@@ -11,14 +11,14 @@ Next.js App Router on Vercel. Engine in `src/lib/`, UI in `src/app/(dashboard)/`
 ```
 CSV Feed (Aosom) → csv-fetcher → variant-merger → diff-engine → Shopify API
                                        ↓
-                                  catalog_snapshots (Turso)
+                                  catalog_snapshots (SQLite)
                                        ↓
                                   Catalog Browser UI
                                        ↓
                                Import Pipeline → Claude API → Shopify (as draft)
 ```
 
-## Data Model (Turso/libSQL)
+## Data Model (SQLite/better-sqlite3)
 
 - `sync_runs` — audit log of daily sync executions
 - `sync_logs` — per-field change records (price, images, status)
@@ -47,8 +47,6 @@ CSV Feed (Aosom) → csv-fetcher → variant-merger → diff-engine → Shopify 
 
 ## Env Vars
 
-- `TURSO_DATABASE_URL` — must use `https://` scheme (HTTP mode for Vercel)
-- `TURSO_AUTH_TOKEN` — Turso auth
 - `SHOPIFY_ACCESS_TOKEN` — Shopify Admin API token
 - `ANTHROPIC_API_KEY` — Claude API
 - `CRON_SECRET` — Vercel Cron auth
