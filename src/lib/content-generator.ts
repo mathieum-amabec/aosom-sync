@@ -21,6 +21,27 @@ export interface GeneratedContent {
   tags: string[];
 }
 
+const REQUIRED_FIELDS: (keyof GeneratedContent)[] = [
+  "titleFr", "titleEn", "descriptionFr", "descriptionEn",
+  "seoDescriptionFr", "seoDescriptionEn", "tags",
+];
+
+function validateContent(data: unknown): GeneratedContent {
+  if (!data || typeof data !== "object") {
+    throw new Error("Claude returned non-object response");
+  }
+  const obj = data as Record<string, unknown>;
+  for (const field of REQUIRED_FIELDS) {
+    if (!(field in obj)) {
+      throw new Error(`Missing required field: ${field}`);
+    }
+  }
+  if (!Array.isArray(obj.tags)) {
+    throw new Error("tags must be an array");
+  }
+  return obj as unknown as GeneratedContent;
+}
+
 /**
  * Quebec-tuned system prompt, ported from reference aosom-shopify/generator.js.
  */
@@ -57,14 +78,7 @@ function sanitizeHtml(html: string): string {
     .trim();
 }
 
-/**
- * Generate bilingual FR/EN product content using Claude API.
- */
-export async function generateProductContent(
-  product: AosomMergedProduct
-): Promise<GeneratedContent> {
-  const client = getClient();
-
+function buildPrompt(product: AosomMergedProduct): string {
   const cleanName = stripColorFromTitle(product.name);
   const cleanDesc = sanitizeHtml(product.description.replace(/\[BRAND NAME\]/gi, product.brand));
   const cleanShort = sanitizeHtml(product.shortDescription.replace(/\[BRAND NAME\]/gi, product.brand));
@@ -73,14 +87,14 @@ export async function generateProductContent(
     .map((v) => `- SKU: ${v.sku}, Price: $${v.price}`)
     .join("\n");
 
-  const prompt = `Create a Shopify product listing from this data:
+  return `Create a Shopify product listing from this data:
 
 Name: ${cleanName}
 Brand: ${product.brand}
 Category: ${product.productType}
 Material: ${product.material}
 Price: $${product.variants[0]?.price || 0} CAD
-Description: ${cleanDesc.slice(0, 1500)}
+Description: ${cleanDesc.slice(0, 1500)}${cleanDesc.length > 1500 ? " [truncated]" : ""}
 Short Description: ${cleanShort.slice(0, 500)}
 Variants:
 ${variantInfo}
@@ -95,15 +109,42 @@ Return JSON with this exact structure:
   "seoDescriptionEn": "...",
   "tags": ["tag1", "tag2"]
 }`;
+}
 
-  const message = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 4000,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: prompt }],
-  });
+const MAX_GENERATE_ATTEMPTS = 2;
 
-  const text = message.content[0].type === "text" ? message.content[0].text : "";
-  const jsonStr = text.replace(/^```json?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
-  return JSON.parse(jsonStr) as GeneratedContent;
+/**
+ * Generate bilingual FR/EN product content using Claude API.
+ * Retries once on JSON parse failure.
+ */
+export async function generateProductContent(
+  product: AosomMergedProduct
+): Promise<GeneratedContent> {
+  const client = getClient();
+  const model = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
+  const prompt = buildPrompt(product);
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < MAX_GENERATE_ATTEMPTS; attempt++) {
+    const message = await client.messages.create({
+      model,
+      max_tokens: 4000,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const text = message.content[0].type === "text" ? message.content[0].text : "";
+
+    try {
+      const jsonStr = text.replace(/^```json?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
+      const parsed = JSON.parse(jsonStr);
+      return validateContent(parsed);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      // On first failure, the retry will naturally re-prompt Claude
+    }
+  }
+
+  throw new Error(`Failed to parse Claude response after ${MAX_GENERATE_ATTEMPTS} attempts: ${lastError?.message}`);
 }

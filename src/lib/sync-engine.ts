@@ -5,7 +5,7 @@ import {
   fetchAllShopifyProducts,
   updateShopifyProduct,
   updateShopifyVariantPrice,
-  archiveShopifyProduct,
+  draftShopifyProduct,
 } from "./shopify-client";
 import {
   createSyncRun,
@@ -26,17 +26,15 @@ export interface SyncResult {
 /**
  * Run the daily sync pipeline:
  * 1. Fetch Aosom CSV + Shopify products in parallel
- * 2. Refresh catalog_snapshots in Turso
- * 3. Merge variants, compute diffs
- * 4. Apply price/image/status changes (no inventory sync — dropship)
- * 5. Log everything
+ * 2. Merge variants, compute diffs
+ * 3. If not dry run: refresh snapshots + apply changes to Shopify
+ * 4. Log everything
  */
 export async function runDailySync(
   options: { dryRun?: boolean } = {}
 ): Promise<SyncResult> {
-  const syncRun = await createSyncRun();
+  const syncRun = createSyncRun();
   const errorMessages: string[] = [];
-  let created = 0;
   let updated = 0;
   let archived = 0;
   let errors = 0;
@@ -48,8 +46,26 @@ export async function runDailySync(
       fetchAllShopifyProducts(),
     ]);
 
-    // Step 2: Refresh catalog snapshots for the browser
-    await refreshCatalogSnapshots(
+    // Step 2: Merge and diff
+    const merged = mergeVariants(aosomProducts);
+    const diffs = computeDiffs(merged, shopifyProducts);
+    const summary = summarizeDiffs(diffs);
+
+    if (options.dryRun) {
+      completeSyncRun(syncRun.id, {
+        status: "completed",
+        totalProducts: merged.length,
+        created: 0,
+        updated: summary.updates,
+        archived: summary.archives,
+        errors: 0,
+        errorMessages: ["DRY RUN — no changes applied"],
+      });
+      return { syncRun: { ...syncRun, status: "completed" }, diffs, summary };
+    }
+
+    // Step 3: Refresh catalog and history snapshots (only on real sync)
+    refreshCatalogSnapshots(
       aosomProducts.map((p) => ({
         sku: p.sku,
         name: p.name,
@@ -61,28 +77,8 @@ export async function runDailySync(
         image: p.images[0] || "",
       }))
     );
-
-    // Step 2b: Record price and stock snapshots for history tracking
-    await recordPriceSnapshots(aosomProducts.map((p) => ({ sku: p.sku, price: p.price })));
-    await recordStockSnapshots(aosomProducts.map((p) => ({ sku: p.sku, qty: p.qty })));
-
-    // Step 3: Merge and diff
-    const merged = mergeVariants(aosomProducts);
-    const diffs = computeDiffs(merged, shopifyProducts);
-    const summary = summarizeDiffs(diffs);
-
-    if (options.dryRun) {
-      await completeSyncRun(syncRun.id, {
-        status: "completed",
-        totalProducts: merged.length,
-        created: summary.creates,
-        updated: summary.updates,
-        archived: summary.archives,
-        errors: 0,
-        errorMessages: ["DRY RUN — no changes applied"],
-      });
-      return { syncRun: { ...syncRun, status: "completed" }, diffs, summary };
-    }
+    recordPriceSnapshots(aosomProducts.map((p) => ({ sku: p.sku, price: p.price })));
+    recordStockSnapshots(aosomProducts.map((p) => ({ sku: p.sku, qty: p.qty })));
 
     // Step 4: Apply changes (price, images, archive only — no inventory/stock)
     const logEntries: Omit<SyncLogEntry, "id">[] = [];
@@ -102,19 +98,22 @@ export async function runDailySync(
             await updateShopifyProduct(diff.shopifyId, productUpdates);
           }
 
-          // Price changes on variants
-          for (const change of diff.changes.filter((c) => c.field === "price")) {
-            const shopifyVariant = shopifyProducts
-              .find((p) => p.shopifyId === diff.shopifyId)
-              ?.variants.find((v) => v.sku === change.sku);
-            if (shopifyVariant && change.newValue !== null) {
-              await updateShopifyVariantPrice(shopifyVariant.variantId, Number(change.newValue));
-            }
-          }
+          // Price changes on variants (concurrent per product)
+          const priceChanges = diff.changes.filter((c) => c.field === "price");
+          await Promise.all(
+            priceChanges.map((change) => {
+              const shopifyVariant = shopifyProducts
+                .find((p) => p.shopifyId === diff.shopifyId)
+                ?.variants.find((v) => v.sku === change.sku);
+              if (shopifyVariant && change.newValue !== null) {
+                return updateShopifyVariantPrice(shopifyVariant.variantId, Number(change.newValue));
+              }
+            })
+          );
 
           updated++;
         } else if (diff.action === "archive" && diff.shopifyId) {
-          await archiveShopifyProduct(diff.shopifyId);
+          await draftShopifyProduct(diff.shopifyId);
           archived++;
         }
         // Note: "create" action is NOT handled by daily sync.
@@ -140,13 +139,13 @@ export async function runDailySync(
     }
 
     if (logEntries.length > 0) {
-      await addSyncLogsBatch(logEntries);
+      addSyncLogsBatch(logEntries);
     }
 
     await completeSyncRun(syncRun.id, {
       status: errors > 0 && updated + archived === 0 ? "failed" : "completed",
       totalProducts: merged.length,
-      created,
+      created: 0,
       updated,
       archived,
       errors,
@@ -154,7 +153,7 @@ export async function runDailySync(
     });
 
     return {
-      syncRun: { ...syncRun, status: "completed", created, updated, archived, errors },
+      syncRun: { ...syncRun, status: "completed", created: 0, updated, archived, errors },
       diffs,
       summary,
     };
@@ -164,7 +163,7 @@ export async function runDailySync(
     await completeSyncRun(syncRun.id, {
       status: "failed",
       totalProducts: 0,
-      created,
+      created: 0,
       updated,
       archived,
       errors: errors + 1,
