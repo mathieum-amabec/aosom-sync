@@ -45,10 +45,10 @@ function verifyToken(token: string): boolean {
       .update(ts)
       .digest("hex");
 
-    return crypto.timingSafeEqual(
-      Buffer.from(providedHmac),
-      Buffer.from(expectedHmac)
-    );
+    const a = Buffer.from(providedHmac);
+    const b = Buffer.from(expectedHmac);
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
   } catch {
     return false;
   }

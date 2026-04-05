@@ -83,6 +83,7 @@ export async function runDailySync(
     // Step 4: Apply changes (price, images, archive only — no inventory/stock)
     const logEntries: Omit<SyncLogEntry, "id">[] = [];
     const now = new Date().toISOString();
+    const shopifyMap = new Map(shopifyProducts.map((p) => [p.shopifyId, p]));
 
     for (const diff of diffs) {
       try {
@@ -100,11 +101,10 @@ export async function runDailySync(
 
           // Price changes on variants (concurrent per product)
           const priceChanges = diff.changes.filter((c) => c.field === "price");
+          const shopifyProduct = shopifyMap.get(diff.shopifyId);
           await Promise.all(
             priceChanges.map((change) => {
-              const shopifyVariant = shopifyProducts
-                .find((p) => p.shopifyId === diff.shopifyId)
-                ?.variants.find((v) => v.sku === change.sku);
+              const shopifyVariant = shopifyProduct?.variants.find((v) => v.sku === change.sku);
               if (shopifyVariant && change.newValue !== null) {
                 return updateShopifyVariantPrice(shopifyVariant.variantId, Number(change.newValue));
               }

@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   // Verify cron secret (Vercel sets this automatically for cron jobs)
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) {
-    return NextResponse.json({ error: "CRON_SECRET not configured" }, { status: 500 });
+    return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
   }
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${cronSecret}`) {

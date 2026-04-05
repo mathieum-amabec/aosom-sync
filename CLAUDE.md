@@ -37,7 +37,7 @@ CSV Feed (Aosom) → csv-fetcher → variant-merger → diff-engine → Shopify 
 
 ## API Routes
 
-- `GET /api/catalog` — browse catalog with filters (reads from Turso, not CSV)
+- `GET /api/catalog` — browse catalog with filters (reads from SQLite, not CSV)
 - `POST /api/sync/trigger` — manual sync (supports `{dryRun: true}`)
 - `GET /api/sync/history` — sync runs + change logs
 - `GET /api/cron/sync` — Vercel Cron daily sync (Bearer CRON_SECRET)
