@@ -98,7 +98,7 @@ function initSchema(db: Database.Database) {
 
 // --- Sync Runs ---
 
-export async function createSyncRun(): Promise<SyncRun> {
+export function createSyncRun(): SyncRun {
   const d = getDb();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -106,22 +106,22 @@ export async function createSyncRun(): Promise<SyncRun> {
   return { id, startedAt: now, completedAt: null, status: "running", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 0, errorMessages: [] };
 }
 
-export async function completeSyncRun(
+export function completeSyncRun(
   id: string,
   stats: { status: "completed" | "failed"; totalProducts: number; created: number; updated: number; archived: number; errors: number; errorMessages: string[] }
-) {
+): void {
   const d = getDb();
   d.prepare(`UPDATE sync_runs SET completed_at=?, status=?, total_products=?, created=?, updated=?, archived=?, errors=?, error_messages=? WHERE id=?`)
     .run(new Date().toISOString(), stats.status, stats.totalProducts, stats.created, stats.updated, stats.archived, stats.errors, JSON.stringify(stats.errorMessages), id);
 }
 
-export async function getSyncRuns(limit = 20): Promise<SyncRun[]> {
+export function getSyncRuns(limit = 20): SyncRun[] {
   const d = getDb();
   const rows = d.prepare(`SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT ?`).all(limit) as Record<string, unknown>[];
   return rows.map(mapSyncRun);
 }
 
-export async function getLatestSyncRun(): Promise<SyncRun | null> {
+export function getLatestSyncRun(): SyncRun | null {
   const d = getDb();
   const row = d.prepare(`SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 1`).get() as Record<string, unknown> | undefined;
   return row ? mapSyncRun(row) : null;
@@ -144,7 +144,7 @@ function mapSyncRun(row: Record<string, unknown>): SyncRun {
 
 // --- Sync Logs ---
 
-export async function addSyncLogsBatch(entries: Omit<SyncLogEntry, "id">[]) {
+export function addSyncLogsBatch(entries: Omit<SyncLogEntry, "id">[]): void {
   const d = getDb();
   const stmt = d.prepare(
     `INSERT INTO sync_logs (id, sync_run_id, timestamp, shopify_product_id, sku, action, field, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -157,7 +157,7 @@ export async function addSyncLogsBatch(entries: Omit<SyncLogEntry, "id">[]) {
   insertMany(entries);
 }
 
-export async function getSyncLogs(syncRunId: string, limit = 500): Promise<SyncLogEntry[]> {
+export function getSyncLogs(syncRunId: string, limit = 500): SyncLogEntry[] {
   const d = getDb();
   const rows = d.prepare(`SELECT * FROM sync_logs WHERE sync_run_id = ? ORDER BY timestamp DESC LIMIT ?`).all(syncRunId, limit) as Record<string, unknown>[];
   return rows.map(mapSyncLog);
@@ -179,22 +179,22 @@ function mapSyncLog(row: Record<string, unknown>): SyncLogEntry {
 
 // --- Catalog Snapshots ---
 
-export async function refreshCatalogSnapshots(
+export function refreshCatalogSnapshots(
   products: { sku: string; name: string; price: number; qty: number; color: string; productType: string; psin: string; image: string }[]
-) {
+): void {
   const d = getDb();
   const now = new Date().toISOString();
-  d.prepare(`DELETE FROM catalog_snapshots`).run();
   const stmt = d.prepare(`INSERT INTO catalog_snapshots (sku, name, price, qty, color, product_type, psin, image, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-  const insertMany = d.transaction((rows: typeof products) => {
+  const replaceAll = d.transaction((rows: typeof products) => {
+    d.prepare(`DELETE FROM catalog_snapshots`).run();
     for (const p of rows) {
       stmt.run(p.sku, p.name, p.price, p.qty, p.color, p.productType, p.psin, p.image, now);
     }
   });
-  insertMany(products);
+  replaceAll(products);
 }
 
-export async function getCatalogProducts(filters: {
+export function getCatalogProducts(filters: {
   productType?: string;
   search?: string;
   minPrice?: number;
@@ -202,7 +202,7 @@ export async function getCatalogProducts(filters: {
   inStock?: boolean;
   page?: number;
   limit?: number;
-}): Promise<{ products: Record<string, unknown>[]; total: number; productTypes: { type: string; count: number }[] }> {
+}): { products: Record<string, unknown>[]; total: number; productTypes: { type: string; count: number }[] } {
   const d = getDb();
   const conditions: string[] = [];
   const args: (string | number)[] = [];
@@ -251,7 +251,7 @@ export async function getCatalogProducts(filters: {
 
 // --- Import Jobs ---
 
-export async function upsertImportJob(job: { id: string; groupKey: string; productData: string; status: string; createdAt: string; updatedAt: string }) {
+export function upsertImportJob(job: { id: string; groupKey: string; productData: string; status: string; createdAt: string; updatedAt: string }): void {
   const d = getDb();
   d.prepare(
     `INSERT INTO import_jobs (id, group_key, product_data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
@@ -259,24 +259,32 @@ export async function upsertImportJob(job: { id: string; groupKey: string; produ
   ).run(job.id, job.groupKey, job.productData, job.status, job.createdAt, job.updatedAt);
 }
 
-export async function getImportJobs(): Promise<Record<string, unknown>[]> {
+export function getImportJobs(): Record<string, unknown>[] {
   const d = getDb();
   return d.prepare(`SELECT * FROM import_jobs ORDER BY created_at DESC`).all() as Record<string, unknown>[];
 }
 
-export async function getImportJob(jobId: string): Promise<Record<string, unknown> | null> {
+export function getImportJob(jobId: string): Record<string, unknown> | null {
   const d = getDb();
   return (d.prepare(`SELECT * FROM import_jobs WHERE id = ?`).get(jobId) as Record<string, unknown>) || null;
 }
 
-export async function updateImportJob(jobId: string, fields: Record<string, unknown>) {
+const IMPORT_JOB_COLUMNS = new Set([
+  "status", "content", "shopify_id", "error", "product_data", "group_key",
+]);
+
+export function updateImportJob(jobId: string, fields: Record<string, unknown>): void {
   const d = getDb();
   const sets: string[] = [];
   const args: unknown[] = [];
   for (const [key, value] of Object.entries(fields)) {
+    if (!IMPORT_JOB_COLUMNS.has(key)) {
+      throw new Error(`Invalid column name: ${key}`);
+    }
     sets.push(`${key} = ?`);
     args.push(value);
   }
+  if (sets.length === 0) return;
   sets.push(`updated_at = ?`);
   args.push(new Date().toISOString());
   args.push(jobId);
@@ -285,7 +293,7 @@ export async function updateImportJob(jobId: string, fields: Record<string, unkn
 
 // --- Price History ---
 
-export async function recordPriceSnapshots(products: { sku: string; price: number }[]) {
+export function recordPriceSnapshots(products: { sku: string; price: number }[]): void {
   const d = getDb();
   const now = new Date().toISOString();
   const stmt = d.prepare(`INSERT INTO price_history (id, sku, price, recorded_at) VALUES (?, ?, ?, ?)`);
@@ -297,9 +305,9 @@ export async function recordPriceSnapshots(products: { sku: string; price: numbe
   insertMany(products);
 }
 
-export async function getPriceChanges(limit = 50): Promise<{
+export function getPriceChanges(limit = 50): {
   sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string;
-}[]> {
+}[] {
   const d = getDb();
   // Find SKUs where the latest price differs from the previous price
   const rows = d.prepare(`
@@ -339,7 +347,7 @@ export async function getPriceChanges(limit = 50): Promise<{
 
 // --- Stock Velocity ---
 
-export async function recordStockSnapshots(products: { sku: string; qty: number }[]) {
+export function recordStockSnapshots(products: { sku: string; qty: number }[]): void {
   const d = getDb();
   const now = new Date().toISOString();
   const stmt = d.prepare(`INSERT INTO stock_snapshots (id, sku, qty, recorded_at) VALUES (?, ?, ?, ?)`);
@@ -351,10 +359,10 @@ export async function recordStockSnapshots(products: { sku: string; qty: number 
   insertMany(products);
 }
 
-export async function getTopSellers(limit = 30): Promise<{
+export function getTopSellers(limit = 30): {
   sku: string; name: string; image: string; color: string; productType: string; price: number;
   currentQty: number; soldPerDay: number; daysTracked: number;
-}[]> {
+}[] {
   const d = getDb();
   // Calculate stock velocity: (first_qty - latest_qty) / days_between
   const rows = d.prepare(`

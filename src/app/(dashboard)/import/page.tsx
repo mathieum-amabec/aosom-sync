@@ -278,6 +278,27 @@ function ImportStatusBadge({ status }: { status: string }) {
   );
 }
 
+const ALLOWED_TAGS = new Set([
+  "p", "br", "b", "strong", "i", "em", "u", "ul", "ol", "li",
+  "h1", "h2", "h3", "h4", "h5", "h6", "a", "span", "div", "table",
+  "thead", "tbody", "tr", "td", "th", "img", "blockquote", "hr",
+]);
+
+function sanitizeHtml(html: string): string {
+  return html
+    // Strip <script>, <style>, <iframe>, <object>, <embed>, <form> and their contents
+    .replace(/<(script|style|iframe|object|embed|form)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
+    // Strip on* event handlers (onclick, onerror, onload, etc.)
+    .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, "")
+    .replace(/\s+on\w+\s*=\s*\S+/gi, "")
+    // Strip javascript: and data: URLs in href/src attributes
+    .replace(/(href|src)\s*=\s*["']\s*(javascript|data):[^"']*/gi, "$1=\"\"")
+    // Strip tags not in the allowlist
+    .replace(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi, (match, tag) => {
+      return ALLOWED_TAGS.has(tag.toLowerCase()) ? match : "";
+    });
+}
+
 function ContentPreview({
   lang,
   title,
@@ -297,7 +318,7 @@ function ContentPreview({
       <h5 className="text-sm font-medium text-white mt-1">{title}</h5>
       <div
         className="text-xs text-gray-400 mt-2 max-h-40 overflow-y-auto prose prose-invert prose-xs"
-        dangerouslySetInnerHTML={{ __html: description }}
+        dangerouslySetInnerHTML={{ __html: sanitizeHtml(description) }}
       />
       <div className="mt-3 p-2 bg-gray-800/50 rounded text-xs">
         <p className="text-gray-500">

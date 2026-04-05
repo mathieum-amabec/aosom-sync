@@ -2,8 +2,9 @@ import type { ShopifyExistingProduct, ShopifyExistingVariant } from "@/types/syn
 import type { AosomMergedProduct } from "@/types/aosom";
 import type { GeneratedContent } from "./content-generator";
 
-const SHOPIFY_STORE = "27u5y2-kp.myshopify.com";
+const SHOPIFY_STORE = process.env.SHOPIFY_STORE || "27u5y2-kp.myshopify.com";
 const API_VERSION = "2025-01";
+const MAX_RETRIES = 3;
 
 function getToken(): string {
   const token = process.env.SHOPIFY_ACCESS_TOKEN;
@@ -13,7 +14,8 @@ function getToken(): string {
 
 async function shopifyFetch(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  retryCount = 0
 ): Promise<Response> {
   const url = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}${endpoint}`;
 
@@ -27,9 +29,12 @@ async function shopifyFetch(
   });
 
   if (response.status === 429) {
+    if (retryCount >= MAX_RETRIES) {
+      throw new Error(`Shopify rate limit exceeded after ${MAX_RETRIES} retries: ${endpoint}`);
+    }
     const retryAfter = parseFloat(response.headers.get("Retry-After") || "2");
     await new Promise((r) => setTimeout(r, retryAfter * 1000));
-    return shopifyFetch(endpoint, options);
+    return shopifyFetch(endpoint, options, retryCount + 1);
   }
 
   return response;
@@ -216,7 +221,8 @@ export async function updateShopifyVariantPrice(
   }
 }
 
-export async function archiveShopifyProduct(shopifyId: string): Promise<void> {
+/** Set a Shopify product to draft status (used for "archiving" in the dropship flow). */
+export async function draftShopifyProduct(shopifyId: string): Promise<void> {
   await updateShopifyProduct(shopifyId, { status: "draft" });
 }
 

@@ -1,31 +1,54 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 
 const SESSION_COOKIE = "aosom_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
 function getPassword(): string {
-  return process.env.AUTH_PASSWORD || "admin123";
+  const pw = process.env.AUTH_PASSWORD;
+  if (!pw) throw new Error("AUTH_PASSWORD environment variable is required");
+  return pw;
 }
 
-/** Create a simple signed token: base64(timestamp:hash) */
+function getSigningSecret(): string {
+  // Derive a signing key from the password so tokens are tied to the current password
+  return crypto.createHash("sha256").update(getPassword()).digest("hex");
+}
+
+/** Create an HMAC-signed token: base64(timestamp:hmac) */
 function createToken(): string {
   const ts = Date.now().toString();
-  const data = `${ts}:${getPassword()}`;
-  // Simple hash — not crypto-grade but sufficient for a 2-user internal tool
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash + data.charCodeAt(i)) | 0;
-  }
-  return Buffer.from(`${ts}:${hash}`).toString("base64");
+  const hmac = crypto
+    .createHmac("sha256", getSigningSecret())
+    .update(ts)
+    .digest("hex");
+  return Buffer.from(`${ts}:${hmac}`).toString("base64");
 }
 
 function verifyToken(token: string): boolean {
   try {
     const decoded = Buffer.from(token, "base64").toString();
-    const [ts] = decoded.split(":");
+    const colonIdx = decoded.indexOf(":");
+    if (colonIdx === -1) return false;
+
+    const ts = decoded.slice(0, colonIdx);
+    const providedHmac = decoded.slice(colonIdx + 1);
+
+    // Verify age
     const age = Date.now() - parseInt(ts, 10);
-    return age < SESSION_MAX_AGE * 1000 && age >= 0;
+    if (age >= SESSION_MAX_AGE * 1000 || age < 0) return false;
+
+    // Verify HMAC signature
+    const expectedHmac = crypto
+      .createHmac("sha256", getSigningSecret())
+      .update(ts)
+      .digest("hex");
+
+    return crypto.timingSafeEqual(
+      Buffer.from(providedHmac),
+      Buffer.from(expectedHmac)
+    );
   } catch {
     return false;
   }
