@@ -52,7 +52,7 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
 
   for (const product of merged) {
     const id = crypto.randomUUID();
-    await upsertImportJob({
+    upsertImportJob({
       id,
       groupKey: product.groupKey,
       productData: JSON.stringify(product),
@@ -80,16 +80,16 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
  * Generate content for a queued import job.
  */
 export async function generateContent(jobId: string): Promise<ImportJob> {
-  const row = await dbGetImportJob(jobId);
+  const row = dbGetImportJob(jobId);
   if (!row) throw new Error(`Job ${jobId} not found`);
 
-  await updateImportJob(jobId, { status: "generating" });
+  updateImportJob(jobId, { status: "generating" });
 
   try {
     const product: AosomMergedProduct = JSON.parse(row.product_data as string);
     const content = await generateProductContent(product);
 
-    await updateImportJob(jobId, {
+    updateImportJob(jobId, {
       status: "reviewing",
       content: JSON.stringify(content),
     });
@@ -97,7 +97,7 @@ export async function generateContent(jobId: string): Promise<ImportJob> {
     return { ...rowToJob(row), status: "reviewing", content };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await updateImportJob(jobId, { status: "error", error: msg });
+    updateImportJob(jobId, { status: "error", error: msg });
     throw err;
   }
 }
@@ -109,7 +109,7 @@ export async function importToShopify(
   jobId: string,
   contentOverrides?: Partial<GeneratedContent>
 ): Promise<ImportJob> {
-  const row = await dbGetImportJob(jobId);
+  const row = dbGetImportJob(jobId);
   if (!row) throw new Error(`Job ${jobId} not found`);
   if (!row.content) throw new Error("Content not generated yet");
 
@@ -117,25 +117,25 @@ export async function importToShopify(
   let content: GeneratedContent = JSON.parse(row.content as string);
   if (contentOverrides) content = { ...content, ...contentOverrides };
 
-  await updateImportJob(jobId, { status: "importing" });
+  updateImportJob(jobId, { status: "importing" });
 
   try {
     const shopifyId = await createShopifyProduct(product, content);
-    await updateImportJob(jobId, { status: "done", shopify_id: shopifyId });
+    updateImportJob(jobId, { status: "done", shopify_id: shopifyId });
     return { ...rowToJob(row), status: "done", shopifyId, content };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await updateImportJob(jobId, { status: "error", error: msg });
+    updateImportJob(jobId, { status: "error", error: msg });
     throw err;
   }
 }
 
 export async function getImportJobsList(): Promise<ImportJob[]> {
-  const rows = await dbGetImportJobs();
+  const rows = dbGetImportJobs();
   return rows.map(rowToJob);
 }
 
 export async function getImportJobById(jobId: string): Promise<ImportJob | null> {
-  const row = await dbGetImportJob(jobId);
+  const row = dbGetImportJob(jobId);
   return row ? rowToJob(row) : null;
 }

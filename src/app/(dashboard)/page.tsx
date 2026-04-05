@@ -4,14 +4,12 @@ import type { SyncRun } from "@/types/sync";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+export default function DashboardPage() {
   let recentRuns: SyncRun[] = [];
   let latestRun: SyncRun | null = null;
   try {
-    [recentRuns, latestRun] = await Promise.all([
-      getSyncRuns(5),
-      getLatestSyncRun(),
-    ]);
+    recentRuns = getSyncRuns(5);
+    latestRun = getLatestSyncRun();
   } catch {
     // DB not ready yet
   }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getCatalogProducts } from "@/lib/database";
 
 /**
- * GET /api/catalog — Browse catalog from Turso snapshots.
+ * GET /api/catalog — Browse catalog from SQLite snapshots.
  * Filters: productType, search, minPrice, maxPrice, inStock, page, limit
  */
 export async function GET(request: Request) {
@@ -10,10 +10,10 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const params = url.searchParams;
 
-    const page = parseInt(params.get("page") || "1", 10);
-    const limit = Math.min(parseInt(params.get("limit") || "50", 10), 200);
+    const page = Math.max(1, parseInt(params.get("page") || "1", 10) || 1);
+    const limit = Math.min(Math.max(1, parseInt(params.get("limit") || "50", 10) || 50), 200);
 
-    const { products, total, productTypes } = await getCatalogProducts({
+    const { products, total, productTypes } = getCatalogProducts({
       productType: params.get("productType") || undefined,
       search: params.get("search") || undefined,
       minPrice: params.get("minPrice") ? parseFloat(params.get("minPrice")!) : undefined,

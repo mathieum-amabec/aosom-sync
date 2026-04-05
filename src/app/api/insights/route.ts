@@ -7,22 +7,19 @@ export async function GET(request: Request) {
     const type = url.searchParams.get("type");
 
     if (type === "price-changes") {
-      const limit = parseInt(url.searchParams.get("limit") || "50", 10);
-      const changes = await getPriceChanges(limit);
+      const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || "50", 10) || 50), 200);
+      const changes = getPriceChanges(limit);
       return NextResponse.json({ changes });
     }
 
     if (type === "top-sellers") {
-      const limit = parseInt(url.searchParams.get("limit") || "30", 10);
-      const sellers = await getTopSellers(limit);
+      const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || "30", 10) || 30), 200);
+      const sellers = getTopSellers(limit);
       return NextResponse.json({ sellers });
     }
 
     // Return both
-    const [changes, sellers] = await Promise.all([
-      getPriceChanges(20),
-      getTopSellers(20),
-    ]);
+    const [changes, sellers] = [getPriceChanges(20), getTopSellers(20)];
     return NextResponse.json({ changes, sellers });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
