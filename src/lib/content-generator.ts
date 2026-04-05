@@ -36,6 +36,11 @@ function validateContent(data: unknown): GeneratedContent {
       throw new Error(`Missing required field: ${field}`);
     }
   }
+  for (const field of REQUIRED_FIELDS) {
+    if (field !== "tags" && typeof obj[field] !== "string") {
+      throw new Error(`Field ${field} must be a string, got ${typeof obj[field]}`);
+    }
+  }
   if (!Array.isArray(obj.tags)) {
     throw new Error("tags must be an array");
   }

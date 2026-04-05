@@ -142,7 +142,7 @@ export async function runDailySync(
       addSyncLogsBatch(logEntries);
     }
 
-    await completeSyncRun(syncRun.id, {
+    completeSyncRun(syncRun.id, {
       status: errors > 0 && updated + archived === 0 ? "failed" : "completed",
       totalProducts: merged.length,
       created: 0,
@@ -160,7 +160,7 @@ export async function runDailySync(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     errorMessages.push(msg);
-    await completeSyncRun(syncRun.id, {
+    completeSyncRun(syncRun.id, {
       status: "failed",
       totalProducts: 0,
       created: 0,

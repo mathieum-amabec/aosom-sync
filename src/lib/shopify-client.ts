@@ -2,7 +2,14 @@ import type { ShopifyExistingProduct, ShopifyExistingVariant } from "@/types/syn
 import type { AosomMergedProduct } from "@/types/aosom";
 import type { GeneratedContent } from "./content-generator";
 
-const SHOPIFY_STORE = process.env.SHOPIFY_STORE || "27u5y2-kp.myshopify.com";
+const DEFAULT_STORE = "27u5y2-kp.myshopify.com";
+const SHOPIFY_STORE = (() => {
+  const store = process.env.SHOPIFY_STORE || DEFAULT_STORE;
+  if (!store.endsWith(".myshopify.com")) {
+    throw new Error(`SHOPIFY_STORE must be a *.myshopify.com domain, got: ${store}`);
+  }
+  return store;
+})();
 const API_VERSION = "2025-01";
 const MAX_RETRIES = 3;
 

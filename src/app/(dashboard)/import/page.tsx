@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import DOMPurify from "isomorphic-dompurify";
 import type { ImportJob } from "@/lib/import-pipeline";
 
 export default function ImportPage() {
@@ -278,25 +279,17 @@ function ImportStatusBadge({ status }: { status: string }) {
   );
 }
 
-const ALLOWED_TAGS = new Set([
+const ALLOWED_TAGS = [
   "p", "br", "b", "strong", "i", "em", "u", "ul", "ol", "li",
   "h1", "h2", "h3", "h4", "h5", "h6", "a", "span", "div", "table",
   "thead", "tbody", "tr", "td", "th", "img", "blockquote", "hr",
-]);
+];
 
 function sanitizeHtml(html: string): string {
-  return html
-    // Strip <script>, <style>, <iframe>, <object>, <embed>, <form> and their contents
-    .replace(/<(script|style|iframe|object|embed|form)\b[^>]*>[\s\S]*?<\/\1>/gi, "")
-    // Strip on* event handlers (onclick, onerror, onload, etc.)
-    .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, "")
-    .replace(/\s+on\w+\s*=\s*\S+/gi, "")
-    // Strip javascript: and data: URLs in href/src attributes
-    .replace(/(href|src)\s*=\s*["']\s*(javascript|data):[^"']*/gi, "$1=\"\"")
-    // Strip tags not in the allowlist
-    .replace(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi, (match, tag) => {
-      return ALLOWED_TAGS.has(tag.toLowerCase()) ? match : "";
-    });
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS,
+    ALLOWED_ATTR: ["href", "src", "alt", "class", "target", "rel"],
+  });
 }
 
 function ContentPreview({

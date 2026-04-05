@@ -1,8 +1,20 @@
 import { parse } from "csv-parse/sync";
 import type { AosomRawRow, AosomProduct } from "@/types/aosom";
 
-const AOSOM_CSV_URL =
-  process.env.AOSOM_CSV_URL || "https://feed-us.aosomcdn.com/390/110_feed/0/0/5e/c4857d.csv";
+const DEFAULT_CSV_URL = "https://feed-us.aosomcdn.com/390/110_feed/0/0/5e/c4857d.csv";
+const AOSOM_CSV_URL = (() => {
+  const url = process.env.AOSOM_CSV_URL || DEFAULT_CSV_URL;
+  try {
+    const hostname = new URL(url).hostname;
+    if (!hostname.endsWith(".aosomcdn.com") && !hostname.endsWith(".aosom.com")) {
+      throw new Error(`AOSOM_CSV_URL must be an *.aosomcdn.com or *.aosom.com domain, got: ${hostname}`);
+    }
+  } catch (e) {
+    if (e instanceof TypeError) throw new Error(`AOSOM_CSV_URL is not a valid URL: ${url}`);
+    throw e;
+  }
+  return url;
+})();
 
 /**
  * Fetch and parse the Aosom CSV feed into normalized AosomProduct[].
