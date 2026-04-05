@@ -2,7 +2,7 @@ import { parse } from "csv-parse/sync";
 import type { AosomRawRow, AosomProduct } from "@/types/aosom";
 
 const AOSOM_CSV_URL =
-  "https://feed-us.aosomcdn.com/390/110_feed/0/0/5e/c4857d.csv";
+  process.env.AOSOM_CSV_URL || "https://feed-us.aosomcdn.com/390/110_feed/0/0/5e/c4857d.csv";
 
 /**
  * Fetch and parse the Aosom CSV feed into normalized AosomProduct[].

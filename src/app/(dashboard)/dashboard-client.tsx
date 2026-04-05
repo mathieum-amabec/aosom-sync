@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import type { SyncRun } from "@/types/sync";
+import { StatusBadge } from "@/components/status-badge";
+import { timeAgo } from "@/lib/utils";
 
 interface PriceChange {
   sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string;
@@ -71,7 +73,7 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
           }`}
         >
           <div>
-            Last sync: {timeAgo(latestRun.startedAt)} | {latestRun.totalProducts.toLocaleString("en-US")} products scanned
+            Last sync: {timeAgo(latestRun.startedAt)} | {latestRun.totalProducts.toLocaleString("fr-CA")} products scanned
             {(latestRun.updated > 0 || latestRun.archived > 0) && (
               <span>
                 {" "}| {latestRun.updated} updated, {latestRun.archived} archived
@@ -224,7 +226,7 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
                   className="border-b border-gray-800/50 hover:bg-gray-800/30"
                 >
                   <td className="px-4 py-3 text-gray-300">
-                    {new Date(run.startedAt).toLocaleString("en-US")}
+                    {new Date(run.startedAt).toLocaleString("fr-CA")}
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={run.status} />
@@ -251,31 +253,3 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
   );
 }
 
-function timeAgo(dateStr: string): string {
-  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    completed: "bg-green-900/40 text-green-400 border-green-800/50",
-    running: "bg-blue-900/40 text-blue-400 border-blue-800/50",
-    failed: "bg-red-900/40 text-red-400 border-red-800/50",
-  };
-
-  return (
-    <span
-      className={`inline-block px-2 py-0.5 rounded-md text-xs font-medium border ${
-        styles[status] || styles.failed
-      }`}
-    >
-      {status}
-    </span>
-  );
-}

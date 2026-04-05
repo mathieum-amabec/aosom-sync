@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { SyncRun, SyncLogEntry } from "@/types/sync";
+import { StatusBadge } from "@/components/status-badge";
 
 export default function SyncHistoryPage() {
   const [runs, setRuns] = useState<SyncRun[]>([]);
@@ -194,23 +195,6 @@ export default function SyncHistoryPage() {
         </div>
       </div>
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    completed: "bg-green-900/40 text-green-400 border-green-800/50",
-    running: "bg-blue-900/40 text-blue-400 border-blue-800/50",
-    failed: "bg-red-900/40 text-red-400 border-red-800/50",
-  };
-  return (
-    <span
-      className={`inline-block px-2 py-0.5 rounded-md text-xs font-medium border ${
-        styles[status] || styles.failed
-      }`}
-    >
-      {status}
-    </span>
   );
 }
 

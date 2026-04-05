@@ -1,28 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-interface CatalogProduct {
-  sku: string;
-  name: string;
-  price: number;
-  qty: number;
-  color: string;
-  product_type: string;
-  psin: string;
-  import_status: string | null;
-  [key: string]: unknown;
-}
-
-interface CatalogResponse {
-  products: CatalogProduct[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    pages: number;
-  };
-  productTypes: { type: string; count: number }[];
-}
+import type { CatalogProduct, CatalogResponse } from "@/types/catalog";
 
 export default function CatalogPage() {
   const [data, setData] = useState<CatalogResponse | null>(null);
@@ -39,6 +18,7 @@ export default function CatalogPage() {
 
   // Selection for import
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const fetchCatalog = useCallback(async () => {
     setLoading(true);
@@ -108,10 +88,12 @@ export default function CatalogPage() {
       });
       if (res.ok) {
         setSelected(new Set());
-        alert(`${skus.length} products queued for import`);
+        setToast({ message: `${skus.length} products queued for import`, type: "success" });
+        setTimeout(() => setToast(null), 4000);
       }
     } catch {
-      alert("Failed to queue products");
+      setToast({ message: "Failed to queue products", type: "error" });
+      setTimeout(() => setToast(null), 4000);
     }
   }
 
@@ -138,6 +120,19 @@ export default function CatalogPage() {
           </button>
         )}
       </div>
+
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`mb-4 p-3 rounded-lg text-sm ${
+            toast.type === "success"
+              ? "bg-green-950/30 border border-green-800/50 text-green-300"
+              : "bg-red-950/30 border border-red-800/50 text-red-300"
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-6">
@@ -226,6 +221,7 @@ export default function CatalogPage() {
                     <th className="px-4 py-3 text-left w-10">
                       <input
                         type="checkbox"
+                        aria-label="Select all products"
                         onChange={selectAll}
                         checked={
                           data.products.length > 0 &&
@@ -261,6 +257,7 @@ export default function CatalogPage() {
                       <td className="px-4 py-3">
                         <input
                           type="checkbox"
+                          aria-label={`Select ${product.name}`}
                           checked={selected.has(product.sku)}
                           onChange={() => toggleSelect(product.sku)}
                           className="rounded bg-gray-800 border-gray-700 text-blue-500"
@@ -326,6 +323,12 @@ export default function CatalogPage() {
                   ))}
                 </tbody>
               </table>
+              {data.products.length === 0 && (
+                <div className="p-12 text-center">
+                  <p className="text-gray-500 text-sm">No products found</p>
+                  <p className="text-gray-600 text-xs mt-1">Try adjusting your filters</p>
+                </div>
+              )}
             </div>
           </div>
 
