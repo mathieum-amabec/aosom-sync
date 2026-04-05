@@ -26,7 +26,7 @@ const REQUIRED_FIELDS: (keyof GeneratedContent)[] = [
   "seoDescriptionFr", "seoDescriptionEn", "tags",
 ];
 
-function validateContent(data: unknown): GeneratedContent {
+export function validateContent(data: unknown): GeneratedContent {
   if (!data || typeof data !== "object") {
     throw new Error("Claude returned non-object response");
   }

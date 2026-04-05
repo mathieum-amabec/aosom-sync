@@ -17,7 +17,7 @@ function getSigningSecret(): string {
 }
 
 /** Create an HMAC-signed token: base64(timestamp:hmac) */
-function createToken(): string {
+export function createToken(): string {
   const ts = Date.now().toString();
   const hmac = crypto
     .createHmac("sha256", getSigningSecret())
@@ -26,7 +26,7 @@ function createToken(): string {
   return Buffer.from(`${ts}:${hmac}`).toString("base64");
 }
 
-function verifyToken(token: string): boolean {
+export function verifyToken(token: string): boolean {
   try {
     const decoded = Buffer.from(token, "base64").toString();
     const colonIdx = decoded.indexOf(":");
