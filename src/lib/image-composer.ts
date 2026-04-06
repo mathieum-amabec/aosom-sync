@@ -25,6 +25,15 @@ export interface ComposeOptions {
 }
 
 async function downloadImage(url: string): Promise<Buffer> {
+  // SSRF protection: only allow HTTPS URLs to public hosts
+  const parsed = new URL(url);
+  if (parsed.protocol !== "https:") throw new Error("Only HTTPS image URLs allowed");
+  const host = parsed.hostname.toLowerCase();
+  if (host === "localhost" || host.startsWith("127.") || host.startsWith("10.") ||
+      host.startsWith("172.") || host.startsWith("192.168.") || host === "169.254.169.254" ||
+      host.endsWith(".internal") || host.endsWith(".local")) {
+    throw new Error("Image URL points to internal network");
+  }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to download image: ${res.status}`);
   return Buffer.from(await res.arrayBuffer());

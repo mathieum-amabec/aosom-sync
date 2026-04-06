@@ -31,7 +31,9 @@ function LoginForm() {
 
     if (res.ok) {
       const redirect = searchParams.get("redirect") || "/";
-      router.push(redirect);
+      // Prevent open redirect — only allow relative paths
+      const safeRedirect = redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/";
+      router.push(safeRedirect);
       router.refresh();
     } else {
       setError("Invalid password");
