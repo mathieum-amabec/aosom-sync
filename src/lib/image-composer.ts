@@ -1,10 +1,11 @@
 import sharp from "sharp";
 import path from "path";
 import fs from "fs";
+import { SOCIAL } from "./config";
 
 const OUTPUT_DIR = path.join(process.cwd(), "public", "social-images");
-const WIDTH = 1200;
-const HEIGHT = 630;
+const WIDTH = SOCIAL.IMAGE_WIDTH;
+const HEIGHT = SOCIAL.IMAGE_HEIGHT;
 
 export type TemplateType = "new_product" | "price_drop" | "stock_highlight";
 
@@ -35,8 +36,8 @@ function sanitizeColor(color: string | undefined, fallback: string): string {
 }
 
 function createSvgOverlay(opts: ComposeOptions): string {
-  const accent = sanitizeColor(opts.accentColor, "#2563eb");
-  const textColor = sanitizeColor(opts.textColor, "#ffffff");
+  const accent = sanitizeColor(opts.accentColor, SOCIAL.DEFAULT_ACCENT_COLOR);
+  const textColor = sanitizeColor(opts.textColor, SOCIAL.DEFAULT_TEXT_COLOR);
   const store = opts.storeName || "Aosom Sync";
   const opacity = (opts.bannerOpacity ?? 75) / 100;
 
@@ -112,7 +113,7 @@ export async function composeImage(opts: ComposeOptions): Promise<string> {
 
   await background
     .composite([{ input: svgOverlay, top: 0, left: 0 }])
-    .jpeg({ quality: 85 })
+    .jpeg({ quality: SOCIAL.IMAGE_QUALITY })
     .toFile(outPath);
 
   return `/social-images/${filename}`;

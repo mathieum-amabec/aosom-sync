@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getProducts } from "@/lib/database";
+import { API } from "@/lib/config";
 
 /**
  * GET /api/catalog — Browse catalog from SQLite products table.
@@ -11,7 +12,7 @@ export async function GET(request: Request) {
     const params = url.searchParams;
 
     const page = Math.max(1, parseInt(params.get("page") || "1", 10) || 1);
-    const limit = Math.min(Math.max(1, parseInt(params.get("limit") || "50", 10) || 50), 200);
+    const limit = Math.min(Math.max(1, parseInt(params.get("limit") || String(API.DEFAULT_PAGE_SIZE), 10) || API.DEFAULT_PAGE_SIZE), API.MAX_PAGE_SIZE);
 
     const { products, total, productTypes } = getProducts({
       productType: params.get("productType") || undefined,

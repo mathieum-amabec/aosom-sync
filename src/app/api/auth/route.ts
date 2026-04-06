@@ -6,16 +6,13 @@ export async function POST(request: Request) {
 
   if (body.action === "logout") {
     await logout();
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ success: true });
   }
 
-  const success = await login(body.password || "");
-  if (!success) {
-    return NextResponse.json(
-      { ok: false, error: "Invalid password" },
-      { status: 401 }
-    );
+  const ok = await login(body.password || "");
+  if (!ok) {
+    return NextResponse.json({ success: false, error: "Invalid password" }, { status: 401 });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ success: true });
 }

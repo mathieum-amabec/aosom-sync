@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRecentPriceChanges } from "@/lib/database";
+import { API } from "@/lib/config";
 
 /**
  * GET /api/insights — Price changes and trends.
@@ -7,7 +8,7 @@ import { getRecentPriceChanges } from "@/lib/database";
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || "50", 10) || 50), 200);
+    const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || String(API.DEFAULT_INSIGHTS_LIMIT), 10) || API.DEFAULT_INSIGHTS_LIMIT), API.MAX_INSIGHTS_LIMIT);
 
     const raw = getRecentPriceChanges(limit);
     const changes = raw

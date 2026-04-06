@@ -1,24 +1,11 @@
 import fs from "fs";
 import path from "path";
+import { env, FACEBOOK } from "./config";
 
 /**
  * Facebook Graph API wrapper for page post publishing.
  * Uses native fetch — no SDK dependency.
  */
-
-const GRAPH_API = "https://graph.facebook.com/v21.0";
-
-function getPageId(): string {
-  const id = process.env.FACEBOOK_PAGE_ID;
-  if (!id) throw new Error("FACEBOOK_PAGE_ID not set");
-  return id;
-}
-
-function getToken(): string {
-  const token = process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
-  if (!token) throw new Error("FACEBOOK_PAGE_ACCESS_TOKEN not set");
-  return token;
-}
 
 export interface PublishResult {
   id: string;
@@ -29,7 +16,7 @@ export interface PublishResult {
  * Test the Facebook connection by fetching page info.
  */
 export async function testConnection(): Promise<{ name: string; id: string }> {
-  const res = await fetch(`${GRAPH_API}/${getPageId()}?fields=name,id&access_token=${getToken()}`);
+  const res = await fetch(`${FACEBOOK.GRAPH_API_URL}/${env.facebookPageId}?fields=name,id&access_token=${env.facebookPageAccessToken}`);
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
   return { name: data.name, id: data.id };
@@ -44,8 +31,8 @@ export async function publishWithImage(opts: {
   imagePath: string;
   scheduledAt?: number; // Unix timestamp for scheduled publish
 }): Promise<PublishResult> {
-  const pageId = getPageId();
-  const token = getToken();
+  const pageId = env.facebookPageId;
+  const token = env.facebookPageAccessToken;
 
   const absPath = path.resolve(process.cwd(), "public", opts.imagePath);
   const allowedDir = path.resolve(process.cwd(), "public", "social-images");
@@ -63,7 +50,7 @@ export async function publishWithImage(opts: {
     formData.append("scheduled_publish_time", String(opts.scheduledAt));
   }
 
-  const res = await fetch(`${GRAPH_API}/${pageId}/photos`, {
+  const res = await fetch(`${FACEBOOK.GRAPH_API_URL}/${pageId}/photos`, {
     method: "POST",
     body: formData,
   });
@@ -81,8 +68,8 @@ export async function publishText(opts: {
   link?: string;
   scheduledAt?: number;
 }): Promise<PublishResult> {
-  const pageId = getPageId();
-  const token = getToken();
+  const pageId = env.facebookPageId;
+  const token = env.facebookPageAccessToken;
 
   const body: Record<string, string> = {
     message: opts.message,
@@ -94,7 +81,7 @@ export async function publishText(opts: {
     body.scheduled_publish_time = String(opts.scheduledAt);
   }
 
-  const res = await fetch(`${GRAPH_API}/${pageId}/feed`, {
+  const res = await fetch(`${FACEBOOK.GRAPH_API_URL}/${pageId}/feed`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

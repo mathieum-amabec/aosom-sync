@@ -1,17 +1,14 @@
 import { cookies } from "next/headers";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { env, AUTH } from "./config";
 
-const SESSION_COOKIE = "aosom_session";
-const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
-
-function getPassword(): string {
-  return process.env.AUTH_PASSWORD || "admin123";
-}
+const SESSION_COOKIE = AUTH.COOKIE_NAME;
+const SESSION_MAX_AGE = AUTH.SESSION_MAX_AGE;
 
 /** Create a simple signed token: base64(timestamp:hash) */
 function createToken(): string {
   const ts = Date.now().toString();
-  const data = `${ts}:${getPassword()}`;
+  const data = `${ts}:${env.authPassword}`;
   // Simple hash — not crypto-grade but sufficient for a 2-user internal tool
   let hash = 0;
   for (let i = 0; i < data.length; i++) {
@@ -32,12 +29,12 @@ function verifyToken(token: string): boolean {
 }
 
 export async function login(password: string): Promise<boolean> {
-  if (password !== getPassword()) return false;
+  if (password !== env.authPassword) return false;
   const token = createToken();
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: env.isProduction,
     sameSite: "lax",
     maxAge: SESSION_MAX_AGE,
     path: "/",

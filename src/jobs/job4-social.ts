@@ -8,6 +8,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { composeImage, type TemplateType } from "@/lib/image-composer";
+import { env, CLAUDE, SYNC } from "@/lib/config";
 import {
   getSetting,
   getAllSettings,
@@ -25,7 +26,7 @@ function log(msg: string): void {
 let anthropicClient: Anthropic | null = null;
 function getClient(): Anthropic {
   if (!anthropicClient) {
-    anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    anthropicClient = new Anthropic({ apiKey: env.anthropicApiKey });
   }
   return anthropicClient;
 }
@@ -41,8 +42,8 @@ function interpolatePrompt(template: string, vars: Record<string, string>): stri
 async function generatePostText(prompt: string): Promise<string> {
   const client = getClient();
   const message = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 500,
+    model: CLAUDE.MODEL,
+    max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
     messages: [{ role: "user", content: prompt }],
   });
   return message.content[0].type === "text" ? message.content[0].text.trim() : "";
@@ -74,7 +75,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
     product_name: productName,
     price: String(product.price),
     hashtags: settings[hashtagsKey] || "",
-    store_name: process.env.NEXT_PUBLIC_STORE_NAME || "Aosom Sync",
+    store_name: env.storeName,
   });
 
   const postText = await generatePostText(prompt);
@@ -90,7 +91,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
         imageUrl,
         price: Number(product.price),
         language: lang,
-        storeName: process.env.NEXT_PUBLIC_STORE_NAME,
+        storeName: env.storeName,
       });
     } catch (err) {
       log(`Image composition failed for ${sku}: ${err}`);
@@ -135,7 +136,7 @@ export async function triggerPriceDrop(
     old_price: String(oldPrice),
     new_price: String(newPrice),
     hashtags: settings[hashtagsKey] || "",
-    store_name: process.env.NEXT_PUBLIC_STORE_NAME || "Aosom Sync",
+    store_name: env.storeName,
   });
 
   const postText = await generatePostText(prompt);
@@ -152,7 +153,7 @@ export async function triggerPriceDrop(
         price: newPrice,
         oldPrice,
         language: lang,
-        storeName: process.env.NEXT_PUBLIC_STORE_NAME,
+        storeName: env.storeName,
       });
     } catch (err) {
       log(`Image composition failed for ${sku}: ${err}`);
@@ -199,7 +200,7 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
     price: String(product.price),
     qty: String(product.qty),
     hashtags: settings[hashtagsKey] || "",
-    store_name: process.env.NEXT_PUBLIC_STORE_NAME || "Aosom Sync",
+    store_name: env.storeName,
   });
 
   const postText = await generatePostText(prompt);
@@ -216,7 +217,7 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
         price: Number(product.price),
         qty: Number(product.qty),
         language: lang,
-        storeName: process.env.NEXT_PUBLIC_STORE_NAME,
+        storeName: env.storeName,
       });
     } catch (err) {
       log(`Image composition failed for ${sku}: ${err}`);

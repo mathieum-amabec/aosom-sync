@@ -1,17 +1,14 @@
 import { NextResponse } from "next/server";
 import { triggerStockHighlight } from "@/jobs/job4-social";
+import { env } from "@/lib/config";
 
 /**
  * Cron handler — daily stock highlight post generation.
  * Protected by CRON_SECRET header.
  */
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) {
-    return NextResponse.json({ success: false, error: "Server misconfigured" }, { status: 500 });
-  }
   const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${cronSecret}`) {
+  if (authHeader !== `Bearer ${env.cronSecret}`) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 

@@ -102,8 +102,10 @@ export default function SettingsPage() {
   async function saveChanges() {
     setSaving(true);
     const updates: Record<string, string> = {};
+    // Only send non-env keys — server-side allowlist enforces the final check
+    const ENV_PREFIXES = ["SHOPIFY_", "FACEBOOK_", "ANTHROPIC_"];
     for (const key of dirty) {
-      if (!key.startsWith("SHOPIFY_") && !key.startsWith("FACEBOOK_") && !key.startsWith("ANTHROPIC_")) {
+      if (!ENV_PREFIXES.some((p) => key.startsWith(p))) {
         updates[key] = settings[key];
       }
     }
