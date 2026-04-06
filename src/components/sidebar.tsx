@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState, useEffect, useRef } from "react";
 
 const NAV_ITEMS = [
   {
@@ -66,11 +67,14 @@ export function Sidebar() {
 
   return (
     <aside className="w-60 bg-gray-900 border-r border-gray-800 flex flex-col h-screen sticky top-0">
-      <div className="p-5 border-b border-gray-800">
-        <h1 className="text-lg font-bold text-white tracking-tight">
-          Aosom Sync
-        </h1>
-        <p className="text-xs text-gray-500 mt-0.5">Catalogue Manager</p>
+      <div className="p-5 border-b border-gray-800 flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-bold text-white tracking-tight">
+            Aosom Sync
+          </h1>
+          <p className="text-xs text-gray-500 mt-0.5">Catalogue Manager</p>
+        </div>
+        <NotificationBell />
       </div>
 
       <nav className="flex-1 p-3 space-y-1">
@@ -100,6 +104,111 @@ export function Sidebar() {
         <LogoutButton />
       </div>
     </aside>
+  );
+}
+
+interface Notification {
+  id: number; type: string; title: string; message: string; read: number; created_at: number;
+}
+
+function NotificationBell() {
+  const [open, setOpen] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unread, setUnread] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  function fetchNotifications() {
+    fetch("/api/notifications?limit=20")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.success) {
+          setNotifications(d.data.notifications);
+          setUnread(d.data.unreadCount);
+        }
+      })
+      .catch(() => {});
+  }
+
+  async function markAllRead() {
+    await fetch("/api/notifications", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "read-all" }),
+    });
+    setUnread(0);
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: 1 })));
+  }
+
+  const typeColor: Record<string, string> = {
+    success: "text-green-400",
+    error: "text-red-400",
+    warning: "text-yellow-400",
+    info: "text-blue-400",
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="relative p-1.5 text-gray-400 hover:text-white transition-colors"
+      >
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+        </svg>
+        {unread > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
+            {unread > 9 ? "9+" : unread}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-2 w-72 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl z-50 max-h-80 overflow-y-auto">
+          <div className="flex items-center justify-between p-3 border-b border-gray-800">
+            <span className="text-sm font-semibold text-white">Notifications</span>
+            {unread > 0 && (
+              <button onClick={markAllRead} className="text-xs text-blue-400 hover:text-blue-300">
+                Tout lire
+              </button>
+            )}
+          </div>
+          {notifications.length === 0 ? (
+            <p className="p-4 text-sm text-gray-500 text-center">Aucune notification</p>
+          ) : (
+            notifications.map((n) => (
+              <div
+                key={n.id}
+                className={`px-3 py-2.5 border-b border-gray-800/50 ${n.read ? "opacity-60" : ""}`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-medium ${typeColor[n.type] || "text-gray-400"}`}>
+                    {n.title}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400 mt-0.5">{n.message}</p>
+                <p className="text-[10px] text-gray-600 mt-1">
+                  {new Date(n.created_at * 1000).toLocaleString("fr-CA")}
+                </p>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
