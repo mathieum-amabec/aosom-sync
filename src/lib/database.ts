@@ -191,6 +191,7 @@ export function getProducts(filters: {
     case "qty_desc": orderBy = "qty DESC"; break;
     case "name_asc": orderBy = "name ASC"; break;
     case "name_desc": orderBy = "name DESC"; break;
+    case "low_stock": orderBy = "CASE WHEN qty > 0 THEN 0 ELSE 1 END, qty ASC"; break;
   }
 
   const total = (d.prepare(`SELECT COUNT(*) as cnt FROM products ${where}`).get(...args) as { cnt: number }).cnt;
@@ -279,7 +280,7 @@ export function markPriceChangeApplied(id: number): void {
 export function getRecentPriceChanges(limit = 50): Record<string, unknown>[] {
   const d = getDb();
   return d.prepare(`
-    SELECT ph.*, p.name, p.image1
+    SELECT ph.*, p.name, p.image1, p.shopify_product_id
     FROM price_history ph
     LEFT JOIN products p ON ph.sku = p.sku
     ORDER BY ph.detected_at DESC

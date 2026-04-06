@@ -4,11 +4,11 @@ import { useState, useEffect } from "react";
 import type { SyncRun } from "@/types/sync";
 
 interface PriceChange {
-  sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string;
+  sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string; inStore: boolean;
 }
 interface TopSeller {
   sku: string; name: string; image: string; color: string; productType: string; price: number;
-  currentQty: number; soldPerDay: number; daysTracked: number;
+  currentQty: number; soldPerDay: number; daysTracked: number; inStore: boolean;
 }
 
 export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun[]; latestRun: SyncRun | null }) {
@@ -154,7 +154,10 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
                 <div key={c.sku} className="flex items-center gap-3 px-4 py-3 border-b border-gray-800/50 last:border-0">
                   {c.image && <img src={c.image} alt="" className="w-8 h-8 rounded bg-gray-800 object-cover shrink-0" />}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-white truncate">{c.name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-white truncate">{c.name}</p>
+                      <StoreBadge inStore={c.inStore} />
+                    </div>
                     <p className="text-xs text-gray-500">{c.sku}</p>
                   </div>
                   <div className="text-right shrink-0">
@@ -181,7 +184,10 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
                 <div key={s.sku} className="flex items-center gap-3 px-4 py-3 border-b border-gray-800/50 last:border-0">
                   {s.image && <img src={s.image} alt="" className="w-8 h-8 rounded bg-gray-800 object-cover shrink-0" />}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-white truncate">{s.name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-white truncate">{s.name}</p>
+                      <StoreBadge inStore={s.inStore} />
+                    </div>
                     <p className="text-xs text-gray-500">${s.price.toFixed(2)} | {s.currentQty} left</p>
                   </div>
                   <div className="text-right shrink-0">
@@ -262,6 +268,21 @@ function timeAgo(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+function StoreBadge({ inStore }: { inStore: boolean }) {
+  return (
+    <span
+      className={`inline-flex shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+        inStore
+          ? "bg-blue-900/40 text-blue-400 border border-blue-800/50"
+          : "bg-gray-800/60 text-gray-500 border border-gray-700/50"
+      }`}
+      title={inStore ? "Product is in your Shopify store" : "Not imported to Shopify yet"}
+    >
+      {inStore ? "In store" : "Not imported"}
+    </span>
+  );
 }
 
 function StatusBadge({ status }: { status: string }) {

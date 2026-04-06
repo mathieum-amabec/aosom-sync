@@ -26,6 +26,7 @@ export async function GET(request: Request) {
           change,
           pct: oldPrice > 0 ? (change / oldPrice) * 100 : 0,
           recordedAt: r.detected_at as string,
+          inStore: !!(r.shopify_product_id),
         };
       });
 
