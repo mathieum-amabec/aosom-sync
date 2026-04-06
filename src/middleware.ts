@@ -3,7 +3,7 @@ import { isAuthenticatedFromRequest } from "@/lib/auth";
 
 const PUBLIC_PATHS = ["/login", "/api/auth", "/api/cron"];
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow public paths
@@ -21,7 +21,7 @@ export function middleware(request: NextRequest) {
   }
 
   // Check auth
-  if (!isAuthenticatedFromRequest(request)) {
+  if (!(await isAuthenticatedFromRequest(request))) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("redirect", pathname);
     return NextResponse.redirect(loginUrl);
