@@ -29,6 +29,7 @@ import {
   getAllProductsMap,
   getSetting,
   getLatestSyncRun,
+  createNotification,
 } from "@/lib/database";
 import type { ChangeTypeHistory } from "@/lib/database";
 
@@ -295,7 +296,16 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
 
     log(`Sync terminé: ${changes.priceUpdates} prix, ${changes.stockChanges} stocks, ${changes.newProducts} nouveaux, ${shopifyResult.archived} archivés, ${shopifyResult.errors} erreurs`);
 
-    // Step 5: Trigger social drafts (non-blocking)
+    // Step 5: Notifications
+    const parts: string[] = [];
+    if (changes.priceUpdates > 0) parts.push(`${changes.priceUpdates} prix mis à jour`);
+    if (changes.stockChanges > 0) parts.push(`${changes.stockChanges} stocks changés`);
+    if (changes.newProducts > 0) parts.push(`${changes.newProducts} nouveaux produits`);
+    if (shopifyResult.errors > 0) parts.push(`${shopifyResult.errors} erreurs`);
+    const notifType = shopifyResult.errors > 0 ? "warning" : "success";
+    createNotification(notifType, "Sync terminée", parts.length > 0 ? parts.join(", ") : "Aucun changement détecté");
+
+    // Step 6: Trigger social drafts (non-blocking)
     triggerSocialDrafts(changes.socialDraftSkus);
 
     return {
@@ -310,6 +320,7 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
     completeSyncRun(syncRun.id, {
       status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
     });
+    createNotification("error", "Sync échouée", msg.slice(0, 200));
     throw err;
   }
 }

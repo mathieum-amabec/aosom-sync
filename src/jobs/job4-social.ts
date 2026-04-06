@@ -16,6 +16,7 @@ import {
   createFacebookDraft,
   getEligibleHighlightProduct,
   markProductPosted,
+  createNotification,
 } from "@/lib/database";
 
 function log(msg: string): void {
@@ -122,6 +123,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
   });
 
   markProductPosted(sku);
+  createNotification("info", "Nouveau draft social", `Nouveau produit: ${productName.slice(0, 60)}`);
   log(`Draft #${draftId} created for new product ${sku}`);
   return { draftId, language: lang, postText, imagePath };
 }
@@ -186,6 +188,7 @@ export async function triggerPriceDrop(
     newPrice,
   });
 
+  createNotification("info", "Draft prix réduit", `${productName.slice(0, 40)}: ${oldPrice}$ → ${newPrice}$`);
   log(`Draft #${draftId} created for price drop ${sku}`);
   return { draftId, language: lang, postText, imagePath };
 }

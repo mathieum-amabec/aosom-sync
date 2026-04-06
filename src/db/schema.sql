@@ -77,6 +77,19 @@ CREATE TABLE IF NOT EXISTS facebook_drafts (
 CREATE INDEX IF NOT EXISTS idx_facebook_drafts_sku ON facebook_drafts(sku);
 CREATE INDEX IF NOT EXISTS idx_facebook_drafts_status ON facebook_drafts(status);
 
+-- Notifications
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  read INTEGER DEFAULT 0,
+  created_at INTEGER DEFAULT (strftime('%s','now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at);
+
 -- Paramètres configurables (clé-valeur)
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,

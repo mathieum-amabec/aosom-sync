@@ -287,6 +287,37 @@ export function getRecentPriceChanges(limit = 50): Record<string, unknown>[] {
   `).all(limit) as Record<string, unknown>[];
 }
 
+// ─── Notifications ──────────────────────────────────────────────────
+
+export function createNotification(type: string, title: string, message: string): number {
+  const d = getDb();
+  const result = d.prepare(`INSERT INTO notifications (type, title, message) VALUES (?, ?, ?)`).run(type, title, message);
+  return result.lastInsertRowid as number;
+}
+
+export function getNotifications(opts: { unreadOnly?: boolean; limit?: number } = {}): Record<string, unknown>[] {
+  const d = getDb();
+  const where = opts.unreadOnly ? "WHERE read = 0" : "";
+  const limit = opts.limit || 50;
+  return d.prepare(`SELECT * FROM notifications ${where} ORDER BY created_at DESC LIMIT ?`).all(limit) as Record<string, unknown>[];
+}
+
+export function markNotificationRead(id: number): void {
+  const d = getDb();
+  d.prepare(`UPDATE notifications SET read = 1 WHERE id = ?`).run(id);
+}
+
+export function markAllNotificationsRead(): void {
+  const d = getDb();
+  d.prepare(`UPDATE notifications SET read = 1 WHERE read = 0`).run();
+}
+
+export function getUnreadNotificationCount(): number {
+  const d = getDb();
+  const row = d.prepare(`SELECT COUNT(*) as count FROM notifications WHERE read = 0`).get() as { count: number };
+  return row.count;
+}
+
 // ─── Settings ────────────────────────────────────────────────────────
 
 export function getSetting(key: string): string | null {
