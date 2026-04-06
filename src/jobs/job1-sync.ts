@@ -26,6 +26,7 @@ import {
   recordPriceChanges,
   getProduct,
   getSetting,
+  getLatestSyncRun,
 } from "@/lib/database";
 import type { ChangeTypeHistory } from "@/lib/database";
 
@@ -82,6 +83,12 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
   let newProducts = 0;
   let archived = 0;
   let errors = 0;
+
+  // Guard against concurrent sync runs
+  const latestRun = getLatestSyncRun();
+  if (latestRun && latestRun.status === "running") {
+    throw new Error(`Sync already in progress (run ${latestRun.id}, started ${latestRun.startedAt})`);
+  }
 
   try {
     // Step 1: Fetch data in parallel
@@ -169,12 +176,6 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
       }
     }
 
-    // Record all changes to price_history
-    if (priceChangeEntries.length > 0) {
-      recordPriceChanges(priceChangeEntries);
-      log(`${priceChangeEntries.length} changements enregistrés dans price_history`);
-    }
-
     if (isDryRun) {
       log("DRY RUN — aucune modification appliquée");
       completeSyncRun(syncRun.id, {
@@ -196,6 +197,12 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
         errors: 0,
         dryRun: true,
       };
+    }
+
+    // Record all changes to price_history (after dry run guard)
+    if (priceChangeEntries.length > 0) {
+      recordPriceChanges(priceChangeEntries);
+      log(`${priceChangeEntries.length} changements enregistrés dans price_history`);
     }
 
     // Step 3: Upsert all products into the products table

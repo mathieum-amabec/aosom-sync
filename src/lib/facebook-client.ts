@@ -47,7 +47,9 @@ export async function publishWithImage(opts: {
   const pageId = getPageId();
   const token = getToken();
 
-  const absPath = path.join(process.cwd(), "public", opts.imagePath);
+  const absPath = path.resolve(process.cwd(), "public", opts.imagePath);
+  const allowedDir = path.resolve(process.cwd(), "public", "social-images");
+  if (!absPath.startsWith(allowedDir)) throw new Error("Image path outside allowed directory");
   if (!fs.existsSync(absPath)) throw new Error(`Image not found: ${absPath}`);
 
   const formData = new FormData();

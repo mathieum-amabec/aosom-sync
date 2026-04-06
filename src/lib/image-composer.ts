@@ -29,9 +29,14 @@ async function downloadImage(url: string): Promise<Buffer> {
   return Buffer.from(await res.arrayBuffer());
 }
 
+function sanitizeColor(color: string | undefined, fallback: string): string {
+  if (!color) return fallback;
+  return /^#[0-9a-fA-F]{3,8}$/.test(color) ? color : fallback;
+}
+
 function createSvgOverlay(opts: ComposeOptions): string {
-  const accent = opts.accentColor || "#2563eb";
-  const textColor = opts.textColor || "#ffffff";
+  const accent = sanitizeColor(opts.accentColor, "#2563eb");
+  const textColor = sanitizeColor(opts.textColor, "#ffffff");
   const store = opts.storeName || "Aosom Sync";
   const opacity = (opts.bannerOpacity ?? 75) / 100;
 

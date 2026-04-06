@@ -34,6 +34,13 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { action } = body;
 
+    // Validate id for actions that require it
+    if (["approve", "reject", "schedule", "publish", "update", "delete"].includes(action)) {
+      if (!body.id || typeof body.id !== "number" || body.id < 1) {
+        return NextResponse.json({ success: false, error: "Valid numeric id required" }, { status: 400 });
+      }
+    }
+
     switch (action) {
       case "generate": {
         const { triggerType, sku, oldPrice, newPrice } = body;

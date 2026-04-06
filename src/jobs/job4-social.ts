@@ -63,6 +63,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
   const settings = getAllSettings();
   const product = getProduct(sku);
   if (!product) throw new Error(`Product ${sku} not found`);
+  const productName = (product.name as string) || sku;
 
   const lang = (settings.social_default_language || "FR") as "FR" | "EN";
   const promptKey = `prompt_new_product_${lang.toLowerCase()}`;
@@ -70,7 +71,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
   const hashtagsKey = `social_hashtags_${lang.toLowerCase()}`;
 
   const prompt = interpolatePrompt(template, {
-    product_name: product.name as string,
+    product_name: productName,
     price: String(product.price),
     hashtags: settings[hashtagsKey] || "",
     store_name: process.env.NEXT_PUBLIC_STORE_NAME || "Aosom Sync",
@@ -85,7 +86,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
       imagePath = await composeImage({
         sku,
         templateType: "new_product",
-        productName: product.name as string,
+        productName,
         imageUrl,
         price: Number(product.price),
         language: lang,
@@ -121,6 +122,7 @@ export async function triggerPriceDrop(
   const settings = getAllSettings();
   const product = getProduct(sku);
   if (!product) throw new Error(`Product ${sku} not found`);
+  const productName = (product.name as string) || sku;
 
   const lang = (settings.social_default_language || "FR") as "FR" | "EN";
   const promptKey = `prompt_price_drop_${lang.toLowerCase()}`;
@@ -128,7 +130,7 @@ export async function triggerPriceDrop(
   const hashtagsKey = `social_hashtags_${lang.toLowerCase()}`;
 
   const prompt = interpolatePrompt(template, {
-    product_name: product.name as string,
+    product_name: productName,
     price: String(newPrice),
     old_price: String(oldPrice),
     new_price: String(newPrice),
@@ -145,7 +147,7 @@ export async function triggerPriceDrop(
       imagePath = await composeImage({
         sku,
         templateType: "price_drop",
-        productName: product.name as string,
+        productName,
         imageUrl,
         price: newPrice,
         oldPrice,
@@ -186,13 +188,14 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
   }
 
   const sku = product.sku as string;
+  const productName = (product.name as string) || sku;
   const lang = (settings.social_default_language || "FR") as "FR" | "EN";
   const promptKey = `prompt_highlight_${lang.toLowerCase()}`;
   const template = settings[promptKey] || "Write a Facebook post highlighting: {product_name}";
   const hashtagsKey = `social_hashtags_${lang.toLowerCase()}`;
 
   const prompt = interpolatePrompt(template, {
-    product_name: product.name as string,
+    product_name: productName,
     price: String(product.price),
     qty: String(product.qty),
     hashtags: settings[hashtagsKey] || "",
@@ -208,7 +211,7 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
       imagePath = await composeImage({
         sku,
         templateType: "stock_highlight",
-        productName: product.name as string,
+        productName,
         imageUrl,
         price: Number(product.price),
         qty: Number(product.qty),
