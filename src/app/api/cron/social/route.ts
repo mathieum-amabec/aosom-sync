@@ -1,14 +1,21 @@
+import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { triggerStockHighlight } from "@/jobs/job4-social";
 import { env } from "@/lib/config";
+
+function verifyCronSecret(header: string | null): boolean {
+  if (!header) return false;
+  const expected = `Bearer ${env.cronSecret}`;
+  if (header.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
+}
 
 /**
  * Cron handler — daily stock highlight post generation.
  * Protected by CRON_SECRET header.
  */
 export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${env.cronSecret}`) {
+  if (!verifyCronSecret(request.headers.get("authorization"))) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 

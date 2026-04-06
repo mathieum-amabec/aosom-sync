@@ -16,7 +16,9 @@ export interface PublishResult {
  * Test the Facebook connection by fetching page info.
  */
 export async function testConnection(): Promise<{ name: string; id: string }> {
-  const res = await fetch(`${FACEBOOK.GRAPH_API_URL}/${env.facebookPageId}?fields=name,id&access_token=${env.facebookPageAccessToken}`);
+  const res = await fetch(`${FACEBOOK.GRAPH_API_URL}/${env.facebookPageId}?fields=name,id`, {
+    headers: { Authorization: `Bearer ${env.facebookPageAccessToken}` },
+  });
   const data = await res.json();
   if (data.error) throw new Error(data.error.message);
   return { name: data.name, id: data.id };

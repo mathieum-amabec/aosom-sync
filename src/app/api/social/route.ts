@@ -118,6 +118,9 @@ export async function POST(request: Request) {
         if (!promptText || typeof promptText !== "string") {
           return NextResponse.json({ success: false, error: "promptText required" }, { status: 400 });
         }
+        if (promptText.length > 2000) {
+          return NextResponse.json({ success: false, error: "promptText too long (max 2000 chars)" }, { status: 400 });
+        }
         const Anthropic = (await import("@anthropic-ai/sdk")).default;
         const { env: cfgEnv, CLAUDE } = await import("@/lib/config");
         const client = new Anthropic({ apiKey: cfgEnv.anthropicApiKey });

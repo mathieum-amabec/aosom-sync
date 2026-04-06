@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { cookies } from "next/headers";
 import { NextRequest } from "next/server";
 import { env, AUTH } from "./config";
@@ -5,24 +6,28 @@ import { env, AUTH } from "./config";
 const SESSION_COOKIE = AUTH.COOKIE_NAME;
 const SESSION_MAX_AGE = AUTH.SESSION_MAX_AGE;
 
-/** Create a simple signed token: base64(timestamp:hash) */
+function hmacSign(ts: string): string {
+  return crypto.createHmac("sha256", env.authPassword).update(ts).digest("hex");
+}
+
+/** Create a signed token: base64(timestamp:hmac) */
 function createToken(): string {
   const ts = Date.now().toString();
-  const data = `${ts}:${env.authPassword}`;
-  // Simple hash — not crypto-grade but sufficient for a 2-user internal tool
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash + data.charCodeAt(i)) | 0;
-  }
-  return Buffer.from(`${ts}:${hash}`).toString("base64");
+  const sig = hmacSign(ts);
+  return Buffer.from(`${ts}:${sig}`).toString("base64");
 }
 
 function verifyToken(token: string): boolean {
   try {
     const decoded = Buffer.from(token, "base64").toString();
-    const [ts] = decoded.split(":");
+    const sep = decoded.indexOf(":");
+    if (sep === -1) return false;
+    const ts = decoded.slice(0, sep);
+    const sig = decoded.slice(sep + 1);
     const age = Date.now() - parseInt(ts, 10);
-    return age < SESSION_MAX_AGE * 1000 && age >= 0;
+    if (age >= SESSION_MAX_AGE * 1000 || age < 0) return false;
+    const expected = hmacSign(ts);
+    return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
   } catch {
     return false;
   }
