@@ -12,6 +12,8 @@ interface FieldDef {
   type: string;
   env?: boolean;
   options?: string[];
+  min?: number;
+  max?: number;
 }
 
 const SECTIONS: { title: string; fields: FieldDef[] }[] = [
@@ -64,6 +66,16 @@ const SECTIONS: { title: string; fields: FieldDef[] }[] = [
     ],
   },
   {
+    title: "Image Composer",
+    fields: [
+      { key: "social_accent_color", label: "Accent Color", type: "color" },
+      { key: "social_text_color", label: "Text Color", type: "color" },
+      { key: "social_store_display_name", label: "Store Name on Images", type: "text" },
+      { key: "social_banner_opacity", label: "Banner Opacity (%)", type: "range", min: 0, max: 100 },
+      { key: "social_logo_position", label: "Logo Position", type: "select", options: ["bottom-right", "bottom-left", "top-right", "top-left"] },
+    ],
+  },
+  {
     title: "Shopify",
     fields: [
       { key: "SHOPIFY_STORE_URL", label: "Store URL", type: "text", env: true },
@@ -86,6 +98,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [testResults, setTestResults] = useState<Record<string, string>>({});
+  const [testingPrompt, setTestingPrompt] = useState<string | null>(null);
+  const [promptPreview, setPromptPreview] = useState<Record<string, string>>({});
 
   useEffect(() => {
     fetch("/api/settings")
@@ -102,7 +116,6 @@ export default function SettingsPage() {
   async function saveChanges() {
     setSaving(true);
     const updates: Record<string, string> = {};
-    // Only send non-env keys — server-side allowlist enforces the final check
     const ENV_PREFIXES = ["SHOPIFY_", "FACEBOOK_", "ANTHROPIC_"];
     for (const key of dirty) {
       if (!ENV_PREFIXES.some((p) => key.startsWith(p))) {
@@ -142,6 +155,59 @@ export default function SettingsPage() {
       setTestResults((prev) => ({ ...prev, claude: res.ok ? "API Key configured" : "Error" }));
     } catch (err) {
       setTestResults((prev) => ({ ...prev, claude: `Error: ${err}` }));
+    }
+  }
+
+  async function testFacebook() {
+    setTestResults((prev) => ({ ...prev, facebook: "Testing..." }));
+    try {
+      const res = await fetch("/api/social", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "test-facebook" }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTestResults((prev) => ({ ...prev, facebook: `Connected — Page: ${data.data.name}` }));
+      } else {
+        setTestResults((prev) => ({ ...prev, facebook: `Error: ${data.error}` }));
+      }
+    } catch (err) {
+      setTestResults((prev) => ({ ...prev, facebook: `Error: ${err}` }));
+    }
+  }
+
+  async function testPrompt(key: string) {
+    const promptText = settings[key];
+    if (!promptText) return;
+    setTestingPrompt(key);
+    setPromptPreview((prev) => ({ ...prev, [key]: "" }));
+    try {
+      // Interpolate with sample data for preview
+      const samplePrompt = promptText
+        .replace(/\{product_name\}/g, "Outsunny Garden Bench")
+        .replace(/\{price\}/g, "299.99")
+        .replace(/\{old_price\}/g, "399.99")
+        .replace(/\{new_price\}/g, "299.99")
+        .replace(/\{qty\}/g, "15")
+        .replace(/\{hashtags\}/g, key.endsWith("_fr") ? (settings.social_hashtags_fr || "") : (settings.social_hashtags_en || ""))
+        .replace(/\{store_name\}/g, settings.social_store_display_name || "Aosom Sync");
+
+      const res = await fetch("/api/social", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "test-prompt", promptText: samplePrompt }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPromptPreview((prev) => ({ ...prev, [key]: data.data.text }));
+      } else {
+        setPromptPreview((prev) => ({ ...prev, [key]: `Error: ${data.error}` }));
+      }
+    } catch (err) {
+      setPromptPreview((prev) => ({ ...prev, [key]: `Error: ${err}` }));
+    } finally {
+      setTestingPrompt(null);
     }
   }
 
@@ -229,7 +295,50 @@ export default function SettingsPage() {
                         rows={4}
                         className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 resize-y font-mono"
                       />
-                      <p className="text-xs text-gray-600 mt-1">Variables: {PROMPT_VARS}</p>
+                      <div className="flex items-center justify-between mt-1">
+                        <p className="text-xs text-gray-600">Variables: {PROMPT_VARS}</p>
+                        <button
+                          onClick={() => testPrompt(field.key)}
+                          disabled={testingPrompt === field.key}
+                          className="px-2 py-1 bg-gray-800 text-gray-400 text-xs rounded hover:bg-gray-700 border border-gray-700 disabled:opacity-50"
+                        >
+                          {testingPrompt === field.key ? "Generating..." : "Test Prompt"}
+                        </button>
+                      </div>
+                      {promptPreview[field.key] && (
+                        <div className="mt-2 p-3 bg-gray-800/50 border border-gray-700 rounded-lg text-sm text-gray-300 whitespace-pre-wrap">
+                          <p className="text-xs text-gray-500 mb-1 font-semibold">Preview (sample data):</p>
+                          {promptPreview[field.key]}
+                        </div>
+                      )}
+                    </div>
+                  ) : field.type === "color" ? (
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="color"
+                        value={settings[field.key] || "#2563eb"}
+                        onChange={(e) => updateField(field.key, e.target.value)}
+                        className="w-10 h-10 rounded border border-gray-700 bg-gray-800 cursor-pointer"
+                      />
+                      <input
+                        type="text"
+                        value={settings[field.key] || ""}
+                        onChange={(e) => updateField(field.key, e.target.value)}
+                        placeholder="#hex"
+                        className="w-28 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 font-mono"
+                      />
+                    </div>
+                  ) : field.type === "range" ? (
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={field.min ?? 0}
+                        max={field.max ?? 100}
+                        value={settings[field.key] || "75"}
+                        onChange={(e) => updateField(field.key, e.target.value)}
+                        className="flex-1 accent-blue-600"
+                      />
+                      <span className="text-sm text-gray-400 w-10 text-right">{settings[field.key] || "75"}%</span>
                     </div>
                   ) : (
                     <input
@@ -243,6 +352,18 @@ export default function SettingsPage() {
               ))}
 
               {/* Test buttons */}
+              {section.title === "Facebook / Graph API" && (
+                <div className="flex items-center gap-3 pt-2">
+                  <button onClick={testFacebook} className="px-3 py-1.5 bg-gray-800 text-gray-300 text-xs rounded-lg hover:bg-gray-700 border border-gray-700">
+                    Test Connection
+                  </button>
+                  {testResults.facebook && (
+                    <span className={`text-xs ${testResults.facebook.startsWith("Connected") ? "text-green-400" : "text-red-400"}`}>
+                      {testResults.facebook}
+                    </span>
+                  )}
+                </div>
+              )}
               {section.title === "Shopify" && (
                 <div className="flex items-center gap-3 pt-2">
                   <button onClick={testShopify} className="px-3 py-1.5 bg-gray-800 text-gray-300 text-xs rounded-lg hover:bg-gray-700 border border-gray-700">
@@ -265,6 +386,34 @@ export default function SettingsPage() {
                       {testResults.claude}
                     </span>
                   )}
+                </div>
+              )}
+
+              {/* Image Composer preview */}
+              {section.title === "Image Composer" && (
+                <div className="mt-3 p-4 rounded-lg border border-gray-700 relative overflow-hidden" style={{ width: "100%", aspectRatio: "1200/630" }}>
+                  <div className="absolute inset-0 bg-gray-800 flex items-center justify-center">
+                    <span className="text-gray-600 text-sm">Product image area</span>
+                  </div>
+                  <div
+                    className="absolute bottom-0 left-0 right-0 flex items-end justify-between px-4 pb-3"
+                    style={{
+                      height: "40%",
+                      backgroundColor: `rgba(0,0,0,${(parseInt(settings.social_banner_opacity || "75") / 100)})`,
+                    }}
+                  >
+                    <div>
+                      <p className="text-sm font-bold" style={{ color: settings.social_text_color || "#ffffff" }}>
+                        Outsunny Garden Bench
+                      </p>
+                      <p className="text-lg font-bold" style={{ color: settings.social_accent_color || "#2563eb" }}>
+                        299.99$
+                      </p>
+                    </div>
+                    <p className="text-xs" style={{ color: settings.social_accent_color || "#2563eb" }}>
+                      {settings.social_store_display_name || "Aosom Sync"}
+                    </p>
+                  </div>
                 </div>
               )}
             </div>

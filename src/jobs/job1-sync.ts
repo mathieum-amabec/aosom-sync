@@ -261,15 +261,15 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
       return { syncRunId: syncRun.id, totalProducts: aosomProducts.length, ...changes, archived: 0, errors: 0, dryRun: true };
     }
 
-    // Step 3: Persist changes
+    // Step 3: Persist changes — upsert products FIRST (price_history has FK on products.sku)
+    log("Mise à jour de la table products...");
+    refreshProducts(aosomProducts.map(aosomToProductRow));
+    log(`${aosomProducts.length} produits upsertés`);
+
     if (changes.priceChangeEntries.length > 0) {
       recordPriceChanges(changes.priceChangeEntries);
       log(`${changes.priceChangeEntries.length} changements enregistrés dans price_history`);
     }
-
-    log("Mise à jour de la table products...");
-    refreshProducts(aosomProducts.map(aosomToProductRow));
-    log(`${aosomProducts.length} produits upsertés`);
 
     // Step 4: Apply to Shopify
     log("Application des changements sur Shopify...");

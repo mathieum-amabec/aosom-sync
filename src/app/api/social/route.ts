@@ -8,6 +8,7 @@ import {
 } from "@/lib/database";
 import { publishWithImage, publishText } from "@/lib/facebook-client";
 import { triggerNewProduct, triggerPriceDrop, triggerStockHighlight } from "@/jobs/job4-social";
+import { testConnection as testFacebookConnection } from "@/lib/facebook-client";
 
 /**
  * GET /api/social — List drafts with optional status filter.
@@ -110,6 +111,28 @@ export async function POST(request: Request) {
       case "delete": {
         deleteFacebookDraft(body.id);
         return NextResponse.json({ success: true });
+      }
+
+      case "test-prompt": {
+        const { promptText } = body;
+        if (!promptText || typeof promptText !== "string") {
+          return NextResponse.json({ success: false, error: "promptText required" }, { status: 400 });
+        }
+        const Anthropic = (await import("@anthropic-ai/sdk")).default;
+        const { env: cfgEnv, CLAUDE } = await import("@/lib/config");
+        const client = new Anthropic({ apiKey: cfgEnv.anthropicApiKey });
+        const message = await client.messages.create({
+          model: CLAUDE.MODEL,
+          max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
+          messages: [{ role: "user", content: promptText }],
+        });
+        const text = message.content[0].type === "text" ? message.content[0].text.trim() : "";
+        return NextResponse.json({ success: true, data: { text } });
+      }
+
+      case "test-facebook": {
+        const result = await testFacebookConnection();
+        return NextResponse.json({ success: true, data: result });
       }
 
       default:

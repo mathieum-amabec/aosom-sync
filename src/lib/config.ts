@@ -112,7 +112,7 @@ export const API = {
 
 export const AUTH = {
   SESSION_MAX_AGE: 60 * 60 * 24 * 7, // 7 days
-  COOKIE_NAME: "auth_token",
+  COOKIE_NAME: "aosom_session",
 } as const;
 
 // ─── Settings Allowlist ─────────────────────────────────────────────
@@ -135,7 +135,9 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   "prompt_price_drop_en",
   "prompt_highlight_fr",
   "prompt_highlight_en",
+  "social_accent_color",
+  "social_text_color",
+  "social_store_display_name",
+  "social_banner_opacity",
+  "social_logo_position",
 ]);
-
-// Keys that are env-only (displayed as masked in settings UI, never saved via API)
-export const ENV_ONLY_PREFIXES = ["SHOPIFY_", "FACEBOOK_", "ANTHROPIC_"];

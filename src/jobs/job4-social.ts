@@ -31,6 +31,20 @@ function getClient(): Anthropic {
   return anthropicClient;
 }
 
+function getImageSettings(settings: Record<string, string>): {
+  accentColor: string;
+  textColor: string;
+  storeName: string;
+  bannerOpacity: number;
+} {
+  return {
+    accentColor: settings.social_accent_color || "#2563eb",
+    textColor: settings.social_text_color || "#ffffff",
+    storeName: settings.social_store_display_name || env.storeName,
+    bannerOpacity: parseInt(settings.social_banner_opacity || "75", 10),
+  };
+}
+
 function interpolatePrompt(template: string, vars: Record<string, string>): string {
   let result = template;
   for (const [key, value] of Object.entries(vars)) {
@@ -80,6 +94,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
 
   const postText = await generatePostText(prompt);
 
+  const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
   const imageUrl = product.image1 as string;
   if (imageUrl) {
@@ -91,7 +106,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
         imageUrl,
         price: Number(product.price),
         language: lang,
-        storeName: env.storeName,
+        ...imgSettings,
       });
     } catch (err) {
       log(`Image composition failed for ${sku}: ${err}`);
@@ -141,6 +156,7 @@ export async function triggerPriceDrop(
 
   const postText = await generatePostText(prompt);
 
+  const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
   const imageUrl = product.image1 as string;
   if (imageUrl) {
@@ -153,7 +169,7 @@ export async function triggerPriceDrop(
         price: newPrice,
         oldPrice,
         language: lang,
-        storeName: env.storeName,
+        ...imgSettings,
       });
     } catch (err) {
       log(`Image composition failed for ${sku}: ${err}`);
@@ -180,7 +196,7 @@ export async function triggerPriceDrop(
 export async function triggerStockHighlight(): Promise<GenerateDraftResult | null> {
   log("stock_highlight trigger");
   const settings = getAllSettings();
-  const minDays = parseInt(settings.social_min_days_between_reposts || "30", 10);
+  const minDays = parseInt(settings.social_min_days_between_reposts || SYNC.DEFAULT_MIN_DAYS_BETWEEN_REPOSTS, 10);
   const product = getEligibleHighlightProduct(minDays);
 
   if (!product) {
@@ -205,6 +221,7 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
 
   const postText = await generatePostText(prompt);
 
+  const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
   const imageUrl = product.image1 as string;
   if (imageUrl) {
@@ -217,7 +234,7 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
         price: Number(product.price),
         qty: Number(product.qty),
         language: lang,
-        storeName: env.storeName,
+        ...imgSettings,
       });
     } catch (err) {
       log(`Image composition failed for ${sku}: ${err}`);
