@@ -216,7 +216,7 @@ export async function updateShopifyVariantPrice(
   }
 }
 
-export async function archiveShopifyProduct(shopifyId: string): Promise<void> {
+export async function draftShopifyProduct(shopifyId: string): Promise<void> {
   await updateShopifyProduct(shopifyId, { status: "draft" });
 }
 
