@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import DOMPurify from "isomorphic-dompurify";
 import type { ImportJob } from "@/lib/import-pipeline";
 
 const SHOPIFY_ADMIN_URL = "https://admin.shopify.com/store/27u5y2-kp";
@@ -299,7 +300,7 @@ function ContentPreview({
       <h5 className="text-sm font-medium text-white mt-1">{title}</h5>
       <div
         className="text-xs text-gray-400 mt-2 max-h-40 overflow-y-auto prose prose-invert prose-xs"
-        dangerouslySetInnerHTML={{ __html: description }}
+        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(description) }}
       />
       <div className="mt-3 p-2 bg-gray-800/50 rounded text-xs">
         <p className="text-gray-500">

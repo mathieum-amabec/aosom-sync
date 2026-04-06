@@ -44,7 +44,13 @@ async function verifyToken(token: string): Promise<boolean> {
 }
 
 export async function login(password: string): Promise<boolean> {
-  if (password !== env.authPassword) return false;
+  const enc = new TextEncoder();
+  const a = enc.encode(password);
+  const b = enc.encode(env.authPassword);
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  if (diff !== 0) return false;
   const token = await createToken();
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
