@@ -35,6 +35,7 @@ export default function CatalogPage() {
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [inStock, setInStock] = useState(false);
+  const [sort, setSort] = useState("");
   const [page, setPage] = useState(1);
 
   // Selection for import
@@ -50,6 +51,7 @@ export default function CatalogPage() {
       if (minPrice) params.set("minPrice", minPrice);
       if (maxPrice) params.set("maxPrice", maxPrice);
       if (inStock) params.set("inStock", "true");
+      if (sort) params.set("sort", sort);
 
       const res = await fetch(`/api/catalog?${params}`);
       if (!res.ok) throw new Error("Failed to fetch catalog");
@@ -59,7 +61,7 @@ export default function CatalogPage() {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
     setLoading(false);
-  }, [search, productType, minPrice, maxPrice, inStock, page]);
+  }, [search, productType, minPrice, maxPrice, inStock, sort, page]);
 
   useEffect(() => {
     fetchCatalog();
@@ -140,7 +142,7 @@ export default function CatalogPage() {
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-6">
         <div className="md:col-span-2">
           <input
             type="text"
@@ -167,6 +169,23 @@ export default function CatalogPage() {
                   {t.type} ({t.count})
                 </option>
               ))}
+          </select>
+        </div>
+        <div>
+          <select
+            value={sort}
+            onChange={(e) => {
+              setSort(e.target.value);
+              setPage(1);
+            }}
+            className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="">Sort by name</option>
+            <option value="price_asc">Price: low to high</option>
+            <option value="price_desc">Price: high to low</option>
+            <option value="qty_asc">Stock: low first</option>
+            <option value="qty_desc">Stock: high first</option>
+            <option value="low_stock">Low stock (in stock)</option>
           </select>
         </div>
         <div className="flex gap-2">
