@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.1.0] - 2026-04-06
+
+### Changed
+- Image composer now uses dynamic import for sharp, reducing cold start time on Vercel
+- Social media images write to /tmp on Vercel (public/ is read-only in serverless)
+- Facebook publish resolves image paths cross-environment via resolveImagePath()
+- Sync engine loads all products in one query instead of one per CSV row (N+1 fix for 10k+ products)
+- Stock change detection uses Set instead of Array.find() (O(1) vs O(n) per lookup)
+
 ## [0.1.0.0] - 2026-04-06
 
 ### Added
