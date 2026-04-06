@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import type { ImportJob } from "@/lib/import-pipeline";
 
+const SHOPIFY_ADMIN_URL = "https://admin.shopify.com/store/27u5y2-kp";
+
 export default function ImportPage() {
   const [jobs, setJobs] = useState<ImportJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -12,7 +14,7 @@ export default function ImportPage() {
     try {
       const res = await fetch("/api/import/queue");
       const data = await res.json();
-      setJobs(data.jobs || []);
+      setJobs(data.data || []);
     } catch {
       // ignore
     }
@@ -32,8 +34,8 @@ export default function ImportPage() {
         body: JSON.stringify({ jobId }),
       });
       const data = await res.json();
-      if (data.ok) {
-        updateJob(data.job);
+      if (data.success) {
+        updateJob(data.data);
         setExpandedJob(jobId);
       } else {
         updateJobStatus(jobId, "error");
@@ -52,8 +54,8 @@ export default function ImportPage() {
         body: JSON.stringify({ jobId }),
       });
       const data = await res.json();
-      if (data.ok) {
-        updateJob(data.job);
+      if (data.success) {
+        updateJob(data.data);
       } else {
         updateJobStatus(jobId, "error");
       }
@@ -183,7 +185,7 @@ export default function ImportPage() {
                   )}
                   {job.status === "done" && job.shopifyId && (
                     <a
-                      href={`https://admin.shopify.com/store/27u5y2-kp/products/${job.shopifyId}`}
+                      href={`${SHOPIFY_ADMIN_URL}/products/${job.shopifyId}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-xs font-medium rounded-lg transition-colors"

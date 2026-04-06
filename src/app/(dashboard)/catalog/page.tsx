@@ -54,7 +54,7 @@ export default function CatalogPage() {
       const res = await fetch(`/api/catalog?${params}`);
       if (!res.ok) throw new Error("Failed to fetch catalog");
       const json = await res.json();
-      setData(json);
+      setData(json.data || json);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     }

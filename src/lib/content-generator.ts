@@ -1,12 +1,13 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { AosomMergedProduct } from "@/types/aosom";
 import { stripColorFromTitle } from "./variant-merger";
+import { env, CLAUDE } from "./config";
 
 let anthropicClient: Anthropic | null = null;
 
 function getClient(): Anthropic {
   if (!anthropicClient) {
-    anthropicClient = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    anthropicClient = new Anthropic({ apiKey: env.anthropicApiKey });
   }
   return anthropicClient;
 }
@@ -97,8 +98,8 @@ Return JSON with this exact structure:
 }`;
 
   const message = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 4000,
+    model: CLAUDE.MODEL,
+    max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user", content: prompt }],
   });

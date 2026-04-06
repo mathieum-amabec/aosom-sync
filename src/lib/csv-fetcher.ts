@@ -1,20 +1,18 @@
 import { parse } from "csv-parse/sync";
 import type { AosomRawRow, AosomProduct } from "@/types/aosom";
-
-const AOSOM_CSV_URL =
-  "https://feed-us.aosomcdn.com/390/110_feed/0/0/5e/c4857d.csv";
+import { AOSOM } from "./config";
 
 /**
  * Fetch and parse the Aosom CSV feed into normalized AosomProduct[].
  * Retries up to 2 times with 5s backoff on failure.
  */
 export async function fetchAosomCatalog(): Promise<AosomProduct[]> {
-  const maxRetries = 2;
+  const maxRetries = AOSOM.FETCH_MAX_RETRIES;
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      const response = await fetch(AOSOM_CSV_URL, {
+      const response = await fetch(AOSOM.CSV_URL, {
         next: { revalidate: 0 },
       });
 
@@ -29,7 +27,7 @@ export async function fetchAosomCatalog(): Promise<AosomProduct[]> {
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       if (attempt < maxRetries) {
-        await new Promise((r) => setTimeout(r, 5000 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, AOSOM.FETCH_BACKOFF_MS * (attempt + 1)));
       }
     }
   }

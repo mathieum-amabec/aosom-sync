@@ -1,43 +1,55 @@
 import { cookies } from "next/headers";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { env, AUTH } from "./config";
 
-const SESSION_COOKIE = "aosom_session";
-const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+const SESSION_COOKIE = AUTH.COOKIE_NAME;
+const SESSION_MAX_AGE = AUTH.SESSION_MAX_AGE;
 
-function getPassword(): string {
-  return process.env.AUTH_PASSWORD || "admin123";
+async function hmacSign(ts: string): Promise<string> {
+  const enc = new TextEncoder();
+  const key = await globalThis.crypto.subtle.importKey(
+    "raw", enc.encode(env.authPassword), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const sig = await globalThis.crypto.subtle.sign("HMAC", key, enc.encode(ts));
+  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Create a simple signed token: base64(timestamp:hash) */
-function createToken(): string {
+/** Create a signed token: base64(timestamp:hmac) */
+async function createToken(): Promise<string> {
   const ts = Date.now().toString();
-  const data = `${ts}:${getPassword()}`;
-  // Simple hash — not crypto-grade but sufficient for a 2-user internal tool
-  let hash = 0;
-  for (let i = 0; i < data.length; i++) {
-    hash = ((hash << 5) - hash + data.charCodeAt(i)) | 0;
-  }
-  return Buffer.from(`${ts}:${hash}`).toString("base64");
+  const sig = await hmacSign(ts);
+  return btoa(`${ts}:${sig}`);
 }
 
-function verifyToken(token: string): boolean {
+async function verifyToken(token: string): Promise<boolean> {
   try {
-    const decoded = Buffer.from(token, "base64").toString();
-    const [ts] = decoded.split(":");
+    const decoded = atob(token);
+    const sep = decoded.indexOf(":");
+    if (sep === -1) return false;
+    const ts = decoded.slice(0, sep);
+    const sig = decoded.slice(sep + 1);
     const age = Date.now() - parseInt(ts, 10);
-    return age < SESSION_MAX_AGE * 1000 && age >= 0;
+    if (age >= SESSION_MAX_AGE * 1000 || age < 0) return false;
+    const expected = await hmacSign(ts);
+    if (sig.length !== expected.length) return false;
+    // Constant-time comparison
+    let diff = 0;
+    for (let i = 0; i < sig.length; i++) {
+      diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
+    }
+    return diff === 0;
   } catch {
     return false;
   }
 }
 
 export async function login(password: string): Promise<boolean> {
-  if (password !== getPassword()) return false;
-  const token = createToken();
+  if (password !== env.authPassword) return false;
+  const token = await createToken();
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: env.isProduction,
     sameSite: "lax",
     maxAge: SESSION_MAX_AGE,
     path: "/",
@@ -58,7 +70,7 @@ export async function isAuthenticated(): Promise<boolean> {
 }
 
 /** Middleware check for API routes */
-export function isAuthenticatedFromRequest(req: NextRequest): boolean {
+export async function isAuthenticatedFromRequest(req: NextRequest): Promise<boolean> {
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   if (!token) return false;
   return verifyToken(token);

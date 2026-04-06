@@ -1,27 +1,19 @@
 import type { ShopifyExistingProduct, ShopifyExistingVariant } from "@/types/sync";
 import type { AosomMergedProduct } from "@/types/aosom";
 import type { GeneratedContent } from "./content-generator";
-
-const SHOPIFY_STORE = "27u5y2-kp.myshopify.com";
-const API_VERSION = "2025-01";
-
-function getToken(): string {
-  const token = process.env.SHOPIFY_ACCESS_TOKEN;
-  if (!token) throw new Error("SHOPIFY_ACCESS_TOKEN not set");
-  return token;
-}
+import { env, SHOPIFY } from "./config";
 
 async function shopifyFetch(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  const url = `https://${SHOPIFY_STORE}/admin/api/${API_VERSION}${endpoint}`;
+  const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}${endpoint}`;
 
   const response = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "X-Shopify-Access-Token": getToken(),
+      "X-Shopify-Access-Token": env.shopifyAccessToken,
       ...options.headers,
     },
   });
@@ -39,7 +31,7 @@ async function shopifyFetch(
  * Fetch all products from Shopify (paginated).
  */
 export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[]> {
-  if (!process.env.SHOPIFY_ACCESS_TOKEN) return [];
+  if (!env.hasShopifyToken) return [];
 
   const products: ShopifyExistingProduct[] = [];
   let pageInfo: string | null = null;
@@ -216,7 +208,7 @@ export async function updateShopifyVariantPrice(
   }
 }
 
-export async function archiveShopifyProduct(shopifyId: string): Promise<void> {
+export async function draftShopifyProduct(shopifyId: string): Promise<void> {
   await updateShopifyProduct(shopifyId, { status: "draft" });
 }
 

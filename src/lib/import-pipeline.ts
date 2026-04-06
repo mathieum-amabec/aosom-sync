@@ -122,6 +122,17 @@ export async function importToShopify(
   try {
     const shopifyId = await createShopifyProduct(product, content);
     await updateImportJob(jobId, { status: "done", shopify_id: shopifyId });
+
+    // Trigger social draft for new product (async, non-blocking)
+    const primarySku = product.variants[0]?.sku;
+    if (primarySku) {
+      import("@/jobs/job4-social").then(({ triggerNewProduct }) => {
+        triggerNewProduct(primarySku).catch((err) =>
+          console.error(`[IMPORT] Social draft failed for ${primarySku}: ${err}`)
+        );
+      }).catch(() => {});
+    }
+
     return { ...rowToJob(row), status: "done", shopifyId, content };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

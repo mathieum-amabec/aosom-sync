@@ -21,8 +21,9 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
     fetch("/api/insights")
       .then((r) => r.json())
       .then((d) => {
-        setPriceChanges(d.changes || []);
-        setTopSellers(d.sellers || []);
+        const data = d.data || d;
+        setPriceChanges(data.changes || []);
+        setTopSellers(data.sellers || []);
       })
       .catch(() => {});
   }, []);
@@ -37,11 +38,12 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
         body: JSON.stringify({ dryRun }),
       });
       const data = await res.json();
-      if (data.ok) {
+      if (data.success && data.data) {
+        const d = data.data;
         setSyncResult(
           dryRun
-            ? `Dry run complete: ${data.summary.creates} new, ${data.summary.updates} updates, ${data.summary.archives} to archive`
-            : `Sync complete: ${data.summary.creates} created, ${data.summary.updates} updated, ${data.summary.archives} archived`
+            ? `Dry run complete: ${d.newProducts} new, ${d.priceUpdates} price updates, ${d.stockChanges} stock changes, ${d.archived} to archive`
+            : `Sync complete: ${d.priceUpdates} prices updated, ${d.stockChanges} stock changes, ${d.newProducts} new detected, ${d.archived} archived, ${d.errors} errors`
         );
       } else {
         setSyncResult(`Error: ${data.error}`);
