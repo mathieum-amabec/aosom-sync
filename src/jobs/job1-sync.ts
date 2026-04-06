@@ -104,6 +104,7 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
     }[] = [];
 
     const priceDropThreshold = parseFloat(getSetting("social_price_drop_threshold") || "10");
+    const socialDraftSkus: { sku: string; oldPrice: number; newPrice: number }[] = [];
 
     for (const csvProduct of aosomProducts) {
       const existing = getProduct(csvProduct.sku);
@@ -132,8 +133,9 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
 
           if (changeType === "price_drop") {
             const pctDrop = ((existing.price - csvProduct.price) / existing.price) * 100;
-            if (pctDrop >= priceDropThreshold) {
-              log(`Prix réduit: ${csvProduct.sku} ${existing.price}$ → ${csvProduct.price}$ (-${pctDrop.toFixed(1)}%)`);
+            if (pctDrop >= priceDropThreshold && existing.shopify_product_id) {
+              log(`Prix réduit: ${csvProduct.sku} ${existing.price}$ → ${csvProduct.price}$ (-${pctDrop.toFixed(1)}%) — social draft queued`);
+              socialDraftSkus.push({ sku: csvProduct.sku, oldPrice: existing.price, newPrice: csvProduct.price });
             }
           }
           priceUpdates++;
@@ -277,6 +279,20 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
     });
 
     log(`Sync terminé: ${priceUpdates} prix, ${stockChanges} stocks, ${newProducts} nouveaux, ${archived} archivés, ${errors} erreurs`);
+
+    // Trigger social drafts for significant price drops (async, non-blocking)
+    if (socialDraftSkus.length > 0) {
+      log(`Génération de ${socialDraftSkus.length} draft(s) social pour baisses de prix...`);
+      import("@/jobs/job4-social").then(async ({ triggerPriceDrop }) => {
+        for (const { sku, oldPrice, newPrice } of socialDraftSkus) {
+          try {
+            await triggerPriceDrop(sku, oldPrice, newPrice);
+          } catch (err) {
+            log(`Social draft failed for ${sku}: ${err}`);
+          }
+        }
+      }).catch((err) => log(`Social module load failed: ${err}`));
+    }
 
     return {
       syncRunId: syncRun.id,

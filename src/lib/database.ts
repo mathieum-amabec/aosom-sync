@@ -425,3 +425,132 @@ export function updateImportJob(jobId: string, fields: Record<string, unknown>):
   args.push(jobId);
   d.prepare(`UPDATE import_jobs SET ${sets.join(", ")} WHERE id = ?`).run(...args);
 }
+
+// ─── Facebook Drafts ────────────────────────���───────────────────────
+
+export interface FacebookDraft {
+  id: number;
+  sku: string;
+  triggerType: string;
+  language: string;
+  postText: string;
+  imagePath: string | null;
+  imageUrl: string | null;
+  oldPrice: number | null;
+  newPrice: number | null;
+  status: string;
+  scheduledAt: number | null;
+  publishedAt: number | null;
+  facebookPostId: string | null;
+  createdAt: number;
+  // joined from products
+  productName?: string;
+  productImage?: string;
+}
+
+function mapDraft(row: Record<string, unknown>): FacebookDraft {
+  return {
+    id: row.id as number,
+    sku: row.sku as string,
+    triggerType: row.trigger_type as string,
+    language: row.language as string,
+    postText: row.post_text as string,
+    imagePath: (row.image_path as string) || null,
+    imageUrl: (row.image_url as string) || null,
+    oldPrice: row.old_price != null ? Number(row.old_price) : null,
+    newPrice: row.new_price != null ? Number(row.new_price) : null,
+    status: row.status as string,
+    scheduledAt: row.scheduled_at != null ? Number(row.scheduled_at) : null,
+    publishedAt: row.published_at != null ? Number(row.published_at) : null,
+    facebookPostId: (row.facebook_post_id as string) || null,
+    createdAt: Number(row.created_at),
+    productName: (row.name as string) || undefined,
+    productImage: (row.image1 as string) || undefined,
+  };
+}
+
+export function createFacebookDraft(draft: {
+  sku: string;
+  triggerType: string;
+  language: string;
+  postText: string;
+  imagePath?: string | null;
+  oldPrice?: number | null;
+  newPrice?: number | null;
+}): number {
+  const d = getDb();
+  const result = d.prepare(
+    `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, image_path, old_price, new_price) VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(draft.sku, draft.triggerType, draft.language, draft.postText, draft.imagePath || null, draft.oldPrice ?? null, draft.newPrice ?? null);
+  return Number(result.lastInsertRowid);
+}
+
+export function getFacebookDrafts(filters?: { status?: string; limit?: number }): FacebookDraft[] {
+  const d = getDb();
+  let sql = `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku`;
+  const args: unknown[] = [];
+  if (filters?.status) {
+    sql += ` WHERE fd.status = ?`;
+    args.push(filters.status);
+  }
+  sql += ` ORDER BY fd.created_at DESC`;
+  if (filters?.limit) {
+    sql += ` LIMIT ?`;
+    args.push(filters.limit);
+  }
+  return (d.prepare(sql).all(...args) as Record<string, unknown>[]).map(mapDraft);
+}
+
+export function getFacebookDraft(id: number): FacebookDraft | null {
+  const d = getDb();
+  const row = d.prepare(
+    `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku WHERE fd.id = ?`
+  ).get(id) as Record<string, unknown> | undefined;
+  return row ? mapDraft(row) : null;
+}
+
+export function updateFacebookDraft(id: number, fields: Record<string, unknown>): void {
+  const d = getDb();
+  const allowed = new Set(["post_text", "image_path", "image_url", "status", "scheduled_at", "published_at", "facebook_post_id"]);
+  const sets: string[] = [];
+  const args: unknown[] = [];
+  for (const [key, value] of Object.entries(fields)) {
+    if (!allowed.has(key)) throw new Error(`Invalid column: ${key}`);
+    sets.push(`${key} = ?`);
+    args.push(value);
+  }
+  if (sets.length === 0) return;
+  args.push(id);
+  d.prepare(`UPDATE facebook_drafts SET ${sets.join(", ")} WHERE id = ?`).run(...args);
+}
+
+export function deleteFacebookDraft(id: number): void {
+  const d = getDb();
+  d.prepare(`DELETE FROM facebook_drafts WHERE id = ?`).run(id);
+}
+
+export function getLastPostDate(sku: string): number | null {
+  const d = getDb();
+  const row = d.prepare(
+    `SELECT MAX(published_at) as last FROM facebook_drafts WHERE sku = ? AND status = 'published'`
+  ).get(sku) as { last: number | null } | undefined;
+  return row?.last ?? null;
+}
+
+export function getEligibleHighlightProduct(minDaysBetween: number): Record<string, unknown> | null {
+  const d = getDb();
+  const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
+  return (d.prepare(`
+    SELECT p.* FROM products p
+    WHERE p.shopify_product_id IS NOT NULL
+      AND p.qty > 0
+      AND (p.last_posted_at IS NULL OR p.last_posted_at < ?)
+    ORDER BY RANDOM()
+    LIMIT 1
+  `).get(cutoff) as Record<string, unknown>) || null;
+}
+
+export function markProductPosted(sku: string): void {
+  const d = getDb();
+  d.prepare(`UPDATE products SET last_posted_at = strftime('%s','now') WHERE sku = ?`).run(sku);
+}
