@@ -144,6 +144,15 @@ export function getProduct(sku: string): ProductRow | null {
   return (d.prepare(`SELECT * FROM products WHERE sku = ?`).get(sku) as ProductRow) || null;
 }
 
+/** Load all products into a Map keyed by SKU. Used by job1-sync to avoid N+1 queries. */
+export function getAllProductsMap(): Map<string, ProductRow> {
+  const d = getDb();
+  const rows = d.prepare(`SELECT * FROM products`).all() as ProductRow[];
+  const map = new Map<string, ProductRow>();
+  for (const row of rows) map.set(row.sku, row);
+  return map;
+}
+
 export function getProducts(filters: {
   productType?: string;
   search?: string;

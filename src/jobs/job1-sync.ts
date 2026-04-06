@@ -26,6 +26,7 @@ import {
   refreshProducts,
   recordPriceChanges,
   getProduct,
+  getAllProductsMap,
   getSetting,
   getLatestSyncRun,
 } from "@/lib/database";
@@ -105,10 +106,15 @@ function detectChanges(aosomProducts: AosomProduct[]): ChangeDetectionResult {
   let stockChanges = 0;
   let newProducts = 0;
 
+  // Batch load all products to avoid N+1 queries (10k+ products)
+  const productsMap = getAllProductsMap();
+  const skusWithPriceChange = new Set<string>();
+
   for (const csv of aosomProducts) {
-    const existing = getProduct(csv.sku);
+    const existing = productsMap.get(csv.sku) || null;
     if (!existing) {
       priceChangeEntries.push({ sku: csv.sku, oldPrice: null, newPrice: csv.price, oldQty: null, newQty: csv.qty, changeType: "new_product" });
+      skusWithPriceChange.add(csv.sku);
       newProducts++;
       continue;
     }
@@ -117,6 +123,7 @@ function detectChanges(aosomProducts: AosomProduct[]): ChangeDetectionResult {
     if (Math.abs(existing.price - csv.price) > SYNC.PRICE_TOLERANCE) {
       const changeType: ChangeTypeHistory = csv.price < existing.price ? "price_drop" : "price_increase";
       priceChangeEntries.push({ sku: csv.sku, oldPrice: existing.price, newPrice: csv.price, oldQty: existing.qty, newQty: csv.qty, changeType });
+      skusWithPriceChange.add(csv.sku);
 
       if (changeType === "price_drop") {
         const pctDrop = ((existing.price - csv.price) / existing.price) * 100;
@@ -134,7 +141,7 @@ function detectChanges(aosomProducts: AosomProduct[]): ChangeDetectionResult {
       if (isRestock) {
         priceChangeEntries.push({ sku: csv.sku, oldPrice: existing.price, newPrice: csv.price, oldQty: 0, newQty: csv.qty, changeType: "restock" });
         log(`Restock: ${csv.sku} 0 → ${csv.qty} unités`);
-      } else if (!priceChangeEntries.find((e) => e.sku === csv.sku)) {
+      } else if (!skusWithPriceChange.has(csv.sku)) {
         priceChangeEntries.push({ sku: csv.sku, oldPrice: existing.price, newPrice: csv.price, oldQty: existing.qty, newQty: csv.qty, changeType: "stock_change" });
       }
       stockChanges++;

@@ -1,11 +1,18 @@
-import sharp from "sharp";
 import path from "path";
 import fs from "fs";
 import { SOCIAL } from "./config";
 
-const OUTPUT_DIR = path.join(process.cwd(), "public", "social-images");
 const WIDTH = SOCIAL.IMAGE_WIDTH;
 const HEIGHT = SOCIAL.IMAGE_HEIGHT;
+
+function getOutputDir(): string {
+  // Vercel: /tmp is writable. Local dev: public/social-images
+  const dir = process.env.VERCEL
+    ? path.join("/tmp", "social-images")
+    : path.join(process.cwd(), "public", "social-images");
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 export type TemplateType = "new_product" | "price_drop" | "stock_highlight";
 
@@ -97,23 +104,24 @@ function escapeXml(str: string): string {
 
 /**
  * Compose a social media image: product photo + overlay template.
- * Returns the relative path under /public/.
+ * Returns the relative path. On Vercel, writes to /tmp/. On local dev, writes to public/.
  */
 export async function composeImage(opts: ComposeOptions): Promise<string> {
-  if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  // Dynamic import — avoids loading sharp for routes that don't need it
+  const sharpModule = await import("sharp");
+  const sharpFn = sharpModule.default;
 
+  const outputDir = getOutputDir();
   const timestamp = Date.now();
   const filename = `${opts.sku}-${opts.templateType}-${timestamp}.jpg`;
-  const outPath = path.join(OUTPUT_DIR, filename);
+  const outPath = path.join(outputDir, filename);
 
-  // Download and resize product image to fill canvas
-  let background: sharp.Sharp;
+  let background: import("sharp").Sharp;
   try {
     const imgBuffer = await downloadImage(opts.imageUrl);
-    background = sharp(imgBuffer).resize(WIDTH, HEIGHT, { fit: "cover" });
+    background = sharpFn(imgBuffer).resize(WIDTH, HEIGHT, { fit: "cover" });
   } catch {
-    // Fallback: solid dark background
-    background = sharp({
+    background = sharpFn({
       create: { width: WIDTH, height: HEIGHT, channels: 3, background: { r: 30, g: 30, b: 40 } },
     });
   }
@@ -125,5 +133,14 @@ export async function composeImage(opts: ComposeOptions): Promise<string> {
     .jpeg({ quality: SOCIAL.IMAGE_QUALITY })
     .toFile(outPath);
 
-  return `/social-images/${filename}`;
+  // On Vercel, return the /tmp path. On local, return the public-relative path.
+  return process.env.VERCEL ? outPath : `/social-images/${filename}`;
+}
+
+/**
+ * Resolve an image path for reading (handles both /tmp and public/ paths).
+ */
+export function resolveImagePath(imagePath: string): string {
+  if (imagePath.startsWith("/tmp/")) return imagePath;
+  return path.resolve(process.cwd(), "public", imagePath);
 }

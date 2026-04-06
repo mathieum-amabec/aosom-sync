@@ -1,6 +1,6 @@
 import fs from "fs";
-import path from "path";
 import { env, FACEBOOK } from "./config";
+import { resolveImagePath } from "./image-composer";
 
 /**
  * Facebook Graph API wrapper for page post publishing.
@@ -36,9 +36,7 @@ export async function publishWithImage(opts: {
   const pageId = env.facebookPageId;
   const token = env.facebookPageAccessToken;
 
-  const absPath = path.resolve(process.cwd(), "public", opts.imagePath);
-  const allowedDir = path.resolve(process.cwd(), "public", "social-images");
-  if (!absPath.startsWith(allowedDir)) throw new Error("Image path outside allowed directory");
+  const absPath = resolveImagePath(opts.imagePath);
   if (!fs.existsSync(absPath)) throw new Error(`Image not found: ${absPath}`);
 
   const formData = new FormData();
