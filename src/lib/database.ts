@@ -344,7 +344,43 @@ export function getAllSettings(): Record<string, string> {
   return settings;
 }
 
+// ─── Trending Products ──────────────────────────────────────────────
+
+export interface TrendingProduct {
+  sku: string;
+  name: string;
+  price: number;
+  image1: string;
+  shopify_product_id: string | null;
+  units_moved: number;
+}
+
+export function getTrendingProducts(limit = 10): TrendingProduct[] {
+  const d = getDb();
+  return d.prepare(`
+    SELECT ph.sku, p.name, p.price, p.image1, p.shopify_product_id,
+           SUM(ph.old_qty - ph.new_qty) as units_moved
+    FROM price_history ph
+    JOIN products p ON ph.sku = p.sku
+    WHERE ph.change_type = 'stock_change'
+      AND ph.detected_at > cast(strftime('%s','now','-14 days') as integer)
+      AND ph.old_qty > ph.new_qty
+    GROUP BY ph.sku
+    ORDER BY units_moved DESC
+    LIMIT ?
+  `).all(limit) as TrendingProduct[];
+}
+
 // ─── Sync Runs ───────────────────────────────────────────────────────
+
+export function clearStaleLockIfNeeded(): void {
+  const d = getDb();
+  d.prepare(`
+    UPDATE sync_runs SET status = 'failed', completed_at = datetime('now'),
+      error_messages = '["Stale lock cleared (timeout > 30 min)"]'
+    WHERE status = 'running' AND datetime(started_at) < datetime('now', '-30 minutes')
+  `).run();
+}
 
 export function createSyncRun(): SyncRun {
   const d = getDb();

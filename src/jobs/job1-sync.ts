@@ -29,6 +29,7 @@ import {
   getAllProductsMap,
   getSetting,
   getLatestSyncRun,
+  clearStaleLockIfNeeded,
   createNotification,
 } from "@/lib/database";
 import type { ChangeTypeHistory } from "@/lib/database";
@@ -186,7 +187,8 @@ async function applyToShopify(
             const variant = shopifyProduct?.variants.find((v) => v.sku === change.sku);
             if (variant && change.newValue !== null) {
               log(`Prix mis à jour: ${change.sku} ${change.oldValue}$ → ${change.newValue}$`);
-              return updateShopifyVariantPrice(variant.variantId, Number(change.newValue));
+              const oldPrice = change.oldValue !== null ? Number(change.oldValue) : undefined;
+              return updateShopifyVariantPrice(variant.variantId, Number(change.newValue), oldPrice);
             }
           })
         );
@@ -237,6 +239,9 @@ function triggerSocialDrafts(skus: { sku: string; oldPrice: number; newPrice: nu
 // ─── Main Entry Point ───────────────────────────────────────────────
 
 export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncResult> {
+  // Clear stale locks from crashed prior syncs (>30 minutes)
+  clearStaleLockIfNeeded();
+
   // Guard against concurrent sync runs
   const latestRun = getLatestSyncRun();
   if (latestRun && latestRun.status === "running") {

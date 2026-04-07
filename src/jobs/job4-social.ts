@@ -6,7 +6,7 @@
  * - price_drop: called by Job 1 when price drops >= threshold
  * - stock_highlight: daily cron picks a random eligible product
  */
-import Anthropic from "@anthropic-ai/sdk";
+import { getAnthropicClient } from "@/lib/content-generator";
 import { composeImage, type TemplateType } from "@/lib/image-composer";
 import { env, CLAUDE, SYNC } from "@/lib/config";
 import {
@@ -24,12 +24,8 @@ function log(msg: string): void {
   console.log(`[JOB4][${ts}] ${msg}`);
 }
 
-let anthropicClient: Anthropic | null = null;
-function getClient(): Anthropic {
-  if (!anthropicClient) {
-    anthropicClient = new Anthropic({ apiKey: env.anthropicApiKey });
-  }
-  return anthropicClient;
+function getClient() {
+  return getAnthropicClient();
 }
 
 function getImageSettings(settings: Record<string, string>): {

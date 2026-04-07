@@ -1,16 +1,16 @@
 {
   "name": "aosom-sync",
-  "version": "0.1.0",
+  "version": "0.1.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
-    "@shopify/shopify-api": "^13.0.0",
     "better-sqlite3": "^12.8.0",
     "csv-parse": "^6.2.1",
     "isomorphic-dompurify": "^3.7.1",

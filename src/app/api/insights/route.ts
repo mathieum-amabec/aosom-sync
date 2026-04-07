@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRecentPriceChanges } from "@/lib/database";
+import { getRecentPriceChanges, getTrendingProducts } from "@/lib/database";
 import { API } from "@/lib/config";
 
 /**
@@ -30,7 +30,16 @@ export async function GET(request: Request) {
         };
       });
 
-    return NextResponse.json({ success: true, data: { changes, sellers: [] } });
+    const trending = getTrendingProducts(10).map((t) => ({
+      sku: t.sku,
+      name: t.name,
+      image: t.image1 || "",
+      price: t.price,
+      unitsMoved: t.units_moved,
+      inStore: !!t.shopify_product_id,
+    }));
+
+    return NextResponse.json({ success: true, data: { changes, trending } });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[API] /api/insights failed: ${message}`);

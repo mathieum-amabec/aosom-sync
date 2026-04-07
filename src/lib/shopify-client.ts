@@ -5,8 +5,10 @@ import { env, SHOPIFY } from "./config";
 
 async function shopifyFetch(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  retryCount = 0
 ): Promise<Response> {
+  const MAX_RETRIES = 3;
   const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}${endpoint}`;
 
   const response = await fetch(url, {
@@ -19,9 +21,12 @@ async function shopifyFetch(
   });
 
   if (response.status === 429) {
+    if (retryCount >= MAX_RETRIES) {
+      throw new Error(`Shopify rate limit exceeded after ${MAX_RETRIES} retries on ${endpoint}`);
+    }
     const retryAfter = parseFloat(response.headers.get("Retry-After") || "2");
     await new Promise((r) => setTimeout(r, retryAfter * 1000));
-    return shopifyFetch(endpoint, options);
+    return shopifyFetch(endpoint, options, retryCount + 1);
   }
 
   return response;
@@ -196,11 +201,18 @@ export async function updateShopifyProduct(
 
 export async function updateShopifyVariantPrice(
   variantId: string,
-  price: number
+  price: number,
+  oldPrice?: number
 ): Promise<void> {
+  const variant: Record<string, unknown> = { id: variantId, price: String(price) };
+
+  if (oldPrice !== undefined) {
+    variant.compare_at_price = price < oldPrice ? String(oldPrice) : null;
+  }
+
   const response = await shopifyFetch(`/variants/${variantId}.json`, {
     method: "PUT",
-    body: JSON.stringify({ variant: { id: variantId, price: String(price) } }),
+    body: JSON.stringify({ variant }),
   });
   if (!response.ok) {
     const text = await response.text();
