@@ -38,6 +38,10 @@ yarn-error.log*
 /data/*.db
 /data/*.db-wal
 /data/*.db-shm
+/data/*.db.backup
+
+# Generated social images
+/public/social-images/
 
 # vercel
 .vercel
