@@ -12,6 +12,9 @@ export async function POST(request: Request) {
     if (!Array.isArray(skus) || skus.length === 0) {
       return NextResponse.json({ success: false, error: "skus array required" }, { status: 400 });
     }
+    if (skus.length > 50) {
+      return NextResponse.json({ success: false, error: "Maximum 50 SKUs per batch" }, { status: 400 });
+    }
     const jobs = await queueForImport(skus);
     return NextResponse.json({ success: true, data: jobs });
   } catch (err) {
