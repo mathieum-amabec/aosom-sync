@@ -43,7 +43,6 @@ export async function publishWithImage(opts: {
   const imageBuffer = fs.readFileSync(absPath);
   formData.append("source", new Blob([imageBuffer], { type: "image/jpeg" }), "image.jpg");
   formData.append("message", opts.caption);
-  formData.append("access_token", token);
 
   if (opts.scheduledAt) {
     formData.append("published", "false");
@@ -52,6 +51,7 @@ export async function publishWithImage(opts: {
 
   const res = await fetch(`${FACEBOOK.GRAPH_API_URL}/${pageId}/photos`, {
     method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
     body: formData,
   });
 
@@ -77,7 +77,6 @@ export async function publishText(opts: {
 
   const body: Record<string, string> = {
     message: opts.message,
-    access_token: token,
   };
   if (opts.link) body.link = opts.link;
   if (opts.scheduledAt) {
@@ -87,7 +86,7 @@ export async function publishText(opts: {
 
   const res = await fetch(`${FACEBOOK.GRAPH_API_URL}/${pageId}/feed`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
 
