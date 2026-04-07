@@ -14,6 +14,9 @@ function getDb(): Client {
     if (tursoUrl && tursoToken) {
       // Production: remote Turso
       client = createClient({ url: tursoUrl, authToken: tursoToken });
+    } else if (tursoUrl || tursoToken) {
+      // Partial config — one set without the other. Fail loud.
+      throw new Error("Both TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set (or neither for local SQLite)");
     } else {
       // Dev/local: SQLite file
       const dbDir = path.join(process.cwd(), "data");
@@ -34,10 +37,16 @@ function rowToObj(row: Row): Record<string, unknown> {
 
 // ─── Schema Initialization ──────────────────────────────────────────
 
-let schemaInitialized = false;
+let schemaPromise: Promise<void> | null = null;
 
 export async function initSchema(): Promise<void> {
-  if (schemaInitialized) return;
+  if (!schemaPromise) {
+    schemaPromise = _initSchemaImpl();
+  }
+  return schemaPromise;
+}
+
+async function _initSchemaImpl(): Promise<void> {
   const db = getDb();
 
   // Load and split schema.sql into individual statements
@@ -88,7 +97,6 @@ export async function initSchema(): Promise<void> {
     await db.execute("PRAGMA foreign_keys = ON");
   }
 
-  schemaInitialized = true;
 }
 
 /** Ensure schema is initialized before any query */
