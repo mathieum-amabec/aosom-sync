@@ -12,9 +12,13 @@ export async function fetchAosomCatalog(): Promise<AosomProduct[]> {
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60_000);
       const response = await fetch(AOSOM.CSV_URL, {
         next: { revalidate: 0 },
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
 
       if (!response.ok) {
         throw new Error(

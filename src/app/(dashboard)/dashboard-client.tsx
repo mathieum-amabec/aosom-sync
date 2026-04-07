@@ -23,7 +23,7 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
       .then((d) => {
         const data = d.data || d;
         setPriceChanges(data.changes || []);
-        setTopSellers(data.sellers || []);
+        setTopSellers(data.trending || data.sellers || []);
       })
       .catch(() => {});
   }, []);
@@ -172,7 +172,7 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
 
         {/* Top Sellers (by stock velocity) */}
         <div>
-          <h3 className="text-lg font-semibold text-white mb-3">Fastest Selling</h3>
+          <h3 className="text-lg font-semibold text-white mb-3">Trending Products</h3>
           {topSellers.length === 0 ? (
             <div className="p-6 bg-gray-900 border border-gray-800 rounded-xl text-center">
               <p className="text-gray-500 text-sm">Not enough data yet</p>

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticatedFromRequest } from "@/lib/auth";
 
-const PUBLIC_PATHS = ["/login", "/api/auth", "/api/cron"];
+const PUBLIC_PATHS = ["/login", "/api/auth", "/api/cron", "/api/health"];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

@@ -5,7 +5,7 @@ import { env, CLAUDE } from "./config";
 
 let anthropicClient: Anthropic | null = null;
 
-function getClient(): Anthropic {
+export function getAnthropicClient(): Anthropic {
   if (!anthropicClient) {
     anthropicClient = new Anthropic({ apiKey: env.anthropicApiKey });
   }
@@ -64,7 +64,7 @@ function sanitizeHtml(html: string): string {
 export async function generateProductContent(
   product: AosomMergedProduct
 ): Promise<GeneratedContent> {
-  const client = getClient();
+  const client = getAnthropicClient();
 
   const cleanName = stripColorFromTitle(product.name);
   const cleanDesc = sanitizeHtml(product.description.replace(/\[BRAND NAME\]/gi, product.brand));
@@ -104,7 +104,17 @@ Return JSON with this exact structure:
     messages: [{ role: "user", content: prompt }],
   });
 
-  const text = message.content[0].type === "text" ? message.content[0].text : "";
+  if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
+    throw new Error("Claude returned empty or non-text content (possible refusal)");
+  }
+
+  const text = message.content[0].text;
   const jsonStr = text.replace(/^```json?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
-  return JSON.parse(jsonStr) as GeneratedContent;
+
+  try {
+    return JSON.parse(jsonStr) as GeneratedContent;
+  } catch {
+    console.error("[content-generator] Claude returned invalid JSON:", text.slice(0, 500));
+    throw new Error("Claude returned invalid JSON — check logs for raw response");
+  }
 }
