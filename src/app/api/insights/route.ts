@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || String(API.DEFAULT_INSIGHTS_LIMIT), 10) || API.DEFAULT_INSIGHTS_LIMIT), API.MAX_INSIGHTS_LIMIT);
 
-    const raw = getRecentPriceChanges(limit);
+    const raw = await getRecentPriceChanges(limit);
     const changes = raw
       .filter((r) => r.change_type === "price_drop" || r.change_type === "price_increase")
       .map((r) => {
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
         };
       });
 
-    const trending = getTrendingProducts(10).map((t) => ({
+    const trending = (await getTrendingProducts(10)).map((t) => ({
       sku: t.sku,
       name: t.name,
       image: t.image1 || "",

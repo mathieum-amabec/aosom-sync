@@ -11,8 +11,8 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const unreadOnly = url.searchParams.get("unread") === "true";
     const limit = parseInt(url.searchParams.get("limit") || "50", 10);
-    const notifications = getNotifications({ unreadOnly, limit });
-    const unreadCount = getUnreadNotificationCount();
+    const notifications = await getNotifications({ unreadOnly, limit });
+    const unreadCount = await getUnreadNotificationCount();
     return NextResponse.json({ success: true, data: { notifications, unreadCount } });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -26,12 +26,12 @@ export async function POST(request: Request) {
     const { action, id } = body;
 
     if (action === "read" && typeof id === "number") {
-      markNotificationRead(id);
+      await markNotificationRead(id);
       return NextResponse.json({ success: true });
     }
 
     if (action === "read-all") {
-      markAllNotificationsRead();
+      await markAllNotificationsRead();
       return NextResponse.json({ success: true });
     }
 

@@ -14,7 +14,7 @@ export async function GET(request: Request) {
     const page = Math.max(1, parseInt(params.get("page") || "1", 10) || 1);
     const limit = Math.min(Math.max(1, parseInt(params.get("limit") || String(API.DEFAULT_PAGE_SIZE), 10) || API.DEFAULT_PAGE_SIZE), API.MAX_PAGE_SIZE);
 
-    const { products, total, productTypes } = getProducts({
+    const { products, total, productTypes } = await getProducts({
       productType: params.get("productType") || undefined,
       search: params.get("search") || undefined,
       minPrice: params.get("minPrice") ? parseFloat(params.get("minPrice")!) : undefined,

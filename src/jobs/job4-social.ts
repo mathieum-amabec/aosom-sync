@@ -72,8 +72,8 @@ interface GenerateDraftResult {
  */
 export async function triggerNewProduct(sku: string): Promise<GenerateDraftResult> {
   log(`new_product trigger for ${sku}`);
-  const settings = getAllSettings();
-  const product = getProduct(sku);
+  const settings = await getAllSettings();
+  const product = await getProduct(sku);
   if (!product) throw new Error(`Product ${sku} not found`);
   const productName = (product.name as string) || sku;
 
@@ -110,7 +110,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
     }
   }
 
-  const draftId = createFacebookDraft({
+  const draftId = await createFacebookDraft({
     sku,
     triggerType: "new_product",
     language: lang,
@@ -118,8 +118,8 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
     imagePath,
   });
 
-  markProductPosted(sku);
-  createNotification("info", "Nouveau draft social", `Nouveau produit: ${productName.slice(0, 60)}`);
+  await markProductPosted(sku);
+  await createNotification("info", "Nouveau draft social", `Nouveau produit: ${productName.slice(0, 60)}`);
   log(`Draft #${draftId} created for new product ${sku}`);
   return { draftId, language: lang, postText, imagePath };
 }
@@ -133,8 +133,8 @@ export async function triggerPriceDrop(
   newPrice: number
 ): Promise<GenerateDraftResult> {
   log(`price_drop trigger for ${sku}: ${oldPrice}$ → ${newPrice}$`);
-  const settings = getAllSettings();
-  const product = getProduct(sku);
+  const settings = await getAllSettings();
+  const product = await getProduct(sku);
   if (!product) throw new Error(`Product ${sku} not found`);
   const productName = (product.name as string) || sku;
 
@@ -174,7 +174,7 @@ export async function triggerPriceDrop(
     }
   }
 
-  const draftId = createFacebookDraft({
+  const draftId = await createFacebookDraft({
     sku,
     triggerType: "price_drop",
     language: lang,
@@ -184,7 +184,7 @@ export async function triggerPriceDrop(
     newPrice,
   });
 
-  createNotification("info", "Draft prix réduit", `${productName.slice(0, 40)}: ${oldPrice}$ → ${newPrice}$`);
+  await createNotification("info", "Draft prix réduit", `${productName.slice(0, 40)}: ${oldPrice}$ → ${newPrice}$`);
   log(`Draft #${draftId} created for price drop ${sku}`);
   return { draftId, language: lang, postText, imagePath };
 }
@@ -194,9 +194,9 @@ export async function triggerPriceDrop(
  */
 export async function triggerStockHighlight(): Promise<GenerateDraftResult | null> {
   log("stock_highlight trigger");
-  const settings = getAllSettings();
+  const settings = await getAllSettings();
   const minDays = parseInt(settings.social_min_days_between_reposts || SYNC.DEFAULT_MIN_DAYS_BETWEEN_REPOSTS, 10);
-  const product = getEligibleHighlightProduct(minDays);
+  const product = await getEligibleHighlightProduct(minDays);
 
   if (!product) {
     log("No eligible product for stock highlight");
@@ -240,7 +240,7 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
     }
   }
 
-  const draftId = createFacebookDraft({
+  const draftId = await createFacebookDraft({
     sku,
     triggerType: "stock_highlight",
     language: lang,
@@ -248,7 +248,7 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
     imagePath,
   });
 
-  markProductPosted(sku);
+  await markProductPosted(sku);
   log(`Draft #${draftId} created for stock highlight ${sku}`);
   return { draftId, language: lang, postText, imagePath };
 }

@@ -4,7 +4,7 @@ import { ALLOWED_SETTINGS_KEYS } from "@/lib/config";
 
 export async function GET() {
   try {
-    const settings = getAllSettings();
+    const settings = await getAllSettings();
     return NextResponse.json({ success: true, data: settings });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -20,10 +20,10 @@ export async function PUT(request: Request) {
     for (const [key, value] of Object.entries(updates)) {
       if (typeof key !== "string" || typeof value !== "string") continue;
       if (!ALLOWED_SETTINGS_KEYS.has(key)) continue;
-      setSetting(key, value);
+      await setSetting(key, value);
     }
 
-    const settings = getAllSettings();
+    const settings = await getAllSettings();
     return NextResponse.json({ success: true, data: settings });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

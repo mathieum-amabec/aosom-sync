@@ -7,12 +7,12 @@ export async function GET(request: Request) {
     const runId = url.searchParams.get("runId");
 
     if (runId) {
-      const logs = getSyncLogs(runId, 1000);
+      const logs = await getSyncLogs(runId, 1000);
       return NextResponse.json({ success: true, data: { logs } });
     }
 
-    const runs = getSyncRuns(50);
-    const recentChanges = getRecentPriceChanges(20);
+    const runs = await getSyncRuns(50);
+    const recentChanges = await getRecentPriceChanges(20);
     return NextResponse.json({ success: true, data: { runs, recentChanges } });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
