@@ -100,16 +100,16 @@ function aosomToProductRow(p: AosomProduct) {
 }
 
 /** Compare CSV products against DB state, detect price/stock/new changes. */
-function detectChanges(aosomProducts: AosomProduct[]): ChangeDetectionResult {
+async function detectChanges(aosomProducts: AosomProduct[]): Promise<ChangeDetectionResult> {
   const priceChangeEntries: PriceChangeEntry[] = [];
   const socialDraftSkus: { sku: string; oldPrice: number; newPrice: number }[] = [];
-  const threshold = parseFloat(getSetting("social_price_drop_threshold") || SYNC.DEFAULT_PRICE_DROP_THRESHOLD);
+  const threshold = parseFloat(await getSetting("social_price_drop_threshold") || SYNC.DEFAULT_PRICE_DROP_THRESHOLD);
   let priceUpdates = 0;
   let stockChanges = 0;
   let newProducts = 0;
 
   // Batch load all products to avoid N+1 queries (10k+ products)
-  const productsMap = getAllProductsMap();
+  const productsMap = await getAllProductsMap();
   const skusWithPriceChange = new Set<string>();
 
   for (const csv of aosomProducts) {
@@ -240,15 +240,15 @@ function triggerSocialDrafts(skus: { sku: string; oldPrice: number; newPrice: nu
 
 export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncResult> {
   // Clear stale locks from crashed prior syncs (>30 minutes)
-  clearStaleLockIfNeeded();
+  await clearStaleLockIfNeeded();
 
   // Guard against concurrent sync runs
-  const latestRun = getLatestSyncRun();
+  const latestRun = await getLatestSyncRun();
   if (latestRun && latestRun.status === "running") {
     throw new Error(`Sync already in progress (run ${latestRun.id}, started ${latestRun.startedAt})`);
   }
 
-  const syncRun = createSyncRun();
+  const syncRun = await createSyncRun();
   const isDryRun = options.dryRun ?? false;
 
   try {
@@ -261,12 +261,12 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
     log(`${aosomProducts.length} produits Aosom, ${shopifyProducts.length} produits Shopify`);
 
     // Step 2: Detect changes
-    const changes = detectChanges(aosomProducts);
+    const changes = await detectChanges(aosomProducts);
 
     // Dry run: report only, no mutations
     if (isDryRun) {
       log("DRY RUN — aucune modification appliquée");
-      completeSyncRun(syncRun.id, {
+      await completeSyncRun(syncRun.id, {
         status: "completed", totalProducts: aosomProducts.length,
         created: 0, updated: changes.priceUpdates, archived: 0, errors: 0,
         errorMessages: ["DRY RUN — no changes applied"],
@@ -276,11 +276,11 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
 
     // Step 3: Persist changes — upsert products FIRST (price_history has FK on products.sku)
     log("Mise à jour de la table products...");
-    refreshProducts(aosomProducts.map(aosomToProductRow));
+    await refreshProducts(aosomProducts.map(aosomToProductRow));
     log(`${aosomProducts.length} produits upsertés`);
 
     if (changes.priceChangeEntries.length > 0) {
-      recordPriceChanges(changes.priceChangeEntries);
+      await recordPriceChanges(changes.priceChangeEntries);
       log(`${changes.priceChangeEntries.length} changements enregistrés dans price_history`);
     }
 
@@ -289,10 +289,10 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
     const shopifyResult = await applyToShopify(aosomProducts, shopifyProducts, syncRun.id);
 
     if (shopifyResult.logEntries.length > 0) {
-      addSyncLogsBatch(shopifyResult.logEntries);
+      await addSyncLogsBatch(shopifyResult.logEntries);
     }
 
-    completeSyncRun(syncRun.id, {
+    await completeSyncRun(syncRun.id, {
       status: shopifyResult.errors > 0 && shopifyResult.updates + shopifyResult.archived === 0 ? "failed" : "completed",
       totalProducts: aosomProducts.length,
       created: 0, updated: shopifyResult.updates, archived: shopifyResult.archived,
@@ -308,7 +308,7 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
     if (changes.newProducts > 0) parts.push(`${changes.newProducts} nouveaux produits`);
     if (shopifyResult.errors > 0) parts.push(`${shopifyResult.errors} erreurs`);
     const notifType = shopifyResult.errors > 0 ? "warning" : "success";
-    createNotification(notifType, "Sync terminée", parts.length > 0 ? parts.join(", ") : "Aucun changement détecté");
+    await createNotification(notifType, "Sync terminée", parts.length > 0 ? parts.join(", ") : "Aucun changement détecté");
 
     // Step 6: Trigger social drafts (non-blocking)
     triggerSocialDrafts(changes.socialDraftSkus);
@@ -322,10 +322,10 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log(`ERREUR FATALE: ${msg}`);
-    completeSyncRun(syncRun.id, {
+    await completeSyncRun(syncRun.id, {
       status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
     });
-    createNotification("error", "Sync échouée", msg.slice(0, 200));
+    await createNotification("error", "Sync échouée", msg.slice(0, 200));
     throw err;
   }
 }

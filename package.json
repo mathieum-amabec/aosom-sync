@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
-    "better-sqlite3": "^12.8.0",
+    "@libsql/client": "^0.17.2",
     "csv-parse": "^6.2.1",
     "isomorphic-dompurify": "^3.7.1",
     "next": "16.2.1",
@@ -21,7 +21,6 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

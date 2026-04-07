@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const status = url.searchParams.get("status") || undefined;
     const limit = parseInt(url.searchParams.get("limit") || "100", 10);
-    const drafts = getFacebookDrafts({ status, limit });
+    const drafts = await getFacebookDrafts({ status, limit });
     return NextResponse.json({ success: true, data: drafts });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -59,24 +59,24 @@ export async function POST(request: Request) {
       }
 
       case "approve": {
-        updateFacebookDraft(body.id, { status: "approved" });
-        return NextResponse.json({ success: true, data: getFacebookDraft(body.id) });
+        await updateFacebookDraft(body.id, { status: "approved" });
+        return NextResponse.json({ success: true, data: await getFacebookDraft(body.id) });
       }
 
       case "reject": {
-        updateFacebookDraft(body.id, { status: "rejected" });
-        return NextResponse.json({ success: true, data: getFacebookDraft(body.id) });
+        await updateFacebookDraft(body.id, { status: "rejected" });
+        return NextResponse.json({ success: true, data: await getFacebookDraft(body.id) });
       }
 
       case "schedule": {
         const scheduledAt = body.scheduledAt; // Unix timestamp
         if (!scheduledAt) return NextResponse.json({ success: false, error: "scheduledAt required" }, { status: 400 });
-        updateFacebookDraft(body.id, { status: "scheduled", scheduled_at: scheduledAt });
-        return NextResponse.json({ success: true, data: getFacebookDraft(body.id) });
+        await updateFacebookDraft(body.id, { status: "scheduled", scheduled_at: scheduledAt });
+        return NextResponse.json({ success: true, data: await getFacebookDraft(body.id) });
       }
 
       case "publish": {
-        const draft = getFacebookDraft(body.id);
+        const draft = await getFacebookDraft(body.id);
         if (!draft) return NextResponse.json({ success: false, error: "Draft not found" }, { status: 404 });
 
         let result;
@@ -94,22 +94,22 @@ export async function POST(request: Request) {
         }
 
         const now = Math.floor(Date.now() / 1000);
-        updateFacebookDraft(body.id, {
+        await updateFacebookDraft(body.id, {
           status: "published",
           published_at: now,
           facebook_post_id: result.postId,
         });
-        return NextResponse.json({ success: true, data: getFacebookDraft(body.id) });
+        return NextResponse.json({ success: true, data: await getFacebookDraft(body.id) });
       }
 
       case "update": {
         const { id, postText } = body;
-        if (postText) updateFacebookDraft(id, { post_text: postText });
-        return NextResponse.json({ success: true, data: getFacebookDraft(id) });
+        if (postText) await updateFacebookDraft(id, { post_text: postText });
+        return NextResponse.json({ success: true, data: await getFacebookDraft(id) });
       }
 
       case "delete": {
-        deleteFacebookDraft(body.id);
+        await deleteFacebookDraft(body.id);
         return NextResponse.json({ success: true });
       }
 

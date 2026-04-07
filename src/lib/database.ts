@@ -1,77 +1,100 @@
-import Database from "better-sqlite3";
+import { createClient, type Client, type Row, type InValue } from "@libsql/client";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import type { SyncRun, SyncLogEntry, ChangeType } from "@/types/sync";
 
-const DB_DIR = path.join(process.cwd(), "data");
-const DB_PATH = path.join(DB_DIR, "aosom-sync.db");
+let client: Client | null = null;
 
-let db: Database.Database | null = null;
+function getDb(): Client {
+  if (!client) {
+    const tursoUrl = process.env.TURSO_DATABASE_URL;
+    const tursoToken = process.env.TURSO_AUTH_TOKEN;
 
-function getDb(): Database.Database {
-  if (!db) {
-    if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
-    db = new Database(DB_PATH);
-    db.pragma("journal_mode = WAL");
-    db.pragma("foreign_keys = ON");
-    initSchema(db);
+    if (tursoUrl && tursoToken) {
+      // Production: remote Turso
+      client = createClient({ url: tursoUrl, authToken: tursoToken });
+    } else {
+      // Dev/local: SQLite file
+      const dbDir = path.join(process.cwd(), "data");
+      if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+      client = createClient({ url: `file:${path.join(dbDir, "aosom-sync.db")}` });
+    }
   }
-  return db;
+  return client;
 }
 
-function initSchema(d: Database.Database) {
-  // Load schema from schema.sql
+/** Row → plain object helper. libsql Row objects support property access by column name. */
+function rowToObj(row: Row): Record<string, unknown> {
+  // libsql Row is iterable and supports named property access
+  return Object.fromEntries(
+    Object.entries(row).filter(([key]) => key !== "length" && !/^\d+$/.test(key))
+  );
+}
+
+// ─── Schema Initialization ──────────────────────────────────────────
+
+let schemaInitialized = false;
+
+export async function initSchema(): Promise<void> {
+  if (schemaInitialized) return;
+  const db = getDb();
+
+  // Load and split schema.sql into individual statements
   const schemaPath = path.join(process.cwd(), "src", "db", "schema.sql");
   if (fs.existsSync(schemaPath)) {
     const schema = fs.readFileSync(schemaPath, "utf-8");
-    d.exec(schema);
+    const statements = schema
+      .split(";")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    for (const stmt of statements) {
+      await db.execute(stmt);
+    }
   }
 
-  // Legacy tables still needed for sync runs and import pipeline
-  d.exec(`
-    CREATE TABLE IF NOT EXISTS sync_runs (
-      id TEXT PRIMARY KEY,
-      started_at TEXT NOT NULL,
-      completed_at TEXT,
+  // Legacy tables for sync runs and import pipeline
+  const legacyStatements = [
+    `CREATE TABLE IF NOT EXISTS sync_runs (
+      id TEXT PRIMARY KEY, started_at TEXT NOT NULL, completed_at TEXT,
       status TEXT NOT NULL DEFAULT 'running',
-      total_products INTEGER DEFAULT 0,
-      created INTEGER DEFAULT 0,
-      updated INTEGER DEFAULT 0,
-      archived INTEGER DEFAULT 0,
-      errors INTEGER DEFAULT 0,
-      error_messages TEXT DEFAULT '[]'
-    );
+      total_products INTEGER DEFAULT 0, created INTEGER DEFAULT 0,
+      updated INTEGER DEFAULT 0, archived INTEGER DEFAULT 0,
+      errors INTEGER DEFAULT 0, error_messages TEXT DEFAULT '[]'
+    )`,
+    `CREATE TABLE IF NOT EXISTS sync_logs (
+      id TEXT PRIMARY KEY, sync_run_id TEXT NOT NULL, timestamp TEXT NOT NULL,
+      shopify_product_id TEXT, sku TEXT NOT NULL, action TEXT NOT NULL,
+      field TEXT NOT NULL, old_value TEXT, new_value TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS import_jobs (
+      id TEXT PRIMARY KEY, group_key TEXT UNIQUE NOT NULL, product_data TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending', content TEXT, shopify_id TEXT,
+      error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_sync_logs_run ON sync_logs(sync_run_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_sync_logs_sku ON sync_logs(sku)`,
+    `CREATE INDEX IF NOT EXISTS idx_sync_runs_date ON sync_runs(started_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status)`,
+  ];
 
-    CREATE TABLE IF NOT EXISTS sync_logs (
-      id TEXT PRIMARY KEY,
-      sync_run_id TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
-      shopify_product_id TEXT,
-      sku TEXT NOT NULL,
-      action TEXT NOT NULL,
-      field TEXT NOT NULL,
-      old_value TEXT,
-      new_value TEXT
-    );
+  for (const stmt of legacyStatements) {
+    await db.execute(stmt);
+  }
 
-    CREATE TABLE IF NOT EXISTS import_jobs (
-      id TEXT PRIMARY KEY,
-      group_key TEXT UNIQUE NOT NULL,
-      product_data TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      content TEXT,
-      shopify_id TEXT,
-      error TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
+  // Enable WAL and foreign keys for local SQLite
+  if (!process.env.TURSO_DATABASE_URL) {
+    await db.execute("PRAGMA journal_mode = WAL");
+    await db.execute("PRAGMA foreign_keys = ON");
+  }
 
-    CREATE INDEX IF NOT EXISTS idx_sync_logs_run ON sync_logs(sync_run_id);
-    CREATE INDEX IF NOT EXISTS idx_sync_logs_sku ON sync_logs(sku);
-    CREATE INDEX IF NOT EXISTS idx_sync_runs_date ON sync_runs(started_at);
-    CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status);
-  `);
+  schemaInitialized = true;
+}
+
+/** Ensure schema is initialized before any query */
+async function ensureSchema(): Promise<Client> {
+  await initSchema();
+  return getDb();
 }
 
 // ─── Products (replaces catalog_snapshots) ───────────────────────────
@@ -106,11 +129,44 @@ export interface ProductRow {
   created_at: number;
 }
 
-export function refreshProducts(products: Omit<ProductRow, "shopify_product_id" | "shopify_variant_id" | "last_posted_at" | "created_at">[]): void {
-  const d = getDb();
+function rowToProduct(row: Row): ProductRow {
+  const o = rowToObj(row);
+  return {
+    sku: (o.sku as string) || "",
+    name: (o.name as string) || "",
+    price: Number(o.price) || 0,
+    qty: Number(o.qty) || 0,
+    color: (o.color as string) || "",
+    size: (o.size as string) || "",
+    product_type: (o.product_type as string) || "",
+    image1: (o.image1 as string) || "",
+    image2: (o.image2 as string) || "",
+    image3: (o.image3 as string) || "",
+    image4: (o.image4 as string) || "",
+    image5: (o.image5 as string) || "",
+    image6: (o.image6 as string) || "",
+    image7: (o.image7 as string) || "",
+    video: (o.video as string) || "",
+    description: (o.description as string) || "",
+    short_description: (o.short_description as string) || "",
+    material: (o.material as string) || "",
+    gtin: (o.gtin as string) || "",
+    weight: Number(o.weight) || 0,
+    out_of_stock_expected: (o.out_of_stock_expected as string) || "",
+    estimated_arrival: (o.estimated_arrival as string) || "",
+    shopify_product_id: (o.shopify_product_id as string) || null,
+    shopify_variant_id: (o.shopify_variant_id as string) || null,
+    last_seen_at: Number(o.last_seen_at) || 0,
+    last_posted_at: o.last_posted_at != null ? Number(o.last_posted_at) : null,
+    created_at: Number(o.created_at) || 0,
+  };
+}
+
+export async function refreshProducts(products: Omit<ProductRow, "shopify_product_id" | "shopify_variant_id" | "last_posted_at" | "created_at">[]): Promise<void> {
+  const db = await ensureSchema();
   const now = Math.floor(Date.now() / 1000);
-  const stmt = d.prepare(`
-    INSERT INTO products (sku, name, price, qty, color, size, product_type,
+  const stmts = products.map((p) => ({
+    sql: `INSERT INTO products (sku, name, price, qty, color, size, product_type,
       image1, image2, image3, image4, image5, image6, image7, video,
       description, short_description, material, gtin, weight,
       out_of_stock_expected, estimated_arrival, last_seen_at)
@@ -124,36 +180,39 @@ export function refreshProducts(products: Omit<ProductRow, "shopify_product_id" 
       description=excluded.description, short_description=excluded.short_description,
       material=excluded.material, gtin=excluded.gtin, weight=excluded.weight,
       out_of_stock_expected=excluded.out_of_stock_expected,
-      estimated_arrival=excluded.estimated_arrival, last_seen_at=excluded.last_seen_at
-  `);
-  const upsertAll = d.transaction((rows: typeof products) => {
-    for (const p of rows) {
-      stmt.run(
-        p.sku, p.name, p.price, p.qty, p.color, p.size, p.product_type,
-        p.image1, p.image2, p.image3, p.image4, p.image5, p.image6, p.image7,
-        p.video, p.description, p.short_description, p.material, p.gtin, p.weight,
-        p.out_of_stock_expected, p.estimated_arrival, now
-      );
-    }
-  });
-  upsertAll(products);
+      estimated_arrival=excluded.estimated_arrival, last_seen_at=excluded.last_seen_at`,
+    args: [
+      p.sku, p.name, p.price, p.qty, p.color, p.size, p.product_type,
+      p.image1, p.image2, p.image3, p.image4, p.image5, p.image6, p.image7,
+      p.video, p.description, p.short_description, p.material, p.gtin, p.weight,
+      p.out_of_stock_expected, p.estimated_arrival, now,
+    ],
+  }));
+
+  // Batch in chunks of 100 (Turso batch limit)
+  for (let i = 0; i < stmts.length; i += 100) {
+    await db.batch(stmts.slice(i, i + 100), "write");
+  }
 }
 
-export function getProduct(sku: string): ProductRow | null {
-  const d = getDb();
-  return (d.prepare(`SELECT * FROM products WHERE sku = ?`).get(sku) as ProductRow) || null;
+export async function getProduct(sku: string): Promise<ProductRow | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT * FROM products WHERE sku = ?`, args: [sku] });
+  return result.rows.length > 0 ? rowToProduct(result.rows[0]) : null;
 }
 
-/** Load all products into a Map keyed by SKU. Used by job1-sync to avoid N+1 queries. */
-export function getAllProductsMap(): Map<string, ProductRow> {
-  const d = getDb();
-  const rows = d.prepare(`SELECT * FROM products`).all() as ProductRow[];
+export async function getAllProductsMap(): Promise<Map<string, ProductRow>> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT * FROM products`);
   const map = new Map<string, ProductRow>();
-  for (const row of rows) map.set(row.sku, row);
+  for (const row of result.rows) {
+    const p = rowToProduct(row);
+    map.set(p.sku, p);
+  }
   return map;
 }
 
-export function getProducts(filters: {
+export async function getProducts(filters: {
   productType?: string;
   search?: string;
   minPrice?: number;
@@ -164,8 +223,8 @@ export function getProducts(filters: {
   page?: number;
   limit?: number;
   sort?: string;
-}): { products: ProductRow[]; total: number; productTypes: { type: string; count: number }[] } {
-  const d = getDb();
+}): Promise<{ products: ProductRow[]; total: number; productTypes: { type: string; count: number }[] }> {
+  const db = await ensureSchema();
   const conditions: string[] = [];
   const args: (string | number)[] = [];
 
@@ -182,7 +241,6 @@ export function getProducts(filters: {
   const limit = Math.min(Math.max(1, filters.limit || 50), 200);
   const offset = (page - 1) * limit;
 
-  // Sort
   let orderBy = "name ASC";
   switch (filters.sort) {
     case "price_asc": orderBy = "price ASC"; break;
@@ -194,23 +252,28 @@ export function getProducts(filters: {
     case "low_stock": orderBy = "CASE WHEN qty > 0 THEN 0 ELSE 1 END, qty ASC"; break;
   }
 
-  const total = (d.prepare(`SELECT COUNT(*) as cnt FROM products ${where}`).get(...args) as { cnt: number }).cnt;
+  const countResult = await db.execute({ sql: `SELECT COUNT(*) as cnt FROM products ${where}`, args });
+  const total = Number(rowToObj(countResult.rows[0]).cnt) || 0;
 
-  const products = d.prepare(
-    `SELECT * FROM products ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`
-  ).all(...args, limit, offset) as ProductRow[];
+  const productsResult = await db.execute({
+    sql: `SELECT * FROM products ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+    args: [...args, limit, offset],
+  });
+  const products = productsResult.rows.map(rowToProduct);
 
-  const typeRows = d.prepare(
+  const typeResult = await db.execute(
     `SELECT product_type, COUNT(*) as cnt FROM products WHERE product_type != '' GROUP BY product_type ORDER BY product_type`
-  ).all() as { product_type: string; cnt: number }[];
-
+  );
   const typeCounts = new Map<string, number>();
-  for (const row of typeRows) {
-    const parts = row.product_type.split(">").map((s: string) => s.trim());
+  for (const row of typeResult.rows) {
+    const o = rowToObj(row);
+    const pt = (o.product_type as string) || "";
+    const cnt = Number(o.cnt) || 0;
+    const parts = pt.split(">").map((s: string) => s.trim());
     let p = "";
     for (const part of parts) {
       p = p ? `${p} > ${part}` : part;
-      typeCounts.set(p, (typeCounts.get(p) || 0) + row.cnt);
+      typeCounts.set(p, (typeCounts.get(p) || 0) + cnt);
     }
   }
 
@@ -221,125 +284,119 @@ export function getProducts(filters: {
   };
 }
 
-export function getProductCount(): number {
-  const d = getDb();
-  return (d.prepare(`SELECT COUNT(*) as cnt FROM products`).get() as { cnt: number }).cnt;
+export async function getProductCount(): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT COUNT(*) as cnt FROM products`);
+  return Number(rowToObj(result.rows[0]).cnt) || 0;
 }
 
-export function getImportedProductCount(): number {
-  const d = getDb();
-  return (d.prepare(`SELECT COUNT(*) as cnt FROM products WHERE shopify_product_id IS NOT NULL`).get() as { cnt: number }).cnt;
+export async function getImportedProductCount(): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT COUNT(*) as cnt FROM products WHERE shopify_product_id IS NOT NULL`);
+  return Number(rowToObj(result.rows[0]).cnt) || 0;
 }
 
-export function updateProductShopifyIds(sku: string, shopifyProductId: string, shopifyVariantId: string): void {
-  const d = getDb();
-  d.prepare(`UPDATE products SET shopify_product_id = ?, shopify_variant_id = ? WHERE sku = ?`)
-    .run(shopifyProductId, shopifyVariantId, sku);
+export async function updateProductShopifyIds(sku: string, shopifyProductId: string, shopifyVariantId: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE products SET shopify_product_id = ?, shopify_variant_id = ? WHERE sku = ?`, args: [shopifyProductId, shopifyVariantId, sku] });
 }
 
 // ─── Price History (enriched) ────────────────────────────────────────
 
 export type ChangeTypeHistory = "price_drop" | "price_increase" | "stock_change" | "new_product" | "restock";
 
-export function recordPriceChange(entry: {
-  sku: string;
-  oldPrice: number | null;
-  newPrice: number | null;
-  oldQty: number | null;
-  newQty: number | null;
-  changeType: ChangeTypeHistory;
-}): void {
-  const d = getDb();
-  d.prepare(`INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(entry.sku, entry.oldPrice, entry.newPrice, entry.oldQty, entry.newQty, entry.changeType);
+export async function recordPriceChange(entry: {
+  sku: string; oldPrice: number | null; newPrice: number | null;
+  oldQty: number | null; newQty: number | null; changeType: ChangeTypeHistory;
+}): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type) VALUES (?, ?, ?, ?, ?, ?)`, args: [entry.sku, entry.oldPrice, entry.newPrice, entry.oldQty, entry.newQty, entry.changeType] });
 }
 
-export function recordPriceChanges(entries: {
-  sku: string;
-  oldPrice: number | null;
-  newPrice: number | null;
-  oldQty: number | null;
-  newQty: number | null;
-  changeType: ChangeTypeHistory;
-}[]): void {
-  const d = getDb();
-  const stmt = d.prepare(`INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type) VALUES (?, ?, ?, ?, ?, ?)`);
-  const insertMany = d.transaction((rows: typeof entries) => {
-    for (const e of rows) {
-      stmt.run(e.sku, e.oldPrice, e.newPrice, e.oldQty, e.newQty, e.changeType);
-    }
+export async function recordPriceChanges(entries: {
+  sku: string; oldPrice: number | null; newPrice: number | null;
+  oldQty: number | null; newQty: number | null; changeType: ChangeTypeHistory;
+}[]): Promise<void> {
+  const db = await ensureSchema();
+  const stmts = entries.map((e) => ({
+    sql: `INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type) VALUES (?, ?, ?, ?, ?, ?)`,
+    args: [e.sku, e.oldPrice, e.newPrice, e.oldQty, e.newQty, e.changeType],
+  }));
+  for (let i = 0; i < stmts.length; i += 100) {
+    await db.batch(stmts.slice(i, i + 100), "write");
+  }
+}
+
+export async function markPriceChangeApplied(id: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE price_history SET applied_to_shopify = 1 WHERE id = ?`, args: [id] });
+}
+
+export async function getRecentPriceChanges(limit = 50): Promise<Record<string, unknown>[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT ph.*, p.name, p.image1, p.shopify_product_id
+    FROM price_history ph LEFT JOIN products p ON ph.sku = p.sku
+    ORDER BY ph.detected_at DESC LIMIT ?`,
+    args: [limit],
   });
-  insertMany(entries);
-}
-
-export function markPriceChangeApplied(id: number): void {
-  const d = getDb();
-  d.prepare(`UPDATE price_history SET applied_to_shopify = 1 WHERE id = ?`).run(id);
-}
-
-export function getRecentPriceChanges(limit = 50): Record<string, unknown>[] {
-  const d = getDb();
-  return d.prepare(`
-    SELECT ph.*, p.name, p.image1, p.shopify_product_id
-    FROM price_history ph
-    LEFT JOIN products p ON ph.sku = p.sku
-    ORDER BY ph.detected_at DESC
-    LIMIT ?
-  `).all(limit) as Record<string, unknown>[];
+  return result.rows.map(rowToObj);
 }
 
 // ─── Notifications ──────────────────────────────────────────────────
 
-export function createNotification(type: string, title: string, message: string): number {
-  const d = getDb();
-  const result = d.prepare(`INSERT INTO notifications (type, title, message) VALUES (?, ?, ?)`).run(type, title, message);
-  return result.lastInsertRowid as number;
+export async function createNotification(type: string, title: string, message: string): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `INSERT INTO notifications (type, title, message) VALUES (?, ?, ?)`, args: [type, title, message] });
+  return Number(result.lastInsertRowid);
 }
 
-export function getNotifications(opts: { unreadOnly?: boolean; limit?: number } = {}): Record<string, unknown>[] {
-  const d = getDb();
+export async function getNotifications(opts: { unreadOnly?: boolean; limit?: number } = {}): Promise<Record<string, unknown>[]> {
+  const db = await ensureSchema();
   const where = opts.unreadOnly ? "WHERE read = 0" : "";
   const limit = opts.limit || 50;
-  return d.prepare(`SELECT * FROM notifications ${where} ORDER BY created_at DESC LIMIT ?`).all(limit) as Record<string, unknown>[];
+  const result = await db.execute({ sql: `SELECT * FROM notifications ${where} ORDER BY created_at DESC LIMIT ?`, args: [limit] });
+  return result.rows.map(rowToObj);
 }
 
-export function markNotificationRead(id: number): void {
-  const d = getDb();
-  d.prepare(`UPDATE notifications SET read = 1 WHERE id = ?`).run(id);
+export async function markNotificationRead(id: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE notifications SET read = 1 WHERE id = ?`, args: [id] });
 }
 
-export function markAllNotificationsRead(): void {
-  const d = getDb();
-  d.prepare(`UPDATE notifications SET read = 1 WHERE read = 0`).run();
+export async function markAllNotificationsRead(): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute(`UPDATE notifications SET read = 1 WHERE read = 0`);
 }
 
-export function getUnreadNotificationCount(): number {
-  const d = getDb();
-  const row = d.prepare(`SELECT COUNT(*) as count FROM notifications WHERE read = 0`).get() as { count: number };
-  return row.count;
+export async function getUnreadNotificationCount(): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT COUNT(*) as count FROM notifications WHERE read = 0`);
+  return Number(rowToObj(result.rows[0]).count) || 0;
 }
 
 // ─── Settings ────────────────────────────────────────────────────────
 
-export function getSetting(key: string): string | null {
-  const d = getDb();
-  const row = d.prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as { value: string } | undefined;
-  return row?.value ?? null;
+export async function getSetting(key: string): Promise<string | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT value FROM settings WHERE key = ?`, args: [key] });
+  if (result.rows.length === 0) return null;
+  return (rowToObj(result.rows[0]).value as string) ?? null;
 }
 
-export function setSetting(key: string, value: string): void {
-  const d = getDb();
+export async function setSetting(key: string, value: string): Promise<void> {
+  const db = await ensureSchema();
   const now = Math.floor(Date.now() / 1000);
-  d.prepare(`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`)
-    .run(key, value, now);
+  await db.execute({ sql: `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, args: [key, value, now] });
 }
 
-export function getAllSettings(): Record<string, string> {
-  const d = getDb();
-  const rows = d.prepare(`SELECT key, value FROM settings`).all() as { key: string; value: string }[];
+export async function getAllSettings(): Promise<Record<string, string>> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT key, value FROM settings`);
   const settings: Record<string, string> = {};
-  for (const row of rows) {
-    settings[row.key] = row.value;
+  for (const row of result.rows) {
+    const o = rowToObj(row);
+    settings[o.key as string] = o.value as string;
   }
   return settings;
 }
@@ -347,68 +404,72 @@ export function getAllSettings(): Record<string, string> {
 // ─── Trending Products ──────────────────────────────────────────────
 
 export interface TrendingProduct {
-  sku: string;
-  name: string;
-  price: number;
-  image1: string;
-  shopify_product_id: string | null;
-  units_moved: number;
+  sku: string; name: string; price: number; image1: string;
+  shopify_product_id: string | null; units_moved: number;
 }
 
-export function getTrendingProducts(limit = 10): TrendingProduct[] {
-  const d = getDb();
-  return d.prepare(`
-    SELECT ph.sku, p.name, p.price, p.image1, p.shopify_product_id,
+export async function getTrendingProducts(limit = 10): Promise<TrendingProduct[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT ph.sku, p.name, p.price, p.image1, p.shopify_product_id,
            SUM(ph.old_qty - ph.new_qty) as units_moved
-    FROM price_history ph
-    JOIN products p ON ph.sku = p.sku
+    FROM price_history ph JOIN products p ON ph.sku = p.sku
     WHERE ph.change_type = 'stock_change'
       AND ph.detected_at > cast(strftime('%s','now','-14 days') as integer)
       AND ph.old_qty > ph.new_qty
-    GROUP BY ph.sku
-    ORDER BY units_moved DESC
-    LIMIT ?
-  `).all(limit) as TrendingProduct[];
+    GROUP BY ph.sku ORDER BY units_moved DESC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      sku: (o.sku as string) || "",
+      name: (o.name as string) || "",
+      price: Number(o.price) || 0,
+      image1: (o.image1 as string) || "",
+      shopify_product_id: (o.shopify_product_id as string) || null,
+      units_moved: Number(o.units_moved) || 0,
+    };
+  });
 }
 
 // ─── Sync Runs ───────────────────────────────────────────────────────
 
-export function clearStaleLockIfNeeded(): void {
-  const d = getDb();
-  d.prepare(`
+export async function clearStaleLockIfNeeded(): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute(`
     UPDATE sync_runs SET status = 'failed', completed_at = datetime('now'),
       error_messages = '["Stale lock cleared (timeout > 30 min)"]'
     WHERE status = 'running' AND datetime(started_at) < datetime('now', '-30 minutes')
-  `).run();
+  `);
 }
 
-export function createSyncRun(): SyncRun {
-  const d = getDb();
+export async function createSyncRun(): Promise<SyncRun> {
+  const db = await ensureSchema();
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  d.prepare(`INSERT INTO sync_runs (id, started_at, status) VALUES (?, ?, 'running')`).run(id, now);
+  await db.execute({ sql: `INSERT INTO sync_runs (id, started_at, status) VALUES (?, ?, 'running')`, args: [id, now] });
   return { id, startedAt: now, completedAt: null, status: "running", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 0, errorMessages: [] };
 }
 
-export function completeSyncRun(
+export async function completeSyncRun(
   id: string,
   stats: { status: "completed" | "failed"; totalProducts: number; created: number; updated: number; archived: number; errors: number; errorMessages: string[] }
-): void {
-  const d = getDb();
-  d.prepare(`UPDATE sync_runs SET completed_at=?, status=?, total_products=?, created=?, updated=?, archived=?, errors=?, error_messages=? WHERE id=?`)
-    .run(new Date().toISOString(), stats.status, stats.totalProducts, stats.created, stats.updated, stats.archived, stats.errors, JSON.stringify(stats.errorMessages), id);
+): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE sync_runs SET completed_at=?, status=?, total_products=?, created=?, updated=?, archived=?, errors=?, error_messages=? WHERE id=?`, args: [new Date().toISOString(), stats.status, stats.totalProducts, stats.created, stats.updated, stats.archived, stats.errors, JSON.stringify(stats.errorMessages), id] });
 }
 
-export function getSyncRuns(limit = 20): SyncRun[] {
-  const d = getDb();
-  const rows = d.prepare(`SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT ?`).all(limit) as Record<string, unknown>[];
-  return rows.map(mapSyncRun);
+export async function getSyncRuns(limit = 20): Promise<SyncRun[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT ?`, args: [limit] });
+  return result.rows.map((r) => mapSyncRun(rowToObj(r)));
 }
 
-export function getLatestSyncRun(): SyncRun | null {
-  const d = getDb();
-  const row = d.prepare(`SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 1`).get() as Record<string, unknown> | undefined;
-  return row ? mapSyncRun(row) : null;
+export async function getLatestSyncRun(): Promise<SyncRun | null> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 1`);
+  return result.rows.length > 0 ? mapSyncRun(rowToObj(result.rows[0])) : null;
 }
 
 function mapSyncRun(row: Record<string, unknown>): SyncRun {
@@ -428,23 +489,21 @@ function mapSyncRun(row: Record<string, unknown>): SyncRun {
 
 // ─── Sync Logs ───────────────────────────────────────────────────────
 
-export function addSyncLogsBatch(entries: Omit<SyncLogEntry, "id">[]): void {
-  const d = getDb();
-  const stmt = d.prepare(
-    `INSERT INTO sync_logs (id, sync_run_id, timestamp, shopify_product_id, sku, action, field, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  const insertMany = d.transaction((rows: Omit<SyncLogEntry, "id">[]) => {
-    for (const e of rows) {
-      stmt.run(crypto.randomUUID(), e.syncRunId, e.timestamp, e.shopifyProductId, e.sku, e.action, e.field, e.oldValue, e.newValue);
-    }
-  });
-  insertMany(entries);
+export async function addSyncLogsBatch(entries: Omit<SyncLogEntry, "id">[]): Promise<void> {
+  const db = await ensureSchema();
+  const stmts = entries.map((e) => ({
+    sql: `INSERT INTO sync_logs (id, sync_run_id, timestamp, shopify_product_id, sku, action, field, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [crypto.randomUUID(), e.syncRunId, e.timestamp, e.shopifyProductId, e.sku, e.action, e.field, e.oldValue, e.newValue],
+  }));
+  for (let i = 0; i < stmts.length; i += 100) {
+    await db.batch(stmts.slice(i, i + 100), "write");
+  }
 }
 
-export function getSyncLogs(syncRunId: string, limit = 500): SyncLogEntry[] {
-  const d = getDb();
-  const rows = d.prepare(`SELECT * FROM sync_logs WHERE sync_run_id = ? ORDER BY timestamp DESC LIMIT ?`).all(syncRunId, limit) as Record<string, unknown>[];
-  return rows.map(mapSyncLog);
+export async function getSyncLogs(syncRunId: string, limit = 500): Promise<SyncLogEntry[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT * FROM sync_logs WHERE sync_run_id = ? ORDER BY timestamp DESC LIMIT ?`, args: [syncRunId, limit] });
+  return result.rows.map((r) => mapSyncLog(rowToObj(r)));
 }
 
 function mapSyncLog(row: Record<string, unknown>): SyncLogEntry {
@@ -467,67 +526,57 @@ const IMPORT_JOB_COLUMNS = new Set([
   "status", "content", "shopify_id", "error", "product_data", "group_key",
 ]);
 
-export function upsertImportJob(job: { id: string; groupKey: string; productData: string; status: string; createdAt: string; updatedAt: string }): void {
-  const d = getDb();
-  d.prepare(
-    `INSERT INTO import_jobs (id, group_key, product_data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(group_key) DO UPDATE SET product_data=excluded.product_data, status='pending', updated_at=excluded.updated_at`
-  ).run(job.id, job.groupKey, job.productData, job.status, job.createdAt, job.updatedAt);
+export async function upsertImportJob(job: { id: string; groupKey: string; productData: string; status: string; createdAt: string; updatedAt: string }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO import_jobs (id, group_key, product_data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(group_key) DO UPDATE SET product_data=excluded.product_data, status='pending', updated_at=excluded.updated_at`,
+    args: [job.id, job.groupKey, job.productData, job.status, job.createdAt, job.updatedAt],
+  });
 }
 
-export function getImportJobs(): Record<string, unknown>[] {
-  const d = getDb();
-  return d.prepare(`SELECT * FROM import_jobs ORDER BY created_at DESC`).all() as Record<string, unknown>[];
+export async function getImportJobs(): Promise<Record<string, unknown>[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT * FROM import_jobs ORDER BY created_at DESC`);
+  return result.rows.map(rowToObj);
 }
 
-export function getImportJob(jobId: string): Record<string, unknown> | null {
-  const d = getDb();
-  return (d.prepare(`SELECT * FROM import_jobs WHERE id = ?`).get(jobId) as Record<string, unknown>) || null;
+export async function getImportJob(jobId: string): Promise<Record<string, unknown> | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT * FROM import_jobs WHERE id = ?`, args: [jobId] });
+  return result.rows.length > 0 ? rowToObj(result.rows[0]) : null;
 }
 
-export function updateImportJob(jobId: string, fields: Record<string, unknown>): void {
-  const d = getDb();
+export async function updateImportJob(jobId: string, fields: Record<string, unknown>): Promise<void> {
+  const db = await ensureSchema();
   const sets: string[] = [];
-  const args: unknown[] = [];
+  const args: InValue[] = [];
   for (const [key, value] of Object.entries(fields)) {
-    if (!IMPORT_JOB_COLUMNS.has(key)) {
-      throw new Error(`Invalid column name: ${key}`);
-    }
+    if (!IMPORT_JOB_COLUMNS.has(key)) throw new Error(`Invalid column name: ${key}`);
     sets.push(`${key} = ?`);
-    args.push(value);
+    args.push(value as InValue);
   }
   if (sets.length === 0) return;
   sets.push(`updated_at = ?`);
   args.push(new Date().toISOString());
   args.push(jobId);
-  d.prepare(`UPDATE import_jobs SET ${sets.join(", ")} WHERE id = ?`).run(...args);
+  await db.execute({ sql: `UPDATE import_jobs SET ${sets.join(", ")} WHERE id = ?`, args });
 }
 
-// ─── Facebook Drafts ────────────────────────���───────────────────────
+// ─── Facebook Drafts ─────────────────────────────────────────────────
 
 export interface FacebookDraft {
-  id: number;
-  sku: string;
-  triggerType: string;
-  language: string;
-  postText: string;
-  imagePath: string | null;
-  imageUrl: string | null;
-  oldPrice: number | null;
-  newPrice: number | null;
-  status: string;
-  scheduledAt: number | null;
-  publishedAt: number | null;
-  facebookPostId: string | null;
-  createdAt: number;
-  // joined from products
-  productName?: string;
-  productImage?: string;
+  id: number; sku: string; triggerType: string; language: string;
+  postText: string; imagePath: string | null; imageUrl: string | null;
+  oldPrice: number | null; newPrice: number | null; status: string;
+  scheduledAt: number | null; publishedAt: number | null;
+  facebookPostId: string | null; createdAt: number;
+  productName?: string; productImage?: string;
 }
 
 function mapDraft(row: Record<string, unknown>): FacebookDraft {
   return {
-    id: row.id as number,
+    id: Number(row.id),
     sku: row.sku as string,
     triggerType: row.trigger_type as string,
     language: row.language as string,
@@ -546,88 +595,83 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
   };
 }
 
-export function createFacebookDraft(draft: {
-  sku: string;
-  triggerType: string;
-  language: string;
-  postText: string;
-  imagePath?: string | null;
-  oldPrice?: number | null;
-  newPrice?: number | null;
-}): number {
-  const d = getDb();
-  const result = d.prepare(
-    `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, image_path, old_price, new_price) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(draft.sku, draft.triggerType, draft.language, draft.postText, draft.imagePath || null, draft.oldPrice ?? null, draft.newPrice ?? null);
+export async function createFacebookDraft(draft: {
+  sku: string; triggerType: string; language: string; postText: string;
+  imagePath?: string | null; oldPrice?: number | null; newPrice?: number | null;
+}): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, image_path, old_price, new_price) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.imagePath || null, draft.oldPrice ?? null, draft.newPrice ?? null],
+  });
   return Number(result.lastInsertRowid);
 }
 
-export function getFacebookDrafts(filters?: { status?: string; limit?: number }): FacebookDraft[] {
-  const d = getDb();
+export async function getFacebookDrafts(filters?: { status?: string; limit?: number }): Promise<FacebookDraft[]> {
+  const db = await ensureSchema();
   let sql = `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku`;
-  const args: unknown[] = [];
-  if (filters?.status) {
-    sql += ` WHERE fd.status = ?`;
-    args.push(filters.status);
-  }
+  const args: InValue[] = [];
+  if (filters?.status) { sql += ` WHERE fd.status = ?`; args.push(filters.status); }
   sql += ` ORDER BY fd.created_at DESC`;
-  if (filters?.limit) {
-    sql += ` LIMIT ?`;
-    args.push(filters.limit);
-  }
-  return (d.prepare(sql).all(...args) as Record<string, unknown>[]).map(mapDraft);
+  if (filters?.limit) { sql += ` LIMIT ?`; args.push(filters.limit); }
+  const result = await db.execute({ sql, args });
+  return result.rows.map((r) => mapDraft(rowToObj(r)));
 }
 
-export function getFacebookDraft(id: number): FacebookDraft | null {
-  const d = getDb();
-  const row = d.prepare(
-    `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku WHERE fd.id = ?`
-  ).get(id) as Record<string, unknown> | undefined;
-  return row ? mapDraft(row) : null;
+export async function getFacebookDraft(id: number): Promise<FacebookDraft | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku WHERE fd.id = ?`,
+    args: [id],
+  });
+  return result.rows.length > 0 ? mapDraft(rowToObj(result.rows[0])) : null;
 }
 
-export function updateFacebookDraft(id: number, fields: Record<string, unknown>): void {
-  const d = getDb();
+export async function updateFacebookDraft(id: number, fields: Record<string, unknown>): Promise<void> {
+  const db = await ensureSchema();
   const allowed = new Set(["post_text", "image_path", "image_url", "status", "scheduled_at", "published_at", "facebook_post_id"]);
   const sets: string[] = [];
-  const args: unknown[] = [];
+  const args: InValue[] = [];
   for (const [key, value] of Object.entries(fields)) {
     if (!allowed.has(key)) throw new Error(`Invalid column: ${key}`);
     sets.push(`${key} = ?`);
-    args.push(value);
+    args.push(value as InValue);
   }
   if (sets.length === 0) return;
   args.push(id);
-  d.prepare(`UPDATE facebook_drafts SET ${sets.join(", ")} WHERE id = ?`).run(...args);
+  await db.execute({ sql: `UPDATE facebook_drafts SET ${sets.join(", ")} WHERE id = ?`, args });
 }
 
-export function deleteFacebookDraft(id: number): void {
-  const d = getDb();
-  d.prepare(`DELETE FROM facebook_drafts WHERE id = ?`).run(id);
+export async function deleteFacebookDraft(id: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `DELETE FROM facebook_drafts WHERE id = ?`, args: [id] });
 }
 
-export function getLastPostDate(sku: string): number | null {
-  const d = getDb();
-  const row = d.prepare(
-    `SELECT MAX(published_at) as last FROM facebook_drafts WHERE sku = ? AND status = 'published'`
-  ).get(sku) as { last: number | null } | undefined;
-  return row?.last ?? null;
+export async function getLastPostDate(sku: string): Promise<number | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT MAX(published_at) as last FROM facebook_drafts WHERE sku = ? AND status = 'published'`,
+    args: [sku],
+  });
+  if (result.rows.length === 0) return null;
+  const val = rowToObj(result.rows[0]).last;
+  return val != null ? Number(val) : null;
 }
 
-export function getEligibleHighlightProduct(minDaysBetween: number): Record<string, unknown> | null {
-  const d = getDb();
+export async function getEligibleHighlightProduct(minDaysBetween: number): Promise<Record<string, unknown> | null> {
+  const db = await ensureSchema();
   const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
-  return (d.prepare(`
-    SELECT p.* FROM products p
-    WHERE p.shopify_product_id IS NOT NULL
-      AND p.qty > 0
+  const result = await db.execute({
+    sql: `SELECT p.* FROM products p
+    WHERE p.shopify_product_id IS NOT NULL AND p.qty > 0
       AND (p.last_posted_at IS NULL OR p.last_posted_at < ?)
-    ORDER BY RANDOM()
-    LIMIT 1
-  `).get(cutoff) as Record<string, unknown>) || null;
+    ORDER BY RANDOM() LIMIT 1`,
+    args: [cutoff],
+  });
+  return result.rows.length > 0 ? rowToObj(result.rows[0]) : null;
 }
 
-export function markProductPosted(sku: string): void {
-  const d = getDb();
-  d.prepare(`UPDATE products SET last_posted_at = strftime('%s','now') WHERE sku = ?`).run(sku);
+export async function markProductPosted(sku: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE products SET last_posted_at = strftime('%s','now') WHERE sku = ?`, args: [sku] });
 }

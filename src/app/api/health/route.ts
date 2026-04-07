@@ -9,7 +9,7 @@ export async function GET() {
   let lastSync: { timestamp: string | null; status: string; age_minutes: number } | null = null;
 
   try {
-    const run = getLatestSyncRun();
+    const run = await getLatestSyncRun();
     dbOk = true;
 
     if (run) {
