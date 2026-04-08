@@ -26,9 +26,12 @@ function hexToBuf(hex: string): Uint8Array {
 export async function hashPassword(password: string): Promise<string> {
   const enc = new TextEncoder();
   const salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
+  // Copy salt to a fresh ArrayBuffer to avoid shared-buffer issues across runtimes
+  const saltBuf = new ArrayBuffer(salt.byteLength);
+  new Uint8Array(saltBuf).set(salt);
   const key = await globalThis.crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
   const derived = await globalThis.crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: salt.buffer as ArrayBuffer, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    { name: "PBKDF2", salt: saltBuf, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
     key, KEY_LENGTH * 8
   );
   return `${bufToHex(salt)}:${bufToHex(derived)}`;
@@ -39,9 +42,12 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
   if (!saltHex || !expectedHex) return false;
   const enc = new TextEncoder();
   const salt = hexToBuf(saltHex);
+  // Copy salt to a fresh ArrayBuffer to avoid shared-buffer issues across runtimes
+  const saltBuf = new ArrayBuffer(salt.byteLength);
+  new Uint8Array(saltBuf).set(salt);
   const key = await globalThis.crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
   const derived = await globalThis.crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: salt.buffer as ArrayBuffer, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
+    { name: "PBKDF2", salt: saltBuf, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
     key, KEY_LENGTH * 8
   );
   const actual = new Uint8Array(derived);
