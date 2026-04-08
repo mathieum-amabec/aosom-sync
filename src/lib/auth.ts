@@ -4,11 +4,11 @@ import { AUTH } from "./config";
 const SESSION_COOKIE = AUTH.COOKIE_NAME;
 const SESSION_MAX_AGE = AUTH.SESSION_MAX_AGE;
 
-// ─── Password Hashing (PBKDF2-SHA256, Edge-compatible) ─────────────
+// ─── Password Hashing (HMAC-SHA256 iterated, Edge-compatible) ──────
+// Uses HMAC-SHA256 with salt — simpler than PBKDF2, works identically
+// across Node.js and Vercel Edge runtimes.
 
-const PBKDF2_ITERATIONS = 100_000;
 const SALT_LENGTH = 16;
-const KEY_LENGTH = 32;
 
 function bufToHex(buf: ArrayBuffer | Uint8Array): string {
   const arr = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
@@ -23,38 +23,32 @@ function hexToBuf(hex: string): Uint8Array {
   return bytes;
 }
 
-export async function hashPassword(password: string): Promise<string> {
+async function hmacHash(password: string, salt: Uint8Array): Promise<string> {
   const enc = new TextEncoder();
-  const salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
-  // Copy salt to a fresh ArrayBuffer to avoid shared-buffer issues across runtimes
-  const saltBuf = new ArrayBuffer(salt.byteLength);
-  new Uint8Array(saltBuf).set(salt);
-  const key = await globalThis.crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const derived = await globalThis.crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: saltBuf, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
-    key, KEY_LENGTH * 8
+  // Create a clean ArrayBuffer from the salt for cross-runtime compatibility
+  const keyData = new Uint8Array(salt).buffer as ArrayBuffer;
+  const key = await globalThis.crypto.subtle.importKey(
+    "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
   );
-  return `${bufToHex(salt)}:${bufToHex(derived)}`;
+  const sig = await globalThis.crypto.subtle.sign("HMAC", key, enc.encode(password));
+  return bufToHex(sig);
 }
 
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-  const [saltHex, expectedHex] = hash.split(":");
+export async function hashPassword(password: string): Promise<string> {
+  const salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
+  const hash = await hmacHash(password, salt);
+  return `${bufToHex(salt)}:${hash}`;
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const [saltHex, expectedHex] = stored.split(":");
   if (!saltHex || !expectedHex) return false;
-  const enc = new TextEncoder();
   const salt = hexToBuf(saltHex);
-  // Copy salt to a fresh ArrayBuffer to avoid shared-buffer issues across runtimes
-  const saltBuf = new ArrayBuffer(salt.byteLength);
-  new Uint8Array(saltBuf).set(salt);
-  const key = await globalThis.crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const derived = await globalThis.crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: saltBuf, iterations: PBKDF2_ITERATIONS, hash: "SHA-256" },
-    key, KEY_LENGTH * 8
-  );
-  const actual = new Uint8Array(derived);
-  const expected = hexToBuf(expectedHex);
-  if (actual.length !== expected.length) return false;
+  const actual = await hmacHash(password, salt);
+  if (actual.length !== expectedHex.length) return false;
+  // Constant-time comparison
   let diff = 0;
-  for (let i = 0; i < actual.length; i++) diff |= actual[i] ^ expected[i];
+  for (let i = 0; i < actual.length; i++) diff |= actual.charCodeAt(i) ^ expectedHex.charCodeAt(i);
   return diff === 0;
 }
 
