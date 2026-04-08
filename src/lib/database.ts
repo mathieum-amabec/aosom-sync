@@ -93,6 +93,13 @@ async function _initSchemaImpl(): Promise<void> {
       key TEXT PRIMARY KEY, value TEXT NOT NULL,
       updated_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
+    `CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      last_login_at INTEGER
+    )`,
   ];
 
   for (const stmt of schemaStatements) {
@@ -447,6 +454,39 @@ export async function getUnreadNotificationCount(): Promise<number> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT COUNT(*) as count FROM notifications WHERE read = 0`);
   return Number(rowToObj(result.rows[0]).count) || 0;
+}
+
+// ─── Users ──────────────────────────────────────────────────────────
+
+export async function getUserByUsername(username: string): Promise<{ id: number; username: string; password_hash: string } | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT id, username, password_hash FROM users WHERE username = ?`, args: [username] });
+  if (result.rows.length === 0) return null;
+  const o = rowToObj(result.rows[0]);
+  return { id: Number(o.id), username: o.username as string, password_hash: o.password_hash as string };
+}
+
+export async function createUser(username: string, passwordHash: string): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `INSERT INTO users (username, password_hash) VALUES (?, ?)`, args: [username, passwordHash] });
+  return Number(result.lastInsertRowid);
+}
+
+export async function getUserCount(): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT COUNT(*) as cnt FROM users`);
+  return Number(rowToObj(result.rows[0]).cnt) || 0;
+}
+
+export async function updateUserLastLogin(id: number): Promise<void> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  await db.execute({ sql: `UPDATE users SET last_login_at = ? WHERE id = ?`, args: [now, id] });
+}
+
+export async function updateUserPassword(id: number, passwordHash: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE users SET password_hash = ? WHERE id = ?`, args: [passwordHash, id] });
 }
 
 // ─── Settings ────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticatedFromRequest } from "@/lib/auth";
+import { verifySessionToken } from "@/lib/auth";
+import { AUTH } from "@/lib/config";
 
 const PUBLIC_PATHS = ["/login", "/api/auth", "/api/cron", "/api/health"];
 
@@ -20,8 +21,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check auth
-  if (!(await isAuthenticatedFromRequest(request))) {
+  // Check auth via cookie (no DB access needed — token is self-contained)
+  const token = request.cookies.get(AUTH.COOKIE_NAME)?.value;
+  if (!token || !(await verifySessionToken(token))) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("redirect", pathname);
     return NextResponse.redirect(loginUrl);

@@ -16,10 +16,8 @@ export const env = {
     if (!v) throw new Error("ANTHROPIC_API_KEY not set in .env.local");
     return v;
   },
-  get authPassword(): string {
-    const v = process.env.AUTH_PASSWORD;
-    if (!v) throw new Error("AUTH_PASSWORD not set in .env.local");
-    return v;
+  get authPassword(): string | undefined {
+    return process.env.AUTH_PASSWORD || undefined;
   },
   get cronSecret(): string {
     const v = process.env.CRON_SECRET;
