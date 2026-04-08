@@ -11,11 +11,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Allow static assets
+  // Allow static assets — only known static file extensions, not any path with a dot
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
-    pathname.includes(".")
+    /\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|eot|map|webp|avif)$/i.test(pathname)
   ) {
     return NextResponse.next();
   }

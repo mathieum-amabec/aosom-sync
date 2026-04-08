@@ -112,9 +112,22 @@ Return JSON with this exact structure:
   const jsonStr = text.replace(/^```json?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
 
   try {
-    return JSON.parse(jsonStr) as GeneratedContent;
-  } catch {
-    console.error("[content-generator] Claude returned invalid JSON:", text.slice(0, 500));
-    throw new Error("Claude returned invalid JSON — check logs for raw response");
+    const parsed = JSON.parse(jsonStr);
+    // Validate required fields and types to prevent LLM output trust boundary violation
+    const required = ["titleFr", "titleEn", "descriptionFr", "descriptionEn", "seoDescriptionFr", "seoDescriptionEn", "tags"] as const;
+    for (const field of required) {
+      if (field === "tags") {
+        if (!Array.isArray(parsed[field])) throw new Error(`Missing or invalid field: ${field}`);
+        parsed[field] = parsed[field].filter((t: unknown) => typeof t === "string").slice(0, 20);
+      } else {
+        if (typeof parsed[field] !== "string") throw new Error(`Missing or invalid field: ${field}`);
+        // Truncate to reasonable limits
+        parsed[field] = parsed[field].slice(0, field.startsWith("seo") ? 200 : 10000);
+      }
+    }
+    return parsed as GeneratedContent;
+  } catch (err) {
+    console.error("[content-generator] Claude returned invalid content:", text.slice(0, 500));
+    throw new Error("Claude returned invalid content");
   }
 }

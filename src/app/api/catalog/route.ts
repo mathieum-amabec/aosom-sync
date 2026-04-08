@@ -36,8 +36,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[API] /api/catalog failed: ${message}`);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    console.error(`[API] /api/catalog failed:`, err);
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }

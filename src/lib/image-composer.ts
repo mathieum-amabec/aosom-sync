@@ -144,6 +144,14 @@ export async function composeImage(opts: ComposeOptions): Promise<string> {
  * Resolve an image path for reading (handles both /tmp and public/ paths).
  */
 export function resolveImagePath(imagePath: string): string {
-  if (imagePath.startsWith("/tmp/")) return imagePath;
-  return path.resolve(process.cwd(), "public", imagePath);
+  if (imagePath.startsWith("/tmp/")) {
+    // Prevent path traversal from /tmp/
+    const resolved = path.resolve(imagePath);
+    if (!resolved.startsWith("/tmp/")) throw new Error("Invalid image path");
+    return resolved;
+  }
+  const resolved = path.resolve(process.cwd(), "public", imagePath);
+  const publicDir = path.resolve(process.cwd(), "public");
+  if (!resolved.startsWith(publicDir)) throw new Error("Invalid image path");
+  return resolved;
 }

@@ -9,9 +9,8 @@ export async function POST(request: Request) {
     const result = await runSync({ dryRun });
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[JOB1] Sync failed: ${message}`);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    console.error(`[JOB1] Sync failed:`, err);
+    return NextResponse.json({ success: false, error: "Sync failed" }, { status: 500 });
   }
 }
 

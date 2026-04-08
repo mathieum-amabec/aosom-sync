@@ -23,9 +23,8 @@ export async function GET(request: Request) {
     const result = await triggerStockHighlight();
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[CRON] Social highlight failed: ${message}`);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    console.error(`[CRON] Social highlight failed:`, err);
+    return NextResponse.json({ success: false, error: "Social generation failed" }, { status: 500 });
   }
 }
 

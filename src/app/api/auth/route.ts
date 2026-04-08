@@ -5,9 +5,18 @@ import { login, logout } from "@/lib/auth";
 const attempts = new Map<string, { count: number; resetAt: number }>();
 const MAX_ATTEMPTS = 10;
 const WINDOW_MS = 15 * 60 * 1000;
+const MAX_TRACKED_IPS = 10000;
 
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
+
+  // Periodic cleanup: evict expired entries to prevent memory leak
+  if (attempts.size > MAX_TRACKED_IPS) {
+    for (const [key, entry] of attempts) {
+      if (now > entry.resetAt) attempts.delete(key);
+    }
+  }
+
   const entry = attempts.get(ip);
   if (!entry || now > entry.resetAt) {
     attempts.set(ip, { count: 1, resetAt: now + WINDOW_MS });
@@ -18,6 +27,12 @@ function isRateLimited(ip: string): boolean {
 }
 
 export async function POST(request: Request) {
+  // Reject oversized payloads
+  const contentLength = parseInt(request.headers.get("content-length") || "0", 10);
+  if (contentLength > 1024) {
+    return NextResponse.json({ success: false, error: "Payload too large" }, { status: 413 });
+  }
+
   const body = await request.json();
 
   if (body.action === "logout") {

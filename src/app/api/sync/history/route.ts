@@ -15,8 +15,7 @@ export async function GET(request: Request) {
     const recentChanges = await getRecentPriceChanges(20);
     return NextResponse.json({ success: true, data: { runs, recentChanges } });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[API] /api/sync/history failed: ${message}`);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    console.error(`[API] /api/sync/history failed:`, err);
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }

@@ -17,12 +17,12 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const status = url.searchParams.get("status") || undefined;
-    const limit = parseInt(url.searchParams.get("limit") || "100", 10);
+    const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || "100", 10) || 100), 500);
     const drafts = await getFacebookDrafts({ status, limit });
     return NextResponse.json({ success: true, data: drafts });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    console.error(`[API] /api/social GET failed:`, err);
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }
 
@@ -69,8 +69,10 @@ export async function POST(request: Request) {
       }
 
       case "schedule": {
-        const scheduledAt = body.scheduledAt; // Unix timestamp
-        if (!scheduledAt) return NextResponse.json({ success: false, error: "scheduledAt required" }, { status: 400 });
+        const scheduledAt = typeof body.scheduledAt === "number" ? body.scheduledAt : null;
+        if (!scheduledAt || scheduledAt < Math.floor(Date.now() / 1000)) {
+          return NextResponse.json({ success: false, error: "Valid future scheduledAt timestamp required" }, { status: 400 });
+        }
         await updateFacebookDraft(body.id, { status: "scheduled", scheduled_at: scheduledAt });
         return NextResponse.json({ success: true, data: await getFacebookDraft(body.id) });
       }
@@ -104,7 +106,9 @@ export async function POST(request: Request) {
 
       case "update": {
         const { id, postText } = body;
-        if (postText) await updateFacebookDraft(id, { post_text: postText });
+        if (postText && typeof postText === "string" && postText.length <= 5000) {
+          await updateFacebookDraft(id, { post_text: postText });
+        }
         return NextResponse.json({ success: true, data: await getFacebookDraft(id) });
       }
 
@@ -143,8 +147,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: false, error: `Unknown action: ${action}` }, { status: 400 });
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ success: false, error: message }, { status: 500 });
+    console.error(`[API] /api/social POST failed:`, err);
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }
 
