@@ -23,12 +23,14 @@ function hexToBuf(hex: string): Uint8Array {
   return bytes;
 }
 
-async function hmacHash(password: string, salt: Uint8Array): Promise<string> {
+async function hmacHash(password: string, saltHex: string): Promise<string> {
   const enc = new TextEncoder();
-  // Create a clean ArrayBuffer from the salt for cross-runtime compatibility
-  const keyData = new Uint8Array(salt).buffer as ArrayBuffer;
+  // Use hex→key directly to avoid any ArrayBuffer/Uint8Array cross-runtime issues
+  const saltBytes = hexToBuf(saltHex);
+  const keyBuf = new ArrayBuffer(saltBytes.length);
+  new Uint8Array(keyBuf).set(saltBytes);
   const key = await globalThis.crypto.subtle.importKey(
-    "raw", keyData, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    "raw", keyBuf, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
   );
   const sig = await globalThis.crypto.subtle.sign("HMAC", key, enc.encode(password));
   return bufToHex(sig);
@@ -36,15 +38,15 @@ async function hmacHash(password: string, salt: Uint8Array): Promise<string> {
 
 export async function hashPassword(password: string): Promise<string> {
   const salt = globalThis.crypto.getRandomValues(new Uint8Array(SALT_LENGTH));
-  const hash = await hmacHash(password, salt);
-  return `${bufToHex(salt)}:${hash}`;
+  const saltHex = bufToHex(salt);
+  const hash = await hmacHash(password, saltHex);
+  return `${saltHex}:${hash}`;
 }
 
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [saltHex, expectedHex] = stored.split(":");
   if (!saltHex || !expectedHex) return false;
-  const salt = hexToBuf(saltHex);
-  const actual = await hmacHash(password, salt);
+  const actual = await hmacHash(password, saltHex);
   if (actual.length !== expectedHex.length) return false;
   // Constant-time comparison
   let diff = 0;
