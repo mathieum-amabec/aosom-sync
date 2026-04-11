@@ -63,6 +63,8 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_products_shopify_id ON products(shopify_product_id)`,
     `CREATE INDEX IF NOT EXISTS idx_products_price ON products(price)`,
     `CREATE INDEX IF NOT EXISTS idx_products_qty ON products(qty)`,
+    `CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)`,
+    `CREATE INDEX IF NOT EXISTS idx_products_name_sku ON products(name, sku)`,
     `CREATE TABLE IF NOT EXISTS price_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, old_price REAL, new_price REAL,
       old_qty INTEGER, new_qty INTEGER, change_type TEXT,
@@ -361,8 +363,8 @@ export async function getProducts(filters: {
     case "low_stock": orderBy = "CASE WHEN qty > 0 THEN 0 ELSE 1 END, qty ASC"; break;
   }
 
-  // Select only columns the catalog UI needs (skip description, short_description, images 2-7, video)
-  const catalogColumns = "sku, name, price, qty, color, size, product_type, image1, material, gtin, weight, out_of_stock_expected, estimated_arrival, shopify_product_id, shopify_variant_id, last_seen_at";
+  // Select only columns the catalog UI needs
+  const catalogColumns = "sku, name, price, qty, color, product_type, image1, shopify_product_id";
 
   // Run count + data in parallel (2 round trips instead of 3)
   const [countResult, productsResult] = await Promise.all([

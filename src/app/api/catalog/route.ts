@@ -8,6 +8,7 @@ import { API } from "@/lib/config";
  */
 export async function GET(request: Request) {
   try {
+    const start = performance.now();
     const url = new URL(request.url);
     const params = url.searchParams;
 
@@ -27,6 +28,8 @@ export async function GET(request: Request) {
       limit,
     });
 
+    const ms = Math.round(performance.now() - start);
+
     return NextResponse.json({
       success: true,
       data: {
@@ -34,6 +37,7 @@ export async function GET(request: Request) {
         pagination: { page, limit, total, pages: Math.ceil(total / limit) },
         productTypes,
       },
+      _timing: { ms },
     });
   } catch (err) {
     console.error(`[API] /api/catalog failed:`, err);

@@ -74,7 +74,7 @@ export default function CatalogPage() {
     const t = setTimeout(() => {
       setSearch(searchInput);
       setPage(1);
-    }, 400);
+    }, 300);
     return () => clearTimeout(t);
   }, [searchInput]);
 
@@ -226,6 +226,14 @@ export default function CatalogPage() {
           </label>
         </div>
       </div>
+
+      {/* Loading indicator for filter/page changes */}
+      {loading && data && (
+        <div className="flex items-center gap-2 mb-3 text-sm text-gray-400">
+          <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+          Loading...
+        </div>
+      )}
 
       {/* Product Table */}
       {loading && !data ? (
