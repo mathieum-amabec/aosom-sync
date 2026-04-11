@@ -73,3 +73,6 @@
 
 ### Bulk Generate — Pousser tous les produits vers Shopify en batch
 **Completed:** v0.1.4.0 (2026-04-11)
+
+### Rate limiting sur les endpoints Claude API
+**Completed:** v0.1.4.1 (2026-04-11)
