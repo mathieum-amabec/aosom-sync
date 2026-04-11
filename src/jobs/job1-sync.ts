@@ -238,7 +238,7 @@ function triggerSocialDrafts(skus: { sku: string; oldPrice: number; newPrice: nu
 
 // ─── Main Entry Point ───────────────────────────────────────────────
 
-export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncResult> {
+export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean } = {}): Promise<SyncResult> {
   // Clear stale locks from crashed prior syncs (>30 minutes)
   await clearStaleLockIfNeeded();
 
@@ -250,9 +250,10 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
 
   const syncRun = await createSyncRun();
   const isDryRun = options.dryRun ?? false;
+  const shopifyPush = options.shopifyPush ?? true;
 
   try {
-    // Step 1: Fetch data in parallel
+    // Step 1: Fetch CSV + Shopify data in parallel
     log("Fetch CSV Aosom + produits Shopify...");
     const [aosomProducts, shopifyProducts] = await Promise.all([
       fetchAosomCatalog(),
@@ -284,19 +285,30 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
       log(`${changes.priceChangeEntries.length} changements enregistrés dans price_history`);
     }
 
-    // Step 4: Apply to Shopify
-    log("Application des changements sur Shopify...");
-    const shopifyResult = await applyToShopify(aosomProducts, shopifyProducts, syncRun.id);
+    // Step 4: Apply to Shopify (skip if shopifyPush=false for cron phase 1)
+    let shopifyResult = { archived: 0, errors: 0, errorMessages: [] as string[], logEntries: [] as Omit<SyncLogEntry, "id">[], updates: 0 };
 
-    if (shopifyResult.logEntries.length > 0) {
-      await addSyncLogsBatch(shopifyResult.logEntries);
+    if (shopifyPush) {
+      log("Application des changements sur Shopify...");
+      shopifyResult = await applyToShopify(aosomProducts, shopifyProducts, syncRun.id);
+
+      if (shopifyResult.logEntries.length > 0) {
+        await addSyncLogsBatch(shopifyResult.logEntries);
+      }
+    } else {
+      log("Shopify push différé (phase 2 séparée)");
     }
 
+    const status = !shopifyPush ? "completed"
+      : shopifyResult.errors > 0 && shopifyResult.updates + shopifyResult.archived === 0 ? "failed"
+      : "completed";
+
     await completeSyncRun(syncRun.id, {
-      status: shopifyResult.errors > 0 && shopifyResult.updates + shopifyResult.archived === 0 ? "failed" : "completed",
+      status,
       totalProducts: aosomProducts.length,
       created: 0, updated: shopifyResult.updates, archived: shopifyResult.archived,
-      errors: shopifyResult.errors, errorMessages: shopifyResult.errorMessages,
+      errors: shopifyResult.errors,
+      errorMessages: shopifyPush ? shopifyResult.errorMessages : ["DB sync only — Shopify push deferred"],
     });
 
     log(`Sync terminé: ${changes.priceUpdates} prix, ${changes.stockChanges} stocks, ${changes.newProducts} nouveaux, ${shopifyResult.archived} archivés, ${shopifyResult.errors} erreurs`);
@@ -307,11 +319,14 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
     if (changes.stockChanges > 0) parts.push(`${changes.stockChanges} stocks changés`);
     if (changes.newProducts > 0) parts.push(`${changes.newProducts} nouveaux produits`);
     if (shopifyResult.errors > 0) parts.push(`${shopifyResult.errors} erreurs`);
+    if (!shopifyPush) parts.push("Shopify push en attente");
     const notifType = shopifyResult.errors > 0 ? "warning" : "success";
     await createNotification(notifType, "Sync terminée", parts.length > 0 ? parts.join(", ") : "Aucun changement détecté");
 
     // Step 6: Trigger social drafts (non-blocking)
-    triggerSocialDrafts(changes.socialDraftSkus);
+    if (shopifyPush) {
+      triggerSocialDrafts(changes.socialDraftSkus);
+    }
 
     return {
       syncRunId: syncRun.id, totalProducts: aosomProducts.length,
@@ -326,6 +341,60 @@ export async function runSync(options: { dryRun?: boolean } = {}): Promise<SyncR
       status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
     });
     await createNotification("error", "Sync échouée", msg.slice(0, 200));
+    throw err;
+  }
+}
+
+/**
+ * Phase 2: Apply pending Shopify diffs.
+ * Fetches CSV + Shopify, computes diffs, applies only the Shopify mutations.
+ * Designed to run as a separate cron job after the DB sync.
+ */
+export async function runShopifyPush(): Promise<{ updates: number; archived: number; errors: number }> {
+  log("Phase 2: Shopify push — fetch data...");
+  const [aosomProducts, shopifyProducts] = await Promise.all([
+    fetchAosomCatalog(),
+    fetchAllShopifyProducts(),
+  ]);
+  log(`${aosomProducts.length} produits Aosom, ${shopifyProducts.length} produits Shopify`);
+
+  const syncRun = await createSyncRun();
+
+  try {
+    const shopifyResult = await applyToShopify(aosomProducts, shopifyProducts, syncRun.id);
+
+    if (shopifyResult.logEntries.length > 0) {
+      await addSyncLogsBatch(shopifyResult.logEntries);
+    }
+
+    await completeSyncRun(syncRun.id, {
+      status: shopifyResult.errors > 0 && shopifyResult.updates + shopifyResult.archived === 0 ? "failed" : "completed",
+      totalProducts: aosomProducts.length,
+      created: 0, updated: shopifyResult.updates, archived: shopifyResult.archived,
+      errors: shopifyResult.errors, errorMessages: shopifyResult.errorMessages,
+    });
+
+    log(`Shopify push terminé: ${shopifyResult.updates} updates, ${shopifyResult.archived} archivés, ${shopifyResult.errors} erreurs`);
+
+    if (shopifyResult.updates > 0 || shopifyResult.archived > 0 || shopifyResult.errors > 0) {
+      const parts: string[] = [];
+      if (shopifyResult.updates > 0) parts.push(`${shopifyResult.updates} produits mis à jour`);
+      if (shopifyResult.archived > 0) parts.push(`${shopifyResult.archived} archivés`);
+      if (shopifyResult.errors > 0) parts.push(`${shopifyResult.errors} erreurs`);
+      await createNotification(
+        shopifyResult.errors > 0 ? "warning" : "success",
+        "Shopify push terminé",
+        parts.join(", "),
+      );
+    }
+
+    return { updates: shopifyResult.updates, archived: shopifyResult.archived, errors: shopifyResult.errors };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`ERREUR Shopify push: ${msg}`);
+    await completeSyncRun(syncRun.id, {
+      status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
+    });
     throw err;
   }
 }

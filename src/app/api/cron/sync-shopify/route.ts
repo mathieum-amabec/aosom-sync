@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { runSync } from "@/jobs/job1-sync";
+import { runShopifyPush } from "@/jobs/job1-sync";
 import { env } from "@/lib/config";
 
 function verifyCronSecret(header: string | null): boolean {
@@ -11,8 +11,8 @@ function verifyCronSecret(header: string | null): boolean {
 }
 
 /**
- * Cron handler — runs daily sync.
- * Protected by CRON_SECRET header.
+ * Cron handler — Phase 2: apply pending Shopify diffs.
+ * Runs 10 minutes after the DB sync to allow it to complete first.
  */
 export async function GET(request: Request) {
   if (!verifyCronSecret(request.headers.get("authorization"))) {
@@ -20,11 +20,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await runSync({ shopifyPush: false });
+    const result = await runShopifyPush();
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
-    console.error(`[CRON] Sync failed:`, err);
-    return NextResponse.json({ success: false, error: "Sync failed" }, { status: 500 });
+    console.error(`[CRON] Shopify push failed:`, err);
+    return NextResponse.json({ success: false, error: "Shopify push failed" }, { status: 500 });
   }
 }
 
