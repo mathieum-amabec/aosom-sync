@@ -107,40 +107,7 @@ async function _initSchemaImpl(): Promise<void> {
     )`,
   ];
 
-  for (const stmt of schemaStatements) {
-    await db.execute(stmt);
-  }
-
-  // Default settings
-  const defaultSettings: [string, string][] = [
-    ['social_default_language', 'FR'],
-    ['social_post_frequency', '1'],
-    ['social_preferred_hour', '13'],
-    ['social_price_drop_threshold', '10'],
-    ['social_min_days_between_reposts', '30'],
-    ['social_hashtags_fr', '#jardinage #patio #mobilierexterieur #canada'],
-    ['social_hashtags_en', '#garden #patio #outdoorfurniture #canada'],
-    ['social_include_price', 'true'],
-    ['social_include_link', 'true'],
-    ['social_tone', 'promotional'],
-    ['prompt_new_product_fr', 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur. Rédige un post Facebook engageant pour ce nouveau produit : {product_name}. Prix : {price}$. Ton : enthousiaste et accessible. Maximum 150 mots. Termine avec les hashtags : {hashtags}'],
-    ['prompt_new_product_en', 'You are a marketing expert for a Canadian outdoor furniture store. Write an engaging Facebook post for this new product: {product_name}. Price: {price}$. Tone: enthusiastic and approachable. Maximum 150 words. End with hashtags: {hashtags}'],
-    ['prompt_price_drop_fr', 'Tu es un expert en marketing promotionnel québécois. Rédige un post Facebook pour annoncer une baisse de prix sur : {product_name}. Ancien prix : {old_price}$. Nouveau prix : {new_price}$. Mets en valeur les économies. Maximum 120 mots. Hashtags : {hashtags}'],
-    ['prompt_price_drop_en', 'You are a Canadian promotional marketing expert. Write a Facebook post announcing a price drop on: {product_name}. Old price: {old_price}$. New price: {new_price}$. Highlight the savings. Maximum 120 words. Hashtags: {hashtags}'],
-    ['prompt_highlight_fr', 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur. Rédige un post Facebook pour mettre en valeur ce produit populaire de notre catalogue : {product_name}. Prix : {price}$. Stock disponible : {qty} unités. Maximum 130 mots. Hashtags : {hashtags}'],
-    ['prompt_highlight_en', 'You are a marketing expert for a Canadian outdoor furniture store. Write a Facebook post highlighting this popular product from our catalogue: {product_name}. Price: {price}$. Stock: {qty} units available. Maximum 130 words. Hashtags: {hashtags}'],
-    ['social_accent_color', '#2563eb'],
-    ['social_text_color', '#ffffff'],
-    ['social_store_display_name', ''],
-    ['social_banner_opacity', '75'],
-    ['social_logo_position', 'bottom-right'],
-  ];
-
-  for (const [key, value] of defaultSettings) {
-    await db.execute({ sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`, args: [key, value] });
-  }
-
-  // Legacy tables for sync runs and import pipeline
+  // Batch all schema + legacy table creation in a single round trip
   const legacyStatements = [
     `CREATE TABLE IF NOT EXISTS sync_runs (
       id TEXT PRIMARY KEY, started_at TEXT NOT NULL, completed_at TEXT,
@@ -165,9 +132,41 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status)`,
   ];
 
-  for (const stmt of legacyStatements) {
-    await db.execute(stmt);
-  }
+  const allStatements = [...schemaStatements, ...legacyStatements];
+  await db.batch(allStatements.map(sql => ({ sql, args: [] })), "write");
+
+  // Default settings — batch insert
+  const defaultSettings: [string, string][] = [
+    ['social_default_language', 'FR'],
+    ['social_post_frequency', '1'],
+    ['social_preferred_hour', '13'],
+    ['social_price_drop_threshold', '10'],
+    ['social_min_days_between_reposts', '30'],
+    ['social_hashtags_fr', '#jardinage #patio #mobilierexterieur #canada'],
+    ['social_hashtags_en', '#garden #patio #outdoorfurniture #canada'],
+    ['social_include_price', 'true'],
+    ['social_include_link', 'true'],
+    ['social_tone', 'promotional'],
+    ['prompt_new_product_fr', 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur. Rédige un post Facebook engageant pour ce nouveau produit : {product_name}. Prix : {price}$. Ton : enthousiaste et accessible. Maximum 150 mots. Termine avec les hashtags : {hashtags}'],
+    ['prompt_new_product_en', 'You are a marketing expert for a Canadian outdoor furniture store. Write an engaging Facebook post for this new product: {product_name}. Price: {price}$. Tone: enthusiastic and approachable. Maximum 150 words. End with hashtags: {hashtags}'],
+    ['prompt_price_drop_fr', 'Tu es un expert en marketing promotionnel québécois. Rédige un post Facebook pour annoncer une baisse de prix sur : {product_name}. Ancien prix : {old_price}$. Nouveau prix : {new_price}$. Mets en valeur les économies. Maximum 120 mots. Hashtags : {hashtags}'],
+    ['prompt_price_drop_en', 'You are a Canadian promotional marketing expert. Write a Facebook post announcing a price drop on: {product_name}. Old price: {old_price}$. New price: {new_price}$. Highlight the savings. Maximum 120 words. Hashtags: {hashtags}'],
+    ['prompt_highlight_fr', 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur. Rédige un post Facebook pour mettre en valeur ce produit populaire de notre catalogue : {product_name}. Prix : {price}$. Stock disponible : {qty} unités. Maximum 130 mots. Hashtags : {hashtags}'],
+    ['prompt_highlight_en', 'You are a marketing expert for a Canadian outdoor furniture store. Write a Facebook post highlighting this popular product from our catalogue: {product_name}. Price: {price}$. Stock: {qty} units available. Maximum 130 words. Hashtags: {hashtags}'],
+    ['social_accent_color', '#2563eb'],
+    ['social_text_color', '#ffffff'],
+    ['social_store_display_name', ''],
+    ['social_banner_opacity', '75'],
+    ['social_logo_position', 'bottom-right'],
+  ];
+
+  await db.batch(
+    defaultSettings.map(([key, value]) => ({
+      sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
+      args: [key, value],
+    })),
+    "write"
+  );
 
   // Enable WAL and foreign keys for local SQLite
   if (!process.env.TURSO_DATABASE_URL) {
