@@ -2,6 +2,11 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.4.1] - 2026-04-11
+
+### Added
+- Rate limiting on Claude API (30 calls/min) and Shopify push (60 calls/min) endpoints to prevent accidental cost spikes
+
 ## [0.1.4.0] - 2026-04-11
 
 ### Added
