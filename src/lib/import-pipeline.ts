@@ -1,7 +1,8 @@
 import { fetchAosomCatalog } from "./csv-fetcher";
 import { mergeVariants, buildSkuIndex } from "./variant-merger";
 import { generateProductContent, type GeneratedContent } from "./content-generator";
-import { createShopifyProduct } from "./shopify-client";
+import { createShopifyProduct, addProductToCollection } from "./shopify-client";
+import { findCollectionForProduct } from "./database";
 import {
   upsertImportJob,
   getImportJobs as dbGetImportJobs,
@@ -122,6 +123,19 @@ export async function importToShopify(
   try {
     const shopifyId = await createShopifyProduct(product, content);
     await updateImportJob(jobId, { status: "done", shopify_id: shopifyId });
+
+    // Add to collection based on category mapping (non-blocking)
+    const mapping = await findCollectionForProduct(product.productType);
+    if (mapping) {
+      try {
+        await addProductToCollection(shopifyId, mapping.shopifyCollectionId);
+        console.log(`[IMPORT] Added to collection "${mapping.shopifyCollectionTitle}" (${product.productType})`);
+      } catch (err) {
+        console.error(`[IMPORT] Collection assignment failed for ${shopifyId}: ${err}`);
+      }
+    } else {
+      console.log(`[IMPORT] No collection mapping for category: ${product.productType}`);
+    }
 
     // Trigger social draft for new product (async, non-blocking)
     const primarySku = product.variants[0]?.sku;

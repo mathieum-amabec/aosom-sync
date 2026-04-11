@@ -94,6 +94,12 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE TABLE IF NOT EXISTS product_type_counts (
       type TEXT PRIMARY KEY, count INTEGER NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS collection_mappings (
+      aosom_category TEXT PRIMARY KEY,
+      shopify_collection_id TEXT NOT NULL,
+      shopify_collection_title TEXT NOT NULL,
+      updated_at INTEGER DEFAULT (strftime('%s','now'))
+    )`,
     `CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY, value TEXT NOT NULL,
       updated_at INTEGER DEFAULT (strftime('%s','now'))
@@ -400,6 +406,81 @@ export async function getProducts(filters: {
   const productTypes = await getCachedProductTypes(db);
 
   return { products, total, productTypes };
+}
+
+// ─── Collection Mappings ────────────────────────────────────────────
+
+export interface CollectionMapping {
+  aosomCategory: string;
+  shopifyCollectionId: string;
+  shopifyCollectionTitle: string;
+}
+
+export async function getAllCollectionMappings(): Promise<CollectionMapping[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT aosom_category, shopify_collection_id, shopify_collection_title FROM collection_mappings ORDER BY aosom_category`);
+  return result.rows.map(row => {
+    const o = rowToObj(row);
+    return {
+      aosomCategory: o.aosom_category as string,
+      shopifyCollectionId: o.shopify_collection_id as string,
+      shopifyCollectionTitle: o.shopify_collection_title as string,
+    };
+  });
+}
+
+export async function upsertCollectionMapping(mapping: CollectionMapping): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT OR REPLACE INTO collection_mappings (aosom_category, shopify_collection_id, shopify_collection_title, updated_at) VALUES (?, ?, ?, strftime('%s','now'))`,
+    args: [mapping.aosomCategory, mapping.shopifyCollectionId, mapping.shopifyCollectionTitle],
+  });
+}
+
+export async function upsertCollectionMappingsBatch(mappings: CollectionMapping[]): Promise<void> {
+  const db = await ensureSchema();
+  await db.batch(
+    mappings.map(m => ({
+      sql: `INSERT OR REPLACE INTO collection_mappings (aosom_category, shopify_collection_id, shopify_collection_title, updated_at) VALUES (?, ?, ?, strftime('%s','now'))`,
+      args: [m.aosomCategory, m.shopifyCollectionId, m.shopifyCollectionTitle],
+    })),
+    "write"
+  );
+}
+
+export async function deleteCollectionMapping(aosomCategory: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `DELETE FROM collection_mappings WHERE aosom_category = ?`, args: [aosomCategory] });
+}
+
+export async function findCollectionForProduct(productType: string): Promise<CollectionMapping | null> {
+  const db = await ensureSchema();
+  // Try exact match first
+  let result = await db.execute({ sql: `SELECT * FROM collection_mappings WHERE aosom_category = ?`, args: [productType] });
+  if (result.rows.length > 0) {
+    const o = rowToObj(result.rows[0]);
+    return { aosomCategory: o.aosom_category as string, shopifyCollectionId: o.shopify_collection_id as string, shopifyCollectionTitle: o.shopify_collection_title as string };
+  }
+  // Try matching parent categories (walk up the hierarchy)
+  const parts = productType.split(">").map(s => s.trim());
+  for (let i = parts.length - 1; i >= 1; i--) {
+    const parent = parts.slice(0, i).join(" > ");
+    result = await db.execute({ sql: `SELECT * FROM collection_mappings WHERE aosom_category = ?`, args: [parent] });
+    if (result.rows.length > 0) {
+      const o = rowToObj(result.rows[0]);
+      return { aosomCategory: o.aosom_category as string, shopifyCollectionId: o.shopify_collection_id as string, shopifyCollectionTitle: o.shopify_collection_title as string };
+    }
+  }
+  return null;
+}
+
+export async function getProductsWithShopifyId(): Promise<{ sku: string; product_type: string; shopify_product_id: string }[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT sku, product_type, shopify_product_id FROM products WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''`);
+  return result.rows.map(row => {
+    const o = rowToObj(row);
+    return { sku: o.sku as string, product_type: o.product_type as string, shopify_product_id: o.shopify_product_id as string };
+  });
 }
 
 export async function getProductCount(): Promise<number> {
