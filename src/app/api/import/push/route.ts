@@ -1,8 +1,18 @@
 import { NextResponse } from "next/server";
 import { importToShopify } from "@/lib/import-pipeline";
+import { checkRateLimit } from "@/lib/rate-limiter";
 
 export async function POST(request: Request) {
   try {
+    // Rate limit: 60 Shopify API calls per minute
+    const { allowed, retryAfterMs } = checkRateLimit("shopify-push", 60, 60_000);
+    if (!allowed) {
+      return NextResponse.json(
+        { success: false, error: "Rate limit exceeded. Try again shortly.", retryAfter: Math.ceil(retryAfterMs / 1000) },
+        { status: 429 }
+      );
+    }
+
     const { jobId, content } = await request.json();
     if (!jobId || typeof jobId !== "string" || jobId.length > 100) {
       return NextResponse.json({ success: false, error: "Valid jobId required" }, { status: 400 });
