@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.3.0] - 2026-04-11
+
+### Added
+- Products are now automatically placed into the correct Shopify collection when imported, based on their Aosom category
+- New /collections page to view and edit category-to-collection mappings with dropdown selectors
+- "Sync Collections" button to assign existing Shopify products to their mapped collections in batch
+- 35 pre-seeded mappings covering all 8 top-level Aosom categories (Patio, Home, Pets, Toys, Office, Sports, etc.)
+- Hierarchical category matching: if "Patio > Furniture > Bistro Sets" has no exact mapping, it walks up to "Patio > Furniture" automatically
+- Collections link added to the sidebar navigation
+
+### Changed
+- Collection sync uses in-memory mapping lookup instead of per-product DB queries (N+1 fix)
+
 ## [0.1.1.0] - 2026-04-06
 
 ### Changed
