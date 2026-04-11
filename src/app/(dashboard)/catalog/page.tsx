@@ -8,6 +8,7 @@ interface CatalogProduct {
   qty: number;
   color: string;
   product_type: string;
+  image1: string;
   psin: string;
   import_status: string | null;
   [key: string]: unknown;
@@ -110,7 +111,7 @@ export default function CatalogPage() {
       });
       if (res.ok) {
         setSelected(new Set());
-        alert(`${skus.length} products queued for import`);
+        window.location.href = "/import";
       }
     } catch {
       alert("Failed to queue products");
@@ -286,9 +287,9 @@ export default function CatalogPage() {
                         />
                       </td>
                       <td className="px-4 py-2">
-                        {product.image ? (
+                        {product.image1 ? (
                           <img
-                            src={product.image as string}
+                            src={product.image1 as string}
                             alt=""
                             className="w-10 h-10 object-cover rounded bg-gray-800"
                             loading="lazy"
