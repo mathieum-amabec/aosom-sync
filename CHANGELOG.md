@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.4.0] - 2026-04-11
+
+### Added
+- Bulk generate: process all pending products to Shopify in one click with "Generate All Pending"
+- Select individual products with checkboxes, then "Generate Selected" for partial batches
+- Live progress bar with success/error counters and estimated time remaining
+- "Stop" button to cancel a bulk operation mid-batch
+- "Retry Failed" button to re-process only errored products
+- Confirmation dialog before starting bulk operations
+- 5th stat card showing error count
+
+### Changed
+- Import page now shows checkboxes for pending products and "Select all pending" toggle
+- Status badges show "importing..." during Shopify push phase
+
 ## [0.1.3.0] - 2026-04-11
 
 ### Added

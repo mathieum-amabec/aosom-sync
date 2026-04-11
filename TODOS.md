@@ -71,4 +71,5 @@
 
 ## Completed
 
-(aucun item complété pour l'instant)
+### Bulk Generate — Pousser tous les produits vers Shopify en batch
+**Completed:** v0.1.4.0 (2026-04-11)
