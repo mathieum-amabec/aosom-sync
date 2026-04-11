@@ -24,6 +24,7 @@ import {
   completeSyncRun,
   addSyncLogsBatch,
   refreshProducts,
+  rebuildProductTypeCounts,
   recordPriceChanges,
   getProduct,
   getAllProductsMap,
@@ -279,6 +280,9 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
     log("Mise à jour de la table products...");
     await refreshProducts(aosomProducts.map(aosomToProductRow));
     log(`${aosomProducts.length} produits upsertés`);
+
+    log("Mise à jour des compteurs de catégories...");
+    await rebuildProductTypeCounts();
 
     if (changes.priceChangeEntries.length > 0) {
       await recordPriceChanges(changes.priceChangeEntries);

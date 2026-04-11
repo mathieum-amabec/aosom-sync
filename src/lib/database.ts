@@ -91,6 +91,9 @@ async function _initSchemaImpl(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read)`,
     `CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at)`,
+    `CREATE TABLE IF NOT EXISTS product_type_counts (
+      type TEXT PRIMARY KEY, count INTEGER NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY, value TEXT NOT NULL,
       updated_at INTEGER DEFAULT (strftime('%s','now'))
@@ -295,14 +298,28 @@ export async function getAllProductsMap(): Promise<Map<string, ProductRow>> {
   return map;
 }
 
-// ─── Product Type Cache (avoid full table scan on every catalog page load) ──
-let _productTypesCache: { types: { type: string; count: number }[]; ts: number } | null = null;
-const PRODUCT_TYPES_TTL_MS = 10 * 60 * 1000; // 10 minutes
+// ─── Product Type Counts (pre-computed table, rebuilt during sync) ──
 
 async function getCachedProductTypes(db: ReturnType<typeof getDb>): Promise<{ type: string; count: number }[]> {
-  if (_productTypesCache && Date.now() - _productTypesCache.ts < PRODUCT_TYPES_TTL_MS) {
-    return _productTypesCache.types;
+  const result = await db.execute(`SELECT type, count FROM product_type_counts ORDER BY type`);
+  if (result.rows.length > 0) {
+    return result.rows.map(row => {
+      const o = rowToObj(row);
+      return { type: o.type as string, count: Number(o.count) || 0 };
+    });
   }
+  // Fallback: compute and persist if table is empty (first run after migration)
+  await rebuildProductTypeCounts();
+  const fallback = await db.execute(`SELECT type, count FROM product_type_counts ORDER BY type`);
+  return fallback.rows.map(row => {
+    const o = rowToObj(row);
+    return { type: o.type as string, count: Number(o.count) || 0 };
+  });
+}
+
+/** Rebuild the product_type_counts table. Called after sync upserts products. */
+export async function rebuildProductTypeCounts(): Promise<void> {
+  const db = await ensureSchema();
   const typeResult = await db.execute(
     `SELECT product_type, COUNT(*) as cnt FROM products WHERE product_type != '' GROUP BY product_type ORDER BY product_type`
   );
@@ -318,9 +335,11 @@ async function getCachedProductTypes(db: ReturnType<typeof getDb>): Promise<{ ty
       typeCounts.set(p, (typeCounts.get(p) || 0) + cnt);
     }
   }
-  const types = Array.from(typeCounts.entries()).map(([type, count]) => ({ type, count })).sort((a, b) => a.type.localeCompare(b.type));
-  _productTypesCache = { types, ts: Date.now() };
-  return types;
+  // Rebuild table
+  await db.execute(`DELETE FROM product_type_counts`);
+  for (const [type, count] of typeCounts) {
+    await db.execute({ sql: `INSERT INTO product_type_counts (type, count) VALUES (?, ?)`, args: [type, count] });
+  }
 }
 
 export async function getProducts(filters: {
