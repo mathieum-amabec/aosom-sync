@@ -293,6 +293,34 @@ export async function getAllProductsMap(): Promise<Map<string, ProductRow>> {
   return map;
 }
 
+// ─── Product Type Cache (avoid full table scan on every catalog page load) ──
+let _productTypesCache: { types: { type: string; count: number }[]; ts: number } | null = null;
+const PRODUCT_TYPES_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+async function getCachedProductTypes(db: ReturnType<typeof getDb>): Promise<{ type: string; count: number }[]> {
+  if (_productTypesCache && Date.now() - _productTypesCache.ts < PRODUCT_TYPES_TTL_MS) {
+    return _productTypesCache.types;
+  }
+  const typeResult = await db.execute(
+    `SELECT product_type, COUNT(*) as cnt FROM products WHERE product_type != '' GROUP BY product_type ORDER BY product_type`
+  );
+  const typeCounts = new Map<string, number>();
+  for (const row of typeResult.rows) {
+    const o = rowToObj(row);
+    const pt = (o.product_type as string) || "";
+    const cnt = Number(o.cnt) || 0;
+    const parts = pt.split(">").map((s: string) => s.trim());
+    let p = "";
+    for (const part of parts) {
+      p = p ? `${p} > ${part}` : part;
+      typeCounts.set(p, (typeCounts.get(p) || 0) + cnt);
+    }
+  }
+  const types = Array.from(typeCounts.entries()).map(([type, count]) => ({ type, count })).sort((a, b) => a.type.localeCompare(b.type));
+  _productTypesCache = { types, ts: Date.now() };
+  return types;
+}
+
 export async function getProducts(filters: {
   productType?: string;
   search?: string;
@@ -333,36 +361,25 @@ export async function getProducts(filters: {
     case "low_stock": orderBy = "CASE WHEN qty > 0 THEN 0 ELSE 1 END, qty ASC"; break;
   }
 
-  const countResult = await db.execute({ sql: `SELECT COUNT(*) as cnt FROM products ${where}`, args });
-  const total = Number(rowToObj(countResult.rows[0]).cnt) || 0;
+  // Select only columns the catalog UI needs (skip description, short_description, images 2-7, video)
+  const catalogColumns = "sku, name, price, qty, color, size, product_type, image1, material, gtin, weight, out_of_stock_expected, estimated_arrival, shopify_product_id, shopify_variant_id, last_seen_at";
 
-  const productsResult = await db.execute({
-    sql: `SELECT * FROM products ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
-    args: [...args, limit, offset],
-  });
+  // Run count + data in parallel (2 round trips instead of 3)
+  const [countResult, productsResult] = await Promise.all([
+    db.execute({ sql: `SELECT COUNT(*) as cnt FROM products ${where}`, args }),
+    db.execute({
+      sql: `SELECT ${catalogColumns} FROM products ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+      args: [...args, limit, offset],
+    }),
+  ]);
+
+  const total = Number(rowToObj(countResult.rows[0]).cnt) || 0;
   const products = productsResult.rows.map(rowToProduct);
 
-  const typeResult = await db.execute(
-    `SELECT product_type, COUNT(*) as cnt FROM products WHERE product_type != '' GROUP BY product_type ORDER BY product_type`
-  );
-  const typeCounts = new Map<string, number>();
-  for (const row of typeResult.rows) {
-    const o = rowToObj(row);
-    const pt = (o.product_type as string) || "";
-    const cnt = Number(o.cnt) || 0;
-    const parts = pt.split(">").map((s: string) => s.trim());
-    let p = "";
-    for (const part of parts) {
-      p = p ? `${p} > ${part}` : part;
-      typeCounts.set(p, (typeCounts.get(p) || 0) + cnt);
-    }
-  }
+  // Product types: use cached value (refreshed on sync, not on every page load)
+  const productTypes = await getCachedProductTypes(db);
 
-  return {
-    products,
-    total,
-    productTypes: Array.from(typeCounts.entries()).map(([type, count]) => ({ type, count })).sort((a, b) => a.type.localeCompare(b.type)),
-  };
+  return { products, total, productTypes };
 }
 
 export async function getProductCount(): Promise<number> {
