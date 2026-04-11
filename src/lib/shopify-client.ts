@@ -224,6 +224,46 @@ export async function draftShopifyProduct(shopifyId: string): Promise<void> {
   await updateShopifyProduct(shopifyId, { status: "draft" });
 }
 
+/**
+ * Add a product to a collection via the Collects API.
+ */
+export async function addProductToCollection(productId: string, collectionId: string): Promise<void> {
+  const response = await shopifyFetch("/collects.json", {
+    method: "POST",
+    body: JSON.stringify({ collect: { product_id: Number(productId), collection_id: Number(collectionId) } }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    // 422 = already in collection, not an error
+    if (response.status === 422 && text.includes("already")) return;
+    throw new Error(`Shopify collect failed: ${response.status} — ${text}`);
+  }
+}
+
+/**
+ * Get all collection IDs a product belongs to.
+ */
+export async function getProductCollections(productId: string): Promise<string[]> {
+  const response = await shopifyFetch(`/collects.json?product_id=${productId}`);
+  if (!response.ok) return [];
+  const data = await response.json();
+  return (data.collects || []).map((c: Record<string, unknown>) => String(c.collection_id));
+}
+
+/**
+ * Fetch all custom collections from Shopify.
+ */
+export async function fetchAllCollections(): Promise<{ id: string; title: string; handle: string }[]> {
+  const response = await shopifyFetch("/custom_collections.json?limit=250");
+  if (!response.ok) return [];
+  const data = await response.json();
+  return (data.custom_collections || []).map((c: Record<string, unknown>) => ({
+    id: String(c.id),
+    title: c.title as string,
+    handle: c.handle as string,
+  }));
+}
+
 function parseLinkHeader(header: string | null): string | null {
   if (!header) return null;
   const match = header.match(/<[^>]*page_info=([^&>]+)[^>]*>;\s*rel="next"/);
