@@ -1,0 +1,29 @@
+name: Vercel Production Deploy
+
+# Fallback auto-deploy via Vercel deploy hook. We ping the hook on every
+# push to main because the native GitHub -> Vercel webhook integration
+# has been unreliable (PR #12 and #13 merged without triggering deploys).
+#
+# The hook URL is a capability URL — anyone who knows it can trigger a
+# production build, so it lives in a GitHub Actions secret instead of the
+# repo (this repo is public). To rotate: create a new hook via the Vercel
+# API and update the VERCEL_DEPLOY_HOOK_URL secret.
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel production deploy
+        env:
+          HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK_URL" ]; then
+            echo "VERCEL_DEPLOY_HOOK_URL secret not set — skipping deploy ping"
+            exit 0
+          fi
+          curl -sS -X POST "$HOOK_URL" -w "\nHTTP %{http_code}\n"

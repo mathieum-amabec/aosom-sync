@@ -30,11 +30,18 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
   }
   const caption = meta.language === "FR" ? draft.postText : draft.postTextEn!;
 
+  // Pick a public image URL. Both platforms now require one (Facebook via Graph API
+  // `url` param, Instagram via media container).
+  // Priority: draft.imageUrl (v0.1.5.0+ snapshot) → draft.productImage (JOIN fallback
+  // for legacy drafts created before imageUrl was populated).
+  const imageUrl = draft.imageUrl || draft.productImage || null;
+
   try {
     if (meta.platform === "facebook") {
       const brand = meta.brand as FacebookBrand;
-      const result = draft.imagePath
-        ? await publishWithImage({ caption, imagePath: draft.imagePath, brand })
+      // Image post when we have a URL; text post otherwise.
+      const result = imageUrl
+        ? await publishWithImage({ caption, imageUrl, brand })
         : await publishText({ message: caption, brand });
       return {
         status: "published",
@@ -44,12 +51,12 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
     }
 
     if (meta.platform === "instagram") {
-      if (!draft.imageUrl) {
-        return { status: "error", error: "No public image URL available for Instagram" };
+      if (!imageUrl) {
+        return { status: "error", error: "No public image URL available for Instagram (draft.imageUrl is null — regenerate draft)" };
       }
       const result = await publishPhoto({
         caption,
-        imageUrl: draft.imageUrl,
+        imageUrl,
         brand: meta.brand as "ameublo" | "furnish",
       });
       return {

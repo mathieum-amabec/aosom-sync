@@ -1,6 +1,4 @@
-import fs from "fs";
 import { env, FACEBOOK } from "./config";
-import { resolveImagePath } from "./image-composer";
 
 /**
  * Facebook Graph API wrapper for multi-brand Page publishing.
@@ -8,6 +6,11 @@ import { resolveImagePath } from "./image-composer";
  *
  * Brand selection: pass `brand: "ameublo" | "furnish"` to pick which Page to publish to.
  * Each brand resolves to its own Page ID + Page Access Token from env.
+ *
+ * Image upload: we pass a public image URL to the Graph API `/photos` endpoint.
+ * Meta fetches the image server-side. We DO NOT upload binaries because Vercel
+ * serverless /tmp is per-instance and ephemeral — the file written during
+ * `generate` is not reachable from the `publish` request. Same mechanism as IG.
  */
 
 export type FacebookBrand = "ameublo" | "furnish";
@@ -48,32 +51,34 @@ export async function testConnection(brand: FacebookBrand = "ameublo"): Promise<
 
 /**
  * Publish a post with an image to a brand's Facebook Page.
+ * imageUrl MUST be a public HTTP URL — Meta fetches it server-side.
+ *
+ * Historically this function read the composed image from /tmp and uploaded
+ * binary. That broke on Vercel because /tmp is per-serverless-instance:
+ * the file written during `generate` doesn't exist when `publish` runs.
+ * Now we pass a URL and let Meta pull the image.
  */
 export async function publishWithImage(opts: {
   caption: string;
-  imagePath: string;
+  imageUrl: string;
   brand: FacebookBrand;
   scheduledAt?: number;
 }): Promise<PublishResult> {
   const { pageId, token, label } = brandCreds(opts.brand);
 
-  const absPath = resolveImagePath(opts.imagePath);
-  if (!fs.existsSync(absPath)) throw new Error(`Image not found: ${absPath}`);
-
-  const formData = new FormData();
-  const imageBuffer = fs.readFileSync(absPath);
-  formData.append("source", new Blob([imageBuffer], { type: "image/jpeg" }), "image.jpg");
-  formData.append("message", opts.caption);
-
+  const body: Record<string, string> = {
+    url: opts.imageUrl,
+    message: opts.caption,
+  };
   if (opts.scheduledAt) {
-    formData.append("published", "false");
-    formData.append("scheduled_publish_time", String(opts.scheduledAt));
+    body.published = "false";
+    body.scheduled_publish_time = String(opts.scheduledAt);
   }
 
   const res = await fetch(`${FACEBOOK.GRAPH_API_URL}/${pageId}/photos`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: formData,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
   });
 
   if (res.status === 429) {

@@ -2,6 +2,11 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.5.2] - 2026-04-11
+
+### Fixed
+- Publishing a social draft to Facebook no longer returns "Internal server error". The old code wrote the composed image to `/tmp/social-images/*.jpg` during draft generation and tried to read it back from disk at publish time, but Vercel serverless `/tmp` is per-instance and ephemeral. The publish request hit a different instance, the file was missing, and the upload crashed. The fix: hand Facebook a public image URL (same mechanism already used for Instagram) and let Meta fetch the image server-side. No more disk reads on the publish path.
+
 ## [0.1.5.1] - 2026-04-11
 
 ### Fixed
