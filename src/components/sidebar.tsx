@@ -71,9 +71,22 @@ const NAV_ITEMS = [
   },
 ];
 
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const update = () => setIsDesktop(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+  return isDesktop;
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const isDesktop = useIsDesktop();
 
   useEffect(() => {
     setMobileOpen(false);
@@ -95,7 +108,7 @@ export function Sidebar() {
           Aosom Sync
         </h1>
         <div className="flex items-center gap-2">
-          <NotificationBell />
+          {!isDesktop && <NotificationBell />}
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
@@ -122,7 +135,7 @@ export function Sidebar() {
           bg-gray-900 border-r border-gray-800 flex flex-col
           fixed inset-y-0 left-0 w-64 z-50 transition-transform duration-300
           ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
-          md:translate-x-0 md:sticky md:top-0 md:w-60 md:h-screen md:z-auto
+          md:translate-x-0 md:sticky md:top-0 md:inset-auto md:w-60 md:h-screen md:z-auto
         `}
       >
         <div className="p-5 border-b border-gray-800 flex items-center justify-between">
@@ -133,9 +146,11 @@ export function Sidebar() {
             <p className="text-xs text-gray-500 mt-0.5">Catalogue Manager</p>
           </div>
           <div className="flex items-center gap-1">
-            <div className="hidden md:block">
-              <NotificationBell />
-            </div>
+            {isDesktop && (
+              <div className="hidden md:block">
+                <NotificationBell />
+              </div>
+            )}
             <button
               type="button"
               onClick={() => setMobileOpen(false)}
