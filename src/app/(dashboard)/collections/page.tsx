@@ -108,26 +108,26 @@ export default function CollectionsPage() {
   const mappedCount = categories.filter(c => mappingMap.has(c.type)).length;
 
   return (
-    <div className="p-8 max-w-5xl">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 md:p-8 max-w-5xl">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Collection Mapping</h2>
           <p className="text-gray-400 text-sm mt-0.5">
             Map Aosom categories to Shopify collections ({mappedCount}/{categories.length} mapped)
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <button
             onClick={syncCollections}
             disabled={syncing}
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+            className="w-full sm:w-auto px-4 py-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
           >
             {syncing ? "Syncing..." : "Sync Collections"}
           </button>
           <button
             onClick={saveMappings}
             disabled={saving}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
+            className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors"
           >
             {saving ? "Saving..." : "Save Mapping"}
           </button>
@@ -149,7 +149,7 @@ export default function CollectionsPage() {
       )}
 
       {/* Filters */}
-      <div className="flex gap-3 mb-4">
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <input
           type="text"
           placeholder="Search categories..."
@@ -173,8 +173,8 @@ export default function CollectionsPage() {
           <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
         </div>
       ) : (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
+          <table className="w-full text-sm min-w-[520px]">
             <thead>
               <tr className="border-b border-gray-800 text-gray-400">
                 <th className="px-4 py-3 text-left font-medium">Aosom Category</th>

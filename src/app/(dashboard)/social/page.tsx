@@ -199,8 +199,8 @@ export default function SocialPage() {
   const calendarDrafts = drafts.filter((d) => d.scheduledAt || d.publishedAt);
 
   return (
-    <div className="p-8 max-w-6xl">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 md:p-8 max-w-6xl">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Social Media</h2>
           <p className="text-gray-400 text-sm mt-1">
@@ -210,13 +210,13 @@ export default function SocialPage() {
         <button
           onClick={generateHighlight}
           disabled={generating}
-          className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors"
+          className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors"
         >
           {generating ? "Generating..." : "Generate Highlight"}
         </button>
       </div>
 
-      <div className="grid grid-cols-5 gap-3 mb-6">
+      <div className="grid grid-cols-3 md:grid-cols-5 gap-2 md:gap-3 mb-6">
         {[
           { label: "Total", value: stats.total, color: "text-white" },
           { label: "Drafts", value: stats.draft, color: "text-gray-400" },
@@ -224,20 +224,20 @@ export default function SocialPage() {
           { label: "Scheduled", value: stats.scheduled, color: "text-blue-400" },
           { label: "Published", value: stats.published, color: "text-purple-400" },
         ].map((s) => (
-          <div key={s.label} className="p-3 bg-gray-900 border border-gray-800 rounded-xl text-center">
-            <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
-            <p className="text-xs text-gray-500 mt-1">{s.label}</p>
+          <div key={s.label} className="p-2 md:p-3 bg-gray-900 border border-gray-800 rounded-xl text-center">
+            <p className={`text-lg md:text-xl font-bold ${s.color}`}>{s.value}</p>
+            <p className="text-[10px] md:text-xs text-gray-500 mt-1">{s.label}</p>
           </div>
         ))}
       </div>
 
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+        <div className="flex gap-2 overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap">
           {["all", "draft", "approved", "scheduled", "published", "rejected"].map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+              className={`shrink-0 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
                 filter === f ? "bg-blue-600/20 border-blue-600 text-blue-400" : "border-gray-700 text-gray-400 hover:text-white"
               }`}
             >
@@ -283,12 +283,12 @@ export default function SocialPage() {
 
               return (
                 <div key={draft.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                  <div className="flex gap-4">
+                  <div className="flex flex-col md:flex-row gap-4">
                     <div className="shrink-0">
                       {thumbSrc ? (
-                        <img src={thumbSrc} alt="" className="w-32 h-[67px] rounded-lg object-cover bg-gray-800" />
+                        <img src={thumbSrc} alt="" className="w-full md:w-32 h-40 md:h-[67px] rounded-lg object-cover bg-gray-800" />
                       ) : (
-                        <div className="w-32 h-[67px] rounded-lg bg-gray-800 flex items-center justify-center text-gray-600 text-xs">
+                        <div className="w-full md:w-32 h-40 md:h-[67px] rounded-lg bg-gray-800 flex items-center justify-center text-gray-600 text-xs">
                           No image
                         </div>
                       )}
@@ -475,7 +475,7 @@ export default function SocialPage() {
                     </div>
 
                     {draft.status !== "rejected" && (
-                      <div className="flex flex-col gap-1 shrink-0">
+                      <div className="grid grid-cols-2 md:flex md:flex-col gap-1 md:shrink-0">
                         {draft.status === "draft" && (
                           <button onClick={() => doAction("approve", draft.id)} className="px-3 py-1.5 bg-green-600/20 text-green-400 text-xs rounded-lg hover:bg-green-600/30 border border-green-800/50">
                             Approve

@@ -55,7 +55,7 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
   }
 
   return (
-    <div className="p-8 max-w-5xl">
+    <div className="p-4 md:p-8 max-w-5xl">
       <h2 className="text-2xl font-bold text-white mb-1">Dashboard</h2>
       <p className="text-gray-400 text-sm mb-8">
         Aosom catalogue sync overview
@@ -64,7 +64,7 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
       {/* Last Sync Banner */}
       {latestRun && (
         <div
-          className={`mb-6 p-4 rounded-xl border text-sm flex items-center justify-between ${
+          className={`mb-6 p-4 rounded-xl border text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 ${
             latestRun.status === "completed"
               ? "bg-green-950/20 border-green-800/40 text-green-300"
               : latestRun.status === "failed"
@@ -213,8 +213,8 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
           </p>
         </div>
       ) : (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-x-auto">
+          <table className="w-full text-sm min-w-[600px]">
             <thead>
               <tr className="border-b border-gray-800 text-gray-400">
                 <th className="text-left px-4 py-3 font-medium">Date</th>
