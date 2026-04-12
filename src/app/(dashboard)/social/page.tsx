@@ -270,15 +270,23 @@ export default function SocialPage() {
               const previewText = lang === "FR" ? draft.postText : draft.postTextEn || draft.postText;
               const hasEn = !!draft.postTextEn;
               const failedChannels = Object.entries(draft.channels || {}).filter(([, s]) => s.status === "error");
+              // Pick a browser-loadable thumbnail.
+              // draft.imagePath on Vercel is an absolute serverless filesystem path ("/tmp/social-images/...")
+              // used only for Facebook binary upload, not for rendering. Skip those and fall back to the
+              // public Aosom CDN image (new drafts: imageUrl, legacy drafts: productImage via JOIN).
+              // Local dev's composed path "/social-images/..." IS a valid public URL and renders fine.
+              const thumbSrc =
+                (draft.imagePath && !draft.imagePath.startsWith("/tmp/") ? draft.imagePath : null) ||
+                draft.imageUrl ||
+                draft.productImage ||
+                null;
 
               return (
                 <div key={draft.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="flex gap-4">
                     <div className="shrink-0">
-                      {draft.imagePath ? (
-                        <img src={draft.imagePath} alt="" className="w-32 h-[67px] rounded-lg object-cover bg-gray-800" />
-                      ) : draft.productImage ? (
-                        <img src={draft.productImage} alt="" className="w-32 h-[67px] rounded-lg object-cover bg-gray-800" />
+                      {thumbSrc ? (
+                        <img src={thumbSrc} alt="" className="w-32 h-[67px] rounded-lg object-cover bg-gray-800" />
                       ) : (
                         <div className="w-32 h-[67px] rounded-lg bg-gray-800 flex items-center justify-center text-gray-600 text-xs">
                           No image
