@@ -32,7 +32,7 @@ export default function SyncHistoryPage() {
   }
 
   return (
-    <div className="p-8 max-w-6xl">
+    <div className="p-4 md:p-8 max-w-6xl">
       <h2 className="text-2xl font-bold text-white mb-1">Sync History</h2>
       <p className="text-gray-400 text-sm mb-8">
         Past sync runs and detailed change logs
@@ -143,7 +143,7 @@ export default function SyncHistoryPage() {
           ) : (
             <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
               <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
-                <table className="w-full text-sm">
+                <table className="w-full text-sm min-w-[560px]">
                   <thead className="sticky top-0 bg-gray-900">
                     <tr className="border-b border-gray-800 text-gray-400">
                       <th className="px-4 py-3 text-left font-medium">

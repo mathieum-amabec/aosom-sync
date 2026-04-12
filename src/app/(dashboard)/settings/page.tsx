@@ -214,8 +214,8 @@ export default function SettingsPage() {
   if (loading) return <div className="p-8 text-gray-500">Loading settings...</div>;
 
   return (
-    <div className="p-8 max-w-4xl">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 md:p-8 max-w-4xl">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Settings</h2>
           <p className="text-gray-400 text-sm mt-1">Configure sync, social media, and API connections</p>
@@ -224,7 +224,7 @@ export default function SettingsPage() {
           <button
             onClick={saveChanges}
             disabled={saving}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 disabled:opacity-50"
+            className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 disabled:opacity-50"
           >
             {saving ? "Saving..." : `Save ${dirty.size} change${dirty.size > 1 ? "s" : ""}`}
           </button>
@@ -233,7 +233,7 @@ export default function SettingsPage() {
 
       <div className="space-y-6">
         {SECTIONS.map((section) => (
-          <div key={section.title} className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+          <div key={section.title} className="bg-gray-900 border border-gray-800 rounded-xl p-4 md:p-5">
             <h3 className="text-white font-semibold mb-4">{section.title}</h3>
             <div className="space-y-4">
               {section.fields.map((field) => (
@@ -278,7 +278,7 @@ export default function SettingsPage() {
                       type="number"
                       value={settings[field.key] || ""}
                       onChange={(e) => updateField(field.key, e.target.value)}
-                      className="w-32 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300"
+                      className="w-full sm:w-32 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300"
                     />
                   ) : field.type === "textarea" ? (
                     <textarea
