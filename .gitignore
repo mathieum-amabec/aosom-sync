@@ -40,6 +40,9 @@ yarn-error.log*
 /data/*.db-shm
 /data/*.db.backup
 
+# Forensic backups (private product data from Shopify exports)
+/data/shopify-backup/
+
 # Generated social images
 /public/social-images/
 
