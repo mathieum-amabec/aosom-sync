@@ -2,19 +2,29 @@
 
 import { useState, useEffect, useCallback } from "react";
 
+interface ChannelState {
+  status: "pending" | "published" | "error" | "skipped";
+  publishedId?: string;
+  publishedAt?: number;
+  error?: string;
+}
+
 interface Draft {
   id: number;
   sku: string;
   triggerType: string;
   language: string;
   postText: string;
+  postTextEn: string | null;
   imagePath: string | null;
+  imageUrl: string | null;
   oldPrice: number | null;
   newPrice: number | null;
   status: string;
   scheduledAt: number | null;
   publishedAt: number | null;
   facebookPostId: string | null;
+  channels: Record<string, ChannelState>;
   createdAt: number;
   productName?: string;
   productImage?: string;
@@ -34,27 +44,80 @@ const TRIGGER_LABELS: Record<string, string> = {
   stock_highlight: "Highlight",
 };
 
+const CHANNEL_LABELS: Record<string, { short: string; long: string; lang: "FR" | "EN"; platform: "fb" | "ig" }> = {
+  fb_ameublo: { short: "FB Ameublo", long: "Facebook Ameublo Direct (FR)", lang: "FR", platform: "fb" },
+  fb_furnish: { short: "FB Furnish", long: "Facebook Furnish Direct (EN)", lang: "EN", platform: "fb" },
+  ig_ameublo: { short: "IG Ameublo", long: "Instagram Ameublo Direct (FR)", lang: "FR", platform: "ig" },
+  ig_furnish: { short: "IG Furnish", long: "Instagram Furnish Direct (EN)", lang: "EN", platform: "ig" },
+};
+
+const DEFAULT_CHANNELS: string[] = ["fb_ameublo", "fb_furnish", "ig_ameublo"];
+
+function ChannelBadge({ channelKey, state }: { channelKey: string; state: ChannelState }) {
+  const label = CHANNEL_LABELS[channelKey]?.short || channelKey;
+  const color =
+    state.status === "published"
+      ? "bg-green-900/40 text-green-400 border-green-800/50"
+      : state.status === "error"
+      ? "bg-red-900/40 text-red-400 border-red-800/50"
+      : "bg-gray-800 text-gray-400 border-gray-700";
+  return (
+    <span
+      title={state.error || state.publishedId || ""}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border ${color}`}
+    >
+      {state.status === "published" ? "✓ " : state.status === "error" ? "✗ " : ""}
+      {label}
+    </span>
+  );
+}
+
 export default function SocialPage() {
   const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [activeChannels, setActiveChannels] = useState<string[]>(DEFAULT_CHANNELS);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
   const [generating, setGenerating] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editText, setEditText] = useState("");
+  const [editTextFr, setEditTextFr] = useState("");
+  const [editTextEn, setEditTextEn] = useState("");
+  const [editTab, setEditTab] = useState<"fr" | "en">("fr");
   const [scheduleId, setScheduleId] = useState<number | null>(null);
   const [scheduleDate, setScheduleDate] = useState("");
+  const [publishId, setPublishId] = useState<number | null>(null);
+  const [publishChannels, setPublishChannels] = useState<Set<string>>(new Set(DEFAULT_CHANNELS));
+  const [publishing, setPublishing] = useState(false);
   const [view, setView] = useState<"list" | "calendar">("list");
+  const [previewLang, setPreviewLang] = useState<Record<number, "FR" | "EN">>({});
 
   const fetchDrafts = useCallback(async () => {
-    setLoading(true);
     const params = filter !== "all" ? `?status=${filter}` : "";
     const res = await fetch(`/api/social${params}`);
     const data = await res.json();
-    if (data.success) setDrafts(data.data);
+    if (data.success) {
+      setDrafts(data.data);
+      if (Array.isArray(data.activeChannels)) setActiveChannels(data.activeChannels);
+    }
     setLoading(false);
   }, [filter]);
 
-  useEffect(() => { fetchDrafts(); }, [fetchDrafts]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const params = filter !== "all" ? `?status=${filter}` : "";
+      const res = await fetch(`/api/social${params}`);
+      const data = await res.json();
+      if (cancelled) return;
+      if (data.success) {
+        setDrafts(data.data);
+        if (Array.isArray(data.activeChannels)) setActiveChannels(data.activeChannels);
+      }
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [filter]);
 
   async function doAction(action: string, id: number, extra?: Record<string, unknown>) {
     const res = await fetch("/api/social", {
@@ -63,8 +126,9 @@ export default function SocialPage() {
       body: JSON.stringify({ action, id, ...extra }),
     });
     const data = await res.json();
-    if (!data.success) alert(`Error: ${data.error}`);
+    if (!data.success && data.error) alert(`Error: ${data.error}`);
     fetchDrafts();
+    return data;
   }
 
   async function generateHighlight() {
@@ -79,7 +143,7 @@ export default function SocialPage() {
   }
 
   function saveEdit(id: number) {
-    doAction("update", id, { postText: editText });
+    doAction("update", id, { postText: editTextFr, postTextEn: editTextEn });
     setEditingId(null);
   }
 
@@ -87,6 +151,41 @@ export default function SocialPage() {
     const ts = Math.floor(new Date(scheduleDate).getTime() / 1000);
     doAction("schedule", id, { scheduledAt: ts });
     setScheduleId(null);
+  }
+
+  async function doPublishMulti(id: number) {
+    if (publishChannels.size === 0) {
+      alert("Pick at least one channel");
+      return;
+    }
+    setPublishing(true);
+    const res = await fetch("/api/social", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "publish-multi", id, channels: Array.from(publishChannels) }),
+    });
+    const data = await res.json();
+    setPublishing(false);
+    setPublishId(null);
+    fetchDrafts();
+
+    if (data.results) {
+      const ok = data.results.filter((r: { status: string }) => r.status === "published").length;
+      const fail = data.results.filter((r: { status: string }) => r.status === "error").length;
+      if (fail > 0) {
+        const errMsg = data.results
+          .filter((r: { status: string }) => r.status === "error")
+          .map((r: { channel: string; error?: string }) => `${r.channel}: ${r.error}`)
+          .join("\n");
+        alert(`Published ${ok} / Failed ${fail}\n\n${errMsg}`);
+      } else {
+        alert(`Published to all ${ok} channel(s) successfully.`);
+      }
+    }
+  }
+
+  async function retryChannel(id: number, channel: string) {
+    await doAction("retry-channel", id, { channel });
   }
 
   const stats = {
@@ -97,7 +196,6 @@ export default function SocialPage() {
     published: drafts.filter((d) => d.status === "published").length,
   };
 
-  // Calendar view data
   const calendarDrafts = drafts.filter((d) => d.scheduledAt || d.publishedAt);
 
   return (
@@ -105,7 +203,9 @@ export default function SocialPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Social Media</h2>
-          <p className="text-gray-400 text-sm mt-1">Facebook draft management</p>
+          <p className="text-gray-400 text-sm mt-1">
+            Multi-channel publishing — {activeChannels.length} channels active
+          </p>
         </div>
         <button
           onClick={generateHighlight}
@@ -116,7 +216,6 @@ export default function SocialPage() {
         </button>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-5 gap-3 mb-6">
         {[
           { label: "Total", value: stats.total, color: "text-white" },
@@ -132,7 +231,6 @@ export default function SocialPage() {
         ))}
       </div>
 
-      {/* Filters + View Toggle */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex gap-2">
           {["all", "draft", "approved", "scheduled", "published", "rejected"].map((f) => (
@@ -140,9 +238,7 @@ export default function SocialPage() {
               key={f}
               onClick={() => setFilter(f)}
               className={`px-3 py-1.5 text-xs rounded-lg border transition-colors ${
-                filter === f
-                  ? "bg-blue-600/20 border-blue-600 text-blue-400"
-                  : "border-gray-700 text-gray-400 hover:text-white"
+                filter === f ? "bg-blue-600/20 border-blue-600 text-blue-400" : "border-gray-700 text-gray-400 hover:text-white"
               }`}
             >
               {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
@@ -150,16 +246,10 @@ export default function SocialPage() {
           ))}
         </div>
         <div className="flex gap-1 bg-gray-900 rounded-lg p-0.5 border border-gray-800">
-          <button
-            onClick={() => setView("list")}
-            className={`px-3 py-1 text-xs rounded-md ${view === "list" ? "bg-gray-700 text-white" : "text-gray-500"}`}
-          >
+          <button onClick={() => setView("list")} className={`px-3 py-1 text-xs rounded-md ${view === "list" ? "bg-gray-700 text-white" : "text-gray-500"}`}>
             List
           </button>
-          <button
-            onClick={() => setView("calendar")}
-            className={`px-3 py-1 text-xs rounded-md ${view === "calendar" ? "bg-gray-700 text-white" : "text-gray-500"}`}
-          >
+          <button onClick={() => setView("calendar")} className={`px-3 py-1 text-xs rounded-md ${view === "calendar" ? "bg-gray-700 text-white" : "text-gray-500"}`}>
             Calendar
           </button>
         </div>
@@ -168,7 +258,6 @@ export default function SocialPage() {
       {loading ? (
         <div className="p-8 text-center text-gray-500">Loading...</div>
       ) : view === "list" ? (
-        /* List View */
         drafts.length === 0 ? (
           <div className="p-8 bg-gray-900 border border-gray-800 rounded-xl text-center">
             <p className="text-gray-500 text-sm">No drafts yet</p>
@@ -176,131 +265,260 @@ export default function SocialPage() {
           </div>
         ) : (
           <div className="space-y-3">
-            {drafts.map((draft) => (
-              <div key={draft.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                <div className="flex gap-4">
-                  {/* Image preview */}
-                  <div className="shrink-0">
-                    {draft.imagePath ? (
-                      <img src={draft.imagePath} alt="" className="w-32 h-[67px] rounded-lg object-cover bg-gray-800" />
-                    ) : draft.productImage ? (
-                      <img src={draft.productImage} alt="" className="w-32 h-[67px] rounded-lg object-cover bg-gray-800" />
-                    ) : (
-                      <div className="w-32 h-[67px] rounded-lg bg-gray-800 flex items-center justify-center text-gray-600 text-xs">
-                        No image
-                      </div>
-                    )}
-                  </div>
+            {drafts.map((draft) => {
+              const lang = previewLang[draft.id] || "FR";
+              const previewText = lang === "FR" ? draft.postText : draft.postTextEn || draft.postText;
+              const hasEn = !!draft.postTextEn;
+              const failedChannels = Object.entries(draft.channels || {}).filter(([, s]) => s.status === "error");
 
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-medium border ${STATUS_STYLES[draft.status] || STATUS_STYLES.draft}`}>
-                        {draft.status}
-                      </span>
-                      <span className="px-2 py-0.5 bg-gray-800 text-gray-400 rounded-md text-xs">
-                        {TRIGGER_LABELS[draft.triggerType] || draft.triggerType}
-                      </span>
-                      <span className="text-xs text-gray-500">{draft.language}</span>
-                      <span className="text-xs text-gray-600">{draft.sku}</span>
+              return (
+                <div key={draft.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                  <div className="flex gap-4">
+                    <div className="shrink-0">
+                      {draft.imagePath ? (
+                        <img src={draft.imagePath} alt="" className="w-32 h-[67px] rounded-lg object-cover bg-gray-800" />
+                      ) : draft.productImage ? (
+                        <img src={draft.productImage} alt="" className="w-32 h-[67px] rounded-lg object-cover bg-gray-800" />
+                      ) : (
+                        <div className="w-32 h-[67px] rounded-lg bg-gray-800 flex items-center justify-center text-gray-600 text-xs">
+                          No image
+                        </div>
+                      )}
                     </div>
 
-                    {draft.productName && (
-                      <p className="text-sm text-gray-300 font-medium truncate mb-1">{draft.productName}</p>
-                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className={`inline-block px-2 py-0.5 rounded-md text-xs font-medium border ${STATUS_STYLES[draft.status] || STATUS_STYLES.draft}`}>
+                          {draft.status}
+                        </span>
+                        <span className="px-2 py-0.5 bg-gray-800 text-gray-400 rounded-md text-xs">
+                          {TRIGGER_LABELS[draft.triggerType] || draft.triggerType}
+                        </span>
+                        <span className="text-xs text-gray-600">{draft.sku}</span>
 
-                    {editingId === draft.id ? (
-                      <div className="mt-2">
-                        <textarea
-                          value={editText}
-                          onChange={(e) => setEditText(e.target.value)}
-                          className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-sm text-gray-300 resize-y"
-                          rows={4}
-                        />
-                        <div className="flex gap-2 mt-2">
-                          <button onClick={() => saveEdit(draft.id)} className="px-3 py-1 bg-blue-600 text-white text-xs rounded-lg">Save</button>
-                          <button onClick={() => setEditingId(null)} className="px-3 py-1 bg-gray-700 text-gray-300 text-xs rounded-lg">Cancel</button>
+                        {hasEn && (
+                          <div className="ml-auto flex gap-1 bg-gray-800 rounded-md p-0.5">
+                            <button
+                              onClick={() => setPreviewLang({ ...previewLang, [draft.id]: "FR" })}
+                              className={`px-2 py-0.5 text-[10px] rounded ${lang === "FR" ? "bg-gray-700 text-white" : "text-gray-500"}`}
+                            >
+                              FR
+                            </button>
+                            <button
+                              onClick={() => setPreviewLang({ ...previewLang, [draft.id]: "EN" })}
+                              className={`px-2 py-0.5 text-[10px] rounded ${lang === "EN" ? "bg-gray-700 text-white" : "text-gray-500"}`}
+                            >
+                              EN
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {draft.productName && (
+                        <p className="text-sm text-gray-300 font-medium truncate mb-1">{draft.productName}</p>
+                      )}
+
+                      {editingId === draft.id ? (
+                        <div className="mt-2">
+                          <div className="flex gap-1 mb-2 bg-gray-800 rounded-md p-0.5 w-fit">
+                            <button
+                              onClick={() => setEditTab("fr")}
+                              className={`px-2 py-0.5 text-[10px] rounded ${editTab === "fr" ? "bg-gray-700 text-white" : "text-gray-500"}`}
+                            >
+                              FR
+                            </button>
+                            <button
+                              onClick={() => setEditTab("en")}
+                              className={`px-2 py-0.5 text-[10px] rounded ${editTab === "en" ? "bg-gray-700 text-white" : "text-gray-500"}`}
+                            >
+                              EN
+                            </button>
+                          </div>
+                          <textarea
+                            value={editTab === "fr" ? editTextFr : editTextEn}
+                            onChange={(e) =>
+                              editTab === "fr" ? setEditTextFr(e.target.value) : setEditTextEn(e.target.value)
+                            }
+                            className="w-full bg-gray-800 border border-gray-700 rounded-lg p-2 text-sm text-gray-300 resize-y"
+                            rows={4}
+                          />
+                          <div className="flex gap-2 mt-2">
+                            <button onClick={() => saveEdit(draft.id)} className="px-3 py-1 bg-blue-600 text-white text-xs rounded-lg">
+                              Save
+                            </button>
+                            <button onClick={() => setEditingId(null)} className="px-3 py-1 bg-gray-700 text-gray-300 text-xs rounded-lg">
+                              Cancel
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-gray-400 line-clamp-2">{draft.postText}</p>
-                    )}
-
-                    {draft.oldPrice && draft.newPrice && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        <span className="line-through text-red-400">{draft.oldPrice.toFixed(2)}$</span>
-                        {" → "}
-                        <span className="text-green-400 font-medium">{draft.newPrice.toFixed(2)}$</span>
-                      </p>
-                    )}
-
-                    {scheduleId === draft.id && (
-                      <div className="flex gap-2 mt-2 items-center">
-                        <input
-                          type="datetime-local"
-                          value={scheduleDate}
-                          onChange={(e) => setScheduleDate(e.target.value)}
-                          className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-gray-300"
-                        />
-                        <button onClick={() => saveSchedule(draft.id)} className="px-3 py-1 bg-blue-600 text-white text-xs rounded-lg">Schedule</button>
-                        <button onClick={() => setScheduleId(null)} className="px-3 py-1 bg-gray-700 text-gray-300 text-xs rounded-lg">Cancel</button>
-                      </div>
-                    )}
-
-                    {draft.scheduledAt && (
-                      <p className="text-xs text-blue-400 mt-1">
-                        Scheduled: {new Date(draft.scheduledAt * 1000).toLocaleString()}
-                      </p>
-                    )}
-                    {draft.publishedAt && (
-                      <p className="text-xs text-purple-400 mt-1">
-                        Published: {new Date(draft.publishedAt * 1000).toLocaleString()}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  {draft.status !== "published" && draft.status !== "rejected" && (
-                    <div className="flex flex-col gap-1 shrink-0">
-                      {draft.status === "draft" && (
-                        <button onClick={() => doAction("approve", draft.id)} className="px-3 py-1.5 bg-green-600/20 text-green-400 text-xs rounded-lg hover:bg-green-600/30 border border-green-800/50">
-                          Approve
-                        </button>
+                      ) : (
+                        <p className="text-sm text-gray-400 line-clamp-2 whitespace-pre-wrap">{previewText}</p>
                       )}
-                      {(draft.status === "draft" || draft.status === "approved") && (
+
+                      {draft.oldPrice && draft.newPrice && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          <span className="line-through text-red-400">{draft.oldPrice.toFixed(2)}$</span>
+                          {" → "}
+                          <span className="text-green-400 font-medium">{draft.newPrice.toFixed(2)}$</span>
+                        </p>
+                      )}
+
+                      {/* Per-channel state badges */}
+                      {Object.keys(draft.channels || {}).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {Object.entries(draft.channels).map(([k, s]) => (
+                            <div key={k} className="flex items-center gap-1">
+                              <ChannelBadge channelKey={k} state={s} />
+                              {s.status === "error" && (
+                                <button
+                                  onClick={() => retryChannel(draft.id, k)}
+                                  className="text-[10px] text-blue-400 hover:text-blue-300 underline"
+                                >
+                                  retry
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {failedChannels.length > 0 && (
                         <button
-                          onClick={() => { setScheduleId(draft.id); setScheduleDate(""); }}
-                          className="px-3 py-1.5 bg-blue-600/20 text-blue-400 text-xs rounded-lg hover:bg-blue-600/30 border border-blue-800/50"
+                          onClick={async () => {
+                            for (const [k] of failedChannels) {
+                              await retryChannel(draft.id, k);
+                            }
+                          }}
+                          className="mt-2 text-[11px] text-orange-400 hover:text-orange-300 underline"
                         >
-                          Schedule
+                          Retry all failed ({failedChannels.length})
                         </button>
                       )}
-                      {(draft.status === "approved" || draft.status === "scheduled") && (
-                        <button onClick={() => doAction("publish", draft.id)} className="px-3 py-1.5 bg-purple-600/20 text-purple-400 text-xs rounded-lg hover:bg-purple-600/30 border border-purple-800/50">
+
+                      {publishId === draft.id && (
+                        <div className="mt-3 p-3 bg-gray-950 border border-gray-800 rounded-lg">
+                          <p className="text-xs text-gray-400 mb-2">Publish to:</p>
+                          <div className="flex flex-col gap-1">
+                            {activeChannels.map((k) => {
+                              const meta = CHANNEL_LABELS[k];
+                              if (!meta) return null;
+                              return (
+                                <label key={k} className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={publishChannels.has(k)}
+                                    onChange={() => {
+                                      const next = new Set(publishChannels);
+                                      if (next.has(k)) next.delete(k);
+                                      else next.add(k);
+                                      setPublishChannels(next);
+                                    }}
+                                  />
+                                  <span>{meta.long}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={() => doPublishMulti(draft.id)}
+                              disabled={publishing}
+                              className="px-3 py-1 bg-purple-600 text-white text-xs rounded-lg disabled:opacity-50"
+                            >
+                              {publishing ? "Publishing..." : `Publish to ${publishChannels.size}`}
+                            </button>
+                            <button
+                              onClick={() => setPublishId(null)}
+                              className="px-3 py-1 bg-gray-700 text-gray-300 text-xs rounded-lg"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {scheduleId === draft.id && (
+                        <div className="flex gap-2 mt-2 items-center">
+                          <input
+                            type="datetime-local"
+                            value={scheduleDate}
+                            onChange={(e) => setScheduleDate(e.target.value)}
+                            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-gray-300"
+                          />
+                          <button onClick={() => saveSchedule(draft.id)} className="px-3 py-1 bg-blue-600 text-white text-xs rounded-lg">
+                            Schedule
+                          </button>
+                          <button onClick={() => setScheduleId(null)} className="px-3 py-1 bg-gray-700 text-gray-300 text-xs rounded-lg">
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+
+                      {draft.scheduledAt && (
+                        <p className="text-xs text-blue-400 mt-1">
+                          Scheduled: {new Date(draft.scheduledAt * 1000).toLocaleString()}
+                        </p>
+                      )}
+                      {draft.publishedAt && (
+                        <p className="text-xs text-purple-400 mt-1">
+                          Published: {new Date(draft.publishedAt * 1000).toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+
+                    {draft.status !== "rejected" && (
+                      <div className="flex flex-col gap-1 shrink-0">
+                        {draft.status === "draft" && (
+                          <button onClick={() => doAction("approve", draft.id)} className="px-3 py-1.5 bg-green-600/20 text-green-400 text-xs rounded-lg hover:bg-green-600/30 border border-green-800/50">
+                            Approve
+                          </button>
+                        )}
+                        {(draft.status === "draft" || draft.status === "approved") && (
+                          <button
+                            onClick={() => {
+                              setScheduleId(draft.id);
+                              setScheduleDate("");
+                            }}
+                            className="px-3 py-1.5 bg-blue-600/20 text-blue-400 text-xs rounded-lg hover:bg-blue-600/30 border border-blue-800/50"
+                          >
+                            Schedule
+                          </button>
+                        )}
+                        <button
+                          onClick={() => {
+                            setPublishId(draft.id);
+                            setPublishChannels(new Set(activeChannels));
+                          }}
+                          className="px-3 py-1.5 bg-purple-600/20 text-purple-400 text-xs rounded-lg hover:bg-purple-600/30 border border-purple-800/50"
+                        >
                           Publish
                         </button>
-                      )}
-                      <button
-                        onClick={() => { setEditingId(draft.id); setEditText(draft.postText); }}
-                        className="px-3 py-1.5 bg-gray-700/50 text-gray-400 text-xs rounded-lg hover:bg-gray-700 border border-gray-700"
-                      >
-                        Edit
-                      </button>
-                      <button onClick={() => doAction("reject", draft.id)} className="px-3 py-1.5 bg-red-600/10 text-red-400 text-xs rounded-lg hover:bg-red-600/20 border border-red-800/50">
-                        Reject
-                      </button>
-                      <button onClick={() => doAction("delete", draft.id)} className="px-3 py-1.5 text-gray-600 text-xs rounded-lg hover:text-red-400">
-                        Delete
-                      </button>
-                    </div>
-                  )}
+                        <button
+                          onClick={() => {
+                            setEditingId(draft.id);
+                            setEditTextFr(draft.postText);
+                            setEditTextEn(draft.postTextEn || "");
+                            setEditTab("fr");
+                          }}
+                          className="px-3 py-1.5 bg-gray-700/50 text-gray-400 text-xs rounded-lg hover:bg-gray-700 border border-gray-700"
+                        >
+                          Edit
+                        </button>
+                        <button onClick={() => doAction("reject", draft.id)} className="px-3 py-1.5 bg-red-600/10 text-red-400 text-xs rounded-lg hover:bg-red-600/20 border border-red-800/50">
+                          Reject
+                        </button>
+                        <button onClick={() => doAction("delete", draft.id)} className="px-3 py-1.5 text-gray-600 text-xs rounded-lg hover:text-red-400">
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )
       ) : (
-        /* Calendar View */
         <CalendarView drafts={calendarDrafts} />
       )}
     </div>
@@ -353,22 +571,16 @@ function CalendarView({ drafts }: { drafts: Draft[] }) {
           return (
             <div
               key={i}
-              className={`min-h-[60px] p-1 rounded-lg border ${
-                date ? "border-gray-800" : "border-transparent"
-              } ${isToday ? "border-blue-600/50 bg-blue-900/10" : ""}`}
+              className={`min-h-[60px] p-1 rounded-lg border ${date ? "border-gray-800" : "border-transparent"} ${isToday ? "border-blue-600/50 bg-blue-900/10" : ""}`}
             >
               {date && (
                 <>
-                  <span className={`text-xs ${isToday ? "text-blue-400 font-bold" : "text-gray-500"}`}>
-                    {date.getDate()}
-                  </span>
+                  <span className={`text-xs ${isToday ? "text-blue-400 font-bold" : "text-gray-500"}`}>{date.getDate()}</span>
                   {dayDrafts.map((d) => (
                     <div
                       key={d.id}
                       className={`mt-0.5 px-1 py-0.5 rounded text-[10px] truncate ${
-                        d.status === "published"
-                          ? "bg-purple-900/40 text-purple-400"
-                          : "bg-blue-900/40 text-blue-400"
+                        d.status === "published" ? "bg-purple-900/40 text-purple-400" : "bg-blue-900/40 text-blue-400"
                       }`}
                       title={d.postText.slice(0, 100)}
                     >

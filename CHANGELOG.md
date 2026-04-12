@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.5.0] - 2026-04-11
+
+### Added
+- Multi-brand social publishing: one click posts to Facebook Ameublo Direct (FR), Facebook Furnish Direct (EN), and Instagram Ameublo Direct (FR)
+- Bilingual caption generation: every draft now stores both FR and EN captions, generated in parallel via Claude
+- Per-channel publish state tracked in drafts (published / error / pending) with retry button per failed channel
+- "Retry all failed" button on drafts with one or more channel errors
+- New Instagram Graph API client (2-step media container + publish flow)
+- Auto-post on price drop with configurable minimum drop %, daily limit, and channel selection (settings: social_autopost_enabled, social_autopost_min_drop_percent, social_autopost_max_per_day, social_autopost_channels)
+- FR/EN preview tab on draft cards and dual-language editor
+- New env vars: FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, FACEBOOK_AMEUBLO_PAGE_ID/TOKEN, FACEBOOK_FURNISH_PAGE_ID/TOKEN, INSTAGRAM_AMEUBLO_ACCOUNT_ID
+
+### Changed
+- facebook-client.ts now takes a `brand` parameter ("ameublo" | "furnish") to resolve the correct Page ID + token
+- facebook_drafts table: added `post_text_en` and `channels` columns (JSON per-channel state) via in-place migration
+- /api/social publish action splits into legacy `publish` (single channel, back-compat) and new `publish-multi` (parallel fan-out)
+
+### Notes
+- Instagram Furnish Direct is not yet configured (account doesn't exist yet); the code path is ready and activates automatically when `INSTAGRAM_FURNISH_ACCOUNT_ID` is set
+- Legacy `FACEBOOK_PAGE_ID` / `FACEBOOK_PAGE_ACCESS_TOKEN` env vars are kept as deprecated fallbacks for one release and will be removed in 0.1.6.0
+
 ## [0.1.4.1] - 2026-04-11
 
 ### Added

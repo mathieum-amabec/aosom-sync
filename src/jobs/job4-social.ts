@@ -1,23 +1,29 @@
 /**
- * Job 4 — Social Media Draft Generator
+ * Job 4 — Social Media Draft Generator (bilingual multi-channel)
  *
  * 3 triggers:
  * - new_product: called after Job 3 imports a product
  * - price_drop: called by Job 1 when price drops >= threshold
  * - stock_highlight: daily cron picks a random eligible product
+ *
+ * Each draft now stores BOTH FR and EN captions so one draft can publish to
+ * all channels (Facebook Ameublo FR, Facebook Furnish EN, Instagram Ameublo FR,
+ * future Instagram Furnish EN).
  */
 import { getAnthropicClient } from "@/lib/content-generator";
-import { composeImage, type TemplateType } from "@/lib/image-composer";
-import { env, CLAUDE, SYNC } from "@/lib/config";
+import { composeImage } from "@/lib/image-composer";
+import { env, CLAUDE, SYNC, CHANNELS, type ChannelKey } from "@/lib/config";
 import {
-  getSetting,
   getAllSettings,
   getProduct,
   createFacebookDraft,
   getEligibleHighlightProduct,
   markProductPosted,
   createNotification,
+  getAutopostCountToday,
+  incrementAutopostCountToday,
 } from "@/lib/database";
+import { publishDraftToChannels } from "@/lib/social-publisher";
 
 function log(msg: string): void {
   const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
@@ -60,11 +66,33 @@ async function generatePostText(prompt: string): Promise<string> {
   return message.content[0].type === "text" ? message.content[0].text.trim() : "";
 }
 
+/** Generate FR and EN captions in parallel. */
+async function generateBilingual(
+  settings: Record<string, string>,
+  triggerType: "new_product" | "price_drop" | "highlight",
+  vars: Record<string, string>
+): Promise<{ fr: string; en: string }> {
+  const frKey = `prompt_${triggerType}_fr`;
+  const enKey = `prompt_${triggerType}_en`;
+  const frTpl = settings[frKey] || "Rédige un post Facebook pour: {product_name}";
+  const enTpl = settings[enKey] || "Write a Facebook post for: {product_name}";
+
+  const frVars = { ...vars, hashtags: settings.social_hashtags_fr || "" };
+  const enVars = { ...vars, hashtags: settings.social_hashtags_en || "" };
+
+  const [fr, en] = await Promise.all([
+    generatePostText(interpolatePrompt(frTpl, frVars)),
+    generatePostText(interpolatePrompt(enTpl, enVars)),
+  ]);
+  return { fr, en };
+}
+
 interface GenerateDraftResult {
   draftId: number;
-  language: string;
   postText: string;
+  postTextEn: string;
   imagePath: string | null;
+  imageUrl: string | null;
 }
 
 /**
@@ -77,23 +105,15 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
   if (!product) throw new Error(`Product ${sku} not found`);
   const productName = (product.name as string) || sku;
 
-  const lang = (settings.social_default_language || "FR") as "FR" | "EN";
-  const promptKey = `prompt_new_product_${lang.toLowerCase()}`;
-  const template = settings[promptKey] || "Write a Facebook post for: {product_name}";
-  const hashtagsKey = `social_hashtags_${lang.toLowerCase()}`;
-
-  const prompt = interpolatePrompt(template, {
+  const { fr, en } = await generateBilingual(settings, "new_product", {
     product_name: productName,
     price: String(product.price),
-    hashtags: settings[hashtagsKey] || "",
     store_name: env.storeName,
   });
 
-  const postText = await generatePostText(prompt);
-
   const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
-  const imageUrl = product.image1 as string;
+  const imageUrl = (product.image1 as string) || null;
   if (imageUrl) {
     try {
       imagePath = await composeImage({
@@ -102,7 +122,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
         productName,
         imageUrl,
         price: Number(product.price),
-        language: lang,
+        language: "FR",
         ...imgSettings,
       });
     } catch (err) {
@@ -113,15 +133,17 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
   const draftId = await createFacebookDraft({
     sku,
     triggerType: "new_product",
-    language: lang,
-    postText,
+    language: "FR",
+    postText: fr,
+    postTextEn: en,
     imagePath,
+    imageUrl,
   });
 
   await markProductPosted(sku);
   await createNotification("info", "Nouveau draft social", `Nouveau produit: ${productName.slice(0, 60)}`);
   log(`Draft #${draftId} created for new product ${sku}`);
-  return { draftId, language: lang, postText, imagePath };
+  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl };
 }
 
 /**
@@ -132,31 +154,23 @@ export async function triggerPriceDrop(
   oldPrice: number,
   newPrice: number
 ): Promise<GenerateDraftResult> {
-  log(`price_drop trigger for ${sku}: ${oldPrice}$ → ${newPrice}$`);
+  log(`price_drop trigger for ${sku}: ${oldPrice}$ -> ${newPrice}$`);
   const settings = await getAllSettings();
   const product = await getProduct(sku);
   if (!product) throw new Error(`Product ${sku} not found`);
   const productName = (product.name as string) || sku;
 
-  const lang = (settings.social_default_language || "FR") as "FR" | "EN";
-  const promptKey = `prompt_price_drop_${lang.toLowerCase()}`;
-  const template = settings[promptKey] || "Write a Facebook post for a price drop on: {product_name}";
-  const hashtagsKey = `social_hashtags_${lang.toLowerCase()}`;
-
-  const prompt = interpolatePrompt(template, {
+  const { fr, en } = await generateBilingual(settings, "price_drop", {
     product_name: productName,
     price: String(newPrice),
     old_price: String(oldPrice),
     new_price: String(newPrice),
-    hashtags: settings[hashtagsKey] || "",
     store_name: env.storeName,
   });
 
-  const postText = await generatePostText(prompt);
-
   const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
-  const imageUrl = product.image1 as string;
+  const imageUrl = (product.image1 as string) || null;
   if (imageUrl) {
     try {
       imagePath = await composeImage({
@@ -166,7 +180,7 @@ export async function triggerPriceDrop(
         imageUrl,
         price: newPrice,
         oldPrice,
-        language: lang,
+        language: "FR",
         ...imgSettings,
       });
     } catch (err) {
@@ -177,16 +191,22 @@ export async function triggerPriceDrop(
   const draftId = await createFacebookDraft({
     sku,
     triggerType: "price_drop",
-    language: lang,
-    postText,
+    language: "FR",
+    postText: fr,
+    postTextEn: en,
     imagePath,
+    imageUrl,
     oldPrice,
     newPrice,
   });
 
-  await createNotification("info", "Draft prix réduit", `${productName.slice(0, 40)}: ${oldPrice}$ → ${newPrice}$`);
+  await createNotification(
+    "info",
+    "Draft prix réduit",
+    `${productName.slice(0, 40)}: ${oldPrice}$ -> ${newPrice}$`
+  );
   log(`Draft #${draftId} created for price drop ${sku}`);
-  return { draftId, language: lang, postText, imagePath };
+  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl };
 }
 
 /**
@@ -195,7 +215,10 @@ export async function triggerPriceDrop(
 export async function triggerStockHighlight(): Promise<GenerateDraftResult | null> {
   log("stock_highlight trigger");
   const settings = await getAllSettings();
-  const minDays = parseInt(settings.social_min_days_between_reposts || SYNC.DEFAULT_MIN_DAYS_BETWEEN_REPOSTS, 10);
+  const minDays = parseInt(
+    settings.social_min_days_between_reposts || SYNC.DEFAULT_MIN_DAYS_BETWEEN_REPOSTS,
+    10
+  );
   const product = await getEligibleHighlightProduct(minDays);
 
   if (!product) {
@@ -205,24 +228,17 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
 
   const sku = product.sku as string;
   const productName = (product.name as string) || sku;
-  const lang = (settings.social_default_language || "FR") as "FR" | "EN";
-  const promptKey = `prompt_highlight_${lang.toLowerCase()}`;
-  const template = settings[promptKey] || "Write a Facebook post highlighting: {product_name}";
-  const hashtagsKey = `social_hashtags_${lang.toLowerCase()}`;
 
-  const prompt = interpolatePrompt(template, {
+  const { fr, en } = await generateBilingual(settings, "highlight", {
     product_name: productName,
     price: String(product.price),
     qty: String(product.qty),
-    hashtags: settings[hashtagsKey] || "",
     store_name: env.storeName,
   });
 
-  const postText = await generatePostText(prompt);
-
   const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
-  const imageUrl = product.image1 as string;
+  const imageUrl = (product.image1 as string) || null;
   if (imageUrl) {
     try {
       imagePath = await composeImage({
@@ -232,7 +248,7 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
         imageUrl,
         price: Number(product.price),
         qty: Number(product.qty),
-        language: lang,
+        language: "FR",
         ...imgSettings,
       });
     } catch (err) {
@@ -243,12 +259,74 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
   const draftId = await createFacebookDraft({
     sku,
     triggerType: "stock_highlight",
-    language: lang,
-    postText,
+    language: "FR",
+    postText: fr,
+    postTextEn: en,
     imagePath,
+    imageUrl,
   });
 
   await markProductPosted(sku);
   log(`Draft #${draftId} created for stock highlight ${sku}`);
-  return { draftId, language: lang, postText, imagePath };
+  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl };
+}
+
+// ─── Auto-post orchestration ────────────────────────────────────────
+
+/**
+ * If auto-post is enabled AND the daily limit isn't reached AND the draft's price drop
+ * percentage meets the configured threshold, publish the draft to the configured channels.
+ *
+ * Non-throwing: logs errors instead of interrupting the sync.
+ */
+export async function maybeAutopostPriceDrop(
+  draftId: number,
+  oldPrice: number,
+  newPrice: number
+): Promise<{ published: boolean; reason?: string }> {
+  try {
+    const settings = await getAllSettings();
+    if (settings.social_autopost_enabled !== "true") {
+      return { published: false, reason: "autopost disabled" };
+    }
+
+    const pctDrop = oldPrice > 0 ? ((oldPrice - newPrice) / oldPrice) * 100 : 0;
+    const minPct = parseFloat(settings.social_autopost_min_drop_percent || "15");
+    if (pctDrop < minPct) {
+      return { published: false, reason: `drop ${pctDrop.toFixed(1)}% < threshold ${minPct}%` };
+    }
+
+    const maxPerDay = parseInt(settings.social_autopost_max_per_day || "5", 10);
+    const current = await getAutopostCountToday();
+    if (current >= maxPerDay) {
+      log(`Autopost daily limit reached (${current}/${maxPerDay}), skipping draft #${draftId}`);
+      return { published: false, reason: "daily limit reached" };
+    }
+
+    const channelsStr = settings.social_autopost_channels || "fb_ameublo,fb_furnish,ig_ameublo";
+    const validKeys = new Set<string>(Object.values(CHANNELS));
+    const keys = channelsStr
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => validKeys.has(s)) as ChannelKey[];
+    if (keys.length === 0) return { published: false, reason: "no channels configured" };
+
+    log(`Autopost draft #${draftId} to ${keys.join(",")} (drop ${pctDrop.toFixed(1)}%)`);
+    const results = await publishDraftToChannels(draftId, keys);
+    const anyOk = results.some((r) => r.state.status === "published");
+    if (anyOk) await incrementAutopostCountToday();
+    const errs = results.filter((r) => r.state.status === "error");
+    if (errs.length > 0) {
+      log(`Autopost draft #${draftId}: ${errs.length} channel error(s): ${errs.map((e) => `${e.channel}=${e.state.error}`).join("; ")}`);
+      await createNotification(
+        "warning",
+        "Autopost partiel",
+        `Draft #${draftId}: ${errs.length} canal(aux) en erreur`
+      );
+    }
+    return { published: anyOk };
+  } catch (err) {
+    log(`Autopost failed for draft #${draftId}: ${err}`);
+    return { published: false, reason: String(err) };
+  }
 }

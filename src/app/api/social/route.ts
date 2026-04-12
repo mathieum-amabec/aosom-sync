@@ -4,11 +4,13 @@ import {
   getFacebookDraft,
   updateFacebookDraft,
   deleteFacebookDraft,
-  createFacebookDraft,
+  setDraftChannelState,
 } from "@/lib/database";
-import { publishWithImage, publishText } from "@/lib/facebook-client";
+import { testConnection as testFacebookConnection, type FacebookBrand } from "@/lib/facebook-client";
+import { testConnection as testInstagramConnection } from "@/lib/instagram-client";
+import { publishDraftToChannel, publishDraftToChannels } from "@/lib/social-publisher";
 import { triggerNewProduct, triggerPriceDrop, triggerStockHighlight } from "@/jobs/job4-social";
-import { testConnection as testFacebookConnection } from "@/lib/facebook-client";
+import { CHANNELS, activeChannels, type ChannelKey } from "@/lib/config";
 
 /**
  * GET /api/social — List drafts with optional status filter.
@@ -19,24 +21,31 @@ export async function GET(request: Request) {
     const status = url.searchParams.get("status") || undefined;
     const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || "100", 10) || 100), 500);
     const drafts = await getFacebookDrafts({ status, limit });
-    return NextResponse.json({ success: true, data: drafts });
+    return NextResponse.json({ success: true, data: drafts, activeChannels: activeChannels() });
   } catch (err) {
     console.error(`[API] /api/social GET failed:`, err);
     return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }
 
+const VALID_CHANNEL_KEYS = new Set<string>(Object.values(CHANNELS));
+
+function assertChannelKey(key: unknown): asserts key is ChannelKey {
+  if (typeof key !== "string" || !VALID_CHANNEL_KEYS.has(key)) {
+    throw new Error(`Invalid channel key: ${String(key)}`);
+  }
+}
+
 /**
  * POST /api/social — Perform actions on drafts.
- * Actions: generate, approve, reject, schedule, publish, update, delete
+ * Actions: generate, approve, reject, schedule, publish, publish-multi, retry-channel, update, delete, test-facebook, test-instagram, test-prompt
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { action } = body;
 
-    // Validate id for actions that require it
-    if (["approve", "reject", "schedule", "publish", "update", "delete"].includes(action)) {
+    if (["approve", "reject", "schedule", "publish", "publish-multi", "retry-channel", "update", "delete"].includes(action)) {
       if (!body.id || typeof body.id !== "number" || body.id < 1) {
         return NextResponse.json({ success: false, error: "Valid numeric id required" }, { status: 400 });
       }
@@ -58,15 +67,13 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: true, data: result });
       }
 
-      case "approve": {
+      case "approve":
         await updateFacebookDraft(body.id, { status: "approved" });
         return NextResponse.json({ success: true, data: await getFacebookDraft(body.id) });
-      }
 
-      case "reject": {
+      case "reject":
         await updateFacebookDraft(body.id, { status: "rejected" });
         return NextResponse.json({ success: true, data: await getFacebookDraft(body.id) });
-      }
 
       case "schedule": {
         const scheduledAt = typeof body.scheduledAt === "number" ? body.scheduledAt : null;
@@ -78,44 +85,56 @@ export async function POST(request: Request) {
       }
 
       case "publish": {
-        const draft = await getFacebookDraft(body.id);
-        if (!draft) return NextResponse.json({ success: false, error: "Draft not found" }, { status: 404 });
-
-        let result;
-        if (draft.imagePath) {
-          result = await publishWithImage({
-            caption: draft.postText,
-            imagePath: draft.imagePath,
-            scheduledAt: draft.scheduledAt || undefined,
-          });
-        } else {
-          result = await publishText({
-            message: draft.postText,
-            scheduledAt: draft.scheduledAt || undefined,
+        // Legacy single-channel publish — defaults to Facebook Ameublo (FR) for backward compat.
+        const state = await publishDraftToChannel(body.id, "fb_ameublo");
+        await setDraftChannelState(body.id, "fb_ameublo", state);
+        if (state.status === "published") {
+          await updateFacebookDraft(body.id, {
+            status: "published",
+            published_at: state.publishedAt,
+            facebook_post_id: state.publishedId,
           });
         }
+        return NextResponse.json({ success: state.status === "published", data: await getFacebookDraft(body.id), error: state.error });
+      }
 
-        const now = Math.floor(Date.now() / 1000);
-        await updateFacebookDraft(body.id, {
-          status: "published",
-          published_at: now,
-          facebook_post_id: result.postId,
+      case "publish-multi": {
+        if (!Array.isArray(body.channels) || body.channels.length === 0) {
+          return NextResponse.json({ success: false, error: "channels array required" }, { status: 400 });
+        }
+        const keys: ChannelKey[] = [];
+        for (const k of body.channels) {
+          try { assertChannelKey(k); keys.push(k); }
+          catch { return NextResponse.json({ success: false, error: `Invalid channel key: ${k}` }, { status: 400 }); }
+        }
+        const results = await publishDraftToChannels(body.id, keys);
+        return NextResponse.json({
+          success: true,
+          data: await getFacebookDraft(body.id),
+          results: results.map(({ channel, state }) => ({ channel, ...state })),
         });
-        return NextResponse.json({ success: true, data: await getFacebookDraft(body.id) });
+      }
+
+      case "retry-channel": {
+        try { assertChannelKey(body.channel); }
+        catch { return NextResponse.json({ success: false, error: "Invalid channel key" }, { status: 400 }); }
+        const state = await publishDraftToChannel(body.id, body.channel as ChannelKey);
+        await setDraftChannelState(body.id, body.channel as ChannelKey, state);
+        return NextResponse.json({ success: state.status === "published", data: await getFacebookDraft(body.id), state });
       }
 
       case "update": {
-        const { id, postText } = body;
-        if (postText && typeof postText === "string" && postText.length <= 5000) {
-          await updateFacebookDraft(id, { post_text: postText });
-        }
+        const { id, postText, postTextEn } = body;
+        const updates: Record<string, unknown> = {};
+        if (typeof postText === "string" && postText.length <= 5000) updates.post_text = postText;
+        if (typeof postTextEn === "string" && postTextEn.length <= 5000) updates.post_text_en = postTextEn;
+        if (Object.keys(updates).length > 0) await updateFacebookDraft(id, updates);
         return NextResponse.json({ success: true, data: await getFacebookDraft(id) });
       }
 
-      case "delete": {
+      case "delete":
         await deleteFacebookDraft(body.id);
         return NextResponse.json({ success: true });
-      }
 
       case "test-prompt": {
         const { promptText } = body;
@@ -139,7 +158,14 @@ export async function POST(request: Request) {
       }
 
       case "test-facebook": {
-        const result = await testFacebookConnection();
+        const brand = (body.brand || "ameublo") as FacebookBrand;
+        const result = await testFacebookConnection(brand);
+        return NextResponse.json({ success: true, data: result });
+      }
+
+      case "test-instagram": {
+        const brand = (body.brand || "ameublo") as "ameublo" | "furnish";
+        const result = await testInstagramConnection(brand);
         return NextResponse.json({ success: true, data: result });
       }
 
@@ -148,7 +174,8 @@ export async function POST(request: Request) {
     }
   } catch (err) {
     console.error(`[API] /api/social POST failed:`, err);
-    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
+    const msg = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
   }
 }
 
