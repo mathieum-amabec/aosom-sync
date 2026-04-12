@@ -2,6 +2,11 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.5.1] - 2026-04-11
+
+### Fixed
+- Social Media drafts now show the product photo thumbnail instead of a broken image icon. Drafts generated on Vercel stored a `/tmp/...` filesystem path as the image source, which 404'd in the browser. The UI now skips those internal paths and falls back to the public Aosom CDN image URL.
+
 ## [0.1.5.0] - 2026-04-11
 
 ### Added
