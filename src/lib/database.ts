@@ -454,9 +454,21 @@ export async function getAllCollectionMappings(): Promise<CollectionMapping[]> {
   return result.rows.map(rowToMapping);
 }
 
+/**
+ * Infer collection_role from the aosom_category key when the caller doesn't specify one.
+ * Level-1 keys (no " > ") represent top-level Aosom categories → main. Level-2+ keys
+ * (contain " > ") represent subcategories → sub. This matches the migration seeding
+ * logic and keeps the legacy /collections UI (which POSTs without a role field) from
+ * polluting the table with bogus sub rows for level-1 keys.
+ */
+function inferRole(aosomCategory: string, explicit?: CollectionRole): CollectionRole {
+  if (explicit) return explicit;
+  return aosomCategory.includes(" > ") ? "sub" : "main";
+}
+
 export async function upsertCollectionMapping(mapping: CollectionMapping): Promise<void> {
   const db = await ensureSchema();
-  const role: CollectionRole = mapping.collectionRole || "sub";
+  const role = inferRole(mapping.aosomCategory, mapping.collectionRole);
   await db.execute({
     sql: `INSERT OR REPLACE INTO collection_mappings (aosom_category, collection_role, shopify_collection_id, shopify_collection_title, updated_at) VALUES (?, ?, ?, ?, strftime('%s','now'))`,
     args: [mapping.aosomCategory, role, mapping.shopifyCollectionId, mapping.shopifyCollectionTitle],
@@ -468,7 +480,7 @@ export async function upsertCollectionMappingsBatch(mappings: CollectionMapping[
   await db.batch(
     mappings.map((m) => ({
       sql: `INSERT OR REPLACE INTO collection_mappings (aosom_category, collection_role, shopify_collection_id, shopify_collection_title, updated_at) VALUES (?, ?, ?, ?, strftime('%s','now'))`,
-      args: [m.aosomCategory, m.collectionRole || "sub", m.shopifyCollectionId, m.shopifyCollectionTitle],
+      args: [m.aosomCategory, inferRole(m.aosomCategory, m.collectionRole), m.shopifyCollectionId, m.shopifyCollectionTitle],
     })),
     "write",
   );
