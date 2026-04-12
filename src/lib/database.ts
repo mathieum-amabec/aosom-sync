@@ -100,10 +100,12 @@ async function _initSchemaImpl(): Promise<void> {
       type TEXT PRIMARY KEY, count INTEGER NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS collection_mappings (
-      aosom_category TEXT PRIMARY KEY,
+      aosom_category TEXT NOT NULL,
+      collection_role TEXT NOT NULL DEFAULT 'sub' CHECK(collection_role IN ('main', 'sub')),
       shopify_collection_id TEXT NOT NULL,
       shopify_collection_title TEXT NOT NULL,
-      updated_at INTEGER DEFAULT (strftime('%s','now'))
+      updated_at INTEGER DEFAULT (strftime('%s','now')),
+      PRIMARY KEY (aosom_category, collection_role)
     )`,
     `CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY, value TEXT NOT NULL,
@@ -425,68 +427,95 @@ export async function getProducts(filters: {
 
 // ─── Collection Mappings ────────────────────────────────────────────
 
+export type CollectionRole = "main" | "sub";
+
 export interface CollectionMapping {
   aosomCategory: string;
+  collectionRole?: CollectionRole; // optional for back-compat; defaults to 'sub' on upsert
   shopifyCollectionId: string;
   shopifyCollectionTitle: string;
 }
 
+function rowToMapping(row: Row): CollectionMapping {
+  const o = rowToObj(row);
+  return {
+    aosomCategory: o.aosom_category as string,
+    collectionRole: (o.collection_role as CollectionRole) || "sub",
+    shopifyCollectionId: o.shopify_collection_id as string,
+    shopifyCollectionTitle: o.shopify_collection_title as string,
+  };
+}
+
 export async function getAllCollectionMappings(): Promise<CollectionMapping[]> {
   const db = await ensureSchema();
-  const result = await db.execute(`SELECT aosom_category, shopify_collection_id, shopify_collection_title FROM collection_mappings ORDER BY aosom_category`);
-  return result.rows.map(row => {
-    const o = rowToObj(row);
-    return {
-      aosomCategory: o.aosom_category as string,
-      shopifyCollectionId: o.shopify_collection_id as string,
-      shopifyCollectionTitle: o.shopify_collection_title as string,
-    };
-  });
+  const result = await db.execute(
+    `SELECT aosom_category, collection_role, shopify_collection_id, shopify_collection_title FROM collection_mappings ORDER BY aosom_category, collection_role`,
+  );
+  return result.rows.map(rowToMapping);
 }
 
 export async function upsertCollectionMapping(mapping: CollectionMapping): Promise<void> {
   const db = await ensureSchema();
+  const role: CollectionRole = mapping.collectionRole || "sub";
   await db.execute({
-    sql: `INSERT OR REPLACE INTO collection_mappings (aosom_category, shopify_collection_id, shopify_collection_title, updated_at) VALUES (?, ?, ?, strftime('%s','now'))`,
-    args: [mapping.aosomCategory, mapping.shopifyCollectionId, mapping.shopifyCollectionTitle],
+    sql: `INSERT OR REPLACE INTO collection_mappings (aosom_category, collection_role, shopify_collection_id, shopify_collection_title, updated_at) VALUES (?, ?, ?, ?, strftime('%s','now'))`,
+    args: [mapping.aosomCategory, role, mapping.shopifyCollectionId, mapping.shopifyCollectionTitle],
   });
 }
 
 export async function upsertCollectionMappingsBatch(mappings: CollectionMapping[]): Promise<void> {
   const db = await ensureSchema();
   await db.batch(
-    mappings.map(m => ({
-      sql: `INSERT OR REPLACE INTO collection_mappings (aosom_category, shopify_collection_id, shopify_collection_title, updated_at) VALUES (?, ?, ?, strftime('%s','now'))`,
-      args: [m.aosomCategory, m.shopifyCollectionId, m.shopifyCollectionTitle],
+    mappings.map((m) => ({
+      sql: `INSERT OR REPLACE INTO collection_mappings (aosom_category, collection_role, shopify_collection_id, shopify_collection_title, updated_at) VALUES (?, ?, ?, ?, strftime('%s','now'))`,
+      args: [m.aosomCategory, m.collectionRole || "sub", m.shopifyCollectionId, m.shopifyCollectionTitle],
     })),
-    "write"
+    "write",
   );
 }
 
-export async function deleteCollectionMapping(aosomCategory: string): Promise<void> {
+export async function deleteCollectionMapping(aosomCategory: string, role?: CollectionRole): Promise<void> {
   const db = await ensureSchema();
-  await db.execute({ sql: `DELETE FROM collection_mappings WHERE aosom_category = ?`, args: [aosomCategory] });
+  if (role) {
+    await db.execute({
+      sql: `DELETE FROM collection_mappings WHERE aosom_category = ? AND collection_role = ?`,
+      args: [aosomCategory, role],
+    });
+  } else {
+    await db.execute({ sql: `DELETE FROM collection_mappings WHERE aosom_category = ?`, args: [aosomCategory] });
+  }
 }
 
-export async function findCollectionForProduct(productType: string): Promise<CollectionMapping | null> {
+/**
+ * Look up BOTH the main and sub collections for a product.
+ *
+ * Lookup order for each role:
+ *   1. Exact match on the full productType
+ *   2. Walk up the hierarchy (strip trailing " > X" segments) and retry
+ *
+ * Returns an object with `main` and `sub` fields, each null if no match found.
+ */
+export async function findCollectionsForProduct(
+  productType: string,
+): Promise<{ main: CollectionMapping | null; sub: CollectionMapping | null }> {
   const db = await ensureSchema();
-  // Try exact match first
-  let result = await db.execute({ sql: `SELECT * FROM collection_mappings WHERE aosom_category = ?`, args: [productType] });
-  if (result.rows.length > 0) {
-    const o = rowToObj(result.rows[0]);
-    return { aosomCategory: o.aosom_category as string, shopifyCollectionId: o.shopify_collection_id as string, shopifyCollectionTitle: o.shopify_collection_title as string };
-  }
-  // Try matching parent categories (walk up the hierarchy)
-  const parts = productType.split(">").map(s => s.trim());
-  for (let i = parts.length - 1; i >= 1; i--) {
-    const parent = parts.slice(0, i).join(" > ");
-    result = await db.execute({ sql: `SELECT * FROM collection_mappings WHERE aosom_category = ?`, args: [parent] });
-    if (result.rows.length > 0) {
-      const o = rowToObj(result.rows[0]);
-      return { aosomCategory: o.aosom_category as string, shopifyCollectionId: o.shopify_collection_id as string, shopifyCollectionTitle: o.shopify_collection_title as string };
+  const parts = productType.split(">").map((s) => s.trim()).filter(Boolean);
+
+  async function lookup(role: CollectionRole): Promise<CollectionMapping | null> {
+    // Walk from most specific to least specific
+    for (let i = parts.length; i >= 1; i--) {
+      const category = parts.slice(0, i).join(" > ");
+      const result = await db.execute({
+        sql: `SELECT * FROM collection_mappings WHERE aosom_category = ? AND collection_role = ?`,
+        args: [category, role],
+      });
+      if (result.rows.length > 0) return rowToMapping(result.rows[0]);
     }
+    return null;
   }
-  return null;
+
+  const [main, sub] = await Promise.all([lookup("main"), lookup("sub")]);
+  return { main, sub };
 }
 
 export async function getProductsWithShopifyId(): Promise<{ sku: string; product_type: string; shopify_product_id: string }[]> {
