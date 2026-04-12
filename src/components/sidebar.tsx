@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 const NAV_ITEMS = [
   {
@@ -202,21 +202,7 @@ function NotificationBell() {
   const [unread, setUnread] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
-
-  function fetchNotifications() {
+  const fetchNotifications = useCallback(() => {
     fetch("/api/notifications?limit=20")
       .then((r) => r.json())
       .then((d) => {
@@ -226,7 +212,21 @@ function NotificationBell() {
         }
       })
       .catch(() => {});
-  }
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   async function markAllRead() {
     await fetch("/api/notifications", {
