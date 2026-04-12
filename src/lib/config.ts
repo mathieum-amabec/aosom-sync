@@ -24,15 +24,47 @@ export const env = {
     if (!v) throw new Error("CRON_SECRET not set in .env.local");
     return v;
   },
+  /** @deprecated use facebookAmeubloPageId — kept for legacy single-brand code paths */
   get facebookPageId(): string {
-    const v = process.env.FACEBOOK_PAGE_ID;
-    if (!v) throw new Error("FACEBOOK_PAGE_ID not set in .env.local");
+    const v = process.env.FACEBOOK_AMEUBLO_PAGE_ID || process.env.FACEBOOK_PAGE_ID;
+    if (!v) throw new Error("FACEBOOK_AMEUBLO_PAGE_ID not set in .env.local");
     return v;
   },
+  /** @deprecated use facebookAmeubloPageToken — kept for legacy single-brand code paths */
   get facebookPageAccessToken(): string {
-    const v = process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
-    if (!v) throw new Error("FACEBOOK_PAGE_ACCESS_TOKEN not set in .env.local");
+    const v = process.env.FACEBOOK_AMEUBLO_PAGE_TOKEN || process.env.FACEBOOK_PAGE_ACCESS_TOKEN;
+    if (!v) throw new Error("FACEBOOK_AMEUBLO_PAGE_TOKEN not set in .env.local");
     return v;
+  },
+  // ─── Multi-brand Meta (Facebook + Instagram) ───
+  get facebookAmeubloPageId(): string {
+    const v = process.env.FACEBOOK_AMEUBLO_PAGE_ID;
+    if (!v) throw new Error("FACEBOOK_AMEUBLO_PAGE_ID not set");
+    return v;
+  },
+  get facebookAmeubloPageToken(): string {
+    const v = process.env.FACEBOOK_AMEUBLO_PAGE_TOKEN;
+    if (!v) throw new Error("FACEBOOK_AMEUBLO_PAGE_TOKEN not set");
+    return v;
+  },
+  get facebookFurnishPageId(): string {
+    const v = process.env.FACEBOOK_FURNISH_PAGE_ID;
+    if (!v) throw new Error("FACEBOOK_FURNISH_PAGE_ID not set");
+    return v;
+  },
+  get facebookFurnishPageToken(): string {
+    const v = process.env.FACEBOOK_FURNISH_PAGE_TOKEN;
+    if (!v) throw new Error("FACEBOOK_FURNISH_PAGE_TOKEN not set");
+    return v;
+  },
+  get instagramAmeubloAccountId(): string {
+    const v = process.env.INSTAGRAM_AMEUBLO_ACCOUNT_ID;
+    if (!v) throw new Error("INSTAGRAM_AMEUBLO_ACCOUNT_ID not set");
+    return v;
+  },
+  /** True if Furnish Instagram is configured (not yet — add later). */
+  get hasInstagramFurnish(): boolean {
+    return !!process.env.INSTAGRAM_FURNISH_ACCOUNT_ID;
   },
   get storeName(): string {
     return process.env.NEXT_PUBLIC_STORE_NAME || "Aosom Sync";
@@ -71,11 +103,45 @@ export const CLAUDE = {
   MAX_TOKENS_SOCIAL: 500,
 } as const;
 
-// ─── Facebook Graph API ─────────────────────────────────────────────
+// ─── Meta Graph API ─────────────────────────────────────────────────
 
 export const FACEBOOK = {
   GRAPH_API_URL: "https://graph.facebook.com/v21.0",
 } as const;
+
+export const META = {
+  GRAPH_API_URL: "https://graph.facebook.com/v21.0",
+} as const;
+
+/**
+ * Available publishing channels. Each channel pairs a platform with a brand.
+ * `ig_furnish` is reserved for future use when Furnish Direct creates an Instagram account.
+ */
+export const CHANNELS = {
+  FB_AMEUBLO: "fb_ameublo",
+  FB_FURNISH: "fb_furnish",
+  IG_AMEUBLO: "ig_ameublo",
+  IG_FURNISH: "ig_furnish",
+} as const;
+
+export type ChannelKey = (typeof CHANNELS)[keyof typeof CHANNELS];
+
+export const CHANNEL_META: Record<
+  ChannelKey,
+  { platform: "facebook" | "instagram"; brand: "ameublo" | "furnish"; language: "FR" | "EN"; label: string }
+> = {
+  fb_ameublo: { platform: "facebook", brand: "ameublo", language: "FR", label: "Facebook Ameublo Direct (FR)" },
+  fb_furnish: { platform: "facebook", brand: "furnish", language: "EN", label: "Facebook Furnish Direct (EN)" },
+  ig_ameublo: { platform: "instagram", brand: "ameublo", language: "FR", label: "Instagram Ameublo Direct (FR)" },
+  ig_furnish: { platform: "instagram", brand: "furnish", language: "EN", label: "Instagram Furnish Direct (EN)" },
+};
+
+/** Channels that are currently configurable (have env credentials). Furnish IG pending. */
+export function activeChannels(): ChannelKey[] {
+  const out: ChannelKey[] = ["fb_ameublo", "fb_furnish", "ig_ameublo"];
+  if (process.env.INSTAGRAM_FURNISH_ACCOUNT_ID) out.push("ig_furnish");
+  return out;
+}
 
 // ─── Social Media ───────────────────────────────────────────────────
 
@@ -138,4 +204,9 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   "social_store_display_name",
   "social_banner_opacity",
   "social_logo_position",
+  // Auto-post price drop settings
+  "social_autopost_enabled",
+  "social_autopost_min_drop_percent",
+  "social_autopost_max_per_day",
+  "social_autopost_channels",
 ]);

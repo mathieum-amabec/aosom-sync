@@ -79,11 +79,16 @@ async function _initSchemaImpl(): Promise<void> {
       language TEXT NOT NULL, post_text TEXT NOT NULL, image_path TEXT, image_url TEXT,
       old_price REAL, new_price REAL, status TEXT DEFAULT 'draft', scheduled_at INTEGER,
       published_at INTEGER, facebook_post_id TEXT,
+      post_text_en TEXT, channels TEXT,
       created_at INTEGER DEFAULT (strftime('%s','now')),
       FOREIGN KEY (sku) REFERENCES products(sku)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_facebook_drafts_sku ON facebook_drafts(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_facebook_drafts_status ON facebook_drafts(status)`,
+    // Migrations for tables created before multi-channel columns existed (no-op if already present)
+    `CREATE TABLE IF NOT EXISTS social_autopost_counter (
+      day TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0
+    )`,
     `CREATE TABLE IF NOT EXISTS notifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, title TEXT NOT NULL,
       message TEXT NOT NULL, read INTEGER DEFAULT 0,
@@ -140,6 +145,16 @@ async function _initSchemaImpl(): Promise<void> {
 
   const allStatements = [...schemaStatements, ...legacyStatements];
   await db.batch(allStatements.map(sql => ({ sql, args: [] })), "write");
+
+  // Column migrations for facebook_drafts (post_text_en, channels) — SQLite can't IF NOT EXISTS on ALTER
+  const info = await db.execute(`PRAGMA table_info(facebook_drafts)`);
+  const cols = new Set(info.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  const alters: string[] = [];
+  if (!cols.has("post_text_en")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN post_text_en TEXT`);
+  if (!cols.has("channels")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN channels TEXT`);
+  if (alters.length > 0) {
+    await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
+  }
 
   // Default settings — batch insert
   const defaultSettings: [string, string][] = [
@@ -797,22 +812,46 @@ export async function updateImportJob(jobId: string, fields: Record<string, unkn
 
 // ─── Facebook Drafts ─────────────────────────────────────────────────
 
+/** Per-channel publish state tracked inside facebook_drafts.channels (JSON). */
+export interface ChannelState {
+  status: "pending" | "published" | "error" | "skipped";
+  publishedId?: string;
+  publishedAt?: number;
+  error?: string;
+}
+
 export interface FacebookDraft {
   id: number; sku: string; triggerType: string; language: string;
-  postText: string; imagePath: string | null; imageUrl: string | null;
+  postText: string;
+  /** English caption for EN channels (Furnish Facebook, future Furnish IG). Optional for legacy drafts. */
+  postTextEn: string | null;
+  imagePath: string | null; imageUrl: string | null;
   oldPrice: number | null; newPrice: number | null; status: string;
   scheduledAt: number | null; publishedAt: number | null;
-  facebookPostId: string | null; createdAt: number;
+  facebookPostId: string | null;
+  /** Per-channel publish state. Keys are CHANNELS values (e.g. "fb_ameublo"). */
+  channels: Record<string, ChannelState>;
+  createdAt: number;
   productName?: string; productImage?: string;
 }
 
 function mapDraft(row: Record<string, unknown>): FacebookDraft {
+  let channels: Record<string, ChannelState> = {};
+  const raw = row.channels;
+  if (typeof raw === "string" && raw.length > 0) {
+    try {
+      channels = JSON.parse(raw);
+    } catch {
+      channels = {};
+    }
+  }
   return {
     id: Number(row.id),
     sku: row.sku as string,
     triggerType: row.trigger_type as string,
     language: row.language as string,
     postText: row.post_text as string,
+    postTextEn: (row.post_text_en as string) || null,
     imagePath: (row.image_path as string) || null,
     imageUrl: (row.image_url as string) || null,
     oldPrice: row.old_price != null ? Number(row.old_price) : null,
@@ -821,6 +860,7 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
     scheduledAt: row.scheduled_at != null ? Number(row.scheduled_at) : null,
     publishedAt: row.published_at != null ? Number(row.published_at) : null,
     facebookPostId: (row.facebook_post_id as string) || null,
+    channels,
     createdAt: Number(row.created_at),
     productName: (row.name as string) || undefined,
     productImage: (row.image1 as string) || undefined,
@@ -829,14 +869,36 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
 
 export async function createFacebookDraft(draft: {
   sku: string; triggerType: string; language: string; postText: string;
-  imagePath?: string | null; oldPrice?: number | null; newPrice?: number | null;
+  postTextEn?: string | null;
+  imagePath?: string | null;
+  /** Public image URL (Aosom CDN) used by Instagram since IG can't accept binary uploads. */
+  imageUrl?: string | null;
+  oldPrice?: number | null; newPrice?: number | null;
 }): Promise<number> {
   const db = await ensureSchema();
   const result = await db.execute({
-    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, image_path, old_price, new_price) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.imagePath || null, draft.oldPrice ?? null, draft.newPrice ?? null],
+    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, post_text_en, image_path, image_url, old_price, new_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.postTextEn ?? null, draft.imagePath || null, draft.imageUrl || null, draft.oldPrice ?? null, draft.newPrice ?? null],
   });
   return Number(result.lastInsertRowid);
+}
+
+/**
+ * Merge a single channel's state into the JSON column atomically.
+ * Uses SQLite's json_set so parallel publishes to different channels don't clobber each other.
+ * channelKey is restricted to a-z/0-9/_ to keep the JSON path safe for SQL interpolation.
+ */
+export async function setDraftChannelState(id: number, channelKey: string, state: ChannelState): Promise<void> {
+  if (!/^[a-z0-9_]+$/.test(channelKey)) {
+    throw new Error(`Invalid channelKey: ${channelKey}`);
+  }
+  const db = await ensureSchema();
+  // json_set(COALESCE(channels, '{}'), '$.fb_ameublo', json(?)) mutates just the one key in-place.
+  // This is a single UPDATE so it races cleanly under concurrent writes to different channels.
+  await db.execute({
+    sql: `UPDATE facebook_drafts SET channels = json_set(COALESCE(channels, '{}'), ?, json(?)) WHERE id = ?`,
+    args: [`$.${channelKey}`, JSON.stringify(state), id],
+  });
 }
 
 export async function getFacebookDrafts(filters?: { status?: string; limit?: number }): Promise<FacebookDraft[]> {
@@ -861,7 +923,7 @@ export async function getFacebookDraft(id: number): Promise<FacebookDraft | null
 
 export async function updateFacebookDraft(id: number, fields: Record<string, unknown>): Promise<void> {
   const db = await ensureSchema();
-  const allowed = new Set(["post_text", "image_path", "image_url", "status", "scheduled_at", "published_at", "facebook_post_id"]);
+  const allowed = new Set(["post_text", "post_text_en", "image_path", "image_url", "status", "scheduled_at", "published_at", "facebook_post_id", "channels"]);
   const sets: string[] = [];
   const args: InValue[] = [];
   for (const [key, value] of Object.entries(fields)) {
@@ -877,6 +939,32 @@ export async function updateFacebookDraft(id: number, fields: Record<string, unk
 export async function deleteFacebookDraft(id: number): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `DELETE FROM facebook_drafts WHERE id = ?`, args: [id] });
+}
+
+// ─── Auto-post daily counter ─────────────────────────────────────────
+
+function todayKey(): string {
+  // YYYY-MM-DD in UTC
+  return new Date().toISOString().slice(0, 10);
+}
+
+export async function getAutopostCountToday(): Promise<number> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT count FROM social_autopost_counter WHERE day = ?`, args: [todayKey()] });
+  if (r.rows.length === 0) return 0;
+  return Number(rowToObj(r.rows[0]).count || 0);
+}
+
+export async function incrementAutopostCountToday(): Promise<number> {
+  const db = await ensureSchema();
+  const day = todayKey();
+  await db.execute({
+    sql: `INSERT INTO social_autopost_counter (day, count) VALUES (?, 1)
+          ON CONFLICT(day) DO UPDATE SET count = count + 1`,
+    args: [day],
+  });
+  const r = await db.execute({ sql: `SELECT count FROM social_autopost_counter WHERE day = ?`, args: [day] });
+  return Number(rowToObj(r.rows[0]).count || 0);
 }
 
 export async function getLastPostDate(sku: string): Promise<number | null> {

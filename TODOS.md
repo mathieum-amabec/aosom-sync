@@ -76,3 +76,21 @@
 
 ### Rate limiting sur les endpoints Claude API
 **Completed:** v0.1.4.1 (2026-04-11)
+
+### Social Media v2 — Multi-brand FB + Instagram, bilingue, auto-post
+**Completed:** v0.1.5.0 (2026-04-11)
+- 3 channels live: Facebook Ameublo (FR), Facebook Furnish (EN), Instagram Ameublo (FR)
+- Furnish Instagram waiting on account creation (env var flip activates it)
+- Auto-post on price drop with threshold + daily limit + channel selection
+- Per-channel retry from the UI
+
+## Follow-ups / P3
+
+### Settings UI for auto-post configuration
+Currently `social_autopost_*` settings must be inserted via API or DB. Add a form on /settings with a toggle, min drop %, max/day, and channel checkboxes.
+
+### Dual-brand test buttons on /settings
+Today the "Test Facebook" button only tests Ameublo. Add a second button for Furnish and one for Instagram Ameublo.
+
+### Instagram Furnish Direct
+When the user creates the Instagram account, run the Graph API flow again to capture `INSTAGRAM_FURNISH_ACCOUNT_ID`, set the env var, redeploy — no code changes needed.
