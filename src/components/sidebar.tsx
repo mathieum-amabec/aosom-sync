@@ -73,46 +73,111 @@ const NAV_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileOpen]);
 
   return (
-    <aside className="w-60 bg-gray-900 border-r border-gray-800 flex flex-col h-screen sticky top-0">
-      <div className="p-5 border-b border-gray-800 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-white tracking-tight">
-            Aosom Sync
-          </h1>
-          <p className="text-xs text-gray-500 mt-0.5">Catalogue Manager</p>
+    <>
+      <header className="md:hidden fixed top-0 inset-x-0 h-14 bg-gray-900 border-b border-gray-800 z-30 flex items-center justify-between px-4">
+        <h1 className="text-base font-bold text-white tracking-tight">
+          Aosom Sync
+        </h1>
+        <div className="flex items-center gap-2">
+          <NotificationBell />
+          <button
+            type="button"
+            onClick={() => setMobileOpen(true)}
+            aria-label="Open navigation"
+            className="p-2 text-gray-300 hover:text-white"
+          >
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" />
+            </svg>
+          </button>
         </div>
-        <NotificationBell />
-      </div>
+      </header>
 
-      <nav className="flex-1 p-3 space-y-1">
-        {NAV_ITEMS.map((item) => {
-          const active =
-            item.href === "/"
-              ? pathname === "/"
-              : pathname.startsWith(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                active
-                  ? "bg-blue-600/15 text-blue-400"
-                  : "text-gray-400 hover:text-white hover:bg-gray-800"
-              }`}
+      {mobileOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-40"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={`
+          bg-gray-900 border-r border-gray-800 flex flex-col
+          fixed inset-y-0 left-0 w-64 z-50 transition-transform duration-300
+          ${mobileOpen ? "translate-x-0" : "-translate-x-full"}
+          md:translate-x-0 md:sticky md:top-0 md:w-60 md:h-screen md:z-auto
+        `}
+      >
+        <div className="p-5 border-b border-gray-800 flex items-center justify-between">
+          <div>
+            <h1 className="text-lg font-bold text-white tracking-tight">
+              Aosom Sync
+            </h1>
+            <p className="text-xs text-gray-500 mt-0.5">Catalogue Manager</p>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="hidden md:block">
+              <NotificationBell />
+            </div>
+            <button
+              type="button"
+              onClick={() => setMobileOpen(false)}
+              aria-label="Close navigation"
+              className="md:hidden p-1.5 text-gray-400 hover:text-white"
             >
-              {item.icon}
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
 
-      <div className="p-3 border-t border-gray-800">
-        <LogoutButton />
-      </div>
-    </aside>
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+          {NAV_ITEMS.map((item) => {
+            const active =
+              item.href === "/"
+                ? pathname === "/"
+                : pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => setMobileOpen(false)}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  active
+                    ? "bg-blue-600/15 text-blue-400"
+                    : "text-gray-400 hover:text-white hover:bg-gray-800"
+                }`}
+              >
+                {item.icon}
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className="p-3 border-t border-gray-800">
+          <LogoutButton />
+        </div>
+      </aside>
+    </>
   );
 }
 
