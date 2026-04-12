@@ -119,8 +119,8 @@ export default function CatalogPage() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-4 md:p-8">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Catalogue</h2>
           <p className="text-gray-400 text-sm mt-0.5">
@@ -135,7 +135,7 @@ export default function CatalogPage() {
         {selected.size > 0 && (
           <button
             onClick={sendToImport}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+            className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
           >
             Import {selected.size} selected
           </button>
@@ -246,7 +246,70 @@ export default function CatalogPage() {
         </div>
       ) : data ? (
         <>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          {/* Mobile: card list */}
+          <div className="md:hidden space-y-3">
+            {data.products.map((product) => {
+              const isSelected = selected.has(product.sku);
+              return (
+                <div
+                  key={product.sku}
+                  className={`bg-gray-900 border rounded-xl p-3 flex gap-3 ${
+                    isSelected ? "border-blue-600/50 bg-blue-950/20" : "border-gray-800"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={() => toggleSelect(product.sku)}
+                    className="mt-1 rounded bg-gray-800 border-gray-700 text-blue-500 shrink-0"
+                  />
+                  {product.image1 ? (
+                    <img
+                      src={product.image1 as string}
+                      alt=""
+                      className="w-16 h-16 object-cover rounded bg-gray-800 shrink-0"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded bg-gray-800 shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white text-sm font-medium line-clamp-2">
+                      {product.name as string}
+                    </div>
+                    <div className="text-gray-500 font-mono text-[11px] mt-1 truncate">
+                      {product.sku as string}
+                    </div>
+                    <div className="flex items-center justify-between mt-2 gap-2">
+                      <span className="text-white font-semibold text-sm">
+                        ${(product.price as number)?.toFixed(2)}
+                      </span>
+                      <span
+                        className={`text-xs ${
+                          (product.qty as number) > 0 ? "text-green-400" : "text-red-400"
+                        }`}
+                      >
+                        {product.qty as number} in stock
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between mt-1 gap-2">
+                      <span className="text-gray-400 text-[11px] truncate">
+                        {product.product_type as string}
+                      </span>
+                      {product.import_status ? (
+                        <span className="px-1.5 py-0.5 bg-green-900/40 text-green-400 border border-green-800/50 rounded text-[10px] font-medium shrink-0">
+                          {product.import_status as string}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop: table */}
+          <div className="hidden md:block bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -358,22 +421,22 @@ export default function CatalogPage() {
           </div>
 
           {/* Pagination */}
-          <div className="flex items-center justify-between mt-4">
-            <p className="text-sm text-gray-500">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4">
+            <p className="text-sm text-gray-500 text-center sm:text-left">
               Page {data.pagination.page} of {data.pagination.pages}
             </p>
             <div className="flex gap-2">
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1}
-                className="px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-sm text-gray-400 hover:text-white disabled:opacity-40 transition-colors"
+                className="flex-1 sm:flex-none px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-sm text-gray-400 hover:text-white disabled:opacity-40 transition-colors"
               >
                 Previous
               </button>
               <button
                 onClick={() => setPage((p) => p + 1)}
                 disabled={page >= (data?.pagination.pages || 1)}
-                className="px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-sm text-gray-400 hover:text-white disabled:opacity-40 transition-colors"
+                className="flex-1 sm:flex-none px-3 py-1.5 bg-gray-900 border border-gray-800 rounded-lg text-sm text-gray-400 hover:text-white disabled:opacity-40 transition-colors"
               >
                 Next
               </button>
