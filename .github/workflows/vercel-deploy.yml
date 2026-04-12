@@ -1,0 +1,25 @@
+name: Vercel Production Deploy
+
+# Fallback auto-deploy via Vercel deploy hook. We ping the hook on every
+# push to main because the native GitHub -> Vercel webhook integration
+# has been unreliable (PR #12 and #13 merged without triggering deploys).
+#
+# The hook URL is public but idempotent: POSTing to it triggers a build
+# against the commit currently on main. No secrets needed. If the native
+# integration starts working again, this will just become a no-op second
+# ping that Vercel deduplicates.
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel production deploy
+        run: |
+          curl -sS -X POST \
+            "https://api.vercel.com/v1/integrations/deploy/prj_J5GWvadc0hV7e2pJ26PuIPjmLGcc/ghxPDCXA3U" \
+            -w "\nHTTP %{http_code}\n"
