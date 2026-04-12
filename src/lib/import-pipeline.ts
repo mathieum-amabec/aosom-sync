@@ -2,7 +2,7 @@ import { fetchAosomCatalog } from "./csv-fetcher";
 import { mergeVariants, buildSkuIndex } from "./variant-merger";
 import { generateProductContent, type GeneratedContent } from "./content-generator";
 import { createShopifyProduct, addProductToCollection } from "./shopify-client";
-import { findCollectionForProduct } from "./database";
+import { findCollectionsForProduct } from "./database";
 import {
   upsertImportJob,
   getImportJobs as dbGetImportJobs,
@@ -124,17 +124,42 @@ export async function importToShopify(
     const shopifyId = await createShopifyProduct(product, content);
     await updateImportJob(jobId, { status: "done", shopify_id: shopifyId });
 
-    // Add to collection based on category mapping (non-blocking)
-    const mapping = await findCollectionForProduct(product.productType);
-    if (mapping) {
-      try {
-        await addProductToCollection(shopifyId, mapping.shopifyCollectionId);
-        console.log(`[IMPORT] Added to collection "${mapping.shopifyCollectionTitle}" (${product.productType})`);
-      } catch (err) {
-        console.error(`[IMPORT] Collection assignment failed for ${shopifyId}: ${err}`);
-      }
-    } else {
+    // Dual collection assignment: every product gets a main + a sub (when both mappings exist).
+    // Non-blocking — failures are logged but don't fail the import.
+    const { main, sub } = await findCollectionsForProduct(product.productType);
+    const planned: Array<{ role: "main" | "sub"; title: string; id: string }> = [];
+    if (main) planned.push({ role: "main", title: main.shopifyCollectionTitle, id: main.shopifyCollectionId });
+    if (sub) planned.push({ role: "sub", title: sub.shopifyCollectionTitle, id: sub.shopifyCollectionId });
+
+    if (planned.length === 0) {
       console.log(`[IMPORT] No collection mapping for category: ${product.productType}`);
+    } else {
+      const succeeded: Array<"main" | "sub"> = [];
+      const failed: Array<{ role: "main" | "sub"; title: string; error: string }> = [];
+      for (const a of planned) {
+        try {
+          await addProductToCollection(shopifyId, a.id);
+          succeeded.push(a.role);
+          console.log(
+            `[IMPORT] Added to [${a.role}] "${a.title}" (${product.productType}) — SKU ${product.variants[0]?.sku ?? "?"}`,
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          failed.push({ role: a.role, title: a.title, error: msg });
+          console.error(`[IMPORT] Collection assignment failed for ${shopifyId} [${a.role}] ${a.title}: ${msg}`);
+        }
+      }
+      // Warn if the product is NOT in both a main AND a sub after attempting.
+      // This catches both "missing mapping" and "POST failed" cases.
+      const hasMain = succeeded.includes("main");
+      const hasSub = succeeded.includes("sub");
+      if (!hasMain || !hasSub) {
+        const missing = !hasMain && !hasSub ? "main AND sub" : !hasMain ? "main" : "sub";
+        const reason = planned.length < 2 ? "missing mapping" : "POST failed";
+        console.warn(
+          `[IMPORT] ⚠ Product ${shopifyId} (${product.productType}) not dual-assigned — missing ${missing} (${reason})`,
+        );
+      }
     }
 
     // Trigger social draft for new product (async, non-blocking)
