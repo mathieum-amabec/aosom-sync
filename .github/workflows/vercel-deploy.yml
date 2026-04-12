@@ -4,10 +4,10 @@ name: Vercel Production Deploy
 # push to main because the native GitHub -> Vercel webhook integration
 # has been unreliable (PR #12 and #13 merged without triggering deploys).
 #
-# The hook URL is public but idempotent: POSTing to it triggers a build
-# against the commit currently on main. No secrets needed. If the native
-# integration starts working again, this will just become a no-op second
-# ping that Vercel deduplicates.
+# The hook URL is a capability URL — anyone who knows it can trigger a
+# production build, so it lives in a GitHub Actions secret instead of the
+# repo (this repo is public). To rotate: create a new hook via the Vercel
+# API and update the VERCEL_DEPLOY_HOOK_URL secret.
 
 on:
   push:
@@ -19,7 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Vercel production deploy
+        env:
+          HOOK_URL: ${{ secrets.VERCEL_DEPLOY_HOOK_URL }}
         run: |
-          curl -sS -X POST \
-            "https://api.vercel.com/v1/integrations/deploy/prj_J5GWvadc0hV7e2pJ26PuIPjmLGcc/ghxPDCXA3U" \
-            -w "\nHTTP %{http_code}\n"
+          if [ -z "$HOOK_URL" ]; then
+            echo "VERCEL_DEPLOY_HOOK_URL secret not set — skipping deploy ping"
+            exit 0
+          fi
+          curl -sS -X POST "$HOOK_URL" -w "\nHTTP %{http_code}\n"
