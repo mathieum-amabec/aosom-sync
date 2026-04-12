@@ -124,9 +124,6 @@ async function main() {
   const collectionCounts = new Map();
   for (const col of allCollections) {
     try {
-      const { body } = await shopifyGet(`/collections/${col.id}/products.json?limit=1`);
-      // /collections/{id}/products.json returns up to limit products but no total count header — we need
-      // to paginate fully OR use the count endpoint.
       const countRes = await shopifyGet(`/products/count.json?collection_id=${col.id}`);
       const count = countRes.body.count ?? 0;
       collectionCounts.set(col.id, count);

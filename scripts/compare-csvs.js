@@ -79,7 +79,6 @@ console.log("original:", countBy(origProducts, "status"));
 console.log("modified:", countBy(modProducts, "status"));
 
 console.log("\n=== Per-product diff (first 15) ===");
-let diffs = 0;
 const diffList = [];
 for (const [handle, origP] of origProducts) {
   const modP = modProducts.get(handle);
@@ -92,7 +91,6 @@ for (const [handle, origP] of origProducts) {
   if (origP.status !== modP.status) changes.push(`status: ${origP.status} → ${modP.status}`);
   if (origP.tags !== modP.tags) changes.push(`tags: changed`);
   if (changes.length > 0) {
-    diffs++;
     diffList.push({ handle, change: changes.join(" | "), title: origP.title });
   }
 }
