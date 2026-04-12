@@ -126,16 +126,20 @@ export async function importToShopify(
 
     // Dual collection assignment: every product gets a main + a sub (when both mappings exist).
     // Non-blocking — failures are logged but don't fail the import.
+    // Deduplicates when both roles resolve to the same Shopify collection (happens when a
+    // level-1 main mapping and a level-2 sub mapping both target the same collection, e.g.
+    // "Toys & Games" main + "Toys & Games > Baby & Toddler Toys" sub both → Jouets pour enfants).
     const { main, sub } = await findCollectionsForProduct(product.productType);
     const planned: Array<{ role: "main" | "sub"; title: string; id: string }> = [];
     if (main) planned.push({ role: "main", title: main.shopifyCollectionTitle, id: main.shopifyCollectionId });
-    if (sub) planned.push({ role: "sub", title: sub.shopifyCollectionTitle, id: sub.shopifyCollectionId });
+    if (sub && (!main || sub.shopifyCollectionId !== main.shopifyCollectionId)) {
+      planned.push({ role: "sub", title: sub.shopifyCollectionTitle, id: sub.shopifyCollectionId });
+    }
 
     if (planned.length === 0) {
       console.log(`[IMPORT] No collection mapping for category: ${product.productType}`);
     } else {
       const succeeded: Array<"main" | "sub"> = [];
-      const failed: Array<{ role: "main" | "sub"; title: string; error: string }> = [];
       for (const a of planned) {
         try {
           await addProductToCollection(shopifyId, a.id);
@@ -145,19 +149,20 @@ export async function importToShopify(
           );
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          failed.push({ role: a.role, title: a.title, error: msg });
           console.error(`[IMPORT] Collection assignment failed for ${shopifyId} [${a.role}] ${a.title}: ${msg}`);
         }
       }
-      // Warn if the product is NOT in both a main AND a sub after attempting.
-      // This catches both "missing mapping" and "POST failed" cases.
-      const hasMain = succeeded.includes("main");
-      const hasSub = succeeded.includes("sub");
-      if (!hasMain || !hasSub) {
-        const missing = !hasMain && !hasSub ? "main AND sub" : !hasMain ? "main" : "sub";
-        const reason = planned.length < 2 ? "missing mapping" : "POST failed";
+      // Warn if the product didn't land in both a resolved main AND a resolved sub.
+      // Special case: when main and sub point to the SAME collection, one successful
+      // assignment satisfies both roles — no warning.
+      const mainResolvedAndDone = main && (succeeded.includes("main") || (sub && main.shopifyCollectionId === sub.shopifyCollectionId && succeeded.includes("sub")));
+      const subResolvedAndDone = sub && (succeeded.includes("sub") || (main && main.shopifyCollectionId === sub.shopifyCollectionId && succeeded.includes("main")));
+      if (!main || !sub || !mainResolvedAndDone || !subResolvedAndDone) {
+        const missingMapping = !main || !sub;
+        const missingRole = !main ? "main" : !sub ? "sub" : !mainResolvedAndDone ? "main (POST failed)" : "sub (POST failed)";
+        const reason = missingMapping ? "missing mapping" : "POST failed";
         console.warn(
-          `[IMPORT] ⚠ Product ${shopifyId} (${product.productType}) not dual-assigned — missing ${missing} (${reason})`,
+          `[IMPORT] ⚠ Product ${shopifyId} (${product.productType}) not dual-assigned — missing ${missingRole} (${reason})`,
         );
       }
     }
