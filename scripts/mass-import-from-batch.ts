@@ -38,6 +38,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { createClient } from "@libsql/client";
+
 import { queueForImport, generateContent, importToShopify } from "@/lib/import-pipeline";
 import { fetchAllShopifyProducts } from "@/lib/shopify-client";
 
@@ -241,6 +243,42 @@ function log(entry: Record<string, unknown>) {
   }
   if (jobs.length !== targets.length) {
     console.warn(`[mass-import] WARN: queued ${jobs.length} jobs but expected ${targets.length}. Some SKUs may have been filtered by the CSV fetcher.`);
+  }
+
+  // ─── fix queueForImport id drift ──────────────────────────────────
+  // upsertImportJob uses ON CONFLICT(group_key) DO UPDATE which preserves the
+  // pre-existing row's id when a group_key collides. queueForImport returns
+  // the NEW uuid it generated, but the DB row still has the OLD one from a
+  // prior queue attempt. generateContent(newUuid) then fails with "Job not
+  // found". Fix: re-query import_jobs by group_key to get the REAL ids that
+  // survived the upsert, and substitute them on each returned job.
+  const groupKeys = jobs.map((j) => j.groupKey);
+  const TURSO_URL = process.env.TURSO_DATABASE_URL;
+  const TURSO_TOKEN = process.env.TURSO_AUTH_TOKEN;
+  if (!TURSO_URL || !TURSO_TOKEN) throw new Error("TURSO env missing");
+  const db = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
+  const idMap = new Map<string, string>();
+  // libsql has a parameter limit, chunk at 500
+  for (let i = 0; i < groupKeys.length; i += 500) {
+    const chunk = groupKeys.slice(i, i + 500);
+    const placeholders = chunk.map(() => "?").join(",");
+    const r = await db.execute({
+      sql: `SELECT id, group_key FROM import_jobs WHERE group_key IN (${placeholders})`,
+      args: chunk,
+    });
+    for (const row of r.rows) idMap.set(row.group_key as string, row.id as string);
+  }
+  let driftCount = 0;
+  for (const job of jobs) {
+    const realId = idMap.get(job.groupKey);
+    if (realId && realId !== job.id) {
+      job.id = realId;
+      driftCount++;
+    }
+  }
+  if (driftCount > 0) {
+    console.log(`[mass-import] Fixed id drift on ${driftCount}/${jobs.length} jobs (upsert kept pre-existing row ids)`);
+    log({ event: "id_drift_fixed", count: driftCount });
   }
 
   // ─── process each job ──────────────────────────────────────────────
