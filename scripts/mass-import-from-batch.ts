@@ -39,7 +39,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { queueForImport, generateContent, importToShopify } from "@/lib/import-pipeline";
-import { getImportJobs as dbGetImportJobs } from "@/lib/database";
+import { fetchAllShopifyProducts } from "@/lib/shopify-client";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -128,16 +128,32 @@ if (SPREAD) {
 }
 
 // ─── resume filter ──────────────────────────────────────────────────
+// Resume queries Shopify itself for every existing product and builds a Set of
+// ALL variant SKUs currently on the store (draft + active). Any batch listing
+// that shares ≥1 variant with that set is skipped. This is the only source of
+// truth that's resilient to:
+//   - import_jobs.group_key using PSIN (opaque CSV IDs) not parseSku().base
+//   - products.shopify_product_id only being populated by the daily sync job,
+//     not by createShopifyProduct
+//   - upsertImportJob REUSING old rows by group_key when re-queueing, which
+//     leaves stale product_data that doesn't reflect the latest imported SKUs
+// The only authoritative answer is "ask Shopify what's on Shopify right now".
 async function filterAlreadyImported(targets: BatchProduct[]): Promise<BatchProduct[]> {
   if (!RESUME) return targets;
-  console.log(`[mass-import] --resume: checking import_jobs for existing done status...`);
-  const allJobs = await dbGetImportJobs();
-  const doneGroupKeys = new Set(
-    allJobs.filter((j: Record<string, unknown>) => j.status === "done").map((j: Record<string, unknown>) => j.group_key as string)
-  );
-  const filtered = targets.filter((p) => !doneGroupKeys.has(p.base_sku));
+  console.log(`[mass-import] --resume: fetching all Shopify products to build authoritative SKU set...`);
+  const shopifyProducts = await fetchAllShopifyProducts();
+  const existingSkus = new Set<string>();
+  for (const p of shopifyProducts) {
+    for (const v of p.variants) {
+      if (v.sku) existingSkus.add(v.sku);
+    }
+  }
+  console.log(`[mass-import] --resume: ${shopifyProducts.length} Shopify products, ${existingSkus.size} variant SKUs already live`);
+
+  // A listing is "already imported" if ANY of its variants is already on Shopify
+  const filtered = targets.filter((p) => !p.variant_skus.some((sku) => existingSkus.has(sku)));
   const skipped = targets.length - filtered.length;
-  if (skipped > 0) console.log(`[mass-import] --resume: skipping ${skipped} already-done listings`);
+  if (skipped > 0) console.log(`[mass-import] --resume: skipping ${skipped} listings (shared ≥1 variant with an existing Shopify product)`);
   return filtered;
 }
 
