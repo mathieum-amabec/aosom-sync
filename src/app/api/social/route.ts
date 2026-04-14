@@ -124,10 +124,18 @@ export async function POST(request: Request) {
       }
 
       case "update": {
-        const { id, postText, postTextEn } = body;
+        const { id, postText, postTextEn, imageUrls } = body;
         const updates: Record<string, unknown> = {};
         if (typeof postText === "string" && postText.length <= 5000) updates.post_text = postText;
         if (typeof postTextEn === "string" && postTextEn.length <= 5000) updates.post_text_en = postTextEn;
+        if (Array.isArray(imageUrls)) {
+          const clean = imageUrls
+            .filter((u: unknown): u is string => typeof u === "string" && u.length > 0 && u.length <= 2000)
+            .slice(0, 10);
+          updates.image_urls = clean.length > 0 ? JSON.stringify(clean) : null;
+          // Keep legacy image_url in sync with primary so old readers still render a thumbnail.
+          updates.image_url = clean[0] ?? null;
+        }
         if (Object.keys(updates).length > 0) await updateFacebookDraft(id, updates);
         return NextResponse.json({ success: true, data: await getFacebookDraft(id) });
       }

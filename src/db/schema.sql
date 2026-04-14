@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS facebook_drafts (
   post_text TEXT NOT NULL,
   image_path TEXT,
   image_url TEXT,
+  image_urls TEXT,
   old_price REAL,
   new_price REAL,
   status TEXT DEFAULT 'draft',

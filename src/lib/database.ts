@@ -77,6 +77,7 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE TABLE IF NOT EXISTS facebook_drafts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, trigger_type TEXT NOT NULL,
       language TEXT NOT NULL, post_text TEXT NOT NULL, image_path TEXT, image_url TEXT,
+      image_urls TEXT,
       old_price REAL, new_price REAL, status TEXT DEFAULT 'draft', scheduled_at INTEGER,
       published_at INTEGER, facebook_post_id TEXT,
       post_text_en TEXT, channels TEXT,
@@ -154,8 +155,15 @@ async function _initSchemaImpl(): Promise<void> {
   const alters: string[] = [];
   if (!cols.has("post_text_en")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN post_text_en TEXT`);
   if (!cols.has("channels")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN channels TEXT`);
+  if (!cols.has("image_urls")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN image_urls TEXT`);
   if (alters.length > 0) {
     await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
+  }
+  // Backfill image_urls from legacy single image_url, one-shot idempotent.
+  if (!cols.has("image_urls")) {
+    await db.execute(
+      `UPDATE facebook_drafts SET image_urls = json_array(image_url) WHERE image_urls IS NULL AND image_url IS NOT NULL`
+    );
   }
 
   // Default settings — batch insert
@@ -867,6 +875,8 @@ export interface FacebookDraft {
   /** English caption for EN channels (Furnish Facebook, future Furnish IG). Optional for legacy drafts. */
   postTextEn: string | null;
   imagePath: string | null; imageUrl: string | null;
+  /** Ordered public image URLs for multi-photo posts. Always ≥1 element when there is any image. */
+  imageUrls: string[];
   oldPrice: number | null; newPrice: number | null; status: string;
   scheduledAt: number | null; publishedAt: number | null;
   facebookPostId: string | null;
@@ -886,6 +896,19 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
       channels = {};
     }
   }
+  const imageUrl = (row.image_url as string) || null;
+  let imageUrls: string[] = [];
+  const rawUrls = row.image_urls;
+  if (typeof rawUrls === "string" && rawUrls.length > 0) {
+    try {
+      const parsed = JSON.parse(rawUrls);
+      if (Array.isArray(parsed)) imageUrls = parsed.filter((u): u is string => typeof u === "string" && u.length > 0);
+    } catch {
+      imageUrls = [];
+    }
+  }
+  // Legacy drafts: fall back to single image_url so publish/render still works pre-backfill.
+  if (imageUrls.length === 0 && imageUrl) imageUrls = [imageUrl];
   return {
     id: Number(row.id),
     sku: row.sku as string,
@@ -894,7 +917,8 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
     postText: row.post_text as string,
     postTextEn: (row.post_text_en as string) || null,
     imagePath: (row.image_path as string) || null,
-    imageUrl: (row.image_url as string) || null,
+    imageUrl,
+    imageUrls,
     oldPrice: row.old_price != null ? Number(row.old_price) : null,
     newPrice: row.new_price != null ? Number(row.new_price) : null,
     status: row.status as string,
@@ -912,14 +936,19 @@ export async function createFacebookDraft(draft: {
   sku: string; triggerType: string; language: string; postText: string;
   postTextEn?: string | null;
   imagePath?: string | null;
-  /** Public image URL (Aosom CDN) used by Instagram since IG can't accept binary uploads. */
+  /** Public image URL (Aosom CDN). Kept for backward compat with legacy readers. Derived from imageUrls[0] if omitted. */
   imageUrl?: string | null;
+  /** Ordered list of public image URLs (1–5). Used for multi-photo Facebook posts. */
+  imageUrls?: string[];
   oldPrice?: number | null; newPrice?: number | null;
 }): Promise<number> {
   const db = await ensureSchema();
+  const urls = (draft.imageUrls ?? []).filter((u) => typeof u === "string" && u.length > 0);
+  const primary = draft.imageUrl ?? urls[0] ?? null;
+  const urlsJson = urls.length > 0 ? JSON.stringify(urls) : null;
   const result = await db.execute({
-    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, post_text_en, image_path, image_url, old_price, new_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.postTextEn ?? null, draft.imagePath || null, draft.imageUrl || null, draft.oldPrice ?? null, draft.newPrice ?? null],
+    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, post_text_en, image_path, image_url, image_urls, old_price, new_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.postTextEn ?? null, draft.imagePath || null, primary, urlsJson, draft.oldPrice ?? null, draft.newPrice ?? null],
   });
   return Number(result.lastInsertRowid);
 }
@@ -964,7 +993,7 @@ export async function getFacebookDraft(id: number): Promise<FacebookDraft | null
 
 export async function updateFacebookDraft(id: number, fields: Record<string, unknown>): Promise<void> {
   const db = await ensureSchema();
-  const allowed = new Set(["post_text", "post_text_en", "image_path", "image_url", "status", "scheduled_at", "published_at", "facebook_post_id", "channels"]);
+  const allowed = new Set(["post_text", "post_text_en", "image_path", "image_url", "image_urls", "status", "scheduled_at", "published_at", "facebook_post_id", "channels"]);
   const sets: string[] = [];
   const args: InValue[] = [];
   for (const [key, value] of Object.entries(fields)) {

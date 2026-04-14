@@ -137,35 +137,16 @@ Générer automatiquement des images brandées professionnelles pour chaque draf
 
 ---
 
-### Multi-photos par publication (priorité : moyenne)
-**Branche suggérée :** `feature/social-multi-photos`
-
-**Problème actuel :**
-Chaque draft social généré automatiquement utilise toujours 1 seule image produit. Ça rend les publications répétitives et "bot-like" dans le feed Facebook/Instagram.
-
-**Comportement souhaité :**
-- À la génération d'un draft, choisir aléatoirement un nombre de photos entre 1 et 5
-- Piocher les photos depuis les colonnes Image, Image1, Image2, Image3, Image4, Image5, Image6, Image7 du CSV Aosom (les images disponibles pour ce SKU)
-- Ne jamais dépasser le nombre d'images réellement disponibles pour le produit (si un produit n'a que 3 images, max = 3)
-- L'ordre des photos dans le carousel doit aussi être varié (pas toujours Image en premier — sauf si c'est la seule)
-- Stocker les URLs des images sélectionnées dans la table facebook_drafts (champ JSON array `image_urls` au lieu d'un seul `image_url`)
-
-**Impact sur le publish :**
-- Si 1 image → POST /{page-id}/photos (comportement actuel)
-- Si 2+ images → utiliser l'endpoint multi-photo de Facebook Graph API : créer chaque photo en unpublished (published=false), puis POST /{page-id}/feed avec attached_media[] pour créer un carousel/album
-- Documenter l'endpoint Graph API exact à utiliser
-
-**Impact sur l'UI :**
-- L'aperçu du draft dans /social doit afficher toutes les images sélectionnées (mini carousel ou grille), pas juste la première
-- Le bouton Edit doit permettre de retirer/réordonner les images avant publication
-
-**Validation :**
-- Générer 10 drafts et confirmer que le nombre de photos varie
-- Publier un draft multi-photos sur une page test Facebook et confirmer le rendu carousel
-
----
-
 ## Completed
+
+### Multi-photos par publication
+**Completed:** v0.1.8.0 (2026-04-13)
+- `pickRandomImages` picks 1-5 random images from product image1..image7 with Fisher-Yates shuffle
+- New `image_urls` JSON column on `facebook_drafts`, idempotent migration + legacy backfill
+- `publishWithImages` handles album posts: uploads each photo unpublished then `/feed` with native JSON `attached_media` array
+- `/social` draft cards: hero + thumbnail row + N photos badge; Photos action opens inline remove/reorder editor
+- Instagram stays single-photo (IG carousel logged as future TODO in social-publisher.ts)
+- Tests: 38 → 48 (pickRandomImages shuffle/cap + FB Graph API payload shape locked in via fetch-mock)
 
 ### Bulk Generate — Pousser tous les produits vers Shopify en batch
 **Completed:** v0.1.4.0 (2026-04-11)

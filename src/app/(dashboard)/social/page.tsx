@@ -18,6 +18,7 @@ interface Draft {
   postTextEn: string | null;
   imagePath: string | null;
   imageUrl: string | null;
+  imageUrls: string[];
   oldPrice: number | null;
   newPrice: number | null;
   status: string;
@@ -87,6 +88,8 @@ export default function SocialPage() {
   const [publishId, setPublishId] = useState<number | null>(null);
   const [publishChannels, setPublishChannels] = useState<Set<string>>(new Set(DEFAULT_CHANNELS));
   const [publishing, setPublishing] = useState(false);
+  const [photoEditId, setPhotoEditId] = useState<number | null>(null);
+  const [photoEditUrls, setPhotoEditUrls] = useState<string[]>([]);
   const [view, setView] = useState<"list" | "calendar">("list");
   const [previewLang, setPreviewLang] = useState<Record<number, "FR" | "EN">>({});
 
@@ -145,6 +148,23 @@ export default function SocialPage() {
   function saveEdit(id: number) {
     doAction("update", id, { postText: editTextFr, postTextEn: editTextEn });
     setEditingId(null);
+  }
+
+  function savePhotoEdit(id: number) {
+    doAction("update", id, { imageUrls: photoEditUrls });
+    setPhotoEditId(null);
+  }
+
+  function removePhoto(idx: number) {
+    setPhotoEditUrls(photoEditUrls.filter((_, i) => i !== idx));
+  }
+
+  function movePhoto(idx: number, direction: -1 | 1) {
+    const next = [...photoEditUrls];
+    const target = idx + direction;
+    if (target < 0 || target >= next.length) return;
+    [next[idx], next[target]] = [next[target], next[idx]];
+    setPhotoEditUrls(next);
   }
 
   function saveSchedule(id: number) {
@@ -270,26 +290,50 @@ export default function SocialPage() {
               const previewText = lang === "FR" ? draft.postText : draft.postTextEn || draft.postText;
               const hasEn = !!draft.postTextEn;
               const failedChannels = Object.entries(draft.channels || {}).filter(([, s]) => s.status === "error");
-              // Pick a browser-loadable thumbnail.
-              // draft.imagePath on Vercel is an absolute serverless filesystem path ("/tmp/social-images/...")
-              // used only for Facebook binary upload, not for rendering. Skip those and fall back to the
-              // public Aosom CDN image (new drafts: imageUrl, legacy drafts: productImage via JOIN).
-              // Local dev's composed path "/social-images/..." IS a valid public URL and renders fine.
-              const thumbSrc =
-                (draft.imagePath && !draft.imagePath.startsWith("/tmp/") ? draft.imagePath : null) ||
-                draft.imageUrl ||
-                draft.productImage ||
-                null;
+              // Pick browser-loadable thumbnails. draft.imagePath on Vercel is an absolute serverless filesystem
+              // path ("/tmp/social-images/...") used only for binary upload, not rendering — skip those.
+              // Otherwise use draft.imageUrls (multi-photo array) → fallback to legacy imageUrl/productImage.
+              const galleryUrls: string[] =
+                draft.imageUrls && draft.imageUrls.length > 0
+                  ? draft.imageUrls
+                  : draft.imageUrl
+                  ? [draft.imageUrl]
+                  : draft.productImage
+                  ? [draft.productImage]
+                  : [];
+              const composedThumb =
+                draft.imagePath && !draft.imagePath.startsWith("/tmp/") ? draft.imagePath : null;
+              const heroSrc = composedThumb || galleryUrls[0] || null;
+              const photoCount = galleryUrls.length;
 
               return (
                 <div key={draft.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
                   <div className="flex flex-col md:flex-row gap-4">
-                    <div className="shrink-0">
-                      {thumbSrc ? (
-                        <img src={thumbSrc} alt="" className="w-full md:w-32 h-40 md:h-[67px] rounded-lg object-cover bg-gray-800" />
-                      ) : (
-                        <div className="w-full md:w-32 h-40 md:h-[67px] rounded-lg bg-gray-800 flex items-center justify-center text-gray-600 text-xs">
-                          No image
+                    <div className="shrink-0 md:w-32">
+                      <div className="relative">
+                        {heroSrc ? (
+                          <img src={heroSrc} alt="" className="w-full h-40 md:h-[67px] rounded-lg object-cover bg-gray-800" />
+                        ) : (
+                          <div className="w-full h-40 md:h-[67px] rounded-lg bg-gray-800 flex items-center justify-center text-gray-600 text-xs">
+                            No image
+                          </div>
+                        )}
+                        {photoCount >= 2 && (
+                          <span className="absolute top-1 right-1 px-1.5 py-0.5 rounded-md bg-black/70 text-white text-[10px] font-medium">
+                            {photoCount} photos
+                          </span>
+                        )}
+                      </div>
+                      {photoCount >= 2 && !composedThumb && (
+                        <div className="mt-1 grid grid-cols-4 gap-1">
+                          {galleryUrls.slice(1, 5).map((u, i) => (
+                            <img
+                              key={i}
+                              src={u}
+                              alt=""
+                              className="w-full aspect-square rounded object-cover bg-gray-800"
+                            />
+                          ))}
                         </div>
                       )}
                     </div>
@@ -361,6 +405,61 @@ export default function SocialPage() {
                         </div>
                       ) : (
                         <p className="text-sm text-gray-400 line-clamp-2 whitespace-pre-wrap">{previewText}</p>
+                      )}
+
+                      {photoEditId === draft.id && (
+                        <div className="mt-3 p-3 bg-gray-950 border border-gray-800 rounded-lg">
+                          <p className="text-xs text-gray-400 mb-2">Photos ({photoEditUrls.length}) — réordonner ou retirer</p>
+                          {photoEditUrls.length === 0 ? (
+                            <p className="text-xs text-gray-600">Aucune photo. Sauvegarder pour publier en texte seul.</p>
+                          ) : (
+                            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                              {photoEditUrls.map((url, i) => (
+                                <div key={`${url}-${i}`} className="relative group">
+                                  <img src={url} alt="" className="w-full aspect-square rounded object-cover bg-gray-800" />
+                                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded flex flex-col items-center justify-center gap-1">
+                                    <div className="flex gap-1">
+                                      <button
+                                        onClick={() => movePhoto(i, -1)}
+                                        disabled={i === 0}
+                                        className="px-1.5 py-0.5 text-[10px] bg-gray-800 text-white rounded disabled:opacity-30"
+                                        title="Monter"
+                                      >
+                                        ←
+                                      </button>
+                                      <button
+                                        onClick={() => movePhoto(i, 1)}
+                                        disabled={i === photoEditUrls.length - 1}
+                                        className="px-1.5 py-0.5 text-[10px] bg-gray-800 text-white rounded disabled:opacity-30"
+                                        title="Descendre"
+                                      >
+                                        →
+                                      </button>
+                                    </div>
+                                    <button
+                                      onClick={() => removePhoto(i)}
+                                      className="px-1.5 py-0.5 text-[10px] bg-red-600 text-white rounded"
+                                      title="Retirer"
+                                    >
+                                      Retirer
+                                    </button>
+                                  </div>
+                                  <span className="absolute top-0.5 left-0.5 px-1 bg-black/70 text-white text-[9px] rounded">
+                                    {i + 1}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          <div className="flex gap-2 mt-3">
+                            <button onClick={() => savePhotoEdit(draft.id)} className="px-3 py-1 bg-blue-600 text-white text-xs rounded-lg">
+                              Save
+                            </button>
+                            <button onClick={() => setPhotoEditId(null)} className="px-3 py-1 bg-gray-700 text-gray-300 text-xs rounded-lg">
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
                       )}
 
                       {draft.oldPrice && draft.newPrice && (
@@ -511,6 +610,15 @@ export default function SocialPage() {
                           className="px-3 py-1.5 bg-gray-700/50 text-gray-400 text-xs rounded-lg hover:bg-gray-700 border border-gray-700"
                         >
                           Edit
+                        </button>
+                        <button
+                          onClick={() => {
+                            setPhotoEditId(draft.id);
+                            setPhotoEditUrls([...galleryUrls]);
+                          }}
+                          className="px-3 py-1.5 bg-gray-700/50 text-gray-400 text-xs rounded-lg hover:bg-gray-700 border border-gray-700"
+                        >
+                          Photos
                         </button>
                         <button onClick={() => doAction("reject", draft.id)} className="px-3 py-1.5 bg-red-600/10 text-red-400 text-xs rounded-lg hover:bg-red-600/20 border border-red-800/50">
                           Reject

@@ -93,6 +93,30 @@ interface GenerateDraftResult {
   postTextEn: string;
   imagePath: string | null;
   imageUrl: string | null;
+  imageUrls: string[];
+}
+
+/**
+ * Pick between 1 and min(5, available) random images from a product row.
+ * Varies both count and order so auto-generated posts don't all look identical.
+ * Returns [] if no images are available.
+ */
+export function pickRandomImages(product: { image1?: string; image2?: string; image3?: string; image4?: string; image5?: string; image6?: string; image7?: string }): string[] {
+  const candidates: string[] = [];
+  const keys = ["image1", "image2", "image3", "image4", "image5", "image6", "image7"] as const;
+  for (const key of keys) {
+    const v = product[key];
+    if (typeof v === "string" && v.trim().length > 0) candidates.push(v.trim());
+  }
+  if (candidates.length === 0) return [];
+  // Fisher-Yates shuffle
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+  const maxPick = Math.min(5, candidates.length);
+  const n = 1 + Math.floor(Math.random() * maxPick);
+  return candidates.slice(0, n);
 }
 
 /**
@@ -113,7 +137,8 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
 
   const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
-  const imageUrl = (product.image1 as string) || null;
+  const imageUrls = pickRandomImages(product);
+  const imageUrl = imageUrls[0] ?? null;
   if (imageUrl) {
     try {
       imagePath = await composeImage({
@@ -138,12 +163,13 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
     postTextEn: en,
     imagePath,
     imageUrl,
+    imageUrls,
   });
 
   await markProductPosted(sku);
   await createNotification("info", "Nouveau draft social", `Nouveau produit: ${productName.slice(0, 60)}`);
-  log(`Draft #${draftId} created for new product ${sku}`);
-  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl };
+  log(`Draft #${draftId} created for new product ${sku} (${imageUrls.length} photos)`);
+  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl, imageUrls };
 }
 
 /**
@@ -170,7 +196,8 @@ export async function triggerPriceDrop(
 
   const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
-  const imageUrl = (product.image1 as string) || null;
+  const imageUrls = pickRandomImages(product);
+  const imageUrl = imageUrls[0] ?? null;
   if (imageUrl) {
     try {
       imagePath = await composeImage({
@@ -196,6 +223,7 @@ export async function triggerPriceDrop(
     postTextEn: en,
     imagePath,
     imageUrl,
+    imageUrls,
     oldPrice,
     newPrice,
   });
@@ -205,8 +233,8 @@ export async function triggerPriceDrop(
     "Draft prix réduit",
     `${productName.slice(0, 40)}: ${oldPrice}$ -> ${newPrice}$`
   );
-  log(`Draft #${draftId} created for price drop ${sku}`);
-  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl };
+  log(`Draft #${draftId} created for price drop ${sku} (${imageUrls.length} photos)`);
+  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl, imageUrls };
 }
 
 /**
@@ -238,7 +266,8 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
 
   const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
-  const imageUrl = (product.image1 as string) || null;
+  const imageUrls = pickRandomImages(product);
+  const imageUrl = imageUrls[0] ?? null;
   if (imageUrl) {
     try {
       imagePath = await composeImage({
@@ -264,11 +293,12 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
     postTextEn: en,
     imagePath,
     imageUrl,
+    imageUrls,
   });
 
   await markProductPosted(sku);
-  log(`Draft #${draftId} created for stock highlight ${sku}`);
-  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl };
+  log(`Draft #${draftId} created for stock highlight ${sku} (${imageUrls.length} photos)`);
+  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl, imageUrls };
 }
 
 // ─── Auto-post orchestration ────────────────────────────────────────
