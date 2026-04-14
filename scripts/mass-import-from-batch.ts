@@ -178,6 +178,7 @@ function printEstimate(n: number) {
 // ─── per-job log ────────────────────────────────────────────────────
 const date = new Date().toISOString().slice(0, 10);
 const logPath = path.resolve(__dirname, "..", "data", "curation", `import-log-${date}.jsonl`);
+fs.mkdirSync(path.dirname(logPath), { recursive: true });
 function log(entry: Record<string, unknown>) {
   fs.appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n");
 }
