@@ -19,6 +19,9 @@
 //     → REAL RUN: queues, generates content via Claude, pushes to Shopify
 //
 //   --limit=N       Take first N listings (default: all 240)
+//   --spread        Take ceil(LIMIT/numCategories) from each category instead
+//                   of the first LIMIT from the start of the batch. Used for
+//                   diversified smoke tests that exercise every category pipeline.
 //   --resume        Skip listings already imported (status='done' in import_jobs)
 //   --batch=PATH    Use specific batch file (default: newest in data/curation/)
 //
@@ -45,6 +48,7 @@ const __dirname = path.dirname(__filename);
 const args = process.argv.slice(2);
 const EXECUTE = args.includes("--execute");
 const RESUME = args.includes("--resume");
+const SPREAD = args.includes("--spread");
 const limitArg = args.find((a) => a.startsWith("--limit="));
 const LIMIT = limitArg ? parseInt(limitArg.split("=")[1], 10) : Infinity;
 const batchArg = args.find((a) => a.startsWith("--batch="));
@@ -103,9 +107,25 @@ console.log(`[mass-import] Loaded batch: ${path.relative(process.cwd(), batchPat
 console.log(`[mass-import] Generated: ${batch.generated_at}`);
 console.log(`[mass-import] Total listings in batch: ${batch.products.length}`);
 
-// Apply limit (first N listings — batch is already ordered by category priority)
-const listings = batch.products.slice(0, LIMIT);
-console.log(`[mass-import] Processing ${listings.length} listings${LIMIT !== Infinity ? ` (--limit=${LIMIT})` : ""}`);
+// Apply limit + optional spread.
+// Default: take first LIMIT listings (batch is already ordered by category priority).
+// --spread: take ceil(LIMIT / numCategories) from each category for a diversified
+//           smoke test that exercises every category pipeline at least once.
+let listings: BatchProduct[];
+if (SPREAD) {
+  const byCat: Record<string, BatchProduct[]> = {};
+  for (const p of batch.products) (byCat[p.category] ??= []).push(p);
+  const numCats = Object.keys(byCat).length;
+  const perCat = LIMIT === Infinity ? Infinity : Math.ceil(LIMIT / numCats);
+  listings = [];
+  for (const cat of Object.keys(byCat)) {
+    listings.push(...byCat[cat].slice(0, perCat));
+  }
+  console.log(`[mass-import] Processing ${listings.length} listings (--spread: ${perCat === Infinity ? "all" : perCat} per category × ${numCats} categories)`);
+} else {
+  listings = batch.products.slice(0, LIMIT);
+  console.log(`[mass-import] Processing ${listings.length} listings${LIMIT !== Infinity ? ` (--limit=${LIMIT})` : ""}`);
+}
 
 // ─── resume filter ──────────────────────────────────────────────────
 async function filterAlreadyImported(targets: BatchProduct[]): Promise<BatchProduct[]> {
