@@ -2,7 +2,7 @@
  * Multi-channel publishing orchestration.
  * Shared by the API route and the auto-post job so both go through the same code path.
  */
-import { publishWithImage, publishText, type FacebookBrand } from "./facebook-client";
+import { publishWithImage, publishWithImages, publishText, type FacebookBrand } from "./facebook-client";
 import { publishPhoto } from "./instagram-client";
 import { CHANNEL_META, type ChannelKey } from "./config";
 import {
@@ -30,19 +30,30 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
   }
   const caption = meta.language === "FR" ? draft.postText : draft.postTextEn!;
 
-  // Pick a public image URL. Both platforms now require one (Facebook via Graph API
-  // `url` param, Instagram via media container).
-  // Priority: draft.imageUrl (v0.1.5.0+ snapshot) → draft.productImage (JOIN fallback
-  // for legacy drafts created before imageUrl was populated).
-  const imageUrl = draft.imageUrl || draft.productImage || null;
+  // Pick public image URLs. Both platforms require at least one (Facebook via Graph API
+  // `url` or `attached_media`, Instagram via media container).
+  // Priority: draft.imageUrls (v0.1.8.0+ multi-photo) → [draft.imageUrl] (v0.1.5.0 snapshot)
+  //   → [draft.productImage] (JOIN fallback for legacy drafts).
+  const imageUrls =
+    draft.imageUrls && draft.imageUrls.length > 0
+      ? draft.imageUrls
+      : draft.imageUrl
+      ? [draft.imageUrl]
+      : draft.productImage
+      ? [draft.productImage]
+      : [];
+  const primaryImageUrl = imageUrls[0] || null;
 
   try {
     if (meta.platform === "facebook") {
       const brand = meta.brand as FacebookBrand;
-      // Image post when we have a URL; text post otherwise.
-      const result = imageUrl
-        ? await publishWithImage({ caption, imageUrl, brand })
-        : await publishText({ message: caption, brand });
+      // Multi-photo album when 2+ URLs, single-photo when 1, text-only when none.
+      const result =
+        imageUrls.length >= 2
+          ? await publishWithImages({ caption, imageUrls, brand })
+          : primaryImageUrl
+          ? await publishWithImage({ caption, imageUrl: primaryImageUrl, brand })
+          : await publishText({ message: caption, brand });
       return {
         status: "published",
         publishedId: result.postId,
@@ -51,12 +62,14 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
     }
 
     if (meta.platform === "instagram") {
-      if (!imageUrl) {
-        return { status: "error", error: "No public image URL available for Instagram (draft.imageUrl is null — regenerate draft)" };
+      if (!primaryImageUrl) {
+        return { status: "error", error: "No public image URL available for Instagram (draft.imageUrls empty — regenerate draft)" };
       }
+      // TODO: IG carousel (3 API calls + parent container) — out of scope for v0.1.8.0.
+      // For now, post only the primary image to IG.
       const result = await publishPhoto({
         caption,
-        imageUrl,
+        imageUrl: primaryImageUrl,
         brand: meta.brand as "ameublo" | "furnish",
       });
       return {
