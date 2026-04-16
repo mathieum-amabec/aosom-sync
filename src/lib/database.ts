@@ -116,6 +116,7 @@ async function _initSchemaImpl(): Promise<void> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'admin' CHECK(role IN ('admin', 'reviewer')),
       created_at INTEGER DEFAULT (strftime('%s','now')),
       last_login_at INTEGER
     )`,
@@ -158,6 +159,15 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("image_urls")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN image_urls TEXT`);
   if (alters.length > 0) {
     await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
+  }
+
+  // Idempotent users.role migration — ALTER TABLE ADD COLUMN with a default.
+  // Existing rows get 'admin' to preserve backwards compatibility for the
+  // original AUTH_PASSWORD-seeded admin user.
+  const usersInfo = await db.execute(`PRAGMA table_info(users)`);
+  const userCols = new Set(usersInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!userCols.has("role")) {
+    await db.execute(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'`);
   }
   // Backfill image_urls from legacy single image_url, one-shot idempotent.
   if (!cols.has("image_urls")) {
@@ -640,17 +650,20 @@ export async function getUnreadNotificationCount(): Promise<number> {
 
 // ─── Users ──────────────────────────────────────────────────────────
 
-export async function getUserByUsername(username: string): Promise<{ id: number; username: string; password_hash: string } | null> {
+export type DbUserRole = "admin" | "reviewer";
+
+export async function getUserByUsername(username: string): Promise<{ id: number; username: string; password_hash: string; role: DbUserRole } | null> {
   const db = await ensureSchema();
-  const result = await db.execute({ sql: `SELECT id, username, password_hash FROM users WHERE username = ?`, args: [username] });
+  const result = await db.execute({ sql: `SELECT id, username, password_hash, role FROM users WHERE username = ?`, args: [username] });
   if (result.rows.length === 0) return null;
   const o = rowToObj(result.rows[0]);
-  return { id: Number(o.id), username: o.username as string, password_hash: o.password_hash as string };
+  const role = (o.role as string) === "reviewer" ? "reviewer" : "admin";
+  return { id: Number(o.id), username: o.username as string, password_hash: o.password_hash as string, role };
 }
 
-export async function createUser(username: string, passwordHash: string): Promise<number> {
+export async function createUser(username: string, passwordHash: string, role: DbUserRole = "admin"): Promise<number> {
   const db = await ensureSchema();
-  const result = await db.execute({ sql: `INSERT INTO users (username, password_hash) VALUES (?, ?)`, args: [username, passwordHash] });
+  const result = await db.execute({ sql: `INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)`, args: [username, passwordHash, role] });
   return Number(result.lastInsertRowid);
 }
 
