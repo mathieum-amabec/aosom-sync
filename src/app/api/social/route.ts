@@ -52,6 +52,11 @@ export async function POST(request: Request) {
       }
     }
 
+    const REVIEWER_BLOCKED_ACTIONS = new Set(["approve", "reject", "schedule", "publish", "publish-multi", "retry-channel", "update", "delete"]);
+    if (REVIEWER_BLOCKED_ACTIONS.has(action) && (await getSessionRole()) === "reviewer") {
+      return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+    }
+
     switch (action) {
       case "generate": {
         const { triggerType, sku, oldPrice, newPrice } = body;
@@ -86,9 +91,6 @@ export async function POST(request: Request) {
       }
 
       case "publish": {
-        if ((await getSessionRole()) === "reviewer") {
-          return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
-        }
         // Legacy single-channel publish — defaults to Facebook Ameublo (FR) for backward compat.
         const state = await publishDraftToChannel(body.id, "fb_ameublo");
         await setDraftChannelState(body.id, "fb_ameublo", state);
@@ -103,9 +105,6 @@ export async function POST(request: Request) {
       }
 
       case "publish-multi": {
-        if ((await getSessionRole()) === "reviewer") {
-          return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
-        }
         if (!Array.isArray(body.channels) || body.channels.length === 0) {
           return NextResponse.json({ success: false, error: "channels array required" }, { status: 400 });
         }
