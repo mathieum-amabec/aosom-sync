@@ -11,6 +11,7 @@ import { testConnection as testInstagramConnection } from "@/lib/instagram-clien
 import { publishDraftToChannel, publishDraftToChannels } from "@/lib/social-publisher";
 import { triggerNewProduct, triggerPriceDrop, triggerStockHighlight } from "@/jobs/job4-social";
 import { CHANNELS, activeChannels, type ChannelKey } from "@/lib/config";
+import { getSessionRole } from "@/lib/auth";
 
 /**
  * GET /api/social — List drafts with optional status filter.
@@ -85,6 +86,9 @@ export async function POST(request: Request) {
       }
 
       case "publish": {
+        if ((await getSessionRole()) === "reviewer") {
+          return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+        }
         // Legacy single-channel publish — defaults to Facebook Ameublo (FR) for backward compat.
         const state = await publishDraftToChannel(body.id, "fb_ameublo");
         await setDraftChannelState(body.id, "fb_ameublo", state);
@@ -99,6 +103,9 @@ export async function POST(request: Request) {
       }
 
       case "publish-multi": {
+        if ((await getSessionRole()) === "reviewer") {
+          return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+        }
         if (!Array.isArray(body.channels) || body.channels.length === 0) {
           return NextResponse.json({ success: false, error: "channels array required" }, { status: 400 });
         }

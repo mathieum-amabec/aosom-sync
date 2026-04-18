@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
+import type { UserRole } from "@/lib/config";
 
 const NAV_ITEMS = [
   {
@@ -83,12 +84,10 @@ function useIsDesktop() {
   return isDesktop;
 }
 
-type SidebarRole = "admin" | "reviewer";
-
 // Reviewer (Meta App Review seeded user) only sees Social Media + Settings.
 const REVIEWER_VISIBLE_HREFS = new Set(["/social", "/settings"]);
 
-export function Sidebar({ role = "admin" }: { role?: SidebarRole }) {
+export function Sidebar({ role = "admin" }: { role?: UserRole }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isDesktop = useIsDesktop();

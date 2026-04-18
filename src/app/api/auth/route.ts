@@ -63,7 +63,11 @@ export async function POST(request: Request) {
   }
 
   // Ensure seeded users exist on first login attempt
-  await ensureSeededUsers();
+  try {
+    await ensureSeededUsers();
+  } catch (err) {
+    console.error("[AUTH] ensureSeededUsers failed (non-fatal):", err);
+  }
 
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   if (isRateLimited(ip)) {

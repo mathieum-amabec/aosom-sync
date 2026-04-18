@@ -56,9 +56,10 @@ export async function verifyPassword(password: string, stored: string): Promise<
 
 // ─── Session Tokens (HMAC-SHA256, Edge-compatible) ──────────────────
 
-const HMAC_SECRET = process.env.AUTH_PASSWORD || "aosom-sync-session-secret";
+const HMAC_SECRET = process.env.AUTH_PASSWORD;
 
 async function hmacSign(data: string): Promise<string> {
+  if (!HMAC_SECRET) throw new Error("AUTH_PASSWORD env var must be set");
   const enc = new TextEncoder();
   const key = await globalThis.crypto.subtle.importKey(
     "raw", enc.encode(HMAC_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]

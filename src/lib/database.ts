@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import type { SyncRun, SyncLogEntry, ChangeType } from "@/types/sync";
+import type { UserRole } from "@/lib/config";
 
 let client: Client | null = null;
 
@@ -650,7 +651,7 @@ export async function getUnreadNotificationCount(): Promise<number> {
 
 // ─── Users ──────────────────────────────────────────────────────────
 
-export type DbUserRole = "admin" | "reviewer";
+export type DbUserRole = UserRole;
 
 export async function getUserByUsername(username: string): Promise<{ id: number; username: string; password_hash: string; role: DbUserRole } | null> {
   const db = await ensureSchema();
