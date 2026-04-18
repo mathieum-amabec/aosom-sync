@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
+import type { UserRole } from "@/lib/config";
 
 const NAV_ITEMS = [
   {
@@ -83,10 +84,17 @@ function useIsDesktop() {
   return isDesktop;
 }
 
-export function Sidebar() {
+// Reviewer (Meta App Review seeded user) only sees Social Media + Settings.
+const REVIEWER_VISIBLE_HREFS = new Set(["/social", "/settings"]);
+
+export function Sidebar({ role = "admin" }: { role?: UserRole }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const isDesktop = useIsDesktop();
+
+  const navItems = role === "reviewer"
+    ? NAV_ITEMS.filter((item) => REVIEWER_VISIBLE_HREFS.has(item.href))
+    : NAV_ITEMS;
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -161,7 +169,7 @@ export function Sidebar() {
         </div>
 
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const active =
               item.href === "/"
                 ? pathname === "/"

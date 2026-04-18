@@ -11,6 +11,7 @@ import { testConnection as testInstagramConnection } from "@/lib/instagram-clien
 import { publishDraftToChannel, publishDraftToChannels } from "@/lib/social-publisher";
 import { triggerNewProduct, triggerPriceDrop, triggerStockHighlight } from "@/jobs/job4-social";
 import { CHANNELS, activeChannels, type ChannelKey } from "@/lib/config";
+import { getSessionRole } from "@/lib/auth";
 
 /**
  * GET /api/social — List drafts with optional status filter.
@@ -49,6 +50,11 @@ export async function POST(request: Request) {
       if (!body.id || typeof body.id !== "number" || body.id < 1) {
         return NextResponse.json({ success: false, error: "Valid numeric id required" }, { status: 400 });
       }
+    }
+
+    const REVIEWER_BLOCKED_ACTIONS = new Set(["approve", "reject", "schedule", "publish", "publish-multi", "retry-channel", "update", "delete"]);
+    if (REVIEWER_BLOCKED_ACTIONS.has(action) && (await getSessionRole()) === "reviewer") {
+      return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
     }
 
     switch (action) {

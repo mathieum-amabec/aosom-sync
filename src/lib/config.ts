@@ -177,7 +177,22 @@ export const API = {
 export const AUTH = {
   SESSION_MAX_AGE: 60 * 60 * 24 * 7, // 7 days
   COOKIE_NAME: "aosom_session",
+  ROLES: ["admin", "reviewer"] as const,
+  // Reviewer is the limited role used for Meta App Review. Can only reach
+  // Social Media + Settings so Meta can verify the publishing workflow
+  // without exposing catalogue, sync history, imports, or collections.
+  REVIEWER_ALLOWED_PREFIXES: [
+    "/social",
+    "/settings",
+    "/api/social",
+    "/api/settings",
+    "/api/auth",
+    "/api/health",
+    "/privacy",
+  ],
 } as const;
+
+export type UserRole = (typeof AUTH.ROLES)[number];
 
 // ─── Settings Allowlist ─────────────────────────────────────────────
 // Single source of truth — used by both the API route and the UI.

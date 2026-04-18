@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyPassword, hashPassword, setSessionCookie, logout } from "@/lib/auth";
-import { getUserByUsername, updateUserLastLogin, createUser, getUserCount } from "@/lib/database";
+import { getUserByUsername, updateUserLastLogin, createUser } from "@/lib/database";
 
 // Simple in-memory rate limiter for auth attempts (per IP, 10 attempts per 15 min)
 const attempts = new Map<string, { count: number; resetAt: number }>();
@@ -26,15 +26,27 @@ function isRateLimited(ip: string): boolean {
   return entry.count > MAX_ATTEMPTS;
 }
 
-/** Ensure at least one user exists (seeds from AUTH_PASSWORD env var) */
-async function ensureDefaultUser(): Promise<void> {
-  const count = await getUserCount();
-  if (count > 0) return;
+/** Ensure seeded users exist: admin from AUTH_PASSWORD, meta-review from META_REVIEW_PASSWORD */
+async function ensureSeededUsers(): Promise<void> {
   const defaultPassword = process.env.AUTH_PASSWORD;
-  if (!defaultPassword) return;
-  const hash = await hashPassword(defaultPassword);
-  await createUser("admin", hash);
-  console.log("[AUTH] Default admin user created");
+  if (defaultPassword) {
+    const existing = await getUserByUsername("admin");
+    if (!existing) {
+      const hash = await hashPassword(defaultPassword);
+      await createUser("admin", hash, "admin");
+      console.log("[AUTH] Default admin user created");
+    }
+  }
+
+  const reviewerPassword = process.env.META_REVIEW_PASSWORD;
+  if (reviewerPassword) {
+    const existing = await getUserByUsername("meta-review");
+    if (!existing) {
+      const hash = await hashPassword(reviewerPassword);
+      await createUser("meta-review", hash, "reviewer");
+      console.log("[AUTH] meta-review reviewer user created");
+    }
+  }
 }
 
 export async function POST(request: Request) {
@@ -50,8 +62,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true });
   }
 
-  // Ensure default user exists on first login attempt
-  await ensureDefaultUser();
+  // Ensure seeded users exist on first login attempt
+  try {
+    await ensureSeededUsers();
+  } catch (err) {
+    console.error("[AUTH] ensureSeededUsers failed (non-fatal):", err);
+  }
 
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   if (isRateLimited(ip)) {
@@ -83,7 +99,7 @@ export async function POST(request: Request) {
   }
 
   await updateUserLastLogin(user.id);
-  await setSessionCookie(username);
-  console.log(`[AUTH] Successful login: user=${username} ip=${ip}`);
-  return NextResponse.json({ success: true, username });
+  await setSessionCookie(username, user.role);
+  console.log(`[AUTH] Successful login: user=${username} role=${user.role} ip=${ip}`);
+  return NextResponse.json({ success: true, username, role: user.role });
 }

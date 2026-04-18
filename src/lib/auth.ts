@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { AUTH } from "./config";
+import { AUTH, type UserRole } from "./config";
 
 const SESSION_COOKIE = AUTH.COOKIE_NAME;
 const SESSION_MAX_AGE = AUTH.SESSION_MAX_AGE;
@@ -56,9 +56,10 @@ export async function verifyPassword(password: string, stored: string): Promise<
 
 // ─── Session Tokens (HMAC-SHA256, Edge-compatible) ──────────────────
 
-const HMAC_SECRET = process.env.AUTH_PASSWORD || "aosom-sync-session-secret";
+const HMAC_SECRET = process.env.AUTH_PASSWORD;
 
 async function hmacSign(data: string): Promise<string> {
+  if (!HMAC_SECRET) throw new Error("AUTH_PASSWORD env var must be set");
   const enc = new TextEncoder();
   const key = await globalThis.crypto.subtle.importKey(
     "raw", enc.encode(HMAC_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
@@ -67,28 +68,38 @@ async function hmacSign(data: string): Promise<string> {
   return bufToHex(sig);
 }
 
-export async function createSessionToken(username: string): Promise<string> {
+export interface SessionPayload {
+  username: string;
+  role: UserRole;
+}
+
+// Token format: base64("ts:role:username:sig"). Role comes before username so
+// parsing stays unambiguous even if a future username ever contains a colon.
+// Old tokens (ts:username:sig) no longer validate — users will re-login.
+export async function createSessionToken(username: string, role: UserRole): Promise<string> {
   const ts = Date.now().toString();
-  const payload = `${ts}:${username}`;
+  const payload = `${ts}:${role}:${username}`;
   const sig = await hmacSign(payload);
   return btoa(`${payload}:${sig}`);
 }
 
-export async function verifySessionToken(token: string): Promise<string | null> {
+export async function verifySessionToken(token: string): Promise<SessionPayload | null> {
   try {
     const decoded = atob(token);
     const parts = decoded.split(":");
-    if (parts.length < 3) return null;
+    if (parts.length < 4) return null;
     const ts = parts[0];
-    const username = parts.slice(1, -1).join(":");
+    const role = parts[1];
+    if (!(AUTH.ROLES as readonly string[]).includes(role)) return null;
+    const username = parts.slice(2, -1).join(":");
     const sig = parts[parts.length - 1];
     const age = Date.now() - parseInt(ts, 10);
     if (age >= SESSION_MAX_AGE * 1000 || age < 0) return null;
-    const expected = await hmacSign(`${ts}:${username}`);
+    const expected = await hmacSign(`${ts}:${role}:${username}`);
     if (sig.length !== expected.length) return null;
     let diff = 0;
     for (let i = 0; i < sig.length; i++) diff |= sig.charCodeAt(i) ^ expected.charCodeAt(i);
-    return diff === 0 ? username : null;
+    return diff === 0 ? { username, role: role as UserRole } : null;
   } catch {
     return null;
   }
@@ -96,8 +107,8 @@ export async function verifySessionToken(token: string): Promise<string | null> 
 
 // ─── Cookie-based Auth (Server Components) ──────────────────────────
 
-export async function setSessionCookie(username: string): Promise<void> {
-  const token = await createSessionToken(username);
+export async function setSessionCookie(username: string, role: UserRole): Promise<void> {
+  const token = await createSessionToken(username, role);
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -120,9 +131,26 @@ export async function isAuthenticated(): Promise<boolean> {
   return (await verifySessionToken(token)) !== null;
 }
 
-export async function getSessionUsername(): Promise<string | null> {
+export async function getSession(): Promise<SessionPayload | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
   return verifySessionToken(token);
+}
+
+export async function getSessionUsername(): Promise<string | null> {
+  const session = await getSession();
+  return session?.username ?? null;
+}
+
+export async function getSessionRole(): Promise<UserRole | null> {
+  const session = await getSession();
+  return session?.role ?? null;
+}
+
+export function isPathAllowedForRole(pathname: string, role: UserRole): boolean {
+  if (role === "admin") return true;
+  return AUTH.REVIEWER_ALLOWED_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(p + "/") || pathname.startsWith(p + "?")
+  );
 }
