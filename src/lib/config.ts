@@ -185,6 +185,7 @@ export const AUTH = {
     "/social",
     "/settings",
     "/api/social",
+    "/api/settings",
     "/api/auth",
     "/api/health",
     "/privacy",
