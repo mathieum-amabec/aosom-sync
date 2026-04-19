@@ -745,13 +745,18 @@ export async function getTrendingProducts(limit = 10): Promise<TrendingProduct[]
 
 // ─── Sync Runs ───────────────────────────────────────────────────────
 
-export async function clearStaleLockIfNeeded(): Promise<void> {
+export async function clearStaleLockIfNeeded(thresholdMinutes = 30): Promise<void> {
   const db = await ensureSchema();
-  await db.execute(`
-    UPDATE sync_runs SET status = 'failed', completed_at = datetime('now'),
-      error_messages = '["Stale lock cleared (timeout > 30 min)"]'
-    WHERE status = 'running' AND datetime(started_at) < datetime('now', '-30 minutes')
-  `);
+  await db.execute({
+    sql: `UPDATE sync_runs SET status = 'failed', completed_at = datetime('now'),
+      error_messages = ?
+    WHERE status = 'running'
+      AND (strftime('%s','now') - strftime('%s', started_at)) > ?`,
+    args: [
+      JSON.stringify([`Stale lock cleared (timeout > ${thresholdMinutes} min)`]),
+      thresholdMinutes * 60,
+    ],
+  });
 }
 
 export async function createSyncRun(): Promise<SyncRun> {

@@ -357,16 +357,21 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
  * Designed to run as a separate cron job after the DB sync.
  */
 export async function runShopifyPush(): Promise<{ updates: number; archived: number; errors: number }> {
-  log("Phase 2: Shopify push — fetch data...");
-  const [aosomProducts, shopifyProducts] = await Promise.all([
-    fetchAosomCatalog(),
-    fetchAllShopifyProducts(),
-  ]);
-  log(`${aosomProducts.length} produits Aosom, ${shopifyProducts.length} produits Shopify`);
+  // Clear stale Phase 1/Phase 2 locks (>15 min old) left by prior Vercel timeouts
+  await clearStaleLockIfNeeded(15);
 
+  log("Phase 2: Shopify push — fetch data...");
+
+  // Create sync run BEFORE fetching so we have a DB record from the start
   const syncRun = await createSyncRun();
 
   try {
+    const [aosomProducts, shopifyProducts] = await Promise.all([
+      fetchAosomCatalog(),
+      fetchAllShopifyProducts(),
+    ]);
+    log(`${aosomProducts.length} produits Aosom, ${shopifyProducts.length} produits Shopify`);
+
     const shopifyResult = await applyToShopify(aosomProducts, shopifyProducts, syncRun.id);
 
     if (shopifyResult.logEntries.length > 0) {
@@ -398,9 +403,11 @@ export async function runShopifyPush(): Promise<{ updates: number; archived: num
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log(`ERREUR Shopify push: ${msg}`);
-    await completeSyncRun(syncRun.id, {
-      status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
-    });
+    try {
+      await completeSyncRun(syncRun.id, {
+        status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
+      });
+    } catch { /* ignore — DB failure after main error */ }
     throw err;
   }
 }
