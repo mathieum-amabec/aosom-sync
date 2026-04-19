@@ -158,6 +158,13 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("post_text_en")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN post_text_en TEXT`);
   if (!cols.has("channels")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN channels TEXT`);
   if (!cols.has("image_urls")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN image_urls TEXT`);
+
+  // checkpoint_data on sync_runs: stores per-chunk progress for Phase 2 chunked push
+  const syncRunsInfo = await db.execute(`PRAGMA table_info(sync_runs)`);
+  const syncRunCols = new Set(syncRunsInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!syncRunCols.has("checkpoint_data")) {
+    alters.push(`ALTER TABLE sync_runs ADD COLUMN checkpoint_data TEXT`);
+  }
   if (alters.length > 0) {
     await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
   }
@@ -1083,4 +1090,85 @@ export async function getEligibleHighlightProduct(minDaysBetween: number): Promi
 export async function markProductPosted(sku: string): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `UPDATE products SET last_posted_at = strftime('%s','now') WHERE sku = ?`, args: [sku] });
+}
+
+// ─── Phase 2 helpers ─────────────────────────────────────────────────
+
+import type { AosomProduct } from "@/types/aosom";
+
+/**
+ * Read all products from the DB and return them as AosomProduct objects.
+ * Used by Phase 2 (runShopifyPush) to avoid re-fetching the full CSV.
+ * Fields not stored in the DB (psin, dimensions, brand, etc.) are set to
+ * safe defaults — they are not needed for diff computation.
+ */
+export async function getAllProductsAsAosom(): Promise<AosomProduct[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(
+    `SELECT sku, name, price, qty, color, size, product_type,
+            image1, image2, image3, image4, image5, image6, image7,
+            video, description, short_description, material, gtin,
+            weight, out_of_stock_expected, estimated_arrival
+     FROM products
+     WHERE last_seen_at IS NOT NULL`
+  );
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    const images = [o.image1, o.image2, o.image3, o.image4, o.image5, o.image6, o.image7]
+      .filter((u): u is string => typeof u === "string" && u.length > 0);
+    return {
+      sku: String(o.sku ?? ""),
+      name: String(o.name ?? ""),
+      price: Number(o.price ?? 0),
+      qty: Number(o.qty ?? 0),
+      color: String(o.color ?? ""),
+      size: String(o.size ?? ""),
+      productType: String(o.product_type ?? ""),
+      images,
+      video: String(o.video ?? ""),
+      description: String(o.description ?? ""),
+      shortDescription: String(o.short_description ?? ""),
+      material: String(o.material ?? ""),
+      gtin: String(o.gtin ?? ""),
+      weight: Number(o.weight ?? 0),
+      estimatedArrival: String(o.estimated_arrival ?? ""),
+      outOfStockExpected: String(o.out_of_stock_expected ?? ""),
+      // Fields not stored in DB — safe defaults (not used for diff computation)
+      dimensions: { length: 0, width: 0, height: 0 },
+      brand: "",
+      category: "",
+      psin: "",
+      sin: "",
+      pdf: "",
+      packageNum: "",
+      boxSize: "",
+      boxWeight: "",
+    } satisfies AosomProduct;
+  });
+}
+
+// ─── Phase 2 checkpoint (cross-cron progress tracking) ───────────────
+
+export interface ShopifyPushCheckpoint {
+  date: string;
+  processedGroupKeys: string[];
+  totalDiffs: number;
+  totalUpdates: number;
+  totalArchived: number;
+  totalErrors: number;
+  done: boolean;
+}
+
+export async function getShopifyPushCheckpoint(): Promise<ShopifyPushCheckpoint | null> {
+  const raw = await getSetting("shopify_push_checkpoint");
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ShopifyPushCheckpoint;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveShopifyPushCheckpoint(cp: ShopifyPushCheckpoint): Promise<void> {
+  await setSetting("shopify_push_checkpoint", JSON.stringify(cp));
 }
