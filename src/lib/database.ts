@@ -1103,14 +1103,15 @@ export async function markProductPosted(sku: string): Promise<void> {
  */
 export async function getAllProductsAsAosom(): Promise<AosomProduct[]> {
   const db = await ensureSchema();
-  const result = await db.execute(
-    `SELECT sku, name, price, qty, color, size, product_type,
+  const result = await db.execute({
+    sql: `SELECT sku, name, price, qty, color, size, product_type,
             image1, image2, image3, image4, image5, image6, image7,
             video, description, short_description, material, gtin,
             weight, out_of_stock_expected, estimated_arrival
      FROM products
-     WHERE last_seen_at IS NOT NULL`
-  );
+     WHERE last_seen_at >= strftime('%s', date('now'))`,
+    args: [],
+  });
   return result.rows.map((r) => {
     const o = rowToObj(r);
     const images = [o.image1, o.image2, o.image3, o.image4, o.image5, o.image6, o.image7]
