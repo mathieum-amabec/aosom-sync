@@ -10,7 +10,7 @@ export async function GET() {
 
     const today = new Date().toISOString().slice(0, 10);
     const todayRuns = runs.filter((r) => r.startedAt.startsWith(today));
-    const latestPhase1 = todayRuns.find((r) => !r.errorMessages.includes("DB sync only — Shopify push deferred") === false) ?? todayRuns[0] ?? null;
+    const latestPhase1 = todayRuns.find((r) => !r.errorMessages.includes("DB sync only — Shopify push deferred")) ?? todayRuns[0] ?? null;
     const zombies = runs.filter((r) => r.status === "running");
 
     const phase2Checkpoint = checkpoint?.date === today ? checkpoint : null;

@@ -4,6 +4,7 @@ import fs from "fs";
 import crypto from "crypto";
 import type { SyncRun, SyncLogEntry, ChangeType } from "@/types/sync";
 import type { UserRole } from "@/lib/config";
+import type { AosomProduct } from "@/types/aosom";
 
 let client: Client | null = null;
 
@@ -1093,8 +1094,6 @@ export async function markProductPosted(sku: string): Promise<void> {
 }
 
 // ─── Phase 2 helpers ─────────────────────────────────────────────────
-
-import type { AosomProduct } from "@/types/aosom";
 
 /**
  * Read all products from the DB and return them as AosomProduct objects.
