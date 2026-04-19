@@ -39,9 +39,8 @@ import {
 } from "@/lib/database";
 import type { ChangeTypeHistory } from "@/lib/database";
 
-function log(msg: string): void {
-  const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
-  console.log(`[JOB1][${ts}] ${msg}`);
+function log(msg: string, extra?: Record<string, unknown>): void {
+  console.log(JSON.stringify({ ts: new Date().toISOString(), job: "job1-sync", msg, ...extra }));
 }
 
 // ─── Types ──────────────────────────────────────────────────────────
