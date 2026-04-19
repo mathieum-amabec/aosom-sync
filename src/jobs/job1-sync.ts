@@ -32,6 +32,10 @@ import {
   getLatestSyncRun,
   clearStaleLockIfNeeded,
   createNotification,
+  getAllProductsAsAosom,
+  getShopifyPushCheckpoint,
+  saveShopifyPushCheckpoint,
+  type ShopifyPushCheckpoint,
 } from "@/lib/database";
 import type { ChangeTypeHistory } from "@/lib/database";
 
@@ -154,14 +158,12 @@ async function detectChanges(aosomProducts: AosomProduct[]): Promise<ChangeDetec
   return { priceChangeEntries, socialDraftSkus, priceUpdates, stockChanges, newProducts };
 }
 
-/** Apply diffs (price, images, archives) to Shopify and log entries. */
+/** Apply pre-computed diffs to Shopify and log entries. */
 async function applyToShopify(
-  aosomProducts: AosomProduct[],
+  diffs: ReturnType<typeof computeDiffs>,
   shopifyProducts: Awaited<ReturnType<typeof fetchAllShopifyProducts>>,
   syncRunId: string,
 ): Promise<{ archived: number; errors: number; errorMessages: string[]; logEntries: Omit<SyncLogEntry, "id">[]; updates: number }> {
-  const merged = mergeVariants(aosomProducts);
-  const diffs = computeDiffs(merged, shopifyProducts);
   const summary = summarizeDiffs(diffs);
   const logEntries: Omit<SyncLogEntry, "id">[] = [];
   const now = new Date().toISOString();
@@ -296,7 +298,9 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
 
     if (shopifyPush) {
       log("Application des changements sur Shopify...");
-      shopifyResult = await applyToShopify(aosomProducts, shopifyProducts, syncRun.id);
+      const mergedForPush = mergeVariants(aosomProducts);
+      const diffsForPush = computeDiffs(mergedForPush, shopifyProducts);
+      shopifyResult = await applyToShopify(diffsForPush, shopifyProducts, syncRun.id);
 
       if (shopifyResult.logEntries.length > 0) {
         await addSyncLogsBatch(shopifyResult.logEntries);
@@ -356,23 +360,66 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
  * Fetches CSV + Shopify, computes diffs, applies only the Shopify mutations.
  * Designed to run as a separate cron job after the DB sync.
  */
+const SHOPIFY_PUSH_CHUNK_SIZE = 10;
+
+/**
+ * Phase 2: Apply pending Shopify diffs.
+ * Reads products from DB (no CSV re-fetch) and processes diffs in chunks of
+ * SHOPIFY_PUSH_CHUNK_SIZE. Checkpoint is saved in settings so multiple cron
+ * fires can resume where the previous one left off.
+ *
+ * Cron fires at "10,25,40 6 * * *" (every 15 min, up to 3 runs per day).
+ * Each run clears stale locks, resumes the checkpoint if today's, and
+ * processes one chunk before returning.
+ */
 export async function runShopifyPush(): Promise<{ updates: number; archived: number; errors: number }> {
-  // Clear stale Phase 1/Phase 2 locks (>15 min old) left by prior Vercel timeouts
+  // Clear stale locks (>15 min) left by prior Vercel SIGKILL timeouts
   await clearStaleLockIfNeeded(15);
 
-  log("Phase 2: Shopify push — fetch data...");
+  const today = new Date().toISOString().slice(0, 10);
 
-  // Create sync run BEFORE fetching so we have a DB record from the start
+  // Read cross-cron checkpoint
+  const existingCp = await getShopifyPushCheckpoint();
+  const cp: ShopifyPushCheckpoint = existingCp?.date === today
+    ? existingCp
+    : { date: today, processedGroupKeys: [], totalDiffs: 0, totalUpdates: 0, totalArchived: 0, totalErrors: 0, done: false };
+
+  if (cp.done) {
+    log("Phase 2: déjà terminé pour aujourd'hui — rien à faire");
+    return { updates: cp.totalUpdates, archived: cp.totalArchived, errors: cp.totalErrors };
+  }
+
+  log(`Phase 2: Shopify push — chunk (${cp.processedGroupKeys.length} déjà traités)`);
+
+  // Fetch from DB (fast) + Shopify (needed for variant IDs and current prices)
+  const [dbProducts, shopifyProducts] = await Promise.all([
+    getAllProductsAsAosom(),
+    fetchAllShopifyProducts(),
+  ]);
+  log(`${dbProducts.length} produits DB, ${shopifyProducts.length} produits Shopify`);
+
+  const merged = mergeVariants(dbProducts);
+  const allDiffs = computeDiffs(merged, shopifyProducts)
+    .filter((d) => d.action !== "create"); // Phase 2 only applies updates + archives
+
+  // Skip already-processed groupKeys
+  const processedSet = new Set(cp.processedGroupKeys);
+  const remaining = allDiffs.filter((d) => !processedSet.has(d.groupKey));
+
+  if (remaining.length === 0) {
+    log("Phase 2: tous les diffs déjà traités");
+    await saveShopifyPushCheckpoint({ ...cp, totalDiffs: allDiffs.length, done: true });
+    return { updates: cp.totalUpdates, archived: cp.totalArchived, errors: cp.totalErrors };
+  }
+
+  const chunk = remaining.slice(0, SHOPIFY_PUSH_CHUNK_SIZE);
+  log(`Phase 2: traitement chunk ${chunk.length}/${remaining.length} diffs restants`);
+
+  // One sync_run per chunk — completes within this Vercel invocation
   const syncRun = await createSyncRun();
 
   try {
-    const [aosomProducts, shopifyProducts] = await Promise.all([
-      fetchAosomCatalog(),
-      fetchAllShopifyProducts(),
-    ]);
-    log(`${aosomProducts.length} produits Aosom, ${shopifyProducts.length} produits Shopify`);
-
-    const shopifyResult = await applyToShopify(aosomProducts, shopifyProducts, syncRun.id);
+    const shopifyResult = await applyToShopify(chunk, shopifyProducts, syncRun.id);
 
     if (shopifyResult.logEntries.length > 0) {
       await addSyncLogsBatch(shopifyResult.logEntries);
@@ -380,29 +427,46 @@ export async function runShopifyPush(): Promise<{ updates: number; archived: num
 
     await completeSyncRun(syncRun.id, {
       status: shopifyResult.errors > 0 && shopifyResult.updates + shopifyResult.archived === 0 ? "failed" : "completed",
-      totalProducts: aosomProducts.length,
+      totalProducts: dbProducts.length,
       created: 0, updated: shopifyResult.updates, archived: shopifyResult.archived,
       errors: shopifyResult.errors, errorMessages: shopifyResult.errorMessages,
     });
 
-    log(`Shopify push terminé: ${shopifyResult.updates} updates, ${shopifyResult.archived} archivés, ${shopifyResult.errors} erreurs`);
+    // Update cross-cron checkpoint
+    const newProcessedKeys = [...cp.processedGroupKeys, ...chunk.map((d) => d.groupKey)];
+    const newUpdates = cp.totalUpdates + shopifyResult.updates;
+    const newArchived = cp.totalArchived + shopifyResult.archived;
+    const newErrors = cp.totalErrors + shopifyResult.errors;
+    const isDone = newProcessedKeys.length >= allDiffs.length;
 
-    if (shopifyResult.updates > 0 || shopifyResult.archived > 0 || shopifyResult.errors > 0) {
+    await saveShopifyPushCheckpoint({
+      date: today,
+      processedGroupKeys: newProcessedKeys,
+      totalDiffs: allDiffs.length,
+      totalUpdates: newUpdates,
+      totalArchived: newArchived,
+      totalErrors: newErrors,
+      done: isDone,
+    });
+
+    log(`Phase 2 chunk terminé: ${shopifyResult.updates} updates, ${shopifyResult.archived} archivés, ${shopifyResult.errors} erreurs — ${isDone ? "COMPLET" : `${remaining.length - chunk.length} diffs restants`}`);
+
+    if (isDone && (newUpdates > 0 || newArchived > 0 || newErrors > 0)) {
       const parts: string[] = [];
-      if (shopifyResult.updates > 0) parts.push(`${shopifyResult.updates} produits mis à jour`);
-      if (shopifyResult.archived > 0) parts.push(`${shopifyResult.archived} archivés`);
-      if (shopifyResult.errors > 0) parts.push(`${shopifyResult.errors} erreurs`);
+      if (newUpdates > 0) parts.push(`${newUpdates} produits mis à jour`);
+      if (newArchived > 0) parts.push(`${newArchived} archivés`);
+      if (newErrors > 0) parts.push(`${newErrors} erreurs`);
       await createNotification(
-        shopifyResult.errors > 0 ? "warning" : "success",
+        newErrors > 0 ? "warning" : "success",
         "Shopify push terminé",
         parts.join(", "),
       );
     }
 
-    return { updates: shopifyResult.updates, archived: shopifyResult.archived, errors: shopifyResult.errors };
+    return { updates: newUpdates, archived: newArchived, errors: newErrors };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    log(`ERREUR Shopify push: ${msg}`);
+    log(`ERREUR Phase 2 chunk: ${msg}`);
     try {
       await completeSyncRun(syncRun.id, {
         status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
