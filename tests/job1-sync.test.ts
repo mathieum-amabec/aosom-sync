@@ -439,3 +439,94 @@ describe("GET /api/sync/health", () => {
     expect(body.success).toBe(false);
   });
 });
+
+// ─── Scenario 7: runSync — dryRun=true ───────────────────────────────
+
+describe("runSync — dryRun=true", () => {
+  beforeEach(resetAllMocks);
+
+  it("completes without mutating products or pushing to Shopify", async () => {
+    const result = await runSync({ dryRun: true });
+
+    expect(result.dryRun).toBe(true);
+    expect(db.refreshProducts).not.toHaveBeenCalled();
+    expect(shopifyClient.updateShopifyVariantPrice).not.toHaveBeenCalled();
+  });
+
+  it("marks run completed with DRY RUN message", async () => {
+    await runSync({ dryRun: true });
+
+    expect(db.completeSyncRun).toHaveBeenCalledWith(
+      "run-new",
+      expect.objectContaining({
+        status: "completed",
+        errorMessages: expect.arrayContaining(["DRY RUN — no changes applied"]),
+      })
+    );
+  });
+});
+
+// ─── Scenario 8: runShopifyPush — catch block on internal error ───────
+
+describe("runShopifyPush — catch block rethrows on DB failure", () => {
+  beforeEach(resetAllMocks);
+
+  it("rethrows when checkpoint save fails mid-chunk and marks run failed", async () => {
+    const diffs = ["gk-err"].map(k => makeProductDiff(k));
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue(diffs);
+    vi.mocked(db.saveShopifyPushCheckpoint).mockRejectedValueOnce(new Error("DB write failed"));
+
+    await expect(runShopifyPush()).rejects.toThrow("DB write failed");
+
+    // completeSyncRun should be called at least once — with status=failed from the catch block
+    const calls = vi.mocked(db.completeSyncRun).mock.calls;
+    expect(calls.some(([, args]) => args.status === "failed")).toBe(true);
+  });
+});
+
+// ─── Scenario 9: runShopifyPush — remaining.length === 0 ─────────────
+
+describe("runShopifyPush — all diffs already processed", () => {
+  beforeEach(resetAllMocks);
+
+  it("saves done=true checkpoint and skips creating a sync run", async () => {
+    const diffs = ["gk-1", "gk-2"].map(k => makeProductDiff(k));
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue(diffs);
+    vi.mocked(db.getShopifyPushCheckpoint).mockResolvedValue({
+      date: TODAY,
+      processedGroupKeys: ["gk-1", "gk-2"],
+      totalDiffs: 2, totalUpdates: 2, totalArchived: 0, totalErrors: 0, done: false,
+    });
+
+    await runShopifyPush();
+
+    expect(db.createSyncRun).not.toHaveBeenCalled();
+    const saved = vi.mocked(db.saveShopifyPushCheckpoint).mock.calls[0]?.[0];
+    expect(saved?.done).toBe(true);
+  });
+});
+
+// ─── Scenario 10: runShopifyPush — notification on isDone ────────────
+
+describe("runShopifyPush — notification fired when phase 2 completes with work done", () => {
+  beforeEach(resetAllMocks);
+
+  it("creates success notification when isDone=true and accumulated updates > 0", async () => {
+    const diffs = ["gk-final"].map(k => makeProductDiff(k));
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue(diffs);
+    // Prior checkpoint: 5 updates already accumulated, this is the last chunk
+    vi.mocked(db.getShopifyPushCheckpoint).mockResolvedValue({
+      date: TODAY,
+      processedGroupKeys: [],
+      totalDiffs: 1, totalUpdates: 5, totalArchived: 0, totalErrors: 0, done: false,
+    });
+
+    await runShopifyPush();
+
+    expect(db.createNotification).toHaveBeenCalledWith(
+      "success",
+      "Shopify push terminé",
+      expect.stringContaining("5 produits mis à jour")
+    );
+  });
+});
