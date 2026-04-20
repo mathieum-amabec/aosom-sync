@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { getSyncRuns, getShopifyPushCheckpoint } from "@/lib/database";
+import { checkRateLimit } from "@/lib/rate-limiter";
 
 export async function GET() {
+  const rl = checkRateLimit("sync-health", 30, 60_000);
+  if (!rl.allowed) {
+    return NextResponse.json({ error: "Too Many Requests" }, { status: 429 });
+  }
   try {
     const [runs, checkpoint] = await Promise.all([
       getSyncRuns(10),

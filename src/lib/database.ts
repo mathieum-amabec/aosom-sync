@@ -780,7 +780,10 @@ export async function completeSyncRun(
   stats: { status: "completed" | "failed"; totalProducts: number; created: number; updated: number; archived: number; errors: number; errorMessages: string[] }
 ): Promise<void> {
   const db = await ensureSchema();
-  await db.execute({ sql: `UPDATE sync_runs SET completed_at=?, status=?, total_products=?, created=?, updated=?, archived=?, errors=?, error_messages=? WHERE id=?`, args: [new Date().toISOString(), stats.status, stats.totalProducts, stats.created, stats.updated, stats.archived, stats.errors, JSON.stringify(stats.errorMessages), id] });
+  const result = await db.execute({ sql: `UPDATE sync_runs SET completed_at=?, status=?, total_products=?, created=?, updated=?, archived=?, errors=?, error_messages=? WHERE id=? AND status='running'`, args: [new Date().toISOString(), stats.status, stats.totalProducts, stats.created, stats.updated, stats.archived, stats.errors, JSON.stringify(stats.errorMessages), id] });
+  if ((result.rowsAffected ?? 0) === 0) {
+    console.warn("[DB] completeSyncRun: no running row for id", id, "(already completed or id unknown)");
+  }
 }
 
 export async function getSyncRuns(limit = 20): Promise<SyncRun[]> {
@@ -1159,11 +1162,30 @@ export interface ShopifyPushCheckpoint {
   done: boolean;
 }
 
+export function isValidCheckpoint(v: unknown): v is ShopifyPushCheckpoint {
+  if (!v || typeof v !== "object") return false;
+  const c = v as Record<string, unknown>;
+  return (
+    typeof c.date === "string" &&
+    Array.isArray(c.processedGroupKeys) &&
+    typeof c.totalDiffs === "number" &&
+    typeof c.totalUpdates === "number" &&
+    typeof c.totalArchived === "number" &&
+    typeof c.totalErrors === "number" &&
+    typeof c.done === "boolean"
+  );
+}
+
 export async function getShopifyPushCheckpoint(): Promise<ShopifyPushCheckpoint | null> {
   const raw = await getSetting("shopify_push_checkpoint");
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as ShopifyPushCheckpoint;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isValidCheckpoint(parsed)) {
+      console.warn("[DB] checkpoint corrupted, discarding:", raw.slice(0, 100));
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
