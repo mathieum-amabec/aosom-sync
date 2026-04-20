@@ -17,6 +17,12 @@ All notable changes to Aosom Sync will be documented in this file.
 - Structured JSON logging on `job1-sync` (replaces human-readable format).
 - 10 new tests: `shopifyFetch` AbortError path, 429 single retry, 429 max retries, Retry-After cap at 30s; `runSync` dryRun mode; `runShopifyPush` catch block, remaining=0 short-circuit, completion notification. Total: 92 tests.
 
+## [0.1.9.3] - 2026-04-19
+
+### Changed
+- Test runner: `bun run test:watch` and `bun run test:ci` scripts added to package.json for watch mode and verbose CI output. `bun run test` remains the correct command — `bun test` (bun's internal runner) silently skips tests that use `vi.stubGlobal` and is not supported.
+- CLAUDE.md: added Testing section documenting the bun test vs bun run test distinction to prevent future test runner confusion.
+
 ## [0.1.9.2] - 2026-04-18
 
 ### Security
