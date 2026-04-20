@@ -52,6 +52,17 @@ CSV Feed (Aosom) → csv-fetcher → variant-merger → diff-engine → Shopify 
 - `CRON_SECRET` — Vercel Cron auth
 - `AUTH_PASSWORD` — simple password auth for 2 users
 
+## Testing
+
+⚠️ Always use `bun run test` (executes `vitest run` via the npm script). Do NOT use `bun test` — bun's internal runner lacks `vi.stubGlobal` support and silently skips entire test files without error.
+
+| Command | Runner | Result |
+|---------|--------|--------|
+| `bun run test` | vitest | ✅ correct |
+| `bun run test:watch` | vitest --watch | ✅ correct |
+| `bun run test:ci` | vitest --reporter=verbose | ✅ correct |
+| `bun test` | bun:test | ❌ vi.stubGlobal crashes, tests skipped |
+
 ## Deployment
 
 Vercel with `vercel.json` cron (daily at 6am UTC). Requires Vercel Pro for 60s function timeout.
