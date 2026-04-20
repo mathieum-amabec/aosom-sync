@@ -4,6 +4,7 @@ import fs from "fs";
 import crypto from "crypto";
 import type { SyncRun, SyncLogEntry, ChangeType } from "@/types/sync";
 import type { UserRole } from "@/lib/config";
+import type { AosomProduct } from "@/types/aosom";
 
 let client: Client | null = null;
 
@@ -158,6 +159,13 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("post_text_en")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN post_text_en TEXT`);
   if (!cols.has("channels")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN channels TEXT`);
   if (!cols.has("image_urls")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN image_urls TEXT`);
+
+  // checkpoint_data on sync_runs: stores per-chunk progress for Phase 2 chunked push
+  const syncRunsInfo = await db.execute(`PRAGMA table_info(sync_runs)`);
+  const syncRunCols = new Set(syncRunsInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!syncRunCols.has("checkpoint_data")) {
+    alters.push(`ALTER TABLE sync_runs ADD COLUMN checkpoint_data TEXT`);
+  }
   if (alters.length > 0) {
     await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
   }
@@ -745,13 +753,18 @@ export async function getTrendingProducts(limit = 10): Promise<TrendingProduct[]
 
 // ─── Sync Runs ───────────────────────────────────────────────────────
 
-export async function clearStaleLockIfNeeded(): Promise<void> {
+export async function clearStaleLockIfNeeded(thresholdMinutes = 30): Promise<void> {
   const db = await ensureSchema();
-  await db.execute(`
-    UPDATE sync_runs SET status = 'failed', completed_at = datetime('now'),
-      error_messages = '["Stale lock cleared (timeout > 30 min)"]'
-    WHERE status = 'running' AND datetime(started_at) < datetime('now', '-30 minutes')
-  `);
+  await db.execute({
+    sql: `UPDATE sync_runs SET status = 'failed', completed_at = datetime('now'),
+      error_messages = ?
+    WHERE status = 'running'
+      AND (strftime('%s','now') - strftime('%s', started_at)) > ?`,
+    args: [
+      JSON.stringify([`Stale lock cleared (timeout > ${thresholdMinutes} min)`]),
+      thresholdMinutes * 60,
+    ],
+  });
 }
 
 export async function createSyncRun(): Promise<SyncRun> {
@@ -767,7 +780,10 @@ export async function completeSyncRun(
   stats: { status: "completed" | "failed"; totalProducts: number; created: number; updated: number; archived: number; errors: number; errorMessages: string[] }
 ): Promise<void> {
   const db = await ensureSchema();
-  await db.execute({ sql: `UPDATE sync_runs SET completed_at=?, status=?, total_products=?, created=?, updated=?, archived=?, errors=?, error_messages=? WHERE id=?`, args: [new Date().toISOString(), stats.status, stats.totalProducts, stats.created, stats.updated, stats.archived, stats.errors, JSON.stringify(stats.errorMessages), id] });
+  const result = await db.execute({ sql: `UPDATE sync_runs SET completed_at=?, status=?, total_products=?, created=?, updated=?, archived=?, errors=?, error_messages=? WHERE id=? AND status='running'`, args: [new Date().toISOString(), stats.status, stats.totalProducts, stats.created, stats.updated, stats.archived, stats.errors, JSON.stringify(stats.errorMessages), id] });
+  if ((result.rowsAffected ?? 0) === 0) {
+    console.warn("[DB] completeSyncRun: no running row for id", id, "(already completed or id unknown)");
+  }
 }
 
 export async function getSyncRuns(limit = 20): Promise<SyncRun[]> {
@@ -1078,4 +1094,103 @@ export async function getEligibleHighlightProduct(minDaysBetween: number): Promi
 export async function markProductPosted(sku: string): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `UPDATE products SET last_posted_at = strftime('%s','now') WHERE sku = ?`, args: [sku] });
+}
+
+// ─── Phase 2 helpers ─────────────────────────────────────────────────
+
+/**
+ * Read all products from the DB and return them as AosomProduct objects.
+ * Used by Phase 2 (runShopifyPush) to avoid re-fetching the full CSV.
+ * Fields not stored in the DB (psin, dimensions, brand, etc.) are set to
+ * safe defaults — they are not needed for diff computation.
+ */
+export async function getAllProductsAsAosom(): Promise<AosomProduct[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT sku, name, price, qty, color, size, product_type,
+            image1, image2, image3, image4, image5, image6, image7,
+            video, description, short_description, material, gtin,
+            weight, out_of_stock_expected, estimated_arrival
+     FROM products
+     WHERE last_seen_at >= strftime('%s', date('now'))`,
+    args: [],
+  });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    const images = [o.image1, o.image2, o.image3, o.image4, o.image5, o.image6, o.image7]
+      .filter((u): u is string => typeof u === "string" && u.length > 0);
+    return {
+      sku: String(o.sku ?? ""),
+      name: String(o.name ?? ""),
+      price: Number(o.price ?? 0),
+      qty: Number(o.qty ?? 0),
+      color: String(o.color ?? ""),
+      size: String(o.size ?? ""),
+      productType: String(o.product_type ?? ""),
+      images,
+      video: String(o.video ?? ""),
+      description: String(o.description ?? ""),
+      shortDescription: String(o.short_description ?? ""),
+      material: String(o.material ?? ""),
+      gtin: String(o.gtin ?? ""),
+      weight: Number(o.weight ?? 0),
+      estimatedArrival: String(o.estimated_arrival ?? ""),
+      outOfStockExpected: String(o.out_of_stock_expected ?? ""),
+      // Fields not stored in DB — safe defaults (not used for diff computation)
+      dimensions: { length: 0, width: 0, height: 0 },
+      brand: "",
+      category: "",
+      psin: "",
+      sin: "",
+      pdf: "",
+      packageNum: "",
+      boxSize: "",
+      boxWeight: "",
+    } satisfies AosomProduct;
+  });
+}
+
+// ─── Phase 2 checkpoint (cross-cron progress tracking) ───────────────
+
+export interface ShopifyPushCheckpoint {
+  date: string;
+  processedGroupKeys: string[];
+  totalDiffs: number;
+  totalUpdates: number;
+  totalArchived: number;
+  totalErrors: number;
+  done: boolean;
+}
+
+export function isValidCheckpoint(v: unknown): v is ShopifyPushCheckpoint {
+  if (!v || typeof v !== "object") return false;
+  const c = v as Record<string, unknown>;
+  return (
+    typeof c.date === "string" &&
+    Array.isArray(c.processedGroupKeys) &&
+    typeof c.totalDiffs === "number" &&
+    typeof c.totalUpdates === "number" &&
+    typeof c.totalArchived === "number" &&
+    typeof c.totalErrors === "number" &&
+    typeof c.done === "boolean"
+  );
+}
+
+export async function getShopifyPushCheckpoint(): Promise<ShopifyPushCheckpoint | null> {
+  const raw = await getSetting("shopify_push_checkpoint");
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isValidCheckpoint(parsed)) {
+      console.warn("[DB] checkpoint corrupted, discarding:", raw.slice(0, 100));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveShopifyPushCheckpoint(cp: ShopifyPushCheckpoint): Promise<void> {
+  await setSetting("shopify_push_checkpoint", JSON.stringify(cp));
 }

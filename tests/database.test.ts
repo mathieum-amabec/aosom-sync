@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 import path from "path";
 import fs from "fs";
+import { isValidCheckpoint } from "@/lib/database";
 
 const TEST_DB_PATH = path.join(__dirname, "fixtures", "test-db.sqlite");
 
@@ -95,6 +96,78 @@ describe("getTrendingProducts (direct SQL)", () => {
     `);
 
     expect(result.rows).toHaveLength(0);
+  });
+});
+
+describe("isValidCheckpoint (GAP 1 — type guard)", () => {
+  it("returns true for a well-formed checkpoint", () => {
+    expect(isValidCheckpoint({
+      date: "2026-04-19",
+      processedGroupKeys: ["g1", "g2"],
+      totalDiffs: 10,
+      totalUpdates: 8,
+      totalArchived: 2,
+      totalErrors: 0,
+      done: false,
+    })).toBe(true);
+  });
+
+  it("returns false when processedGroupKeys is missing", () => {
+    expect(isValidCheckpoint({
+      date: "2026-04-19",
+      totalDiffs: 10,
+      totalUpdates: 8,
+      totalArchived: 2,
+      totalErrors: 0,
+      done: false,
+    })).toBe(false);
+  });
+
+  it("returns false when done is not a boolean", () => {
+    expect(isValidCheckpoint({
+      date: "2026-04-19",
+      processedGroupKeys: [],
+      totalDiffs: 10,
+      totalUpdates: 0,
+      totalArchived: 0,
+      totalErrors: 0,
+      done: "yes",
+    })).toBe(false);
+  });
+
+  it("returns false for null, primitives, and empty object", () => {
+    expect(isValidCheckpoint(null)).toBe(false);
+    expect(isValidCheckpoint("string")).toBe(false);
+    expect(isValidCheckpoint({})).toBe(false);
+  });
+});
+
+describe("completeSyncRun WHERE status='running' guard (GAP 3)", () => {
+  let db: Client;
+
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  it("updates a running row and reports 1 row affected", async () => {
+    await db.execute(`CREATE TABLE IF NOT EXISTS sync_runs (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, completed_at TEXT, status TEXT NOT NULL DEFAULT 'running', total_products INTEGER, created INTEGER, updated INTEGER, archived INTEGER, errors INTEGER, error_messages TEXT DEFAULT '[]')`);
+    await db.execute({ sql: `INSERT INTO sync_runs (id, started_at, status) VALUES (?, ?, 'running')`, args: ["run-1", new Date().toISOString()] });
+
+    const result = await db.execute({ sql: `UPDATE sync_runs SET completed_at=?, status=?, total_products=?, created=?, updated=?, archived=?, errors=?, error_messages=? WHERE id=? AND status='running'`, args: [new Date().toISOString(), "completed", 100, 0, 5, 0, 0, "[]", "run-1"] });
+    expect(result.rowsAffected).toBe(1);
+
+    const row = await db.execute({ sql: `SELECT status FROM sync_runs WHERE id=?`, args: ["run-1"] });
+    expect(row.rows[0].status).toBe("completed");
+  });
+
+  it("does not update an already-completed row (guard prevents double-complete)", async () => {
+    await db.execute(`CREATE TABLE IF NOT EXISTS sync_runs (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, completed_at TEXT, status TEXT NOT NULL DEFAULT 'running', total_products INTEGER, created INTEGER, updated INTEGER, archived INTEGER, errors INTEGER, error_messages TEXT DEFAULT '[]')`);
+    await db.execute({ sql: `INSERT INTO sync_runs (id, started_at, status) VALUES (?, ?, 'completed')`, args: ["run-done", new Date().toISOString()] });
+
+    const result = await db.execute({ sql: `UPDATE sync_runs SET completed_at=?, status=?, total_products=?, created=?, updated=?, archived=?, errors=?, error_messages=? WHERE id=? AND status='running'`, args: [new Date().toISOString(), "failed", 0, 0, 0, 0, 0, "[]", "run-done"] });
+    expect(result.rowsAffected).toBe(0);
+
+    const row = await db.execute({ sql: `SELECT status FROM sync_runs WHERE id=?`, args: ["run-done"] });
+    expect(row.rows[0].status).toBe("completed");
   });
 });
 

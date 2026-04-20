@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/sync-shopify",
-      "schedule": "10 6 * * *"
+      "schedule": "10,25,40 6 * * *"
     },
     {
       "path": "/api/cron/social",

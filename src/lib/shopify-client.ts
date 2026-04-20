@@ -3,28 +3,48 @@ import type { AosomMergedProduct } from "@/types/aosom";
 import type { GeneratedContent } from "./content-generator";
 import { env, SHOPIFY } from "./config";
 
+const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
+const SHOPIFY_MAX_RETRIES = 3;
+const SHOPIFY_MAX_RETRY_AFTER_S = 30;
+
 async function shopifyFetch(
   endpoint: string,
   options: RequestInit = {},
   retryCount = 0
 ): Promise<Response> {
-  const MAX_RETRIES = 3;
   const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}${endpoint}`;
 
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Shopify-Access-Token": env.shopifyAccessToken,
-      ...options.headers,
-    },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SHOPIFY_FETCH_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": env.shopifyAccessToken,
+        ...options.headers,
+      },
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Shopify request timeout after ${SHOPIFY_FETCH_TIMEOUT_MS / 1000}s: ${endpoint}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (response.status === 429) {
-    if (retryCount >= MAX_RETRIES) {
-      throw new Error(`Shopify rate limit exceeded after ${MAX_RETRIES} retries on ${endpoint}`);
+    if (retryCount >= SHOPIFY_MAX_RETRIES) {
+      throw new Error(`Shopify rate limit exceeded after ${SHOPIFY_MAX_RETRIES} retries on ${endpoint}`);
     }
-    const retryAfter = parseFloat(response.headers.get("Retry-After") || "2");
+    const retryAfter = Math.min(
+      parseFloat(response.headers.get("Retry-After") || "2"),
+      SHOPIFY_MAX_RETRY_AFTER_S,
+    );
     await new Promise((r) => setTimeout(r, retryAfter * 1000));
     return shopifyFetch(endpoint, options, retryCount + 1);
   }
