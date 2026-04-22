@@ -257,13 +257,12 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
   const shopifyPush = options.shopifyPush ?? true;
 
   try {
-    // Step 1: Fetch CSV + Shopify data in parallel
-    log("Fetch CSV Aosom + produits Shopify...");
-    const [aosomProducts, shopifyProducts] = await Promise.all([
-      fetchAosomCatalog(),
-      fetchAllShopifyProducts(),
-    ]);
-    log(`${aosomProducts.length} produits Aosom, ${shopifyProducts.length} produits Shopify`);
+    // Step 1: Fetch CSV data (+ Shopify only if we'll push to it this phase)
+    log(shopifyPush ? "Fetch CSV Aosom + produits Shopify..." : "Fetch CSV Aosom...");
+    const [aosomProducts, shopifyProducts] = shopifyPush
+      ? await Promise.all([fetchAosomCatalog(), fetchAllShopifyProducts()])
+      : [await fetchAosomCatalog(), [] as Awaited<ReturnType<typeof fetchAllShopifyProducts>>];
+    log(`${aosomProducts.length} produits Aosom${shopifyPush ? `, ${shopifyProducts.length} produits Shopify` : ""}`);
 
     // Step 2: Detect changes
     const changes = await detectChanges(aosomProducts);
@@ -388,36 +387,41 @@ export async function runShopifyPush(): Promise<{ updates: number; archived: num
     return { updates: cp.totalUpdates, archived: cp.totalArchived, errors: cp.totalErrors };
   }
 
-  log(`Phase 2: Shopify push — chunk (${cp.processedGroupKeys.length} déjà traités)`);
-
-  // Fetch from DB (fast) + Shopify (needed for variant IDs and current prices)
-  const [dbProducts, shopifyProducts] = await Promise.all([
-    getAllProductsAsAosom(),
-    fetchAllShopifyProducts(),
-  ]);
-  log(`${dbProducts.length} produits DB, ${shopifyProducts.length} produits Shopify`);
-
-  const merged = mergeVariants(dbProducts);
-  const allDiffs = computeDiffs(merged, shopifyProducts)
-    .filter((d) => d.action !== "create"); // Phase 2 only applies updates + archives
-
-  // Skip already-processed groupKeys
-  const processedSet = new Set(cp.processedGroupKeys);
-  const remaining = allDiffs.filter((d) => !processedSet.has(d.groupKey));
-
-  if (remaining.length === 0) {
-    log("Phase 2: tous les diffs déjà traités");
-    await saveShopifyPushCheckpoint({ ...cp, totalDiffs: allDiffs.length, done: true });
-    return { updates: cp.totalUpdates, archived: cp.totalArchived, errors: cp.totalErrors };
-  }
-
-  const chunk = remaining.slice(0, SHOPIFY_PUSH_CHUNK_SIZE);
-  log(`Phase 2: traitement chunk ${chunk.length}/${remaining.length} diffs restants`);
-
-  // One sync_run per chunk — completes within this Vercel invocation
+  // Create sync_run BEFORE the heavy fetch so the run is observable in DB even if
+  // Vercel SIGKILLs the function during fetchAllShopifyProducts (which can take >300s).
   const syncRun = await createSyncRun();
+  log(`Phase 2: Shopify push — sync run ${syncRun.id} créée, chunk (${cp.processedGroupKeys.length} déjà traités)`);
 
   try {
+    // Fetch from DB (fast) + Shopify (needed for variant IDs and current prices)
+    const [dbProducts, shopifyProducts] = await Promise.all([
+      getAllProductsAsAosom(),
+      fetchAllShopifyProducts(),
+    ]);
+    log(`${dbProducts.length} produits DB, ${shopifyProducts.length} produits Shopify`);
+
+    const merged = mergeVariants(dbProducts);
+    const allDiffs = computeDiffs(merged, shopifyProducts)
+      .filter((d) => d.action !== "create"); // Phase 2 only applies updates + archives
+
+    // Skip already-processed groupKeys
+    const processedSet = new Set(cp.processedGroupKeys);
+    const remaining = allDiffs.filter((d) => !processedSet.has(d.groupKey));
+
+    if (remaining.length === 0) {
+      log("Phase 2: tous les diffs déjà traités");
+      await completeSyncRun(syncRun.id, {
+        status: "completed", totalProducts: dbProducts.length,
+        created: 0, updated: 0, archived: 0, errors: 0,
+        errorMessages: ["Phase 2: no diffs remaining (checkpoint complete)"],
+      });
+      await saveShopifyPushCheckpoint({ ...cp, totalDiffs: allDiffs.length, done: true });
+      return { updates: cp.totalUpdates, archived: cp.totalArchived, errors: cp.totalErrors };
+    }
+
+    const chunk = remaining.slice(0, SHOPIFY_PUSH_CHUNK_SIZE);
+    log(`Phase 2: traitement chunk ${chunk.length}/${remaining.length} diffs restants`);
+
     const shopifyResult = await applyToShopify(chunk, shopifyProducts, syncRun.id);
 
     if (shopifyResult.logEntries.length > 0) {
