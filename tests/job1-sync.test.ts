@@ -489,7 +489,7 @@ describe("runShopifyPush — catch block rethrows on DB failure", () => {
 describe("runShopifyPush — all diffs already processed", () => {
   beforeEach(resetAllMocks);
 
-  it("saves done=true checkpoint and skips creating a sync run", async () => {
+  it("saves done=true checkpoint and completes the sync run", async () => {
     const diffs = ["gk-1", "gk-2"].map(k => makeProductDiff(k));
     vi.mocked(diffEngine.computeDiffs).mockReturnValue(diffs);
     vi.mocked(db.getShopifyPushCheckpoint).mockResolvedValue({
@@ -500,9 +500,66 @@ describe("runShopifyPush — all diffs already processed", () => {
 
     await runShopifyPush();
 
-    expect(db.createSyncRun).not.toHaveBeenCalled();
+    expect(db.createSyncRun).toHaveBeenCalledOnce();
+    expect(db.completeSyncRun).toHaveBeenCalledWith(
+      "run-new",
+      expect.objectContaining({
+        status: "completed",
+        errorMessages: expect.arrayContaining(["Phase 2: no diffs remaining (checkpoint complete)"]),
+      })
+    );
     const saved = vi.mocked(db.saveShopifyPushCheckpoint).mock.calls[0]?.[0];
     expect(saved?.done).toBe(true);
+  });
+});
+
+// ─── Test A: Fix #2 — runSync({shopifyPush:false}) skips Shopify fetch ──
+
+describe("runSync — shopifyPush=false skips fetchAllShopifyProducts", () => {
+  beforeEach(resetAllMocks);
+
+  it("does not call fetchAllShopifyProducts when shopifyPush=false", async () => {
+    await runSync({ shopifyPush: false });
+
+    expect(shopifyClient.fetchAllShopifyProducts).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Test B: Fix #1 — createSyncRun called before fetch in runShopifyPush ──
+
+describe("runShopifyPush — createSyncRun called before fetchAllShopifyProducts throws", () => {
+  beforeEach(resetAllMocks);
+
+  it("run is created in DB even when fetch throws (SIGKILL-safe)", async () => {
+    vi.mocked(shopifyClient.fetchAllShopifyProducts).mockRejectedValueOnce(
+      new Error("Shopify API timeout")
+    );
+
+    await expect(runShopifyPush()).rejects.toThrow("Shopify API timeout");
+
+    expect(db.createSyncRun).toHaveBeenCalledOnce();
+    expect(db.completeSyncRun).toHaveBeenCalledWith(
+      "run-new",
+      expect.objectContaining({ status: "failed" })
+    );
+  });
+});
+
+// ─── Test C: Fix #1 — cp.done=true early return skips createSyncRun ──────
+
+describe("runShopifyPush — cp.done=true early return skips createSyncRun", () => {
+  beforeEach(resetAllMocks);
+
+  it("does not create a sync run when today's checkpoint is already done", async () => {
+    vi.mocked(db.getShopifyPushCheckpoint).mockResolvedValue({
+      date: TODAY,
+      processedGroupKeys: ["gk-1", "gk-2"],
+      totalDiffs: 2, totalUpdates: 2, totalArchived: 0, totalErrors: 0, done: true,
+    });
+
+    await runShopifyPush();
+
+    expect(db.createSyncRun).not.toHaveBeenCalled();
   });
 });
 
