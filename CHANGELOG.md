@@ -13,7 +13,8 @@ All notable changes to Aosom Sync will be documented in this file.
 - Updated Scenario 9: `runShopifyPush — all diffs already processed` now asserts `createSyncRun` IS called and `completeSyncRun(status="completed")` is called with `"Phase 2: no diffs remaining (checkpoint complete)"`.
 - Added Test A: `runSync({ shopifyPush: false })` does not call `fetchAllShopifyProducts`.
 - Added Test B: `runShopifyPush()` with a failing fetch still has `createSyncRun` in DB and `completeSyncRun(failed)` called (SIGKILL-safe invariant).
-- Added Test C: `runShopifyPush()` with `cp.done=true` does not call `createSyncRun` (fast-path guard). Total: 103 tests.
+- Added Test C: `runShopifyPush()` with `cp.done=true` does not call `createSyncRun` (fast-path guard).
+- Added positive-path test: `runSync({ shopifyPush: true })` calls `fetchAllShopifyProducts` (pairs with Test A). Total: 104 tests.
 
 ## [0.1.10.0] - 2026-04-19
 
