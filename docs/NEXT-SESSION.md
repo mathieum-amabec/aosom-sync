@@ -1,5 +1,47 @@
 # Next session — 22 avril 2026 (en cours)
 
+## UPDATE 23 avril (session reprise)
+
+### Révision de l'hypothèse Turso
+
+Finding critique après reprise: le cron Phase 1 du **20 avril 06:25 UTC** a 
+complété en **235s AVEC le fetch Shopify** (v0.1.10.0, pré-Fix #2). 
+
+Si le bottleneck `db.batch(100) @ 24s/batch` était structurel, ce run aurait 
+timeout AVANT le nôtre (qui faisait moins de travail). Donc l'hypothèse 
+"db.batch séquentiel" probablement FAUSSE.
+
+**Hypothèses alternatives plus probables:**
+- Dégradation Turso transitoire le soir du 22 avril
+- Cold start connection pool (22 avril était 1ère connexion post-deploy, 
+  20 avril était dans une série warm de crons successifs)
+
+### Décision: Wait before fix
+
+**On attend le cron 23 avril 06:00 UTC** avant de toucher à TURSO_DATABASE_URL.
+
+Raisons:
+1. Action hâtive risque de produire une fausse confirmation ("https:// a fixé" 
+   alors que c'était transitoire)
+2. Le 20 avril prouve que le système peut compléter avec le code actuel
+3. Fix #2 déployé le 22 avril doit faire passer Phase 1 de 235s (avec fetch) 
+   à bien moins (sans fetch). Le cron de demain est la vraie mesure.
+4. Changement d'infra = perte d'apprentissage sur la vraie cause
+
+### Plan 23 avril matin (à 7-8h Montréal)
+
+Audit du cron 06:00 UTC via:
+- SELECT id, started_at, completed_at, status, duration_s FROM sync_runs 
+  WHERE started_at > '2026-04-23T05:55:00Z' AND started_at < '2026-04-23T06:10:00Z'
+- /api/health public
+
+Arbre de décision:
+- duration_s < 120 → transitoire confirmée, on passe au force-push des 74 produits
+- duration_s 120-280 → marginal, on observe samedi et dimanche avant conclusion
+- duration_s > 300 ou status='failed' → structurel, go Option 1 avec prompt dédié
+
+---
+
 ## État actuel
 
 - PR #25 (v0.1.11.0) mergée et déployée en prod
