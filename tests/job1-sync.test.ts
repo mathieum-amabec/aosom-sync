@@ -153,6 +153,11 @@ describe("runSync — normal completion", () => {
     const createOrder = vi.mocked(db.createSyncRun).mock.invocationCallOrder[0];
     expect(clearOrder).toBeLessThan(createOrder);
   });
+
+  it("calls fetchAllShopifyProducts when shopifyPush=true", async () => {
+    await runSync({ shopifyPush: true });
+    expect(shopifyClient.fetchAllShopifyProducts).toHaveBeenCalledOnce();
+  });
 });
 
 // ─── Scenario 2: runSync throws → catch marks failed ─────────────────
@@ -542,6 +547,10 @@ describe("runShopifyPush — createSyncRun called before fetchAllShopifyProducts
       "run-new",
       expect.objectContaining({ status: "failed" })
     );
+    // Verify createSyncRun was called BEFORE fetchAllShopifyProducts — the core invariant
+    const createOrder = vi.mocked(db.createSyncRun).mock.invocationCallOrder[0];
+    const fetchOrder = vi.mocked(shopifyClient.fetchAllShopifyProducts).mock.invocationCallOrder[0];
+    expect(createOrder).toBeLessThan(fetchOrder!);
   });
 });
 
