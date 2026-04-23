@@ -1,3 +1,57 @@
+---
+## UPDATE 22 avril fin de soirée — Reprise demain matin
+
+### État au moment de dormir
+
+Branche `fix/social-cron-zero-drafts` (PR #26) prête à merger:
+- Bug confirmé: Anthropic API hang sur generatePostText() → SIGKILL Vercel 120s → 0 draft
+- Fix appliqué: AbortSignal.timeout(45s) + retry once après 5s sur TimeoutError
+- Tests: 108/108 pass, TypeScript clean
+- Scope strict Job 4 social — content-generator.ts (import pipeline) intact
+
+### Reste à faire — séquence demain matin
+
+ÉTAPE A — Audit cron Phase 1 06:00 UTC (le vrai test du fix Turso)
+  Query:
+    SELECT id, started_at, completed_at, status,
+           CAST((julianday(completed_at) - julianday(started_at)) * 86400 AS INTEGER) as duration_s,
+           total_products
+    FROM sync_runs 
+    WHERE started_at > '2026-04-23T05:55:00Z' AND started_at < '2026-04-23T06:10:00Z';
+  
+  Décision selon duration_s:
+    < 120s → transitoire confirmée, on n'a PAS besoin d'Option 1 Turso pour l'instant
+    120-280s → marginal, on observe samedi/dimanche
+    >300s ou failed → structurel, go Option 1 (libsql:// → https://)
+
+ÉTAPE B — Flow GStack sur PR #26 (social cron)
+  /review
+  /qa  (vérifier 108/108 pass + 4 nouveaux tests social)
+  /ship
+
+ÉTAPE C — Validation post-merge social cron
+  Vers 10h Montréal (cron 13:53 UTC), query:
+    SELECT id, trigger_type, status, created_at 
+    FROM facebook_drafts ORDER BY id DESC LIMIT 3;
+  Attendu: nouveau draft id=290+ créé aujourd'hui
+
+ÉTAPE D — Force-push 74 produits (si Étape A ✅)
+  Script à coder: scripts/force-push-shopify.ts en dry-run d'abord
+  Comble le drift accumulé (ex: 84G-720V00GY DB=$214.99 vs Shopify=$179.99)
+
+ÉTAPE E (optionnel si temps) — Timeout 90s sur content-generator.ts:100
+  generateProductContent (import pipeline) bénéficie du même pattern timeout
+  Branche dédiée fix/import-content-timeout, scope distinct du social fix
+
+### Commande pour reprendre demain
+
+cd ~/.gstack/projects/aosom-sync
+git checkout main && git pull origin main --ff-only
+cat docs/NEXT-SESSION.md | head -60
+gh pr list --state open
+
+---
+
 # Next session — 22 avril 2026 (en cours)
 
 ## UPDATE 23 avril (session reprise)
