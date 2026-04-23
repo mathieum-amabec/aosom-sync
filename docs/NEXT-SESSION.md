@@ -1,58 +1,56 @@
----
-## UPDATE 22 avril fin de soirée — Reprise demain matin
+# Next session — 24 avril 2026
 
-### État au moment de dormir
+## UPDATE 23 avril — PR #26 social cron fix prête à merger
 
-Branche `fix/social-cron-zero-drafts` (PR #26) prête à merger:
-- Bug confirmé: Anthropic API hang sur generatePostText() → SIGKILL Vercel 120s → 0 draft
-- Fix appliqué: AbortSignal.timeout(45s) + retry once après 5s sur TimeoutError
-- Tests: 108/108 pass, TypeScript clean
-- Scope strict Job 4 social — content-generator.ts (import pipeline) intact
+PR #26 (`fix/social-cron-zero-drafts`) est complète et prête au merge.
+108/108 tests, QA CLEAN 97/100, adversarial 0 blockers.
 
-### Reste à faire — séquence demain matin
+### ACTIONS IMMÉDIATES (aujourd'hui 23 avril)
 
-ÉTAPE A — Audit cron Phase 1 06:00 UTC (le vrai test du fix Turso)
-  Query:
-    SELECT id, started_at, completed_at, status,
-           CAST((julianday(completed_at) - julianday(started_at)) * 86400 AS INTEGER) as duration_s,
-           total_products
-    FROM sync_runs 
-    WHERE started_at > '2026-04-23T05:55:00Z' AND started_at < '2026-04-23T06:10:00Z';
-  
-  Décision selon duration_s:
-    < 120s → transitoire confirmée, on n'a PAS besoin d'Option 1 Turso pour l'instant
-    120-280s → marginal, on observe samedi/dimanche
-    >300s ou failed → structurel, go Option 1 (libsql:// → https://)
-
-ÉTAPE B — Flow GStack sur PR #26 (social cron)
-  /review
-  /qa  (vérifier 108/108 pass + 4 nouveaux tests social)
-  /ship
-
-ÉTAPE C — Validation post-merge social cron
-  Vers 10h Montréal (cron 13:53 UTC), query:
-    SELECT id, trigger_type, status, created_at 
-    FROM facebook_drafts ORDER BY id DESC LIMIT 3;
-  Attendu: nouveau draft id=290+ créé aujourd'hui
-
-ÉTAPE D — Force-push 74 produits (si Étape A ✅)
-  Script à coder: scripts/force-push-shopify.ts en dry-run d'abord
-  Comble le drift accumulé (ex: 84G-720V00GY DB=$214.99 vs Shopify=$179.99)
-
-ÉTAPE E (optionnel si temps) — Timeout 90s sur content-generator.ts:100
-  generateProductContent (import pipeline) bénéficie du même pattern timeout
-  Branche dédiée fix/import-content-timeout, scope distinct du social fix
-
-### Commande pour reprendre demain
-
-cd ~/.gstack/projects/aosom-sync
-git checkout main && git pull origin main --ff-only
-cat docs/NEXT-SESSION.md | head -60
-gh pr list --state open
+1. **Merger PR #26** sur main → déploiement Vercel automatique
+2. **ÉTAPE C (~13:53 UTC)**: Après deploy, checker `facebook_drafts` pour draft id=290+
+   ```sql
+   SELECT id, sku, created_at FROM facebook_drafts ORDER BY id DESC LIMIT 5;
+   ```
+3. **ÉTAPE D**: Force-push 74 produits driftés (script `scripts/force-push-shopify.ts`)
 
 ---
 
-# Next session — 22 avril 2026 (en cours)
+## UPDATE 22 avril soir — Bug social cron corrigé (PR mergée)
+
+### Root cause identifiée
+
+Cron social du **22 avril 13:53 UTC** → `504 Gateway Timeout`.  
+Anthropic API a hung indéfiniment; la Vercel function a timeout à 120s.  
+Aucun draft créé car `createFacebookDraft()` jamais atteint.
+
+Preuve: logs Vercel deployment `czi0hj90x` — seule ligne:
+```
+[JOB4][2026-04-22 13:53:22] stock_highlight trigger
+```
+(21 avril même heure → 200 OK, draft #289 créé)
+
+Note: le cron fire à **13:53 UTC** (pas 13:00) car le deployment `czi0hj90x`
+a été promu en prod le 19 avril à 13:53 UTC — Vercel ancre l'heure au deploy.
+
+### Fix livré (branch fix/social-cron-zero-drafts, 4 commits)
+
+1. **Timeout 45s** via `AbortSignal.timeout(45_000)` sur chaque appel Anthropic
+2. **Retry unique** dans `generateBilingual()`: TimeoutError/AbortError seulement,
+   sleep 5s (10ms en test), même timeout 45s sur la retry
+3. **Structured logs**: `anthropic call started/completed` (info), 
+   `anthropic timeout, retrying` (warn), `anthropic failed after retry` (error)
+4. **Tests**: 4 scénarios couverts (happy, timeout+retry ok, double timeout, 429 no retry)
+
+Worst case wall time: 45s + 5s + 45s = **95s < maxDuration 120s**
+
+### TODO: content-generator.ts:100 (import pipeline — hors scope)
+
+`generateProductContent()` à la ligne 100 a `max_tokens: 4000` et AUCUN timeout.
+Needs a **90s** timeout (pas 45s — prompts plus longs, plus de tokens).
+À faire dans une prochaine session, séparément du social cron fix.
+
+---
 
 ## UPDATE 23 avril (session reprise)
 
@@ -160,8 +158,7 @@ n'en utilise pas, donc safe.
 2. Étape 2 du plan sync: migration + backfill variant IDs en DB (préparation Étape 3)
 3. Étape 3 du plan sync: refactor Phase 2 pour lire diffs depuis DB au lieu 
    de fetcher Shopify live
-4. Bug Social cron: 0 draft créé le 22 avril à 13:00 UTC (à investiguer)
-5. Meta App Review: submission manuelle (business verif + screencast + submit)
+4. Meta App Review: submission manuelle (business verif + screencast + submit)
 
 ## Commandes pour reprendre
 

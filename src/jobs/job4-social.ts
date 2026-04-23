@@ -10,6 +10,7 @@
  * all channels (Facebook Ameublo FR, Facebook Furnish EN, Instagram Ameublo FR,
  * future Instagram Furnish EN).
  */
+import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { composeImage } from "@/lib/image-composer";
 import { env, CLAUDE, SYNC, CHANNELS, type ChannelKey } from "@/lib/config";
@@ -25,9 +26,25 @@ import {
 } from "@/lib/database";
 import { publishDraftToChannels } from "@/lib/social-publisher";
 
-function log(msg: string): void {
+const ANTHROPIC_CALL_TIMEOUT_MS = 45_000;
+const ANTHROPIC_RETRY_DELAY_MS = 5_000;
+
+function log(msg: string, data?: Record<string, unknown>): void {
   const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
-  console.log(`[JOB4][${ts}] ${msg}`);
+  const suffix = data ? ` ${JSON.stringify(data)}` : "";
+  console.log(`[JOB4][${ts}] ${msg}${suffix}`);
+}
+
+function logWarn(msg: string, data?: Record<string, unknown>): void {
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const suffix = data ? ` ${JSON.stringify(data)}` : "";
+  console.warn(`[JOB4][${ts}] WARN ${msg}${suffix}`);
+}
+
+function logError(msg: string, data?: Record<string, unknown>): void {
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const suffix = data ? ` ${JSON.stringify(data)}` : "";
+  console.error(`[JOB4][${ts}] ERROR ${msg}${suffix}`);
 }
 
 function getClient() {
@@ -58,15 +75,21 @@ function interpolatePrompt(template: string, vars: Record<string, string>): stri
 
 async function generatePostText(prompt: string): Promise<string> {
   const client = getClient();
-  const message = await client.messages.create({
-    model: CLAUDE.MODEL,
-    max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
-    messages: [{ role: "user", content: prompt }],
-  });
-  return message.content[0].type === "text" ? message.content[0].text.trim() : "";
+  const t0 = Date.now();
+  log("anthropic call started", { prompt_tokens: Math.ceil(prompt.length / 4) });
+  const message = await client.messages.create(
+    {
+      model: CLAUDE.MODEL,
+      max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
+      messages: [{ role: "user", content: prompt }],
+    },
+    { signal: AbortSignal.timeout(ANTHROPIC_CALL_TIMEOUT_MS) },
+  );
+  log("anthropic call completed", { duration_ms: Date.now() - t0 });
+  return message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
 }
 
-/** Generate FR and EN captions in parallel. */
+/** Generate FR and EN captions in parallel, with one retry on Anthropic timeout. */
 async function generateBilingual(
   settings: Record<string, string>,
   triggerType: "new_product" | "price_drop" | "highlight",
@@ -80,11 +103,27 @@ async function generateBilingual(
   const frVars = { ...vars, hashtags: settings.social_hashtags_fr || "" };
   const enVars = { ...vars, hashtags: settings.social_hashtags_en || "" };
 
-  const [fr, en] = await Promise.all([
-    generatePostText(interpolatePrompt(frTpl, frVars)),
-    generatePostText(interpolatePrompt(enTpl, enVars)),
-  ]);
-  return { fr, en };
+  const frPrompt = interpolatePrompt(frTpl, frVars);
+  const enPrompt = interpolatePrompt(enTpl, enVars);
+
+  try {
+    const [fr, en] = await Promise.all([generatePostText(frPrompt), generatePostText(enPrompt)]);
+    return { fr, en };
+  } catch (err) {
+    if (err instanceof Anthropic.APIUserAbortError) {
+      logWarn("anthropic timeout, retrying", { attempt: 1 });
+      const retryDelayMs = process.env.NODE_ENV === "test" ? 10 : ANTHROPIC_RETRY_DELAY_MS;
+      await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
+      try {
+        const [fr, en] = await Promise.all([generatePostText(frPrompt), generatePostText(enPrompt)]);
+        return { fr, en };
+      } catch (retryErr) {
+        logError("anthropic failed after retry", { error: String(retryErr) });
+        throw retryErr;
+      }
+    }
+    throw err;
+  }
 }
 
 interface GenerateDraftResult {
