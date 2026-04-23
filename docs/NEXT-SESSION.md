@@ -1,6 +1,22 @@
-# Next session — 23 avril 2026
+# Next session — 24 avril 2026
 
-## UPDATE 22 avril soir — Bug social cron corrigé (PR en cours)
+## UPDATE 23 avril — PR #26 social cron fix prête à merger
+
+PR #26 (`fix/social-cron-zero-drafts`) est complète et prête au merge.
+108/108 tests, QA CLEAN 97/100, adversarial 0 blockers.
+
+### ACTIONS IMMÉDIATES (aujourd'hui 23 avril)
+
+1. **Merger PR #26** sur main → déploiement Vercel automatique
+2. **ÉTAPE C (~13:53 UTC)**: Après deploy, checker `facebook_drafts` pour draft id=290+
+   ```sql
+   SELECT id, sku, created_at FROM facebook_drafts ORDER BY id DESC LIMIT 5;
+   ```
+3. **ÉTAPE D**: Force-push 74 produits driftés (script `scripts/force-push-shopify.ts`)
+
+---
+
+## UPDATE 22 avril soir — Bug social cron corrigé (PR mergée)
 
 ### Root cause identifiée
 
