@@ -197,32 +197,7 @@ function diffProduct(
     });
   }
 
-  // Description change — compare normalized HTML
-  const aosomDesc = normalizeHtml(aosom.description);
-  const shopifyDesc = normalizeHtml(shopify.bodyHtml);
-  if (aosomDesc !== shopifyDesc) {
-    changes.push({
-      field: "description",
-      sku: aosom.variants[0].sku,
-      oldValue: truncate(shopify.bodyHtml, 100),
-      newValue: truncate(aosom.description, 100),
-    });
-  }
-
   return changes;
-}
-
-function normalizeHtml(html: string): string {
-  return (html || "")
-    .replace(/\s+/g, " ")
-    .replace(/>\s+</g, "><")
-    .trim()
-    .toLowerCase();
-}
-
-function truncate(str: string, max: number): string {
-  if (!str) return "";
-  return str.length > max ? str.slice(0, max) + "…" : str;
 }
 
 /**
@@ -246,6 +221,8 @@ export function summarizeDiffs(diffs: ProductDiff[]) {
       (n, d) => n + d.changes.filter((c) => c.field === "images").length,
       0
     ),
+    // descriptionChanges is always 0 since diffProduct() no longer compares
+    // descriptions. Kept here for backward compat and future re-introduction.
     descriptionChanges: diffs.reduce(
       (n, d) => n + d.changes.filter((c) => c.field === "description").length,
       0

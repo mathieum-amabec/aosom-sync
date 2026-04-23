@@ -297,29 +297,38 @@ function rowToProduct(row: Row): ProductRow {
   };
 }
 
+/**
+ * Syncs products from Aosom CSV to DB.
+ *
+ * PERF DESIGN: description and short_description are intentionally OMITTED
+ * from the nightly INSERT/UPDATE. Rationale:
+ * - They carry ~88% of payload weight (~1640 chars avg per product)
+ * - NEVER displayed in UI /catalog before import — zero user value nightly
+ * - Import pipeline fetches fresh description on-demand via fetchDescriptionsForImport()
+ * - Existing DB values preserved (not cleared here); new products get NULL
+ */
 export async function refreshProducts(products: Omit<ProductRow, "shopify_product_id" | "shopify_variant_id" | "last_posted_at" | "created_at">[]): Promise<void> {
   const db = await ensureSchema();
   const now = Math.floor(Date.now() / 1000);
   const stmts = products.map((p) => ({
     sql: `INSERT INTO products (sku, name, price, qty, color, size, product_type,
       image1, image2, image3, image4, image5, image6, image7, video,
-      description, short_description, material, gtin, weight,
+      material, gtin, weight,
       out_of_stock_expected, estimated_arrival, last_seen_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(sku) DO UPDATE SET
       name=excluded.name, price=excluded.price, qty=excluded.qty,
       color=excluded.color, size=excluded.size, product_type=excluded.product_type,
       image1=excluded.image1, image2=excluded.image2, image3=excluded.image3,
       image4=excluded.image4, image5=excluded.image5, image6=excluded.image6,
       image7=excluded.image7, video=excluded.video,
-      description=excluded.description, short_description=excluded.short_description,
       material=excluded.material, gtin=excluded.gtin, weight=excluded.weight,
       out_of_stock_expected=excluded.out_of_stock_expected,
       estimated_arrival=excluded.estimated_arrival, last_seen_at=excluded.last_seen_at`,
     args: [
       p.sku, p.name, p.price, p.qty, p.color, p.size, p.product_type,
       p.image1, p.image2, p.image3, p.image4, p.image5, p.image6, p.image7,
-      p.video, p.description, p.short_description, p.material, p.gtin, p.weight,
+      p.video, p.material, p.gtin, p.weight,
       p.out_of_stock_expected, p.estimated_arrival, now,
     ],
   }));

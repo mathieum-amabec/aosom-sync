@@ -39,6 +39,49 @@ export async function fetchAosomCatalog(): Promise<AosomProduct[]> {
   throw lastError!;
 }
 
+// ─── Description-on-demand helpers ───────────────────────────────────────────
+
+let _csvCache: { products: AosomProduct[]; fetchedAt: number } | null = null;
+const CSV_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function getCachedCatalog(): Promise<AosomProduct[]> {
+  if (_csvCache && Date.now() - _csvCache.fetchedAt < CSV_CACHE_TTL_MS) {
+    return _csvCache.products;
+  }
+  const products = await fetchAosomCatalog();
+  _csvCache = { products, fetchedAt: Date.now() };
+  return products;
+}
+
+export async function fetchDescriptionsForImport(
+  sku: string
+): Promise<{ description: string | null; short_description: string | null } | null> {
+  const catalog = await getCachedCatalog();
+  const product = catalog.find((p) => p.sku === sku);
+  if (!product) return null;
+  return {
+    description: product.description || null,
+    short_description: product.shortDescription || null,
+  };
+}
+
+export async function fetchDescriptionsForImportBatch(
+  skus: string[]
+): Promise<Map<string, { description: string | null; short_description: string | null }>> {
+  const catalog = await getCachedCatalog();
+  const skuSet = new Set(skus);
+  const result = new Map<string, { description: string | null; short_description: string | null }>();
+  for (const product of catalog) {
+    if (skuSet.has(product.sku)) {
+      result.set(product.sku, {
+        description: product.description || null,
+        short_description: product.shortDescription || null,
+      });
+    }
+  }
+  return result;
+}
+
 /**
  * Parse TSV text into normalized products.
  * Exported separately for testing with local files.

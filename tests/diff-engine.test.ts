@@ -95,11 +95,26 @@ describe("computeDiffs", () => {
     expect(diffs[0].changes.some((c) => c.field === "images")).toBe(true);
   });
 
-  it("detects description change", () => {
+  it("does NOT report description changes even when descriptions differ", () => {
     const aosom = makeAosom({ description: "<p>New description</p>" });
     const diffs = computeDiffs([aosom], [makeShopify()]);
+    expect(diffs).toHaveLength(0);
+  });
+
+  it("does NOT include description field in any change record", () => {
+    const aosom = makeAosom({ description: "<p>Completely different content</p>" });
+    const diffs = computeDiffs([aosom], [makeShopify()]);
+    const allFields = diffs.flatMap((d) => d.changes.map((c) => c.field));
+    expect(allFields).not.toContain("description");
+  });
+
+  it("still detects price changes when descriptions also differ", () => {
+    const aosom = makeAosom({ description: "<p>Different</p>" });
+    aosom.variants[0].price = 109.99;
+    const diffs = computeDiffs([aosom], [makeShopify()]);
     expect(diffs).toHaveLength(1);
-    expect(diffs[0].changes.some((c) => c.field === "description")).toBe(true);
+    expect(diffs[0].changes.some((c) => c.field === "price")).toBe(true);
+    expect(diffs[0].changes.some((c) => c.field === "description")).toBe(false);
   });
 
   it("identifies new products not in Shopify", () => {
