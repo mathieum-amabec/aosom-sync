@@ -86,7 +86,7 @@ async function generatePostText(prompt: string): Promise<string> {
     { signal: AbortSignal.timeout(ANTHROPIC_CALL_TIMEOUT_MS) },
   );
   log("anthropic call completed", { duration_ms: Date.now() - t0 });
-  return message.content[0].type === "text" ? message.content[0].text.trim() : "";
+  return message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
 }
 
 /** Generate FR and EN captions in parallel, with one retry on Anthropic timeout. */

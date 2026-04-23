@@ -132,7 +132,7 @@ describe("pickRandomImages", () => {
 describe("triggerStockHighlight — Anthropic timeout handling", () => {
   beforeEach(() => {
     // Clear call history before every test so counts don't bleed across.
-    vi.clearAllMocks();
+    vi.resetAllMocks();
 
     vi.mocked(getAllSettings).mockResolvedValue(SETTINGS);
     vi.mocked(getEligibleHighlightProduct).mockResolvedValue(PRODUCT);
@@ -178,10 +178,13 @@ describe("triggerStockHighlight — Anthropic timeout handling", () => {
     const result = await triggerStockHighlight();
 
     expect(result?.draftId).toBe(DRAFT_ID);
+    expect(result?.postText).toBe("Texte FR retry");
+    expect(result?.postTextEn).toBe("Text EN retry");
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("anthropic timeout, retrying"),
     );
     expect(createFacebookDraft).toHaveBeenCalledOnce();
+    expect(mockCreate).toHaveBeenCalledTimes(4);
   });
 
   it("timeout on both attempts → throws, no draft created, error logged", async () => {
@@ -197,6 +200,7 @@ describe("triggerStockHighlight — Anthropic timeout handling", () => {
 
     await expect(triggerStockHighlight()).rejects.toThrow();
     expect(createFacebookDraft).not.toHaveBeenCalled();
+    expect(mockCreate).toHaveBeenCalledTimes(4);
     expect(errorSpy).toHaveBeenCalledWith(
       expect.stringContaining("anthropic failed after retry"),
     );
@@ -216,6 +220,7 @@ describe("triggerStockHighlight — Anthropic timeout handling", () => {
 
     await expect(triggerStockHighlight()).rejects.toThrow("429 Too Many Requests");
     expect(createFacebookDraft).not.toHaveBeenCalled();
+    expect(mockCreate).toHaveBeenCalledTimes(2);
     // Retry path must NOT have been reached.
     expect(warnSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("anthropic timeout, retrying"),
