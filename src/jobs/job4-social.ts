@@ -10,6 +10,7 @@
  * all channels (Facebook Ameublo FR, Facebook Furnish EN, Instagram Ameublo FR,
  * future Instagram Furnish EN).
  */
+import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { composeImage } from "@/lib/image-composer";
 import { env, CLAUDE, SYNC, CHANNELS, type ChannelKey } from "@/lib/config";
@@ -109,8 +110,7 @@ async function generateBilingual(
     const [fr, en] = await Promise.all([generatePostText(frPrompt), generatePostText(enPrompt)]);
     return { fr, en };
   } catch (err) {
-    const name = (err as Error).name;
-    if (name === "TimeoutError" || name === "AbortError") {
+    if (err instanceof Anthropic.APIUserAbortError) {
       logWarn("anthropic timeout, retrying", { attempt: 1 });
       const retryDelayMs = process.env.NODE_ENV === "test" ? 10 : ANTHROPIC_RETRY_DELAY_MS;
       await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));

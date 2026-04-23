@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import Anthropic from "@anthropic-ai/sdk";
 import { pickRandomImages, triggerStockHighlight } from "@/jobs/job4-social";
 
 // ─── Mock factories ───────────────────────────────────────────────────
@@ -68,12 +69,9 @@ function makeMsg(text: string) {
 }
 
 function makeTimeout() {
-  // Plain Error with name="TimeoutError" matches the production check
-  // (name === "TimeoutError") and avoids Node.js's special DOMException
-  // unhandled-rejection tracking that causes false-positive noise in vitest.
-  const err = new Error("signal timed out");
-  err.name = "TimeoutError";
-  return err;
+  // Use the real SDK error class so tests match what AbortSignal.timeout() causes
+  // in production (SDK wraps it into APIUserAbortError, not a raw "TimeoutError").
+  return new Anthropic.APIUserAbortError();
 }
 
 // ─── pickRandomImages ─────────────────────────────────────────────────
