@@ -109,7 +109,8 @@ async function generateBilingual(
     const name = (err as Error).name;
     if (name === "TimeoutError" || name === "AbortError") {
       logWarn("anthropic timeout, retrying", { attempt: 1 });
-      await new Promise<void>((resolve) => setTimeout(resolve, 5000));
+      const retryDelayMs = process.env.NODE_ENV === "test" ? 10 : 5_000;
+      await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
       try {
         const [fr, en] = await Promise.all([generatePostText(frPrompt), generatePostText(enPrompt)]);
         return { fr, en };
