@@ -25,9 +25,22 @@ import {
 } from "@/lib/database";
 import { publishDraftToChannels } from "@/lib/social-publisher";
 
-function log(msg: string): void {
+function log(msg: string, data?: Record<string, unknown>): void {
   const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
-  console.log(`[JOB4][${ts}] ${msg}`);
+  const suffix = data ? ` ${JSON.stringify(data)}` : "";
+  console.log(`[JOB4][${ts}] ${msg}${suffix}`);
+}
+
+function logWarn(msg: string, data?: Record<string, unknown>): void {
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const suffix = data ? ` ${JSON.stringify(data)}` : "";
+  console.warn(`[JOB4][${ts}] WARN ${msg}${suffix}`);
+}
+
+function logError(msg: string, data?: Record<string, unknown>): void {
+  const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const suffix = data ? ` ${JSON.stringify(data)}` : "";
+  console.error(`[JOB4][${ts}] ERROR ${msg}${suffix}`);
 }
 
 function getClient() {
@@ -58,11 +71,17 @@ function interpolatePrompt(template: string, vars: Record<string, string>): stri
 
 async function generatePostText(prompt: string): Promise<string> {
   const client = getClient();
-  const message = await client.messages.create({
-    model: CLAUDE.MODEL,
-    max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
-    messages: [{ role: "user", content: prompt }],
-  });
+  const t0 = Date.now();
+  log("anthropic call started", { prompt_tokens: Math.ceil(prompt.length / 4) });
+  const message = await client.messages.create(
+    {
+      model: CLAUDE.MODEL,
+      max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
+      messages: [{ role: "user", content: prompt }],
+    },
+    { signal: AbortSignal.timeout(45_000) },
+  );
+  log("anthropic call completed", { duration_ms: Date.now() - t0 });
   return message.content[0].type === "text" ? message.content[0].text.trim() : "";
 }
 
