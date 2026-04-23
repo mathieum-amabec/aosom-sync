@@ -1,164 +1,169 @@
 # Next session — 24 avril 2026
 
-## UPDATE 23 avril — PR #26 social cron fix prête à merger
+## OUVERTURE SESSION
 
-PR #26 (`fix/social-cron-zero-drafts`) est complète et prête au merge.
-108/108 tests, QA CLEAN 97/100, adversarial 0 blockers.
-
-### ACTIONS IMMÉDIATES (aujourd'hui 23 avril)
-
-1. **Merger PR #26** sur main → déploiement Vercel automatique
-2. **ÉTAPE C (~13:53 UTC)**: Après deploy, checker `facebook_drafts` pour draft id=290+
-   ```sql
-   SELECT id, sku, created_at FROM facebook_drafts ORDER BY id DESC LIMIT 5;
-   ```
-3. **ÉTAPE D**: Force-push 74 produits driftés (script `scripts/force-push-shopify.ts`)
+> Reprise aosom-sync après diagnostic Turso complet.
+> Commence par Étape A: bench READ Turso pour valider viabilité Option α.
 
 ---
 
-## UPDATE 22 avril soir — Bug social cron corrigé (PR mergée)
+## État prod au checkpoint (23 avril soir)
 
-### Root cause identifiée
+- Version prod: **0.1.12.0** (PR #26 mergée et déployée ce matin)
+- Tests: 110/110 (main)
+- sync_runs: 0 running (propre)
+- Dernier Phase 1 completed via cron: 2026-04-20T06:25:21Z (Phase 1 timeout depuis)
+- Products count: 10 426
 
-Cron social du **22 avril 13:53 UTC** → `504 Gateway Timeout`.  
-Anthropic API a hung indéfiniment; la Vercel function a timeout à 120s.  
-Aucun draft créé car `createFacebookDraft()` jamais atteint.
+### PR #26 validée en prod ✅
 
-Preuve: logs Vercel deployment `czi0hj90x` — seule ligne:
+Draft #290 `stock_highlight` créé à **2026-04-23T00:22:25 UTC** — Vercel a ancré
+le cron à l'heure du deploy (pas 13:53 cette fois, deploy fait à ~00:22 UTC).
+Social cron timeout + retry fix confirmé en production réelle.
+
+---
+
+## Diagnostic Turso complet — 3 hypothèses éliminées
+
+### Hypothèse 1 — WebSocket sequential (libsql://) ❌ ÉLIMINÉE
+
+`https://` mode donne 8× speedup sur petits payloads mais pas sur 427KB.
+Gain modeste car bottleneck pas le protocol.
+
+### Hypothèse 2 — Payload size (description ~88%) ❌ PARTIELLEMENT ÉLIMINÉE
+
+Fix appliqué (branche `fix/turso-http-mode`, commit `00f5606`):
+- `refreshProducts()`: description/short_description exclus de INSERT/UPSERT
+- Payload réduit: 427KB → 174KB (-59%) ✅ bon standalone fix
+- **MAIS**: timing inchangé. 174KB → ~22s/batch, même rythme que 427KB.
+  Le bottleneck n'est pas la taille du payload.
+
+### Hypothèse 3 — Statement count (multi-row INSERT) ❌ ÉLIMINÉE
+
+Bench `bench-multirow-insert.ts` (Stratégies A/B/C, 3 runs chacune):
+- Strategy A: 100× individuels → médiane **33s**
+- Strategy B: 1× multi-row via `db.execute()` → médiane **41s** (plus lent)
+- Strategy C: 1× multi-row via `db.batch([stmt])` → médiane **42s** (plus lent)
+
+**Conclusion définitive**: Turso exécute chaque row de VALUES séparément au
+niveau SQLite. Multi-row INSERT n'aide pas. SQLite processing time ~220-330ms/row
+est structurel.
+
+### Root cause finale
+
+**Turso write latency = ~200–330ms/row, quelle que soit la formulation SQL.**
+
+Avec 10 426 produits × ~250ms = ~2600s. Aucune reformulation SQL ne résout ça.
+Le seul levier est de réduire le **nombre de rows qu'on écrit**.
+
+---
+
+## Option α — Diff-before-upsert (prochaine session)
+
+Au lieu d'UPSERT tous les 10 426 produits chaque nuit, on ne write que les lignes
+qui ont réellement changé depuis le dernier sync.
+
+### Plan
+
 ```
-[JOB4][2026-04-22 13:53:22] stock_highlight trigger
+Phase 1 actuelle:
+  fetchCSV (10 426 produits)
+  → refreshProducts(tous) → 105 batches × ~30s = timeout
+
+Phase 1 avec Option α:
+  fetchCSV (10 426 produits)
+  → SELECT lightweight DB (sku, price, qty, images...) ← ÉTAPE A à mesurer
+  → diff CSV vs DB → trouver changed_rows (~50–500 typiquement)
+  → refreshProducts(changed_only) → 1–5 batches → ~1–5s
 ```
-(21 avril même heure → 200 OK, draft #289 créé)
 
-Note: le cron fire à **13:53 UTC** (pas 13:00) car le deployment `czi0hj90x`
-a été promu en prod le 19 avril à 13:53 UTC — Vercel ancre l'heure au deploy.
+### ÉTAPE A — Bench READ (à faire en premier)
 
-### Fix livré (branch fix/social-cron-zero-drafts, 4 commits)
+Mesurer le temps du SELECT lightweight:
 
-1. **Timeout 45s** via `AbortSignal.timeout(45_000)` sur chaque appel Anthropic
-2. **Retry unique** dans `generateBilingual()`: TimeoutError/AbortError seulement,
-   sleep 5s (10ms en test), même timeout 45s sur la retry
-3. **Structured logs**: `anthropic call started/completed` (info), 
-   `anthropic timeout, retrying` (warn), `anthropic failed after retry` (error)
-4. **Tests**: 4 scénarios couverts (happy, timeout+retry ok, double timeout, 429 no retry)
+```sql
+SELECT sku, price, qty, image1, image2, image3, image4, image5, image6, image7,
+       video, material, gtin, weight, out_of_stock_expected, estimated_arrival
+FROM products
+```
 
-Worst case wall time: 45s + 5s + 45s = **95s < maxDuration 120s**
+Objectif: confirmer que la lecture de 10 426 rows sans description est rapide.
 
-### TODO: content-generator.ts:100 (import pipeline — hors scope)
+**Gate A**: 
+- < 5s → Option α viahle, proceed
+- 5–15s → viable si peu de rows changent (Phase 1 = 15s + batches)
+- > 30s → SELECT aussi lent que les writes → option α perd son intérêt, 
+  explorer Option β (passer à un autre provider)
 
-`generateProductContent()` à la ligne 100 a `max_tokens: 4000` et AUCUN timeout.
-Needs a **90s** timeout (pas 45s — prompts plus longs, plus de tokens).
-À faire dans une prochaine session, séparément du social cron fix.
+Script à créer: `scripts/bench-read-products.ts`
 
----
+```typescript
+// Mesure:
+// 1. SELECT * FROM products LIMIT 100 (warmup)
+// 2. SELECT lightweight 10 426 rows × 3 runs → médiane
+// 3. Taille payload retourné (JSON.stringify result)
+// 4. Extrapolation Phase 1 = SELECT + 300 rows de writes estimés
+```
 
-## UPDATE 23 avril (session reprise)
+### Implémentation Option α (après Gate A positif)
 
-### Révision de l'hypothèse Turso
+Dans `src/jobs/job1-sync.ts`, Phase 1:
 
-Finding critique après reprise: le cron Phase 1 du **20 avril 06:25 UTC** a 
-complété en **235s AVEC le fetch Shopify** (v0.1.10.0, pré-Fix #2). 
+```typescript
+// 1. Fetch CSV → aosomProducts[]
+// 2. SELECT lightweight DB → dbSnapshot Map<sku, {price, qty, images...}>
+// 3. diff: filtrer les produits où ≥1 champ a changé
+// 4. refreshProducts(changedOnly)  ← souvent 50–500 rows
+```
 
-Si le bottleneck `db.batch(100) @ 24s/batch` était structurel, ce run aurait 
-timeout AVANT le nôtre (qui faisait moins de travail). Donc l'hypothèse 
-"db.batch séquentiel" probablement FAUSSE.
+Fichier clé: `src/lib/database.ts` — ajouter `getProductsLightweightSnapshot()`:
+```typescript
+export async function getProductsLightweightSnapshot(): Promise<Map<string, {...}>>
+```
 
-**Hypothèses alternatives plus probables:**
-- Dégradation Turso transitoire le soir du 22 avril
-- Cold start connection pool (22 avril était 1ère connexion post-deploy, 
-  20 avril était dans une série warm de crons successifs)
-
-### Décision: Wait before fix
-
-**On attend le cron 23 avril 06:00 UTC** avant de toucher à TURSO_DATABASE_URL.
-
-Raisons:
-1. Action hâtive risque de produire une fausse confirmation ("https:// a fixé" 
-   alors que c'était transitoire)
-2. Le 20 avril prouve que le système peut compléter avec le code actuel
-3. Fix #2 déployé le 22 avril doit faire passer Phase 1 de 235s (avec fetch) 
-   à bien moins (sans fetch). Le cron de demain est la vraie mesure.
-4. Changement d'infra = perte d'apprentissage sur la vraie cause
-
-### Plan 23 avril matin (à 7-8h Montréal)
-
-Audit du cron 06:00 UTC via:
-- SELECT id, started_at, completed_at, status, duration_s FROM sync_runs 
-  WHERE started_at > '2026-04-23T05:55:00Z' AND started_at < '2026-04-23T06:10:00Z'
-- /api/health public
-
-Arbre de décision:
-- duration_s < 120 → transitoire confirmée, on passe au force-push des 74 produits
-- duration_s 120-280 → marginal, on observe samedi et dimanche avant conclusion
-- duration_s > 300 ou status='failed' → structurel, go Option 1 avec prompt dédié
+**Note**: les Zone 1/2/4 changes sur `fix/turso-http-mode` restent valides et
+seront mergées avec ce fix. Le payload réduit (174KB) + diff-before-upsert =
+double protection.
 
 ---
 
-## État actuel
+## Branche fix/turso-http-mode — état actuel
 
-- PR #25 (v0.1.11.0) mergée et déployée en prod
-- Fix #1 (createSyncRun avant fetch) ✅ CONFIRMÉ via test manuel
-- Fix #2 (skip fetch Shopify Phase 1) ✅ CONFIRMÉ via test manuel  
-- Vercel Pro activé, 3 crons actifs
-- Meta App Review: credentials validées, en attente de soumission manuelle
-- 0 zombie en DB (cleanup effectué)
+**Ne pas merger, ne pas ouvrir de PR.** Branche PAUSED sur commit `00f5606`.
 
-## Nouveau bottleneck découvert (bloquant)
+Contenu:
+- ✅ Zone 1 (database.ts): description/short_description exclus de INSERT
+- ✅ Zone 2 (csv-fetcher.ts): fetchDescriptionsForImport() + cache 5min
+- ✅ Zone 4 (diff-engine.ts): comparison description supprimée (fix bug destructif)
+- ✅ 110/110 tests
+- ❌ Phase 1 toujours >300s (payload réduit mais timing/row identique)
 
-Phase 1 timeout à 302s. Pas à cause des fixes — à cause d'un NOUVEAU bug révélé:
-`refreshProducts()` prend ~24s par batch de 100 produits dans Turso, pour 105 batches total.
+La branche sera rebasée sur main et complétée avec Option α avant merge.
 
-### Cause probable (hypothèse forte)
+---
 
-`db.batch(stmts, "write")` via `libsql://` (WebSocket hrana) exécute les 100 statements
-SÉQUENTIELLEMENT au lieu d'en faire un vrai batch atomique. Avec ~250ms de latence 
-réseau par statement, on obtient 100 × 250ms = ~25s par "batch" — correspond aux 
-mesures observées (24s/batch, 5 batches en 120s).
+## rebuildProductTypeCounts — bonus fix en attente
 
-### Fix recommandé: Option 1 (changement d'env var, zéro code)
+`database.ts:388-391` — 307 `db.execute()` séquentiels = ~77s additionnels en Phase 1.
+Remplacer par `db.batch(allInserts)`. 5 lignes. À inclure dans le même PR qu'Option α.
 
-Changer TURSO_DATABASE_URL:
-  - AVANT: libsql://aosom-sync-matmat.aws-us-east-1.turso.io
-  - APRÈS: https://aosom-sync-matmat.aws-us-east-1.turso.io
+---
 
-@libsql/client v0.17.2 supporte les deux schemes. `https://` fait du vrai HTTP REST
-(équivalent à POST /v2/pipeline avec 100 statements en un body JSON = 1 round-trip).
+## Autres items en attente (par priorité)
 
-Gain attendu: refreshProducts passe de >300s à ~5-10s. Phase 1 passe sous 60s.
+1. **Script force-push 74 produits driftés** — `scripts/force-push-shopify.ts`
+   Exemple connu: 84G-720V00GY DB=$214.99 ≠ Shopify=$179.99
 
-Risque: les subscriptions/live queries ne marchent pas en HTTP mode. Ce projet 
-n'en utilise pas, donc safe.
+2. **content-generator.ts:100** — `generateProductContent()` a `max_tokens: 4000`
+   sans timeout. Besoin 90s timeout. Branch: `fix/import-content-timeout` (à créer).
 
-### Plan d'exécution prochaine session
+3. **Étape 2 plan sync**: migration + backfill variant IDs en DB
 
-1. Modifier `.env.local` local: libsql:// → https://
-2. Tester `bun run test` (DB tests doivent encore passer)
-3. Lancer un script local qui appelle refreshProducts sur un sous-ensemble 
-   (ex: 1000 produits du CSV Aosom) pour mesurer le nouveau timing
-4. Si gain confirmé (>5× plus rapide), changer l'env var sur Vercel Production
-5. Trigger Phase 1 manuel post-deploy pour confirmer en prod
-6. Si succès → attendre le cron automatique 06:00 UTC du lendemain
+4. **Étape 3 plan sync**: refactor Phase 2 pour lire diffs depuis DB
 
-## Options alternatives (si Option 1 ne suffit pas)
+5. **Meta App Review**: submission manuelle (business verif + screencast)
 
-- Option 2: `await db.batch(allStmts, "write")` en une seule fois (1 round-trip 
-  au lieu de 105). Risque: payload 26MB peut dépasser limites Turso.
-- Option 3: Exclure description/short_description du ON CONFLICT DO UPDATE 
-  (réduit payload 70%). Ne résout pas le N+1 mais accélère chaque batch.
-
-## Bonus fix indépendant à faire quand on y sera
-
-`rebuildProductTypeCounts` (database.ts:388-391) — 307 `db.execute()` séquentiels 
-= ~77s additionnels. Remplacer par `db.batch(allInserts)`. 5 lignes.
-
-## Autres items en attente (par priorité business)
-
-1. Script force-push one-shot pour combler le drift sur les 74 produits Shopify
-   importés (exemple connu: 84G-720V00GY DB=$214.99 ≠ Shopify=$179.99)
-2. Étape 2 du plan sync: migration + backfill variant IDs en DB (préparation Étape 3)
-3. Étape 3 du plan sync: refactor Phase 2 pour lire diffs depuis DB au lieu 
-   de fetcher Shopify live
-4. Meta App Review: submission manuelle (business verif + screencast + submit)
+---
 
 ## Commandes pour reprendre
 
@@ -167,14 +172,27 @@ cd ~/.gstack/projects/aosom-sync
 git checkout main
 git pull origin main --ff-only
 git status   # doit être clean
-bun run test # sanity: 104+/104+ pass
+bun run test # sanity: 110/110 pass
 cat docs/NEXT-SESSION.md
 ```
 
-## État DB prod au checkpoint
+Pour lancer Étape A directement:
+```bash
+# Créer scripts/bench-read-products.ts (voir plan ci-dessus)
+# npx tsx --env-file=.env.local scripts/bench-read-products.ts
+```
 
-- sync_runs: 0 running (propre)
-- Dernier Phase 1 completed réel via cron: 2026-04-20T06:25:21Z
-- Dernier Shopify push completed: jamais depuis v0.1.10.0 deploy
-- Products count: 10 426
-- Version prod: 0.1.11.0
+---
+
+## Commandes SQL prod utiles
+
+```sql
+-- Dernier sync run
+SELECT id, started_at, completed_at, status, 
+       total_products, duration_s
+FROM sync_runs ORDER BY started_at DESC LIMIT 5;
+
+-- Dernier draft social
+SELECT id, trigger_type, status, datetime(created_at, 'unixepoch') 
+FROM facebook_drafts ORDER BY id DESC LIMIT 3;
+```
