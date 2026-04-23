@@ -85,7 +85,7 @@ async function generatePostText(prompt: string): Promise<string> {
   return message.content[0].type === "text" ? message.content[0].text.trim() : "";
 }
 
-/** Generate FR and EN captions in parallel. */
+/** Generate FR and EN captions in parallel, with one retry on Anthropic timeout. */
 async function generateBilingual(
   settings: Record<string, string>,
   triggerType: "new_product" | "price_drop" | "highlight",
@@ -99,11 +99,27 @@ async function generateBilingual(
   const frVars = { ...vars, hashtags: settings.social_hashtags_fr || "" };
   const enVars = { ...vars, hashtags: settings.social_hashtags_en || "" };
 
-  const [fr, en] = await Promise.all([
-    generatePostText(interpolatePrompt(frTpl, frVars)),
-    generatePostText(interpolatePrompt(enTpl, enVars)),
-  ]);
-  return { fr, en };
+  const frPrompt = interpolatePrompt(frTpl, frVars);
+  const enPrompt = interpolatePrompt(enTpl, enVars);
+
+  try {
+    const [fr, en] = await Promise.all([generatePostText(frPrompt), generatePostText(enPrompt)]);
+    return { fr, en };
+  } catch (err) {
+    const name = (err as Error).name;
+    if (name === "TimeoutError" || name === "AbortError") {
+      logWarn("anthropic timeout, retrying", { attempt: 1 });
+      await new Promise<void>((resolve) => setTimeout(resolve, 5000));
+      try {
+        const [fr, en] = await Promise.all([generatePostText(frPrompt), generatePostText(enPrompt)]);
+        return { fr, en };
+      } catch (retryErr) {
+        logError("anthropic failed after retry", { error: String(retryErr) });
+        throw retryErr;
+      }
+    }
+    throw err;
+  }
 }
 
 interface GenerateDraftResult {
