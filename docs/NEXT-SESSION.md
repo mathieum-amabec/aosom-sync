@@ -1,4 +1,40 @@
-# Next session — 22 avril 2026 (en cours)
+# Next session — 23 avril 2026
+
+## UPDATE 22 avril soir — Bug social cron corrigé (PR en cours)
+
+### Root cause identifiée
+
+Cron social du **22 avril 13:53 UTC** → `504 Gateway Timeout`.  
+Anthropic API a hung indéfiniment; la Vercel function a timeout à 120s.  
+Aucun draft créé car `createFacebookDraft()` jamais atteint.
+
+Preuve: logs Vercel deployment `czi0hj90x` — seule ligne:
+```
+[JOB4][2026-04-22 13:53:22] stock_highlight trigger
+```
+(21 avril même heure → 200 OK, draft #289 créé)
+
+Note: le cron fire à **13:53 UTC** (pas 13:00) car le deployment `czi0hj90x`
+a été promu en prod le 19 avril à 13:53 UTC — Vercel ancre l'heure au deploy.
+
+### Fix livré (branch fix/social-cron-zero-drafts, 4 commits)
+
+1. **Timeout 45s** via `AbortSignal.timeout(45_000)` sur chaque appel Anthropic
+2. **Retry unique** dans `generateBilingual()`: TimeoutError/AbortError seulement,
+   sleep 5s (10ms en test), même timeout 45s sur la retry
+3. **Structured logs**: `anthropic call started/completed` (info), 
+   `anthropic timeout, retrying` (warn), `anthropic failed after retry` (error)
+4. **Tests**: 4 scénarios couverts (happy, timeout+retry ok, double timeout, 429 no retry)
+
+Worst case wall time: 45s + 5s + 45s = **95s < maxDuration 120s**
+
+### TODO: content-generator.ts:100 (import pipeline — hors scope)
+
+`generateProductContent()` à la ligne 100 a `max_tokens: 4000` et AUCUN timeout.
+Needs a **90s** timeout (pas 45s — prompts plus longs, plus de tokens).
+À faire dans une prochaine session, séparément du social cron fix.
+
+---
 
 ## UPDATE 23 avril (session reprise)
 
@@ -106,8 +142,7 @@ n'en utilise pas, donc safe.
 2. Étape 2 du plan sync: migration + backfill variant IDs en DB (préparation Étape 3)
 3. Étape 3 du plan sync: refactor Phase 2 pour lire diffs depuis DB au lieu 
    de fetcher Shopify live
-4. Bug Social cron: 0 draft créé le 22 avril à 13:00 UTC (à investiguer)
-5. Meta App Review: submission manuelle (business verif + screencast + submit)
+4. Meta App Review: submission manuelle (business verif + screencast + submit)
 
 ## Commandes pour reprendre
 
