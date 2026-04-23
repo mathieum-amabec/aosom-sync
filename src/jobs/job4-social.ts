@@ -25,6 +25,9 @@ import {
 } from "@/lib/database";
 import { publishDraftToChannels } from "@/lib/social-publisher";
 
+const ANTHROPIC_CALL_TIMEOUT_MS = 45_000;
+const ANTHROPIC_RETRY_DELAY_MS = 5_000;
+
 function log(msg: string, data?: Record<string, unknown>): void {
   const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
   const suffix = data ? ` ${JSON.stringify(data)}` : "";
@@ -79,7 +82,7 @@ async function generatePostText(prompt: string): Promise<string> {
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       messages: [{ role: "user", content: prompt }],
     },
-    { signal: AbortSignal.timeout(45_000) },
+    { signal: AbortSignal.timeout(ANTHROPIC_CALL_TIMEOUT_MS) },
   );
   log("anthropic call completed", { duration_ms: Date.now() - t0 });
   return message.content[0].type === "text" ? message.content[0].text.trim() : "";
@@ -109,7 +112,7 @@ async function generateBilingual(
     const name = (err as Error).name;
     if (name === "TimeoutError" || name === "AbortError") {
       logWarn("anthropic timeout, retrying", { attempt: 1 });
-      const retryDelayMs = process.env.NODE_ENV === "test" ? 10 : 5_000;
+      const retryDelayMs = process.env.NODE_ENV === "test" ? 10 : ANTHROPIC_RETRY_DELAY_MS;
       await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
       try {
         const [fr, en] = await Promise.all([generatePostText(frPrompt), generatePostText(enPrompt)]);
