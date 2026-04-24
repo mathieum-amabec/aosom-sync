@@ -1,7 +1,7 @@
 # Next session — 24 avril 2026
 
 ---
-## UPDATE 24 avril fin de nuit — 2 wins business shipped
+## UPDATE 24 avril — 3 wins business shipped
 
 ### Wins de la session
 
@@ -16,14 +16,16 @@
    - Tests: 120/120 (vs 108 baseline début de session)
    - Version: 0.1.13.0
 
-3. ✅ Bug destructif latent désamorcé dans diff-engine.ts
-   (retrait comparaison description — voir NEXT-SESSION.md précédent)
+3. ✅ Bug C (Phase 1 timeout) — Option α implémentée + benchée
+   - PR #28 (fix/phase1-diff-before-upsert) — prête à merger
+   - Bench Run 1 (rattrapage 14j): 8274 rows écrites, 0 crash, 0 corruption
+   - Bench Run 2 (nominal): 109s total (0 writes, DB alignée) ✅ ACCEPTABLE
+   - Tests: 137/137
+   - Version: 0.1.14.0
+   - Nouveau bottleneck découvert: P6 recordPriceChanges N+1 (voir ci-dessous)
 
-4. ✅ 3 hypothèses Turso testées et documentées
-   - libsql:// → https:// (gain marginal sur batch léger, rien en prod)
-   - Option B payload (ne marche pas — args sérialisés quand même)
-   - Multi-row INSERT (marginalement pire, Turso parse per-row)
-   Root cause structurel: write latency per-row Turso (~200-330ms/row)
+4. ✅ Bug destructif latent désamorcé dans diff-engine.ts
+   (retrait comparaison description — voir NEXT-SESSION.md précédent)
 
 ### Bugs identifiés pour sessions futures
 
@@ -45,15 +47,23 @@ Posts "published" ne se distinguent pas visuellement des "draft":
 Branche: feat/social-published-state-ux
 Estimation: 1h
 
-**Bug C — Turso Phase 1 timeout (P0 business, pas technique urgent)**
-Phase 1 sync cron timeout à ~300s. refreshProducts() trop lent.
-Seul levier testable restant: Option α (diff-before-upsert)
-→ ne writer que les rows qui ont changé (typiquement 1-2% par jour)
-Gate préalable: bench READ Turso sur 10 426 rows (voir plan précédent)
+**Bug C — Turso Phase 1 timeout → ✅ RÉSOLU (PR #28, v0.1.14.0)**
+Option α implémentée. Bench Run 2 (nominal): 109s ✅ ACCEPTABLE.
+Merger PR #28 + trigger Phase 1 manuel en prod pour validation finale.
+
+**Bug D — recordPriceChanges N+1 (P2, perf future)**
+Découvert via bench Run 1: 7656 history entries × ~28ms/entry = 218s.
+Même pattern que rebuildProductTypeCounts (résolu par db.batch()).
+Fix: remplacer la boucle séquentielle dans `recordPriceChanges()` par
+`db.batch([...inserts], "write")`.
+Fichier: src/lib/database.ts (chercher `recordPriceChanges`).
+Estimation: 30 min. Impact: Phase 1 daily workload nominal non affecté
+(typiquement ~50-300 rows changées/jour = 50-300 history entries, ~7s max).
+Seulement visible si backlog multi-jours (ex: redéploiement après panne).
 
 ### État prod
 
-- Phase 1 cron: cassé (timeout chaque nuit, mais observé via runs en DB)
+- Phase 1 cron: cassé (timeout chaque nuit) — PR #28 à merger pour fix
 - Phase 2 cron: 3 tentatives par matin, 0 complétée depuis v0.1.10.0
 - Social cron: opérationnel (draft#290 créé)
 - Shopify prices: 47 produits à jour au 24 avril 01:32 UTC
@@ -61,9 +71,10 @@ Gate préalable: bench READ Turso sur 10 426 rows (voir plan précédent)
 
 ### Plan prochaine session (ordre recommandé)
 
-1. Bug A (scheduled posts) — 1-2h, fixe une fonctionnalité visible cassée
-2. Bug C (Turso Option α) — 2-3h, critique pour le sync automatique
+1. Merger PR #28 + trigger Phase 1 prod + valider cron le lendemain matin
+2. Bug A (scheduled posts) — 1-2h, fixe une fonctionnalité visible cassée
 3. Bug B (UX published) — 1h, polish
+4. Bug D (recordPriceChanges N+1) — 30min, perf optionnelle
 
 ### Commande pour reprendre
 
