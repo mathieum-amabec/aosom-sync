@@ -171,6 +171,107 @@ describe("completeSyncRun WHERE status='running' guard (GAP 3)", () => {
   });
 });
 
+describe("rebuildProductTypeCounts — batch write correctness (direct SQL)", () => {
+  let db: Client;
+
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  it("batch DELETE+INSERT produces the same result as N sequential inserts", async () => {
+    await db.batch([
+      `CREATE TABLE IF NOT EXISTS product_type_counts (type TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0)`,
+    ]);
+
+    // Simulate typeCounts map: {Furniture: 3, "Furniture > Chairs": 2}
+    const typeCounts = new Map([["Furniture", 3], ["Furniture > Chairs", 2]]);
+    const inserts = [...typeCounts].map(([type, count]) => ({
+      sql: `INSERT INTO product_type_counts (type, count) VALUES (?, ?)`,
+      args: [type, count] as [string, number],
+    }));
+    await db.batch([{ sql: `DELETE FROM product_type_counts`, args: [] }, ...inserts], "write");
+
+    const result = await db.execute(`SELECT type, count FROM product_type_counts ORDER BY type`);
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0].type).toBe("Furniture");
+    expect(Number(result.rows[0].count)).toBe(3);
+    expect(result.rows[1].type).toBe("Furniture > Chairs");
+    expect(Number(result.rows[1].count)).toBe(2);
+  });
+
+  it("batch DELETE clears stale rows before inserting new ones", async () => {
+    await db.batch([
+      `CREATE TABLE IF NOT EXISTS product_type_counts (type TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0)`,
+      `INSERT INTO product_type_counts (type, count) VALUES ('Stale Category', 99)`,
+    ]);
+
+    const inserts = [{ sql: `INSERT INTO product_type_counts (type, count) VALUES (?, ?)`, args: ["Fresh Category", 5] as [string, number] }];
+    await db.batch([{ sql: `DELETE FROM product_type_counts`, args: [] }, ...inserts], "write");
+
+    const result = await db.execute(`SELECT type FROM product_type_counts`);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].type).toBe("Fresh Category");
+  });
+});
+
+describe("getProductsSnapshot — SQL shape (direct SQL)", () => {
+  let db: Client;
+
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  it("returns all 23 snapshot fields including shopify_product_id", async () => {
+    await db.execute(`CREATE TABLE IF NOT EXISTS products (
+      sku TEXT PRIMARY KEY, name TEXT DEFAULT '', price REAL, qty INTEGER,
+      color TEXT DEFAULT '', size TEXT DEFAULT '', product_type TEXT DEFAULT '',
+      image1 TEXT DEFAULT '', image2 TEXT DEFAULT '', image3 TEXT DEFAULT '',
+      image4 TEXT DEFAULT '', image5 TEXT DEFAULT '', image6 TEXT DEFAULT '',
+      image7 TEXT DEFAULT '', video TEXT DEFAULT '', description TEXT DEFAULT '',
+      short_description TEXT DEFAULT '', material TEXT DEFAULT '', gtin TEXT DEFAULT '',
+      weight REAL DEFAULT 0, out_of_stock_expected TEXT DEFAULT '',
+      estimated_arrival TEXT DEFAULT '', shopify_product_id TEXT
+    )`);
+    await db.execute({
+      sql: `INSERT INTO products (sku, price, qty, image1, shopify_product_id) VALUES (?, ?, ?, ?, ?)`,
+      args: ["SKU-SNAP-1", 99.99, 5, "img.jpg", "shop-999"],
+    });
+
+    const result = await db.execute(
+      `SELECT sku, name, price, qty, color, size, product_type, image1, image2, image3, image4, image5, image6, image7, video, description, short_description, material, gtin, weight, out_of_stock_expected, estimated_arrival, shopify_product_id FROM products`
+    );
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.columns).toHaveLength(23);
+    expect(result.rows[0].sku).toBe("SKU-SNAP-1");
+    expect(Number(result.rows[0].price)).toBe(99.99);
+    expect(Number(result.rows[0].qty)).toBe(5);
+    expect(result.rows[0].shopify_product_id).toBe("shop-999");
+  });
+
+  it("returns null shopify_product_id for unimported products", async () => {
+    await db.execute(`CREATE TABLE IF NOT EXISTS products (
+      sku TEXT PRIMARY KEY, name TEXT DEFAULT '', price REAL DEFAULT 0, qty INTEGER DEFAULT 0,
+      color TEXT DEFAULT '', size TEXT DEFAULT '', product_type TEXT DEFAULT '',
+      image1 TEXT DEFAULT '', image2 TEXT DEFAULT '', image3 TEXT DEFAULT '',
+      image4 TEXT DEFAULT '', image5 TEXT DEFAULT '', image6 TEXT DEFAULT '',
+      image7 TEXT DEFAULT '', video TEXT DEFAULT '', description TEXT DEFAULT '',
+      short_description TEXT DEFAULT '', material TEXT DEFAULT '', gtin TEXT DEFAULT '',
+      weight REAL DEFAULT 0, out_of_stock_expected TEXT DEFAULT '',
+      estimated_arrival TEXT DEFAULT '', shopify_product_id TEXT
+    )`);
+    await db.execute({
+      sql: `INSERT INTO products (sku, price, qty) VALUES (?, ?, ?)`,
+      args: ["SKU-UNIMPORTED", 49.99, 3],
+    });
+
+    const result = await db.execute(
+      `SELECT sku, name, price, qty, color, size, product_type, image1, image2, image3, image4, image5, image6, image7, video, description, short_description, material, gtin, weight, out_of_stock_expected, estimated_arrival, shopify_product_id FROM products`
+    );
+
+    expect(result.rows[0].shopify_product_id).toBeNull();
+    expect(result.rows[0].sku).toBe("SKU-UNIMPORTED");
+  });
+});
+
 describe("clearStaleLockIfNeeded (direct SQL)", () => {
   let db: Client;
 

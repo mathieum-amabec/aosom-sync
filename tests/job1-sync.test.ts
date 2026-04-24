@@ -55,7 +55,7 @@ vi.mock("@/lib/database", () => ({
   rebuildProductTypeCounts: vi.fn().mockResolvedValue(undefined),
   recordPriceChanges: vi.fn().mockResolvedValue(undefined),
   getProduct: vi.fn().mockResolvedValue(null),
-  getAllProductsMap: vi.fn().mockResolvedValue(new Map()),
+  getProductsSnapshot: vi.fn().mockResolvedValue(new Map()),
   getSetting: vi.fn().mockResolvedValue(null),
   createNotification: vi.fn().mockResolvedValue(1),
   getAllProductsAsAosom: vi.fn().mockResolvedValue([]),
@@ -122,6 +122,7 @@ function resetAllMocks() {
   vi.mocked(db.recordPriceChanges).mockResolvedValue(undefined);
   vi.mocked(db.createNotification).mockResolvedValue(1);
   vi.mocked(db.getAllProductsAsAosom).mockResolvedValue([]);
+  vi.mocked(db.getProductsSnapshot).mockResolvedValue(new Map());
   vi.mocked(db.getShopifyPushCheckpoint).mockResolvedValue(null);
   vi.mocked(db.saveShopifyPushCheckpoint).mockResolvedValue(undefined);
   vi.mocked(shopifyClient.fetchAllShopifyProducts).mockResolvedValue([]);
@@ -170,6 +171,17 @@ describe("runSync — mid-flight error → status=failed", () => {
     vi.mocked(fetchAosomCatalog).mockRejectedValueOnce(new Error("CSV fetch timeout"));
 
     await expect(runSync({ shopifyPush: false })).rejects.toThrow("CSV fetch timeout");
+
+    expect(db.completeSyncRun).toHaveBeenCalledWith(
+      "run-new",
+      expect.objectContaining({ status: "failed", errors: 1 })
+    );
+  });
+
+  it("marks run failed when getProductsSnapshot throws", async () => {
+    vi.mocked(db.getProductsSnapshot).mockRejectedValueOnce(new Error("Turso connection reset"));
+
+    await expect(runSync({ shopifyPush: false })).rejects.toThrow("Turso connection reset");
 
     expect(db.completeSyncRun).toHaveBeenCalledWith(
       "run-new",
@@ -569,6 +581,70 @@ describe("runShopifyPush — cp.done=true early return skips createSyncRun", () 
     await runShopifyPush();
 
     expect(db.createSyncRun).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Option α: diff-before-upsert tests ─────────────────────────────
+
+describe("runSync — diff-before-upsert: refreshProducts called only for changed rows", () => {
+  beforeEach(resetAllMocks);
+
+  it("skips refreshProducts entirely when snapshot matches all CSV rows (all unchanged)", async () => {
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    // One CSV product
+    const csvProduct = {
+      sku: "SKU-SAME", name: "A", price: 99.99, qty: 5, color: "", size: "",
+      shortDescription: "", description: "", images: ["img.jpg", "", "", "", "", "", ""],
+      gtin: "", weight: 0, dimensions: { length: 0, width: 0, height: 0 },
+      productType: "", category: "", brand: "", material: "", psin: "", sin: "",
+      video: "", estimatedArrival: "", outOfStockExpected: "", packageNum: "", boxSize: "", boxWeight: "", pdf: "",
+    };
+    vi.mocked(fetchAosomCatalog).mockResolvedValueOnce([csvProduct]);
+
+    // Snapshot matches exactly — all fields the same
+    vi.mocked(db.getProductsSnapshot).mockResolvedValueOnce(new Map([
+      ["SKU-SAME", {
+        sku: "SKU-SAME", name: "A", price: 99.99, qty: 5,
+        color: "", size: "", product_type: "",
+        image1: "img.jpg", image2: "", image3: "", image4: "", image5: "", image6: "", image7: "",
+        video: "", description: "", short_description: "", material: "", gtin: "", weight: 0,
+        out_of_stock_expected: "", estimated_arrival: "", shopify_product_id: null,
+      }],
+    ]));
+
+    await runSync({ shopifyPush: false });
+
+    // Nothing changed → refreshProducts should NOT be called
+    expect(db.refreshProducts).not.toHaveBeenCalled();
+    // Type counts and price history still run regardless
+    expect(db.rebuildProductTypeCounts).toHaveBeenCalledOnce();
+  });
+
+  it("calls refreshProducts with only the changed subset (not all 10k rows)", async () => {
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    // Two CSV products: one unchanged, one with a price change
+    const unchanged = {
+      sku: "SKU-OLD", name: "B", price: 50.00, qty: 3, color: "", size: "",
+      shortDescription: "", description: "", images: ["", "", "", "", "", "", ""],
+      gtin: "", weight: 0, dimensions: { length: 0, width: 0, height: 0 },
+      productType: "", category: "", brand: "", material: "", psin: "", sin: "",
+      video: "", estimatedArrival: "", outOfStockExpected: "", packageNum: "", boxSize: "", boxWeight: "", pdf: "",
+    };
+    const changed = { ...unchanged, sku: "SKU-NEW-PRICE", price: 199.99 };
+    vi.mocked(fetchAosomCatalog).mockResolvedValueOnce([unchanged, changed]);
+
+    vi.mocked(db.getProductsSnapshot).mockResolvedValueOnce(new Map([
+      ["SKU-OLD", { sku: "SKU-OLD", name: "B", price: 50.00, qty: 3, color: "", size: "", product_type: "", image1: "", image2: "", image3: "", image4: "", image5: "", image6: "", image7: "", video: "", description: "", short_description: "", material: "", gtin: "", weight: 0, out_of_stock_expected: "", estimated_arrival: "", shopify_product_id: null }],
+      ["SKU-NEW-PRICE", { sku: "SKU-NEW-PRICE", name: "B", price: 99.99, qty: 3, color: "", size: "", product_type: "", image1: "", image2: "", image3: "", image4: "", image5: "", image6: "", image7: "", video: "", description: "", short_description: "", material: "", gtin: "", weight: 0, out_of_stock_expected: "", estimated_arrival: "", shopify_product_id: null }],
+    ]));
+
+    await runSync({ shopifyPush: false });
+
+    // refreshProducts called once with only 1 product (the changed one)
+    expect(db.refreshProducts).toHaveBeenCalledOnce();
+    const calledWith = vi.mocked(db.refreshProducts).mock.calls[0][0];
+    expect(calledWith).toHaveLength(1);
+    expect(calledWith[0].sku).toBe("SKU-NEW-PRICE");
   });
 });
 

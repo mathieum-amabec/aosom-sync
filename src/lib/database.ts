@@ -336,13 +336,70 @@ export async function getProduct(sku: string): Promise<ProductRow | null> {
   return result.rows.length > 0 ? rowToProduct(result.rows[0]) : null;
 }
 
-export async function getAllProductsMap(): Promise<Map<string, ProductRow>> {
+export interface ProductSnapshot {
+  sku: string;
+  name: string;
+  price: number;
+  qty: number;
+  color: string;
+  size: string;
+  product_type: string;
+  image1: string;
+  image2: string;
+  image3: string;
+  image4: string;
+  image5: string;
+  image6: string;
+  image7: string;
+  video: string;
+  description: string;
+  short_description: string;
+  material: string;
+  gtin: string;
+  weight: number;
+  out_of_stock_expected: string;
+  estimated_arrival: string;
+  shopify_product_id: string | null;
+}
+
+const SNAPSHOT_COLS =
+  "sku, name, price, qty, color, size, product_type, " +
+  "image1, image2, image3, image4, image5, image6, image7, " +
+  "video, description, short_description, material, gtin, weight, " +
+  "out_of_stock_expected, estimated_arrival, shopify_product_id";
+
+export async function getProductsSnapshot(): Promise<Map<string, ProductSnapshot>> {
   const db = await ensureSchema();
-  const result = await db.execute(`SELECT * FROM products`);
-  const map = new Map<string, ProductRow>();
+  const result = await db.execute(`SELECT ${SNAPSHOT_COLS} FROM products`);
+  const map = new Map<string, ProductSnapshot>();
   for (const row of result.rows) {
-    const p = rowToProduct(row);
-    map.set(p.sku, p);
+    const o = rowToObj(row);
+    const snap: ProductSnapshot = {
+      sku: (o.sku as string) || "",
+      name: (o.name as string) || "",
+      price: Number(o.price) || 0,
+      qty: Number(o.qty) || 0,
+      color: (o.color as string) || "",
+      size: (o.size as string) || "",
+      product_type: (o.product_type as string) || "",
+      image1: (o.image1 as string) || "",
+      image2: (o.image2 as string) || "",
+      image3: (o.image3 as string) || "",
+      image4: (o.image4 as string) || "",
+      image5: (o.image5 as string) || "",
+      image6: (o.image6 as string) || "",
+      image7: (o.image7 as string) || "",
+      video: (o.video as string) || "",
+      description: (o.description as string) || "",
+      short_description: (o.short_description as string) || "",
+      material: (o.material as string) || "",
+      gtin: (o.gtin as string) || "",
+      weight: Number(o.weight) || 0,
+      out_of_stock_expected: (o.out_of_stock_expected as string) || "",
+      estimated_arrival: (o.estimated_arrival as string) || "",
+      shopify_product_id: (o.shopify_product_id as string | null) ?? null,
+    };
+    map.set(snap.sku, snap);
   }
   return map;
 }
@@ -384,11 +441,12 @@ export async function rebuildProductTypeCounts(): Promise<void> {
       typeCounts.set(p, (typeCounts.get(p) || 0) + cnt);
     }
   }
-  // Rebuild table
-  await db.execute(`DELETE FROM product_type_counts`);
-  for (const [type, count] of typeCounts) {
-    await db.execute({ sql: `INSERT INTO product_type_counts (type, count) VALUES (?, ?)`, args: [type, count] });
-  }
+  // Rebuild table — one batch instead of N sequential execute() calls (~77s → ~2 queries)
+  const inserts = [...typeCounts].map(([type, count]) => ({
+    sql: `INSERT INTO product_type_counts (type, count) VALUES (?, ?)`,
+    args: [type, count] as [string, number],
+  }));
+  await db.batch([{ sql: `DELETE FROM product_type_counts`, args: [] }, ...inserts], "write");
 }
 
 export async function getProducts(filters: {

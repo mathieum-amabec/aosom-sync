@@ -46,6 +46,9 @@ yarn-error.log*
 # Script run reports (force-push audit logs, etc.)
 /scripts/reports/
 
+# Security audit reports (CSO output)
+/security-reports/
+
 # Curation batches (regenerable via scripts/curate-import-batch.js)
 /data/curation/
 
