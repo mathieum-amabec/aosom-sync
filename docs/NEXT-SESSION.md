@@ -1,5 +1,78 @@
 # Next session — 24 avril 2026
 
+---
+## UPDATE 24 avril fin de nuit — 2 wins business shipped
+
+### Wins de la session
+
+1. ✅ PR #26 (social cron Anthropic timeout) — mergée + validée en prod
+   Draft #290 créé automatiquement à 00:22:25 UTC le 23 avril.
+
+2. ✅ PR #27 (force-push Shopify drift recovery) — mergée + exécutée
+   - Script: scripts/force-push-shopify.ts (permanent, re-lançable)
+   - Dry-run: 18 price diffs détectés sur 47 produits Shopify matched
+   - --apply: 18/18 success, 0/18 failed
+   - Rapport: scripts/reports/force-push-2026-04-24T01-32-30.json
+   - Tests: 120/120 (vs 108 baseline début de session)
+   - Version: 0.1.13.0
+
+3. ✅ Bug destructif latent désamorcé dans diff-engine.ts
+   (retrait comparaison description — voir NEXT-SESSION.md précédent)
+
+4. ✅ 3 hypothèses Turso testées et documentées
+   - libsql:// → https:// (gain marginal sur batch léger, rien en prod)
+   - Option B payload (ne marche pas — args sérialisés quand même)
+   - Multi-row INSERT (marginalement pire, Turso parse per-row)
+   Root cause structurel: write latency per-row Turso (~200-330ms/row)
+
+### Bugs identifiés pour sessions futures
+
+**Bug A — Scheduled posts ne fire pas (P1)**
+Scheduled drafts (ex: 83B-353V00GN pour 23/04/2026 19:25 UTC) jamais publiés.
+Le cron /api/cron/social fait stock_highlight mais ne processe pas
+les scheduled_at de facebook_drafts.
+
+Hypothèse: pas de worker qui compare scheduled_at vs NOW() et fire publish.
+Branche: fix/scheduled-posts-not-firing
+Estimation: 1-2h
+
+**Bug B — UX post-publication insuffisant (P2)**
+Posts "published" ne se distinguent pas visuellement des "draft":
+- Boutons Edit/Photos/Reject/Delete restent cliquables
+- Pas de timestamp "Posted at HH:MM on FB/IG" visible
+- Pas de badge "✅ Published" proéminent
+
+Branche: feat/social-published-state-ux
+Estimation: 1h
+
+**Bug C — Turso Phase 1 timeout (P0 business, pas technique urgent)**
+Phase 1 sync cron timeout à ~300s. refreshProducts() trop lent.
+Seul levier testable restant: Option α (diff-before-upsert)
+→ ne writer que les rows qui ont changé (typiquement 1-2% par jour)
+Gate préalable: bench READ Turso sur 10 426 rows (voir plan précédent)
+
+### État prod
+
+- Phase 1 cron: cassé (timeout chaque nuit, mais observé via runs en DB)
+- Phase 2 cron: 3 tentatives par matin, 0 complétée depuis v0.1.10.0
+- Social cron: opérationnel (draft#290 créé)
+- Shopify prices: 47 produits à jour au 24 avril 01:32 UTC
+- Remaining drift: 27 produits en DB sans shopify_product_id (pas importés)
+
+### Plan prochaine session (ordre recommandé)
+
+1. Bug A (scheduled posts) — 1-2h, fixe une fonctionnalité visible cassée
+2. Bug C (Turso Option α) — 2-3h, critique pour le sync automatique
+3. Bug B (UX published) — 1h, polish
+
+### Commande pour reprendre
+
+cd ~/.gstack/projects/aosom-sync
+git checkout main && git pull origin main --ff-only
+cat docs/NEXT-SESSION.md | head -80
+
+---
+
 ## OUVERTURE SESSION
 
 > Reprise aosom-sync après diagnostic Turso complet.
