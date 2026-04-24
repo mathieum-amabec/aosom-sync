@@ -1,4 +1,30 @@
-# Next session — 24 avril 2026
+# Next session — après 24 avril 2026
+
+---
+## UPDATE 24 avril (fin de journée) — PR #28 mergée, prod toujours timeout
+
+### ❌ Validation prod Phase 1 — ÉCHEC
+
+Trigger manuel Phase 1 à 18:12:57 UTC → FUNCTION_INVOCATION_TIMEOUT (504) à ~300s.
+Le fix diff-before-upsert (v0.1.14.0) résout les ÉCRITURES DB mais pas le bottleneck réel.
+
+**Root cause finale (réévaluation) :**
+`fetchAosomCatalog()` depuis Vercel us-east-1 prend 88s+ à lui seul (visible dans logs prod).
+Même avec 0 écriture, si le CSV download prend 200s, le timeout est inévitable à 300s.
+
+**Timeline logs :**
+- 18:12:57.809Z → job start ("Fetch CSV Aosom + snapshot DB...")
+- 18:14:25.819Z → 2ème log interne (88s, Promise.all encore en vol)
+- ~18:17:57Z → Vercel kill (300s), zombie status=running, total_products=0
+
+**Zombie actuel :** id `0eef94f1-fb34-4c8b-9e08-cecfbdbd20c3` — sera auto-nettoyé par
+`clearStaleLockIfNeeded` au prochain trigger (>30min stale).
+
+**Prochaine priorité P0 :** Séparer le téléchargement CSV du processing.
+Options :
+1. Mesure d'abord — logger `fetchAosomCatalog()` duration exacte en prod
+2. Pré-cache CSV — cron léger stocke le CSV (R2 / Turso), Phase 1 lit depuis cache
+3. Fallback local — `npx tsx --env-file=.env.local -e "import {runSync} from './src/jobs/job1-sync'; runSync({shopifyPush:false})"`
 
 ---
 ## UPDATE 24 avril — 3 wins business shipped
