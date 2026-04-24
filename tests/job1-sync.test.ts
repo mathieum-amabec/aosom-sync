@@ -178,6 +178,17 @@ describe("runSync — mid-flight error → status=failed", () => {
     );
   });
 
+  it("marks run failed when getProductsSnapshot throws", async () => {
+    vi.mocked(db.getProductsSnapshot).mockRejectedValueOnce(new Error("Turso connection reset"));
+
+    await expect(runSync({ shopifyPush: false })).rejects.toThrow("Turso connection reset");
+
+    expect(db.completeSyncRun).toHaveBeenCalledWith(
+      "run-new",
+      expect.objectContaining({ status: "failed", errors: 1 })
+    );
+  });
+
   it("never leaves run in status=running after an error", async () => {
     const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
     vi.mocked(fetchAosomCatalog).mockRejectedValueOnce(new Error("network error"));
