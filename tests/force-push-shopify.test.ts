@@ -264,6 +264,18 @@ describe("force-push-shopify", () => {
   });
 
   // ── Test 10 ────────────────────────────────────────────────────────────────
+  it("non-Error throw: string error serialized via String(err) into errors array", async () => {
+    // Coverage for the `String(err)` branch when a non-Error value is rejected.
+    mockUpdateVariantPrice.mockRejectedValueOnce("network gone");
+
+    const diff = makePriceDiff({ sku: "STRING-ERR", variant_id: "v-str" });
+    const result = await applyPriceDiffs([diff], { delayMs: 0 });
+
+    expect(result.failed).toBe(1);
+    expect(result.errors[0].error).toBe("network gone");
+  });
+
+  // ── Test 11 ────────────────────────────────────────────────────────────────
   it("PRICE_TOLERANCE boundary: small diff (< 0.01) produces no diff, large diff (> 0.01) does", () => {
     // 0.005 difference — clearly within tolerance, no diff expected.
     const withinTolerance = [makeDbProduct({ price: 100.005 })];
