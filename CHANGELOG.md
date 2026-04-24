@@ -2,6 +2,28 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.14.0] - 2026-04-24
+
+### Changed — Phase 1 sync performance (Bug C fix)
+
+**Root cause:** Phase 1 nightly cron timed out every night because `refreshProducts()` UPSERTed all 10 426 products at ~250ms/row (Turso structural write latency) = ~2600s, well above the 300s Vercel limit.
+
+**Fix: diff-before-upsert (Option α)**
+- `runSync()` now fetches the CSV and a lightweight DB snapshot in parallel (`Promise.all`)
+- `diffProductsLight()` classifies the 10k rows in O(n): new / modified / unchanged / removed
+- `refreshProducts()` is called only for rows that actually changed (typically 100–300 per day, ~25–75s)
+- `rebuildProductTypeCounts()` now uses `db.batch()` (1 round-trip vs 307 sequential `db.execute()` calls = ~77s saved)
+- `detectChanges()` reuses the snapshot instead of issuing a separate `SELECT *` (8.8s warm removed from critical path)
+
+**Expected Phase 1 budget:** ~1.6s snapshot read + ~3-5s CSV fetch (parallel) + ~25-75s writes = **~30-80s total**, well under 300s.
+
+### Added
+- `src/lib/database.ts` — `getProductsSnapshot()`: 13-col lightweight SELECT (~1.6s warm on 10k rows). Exported `ProductSnapshot` interface.
+- `src/lib/product-diff.ts` — `diffProductsLight()`: pure O(n) diff function, no DB calls. Exported `ProductDiffResult` type.
+
+### For contributors
+- 137 tests (up from 120). New coverage: `getProductsSnapshot` SQL shape (2), `rebuildProductTypeCounts` batch correctness (2), `diffProductsLight` full matrix (11), `runSync` diff-before-upsert invariants (2).
+
 ## [0.1.13.0] - 2026-04-23
 
 ### Added
