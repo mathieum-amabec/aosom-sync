@@ -27,7 +27,7 @@ import {
   rebuildProductTypeCounts,
   recordPriceChanges,
   getProduct,
-  getAllProductsMap,
+  getProductsSnapshot,
   getSetting,
   getLatestSyncRun,
   clearStaleLockIfNeeded,
@@ -36,8 +36,10 @@ import {
   getShopifyPushCheckpoint,
   saveShopifyPushCheckpoint,
   type ShopifyPushCheckpoint,
+  type ProductSnapshot,
 } from "@/lib/database";
 import type { ChangeTypeHistory } from "@/lib/database";
+import { diffProductsLight } from "@/lib/product-diff";
 
 function log(msg: string, extra?: Record<string, unknown>): void {
   console.log(JSON.stringify({ ts: new Date().toISOString(), job: "job1-sync", msg, ...extra }));
@@ -103,8 +105,8 @@ function aosomToProductRow(p: AosomProduct) {
   };
 }
 
-/** Compare CSV products against DB state, detect price/stock/new changes. */
-async function detectChanges(aosomProducts: AosomProduct[]): Promise<ChangeDetectionResult> {
+/** Compare CSV products against DB snapshot, detect price/stock/new changes. */
+async function detectChanges(aosomProducts: AosomProduct[], snapshot: Map<string, ProductSnapshot>): Promise<ChangeDetectionResult> {
   const priceChangeEntries: PriceChangeEntry[] = [];
   const socialDraftSkus: { sku: string; oldPrice: number; newPrice: number }[] = [];
   const threshold = parseFloat(await getSetting("social_price_drop_threshold") || SYNC.DEFAULT_PRICE_DROP_THRESHOLD);
@@ -112,12 +114,10 @@ async function detectChanges(aosomProducts: AosomProduct[]): Promise<ChangeDetec
   let stockChanges = 0;
   let newProducts = 0;
 
-  // Batch load all products to avoid N+1 queries (10k+ products)
-  const productsMap = await getAllProductsMap();
   const skusWithPriceChange = new Set<string>();
 
   for (const csv of aosomProducts) {
-    const existing = productsMap.get(csv.sku) || null;
+    const existing = snapshot.get(csv.sku) ?? null;
     if (!existing) {
       priceChangeEntries.push({ sku: csv.sku, oldPrice: null, newPrice: csv.price, oldQty: null, newQty: csv.qty, changeType: "new_product" });
       skusWithPriceChange.add(csv.sku);
@@ -257,15 +257,22 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
   const shopifyPush = options.shopifyPush ?? true;
 
   try {
-    // Step 1: Fetch CSV data (+ Shopify only if we'll push to it this phase)
-    log(shopifyPush ? "Fetch CSV Aosom + produits Shopify..." : "Fetch CSV Aosom...");
-    const [aosomProducts, shopifyProducts] = shopifyPush
-      ? await Promise.all([fetchAosomCatalog(), fetchAllShopifyProducts()])
-      : [await fetchAosomCatalog(), [] as Awaited<ReturnType<typeof fetchAllShopifyProducts>>];
-    log(`${aosomProducts.length} produits Aosom${shopifyPush ? `, ${shopifyProducts.length} produits Shopify` : ""}`);
+    // Step 1: Fetch CSV + DB snapshot in parallel (+ Shopify if pushing this phase)
+    log(shopifyPush ? "Fetch CSV Aosom + snapshot DB + produits Shopify..." : "Fetch CSV Aosom + snapshot DB...");
+    const [aosomProducts, snapshot, shopifyProducts] = await Promise.all([
+      fetchAosomCatalog(),
+      getProductsSnapshot(),
+      shopifyPush ? fetchAllShopifyProducts() : Promise.resolve([] as Awaited<ReturnType<typeof fetchAllShopifyProducts>>),
+    ]);
+    log(`${aosomProducts.length} produits CSV, ${snapshot.size} en DB${shopifyPush ? `, ${shopifyProducts.length} Shopify` : ""}`);
 
-    // Step 2: Detect changes
-    const changes = await detectChanges(aosomProducts);
+    // Step 2: Diff CSV vs snapshot — only write rows that actually changed
+    const diffResult = diffProductsLight(aosomProducts, snapshot);
+    const toWrite = [...diffResult.toInsert, ...diffResult.toUpdate];
+    log(`Diff: ${diffResult.toInsert.length} nouveaux, ${diffResult.toUpdate.length} modifiés, ${diffResult.unchanged} inchangés, ${diffResult.removed.length} disparus`);
+
+    // Step 2b: Detect price/stock changes on the changed subset
+    const changes = await detectChanges(toWrite, snapshot);
 
     // Dry run: report only, no mutations
     if (isDryRun) {
@@ -278,10 +285,14 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
       return { syncRunId: syncRun.id, totalProducts: aosomProducts.length, ...changes, archived: 0, errors: 0, dryRun: true };
     }
 
-    // Step 3: Persist changes — upsert products FIRST (price_history has FK on products.sku)
-    log("Mise à jour de la table products...");
-    await refreshProducts(aosomProducts.map(aosomToProductRow));
-    log(`${aosomProducts.length} produits upsertés`);
+    // Step 3: Persist only changed rows (toInsert + toUpdate) — price_history FK on products.sku
+    if (toWrite.length > 0) {
+      log(`Mise à jour de la table products (${toWrite.length}/${aosomProducts.length})...`);
+      await refreshProducts(toWrite.map(aosomToProductRow));
+      log(`${toWrite.length} produits upsertés`);
+    } else {
+      log("Aucun produit modifié — refreshProducts ignoré");
+    }
 
     log("Mise à jour des compteurs de catégories...");
     await rebuildProductTypeCounts();
