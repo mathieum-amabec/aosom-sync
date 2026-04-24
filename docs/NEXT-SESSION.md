@@ -1,6 +1,113 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 24 avril milieu de journée — Option α shipped MAIS fix incomplet
+
+### Ce qui est shipped (PR #28, v0.1.14.0 en prod)
+
+✅ Option α (diff-before-upsert) architecture:
+   - getProductsSnapshot (SELECT 23 fields vs 8.8s SELECT *)
+   - diffProductsLight pur O(n)
+   - refreshProducts sur subset changé seulement
+   - rebuildProductTypeCounts batché (77s → 6.7s)
+   - Promise.all(fetch CSV, snapshot) parallèle
+   - 142/142 tests verts
+   - Red Team review: trouvé 10 fields manquants dans hasChanged, fixés
+
+✅ Bench local Run 1: 37 min (rattrapage 8274 rows, 14j backlog)
+✅ Bench local Run 2: 109s (0 writes, DB alignée)
+✅ Script scripts/force-push-shopify.ts (précédente session)
+
+### Ce qui NE fonctionne PAS encore
+
+🚨 Trigger Phase 1 manuel en prod → FUNCTION_INVOCATION_TIMEOUT (504 à 300s)
+
+**Diagnostic incomplet:**
+- Hypothèse "fetchAosomCatalog = 88s" NON PROUVÉE (inférence sur timestamp,
+  pas sur label de phase Pino)
+- 160s manquants non expliqués
+- Les logs Vercel Pino sont tronqués, inaccessibles via API
+- Bench local ≠ prod (réseau WSL2 ≠ Vercel us-east-1)
+
+**Hypothèses ouvertes à vérifier avec instrumentation:**
+- fetchAosomCatalog retry 2× à 60s timeout = 195s worst case possible
+- refreshProducts avec N rows inconnu (0 à 2000+ selon drift depuis 20 avril)
+- recordPriceChanges N+1 (déjà identifié au bench Run 1 comme 218s sur 7656 rows)
+- rebuildProductTypeCounts (même s'il est batché maintenant)
+
+### Plan prochaine session — OBLIGATOIRE avant re-fix
+
+**Principe non-négociable: NO MORE HYPOTHESIS-BASED FIXES.**
+
+On a épuisé les cycles "hypothèse → fix → échec" (libsql, payload, multi-row,
+maintenant Option α seul). La prochaine session DOIT commencer par
+l'instrumentation avant tout changement de code.
+
+**Étape A — Instrumentation Pino obligatoire (~15 min)**
+
+Dans src/jobs/job1-sync.ts, wrap chaque phase avec:
+  const t0 = Date.now();
+  // phase X
+  log(`Phase X terminée`, { duration_ms: Date.now() - t0 });
+
+Phases à instrumenter:
+1. clearStaleLock
+2. createSyncRun
+3. fetchAosomCatalog (+ nombre de retries si applicable)
+4. getProductsSnapshot (+ count de rows récupérées)
+5. diffProductsLight (+ toInsert/toUpdate/unchanged/removed counts)
+6. detectChanges (+ count de diffs trouvés)
+7. refreshProducts (+ count de rows écrites)
+8. rebuildProductTypeCounts
+9. recordPriceChanges (+ count d'entrées)
+10. completeSyncRun
+
+Format logs structuré JSON pour facilité d'analyse en post-mortem.
+Garantie de préservation: AUCUN changement de logique métier. Uniquement
+ajout de logs avant/après.
+
+**Étape B — Deploy instrumentation + trigger manuel**
+
+Commit "observability: add per-phase timing logs to Phase 1 sync"
+Push, merge, deploy. Trigger Phase 1 manuel. Cette fois, les logs Vercel
+vont montrer le breakdown RÉEL par phase.
+
+**Étape C — Fix basé sur les VRAIES données**
+
+Selon ce que les logs révèlent:
+- Si fetch 88s+ confirmé: pré-cache ou cascade de crons
+- Si refreshProducts dépasse attentes: investigate pourquoi (volume?
+  connection pool?)
+- Si recordPriceChanges gros: batcher comme on a fait pour product_type_counts
+- Si autre chose qu'on n'a pas anticipé: on saura enfin quoi fixer
+
+**Étape D — Validation finale**
+
+Re-trigger manuel, confirmer duration <90s et status=completed.
+
+### Commandes pour reprendre
+
+```bash
+cd ~/.gstack/projects/aosom-sync
+git checkout main && git pull origin main --ff-only
+cat docs/NEXT-SESSION.md | head -100
+```
+
+Dire à Claude: "Reprise aosom-sync. Je veux attaquer Phase 1 prod timeout
+via instrumentation. Commence par Étape A (wrap chaque phase avec logs
+Pino structurés)."
+
+### Bugs toujours en attente (P1/P2)
+
+**Bug A — Scheduled posts ne fire pas (P1, 1-2h)**
+Drafts scheduled (ex: 83B-353V00GN) jamais publiés par le cron.
+Investigation Job 4 cron logic.
+
+**Bug B — UX published posts (P2, 1h)**
+Boutons Edit/Reject restent cliquables après publication. Pas de badge
+"Published at" visible. UI polish.
+
+---
 ## UPDATE 24 avril (fin de journée) — PR #28 mergée, prod toujours timeout
 
 ### ❌ Validation prod Phase 1 — ÉCHEC
