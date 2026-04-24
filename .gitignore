@@ -43,6 +43,9 @@ yarn-error.log*
 # Forensic backups (private product data from Shopify exports)
 /data/shopify-backup/
 
+# Script run reports (force-push audit logs, etc.)
+/scripts/reports/
+
 # Curation batches (regenerable via scripts/curate-import-batch.js)
 /data/curation/
 
