@@ -69,6 +69,43 @@
 
 ---
 
+## P1 — Social Media bugs identifiés 23 avril (en attente)
+
+### Bug A — Scheduled publications ne fire pas
+
+**Symptôme observé:**
+- Post "3 Seater Sofa, 83.5'' Modern Upholstered Couch" (SKU 83B-353V00GN) scheduled le 23/04/2026 19:25:00 → toujours en `status="scheduled"`, jamais publié
+- Post "Adjustable Counter Height Bar Stools" (SKU 835-717V00BG) scheduled le 21/04/2026 10:29:00 → même symptôme
+
+**Hypothèses à investiguer:**
+1. Le cron Vercel `/api/cron/social` ne fait que `stock_highlight`, pas le processing des scheduled drafts
+2. Pas de cron worker dédié au "publish scheduled at X time"
+3. Le `scheduled_at` en DB n'est jamais comparé à `NOW()` dans un job
+
+**Branche suggérée:** `fix/scheduled-posts-not-firing`
+**Estimation:** 1–2h investigation + fix
+**Priorité:** P1 (le scheduling est une fonctionnalité advertised qui ne marche pas — perte de confiance utilisateur)
+
+---
+
+### Bug B — UX feedback post-publication
+
+**Symptôme observé:**
+- Quand un post passe en `status="published"`, les boutons Edit/Photos/Reject/Delete restent cliquables identiquement aux autres status
+- L'utilisateur ne distingue pas visuellement un post finalisé vs un post encore modifiable
+- Pas de label "Posted on Facebook at HH:MM" ou équivalent visible
+
+**Améliorations souhaitées:**
+1. Quand `status="published"` : griser ou cacher Edit, Photos, Reject, Delete
+2. Afficher en grand "✅ Published 23/04/2026 14:32" sur la card
+3. Distinction visuelle nette (couleur de fond, bordure, badge plus gros)
+
+**Branche suggérée:** `feat/social-published-state-ux`
+**Estimation:** 1h
+**Priorité:** P2 (UX, pas data integrity, mais user-facing important)
+
+---
+
 ## Social Media / Job 4
 
 ### Branded image composer pour publications sociales (priorité : moyenne-haute)
