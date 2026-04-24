@@ -614,6 +614,8 @@ describe("runSync — diff-before-upsert: refreshProducts called only for change
 
     // Nothing changed → refreshProducts should NOT be called
     expect(db.refreshProducts).not.toHaveBeenCalled();
+    // Type counts and price history still run regardless
+    expect(db.rebuildProductTypeCounts).toHaveBeenCalledOnce();
   });
 
   it("calls refreshProducts with only the changed subset (not all 10k rows)", async () => {
