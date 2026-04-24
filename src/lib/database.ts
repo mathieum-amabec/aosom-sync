@@ -336,17 +336,6 @@ export async function getProduct(sku: string): Promise<ProductRow | null> {
   return result.rows.length > 0 ? rowToProduct(result.rows[0]) : null;
 }
 
-export async function getAllProductsMap(): Promise<Map<string, ProductRow>> {
-  const db = await ensureSchema();
-  const result = await db.execute(`SELECT * FROM products`);
-  const map = new Map<string, ProductRow>();
-  for (const row of result.rows) {
-    const p = rowToProduct(row);
-    map.set(p.sku, p);
-  }
-  return map;
-}
-
 export interface ProductSnapshot {
   sku: string;
   price: number;

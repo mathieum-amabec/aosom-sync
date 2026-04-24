@@ -55,7 +55,6 @@ vi.mock("@/lib/database", () => ({
   rebuildProductTypeCounts: vi.fn().mockResolvedValue(undefined),
   recordPriceChanges: vi.fn().mockResolvedValue(undefined),
   getProduct: vi.fn().mockResolvedValue(null),
-  getAllProductsMap: vi.fn().mockResolvedValue(new Map()),
   getProductsSnapshot: vi.fn().mockResolvedValue(new Map()),
   getSetting: vi.fn().mockResolvedValue(null),
   createNotification: vi.fn().mockResolvedValue(1),
