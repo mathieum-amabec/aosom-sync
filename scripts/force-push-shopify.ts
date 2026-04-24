@@ -100,6 +100,20 @@ const DRY_RUN = !process.argv.includes("--apply");
 const PRICE_TOLERANCE = 0.01;
 /** Delay between Shopify write calls — stays well within Shopify's 2 req/s bucket. */
 const APPLY_DELAY_MS = 100;
+const DIFF_SAMPLE_SIZE = 10;
+
+// ─── Env validation ───────────────────────────────────────────────────────────
+// Fail fast with a clear message rather than cryptic downstream errors.
+function validateEnv() {
+  const missing: string[] = [];
+  if (!process.env.TURSO_DATABASE_URL) missing.push("TURSO_DATABASE_URL");
+  if (!process.env.TURSO_AUTH_TOKEN) missing.push("TURSO_AUTH_TOKEN");
+  if (!process.env.SHOPIFY_ACCESS_TOKEN) missing.push("SHOPIFY_ACCESS_TOKEN");
+  if (missing.length > 0) {
+    log.fatal({ missing }, "Missing required env vars — run with --env-file=.env.local");
+    process.exit(1);
+  }
+}
 
 // ─── DB ────────────────────────────────────────────────────────────────────────
 async function loadImportedProducts(): Promise<DbProduct[]> {
@@ -113,13 +127,19 @@ async function loadImportedProducts(): Promise<DbProduct[]> {
        FROM products
        WHERE shopify_product_id IS NOT NULL`
     );
-    return result.rows.map((row) => ({
+    const rows = result.rows.map((row) => ({
       sku: String(row.sku ?? ""),
       shopify_product_id: String(row.shopify_product_id ?? ""),
-      price: Number(row.price) || 0,
+      price: Number(row.price),
       qty: Number(row.qty) || 0,
       name: String(row.name ?? ""),
     }));
+    // Guard: skip products with no valid price (NULL or 0) — pushing $0 to Shopify would be damaging.
+    const valid = rows.filter((r) => r.price > 0);
+    if (valid.length < rows.length) {
+      log.warn({ skipped: rows.length - valid.length }, "Skipped products with invalid price (NULL or 0)");
+    }
+    return valid;
   } finally {
     db.close();
   }
@@ -222,7 +242,6 @@ export async function applyPriceDiffs(
       errors.push({ sku: diff.sku, error: message });
       log.error({ sku: diff.sku, err: message }, "Failed to update price");
     }
-    // delayMs gap between Shopify writes — default 100ms stays within the 2 req/s bucket.
     await new Promise((r) => setTimeout(r, delayMs));
   }
 
@@ -231,6 +250,7 @@ export async function applyPriceDiffs(
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
+  validateEnv();
   log.info({ mode: DRY_RUN ? "dry-run" : "apply" }, "Force-push started");
 
   // 1. Load the 74 imported products from DB
@@ -264,7 +284,7 @@ async function main() {
       shopify_matched: shopifyById.size,
       price_diffs: priceDiffs.length,
       warnings: warnings.length,
-      sample: priceDiffs.slice(0, 10).map((d) => ({
+      sample: priceDiffs.slice(0, DIFF_SAMPLE_SIZE).map((d) => ({
         sku: d.sku,
         db_price: d.db_price,
         shopify_price: d.shopify_price,
@@ -276,7 +296,8 @@ async function main() {
 
   if (DRY_RUN) {
     log.info("Dry-run complete — re-run with --apply to apply corrections");
-    writeReport({ mode: "dry-run", diffs, applied: 0, failed: 0, errors: [] });
+    try { writeReport({ mode: "dry-run", diffs, applied: 0, failed: 0, errors: [] }); }
+    catch (e) { log.warn({ err: String(e) }, "Report write failed (dry-run results were not persisted)"); }
     return;
   }
 
@@ -284,7 +305,9 @@ async function main() {
   const { applied, failed, errors } = await applyPriceDiffs(priceDiffs);
 
   log.info({ applied, failed, total: priceDiffs.length }, "Apply complete");
-  writeReport({ mode: "apply", diffs, applied, failed, errors });
+  // Report write failure is non-fatal after a successful apply — log a warning but don't mask the apply result.
+  try { writeReport({ mode: "apply", diffs, applied, failed, errors }); }
+  catch (e) { log.warn({ err: String(e) }, "Report write failed — apply results were logged above"); }
 }
 
 // Guard: only auto-execute when run as a script, not when imported by tests.

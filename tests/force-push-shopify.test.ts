@@ -205,6 +205,76 @@ describe("force-push-shopify", () => {
 
     setTimeoutSpy.mockRestore();
   });
+
+  // ── Test 6 ────────────────────────────────────────────────────────────────
+  it("prices-already-match: returns empty diffs (idempotency guarantee)", () => {
+    // DB price === Shopify price → no diff expected.
+    const db = [makeDbProduct({ price: 214.99 })];
+    const shopifyMap = makeShopifyMap(makeShopifyProduct({ variantPrice: 214.99 }));
+
+    const diffs = computePriceDiffs(db, shopifyMap);
+
+    expect(diffs).toHaveLength(0);
+    expect(mockUpdateVariantPrice).not.toHaveBeenCalled();
+  });
+
+  // ── Test 7 ────────────────────────────────────────────────────────────────
+  it("missing product on Shopify: returns missing_product entry (warn + skip)", () => {
+    const db = [makeDbProduct({ shopify_product_id: "DOES-NOT-EXIST" })];
+    // Empty map — product not on Shopify.
+    const shopifyMap = new Map<string, ReturnType<typeof makeShopifyProduct>>();
+
+    const diffs = computePriceDiffs(db, shopifyMap);
+
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0].type).toBe("missing_product");
+    expect(diffs[0].sku).toBe("84G-720V00GY");
+    expect(mockUpdateVariantPrice).not.toHaveBeenCalled();
+  });
+
+  // ── Test 8 ────────────────────────────────────────────────────────────────
+  it("apply mode: error path — records failure, increments failed count, continues", async () => {
+    mockUpdateVariantPrice.mockRejectedValueOnce(new Error("429 Too Many Requests"));
+
+    const diff = makePriceDiff({ sku: "FAIL-SKU", variant_id: "v-fail" });
+    const result = await applyPriceDiffs([diff], { delayMs: 0 });
+
+    expect(result.applied).toBe(0);
+    expect(result.failed).toBe(1);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0].sku).toBe("FAIL-SKU");
+    expect(result.errors[0].error).toContain("429 Too Many Requests");
+  });
+
+  // ── Test 9 ────────────────────────────────────────────────────────────────
+  it("partial failure: first succeeds, second fails, both counts correct", async () => {
+    mockUpdateVariantPrice
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Shopify timeout"));
+
+    const diffs: PriceDiff[] = [
+      makePriceDiff({ sku: "SKU-OK",   variant_id: "v-ok" }),
+      makePriceDiff({ sku: "SKU-FAIL", variant_id: "v-fail" }),
+    ];
+    const result = await applyPriceDiffs(diffs, { delayMs: 0 });
+
+    expect(result.applied).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.errors[0].sku).toBe("SKU-FAIL");
+  });
+
+  // ── Test 10 ────────────────────────────────────────────────────────────────
+  it("PRICE_TOLERANCE boundary: small diff (< 0.01) produces no diff, large diff (> 0.01) does", () => {
+    // 0.005 difference — clearly within tolerance, no diff expected.
+    const withinTolerance = [makeDbProduct({ price: 100.005 })];
+    const shopifyWithin = makeShopifyMap(makeShopifyProduct({ variantPrice: 100.00 }));
+    expect(computePriceDiffs(withinTolerance, shopifyWithin)).toHaveLength(0);
+
+    // 0.02 difference — clearly over tolerance, diff expected.
+    const overTolerance = [makeDbProduct({ price: 100.02 })];
+    const shopifyOver = makeShopifyMap(makeShopifyProduct({ variantPrice: 100.00 }));
+    expect(computePriceDiffs(overTolerance, shopifyOver)).toHaveLength(1);
+  });
 });
 
 // ─── writeReport ──────────────────────────────────────────────────────────────
