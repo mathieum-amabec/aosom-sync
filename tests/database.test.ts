@@ -219,12 +219,15 @@ describe("getProductsSnapshot — SQL shape (direct SQL)", () => {
   beforeEach(() => { db = setupTestDb(); });
   afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
 
-  it("returns all 13 snapshot fields including shopify_product_id", async () => {
+  it("returns all 23 snapshot fields including shopify_product_id", async () => {
     await db.execute(`CREATE TABLE IF NOT EXISTS products (
-      sku TEXT PRIMARY KEY, price REAL, qty INTEGER,
+      sku TEXT PRIMARY KEY, name TEXT DEFAULT '', price REAL, qty INTEGER,
+      color TEXT DEFAULT '', size TEXT DEFAULT '', product_type TEXT DEFAULT '',
       image1 TEXT DEFAULT '', image2 TEXT DEFAULT '', image3 TEXT DEFAULT '',
       image4 TEXT DEFAULT '', image5 TEXT DEFAULT '', image6 TEXT DEFAULT '',
-      image7 TEXT DEFAULT '', out_of_stock_expected TEXT DEFAULT '',
+      image7 TEXT DEFAULT '', video TEXT DEFAULT '', description TEXT DEFAULT '',
+      short_description TEXT DEFAULT '', material TEXT DEFAULT '', gtin TEXT DEFAULT '',
+      weight REAL DEFAULT 0, out_of_stock_expected TEXT DEFAULT '',
       estimated_arrival TEXT DEFAULT '', shopify_product_id TEXT
     )`);
     await db.execute({
@@ -233,11 +236,11 @@ describe("getProductsSnapshot — SQL shape (direct SQL)", () => {
     });
 
     const result = await db.execute(
-      `SELECT sku, price, qty, image1, image2, image3, image4, image5, image6, image7, out_of_stock_expected, estimated_arrival, shopify_product_id FROM products`
+      `SELECT sku, name, price, qty, color, size, product_type, image1, image2, image3, image4, image5, image6, image7, video, description, short_description, material, gtin, weight, out_of_stock_expected, estimated_arrival, shopify_product_id FROM products`
     );
 
     expect(result.rows).toHaveLength(1);
-    expect(result.columns).toHaveLength(13);
+    expect(result.columns).toHaveLength(23);
     expect(result.rows[0].sku).toBe("SKU-SNAP-1");
     expect(Number(result.rows[0].price)).toBe(99.99);
     expect(Number(result.rows[0].qty)).toBe(5);
@@ -246,10 +249,13 @@ describe("getProductsSnapshot — SQL shape (direct SQL)", () => {
 
   it("returns null shopify_product_id for unimported products", async () => {
     await db.execute(`CREATE TABLE IF NOT EXISTS products (
-      sku TEXT PRIMARY KEY, price REAL DEFAULT 0, qty INTEGER DEFAULT 0,
+      sku TEXT PRIMARY KEY, name TEXT DEFAULT '', price REAL DEFAULT 0, qty INTEGER DEFAULT 0,
+      color TEXT DEFAULT '', size TEXT DEFAULT '', product_type TEXT DEFAULT '',
       image1 TEXT DEFAULT '', image2 TEXT DEFAULT '', image3 TEXT DEFAULT '',
       image4 TEXT DEFAULT '', image5 TEXT DEFAULT '', image6 TEXT DEFAULT '',
-      image7 TEXT DEFAULT '', out_of_stock_expected TEXT DEFAULT '',
+      image7 TEXT DEFAULT '', video TEXT DEFAULT '', description TEXT DEFAULT '',
+      short_description TEXT DEFAULT '', material TEXT DEFAULT '', gtin TEXT DEFAULT '',
+      weight REAL DEFAULT 0, out_of_stock_expected TEXT DEFAULT '',
       estimated_arrival TEXT DEFAULT '', shopify_product_id TEXT
     )`);
     await db.execute({
@@ -258,7 +264,7 @@ describe("getProductsSnapshot — SQL shape (direct SQL)", () => {
     });
 
     const result = await db.execute(
-      `SELECT sku, price, qty, image1, image2, image3, image4, image5, image6, image7, out_of_stock_expected, estimated_arrival, shopify_product_id FROM products`
+      `SELECT sku, name, price, qty, color, size, product_type, image1, image2, image3, image4, image5, image6, image7, video, description, short_description, material, gtin, weight, out_of_stock_expected, estimated_arrival, shopify_product_id FROM products`
     );
 
     expect(result.rows[0].shopify_product_id).toBeNull();

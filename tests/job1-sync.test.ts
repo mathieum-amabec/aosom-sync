@@ -601,11 +601,13 @@ describe("runSync — diff-before-upsert: refreshProducts called only for change
     };
     vi.mocked(fetchAosomCatalog).mockResolvedValueOnce([csvProduct]);
 
-    // Snapshot matches exactly — price, qty, images all the same
+    // Snapshot matches exactly — all fields the same
     vi.mocked(db.getProductsSnapshot).mockResolvedValueOnce(new Map([
       ["SKU-SAME", {
-        sku: "SKU-SAME", price: 99.99, qty: 5,
+        sku: "SKU-SAME", name: "A", price: 99.99, qty: 5,
+        color: "", size: "", product_type: "",
         image1: "img.jpg", image2: "", image3: "", image4: "", image5: "", image6: "", image7: "",
+        video: "", description: "", short_description: "", material: "", gtin: "", weight: 0,
         out_of_stock_expected: "", estimated_arrival: "", shopify_product_id: null,
       }],
     ]));
@@ -632,8 +634,8 @@ describe("runSync — diff-before-upsert: refreshProducts called only for change
     vi.mocked(fetchAosomCatalog).mockResolvedValueOnce([unchanged, changed]);
 
     vi.mocked(db.getProductsSnapshot).mockResolvedValueOnce(new Map([
-      ["SKU-OLD", { sku: "SKU-OLD", price: 50.00, qty: 3, image1: "", image2: "", image3: "", image4: "", image5: "", image6: "", image7: "", out_of_stock_expected: "", estimated_arrival: "", shopify_product_id: null }],
-      ["SKU-NEW-PRICE", { sku: "SKU-NEW-PRICE", price: 99.99, qty: 3, image1: "", image2: "", image3: "", image4: "", image5: "", image6: "", image7: "", out_of_stock_expected: "", estimated_arrival: "", shopify_product_id: null }],
+      ["SKU-OLD", { sku: "SKU-OLD", name: "B", price: 50.00, qty: 3, color: "", size: "", product_type: "", image1: "", image2: "", image3: "", image4: "", image5: "", image6: "", image7: "", video: "", description: "", short_description: "", material: "", gtin: "", weight: 0, out_of_stock_expected: "", estimated_arrival: "", shopify_product_id: null }],
+      ["SKU-NEW-PRICE", { sku: "SKU-NEW-PRICE", name: "B", price: 99.99, qty: 3, color: "", size: "", product_type: "", image1: "", image2: "", image3: "", image4: "", image5: "", image6: "", image7: "", video: "", description: "", short_description: "", material: "", gtin: "", weight: 0, out_of_stock_expected: "", estimated_arrival: "", shopify_product_id: null }],
     ]));
 
     await runSync({ shopifyPush: false });

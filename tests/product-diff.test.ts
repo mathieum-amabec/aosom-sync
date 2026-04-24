@@ -39,8 +39,12 @@ function makeProduct(overrides: Partial<AosomProduct> = {}): AosomProduct {
 function makeSnapshot(overrides: Partial<ProductSnapshot> = {}): ProductSnapshot {
   return {
     sku: "SKU-001",
+    name: "Test Product",
     price: 99.99,
     qty: 5,
+    color: "Black",
+    size: "",
+    product_type: "Furniture",
     image1: "img1.jpg",
     image2: "img2.jpg",
     image3: "",
@@ -48,6 +52,12 @@ function makeSnapshot(overrides: Partial<ProductSnapshot> = {}): ProductSnapshot
     image5: "",
     image6: "",
     image7: "",
+    video: "",
+    description: "<p>desc</p>",
+    short_description: "",
+    material: "",
+    gtin: "",
+    weight: 10,
     out_of_stock_expected: "",
     estimated_arrival: "",
     shopify_product_id: null,
@@ -189,7 +199,48 @@ describe("diffProductsLight", () => {
     expect(result.removed).toHaveLength(0);
   });
 
-  // Test 11: images shorter than 7 → treats missing as empty string
+  // Test 11: name change → toUpdate
+  it("classifies name change as toUpdate", () => {
+    const csv = [makeProduct({ name: "New Name" })];
+    const snap = makeMap(makeSnapshot({ name: "Test Product" }));
+
+    const result = diffProductsLight(csv, snap);
+
+    expect(result.toUpdate).toHaveLength(1);
+    expect(result.unchanged).toBe(0);
+  });
+
+  // Test 12: color change → toUpdate
+  it("classifies color change as toUpdate", () => {
+    const csv = [makeProduct({ color: "White" })];
+    const snap = makeMap(makeSnapshot({ color: "Black" }));
+
+    const result = diffProductsLight(csv, snap);
+
+    expect(result.toUpdate).toHaveLength(1);
+  });
+
+  // Test 13: material change → toUpdate
+  it("classifies material change as toUpdate", () => {
+    const csv = [makeProduct({ material: "Steel" })];
+    const snap = makeMap(makeSnapshot({ material: "" }));
+
+    const result = diffProductsLight(csv, snap);
+
+    expect(result.toUpdate).toHaveLength(1);
+  });
+
+  // Test 14: weight change → toUpdate
+  it("classifies weight change as toUpdate", () => {
+    const csv = [makeProduct({ weight: 25 })];
+    const snap = makeMap(makeSnapshot({ weight: 10 }));
+
+    const result = diffProductsLight(csv, snap);
+
+    expect(result.toUpdate).toHaveLength(1);
+  });
+
+  // Test 15: images shorter than 7 → treats missing as empty string
   it("treats missing images (short array) as empty string when comparing", () => {
     // CSV has only 2 images, snapshot has all 7 empty
     const csv = [makeProduct({ images: ["a.jpg", "b.jpg"] })];

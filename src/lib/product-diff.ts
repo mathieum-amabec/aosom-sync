@@ -43,6 +43,16 @@ function hasChanged(row: AosomProduct, snap: ProductSnapshot): boolean {
   if (row.qty !== snap.qty) return true;
   if (row.outOfStockExpected !== snap.out_of_stock_expected) return true;
   if (row.estimatedArrival !== snap.estimated_arrival) return true;
+  if (row.name !== snap.name) return true;
+  if (row.color !== snap.color) return true;
+  if (row.size !== snap.size) return true;
+  if (row.productType !== snap.product_type) return true;
+  if (row.video !== snap.video) return true;
+  if (row.description !== snap.description) return true;
+  if (row.shortDescription !== snap.short_description) return true;
+  if (row.material !== snap.material) return true;
+  if (row.gtin !== snap.gtin) return true;
+  if (row.weight !== snap.weight) return true;
 
   const imgs = row.images;
   if ((imgs[0] ?? "") !== snap.image1) return true;
