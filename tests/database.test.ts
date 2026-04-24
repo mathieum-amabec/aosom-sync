@@ -171,6 +171,48 @@ describe("completeSyncRun WHERE status='running' guard (GAP 3)", () => {
   });
 });
 
+describe("rebuildProductTypeCounts — batch write correctness (direct SQL)", () => {
+  let db: Client;
+
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  it("batch DELETE+INSERT produces the same result as N sequential inserts", async () => {
+    await db.batch([
+      `CREATE TABLE IF NOT EXISTS product_type_counts (type TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0)`,
+    ]);
+
+    // Simulate typeCounts map: {Furniture: 3, "Furniture > Chairs": 2}
+    const typeCounts = new Map([["Furniture", 3], ["Furniture > Chairs", 2]]);
+    const inserts = [...typeCounts].map(([type, count]) => ({
+      sql: `INSERT INTO product_type_counts (type, count) VALUES (?, ?)`,
+      args: [type, count] as [string, number],
+    }));
+    await db.batch([{ sql: `DELETE FROM product_type_counts`, args: [] }, ...inserts], "write");
+
+    const result = await db.execute(`SELECT type, count FROM product_type_counts ORDER BY type`);
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[0].type).toBe("Furniture");
+    expect(Number(result.rows[0].count)).toBe(3);
+    expect(result.rows[1].type).toBe("Furniture > Chairs");
+    expect(Number(result.rows[1].count)).toBe(2);
+  });
+
+  it("batch DELETE clears stale rows before inserting new ones", async () => {
+    await db.batch([
+      `CREATE TABLE IF NOT EXISTS product_type_counts (type TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0)`,
+      `INSERT INTO product_type_counts (type, count) VALUES ('Stale Category', 99)`,
+    ]);
+
+    const inserts = [{ sql: `INSERT INTO product_type_counts (type, count) VALUES (?, ?)`, args: ["Fresh Category", 5] as [string, number] }];
+    await db.batch([{ sql: `DELETE FROM product_type_counts`, args: [] }, ...inserts], "write");
+
+    const result = await db.execute(`SELECT type FROM product_type_counts`);
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].type).toBe("Fresh Category");
+  });
+});
+
 describe("getProductsSnapshot — SQL shape (direct SQL)", () => {
   let db: Client;
 

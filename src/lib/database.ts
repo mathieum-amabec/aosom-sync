@@ -429,11 +429,12 @@ export async function rebuildProductTypeCounts(): Promise<void> {
       typeCounts.set(p, (typeCounts.get(p) || 0) + cnt);
     }
   }
-  // Rebuild table
-  await db.execute(`DELETE FROM product_type_counts`);
-  for (const [type, count] of typeCounts) {
-    await db.execute({ sql: `INSERT INTO product_type_counts (type, count) VALUES (?, ?)`, args: [type, count] });
-  }
+  // Rebuild table — one batch instead of N sequential execute() calls (~77s → ~2 queries)
+  const inserts = [...typeCounts].map(([type, count]) => ({
+    sql: `INSERT INTO product_type_counts (type, count) VALUES (?, ?)`,
+    args: [type, count] as [string, number],
+  }));
+  await db.batch([{ sql: `DELETE FROM product_type_counts`, args: [] }, ...inserts], "write");
 }
 
 export async function getProducts(filters: {
