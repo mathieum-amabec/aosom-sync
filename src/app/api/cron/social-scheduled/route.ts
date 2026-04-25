@@ -6,7 +6,12 @@ import { env } from "@/lib/config";
 
 function verifyCronSecret(header: string | null): boolean {
   if (!header) return false;
-  const expected = `Bearer ${env.cronSecret}`;
+  let expected: string;
+  try {
+    expected = `Bearer ${env.cronSecret}`;
+  } catch {
+    return false;  // CRON_SECRET missing → 401, not 500
+  }
   if (header.length !== expected.length) return false;
   return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
 }
