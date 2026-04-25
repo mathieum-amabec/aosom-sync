@@ -161,10 +161,14 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("image_urls")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN image_urls TEXT`);
 
   // checkpoint_data on sync_runs: stores per-chunk progress for Phase 2 chunked push
+  // timing_ms on sync_runs: per-phase duration map written incrementally (survives SIGKILL diagnosis)
   const syncRunsInfo = await db.execute(`PRAGMA table_info(sync_runs)`);
   const syncRunCols = new Set(syncRunsInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
   if (!syncRunCols.has("checkpoint_data")) {
     alters.push(`ALTER TABLE sync_runs ADD COLUMN checkpoint_data TEXT`);
+  }
+  if (!syncRunCols.has("timing_ms")) {
+    alters.push(`ALTER TABLE sync_runs ADD COLUMN timing_ms TEXT`);
   }
   if (alters.length > 0) {
     await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
@@ -844,6 +848,16 @@ export async function completeSyncRun(
   }
 }
 
+export async function updateSyncRunTiming(id: string, timing: Record<string, number>): Promise<void> {
+  try {
+    const db = await ensureSchema();
+    await db.execute({ sql: `UPDATE sync_runs SET timing_ms = ? WHERE id = ?`, args: [JSON.stringify(timing), id] });
+  } catch (err) {
+    // non-fatal — timing writes must not interrupt or mask sync errors
+    console.warn("[DB] updateSyncRunTiming failed (non-fatal):", err instanceof Error ? err.message : String(err));
+  }
+}
+
 export async function getSyncRuns(limit = 20): Promise<SyncRun[]> {
   const db = await ensureSchema();
   const result = await db.execute({ sql: `SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT ?`, args: [limit] });
@@ -868,6 +882,7 @@ function mapSyncRun(row: Record<string, unknown>): SyncRun {
     archived: (row.archived as number) || 0,
     errors: (row.errors as number) || 0,
     errorMessages: JSON.parse((row.error_messages as string) || "[]"),
+    timingMs: (() => { try { return row.timing_ms ? JSON.parse(row.timing_ms as string) : undefined; } catch { return undefined; } })(),
   };
 }
 
