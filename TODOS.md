@@ -91,6 +91,20 @@
 
 ## Social Media / Job 4
 
+### Wire content_type into FacebookDraft interface (v0.1.16.0 follow-up)
+
+**Priority:** P3 (deferred to creative session)
+**Context:** `content_type` column was added to `facebook_drafts` in v0.1.16.0 but is not yet in the `FacebookDraft` TypeScript interface or `mapDraft()`. Wire it up when implementing generation logic so drafts can be tagged informative/entertaining/engagement.
+
+---
+
+### Timestamp type inconsistency: new tables vs facebook_drafts
+
+**Priority:** P4 (low, maintenance debt)
+**Context:** `content_templates` and `content_generation_log` use `TIMESTAMP DEFAULT CURRENT_TIMESTAMP` (SQLite text format), while `facebook_drafts.created_at` uses `INTEGER` (Unix epoch). Will need `CAST` workarounds if joining across tables. Fix when implementing generation log queries.
+
+---
+
 ### Branded image composer pour publications sociales (priorité : moyenne-haute)
 **Branche suggérée :** `feature/social-branded-images`
 
