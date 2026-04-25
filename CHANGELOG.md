@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.14.1] - 2026-04-25
+
+### Added — Observability
+
+- `runSync()` now emits structured JSON timing logs (via the existing Pino-compatible `log()` helper) at each phase: `clearStaleLock`, `createSyncRun`, `fetchAll`, `diff`, `detectChanges`, `refreshProducts`, `rebuildProductTypeCounts`, `recordPriceChanges`, `completeSyncRun`.
+- Each log line includes `phase` and `duration_ms` fields, plus phase-specific counters (`csv_count`, `snapshot_count`, `to_insert`, `to_update`, `unchanged`, `removed`, `rows_written`, `entries`, etc.).
+- Zero logic changes — pure instrumentation to diagnose the Phase 1 timeout (prod times out at 300s, root cause unknown without timing proof).
+
 ## [0.1.14.0] - 2026-04-24
 
 ### Changed — Phase 1 sync performance (Bug C fix)
