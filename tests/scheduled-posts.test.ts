@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("@/lib/database", () => ({
   getAllSettings: vi.fn(),
   getFacebookDrafts: vi.fn(),
+  claimFacebookDraft: vi.fn().mockResolvedValue(true),
   updateFacebookDraft: vi.fn().mockResolvedValue(undefined),
   getEligibleHighlightProduct: vi.fn(),
   createFacebookDraft: vi.fn(),
@@ -52,7 +53,7 @@ vi.mock("@/lib/auth", () => ({
 // ─── Real imports (after mocks are set up) ───────────────────────────────────────
 
 import { processScheduledDrafts } from "@/jobs/job4-social";
-import { getAllSettings, getFacebookDrafts, updateFacebookDraft } from "@/lib/database";
+import { getAllSettings, claimFacebookDraft, getFacebookDrafts, updateFacebookDraft } from "@/lib/database";
 import { publishDraftToChannels } from "@/lib/social-publisher";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────────
@@ -95,6 +96,7 @@ describe("processScheduledDrafts", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(getAllSettings).mockResolvedValue(SETTINGS);
+    vi.mocked(claimFacebookDraft).mockResolvedValue(true);
     vi.mocked(updateFacebookDraft).mockResolvedValue(undefined);
   });
 
@@ -150,17 +152,43 @@ describe("processScheduledDrafts", () => {
     expect(result.success).toBe(0);
   });
 
-  it("claim via status=publishing prevents second invocation from picking up same draft", async () => {
-    // First call sees the draft as scheduled; second call returns empty (draft is now publishing/published)
-    vi.mocked(getFacebookDrafts)
-      .mockResolvedValueOnce([makeDraft()])
-      .mockResolvedValueOnce([]);
+  it("skips draft when claimFacebookDraft returns false (already claimed)", async () => {
+    vi.mocked(getFacebookDrafts).mockResolvedValue([makeDraft()]);
+    vi.mocked(claimFacebookDraft).mockResolvedValue(false);
+
+    const result = await processScheduledDrafts();
+
+    expect(publishDraftToChannels).not.toHaveBeenCalled();
+    expect(result.processed).toBe(1);
+    expect(result.success).toBe(0);
+    expect(result.failed).toBe(0);
+  });
+
+  it("claimFacebookDraft called once per due draft", async () => {
+    vi.mocked(getFacebookDrafts).mockResolvedValue([makeDraft({ id: 1 }), makeDraft({ id: 2 })]);
+    vi.mocked(claimFacebookDraft).mockResolvedValue(true);
     vi.mocked(publishDraftToChannels).mockResolvedValue(SUCCESS);
 
-    const [r1, r2] = await Promise.all([processScheduledDrafts(), processScheduledDrafts()]);
+    await processScheduledDrafts();
+
+    expect(claimFacebookDraft).toHaveBeenCalledTimes(2);
+    expect(claimFacebookDraft).toHaveBeenCalledWith(1);
+    expect(claimFacebookDraft).toHaveBeenCalledWith(2);
+  });
+
+  it("only publishes drafts where claim succeeds, skips others", async () => {
+    vi.mocked(getFacebookDrafts).mockResolvedValue([makeDraft({ id: 10 }), makeDraft({ id: 11 })]);
+    vi.mocked(claimFacebookDraft)
+      .mockResolvedValueOnce(true)   // draft 10: claimed
+      .mockResolvedValueOnce(false); // draft 11: already taken by another instance
+    vi.mocked(publishDraftToChannels).mockResolvedValue(SUCCESS);
+
+    const result = await processScheduledDrafts();
 
     expect(publishDraftToChannels).toHaveBeenCalledTimes(1);
-    expect(r1.processed + r2.processed).toBe(1);
+    expect(result.processed).toBe(2);
+    expect(result.success).toBe(1);
+    expect(result.failed).toBe(0);
   });
 
   it("returns correct stats shape { processed, success, failed }", async () => {
@@ -249,6 +277,7 @@ describe("POST /api/cron/social-scheduled — manual trigger", () => {
 describe("processScheduledDrafts — edge cases", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(claimFacebookDraft).mockResolvedValue(true);
     vi.mocked(updateFacebookDraft).mockResolvedValue(undefined);
   });
 

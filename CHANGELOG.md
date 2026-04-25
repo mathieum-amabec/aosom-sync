@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.15.1] - 2026-04-25
+
+### Fixed — Non-atomic scheduled draft claim (double-post risk)
+
+- Adds `claimFacebookDraft(id)` in `database.ts`: executes `UPDATE facebook_drafts SET status='publishing' WHERE id=? AND status='scheduled'` and returns `rowsAffected === 1`. If two Vercel cron instances race on the same draft, only one UPDATE matches — the other gets `false` and skips publication.
+- `processScheduledDrafts` now uses `claimFacebookDraft` instead of unconditional `updateFacebookDraft(..., {status:'publishing'})`. Drafts that fail to claim are skipped (counted in `processed` but not in `success` or `failed`).
+- Previous code used `UPDATE ... WHERE id=?` (no status guard) — both concurrent instances would succeed and both would call `publishDraftToChannels`. Eliminated.
+- Replaces 1 mock-weak concurrent test with 3 assertion-strong tests: claim-returns-false skips publish, claim called once per due draft, partial-claim counts correctly.
+- 163 tests total (+2 net: 1 replaced by 3).
+
 ## [0.1.15.0] - 2026-04-25
 
 ### Fixed — Scheduled posts never published

@@ -18,6 +18,7 @@ import {
   getAllSettings,
   getProduct,
   createFacebookDraft,
+  claimFacebookDraft,
   getFacebookDrafts,
   updateFacebookDraft,
   getEligibleHighlightProduct,
@@ -437,8 +438,11 @@ export async function processScheduledDrafts(): Promise<ScheduledDraftsResult> {
 
   for (const draft of due) {
     const t0 = Date.now();
-    // Claim: mark as 'publishing' so a concurrent invocation skips this draft.
-    await updateFacebookDraft(draft.id, { status: "publishing" });
+    const claimed = await claimFacebookDraft(draft.id);
+    if (!claimed) {
+      log(`Draft #${draft.id}: claim failed — already claimed by another instance`, { phase: "processScheduledDrafts", draft_id: draft.id });
+      continue;
+    }
 
     try {
       if (keys.length === 0) {
