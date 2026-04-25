@@ -65,6 +65,7 @@ export interface SyncRun {
   archived: number;
   errors: number;
   errorMessages: string[];
+  timingMs?: Record<string, number>;
 }
 
 export interface SyncLogEntry {

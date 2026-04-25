@@ -50,6 +50,7 @@ vi.mock("@/lib/database", () => ({
   getLatestSyncRun: vi.fn().mockResolvedValue(null),
   createSyncRun: vi.fn().mockResolvedValue({ id: "run-new", startedAt: new Date().toISOString() }),
   completeSyncRun: vi.fn().mockResolvedValue(undefined),
+  updateSyncRunTiming: vi.fn().mockResolvedValue(undefined),
   addSyncLogsBatch: vi.fn().mockResolvedValue(undefined),
   refreshProducts: vi.fn().mockResolvedValue(undefined),
   rebuildProductTypeCounts: vi.fn().mockResolvedValue(undefined),
@@ -145,6 +146,9 @@ describe("runSync — normal completion", () => {
     );
     expect(result.syncRunId).toBe("run-new");
     expect(result.dryRun).toBe(false);
+    // timing written incrementally after each phase (8 calls: createSyncRun + 7 phases)
+    expect(db.updateSyncRunTiming).toHaveBeenCalledWith("run-new", expect.any(Object));
+    expect(vi.mocked(db.updateSyncRunTiming).mock.calls.length).toBeGreaterThanOrEqual(8);
   });
 
   it("calls clearStaleLockIfNeeded before creating a new run", async () => {
@@ -176,6 +180,8 @@ describe("runSync — mid-flight error → status=failed", () => {
       "run-new",
       expect.objectContaining({ status: "failed", errors: 1 })
     );
+    // timing written in catch block with total elapsed
+    expect(db.updateSyncRunTiming).toHaveBeenCalledWith("run-new", expect.objectContaining({ total: expect.any(Number) }));
   });
 
   it("marks run failed when getProductsSnapshot throws", async () => {
