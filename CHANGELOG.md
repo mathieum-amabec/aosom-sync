@@ -10,7 +10,8 @@ All notable changes to Aosom Sync will be documented in this file.
 - Adds `/api/cron/social-scheduled` route: GET handler (Vercel cron, Bearer CRON_SECRET) + POST handler (manual trigger, session auth).
 - Adds Vercel cron schedule `0,15,30,45 * * * *` (every 15 min) in `vercel.json`.
 - No DB schema migration required — existing `scheduled_at`, `channels`, and `status` columns support the workflow.
-- 6 new tests (154 total).
+- `verifyCronSecret` now catches missing `CRON_SECRET` env var and returns `false` (401) instead of throwing (500).
+- 14 new tests (161 total), covering route 401/500 paths, empty-channels branch, per-draft error catch, and partial channel success.
 
 ## [0.1.14.3] - 2026-04-25
 
