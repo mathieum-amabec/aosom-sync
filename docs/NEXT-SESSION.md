@@ -1,6 +1,31 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 25 avril après-midi — Bug A résolu (scheduled posts) v0.1.15.0
+
+### Ce qui est shipped (PR #32, v0.1.15.0)
+
+✅ processScheduledDrafts() — cron worker dédié pour les scheduled posts
+✅ /api/cron/social-scheduled — GET (Vercel cron) + POST (trigger manuel)
+✅ Vercel cron schedule: 0,15,30,45 * * * *  (toutes les 15 min)
+✅ 161/161 tests (14 nouveaux dont route 401/500, edge cases, partial success)
+✅ Fix adversarial: verifyCronSecret catch CRON_SECRET manquant → 401 pas 500
+✅ PR #32 mergée à 17:23 UTC
+
+### 3 drafts bloqués en prod (P1)
+
+IDs 279, 291, 283 — stuck depuis 2-4 jours avec status='scheduled'.
+→ Prochain cron (toutes les 15 min) ou trigger manuel:
+  POST /api/cron/social-scheduled avec session cookie
+→ Vérifier dans Turso: SELECT id, status, sku, scheduled_at FROM facebook_drafts WHERE id IN (279, 291, 283);
+→ Vérifier visuellement: Facebook Ameublo Direct + Furnish Direct
+
+### Bugs toujours en attente
+
+**Bug B — UX published posts (P2, ~1h)** — affichage et gestion des posts publiés
+**Bug C — Phase 1 nightly** — 75% résolu (voir ci-dessous), surveiller log du 26 avril
+
+---
 ## UPDATE 25 avril fin de matinée — Bug C ENFIN résolu en prod
 
 ### Ce qui est shipped (PR #30 + #31, v0.1.14.1, v0.1.14.2, v0.1.14.3)
