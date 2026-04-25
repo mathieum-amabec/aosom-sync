@@ -194,4 +194,109 @@ describe("GET /api/cron/social-scheduled — route handler", () => {
     expect(body.success).toBe(true);
     expect(body.data).toMatchObject({ processed: 0, success: 0, failed: 0 });
   });
+
+  it("returns 401 when Authorization header is missing", async () => {
+    const { GET } = await import("@/app/api/cron/social-scheduled/route");
+    const req = new Request("http://localhost/api/cron/social-scheduled");
+    const res = await GET(req);
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+  });
+
+  it("returns 401 when Bearer token is wrong", async () => {
+    const { GET } = await import("@/app/api/cron/social-scheduled/route");
+    const req = new Request("http://localhost/api/cron/social-scheduled", {
+      headers: { authorization: "Bearer wrong-secret" },
+    });
+    const res = await GET(req);
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("POST /api/cron/social-scheduled — manual trigger", () => {
+  it("returns 200 with stats JSON when authenticated", async () => {
+    vi.mocked(getFacebookDrafts).mockResolvedValue([]);
+    vi.mocked(getAllSettings).mockResolvedValue(SETTINGS);
+
+    const { isAuthenticated } = await import("@/lib/auth");
+    vi.mocked(isAuthenticated).mockResolvedValue(true);
+
+    const { POST } = await import("@/app/api/cron/social-scheduled/route");
+    const req = new Request("http://localhost/api/cron/social-scheduled", { method: "POST" });
+
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.data).toMatchObject({ processed: 0, success: 0, failed: 0 });
+  });
+
+  it("returns 401 when not authenticated", async () => {
+    const { isAuthenticated } = await import("@/lib/auth");
+    vi.mocked(isAuthenticated).mockResolvedValue(false);
+
+    const { POST } = await import("@/app/api/cron/social-scheduled/route");
+    const req = new Request("http://localhost/api/cron/social-scheduled", { method: "POST" });
+
+    const res = await POST(req);
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+  });
+});
+
+describe("processScheduledDrafts — edge cases", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(updateFacebookDraft).mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("marks draft failed when no valid channels are configured", async () => {
+    vi.mocked(getFacebookDrafts).mockResolvedValue([makeDraft()]);
+    vi.mocked(getAllSettings).mockResolvedValue({ social_autopost_channels: "not_a_real_channel" });
+
+    const result = await processScheduledDrafts();
+
+    const failCalls = vi.mocked(updateFacebookDraft).mock.calls.filter(
+      ([, fields]) => (fields as Record<string, unknown>).status === "failed"
+    );
+    expect(failCalls).toHaveLength(1);
+    expect(result.failed).toBe(1);
+    expect(result.success).toBe(0);
+  });
+
+  it("marks draft failed on unexpected publishDraftToChannels error", async () => {
+    vi.mocked(getFacebookDrafts).mockResolvedValue([makeDraft()]);
+    vi.mocked(getAllSettings).mockResolvedValue(SETTINGS);
+    vi.mocked(publishDraftToChannels).mockRejectedValue(new Error("Network error"));
+
+    const result = await processScheduledDrafts();
+
+    const failCalls = vi.mocked(updateFacebookDraft).mock.calls.filter(
+      ([, fields]) => (fields as Record<string, unknown>).status === "failed"
+    );
+    expect(failCalls).toHaveLength(1);
+    expect(result.failed).toBe(1);
+    expect(result.success).toBe(0);
+  });
+
+  it("counts success correctly when some channels fail but one succeeds", async () => {
+    const PARTIAL = [
+      { channel: "fb_ameublo" as const, state: { status: "published" as const, publishedId: "111", publishedAt: NOW_S } },
+      { channel: "fb_furnish" as const, state: { status: "error" as const, error: "Meta 400" } },
+    ];
+    vi.mocked(getFacebookDrafts).mockResolvedValue([makeDraft()]);
+    vi.mocked(getAllSettings).mockResolvedValue({ social_autopost_channels: "fb_ameublo,fb_furnish" });
+    vi.mocked(publishDraftToChannels).mockResolvedValue(PARTIAL);
+
+    const result = await processScheduledDrafts();
+
+    expect(result.success).toBe(1);
+    expect(result.failed).toBe(0);
+  });
 });
