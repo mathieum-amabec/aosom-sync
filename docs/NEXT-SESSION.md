@@ -1,6 +1,91 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 25 avril fin de matinée — Bug C ENFIN résolu en prod
+
+### Ce qui est shipped (PR #30 + #31, v0.1.14.1, v0.1.14.2, v0.1.14.3)
+
+✅ Per-phase timing logs (PR #30) — instrumentation Pino
+✅ Fix CSV body stream timeout (PR #31) — root cause identifiée et fixée
+✅ Manual Phase 1 trigger en prod: COMPLETED en 232s avec 10 253 produits
+✅ Première completion Phase 1 en prod depuis le 11 avril
+
+### Root cause finale (sur preuves)
+
+fetchAosomCatalog body stream NON protégé par AbortController. Mécanisme:
+- AbortController setTimeout 60s → fetch headers OK en <1s → clearTimeout 
+  TOO EARLY → response.text() body stream démarre sans timeout
+- Aosom CDN body download ~80s daytime, >240s nightly à 6h UTC
+- Vercel SIGKILL à 300s avant que le sync log quoi que ce soit
+
+Fix appliqué (csv-fetcher.ts):
+- AbortController couvre fetch ET response.text() via try/finally
+- Timeout 240s (marge 60s sous Vercel 300s)
+- Retry retiré (incompatible avec budget Vercel + 240s timeout)
+- Erreur explicite "CSV fetch exceeded 240s" si timeout
+
+### Tableau de timing prod (run manuel 25 avril 16:28 UTC)
+
+| Phase                    | ms      | % total |
+|--------------------------|---------|---------|
+| fetchAll                 | 40,221  | 17.3%   |
+| refreshProducts          | 161,814 | 69.8% 🆕|
+| recordPriceChanges       | 24,806  | 10.7%   |
+| rebuildProductTypeCounts | 1,296   | 0.6%    |
+| Autres (lock, diff, etc) | 3,833   | 1.6%    |
+| TOTAL                    | 231,970 | 100%    |
+
+### Nouveau bottleneck identifié (à surveiller)
+
+🆕 refreshProducts: 162s sur grosse journée de changes (~100 batches Turso)
+- Pas un problème aujourd'hui (sous 300s)
+- Risque: nightly avec CSV lent (80s) + grosse journée changes (162s) +
+  autres (30s) = 272s. Marge 30s seulement.
+- Optimisation possible si récurrent: chunking + checkpoint comme Phase 2
+
+### Decision tree pour demain 06:00 UTC
+
+**Scénario A** (probable, ~70%): cron completed en <300s
+→ Bug C définitivement résolu, on peut attaquer Bug A (scheduled posts)
+
+**Scénario B** (~20%): cron failed avec "CSV fetch exceeded 240s"
+→ Plan B pré-cache CSV (GitHub Actions ou Vercel background)
+→ Documenté, mais pas implémenté tant que pas confirmé nécessaire
+
+**Scénario C** (~10%): cron failed avec timeout autre phase
+→ Probablement refreshProducts sur grosse journée
+→ Optimisation chunking + checkpoint pattern
+
+### État final session
+
+- v0.1.14.3 en prod
+- 147/147 tests
+- Sync_runs ont maintenant des timings par phase visibles dans Vercel logs
+- Aucun zombie
+- Plus jamais de SIGKILL silencieux — diagnostic explicite désormais
+
+### Bugs toujours en attente (P1/P2)
+
+**Bug A — Scheduled posts ne fire pas (P1, 1-2h)**
+**Bug B — UX published posts (P2, 1h)**
+**Bug C — Phase 1 nightly** : 75% probabilité résolu, 25% nécessite Plan B selon demain matin
+
+### Commande pour reprendre
+
+cd ~/.gstack/projects/aosom-sync
+git checkout main && git pull origin main --ff-only
+
+Vérifier d'abord le cron de demain matin:
+SELECT id, started_at, completed_at, status, total_products,
+       substr(COALESCE(error_messages, ''), 1, 200) as err,
+       CAST((julianday(COALESCE(completed_at, 'now')) - julianday(started_at)) * 86400 AS INTEGER) as duration_s
+FROM sync_runs WHERE started_at > datetime('now', '-24 hours')
+ORDER BY started_at DESC;
+
+Selon le résultat: Scénario A → Bug A, Scénario B → Plan B, Scénario C →
+optimisation refreshProducts.
+
+---
 ## UPDATE 24 avril milieu de journée — Option α shipped MAIS fix incomplet
 
 ### Ce qui est shipped (PR #28, v0.1.14.0 en prod)
