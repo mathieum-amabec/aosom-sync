@@ -1,6 +1,45 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 25 avril fin d'après-midi — 5 PRs shipped, journée exceptionnelle
+
+### Wins de la journée
+
+PR #30 (0.1.14.1) - Per-phase timing logs Phase 1
+PR #31 (0.1.14.3) - Bug C: CSV body stream timeout (Phase 1 nightly fix)
+PR #32 (0.1.15.0) - Bug A: Scheduled posts cron worker
+PR #33 (0.1.15.1) - Atomic claim race condition fix
+PR #34 (0.1.16.0) - Infrastructure feature contenu non-produit
+
+Tests: 147 → 169 (+22)
+TODOS.md: Bug A completed, infrastructure complete
+
+### Prochaine session — Creative writing
+
+Objectif: remplir les 24 prompts FR/EN des content_templates
+(12 × 2 langues) avec persona-aware tones:
+- Ameublo Direct (FR): tutoiement Quebec, ton chaleureux/complice
+- Furnish Direct (EN): "you" direct, neutral Canadian
+
+Templates à compléter (slugs):
+INFORMATIVE: seasonal_tip, mistake_listicle, myth_vs_reality, product_comparison
+ENTERTAINING: relatable_meme, pov_scenario, nostalgic_throwback, design_quote
+ENGAGEMENT: this_or_that, guess_the_price, caption_this, unpopular_opinion
+
+Plus: implémenter le code de génération réelle (Anthropic API call)
+et l'UI sur /social.
+
+Estimation: 2-3h focus dédiée.
+
+### Bugs en attente
+
+- Bug B UX (publishing badge sur drafts published) — 1h
+- Limitation: publishing orphan si Vercel kill à 120s — edge case
+- Limitation: sort newest-first au lieu de FIFO — cosmétique
+
+Status prod: tout fonctionnel, 0 zombies, version 0.1.16.0.
+
+---
 ## UPDATE 25 avril après-midi — Bug A résolu (scheduled posts) v0.1.15.0
 
 ### Ce qui est shipped (PR #32, v0.1.15.0)
