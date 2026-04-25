@@ -2,41 +2,41 @@ import { parse } from "csv-parse/sync";
 import type { AosomRawRow, AosomProduct } from "@/types/aosom";
 import { AOSOM } from "./config";
 
+/** Covers headers + body stream — 60s margin under Vercel 300s function limit */
+const FETCH_TIMEOUT_MS = 240_000;
+
+function isAbortError(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { name?: string }).name === "AbortError";
+}
+
 /**
  * Fetch and parse the Aosom CSV feed into normalized AosomProduct[].
- * Retries up to 2 times with 5s backoff on failure.
+ * Single attempt — no retry (240s timeout × retries would exceed Vercel 300s budget).
+ * Timeout covers both the initial connection and the full body stream.
  */
 export async function fetchAosomCatalog(): Promise<AosomProduct[]> {
-  const maxRetries = AOSOM.FETCH_MAX_RETRIES;
-  let lastError: Error | null = null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const response = await fetch(AOSOM.CSV_URL, {
+      next: { revalidate: 0 },
+      signal: controller.signal,
+    });
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 60_000);
-      const response = await fetch(AOSOM.CSV_URL, {
-        next: { revalidate: 0 },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to fetch Aosom CSV: ${response.status} ${response.statusText}`
-        );
-      }
-
-      const text = await response.text();
-      return parseTsv(text);
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err));
-      if (attempt < maxRetries) {
-        await new Promise((r) => setTimeout(r, AOSOM.FETCH_BACKOFF_MS * (attempt + 1)));
-      }
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} from Aosom CSV endpoint`);
     }
-  }
 
-  throw lastError!;
+    const text = await response.text();
+    return parseTsv(text);
+  } catch (err) {
+    if (isAbortError(err)) {
+      throw new Error(`CSV fetch exceeded ${FETCH_TIMEOUT_MS / 1000}s — likely Aosom CDN slow window`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
