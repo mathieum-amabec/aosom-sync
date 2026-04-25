@@ -1109,6 +1109,21 @@ export async function updateFacebookDraft(id: number, fields: Record<string, unk
   await db.execute({ sql: `UPDATE facebook_drafts SET ${sets.join(", ")} WHERE id = ?`, args });
 }
 
+/**
+ * Atomically claim a scheduled draft for publishing.
+ * Returns true if claim succeeded (rowsAffected === 1), false if another
+ * instance already claimed it or its status is no longer 'scheduled'.
+ * Prevents double-posting when Vercel runs two cron instances in parallel.
+ */
+export async function claimFacebookDraft(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE facebook_drafts SET status = 'publishing' WHERE id = ? AND status = 'scheduled'`,
+    args: [id],
+  });
+  return (result.rowsAffected ?? 0) === 1;
+}
+
 export async function deleteFacebookDraft(id: number): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `DELETE FROM facebook_drafts WHERE id = ?`, args: [id] });

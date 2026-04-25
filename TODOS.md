@@ -71,23 +71,6 @@
 
 ## P1 — Social Media bugs identifiés 23 avril (en attente)
 
-### Bug A — Scheduled publications ne fire pas
-
-**Symptôme observé:**
-- Post "3 Seater Sofa, 83.5'' Modern Upholstered Couch" (SKU 83B-353V00GN) scheduled le 23/04/2026 19:25:00 → toujours en `status="scheduled"`, jamais publié
-- Post "Adjustable Counter Height Bar Stools" (SKU 835-717V00BG) scheduled le 21/04/2026 10:29:00 → même symptôme
-
-**Hypothèses à investiguer:**
-1. Le cron Vercel `/api/cron/social` ne fait que `stock_highlight`, pas le processing des scheduled drafts
-2. Pas de cron worker dédié au "publish scheduled at X time"
-3. Le `scheduled_at` en DB n'est jamais comparé à `NOW()` dans un job
-
-**Branche suggérée:** `fix/scheduled-posts-not-firing`
-**Estimation:** 1–2h investigation + fix
-**Priorité:** P1 (le scheduling est une fonctionnalité advertised qui ne marche pas — perte de confiance utilisateur)
-
----
-
 ### Bug B — UX feedback post-publication
 
 **Symptôme observé:**
@@ -175,6 +158,13 @@ Générer automatiquement des images brandées professionnelles pour chaque draf
 ---
 
 ## Completed
+
+### Bug A — Scheduled publications ne fire pas
+**Completed:** v0.1.15.0 (2026-04-25)
+- Root cause: `/api/cron/social` only ran `stock_highlight`, no worker processed `scheduled` drafts
+- Fix: new `processScheduledDrafts()` in `job4-social.ts` + `/api/cron/social-scheduled` cron route
+- Atomic claim added in v0.1.15.1: `claimFacebookDraft()` uses `UPDATE WHERE status='scheduled'` (rowsAffected===1) to prevent double-publish across concurrent cron instances
+- Drafts 279/283/291 confirmed published in prod
 
 ### Multi-photos par publication
 **Completed:** v0.1.8.0 (2026-04-13)
