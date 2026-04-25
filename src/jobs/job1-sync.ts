@@ -243,13 +243,17 @@ function triggerSocialDrafts(skus: { sku: string; oldPrice: number; newPrice: nu
 // ─── Main Entry Point ───────────────────────────────────────────────
 
 export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean } = {}): Promise<SyncResult> {
+  const t0Total = Date.now();
+
   // Phase 1: clearStaleLock
   const t0Lock = Date.now();
   await clearStaleLockIfNeeded();
   log("clearStaleLock done", { phase: "clearStaleLock", duration_ms: Date.now() - t0Lock });
 
   // Guard against concurrent sync runs
+  const t0LatestRun = Date.now();
   const latestRun = await getLatestSyncRun();
+  log("getLatestSyncRun done", { phase: "getLatestSyncRun", duration_ms: Date.now() - t0LatestRun });
   if (latestRun && latestRun.status === "running") {
     throw new Error(`Sync already in progress (run ${latestRun.id}, started ${latestRun.startedAt})`);
   }
@@ -274,6 +278,7 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
     log(`${aosomProducts.length} produits CSV, ${snapshot.size} en DB${shopifyPush ? `, ${shopifyProducts.length} Shopify` : ""}`, {
       phase: "fetchAll", duration_ms: Date.now() - t0Fetch,
       csv_count: aosomProducts.length, snapshot_count: snapshot.size,
+      shopify_count: shopifyProducts.length,
     });
 
     // Phase 4: Diff CSV vs snapshot — only write rows that actually changed
@@ -327,13 +332,13 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
     log("rebuildProductTypeCounts done", { phase: "rebuildProductTypeCounts", duration_ms: Date.now() - t0Rebuild });
 
     // Phase 8: Record price history
+    const t0Record = Date.now();
     if (changes.priceChangeEntries.length > 0) {
-      const t0Record = Date.now();
       await recordPriceChanges(changes.priceChangeEntries);
-      log(`${changes.priceChangeEntries.length} changements enregistrés dans price_history`, {
-        phase: "recordPriceChanges", duration_ms: Date.now() - t0Record, entries: changes.priceChangeEntries.length,
-      });
     }
+    log(`recordPriceChanges done`, {
+      phase: "recordPriceChanges", duration_ms: Date.now() - t0Record, entries: changes.priceChangeEntries.length,
+    });
 
     // Step 4: Apply to Shopify (skip if shopifyPush=false for cron phase 1)
     let shopifyResult = { archived: 0, errors: 0, errorMessages: [] as string[], logEntries: [] as Omit<SyncLogEntry, "id">[], updates: 0 };
@@ -366,7 +371,9 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
     });
     log("completeSyncRun done", { phase: "completeSyncRun", duration_ms: Date.now() - t0Complete });
 
-    log(`Sync terminé: ${changes.priceUpdates} prix, ${changes.stockChanges} stocks, ${changes.newProducts} nouveaux, ${shopifyResult.archived} archivés, ${shopifyResult.errors} erreurs`);
+    log(`Sync terminé: ${changes.priceUpdates} prix, ${changes.stockChanges} stocks, ${changes.newProducts} nouveaux, ${shopifyResult.archived} archivés, ${shopifyResult.errors} erreurs`, {
+      phase: "total", duration_ms: Date.now() - t0Total,
+    });
 
     // Step 5: Notifications
     const parts: string[] = [];
@@ -391,7 +398,7 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    log(`ERREUR FATALE: ${msg}`);
+    log(`ERREUR FATALE: ${msg}`, { phase: "error", duration_ms: Date.now() - t0Total });
     await completeSyncRun(syncRun.id, {
       status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
     });
