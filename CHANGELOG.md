@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.15.0] - 2026-04-25
+
+### Fixed — Scheduled posts never published
+
+- Adds `processScheduledDrafts()` in `job4-social.ts`: claims drafts via `status='publishing'` (idempotent), reads `social_autopost_channels` setting for target channels, calls `publishDraftToChannels()` (existing shared path), and marks `status='failed'` if all channels fail.
+- Adds `/api/cron/social-scheduled` route: GET handler (Vercel cron, Bearer CRON_SECRET) + POST handler (manual trigger, session auth).
+- Adds Vercel cron schedule `0,15,30,45 * * * *` (every 15 min) in `vercel.json`.
+- No DB schema migration required — existing `scheduled_at`, `channels`, and `status` columns support the workflow.
+- `verifyCronSecret` now catches missing `CRON_SECRET` env var and returns `false` (401) instead of throwing (500).
+- 14 new tests (161 total), covering route 401/500 paths, empty-channels branch, per-draft error catch, and partial channel success.
+
 ## [0.1.14.3] - 2026-04-25
 
 ### Fixed — CSV body stream timeout
