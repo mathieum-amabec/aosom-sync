@@ -40,6 +40,36 @@ export async function fetchAosomCatalog(): Promise<AosomProduct[]> {
 }
 
 /**
+ * Fetch Aosom CSV and return raw text without parsing.
+ * Used by pre-cache cron — stores text in csv_cache for Phase 1 to read.
+ * Configurable timeout (default 240s = same as fetchAosomCatalog; cron passes 540s).
+ */
+export async function fetchAosomCatalogRaw(
+  timeoutMs = 240_000
+): Promise<{ raw_text: string; bytes_size: number; duration_ms: number }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const t0 = Date.now();
+  try {
+    const response = await fetch(AOSOM.CSV_URL, { signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} from Aosom CSV endpoint`);
+    }
+    const raw_text = await response.text();
+    const duration_ms = Date.now() - t0;
+    const bytes_size = Buffer.byteLength(raw_text, "utf8");
+    return { raw_text, bytes_size, duration_ms };
+  } catch (err) {
+    if (isAbortError(err)) {
+      throw new Error(`CSV fetch exceeded ${timeoutMs / 1000}s — likely Aosom CDN slow window`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Parse TSV text into normalized products.
  * Exported separately for testing with local files.
  */
