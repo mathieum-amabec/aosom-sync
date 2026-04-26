@@ -720,6 +720,7 @@ export async function recordPriceChanges(entries: {
     sql: `INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type) VALUES (?, ?, ?, ?, ?, ?)`,
     args: [e.sku, e.oldPrice, e.newPrice, e.oldQty, e.newQty, e.changeType],
   }));
+  // price_history rows are small (6 cols) — 100 is fine, not the sync bottleneck
   for (let i = 0; i < stmts.length; i += 100) {
     await db.batch(stmts.slice(i, i + 100), "write");
   }
@@ -948,6 +949,7 @@ export async function addSyncLogsBatch(entries: Omit<SyncLogEntry, "id">[]): Pro
     sql: `INSERT INTO sync_logs (id, sync_run_id, timestamp, shopify_product_id, sku, action, field, old_value, new_value) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [crypto.randomUUID(), e.syncRunId, e.timestamp, e.shopifyProductId, e.sku, e.action, e.field, e.oldValue, e.newValue],
   }));
+  // sync_logs rows are small (9 cols) — 100 is fine, not the sync bottleneck
   for (let i = 0; i < stmts.length; i += 100) {
     await db.batch(stmts.slice(i, i + 100), "write");
   }
