@@ -2,6 +2,13 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.16.2] - 2026-04-27
+
+### Changed — Observability: Phase 1 timing complet
+
+- Instruments `applyToShopify` + `addSyncLogsBatch` + `createNotification` avec `timing_ms` pour couvrir le gap non instrumenté identifié post-PR #36.
+- Aucun changement de logique. Les nouvelles clés `applyToShopify`, `addSyncLogsBatch`, `createNotification` apparaissent dans `timingMs` des sync_runs.
+
 ## [0.1.16.1] - 2026-04-26
 
 ### Changed — refreshProducts batch size 100 → 1000
