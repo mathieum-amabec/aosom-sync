@@ -1,6 +1,118 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 26 avril fin de journée — Bug C root cause CORRIGÉE (encore)
+
+### Wins de la session
+
+✅ PR #34 mergée: infrastructure feature contenu non-produit
+   - 12 templates seedés (placeholders prompts pour session créative future)
+   - Endpoints API stubs (501 NOT_IMPLEMENTED)
+   - Migration content_type sur facebook_drafts
+
+✅ PR #35 testée puis revertée: Plan B Variante B (Turso TEXT cache)
+   - Hypothèse "Turso 45MB read = 50ms" INVALIDÉE par mesure prod
+   - Mesure réelle: 62s pour SELECT raw_text 45MB via Turso HTTP API
+   - Régression: 232s daytime → 301s timeout
+   - Revert clean (commit 517225e)
+   - **Apprentissage**: Turso optimisé pour rows quelques KB, PAS pour blobs 45MB
+
+✅ Diagnostic définitif du VRAI Bug C avec instrumentation prod:
+   - Bug C N'EST PAS un problème de CSV fetch (52s OK aujourd'hui)
+   - Bug C EST un problème de DB write phase (refreshProducts >245s sur
+     grosses journées de changes Aosom)
+   - Mesure prod 26 avril 15:52 UTC:
+     * fetchAll: 52s ✅
+     * refreshProducts: >245s ❌ (timeout avant complétion)
+     * Total: >300s ❌ Vercel SIGKILL
+
+### Erreurs honnêtes de cette session
+
+1. Hypothèse "Turso TEXT read fast" non validée empiriquement avant code
+2. Plan B Variante B shippée sans test de vitesse réelle
+3. Régression prod (Phase 1 daytime cassée pendant ~30 min)
+4. Heureusement: revert disponible, Phase 2 compense côté business
+
+### Nouvelle compréhension de Bug C
+
+| Phase                | Mesure prod 26 avril | Verdict          |
+|----------------------|----------------------|------------------|
+| fetchAll (CSV+snap)  | 52s                  | OK ✅            |
+| diff + detectChanges | <1s                  | OK ✅            |
+| refreshProducts      | >245s                | BOTTLENECK ❌    |
+| recordPriceChanges   | (pas atteint)        | TBD              |
+| TOTAL                | >300s                | TIMEOUT ❌       |
+
+refreshProducts varie selon volume:
+- Hier 25 avril: 161s (jour normal)
+- Aujourd'hui 26 avril: >245s (backlog accumulé après fail 06:00 UTC)
+
+### Plan prochaine session — VRAI fix Bug C
+
+**Architecture cible: chunking + checkpoint pattern (comme Phase 2)**
+
+Modèle:
+- Phase 1 actuelle: 1 invocation Vercel, tout ou rien (vulnerable à 300s)
+- Phase 1 chunked: split refreshProducts en chunks 2000 rows
+  * Run 1 (06:00): processe rows 0-2000, sauvegarde checkpoint, retourne
+  * Run 2 (06:15 cron): reprend rows 2001-4000, etc.
+  * Pattern existant sur Phase 2 (3 runs cascade)
+- Estimation: 6 invocations × 40-60s chacune = sous 300s par invocation
+
+**Préalables session prochaine:**
+
+1. Mesure empirique batch size (15 min)
+   - refreshProducts actuelle: batches 100
+   - Tester localement: batches 100, 500, 1000 sur 2000 rows
+   - Choisir taille optimal avant code
+
+2. Design pattern checkpoint (15 min)
+   - Table sync_checkpoints (id_run, last_processed_row, status)
+   - Idempotency: si crash mid-batch, reprend depuis checkpoint
+   - Ressemble au pattern Phase 2
+
+3. Implémentation (1-2h)
+   - Refactor refreshProducts pour accepter offset/limit
+   - Modifier runSync pour gérer continuation
+   - Cron secondaire 06:15 + 06:30 + 06:45 si nécessaire
+
+4. Tests + validation prod
+
+Estimation totale: 2.5-3h session dédiée.
+
+### NE PAS FAIRE prochaine session
+
+- Vercel Blob storage (résoudrait CSV fetch qui n'est pas le bottleneck)
+- Optimisation prématurée (Turso, network, etc.)
+- Hypothèses non validées par mesure
+
+### État final session
+
+- Branche main: clean, version 0.1.16.0 (post-revert)
+- PR #34 mergée et OK (feature infra)
+- 0 zombies sync_runs
+- Tests: 169/169 (post-revert, on a perdu 23 tests liés à PR #35)
+- Bug C: diagnostic clair, plan pour fix demain
+
+### Bugs en attente
+
+- **Bug C (P0)**: chunking Phase 1 — session prochaine
+- **Bug B (P2)**: UX published posts
+- **content-generator timeout (P2)**: 90s pattern
+- **recordPriceChanges N+1 (P2)**: déjà noté, à fixer un jour
+
+### Commande pour reprendre
+
+```bash
+cd ~/.gstack/projects/aosom-sync
+git checkout main && git pull origin main --ff-only
+```
+
+Dire à Claude: "Reprise aosom-sync. Lis docs/NEXT-SESSION.md 'UPDATE
+26 avril fin de journée'. Je veux attaquer le VRAI Bug C: chunking
+refreshProducts. Commence par la mesure empirique batch sizes."
+
+---
 ## UPDATE 25 avril fin d'après-midi — 5 PRs shipped, journée exceptionnelle
 
 ### Wins de la journée
