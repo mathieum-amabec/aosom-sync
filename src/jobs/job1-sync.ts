@@ -364,13 +364,20 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
 
     if (shopifyPush) {
       log("Application des changements sur Shopify...");
+      const t0Shopify = Date.now();
       const mergedForPush = mergeVariants(aosomProducts);
       const diffsForPush = computeDiffs(mergedForPush, shopifyProducts);
       shopifyResult = await applyToShopify(diffsForPush, shopifyProducts, syncRun.id);
+      timing.applyToShopify = Date.now() - t0Shopify;
+      log("applyToShopify done", { phase: "applyToShopify", duration_ms: timing.applyToShopify, updates: shopifyResult.updates, archived: shopifyResult.archived });
 
       if (shopifyResult.logEntries.length > 0) {
+        const t0Logs = Date.now();
         await addSyncLogsBatch(shopifyResult.logEntries);
+        timing.addSyncLogsBatch = Date.now() - t0Logs;
+        log("addSyncLogsBatch done", { phase: "addSyncLogsBatch", duration_ms: timing.addSyncLogsBatch, count: shopifyResult.logEntries.length });
       }
+      await updateSyncRunTiming(syncRun.id, timing);
     } else {
       log("Shopify push différé (phase 2 séparée)");
     }
@@ -404,7 +411,9 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
     if (shopifyResult.errors > 0) parts.push(`${shopifyResult.errors} erreurs`);
     if (!shopifyPush) parts.push("Shopify push en attente");
     const notifType = shopifyResult.errors > 0 ? "warning" : "success";
+    const t0Notif = Date.now();
     await createNotification(notifType, "Sync terminée", parts.length > 0 ? parts.join(", ") : "Aucun changement détecté");
+    timing.createNotification = Date.now() - t0Notif;
 
     // Step 6: Trigger social drafts (non-blocking)
     if (shopifyPush) {
