@@ -380,9 +380,11 @@ export async function refreshProducts(products: Omit<ProductRow, "shopify_produc
     ],
   }));
 
-  // Batch in chunks of 100 (Turso batch limit)
-  for (let i = 0; i < stmts.length; i += 100) {
-    await db.batch(stmts.slice(i, i + 100), "write");
+  // Bench 26 avril: batch_size=1000 is 4× faster than 100 on Turso
+  // (super-linear efficiency from internal SQLite transaction grouping)
+  const BATCH_SIZE = 1000;
+  for (let i = 0; i < stmts.length; i += BATCH_SIZE) {
+    await db.batch(stmts.slice(i, i + BATCH_SIZE), "write");
   }
 }
 
