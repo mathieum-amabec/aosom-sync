@@ -1,6 +1,105 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 26 avril fin de session — Bug C partiellement résolu, nouveau goulot identifié
+
+### Wins de la journée
+
+✅ **PR #34** mergée — infrastructure feature contenu non-produit (v0.1.16.0)
+   - 12 templates seedés avec placeholders
+   - Endpoints stubs (501 NOT_IMPLEMENTED)
+   - Migration content_type sur facebook_drafts
+
+✅ **PR #35** testée puis revertée — Plan B Turso TEXT cache (échec empirique)
+   - Hypothèse "Turso TEXT 45MB read = 50ms" INVALIDÉE par mesure prod
+   - Mesure réelle: 62s pour SELECT raw_text 45MB
+   - Apprentissage: Turso optimisé pour rows quelques KB, pas blobs 45MB
+   - Revert clean (commit 517225e)
+
+✅ **PR #36** mergée — batch_size 100→1000 (v0.1.16.1)
+   - Mesure empirique: Turso super-linéaire sur gros batches
+   - refreshProducts: 824s estimé → **11s mesuré** (75× plus rapide)
+   - 1 ligne de code + 1 test + commentaires sur autres usages batch=100
+
+### Bug C status: PARTIELLEMENT résolu
+
+**Avant ce matin:**
+- Phase 1 timeout 300s+ chaque nuit
+- Phase 1 daytime 232s (limite)
+- Hypothèse: refreshProducts = bottleneck
+
+**Après PR #36:**
+- refreshProducts: 11s (était bottleneck principal, RÉSOLU)
+- Phase 1 daytime: TOUJOURS timeout 302s
+- Nouveau diagnostic via instrumentation:
+
+| Phase                    | Durée mesurée | Verdict          |
+|--------------------------|---------------|------------------|
+| fetchAll (CSV+snap)      | 90.5s         | ⚠️ Variable      |
+| refreshProducts          | 11s           | ✅ FIX confirmé  |
+| rebuildProductTypeCounts | 1.6s          | ✅               |
+| recordPriceChanges       | 1.0s          | ✅               |
+| diff + detectChanges     | 0.1s          | ✅               |
+| Init + locks             | 2.7s          | ✅               |
+| **Sous-total mesuré**    | **~107s**     |                  |
+| **Gap non instrumenté**  | **~195s**     | 🚨 NOUVEAU BUG   |
+| **Total observé**        | **302s**      | ❌ TIMEOUT       |
+
+### Plan prochaine session — Identifier les 195s mystérieuses
+
+**Étape A** — Instrumentation Pino sur les phases finales (15 min)
+   Candidates probables:
+   - completeSyncRun (UPDATE sync_runs avec metadata)
+   - addSyncLogsBatch (flush des logs accumulés batch=100)
+   - Quelque chose entre recordPriceChanges et completeSyncRun
+
+**Étape B** — Trigger Phase 1 manuel + capture logs (5 min)
+
+**Étape C** — Identifier précisément la phase coupable (5 min)
+
+**Étape D** — Fix selon la nature du bug:
+   - Si addSyncLogsBatch lent: batch_size 100→1000 (pattern même que PR #36)
+   - Si completeSyncRun lent: investigation différente
+   - Si autre chose: adapter
+
+Estimation totale: 1-2h selon nature du bug.
+
+### Ce qu'on a appris cette saga (16 jours)
+
+1. **Multiple bottlenecks** peuvent cohabiter sur Phase 1 — fix d'un révèle le suivant
+2. **Instrumentation prod > spéculation** — chaque hypothèse doit être validée empiriquement
+3. **Mesures locales WSL2 ≠ prod Vercel** — toujours valider en prod
+4. **Turso super-linéaire** sur gros batches (apprentissage clé)
+5. **Cache TEXT 45MB Turso = anti-pattern** (cache fermée définitivement)
+6. **Pattern PR review ↔ Adversarial** = bug catcher éprouvé (PR #28 hasChanged)
+
+### Bugs en backlog
+
+- **Bug C step 2** (P0): identifier les 195s mystérieuses — prochaine session
+- **fetchAll variable** (P1): 51-151s selon journée — pré-cache toujours possible mais avec architecture différente (Vercel Blob, pas Turso TEXT)
+- **Bug B** (P2): UX published posts
+- **Feature contenu non-produit** (P2): écriture des 24 prompts FR/EN dans session créative dédiée
+
+### État final session
+
+- v0.1.16.1 en prod
+- 170/170 tests
+- Phase 2 cron toujours opérationnel (compense Phase 1 fail business-wise)
+- 0 zombies après cleanup
+- 4 PRs traitées aujourd'hui (#34 mergée, #35 revertée, #36 mergée, et le revert de #35)
+
+### Commande pour reprendre
+
+```
+cd ~/.gstack/projects/aosom-sync
+git checkout main && git pull origin main --ff-only
+```
+
+Dire à Claude: "Reprise aosom-sync. Lis docs/NEXT-SESSION.md 'UPDATE 26
+avril fin de session'. Je veux identifier les 195s mystérieuses dans
+Phase 1. Commence par instrumenter completeSyncRun + addSyncLogsBatch."
+
+---
 ## UPDATE 26 avril fin de journée — Bug C root cause CORRIGÉE (encore)
 
 ### Wins de la session
