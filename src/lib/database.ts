@@ -382,6 +382,8 @@ export async function refreshProducts(products: Omit<ProductRow, "shopify_produc
 
   // Bench 26 avril: batch_size=1000 is 4× faster than 100 on Turso
   // (super-linear efficiency from internal SQLite transaction grouping)
+  // Turso HTTP API cap: ~8MB/request. At ~427KB/100 rows (bench 25 avril),
+  // 1000 rows ≈ 4.27MB — within limit. Reduce if descriptions grow significantly.
   const BATCH_SIZE = 1000;
   for (let i = 0; i < stmts.length; i += BATCH_SIZE) {
     await db.batch(stmts.slice(i, i + BATCH_SIZE), "write");
