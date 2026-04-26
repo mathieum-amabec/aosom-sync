@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.16.0] - 2026-04-25
+
+### Added — Non-product content template infrastructure
+
+- New `content_templates` table (slug, content_type, FR/EN prompts, image_strategy, active flag) with indexes on slug and type.
+- New `content_generation_log` table for audit trail (template_slug, draft_id, language, success/error).
+- `content_type` column on `facebook_drafts` (DEFAULT `'product'`) to distinguish product posts from non-product content.
+- Seed of 12 content templates across 3 categories: informative ×4 (seasonal_tip, mistake_listicle, myth_vs_reality, product_comparison), entertaining ×4 (relatable_meme, pov_scenario, nostalgic_throwback, design_quote), engagement ×4 (this_or_that, guess_the_price, caption_this, unpopular_opinion). Prompts marked TODO for creative session.
+- `POST /api/social/content/generate` — admin-only stub returning 501 with input echo. Validates `language` (required: fr|en) and `content_type` (optional: informative|entertaining|engagement).
+- `POST /api/social/content/generate-weekly-mix` — admin-only stub returning 501. Validates `language` (required).
+- 6 new tests: migration idempotency, seed count/idempotency, route 501 and 400 responses. 169 total.
+
 ## [0.1.15.1] - 2026-04-25
 
 ### Fixed — Non-atomic scheduled draft claim (double-post risk)

@@ -122,6 +122,33 @@ async function _initSchemaImpl(): Promise<void> {
       created_at INTEGER DEFAULT (strftime('%s','now')),
       last_login_at INTEGER
     )`,
+    /* content_type: 'product' | 'informative' | 'entertaining' | 'engagement'
+       Constraint enforced at application layer — SQLite ALTER TABLE cannot add CHECK constraints */
+    `CREATE TABLE IF NOT EXISTS content_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug TEXT NOT NULL UNIQUE,
+      content_type TEXT NOT NULL,
+      display_name_fr TEXT NOT NULL,
+      display_name_en TEXT NOT NULL,
+      prompt_pattern_fr TEXT NOT NULL,
+      prompt_pattern_en TEXT NOT NULL,
+      image_strategy TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_content_templates_slug ON content_templates(slug)`,
+    `CREATE INDEX IF NOT EXISTS idx_content_templates_type ON content_templates(content_type)`,
+    `CREATE TABLE IF NOT EXISTS content_generation_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_slug TEXT NOT NULL,
+      draft_id INTEGER,
+      language TEXT NOT NULL,
+      category_filter TEXT,
+      success INTEGER NOT NULL,
+      error_message TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )`,
   ];
 
   // Batch all schema + legacy table creation in a single round trip
@@ -159,6 +186,8 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("post_text_en")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN post_text_en TEXT`);
   if (!cols.has("channels")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN channels TEXT`);
   if (!cols.has("image_urls")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN image_urls TEXT`);
+  // content_type: distinguishes product posts from informative/entertaining/engagement content
+  if (!cols.has("content_type")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN content_type TEXT NOT NULL DEFAULT 'product'`);
 
   // checkpoint_data on sync_runs: stores per-chunk progress for Phase 2 chunked push
   // timing_ms on sync_runs: per-phase duration map written incrementally (survives SIGKILL diagnosis)
@@ -218,6 +247,29 @@ async function _initSchemaImpl(): Promise<void> {
     defaultSettings.map(([key, value]) => ({
       sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
       args: [key, value],
+    })),
+    "write"
+  );
+
+  // Seed content templates — INSERT OR IGNORE preserves manually-edited prompts on re-run
+  const contentTemplates: Array<{ slug: string; content_type: string; display_name_fr: string; display_name_en: string; prompt_fr: string; prompt_en: string; image_strategy: string }> = [
+    { slug: 'seasonal_tip', content_type: 'informative', display_name_fr: 'Conseil saisonnier', display_name_en: 'Seasonal tip', image_strategy: 'text_overlay', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 100-200 words informative tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 100-200 words informative tone' },
+    { slug: 'mistake_listicle', content_type: 'informative', display_name_fr: 'Erreurs courantes', display_name_en: 'Common mistakes', image_strategy: 'text_overlay', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 100-200 words informative tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 100-200 words informative tone' },
+    { slug: 'myth_vs_reality', content_type: 'informative', display_name_fr: 'Mythe vs réalité', display_name_en: 'Myth vs reality', image_strategy: 'text_overlay', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 100-200 words informative tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 100-200 words informative tone' },
+    { slug: 'product_comparison', content_type: 'informative', display_name_fr: 'Comparatif éducatif', display_name_en: 'Educational comparison', image_strategy: 'text_overlay', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 100-200 words informative tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 100-200 words informative tone' },
+    { slug: 'relatable_meme', content_type: 'entertaining', display_name_fr: 'Meme relatable', display_name_en: 'Relatable meme', image_strategy: 'random_product', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 30-80 words humor/relatable tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 30-80 words humor/relatable tone' },
+    { slug: 'pov_scenario', content_type: 'entertaining', display_name_fr: 'POV scénario', display_name_en: 'POV scenario', image_strategy: 'random_product', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 30-80 words humor/relatable tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 30-80 words humor/relatable tone' },
+    { slug: 'nostalgic_throwback', content_type: 'entertaining', display_name_fr: 'Nostalgie déco', display_name_en: 'Decor nostalgia', image_strategy: 'none', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 30-80 words humor/relatable tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 30-80 words humor/relatable tone' },
+    { slug: 'design_quote', content_type: 'entertaining', display_name_fr: 'Citation design', display_name_en: 'Design quote', image_strategy: 'text_overlay', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 30-80 words humor/relatable tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 30-80 words humor/relatable tone' },
+    { slug: 'this_or_that', content_type: 'engagement', display_name_fr: 'Ceci ou cela', display_name_en: 'This or that', image_strategy: 'random_product', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 40-80 words engagement question tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 40-80 words engagement question tone' },
+    { slug: 'guess_the_price', content_type: 'engagement', display_name_fr: 'Devine le prix', display_name_en: 'Guess the price', image_strategy: 'random_product', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 40-80 words engagement question tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 40-80 words engagement question tone' },
+    { slug: 'caption_this', content_type: 'engagement', display_name_fr: 'Trouve la caption', display_name_en: 'Caption this', image_strategy: 'random_product', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 40-80 words engagement question tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 40-80 words engagement question tone' },
+    { slug: 'unpopular_opinion', content_type: 'engagement', display_name_fr: 'Opinion impopulaire', display_name_en: 'Unpopular opinion', image_strategy: 'none', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 40-80 words engagement question tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 40-80 words engagement question tone' },
+  ];
+  await db.batch(
+    contentTemplates.map(t => ({
+      sql: `INSERT OR IGNORE INTO content_templates (slug, content_type, display_name_fr, display_name_en, prompt_pattern_fr, prompt_pattern_en, image_strategy) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [t.slug, t.content_type, t.display_name_fr, t.display_name_en, t.prompt_fr, t.prompt_en, t.image_strategy],
     })),
     "write"
   );
