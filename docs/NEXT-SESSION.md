@@ -1,6 +1,88 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 26 avril fin de session — Bug C DÉFINITIVEMENT RÉSOLU 🎉
+
+### Saga Bug C: 16 jours, 5 PRs, résolution complète
+
+**Diagnostic final**: Bug C nightly Phase 1 timeout était causé par
+refreshProducts utilisant batch_size=100 au lieu de 1000.
+
+Les "195s mystérieuses" précédemment observées étaient applyToShopify
+qui tournait parce que les triggers de test ne passaient pas correctement
+shopifyPush:false. Phase 1 réelle (cron 06:00 UTC) avec dbSync:true
+seulement = ~80s.
+
+### PRs de la journée (5)
+
+✅ PR #34 (v0.1.16.0) — Infrastructure feature contenu non-produit
+   12 templates seedés, endpoints stubs (501), migration content_type
+
+✅ PR #35 (v0.1.17.0) — Plan B Turso TEXT cache → REVERTÉE
+   Hypothèse "Turso TEXT 45MB read = 50ms" INVALIDÉE
+   Mesure réelle: 62s. Apprentissage: Turso optimisé pour rows
+   quelques KB, PAS pour blobs 45MB. Door closed.
+
+✅ PR #36 (v0.1.16.1) — batch_size 100→1000 sur refreshProducts
+   refreshProducts: ~824s estimé worst case → 11s mesuré
+   1 ligne + 1 test + commentaires
+
+✅ PR #37 (v0.1.16.2) — Instrumentation Phase 2
+   Logs Pino sur applyToShopify, addSyncLogsBatch, createNotification
+   À valider via prochain Phase 2 cron naturel
+
+### Mesures finales Phase 1 (cron 06:00 UTC simulé)
+
+| Phase                    | Durée        |
+|--------------------------|--------------|
+| clearStaleLock           | 1.7s         |
+| createSyncRun            | 0.2s         |
+| fetchAll (CSV+snap)      | 75s          |
+| diff + detectChanges     | <0.2s        |
+| refreshProducts          | 0-11s        |
+| rebuildProductTypeCounts | 1.6s         |
+| recordPriceChanges       | 0-1s         |
+| completeSyncRun          | <0.1s        |
+| **TOTAL Phase 1**        | **~80s** ✅  |
+
+### Apprentissages permanents
+
+1. Multiple bottlenecks coexistent — fix d'un peut révéler le suivant
+   ou montrer qu'il n'existait pas (cas applyToShopify mystery)
+2. Empirical measurement > speculation — bench AVANT code (PR #35 leçon)
+3. Local WSL2 ≠ Vercel prod — valider en prod (bench local pour ratios)
+4. Turso super-linéaire sur gros batches (insight réutilisable)
+5. Turso TEXT blobs 45MB = anti-pattern (use Vercel Blob/S3 si besoin)
+6. Pattern PR review ↔ Adversarial = bug catcher éprouvé
+7. Discipline checkpoint humain — Phase F aujourd'hui a sauvé d'un
+   non-bug
+
+### Bugs en backlog post-Bug C
+
+- fetchAll variable (P2): 51-151s daytime — accepter, OK budget
+- Bug B (P2): UX published posts
+- Feature contenu non-produit (P2): écriture 24 prompts FR/EN
+- content-generator timeout (P3): 90s pattern
+- recordPriceChanges N+1 (P3): non-bottleneck en nominal
+
+### État final
+
+- v0.1.16.2 en prod
+- 170/170 tests
+- 0 zombies
+- Bug C: ✅ RÉSOLU après 16 jours
+
+### Pour reprendre demain
+
+Vérifier que cron 06:00 UTC s'est exécuté en <120s. Si oui, Bug C
+définitivement clos historiquement.
+
+```
+cd ~/.gstack/projects/aosom-sync
+git checkout main && git pull origin main --ff-only
+```
+
+---
 ## UPDATE 26 avril fin de session — Bug C partiellement résolu, nouveau goulot identifié
 
 ### Wins de la journée
