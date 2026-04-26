@@ -63,19 +63,10 @@ vi.mock("@/lib/database", () => ({
   getShopifyPushCheckpoint: vi.fn().mockResolvedValue(null),
   saveShopifyPushCheckpoint: vi.fn().mockResolvedValue(undefined),
   getSyncRuns: vi.fn().mockResolvedValue([]),
-  getCachedCSV: vi.fn().mockResolvedValue({
-    raw_text: "SKU\tName\n",
-    bytes_size: 12,
-    fetched_at: new Date(Date.now() - 3_600_000).toISOString(), // 1h ago
-    source_url: "https://feed-us.aosomcdn.com/test.csv",
-  }),
-  getPreviousCachedCSV: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/csv-fetcher", () => ({
   fetchAosomCatalog: vi.fn().mockResolvedValue([]),
-  fetchAosomCatalogRaw: vi.fn().mockResolvedValue({ raw_text: "SKU\tName\n", bytes_size: 12, duration_ms: 500 }),
-  parseTsv: vi.fn().mockReturnValue([]),
 }));
 
 vi.mock("@/lib/shopify-client", () => ({
@@ -135,13 +126,6 @@ function resetAllMocks() {
   vi.mocked(db.getProductsSnapshot).mockResolvedValue(new Map());
   vi.mocked(db.getShopifyPushCheckpoint).mockResolvedValue(null);
   vi.mocked(db.saveShopifyPushCheckpoint).mockResolvedValue(undefined);
-  vi.mocked(db.getCachedCSV).mockResolvedValue({
-    raw_text: "SKU\tName\n",
-    bytes_size: 12,
-    fetched_at: new Date(Date.now() - 3_600_000).toISOString(),
-    source_url: "https://feed-us.aosomcdn.com/test.csv",
-  });
-  vi.mocked(db.getPreviousCachedCSV).mockResolvedValue(null);
   vi.mocked(shopifyClient.fetchAllShopifyProducts).mockResolvedValue([]);
   vi.mocked(diffEngine.computeDiffs).mockReturnValue([]);
   vi.mocked(diffEngine.summarizeDiffs).mockReturnValue({ total: 0, updates: 0, archives: 0, creates: 0, priceChanges: 0, stockChanges: 0, imageChanges: 0, descriptionChanges: 0 });
@@ -186,13 +170,11 @@ describe("runSync — normal completion", () => {
 describe("runSync — mid-flight error → status=failed", () => {
   beforeEach(resetAllMocks);
 
-  it("marks run failed when all CSV sources fail (cache + live fallback)", async () => {
-    const { fetchAosomCatalogRaw } = await import("@/lib/csv-fetcher");
-    vi.mocked(db.getCachedCSV).mockResolvedValueOnce(null);
-    vi.mocked(db.getPreviousCachedCSV).mockResolvedValueOnce(null);
-    vi.mocked(fetchAosomCatalogRaw).mockRejectedValueOnce(new Error("CSV fetch timeout"));
+  it("marks run failed when fetchAosomCatalog throws", async () => {
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    vi.mocked(fetchAosomCatalog).mockRejectedValueOnce(new Error("CSV fetch timeout"));
 
-    await expect(runSync({ shopifyPush: false })).rejects.toThrow("no cached CSV available");
+    await expect(runSync({ shopifyPush: false })).rejects.toThrow("CSV fetch timeout");
 
     expect(db.completeSyncRun).toHaveBeenCalledWith(
       "run-new",
@@ -214,10 +196,8 @@ describe("runSync — mid-flight error → status=failed", () => {
   });
 
   it("never leaves run in status=running after an error", async () => {
-    const { fetchAosomCatalogRaw } = await import("@/lib/csv-fetcher");
-    vi.mocked(db.getCachedCSV).mockResolvedValueOnce(null);
-    vi.mocked(db.getPreviousCachedCSV).mockResolvedValueOnce(null);
-    vi.mocked(fetchAosomCatalogRaw).mockRejectedValueOnce(new Error("network error"));
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    vi.mocked(fetchAosomCatalog).mockRejectedValueOnce(new Error("network error"));
 
     await expect(runSync()).rejects.toThrow();
 
@@ -647,7 +627,7 @@ describe("runSync — diff-before-upsert: refreshProducts called only for change
   });
 
   it("calls refreshProducts with only the changed subset (not all 10k rows)", async () => {
-    const { parseTsv } = await import("@/lib/csv-fetcher");
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
     // Two CSV products: one unchanged, one with a price change
     const unchanged = {
       sku: "SKU-OLD", name: "B", price: 50.00, qty: 3, color: "", size: "",
@@ -657,7 +637,7 @@ describe("runSync — diff-before-upsert: refreshProducts called only for change
       video: "", estimatedArrival: "", outOfStockExpected: "", packageNum: "", boxSize: "", boxWeight: "", pdf: "",
     };
     const changed = { ...unchanged, sku: "SKU-NEW-PRICE", price: 199.99 };
-    vi.mocked(parseTsv).mockReturnValueOnce([unchanged, changed]);
+    vi.mocked(fetchAosomCatalog).mockResolvedValueOnce([unchanged, changed]);
 
     vi.mocked(db.getProductsSnapshot).mockResolvedValueOnce(new Map([
       ["SKU-OLD", { sku: "SKU-OLD", name: "B", price: 50.00, qty: 3, color: "", size: "", product_type: "", image1: "", image2: "", image3: "", image4: "", image5: "", image6: "", image7: "", video: "", description: "", short_description: "", material: "", gtin: "", weight: 0, out_of_stock_expected: "", estimated_arrival: "", shopify_product_id: null }],
@@ -696,105 +676,5 @@ describe("runShopifyPush — notification fired when phase 2 completes with work
       "Shopify push terminé",
       expect.stringContaining("5 produits mis à jour")
     );
-  });
-});
-
-// ─── Scenario 11: CSV source resolution (cache-first) ─────────────────
-
-describe("runSync — CSV source resolution", () => {
-  beforeEach(resetAllMocks);
-
-  it("uses cache_current when available and logs csv_source", async () => {
-    const cachedAt = new Date(Date.now() - 2 * 3_600_000).toISOString(); // 2h ago
-    vi.mocked(db.getCachedCSV).mockResolvedValueOnce({
-      raw_text: "SKU\tName\n",
-      bytes_size: 12,
-      fetched_at: cachedAt,
-      source_url: "https://feed-us.aosomcdn.com/test.csv",
-    });
-
-    await runSync({ shopifyPush: false });
-
-    expect(db.getCachedCSV).toHaveBeenCalledOnce();
-    expect(db.getPreviousCachedCSV).not.toHaveBeenCalled();
-    const { fetchAosomCatalogRaw } = await import("@/lib/csv-fetcher");
-    expect(vi.mocked(fetchAosomCatalogRaw)).not.toHaveBeenCalled();
-  });
-
-  it("warns when cache_current age > 48h but still uses it", async () => {
-    const staleAt = new Date(Date.now() - 50 * 3_600_000).toISOString(); // 50h ago
-    vi.mocked(db.getCachedCSV).mockResolvedValueOnce({
-      raw_text: "SKU\tName\n",
-      bytes_size: 12,
-      fetched_at: staleAt,
-      source_url: "https://feed-us.aosomcdn.com/test.csv",
-    });
-
-    // Should complete (stale cache is used, not discarded)
-    await expect(runSync({ shopifyPush: false })).resolves.toBeDefined();
-    // getPreviousCachedCSV not called — stale current is still preferred over previous
-    expect(db.getPreviousCachedCSV).not.toHaveBeenCalled();
-  });
-
-  it("falls back to cache_previous when current is null", async () => {
-    const { parseTsv } = await import("@/lib/csv-fetcher");
-    vi.mocked(db.getCachedCSV).mockResolvedValueOnce(null);
-    vi.mocked(db.getPreviousCachedCSV).mockResolvedValueOnce({
-      raw_text: "SKU\tName\nOLD-001\tOld Product\n",
-      bytes_size: 30,
-      fetched_at: new Date(Date.now() - 12 * 3_600_000).toISOString(),
-      source_url: "https://feed-us.aosomcdn.com/test.csv",
-    });
-
-    await runSync({ shopifyPush: false });
-
-    expect(db.getCachedCSV).toHaveBeenCalledOnce();
-    expect(db.getPreviousCachedCSV).toHaveBeenCalledOnce();
-    // parseTsv called with the previous slot raw text
-    expect(vi.mocked(parseTsv)).toHaveBeenCalledWith("SKU\tName\nOLD-001\tOld Product\n");
-    const { fetchAosomCatalogRaw } = await import("@/lib/csv-fetcher");
-    expect(vi.mocked(fetchAosomCatalogRaw)).not.toHaveBeenCalled();
-  });
-
-  it("falls back to live fetch when both caches are empty", async () => {
-    const { fetchAosomCatalogRaw } = await import("@/lib/csv-fetcher");
-    vi.mocked(db.getCachedCSV).mockResolvedValueOnce(null);
-    vi.mocked(db.getPreviousCachedCSV).mockResolvedValueOnce(null);
-    vi.mocked(fetchAosomCatalogRaw).mockResolvedValueOnce({
-      raw_text: "SKU\tName\n",
-      bytes_size: 12,
-      duration_ms: 80_000,
-    });
-
-    await runSync({ shopifyPush: false });
-
-    expect(vi.mocked(fetchAosomCatalogRaw)).toHaveBeenCalledOnce();
-  });
-
-  it("throws with clear message when all CSV sources fail", async () => {
-    const { fetchAosomCatalogRaw } = await import("@/lib/csv-fetcher");
-    vi.mocked(db.getCachedCSV).mockResolvedValueOnce(null);
-    vi.mocked(db.getPreviousCachedCSV).mockResolvedValueOnce(null);
-    vi.mocked(fetchAosomCatalogRaw).mockRejectedValueOnce(new Error("CSV fetch exceeded 240s"));
-
-    await expect(runSync({ shopifyPush: false })).rejects.toThrow("no cached CSV available");
-  });
-
-  it("parseTsv produces same AosomProduct[] regardless of CSV source", async () => {
-    const { parseTsv } = await import("@/lib/csv-fetcher");
-    const fakeProduct = {
-      sku: "ABC-123", name: "Test", price: 99.99, qty: 5, color: "", size: "",
-      shortDescription: "", description: "", images: [],
-      gtin: "", weight: 0, dimensions: { length: 0, width: 0, height: 0 },
-      productType: "", category: "", brand: "", material: "", psin: "", sin: "",
-      video: "", estimatedArrival: "", outOfStockExpected: "", packageNum: "", boxSize: "", boxWeight: "", pdf: "",
-    };
-    vi.mocked(parseTsv).mockReturnValueOnce([fakeProduct]);
-
-    // Cache path
-    await runSync({ shopifyPush: false });
-    const calledWith = vi.mocked(parseTsv).mock.calls[0][0];
-    // parseTsv was called with the raw_text from cache
-    expect(typeof calledWith).toBe("string");
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "fs";
 import path from "path";
-import { parseTsv, fetchAosomCatalog, fetchAosomCatalogRaw } from "@/lib/csv-fetcher";
+import { parseTsv, fetchAosomCatalog } from "@/lib/csv-fetcher";
 
 const FIXTURE = readFileSync(
   path.join(__dirname, "fixtures/sample.csv"),
@@ -156,78 +156,6 @@ describe("fetchAosomCatalog", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     await expect(fetchAosomCatalog()).rejects.toThrow("HTTP 503");
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("fetchAosomCatalogRaw", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
-
-  it("returns raw text, bytes_size, and duration_ms on success", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: true, text: async () => "raw csv content" })
-    );
-
-    const result = await fetchAosomCatalogRaw();
-    expect(result.raw_text).toBe("raw csv content");
-    expect(result.bytes_size).toBeGreaterThan(0);
-    expect(result.duration_ms).toBeGreaterThanOrEqual(0);
-  });
-
-  it("throws with default 240s message when body stream hangs", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation((_url: string, options: RequestInit) => {
-        const signal = options?.signal as AbortSignal | undefined;
-        return {
-          ok: true,
-          text: () =>
-            new Promise<string>((_resolve, reject) => {
-              signal?.addEventListener("abort", () => {
-                reject(new DOMException("The operation was aborted.", "AbortError"));
-              });
-            }),
-        };
-      })
-    );
-
-    const assertion = expect(fetchAosomCatalogRaw()).rejects.toThrow("240s");
-    await vi.advanceTimersByTimeAsync(240_001);
-    await assertion;
-  });
-
-  it("respects custom timeoutMs parameter", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockImplementation((_url: string, options: RequestInit) => {
-        const signal = options?.signal as AbortSignal | undefined;
-        return new Promise<never>((_resolve, reject) => {
-          signal?.addEventListener("abort", () => {
-            reject(new DOMException("The operation was aborted.", "AbortError"));
-          });
-        });
-      })
-    );
-
-    const assertion = expect(fetchAosomCatalogRaw(10_000)).rejects.toThrow("10s");
-    await vi.advanceTimersByTimeAsync(10_001);
-    await assertion;
-  });
-
-  it("throws on HTTP 5xx without retry — single fetch call", async () => {
-    const fetchSpy = vi.fn().mockResolvedValue({ ok: false, status: 503 });
-    vi.stubGlobal("fetch", fetchSpy);
-
-    await expect(fetchAosomCatalogRaw()).rejects.toThrow("HTTP 503");
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });
