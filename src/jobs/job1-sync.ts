@@ -7,7 +7,7 @@
  * 4. Apply diffs to Shopify (prix, stock, images, archives)
  * 5. Trigger social drafts for significant price drops
  */
-import { fetchAosomCatalog } from "@/lib/csv-fetcher";
+import { fetchAosomCatalog, fetchAosomCatalogRaw, parseTsv } from "@/lib/csv-fetcher";
 import { mergeVariants } from "@/lib/variant-merger";
 import { computeDiffs, summarizeDiffs } from "@/lib/diff-engine";
 import { SYNC } from "@/lib/config";
@@ -36,6 +36,8 @@ import {
   getAllProductsAsAosom,
   getShopifyPushCheckpoint,
   saveShopifyPushCheckpoint,
+  getCachedCSV,
+  getPreviousCachedCSV,
   type ShopifyPushCheckpoint,
   type ProductSnapshot,
 } from "@/lib/database";
@@ -273,17 +275,66 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
   const shopifyPush = options.shopifyPush ?? true;
 
   try {
-    // Phase 3: Fetch CSV + DB snapshot in parallel (+ Shopify if pushing this phase)
-    log(shopifyPush ? "Fetch CSV Aosom + snapshot DB + produits Shopify..." : "Fetch CSV Aosom + snapshot DB...");
+    // Phase 3: Resolve CSV source (cache-first) + DB snapshot in parallel
+    // Cache-first: getCachedCSV() costs ~50ms vs ~80s live fetch at 06:00 UTC.
+    const t0CsvRes = Date.now();
+    let csvRawText: string;
+    let csvSource: "cache_current" | "cache_previous" | "live_fallback" = "cache_current";
+    let csvAgeHours = 0;
+
+    const cachedCurrent = await getCachedCSV();
+    if (cachedCurrent) {
+      csvRawText = cachedCurrent.raw_text;
+      csvAgeHours = (Date.now() - new Date(cachedCurrent.fetched_at).getTime()) / 3_600_000;
+      csvSource = "cache_current";
+      if (csvAgeHours > 48) {
+        log("WARN: CSV cache stale > 48h — pre-cache cron may be failing",
+          { phase: "csv_source", source: "cache_current", age_hours: csvAgeHours, severity: "warn" });
+      } else {
+        log("Using current cached CSV",
+          { phase: "csv_source", source: "cache_current", age_hours: csvAgeHours, bytes_size: cachedCurrent.bytes_size });
+      }
+    } else {
+      const cachedPrevious = await getPreviousCachedCSV();
+      if (cachedPrevious) {
+        csvRawText = cachedPrevious.raw_text;
+        csvAgeHours = (Date.now() - new Date(cachedPrevious.fetched_at).getTime()) / 3_600_000;
+        csvSource = "cache_previous";
+        log("WARN: Using PREVIOUS cached CSV (current slot empty or failed)",
+          { phase: "csv_source", source: "cache_previous", age_hours: csvAgeHours, severity: "warn" });
+      } else {
+        csvSource = "live_fallback";
+        log("WARN: No cache available, falling back to live Aosom fetch",
+          { phase: "csv_source", source: "live_fallback", severity: "warn" });
+        try {
+          const liveResult = await fetchAosomCatalogRaw(240_000);
+          csvRawText = liveResult.raw_text;
+          csvAgeHours = 0;
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          log("ERROR: Both cache and live fetch failed",
+            { phase: "csv_source", source: "live_fallback", error: errorMessage });
+          throw new Error(
+            `Phase 1 cannot proceed: no cached CSV available and live fetch failed (${errorMessage})`
+          );
+        }
+      }
+    }
+
+    timing.csvResolution = Date.now() - t0CsvRes;
+
+    log(shopifyPush ? "Parse CSV + snapshot DB + produits Shopify..." : "Parse CSV + snapshot DB...");
     const t0Fetch = Date.now();
     const [aosomProducts, snapshot, shopifyProducts] = await Promise.all([
-      fetchAosomCatalog(),
+      Promise.resolve(parseTsv(csvRawText!)),
       getProductsSnapshot(),
       shopifyPush ? fetchAllShopifyProducts() : Promise.resolve([] as Awaited<ReturnType<typeof fetchAllShopifyProducts>>),
     ]);
     timing.fetchAll = Date.now() - t0Fetch;
     log(`${aosomProducts.length} produits CSV, ${snapshot.size} en DB${shopifyPush ? `, ${shopifyProducts.length} Shopify` : ""}`, {
       phase: "fetchAll", duration_ms: timing.fetchAll,
+      csv_resolution_ms: timing.csvResolution,
+      csv_source: csvSource, csv_age_hours: csvAgeHours,
       csv_count: aosomProducts.length, snapshot_count: snapshot.size,
       shopify_count: shopifyProducts.length,
     });
