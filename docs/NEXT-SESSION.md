@@ -1,6 +1,62 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 02 mai (3) — Chantier A1 COMPLET ✅ — v0.1.18.3 region fix en prod
+
+### Diagnostic région Vercel function vs Blob store (02 mai 2026, ~22:30-22:45 UTC)
+
+**Hypothèse confirmée**: mismatch région = root cause du 30s body read.
+
+| | Avant (iad1) | Après (yul1) |
+|---|---|---|
+| x-vercel-id | `yul1::iad1` | `yul1::yul1` |
+| Précache download Aosom CDN | 9.5s | **2.3s** (4×) |
+| Blob fetch depuis function | ~30s (cross-region) | **~1-2s** (co-localisé) |
+| fetchAll (Shopify dominé) | 104s | **70-99s** (variable) |
+| Phase 1 total (0 changes) | 287s | **78s** |
+
+**Fix**: `"regions": ["yul1"]` dans `vercel.json`. Commit `e766276` sur main.
+
+**Découverte clé**: `fetchAll` est dominé par Shopify API pagination (~70-99s), pas par le blob.
+La vraie valeur du region fix = supprimer le risque de 30s blob + accélérer le fallback CDN.
+
+**À surveiller**: cron 06:00 UTC — Phase 1 doit completer <250s même avec des changements.
+
+---
+## UPDATE 02 mai (2) — Bug C RÉSOLU ✅ — v0.1.18.2 en prod, Phase 1 completed
+
+### Phase 5 validation finale (02 mai 2026, ~19:53 UTC)
+
+**Résultat**: PR #40 (v0.1.18.2 hotfix BLOB_FETCH_TIMEOUT_MS 60s) mergée et validée.
+
+Phase 1 manuelle déclenchée:
+- Status: `completed` ✅ (pas zombie)
+- Elapsed: **287s** (dans la limite 300s Vercel)
+- Products synced: 10,387
+- Price updates: 189, stock changes: 1,005
+- Health: `ok` ✅
+
+Pre-cache seed juste avant: 43.2 MB en 9.5s download, 1.3s upload.
+
+**Timeline empirique BLOB_FETCH_TIMEOUT_MS:**
+- 10s → fetchAll 94.7s (blob timeout 10s + CDN ~85s) → zombie
+- 30s → fetchAll 81.9s (blob timeout 30s + CDN ~52s) → zombie  
+- 60s → fetchAll <300s → **COMPLETED** ✅
+
+**Root cause confirmée**: `AbortSignal.timeout()` couvre TOUT le body read.
+45MB à ~1.5 MB/s depuis Vercel function = ~30s body read seul.
+60s = 2× safety margin → blob hit ou CDN complète dans les temps.
+
+**À surveiller**: Cron 06:00 UTC le 03 mai pour confirmer Bug C résolu
+sur plusieurs nuits.
+
+### Issue à traiter (prochaine session, non urgent)
+
+`import/queue` (`maxDuration=60`) appelle `fetchAosomCatalog()`. Si blob
+unavailable → timeout au 60s (pré-existant, non aggravé par ce hotfix).
+Fix futur: lire depuis `catalog_snapshots` DB dans `queueForImport()`.
+
+---
 ## UPDATE 02 mai — Bug C PARTIELLEMENT résolu — hotfix requis avant cron 06:00 UTC 🔧
 
 ### Phase 5 validation prod (02 mai 2026)
