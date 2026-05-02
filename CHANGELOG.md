@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.19.0] - 2026-05-02
+
+### Fixed
+- **Bug B: UX published posts** — buttons remained clickable after publish,
+  allowing accidental re-publish or edit of posts already on Facebook/Instagram
+- Edit, Photos, Reject, Publish now disabled when status='published'
+- Delete on published draft requires confirmation (warns about history loss;
+  FB post stays online)
+
+### Added
+- "· Publié le {date}" badge in draft card header (visible at glance)
+- Helpers: isPublished(), formatPublishedAt() with fr-CA locale
+
+### Changed
+- Existing publishedAt timestamp now uses fr-CA format (was browser-dependent)
+- 14 new unit tests (logic helpers, 199/199 total)
+
+### Notes
+- Tests written as pure logic units (no @testing-library/react in project)
+- Asymmetric layout on rejected drafts: backlog P3
+
 ## [0.1.18.3] - 2026-05-02 (perf)
 
 ### Changed
