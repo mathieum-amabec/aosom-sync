@@ -10,12 +10,20 @@ All notable changes to Aosom Sync will be documented in this file.
 - Edit, Photos, Reject, Publish now disabled when status='published'
 - Delete on published draft requires confirmation (warns about history loss;
   FB post stays online)
+- Publish panel now closes when draft transitions to published mid-session
+  (prevented potential double-post to Facebook via channel buttons)
+- Detail-area "Publié le" badge now guarded by isPublished() — was showing
+  for any draft with publishedAt set regardless of status
+- `publishedAt` guards use `!== null` instead of falsy check — epoch timestamp
+  (0) no longer silently hides the badge
 
 ### Added
 - "· Publié le {date}" badge in draft card header (visible at glance)
 - Helpers: isPublished(), formatPublishedAt() with fr-CA locale
 
 ### Changed
+- `formatPublishedAt` uses `toLocaleString` (ECMA-402 compliant) instead of
+  `toLocaleDateString` with time options (non-standard mixing of date+time opts)
 - Existing publishedAt timestamp now uses fr-CA format (was browser-dependent)
 - 14 new unit tests (logic helpers, 199/199 total)
 
