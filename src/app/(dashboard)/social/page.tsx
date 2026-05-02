@@ -54,6 +54,19 @@ const CHANNEL_LABELS: Record<string, { short: string; long: string; lang: "FR" |
 
 const DEFAULT_CHANNELS: string[] = ["fb_ameublo", "fb_furnish", "ig_ameublo"];
 
+function isPublished(draft: Draft): boolean {
+  return draft.status === "published";
+}
+
+function formatPublishedAt(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleString("fr-CA", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function ChannelBadge({ channelKey, state }: { channelKey: string; state: ChannelState }) {
   const label = CHANNEL_LABELS[channelKey]?.short || channelKey;
   const color =
@@ -347,6 +360,11 @@ export default function SocialPage() {
                           {TRIGGER_LABELS[draft.triggerType] || draft.triggerType}
                         </span>
                         <span className="text-xs text-gray-600">{draft.sku}</span>
+                        {isPublished(draft) && draft.publishedAt !== null && (
+                          <span className="text-xs text-purple-300">
+                            · Publié le {formatPublishedAt(draft.publishedAt)}
+                          </span>
+                        )}
 
                         {hasEn && (
                           <div className="ml-auto flex gap-1 bg-gray-800 rounded-md p-0.5">
@@ -502,7 +520,7 @@ export default function SocialPage() {
                         </button>
                       )}
 
-                      {publishId === draft.id && (
+                      {publishId === draft.id && !isPublished(draft) && (
                         <div className="mt-3 p-3 bg-gray-950 border border-gray-800 rounded-lg">
                           <p className="text-xs text-gray-400 mb-2">Publish to:</p>
                           <div className="flex flex-col gap-1">
@@ -566,9 +584,9 @@ export default function SocialPage() {
                           Scheduled: {new Date(draft.scheduledAt * 1000).toLocaleString()}
                         </p>
                       )}
-                      {draft.publishedAt && (
+                      {isPublished(draft) && draft.publishedAt !== null && (
                         <p className="text-xs text-purple-400 mt-1">
-                          Published: {new Date(draft.publishedAt * 1000).toLocaleString()}
+                          Publié le {formatPublishedAt(draft.publishedAt)}
                         </p>
                       )}
                     </div>
@@ -596,7 +614,8 @@ export default function SocialPage() {
                             setPublishId(draft.id);
                             setPublishChannels(new Set(activeChannels));
                           }}
-                          className="px-3 py-1.5 bg-purple-600/20 text-purple-400 text-xs rounded-lg hover:bg-purple-600/30 border border-purple-800/50"
+                          disabled={isPublished(draft)}
+                          className={`px-3 py-1.5 bg-purple-600/20 text-purple-400 text-xs rounded-lg border border-purple-800/50 ${isPublished(draft) ? "opacity-40 cursor-not-allowed" : "hover:bg-purple-600/30"}`}
                         >
                           Publish
                         </button>
@@ -607,7 +626,8 @@ export default function SocialPage() {
                             setEditTextEn(draft.postTextEn || "");
                             setEditTab("fr");
                           }}
-                          className="px-3 py-1.5 bg-gray-700/50 text-gray-400 text-xs rounded-lg hover:bg-gray-700 border border-gray-700"
+                          disabled={isPublished(draft)}
+                          className={`px-3 py-1.5 bg-gray-700/50 text-gray-400 text-xs rounded-lg border border-gray-700 ${isPublished(draft) ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-700"}`}
                         >
                           Edit
                         </button>
@@ -616,14 +636,27 @@ export default function SocialPage() {
                             setPhotoEditId(draft.id);
                             setPhotoEditUrls([...galleryUrls]);
                           }}
-                          className="px-3 py-1.5 bg-gray-700/50 text-gray-400 text-xs rounded-lg hover:bg-gray-700 border border-gray-700"
+                          disabled={isPublished(draft)}
+                          className={`px-3 py-1.5 bg-gray-700/50 text-gray-400 text-xs rounded-lg border border-gray-700 ${isPublished(draft) ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-700"}`}
                         >
                           Photos
                         </button>
-                        <button onClick={() => doAction("reject", draft.id)} className="px-3 py-1.5 bg-red-600/10 text-red-400 text-xs rounded-lg hover:bg-red-600/20 border border-red-800/50">
+                        <button
+                          onClick={() => doAction("reject", draft.id)}
+                          disabled={isPublished(draft)}
+                          className={`px-3 py-1.5 bg-red-600/10 text-red-400 text-xs rounded-lg border border-red-800/50 ${isPublished(draft) ? "opacity-40 cursor-not-allowed" : "hover:bg-red-600/20"}`}
+                        >
                           Reject
                         </button>
-                        <button onClick={() => doAction("delete", draft.id)} className="px-3 py-1.5 text-gray-600 text-xs rounded-lg hover:text-red-400">
+                        <button
+                          onClick={() => {
+                            const msg = isPublished(draft)
+                              ? "Supprimer ce draft publié? L'historique de publication sera perdu (le post Facebook reste en ligne)."
+                              : "Supprimer ce draft?";
+                            if (window.confirm(msg)) doAction("delete", draft.id);
+                          }}
+                          className="px-3 py-1.5 text-gray-600 text-xs rounded-lg hover:text-red-400"
+                        >
                           Delete
                         </button>
                       </div>

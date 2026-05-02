@@ -69,24 +69,6 @@
 
 ---
 
-## P1 — Social Media bugs identifiés 23 avril (en attente)
-
-### Bug B — UX feedback post-publication
-
-**Symptôme observé:**
-- Quand un post passe en `status="published"`, les boutons Edit/Photos/Reject/Delete restent cliquables identiquement aux autres status
-- L'utilisateur ne distingue pas visuellement un post finalisé vs un post encore modifiable
-- Pas de label "Posted on Facebook at HH:MM" ou équivalent visible
-
-**Améliorations souhaitées:**
-1. Quand `status="published"` : griser ou cacher Edit, Photos, Reject, Delete
-2. Afficher en grand "✅ Published 23/04/2026 14:32" sur la card
-3. Distinction visuelle nette (couleur de fond, bordure, badge plus gros)
-
-**Branche suggérée:** `feat/social-published-state-ux`
-**Estimation:** 1h
-**Priorité:** P2 (UX, pas data integrity, mais user-facing important)
-
 ---
 
 ## Social Media / Job 4
@@ -172,6 +154,14 @@ Générer automatiquement des images brandées professionnelles pour chaque draf
 ---
 
 ## Completed
+
+### Bug B — UX feedback post-publication
+**Completed:** v0.1.19.0 (2026-05-02)
+- Edit/Photos/Reject/Publish disabled when status='published'
+- "· Publié le {date}" badge in draft card header (fr-CA locale)
+- Delete on published draft shows confirmation dialog (warns FB post stays live)
+- Publish panel auto-closes when draft transitions to published mid-session
+- P3 backlog: investigate whether publishedAt can exist on non-published drafts (DB inconsistency?)
 
 ### Bug A — Scheduled publications ne fire pas
 **Completed:** v0.1.15.0 (2026-04-25)
