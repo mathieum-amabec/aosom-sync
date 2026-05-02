@@ -310,3 +310,57 @@ describe("clearStaleLockIfNeeded (direct SQL)", () => {
     expect(result.rows[0].status).toBe("running");
   });
 });
+
+describe("csv_blob_cache — SQL logic (direct SQL)", () => {
+  let db: Client;
+
+  const CREATE_TABLE = `CREATE TABLE IF NOT EXISTS csv_blob_cache (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    blob_url TEXT NOT NULL,
+    blob_key TEXT NOT NULL,
+    csv_size_bytes INTEGER NOT NULL,
+    fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+    upload_duration_ms INTEGER NOT NULL DEFAULT 0,
+    download_duration_ms INTEGER NOT NULL DEFAULT 0
+  )`;
+
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  it("returns no rows when table is empty", async () => {
+    await db.execute(CREATE_TABLE);
+    const { rows } = await db.execute(`SELECT * FROM csv_blob_cache WHERE id = 1`);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("upserts row and updates on conflict", async () => {
+    await db.execute(CREATE_TABLE);
+    const upsert = (url: string) => db.execute({
+      sql: `INSERT INTO csv_blob_cache (id, blob_url, blob_key, csv_size_bytes, upload_duration_ms, download_duration_ms)
+            VALUES (1, ?, 'csv/key', 1000, 100, 200)
+            ON CONFLICT(id) DO UPDATE SET blob_url = excluded.blob_url, fetched_at = datetime('now')`,
+      args: [url],
+    });
+
+    await upsert("https://blob.example.com/v1.csv");
+    await upsert("https://blob.example.com/v2.csv");
+
+    const { rows } = await db.execute(`SELECT * FROM csv_blob_cache WHERE id = 1`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].blob_url).toBe("https://blob.example.com/v2.csv");
+  });
+});
+
+describe("isCacheStale (pure function)", () => {
+  it("returns false for a timestamp less than 12 hours ago", async () => {
+    const { isCacheStale } = await import("@/lib/database");
+    const recentUtc = new Date(Date.now() - 6 * 3600 * 1000).toISOString().replace("Z", "");
+    expect(isCacheStale(recentUtc)).toBe(false);
+  });
+
+  it("returns true for a timestamp older than 12 hours", async () => {
+    const { isCacheStale } = await import("@/lib/database");
+    const oldUtc = new Date(Date.now() - 13 * 3600 * 1000).toISOString().replace("Z", "");
+    expect(isCacheStale(oldUtc)).toBe(true);
+  });
+});
