@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.18.2] - 2026-05-02 (hotfix)
+
+### Fixed
+- **Blob fetch timeout still too short** — `BLOB_FETCH_TIMEOUT_MS` 30s → 60s
+- Empirical 02 mai: 30s timeout also triggers live CDN fallback (fetchAll 81.9s)
+- Root cause: `AbortSignal.timeout()` covers full body read; 45MB at ~1.5 MB/s
+  (Vercel function ↔ Blob throughput) = ~30s body read alone; 60s provides 2× margin
+
 ## [0.1.18.1] - 2026-05-02 (hotfix)
 
 ### Fixed
