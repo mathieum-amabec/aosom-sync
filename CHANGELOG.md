@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.18.3] - 2026-05-02 (perf)
+
+### Changed
+- **Pin Vercel functions to `yul1` (Montréal)** — co-locate with Blob store
+- Before: functions ran in `iad1` (US East), blob in `yul1` → 30s cross-region body read
+- After: `yul1::yul1` → blob fetch ~1-2s, Aosom CDN download 9.5s → 2.3s (4×)
+- fetchAll still dominated by Shopify API pagination (~70-99s), but blob no longer a risk
+
 ## [0.1.18.2] - 2026-05-02 (hotfix)
 
 ### Fixed
