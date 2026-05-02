@@ -1,6 +1,101 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 02 mai — Bug C PARTIELLEMENT résolu — hotfix requis avant cron 06:00 UTC 🔧
+
+### Phase 5 validation prod (02 mai 2026)
+
+**Résumé**: PR #38 (v0.1.18.0) mergée, pre-cache blob fonctionnel, MAIS Phase 1 
+toujours en timeout 504 à cause d'un bug dans le fix adversarial (F11).
+
+### Friction du jour: Vercel Blob "Private" vs "Public"
+
+Store créé initialement en mode Private. Solution: création nouveau store 
+`aosom-csv-public` (Public, YUL1), redeploy Vercel pour appliquer nouveau 
+BLOB_READ_WRITE_TOKEN.
+
+Pre-cache ✅: 43.2 MB en 7.8s (download Aosom CDN 4.4s, upload Blob 1.4s)
+csv_blob_cache DB row: blob_url = `.public.blob.vercel-storage.com` ✅
+
+### Bug critique découvert: BLOB_FETCH_TIMEOUT_MS = 10s trop court
+
+**Root cause**: Le fix adversarial F11 a réduit BLOB_FETCH_TIMEOUT_MS de 60s 
+à 10s. Mais le blob de 45MB téléchargé DEPUIS une Vercel function dépasse 10s. 
+
+Preuve timing Phase 1 (run 8fa301c3, 02 mai 19:07 UTC):
+- fetchAll: 94,697ms = blob timeout (10s) + live CDN fallback (~85s)
+- diff: 45ms, detectChanges: 33ms
+- refreshProducts: killed par Vercel à 300s (zombie)
+- Résultat: 504 Gateway Timeout
+
+Blob URL accessible localement en 1.6s @ 28 MB/s. Mais depuis Vercel function,
+throughput différent — possiblement 4-5 MB/s → 45MB prend 9-11s → timeout 10s.
+
+### Hotfix requis — UNE LIGNE DE CODE
+
+Dans `src/lib/csv-fetcher.ts` ligne 8:
+```
+// AVANT:
+const BLOB_FETCH_TIMEOUT_MS = 10_000;
+
+// APRÈS:
+const BLOB_FETCH_TIMEOUT_MS = 30_000;  // 30s covers 45MB at 1.5 MB/s minimum
+```
+
+30s est conservateur mais safe: si le blob prend >30s, c'est anormal et le
+live fallback (240s budget) est préférable. Le sync budget (300s) absorbe
+30s + parseTsv (~3s) + refreshProducts (~15s) confortablement.
+
+### À faire IMMÉDIATEMENT en début de prochaine session
+
+1. Hotfix: `BLOB_FETCH_TIMEOUT_MS = 10_000` → `30_000` dans csv-fetcher.ts
+2. Aussi mettre à jour le test "AbortError fallback" pour refléter la nouvelle valeur
+3. Version bump 0.1.18.0 → 0.1.18.1 (patch hotfix)
+4. PR + merge + redeploy
+5. Re-trigger Phase 1 pour validation
+
+### État au 02 mai
+
+- v0.1.18.0 en prod (blob cache actif, hotfix BLOB_FETCH_TIMEOUT en attente)
+- Store Vercel Blob `aosom-csv-public` actif, csv_blob_cache row OK
+- 185/185 tests
+- 0 zombies après cleanup  
+- Bug C: 🔧 PARTIELLEMENT résolu — blob cache en place, hotfix timeout requis
+
+### Validation cron 06:00 UTC 03 mai — ATTENTE CRITIQUE
+
+Sans le hotfix, le cron de ce soir va probablement timeout encore.
+Avec le hotfix appliqué ce soir: le cron de demain devrait compléter en <200s.
+
+Query post-cron:
+```sql
+SELECT id, status, total_products,
+  CAST((julianday(completed_at) - julianday(started_at)) * 86400 AS INTEGER) as duration_s,
+  timing_ms
+FROM sync_runs 
+WHERE date(started_at) = date('now')
+  AND time(started_at) BETWEEN '06:00:00' AND '06:05:00'
+ORDER BY started_at DESC LIMIT 1;
+```
+
+### Backlog post-Bug C
+
+- Bug B (P2): UX published posts (boutons, badge "Posted at")
+- Feature contenu non-produit (P2): écriture 24 prompts FR/EN templates
+- content-generator timeout (P3): 90s pattern
+- recordPriceChanges N+1 (P3): non-bottleneck nominal
+
+### Pour reprendre demain
+
+```bash
+cd ~/.gstack/projects/aosom-sync
+git checkout main && git pull origin main --ff-only
+```
+
+Dire à Claude: "Appliquer hotfix BLOB_FETCH_TIMEOUT_MS 10s→30s dans 
+csv-fetcher.ts, bump 0.1.18.1, PR + merge + validate Phase 1."
+
+---
 ## UPDATE 26 avril fin de session — Bug C DÉFINITIVEMENT RÉSOLU 🎉
 
 ### Saga Bug C: 16 jours, 5 PRs, résolution complète
