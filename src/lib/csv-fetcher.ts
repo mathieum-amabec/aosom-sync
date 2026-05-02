@@ -5,8 +5,9 @@ import { getCachedBlobUrl } from "./database";
 
 /** Covers headers + body stream — 60s margin under Vercel 300s function limit */
 const FETCH_TIMEOUT_MS = 240_000;
-// Blob is Vercel CDN — should respond in < 5s. 10s gives headroom before live fallback.
-const BLOB_FETCH_TIMEOUT_MS = 10_000;
+// 30s = 3× safety margin over observed Vercel function ↔ Blob throughput.
+// Empirical 02 mai: 10s caused fallback to live CDN (504). At ~4-5 MB/s for 45MB, typical fetch ~10s.
+const BLOB_FETCH_TIMEOUT_MS = 30_000;
 
 function isAbortError(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { name?: string }).name === "AbortError";

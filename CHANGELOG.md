@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.18.1] - 2026-05-02 (hotfix)
+
+### Fixed
+- **Blob fetch timeout too aggressive** — `BLOB_FETCH_TIMEOUT_MS` 10s → 30s
+- Empirical post-deploy: Vercel function ↔ Blob throughput ~4-5 MB/s on 45MB CSV,
+  typical fetch ~10s, causing 10s timeout to trigger live CDN fallback on every Phase 1
+- Fix restores the pre-cache benefit: Phase 1 fetchAll expected <30s instead of ~95s
+
 ## [0.1.18.0] - 2026-05-02
 
 ### Fixed (Bug C definitive)
