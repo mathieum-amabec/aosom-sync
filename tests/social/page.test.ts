@@ -15,7 +15,7 @@ function isPublished(draft: { status: string }): boolean {
 }
 
 function formatPublishedAt(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toLocaleDateString("fr-CA", {
+  return new Date(unixSeconds * 1000).toLocaleString("fr-CA", {
     day: "numeric",
     month: "short",
     hour: "2-digit",

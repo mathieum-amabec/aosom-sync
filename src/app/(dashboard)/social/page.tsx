@@ -59,7 +59,7 @@ function isPublished(draft: Draft): boolean {
 }
 
 function formatPublishedAt(unixSeconds: number): string {
-  return new Date(unixSeconds * 1000).toLocaleDateString("fr-CA", {
+  return new Date(unixSeconds * 1000).toLocaleString("fr-CA", {
     day: "numeric",
     month: "short",
     hour: "2-digit",
@@ -360,7 +360,7 @@ export default function SocialPage() {
                           {TRIGGER_LABELS[draft.triggerType] || draft.triggerType}
                         </span>
                         <span className="text-xs text-gray-600">{draft.sku}</span>
-                        {isPublished(draft) && draft.publishedAt && (
+                        {isPublished(draft) && draft.publishedAt !== null && (
                           <span className="text-xs text-purple-300">
                             · Publié le {formatPublishedAt(draft.publishedAt)}
                           </span>
@@ -520,7 +520,7 @@ export default function SocialPage() {
                         </button>
                       )}
 
-                      {publishId === draft.id && (
+                      {publishId === draft.id && !isPublished(draft) && (
                         <div className="mt-3 p-3 bg-gray-950 border border-gray-800 rounded-lg">
                           <p className="text-xs text-gray-400 mb-2">Publish to:</p>
                           <div className="flex flex-col gap-1">
@@ -584,7 +584,7 @@ export default function SocialPage() {
                           Scheduled: {new Date(draft.scheduledAt * 1000).toLocaleString()}
                         </p>
                       )}
-                      {draft.publishedAt && (
+                      {isPublished(draft) && draft.publishedAt !== null && (
                         <p className="text-xs text-purple-400 mt-1">
                           Publié le {formatPublishedAt(draft.publishedAt)}
                         </p>
