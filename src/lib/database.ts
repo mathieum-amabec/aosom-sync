@@ -149,6 +149,16 @@ async function _initSchemaImpl(): Promise<void> {
       error_message TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`,
+    // Single-row cache for the pre-fetched Aosom CSV blob. CHECK(id=1) enforces singleton.
+    `CREATE TABLE IF NOT EXISTS csv_blob_cache (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      blob_url TEXT NOT NULL,
+      blob_key TEXT NOT NULL,
+      csv_size_bytes INTEGER NOT NULL,
+      fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+      upload_duration_ms INTEGER NOT NULL DEFAULT 0,
+      download_duration_ms INTEGER NOT NULL DEFAULT 0
+    )`,
   ];
 
   // Batch all schema + legacy table creation in a single round trip
@@ -1335,6 +1345,62 @@ export async function getShopifyPushCheckpoint(): Promise<ShopifyPushCheckpoint 
   } catch {
     return null;
   }
+}
+
+// ─── CSV Blob Cache ────────────────────────────────────────────────────────────
+
+export interface CsvBlobCache {
+  blob_url: string;
+  blob_key: string;
+  csv_size_bytes: number;
+  fetched_at: string;
+  upload_duration_ms: number;
+  download_duration_ms: number;
+}
+
+export async function getCachedBlobUrl(): Promise<CsvBlobCache | null> {
+  const db = getDb();
+  await initSchema();
+  const { rows } = await db.execute({
+    sql: `SELECT blob_url, blob_key, csv_size_bytes, fetched_at,
+                 upload_duration_ms, download_duration_ms
+          FROM csv_blob_cache WHERE id = 1`,
+    args: [],
+  });
+  if (!rows[0]) return null;
+  const r = rows[0] as unknown as Record<string, unknown>;
+  return {
+    blob_url: String(r.blob_url),
+    blob_key: String(r.blob_key),
+    csv_size_bytes: Number(r.csv_size_bytes),
+    fetched_at: String(r.fetched_at),
+    upload_duration_ms: Number(r.upload_duration_ms),
+    download_duration_ms: Number(r.download_duration_ms),
+  };
+}
+
+export async function upsertBlobCache(cache: Omit<CsvBlobCache, "fetched_at">): Promise<void> {
+  const db = getDb();
+  await initSchema();
+  await db.execute({
+    sql: `INSERT INTO csv_blob_cache
+          (id, blob_url, blob_key, csv_size_bytes, upload_duration_ms, download_duration_ms)
+          VALUES (1, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            blob_url = excluded.blob_url,
+            blob_key = excluded.blob_key,
+            csv_size_bytes = excluded.csv_size_bytes,
+            upload_duration_ms = excluded.upload_duration_ms,
+            download_duration_ms = excluded.download_duration_ms,
+            fetched_at = datetime('now')`,
+    args: [cache.blob_url, cache.blob_key, cache.csv_size_bytes, cache.upload_duration_ms, cache.download_duration_ms],
+  });
+}
+
+/** Returns true if the cache is older than max_age_hours (default 12h). */
+export function isCacheStale(fetched_at: string, max_age_hours = 12): boolean {
+  const ageMs = Date.now() - new Date(fetched_at + "Z").getTime();
+  return ageMs > max_age_hours * 3600 * 1000;
 }
 
 export async function saveShopifyPushCheckpoint(cp: ShopifyPushCheckpoint): Promise<void> {

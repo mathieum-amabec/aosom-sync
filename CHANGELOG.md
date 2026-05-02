@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.18.0] - 2026-05-02
+
+### Fixed (Bug C definitive)
+- **Phase 1 cron timeout 80% of nights** — pre-cache CSV in Vercel Blob
+  decouples Aosom CDN download from sync execution
+
+### Added
+- Table `csv_blob_cache` (single row) with blob URL + metadata
+- DB functions: getCachedBlobUrl, upsertBlobCache, isCacheStale (12h max age)
+- `/api/cron/csv-precache` endpoint (Bearer auth, maxDuration 600)
+- 4 cron schedules: 04:00 UTC primary, 05:30 backup, 12:00, 18:00
+- 13 new tests (3 DB, 5 endpoint, 4 fetcher fallback, 1 stale logic)
+
+### Changed
+- `fetchAosomCatalog` uses fallback chain: blob_cache → live_fallback
+- csv_source logged: 'blob_cache' or 'live_fallback' for observability
+- Empirical: blob fetch 1.22s avg (vs 27-199s Aosom CDN)
+
+### Notes
+- Blob access: 'public' (URL random hash, content already public via CDN)
+- import-pipeline.ts unchanged (uses live fetch, no Vercel 300s constraint)
+- Bench data preserved in commit message for future reference
+
 ## [0.1.16.2] - 2026-04-27
 
 ### Changed — Observability: Phase 1 timing complet
