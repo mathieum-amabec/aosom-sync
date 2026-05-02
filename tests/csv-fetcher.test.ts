@@ -237,4 +237,25 @@ describe("fetchAosomCatalog — blob cache fallback chain", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(String(fetchSpy.mock.calls[0][0])).toContain("aosomcdn.com");
   });
+
+  it("cache hit but blob fetch times out (AbortError): falls back to live Aosom CDN", async () => {
+    vi.mocked(getCachedBlobUrl).mockResolvedValue({
+      blob_url: "https://blob.example.com/current.csv",
+      blob_key: "csv/aosom-feed/current.csv",
+      csv_size_bytes: 1000,
+      fetched_at: new Date().toISOString().replace("Z", ""),
+      upload_duration_ms: 100,
+      download_duration_ms: 200,
+    });
+    const fetchSpy = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError")) // blob timeout
+      .mockResolvedValueOnce({ ok: true, text: async () => SAMPLE_CSV }); // live fallback
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const products = await fetchAosomCatalog();
+    expect(products.length).toBeGreaterThan(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(String(fetchSpy.mock.calls[1][0])).toContain("aosomcdn.com");
+  });
 });

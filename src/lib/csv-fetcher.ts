@@ -5,7 +5,8 @@ import { getCachedBlobUrl } from "./database";
 
 /** Covers headers + body stream — 60s margin under Vercel 300s function limit */
 const FETCH_TIMEOUT_MS = 240_000;
-const BLOB_FETCH_TIMEOUT_MS = 60_000;
+// Blob is Vercel CDN — should respond in < 5s. 10s gives headroom before live fallback.
+const BLOB_FETCH_TIMEOUT_MS = 10_000;
 
 function isAbortError(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { name?: string }).name === "AbortError";
@@ -35,7 +36,8 @@ export async function fetchAosomCatalog(): Promise<AosomProduct[]> {
       if (blobResp.ok) {
         const text = await blobResp.text();
         const duration_ms = Date.now() - t0;
-        const age_hours = (Date.now() - new Date(cache.fetched_at + "Z").getTime()) / 3_600_000;
+        const tsNormalized = cache.fetched_at.replace(" ", "T") + (cache.fetched_at.endsWith("Z") ? "" : "Z");
+        const age_hours = (Date.now() - new Date(tsNormalized).getTime()) / 3_600_000;
         log("csv_blob_hit", { csv_source: "blob_cache", csv_age_hours: age_hours.toFixed(1), csv_resolution_ms: duration_ms });
         return parseTsv(text);
       }

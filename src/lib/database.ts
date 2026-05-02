@@ -1399,7 +1399,8 @@ export async function upsertBlobCache(cache: Omit<CsvBlobCache, "fetched_at">): 
 
 /** Returns true if the cache is older than max_age_hours (default 12h). */
 export function isCacheStale(fetched_at: string, max_age_hours = 12): boolean {
-  const ageMs = Date.now() - new Date(fetched_at + "Z").getTime();
+  const tsNormalized = fetched_at.replace(" ", "T") + (fetched_at.endsWith("Z") ? "" : "Z");
+  const ageMs = Date.now() - new Date(tsNormalized).getTime();
   return ageMs > max_age_hours * 3600 * 1000;
 }
 

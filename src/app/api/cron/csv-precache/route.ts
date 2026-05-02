@@ -4,11 +4,23 @@ import { put, del } from "@vercel/blob";
 import { env, AOSOM } from "@/lib/config";
 import { upsertBlobCache, getCachedBlobUrl } from "@/lib/database";
 
-export const maxDuration = 600;
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
 const BLOB_KEY = "csv/aosom-feed/current.csv";
 const MIN_CSV_BYTES = 10 * 1024 * 1024; // 10 MB sanity floor
+const MIN_CSV_ROWS = 8_000; // Aosom catalog has ~10k products; HTML error pages have none
+
+function validateCsvContent(csvText: string): void {
+  // Reject HTML error pages that pass the size floor (e.g. a 12 MB Nginx error page)
+  if (csvText.trimStart().startsWith("<")) {
+    throw new Error(`CSV response looks like HTML, not a TSV feed (first chars: ${csvText.slice(0, 60)})`);
+  }
+  const rowCount = csvText.split("\n").filter((l) => l.trim().length > 0).length - 1; // minus header
+  if (rowCount < MIN_CSV_ROWS) {
+    throw new Error(`CSV has only ${rowCount} data rows (min ${MIN_CSV_ROWS})`);
+  }
+}
 
 function verifyCronSecret(header: string | null): boolean {
   if (!header) return false;
@@ -34,7 +46,7 @@ export async function GET(request: Request) {
     // Step 1: Download CSV from Aosom CDN
     const t_download = Date.now();
     const aosomResp = await fetch(AOSOM.CSV_URL, {
-      signal: AbortSignal.timeout(540_000), // 9 min hard cap (under maxDuration 600s)
+      signal: AbortSignal.timeout(240_000), // 4 min hard cap (under Vercel Pro 300s limit)
     });
 
     if (!aosomResp.ok) {
@@ -54,6 +66,7 @@ export async function GET(request: Request) {
     if (csv_size_bytes < MIN_CSV_BYTES) {
       throw new Error(`CSV suspiciously small: ${csv_size_bytes} bytes (min ${MIN_CSV_BYTES})`);
     }
+    validateCsvContent(csvText);
 
     // Step 2: Upload to Vercel Blob (fixed key, overwrite in-place)
     const t_upload = Date.now();
