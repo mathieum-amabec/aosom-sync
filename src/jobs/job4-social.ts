@@ -27,6 +27,7 @@ import {
   getAutopostCountToday,
   incrementAutopostCountToday,
 } from "@/lib/database";
+import { selectHook, buildHookedPrompt, buildHookedPromptEn } from "@/lib/hook-selector";
 import { publishDraftToChannels } from "@/lib/social-publisher";
 
 const ANTHROPIC_CALL_TIMEOUT_MS = 45_000;
@@ -96,8 +97,9 @@ async function generatePostText(prompt: string): Promise<string> {
 async function generateBilingual(
   settings: Record<string, string>,
   triggerType: "new_product" | "price_drop" | "highlight",
-  vars: Record<string, string>
-): Promise<{ fr: string; en: string }> {
+  vars: Record<string, string>,
+  productType?: string | null
+): Promise<{ fr: string; en: string; hookId: number | null }> {
   const frKey = `prompt_${triggerType}_fr`;
   const enKey = `prompt_${triggerType}_en`;
   const frTpl = settings[frKey] || "Rédige un post Facebook pour: {product_name}";
@@ -106,12 +108,26 @@ async function generateBilingual(
   const frVars = { ...vars, hashtags: settings.social_hashtags_fr || "" };
   const enVars = { ...vars, hashtags: settings.social_hashtags_en || "" };
 
-  const frPrompt = interpolatePrompt(frTpl, frVars);
-  const enPrompt = interpolatePrompt(enTpl, enVars);
+  const basePromptFr = interpolatePrompt(frTpl, frVars);
+  const basePromptEn = interpolatePrompt(enTpl, enVars);
+
+  // Select a hook for this draft (no draft_id yet — recorded once draft is created)
+  let hookId: number | null = null;
+  let frPrompt = basePromptFr;
+  let enPrompt = basePromptEn;
+  try {
+    const hookFr = await selectHook("FR", productType, null);
+    const hookEn = await selectHook("EN", productType, null);
+    frPrompt = buildHookedPrompt(basePromptFr, hookFr);
+    enPrompt = buildHookedPromptEn(basePromptEn, hookEn);
+    hookId = hookFr.hookId;
+  } catch (hookErr) {
+    logWarn("hook selection failed, using base prompt", { error: String(hookErr) });
+  }
 
   try {
     const [fr, en] = await Promise.all([generatePostText(frPrompt), generatePostText(enPrompt)]);
-    return { fr, en };
+    return { fr, en, hookId };
   } catch (err) {
     if (err instanceof Anthropic.APIUserAbortError) {
       logWarn("anthropic timeout, retrying", { attempt: 1 });
@@ -119,7 +135,7 @@ async function generateBilingual(
       await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
       try {
         const [fr, en] = await Promise.all([generatePostText(frPrompt), generatePostText(enPrompt)]);
-        return { fr, en };
+        return { fr, en, hookId };
       } catch (retryErr) {
         logError("anthropic failed after retry", { error: String(retryErr) });
         throw retryErr;
@@ -171,11 +187,11 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
   if (!product) throw new Error(`Product ${sku} not found`);
   const productName = (product.name as string) || sku;
 
-  const { fr, en } = await generateBilingual(settings, "new_product", {
+  const { fr, en, hookId } = await generateBilingual(settings, "new_product", {
     product_name: productName,
     price: String(product.price),
     store_name: env.storeName,
-  });
+  }, product.product_type as string | null);
 
   const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
@@ -206,6 +222,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
     imagePath,
     imageUrl,
     imageUrls,
+    hookId,
   });
 
   await markProductPosted(sku);
@@ -228,13 +245,13 @@ export async function triggerPriceDrop(
   if (!product) throw new Error(`Product ${sku} not found`);
   const productName = (product.name as string) || sku;
 
-  const { fr, en } = await generateBilingual(settings, "price_drop", {
+  const { fr, en, hookId } = await generateBilingual(settings, "price_drop", {
     product_name: productName,
     price: String(newPrice),
     old_price: String(oldPrice),
     new_price: String(newPrice),
     store_name: env.storeName,
-  });
+  }, product.product_type as string | null);
 
   const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
@@ -268,6 +285,7 @@ export async function triggerPriceDrop(
     imageUrls,
     oldPrice,
     newPrice,
+    hookId,
   });
 
   await createNotification(
@@ -299,12 +317,12 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
   const sku = product.sku as string;
   const productName = (product.name as string) || sku;
 
-  const { fr, en } = await generateBilingual(settings, "highlight", {
+  const { fr, en, hookId } = await generateBilingual(settings, "highlight", {
     product_name: productName,
     price: String(product.price),
     qty: String(product.qty),
     store_name: env.storeName,
-  });
+  }, product.product_type as string | null);
 
   const imgSettings = getImageSettings(settings);
   let imagePath: string | null = null;
@@ -336,6 +354,7 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
     imagePath,
     imageUrl,
     imageUrls,
+    hookId,
   });
 
   await markProductPosted(sku);

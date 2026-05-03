@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.20.0] - 2026-05-04
+
+### Added
+- **Hook pool rotation system** for FB/IG draft generation
+  - 200 hooks seeded (100 FR + 100 EN, 5 categories × ~20 hooks/language)
+  - 7 product scopes: universal, mobilier_indoor, outdoor_patio, pets,
+    kids_toys_sport, storage_kitchen, bedroom_decor
+  - Multi-tagging: 1 hook can cover multiple scopes (e.g. mobilier+bedroom)
+  - Anti-repeat rotation: excludes last 5 *distinct* categories from selection
+  - Mode 60% pool (verbatim hook) / 40% generative_seeded (spirit variation)
+- DB tables: `content_hook_categories`, `content_hooks`, `hook_usage_history`
+- `mapProductTypeToScope()`: 14 prefix rules → 7 scopes (home_office merged into mobilier_indoor)
+- `selectHook()`: rotation + scope filter + mode split + 3-level fallback
+- `seedHooksIfEmpty()`: lazy seeding with UNIQUE index + INSERT OR IGNORE (race-safe cold starts)
+
+### Changed
+- `generateBilingual()` integrates hook selection into prompt construction
+- Graceful fallback: if `selectHook()` throws, generation continues without hook
+- `facebook_drafts.hook_id` (FK nullable) tracks the hook used per draft
+
+### Fixed
+- False-advertising risk: 8 pool-mode hooks with specific stock counts and day-bound deadlines
+  moved to generative_seeded mode (Quebec Consumer Protection Act compliance)
+- `getRecentHookCategoryIds()` now uses DISTINCT to correctly exclude up to 5 distinct categories
+- `selectCompatibleHooks()` uses parameterized LIKE patterns (SQL safety)
+- Added "Home Decor" (ASCII) scope rule alongside "Home Décor" (Unicode)
+
 ## [0.1.19.0] - 2026-05-02
 
 ### Fixed

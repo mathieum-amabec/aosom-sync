@@ -82,6 +82,7 @@ function makeDraft(overrides: Partial<{ id: number; scheduledAt: number | null; 
     newPrice: null,
     facebookPostId: null,
     publishedAt: null,
+    hookId: null,
     ...overrides,
   };
 }
