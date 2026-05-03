@@ -107,16 +107,16 @@ const FR_CAT2: HookSeedEntry[] = [
 
 const FR_CAT3: HookSeedEntry[] = [
   // universal (3)
-  { categoryId: 3, language: "FR", text: "Dernières chances avant la rupture de stock — il en reste 4.", productScopes: ["universal"], mode: "pool" },
-  { categoryId: 3, language: "FR", text: "Cette promo se termine vendredi. Pas de prolongation.", productScopes: ["universal"], mode: "pool" },
-  { categoryId: 3, language: "FR", text: "7 unités encore en entrepôt. Après, on ne sait pas.", productScopes: ["universal"], mode: "pool" },
+  { categoryId: 3, language: "FR", text: "Dernières chances avant la rupture de stock — il en reste 4.", productScopes: ["universal"], mode: "generative_seeded" },
+  { categoryId: 3, language: "FR", text: "Cette promo se termine vendredi. Pas de prolongation.", productScopes: ["universal"], mode: "generative_seeded" },
+  { categoryId: 3, language: "FR", text: "7 unités encore en entrepôt. Après, on ne sait pas.", productScopes: ["universal"], mode: "generative_seeded" },
   // mobilier_indoor pure (3)
-  { categoryId: 3, language: "FR", text: "Ce canapé est en promotion pour 48h seulement.", productScopes: ["mobilier_indoor"], mode: "pool" },
+  { categoryId: 3, language: "FR", text: "Ce canapé est en promotion pour 48h seulement.", productScopes: ["mobilier_indoor"], mode: "generative_seeded" },
   { categoryId: 3, language: "FR", text: "Dernier lot de cette collection — le prochain arrivage n'est pas confirmé.", productScopes: ["mobilier_indoor"], mode: "pool" },
   { categoryId: 3, language: "FR", text: "Prix promotionnel disponible pour quelques jours seulement.", productScopes: ["mobilier_indoor"], mode: "generative_seeded" },
   // mobilier_indoor + bedroom_decor (2)
   { categoryId: 3, language: "FR", text: "Cette collection chambre part vite à chaque promotion — voilà pourquoi.", productScopes: ["mobilier_indoor", "bedroom_decor"], mode: "pool" },
-  { categoryId: 3, language: "FR", text: "Le set de chambre en spécial cette semaine seulement.", productScopes: ["mobilier_indoor", "bedroom_decor"], mode: "pool" },
+  { categoryId: 3, language: "FR", text: "Le set de chambre en spécial cette semaine seulement.", productScopes: ["mobilier_indoor", "bedroom_decor"], mode: "generative_seeded" },
   // outdoor_patio pure (3)
   { categoryId: 3, language: "FR", text: "La saison patio arrive vite — et les bons meubles partent encore plus vite.", productScopes: ["outdoor_patio"], mode: "pool" },
   { categoryId: 3, language: "FR", text: "Commander maintenant pour recevoir avant l'été.", productScopes: ["outdoor_patio"], mode: "pool" },
@@ -126,11 +126,11 @@ const FR_CAT3: HookSeedEntry[] = [
   { categoryId: 3, language: "FR", text: "Les meubles d'extérieur de qualité se vendent dès leur mise en ligne.", productScopes: ["mobilier_indoor", "outdoor_patio"], mode: "generative_seeded" },
   // pets (3)
   { categoryId: 3, language: "FR", text: "Dernier lot de cet arbre à chat best-seller — ne tardez pas.", productScopes: ["pets"], mode: "pool" },
-  { categoryId: 3, language: "FR", text: "Panier orthopédique pour chien : stock limité, prix fixé jusqu'à dimanche.", productScopes: ["pets"], mode: "pool" },
+  { categoryId: 3, language: "FR", text: "Panier orthopédique pour chien : stock limité, prix fixé jusqu'à dimanche.", productScopes: ["pets"], mode: "generative_seeded" },
   { categoryId: 3, language: "FR", text: "Ces niches d'extérieur sont presque épuisées. Il en reste quelques-unes.", productScopes: ["pets"], mode: "generative_seeded" },
   // kids_toys_sport (3)
   { categoryId: 3, language: "FR", text: "La voiture électrique la plus vendue — stock quasi épuisé pour l'été.", productScopes: ["kids_toys_sport"], mode: "pool" },
-  { categoryId: 3, language: "FR", text: "Balançoire double en promotion cette semaine seulement.", productScopes: ["kids_toys_sport"], mode: "pool" },
+  { categoryId: 3, language: "FR", text: "Balançoire double en promotion cette semaine seulement.", productScopes: ["kids_toys_sport"], mode: "generative_seeded" },
   { categoryId: 3, language: "FR", text: "Trampoline à -25% jusqu'à vendredi. L'été commence bientôt.", productScopes: ["kids_toys_sport"], mode: "generative_seeded" },
   // storage_kitchen (1)
   { categoryId: 3, language: "FR", text: "Offre à durée limitée sur cette unité de rangement best-seller.", productScopes: ["storage_kitchen"], mode: "pool" },
@@ -273,16 +273,16 @@ const EN_CAT2: HookSeedEntry[] = [
 
 const EN_CAT3: HookSeedEntry[] = [
   // universal (3)
-  { categoryId: 3, language: "EN", text: "Last chance before stock runs out — 4 left.", productScopes: ["universal"], mode: "pool" },
+  { categoryId: 3, language: "EN", text: "Last chance before stock runs out — 4 left.", productScopes: ["universal"], mode: "generative_seeded" },
   { categoryId: 3, language: "EN", text: "This promotion ends Friday. No extension.", productScopes: ["universal"], mode: "pool" },
   { categoryId: 3, language: "EN", text: "7 units still in the warehouse. After that, we're not sure.", productScopes: ["universal"], mode: "pool" },
   // mobilier_indoor pure (3)
-  { categoryId: 3, language: "EN", text: "This sofa is on sale for 48 hours only.", productScopes: ["mobilier_indoor"], mode: "pool" },
+  { categoryId: 3, language: "EN", text: "This sofa is on sale for 48 hours only.", productScopes: ["mobilier_indoor"], mode: "generative_seeded" },
   { categoryId: 3, language: "EN", text: "Last batch of this collection — no confirmed restocking date.", productScopes: ["mobilier_indoor"], mode: "pool" },
   { categoryId: 3, language: "EN", text: "Promotional pricing available for a few days only.", productScopes: ["mobilier_indoor"], mode: "generative_seeded" },
   // mobilier_indoor + bedroom_decor (2)
   { categoryId: 3, language: "EN", text: "This bedroom collection sells out fast every time it goes on sale.", productScopes: ["mobilier_indoor", "bedroom_decor"], mode: "pool" },
-  { categoryId: 3, language: "EN", text: "The bedroom set on special this week only.", productScopes: ["mobilier_indoor", "bedroom_decor"], mode: "pool" },
+  { categoryId: 3, language: "EN", text: "The bedroom set on special this week only.", productScopes: ["mobilier_indoor", "bedroom_decor"], mode: "generative_seeded" },
   // outdoor_patio pure (3)
   { categoryId: 3, language: "EN", text: "Patio season arrives fast — and the good furniture goes even faster.", productScopes: ["outdoor_patio"], mode: "pool" },
   { categoryId: 3, language: "EN", text: "Order now to receive before summer.", productScopes: ["outdoor_patio"], mode: "pool" },
@@ -292,11 +292,11 @@ const EN_CAT3: HookSeedEntry[] = [
   { categoryId: 3, language: "EN", text: "Quality outdoor furniture sells out the moment it goes live.", productScopes: ["mobilier_indoor", "outdoor_patio"], mode: "generative_seeded" },
   // pets (3)
   { categoryId: 3, language: "EN", text: "Last batch of this best-selling cat tree — don't wait.", productScopes: ["pets"], mode: "pool" },
-  { categoryId: 3, language: "EN", text: "Orthopaedic dog bed: limited stock, price fixed until Sunday.", productScopes: ["pets"], mode: "pool" },
+  { categoryId: 3, language: "EN", text: "Orthopaedic dog bed: limited stock, price fixed until Sunday.", productScopes: ["pets"], mode: "generative_seeded" },
   { categoryId: 3, language: "EN", text: "These outdoor kennels are almost gone. A few left.", productScopes: ["pets"], mode: "generative_seeded" },
   // kids_toys_sport (3)
   { categoryId: 3, language: "EN", text: "The best-selling electric car — nearly sold out for summer.", productScopes: ["kids_toys_sport"], mode: "pool" },
-  { categoryId: 3, language: "EN", text: "Double swing on sale this week only.", productScopes: ["kids_toys_sport"], mode: "pool" },
+  { categoryId: 3, language: "EN", text: "Double swing on sale this week only.", productScopes: ["kids_toys_sport"], mode: "generative_seeded" },
   { categoryId: 3, language: "EN", text: "Trampoline at -25% until Friday. Summer is coming.", productScopes: ["kids_toys_sport"], mode: "generative_seeded" },
   // storage_kitchen (1)
   { categoryId: 3, language: "EN", text: "Limited-time offer on this best-selling storage unit.", productScopes: ["storage_kitchen"], mode: "pool" },

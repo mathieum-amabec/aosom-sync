@@ -1111,7 +1111,7 @@ export interface ContentHook {
 export async function getRecentHookCategoryIds(limit = 5): Promise<number[]> {
   const db = await ensureSchema();
   const result = await db.execute({
-    sql: `SELECT h.category_id FROM hook_usage_history u
+    sql: `SELECT DISTINCT h.category_id FROM hook_usage_history u
           JOIN content_hooks h ON h.id = u.hook_id
           ORDER BY u.used_at DESC LIMIT ?`,
     args: [limit],
@@ -1125,9 +1125,10 @@ export async function selectCompatibleHooks(
   excludeCategoryIds: number[]
 ): Promise<ContentHook[]> {
   const db = await ensureSchema();
-  const scopeFilter = `(product_scopes LIKE '%"universal"%' OR product_scopes LIKE '%"${scope}"%')`;
-  let sql = `SELECT * FROM content_hooks WHERE language = ? AND ${scopeFilter}`;
-  const args: InValue[] = [language];
+  const universalPattern = `%"universal"%`;
+  const scopePattern = `%"${scope}"%`;
+  let sql = `SELECT * FROM content_hooks WHERE language = ? AND (product_scopes LIKE ? OR product_scopes LIKE ?)`;
+  const args: InValue[] = [language, universalPattern, scopePattern];
   if (excludeCategoryIds.length > 0) {
     const placeholders = excludeCategoryIds.map(() => "?").join(", ");
     sql += ` AND category_id NOT IN (${placeholders})`;

@@ -55,6 +55,7 @@ const SCOPE_RULES: Array<{ prefix: string; scope: ProductScope }> = [
   { prefix: "Home Furnishings > Bedroom", scope: "bedroom_decor" },
   { prefix: "Bedding & Bath", scope: "bedroom_decor" },
   { prefix: "Home Décor", scope: "bedroom_decor" },
+  { prefix: "Home Decor", scope: "bedroom_decor" },
   { prefix: "Holiday", scope: "bedroom_decor" },
 
   // Storage & Kitchen — sub-paths before parent catch-all
