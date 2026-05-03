@@ -159,6 +159,35 @@ async function _initSchemaImpl(): Promise<void> {
       upload_duration_ms INTEGER NOT NULL DEFAULT 0,
       download_duration_ms INTEGER NOT NULL DEFAULT 0
     )`,
+    // ─── Hook Pool (v0.1.20) ─────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS content_hook_categories (
+      id INTEGER PRIMARY KEY,
+      name_fr TEXT NOT NULL,
+      name_en TEXT NOT NULL,
+      description TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS content_hooks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      category_id INTEGER NOT NULL REFERENCES content_hook_categories(id),
+      language TEXT NOT NULL CHECK(language IN ('FR', 'EN')),
+      text TEXT NOT NULL,
+      -- JSON array of scope strings this hook applies to (e.g. ["universal"] or ["outdoor_patio","mobilier_indoor"])
+      product_scopes TEXT NOT NULL DEFAULT '["universal"]',
+      mode TEXT NOT NULL DEFAULT 'pool' CHECK(mode IN ('pool', 'generative_seeded')),
+      used_count INTEGER NOT NULL DEFAULT 0,
+      last_used_at INTEGER
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_content_hooks_category ON content_hooks(category_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_content_hooks_lang ON content_hooks(language)`,
+    `CREATE INDEX IF NOT EXISTS idx_content_hooks_used ON content_hooks(used_count, last_used_at)`,
+    `CREATE TABLE IF NOT EXISTS hook_usage_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      hook_id INTEGER NOT NULL REFERENCES content_hooks(id),
+      draft_id INTEGER REFERENCES facebook_drafts(id),
+      used_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_hook_usage_hook ON hook_usage_history(hook_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_hook_usage_at ON hook_usage_history(used_at DESC)`,
   ];
 
   // Batch all schema + legacy table creation in a single round trip
@@ -198,6 +227,8 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("image_urls")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN image_urls TEXT`);
   // content_type: distinguishes product posts from informative/entertaining/engagement content
   if (!cols.has("content_type")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN content_type TEXT NOT NULL DEFAULT 'product'`);
+  // hook_id: FK to content_hooks — which hook seeded this draft's caption
+  if (!cols.has("hook_id")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN hook_id INTEGER REFERENCES content_hooks(id)`);
 
   // checkpoint_data on sync_runs: stores per-chunk progress for Phase 2 chunked push
   // timing_ms on sync_runs: per-phase duration map written incrementally (survives SIGKILL diagnosis)
@@ -289,6 +320,9 @@ async function _initSchemaImpl(): Promise<void> {
     await db.execute("PRAGMA journal_mode = WAL");
     await db.execute("PRAGMA foreign_keys = ON");
   }
+
+  // Seed hook pool on first run (no-op if already seeded)
+  await seedHooksIfEmpty();
 
 }
 
@@ -1054,7 +1088,125 @@ export interface FacebookDraft {
   /** Per-channel publish state. Keys are CHANNELS values (e.g. "fb_ameublo"). */
   channels: Record<string, ChannelState>;
   createdAt: number;
+  /** FK to content_hooks — the hook that seeded this draft's caption. Null for legacy drafts. */
+  hookId: number | null;
   productName?: string; productImage?: string;
+}
+
+// ─── Hook Pool DB functions (v0.1.20) ────────────────────────────────
+
+export interface ContentHook {
+  id: number;
+  categoryId: number;
+  language: "FR" | "EN";
+  text: string;
+  productScopes: string[];
+  mode: "pool" | "generative_seeded";
+  usedCount: number;
+  lastUsedAt: number | null;
+}
+
+export async function getRecentHookCategoryIds(limit = 5): Promise<number[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT h.category_id FROM hook_usage_history u
+          JOIN content_hooks h ON h.id = u.hook_id
+          ORDER BY u.used_at DESC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => Number(rowToObj(r).category_id));
+}
+
+export async function selectCompatibleHooks(
+  scope: string,
+  language: "FR" | "EN",
+  excludeCategoryIds: number[]
+): Promise<ContentHook[]> {
+  const db = await ensureSchema();
+  const scopeFilter = `(product_scopes LIKE '%"universal"%' OR product_scopes LIKE '%"${scope}"%')`;
+  let sql = `SELECT * FROM content_hooks WHERE language = ? AND ${scopeFilter}`;
+  const args: InValue[] = [language];
+  if (excludeCategoryIds.length > 0) {
+    const placeholders = excludeCategoryIds.map(() => "?").join(", ");
+    sql += ` AND category_id NOT IN (${placeholders})`;
+    args.push(...excludeCategoryIds);
+  }
+  sql += ` ORDER BY used_count ASC, last_used_at ASC NULLS FIRST LIMIT 10`;
+  const result = await db.execute({ sql, args });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    let scopes: string[] = [];
+    try { scopes = JSON.parse(o.product_scopes as string); } catch { scopes = ["universal"]; }
+    return {
+      id: Number(o.id),
+      categoryId: Number(o.category_id),
+      language: o.language as "FR" | "EN",
+      text: o.text as string,
+      productScopes: scopes,
+      mode: (o.mode as "pool" | "generative_seeded") || "pool",
+      usedCount: Number(o.used_count || 0),
+      lastUsedAt: o.last_used_at != null ? Number(o.last_used_at) : null,
+    };
+  });
+}
+
+export async function recordHookUsage(hookId: number, draftId: number | null): Promise<void> {
+  const db = await ensureSchema();
+  await db.batch([
+    {
+      sql: `INSERT INTO hook_usage_history (hook_id, draft_id) VALUES (?, ?)`,
+      args: [hookId, draftId],
+    },
+    {
+      sql: `UPDATE content_hooks SET used_count = used_count + 1, last_used_at = strftime('%s','now') WHERE id = ?`,
+      args: [hookId],
+    },
+  ], "write");
+}
+
+export async function getHookById(id: number): Promise<ContentHook | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT * FROM content_hooks WHERE id = ?`, args: [id] });
+  if (result.rows.length === 0) return null;
+  const o = rowToObj(result.rows[0]);
+  let scopes: string[] = [];
+  try { scopes = JSON.parse(o.product_scopes as string); } catch { scopes = ["universal"]; }
+  return {
+    id: Number(o.id),
+    categoryId: Number(o.category_id),
+    language: o.language as "FR" | "EN",
+    text: o.text as string,
+    productScopes: scopes,
+    mode: (o.mode as "pool" | "generative_seeded") || "pool",
+    usedCount: Number(o.used_count || 0),
+    lastUsedAt: o.last_used_at != null ? Number(o.last_used_at) : null,
+  };
+}
+
+export async function seedHooksIfEmpty(): Promise<void> {
+  const db = await ensureSchema();
+  const countRow = await db.execute(`SELECT COUNT(*) as n FROM content_hooks`);
+  const count = Number(rowToObj(countRow.rows[0]).n || 0);
+  if (count > 0) return;
+
+  // Import dynamically to keep bundle size down (seed only runs once per DB lifetime)
+  const { HOOK_CATEGORIES, HOOKS_SEED } = await import("@/lib/seed/hooks-seed");
+
+  await db.batch(
+    HOOK_CATEGORIES.map((c) => ({
+      sql: `INSERT OR IGNORE INTO content_hook_categories (id, name_fr, name_en, description) VALUES (?, ?, ?, ?)`,
+      args: [c.id, c.name_fr, c.name_en, c.description],
+    })),
+    "write"
+  );
+
+  await db.batch(
+    HOOKS_SEED.map((h) => ({
+      sql: `INSERT INTO content_hooks (category_id, language, text, product_scopes, mode) VALUES (?, ?, ?, ?, ?)`,
+      args: [h.categoryId, h.language, h.text, JSON.stringify(h.productScopes), h.mode],
+    })),
+    "write"
+  );
 }
 
 function mapDraft(row: Record<string, unknown>): FacebookDraft {
@@ -1098,6 +1250,7 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
     facebookPostId: (row.facebook_post_id as string) || null,
     channels,
     createdAt: Number(row.created_at),
+    hookId: row.hook_id != null ? Number(row.hook_id) : null,
     productName: (row.name as string) || undefined,
     productImage: (row.image1 as string) || undefined,
   };
@@ -1112,14 +1265,16 @@ export async function createFacebookDraft(draft: {
   /** Ordered list of public image URLs (1–5). Used for multi-photo Facebook posts. */
   imageUrls?: string[];
   oldPrice?: number | null; newPrice?: number | null;
+  /** FK to content_hooks — which hook seeded this draft's caption. */
+  hookId?: number | null;
 }): Promise<number> {
   const db = await ensureSchema();
   const urls = (draft.imageUrls ?? []).filter((u) => typeof u === "string" && u.length > 0);
   const primary = draft.imageUrl ?? urls[0] ?? null;
   const urlsJson = urls.length > 0 ? JSON.stringify(urls) : null;
   const result = await db.execute({
-    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, post_text_en, image_path, image_url, image_urls, old_price, new_price) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.postTextEn ?? null, draft.imagePath || null, primary, urlsJson, draft.oldPrice ?? null, draft.newPrice ?? null],
+    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, post_text_en, image_path, image_url, image_urls, old_price, new_price, hook_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.postTextEn ?? null, draft.imagePath || null, primary, urlsJson, draft.oldPrice ?? null, draft.newPrice ?? null, draft.hookId ?? null],
   });
   return Number(result.lastInsertRowid);
 }
