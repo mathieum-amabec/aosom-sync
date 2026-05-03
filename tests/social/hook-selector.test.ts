@@ -247,6 +247,18 @@ describe("selectHook", () => {
     expect(mockSelectCompatibleHooks).toHaveBeenCalledTimes(2);
   });
 
+  it("falls back to universal scope as last resort (3-call chain)", async () => {
+    const universalHook = { id: 20, categoryId: 1, language: "FR" as const, text: "Universal fallback hook.", productScopes: ["universal"], mode: "pool" as const, usedCount: 0, lastUsedAt: null };
+    mockSelectCompatibleHooks
+      .mockResolvedValueOnce([])  // scope + exclusions → empty
+      .mockResolvedValueOnce([])  // scope without exclusions → empty
+      .mockResolvedValue([universalHook]); // universal scope → hit
+    const result = await selectHook("FR", "Home Furnishings", null);
+    expect(result.hookId).toBe(20);
+    expect(mockSelectCompatibleHooks).toHaveBeenCalledTimes(3);
+    expect(mockSelectCompatibleHooks.mock.calls[2][0]).toBe("universal");
+  });
+
   it("throws when all fallbacks return empty", async () => {
     mockSelectCompatibleHooks.mockResolvedValue([]);
     await expect(selectHook("FR", "Home Furnishings", null)).rejects.toThrow("No hooks found");
