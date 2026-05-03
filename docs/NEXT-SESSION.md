@@ -1,6 +1,80 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 02 mai (4) — fin de session — Bug C et Bug B résolus ✅
+
+### Journée complète (02 mai 2026)
+
+**4 PRs mergées + 1 commit direct:**
+
+| # | PR/Commit | Version | Description |
+|---|---|---|---|
+| 1 | PR #38 | v0.1.18.0 | Bug C définitif: pre-cache CSV dans Vercel Blob (store public yul1) |
+| 2 | PR #39 | v0.1.18.1 | Hotfix: BLOB_FETCH_TIMEOUT_MS 10s → 30s |
+| 3 | PR #40 | v0.1.18.2 | Hotfix: BLOB_FETCH_TIMEOUT_MS 30s → 60s (45MB × 1.5 MB/s = 30s body read seul) |
+| 4 | e766276 | v0.1.18.3 | Perf: `"regions": ["yul1"]` dans vercel.json (co-locate functions avec Blob) |
+| 5 | PR #41 | v0.1.19.0 | Bug B: UX published drafts (disabled buttons, badge fr-CA, confirm delete, panel guard) |
+
+**Tests:** 185/185 → 199/199 (+14)
+**Health prod:** `{"status":"ok","db":true,"version":"0.1.19.0"}` confirmé 23:53 UTC
+
+---
+
+### Apprentissages permanents
+
+1. **Region Vercel = root cause cachée** — Function `iad1` + Blob `yul1` = cross-region body read 30s. Toujours vérifier `x-vercel-id`: `yul1::iad1` = problème, `yul1::yul1` = OK.
+2. **`AbortSignal.timeout()` couvre TOUT le body read** — pas seulement le headers handshake. 45MB à 1.5 MB/s depuis Vercel function = 30s body read seul. Margin = 2×.
+3. **Vercel Blob public store (yul1)** — pattern éprouvé pour cacher gros fichiers (45MB). Store privé initial = erreur; recréer en mode public est la solution.
+4. **`toLocaleDateString` + options time = non-standard ECMA-402** — utiliser `toLocaleString` avec `{ day, month, hour, minute }`. Tester le format fr-CA en isolation.
+5. **Test mirror pattern** — sans @testing-library/react, dupliquer les helpers purs dans le fichier test. Drift detection = manuel; syncer les deux à chaque modification.
+
+---
+
+### Bugs en backlog post-session
+
+- **publishedAt sur drafts non-published (P3)**: `SELECT id, status, published_at FROM facebook_drafts WHERE published_at IS NOT NULL AND status != 'published'`
+- **Server-side guards pour drafts published (P3)**: `approve`/`reject` dans route.ts ne vérifient pas status='published' → ajouter check + return 400
+- **import/queue timeout (P3)**: `queueForImport()` appelle `fetchAosomCatalog()` — si blob unavailable → timeout 60s. Fix: lire depuis `catalog_snapshots` DB.
+- **content_type dans FacebookDraft interface (P3)**: colonne existe en DB (v0.1.16.0) mais pas dans le TypeScript interface ni `mapDraft()`
+
+---
+
+### Query validation cron 06:00 UTC (03 mai) — CRITIQUE
+
+Phase 1 doit compléter avec `csv_source='blob_cache'` (pas live_fallback):
+
+```sql
+SELECT id, status, total_products,
+  CAST((julianday(completed_at) - julianday(started_at)) * 86400 AS INTEGER) as duration_s,
+  timing_ms
+FROM sync_runs 
+WHERE date(started_at) = date('now')
+  AND time(started_at) BETWEEN '06:00:00' AND '06:05:00'
+ORDER BY started_at DESC LIMIT 1;
+```
+
+Succès: `status='completed'`, `duration_s < 200`, `timing_ms` contient `"csvSource":"blob_cache"`.
+Échec: `status='running'` après 06:05 UTC → zombie → Bug C persist malgré region fix.
+
+---
+
+### Instructions reprise demain
+
+```bash
+cd ~/.gstack/projects/aosom-sync
+git checkout main && git pull origin main --ff-only
+```
+
+1. Query cron ci-dessus → confirmer Bug C résolu sur nuit entière
+2. Smoke test visuel Bug B: draft published → boutons disabled + badge "Publié le {date}"
+3. Next: voir TODOS.md (Bulk Generate P1 ou social content P2)
+
+```
+Dire à Claude: "Reprise aosom-sync. Lis docs/NEXT-SESSION.md UPDATE 02 mai (4).
+Commence par la query cron 06:00 UTC pour valider Bug C + smoke test Bug B."
+```
+
+---
 ## UPDATE 02 mai (3) — Chantier A1 COMPLET ✅ — v0.1.18.3 region fix en prod
 
 ### Diagnostic région Vercel function vs Blob store (02 mai 2026, ~22:30-22:45 UTC)
