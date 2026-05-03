@@ -1,6 +1,71 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 03 mai — v0.1.20.0 hook pool + hotfix deadlock ✅
+
+### Session (03 mai 2026)
+
+**2 commits sur main:**
+
+| Commit | Description |
+|--------|-------------|
+| a226cd8 | feat(social): hook pool with rotation and product scope (v0.1.20.0) — squash de PR #42 |
+| a0f9f7b | fix: deadlock in seedHooksIfEmpty — use getDb() not ensureSchema() |
+
+**v0.1.20.0 — Hook pool rotation system:**
+- 200 hooks (100 FR + 100 EN) dans `content_hooks` via `HOOKS_SEED`
+- 7 scopes: universal, mobilier_indoor, outdoor_patio, pets, kids_toys_sport, storage_kitchen, bedroom_decor
+- Anti-repeat rotation: 5 dernières catégories exclues (`getRecentHookCategoryIds` avec DISTINCT)
+- 60% pool (verbatim) / 40% generative_seeded
+- 3 review auto-fixes: LIKE paramétrisé, DISTINCT rotation, "Home Decor" ASCII variant
+- 8 hooks pool→generative_seeded (compliance Loi protection consommateur QC — fausses quantités/délais)
+- DB tables: `content_hook_categories`, `content_hooks`, `hook_usage_history`
+- `facebook_drafts.hook_id` FK nullable ajoutée
+
+**Hotfix critique — deadlock async:**
+- `seedHooksIfEmpty()` appelait `ensureSchema()` depuis l'intérieur de `_initSchemaImpl()`
+- Deadlock: `schemaPromise` attendait `seedHooksIfEmpty()`, qui attendait `schemaPromise`
+- Symptôme: health endpoint timeout sur chaque cold start, `content_hooks` vide en prod
+- Fix: `getDb()` directement (client déjà créé à ce stade)
+
+**Tests:** 242/243 (1 pre-existing timeout dans refresh-products-batch — non lié)
+
+**Scopes distribution:**
+- mobilier_indoor: ≥30 hooks/langue (multi-tagged)
+- universal: ≥5 hooks/langue (fallback pool)
+- outdoor_patio, pets, kids_toys_sport, storage_kitchen, bedroom_decor: couverts
+
+---
+
+### Instructions reprise (à valider au début de la prochaine session)
+
+```bash
+cd ~/.gstack/projects/aosom-sync
+git checkout main && git pull origin main --ff-only
+```
+
+**Étape 1 — Valider health prod:**
+```bash
+curl -s https://aosom-sync.vercel.app/api/health | jq
+# Attendu: { "version": "0.1.20.0", "status": "ok/degraded", "db": true }
+```
+
+**Étape 2 — Valider seed Turso prod:**
+```sql
+SELECT language, COUNT(*) as count FROM content_hooks GROUP BY language;
+-- Attendu: 100 FR + 100 EN = 200 total
+-- Si 0: seed n'a pas run → vérifier que le hotfix a0f9f7b est bien déployé
+```
+
+**Étape 3 — Smoke test génération sociale:**
+Tester la génération d'un draft social depuis l'UI → vérifier que `hook_id` est populé dans `facebook_drafts`.
+
+```
+Dire à Claude: "Reprise aosom-sync. Lis docs/NEXT-SESSION.md UPDATE 03 mai.
+Valide health 0.1.20.0, seed count 200, smoke test hook_id populé."
+```
+
+---
 ## UPDATE 02 mai (4) — fin de session — Bug C et Bug B résolus ✅
 
 ### Journée complète (02 mai 2026)
