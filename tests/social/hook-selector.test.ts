@@ -12,10 +12,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mapProductTypeToScope, buildHookedPrompt, buildHookedPromptEn, selectHook } from "@/lib/hook-selector";
 import type { HookSelection } from "@/lib/hook-selector";
 import * as database from "@/lib/database";
+import { HOOKS_SEED } from "@/lib/seed/hooks-seed";
 
 // ─── mapProductTypeToScope ────────────────────────────────────────────
 
 describe("mapProductTypeToScope", () => {
+  // ── Outdoor / Patio
   it("maps Patio, Lawn & Garden → outdoor_patio", () => {
     expect(mapProductTypeToScope("Patio, Lawn & Garden")).toBe("outdoor_patio");
   });
@@ -24,44 +26,65 @@ describe("mapProductTypeToScope", () => {
     expect(mapProductTypeToScope("Patio, Lawn & Garden > Chairs")).toBe("outdoor_patio");
   });
 
-  it("maps Storage & Organization → storage_organization", () => {
-    expect(mapProductTypeToScope("Storage & Organization")).toBe("storage_organization");
+  it("maps Patio & Garden → outdoor_patio", () => {
+    expect(mapProductTypeToScope("Patio & Garden")).toBe("outdoor_patio");
   });
 
-  it("maps Storage & Organization > Shelving → storage_organization", () => {
-    expect(mapProductTypeToScope("Storage & Organization > Shelving")).toBe("storage_organization");
+  // ── Storage & Kitchen
+  it("maps Home Furnishings > Storage → storage_kitchen", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Storage")).toBe("storage_kitchen");
   });
 
-  it("maps Pet Supplies → pets_kids", () => {
-    expect(mapProductTypeToScope("Pet Supplies")).toBe("pets_kids");
+  it("maps Home Furnishings > Storage > Shelving → storage_kitchen", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Storage > Shelving")).toBe("storage_kitchen");
   });
 
-  it("maps Toys & Games → pets_kids", () => {
-    expect(mapProductTypeToScope("Toys & Games")).toBe("pets_kids");
+  it("maps Appliances → storage_kitchen", () => {
+    expect(mapProductTypeToScope("Appliances")).toBe("storage_kitchen");
   });
 
-  it("maps Baby → pets_kids", () => {
-    expect(mapProductTypeToScope("Baby")).toBe("pets_kids");
+  // ── Pets
+  it("maps Pet Supplies → pets", () => {
+    expect(mapProductTypeToScope("Pet Supplies")).toBe("pets");
   });
 
-  it("maps Bedroom → bedroom_bath", () => {
-    expect(mapProductTypeToScope("Bedroom")).toBe("bedroom_bath");
+  it("maps Pet Supplies > Dog Beds → pets", () => {
+    expect(mapProductTypeToScope("Pet Supplies > Dog Beds")).toBe("pets");
   });
 
-  it("maps Home Office → home_office", () => {
-    expect(mapProductTypeToScope("Home Office")).toBe("home_office");
+  // ── Kids Toys & Sports
+  it("maps Toys & Games → kids_toys_sport", () => {
+    expect(mapProductTypeToScope("Toys & Games")).toBe("kids_toys_sport");
   });
 
-  it("maps Home Furnishings > Bedroom → bedroom_bath (sub-path before parent)", () => {
-    expect(mapProductTypeToScope("Home Furnishings > Bedroom")).toBe("bedroom_bath");
+  it("maps Toys & Games > Electric Cars → kids_toys_sport", () => {
+    expect(mapProductTypeToScope("Toys & Games > Electric Cars")).toBe("kids_toys_sport");
   });
 
-  it("maps Home Furnishings > Office → home_office", () => {
-    expect(mapProductTypeToScope("Home Furnishings > Office")).toBe("home_office");
+  it("maps Sports & Recreation > Trampolines → kids_toys_sport", () => {
+    expect(mapProductTypeToScope("Sports & Recreation > Trampolines")).toBe("kids_toys_sport");
   });
 
-  it("maps Home Furnishings > Storage → storage_organization", () => {
-    expect(mapProductTypeToScope("Home Furnishings > Storage")).toBe("storage_organization");
+  // ── Bedroom & Decor
+  it("maps Home Furnishings > Bedroom → bedroom_decor (sub-path before parent)", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Bedroom")).toBe("bedroom_decor");
+  });
+
+  it("maps Bedding & Bath → bedroom_decor", () => {
+    expect(mapProductTypeToScope("Bedding & Bath")).toBe("bedroom_decor");
+  });
+
+  // ── Mobilier indoor (home_office merged)
+  it("maps Home Furnishings > Office → mobilier_indoor (home_office merged)", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Office")).toBe("mobilier_indoor");
+  });
+
+  it("maps Office Products → mobilier_indoor", () => {
+    expect(mapProductTypeToScope("Office Products")).toBe("mobilier_indoor");
+  });
+
+  it("maps Office Products > Office Desks → mobilier_indoor", () => {
+    expect(mapProductTypeToScope("Office Products > Office Desks")).toBe("mobilier_indoor");
   });
 
   it("maps Home Furnishings (no sub-path) → mobilier_indoor", () => {
@@ -72,24 +95,21 @@ describe("mapProductTypeToScope", () => {
     expect(mapProductTypeToScope("Furniture")).toBe("mobilier_indoor");
   });
 
-  it("maps null → mobilier_indoor (default)", () => {
-    expect(mapProductTypeToScope(null)).toBe("mobilier_indoor");
+  // ── Universal fallback
+  it("maps null → universal (default)", () => {
+    expect(mapProductTypeToScope(null)).toBe("universal");
   });
 
-  it("maps undefined → mobilier_indoor (default)", () => {
-    expect(mapProductTypeToScope(undefined)).toBe("mobilier_indoor");
+  it("maps undefined → universal (default)", () => {
+    expect(mapProductTypeToScope(undefined)).toBe("universal");
   });
 
-  it("maps empty string → mobilier_indoor (default)", () => {
-    expect(mapProductTypeToScope("")).toBe("mobilier_indoor");
+  it("maps empty string → universal (default)", () => {
+    expect(mapProductTypeToScope("")).toBe("universal");
   });
 
-  it("maps unknown product type → mobilier_indoor (default)", () => {
-    expect(mapProductTypeToScope("Health & Beauty")).toBe("mobilier_indoor");
-  });
-
-  it("maps Health & Beauty → mobilier_indoor (fallback for unmapped types)", () => {
-    expect(mapProductTypeToScope("Health & Beauty > Hair Care")).toBe("mobilier_indoor");
+  it("maps unknown product type → universal (fallback)", () => {
+    expect(mapProductTypeToScope("Health & Beauty")).toBe("universal");
   });
 });
 
@@ -201,9 +221,14 @@ describe("selectHook", () => {
     expect(mockRecordHookUsage).toHaveBeenCalledOnce();
   });
 
-  it("maps product type to scope correctly before querying", async () => {
+  it("maps Pet Supplies to pets scope before querying", async () => {
     await selectHook("FR", "Pet Supplies", null);
-    expect(mockSelectCompatibleHooks.mock.calls[0][0]).toBe("pets_kids");
+    expect(mockSelectCompatibleHooks.mock.calls[0][0]).toBe("pets");
+  });
+
+  it("maps Toys & Games to kids_toys_sport scope before querying", async () => {
+    await selectHook("FR", "Toys & Games", null);
+    expect(mockSelectCompatibleHooks.mock.calls[0][0]).toBe("kids_toys_sport");
   });
 
   it("passes language correctly to selectCompatibleHooks", async () => {
@@ -225,5 +250,45 @@ describe("selectHook", () => {
   it("throws when all fallbacks return empty", async () => {
     mockSelectCompatibleHooks.mockResolvedValue([]);
     await expect(selectHook("FR", "Home Furnishings", null)).rejects.toThrow("No hooks found");
+  });
+});
+
+// ─── HOOKS_SEED array validation ──────────────────────────────────────
+
+describe("HOOKS_SEED array", () => {
+  it("contains exactly 200 hooks (100 FR + 100 EN)", () => {
+    expect(HOOKS_SEED).toHaveLength(200);
+    expect(HOOKS_SEED.filter(h => h.language === "FR")).toHaveLength(100);
+    expect(HOOKS_SEED.filter(h => h.language === "EN")).toHaveLength(100);
+  });
+
+  it("covers all 7 expected scopes", () => {
+    const expectedScopes = ["universal", "mobilier_indoor", "outdoor_patio", "pets", "kids_toys_sport", "storage_kitchen", "bedroom_decor"];
+    const allScopes = new Set(HOOKS_SEED.flatMap(h => h.productScopes));
+    for (const scope of expectedScopes) {
+      expect(allScopes).toContain(scope);
+    }
+  });
+
+  it("has no duplicate texts within the same language", () => {
+    for (const lang of ["FR", "EN"] as const) {
+      const texts = HOOKS_SEED.filter(h => h.language === lang).map(h => h.text);
+      const unique = new Set(texts);
+      expect(unique.size).toBe(texts.length);
+    }
+  });
+
+  it("mobilier_indoor scope reaches ≥30 hooks per language (incl. multi-tagged)", () => {
+    const frMob = HOOKS_SEED.filter(h => h.language === "FR" && h.productScopes.includes("mobilier_indoor"));
+    const enMob = HOOKS_SEED.filter(h => h.language === "EN" && h.productScopes.includes("mobilier_indoor"));
+    expect(frMob.length).toBeGreaterThanOrEqual(30);
+    expect(enMob.length).toBeGreaterThanOrEqual(30);
+  });
+
+  it("universal hooks present in both languages (≥5 each, forms fallback pool)", () => {
+    const frUniv = HOOKS_SEED.filter(h => h.language === "FR" && h.productScopes.includes("universal"));
+    const enUniv = HOOKS_SEED.filter(h => h.language === "EN" && h.productScopes.includes("universal"));
+    expect(frUniv.length).toBeGreaterThanOrEqual(5);
+    expect(enUniv.length).toBeGreaterThanOrEqual(5);
   });
 });

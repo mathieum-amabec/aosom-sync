@@ -2,8 +2,9 @@
  * Hook Selector — picks a hook from the pool for a given product and language.
  *
  * Strategy:
- * - Map product_type → one of 6 scopes (outdoor_patio, storage_organization,
- *   mobilier_indoor, pets_kids, bedroom_bath, home_office). Unknown → "mobilier_indoor".
+ * - Map product_type → one of 7 scopes (outdoor_patio, storage_kitchen,
+ *   mobilier_indoor, pets, kids_toys_sport, bedroom_decor, universal).
+ *   home_office is merged into mobilier_indoor.
  * - Exclude the last 5 used categories (anti-repeat rotation).
  *   If no hooks survive exclusion, retry without exclusion.
  * - 60% pool (hook text verbatim as post opener), 40% generative_seeded.
@@ -19,11 +20,12 @@ import {
 
 export type ProductScope =
   | "outdoor_patio"
-  | "storage_organization"
+  | "storage_kitchen"
   | "mobilier_indoor"
-  | "pets_kids"
-  | "bedroom_bath"
-  | "home_office";
+  | "pets"
+  | "kids_toys_sport"
+  | "bedroom_decor"
+  | "universal";
 
 export interface HookSelection {
   hookId: number;
@@ -33,50 +35,57 @@ export interface HookSelection {
 }
 
 // ─── Product Type → Scope Mapping ────────────────────────────────────
+// Rules are matched in order — longest/most-specific prefix first.
 
 const SCOPE_RULES: Array<{ prefix: string; scope: ProductScope }> = [
+  // Pet Supplies
+  { prefix: "Pet Supplies", scope: "pets" },
+
+  // Kids Toys & Sports
+  { prefix: "Toys & Games", scope: "kids_toys_sport" },
+  { prefix: "Sports & Recreation", scope: "kids_toys_sport" },
+
+  // Outdoor & Patio
+  { prefix: "Patio & Garden", scope: "outdoor_patio" },
   { prefix: "Patio, Lawn & Garden", scope: "outdoor_patio" },
   { prefix: "Garden", scope: "outdoor_patio" },
   { prefix: "Outdoor", scope: "outdoor_patio" },
-  { prefix: "Storage & Organization", scope: "storage_organization" },
-  { prefix: "Storage", scope: "storage_organization" },
-  { prefix: "Organization", scope: "storage_organization" },
-  { prefix: "Pet Supplies", scope: "pets_kids" },
-  { prefix: "Pets", scope: "pets_kids" },
-  { prefix: "Toys & Games", scope: "pets_kids" },
-  { prefix: "Baby", scope: "pets_kids" },
-  { prefix: "Kids", scope: "pets_kids" },
-  { prefix: "Bedroom", scope: "bedroom_bath" },
-  { prefix: "Bath", scope: "bedroom_bath" },
-  { prefix: "Home Office", scope: "home_office" },
-  { prefix: "Office", scope: "home_office" },
-  // Home Furnishings sub-paths
-  { prefix: "Home Furnishings > Bedroom", scope: "bedroom_bath" },
-  { prefix: "Home Furnishings > Office", scope: "home_office" },
-  { prefix: "Home Furnishings > Storage", scope: "storage_organization" },
-  // Catch-all indoor furniture
+
+  // Bedroom & Decor — sub-paths before parent catch-all
+  { prefix: "Home Furnishings > Bedroom", scope: "bedroom_decor" },
+  { prefix: "Bedding & Bath", scope: "bedroom_decor" },
+  { prefix: "Home Décor", scope: "bedroom_decor" },
+  { prefix: "Holiday", scope: "bedroom_decor" },
+
+  // Storage & Kitchen — sub-paths before parent catch-all
+  { prefix: "Home Furnishings > Storage", scope: "storage_kitchen" },
+  { prefix: "Home Furnishings > Kitchen", scope: "storage_kitchen" },
+  { prefix: "Appliances", scope: "storage_kitchen" },
+
+  // Mobilier intérieur — home_office merged here, catch-all last
+  { prefix: "Home Furnishings > Living Room", scope: "mobilier_indoor" },
+  { prefix: "Home Furnishings > Dining", scope: "mobilier_indoor" },
+  { prefix: "Home Furnishings > Office", scope: "mobilier_indoor" },
   { prefix: "Home Furnishings", scope: "mobilier_indoor" },
+  { prefix: "Office Products", scope: "mobilier_indoor" },
   { prefix: "Furniture", scope: "mobilier_indoor" },
   { prefix: "Living", scope: "mobilier_indoor" },
   { prefix: "Dining", scope: "mobilier_indoor" },
-  { prefix: "Kitchen", scope: "mobilier_indoor" },
 ];
 
 export function mapProductTypeToScope(productType: string | null | undefined): ProductScope {
-  if (!productType) return "mobilier_indoor";
+  if (!productType || productType.trim().length === 0) return "universal";
   const normalized = productType.trim();
-  // Longest-prefix-first already guaranteed by order above (sub-paths before parent)
   for (const rule of SCOPE_RULES) {
     if (normalized.startsWith(rule.prefix)) return rule.scope;
   }
-  return "mobilier_indoor";
+  return "universal";
 }
 
 // ─── Core selection logic ─────────────────────────────────────────────
 
 function pickFromCandidates(candidates: ContentHook[]): ContentHook {
-  const idx = Math.floor(Math.random() * candidates.length);
-  return candidates[idx];
+  return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
 function applyModeSplit(candidates: ContentHook[]): ContentHook {
@@ -93,14 +102,14 @@ export async function selectHook(
   const scope = mapProductTypeToScope(productType);
   const recentCategoryIds = await getRecentHookCategoryIds(5);
 
-  // Try with exclusion first, then without if nothing matches
+  // Try with anti-repeat exclusion first, then without if empty
   let candidates = await selectCompatibleHooks(scope, language, recentCategoryIds);
   if (candidates.length === 0) {
     candidates = await selectCompatibleHooks(scope, language, []);
   }
-  // Last resort: any hook in this language
+  // Last resort: universal hooks only
   if (candidates.length === 0) {
-    candidates = await selectCompatibleHooks("mobilier_indoor", language, []);
+    candidates = await selectCompatibleHooks("universal", language, []);
   }
 
   if (candidates.length === 0) {
@@ -118,12 +127,12 @@ export async function selectHook(
   };
 }
 
-// ─── Prompt injection helper ──────────────────────────────────────────
+// ─── Prompt injection helpers ─────────────────────────────────────────
 
 /**
- * Build a hook-prepended prompt for Claude.
+ * Build a hook-prepended prompt for Claude (FR).
  *
- * pool mode: Claude is told to open the post with the exact hook text verbatim.
+ * pool mode: Claude opens the post with the exact hook text verbatim.
  * generative_seeded: Claude is given the hook's spirit but allowed to vary the wording.
  */
 export function buildHookedPrompt(basePrompt: string, hook: HookSelection): string {

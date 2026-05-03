@@ -180,6 +180,8 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_content_hooks_category ON content_hooks(category_id)`,
     `CREATE INDEX IF NOT EXISTS idx_content_hooks_lang ON content_hooks(language)`,
     `CREATE INDEX IF NOT EXISTS idx_content_hooks_used ON content_hooks(used_count, last_used_at)`,
+    // UNIQUE prevents double-seeding on concurrent cold starts
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_content_hooks_lang_text ON content_hooks(language, text)`,
     `CREATE TABLE IF NOT EXISTS hook_usage_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       hook_id INTEGER NOT NULL REFERENCES content_hooks(id),
@@ -1202,7 +1204,7 @@ export async function seedHooksIfEmpty(): Promise<void> {
 
   await db.batch(
     HOOKS_SEED.map((h) => ({
-      sql: `INSERT INTO content_hooks (category_id, language, text, product_scopes, mode) VALUES (?, ?, ?, ?, ?)`,
+      sql: `INSERT OR IGNORE INTO content_hooks (category_id, language, text, product_scopes, mode) VALUES (?, ?, ?, ?, ?)`,
       args: [h.categoryId, h.language, h.text, JSON.stringify(h.productScopes), h.mode],
     })),
     "write"
