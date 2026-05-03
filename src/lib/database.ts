@@ -1187,7 +1187,7 @@ export async function getHookById(id: number): Promise<ContentHook | null> {
 }
 
 export async function seedHooksIfEmpty(): Promise<void> {
-  const db = await ensureSchema();
+  const db = getDb();
   const countRow = await db.execute(`SELECT COUNT(*) as n FROM content_hooks`);
   const count = Number(rowToObj(countRow.rows[0]).n || 0);
   if (count > 0) return;
