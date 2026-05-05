@@ -1,138 +1,119 @@
 # Next session — après 24 avril 2026
 
 ---
-## 🌙 SESSION CLOSE — 05 mai soir
+## ✅ INCIDENT 06 mai RÉSOLU — Social cron débloqué après 4 jours de panne
 
-### Status global
+### Symptôme
+- 0 drafts FB générés depuis 01 mai (4 jours sans posts)
+- 304 drafts en DB tous avec hook_id=NULL (format pré-hook)
+- hook_usage_history vide
 
-- v0.1.20.1 shipped (PR #43, commit 797814f)
-- Bug C step 2 fix en prod, EN ATTENTE de validation
-- 244/245 tests verts (1 flaky pré-existant dans refresh-products-batch)
+### Cause racine identifiée (preuve directe)
+- ANTHROPIC_API_KEY dans Vercel env contenait `\n` parasite (110 chars vs 108)
+- Test API direct: clé 110 chars → authentication_error, 108 chars → 200 OK
+- Première hypothèse "modèle déprécié" RÉFUTÉE par test direct (modèle valide)
+- Vraie cause: clé corrompue, probablement re-saisie avec retour ligne vers 02 mai
 
-### ⏳ VALIDATION CRITIQUE — Demain matin (06 mai)
+### Fix appliqué
+- Aucun code modifié
+- Nouvelle clé Anthropic créée (Console)
+- Re-saisie clean dans Vercel Dashboard
+- Redeploy
 
-Bug C n'est PAS closed. Il faut 3 crons 06:00 UTC consécutifs healthy.
+### Validation prod (06 mai 14:30 UTC)
+- Trigger manuel cron `/api/cron/social` → 200 OK en 98s
+- **Premier hook de l'histoire** (hook_usage_history ids 1 et 2):
+  - FR: mode `generative_seeded` — Claude varie depuis seed du pool
+  - EN: mode `pool` — hook verbatim depuis pool
+- fr_caption: "Cuisiner devient un vrai plaisir..."
+- en_caption: "Some spaces change your mood the moment you walk in."
+- Format pré-hook ("COUP DE CŒUR") DISPARU
 
-**Action obligatoire au réveil** (3 min) :
+### Validation auto (07 mai 13:00 UTC)
+**À VÉRIFIER demain matin** — cron auto doit tourner sans intervention.
+
+### Apprentissages permanents
+1. **Toujours valider hypothèses avec preuve directe avant fix**
+   - Aujourd'hui: hypothèse "modèle déprécié" était plausible mais FAUSSE
+   - Sans test API direct, on aurait shippé un fix raté qui changeait le modèle pour rien
+2. **Vérifier env vars de length attendue**
+   - ANTHROPIC_API_KEY = 108 chars exact
+   - 110 chars = parasite (probablement \n du paste)
+3. **Vercel logs CLI ne montre que 100 dernières lignes**
+   - Pour debug cron éloigné dans le temps, utiliser dashboard ou queries DB
+4. **Cron Vercel se "pause" silencieusement après 2-3 échecs consécutifs**
+   - Pas un echec visible — disparaît juste des logs
+   - Toujours valider le succès post-deploy par trigger manuel
+
+### Backlog P3 (nouveaux items)
+- **hook_usage_history.product_scope_used absent du schema** (P3)
+  - Divergence vs spec validée 04 mai
+  - Pas critique pour la logique, mais perd traçabilité analytics
+  - À ajouter dans une session future
+
+---
+
+## ⏳ VALIDATIONS CRITIQUES DEMAIN MATIN (07 mai)
+
+### 1. Bug C cron 06:00 UTC (validation 2/3)
 
 ```sql
-SELECT
-  id, status, total_products, csv_source,
-  CAST((julianday(completed_at) - julianday(started_at)) * 86400 AS INTEGER) as duration_s,
-  timing_ms
+SELECT id, status, total_products,
+CAST((julianday(completed_at) - julianday(started_at)) * 86400 AS INTEGER) as duration_s,
+timing_ms
 FROM sync_runs
 WHERE date(started_at) = date('now')
-  AND time(started_at) BETWEEN '06:00:00' AND '06:10:00'
+AND time(started_at) BETWEEN '06:00:00' AND '06:10:00'
 ORDER BY started_at DESC LIMIT 1;
 ```
 
-**3 scénarios possibles :**
+Attendu: status='completed', duration_s entre 80-280s
+Actuel count: 1/3 (06 mai cron passé à 274s, marge 26s)
+Cible: 3/3 pour déclarer Bug C definitively closed
 
-🟢 **Scenario A (~85% probabilité)** — Cron passe
-- `status='completed'`
-- `duration_s` 80–150s
-- `toUpdate` count < 1000
-- `csv_source='blob_cache'`
-→ Réaction : 1/3 ✅. PAS de célébration. Continue chantier suivant.
+**À NOTER**: Bug C step 2 a fixé la pollution ETA, mais
+refreshProducts prend toujours 149s même avec 0 updates
+(architecture issue à investiguer dans une session future).
 
-🟡 **Scenario B (~10%)** — toUpdate réduit mais cron timeout encore
-- Status failed/zombie
-- toUpdate < 2000 (vs 5000 avant)
-→ Réaction : ETA fix a aidé mais autre champ pollue encore.
-   Plan B : investiguer `description` mismatch `[BRAND NAME]` (finding secondaire).
+### 2. Social cron auto 13:00 UTC (validation 1/3)
 
-🔴 **Scenario C (~5%)** — toUpdate reste élevé (>3000)
-- Status failed
-- toUpdate > 3000
-→ Réaction : champ non identifié. Investigation profonde 30 produits
-   stale, comparaison field-by-field DB vs CSV.
+```sql
+SELECT id, status, hook_id, content_type,
+substr(fr_caption, 1, 100) as fr_preview,
+created_at
+FROM facebook_drafts
+WHERE date(created_at) = date('now')
+AND time(created_at) BETWEEN '13:00:00' AND '13:05:00'
+ORDER BY created_at DESC LIMIT 3;
+```
 
-### 📋 Bug C diagnostic (référence)
+Attendu: au moins 1 draft, hook_id non-null, fr_caption variée
+Actuel: 1 draft manuel créé aujourd'hui (id=305)
+Cible: cron auto doit tourner sans intervention
 
-**Root cause identifié 05 mai matin :**
-- Aosom avance "Estimated Arrival Time" +1 jour quotidien pour ~2,197 produits in-stock
-- `hasChanged()` classait ces produits en `toUpdate`
-- `toUpdate` ballonait à ~5,000 daily
-- `refreshProducts` : 5 batches × 45s = 225s + 75s setup = 300s = Vercel kill
+---
 
-**Fix appliqué (PR #43, v0.1.20.1) :**
-- `estimated_arrival` exclu de `hasChanged()` dans `src/lib/product-diff.ts` (commenté, pas supprimé)
-- Champ toujours updated en upsert quand un produit change pour autre raison
-- Validation business : ETA pas utilisé Shopify display (confirmé 05 mai)
+## 🎯 Prochain chantier (au choix)
 
-**Math attendu après fix :**
-- `toUpdate` : ~5,000 → ~300/jour
-- Phase 1 duration : 300s → ~120s
-- Marge : 180s vs 300s limit
+Une fois validations OK, choisir:
 
-**Smoking gun preuve :**
-- SKU 01-0016 : DB `estimated_arrival = "2026-05-03"`, CSV `"2026-05-04"`, tout autre champ identique
-- Math exact : 5,000 produits = 5 batches × 1,000 (cut exact à 300s)
+1. **Quick win Dashboard "In store" indicator** (~1h)
+   - Sur Price Drops + Fastest Selling panels
+   - Aide curation: voir d'un coup d'œil ce qui est importé
 
-### 🎯 Prochain chantier (au choix une fois 1/3 crons OK)
-
-1. **Feature contenu non-produit** (~4-5h)
+2. **Feature contenu non-produit** (~4-5h)
    - 12 templates méga-store déjà cadrés (validé 05 mai)
    - 24 prompts FR/EN à écrire
    - Couverture 7 product scopes
-   - Distribution : 3 Education, 4 Inspiration, 3 Engagement, 2 Saisonnier
 
-2. **Dashboard indicator "In store" / "Not imported"** (~2-3h)
-   - Sur Price Drops & Fastest Selling panels
-   - Hover/click sur chaque produit
+3. **Bug C step 3 — investigation 149s mystery** (~2-3h)
+   - refreshProducts prend 149s même avec 0 updates
+   - Probablement architecture issue (itère sur tout avant de check)
+   - Pas urgent (cron passe à 274s avec marge 26s)
+   - Mais sécurise le futur
 
-3. **Catalogue sorting options** (~3-4h)
+4. **Catalogue sorting options** (~3-4h)
    - Best sellers, prix high/low, low stock, drop %
-
-4. **Bug C step 3** (si Scenario B/C demain)
-   - Investigation `description` ou autre champ quotidien
-
-### 🐛 Backlog post-session
-
-- **Validation Bug C (P0)** : 3 crons consécutifs (jour 1 : 06 mai, 06:00 UTC)
-- **Hook pool prod usage (P2)** : vérifier que Phase 4 social cron 13:00 UTC du 05 mai a utilisé un hook du pool
-- **draft_id NULL hook_usage_history (P3)** : traçabilité limitée
-- **flaky test refresh-products-batch (P3)** : timeout dans test isolation depuis hotfix deadlock `seedHooksIfEmpty`
-- **content-generator timeout (P3)** : 90s pattern à investiguer
-- **recordPriceChanges N+1 (P3)** : non-bottleneck nominal
-- **Layout asymétrique drafts rejected (P3)** : UI bug noted
-
-### 🧠 Apprentissages permanents
-
-1. **Ne pas célébrer avant validation prod réelle**
-   - Hier soir : "Bug C closed" déclaré sans cron 06:00 testé
-   - Aujourd'hui : nouveau timeout, frustration justifiée
-   - Désormais : 3 crons consécutifs healthy = closed
-
-2. **Investigation > spéculation quand frustré**
-   - 25 min d'investigation = root cause identifié avec preuve math
-   - Fix en 5 min
-   - Pattern : quand bloqué, investigue plus profond, pas plus vite
-
-3. **Multiple bottlenecks coexistent**
-   - Region YUL1 fixé blob fetch
-   - ETA pollution était le suivant
-   - `description` possible 3e si Scenario B
-   - Attaquer un par un avec preuve
-
-4. **`hasChanged()` = point de levier critique**
-   - Chaque champ ajouté multiplie `toUpdate` quotidien
-   - Règle : business-side ET ne change pas quotidiennement Aosom
-   - Documenter cette contrainte en haut du fichier (TODO future)
-
-### 📂 Resume command pour demain
-
-```bash
-cd ~/.gstack/projects/aosom-sync
-git checkout main && git pull origin main --ff-only
-```
-
-Dire à Claude :
-> "Reprise aosom-sync 06 mai. Lis docs/NEXT-SESSION.md.
-> Vérifier en priorité :
-> - Cron 06:00 UTC du 06 mai (Bug C step 2 validation)
-> - Selon résultat, suivre Scenario A/B/C dans NEXT-SESSION.md
-> - Une fois validation faite, attaquer chantier suivant"
 
 ---
 ## UPDATE 03 mai — v0.1.20.0 hook pool + hotfix deadlock ✅
