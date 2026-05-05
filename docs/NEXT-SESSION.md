@@ -1,38 +1,138 @@
 # Next session — après 24 avril 2026
 
 ---
-## UPDATE 05 mai — Bug C step 2 fix shipped (v0.1.20.1)
+## 🌙 SESSION CLOSE — 05 mai soir
 
-### Root cause Bug C (identifié 05 mai 2026)
+### Status global
 
-Aosom avance `Estimated Arrival Time` de 1 jour chaque matin pour ~2,197 produits in-stock.
-`hasChanged()` comparait ce champ comme string exacte → ~5,000 produits faussement en `toUpdate` quotidiennement.
-`refreshProducts` : 5 batches × 45s = 225s + 75s setup = 300s → killed par Vercel exactement au limit.
+- v0.1.20.1 shipped (PR #43, commit 797814f)
+- Bug C step 2 fix en prod, EN ATTENTE de validation
+- 244/245 tests verts (1 flaky pré-existant dans refresh-products-batch)
 
-### Fix appliqué
+### ⏳ VALIDATION CRITIQUE — Demain matin (06 mai)
 
-`estimated_arrival` exclu de `hasChanged()` dans `src/lib/product-diff.ts` (ligne commentée, pas supprimée).
-- Le champ est toujours écrit dans le upsert SQL quand un produit change pour une autre raison.
-- Validé non utilisé business-side par Mathieu (2026-05-05).
+Bug C n'est PAS closed. Il faut 3 crons 06:00 UTC consécutifs healthy.
 
-**Attendu après fix:**
-- `toUpdate` quotidien : ~5,000 → ~300 (vraies modifications price/qty)
-- Phase 1 duration : ~225s → ~120s (margin 180s vs limit 300s)
-
-### À valider 06 mai matin (cron 06:00 UTC)
+**Action obligatoire au réveil** (3 min) :
 
 ```sql
-SELECT status, timing_ms, created_at
+SELECT
+  id, status, total_products, csv_source,
+  CAST((julianday(completed_at) - julianday(started_at)) * 86400 AS INTEGER) as duration_s,
+  timing_ms
 FROM sync_runs
-ORDER BY created_at DESC
-LIMIT 3;
+WHERE date(started_at) = date('now')
+  AND time(started_at) BETWEEN '06:00:00' AND '06:10:00'
+ORDER BY started_at DESC LIMIT 1;
 ```
 
-Critères "Bug C definitively closed" : 3 crons consécutifs avec `status='completed'`.
+**3 scénarios possibles :**
 
-Si re-fail demain :
-- Investiguer description mismatch `[BRAND NAME]` (finding secondaire identifié)
-- Considérer Option 2 architecture : critical/metadata separation
+🟢 **Scenario A (~85% probabilité)** — Cron passe
+- `status='completed'`
+- `duration_s` 80–150s
+- `toUpdate` count < 1000
+- `csv_source='blob_cache'`
+→ Réaction : 1/3 ✅. PAS de célébration. Continue chantier suivant.
+
+🟡 **Scenario B (~10%)** — toUpdate réduit mais cron timeout encore
+- Status failed/zombie
+- toUpdate < 2000 (vs 5000 avant)
+→ Réaction : ETA fix a aidé mais autre champ pollue encore.
+   Plan B : investiguer `description` mismatch `[BRAND NAME]` (finding secondaire).
+
+🔴 **Scenario C (~5%)** — toUpdate reste élevé (>3000)
+- Status failed
+- toUpdate > 3000
+→ Réaction : champ non identifié. Investigation profonde 30 produits
+   stale, comparaison field-by-field DB vs CSV.
+
+### 📋 Bug C diagnostic (référence)
+
+**Root cause identifié 05 mai matin :**
+- Aosom avance "Estimated Arrival Time" +1 jour quotidien pour ~2,197 produits in-stock
+- `hasChanged()` classait ces produits en `toUpdate`
+- `toUpdate` ballonait à ~5,000 daily
+- `refreshProducts` : 5 batches × 45s = 225s + 75s setup = 300s = Vercel kill
+
+**Fix appliqué (PR #43, v0.1.20.1) :**
+- `estimated_arrival` exclu de `hasChanged()` dans `src/lib/product-diff.ts` (commenté, pas supprimé)
+- Champ toujours updated en upsert quand un produit change pour autre raison
+- Validation business : ETA pas utilisé Shopify display (confirmé 05 mai)
+
+**Math attendu après fix :**
+- `toUpdate` : ~5,000 → ~300/jour
+- Phase 1 duration : 300s → ~120s
+- Marge : 180s vs 300s limit
+
+**Smoking gun preuve :**
+- SKU 01-0016 : DB `estimated_arrival = "2026-05-03"`, CSV `"2026-05-04"`, tout autre champ identique
+- Math exact : 5,000 produits = 5 batches × 1,000 (cut exact à 300s)
+
+### 🎯 Prochain chantier (au choix une fois 1/3 crons OK)
+
+1. **Feature contenu non-produit** (~4-5h)
+   - 12 templates méga-store déjà cadrés (validé 05 mai)
+   - 24 prompts FR/EN à écrire
+   - Couverture 7 product scopes
+   - Distribution : 3 Education, 4 Inspiration, 3 Engagement, 2 Saisonnier
+
+2. **Dashboard indicator "In store" / "Not imported"** (~2-3h)
+   - Sur Price Drops & Fastest Selling panels
+   - Hover/click sur chaque produit
+
+3. **Catalogue sorting options** (~3-4h)
+   - Best sellers, prix high/low, low stock, drop %
+
+4. **Bug C step 3** (si Scenario B/C demain)
+   - Investigation `description` ou autre champ quotidien
+
+### 🐛 Backlog post-session
+
+- **Validation Bug C (P0)** : 3 crons consécutifs (jour 1 : 06 mai, 06:00 UTC)
+- **Hook pool prod usage (P2)** : vérifier que Phase 4 social cron 13:00 UTC du 05 mai a utilisé un hook du pool
+- **draft_id NULL hook_usage_history (P3)** : traçabilité limitée
+- **flaky test refresh-products-batch (P3)** : timeout dans test isolation depuis hotfix deadlock `seedHooksIfEmpty`
+- **content-generator timeout (P3)** : 90s pattern à investiguer
+- **recordPriceChanges N+1 (P3)** : non-bottleneck nominal
+- **Layout asymétrique drafts rejected (P3)** : UI bug noted
+
+### 🧠 Apprentissages permanents
+
+1. **Ne pas célébrer avant validation prod réelle**
+   - Hier soir : "Bug C closed" déclaré sans cron 06:00 testé
+   - Aujourd'hui : nouveau timeout, frustration justifiée
+   - Désormais : 3 crons consécutifs healthy = closed
+
+2. **Investigation > spéculation quand frustré**
+   - 25 min d'investigation = root cause identifié avec preuve math
+   - Fix en 5 min
+   - Pattern : quand bloqué, investigue plus profond, pas plus vite
+
+3. **Multiple bottlenecks coexistent**
+   - Region YUL1 fixé blob fetch
+   - ETA pollution était le suivant
+   - `description` possible 3e si Scenario B
+   - Attaquer un par un avec preuve
+
+4. **`hasChanged()` = point de levier critique**
+   - Chaque champ ajouté multiplie `toUpdate` quotidien
+   - Règle : business-side ET ne change pas quotidiennement Aosom
+   - Documenter cette contrainte en haut du fichier (TODO future)
+
+### 📂 Resume command pour demain
+
+```bash
+cd ~/.gstack/projects/aosom-sync
+git checkout main && git pull origin main --ff-only
+```
+
+Dire à Claude :
+> "Reprise aosom-sync 06 mai. Lis docs/NEXT-SESSION.md.
+> Vérifier en priorité :
+> - Cron 06:00 UTC du 06 mai (Bug C step 2 validation)
+> - Selon résultat, suivre Scenario A/B/C dans NEXT-SESSION.md
+> - Une fois validation faite, attaquer chantier suivant"
 
 ---
 ## UPDATE 03 mai — v0.1.20.0 hook pool + hotfix deadlock ✅
