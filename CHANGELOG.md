@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.1.20.1] - 2026-05-05
+## [0.1.20.1] - 2026-05-04
 
 ### Fixed
 - **Bug C step 2** — Exclude `estimated_arrival` from `hasChanged()` in `product-diff.ts`
