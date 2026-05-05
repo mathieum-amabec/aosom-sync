@@ -179,14 +179,40 @@ describe("diffProductsLight", () => {
     expect(result.toUpdate).toHaveLength(1);
   });
 
-  // Test 9: estimatedArrival change → toUpdate
-  it("classifies estimatedArrival change as toUpdate", () => {
-    const csv = [makeProduct({ estimatedArrival: "2 weeks" })];
-    const snap = makeMap(makeSnapshot({ estimated_arrival: "" }));
+  // Test 9: estimatedArrival change alone → unchanged (BUG-C-STEP2)
+  // Aosom advances this field by 1 day daily for ~2,197 in-stock products.
+  // Excluded from diff to prevent toUpdate from ballooning to 5,000+/day.
+  it("ignores estimatedArrival-only change (not a business-side field)", () => {
+    const csv = [makeProduct({ estimatedArrival: "2026-05-05" })];
+    const snap = makeMap(makeSnapshot({ estimated_arrival: "2026-05-04" }));
+
+    const result = diffProductsLight(csv, snap);
+
+    expect(result.toUpdate).toHaveLength(0);
+    expect(result.unchanged).toBe(1);
+  });
+
+  // Test 9b: ETA change + price change → toUpdate (price still triggers)
+  it("classifies product with ETA + price change as toUpdate (price wins)", () => {
+    const csv = [makeProduct({ estimatedArrival: "2026-05-05", price: 149.99 })];
+    const snap = makeMap(makeSnapshot({ estimated_arrival: "2026-05-04", price: 99.99 }));
 
     const result = diffProductsLight(csv, snap);
 
     expect(result.toUpdate).toHaveLength(1);
+    expect(result.unchanged).toBe(0);
+  });
+
+  // Test 9c: batch with only ETA differences → toUpdate empty
+  it("returns empty toUpdate for batch where only estimatedArrival differs", () => {
+    const skus = Array.from({ length: 10 }, (_, i) => `ETA-SKU-${i}`);
+    const csv = skus.map(sku => makeProduct({ sku, estimatedArrival: "2026-05-05" }));
+    const snap = makeMap(...skus.map(sku => makeSnapshot({ sku, estimated_arrival: "2026-05-04" })));
+
+    const result = diffProductsLight(csv, snap);
+
+    expect(result.toUpdate).toHaveLength(0);
+    expect(result.unchanged).toBe(10);
   });
 
   // Test 10: empty CSV + empty snapshot → all zeros

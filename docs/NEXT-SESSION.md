@@ -1,6 +1,40 @@
 # Next session — après 24 avril 2026
 
 ---
+## UPDATE 05 mai — Bug C step 2 fix shipped (v0.1.20.1)
+
+### Root cause Bug C (identifié 05 mai 2026)
+
+Aosom avance `Estimated Arrival Time` de 1 jour chaque matin pour ~2,197 produits in-stock.
+`hasChanged()` comparait ce champ comme string exacte → ~5,000 produits faussement en `toUpdate` quotidiennement.
+`refreshProducts` : 5 batches × 45s = 225s + 75s setup = 300s → killed par Vercel exactement au limit.
+
+### Fix appliqué
+
+`estimated_arrival` exclu de `hasChanged()` dans `src/lib/product-diff.ts` (ligne commentée, pas supprimée).
+- Le champ est toujours écrit dans le upsert SQL quand un produit change pour une autre raison.
+- Validé non utilisé business-side par Mathieu (2026-05-05).
+
+**Attendu après fix:**
+- `toUpdate` quotidien : ~5,000 → ~300 (vraies modifications price/qty)
+- Phase 1 duration : ~225s → ~120s (margin 180s vs limit 300s)
+
+### À valider 06 mai matin (cron 06:00 UTC)
+
+```sql
+SELECT status, timing_ms, created_at
+FROM sync_runs
+ORDER BY created_at DESC
+LIMIT 3;
+```
+
+Critères "Bug C definitively closed" : 3 crons consécutifs avec `status='completed'`.
+
+Si re-fail demain :
+- Investiguer description mismatch `[BRAND NAME]` (finding secondaire identifié)
+- Considérer Option 2 architecture : critical/metadata separation
+
+---
 ## UPDATE 03 mai — v0.1.20.0 hook pool + hotfix deadlock ✅
 
 ### Session (03 mai 2026)
