@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.20.1] - 2026-05-05
+
+### Fixed
+- **Bug C step 2** — Exclude `estimated_arrival` from `hasChanged()` in `product-diff.ts`
+  - Aosom advances `Estimated Arrival Time` by 1 day daily for ~2,197 in-stock products
+  - This inflated `toUpdate` to ~5,000 products/day, causing `refreshProducts` to hit the
+    Vercel 300s function limit (5 batches × 45s = 225s + 75s setup = 300s → killed)
+  - Field is not used business-side (Shopify display); exclusion validated 2026-05-05
+  - Products with genuine changes (price/qty/stock) still update their ETA in the same upsert
+  - Expected impact: `toUpdate` ~5,000 → ~300/day, Phase 1 ~120s (180s margin)
+
 ## [0.1.20.0] - 2026-05-04
 
 ### Added
