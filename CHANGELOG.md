@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.20.3] - 2026-05-07
+
+### Fixed
+- **Dashboard Trending Products** — "undefined/day" and "undefined left" displayed
+  - `TopSeller` interface expected `soldPerDay`, `currentQty`, `daysTracked`
+  - API was returning only `unitsMoved` — 3 fields rendered as undefined
+  - Fix: `database.ts` adds `p.qty AS current_qty` to SELECT; `route.ts` computes
+    `soldPerDay` (units_moved / 14), `currentQty`, `daysTracked: 14` server-side
+
+### Changed
+- Cleaned `TopSeller` interface — removed unused `color` and `productType` fields
+
 ## [0.1.20.2] - 2026-05-07
 
 ### Fixed

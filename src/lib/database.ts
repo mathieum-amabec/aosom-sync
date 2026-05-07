@@ -888,13 +888,14 @@ export async function getAllSettings(): Promise<Record<string, string>> {
 
 export interface TrendingProduct {
   sku: string; name: string; price: number; image1: string;
-  shopify_product_id: string | null; units_moved: number;
+  shopify_product_id: string | null; units_moved: number; current_qty: number;
 }
 
 export async function getTrendingProducts(limit = 10): Promise<TrendingProduct[]> {
   const db = await ensureSchema();
   const result = await db.execute({
     sql: `SELECT ph.sku, p.name, p.price, p.image1, p.shopify_product_id,
+           p.qty AS current_qty,
            SUM(ph.old_qty - ph.new_qty) as units_moved
     FROM price_history ph JOIN products p ON ph.sku = p.sku
     WHERE ph.change_type = 'stock_change'
@@ -912,6 +913,7 @@ export async function getTrendingProducts(limit = 10): Promise<TrendingProduct[]
       image1: (o.image1 as string) || "",
       shopify_product_id: (o.shopify_product_id as string) || null,
       units_moved: Number(o.units_moved) || 0,
+      current_qty: Number(o.current_qty) || 0,
     };
   });
 }
