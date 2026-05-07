@@ -60,6 +60,32 @@ describe("CSV Parser", () => {
     }
   });
 
+  // BUG-C-STEP3: unknown brands (not in KNOWN_BRANDS list) must return "Aosom",
+  // not the first word of the name. The fixture's first product (720-021) has name
+  // "Commercial Janitorial Cart..." — a non-Aosom brand. Before the fix, brand was
+  // "Commercial"; after the fix it must be "Aosom" to align with DB historical data.
+  it("returns 'Aosom' for unknown brand names (BUG-C-STEP3 fallback)", () => {
+    const csv = `"SKU","Image","Name","Price","custom_tagid","Category","Qty","color","size","short_description","Images","description","Gtin","Weight","Length","Width","Height","Psin","Product_Type","Sin","Estimated Arrival Time","Out Of Stock Expected","pdf","Material","Package_Num","Image1","Image2","Image3","Image4","Image5","Image6","Image7","Box_Size","Box_Weight","Video"
+UNKNOWN-001,,Commercial Janitorial Cart Model X,99.99,,,5,,,,,,,,,,,,,,,,,,,,,,,,,,
+UNKNOWN-002,,10x13ft Steel Gazebo Patio Kit,199.99,,,10,,,,,,,,,,,,,,,,,,,,,,,,,,`;
+    const products = parseTsv(csv);
+    expect(products).toHaveLength(2);
+    expect(products[0].brand).toBe("Aosom");
+    expect(products[1].brand).toBe("Aosom");
+  });
+
+  it("preserves known brand names (Outsunny, HomCom, etc.) unchanged", () => {
+    const csv = `"SKU","Image","Name","Price","custom_tagid","Category","Qty","color","size","short_description","Images","description","Gtin","Weight","Length","Width","Height","Psin","Product_Type","Sin","Estimated Arrival Time","Out Of Stock Expected","pdf","Material","Package_Num","Image1","Image2","Image3","Image4","Image5","Image6","Image7","Box_Size","Box_Weight","Video"
+OUT-001,,Outsunny Patio Lounge Set,249.99,,,3,,,,,,,,,,,,,,,,,,,,,,,,,,
+HC-001,,HomCom Office Chair Ergonomic,179.99,,,8,,,,,,,,,,,,,,,,,,,,,,,,,,
+PH-001,,PawHut Dog Crate Medium,89.99,,,15,,,,,,,,,,,,,,,,,,,,,,,,,,`;
+    const products = parseTsv(csv);
+    expect(products).toHaveLength(3);
+    expect(products[0].brand).toBe("Outsunny");
+    expect(products[1].brand).toBe("HomCom");
+    expect(products[2].brand).toBe("PawHut");
+  });
+
   it("handles empty/missing fields gracefully", () => {
     const csv = `"SKU","Image","Name","Price","custom_tagid","Category","Qty","color","size","short_description","Images","description","Gtin","Weight","Length","Width","Height","Psin","Product_Type","Sin","Estimated Arrival Time","Out Of Stock Expected","pdf","Material","Package_Num","Image1","Image2","Image3","Image4","Image5","Image6","Image7","Box_Size","Box_Weight","Video"
 TEST-001,,"Test Product",99.99,,,5,,,,,,,,,,,,,,,,,,,,,,,,,`;

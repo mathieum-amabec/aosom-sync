@@ -169,14 +169,28 @@ describe("diffProductsLight", () => {
     expect(result.removed).toEqual(["GONE"]);
   });
 
-  // Test 8: out_of_stock_expected change → toUpdate
-  it("classifies outOfStockExpected change as toUpdate", () => {
-    const csv = [makeProduct({ outOfStockExpected: "2026-06-01" })];
+  // Test 8: out_of_stock_expected change alone → unchanged (BUG-C-STEP3)
+  // "Low Stock Alert" string, 204/10,731 products (1.9%), not used business-side.
+  // Excluded from diff for same rationale as estimatedArrival (BUG-C-STEP2).
+  it("ignores outOfStockExpected-only change (not a business-side field)", () => {
+    const csv = [makeProduct({ outOfStockExpected: "Low Stock Alert" })];
     const snap = makeMap(makeSnapshot({ out_of_stock_expected: "" }));
 
     const result = diffProductsLight(csv, snap);
 
+    expect(result.toUpdate).toHaveLength(0);
+    expect(result.unchanged).toBe(1);
+  });
+
+  // Test 8b: OOS change + price change → toUpdate (price still triggers)
+  it("classifies product with OOS + price change as toUpdate (price wins)", () => {
+    const csv = [makeProduct({ outOfStockExpected: "Low Stock Alert", price: 149.99 })];
+    const snap = makeMap(makeSnapshot({ out_of_stock_expected: "", price: 99.99 }));
+
+    const result = diffProductsLight(csv, snap);
+
     expect(result.toUpdate).toHaveLength(1);
+    expect(result.unchanged).toBe(0);
   });
 
   // Test 9: estimatedArrival change alone → unchanged (BUG-C-STEP2)

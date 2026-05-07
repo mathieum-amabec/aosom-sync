@@ -2,6 +2,28 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.20.2] - 2026-05-07
+
+### Fixed
+- **Bug C step 3** — Brand extraction inconsistency causing ~7,500 false positive description diffs daily
+  - Root cause: `csv-fetcher.ts` `extractBrand()` returned the first word of the product name
+    for unknown brands (e.g., `"Commercial"`, `"10x13ft"`, `"Cosmetic"`), but the DB stored
+    `"Aosom"` for these same 9,700/10,731 products (91%)
+  - Daily mismatch inflated `toWrite` to ~9,000 products (vs ~2,500 real changes),
+    causing `refreshProducts` to take 204s and Phase 1 to exceed the Vercel 300s timeout
+  - Fix: unknown brands now always return `"Aosom"`, aligned with DB historical data
+  - Known brands (Outsunny, HomCom, PawHut…) are NOT affected
+  - Math: `toWrite` ~9,000 → ~2,500, `refreshProducts` 204s → ~81s, Phase 1 ~204s → ~140s
+- **Bonus** — Exclude `out_of_stock_expected` from `hasChanged()` diff
+  - Field contains `"Low Stock Alert"` string (not date-based), only 204/10,731 products (1.9%)
+  - Not used business-side (Shopify display). Safe to exclude (same rationale as BUG-C-STEP2)
+  - Field still written during upsert when a product changes for another reason
+
+### Tests
+- Updated Test 8 in `product-diff.test.ts` — OOS-only change now yields `unchanged` (not `toUpdate`)
+- Added Test 8b — OOS + price change still triggers `toUpdate` (price wins)
+- Added 2 tests in `csv-fetcher.test.ts` — unknown brand fallback → `"Aosom"`, known brands preserved
+
 ## [0.1.20.1] - 2026-05-04
 
 ### Fixed
