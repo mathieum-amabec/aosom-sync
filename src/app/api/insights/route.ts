@@ -35,7 +35,9 @@ export async function GET(request: Request) {
       name: t.name,
       image: t.image1 || "",
       price: t.price,
-      unitsMoved: t.units_moved,
+      currentQty: t.current_qty,
+      soldPerDay: +(t.units_moved / 14).toFixed(1),
+      daysTracked: 14,
       inStore: !!t.shopify_product_id,
     }));
 

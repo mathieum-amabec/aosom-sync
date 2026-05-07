@@ -7,7 +7,7 @@ interface PriceChange {
   sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string; inStore: boolean;
 }
 interface TopSeller {
-  sku: string; name: string; image: string; color: string; productType: string; price: number;
+  sku: string; name: string; image: string; price: number;
   currentQty: number; soldPerDay: number; daysTracked: number; inStore: boolean;
 }
 
