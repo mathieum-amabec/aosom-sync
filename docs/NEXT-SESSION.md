@@ -1,6 +1,32 @@
 # Next session — après 24 avril 2026
 
 ---
+## SESSION 07 mai après-midi — Trending fix shipped (v0.1.20.3)
+
+### Bug fixed
+- Dashboard Trending Products: "undefined/day" et "undefined left"
+- Mismatch interface vs API response
+- 3 fichiers modifiés:
+  - `database.ts`: ajout `p.qty AS current_qty` dans `getTrendingProducts`
+  - `route.ts`: calcul `soldPerDay`/`currentQty`/`daysTracked` côté API
+  - `dashboard-client.tsx`: cleanup interface `TopSeller` (`color`/`productType` retirés)
+- 3 tests ajoutés (250/251)
+
+### V1 simplification appliquée
+- `soldPerDay = unitsMoved / 14` (fenêtre fixe)
+- Pour produits récents (< 14 jours), valeur sous-estimée
+- Acceptable pour V1
+
+### V2 enhancement (P3 backlog)
+- Calculer `soldPerDay` avec `daysSinceFirstSeen` précis
+- Effort: 15-20 min en session future
+- Priorité: P3 (cosmétique, pas urgent)
+
+### Validation visuelle confirmée
+- Dashboard Trending Products affiche maintenant chiffres réels
+- Format: `$XX.XX | N left` + `X.X/day · 14d tracked`
+
+---
 ## SESSION 07 mai — Bug C step 3 SHIPPED (v0.1.20.2)
 
 ### Root cause finally identified (after 17 days)
