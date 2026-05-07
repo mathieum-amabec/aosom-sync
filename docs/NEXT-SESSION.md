@@ -1,6 +1,82 @@
 # Next session — après 24 avril 2026
 
 ---
+## SESSION 07 mai — Bug C step 3 SHIPPED (v0.1.20.2)
+
+### Root cause finally identified (after 17 days)
+- Step 1 (region YUL1): blob fetch fixed
+- Step 2 (ETA exclusion): one volatile field excluded
+- Step 3 (brand fix): the REAL root cause = code inconsistency
+  between csv-fetcher.ts (returned firstWord) and DB historical
+  data (stored "Aosom")
+- 7,500 false positive description diffs daily eliminated
+
+### Fix
+- 2 lines changed (csv-fetcher.ts + product-diff.ts)
+- Math: toWrite ~9,000 → ~2,500
+- Phase 1: 204s → ~140s estimated
+
+### VALIDATION CRITIQUE — 3 crons consécutifs healthy
+- 08 mai 06:00 UTC: 1/3
+- 09 mai 06:00 UTC: 2/3
+- 10 mai 06:00 UTC: 3/3
+→ Bug C definitively closed après 3 jours healthy
+
+### Action morning routine (chaque matin):
+```sql
+SELECT id, status, total_products,
+  CAST((julianday(completed_at) - julianday(started_at)) * 86400 AS INTEGER) as duration_s,
+  timing_ms
+FROM sync_runs
+WHERE date(started_at) = date('now')
+  AND time(started_at) BETWEEN '06:00:00' AND '06:10:00'
+ORDER BY started_at DESC LIMIT 1;
+```
+
+Critère par jour:
+- status = 'completed' ✅
+- duration_s < 150s ✅
+- toWrite < 500 (real changes only)
+
+### Plan B — Variante B chunked (backlog)
+Si Phase 1 commence à dépasser 250s dans le futur:
+
+Trigger:
+- 3+ crons 06:00 UTC > 250s dans une semaine
+- OU catalogue dépasse 15,000 produits
+- OU duration_s grimpe sans raison apparente
+
+Action:
+- Implémenter chunked Phase 1 sur 24h spread (Variante B)
+- Effort estimé: 4-5h en session dédiée
+- Plan détaillé documenté dans memory Claude (sessions 06-07 mai)
+
+### Apprentissages permanents (saga 17 jours)
+1. **Patches successifs cachent la vraie cause root**
+   - Step 1 (region) résolu un symptôme (blob fetch)
+   - Step 2 (ETA) résolu un autre symptôme
+   - Step 3 (brand) = vraie cause révélée par investigation rigoureuse
+   - **Sans investigation field-by-field, on aurait shippé Variante B inutilement**
+
+2. **Investigation field-by-field obligatoire** quand bug récurrent
+   - Pas spéculer "c'est probablement X"
+   - Comparer DB vs CSV pour 5-10+ produits réels
+   - Identifier TOP 3 champs avec diffs
+
+3. **Bug peut venir d'incohérence interne du code**, pas de Aosom externe
+   - Code A (csv-fetcher) + Code B (DB schema) doivent rester cohérents
+   - Refactor parallèle peut désynchroniser silencieusement
+
+4. **Discipline anti-célébration**
+   - "Closed" = 3 crons consécutifs healthy
+   - Pas avant
+   - 17 jours de saga = 3 jours de patience pour validation
+
+5. **GitHub auth peut expirer en milieu de session**
+   - PAT (Personal Access Token) plus stable que device flow
+   - À documenter dans setup local
+
+---
 ## ✅ INCIDENT 06 mai RÉSOLU — Social cron débloqué après 4 jours de panne
 
 ### Symptôme
