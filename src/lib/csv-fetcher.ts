@@ -200,7 +200,12 @@ function extractBrand(name: string): string {
       return brand;
     }
   }
-  // Fallback: first word
-  const firstWord = name.split(/\s+/)[0];
-  return firstWord || "Aosom";
+  // BUG-C-STEP3 (2026-05-07): Unknown brands always return "Aosom" to align with DB
+  // historical data. The previous firstWord fallback returned values like "Commercial",
+  // "10x13ft", "Cosmetic" for 9,700/10,731 products (91%), but the DB stored "Aosom"
+  // for these same products. This caused ~7,500 false positive description diffs daily,
+  // inflating toWrite to ~9,000 and refreshProducts to 204s (Vercel 300s timeout).
+  // Known brands (Outsunny, HomCom, PawHut…) are NOT affected — the loop above returns
+  // before reaching this fallback.
+  return "Aosom";
 }
