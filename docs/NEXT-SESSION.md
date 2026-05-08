@@ -1,6 +1,28 @@
 # Next session — après 24 avril 2026
 
 ---
+## SESSION 08 mai après-midi — CRON_SECRET rotation + cleanup
+
+### Action de sécurité
+- CRON_SECRET leaked dans docs/NEXT-SESSION.md (ajouté dans la session du matin)
+- Rotation immédiate dans Vercel env vars ✅
+- Cleanup secret du repo (remplacé par `$CRON_SECRET`) ✅
+- Force redeploy → a réveillé le cron Vercel auto-pausé
+
+### Validation finale
+- Trigger manuel `/api/cron/social`: HTTP 200 ✅
+- hook_usage_history: 3 → 4 ✅
+
+### Validation J+1 (09 mai)
+- Bug C cron 06:00 UTC: validation 2/3 attendue
+- Social cron auto 13:00 UTC: a-t-il tourné? (sera 1/3 healthy si oui)
+- Si non → re-investiguer Vercel cron pause
+
+### Apprentissages permanents
+6. **Ne JAMAIS coller un secret dans docs** — même un curl example; utiliser `$CRON_SECRET` ou `<token>`
+7. **Vercel cron auto-pause nécessite Resume manuel ou redeploy** — un nouveau deploy ne réactive pas automatiquement un cron pausé après 504s
+
+---
 ## SESSION 08 mai — Social cron 504 fix shipped (v0.1.20.4) + sync-race guard
 
 ### What shipped
