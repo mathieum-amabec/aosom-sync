@@ -585,6 +585,7 @@ export async function getProducts(filters: {
   const offset = (page - 1) * limit;
 
   let orderBy = "name ASC";
+  let joinSort: "best_sellers" | "price_drop" | null = null;
   switch (filters.sort) {
     case "price_asc": orderBy = "price ASC"; break;
     case "price_desc": orderBy = "price DESC"; break;
@@ -593,18 +594,54 @@ export async function getProducts(filters: {
     case "name_asc": orderBy = "name ASC"; break;
     case "name_desc": orderBy = "name DESC"; break;
     case "low_stock": orderBy = "CASE WHEN qty > 0 THEN 0 ELSE 1 END, qty ASC"; break;
+    case "best_sellers": joinSort = "best_sellers"; break;
+    case "price_drop": joinSort = "price_drop"; break;
   }
 
   // Select only columns the catalog UI needs
   const catalogColumns = "sku, name, price, qty, color, product_type, image1, shopify_product_id";
 
+  // Price-history sorts use a CTE + LEFT JOIN: `filtered` applies all WHERE conditions,
+  // `ph_agg` aggregates price_history for the last 14 days.
+  // COALESCE(…, 0) keeps products without history at the bottom of the list.
+  const cutoff14d = Math.floor(Date.now() / 1000) - 14 * 86400;
+  let productsSql: string;
+  let productsArgs: (string | number)[];
+
+  if (joinSort === "best_sellers") {
+    productsSql = `
+      WITH filtered AS (SELECT ${catalogColumns} FROM products ${where}),
+      ph_agg AS (
+        SELECT sku, SUM(old_qty - new_qty) AS units_moved
+        FROM price_history WHERE detected_at > ? GROUP BY sku
+      )
+      SELECT f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id
+      FROM filtered f LEFT JOIN ph_agg ON ph_agg.sku = f.sku
+      ORDER BY COALESCE(ph_agg.units_moved, 0) DESC LIMIT ? OFFSET ?`;
+    productsArgs = [...args, cutoff14d, limit, offset];
+  } else if (joinSort === "price_drop") {
+    productsSql = `
+      WITH filtered AS (SELECT ${catalogColumns} FROM products ${where}),
+      ph_agg AS (
+        SELECT ph.sku,
+          ROUND(((MAX(ph.old_price) - MIN(p2.price)) / MAX(ph.old_price)) * 100.0, 1) AS drop_pct
+        FROM price_history ph JOIN products p2 ON p2.sku = ph.sku
+        WHERE ph.detected_at > ? AND ph.old_price > p2.price
+        GROUP BY ph.sku
+      )
+      SELECT f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id
+      FROM filtered f LEFT JOIN ph_agg ON ph_agg.sku = f.sku
+      ORDER BY COALESCE(ph_agg.drop_pct, 0) DESC LIMIT ? OFFSET ?`;
+    productsArgs = [...args, cutoff14d, limit, offset];
+  } else {
+    productsSql = `SELECT ${catalogColumns} FROM products ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
+    productsArgs = [...args, limit, offset];
+  }
+
   // Run count + data in parallel (2 round trips instead of 3)
   const [countResult, productsResult] = await Promise.all([
     db.execute({ sql: `SELECT COUNT(*) as cnt FROM products ${where}`, args }),
-    db.execute({
-      sql: `SELECT ${catalogColumns} FROM products ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
-      args: [...args, limit, offset],
-    }),
+    db.execute({ sql: productsSql, args: productsArgs }),
   ]);
 
   const total = Number(rowToObj(countResult.rows[0]).cnt) || 0;

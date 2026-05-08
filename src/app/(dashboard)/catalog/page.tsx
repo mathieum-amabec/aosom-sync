@@ -182,6 +182,8 @@ export default function CatalogPage() {
             className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="">Sort by name</option>
+            <option value="best_sellers">Best sellers (14j)</option>
+            <option value="price_drop">Price drop %</option>
             <option value="price_asc">Price: low to high</option>
             <option value="price_desc">Price: high to low</option>
             <option value="qty_asc">Stock: low first</option>

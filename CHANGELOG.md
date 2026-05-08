@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.21.0] - 2026-05-08
+
+### Added
+- **Catalogue sort options** — 2 new sort options on `/catalog`:
+  - **Best sellers (14j)**: products with most units moved in the last 14 days (SUM of `old_qty - new_qty` from `price_history`)
+  - **Price drop %**: products with the largest price decrease in the last 14 days (MAX drop % calculated from `price_history`)
+- Both sorts use CTE + LEFT JOIN on `price_history` — NULL-safe (`COALESCE(…, 0)` pushes products without history to the bottom)
+- Performance: <1s on 18k+ `price_history` rows — `idx_price_history_sku` and `idx_price_history_detected_at` indexes already in place
+- Supports import curation: identify what's selling on Aosom (not yet in store) and current Aosom price drops to exploit
+
 ## [0.1.20.4] - 2026-05-08
 
 ### Fixed
