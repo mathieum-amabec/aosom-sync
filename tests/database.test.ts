@@ -428,4 +428,24 @@ describe("getEligibleHighlightProduct SQL logic (two-step pattern)", () => {
     expect((rows[0] as Record<string, unknown>).name).toBe("Product X");
     expect((rows[0] as Record<string, unknown>).price).toBe(99.99);
   });
+
+  it("selects from multi-SKU pool — JS random pick is one of the eligible SKUs", async () => {
+    const cutoff = now - 30 * 86400;
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-1", "P1", 10, 5, "shop-1", null] });
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-2", "P2", 20, 3, "shop-2", null] });
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-3", "P3", 30, 1, "shop-3", null] });
+    const { rows } = await db.execute({ sql: `SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND qty > 0 AND (last_posted_at IS NULL OR last_posted_at < ?)`, args: [cutoff] });
+    expect(rows).toHaveLength(3);
+    const skus = rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
+    const randomSku = skus[Math.floor(Math.random() * skus.length)];
+    expect(["SKU-1", "SKU-2", "SKU-3"]).toContain(randomSku);
+  });
+
+  it("second-step fetch returns empty when SKU was removed between steps (TOCTOU)", async () => {
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-GONE", "Gone", 10, 5, "shop-gone", null] });
+    // Simulate TOCTOU: SKU appears in step-1 results but is deleted before step-2
+    await db.execute({ sql: `DELETE FROM products WHERE sku = ?`, args: ["SKU-GONE"] });
+    const { rows } = await db.execute({ sql: `SELECT * FROM products WHERE sku = ?`, args: ["SKU-GONE"] });
+    expect(rows).toHaveLength(0); // function returns null in this case
+  });
 });
