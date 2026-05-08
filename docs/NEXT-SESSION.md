@@ -295,8 +295,8 @@ Une fois validations OK, choisir:
    - Pas urgent (cron passe à 274s avec marge 26s)
    - Mais sécurise le futur
 
-4. **Catalogue sorting options** (~3-4h)
-   - Best sellers, prix high/low, low stock, drop %
+4. ~~**Catalogue sorting options** (~3-4h)~~ ✅ Shipped in v0.1.21.0
+   - Best sellers (14d) + Price drop % added to /catalog
 
 ---
 ## UPDATE 03 mai — v0.1.20.0 hook pool + hotfix deadlock ✅

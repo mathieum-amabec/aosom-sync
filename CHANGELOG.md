@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.21.0] - 2026-05-08
+
+### Added
+- **Catalogue sort options** — 2 new sort options on `/catalog`:
+  - **Best sellers (14d)**: products with most units sold in the last 14 days, ranked by `SUM(old_qty - new_qty)` from `stock_change` events in `price_history`. Products with no sales history rank last.
+  - **Price drop %**: products with the largest price decrease in the last 14 days, ranked by `(MAX(old_price) - current_price) / MAX(old_price)` from `price_drop` events. Products with no price drop rank last.
+- Products with no history in the last 14 days always rank last — so results stay meaningful even when half the catalogue has no recent activity
+- Supports import curation: identify what's selling on Aosom (not yet imported) and products with active price drops to exploit
+
+### Fixed
+- **Best sellers sort accuracy**: excluded restock entries (`old_qty < new_qty`) from units-moved calculation — restocks would have inflated the negative contribution and pushed heavily-restocked products to the bottom
+- **Price drop sort accuracy**: added `change_type = 'price_drop'` filter to exclude stock-change rows where `old_price > current_price` (incidental match, not an actual price drop event); added `old_price > 0` guard for division-by-zero safety
+
 ## [0.1.20.4] - 2026-05-08
 
 ### Fixed
