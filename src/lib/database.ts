@@ -122,7 +122,7 @@ async function _initSchemaImpl(): Promise<void> {
       created_at INTEGER DEFAULT (strftime('%s','now')),
       last_login_at INTEGER
     )`,
-    /* content_type: 'product' | 'informative' | 'entertaining' | 'engagement'
+    /* content_type: 'education' | 'inspiration' | 'engagement' | 'seasonal'
        Constraint enforced at application layer — SQLite ALTER TABLE cannot add CHECK constraints */
     `CREATE TABLE IF NOT EXISTS content_templates (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +134,8 @@ async function _initSchemaImpl(): Promise<void> {
       prompt_pattern_en TEXT NOT NULL,
       image_strategy TEXT NOT NULL,
       active INTEGER NOT NULL DEFAULT 1,
+      frequency_per_month INTEGER NOT NULL DEFAULT 2,
+      scopes TEXT NOT NULL DEFAULT '[]',
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )`,
@@ -246,6 +248,20 @@ async function _initSchemaImpl(): Promise<void> {
     await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
   }
 
+  // content_templates column migration (frequency_per_month + scopes added in megastore spec)
+  const ctInfo = await db.execute(`PRAGMA table_info(content_templates)`);
+  const ctCols = new Set(ctInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  const ctAlters: string[] = [];
+  if (!ctCols.has("frequency_per_month")) {
+    ctAlters.push(`ALTER TABLE content_templates ADD COLUMN frequency_per_month INTEGER NOT NULL DEFAULT 2`);
+  }
+  if (!ctCols.has("scopes")) {
+    ctAlters.push(`ALTER TABLE content_templates ADD COLUMN scopes TEXT NOT NULL DEFAULT '[]'`);
+  }
+  if (ctAlters.length > 0) {
+    await db.batch(ctAlters.map(sql => ({ sql, args: [] })), "write");
+  }
+
   // Idempotent users.role migration — ALTER TABLE ADD COLUMN with a default.
   // Existing rows get 'admin' to preserve backwards compatibility for the
   // original AUTH_PASSWORD-seeded admin user.
@@ -294,28 +310,29 @@ async function _initSchemaImpl(): Promise<void> {
     "write"
   );
 
-  // Seed content templates — INSERT OR IGNORE preserves manually-edited prompts on re-run
-  const contentTemplates: Array<{ slug: string; content_type: string; display_name_fr: string; display_name_en: string; prompt_fr: string; prompt_en: string; image_strategy: string }> = [
-    { slug: 'seasonal_tip', content_type: 'informative', display_name_fr: 'Conseil saisonnier', display_name_en: 'Seasonal tip', image_strategy: 'text_overlay', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 100-200 words informative tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 100-200 words informative tone' },
-    { slug: 'mistake_listicle', content_type: 'informative', display_name_fr: 'Erreurs courantes', display_name_en: 'Common mistakes', image_strategy: 'text_overlay', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 100-200 words informative tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 100-200 words informative tone' },
-    { slug: 'myth_vs_reality', content_type: 'informative', display_name_fr: 'Mythe vs réalité', display_name_en: 'Myth vs reality', image_strategy: 'text_overlay', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 100-200 words informative tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 100-200 words informative tone' },
-    { slug: 'product_comparison', content_type: 'informative', display_name_fr: 'Comparatif éducatif', display_name_en: 'Educational comparison', image_strategy: 'text_overlay', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 100-200 words informative tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 100-200 words informative tone' },
-    { slug: 'relatable_meme', content_type: 'entertaining', display_name_fr: 'Meme relatable', display_name_en: 'Relatable meme', image_strategy: 'random_product', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 30-80 words humor/relatable tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 30-80 words humor/relatable tone' },
-    { slug: 'pov_scenario', content_type: 'entertaining', display_name_fr: 'POV scénario', display_name_en: 'POV scenario', image_strategy: 'random_product', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 30-80 words humor/relatable tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 30-80 words humor/relatable tone' },
-    { slug: 'nostalgic_throwback', content_type: 'entertaining', display_name_fr: 'Nostalgie déco', display_name_en: 'Decor nostalgia', image_strategy: 'none', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 30-80 words humor/relatable tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 30-80 words humor/relatable tone' },
-    { slug: 'design_quote', content_type: 'entertaining', display_name_fr: 'Citation design', display_name_en: 'Design quote', image_strategy: 'text_overlay', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 30-80 words humor/relatable tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 30-80 words humor/relatable tone' },
-    { slug: 'this_or_that', content_type: 'engagement', display_name_fr: 'Ceci ou cela', display_name_en: 'This or that', image_strategy: 'random_product', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 40-80 words engagement question tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 40-80 words engagement question tone' },
-    { slug: 'guess_the_price', content_type: 'engagement', display_name_fr: 'Devine le prix', display_name_en: 'Guess the price', image_strategy: 'random_product', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 40-80 words engagement question tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 40-80 words engagement question tone' },
-    { slug: 'caption_this', content_type: 'engagement', display_name_fr: 'Trouve la caption', display_name_en: 'Caption this', image_strategy: 'random_product', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 40-80 words engagement question tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 40-80 words engagement question tone' },
-    { slug: 'unpopular_opinion', content_type: 'engagement', display_name_fr: 'Opinion impopulaire', display_name_en: 'Unpopular opinion', image_strategy: 'none', prompt_fr: 'TODO: writing session — Ameublo Direct (FR), persona Quebec, 40-80 words engagement question tone', prompt_en: 'TODO: writing session — Furnish Direct (EN), persona neutral Canadian, 40-80 words engagement question tone' },
-  ];
-  await db.batch(
-    contentTemplates.map(t => ({
-      sql: `INSERT OR IGNORE INTO content_templates (slug, content_type, display_name_fr, display_name_en, prompt_pattern_fr, prompt_pattern_en, image_strategy) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: [t.slug, t.content_type, t.display_name_fr, t.display_name_en, t.prompt_fr, t.prompt_en, t.image_strategy],
-    })),
-    "write"
+  // Migrate content templates to megastore spec (one-shot: detects old slugs by checking for new slug)
+  const ctMigrateCheck = await db.execute(
+    `SELECT slug FROM content_templates WHERE slug = 'conseil_deco_piece' LIMIT 1`
   );
+  if (ctMigrateCheck.rows.length === 0) {
+    const { MEGASTORE_TEMPLATES } = await import("@/lib/seed/content-templates-megastore");
+    await db.execute("DELETE FROM content_templates");
+    await db.batch(
+      MEGASTORE_TEMPLATES.map((t) => ({
+        sql: `INSERT INTO content_templates
+              (slug, content_type, display_name_fr, display_name_en,
+               prompt_pattern_fr, prompt_pattern_en, image_strategy,
+               active, frequency_per_month, scopes)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          t.slug, t.content_type, t.display_name_fr, t.display_name_en,
+          t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy,
+          t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes),
+        ],
+      })),
+      "write"
+    );
+  }
 
   // Enable WAL and foreign keys for local SQLite
   if (!process.env.TURSO_DATABASE_URL) {
@@ -1135,6 +1152,77 @@ export interface FacebookDraft {
 }
 
 // ─── Hook Pool DB functions (v0.1.20) ────────────────────────────────
+
+export interface ContentTemplate {
+  id: number;
+  slug: string;
+  content_type: "education" | "inspiration" | "engagement" | "seasonal";
+  display_name_fr: string;
+  display_name_en: string;
+  prompt_pattern_fr: string;
+  prompt_pattern_en: string;
+  image_strategy: string;
+  active: boolean;
+  frequency_per_month: number;
+  scopes: string[];
+}
+
+export async function getContentTemplates(options?: {
+  content_type?: ContentTemplate["content_type"];
+  active_only?: boolean;
+}): Promise<ContentTemplate[]> {
+  const db = await ensureSchema();
+  let sql = `SELECT * FROM content_templates`;
+  const args: InValue[] = [];
+  const conditions: string[] = [];
+  if (options?.active_only !== false) conditions.push(`active = 1`);
+  if (options?.content_type) {
+    conditions.push(`content_type = ?`);
+    args.push(options.content_type);
+  }
+  if (conditions.length > 0) sql += ` WHERE ${conditions.join(" AND ")}`;
+  sql += ` ORDER BY id`;
+  const result = await db.execute({ sql, args });
+  return result.rows.map((r) => {
+    const row = rowToObj(r);
+    return {
+      id: Number(row.id),
+      slug: String(row.slug),
+      content_type: row.content_type as ContentTemplate["content_type"],
+      display_name_fr: String(row.display_name_fr),
+      display_name_en: String(row.display_name_en),
+      prompt_pattern_fr: String(row.prompt_pattern_fr),
+      prompt_pattern_en: String(row.prompt_pattern_en),
+      image_strategy: String(row.image_strategy),
+      active: Number(row.active) === 1,
+      frequency_per_month: Number(row.frequency_per_month),
+      scopes: JSON.parse(String(row.scopes ?? "[]")) as string[],
+    };
+  });
+}
+
+export async function getContentTemplateBySlug(slug: string): Promise<ContentTemplate | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM content_templates WHERE slug = ? LIMIT 1`,
+    args: [slug],
+  });
+  if (result.rows.length === 0) return null;
+  const row = rowToObj(result.rows[0]);
+  return {
+    id: Number(row.id),
+    slug: String(row.slug),
+    content_type: row.content_type as ContentTemplate["content_type"],
+    display_name_fr: String(row.display_name_fr),
+    display_name_en: String(row.display_name_en),
+    prompt_pattern_fr: String(row.prompt_pattern_fr),
+    prompt_pattern_en: String(row.prompt_pattern_en),
+    image_strategy: String(row.image_strategy),
+    active: Number(row.active) === 1,
+    frequency_per_month: Number(row.frequency_per_month),
+    scopes: JSON.parse(String(row.scopes ?? "[]")) as string[],
+  };
+}
 
 export interface ContentHook {
   id: number;
