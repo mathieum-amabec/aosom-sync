@@ -1,6 +1,38 @@
 # Next session — après 24 avril 2026
 
 ---
+## TRIPLE SHIP DAY — 08 mai 2026 (3 PRs: v0.1.20.4 + v0.1.21.0 + v0.1.22.0)
+
+### PRs mergées aujourd'hui
+
+| PR | Version | Feature |
+|---|---|---|
+| #46 | v0.1.20.4 | Social cron 504 fix (ORDER BY RANDOM → two-step JS) + sync-race guard |
+| #47 | v0.1.21.0 | Catalog sort: best sellers (14d) + price drop % |
+| #48 | v0.1.22.0 | Content templates megastore foundation + 12 FR prompts |
+
+### SESSION 08 mai — v0.1.22.0 — Content templates megastore foundation
+
+**Feature shipped (PR #48):**
+- 12 prompts FR production-ready (713-898 chars chacun)
+- Persona Ameublo Direct, tutoiement Québec, `{{hook}}` injection
+- 4 content_types: education (3), inspiration (4), engagement (3), seasonal (2)
+- 2 nouvelles colonnes: `frequency_per_month`, `scopes` (JSON array)
+- TypeScript: `ContentTemplate` interface + `getContentTemplates()` + `getContentTemplateBySlug()`
+- Migration guard one-shot: `conseil_deco_piece` slug check (idempotent, safe sur cold start)
+- Turso prod: 12 templates IDs 6397-6408, colonnes migrées
+
+**EN prompts (TODO next session):**
+- 12 `prompt_pattern_en` = `TODO_EN` pour Furnish Direct brand voice
+- Estimation: 2-3h session créative
+
+**Pipeline restant (non-produit content):**
+- `POST /api/social/content/generate` → Claude API (remplacer 501 stub) (~2-3h)
+- Cron scheduling non-produit (~1h)
+
+**Tests: 267/268** (1 pre-existing dans refresh-products-batch — unrelated)
+
+---
 ## SESSION 08 mai après-midi — Catalog sort feature shipped (v0.1.21.0)
 
 ### Feature shipped
