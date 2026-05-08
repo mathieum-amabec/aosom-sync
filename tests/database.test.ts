@@ -364,3 +364,68 @@ describe("isCacheStale (pure function)", () => {
     expect(isCacheStale(oldUtc)).toBe(true);
   });
 });
+
+// Two-step SQL logic used by getEligibleHighlightProduct after the ORDER BY RANDOM()
+// bottleneck fix (2026-05-08). Tests validate the replacement queries, not the full
+// function (which connects to Turso via ensureSchema).
+describe("getEligibleHighlightProduct SQL logic (two-step pattern)", () => {
+  let db: ReturnType<typeof setupTestDb>;
+  const now = Math.floor(Date.now() / 1000);
+
+  const CREATE_PRODUCTS = `CREATE TABLE IF NOT EXISTS products (
+    sku TEXT PRIMARY KEY, name TEXT, price REAL, qty INTEGER,
+    shopify_product_id TEXT, last_posted_at INTEGER
+  )`;
+
+  beforeEach(async () => {
+    db = setupTestDb();
+    await db.execute(CREATE_PRODUCTS);
+  });
+  afterEach(async () => {
+    db.close();
+    if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
+  });
+
+  it("returns empty when no products have a shopify_product_id", async () => {
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-1", "P1", 10, 5, null, null] });
+    const cutoff = now - 30 * 86400;
+    const { rows } = await db.execute({ sql: `SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND qty > 0 AND (last_posted_at IS NULL OR last_posted_at < ?)`, args: [cutoff] });
+    expect(rows).toHaveLength(0);
+  });
+
+  it("returns empty when all eligible products were posted within minDays", async () => {
+    const recentPost = now - 5 * 86400; // 5 days ago, within 30-day window
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-1", "P1", 10, 5, "shop-1", recentPost] });
+    const cutoff = now - 30 * 86400;
+    const { rows } = await db.execute({ sql: `SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND qty > 0 AND (last_posted_at IS NULL OR last_posted_at < ?)`, args: [cutoff] });
+    expect(rows).toHaveLength(0);
+  });
+
+  it("returns eligible SKUs with null last_posted_at", async () => {
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-1", "P1", 10, 5, "shop-1", null] });
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-2", "P2", 20, 0, "shop-2", null] }); // qty=0, excluded
+    const cutoff = now - 30 * 86400;
+    const { rows } = await db.execute({ sql: `SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND qty > 0 AND (last_posted_at IS NULL OR last_posted_at < ?)`, args: [cutoff] });
+    expect(rows).toHaveLength(1);
+    expect((rows[0] as Record<string, unknown>).sku).toBe("SKU-1");
+  });
+
+  it("returns eligible SKUs posted more than minDays ago", async () => {
+    const oldPost = now - 35 * 86400; // 35 days ago, outside 30-day window → eligible
+    const recentPost = now - 5 * 86400; // 5 days ago → excluded
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-A", "PA", 10, 5, "shop-A", oldPost] });
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-B", "PB", 20, 3, "shop-B", recentPost] });
+    const cutoff = now - 30 * 86400;
+    const { rows } = await db.execute({ sql: `SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND qty > 0 AND (last_posted_at IS NULL OR last_posted_at < ?)`, args: [cutoff] });
+    expect(rows).toHaveLength(1);
+    expect((rows[0] as Record<string, unknown>).sku).toBe("SKU-A");
+  });
+
+  it("second-step fetch by SKU returns full product row", async () => {
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-X", "Product X", 99.99, 10, "shop-X", null] });
+    const { rows } = await db.execute({ sql: `SELECT * FROM products WHERE sku = ?`, args: ["SKU-X"] });
+    expect(rows).toHaveLength(1);
+    expect((rows[0] as Record<string, unknown>).name).toBe("Product X");
+    expect((rows[0] as Record<string, unknown>).price).toBe(99.99);
+  });
+});

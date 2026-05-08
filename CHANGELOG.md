@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.20.4] - 2026-05-08
+
+### Fixed
+- **Social cron auto-paused** since ~2026-05-01 due to Vercel 504 timeouts
+  - Root cause: `getEligibleHighlightProduct` used `ORDER BY RANDOM()` on 10k+
+    products — forces a full table scan on Turso = 60-82s
+  - Combined with Anthropic API call (~5s), total exceeded Vercel 120s maxDuration
+  - Vercel auto-pauses cron schedules after consecutive 504s
+  - Fix: two-step pattern — `SELECT sku WHERE filters` (~4s) + JS random pick
+    (instant) + `SELECT * WHERE sku = ?` (<1s). Total: <10s vs 60-82s.
+
 ## [0.1.20.3] - 2026-05-07
 
 ### Fixed

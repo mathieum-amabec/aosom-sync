@@ -1397,12 +1397,25 @@ export async function getLastPostDate(sku: string): Promise<number | null> {
 export async function getEligibleHighlightProduct(minDaysBetween: number): Promise<Record<string, unknown> | null> {
   const db = await ensureSchema();
   const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
-  const result = await db.execute({
-    sql: `SELECT p.* FROM products p
-    WHERE p.shopify_product_id IS NOT NULL AND p.qty > 0
-      AND (p.last_posted_at IS NULL OR p.last_posted_at < ?)
-    ORDER BY RANDOM() LIMIT 1`,
+
+  // Two-step pattern: fetch eligible SKUs only (fast ~4s), then pick randomly in JS.
+  // ORDER BY RANDOM() on 10k+ products forces a full table scan on Turso = 60-82s,
+  // which exceeds Vercel's 120s maxDuration and causes 504 on the social cron.
+  const skusResult = await db.execute({
+    sql: `SELECT sku FROM products
+          WHERE shopify_product_id IS NOT NULL AND qty > 0
+            AND (last_posted_at IS NULL OR last_posted_at < ?)`,
     args: [cutoff],
+  });
+
+  if (skusResult.rows.length === 0) return null;
+
+  const skus = skusResult.rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
+  const randomSku = skus[Math.floor(Math.random() * skus.length)];
+
+  const result = await db.execute({
+    sql: `SELECT * FROM products WHERE sku = ?`,
+    args: [randomSku],
   });
   return result.rows.length > 0 ? rowToObj(result.rows[0]) : null;
 }
