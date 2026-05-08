@@ -494,7 +494,7 @@ describe("getProducts sort — best_sellers and price_drop (direct SQL)", () => 
 
     const { rows } = await db.execute({
       sql: `WITH filtered AS (SELECT sku, name, price, qty, color, product_type, image1, shopify_product_id FROM products),
-            ph_agg AS (SELECT sku, SUM(old_qty - new_qty) AS units_moved FROM price_history WHERE detected_at > ? GROUP BY sku)
+            ph_agg AS (SELECT sku, SUM(old_qty - new_qty) AS units_moved FROM price_history WHERE detected_at > ? AND change_type = 'stock_change' AND old_qty > new_qty GROUP BY sku)
             SELECT f.sku, COALESCE(ph_agg.units_moved, 0) AS units_moved
             FROM filtered f LEFT JOIN ph_agg ON ph_agg.sku = f.sku
             ORDER BY COALESCE(ph_agg.units_moved, 0) DESC`,
@@ -516,7 +516,7 @@ describe("getProducts sort — best_sellers and price_drop (direct SQL)", () => 
 
     const { rows } = await db.execute({
       sql: `WITH filtered AS (SELECT sku, name, price, qty, color, product_type, image1, shopify_product_id FROM products),
-            ph_agg AS (SELECT sku, SUM(old_qty - new_qty) AS units_moved FROM price_history WHERE detected_at > ? GROUP BY sku)
+            ph_agg AS (SELECT sku, SUM(old_qty - new_qty) AS units_moved FROM price_history WHERE detected_at > ? AND change_type = 'stock_change' AND old_qty > new_qty GROUP BY sku)
             SELECT f.sku FROM filtered f LEFT JOIN ph_agg ON ph_agg.sku = f.sku
             ORDER BY COALESCE(ph_agg.units_moved, 0) DESC`,
       args: [cutoff14d],
@@ -525,6 +525,32 @@ describe("getProducts sort — best_sellers and price_drop (direct SQL)", () => 
     const skus = rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
     expect(skus[0]).toBe("SKU-X"); // 15 units moved
     expect(skus[1]).toBe("SKU-Y"); // no history → COALESCE 0
+  });
+
+  it("best_sellers: restock entries (old_qty < new_qty) are excluded and don't rank products down", async () => {
+    await db.batch([
+      { sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, args: ["SKU-SELL", "HighSell", 100, 5, "", "", "", null] },
+      { sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, args: ["SKU-RESTOCK", "HeavyRestock", 200, 3, "", "", "", null] },
+      // SKU-SELL: sold 20 units
+      { sql: `INSERT INTO price_history (sku, old_qty, new_qty, change_type, detected_at) VALUES (?, ?, ?, 'stock_change', ?)`, args: ["SKU-SELL", 50, 30, withinWindow] },
+      // SKU-RESTOCK: received 100 units (restock, old_qty < new_qty) — must NOT inflate or deflate rank
+      { sql: `INSERT INTO price_history (sku, old_qty, new_qty, change_type, detected_at) VALUES (?, ?, ?, 'stock_change', ?)`, args: ["SKU-RESTOCK", 10, 110, withinWindow] },
+    ]);
+
+    const { rows } = await db.execute({
+      sql: `WITH filtered AS (SELECT sku, name, price, qty, color, product_type, image1, shopify_product_id FROM products),
+            ph_agg AS (SELECT sku, SUM(old_qty - new_qty) AS units_moved FROM price_history WHERE detected_at > ? AND change_type = 'stock_change' AND old_qty > new_qty GROUP BY sku)
+            SELECT f.sku, COALESCE(ph_agg.units_moved, 0) AS units_moved
+            FROM filtered f LEFT JOIN ph_agg ON ph_agg.sku = f.sku
+            ORDER BY COALESCE(ph_agg.units_moved, 0) DESC`,
+      args: [cutoff14d],
+    });
+
+    const skus = rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
+    const units = rows.map((r) => Number((r as unknown as Record<string, unknown>).units_moved));
+    expect(skus[0]).toBe("SKU-SELL");    // 20 units sold
+    expect(skus[1]).toBe("SKU-RESTOCK"); // restock excluded → COALESCE 0, not -100
+    expect(units[1]).toBe(0);            // guard confirmed: not negative
   });
 
   it("price_drop: orders by drop % DESC, products with no price drop go last", async () => {

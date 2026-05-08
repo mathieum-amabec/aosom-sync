@@ -613,7 +613,7 @@ export async function getProducts(filters: {
       WITH filtered AS (SELECT ${catalogColumns} FROM products ${where}),
       ph_agg AS (
         SELECT sku, SUM(old_qty - new_qty) AS units_moved
-        FROM price_history WHERE detected_at > ? GROUP BY sku
+        FROM price_history WHERE detected_at > ? AND change_type = 'stock_change' AND old_qty > new_qty GROUP BY sku
       )
       SELECT f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id
       FROM filtered f LEFT JOIN ph_agg ON ph_agg.sku = f.sku
