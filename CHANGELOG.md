@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.1.22.0] - 2026-05-08
+
+### Added
+- **Content templates — megastore foundation** — full replacement of 12 placeholder TODO templates with production-ready FR prompts
+  - 4 content categories: `education` (3), `inspiration` (4), `engagement` (3), `seasonal` (2)
+  - New slugs: `conseil_deco_piece`, `guide_achat_categorie`, `astuces_entretien`, `inspiration_ambiance_maison`, `inspiration_vie_outdoor`, `inspiration_animaux`, `inspiration_famille`, `sondage_debat`, `devine_quizz`, `aide_choisir`, `saisonnier_outdoor`, `saisonnier_indoor`
+  - Each prompt: persona Ameublo Direct, tutoiement Québec, `{{hook}}` injection, concrete word/emoji/CTA constraints, example output
+- **Schema migration** — 2 new columns on `content_templates`:
+  - `frequency_per_month INTEGER NOT NULL DEFAULT 2` — publishing cadence (1–3/month)
+  - `scopes TEXT NOT NULL DEFAULT '[]'` — JSON array of applicable product scopes (`mobilier_indoor`, `bedroom_decor`, `outdoor_patio`, `pets`, `kids_toys_sport`, `storage_kitchen`, `universal`)
+- **TypeScript interfaces** — `ContentTemplate` interface + `getContentTemplates()` + `getContentTemplateBySlug()` exported from `database.ts`
+- **Migration idempotency guard** — `conseil_deco_piece` slug check prevents re-running the DELETE+INSERT on subsequent cold starts (user edits survive)
+
+### Migration notes
+- One-shot: runs once on first cold start after deploy, then becomes a no-op
+- Safe on prod: Turso columns pre-applied (2026-05-08), 12 templates seeded (IDs 6397–6408)
+- EN prompts remain `TODO_EN` placeholder — scheduled for next session
+
+### TODO (next session)
+- Write 12 EN prompts (`prompt_pattern_en`) for Furnish Direct brand voice
+- Implement `/api/social/content/generate` (Claude API call, replace 501 stub)
+- Wire cron scheduling for non-product content
+
 ## [0.1.21.0] - 2026-05-08
 
 ### Added

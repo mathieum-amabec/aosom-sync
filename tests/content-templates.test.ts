@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 import path from "path";
 import fs from "fs";
+import { MEGASTORE_TEMPLATES } from "@/lib/seed/content-templates-megastore";
 
 // ─── DB migration / seed tests (direct libsql, no Next.js) ──────────────────
 
@@ -12,117 +13,251 @@ function makeDb(): Client {
   return createClient({ url: `file:${TEST_DB_PATH}` });
 }
 
-describe("content_templates migration", () => {
+async function createTemplatesTable(db: Client, withNewCols = true) {
+  const extra = withNewCols
+    ? `, frequency_per_month INTEGER NOT NULL DEFAULT 2, scopes TEXT NOT NULL DEFAULT '[]'`
+    : "";
+  await db.execute(`CREATE TABLE IF NOT EXISTS content_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug TEXT NOT NULL UNIQUE,
+    content_type TEXT NOT NULL,
+    display_name_fr TEXT NOT NULL,
+    display_name_en TEXT NOT NULL,
+    prompt_pattern_fr TEXT NOT NULL,
+    prompt_pattern_en TEXT NOT NULL,
+    image_strategy TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
+    ${extra}
+  )`);
+}
+
+describe("content_templates — megastore migration", () => {
   let db: Client;
 
   beforeEach(() => { db = makeDb(); });
   afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
 
-  it("migration adds content_type column to facebook_drafts", async () => {
-    await db.execute(`CREATE TABLE IF NOT EXISTS facebook_drafts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sku TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'draft',
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
-
-    const colsBefore = await db.execute("PRAGMA table_info(facebook_drafts)");
-    const hasContentType = colsBefore.rows.some(r => r.name === "content_type");
-    if (!hasContentType) {
-      await db.execute(`ALTER TABLE facebook_drafts ADD COLUMN content_type TEXT NOT NULL DEFAULT 'product'`);
+  it("ALTER TABLE adds frequency_per_month to legacy schema", async () => {
+    await createTemplatesTable(db, false);
+    const colsBefore = await db.execute("PRAGMA table_info(content_templates)");
+    const hasFreq = colsBefore.rows.some((r) => r.name === "frequency_per_month");
+    if (!hasFreq) {
+      await db.execute(`ALTER TABLE content_templates ADD COLUMN frequency_per_month INTEGER NOT NULL DEFAULT 2`);
     }
-
-    const colsAfter = await db.execute("PRAGMA table_info(facebook_drafts)");
-    const col = colsAfter.rows.find(r => r.name === "content_type");
+    const colsAfter = await db.execute("PRAGMA table_info(content_templates)");
+    const col = colsAfter.rows.find((r) => r.name === "frequency_per_month");
     expect(col).toBeDefined();
-    expect(col?.dflt_value).toBe("'product'");
+    expect(col?.dflt_value).toBe("2");
   });
 
-  it("migration is idempotent — running ALTER twice does not throw", async () => {
-    await db.execute(`CREATE TABLE IF NOT EXISTS facebook_drafts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sku TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'draft',
-      content_type TEXT NOT NULL DEFAULT 'product'
-    )`);
-
-    const cols = await db.execute("PRAGMA table_info(facebook_drafts)");
-    const colSet = new Set(cols.rows.map(r => r.name as string));
-    if (!colSet.has("content_type")) {
-      await db.execute(`ALTER TABLE facebook_drafts ADD COLUMN content_type TEXT NOT NULL DEFAULT 'product'`);
+  it("ALTER TABLE adds scopes to legacy schema", async () => {
+    await createTemplatesTable(db, false);
+    const cols = await db.execute("PRAGMA table_info(content_templates)");
+    const hasScopes = cols.rows.some((r) => r.name === "scopes");
+    if (!hasScopes) {
+      await db.execute(`ALTER TABLE content_templates ADD COLUMN scopes TEXT NOT NULL DEFAULT '[]'`);
     }
-
-    // No throw — idempotent guard worked
-    const colsAfter = await db.execute("PRAGMA table_info(facebook_drafts)");
-    expect(colsAfter.rows.filter(r => r.name === "content_type")).toHaveLength(1);
+    const colsAfter = await db.execute("PRAGMA table_info(content_templates)");
+    const col = colsAfter.rows.find((r) => r.name === "scopes");
+    expect(col).toBeDefined();
+    expect(col?.dflt_value).toBe("'[]'");
   });
 
-  it("seed inserts exactly 12 content templates", async () => {
-    await db.execute(`CREATE TABLE IF NOT EXISTS content_templates (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      slug TEXT NOT NULL UNIQUE,
-      content_type TEXT NOT NULL,
-      display_name_fr TEXT NOT NULL,
-      display_name_en TEXT NOT NULL,
-      prompt_pattern_fr TEXT NOT NULL,
-      prompt_pattern_en TEXT NOT NULL,
-      image_strategy TEXT NOT NULL,
-      active INTEGER NOT NULL DEFAULT 1,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
+  it("ALTER TABLE is idempotent — running twice does not throw", async () => {
+    await createTemplatesTable(db, true);
+    // Columns already exist — PRAGMA guard must prevent ALTER
+    const cols = await db.execute("PRAGMA table_info(content_templates)");
+    const colSet = new Set(cols.rows.map((r) => r.name as string));
+    if (!colSet.has("frequency_per_month")) {
+      await db.execute(`ALTER TABLE content_templates ADD COLUMN frequency_per_month INTEGER NOT NULL DEFAULT 2`);
+    }
+    if (!colSet.has("scopes")) {
+      await db.execute(`ALTER TABLE content_templates ADD COLUMN scopes TEXT NOT NULL DEFAULT '[]'`);
+    }
+    const colsAfter = await db.execute("PRAGMA table_info(content_templates)");
+    expect(colsAfter.rows.filter((r) => r.name === "frequency_per_month")).toHaveLength(1);
+    expect(colsAfter.rows.filter((r) => r.name === "scopes")).toHaveLength(1);
+  });
 
-    const templates = [
-      { slug: "seasonal_tip", content_type: "informative", fr: "Conseil saisonnier", en: "Seasonal tip", img: "text_overlay" },
-      { slug: "mistake_listicle", content_type: "informative", fr: "Erreurs courantes", en: "Common mistakes", img: "text_overlay" },
-      { slug: "myth_vs_reality", content_type: "informative", fr: "Mythe vs réalité", en: "Myth vs reality", img: "text_overlay" },
-      { slug: "product_comparison", content_type: "informative", fr: "Comparatif éducatif", en: "Educational comparison", img: "text_overlay" },
-      { slug: "relatable_meme", content_type: "entertaining", fr: "Meme relatable", en: "Relatable meme", img: "random_product" },
-      { slug: "pov_scenario", content_type: "entertaining", fr: "POV scénario", en: "POV scenario", img: "random_product" },
-      { slug: "nostalgic_throwback", content_type: "entertaining", fr: "Nostalgie déco", en: "Decor nostalgia", img: "none" },
-      { slug: "design_quote", content_type: "entertaining", fr: "Citation design", en: "Design quote", img: "text_overlay" },
-      { slug: "this_or_that", content_type: "engagement", fr: "Ceci ou cela", en: "This or that", img: "random_product" },
-      { slug: "guess_the_price", content_type: "engagement", fr: "Devine le prix", en: "Guess the price", img: "random_product" },
-      { slug: "caption_this", content_type: "engagement", fr: "Trouve la caption", en: "Caption this", img: "random_product" },
-      { slug: "unpopular_opinion", content_type: "engagement", fr: "Opinion impopulaire", en: "Unpopular opinion", img: "none" },
-    ];
-
+  it("seeds exactly 12 megastore templates", async () => {
+    await createTemplatesTable(db, true);
     await db.batch(
-      templates.map(t => ({
-        sql: `INSERT OR IGNORE INTO content_templates (slug, content_type, display_name_fr, display_name_en, prompt_pattern_fr, prompt_pattern_en, image_strategy) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        args: [t.slug, t.content_type, t.fr, t.en, "TODO", "TODO", t.img],
+      MEGASTORE_TEMPLATES.map((t) => ({
+        sql: `INSERT INTO content_templates
+              (slug, content_type, display_name_fr, display_name_en,
+               prompt_pattern_fr, prompt_pattern_en, image_strategy,
+               active, frequency_per_month, scopes)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [t.slug, t.content_type, t.display_name_fr, t.display_name_en,
+               t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy,
+               t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes)],
       })),
       "write"
     );
-
     const result = await db.execute("SELECT COUNT(*) as cnt FROM content_templates");
     expect(Number(result.rows[0].cnt)).toBe(12);
   });
 
-  it("seed is idempotent — INSERT OR IGNORE does not duplicate rows", async () => {
-    await db.execute(`CREATE TABLE IF NOT EXISTS content_templates (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      slug TEXT NOT NULL UNIQUE,
-      content_type TEXT NOT NULL,
-      display_name_fr TEXT NOT NULL,
-      display_name_en TEXT NOT NULL,
-      prompt_pattern_fr TEXT NOT NULL,
-      prompt_pattern_en TEXT NOT NULL,
-      image_strategy TEXT NOT NULL,
-      active INTEGER NOT NULL DEFAULT 1,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
+  it("all 12 templates have new megastore slugs (no old TODO slugs)", async () => {
+    await createTemplatesTable(db, true);
+    await db.batch(
+      MEGASTORE_TEMPLATES.map((t) => ({
+        sql: `INSERT INTO content_templates
+              (slug, content_type, display_name_fr, display_name_en,
+               prompt_pattern_fr, prompt_pattern_en, image_strategy,
+               active, frequency_per_month, scopes)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [t.slug, t.content_type, t.display_name_fr, t.display_name_en,
+               t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy,
+               t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes)],
+      })),
+      "write"
+    );
+    // Old slugs must be gone
+    const oldSlugs = ["seasonal_tip", "mistake_listicle", "relatable_meme", "this_or_that"];
+    for (const slug of oldSlugs) {
+      const r = await db.execute({ sql: `SELECT id FROM content_templates WHERE slug = ?`, args: [slug] });
+      expect(r.rows).toHaveLength(0);
+    }
+    // New slugs must exist
+    const newSlugs = ["conseil_deco_piece", "guide_achat_categorie", "astuces_entretien",
+                      "inspiration_ambiance_maison", "inspiration_vie_outdoor", "inspiration_animaux",
+                      "inspiration_famille", "sondage_debat", "devine_quizz",
+                      "aide_choisir", "saisonnier_outdoor", "saisonnier_indoor"];
+    for (const slug of newSlugs) {
+      const r = await db.execute({ sql: `SELECT id FROM content_templates WHERE slug = ?`, args: [slug] });
+      expect(r.rows).toHaveLength(1);
+    }
+  });
 
-    const row = {
-      sql: `INSERT OR IGNORE INTO content_templates (slug, content_type, display_name_fr, display_name_en, prompt_pattern_fr, prompt_pattern_en, image_strategy) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      args: ["seasonal_tip", "informative", "Conseil saisonnier", "Seasonal tip", "TODO", "TODO", "text_overlay"],
-    };
-    await db.execute(row);
-    await db.execute(row); // second run — must not throw or duplicate
+  it("content_type values match megastore categories", async () => {
+    await createTemplatesTable(db, true);
+    await db.batch(
+      MEGASTORE_TEMPLATES.map((t) => ({
+        sql: `INSERT INTO content_templates
+              (slug, content_type, display_name_fr, display_name_en,
+               prompt_pattern_fr, prompt_pattern_en, image_strategy,
+               active, frequency_per_month, scopes)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [t.slug, t.content_type, t.display_name_fr, t.display_name_en,
+               t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy,
+               t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes)],
+      })),
+      "write"
+    );
+    const counts = await db.execute(`
+      SELECT content_type, COUNT(*) as cnt FROM content_templates GROUP BY content_type ORDER BY content_type
+    `);
+    const byType: Record<string, number> = {};
+    counts.rows.forEach((r) => { byType[r.content_type as string] = Number(r.cnt); });
+    expect(byType["education"]).toBe(3);
+    expect(byType["inspiration"]).toBe(4);
+    expect(byType["engagement"]).toBe(3);
+    expect(byType["seasonal"]).toBe(2);
+    // Old types must not exist
+    expect(byType["informative"]).toBeUndefined();
+    expect(byType["entertaining"]).toBeUndefined();
+  });
 
-    const result = await db.execute("SELECT COUNT(*) as cnt FROM content_templates WHERE slug = 'seasonal_tip'");
-    expect(Number(result.rows[0].cnt)).toBe(1);
+  it("scopes are valid JSON arrays for all templates", async () => {
+    await createTemplatesTable(db, true);
+    await db.batch(
+      MEGASTORE_TEMPLATES.map((t) => ({
+        sql: `INSERT INTO content_templates
+              (slug, content_type, display_name_fr, display_name_en,
+               prompt_pattern_fr, prompt_pattern_en, image_strategy,
+               active, frequency_per_month, scopes)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [t.slug, t.content_type, t.display_name_fr, t.display_name_en,
+               t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy,
+               t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes)],
+      })),
+      "write"
+    );
+    const rows = await db.execute("SELECT slug, scopes FROM content_templates");
+    for (const row of rows.rows) {
+      const parsed = JSON.parse(row.scopes as string) as unknown;
+      expect(Array.isArray(parsed)).toBe(true);
+      expect((parsed as unknown[]).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("frequency_per_month is between 1 and 3 for all templates", async () => {
+    await createTemplatesTable(db, true);
+    await db.batch(
+      MEGASTORE_TEMPLATES.map((t) => ({
+        sql: `INSERT INTO content_templates
+              (slug, content_type, display_name_fr, display_name_en,
+               prompt_pattern_fr, prompt_pattern_en, image_strategy,
+               active, frequency_per_month, scopes)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [t.slug, t.content_type, t.display_name_fr, t.display_name_en,
+               t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy,
+               t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes)],
+      })),
+      "write"
+    );
+    const rows = await db.execute("SELECT slug, frequency_per_month FROM content_templates");
+    for (const row of rows.rows) {
+      const freq = Number(row.frequency_per_month);
+      expect(freq).toBeGreaterThanOrEqual(1);
+      expect(freq).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it("prompt_pattern_fr is non-empty and contains {{hook}} for all templates", async () => {
+    await createTemplatesTable(db, true);
+    await db.batch(
+      MEGASTORE_TEMPLATES.map((t) => ({
+        sql: `INSERT INTO content_templates
+              (slug, content_type, display_name_fr, display_name_en,
+               prompt_pattern_fr, prompt_pattern_en, image_strategy,
+               active, frequency_per_month, scopes)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [t.slug, t.content_type, t.display_name_fr, t.display_name_en,
+               t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy,
+               t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes)],
+      })),
+      "write"
+    );
+    const rows = await db.execute("SELECT slug, prompt_pattern_fr FROM content_templates");
+    for (const row of rows.rows) {
+      const prompt = row.prompt_pattern_fr as string;
+      expect(prompt.length).toBeGreaterThan(200);
+      expect(prompt).toContain("{{hook}}");
+      expect(prompt).not.toContain("TODO:");
+    }
+  });
+
+  it("migration is one-shot idempotent — conseil_deco_piece check prevents re-delete", async () => {
+    await createTemplatesTable(db, true);
+    // First run: insert all 12
+    await db.batch(
+      MEGASTORE_TEMPLATES.map((t) => ({
+        sql: `INSERT INTO content_templates (slug, content_type, display_name_fr, display_name_en, prompt_pattern_fr, prompt_pattern_en, image_strategy, active, frequency_per_month, scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [t.slug, t.content_type, t.display_name_fr, t.display_name_en, t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy, t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes)],
+      })),
+      "write"
+    );
+    // Manually edit one prompt (simulates user customization)
+    await db.execute({ sql: `UPDATE content_templates SET prompt_pattern_fr = 'custom_edited' WHERE slug = 'conseil_deco_piece'`, args: [] });
+
+    // Second run: migration guard should fire — conseil_deco_piece exists, so NO re-delete
+    const check = await db.execute(`SELECT slug FROM content_templates WHERE slug = 'conseil_deco_piece' LIMIT 1`);
+    if (check.rows.length === 0) {
+      await db.execute("DELETE FROM content_templates");
+      await db.batch(MEGASTORE_TEMPLATES.map((t) => ({
+        sql: `INSERT INTO content_templates (slug, content_type, display_name_fr, display_name_en, prompt_pattern_fr, prompt_pattern_en, image_strategy, active, frequency_per_month, scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [t.slug, t.content_type, t.display_name_fr, t.display_name_en, t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy, t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes)],
+      })), "write");
+    }
+
+    // Custom edit must survive — migration did NOT run again
+    const r = await db.execute({ sql: `SELECT prompt_pattern_fr FROM content_templates WHERE slug = 'conseil_deco_piece'`, args: [] });
+    expect(r.rows[0].prompt_pattern_fr).toBe("custom_edited");
+    // And we still have 12 rows
+    const cnt = await db.execute("SELECT COUNT(*) as cnt FROM content_templates");
+    expect(Number(cnt.rows[0].cnt)).toBe(12);
   });
 });
 
@@ -156,7 +291,7 @@ describe("POST /api/social/content/generate — stub responses", () => {
       getSessionRole: vi.fn().mockResolvedValue("admin"),
     }));
     const { POST } = await import("@/app/api/social/content/generate/route");
-    const res = await POST(makeRequest({ language: "fr", template_slug: "seasonal_tip" }));
+    const res = await POST(makeRequest({ language: "fr", template_slug: "conseil_deco_piece" }));
     expect(res.status).toBe(501);
     const body = await res.json();
     expect(body.error).toBe("NOT_IMPLEMENTED");
@@ -169,7 +304,7 @@ describe("POST /api/social/content/generate — stub responses", () => {
       getSessionRole: vi.fn().mockResolvedValue("admin"),
     }));
     const { POST } = await import("@/app/api/social/content/generate/route");
-    const res = await POST(makeRequest({ template_slug: "seasonal_tip" }));
+    const res = await POST(makeRequest({ template_slug: "conseil_deco_piece" }));
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.success).toBe(false);
