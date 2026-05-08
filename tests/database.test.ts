@@ -561,8 +561,8 @@ describe("getProducts sort — best_sellers and price_drop (direct SQL)", () => 
       { sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, args: ["SKU-B", "SmallDrop",  90, 3, "", "", "", null] },
       // SKU-C: no price history
       { sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, args: ["SKU-C", "NoDrop",    200, 1, "", "", "", null] },
-      { sql: `INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type, detected_at) VALUES (?, ?, ?, ?, ?, 'price_change', ?)`, args: ["SKU-A", 200, 100, 5, 5, withinWindow] },
-      { sql: `INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type, detected_at) VALUES (?, ?, ?, ?, ?, 'price_change', ?)`, args: ["SKU-B", 100,  90, 3, 3, withinWindow] },
+      { sql: `INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type, detected_at) VALUES (?, ?, ?, ?, ?, 'price_drop', ?)`, args: ["SKU-A", 200, 100, 5, 5, withinWindow] },
+      { sql: `INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type, detected_at) VALUES (?, ?, ?, ?, ?, 'price_drop', ?)`, args: ["SKU-B", 100,  90, 3, 3, withinWindow] },
     ]);
 
     const { rows } = await db.execute({
@@ -571,7 +571,7 @@ describe("getProducts sort — best_sellers and price_drop (direct SQL)", () => 
               SELECT ph.sku,
                 ROUND(((MAX(ph.old_price) - MIN(p2.price)) / MAX(ph.old_price)) * 100.0, 1) AS drop_pct
               FROM price_history ph JOIN products p2 ON p2.sku = ph.sku
-              WHERE ph.detected_at > ? AND ph.old_price > p2.price
+              WHERE ph.detected_at > ? AND ph.change_type = 'price_drop' AND ph.old_price > p2.price AND ph.old_price > 0
               GROUP BY ph.sku
             )
             SELECT f.sku, COALESCE(ph_agg.drop_pct, 0) AS drop_pct
@@ -585,6 +585,8 @@ describe("getProducts sort — best_sellers and price_drop (direct SQL)", () => 
     expect(skus[1]).toBe("SKU-B"); // 10% drop
     expect(skus[2]).toBe("SKU-C"); // no history → 0%
     const dropA = Number((rows[0] as unknown as Record<string, unknown>).drop_pct);
+    const dropB = Number((rows[1] as unknown as Record<string, unknown>).drop_pct);
     expect(dropA).toBe(50.0);
+    expect(dropB).toBe(10.0);
   });
 });

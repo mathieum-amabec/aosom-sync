@@ -626,7 +626,7 @@ export async function getProducts(filters: {
         SELECT ph.sku,
           ROUND(((MAX(ph.old_price) - MIN(p2.price)) / MAX(ph.old_price)) * 100.0, 1) AS drop_pct
         FROM price_history ph JOIN products p2 ON p2.sku = ph.sku
-        WHERE ph.detected_at > ? AND ph.old_price > p2.price
+        WHERE ph.detected_at > ? AND ph.change_type = 'price_drop' AND ph.old_price > p2.price AND ph.old_price > 0
         GROUP BY ph.sku
       )
       SELECT f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id
