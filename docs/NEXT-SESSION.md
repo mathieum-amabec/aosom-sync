@@ -1,6 +1,39 @@
 # Next session — après 24 avril 2026
 
 ---
+## SESSION 08 mai après-midi — Catalog sort feature shipped (v0.1.21.0)
+
+### Feature shipped
+- 2 nouveaux sort options sur /catalog:
+  - Best sellers (14d) — units_sold DESC depuis price_history
+  - Price drop % — drop_pct DESC depuis price_history
+- Performance: <1s sur 18k rows price_history (indexes en place)
+- LEFT JOIN NULL-safe pour produits sans historique
+
+### Bugs catchés par /review (excellent adversarial)
+1. Premier impl: SUM(old_qty - new_qty) classait restocks comme négatifs
+   - Fix: AND change_type='stock_change' AND old_qty>new_qty
+   - Match pattern getTrendingProducts() existant
+2. Price drop %: pas de change_type filter + risque div-by-zero
+   - Fix: change_type filter + guard division
+
+### Use cases business
+- Identifier quoi importer (best sellers Aosom non encore en store)
+- Identifier price drops Aosom à exploiter
+- Décision import data-driven (vs feeling)
+
+### Tests
+- 261/262 passing (1 pre-existing flaky)
+- 5 nouveaux tests pour les sort patterns
+
+### Apprentissages permanents (additions)
+6. SUM(old_qty - new_qty) sans guard restocks = sort inversé
+7. Match les patterns existants (getTrendingProducts) = consistency
+8. /review adversarial = catche les bugs business critiques
+9. Bumper VERSION + package.json en parallèle (oublié dans précédent ship)
+10. /ship prépare la PR mais ne merge pas — il faut cliquer manuellement
+
+---
 ## SESSION 08 mai après-midi — CRON_SECRET rotation + cleanup
 
 ### Action de sécurité
