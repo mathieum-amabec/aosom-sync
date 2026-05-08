@@ -1,6 +1,65 @@
 # Next session — après 24 avril 2026
 
 ---
+## SESSION 08 mai — Social cron 504 fix shipped (v0.1.20.4) + sync-race guard
+
+### What shipped
+- **PR #46** (`fix/social-cron-random-bottleneck`) merged → v0.1.20.4 live
+- **Root cause**: `ORDER BY RANDOM()` on 10k+ products = full table scan on Turso = 60-82s → Vercel 504
+- **Fix**: two-step pattern in `getEligibleHighlightProduct()`:
+  - Step 1: `SELECT sku WHERE filters` → get eligible SKU list (~4s)
+  - Step 2: `Math.floor(Math.random() * skus.length)` in JS → pick randomly
+  - Step 3: `SELECT * WHERE sku = ? AND shopify_product_id IS NOT NULL AND qty > 0` → re-validate
+- **Sync-race guard**: step-2 re-validates eligibility; concurrent sync could zero `qty` between the two queries → without guard, a 30-day `last_posted_at` poison would be set for an OOS product
+- **7 new tests** added covering all paths (pool, edge cases, TOCTOU)
+- **Package.json drift fixed**: `/ship` ALREADY_BUMPED path left package.json at 0.1.20.3 while VERSION was 0.1.20.4. Health endpoint reads `pkg.version`, so prod was showing wrong version. Fixed and pushed directly to main.
+- **Prod confirmed**: `curl https://aosom-sync.vercel.app/api/health` → `{"version":"0.1.20.4"}`
+
+### Vercel cron auto-pause (CRITICAL — action required)
+Vercel auto-pauses cron schedules after consecutive 504 timeouts. The social cron is **paused** and will NOT run automatically, even after the deploy.
+
+**Required action (once)**: Vercel Dashboard → Settings → Crons → click **Resume** on `/api/cron/social`
+
+After resuming, validate with:
+```bash
+curl -i "https://aosom-sync.vercel.app/api/cron/social" \
+  -H "Authorization: Bearer $CRON_SECRET"
+```
+Expect: HTTP 200, new row in `hook_usage_history` (count goes from 3 to 4+), new `facebook_drafts` row.
+
+```sql
+-- Validate social cron worked
+SELECT id, hook_id, status, content_type, substr(fr_caption, 1, 80) as fr_preview, created_at
+FROM facebook_drafts
+ORDER BY id DESC LIMIT 3;
+
+SELECT COUNT(*) FROM hook_usage_history;
+```
+
+### Bug C validations still pending
+- **09 mai 06:00 UTC**: validation 2/3
+- **10 mai 06:00 UTC**: validation 3/3
+
+Morning routine query:
+```sql
+SELECT id, status, total_products,
+  CAST((julianday(completed_at) - julianday(started_at)) * 86400 AS INTEGER) as duration_s,
+  timing_ms
+FROM sync_runs
+WHERE date(started_at) = date('now')
+  AND time(started_at) BETWEEN '06:00:00' AND '06:10:00'
+ORDER BY started_at DESC LIMIT 1;
+```
+Criteria: `status='completed'`, `duration_s < 150`.
+
+### Lessons learned
+1. **`ORDER BY RANDOM()` is a full table scan on Turso** — 10k rows = 60-82s. Two-step JS random is always better when the filtered set fits in memory.
+2. **TOCTOU race in two-step patterns** — always re-validate eligibility on the second query when state can change between steps (concurrent writes).
+3. **`/ship` ALREADY_BUMPED doesn't check package.json** — if VERSION was pre-bumped manually, the ship pipeline skips the bump step but doesn't detect package.json drift. Fix: check both VERSION and package.json in the idempotency guard.
+4. **Vercel cron pause is silent** — after 504s, Vercel stops the schedule without any visible alert. Always verify "Resume" in dashboard after fixing a cron timeout bug.
+5. **CRON_SECRET curl format**: `-H "Authorization: Bearer <token>"` — not just `-H "<token>"`.
+
+---
 ## SESSION 07 mai après-midi — Trending fix shipped (v0.1.20.3)
 
 ### Bug fixed
