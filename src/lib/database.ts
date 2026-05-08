@@ -1413,8 +1413,10 @@ export async function getEligibleHighlightProduct(minDaysBetween: number): Promi
   const skus = skusResult.rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
   const randomSku = skus[Math.floor(Math.random() * skus.length)];
 
+  // Re-validate eligibility to guard against sync-race: a concurrent sync run
+  // could zero qty or clear shopify_product_id between the two queries.
   const result = await db.execute({
-    sql: `SELECT * FROM products WHERE sku = ?`,
+    sql: `SELECT * FROM products WHERE sku = ? AND shopify_product_id IS NOT NULL AND qty > 0`,
     args: [randomSku],
   });
   return result.rows.length > 0 ? rowToObj(result.rows[0]) : null;
