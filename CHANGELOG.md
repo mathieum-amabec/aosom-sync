@@ -12,6 +12,9 @@ All notable changes to Aosom Sync will be documented in this file.
   - Vercel auto-pauses cron schedules after consecutive 504s
   - Fix: two-step pattern — `SELECT sku WHERE filters` (~4s) + JS random pick
     (instant) + `SELECT * WHERE sku = ?` (<1s). Total: <10s vs 60-82s.
+- **Sync-race guard** — step-2 query now re-validates `shopify_product_id IS NOT NULL
+  AND qty > 0` to prevent drafts being generated for products that became OOS between
+  the two queries (concurrent sync run scenario)
 
 ## [0.1.20.3] - 2026-05-07
 
