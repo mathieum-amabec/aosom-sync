@@ -1,6 +1,76 @@
 # Next session — après 24 avril 2026
 
 ---
+## SESSION 09 mai — Bug C Plan B Chunked SHIPPED (v0.2.0.0)
+
+### PRs mergée
+| PR | Version | Feature |
+|---|---|---|
+| #49 | v0.2.0.0 | Phase 1 chunked pipeline (Bug C fix) |
+
+### Architectural change shipped
+- Monolithic `runSync()` → 3 cron functions: `runSyncInit` / `runSyncRefreshChunk` ×4 / `runSyncFinalize`
+- `REFRESH_CHUNK_SIZE = 2500` — each chunk ~60s, well within 200s budget
+- State: `Phase1Checkpoint` in settings table (JSON blob, same pattern as `ShopifyPushCheckpoint`) — **no DB migration needed**
+- Vercel Blob: `toWriteMapped` + `priceChangeEntries` serialized between phases
+- Social cron `maxDuration` 120→200s (Anthropic retry overhead)
+- Phase 2 Shopify push moved 06:10→08:00 UTC (freed from Phase 1 window)
+
+### Cron schedule post-v0.2.0.0
+| Time (UTC) | Route | Function |
+|---|---|---|
+| 06:00 | `/api/cron/sync` | `runSyncInit` — fetchAll + diff + save blob |
+| 06:20, 06:40, 07:00, 07:20 | `/api/cron/sync-refresh` | `runSyncRefreshChunk` — 2500 rows/chunk |
+| 07:40 | `/api/cron/sync-finalize` | `runSyncFinalize` — rebuildCounts + recordPriceChanges + notify |
+| 08:00, 08:15, 08:30 | `/api/cron/sync-shopify` | Phase 2 Shopify push |
+| 13:00 | `/api/cron/social` | Social cron |
+
+### Tests
+- 315/316 passing (1 pre-existing flaky: `refresh-products-batch.test.ts`)
+- 97% coverage
+- +31 nouveaux tests: 9 job1-sync phases + 16 cron routes + 15 blob storage unit tests
+
+### Adversarial /review findings adressés (5/12)
+- **F1**: Guard `totalChunks > MAX_REFRESH_SLOTS` → throws instead of silent abort
+- **F2**: Re-read checkpoint after `refreshProducts` → skip save if concurrent invocation advanced it
+- **F3**: `runSync()` manual trigger refuses if Phase 1 pipeline is in progress
+- **F4**: Error notification when finalize skips due to incomplete refresh (was silent 200 OK)
+- **F6**: `savePhase1Checkpoint(finalized=true)` BEFORE `deletePhase1Blob` (price history safety)
+
+### Findings deferred (TODOS.md P3/P4)
+- F7: Full blob re-read per chunk (O(n²) bandwidth)
+- F8: Orphaned blobs accumulate on failed days
+- F9: `verifyCronSecret` DRY (5 cron routes)
+- F10: Sync history shows 0 creates / N updates for chunks (cosmetic)
+- F5: Blob URL in logs (architectural constraint, accepted)
+
+### Note: Aucune migration DB requise
+Le plan original prévoyait 4 colonnes sur `sync_runs` (current_phase, refresh_chunks_total, etc.).
+L'implémentation finale utilise le pattern settings table (comme Phase 2) — aucune migration.
+`PRAGMA table_info(sync_runs)` montrera les colonnes originales uniquement — c'est correct.
+
+### Validation pending — STRICT 3/3
+- **10 mai 06:00–07:40 UTC**: sync-init + sync-refresh (×N chunks) + sync-finalize → 1/3
+- **11 mai 06:00–07:40 UTC**: 2/3
+- **12 mai 06:00–07:40 UTC**: 3/3 → **Bug C CONFIRMED CLOSED**
+
+### Critères validation par run (TOUS requis)
+- `runSyncInit` completed `status='completed'` en <80s
+- Tous les sync-refresh chunks completed (`refreshDone=true` dans Phase1Checkpoint)
+- `runSyncFinalize` completed `status='completed'`, notification "Sync Phase 1 finalisée" reçue
+- ZERO stale locks cleared
+- Phase1Checkpoint finalized=true en DB
+
+### Apprentissages permanents (additions session 09 mai)
+17. Validation 1/3 sans Shopify push complete = NON valide (08 mai outlier)
+18. Instrumentation insuffisante = deviner à chaque debug
+19. Migration DB coût > économie pour catalogue actuel (settings table pattern préférable)
+20. Vrai problème souvent dans le code, pas la plateforme
+21. SIGKILL silencieux Vercel = artefacts trompeurs en DB (stale lock)
+22. `fetchAll` variabilité (29–61s) = facteur clé sous-estimé
+23. Phase 2 chunked pattern existait → à répliquer pour Phase 1 (fait en v0.2.0.0)
+
+---
 ## TRIPLE SHIP DAY — 08 mai 2026 (3 PRs: v0.1.20.4 + v0.1.21.0 + v0.1.22.0)
 
 ### PRs mergées aujourd'hui
