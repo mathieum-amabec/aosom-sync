@@ -68,11 +68,17 @@ async function generatePostText(prompt: string): Promise<string> {
 
 export async function POST(request: Request) {
   try {
-    if (!(await isAuthenticated())) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-    }
-    if ((await getSessionRole()) === "reviewer") {
-      return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+    const authHeader = request.headers.get("authorization");
+    const cronSecret = process.env.CRON_SECRET;
+    const isCronAuth = !!cronSecret && authHeader === `Bearer ${cronSecret}`;
+
+    if (!isCronAuth) {
+      if (!(await isAuthenticated())) {
+        return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+      }
+      if ((await getSessionRole()) === "reviewer") {
+        return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+      }
     }
 
     let body: Record<string, unknown>;
@@ -82,7 +88,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Invalid JSON body" }, { status: 400 });
     }
 
-    const { templateSlug, language } = body as {
+    const { templateSlug, language = "fr" } = body as {
       templateSlug?: unknown;
       language?: unknown;
     };
