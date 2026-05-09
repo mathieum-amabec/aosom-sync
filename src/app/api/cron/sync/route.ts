@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { runSync } from "@/jobs/job1-sync";
+import { runSyncInit } from "@/jobs/job1-sync";
 import { env } from "@/lib/config";
 
 function verifyCronSecret(header: string | null): boolean {
@@ -11,7 +11,8 @@ function verifyCronSecret(header: string | null): boolean {
 }
 
 /**
- * Cron handler — runs daily sync.
+ * Cron handler — Phase 1 init (fetchAll + diff + save blob).
+ * Fast: completes in <200s regardless of catalog size.
  * Protected by CRON_SECRET header.
  */
 export async function GET(request: Request) {
@@ -20,12 +21,12 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await runSync({ shopifyPush: false });
+    const result = await runSyncInit();
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
-    console.error(`[CRON] Sync failed:`, err);
-    return NextResponse.json({ success: false, error: "Sync failed" }, { status: 500 });
+    console.error(`[CRON] Sync init failed:`, err);
+    return NextResponse.json({ success: false, error: "Sync init failed" }, { status: 500 });
   }
 }
 
-export const maxDuration = 300;
+export const maxDuration = 200;

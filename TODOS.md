@@ -49,6 +49,30 @@
 
 ---
 
+## Phase 1 Chunked Pipeline (v0.2.0.0 follow-ups)
+
+### Full blob re-read per chunk — O(n²) bandwidth
+**Priority:** P3 (LOW)
+**Context:** Each `runSyncRefreshChunk` downloads the entire blob (~10 MB for 10k products) to slice out 2500 rows. 4 chunks + finalize = 5 × blob downloads/day. Acceptable now; revisit if catalog exceeds 20k products.
+**Fix:** Separate blobs per chunk (save N smaller blobs in init instead of 1 large one).
+
+### Orphaned blobs accumulate on failed days
+**Priority:** P3 (LOW)
+**Context:** If `runSyncFinalize` never runs (refresh never completes), `deletePhase1Blob` is never called. Failed days leave orphan blobs in Vercel Blob storage with no TTL.
+**Fix:** Add cleanup in `runSyncInit` — delete any existing blob from yesterday's checkpoint before writing a new one.
+
+### verifyCronSecret DRY violation
+**Priority:** P3 (LOW)
+**Context:** `verifyCronSecret` is copy-pasted in 5 cron route files. No bug, just maintainability debt.
+**Fix:** Extract to `src/lib/cron-auth.ts` and import in all cron routes.
+
+### Sync history shows 0 creates / N updates for refresh chunks
+**Priority:** P4 (cosmetic)
+**Context:** `completeSyncRun` in `runSyncRefreshChunk` hardcodes `created: 0, updated: chunk.length`. The chunk may contain new inserts too (refreshProducts UPSERT handles both). Dashboard sync history is slightly misleading.
+**Fix:** Have `refreshProducts` return `{ inserted, updated }` counts and propagate to `completeSyncRun`.
+
+---
+
 ## Performance
 
 ### Cold start Vercel sur plan Hobby
@@ -57,7 +81,7 @@
 
 ### Sync timeout sur Vercel
 **Priority:** P2 (MEDIUM)
-**Status:** Fixé — sync splitté en 2 phases (DB sync 6:00 UTC, Shopify push 6:10 UTC). Fonctionne dans les 300s du plan Hobby.
+**Status:** Fixé définitivement v0.2.0.0 — Phase 1 splittée en 3 fonctions distinctes (init/refresh×4/finalize). Chaque slot bien dans les 200s. Validation 3 runs consécutifs en cours (10-12 mai).
 
 ---
 

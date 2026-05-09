@@ -2,6 +2,56 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.2.0.0] - 2026-05-09
+
+### BREAKING — Architectural change (Bug C definitively closed)
+
+**Phase 1 sync — monolith → 3-phase pipeline**
+
+Root cause diagnosed 09 mai: `runSync({ shopifyPush: false })` exceeded Vercel `maxDuration=300s` when `fetchAll` was slow (~61s) because `refreshProducts` had no timeout guard and consumed the remaining budget (~239s). Vercel SIGKILL left runs as "running" in DB until stale lock clearer intervened.
+
+Pattern: 3 out of 4 days (06, 07, 09 mai) failed; 08 mai succeeded only because `fetchAll` was unusually fast (29s), leaving 271s for `refreshProducts` (123s).
+
+**New pipeline:**
+
+| Cron | Time (UTC) | Function | Budget |
+|---|---|---|---|
+| `/api/cron/sync` | 06:00 | `runSyncInit()` — fetchAll + diff + save blob | 200s |
+| `/api/cron/sync-refresh` | 06:20, 06:40, 07:00, 07:20 | `runSyncRefreshChunk()` — 2500 rows/chunk | 200s each |
+| `/api/cron/sync-finalize` | 07:40 | `runSyncFinalize()` — rebuildCounts + recordPriceChanges + notify | 60s |
+
+`REFRESH_CHUNK_SIZE = 2500`. Typical catalog: 1–3 chunks. Each chunk ~60s.
+
+State is passed via `Phase1Checkpoint` stored in settings table (same pattern as `ShopifyPushCheckpoint`). `toWrite` + `priceChangeEntries` serialized to Vercel Blob between phases.
+
+### Added
+
+- `src/lib/sync-blob-storage.ts` — Vercel Blob helper (`savePhase1Blob`, `readPhase1Blob`, `deletePhase1Blob`) with SSRF guard, 30s timeout, JSON shape validation
+- `Phase1Checkpoint` interface + `getPhase1Checkpoint()` + `savePhase1Checkpoint()` in `database.ts`
+- `runSyncInit()`, `runSyncRefreshChunk()`, `runSyncFinalize()` in `job1-sync.ts`
+- `src/app/api/cron/sync-refresh/route.ts` — new cron route (timing-safe auth)
+- `src/app/api/cron/sync-finalize/route.ts` — new cron route (timing-safe auth)
+- 40 new tests: 9 job1-sync phases, 16 cron route handlers, 15 blob storage unit tests
+- `MAX_REFRESH_SLOTS = 4` guard in `runSyncInit` — throws if `totalChunks > 4` instead of silent pipeline abort
+- Concurrent refresh protection — re-reads checkpoint after `refreshProducts` completes; skips save if another invocation already advanced it
+- Error notification when `runSyncFinalize` skips due to incomplete refresh (was silent 200 OK)
+
+### Changed
+
+- `src/app/api/cron/sync/route.ts` — now calls `runSyncInit()`, `maxDuration` 300 → 200
+- `src/app/api/cron/social/route.ts` — `maxDuration` 120 → 200 (Anthropic retry overhead fix)
+- `vercel.json` — 4 new cron slots for sync-refresh (06:20/06:40/07:00/07:20) and sync-finalize (07:40); Phase 2 Shopify push moved to 08:00/08:15/08:30
+- `PriceChangeEntry` interface exported from `job1-sync.ts`
+- `runSync()` (manual trigger) now refuses to run while Phase 1 chunked pipeline is in progress
+- `runSyncFinalize` saves checkpoint as finalized BEFORE deleting blob (prevents silent price history loss on retry)
+
+### Validation pending
+
+3 consecutive healthy Phase 1 completions required to close Bug C:
+- 10 mai 06:00–07:40 UTC: 1/3
+- 11 mai 06:00–07:40 UTC: 2/3
+- 12 mai 06:00–07:40 UTC: 3/3 → Bug C CONFIRMED CLOSED
+
 ## [0.1.22.0] - 2026-05-08
 
 ### Added

@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { triggerStockHighlight } from "@/jobs/job4-social";
+import { runSyncRefreshChunk } from "@/jobs/job1-sync";
 import { env } from "@/lib/config";
 
 function verifyCronSecret(header: string | null): boolean {
@@ -11,7 +11,9 @@ function verifyCronSecret(header: string | null): boolean {
 }
 
 /**
- * Cron handler — daily stock highlight post generation.
+ * Cron handler — Phase 1 refresh chunk (writes one REFRESH_CHUNK_SIZE slice to DB).
+ * Runs at 06:20, 06:40, 07:00, 07:20 UTC.
+ * Is a no-op if no pending refresh work exists.
  * Protected by CRON_SECRET header.
  */
 export async function GET(request: Request) {
@@ -20,11 +22,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await triggerStockHighlight();
+    const result = await runSyncRefreshChunk();
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
-    console.error(`[CRON] Social highlight failed:`, err);
-    return NextResponse.json({ success: false, error: "Social generation failed" }, { status: 500 });
+    console.error(`[CRON] Sync refresh chunk failed:`, err);
+    return NextResponse.json({ success: false, error: "Sync refresh failed" }, { status: 500 });
   }
 }
 
