@@ -1,7 +1,7 @@
 # Next session — après 24 avril 2026
 
 ---
-## SESSION 09 mai — Bug C Plan B Chunked SHIPPED (v0.2.0.0)
+## SESSION 09 mai — DOUBLE SHIP DAY (v0.2.0.0 + endpoint impl)
 
 ### PRs mergée
 | PR | Version | Feature |
@@ -61,6 +61,44 @@ L'implémentation finale utilise le pattern settings table (comme Phase 2) — a
 - ZERO stale locks cleared
 - Phase1Checkpoint finalized=true en DB
 
+### Feature implémentée en feature branch (PAS mergée)
+
+**Branch:** `feature/content-generate-endpoint` (4 commits, pushée)
+
+**Endpoint:** `POST /api/social/content/generate`
+- Auth: `Bearer $CRON_SECRET` OU session cookie (dashboard)
+- Body: `{ templateSlug: string, language?: "fr" }` — language default "fr"
+- Flow: template → vars auto (saison/mois/category/room/hook) → Claude → `createFacebookDraft`
+- Variables: `{{hook}}`, `{{season}}`, `{{saison}}`, `{{mois}}`, `{{category}}`, `{{room}}`
+- Tests: 17 tests route (401/403/400/404/422/200), 17/17 verts
+
+**Bugs fixes découverts pendant qualité validation:**
+1. `{{hook}}` non résolu — templates utilisent `{{hook}}` in prompt, `buildHookedPrompt` wrappait EN PLUS → double instruction contradictoire → fix: interpolateTemplate remplace `{{hook}}` direct
+2. `{{season}}` non résolu — `inspiration_vie_outdoor` utilise `{{season}}` (EN key) pas `{{saison}}` → fix: alias `season` ajouté dans vars
+3. `sku` FK violation — LibSQL enforce `FOREIGN KEY (sku) REFERENCES products(sku)` en remote mode → fix: `getAnyProductSku()` helper, content_template drafts utilisent premier SKU disponible comme placeholder
+
+**Qualité validée (3 templates):**
+| Template | Mots | Note |
+|---|---|---|
+| sondage_debat | 72 | 7/10 — format parfait, hook promo mismatch |
+| inspiration_vie_outdoor | 94 | 7/10 — contenu saisonnier excellent, hook promo mismatch |
+| astuces_entretien | 106 | 8/10 — meilleur draft, hook thématiquement pertinent |
+
+**Décision: NE PAS merger** — corriger hook filter P2 dans prochaine session AVANT merge
+
+### P2 Follow-ups à corriger AVANT merge endpoint
+
+**Issue 1 — Hook mismatch (stock/promo hooks pour templates éducatifs):**
+- Pool 200 hooks créé pour product highlights (promo, stock, prix urgency)
+- Templates education/inspiration tirent des hooks "Cette promo se termine vendredi" → posts incohérents
+- Fix Option A (rapide ~30min): filtrer `mode = 'generative_seeded'` pour `triggerType = 'content_template'`
+- Fix Option B (propre ~1h): sous-catégorie `editorial` dans `content_hook_categories` avec hooks lifestyle/curiosité
+
+**Issue 2 — `facebook_drafts.sku` FK sur LibSQL:**
+- `sku TEXT NOT NULL REFERENCES products(sku)` est enforced par LibSQL remote (≠ SQLite local)
+- Content template drafts utilisent `getAnyProductSku()` placeholder → sémantiquement incorrect
+- Fix: migration SQLite (recreate table, make `sku` nullable) — P2, pas bloquant pour merge
+
 ### Apprentissages permanents (additions session 09 mai)
 17. Validation 1/3 sans Shopify push complete = NON valide (08 mai outlier)
 18. Instrumentation insuffisante = deviner à chaque debug
@@ -69,6 +107,28 @@ L'implémentation finale utilise le pattern settings table (comme Phase 2) — a
 21. SIGKILL silencieux Vercel = artefacts trompeurs en DB (stale lock)
 22. `fetchAll` variabilité (29–61s) = facteur clé sous-estimé
 23. Phase 2 chunked pattern existait → à répliquer pour Phase 1 (fait en v0.2.0.0)
+24. Hooks pool unique pour tous content types = anti-pattern (stock/promo hooks ≠ editorial hooks)
+25. Validation qualité prompts AVANT cron auto = critique (bugs template variables non détectés sinon)
+26. LibSQL remote enforce FK par défaut (≠ SQLite local sans `PRAGMA foreign_keys = ON`)
+
+### Backlog priorisé après session 09 mai
+
+**P1 (prochaine session):**
+1. Validation Bug C 3/3 (10-12 mai, automatique — juste vérifier les logs)
+2. Fix hook filter Issue 1 (~30min, Option A recommandée)
+3. Merge `feature/content-generate-endpoint` + ship v0.2.1.0
+4. 12 EN prompts pour Furnish Direct (~2-3h session créative)
+5. Cron scheduling content_template 3×/week (~1h)
+
+**P2:**
+- `facebook_drafts.sku` migration (nullable + drop FK) — avant UI non-product drafts
+- UI dashboard: preview drafts `content_template` (pas de SKU produit affiché)
+- Multi-photo drafts pour content posts (1-5 images random)
+
+**P3:**
+- V2 Trending `soldPerDay` précis
+- Test flaky `refresh-products-batch.test.ts`
+- `recordPriceChanges` N+1 pattern
 
 ---
 ## TRIPLE SHIP DAY — 08 mai 2026 (3 PRs: v0.1.20.4 + v0.1.21.0 + v0.1.22.0)
