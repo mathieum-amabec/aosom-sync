@@ -1758,3 +1758,11 @@ export async function getPhase1Checkpoint(): Promise<Phase1Checkpoint | null> {
 export async function savePhase1Checkpoint(cp: Phase1Checkpoint): Promise<void> {
   await setSetting("phase1_checkpoint", JSON.stringify(cp));
 }
+
+/** Returns the first available product SKU, used as a fallback for non-product drafts. */
+export async function getAnyProductSku(): Promise<string | null> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT sku FROM products LIMIT 1`);
+  if (result.rows.length === 0) return null;
+  return String(rowToObj(result.rows[0]).sku);
+}

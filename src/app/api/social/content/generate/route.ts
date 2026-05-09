@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
-import { getContentTemplateBySlug, createFacebookDraft } from "@/lib/database";
-import { selectHook, buildHookedPrompt } from "@/lib/hook-selector";
+import { getContentTemplateBySlug, createFacebookDraft, getAnyProductSku, selectCompatibleHooks } from "@/lib/database";
+import { mapProductTypeToScope } from "@/lib/hook-selector";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { CLAUDE } from "@/lib/config";
 
@@ -123,18 +123,28 @@ export async function POST(request: Request) {
 
     const now = new Date();
     const month = now.getMonth();
+    const saison = getSaisonFr(month);
+
+    // Select a hook (no draft_id yet — we don't record usage to avoid FK issue on null draft_id)
+    const scope = mapProductTypeToScope(null);
+    const hookCandidates = await selectCompatibleHooks(scope, "FR", []);
+    const hookChosen = hookCandidates.length > 0
+      ? hookCandidates[Math.floor(Math.random() * hookCandidates.length)]
+      : null;
+
+    // Inject all template variables including {{hook}} and {{season}} aliases
     const vars: Record<string, string> = {
-      saison: getSaisonFr(month),
+      saison,
+      season: saison,
       mois: MONTHS_FR[month],
       category: pickRandom(CATEGORIES_FR),
       room: pickRandom(ROOMS_FR),
+      hook: hookChosen?.text ?? "",
     };
 
-    const basePrompt = interpolateTemplate(template.prompt_pattern_fr, vars);
-    const hook = await selectHook("FR", null, null);
-    const hookedPrompt = buildHookedPrompt(basePrompt, hook);
+    const finalPrompt = interpolateTemplate(template.prompt_pattern_fr, vars);
 
-    const postText = await generatePostText(hookedPrompt);
+    const postText = await generatePostText(finalPrompt);
     if (!postText) {
       return NextResponse.json(
         { success: false, error: "Claude returned an empty response" },
@@ -142,12 +152,21 @@ export async function POST(request: Request) {
       );
     }
 
+    // facebook_drafts.sku has FK on products(sku) — content template drafts use any real SKU
+    const sku = await getAnyProductSku();
+    if (!sku) {
+      return NextResponse.json(
+        { success: false, error: "No products in catalog — cannot create draft" },
+        { status: 503 },
+      );
+    }
+
     const draftId = await createFacebookDraft({
-      sku: `content-${template.slug}`,
+      sku,
       triggerType: "content_template",
       language: "fr",
       postText,
-      hookId: hook.hookId,
+      hookId: hookChosen?.id ?? null,
     });
 
     return NextResponse.json({
@@ -155,7 +174,7 @@ export async function POST(request: Request) {
       draftId,
       postText,
       templateSlug: template.slug,
-      hookId: hook.hookId,
+      hookId: hookChosen?.id ?? null,
       vars,
     });
   } catch (err) {

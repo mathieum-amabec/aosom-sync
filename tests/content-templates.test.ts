@@ -386,12 +386,13 @@ describe("POST /api/social/content/generate", () => {
     vi.doMock("@/lib/database", () => ({
       getContentTemplateBySlug: vi.fn().mockResolvedValue(MOCK_TEMPLATE),
       createFacebookDraft: vi.fn().mockResolvedValue(42),
+      selectCompatibleHooks: vi.fn().mockResolvedValue([
+        { id: 7, text: "Voici une astuce!", mode: "pool", categoryId: 1, language: "FR", productScopes: ["universal"], usedCount: 0, lastUsedAt: null },
+      ]),
+      getAnyProductSku: vi.fn().mockResolvedValue("01-0016"),
     }));
     vi.doMock("@/lib/hook-selector", () => ({
-      selectHook: vi.fn().mockResolvedValue({ hookId: 7, text: "Voici une astuce!", mode: "pool" }),
-      buildHookedPrompt: vi.fn().mockImplementation((_prompt: string) =>
-        "Commence ton post par cette phrase d'accroche exacte : \"Voici une astuce!\"\n\nEnsuite, mock prompt"
-      ),
+      mapProductTypeToScope: vi.fn().mockReturnValue("universal"),
     }));
     vi.doMock("@/lib/content-generator", () => ({
       getAnthropicClient: vi.fn().mockReturnValue({
