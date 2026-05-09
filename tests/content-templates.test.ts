@@ -261,7 +261,7 @@ describe("content_templates — megastore migration", () => {
   });
 });
 
-// ─── Route tests (mocked auth, 501/400 verification) ────────────────────────
+// ─── Route tests (mocked auth + DB + Anthropic) ─────────────────────────────
 
 vi.mock("next/headers", () => ({
   cookies: () => ({
@@ -280,33 +280,140 @@ const makeRequest = (body: unknown) =>
     body: JSON.stringify(body),
   });
 
-describe("POST /api/social/content/generate — stub responses", () => {
+const MOCK_TEMPLATE = {
+  id: 1,
+  slug: "conseil_deco_piece",
+  content_type: "education" as const,
+  display_name_fr: "Conseil déco",
+  display_name_en: "Deco tip",
+  prompt_pattern_fr: "Rédige un post Facebook sur {{category}} dans un {{room}} en {{saison}}.",
+  prompt_pattern_en: "Write a Facebook post about {{category}} in a {{room}} in {{saison}}.",
+  image_strategy: "product",
+  active: true,
+  frequency_per_month: 2,
+  scopes: ["mobilier_indoor"],
+};
+
+describe("POST /api/social/content/generate", () => {
   beforeEach(() => {
     vi.resetModules();
   });
 
-  it("returns 501 NOT_IMPLEMENTED with valid payload (authenticated admin)", async () => {
+  it("returns 401 when not authenticated", async () => {
     vi.doMock("@/lib/auth", () => ({
-      isAuthenticated: vi.fn().mockResolvedValue(true),
-      getSessionRole: vi.fn().mockResolvedValue("admin"),
+      isAuthenticated: vi.fn().mockResolvedValue(false),
+      getSessionRole: vi.fn().mockResolvedValue(null),
     }));
     const { POST } = await import("@/app/api/social/content/generate/route");
-    const res = await POST(makeRequest({ language: "fr", template_slug: "conseil_deco_piece" }));
-    expect(res.status).toBe(501);
-    const body = await res.json();
-    expect(body.error).toBe("NOT_IMPLEMENTED");
-    expect(body.received.language).toBe("fr");
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "fr" }));
+    expect(res.status).toBe(401);
   });
 
-  it("returns 400 when language is missing or invalid", async () => {
+  it("returns 403 for reviewer role", async () => {
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("reviewer"),
+    }));
+    const { POST } = await import("@/app/api/social/content/generate/route");
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "fr" }));
+    expect(res.status).toBe(403);
+  });
+
+  it("returns 400 when templateSlug is missing", async () => {
     vi.doMock("@/lib/auth", () => ({
       isAuthenticated: vi.fn().mockResolvedValue(true),
       getSessionRole: vi.fn().mockResolvedValue("admin"),
     }));
     const { POST } = await import("@/app/api/social/content/generate/route");
-    const res = await POST(makeRequest({ template_slug: "conseil_deco_piece" }));
+    const res = await POST(makeRequest({ language: "fr" }));
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.success).toBe(false);
+    expect(body.error).toContain("templateSlug");
+  });
+
+  it("returns 400 when language is not fr", async () => {
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("admin"),
+    }));
+    const { POST } = await import("@/app/api/social/content/generate/route");
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "en" }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+  });
+
+  it("returns 404 when template slug does not exist", async () => {
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("admin"),
+    }));
+    vi.doMock("@/lib/database", () => ({
+      getContentTemplateBySlug: vi.fn().mockResolvedValue(null),
+      createFacebookDraft: vi.fn().mockResolvedValue(99),
+    }));
+    const { POST } = await import("@/app/api/social/content/generate/route");
+    const res = await POST(makeRequest({ templateSlug: "does-not-exist", language: "fr" }));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("not found");
+  });
+
+  it("returns 422 when template is inactive", async () => {
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("admin"),
+    }));
+    vi.doMock("@/lib/database", () => ({
+      getContentTemplateBySlug: vi.fn().mockResolvedValue({ ...MOCK_TEMPLATE, active: false }),
+      createFacebookDraft: vi.fn().mockResolvedValue(99),
+    }));
+    const { POST } = await import("@/app/api/social/content/generate/route");
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "fr" }));
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error).toContain("not active");
+  });
+
+  it("returns 200 with draftId and postText on success", async () => {
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("admin"),
+    }));
+    vi.doMock("@/lib/database", () => ({
+      getContentTemplateBySlug: vi.fn().mockResolvedValue(MOCK_TEMPLATE),
+      createFacebookDraft: vi.fn().mockResolvedValue(42),
+    }));
+    vi.doMock("@/lib/hook-selector", () => ({
+      selectHook: vi.fn().mockResolvedValue({ hookId: 7, text: "Voici une astuce!", mode: "pool" }),
+      buildHookedPrompt: vi.fn().mockImplementation((_prompt: string) =>
+        "Commence ton post par cette phrase d'accroche exacte : \"Voici une astuce!\"\n\nEnsuite, mock prompt"
+      ),
+    }));
+    vi.doMock("@/lib/content-generator", () => ({
+      getAnthropicClient: vi.fn().mockReturnValue({
+        messages: {
+          create: vi.fn().mockResolvedValue({
+            content: [{ type: "text", text: "Super post généré par Claude !" }],
+          }),
+        },
+      }),
+    }));
+    const { POST } = await import("@/app/api/social/content/generate/route");
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "fr" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.draftId).toBe(42);
+    expect(body.postText).toBe("Super post généré par Claude !");
+    expect(body.templateSlug).toBe("conseil_deco_piece");
+    expect(body.hookId).toBe(7);
+    expect(body.vars).toHaveProperty("saison");
+    expect(body.vars).toHaveProperty("mois");
+    expect(body.vars).toHaveProperty("category");
+    expect(body.vars).toHaveProperty("room");
   });
 });
