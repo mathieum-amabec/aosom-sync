@@ -9,14 +9,19 @@ Catalogue management tool for a Shopify dropshipping store (27u5y2-kp.myshopify.
 Next.js App Router on Vercel. Engine in `src/lib/`, UI in `src/app/(dashboard)/`, API in `src/app/api/`.
 
 ```
-CSV Feed (Aosom) → csv-fetcher → variant-merger → diff-engine → Shopify API
-                                       ↓
-                                  catalog_snapshots (SQLite)
-                                       ↓
-                                  Catalog Browser UI
+CSV Feed (Aosom) → csv-fetcher → variant-merger → diff-engine → Vercel Blob (Phase1Checkpoint)
+                                       ↓                                  ↓
+                                  catalog_snapshots (SQLite)      sync-refresh ×4 (2500 rows/chunk)
+                                       ↓                                  ↓
+                                  Catalog Browser UI              sync-finalize (rebuildCounts + notify)
                                        ↓
                                Import Pipeline → Claude API → Shopify (as draft)
 ```
+
+Phase 1 is split into 3 cron functions to avoid Vercel 300s SIGKILL:
+- `runSyncInit()` at 06:00 UTC — fetchAll + diff + save blob (~200s budget)
+- `runSyncRefreshChunk()` at 06:20/06:40/07:00/07:20 UTC — 2500 rows/chunk (~200s budget each)
+- `runSyncFinalize()` at 07:40 UTC — counts + price history + notify (~60s budget)
 
 ## Data Model (SQLite/better-sqlite3)
 
@@ -25,6 +30,7 @@ CSV Feed (Aosom) → csv-fetcher → variant-merger → diff-engine → Shopify 
 - `import_jobs` — import queue with status machine (pending→generating→reviewing→importing→done)
 - `catalog_snapshots` — latest CSV data for fast catalog browsing
 - `sync_cursor` — chunked sync progress for large stores
+- `settings` — key-value store; `checkpoint_data` holds both `ShopifyPushCheckpoint` (Phase 2) and `Phase1Checkpoint` (Phase 1 chunked pipeline state)
 
 ## Key Patterns
 
@@ -40,7 +46,9 @@ CSV Feed (Aosom) → csv-fetcher → variant-merger → diff-engine → Shopify 
 - `GET /api/catalog` — browse catalog with filters (reads from Turso, not CSV)
 - `POST /api/sync/trigger` — manual sync (supports `{dryRun: true}`)
 - `GET /api/sync/history` — sync runs + change logs
-- `GET /api/cron/sync` — Vercel Cron daily sync (Bearer CRON_SECRET)
+- `GET /api/cron/sync` — Vercel Cron Phase 1 init: fetchAll + diff + save blob (Bearer CRON_SECRET, maxDuration 200s)
+- `GET /api/cron/sync-refresh` — Vercel Cron Phase 1 chunk: refreshes 2500 rows/chunk, fires at 06:20/06:40/07:00/07:20 UTC (Bearer CRON_SECRET, maxDuration 200s)
+- `GET /api/cron/sync-finalize` — Vercel Cron Phase 1 finalize: rebuildCounts + recordPriceChanges + notify, fires at 07:40 UTC (Bearer CRON_SECRET, maxDuration 60s)
 - `POST /api/import/queue` — queue products by SKU array
 - `POST /api/import/generate` — generate Claude content for one job
 - `POST /api/import/push` — push reviewed job to Shopify
