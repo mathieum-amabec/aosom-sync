@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { triggerStockHighlight } from "@/jobs/job4-social";
+import { runSyncFinalize } from "@/jobs/job1-sync";
 import { env } from "@/lib/config";
 
 function verifyCronSecret(header: string | null): boolean {
@@ -11,7 +11,9 @@ function verifyCronSecret(header: string | null): boolean {
 }
 
 /**
- * Cron handler — daily stock highlight post generation.
+ * Cron handler — Phase 1 finalize (rebuildCounts + recordPriceChanges + notify).
+ * Runs at 07:40 UTC after all refresh chunks are done.
+ * Is a no-op if refresh is not yet complete or already finalized.
  * Protected by CRON_SECRET header.
  */
 export async function GET(request: Request) {
@@ -20,12 +22,12 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await triggerStockHighlight();
+    const result = await runSyncFinalize();
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
-    console.error(`[CRON] Social highlight failed:`, err);
-    return NextResponse.json({ success: false, error: "Social generation failed" }, { status: 500 });
+    console.error(`[CRON] Sync finalize failed:`, err);
+    return NextResponse.json({ success: false, error: "Sync finalize failed" }, { status: 500 });
   }
 }
 
-export const maxDuration = 200;
+export const maxDuration = 60;

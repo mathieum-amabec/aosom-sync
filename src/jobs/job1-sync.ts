@@ -36,11 +36,20 @@ import {
   getAllProductsAsAosom,
   getShopifyPushCheckpoint,
   saveShopifyPushCheckpoint,
+  getPhase1Checkpoint,
+  savePhase1Checkpoint,
   type ShopifyPushCheckpoint,
+  type Phase1Checkpoint,
   type ProductSnapshot,
 } from "@/lib/database";
 import type { ChangeTypeHistory } from "@/lib/database";
 import { diffProductsLight } from "@/lib/product-diff";
+import {
+  savePhase1Blob,
+  readPhase1Blob,
+  deletePhase1Blob,
+  type Phase1BlobData,
+} from "@/lib/sync-blob-storage";
 
 function log(msg: string, extra?: Record<string, unknown>): void {
   console.log(JSON.stringify({ ts: new Date().toISOString(), job: "job1-sync", msg, ...extra }));
@@ -59,7 +68,7 @@ export interface SyncResult {
   dryRun: boolean;
 }
 
-interface PriceChangeEntry {
+export interface PriceChangeEntry {
   sku: string;
   oldPrice: number | null;
   newPrice: number | null;
@@ -260,6 +269,12 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
   log("getLatestSyncRun done", { phase: "getLatestSyncRun", duration_ms: timing.getLatestSyncRun });
   if (latestRun && latestRun.status === "running") {
     throw new Error(`Sync already in progress (run ${latestRun.id}, started ${latestRun.startedAt})`);
+  }
+  // F3: refuse manual trigger while Phase 1 chunked pipeline is running
+  const todayForGuard = new Date().toISOString().slice(0, 10);
+  const phase1Cp = await getPhase1Checkpoint();
+  if (phase1Cp?.date === todayForGuard && !phase1Cp.finalized) {
+    throw new Error(`Phase 1 chunked pipeline in progress (${phase1Cp.chunksProcessed}/${phase1Cp.totalChunks} chunks done). Wait for finalize at 07:40 UTC or use the cron routes directly.`);
   }
 
   // Phase 2: createSyncRun
@@ -561,6 +576,297 @@ export async function runShopifyPush(): Promise<{ updates: number; archived: num
         status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
       });
     } catch { /* ignore — DB failure after main error */ }
+    throw err;
+  }
+}
+
+// ─── Phase 1 chunked: init → refresh (×N) → finalize ───────────────────────
+
+const REFRESH_CHUNK_SIZE = 2500;
+const MAX_REFRESH_SLOTS = 4; // must match the number of sync-refresh cron slots in vercel.json
+
+export interface SyncInitResult {
+  syncRunId: string;
+  totalChunks: number;
+  totalProducts: number;
+  skipped: boolean;
+}
+
+export interface SyncRefreshResult {
+  chunksProcessed: number;
+  totalChunks: number;
+  refreshDone: boolean;
+  skipped: boolean;
+}
+
+export interface SyncFinalizeResult {
+  skipped: boolean;
+}
+
+/**
+ * Phase 1 init — fetchAll + diff + detectChanges + save blob.
+ * Runs at 06:00 UTC. Completes quickly (<200s) regardless of catalog size.
+ * Hands off refreshProducts work to sync-refresh crons via Phase1Checkpoint.
+ */
+export async function runSyncInit(): Promise<SyncInitResult> {
+  const t0 = Date.now();
+  const timing: Record<string, number> = {};
+  const today = new Date().toISOString().slice(0, 10);
+
+  const t0Lock = Date.now();
+  await clearStaleLockIfNeeded();
+  timing.clearStaleLock = Date.now() - t0Lock;
+
+  const existingCp = await getPhase1Checkpoint();
+  if (existingCp?.date === today) {
+    log("Phase1 already initialized today — skipping", { phase: "init", finalized: existingCp.finalized });
+    return { syncRunId: "", totalChunks: existingCp.totalChunks, totalProducts: existingCp.totalProducts, skipped: true };
+  }
+
+  const t0Latest = Date.now();
+  const latestRun = await getLatestSyncRun();
+  timing.getLatestSyncRun = Date.now() - t0Latest;
+  if (latestRun && latestRun.status === "running") {
+    throw new Error(`Sync already in progress (run ${latestRun.id}, started ${latestRun.startedAt})`);
+  }
+
+  const t0Create = Date.now();
+  const syncRun = await createSyncRun();
+  timing.createSyncRun = Date.now() - t0Create;
+  await updateSyncRunTiming(syncRun.id, timing);
+
+  try {
+    const t0Fetch = Date.now();
+    const [aosomProducts, snapshot] = await Promise.all([
+      fetchAosomCatalog(),
+      getProductsSnapshot(),
+    ]);
+    timing.fetchAll = Date.now() - t0Fetch;
+    log(`${aosomProducts.length} produits CSV, ${snapshot.size} en DB`, {
+      phase: "fetchAll", duration_ms: timing.fetchAll,
+      csv_count: aosomProducts.length, snapshot_count: snapshot.size,
+    });
+    await updateSyncRunTiming(syncRun.id, timing);
+
+    const t0Diff = Date.now();
+    const diffResult = diffProductsLight(aosomProducts, snapshot);
+    const toWrite = [...diffResult.toInsert, ...diffResult.toUpdate];
+    timing.diff = Date.now() - t0Diff;
+    log(`Diff: ${diffResult.toInsert.length} nouveaux, ${diffResult.toUpdate.length} modifiés`, {
+      phase: "diff", duration_ms: timing.diff,
+      to_insert: diffResult.toInsert.length, to_update: diffResult.toUpdate.length,
+    });
+    await updateSyncRunTiming(syncRun.id, timing);
+
+    const t0Detect = Date.now();
+    const changes = await detectChanges(toWrite, snapshot);
+    timing.detectChanges = Date.now() - t0Detect;
+    log("detectChanges done", {
+      phase: "detectChanges", duration_ms: timing.detectChanges,
+      price_updates: changes.priceUpdates, stock_changes: changes.stockChanges,
+      new_products: changes.newProducts,
+    });
+    await updateSyncRunTiming(syncRun.id, timing);
+
+    const totalChunks = toWrite.length > 0 ? Math.ceil(toWrite.length / REFRESH_CHUNK_SIZE) : 0;
+    if (totalChunks > MAX_REFRESH_SLOTS) {
+      throw new Error(`Phase1 init: ${totalChunks} chunks needed but only ${MAX_REFRESH_SLOTS} cron refresh slots available. Increase REFRESH_CHUNK_SIZE or add slots in vercel.json.`);
+    }
+
+    const t0Blob = Date.now();
+    let blobUrl = "";
+    if (toWrite.length > 0) {
+      const blobData: Phase1BlobData = {
+        toWriteMapped: toWrite.map(aosomToProductRow),
+        priceChangeEntries: changes.priceChangeEntries,
+      };
+      blobUrl = await savePhase1Blob(syncRun.id, blobData);
+    }
+    timing.saveBlob = Date.now() - t0Blob;
+    log(`Blob saved (${toWrite.length} rows, ${totalChunks} chunks)`, {
+      phase: "saveBlob", duration_ms: timing.saveBlob, rows: toWrite.length, total_chunks: totalChunks,
+    });
+    await updateSyncRunTiming(syncRun.id, timing);
+
+    const cp: Phase1Checkpoint = {
+      date: today,
+      blobUrl,
+      totalChunks,
+      chunksProcessed: 0,
+      refreshDone: totalChunks === 0,
+      finalized: false,
+      totalProducts: aosomProducts.length,
+      priceUpdates: changes.priceUpdates,
+      stockChanges: changes.stockChanges,
+      newProducts: changes.newProducts,
+    };
+    await savePhase1Checkpoint(cp);
+
+    const t0Complete = Date.now();
+    await completeSyncRun(syncRun.id, {
+      status: "completed",
+      totalProducts: aosomProducts.length,
+      created: 0, updated: 0, archived: 0, errors: 0,
+      errorMessages: [`Phase 1 init — ${totalChunks} refresh chunks queued`],
+    });
+    timing.completeSyncRun = Date.now() - t0Complete;
+    timing.total = Date.now() - t0;
+    await updateSyncRunTiming(syncRun.id, timing);
+
+    log(`runSyncInit done: ${totalChunks} chunks`, { phase: "total", duration_ms: timing.total });
+    return { syncRunId: syncRun.id, totalChunks, totalProducts: aosomProducts.length, skipped: false };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    timing.total = Date.now() - t0;
+    log(`ERREUR runSyncInit: ${msg}`, { phase: "error", duration_ms: timing.total });
+    await updateSyncRunTiming(syncRun.id, timing);
+    await completeSyncRun(syncRun.id, {
+      status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
+    });
+    await createNotification("error", "Sync init échouée", msg.slice(0, 200));
+    throw err;
+  }
+}
+
+/**
+ * Phase 1 refresh chunk — reads one REFRESH_CHUNK_SIZE slice from blob and writes to DB.
+ * Each call is idempotent: advances chunksProcessed by exactly 1.
+ * Runs at 06:20, 06:40, 07:00, 07:20 UTC until refreshDone=true.
+ */
+export async function runSyncRefreshChunk(): Promise<SyncRefreshResult> {
+  const today = new Date().toISOString().slice(0, 10);
+  const cp = await getPhase1Checkpoint();
+
+  if (!cp || cp.date !== today || cp.refreshDone || cp.finalized) {
+    log("Phase1 refresh: nothing to do", { phase: "refresh", hasCheckpoint: !!cp });
+    return { chunksProcessed: 0, totalChunks: 0, refreshDone: true, skipped: true };
+  }
+
+  const syncRun = await createSyncRun();
+
+  try {
+    const t0Read = Date.now();
+    const blobData = await readPhase1Blob(cp.blobUrl);
+    const start = cp.chunksProcessed * REFRESH_CHUNK_SIZE;
+    const chunk = blobData.toWriteMapped.slice(start, start + REFRESH_CHUNK_SIZE);
+    const readMs = Date.now() - t0Read;
+
+    log(`Refresh chunk ${cp.chunksProcessed + 1}/${cp.totalChunks}: ${chunk.length} rows`, {
+      phase: "refresh", chunk_index: cp.chunksProcessed, chunk_size: chunk.length, read_ms: readMs,
+    });
+
+    const t0Refresh = Date.now();
+    await refreshProducts(chunk);
+    const refreshMs = Date.now() - t0Refresh;
+    log(`Chunk written`, { phase: "refresh", duration_ms: refreshMs, rows: chunk.length });
+
+    // F2: re-read checkpoint to detect a concurrent invocation that already advanced it
+    const freshCp = await getPhase1Checkpoint();
+    if (!freshCp || freshCp.chunksProcessed !== cp.chunksProcessed) {
+      log("Phase1 refresh: concurrent invocation already advanced checkpoint — skipping save", {
+        phase: "refresh", expected: cp.chunksProcessed, actual: freshCp?.chunksProcessed,
+      });
+      return { chunksProcessed: freshCp?.chunksProcessed ?? cp.chunksProcessed + 1, totalChunks: cp.totalChunks, refreshDone: freshCp?.refreshDone ?? false, skipped: true };
+    }
+
+    const newChunksProcessed = cp.chunksProcessed + 1;
+    const newRefreshDone = newChunksProcessed >= cp.totalChunks;
+    await savePhase1Checkpoint({ ...cp, chunksProcessed: newChunksProcessed, refreshDone: newRefreshDone });
+
+    await completeSyncRun(syncRun.id, {
+      status: "completed",
+      totalProducts: chunk.length,
+      created: 0, updated: chunk.length, archived: 0, errors: 0,
+      errorMessages: [`Phase 1 refresh chunk ${newChunksProcessed}/${cp.totalChunks}`],
+    });
+
+    return { chunksProcessed: newChunksProcessed, totalChunks: cp.totalChunks, refreshDone: newRefreshDone, skipped: false };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`ERREUR Phase1 refresh chunk: ${msg}`);
+    try {
+      await completeSyncRun(syncRun.id, {
+        status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
+      });
+    } catch { /* ignore */ }
+    throw err;
+  }
+}
+
+/**
+ * Phase 1 finalize — rebuildProductTypeCounts + recordPriceChanges + completeSyncRun.
+ * Runs at 07:40 UTC after all refresh chunks are done.
+ */
+export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
+  const today = new Date().toISOString().slice(0, 10);
+  const cp = await getPhase1Checkpoint();
+
+  if (!cp || cp.date !== today || cp.finalized) {
+    log("Phase1 finalize: not ready or already done", { phase: "finalize", hasCheckpoint: !!cp });
+    return { skipped: true };
+  }
+  if (!cp.refreshDone) {
+    const msg = `Phase1 finalize ignorée: refresh incomplet (${cp.chunksProcessed}/${cp.totalChunks} chunks)`;
+    log(msg, { phase: "finalize" });
+    await createNotification("error", "Sync finalize ignorée — refresh incomplet", msg.slice(0, 200));
+    return { skipped: true };
+  }
+
+  const syncRun = await createSyncRun();
+
+  try {
+    let priceChangeEntries: PriceChangeEntry[] = [];
+    if (cp.blobUrl) {
+      try {
+        const blobData = await readPhase1Blob(cp.blobUrl);
+        priceChangeEntries = blobData.priceChangeEntries;
+      } catch (blobErr) {
+        log(`Blob read failed in finalize, skipping price history: ${blobErr}`);
+      }
+    }
+
+    const t0Rebuild = Date.now();
+    await rebuildProductTypeCounts();
+    log("rebuildProductTypeCounts done", { phase: "finalize", duration_ms: Date.now() - t0Rebuild });
+
+    const t0Record = Date.now();
+    if (priceChangeEntries.length > 0) {
+      await recordPriceChanges(priceChangeEntries);
+    }
+    log("recordPriceChanges done", { phase: "finalize", duration_ms: Date.now() - t0Record, entries: priceChangeEntries.length });
+
+    await completeSyncRun(syncRun.id, {
+      status: "completed",
+      totalProducts: cp.totalProducts,
+      created: 0, updated: cp.priceUpdates, archived: 0, errors: 0,
+      errorMessages: ["Phase 1 finalized — Shopify push deferred to Phase 2"],
+    });
+
+    // F6: mark finalized BEFORE deleting blob — if delete fails or checkpoint save fails
+    // after delete, a retry would find no blob and silently skip price history.
+    await savePhase1Checkpoint({ ...cp, finalized: true });
+    if (cp.blobUrl) {
+      await deletePhase1Blob(cp.blobUrl);
+    }
+
+    const parts: string[] = [];
+    if (cp.priceUpdates > 0) parts.push(`${cp.priceUpdates} prix mis à jour`);
+    if (cp.stockChanges > 0) parts.push(`${cp.stockChanges} stocks changés`);
+    if (cp.newProducts > 0) parts.push(`${cp.newProducts} nouveaux produits`);
+    parts.push("Shopify push en attente (Phase 2)");
+    await createNotification("success", "Sync Phase 1 finalisée", parts.join(", ") || "Aucun changement");
+
+    log("runSyncFinalize complete", { phase: "finalize", total_products: cp.totalProducts });
+    return { skipped: false };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log(`ERREUR Phase1 finalize: ${msg}`);
+    try {
+      await completeSyncRun(syncRun.id, {
+        status: "failed", totalProducts: 0, created: 0, updated: 0, archived: 0, errors: 1, errorMessages: [msg],
+      });
+    } catch { /* ignore */ }
+    await createNotification("error", "Sync finalize échouée", msg.slice(0, 200));
     throw err;
   }
 }

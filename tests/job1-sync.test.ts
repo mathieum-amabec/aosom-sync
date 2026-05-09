@@ -62,7 +62,15 @@ vi.mock("@/lib/database", () => ({
   getAllProductsAsAosom: vi.fn().mockResolvedValue([]),
   getShopifyPushCheckpoint: vi.fn().mockResolvedValue(null),
   saveShopifyPushCheckpoint: vi.fn().mockResolvedValue(undefined),
+  getPhase1Checkpoint: vi.fn().mockResolvedValue(null),
+  savePhase1Checkpoint: vi.fn().mockResolvedValue(undefined),
   getSyncRuns: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@/lib/sync-blob-storage", () => ({
+  savePhase1Blob: vi.fn().mockResolvedValue("https://blob.vercel-storage.com/test/run-new.json"),
+  readPhase1Blob: vi.fn().mockResolvedValue({ toWriteMapped: [], priceChangeEntries: [] }),
+  deletePhase1Blob: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/csv-fetcher", () => ({
@@ -106,7 +114,8 @@ vi.mock("@/lib/config", () => ({
 const db = await import("@/lib/database");
 const shopifyClient = await import("@/lib/shopify-client");
 const diffEngine = await import("@/lib/diff-engine");
-const { runSync, runShopifyPush } = await import("@/jobs/job1-sync");
+const blobStorage = await import("@/lib/sync-blob-storage");
+const { runSync, runShopifyPush, runSyncInit, runSyncRefreshChunk, runSyncFinalize } = await import("@/jobs/job1-sync");
 const { GET } = await import("@/app/api/sync/health/route");
 
 // ─── Test utilities ───────────────────────────────────────────────────
@@ -126,6 +135,11 @@ function resetAllMocks() {
   vi.mocked(db.getProductsSnapshot).mockResolvedValue(new Map());
   vi.mocked(db.getShopifyPushCheckpoint).mockResolvedValue(null);
   vi.mocked(db.saveShopifyPushCheckpoint).mockResolvedValue(undefined);
+  vi.mocked(db.getPhase1Checkpoint).mockResolvedValue(null);
+  vi.mocked(db.savePhase1Checkpoint).mockResolvedValue(undefined);
+  vi.mocked(blobStorage.savePhase1Blob).mockResolvedValue("https://blob.vercel-storage.com/test/run-new.json");
+  vi.mocked(blobStorage.readPhase1Blob).mockResolvedValue({ toWriteMapped: [], priceChangeEntries: [] });
+  vi.mocked(blobStorage.deletePhase1Blob).mockResolvedValue(undefined);
   vi.mocked(shopifyClient.fetchAllShopifyProducts).mockResolvedValue([]);
   vi.mocked(diffEngine.computeDiffs).mockReturnValue([]);
   vi.mocked(diffEngine.summarizeDiffs).mockReturnValue({ total: 0, updates: 0, archives: 0, creates: 0, priceChanges: 0, stockChanges: 0, imageChanges: 0, descriptionChanges: 0 });
@@ -676,5 +690,297 @@ describe("runShopifyPush — notification fired when phase 2 completes with work
       "Shopify push terminé",
       expect.stringContaining("5 produits mis à jour")
     );
+  });
+});
+
+// ─── Phase 1 chunked: runSyncInit ─────────────────────────────────────
+
+describe("runSyncInit — normal flow with toWrite > 0", () => {
+  beforeEach(resetAllMocks);
+
+  it("saves blob, saves checkpoint, completes run, returns totalChunks=1 for 100 rows", async () => {
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    const rows = Array.from({ length: 100 }, (_, i) => ({
+      sku: `SKU-${i}`, name: `Product ${i}`, price: 99, qty: 10,
+      color: "BK", size: "", shortDescription: "", description: "<p>desc</p>",
+      images: [], gtin: "", weight: 1.0, dimensions: { length: 0, width: 0, height: 0 },
+      productType: "Home", category: "", brand: "Aosom", material: "", psin: `P${i}`, sin: "",
+      video: "", estimatedArrival: "", outOfStockExpected: "", packageNum: "", boxSize: "", boxWeight: "", pdf: "",
+    }));
+    vi.mocked(fetchAosomCatalog).mockResolvedValue(rows);
+
+    const result = await runSyncInit();
+
+    expect(result.skipped).toBe(false);
+    expect(result.totalChunks).toBe(1); // 100 rows < CHUNK_SIZE=2500
+    expect(result.totalProducts).toBe(100);
+    expect(blobStorage.savePhase1Blob).toHaveBeenCalledOnce();
+    expect(db.savePhase1Checkpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ totalChunks: 1, chunksProcessed: 0, refreshDone: false, finalized: false })
+    );
+    expect(db.completeSyncRun).toHaveBeenCalledWith("run-new", expect.objectContaining({ status: "completed" }));
+  });
+
+  it("skips blob save and sets refreshDone=true when toWrite is empty", async () => {
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    vi.mocked(fetchAosomCatalog).mockResolvedValue([]);
+    const result = await runSyncInit();
+
+    expect(result.skipped).toBe(false);
+    expect(result.totalChunks).toBe(0);
+    expect(blobStorage.savePhase1Blob).not.toHaveBeenCalled();
+    expect(db.savePhase1Checkpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ totalChunks: 0, refreshDone: true, finalized: false })
+    );
+  });
+
+  it("skips and returns skipped=true if already finalized today", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "", totalChunks: 1, chunksProcessed: 1,
+      refreshDone: true, finalized: true,
+      totalProducts: 100, priceUpdates: 5, stockChanges: 2, newProducts: 1,
+    });
+
+    const result = await runSyncInit();
+
+    expect(result.skipped).toBe(true);
+    expect(db.createSyncRun).not.toHaveBeenCalled();
+    expect(blobStorage.savePhase1Blob).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Phase 1 chunked: runSyncRefreshChunk ────────────────────────────
+
+describe("runSyncRefreshChunk — normal flow", () => {
+  beforeEach(resetAllMocks);
+
+  it("reads blob, writes chunk, advances chunksProcessed, marks refreshDone when last chunk", async () => {
+    const mappedRows = Array.from({ length: 50 }, (_, i) => ({
+      sku: `S${i}`, name: `P${i}`, price: 10, qty: 5, color: "", size: "", product_type: "Home",
+      image1: "", image2: "", image3: "", image4: "", image5: "", image6: "", image7: "",
+      video: "", description: "", short_description: "", material: "", gtin: "", weight: 0,
+      out_of_stock_expected: "", estimated_arrival: "", last_seen_at: 0,
+    }));
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "https://blob.test/run.json",
+      totalChunks: 1, chunksProcessed: 0,
+      refreshDone: false, finalized: false,
+      totalProducts: 50, priceUpdates: 2, stockChanges: 1, newProducts: 0,
+    });
+    vi.mocked(blobStorage.readPhase1Blob).mockResolvedValue({ toWriteMapped: mappedRows, priceChangeEntries: [] });
+
+    const result = await runSyncRefreshChunk();
+
+    expect(result.skipped).toBe(false);
+    expect(result.chunksProcessed).toBe(1);
+    expect(result.refreshDone).toBe(true);
+    expect(db.refreshProducts).toHaveBeenCalledWith(mappedRows);
+    expect(db.savePhase1Checkpoint).toHaveBeenCalledWith(
+      expect.objectContaining({ chunksProcessed: 1, refreshDone: true })
+    );
+    expect(db.completeSyncRun).toHaveBeenCalledWith("run-new", expect.objectContaining({ status: "completed" }));
+  });
+
+  it("skips when no checkpoint for today", async () => {
+    const result = await runSyncRefreshChunk();
+
+    expect(result.skipped).toBe(true);
+    expect(db.createSyncRun).not.toHaveBeenCalled();
+    expect(db.refreshProducts).not.toHaveBeenCalled();
+  });
+
+  it("skips when refreshDone is already true", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "", totalChunks: 1, chunksProcessed: 1,
+      refreshDone: true, finalized: false,
+      totalProducts: 50, priceUpdates: 0, stockChanges: 0, newProducts: 0,
+    });
+
+    const result = await runSyncRefreshChunk();
+
+    expect(result.skipped).toBe(true);
+    expect(db.refreshProducts).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Phase 1 chunked: runSyncFinalize ────────────────────────────────
+
+describe("runSyncFinalize — normal flow", () => {
+  beforeEach(resetAllMocks);
+
+  it("runs rebuildCounts + recordPriceChanges + completes run + cleans up blob", async () => {
+    const priceEntries = [{ sku: "S1", oldPrice: 100, newPrice: 80, oldQty: 5, newQty: 5, changeType: "price_drop" as const }];
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "https://blob.test/run.json",
+      totalChunks: 1, chunksProcessed: 1,
+      refreshDone: true, finalized: false,
+      totalProducts: 50, priceUpdates: 1, stockChanges: 0, newProducts: 0,
+    });
+    vi.mocked(blobStorage.readPhase1Blob).mockResolvedValue({ toWriteMapped: [], priceChangeEntries: priceEntries });
+
+    const result = await runSyncFinalize();
+
+    expect(result.skipped).toBe(false);
+    expect(db.rebuildProductTypeCounts).toHaveBeenCalledOnce();
+    expect(db.recordPriceChanges).toHaveBeenCalledWith(priceEntries);
+    expect(db.completeSyncRun).toHaveBeenCalledWith("run-new", expect.objectContaining({ status: "completed", totalProducts: 50 }));
+    expect(blobStorage.deletePhase1Blob).toHaveBeenCalledWith("https://blob.test/run.json");
+    expect(db.savePhase1Checkpoint).toHaveBeenCalledWith(expect.objectContaining({ finalized: true }));
+    expect(db.createNotification).toHaveBeenCalledWith("success", "Sync Phase 1 finalisée", expect.any(String));
+  });
+
+  it("skips when refreshDone=false (chunks not yet complete)", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "", totalChunks: 2, chunksProcessed: 1,
+      refreshDone: false, finalized: false,
+      totalProducts: 5000, priceUpdates: 0, stockChanges: 0, newProducts: 0,
+    });
+
+    const result = await runSyncFinalize();
+
+    expect(result.skipped).toBe(true);
+    expect(db.rebuildProductTypeCounts).not.toHaveBeenCalled();
+  });
+
+  it("skips when no checkpoint for today", async () => {
+    const result = await runSyncFinalize();
+
+    expect(result.skipped).toBe(true);
+    expect(db.createSyncRun).not.toHaveBeenCalled();
+  });
+
+  it("skips when already finalized today", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "", totalChunks: 1, chunksProcessed: 1,
+      refreshDone: true, finalized: true,
+      totalProducts: 50, priceUpdates: 0, stockChanges: 0, newProducts: 0,
+    });
+
+    const result = await runSyncFinalize();
+
+    expect(result.skipped).toBe(true);
+    expect(db.rebuildProductTypeCounts).not.toHaveBeenCalled();
+    expect(db.createSyncRun).not.toHaveBeenCalled();
+  });
+
+  it("continues without price history when blob read fails, still marks finalized", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "https://blob.test/run.json",
+      totalChunks: 1, chunksProcessed: 1,
+      refreshDone: true, finalized: false,
+      totalProducts: 50, priceUpdates: 3, stockChanges: 0, newProducts: 0,
+    });
+    vi.mocked(blobStorage.readPhase1Blob).mockRejectedValue(new Error("blob 404"));
+
+    const result = await runSyncFinalize();
+
+    expect(result.skipped).toBe(false);
+    expect(db.rebuildProductTypeCounts).toHaveBeenCalledOnce();
+    expect(db.recordPriceChanges).not.toHaveBeenCalled();
+    expect(db.savePhase1Checkpoint).toHaveBeenCalledWith(expect.objectContaining({ finalized: true }));
+    expect(db.createNotification).toHaveBeenCalledWith("success", "Sync Phase 1 finalisée", expect.any(String));
+  });
+
+  it("marks run failed and fires error notification when rebuildProductTypeCounts throws", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "https://blob.test/run.json",
+      totalChunks: 1, chunksProcessed: 1,
+      refreshDone: true, finalized: false,
+      totalProducts: 50, priceUpdates: 0, stockChanges: 0, newProducts: 0,
+    });
+    vi.mocked(db.rebuildProductTypeCounts).mockRejectedValueOnce(new Error("DB error"));
+
+    await expect(runSyncFinalize()).rejects.toThrow("DB error");
+
+    const calls = vi.mocked(db.completeSyncRun).mock.calls;
+    expect(calls.some(([, args]) => args.status === "failed")).toBe(true);
+    expect(db.createNotification).toHaveBeenCalledWith("error", "Sync finalize échouée", expect.stringContaining("DB error"));
+    expect(db.savePhase1Checkpoint).not.toHaveBeenCalledWith(expect.objectContaining({ finalized: true }));
+  });
+});
+
+// ─── Phase 1 chunked: error paths ────────────────────────────────────
+
+describe("runSyncInit — error path", () => {
+  beforeEach(resetAllMocks);
+
+  it("marks run failed and fires error notification when fetchAosomCatalog throws", async () => {
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    vi.mocked(fetchAosomCatalog).mockRejectedValueOnce(new Error("CSV fetch error"));
+
+    await expect(runSyncInit()).rejects.toThrow("CSV fetch error");
+
+    const calls = vi.mocked(db.completeSyncRun).mock.calls;
+    expect(calls.some(([, args]) => args.status === "failed")).toBe(true);
+    expect(db.createNotification).toHaveBeenCalledWith("error", "Sync init échouée", expect.stringContaining("CSV fetch error"));
+    expect(blobStorage.savePhase1Blob).not.toHaveBeenCalled();
+  });
+
+  it("skips init if today's checkpoint already exists (not yet finalized — protects in-progress refresh)", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "https://blob.test/run.json",
+      totalChunks: 2, chunksProcessed: 1,
+      refreshDone: false, finalized: false,
+      totalProducts: 5000, priceUpdates: 0, stockChanges: 0, newProducts: 0,
+    });
+
+    const result = await runSyncInit();
+
+    expect(result.skipped).toBe(true);
+    expect(db.createSyncRun).not.toHaveBeenCalled();
+    expect(blobStorage.savePhase1Blob).not.toHaveBeenCalled();
+  });
+});
+
+describe("runSyncRefreshChunk — error path", () => {
+  beforeEach(resetAllMocks);
+
+  it("marks run failed and rethrows when refreshProducts throws, does NOT advance chunksProcessed", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "https://blob.test/run.json",
+      totalChunks: 1, chunksProcessed: 0,
+      refreshDone: false, finalized: false,
+      totalProducts: 50, priceUpdates: 0, stockChanges: 0, newProducts: 0,
+    });
+    vi.mocked(blobStorage.readPhase1Blob).mockResolvedValue({ toWriteMapped: Array(50).fill({ sku: "S1" }) as any, priceChangeEntries: [] });
+    vi.mocked(db.refreshProducts).mockRejectedValueOnce(new Error("DB timeout"));
+
+    await expect(runSyncRefreshChunk()).rejects.toThrow("DB timeout");
+
+    const calls = vi.mocked(db.completeSyncRun).mock.calls;
+    expect(calls.some(([, args]) => args.status === "failed")).toBe(true);
+    expect(db.savePhase1Checkpoint).not.toHaveBeenCalled();
+  });
+
+  it("skips when checkpoint is from yesterday", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: YESTERDAY, blobUrl: "https://blob.test/run.json",
+      totalChunks: 1, chunksProcessed: 0,
+      refreshDone: false, finalized: false,
+      totalProducts: 50, priceUpdates: 0, stockChanges: 0, newProducts: 0,
+    });
+
+    const result = await runSyncRefreshChunk();
+
+    expect(result.skipped).toBe(true);
+    expect(db.createSyncRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("runSyncFinalize — stale checkpoint", () => {
+  beforeEach(resetAllMocks);
+
+  it("skips when checkpoint is from yesterday", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: YESTERDAY, blobUrl: "",
+      totalChunks: 1, chunksProcessed: 1,
+      refreshDone: true, finalized: false,
+      totalProducts: 50, priceUpdates: 0, stockChanges: 0, newProducts: 0,
+    });
+
+    const result = await runSyncFinalize();
+
+    expect(result.skipped).toBe(true);
+    expect(db.rebuildProductTypeCounts).not.toHaveBeenCalled();
   });
 });

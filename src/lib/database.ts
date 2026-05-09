@@ -1707,3 +1707,54 @@ export function isCacheStale(fetched_at: string, max_age_hours = 12): boolean {
 export async function saveShopifyPushCheckpoint(cp: ShopifyPushCheckpoint): Promise<void> {
   await setSetting("shopify_push_checkpoint", JSON.stringify(cp));
 }
+
+// ─── Phase 1 chunked checkpoint ────────────────────────────────────────────────
+
+export interface Phase1Checkpoint {
+  date: string;
+  blobUrl: string;
+  totalChunks: number;
+  chunksProcessed: number;
+  refreshDone: boolean;
+  finalized: boolean;
+  totalProducts: number;
+  priceUpdates: number;
+  stockChanges: number;
+  newProducts: number;
+}
+
+function isValidPhase1Checkpoint(v: unknown): v is Phase1Checkpoint {
+  if (!v || typeof v !== "object") return false;
+  const c = v as Record<string, unknown>;
+  return (
+    typeof c.date === "string" &&
+    typeof c.blobUrl === "string" &&
+    typeof c.totalChunks === "number" &&
+    typeof c.chunksProcessed === "number" &&
+    typeof c.refreshDone === "boolean" &&
+    typeof c.finalized === "boolean" &&
+    typeof c.totalProducts === "number" &&
+    typeof c.priceUpdates === "number" &&
+    typeof c.stockChanges === "number" &&
+    typeof c.newProducts === "number"
+  );
+}
+
+export async function getPhase1Checkpoint(): Promise<Phase1Checkpoint | null> {
+  const raw = await getSetting("phase1_checkpoint");
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isValidPhase1Checkpoint(parsed)) {
+      console.warn("[DB] phase1_checkpoint corrupted, discarding:", raw.slice(0, 100));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export async function savePhase1Checkpoint(cp: Phase1Checkpoint): Promise<void> {
+  await setSetting("phase1_checkpoint", JSON.stringify(cp));
+}
