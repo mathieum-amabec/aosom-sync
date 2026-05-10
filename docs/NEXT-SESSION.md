@@ -1,6 +1,80 @@
 # Next session — après 24 avril 2026
 
 ---
+## SESSION 10 mai — RECORD QUADRUPLE SHIP DAY 🚀
+
+### Validation Bug C 1/3 ✅
+- Pipeline complete healthy: sync-init (58s) + 2 chunks + finalize
+- 10,305 produits, 4,510 stock changes, 0 stale locks
+- Phase 2 Shopify: 3/3 completed (186-216s)
+- Plan B Chunked architecture confirmed working
+
+### Shipped (3 PRs + 1 hotfix)
+| # | Version | Feature |
+|---|---|---|
+| PR #50 | v0.2.1.0 | Endpoint /api/social/content/generate |
+| PR #51 | v0.2.2.0 | Cron content_template 3×/week |
+| direct main | hotfix | VERCEL_URL → request.url.origin |
+
+**v0.2.1.0** — Mode-aware content generate endpoint
+- 9 generative_seeded templates (Claude génère sa propre accroche)
+- 3 hook_seeded templates (accroche poolée via {{hook}})
+- Tutoiement v1 enforced sur 6 templates inspiration/seasonal
+- Quality 9.5/10 validée sur 4 drafts prod
+- 3 review blockers caught & fixed: empty hook pool → 503, migration atomicity, +1 test
+
+**v0.2.2.0** — Cron content_template 3×/week
+- Schedule: Mon/Wed/Fri 14:00 UTC (10am Quebec)
+- selectRandomTemplate() weighted by frequency_per_month
+- Internal fetch vers /api/social/content/generate
+- Test trigger réussi: draft 324 (saisonnier_outdoor, 718 chars)
+- Hotfix: VERCEL_URL = preview URL ≠ production alias → revenu à request.url.origin
+
+### Social cron CONFIRMED WORKING
+- Draft 325 créé via Run manuel Vercel UI (social stock highlight)
+- Bilingual: FR 760 chars + EN 736 chars ✅
+- Hook #1 injecté depuis pool ✅
+- Cron status: not paused (pas besoin de Resume manuel)
+
+### P3 backlog (non-bloquant, identifiés today)
+- `hook_usage_history` draft_id=NULL + used_at=NULL (lien hook↔draft cassé pour analytics)
+- Fontconfig error `src/lib/image-composer.ts:114` (sharp manque polices système)
+- Test flaky `refresh-products-batch.test.ts` (1 pre-existing)
+
+### Validation pending
+- **11 mai 06:00–07:40 UTC**: Bug C 2/3
+- **12 mai 06:00–07:40 UTC**: Bug C 3/3 → CONFIRMED CLOSED
+- **12 mai 14:00 UTC**: 1er cron content auto-trigger (premier lundi/mercredi/vendredi)
+
+### Métriques journée
+- Tests: +11 nouveaux (334/335 total, 1 pre-existing P3)
+- 5 review blockers caught et fixés (3 pour v0.2.1.0, 2 pour v0.2.2.0)
+- 3 PRs mergés + 1 hotfix direct main = 4 ships
+
+### Apprentissages permanents (additions 10 mai)
+27. `VERCEL_URL` ≠ production alias — toujours `new URL(request.url).origin` pour internal calls depuis cron
+28. Hotfix direct push to main = acceptable pour fix critique découvert en prod post-ship
+29. /review peut proposer un mauvais fix (VERCEL_URL) — toujours valider en prod
+30. Pattern internal-fetch cron→endpoint: simple, testable, réutilisable
+31. `settings` flag pattern > ALTER TABLE pour migrations one-shot conditionnelles
+
+### Backlog priorisé (prochaines sessions)
+
+**P1:**
+- 12 EN prompts pour Furnish Direct (~2-3h session créative)
+- UI dashboard preview drafts content_template (~2h)
+
+**P2:**
+- Multi-photo drafts (1-5 images aléatoires par post)
+- `hook_usage_history` draft_id backfill + fix recording
+- `facebook_drafts.sku` nullable (content_template drafts utilisent placeholder SKU)
+
+**P3:**
+- Test flaky `refresh-products-batch.test.ts`
+- `recordPriceChanges` N+1 pattern
+- V2 Trending `soldPerDay` précis
+
+---
 ## SESSION 10 mai — v0.2.1.0 content generate endpoint SHIPPED (PR #50)
 
 ### PRs mergées
