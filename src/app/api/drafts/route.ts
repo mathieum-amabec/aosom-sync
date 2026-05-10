@@ -19,11 +19,15 @@ export async function GET(request: Request) {
 
   const sinceParam = searchParams.get("since");
   const untilParam = searchParams.get("until");
-  const since = sinceParam ? Number(sinceParam) : undefined;
-  const until = untilParam ? Number(untilParam) : undefined;
+  const sinceNum = sinceParam ? parseInt(sinceParam, 10) : NaN;
+  const untilNum = untilParam ? parseInt(untilParam, 10) : NaN;
+  const since = !isNaN(sinceNum) ? sinceNum : undefined;
+  const until = !isNaN(untilNum) ? untilNum : undefined;
 
-  const page = Math.max(1, Number(searchParams.get("page") ?? "1"));
-  const pageSize = Math.min(50, Math.max(1, Number(searchParams.get("pageSize") ?? "20")));
+  const pageRaw = parseInt(searchParams.get("page") ?? "1", 10);
+  const page = Math.max(1, isNaN(pageRaw) ? 1 : pageRaw);
+  const pageSizeRaw = parseInt(searchParams.get("pageSize") ?? "20", 10);
+  const pageSize = Math.min(50, Math.max(1, isNaN(pageSizeRaw) ? 20 : pageSizeRaw));
 
   try {
     const result = await getDraftsForReview({ statuses, triggerType, hook, since, until, page, pageSize });
