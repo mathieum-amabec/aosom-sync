@@ -1,6 +1,80 @@
 # Next session — après 24 avril 2026
 
 ---
+## SESSION 10 mai — v0.2.1.0 content generate endpoint SHIPPED (PR #50)
+
+### PRs mergées
+| PR | Version | Feature |
+|---|---|---|
+| #50 | v0.2.1.0 | Content generate endpoint + hook filter + tutoiement constraint |
+
+### Ce qui est shippe
+
+**`POST /api/social/content/generate`** — endpoint production-ready
+- Auth: `Bearer $CRON_SECRET` OU session cookie (reviewer bloqué 403)
+- Body: `{ templateSlug: string, language?: "fr" }`
+- Flow: template → mode check → hook pool (hook_seeded) ou skip (generative_seeded) → Claude → createFacebookDraft
+- 9 erreurs structurées: 400/401/403/404/422/502/503
+
+**Mode système**
+- `generative_seeded` (9 templates): Claude génère sa propre accroche (conseil_deco_piece, guide_achat_categorie, astuces_entretien, inspiration_*, saisonnier_*)
+- `hook_seeded` (3 templates): accroche poolée injectée via `{{hook}}` (sondage_debat, devine_quizz, aide_choisir)
+- Migration idempotente: `!ctCols.has("mode")` + settings-gated tutoiement
+
+**Tutoiement constraint**
+- 6 templates inspiration/seasonal: `Tutoiement OBLIGATOIRE (tu/te/ton)` dans prompt
+- Migration prod appliquée manuellement + settings-gated (`tutoiement_v1_migrated`)
+
+**Review adversariale (3 blockers résolus)**
+1. Empty hook pool + hook_seeded → 503 (avant: `{{hook}}` restait dans prompt → garbage Claude)
+2. Tutoiement flag écrit après UPDATE batch (séparé, pas dans le même batch)
+3. 1 test ajouté: mode hook_seeded + empty pool → 503
+
+### Tests
+- 323/324 passing (1 pre-existing P3: refresh-products-batch.test.ts)
+- +7 nouveaux tests: 2 mode tests (hook_seeded/generative_seeded) + 1 empty pool 503 + autres path coverage
+
+### Qualité validée en prod (10 mai)
+| Template | Mode | hookId | Résultat |
+|---|---|---|---|
+| conseil_deco_piece | generative_seeded | null | Post 200 mots, accroche Claude, tutoiement OK |
+| sondage_debat | hook_seeded | 2 | Post format parfait, accroche poolée correctement injectée |
+
+### Backlog post-session 10 mai
+
+**P0 (action manuelle requise):**
+- [ ] **Résume social cron dans Vercel Dashboard** — auto-pausé depuis les 504s. Settings → Crons → Resume `/api/cron/social`
+
+**P1 (Bug C validation continue):**
+- 10 mai 06:00–07:40 UTC: 1/3 ✅ (validé session 09 mai)
+- 11 mai 06:00–07:40 UTC: 2/3 (à vérifier demain matin)
+- 12 mai 06:00–07:40 UTC: 3/3 → **Bug C CONFIRMED CLOSED**
+
+**P1 (prochaine session créative):**
+- Cron scheduling content_template 3×/week (sélection aléatoire template actif, appel endpoint) (~1h)
+- 12 EN prompts pour Furnish Direct (~2-3h session créative)
+
+**P2:**
+- `facebook_drafts.sku` nullable — FK libsql enforce strict, content_template drafts utilisent SKU placeholder `getAnyProductSku()`; migration pour rendre sku nullable proprement
+- UI dashboard: preview drafts content_template (pas de SKU produit affiché)
+
+**P3:**
+- Test flaky `refresh-products-batch.test.ts` (seedHooksIfEmpty reçoit row null)
+
+### Query validation Bug C (chaque matin 06:00–08:00 UTC)
+```sql
+-- Vérifier les 5 runs cron du matin
+SELECT id, status, type,
+  CAST((julianday(completed_at) - julianday(started_at)) * 86400 AS INTEGER) as duration_s,
+  substr(timing_ms, 1, 200) as timing_preview,
+  started_at
+FROM sync_runs
+WHERE date(started_at) = date('now')
+ORDER BY started_at ASC LIMIT 6;
+```
+Critères: tous `status='completed'`, init <80s, refresh chunks <200s chacun, finalize <60s.
+
+---
 ## SESSION 09 mai — DOUBLE SHIP DAY (v0.2.0.0 + endpoint impl)
 
 ### PRs mergée
