@@ -220,4 +220,67 @@ describe("rejectDraft server action", () => {
     const result = await rejectDraft(7, "bad content");
     expect(result.error).toBe("write failed");
   });
+
+  it("returns 'Erreur inconnue' when non-Error is thrown from approveDraft", async () => {
+    vi.doMock("@/lib/database", () => ({
+      approveDraftDb: vi.fn().mockRejectedValue("string error"),
+      rejectDraftDb: vi.fn(),
+    }));
+    vi.doMock("next/cache", () => ({ revalidatePath: vi.fn() }));
+    const { approveDraft } = await import("@/app/(dashboard)/drafts/actions");
+    const result = await approveDraft(1);
+    expect(result.error).toBe("Erreur inconnue");
+  });
+
+  it("returns 'Erreur inconnue' when non-Error is thrown from rejectDraft", async () => {
+    vi.doMock("@/lib/database", () => ({
+      approveDraftDb: vi.fn(),
+      rejectDraftDb: vi.fn().mockRejectedValue(42),
+    }));
+    vi.doMock("next/cache", () => ({ revalidatePath: vi.fn() }));
+    const { rejectDraft } = await import("@/app/(dashboard)/drafts/actions");
+    const result = await rejectDraft(7, "raison valide");
+    expect(result.error).toBe("Erreur inconnue");
+  });
+});
+
+// ─── Additional coverage gaps ─────────────────────────────────────────────────
+
+describe("GET /api/drafts — additional coverage", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("passes since and until as numbers", async () => {
+    vi.doMock("@/lib/auth", () => ({ isAuthenticated: vi.fn().mockResolvedValue(true) }));
+    const getDraftsForReview = vi.fn().mockResolvedValue({ ...basePage, items: [] });
+    vi.doMock("@/lib/database", () => ({ getDraftsForReview }));
+    const { GET } = await import("@/app/api/drafts/route");
+    await GET(new Request("http://localhost/api/drafts?since=1714000000&until=1715000000"));
+    expect(getDraftsForReview).toHaveBeenCalledWith(
+      expect.objectContaining({ since: 1714000000, until: 1715000000 })
+    );
+  });
+
+  it("clamps pageSize minimum to 1", async () => {
+    vi.doMock("@/lib/auth", () => ({ isAuthenticated: vi.fn().mockResolvedValue(true) }));
+    const getDraftsForReview = vi.fn().mockResolvedValue({ ...basePage, items: [] });
+    vi.doMock("@/lib/database", () => ({ getDraftsForReview }));
+    const { GET } = await import("@/app/api/drafts/route");
+    await GET(new Request("http://localhost/api/drafts?pageSize=0"));
+    expect(getDraftsForReview).toHaveBeenCalledWith(
+      expect.objectContaining({ pageSize: 1 })
+    );
+  });
+
+  it("passes hook='without' filter", async () => {
+    vi.doMock("@/lib/auth", () => ({ isAuthenticated: vi.fn().mockResolvedValue(true) }));
+    const getDraftsForReview = vi.fn().mockResolvedValue({ ...basePage, items: [] });
+    vi.doMock("@/lib/database", () => ({ getDraftsForReview }));
+    const { GET } = await import("@/app/api/drafts/route");
+    await GET(new Request("http://localhost/api/drafts?hook=without"));
+    expect(getDraftsForReview).toHaveBeenCalledWith(
+      expect.objectContaining({ hook: "without" })
+    );
+  });
 });
