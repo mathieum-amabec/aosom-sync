@@ -129,6 +129,19 @@ describe("GET /api/cron/content", () => {
     expect(body.triggeredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
+  it("returns 503 when fetch throws network error", async () => {
+    vi.doMock("@/lib/content-template-selector", () => ({
+      selectRandomTemplate: vi.fn().mockResolvedValue({ id: 1, slug: "conseil_deco_piece", content_type: "education" }),
+    }));
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")));
+    const { GET } = await import("@/app/api/cron/content/route");
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error).toMatch(/unreachable/);
+  });
+
   it("calls generate endpoint with correct templateSlug and Bearer auth", async () => {
     vi.doMock("@/lib/content-template-selector", () => ({
       selectRandomTemplate: vi.fn().mockResolvedValue({ id: 2, slug: "guide_achat_categorie", content_type: "education" }),
