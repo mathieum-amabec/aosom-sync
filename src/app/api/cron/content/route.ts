@@ -22,12 +22,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: false, error: "No active templates" }, { status: 503 });
   }
 
-  // Use VERCEL_URL env var for URL construction — request.url is reliable for Vercel crons
-  // (cron scheduler sends real HTTP requests), but VERCEL_URL is the safer fallback.
-  const origin = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : new URL(request.url).origin;
-  const generateUrl = `${origin}/api/social/content/generate`;
+  // Vercel crons send real HTTP requests, so request.url has the correct production origin.
+  // VERCEL_URL is a deployment-specific preview URL (not the production alias) — do not use it.
+  const generateUrl = `${new URL(request.url).origin}/api/social/content/generate`;
 
   let generateRes: Response;
   try {
