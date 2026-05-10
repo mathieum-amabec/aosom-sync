@@ -2,6 +2,34 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.2.1.0] - 2026-05-10
+
+### Added
+
+- **`POST /api/social/content/generate`** — new endpoint for on-demand content generation from a named template
+  - Accepts `{ templateSlug, language }` (only `"fr"` supported)
+  - Resolves template → interpolates dynamic vars (saison, mois, category, room) → calls Claude → saves FB draft
+  - Returns `{ success, draftId, postText, templateSlug, hookId, vars }`
+  - Auth: session cookie OR `Authorization: Bearer CRON_SECRET` (for cron integration)
+  - `reviewer` role blocked (403)
+  - Graceful errors: 404 template not found, 422 inactive template, 503 no products in catalog, 502 empty Claude response
+
+- **`mode` field on `content_templates`** — distinguishes how each template opens its post
+  - `hook_seeded` (3 templates): opening hook pulled from hook pool, injected as `{{hook}}` in prompt
+  - `generative_seeded` (9 templates): Claude self-generates its own opening hook — no pool needed
+  - Migration: idempotent (`!ctCols.has("mode")` guard), assigns mode to all 12 existing templates on first boot
+
+- **Tutoiement constraint** — 6 inspiration/seasonal templates now enforce `Tutoiement OBLIGATOIRE (tu/te/ton)` in prompt, preventing vous/votre/vos in generated posts. Settings-gated migration (`tutoiement_v1_migrated`).
+
+- **2 new test cases** in `content-templates.test.ts`: `mode hook_seeded calls selectCompatibleHooks and injects hookId` + `mode generative_seeded skips hook selection and saves with hookId=null`
+
+### Changed
+
+- `src/proxy.ts` PUBLIC_PATHS: added `/api/social/content` so Bearer-auth cron calls can reach the route handler without being redirected to `/login`
+- `src/lib/database.ts` `ContentTemplate` interface: added `mode` field; both mappers (`getContentTemplates`, `getContentTemplateBySlug`) include mode
+- `src/lib/seed/content-templates-megastore.ts`: all 12 templates have `mode`; 9 generative_seeded prompts self-generate hook instead of injecting `{{hook}}`
+- `tests/content-templates.test.ts`: `{{hook}}` test is now mode-aware (hook_seeded must contain it; generative_seeded must NOT)
+
 ## [0.2.0.0] - 2026-05-09
 
 ### BREAKING — Architectural change (Bug C definitively closed)
