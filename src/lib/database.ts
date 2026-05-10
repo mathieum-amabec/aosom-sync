@@ -233,6 +233,9 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("content_type")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN content_type TEXT NOT NULL DEFAULT 'product'`);
   // hook_id: FK to content_hooks — which hook seeded this draft's caption
   if (!cols.has("hook_id")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN hook_id INTEGER REFERENCES content_hooks(id)`);
+  if (!cols.has("approved_at")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN approved_at INTEGER`);
+  if (!cols.has("reviewed_by")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN reviewed_by TEXT`);
+  if (!cols.has("review_notes")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN review_notes TEXT`);
 
   // checkpoint_data on sync_runs: stores per-chunk progress for Phase 2 chunked push
   // timing_ms on sync_runs: per-phase duration map written incrementally (survives SIGKILL diagnosis)
@@ -1217,6 +1220,9 @@ export interface FacebookDraft {
   createdAt: number;
   /** FK to content_hooks — the hook that seeded this draft's caption. Null for legacy drafts. */
   hookId: number | null;
+  approvedAt: number | null;
+  reviewedBy: string | null;
+  reviewNotes: string | null;
   productName?: string; productImage?: string;
 }
 
@@ -1453,6 +1459,9 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
     channels,
     createdAt: Number(row.created_at),
     hookId: row.hook_id != null ? Number(row.hook_id) : null,
+    approvedAt: row.approved_at != null ? Number(row.approved_at) : null,
+    reviewedBy: (row.reviewed_by as string) || null,
+    reviewNotes: (row.review_notes as string) || null,
     productName: (row.name as string) || undefined,
     productImage: (row.image1 as string) || undefined,
   };
@@ -1837,4 +1846,101 @@ export async function getAnyProductSku(): Promise<string | null> {
   const result = await db.execute(`SELECT sku FROM products LIMIT 1`);
   if (result.rows.length === 0) return null;
   return String(rowToObj(result.rows[0]).sku);
+}
+
+// ─── Drafts Review ───────────────────────────────────────────────────────────
+
+export interface DraftFilters {
+  statuses?: string[];    // default: all non-published
+  triggerType?: string;   // 'stock_highlight' | 'content_template' | undefined = all
+  hook?: "with" | "without" | "all";
+  since?: number;         // unix timestamp
+  until?: number;         // unix timestamp
+  page?: number;
+  pageSize?: number;
+}
+
+export interface DraftsPage {
+  items: FacebookDraft[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}
+
+export async function getDraftsForReview(filters: DraftFilters = {}): Promise<DraftsPage> {
+  const db = await ensureSchema();
+  const {
+    statuses,
+    triggerType,
+    hook = "all",
+    since,
+    until,
+    page = 1,
+    pageSize = 20,
+  } = filters;
+
+  const where: string[] = [];
+  const args: InValue[] = [];
+
+  if (statuses && statuses.length > 0) {
+    where.push(`fd.status IN (${statuses.map(() => "?").join(",")})`);
+    args.push(...statuses);
+  } else {
+    where.push(`fd.status != 'published'`);
+  }
+
+  if (triggerType) {
+    where.push(`fd.trigger_type = ?`);
+    args.push(triggerType);
+  }
+  if (hook === "with") {
+    where.push(`fd.hook_id IS NOT NULL`);
+  } else if (hook === "without") {
+    where.push(`fd.hook_id IS NULL`);
+  }
+  if (since != null) {
+    where.push(`fd.created_at >= ?`);
+    args.push(since);
+  }
+  if (until != null) {
+    where.push(`fd.created_at <= ?`);
+    args.push(until);
+  }
+
+  const whereClause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
+  const offset = (page - 1) * pageSize;
+
+  const [countRes, rowsRes] = await Promise.all([
+    db.execute({ sql: `SELECT COUNT(*) as n FROM facebook_drafts fd ${whereClause}`, args }),
+    db.execute({
+      sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd
+            LEFT JOIN products p ON fd.sku = p.sku
+            ${whereClause}
+            ORDER BY fd.created_at DESC
+            LIMIT ? OFFSET ?`,
+      args: [...args, pageSize, offset],
+    }),
+  ]);
+
+  const total = Number(rowToObj(countRes.rows[0]).n);
+  const items = rowsRes.rows.map((r) => mapDraft(rowToObj(r)));
+
+  return { items, total, page, pageSize, hasMore: offset + items.length < total };
+}
+
+export async function approveDraftDb(id: number, reviewedBy = "admin"): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE facebook_drafts SET status = 'approved', approved_at = strftime('%s','now'), reviewed_by = ? WHERE id = ?`,
+    args: [reviewedBy, id],
+  });
+}
+
+export async function rejectDraftDb(id: number, notes: string, reviewedBy = "admin"): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE facebook_drafts SET status = 'rejected', approved_at = strftime('%s','now'), reviewed_by = ?, review_notes = ? WHERE id = ?`,
+    args: [reviewedBy, notes, id],
+  });
 }
