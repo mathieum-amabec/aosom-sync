@@ -248,7 +248,7 @@ async function _initSchemaImpl(): Promise<void> {
     await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
   }
 
-  // content_templates column migration (frequency_per_month + scopes added in megastore spec)
+  // content_templates column migration (frequency_per_month + scopes + mode)
   const ctInfo = await db.execute(`PRAGMA table_info(content_templates)`);
   const ctCols = new Set(ctInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
   const ctAlters: string[] = [];
@@ -258,8 +258,77 @@ async function _initSchemaImpl(): Promise<void> {
   if (!ctCols.has("scopes")) {
     ctAlters.push(`ALTER TABLE content_templates ADD COLUMN scopes TEXT NOT NULL DEFAULT '[]'`);
   }
+  if (!ctCols.has("mode")) {
+    ctAlters.push(`ALTER TABLE content_templates ADD COLUMN mode TEXT NOT NULL DEFAULT 'hook_seeded'`);
+  }
   if (ctAlters.length > 0) {
     await db.batch(ctAlters.map(sql => ({ sql, args: [] })), "write");
+  }
+
+  // One-shot: assign mode values + update generative prompts (runs only when mode column is new)
+  if (!ctCols.has("mode")) {
+    const GENERATIVE_SEEDED_SLUGS = [
+      "conseil_deco_piece", "guide_achat_categorie", "astuces_entretien",
+      "inspiration_ambiance_maison", "inspiration_vie_outdoor", "inspiration_animaux",
+      "inspiration_famille", "saisonnier_outdoor", "saisonnier_indoor",
+    ];
+    const HOOK_SEEDED_SLUGS = ["sondage_debat", "devine_quizz", "aide_choisir"];
+    const GENERATIVE_PROMPT_REPLACEMENTS: { slug: string; replacement: string }[] = [
+      { slug: "conseil_deco_piece",
+        replacement: "Commence par une accroche percutante que tu génères toi-même — 8-15 mots, évoque un secret de déco, une erreur courante ou une révélation sur l'aménagement intérieur." },
+      { slug: "guide_achat_categorie",
+        replacement: "Commence par une accroche percutante que tu génères toi-même — 8-15 mots, évoque ce que les gens oublient souvent avant d'acheter en {{category}}. Ton de conseil bienveillant." },
+      { slug: "astuces_entretien",
+        replacement: "Commence par une accroche percutante que tu génères toi-même — 8-15 mots, évoque un secret de pro ou une erreur d'entretien à éviter. Pratique et utile." },
+      { slug: "inspiration_ambiance_maison",
+        replacement: "Commence par une accroche évocatrice que tu génères toi-même — 8-15 mots, crée une image mentale ou sensorielle d'un intérieur réussi. Poétique, désirable." },
+      { slug: "inspiration_vie_outdoor",
+        replacement: "Commence par une accroche évocatrice que tu génères toi-même — 8-15 mots, évoque un moment de vie idéal à l'extérieur en {{season}} au Québec. Vivant et sensoriel." },
+      { slug: "inspiration_animaux",
+        replacement: "Commence par une accroche évocatrice que tu génères toi-même — 8-15 mots, évoque un moment tendre et reconnaissable avec un animal de compagnie." },
+      { slug: "inspiration_famille",
+        replacement: "Commence par une accroche évocatrice que tu génères toi-même — 8-15 mots, évoque une scène familière et complice de la vie de famille à la maison." },
+      { slug: "saisonnier_outdoor",
+        replacement: "Commence par une accroche percutante que tu génères toi-même — 8-15 mots, évoque l'anticipation ou l'émotion propre à {{season}} pour les Québécois dehors." },
+      { slug: "saisonnier_indoor",
+        replacement: "Commence par une accroche évocatrice que tu génères toi-même — 8-15 mots, évoque l'ambiance saisonnière intérieure au Québec en {{season}}." },
+    ];
+    await db.batch([
+      ...GENERATIVE_SEEDED_SLUGS.map(slug => ({
+        sql: `UPDATE content_templates SET mode = 'generative_seeded' WHERE slug = ?`,
+        args: [slug] as import("@libsql/client").InValue[],
+      })),
+      ...HOOK_SEEDED_SLUGS.map(slug => ({
+        sql: `UPDATE content_templates SET mode = 'hook_seeded' WHERE slug = ?`,
+        args: [slug] as import("@libsql/client").InValue[],
+      })),
+      ...GENERATIVE_PROMPT_REPLACEMENTS.map(({ slug, replacement }) => ({
+        sql: `UPDATE content_templates SET prompt_pattern_fr = REPLACE(prompt_pattern_fr, 'Commence exactement par cette accroche: {{hook}}', ?) WHERE slug = ?`,
+        args: [replacement, slug] as import("@libsql/client").InValue[],
+      })),
+    ], "write");
+  }
+
+  // Tutoiement v1 — add mandatory tutoiement constraint to 6 inspiration/seasonal templates.
+  // Gated on a settings flag so it runs exactly once per database, regardless of mode column state.
+  const tutoiementDone = await db.execute(`SELECT value FROM settings WHERE key = 'tutoiement_v1_migrated' LIMIT 1`);
+  if (tutoiementDone.rows.length === 0) {
+    const TUTOIEMENT_SLUGS = [
+      "inspiration_ambiance_maison", "inspiration_vie_outdoor", "inspiration_animaux",
+      "inspiration_famille", "saisonnier_outdoor", "saisonnier_indoor",
+    ];
+    await db.batch([
+      ...TUTOIEMENT_SLUGS.map(slug => ({
+        sql: `UPDATE content_templates SET prompt_pattern_fr = REPLACE(prompt_pattern_fr, 'Contraintes:', 'Contraintes:' || char(10) || '- Tutoiement OBLIGATOIRE (tu/te/ton) dans tout le post — corps ET CTA. Jamais de vous/votre/vos.') WHERE slug = ?`,
+        args: [slug] as import("@libsql/client").InValue[],
+      })),
+      {
+        sql: `UPDATE content_templates SET prompt_pattern_fr = REPLACE(prompt_pattern_fr, 'C''est quoi votre activité préférée en famille à la maison?', 'C''est quoi ton activité préférée en famille à la maison?') WHERE slug = 'inspiration_famille'`,
+        args: [] as import("@libsql/client").InValue[],
+      },
+    ], "write");
+    // Flag written after updates succeed — separate statement so partial batch failure leaves flag unset
+    await db.execute(`INSERT OR IGNORE INTO settings (key, value) VALUES ('tutoiement_v1_migrated', '1')`);
   }
 
   // Idempotent users.role migration — ALTER TABLE ADD COLUMN with a default.
@@ -322,12 +391,12 @@ async function _initSchemaImpl(): Promise<void> {
         sql: `INSERT INTO content_templates
               (slug, content_type, display_name_fr, display_name_en,
                prompt_pattern_fr, prompt_pattern_en, image_strategy,
-               active, frequency_per_month, scopes)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               active, frequency_per_month, scopes, mode)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [
           t.slug, t.content_type, t.display_name_fr, t.display_name_en,
           t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy,
-          t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes),
+          t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes), t.mode,
         ],
       })),
       "write"
@@ -1157,6 +1226,7 @@ export interface ContentTemplate {
   id: number;
   slug: string;
   content_type: "education" | "inspiration" | "engagement" | "seasonal";
+  mode: "hook_seeded" | "generative_seeded";
   display_name_fr: string;
   display_name_en: string;
   prompt_pattern_fr: string;
@@ -1189,6 +1259,7 @@ export async function getContentTemplates(options?: {
       id: Number(row.id),
       slug: String(row.slug),
       content_type: row.content_type as ContentTemplate["content_type"],
+      mode: (String(row.mode ?? "hook_seeded")) as ContentTemplate["mode"],
       display_name_fr: String(row.display_name_fr),
       display_name_en: String(row.display_name_en),
       prompt_pattern_fr: String(row.prompt_pattern_fr),
@@ -1213,6 +1284,7 @@ export async function getContentTemplateBySlug(slug: string): Promise<ContentTem
     id: Number(row.id),
     slug: String(row.slug),
     content_type: row.content_type as ContentTemplate["content_type"],
+    mode: (String(row.mode ?? "hook_seeded")) as ContentTemplate["mode"],
     display_name_fr: String(row.display_name_fr),
     display_name_en: String(row.display_name_en),
     prompt_pattern_fr: String(row.prompt_pattern_fr),
@@ -1757,4 +1829,12 @@ export async function getPhase1Checkpoint(): Promise<Phase1Checkpoint | null> {
 
 export async function savePhase1Checkpoint(cp: Phase1Checkpoint): Promise<void> {
   await setSetting("phase1_checkpoint", JSON.stringify(cp));
+}
+
+/** Returns the first available product SKU, used as a fallback for non-product drafts. */
+export async function getAnyProductSku(): Promise<string | null> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT sku FROM products LIMIT 1`);
+  if (result.rows.length === 0) return null;
+  return String(rowToObj(result.rows[0]).sku);
 }

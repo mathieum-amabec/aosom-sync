@@ -97,6 +97,25 @@
 
 ## Social Media / Job 4
 
+### Hook mismatch pour content_template drafts — filtrer les hooks stock/promo
+
+**Priority:** P2 (MEDIUM)
+**Context:** `/api/social/content/generate` sélectionne des hooks `universal`, mais plusieurs hooks de cette scope sont des hooks de scarcité/promo ("Cette promo se termine vendredi", "On a calculé combien tu économises cette semaine"). Ces hooks sont incompatibles avec des posts éducatifs/inspirationnels.
+**Fix options:**
+- Option A: Filtrer `mode = 'generative_seeded'` pour les content_template drafts (hooks génériques, pas verbatim stock-scarcity)
+- Option B: Créer une sous-catégorie `editorial` dans `content_hook_categories` avec uniquement des hooks lifestyle/curiosité
+- Option C: Ajouter un champ `compatible_triggers` dans `content_hooks` et filtrer par `trigger_type`
+
+---
+
+### facebook_drafts.sku FK constraint — rendre sku nullable pour content_template
+
+**Priority:** P2 (MEDIUM)
+**Context:** `facebook_drafts.sku NOT NULL REFERENCES products(sku)` — LibSQL enforce ce FK en remote mode. Les drafts `content_template` (posts généraux sans produit spécifique) utilisent actuellement un SKU placeholder (`getAnyProductSku()`). Sémantiquement incorrect.
+**Fix:** Migration SQLite pour rendre `sku` nullable: DROP + recreate `facebook_drafts` sans `NOT NULL` et sans le FK sur `sku`. Coordonner avec `createFacebookDraft` et `mapDraft` pour accepter `sku = null`.
+
+---
+
 ### Wire content_type into FacebookDraft interface (v0.1.16.0 follow-up)
 
 **Priority:** P3 (deferred to creative session)
