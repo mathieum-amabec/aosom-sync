@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.3.0.0] - 2026-05-10
+
+### Added
+
+- **`/drafts` dashboard page** — master-detail review UI for Facebook drafts
+  - Left panel: paginated list with status badge, trigger type, hook indicator (◆), 100-char FR preview, date
+  - Right panel: full FR caption, EN caption (if present), review notes (if rejected), approve/reject actions
+  - Filters: status (all/draft/approved/rejected/published), trigger type, hook (with/without/all)
+  - Approve: one-click, disabled if already approved
+  - Reject: requires non-empty reason text (inline textarea), disabled if already rejected
+  - Pagination: prev/next with `hasMore` guard
+- **`GET /api/drafts`** — paginated query endpoint; filters: `status` (comma-separated), `triggerType`, `hook`, `since`, `until`, `page`, `pageSize` (max 50)
+- **Review columns on `facebook_drafts`** — idempotent `ALTER TABLE`: `approved_at INTEGER`, `reviewed_by TEXT`, `review_notes TEXT`
+- **`getDraftsForReview()`**, **`approveDraftDb()`**, **`rejectDraftDb()`** — new DB functions
+- **`approveDraft` / `rejectDraft` server actions** in `src/app/(dashboard)/drafts/actions.ts`
+- **Sidebar** — "Drafts" nav item (clipboard icon) between Social Media and Settings; hidden from reviewer role
+- **14 new tests** in `tests/drafts.test.ts` — GET /api/drafts (7) + approveDraft action (2) + rejectDraft action (3) + filter logic (2)
+
 ## [0.2.2.0] - 2026-05-10
 
 ### Added
