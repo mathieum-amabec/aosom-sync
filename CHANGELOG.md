@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.2.2.0] - 2026-05-10
+
+### Added
+
+- **`GET /api/cron/content`** — scheduled content generation cron, Mon/Wed/Fri at 14:00 UTC
+  - Selects a random template weighted by `frequency_per_month`
+  - Calls `/api/social/content/generate` internally with Bearer CRON_SECRET auth
+  - Returns `{ success, template, contentType, draftId, hookId, triggeredAt }`
+  - Returns 503 if no active templates, 500 if generation fails
+- **`selectRandomTemplate()`** in `src/lib/content-template-selector.ts` — weighted random selection over active templates; `frequency_per_month=0` treated as weight 1 (never excluded)
+- **`vercel.json`** — new cron slot `"0 14 * * 1,3,5"` (12 total, well under 40 limit)
+- **10 new tests** — 4 for `selectRandomTemplate` (null/single/weighted/zero-freq) + 6 for the cron route (401×2/503/500/200/fetch-args)
+
 ## [0.2.1.0] - 2026-05-10
 
 ### Added
