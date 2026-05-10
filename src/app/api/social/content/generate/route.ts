@@ -125,21 +125,24 @@ export async function POST(request: Request) {
     const month = now.getMonth();
     const saison = getSaisonFr(month);
 
-    // Select a hook (no draft_id yet — we don't record usage to avoid FK issue on null draft_id)
-    const scope = mapProductTypeToScope(null);
-    const hookCandidates = await selectCompatibleHooks(scope, "FR", []);
-    const hookChosen = hookCandidates.length > 0
-      ? hookCandidates[Math.floor(Math.random() * hookCandidates.length)]
-      : null;
+    // Hook selection — only for hook_seeded templates; generative_seeded templates self-generate their hook
+    let hookChosen: { id: number; text: string } | null = null;
+    if (template.mode !== "generative_seeded") {
+      const scope = mapProductTypeToScope(null);
+      const hookCandidates = await selectCompatibleHooks(scope, "FR", []);
+      hookChosen = hookCandidates.length > 0
+        ? hookCandidates[Math.floor(Math.random() * hookCandidates.length)]
+        : null;
+    }
 
-    // Inject all template variables including {{hook}} and {{season}} aliases
+    // Inject template variables; {{hook}} only present for hook_seeded mode
     const vars: Record<string, string> = {
       saison,
       season: saison,
       mois: MONTHS_FR[month],
       category: pickRandom(CATEGORIES_FR),
       room: pickRandom(ROOMS_FR),
-      hook: hookChosen?.text ?? "",
+      ...(hookChosen ? { hook: hookChosen.text } : {}),
     };
 
     const finalPrompt = interpolateTemplate(template.prompt_pattern_fr, vars);

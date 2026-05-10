@@ -15,7 +15,7 @@ function makeDb(): Client {
 
 async function createTemplatesTable(db: Client, withNewCols = true) {
   const extra = withNewCols
-    ? `, frequency_per_month INTEGER NOT NULL DEFAULT 2, scopes TEXT NOT NULL DEFAULT '[]'`
+    ? `, frequency_per_month INTEGER NOT NULL DEFAULT 2, scopes TEXT NOT NULL DEFAULT '[]', mode TEXT NOT NULL DEFAULT 'hook_seeded'`
     : "";
   await db.execute(`CREATE TABLE IF NOT EXISTS content_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -205,27 +205,32 @@ describe("content_templates — megastore migration", () => {
     }
   });
 
-  it("prompt_pattern_fr is non-empty and contains {{hook}} for all templates", async () => {
+  it("prompt_pattern_fr is non-empty; hook_seeded has {{hook}}, generative_seeded does not", async () => {
     await createTemplatesTable(db, true);
     await db.batch(
       MEGASTORE_TEMPLATES.map((t) => ({
         sql: `INSERT INTO content_templates
               (slug, content_type, display_name_fr, display_name_en,
                prompt_pattern_fr, prompt_pattern_en, image_strategy,
-               active, frequency_per_month, scopes)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+               active, frequency_per_month, scopes, mode)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         args: [t.slug, t.content_type, t.display_name_fr, t.display_name_en,
                t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy,
-               t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes)],
+               t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes), t.mode],
       })),
       "write"
     );
-    const rows = await db.execute("SELECT slug, prompt_pattern_fr FROM content_templates");
+    const rows = await db.execute("SELECT slug, prompt_pattern_fr, mode FROM content_templates");
     for (const row of rows.rows) {
       const prompt = row.prompt_pattern_fr as string;
+      const mode = row.mode as string;
       expect(prompt.length).toBeGreaterThan(200);
-      expect(prompt).toContain("{{hook}}");
       expect(prompt).not.toContain("TODO:");
+      if (mode === "hook_seeded") {
+        expect(prompt, `${row.slug} (hook_seeded) must contain {{hook}}`).toContain("{{hook}}");
+      } else {
+        expect(prompt, `${row.slug} (generative_seeded) must NOT contain {{hook}}`).not.toContain("{{hook}}");
+      }
     }
   });
 
@@ -284,6 +289,7 @@ const MOCK_TEMPLATE = {
   id: 1,
   slug: "conseil_deco_piece",
   content_type: "education" as const,
+  mode: "hook_seeded" as const,
   display_name_fr: "Conseil déco",
   display_name_en: "Deco tip",
   prompt_pattern_fr: "Rédige un post Facebook sur {{category}} dans un {{room}} en {{saison}}.",
@@ -416,5 +422,60 @@ describe("POST /api/social/content/generate", () => {
     expect(body.vars).toHaveProperty("mois");
     expect(body.vars).toHaveProperty("category");
     expect(body.vars).toHaveProperty("room");
+  });
+
+  it("mode hook_seeded calls selectCompatibleHooks and injects hookId", async () => {
+    const selectCompatibleHooks = vi.fn().mockResolvedValue([
+      { id: 5, text: "Accroche pool!", mode: "pool", categoryId: 1, language: "FR", productScopes: ["universal"], usedCount: 0, lastUsedAt: null },
+    ]);
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("admin"),
+    }));
+    vi.doMock("@/lib/database", () => ({
+      getContentTemplateBySlug: vi.fn().mockResolvedValue({ ...MOCK_TEMPLATE, mode: "hook_seeded" }),
+      createFacebookDraft: vi.fn().mockResolvedValue(10),
+      selectCompatibleHooks,
+      getAnyProductSku: vi.fn().mockResolvedValue("01-0016"),
+    }));
+    vi.doMock("@/lib/hook-selector", () => ({ mapProductTypeToScope: vi.fn().mockReturnValue("universal") }));
+    vi.doMock("@/lib/content-generator", () => ({
+      getAnthropicClient: vi.fn().mockReturnValue({
+        messages: { create: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "Post hook_seeded" }] }) },
+      }),
+    }));
+    const { POST } = await import("@/app/api/social/content/generate/route");
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "fr" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(selectCompatibleHooks).toHaveBeenCalledOnce();
+    expect(body.hookId).toBe(5);
+  });
+
+  it("mode generative_seeded skips hook selection and saves with hookId=null", async () => {
+    const selectCompatibleHooks = vi.fn();
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("admin"),
+    }));
+    vi.doMock("@/lib/database", () => ({
+      getContentTemplateBySlug: vi.fn().mockResolvedValue({ ...MOCK_TEMPLATE, mode: "generative_seeded" }),
+      createFacebookDraft: vi.fn().mockResolvedValue(11),
+      selectCompatibleHooks,
+      getAnyProductSku: vi.fn().mockResolvedValue("01-0016"),
+    }));
+    vi.doMock("@/lib/hook-selector", () => ({ mapProductTypeToScope: vi.fn().mockReturnValue("universal") }));
+    vi.doMock("@/lib/content-generator", () => ({
+      getAnthropicClient: vi.fn().mockReturnValue({
+        messages: { create: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "Post generative" }] }) },
+      }),
+    }));
+    const { POST } = await import("@/app/api/social/content/generate/route");
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "fr" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(selectCompatibleHooks).not.toHaveBeenCalled();
+    expect(body.hookId).toBeNull();
+    expect(body.vars).not.toHaveProperty("hook");
   });
 });
