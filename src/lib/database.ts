@@ -326,11 +326,9 @@ async function _initSchemaImpl(): Promise<void> {
         sql: `UPDATE content_templates SET prompt_pattern_fr = REPLACE(prompt_pattern_fr, 'C''est quoi votre activité préférée en famille à la maison?', 'C''est quoi ton activité préférée en famille à la maison?') WHERE slug = 'inspiration_famille'`,
         args: [] as import("@libsql/client").InValue[],
       },
-      {
-        sql: `INSERT OR IGNORE INTO settings (key, value) VALUES ('tutoiement_v1_migrated', '1')`,
-        args: [] as import("@libsql/client").InValue[],
-      },
     ], "write");
+    // Flag written after updates succeed — separate statement so partial batch failure leaves flag unset
+    await db.execute(`INSERT OR IGNORE INTO settings (key, value) VALUES ('tutoiement_v1_migrated', '1')`);
   }
 
   // Idempotent users.role migration — ALTER TABLE ADD COLUMN with a default.

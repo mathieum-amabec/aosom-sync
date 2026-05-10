@@ -478,4 +478,29 @@ describe("POST /api/social/content/generate", () => {
     expect(body.hookId).toBeNull();
     expect(body.vars).not.toHaveProperty("hook");
   });
+
+  it("mode hook_seeded with empty hook pool returns 503", async () => {
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("admin"),
+    }));
+    vi.doMock("@/lib/database", () => ({
+      getContentTemplateBySlug: vi.fn().mockResolvedValue({ ...MOCK_TEMPLATE, mode: "hook_seeded" }),
+      createFacebookDraft: vi.fn().mockResolvedValue(12),
+      selectCompatibleHooks: vi.fn().mockResolvedValue([]),
+      getAnyProductSku: vi.fn().mockResolvedValue("01-0016"),
+    }));
+    vi.doMock("@/lib/hook-selector", () => ({ mapProductTypeToScope: vi.fn().mockReturnValue("universal") }));
+    vi.doMock("@/lib/content-generator", () => ({
+      getAnthropicClient: vi.fn().mockReturnValue({
+        messages: { create: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "Post" }] }) },
+      }),
+    }));
+    const { POST } = await import("@/app/api/social/content/generate/route");
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "fr" }));
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.success).toBe(false);
+    expect(body.error).toMatch(/No hooks available/);
+  });
 });

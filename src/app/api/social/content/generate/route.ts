@@ -130,9 +130,13 @@ export async function POST(request: Request) {
     if (template.mode !== "generative_seeded") {
       const scope = mapProductTypeToScope(null);
       const hookCandidates = await selectCompatibleHooks(scope, "FR", []);
-      hookChosen = hookCandidates.length > 0
-        ? hookCandidates[Math.floor(Math.random() * hookCandidates.length)]
-        : null;
+      if (hookCandidates.length === 0) {
+        return NextResponse.json(
+          { success: false, error: "No hooks available in pool — cannot generate hook_seeded post" },
+          { status: 503 },
+        );
+      }
+      hookChosen = hookCandidates[Math.floor(Math.random() * hookCandidates.length)];
     }
 
     // Inject template variables; {{hook}} only present for hook_seeded mode
