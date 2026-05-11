@@ -2,6 +2,34 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.4.2.0] - 2026-05-13
+
+### Added
+
+- **Publish Now button** on `/drafts` dashboard for approved drafts
+  - Manual trigger only (confirmation modal required — action is irreversible)
+  - FR posts → Ameublo Direct (page 1057151924144231)
+  - EN posts → Furnish Direct (page 1080288908505354)
+  - Bilingual drafts: publishes to both pages in parallel
+  - Success / error / partial-failure feedback displayed inline
+  - Failed publishes preserve `status='approved'` for retry
+- `publish_error TEXT` column on `facebook_drafts` (idempotent `ALTER TABLE` in `ensureSchema`)
+- 9 new tests for `publishDraft` server action (mocked `publishText`)
+- Pre-existing TS fix: `scheduled-posts.test.ts` fixtures updated for `approvedAt/reviewedBy/reviewNotes`
+
+### Reuses existing
+
+- `facebook-client.ts` `publishText()` helper (audited before use)
+- `social-publisher.ts` try/catch pattern
+- `facebook_post_id` + `published_at` columns (already in schema)
+
+### Not in this ship
+
+- Image attachments (text-only MVP)
+- Auto-publish cron
+- Schedule publish (date picker)
+- Bulk approve/publish
+
 ## [0.4.1.0] - 2026-05-12
 
 ### Added
