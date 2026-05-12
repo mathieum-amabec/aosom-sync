@@ -10,11 +10,12 @@ All notable changes to Aosom Sync will be documented in this file.
   - Atomic acquire via `db.batch([DELETE stale, INSERT OR IGNORE])` in a single Turso transaction
   - TTL 900s (> maxDuration 800s) — auto-releases on crash/SIGKILL without manual intervention
   - Holder auto-detected by UTC hour: `cron-06-00` / `cron-06-30` / `manual-{timestamp}`
-  - Lock released in `finally` block — always cleaned up even on unexpected throws
+  - Lock released in `finally` block — DB errors on release are caught and logged, never re-thrown (prevents swallowing the original sync error)
 
 ### Fixed
 - Race condition discovered 12 mai: 4 `runSyncFull()` invocations in parallel → 4× `recordPriceChanges` → duplicate `sync_logs` entries
 - Second parallel call now returns immediately: `{ skipped: true, reason: "Another sync in progress", lockHolder: "...", lockAgeSeconds: N }`
+- Lock release errors in `finally` no longer replace the original error or turn a successful sync into a 500
 
 ### Protected use cases
 - Vercel cron 06:00 still running + retry 06:30 starts → 06:30 skips cleanly
