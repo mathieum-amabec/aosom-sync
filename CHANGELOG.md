@@ -25,6 +25,11 @@ Vercel docs: "If a cron invocation fails, Vercel does not retry it."
 6 cron slots = 6 chances of fail → 3 fails in 5 days (8, 11, 12 mai).
 Migration to 1 + 1 retry = drastically simpler and more robust.
 
+### Fixed (pre-landing)
+
+- Stale error message at `src/jobs/job1-sync.ts:277` still referenced "07:40 UTC" — updated to reflect 06:00/06:30 cron schedule
+- `runSyncFull()` now throws if `runSyncFinalize()` returns `skipped=true` unexpectedly, preventing silent partial-sync
+
 ### Validation pending (reset 3/3 strict)
 
 - 13 mai 06:00 UTC: 1/3 after architecture migration

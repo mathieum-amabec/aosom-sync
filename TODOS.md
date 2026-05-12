@@ -81,7 +81,7 @@
 
 ### Sync timeout sur Vercel
 **Priority:** P2 (MEDIUM)
-**Status:** Fixé v0.2.0.0 (chunked pipeline) + v0.3.2.0 (blob timeout 60s + self-healing stale lock). Validation reset après 2/3 fail (dégradation infra Vercel Blob 11 mai). Nouveau calendrier: 12 mai=1/3, 13 mai=2/3, 14 mai=3/3 → fermé.
+**Status:** v0.4.0.0 (12 mai) — Plan B Chunked → Fluid Compute single function (maxDuration=800s). Root cause: Vercel cron no retry on fail. 6 slots → 2 slots (06:00 + 06:30 idempotent retry). Validation reset 3/3: 13 mai=1/3, 14 mai=2/3, 15 mai=3/3 → fermé.
 
 ---
 
