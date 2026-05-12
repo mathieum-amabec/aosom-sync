@@ -50,6 +50,11 @@ import {
   deletePhase1Blob,
   type Phase1BlobData,
 } from "@/lib/sync-blob-storage";
+import {
+  tryAcquireSyncLock,
+  releaseSyncLock,
+  getSyncLockStatus,
+} from "@/lib/sync-lock";
 
 function log(msg: string, extra?: Record<string, unknown>): void {
   console.log(JSON.stringify({ ts: new Date().toISOString(), job: "job1-sync", msg, ...extra }));
@@ -608,6 +613,8 @@ export interface SyncFullResult {
   totalChunks: number;
   chunksProcessed: number;
   totalProducts: number;
+  lockHolder?: string;
+  lockAgeSeconds?: number;
 }
 
 /**
@@ -826,32 +833,62 @@ export async function runSyncFull(): Promise<SyncFullResult> {
     };
   }
 
-  // Init (idempotent — skips if today's checkpoint already exists)
-  const initResult = await runSyncInit();
+  // Atomic lock — prevent parallel executions (race condition guard)
+  const holder = await tryAcquireSyncLock();
+  if (!holder) {
+    const lockStatus = await getSyncLockStatus();
+    log("runSyncFull: lock held — skipping parallel call", {
+      phase: "full",
+      lockHolder: lockStatus?.holder,
+      lockAgeSeconds: lockStatus?.ageSeconds,
+    });
+    return {
+      skipped: true,
+      reason: "Another sync in progress",
+      totalChunks: existingCp?.totalChunks ?? 0,
+      chunksProcessed: existingCp?.chunksProcessed ?? 0,
+      totalProducts: existingCp?.totalProducts ?? 0,
+      lockHolder: lockStatus?.holder,
+      lockAgeSeconds: lockStatus?.ageSeconds,
+    };
+  }
 
-  // Sequential chunks loop — each call reads checkpoint to find current position
-  let refreshDone = false;
-  let chunksProcessed = 0;
-  while (!refreshDone) {
-    const result = await runSyncRefreshChunk();
-    refreshDone = result.refreshDone;
-    if (!result.skipped) {
-      chunksProcessed = result.chunksProcessed;
+  try {
+    // Init (idempotent — skips if today's checkpoint already exists)
+    const initResult = await runSyncInit();
+
+    // Sequential chunks loop — each call reads checkpoint to find current position
+    let refreshDone = false;
+    let chunksProcessed = 0;
+    while (!refreshDone) {
+      const result = await runSyncRefreshChunk();
+      refreshDone = result.refreshDone;
+      if (!result.skipped) {
+        chunksProcessed = result.chunksProcessed;
+      }
+    }
+
+    // Finalize
+    const finalizeResult = await runSyncFinalize();
+    if (finalizeResult.skipped) {
+      throw new Error("runSyncFinalize returned skipped=true unexpectedly after refresh completed — checkpoint may be in an inconsistent state");
+    }
+
+    return {
+      skipped: false,
+      totalChunks: initResult.totalChunks,
+      chunksProcessed,
+      totalProducts: initResult.totalProducts,
+    };
+  } finally {
+    try {
+      await releaseSyncLock(holder);
+    } catch (releaseErr) {
+      // DB unavailable at release time — TTL (900s) will clean up the stale lock.
+      // Do not re-throw: would replace the original error or turn a successful sync into a 500.
+      console.error("[sync-lock] Failed to release lock — TTL will clean up", releaseErr);
     }
   }
-
-  // Finalize
-  const finalizeResult = await runSyncFinalize();
-  if (finalizeResult.skipped) {
-    throw new Error("runSyncFinalize returned skipped=true unexpectedly after refresh completed — checkpoint may be in an inconsistent state");
-  }
-
-  return {
-    skipped: false,
-    totalChunks: initResult.totalChunks,
-    chunksProcessed,
-    totalProducts: initResult.totalProducts,
-  };
 }
 
 /**

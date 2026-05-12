@@ -73,6 +73,14 @@ vi.mock("@/lib/sync-blob-storage", () => ({
   deletePhase1Blob: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/lib/sync-lock", () => ({
+  tryAcquireSyncLock: vi.fn().mockResolvedValue("test-holder"),
+  releaseSyncLock: vi.fn().mockResolvedValue(undefined),
+  getSyncLockStatus: vi.fn().mockResolvedValue(null),
+  SYNC_LOCK_KEY: "sync_full_lock",
+  SYNC_LOCK_TTL_SECONDS: 900,
+}));
+
 vi.mock("@/lib/csv-fetcher", () => ({
   fetchAosomCatalog: vi.fn().mockResolvedValue([]),
 }));
@@ -115,6 +123,7 @@ const db = await import("@/lib/database");
 const shopifyClient = await import("@/lib/shopify-client");
 const diffEngine = await import("@/lib/diff-engine");
 const blobStorage = await import("@/lib/sync-blob-storage");
+const syncLock = await import("@/lib/sync-lock");
 const { runSync, runShopifyPush, runSyncInit, runSyncRefreshChunk, runSyncFinalize, runSyncFull } = await import("@/jobs/job1-sync");
 const { GET } = await import("@/app/api/sync/health/route");
 
@@ -1152,5 +1161,42 @@ describe("runSyncFull — zero chunks (no catalog changes)", () => {
     expect(result.totalChunks).toBe(0);
     expect(db.refreshProducts).not.toHaveBeenCalled();
     expect(db.rebuildProductTypeCounts).toHaveBeenCalledOnce();
+  });
+});
+
+describe("runSyncFull — skips when lock is held (parallel call guard)", () => {
+  beforeEach(resetAllMocks);
+
+  it("returns skipped=true with reason='Another sync in progress' when lock not acquired", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue(null);
+    vi.mocked(syncLock.tryAcquireSyncLock).mockResolvedValue(null);
+    vi.mocked(syncLock.getSyncLockStatus).mockResolvedValue({
+      holder: "cron-06-00",
+      acquiredAt: Math.floor(Date.now() / 1000) - 30,
+      ageSeconds: 30,
+    });
+
+    const result = await runSyncFull();
+
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toBe("Another sync in progress");
+    expect(result.lockHolder).toBe("cron-06-00");
+    expect(result.lockAgeSeconds).toBe(30);
+    expect(db.createSyncRun).not.toHaveBeenCalled();
+    expect(db.rebuildProductTypeCounts).not.toHaveBeenCalled();
+  });
+});
+
+describe("runSyncFull — releases lock in finally block on error", () => {
+  beforeEach(resetAllMocks);
+
+  it("calls releaseSyncLock even when runSyncInit throws", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue(null);
+    vi.mocked(syncLock.tryAcquireSyncLock).mockResolvedValue("test-holder");
+    vi.mocked(db.clearStaleLockIfNeeded).mockRejectedValue(new Error("DB timeout"));
+
+    await expect(runSyncFull()).rejects.toThrow("DB timeout");
+
+    expect(syncLock.releaseSyncLock).toHaveBeenCalledWith("test-holder");
   });
 });

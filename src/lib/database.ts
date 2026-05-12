@@ -418,7 +418,7 @@ async function _initSchemaImpl(): Promise<void> {
 }
 
 /** Ensure schema is initialized before any query */
-async function ensureSchema(): Promise<Client> {
+export async function ensureSchema(): Promise<Client> {
   await initSchema();
   return getDb();
 }
