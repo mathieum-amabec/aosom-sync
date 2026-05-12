@@ -274,7 +274,7 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
   const todayForGuard = new Date().toISOString().slice(0, 10);
   const phase1Cp = await getPhase1Checkpoint();
   if (phase1Cp?.date === todayForGuard && !phase1Cp.finalized) {
-    throw new Error(`Phase 1 chunked pipeline in progress (${phase1Cp.chunksProcessed}/${phase1Cp.totalChunks} chunks done). Wait for finalize at 07:40 UTC or use the cron routes directly.`);
+    throw new Error(`Phase 1 chunked pipeline in progress (${phase1Cp.chunksProcessed}/${phase1Cp.totalChunks} chunks done). Wait for runSyncFull to finish (cron at 06:00/06:30 UTC) or use the manual fallback routes directly.`);
   }
 
   // Phase 2: createSyncRun
@@ -841,7 +841,10 @@ export async function runSyncFull(): Promise<SyncFullResult> {
   }
 
   // Finalize
-  await runSyncFinalize();
+  const finalizeResult = await runSyncFinalize();
+  if (finalizeResult.skipped) {
+    throw new Error("runSyncFinalize returned skipped=true unexpectedly after refresh completed — checkpoint may be in an inconsistent state");
+  }
 
   return {
     skipped: false,
