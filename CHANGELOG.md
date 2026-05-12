@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.4.1.0] - 2026-05-12
+
+### Added
+- **Atomic lock for `runSyncFull()`** — prevents parallel executions
+  - `src/lib/sync-lock.ts`: `tryAcquireSyncLock()`, `releaseSyncLock()`, `getSyncLockStatus()`
+  - Atomic acquire via `db.batch([DELETE stale, INSERT OR IGNORE])` in a single Turso transaction
+  - TTL 900s (> maxDuration 800s) — auto-releases on crash/SIGKILL without manual intervention
+  - Holder auto-detected by UTC hour: `cron-06-00` / `cron-06-30` / `manual-{timestamp}`
+  - Lock released in `finally` block — always cleaned up even on unexpected throws
+
+### Fixed
+- Race condition discovered 12 mai: 4 `runSyncFull()` invocations in parallel → 4× `recordPriceChanges` → duplicate `sync_logs` entries
+- Second parallel call now returns immediately: `{ skipped: true, reason: "Another sync in progress", lockHolder: "...", lockAgeSeconds: N }`
+
+### Protected use cases
+- Vercel cron 06:00 still running + retry 06:30 starts → 06:30 skips cleanly
+- Manual dashboard "Run" clicked multiple times rapidly → only first proceeds
+- Crash mid-sync → TTL expires → next scheduled cron auto-recovers
+
 ## [0.4.0.0] - 2026-05-12
 
 ### Changed (ARCHITECTURE)
