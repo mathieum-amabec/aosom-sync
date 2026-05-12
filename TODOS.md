@@ -81,7 +81,7 @@
 
 ### Sync timeout sur Vercel
 **Priority:** P2 (MEDIUM)
-**Status:** Fixé définitivement v0.2.0.0 — Phase 1 splittée en 3 fonctions distinctes (init/refresh×4/finalize). Chaque slot bien dans les 200s. Validation 3 runs consécutifs en cours (10-12 mai).
+**Status:** Fixé v0.2.0.0 (chunked pipeline) + v0.3.2.0 (blob timeout 60s + self-healing stale lock). Validation reset après 2/3 fail (dégradation infra Vercel Blob 11 mai). Nouveau calendrier: 12 mai=1/3, 13 mai=2/3, 14 mai=3/3 → fermé.
 
 ---
 

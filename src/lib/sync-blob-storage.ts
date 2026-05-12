@@ -26,7 +26,8 @@ export interface Phase1BlobData {
 }
 
 const BLOB_PREFIX = "sync-runs/phase1";
-const BLOB_FETCH_TIMEOUT_MS = 30_000;
+// 60s: observed Vercel Blob degradation (11 mai 06:00-08:00 UTC) caused 19MB reads to exceed 30s.
+const BLOB_FETCH_TIMEOUT_MS = 60_000;
 
 export async function savePhase1Blob(runId: string, data: Phase1BlobData): Promise<string> {
   const today = new Date().toISOString().slice(0, 10);
