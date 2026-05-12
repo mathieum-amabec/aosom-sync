@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/database", () => ({
   ensureSchema: vi.fn(),
@@ -204,5 +204,93 @@ describe("runSyncFull lock integration", () => {
 
     const releaseCall = db.execute.mock.calls[0][0];
     expect(releaseCall.args).toContain(holder);
+  });
+});
+
+// ─── deriveSyncHolder (via tryAcquireSyncLock) ───────────────────────────────
+
+describe("deriveSyncHolder time branches", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns 'cron-06-00' at 06:05 UTC", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-12T06:05:00Z"));
+    const db = makeDb({
+      batch: vi.fn().mockResolvedValue([{ rowsAffected: 0 }, { rowsAffected: 1 }]),
+      execute: vi.fn().mockResolvedValue({ rows: [] }),
+    });
+    vi.mocked(ensureSchema).mockResolvedValue(db as never);
+
+    const holder = await tryAcquireSyncLock();
+    expect(holder).toBe("cron-06-00");
+  });
+
+  it("returns 'cron-06-30' at 06:35 UTC", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-12T06:35:00Z"));
+    const db = makeDb({
+      batch: vi.fn().mockResolvedValue([{ rowsAffected: 0 }, { rowsAffected: 1 }]),
+      execute: vi.fn().mockResolvedValue({ rows: [] }),
+    });
+    vi.mocked(ensureSchema).mockResolvedValue(db as never);
+
+    const holder = await tryAcquireSyncLock();
+    expect(holder).toBe("cron-06-30");
+  });
+
+  it("returns 'manual-{timestamp}' outside cron windows", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-12T10:00:00Z"));
+    const db = makeDb({
+      batch: vi.fn().mockResolvedValue([{ rowsAffected: 0 }, { rowsAffected: 1 }]),
+      execute: vi.fn().mockResolvedValue({ rows: [] }),
+    });
+    vi.mocked(ensureSchema).mockResolvedValue(db as never);
+
+    const holder = await tryAcquireSyncLock();
+    expect(holder).toMatch(/^manual-\d+$/);
+  });
+});
+
+// ─── getSyncLockStatus — named-key row fallback ───────────────────────────────
+
+describe("getSyncLockStatus named-key row fallback", () => {
+  it("reads holder and acquiredAt from named keys (LibSQL column-object rows)", async () => {
+    const acquiredAt = Math.floor(Date.now() / 1000) - 60;
+    const db = makeDb({
+      execute: vi.fn().mockResolvedValue({
+        rows: [{ value: "cron-06-00", updated_at: acquiredAt, 0: "cron-06-00", 1: acquiredAt }],
+      }),
+    });
+    vi.mocked(ensureSchema).mockResolvedValue(db as never);
+
+    const status = await getSyncLockStatus();
+
+    expect(status).not.toBeNull();
+    expect(status!.holder).toBe("cron-06-00");
+    expect(status!.acquiredAt).toBe(acquiredAt);
+  });
+});
+
+// ─── tryAcquireSyncLock — null getSyncLockStatus fallback ────────────────────
+
+describe("tryAcquireSyncLock — null lockStatus fallback in warn", () => {
+  it("logs 'unknown' and '?' when getSyncLockStatus returns null after failed acquire", async () => {
+    const db = makeDb({
+      batch: vi.fn().mockResolvedValue([{ rowsAffected: 0 }, { rowsAffected: 0 }]),
+      execute: vi.fn().mockResolvedValue({ rows: [] }), // empty → getSyncLockStatus returns null
+    });
+    vi.mocked(ensureSchema).mockResolvedValue(db as never);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const holder = await tryAcquireSyncLock();
+
+    expect(holder).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('"unknown"')
+    );
+    warnSpy.mockRestore();
   });
 });

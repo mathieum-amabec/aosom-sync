@@ -881,7 +881,13 @@ export async function runSyncFull(): Promise<SyncFullResult> {
       totalProducts: initResult.totalProducts,
     };
   } finally {
-    await releaseSyncLock(holder);
+    try {
+      await releaseSyncLock(holder);
+    } catch (releaseErr) {
+      // DB unavailable at release time — TTL (900s) will clean up the stale lock.
+      // Do not re-throw: would replace the original error or turn a successful sync into a 500.
+      console.error("[sync-lock] Failed to release lock — TTL will clean up", releaseErr);
+    }
   }
 }
 

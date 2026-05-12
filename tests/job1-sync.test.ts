@@ -1181,6 +1181,7 @@ describe("runSyncFull — skips when lock is held (parallel call guard)", () => 
     expect(result.skipped).toBe(true);
     expect(result.reason).toBe("Another sync in progress");
     expect(result.lockHolder).toBe("cron-06-00");
+    expect(result.lockAgeSeconds).toBe(30);
     expect(db.createSyncRun).not.toHaveBeenCalled();
     expect(db.rebuildProductTypeCounts).not.toHaveBeenCalled();
   });
