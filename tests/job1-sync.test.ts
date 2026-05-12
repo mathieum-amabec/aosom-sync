@@ -789,6 +789,29 @@ describe("runSyncRefreshChunk — normal flow", () => {
     expect(db.refreshProducts).not.toHaveBeenCalled();
   });
 
+  it("calls clearStaleLockIfNeeded(15) before createSyncRun — self-healing stale orphans", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "https://blob.test/run.json",
+      totalChunks: 2, chunksProcessed: 0,
+      refreshDone: false, finalized: false,
+      totalProducts: 100, priceUpdates: 0, stockChanges: 5, newProducts: 0,
+    });
+    vi.mocked(blobStorage.readPhase1Blob).mockResolvedValue({ toWriteMapped: [], priceChangeEntries: [] });
+
+    await runSyncRefreshChunk();
+
+    expect(db.clearStaleLockIfNeeded).toHaveBeenCalledWith(15);
+    const clearOrder = vi.mocked(db.clearStaleLockIfNeeded).mock.invocationCallOrder[0]!;
+    const createOrder = vi.mocked(db.createSyncRun).mock.invocationCallOrder[0]!;
+    expect(clearOrder).toBeLessThan(createOrder);
+  });
+
+  it("does not call clearStaleLockIfNeeded when no checkpoint today", async () => {
+    await runSyncRefreshChunk();
+
+    expect(db.clearStaleLockIfNeeded).not.toHaveBeenCalled();
+  });
+
   it("skips when refreshDone is already true", async () => {
     vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
       date: TODAY, blobUrl: "", totalChunks: 1, chunksProcessed: 1,

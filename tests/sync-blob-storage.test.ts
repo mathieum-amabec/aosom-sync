@@ -149,6 +149,19 @@ describe("readPhase1Blob — fetch errors", () => {
       .rejects.toThrow("Aborted");
   });
 
+  it("uses 60s timeout — hardened against Vercel Blob degradation (observed 11 mai)", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ toWriteMapped: [], priceChangeEntries: [] }),
+    }));
+
+    await readPhase1Blob(VALID_BLOB_URL);
+
+    expect(timeoutSpy).toHaveBeenCalledWith(60_000);
+    timeoutSpy.mockRestore();
+  });
+
   it("returns full data when valid blob is fetched", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce({
       ok: true,

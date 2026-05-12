@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.3.2.0] - 2026-05-11
+
+### Fixed
+
+- **Bug C infrastructure resilience** — diagnosed 11 mai 2/3 fail, shipped 2 targeted fixes
+  - `BLOB_FETCH_TIMEOUT_MS`: `30s → 60s` in `sync-blob-storage.ts` — 19MB Phase 1 blob reads exceeded 30s on degraded Vercel Blob infrastructure (observed 06:00–08:00 UTC 11 mai)
+  - Self-healing stale lock in `runSyncRefreshChunk` — calls `clearStaleLockIfNeeded(15)` before `createSyncRun`, clearing orphan 'running' records left by prior SIGKILL/timeout without waiting for 08:00 UTC Shopify sync
+- **Root cause confirmed non-regression** — PRs #50/#51/#52 innocent; cause was transient Vercel Blob + Aosom CDN degradation
+- **3 new tests** — timeout constant (60s), self-healing ordering, no-op when no checkpoint
+
+### Validation pending (reset 3/3 strict)
+
+- 12 mai 06:00 UTC: 1/3
+- 13 mai 06:00 UTC: 2/3
+- 14 mai 06:00 UTC: 3/3 → Bug C officially closed
+
 ## [0.3.0.0] - 2026-05-10
 
 ### Added

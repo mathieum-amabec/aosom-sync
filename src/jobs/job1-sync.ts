@@ -742,6 +742,10 @@ export async function runSyncRefreshChunk(): Promise<SyncRefreshResult> {
     return { chunksProcessed: 0, totalChunks: 0, refreshDone: true, skipped: true };
   }
 
+  // Self-healing: clear orphan 'running' records left by prior Vercel SIGKILL or blob timeout.
+  // Without this, stale locks accumulate across the 4 cron slots and block finalize.
+  await clearStaleLockIfNeeded(15);
+
   const syncRun = await createSyncRun();
 
   try {
