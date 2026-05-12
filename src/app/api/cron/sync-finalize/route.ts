@@ -11,9 +11,9 @@ function verifyCronSecret(header: string | null): boolean {
 }
 
 /**
- * Cron handler — Phase 1 finalize (rebuildCounts + recordPriceChanges + notify).
- * Runs at 07:40 UTC after all refresh chunks are done.
- * Is a no-op if refresh is not yet complete or already finalized.
+ * Manual fallback — Phase 1 finalize (rebuildCounts + recordPriceChanges + notify).
+ * No longer triggered by Vercel cron (removed in v0.4.0.0 — replaced by runSyncFull).
+ * Kept as emergency manual fallback only.
  * Protected by CRON_SECRET header.
  */
 export async function GET(request: Request) {

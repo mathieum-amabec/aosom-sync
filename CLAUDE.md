@@ -11,17 +11,17 @@ Next.js App Router on Vercel. Engine in `src/lib/`, UI in `src/app/(dashboard)/`
 ```
 CSV Feed (Aosom) → csv-fetcher → variant-merger → diff-engine → Vercel Blob (Phase1Checkpoint)
                                        ↓                                  ↓
-                                  catalog_snapshots (SQLite)      sync-refresh ×4 (2500 rows/chunk)
+                                  catalog_snapshots (SQLite)      refreshProducts ×N (2500 rows/chunk)
                                        ↓                                  ↓
-                                  Catalog Browser UI              sync-finalize (rebuildCounts + notify)
+                                  Catalog Browser UI              rebuildCounts + notify
                                        ↓
                                Import Pipeline → Claude API → Shopify (as draft)
 ```
 
-Phase 1 is split into 3 cron functions to avoid Vercel 300s SIGKILL:
-- `runSyncInit()` at 06:00 UTC — fetchAll + diff + save blob (~200s budget)
-- `runSyncRefreshChunk()` at 06:20/06:40/07:00/07:20 UTC — 2500 rows/chunk (~200s budget each)
-- `runSyncFinalize()` at 07:40 UTC — counts + price history + notify (~60s budget)
+Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s, Vercel Pro):
+- `runSyncFull()` at 06:00 UTC — init + sequential refresh chunks + finalize in one call
+- `runSyncFull()` retry at 06:30 UTC — idempotent retry (skips if already finalized)
+- `runSyncRefreshChunk()` / `runSyncFinalize()` — manual fallback routes only (not in cron schedule)
 
 ## Data Model (SQLite/better-sqlite3)
 
@@ -46,9 +46,9 @@ Phase 1 is split into 3 cron functions to avoid Vercel 300s SIGKILL:
 - `GET /api/catalog` — browse catalog with filters (reads from Turso, not CSV)
 - `POST /api/sync/trigger` — manual sync (supports `{dryRun: true}`)
 - `GET /api/sync/history` — sync runs + change logs
-- `GET /api/cron/sync` — Vercel Cron Phase 1 init: fetchAll + diff + save blob (Bearer CRON_SECRET, maxDuration 200s)
-- `GET /api/cron/sync-refresh` — Vercel Cron Phase 1 chunk: refreshes 2500 rows/chunk, fires at 06:20/06:40/07:00/07:20 UTC (Bearer CRON_SECRET, maxDuration 200s)
-- `GET /api/cron/sync-finalize` — Vercel Cron Phase 1 finalize: rebuildCounts + recordPriceChanges + notify, fires at 07:40 UTC (Bearer CRON_SECRET, maxDuration 60s)
+- `GET /api/cron/sync` — Vercel Cron: Fluid Compute Phase 1 orchestrator (init+chunks+finalize), fires at 06:00 + 06:30 UTC (Bearer CRON_SECRET, maxDuration 800s)
+- `GET /api/cron/sync-refresh` — Manual fallback only: one refresh chunk (not in cron schedule since v0.4.0.0)
+- `GET /api/cron/sync-finalize` — Manual fallback only: finalize step (not in cron schedule since v0.4.0.0)
 - `POST /api/import/queue` — queue products by SKU array
 - `POST /api/import/generate` — generate Claude content for one job
 - `POST /api/import/push` — push reviewed job to Shopify
@@ -73,7 +73,7 @@ Phase 1 is split into 3 cron functions to avoid Vercel 300s SIGKILL:
 
 ## Deployment
 
-Vercel with `vercel.json` cron (daily at 6am UTC). Requires Vercel Pro for 60s function timeout.
+Vercel with `vercel.json` cron (daily at 6am UTC). Requires Vercel Pro for Fluid Compute (maxDuration 800s).
 
 ## Skill routing
 

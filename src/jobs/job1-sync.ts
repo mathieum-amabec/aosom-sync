@@ -274,7 +274,7 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
   const todayForGuard = new Date().toISOString().slice(0, 10);
   const phase1Cp = await getPhase1Checkpoint();
   if (phase1Cp?.date === todayForGuard && !phase1Cp.finalized) {
-    throw new Error(`Phase 1 chunked pipeline in progress (${phase1Cp.chunksProcessed}/${phase1Cp.totalChunks} chunks done). Wait for finalize at 07:40 UTC or use the cron routes directly.`);
+    throw new Error(`Phase 1 chunked pipeline in progress (${phase1Cp.chunksProcessed}/${phase1Cp.totalChunks} chunks done). Wait for runSyncFull to finish (cron at 06:00/06:30 UTC) or use the manual fallback routes directly.`);
   }
 
   // Phase 2: createSyncRun
@@ -583,7 +583,6 @@ export async function runShopifyPush(): Promise<{ updates: number; archived: num
 // ─── Phase 1 chunked: init → refresh (×N) → finalize ───────────────────────
 
 const REFRESH_CHUNK_SIZE = 2500;
-const MAX_REFRESH_SLOTS = 4; // must match the number of sync-refresh cron slots in vercel.json
 
 export interface SyncInitResult {
   syncRunId: string;
@@ -601,6 +600,14 @@ export interface SyncRefreshResult {
 
 export interface SyncFinalizeResult {
   skipped: boolean;
+}
+
+export interface SyncFullResult {
+  skipped: boolean;
+  reason?: string;
+  totalChunks: number;
+  chunksProcessed: number;
+  totalProducts: number;
 }
 
 /**
@@ -669,9 +676,6 @@ export async function runSyncInit(): Promise<SyncInitResult> {
     await updateSyncRunTiming(syncRun.id, timing);
 
     const totalChunks = toWrite.length > 0 ? Math.ceil(toWrite.length / REFRESH_CHUNK_SIZE) : 0;
-    if (totalChunks > MAX_REFRESH_SLOTS) {
-      throw new Error(`Phase1 init: ${totalChunks} chunks needed but only ${MAX_REFRESH_SLOTS} cron refresh slots available. Increase REFRESH_CHUNK_SIZE or add slots in vercel.json.`);
-    }
 
     const t0Blob = Date.now();
     let blobUrl = "";
@@ -795,6 +799,59 @@ export async function runSyncRefreshChunk(): Promise<SyncRefreshResult> {
     } catch { /* ignore */ }
     throw err;
   }
+}
+
+/**
+ * Fluid Compute single-function orchestrator — replaces the 6-slot cron pipeline.
+ * Runs at 06:00 UTC (maxDuration 800s, Vercel Pro Fluid Compute).
+ * A retry slot at 06:30 UTC provides resilience via idempotency + resumability.
+ *
+ * Flow: init → sequential chunks loop → finalize
+ * Idempotent: skips entirely if already finalized today.
+ * Resumable: if interrupted mid-chunks, the 06:30 retry slot resumes from checkpoint.
+ */
+export async function runSyncFull(): Promise<SyncFullResult> {
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Fast idempotency check — skip entirely if already finalized today
+  const existingCp = await getPhase1Checkpoint();
+  if (existingCp?.date === today && existingCp.finalized) {
+    log("runSyncFull: already finalized today — skipping", { phase: "full" });
+    return {
+      skipped: true,
+      reason: "Already finalized today",
+      totalChunks: existingCp.totalChunks,
+      chunksProcessed: existingCp.chunksProcessed,
+      totalProducts: existingCp.totalProducts,
+    };
+  }
+
+  // Init (idempotent — skips if today's checkpoint already exists)
+  const initResult = await runSyncInit();
+
+  // Sequential chunks loop — each call reads checkpoint to find current position
+  let refreshDone = false;
+  let chunksProcessed = 0;
+  while (!refreshDone) {
+    const result = await runSyncRefreshChunk();
+    refreshDone = result.refreshDone;
+    if (!result.skipped) {
+      chunksProcessed = result.chunksProcessed;
+    }
+  }
+
+  // Finalize
+  const finalizeResult = await runSyncFinalize();
+  if (finalizeResult.skipped) {
+    throw new Error("runSyncFinalize returned skipped=true unexpectedly after refresh completed — checkpoint may be in an inconsistent state");
+  }
+
+  return {
+    skipped: false,
+    totalChunks: initResult.totalChunks,
+    chunksProcessed,
+    totalProducts: initResult.totalProducts,
+  };
 }
 
 /**
