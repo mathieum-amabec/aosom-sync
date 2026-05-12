@@ -1,8 +1,8 @@
 /**
- * Tests for the three Phase 1 cron route handlers:
- *   GET /api/cron/sync         — calls runSyncInit
- *   GET /api/cron/sync-refresh — calls runSyncRefreshChunk
- *   GET /api/cron/sync-finalize — calls runSyncFinalize
+ * Tests for the Phase 1 cron route handlers:
+ *   GET /api/cron/sync         — calls runSyncFull (Fluid Compute orchestrator, v0.4.0.0+)
+ *   GET /api/cron/sync-refresh — calls runSyncRefreshChunk (manual fallback only)
+ *   GET /api/cron/sync-finalize — calls runSyncFinalize (manual fallback only)
  *
  * Each route shares the same pattern:
  *   - 401 when Authorization header is missing
@@ -17,6 +17,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 vi.mock("@/jobs/job1-sync", () => ({
+  runSyncFull: vi.fn(),
   runSyncInit: vi.fn(),
   runSyncRefreshChunk: vi.fn(),
   runSyncFinalize: vi.fn(),
@@ -25,7 +26,7 @@ vi.mock("@/jobs/job1-sync", () => ({
 import { GET as getSyncInit } from "@/app/api/cron/sync/route";
 import { GET as getSyncRefresh } from "@/app/api/cron/sync-refresh/route";
 import { GET as getSyncFinalize } from "@/app/api/cron/sync-finalize/route";
-import { runSyncInit, runSyncRefreshChunk, runSyncFinalize } from "@/jobs/job1-sync";
+import { runSyncFull, runSyncInit, runSyncRefreshChunk, runSyncFinalize } from "@/jobs/job1-sync";
 
 function makeReq(url: string, auth?: string): Request {
   return new Request(`http://localhost${url}`, {
@@ -37,7 +38,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-// ─── GET /api/cron/sync (Phase 1 init) ────────────────────────────────────────
+// ─── GET /api/cron/sync (Fluid Compute orchestrator, v0.4.0.0+) ──────────────
 
 describe("GET /api/cron/sync", () => {
   it("returns 401 without Authorization header", async () => {
@@ -46,7 +47,7 @@ describe("GET /api/cron/sync", () => {
     const body = await res.json() as { success: boolean; error: string };
     expect(body.success).toBe(false);
     expect(body.error).toBe("Unauthorized");
-    expect(runSyncInit).not.toHaveBeenCalled();
+    expect(runSyncFull).not.toHaveBeenCalled();
   });
 
   it("returns 401 with wrong Bearer token", async () => {
@@ -54,12 +55,12 @@ describe("GET /api/cron/sync", () => {
     expect(res.status).toBe(401);
     const body = await res.json() as { success: boolean };
     expect(body.success).toBe(false);
-    expect(runSyncInit).not.toHaveBeenCalled();
+    expect(runSyncFull).not.toHaveBeenCalled();
   });
 
   it("returns 200 with job result on success", async () => {
-    const jobResult = { syncRunId: "run-1", totalChunks: 3, totalProducts: 7500, skipped: false };
-    vi.mocked(runSyncInit).mockResolvedValueOnce(jobResult);
+    const jobResult = { skipped: false, totalChunks: 3, chunksProcessed: 3, totalProducts: 7500 };
+    vi.mocked(runSyncFull).mockResolvedValueOnce(jobResult);
 
     const res = await getSyncInit(makeReq("/api/cron/sync", "Bearer test-secret"));
     const body = await res.json() as { success: boolean; data: typeof jobResult };
@@ -67,12 +68,12 @@ describe("GET /api/cron/sync", () => {
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
     expect(body.data).toEqual(jobResult);
-    expect(runSyncInit).toHaveBeenCalledOnce();
+    expect(runSyncFull).toHaveBeenCalledOnce();
   });
 
-  it("returns 200 with skipped=true when init is idempotent", async () => {
-    const jobResult = { syncRunId: "", totalChunks: 3, totalProducts: 7500, skipped: true };
-    vi.mocked(runSyncInit).mockResolvedValueOnce(jobResult);
+  it("returns 200 with skipped=true when already finalized today (idempotent retry)", async () => {
+    const jobResult = { skipped: true, reason: "Already finalized today", totalChunks: 3, chunksProcessed: 3, totalProducts: 7500 };
+    vi.mocked(runSyncFull).mockResolvedValueOnce(jobResult);
 
     const res = await getSyncInit(makeReq("/api/cron/sync", "Bearer test-secret"));
     const body = await res.json() as { success: boolean; data: typeof jobResult };
@@ -82,15 +83,15 @@ describe("GET /api/cron/sync", () => {
     expect(body.data.skipped).toBe(true);
   });
 
-  it("returns 500 when runSyncInit throws", async () => {
-    vi.mocked(runSyncInit).mockRejectedValueOnce(new Error("CSV unreachable"));
+  it("returns 500 when runSyncFull throws", async () => {
+    vi.mocked(runSyncFull).mockRejectedValueOnce(new Error("CSV unreachable"));
 
     const res = await getSyncInit(makeReq("/api/cron/sync", "Bearer test-secret"));
     const body = await res.json() as { success: boolean; error: string };
 
     expect(res.status).toBe(500);
     expect(body.success).toBe(false);
-    expect(body.error).toBe("Sync init failed");
+    expect(body.error).toBe("Sync full failed");
   });
 });
 

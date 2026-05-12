@@ -2,6 +2,39 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.4.0.0] - 2026-05-12
+
+### Changed (ARCHITECTURE)
+
+- **Plan B Chunked → Fluid Compute single function (Alt B)**
+- New `runSyncFull()` séquentielle (init → chunks loop → finalize) in `src/jobs/job1-sync.ts`
+- `/api/cron/sync` route now calls `runSyncFull()` with `maxDuration=800` (Vercel Pro Fluid Compute)
+- 1 retry cron slot added at 06:30 UTC — idempotent via `Phase1Checkpoint`
+- Eliminates Vercel cron missed-invocation fragility (root cause of 3 fails in 5 days)
+
+### Removed (vercel.json crons only — routes kept as code for manual fallback)
+
+- `/api/cron/sync-refresh` × 4 cron slots (06:20, 06:40, 07:00, 07:20)
+- `/api/cron/sync-finalize` × 1 cron slot (07:40)
+- `MAX_REFRESH_SLOTS` constant + guard (no longer pertinent with Fluid Compute)
+
+### Architecture rationale
+
+Root cause Bug C identified via investigation 12 mai:
+Vercel docs: "If a cron invocation fails, Vercel does not retry it."
+6 cron slots = 6 chances of fail → 3 fails in 5 days (8, 11, 12 mai).
+Migration to 1 + 1 retry = drastically simpler and more robust.
+
+### Validation pending (reset 3/3 strict)
+
+- 13 mai 06:00 UTC: 1/3 after architecture migration
+- 14 mai 06:00 UTC: 2/3
+- 15 mai 06:00 UTC: 3/3 → Bug C truly closed
+
+### Next steps
+
+- Alt C Inngest migration planned in 2 weeks (~8-12h) for full robustness
+
 ## [0.3.2.0] - 2026-05-11
 
 ### Fixed

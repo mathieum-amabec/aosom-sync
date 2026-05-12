@@ -6,16 +6,8 @@
       "schedule": "0 6 * * *"
     },
     {
-      "path": "/api/cron/sync-refresh",
-      "schedule": "20,40 6 * * *"
-    },
-    {
-      "path": "/api/cron/sync-refresh",
-      "schedule": "0,20 7 * * *"
-    },
-    {
-      "path": "/api/cron/sync-finalize",
-      "schedule": "40 7 * * *"
+      "path": "/api/cron/sync",
+      "schedule": "30 6 * * *"
     },
     {
       "path": "/api/cron/sync-shopify",

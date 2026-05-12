@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { runSyncInit } from "@/jobs/job1-sync";
+import { runSyncFull } from "@/jobs/job1-sync";
 import { env } from "@/lib/config";
 
 function verifyCronSecret(header: string | null): boolean {
@@ -11,8 +11,9 @@ function verifyCronSecret(header: string | null): boolean {
 }
 
 /**
- * Cron handler — Phase 1 init (fetchAll + diff + save blob).
- * Fast: completes in <200s regardless of catalog size.
+ * Cron handler — Fluid Compute single-function Phase 1 orchestrator.
+ * Runs at 06:00 UTC (primary) and 06:30 UTC (idempotent retry).
+ * maxDuration 800s on Vercel Pro Fluid Compute.
  * Protected by CRON_SECRET header.
  */
 export async function GET(request: Request) {
@@ -21,12 +22,12 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await runSyncInit();
+    const result = await runSyncFull();
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
-    console.error(`[CRON] Sync init failed:`, err);
-    return NextResponse.json({ success: false, error: "Sync init failed" }, { status: 500 });
+    console.error(`[CRON] Sync full failed:`, err);
+    return NextResponse.json({ success: false, error: "Sync full failed" }, { status: 500 });
   }
 }
 
-export const maxDuration = 200;
+export const maxDuration = 800;

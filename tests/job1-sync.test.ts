@@ -115,7 +115,7 @@ const db = await import("@/lib/database");
 const shopifyClient = await import("@/lib/shopify-client");
 const diffEngine = await import("@/lib/diff-engine");
 const blobStorage = await import("@/lib/sync-blob-storage");
-const { runSync, runShopifyPush, runSyncInit, runSyncRefreshChunk, runSyncFinalize } = await import("@/jobs/job1-sync");
+const { runSync, runShopifyPush, runSyncInit, runSyncRefreshChunk, runSyncFinalize, runSyncFull } = await import("@/jobs/job1-sync");
 const { GET } = await import("@/app/api/sync/health/route");
 
 // ─── Test utilities ───────────────────────────────────────────────────
@@ -1005,5 +1005,152 @@ describe("runSyncFinalize — stale checkpoint", () => {
 
     expect(result.skipped).toBe(true);
     expect(db.rebuildProductTypeCounts).not.toHaveBeenCalled();
+  });
+});
+
+// ─── runSyncFull ──────────────────────────────────────────────────────
+
+describe("runSyncFull — skips if already finalized today", () => {
+  beforeEach(resetAllMocks);
+
+  it("returns skipped=true without calling init/refresh/finalize", async () => {
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "", totalChunks: 1, chunksProcessed: 1,
+      refreshDone: true, finalized: true,
+      totalProducts: 100, priceUpdates: 5, stockChanges: 3, newProducts: 0,
+    });
+
+    const result = await runSyncFull();
+
+    expect(result.skipped).toBe(true);
+    expect(result.reason).toBe("Already finalized today");
+    expect(result.totalProducts).toBe(100);
+    expect(result.totalChunks).toBe(1);
+    expect(db.createSyncRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("runSyncFull — fresh start (no checkpoint)", () => {
+  beforeEach(resetAllMocks);
+
+  it("runs init → 1 chunk → finalize and returns success", async () => {
+    const mappedRows = Array.from({ length: 50 }, (_, i) => ({
+      sku: `S${i}`, name: `P${i}`, price: 10, qty: 5, color: "", size: "", product_type: "Home",
+      image1: "", image2: "", image3: "", image4: "", image5: "", image6: "", image7: "",
+      video: "", description: "", short_description: "", material: "", gtin: "", weight: 0,
+      out_of_stock_expected: "", estimated_arrival: "", last_seen_at: 0,
+    }));
+
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    vi.mocked(fetchAosomCatalog).mockResolvedValue(
+      mappedRows.map(r => ({
+        sku: r.sku, name: r.name, price: r.price, qty: r.qty, color: r.color, size: r.size,
+        shortDescription: "", description: "", images: [], gtin: "", weight: 0,
+        dimensions: { length: 0, width: 0, height: 0 },
+        productType: r.product_type, category: "", brand: "", material: "", psin: r.sku, sin: "",
+        video: "", estimatedArrival: "", outOfStockExpected: "", packageNum: "", boxSize: "", boxWeight: "", pdf: "",
+      }))
+    );
+
+    // Init sets checkpoint with totalChunks=1, refreshDone=false
+    vi.mocked(db.savePhase1Checkpoint).mockImplementation(async (cp) => {
+      // After init saves: simulate checkpoint with chunksProcessed=0
+      vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({ ...cp });
+    });
+
+    // After refresh chunk: checkpoint advances to chunksProcessed=1, refreshDone=true
+    vi.mocked(blobStorage.readPhase1Blob).mockResolvedValue({ toWriteMapped: mappedRows, priceChangeEntries: [] });
+
+    // After full savePhase1Checkpoint sequence, finalize will see refreshDone=true
+    // We simulate the checkpoint progression via side effects on savePhase1Checkpoint
+    let checkpointState = { date: "", blobUrl: "", totalChunks: 0, chunksProcessed: 0, refreshDone: false, finalized: false, totalProducts: 0, priceUpdates: 0, stockChanges: 0, newProducts: 0 };
+    vi.mocked(db.savePhase1Checkpoint).mockImplementation(async (cp) => {
+      checkpointState = { ...cp };
+      vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({ ...cp });
+    });
+
+    const result = await runSyncFull();
+
+    expect(result.skipped).toBe(false);
+    expect(result.totalProducts).toBe(50);
+    expect(db.rebuildProductTypeCounts).toHaveBeenCalledOnce();
+  });
+});
+
+describe("runSyncFull — resumes from partial checkpoint (chunks_done=2, totalChunks=3)", () => {
+  beforeEach(resetAllMocks);
+
+  it("skips init, processes remaining chunk, then finalizes", async () => {
+    // Partial checkpoint: 2/3 chunks done
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "https://blob.test/run.json",
+      totalChunks: 3, chunksProcessed: 2,
+      refreshDone: false, finalized: false,
+      totalProducts: 7500, priceUpdates: 100, stockChanges: 500, newProducts: 0,
+    });
+
+    // readPhase1Blob returns data for the remaining chunk
+    vi.mocked(blobStorage.readPhase1Blob).mockResolvedValue({
+      toWriteMapped: Array(2500).fill({ sku: "S1" }) as any,
+      priceChangeEntries: [],
+    });
+
+    // Simulate checkpoint advancing to refreshDone=true after chunk 3
+    vi.mocked(db.savePhase1Checkpoint).mockImplementation(async (cp) => {
+      vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({ ...cp });
+    });
+
+    const result = await runSyncFull();
+
+    expect(result.skipped).toBe(false);
+    // Init must NOT have called fetchAosomCatalog (existing checkpoint → skipped)
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    expect(fetchAosomCatalog).not.toHaveBeenCalled();
+    // Exactly 1 refresh chunk written (chunk 3/3)
+    expect(db.refreshProducts).toHaveBeenCalledOnce();
+    // Finalize must have run
+    expect(db.rebuildProductTypeCounts).toHaveBeenCalledOnce();
+  });
+});
+
+describe("runSyncFull — idempotent (second call same day skips)", () => {
+  beforeEach(resetAllMocks);
+
+  it("second call returns skipped=true after first call finalized", async () => {
+    // Simulate already finalized (e.g. retry slot at 06:30 after 06:00 succeeded)
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: TODAY, blobUrl: "", totalChunks: 1, chunksProcessed: 1,
+      refreshDone: true, finalized: true,
+      totalProducts: 200, priceUpdates: 0, stockChanges: 10, newProducts: 0,
+    });
+
+    const result = await runSyncFull();
+
+    expect(result.skipped).toBe(true);
+    expect(db.createSyncRun).not.toHaveBeenCalled();
+    expect(db.refreshProducts).not.toHaveBeenCalled();
+    expect(db.rebuildProductTypeCounts).not.toHaveBeenCalled();
+  });
+});
+
+describe("runSyncFull — zero chunks (no catalog changes)", () => {
+  beforeEach(resetAllMocks);
+
+  it("skips refresh loop and goes straight to finalize when totalChunks=0", async () => {
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    // Empty catalog → toWrite=[] → totalChunks=0, refreshDone=true
+    vi.mocked(fetchAosomCatalog).mockResolvedValue([]);
+
+    // After init saves checkpoint with refreshDone=true, finalize will see it
+    vi.mocked(db.savePhase1Checkpoint).mockImplementation(async (cp) => {
+      vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({ ...cp });
+    });
+
+    const result = await runSyncFull();
+
+    expect(result.skipped).toBe(false);
+    expect(result.totalChunks).toBe(0);
+    expect(db.refreshProducts).not.toHaveBeenCalled();
+    expect(db.rebuildProductTypeCounts).toHaveBeenCalledOnce();
   });
 });

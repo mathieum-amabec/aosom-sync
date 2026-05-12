@@ -11,9 +11,9 @@ function verifyCronSecret(header: string | null): boolean {
 }
 
 /**
- * Cron handler — Phase 1 refresh chunk (writes one REFRESH_CHUNK_SIZE slice to DB).
- * Runs at 06:20, 06:40, 07:00, 07:20 UTC.
- * Is a no-op if no pending refresh work exists.
+ * Manual fallback — Phase 1 refresh chunk (writes one REFRESH_CHUNK_SIZE slice to DB).
+ * No longer triggered by Vercel cron (removed in v0.4.0.0 — replaced by runSyncFull).
+ * Kept as emergency manual fallback only.
  * Protected by CRON_SECRET header.
  */
 export async function GET(request: Request) {
