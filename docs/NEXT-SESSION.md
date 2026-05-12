@@ -1,7 +1,44 @@
 # Next session — après 24 avril 2026
 
 ---
-## SESSION 10 mai — RECORD QUADRUPLE SHIP DAY 🚀
+## SESSION 11-12 mai — v0.3.2.0 Bug C resilience SHIPPED (PR #54)
+
+### Root cause confirmed: Vercel Blob degradation (not code regression)
+- PRs #50/#51/#52 innocent — déduction timing_ms: 56s (10 mai) → 134s (11 mai) = infrastructure
+- 4 stale locks créés par 4 cron slots qui ont tous failed blob read en 30s
+- Phase 1 blob (~19MB JSON) non lisible → chunksProcessed=0 toute la journée
+
+### Shipped (PR #54 — v0.3.2.0)
+| Fix | Fichier | Description |
+|-----|---------|-------------|
+| #1 | `sync-blob-storage.ts` | `BLOB_FETCH_TIMEOUT_MS` 30s → 60s |
+| #2 | `job1-sync.ts` | `clearStaleLockIfNeeded(15)` avant `createSyncRun()` dans `runSyncRefreshChunk` |
+| Tests | `tests/` | +3 nouveaux (timeout spy, ordering, no-op) |
+
+- gstack upgradé 1.31.1.0 → 1.32.0.0 (7 community PRs, 3 security fixes)
+- Prod confirmé v0.3.2.0 à 21:xx UTC (health endpoint 200 OK)
+
+### Validation Bug C (reset calendrier)
+- **12 mai 06:00–07:40 UTC**: 1/3
+- **13 mai 06:00–07:40 UTC**: 2/3
+- **14 mai 06:00–07:40 UTC**: 3/3 → Bug C OFFICIELLEMENT FERMÉ
+
+### Note PR #53 ouverte
+- `feat(drafts): v0.3.1.0 — Publish Now button` — toujours OPEN, non-urgent
+- Décision sur merge à prendre prochaine session
+
+### Adversarial finding (P3 backlog)
+- `runSyncFinalize` n'appelle pas `clearStaleLockIfNeeded` — ghost 'running' record 22h si 07:20 slot SIGKILL
+- Décision user: ship as-is (cosmétique, hors scope autorisé)
+- Performance: `clearStaleLockIfNeeded` UPDATE non indexé sur `sync_runs(status)` — low urgency 4×/day
+
+### Apprentissages permanents (additions 11-12 mai)
+32. `BLOB_FETCH_TIMEOUT_MS` = timeout total fetch+body, pas seulement headers — doit absorber lecture 19MB
+33. `clearStaleLockIfNeeded(15)` avant `createSyncRun()` = pattern self-healing pour SIGKILL Vercel
+34. Root cause diagnostiqué via `timing_ms` Turso: comparer jours consécutifs → smoking gun infra
+
+---
+## SESSION 10 mai — RECORD QUADRUPLE SHIP DAY
 
 ### Validation Bug C 1/3 ✅
 - Pipeline complete healthy: sync-init (58s) + 2 chunks + finalize
