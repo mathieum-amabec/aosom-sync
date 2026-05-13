@@ -293,7 +293,7 @@ const MOCK_TEMPLATE = {
   display_name_fr: "Conseil déco",
   display_name_en: "Deco tip",
   prompt_pattern_fr: "Rédige un post Facebook sur {{category}} dans un {{room}} en {{saison}}.",
-  prompt_pattern_en: "Write a Facebook post about {{category}} in a {{room}} in {{saison}}.",
+  prompt_pattern_en: "Write a Facebook post about {{category}} in {{season}} ({{month}}).",
   image_strategy: "product",
   active: true,
   frequency_per_month: 2,

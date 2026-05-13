@@ -251,10 +251,13 @@ async function main() {
   console.log(`Migrating ${EN_PROMPTS.length} EN prompts to content_templates...`);
 
   for (const { id, slug, prompt } of EN_PROMPTS) {
-    await db.execute({
+    const result = await db.execute({
       sql: `UPDATE content_templates SET prompt_pattern_en = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
       args: [prompt, id],
     });
+    if ((result.rowsAffected ?? 0) === 0) {
+      throw new Error(`No row updated for id=${id} (${slug}) — check ID in content_templates`);
+    }
     console.log(`  ✓ id=${id} (${slug})`);
   }
 
