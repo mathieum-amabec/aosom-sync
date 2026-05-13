@@ -338,16 +338,97 @@ describe("POST /api/social/content/generate", () => {
     expect(body.error).toContain("templateSlug");
   });
 
-  it("returns 400 when language is not fr", async () => {
+  it("returns 400 when language is unsupported (not fr or en)", async () => {
     vi.doMock("@/lib/auth", () => ({
       isAuthenticated: vi.fn().mockResolvedValue(true),
       getSessionRole: vi.fn().mockResolvedValue("admin"),
     }));
     const { POST } = await import("@/app/api/social/content/generate/route");
-    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "en" }));
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "de" }));
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.success).toBe(false);
+  });
+
+  it("language=en uses prompt_pattern_en and returns language=en in response", async () => {
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("admin"),
+    }));
+    vi.doMock("@/lib/database", () => ({
+      getContentTemplateBySlug: vi.fn().mockResolvedValue({ ...MOCK_TEMPLATE, mode: "generative_seeded" }),
+      createFacebookDraft: vi.fn().mockResolvedValue(55),
+      selectCompatibleHooks: vi.fn().mockResolvedValue([]),
+      getAnyProductSku: vi.fn().mockResolvedValue("01-0016"),
+    }));
+    vi.doMock("@/lib/hook-selector", () => ({ mapProductTypeToScope: vi.fn().mockReturnValue("universal") }));
+    vi.doMock("@/lib/content-generator", () => ({
+      getAnthropicClient: vi.fn().mockReturnValue({
+        messages: { create: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "Furnish Direct EN post" }] }) },
+      }),
+    }));
+    const { POST } = await import("@/app/api/social/content/generate/route");
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "en" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.language).toBe("en");
+    expect(body.vars).toHaveProperty("season");
+    expect(body.vars).toHaveProperty("month");
+    expect(body.vars).toHaveProperty("category");
+    expect(body.vars).not.toHaveProperty("saison");
+    expect(body.vars).not.toHaveProperty("mois");
+  });
+
+  it("language=en hook_seeded selects EN hooks", async () => {
+    const selectCompatibleHooks = vi.fn().mockResolvedValue([
+      { id: 20, text: "Have you ever thought about this?", mode: "pool", categoryId: 1, language: "EN", productScopes: ["universal"], usedCount: 0, lastUsedAt: null },
+    ]);
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("admin"),
+    }));
+    vi.doMock("@/lib/database", () => ({
+      getContentTemplateBySlug: vi.fn().mockResolvedValue({ ...MOCK_TEMPLATE, mode: "hook_seeded" }),
+      createFacebookDraft: vi.fn().mockResolvedValue(56),
+      selectCompatibleHooks,
+      getAnyProductSku: vi.fn().mockResolvedValue("01-0016"),
+    }));
+    vi.doMock("@/lib/hook-selector", () => ({ mapProductTypeToScope: vi.fn().mockReturnValue("universal") }));
+    vi.doMock("@/lib/content-generator", () => ({
+      getAnthropicClient: vi.fn().mockReturnValue({
+        messages: { create: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "EN hook post" }] }) },
+      }),
+    }));
+    const { POST } = await import("@/app/api/social/content/generate/route");
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "en" }));
+    expect(res.status).toBe(200);
+    expect(selectCompatibleHooks).toHaveBeenCalledWith(expect.any(String), "EN", []);
+  });
+
+  it("language defaults to fr when omitted", async () => {
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("admin"),
+    }));
+    vi.doMock("@/lib/database", () => ({
+      getContentTemplateBySlug: vi.fn().mockResolvedValue({ ...MOCK_TEMPLATE, mode: "generative_seeded" }),
+      createFacebookDraft: vi.fn().mockResolvedValue(57),
+      selectCompatibleHooks: vi.fn().mockResolvedValue([]),
+      getAnyProductSku: vi.fn().mockResolvedValue("01-0016"),
+    }));
+    vi.doMock("@/lib/hook-selector", () => ({ mapProductTypeToScope: vi.fn().mockReturnValue("universal") }));
+    vi.doMock("@/lib/content-generator", () => ({
+      getAnthropicClient: vi.fn().mockReturnValue({
+        messages: { create: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "Post FR" }] }) },
+      }),
+    }));
+    const { POST } = await import("@/app/api/social/content/generate/route");
+    const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.language).toBe("fr");
+    expect(body.vars).toHaveProperty("saison");
   });
 
   it("returns 404 when template slug does not exist", async () => {
@@ -501,6 +582,6 @@ describe("POST /api/social/content/generate", () => {
     expect(res.status).toBe(503);
     const body = await res.json();
     expect(body.success).toBe(false);
-    expect(body.error).toMatch(/No hooks available/);
+    expect(body.error).toMatch(/No .* hooks available/);
   });
 });

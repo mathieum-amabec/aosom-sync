@@ -34,11 +34,34 @@ const MONTHS_FR = [
   "juillet", "août", "septembre", "octobre", "novembre", "décembre",
 ];
 
+const CATEGORIES_EN = [
+  "living room furniture",
+  "bedroom furniture",
+  "dining room furniture",
+  "home office furniture",
+  "garden and patio",
+  "storage and organization",
+  "home decor",
+  "outdoor furniture",
+];
+
+const MONTHS_EN = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
 function getSaisonFr(month: number): string {
   if (month >= 2 && month <= 4) return "printemps";
   if (month >= 5 && month <= 7) return "été";
   if (month >= 8 && month <= 10) return "automne";
   return "hiver";
+}
+
+function getSeasonEn(month: number): string {
+  if (month >= 2 && month <= 4) return "spring";
+  if (month >= 5 && month <= 7) return "summer";
+  if (month >= 8 && month <= 10) return "fall";
+  return "winter";
 }
 
 function pickRandom<T>(arr: T[]): T {
@@ -100,9 +123,9 @@ export async function POST(request: Request) {
       );
     }
 
-    if (language !== "fr") {
+    if (language !== "fr" && language !== "en") {
       return NextResponse.json(
-        { success: false, error: "Only language 'fr' is supported at this time" },
+        { success: false, error: "language must be 'fr' or 'en'" },
         { status: 400 },
       );
     }
@@ -123,16 +146,17 @@ export async function POST(request: Request) {
 
     const now = new Date();
     const month = now.getMonth();
-    const saison = getSaisonFr(month);
+    const isEn = language === "en";
 
     // Hook selection — only for hook_seeded templates; generative_seeded templates self-generate their hook
     let hookChosen: { id: number; text: string } | null = null;
     if (template.mode !== "generative_seeded") {
       const scope = mapProductTypeToScope(null);
-      const hookCandidates = await selectCompatibleHooks(scope, "FR", []);
+      const hookLang = isEn ? "EN" : "FR";
+      const hookCandidates = await selectCompatibleHooks(scope, hookLang, []);
       if (hookCandidates.length === 0) {
         return NextResponse.json(
-          { success: false, error: "No hooks available in pool — cannot generate hook_seeded post" },
+          { success: false, error: `No ${hookLang} hooks available in pool — cannot generate hook_seeded post` },
           { status: 503 },
         );
       }
@@ -140,16 +164,25 @@ export async function POST(request: Request) {
     }
 
     // Inject template variables; {{hook}} only present for hook_seeded mode
-    const vars: Record<string, string> = {
-      saison,
-      season: saison,
-      mois: MONTHS_FR[month],
-      category: pickRandom(CATEGORIES_FR),
-      room: pickRandom(ROOMS_FR),
-      ...(hookChosen ? { hook: hookChosen.text } : {}),
-    };
+    const vars: Record<string, string> = isEn
+      ? {
+          season: getSeasonEn(month),
+          month: MONTHS_EN[month],
+          category: pickRandom(CATEGORIES_EN),
+          ...(hookChosen ? { hook: hookChosen.text } : {}),
+        }
+      : {
+          saison: getSaisonFr(month),
+          season: getSaisonFr(month),
+          mois: MONTHS_FR[month],
+          month: MONTHS_FR[month],
+          category: pickRandom(CATEGORIES_FR),
+          room: pickRandom(ROOMS_FR),
+          ...(hookChosen ? { hook: hookChosen.text } : {}),
+        };
 
-    const finalPrompt = interpolateTemplate(template.prompt_pattern_fr, vars);
+    const pattern = isEn ? template.prompt_pattern_en : template.prompt_pattern_fr;
+    const finalPrompt = interpolateTemplate(pattern, vars);
 
     const postText = await generatePostText(finalPrompt);
     if (!postText) {
@@ -171,7 +204,7 @@ export async function POST(request: Request) {
     const draftId = await createFacebookDraft({
       sku,
       triggerType: "content_template",
-      language: "fr",
+      language: isEn ? "en" : "fr",
       postText,
       hookId: hookChosen?.id ?? null,
     });
@@ -181,6 +214,7 @@ export async function POST(request: Request) {
       draftId,
       postText,
       templateSlug: template.slug,
+      language,
       hookId: hookChosen?.id ?? null,
       vars,
     });
