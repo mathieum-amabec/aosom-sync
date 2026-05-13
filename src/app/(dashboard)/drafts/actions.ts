@@ -27,11 +27,13 @@ export async function rejectDraft(draftId: number, notes: string): Promise<{ err
   }
 }
 
+export type PublishLanguage = "fr" | "en" | "both";
+
 type PublishResult =
   | { success: true; publishedTo: string[]; fbPostIds: string[]; partialFailures?: { brand: string; error: string }[] }
   | { success: false; error: string };
 
-export async function publishDraft(draftId: number): Promise<PublishResult> {
+export async function publishDraft(draftId: number, language: PublishLanguage = "both"): Promise<PublishResult> {
   if (!(await isAuthenticated())) return { success: false, error: "Non autorisé" };
 
   const draft = await getFacebookDraft(draftId);
@@ -41,8 +43,8 @@ export async function publishDraft(draftId: number): Promise<PublishResult> {
   }
 
   const tasks: { brand: FacebookBrand; text: string }[] = [];
-  if (draft.postText?.trim()) tasks.push({ brand: "ameublo", text: draft.postText.trim() });
-  if (draft.postTextEn?.trim()) tasks.push({ brand: "furnish", text: draft.postTextEn.trim() });
+  if (language !== "en" && draft.postText?.trim()) tasks.push({ brand: "ameublo", text: draft.postText.trim() });
+  if (language !== "fr" && draft.postTextEn?.trim()) tasks.push({ brand: "furnish", text: draft.postTextEn.trim() });
   if (tasks.length === 0) return { success: false, error: "Aucun texte à publier" };
 
   const results = await Promise.all(

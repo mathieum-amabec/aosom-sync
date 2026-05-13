@@ -524,4 +524,66 @@ describe("publishDraft server action", () => {
       expect(result.fbPostIds).toContain("1080_en");
     }
   });
+
+  it("language='fr' on bilingual draft publishes to ameublo only, excludes furnish", async () => {
+    vi.doMock("@/lib/auth", () => ({ isAuthenticated: vi.fn().mockResolvedValue(true) }));
+    const publishText = vi.fn().mockResolvedValue({ id: "1057_fr_only", postId: "1057_fr_only" });
+    vi.doMock("@/lib/database", () => ({
+      getFacebookDraft: vi.fn().mockResolvedValue(approvedDraft),
+      updateFacebookDraft: vi.fn(),
+    }));
+    vi.doMock("@/lib/facebook-client", () => ({ publishText }));
+    vi.doMock("next/cache", () => ({ revalidatePath: vi.fn() }));
+    const { publishDraft } = await import("@/app/(dashboard)/drafts/actions");
+    const result = await publishDraft(1, "fr");
+    expect(result.success).toBe(true);
+    expect(publishText).toHaveBeenCalledTimes(1);
+    expect(publishText).toHaveBeenCalledWith(expect.objectContaining({ brand: "ameublo" }));
+    expect(publishText).not.toHaveBeenCalledWith(expect.objectContaining({ brand: "furnish" }));
+  });
+
+  it("language='fr' returns error when draft has no FR text", async () => {
+    vi.doMock("@/lib/auth", () => ({ isAuthenticated: vi.fn().mockResolvedValue(true) }));
+    vi.doMock("@/lib/database", () => ({
+      getFacebookDraft: vi.fn().mockResolvedValue({ ...approvedDraft, postText: "" }),
+      updateFacebookDraft: vi.fn(),
+    }));
+    vi.doMock("@/lib/facebook-client", () => ({ publishText: vi.fn() }));
+    vi.doMock("next/cache", () => ({ revalidatePath: vi.fn() }));
+    const { publishDraft } = await import("@/app/(dashboard)/drafts/actions");
+    const result = await publishDraft(1, "fr");
+    expect(result.success).toBe(false);
+    expect((result as { error: string }).error).toMatch(/aucun texte/i);
+  });
+
+  it("language='en' on bilingual draft publishes to furnish only, excludes ameublo", async () => {
+    vi.doMock("@/lib/auth", () => ({ isAuthenticated: vi.fn().mockResolvedValue(true) }));
+    const publishText = vi.fn().mockResolvedValue({ id: "1080_en_only", postId: "1080_en_only" });
+    vi.doMock("@/lib/database", () => ({
+      getFacebookDraft: vi.fn().mockResolvedValue(approvedDraft),
+      updateFacebookDraft: vi.fn(),
+    }));
+    vi.doMock("@/lib/facebook-client", () => ({ publishText }));
+    vi.doMock("next/cache", () => ({ revalidatePath: vi.fn() }));
+    const { publishDraft } = await import("@/app/(dashboard)/drafts/actions");
+    const result = await publishDraft(1, "en");
+    expect(result.success).toBe(true);
+    expect(publishText).toHaveBeenCalledTimes(1);
+    expect(publishText).toHaveBeenCalledWith(expect.objectContaining({ brand: "furnish" }));
+    expect(publishText).not.toHaveBeenCalledWith(expect.objectContaining({ brand: "ameublo" }));
+  });
+
+  it("language='en' returns error when draft has no EN text", async () => {
+    vi.doMock("@/lib/auth", () => ({ isAuthenticated: vi.fn().mockResolvedValue(true) }));
+    vi.doMock("@/lib/database", () => ({
+      getFacebookDraft: vi.fn().mockResolvedValue({ ...approvedDraft, postTextEn: null }),
+      updateFacebookDraft: vi.fn(),
+    }));
+    vi.doMock("@/lib/facebook-client", () => ({ publishText: vi.fn() }));
+    vi.doMock("next/cache", () => ({ revalidatePath: vi.fn() }));
+    const { publishDraft } = await import("@/app/(dashboard)/drafts/actions");
+    const result = await publishDraft(1, "en");
+    expect(result.success).toBe(false);
+    expect((result as { error: string }).error).toMatch(/aucun texte/i);
+  });
 });
