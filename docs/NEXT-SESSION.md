@@ -1,6 +1,53 @@
 # Next session — après 24 avril 2026
 
 ---
+## SESSION 13 mai — v0.5.0.0 12 EN prompts Furnish Direct SHIPPED (PR #58)
+
+### Bug C validation — 13 mai 06:00–07:40 UTC: 1/3 ✅
+- Pipeline complete healthy (v0.4.0.0 Fluid Compute confirmé)
+- Validation 2/3 demain (14 mai 06:00), 3/3 après-demain (15 mai) → Bug C CLOSED
+
+### Premier publish manuel Facebook ✅ (v0.4.3.0)
+- Toggle UI 3 boutons FR/EN/Both shippé en matinée
+- Draft #325 publié sur Furnish Direct EN
+
+### Shipped PR #58 — v0.5.0.0 (après-midi)
+| Item | Détail |
+|------|--------|
+| 12 EN prompts | `prompt_pattern_en` peuplé (était `TODO_EN`) |
+| Endpoint EN | `/api/social/content/generate` accepte `language=en` |
+| Brand | Furnish Direct (EN) vs Ameublo Direct (FR) |
+| Audience | Canadian homeowners 25-45, you/your, Canadian seasons |
+| Migration | `src/scripts/migrate-en-prompts.ts` (rowsAffected guard) |
+| Tests | 397 → 401 (+4 nouveaux EN) |
+| Vercel | v0.5.0.0 live confirmé |
+
+### Drafts EN générés post-deploy (quality validated)
+| Draft | Template | Verdict |
+|-------|----------|---------|
+| #329 | `saisonnier_outdoor` | spring/May, Canadian milestones, ✅ |
+| #330 | `conseil_deco_piece` | floating sofa tip, Furnish Direct subtil, ✅ |
+| #331 | `inspiration_animaux` | cat chair moment, humour doux, ✅ |
+
+### Architecture EN billing
+- Colonne `prompt_pattern_en` déjà existante = zéro migration schema
+- `selectCompatibleHooks(..., "EN", [])` déjà supporté
+- Prompt séquence: 3 samples validés par user → 9 batch Claude Code
+
+### Backlog priorisé
+- P1: Première campagne FB EN content (validation business, draft #329/330/331 prêts)
+- P2: Schedule publish date picker (step naturel après publication manuelle validée)
+- P2: Migration checkpoint Blob → Turso (élimine F4 instabilité Vercel Blob)
+- P3: Inngest migration (Alt C, ~6-12h, éliminerait cron Vercel limitation)
+
+### Apprentissages permanents (additions 13 mai)
+51. Colonne `prompt_pattern_en` existante = bonus architecture — pas de schema migration needed
+52. Workflow hybride (3 samples user → 9 batch Claude Code) = balance qualité/vitesse
+53. Brand bifurcation FR/EN: Ameublo Direct ≠ Furnish Direct (audience différente, brand différente)
+54. Canadian EN ≠ US EN: seasonal milestones authentiques ("BBQ season", "frosted windows"), `you/your` naturel
+55. `rowsAffected` guard dans scripts migration = safety net silence no-op masqué
+
+---
 ## SESSION 11-12 mai — v0.3.2.0 Bug C resilience SHIPPED (PR #54)
 
 ### Root cause confirmed: Vercel Blob degradation (not code regression)
