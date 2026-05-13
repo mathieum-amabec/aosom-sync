@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { FacebookDraft, DraftsPage } from "@/lib/database";
-import { approveDraft, rejectDraft } from "./actions";
+import { approveDraft, rejectDraft, publishDraft } from "./actions";
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "En attente",
@@ -39,6 +39,8 @@ export default function DraftsClient() {
   const [rejectNotes, setRejectNotes] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+  const [publishFeedback, setPublishFeedback] = useState<{ type: "success" | "partial" | "error"; message: string } | null>(null);
 
   // Filters
   const [statusFilter, setStatusFilter] = useState("draft");
@@ -91,6 +93,25 @@ export default function DraftsClient() {
     const result = await rejectDraft(selected.id, rejectNotes.trim());
     if (result.error) setError(result.error);
     else { setSelected(null); setRejectNotes(""); setShowRejectInput(false); fetchDrafts(); }
+    setActionLoading(false);
+  }
+
+  async function handlePublish() {
+    if (!selected) return;
+    setActionLoading(true);
+    setShowPublishConfirm(false);
+    setPublishFeedback(null);
+    const result = await publishDraft(selected.id);
+    if (result.success) {
+      const to = result.publishedTo.join(", ");
+      const msg = result.partialFailures
+        ? `Publié sur ${to}. Partiel: ${result.partialFailures.map((f) => `${f.brand}: ${f.error}`).join("; ")}`
+        : `Publié sur ${to} (${result.fbPostIds.join(", ")})`;
+      setPublishFeedback({ type: result.partialFailures ? "partial" : "success", message: msg });
+      fetchDrafts();
+    } else {
+      setPublishFeedback({ type: "error", message: result.error });
+    }
     setActionLoading(false);
   }
 
@@ -261,11 +282,27 @@ export default function DraftsClient() {
                 </div>
               )}
 
+              {/* Publish feedback */}
+              {publishFeedback && (
+                <div className={`rounded-lg p-4 text-sm border ${
+                  publishFeedback.type === "success"
+                    ? "bg-green-50 border-green-200 text-green-800"
+                    : publishFeedback.type === "partial"
+                    ? "bg-yellow-50 border-yellow-200 text-yellow-800"
+                    : "bg-red-50 border-red-200 text-red-800"
+                }`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <span>{publishFeedback.type === "success" ? "✓" : publishFeedback.type === "partial" ? "⚠" : "✕"} {publishFeedback.message}</span>
+                    <button onClick={() => setPublishFeedback(null)} className="shrink-0 opacity-60 hover:opacity-100">✕</button>
+                  </div>
+                </div>
+              )}
+
               {/* Actions (only for reviewable statuses) */}
               {(selected.status === "draft" || selected.status === "approved" || selected.status === "rejected") && (
                 <div className="space-y-3">
                   {!showRejectInput ? (
-                    <div className="flex gap-3">
+                    <div className="flex gap-3 flex-wrap">
                       {selected.status !== "approved" && (
                         <button
                           onClick={handleApprove}
@@ -273,6 +310,15 @@ export default function DraftsClient() {
                           className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 px-4 rounded-lg transition-colors"
                         >
                           {actionLoading ? "…" : "✓ Approuver"}
+                        </button>
+                      )}
+                      {selected.status === "approved" && (
+                        <button
+                          onClick={() => { setPublishFeedback(null); setShowPublishConfirm(true); }}
+                          disabled={actionLoading}
+                          className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 px-4 rounded-lg transition-colors"
+                        >
+                          {actionLoading ? "Publication…" : "Publier sur Facebook"}
                         </button>
                       )}
                       {selected.status !== "rejected" && (
@@ -318,6 +364,37 @@ export default function DraftsClient() {
           )}
         </div>
       </div>
+
+      {/* Publish confirm modal */}
+      {showPublishConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Publier sur Facebook</h3>
+            <p className="text-sm text-gray-600 mb-1">
+              Ce draft sera publié immédiatement sur les pages Facebook.
+            </p>
+            <p className="text-sm text-gray-600 mb-5">
+              <strong className="text-gray-800">Cette action est irréversible.</strong>
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowPublishConfirm(false)}
+                disabled={actionLoading}
+                className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handlePublish}
+                disabled={actionLoading}
+                className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors font-medium"
+              >
+                {actionLoading ? "Publication…" : "Oui, publier"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

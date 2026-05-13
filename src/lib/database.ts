@@ -236,6 +236,7 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("approved_at")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN approved_at INTEGER`);
   if (!cols.has("reviewed_by")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN reviewed_by TEXT`);
   if (!cols.has("review_notes")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN review_notes TEXT`);
+  if (!cols.has("publish_error")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN publish_error TEXT`);
 
   // checkpoint_data on sync_runs: stores per-chunk progress for Phase 2 chunked push
   // timing_ms on sync_runs: per-phase duration map written incrementally (survives SIGKILL diagnosis)
@@ -1530,7 +1531,7 @@ export async function getFacebookDraft(id: number): Promise<FacebookDraft | null
 
 export async function updateFacebookDraft(id: number, fields: Record<string, unknown>): Promise<void> {
   const db = await ensureSchema();
-  const allowed = new Set(["post_text", "post_text_en", "image_path", "image_url", "image_urls", "status", "scheduled_at", "published_at", "facebook_post_id", "channels"]);
+  const allowed = new Set(["post_text", "post_text_en", "image_path", "image_url", "image_urls", "status", "scheduled_at", "published_at", "facebook_post_id", "channels", "publish_error"]);
   const sets: string[] = [];
   const args: InValue[] = [];
   for (const [key, value] of Object.entries(fields)) {
