@@ -2,6 +2,34 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.0.0] - 2026-05-13
+
+### Added
+
+- **12 English prompts** for Furnish Direct content generation (`prompt_pattern_en` column)
+  - 3 education: `conseil_deco_piece`, `guide_achat_categorie`, `astuces_entretien`
+  - 4 inspiration: `inspiration_ambiance_maison`, `inspiration_vie_outdoor`, `inspiration_animaux`, `inspiration_famille`
+  - 3 engagement: `sondage_debat`, `devine_quizz`, `aide_choisir`
+  - 2 seasonal: `saisonnier_outdoor`, `saisonnier_indoor`
+- **EN generation support** in `/api/social/content/generate`
+  - `language: "en"` now accepted (was previously blocked with 400)
+  - EN uses `prompt_pattern_en`, EN categories/months/seasons, `selectCompatibleHooks(..., "EN", [])`
+  - Draft saved with `language: "en"` for correct downstream routing
+- **Migration script** `src/scripts/migrate-en-prompts.ts` — parameterized UPDATEs, apostrophe-safe
+
+### Architecture
+
+- Reused existing `prompt_pattern_en` column (was `'TODO_EN'` placeholder in all 12 rows)
+- No DB schema migration needed — 12 UPDATE statements only
+- `selectCompatibleHooks` already supported `"EN"` language filter
+- Brand bifurcation: Ameublo Direct (FR) vs Furnish Direct (EN)
+- Audience: Canadian homeowners 25-45, `you/your`, seasonal Canadian milestones
+
+### Tests
+
+- Updated `language=en` test: was expecting 400, now expects 200 with EN vars
+- Added 4 new tests: EN vars shape, EN hook selection, unsupported language 400, language default
+
 ## [0.4.3.0] - 2026-05-13
 
 ### Added
