@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.4.3.0] - 2026-05-13
+
+### Added
+
+- **Language-selective publish** on `/drafts` dashboard for approved drafts
+  - 3 separate publish buttons per draft based on available content:
+    - `📢 Ameublo (FR)` — publishes FR caption to Ameublo only
+    - `📢 Furnish (EN)` — publishes EN caption to Furnish Direct only
+    - `📢 Les deux (FR + EN)` — publishes both (shown only when both captions exist)
+  - Language-specific confirmation modals with distinct button colors (blue/indigo/purple)
+  - `PublishLanguage = 'fr' | 'en' | 'both'` type exported from server action
+  - `publishDraft(draftId, language)` extended with optional `language` param (default `'both'`)
+
+### Not in this ship
+
+- Schedule publish
+- Auto-publish cron
+- Bulk publish
+
 ## [0.4.2.0] - 2026-05-13
 
 ### Added

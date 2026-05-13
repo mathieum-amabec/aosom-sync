@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { FacebookDraft, DraftsPage } from "@/lib/database";
 import { approveDraft, rejectDraft, publishDraft } from "./actions";
+import type { PublishLanguage } from "./actions";
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "En attente",
@@ -39,7 +40,7 @@ export default function DraftsClient() {
   const [rejectNotes, setRejectNotes] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+  const [pendingLanguage, setPendingLanguage] = useState<PublishLanguage | null>(null);
   const [publishFeedback, setPublishFeedback] = useState<{ type: "success" | "partial" | "error"; message: string } | null>(null);
 
   // Filters
@@ -97,11 +98,12 @@ export default function DraftsClient() {
   }
 
   async function handlePublish() {
-    if (!selected) return;
+    if (!selected || !pendingLanguage) return;
     setActionLoading(true);
-    setShowPublishConfirm(false);
+    const lang = pendingLanguage;
+    setPendingLanguage(null);
     setPublishFeedback(null);
-    const result = await publishDraft(selected.id);
+    const result = await publishDraft(selected.id, lang);
     if (result.success) {
       const to = result.publishedTo.join(", ");
       const msg = result.partialFailures
@@ -312,15 +314,41 @@ export default function DraftsClient() {
                           {actionLoading ? "…" : "✓ Approuver"}
                         </button>
                       )}
-                      {selected.status === "approved" && (
-                        <button
-                          onClick={() => { setPublishFeedback(null); setShowPublishConfirm(true); }}
-                          disabled={actionLoading}
-                          className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 px-4 rounded-lg transition-colors"
-                        >
-                          {actionLoading ? "Publication…" : "Publier sur Facebook"}
-                        </button>
-                      )}
+                      {selected.status === "approved" && (() => {
+                        const hasFR = !!selected.postText?.trim();
+                        const hasEN = !!selected.postTextEn?.trim();
+                        return (
+                          <>
+                            {hasFR && (
+                              <button
+                                onClick={() => { setPublishFeedback(null); setPendingLanguage("fr"); }}
+                                disabled={actionLoading}
+                                className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 px-4 rounded-lg transition-colors"
+                              >
+                                {actionLoading ? "Publication…" : "📢 Ameublo (FR)"}
+                              </button>
+                            )}
+                            {hasEN && (
+                              <button
+                                onClick={() => { setPublishFeedback(null); setPendingLanguage("en"); }}
+                                disabled={actionLoading}
+                                className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 px-4 rounded-lg transition-colors"
+                              >
+                                {actionLoading ? "Publication…" : "📢 Furnish (EN)"}
+                              </button>
+                            )}
+                            {hasFR && hasEN && (
+                              <button
+                                onClick={() => { setPublishFeedback(null); setPendingLanguage("both"); }}
+                                disabled={actionLoading}
+                                className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium py-2.5 px-4 rounded-lg transition-colors"
+                              >
+                                {actionLoading ? "Publication…" : "📢 Les deux (FR + EN)"}
+                              </button>
+                            )}
+                          </>
+                        );
+                      })()}
                       {selected.status !== "rejected" && (
                         <button
                           onClick={() => setShowRejectInput(true)}
@@ -366,19 +394,25 @@ export default function DraftsClient() {
       </div>
 
       {/* Publish confirm modal */}
-      {showPublishConfirm && (
+      {pendingLanguage && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Publier sur Facebook</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              {pendingLanguage === "fr" && "Publier sur Ameublo (FR)"}
+              {pendingLanguage === "en" && "Publier sur Furnish Direct (EN)"}
+              {pendingLanguage === "both" && "Publier sur les deux pages"}
+            </h3>
             <p className="text-sm text-gray-600 mb-1">
-              Ce draft sera publié immédiatement sur les pages Facebook.
+              {pendingLanguage === "fr" && "Ce draft sera publié immédiatement sur la page Ameublo (français seulement)."}
+              {pendingLanguage === "en" && "Ce draft sera publié immédiatement sur la page Furnish Direct (anglais seulement)."}
+              {pendingLanguage === "both" && "Ce draft sera publié immédiatement sur Ameublo (FR) et Furnish Direct (EN)."}
             </p>
             <p className="text-sm text-gray-600 mb-5">
               <strong className="text-gray-800">Cette action est irréversible.</strong>
             </p>
             <div className="flex gap-3 justify-end">
               <button
-                onClick={() => setShowPublishConfirm(false)}
+                onClick={() => setPendingLanguage(null)}
                 disabled={actionLoading}
                 className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
               >
@@ -387,7 +421,11 @@ export default function DraftsClient() {
               <button
                 onClick={handlePublish}
                 disabled={actionLoading}
-                className="px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50 transition-colors font-medium"
+                className={`px-4 py-2 text-sm text-white rounded-lg disabled:opacity-50 transition-colors font-medium ${
+                  pendingLanguage === "fr" ? "bg-blue-600 hover:bg-blue-700" :
+                  pendingLanguage === "en" ? "bg-indigo-600 hover:bg-indigo-700" :
+                  "bg-purple-600 hover:bg-purple-700"
+                }`}
               >
                 {actionLoading ? "Publication…" : "Oui, publier"}
               </button>
