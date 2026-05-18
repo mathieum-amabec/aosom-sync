@@ -1,6 +1,5 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { triggerStockHighlight } from "@/jobs/job4-social";
 import { env } from "@/lib/config";
 
 function verifyCronSecret(header: string | null): boolean {
@@ -19,13 +18,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  try {
-    const result = await triggerStockHighlight();
-    return NextResponse.json({ success: true, data: result });
-  } catch (err) {
-    console.error(`[CRON] Social highlight failed:`, err);
-    return NextResponse.json({ success: false, error: "Social generation failed" }, { status: 500 });
-  }
+  // DISABLED: waiting for image attachments feature (product posts need images)
+  return NextResponse.json({ success: true, data: null, skipped: "stock_highlight disabled until image attachments feature is built" });
 }
 
 export const maxDuration = 200;

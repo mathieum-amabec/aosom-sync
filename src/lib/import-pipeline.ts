@@ -167,15 +167,12 @@ export async function importToShopify(
       }
     }
 
-    // Trigger social draft for new product (async, non-blocking)
-    const primarySku = product.variants[0]?.sku;
-    if (primarySku) {
-      import("@/jobs/job4-social").then(({ triggerNewProduct }) => {
-        triggerNewProduct(primarySku).catch((err) =>
-          console.error(`[IMPORT] Social draft failed for ${primarySku}: ${err}`)
-        );
-      }).catch(() => {});
-    }
+    // DISABLED: waiting for image attachments feature (product posts need images)
+    // import("@/jobs/job4-social").then(({ triggerNewProduct }) => {
+    //   triggerNewProduct(primarySku).catch((err) =>
+    //     console.error(`[IMPORT] Social draft failed for ${primarySku}: ${err}`)
+    //   );
+    // }).catch(() => {});
 
     return { ...rowToJob(row), status: "done", shopifyId, content };
   } catch (err) {
