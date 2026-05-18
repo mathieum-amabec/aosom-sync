@@ -211,7 +211,7 @@ export default function DraftsClient() {
                 </span>
               </div>
               <p className="text-sm text-gray-700 line-clamp-2 leading-snug">
-                {draft.postText.slice(0, 100)}
+                {(draft.postText || draft.postTextEn || "").slice(0, 100)}
               </p>
               <p className="text-xs text-gray-400 mt-1">{formatDate(draft.createdAt)}</p>
             </button>

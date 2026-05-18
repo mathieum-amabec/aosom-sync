@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.1.0] - 2026-05-18
+
+### Fixed
+- **Bilingual draft display**: EN content_template drafts now correctly stored in `post_text_en`
+  (was incorrectly stored in `post_text` / "FRANÇAIS" zone of dashboard)
+- Corrected existing EN drafts #329-331 data placement (`post_text → post_text_en`)
+- Draft list preview now falls back to `postTextEn` when `postText` is empty (EN-only drafts)
+
+### Changed
+- **Disabled stock_highlight draft generation** temporarily — cron returns `skipped` response
+  (waiting for image attachments feature; product posts need images to be effective on Facebook)
+- **Disabled new_product draft generation** temporarily — import pipeline no longer triggers social draft
+  (same reason; will re-enable when image attachments feature is built)
+- content_template generation remains fully active (engagement/tips/polls work text-only)
+
 ## [0.5.0.0] - 2026-05-13
 
 ### Added

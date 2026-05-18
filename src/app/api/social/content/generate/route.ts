@@ -205,7 +205,8 @@ export async function POST(request: Request) {
       sku,
       triggerType: "content_template",
       language: isEn ? "en" : "fr",
-      postText,
+      postText: isEn ? "" : postText,
+      postTextEn: isEn ? postText : null,
       hookId: hookChosen?.id ?? null,
     });
 
