@@ -99,9 +99,10 @@ describe("GET /api/cron/content", () => {
     vi.doMock("@/lib/content-template-selector", () => ({
       selectRandomTemplate: vi.fn().mockResolvedValue({ id: 1, slug: "conseil_deco_piece", content_type: "education" }),
     }));
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+    // Fresh Response per call — a body can only be read once.
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(
       new Response(JSON.stringify({ success: false, error: "Claude timeout" }), { status: 502 })
-    ));
+    )));
     const { GET } = await import("@/app/api/cron/content/route");
     const res = await GET(makeRequest());
     expect(res.status).toBe(500);
@@ -110,56 +111,91 @@ describe("GET /api/cron/content", () => {
     expect(body.template).toBe("conseil_deco_piece");
   });
 
-  it("returns 200 with draftId on success", async () => {
+  it("returns 200 with FR + EN drafts on success", async () => {
     vi.doMock("@/lib/content-template-selector", () => ({
       selectRandomTemplate: vi.fn().mockResolvedValue({ id: 3, slug: "sondage_debat", content_type: "engagement" }),
     }));
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+    // Fresh Response per call — a body can only be read once.
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(
       new Response(JSON.stringify({ success: true, draftId: 99, hookId: 7 }), { status: 200 })
-    ));
+    )));
     const { GET } = await import("@/app/api/cron/content/route");
     const res = await GET(makeRequest());
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
-    expect(body.draftId).toBe(99);
-    expect(body.hookId).toBe(7);
+    expect(body.generated).toBe(2);
     expect(body.template).toBe("sondage_debat");
     expect(body.contentType).toBe("engagement");
     expect(body.triggeredAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(body.drafts).toHaveLength(2);
+    expect(body.drafts[0]).toMatchObject({ language: "fr", success: true, draftId: 99, hookId: 7 });
+    expect(body.drafts[1]).toMatchObject({ language: "en", success: true, draftId: 99, hookId: 7 });
   });
 
-  it("returns 503 when fetch throws network error", async () => {
+  it("returns 200 with partial success when only EN fails", async () => {
+    vi.doMock("@/lib/content-template-selector", () => ({
+      selectRandomTemplate: vi.fn().mockResolvedValue({ id: 1, slug: "conseil_deco_piece", content_type: "education" }),
+    }));
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true, draftId: 11, hookId: null }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: false, error: "Claude timeout" }), { status: 502 }),
+      );
+    vi.stubGlobal("fetch", mockFetch);
+    const { GET } = await import("@/app/api/cron/content/route");
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.generated).toBe(1);
+    expect(body.drafts[0]).toMatchObject({ language: "fr", success: true, draftId: 11 });
+    expect(body.drafts[1]).toMatchObject({ language: "en", success: false });
+  });
+
+  it("returns 500 when both generate calls fail (network error)", async () => {
     vi.doMock("@/lib/content-template-selector", () => ({
       selectRandomTemplate: vi.fn().mockResolvedValue({ id: 1, slug: "conseil_deco_piece", content_type: "education" }),
     }));
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")));
     const { GET } = await import("@/app/api/cron/content/route");
     const res = await GET(makeRequest());
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.success).toBe(false);
-    expect(body.error).toMatch(/unreachable/);
+    expect(body.generated).toBe(0);
+    expect(body.drafts[0].error).toMatch(/unreachable/);
+    expect(body.drafts[1].error).toMatch(/unreachable/);
   });
 
-  it("calls generate endpoint with correct templateSlug and Bearer auth", async () => {
+  it("calls generate twice — FR then EN — with correct slug and Bearer auth", async () => {
     vi.doMock("@/lib/content-template-selector", () => ({
       selectRandomTemplate: vi.fn().mockResolvedValue({ id: 2, slug: "guide_achat_categorie", content_type: "education" }),
     }));
-    const mockFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true, draftId: 50, hookId: null }), { status: 200 })
-    );
+    // Fresh Response per call — a body can only be read once.
+    const mockFetch = vi.fn();
+    mockFetch.mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ success: true, draftId: 50, hookId: null }), { status: 200 }),
+    ));
     vi.stubGlobal("fetch", mockFetch);
     const { GET } = await import("@/app/api/cron/content/route");
     await GET(makeRequest());
 
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toContain("/api/social/content/generate");
-    expect(opts.method).toBe("POST");
-    expect(opts.headers.Authorization).toBe("Bearer test-secret-123");
-    const bodyParsed = JSON.parse(opts.body);
-    expect(bodyParsed.templateSlug).toBe("guide_achat_categorie");
-    expect(bodyParsed.language).toBe("fr");
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    const [urlFr, optsFr] = mockFetch.mock.calls[0];
+    expect(urlFr).toContain("/api/social/content/generate");
+    expect(optsFr.method).toBe("POST");
+    expect(optsFr.headers.Authorization).toBe("Bearer test-secret-123");
+    const bodyFr = JSON.parse(optsFr.body);
+    expect(bodyFr.templateSlug).toBe("guide_achat_categorie");
+    expect(bodyFr.language).toBe("fr");
+
+    const [, optsEn] = mockFetch.mock.calls[1];
+    const bodyEn = JSON.parse(optsEn.body);
+    expect(bodyEn.templateSlug).toBe("guide_achat_categorie");
+    expect(bodyEn.language).toBe("en");
   });
 });
