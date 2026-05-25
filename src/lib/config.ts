@@ -66,6 +66,14 @@ export const env = {
   get hasInstagramFurnish(): boolean {
     return !!process.env.INSTAGRAM_FURNISH_ACCOUNT_ID;
   },
+  get unsplashAccessKey(): string {
+    const v = process.env.UNSPLASH_ACCESS_KEY;
+    if (!v) throw new Error("UNSPLASH_ACCESS_KEY not set in .env.local");
+    return v;
+  },
+  get unsplashAppName(): string {
+    return process.env.UNSPLASH_APP_NAME || "aosom-sync";
+  },
   get storeName(): string {
     return process.env.NEXT_PUBLIC_STORE_NAME || "Aosom Sync";
   },
@@ -85,6 +93,15 @@ export const SHOPIFY = {
   API_VERSION: "2025-01",
   PRODUCTS_PER_PAGE: 250,
   ADMIN_URL: "https://admin.shopify.com/store/27u5y2-kp",
+} as const;
+
+// Shopify Online Store blog IDs — verified by user.
+// FR = "Actualités", EN = "Blog".
+export const BLOG = {
+  FR_ID: 90302349417,
+  EN_ID: 91161428073,
+  ADMIN_ARTICLE_URL: (id: string | number) =>
+    `${SHOPIFY.ADMIN_URL}/articles/${id}`,
 } as const;
 
 // ─── Aosom Feed ─────────────────────────────────────────────────────

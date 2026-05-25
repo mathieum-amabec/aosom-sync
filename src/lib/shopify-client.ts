@@ -7,7 +7,7 @@ const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
 const SHOPIFY_MAX_RETRY_AFTER_S = 30;
 
-async function shopifyFetch(
+export async function shopifyFetch(
   endpoint: string,
   options: RequestInit = {},
   retryCount = 0
