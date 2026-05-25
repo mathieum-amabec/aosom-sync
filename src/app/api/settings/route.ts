@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAllSettings, setSetting } from "@/lib/database";
 import { ALLOWED_SETTINGS_KEYS } from "@/lib/config";
-import { getSessionRole } from "@/lib/auth";
+import { isAuthenticated, getSessionRole } from "@/lib/auth";
 
 export async function GET() {
   try {
@@ -14,6 +14,9 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  if (!(await isAuthenticated())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     if ((await getSessionRole()) === "reviewer") {
       return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
