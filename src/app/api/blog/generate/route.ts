@@ -273,9 +273,17 @@ export async function POST(request: Request) {
       imagesUsed: images.map((i) => ({ id: i.id, photographer: i.photographer })),
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    // Avoid echoing full upstream payloads (Shopify/Claude/Unsplash) to the client.
+    // Full upstream error (Shopify/Claude/Unsplash payloads, stack) goes to
+    // server logs only. Client gets a generic message + short error code so
+    // admin UI can map to a friendly string without exposing internals.
     console.error("[/api/blog/generate] failed:", err);
-    return NextResponse.json({ error: "Blog generation failed", detail: message }, { status: 500 });
+    const code = err instanceof Error && /^Shopify/i.test(err.message)
+      ? "shopify_error"
+      : err instanceof Error && /^Unsplash/i.test(err.message)
+        ? "unsplash_error"
+        : err instanceof Error && /Claude/i.test(err.message)
+          ? "claude_error"
+          : "internal_error";
+    return NextResponse.json({ error: "Blog generation failed", code }, { status: 500 });
   }
 }
