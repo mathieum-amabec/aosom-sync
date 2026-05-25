@@ -11,12 +11,15 @@ import { testConnection as testInstagramConnection } from "@/lib/instagram-clien
 import { publishDraftToChannel, publishDraftToChannels } from "@/lib/social-publisher";
 import { triggerNewProduct, triggerPriceDrop, triggerStockHighlight } from "@/jobs/job4-social";
 import { CHANNELS, activeChannels, type ChannelKey } from "@/lib/config";
-import { getSessionRole } from "@/lib/auth";
+import { isAuthenticated, getSessionRole } from "@/lib/auth";
 
 /**
  * GET /api/social — List drafts with optional status filter.
  */
 export async function GET(request: Request) {
+  if (!(await isAuthenticated())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const url = new URL(request.url);
     const status = url.searchParams.get("status") || undefined;
@@ -42,6 +45,9 @@ function assertChannelKey(key: unknown): asserts key is ChannelKey {
  * Actions: generate, approve, reject, schedule, publish, publish-multi, retry-channel, update, delete, test-facebook, test-instagram, test-prompt
  */
 export async function POST(request: Request) {
+  if (!(await isAuthenticated())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const body = await request.json();
     const { action } = body;
