@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.3.0] - 2026-05-26
+
+### Added
+- **Weekly blog auto-cron** (`/api/cron/blog`) — generates 1 FR + 1 EN draft blog
+  article every Tuesday 15:00 UTC (11h00 Montréal). Topic rotation by ISO week
+  number across 10 FR + 10 EN evergreen topics (same index = paired theme).
+  Each article includes 1 featured + 2 inline Unsplash images via the existing
+  `/api/blog/generate` route.
+- **Dual-auth on `/api/blog/generate`** — POST now accepts a `Bearer CRON_SECRET`
+  header in addition to the existing session cookie, so the cron route can
+  invoke it server-to-server. Timing-safe comparison.
+
+### Configuration
+- `vercel.json` cron entry: `{ path: /api/cron/blog, schedule: 0 15 * * 2 }`
+- Function `maxDuration: 180` (two sequential generate calls + 3s spacing)
+
 ## [0.5.1.0] - 2026-05-18
 
 ### Fixed
