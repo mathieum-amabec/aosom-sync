@@ -2,6 +2,35 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.4.0] - 2026-05-27
+
+### Added
+- **Draft scheduling UI** in `/drafts` dashboard. Each `draft` or `approved`
+  draft now exposes a datetime-local input + "Planifier" button. Saving
+  flips the draft to `status='scheduled'` with `scheduled_at` set; the
+  existing `/api/cron/social-scheduled` cron (every 15 min,
+  `processScheduledDrafts`) auto-publishes when the time arrives. Cancel
+  reverts to `status='draft'` and clears the timestamp.
+- New API endpoints `POST` and `DELETE` on `/api/social/drafts/:id/schedule`
+  (session auth, admin only, reviewer role forbidden).
+- `Planifié` and `Échec` options in the status filter; `Nouveau produit`
+  in the trigger-type filter.
+
+### Fixed
+- **Badge contrast** on the drafts dashboard. Status pills moved to higher
+  contrast palettes (amber/emerald/gray) and trigger badges (`Contenu`,
+  `Produit`, `Nouveau produit`) now use color-coded pills instead of
+  faded gray text. Added `publishing` and `failed` status badges to
+  cover the full cron pipeline state machine.
+
+### Notes — pipeline already in place
+- `facebook_drafts.scheduled_at` column already existed (since v0.1.x).
+- `processScheduledDrafts()` in `src/jobs/job4-social.ts` already polls
+  for due `status='scheduled'` rows, claims them atomically via
+  `claimFacebookDraft` (no double-post on parallel cron instances), and
+  publishes through `publishDraftToChannels`. This PR adds only the UI +
+  REST shim to feed that pipeline; no cron or schema migration needed.
+
 ## [0.5.3.0] - 2026-05-26
 
 ### Added

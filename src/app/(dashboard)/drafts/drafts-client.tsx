@@ -11,25 +11,43 @@ const STATUS_LABELS: Record<string, string> = {
   rejected: "Rejeté",
   published: "Publié",
   scheduled: "Planifié",
+  publishing: "En cours…",
+  failed: "Échec",
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  draft: "bg-yellow-100 text-yellow-800",
-  approved: "bg-green-100 text-green-800",
+  draft: "bg-amber-100 text-amber-800",
+  approved: "bg-emerald-100 text-emerald-800",
   rejected: "bg-red-100 text-red-800",
-  published: "bg-blue-100 text-blue-800",
+  published: "bg-gray-100 text-gray-700",
   scheduled: "bg-purple-100 text-purple-800",
+  publishing: "bg-blue-100 text-blue-800",
+  failed: "bg-orange-100 text-orange-800",
 };
 
 const TRIGGER_LABELS: Record<string, string> = {
   stock_highlight: "Produit",
   content_template: "Contenu",
+  new_product: "Nouveau produit",
+};
+
+const TRIGGER_COLORS: Record<string, string> = {
+  stock_highlight: "bg-green-100 text-green-800",
+  content_template: "bg-blue-100 text-blue-800",
+  new_product: "bg-purple-100 text-purple-800",
 };
 
 function formatDate(ts: number) {
   return new Date(ts * 1000).toLocaleDateString("fr-CA", {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
+}
+
+/** Local-tz "YYYY-MM-DDTHH:mm" suitable for <input type="datetime-local"> defaults. */
+function toLocalInputValue(ts: number): string {
+  const d = new Date(ts * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export default function DraftsClient() {
@@ -48,6 +66,9 @@ export default function DraftsClient() {
   const [triggerFilter, setTriggerFilter] = useState("");
   const [hookFilter, setHookFilter] = useState("all");
   const [page, setPage] = useState(1);
+
+  // Schedule UI state
+  const [scheduledAt, setScheduledAt] = useState("");
 
   const fetchDrafts = useCallback(async () => {
     setLoading(true);
@@ -95,6 +116,53 @@ export default function DraftsClient() {
     if (result.error) setError(result.error);
     else { setSelected(null); setRejectNotes(""); setShowRejectInput(false); fetchDrafts(); }
     setActionLoading(false);
+  }
+
+  async function handleSchedule() {
+    if (!selected || !scheduledAt) return;
+    const dt = new Date(scheduledAt);
+    if (isNaN(dt.getTime())) { setError("Date invalide"); return; }
+    const unixTs = Math.floor(dt.getTime() / 1000);
+    if (unixTs <= Math.floor(Date.now() / 1000)) {
+      setError("La date de publication doit être dans le futur"); return;
+    }
+    setError(null);
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/social/drafts/${selected.id}/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scheduled_at: unixTs }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j.error ?? `Échec planification (${res.status})`);
+      } else {
+        setScheduledAt("");
+        setSelected(null);
+        fetchDrafts();
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleCancelSchedule() {
+    if (!selected) return;
+    setError(null);
+    setActionLoading(true);
+    try {
+      const res = await fetch(`/api/social/drafts/${selected.id}/schedule`, { method: "DELETE" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j.error ?? `Échec annulation (${res.status})`);
+      } else {
+        setSelected(null);
+        fetchDrafts();
+      }
+    } finally {
+      setActionLoading(false);
+    }
   }
 
   async function handlePublish() {
@@ -150,8 +218,10 @@ export default function DraftsClient() {
           <option value="">Tous les statuts</option>
           <option value="draft">En attente</option>
           <option value="approved">Approuvé</option>
+          <option value="scheduled">Planifié</option>
           <option value="rejected">Rejeté</option>
           <option value="published">Publié</option>
+          <option value="failed">Échec</option>
         </select>
 
         <select
@@ -162,6 +232,7 @@ export default function DraftsClient() {
           <option value="">Tous les types</option>
           <option value="content_template">Contenu</option>
           <option value="stock_highlight">Produit</option>
+          <option value="new_product">Nouveau produit</option>
         </select>
 
         <select
@@ -198,16 +269,16 @@ export default function DraftsClient() {
           {!loading && data?.items.map((draft) => (
             <button
               key={draft.id}
-              onClick={() => { setSelected(draft); setShowRejectInput(false); setRejectNotes(""); setPendingLanguage(null); }}
+              onClick={() => { setSelected(draft); setShowRejectInput(false); setRejectNotes(""); setPendingLanguage(null); setScheduledAt(""); }}
               className={`w-full text-left px-4 py-3 border-b hover:bg-gray-50 transition-colors ${selected?.id === draft.id ? "bg-blue-50 border-l-2 border-l-blue-500" : ""}`}
             >
               <div className="flex items-center justify-between mb-1">
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[draft.status] ?? "bg-gray-100 text-gray-700"}`}>
                   {STATUS_LABELS[draft.status] ?? draft.status}
                 </span>
-                <span className="text-xs text-gray-400 font-medium">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${TRIGGER_COLORS[draft.triggerType] ?? "bg-gray-100 text-gray-700"}`}>
                   {TRIGGER_LABELS[draft.triggerType] ?? draft.triggerType}
-                  {draft.hookId != null && <span className="ml-1 text-purple-500">◆</span>}
+                  {draft.hookId != null && <span className="ml-1 opacity-70">◆</span>}
                 </span>
               </div>
               <p className="text-sm text-gray-700 line-clamp-2 leading-snug">
@@ -248,7 +319,7 @@ export default function DraftsClient() {
                 <span className={`text-sm px-3 py-1 rounded-full font-medium ${STATUS_COLORS[selected.status] ?? "bg-gray-100 text-gray-700"}`}>
                   {STATUS_LABELS[selected.status] ?? selected.status}
                 </span>
-                <span className="text-sm text-gray-500">
+                <span className={`text-sm px-3 py-1 rounded-full font-medium ${TRIGGER_COLORS[selected.triggerType] ?? "bg-gray-100 text-gray-700"}`}>
                   {TRIGGER_LABELS[selected.triggerType] ?? selected.triggerType}
                 </span>
                 <span className="text-sm text-gray-400">{formatDate(selected.createdAt)}</span>
@@ -386,6 +457,52 @@ export default function DraftsClient() {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Scheduled state — show schedule info + cancel */}
+              {selected.status === "scheduled" && selected.scheduledAt != null && (
+                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 flex items-center justify-between">
+                  <div className="text-sm text-purple-900">
+                    <span className="font-medium">📅 Planifié pour </span>
+                    {formatDate(selected.scheduledAt)}
+                  </div>
+                  <button
+                    onClick={handleCancelSchedule}
+                    disabled={actionLoading}
+                    className="text-sm text-purple-700 hover:text-purple-900 font-medium underline disabled:opacity-50"
+                  >
+                    {actionLoading ? "…" : "Annuler la planification"}
+                  </button>
+                </div>
+              )}
+
+              {/* Schedule input — available for unreviewed or approved drafts */}
+              {(selected.status === "draft" || selected.status === "approved") && !showRejectInput && (
+                <div className="bg-white rounded-lg border shadow-sm p-5">
+                  <h3 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
+                    Planifier la publication
+                  </h3>
+                  <p className="text-xs text-gray-500 mb-3">
+                    La publication automatique se fait sur les canaux configurés (Settings → Auto-post).
+                    Vérification toutes les 15 minutes.
+                  </p>
+                  <div className="flex gap-2 flex-wrap">
+                    <input
+                      type="datetime-local"
+                      value={scheduledAt}
+                      min={toLocalInputValue(Math.floor(Date.now() / 1000) + 60)}
+                      onChange={(e) => setScheduledAt(e.target.value)}
+                      className="flex-1 min-w-[200px] text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                    <button
+                      onClick={handleSchedule}
+                      disabled={actionLoading || !scheduledAt}
+                      className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white text-sm font-medium py-2 px-4 rounded-lg transition-colors"
+                    >
+                      {actionLoading ? "…" : "📅 Planifier"}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
