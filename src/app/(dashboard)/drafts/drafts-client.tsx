@@ -126,6 +126,7 @@ export default function DraftsClient() {
     if (unixTs <= Math.floor(Date.now() / 1000)) {
       setError("La date de publication doit être dans le futur"); return;
     }
+    setError(null);
     setActionLoading(true);
     try {
       const res = await fetch(`/api/social/drafts/${selected.id}/schedule`, {
@@ -148,6 +149,7 @@ export default function DraftsClient() {
 
   async function handleCancelSchedule() {
     if (!selected) return;
+    setError(null);
     setActionLoading(true);
     try {
       const res = await fetch(`/api/social/drafts/${selected.id}/schedule`, { method: "DELETE" });
@@ -267,7 +269,7 @@ export default function DraftsClient() {
           {!loading && data?.items.map((draft) => (
             <button
               key={draft.id}
-              onClick={() => { setSelected(draft); setShowRejectInput(false); setRejectNotes(""); setPendingLanguage(null); }}
+              onClick={() => { setSelected(draft); setShowRejectInput(false); setRejectNotes(""); setPendingLanguage(null); setScheduledAt(""); }}
               className={`w-full text-left px-4 py-3 border-b hover:bg-gray-50 transition-colors ${selected?.id === draft.id ? "bg-blue-50 border-l-2 border-l-blue-500" : ""}`}
             >
               <div className="flex items-center justify-between mb-1">
