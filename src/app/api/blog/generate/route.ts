@@ -13,13 +13,26 @@
  *   { articleId, adminUrl, title, blogId, handle, imagesUsed }
  */
 
+import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
 import { getAnthropicClient } from "@/lib/content-generator";
-import { CLAUDE } from "@/lib/config";
+import { CLAUDE, env } from "@/lib/config";
 import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
 import { createBlogArticle, type BlogLang } from "@/lib/shopify-blog";
 import { checkRateLimit } from "@/lib/rate-limiter";
+
+// Claude article generation (~25-45s) + 3 Unsplash searches + 3 download
+// pings + Shopify article create. Stays under the cron/blog 180s budget
+// while giving Claude room to breathe on cold starts.
+export const maxDuration = 120;
+
+function isCronAuthorized(header: string | null): boolean {
+  if (!header) return false;
+  const expected = `Bearer ${env.cronSecret}`;
+  if (header.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
+}
 
 interface BlogGenerateBody {
   topic: string;
@@ -202,7 +215,8 @@ function injectInlineImages(
 }
 
 export async function POST(request: Request) {
-  if (!(await isAuthenticated())) {
+  const cronOk = isCronAuthorized(request.headers.get("authorization"));
+  if (!cronOk && !(await isAuthenticated())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
