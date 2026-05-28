@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
-import { getContentTemplateBySlug, createFacebookDraft, getAnyProductSku, selectCompatibleHooks } from "@/lib/database";
+import { getContentTemplateBySlug, createFacebookDraft, getAnyProductSku, selectCompatibleHooks, getRecentlyUsedHookIds, recordHookUsage } from "@/lib/database";
 import { mapProductTypeToScope } from "@/lib/hook-selector";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { CLAUDE } from "@/lib/config";
@@ -153,7 +153,14 @@ export async function POST(request: Request) {
     if (template.mode !== "generative_seeded") {
       const scope = mapProductTypeToScope(null);
       const hookLang = isEn ? "EN" : "FR";
-      const hookCandidates = await selectCompatibleHooks(scope, hookLang, []);
+      // Exclude hooks already seeded in the last 7 days so the same hook does not
+      // recur across drafts. Fall back to the full pool if the recent-use window
+      // has consumed every compatible hook.
+      const recentHookIds = await getRecentlyUsedHookIds(7);
+      let hookCandidates = await selectCompatibleHooks(scope, hookLang, [], recentHookIds);
+      if (hookCandidates.length === 0) {
+        hookCandidates = await selectCompatibleHooks(scope, hookLang, []);
+      }
       if (hookCandidates.length === 0) {
         return NextResponse.json(
           { success: false, error: `No ${hookLang} hooks available in pool — cannot generate hook_seeded post` },
@@ -209,6 +216,13 @@ export async function POST(request: Request) {
       postTextEn: isEn ? postText : null,
       hookId: hookChosen?.id ?? null,
     });
+
+    // Record usage so this hook is excluded from the 7-day window and its
+    // used_count/last_used_at counters age it out of future candidate pools.
+    // Without this, the same hook recurs across content_template drafts.
+    if (hookChosen) {
+      await recordHookUsage(hookChosen.id, draftId);
+    }
 
     return NextResponse.json({
       success: true,

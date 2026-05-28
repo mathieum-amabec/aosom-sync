@@ -1325,10 +1325,26 @@ export async function getRecentHookCategoryIds(limit = 5): Promise<number[]> {
   return result.rows.map((r) => Number(rowToObj(r).category_id));
 }
 
+/**
+ * Hook IDs used within the last `days` days (from hook_usage_history).
+ * Used to exclude recently-seeded hooks so the same hook does not appear in
+ * multiple drafts within a short window.
+ */
+export async function getRecentlyUsedHookIds(days = 7): Promise<number[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT DISTINCT hook_id FROM hook_usage_history
+          WHERE used_at >= strftime('%s','now') - ? * 86400`,
+    args: [days],
+  });
+  return result.rows.map((r) => Number(rowToObj(r).hook_id));
+}
+
 export async function selectCompatibleHooks(
   scope: string,
   language: "FR" | "EN",
-  excludeCategoryIds: number[]
+  excludeCategoryIds: number[],
+  excludeHookIds: number[] = []
 ): Promise<ContentHook[]> {
   const db = await ensureSchema();
   const universalPattern = `%"universal"%`;
@@ -1339,6 +1355,11 @@ export async function selectCompatibleHooks(
     const placeholders = excludeCategoryIds.map(() => "?").join(", ");
     sql += ` AND category_id NOT IN (${placeholders})`;
     args.push(...excludeCategoryIds);
+  }
+  if (excludeHookIds.length > 0) {
+    const placeholders = excludeHookIds.map(() => "?").join(", ");
+    sql += ` AND id NOT IN (${placeholders})`;
+    args.push(...excludeHookIds);
   }
   sql += ` ORDER BY used_count ASC, last_used_at ASC NULLS FIRST LIMIT 10`;
   const result = await db.execute({ sql, args });
