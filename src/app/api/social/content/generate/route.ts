@@ -220,8 +220,15 @@ export async function POST(request: Request) {
     // Record usage so this hook is excluded from the 7-day window and its
     // used_count/last_used_at counters age it out of future candidate pools.
     // Without this, the same hook recurs across content_template drafts.
+    // Best-effort: the draft is already persisted, so a bookkeeping failure
+    // must not turn a successful creation into a 500 (which would make the cron
+    // retry and risk a duplicate draft).
     if (hookChosen) {
-      await recordHookUsage(hookChosen.id, draftId);
+      try {
+        await recordHookUsage(hookChosen.id, draftId);
+      } catch (recordErr) {
+        console.error(`[API] recordHookUsage failed for hook ${hookChosen.id} / draft ${draftId}:`, recordErr);
+      }
     }
 
     return NextResponse.json({
