@@ -7,6 +7,20 @@ import { CLAUDE } from "@/lib/config";
 
 const ANTHROPIC_CALL_TIMEOUT_MS = 45_000;
 
+// Clickbait style layer applied to every generated post. Templates may still
+// specify an exact opener/closer (e.g. {{hook}} posts) — those take precedence;
+// otherwise these rules shape the voice toward scroll-stopping engagement.
+const SYSTEM_STYLE_FR = `Tu écris des publications Facebook pour une audience québécoise (25-45 ans). Style obligatoire:
+- Ouvre par une accroche qui arrête le défilement: une QUESTION CHOC ou une STATISTIQUE/AFFIRMATION surprenante. Exemples de ton: "L'erreur #1 que tout le monde fait...", "Pourquoi ton salon paraît petit? (indice: c'est pas la grandeur)".
+- Termine TOUJOURS par une question ouverte qui invite les gens à commenter.
+- Tutoiement (tu/te/ton), jamais de vouvoiement.
+Si le gabarit impose une accroche exacte ou une formule de fin précise, respecte-la; sinon applique ces règles.`;
+
+const SYSTEM_STYLE_EN = `You write Facebook posts for an English-speaking audience (ages 25-45). Required style:
+- Open with a scroll-stopping hook: a SURPRISING QUESTION or a COUNTERINTUITIVE STATEMENT. Tone examples: "Everyone arranges furniture wrong (here is why)", "Hot take: bigger furniture = smaller room".
+- ALWAYS end with an open question inviting people to comment.
+If the template imposes an exact hook or closing line, honor it; otherwise apply these rules.`;
+
 const CATEGORIES_FR = [
   "mobilier de salon",
   "mobilier de chambre à coucher",
@@ -76,12 +90,13 @@ function interpolateTemplate(template: string, vars: Record<string, string>): st
   return result;
 }
 
-async function generatePostText(prompt: string): Promise<string> {
+async function generatePostText(prompt: string, isEn: boolean): Promise<string> {
   const client = getAnthropicClient();
   const message = await client.messages.create(
     {
       model: CLAUDE.MODEL,
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
+      system: isEn ? SYSTEM_STYLE_EN : SYSTEM_STYLE_FR,
       messages: [{ role: "user", content: prompt }],
     },
     { signal: AbortSignal.timeout(ANTHROPIC_CALL_TIMEOUT_MS) },
@@ -184,7 +199,7 @@ export async function POST(request: Request) {
     const pattern = isEn ? template.prompt_pattern_en : template.prompt_pattern_fr;
     const finalPrompt = interpolateTemplate(pattern, vars);
 
-    const postText = await generatePostText(finalPrompt);
+    const postText = await generatePostText(finalPrompt, isEn);
     if (!postText) {
       return NextResponse.json(
         { success: false, error: "Claude returned an empty response" },
