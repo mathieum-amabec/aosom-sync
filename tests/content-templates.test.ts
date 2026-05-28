@@ -79,7 +79,7 @@ describe("content_templates — megastore migration", () => {
     expect(colsAfter.rows.filter((r) => r.name === "scopes")).toHaveLength(1);
   });
 
-  it("seeds exactly 12 megastore templates", async () => {
+  it("seeds every megastore template (no slug collisions drop rows)", async () => {
     await createTemplatesTable(db, true);
     await db.batch(
       MEGASTORE_TEMPLATES.map((t) => ({
@@ -95,10 +95,10 @@ describe("content_templates — megastore migration", () => {
       "write"
     );
     const result = await db.execute("SELECT COUNT(*) as cnt FROM content_templates");
-    expect(Number(result.rows[0].cnt)).toBe(12);
+    expect(Number(result.rows[0].cnt)).toBe(MEGASTORE_TEMPLATES.length);
   });
 
-  it("all 12 templates have new megastore slugs (no old TODO slugs)", async () => {
+  it("all templates have new megastore slugs (no old TODO slugs)", async () => {
     await createTemplatesTable(db, true);
     await db.batch(
       MEGASTORE_TEMPLATES.map((t) => ({
@@ -123,7 +123,9 @@ describe("content_templates — megastore migration", () => {
     const newSlugs = ["conseil_deco_piece", "guide_achat_categorie", "astuces_entretien",
                       "inspiration_ambiance_maison", "inspiration_vie_outdoor", "inspiration_animaux",
                       "inspiration_famille", "sondage_debat", "devine_quizz",
-                      "aide_choisir", "saisonnier_outdoor", "saisonnier_indoor"];
+                      "aide_choisir", "saisonnier_outdoor", "saisonnier_indoor",
+                      "clickbait_erreur_meubles", "clickbait_canape_personnalite", "clickbait_regle_design_pros",
+                      "clickbait_salon_desordre", "clickbait_meuble_essentiel", "clickbait_hot_take"];
     for (const slug of newSlugs) {
       const r = await db.execute({ sql: `SELECT id FROM content_templates WHERE slug = ?`, args: [slug] });
       expect(r.rows).toHaveLength(1);
@@ -150,10 +152,13 @@ describe("content_templates — megastore migration", () => {
     `);
     const byType: Record<string, number> = {};
     counts.rows.forEach((r) => { byType[r.content_type as string] = Number(r.cnt); });
-    expect(byType["education"]).toBe(3);
-    expect(byType["inspiration"]).toBe(4);
-    expect(byType["engagement"]).toBe(3);
-    expect(byType["seasonal"]).toBe(2);
+    // Derive expected distribution from the seed so the test tracks template
+    // additions (e.g. clickbait set) instead of hardcoding stale counts.
+    const expected: Record<string, number> = {};
+    for (const t of MEGASTORE_TEMPLATES) expected[t.content_type] = (expected[t.content_type] ?? 0) + 1;
+    expect(byType).toEqual(expected);
+    // Only the four validated megastore categories may appear
+    expect(Object.keys(byType).sort()).toEqual(["education", "engagement", "inspiration", "seasonal"]);
     // Old types must not exist
     expect(byType["informative"]).toBeUndefined();
     expect(byType["entertaining"]).toBeUndefined();
@@ -260,9 +265,9 @@ describe("content_templates — megastore migration", () => {
     // Custom edit must survive — migration did NOT run again
     const r = await db.execute({ sql: `SELECT prompt_pattern_fr FROM content_templates WHERE slug = 'conseil_deco_piece'`, args: [] });
     expect(r.rows[0].prompt_pattern_fr).toBe("custom_edited");
-    // And we still have 12 rows
+    // And we still have all seeded rows
     const cnt = await db.execute("SELECT COUNT(*) as cnt FROM content_templates");
-    expect(Number(cnt.rows[0].cnt)).toBe(12);
+    expect(Number(cnt.rows[0].cnt)).toBe(MEGASTORE_TEMPLATES.length);
   });
 });
 
