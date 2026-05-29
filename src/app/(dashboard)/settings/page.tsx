@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 interface Settings {
   [key: string]: string;
@@ -91,6 +91,119 @@ const SECTIONS: { title: string; fields: FieldDef[] }[] = [
 ];
 
 const PROMPT_VARS = "{product_name}, {price}, {old_price}, {new_price}, {qty}, {hashtags}, {store_name}";
+
+interface PixelState {
+  installed: boolean;
+  pixelConfigured: boolean;
+  scriptTagId: number | null;
+}
+
+function MetaPixelSection() {
+  const [status, setStatus] = useState<PixelState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/pixel/install");
+      const d = await res.json();
+      if (d.success) {
+        setStatus({ installed: d.installed, pixelConfigured: d.pixelConfigured, scriptTagId: d.scriptTagId });
+      }
+    } catch {
+      /* leave status null — render shows "unknown" */
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function act(method: "POST" | "DELETE") {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/pixel/install", { method });
+      const d = await res.json();
+      if (d.success) {
+        setMsg({ ok: true, text: method === "POST" ? "Pixel installé sur Shopify." : "Pixel désinstallé." });
+      } else {
+        setMsg({ ok: false, text: d.error || "Erreur" });
+      }
+      await load();
+    } catch (err) {
+      setMsg({ ok: false, text: String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const installed = status?.installed === true;
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 md:p-5">
+      <h3 className="text-white font-semibold mb-4">Meta Pixel</h3>
+
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-sm text-gray-400">Statut :</span>
+        {status === null ? (
+          <span className="text-sm text-gray-500">…</span>
+        ) : installed ? (
+          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-900/50 text-emerald-300 border border-emerald-800">
+            Installé{status.scriptTagId ? ` (ScriptTag #${status.scriptTagId})` : ""}
+          </span>
+        ) : (
+          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-800 text-gray-400 border border-gray-700">
+            Non installé
+          </span>
+        )}
+      </div>
+
+      {status && !status.pixelConfigured && (
+        <p className="text-xs text-amber-400 mb-3">
+          ⚠ <code className="font-mono">NEXT_PUBLIC_META_PIXEL_ID</code> n&apos;est pas défini — le script injecté sera inerte
+          (no-op) jusqu&apos;à ce que tu l&apos;ajoutes dans les env vars Vercel.
+        </p>
+      )}
+
+      <div className="flex items-center gap-3">
+        {!installed ? (
+          <button
+            onClick={() => act("POST")}
+            disabled={busy}
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 disabled:opacity-50"
+          >
+            {busy ? "…" : "Installer"}
+          </button>
+        ) : (
+          <>
+            <button
+              onClick={() => act("POST")}
+              disabled={busy}
+              className="px-3 py-1.5 bg-gray-800 text-gray-300 text-xs rounded-lg hover:bg-gray-700 border border-gray-700 disabled:opacity-50"
+            >
+              {busy ? "…" : "Réinstaller"}
+            </button>
+            <button
+              onClick={() => act("DELETE")}
+              disabled={busy}
+              className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-500 disabled:opacity-50"
+            >
+              {busy ? "…" : "Désinstaller"}
+            </button>
+          </>
+        )}
+        {msg && (
+          <span className={`text-xs ${msg.ok ? "text-green-400" : "text-red-400"}`}>{msg.text}</span>
+        )}
+      </div>
+
+      <p className="text-xs text-gray-600 mt-3">
+        Injecte le Meta Pixel sur le storefront Shopify via la ScriptTag API. Ajoute{" "}
+        <code className="font-mono">NEXT_PUBLIC_META_PIXEL_ID</code> dans les env vars Vercel
+        (Meta Business Suite → Events Manager), puis installe.
+      </p>
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>({});
@@ -419,6 +532,8 @@ export default function SettingsPage() {
             </div>
           </div>
         ))}
+
+        <MetaPixelSection />
       </div>
     </div>
   );

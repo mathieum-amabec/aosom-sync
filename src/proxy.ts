@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/auth";
 import { AUTH } from "@/lib/config";
 
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content"];
+// "/api/pixel/script" is public so Shopify's storefront ScriptTag can fetch it
+// (no session). "/api/pixel/install" is intentionally NOT public — it stays
+// session-gated for the dashboard.
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/pixel/script"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(
