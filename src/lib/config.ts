@@ -77,6 +77,13 @@ export const env = {
   get storeName(): string {
     return process.env.NEXT_PUBLIC_STORE_NAME || "Aosom Sync";
   },
+  /** Meta (Facebook) Pixel ID. Optional — when unset, the injected pixel script is a no-op. */
+  get metaPixelId(): string | undefined {
+    return process.env.NEXT_PUBLIC_META_PIXEL_ID || undefined;
+  },
+  get hasMetaPixel(): boolean {
+    return !!process.env.NEXT_PUBLIC_META_PIXEL_ID;
+  },
   get isProduction(): boolean {
     return process.env.NODE_ENV === "production";
   },
