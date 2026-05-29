@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.6.0] - 2026-05-28
+
+### Added
+- **Meta Pixel integration.** Installs the Meta (Facebook) Pixel on the Shopify
+  storefront via the ScriptTag API, toggled by `NEXT_PUBLIC_META_PIXEL_ID`.
+  - `src/lib/meta-pixel.ts`: `installPixel` / `removePixel` / `getPixelStatus`
+    (idempotent install — removes existing pixel ScriptTags first).
+  - `GET /api/pixel/script` (public): emits the pixel JS at request time from the
+    env var (no-op when unset); fires PageView always plus ViewContent, AddToCart,
+    and Purchase from guarded Shopify storefront globals. Pixel ID is validated
+    `^[0-9]+$` before interpolation.
+  - `/api/pixel/install`: GET status, POST install, DELETE uninstall; script src
+    derived from the request origin; session-gated by `proxy.ts`.
+  - Settings → Meta Pixel section: status, Install/Reinstall/Uninstall, env warning.
+  - `proxy.ts` allowlists `/api/pixel/script` (Shopify fetches it without a session).
+  - Caveat: ScriptTags don't run on the new Checkout Extensibility checkout, so
+    Purchase tracking relies on the legacy order-status page.
+
 ## [0.5.5.0] - 2026-05-28
 
 ### Fixed
