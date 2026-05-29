@@ -2,6 +2,38 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.5.0] - 2026-05-28
+
+### Fixed
+- **Hook deduplication — 7-day window.** The `content_template` generate route
+  selected a hook but never recorded its use and passed an empty exclusion list,
+  so the same hook resurfaced across drafts (both within the content path and via
+  the product path, which judges eligibility by `used_count`/`last_used_at`). Now
+  excludes hooks seeded in the last 7 days (`getRecentlyUsedHookIds`, with a
+  fallback to the full pool when the window exhausts the compatible set) and
+  records usage after the draft is created. Recording is best-effort so a
+  bookkeeping failure can't turn a created draft into a 500 + retry duplicate.
+
+### Added
+- **Clickbait system prompts + 6 new templates.** Added per-language system
+  prompts to the content generate call (none existed): FR opens on a shock
+  question / surprising stat and always closes on an open comment-inviting
+  question; EN uses a surprising question / counterintuitive statement. Templates
+  with an exact hook/closer keep precedence. Added 6 fully-bilingual clickbait
+  templates (`clickbait_erreur_meubles`, `clickbait_canape_personnalite`,
+  `clickbait_regle_design_pros`, `clickbait_salon_desordre`,
+  `clickbait_meuble_essentiel`, `clickbait_hot_take`), seeded via `INSERT OR
+  IGNORE` so already-seeded production DBs pick them up.
+- **Unsplash images on content_template drafts.** Each `content_template` draft
+  is now illustrated with a themed Unsplash photo: the template theme (scopes +
+  interpolated vars) maps to an Unsplash query, one landscape image is fetched,
+  and `triggerDownload` is called per Unsplash API guidelines. Three new
+  `facebook_drafts` columns (`unsplash_image_url`, `unsplash_photographer`,
+  `unsplash_photographer_url`) store the image + attribution; the drafts preview
+  shows a thumbnail and photographer credit. The image flows into the existing
+  multi-photo publish path, ahead of the incidental product image. The fetch is
+  best-effort — a failure never blocks draft creation.
+
 ## [0.5.4.0] - 2026-05-27
 
 ### Added
