@@ -407,6 +407,29 @@ async function _initSchemaImpl(): Promise<void> {
     );
   }
 
+  // Idempotent: ensure clickbait templates exist even on already-seeded DBs.
+  // The megastore seed above runs once (guarded by the conseil_deco_piece slug),
+  // so new templates added later need their own INSERT OR IGNORE pass keyed on
+  // the unique slug. Safe to run on every cold start.
+  {
+    const { CLICKBAIT_TEMPLATES } = await import("@/lib/seed/content-templates-megastore");
+    await db.batch(
+      CLICKBAIT_TEMPLATES.map((t) => ({
+        sql: `INSERT OR IGNORE INTO content_templates
+              (slug, content_type, display_name_fr, display_name_en,
+               prompt_pattern_fr, prompt_pattern_en, image_strategy,
+               active, frequency_per_month, scopes, mode)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          t.slug, t.content_type, t.display_name_fr, t.display_name_en,
+          t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy,
+          t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes), t.mode,
+        ],
+      })),
+      "write"
+    );
+  }
+
   // Enable WAL and foreign keys for local SQLite
   if (!process.env.TURSO_DATABASE_URL) {
     await db.execute("PRAGMA journal_mode = WAL");
