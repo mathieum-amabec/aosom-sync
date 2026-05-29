@@ -411,6 +411,29 @@ async function _initSchemaImpl(): Promise<void> {
     );
   }
 
+  // Idempotent: ensure clickbait templates exist even on already-seeded DBs.
+  // The megastore seed above runs once (guarded by the conseil_deco_piece slug),
+  // so new templates added later need their own INSERT OR IGNORE pass keyed on
+  // the unique slug. Safe to run on every cold start.
+  {
+    const { CLICKBAIT_TEMPLATES } = await import("@/lib/seed/content-templates-megastore");
+    await db.batch(
+      CLICKBAIT_TEMPLATES.map((t) => ({
+        sql: `INSERT OR IGNORE INTO content_templates
+              (slug, content_type, display_name_fr, display_name_en,
+               prompt_pattern_fr, prompt_pattern_en, image_strategy,
+               active, frequency_per_month, scopes, mode)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          t.slug, t.content_type, t.display_name_fr, t.display_name_en,
+          t.prompt_pattern_fr, t.prompt_pattern_en, t.image_strategy,
+          t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes), t.mode,
+        ],
+      })),
+      "write"
+    );
+  }
+
   // Enable WAL and foreign keys for local SQLite
   if (!process.env.TURSO_DATABASE_URL) {
     await db.execute("PRAGMA journal_mode = WAL");
@@ -1333,10 +1356,26 @@ export async function getRecentHookCategoryIds(limit = 5): Promise<number[]> {
   return result.rows.map((r) => Number(rowToObj(r).category_id));
 }
 
+/**
+ * Hook IDs used within the last `days` days (from hook_usage_history).
+ * Used to exclude recently-seeded hooks so the same hook does not appear in
+ * multiple drafts within a short window.
+ */
+export async function getRecentlyUsedHookIds(days = 7): Promise<number[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT DISTINCT hook_id FROM hook_usage_history
+          WHERE used_at >= strftime('%s','now') - ? * 86400`,
+    args: [days],
+  });
+  return result.rows.map((r) => Number(rowToObj(r).hook_id));
+}
+
 export async function selectCompatibleHooks(
   scope: string,
   language: "FR" | "EN",
-  excludeCategoryIds: number[]
+  excludeCategoryIds: number[],
+  excludeHookIds: number[] = []
 ): Promise<ContentHook[]> {
   const db = await ensureSchema();
   const universalPattern = `%"universal"%`;
@@ -1347,6 +1386,11 @@ export async function selectCompatibleHooks(
     const placeholders = excludeCategoryIds.map(() => "?").join(", ");
     sql += ` AND category_id NOT IN (${placeholders})`;
     args.push(...excludeCategoryIds);
+  }
+  if (excludeHookIds.length > 0) {
+    const placeholders = excludeHookIds.map(() => "?").join(", ");
+    sql += ` AND id NOT IN (${placeholders})`;
+    args.push(...excludeHookIds);
   }
   sql += ` ORDER BY used_count ASC, last_used_at ASC NULLS FIRST LIMIT 10`;
   const result = await db.execute({ sql, args });

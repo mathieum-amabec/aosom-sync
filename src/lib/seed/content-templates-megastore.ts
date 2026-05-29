@@ -24,6 +24,242 @@ export interface ContentTemplateSeed {
   scopes: string[];
 }
 
+/**
+ * Clickbait templates (2026-05-28) — punchy scroll-stopping openers and an
+ * open question close. Fully bilingual (no TODO_EN). Inserted idempotently in
+ * initSchema via INSERT OR IGNORE so already-seeded production DBs pick them up.
+ */
+export const CLICKBAIT_TEMPLATES: ContentTemplateSeed[] = [
+  {
+    slug: "clickbait_erreur_meubles",
+    content_type: "education",
+    mode: "generative_seeded",
+    display_name_fr: "Clickbait — L'erreur #1 meubles",
+    display_name_en: "Clickbait — #1 furniture mistake",
+    scopes: ["mobilier_indoor"],
+    frequency_per_month: 2,
+    image_strategy: "lifestyle",
+    active: true,
+    prompt_pattern_fr: `Tu es le responsable contenu d'Ameublo Direct, boutique québécoise de meubles et décoration. Ton audience: 25-45 ans au Québec.
+
+Ouvre par une accroche choc que tu génères toi-même — une question percutante OU une affirmation surprenante qui arrête le défilement. Inspire-toi du ton: "L'erreur #1 que tout le monde fait en achetant un meuble..." Ne révèle pas tout dans l'accroche.
+
+Génère un post Facebook qui expose UNE erreur fréquente quand les gens achètent ou placent un meuble, puis donne la solution concrète.
+
+Contraintes:
+- Tutoiement OBLIGATOIRE (tu/te/ton) dans tout le post — corps ET CTA. Jamais de vous/votre/vos.
+- Une seule erreur, une seule solution claire et actionnable
+- Mentionne naturellement qu'Ameublo Direct aide à bien choisir (sans vente forcée)
+- Termine par une question ouverte qui invite les commentaires: "Tu as déjà fait cette erreur? Raconte 👇"
+- 90-120 mots, français québécois, 2-3 emojis, aucun prix, aucun lien
+
+Retourne uniquement le post, prêt à publier.`,
+    prompt_pattern_en: `You are the content lead for Ameublo Direct, a Quebec furniture and home decor store. Audience: 25-45 year olds.
+
+Open with a scroll-stopping hook you generate yourself — a punchy question OR a surprising statement. Tone reference: "Everyone makes this #1 mistake when buying furniture..." Do not reveal everything in the hook.
+
+Write a Facebook post that exposes ONE common mistake people make when buying or placing furniture, then give the concrete fix.
+
+Constraints:
+- One mistake, one clear actionable fix
+- Naturally mention Ameublo Direct helps you choose right (no hard sell)
+- End with an open question inviting comments: "Have you made this mistake? Tell us 👇"
+- 90-120 words, 2-3 emojis, no prices, no links
+
+Return only the post, ready to publish.`,
+  },
+  {
+    slug: "clickbait_canape_personnalite",
+    content_type: "engagement",
+    mode: "generative_seeded",
+    display_name_fr: "Clickbait — Ton canapé révèle ta personnalité",
+    display_name_en: "Clickbait — Your sofa personality",
+    scopes: ["mobilier_indoor"],
+    frequency_per_month: 2,
+    image_strategy: "lifestyle",
+    active: true,
+    prompt_pattern_fr: `Tu es le responsable contenu d'Ameublo Direct, boutique québécoise de meubles et décoration. Ton audience: 25-45 ans au Québec.
+
+Ouvre par une accroche choc que tu génères toi-même — une question surprenante du genre: "Ton canapé en dit plus long sur toi que tu penses." Intrigante, légère.
+
+Génère un post Facebook ludique qui associe 3-4 styles de canapé à un trait de personnalité. Pas un test sérieux — c'est pour s'amuser et faire réagir.
+
+Contraintes:
+- Tutoiement OBLIGATOIRE (tu/te/ton) dans tout le post — corps ET CTA. Jamais de vous/votre/vos.
+- 3-4 associations style → personnalité, courtes et drôles
+- Mentionne qu'Ameublo Direct a tous ces styles (ton naturel)
+- Termine par une question ouverte: "C'est quoi ton canapé — et est-ce que ça te ressemble? 👇"
+- 80-110 mots, français québécois, 2-3 emojis
+
+Retourne uniquement le post, prêt à publier.`,
+    prompt_pattern_en: `You are the content lead for Ameublo Direct, a Quebec furniture and home decor store. Audience: 25-45 year olds.
+
+Open with a scroll-stopping hook you generate yourself — a surprising question like: "Your sofa says more about you than you think." Intriguing, playful.
+
+Write a fun Facebook post that pairs 3-4 sofa styles with a personality trait. Not a serious test — it is for fun and reactions.
+
+Constraints:
+- 3-4 style → personality pairings, short and funny
+- Mention Ameublo Direct carries all these styles (natural tone)
+- End with an open question: "What is your sofa — and does it match you? 👇"
+- 80-110 words, 2-3 emojis
+
+Return only the post, ready to publish.`,
+  },
+  {
+    slug: "clickbait_regle_design_pros",
+    content_type: "education",
+    mode: "generative_seeded",
+    display_name_fr: "Clickbait — La règle des designers pros",
+    display_name_en: "Clickbait — The pro designer rule",
+    scopes: ["mobilier_indoor", "bedroom_decor"],
+    frequency_per_month: 2,
+    image_strategy: "text_overlay",
+    active: true,
+    prompt_pattern_fr: `Tu es le responsable contenu d'Ameublo Direct, boutique québécoise de meubles et décoration. Ton audience: 25-45 ans au Québec.
+
+Ouvre par une accroche choc que tu génères toi-même — une affirmation surprenante du genre: "La règle que les designers pros utilisent et que presque personne ne connaît..." Crée de la curiosité.
+
+Génère un post Facebook qui révèle UNE règle de design d'intérieur que les pros appliquent (ex: la règle 60-30-10 des couleurs, la hauteur des cadres à hauteur des yeux, le bon format de tapis). Explique-la simplement.
+
+Contraintes:
+- Tutoiement OBLIGATOIRE (tu/te/ton) dans tout le post — corps ET CTA. Jamais de vous/votre/vos.
+- Une seule règle, expliquée en termes simples avec un exemple concret
+- Mentionne naturellement qu'Ameublo Direct a ce qu'il faut pour l'appliquer
+- Termine par une question ouverte: "Tu connaissais cette règle? 👇"
+- 90-120 mots, français québécois, 2-3 emojis
+
+Retourne uniquement le post, prêt à publier.`,
+    prompt_pattern_en: `You are the content lead for Ameublo Direct, a Quebec furniture and home decor store. Audience: 25-45 year olds.
+
+Open with a scroll-stopping hook you generate yourself — a surprising statement like: "The rule pro designers use that almost no one knows..." Build curiosity.
+
+Write a Facebook post that reveals ONE interior design rule the pros apply (e.g., the 60-30-10 color rule, hanging art at eye level, the right rug size). Explain it simply.
+
+Constraints:
+- One rule, explained in plain terms with a concrete example
+- Naturally mention Ameublo Direct has what you need to apply it
+- End with an open question: "Did you know this rule? 👇"
+- 90-120 words, 2-3 emojis
+
+Return only the post, ready to publish.`,
+  },
+  {
+    slug: "clickbait_salon_desordre",
+    content_type: "education",
+    mode: "generative_seeded",
+    display_name_fr: "Clickbait — Pourquoi ton salon paraît petit",
+    display_name_en: "Clickbait — Why your room looks small",
+    scopes: ["mobilier_indoor", "storage_kitchen"],
+    frequency_per_month: 2,
+    image_strategy: "lifestyle",
+    active: true,
+    prompt_pattern_fr: `Tu es le responsable contenu d'Ameublo Direct, boutique québécoise de meubles et décoration. Ton audience: 25-45 ans au Québec.
+
+Ouvre par cette accroche choc (ou une variante très proche): "Pourquoi ton salon paraît petit? (indice: c'est pas la grandeur)". Intrigue immédiate.
+
+Génère un post Facebook qui explique pourquoi une pièce paraît plus petite qu'elle ne l'est (désordre visuel, mauvais agencement, meubles trop massifs, manque de rangement) et donne 1-2 solutions concrètes.
+
+Contraintes:
+- Tutoiement OBLIGATOIRE (tu/te/ton) dans tout le post — corps ET CTA. Jamais de vous/votre/vos.
+- Cause + solution concrète, pas de généralités
+- Mentionne naturellement que le bon rangement/mobilier d'Ameublo Direct aide
+- Termine par une question ouverte: "C'est quoi le coin le plus encombré chez toi? 👇"
+- 90-120 mots, français québécois, 2-3 emojis
+
+Retourne uniquement le post, prêt à publier.`,
+    prompt_pattern_en: `You are the content lead for Ameublo Direct, a Quebec furniture and home decor store. Audience: 25-45 year olds.
+
+Open with this scroll-stopping hook (or a very close variant): "Hot take: your room looks small because of clutter, not size." Instant intrigue.
+
+Write a Facebook post that explains why a room looks smaller than it is (visual clutter, poor layout, oversized furniture, lack of storage) and give 1-2 concrete fixes.
+
+Constraints:
+- Cause + concrete fix, no generalities
+- Naturally mention the right storage/furniture from Ameublo Direct helps
+- End with an open question: "What is the most cluttered corner in your home? 👇"
+- 90-120 words, 2-3 emojis
+
+Return only the post, ready to publish.`,
+  },
+  {
+    slug: "clickbait_meuble_essentiel",
+    content_type: "inspiration",
+    mode: "generative_seeded",
+    display_name_fr: "Clickbait — Le meuble que tout le monde devrait avoir",
+    display_name_en: "Clickbait — The one piece everyone needs",
+    scopes: ["mobilier_indoor", "storage_kitchen"],
+    frequency_per_month: 2,
+    image_strategy: "random_product",
+    active: true,
+    prompt_pattern_fr: `Tu es le responsable contenu d'Ameublo Direct, boutique québécoise de meubles et décoration. Ton audience: 25-45 ans au Québec.
+
+Ouvre par une accroche choc que tu génères toi-même — du genre: "Le meuble que tout le monde devrait avoir (et que 90% oublient)..." Crée de l'attente.
+
+Génère un post Facebook qui défend UN meuble polyvalent sous-estimé (ex: pouf de rangement, console d'entrée, banc multifonction) et explique pourquoi il change la vie au quotidien.
+
+Contraintes:
+- Tutoiement OBLIGATOIRE (tu/te/ton) dans tout le post — corps ET CTA. Jamais de vous/votre/vos.
+- 2-3 usages concrets qui justifient l'achat
+- Mentionne qu'Ameublo Direct en propose (ton naturel)
+- Termine par une question ouverte: "Tu en as un chez toi? Sinon, ça te tente? 👇"
+- 90-120 mots, français québécois, 2-3 emojis
+
+Retourne uniquement le post, prêt à publier.`,
+    prompt_pattern_en: `You are the content lead for Ameublo Direct, a Quebec furniture and home decor store. Audience: 25-45 year olds.
+
+Open with a scroll-stopping hook you generate yourself — something like: "The one piece of furniture everyone needs (and most forget)..." Build anticipation.
+
+Write a Facebook post that champions ONE underrated versatile piece (e.g., storage ottoman, entryway console, multifunction bench) and explain why it changes daily life.
+
+Constraints:
+- 2-3 concrete uses that justify buying it
+- Mention Ameublo Direct carries it (natural tone)
+- End with an open question: "Do you own one? If not, are you tempted? 👇"
+- 90-120 words, 2-3 emojis
+
+Return only the post, ready to publish.`,
+  },
+  {
+    slug: "clickbait_hot_take",
+    content_type: "engagement",
+    mode: "generative_seeded",
+    display_name_fr: "Clickbait — Hot take déco",
+    display_name_en: "Clickbait — Furniture hot take",
+    scopes: ["universal"],
+    frequency_per_month: 2,
+    image_strategy: "none",
+    active: true,
+    prompt_pattern_fr: `Tu es le responsable contenu d'Ameublo Direct, boutique québécoise de meubles et décoration. Ton audience: 25-45 ans au Québec.
+
+Ouvre par une accroche choc que tu génères toi-même — une opinion tranchée et débattable du genre: "Hot take déco: un gros canapé rend ton salon plus petit." Assume l'opinion.
+
+Génère un post Facebook qui défend une opinion déco/aménagement clivante (mais défendable), avec 1-2 arguments. Le but est de faire débattre dans les commentaires.
+
+Contraintes:
+- Tutoiement OBLIGATOIRE (tu/te/ton) dans tout le post — corps ET CTA. Jamais de vous/votre/vos.
+- Opinion claire + 1-2 arguments courts
+- PAS de vente forcée — l'engagement seul suffit
+- Termine par une question ouverte: "T'es d'accord ou pas du tout? Dis-le 👇"
+- 60-90 mots, français québécois, 2-3 emojis
+
+Retourne uniquement le post, prêt à publier.`,
+    prompt_pattern_en: `You are the content lead for Ameublo Direct, a Quebec furniture and home decor store. Audience: 25-45 year olds.
+
+Open with a scroll-stopping hook you generate yourself — a bold debatable opinion like: "Hot take: bigger furniture = smaller room." Own the opinion.
+
+Write a Facebook post that defends one divisive (but defensible) decor/layout opinion, with 1-2 arguments. The goal is to spark debate in the comments.
+
+Constraints:
+- Clear opinion + 1-2 short arguments
+- No hard sell — engagement alone is the goal
+- End with an open question: "Agree or totally disagree? Tell us 👇"
+- 60-90 words, 2-3 emojis
+
+Return only the post, ready to publish.`,
+  },
+];
+
 export const MEGASTORE_TEMPLATES: ContentTemplateSeed[] = [
   // ─── EDUCATION (3) ──────────────────────────────────────────────────────────
   {
@@ -363,4 +599,7 @@ Contraintes:
 Retourne uniquement le post, prêt à publier.`,
     prompt_pattern_en: "TODO_EN",
   },
+
+  // ─── CLICKBAIT (6) ──────────────────────────────────────────────────────────
+  ...CLICKBAIT_TEMPLATES,
 ];
