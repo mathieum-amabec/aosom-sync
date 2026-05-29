@@ -237,6 +237,10 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("reviewed_by")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN reviewed_by TEXT`);
   if (!cols.has("review_notes")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN review_notes TEXT`);
   if (!cols.has("publish_error")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN publish_error TEXT`);
+  // Unsplash image + attribution for content_template drafts (no product image of their own)
+  if (!cols.has("unsplash_image_url")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN unsplash_image_url TEXT`);
+  if (!cols.has("unsplash_photographer")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN unsplash_photographer TEXT`);
+  if (!cols.has("unsplash_photographer_url")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN unsplash_photographer_url TEXT`);
 
   // checkpoint_data on sync_runs: stores per-chunk progress for Phase 2 chunked push
   // timing_ms on sync_runs: per-phase duration map written incrementally (survives SIGKILL diagnosis)
@@ -1224,6 +1228,10 @@ export interface FacebookDraft {
   approvedAt: number | null;
   reviewedBy: string | null;
   reviewNotes: string | null;
+  /** Unsplash image + attribution. Populated for content_template drafts; null otherwise. */
+  unsplashImageUrl: string | null;
+  unsplashPhotographer: string | null;
+  unsplashPhotographerUrl: string | null;
   productName?: string; productImage?: string;
 }
 
@@ -1463,6 +1471,9 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
     approvedAt: row.approved_at != null ? Number(row.approved_at) : null,
     reviewedBy: (row.reviewed_by as string) || null,
     reviewNotes: (row.review_notes as string) || null,
+    unsplashImageUrl: (row.unsplash_image_url as string) || null,
+    unsplashPhotographer: (row.unsplash_photographer as string) || null,
+    unsplashPhotographerUrl: (row.unsplash_photographer_url as string) || null,
     productName: (row.name as string) || undefined,
     productImage: (row.image1 as string) || undefined,
   };
@@ -1479,14 +1490,18 @@ export async function createFacebookDraft(draft: {
   oldPrice?: number | null; newPrice?: number | null;
   /** FK to content_hooks — which hook seeded this draft's caption. */
   hookId?: number | null;
+  /** Unsplash image + attribution (content_template drafts have no product image of their own). */
+  unsplashImageUrl?: string | null;
+  unsplashPhotographer?: string | null;
+  unsplashPhotographerUrl?: string | null;
 }): Promise<number> {
   const db = await ensureSchema();
   const urls = (draft.imageUrls ?? []).filter((u) => typeof u === "string" && u.length > 0);
   const primary = draft.imageUrl ?? urls[0] ?? null;
   const urlsJson = urls.length > 0 ? JSON.stringify(urls) : null;
   const result = await db.execute({
-    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, post_text_en, image_path, image_url, image_urls, old_price, new_price, hook_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.postTextEn ?? null, draft.imagePath || null, primary, urlsJson, draft.oldPrice ?? null, draft.newPrice ?? null, draft.hookId ?? null],
+    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, post_text_en, image_path, image_url, image_urls, old_price, new_price, hook_id, unsplash_image_url, unsplash_photographer, unsplash_photographer_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.postTextEn ?? null, draft.imagePath || null, primary, urlsJson, draft.oldPrice ?? null, draft.newPrice ?? null, draft.hookId ?? null, draft.unsplashImageUrl ?? null, draft.unsplashPhotographer ?? null, draft.unsplashPhotographerUrl ?? null],
   });
   return Number(result.lastInsertRowid);
 }

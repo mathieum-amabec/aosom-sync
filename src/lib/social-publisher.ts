@@ -33,7 +33,8 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
   // Pick public image URLs. Both platforms require at least one (Facebook via Graph API
   // `url` or `attached_media`, Instagram via media container).
   // Priority: draft.imageUrls (v0.1.8.0+ multi-photo) → [draft.imageUrl] (v0.1.5.0 snapshot)
-  //   → [draft.productImage] (JOIN fallback for legacy drafts).
+  //   → [draft.productImage] (JOIN fallback for legacy drafts)
+  //   → [draft.unsplashImageUrl] (content_template drafts: themed stock photo).
   const imageUrls =
     draft.imageUrls && draft.imageUrls.length > 0
       ? draft.imageUrls
@@ -41,6 +42,8 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
       ? [draft.imageUrl]
       : draft.productImage
       ? [draft.productImage]
+      : draft.unsplashImageUrl
+      ? [draft.unsplashImageUrl]
       : [];
   const primaryImageUrl = imageUrls[0] || null;
 

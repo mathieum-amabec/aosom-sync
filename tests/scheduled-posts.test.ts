@@ -86,6 +86,9 @@ function makeDraft(overrides: Partial<{ id: number; scheduledAt: number | null; 
     approvedAt: null,
     reviewedBy: null,
     reviewNotes: null,
+    unsplashImageUrl: null,
+    unsplashPhotographer: null,
+    unsplashPhotographerUrl: null,
     ...overrides,
   };
 }

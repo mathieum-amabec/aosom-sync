@@ -3,9 +3,25 @@ import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { getContentTemplateBySlug, createFacebookDraft, getAnyProductSku, selectCompatibleHooks } from "@/lib/database";
 import { mapProductTypeToScope } from "@/lib/hook-selector";
 import { getAnthropicClient } from "@/lib/content-generator";
+import { searchImages, triggerDownload } from "@/lib/unsplash";
 import { CLAUDE } from "@/lib/config";
 
 const ANTHROPIC_CALL_TIMEOUT_MS = 45_000;
+
+/**
+ * Map a content_template's theme (its scopes + interpolated vars) to an
+ * Unsplash search query. content_template drafts have no product image of
+ * their own, so we illustrate them with a themed stock photo.
+ */
+function unsplashQueryForTheme(scopes: string[], vars: Record<string, string>): string {
+  const hay = `${scopes.join(" ")} ${Object.values(vars).join(" ")}`.toLowerCase();
+  if (/patio|outdoor|jardin|ext[eé]rieur|terrasse/.test(hay)) return "patio outdoor living";
+  if (/salon|living room/.test(hay)) return "cozy living room decor";
+  if (/chambre|bedroom/.test(hay)) return "bedroom furniture cozy";
+  if (/lumi[eè]re|lighting|luminaire/.test(hay)) return "interior lighting home";
+  if (/meuble|furniture|mobilier/.test(hay)) return "modern furniture interior";
+  return "home decor interior design";
+}
 
 const CATEGORIES_FR = [
   "mobilier de salon",
@@ -201,6 +217,21 @@ export async function POST(request: Request) {
       );
     }
 
+    // Illustrate the draft with a themed Unsplash photo. Best-effort: a fetch
+    // failure (rate limit, network, no key) must not block draft creation.
+    let unsplash: { url: string; photographer: string; photographerUrl: string } | null = null;
+    try {
+      const query = unsplashQueryForTheme(template.scopes, vars);
+      const [img] = await searchImages(query, 1);
+      if (img) {
+        // Required by Unsplash API guidelines whenever a photo is used/displayed.
+        await triggerDownload(img.downloadLocation);
+        unsplash = { url: img.url, photographer: img.photographer, photographerUrl: img.photographerUrl };
+      }
+    } catch (imgErr) {
+      console.warn(`[API] Unsplash fetch failed (non-fatal):`, imgErr instanceof Error ? imgErr.message : imgErr);
+    }
+
     const draftId = await createFacebookDraft({
       sku,
       triggerType: "content_template",
@@ -208,6 +239,9 @@ export async function POST(request: Request) {
       postText: isEn ? "" : postText,
       postTextEn: isEn ? postText : null,
       hookId: hookChosen?.id ?? null,
+      unsplashImageUrl: unsplash?.url ?? null,
+      unsplashPhotographer: unsplash?.photographer ?? null,
+      unsplashPhotographerUrl: unsplash?.photographerUrl ?? null,
     });
 
     return NextResponse.json({
@@ -218,6 +252,7 @@ export async function POST(request: Request) {
       language,
       hookId: hookChosen?.id ?? null,
       vars,
+      unsplashImageUrl: unsplash?.url ?? null,
     });
   } catch (err) {
     console.error("[API] /api/social/content/generate POST failed:", err);
