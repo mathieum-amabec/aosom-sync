@@ -328,6 +328,36 @@ export default function DraftsClient() {
                 )}
               </div>
 
+              {/* Unsplash image + attribution (content_template drafts) */}
+              {selected.unsplashImageUrl && (
+                <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={selected.unsplashImageUrl}
+                    alt="Illustration Unsplash du post"
+                    className="w-full h-56 object-cover"
+                  />
+                  {selected.unsplashPhotographer && (
+                    <p className="px-4 py-2 text-xs text-gray-400">
+                      Photo par{" "}
+                      {selected.unsplashPhotographerUrl ? (
+                        <a
+                          href={selected.unsplashPhotographerUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline hover:text-gray-600"
+                        >
+                          {selected.unsplashPhotographer}
+                        </a>
+                      ) : (
+                        selected.unsplashPhotographer
+                      )}{" "}
+                      sur Unsplash
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* FR caption */}
               <div className="bg-white rounded-lg border shadow-sm p-5">
                 <div className="flex items-center justify-between mb-3">

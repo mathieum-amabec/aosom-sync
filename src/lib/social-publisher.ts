@@ -33,12 +33,19 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
   // Pick public image URLs. Both platforms require at least one (Facebook via Graph API
   // `url` or `attached_media`, Instagram via media container).
   // Priority: draft.imageUrls (v0.1.8.0+ multi-photo) → [draft.imageUrl] (v0.1.5.0 snapshot)
-  //   → [draft.productImage] (JOIN fallback for legacy drafts).
+  //   → [draft.unsplashImageUrl] (content_template drafts: themed stock photo)
+  //   → [draft.productImage] (JOIN fallback for legacy product drafts).
+  // Unsplash beats productImage: content_template drafts carry an incidental real
+  // SKU only to satisfy the FK, so that product's image is irrelevant to the post —
+  // the themed Unsplash photo is the intended image. unsplashImageUrl is only set
+  // for content_template drafts, so product drafts still fall through to productImage.
   const imageUrls =
     draft.imageUrls && draft.imageUrls.length > 0
       ? draft.imageUrls
       : draft.imageUrl
       ? [draft.imageUrl]
+      : draft.unsplashImageUrl
+      ? [draft.unsplashImageUrl]
       : draft.productImage
       ? [draft.productImage]
       : [];
