@@ -60,6 +60,32 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
 - `CRON_SECRET` — Vercel Cron auth
 - `AUTH_PASSWORD` — simple password auth for 2 users
 
+## Dev Setup
+
+Standard: `bun install`, then `bun run dev` / `bun run test`.
+
+### Windows ARM64
+
+Several native deps — `libsql`, `rolldown` (vitest), `@next/swc` — publish **no
+`win32-arm64-msvc` build**, only `win32-x64-msvc`. The arm64 system Node/Bun can't
+load them (`Cannot find module '@libsql/win32-arm64-msvc'`). Windows ARM emulates
+x64, so run everything under an **x64 runtime**:
+
+1. Install portable x64 runtimes (not committed to the repo):
+   - Node x64 → `%USERPROFILE%\node-x64` (e.g. `node-v22.x-win-x64.zip` from nodejs.org)
+   - Bun x64 → `%USERPROFILE%\bun-x64` (`bun-windows-x64.zip` from the bun releases)
+2. Install deps under x64 Bun so the `win32-x64-msvc` bindings download:
+   `& "$env:USERPROFILE\bun-x64\bun-windows-x64\bun.exe" install`
+3. Run dev / tests via the wrappers (they select the x64 Node and guard on arch):
+   - `.\dev.ps1` — `next dev` (forwards args, e.g. `.\dev.ps1 -p 3001`)
+   - `.\test.ps1` — `vitest run` (forwards args, e.g. `.\test.ps1 tests/database.test.ts`)
+
+   Override the Node location with `$env:AOSOM_NODE_X64` if you put it elsewhere.
+
+Note: libsql's `client.close()` doesn't release the `.sqlite` file handle
+synchronously on Windows, so file-backed test DBs hit `EBUSY` on cleanup. The
+libsql-backed test suites use `:memory:` DBs to avoid this.
+
 ## Testing
 
 ⚠️ Always use `bun run test` (executes `vitest run` via the npm script). Do NOT use `bun test` — bun's internal runner lacks `vi.stubGlobal` support and silently skips entire test files without error.
