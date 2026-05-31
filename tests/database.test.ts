@@ -7,8 +7,12 @@ import { isValidCheckpoint } from "@/lib/database";
 const TEST_DB_PATH = path.join(__dirname, "fixtures", "test-db.sqlite");
 
 function setupTestDb(): Client {
+  // In-memory DB: each connection is a fresh, empty database. Every test below
+  // builds its own schema + data, so no cross-connection persistence is needed.
+  // Avoids a Windows file-lock issue where libsql's client.close() does not
+  // release the .sqlite file handle synchronously, causing EBUSY on unlink.
   if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
-  const client = createClient({ url: `file:${TEST_DB_PATH}` });
+  const client = createClient({ url: ":memory:" });
   return client;
 }
 
