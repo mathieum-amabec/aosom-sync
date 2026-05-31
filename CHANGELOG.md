@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.7.0] - 2026-05-31
+
+### Fixed
+- **Windows ARM64 local dev** (x64 portable runtimes + `dev.ps1`/`test.ps1`).
+  Native deps (`libsql`, `rolldown`, `@next/swc`) ship no `win32-arm64-msvc`
+  build, so dev/test failed under the arm64 system Node/Bun
+  (`Cannot find module '@libsql/win32-arm64-msvc'`). Windows ARM emulates x64,
+  so added `dev.ps1`/`test.ps1` wrappers that run under a portable x64 Node
+  (with an arch guard and `AOSOM_NODE_X64` override) and documented the setup in
+  `CLAUDE.md`. Switched the libsql-backed test suites to in-memory DBs to dodge a
+  Windows `EBUSY` file-lock (libsql's `close()` doesn't release the file handle
+  synchronously). Also fixed `content-templates` route test mocks
+  (`getRecentlyUsedHookIds` + `recordHookUsage`, 4-arg `selectCompatibleHooks`)
+  that drifted in 0.5.5.0 and left the suite red.
+
 ## [0.5.6.0] - 2026-05-28
 
 ### Added

@@ -9,8 +9,12 @@ import { MEGASTORE_TEMPLATES } from "@/lib/seed/content-templates-megastore";
 const TEST_DB_PATH = path.join(__dirname, "fixtures", "content-templates-test.sqlite");
 
 function makeDb(): Client {
+  // In-memory DB: each connection is a fresh, empty database. Every test below
+  // builds its own schema + data, so no cross-connection persistence is needed.
+  // Avoids a Windows file-lock issue where libsql's client.close() does not
+  // release the .sqlite file handle synchronously, causing EBUSY on unlink.
   if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
-  return createClient({ url: `file:${TEST_DB_PATH}` });
+  return createClient({ url: ":memory:" });
 }
 
 async function createTemplatesTable(db: Client, withNewCols = true) {
@@ -398,6 +402,8 @@ describe("POST /api/social/content/generate", () => {
       createFacebookDraft: vi.fn().mockResolvedValue(56),
       selectCompatibleHooks,
       getAnyProductSku: vi.fn().mockResolvedValue("01-0016"),
+      getRecentlyUsedHookIds: vi.fn().mockResolvedValue([]),
+      recordHookUsage: vi.fn().mockResolvedValue(undefined),
     }));
     vi.doMock("@/lib/hook-selector", () => ({ mapProductTypeToScope: vi.fn().mockReturnValue("universal") }));
     vi.doMock("@/lib/content-generator", () => ({
@@ -408,7 +414,9 @@ describe("POST /api/social/content/generate", () => {
     const { POST } = await import("@/app/api/social/content/generate/route");
     const res = await POST(makeRequest({ templateSlug: "conseil_deco_piece", language: "en" }));
     expect(res.status).toBe(200);
-    expect(selectCompatibleHooks).toHaveBeenCalledWith(expect.any(String), "EN", []);
+    // Route now excludes recently-used hooks: selectCompatibleHooks(scope, lang, [], recentHookIds).
+    // getRecentlyUsedHookIds is mocked to return [], so the 4th arg is [].
+    expect(selectCompatibleHooks).toHaveBeenCalledWith(expect.any(String), "EN", [], []);
   });
 
   it("language defaults to fr when omitted", async () => {
@@ -482,6 +490,8 @@ describe("POST /api/social/content/generate", () => {
         { id: 7, text: "Voici une astuce!", mode: "pool", categoryId: 1, language: "FR", productScopes: ["universal"], usedCount: 0, lastUsedAt: null },
       ]),
       getAnyProductSku: vi.fn().mockResolvedValue("01-0016"),
+      getRecentlyUsedHookIds: vi.fn().mockResolvedValue([]),
+      recordHookUsage: vi.fn().mockResolvedValue(undefined),
     }));
     vi.doMock("@/lib/hook-selector", () => ({
       mapProductTypeToScope: vi.fn().mockReturnValue("universal"),
@@ -523,6 +533,8 @@ describe("POST /api/social/content/generate", () => {
       createFacebookDraft: vi.fn().mockResolvedValue(10),
       selectCompatibleHooks,
       getAnyProductSku: vi.fn().mockResolvedValue("01-0016"),
+      getRecentlyUsedHookIds: vi.fn().mockResolvedValue([]),
+      recordHookUsage: vi.fn().mockResolvedValue(undefined),
     }));
     vi.doMock("@/lib/hook-selector", () => ({ mapProductTypeToScope: vi.fn().mockReturnValue("universal") }));
     vi.doMock("@/lib/content-generator", () => ({
@@ -575,6 +587,8 @@ describe("POST /api/social/content/generate", () => {
       createFacebookDraft: vi.fn().mockResolvedValue(12),
       selectCompatibleHooks: vi.fn().mockResolvedValue([]),
       getAnyProductSku: vi.fn().mockResolvedValue("01-0016"),
+      getRecentlyUsedHookIds: vi.fn().mockResolvedValue([]),
+      recordHookUsage: vi.fn().mockResolvedValue(undefined),
     }));
     vi.doMock("@/lib/hook-selector", () => ({ mapProductTypeToScope: vi.fn().mockReturnValue("universal") }));
     vi.doMock("@/lib/content-generator", () => ({
