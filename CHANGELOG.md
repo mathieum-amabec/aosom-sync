@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.8.0] - 2026-06-02
+
+### Fixed
+- **compare_at_price discount threshold.** `compare_at_price` was set on ANY price
+  drop (even 1%), producing fake "sales" that erode credibility, plus a batch of
+  corrupted values (compare_at far below the real price). Now a struck-through "was"
+  price renders only for a genuine discount >= `MIN_DISCOUNT_DISPLAY_PERCENT`
+  (default 10%, overridable via env); smaller dips and price increases clear it.
+  NaN-guarded so a malformed env var falls back to 10 instead of silently disabling
+  every sale price.
+
+### Added
+- **`scripts/clean-compare-at-price.ts`** — one-shot, dry-run-by-default retroactive
+  cleanup that clears invalid (`compare_at <= price`) or sub-threshold
+  `compare_at_price` on existing Shopify variants (2 req/s, gitignored report).
+  First run cleared 70 of 101 variants (6 corrupted + 64 sub-threshold); 31 genuine
+  discounts kept.
+
 ## [0.5.7.0] - 2026-05-31
 
 ### Fixed
