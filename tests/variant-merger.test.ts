@@ -4,6 +4,9 @@ import {
   stripColorFromTitle,
   mergeVariants,
   COLOR_MAP,
+  selectProductImages,
+  smallestUrlDimension,
+  MAX_IMAGES_PER_PRODUCT,
 } from "@/lib/variant-merger";
 import type { AosomProduct } from "@/types/aosom";
 
@@ -145,5 +148,64 @@ describe("mergeVariants", () => {
     ];
     const merged = mergeVariants(products);
     expect(merged[0].images).toHaveLength(3);
+  });
+});
+
+describe("smallestUrlDimension", () => {
+  it("reads an explicit _NxN size marker", () => {
+    expect(smallestUrlDimension("https://x.com/img_800x800.jpg")).toBe(800);
+    expect(smallestUrlDimension("https://x.com/img-600x900.jpg")).toBe(600);
+  });
+
+  it("returns null for opaque Aosom hash URLs (no size in URL)", () => {
+    expect(smallestUrlDimension("https://img-us.aosomcdn.com/100/product/2025/07/24/A8y0a31983e7664de.jpg")).toBeNull();
+  });
+
+  it("ignores the /YYYY/MM/DD/ date path", () => {
+    // date path stripped, no real NxN token remains
+    expect(smallestUrlDimension("https://img-us.aosomcdn.com/100/product/2025/01/24/wXW971194962f8b28.jpg")).toBeNull();
+  });
+});
+
+describe("selectProductImages", () => {
+  it("drops images below 800px when the size is URL-detectable", () => {
+    const out = selectProductImages([
+      "https://x.com/a_400x400.jpg",
+      "https://x.com/b_1000x1000.jpg",
+      "https://x.com/c_800x800.jpg",
+    ]);
+    expect(out).toEqual(["https://x.com/b_1000x1000.jpg", "https://x.com/c_800x800.jpg"]);
+  });
+
+  it("keeps images whose size is undetectable (no HEAD requests)", () => {
+    const imgs = ["https://x.com/opaque1.jpg", "https://x.com/opaque2.jpg"];
+    expect(selectProductImages(imgs)).toEqual(imgs);
+  });
+
+  it("promotes the first lifestyle/ambiance/room image to position 1", () => {
+    const out = selectProductImages([
+      "https://x.com/studio.jpg",
+      "https://x.com/detail.jpg",
+      "https://x.com/lifestyle-room.jpg",
+    ]);
+    expect(out[0]).toBe("https://x.com/lifestyle-room.jpg");
+    expect(out).toHaveLength(3);
+  });
+
+  it("keeps source order when no lifestyle image is present", () => {
+    const imgs = ["https://x.com/1.jpg", "https://x.com/2.jpg", "https://x.com/3.jpg"];
+    expect(selectProductImages(imgs)).toEqual(imgs);
+  });
+
+  it(`caps at ${MAX_IMAGES_PER_PRODUCT} images, after promotion`, () => {
+    const imgs = Array.from({ length: 20 }, (_, i) => `https://x.com/${i}.jpg`);
+    imgs[15] = "https://x.com/ambiance.jpg"; // deep lifestyle shot must survive the cap
+    const out = selectProductImages(imgs);
+    expect(out).toHaveLength(MAX_IMAGES_PER_PRODUCT);
+    expect(out[0]).toBe("https://x.com/ambiance.jpg");
+  });
+
+  it("handles an empty list", () => {
+    expect(selectProductImages([])).toEqual([]);
   });
 });
