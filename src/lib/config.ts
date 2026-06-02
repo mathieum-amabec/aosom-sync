@@ -185,6 +185,12 @@ export const SYNC = {
   PRICE_TOLERANCE: 0.01,
   DEFAULT_PRICE_DROP_THRESHOLD: "10",
   DEFAULT_MIN_DAYS_BETWEEN_REPOSTS: "30",
+  /**
+   * Minimum real discount (%) required to display a compare_at_price (struck-through
+   * "was" price). Below this, no compare_at_price is set so we never show a fake sale
+   * on a 1% dip. Default 10%. Override with MIN_DISCOUNT_DISPLAY_PERCENT.
+   */
+  MIN_DISCOUNT_DISPLAY_PERCENT: Number(process.env.MIN_DISCOUNT_DISPLAY_PERCENT ?? "10"),
 } as const;
 
 // ─── API Defaults ───────────────────────────────────────────────────

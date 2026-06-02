@@ -1,7 +1,7 @@
 import type { ShopifyExistingProduct, ShopifyExistingVariant } from "@/types/sync";
 import type { AosomMergedProduct } from "@/types/aosom";
 import type { GeneratedContent } from "./content-generator";
-import { env, SHOPIFY } from "./config";
+import { env, SHOPIFY, SYNC } from "./config";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -227,7 +227,14 @@ export async function updateShopifyVariantPrice(
   const variant: Record<string, unknown> = { id: variantId, price: String(price) };
 
   if (oldPrice !== undefined) {
-    variant.compare_at_price = price < oldPrice ? String(oldPrice) : null;
+    // Only show a struck-through "was" price for a real discount >= the configured
+    // threshold (default 10%). A 1% dip no longer renders a fake sale. oldPrice > 0
+    // guards against divide-by-zero; a price increase clears compare_at_price.
+    const discountPct = oldPrice > 0 ? (oldPrice - price) / oldPrice : 0;
+    variant.compare_at_price =
+      price < oldPrice && discountPct >= SYNC.MIN_DISCOUNT_DISPLAY_PERCENT / 100
+        ? String(oldPrice)
+        : null;
   }
 
   const response = await shopifyFetch(`/variants/${variantId}.json`, {
