@@ -28,13 +28,13 @@ if (!FEED) {
 type Row = Record<string, string>;
 const text = readFileSync(FEED, "utf8");
 const delimiter = text.split("\n")[0].includes("\t") ? "\t" : ",";
-const rows: Row[] = parse(text, {
+const rows: Row[] = (parse(text, {
   columns: true,
   delimiter,
   skip_empty_lines: true,
   relax_column_count: true,
   trim: true,
-}).filter((r: Row) => r.SKU && r.SKU.trim() !== "");
+}) as Row[]).filter((r) => r.SKU != null && r.SKU.trim() !== "");
 
 // Mirror csv-fetcher.collectImages
 function collectImages(row: Row): string[] {
