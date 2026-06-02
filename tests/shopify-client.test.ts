@@ -8,6 +8,7 @@ vi.stubGlobal("fetch", mockFetch);
 vi.mock("@/lib/config", () => ({
   env: { shopifyAccessToken: "test-token", hasShopifyToken: true },
   SHOPIFY: { STORE: "test.myshopify.com", API_VERSION: "2025-01" },
+  SYNC: { MIN_DISCOUNT_DISPLAY_PERCENT: 10 },
 }));
 
 // Import after mocks
@@ -89,13 +90,24 @@ describe("updateShopifyVariantPrice", () => {
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
   });
 
-  it("sets compare_at_price on price drop", async () => {
+  it("sets compare_at_price on a price drop at/above the threshold", async () => {
+    // 39.99 -> 29.99 is a 25% drop, above the 10% threshold.
     await updateShopifyVariantPrice("variant-1", 29.99, 39.99);
 
     const call = mockFetch.mock.calls[0];
     const body = JSON.parse(call[1].body);
     expect(body.variant.price).toBe("29.99");
     expect(body.variant.compare_at_price).toBe("39.99");
+  });
+
+  it("clears compare_at_price on a sub-threshold drop (< MIN_DISCOUNT_DISPLAY_PERCENT)", async () => {
+    // 100 -> 99 is a 1% drop, below the 10% threshold: no fake "sale".
+    await updateShopifyVariantPrice("variant-1", 99, 100);
+
+    const call = mockFetch.mock.calls[0];
+    const body = JSON.parse(call[1].body);
+    expect(body.variant.price).toBe("99");
+    expect(body.variant.compare_at_price).toBeNull();
   });
 
   it("clears compare_at_price on price increase", async () => {
