@@ -9,7 +9,15 @@ describe("refreshProducts — batch_size=1000", () => {
 
   it("splits 1500 products into 2 batches: first 1000, second 500", async () => {
     const batchMock = vi.fn().mockResolvedValue(undefined);
-    const executeMock = vi.fn().mockResolvedValue({ rows: [] });
+    // seedHooksIfEmpty (runs during schema init) reads rows[0] of a SELECT COUNT(*).
+    // A bare { rows: [] } makes rowToObj(rows[0]) throw "Cannot convert undefined or
+    // null to object". Return a non-zero count for COUNT(*) so seeding is skipped;
+    // every other statement still resolves to an empty result.
+    const executeMock = vi.fn().mockImplementation((arg: unknown) => {
+      const sql = typeof arg === "string" ? arg : ((arg as { sql?: string } | undefined)?.sql ?? "");
+      if (/count\(\*\)/i.test(sql)) return Promise.resolve({ rows: [{ n: 1 }] });
+      return Promise.resolve({ rows: [] });
+    });
 
     vi.doMock("@libsql/client", () => ({
       createClient: () => ({ batch: batchMock, execute: executeMock }),
