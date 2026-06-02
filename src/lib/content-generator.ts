@@ -64,6 +64,27 @@ export function slugify(s: string): string {
 }
 
 /**
+ * Backfill the SEO-native fields (metaTitle, metaDescription, urlHandle, brand)
+ * on content that was persisted BEFORE product-naming-v2. Import jobs generated
+ * under the old schema lack these fields, so without this they reach Shopify as
+ * `undefined` metafield values and 422 the whole product create. Only empty
+ * fields are filled — anything the model already produced is left untouched.
+ */
+export function backfillSeoFields(content: GeneratedContent, brand: string): GeneratedContent {
+  const c = { ...content };
+  const empty = (v: unknown): boolean => typeof v !== "string" || v.trim() === "";
+
+  if (empty(c.brand)) c.brand = brand;
+  if (empty(c.metaTitleFr)) c.metaTitleFr = clampMetaTitle(`${c.titleFr} | Livraison gratuite — Ameublo Direct`, 65);
+  if (empty(c.metaTitleEn)) c.metaTitleEn = clampMetaTitle(`${c.titleEn} | Free Shipping — Furnish Direct`, 65);
+  if (empty(c.metaDescriptionFr)) c.metaDescriptionFr = (c.seoDescriptionFr || c.titleFr).slice(0, 155);
+  if (empty(c.metaDescriptionEn)) c.metaDescriptionEn = (c.seoDescriptionEn || c.titleEn).slice(0, 155);
+  if (empty(c.urlHandleFr)) c.urlHandleFr = slugify(c.titleFr);
+  if (empty(c.urlHandleEn)) c.urlHandleEn = slugify(c.titleEn);
+  return c;
+}
+
+/**
  * Quebec-tuned system prompt, ported from reference aosom-shopify/generator.js.
  */
 const SYSTEM_PROMPT = `You are a bilingual e-commerce copywriter for a Quebec/Canada furniture store.
