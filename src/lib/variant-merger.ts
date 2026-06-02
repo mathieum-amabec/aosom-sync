@@ -172,3 +172,60 @@ export function buildSkuIndex(products: AosomProduct[]): Map<string, AosomProduc
   for (const p of products) map.set(p.sku, p);
   return map;
 }
+
+// ─── Image selection for new-product imports (Étape 1) ─────────────────
+// Pure and URL-only — never does network I/O. Applied ONLY on the import/create
+// path (see queueForImport), never inside mergeVariants: mergeVariants also feeds
+// the daily sync/diff path (job1-sync → computeDiffs → applyToShopify), so
+// filtering there would re-image products that are already live. Re-touching
+// existing products is Étape 4, explicitly out of scope here.
+
+/** Minimum pixel dimension to keep when a size is detectable from the URL. */
+export const MIN_IMAGE_PX = 800;
+/** Hard cap on images per product, applied after filter + main-image promotion. */
+export const MAX_IMAGES_PER_PRODUCT = 8;
+/** URL hint that an image is a styled/in-context shot worth showing first. */
+const LIFESTYLE_RE = /lifestyle|ambiance|room/i;
+// A real Aosom size marker looks like "_800x800" / "-600x600": an NxN token
+// delimited by _ - or /. Bare digit runs inside the opaque hash filename are
+// ignored so a coincidental match can never drop a valid image.
+const DIMENSION_RE = /[_\-/](\d{2,4})[xX](\d{2,4})(?=[._\-/]|$)/g;
+
+/**
+ * Smallest explicit pixel dimension encoded in the URL, or null when none is
+ * detectable (the common case for Aosom's hashed filenames).
+ */
+export function smallestUrlDimension(url: string): number | null {
+  // Drop the /YYYY/MM/DD/ date path so it can't be misread as dimensions.
+  const cleaned = url.replace(/\/\d{4}\/\d{2}\/\d{2}\//, "/");
+  let min: number | null = null;
+  for (const m of cleaned.matchAll(DIMENSION_RE)) {
+    const lo = Math.min(parseInt(m[1], 10), parseInt(m[2], 10));
+    if (min === null || lo < min) min = lo;
+  }
+  return min;
+}
+
+/**
+ * Curate a product's image list for import:
+ *  1. Drop images whose URL exposes a dimension below MIN_IMAGE_PX. Images with
+ *     no detectable size are KEPT (no HEAD requests — too slow at catalog scale).
+ *  2. Promote the first lifestyle/ambiance/room image to position 1; otherwise
+ *     keep source order (the CSV primary image stays first).
+ *  3. Cap at MAX_IMAGES_PER_PRODUCT. Promotion happens before the cap so a
+ *     lifestyle shot deep in the list still survives as the main image.
+ */
+export function selectProductImages(images: string[]): string[] {
+  const filtered = images.filter((url) => {
+    const dim = smallestUrlDimension(url);
+    return dim === null || dim >= MIN_IMAGE_PX;
+  });
+
+  const idx = filtered.findIndex((url) => LIFESTYLE_RE.test(url));
+  const ordered =
+    idx > 0
+      ? [filtered[idx], ...filtered.slice(0, idx), ...filtered.slice(idx + 1)]
+      : filtered;
+
+  return ordered.slice(0, MAX_IMAGES_PER_PRODUCT);
+}

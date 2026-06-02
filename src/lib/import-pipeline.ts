@@ -1,5 +1,5 @@
 import { fetchAosomCatalog } from "./csv-fetcher";
-import { mergeVariants, buildSkuIndex } from "./variant-merger";
+import { mergeVariants, buildSkuIndex, selectProductImages } from "./variant-merger";
 import { generateProductContent, backfillSeoFields, type GeneratedContent } from "./content-generator";
 import { createShopifyProduct, addProductToCollection } from "./shopify-client";
 import { findCollectionsForProduct } from "./database";
@@ -51,7 +51,12 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
   const now = new Date().toISOString();
   const jobs: ImportJob[] = [];
 
-  for (const product of merged) {
+  for (const rawProduct of merged) {
+    // Curate images for the customer-facing product (Étape 1): drop sub-800px
+    // images with a detectable size, promote a lifestyle shot to position 1,
+    // cap at 8. Done here (import path only) so the daily sync/diff never
+    // re-images products that are already live.
+    const product = { ...rawProduct, images: selectProductImages(rawProduct.images) };
     const id = crypto.randomUUID();
     await upsertImportJob({
       id,
