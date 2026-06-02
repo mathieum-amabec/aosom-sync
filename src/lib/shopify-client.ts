@@ -126,8 +126,9 @@ export async function createShopifyProduct(
   const payload = {
     product: {
       title: content.titleFr,
+      handle: content.urlHandleFr,
       body_html: content.descriptionFr,
-      vendor: "Aosom",
+      vendor: merged.brand || "Aosom",
       product_type: merged.productType,
       tags: content.tags.join(", "),
       status: "draft",
@@ -149,6 +150,20 @@ export async function createShopifyProduct(
       })),
       images: merged.images.map((src) => ({ src })),
       metafields: [
+        // Native Shopify SEO (store default locale = FR). EN equivalents kept in
+        // custom.* for later translation (Translate & Adapt / GraphQL).
+        {
+          namespace: "global",
+          key: "title_tag",
+          value: content.metaTitleFr,
+          type: "single_line_text_field",
+        },
+        {
+          namespace: "global",
+          key: "description_tag",
+          value: content.metaDescriptionFr,
+          type: "single_line_text_field",
+        },
         {
           namespace: "custom",
           key: "title_en",
@@ -163,14 +178,21 @@ export async function createShopifyProduct(
         },
         {
           namespace: "custom",
-          key: "meta_description_fr",
-          value: content.seoDescriptionFr,
+          key: "meta_title_en",
+          value: content.metaTitleEn,
           type: "single_line_text_field",
         },
         {
           namespace: "custom",
           key: "meta_description_en",
-          value: content.seoDescriptionEn,
+          value: content.metaDescriptionEn,
+          type: "single_line_text_field",
+        },
+        // Supplier brand — internal only, never shown to the customer.
+        {
+          namespace: "custom",
+          key: "brand_fr",
+          value: merged.brand,
           type: "single_line_text_field",
         },
       ],

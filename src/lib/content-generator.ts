@@ -19,26 +19,84 @@ export interface GeneratedContent {
   descriptionEn: string;
   seoDescriptionFr: string;
   seoDescriptionEn: string;
+  // SEO-native fields (Shopify global.title_tag / global.description_tag + handle)
+  metaTitleFr: string;
+  metaTitleEn: string;
+  metaDescriptionFr: string;
+  metaDescriptionEn: string;
+  urlHandleFr: string;
+  urlHandleEn: string;
   tags: string[];
+  /** Supplier brand (Outsunny, HOMCOM, …) — internal only, used as Shopify vendor; never in the title. */
+  brand: string;
+}
+
+/**
+ * Kebab-case slug: lowercase, accent-stripped, alphanumerics joined by hyphens.
+ * Defensive — guarantees a clean handle regardless of what the model returns.
+ */
+/**
+ * Clamp a "Name | suffix — Brand" meta title to `max` chars WITHOUT cutting the
+ * brand suffix. If too long, trim the name part (at a word boundary) and keep the
+ * full "| … — Brand" tail. Falls back to a plain tail-slice if there is no " | ".
+ */
+export function clampMetaTitle(title: string, max: number): string {
+  if (title.length <= max) return title;
+  const sepIdx = title.indexOf(" | ");
+  if (sepIdx === -1) return title.slice(0, max);
+  const suffix = title.slice(sepIdx); // " | Livraison gratuite — Ameublo Direct"
+  const room = max - suffix.length;
+  if (room <= 3) return title.slice(0, max); // suffix alone ~fills the budget
+  let name = title.slice(0, room);
+  const lastSpace = name.lastIndexOf(" ");
+  if (lastSpace > 0) name = name.slice(0, lastSpace);
+  return name.trimEnd() + suffix;
+}
+
+export function slugify(s: string): string {
+  return s
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "") // strip diacritics (é → e)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 100);
 }
 
 /**
  * Quebec-tuned system prompt, ported from reference aosom-shopify/generator.js.
  */
-const SYSTEM_PROMPT = `You are a bilingual e-commerce copywriter specializing in the Quebec/Canada market.
-You write product listings in both French (Canadian French) and English.
+const SYSTEM_PROMPT = `You are a bilingual e-commerce copywriter for a Quebec/Canada furniture store.
+You write product listings in Canadian French and English.
 
-Rules:
-- French must sound natural for Quebec shoppers (not Parisian French)
-- Use metric units (cm, kg) — convert if needed
-- Do NOT mention shipping or delivery terms
-- Include relevant Canadian keywords for SEO
-- Keep titles under 80 characters
-- HTML body should be clean, mobile-friendly, no inline styles
-- Include 5-8 bullet-point features
-- Add a short meta description (160 chars max) for each language
-- Replace any "[BRAND NAME]" with the actual brand name provided
-- Do NOT include color or size info in the title or body (those are variant-level)
+GLOBAL RULES
+- French must sound natural for Quebec shoppers (not Parisian French).
+- Use metric units (cm, kg) — convert if needed.
+- Include relevant Canadian keywords for SEO.
+- HTML body: clean, mobile-friendly, no inline styles, 5-8 bullet-point features.
+- Replace any "[BRAND NAME]" with the actual brand name provided.
+- Do NOT mention shipping or delivery in the product title or HTML body.
+- Do NOT put color or size in the product title or body (those are variant-level).
+
+PRODUCT TITLE (titleFr / titleEn) — strict pattern:
+  [Product type] [distinctive feature] [size/capacity if relevant] — [color if relevant]
+  - NEVER include a supplier brand: Outsunny, HOMCOM, HomCom, Aosom, Vinsetto, Pawhut,
+    PawHut, Soozier, Qaba, ShopEZ, Wikinger, Portland, Aousthop.
+  - Maximum 10 words, strict — truncate if necessary. Product type FIRST (SEO). No brand, no model number.
+  - Color, only if relevant, after an em dash "—".
+
+META TITLE (metaTitleFr / metaTitleEn) — max 65 characters total:
+  - FR pattern: "<product name FR> | Livraison gratuite — Ameublo Direct"
+  - EN pattern: "<product name EN> | Free Shipping — Furnish Direct"
+  - Keep the product-name part short so the whole string stays within 65 characters.
+
+META DESCRIPTION (metaDescriptionFr / metaDescriptionEn) — max 155 characters:
+  - Lead with the main benefit, mention free shipping in Canada, end with a short CTA.
+  - (Meta title/description are the ONLY place shipping may be mentioned.)
+
+URL HANDLE (urlHandleFr / urlHandleEn):
+  - Short kebab-case slug: lowercase, no accents, no supplier brand, words joined by "-".
+  - Example: "chaise-longue-reglable-grise".
 
 Return valid JSON only, no markdown fences.`;
 
@@ -77,7 +135,7 @@ export async function generateProductContent(
   const prompt = `Create a Shopify product listing from this data:
 
 Name: ${cleanName}
-Brand: ${product.brand}
+Brand (supplier — internal only, NEVER put it in the title): ${product.brand}
 Category: ${product.productType}
 Material: ${product.material}
 Price: $${product.variants[0]?.price || 0} CAD
@@ -85,6 +143,8 @@ Description: ${cleanDesc.slice(0, 1500)}
 Short Description: ${cleanShort.slice(0, 500)}
 Variants:
 ${variantInfo}
+
+Store brands for the meta titles: French store = "Ameublo Direct", English store = "Furnish Direct".
 
 Return JSON with this exact structure:
 {
@@ -94,6 +154,12 @@ Return JSON with this exact structure:
   "descriptionEn": "<HTML product description in English>",
   "seoDescriptionFr": "...",
   "seoDescriptionEn": "...",
+  "metaTitleFr": "<= 65 chars, pattern: name FR | Livraison gratuite — Ameublo Direct",
+  "metaTitleEn": "<= 65 chars, pattern: name EN | Free Shipping — Furnish Direct",
+  "metaDescriptionFr": "<= 155 chars, benefit + livraison gratuite + CTA",
+  "metaDescriptionEn": "<= 155 chars, benefit + free shipping + CTA",
+  "urlHandleFr": "kebab-case-fr-no-accents-no-brand",
+  "urlHandleEn": "kebab-case-en-no-accents-no-brand",
   "tags": ["tag1", "tag2"]
 }`;
 
@@ -113,18 +179,37 @@ Return JSON with this exact structure:
 
   try {
     const parsed = JSON.parse(jsonStr);
-    // Validate required fields and types to prevent LLM output trust boundary violation
-    const required = ["titleFr", "titleEn", "descriptionFr", "descriptionEn", "seoDescriptionFr", "seoDescriptionEn", "tags"] as const;
-    for (const field of required) {
-      if (field === "tags") {
-        if (!Array.isArray(parsed[field])) throw new Error(`Missing or invalid field: ${field}`);
-        parsed[field] = parsed[field].filter((t: unknown) => typeof t === "string").slice(0, 20);
-      } else {
-        if (typeof parsed[field] !== "string") throw new Error(`Missing or invalid field: ${field}`);
-        // Truncate to reasonable limits
-        parsed[field] = parsed[field].slice(0, field.startsWith("seo") ? 200 : 10000);
-      }
+    // Validate required string fields (LLM output trust boundary)
+    const stringFields = [
+      "titleFr", "titleEn", "descriptionFr", "descriptionEn",
+      "seoDescriptionFr", "seoDescriptionEn",
+      "metaTitleFr", "metaTitleEn", "metaDescriptionFr", "metaDescriptionEn",
+      "urlHandleFr", "urlHandleEn",
+    ] as const;
+    for (const field of stringFields) {
+      if (typeof parsed[field] !== "string") throw new Error(`Missing or invalid field: ${field}`);
     }
+    if (!Array.isArray(parsed.tags)) throw new Error("Missing or invalid field: tags");
+    parsed.tags = parsed.tags.filter((t: unknown) => typeof t === "string").slice(0, 20);
+
+    // Enforce length / format limits
+    parsed.titleFr = parsed.titleFr.slice(0, 200);
+    parsed.titleEn = parsed.titleEn.slice(0, 200);
+    parsed.descriptionFr = parsed.descriptionFr.slice(0, 10000);
+    parsed.descriptionEn = parsed.descriptionEn.slice(0, 10000);
+    parsed.seoDescriptionFr = parsed.seoDescriptionFr.slice(0, 200);
+    parsed.seoDescriptionEn = parsed.seoDescriptionEn.slice(0, 200);
+    parsed.metaTitleFr = clampMetaTitle(parsed.metaTitleFr, 65);
+    parsed.metaTitleEn = clampMetaTitle(parsed.metaTitleEn, 65);
+    parsed.metaDescriptionFr = parsed.metaDescriptionFr.slice(0, 155);
+    parsed.metaDescriptionEn = parsed.metaDescriptionEn.slice(0, 155);
+    parsed.urlHandleFr = slugify(parsed.urlHandleFr);
+    parsed.urlHandleEn = slugify(parsed.urlHandleEn);
+
+    // Supplier brand is echoed from the source (never invented by the model) so it
+    // can be the Shopify vendor + stored in custom.brand_fr.
+    parsed.brand = product.brand;
+
     return parsed as GeneratedContent;
   } catch (err) {
     console.error("[content-generator] Claude returned invalid content:", text.slice(0, 500));
