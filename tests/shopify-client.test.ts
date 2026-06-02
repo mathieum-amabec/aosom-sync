@@ -12,7 +12,87 @@ vi.mock("@/lib/config", () => ({
 }));
 
 // Import after mocks
-const { updateShopifyVariantPrice } = await import("@/lib/shopify-client");
+const { updateShopifyVariantPrice, createShopifyProduct } = await import("@/lib/shopify-client");
+
+import type { AosomMergedProduct } from "@/types/aosom";
+import type { GeneratedContent } from "@/lib/content-generator";
+
+function mergedFixture(): AosomMergedProduct {
+  return {
+    groupKey: "g1",
+    name: "Chaise longue grise",
+    brand: "Outsunny",
+    productType: "Patio & Garden",
+    category: "Patio",
+    description: "",
+    shortDescription: "",
+    material: "",
+    images: ["https://img/1.jpg"],
+    video: "",
+    pdf: "",
+    variants: [
+      {
+        sku: "SKU1", price: 99, qty: 1, color: "Gris", size: "", gtin: "",
+        weight: 1, dimensions: { length: 0, width: 0, height: 0 }, images: [],
+        estimatedArrival: "", outOfStockExpected: "", packageNum: "", boxSize: "", boxWeight: "",
+      },
+    ],
+  } as unknown as AosomMergedProduct;
+}
+
+function contentFixture(over: Partial<GeneratedContent> = {}): GeneratedContent {
+  return {
+    titleFr: "Chaise longue grise",
+    titleEn: "Grey lounge chair",
+    descriptionFr: "<p>fr</p>",
+    descriptionEn: "<p>en</p>",
+    seoDescriptionFr: "s-fr",
+    seoDescriptionEn: "s-en",
+    metaTitleFr: "Chaise | Livraison gratuite — Ameublo Direct",
+    metaTitleEn: "Grey | Free Shipping — Furnish Direct",
+    metaDescriptionFr: "desc fr",
+    metaDescriptionEn: "desc en",
+    urlHandleFr: "chaise-longue-grise",
+    urlHandleEn: "grey-lounge-chair",
+    tags: ["jardin"],
+    brand: "Outsunny",
+    ...over,
+  };
+}
+
+describe("createShopifyProduct — metafield + handle safety", () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({ product: { id: 555 } }) });
+  });
+
+  it("drops metafields whose value is empty (would 422 the whole create)", async () => {
+    // Empty metaTitleFr must NOT be sent as an empty global.title_tag.
+    await createShopifyProduct(mergedFixture(), contentFixture({ metaTitleFr: "" }));
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const mf = body.product.metafields as Array<{ namespace: string; key: string; value: string }>;
+    expect(mf.every((m) => typeof m.value === "string" && m.value.trim() !== "")).toBe(true);
+    expect(mf.find((m) => m.namespace === "global" && m.key === "title_tag")).toBeUndefined();
+    // The non-empty ones survive.
+    expect(mf.find((m) => m.namespace === "global" && m.key === "description_tag")?.value).toBe("desc fr");
+    expect(mf.find((m) => m.key === "brand_fr")?.value).toBe("Outsunny");
+  });
+
+  it("falls back to a title-derived handle when urlHandleFr is empty", async () => {
+    await createShopifyProduct(mergedFixture(), contentFixture({ urlHandleFr: "" }));
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.product.handle).toBe("chaise-longue-grise");
+  });
+
+  it("uses the model handle when present", async () => {
+    await createShopifyProduct(mergedFixture(), contentFixture({ urlHandleFr: "custom-slug" }));
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.product.handle).toBe("custom-slug");
+  });
+});
 
 describe("shopifyFetch — AbortError / timeout", () => {
   beforeEach(() => mockFetch.mockReset());

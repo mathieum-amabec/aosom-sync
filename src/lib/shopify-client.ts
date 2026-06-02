@@ -1,6 +1,6 @@
 import type { ShopifyExistingProduct, ShopifyExistingVariant } from "@/types/sync";
 import type { AosomMergedProduct } from "@/types/aosom";
-import type { GeneratedContent } from "./content-generator";
+import { slugify, type GeneratedContent } from "./content-generator";
 import { env, SHOPIFY, SYNC } from "./config";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
@@ -123,11 +123,16 @@ export async function createShopifyProduct(
   if (hasSize) options.push({ name: "Taille" });
   if (options.length === 0) options.push({ name: "Titre" });
 
+  // Fall back to a title-derived slug if the model's handle slugified to empty;
+  // an empty handle lets Shopify auto-generate one from the title.
+  const handle = content.urlHandleFr.trim() || slugify(content.titleFr);
+
   const payload = {
     product: {
       title: content.titleFr,
+      ...(handle ? { handle } : {}),
       body_html: content.descriptionFr,
-      vendor: "Aosom",
+      vendor: merged.brand || "Aosom",
       product_type: merged.productType,
       tags: content.tags.join(", "),
       status: "draft",
@@ -149,6 +154,20 @@ export async function createShopifyProduct(
       })),
       images: merged.images.map((src) => ({ src })),
       metafields: [
+        // Native Shopify SEO (store default locale = FR). EN equivalents kept in
+        // custom.* for later translation (Translate & Adapt / GraphQL).
+        {
+          namespace: "global",
+          key: "title_tag",
+          value: content.metaTitleFr,
+          type: "single_line_text_field",
+        },
+        {
+          namespace: "global",
+          key: "description_tag",
+          value: content.metaDescriptionFr,
+          type: "single_line_text_field",
+        },
         {
           namespace: "custom",
           key: "title_en",
@@ -163,17 +182,27 @@ export async function createShopifyProduct(
         },
         {
           namespace: "custom",
-          key: "meta_description_fr",
-          value: content.seoDescriptionFr,
+          key: "meta_title_en",
+          value: content.metaTitleEn,
           type: "single_line_text_field",
         },
         {
           namespace: "custom",
           key: "meta_description_en",
-          value: content.seoDescriptionEn,
+          value: content.metaDescriptionEn,
           type: "single_line_text_field",
         },
-      ],
+        // Supplier brand — internal only, never shown to the customer.
+        {
+          namespace: "custom",
+          key: "brand_fr",
+          value: merged.brand || "Aosom",
+          type: "single_line_text_field",
+        },
+        // Shopify 422s the entire product create on a blank single_line_text_field
+        // value, so drop any metafield whose value is empty/undefined (e.g. an LLM
+        // that returned "" for a meta field).
+      ].filter((m) => typeof m.value === "string" && m.value.trim() !== ""),
     },
   };
 

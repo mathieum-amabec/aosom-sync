@@ -2,6 +2,36 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.9.0] - 2026-06-02
+
+### Changed
+- **Product titles no longer carry the supplier brand.** Titles now follow a strict
+  `[product type] [feature] [size] — [color]` pattern (product type first for SEO,
+  max 10 words, no brand, no model number). The supplier brand (Outsunny, HOMCOM, …)
+  moves to the Shopify `vendor` field and a `custom.brand_fr` metafield instead of
+  cluttering the customer-facing title.
+
+### Added
+- **Native Shopify SEO.** Generates `global.title_tag` (≤65 chars, brand-suffix
+  preserved via `clampMetaTitle`) and `global.description_tag` (≤155 chars), plus
+  EN equivalents in `custom.meta_title_en` / `custom.meta_description_en` for later
+  translation.
+- **URL handles.** A `slugify`'d, accent-stripped, brand-free kebab-case handle per
+  language, set on the product at creation.
+
+### Fixed
+- **Empty / stale metafield values no longer 422 the entire product create.** Import
+  jobs generated before this feature lacked the new SEO fields and reached Shopify as
+  `undefined` metafield values, failing the whole `POST /products.json`. `createShopifyProduct`
+  now drops empty-valued metafields and falls back to a title-derived handle; `importToShopify`
+  backfills missing SEO fields on stale content with safe defaults.
+
+### Known issues
+- `extractBrand` resolves a real supplier brand for only ~10% of products; the other
+  ~90% fall back to `vendor = "Aosom"` (deliberate, to match historical DB data and
+  avoid false-positive description diffs — see csv-fetcher.ts BUG-C-STEP3). Improving
+  brand coverage is tracked as separate work.
+
 ## [0.5.8.0] - 2026-06-02
 
 ### Fixed

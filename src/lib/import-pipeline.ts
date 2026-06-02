@@ -1,6 +1,6 @@
 import { fetchAosomCatalog } from "./csv-fetcher";
 import { mergeVariants, buildSkuIndex } from "./variant-merger";
-import { generateProductContent, type GeneratedContent } from "./content-generator";
+import { generateProductContent, backfillSeoFields, type GeneratedContent } from "./content-generator";
 import { createShopifyProduct, addProductToCollection } from "./shopify-client";
 import { findCollectionsForProduct } from "./database";
 import {
@@ -117,6 +117,9 @@ export async function importToShopify(
   const product: AosomMergedProduct = JSON.parse(row.product_data as string);
   let content: GeneratedContent = JSON.parse(row.content as string);
   if (contentOverrides) content = { ...content, ...contentOverrides };
+  // Jobs generated before product-naming-v2 have no SEO-native fields; fill safe
+  // defaults so a stale job imports with degraded SEO instead of 422-ing.
+  content = backfillSeoFields(content, product.brand);
 
   await updateImportJob(jobId, { status: "importing" });
 
