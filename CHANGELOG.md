@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.10.0] - 2026-06-02
+
+### Added
+- **Image selection at import (Étape 1).** `selectProductImages()` curates a
+  product's image list before it becomes a draft: drops images whose URL exposes
+  a dimension `< 800px` (kept when size is undetectable — no per-image HEAD
+  requests), promotes a `lifestyle`/`ambiance`/`room` image to position 1, and
+  caps at **8 images**.
+- **`scripts/dry-run-image-selection.ts`** — before/after dry-run against a local
+  feed copy, using the real selection function. No Shopify writes.
+
+### Notes
+- Applied **only** in `queueForImport` (import/create path), never in
+  `mergeVariants` — `mergeVariants` also feeds the daily sync diff, so filtering
+  there would re-image products that are already live (that is Étape 4).
+- On the current Aosom feed the **size filter and lifestyle promotion are no-ops**:
+  image URLs are opaque hashes (`img-us.aosomcdn.com/100/…`) with no dimensions or
+  scene keywords. They are forward-compatible if such URLs ever appear.
+- The **8-image cap is the active rule**: a dry-run over 5,132 products / 69,095
+  image URLs showed 2,415 products (47%) currently exceed 8 images (up to 119).
+
 ## [0.5.9.0] - 2026-06-02
 
 ### Changed
