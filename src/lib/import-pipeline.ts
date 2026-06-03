@@ -2,7 +2,7 @@ import { fetchAosomCatalog } from "./csv-fetcher";
 import { mergeVariants, buildSkuIndex, selectProductImages } from "./variant-merger";
 import { generateProductContent, backfillSeoFields, type GeneratedContent } from "./content-generator";
 import { createShopifyProduct, addProductToCollection } from "./shopify-client";
-import { findCollectionsForProduct } from "./database";
+import { findCollectionsForProduct, getProduct } from "./database";
 import {
   upsertImportJob,
   getImportJobs as dbGetImportJobs,
@@ -11,7 +11,14 @@ import {
 } from "./database";
 import type { AosomMergedProduct } from "@/types/aosom";
 
-export type ImportStatus = "pending" | "generating" | "reviewing" | "importing" | "done" | "error";
+export type ImportStatus =
+  | "pending"
+  | "generating"
+  | "reviewing"
+  | "importing"
+  | "done"
+  | "error"
+  | "already_imported";
 
 export interface ImportJob {
   id: string;
@@ -57,6 +64,23 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
     // cap at 8. Done here (import path only) so the daily sync/diff never
     // re-images products that are already live.
     const product = { ...rawProduct, images: selectProductImages(rawProduct.images) };
+
+    // Idempotency: skip any product whose SKU already maps to a Shopify product.
+    // Re-importing would create a duplicate (createShopifyProduct always POSTs),
+    // and the new product would not carry the original's manual tags/metafields.
+    let existingShopifyId: string | null = null;
+    for (const v of product.variants) {
+      const existing = await getProduct(v.sku);
+      if (existing?.shopify_product_id) {
+        existingShopifyId = existing.shopify_product_id;
+        break;
+      }
+    }
+    if (existingShopifyId) {
+      console.log(`[IMPORT] Skipping ${product.groupKey} — already_in_shopify (${existingShopifyId})`);
+      continue;
+    }
+
     const id = crypto.randomUUID();
     await upsertImportJob({
       id,
@@ -117,6 +141,15 @@ export async function importToShopify(
 ): Promise<ImportJob> {
   const row = await dbGetImportJob(jobId);
   if (!row) throw new Error(`Job ${jobId} not found`);
+
+  // Idempotency guard: a job that already produced a Shopify product must not be
+  // re-imported. createShopifyProduct is an unconditional POST, so re-running would
+  // create a duplicate product (new ID), and the duplicate would lack any manually
+  // added tags/metafields. Return early instead of creating the duplicate.
+  if (row.shopify_id) {
+    return { ...rowToJob(row), status: "already_imported" };
+  }
+
   if (!row.content) throw new Error("Content not generated yet");
 
   const product: AosomMergedProduct = JSON.parse(row.product_data as string);
