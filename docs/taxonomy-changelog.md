@@ -43,18 +43,23 @@ and got multiple tags in a single PUT). Created **5 smart collections**:
   (no braseros / patio heaters in catalog); merged into existing *Foyers extérieurs*.
 - **#7 (BBQ & Outdoor Kitchen)**: already exists as `bbq-cuisson` (34) from 5B — unchanged.
 
-## ⛔ Blocked: EN translations
+## 5D — collection handle fix
 
-EN collection titles could **not** be set. The Admin token lacks the Translations API
-scopes (confirmed via GraphQL `ACCESS_DENIED`):
+One genuinely mismatched handle corrected (the rest were already consistent):
+- **Jouets pour enfants** (`312997871721`): handle `jeux-dinterieur-et-dexterieur` →
+  `jouets-pour-enfants`, **plus a 301 redirect** (`/collections/jeux-dinterieur-et-dexterieur`
+  → `/collections/jouets-pour-enfants`, redirect id `455589757033`) so the indexed URL
+  keeps working. (The Shopify Admin API does NOT auto-create redirects on handle change.)
+- `frontpage` (Page d'accueil, `312760631401`) left untouched — it's Shopify's reserved
+  homepage handle, not a mismatch.
 
-- `shopLocales` → needs `read_locales` (or `read_markets_home`)
-- `translatableResource` → needs `read_translations`
-- `translationsRegister` will also need `write_translations`
+## EN translations — DONE (25/25)
 
-**To unblock:** Shopify admin → custom app → API scopes → add `read_translations`,
-`write_translations`, `read_locales` → reinstall → update `SHOPIFY_ACCESS_TOKEN` in
-`.env.local`. Then a translations-only pass can register the EN titles in the table above.
+The Translations API scopes (`read_translations`, `write_translations`, `read_locales`)
+were added and the app reinstalled (2026-06-03). EN `title` translations were then
+registered via GraphQL `translationsRegister` for **25 collections** (the 7 smart + 18
+custom; `frontpage` excluded). `en` is a published locale; `fr` is primary.
+Each register fetched the source title `digest` via `translatableResource` first (required).
 
 ## ⚠️ Observed: manual tags can be stripped by product refresh
 
@@ -66,8 +71,15 @@ idempotent and re-syncs any missing tags on `--apply`). Worth confirming the syn
 path preserves non-Aosom tags.
 
 ## Follow-ups
-1. Add translation scopes + run the EN-title pass (7 collections).
-2. Retire the old custom collections (`312997806185`, `312997707881`, `312997740649`)
+1. Retire the old custom collections (`312997806185`, `312997707881`, `312997740649`)
    once the smart versions are verified, then publish the smart `#2/#3/#4`.
-3. Verify the sync/import pipeline preserves manual tags (see warning above); if not,
-   schedule a periodic `taxonomy-build.js --apply` re-sync.
+2. Verify the sync/import pipeline preserves manual tags (see warning above); if not,
+   schedule a periodic `taxonomy-build.js --apply` re-sync. The idempotent-import fix
+   (guard duplicate jobs + existing SKUs) reduces — but the recreation actor ("Zoom")
+   still needs identifying.
+3. Sync `SHOPIFY_ACCESS_TOKEN` into Vercel (Prod + Preview) + redeploy — the app
+   reinstall rotated the token; the old one in Vercel is likely revoked.
+
+> Note: "5A" (deleting empty collections + demo products) was **not** performed in these
+> sessions — no record of it. Only 5B, 5C, 5D, the EN translations, and the import fix
+> were done.
