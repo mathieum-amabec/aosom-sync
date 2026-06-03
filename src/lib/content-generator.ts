@@ -7,7 +7,9 @@ let anthropicClient: Anthropic | null = null;
 
 export function getAnthropicClient(): Anthropic {
   if (!anthropicClient) {
-    anthropicClient = new Anthropic({ apiKey: env.anthropicApiKey });
+    // timeout + retries: a network blip must fail fast and retry, never hang the
+    // process on a half-open socket (the default has no per-request timeout).
+    anthropicClient = new Anthropic({ apiKey: env.anthropicApiKey, timeout: 60_000, maxRetries: 3 });
   }
   return anthropicClient;
 }
