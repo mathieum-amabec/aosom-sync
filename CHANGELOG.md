@@ -2,6 +2,36 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.11.0] - 2026-06-02
+
+### Added
+- **`scripts/migrate-existing-products.ts`** — retroactively applies product-naming-v2
+  (brand-free titles + native SEO metafields) to already-imported Shopify products.
+  Reconstructs each product's Aosom source from the DB (by `shopify_product_id`, falling
+  back to SKU), regenerates content with `generateProductContent`, and writes the title +
+  SEO metafields. **Never touches the URL handle** (SEO-indexed). Modes:
+  - `DRY_RUN=true` (default) — writes a CSV report, no Shopify writes.
+  - `APPLY_FROM_CSV=<csv>` — applies already-reviewed content straight from a dry-run CSV
+    (no Claude calls): title + `global.title_tag` / `global.description_tag` /
+    `custom.title_en` / `custom.meta_description_fr`.
+  - `RESUME_CSV=<csv>` — skips `shopify_id`s already present (resume an interrupted run).
+  - `CANARY=N` — apply to the first N rows only.
+  - Aborts after >10 consecutive errors (network-outage guard).
+- **`scripts/verify-products.ts`** — read-only check of a product's title/handle + SEO
+  metafields, for before/after migration verification.
+
+### Changed
+- **Anthropic client now has a 60s timeout + 3 retries** (`content-generator.ts`). A
+  network blip fails fast and retries instead of hanging the process on a half-open
+  socket (this previously froze a long migration run indefinitely).
+
+### Notes
+- Production migration run: **566 / 577 products migrated** (titles v2, native SEO, no
+  supplier brand), 0 errors. 11 not migrated: 4 test placeholders + 6 delisted Outsunny
+  products (no Aosom DB source) + 1 invalid-JSON generation error.
+- Known gap: `custom.meta_description_en` keeps its old (brand-y) text — the dry-run CSV
+  did not capture the EN meta description. A separate pass is planned.
+
 ## [0.5.10.0] - 2026-06-02
 
 ### Added
