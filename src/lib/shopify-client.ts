@@ -134,6 +134,12 @@ export async function createShopifyProduct(
       body_html: content.descriptionFr,
       vendor: merged.brand || "Aosom",
       product_type: merged.productType,
+      // TODO(taxonomy): on a (re)creation, only generated tags are written here.
+      // Manually-added taxonomy slugs (e.g. "bbq-cuisson", "rangement-exterieur")
+      // are not part of content.tags, so they are lost if a product is recreated.
+      // Once taxonomy tags are tracked (import job / products table), merge them in:
+      // tags: [...new Set([...content.tags, ...taxonomyTags])].join(", ").
+      // See docs/taxonomy-changelog.md. Non-blocking for the idempotency fix.
       tags: content.tags.join(", "),
       status: "draft",
       options,
