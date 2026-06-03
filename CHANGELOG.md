@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.12.0] - 2026-06-03
+
+### Fixed
+- **Idempotent import** — `importToShopify` no longer creates duplicate Shopify
+  products. A job that already produced a `shopify_id` returns early
+  (`already_imported`), and `queueForImport` skips any SKU already mapped to a
+  `shopify_product_id`. Closes the failure mode where re-importing an existing SKU
+  created a fresh product (new ID) stripped of its manual tags/metafields.
+- **`package.json` version drift** — synced `package.json` (was stuck at `0.5.1.0`)
+  to the `VERSION` file, so the health endpoint reports the real version again.
+
+### Added
+- `scripts/taxonomy-audit.js` (read-only) and `scripts/taxonomy-build.js`
+  (idempotent, dry-run by default; `--apply` to write) — reusable tooling for the
+  outdoor-collection taxonomy work.
+- `docs/taxonomy-changelog.md` — audit trail of the Shopify-side taxonomy operations
+  (5B smart-collection migration, 5C new outdoor collections, 5D handle fix + 301
+  redirect, and the 25/25 EN collection-title translations).
+- `tests/import-pipeline.test.ts` — 4 tests covering both import idempotency guards.
+
 ## [0.5.11.0] - 2026-06-02
 
 ### Added
