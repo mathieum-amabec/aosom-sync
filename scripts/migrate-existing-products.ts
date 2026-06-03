@@ -27,7 +27,8 @@
  * CSV report → scripts/reports/migrate-dry-run-<timestamp>.csv (gitignored).
  */
 
-import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync, readFileSync } from "node:fs";
+import { parse as parseCsv } from "csv-parse/sync";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureSchema } from "@/lib/database";
@@ -43,6 +44,16 @@ const DRY_RUN = process.env.DRY_RUN !== "false"; // default true — must opt ou
 const LIMIT = process.env.LIMIT ? Math.max(1, parseInt(process.env.LIMIT, 10)) : Infinity;
 const CLAUDE_DELAY_MS = 2000; // 2s between Claude API calls
 const SHOPIFY_DELAY_MS = 500; // 2 req/s ceiling for the PUT in write mode
+// Resume: skip every shopify_id already present in this CSV (e.g. an interrupted
+// run's own output). Lets a re-run continue without re-touching done products.
+const RESUME_CSV = process.env.RESUME_CSV || "";
+// Abort if too many products fail in a row — a sign of a network/API outage
+// rather than per-product data issues.
+const MAX_CONSECUTIVE_ERRORS = 10;
+// Apply already-reviewed content straight from a prior dry-run CSV (no Claude calls).
+const APPLY_FROM_CSV = process.env.APPLY_FROM_CSV || "";
+// Limit the apply to the first N rows (canary). 0 = all.
+const CANARY = process.env.CANARY ? Math.max(1, parseInt(process.env.CANARY, 10)) : 0;
 
 // Supplier brands that must NOT appear in a v2 title (used for the audit metric).
 const SUPPLIER_BRANDS = [
@@ -219,6 +230,21 @@ function csvCell(v: string): string {
   return `"${String(v).replace(/"/g, '""')}"`;
 }
 
+/** Shopify IDs already present in a prior CSV — skipped on resume. */
+function loadResumeIds(path: string): Set<string> {
+  if (!path) return new Set();
+  try {
+    const text = readFileSync(path, "utf8");
+    const rows = parseCsv(text, { columns: true, skip_empty_lines: true, relax_column_count: true }) as Record<string, string>[];
+    const ids = new Set<string>();
+    for (const r of rows) if (r.shopify_id) ids.add(String(r.shopify_id).trim());
+    return ids;
+  } catch (err) {
+    log("resume_csv_error", { path, err: err instanceof Error ? err.message : String(err) });
+    return new Set();
+  }
+}
+
 interface MigrationRecord {
   shopify_id: string;
   sku: string;
@@ -230,8 +256,70 @@ interface MigrationRecord {
   meta_description_fr_apres: string;
 }
 
+// ─── Apply mode: write already-reviewed content straight from a dry-run CSV ───
+// No Claude calls — applies exactly the titles/metas already reviewed. The dry-run
+// CSV has no meta_description_en column, so custom.meta_description_en is NOT set
+// by this path (empty values are filtered out before the PUT). Handle is never sent.
+async function applyFromCsv(): Promise<void> {
+  const allRows = parseCsv(readFileSync(APPLY_FROM_CSV, "utf8"), {
+    columns: true, skip_empty_lines: true, relax_column_count: true,
+  }) as Record<string, string>[];
+  const resumeIds = loadResumeIds(RESUME_CSV);
+  const limit = CANARY > 0 ? CANARY : allRows.length;
+  const rows = allRows.slice(0, limit).filter((r) => !resumeIds.has(String(r.shopify_id).trim()));
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const reportsDir = join(__dirname, "reports");
+  mkdirSync(reportsDir, { recursive: true });
+  const reportPath = join(reportsDir, `migrate-apply-${stamp}.csv`);
+  writeFileSync(reportPath, "shopify_id,status\n", "utf8");
+
+  log("apply_from_csv_start", {
+    source: APPLY_FROM_CSV, total: allRows.length, canary: CANARY || "all",
+    resume_skipped: resumeIds.size, to_apply: rows.length, dry_run: DRY_RUN, report: reportPath,
+  });
+
+  let updated = 0, errors = 0, consecutiveErrors = 0, aborted = false;
+  for (const r of rows) {
+    const id = String(r.shopify_id).trim();
+    const content: NewContent = {
+      titleFr: r.title_fr_apres ?? "",
+      titleEn: r.title_en_apres ?? "",
+      metaTitleFr: r.meta_title_fr_apres ?? "",
+      metaDescriptionFr: r.meta_description_fr_apres ?? "",
+      metaDescriptionEn: "", // not captured in the dry-run CSV → filtered out of the PUT
+    };
+    if (DRY_RUN) { log("would_apply", { shopify_id: id, title: content.titleFr }); continue; }
+    try {
+      await applyToShopify(id, content);
+      updated++; consecutiveErrors = 0;
+      appendFileSync(reportPath, `"${id}","ok"\n`, "utf8");
+      log("applied", { progress: `${updated}/${rows.length}`, shopify_id: id, handle: r.handle });
+      await sleep(SHOPIFY_DELAY_MS);
+    } catch (err) {
+      errors++; consecutiveErrors++;
+      appendFileSync(reportPath, `"${id}","error"\n`, "utf8");
+      log("apply_error", { shopify_id: id, err: err instanceof Error ? err.message : String(err), consecutive: consecutiveErrors });
+      if (consecutiveErrors > MAX_CONSECUTIVE_ERRORS) { aborted = true; break; }
+    }
+    if (updated % 25 === 0 && updated > 0) log("progress", { applied: `${updated}/${rows.length}`, errors });
+  }
+
+  console.log("\n══════════════════════════════════════════════════════════════════");
+  console.log(` MIGRATION APPLY-FROM-CSV — ${DRY_RUN ? "PREVIEW (no writes)" : "WRITE MODE"}${aborted ? "  [ABORTED: error streak]" : ""}`);
+  console.log("══════════════════════════════════════════════════════════════════");
+  console.log(`Source CSV: ${APPLY_FROM_CSV}`);
+  console.log(`À appliquer: ${rows.length}${CANARY ? ` (canary ${CANARY})` : ""}   Mis à jour: ${updated}   Erreurs: ${errors}   Resume-skippés: ${resumeIds.size}`);
+  if (aborted) console.log(`⚠ ARRÊT: >${MAX_CONSECUTIVE_ERRORS} erreurs consécutives. Relançable avec RESUME_CSV=${reportPath}`);
+  console.log(`Note: custom.meta_description_en NON appliqué (absent du CSV dry-run). Handle jamais touché.`);
+  console.log(`Report: ${reportPath}`);
+  console.log("══════════════════════════════════════════════════════════════════");
+  log("done_apply", { updated, errors, aborted, to_apply: rows.length });
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
+  if (APPLY_FROM_CSV) { await applyFromCsv(); return; }
   log("start", { dry_run: DRY_RUN, limit: LIMIT === Infinity ? "all" : LIMIT });
 
   const idx = await buildDbIndex();
@@ -253,10 +341,16 @@ async function main(): Promise<void> {
   writeFileSync(csvPath, CSV_COLUMNS.join(",") + "\n", "utf8");
   log("csv_opened", { path: csvPath });
 
+  const resumeIds = loadResumeIds(RESUME_CSV);
+  if (RESUME_CSV) log("resume_loaded", { path: RESUME_CSV, skip_ids: resumeIds.size });
+
   const records: MigrationRecord[] = [];
-  let processed = 0, skipped = 0, errors = 0, updated = 0;
+  let processed = 0, skipped = 0, errors = 0, updated = 0, resumeSkipped = 0;
+  let consecutiveErrors = 0, aborted = false;
 
   for await (const p of iterateShopifyProducts(LIMIT)) {
+    if (resumeIds.has(p.id)) { resumeSkipped++; continue; }
+
     const rows = resolveRows(p, idx);
     if (!rows.length) {
       skipped++;
@@ -269,8 +363,9 @@ async function main(): Promise<void> {
       const merged = pickMerged(mergeVariants(rows), p);
       content = await generateProductContent(merged);
     } catch (err) {
-      errors++;
-      log("generate_error", { shopify_id: p.id, err: err instanceof Error ? err.message : String(err) });
+      errors++; consecutiveErrors++;
+      log("generate_error", { shopify_id: p.id, err: err instanceof Error ? err.message : String(err), consecutive: consecutiveErrors });
+      if (consecutiveErrors > MAX_CONSECUTIVE_ERRORS) { aborted = true; break; }
       await sleep(CLAUDE_DELAY_MS);
       continue;
     }
@@ -292,20 +387,24 @@ async function main(): Promise<void> {
     if (!DRY_RUN) {
       try {
         await applyToShopify(p.id, content);
-        updated++;
+        updated++; consecutiveErrors = 0;
         log("updated", { progress: `${updated}/${totalShopify}`, shopify_id: p.id, handle: p.handle });
         await sleep(SHOPIFY_DELAY_MS);
       } catch (err) {
-        errors++;
-        log("shopify_update_error", { shopify_id: p.id, err: err instanceof Error ? err.message : String(err) });
+        errors++; consecutiveErrors++;
+        log("shopify_update_error", { shopify_id: p.id, err: err instanceof Error ? err.message : String(err), consecutive: consecutiveErrors });
+        if (consecutiveErrors > MAX_CONSECUTIVE_ERRORS) { aborted = true; break; }
       }
+    } else {
+      consecutiveErrors = 0; // dry-run: a successfully generated product resets the streak
     }
 
     processed++;
-    if (processed % 25 === 0) log("progress", { done: `${processed}/${totalShopify}`, skipped, errors });
+    if (processed % 25 === 0) log("progress", { done: `${processed}/${totalShopify}`, skipped, errors, updated });
     await sleep(CLAUDE_DELAY_MS); // 2s between Claude calls
   }
 
+  if (aborted) log("aborted", { reason: `>${MAX_CONSECUTIVE_ERRORS} consecutive errors`, processed, updated, errors });
   log("csv_finalized", { path: csvPath, rows: records.length });
 
   // ─── Analysis (ÉTAPE 2) ───────────────────────────────────────────────────
@@ -314,10 +413,12 @@ async function main(): Promise<void> {
   const fmt = (s: number) => `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}min`;
 
   console.log("\n══════════════════════════════════════════════════════════════════");
-  console.log(` MIGRATION DRY-RUN — ${DRY_RUN ? "NO Shopify writes" : "WRITE MODE"}`);
+  console.log(` MIGRATION ${DRY_RUN ? "DRY-RUN — NO Shopify writes" : "APPLY — WRITE MODE"}${aborted ? "  [ABORTED: error streak]" : ""}`);
   console.log("══════════════════════════════════════════════════════════════════");
   console.log(`Shopify products total: ${totalShopify}`);
-  console.log(`Processed: ${processed}   Skipped (no DB match): ${skipped}   Errors: ${errors}   ${DRY_RUN ? "" : `Updated: ${updated}`}`);
+  if (!DRY_RUN) console.log(`Mis à jour (Shopify): ${updated}`);
+  console.log(`Traités (contenu généré): ${processed}   Skippés (pas de match DB): ${skipped}   Resume-skippés: ${resumeSkipped}   Erreurs: ${errors}`);
+  if (aborted) console.log(`⚠ ARRÊT: >${MAX_CONSECUTIVE_ERRORS} erreurs consécutives — vérifier le réseau/API. Relançable avec RESUME_CSV=${csvPath}`);
   if (csvPath) console.log(`CSV: ${csvPath}`);
 
   console.log("\n── First 10: title BEFORE → AFTER (FR) ───────────────────────────");
@@ -334,7 +435,7 @@ async function main(): Promise<void> {
   console.log(`\nEstimation temps total (tous les produits): ~${fmt(estSeconds)}  (${totalShopify} × ${CLAUDE_DELAY_MS / 1000}s/appel Claude)`);
   console.log("══════════════════════════════════════════════════════════════════");
 
-  log("done", { processed, skipped, errors, updated, still_brand: stillBrand.length });
+  log("done", { processed, skipped, resumeSkipped, errors, updated, aborted, still_brand: stillBrand.length });
 }
 
 main().catch((err) => {
