@@ -15,7 +15,7 @@
 - `color_scheme` scheme-4 (dark) → **scheme-1 (light #FAFAF8)**; nav/icons/lang auto-adapt to `#1A1A2E`
 - **Bilingual logo** (header.liquid, both logo blocks, unconditional): FR `logo-fr.png` (Ameublo Direct) / EN `logo-en.png` (Furnish Direct) — white bg stripped via sharp, transparent PNG, `max-height:50px`. Favicon sofa extracted to `favicon-32/180.png`, linked in `layout/theme.liquid <head>`.
 - Phone `514-292-7788` (tel link, `#1A1A2E`)
-- Announcement bar (2 slides, auto-rotate, bilingual via translationsRegister): (1) shipping/returns/payment, (2) "⭐ clients satisfaits → /pages/a-propos"
+- Announcement bar (2 slides, auto-rotate, bilingual via translationsRegister): (1) shipping/returns/payment, (2) "⭐ Nouveau : Laissez-nous votre avis après votre achat !" → /pages/a-propos (honest CTA — Judge.me has 0 reviews so far)
 
 ## Homepage (`templates/index.json`)
 Order: hero → trust bar → story1 (meubles) → best-sellers → category list → mobilier ext → free-ship banner → story2 (extérieur) → "Pourquoi nous" → Judge.me → testimonials → blog → "Comment ça marche" → newsletter → trust banner.
@@ -43,6 +43,6 @@ Order: hero → trust bar → story1 (meubles) → best-sellers → category lis
 - `package.json`/`package-lock.json`: dev deps `sharp`, `potrace`
 
 ## Follow-ups before/after publish
-- Judge.me: 0 reviews so far → "verified reviews" / "thousands of customers" messaging is aspirational until reviews accrue. Configure post-purchase review-request emails in app.judge.me.
+- Judge.me: 0 reviews so far. Aspirational messaging adjusted to honest CTAs: announcement slide 2 → "Leave us a review", product badge → "Avis clients Judge.me" (not "vérifiés"). Testimonials multicolumn (5 manual ★) + "500 families" banner kept (not review-dependent). Configure post-purchase review-request emails in app.judge.me; revisit copy once reviews accrue.
 - Logo text renders via `<img>` (no DM Sans webfont in img sandbox — uses image pixels, fine since PNG).
 - Publish: swap copy `160059195497` to main when validated.
