@@ -34,12 +34,18 @@ vi.mock("@/lib/database", () => ({
   getProduct: vi.fn(),
   findCollectionsForProduct: vi.fn().mockResolvedValue({ main: null, sub: null }),
 }));
+// Social draft generation is fire-and-forget after a successful import; mock it so the
+// dynamic import resolves to a stub instead of loading the real (Anthropic-backed) job.
+vi.mock("@/jobs/job4-social", () => ({
+  triggerNewProduct: vi.fn().mockResolvedValue({ draftId: 1 }),
+}));
 
 import { importToShopify, queueForImport } from "@/lib/import-pipeline";
 import { createShopifyProduct } from "@/lib/shopify-client";
 import { getImportJob, getProduct, upsertImportJob } from "@/lib/database";
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { mergeVariants } from "@/lib/variant-merger";
+import { triggerNewProduct } from "@/jobs/job4-social";
 
 function makeJobRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -80,6 +86,17 @@ describe("importToShopify — duplicate-job guard", () => {
     expect(createShopifyProduct).toHaveBeenCalledTimes(1);
     expect(job.status).toBe("done");
     expect(job.shopifyId).toBe("123");
+  });
+
+  it("fires a new_product social draft (with the primary SKU) after a successful import", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(createShopifyProduct).mockResolvedValue("123");
+
+    await importToShopify("job-1");
+
+    // The draft trigger is fire-and-forget via a dynamic import, so wait for the
+    // floating promise to flush before asserting.
+    await vi.waitFor(() => expect(triggerNewProduct).toHaveBeenCalledWith("S1"));
   });
 });
 

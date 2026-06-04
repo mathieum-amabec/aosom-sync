@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.13.0] - 2026-06-04
+## [0.5.15.0] - 2026-06-04
 
 ### Added
 - **Storefront theme overhaul** (preview copy theme `160059195497` "Copie de Trade v2";
@@ -22,6 +22,25 @@ All notable changes to Aosom Sync will be documented in this file.
 - Review messaging made honest while Judge.me has 0 reviews: announcement slide 2 →
   "Laissez-nous votre avis après votre achat" CTA, product badge → "Avis clients Judge.me"
   (dropped "vérifiés"). Revisit once reviews accrue.
+
+## [0.5.14.0] - 2026-06-04
+
+### Changed
+- **Re-enabled `new_product` social drafts.** A successful product import now fires a
+  bilingual social draft again (`importToShopify` → `triggerNewProduct`). The trigger was
+  disabled while waiting for image support; that infra is now in place — `pickRandomImages`
+  captures the Aosom product photos into `image_urls`, and the publisher falls back to
+  `products.image1` (JOIN) so every product post carries an image. Drafts are created in
+  `status='draft'` (review-pending) — nothing is auto-published.
+- **Re-enabled the daily `stock_highlight` cron.** `/api/cron/social` now calls
+  `triggerStockHighlight()` (was a no-op) to generate one highlight draft per day from a
+  random eligible product. Returns `skipped` when no product is eligible, `500` on failure.
+
+### Added
+- `tests/cron-social.test.ts` — auth, success, no-eligible-product, and failure paths for
+  the stock_highlight cron.
+- `tests/import-pipeline.test.ts` — asserts a `new_product` draft fires with the primary SKU
+  after a successful import.
 
 ## [0.5.12.0] - 2026-06-03
 
