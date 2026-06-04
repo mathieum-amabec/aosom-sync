@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.15.0] - 2026-06-04
+
+### Added
+- **Storefront theme overhaul** (preview copy theme `160059195497` "Copie de Trade v2";
+  the live theme `141533905001` was never touched). Bilingual FR/EN B2C storefront:
+  light-scheme header with bilingual logo + sofa favicon, lifestyle homepage
+  (hero, storytelling, 6-collection grid, "Pourquoi nous choisir", "Comment ça marche",
+  blog teaser, newsletter, trust banners), B2C product page (variant picker, quantity,
+  buy buttons, trust badges, sticky add-to-cart, accordions), filtered collections
+  (4-col / 24-per-page), and a custom bilingual 404. Copper `#C17F3E` palette throughout.
+  i18n via `request.locale.iso_code` (custom-liquid) + `translationsRegister` (native sections).
+  The theme lives in Shopify (Admin Assets API); `docs/theme-overhaul.md` is the audit trail.
+- `scripts/vectorize-logos.ts` — logo vectorization tool (webp → sharp → potrace → SVG),
+  plus generated `Logo/` assets (bilingual PNG logos, favicons) and `potrace` dev dependency.
+- `docs/BACKLOG.md` — P2 follow-up: synchronize FR/EN blog generation onto the same topic.
+
+### Changed
+- Review messaging made honest while Judge.me has 0 reviews: announcement slide 2 →
+  "Laissez-nous votre avis après votre achat" CTA, product badge → "Avis clients Judge.me"
+  (dropped "vérifiés"). Revisit once reviews accrue.
+
 ## [0.5.14.0] - 2026-06-04
 
 ### Changed
