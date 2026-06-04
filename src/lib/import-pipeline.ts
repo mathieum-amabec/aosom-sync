@@ -208,12 +208,18 @@ export async function importToShopify(
       }
     }
 
-    // DISABLED: waiting for image attachments feature (product posts need images)
-    // import("@/jobs/job4-social").then(({ triggerNewProduct }) => {
-    //   triggerNewProduct(primarySku).catch((err) =>
-    //     console.error(`[IMPORT] Social draft failed for ${primarySku}: ${err}`)
-    //   );
-    // }).catch(() => {});
+    // Fire-and-forget social draft for the new product. Re-enabled now that the
+    // image infra is in place: triggerNewProduct calls pickRandomImages() to capture
+    // the Aosom product photos into image_urls, and the publisher falls back to
+    // products.image1 (JOIN) when needed — so product posts always carry an image.
+    const primarySku = product.variants[0]?.sku;
+    if (primarySku) {
+      import("@/jobs/job4-social").then(({ triggerNewProduct }) => {
+        triggerNewProduct(primarySku).catch((err) =>
+          console.error(`[IMPORT] Social draft failed for ${primarySku}: ${err}`)
+        );
+      }).catch(() => {});
+    }
 
     return { ...rowToJob(row), status: "done", shopifyId, content };
   } catch (err) {
