@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 80" width="280" height="80" fill="none" role="img" aria-label="FURNISH Direct">
+  <g fill="#C9A84C">
+    <rect x="20" y="23" width="60" height="21" rx="5"/>
+    <rect x="12" y="38" width="76" height="16" rx="6"/>
+    <rect x="12" y="32" width="13" height="22" rx="5"/>
+    <rect x="75" y="32" width="13" height="22" rx="5"/>
+    <rect x="18" y="54" width="4" height="7" rx="1"/>
+    <rect x="30" y="54" width="4" height="7" rx="1"/>
+    <rect x="66" y="54" width="4" height="7" rx="1"/>
+    <rect x="78" y="54" width="4" height="7" rx="1"/>
+  </g>
+  <line x1="105" y1="15" x2="105" y2="65" stroke="#888888" stroke-width="1"/>
+  <text x="120" y="38" font-family="DM Sans, Arial, sans-serif" font-size="22" font-weight="700" fill="#FFFFFF" letter-spacing="3">FURNISH</text>
+  <text x="120" y="57" font-family="DM Sans, Arial, sans-serif" font-size="14" font-weight="400" fill="#FFFFFF" letter-spacing="4">DIRECT</text>
+</svg>
