@@ -1,89 +1,33 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/config";
+import {
+  selectBilingualTopic,
+  type Language,
+} from "@/lib/blog-topics";
+import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
 
-// Two sequential blog generations (Claude article + 3 Unsplash searches +
-// Shopify draft create), each ~30-50s, with a 3s pause between them.
+// Two sequential blog generations (Claude article + Shopify draft create),
+// each ~30-50s, plus one shared Unsplash fetch, with a 3s pause between langs.
 export const maxDuration = 180;
 
 // Spacing between FR and EN generations — stays well inside the blog/generate
-// rate limiter (6/min) and gives Claude/Unsplash a beat.
+// rate limiter (6/min) and gives Claude a beat.
 const BETWEEN_LANGS_DELAY_MS = 3_000;
 
-type Language = "fr" | "en";
+// Images shared across the FR + EN pair so the two articles are visually
+// identical. One photo set per run keeps Unsplash usage and download pings low.
+const SHARED_IMAGE_COUNT = 3;
 
 type LangOutcome =
   | { language: Language; success: true; articleId: string; adminUrl: string; title: string }
   | { language: Language; success: false; error: string };
-
-// Topic rotation keyed by ISO week number modulo 10 — same index FR/EN so
-// the two articles in a single run share a theme.
-const TOPICS_FR: readonly string[] = [
-  "Guide entretien meubles bois intérieur",
-  "Aménager un balcon urbain petit budget",
-  "Meubles multifonctionnels petits espaces",
-  "Décoration scandinave guide complet",
-  "Comment choisir un canapé durable",
-  "Tendances déco automne 2026 Québec",
-  "Organiser son espace de travail à domicile",
-  "Meubles écologiques et durables",
-  "Créer une chambre cocooning",
-  "Salle à manger conviviale nos conseils",
-];
-
-const TOPICS_EN: readonly string[] = [
-  "How to arrange furniture in a small living room",
-  "Best materials for outdoor furniture in Canada",
-  "Home office setup for remote work productivity",
-  "Mid-century modern furniture guide",
-  "Choosing the right dining table for your family",
-  "Fall decor trends 2026 Canadian homes",
-  "Minimalist bedroom design tips",
-  "Pet-friendly furniture materials ranked",
-  "Creating a cozy reading nook",
-  "Storage solutions for small apartments",
-];
-
-// Stopwords stripped when deriving keywords from a topic. Kept inline (small,
-// language-specific to this file) to avoid a global stopword list module.
-const STOP_FR = new Set([
-  "le", "la", "les", "un", "une", "de", "du", "des", "d", "et", "à", "au", "aux",
-  "en", "avec", "pour", "sur", "dans", "par", "ou", "ce", "ces", "son", "sa",
-  "ses", "nos", "votre", "notre", "comment", "guide", "complet", "conseils",
-  "est", "sont", "plus", "mieux", "tout", "tous", "toute", "toutes",
-]);
-
-const STOP_EN = new Set([
-  "a", "an", "the", "of", "in", "on", "for", "to", "and", "or", "with", "by",
-  "how", "best", "guide", "tips", "your", "you", "is", "are", "what", "when",
-  "where", "which", "that", "this", "these", "those", "at", "from", "right",
-  "into",
-]);
 
 function verifyCronSecret(header: string | null): boolean {
   if (!header) return false;
   const expected = `Bearer ${env.cronSecret}`;
   if (header.length !== expected.length) return false;
   return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
-}
-
-function isoWeekNumber(d: Date): number {
-  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  const dayNum = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  return Math.ceil(((date.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
-}
-
-function extractKeywords(topic: string, lang: Language): string[] {
-  const stops = lang === "fr" ? STOP_FR : STOP_EN;
-  return topic
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !stops.has(w))
-    .filter((w, i, arr) => arr.indexOf(w) === i)
-    .slice(0, 3);
 }
 
 interface BlogGenerateResponse {
@@ -95,11 +39,37 @@ interface BlogGenerateResponse {
   blogId: number;
 }
 
+/**
+ * Fetch the photo set shared by both languages. Returns `undefined` (not an
+ * error) when Unsplash fails — callers then let each language self-fetch so a
+ * photo hiccup never blocks the articles, at the cost of the "same image"
+ * guarantee for that one run.
+ */
+async function fetchSharedImages(query: string): Promise<UnsplashImage[] | undefined> {
+  try {
+    const images = await searchImages(query, SHARED_IMAGE_COUNT);
+    if (images.length < SHARED_IMAGE_COUNT) {
+      console.error(`[CRON/blog] shared image query "${query}" returned ${images.length}/${SHARED_IMAGE_COUNT}; langs will self-fetch`);
+      return undefined;
+    }
+    // Trigger download pings once here (Unsplash guideline) since /api/blog/generate
+    // skips its own search + ping when images are supplied.
+    for (const img of images) {
+      await triggerDownload(img.downloadLocation);
+    }
+    return images;
+  } catch (err) {
+    console.error(`[CRON/blog] shared image fetch failed for "${query}"; langs will self-fetch:`, err);
+    return undefined;
+  }
+}
+
 async function generateBlog(
   origin: string,
   topic: string,
   lang: Language,
   keywords: string[],
+  images: UnsplashImage[] | undefined,
 ): Promise<LangOutcome> {
   const url = `${origin}/api/blog/generate`;
   const tag = lang.toUpperCase();
@@ -112,7 +82,8 @@ async function generateBlog(
         Authorization: `Bearer ${env.cronSecret}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ topic, lang, keywords }),
+      // `images` is omitted when undefined → generate falls back to its own search.
+      body: JSON.stringify({ topic, lang, keywords, ...(images ? { images } : {}) }),
     });
   } catch (err) {
     console.error(`[CRON/blog] ${tag} fetch threw:`, err);
@@ -141,23 +112,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const week = isoWeekNumber(new Date());
-  const idx = week % TOPICS_FR.length;
-  const topicFr = TOPICS_FR[idx];
-  const topicEn = TOPICS_EN[idx];
-  const kwFr = extractKeywords(topicFr, "fr");
-  const kwEn = extractKeywords(topicEn, "en");
-
+  const sel = selectBilingualTopic(new Date());
   const origin = new URL(request.url).origin;
 
-  console.log(`[CRON/blog] week=${week} idx=${idx} FR="${topicFr}" EN="${topicEn}"`);
+  console.log(`[CRON/blog] week=${sel.week} idx=${sel.idx} FR="${sel.fr}" EN="${sel.en}" img="${sel.imageQuery}"`);
 
-  const fr = await generateBlog(origin, topicFr, "fr", kwFr);
+  // One shared photo set for the whole pair → identical imagery FR + EN.
+  const sharedImages = await fetchSharedImages(sel.imageQuery);
+  console.log(`[CRON/blog] shared images: ${sharedImages ? sharedImages.length : "none (self-fetch)"}`);
+
+  const fr = await generateBlog(origin, sel.fr, "fr", sel.keywordsFr, sharedImages);
 
   console.log(`[CRON/blog] Waiting ${BETWEEN_LANGS_DELAY_MS}ms before EN`);
   await new Promise((r) => setTimeout(r, BETWEEN_LANGS_DELAY_MS));
 
-  const en = await generateBlog(origin, topicEn, "en", kwEn);
+  const en = await generateBlog(origin, sel.en, "en", sel.keywordsEn, sharedImages);
 
   const articles: LangOutcome[] = [fr, en];
   const generated = articles.filter((a) => a.success).length;
@@ -167,8 +136,9 @@ export async function GET(request: Request) {
   return NextResponse.json(
     {
       success: !allFailed,
-      week,
-      topicIndex: idx,
+      week: sel.week,
+      topicIndex: sel.idx,
+      sharedImages: sharedImages ? sharedImages.length : 0,
       articles,
       generated,
       triggeredAt: new Date().toISOString(),
