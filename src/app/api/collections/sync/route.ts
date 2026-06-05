@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getProductsWithShopifyId, getAllCollectionMappings } from "@/lib/database";
 import type { CollectionMapping } from "@/lib/database";
 import { addProductToCollection, getProductCollections } from "@/lib/shopify-client";
+import { isAuthenticated } from "@/lib/auth";
 
 /** Match a product type against the mapping table in-memory (walk up hierarchy). */
 function findMappingForType(productType: string, mappingMap: Map<string, CollectionMapping>): CollectionMapping | null {
@@ -21,6 +22,9 @@ function findMappingForType(productType: string, mappingMap: Map<string, Collect
  * Loads all mappings once (no N+1), then processes products in batches.
  */
 export async function POST() {
+  if (!(await isAuthenticated())) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const [products, mappings] = await Promise.all([
       getProductsWithShopifyId(),

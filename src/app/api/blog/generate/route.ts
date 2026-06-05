@@ -38,6 +38,40 @@ interface BlogGenerateBody {
   topic: string;
   lang: BlogLang;
   keywords?: string[];
+  /** Pre-fetched shared photo set (from the bilingual cron) — when present,
+   *  this endpoint skips its own Unsplash search so FR + EN match exactly. */
+  images?: UnsplashImage[];
+}
+
+const IMAGE_FIELDS = [
+  "id", "url", "altDescription", "photographer",
+  "photographerUrl", "unsplashUrl", "downloadLocation",
+] as const;
+
+/**
+ * Validate a caller-supplied image set. Malformed input returns `undefined`
+ * (ignored → endpoint falls back to its own search) rather than 400, so a bad
+ * `images` field never blocks article creation.
+ */
+function parseImages(raw: unknown): UnsplashImage[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: UnsplashImage[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    if (IMAGE_FIELDS.every((f) => typeof o[f] === "string")) {
+      out.push({
+        id: o.id as string,
+        url: o.url as string,
+        altDescription: o.altDescription as string,
+        photographer: o.photographer as string,
+        photographerUrl: o.photographerUrl as string,
+        unsplashUrl: o.unsplashUrl as string,
+        downloadLocation: o.downloadLocation as string,
+      });
+    }
+  }
+  return out.length > 0 ? out.slice(0, 6) : undefined;
 }
 
 interface ClaudeArticleJson {
@@ -73,7 +107,9 @@ function parseBody(raw: unknown): BlogGenerateBody | { error: string } {
       .slice(0, 10);
   }
 
-  return { topic, lang, keywords };
+  const images = parseImages(obj.images);
+
+  return { topic, lang, keywords, images };
 }
 
 function langPromptFragment(lang: BlogLang): string {
@@ -247,18 +283,25 @@ export async function POST(request: Request) {
     // 1. Generate article copy via Claude.
     const article = await generateArticleJson(input);
 
-    // 2. Fetch 3 Unsplash photos: 1 featured + 2 inline.
-    const searchQuery = [input.topic, ...(input.keywords ?? [])].filter(Boolean).join(" ");
-    const images = await searchImages(searchQuery, 3);
-    if (images.length < 3) {
-      throw new Error(`Unsplash returned ${images.length} image(s) for "${searchQuery}", need 3`);
-    }
+    // 2. Use the cron-supplied shared photo set when present (keeps the FR + EN
+    //    pair visually identical); otherwise search Unsplash for this topic.
+    let images: UnsplashImage[];
+    if (input.images && input.images.length >= 3) {
+      // Download pings already fired by the caller that fetched the shared set.
+      images = input.images;
+    } else {
+      const searchQuery = [input.topic, ...(input.keywords ?? [])].filter(Boolean).join(" ");
+      images = await searchImages(searchQuery, 3);
+      if (images.length < 3) {
+        throw new Error(`Unsplash returned ${images.length} image(s) for "${searchQuery}", need 3`);
+      }
 
-    // 3. Trigger download notifications (Unsplash API guideline — required).
-    //    Fire sequentially to respect API politeness; failures are logged
-    //    inside triggerDownload and never block the article.
-    for (const img of images) {
-      await triggerDownload(img.downloadLocation);
+      // Trigger download notifications (Unsplash API guideline — required).
+      // Fire sequentially to respect API politeness; failures are logged
+      // inside triggerDownload and never block the article.
+      for (const img of images) {
+        await triggerDownload(img.downloadLocation);
+      }
     }
 
     // 4. Compose final body: 2 inline images injected into Claude's HTML.

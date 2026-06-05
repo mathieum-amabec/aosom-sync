@@ -1,12 +1,19 @@
 import { NextResponse } from "next/server";
 import { queueForImport, getImportJobsList } from "@/lib/import-pipeline";
+import { isAuthenticated } from "@/lib/auth";
 
 export async function GET() {
+  if (!(await isAuthenticated())) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
   const jobs = await getImportJobsList();
   return NextResponse.json({ success: true, data: jobs });
 }
 
 export async function POST(request: Request) {
+  if (!(await isAuthenticated())) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const { skus } = await request.json();
     if (!Array.isArray(skus) || skus.length === 0) {
