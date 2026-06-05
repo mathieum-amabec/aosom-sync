@@ -38,6 +38,12 @@
 - **Audited all `index.json`/`product.json`/`header-group.json` strings**: every `custom_liquid` is bilingual via `request.locale.iso_code`; native settings (`why_us`, `multicolumn`, `newsletter`, `collection_list`, `related-products`, announcement) already had correct EN. Theme section translations are stored against the theme — targeting the copy theme gid directly works even while unpublished.
 - **FIX 20**: product **description** kept open (not collapsed) — recommended to keep SEO-important content visible. Only "Shipping, assembly & returns" is an accordion.
 
+## Bloc 6-8 — sticky fix, cart, header, Messenger
+- **Sticky ATC bug fix** (`product.json` → `mobile_sticky_atc`): reworked from fail-closed to **fail-safe** — bar is `display:flex` by default on mobile and only hidden (`.msa-hide`) when the real ATC is in view (IntersectionObserver `toggle('msa-hide', isIntersecting)`). `z-index 1000→9999`, robust ATC selector with fallbacks (`product-form button[name="add"]` → `.product-form__submit` → `product-form [type="submit"]`). If JS fails, the bar still shows. `body.has-msa{padding-bottom:80px}` on mobile.
+- **FIX 21 — cart cleanup** (`cart.json`): removed the B2B leftover `featured-collection` "More industry favorites" (empty collection). Cart order is now `lc_free_ship → cart-items → cart-footer` only.
+- **FIX 22 — header mobile** (`header.liquid`): phone hidden on mobile (`.header__phone{display:none}`, kept in footer + contact); logo bigger (`max-height 55→65px`, wrapper `max-width 260px`). Desktop unchanged.
+- **Messenger button** (`layout/theme.liquid`): the Meta Customer Chat plugin (whitelist-dependent, stayed hidden) was replaced by a **custom floating button** — 56px circle, Messenger blue `#0099FF`, official SVG, `https://m.me/AmeubloDirect` (target=_blank), pulse 3 cycles on load, hover tooltip (FR "Chattez avec nous!" / EN "Chat with us!"), desktop `bottom:24px` / mobile `bottom:90px` (clears the sticky ATC), `z-index:9998`. Works without Meta domain whitelisting.
+
 ## Known follow-ups
 - Featured-collection section **heading** translation works now via theme translations (done). If new sections are added, register their EN the same way.
 - "Buy now" adds to cart then redirects to `/checkout` (`return_to`) — reliable cross-theme; confirm flow on device.
