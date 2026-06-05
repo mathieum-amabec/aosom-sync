@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { runSync } from "@/jobs/job1-sync";
+import { isAuthenticated } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  if (!(await isAuthenticated())) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const body = await request.json().catch(() => ({}));
     const dryRun = body.dryRun === true;

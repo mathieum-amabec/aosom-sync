@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { generateContent } from "@/lib/import-pipeline";
 import { checkRateLimit } from "@/lib/rate-limiter";
+import { isAuthenticated } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  if (!(await isAuthenticated())) {
+    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+  }
   try {
     // Rate limit: 30 Claude API calls per minute
     const { allowed, retryAfterMs } = checkRateLimit("claude-generate", 30, 60_000);
