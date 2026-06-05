@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.16.0] - 2026-06-05
+
+### Added
+- **Synchronized bilingual blog.** The weekly blog cron now publishes a translated PAIR:
+  FR (`/blogs/actualites`) + EN (`/blogs/blog`) on the SAME subject, sharing one Unsplash
+  photo set per run. New `src/lib/blog-topics.ts` holds 12 index-aligned bilingual topics
+  plus pure, unit-tested weekly selection (`tests/blog-topics.test.ts`, 13 tests).
+  `/api/blog/generate` accepts an optional pre-fetched `images` set so both languages
+  render identical photos; it self-fetches when none is supplied (backward compatible).
+
+### Security
+- **Authentication on mutating API routes** (`/cso` P1). Added `isAuthenticated()` guards
+  to `/api/import/push`, `/api/import/queue`, `/api/import/generate`, `/api/sync/trigger`,
+  and `/api/collections/sync`, which were previously reachable without auth on a
+  publicly-served deployment (Claude cost amplification, arbitrary Shopify writes, sync
+  triggering). Dashboard flows are unaffected (same-origin cookie). Remaining P2/P3 items
+  tracked in `docs/SECURITY-BACKLOG.md`.
+
 ## [0.5.15.0] - 2026-06-04
 
 ### Added
