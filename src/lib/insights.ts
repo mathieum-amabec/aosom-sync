@@ -1,32 +1,39 @@
 import { SHOPIFY } from "./config";
 
+/** Public storefront base (FR). Storefront product URLs are /products/{handle}. */
+export const STOREFRONT_BASE_URL = "https://ameublodirect.ca";
+
 export interface StoreLink {
-  /** true when the product already exists in Shopify (has a shopify_product_id). */
+  /** true when the product already exists in Shopify (has a shopify_product_id or handle). */
   inStore: boolean;
   /** Deep link to the product, or null when not imported. */
   shopifyUrl: string | null;
 }
 
 /**
- * Map a product's Shopify product id to its store status + a deep link.
+ * Map a product's Shopify identity to its store status + a deep link.
  *
- * "In store" links to the Shopify ADMIN product page (by numeric id), not the public
- * storefront `/products/{handle}`: the products table does not persist the storefront
- * handle, and deriving it from the name risks 404s (Shopify appends `-1` on collisions
- * and the generated `urlHandleFr` can differ from the title). The admin link is reliable
- * and matches the existing pattern in the import dashboard. If a storefront link is
- * wanted later, persist `shopify_handle` on import and switch the base URL here.
- *
- * "Not imported" returns shopifyUrl=null; the UI links those to the import dashboard.
+ * Prefers the public storefront `/products/{handle}` when the handle is known
+ * (persisted on import / via backfill). Falls back to the Shopify ADMIN product page
+ * (by numeric id) when the handle isn't available yet — reliable, and matches the
+ * import dashboard pattern. "Not imported" → shopifyUrl=null (UI links to /import).
  */
 export function storeLink(
   shopifyProductId: string | number | null | undefined,
-  adminBaseUrl: string = SHOPIFY.ADMIN_URL,
+  shopifyHandle?: string | null,
+  opts?: { adminBaseUrl?: string; storefrontBaseUrl?: string },
 ): StoreLink {
+  const adminBaseUrl = opts?.adminBaseUrl ?? SHOPIFY.ADMIN_URL;
+  const storefrontBaseUrl = opts?.storefrontBaseUrl ?? STOREFRONT_BASE_URL;
   const id = shopifyProductId == null ? "" : String(shopifyProductId).trim();
-  const inStore = id.length > 0;
-  return {
-    inStore,
-    shopifyUrl: inStore ? `${adminBaseUrl}/products/${id}` : null,
-  };
+  const handle = shopifyHandle == null ? "" : String(shopifyHandle).trim();
+  const inStore = id.length > 0 || handle.length > 0;
+
+  let shopifyUrl: string | null = null;
+  // Shopify handles are slug-safe ([a-z0-9-]); encodeURIComponent is defense-in-depth
+  // since the handle comes from the Shopify API (backfill), not a local slugify.
+  if (handle.length > 0) shopifyUrl = `${storefrontBaseUrl}/products/${encodeURIComponent(handle)}`;
+  else if (id.length > 0) shopifyUrl = `${adminBaseUrl}/products/${id}`;
+
+  return { inStore, shopifyUrl };
 }

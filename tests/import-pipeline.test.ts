@@ -33,6 +33,7 @@ vi.mock("@/lib/database", () => ({
   updateImportJob: vi.fn().mockResolvedValue(undefined),
   getProduct: vi.fn(),
   findCollectionsForProduct: vi.fn().mockResolvedValue({ main: null, sub: null }),
+  linkProductToShopify: vi.fn().mockResolvedValue(undefined),
 }));
 // Social draft generation is fire-and-forget after a successful import; mock it so the
 // dynamic import resolves to a stub instead of loading the real (Anthropic-backed) job.
@@ -79,7 +80,7 @@ describe("importToShopify — duplicate-job guard", () => {
 
   it("creates the product when the job has no shopify_id yet", async () => {
     vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
-    vi.mocked(createShopifyProduct).mockResolvedValue("123");
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
 
     const job = await importToShopify("job-1");
 
@@ -90,7 +91,7 @@ describe("importToShopify — duplicate-job guard", () => {
 
   it("fires a new_product social draft (with the primary SKU) after a successful import", async () => {
     vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
-    vi.mocked(createShopifyProduct).mockResolvedValue("123");
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
 
     await importToShopify("job-1");
 

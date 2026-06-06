@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.23.0] - 2026-06-06
+
+### Added
+- **Auto-scheduling of approved editorial drafts.** Approving a `content_template` draft now
+  schedules it onto the next free Mon/Wed/Fri 10:00 EST (15:00 UTC) slot — 1 FR + 1 EN per
+  slot — and flips it to `scheduled`. Product drafts still go to `approved` for manual
+  scheduling. Pure slot logic in `src/lib/draft-scheduler.ts` (13 tests).
+- **`products.shopify_handle`** column + persistence. `createShopifyProduct` now returns the
+  Shopify handle; imports persist it (and the product id) onto the catalog rows. The
+  dashboard "In store" badge now deep-links to the storefront
+  `ameublodirect.ca/products/{handle}`, falling back to the Shopify admin link when no
+  handle is known yet.
+
+### Notes
+- A read-only backfill diagnostic (`scripts/shopify-handle-backfill-diagnostic.mjs`) showed
+  only 74 of 11,093 catalog rows carry a `shopify_product_id` today, while SKU-matching
+  reaches ~969 — so the mass backfill (and the "In store" coverage) is pending validation
+  before any write.
+- **furnishdirect.ca (EN domain):** configuration is blocked by missing Shopify scopes
+  (`read_markets`/`write_markets` → 403) and an unavailable REST domains endpoint. Documented
+  the manual DNS/admin steps + scopes in `docs/FURNISHDIRECT-DOMAIN-SETUP.md`. No live-store
+  change was made.
+
 ## [0.5.22.0] - 2026-06-06
 
 ### Changed
