@@ -18,7 +18,7 @@ export async function GET(request: Request) {
         const oldPrice = Number(r.old_price) || 0;
         const newPrice = Number(r.new_price) || 0;
         const change = newPrice - oldPrice;
-        const link = storeLink(r.shopify_product_id as string | null);
+        const link = storeLink(r.shopify_product_id as string | null, r.shopify_handle as string | null);
         return {
           sku: r.sku as string,
           name: (r.name as string) || r.sku as string,
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
       });
 
     const trending = (await getTrendingProducts(10)).map((t) => {
-      const link = storeLink(t.shopify_product_id);
+      const link = storeLink(t.shopify_product_id, t.shopify_handle);
       return {
         sku: t.sku,
         name: t.name,

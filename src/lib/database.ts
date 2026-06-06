@@ -58,7 +58,8 @@ async function _initSchemaImpl(): Promise<void> {
       product_type TEXT, image1 TEXT, image2 TEXT, image3 TEXT, image4 TEXT, image5 TEXT,
       image6 TEXT, image7 TEXT, video TEXT, description TEXT, short_description TEXT,
       material TEXT, gtin TEXT, weight REAL, out_of_stock_expected TEXT, estimated_arrival TEXT,
-      shopify_product_id TEXT, shopify_variant_id TEXT, last_seen_at INTEGER, last_posted_at INTEGER,
+      shopify_product_id TEXT, shopify_variant_id TEXT, shopify_handle TEXT,
+      last_seen_at INTEGER, last_posted_at INTEGER,
       created_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type)`,
@@ -252,6 +253,13 @@ async function _initSchemaImpl(): Promise<void> {
   if (!syncRunCols.has("timing_ms")) {
     alters.push(`ALTER TABLE sync_runs ADD COLUMN timing_ms TEXT`);
   }
+  // shopify_handle on products: storefront handle for /products/{handle} deep links.
+  const productsInfo = await db.execute(`PRAGMA table_info(products)`);
+  const productCols = new Set(productsInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!productCols.has("shopify_handle")) {
+    alters.push(`ALTER TABLE products ADD COLUMN shopify_handle TEXT`);
+  }
+
   if (alters.length > 0) {
     await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
   }
@@ -478,6 +486,7 @@ export interface ProductRow {
   estimated_arrival: string;
   shopify_product_id: string | null;
   shopify_variant_id: string | null;
+  shopify_handle: string | null;
   last_seen_at: number;
   last_posted_at: number | null;
   created_at: number;
@@ -510,13 +519,14 @@ function rowToProduct(row: Row): ProductRow {
     estimated_arrival: (o.estimated_arrival as string) || "",
     shopify_product_id: (o.shopify_product_id as string) || null,
     shopify_variant_id: (o.shopify_variant_id as string) || null,
+    shopify_handle: (o.shopify_handle as string) || null,
     last_seen_at: Number(o.last_seen_at) || 0,
     last_posted_at: o.last_posted_at != null ? Number(o.last_posted_at) : null,
     created_at: Number(o.created_at) || 0,
   };
 }
 
-export async function refreshProducts(products: Omit<ProductRow, "shopify_product_id" | "shopify_variant_id" | "last_posted_at" | "created_at">[]): Promise<void> {
+export async function refreshProducts(products: Omit<ProductRow, "shopify_product_id" | "shopify_variant_id" | "shopify_handle" | "last_posted_at" | "created_at">[]): Promise<void> {
   const db = await ensureSchema();
   const now = Math.floor(Date.now() / 1000);
   const stmts = products.map((p) => ({
@@ -901,6 +911,24 @@ export async function updateProductShopifyIds(sku: string, shopifyProductId: str
   await db.execute({ sql: `UPDATE products SET shopify_product_id = ?, shopify_variant_id = ? WHERE sku = ?`, args: [shopifyProductId, shopifyVariantId, sku] });
 }
 
+/**
+ * Persist the Shopify product id + storefront handle onto every catalog row (one per
+ * variant SKU) of a freshly-imported product, so the dashboard can deep-link to the
+ * storefront `/products/{handle}`. Called from the import pipeline after createShopifyProduct.
+ */
+export async function linkProductToShopify(skus: string[], shopifyProductId: string, handle: string | null): Promise<void> {
+  const unique = [...new Set(skus.filter((s) => typeof s === "string" && s.length > 0))];
+  if (unique.length === 0) return;
+  const db = await ensureSchema();
+  await db.batch(
+    unique.map((sku) => ({
+      sql: `UPDATE products SET shopify_product_id = ?, shopify_handle = ? WHERE sku = ?`,
+      args: [shopifyProductId, handle, sku],
+    })),
+    "write",
+  );
+}
+
 // ─── Price History (enriched) ────────────────────────────────────────
 
 export type ChangeTypeHistory = "price_drop" | "price_increase" | "stock_change" | "new_product" | "restock";
@@ -936,7 +964,7 @@ export async function markPriceChangeApplied(id: number): Promise<void> {
 export async function getRecentPriceChanges(limit = 50): Promise<Record<string, unknown>[]> {
   const db = await ensureSchema();
   const result = await db.execute({
-    sql: `SELECT ph.*, p.name, p.image1, p.shopify_product_id
+    sql: `SELECT ph.*, p.name, p.image1, p.shopify_product_id, p.shopify_handle
     FROM price_history ph LEFT JOIN products p ON ph.sku = p.sku
     ORDER BY ph.detected_at DESC LIMIT ?`,
     args: [limit],
@@ -1042,13 +1070,13 @@ export async function getAllSettings(): Promise<Record<string, string>> {
 
 export interface TrendingProduct {
   sku: string; name: string; price: number; image1: string;
-  shopify_product_id: string | null; units_moved: number; current_qty: number;
+  shopify_product_id: string | null; shopify_handle: string | null; units_moved: number; current_qty: number;
 }
 
 export async function getTrendingProducts(limit = 10): Promise<TrendingProduct[]> {
   const db = await ensureSchema();
   const result = await db.execute({
-    sql: `SELECT ph.sku, p.name, p.price, p.image1, p.shopify_product_id,
+    sql: `SELECT ph.sku, p.name, p.price, p.image1, p.shopify_product_id, p.shopify_handle,
            p.qty AS current_qty,
            SUM(ph.old_qty - ph.new_qty) as units_moved
     FROM price_history ph JOIN products p ON ph.sku = p.sku
@@ -1066,6 +1094,7 @@ export async function getTrendingProducts(limit = 10): Promise<TrendingProduct[]
       price: Number(o.price) || 0,
       image1: (o.image1 as string) || "",
       shopify_product_id: (o.shopify_product_id as string) || null,
+      shopify_handle: (o.shopify_handle as string) || null,
       units_moved: Number(o.units_moved) || 0,
       current_qty: Number(o.current_qty) || 0,
     };
@@ -1586,6 +1615,25 @@ export async function getFacebookDraft(id: number): Promise<FacebookDraft | null
     args: [id],
   });
   return result.rows.length > 0 ? mapDraft(rowToObj(result.rows[0])) : null;
+}
+
+/**
+ * Currently-scheduled drafts reduced to what the auto-scheduler needs: the slot
+ * timestamp + which languages each occupies. Used to compute per-slot occupancy.
+ */
+export async function getScheduledDraftSlots(): Promise<Array<{ scheduledAt: number | null; fr: boolean; en: boolean }>> {
+  const db = await ensureSchema();
+  const result = await db.execute(
+    `SELECT scheduled_at, post_text, post_text_en FROM facebook_drafts WHERE status = 'scheduled' AND scheduled_at IS NOT NULL`,
+  );
+  return result.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      scheduledAt: o.scheduled_at != null ? Number(o.scheduled_at) : null,
+      fr: !!o.post_text && String(o.post_text).trim() !== "",
+      en: !!o.post_text_en && String(o.post_text_en).trim() !== "",
+    };
+  });
 }
 
 export async function updateFacebookDraft(id: number, fields: Record<string, unknown>): Promise<void> {

@@ -58,7 +58,7 @@ describe("GET /api/insights — trending products shape (regression)", () => {
   it("soldPerDay rounds to 1 decimal place", async () => {
     const { getTrendingProducts } = await import("@/lib/database");
     vi.mocked(getTrendingProducts).mockResolvedValueOnce([
-      { sku: "X", name: "X", price: 0, image1: "", shopify_product_id: null, units_moved: 10, current_qty: 5 },
+      { sku: "X", name: "X", price: 0, image1: "", shopify_product_id: null, shopify_handle: null, units_moved: 10, current_qty: 5 },
     ]);
     const req = new Request("http://localhost/api/insights");
     const res = await GET(req);
@@ -71,7 +71,7 @@ describe("GET /api/insights — trending products shape (regression)", () => {
   it("currentQty defaults to 0 when null", async () => {
     const { getTrendingProducts } = await import("@/lib/database");
     vi.mocked(getTrendingProducts).mockResolvedValueOnce([
-      { sku: "X", name: "X", price: 0, image1: "", shopify_product_id: null, units_moved: 5, current_qty: 0 },
+      { sku: "X", name: "X", price: 0, image1: "", shopify_product_id: null, shopify_handle: null, units_moved: 5, current_qty: 0 },
     ]);
     const req = new Request("http://localhost/api/insights");
     const res = await GET(req);

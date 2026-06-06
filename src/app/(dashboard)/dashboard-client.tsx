@@ -283,7 +283,7 @@ function StoreBadge({ inStore, shopifyUrl }: { inStore: boolean; shopifyUrl: str
         rel="noopener noreferrer"
         onClick={(e) => e.stopPropagation()}
         className={`${base} bg-green-900/40 text-green-400 border-green-800/50 hover:bg-green-800/50 hover:text-green-300`}
-        title="In your Shopify store — open in Shopify admin"
+        title="In your Shopify store — open the product page"
       >
         In store
       </a>

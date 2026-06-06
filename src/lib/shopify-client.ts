@@ -114,7 +114,7 @@ function mapShopifyProduct(raw: Record<string, unknown>): ShopifyExistingProduct
 export async function createShopifyProduct(
   merged: AosomMergedProduct,
   content: GeneratedContent
-): Promise<string> {
+): Promise<{ id: string; handle: string }> {
   const hasColor = merged.variants.some((v) => v.color);
   const hasSize = merged.variants.some((v) => v.size);
 
@@ -223,7 +223,10 @@ export async function createShopifyProduct(
   }
 
   const data = await response.json();
-  return String(data.product.id);
+  return {
+    id: String(data.product.id),
+    handle: typeof data.product.handle === "string" ? data.product.handle : "",
+  };
 }
 
 export async function updateShopifyProduct(

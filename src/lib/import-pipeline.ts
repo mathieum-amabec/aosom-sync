@@ -2,7 +2,7 @@ import { fetchAosomCatalog } from "./csv-fetcher";
 import { mergeVariants, buildSkuIndex, selectProductImages } from "./variant-merger";
 import { generateProductContent, backfillSeoFields, type GeneratedContent } from "./content-generator";
 import { createShopifyProduct, addProductToCollection } from "./shopify-client";
-import { findCollectionsForProduct, getProduct } from "./database";
+import { findCollectionsForProduct, getProduct, linkProductToShopify } from "./database";
 import {
   upsertImportJob,
   getImportJobs as dbGetImportJobs,
@@ -162,8 +162,17 @@ export async function importToShopify(
   await updateImportJob(jobId, { status: "importing" });
 
   try {
-    const shopifyId = await createShopifyProduct(product, content);
+    const { id: shopifyId, handle: shopifyHandle } = await createShopifyProduct(product, content);
     await updateImportJob(jobId, { status: "done", shopify_id: shopifyId });
+
+    // Persist the Shopify mapping (id + storefront handle) onto the catalog rows so the
+    // dashboard "In store" badge can deep-link to ameublodirect.ca/products/{handle}.
+    // Best-effort: a failure here must not fail the (already successful) import.
+    try {
+      await linkProductToShopify(product.variants.map((v) => v.sku), shopifyId, shopifyHandle || null);
+    } catch (linkErr) {
+      console.error(`[IMPORT] Failed to persist shopify handle for ${shopifyId}:`, linkErr);
+    }
 
     // Dual collection assignment: every product gets a main + a sub (when both mappings exist).
     // Non-blocking — failures are logged but don't fail the import.

@@ -1,46 +1,46 @@
 import { describe, it, expect } from "vitest";
-import { storeLink } from "@/lib/insights";
+import { storeLink, STOREFRONT_BASE_URL } from "@/lib/insights";
 import { SHOPIFY } from "@/lib/config";
 
 const ADMIN = "https://admin.shopify.com/store/test-store";
+const opts = { adminBaseUrl: ADMIN };
 
-describe("storeLink", () => {
-  it("marks a product with a shopify id as in store and links to the admin product page", () => {
-    const r = storeLink("123456789", ADMIN);
+describe("storeLink — storefront handle preferred, admin fallback", () => {
+  it("prefers the storefront /products/{handle} when a handle is present", () => {
+    const r = storeLink("123456789", "chaise-longue-grise", opts);
     expect(r.inStore).toBe(true);
-    expect(r.shopifyUrl).toBe("https://admin.shopify.com/store/test-store/products/123456789");
+    expect(r.shopifyUrl).toBe(`${STOREFRONT_BASE_URL}/products/chaise-longue-grise`);
   });
 
-  it("accepts a numeric id and coerces it to a string", () => {
-    const r = storeLink(987654321, ADMIN);
+  it("falls back to the admin product page when no handle is known", () => {
+    const r = storeLink("123456789", null, opts);
     expect(r.inStore).toBe(true);
-    expect(r.shopifyUrl).toBe("https://admin.shopify.com/store/test-store/products/987654321");
+    expect(r.shopifyUrl).toBe(`${ADMIN}/products/123456789`);
   });
 
-  it("treats null as not imported", () => {
-    expect(storeLink(null, ADMIN)).toEqual({ inStore: false, shopifyUrl: null });
+  it("falls back to admin when handle is blank/whitespace", () => {
+    expect(storeLink("42", "   ", opts).shopifyUrl).toBe(`${ADMIN}/products/42`);
   });
 
-  it("treats undefined as not imported", () => {
-    expect(storeLink(undefined, ADMIN)).toEqual({ inStore: false, shopifyUrl: null });
+  it("treats a product with neither id nor handle as not imported", () => {
+    expect(storeLink(null, null, opts)).toEqual({ inStore: false, shopifyUrl: null });
+    expect(storeLink(undefined, undefined, opts)).toEqual({ inStore: false, shopifyUrl: null });
+    expect(storeLink("", "", opts)).toEqual({ inStore: false, shopifyUrl: null });
   });
 
-  it("treats empty string as not imported", () => {
-    expect(storeLink("", ADMIN)).toEqual({ inStore: false, shopifyUrl: null });
-  });
-
-  it("treats a whitespace-only id as not imported (no bogus link)", () => {
-    expect(storeLink("   ", ADMIN)).toEqual({ inStore: false, shopifyUrl: null });
-  });
-
-  it("trims surrounding whitespace from a real id", () => {
-    const r = storeLink("  42 ", ADMIN);
+  it("is in store via handle even if the numeric id is missing", () => {
+    const r = storeLink(null, "some-handle", opts);
     expect(r.inStore).toBe(true);
-    expect(r.shopifyUrl).toBe("https://admin.shopify.com/store/test-store/products/42");
+    expect(r.shopifyUrl).toBe(`${STOREFRONT_BASE_URL}/products/some-handle`);
   });
 
-  it("defaults to the configured Shopify admin base url", () => {
-    const r = storeLink("55");
-    expect(r.shopifyUrl).toBe(`${SHOPIFY.ADMIN_URL}/products/55`);
+  it("coerces a numeric id and trims whitespace for the admin fallback", () => {
+    expect(storeLink(987654321, null, opts).shopifyUrl).toBe(`${ADMIN}/products/987654321`);
+    expect(storeLink("  55 ", null, opts).shopifyUrl).toBe(`${ADMIN}/products/55`);
+  });
+
+  it("defaults to the configured Shopify admin base + public storefront base", () => {
+    expect(storeLink("55").shopifyUrl).toBe(`${SHOPIFY.ADMIN_URL}/products/55`);
+    expect(storeLink("55", "the-handle").shopifyUrl).toBe(`${STOREFRONT_BASE_URL}/products/the-handle`);
   });
 });
