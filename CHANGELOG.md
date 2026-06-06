@@ -2,6 +2,28 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.18.0] - 2026-06-05
+
+### Changed
+- **Homepage hero, carousels and a new deals strip** (preview copy theme `160059195497`
+  only). The hero headline now keeps a space between its two sentences on desktop, where
+  the line break is hidden — it reads "Meublez votre espace. Livraison gratuite au Canada."
+  on one line instead of running together (FR + EN).
+
+### Added
+- **"🔥 Meilleures offres du moment" / EN "🔥 Best deals right now"** carousel on the
+  homepage, right under the trust bar, showing the Rabais/Sale collection (12 products) so
+  visitors see discounts immediately. Title is bilingual via theme translations.
+- **Infinite-swipe carousels.** The homepage product carousels now loop: swiping to the end
+  wraps seamlessly back to the start so shoppers can keep discovering products. Implemented
+  as a passive clone buffer (clones are `inert` — never clickable or focusable, so no double
+  cart-adds), with the slider's "1 / N" counter hidden.
+
+### Notes
+- Theme edits are on the unpublished preview copy `160059195497`, pending on-device
+  validation before publish. Operational scripts that drive these edits live under
+  `scripts/` and read credentials only from gitignored `.env.local`.
+
 ## [0.5.17.0] - 2026-06-05
 
 ### Changed
