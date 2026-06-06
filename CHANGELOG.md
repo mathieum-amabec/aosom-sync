@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.17.0] - 2026-06-05
+
+### Changed
+- **Homepage polish** (preview copy theme `160059195497` only; the live theme was not
+  touched). Hero text now sits in the upper, readable zone instead of the dark center of
+  the photo: vertical alignment moved to `flex-start`, padding-top 10% desktop / 15% mobile,
+  and a top-to-bottom gradient overlay so the headline reads on the upper third. The
+  "Pourquoi nous choisir" section no longer shows Dawn's default "Texte du bouton" button
+  (`button_label` is now explicitly blank). Both homepage carousels ("Mobilier extérieur
+  populaire", "Coups de cœur") now show 16 products with the desktop slider enabled, so
+  shoppers can swipe through more of the catalogue. (Dawn's native slider has no infinite
+  loop, so swipe-carousel was enabled instead.)
+
+### Added
+- **"Rabais" / EN "Sale" smart collection** (`/collections/rabais`, 29 products) surfacing
+  any product with a struck-through `compare_at_price` or a `sale`/`rabais` tag, sorted by
+  best-selling. Added first in the main navigation as "Rabais 🔥" / "Sale 🔥" to make
+  discounts discoverable. Collection and menu are global Shopify objects, so they appear on
+  the live storefront, not only the preview copy.
+
+### Fixed
+- **Blog articles no longer render literal ```` ```html ```` markers.** The AI generator
+  wrapped each article's HTML in a markdown code fence; the fence markers showed as visible
+  text at the top and bottom of every post. Stripped the fences from 16 affected articles
+  (5 published, 11 drafts) and hardened `/api/blog/generate` to strip any code fence inside
+  the model's `bodyHtml` before saving, so future articles stay clean.
+
 ## [0.5.16.0] - 2026-06-05
 
 ### Added
