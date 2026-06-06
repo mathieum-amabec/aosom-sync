@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.20.0] - 2026-06-06
+
+### Changed
+- **Replaced Plausible with Umami Cloud** for storefront analytics (preview copy theme
+  `160059195497`). Plausible costs 9 $/mo minimum; Umami Cloud is free up to 100k events/mo
+  with the same guarantees — cookieless, Loi 25/RGPD/PIPEDA compliant, no cookie banner.
+  - Umami `cloud.umami.is/script.js` in `<head>`. The website-id is read from `.env.local`
+    (`UMAMI_WEBSITE_ID`); until Mat sets it, a clearly-marked `UMAMI_WEBSITE_ID_PLACEHOLDER`
+    ships and the migration script warns loudly.
+  - The 4 custom events were migrated off Plausible: **Hero CTA** and **Messenger Click** now
+    use `data-umami-event` on the `<a>` links; **Sticky ATC** and **Add to Cart** use
+    `umami.track()` in JS (Sticky tracks before its full-page POST, with a 500 ms failsafe;
+    Add to Cart is scoped to Dawn `<product-form>`). Unlike Plausible, Umami shows custom
+    events automatically — no manual goal creation.
+  - Sidebar "Analytics" link now opens `https://cloud.umami.is`.
+
+### Removed
+- `docs/PLAUSIBLE-SETUP.md` and `scripts/apply-plausible.mjs` (replaced by
+  `docs/UMAMI-SETUP.md` and `scripts/apply-umami.mjs`). All `window.plausible()` /
+  `plausible-event-name` references removed from the theme.
+
+### Notes
+- Theme edits are on the unpublished preview copy `160059195497`. Umami only reports once the
+  theme is published and a real `UMAMI_WEBSITE_ID` is set — verify via Umami's Realtime view
+  after setup (see `docs/UMAMI-SETUP.md`). Migration driven by the idempotent
+  `scripts/apply-umami.mjs` (reads creds only from gitignored `.env.local`).
+
 ## [0.5.19.0] - 2026-06-06
 
 ### Added
