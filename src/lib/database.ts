@@ -1912,12 +1912,39 @@ export async function getAnyProductSku(): Promise<string | null> {
 
 export interface DraftFilters {
   statuses?: string[];    // default: all non-published
-  triggerType?: string;   // 'stock_highlight' | 'content_template' | undefined = all
+  // 'content_template' | 'new_product' | 'stock_highlight' (exact trigger_type),
+  // or the group 'products' (= new_product + stock_highlight), or undefined = all.
+  triggerType?: string;
   hook?: "with" | "without" | "all";
   since?: number;         // unix timestamp
   until?: number;         // unix timestamp
   page?: number;
   pageSize?: number;
+}
+
+// Product-type drafts (auto-generated from the catalog) vs content_template
+// drafts (curated editorial content). The drafts UI groups the two product
+// triggers under one "Produits" filter.
+export const PRODUCT_TRIGGER_TYPES = ["new_product", "stock_highlight"] as const;
+
+/**
+ * Build the trigger_type WHERE fragment for a drafts query.
+ * - undefined / "" / "all" → null (no filter)
+ * - "products"            → trigger_type IN (new_product, stock_highlight)
+ * - any other value       → exact trigger_type = ?
+ * Returns null when no filter should be applied.
+ */
+export function triggerTypeClause(
+  triggerType: string | undefined | null,
+): { sql: string; args: string[] } | null {
+  if (!triggerType || triggerType === "all") return null;
+  if (triggerType === "products") {
+    return {
+      sql: `fd.trigger_type IN (${PRODUCT_TRIGGER_TYPES.map(() => "?").join(", ")})`,
+      args: [...PRODUCT_TRIGGER_TYPES],
+    };
+  }
+  return { sql: `fd.trigger_type = ?`, args: [triggerType] };
 }
 
 export interface DraftsPage {
@@ -1950,9 +1977,10 @@ export async function getDraftsForReview(filters: DraftFilters = {}): Promise<Dr
     where.push(`fd.status != 'published'`);
   }
 
-  if (triggerType) {
-    where.push(`fd.trigger_type = ?`);
-    args.push(triggerType);
+  const trig = triggerTypeClause(triggerType);
+  if (trig) {
+    where.push(trig.sql);
+    args.push(...trig.args);
   }
   if (hook === "with") {
     where.push(`fd.hook_id IS NOT NULL`);
