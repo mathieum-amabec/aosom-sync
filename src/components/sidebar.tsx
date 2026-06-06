@@ -93,8 +93,8 @@ function useIsDesktop() {
   return isDesktop;
 }
 
-// External Plausible Analytics dashboard (cookieless storefront analytics).
-const PLAUSIBLE_DASHBOARD_URL = "https://plausible.io/ameublodirect.ca";
+// External Umami Cloud analytics dashboard (cookieless storefront analytics).
+const UMAMI_DASHBOARD_URL = "https://cloud.umami.is";
 
 // Reviewer (Meta App Review seeded user) only sees Social Media + Settings.
 const REVIEWER_VISIBLE_HREFS = new Set(["/social", "/settings"]);
@@ -205,7 +205,7 @@ export function Sidebar({ role = "admin" }: { role?: UserRole }) {
 
           {role !== "reviewer" && (
             <a
-              href={PLAUSIBLE_DASHBOARD_URL}
+              href={UMAMI_DASHBOARD_URL}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
