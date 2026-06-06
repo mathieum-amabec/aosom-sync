@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.19.0] - 2026-06-06
+
+### Added
+- **Plausible Analytics** on the storefront (preview copy theme `160059195497`). Cookieless,
+  RGPD/PIPEDA/Loi 25-compliant analytics — no cookie banner needed. Auto-tracks page views
+  plus four custom click goals: **Hero CTA** ("Magasinez maintenant"), **Sticky ATC**
+  ("Acheter maintenant"), **Messenger Click** (floating chat button), and **Add to Cart**
+  (product page). Single domain `ameublodirect.ca`.
+- **"Analytics" link** in the aosom-sync sidebar opening the Plausible dashboard in a new
+  tab (hidden from the reviewer role).
+- **`docs/PLAUSIBLE-SETUP.md`** — setup guide for Mat: create the account, add the domain,
+  verify the script, and configure the four custom-event goals.
+
+### Notes
+- `<a>` links (Hero, Messenger) use Plausible tagged events. The **Sticky ATC** button does
+  a full-page POST to checkout, so its goal is sent in JS before submit (with a 500 ms
+  failsafe) to avoid losing the event to page-unload. **Add to Cart** is scoped to Dawn
+  `<product-form>` adds to avoid double-counting.
+- Theme edits are on the unpublished preview copy `160059195497`. Plausible only reports
+  once the theme is published; verify via Plausible's "Verify installation" after publish.
+  Integration is driven by the idempotent `scripts/apply-plausible.mjs` (reads creds only
+  from gitignored `.env.local`).
+
 ## [0.5.18.0] - 2026-06-05
 
 ### Changed
