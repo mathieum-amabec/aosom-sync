@@ -2,7 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.21.0] - 2026-06-06
+## [0.5.22.0] - 2026-06-06
+
+### Changed
+- **Drafts review defaults to editorial content.** The drafts trigger filter now defaults
+  to **Contenu** (`content_template`) and offers three options: Contenu | **Produits**
+  (groups `new_product` + `stock_highlight`) | Tous. Product/stock drafts stay in the DB and
+  are one click away. New parameterized `triggerTypeClause()` helper in `database.ts` powers
+  the grouped "Produits" filter (covered by `tests/drafts-filter.test.ts`).
+
+### Added
+- **`scripts/drafts-purge-diagnostic.mjs`** — read-only diagnostic + dry-run for the draft
+  backlog (distribution by `trigger_type`/status; per-rule purge counts). Performs no
+  deletions; intended to validate purge rules before any cleanup.
+
+### Notes
+- The task spec referenced `content_type = 'content_template'`, but the post type lives in
+  `trigger_type` (every row's `content_type` is `'product'`). Implemented against the correct
+  column. The diagnostic also showed the proposed `hook_id IS NULL` purge rule would flag
+  ~299 drafts as "incomplete" when only 1 is actually empty — surfaced for review rather than
+  applied.
+
 
 ### Added
 - **"In store" / "Not imported" indicator** on the dashboard Price Drops and Trending
