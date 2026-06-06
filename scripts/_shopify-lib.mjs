@@ -1,4 +1,4 @@
-// Ad-hoc Shopify Admin API helper for the homepage-polish session.
+// Ad-hoc Shopify Admin API helper for the hero/carousel polish session.
 // Plain ESM (.mjs) so it runs under node x64 with global fetch — no TS loader needed.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,6 @@ export function loadEnv() {
     const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
     if (!m) continue;
     let v = m[2].trim();
-    // strip surrounding quotes if any
     if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
       v = v.slice(1, -1);
     }
@@ -46,22 +45,14 @@ export async function rest(endpoint, options = {}) {
 }
 
 export async function gql(query, variables = {}) {
-  const res = await rest("/graphql.json", {
-    method: "POST",
-    body: JSON.stringify({ query, variables }),
-  });
+  const res = await rest("/graphql.json", { method: "POST", body: JSON.stringify({ query, variables }) });
   const json = await res.json();
   if (json.errors) throw new Error("GraphQL errors: " + JSON.stringify(json.errors));
-  if (json.data && Object.values(json.data).some((d) => d && d.userErrors && d.userErrors.length)) {
-    // surface userErrors but don't throw — caller decides
-  }
   return json;
 }
 
 export async function getAsset(key, themeId = PREVIEW_THEME_ID) {
-  const res = await rest(
-    `/themes/${themeId}/assets.json?asset[key]=${encodeURIComponent(key)}`
-  );
+  const res = await rest(`/themes/${themeId}/assets.json?asset[key]=${encodeURIComponent(key)}`);
   if (!res.ok) throw new Error(`getAsset ${key} failed: ${res.status} ${await res.text()}`);
   const data = await res.json();
   return data.asset.value;
