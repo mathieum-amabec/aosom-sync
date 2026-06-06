@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRecentPriceChanges, getTrendingProducts } from "@/lib/database";
 import { API } from "@/lib/config";
+import { storeLink } from "@/lib/insights";
 
 /**
  * GET /api/insights — Price changes and trends.
@@ -17,6 +18,7 @@ export async function GET(request: Request) {
         const oldPrice = Number(r.old_price) || 0;
         const newPrice = Number(r.new_price) || 0;
         const change = newPrice - oldPrice;
+        const link = storeLink(r.shopify_product_id as string | null);
         return {
           sku: r.sku as string,
           name: (r.name as string) || r.sku as string,
@@ -26,20 +28,25 @@ export async function GET(request: Request) {
           change,
           pct: oldPrice > 0 ? (change / oldPrice) * 100 : 0,
           recordedAt: r.detected_at as string,
-          inStore: !!(r.shopify_product_id),
+          inStore: link.inStore,
+          shopifyUrl: link.shopifyUrl,
         };
       });
 
-    const trending = (await getTrendingProducts(10)).map((t) => ({
-      sku: t.sku,
-      name: t.name,
-      image: t.image1 || "",
-      price: t.price,
-      currentQty: t.current_qty,
-      soldPerDay: +(t.units_moved / 14).toFixed(1),
-      daysTracked: 14,
-      inStore: !!t.shopify_product_id,
-    }));
+    const trending = (await getTrendingProducts(10)).map((t) => {
+      const link = storeLink(t.shopify_product_id);
+      return {
+        sku: t.sku,
+        name: t.name,
+        image: t.image1 || "",
+        price: t.price,
+        currentQty: t.current_qty,
+        soldPerDay: +(t.units_moved / 14).toFixed(1),
+        daysTracked: 14,
+        inStore: link.inStore,
+        shopifyUrl: link.shopifyUrl,
+      };
+    });
 
     return NextResponse.json({ success: true, data: { changes, trending } });
   } catch (err) {

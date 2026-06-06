@@ -4,11 +4,11 @@ import { useState, useEffect } from "react";
 import type { SyncRun } from "@/types/sync";
 
 interface PriceChange {
-  sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string; inStore: boolean;
+  sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string; inStore: boolean; shopifyUrl: string | null;
 }
 interface TopSeller {
   sku: string; name: string; image: string; price: number;
-  currentQty: number; soldPerDay: number; daysTracked: number; inStore: boolean;
+  currentQty: number; soldPerDay: number; daysTracked: number; inStore: boolean; shopifyUrl: string | null;
 }
 
 export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun[]; latestRun: SyncRun | null }) {
@@ -156,7 +156,7 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm text-white truncate">{c.name}</p>
-                      <StoreBadge inStore={c.inStore} />
+                      <StoreBadge inStore={c.inStore} shopifyUrl={c.shopifyUrl} />
                     </div>
                     <p className="text-xs text-gray-500">{c.sku}</p>
                   </div>
@@ -186,7 +186,7 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm text-white truncate">{s.name}</p>
-                      <StoreBadge inStore={s.inStore} />
+                      <StoreBadge inStore={s.inStore} shopifyUrl={s.shopifyUrl} />
                     </div>
                     <p className="text-xs text-gray-500">${s.price.toFixed(2)} | {s.currentQty} left</p>
                   </div>
@@ -270,18 +270,36 @@ function timeAgo(dateStr: string): string {
   return `${days}d ago`;
 }
 
-function StoreBadge({ inStore }: { inStore: boolean }) {
+function StoreBadge({ inStore, shopifyUrl }: { inStore: boolean; shopifyUrl: string | null }) {
+  const base =
+    "inline-flex shrink-0 items-center px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors";
+
+  if (inStore) {
+    // Green = already in Shopify. Links to the Shopify admin product page (new tab).
+    return (
+      <a
+        href={shopifyUrl ?? "#"}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className={`${base} bg-green-900/40 text-green-400 border-green-800/50 hover:bg-green-800/50 hover:text-green-300`}
+        title="In your Shopify store — open in Shopify admin"
+      >
+        In store
+      </a>
+    );
+  }
+
+  // Orange = catalogue only. Links to the import dashboard.
   return (
-    <span
-      className={`inline-flex shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-        inStore
-          ? "bg-blue-900/40 text-blue-400 border border-blue-800/50"
-          : "bg-gray-800/60 text-gray-500 border border-gray-700/50"
-      }`}
-      title={inStore ? "Product is in your Shopify store" : "Not imported to Shopify yet"}
+    <a
+      href="/import"
+      onClick={(e) => e.stopPropagation()}
+      className={`${base} bg-orange-900/40 text-orange-400 border-orange-800/50 hover:bg-orange-800/50 hover:text-orange-300`}
+      title="Not imported to Shopify yet — go to the import dashboard"
     >
-      {inStore ? "In store" : "Not imported"}
-    </span>
+      Not imported
+    </a>
   );
 }
 
