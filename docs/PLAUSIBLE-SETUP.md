@@ -29,21 +29,25 @@ Dans Plausible → **Add a website** :
 
 1. **Domaine principal** : `ameublodirect.ca`
    - Timezone : `America/Toronto`
-2. (Optionnel mais recommandé) **Add a website** une 2ᵉ fois : `furnishdirect.ca`
-   pour suivre la version anglaise séparément.
 
-Le script installé dans le thème déclare **les deux domaines** :
+Le script installé dans le thème déclare **un seul domaine** :
 
 ```html
 <script defer
-  data-domain="ameublodirect.ca,furnishdirect.ca"
+  data-domain="ameublodirect.ca"
   src="https://plausible.io/js/script.tagged-events.js"></script>
 ```
 
-➡️ Chaque visite est donc envoyée aux **deux** sites Plausible. Crée bien les deux
-sites dans Plausible (sinon le 2ᵉ domaine renverra des données ignorées). Si tu ne
-veux qu'un seul site, retire `,furnishdirect.ca` du `data-domain` (voir
-`scripts/apply-plausible.mjs`).
+> **Pourquoi un seul domaine ?** Lister un 2ᵉ domaine (`furnishdirect.ca`) dans
+> `data-domain` envoie **chaque** visite aux deux sites Plausible : si le 2ᵉ site
+> n'existe pas encore, ses events sont silencieusement jetés, et s'il existe, chaque
+> visite compte **double** dans le quota de pages vues. À n'activer que si
+> `furnishdirect.ca` est un site Plausible réel et distinct.
+>
+> **Pour l'ajouter plus tard** : crée d'abord le site `furnishdirect.ca` dans
+> Plausible, puis remplace `data-domain="ameublodirect.ca"` par
+> `data-domain="ameublodirect.ca,furnishdirect.ca"` dans
+> `scripts/apply-plausible.mjs` (constante `PLAUSIBLE_HEAD`) et relance le script.
 
 ---
 
@@ -67,12 +71,12 @@ Le thème envoie déjà 4 events de clic personnalisés (+ les pages vues automa
 Dans Plausible → **Site Settings → Goals → + Add goal → Custom event**, créer ces
 4 objectifs en saisissant **exactement** le nom de l'event :
 
-| Goal (nom exact)  | Déclencheur                                                    |
-| ----------------- | -------------------------------------------------------------- |
-| `Hero CTA`        | Clic sur « Magasinez maintenant / Shop now » (héro accueil)    |
-| `Sticky ATC`      | Clic sur « Acheter maintenant / Buy now » (barre mobile fixe)  |
-| `Messenger Click` | Clic sur le bouton flottant Messenger (`m.me/AmeubloDirect`)   |
-| `Add to Cart`     | Soumission du formulaire d'ajout au panier (page produit)      |
+| Goal (nom exact)  | Déclencheur                                                       |
+| ----------------- | ---------------------------------------------------------------- |
+| `Hero CTA`        | Clic sur « Magasinez maintenant / Shop now » (héro accueil)      |
+| `Sticky ATC`      | Clic sur « Acheter maintenant / Buy now » (barre mobile fixe)    |
+| `Messenger Click` | Clic sur le bouton flottant Messenger (`m.me/AmeubloDirect`)     |
+| `Add to Cart`     | Ajout au panier depuis la fiche produit (`<product-form>` Dawn)  |
 
 > Les **pages vues produit** sont suivies automatiquement (pageviews) — pas besoin
 > de goal pour ça. Pour isoler les pages produit, créer au besoin un goal de type
@@ -98,21 +102,30 @@ conversions et le taux de conversion.
 
 ## Ce qui est déjà fait (côté code) ✅
 
-| Élément                         | Emplacement                                                        |
-| ------------------------------- | ----------------------------------------------------------------- |
-| Script Plausible dans `<head>`  | `layout/theme.liquid` (thème `160059195497`), après `meta-tags`   |
-| Stub `window.plausible()`       | même bloc `<head>` (file d'attente avant chargement du script)    |
-| Goal `Hero CTA`                 | `templates/index.json` → section `lc_hero`, classe sur `.lc-btn`  |
-| Goal `Sticky ATC`               | `templates/product.json` → bouton `#mobile-sticky-atc`            |
-| Goal `Messenger Click`          | `layout/theme.liquid` → ancre `.lc-msgr`                          |
-| Goal `Add to Cart`              | listener délégué `submit` sur `form[action*="/cart/add"]`         |
-| Lien « Analytics »              | `src/components/sidebar.tsx`                                       |
-| Script d'application idempotent | `scripts/apply-plausible.mjs` (re-jouable, fait un backup)        |
+| Élément                         | Emplacement / mécanisme                                                       |
+| ------------------------------- | ----------------------------------------------------------------------------- |
+| Script Plausible dans `<head>`  | `layout/theme.liquid` (thème `160059195497`), bloc balisé après `meta-tags`   |
+| Stub `window.plausible()`       | même bloc `<head>` (file d'attente avant chargement du script)                |
+| Goal `Hero CTA`                 | `templates/index.json` → `lc_hero`, classe taguée sur `.lc-btn` (lien `<a>`)  |
+| Goal `Messenger Click`          | `layout/theme.liquid` → ancre `.lc-msgr` taguée (lien `<a>`)                  |
+| Goal `Sticky ATC`               | JS dans `<head>` : `preventDefault` + `plausible(..,{callback})` puis submit  |
+| Goal `Add to Cart`              | JS dans `<head>` : `submit` délégué, limité aux `<product-form>` (Dawn)       |
+| Lien « Analytics »              | `src/components/sidebar.tsx`                                                   |
+| Script d'application idempotent | `scripts/apply-plausible.mjs` (re-jouable, balises de bloc, fait un backup)   |
 
-**Note technique :** on utilise `script.tagged-events.js` plutôt que `script.js`. C'est
-un **surensemble** : mêmes pages vues automatiques que `script.js`, plus la prise en
-charge des objectifs de clic via la classe CSS `plausible-event-name=<Nom>`. C'est ce
-qui permet de suivre les 4 clics ci-dessus sans JavaScript additionnel par bouton.
+**Notes techniques :**
+
+- On utilise `script.tagged-events.js` plutôt que `script.js` : c'est un **surensemble**
+  (mêmes pages vues automatiques, plus les objectifs de clic via la classe CSS
+  `plausible-event-name=<Nom>`). Les **liens `<a>`** (héro, Messenger) utilisent cette
+  méthode déclarative — fiable, car Plausible gère le délai de navigation pour les liens.
+- Le **bouton Sticky ATC** soumet un `<form>` classique qui fait un **POST pleine page**
+  vers `/checkout`. Une classe taguée sur un bouton qui navigue **perd souvent l'event**
+  (la page se décharge avant l'envoi). On le gère donc en JS : on bloque la soumission,
+  on envoie le goal avec un `callback` qui re-soumet ensuite (plus un failsafe de 500 ms
+  si Plausible est bloqué/non chargé). Aucun event perdu.
+- **Add to Cart** est limité aux ajouts via `<product-form>` (flux `fetch` de Dawn, sans
+  navigation) : pas de perte d'event et pas de double comptage avec le Sticky ATC.
 
 ### Re-jouer / modifier l'intégration thème
 
