@@ -6,6 +6,8 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@/lib/config", () => ({
   API: { DEFAULT_INSIGHTS_LIMIT: 20, MAX_INSIGHTS_LIMIT: 100 },
+  // The route now builds a Shopify admin deep-link via storeLink() → SHOPIFY.ADMIN_URL.
+  SHOPIFY: { ADMIN_URL: "https://admin.shopify.com/store/test-store" },
 }));
 
 vi.mock("@/lib/database", () => ({
@@ -49,6 +51,8 @@ describe("GET /api/insights — trending products shape (regression)", () => {
     expect(product.currentQty).toBe(42);
     expect(product.daysTracked).toBe(14);
     expect(product.inStore).toBe(true);
+    // In-store products carry a Shopify admin deep-link for the dashboard badge.
+    expect(product.shopifyUrl).toBe("https://admin.shopify.com/store/test-store/products/gid://shopify/Product/123");
   });
 
   it("soldPerDay rounds to 1 decimal place", async () => {

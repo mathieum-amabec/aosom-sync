@@ -63,6 +63,54 @@ figcaption/a/img) before `createBlogArticle`, so a future prompt-injection or mo
 can't store active markup on the storefront blog.
 
 ---
+
+## Audit 2026-06-06 — branch `feature/dashboard-ui-cso` (daily, 8/10 gate)
+
+Scope: full audit + the dashboard in-store-indicator diff. **No new P0/P1.** Most candidate
+findings were dismissed on active verification (see below) — the auth model is sound.
+
+### Verified clean (active verification dismissed these)
+- **Auth model is centralized and solid.** `src/proxy.ts` is the Next.js 16 middleware
+  (the framework renamed `middleware.ts` → `proxy.ts` in v16). Its `config.matcher` runs on
+  every non-static route and redirects to `/login` unless a valid session cookie is present,
+  with an explicit `PUBLIC_PATHS` allowlist (`/login`, `/privacy`, `/api/auth`, `/api/cron`,
+  `/api/health`, `/api/social/content`, `/api/pixel/script`) and a reviewer-role 403 gate.
+- **SQL injection: none.** Dynamic `UPDATE` builders (`updateImportJob`, the facebook_drafts
+  updater) whitelist column names (`IMPORT_JOB_COLUMNS.has(key)` / `allowed.has(key)` → throw)
+  and pass all values as `?` args. Dynamic `WHERE` clauses are built from constant fragments
+  with parameterized args.
+- **XSS: none.** Only one `dangerouslySetInnerHTML` (`import/page.tsx:528`) and it is
+  `DOMPurify.sanitize()`-wrapped. No `eval`/`Function`/`child_process`. No CORS wildcard.
+- **Public LLM route is gated.** `/api/social/content/generate` is proxy-allowlisted but the
+  handler itself requires a valid session OR a `CRON_SECRET` Bearer (else 401/403) — no
+  unauthenticated Anthropic cost amplification.
+- **`/api/pixel/script`** (public, serves JS to the storefront) validates the pixel id as
+  digits-only and reads it from a trusted env var.
+- **Secrets:** no secret patterns in git history; `.env*` is gitignored; nothing tracked.
+- **The diff is clean.** `src/lib/insights.ts` builds `https://admin.shopify.com/...` + a
+  numeric Shopify product id, rendered via React-escaped `href` (+ `rel="noopener noreferrer"`
+  on the new tab) — no injection. The id originates from our DB, not user input.
+
+### Status update on prior items
+- **P2-1 (unauthenticated read routes) — RESOLVED.** The "Better fix" it proposed (a single
+  middleware enforcing the session cookie with a public allowlist) now exists as
+  `src/proxy.ts`. Verified `/api/catalog`, `/api/insights`, `/api/sync/history`,
+  `/api/notifications`, `/api/collections/*` are NOT in `PUBLIC_PATHS`, so an unauthenticated
+  request is redirected to `/login` before reaching the handler. Leaving the per-handler
+  notes for history; the hole is closed.
+
+### New P3 — Low / informational
+- **P3-2: 3 moderate npm advisories.** `npm audit --omit=dev` reports 3 moderate (no
+  high/critical). Transitive/tooling-level, no known exploit path into the app. **Action:**
+  run `npm audit` periodically and bump when non-breaking fixes land. Not blocking.
+- **P3-3: SSRF hardening on image fetch.** `src/lib/image-composer.ts:47` does `fetch(url)`
+  where `url` comes from the Aosom CSV feed (also `src/app/api/cron/blog/route.ts:79`). The
+  feed is trusted and these run server-side (import/cron), so this is not exploitable today.
+  **Defense in depth:** before fetching, enforce `https?:` scheme and block private/loopback/
+  link-local IP ranges (169.254.169.254 metadata, 10/8, 192.168/16, 127/8), so a compromised
+  or MITM'd feed can't pivot `fetch` at internal/metadata endpoints during composition.
+
+---
 **Disclaimer:** `/cso` is an AI-assisted scan that catches common patterns. It is not a
 substitute for a professional penetration test. For production systems handling PII or
 payments, engage a qualified security firm.
