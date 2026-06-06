@@ -3,6 +3,15 @@
 Goal: point **furnishdirect.ca** at the English version of the Shopify store
 (primary store is **ameublodirect.ca**, locales: `fr` primary + `en` published).
 
+> ## ⚠️ ACTION REQUIRED (Mat) — add Markets scopes
+> The Shopify access token currently lacks **`read_markets`** and **`write_markets`**, so
+> the Markets API returns 403 and furnishdirect.ca can't be configured programmatically.
+> Add both scopes the same way as the previous scope updates: **Shopify Admin → Settings →
+> Apps and sales channels → Develop apps → [the custom app] → Configuration → Admin API
+> integration → edit scopes → add `read_markets` + `write_markets` → Save → reinstall the
+> app to issue a new token**, then sync the new token (incl. Vercel) as before.
+> Once granted, the API path below can be scripted; until then, use the manual steps.
+
 ## API investigation (2026-06-06, read-only)
 
 | Check | Result |

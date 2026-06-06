@@ -3,6 +3,34 @@
 Audit trail for manual/destructive operations against the production Turso database.
 Each entry records the date, the exact rules, and the exact row counts affected.
 
+## 2026-06-06 — Backfill products.shopify_product_id + shopify_handle (SKU match)
+
+Ran after the read-only dry-run (`scripts/shopify-handle-backfill-diagnostic.mjs`) was
+validated by Mat. The catalog only had 74 rows with a `shopify_product_id` (imports never
+persisted it), so the dashboard "In store" badge under-counted; this links the catalog to
+Shopify by SKU and records the storefront handle.
+
+**Procedure:**
+1. Added the `products.shopify_handle` column (it predated the PR #87 migration in prod;
+   `ALTER TABLE products ADD COLUMN shopify_handle TEXT`, idempotent).
+2. Fetched all Shopify products (`GET /products.json`, paginated, ~2 req/sec):
+   **597 products / 1,237 variant-SKU mappings**.
+3. For each variant SKU: `UPDATE products SET shopify_product_id = ?, shopify_handle = ?
+   WHERE sku = ?`.
+
+**Result:**
+| Metric | Value |
+| --- | --- |
+| Shopify products fetched | 597 |
+| SKU mappings attempted | 1,237 |
+| Catalog rows matched/updated | **969 distinct** (74 → 969) |
+| Skipped (SKU not in catalog) | 6 |
+
+**⚠ Data-quality note:** many SKUs appear on **multiple Shopify products** (duplicate
+products sharing a SKU). The backfill is last-write-wins per SKU, so a duplicated SKU maps
+to whichever Shopify product was fetched last. The handle/link still resolves to a valid
+product, but the duplicate products in Shopify are worth cleaning up separately.
+
 ## 2026-06-06 — Purge stale + broken facebook_drafts
 
 Ran after a read-only dry-run (`scripts/drafts-purge-diagnostic.mjs`) was validated by Mat.
