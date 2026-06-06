@@ -30,7 +30,9 @@ export function storeLink(
   const inStore = id.length > 0 || handle.length > 0;
 
   let shopifyUrl: string | null = null;
-  if (handle.length > 0) shopifyUrl = `${storefrontBaseUrl}/products/${handle}`;
+  // Shopify handles are slug-safe ([a-z0-9-]); encodeURIComponent is defense-in-depth
+  // since the handle comes from the Shopify API (backfill), not a local slugify.
+  if (handle.length > 0) shopifyUrl = `${storefrontBaseUrl}/products/${encodeURIComponent(handle)}`;
   else if (id.length > 0) shopifyUrl = `${adminBaseUrl}/products/${id}`;
 
   return { inStore, shopifyUrl };

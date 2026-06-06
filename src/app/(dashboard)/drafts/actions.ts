@@ -14,6 +14,11 @@ export async function approveDraft(draftId: number): Promise<{ error?: string; s
     // Auto-schedule content_template drafts onto the next free Mon/Wed/Fri 10:00 EST
     // (15:00 UTC) slot — 1 FR + 1 EN per slot. Product drafts stay 'approved' for
     // manual scheduling. Failure here must not undo the approval, so it's best-effort.
+    // The per-slot cap is best-effort under concurrency: this is a read-compute-write
+    // without a lock, so two simultaneous approvals could pick the same slot. Acceptable
+    // for a single-operator manual-approval tool; revisit with a transaction/unique index
+    // if approvals ever become concurrent/automated. If no slot is free within the
+    // horizon, the draft stays 'approved' for manual scheduling.
     let scheduledAt: number | undefined;
     try {
       const draft = await getFacebookDraft(draftId);

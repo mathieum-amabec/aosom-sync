@@ -75,10 +75,10 @@ export function findSlot(
 }
 
 /**
- * Build a slot → occupancy map from already-scheduled drafts. Only timestamps that
- * fall on the posting grid are counted (off-grid manual schedules are ignored, so
- * they never block an auto-slot — they also can't be double-filled because we only
- * ever assign on-grid slots).
+ * Build a slot → occupancy map from already-scheduled drafts, keyed by raw
+ * scheduled_at. Off-grid manual schedules (timestamps not on the M/W/F 15:00 UTC grid)
+ * are stored but never read: findSlot only ever looks up on-grid slots, so off-grid
+ * drafts neither block an auto-slot nor get double-booked.
  */
 export function buildOccupancy(
   scheduled: Array<{ scheduledAt: number | null; fr: boolean; en: boolean }>,
