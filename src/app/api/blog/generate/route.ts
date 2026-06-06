@@ -186,7 +186,14 @@ async function generateArticleJson(input: BlogGenerateBody): Promise<ClaudeArtic
   // literal "```html" / "```" text on the published article. Strip any fence runs here.
   const bodyHtml =
     typeof p.bodyHtml === "string"
-      ? p.bodyHtml.replace(/```+[a-zA-Z]*[ \t]*\r?\n?/g, "").trim()
+      ? p.bodyHtml
+          // Drop a fence opener sitting on its own line (and its ```html lang tag).
+          // Anchoring to a real line break avoids eating a word that happens to sit
+          // right after an inline backtick run.
+          .replace(/```+[a-zA-Z]*[ \t]*\r?\n/g, "")
+          // Remove any remaining bare backtick run (the trailing closing fence, strays).
+          .replace(/```+/g, "")
+          .trim()
       : "";
   const excerpt = typeof p.excerpt === "string" ? p.excerpt.trim().slice(0, 300) : "";
   const metaDescription = typeof p.metaDescription === "string" ? p.metaDescription.trim().slice(0, 320) : "";
