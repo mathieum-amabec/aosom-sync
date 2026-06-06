@@ -61,9 +61,10 @@ export default function DraftsClient() {
   const [pendingLanguage, setPendingLanguage] = useState<PublishLanguage | null>(null);
   const [publishFeedback, setPublishFeedback] = useState<{ type: "success" | "partial" | "error"; message: string } | null>(null);
 
-  // Filters
+  // Filters — default to "Contenu" (content_template) so the review queue shows
+  // curated editorial drafts first; product/stock drafts are one click away.
   const [statusFilter, setStatusFilter] = useState("draft");
-  const [triggerFilter, setTriggerFilter] = useState("");
+  const [triggerFilter, setTriggerFilter] = useState("content_template");
   const [hookFilter, setHookFilter] = useState("all");
   const [page, setPage] = useState(1);
 
@@ -229,10 +230,9 @@ export default function DraftsClient() {
           onChange={(e) => setTriggerFilter(e.target.value)}
           className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
-          <option value="">Tous les types</option>
           <option value="content_template">Contenu</option>
-          <option value="stock_highlight">Produit</option>
-          <option value="new_product">Nouveau produit</option>
+          <option value="products">Produits</option>
+          <option value="">Tous</option>
         </select>
 
         <select
