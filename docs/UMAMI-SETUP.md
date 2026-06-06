@@ -55,14 +55,24 @@ Le thème contient déjà le script Umami avec un placeholder bien visible :
 Remplace `UMAMI_WEBSITE_ID_PLACEHOLDER` par le vrai Website ID. Deux façons :
 
 **Option A — via le script (recommandé, reproductible)**
-Édite la constante `PLACEHOLDER`/`UMAMI_HEAD` dans `scripts/apply-umami.mjs` (mets le vrai
-id à la place de `UMAMI_WEBSITE_ID_PLACEHOLDER`) puis relance :
+Ajoute le Website ID dans `.env.local` (gitignored), puis relance le script — il lit
+`UMAMI_WEBSITE_ID` depuis `.env.local` et l'injecte dans le thème :
+
+```dotenv
+# .env.local
+UMAMI_WEBSITE_ID=a1b2c3d4-5678-90ab-cdef-1234567890ab
+```
 
 ```powershell
 # depuis C:\Users\vente\Documents\aosom-sync (runtime x64 — voir CLAUDE.md ARM64)
 & "$env:USERPROFILE\node-x64\node.exe" scripts/apply-umami.mjs --dry   # aperçu
 & "$env:USERPROFILE\node-x64\node.exe" scripts/apply-umami.mjs         # appliquer
 ```
+
+> ✅ Comme l'id vient de `.env.local` et non d'une constante codée en dur, **relancer le
+> script préserve le vrai id** (il ne le réécrit jamais en placeholder). Tant que
+> `UMAMI_WEBSITE_ID` n'est pas défini, le script écrit le placeholder et **avertit
+> bruyamment** que Umami renverra des 404 (aucune donnée) jusqu'à ce que l'id soit fourni.
 
 **Option B — manuellement dans l'éditeur de thème Shopify**
 Admin Shopify → **Thèmes → « Copie de Trade v2 » (160059195497) → … → Modifier le code →
@@ -136,7 +146,10 @@ Les **pages vues** (dont les pages produit) sont suivies automatiquement.
   vers `/checkout`. Un `data-umami-event` sur un bouton qui navigue **perd souvent l'event**
   (la page se décharge avant l'envoi). On le gère donc en JS : on bloque la soumission, on
   appelle `umami.track('Sticky ATC')` et on re-soumet sur sa promesse (plus un failsafe de
-  500 ms si Umami est bloqué/non chargé). Aucun event perdu, le checkout n'est jamais bloqué.
+  500 ms si Umami est bloqué/non chargé). **Le checkout n'est jamais bloqué.** Limite : Umami
+  n'a pas de file d'attente avant chargement, donc un clic survenant **avant** que le script
+  `defer` ne soit chargé n'est pas compté (cas rare — le script charge tôt). Le failsafe
+  garantit quand même la soumission du formulaire.
 - **Add to Cart** est limité aux ajouts via `<product-form>` (flux `fetch` de Dawn, sans
   navigation) : pas de perte d'event et pas de double comptage avec le Sticky ATC.
 - Umami n'a pas de file d'attente avant chargement, donc chaque appel JS est gardé par
