@@ -180,7 +180,14 @@ async function generateArticleJson(input: BlogGenerateBody): Promise<ClaudeArtic
   const p = parsed as Record<string, unknown>;
 
   const title = typeof p.title === "string" ? p.title.trim().slice(0, 200) : "";
-  const bodyHtml = typeof p.bodyHtml === "string" ? p.bodyHtml : "";
+  // Defensive: even though the prompt forbids fences, the model sometimes wraps the
+  // HTML *inside* the bodyHtml string in a ```html ... ``` fence. The outer JSON-fence
+  // strip above does not reach inside the field, so those markers would render as
+  // literal "```html" / "```" text on the published article. Strip any fence runs here.
+  const bodyHtml =
+    typeof p.bodyHtml === "string"
+      ? p.bodyHtml.replace(/```+[a-zA-Z]*[ \t]*\r?\n?/g, "").trim()
+      : "";
   const excerpt = typeof p.excerpt === "string" ? p.excerpt.trim().slice(0, 300) : "";
   const metaDescription = typeof p.metaDescription === "string" ? p.metaDescription.trim().slice(0, 320) : "";
   const tags = Array.isArray(p.tags)
