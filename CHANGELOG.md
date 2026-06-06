@@ -2,6 +2,28 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.21.0] - 2026-06-06
+
+### Added
+- **"In store" / "Not imported" indicator** on the dashboard Price Drops and Trending
+  panels. Each product now shows a green **In store** badge (links to the Shopify admin
+  product page) or an orange **Not imported** badge (links to the import dashboard), driven
+  by `shopify_product_id`. New `src/lib/insights.ts` `storeLink()` helper maps the id to the
+  badge state + deep link (built server-side); covered by `tests/insights.test.ts`.
+
+### Security
+- Ran `/cso` security review (daily, 8/10 gate): **no new P0/P1.** Verified the auth model
+  (`src/proxy.ts` middleware gates all non-allowlisted routes), parameterized/whitelisted
+  SQL, DOMPurify-wrapped HTML, and a session-or-cron-secret gate on the public LLM route.
+  Prior backlog P2-1 (unauthenticated read routes) is now resolved by `proxy.ts`. Appended
+  the audit + two P3 items (3 moderate npm advisories; image-fetch SSRF hardening) to
+  `docs/SECURITY-BACKLOG.md`.
+
+### Notes
+- The In-store badge links to the Shopify **admin** product page (by id), matching the
+  existing import-page pattern. A storefront `/products/{handle}` link would need the handle
+  persisted on the products table (not stored today) — tracked as a follow-up.
+
 ## [0.5.20.0] - 2026-06-06
 
 ### Changed
