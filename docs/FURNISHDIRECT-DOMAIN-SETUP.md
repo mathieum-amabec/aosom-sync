@@ -3,56 +3,56 @@
 Goal: point **furnishdirect.ca** at the English version of the Shopify store
 (primary store is **ameublodirect.ca**, locales: `fr` primary + `en` published).
 
-> ## ⚠️ ACTION REQUIRED (Mat) — add Markets scopes
-> The Shopify access token currently lacks **`read_markets`** and **`write_markets`**, so
-> the Markets API returns 403 and furnishdirect.ca can't be configured programmatically.
-> Add both scopes the same way as the previous scope updates: **Shopify Admin → Settings →
-> Apps and sales channels → Develop apps → [the custom app] → Configuration → Admin API
-> integration → edit scopes → add `read_markets` + `write_markets` → Save → reinstall the
-> app to issue a new token**, then sync the new token (incl. Vercel) as before.
-> Once granted, the API path below can be scripted; until then, use the manual steps.
+> ## ✅ Markets scopes — GRANTED (verified 2026-06-06)
+> Mat updated the token; the GraphQL `markets` query now succeeds (`read_markets` granted).
+> The only remaining blocker is that **furnishdirect.ca is not yet connected to the shop as
+> a domain** — and connecting a domain is a manual DNS + Shopify-admin step, not an Admin-API
+> operation. Once it's connected, attaching it to a market is a one-call API mutation.
 
-## API investigation (2026-06-06, read-only)
+## API investigation — UPDATED 2026-06-06 (post-scope-grant, read-only)
 
 | Check | Result |
 | --- | --- |
-| `GET /admin/api/2025-01/domains.json` (REST) | **404** — domains are not exposed on this REST version |
-| GraphQL `markets { … }` | **403 ACCESS_DENIED** — requires `read_markets` (+ `write_markets` to configure) |
-| `shop.primaryDomain` | `ameublodirect.ca` |
-| `shopLocales` | `fr` (primary, published), `en` (published) |
+| GraphQL `markets { … }` | ✅ **succeeds** — `read_markets` granted |
+| Markets present | exactly one: **"Canada"** (`gid://shopify/Market/35882270825`), primary + enabled |
+| Web presences | primary domain `ameublodirect.ca` only |
+| Hosts across shop + all markets | `ameublodirect.ca` only — **`furnishdirect.ca` is NOT connected** |
+| `GET /admin/api/2025-01/domains.json` (REST) | 404 (REST domains unavailable on this version) — used GraphQL instead |
 
-**Conclusion:** the current Shopify access token **cannot read or configure Markets**
-(missing `read_markets` / `write_markets`), and the REST domains endpoint isn't available.
-So furnishdirect.ca cannot be wired up via the API with the current credentials. This is a
-manual/scoped operation for Mat.
+**Conclusion:** scopes are no longer the blocker. The blocker is that **furnishdirect.ca is
+not connected to the shop**. The Admin API can *attach* an already-connected domain to a
+market, but it cannot *connect* a new domain — that requires DNS at the registrar +
+verification in Shopify admin. So the next step is manual; after it, the attach is one API call.
 
-## Manual steps for Mat
+## Next steps
 
-1. **DNS** — at the registrar for `furnishdirect.ca`, point it at Shopify:
-   - `A` record `@` → `23.227.38.65`
-   - `CNAME` `www` → `shops.myshopify.com`
-2. **Add the domain in Shopify** — Admin → **Settings → Domains → Connect existing domain**
-   → `furnishdirect.ca`. Wait for SSL to provision.
-3. **Attach it to an English market** — Admin → **Settings → Markets**:
-   - Use (or create) a market whose **default/primary language is English**.
-   - Under that market's **Domains and languages**, set its web presence to
-     `furnishdirect.ca` with default locale **EN** (the "subfolder vs domain" choice →
-     pick the dedicated domain `furnishdirect.ca`).
-4. (Optional) Set `ameublodirect.ca` to default **FR** so the two domains map cleanly
-   FR↔EN.
+### 1. Connect furnishdirect.ca (manual — Mat)
+- **DNS** at the registrar: `A @ → 23.227.38.65`, `CNAME www → shops.myshopify.com`.
+- **Shopify Admin → Settings → Domains → Connect existing domain** → `furnishdirect.ca`.
+  Wait for SSL to provision.
 
-## To automate later (API path)
+### 2. Attach it to the Canada market as the EN web presence (API — automatable now)
+Once the domain is connected (so it has a domain id), this becomes a single GraphQL mutation
+against the existing **Canada** market — the store stays one market with two web presences:
+`ameublodirect.ca` (FR) + `furnishdirect.ca` (EN):
 
-If you want this scripted, grant the custom app these scopes, then it can be done via the
-GraphQL Admin API:
+```graphql
+mutation {
+  marketWebPresenceCreate(
+    marketId: "gid://shopify/Market/35882270825"
+    webPresence: { domainId: "<furnishdirect.ca connected domain id>", defaultLocale: "en", alternateLocales: [] }
+  ) {
+    market { id name }
+    webPresence { id domain { host } defaultLocale { locale } }
+    userErrors { field message }
+  }
+}
+```
 
-- `read_markets`, `write_markets`
-- (domain attach is done through `webPresence` on the market: `marketWebPresenceCreate` /
-  `marketWebPresenceUpdate`, referencing the connected domain)
-
-Once `write_markets` is granted, a follow-up script can: look up the EN market →
-`marketWebPresenceUpdate` to bind `furnishdirect.ca` + `defaultLocale: EN`. Until then, the
-steps above are manual in the Shopify admin.
+Ping me once furnishdirect.ca shows as connected in Settings → Domains and I'll run this
+mutation (I'll resolve the connected domain id and confirm the FR/EN split). Field names
+should be validated against the API version in use at run time (`marketWebPresenceCreate`
+input shape has changed across versions).
 
 > Note: the storefront analytics + dashboard links use `ameublodirect.ca`. Once
 > `furnishdirect.ca` is live for EN, revisit the Umami `data-domain` (see
