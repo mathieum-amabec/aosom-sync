@@ -31,22 +31,79 @@ export interface ComposeOptions {
   bannerOpacity?: number;
 }
 
-async function downloadImage(url: string): Promise<Buffer> {
-  // SSRF protection: only allow HTTPS URLs to public hosts
-  const parsed = new URL(url);
-  if (parsed.protocol !== "https:") throw new Error("Only HTTPS image URLs allowed");
-  const host = parsed.hostname.toLowerCase();
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024; // 15 MB — guards against decompression-bomb / OOM
+const DOWNLOAD_TIMEOUT_MS = 15_000;
+const MAX_REDIRECTS = 3;
+
+/**
+ * SSRF guard: reject non-HTTPS and any host that resolves (by name) to a
+ * private/link-local/internal range. Applied to the INITIAL url AND re-applied
+ * to every redirect hop in downloadImage — a host-only check on the first URL
+ * is bypassable by an attacker-controlled 30x redirect to an internal address.
+ */
+export function assertPublicHttpsUrl(url: URL): void {
+  if (url.protocol !== "https:") throw new Error("Only HTTPS image URLs allowed");
+  const host = url.hostname.toLowerCase();
   if (host === "localhost" || host === "::1" || host === "[::1]" ||
       host.startsWith("127.") || host.startsWith("10.") || host.startsWith("0.") ||
       host.startsWith("172.") || host.startsWith("192.168.") ||
-      host === "169.254.169.254" || host.startsWith("[") ||
+      host === "169.254.169.254" || host.startsWith("169.254.") || host.startsWith("[") ||
       /^fe[89ab]/i.test(host) || /^fd/i.test(host) || /^fc/i.test(host) ||
       host.endsWith(".internal") || host.endsWith(".local")) {
     throw new Error("Image URL points to internal network");
   }
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Failed to download image: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+}
+
+/** Read a response body into a Buffer, aborting if it exceeds `max` bytes. */
+async function readCapped(res: Response, max: number): Promise<Buffer> {
+  const declared = Number(res.headers.get("content-length") || "0");
+  if (declared > max) throw new Error(`Image too large: ${declared} bytes`);
+  if (!res.body) {
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength > max) throw new Error("Image exceeds size cap");
+    return buf;
+  }
+  const reader = res.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      total += value.byteLength;
+      if (total > max) {
+        await reader.cancel();
+        throw new Error("Image exceeds size cap");
+      }
+      chunks.push(Buffer.from(value));
+    }
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
+ * Download a public image with SSRF + DoS protections: HTTPS-only, internal-host
+ * denylist re-checked on every redirect hop, a request timeout, and a size cap.
+ */
+export async function downloadImage(url: string): Promise<Buffer> {
+  let current = url;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    assertPublicHttpsUrl(new URL(current));
+    const res = await fetch(current, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    });
+    // Follow redirects manually so the SSRF guard runs against each hop's host.
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      if (!location) throw new Error(`Redirect ${res.status} without Location`);
+      current = new URL(location, current).toString();
+      continue;
+    }
+    if (!res.ok) throw new Error(`Failed to download image: ${res.status}`);
+    return readCapped(res, MAX_IMAGE_BYTES);
+  }
+  throw new Error("Too many redirects while downloading image");
 }
 
 function sanitizeColor(color: string | undefined, fallback: string): string {

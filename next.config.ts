@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The branded image compositor reads Logo/*.png at runtime. These live outside
+  // the route's traced module graph, so include them explicitly in the function
+  // bundle for /api/image-preview (the only route that composes branded images).
+  outputFileTracingIncludes: {
+    "/api/image-preview": ["./Logo/logo-fr.png", "./Logo/logo-en.png"],
+  },
   async headers() {
     return [
       {

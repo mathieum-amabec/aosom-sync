@@ -179,6 +179,44 @@ export const SOCIAL = {
   SAVINGS_COLOR: "#22c55e",
 } as const;
 
+/**
+ * Resolve the app's public base URL (no trailing slash), or null when it can't
+ * be determined reliably.
+ *
+ * Used to build absolute, publicly-fetchable URLs for the branded image
+ * compositor (`/api/image-preview`): Facebook/Instagram fetch the image
+ * themselves, so a relative path or a localhost URL is useless to them.
+ *
+ * Priority:
+ *  1. NEXT_PUBLIC_APP_URL — explicit override (set this for custom domains).
+ *  2. VERCEL_PROJECT_PRODUCTION_URL — the STABLE production alias on Vercel.
+ *     Deliberately NOT VERCEL_URL, which is a per-deployment preview host
+ *     (see api/cron/content/route.ts for the same reasoning).
+ *  3. null — caller must skip branding and fall back to raw image URLs rather
+ *     than emit a localhost URL that the social platforms can't reach.
+ */
+export function getPublicAppUrl(): string | null {
+  const explicit = process.env.NEXT_PUBLIC_APP_URL;
+  if (explicit && explicit.trim()) {
+    // A misconfigured override (http://, localhost) must NOT be emitted to
+    // Facebook/Instagram — return null so callers fall back to raw image URLs
+    // rather than posting an unreachable branded URL.
+    try {
+      const u = new URL(explicit.trim());
+      const host = u.hostname.toLowerCase();
+      if (u.protocol === "https:" && host !== "localhost" && !host.startsWith("127.")) {
+        return `https://${u.host}`;
+      }
+    } catch {
+      /* malformed — fall through to null */
+    }
+    return null;
+  }
+  const vercelProd = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (vercelProd && vercelProd.trim()) return `https://${vercelProd.trim().replace(/\/+$/, "")}`;
+  return null;
+}
+
 // ─── Sync ───────────────────────────────────────────────────────────
 
 export const SYNC = {

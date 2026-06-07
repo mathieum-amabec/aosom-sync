@@ -5,7 +5,10 @@ import { AUTH } from "@/lib/config";
 // "/api/pixel/script" is public so Shopify's storefront ScriptTag can fetch it
 // (no session). "/api/pixel/install" is intentionally NOT public — it stays
 // session-gated for the dashboard.
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/pixel/script"];
+// "/api/image-preview" is public so Facebook/Instagram can fetch a draft's
+// branded image when publishing (the Graph APIs fetch the URL themselves, with
+// no session). The route only composes images for SKUs that exist in the DB.
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/pixel/script", "/api/image-preview"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(

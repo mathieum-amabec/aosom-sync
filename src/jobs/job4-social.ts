@@ -13,7 +13,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { composeImage } from "@/lib/image-composer";
-import { env, CLAUDE, SYNC, CHANNELS, type ChannelKey } from "@/lib/config";
+import { env, CLAUDE, SYNC, CHANNELS, getPublicAppUrl, type ChannelKey } from "@/lib/config";
 import {
   getAllSettings,
   getProduct,
@@ -177,6 +177,57 @@ export function pickRandomImages(product: { image1?: string; image2?: string; im
   return candidates.slice(0, n);
 }
 
+interface BrandedImages {
+  /** True when a branded preview URL was produced and prepended. */
+  applied: boolean;
+  imageUrls: string[];
+  imageUrl: string | null;
+  imagePath: string | null;
+}
+
+/**
+ * Build the branded hero image for a draft (new_product / stock_highlight).
+ *
+ * The branded image is served by GET /api/image-preview, which composes the
+ * product photo + Ameublo Direct logo + price (+ "NOUVEAU" badge for new
+ * products). We prepend that public URL as imageUrls[0] so the publisher posts
+ * the branded image first, keeping the raw Aosom photos as a gallery, and store
+ * the same URL in image_path as a reference (not base64 — the Graph APIs fetch
+ * the URL themselves).
+ *
+ * Returns applied=false when no public base URL is configured (e.g. local dev
+ * without NEXT_PUBLIC_APP_URL) so callers fall back to the legacy overlay rather
+ * than emit a localhost URL the platforms can't reach.
+ *
+ * Locale is FR (Ameublo): a single image is shared across FR + EN channels, so
+ * EN channels currently receive the FR-branded logo. Per-channel branded images
+ * would require the publisher to pick the image per channel — tracked as a
+ * follow-up, out of scope here.
+ */
+function brandImages(
+  trigger: "new_product" | "stock_highlight",
+  sku: string,
+  price: number,
+  rawImageUrls: string[]
+): BrandedImages {
+  const base = getPublicAppUrl();
+  const rawPrimary = rawImageUrls[0] ?? null;
+  if (!base || rawImageUrls.length === 0) {
+    return { applied: false, imageUrls: rawImageUrls, imageUrl: rawPrimary, imagePath: null };
+  }
+  // Price goes in the URL so the composed image is cache-keyed on it — otherwise
+  // the CDN could serve a stale price after the product's price changes.
+  const params = new URLSearchParams({ sku, locale: "fr", price: Number(price).toFixed(2) });
+  if (trigger === "new_product") params.set("badge", "new");
+  const brandedUrl = `${base}/api/image-preview?${params.toString()}`;
+  return {
+    applied: true,
+    imageUrls: [brandedUrl, ...rawImageUrls],
+    imageUrl: brandedUrl,
+    imagePath: brandedUrl,
+  };
+}
+
 /**
  * Generate a social draft for a new product import.
  */
@@ -194,16 +245,17 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
   }, product.product_type as string | null);
 
   const imgSettings = getImageSettings(settings);
-  let imagePath: string | null = null;
-  const imageUrls = pickRandomImages(product);
-  const imageUrl = imageUrls[0] ?? null;
-  if (imageUrl) {
+  const rawImageUrls = pickRandomImages(product);
+  const branded = brandImages("new_product", sku, Number(product.price), rawImageUrls);
+  let imagePath = branded.imagePath;
+  if (!branded.applied && rawImageUrls[0]) {
+    // No public base URL — fall back to the legacy overlay preview.
     try {
       imagePath = await composeImage({
         sku,
         templateType: "new_product",
         productName,
-        imageUrl,
+        imageUrl: rawImageUrls[0],
         price: Number(product.price),
         language: "FR",
         ...imgSettings,
@@ -220,15 +272,15 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
     postText: fr,
     postTextEn: en,
     imagePath,
-    imageUrl,
-    imageUrls,
+    imageUrl: branded.imageUrl,
+    imageUrls: branded.imageUrls,
     hookId,
   });
 
   await markProductPosted(sku);
   await createNotification("info", "Nouveau draft social", `Nouveau produit: ${productName.slice(0, 60)}`);
-  log(`Draft #${draftId} created for new product ${sku} (${imageUrls.length} photos)`);
-  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl, imageUrls };
+  log(`Draft #${draftId} created for new product ${sku} (${branded.imageUrls.length} photos, branded=${branded.applied})`);
+  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl: branded.imageUrl, imageUrls: branded.imageUrls };
 }
 
 /**
@@ -325,16 +377,17 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
   }, product.product_type as string | null);
 
   const imgSettings = getImageSettings(settings);
-  let imagePath: string | null = null;
-  const imageUrls = pickRandomImages(product);
-  const imageUrl = imageUrls[0] ?? null;
-  if (imageUrl) {
+  const rawImageUrls = pickRandomImages(product);
+  const branded = brandImages("stock_highlight", sku, Number(product.price), rawImageUrls);
+  let imagePath = branded.imagePath;
+  if (!branded.applied && rawImageUrls[0]) {
+    // No public base URL — fall back to the legacy overlay preview.
     try {
       imagePath = await composeImage({
         sku,
         templateType: "stock_highlight",
         productName,
-        imageUrl,
+        imageUrl: rawImageUrls[0],
         price: Number(product.price),
         qty: Number(product.qty),
         language: "FR",
@@ -352,14 +405,14 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
     postText: fr,
     postTextEn: en,
     imagePath,
-    imageUrl,
-    imageUrls,
+    imageUrl: branded.imageUrl,
+    imageUrls: branded.imageUrls,
     hookId,
   });
 
   await markProductPosted(sku);
-  log(`Draft #${draftId} created for stock highlight ${sku} (${imageUrls.length} photos)`);
-  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl, imageUrls };
+  log(`Draft #${draftId} created for stock highlight ${sku} (${branded.imageUrls.length} photos, branded=${branded.applied})`);
+  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl: branded.imageUrl, imageUrls: branded.imageUrls };
 }
 
 // ─── Auto-post orchestration ────────────────────────────────────────
