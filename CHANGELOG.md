@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.41.0] - 2026-06-07
+## [0.5.42.0] - 2026-06-07
 
 ### Added
 - **Configurable Meta ad account for the dashboard ads panel.** New optional
@@ -19,6 +19,50 @@ All notable changes to Aosom Sync will be documented in this file.
   mobile cards and the desktop table — "In store" links to the Shopify product
   (storefront when the handle is known, else admin), clickable on mobile too;
   "Not imported" is a muted badge.
+
+## [0.5.41.0] - 2026-06-07
+
+### Changed
+- **Deployed the double-opt-in price-alert widget to the live theme** (160059195497).
+  The live `price_drop_alert` block still held the old single-opt-in copy ("You're on the
+  list…"); replaced it with the canonical `docs/snippets/price-drop-alert.liquid` (animated
+  success panel, validation, error handling) whose post-submission message reads "Check
+  your email to confirm your alert." / "Vérifiez votre courriel pour confirmer votre
+  alerte." New `scripts/update-price-alert-block.mjs` rewrites only that block's
+  `custom_liquid` (dry-run by default, `--apply` to PUT); logged in `docs/DATA-OPS-LOG.md`.
+
+### Added
+- **`scripts/markets-status.mjs`** — read-only Shopify Markets/locales/scopes probe.
+- **`scripts/inspect-product-template.mjs`** — read-only inspector for the live theme's
+  `templates/product.json` blocks.
+
+### Docs
+- **`docs/FURNISHDIRECT-DOMAIN-SETUP.md`** rewritten with the current state (verified
+  2026-06-07): `read_markets`+`write_markets` are now granted (the prior 403 is resolved),
+  the store has one region-scoped "Canada" market, and both locales are published. Explains
+  why a *second* EN market isn't the right model for English-Canada (a country belongs to
+  one market — the FR/EN split is a language+domain mapping inside the Canada market) and
+  gives the connect-domain → bind-EN-domain steps + GraphQL path for once furnishdirect.ca's
+  DNS is configured. No market was created (domain not connected yet).
+
+## [0.5.40.0] - 2026-06-07
+
+### Added
+- **Pinterest EN feed setup guide** (`docs/PINTEREST-EN-SETUP.md`). Step-by-step
+  for adding the second (English) catalog source in Pinterest — URL
+  `/api/feeds/pinterest-en`, Language English (US), Country Canada — same
+  procedure as the already-configured FR feed.
+
+### Changed
+- **Price-drop "notify me" widget UX overhaul** (`docs/snippets/price-drop-alert.liquid`,
+  injected into live theme 160059195497). No-reload animated ✓ success panel that
+  replaces the form on submit; client-side email validation before the network
+  call; a button loading state (spinner + "Sending…/En cours…"); and friendly
+  error handling that maps the real API responses (429 rate limit, 404 unknown
+  product, network failure). Success copy stays double-opt-in accurate ("check
+  your email to confirm"). Respects `prefers-reduced-motion`.
+
+## [0.5.39.0] - 2026-06-07
 
 ### Changed
 - **Blog topic catalogue expanded 12 → 30 bilingual topics** (`src/lib/blog-topics.ts`).
