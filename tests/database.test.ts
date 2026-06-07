@@ -594,3 +594,99 @@ describe("getProducts sort — best_sellers and price_drop (direct SQL)", () => 
     expect(dropB).toBe(10.0);
   });
 });
+
+// ─── getProducts — prev_price via last_price CTE (direct SQL) ─────────────────
+// The catalog table renders a ▼/▲ price-movement badge by comparing each product's
+// current price against `prev_price` (old_price of its most recent price change). This
+// exercises the `last_price` CTE that getProducts LEFT JOINs into every sort branch.
+
+describe("getProducts prev_price — last_price CTE (direct SQL)", () => {
+  let db: ReturnType<typeof setupTestDb>;
+  const now = Math.floor(Date.now() / 1000);
+
+  // Mirror of the CTE + final SELECT used by getProducts' default branch.
+  const sql = `
+    WITH filtered AS (SELECT sku, name, price, qty, color, product_type, image1, shopify_product_id FROM products),
+    last_price AS (
+      SELECT sku, prev_price FROM (
+        SELECT sku, old_price AS prev_price,
+          ROW_NUMBER() OVER (PARTITION BY sku ORDER BY detected_at DESC, id DESC) AS rn
+        FROM price_history
+        WHERE change_type IN ('price_drop', 'price_increase') AND old_price IS NOT NULL
+      ) WHERE rn = 1
+    )
+    SELECT f.sku, f.price, lp.prev_price
+    FROM filtered f LEFT JOIN last_price lp ON lp.sku = f.sku
+    ORDER BY f.sku ASC`;
+
+  const prevBySku = (rows: unknown[]) =>
+    Object.fromEntries(
+      rows.map((r) => {
+        const o = r as Record<string, unknown>;
+        return [o.sku as string, o.prev_price == null ? null : Number(o.prev_price)];
+      }),
+    );
+
+  beforeEach(async () => {
+    db = setupTestDb();
+    await db.batch([
+      `CREATE TABLE IF NOT EXISTS products (
+        sku TEXT PRIMARY KEY, name TEXT, price REAL, qty INTEGER,
+        color TEXT, product_type TEXT, image1 TEXT, shopify_product_id TEXT
+      )`,
+      `CREATE TABLE IF NOT EXISTS price_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL,
+        old_price REAL, new_price REAL, old_qty INTEGER, new_qty INTEGER,
+        change_type TEXT, detected_at INTEGER
+      )`,
+    ]);
+  });
+
+  afterEach(async () => {
+    db.close();
+    if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
+  });
+
+  it("exposes old_price of the most recent price change, and null when a SKU never changed price", async () => {
+    await db.batch([
+      { sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, args: ["SKU-DROP", "Dropped", 80, 5, "", "", "", null] },
+      { sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, args: ["SKU-NEW",  "NoChange", 50, 5, "", "", "", null] },
+      // Two price moves for SKU-DROP: the LATER one (detected_at) must win.
+      { sql: `INSERT INTO price_history (sku, old_price, new_price, change_type, detected_at) VALUES (?, ?, ?, 'price_drop', ?)`, args: ["SKU-DROP", 120, 100, now - 10 * 86400] },
+      { sql: `INSERT INTO price_history (sku, old_price, new_price, change_type, detected_at) VALUES (?, ?, ?, 'price_drop', ?)`, args: ["SKU-DROP", 100,  80, now - 1 * 86400] },
+    ]);
+
+    const prev = prevBySku((await db.execute(sql)).rows);
+    expect(prev["SKU-DROP"]).toBe(100); // old_price of the latest change, not the older 120
+    expect(prev["SKU-NEW"]).toBeNull(); // never changed price → LEFT JOIN yields null
+  });
+
+  it("ignores stock-only changes so the badge reflects the last real price move", async () => {
+    await db.batch([
+      { sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, args: ["SKU-UP", "Raised", 130, 5, "", "", "", null] },
+      // A price_increase, then a later stock_change (no price fields). prev_price must stay the increase's old_price.
+      { sql: `INSERT INTO price_history (sku, old_price, new_price, change_type, detected_at) VALUES (?, ?, ?, 'price_increase', ?)`, args: ["SKU-UP", 110, 130, now - 5 * 86400] },
+      { sql: `INSERT INTO price_history (sku, old_qty, new_qty, change_type, detected_at) VALUES (?, ?, ?, 'stock_change', ?)`, args: ["SKU-UP", 20, 8, now - 1 * 86400] },
+    ]);
+
+    const prev = prevBySku((await db.execute(sql)).rows);
+    expect(prev["SKU-UP"]).toBe(110); // increase old_price; stock_change (null old_price) excluded
+  });
+
+  it("breaks detected_at ties deterministically by id (latest-inserted row wins)", async () => {
+    // detected_at is second-granularity, so a SKU can get two price changes in the same
+    // second during a batch sync. ROW_NUMBER's id DESC tiebreak must pick the row inserted
+    // last (highest id), not an arbitrary tied row.
+    const sameSecond = now - 2 * 86400;
+    await db.batch([
+      { sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, args: ["SKU-TIE", "Tied", 70, 5, "", "", "", null] },
+      // Inserted first (lower id): old_price 90.
+      { sql: `INSERT INTO price_history (sku, old_price, new_price, change_type, detected_at) VALUES (?, ?, ?, 'price_drop', ?)`, args: ["SKU-TIE", 90, 80, sameSecond] },
+      // Inserted second (higher id), SAME detected_at: old_price 80 → this must win.
+      { sql: `INSERT INTO price_history (sku, old_price, new_price, change_type, detected_at) VALUES (?, ?, ?, 'price_drop', ?)`, args: ["SKU-TIE", 80, 70, sameSecond] },
+    ]);
+
+    const prev = prevBySku((await db.execute(sql)).rows);
+    expect(prev["SKU-TIE"]).toBe(80); // higher id wins the tie, deterministically
+  });
+});

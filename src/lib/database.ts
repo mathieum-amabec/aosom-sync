@@ -502,6 +502,10 @@ export interface ProductRow {
   last_seen_at: number;
   last_posted_at: number | null;
   created_at: number;
+  /** old_price of the most recent price change (price_drop/price_increase) for this SKU,
+   * or null if the SKU never changed price. The catalog UI compares it against `price` to
+   * render the ▼/▲ movement badge. Only populated by getProducts (catalog browse). */
+  prev_price?: number | null;
 }
 
 function rowToProduct(row: Row): ProductRow {
@@ -535,6 +539,7 @@ function rowToProduct(row: Row): ProductRow {
     last_seen_at: Number(o.last_seen_at) || 0,
     last_posted_at: o.last_posted_at != null ? Number(o.last_posted_at) : null,
     created_at: Number(o.created_at) || 0,
+    prev_price: o.prev_price != null ? Number(o.prev_price) : null,
   };
 }
 
@@ -740,27 +745,47 @@ export async function getProducts(filters: {
   // Select only columns the catalog UI needs
   const catalogColumns = "sku, name, price, qty, color, product_type, image1, shopify_product_id";
 
-  // Price-history sorts use a CTE + LEFT JOIN: `filtered` applies all WHERE conditions,
-  // `ph_agg` aggregates price_history for the last 14 days.
-  // COALESCE(…, 0) keeps products without history at the bottom of the list.
+  // `last_price` exposes the old_price of each SKU's most recent price change so the catalog
+  // table can render the ▼/▲ movement badge (current price vs. previous price). ROW_NUMBER
+  // picks exactly one row per SKU, ordered detected_at DESC then id DESC — the id tiebreak
+  // makes selection deterministic when a SKU has two price changes in the same detected_at
+  // second (detected_at is second-granularity, so batch syncs can collide). Restocks/
+  // stock-only events are excluded (change_type filter), so the badge always reflects the
+  // last *price* move, not an incidental stock update.
+  const lastPriceCte = `last_price AS (
+        SELECT sku, prev_price FROM (
+          SELECT sku, old_price AS prev_price,
+            ROW_NUMBER() OVER (PARTITION BY sku ORDER BY detected_at DESC, id DESC) AS rn
+          FROM price_history
+          WHERE change_type IN ('price_drop', 'price_increase') AND old_price IS NOT NULL
+        ) WHERE rn = 1
+      )`;
+
+  // All three branches share the same shape: a `filtered` CTE applies the WHERE clause, the
+  // result is LEFT JOINed to `last_price` (and, for the velocity/discount sorts, to a 14-day
+  // `ph_agg`). COALESCE(…, 0) keeps products without history at the bottom of the list.
   const cutoff14d = Math.floor(Date.now() / 1000) - 14 * 86400;
+  const filteredCte = `filtered AS (SELECT ${catalogColumns} FROM products ${where})`;
+  const selectCols = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, lp.prev_price`;
   let productsSql: string;
   let productsArgs: (string | number)[];
 
   if (joinSort === "best_sellers") {
     productsSql = `
-      WITH filtered AS (SELECT ${catalogColumns} FROM products ${where}),
+      WITH ${filteredCte}, ${lastPriceCte},
       ph_agg AS (
         SELECT sku, SUM(old_qty - new_qty) AS units_moved
         FROM price_history WHERE detected_at > ? AND change_type = 'stock_change' AND old_qty > new_qty GROUP BY sku
       )
-      SELECT f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id
-      FROM filtered f LEFT JOIN ph_agg ON ph_agg.sku = f.sku
+      SELECT ${selectCols}
+      FROM filtered f
+      LEFT JOIN last_price lp ON lp.sku = f.sku
+      LEFT JOIN ph_agg ON ph_agg.sku = f.sku
       ORDER BY COALESCE(ph_agg.units_moved, 0) DESC LIMIT ? OFFSET ?`;
     productsArgs = [...args, cutoff14d, limit, offset];
   } else if (joinSort === "price_drop") {
     productsSql = `
-      WITH filtered AS (SELECT ${catalogColumns} FROM products ${where}),
+      WITH ${filteredCte}, ${lastPriceCte},
       ph_agg AS (
         SELECT ph.sku,
           ROUND(((MAX(ph.old_price) - MIN(p2.price)) / MAX(ph.old_price)) * 100.0, 1) AS drop_pct
@@ -768,12 +793,19 @@ export async function getProducts(filters: {
         WHERE ph.detected_at > ? AND ph.change_type = 'price_drop' AND ph.old_price > p2.price AND ph.old_price > 0
         GROUP BY ph.sku
       )
-      SELECT f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id
-      FROM filtered f LEFT JOIN ph_agg ON ph_agg.sku = f.sku
+      SELECT ${selectCols}
+      FROM filtered f
+      LEFT JOIN last_price lp ON lp.sku = f.sku
+      LEFT JOIN ph_agg ON ph_agg.sku = f.sku
       ORDER BY COALESCE(ph_agg.drop_pct, 0) DESC LIMIT ? OFFSET ?`;
     productsArgs = [...args, cutoff14d, limit, offset];
   } else {
-    productsSql = `SELECT ${catalogColumns} FROM products ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
+    productsSql = `
+      WITH ${filteredCte}, ${lastPriceCte}
+      SELECT ${selectCols}
+      FROM filtered f
+      LEFT JOIN last_price lp ON lp.sku = f.sku
+      ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
     productsArgs = [...args, limit, offset];
   }
 
