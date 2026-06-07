@@ -2,7 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.24.0] - 2026-06-06
+## [0.5.25.0] - 2026-06-06
+
+### Added
+- **Shopping feeds** for Google Merchant, Pinterest, and Meta, generated from the live
+  Shopify catalogue and served publicly (CDN-cached 24h):
+  - `GET /api/feeds/google` and `/api/feeds/pinterest` — RSS 2.0 + `g:` namespace.
+  - `GET /api/feeds/meta` — Meta Product Catalog JSON.
+  - One item per priced variant SKU of an **active** product (item_group_id groups variants),
+    linking to `ameublodirect.ca/products/{handle}`, with brand (vendor), price (CAD),
+    availability, and a Google Product Category mapped from the product taxonomy
+    (`src/lib/feeds/google-category.ts`).
+  - All routes are public (added to `proxy.ts` allowlist). Hardened against feed-poisoning:
+    XML-forbidden control chars stripped, `g:id` deduped, retry/backoff on Shopify 429/5xx,
+    and a fail-loud guard rather than serving a truncated catalogue.
+
+### Notes
+- Feeds use the FR title from Shopify (matches the FR storefront they link to). Follow-ups:
+  an EN feed for furnishdirect.ca (needs Shopify EN metafields) and refining availability
+  from live Aosom stock.
+
 
 ### Changed
 - **Deduplicated the Shopify catalog.** Re-imports had created products sharing variant SKUs.

@@ -5,7 +5,7 @@ import { AUTH } from "@/lib/config";
 // "/api/pixel/script" is public so Shopify's storefront ScriptTag can fetch it
 // (no session). "/api/pixel/install" is intentionally NOT public — it stays
 // session-gated for the dashboard.
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/pixel/script"];
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/pixel/script", "/api/feeds"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(
