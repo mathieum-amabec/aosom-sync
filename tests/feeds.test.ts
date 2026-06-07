@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mapToGoogleCategory, DEFAULT_GOOGLE_CATEGORY } from "@/lib/feeds/google-category";
 import {
   escapeXml, stripHtml, truncate, formatPrice,
-  buildGoogleFeed, buildPinterestFeed, buildMetaFeed, type FeedItem,
+  buildGoogleFeed, buildPinterestFeed, buildMetaFeed, buildMetaXmlFeed, type FeedItem,
 } from "@/lib/feeds/feed";
 import { shopifyToFeedItems, type ShopifyFeedProduct } from "@/lib/feeds/source";
 
@@ -158,5 +158,49 @@ describe("buildMetaFeed", () => {
   });
   it("is JSON-serializable", () => {
     expect(() => JSON.stringify(json)).not.toThrow();
+  });
+});
+
+// Sale-price fixture: a product whose variant has a compare_at_price (regular > current).
+const saleProducts: ShopifyFeedProduct[] = [
+  {
+    id: 555, title: "Parasol en solde", handle: "parasol", vendor: "Outsunny", status: "active",
+    product_type: "Patio & Garden > Patio Shade > Patio Umbrellas",
+    images: [{ src: "https://img/p.jpg" }],
+    variants: [
+      { sku: "UMB-1", price: "79.99", compare_at_price: "129.99", inventory_management: null },   // on sale
+      { sku: "UMB-2", price: "79.99", compare_at_price: "50.00", inventory_management: null },      // compare <= price → not a sale
+    ],
+  },
+];
+
+describe("shopifyToFeedItems — compareAtPrice", () => {
+  const items = shopifyToFeedItems(saleProducts);
+  it("captures compare_at_price only when it exceeds the current price", () => {
+    expect(items.find((i) => i.id === "UMB-1")!.compareAtPrice).toBe(129.99);
+    expect(items.find((i) => i.id === "UMB-2")!.compareAtPrice).toBeNull();
+  });
+});
+
+describe("buildMetaXmlFeed", () => {
+  const items = shopifyToFeedItems([...fixtureProducts, ...saleProducts]);
+  const xml = buildMetaXmlFeed(items, { title: "Meta", link: "https://x", description: "d" });
+
+  it("is RSS 2.0 with the g: namespace", () => {
+    expect(xml).toContain(`<?xml version="1.0" encoding="UTF-8"?>`);
+    expect(xml).toContain(`xmlns:g="http://base.google.com/ns/1.0"`);
+  });
+  it("adds g:custom_label_0 = product_type", () => {
+    expect(xml).toContain("<g:custom_label_0>Patio &amp; Garden &gt; Patio Furniture &gt; Patio Chairs</g:custom_label_0>");
+  });
+  it("emits g:sale_price (current) + g:price (regular) for a discounted item", () => {
+    const block = xml.split("<item>").find((b) => b.includes("<g:id>UMB-1</g:id>"))!;
+    expect(block).toContain("<g:price>129.99 CAD</g:price>");      // regular = compare_at
+    expect(block).toContain("<g:sale_price>79.99 CAD</g:sale_price>"); // current
+  });
+  it("omits g:sale_price when there is no real discount", () => {
+    const block = xml.split("<item>").find((b) => b.includes("<g:id>PAT-001GY</g:id>"))!;
+    expect(block).toContain("<g:price>129.99 CAD</g:price>");
+    expect(block).not.toContain("<g:sale_price>");
   });
 });

@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.28.0] - 2026-06-07
+
+### Added
+- **Meta Catalog XML feed** at `GET /api/feeds/meta-xml`. Meta Commerce ingests RSS/ATOM
+  XML (not JSON), so this serves the same RSS 2.0 + `g:` shape as the Google feed, plus
+  `g:custom_label_0` (= product_type) and `g:sale_price` (current price) alongside `g:price`
+  (regular/compare-at) when a variant is discounted. Public via the existing `/api/feeds`
+  proxy allowlist; cached 24h. The feed source now reads Shopify `compare_at_price`.
+
 ## [0.5.27.0] - 2026-06-07
 
 ### Changed

@@ -8,6 +8,7 @@ import { type FeedItem, mapToGoogleCategory, stripHtml, truncate } from "./feed"
 export interface ShopifyFeedVariant {
   sku: string | null;
   price: string | null;
+  compare_at_price?: string | null;
   inventory_quantity?: number | null;
   inventory_management?: string | null;
   title?: string | null;
@@ -51,6 +52,8 @@ export function shopifyToFeedItems(products: ShopifyFeedProduct[]): FeedItem[] {
       const id = String(v.sku);
       if (seenIds.has(id)) { dupCount++; continue; } // dedup g:id across the feed
       seenIds.add(id);
+      const cap = parseFloat(v.compare_at_price ?? "") || 0;
+      const compareAtPrice = cap > price ? cap : null; // only a real "was" price counts
       // Dropship products are mostly untracked; treat untracked as in stock.
       const tracked = v.inventory_management != null && v.inventory_management !== "";
       const availability: FeedItem["availability"] =
@@ -66,6 +69,7 @@ export function shopifyToFeedItems(products: ShopifyFeedProduct[]): FeedItem[] {
         imageLink: images[0],
         additionalImageLinks: images.slice(1),
         price,
+        compareAtPrice,
         availability,
         condition: "new",
         brand,
