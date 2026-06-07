@@ -111,6 +111,58 @@ findings were dismissed on active verification (see below) — the auth model is
   or MITM'd feed can't pivot `fetch` at internal/metadata endpoints during composition.
 
 ---
+
+## Audit 2026-06-07 — branch `fix/cso-review-june` (daily, 8/10 gate)
+
+Scope: full audit, focus on the public (unauthenticated) attack surface and the merged
+feed code (`/api/feeds/{google,pinterest,meta,meta-xml}`). Independent verification via a
+read-only security subagent. **1 P1 fixed inline; 1 P2 + 1 P3 tracked below.**
+
+### Fixed (P1) — this branch
+- **Non-constant-time cron-secret comparison on a public LLM endpoint.**
+  `src/app/api/social/content/generate/route.ts:127` gated the cron path with
+  `authHeader === "Bearer " + cronSecret` (`===`), a timing oracle on the secret, while all
+  8 other cron routes use `crypto.timingSafeEqual`. The route is proxy-allowlisted under
+  `/api/social/content` (public) and triggers paid Anthropic calls, so its auth gate must be
+  constant-time. **Fix:** replaced the inline `===` with a `verifyCronSecret()` helper
+  matching the rest of the codebase (length check + `timingSafeEqual`, fail-closed on missing
+  `CRON_SECRET`). The session-auth fallback is unchanged.
+
+### New P2 — Medium (do next)
+### P2-5: `/api/image-preview` redirect not scheme/host-validated
+On composition failure, `src/app/api/image-preview/route.ts:88` does
+`NextResponse.redirect(productImageUrl, 302)` where `productImageUrl` is `products.image1`
+(populated from the Aosom CSV sync). The route is public and keyed by `sku`. Today the value
+is supplier-sourced (not directly attacker-controlled), so this is not exploitable — but if
+the Aosom feed were compromised, or a future import path let arbitrary image URLs into the
+table, this becomes an unauthenticated open redirect. **Fix (one line):** call the already-
+exported `assertPublicHttpsUrl(new URL(productImageUrl))` before the redirect; on failure
+return `502` instead of redirecting. Reuses the same guard `downloadImage` already applies.
+
+### New P3 — Low / informational
+### P3-4: `/api/health` exposes exact version for fingerprinting
+`src/app/api/health/route.ts` returns `version: pkg.version` (e.g. `0.5.28.0`) unauthenticated.
+Useful for ops monitoring, but lets an attacker fingerprint the exact build to correlate
+against dependency CVEs. **Fix (optional):** drop `version` from the public payload, or gate
+it behind a secret query param. Accept-risk is reasonable if the ops value outweighs recon.
+
+### Status updates on prior items
+- **P3-3 (SSRF hardening on image fetch) — RESOLVED (PR #90).** `downloadImage`
+  (`src/lib/image-composer.ts`) now enforces `https:`, re-validates the internal-host
+  denylist on every redirect hop, times out (15s), and caps download size (15MB); the
+  compositor sets sharp `limitInputPixels`. The exact defense-in-depth this item asked for.
+
+### Verified clean (active verification)
+- **Feeds:** all interpolated product data passes through `escapeXml()`; `availability`/
+  `condition` are hardcoded enums, category id is an integer from an internal allowlist; no
+  request query params reach feed generation; error path returns only "Feed temporarily
+  unavailable" (no stack/env leak).
+- **SQL:** all `db.execute`/`db.batch` parameterized; dynamic `orderBy` uses a `switch`
+  allowlist. **Session:** HMAC-SHA256 with constant-time compare + expiry. **Secrets:** none
+  hardcoded; `.env*` gitignored; clean git history. **LLM:** no public request parameter
+  reaches a Claude system prompt without a DB-validation step.
+
+---
 **Disclaimer:** `/cso` is an AI-assisted scan that catches common patterns. It is not a
 substitute for a professional penetration test. For production systems handling PII or
 payments, engage a qualified security firm.
