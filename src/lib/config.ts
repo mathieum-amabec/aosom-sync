@@ -19,6 +19,10 @@ export const env = {
   get authPassword(): string | undefined {
     return process.env.AUTH_PASSWORD || undefined;
   },
+  /** Optional: Klaviyo private API key. When unset, the Klaviyo client no-ops. */
+  get klaviyoApiKey(): string | undefined {
+    return process.env.KLAVIYO_API_KEY || undefined;
+  },
   get cronSecret(): string {
     const v = process.env.CRON_SECRET;
     if (!v) throw new Error("CRON_SECRET not set in .env.local");
