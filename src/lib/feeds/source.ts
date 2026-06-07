@@ -23,14 +23,24 @@ export interface ShopifyFeedProduct {
   body_html?: string | null;
   images?: Array<{ src: string }>;
   variants?: ShopifyFeedVariant[];
+  /** English product title from the custom.title_en metafield. Only populated for the
+   * EN feed; absent/empty falls back to the FR `title`. */
+  titleEn?: string | null;
 }
 
 const DESCRIPTION_MAX = 5000;
 
 /** Pure: map raw Shopify products to feed items (one per variant SKU). Active only.
  * g:id (SKU) is deduplicated across the whole feed — a duplicate g:id makes Google
- * reject/merge unpredictably, and dropship catalogs do reuse SKUs. */
-export function shopifyToFeedItems(products: ShopifyFeedProduct[]): FeedItem[] {
+ * reject/merge unpredictably, and dropship catalogs do reuse SKUs.
+ *
+ * When `opts.preferEnglishTitle` is set, the base title comes from `p.titleEn`
+ * (custom.title_en metafield), falling back to the FR `p.title` when it's missing
+ * or blank. Used by the Pinterest EN feed to reach the anglophone audience. */
+export function shopifyToFeedItems(
+  products: ShopifyFeedProduct[],
+  opts: { preferEnglishTitle?: boolean } = {},
+): FeedItem[] {
   const items: FeedItem[] = [];
   const seenIds = new Set<string>();
   let dupCount = 0;
@@ -45,6 +55,9 @@ export function shopifyToFeedItems(products: ShopifyFeedProduct[]): FeedItem[] {
     const cat = mapToGoogleCategory(p.product_type);
     const variants = (p.variants ?? []).filter((v) => v.sku && String(v.sku).trim() !== "");
     const multi = variants.length > 1;
+    // EN feed: prefer custom.title_en; fall back to the FR title when it's absent/blank.
+    const baseTitle =
+      opts.preferEnglishTitle && p.titleEn && p.titleEn.trim() !== "" ? p.titleEn : p.title;
 
     for (const v of variants) {
       const price = parseFloat(v.price ?? "0") || 0;
@@ -63,7 +76,7 @@ export function shopifyToFeedItems(products: ShopifyFeedProduct[]): FeedItem[] {
       items.push({
         id,
         itemGroupId: multi ? String(p.id) : null,
-        title: truncate(`${p.title}${variantTitle}`, 150),
+        title: truncate(`${baseTitle}${variantTitle}`, 150),
         description,
         link,
         imageLink: images[0],
@@ -107,8 +120,84 @@ async function fetchWithRetry(url: string, token: string, tries = 5): Promise<Re
 
 const MAX_PAGES = 80; // 80 * 250 = 20,000 variants — well above the catalog; guard against runaway
 
-/** Fetch all products from Shopify (paginated) and return feed items. */
-export async function getFeedItems(): Promise<FeedItem[]> {
+/** POST a GraphQL query with retry/backoff for 429 + 5xx + GraphQL THROTTLED errors. */
+async function graphqlWithRetry(
+  url: string,
+  token: string,
+  query: string,
+  variables: Record<string, unknown>,
+  tries = 5,
+): Promise<{ data?: unknown; errors?: Array<{ message: string; extensions?: { code?: string } }> }> {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
+      body: JSON.stringify({ query, variables }),
+    });
+    if ((res.status === 429 || res.status >= 500) && attempt < tries) {
+      const retryAfter = parseFloat(res.headers.get("Retry-After") || "");
+      const waitSec = !Number.isNaN(retryAfter) ? Math.min(retryAfter, 30) : Math.min(2 ** attempt, 20);
+      await sleep(waitSec * 1000);
+      continue;
+    }
+    if (!res.ok) throw new Error(`Shopify GraphQL fetch failed: ${res.status}`);
+    const body = (await res.json()) as {
+      data?: unknown;
+      errors?: Array<{ message: string; extensions?: { code?: string } }>;
+    };
+    // GraphQL throttling comes back as HTTP 200 with a THROTTLED error code.
+    const throttled = body.errors?.some((e) => e.extensions?.code === "THROTTLED");
+    if (throttled && attempt < tries) {
+      await sleep(Math.min(2 ** attempt, 20) * 1000);
+      continue;
+    }
+    return body;
+  }
+}
+
+/** Fetch a map of Shopify product id → custom.title_en metafield value (non-empty only).
+ * REST products.json does not return metafields, so the EN title is resolved via GraphQL. */
+export async function fetchTitleEnMap(): Promise<Map<string, string>> {
+  const token = process.env.SHOPIFY_ACCESS_TOKEN;
+  if (!token) throw new Error("SHOPIFY_ACCESS_TOKEN not configured");
+  const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}/graphql.json`;
+  const query = `query TitleEn($cursor: String) {
+    products(first: 250, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        legacyResourceId
+        metafield(namespace: "custom", key: "title_en") { value }
+      }
+    }
+  }`;
+  const map = new Map<string, string>();
+  let cursor: string | null = null;
+  let pages = 0;
+  do {
+    const body = await graphqlWithRetry(url, token, query, { cursor });
+    if (body.errors?.length) {
+      throw new Error(`Shopify GraphQL errors: ${body.errors.map((e) => e.message).join("; ")}`);
+    }
+    const conn = (body.data as {
+      products?: {
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        nodes: Array<{ legacyResourceId: string; metafield: { value: string } | null }>;
+      };
+    })?.products;
+    if (!conn) throw new Error("Shopify GraphQL returned no products connection");
+    for (const node of conn.nodes) {
+      const value = node.metafield?.value?.trim();
+      if (value) map.set(String(node.legacyResourceId), value);
+    }
+    cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+    pages++;
+  } while (cursor && pages < MAX_PAGES);
+  return map;
+}
+
+/** Fetch all products from Shopify (paginated) and return feed items.
+ * Pass `{ english: true }` to overlay custom.title_en titles for the Pinterest EN feed. */
+export async function getFeedItems(opts: { english?: boolean } = {}): Promise<FeedItem[]> {
   const token = process.env.SHOPIFY_ACCESS_TOKEN;
   if (!token) throw new Error("SHOPIFY_ACCESS_TOKEN not configured");
   const base = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}`;
@@ -128,6 +217,15 @@ export async function getFeedItems(): Promise<FeedItem[]> {
 
   // Fail loud rather than silently serve (and CDN-cache for 24h) a truncated catalog.
   if (pageInfo) throw new Error(`Feed pagination exceeded ${MAX_PAGES} pages — catalog larger than expected; refusing to serve a partial feed`);
+
+  if (opts.english) {
+    const titleEnMap = await fetchTitleEnMap();
+    for (const p of products) {
+      const en = titleEnMap.get(String(p.id));
+      if (en) p.titleEn = en;
+    }
+    return shopifyToFeedItems(products, { preferEnglishTitle: true });
+  }
 
   return shopifyToFeedItems(products);
 }

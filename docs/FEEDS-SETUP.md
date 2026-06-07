@@ -10,9 +10,15 @@ code — this guide covers connecting each platform to its feed.
 |----------|----------|--------|--------------|
 | Google Merchant Center | `https://aosom-sync.vercel.app/api/feeds/google` | RSS 2.0 XML (`g:` namespace) | `application/xml` |
 | Pinterest Catalog | `https://aosom-sync.vercel.app/api/feeds/pinterest` | RSS 2.0 XML (`g:` namespace) | `application/xml` |
+| Pinterest Catalog (EN) | `https://aosom-sync.vercel.app/api/feeds/pinterest-en` | RSS 2.0 XML (`g:` namespace) | `application/xml` |
 | Meta Product Catalog | `https://aosom-sync.vercel.app/api/feeds/meta` | JSON array | `application/json` |
 
-All three are **public** (no auth) so the platforms can fetch them directly.
+The **Pinterest EN** feed is identical to the Pinterest feed except titles come
+from the `custom.title_en` metafield (falling back to the FR title when absent),
+to maximize reach with the anglophone Canadian audience. Connect it as a second
+Pinterest catalog source.
+
+All feeds are **public** (no auth) so the platforms can fetch them directly.
 
 ### Validation snapshot — 2026-06-07
 

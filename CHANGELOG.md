@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.35.0] - 2026-06-07
+
+### Added
+- **Second Pinterest feed in English** (`GET /api/feeds/pinterest-en`). Same RSS
+  shape as `/api/feeds/pinterest`, but product titles come from the
+  `custom.title_en` metafield (falling back to the FR title when it's absent or
+  blank), to widen reach with the anglophone Canadian audience. Titles are
+  resolved via a paginated Shopify GraphQL query (REST `products.json` does not
+  return metafields). CDN-cached 24h; public via the existing `/api/feeds`
+  allowlist prefix.
+- **Meta Ads automation foundation.**
+  - `src/lib/meta-ads-client.ts` — Meta Marketing API v18.0 client (native fetch):
+    `getAdAccounts`, `getCampaigns` (active only), `createCampaign` (defaults to
+    `PAUSED` so it never auto-spends), `getAdSets`, `getInsights` (spend / reach /
+    impressions / clicks / CPC / CPM / CTR / ROAS). Process-local guardrail caps
+    usage at 200 calls/hour.
+  - `GET /api/ads` — session-protected (`isAuthenticated`); `?resource=accounts`
+    (default) | `campaigns` | `insights` (current calendar month). Returns `503`
+    when `META_ACCESS_TOKEN` is unset.
+  - `docs/META-ADS-SETUP.md` — how to connect an ad account + token to the app.
+
 ## [0.5.34.0] - 2026-06-07
 
 ### Added

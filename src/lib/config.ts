@@ -88,6 +88,16 @@ export const env = {
   get hasMetaPixel(): boolean {
     return !!process.env.NEXT_PUBLIC_META_PIXEL_ID;
   },
+  /** Meta Marketing API access token (Ads management). Throws when the Ads features
+   * are used without it configured. */
+  get metaAccessToken(): string {
+    const v = process.env.META_ACCESS_TOKEN;
+    if (!v) throw new Error("META_ACCESS_TOKEN not set in .env.local");
+    return v;
+  },
+  get hasMetaAccessToken(): boolean {
+    return !!process.env.META_ACCESS_TOKEN;
+  },
   get isProduction(): boolean {
     return process.env.NODE_ENV === "production";
   },
@@ -139,6 +149,16 @@ export const FACEBOOK = {
 
 export const META = {
   GRAPH_API_URL: "https://graph.facebook.com/v21.0",
+} as const;
+
+// ─── Meta Marketing (Ads) API ───────────────────────────────────────
+// Pinned to v18.0 per the Ads automation spec. Bump this single constant to
+// migrate the whole Ads client to a newer Graph version.
+export const META_ADS = {
+  API_VERSION: "v18.0",
+  GRAPH_API_URL: "https://graph.facebook.com/v18.0",
+  /** Self-imposed cap: Meta's standard ad-account tier allows ~200 calls/hour. */
+  RATE_LIMIT_PER_HOUR: 200,
 } as const;
 
 /**
