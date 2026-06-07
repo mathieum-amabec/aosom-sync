@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.29.0] - 2026-06-07
+## [0.5.30.0] - 2026-06-07
 
 ### Fixed
 - **EN posts now carry the Furnish Direct (EN) logo** on their branded hero image. The
@@ -10,6 +10,18 @@ All notable changes to Aosom Sync will be documented in this file.
   image to both channels. `publishDraftToChannel` now rewrites the `/api/image-preview`
   URL's `locale` per channel, so EN channels (Furnish Direct) fetch the EN-branded variant
   while FR channels (Ameublo Direct) keep the FR logo — from a single draft.
+
+## [0.5.29.0] - 2026-06-07
+
+### Security
+- **Constant-time cron-secret check on the content-generation endpoint.**
+  `POST /api/social/content/generate` (a public-prefixed route that triggers paid
+  Claude calls) compared its cron Bearer secret with `===`, a timing oracle, while
+  every other cron route uses `crypto.timingSafeEqual`. Switched it to the same
+  constant-time helper, fail-closed when `CRON_SECRET` is unset. Surfaced by a
+  `/cso` security audit; two lower-severity items (image-preview redirect
+  validation, `/api/health` version disclosure) are tracked in
+  `docs/SECURITY-BACKLOG.md`.
 
 ## [0.5.28.0] - 2026-06-07
 
