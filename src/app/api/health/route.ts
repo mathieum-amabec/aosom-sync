@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getLatestSyncRun } from "@/lib/database";
-import pkg from "../../../../package.json";
 
 export const dynamic = "force-dynamic";
 
@@ -33,10 +32,12 @@ export async function GET() {
     }
   }
 
+  // Deliberately no exact version: this endpoint is public (allow-listed in
+  // proxy.ts), and leaking the precise build lets an attacker fingerprint it
+  // against dependency CVEs. status/db/lastSync are enough for monitoring.
   return NextResponse.json({
     status,
     db: dbOk,
     lastSync,
-    version: pkg.version,
   }, { status: status === "down" ? 503 : 200 });
 }
