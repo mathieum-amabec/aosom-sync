@@ -3,7 +3,7 @@
  * Shared by the API route and the auto-post job so both go through the same code path.
  */
 import { publishWithImage, publishWithImages, publishText, publishVideo, type FacebookBrand } from "./facebook-client";
-import { publishPhoto } from "./instagram-client";
+import { publishPhoto, publishReel } from "./instagram-client";
 import { CHANNEL_META, type ChannelKey } from "./config";
 import {
   getFacebookDraft,
@@ -94,15 +94,28 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
     }
 
     if (meta.platform === "instagram") {
+      const igBrand = meta.brand as "ameublo" | "furnish";
+      // Prefer a Reel when a video is available: the vertical 9:16 reel render, or the
+      // square video as a fallback (still better reach than skipping the video, which
+      // is what the publisher used to do). Otherwise post the primary image.
+      const reelUrl = draft.reelsVideoUrl || draft.videoUrl;
+      if (reelUrl) {
+        const result = await publishReel({ caption, videoUrl: reelUrl, brand: igBrand });
+        return {
+          status: "published",
+          publishedId: result.id,
+          publishedAt: Math.floor(Date.now() / 1000),
+        };
+      }
       if (!primaryImageUrl) {
-        return { status: "error", error: "No public image URL available for Instagram (draft.imageUrls empty — regenerate draft)" };
+        return { status: "error", error: "No public image URL or video available for Instagram (regenerate draft)" };
       }
       // TODO: IG carousel (3 API calls + parent container) — out of scope for v0.1.8.0.
       // For now, post only the primary image to IG.
       const result = await publishPhoto({
         caption,
         imageUrl: primaryImageUrl,
-        brand: meta.brand as "ameublo" | "furnish",
+        brand: igBrand,
       });
       return {
         status: "published",

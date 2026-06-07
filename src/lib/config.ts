@@ -107,9 +107,16 @@ export const env = {
   get creatomateApiKey(): string | undefined {
     return process.env.CREATOMATE_API_KEY || undefined;
   },
-  /** Optional: the Creatomate template id used to render product videos. */
+  /** Optional: the Creatomate template id used to render square (1080x1080) product
+   * videos for Facebook. */
   get creatomateTemplateId(): string | undefined {
     return process.env.CREATOMATE_TEMPLATE_ID || undefined;
+  },
+  /** Optional: a second Creatomate template rendering vertical 9:16 (1080x1920)
+   * videos for Instagram Reels. When unset, no reel is rendered and IG falls back to
+   * the image post. */
+  get creatomateReelsTemplateId(): string | undefined {
+    return process.env.CREATOMATE_REELS_TEMPLATE_ID || undefined;
   },
   /** Optional: public logo URL passed to the Creatomate template's logo_url variable. */
   get creatomateLogoUrl(): string | undefined {
