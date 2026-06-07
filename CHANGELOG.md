@@ -2,6 +2,13 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.27.0] - 2026-06-07
+
+### Changed
+- **Imports now publish live immediately.** `createShopifyProduct` creates products with
+  status `active` instead of `draft`, so an imported product goes straight to the storefront
+  (and into the shopping feeds) with no manual draft-review step.
+
 ## [0.5.26.0] - 2026-06-06
 
 ### Added
