@@ -1,6 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { aggregateInsights, rangeForDays, parseDays } from "@/lib/ads-insights";
-import type { InsightsRow } from "@/lib/meta-ads-client";
+import { aggregateInsights, pickAdAccount, rangeForDays, parseDays } from "@/lib/ads-insights";
+import type { InsightsRow, AdAccount } from "@/lib/meta-ads-client";
+
+const acct = (id: string, status: number): AdAccount => ({
+  id, account_id: id.replace(/^act_/, ""), name: id, account_status: status, currency: "CAD",
+});
+
+describe("pickAdAccount", () => {
+  const accts = [acct("act_111", 2), acct("act_222", 1), acct("act_333", 1)];
+
+  it("returns null when there are no accounts", () => {
+    expect(pickAdAccount([], "act_222")).toBeNull();
+  });
+  it("prefers the configured account id (with act_ prefix)", () => {
+    expect(pickAdAccount(accts, "act_333")?.id).toBe("act_333");
+  });
+  it("matches the configured id without the act_ prefix", () => {
+    expect(pickAdAccount(accts, "333")?.id).toBe("act_333");
+  });
+  it("falls back to the first ACTIVE account when no preference is set", () => {
+    expect(pickAdAccount(accts)?.id).toBe("act_222"); // act_111 is status 2 (not active)
+  });
+  it("falls back to ACTIVE when the preferred id isn't accessible", () => {
+    expect(pickAdAccount(accts, "act_999")?.id).toBe("act_222");
+  });
+  it("falls back to the first account when none are active", () => {
+    expect(pickAdAccount([acct("act_a", 2), acct("act_b", 3)])?.id).toBe("act_a");
+  });
+});
 
 describe("aggregateInsights", () => {
   it("computes totals and derived metrics from a single row", () => {

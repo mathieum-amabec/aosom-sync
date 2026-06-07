@@ -98,6 +98,11 @@ export const env = {
   get hasMetaAccessToken(): boolean {
     return !!process.env.META_ACCESS_TOKEN;
   },
+  /** Optional: the Meta ad account to report on (e.g. "act_123456789"). When set,
+   * the ads insights route uses it instead of auto-picking the first ACTIVE account. */
+  get metaAdAccountId(): string | undefined {
+    return process.env.META_AD_ACCOUNT_ID || undefined;
+  },
   get isProduction(): boolean {
     return process.env.NODE_ENV === "production";
   },
