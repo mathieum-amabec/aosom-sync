@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.43.0] - 2026-06-07
+## [0.5.44.0] - 2026-06-07
 
 ### Fixed
 - **Catalog "In store" links now open the storefront, not the Shopify admin**
@@ -15,7 +15,20 @@ All notable changes to Aosom Sync will be documented in this file.
   lock in that the projection carries `shopify_handle` and that `storeLink` then yields a
   storefront URL (admin fallback only when the handle is missing).
 
-## [0.5.42.0] - 2026-06-07
+## [0.5.43.0] - 2026-06-07
+
+### Added
+- **Creatomate foundation for automated product videos.** New
+  `src/lib/creatomate-client.ts` (`createVideoFromTemplate` → render job id,
+  `getVideoStatus` → `{status, url}`, `renderVideoAndWait` bounded poll; no-ops
+  without `CREATOMATE_API_KEY`). On a **new_product** draft, when
+  `CREATOMATE_API_KEY` + `CREATOMATE_TEMPLATE_ID` are set, job4 renders a 1080×1080
+  branded video (product image + title + price + logo) and stores the MP4 in the
+  new `facebook_drafts.video_url` column. The publisher **prefers the video on
+  Facebook** (`publishVideo` → `/{page}/videos`), falling back to the image.
+  Instagram keeps the branded image (Reels = follow-up). Setup +
+  template/variable guide in `docs/CREATOMATE-SETUP.md`. Foundation: renders are
+  async (bounded ~90s wait; slow renders attach later via a future webhook/cron).
 
 ### Added
 - **Configurable Meta ad account for the dashboard ads panel.** New optional

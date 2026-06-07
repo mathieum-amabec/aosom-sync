@@ -91,6 +91,44 @@ export async function publishWithImage(opts: {
 }
 
 /**
+ * Publish a video to a brand's Facebook Page. `videoUrl` MUST be a public MP4 URL
+ * — Meta fetches it server-side (same model as photos; we never upload binary).
+ * Used for the automated product videos (better engagement than a still image).
+ */
+export async function publishVideo(opts: {
+  caption: string;
+  videoUrl: string;
+  brand: FacebookBrand;
+  scheduledAt?: number;
+}): Promise<PublishResult> {
+  const { pageId, token, label } = brandCreds(opts.brand);
+
+  const body: Record<string, string> = {
+    file_url: opts.videoUrl,
+    description: opts.caption,
+  };
+  if (opts.scheduledAt) {
+    body.published = "false";
+    body.scheduled_publish_time = String(opts.scheduledAt);
+  }
+
+  const res = await fetch(`${FACEBOOK.GRAPH_API_URL}/${pageId}/videos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 429) {
+    throw new Error(`${label}: Facebook rate limit, retry later`);
+  }
+
+  const data = await res.json();
+  if (data.error) throw new Error(`${label}: ${data.error.message}`);
+  // The /videos endpoint returns the video id; there's no separate post_id.
+  return { id: data.id, postId: data.post_id || data.id };
+}
+
+/**
  * Publish a multi-photo album/carousel to a brand's Facebook Page.
  *
  * Flow (per Meta Graph API docs):

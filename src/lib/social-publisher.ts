@@ -2,7 +2,7 @@
  * Multi-channel publishing orchestration.
  * Shared by the API route and the auto-post job so both go through the same code path.
  */
-import { publishWithImage, publishWithImages, publishText, type FacebookBrand } from "./facebook-client";
+import { publishWithImage, publishWithImages, publishText, publishVideo, type FacebookBrand } from "./facebook-client";
 import { publishPhoto } from "./instagram-client";
 import { CHANNEL_META, type ChannelKey } from "./config";
 import {
@@ -76,9 +76,12 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
   try {
     if (meta.platform === "facebook") {
       const brand = meta.brand as FacebookBrand;
-      // Multi-photo album when 2+ URLs, single-photo when 1, text-only when none.
+      // Prefer the rendered video when available (higher engagement); else
+      // multi-photo album (2+ URLs), single photo (1), or text-only (none).
       const result =
-        imageUrls.length >= 2
+        draft.videoUrl
+          ? await publishVideo({ caption, videoUrl: draft.videoUrl, brand })
+          : imageUrls.length >= 2
           ? await publishWithImages({ caption, imageUrls: localizedImageUrls, brand })
           : primaryImageUrl
           ? await publishWithImage({ caption, imageUrl: primaryImageUrl, brand })
