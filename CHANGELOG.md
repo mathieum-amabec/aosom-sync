@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.40.0] - 2026-06-07
+
+### Added
+- **Pinterest EN feed setup guide** (`docs/PINTEREST-EN-SETUP.md`). Step-by-step
+  for adding the second (English) catalog source in Pinterest — URL
+  `/api/feeds/pinterest-en`, Language English (US), Country Canada — same
+  procedure as the already-configured FR feed.
+
+### Changed
+- **Price-drop "notify me" widget UX overhaul** (`docs/snippets/price-drop-alert.liquid`,
+  injected into live theme 160059195497). No-reload animated ✓ success panel that
+  replaces the form on submit; client-side email validation before the network
+  call; a button loading state (spinner + "Sending…/En cours…"); and friendly
+  error handling that maps the real API responses (429 rate limit, 404 unknown
+  product, network failure). Success copy stays double-opt-in accurate ("check
+  your email to confirm"). Respects `prefers-reduced-motion`.
+
 ## [0.5.39.0] - 2026-06-07
 
 ### Changed

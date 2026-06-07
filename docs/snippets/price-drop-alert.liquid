@@ -2,7 +2,14 @@
   Price-drop alert widget — "Notify me if the price drops".
 
   Posts to POST https://aosom-sync.vercel.app/api/price-alert (cross-origin,
-  CORS-allow-listed for the storefront origins; rate-limited per IP).
+  CORS-allow-listed for the storefront origins; rate-limited per IP). The backend
+  is double opt-in: the signup is stored unconfirmed and a confirmation email is
+  sent — the visitor must click the emailed link before any alert fires. The
+  success panel reflects that ("check your email to confirm").
+
+  UX: client-side email validation, a button loading state during submit,
+  an animated ✓ success panel that replaces the form (no page reload), and
+  friendly error handling (rate limit, network, invalid email).
 
   INSTALL (theme 160059195497 or live theme):
   1. Theme editor → Product template → add a "Custom Liquid" block in the
@@ -27,10 +34,14 @@
 <div class="price-alert" data-section-id="{{ section.id }}">
   <form
     class="price-alert__form"
+    novalidate
     data-sku="{{ sku | escape }}"
     data-price="{{ price_amount }}"
-    data-ok="{% if is_en %}Almost there — check your email to confirm your alert.{% else %}Presque fini — vérifie ton courriel pour confirmer ton alerte.{% endif %}"
     data-err="{% if is_en %}Something went wrong. Please try again.{% else %}Une erreur est survenue. Réessayez.{% endif %}"
+    data-err-email="{% if is_en %}Please enter a valid email address.{% else %}Entrez une adresse courriel valide.{% endif %}"
+    data-err-rate="{% if is_en %}Too many requests — please try again in a minute.{% else %}Trop de tentatives — réessayez dans une minute.{% endif %}"
+    data-err-product="{% if is_en %}This product can't be tracked right now.{% else %}Ce produit ne peut pas être suivi pour l'instant.{% endif %}"
+    data-sending="{% if is_en %}Sending…{% else %}En cours…{% endif %}"
   >
     <label class="price-alert__label" for="price-alert-email-{{ section.id }}">
       🔔 {% if is_en %}Get notified if the price drops{% else %}Recevoir une alerte si le prix baisse{% endif %}
@@ -45,11 +56,23 @@
         class="price-alert__input"
       />
       <button type="submit" class="price-alert__btn">
-        {% if is_en %}Notify me{% else %}M'alerter{% endif %}
+        <span class="price-alert__btn-label">{% if is_en %}Notify me{% else %}M'alerter{% endif %}</span>
       </button>
     </div>
-    <p class="price-alert__msg" role="status" aria-live="polite" hidden></p>
+    <p class="price-alert__msg" role="alert" aria-live="assertive" hidden></p>
   </form>
+
+  <div class="price-alert__success" role="status" aria-live="polite" hidden>
+    <span class="price-alert__check" aria-hidden="true">
+      <svg viewBox="0 0 52 52"><circle class="price-alert__check-circle" cx="26" cy="26" r="24" fill="none"/><path class="price-alert__check-mark" fill="none" d="M14 27 l8 8 l16 -18"/></svg>
+    </span>
+    <p class="price-alert__success-title">
+      {% if is_en %}You'll be notified when the price drops!{% else %}Vous serez alerté(e) dès que le prix baisse!{% endif %}
+    </p>
+    <p class="price-alert__success-sub">
+      {% if is_en %}Check your email to confirm your alert.{% else %}Vérifiez votre courriel pour confirmer votre alerte.{% endif %}
+    </p>
+  </div>
 </div>
 
 <style>
@@ -58,10 +81,27 @@
   .price-alert__row { display: flex; gap: 8px; flex-wrap: wrap; }
   .price-alert__input { flex: 1 1 180px; min-width: 0; padding: 9px 12px; border: 1px solid #d9d2c7; border-radius: 6px; font-size: 14px; }
   .price-alert__input:focus { outline: 2px solid #C17F3E; outline-offset: 0; border-color: #C17F3E; }
-  .price-alert__btn { padding: 9px 16px; background: #C17F3E; color: #fff; border: 0; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .price-alert__input.is-invalid { border-color: #c0392b; outline-color: #c0392b; }
+  .price-alert__btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 9px 16px; background: #C17F3E; color: #fff; border: 0; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
   .price-alert__btn:hover { background: #a96c31; }
-  .price-alert__btn:disabled { opacity: .6; cursor: default; }
-  .price-alert__msg { margin: 8px 0 0; font-size: 13px; color: #1A2340; }
+  .price-alert__btn:disabled { opacity: .7; cursor: default; }
+  .price-alert__msg { margin: 8px 0 0; font-size: 13px; color: #c0392b; }
+  .price-alert__spinner { width: 15px; height: 15px; border: 2px solid rgba(255,255,255,.5); border-top-color: #fff; border-radius: 50%; animation: price-alert-spin .6s linear infinite; }
+  @keyframes price-alert-spin { to { transform: rotate(360deg); } }
+
+  .price-alert__success { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 4px; padding: 6px 0; animation: price-alert-rise .35s ease-out both; }
+  .price-alert__check svg { width: 44px; height: 44px; }
+  .price-alert__check-circle { stroke: #2e9e5b; stroke-width: 3; stroke-dasharray: 151; stroke-dashoffset: 151; animation: price-alert-circle .45s ease-out forwards; }
+  .price-alert__check-mark { stroke: #2e9e5b; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 48; stroke-dashoffset: 48; animation: price-alert-mark .3s .4s ease-out forwards; }
+  .price-alert__success-title { margin: 6px 0 0; font-size: 15px; font-weight: 700; color: #1A2340; }
+  .price-alert__success-sub { margin: 0; font-size: 13px; color: #5b6172; }
+  @keyframes price-alert-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes price-alert-circle { to { stroke-dashoffset: 0; } }
+  @keyframes price-alert-mark { to { stroke-dashoffset: 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .price-alert__success, .price-alert__check-circle, .price-alert__check-mark, .price-alert__spinner { animation: none; }
+    .price-alert__check-circle, .price-alert__check-mark { stroke-dashoffset: 0; }
+  }
 </style>
 
 <script>
@@ -71,14 +111,46 @@
     var form = root.querySelector('.price-alert__form');
     if (!form || form.dataset.bound) return;
     form.dataset.bound = '1';
+
+    var btn = form.querySelector('.price-alert__btn');
+    var btnLabel = form.querySelector('.price-alert__btn-label');
+    var btnText = btnLabel ? btnLabel.textContent : '';
+    var msg = form.querySelector('.price-alert__msg');
+    var emailEl = form.querySelector('.price-alert__input');
+    var success = root.querySelector('.price-alert__success');
+    var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    function showError(text) {
+      msg.textContent = text;
+      msg.hidden = false;
+    }
+    function clearError() {
+      msg.hidden = true;
+      emailEl.classList.remove('is-invalid');
+    }
+    function setLoading(on) {
+      btn.disabled = on;
+      btnLabel.textContent = on ? form.dataset.sending : btnText;
+      var sp = btn.querySelector('.price-alert__spinner');
+      if (on && !sp) { sp = document.createElement('span'); sp.className = 'price-alert__spinner'; btn.insertBefore(sp, btnLabel); }
+      if (!on && sp) { sp.remove(); }
+    }
+
+    emailEl.addEventListener('input', clearError);
+
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      var btn = form.querySelector('.price-alert__btn');
-      var msg = form.querySelector('.price-alert__msg');
-      var emailEl = form.querySelector('.price-alert__input');
+      clearError();
       var email = (emailEl.value || '').trim();
-      if (!email) return;
-      btn.disabled = true;
+      // Client-side validation before hitting the network.
+      if (!EMAIL_RE.test(email) || email.length > 254) {
+        emailEl.classList.add('is-invalid');
+        showError(form.dataset.errEmail);
+        emailEl.focus();
+        return;
+      }
+
+      setLoading(true);
       fetch('https://aosom-sync.vercel.app/api/price-alert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -88,14 +160,27 @@
           price: parseFloat(form.dataset.price)
         })
       })
-        .then(function (r) { return r.json().catch(function () { return {}; }); })
-        .then(function (d) {
-          msg.textContent = d && d.success ? form.dataset.ok : form.dataset.err;
-          msg.hidden = false;
-          if (d && d.success) form.reset();
+        .then(function (r) {
+          return r.json().catch(function () { return {}; }).then(function (d) {
+            return { status: r.status, data: d || {} };
+          });
         })
-        .catch(function () { msg.textContent = form.dataset.err; msg.hidden = false; })
-        .finally(function () { btn.disabled = false; });
+        .then(function (res) {
+          if (res.data.success) {
+            // Replace the form with the animated success panel (no reload).
+            form.hidden = true;
+            success.hidden = false;
+            return;
+          }
+          setLoading(false);
+          if (res.status === 429) { showError(form.dataset.errRate); }
+          else if (res.status === 404) { showError(form.dataset.errProduct); }
+          else { showError(form.dataset.err); }
+        })
+        .catch(function () {
+          setLoading(false);
+          showError(form.dataset.err);
+        });
     });
   })();
 </script>
