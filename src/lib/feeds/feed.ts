@@ -9,7 +9,8 @@ export interface FeedItem {
   link: string;                  // https://ameublodirect.ca/products/{handle}
   imageLink: string;
   additionalImageLinks: string[];
-  price: number;                 // numeric, CAD
+  price: number;                 // numeric, CAD (current selling price)
+  compareAtPrice?: number | null; // Shopify compare_at_price — the regular "was" price when on sale
   availability: "in stock" | "out of stock";
   condition: "new";
   brand: string;
@@ -93,6 +94,45 @@ export function buildPinterestFeed(items: FeedItem[], opts: { title: string; lin
   // Pinterest consumes the same RSS+g: shape as Google. We keep additional_image_link
   // (Pinterest prefers larger/square images — those are surfaced via these extras).
   return buildGoogleFeed(items, opts);
+}
+
+// ── Meta Catalog feed (RSS 2.0 + g:) — Meta rejects JSON; it ingests RSS/ATOM XML ──
+// Same shape as Google, plus: g:custom_label_0 = product_type, and g:sale_price when the
+// item is discounted (g:price then carries the regular/compare-at price).
+function metaXmlItemXml(it: FeedItem): string {
+  const onSale = it.compareAtPrice != null && it.compareAtPrice > it.price;
+  const regular = onSale ? (it.compareAtPrice as number) : it.price;
+  const g: string[] = [
+    `<g:id>${escapeXml(it.id)}</g:id>`,
+    `<title>${escapeXml(it.title)}</title>`,
+    `<description>${escapeXml(it.description)}</description>`,
+    `<link>${escapeXml(it.link)}</link>`,
+    `<g:image_link>${escapeXml(it.imageLink)}</g:image_link>`,
+    ...it.additionalImageLinks.slice(0, 10).map((u) => `<g:additional_image_link>${escapeXml(u)}</g:additional_image_link>`),
+    `<g:availability>${it.availability}</g:availability>`,
+    `<g:price>${escapeXml(formatPrice(regular))}</g:price>`,
+    onSale ? `<g:sale_price>${escapeXml(formatPrice(it.price))}</g:sale_price>` : "",
+    `<g:condition>${it.condition}</g:condition>`,
+    `<g:brand>${escapeXml(it.brand)}</g:brand>`,
+    `<g:google_product_category>${it.googleCategoryId}</g:google_product_category>`,
+    it.productType ? `<g:product_type>${escapeXml(it.productType)}</g:product_type>` : "",
+    it.productType ? `<g:custom_label_0>${escapeXml(it.productType)}</g:custom_label_0>` : "",
+    it.itemGroupId ? `<g:item_group_id>${escapeXml(it.itemGroupId)}</g:item_group_id>` : "",
+    `<g:identifier_exists>false</g:identifier_exists>`,
+  ].filter(Boolean);
+  return `    <item>\n      ${g.join("\n      ")}\n    </item>`;
+}
+
+export function buildMetaXmlFeed(items: FeedItem[], opts: { title: string; link: string; description: string }): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
+  <channel>
+    <title>${escapeXml(opts.title)}</title>
+    <link>${escapeXml(opts.link)}</link>
+    <description>${escapeXml(opts.description)}</description>
+${items.map(metaXmlItemXml).join("\n")}
+  </channel>
+</rss>`;
 }
 
 // ── Meta (Facebook/Instagram) Product Catalog feed (JSON) ─────────────────
