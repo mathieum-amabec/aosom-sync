@@ -29,7 +29,7 @@
     class="price-alert__form"
     data-sku="{{ sku | escape }}"
     data-price="{{ price_amount }}"
-    data-ok="{% if is_en %}You're on the list — we'll email you if the price drops.{% else %}C'est noté — on vous écrit dès que le prix baisse.{% endif %}"
+    data-ok="{% if is_en %}Almost there — check your email to confirm your alert.{% else %}Presque fini — vérifie ton courriel pour confirmer ton alerte.{% endif %}"
     data-err="{% if is_en %}Something went wrong. Please try again.{% else %}Une erreur est survenue. Réessayez.{% endif %}"
   >
     <label class="price-alert__label" for="price-alert-email-{{ section.id }}">

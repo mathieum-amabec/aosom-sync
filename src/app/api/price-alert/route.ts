@@ -7,12 +7,17 @@
  * exist in the catalog. Best-effort Klaviyo profile identify (never fails the
  * signup). The actual "Price Drop Alert" email is sent later by the notify cron.
  */
+import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { getProduct, upsertPriceAlert } from "@/lib/database";
-import { identifyProfile } from "@/lib/klaviyo-client";
+import { identifyProfile, trackEvent } from "@/lib/klaviyo-client";
 import { checkRateLimit } from "@/lib/rate-limiter";
+import { getPublicAppUrl } from "@/lib/config";
 
 export const runtime = "nodejs";
+
+const TOKEN_TTL_SECONDS = 24 * 60 * 60; // confirmation link valid 24h
+const PUBLIC_BASE_FALLBACK = "https://aosom-sync.vercel.app";
 
 // Storefront origins allowed to POST here.
 const ALLOWED_ORIGINS = new Set([
@@ -87,20 +92,37 @@ export async function POST(request: Request) {
     return json(409, { success: false, error: "Product price unavailable" });
   }
 
+  const confirmToken = crypto.randomUUID();
+  const tokenExpiresAt = Math.floor(Date.now() / 1000) + TOKEN_TTL_SECONDS;
+
   await upsertPriceAlert({
     email,
     sku,
     shopifyProductId: (product.shopify_product_id as string) || null,
     priceAtSignup: baselinePrice,
+    confirmToken,
+    tokenExpiresAt,
   });
 
-  // Best-effort: create/locate the Klaviyo profile so the later Price Drop Alert
-  // event has a profile to attach to. Never fail the signup on Klaviyo errors.
+  // Double opt-in: the row stays confirmed=0 (the notify cron skips it) until the
+  // recipient clicks the emailed link, so price drops never go to an address that
+  // didn't opt in. Send the confirmation email via Klaviyo.
+  const base = getPublicAppUrl() || PUBLIC_BASE_FALLBACK;
+  const confirmUrl = `${base}/api/price-alert/confirm?token=${encodeURIComponent(confirmToken)}`;
   try {
     await identifyProfile(email, { last_price_alert_sku: sku });
-  } catch {
-    /* ignore — the cron will identify again when it sends the event */
+    const sent = await trackEvent("Price Alert Confirmation", email, {
+      confirm_url: confirmUrl,
+      sku,
+      product_name: (product.name as string) || sku,
+      price: baselinePrice,
+    });
+    if (!sent.ok) {
+      console.warn(`[price-alert] confirmation email not sent for ${email}: ${sent.skipped ? "Klaviyo not configured" : sent.error}`);
+    }
+  } catch (err) {
+    console.warn(`[price-alert] Klaviyo confirmation failed for ${email}: ${err}`);
   }
 
-  return json(200, { success: true });
+  return json(200, { success: true, message: "Vérifiez votre courriel pour confirmer / Check your email to confirm." });
 }
