@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.31.0] - 2026-06-07
+
+### Security
+- **Removed the exact version from the public `/api/health` payload (P3-4 from `/cso`).**
+  The endpoint no longer returns `version`, so an unauthenticated caller can't
+  fingerprint the precise build against dependency CVEs. `status`/`db`/`lastSync`
+  are unchanged for monitoring.
+
+### Added
+- **`docs/KLAVIYO-SETUP.md`** — setup guide for Klaviyo email automation
+  (account + Shopify connection + Welcome / Abandoned-cart / Post-purchase /
+  Browse-abandonment flows, bilingual FR/EN, post-purchase review ask via
+  Judge.me). Documentation only — no Klaviyo code in the repo.
+
 ## [0.5.30.0] - 2026-06-07
 
 ### Security
