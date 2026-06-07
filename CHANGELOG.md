@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.31.0] - 2026-06-07
+## [0.5.32.0] - 2026-06-07
 
 ### Fixed
 - **EN posts now carry the Furnish Direct (EN) logo** on their branded hero image. The
@@ -10,6 +10,20 @@ All notable changes to Aosom Sync will be documented in this file.
   image to both channels. `publishDraftToChannel` now rewrites the `/api/image-preview`
   URL's `locale` per channel, so EN channels (Furnish Direct) fetch the EN-branded variant
   while FR channels (Ameublo Direct) keep the FR logo — from a single draft.
+
+## [0.5.31.0] - 2026-06-07
+
+### Security
+- **Removed the exact version from the public `/api/health` payload (P3-4 from `/cso`).**
+  The endpoint no longer returns `version`, so an unauthenticated caller can't
+  fingerprint the precise build against dependency CVEs. `status`/`db`/`lastSync`
+  are unchanged for monitoring.
+
+### Added
+- **`docs/KLAVIYO-SETUP.md`** — setup guide for Klaviyo email automation
+  (account + Shopify connection + Welcome / Abandoned-cart / Post-purchase /
+  Browse-abandonment flows, bilingual FR/EN, post-purchase review ask via
+  Judge.me). Documentation only — no Klaviyo code in the repo.
 
 ## [0.5.30.0] - 2026-06-07
 
