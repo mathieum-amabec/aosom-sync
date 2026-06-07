@@ -8,6 +8,9 @@ import {
   getVideoStatus,
   renderVideoAndWait,
   isCreatomateConfigured,
+  createReelsVideo,
+  renderReelsVideoAndWait,
+  isReelsConfigured,
 } from "@/lib/creatomate-client";
 
 const json = (status: number, body: unknown) =>
@@ -87,5 +90,55 @@ describe("renderVideoAndWait", () => {
   it("returns null when the create step no-ops (no key)", async () => {
     (env as { creatomateApiKey?: string }).creatomateApiKey = undefined;
     expect(await renderVideoAndWait("t", {})).toEqual({ jobId: null, url: null });
+  });
+});
+
+describe("createReelsVideo / renderReelsVideoAndWait (9:16)", () => {
+  type E = { creatomateApiKey?: string; creatomateReelsTemplateId?: string };
+  afterEach(() => { (env as E).creatomateReelsTemplateId = undefined; });
+
+  it("isReelsConfigured is true only with key + reels template", () => {
+    (env as E).creatomateApiKey = "ck_test";
+    (env as E).creatomateReelsTemplateId = undefined;
+    expect(isReelsConfigured()).toBe(false);
+    (env as E).creatomateReelsTemplateId = "tmpl_reel";
+    expect(isReelsConfigured()).toBe(true);
+  });
+
+  it("createReelsVideo POSTs with the reels template id", async () => {
+    (env as E).creatomateApiKey = "ck_test";
+    (env as E).creatomateReelsTemplateId = "tmpl_reel";
+    fetchMock.mockResolvedValueOnce(json(200, [{ id: "rr1", status: "planned" }]));
+    const id = await createReelsVideo({ product_title: "Chair" });
+    expect(id).toBe("rr1");
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).template_id).toBe("tmpl_reel");
+  });
+
+  it("createReelsVideo no-ops to null when no reels template configured", async () => {
+    (env as E).creatomateApiKey = "ck_test";
+    (env as E).creatomateReelsTemplateId = undefined;
+    expect(await createReelsVideo({})).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("renderReelsVideoAndWait returns the url once the reel render succeeds", async () => {
+    (env as E).creatomateApiKey = "ck_test";
+    (env as E).creatomateReelsTemplateId = "tmpl_reel";
+    fetchMock.mockImplementation((url: string, opts: { method?: string } = {}) =>
+      Promise.resolve(
+        url.endsWith("/v1/renders") && opts.method === "POST"
+          ? json(200, [{ id: "rr1", status: "planned" }])
+          : json(200, { id: "rr1", status: "succeeded", url: "https://cdn/reel.mp4" }),
+      ),
+    );
+    const r = await renderReelsVideoAndWait({}, { timeoutMs: 1000, intervalMs: 5 });
+    expect(r).toEqual({ jobId: "rr1", url: "https://cdn/reel.mp4" });
+  });
+
+  it("renderReelsVideoAndWait no-ops when no reels template", async () => {
+    (env as E).creatomateApiKey = "ck_test";
+    (env as E).creatomateReelsTemplateId = undefined;
+    expect(await renderReelsVideoAndWait({})).toEqual({ jobId: null, url: null });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
