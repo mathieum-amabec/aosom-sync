@@ -110,9 +110,45 @@ For each flow email, build FR and EN versions (per the Option A split):
 - Confirm **smart sending** and **quiet hours** are on to avoid over-emailing.
 - Watch the first week: deliverability, open/click rates, and unsubscribe rate.
 
+## Server-side events (API client)
+
+`src/lib/klaviyo-client.ts` is a rate-limited Klaviyo API client (revision
+`2023-10-15`) with `trackEvent(metric, email, props)` and
+`identifyProfile(email, props)`. It is a **ready capability, intentionally not
+wired into the catalog/sync jobs.**
+
+Why not wired: every Klaviyo event must be attached to a **profile** (a real
+recipient email). aosom-sync's server jobs — `import-pipeline.ts` (imports a
+product to Shopify) and `job1-sync.ts` (detects a price change) — operate on the
+**catalog**, with no customer in scope. Firing `Product Viewed` or `Price Drop`
+there would have no recipient (the API rejects profile-less events) and couldn't
+trigger any email.
+
+The flows above are driven correctly without server events:
+- **Browse / cart / viewed-product** come from Klaviyo's **onsite tracking**
+  (`klaviyo.js`) on the storefront.
+- **Price drop / back-in-stock** come from Klaviyo's **Shopify catalog sync** —
+  aosom-sync already keeps the Shopify price current (Job 1), so Klaviyo sees the
+  drop and notifies subscribers natively.
+
+When to use the client: only where a **real recipient email** exists. The
+concrete future case is a price-drop "notify me" list — store `email ↔ SKU` (with
+consent), then on a Job 1 price drop call `trackEvent("Price Drop", email, {...})`
+for each subscriber of that SKU. That needs a new table + a storefront
+subscribe endpoint and is out of scope here.
+
+### Config
+Set the key in `.env.local` (gitignored; placeholder already present):
+```
+KLAVIYO_API_KEY=your_klaviyo_private_api_key_here
+```
+Get a **Private API Key** in Klaviyo → Settings → API Keys (scopes:
+`profiles:write`, `events:write`). When the key is unset the client no-ops
+(`{ ok: false, skipped: true }`), so it is safe to wire defensively. The client
+caps itself at 10 requests/second.
+
 ## Notes
-- No code in this repo touches Klaviyo — it is a Shopify-app + Klaviyo-dashboard
-  setup. If we later want server-side events (e.g. custom catalog events), that
-  would be a separate integration via the Klaviyo API.
+- Most of Klaviyo is a Shopify-app + dashboard setup; the only repo code is the
+  optional server-side client above.
 - Consent first: only email contacts who opted into marketing. Browse/cart flows
   to non-consented contacts create legal risk under CASL (Canada) and GDPR.
