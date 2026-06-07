@@ -113,6 +113,42 @@ describe("shopifyToFeedItems", () => {
   });
 });
 
+describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => {
+  const enProducts: ShopifyFeedProduct[] = [
+    {
+      id: 700, title: "Chaise de patio", titleEn: "Patio Chair", handle: "chaise-de-patio",
+      vendor: "Outsunny", status: "active",
+      product_type: "Patio & Garden > Patio Furniture > Patio Chairs",
+      images: [{ src: "https://img/1.jpg" }],
+      variants: [{ sku: "EN-001", price: "129.99", inventory_management: null }],
+    },
+    {
+      id: 701, title: "Niche pour chien", titleEn: "  ", handle: "niche", status: "active", // blank EN → fallback
+      images: [{ src: "https://img/2.jpg" }],
+      variants: [{ sku: "EN-002", price: "59.99", inventory_management: null }],
+    },
+    {
+      id: 702, title: "Tente de jardin", handle: "tente", status: "active", // no EN at all → fallback
+      images: [{ src: "https://img/3.jpg" }],
+      variants: [{ sku: "EN-003", price: "89.99", inventory_management: null }],
+    },
+  ];
+
+  it("uses custom.title_en when present", () => {
+    const items = shopifyToFeedItems(enProducts, { preferEnglishTitle: true });
+    expect(items.find((i) => i.id === "EN-001")!.title).toBe("Patio Chair");
+  });
+  it("falls back to the FR title when title_en is blank or absent", () => {
+    const items = shopifyToFeedItems(enProducts, { preferEnglishTitle: true });
+    expect(items.find((i) => i.id === "EN-002")!.title).toBe("Niche pour chien");
+    expect(items.find((i) => i.id === "EN-003")!.title).toBe("Tente de jardin");
+  });
+  it("ignores title_en when preferEnglishTitle is not set (FR feed default)", () => {
+    const items = shopifyToFeedItems(enProducts);
+    expect(items.find((i) => i.id === "EN-001")!.title).toBe("Chaise de patio");
+  });
+});
+
 const sample: FeedItem[] = shopifyToFeedItems(fixtureProducts);
 
 describe("buildGoogleFeed", () => {
