@@ -2,7 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.39.0] - 2026-06-07
+## [0.5.41.0] - 2026-06-07
+
+### Added
+- **Configurable Meta ad account for the dashboard ads panel.** New optional
+  `META_AD_ACCOUNT_ID` env var: when set, `/api/ads/insights` reports on that
+  account instead of auto-picking the first ACTIVE one. New pure, unit-tested
+  `pickAdAccount()` helper (prefers the configured id with/without the `act_`
+  prefix, falls back to first ACTIVE, then first).
+
+### Fixed
+- **"In store" / "Not imported" badge now works on mobile and desktop.** The
+  catalog badge was keyed to `import_status`, a field the catalog API never
+  returns, so it rendered on neither layout. It now derives from
+  `shopify_product_id` via the shared `storeLink` helper and shows in both the
+  mobile cards and the desktop table — "In store" links to the Shopify product
+  (storefront when the handle is known, else admin), clickable on mobile too;
+  "Not imported" is a muted badge.
 
 ### Changed
 - **Blog topic catalogue expanded 12 → 30 bilingual topics** (`src/lib/blog-topics.ts`).
