@@ -60,3 +60,21 @@ Réviser FR ET EN.
 ## VERSION ANGLAISE
 - Réviser toute la version EN (Furnish Direct) en parallèle
 - Vérifier que tous les fixes mobile s'appliquent aux 2 langues
+
+## À faire — Suite session 7 juin
+
+### Fix espacement homepage mobile
+- Rapprocher la bande Shop Pay (shop_pay_home) de l'image héro
+- Rapprocher "Meilleures offres du moment" de la bande Shop Pay
+- Réduire le padding/margin entre tous ces blocs sur mobile
+- Cible : enchaînement fluide sans grands espaces blancs
+
+### Fix lien Judge.me dans barre d'annonce
+- Slide 2 de l'annonce bar pointe vers judge.me/reviews/ameublodirect.myshopify.com
+- Ce lien retourne 404
+- Trouver la vraie URL publique des avis Judge.me pour ameublodirect.ca
+- Options : page /pages/avis, ou désactiver ce slide
+
+### Vercel env vars à confirmer
+- META_AD_ACCOUNT_ID=act_20658834 → ajouter en Production + Preview
+- META_ACCESS_TOKEN → vérifier qu'il est à jour (long-lived token)
