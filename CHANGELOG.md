@@ -2,7 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.25.0] - 2026-06-06
+## [0.5.26.0] - 2026-06-06
+
+### Added
+- **Branded social post images.** New-product and stock-highlight posts now lead with
+  a composed 1080x1080 image — the product photo on an off-white canvas, a navy footer
+  band carrying the Ameublo Direct logo and the price, and an optional copper NEW badge —
+  instead of the raw Aosom photo. Served by a new public `GET /api/image-preview` route
+  (the URL Facebook/Instagram fetch when publishing), with the price baked into the URL
+  so the cached image always matches the listing. Raw product photos still follow as the
+  gallery. Set `NEXT_PUBLIC_APP_URL` (or rely on the Vercel production URL) to enable it;
+  without a public base URL the pipeline falls back to the previous behavior.
+
+### Fixed
+- **Hardened image downloads against SSRF and resource abuse.** The shared image
+  downloader now re-checks the internal-host guard on every redirect hop, times out
+  requests, and caps download size; the compositor caps decoded pixels. The preview
+  route is locked to known SKUs and redirects to the raw image rather than erroring, so
+  a composition failure can never break a social post.
 
 ### Added
 - **Shopping feeds** for Google Merchant, Pinterest, and Meta, generated from the live
