@@ -44,6 +44,10 @@
     {
       "path": "/api/cron/csv-precache",
       "schedule": "0 18 * * *"
+    },
+    {
+      "path": "/api/price-alert/notify",
+      "schedule": "0 9 * * *"
     }
   ]
 }

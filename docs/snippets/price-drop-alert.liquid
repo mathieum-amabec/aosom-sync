@@ -1,0 +1,102 @@
+{%- comment -%}
+  Price-drop alert widget — "Notify me if the price drops".
+
+  Posts to POST https://aosom-sync.vercel.app/api/price-alert (cross-origin,
+  CORS-allow-listed for the storefront origins; rate-limited per IP).
+
+  INSTALL (theme 160059195497 or live theme):
+  1. Theme editor → Product template → add a "Custom Liquid" block in the
+     product section, placed just under the trust badges.
+  2. Paste this whole file into that Custom Liquid block.
+     (Or save as snippets/price-drop-alert.liquid and {% render 'price-drop-alert' %}.)
+  Bilingual via request.locale.iso_code (FR default, EN when the storefront
+  locale is English). Palette: copper #C17F3E on off-white, kept discreet.
+{%- endcomment -%}
+
+{%- liquid
+  assign is_en = false
+  if request.locale.iso_code == 'en'
+    assign is_en = true
+  endif
+  assign variant = product.selected_or_first_available_variant
+  assign sku = variant.sku
+  assign price_amount = variant.price | divided_by: 100.0
+-%}
+
+{%- if sku != blank -%}
+<div class="price-alert" data-section-id="{{ section.id }}">
+  <form
+    class="price-alert__form"
+    data-sku="{{ sku | escape }}"
+    data-price="{{ price_amount }}"
+    data-ok="{% if is_en %}You're on the list — we'll email you if the price drops.{% else %}C'est noté — on vous écrit dès que le prix baisse.{% endif %}"
+    data-err="{% if is_en %}Something went wrong. Please try again.{% else %}Une erreur est survenue. Réessayez.{% endif %}"
+  >
+    <label class="price-alert__label" for="price-alert-email-{{ section.id }}">
+      🔔 {% if is_en %}Get notified if the price drops{% else %}Recevoir une alerte si le prix baisse{% endif %}
+    </label>
+    <div class="price-alert__row">
+      <input
+        id="price-alert-email-{{ section.id }}"
+        type="email"
+        required
+        autocomplete="email"
+        placeholder="{% if is_en %}your@email.com{% else %}votre@courriel.com{% endif %}"
+        class="price-alert__input"
+      />
+      <button type="submit" class="price-alert__btn">
+        {% if is_en %}Notify me{% else %}M'alerter{% endif %}
+      </button>
+    </div>
+    <p class="price-alert__msg" role="status" aria-live="polite" hidden></p>
+  </form>
+</div>
+
+<style>
+  .price-alert { margin: 16px 0; padding: 14px 16px; background: #FAFAF8; border: 1px solid #ece6dd; border-radius: 8px; }
+  .price-alert__label { display: block; font-size: 14px; font-weight: 600; color: #1A2340; margin-bottom: 8px; }
+  .price-alert__row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .price-alert__input { flex: 1 1 180px; min-width: 0; padding: 9px 12px; border: 1px solid #d9d2c7; border-radius: 6px; font-size: 14px; }
+  .price-alert__input:focus { outline: 2px solid #C17F3E; outline-offset: 0; border-color: #C17F3E; }
+  .price-alert__btn { padding: 9px 16px; background: #C17F3E; color: #fff; border: 0; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .price-alert__btn:hover { background: #a96c31; }
+  .price-alert__btn:disabled { opacity: .6; cursor: default; }
+  .price-alert__msg { margin: 8px 0 0; font-size: 13px; color: #1A2340; }
+</style>
+
+<script>
+  (function () {
+    var root = document.querySelector('.price-alert[data-section-id="{{ section.id }}"]');
+    if (!root) return;
+    var form = root.querySelector('.price-alert__form');
+    if (!form || form.dataset.bound) return;
+    form.dataset.bound = '1';
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var btn = form.querySelector('.price-alert__btn');
+      var msg = form.querySelector('.price-alert__msg');
+      var emailEl = form.querySelector('.price-alert__input');
+      var email = (emailEl.value || '').trim();
+      if (!email) return;
+      btn.disabled = true;
+      fetch('https://aosom-sync.vercel.app/api/price-alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email,
+          sku: form.dataset.sku,
+          price: parseFloat(form.dataset.price)
+        })
+      })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (d) {
+          msg.textContent = d && d.success ? form.dataset.ok : form.dataset.err;
+          msg.hidden = false;
+          if (d && d.success) form.reset();
+        })
+        .catch(function () { msg.textContent = form.dataset.err; msg.hidden = false; })
+        .finally(function () { btn.disabled = false; });
+    });
+  })();
+</script>
+{%- endif -%}

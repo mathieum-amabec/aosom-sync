@@ -214,10 +214,22 @@ async function _initSchemaImpl(): Promise<void> {
       status TEXT NOT NULL DEFAULT 'pending', content TEXT, shopify_id TEXT,
       error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )`,
+    `CREATE TABLE IF NOT EXISTS price_alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      sku TEXT NOT NULL,
+      shopify_product_id TEXT,
+      price_at_signup REAL NOT NULL,
+      created_at INTEGER NOT NULL,
+      notified_at INTEGER,
+      UNIQUE(email, sku)
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_run ON sync_logs(sync_run_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_sku ON sync_logs(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_runs_date ON sync_runs(started_at)`,
     `CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_price_alerts_sku ON price_alerts(sku)`,
+    `CREATE INDEX IF NOT EXISTS idx_price_alerts_pending ON price_alerts(notified_at)`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
@@ -991,6 +1003,80 @@ export async function getNotifications(opts: { unreadOnly?: boolean; limit?: num
 export async function markNotificationRead(id: number): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `UPDATE notifications SET read = 1 WHERE id = ?`, args: [id] });
+}
+
+// ─── Price alerts ("notify me when the price drops") ────────────────────
+
+export interface TriggeredPriceAlert {
+  id: number;
+  email: string;
+  sku: string;
+  priceAtSignup: number;
+  currentPrice: number;
+  productName: string | null;
+  shopifyHandle: string | null;
+}
+
+/**
+ * Upsert a price-drop alert. Re-signing up for the same (email, sku) resets the
+ * reference price to the current one and clears notified_at, so the visitor can
+ * be alerted again on the next drop below this new baseline.
+ */
+export async function upsertPriceAlert(alert: {
+  email: string;
+  sku: string;
+  shopifyProductId?: string | null;
+  priceAtSignup: number;
+}): Promise<void> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  await db.execute({
+    sql: `INSERT INTO price_alerts (email, sku, shopify_product_id, price_at_signup, created_at, notified_at)
+          VALUES (?, ?, ?, ?, ?, NULL)
+          ON CONFLICT(email, sku) DO UPDATE SET
+            price_at_signup = excluded.price_at_signup,
+            shopify_product_id = excluded.shopify_product_id,
+            created_at = excluded.created_at,
+            notified_at = NULL`,
+    args: [alert.email, alert.sku, alert.shopifyProductId ?? null, alert.priceAtSignup, now],
+  });
+}
+
+/**
+ * Pending alerts whose product's current price has dropped below the signup
+ * price. Joins products for the live price + name + handle; alerts for SKUs no
+ * longer in the catalog are naturally excluded by the inner join.
+ */
+export async function getTriggeredPriceAlerts(): Promise<TriggeredPriceAlert[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(
+    `SELECT a.id, a.email, a.sku, a.price_at_signup,
+            p.price AS current_price, p.name AS product_name, p.shopify_handle AS shopify_handle
+     FROM price_alerts a
+     JOIN products p ON p.sku = a.sku
+     WHERE a.notified_at IS NULL AND p.price < a.price_at_signup`,
+  );
+  return result.rows.map((r) => ({
+    id: Number(r.id),
+    email: String(r.email),
+    sku: String(r.sku),
+    priceAtSignup: Number(r.price_at_signup),
+    currentPrice: Number(r.current_price),
+    productName: (r.product_name as string) || null,
+    shopifyHandle: (r.shopify_handle as string) || null,
+  }));
+}
+
+/** Stamp notified_at on the given alert ids so they aren't re-notified. */
+export async function markPriceAlertsNotified(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const placeholders = ids.map(() => "?").join(",");
+  await db.execute({
+    sql: `UPDATE price_alerts SET notified_at = ? WHERE id IN (${placeholders})`,
+    args: [now, ...ids],
+  });
 }
 
 export async function markAllNotificationsRead(): Promise<void> {
