@@ -2,7 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.33.0] - 2026-06-07
+## [0.5.34.0] - 2026-06-07
+
+### Added
+- **Price-drop alerts ("notify me when the price drops").** Storefront visitors can
+  subscribe to be emailed when a product's price drops:
+  - `price_alerts` table (unique per email+sku) + helpers.
+  - `POST /api/price-alert` — public, CORS-guarded (storefront origins only),
+    per-IP rate-limited; validates the email + an existing SKU, stores the
+    **server-side** current price as the baseline, and identifies the Klaviyo
+    profile. (The baseline is taken from the catalog, not the client, so a
+    forged price can't trigger a spurious alert.)
+  - `GET /api/price-alert/notify` — daily cron (09:00 UTC, CRON_SECRET-gated):
+    finds alerts whose price dropped below the signup baseline, fires a
+    `Price Drop Alert` Klaviyo event per subscriber, and marks them notified
+    (only on a confirmed send, so un-sent alerts retry).
+  - Bilingual storefront widget as a ready Liquid snippet
+    (`docs/snippets/price-drop-alert.liquid`) for the product page.
 
 ### Added
 - **Klaviyo API client** (`src/lib/klaviyo-client.ts`, revision 2023-10-15):
