@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.32.0] - 2026-06-07
+
+### Added
+- **Klaviyo API client** (`src/lib/klaviyo-client.ts`, revision 2023-10-15):
+  `trackEvent(metric, email, props)` and `identifyProfile(email, props)`, capped
+  at 10 req/s, reading `KLAVIYO_API_KEY` from the env (no-ops when unset). A ready
+  server-side capability — intentionally **not** wired into the catalog/sync jobs,
+  because Klaviyo events need a recipient email and those jobs have no customer in
+  scope. The browse/cart/price-drop flows are driven by Klaviyo onsite tracking +
+  Shopify catalog sync (which Job 1 already feeds). `docs/KLAVIYO-SETUP.md`
+  documents the client, the `KLAVIYO_API_KEY` setup, and the one valid future use
+  (a price-drop "notify me" list with real subscriber emails).
+
 ## [0.5.31.0] - 2026-06-07
 
 ### Security
