@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.32.0] - 2026-06-07
+## [0.5.33.0] - 2026-06-07
 
 ### Added
 - **Klaviyo API client** (`src/lib/klaviyo-client.ts`, revision 2023-10-15):
@@ -14,6 +14,15 @@ All notable changes to Aosom Sync will be documented in this file.
   Shopify catalog sync (which Job 1 already feeds). `docs/KLAVIYO-SETUP.md`
   documents the client, the `KLAVIYO_API_KEY` setup, and the one valid future use
   (a price-drop "notify me" list with real subscriber emails).
+
+## [0.5.32.0] - 2026-06-07
+
+### Fixed
+- **EN posts now carry the Furnish Direct (EN) logo** on their branded hero image. The
+  compositor already supported per-locale logos, but the publisher posted one FR-branded
+  image to both channels. `publishDraftToChannel` now rewrites the `/api/image-preview`
+  URL's `locale` per channel, so EN channels (Furnish Direct) fetch the EN-branded variant
+  while FR channels (Ameublo Direct) keep the FR logo — from a single draft.
 
 ## [0.5.31.0] - 2026-06-07
 
@@ -50,6 +59,8 @@ All notable changes to Aosom Sync will be documented in this file.
   `/cso` security audit; two lower-severity items (image-preview redirect
   validation, `/api/health` version disclosure) are tracked in
   `docs/SECURITY-BACKLOG.md`.
+
+## [0.5.28.0] - 2026-06-07
 
 ### Added
 - **Meta Catalog XML feed** at `GET /api/feeds/meta-xml`. Meta Commerce ingests RSS/ATOM

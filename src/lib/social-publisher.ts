@@ -13,6 +13,26 @@ import {
 } from "./database";
 
 /**
+ * The branded hero image (GET /api/image-preview) is stored on a draft with locale=fr
+ * (Ameublo). For EN channels (Furnish Direct) rewrite that URL's locale to "en" so the
+ * compositor uses the EN logo. Only the image-preview URL carries a locale param; raw
+ * Aosom product photos (and any other URL) pass through untouched.
+ */
+export function localizeBrandedImageUrls(urls: string[], language: "FR" | "EN"): string[] {
+  const target = language === "EN" ? "en" : "fr";
+  return urls.map((u) => {
+    if (typeof u !== "string" || !u.includes("/api/image-preview")) return u;
+    try {
+      const url = new URL(u);
+      if (url.searchParams.has("locale")) url.searchParams.set("locale", target);
+      return url.toString();
+    } catch {
+      return u; // relative / non-absolute URL — leave as-is
+    }
+  });
+}
+
+/**
  * Publish one draft to one channel. Returns the ChannelState to record.
  * Never throws: on failure returns { status: "error", error }.
  */
@@ -49,7 +69,9 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
       : draft.productImage
       ? [draft.productImage]
       : [];
-  const primaryImageUrl = imageUrls[0] || null;
+  // Per-channel logo: EN channels get the EN-branded hero image.
+  const localizedImageUrls = localizeBrandedImageUrls(imageUrls, meta.language);
+  const primaryImageUrl = localizedImageUrls[0] || null;
 
   try {
     if (meta.platform === "facebook") {
@@ -57,7 +79,7 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
       // Multi-photo album when 2+ URLs, single-photo when 1, text-only when none.
       const result =
         imageUrls.length >= 2
-          ? await publishWithImages({ caption, imageUrls, brand })
+          ? await publishWithImages({ caption, imageUrls: localizedImageUrls, brand })
           : primaryImageUrl
           ? await publishWithImage({ caption, imageUrl: primaryImageUrl, brand })
           : await publishText({ message: caption, brand });
