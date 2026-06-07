@@ -8,7 +8,10 @@ import { AUTH } from "@/lib/config";
 // "/api/image-preview" is public so Facebook/Instagram can fetch a draft's
 // branded image when publishing (the Graph APIs fetch the URL themselves, with
 // no session). The route only composes images for SKUs that exist in the DB.
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/pixel/script", "/api/feeds", "/api/image-preview"];
+// "/api/price-alert" is public so the Shopify storefront can POST price-drop
+// signups (cross-origin, CORS-guarded, rate-limited); its /notify cron child
+// self-gates on CRON_SECRET.
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/pixel/script", "/api/feeds", "/api/image-preview", "/api/price-alert"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(
