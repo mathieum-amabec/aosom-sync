@@ -2,7 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.28.0] - 2026-06-07
+## [0.5.29.0] - 2026-06-07
+
+### Security
+- **Constant-time cron-secret check on the content-generation endpoint.**
+  `POST /api/social/content/generate` (a public-prefixed route that triggers paid
+  Claude calls) compared its cron Bearer secret with `===`, a timing oracle, while
+  every other cron route uses `crypto.timingSafeEqual`. Switched it to the same
+  constant-time helper, fail-closed when `CRON_SECRET` is unset. Surfaced by a
+  `/cso` security audit; two lower-severity items (image-preview redirect
+  validation, `/api/health` version disclosure) are tracked in
+  `docs/SECURITY-BACKLOG.md`.
 
 ### Added
 - **Meta Catalog XML feed** at `GET /api/feeds/meta-xml`. Meta Commerce ingests RSS/ATOM

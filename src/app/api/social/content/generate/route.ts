@@ -1,12 +1,30 @@
+import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { getContentTemplateBySlug, createFacebookDraft, getAnyProductSku, selectCompatibleHooks, getRecentlyUsedHookIds, recordHookUsage } from "@/lib/database";
 import { mapProductTypeToScope } from "@/lib/hook-selector";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { searchImages, triggerDownload } from "@/lib/unsplash";
-import { CLAUDE } from "@/lib/config";
+import { CLAUDE, env } from "@/lib/config";
 
 const ANTHROPIC_CALL_TIMEOUT_MS = 45_000;
+
+/**
+ * Constant-time cron-secret check, matching the other cron routes. Using `===`
+ * here is a timing oracle on the secret that gates this public-prefixed,
+ * paid-LLM endpoint — compare in constant time and fail closed on missing env.
+ */
+function verifyCronSecret(header: string | null): boolean {
+  if (!header) return false;
+  let expected: string;
+  try {
+    expected = `Bearer ${env.cronSecret}`;
+  } catch {
+    return false; // CRON_SECRET missing → treat as unauthenticated, not 500
+  }
+  if (header.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
+}
 
 // Clickbait style layer applied to every generated post. Templates may still
 // specify an exact opener/closer (e.g. {{hook}} posts) — those take precedence;
@@ -122,9 +140,7 @@ async function generatePostText(prompt: string, isEn: boolean): Promise<string> 
 
 export async function POST(request: Request) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET;
-    const isCronAuth = !!cronSecret && authHeader === `Bearer ${cronSecret}`;
+    const isCronAuth = verifyCronSecret(request.headers.get("authorization"));
 
     if (!isCronAuth) {
       if (!(await isAuthenticated())) {
