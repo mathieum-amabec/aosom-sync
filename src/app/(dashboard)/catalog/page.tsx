@@ -11,6 +11,8 @@ interface CatalogProduct {
   image1: string;
   psin: string;
   import_status: string | null;
+  /** old_price of the SKU's most recent price change; drives the ▼/▲ movement badge. */
+  prev_price: number | null;
   [key: string]: unknown;
 }
 
