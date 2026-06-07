@@ -5,6 +5,7 @@ import crypto from "crypto";
 import type { SyncRun, SyncLogEntry, ChangeType } from "@/types/sync";
 import type { UserRole } from "@/lib/config";
 import type { AosomProduct } from "@/types/aosom";
+import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
 
 let client: Client | null = null;
 
@@ -227,12 +228,26 @@ async function _initSchemaImpl(): Promise<void> {
       token_expires_at INTEGER,
       UNIQUE(email, sku)
     )`,
+    // cron_runs: one row per cron invocation (last-run status surfaced on the dashboard).
+    `CREATE TABLE IF NOT EXISTS cron_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL, status TEXT NOT NULL, detail TEXT,
+      ran_at INTEGER NOT NULL
+    )`,
+    // feed_syncs: one row per Google/Meta/Pinterest feed fetch (last successful fetch on the dashboard).
+    `CREATE TABLE IF NOT EXISTS feed_syncs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      feed_type TEXT NOT NULL, item_count INTEGER, status TEXT NOT NULL, error TEXT,
+      fetched_at INTEGER NOT NULL
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_run ON sync_logs(sync_run_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_sku ON sync_logs(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_runs_date ON sync_runs(started_at)`,
     `CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status)`,
     `CREATE INDEX IF NOT EXISTS idx_price_alerts_sku ON price_alerts(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_price_alerts_pending ON price_alerts(notified_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_cron_runs_name_at ON cron_runs(name, ran_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_feed_syncs_type_at ON feed_syncs(feed_type, fetched_at DESC)`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
@@ -1323,6 +1338,125 @@ export async function getLatestSyncRun(): Promise<SyncRun | null> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 1`);
   return result.rows.length > 0 ? mapSyncRun(rowToObj(result.rows[0])) : null;
+}
+
+// ─── Dashboard: cron + feed run tracking ─────────────────────────────────────
+
+/** Record one cron invocation. status is "success" | "error". Never throws on its own
+ * (callers wrap the real work; a failed write here must not mask the cron's own result). */
+export async function recordCronRun(name: string, status: "success" | "error", detail?: string): Promise<void> {
+  try {
+    const db = await ensureSchema();
+    await db.execute({
+      sql: `INSERT INTO cron_runs (name, status, detail, ran_at) VALUES (?, ?, ?, ?)`,
+      args: [name, status, detail ?? null, Math.floor(Date.now() / 1000)],
+    });
+  } catch (err) {
+    console.error(`[cron_runs] failed to record run for ${name}:`, err);
+  }
+}
+
+/** Record one feed fetch. Best-effort (never throws). */
+export async function recordFeedSync(feedType: string, itemCount: number | null, status: "success" | "error", error?: string): Promise<void> {
+  try {
+    const db = await ensureSchema();
+    await db.execute({
+      sql: `INSERT INTO feed_syncs (feed_type, item_count, status, error, fetched_at) VALUES (?, ?, ?, ?, ?)`,
+      args: [feedType, itemCount, status, error ?? null, Math.floor(Date.now() / 1000)],
+    });
+  } catch (err) {
+    console.error(`[feed_syncs] failed to record fetch for ${feedType}:`, err);
+  }
+}
+
+export interface CronRunSummary { name: string; status: string; detail: string | null; ranAt: number; }
+export interface FeedSyncSummary {
+  feedType: string;
+  /** Epoch of the last SUCCESSFUL fetch; null if it has never succeeded. */
+  lastSuccessAt: number | null;
+  /** Item count of that last successful fetch. */
+  itemCount: number | null;
+  /** Status of the most recent attempt (any status): "success" | "error" | null (never run). */
+  lastStatus: string | null;
+}
+export interface ErroredImportJob { id: string; groupKey: string; sku: string | null; error: string | null; updatedAt: string; }
+
+export interface DashboardSummary {
+  newProductsToday: number;
+  draftsThisWeek: number;
+  activePriceAlerts: number;
+  crons: CronRunSummary[];
+}
+
+/** "Résumé du jour" DB metrics (Meta-Ads revenue is merged client-side from /api/ads/insights). */
+export async function getDashboardSummary(): Promise<DashboardSummary> {
+  const db = await ensureSchema();
+  const now = new Date();
+  const todayStart = startOfUtcDayEpoch(now);
+  const weekAgo = epochDaysAgo(now, 7);
+  const [newProd, drafts, alerts, crons] = await Promise.all([
+    // "new_product" is logged in price_history when a SKU is first seen (canonical import signal).
+    db.execute({ sql: `SELECT COUNT(*) AS c FROM price_history WHERE change_type = 'new_product' AND detected_at >= ?`, args: [todayStart] }),
+    db.execute({ sql: `SELECT COUNT(*) AS c FROM facebook_drafts WHERE created_at >= ?`, args: [weekAgo] }),
+    db.execute({ sql: `SELECT COUNT(*) AS c FROM price_alerts WHERE confirmed = 1` }),
+    // Latest run per cron (single-MAX bare-column rule picks status/detail from the newest row).
+    db.execute({ sql: `SELECT name, status, detail, MAX(ran_at) AS ran_at FROM cron_runs GROUP BY name ORDER BY name ASC` }),
+  ]);
+  return {
+    newProductsToday: Number(rowToObj(newProd.rows[0]).c) || 0,
+    draftsThisWeek: Number(rowToObj(drafts.rows[0]).c) || 0,
+    activePriceAlerts: Number(rowToObj(alerts.rows[0]).c) || 0,
+    crons: crons.rows.map((r) => {
+      const o = rowToObj(r);
+      return { name: o.name as string, status: o.status as string, detail: (o.detail as string) ?? null, ranAt: Number(o.ran_at) || 0 };
+    }),
+  };
+}
+
+export interface DashboardAlerts {
+  erroredImportJobs: ErroredImportJob[];
+  staleDraftCount: number;
+  feeds: FeedSyncSummary[];
+}
+
+/** "Alertes" DB metrics (Meta token expiry is added by the route via debug_token). */
+export async function getDashboardAlerts(): Promise<DashboardAlerts> {
+  const db = await ensureSchema();
+  const weekAgo = epochDaysAgo(new Date(), 7);
+  const [errs, stale, feeds] = await Promise.all([
+    db.execute({ sql: `SELECT id, group_key, product_data, error, updated_at FROM import_jobs WHERE status = 'error' ORDER BY updated_at DESC LIMIT 20` }),
+    db.execute({ sql: `SELECT COUNT(*) AS c FROM facebook_drafts WHERE status IN ('draft', 'pending') AND created_at < ?`, args: [weekAgo] }),
+    // Per feed: time + count of the last SUCCESS, plus the status of the most recent
+    // attempt (so a feed whose latest fetch errored is flagged even if an older success exists).
+    db.execute({ sql: `SELECT f.feed_type AS feed_type,
+        MAX(CASE WHEN f.status = 'success' THEN f.fetched_at END) AS last_success_at,
+        (SELECT s.status FROM feed_syncs s WHERE s.feed_type = f.feed_type ORDER BY s.fetched_at DESC, s.id DESC LIMIT 1) AS last_status,
+        (SELECT s.item_count FROM feed_syncs s WHERE s.feed_type = f.feed_type AND s.status = 'success' ORDER BY s.fetched_at DESC, s.id DESC LIMIT 1) AS item_count
+      FROM feed_syncs f GROUP BY f.feed_type ORDER BY f.feed_type ASC` }),
+  ]);
+  const erroredImportJobs: ErroredImportJob[] = errs.rows.map((r) => {
+    const o = rowToObj(r);
+    let sku: string | null = null;
+    try {
+      const pd = JSON.parse((o.product_data as string) || "{}") as Record<string, unknown>;
+      const variants = pd.variants as Array<{ sku?: string }> | undefined;
+      sku = (pd.sku as string) || (pd.SKU as string) || (variants && variants[0]?.sku) || null;
+    } catch { /* product_data not JSON — fall back to group_key */ }
+    return { id: o.id as string, groupKey: o.group_key as string, sku, error: (o.error as string) ?? null, updatedAt: (o.updated_at as string) ?? "" };
+  });
+  return {
+    erroredImportJobs,
+    staleDraftCount: Number(rowToObj(stale.rows[0]).c) || 0,
+    feeds: feeds.rows.map((r) => {
+      const o = rowToObj(r);
+      return {
+        feedType: o.feed_type as string,
+        lastSuccessAt: o.last_success_at != null ? Number(o.last_success_at) : null,
+        itemCount: o.item_count != null ? Number(o.item_count) : null,
+        lastStatus: (o.last_status as string) ?? null,
+      };
+    }),
+  };
 }
 
 function mapSyncRun(row: Record<string, unknown>): SyncRun {

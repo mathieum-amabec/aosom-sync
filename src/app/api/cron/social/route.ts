@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/config";
 import { triggerStockHighlight } from "@/jobs/job4-social";
+import { trackCron } from "@/lib/cron-tracking";
 
 function verifyCronSecret(header: string | null): boolean {
   if (!header) return false;
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
   // draft. triggerStockHighlight captures the Aosom product images via pickRandomImages,
   // and the publisher falls back to products.image1 (JOIN) — so the post carries an image.
   try {
-    const result = await triggerStockHighlight();
+    const result = await trackCron("social", () => triggerStockHighlight());
     if (!result) {
       return NextResponse.json({ success: true, data: null, skipped: "no eligible product for stock highlight" });
     }

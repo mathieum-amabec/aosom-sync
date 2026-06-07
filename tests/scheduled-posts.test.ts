@@ -20,6 +20,7 @@ vi.mock("@/lib/database", () => ({
   createNotification: vi.fn(),
   getAutopostCountToday: vi.fn(),
   incrementAutopostCountToday: vi.fn(),
+  recordCronRun: vi.fn().mockResolvedValue(undefined), // route now records its run via trackCron
 }));
 
 vi.mock("@/lib/social-publisher", () => ({

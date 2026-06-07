@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { runShopifyPush } from "@/jobs/job1-sync";
 import { env } from "@/lib/config";
+import { trackCron } from "@/lib/cron-tracking";
 
 function verifyCronSecret(header: string | null): boolean {
   if (!header) return false;
@@ -20,7 +21,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await runShopifyPush();
+    const result = await trackCron("sync-shopify", () => runShopifyPush());
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
     console.error(`[CRON] Shopify push failed:`, err);

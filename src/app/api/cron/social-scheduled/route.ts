@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { processScheduledDrafts } from "@/jobs/job4-social";
 import { isAuthenticated } from "@/lib/auth";
 import { env } from "@/lib/config";
+import { trackCron } from "@/lib/cron-tracking";
 
 function verifyCronSecret(header: string | null): boolean {
   if (!header) return false;
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await processScheduledDrafts();
+    const result = await trackCron("social-scheduled", () => processScheduledDrafts());
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
     console.error(`[CRON] Scheduled posts processing failed:`, err);

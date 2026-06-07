@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.46.0] - 2026-06-07
+
+### Added
+- **Dashboard "Résumé du jour" panel** (`src/app/(dashboard)/day-summary-panel.tsx`):
+  new products imported today (`price_history` `new_product` events), social drafts
+  generated in the last 7 days, active (confirmed) price alerts, estimated Meta-Ads
+  revenue over 30 days (ROAS × spend, merged from the cached `/api/ads/insights`), and
+  each cron's last run with success/error status.
+- **Dashboard "Alertes" panel** (`src/app/(dashboard)/alerts-panel.tsx`): import jobs in
+  `status='error'` (with SKU pulled from `product_data`), social drafts pending > 7 days,
+  Meta token expiry (via Graph `debug_token` — warns when expired or within 7 days), and
+  the last successful fetch per Google/Meta/Pinterest feed. Shows an all-clear state when
+  nothing needs attention.
+- **Cron + feed run tracking** to back those panels: new `cron_runs` and `feed_syncs`
+  tables + `recordCronRun`/`recordFeedSync`/`getDashboardSummary`/`getDashboardAlerts` in
+  `database.ts`. The sync-family + social crons record via a `trackCron` wrapper
+  (`src/lib/cron-tracking.ts`); the Google/Meta/Pinterest feed routes record each fetch.
+  (blog/content/csv-precache crons will be wrapped in a follow-up — the table is ready.)
+- **`getTokenInfo()`** in `meta-ads-client.ts` (Graph `debug_token`) and pure, unit-tested
+  helpers in `src/lib/dashboard-metrics.ts` (date windows, revenue, token-expiry
+  classification). Two new API routes: `GET /api/dashboard/summary` and
+  `GET /api/dashboard/alerts` (both `isAuthenticated`-gated). 19 new tests.
+
 ## [0.5.44.0] - 2026-06-07
 
 ### Fixed

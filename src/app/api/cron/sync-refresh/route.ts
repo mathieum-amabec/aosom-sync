@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { runSyncRefreshChunk } from "@/jobs/job1-sync";
 import { env } from "@/lib/config";
+import { trackCron } from "@/lib/cron-tracking";
 
 function verifyCronSecret(header: string | null): boolean {
   if (!header) return false;
@@ -22,7 +23,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await runSyncRefreshChunk();
+    const result = await trackCron("sync-refresh", () => runSyncRefreshChunk());
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
     console.error(`[CRON] Sync refresh chunk failed:`, err);

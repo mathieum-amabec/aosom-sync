@@ -211,3 +211,20 @@ export async function getInsights(adAccountId: string, dateRange: DateRange): Pr
     time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
   });
 }
+
+export interface TokenDebugInfo {
+  isValid: boolean;
+  /** Epoch seconds the token expires; 0 means "never" (system-user / long-lived token). */
+  expiresAt: number;
+  scopes: string[];
+}
+
+/** Inspect the configured token via Graph `debug_token` (a token may debug itself), so the
+ * dashboard can warn before it expires. Throws on API error (caller treats as "unknown"). */
+export async function getTokenInfo(): Promise<TokenDebugInfo> {
+  const res = await graph<{ data?: { is_valid?: boolean; expires_at?: number; scopes?: string[] } }>("debug_token", {
+    params: { input_token: env.metaAccessToken },
+  });
+  const d = res.data ?? {};
+  return { isValid: !!d.is_valid, expiresAt: Number(d.expires_at) || 0, scopes: d.scopes ?? [] };
+}
