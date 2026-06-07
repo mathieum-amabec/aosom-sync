@@ -103,6 +103,18 @@ export const env = {
   get metaAdAccountId(): string | undefined {
     return process.env.META_AD_ACCOUNT_ID || undefined;
   },
+  /** Optional: Creatomate API key for automated product videos. Client no-ops when unset. */
+  get creatomateApiKey(): string | undefined {
+    return process.env.CREATOMATE_API_KEY || undefined;
+  },
+  /** Optional: the Creatomate template id used to render product videos. */
+  get creatomateTemplateId(): string | undefined {
+    return process.env.CREATOMATE_TEMPLATE_ID || undefined;
+  },
+  /** Optional: public logo URL passed to the Creatomate template's logo_url variable. */
+  get creatomateLogoUrl(): string | undefined {
+    return process.env.CREATOMATE_LOGO_URL || undefined;
+  },
   get isProduction(): boolean {
     return process.env.NODE_ENV === "production";
   },
