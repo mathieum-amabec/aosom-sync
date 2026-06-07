@@ -18,6 +18,6 @@ export async function GET() {
     });
   } catch (err) {
     console.error("[FEED] pinterest failed:", err);
-    return new Response("Feed temporarily unavailable", { status: 500 });
+    return new Response("Feed temporarily unavailable", { status: 500, headers: { "Cache-Control": "no-store" } });
   }
 }

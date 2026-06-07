@@ -8,7 +8,7 @@ import { shopifyToFeedItems, type ShopifyFeedProduct } from "@/lib/feeds/source"
 
 describe("mapToGoogleCategory", () => {
   const cases: Array<[string, number]> = [
-    ["Pet Supplies > Cats > Outdoor Cat Enclosures", 1],         // pet beats "outdoor"
+    ["Pet Supplies > Cats > Outdoor Cat Enclosures", 1],          // pet beats "outdoor"
     ["Patio & Garden > BBQs & Grills > Propane Gas Grills", 3553], // bbq
     ["Toys & Games > Baby & Toddler Toys > Electric Toy Cars", 220],
     ["Patio & Garden > Lawn & Garden > Raised Garden Beds > Galvanized Planter Boxes", 2962], // garden beats "patio"
@@ -46,6 +46,15 @@ describe("text helpers", () => {
   it("formatPrice yields '<amount> CAD'", () => {
     expect(formatPrice(41.9)).toBe("41.90 CAD");
     expect(formatPrice(0)).toBe("0.00 CAD");
+  });
+  it("escapeXml/stripHtml strip XML-forbidden control chars (one bad byte must not poison the feed)", () => {
+    const ctrl = String.fromCharCode(1); // 0x01 — illegal in XML 1.0
+    expect(escapeXml("abc" + ctrl + "d")).toBe("abcd");
+    expect(stripHtml("x" + ctrl + "y")).toBe("xy");
+  });
+  it("truncate does not split an astral emoji into a lone surrogate", () => {
+    const out = truncate("😀".repeat(5), 3);
+    expect([...out].every((ch) => ch === "😀" || ch === "…")).toBe(true);
   });
 });
 
@@ -94,6 +103,13 @@ describe("shopifyToFeedItems", () => {
   it("defaults brand to Aosom when vendor is missing", () => {
     const noVendor = shopifyToFeedItems([{ ...fixtureProducts[0], id: 9, vendor: null, handle: "h", variants: [{ sku: "S", price: "5", inventory_management: null }] }]);
     expect(noVendor[0].brand).toBe("Aosom");
+  });
+  it("deduplicates g:id (SKU) across the whole feed", () => {
+    const dup = shopifyToFeedItems([
+      { id: 1, title: "A", handle: "a", status: "active", images: [{ src: "i" }], variants: [{ sku: "SAME", price: "10", inventory_management: null }] },
+      { id: 2, title: "B", handle: "b", status: "active", images: [{ src: "i" }], variants: [{ sku: "SAME", price: "20", inventory_management: null }] },
+    ]);
+    expect(dup.map((i) => i.id)).toEqual(["SAME"]); // only the first wins
   });
 });
 

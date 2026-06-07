@@ -19,9 +19,15 @@ export interface FeedItem {
 
 const CURRENCY = "CAD";
 
+// XML 1.0 forbids these control chars entirely — a single one anywhere makes the WHOLE
+// RSS document invalid and Google/Pinterest reject the entire feed. Built from escapes so
+// there are no literal control bytes in source.
+const XML_INVALID = new RegExp("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]", "g");
+
 // ── text helpers ──────────────────────────────────────────────────────────
 export function escapeXml(s: string): string {
   return String(s ?? "")
+    .replace(XML_INVALID, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -33,13 +39,16 @@ export function stripHtml(s: string): string {
   return String(s ?? "")
     .replace(/<[^>]*>/g, " ")     // drop tags
     .replace(/&nbsp;/gi, " ")
+    .replace(XML_INVALID, "")     // drop XML-forbidden control chars
     .replace(/\s+/g, " ")
     .trim();
 }
 
 export function truncate(s: string, max: number): string {
-  const t = String(s ?? "");
-  return t.length <= max ? t : t.slice(0, max - 1).trimEnd() + "…";
+  // Slice by code points so we never cut an astral emoji into a lone surrogate
+  // (a lone surrogate is invalid XML).
+  const cp = Array.from(String(s ?? ""));
+  return cp.length <= max ? cp.join("") : cp.slice(0, max - 1).join("").trimEnd() + "…";
 }
 
 export function formatPrice(price: number): string {

@@ -15,7 +15,7 @@ export async function GET() {
     console.error("[FEED] meta failed:", err);
     return new Response(JSON.stringify({ error: "Feed temporarily unavailable" }), {
       status: 500,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
     });
   }
 }
