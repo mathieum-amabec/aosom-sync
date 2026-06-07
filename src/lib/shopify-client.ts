@@ -109,7 +109,7 @@ function mapShopifyProduct(raw: Record<string, unknown>): ShopifyExistingProduct
 
 /**
  * Create a Shopify product with FR primary + EN metafields.
- * Imported as draft for manual review. No inventory tracking (dropship).
+ * Published live ('active') on import. No inventory tracking (dropship).
  */
 export async function createShopifyProduct(
   merged: AosomMergedProduct,
@@ -141,7 +141,7 @@ export async function createShopifyProduct(
       // tags: [...new Set([...content.tags, ...taxonomyTags])].join(", ").
       // See docs/taxonomy-changelog.md. Non-blocking for the idempotency fix.
       tags: content.tags.join(", "),
-      status: "draft",
+      status: "active",
       options,
       variants: merged.variants.map((v) => ({
         sku: v.sku,
