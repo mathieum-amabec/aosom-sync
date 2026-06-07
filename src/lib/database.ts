@@ -759,7 +759,7 @@ export async function getProducts(filters: {
   }
 
   // Select only columns the catalog UI needs
-  const catalogColumns = "sku, name, price, qty, color, product_type, image1, shopify_product_id";
+  const catalogColumns = "sku, name, price, qty, color, product_type, image1, shopify_product_id, shopify_handle";
 
   // `last_price` exposes the old_price of each SKU's most recent price change so the catalog
   // table can render the ▼/▲ movement badge (current price vs. previous price). ROW_NUMBER
@@ -782,7 +782,7 @@ export async function getProducts(filters: {
   // `ph_agg`). COALESCE(…, 0) keeps products without history at the bottom of the list.
   const cutoff14d = Math.floor(Date.now() / 1000) - 14 * 86400;
   const filteredCte = `filtered AS (SELECT ${catalogColumns} FROM products ${where})`;
-  const selectCols = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, lp.prev_price`;
+  const selectCols = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, f.shopify_handle, lp.prev_price`;
   let productsSql: string;
   let productsArgs: (string | number)[];
 

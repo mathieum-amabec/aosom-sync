@@ -3,6 +3,7 @@ import { createClient, type Client } from "@libsql/client";
 import path from "path";
 import fs from "fs";
 import { isValidCheckpoint } from "@/lib/database";
+import { storeLink, STOREFRONT_BASE_URL } from "@/lib/insights";
 
 const TEST_DB_PATH = path.join(__dirname, "fixtures", "test-db.sqlite");
 
@@ -688,5 +689,85 @@ describe("getProducts prev_price — last_price CTE (direct SQL)", () => {
 
     const prev = prevBySku((await db.execute(sql)).rows);
     expect(prev["SKU-TIE"]).toBe(80); // higher id wins the tie, deterministically
+  });
+});
+
+// ─── getProducts — catalog projection includes shopify_handle (direct SQL) ───
+// Regression for the catalog "In store" badge linking to the Shopify ADMIN instead of
+// the storefront: getProducts must SELECT shopify_handle so storeLink can build the
+// public /products/{handle} URL. Without it, storeLink only sees the numeric id and
+// falls back to the admin product page.
+describe("getProducts catalog projection — shopify_handle drives the storefront link (direct SQL)", () => {
+  let db: ReturnType<typeof setupTestDb>;
+
+  // Mirror of getProducts' default branch SELECT (must include shopify_handle).
+  const catalogColumns = "sku, name, price, qty, color, product_type, image1, shopify_product_id, shopify_handle";
+  const sql = `
+    WITH filtered AS (SELECT ${catalogColumns} FROM products),
+    last_price AS (
+      SELECT sku, prev_price FROM (
+        SELECT sku, old_price AS prev_price,
+          ROW_NUMBER() OVER (PARTITION BY sku ORDER BY detected_at DESC, id DESC) AS rn
+        FROM price_history
+        WHERE change_type IN ('price_drop', 'price_increase') AND old_price IS NOT NULL
+      ) WHERE rn = 1
+    )
+    SELECT f.sku, f.shopify_product_id, f.shopify_handle, lp.prev_price
+    FROM filtered f LEFT JOIN last_price lp ON lp.sku = f.sku
+    ORDER BY f.sku ASC`;
+
+  beforeEach(async () => {
+    db = setupTestDb();
+    await db.batch([
+      `CREATE TABLE IF NOT EXISTS products (
+        sku TEXT PRIMARY KEY, name TEXT, price REAL, qty INTEGER, color TEXT,
+        product_type TEXT, image1 TEXT, shopify_product_id TEXT, shopify_handle TEXT
+      )`,
+      `CREATE TABLE IF NOT EXISTS price_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL,
+        old_price REAL, new_price REAL, old_qty INTEGER, new_qty INTEGER,
+        change_type TEXT, detected_at INTEGER
+      )`,
+    ]);
+    await db.batch([
+      // imported with a handle → storefront link
+      { sql: `INSERT INTO products (sku, name, price, qty, shopify_product_id, shopify_handle) VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-IN", "Chaise", 99, 5, "111", "chaise-de-patio"] },
+      // imported but handle not yet backfilled → admin fallback
+      { sql: `INSERT INTO products (sku, name, price, qty, shopify_product_id, shopify_handle) VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-NOHANDLE", "Table", 79, 3, "222", null] },
+      // not imported → no link
+      { sql: `INSERT INTO products (sku, name, price, qty, shopify_product_id, shopify_handle) VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-OUT", "Lampe", 29, 1, null, null] },
+    ]);
+  });
+
+  afterEach(async () => {
+    db.close();
+    if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
+  });
+
+  it("returns shopify_handle in the projection and storeLink yields a storefront URL", async () => {
+    const rows = (await db.execute(sql)).rows.map((r) => r as unknown as Record<string, unknown>);
+    const bySku = Object.fromEntries(rows.map((r) => [r.sku as string, r]));
+
+    // handle is actually projected (the fix)
+    expect(bySku["SKU-IN"].shopify_handle).toBe("chaise-de-patio");
+
+    const link = storeLink(bySku["SKU-IN"].shopify_product_id as string, bySku["SKU-IN"].shopify_handle as string);
+    expect(link.inStore).toBe(true);
+    expect(link.shopifyUrl).toBe(`${STOREFRONT_BASE_URL}/products/chaise-de-patio`);
+    expect(link.shopifyUrl).not.toContain("/admin");
+  });
+
+  it("falls back to admin only when the handle is missing, and shows no link when not imported", async () => {
+    const rows = (await db.execute(sql)).rows.map((r) => r as unknown as Record<string, unknown>);
+    const bySku = Object.fromEntries(rows.map((r) => [r.sku as string, r]));
+
+    const noHandle = storeLink(bySku["SKU-NOHANDLE"].shopify_product_id as string, bySku["SKU-NOHANDLE"].shopify_handle as string | null);
+    expect(noHandle.inStore).toBe(true);
+    expect(noHandle.shopifyUrl).toContain("/products/222");
+    expect(noHandle.shopifyUrl).not.toContain(STOREFRONT_BASE_URL);
+
+    const notImported = storeLink(bySku["SKU-OUT"].shopify_product_id as string | null, bySku["SKU-OUT"].shopify_handle as string | null);
+    expect(notImported.inStore).toBe(false);
+    expect(notImported.shopifyUrl).toBeNull();
   });
 });
