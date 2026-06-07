@@ -98,6 +98,13 @@ export const env = {
   get hasMetaAccessToken(): boolean {
     return !!process.env.META_ACCESS_TOKEN;
   },
+  /** Default Meta ad account for the dashboard (e.g. "act_20658834"). Optional —
+   * when set, the Ads routes use it instead of probing /me/adaccounts, saving a
+   * Graph call. Returned verbatim; the client normalizes the "act_" prefix. */
+  get metaAdAccountId(): string | undefined {
+    const v = process.env.META_AD_ACCOUNT_ID?.trim();
+    return v ? v : undefined;
+  },
   get isProduction(): boolean {
     return process.env.NODE_ENV === "production";
   },

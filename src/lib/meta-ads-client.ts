@@ -169,6 +169,23 @@ function actId(adAccountId: string): string {
 
 // ── public API ───────────────────────────────────────────────────────────
 
+/** The configured default ad account (META_AD_ACCOUNT_ID), normalized to "act_<id>".
+ * Undefined when not configured — callers then fall back to probing /me/adaccounts. */
+export function defaultAdAccountId(): string | undefined {
+  return env.metaAdAccountId ? actId(env.metaAdAccountId) : undefined;
+}
+
+/** Resolve the ad account to use for a dashboard call. Order: the configured
+ * META_AD_ACCOUNT_ID (no API call), else the first ACTIVE account the token can
+ * manage, else the first account. Throws when the token manages none. */
+export async function resolveDefaultAdAccountId(): Promise<string> {
+  const configured = defaultAdAccountId();
+  if (configured) return configured;
+  const accounts = await getAdAccounts();
+  if (accounts.length === 0) throw new Error("No ad accounts available for this token");
+  return (accounts.find((a) => a.account_status === 1) ?? accounts[0]).id;
+}
+
 /** List the ad accounts the token can manage. */
 export async function getAdAccounts(): Promise<AdAccount[]> {
   return graphPaged<AdAccount>("me/adaccounts", {

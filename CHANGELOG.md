@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.42.0] - 2026-06-07
+
+### Changed
+- **Meta Ads dashboard uses `META_AD_ACCOUNT_ID` as the default account.** New
+  `env.metaAdAccountId` config + `defaultAdAccountId()` / `resolveDefaultAdAccountId()`
+  in `meta-ads-client.ts`. `GET /api/ads` (campaigns/insights) and
+  `GET /api/ads/insights` now resolve the account in this order: explicit
+  `?adAccountId=` → configured `META_AD_ACCOUNT_ID` → first ACTIVE account the token
+  manages. When the env var is set, the routes skip the `/me/adaccounts` probe
+  (one fewer Graph call per request). Verified live against `act_20658834`.
+
 ## [0.5.41.0] - 2026-06-07
 
 ### Changed

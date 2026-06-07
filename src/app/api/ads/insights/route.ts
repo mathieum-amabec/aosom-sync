@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
 import { env } from "@/lib/config";
-import { getAdAccounts, getInsights } from "@/lib/meta-ads-client";
+import { getAdAccounts, getInsights, defaultAdAccountId } from "@/lib/meta-ads-client";
 import { aggregateInsights, rangeForDays, parseDays, type AdsMetrics } from "@/lib/ads-insights";
 
 /**
@@ -63,9 +63,14 @@ export async function GET(request: Request) {
         { status: 200, headers: { "Cache-Control": "no-store" } },
       );
     }
-    // Prefer an ACTIVE account (account_status === 1) so a closed/disabled first
-    // account doesn't make the panel show empty numbers; fall back to the first.
-    const account = accounts.find((a) => a.account_status === 1) ?? accounts[0];
+    // Selection order: the configured META_AD_ACCOUNT_ID (matched in the list so we
+    // keep its currency), else an ACTIVE account (account_status === 1) so a
+    // closed/disabled first account doesn't show empty numbers, else the first.
+    const configured = defaultAdAccountId();
+    const account =
+      (configured ? accounts.find((a) => a.id === configured) : undefined) ??
+      accounts.find((a) => a.account_status === 1) ??
+      accounts[0];
     const cacheKey = `${account.id}:${days}`;
 
     const hit = cache.get(cacheKey);

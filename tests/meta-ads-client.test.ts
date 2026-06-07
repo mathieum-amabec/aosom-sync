@@ -8,6 +8,8 @@ import {
   getCampaigns,
   createCampaign,
   getInsights,
+  defaultAdAccountId,
+  resolveDefaultAdAccountId,
   __resetRateLimit,
 } from "@/lib/meta-ads-client";
 import { META_ADS } from "@/lib/config";
@@ -113,5 +115,52 @@ describe("meta-ads-client", () => {
       await getAdAccounts();
     }
     await expect(getAdAccounts()).rejects.toThrow(/rate limit reached/i);
+  });
+});
+
+describe("default ad account resolution (META_AD_ACCOUNT_ID)", () => {
+  let originalFetch: typeof fetch;
+  let calls: string[];
+  const prev = process.env.META_AD_ACCOUNT_ID;
+
+  beforeEach(() => {
+    __resetRateLimit();
+    calls = [];
+    originalFetch = global.fetch;
+    global.fetch = vi.fn(async (url: string | URL | Request) => {
+      calls.push(typeof url === "string" ? url : url.toString());
+      return new Response(
+        JSON.stringify({ data: [{ id: "act_999", account_id: "999", name: "Fallback", account_status: 1, currency: "CAD" }] }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    global.fetch = originalFetch;
+    if (prev === undefined) delete process.env.META_AD_ACCOUNT_ID;
+    else process.env.META_AD_ACCOUNT_ID = prev;
+  });
+
+  it("defaultAdAccountId normalizes a bare id to act_ and is undefined when unset", () => {
+    process.env.META_AD_ACCOUNT_ID = "20658834";
+    expect(defaultAdAccountId()).toBe("act_20658834");
+    process.env.META_AD_ACCOUNT_ID = "act_20658834";
+    expect(defaultAdAccountId()).toBe("act_20658834");
+    delete process.env.META_AD_ACCOUNT_ID;
+    expect(defaultAdAccountId()).toBeUndefined();
+  });
+
+  it("resolveDefaultAdAccountId uses the configured id WITHOUT an API call", async () => {
+    process.env.META_AD_ACCOUNT_ID = "act_20658834";
+    const id = await resolveDefaultAdAccountId();
+    expect(id).toBe("act_20658834");
+    expect(calls).toHaveLength(0); // no /me/adaccounts probe needed
+  });
+
+  it("resolveDefaultAdAccountId falls back to the first active account when unset", async () => {
+    delete process.env.META_AD_ACCOUNT_ID;
+    const id = await resolveDefaultAdAccountId();
+    expect(id).toBe("act_999");
+    expect(calls.some((u) => u.includes("/me/adaccounts"))).toBe(true);
   });
 });

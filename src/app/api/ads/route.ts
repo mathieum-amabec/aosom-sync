@@ -5,6 +5,7 @@ import {
   getAdAccounts,
   getCampaigns,
   getInsights,
+  resolveDefaultAdAccountId,
   type DateRange,
 } from "@/lib/meta-ads-client";
 
@@ -16,8 +17,8 @@ import {
  *   GET /api/ads?resource=campaigns[&adAccountId=...]   → active campaigns
  *   GET /api/ads?resource=insights[&adAccountId=...]    → current-month metrics
  *
- * When adAccountId is omitted for campaigns/insights, the first manageable ad
- * account is used.
+ * When adAccountId is omitted for campaigns/insights, the configured default
+ * (META_AD_ACCOUNT_ID) is used, falling back to the first manageable ad account.
  */
 
 /** First and last day of the current month as YYYY-MM-DD (UTC). */
@@ -33,9 +34,7 @@ function currentMonthRange(now: Date): DateRange {
 
 async function resolveAdAccountId(explicit: string | null): Promise<string> {
   if (explicit) return explicit;
-  const accounts = await getAdAccounts();
-  if (accounts.length === 0) throw new Error("No ad accounts available for this token");
-  return accounts[0].id;
+  return resolveDefaultAdAccountId();
 }
 
 export async function GET(request: Request) {
