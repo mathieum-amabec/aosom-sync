@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.38.0] - 2026-06-07
+## [0.5.39.0] - 2026-06-07
 
 ### Changed
 - **Blog topic catalogue expanded 12 → 30 bilingual topics** (`src/lib/blog-topics.ts`).
@@ -12,6 +12,25 @@ All notable changes to Aosom Sync will be documented in this file.
   furniture, storage & organization, pet-friendly furniture, budget decor, and
   DIY/upcycling. The weekly cron rotation (`week % length`) now cycles through 30
   subjects before repeating. New tests assert ≥30 topics and no duplicate FR/EN/query.
+
+## [0.5.38.0] - 2026-06-07
+
+### Added
+- **Meta Ads panel on the dashboard** (`src/app/(dashboard)/meta-ads-panel.tsx`,
+  wired into `dashboard-client.tsx`). Shows last-30-days headline metrics: spend
+  (CAD), reach, clicks, ROAS, CPM, CTR. When `META_ACCESS_TOKEN` is absent it
+  renders a "Connectez votre compte Meta Ads" CTA linking to the setup guide
+  (`docs/META-ADS-SETUP.md`) instead of erroring.
+- **`GET /api/ads/insights?days=30`** (`src/app/api/ads/insights/route.ts`):
+  session-protected (`isAuthenticated`), resolves the first ACTIVE ad account,
+  pulls account-level insights via `meta-ads-client.getInsights`, aggregates the
+  six metrics. Cached in-process for 1h keyed by (account, days); responses are
+  `Cache-Control: no-store` (auth-gated data). Returns `{configured:false, reason}`
+  (200) when the token/account is missing so the panel can show its CTA.
+- **`src/lib/ads-insights.ts`** — pure, unit-tested helpers: `aggregateInsights`
+  (canonical `purchase_roas` — never sums overlapping action types; max-based reach;
+  divide-by-zero-safe CPM/CTR), `rangeForDays` (UTC, clamped 1–365), `parseDays`.
+  12 tests in `tests/ads-insights.test.ts`.
 
 ## [0.5.37.0] - 2026-06-07
 

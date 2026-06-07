@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import type { SyncRun } from "@/types/sync";
+import { MetaAdsPanel } from "./meta-ads-panel";
 
 interface PriceChange {
   sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string; inStore: boolean; shopifyUrl: string | null;
@@ -200,6 +201,9 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
           )}
         </div>
       </div>
+
+      {/* Meta Ads metrics (last 30 days) */}
+      <MetaAdsPanel />
 
       {/* Recent Sync Runs */}
       <h3 className="text-lg font-semibold text-white mb-4">
