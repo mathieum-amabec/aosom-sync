@@ -16,9 +16,20 @@
 import { NextResponse } from "next/server";
 import { getProduct } from "@/lib/database";
 import { composeProductImage, type Locale, type Badge } from "@/lib/image-compositor";
+import { assertPublicHttpsUrl } from "@/lib/image-composer";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+// CDNs the catalog legitimately serves product photos from. The fallback
+// redirect target must be one of these — never an arbitrary URL — so a bad or
+// poisoned products.image1 can't turn this public route into an open redirect.
+const ALLOWED_IMAGE_HOSTS = ["cdn.shopify.com", "img-us.aosomcdn.com", "images.unsplash.com"];
+
+function isAllowedImageHost(host: string): boolean {
+  const h = host.toLowerCase();
+  return ALLOWED_IMAGE_HOSTS.some((allowed) => h === allowed || h.endsWith("." + allowed));
+}
 
 const IMAGE_KEYS = ["image1", "image2", "image3", "image4", "image5", "image6", "image7"] as const;
 
@@ -81,10 +92,22 @@ export async function GET(request: Request) {
       },
     });
   } catch (err) {
-    // Composition failed (source image gone, sharp error). Redirect to the raw
+    // Composition failed (source image gone, sharp error). Fall back to the raw
     // product image so a publishing platform still gets a usable image instead
-    // of a 500 that would fail the whole post.
-    console.error(`[API] /api/image-preview compose failed for ${sku}, redirecting to raw image:`, err);
-    return NextResponse.redirect(productImageUrl, 302);
+    // of a 500 that would fail the whole post — but only redirect to a known,
+    // allow-listed HTTPS image host (closes the open-redirect/SSRF risk if a bad
+    // URL ever lands in products.image1).
+    console.error(`[API] /api/image-preview compose failed for ${sku}, falling back to raw image:`, err);
+    try {
+      const target = new URL(productImageUrl);
+      assertPublicHttpsUrl(target);
+      if (!isAllowedImageHost(target.hostname)) {
+        throw new Error(`disallowed image host: ${target.hostname}`);
+      }
+      return NextResponse.redirect(target.toString(), 302);
+    } catch (redirectErr) {
+      console.error(`[API] /api/image-preview refusing unsafe redirect for ${sku}:`, redirectErr);
+      return new NextResponse(null, { status: 502 });
+    }
   }
 }

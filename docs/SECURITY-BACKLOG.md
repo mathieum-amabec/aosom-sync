@@ -129,7 +129,11 @@ read-only security subagent. **1 P1 fixed inline; 1 P2 + 1 P3 tracked below.**
   `CRON_SECRET`). The session-auth fallback is unchanged.
 
 ### New P2 — Medium (do next)
-### P2-5: `/api/image-preview` redirect not scheme/host-validated
+### P2-5: `/api/image-preview` redirect not scheme/host-validated — RESOLVED (fix/image-preview-ssrf)
+**RESOLVED:** the fallback now validates the target with `assertPublicHttpsUrl` + an
+explicit host allowlist (`cdn.shopify.com`, `img-us.aosomcdn.com`, `images.unsplash.com`)
+before redirecting; non-allowlisted/non-https targets return `502`. Covered by
+`tests/image-preview-route.test.ts`. Original finding below for history.
 On composition failure, `src/app/api/image-preview/route.ts:88` does
 `NextResponse.redirect(productImageUrl, 302)` where `productImageUrl` is `products.image1`
 (populated from the Aosom CSV sync). The route is public and keyed by `sku`. Today the value
