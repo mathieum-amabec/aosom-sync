@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.30.0] - 2026-06-07
+
+### Security
+- **Validated the `/api/image-preview` fallback redirect host (F2 from `/cso`).**
+  On composition failure the public route 302-redirected to `products.image1`
+  without checking the destination. It now requires HTTPS and an allow-listed
+  image host (`cdn.shopify.com`, `img-us.aosomcdn.com`, `images.unsplash.com`)
+  before redirecting, returning `502` otherwise — closing the open-redirect risk
+  if a bad URL ever lands in the products table. Covered by a new route test.
+
 ## [0.5.29.0] - 2026-06-07
 
 ### Security
