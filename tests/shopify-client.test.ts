@@ -92,6 +92,13 @@ describe("createShopifyProduct — metafield + handle safety", () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.product.handle).toBe("custom-slug");
   });
+
+  it("publishes the product live (status active) on import", async () => {
+    await createShopifyProduct(mergedFixture(), contentFixture({}));
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.product.status).toBe("active");
+  });
 });
 
 describe("shopifyFetch — AbortError / timeout", () => {
