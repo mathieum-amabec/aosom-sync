@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.24.0] - 2026-06-06
+
+### Changed
+- **Deduplicated the Shopify catalog.** Re-imports had created products sharing variant SKUs.
+  Removed all duplicate products (keeping one per cluster: active > most-recent > the listing
+  the catalog links to) across two validated passes — **48 draft + 62 active = 110 deleted**,
+  597 → **487 products, 0 duplicates remaining**. After each pass the SKU → `shopify_handle` /
+  `shopify_product_id` backfill was re-run so the dashboard "In store" links point at the
+  surviving products (969 catalog rows linked). 0 keepers ever deleted.
+
+### Added
+- `scripts/shopify-duplicate-products-diagnostic.mjs` — read-only duplicate detector (clusters
+  products by shared SKU, proposes keepers, dry-run only). Full audit in `docs/DATA-OPS-LOG.md`.
+
 ## [0.5.23.0] - 2026-06-06
 
 ### Added

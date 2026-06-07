@@ -3,6 +3,29 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-06 — Delete active duplicate Shopify products + final re-backfill
+
+Second (and final) dedup pass, validated by Mat. Same clustering + keeper rule as the draft
+pass; this time deleting the remaining **active** non-keeper duplicates. Each delete was
+hard-guarded so a cluster keeper is never removed.
+
+**ÉTAPE 1 — deleted active non-keeper duplicates** (`DELETE /products/{id}.json`, ~2 req/sec,
+logged id + title + SKUs):
+| Metric | Value |
+| --- | --- |
+| Active duplicates deleted | **62** |
+| Failed | 0 |
+| **Keepers touched** | **0** |
+
+Products went 549 → **487**.
+
+**ÉTAPE 2 — re-backfill (3rd time):** re-ran the SKU match on the 487 survivors so the ~28
+links that referenced now-deleted products repoint to keepers. Post-state: **969** catalog
+rows carry both `shopify_product_id` and `shopify_handle`.
+
+**ÉTAPE 3 — final verification (read-only):** **0 duplicate SKUs, 0 clusters.** The catalog
+is fully deduplicated (487 unique products).
+
 ## 2026-06-06 — Delete draft duplicate Shopify products + re-backfill handles
 
 Conservative dedup pass, validated by Mat after the read-only diagnostic
