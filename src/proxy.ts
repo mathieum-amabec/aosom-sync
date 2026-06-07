@@ -8,7 +8,7 @@ import { AUTH } from "@/lib/config";
 // "/api/image-preview" is public so Facebook/Instagram can fetch a draft's
 // branded image when publishing (the Graph APIs fetch the URL themselves, with
 // no session). The route only composes images for SKUs that exist in the DB.
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/pixel/script", "/api/image-preview"];
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/pixel/script", "/api/feeds", "/api/image-preview"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(
