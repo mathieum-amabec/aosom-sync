@@ -20,6 +20,19 @@ All notable changes to Aosom Sync will be documented in this file.
     falling back to the square `videoUrl`), and still posts the square video on
     Facebook.
 
+## [0.5.44.0] - 2026-06-07
+
+### Fixed
+- **Catalog "In store" links now open the storefront, not the Shopify admin**
+  (`src/lib/database.ts`). The catalog `StoreBadge` (added in #107) calls
+  `storeLink(shopify_product_id, shopify_handle)`, which prefers the public
+  `/products/{handle}` URL — but `getProducts` never SELECTed `shopify_handle`, so the
+  badge only saw the numeric id and fell back to the admin product page. Added
+  `shopify_handle` to the catalog projection (`catalogColumns` + the CTE `selectCols`);
+  `ProductRow`, `rowToProduct`, and `storeLink` already supported it. 2 direct-SQL tests
+  lock in that the projection carries `shopify_handle` and that `storeLink` then yields a
+  storefront URL (admin fallback only when the handle is missing).
+
 ## [0.5.43.0] - 2026-06-07
 
 ### Added
