@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.30.0] - 2026-06-07
+## [0.5.31.0] - 2026-06-07
 
 ### Fixed
 - **EN posts now carry the Furnish Direct (EN) logo** on their branded hero image. The
@@ -10,6 +10,16 @@ All notable changes to Aosom Sync will be documented in this file.
   image to both channels. `publishDraftToChannel` now rewrites the `/api/image-preview`
   URL's `locale` per channel, so EN channels (Furnish Direct) fetch the EN-branded variant
   while FR channels (Ameublo Direct) keep the FR logo — from a single draft.
+
+## [0.5.30.0] - 2026-06-07
+
+### Security
+- **Validated the `/api/image-preview` fallback redirect host (F2 from `/cso`).**
+  On composition failure the public route 302-redirected to `products.image1`
+  without checking the destination. It now requires HTTPS and an allow-listed
+  image host (`cdn.shopify.com`, `img-us.aosomcdn.com`, `images.unsplash.com`)
+  before redirecting, returning `502` otherwise — closing the open-redirect risk
+  if a bad URL ever lands in the products table. Covered by a new route test.
 
 ## [0.5.29.0] - 2026-06-07
 
