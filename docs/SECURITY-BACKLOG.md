@@ -144,7 +144,9 @@ exported `assertPublicHttpsUrl(new URL(productImageUrl))` before the redirect; o
 return `502` instead of redirecting. Reuses the same guard `downloadImage` already applies.
 
 ### New P3 — Low / informational
-### P3-4: `/api/health` exposes exact version for fingerprinting
+### P3-4: `/api/health` exposes exact version for fingerprinting — RESOLVED (fix/health-version-leak)
+**RESOLVED:** the `version` field was removed from the public `/api/health` payload;
+`status`/`db`/`lastSync` remain for monitoring. No more exact-build fingerprinting.
 `src/app/api/health/route.ts` returns `version: pkg.version` (e.g. `0.5.28.0`) unauthenticated.
 Useful for ops monitoring, but lets an attacker fingerprint the exact build to correlate
 against dependency CVEs. **Fix (optional):** drop `version` from the public payload, or gate
