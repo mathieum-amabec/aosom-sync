@@ -1,7 +1,35 @@
 # Data Operations Log
 
-Audit trail for manual/destructive operations against the production Turso database.
-Each entry records the date, the exact rules, and the exact row counts affected.
+Audit trail for manual/destructive operations against production data stores
+(Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
+
+## 2026-06-06 — Delete draft duplicate Shopify products + re-backfill handles
+
+Conservative dedup pass, validated by Mat after the read-only diagnostic
+(`scripts/shopify-duplicate-products-diagnostic.mjs`). Duplicate products (re-imports
+sharing variant SKUs) were grouped into clusters; one keeper per cluster
+(rule: active > most-recent `updated_at` > DB-referenced handle).
+
+**ÉTAPE 1 — deleted ONLY `draft` non-keeper duplicates** (`DELETE /products/{id}.json`,
+~2 req/sec, each delete hard-guarded to `status === 'draft'`):
+| Metric | Value |
+| --- | --- |
+| Draft duplicates deleted | **48** |
+| Failed | 0 |
+| **Active products touched** | **0** |
+
+Products went 597 → **549**. No active/published product was deleted.
+
+**ÉTAPE 2 — re-backfill** (`scripts/shopify-handle-backfill-diagnostic.mjs` logic, applied):
+re-ran the SKU → `shopify_product_id` + `shopify_handle` match on the 549 survivors so the
+~40 catalog links that referenced now-deleted drafts repoint to surviving products.
+Post-state: **969** catalog rows carry both `shopify_product_id` and `shopify_handle`.
+
+**ÉTAPE 3 — remaining duplicates (read-only):** 110 duplicate SKUs across **51 clusters**,
+all now **active-vs-active** dupes. Fully deduping would require deleting **62 active
+(published) products** (28 of which the DB links to) — held for Mat's per-case review,
+since deleting published products has storefront/SEO impact. Worst remaining clusters are
+mostly raised garden beds / planters and patio swings with 3–4 near-identical active listings.
 
 ## 2026-06-06 — Backfill products.shopify_product_id + shopify_handle (SKU match)
 
