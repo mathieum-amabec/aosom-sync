@@ -31,6 +31,9 @@ vi.mock("@/lib/config", () => ({
   CLAUDE: { MODEL: "claude-test", MAX_TOKENS_SOCIAL: 500 },
   SYNC: { DEFAULT_MIN_DAYS_BETWEEN_REPOSTS: "30" },
   CHANNELS: {},
+  // Null base URL → branding is skipped, so these tests exercise the legacy
+  // (raw image) path. Branding is covered in job4-branding.test.ts.
+  getPublicAppUrl: () => null,
 }));
 
 vi.mock("@/lib/social-publisher", () => ({
