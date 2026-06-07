@@ -1,7 +1,24 @@
 // Pure helpers for the Meta Ads dashboard panel — no I/O, fully unit-testable.
 // The route handler does the auth/token/cache/network work and delegates the
 // number-crunching here so it can be tested without hitting the Graph API.
-import type { InsightsRow, DateRange } from "./meta-ads-client";
+import type { InsightsRow, DateRange, AdAccount } from "./meta-ads-client";
+
+/**
+ * Choose which ad account to report on. Prefers a configured `preferredId`
+ * (`META_AD_ACCOUNT_ID`, with or without the `act_` prefix) when it's present in
+ * the token's accessible accounts; otherwise falls back to the first ACTIVE
+ * account, then the first account. Returns null when there are no accounts.
+ */
+export function pickAdAccount(accounts: AdAccount[], preferredId?: string | null): AdAccount | null {
+  if (accounts.length === 0) return null;
+  const pref = preferredId?.trim();
+  if (pref) {
+    const bare = pref.replace(/^act_/, "");
+    const match = accounts.find((a) => a.id === pref || a.id === `act_${bare}` || a.account_id === bare);
+    if (match) return match;
+  }
+  return accounts.find((a) => a.account_status === 1) ?? accounts[0];
+}
 
 /** Aggregated, dashboard-ready ad metrics over a date range. */
 export interface AdsMetrics {

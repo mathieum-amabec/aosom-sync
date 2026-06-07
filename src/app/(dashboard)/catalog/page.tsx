@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { storeLink } from "@/lib/insights";
 interface CatalogProduct {
   sku: string;
   name: string;
@@ -11,9 +12,40 @@ interface CatalogProduct {
   image1: string;
   psin: string;
   import_status: string | null;
+  /** Shopify product id when imported (drives the In store / Not imported badge). */
+  shopify_product_id: string | null;
+  shopify_handle?: string | null;
   /** old_price of the SKU's most recent price change; drives the ▼/▲ movement badge. */
   prev_price: number | null;
   [key: string]: unknown;
+}
+
+/**
+ * In-store status badge. "In store" links to the Shopify product (storefront when
+ * the handle is known, else admin) — works on mobile and desktop. "Not imported"
+ * is a muted badge. Driven by shopify_product_id (the catalog API field), not the
+ * never-populated import_status.
+ */
+function StoreBadge({ product }: { product: CatalogProduct }) {
+  const { inStore, shopifyUrl } = storeLink(product.shopify_product_id, product.shopify_handle);
+  if (inStore && shopifyUrl) {
+    return (
+      <a
+        href={shopifyUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="inline-flex items-center gap-0.5 px-2 py-0.5 bg-green-900/40 text-green-400 border border-green-800/50 rounded-md text-xs font-medium hover:bg-green-900/60 transition-colors shrink-0"
+      >
+        In store ↗
+      </a>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-2 py-0.5 bg-gray-800 text-gray-500 border border-gray-700 rounded-md text-xs font-medium shrink-0">
+      Not imported
+    </span>
+  );
 }
 
 interface CatalogResponse {
@@ -300,11 +332,7 @@ export default function CatalogPage() {
                       <span className="text-gray-400 text-[11px] truncate">
                         {product.product_type as string}
                       </span>
-                      {product.import_status ? (
-                        <span className="px-1.5 py-0.5 bg-green-900/40 text-green-400 border border-green-800/50 rounded text-[10px] font-medium shrink-0">
-                          {product.import_status as string}
-                        </span>
-                      ) : null}
+                      <StoreBadge product={product} />
                     </div>
                   </div>
                 </div>
@@ -411,11 +439,7 @@ export default function CatalogPage() {
                         {product.color as string}
                       </td>
                       <td className="px-4 py-3">
-                        {product.import_status ? (
-                          <span className="px-2 py-0.5 bg-green-900/40 text-green-400 border border-green-800/50 rounded-md text-xs font-medium">
-                            {product.import_status as string}
-                          </span>
-                        ) : null}
+                        <StoreBadge product={product} />
                       </td>
                     </tr>
                   ))}
