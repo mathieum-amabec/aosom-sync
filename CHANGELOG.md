@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.37.0] - 2026-06-07
+## [0.5.38.0] - 2026-06-07
 
 ### Changed
 - **Blog topic catalogue expanded 12 → 30 bilingual topics** (`src/lib/blog-topics.ts`).
@@ -12,6 +12,23 @@ All notable changes to Aosom Sync will be documented in this file.
   furniture, storage & organization, pet-friendly furniture, budget decor, and
   DIY/upcycling. The weekly cron rotation (`week % length`) now cycles through 30
   subjects before repeating. New tests assert ≥30 topics and no duplicate FR/EN/query.
+
+## [0.5.37.0] - 2026-06-07
+
+### Added
+- **Double opt-in for price alerts.** Price-drop signups now require email
+  confirmation before any alert is sent:
+  - `price_alerts` gains `confirmed` / `confirm_token` / `token_expires_at`
+    (CREATE for new DBs + ALTER migration for the table shipped in #99).
+  - `POST /api/price-alert` issues a single-use UUID token (24h TTL), stores the
+    row as `confirmed=0`, and emails a confirmation link via Klaviyo
+    (`Price Alert Confirmation` event).
+  - `GET /api/price-alert/confirm?token=…` marks the alert confirmed, clears the
+    token, and redirects to the product page (`?price_alert=confirmed`); invalid
+    or expired tokens get a bilingual error page.
+  - The notify cron now only emails `confirmed=1` alerts — so price drops never
+    reach an address that didn't opt in. Storefront widget copy updated to
+    "check your email to confirm".
 
 ## [0.5.36.0] - 2026-06-07
 

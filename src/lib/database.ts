@@ -222,6 +222,9 @@ async function _initSchemaImpl(): Promise<void> {
       price_at_signup REAL NOT NULL,
       created_at INTEGER NOT NULL,
       notified_at INTEGER,
+      confirmed INTEGER DEFAULT 0,
+      confirm_token TEXT,
+      token_expires_at INTEGER,
       UNIQUE(email, sku)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_run ON sync_logs(sync_run_id)`,
@@ -270,6 +273,19 @@ async function _initSchemaImpl(): Promise<void> {
   const productCols = new Set(productsInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
   if (!productCols.has("shopify_handle")) {
     alters.push(`ALTER TABLE products ADD COLUMN shopify_handle TEXT`);
+  }
+
+  // price_alerts double opt-in columns (table shipped in #99 without them).
+  const priceAlertsInfo = await db.execute(`PRAGMA table_info(price_alerts)`);
+  const priceAlertCols = new Set(priceAlertsInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!priceAlertCols.has("confirmed")) {
+    alters.push(`ALTER TABLE price_alerts ADD COLUMN confirmed INTEGER DEFAULT 0`);
+  }
+  if (!priceAlertCols.has("confirm_token")) {
+    alters.push(`ALTER TABLE price_alerts ADD COLUMN confirm_token TEXT`);
+  }
+  if (!priceAlertCols.has("token_expires_at")) {
+    alters.push(`ALTER TABLE price_alerts ADD COLUMN token_expires_at INTEGER`);
   }
 
   if (alters.length > 0) {
@@ -1050,28 +1066,60 @@ export interface TriggeredPriceAlert {
 }
 
 /**
- * Upsert a price-drop alert. Re-signing up for the same (email, sku) resets the
- * reference price to the current one and clears notified_at, so the visitor can
- * be alerted again on the next drop below this new baseline.
+ * Upsert a price-drop alert (double opt-in). A signup always starts unconfirmed
+ * (confirmed=0) with a fresh confirm token; re-signing up for the same
+ * (email, sku) also resets the reference price, clears notified_at, and issues a
+ * new token — so the visitor must (re-)confirm before any alert is sent.
  */
 export async function upsertPriceAlert(alert: {
   email: string;
   sku: string;
   shopifyProductId?: string | null;
   priceAtSignup: number;
+  confirmToken: string;
+  tokenExpiresAt: number;
 }): Promise<void> {
   const db = await ensureSchema();
   const now = Math.floor(Date.now() / 1000);
   await db.execute({
-    sql: `INSERT INTO price_alerts (email, sku, shopify_product_id, price_at_signup, created_at, notified_at)
-          VALUES (?, ?, ?, ?, ?, NULL)
+    sql: `INSERT INTO price_alerts (email, sku, shopify_product_id, price_at_signup, created_at, notified_at, confirmed, confirm_token, token_expires_at)
+          VALUES (?, ?, ?, ?, ?, NULL, 0, ?, ?)
           ON CONFLICT(email, sku) DO UPDATE SET
             price_at_signup = excluded.price_at_signup,
             shopify_product_id = excluded.shopify_product_id,
             created_at = excluded.created_at,
-            notified_at = NULL`,
-    args: [alert.email, alert.sku, alert.shopifyProductId ?? null, alert.priceAtSignup, now],
+            notified_at = NULL,
+            confirmed = 0,
+            confirm_token = excluded.confirm_token,
+            token_expires_at = excluded.token_expires_at`,
+    args: [alert.email, alert.sku, alert.shopifyProductId ?? null, alert.priceAtSignup, now, alert.confirmToken, alert.tokenExpiresAt],
   });
+}
+
+/**
+ * Confirm an alert by its token (double opt-in). Matches a non-expired,
+ * still-unconfirmed token; sets confirmed=1 and clears the token (single use).
+ * Returns the confirmed row + product handle for the success redirect, or null
+ * when the token is unknown/expired/already used.
+ */
+export async function confirmPriceAlert(
+  token: string,
+): Promise<{ sku: string; shopifyHandle: string | null } | null> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const found = await db.execute({
+    sql: `SELECT a.id, a.sku, p.shopify_handle AS shopify_handle
+          FROM price_alerts a LEFT JOIN products p ON p.sku = a.sku
+          WHERE a.confirm_token = ? AND a.confirmed = 0 AND a.token_expires_at > ?`,
+    args: [token, now],
+  });
+  if (found.rows.length === 0) return null;
+  const row = found.rows[0];
+  await db.execute({
+    sql: `UPDATE price_alerts SET confirmed = 1, confirm_token = NULL, token_expires_at = NULL WHERE id = ?`,
+    args: [Number(row.id)],
+  });
+  return { sku: String(row.sku), shopifyHandle: (row.shopify_handle as string) || null };
 }
 
 /**
@@ -1086,7 +1134,7 @@ export async function getTriggeredPriceAlerts(): Promise<TriggeredPriceAlert[]> 
             p.price AS current_price, p.name AS product_name, p.shopify_handle AS shopify_handle
      FROM price_alerts a
      JOIN products p ON p.sku = a.sku
-     WHERE a.notified_at IS NULL AND p.price < a.price_at_signup`,
+     WHERE a.notified_at IS NULL AND a.confirmed = 1 AND p.price < a.price_at_signup`,
   );
   return result.rows.map((r) => ({
     id: Number(r.id),
