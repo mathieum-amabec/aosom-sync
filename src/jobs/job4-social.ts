@@ -199,10 +199,9 @@ interface BrandedImages {
  * without NEXT_PUBLIC_APP_URL) so callers fall back to the legacy overlay rather
  * than emit a localhost URL the platforms can't reach.
  *
- * Locale is FR (Ameublo): a single image is shared across FR + EN channels, so
- * EN channels currently receive the FR-branded logo. Per-channel branded images
- * would require the publisher to pick the image per channel — tracked as a
- * follow-up, out of scope here.
+ * The stored URL uses locale=fr (Ameublo). The publisher rewrites it per channel
+ * (localizeBrandedImageUrls in social-publisher.ts) so EN channels (Furnish Direct)
+ * fetch the EN-branded variant — one draft, correct logo on each page.
  */
 function brandImages(
   trigger: "new_product" | "stock_highlight",
