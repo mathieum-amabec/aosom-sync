@@ -2,6 +2,31 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.41.0] - 2026-06-07
+
+### Changed
+- **Deployed the double-opt-in price-alert widget to the live theme** (160059195497).
+  The live `price_drop_alert` block still held the old single-opt-in copy ("You're on the
+  list…"); replaced it with the canonical `docs/snippets/price-drop-alert.liquid` (animated
+  success panel, validation, error handling) whose post-submission message reads "Check
+  your email to confirm your alert." / "Vérifiez votre courriel pour confirmer votre
+  alerte." New `scripts/update-price-alert-block.mjs` rewrites only that block's
+  `custom_liquid` (dry-run by default, `--apply` to PUT); logged in `docs/DATA-OPS-LOG.md`.
+
+### Added
+- **`scripts/markets-status.mjs`** — read-only Shopify Markets/locales/scopes probe.
+- **`scripts/inspect-product-template.mjs`** — read-only inspector for the live theme's
+  `templates/product.json` blocks.
+
+### Docs
+- **`docs/FURNISHDIRECT-DOMAIN-SETUP.md`** rewritten with the current state (verified
+  2026-06-07): `read_markets`+`write_markets` are now granted (the prior 403 is resolved),
+  the store has one region-scoped "Canada" market, and both locales are published. Explains
+  why a *second* EN market isn't the right model for English-Canada (a country belongs to
+  one market — the FR/EN split is a language+domain mapping inside the Canada market) and
+  gives the connect-domain → bind-EN-domain steps + GraphQL path for once furnishdirect.ca's
+  DNS is configured. No market was created (domain not connected yet).
+
 ## [0.5.40.0] - 2026-06-07
 
 ### Added

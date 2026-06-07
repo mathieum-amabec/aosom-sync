@@ -3,6 +3,31 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-07 — Deploy double-opt-in price_drop_alert widget to the LIVE theme
+
+Deployed the canonical double-opt-in price-alert widget
+(`docs/snippets/price-drop-alert.liquid`, the PR #105 version with client-side email
+validation, button loading state, an animated ✓ success panel, and rate-limit/network
+error handling) into the `price_drop_alert` custom_liquid block of
+`templates/product.json` on the **live** theme `160059195497`. The block previously held
+the old single-opt-in confirmation ("You're on the list…" / "C'est noté…"); the
+double-opt-in flow needs the visitor to confirm by email, so the success panel now reads:
+
+- EN: **"Check your email to confirm your alert."**
+- FR: **"Vérifiez votre courriel pour confirmer votre alerte."**
+
+| Metric | Value |
+| --- | --- |
+| Asset | `templates/product.json` (theme 160059195497, live) |
+| Block touched | `sections.main.blocks.price_drop_alert.settings.custom_liquid` (only) |
+| Final custom_liquid length | **9446** (matches the repo snippet exactly) |
+| Other blocks / block_order | unchanged |
+| `PUT /assets.json` | **200** (verified by re-GET: both confirm strings + success panel present) |
+
+Script: `scripts/update-price-alert-block.mjs` (dry-run by default, `--apply` to PUT).
+It targets the block by id (`price_drop_alert`) or content match and rewrites only that
+block's `custom_liquid`, preserving every other section/block and `block_order`.
+
 ## 2026-06-06 — Delete active duplicate Shopify products + final re-backfill
 
 Second (and final) dedup pass, validated by Mat. Same clustering + keeper rule as the draft
