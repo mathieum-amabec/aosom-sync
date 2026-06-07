@@ -38,6 +38,26 @@ export const BILINGUAL_TOPICS: readonly BilingualTopic[] = [
   { fr: "Préparer son patio pour l'été", en: "Getting your patio summer-ready", imageQuery: "summer patio backyard furniture" },
   { fr: "Créer une chambre apaisante", en: "Designing a calming bedroom", imageQuery: "calm minimalist bedroom" },
   { fr: "Recevoir : une salle à manger conviviale", en: "Hosting: a welcoming dining room", imageQuery: "modern dining room table" },
+  // ── 2026 expansion: décoration tendances, petits espaces, 4 saisons, entretien,
+  // styles, enfants, rangement, animaux, budget, DIY ──
+  { fr: "Les grandes tendances déco de 2026", en: "The biggest decor trends of 2026", imageQuery: "2026 interior design trends" },
+  { fr: "Meubler un studio sans le surcharger", en: "Furnishing a studio apartment without clutter", imageQuery: "studio apartment small furniture" },
+  { fr: "Mobilier extérieur 4 saisons pour l'hiver québécois", en: "All-season outdoor furniture for Canadian winters", imageQuery: "winter proof outdoor patio furniture" },
+  { fr: "Entretenir et protéger vos meubles en bois", en: "Caring for and protecting wooden furniture", imageQuery: "wood furniture care cleaning" },
+  { fr: "Nettoyer un canapé en tissu ou en cuir", en: "Cleaning fabric and leather sofas", imageQuery: "cleaning fabric leather sofa" },
+  { fr: "Le style industriel : métal, bois et caractère", en: "Industrial style: metal, wood, and character", imageQuery: "industrial style loft interior" },
+  { fr: "Créer une ambiance bohème chaleureuse", en: "Creating a warm bohemian atmosphere", imageQuery: "bohemian boho living room decor" },
+  { fr: "Adopter un intérieur moderne et épuré", en: "Embracing a modern, minimalist interior", imageQuery: "modern minimalist interior" },
+  { fr: "Choisir des meubles sécuritaires pour enfants", en: "Choosing safe furniture for kids", imageQuery: "kids room safe furniture" },
+  { fr: "Aménager une chambre d'enfant évolutive", en: "Designing a kids' room that grows with them", imageQuery: "children bedroom furniture" },
+  { fr: "Organiser une entrée fonctionnelle", en: "Organizing a functional entryway", imageQuery: "entryway storage organization" },
+  { fr: "Maximiser le rangement dans une petite maison", en: "Maximizing storage in a small home", imageQuery: "home storage shelving organization" },
+  { fr: "Des meubles qui résistent aux griffes des animaux", en: "Pet-friendly furniture that resists scratches", imageQuery: "pet friendly scratch resistant furniture" },
+  { fr: "Aménager un coin confortable pour votre animal", en: "Creating a cozy corner for your pet", imageQuery: "cozy pet bed corner home" },
+  { fr: "Décorer avec un petit budget", en: "Decorating on a small budget", imageQuery: "affordable budget home decor" },
+  { fr: "Trouver des meubles abordables et durables", en: "Finding affordable, durable furniture", imageQuery: "affordable quality furniture" },
+  { fr: "Personnaliser vos meubles : idées DIY faciles", en: "Personalizing your furniture: easy DIY ideas", imageQuery: "diy furniture makeover" },
+  { fr: "Donner une seconde vie à vos vieux meubles", en: "Upcycling old furniture for a fresh look", imageQuery: "upcycled furniture restoration" },
 ];
 
 // Stopwords stripped when deriving SEO keywords from a topic. Language-specific
