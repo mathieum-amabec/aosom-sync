@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.39.0] - 2026-06-07
+
+### Changed
+- **Blog topic catalogue expanded 12 → 30 bilingual topics** (`src/lib/blog-topics.ts`).
+  18 new FR/EN topic pairs with shared English Unsplash queries, covering 2026 decor
+  trends, small-space/studio living, all-season (Quebec winter) outdoor furniture,
+  furniture care, decor styles (industrial, bohemian, modern minimalist), kid-safe
+  furniture, storage & organization, pet-friendly furniture, budget decor, and
+  DIY/upcycling. The weekly cron rotation (`week % length`) now cycles through 30
+  subjects before repeating. New tests assert ≥30 topics and no duplicate FR/EN/query.
+
 ## [0.5.38.0] - 2026-06-07
 
 ### Added

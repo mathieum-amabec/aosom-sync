@@ -7,8 +7,17 @@ import {
 } from "@/lib/blog-topics";
 
 describe("BILINGUAL_TOPICS catalogue", () => {
-  it("has at least 12 bilingual topics", () => {
-    expect(BILINGUAL_TOPICS.length).toBeGreaterThanOrEqual(12);
+  it("has at least 30 bilingual topics", () => {
+    expect(BILINGUAL_TOPICS.length).toBeGreaterThanOrEqual(30);
+  });
+
+  it("has no duplicate FR, EN, or imageQuery entries", () => {
+    const fr = BILINGUAL_TOPICS.map((t) => t.fr);
+    const en = BILINGUAL_TOPICS.map((t) => t.en);
+    const iq = BILINGUAL_TOPICS.map((t) => t.imageQuery);
+    expect(new Set(fr).size).toBe(fr.length);
+    expect(new Set(en).size).toBe(en.length);
+    expect(new Set(iq).size).toBe(iq.length);
   });
 
   it("every entry has a non-empty FR, EN, and imageQuery", () => {
