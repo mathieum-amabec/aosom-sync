@@ -80,7 +80,7 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE TABLE IF NOT EXISTS facebook_drafts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, trigger_type TEXT NOT NULL,
       language TEXT NOT NULL, post_text TEXT NOT NULL, image_path TEXT, image_url TEXT,
-      image_urls TEXT,
+      image_urls TEXT, video_url TEXT,
       old_price REAL, new_price REAL, status TEXT DEFAULT 'draft', scheduled_at INTEGER,
       published_at INTEGER, facebook_post_id TEXT,
       post_text_en TEXT, channels TEXT,
@@ -245,6 +245,7 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("post_text_en")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN post_text_en TEXT`);
   if (!cols.has("channels")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN channels TEXT`);
   if (!cols.has("image_urls")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN image_urls TEXT`);
+  if (!cols.has("video_url")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN video_url TEXT`);
   // content_type: distinguishes product posts from informative/entertaining/engagement content
   if (!cols.has("content_type")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN content_type TEXT NOT NULL DEFAULT 'product'`);
   // hook_id: FK to content_hooks — which hook seeded this draft's caption
@@ -1435,6 +1436,8 @@ export interface FacebookDraft {
   imagePath: string | null; imageUrl: string | null;
   /** Ordered public image URLs for multi-photo posts. Always ≥1 element when there is any image. */
   imageUrls: string[];
+  /** Rendered Creatomate video URL (new_product drafts when Creatomate is configured). Publisher prefers it on Facebook. */
+  videoUrl?: string | null;
   oldPrice: number | null; newPrice: number | null; status: string;
   scheduledAt: number | null; publishedAt: number | null;
   facebookPostId: string | null;
@@ -1713,6 +1716,7 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
     unsplashImageUrl: (row.unsplash_image_url as string) || null,
     unsplashPhotographer: (row.unsplash_photographer as string) || null,
     unsplashPhotographerUrl: (row.unsplash_photographer_url as string) || null,
+    videoUrl: (row.video_url as string) || null,
     productName: (row.name as string) || undefined,
     productImage: (row.image1 as string) || undefined,
   };
@@ -1726,6 +1730,8 @@ export async function createFacebookDraft(draft: {
   imageUrl?: string | null;
   /** Ordered list of public image URLs (1–5). Used for multi-photo Facebook posts. */
   imageUrls?: string[];
+  /** Rendered Creatomate video URL, when available. */
+  videoUrl?: string | null;
   oldPrice?: number | null; newPrice?: number | null;
   /** FK to content_hooks — which hook seeded this draft's caption. */
   hookId?: number | null;
@@ -1739,8 +1745,8 @@ export async function createFacebookDraft(draft: {
   const primary = draft.imageUrl ?? urls[0] ?? null;
   const urlsJson = urls.length > 0 ? JSON.stringify(urls) : null;
   const result = await db.execute({
-    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, post_text_en, image_path, image_url, image_urls, old_price, new_price, hook_id, unsplash_image_url, unsplash_photographer, unsplash_photographer_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.postTextEn ?? null, draft.imagePath || null, primary, urlsJson, draft.oldPrice ?? null, draft.newPrice ?? null, draft.hookId ?? null, draft.unsplashImageUrl ?? null, draft.unsplashPhotographer ?? null, draft.unsplashPhotographerUrl ?? null],
+    sql: `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, post_text_en, image_path, image_url, image_urls, video_url, old_price, new_price, hook_id, unsplash_image_url, unsplash_photographer, unsplash_photographer_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [draft.sku, draft.triggerType, draft.language, draft.postText, draft.postTextEn ?? null, draft.imagePath || null, primary, urlsJson, draft.videoUrl ?? null, draft.oldPrice ?? null, draft.newPrice ?? null, draft.hookId ?? null, draft.unsplashImageUrl ?? null, draft.unsplashPhotographer ?? null, draft.unsplashPhotographerUrl ?? null],
   });
   return Number(result.lastInsertRowid);
 }
