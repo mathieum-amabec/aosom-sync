@@ -25,6 +25,24 @@ All notable changes to Aosom Sync will be documented in this file.
   classification). Two new API routes: `GET /api/dashboard/summary` and
   `GET /api/dashboard/alerts` (both `isAuthenticated`-gated). 19 new tests.
 
+## [0.5.45.0] - 2026-06-07
+
+### Added
+- **Instagram Reels (9:16 video) support.** Previously the publisher skipped video
+  on Instagram and posted only the image; now it posts a Reel when a video is
+  available.
+  - `createReelsVideo()` / `renderReelsVideoAndWait()` in `creatomate-client.ts`
+    render a vertical 1080x1920 video from a dedicated `CREATOMATE_REELS_TEMPLATE_ID`.
+  - `publishReel()` in `instagram-client.ts` — IG Graph Reels flow: create a
+    `media_type=REELS` container, poll `status_code` until the upload finishes
+    processing, then `media_publish`.
+  - `job4-social` renders the 9:16 reel alongside the square Facebook video
+    (best-effort, independent — a reel failure never blocks the draft); stored on
+    the new `facebook_drafts.reels_video_url` column.
+  - The publisher posts the Reel on Instagram (preferring the 9:16 `reelsVideoUrl`,
+    falling back to the square `videoUrl`), and still posts the square video on
+    Facebook.
+
 ## [0.5.44.0] - 2026-06-07
 
 ### Fixed

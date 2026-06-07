@@ -69,6 +69,39 @@ export async function createVideoFromTemplate(
   }
 }
 
+/**
+ * Start a vertical 9:16 (1080x1920) render for Instagram Reels, using the dedicated
+ * CREATOMATE_REELS_TEMPLATE_ID (a separate template laid out for the portrait frame —
+ * the square product template doesn't crop well to 9:16). Returns the render job id,
+ * or null when the reels template isn't configured / Creatomate is off. Same async
+ * model as createVideoFromTemplate.
+ */
+export function isReelsConfigured(): boolean {
+  return !!env.creatomateApiKey && !!env.creatomateReelsTemplateId;
+}
+
+export async function createReelsVideo(
+  modifications: Record<string, string>,
+): Promise<string | null> {
+  const templateId = env.creatomateReelsTemplateId;
+  if (!templateId) return null; // no 9:16 template configured → caller skips the reel
+  return createVideoFromTemplate(templateId, modifications);
+}
+
+/**
+ * Start a 9:16 reels render and poll until it succeeds/fails or the budget runs out.
+ * Returns the MP4 url or null (caller then skips the reel and posts the image instead).
+ * No-ops to { jobId: null, url: null } when CREATOMATE_REELS_TEMPLATE_ID is unset.
+ */
+export async function renderReelsVideoAndWait(
+  modifications: Record<string, string>,
+  opts: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<{ jobId: string | null; url: string | null }> {
+  const templateId = env.creatomateReelsTemplateId;
+  if (!templateId) return { jobId: null, url: null };
+  return renderVideoAndWait(templateId, modifications, opts);
+}
+
 /** Poll a render's status. Returns { status, url } — url is set once succeeded. */
 export async function getVideoStatus(jobId: string): Promise<VideoStatus> {
   const key = env.creatomateApiKey;
