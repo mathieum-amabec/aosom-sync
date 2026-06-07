@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.35.0] - 2026-06-07
+
+### Fixed
+- **Catalog price-movement badge now renders** (`src/lib/database.ts`,
+  `src/app/(dashboard)/catalog/page.tsx`): the catalog table has long contained a
+  ▼/▲ badge that compares each product's current price against `prev_price`, but
+  `getProducts` never selected a `prev_price` column, so the badge was permanently
+  dead code. Added a `last_price` CTE — `old_price` of each SKU's most recent
+  `price_drop`/`price_increase`, selected with `ROW_NUMBER() OVER (PARTITION BY sku
+  ORDER BY detected_at DESC, id DESC)` so the pick is deterministic even when two
+  price changes share the same `detected_at` second (stock-only changes excluded) —
+  LEFT JOINed into all three sort branches of `getProducts`. The badge now shows the
+  real last price move and complements the existing "Plus gros rabais" (price drop %)
+  sort. `ProductRow` gains an optional `prev_price` field; 3 direct-SQL tests cover
+  latest-change selection, stock-change exclusion, and the detected_at tiebreak.
+
 ## [0.5.34.0] - 2026-06-07
 
 ### Added
