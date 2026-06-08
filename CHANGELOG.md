@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.47.0] - 2026-06-08
+
+Catch-up version bump: three video feature PRs (#113, #114, #115) merged to `main`
+without bumping VERSION/CHANGELOG. This entry documents them; no code change.
+
+### Added
+- **Video dashboard skeleton** (#113): `video_jobs` table + indexes, `VideoJob`
+  types and `create`/`get`/`list`/`update`/`delete` helpers in `database.ts`;
+  `GET`/`POST /api/videos` and `PATCH`/`DELETE /api/videos/[id]` (all
+  `isAuthenticated`-gated, writes blocked for `reviewer`); the `/videos` page with
+  4 tabs (Générer / File d'attente / Bibliothèque / Publier) + "Vidéos" nav entry.
+- **Video pipeline foundation** (#114): brand tokens, Job4 decoupling, and the
+  FFmpeg slideshow engine (`src/lib/video-engines/ffmpeg-slideshow.ts`).
+- **Public video delivery route** (#115): `GET /api/video-serve/[id]` — 302-redirects
+  to `video_url` when set, otherwise streams the local MP4 (`video/mp4`,
+  `Accept-Ranges: bytes`, Range/206 support), else 404. Allow-listed in `proxy.ts`
+  so the FB/IG Graph APIs can fetch a Reel video by id with no session.
+- **furnishdirect.ca EN domain binding** (#115): `docs/FURNISHDIRECT-DOMAIN-SETUP.md`
+  updated with the scriptable steps now that `read_markets`/`write_markets` are
+  granted, plus `scripts/bind-furnishdirect-domain.mjs` (dry-run by default) which
+  adds a second web presence on the Canada market bound to `furnishdirect.ca` /
+  `defaultLocale: en`.
+
 ## [0.5.46.0] - 2026-06-07
 
 ### Added
