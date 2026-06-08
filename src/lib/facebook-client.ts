@@ -36,6 +36,11 @@ function brandCreds(brand: FacebookBrand): BrandCreds {
   throw new Error(`Unknown Facebook brand: ${brand}`);
 }
 
+/** Public accessor for a brand's Page id + token + label (used by the reels orchestrator). */
+export function facebookBrandCreds(brand: FacebookBrand): BrandCreds {
+  return brandCreds(brand);
+}
+
 /**
  * Test the connection for one brand by fetching page info.
  */
@@ -126,6 +131,73 @@ export async function publishVideo(opts: {
   if (data.error) throw new Error(`${label}: ${data.error.message}`);
   // The /videos endpoint returns the video id; there's no separate post_id.
   return { id: data.id, postId: data.post_id || data.id };
+}
+
+/**
+ * Publish a Facebook Reel (vertical 9:16 video) to a Page via the dedicated
+ * `/video_reels` resumable upload, three-phase flow:
+ *
+ *   1. start  → POST /{page-id}/video_reels { upload_phase: "start" }
+ *               returns { video_id, upload_url }
+ *   2. upload → POST upload_url with `file_url: <public MP4>` header — Meta
+ *               fetches the hosted file server-side (we never stream bytes from
+ *               serverless /tmp; same rationale as photos/videos above).
+ *   3. finish → POST /{page-id}/video_reels { upload_phase: "finish", video_id,
+ *               video_state: "PUBLISHED", description } — publishes the reel.
+ *
+ * `videoUrl` MUST be a public MP4 URL. Returns { id, postId } = the reel video id.
+ * `pageId`/`token`/`label` are passed explicitly so the caller can route the reel
+ * to a specific Page (the orchestrator resolves them per locale via facebookBrandCreds).
+ */
+export async function publishFacebookReel(opts: {
+  caption: string;
+  videoUrl: string;
+  pageId: string;
+  token: string;
+  label?: string;
+}): Promise<PublishResult> {
+  const { pageId, token, videoUrl } = opts;
+  const label = opts.label ?? "Facebook";
+  const reelsUrl = `${FACEBOOK.GRAPH_API_URL}/${pageId}/video_reels`;
+
+  // Phase 1: start — reserve a video container + an upload endpoint.
+  const startRes = await fetch(reelsUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ upload_phase: "start" }),
+  });
+  if (startRes.status === 429) throw new Error(`${label}: Facebook rate limit (reel start), retry later`);
+  const startData = await startRes.json();
+  if (startData.error) throw new Error(`${label} (reel start): ${startData.error.message}`);
+  const videoId: string | undefined = startData.video_id;
+  const uploadUrl: string | undefined = startData.upload_url;
+  if (!videoId || !uploadUrl) throw new Error(`${label}: reel start returned no video_id/upload_url`);
+
+  // Phase 2: upload — hand Meta the public file URL; it fetches the bytes itself.
+  const uploadRes = await fetch(uploadUrl, {
+    method: "POST",
+    headers: { Authorization: `OAuth ${token}`, file_url: videoUrl },
+  });
+  const uploadData = await uploadRes.json().catch(() => ({}));
+  if (uploadData?.error) throw new Error(`${label} (reel upload): ${uploadData.error.message}`);
+  if (!uploadRes.ok) throw new Error(`${label}: reel upload failed (${uploadRes.status})`);
+
+  // Phase 3: finish — publish the reel with its caption.
+  const finishRes = await fetch(reelsUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      upload_phase: "finish",
+      video_id: videoId,
+      video_state: "PUBLISHED",
+      description: opts.caption,
+    }),
+  });
+  if (finishRes.status === 429) throw new Error(`${label}: Facebook rate limit (reel finish), retry later`);
+  const finishData = await finishRes.json();
+  if (finishData.error) throw new Error(`${label} (reel finish): ${finishData.error.message}`);
+
+  return { id: videoId, postId: videoId };
 }
 
 /**

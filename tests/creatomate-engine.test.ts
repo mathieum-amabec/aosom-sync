@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@/lib/config", () => ({ env: { creatomateApiKey: "ck_test" } }));
+vi.mock("@/lib/config", () => ({
+  env: { creatomateApiKey: "ck_test" },
+  getPublicAppUrl: () => "https://app.example.com",
+}));
 
 import { env } from "@/lib/config";
 import {
@@ -11,7 +14,11 @@ import {
   createReelsVideo,
   renderReelsVideoAndWait,
   isReelsConfigured,
-} from "@/lib/creatomate-client";
+  templateIdForLocale,
+  isLocaleTemplateConfigured,
+  withBrandTokens,
+  renderProductVideoForLocale,
+} from "@/lib/video-engines/creatomate-engine";
 
 const json = (status: number, body: unknown) =>
   ({ ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) }) as Response;
@@ -139,6 +146,64 @@ describe("createReelsVideo / renderReelsVideoAndWait (9:16)", () => {
     (env as E).creatomateApiKey = "ck_test";
     (env as E).creatomateReelsTemplateId = undefined;
     expect(await renderReelsVideoAndWait({})).toEqual({ jobId: null, url: null });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("locale-aware FR/EN rendering + brand tokens", () => {
+  type E = { creatomateApiKey?: string; creatomateTemplateIdFr?: string; creatomateTemplateIdEn?: string };
+  afterEach(() => {
+    (env as E).creatomateTemplateIdFr = undefined;
+    (env as E).creatomateTemplateIdEn = undefined;
+  });
+
+  it("templateIdForLocale picks the FR/EN template", () => {
+    (env as E).creatomateTemplateIdFr = "tmpl_fr";
+    (env as E).creatomateTemplateIdEn = "tmpl_en";
+    expect(templateIdForLocale("fr")).toBe("tmpl_fr");
+    expect(templateIdForLocale("en")).toBe("tmpl_en");
+  });
+
+  it("isLocaleTemplateConfigured needs key + that locale's template", () => {
+    (env as E).creatomateApiKey = "ck_test";
+    (env as E).creatomateTemplateIdFr = undefined;
+    expect(isLocaleTemplateConfigured("fr")).toBe(false);
+    (env as E).creatomateTemplateIdFr = "tmpl_fr";
+    expect(isLocaleTemplateConfigured("fr")).toBe(true);
+  });
+
+  it("withBrandTokens injects brand defaults but lets product fields win", () => {
+    const mods = withBrandTokens("en", { product_title: "Chair", brand_color: "#000000" });
+    expect(mods.store_name).toBe("Furnish Direct");
+    expect(mods.accent_color).toBe("#D4A853");
+    expect(mods.logo_url).toBe("https://app.example.com/Logo/logo-en.png");
+    expect(mods.product_title).toBe("Chair");
+    // caller override wins over the brand default
+    expect(mods.brand_color).toBe("#000000");
+  });
+
+  it("renderProductVideoForLocale POSTs the locale template with branded mods", async () => {
+    (env as E).creatomateApiKey = "ck_test";
+    (env as E).creatomateTemplateIdFr = "tmpl_fr";
+    fetchMock.mockImplementation((url: string, opts: { method?: string } = {}) =>
+      Promise.resolve(
+        url.endsWith("/v1/renders") && opts.method === "POST"
+          ? json(200, [{ id: "rf1", status: "planned" }])
+          : json(200, { id: "rf1", status: "succeeded", url: "https://cdn/fr.mp4" }),
+      ),
+    );
+    const r = await renderProductVideoForLocale("fr", { product_title: "Chair" }, { timeoutMs: 1000, intervalMs: 5 });
+    expect(r).toEqual({ jobId: "rf1", url: "https://cdn/fr.mp4" });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.template_id).toBe("tmpl_fr");
+    expect(body.modifications.store_name).toBe("Ameublo Direct");
+    expect(body.modifications.product_title).toBe("Chair");
+  });
+
+  it("renderProductVideoForLocale no-ops when that locale has no template", async () => {
+    (env as E).creatomateApiKey = "ck_test";
+    (env as E).creatomateTemplateIdEn = undefined;
+    expect(await renderProductVideoForLocale("en", {})).toEqual({ jobId: null, url: null });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
