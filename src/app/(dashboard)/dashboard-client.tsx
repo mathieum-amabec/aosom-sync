@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import type { SyncRun } from "@/types/sync";
 import { MetaAdsPanel } from "./meta-ads-panel";
+import { DaySummaryPanel } from "./day-summary-panel";
+import { AlertsPanel } from "./alerts-panel";
 
 interface PriceChange {
   sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string; inStore: boolean; shopifyUrl: string | null;
@@ -61,6 +63,10 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
       <p className="text-gray-400 text-sm mb-8">
         Aosom catalogue sync overview
       </p>
+
+      {/* Today's summary + alerts (top of dashboard) */}
+      <DaySummaryPanel />
+      <AlertsPanel />
 
       {/* Last Sync Banner */}
       {latestRun && (
