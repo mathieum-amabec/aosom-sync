@@ -215,6 +215,22 @@ async function _initSchemaImpl(): Promise<void> {
       status TEXT NOT NULL DEFAULT 'pending', content TEXT, shopify_id TEXT,
       error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     )`,
+    // video_jobs: queue of product/lifestyle/promo video generations. The generation
+    // engines (ffmpeg/kling/creatomate) land in a follow-up PR; this table backs the
+    // dashboard "Vidéos" UI skeleton. created_at/updated_at are unix seconds.
+    `CREATE TABLE IF NOT EXISTS video_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      engine TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      product_skus TEXT,
+      locale TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      video_url TEXT,
+      video_path TEXT,
+      error_message TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS price_alerts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL,
@@ -244,6 +260,8 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_sku ON sync_logs(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_runs_date ON sync_runs(started_at)`,
     `CREATE INDEX IF NOT EXISTS idx_import_jobs_status ON import_jobs(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_video_jobs_status ON video_jobs(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_video_jobs_created_at ON video_jobs(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_price_alerts_sku ON price_alerts(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_price_alerts_pending ON price_alerts(notified_at)`,
     `CREATE INDEX IF NOT EXISTS idx_cron_runs_name_at ON cron_runs(name, ran_at DESC)`,
@@ -1552,6 +1570,137 @@ export async function updateImportJob(jobId: string, fields: Record<string, unkn
   args.push(new Date().toISOString());
   args.push(jobId);
   await db.execute({ sql: `UPDATE import_jobs SET ${sets.join(", ")} WHERE id = ?`, args });
+}
+
+// ─── Video Jobs ──────────────────────────────────────────────────────
+
+export type VideoEngine = "ffmpeg" | "kling" | "creatomate";
+export type VideoContentType = "product" | "lifestyle" | "promo";
+export type VideoLocale = "fr" | "en";
+export type VideoStatus =
+  | "pending"
+  | "generating"
+  | "ready"
+  | "error"
+  | "approved"
+  | "rejected";
+
+export interface VideoJob {
+  id: number;
+  engine: VideoEngine;
+  content_type: VideoContentType;
+  /** JSON-decoded array of SKUs (empty array when none were attached). */
+  product_skus: string[];
+  locale: VideoLocale;
+  status: VideoStatus;
+  video_url: string | null;
+  video_path: string | null;
+  error_message: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+function rowToVideoJob(row: Row): VideoJob {
+  const o = rowToObj(row);
+  let skus: string[] = [];
+  try {
+    const parsed = JSON.parse((o.product_skus as string) || "[]");
+    if (Array.isArray(parsed)) skus = parsed.filter((s): s is string => typeof s === "string");
+  } catch { /* product_skus not JSON — leave empty */ }
+  return {
+    id: Number(o.id),
+    engine: o.engine as VideoEngine,
+    content_type: o.content_type as VideoContentType,
+    product_skus: skus,
+    locale: o.locale as VideoLocale,
+    status: o.status as VideoStatus,
+    video_url: (o.video_url as string) ?? null,
+    video_path: (o.video_path as string) ?? null,
+    error_message: (o.error_message as string) ?? null,
+    created_at: Number(o.created_at) || 0,
+    updated_at: Number(o.updated_at) || 0,
+  };
+}
+
+export async function createVideoJob(job: {
+  engine: VideoEngine;
+  contentType: VideoContentType;
+  productSkus: string[];
+  locale: VideoLocale;
+}): Promise<VideoJob> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const result = await db.execute({
+    sql: `INSERT INTO video_jobs (engine, content_type, product_skus, locale, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, 'pending', ?, ?)`,
+    args: [job.engine, job.contentType, JSON.stringify(job.productSkus), job.locale, now, now],
+  });
+  const created = await getVideoJob(Number(result.lastInsertRowid));
+  if (!created) throw new Error("Failed to read back created video job");
+  return created;
+}
+
+export async function getVideoJobs(opts: {
+  status?: VideoStatus | VideoStatus[];
+  page?: number;
+  pageSize?: number;
+} = {}): Promise<{ jobs: VideoJob[]; total: number }> {
+  const db = await ensureSchema();
+  const statuses = opts.status
+    ? (Array.isArray(opts.status) ? opts.status : [opts.status])
+    : [];
+  const where = statuses.length > 0
+    ? `WHERE status IN (${statuses.map(() => "?").join(", ")})`
+    : "";
+  const page = Math.max(1, opts.page || 1);
+  const pageSize = Math.min(100, Math.max(1, opts.pageSize || 50));
+  const offset = (page - 1) * pageSize;
+
+  const [countResult, jobsResult] = await Promise.all([
+    db.execute({ sql: `SELECT COUNT(*) AS c FROM video_jobs ${where}`, args: statuses }),
+    db.execute({
+      sql: `SELECT * FROM video_jobs ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+      args: [...statuses, pageSize, offset],
+    }),
+  ]);
+
+  return {
+    jobs: jobsResult.rows.map(rowToVideoJob),
+    total: Number(rowToObj(countResult.rows[0]).c) || 0,
+  };
+}
+
+export async function getVideoJob(id: number): Promise<VideoJob | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT * FROM video_jobs WHERE id = ?`, args: [id] });
+  return result.rows.length > 0 ? rowToVideoJob(result.rows[0]) : null;
+}
+
+const VIDEO_JOB_COLUMNS = new Set([
+  "engine", "content_type", "product_skus", "locale", "status",
+  "video_url", "video_path", "error_message",
+]);
+
+export async function updateVideoJob(id: number, fields: Record<string, unknown>): Promise<void> {
+  const db = await ensureSchema();
+  const sets: string[] = [];
+  const args: InValue[] = [];
+  for (const [key, value] of Object.entries(fields)) {
+    if (!VIDEO_JOB_COLUMNS.has(key)) throw new Error(`Invalid column name: ${key}`);
+    sets.push(`${key} = ?`);
+    args.push(value as InValue);
+  }
+  if (sets.length === 0) return;
+  sets.push(`updated_at = ?`);
+  args.push(Math.floor(Date.now() / 1000));
+  args.push(id);
+  await db.execute({ sql: `UPDATE video_jobs SET ${sets.join(", ")} WHERE id = ?`, args });
+}
+
+export async function deleteVideoJob(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `DELETE FROM video_jobs WHERE id = ?`, args: [id] });
+  return result.rowsAffected > 0;
 }
 
 // ─── Facebook Drafts ─────────────────────────────────────────────────
