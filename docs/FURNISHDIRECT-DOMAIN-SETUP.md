@@ -38,49 +38,73 @@ conflict with the Canada market.
 Either way, the blocker right now is the same: **furnishdirect.ca must be connected as a
 domain before its web presence can be configured.**
 
-## Steps (manual, in order) — once you're ready
+## Steps (in order) — now that `read_markets` + `write_markets` are granted
 
-1. **DNS** — at the `furnishdirect.ca` registrar, point it at Shopify:
+**Step 1 — DNS (manual, at the registrar).** Point `furnishdirect.ca` at Shopify:
    - `A` record `@` → `23.227.38.65`
    - `CNAME` `www` → `shops.myshopify.com`
-2. **Connect the domain** — Shopify Admin → **Settings → Domains → Connect existing
-   domain** → `furnishdirect.ca`. Wait for SSL to provision.
-3. **Map it to English** — Admin → **Settings → Markets → Canada → Domains and
-   languages**:
-   - Keep `ameublodirect.ca` as the **French** domain.
-   - Assign `furnishdirect.ca` as the **English** domain (dedicated domain, not a
-     subfolder). EN visitors then land on `furnishdirect.ca`, FR on `ameublodirect.ca`.
-   - Note: dedicated per-language top-level domains within one market may require a
-     Shopify plan that supports international domains; if unavailable, the fallback is a
-     subfolder (`ameublodirect.ca/en`) and `furnishdirect.ca` set to redirect/forward.
-4. (Cross-region alternative) If EN is meant for a **different region** rather than
-   English-Canada, create a dedicated market instead (see API path below).
 
-## API path (now scriptable — scopes are granted)
+   Allow up to a few hours for propagation. Verify with `nslookup furnishdirect.ca`
+   (should resolve to `23.227.38.65`).
 
-Once `furnishdirect.ca` is connected (step 2), the web-presence binding can be scripted.
-Inspect the Canada market's web presence and locales, then bind the EN domain:
+**Step 2 — Connect the domain (manual, Shopify Admin).** Settings → **Domains** →
+   **Connect existing domain** → `furnishdirect.ca`. Shopify checks the DNS records
+   above and provisions an SSL certificate. Wait until it shows **Connected** with SSL
+   active (the REST `/domains.json` endpoint is gone on `2025-01`, so confirm in the
+   Admin UI, not via REST).
+
+**Step 3 — Bind `furnishdirect.ca` → EN on the Canada market (scriptable).** Once the
+   domain is connected, Claude Code can run the binding instead of clicking through the
+   Admin. A Shopify market can hold **multiple web presences, one per domain**, so we add
+   a *second* web presence on the existing **Canada** market — no new market (CA already
+   belongs to Canada). The existing `ameublodirect.ca` → FR presence is untouched.
+
+   ```bash
+   # dry-run first — prints the exact mutation + resolved marketId/domainId
+   node scripts/bind-furnishdirect-domain.mjs
+   # then apply
+   node scripts/bind-furnishdirect-domain.mjs --apply
+   ```
+
+   The script (`scripts/bind-furnishdirect-domain.mjs`) preflights scopes, finds the
+   Canada market, resolves the `furnishdirect.ca` domain id, refuses to run twice (exits
+   if already bound), and — if the domain isn't connected yet — prints the connect steps
+   and exits without mutating anything. Pass `--domain-id gid://shopify/Domain/XXX` if
+   auto-discovery can't find it.
+
+**Cross-region alternative.** If EN is meant for a **different region** (e.g. US /
+   International) rather than English-Canada, create a dedicated market instead:
+   `marketCreate(input: { name: "International (EN)", handle: "intl-en", regions: [...] })`
+   then `marketWebPresenceCreate` binding `furnishdirect.ca` + `defaultLocale: en`. That
+   path does not conflict with the Canada market.
+
+## API path (the mutation the script runs)
+
+`marketWebPresenceCreate` adds the EN web presence to the Canada market:
 
 ```graphql
-# 1. Find the Canada market's web presence id
+# 1. Find the Canada market id + its current web presences (avoid a duplicate)
 query {
-  markets(first: 10) { nodes { id name webPresence { id rootUrls { url locale } } } }
+  markets(first: 50) {
+    nodes {
+      id name primary
+      webPresences(first: 10) { nodes { id domain { host } defaultLocale { locale } } }
+      regions(first: 50) { nodes { ... on MarketRegionCountry { code } } }
+    }
+  }
 }
 
-# 2. Bind furnishdirect.ca to the EN locale of the Canada market
-#    (exact input shape depends on API version — confirm against the
-#     marketWebPresenceUpdate / domain targeting docs for 2025-01).
-mutation {
-  marketWebPresenceUpdate(
-    webPresenceId: "gid://shopify/MarketWebPresence/XXX",
-    input: { /* domainId for furnishdirect.ca + alternateLocales/defaultLocale EN */ }
-  ) { userErrors { field message } }
+# 2. Create a second web presence on the Canada market, bound to furnishdirect.ca, EN
+mutation marketWebPresenceCreate($marketId: ID!, $webPresence: MarketWebPresenceCreateInput!) {
+  marketWebPresenceCreate(marketId: $marketId, webPresence: $webPresence) {
+    market { id webPresences(first: 10) { nodes { id domain { host } defaultLocale { locale } } } }
+    userErrors { field message }
+  }
 }
+# variables:
+# { "marketId": "gid://shopify/Market/35882270825",
+#   "webPresence": { "domainId": "gid://shopify/Domain/XXX", "defaultLocale": "en" } }
 ```
-
-For the **cross-region** alternative (separate EN market), the mutation is
-`marketCreate(input: { name: "International (EN)", handle: "intl-en", regions: [...],
-... })` followed by `marketWebPresenceCreate` binding `furnishdirect.ca` + `defaultLocale: EN`.
 
 > Analytics note: storefront analytics + dashboard links use `ameublodirect.ca`. Once
 > `furnishdirect.ca` is live for EN, revisit the Umami `data-domain`
