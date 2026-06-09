@@ -141,6 +141,25 @@ export interface CreateCampaignParams {
   specialAdCategories?: string[];
 }
 
+export interface CreateAdSetParams {
+  campaignId: string;
+  name: string;
+  /** Meta targeting spec, e.g. { geo_locations: { countries: ["CA"] }, custom_audiences: [{ id }] }. */
+  targeting: Record<string, unknown>;
+  /** What the ad set promotes. For catalog retargeting: { product_catalog_id, ... } or { product_set_id, custom_event_type }. */
+  promotedObject: Record<string, unknown>;
+  /** Defaults to IMPRESSIONS. */
+  billingEvent?: string;
+  /** Defaults to LOWEST_COST_WITHOUT_CAP (auto-bid, no cap). */
+  bidStrategy?: string;
+  /** Defaults to OFFSITE_CONVERSIONS (standard for catalog-sales retargeting). */
+  optimizationGoal?: string;
+  /** Daily budget in the account's minor currency unit (e.g. cents). */
+  dailyBudget?: number;
+  /** Defaults to PAUSED — never auto-spend a freshly created ad set. */
+  status?: "ACTIVE" | "PAUSED";
+}
+
 export interface InsightsRow {
   spend?: string;
   reach?: string;
@@ -195,6 +214,25 @@ export async function createCampaign(adAccountId: string, params: CreateCampaign
   };
   if (params.dailyBudget != null) body.daily_budget = String(params.dailyBudget);
   return graph<{ id: string }>(`${actId(adAccountId)}/campaigns`, { method: "POST", body });
+}
+
+/**
+ * Create an ad set. Defaults to PAUSED so it never spends until explicitly activated.
+ * `targeting` and `promoted_object` are sent as nested JSON in the request body.
+ */
+export async function createAdSet(adAccountId: string, params: CreateAdSetParams): Promise<{ id: string }> {
+  const body: Record<string, unknown> = {
+    campaign_id: params.campaignId,
+    name: params.name,
+    targeting: params.targeting,
+    promoted_object: params.promotedObject,
+    billing_event: params.billingEvent ?? "IMPRESSIONS",
+    bid_strategy: params.bidStrategy ?? "LOWEST_COST_WITHOUT_CAP",
+    optimization_goal: params.optimizationGoal ?? "OFFSITE_CONVERSIONS",
+    status: params.status ?? "PAUSED",
+  };
+  if (params.dailyBudget != null) body.daily_budget = String(params.dailyBudget);
+  return graph<{ id: string }>(`${actId(adAccountId)}/adsets`, { method: "POST", body });
 }
 
 /** List the ad sets of a campaign. */
