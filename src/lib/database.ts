@@ -6,6 +6,7 @@ import type { SyncRun, SyncLogEntry, ChangeType } from "@/types/sync";
 import type { UserRole } from "@/lib/config";
 import type { AosomProduct } from "@/types/aosom";
 import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
+import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
 
 let client: Client | null = null;
 
@@ -761,23 +762,16 @@ export async function getProducts(filters: {
   inStock?: boolean;
   color?: string;
   size?: string;
+  notImported?: boolean;
+  withDiscount?: boolean;
+  lowStock?: boolean;
   page?: number;
   limit?: number;
   sort?: string;
 }): Promise<{ products: ProductRow[]; total: number; productTypes: { type: string; count: number }[] }> {
   const db = await ensureSchema();
-  const conditions: string[] = [];
-  const args: (string | number)[] = [];
-
-  if (filters.productType) { conditions.push(`product_type LIKE ?`); args.push(`${filters.productType}%`); }
-  if (filters.search) { conditions.push(`(name LIKE ? OR sku LIKE ?)`); args.push(`%${filters.search}%`, `%${filters.search}%`); }
-  if (filters.minPrice !== undefined) { conditions.push(`price >= ?`); args.push(filters.minPrice); }
-  if (filters.maxPrice !== undefined) { conditions.push(`price <= ?`); args.push(filters.maxPrice); }
-  if (filters.inStock) { conditions.push(`qty > 0`); }
-  if (filters.color) { conditions.push(`color = ?`); args.push(filters.color); }
-  if (filters.size) { conditions.push(`size = ?`); args.push(filters.size); }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  // WHERE clause + args are shared with getCatalogStats via buildCatalogWhere.
+  const { where, args } = buildCatalogWhere(filters);
   const page = Math.max(1, filters.page || 1);
   const limit = Math.min(Math.max(1, filters.limit || 50), 200);
   const offset = (page - 1) * limit;
@@ -876,6 +870,45 @@ export async function getProducts(filters: {
   const productTypes = await getCachedProductTypes(db);
 
   return { products, total, productTypes };
+}
+
+export interface CatalogStats {
+  /** Total products in the catalog. */
+  total: number;
+  /** How many are imported into Shopify (shopify_product_id set). */
+  imported: number;
+  /** How many have an active rabais (last price > current price). */
+  withDiscount: number;
+  /** Most recent sync cron run (sync / sync-refresh / sync-shopify / sync-finalize). */
+  lastSync: { name: string; status: string; ranAt: number } | null;
+}
+
+/**
+ * Header metrics for the catalog page. Each count is a single COUNT(*); the last
+ * sync is the newest cron_runs row whose name starts with "sync".
+ */
+export async function getCatalogStats(): Promise<CatalogStats> {
+  const db = await ensureSchema();
+  const [totalR, importedR, discountR, syncR] = await Promise.all([
+    db.execute(`SELECT COUNT(*) AS c FROM products`),
+    db.execute(`SELECT COUNT(*) AS c FROM products WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''`),
+    db.execute(`SELECT COUNT(*) AS c FROM products WHERE ${PRODUCT_HAS_DISCOUNT_SQL}`),
+    // Bare name/status come from the MAX(ran_at) row (SQLite single-MAX rule).
+    db.execute(`SELECT name, status, MAX(ran_at) AS ran_at FROM cron_runs WHERE name LIKE 'sync%'`),
+  ]);
+
+  const syncRow = syncR.rows.length > 0 ? rowToObj(syncR.rows[0]) : null;
+  const lastSync =
+    syncRow && syncRow.ran_at != null
+      ? { name: syncRow.name as string, status: syncRow.status as string, ranAt: Number(syncRow.ran_at) || 0 }
+      : null;
+
+  return {
+    total: Number(rowToObj(totalR.rows[0]).c) || 0,
+    imported: Number(rowToObj(importedR.rows[0]).c) || 0,
+    withDiscount: Number(rowToObj(discountR.rows[0]).c) || 0,
+    lastSync,
+  };
 }
 
 // ─── Collection Mappings ────────────────────────────────────────────
