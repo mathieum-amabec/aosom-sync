@@ -8,10 +8,23 @@ import { recordCronRun } from "./database";
 export async function trackCron<T>(name: string, fn: () => Promise<T>): Promise<T> {
   try {
     const result = await fn();
-    await recordCronRun(name, "success");
+    await safeRecord(name, "success");
     return result;
   } catch (err) {
-    await recordCronRun(name, "error", err instanceof Error ? err.message : String(err));
+    await safeRecord(name, "error", err instanceof Error ? err.message : String(err));
     throw err;
+  }
+}
+
+/**
+ * Record the cron outcome without ever throwing. A telemetry write failure (DB
+ * down, schema not migrated) must not turn a successful cron run into a 500 or
+ * mask the original error on the failure path — the dashboard row is best-effort.
+ */
+async function safeRecord(name: string, status: "success" | "error", detail?: string): Promise<void> {
+  try {
+    await recordCronRun(name, status, detail);
+  } catch (recordErr) {
+    console.error(`[trackCron] failed to record ${status} for "${name}":`, recordErr);
   }
 }

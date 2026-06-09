@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.51.0] - 2026-06-09
+
+### Added
+- **Cron instrumentation for the dashboard "Résumé du jour".** Wrapped the three
+  remaining un-instrumented cron routes — `/api/cron/blog`, `/api/cron/content`,
+  `/api/cron/csv-precache` — in `trackCron()`, so each run records success/error
+  (+ message) in `cron_runs`. blog/content throw on total bilingual failure so it
+  logs as `error` while keeping their existing 500 response shape. The feeds
+  (`google`/`meta`/`meta_xml`/`pinterest`/`pinterest_en`) were already instrumented
+  via `recordFeedSync`.
+
+### Fixed
+- **`trackCron` recording is now genuinely best-effort.** A `recordCronRun` failure
+  (telemetry DB write) no longer turns a successful cron into a 500, nor masks the
+  original error on the failure path — it is caught and logged. Matches the helper's
+  documented contract. New `tests/cron-tracking.test.ts`.
+
 ## [0.5.50.0] - 2026-06-09
 
 Catch-up version bump: four PRs merged to `main` without bumping VERSION/CHANGELOG
