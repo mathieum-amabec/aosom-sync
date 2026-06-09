@@ -2,7 +2,11 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.47.0] - 2026-06-08
+## [0.5.48.0] - 2026-06-08
+
+Merge of `feature/video-engines-publishing` into `main`. The `/api/video-serve/[id]`
+route was resolved to main's `video_jobs`-based implementation (#115, below); the
+entries here cover this branch's engine + publishing work.
 
 ### Added
 - **Kling AI video engine** (`src/lib/video-engines/kling-client.ts`): turns a product's
@@ -14,16 +18,40 @@ All notable changes to Aosom Sync will be documented in this file.
   `/video_reels` start→upload→finish) and `publishReel({videoUrl,caption,pageId,locale})`
   in `social-publisher.ts` routing the Page token per locale. Instagram Reels already
   shipped via `instagram-client.publishReel`.
-- **`GET /api/video-serve/[id]`**: streams a draft's rendered MP4 (`facebook_drafts.video_path`)
-  with HTTP Range support and a traversal guard (`video-store.ts`), giving Meta a public
-  https URL for FB/IG Reels. Public-listed in `proxy.ts`. New `video_path` column +
-  `setDraftVideoPath`.
+- **`facebook_drafts.video_path` column + `setDraftVideoPath`**: records a rendered
+  clip's local path on a draft (written by the Kling/FFmpeg engines).
 
 ### Changed
 - **Creatomate client → engine**: moved `creatomate-client.ts` to
   `video-engines/creatomate-engine.ts` with separate FR/EN templates
   (`CREATOMATE_TEMPLATE_ID_FR`/`_EN`, falling back to `CREATOMATE_TEMPLATE_ID`) and shared
   `VIDEO_BRAND` token injection (`renderProductVideoForLocale`).
+- **Job 4 → static posts only**: decoupled inline Creatomate video rendering out of
+  `job4-social.ts`; video generation is now owned by the FFmpeg slideshow / engine
+  pipeline. Adds the `ffmpeg-static` dependency.
+
+## [0.5.47.0] - 2026-06-08
+
+Catch-up version bump: three video feature PRs (#113, #114, #115) merged to `main`
+without bumping VERSION/CHANGELOG. This entry documents them; no code change.
+
+### Added
+- **Video dashboard skeleton** (#113): `video_jobs` table + indexes, `VideoJob`
+  types and `create`/`get`/`list`/`update`/`delete` helpers in `database.ts`;
+  `GET`/`POST /api/videos` and `PATCH`/`DELETE /api/videos/[id]` (all
+  `isAuthenticated`-gated, writes blocked for `reviewer`); the `/videos` page with
+  4 tabs (Générer / File d'attente / Bibliothèque / Publier) + "Vidéos" nav entry.
+- **Video pipeline foundation** (#114): brand tokens, Job4 decoupling, and the
+  FFmpeg slideshow engine (`src/lib/video-engines/ffmpeg-slideshow.ts`).
+- **Public video delivery route** (#115): `GET /api/video-serve/[id]` — 302-redirects
+  to `video_url` when set, otherwise streams the local MP4 (`video/mp4`,
+  `Accept-Ranges: bytes`, Range/206 support), else 404. Allow-listed in `proxy.ts`
+  so the FB/IG Graph APIs can fetch a Reel video by id with no session.
+- **furnishdirect.ca EN domain binding** (#115): `docs/FURNISHDIRECT-DOMAIN-SETUP.md`
+  updated with the scriptable steps now that `read_markets`/`write_markets` are
+  granted, plus `scripts/bind-furnishdirect-domain.mjs` (dry-run by default) which
+  adds a second web presence on the Canada market bound to `furnishdirect.ca` /
+  `defaultLocale: en`.
 
 ## [0.5.46.0] - 2026-06-07
 

@@ -1,102 +1,92 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
+import { promises as fsp } from "fs";
+import os from "os";
+import path from "path";
 
-vi.mock("@/lib/database", () => ({ getFacebookDraft: vi.fn() }));
-vi.mock("@/lib/video-engines/video-store", () => ({ resolveVideoPath: vi.fn() }));
+vi.mock("@/lib/database", () => ({ getVideoJob: vi.fn() }));
 
 import { GET } from "@/app/api/video-serve/[id]/route";
-import { getFacebookDraft } from "@/lib/database";
-import { resolveVideoPath } from "@/lib/video-engines/video-store";
+import { getVideoJob } from "@/lib/database";
 
+const req = (range?: string) =>
+  new Request("https://app.test/api/video-serve/1", range ? { headers: { range } } : undefined);
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
-const req = (headers: Record<string, string> = {}) =>
-  new Request("https://app.test/api/video-serve/1", { headers });
 
-const BODY = Buffer.from("MP4DATA-0123456789"); // 18 bytes
+// A small real file on disk so the streaming branch exercises fs.stat + createReadStream.
+const BODY = "0123456789"; // 10 bytes
+let tmpFile: string;
 
-let tmpFile = "";
-beforeEach(() => {
-  vi.clearAllMocks();
-  tmpFile = path.join(os.tmpdir(), `vs-test-${process.pid}-${Date.now()}.mp4`);
-  fs.writeFileSync(tmpFile, BODY);
-});
-afterEach(() => {
-  try {
-    fs.unlinkSync(tmpFile);
-  } catch {
-    /* ignore */
-  }
-});
+function job(over: Record<string, unknown>) {
+  return {
+    id: 1, engine: "ffmpeg", content_type: "product", product_skus: [], locale: "fr",
+    status: "ready", video_url: null, video_path: null, error_message: null,
+    created_at: 0, updated_at: 0, ...over,
+  } as never;
+}
 
-describe("GET /api/video-serve/[id]", () => {
-  it("streams the full MP4 with the right headers", async () => {
-    vi.mocked(getFacebookDraft).mockResolvedValue({ videoPath: tmpFile } as never);
-    vi.mocked(resolveVideoPath).mockReturnValue(tmpFile);
+describe("GET /api/video-serve/:id", () => {
+  beforeAll(async () => {
+    tmpFile = path.join(os.tmpdir(), `video-serve-test-${process.pid}.mp4`);
+    await fsp.writeFile(tmpFile, BODY);
+  });
+  afterAll(async () => { await fsp.rm(tmpFile, { force: true }); });
+  beforeEach(() => vi.resetAllMocks());
 
+  it("400s on a non-numeric id", async () => {
+    expect((await GET(req(), ctx("abc"))).status).toBe(400);
+    expect((await GET(req(), ctx("0"))).status).toBe(400);
+  });
+
+  it("404s when the job does not exist", async () => {
+    vi.mocked(getVideoJob).mockResolvedValue(null);
+    expect((await GET(req(), ctx("1"))).status).toBe(404);
+  });
+
+  it("302-redirects to the external URL when video_url is set", async () => {
+    vi.mocked(getVideoJob).mockResolvedValue(job({ video_url: "https://blob.test/v.mp4" }));
+    const res = await GET(req(), ctx("1"));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://blob.test/v.mp4");
+  });
+
+  it("ignores a non-http video_url and falls through to 404", async () => {
+    vi.mocked(getVideoJob).mockResolvedValue(job({ video_url: "javascript:alert(1)" }));
+    expect((await GET(req(), ctx("1"))).status).toBe(404);
+  });
+
+  it("404s when neither video_url nor video_path is set", async () => {
+    vi.mocked(getVideoJob).mockResolvedValue(job({}));
+    expect((await GET(req(), ctx("1"))).status).toBe(404);
+  });
+
+  it("streams the full file with mp4 + Accept-Ranges headers", async () => {
+    vi.mocked(getVideoJob).mockResolvedValue(job({ video_path: tmpFile }));
     const res = await GET(req(), ctx("1"));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("video/mp4");
     expect(res.headers.get("accept-ranges")).toBe("bytes");
     expect(res.headers.get("content-length")).toBe(String(BODY.length));
-    const buf = Buffer.from(await res.arrayBuffer());
-    expect(buf.equals(BODY)).toBe(true);
+    expect(await res.text()).toBe(BODY);
   });
 
   it("serves a 206 partial for a Range request", async () => {
-    vi.mocked(getFacebookDraft).mockResolvedValue({ videoPath: tmpFile } as never);
-    vi.mocked(resolveVideoPath).mockReturnValue(tmpFile);
-
-    const res = await GET(req({ range: "bytes=0-3" }), ctx("1"));
+    vi.mocked(getVideoJob).mockResolvedValue(job({ video_path: tmpFile }));
+    const res = await GET(req("bytes=2-5"), ctx("1"));
     expect(res.status).toBe(206);
-    expect(res.headers.get("content-range")).toBe(`bytes 0-3/${BODY.length}`);
+    expect(res.headers.get("content-range")).toBe(`bytes 2-5/${BODY.length}`);
     expect(res.headers.get("content-length")).toBe("4");
-    const buf = Buffer.from(await res.arrayBuffer());
-    expect(buf.equals(BODY.subarray(0, 4))).toBe(true);
+    expect(await res.text()).toBe("2345");
   });
 
-  it("serves a suffix range (last N bytes) as 206", async () => {
-    vi.mocked(getFacebookDraft).mockResolvedValue({ videoPath: tmpFile } as never);
-    vi.mocked(resolveVideoPath).mockReturnValue(tmpFile);
-    const res = await GET(req({ range: "bytes=-4" }), ctx("1"));
-    expect(res.status).toBe(206);
-    expect(res.headers.get("content-range")).toBe(`bytes ${BODY.length - 4}-${BODY.length - 1}/${BODY.length}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    expect(buf.equals(BODY.subarray(BODY.length - 4))).toBe(true);
-  });
-
-  it("416s for an unsatisfiable range", async () => {
-    vi.mocked(getFacebookDraft).mockResolvedValue({ videoPath: tmpFile } as never);
-    vi.mocked(resolveVideoPath).mockReturnValue(tmpFile);
-    const res = await GET(req({ range: "bytes=999-1000" }), ctx("1"));
+  it("416s on an unsatisfiable range", async () => {
+    vi.mocked(getVideoJob).mockResolvedValue(job({ video_path: tmpFile }));
+    const res = await GET(req("bytes=999-"), ctx("1"));
     expect(res.status).toBe(416);
+    expect(res.headers.get("content-range")).toBe(`bytes */${BODY.length}`);
   });
 
-  it("400s on a non-numeric id", async () => {
-    const res = await GET(req(), ctx("abc"));
-    expect(res.status).toBe(400);
-  });
-
-  it("404s when the draft has no video_path", async () => {
-    vi.mocked(getFacebookDraft).mockResolvedValue({ videoPath: null } as never);
-    const res = await GET(req(), ctx("1"));
-    expect(res.status).toBe(404);
-  });
-
-  it("404s (not 500) when video_path escapes the video dir", async () => {
-    vi.mocked(getFacebookDraft).mockResolvedValue({ videoPath: "../../etc/passwd" } as never);
-    vi.mocked(resolveVideoPath).mockImplementation(() => {
-      throw new Error("Invalid video path");
-    });
-    const res = await GET(req(), ctx("1"));
-    expect(res.status).toBe(404);
-  });
-
-  it("404s when the file is missing on disk", async () => {
-    vi.mocked(getFacebookDraft).mockResolvedValue({ videoPath: tmpFile } as never);
-    vi.mocked(resolveVideoPath).mockReturnValue(tmpFile + ".gone");
-    const res = await GET(req(), ctx("1"));
-    expect(res.status).toBe(404);
+  it("404s when video_path points at a missing file", async () => {
+    vi.mocked(getVideoJob).mockResolvedValue(job({ video_path: path.join(os.tmpdir(), "nope-xyz.mp4") }));
+    expect((await GET(req(), ctx("1"))).status).toBe(404);
   });
 });

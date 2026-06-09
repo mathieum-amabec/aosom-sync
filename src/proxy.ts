@@ -11,9 +11,9 @@ import { AUTH } from "@/lib/config";
 // "/api/price-alert" is public so the Shopify storefront can POST price-drop
 // signups (cross-origin, CORS-guarded, rate-limited); its /notify cron child
 // self-gates on CRON_SECRET.
-// "/api/video-serve" is public so Facebook/Instagram can fetch a draft's rendered
-// reel MP4 when publishing (Graph APIs fetch the URL themselves, no session). The
-// route only streams the video_path of an existing draft, with a traversal guard.
+// "/api/video-serve" is public so the Facebook/Instagram Graph APIs can fetch a
+// generated video by id when publishing a Reel (they fetch the URL themselves,
+// with no session). The route only serves video_jobs rows that exist in the DB.
 const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/pixel/script", "/api/feeds", "/api/image-preview", "/api/price-alert", "/api/video-serve"];
 
 function isReviewerAllowed(pathname: string): boolean {
