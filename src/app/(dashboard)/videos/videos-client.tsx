@@ -94,9 +94,48 @@ export default function VideosClient() {
     return () => clearInterval(interval);
   }, [jobs, fetchJobs]);
 
+  // Fine-grained 3s poll on each generating job's status endpoint so a finished
+  // FFmpeg render flips to ready (and appears in the library) without waiting for
+  // the slower full-list refresh above.
+  useEffect(() => {
+    const generatingIds = jobs.filter((j) => j.status === "generating").map((j) => j.id);
+    if (generatingIds.length === 0) return;
+    const interval = setInterval(async () => {
+      const updates = await Promise.all(
+        generatingIds.map(async (id) => {
+          try {
+            const res = await fetch(`/api/videos/${id}/status`);
+            if (!res.ok) return null;
+            const data = (await res.json()) as {
+              status: VideoStatus;
+              video_url: string | null;
+              error_message: string | null;
+            };
+            return { id, ...data };
+          } catch {
+            return null; // transient — next tick retries
+          }
+        }),
+      );
+      setJobs((prev) =>
+        prev.map((j) => {
+          const u = updates.find((x) => x && x.id === j.id);
+          return u
+            ? { ...j, status: u.status, video_url: u.video_url, error_message: u.error_message }
+            : j;
+        }),
+      );
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [jobs]);
+
   const queueJobs = jobs.filter((j) => j.status === "pending" || j.status === "generating");
   const libraryJobs = jobs.filter(
-    (j) => j.status === "ready" || j.status === "approved" || j.status === "rejected",
+    (j) =>
+      j.status === "ready" ||
+      j.status === "approved" ||
+      j.status === "rejected" ||
+      j.status === "error",
   );
   const approvedJobs = jobs.filter((j) => j.status === "approved");
 
@@ -175,11 +214,21 @@ function GenerateTab({ onCreated }: { onCreated: () => void }) {
     const productSkus = skus.map((s) => s.sku);
     try {
       for (const locale of locales) {
-        const res = await fetch("/api/videos", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ engine, contentType, locale, productSkus }),
-        });
+        // FFmpeg renders a real video right away via the generate endpoint
+        // (async — returns a jobId and flips the job to "generating"). The other
+        // engines still just queue a pending job through /api/videos.
+        const res =
+          engine === "ffmpeg"
+            ? await fetch("/api/videos/generate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ engine, productSkus, locale }),
+              })
+            : await fetch("/api/videos", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ engine, contentType, locale, productSkus }),
+              });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || `HTTP ${res.status}`);
@@ -454,6 +503,11 @@ function LibraryTab({ jobs, onChange }: { jobs: VideoJob[]; onChange: () => void
               {contentTypeLabel(job.content_type)}
               {job.product_skus.length > 0 && ` · ${job.product_skus.join(", ")}`}
             </p>
+            {job.status === "error" && job.error_message && (
+              <p className="text-xs text-red-400 break-words" title={job.error_message}>
+                {job.error_message}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2 mt-auto pt-1">
               {job.status !== "approved" && (
                 <button
