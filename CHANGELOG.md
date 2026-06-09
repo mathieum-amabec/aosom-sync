@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.48.0] - 2026-06-08
+## [0.5.49.0] - 2026-06-09
 
 ### Added
 - **Meta Dynamic Ads foundation.** `createAdSet(adAccountId, params)` +
@@ -18,6 +18,34 @@ All notable changes to Aosom Sync will be documented in this file.
   `product_set_id` caveats, audience requirement) + `createAdSet` in the API table.
 - Tests: 3 new in `tests/meta-ads-client.test.ts` (catalog-sales objective, ad-set
   defaults, overrides).
+
+## [0.5.48.0] - 2026-06-08
+
+Merge of `feature/video-engines-publishing` into `main`. The `/api/video-serve/[id]`
+route was resolved to main's `video_jobs`-based implementation (#115, below); the
+entries here cover this branch's engine + publishing work.
+
+### Added
+- **Kling AI video engine** (`src/lib/video-engines/kling-client.ts`): turns a product's
+  best photo into a cinematic 9:16 clip — picks the best image, generates a cinematic
+  prompt via Claude (templated fallback), calls Kling `/v1/videos/image2video`, polls to
+  completion (5min budget), downloads the clip, and runs a best-effort FFmpeg brand
+  overlay (navy band + logo, `ffmpeg-brand.ts`). No-ops when `KLING_API_KEY` is unset.
+- **Reels publishing**: `publishFacebookReel` in `facebook-client.ts` (resumable
+  `/video_reels` start→upload→finish) and `publishReel({videoUrl,caption,pageId,locale})`
+  in `social-publisher.ts` routing the Page token per locale. Instagram Reels already
+  shipped via `instagram-client.publishReel`.
+- **`facebook_drafts.video_path` column + `setDraftVideoPath`**: records a rendered
+  clip's local path on a draft (written by the Kling/FFmpeg engines).
+
+### Changed
+- **Creatomate client → engine**: moved `creatomate-client.ts` to
+  `video-engines/creatomate-engine.ts` with separate FR/EN templates
+  (`CREATOMATE_TEMPLATE_ID_FR`/`_EN`, falling back to `CREATOMATE_TEMPLATE_ID`) and shared
+  `VIDEO_BRAND` token injection (`renderProductVideoForLocale`).
+- **Job 4 → static posts only**: decoupled inline Creatomate video rendering out of
+  `job4-social.ts`; video generation is now owned by the FFmpeg slideshow / engine
+  pipeline. Adds the `ffmpeg-static` dependency.
 
 ## [0.5.47.0] - 2026-06-08
 

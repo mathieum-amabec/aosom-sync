@@ -122,6 +122,20 @@ export const env = {
   get creatomateLogoUrl(): string | undefined {
     return process.env.CREATOMATE_LOGO_URL || undefined;
   },
+  /** Optional: French (Ameublo) square Creatomate template. Falls back to
+   * CREATOMATE_TEMPLATE_ID when unset so existing single-template setups keep working. */
+  get creatomateTemplateIdFr(): string | undefined {
+    return process.env.CREATOMATE_TEMPLATE_ID_FR || process.env.CREATOMATE_TEMPLATE_ID || undefined;
+  },
+  /** Optional: English (Furnish Direct) square Creatomate template. Falls back to
+   * CREATOMATE_TEMPLATE_ID when unset. */
+  get creatomateTemplateIdEn(): string | undefined {
+    return process.env.CREATOMATE_TEMPLATE_ID_EN || process.env.CREATOMATE_TEMPLATE_ID || undefined;
+  },
+  /** Optional: Kling AI API key for the cinematic image→video engine. Client no-ops when unset. */
+  get klingApiKey(): string | undefined {
+    return process.env.KLING_API_KEY || undefined;
+  },
   get isProduction(): boolean {
     return process.env.NODE_ENV === "production";
   },

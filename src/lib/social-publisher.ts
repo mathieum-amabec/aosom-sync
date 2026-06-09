@@ -2,8 +2,16 @@
  * Multi-channel publishing orchestration.
  * Shared by the API route and the auto-post job so both go through the same code path.
  */
-import { publishWithImage, publishWithImages, publishText, publishVideo, type FacebookBrand } from "./facebook-client";
-import { publishPhoto, publishReel } from "./instagram-client";
+import {
+  publishWithImage,
+  publishWithImages,
+  publishText,
+  publishVideo,
+  publishFacebookReel,
+  facebookBrandCreds,
+  type FacebookBrand,
+} from "./facebook-client";
+import { publishPhoto, publishReel as publishInstagramReel } from "./instagram-client";
 import { CHANNEL_META, type ChannelKey } from "./config";
 import {
   getFacebookDraft,
@@ -30,6 +38,36 @@ export function localizeBrandedImageUrls(urls: string[], language: "FR" | "EN"):
       return u; // relative / non-absolute URL — leave as-is
     }
   });
+}
+
+/**
+ * Publish a Reel to a Facebook Page from a public video URL.
+ *
+ * The locale selects the brand's Page token (fr → Ameublo, en → Furnish Direct)
+ * while `pageId` is the explicit target Page, so a caller can publish to any Page
+ * it owns. `videoUrl` must be publicly fetchable (e.g. a Vercel /api/video-serve
+ * URL) — Meta downloads it server-side via the resumable `/video_reels` flow.
+ *
+ * Instagram Reels are already covered by the draft path (publishDraftToChannel →
+ * publishInstagramReel); this is the Facebook-Page counterpart, returning the
+ * published reel's post id.
+ */
+export async function publishReel(options: {
+  videoUrl: string;
+  caption: string;
+  pageId: string;
+  locale: "fr" | "en";
+}): Promise<{ postId: string }> {
+  const brand: FacebookBrand = options.locale === "en" ? "furnish" : "ameublo";
+  const { token, label } = facebookBrandCreds(brand);
+  const { postId } = await publishFacebookReel({
+    caption: options.caption,
+    videoUrl: options.videoUrl,
+    pageId: options.pageId,
+    token,
+    label,
+  });
+  return { postId };
 }
 
 /**
@@ -100,7 +138,7 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
       // is what the publisher used to do). Otherwise post the primary image.
       const reelUrl = draft.reelsVideoUrl || draft.videoUrl;
       if (reelUrl) {
-        const result = await publishReel({ caption, videoUrl: reelUrl, brand: igBrand });
+        const result = await publishInstagramReel({ caption, videoUrl: reelUrl, brand: igBrand });
         return {
           status: "published",
           publishedId: result.id,
