@@ -23,7 +23,7 @@ export function loadEnv() {
 
 export const STORE = "27u5y2-kp.myshopify.com";
 export const API_VERSION = "2025-01";
-export const PREVIEW_THEME_ID = "160059195497"; // "Copie de Trade v2" — UNPUBLISHED preview copy
+export const PREVIEW_THEME_ID = "160059195497"; // "Copie de Trade v2" — now role:main (PUBLISHED/live theme as of 2026-06)
 const TOKEN = loadEnv().SHOPIFY_ACCESS_TOKEN;
 
 export async function rest(endpoint, options = {}) {

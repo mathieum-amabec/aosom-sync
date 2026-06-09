@@ -211,6 +211,62 @@ public route an open redirect. **Fix:** reuse the image-preview host allowlist
 (`cdn.shopify.com`, blob/CDN hosts) before `NextResponse.redirect`, consistent with P2-5.
 
 ---
+
+## Audit 2026-06-09 — branch `feature/pinterest-en-judgeme` (daily, 8/10 gate)
+
+Scope: the merges landed since the 2026-06-08 audit — #125 cron instrumentation
+(`blog`/`content`/`csv-precache` wrapped in `trackCron`), #126 Pinterest EN feed + Judge.me
+avis page, #127 video pipeline rewire (Kling render via `/api/videos/generate` → `video_jobs`).
+Plus the live-theme Shop Pay block edit made this session. **No P0/P1 findings.**
+
+### Verified clean (active verification)
+- **All 9 cron routes self-gate.** `verifyCronSecret` (`length` check + `crypto.timingSafeEqual`)
+  is present and called in `sync`, `sync-refresh`, `sync-finalize`, `sync-shopify`, `social`,
+  `social-scheduled`, `blog`, `content`, `csv-precache` — every route under the public
+  `/api/cron` prefix returns 401 without the Bearer. `env.cronSecret` throws when `CRON_SECRET`
+  is unset (`config.ts:26`), so a missing secret fails closed (500/throw, never "Bearer
+  undefined" auth) regardless of whether a given route wraps the access in try/catch.
+- **New paid route `/api/videos/generate` (#127) is gated.** `route.ts:131-135` requires a
+  valid session and blocks the `reviewer` role before any FFmpeg/Kling render — no
+  unauthenticated Kling/Anthropic cost amplification.
+- **`social/content/generate` + `generate-weekly-mix`** remain self-gated (session OR cron
+  Bearer → 401/403) despite the public `/api/social/content` proxy prefix.
+- **Feeds (#126 Pinterest EN):** public by design (Google/Meta/Pinterest pull them); they
+  expose only catalog data already public on the storefront. No request params reach feed
+  generation; product data is `escapeXml()`-escaped (per the 2026-06-07 verification, pattern
+  unchanged).
+- **price-alert (public, cross-origin):** strict `ALLOWED_ORIGINS` allowlist, per-IP rate
+  limit, email/sku validation, and the baseline price is taken **server-side** from the DB
+  (client `price` is sanity-checked only) — a client can't post an inflated price to trigger a
+  spurious drop alert. Double opt-in keeps alerts off non-confirmed addresses.
+- **Secrets:** no hardcoded secret patterns in `src/` or `scripts/`; `.env.local` is untracked;
+  `.gitignore` covers `.env*` + `.env*.local`; no env file in git history.
+- **Live-theme Shop Pay edit (this session):** the new `shop_pay_finance` custom_liquid is
+  static branded markup + a CSS rule for the native `<shopify-payment-terms>` widget. No user
+  input, no script, no external fetch. The removed block had computed a price ÷ 4 amount; the
+  replacement leans on Shopify's native widget for real figures. No new surface.
+
+### Persistent (still open from 2026-06-08, re-confirmed)
+- **P3-5: `/api/video-serve` streams `video_path` with no directory containment.** Still
+  `fsp.stat`/`createReadStream(job.video_path)` directly (`route.ts:57-100`). Safe today
+  (pipeline-set path), but add a `path.resolve` startsWith-videos-root assertion before
+  streaming. Unchanged from prior audit.
+- **P3-6: `/api/video-serve` 302-redirects to `video_url` with only an http(s) scheme check**
+  (`route.ts:52-53`). Same class as the RESOLVED P2-5 (`/api/image-preview` host allowlist);
+  video-serve still hasn't adopted the host allowlist. Reuse `assertPublicHttpsUrl` + CDN/blob
+  host allowlist before redirecting.
+
+### New P3 — Low / informational
+### P3-7: `verifyCronSecret` is copy-pasted into 9 cron routes
+Each cron route defines its own identical `verifyCronSecret`. They agree today, but a future
+cron route can ship without the check (the `/api/cron` prefix is public, so a forgotten gate =
+an open paid/mutating endpoint, not a redirect to /login). **Fix (defense in depth):** extract
+one `lib/cron-auth.ts` `verifyCronSecret(header)` helper and import it everywhere, so "is this
+cron route authenticated?" has a single answer and new routes opt into it by import. Two of the
+copies (`social-scheduled`, `social/content/generate`) already wrap `env.cronSecret` in
+try/catch; the shared helper should adopt that fail-closed form for all.
+
+---
 **Disclaimer:** `/cso` is an AI-assisted scan that catches common patterns. It is not a
 substitute for a professional penetration test. For production systems handling PII or
 payments, engage a qualified security firm.
