@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/config";
 import { selectRandomTemplate } from "@/lib/content-template-selector";
+import { trackCron } from "@/lib/cron-tracking";
 
 // Two sequential Claude calls (FR then EN), each with a 45s timeout, plus the
 // rate-limit pause between them — give the function room beyond the old 60s.
@@ -84,30 +85,53 @@ export async function GET(request: Request) {
 
   console.log(`[CRON] Starting bilingual generation (FR+EN) for template '${template.slug}'`);
 
-  // FR first. A FR failure does not abort the run — EN is still attempted.
-  const fr = await generateDraft(origin, template.slug, "fr");
+  // trackCron records the run (success/error) in cron_runs for the dashboard. The
+  // work throws on total failure so it is logged as 'error'; the outer catch turns
+  // that back into the same 500 response shape the route returned before.
+  let drafts: LangOutcome[] = [];
+  try {
+    const generated = await trackCron("content", async () => {
+      // FR first. A FR failure does not abort the run — EN is still attempted.
+      const fr = await generateDraft(origin, template.slug, "fr");
 
-  // Space the two Anthropic calls to respect the rate limit.
-  console.log(`[CRON] Waiting ${RATE_LIMIT_DELAY_MS}ms for rate limit`);
-  await new Promise((r) => setTimeout(r, RATE_LIMIT_DELAY_MS));
+      // Space the two Anthropic calls to respect the rate limit.
+      console.log(`[CRON] Waiting ${RATE_LIMIT_DELAY_MS}ms for rate limit`);
+      await new Promise((r) => setTimeout(r, RATE_LIMIT_DELAY_MS));
 
-  const en = await generateDraft(origin, template.slug, "en");
+      const en = await generateDraft(origin, template.slug, "en");
 
-  const drafts: LangOutcome[] = [fr, en];
-  const generated = drafts.filter((d) => d.success).length;
-  console.log(`[CRON] Bilingual generation complete — ${generated}/2 drafts created`);
+      drafts = [fr, en];
+      const count = drafts.filter((d) => d.success).length;
+      console.log(`[CRON] Bilingual generation complete — ${count}/2 drafts created`);
+      if (count === 0) throw new Error("Both FR and EN content generations failed");
+      return count;
+    });
 
-  // Both languages failed → 500. Full or partial success → 200 with per-language detail.
-  const allFailed = generated === 0;
-  return NextResponse.json(
-    {
-      success: !allFailed,
-      template: template.slug,
-      contentType: template.content_type,
-      drafts,
-      generated,
-      triggeredAt: new Date().toISOString(),
-    },
-    { status: allFailed ? 500 : 200 },
-  );
+    return NextResponse.json(
+      {
+        success: true,
+        template: template.slug,
+        contentType: template.content_type,
+        drafts,
+        generated,
+        triggeredAt: new Date().toISOString(),
+      },
+      { status: 200 },
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[CRON/content] run failed:", msg);
+    return NextResponse.json(
+      {
+        success: false,
+        template: template.slug,
+        contentType: template.content_type,
+        drafts,
+        generated: drafts.filter((d) => d.success).length,
+        error: msg,
+        triggeredAt: new Date().toISOString(),
+      },
+      { status: 500 },
+    );
+  }
 }

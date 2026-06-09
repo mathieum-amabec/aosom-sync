@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { put, del } from "@vercel/blob";
 import { env, AOSOM } from "@/lib/config";
 import { upsertBlobCache, getCachedBlobUrl } from "@/lib/database";
+import { trackCron } from "@/lib/cron-tracking";
 
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
@@ -41,6 +42,11 @@ export async function GET(request: Request) {
   const t_start = Date.now();
 
   try {
+    // trackCron records this run (success/error) in cron_runs for the dashboard.
+    // The work throws on any failure (bad CDN response, undersized/HTML feed, blob
+    // upload error), so trackCron logs 'error' + message; the outer catch keeps the
+    // route's existing 500 response shape.
+    const data = await trackCron("csv-precache", async () => {
     log("precache_start");
 
     // Step 1: Download CSV from Aosom CDN
@@ -101,15 +107,15 @@ export async function GET(request: Request) {
     const total_duration_ms = Date.now() - t_start;
     log("precache_complete", { phase: "precache_complete", duration_ms: total_duration_ms });
 
-    return NextResponse.json({
-      success: true,
-      data: {
+      return {
         size_mb: (csv_size_bytes / 1024 / 1024).toFixed(2),
         download_duration_ms,
         upload_duration_ms,
         total_duration_ms,
-      },
+      };
     });
+
+    return NextResponse.json({ success: true, data });
   } catch (err) {
     const total_duration_ms = Date.now() - t_start;
     const error_msg = err instanceof Error ? err.message : String(err);
