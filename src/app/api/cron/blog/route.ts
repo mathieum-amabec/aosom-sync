@@ -6,6 +6,7 @@ import {
   type Language,
 } from "@/lib/blog-topics";
 import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
+import { trackCron } from "@/lib/cron-tracking";
 
 // Two sequential blog generations (Claude article + Shopify draft create),
 // each ~30-50s, plus one shared Unsplash fetch, with a 3s pause between langs.
@@ -117,32 +118,59 @@ export async function GET(request: Request) {
 
   console.log(`[CRON/blog] week=${sel.week} idx=${sel.idx} FR="${sel.fr}" EN="${sel.en}" img="${sel.imageQuery}"`);
 
-  // One shared photo set for the whole pair → identical imagery FR + EN.
-  const sharedImages = await fetchSharedImages(sel.imageQuery);
-  console.log(`[CRON/blog] shared images: ${sharedImages ? sharedImages.length : "none (self-fetch)"}`);
+  // trackCron records the run (success/error) in cron_runs for the dashboard. The
+  // work throws on total failure so it is logged as 'error'; the outer catch turns
+  // that back into the same 500 response shape the route returned before.
+  let articles: LangOutcome[] = [];
+  let sharedCount = 0;
+  try {
+    const generated = await trackCron("blog", async () => {
+      // One shared photo set for the whole pair → identical imagery FR + EN.
+      const sharedImages = await fetchSharedImages(sel.imageQuery);
+      sharedCount = sharedImages ? sharedImages.length : 0;
+      console.log(`[CRON/blog] shared images: ${sharedImages ? sharedImages.length : "none (self-fetch)"}`);
 
-  const fr = await generateBlog(origin, sel.fr, "fr", sel.keywordsFr, sharedImages);
+      const fr = await generateBlog(origin, sel.fr, "fr", sel.keywordsFr, sharedImages);
 
-  console.log(`[CRON/blog] Waiting ${BETWEEN_LANGS_DELAY_MS}ms before EN`);
-  await new Promise((r) => setTimeout(r, BETWEEN_LANGS_DELAY_MS));
+      console.log(`[CRON/blog] Waiting ${BETWEEN_LANGS_DELAY_MS}ms before EN`);
+      await new Promise((r) => setTimeout(r, BETWEEN_LANGS_DELAY_MS));
 
-  const en = await generateBlog(origin, sel.en, "en", sel.keywordsEn, sharedImages);
+      const en = await generateBlog(origin, sel.en, "en", sel.keywordsEn, sharedImages);
 
-  const articles: LangOutcome[] = [fr, en];
-  const generated = articles.filter((a) => a.success).length;
-  console.log(`[CRON/blog] Complete — ${generated}/2 articles created`);
+      articles = [fr, en];
+      const count = articles.filter((a) => a.success).length;
+      console.log(`[CRON/blog] Complete — ${count}/2 articles created`);
+      if (count === 0) throw new Error("Both FR and EN blog generations failed");
+      return count;
+    });
 
-  const allFailed = generated === 0;
-  return NextResponse.json(
-    {
-      success: !allFailed,
-      week: sel.week,
-      topicIndex: sel.idx,
-      sharedImages: sharedImages ? sharedImages.length : 0,
-      articles,
-      generated,
-      triggeredAt: new Date().toISOString(),
-    },
-    { status: allFailed ? 500 : 200 },
-  );
+    return NextResponse.json(
+      {
+        success: true,
+        week: sel.week,
+        topicIndex: sel.idx,
+        sharedImages: sharedCount,
+        articles,
+        generated,
+        triggeredAt: new Date().toISOString(),
+      },
+      { status: 200 },
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[CRON/blog] run failed:", msg);
+    return NextResponse.json(
+      {
+        success: false,
+        week: sel.week,
+        topicIndex: sel.idx,
+        sharedImages: sharedCount,
+        articles,
+        generated: articles.filter((a) => a.success).length,
+        error: msg,
+        triggeredAt: new Date().toISOString(),
+      },
+      { status: 500 },
+    );
+  }
 }
