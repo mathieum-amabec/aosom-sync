@@ -7,14 +7,22 @@
  */
 import path from "path";
 import type { SlideshowProduct, VideoLocale } from "./ffmpeg-slideshow";
+import type { KlingProduct } from "./kling-client";
 
-/** Engine ↔ slideshow: this route only drives the FFmpeg slideshow engine. */
-export const GENERATE_ENGINE = "ffmpeg" as const;
+/**
+ * Engines this route renders synchronously into a video_job:
+ *  - "ffmpeg": branded slideshow from 1-6 product photos.
+ *  - "kling":  AI image→video clip from a single product's hero photo.
+ * Both write their MP4 to video_jobs.video_path; Creatomate stays on the
+ * pending-queue path (/api/videos) until its engine lands.
+ */
+export const GENERATE_ENGINES = ["ffmpeg", "kling"] as const;
+export type GenerateEngine = (typeof GENERATE_ENGINES)[number];
 /** generateSlideshowVideo accepts 1-6 products. */
 export const MAX_VIDEO_PRODUCTS = 6;
 
 export interface GenerateRequest {
-  engine: typeof GENERATE_ENGINE;
+  engine: GenerateEngine;
   productSkus: string[];
   locale: VideoLocale;
 }
@@ -49,8 +57,8 @@ export function parseGenerateRequest(body: unknown): ParseResult {
   }
   const obj = body as { engine?: unknown; productSkus?: unknown; locale?: unknown };
 
-  if (obj.engine !== GENERATE_ENGINE) {
-    return { ok: false, error: `\`engine\` must be "${GENERATE_ENGINE}"` };
+  if (typeof obj.engine !== "string" || !(GENERATE_ENGINES as readonly string[]).includes(obj.engine)) {
+    return { ok: false, error: `\`engine\` must be one of: ${GENERATE_ENGINES.join(", ")}` };
   }
   if (
     !Array.isArray(obj.productSkus) ||
@@ -69,7 +77,7 @@ export function parseGenerateRequest(body: unknown): ParseResult {
     return { ok: false, error: `\`locale\` must be one of: ${LOCALES.join(", ")}` };
   }
 
-  return { ok: true, value: { engine: GENERATE_ENGINE, productSkus: skus, locale: obj.locale as VideoLocale } };
+  return { ok: true, value: { engine: obj.engine as GenerateEngine, productSkus: skus, locale: obj.locale as VideoLocale } };
 }
 
 /** First non-empty product image (image1..image7), or null if none. */
@@ -93,6 +101,30 @@ export function toSlideshowProducts(rows: ProductLike[]): SlideshowProduct[] {
     price: typeof row.price === "number" ? row.price : Number(row.price) || 0,
     imageUrl: selectProductImage(row) ?? "",
   }));
+}
+
+/** All non-empty product images (image1..image7), in position order. */
+export function selectProductImages(row: ProductLike): string[] {
+  const keys = ["image1", "image2", "image3", "image4", "image5", "image6", "image7"] as const;
+  const out: string[] = [];
+  for (const k of keys) {
+    const v = row[k];
+    if (typeof v === "string" && v.trim().length > 0) out.push(v.trim());
+  }
+  return out;
+}
+
+/**
+ * Map a DB product row to the Kling engine's product shape. Kling renders a
+ * single cinematic clip from one product, so the route drives it with the first
+ * resolved product; selectBestImage (inside the engine) picks the hero photo.
+ */
+export function toKlingProduct(row: ProductLike): KlingProduct {
+  return {
+    name: (row.name ?? row.sku ?? "Produit") || "Produit",
+    images: selectProductImages(row),
+    sku: row.sku ?? undefined,
+  };
 }
 
 /**
