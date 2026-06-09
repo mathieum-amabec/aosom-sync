@@ -168,6 +168,48 @@ it behind a secret query param. Accept-risk is reasonable if the ops value outwe
   hardcoded; `.env*` gitignored; clean git history. **LLM:** no public request parameter
   reaches a Claude system prompt without a DB-validation step.
 
+## Audit 2026-06-08 — branch `main` (daily, 8/10 gate)
+
+Scope: recent video feature merges (#113 dashboard, #114 FFmpeg pipeline, #115 video-serve
++ furnishdirect domain script) and the new public route. **No P0/P1 findings.**
+
+### Verified clean (active verification)
+- **FFmpeg engine** (`src/lib/video-engines/ffmpeg-slideshow.ts`): invoked via
+  `spawn(binary, args, …)` with an **argument array, not a shell string** — product
+  names/SKUs/paths can't inject shell commands. Binary resolved from `FFMPEG_BIN` env →
+  `ffmpeg-static` → system PATH (no user input). No command injection.
+- **`/api/video-serve/[id]`** (public, allow-listed in `proxy.ts`): the only request input
+  is the numeric `id` (validated `> 0`). `video_url`/`video_path` come from the DB row
+  (pipeline-set), never the request — no path traversal, no open redirect from user input.
+  Range parsing rejects unsatisfiable ranges with 416.
+- **`/api/videos` + `/api/videos/[id]`**: `isAuthenticated()`-gated; writes (POST/PATCH/
+  DELETE) additionally blocked for the `reviewer` role. POST accepts only
+  engine/contentType/locale/productSkus — `video_path`/`video_url` are NOT settable by the
+  client, closing the traversal/redirect surface at the source.
+- **Cron routes** `blog`, `csv-precache`, `sync-shopify`: all self-gate via
+  `verifyCronSecret` (`Bearer ${env.cronSecret}`) despite `/api/cron` being public — cleared.
+- **Scripts** (`bind-furnishdirect-domain.mjs` + the in-tree klaviyo scripts): no hardcoded
+  secrets; token read from `.env.local` via `loadEnv()`. `.env*` gitignored; clean history.
+
+### New P3 — Low / informational (defense-in-depth)
+### P3-5: `/api/video-serve` streams `video_path` with no directory containment
+`src/app/api/video-serve/[id]/route.ts:57-100` calls `fsp.stat(job.video_path)` +
+`createReadStream(job.video_path)` directly. Currently safe — `video_path` is written by the
+(future) generation pipeline, never by a request — so there is no traversal path today.
+**Risk only materializes** if a future pipeline bug or a new admin endpoint lets an arbitrary
+path land in `video_jobs.video_path`; the public route would then stream that file
+(e.g. `.env.local`) to anyone. **Fix (cheap):** resolve `video_path` and assert it is inside
+a dedicated videos directory (e.g. `path.resolve` startsWith the blob/tmp video root) before
+streaming. Mirrors the containment discipline already applied elsewhere.
+
+### P3-6: `/api/video-serve` 302-redirect to `video_url` not host-allow-listed
+`route.ts:52-53` redirects to `job.video_url` after only an `http(s)` scheme check. This is
+the **same class as P2-5** (`/api/image-preview`), which was RESOLVED by allow-listing the
+redirect host (`fix/image-preview-ssrf`). video-serve did not adopt that pattern. Safe today
+(`video_url` is pipeline-set: Vercel Blob / Kling), but a poisoned DB value would make this
+public route an open redirect. **Fix:** reuse the image-preview host allowlist
+(`cdn.shopify.com`, blob/CDN hosts) before `NextResponse.redirect`, consistent with P2-5.
+
 ---
 **Disclaimer:** `/cso` is an AI-assisted scan that catches common patterns. It is not a
 substitute for a professional penetration test. For production systems handling PII or
