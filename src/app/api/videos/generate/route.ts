@@ -16,11 +16,14 @@
  * and streamed back by GET /api/video-serve/:id.
  *
  * NOTE (Vercel): /tmp is per-instance and ephemeral, so a render and a later
- * serve request may land on different instances. Uploading the MP4 to durable
- * storage (Vercel Blob) and setting an absolute video_url is the production
- * follow-up; the serve route already 302-redirects when video_url is an http URL.
+ * serve request may land on different instances. To make the video durable we
+ * upload the rendered MP4 to Vercel Blob and store its permanent absolute URL in
+ * video_url; the serve route 302-redirects to it. When no Blob token is set
+ * (local dev) we skip the upload and the serve route streams the /tmp file.
  */
 import { NextResponse, after } from "next/server";
+import { readFile } from "node:fs/promises";
+import { put } from "@vercel/blob";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { createVideoJob, updateVideoJob, getProduct } from "@/lib/database";
 import { generateSlideshowVideo } from "@/lib/video-engines/ffmpeg-slideshow";
@@ -40,6 +43,31 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 /**
+ * Resolve the durable video_url for a finished render (shared by both engines).
+ * With a Blob token: upload the MP4 and return its permanent URL so the serve
+ * route works across Vercel instances. Without one (local dev) or on a transient
+ * upload failure: fall back to the serve route, which streams the on-disk /tmp
+ * file. A Blob failure is logged loudly (misconfigured/expired token) but never
+ * wastes a good render — the job stays ready, served from disk.
+ */
+async function resolveDurableVideoUrl(jobId: number, filePath: string): Promise<string> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) return videoServeUrl(jobId);
+  try {
+    const fileBuffer = await readFile(filePath);
+    const blob = await put(`videos/video-${jobId}.mp4`, fileBuffer, {
+      access: "public",
+      contentType: "video/mp4",
+      addRandomSuffix: false,
+      allowOverwrite: true,
+    });
+    return blob.url;
+  } catch (uploadErr) {
+    console.error(`[API] Blob upload failed for job ${jobId}, serving from disk:`, uploadErr);
+    return videoServeUrl(jobId);
+  }
+}
+
+/**
  * Background render: produce the MP4 and move the job to ready/error.
  * Exported for unit testing; never throws (errors are recorded on the job).
  */
@@ -51,10 +79,11 @@ export async function runFfmpegGeneration(
 ): Promise<void> {
   try {
     await generateSlideshowVideo({ products, locale, outputPath });
+    const videoUrl = await resolveDurableVideoUrl(jobId, outputPath);
     await updateVideoJob(jobId, {
       status: "ready",
       video_path: outputPath,
-      video_url: videoServeUrl(jobId),
+      video_url: videoUrl,
     });
   } catch (err) {
     const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);
@@ -85,10 +114,11 @@ export async function runKlingGeneration(
       });
       return;
     }
+    const videoUrl = await resolveDurableVideoUrl(jobId, finalPath);
     await updateVideoJob(jobId, {
       status: "ready",
       video_path: finalPath,
-      video_url: videoServeUrl(jobId),
+      video_url: videoUrl,
     });
   } catch (err) {
     const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);

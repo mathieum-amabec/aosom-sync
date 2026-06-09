@@ -59,6 +59,41 @@ which runs scripts normally and fetches the linux binary.
 math, filter graph, arg vector, SVG) are unit-tested in isolation
 (`tests/ffmpeg-slideshow.test.ts`), so the test suite is green without a binary.
 
+## Storage & delivery (Vercel Blob)
+
+The render writes the MP4 to a local path (`resolveVideoOutputPath`): `/tmp/videos/`
+on Vercel, `public/social-videos/` in local dev. **On Vercel `/tmp` is per-instance
+and ephemeral** — a render on instance A and a later `GET /api/video-serve/:id` on
+instance B would 404. So after a successful render, `runFfmpegGeneration`
+(`src/app/api/videos/generate/route.ts`) uploads the MP4 to **Vercel Blob** and
+stores the permanent absolute URL in `video_jobs.video_url`:
+
+```ts
+const fileBuffer = await readFile(outputPath);
+const blob = await put(`videos/video-${jobId}.mp4`, fileBuffer, {
+  access: "public",
+  contentType: "video/mp4",
+  addRandomSuffix: false,   // stable path: a re-render overwrites the same blob
+  allowOverwrite: true,
+});
+// video_url = blob.url   (e.g. https://<store>.public.blob.vercel-storage.com/videos/video-7.mp4)
+```
+
+`GET /api/video-serve/:id` already prefers `video_url` and **302-redirects** to it
+when it is an `http(s)` URL (the Facebook/Instagram Graph APIs fetch the hosted
+URL directly when publishing a Reel), so no change was needed there.
+
+**Config:** set `BLOB_READ_WRITE_TOKEN` in `.env.local` (gitignored) and in the
+Vercel project env. Get it from the Vercel dashboard → Storage → your Blob store →
+**Read/Write Token**. The `@vercel/blob` SDK reads the token from this env var
+automatically.
+
+**Local-dev fallback:** when `BLOB_READ_WRITE_TOKEN` is **unset**, the upload is
+skipped and `video_url` falls back to `/api/video-serve/:id`, which streams the
+file straight from `public/social-videos/` (with Range support) — so local
+playback works with no Blob account. A Blob upload failure on Vercel marks the
+job `error` (a video that can't be served durably is treated as a failed render).
+
 ## Music
 
 Add royalty-free tracks under `public/music/` (see that folder's README). Empty

@@ -70,6 +70,15 @@ export default function VideosClient() {
   const [tab, setTab] = useState<Tab>("generate");
   const [jobs, setJobs] = useState<VideoJob[]>([]);
   const [loading, setLoading] = useState(true);
+  // Transient banner shown after a submit — lives in the parent so it survives
+  // the redirect from "Générer" to "File d'attente" (the child unmounts).
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -148,6 +157,12 @@ export default function VideosClient() {
         </p>
       </div>
 
+      {notice && (
+        <div className="mb-4 p-3 rounded-lg text-sm border bg-blue-950/30 border-blue-800/50 text-blue-300">
+          {notice}
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex gap-1 border-b border-gray-800 mb-6 overflow-x-auto">
         {TABS.map((t) => {
@@ -179,7 +194,15 @@ export default function VideosClient() {
         <p className="text-gray-500 text-sm">Chargement…</p>
       ) : (
         <>
-          {tab === "generate" && <GenerateTab onCreated={fetchJobs} />}
+          {tab === "generate" && (
+            <GenerateTab
+              onCreated={() => {
+                fetchJobs();
+                setNotice("Génération en cours…");
+                setTab("queue"); // jump to the queue so the user watches it render
+              }}
+            />
+          )}
           {tab === "queue" && <QueueTab jobs={queueJobs} />}
           {tab === "library" && (
             <LibraryTab jobs={libraryJobs} onChange={fetchJobs} />
@@ -234,10 +257,8 @@ function GenerateTab({ onCreated }: { onCreated: () => void }) {
           throw new Error(data.error || `HTTP ${res.status}`);
         }
       }
-      setMessage({
-        kind: "ok",
-        text: `${locales.length} job${locales.length > 1 ? "s" : ""} ajouté${locales.length > 1 ? "s" : ""} à la file.`,
-      });
+      // Success feedback ("Génération en cours…") + the redirect to the queue are
+      // handled by the parent via onCreated (this tab unmounts on redirect).
       setSkus([]);
       onCreated();
     } catch (err) {
@@ -546,7 +567,9 @@ function LibraryTab({ jobs, onChange }: { jobs: VideoJob[]; onChange: () => void
 
 function PublishTab({ jobs }: { jobs: VideoJob[] }) {
   if (jobs.length === 0) {
-    return <EmptyState text="Aucune vidéo approuvée à publier." />;
+    return (
+      <EmptyState text="Aucune vidéo approuvée. Approuvez d'abord une vidéo dans la Bibliothèque." />
+    );
   }
   return (
     <div className="space-y-3 max-w-2xl">

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getProducts } from "@/lib/database";
+import { parseBoolParam } from "@/lib/catalog-filters";
 import { API } from "@/lib/config";
 
 /**
@@ -23,6 +24,9 @@ export async function GET(request: Request) {
       inStock: params.get("inStock") === "true",
       color: params.get("color") || undefined,
       size: params.get("size") || undefined,
+      notImported: parseBoolParam(params.get("notImported")),
+      withDiscount: parseBoolParam(params.get("withDiscount")),
+      lowStock: parseBoolParam(params.get("lowStock")),
       sort: params.get("sort") || undefined,
       page,
       limit,
