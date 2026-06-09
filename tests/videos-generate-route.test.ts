@@ -11,11 +11,18 @@ const db = vi.hoisted(() => ({
   getProduct: vi.fn(),
 }));
 const engine = vi.hoisted(() => ({ generateSlideshowVideo: vi.fn() }));
+const blob = vi.hoisted(() => ({ put: vi.fn() }));
+const fsp = vi.hoisted(() => ({ readFile: vi.fn() }));
 const afterCbs = vi.hoisted(() => ({ run: [] as Array<() => unknown> }));
 
 vi.mock("@/lib/auth", () => auth);
 vi.mock("@/lib/database", () => db);
 vi.mock("@/lib/video-engines/ffmpeg-slideshow", () => engine);
+vi.mock("@vercel/blob", () => blob);
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, readFile: fsp.readFile };
+});
 vi.mock("next/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next/server")>();
   return {
@@ -42,12 +49,16 @@ const PRODUCT = { sku: "A1", name: "Sofa", price: 499.99, image1: "https://x/a.j
 beforeEach(() => {
   vi.clearAllMocks();
   afterCbs.run = [];
+  // No Blob token by default → runFfmpegGeneration uses the /api/video-serve URL.
+  delete process.env.BLOB_READ_WRITE_TOKEN;
   auth.isAuthenticated.mockResolvedValue(true);
   auth.getSessionRole.mockResolvedValue("admin");
   db.getProduct.mockResolvedValue(PRODUCT);
   db.createVideoJob.mockResolvedValue({ id: 7 });
   db.updateVideoJob.mockResolvedValue(undefined);
   engine.generateSlideshowVideo.mockResolvedValue("/tmp/videos/video-7.mp4");
+  blob.put.mockResolvedValue({ url: "https://blob.test/videos/video-7.mp4" });
+  fsp.readFile.mockResolvedValue(Buffer.from("mp4-bytes"));
 });
 
 // ─── POST /api/videos/generate ────────────────────────────────────────
@@ -107,13 +118,59 @@ describe("POST /api/videos/generate", () => {
 // ─── runFfmpegGeneration ──────────────────────────────────────────────
 
 describe("runFfmpegGeneration", () => {
-  it("records ready + video_path/url on success", async () => {
+  it("records ready + video_path/url on success (no Blob token → no upload)", async () => {
     await runFfmpegGeneration(9, [{ name: "X", price: 1, imageUrl: "u" }], "en", "/tmp/videos/video-9.mp4");
     expect(db.updateVideoJob).toHaveBeenCalledWith(9, {
       status: "ready",
       video_path: "/tmp/videos/video-9.mp4",
       video_url: "/api/video-serve/9",
     });
+    // Without a token the Blob branch is skipped entirely.
+    expect(fsp.readFile).not.toHaveBeenCalled();
+    expect(blob.put).not.toHaveBeenCalled();
+  });
+
+  it("uploads the MP4 to Vercel Blob and stores its URL when a token is set", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_test";
+    blob.put.mockResolvedValue({ url: "https://blob.test/videos/video-9.mp4" });
+    try {
+      await runFfmpegGeneration(9, [{ name: "X", price: 1, imageUrl: "u" }], "en", "/tmp/videos/video-9.mp4");
+      expect(fsp.readFile).toHaveBeenCalledWith("/tmp/videos/video-9.mp4");
+      expect(blob.put).toHaveBeenCalledWith(
+        "videos/video-9.mp4",
+        expect.anything(),
+        expect.objectContaining({
+          access: "public",
+          contentType: "video/mp4",
+          addRandomSuffix: false,
+          allowOverwrite: true,
+        }),
+      );
+      expect(db.updateVideoJob).toHaveBeenCalledWith(9, {
+        status: "ready",
+        video_path: "/tmp/videos/video-9.mp4",
+        video_url: "https://blob.test/videos/video-9.mp4",
+      });
+    } finally {
+      delete process.env.BLOB_READ_WRITE_TOKEN;
+    }
+  });
+
+  it("falls back to the serve URL (still ready) when the Blob upload fails", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_test";
+    blob.put.mockRejectedValue(new Error("blob 500"));
+    try {
+      await runFfmpegGeneration(9, [{ name: "X", price: 1, imageUrl: "u" }], "en", "/tmp/videos/video-9.mp4");
+      // A transient Blob failure must not waste the render — job stays ready,
+      // served from disk.
+      expect(db.updateVideoJob).toHaveBeenCalledWith(9, {
+        status: "ready",
+        video_path: "/tmp/videos/video-9.mp4",
+        video_url: "/api/video-serve/9",
+      });
+    } finally {
+      delete process.env.BLOB_READ_WRITE_TOKEN;
+    }
   });
 
   it("records error + message on failure (never throws)", async () => {

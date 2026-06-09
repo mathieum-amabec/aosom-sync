@@ -13,11 +13,14 @@
  * and streamed back by GET /api/video-serve/:id.
  *
  * NOTE (Vercel): /tmp is per-instance and ephemeral, so a render and a later
- * serve request may land on different instances. Uploading the MP4 to durable
- * storage (Vercel Blob) and setting an absolute video_url is the production
- * follow-up; the serve route already 302-redirects when video_url is an http URL.
+ * serve request may land on different instances. To make the video durable we
+ * upload the rendered MP4 to Vercel Blob and store its permanent absolute URL in
+ * video_url; the serve route 302-redirects to it. When no Blob token is set
+ * (local dev) we skip the upload and the serve route streams the /tmp file.
  */
 import { NextResponse, after } from "next/server";
+import { readFile } from "node:fs/promises";
+import { put } from "@vercel/blob";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { createVideoJob, updateVideoJob, getProduct } from "@/lib/database";
 import { generateSlideshowVideo } from "@/lib/video-engines/ffmpeg-slideshow";
@@ -46,10 +49,34 @@ export async function runFfmpegGeneration(
 ): Promise<void> {
   try {
     await generateSlideshowVideo({ products, locale, outputPath });
+
+    // Persist to durable storage so the serve route works across Vercel instances.
+    // With a Blob token: upload the MP4 and use its permanent URL. Without one
+    // (local dev): fall back to the serve route, which streams the /tmp file.
+    let videoUrl = videoServeUrl(jobId);
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      try {
+        const fileBuffer = await readFile(outputPath);
+        const blob = await put(`videos/video-${jobId}.mp4`, fileBuffer, {
+          access: "public",
+          contentType: "video/mp4",
+          addRandomSuffix: false,
+          allowOverwrite: true,
+        });
+        videoUrl = blob.url;
+      } catch (uploadErr) {
+        // Don't waste a good render on a transient Blob failure: keep the job
+        // ready and serve the on-disk file (works same-instance / local dev).
+        // Logged loudly so a misconfigured/expired token is visible — on Vercel
+        // this is best-effort until the instance recycles.
+        console.error(`[API] Blob upload failed for job ${jobId}, serving from disk:`, uploadErr);
+      }
+    }
+
     await updateVideoJob(jobId, {
       status: "ready",
       video_path: outputPath,
-      video_url: videoServeUrl(jobId),
+      video_url: videoUrl,
     });
   } catch (err) {
     const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);
