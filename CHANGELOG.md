@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.47.0] - 2026-06-08
+
+### Added
+- **Kling AI video engine** (`src/lib/video-engines/kling-client.ts`): turns a product's
+  best photo into a cinematic 9:16 clip — picks the best image, generates a cinematic
+  prompt via Claude (templated fallback), calls Kling `/v1/videos/image2video`, polls to
+  completion (5min budget), downloads the clip, and runs a best-effort FFmpeg brand
+  overlay (navy band + logo, `ffmpeg-brand.ts`). No-ops when `KLING_API_KEY` is unset.
+- **Reels publishing**: `publishFacebookReel` in `facebook-client.ts` (resumable
+  `/video_reels` start→upload→finish) and `publishReel({videoUrl,caption,pageId,locale})`
+  in `social-publisher.ts` routing the Page token per locale. Instagram Reels already
+  shipped via `instagram-client.publishReel`.
+- **`GET /api/video-serve/[id]`**: streams a draft's rendered MP4 (`facebook_drafts.video_path`)
+  with HTTP Range support and a traversal guard (`video-store.ts`), giving Meta a public
+  https URL for FB/IG Reels. Public-listed in `proxy.ts`. New `video_path` column +
+  `setDraftVideoPath`.
+
+### Changed
+- **Creatomate client → engine**: moved `creatomate-client.ts` to
+  `video-engines/creatomate-engine.ts` with separate FR/EN templates
+  (`CREATOMATE_TEMPLATE_ID_FR`/`_EN`, falling back to `CREATOMATE_TEMPLATE_ID`) and shared
+  `VIDEO_BRAND` token injection (`renderProductVideoForLocale`).
+
 ## [0.5.46.0] - 2026-06-07
 
 ### Added
