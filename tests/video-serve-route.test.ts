@@ -56,6 +56,16 @@ describe("GET /api/video-serve/[id]", () => {
     expect(buf.equals(BODY.subarray(0, 4))).toBe(true);
   });
 
+  it("serves a suffix range (last N bytes) as 206", async () => {
+    vi.mocked(getFacebookDraft).mockResolvedValue({ videoPath: tmpFile } as never);
+    vi.mocked(resolveVideoPath).mockReturnValue(tmpFile);
+    const res = await GET(req({ range: "bytes=-4" }), ctx("1"));
+    expect(res.status).toBe(206);
+    expect(res.headers.get("content-range")).toBe(`bytes ${BODY.length - 4}-${BODY.length - 1}/${BODY.length}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.equals(BODY.subarray(BODY.length - 4))).toBe(true);
+  });
+
   it("416s for an unsatisfiable range", async () => {
     vi.mocked(getFacebookDraft).mockResolvedValue({ videoPath: tmpFile } as never);
     vi.mocked(resolveVideoPath).mockReturnValue(tmpFile);

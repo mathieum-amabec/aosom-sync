@@ -20,7 +20,7 @@ import { resolveVideoPath } from "@/lib/video-engines/video-store";
 
 export const runtime = "nodejs";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: idStr } = await params;
   const id = Number.parseInt(idStr, 10);
   if (!Number.isInteger(id) || id <= 0) {
@@ -51,11 +51,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   };
 
   // Range request (Meta/browsers seek): serve the requested byte window as 206.
-  const range = _request.headers.get("range");
+  const range = request.headers.get("range");
   const match = range && /^bytes=(\d*)-(\d*)$/.exec(range.trim());
   if (match && (match[1] !== "" || match[2] !== "")) {
-    let start = match[1] === "" ? 0 : Number.parseInt(match[1], 10);
-    let end = match[2] === "" ? size - 1 : Number.parseInt(match[2], 10);
+    let start: number;
+    let end: number;
+    if (match[1] === "") {
+      // Suffix range `bytes=-N` → the last N bytes.
+      const n = Number.parseInt(match[2], 10);
+      start = Math.max(0, size - n);
+      end = size - 1;
+    } else {
+      start = Number.parseInt(match[1], 10);
+      end = match[2] === "" ? size - 1 : Number.parseInt(match[2], 10);
+    }
     if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= size) {
       return new NextResponse(null, { status: 416, headers: { "Content-Range": `bytes */${size}` } });
     }
