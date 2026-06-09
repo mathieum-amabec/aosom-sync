@@ -29,13 +29,11 @@ import {
 } from "@/lib/database";
 import { selectHook, buildHookedPrompt, buildHookedPromptEn } from "@/lib/hook-selector";
 import { publishDraftToChannels } from "@/lib/social-publisher";
-import { isCreatomateConfigured, renderVideoAndWait, renderReelsVideoAndWait } from "@/lib/creatomate-client";
 
-// Bounded wait for the Creatomate render so new-product draft generation never
-// hangs. If the video isn't ready in time, the draft posts with the image and the
-// video is simply not attached (foundation: webhook/cron resolution is a follow-up).
-const VIDEO_RENDER_TIMEOUT_MS = process.env.NODE_ENV === "test" ? 50 : 90_000;
-const VIDEO_RENDER_POLL_MS = process.env.NODE_ENV === "test" ? 10 : 3_000;
+// Job 4 generates STATIC posts only (branded images). Video generation has been
+// decoupled out of this job — the new FFmpeg-based slideshow pipeline owns video
+// rendering and populates the draft's video_url separately. See
+// src/lib/video-engines/ and src/lib/video-brand-tokens.ts.
 
 const ANTHROPIC_CALL_TIMEOUT_MS = 45_000;
 const ANTHROPIC_RETRY_DELAY_MS = 5_000;
@@ -271,43 +269,6 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
     }
   }
 
-  // Automated product video (Creatomate). Best-effort: only for new_product, only
-  // when configured; a render failure/timeout never blocks the draft (image still posts).
-  let videoUrl: string | null = null;
-  let reelsVideoUrl: string | null = null;
-  if (isCreatomateConfigured() && env.creatomateTemplateId && rawImageUrls[0]) {
-    const modifications: Record<string, string> = {
-      product_image: rawImageUrls[0],
-      product_title: productName,
-      price: `${Number(product.price).toFixed(2)} $`,
-    };
-    if (env.creatomateLogoUrl) modifications.logo_url = env.creatomateLogoUrl;
-    try {
-      const { url } = await renderVideoAndWait(env.creatomateTemplateId, modifications, {
-        timeoutMs: VIDEO_RENDER_TIMEOUT_MS,
-        intervalMs: VIDEO_RENDER_POLL_MS,
-      });
-      videoUrl = url;
-      log(`Video render (square) for ${sku}: ${url ? "ready" : "not ready in time"}`);
-    } catch (err) {
-      log(`Video render (square) failed for ${sku}: ${err}`);
-    }
-    // Also render the 9:16 reel for Instagram (only when CREATOMATE_REELS_TEMPLATE_ID
-    // is set). Best-effort and independent: a reel failure never blocks the draft.
-    if (env.creatomateReelsTemplateId) {
-      try {
-        const { url } = await renderReelsVideoAndWait(modifications, {
-          timeoutMs: VIDEO_RENDER_TIMEOUT_MS,
-          intervalMs: VIDEO_RENDER_POLL_MS,
-        });
-        reelsVideoUrl = url;
-        log(`Video render (reel 9:16) for ${sku}: ${url ? "ready" : "not ready in time"}`);
-      } catch (err) {
-        log(`Video render (reel 9:16) failed for ${sku}: ${err}`);
-      }
-    }
-  }
-
   const draftId = await createFacebookDraft({
     sku,
     triggerType: "new_product",
@@ -317,8 +278,6 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
     imagePath,
     imageUrl: branded.imageUrl,
     imageUrls: branded.imageUrls,
-    videoUrl,
-    reelsVideoUrl,
     hookId,
   });
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Anthropic from "@anthropic-ai/sdk";
-import { pickRandomImages, triggerStockHighlight } from "@/jobs/job4-social";
+import { pickRandomImages, triggerStockHighlight, triggerNewProduct } from "@/jobs/job4-social";
 
 // ─── Mock factories ───────────────────────────────────────────────────
 
@@ -45,6 +45,7 @@ vi.mock("@/lib/social-publisher", () => ({
 import {
   getAllSettings,
   getEligibleHighlightProduct,
+  getProduct,
   createFacebookDraft,
   markProductPosted,
 } from "@/lib/database";
@@ -228,5 +229,52 @@ describe("triggerStockHighlight — Anthropic timeout handling", () => {
     expect(warnSpy).not.toHaveBeenCalledWith(
       expect.stringContaining("anthropic timeout, retrying"),
     );
+  });
+});
+
+// ─── triggerNewProduct — Creatomate decoupled (static posts only) ─────
+//
+// Job 4 no longer generates video. These tests lock in that the new-product
+// draft is created WITHOUT videoUrl/reelsVideoUrl — the FFmpeg slideshow
+// pipeline owns video rendering now.
+
+describe("triggerNewProduct — static posts only (Creatomate decoupled)", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(getAllSettings).mockResolvedValue({
+      ...SETTINGS,
+      prompt_new_product_fr: "Post FR pour {product_name}",
+      prompt_new_product_en: "Post EN for {product_name}",
+    });
+    // PRODUCT is a minimal fixture; getProduct's ProductRow is wider than we
+    // need here, so cast to the awaited return type for the mock.
+    vi.mocked(getProduct).mockResolvedValue(
+      PRODUCT as unknown as Awaited<ReturnType<typeof getProduct>>,
+    );
+    vi.mocked(createFacebookDraft).mockResolvedValue(DRAFT_ID);
+    vi.mocked(markProductPosted).mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("creates a draft with no video fields and no render call", async () => {
+    mockCreate
+      .mockResolvedValueOnce(makeMsg("Texte FR généré"))
+      .mockResolvedValueOnce(makeMsg("Generated EN text"));
+
+    const result = await triggerNewProduct("TEST-001");
+
+    expect(result.draftId).toBe(DRAFT_ID);
+    expect(createFacebookDraft).toHaveBeenCalledOnce();
+
+    // The draft payload must carry neither a square nor a reels video URL —
+    // Job 4 is decoupled from Creatomate and produces static branded posts.
+    const draftArg = vi.mocked(createFacebookDraft).mock.calls[0][0];
+    expect(draftArg.videoUrl).toBeUndefined();
+    expect(draftArg.reelsVideoUrl).toBeUndefined();
+    expect("videoUrl" in draftArg).toBe(false);
+    expect("reelsVideoUrl" in draftArg).toBe(false);
   });
 });
