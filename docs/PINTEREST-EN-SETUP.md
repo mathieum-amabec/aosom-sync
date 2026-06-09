@@ -57,8 +57,13 @@ curl -s -o /dev/null -w "HTTP=%{http_code} size=%{size_download}B\n" \
   "https://aosom-sync.vercel.app/api/feeds/pinterest-en"
 ```
 
-A healthy feed returns `HTTP=200` with a non-trivial size. To eyeball the English
-titles:
+A healthy feed returns `HTTP=200` with a non-trivial size.
+
+> ✅ **Last verified 2026-06-09 (prod):** `HTTP=200`, **966 products** (`<item>`),
+> 3.27 MB, `application/xml`. English titles confirmed (e.g. "Garden kneeler
+> foldable with EVA foam cushion pad").
+
+To eyeball the English titles:
 
 ```bash
 curl -s "https://aosom-sync.vercel.app/api/feeds/pinterest-en" | grep -m3 "<title>"
