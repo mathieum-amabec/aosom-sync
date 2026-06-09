@@ -282,7 +282,8 @@ async function _initSchemaImpl(): Promise<void> {
   if (!cols.has("video_url")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN video_url TEXT`);
   // reels_video_url: vertical 9:16 video for Instagram Reels (square video_url stays for Facebook)
   if (!cols.has("reels_video_url")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN reels_video_url TEXT`);
-  // video_path: local MP4 path rendered by the Kling/FFmpeg engines; served via /api/video-serve/[id]
+  // video_path: legacy column kept for existing rows. Rendered clips now live in
+  // video_jobs.video_path (served via /api/video-serve/[id]); nothing writes this.
   if (!cols.has("video_path")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN video_path TEXT`);
   // content_type: distinguishes product posts from informative/entertaining/engagement content
   if (!cols.has("content_type")) alters.push(`ALTER TABLE facebook_drafts ADD COLUMN content_type TEXT NOT NULL DEFAULT 'product'`);
@@ -1760,9 +1761,6 @@ export interface FacebookDraft {
   videoUrl?: string | null;
   /** Vertical 9:16 Creatomate video URL for Instagram Reels. Publisher prefers it on Instagram. */
   reelsVideoUrl?: string | null;
-  /** Local filesystem path of a rendered MP4 (Kling/FFmpeg engines). Served by
-   * /api/video-serve/[id] to give Meta a public URL. Null until a clip is rendered. */
-  videoPath?: string | null;
   oldPrice: number | null; newPrice: number | null; status: string;
   scheduledAt: number | null; publishedAt: number | null;
   facebookPostId: string | null;
@@ -2043,7 +2041,6 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
     unsplashPhotographerUrl: (row.unsplash_photographer_url as string) || null,
     videoUrl: (row.video_url as string) || null,
     reelsVideoUrl: (row.reels_video_url as string) || null,
-    videoPath: (row.video_path as string) || null,
     productName: (row.name as string) || undefined,
     productImage: (row.image1 as string) || undefined,
   };
@@ -2095,15 +2092,6 @@ export async function setDraftChannelState(id: number, channelKey: string, state
   await db.execute({
     sql: `UPDATE facebook_drafts SET channels = json_set(COALESCE(channels, '{}'), ?, json(?)) WHERE id = ?`,
     args: [`$.${channelKey}`, JSON.stringify(state), id],
-  });
-}
-
-/** Record the local MP4 path of a rendered clip (Kling/FFmpeg) for /api/video-serve. */
-export async function setDraftVideoPath(id: number, videoPath: string): Promise<void> {
-  const db = await ensureSchema();
-  await db.execute({
-    sql: `UPDATE facebook_drafts SET video_path = ? WHERE id = ?`,
-    args: [videoPath, id],
   });
 }
 

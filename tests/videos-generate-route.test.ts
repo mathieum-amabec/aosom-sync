@@ -11,6 +11,7 @@ const db = vi.hoisted(() => ({
   getProduct: vi.fn(),
 }));
 const engine = vi.hoisted(() => ({ generateSlideshowVideo: vi.fn() }));
+const kling = vi.hoisted(() => ({ generateKlingVideo: vi.fn(), isKlingConfigured: vi.fn() }));
 const blob = vi.hoisted(() => ({ put: vi.fn() }));
 const fsp = vi.hoisted(() => ({ readFile: vi.fn() }));
 const afterCbs = vi.hoisted(() => ({ run: [] as Array<() => unknown> }));
@@ -18,6 +19,7 @@ const afterCbs = vi.hoisted(() => ({ run: [] as Array<() => unknown> }));
 vi.mock("@/lib/auth", () => auth);
 vi.mock("@/lib/database", () => db);
 vi.mock("@/lib/video-engines/ffmpeg-slideshow", () => engine);
+vi.mock("@/lib/video-engines/kling-client", () => kling);
 vi.mock("@vercel/blob", () => blob);
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
@@ -33,7 +35,7 @@ vi.mock("next/server", async (importOriginal) => {
   };
 });
 
-import { POST, runFfmpegGeneration } from "@/app/api/videos/generate/route";
+import { POST, runFfmpegGeneration, runKlingGeneration } from "@/app/api/videos/generate/route";
 import { GET } from "@/app/api/videos/[id]/status/route";
 
 function postReq(body: unknown): Request {
@@ -57,6 +59,8 @@ beforeEach(() => {
   db.createVideoJob.mockResolvedValue({ id: 7 });
   db.updateVideoJob.mockResolvedValue(undefined);
   engine.generateSlideshowVideo.mockResolvedValue("/tmp/videos/video-7.mp4");
+  kling.generateKlingVideo.mockResolvedValue("/tmp/videos/video-7.mp4");
+  kling.isKlingConfigured.mockReturnValue(true);
   blob.put.mockResolvedValue({ url: "https://blob.test/videos/video-7.mp4" });
   fsp.readFile.mockResolvedValue(Buffer.from("mp4-bytes"));
 });
@@ -77,9 +81,17 @@ describe("POST /api/videos/generate", () => {
     expect(res.status).toBe(403);
   });
 
-  it("400 on invalid body", async () => {
+  it("400 on an unsupported engine", async () => {
+    const res = await POST(postReq({ engine: "creatomate", productSkus: ["A1"], locale: "fr" }));
+    expect(res.status).toBe(400);
+    expect(db.createVideoJob).not.toHaveBeenCalled();
+  });
+
+  it("400 when kling is requested but not configured", async () => {
+    kling.isKlingConfigured.mockReturnValue(false);
     const res = await POST(postReq({ engine: "kling", productSkus: ["A1"], locale: "fr" }));
     expect(res.status).toBe(400);
+    expect(db.createVideoJob).not.toHaveBeenCalled();
   });
 
   it("400 when none of the SKUs resolve to a product", async () => {
@@ -107,6 +119,36 @@ describe("POST /api/videos/generate", () => {
     await afterCbs.run[0]();
     expect(engine.generateSlideshowVideo).toHaveBeenCalledWith(
       expect.objectContaining({ locale: "fr", outputPath: expect.stringContaining("video-7.mp4") }),
+    );
+    expect(db.updateVideoJob).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ status: "ready", video_url: "/api/video-serve/7" }),
+    );
+  });
+
+  it("202 + jobId for kling, renders via the Kling engine into video_jobs", async () => {
+    const res = await POST(postReq({ engine: "kling", productSkus: ["A1"], locale: "en" }));
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ jobId: 7 });
+
+    expect(db.createVideoJob).toHaveBeenCalledWith(
+      expect.objectContaining({ engine: "kling", contentType: "product", productSkus: ["A1"], locale: "en" }),
+    );
+    expect(db.updateVideoJob).toHaveBeenCalledWith(7, { status: "generating" });
+
+    // The Kling render was scheduled via after() but not yet run.
+    expect(kling.generateKlingVideo).not.toHaveBeenCalled();
+    expect(engine.generateSlideshowVideo).not.toHaveBeenCalled();
+    expect(afterCbs.run).toHaveLength(1);
+
+    // Running it renders the clip (from the product's images) and flips to ready.
+    await afterCbs.run[0]();
+    expect(kling.generateKlingVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        locale: "en",
+        outputPath: expect.stringContaining("video-7.mp4"),
+        product: expect.objectContaining({ name: "Sofa", images: ["https://x/a.jpg"] }),
+      }),
     );
     expect(db.updateVideoJob).toHaveBeenCalledWith(
       7,
@@ -181,6 +223,64 @@ describe("runFfmpegGeneration", () => {
     expect(db.updateVideoJob).toHaveBeenCalledWith(9, {
       status: "error",
       error_message: "ffmpeg exploded",
+    });
+  });
+});
+
+// ─── runKlingGeneration ───────────────────────────────────────────────
+
+describe("runKlingGeneration", () => {
+  const PROD = { name: "X", images: ["https://x/a.jpg"], sku: "A1" };
+
+  it("records ready + video_path/url on success (no Blob token → no upload)", async () => {
+    kling.generateKlingVideo.mockResolvedValue("/tmp/videos/video-9.mp4");
+    await runKlingGeneration(9, PROD, "en", "/tmp/videos/video-9.mp4");
+    expect(db.updateVideoJob).toHaveBeenCalledWith(9, {
+      status: "ready",
+      video_path: "/tmp/videos/video-9.mp4",
+      video_url: "/api/video-serve/9",
+    });
+    expect(fsp.readFile).not.toHaveBeenCalled();
+    expect(blob.put).not.toHaveBeenCalled();
+  });
+
+  it("uploads the branded clip to Vercel Blob and stores its URL when a token is set", async () => {
+    process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_test";
+    kling.generateKlingVideo.mockResolvedValue("/tmp/videos/video-9.mp4");
+    blob.put.mockResolvedValue({ url: "https://blob.test/videos/video-9.mp4" });
+    try {
+      await runKlingGeneration(9, PROD, "en", "/tmp/videos/video-9.mp4");
+      expect(fsp.readFile).toHaveBeenCalledWith("/tmp/videos/video-9.mp4");
+      expect(blob.put).toHaveBeenCalledWith(
+        "videos/video-9.mp4",
+        expect.anything(),
+        expect.objectContaining({ access: "public", contentType: "video/mp4" }),
+      );
+      expect(db.updateVideoJob).toHaveBeenCalledWith(9, {
+        status: "ready",
+        video_path: "/tmp/videos/video-9.mp4",
+        video_url: "https://blob.test/videos/video-9.mp4",
+      });
+    } finally {
+      delete process.env.BLOB_READ_WRITE_TOKEN;
+    }
+  });
+
+  it("records error when the engine no-ops (returns null)", async () => {
+    kling.generateKlingVideo.mockResolvedValue(null);
+    await runKlingGeneration(9, PROD, "en", "/tmp/x.mp4");
+    expect(db.updateVideoJob).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({ status: "error" }),
+    );
+  });
+
+  it("records error + message on failure (never throws)", async () => {
+    kling.generateKlingVideo.mockRejectedValue(new Error("kling exploded"));
+    await expect(runKlingGeneration(9, PROD, "en", "/tmp/x.mp4")).resolves.toBeUndefined();
+    expect(db.updateVideoJob).toHaveBeenCalledWith(9, {
+      status: "error",
+      error_message: "kling exploded",
     });
   });
 });

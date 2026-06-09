@@ -2,6 +2,32 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.52.0] - 2026-06-09
+
+Recâblage du pipeline vidéo sur `video_jobs` comme source de vérité unique
+(suite à la note PR #118). Le moteur Kling était branché à l'UI mais orphelin —
+il ne faisait que mettre un job en file sans jamais rendre la vidéo — et un
+`setDraftVideoPath` mort écrivait encore dans `facebook_drafts.video_path`.
+
+### Changed
+- **Kling rendu via `/api/videos/generate` → `video_jobs`** (`route.ts`,
+  `video-generate.ts`): la route accepte désormais `engine: 'ffmpeg' | 'kling'`.
+  Nouveau `runKlingGeneration` qui lance `generateKlingVideo` en arrière-plan et
+  écrit `video_path`/`video_url` dans `video_jobs` via `updateVideoJob`. Échec
+  rapide (400) quand Kling n'est pas configuré (`KLING_API_KEY` absent). Ajout de
+  `selectProductImages` + `toKlingProduct`.
+- **Durabilité Blob partagée**: extraction de `resolveDurableVideoUrl` (upload
+  Vercel Blob + repli sur la route de streaming), désormais utilisée par les deux
+  moteurs — les clips Kling sont donc servis correctement entre instances Vercel,
+  comme la slideshow FFmpeg.
+- **Dashboard**: Kling poste maintenant vers `/api/videos/generate` (rend la
+  vidéo) au lieu de la file `/api/videos` (qui ne faisait que mettre en attente).
+
+### Removed
+- **`setDraftVideoPath` + `FacebookDraft.videoPath`** (code mort): plus rien
+  n'écrivait dans `facebook_drafts.video_path`. La colonne reste (legacy) pour
+  les lignes existantes; `video_jobs.video_path` est la source canonique.
+
 ## [0.5.51.0] - 2026-06-09
 
 ### Added

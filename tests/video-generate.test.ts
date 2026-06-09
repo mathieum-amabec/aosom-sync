@@ -2,7 +2,9 @@ import { describe, it, expect, afterEach } from "vitest";
 import {
   parseGenerateRequest,
   selectProductImage,
+  selectProductImages,
   toSlideshowProducts,
+  toKlingProduct,
   resolveVideoOutputPath,
   videoServeUrl,
   MAX_VIDEO_PRODUCTS,
@@ -21,9 +23,15 @@ describe("parseGenerateRequest", () => {
     }
   });
 
-  it("rejects non-ffmpeg engines (those use /api/videos)", () => {
-    const r = parseGenerateRequest({ engine: "kling", productSkus: ["A"], locale: "fr" });
-    expect(r.ok).toBe(false);
+  it("accepts the kling engine (also rendered via /api/videos/generate)", () => {
+    const r = parseGenerateRequest({ engine: "kling", productSkus: ["A"], locale: "en" });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.engine).toBe("kling");
+  });
+
+  it("rejects engines that aren't rendered inline (e.g. creatomate)", () => {
+    expect(parseGenerateRequest({ engine: "creatomate", productSkus: ["A"], locale: "fr" }).ok).toBe(false);
+    expect(parseGenerateRequest({ engine: "nope", productSkus: ["A"], locale: "fr" }).ok).toBe(false);
   });
 
   it("rejects empty / non-array / non-string SKUs", () => {
@@ -86,6 +94,35 @@ describe("toSlideshowProducts", () => {
   it("caps the result at MAX_VIDEO_PRODUCTS", () => {
     const rows = Array.from({ length: 10 }, (_, i) => ({ sku: `S${i}`, name: `N${i}`, price: i }));
     expect(toSlideshowProducts(rows)).toHaveLength(MAX_VIDEO_PRODUCTS);
+  });
+});
+
+// ─── selectProductImages + toKlingProduct ────────────────────────────
+
+describe("selectProductImages", () => {
+  it("collects all non-empty images in position order, trimming blanks", () => {
+    expect(
+      selectProductImages({ image1: " https://x/a.jpg ", image2: "", image3: "https://x/c.jpg" }),
+    ).toEqual(["https://x/a.jpg", "https://x/c.jpg"]);
+  });
+
+  it("returns [] when no images are present", () => {
+    expect(selectProductImages({ name: "x" })).toEqual([]);
+  });
+});
+
+describe("toKlingProduct", () => {
+  it("maps a row to {name, images, sku}", () => {
+    expect(toKlingProduct({ sku: "A1", name: "Sofa", image1: "https://x/a.jpg", image2: "https://x/b.jpg" })).toEqual({
+      name: "Sofa",
+      images: ["https://x/a.jpg", "https://x/b.jpg"],
+      sku: "A1",
+    });
+  });
+
+  it("falls back to sku then 'Produit' for name and tolerates no images", () => {
+    expect(toKlingProduct({ sku: "SKU1" })).toEqual({ name: "SKU1", images: [], sku: "SKU1" });
+    expect(toKlingProduct({})).toEqual({ name: "Produit", images: [], sku: undefined });
   });
 });
 

@@ -237,21 +237,21 @@ function GenerateTab({ onCreated }: { onCreated: () => void }) {
     const productSkus = skus.map((s) => s.sku);
     try {
       for (const locale of locales) {
-        // FFmpeg renders a real video right away via the generate endpoint
-        // (async — returns a jobId and flips the job to "generating"). The other
-        // engines still just queue a pending job through /api/videos.
-        const res =
-          engine === "ffmpeg"
-            ? await fetch("/api/videos/generate", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ engine, productSkus, locale }),
-              })
-            : await fetch("/api/videos", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ engine, contentType, locale, productSkus }),
-              });
+        // FFmpeg and Kling render a real video right away via the generate
+        // endpoint (async — returns a jobId and flips the job to "generating").
+        // Creatomate still just queues a pending job through /api/videos.
+        const rendersInline = engine === "ffmpeg" || engine === "kling";
+        const res = rendersInline
+          ? await fetch("/api/videos/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ engine, productSkus, locale }),
+            })
+          : await fetch("/api/videos", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ engine, contentType, locale, productSkus }),
+            });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || `HTTP ${res.status}`);
