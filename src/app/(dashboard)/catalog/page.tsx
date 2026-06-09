@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { storeLink } from "@/lib/insights";
+
 interface CatalogProduct {
   sku: string;
   name: string;
@@ -18,6 +20,13 @@ interface CatalogProduct {
   /** old_price of the SKU's most recent price change; drives the ▼/▲ movement badge. */
   prev_price: number | null;
   [key: string]: unknown;
+}
+
+interface CatalogStats {
+  total: number;
+  imported: number;
+  withDiscount: number;
+  lastSync: { name: string; status: string; ranAt: number } | null;
 }
 
 /**
@@ -59,35 +68,80 @@ interface CatalogResponse {
   productTypes: { type: string; count: number }[];
 }
 
+const INPUT_CLASS =
+  "w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
+const TOGGLE_BASE =
+  "flex items-center gap-2 px-3 py-2 rounded-lg text-sm border cursor-pointer transition-colors select-none";
+
+function timeAgo(epochSec: number): string {
+  const s = Math.floor(Date.now() / 1000) - epochSec;
+  if (s < 60) return "à l'instant";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `il y a ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `il y a ${h} h`;
+  const d = Math.floor(h / 24);
+  return `il y a ${d} j`;
+}
+
+// useSearchParams() must be read under a Suspense boundary.
 export default function CatalogPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-gray-500 text-sm">Chargement…</div>}>
+      <CatalogBrowser />
+    </Suspense>
+  );
+}
+
+function CatalogBrowser() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
+
   const [data, setData] = useState<CatalogResponse | null>(null);
+  const [stats, setStats] = useState<CatalogStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
-  const [search, setSearch] = useState("");
-  const [productType, setProductType] = useState("");
-  const [minPrice, setMinPrice] = useState("");
-  const [maxPrice, setMaxPrice] = useState("");
-  const [inStock, setInStock] = useState(false);
-  const [sort, setSort] = useState("");
-  const [page, setPage] = useState(1);
+  // Filters — initialised from the URL so links/refreshes are sticky.
+  const [search, setSearch] = useState(() => sp.get("search") ?? "");
+  const [searchInput, setSearchInput] = useState(() => sp.get("search") ?? "");
+  const [productType, setProductType] = useState(() => sp.get("productType") ?? "");
+  const [minPrice, setMinPrice] = useState(() => sp.get("minPrice") ?? "");
+  const [maxPrice, setMaxPrice] = useState(() => sp.get("maxPrice") ?? "");
+  const [inStock, setInStock] = useState(() => sp.get("inStock") === "true");
+  const [notImported, setNotImported] = useState(() => sp.get("notImported") === "true");
+  const [withDiscount, setWithDiscount] = useState(() => sp.get("withDiscount") === "true");
+  const [lowStock, setLowStock] = useState(() => sp.get("lowStock") === "true");
+  const [sort, setSort] = useState(() => sp.get("sort") ?? "");
+  const [page, setPage] = useState(() => Math.max(1, parseInt(sp.get("page") ?? "1", 10) || 1));
 
-  // Selection for import
+  // Selection + bulk-import confirmation.
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmingImport, setConfirmingImport] = useState(false);
+
+  // Build the query params shared by the fetch and the URL (page=1 / falsy omitted).
+  const buildParams = useCallback(() => {
+    const p = new URLSearchParams();
+    if (search) p.set("search", search);
+    if (productType) p.set("productType", productType);
+    if (minPrice) p.set("minPrice", minPrice);
+    if (maxPrice) p.set("maxPrice", maxPrice);
+    if (inStock) p.set("inStock", "true");
+    if (notImported) p.set("notImported", "true");
+    if (withDiscount) p.set("withDiscount", "true");
+    if (lowStock) p.set("lowStock", "true");
+    if (sort) p.set("sort", sort);
+    if (page > 1) p.set("page", String(page));
+    return p;
+  }, [search, productType, minPrice, maxPrice, inStock, notImported, withDiscount, lowStock, sort, page]);
 
   const fetchCatalog = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ page: String(page), limit: "50" });
-      if (search) params.set("search", search);
-      if (productType) params.set("productType", productType);
-      if (minPrice) params.set("minPrice", minPrice);
-      if (maxPrice) params.set("maxPrice", maxPrice);
-      if (inStock) params.set("inStock", "true");
-      if (sort) params.set("sort", sort);
-
+      const params = buildParams();
+      params.set("limit", "50");
       const res = await fetch(`/api/catalog?${params}`);
       if (!res.ok) throw new Error("Failed to fetch catalog");
       const json = await res.json();
@@ -96,14 +150,33 @@ export default function CatalogPage() {
       setError(err instanceof Error ? err.message : "Unknown error");
     }
     setLoading(false);
-  }, [search, productType, minPrice, maxPrice, inStock, sort, page]);
+  }, [buildParams]);
 
   useEffect(() => {
     fetchCatalog();
   }, [fetchCatalog]);
 
-  // Debounced search
-  const [searchInput, setSearchInput] = useState("");
+  // Keep the URL in sync with the active filters (shareable + survives refresh).
+  useEffect(() => {
+    const qs = buildParams().toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [buildParams, router, pathname]);
+
+  // Header stats — fetched once on mount (independent of filters/pagination).
+  const loadStats = useCallback(async () => {
+    try {
+      const res = await fetch("/api/catalog/stats");
+      const json = await res.json();
+      if (json.success) setStats(json.data);
+    } catch {
+      // non-fatal — the cards just stay blank
+    }
+  }, []);
+  useEffect(() => {
+    loadStats();
+  }, [loadStats]);
+
+  // Debounced search.
   useEffect(() => {
     const t = setTimeout(() => {
       setSearch(searchInput);
@@ -121,18 +194,26 @@ export default function CatalogPage() {
     });
   }
 
-  function selectAll() {
+  function selectAllOnPage() {
+    if (!data) return;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const p of data.products) next.add(p.sku);
+      return next;
+    });
+  }
+
+  function deselectAll() {
+    setSelected(new Set());
+  }
+
+  /** Header checkbox: toggles every product on the current page. */
+  function toggleAllOnPage() {
     if (!data) return;
     const allSkus = data.products.map((p) => p.sku);
     const allSelected = allSkus.every((s) => selected.has(s));
-    setSelected((prev) => {
-      const next = new Set(prev);
-      for (const sku of allSkus) {
-        if (allSelected) next.delete(sku);
-        else next.add(sku);
-      }
-      return next;
-    });
+    if (allSelected) deselectAll();
+    else selectAllOnPage();
   }
 
   async function sendToImport() {
@@ -145,6 +226,7 @@ export default function CatalogPage() {
       });
       if (res.ok) {
         setSelected(new Set());
+        setConfirmingImport(false);
         window.location.href = "/import";
       }
     } catch {
@@ -154,7 +236,7 @@ export default function CatalogPage() {
 
   return (
     <div className="p-4 md:p-8">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div>
           <h2 className="text-2xl font-bold text-white">Catalogue</h2>
           <p className="text-gray-400 text-sm mt-0.5">
@@ -166,25 +248,34 @@ export default function CatalogPage() {
             )}
           </p>
         </div>
-        {selected.size > 0 && (
-          <button
-            onClick={sendToImport}
-            className="w-full sm:w-auto px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
-          >
-            Import {selected.size} selected
-          </button>
-        )}
+      </div>
+
+      {/* Stats header */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <StatCard label="Total catalogue" value={stats ? stats.total.toLocaleString() : "…"} />
+        <StatCard label="Importés Shopify" value={stats ? stats.imported.toLocaleString() : "…"} />
+        <StatCard label="Avec rabais actif" value={stats ? stats.withDiscount.toLocaleString() : "…"} />
+        <StatCard
+          label="Dernière sync"
+          value={stats ? (stats.lastSync ? timeAgo(stats.lastSync.ranAt) : "—") : "…"}
+          sub={
+            stats?.lastSync
+              ? `${stats.lastSync.name} · ${stats.lastSync.status === "success" ? "OK" : "erreur"}`
+              : undefined
+          }
+          tone={stats?.lastSync && stats.lastSync.status !== "success" ? "warn" : "default"}
+        />
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 mb-3">
         <div className="md:col-span-2">
           <input
             type="text"
             placeholder="Search products..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className={INPUT_CLASS}
           />
         </div>
         <div>
@@ -194,7 +285,7 @@ export default function CatalogPage() {
               setProductType(e.target.value);
               setPage(1);
             }}
-            className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className={INPUT_CLASS}
           >
             <option value="">All categories</option>
             {data?.productTypes
@@ -213,7 +304,7 @@ export default function CatalogPage() {
               setSort(e.target.value);
               setPage(1);
             }}
-            className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className={INPUT_CLASS}
           >
             <option value="">Sort by name</option>
             <option value="best_sellers">Best sellers (14d)</option>
@@ -234,7 +325,7 @@ export default function CatalogPage() {
               setMinPrice(e.target.value);
               setPage(1);
             }}
-            className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className={INPUT_CLASS}
           />
           <input
             type="number"
@@ -244,24 +335,85 @@ export default function CatalogPage() {
               setMaxPrice(e.target.value);
               setPage(1);
             }}
-            className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className={INPUT_CLASS}
           />
         </div>
-        <div className="flex items-center">
-          <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={inStock}
-              onChange={(e) => {
-                setInStock(e.target.checked);
-                setPage(1);
-              }}
-              className="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-blue-500"
-            />
-            In stock only
-          </label>
-        </div>
       </div>
+
+      {/* Advanced toggle filters */}
+      <div className="flex flex-wrap gap-2 mb-6">
+        <FilterToggle
+          label="En stock"
+          active={inStock}
+          onChange={(v) => {
+            setInStock(v);
+            setPage(1);
+          }}
+        />
+        <FilterToggle
+          label="Non importés"
+          active={notImported}
+          onChange={(v) => {
+            setNotImported(v);
+            setPage(1);
+          }}
+        />
+        <FilterToggle
+          label="Avec rabais"
+          active={withDiscount}
+          onChange={(v) => {
+            setWithDiscount(v);
+            setPage(1);
+          }}
+        />
+        <FilterToggle
+          label="Stock faible (< 5)"
+          active={lowStock}
+          onChange={(v) => {
+            setLowStock(v);
+            setPage(1);
+          }}
+        />
+      </div>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 p-3 bg-blue-950/20 border border-blue-900/40 rounded-xl">
+          <div className="flex items-center gap-3 text-sm text-blue-200">
+            <span className="font-medium">{selected.size} sélectionné{selected.size > 1 ? "s" : ""}</span>
+            <button onClick={selectAllOnPage} className="text-blue-400 hover:text-blue-300 underline-offset-2 hover:underline">
+              Sélectionner la page
+            </button>
+            <button onClick={deselectAll} className="text-gray-400 hover:text-white underline-offset-2 hover:underline">
+              Désélectionner tout
+            </button>
+          </div>
+          {confirmingImport ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-300">Importer {selected.size} produit{selected.size > 1 ? "s" : ""} ?</span>
+              <button
+                onClick={sendToImport}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                Confirmer
+              </button>
+              <button
+                onClick={() => setConfirmingImport(false)}
+                className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors"
+              >
+                Annuler
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmingImport(true)}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              Importer la sélection ({selected.size})
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Loading indicator for filter/page changes */}
       {loading && data && (
@@ -349,7 +501,7 @@ export default function CatalogPage() {
                     <th className="px-4 py-3 text-left w-10">
                       <input
                         type="checkbox"
-                        onChange={selectAll}
+                        onChange={toggleAllOnPage}
                         checked={
                           data.products.length > 0 &&
                           data.products.every((p) => selected.has(p.sku))
@@ -473,5 +625,55 @@ export default function CatalogPage() {
         </>
       ) : null}
     </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  sub,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "default" | "warn";
+}) {
+  return (
+    <div className="p-4 bg-gray-900 border border-gray-800 rounded-xl">
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className={`text-2xl font-bold mt-1 ${tone === "warn" ? "text-amber-400" : "text-white"}`}>
+        {value}
+      </div>
+      {sub && <div className="text-[11px] text-gray-600 mt-0.5 truncate">{sub}</div>}
+    </div>
+  );
+}
+
+function FilterToggle({
+  label,
+  active,
+  onChange,
+}: {
+  label: string;
+  active: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label
+      className={`${TOGGLE_BASE} ${
+        active
+          ? "bg-blue-600/15 border-blue-600/50 text-blue-300"
+          : "bg-gray-900 border-gray-800 text-gray-400 hover:text-white"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={active}
+        onChange={(e) => onChange(e.target.checked)}
+        className="rounded bg-gray-800 border-gray-700 text-blue-500 focus:ring-blue-500"
+      />
+      {label}
+    </label>
   );
 }
