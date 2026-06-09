@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.48.0] - 2026-06-08
+
+### Added
+- **Meta Dynamic Ads foundation.** `createAdSet(adAccountId, params)` +
+  `CreateAdSetParams` in `src/lib/meta-ads-client.ts` — creates a (PAUSED) ad set with
+  nested `targeting` + `promoted_object`, defaulting to `IMPRESSIONS` /
+  `LOWEST_COST_WITHOUT_CAP` / `OFFSITE_CONVERSIONS`. Complements the existing
+  `createCampaign`.
+- **`scripts/create-meta-dynamic-ads.mjs`** — builds the first catalog-retargeting
+  campaign + ad set for `act_20658834` (catalog `1103064966519153`). **Dry-run by
+  default** (prints payloads, sends nothing); `--apply` gated behind a token preflight
+  and a required `--audience-id`. Both objects are created PAUSED.
+- **`docs/META-ADS-SETUP.md`**: Dynamic Ads section (payloads, ODAX/`OUTCOME_SALES` and
+  `product_set_id` caveats, audience requirement) + `createAdSet` in the API table.
+- Tests: 3 new in `tests/meta-ads-client.test.ts` (catalog-sales objective, ad-set
+  defaults, overrides).
+
 ## [0.5.47.0] - 2026-06-08
 
 Catch-up version bump: three video feature PRs (#113, #114, #115) merged to `main`

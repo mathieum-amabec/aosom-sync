@@ -7,6 +7,7 @@ import {
   getAdAccounts,
   getCampaigns,
   createCampaign,
+  createAdSet,
   getInsights,
   __resetRateLimit,
 } from "@/lib/meta-ads-client";
@@ -39,6 +40,9 @@ describe("meta-ads-client", () => {
       }
       if (urlStr.includes("/campaigns") && (init?.method || "GET") === "POST") {
         return new Response(JSON.stringify({ id: "camp_new" }), { status: 200 });
+      }
+      if (urlStr.includes("/adsets") && (init?.method || "GET") === "POST") {
+        return new Response(JSON.stringify({ id: "adset_new" }), { status: 200 });
       }
       if (urlStr.includes("/campaigns")) {
         return new Response(JSON.stringify({ data: [{ id: "camp_1", name: "C1", status: "ACTIVE" }] }), { status: 200 });
@@ -91,6 +95,58 @@ describe("meta-ads-client", () => {
     await createCampaign("act_111", { name: "T", objective: "OUTCOME_SALES", status: "ACTIVE", dailyBudget: 2000 });
     const post = calls.find((c) => c.method === "POST")!;
     expect(post.body).toMatchObject({ status: "ACTIVE", daily_budget: "2000" });
+  });
+
+  it("createCampaign forwards the PRODUCT_CATALOG_SALES objective for Dynamic Ads", async () => {
+    const res = await createCampaign("act_20658834", {
+      name: "Ameublo Direct — Retargeting",
+      objective: "PRODUCT_CATALOG_SALES",
+    });
+    expect(res.id).toBe("camp_new");
+    const post = calls.find((c) => c.url.includes("/campaigns") && c.method === "POST")!;
+    expect(post.url).toContain("/act_20658834/campaigns");
+    expect(post.body).toMatchObject({
+      name: "Ameublo Direct — Retargeting",
+      objective: "PRODUCT_CATALOG_SALES",
+      status: "PAUSED",
+      special_ad_categories: ["NONE"],
+    });
+  });
+
+  it("createAdSet POSTs nested targeting + promoted_object with safe defaults", async () => {
+    const res = await createAdSet("20658834", {
+      campaignId: "camp_new",
+      name: "Retargeting — Visiteurs 30j",
+      targeting: { geo_locations: { countries: ["CA"] }, custom_audiences: [{ id: "aud_1" }] },
+      promotedObject: { product_catalog_id: "1103064966519153" },
+    });
+    expect(res.id).toBe("adset_new");
+    const post = calls.find((c) => c.url.includes("/adsets") && c.method === "POST")!;
+    expect(post.url).toContain("/act_20658834/adsets");
+    expect(post.body).toMatchObject({
+      campaign_id: "camp_new",
+      name: "Retargeting — Visiteurs 30j",
+      targeting: { geo_locations: { countries: ["CA"] }, custom_audiences: [{ id: "aud_1" }] },
+      promoted_object: { product_catalog_id: "1103064966519153" },
+      billing_event: "IMPRESSIONS",
+      bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+      optimization_goal: "OFFSITE_CONVERSIONS",
+      status: "PAUSED",
+    });
+  });
+
+  it("createAdSet forwards explicit budget/status overrides", async () => {
+    await createAdSet("act_111", {
+      campaignId: "c1",
+      name: "AS",
+      targeting: { geo_locations: { countries: ["CA"] } },
+      promotedObject: { product_set_id: "ps_1", custom_event_type: "PURCHASE" },
+      dailyBudget: 1500,
+      status: "ACTIVE",
+      optimizationGoal: "VALUE",
+    });
+    const post = calls.find((c) => c.url.includes("/adsets") && c.method === "POST")!;
+    expect(post.body).toMatchObject({ daily_budget: "1500", status: "ACTIVE", optimization_goal: "VALUE" });
   });
 
   it("getInsights passes a time_range and returns metric rows", async () => {

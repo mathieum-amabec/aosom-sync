@@ -79,6 +79,7 @@ curl -s --cookie "session=<your-cookie>" \
 | `getAdAccounts()` | List ad accounts the token manages |
 | `getCampaigns(adAccountId)` | List **active** campaigns |
 | `createCampaign(adAccountId, params)` | Create a campaign (defaults to `PAUSED`) |
+| `createAdSet(adAccountId, params)` | Create an ad set with targeting + `promoted_object` (defaults to `PAUSED`) |
 | `getAdSets(campaignId)` | List ad sets in a campaign |
 | `getInsights(adAccountId, dateRange)` | Spend / reach / impressions / clicks / CPC / CPM / CTR / ROAS |
 
@@ -102,6 +103,67 @@ await createCampaign("act_123456789012345", {
   dailyBudget: 2000, // 20.00 in the account currency's minor unit (cents)
 });
 ```
+
+## Dynamic Ads — catalog retargeting (first campaign)
+
+Goal: retarget 30-day site visitors with products from the Meta catalog
+(**966 products**, catalog id `1103064966519153`, Pixel connected). One **PAUSED**
+campaign + ad set on ad account `act_20658834`.
+
+**Model:** one `PRODUCT_CATALOG_SALES` campaign → one ad set that targets a custom
+audience (site visitors) in Canada and promotes the catalog. Everything is created
+**PAUSED**; you review and activate in Ads Manager.
+
+### Scripted creation (dry-run first)
+
+`scripts/create-meta-dynamic-ads.mjs` builds and (optionally) sends the payloads.
+It is **dry-run by default — it prints the payloads and sends nothing**:
+
+```bash
+# 1. Dry-run — review the exact campaign + ad set payloads (no API call)
+node scripts/create-meta-dynamic-ads.mjs
+
+# 2. Create for real (both PAUSED). --audience-id is REQUIRED so the ad set
+#    actually retargets instead of spending on cold traffic.
+node scripts/create-meta-dynamic-ads.mjs --apply --audience-id <30d-visitors-audience-id>
+```
+
+Flags: `--audience-id <id>` (custom audience of site visitors — required for
+`--apply`), `--product-set-id <id>` (promote a product *set* instead of the whole
+catalog), `--objective <obj>` (default `PRODUCT_CATALOG_SALES`), `--daily-budget
+<cents>`.
+
+### Payloads
+
+```jsonc
+// POST /act_20658834/campaigns
+{ "name": "Ameublo Direct — Retargeting", "objective": "PRODUCT_CATALOG_SALES",
+  "status": "PAUSED", "special_ad_categories": ["NONE"] }
+
+// POST /act_20658834/adsets
+{ "campaign_id": "<from step 1>", "name": "Retargeting — Visiteurs 30j",
+  "targeting": { "geo_locations": { "countries": ["CA"] },
+                 "custom_audiences": [{ "id": "<30d-visitors-audience-id>" }] },
+  "promoted_object": { "product_catalog_id": "1103064966519153" },
+  "billing_event": "IMPRESSIONS", "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
+  "optimization_goal": "OFFSITE_CONVERSIONS", "status": "PAUSED" }
+```
+
+### Caveats to confirm before `--apply`
+
+- **Objective taxonomy (ODAX).** `PRODUCT_CATALOG_SALES` is the legacy objective.
+  On newer accounts Meta may require `OUTCOME_SALES` instead (pass `--objective
+  OUTCOME_SALES`). The dry-run lets you confirm which the account accepts.
+- **`promoted_object`.** Catalog-sales ad sets usually want a **product set**
+  (`product_set_id` + `custom_event_type: PURCHASE`), not the bare catalog id. Use
+  `--product-set-id <id>` if Meta rejects `product_catalog_id`. Create a product set
+  (or use "All products") in Commerce Manager → Catalog → Product sets.
+- **Custom audience.** The 30-day visitors audience must already exist (Pixel-based
+  Website Custom Audience). The script refuses `--apply` without `--audience-id` so a
+  retargeting ad set can't accidentally run against cold traffic.
+
+> The same payloads are available programmatically via `createCampaign` +
+> `createAdSet` in `src/lib/meta-ads-client.ts` (both default to `PAUSED`).
 
 ## Troubleshooting
 
