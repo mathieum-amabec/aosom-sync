@@ -125,6 +125,69 @@ Les **pages vues** (dont les pages produit) sont suivies automatiquement.
 
 ---
 
+## ÉTAPE 8 — Vérification automatisée (API + storefront)
+
+> **Statut au 2026-06-08 : tracking confirmé fonctionnel. ✅**
+> `UMAMI_WEBSITE_ID` est défini (`e18dd137-d7c1-46d9-9647-63e936f48cff`) et le script est
+> servi en production sur `ameublodirect.ca`.
+
+Deux façons de vérifier le tracking **par script**, selon qu'on dispose d'une clé API.
+
+### A) Sans clé API — vérifier que le script + les events sont en ligne (recommandé)
+
+Ne demande **aucun secret**. Confirme que le storefront sert bien Umami et les events :
+
+```bash
+# 1) Le script Umami est-il servi (200) ?
+curl -s -o /dev/null -w "%{http_code}\n" https://cloud.umami.is/script.js          # -> 200
+
+# 2) Le website-id est-il injecté dans la page ?
+curl -s -A "Mozilla/5.0" https://ameublodirect.ca/ | grep -o 'data-website-id="[^"]*"'
+#   -> data-website-id="e18dd137-d7c1-46d9-9647-63e936f48cff"  (doit == UMAMI_WEBSITE_ID)
+
+# 3) Les events déclaratifs sont-ils présents ?
+curl -s -A "Mozilla/5.0" https://ameublodirect.ca/ | grep -o 'data-umami-event="[^"]*"' | sort -u
+#   -> "Hero CTA", "Messenger Click"
+```
+
+> Les events `Sticky ATC` et `Add to Cart` sont déclenchés par `umami.track()` (JS) sur les
+> **fiches produit**, pas par un attribut `data-umami-event` sur l'accueil — ils n'apparaissent
+> donc pas dans le grep de la page d'accueil. C'est normal (voir ÉTAPE 5).
+
+Vérifié le 2026-06-08 : (1) → `200`, (2) → id concordant, (3) → `Hero CTA` + `Messenger Click`.
+
+### B) Avec clé API — interroger les stats (nécessite `UMAMI_API_KEY`)
+
+> ⚠️ **Pas configuré actuellement** : aucune `UMAMI_API_KEY` dans `.env.local`. L'appel stats
+> renvoie `400/401` sans clé. Cette section décrit la marche à suivre quand on en aura besoin.
+
+L'API Umami Cloud passe par **`api.umami.is`** (et non `cloud.umami.is`) et s'authentifie avec
+l'en-tête **`x-umami-api-key`** (pas un `Bearer`). Pour obtenir une clé :
+Umami Cloud → **Settings → API keys → + Create key**, puis la coller dans `.env.local` :
+
+```dotenv
+# .env.local (gitignored)
+UMAMI_API_KEY=umami_xxx...
+```
+
+Appel des stats (fenêtre temporelle en **millisecondes epoch**, `startAt`/`endAt` requis) :
+
+```bash
+curl -s "https://api.umami.is/v1/websites/$UMAMI_WEBSITE_ID/stats?startAt=0&endAt=9999999999999" \
+  -H "x-umami-api-key: $UMAMI_API_KEY"
+# -> { "pageviews": {"value":N}, "visitors": {...}, "visits": {...}, "bounces": {...}, "totaltime": {...} }
+```
+
+Endpoints utiles : `/v1/websites/{id}/stats`, `/v1/websites/{id}/metrics?type=event` (events custom),
+`/v1/websites/{id}/active` (visiteurs temps réel). Doc : <https://umami.is/docs/api>.
+
+### C) Vérification visuelle (dashboard, sans script)
+
+Voir **ÉTAPE 6** : ouvrir le storefront puis Umami → **Realtime** ; ou DevTools → **Network** →
+filtrer `umami` → voir `script.js` (200) et les `api/send` (202) à chaque page vue / event.
+
+---
+
 ## Ce qui est déjà fait (côté code) ✅
 
 | Élément                         | Emplacement / mécanisme                                                       |
