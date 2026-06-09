@@ -2,6 +2,30 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.0] - 2026-06-09
+
+Live Shop Pay widget cleanup on the product page + the 2026-06-09 security audit.
+
+### Changed
+- **Shop Pay finance block (live theme `160059195497`, `templates/product.json`).**
+  The `shop_pay_finance` block computed its own "Payez en 4 × $XX avec Shop Pay" line
+  (`price ÷ 4`), which can diverge from the real Shop Pay Installments terms. Replaced it
+  with a branded navy/gold banner carrying no hardcoded figure, plus a CSS rule enlarging the
+  **native** `<shopify-payment-terms>` widget (`font-size:18px; font-weight:600`) so Shopify
+  renders the actual installment amounts. Neutral wording ("plusieurs versements", not "sans
+  intérêts") to avoid an inaccurate interest-free claim on the storefront. Applied via the new
+  idempotent `scripts/fix-shop-pay-widget.mjs` (anti-clobber guard, PUT confirmed 200).
+- **`scripts/_shopify-lib.mjs`**: corrected a stale comment — theme `160059195497` is now
+  `role:main` (published/live), no longer the unpublished preview copy.
+
+### Security
+- **`/cso` daily audit (8/10 gate) — no P0/P1.** `docs/SECURITY-BACKLOG.md` gains the
+  2026-06-09 section covering #125/#126/#127 and the theme edit. Verified clean: all 9 cron
+  routes self-gate (`verifyCronSecret` + `timingSafeEqual`), the new paid `/api/videos/generate`
+  route is session-gated, price-alert uses a server-side baseline price. New **P3-7** (extract
+  the copy-pasted `verifyCronSecret` into a shared `lib/cron-auth.ts` helper); **P3-5/P3-6**
+  (video-serve path containment + redirect host allowlist) re-confirmed still open.
+
 ## [0.5.52.0] - 2026-06-09
 
 Recâblage du pipeline vidéo sur `video_jobs` comme source de vérité unique
