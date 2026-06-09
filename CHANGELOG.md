@@ -2,6 +2,35 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.50.0] - 2026-06-09
+
+Catch-up version bump: four PRs merged to `main` without bumping VERSION/CHANGELOG
+(VERSION stayed at 0.5.47.0–0.5.48.0 through these merges). This entry documents
+them; no code change. Note: 0.5.49.0 was PR #121 (meta Dynamic Ads).
+
+### Added
+- **Klaviyo email flows + Umami verification** (#119): `scripts/setup-klaviyo-flows.mjs`
+  creates the `Newsletter` list, bootstraps the `Price Drop Alert` custom metric, and
+  builds the four core flows (Welcome Series, Abandoned Cart, Post-Purchase review
+  request, Price Drop Alert) in **draft** via the Klaviyo API (revision `2025-01-15`
+  for flow creation). Bilingual FR/EN templates; IDs recorded in
+  `docs/KLAVIYO-FLOWS.md`. Confirmed Umami tracking is live on the storefront and
+  documented API + no-key verification in `docs/UMAMI-SETUP.md`.
+- **FFmpeg engine wired into the video dashboard** (#120): the "Générer" tab renders a
+  real MP4 through `/api/videos/generate` (async job + status polling), surfacing the
+  FFmpeg slideshow engine in the UI.
+- **Catalogue improvements** (#123): advanced filters, bulk import, and a stats header
+  on the catalogue page.
+
+### Changed
+- **Video renders → Vercel Blob + dashboard polish** (#122): `runFfmpegGeneration`
+  uploads the rendered MP4 to Vercel Blob and stores the permanent `video_url`, so
+  `GET /api/video-serve/:id` works across ephemeral Vercel instances (falls back to
+  on-disk serving when no Blob token is set, and a transient Blob failure keeps the
+  job `ready`). Dashboard: post-submit redirect to the queue tab + clearer empty
+  states. `BLOB_READ_WRITE_TOKEN` documented in `.env.example` and
+  `docs/VIDEO-PIPELINE-FFMPEG.md`.
+
 ## [0.5.49.0] - 2026-06-09
 
 ### Added
