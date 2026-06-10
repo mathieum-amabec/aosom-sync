@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.7] - 2026-06-10
+## [0.5.53.8] - 2026-06-10
 
 ### Changed
 - **A2 — quantity steppers removed from product cards (PREVIEW `160213696617` only).**
@@ -18,7 +18,7 @@ All notable changes to Aosom Sync will be documented in this file.
   `fr.json` change). There is nothing to guard with `{% unless variant.title == 'Default
   Title' %}`. Awaiting an example card URL from Mat to locate the actual source.
 
-## [0.5.53.6] - 2026-06-10
+## [0.5.53.7] - 2026-06-10
 
 ### Changed
 - **Phase 1 anti-cheap PDP/home fixes — PREVIEW theme `160213696617` only** (never live
@@ -39,6 +39,25 @@ All notable changes to Aosom Sync will be documented in this file.
 - **Not applied: literal "##" in descriptions.** A full scan found **0/502** product
   descriptions contain "##"; the description block renders raw HTML with nothing to strip.
   Flagged for Mat (needs a specific example URL — likely a custom_liquid block or metafield).
+
+## [0.5.53.6] - 2026-06-10
+
+### Changed (preview theme `160213696617` only — live untouched)
+- **A3 og:image:** uploaded an Unsplash 1200×630 patio-lifestyle image as
+  `assets/og-image-social.jpg` and injected `<meta property="og:image">` (via `asset_url`)
+  before `</head>` in the preview `layout/theme.liquid`. Caveat documented: it coexists with
+  Shopify's `content_for_header` og:image (2 tags) — the clean fix remains the admin Social
+  sharing image setting. `scripts/og-unsplash-search.mjs` + `apply-og-newsletter-preview.mjs`.
+- **A5 newsletter dedup:** removed the home-body `lc_newsletter` ("Restez à l'affût") section
+  from the preview `templates/index.json` (section + `order`); kept the site-wide footer
+  `newsletter_DPwWK7`. Klaviyo (account XAvTkS) unaffected — both were native Shopify forms
+  feeding the Shopify→Klaviyo sync.
+
+### Docs
+- **A4 meta description:** `docs/HOME-META-DESCRIPTION.md` now states the final chosen V1 text
+  and the exact admin path (Online Store → Preferences → Homepage meta description) — not
+  API-writable. `docs/DATA-OPS-LOG.md` logs the three preview-theme writes. The apply script
+  hard-aborts if the target is the live theme or not unpublished.
 
 ## [0.5.53.5] - 2026-06-10
 
