@@ -3,6 +3,28 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-10 — B1: Discount credibility audit (DRY-RUN, no writes)
+
+Scanned all **502** Shopify products via Admin GraphQL (read-only, ~2 req/s, 3 pages) for
+variants with `compareAtPrice > price`. Per product, the headline discount = the variant with
+the **largest** discount %. Bucketed against the store rule (≥10% to show a strikethrough):
+
+| Bucket | Rule | Count |
+| --- | --- | --- |
+| `remove` | `< 10%` (not credible) | **0** |
+| `ok` | `10–40%` | **24** |
+| `review` | `> 40%` (defensible?) | **4** |
+
+Only **28 / 502** products carry a compare-at (sale) price. **Nothing to remove** (0 below
+10%). The 4 `review` items (highest first): 62.5% (`7736546033769` Serre portable 4 étages),
+47.6% (`7736568971369` Gazebo 10×13), 46.9% (`7736553177193` Clôture jardin 152 cm), 46.2%
+(`7736550228073` Lampadaire solaire 3 têtes). Whether these are defensible depends on the real
+MSRP vs the strikethrough — manual call for Mat.
+
+Report: `docs/discount-audit.csv` (UTF-8 BOM; columns product_id, title, price,
+compare_at_price, discount_pct, bucket). Generator: `scripts/discount-audit.mjs` (read-only).
+**No product writes performed.** No remediation applied — awaiting Mat's decision.
+
 ## 2026-06-10 — A3/A4 finalized on the LIVE theme 160059195497: og:image + home meta description (authorized)
 
 Mat authorized editing the live theme this round. Two SEO changes applied to the LIVE theme

@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.9] - 2026-06-10
+
+### Docs
+- **B1 — discount credibility audit (dry-run, no writes).** `scripts/discount-audit.mjs`
+  scans all 502 Shopify products (read-only GraphQL) for variants with
+  `compareAtPrice > price`, computes the headline discount %, and buckets it against the
+  ≥10% strikethrough rule. Result: 28 on-sale products — **0 below 10%** (nothing to remove),
+  24 in 10–40% (ok), 4 above 40% (review). Report in `docs/discount-audit.csv`
+  (product_id, title, price, compare_at_price, discount_pct, bucket). No product writes; no
+  remediation applied (awaiting decision).
+
 ## [0.5.53.8] - 2026-06-10
 
 ### Changed (LIVE theme `160059195497` — authorized)
