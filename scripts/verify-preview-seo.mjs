@@ -1,0 +1,12 @@
+import { getAsset } from "./_shopify-lib.mjs";
+const P = "160213696617";
+const META = "Aménagez votre patio";
+const mt = await getAsset("snippets/meta-tags.liquid", P);
+const th = await getAsset("layout/theme.liquid", P);
+console.log("meta-tags has og-image-social.jpg:", mt.includes("og-image-social.jpg"));
+console.log("meta-tags has index branch:", mt.includes("request.page_type == 'index'"));
+console.log("meta-tags has og_description override:", mt.includes(META));
+console.log("theme.liquid has description (index) text:", th.includes(META));
+const oldInject = `  <meta property="og:image" content="{{ 'og-image-social.jpg' | asset_url }}">\n</head>`;
+console.log("theme.liquid OLD og injection still present:", th.includes(oldInject));
+console.log("theme.liquid og:image tag count:", (th.match(/og:image/g) || []).length);

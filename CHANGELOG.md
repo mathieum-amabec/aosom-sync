@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.13] - 2026-06-10
+
+### Changed (PREVIEW theme `160213696617` only — live untouched)
+- **B2 — removed fabricated testimonials.** The "Évaluations de nos clients" multicolumn (5
+  invented reviews, 2 "Anonyme") was removed from `index.json` rather than replaced with new
+  fake named testimonials (deceptive advertising). The real Judge.me widget stays.
+- **B3 — carousels 3 → 2.** Removed `featured_collection1` ("Mobilier extérieur"), which
+  overlapped "Coups de cœur" by ~93% (217/≈233 products). Kept "Meilleures offres" (rabais) +
+  "Coups de cœur".
+- **B3 — reduced "livraison gratuite" repetition** on the home from 8 mentions to 3 (kept the
+  hero headline + reassurance bar + structural `why_us` icon; removed/reworded `lc_story2`,
+  `lc_trust`, `lc_howit`, `shop_pay_home`, `rich_text`).
+- **Preview SEO finalize.** Applied A3 (og:image) + A4 (meta description) to the preview too,
+  so promoting it does not revert the live SEO. Removed the earlier duplicate og injection.
+
+### Added
+- **`docs/preview-qa-report.md`** — automated QA across the live storefront + preview assets:
+  **16 ✅ / 0 ❌ / 0 ⚠️**. Scripts under `scripts/*qa*`, `apply-homepage-improvements.mjs`,
+  `apply-preview-seo-finalize.mjs` (all preview-guarded).
+
 ## [0.5.53.12] - 2026-06-10
 
 ### Fixed (P0, PREVIEW theme `160213696617` — live untouched)

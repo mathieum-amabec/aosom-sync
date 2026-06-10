@@ -3,6 +3,32 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-10 — B2/B3 + preview SEO finalize on PREVIEW theme 160213696617 (no live edit)
+
+All writes on the unpublished preview `160213696617`; live `160059195497` not touched
+(`scripts/apply-homepage-improvements.mjs` + `apply-preview-seo-finalize.mjs` are preview-guarded).
+
+- **B2 testimonials:** the fabricated "Évaluations de nos clients" multicolumn
+  (`multicolumn_eWXcry`, 5 invented reviews incl. 2 "Anonyme") was **removed** from
+  `templates/index.json` (section + order). Per Mat's decision — **not** replaced with new
+  fabricated named testimonials (deceptive advertising / QC Consumer Protection Act). The real
+  Judge.me widget on the home is kept. Judge.me public API returned 401 (no token), so review
+  count could not be auto-verified.
+- **B3 carousels:** removed the redundant 3rd carousel `featured_collection1` ("Mobilier
+  extérieur", manual collection) — it overlapped "Coups de cœur" by **217/≈233 products
+  (~93%)**. Kept "Meilleures offres" (`rabais`) + "Coups de cœur" (`coups-de-coeur`, smart).
+- **B3 "livraison gratuite" repetition:** home went from 8 mentions to 3. Kept `lc_hero`
+  (headline) + `lc_trustbar` (✓ reassurance bar); the structural `why_us` SVG icon kept.
+  Removed/reworded in `lc_story2`, `lc_trust`, `lc_howit` (step → "Livraison à domicile"),
+  `shop_pay_home` mini-bar, and the all-caps `rich_text` banner.
+- **Preview SEO finalize (promotion-safety):** the preview lacked A3/A4 (those were applied to
+  the live theme only — promoting the preview would have reverted them). Applied the same
+  clean edits to the preview: removed the old duplicate og injection from `layout/theme.liquid`,
+  added the `request.page_type == 'index'` og:image branch to `meta-tags.liquid` (asset already
+  on preview), and the meta-description index branch in `theme.liquid` + `meta-tags.liquid`.
+
+QA (`scripts/preview-qa.mjs`): **16 ✅ / 0 ❌ / 0 ⚠️**. Report: `docs/preview-qa-report.md`.
+
 ## 2026-06-10 — P0 fix: featured-collection pagination on PREVIEW theme (no live edit)
 
 Fixed the Liquid render error on the preview theme `160213696617` introduced by the Phase-1
