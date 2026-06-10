@@ -1,14 +1,33 @@
 import { describe, it, expect } from "vitest";
+import sharp from "sharp";
 import {
   parseSku,
   stripColorFromTitle,
   mergeVariants,
   COLOR_MAP,
   selectProductImages,
+  selectProductImagesAsync,
+  classifyImageBackground,
   smallestUrlDimension,
   MAX_IMAGES_PER_PRODUCT,
 } from "@/lib/variant-merger";
 import type { AosomProduct } from "@/types/aosom";
+
+// Tiny PNG fixtures for background classification (generated with sharp).
+const whitePng = await sharp({ create: { width: 120, height: 120, channels: 3, background: "#ffffff" } }).png().toBuffer();
+const colorPng = await sharp({ create: { width: 120, height: 120, channels: 3, background: "#2c5f8a" } }).png().toBuffer();
+function fakeFetch(map: Record<string, Buffer>): typeof fetch {
+  return (async (url: string | URL | Request) => {
+    const key = String(url);
+    const buf = map[key];
+    if (!buf) return { ok: false, headers: { get: () => null }, arrayBuffer: async () => new ArrayBuffer(0) } as unknown as Response;
+    return {
+      ok: true,
+      headers: { get: (h: string) => (h.toLowerCase() === "content-length" ? String(buf.byteLength) : null) },
+      arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+}
 
 describe("parseSku", () => {
   it("extracts color from known 2-letter suffix", () => {
@@ -207,5 +226,54 @@ describe("selectProductImages", () => {
 
   it("handles an empty list", () => {
     expect(selectProductImages([])).toEqual([]);
+  });
+});
+
+describe("classifyImageBackground", () => {
+  const W = "https://x.com/studio.jpg";
+  const C = "https://x.com/scene.jpg";
+  const fetchImpl = fakeFetch({ [W]: whitePng, [C]: colorPng });
+
+  it("flags a white studio background", async () => {
+    expect(await classifyImageBackground(W, fetchImpl)).toBe("white_bg");
+  });
+  it("flags a non-white shot as lifestyle", async () => {
+    expect(await classifyImageBackground(C, fetchImpl)).toBe("lifestyle");
+  });
+  it("returns unknown when the fetch fails (failsafe)", async () => {
+    const boom = (async () => { throw new Error("net"); }) as unknown as typeof fetch;
+    expect(await classifyImageBackground(W, boom)).toBe("unknown");
+  });
+  it("returns unknown on a non-ok response", async () => {
+    expect(await classifyImageBackground("https://x.com/missing.jpg", fetchImpl)).toBe("unknown");
+  });
+});
+
+describe("selectProductImagesAsync", () => {
+  const W = "https://x.com/studio.jpg";
+  const C = "https://x.com/scene.jpg";
+  const fetchImpl = fakeFetch({ [W]: whitePng, [C]: colorPng });
+
+  it("promotes the lifestyle (non-white) shot ahead of the white-bg one", async () => {
+    expect(await selectProductImagesAsync([W, C], fetchImpl)).toEqual([C, W]);
+  });
+
+  it("keeps a URL-regex lifestyle hit first without downloading it", async () => {
+    const L = "https://x.com/lifestyle-1.jpg"; // regex hit, never fetched
+    const out = await selectProductImagesAsync([W, L], fetchImpl);
+    expect(out[0]).toBe(L);
+    expect(out[1]).toBe(W);
+  });
+
+  it("keeps CSV order when every image is unknown (failsafe)", async () => {
+    const boom = (async () => { throw new Error("net"); }) as unknown as typeof fetch;
+    const imgs = ["https://x.com/a.jpg", "https://x.com/b.jpg"];
+    expect(await selectProductImagesAsync(imgs, boom)).toEqual(imgs);
+  });
+
+  it("still drops sub-800px images before ordering", async () => {
+    const small = "https://x.com/scene_400x400.jpg"; // dropped by MIN_IMAGE_PX
+    const out = await selectProductImagesAsync([small, W], fetchImpl);
+    expect(out).toEqual([W]);
   });
 });

@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.13] - 2026-06-10
+## [0.5.53.15] - 2026-06-10
 
 ### Added (Phase 3 — Aosom video ingest, DRY-RUN)
 - **`scripts/aosom-video-ingest-dry-run.mjs`** (read-only): validates the Shopify API path
@@ -15,6 +15,47 @@ All notable changes to Aosom Sync will be documented in this file.
     (covered by `write_products`), not the Files API. **No upload, no product change.**
   - Report: `docs/aosom-video-ingest-dry-run.md`. Real ingestion (upload bytes +
     `productCreateMedia` + poll to READY) is **NOT** done — awaiting Mat's validation.
+
+## [0.5.53.14] - 2026-06-10
+
+### Added (Phase 2 — lifestyle featured image, DRY-RUN)
+- **White-background detection for featured-image selection.** `variant-merger.ts` gains an
+  async curation path: `classifyImageBackground` downloads an image (≤5s, ≤2MB) and measures
+  the near-white pixel ratio in its outer-10% border via `sharp` (lazy-imported); >80% reads
+  as a white studio background, <80% as lifestyle. `selectProductImagesAsync` orders images
+  lifestyle-first (URL regex OR border analysis) → CSV order (unknown/failed) → white
+  backgrounds last, keeping the sub-800px filter and 8-image cap. Every failure path
+  (timeout, oversize, decode/network error) degrades to "keep CSV order" (failsafe).
+- **Job 3 integration:** `import-pipeline.ts` (`queueForImport`) now curates images via the
+  async path, so **new imports** get the lifestyle-first ordering. The daily sync is
+  untouched (the sync URL-only `selectProductImages` stays for catalog-scale paths).
+- **DRY-RUN report:** `scripts/lifestyle-image-dry-run.mts` (read-only) ran the heuristic on
+  the 30 top-seller SKUs (docs/audit-pdp-video.md). **24/30 would switch their featured image
+  from a white-studio shot to a lifestyle shot**; 6 already lifestyle. Report:
+  `docs/lifestyle-image-dry-run.csv`. No Shopify/DB writes. Backfill of existing products
+  awaits Mat's validation.
+- Tests: `classifyImageBackground` + `selectProductImagesAsync` covered (sharp-generated
+  fixtures, injected fetch, failsafe). Full suite 765 green, `tsc --noEmit` clean.
+
+## [0.5.53.13] - 2026-06-10
+
+### Changed (PREVIEW theme `160213696617` only — live untouched)
+- **B2 — removed fabricated testimonials.** The "Évaluations de nos clients" multicolumn (5
+  invented reviews, 2 "Anonyme") was removed from `index.json` rather than replaced with new
+  fake named testimonials (deceptive advertising). The real Judge.me widget stays.
+- **B3 — carousels 3 → 2.** Removed `featured_collection1` ("Mobilier extérieur"), which
+  overlapped "Coups de cœur" by ~93% (217/≈233 products). Kept "Meilleures offres" (rabais) +
+  "Coups de cœur".
+- **B3 — reduced "livraison gratuite" repetition** on the home from 8 mentions to 3 (kept the
+  hero headline + reassurance bar + structural `why_us` icon; removed/reworded `lc_story2`,
+  `lc_trust`, `lc_howit`, `shop_pay_home`, `rich_text`).
+- **Preview SEO finalize.** Applied A3 (og:image) + A4 (meta description) to the preview too,
+  so promoting it does not revert the live SEO. Removed the earlier duplicate og injection.
+
+### Added
+- **`docs/preview-qa-report.md`** — automated QA across the live storefront + preview assets:
+  **16 ✅ / 0 ❌ / 0 ⚠️**. Scripts under `scripts/*qa*`, `apply-homepage-improvements.mjs`,
+  `apply-preview-seo-finalize.mjs` (all preview-guarded).
 
 ## [0.5.53.12] - 2026-06-10
 
