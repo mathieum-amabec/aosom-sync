@@ -2,6 +2,19 @@
 
 **Store:** 27u5y2-kp.myshopify.com · **Thème live:** `160059195497` (NE PAS éditer)
 
+## ✅ DÉCISION — texte final à appliquer (V1)
+
+**Shopify Admin → Online Store → Preferences → Homepage meta description** → coller
+**exactement** ce texte → **Save** :
+
+```
+Aménagez votre patio et votre jardin pour l'été québécois : mobilier d'extérieur, BBQ, déco et accessoires, livrés gratuitement partout au Canada.
+```
+
+Non scriptable via l'API Admin publique (réglage SEO niveau boutique, hors thème), donc
+c'est une action manuelle en admin (~30 s). Le reste du document conserve l'analyse et la
+variante evergreen de repli (V2) pour l'automne.
+
 ## Actuel (à remplacer)
 
 ```

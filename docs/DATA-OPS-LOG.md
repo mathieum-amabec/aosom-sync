@@ -3,6 +3,27 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-10 — og:image + newsletter dedup on PREVIEW theme 160213696617 (live untouched)
+
+Three Shopify Admin API writes, all on the **unpublished preview** theme
+`160213696617` ("Copie de Copie de Trade v2"). The live theme `160059195497` was
+**not** touched (script `scripts/apply-og-newsletter-preview.mjs` hard-aborts if the
+target id equals live or is not role=unpublished).
+
+- **Asset PUT** `assets/og-image-social.jpg` ← Unsplash `UQXMWJHusQs` cropped to
+  1200×630 (`&w=1200&h=630&fit=crop&crop=entropy`). Status 200, 226 057 bytes,
+  image/jpeg. Unsplash download ping triggered (status 200) per API ToS.
+- **Asset PUT** `layout/theme.liquid` — inserted `<meta property="og:image"
+  content="{{ 'og-image-social.jpg' | asset_url }}">` immediately before `</head>`.
+  Status 200. (Caveat: coexists with Shopify's `content_for_header` og:image — 2 tags.)
+- **Asset PUT** `templates/index.json` — removed section `lc_newsletter` ("Restez à
+  l'affût") and its `order` entry; footer `newsletter_DPwWK7` kept. Status 200.
+
+Verification via Admin API reads (`scripts/verify-og-newsletter-preview.mjs`): asset
+present, `lc_newsletter` absent from sections+order, og:image line present in
+theme.liquid. Public `?preview_theme_id=` render serves the published theme (Shopify
+ignores the param without a staff session), so visual QA is done via admin Theme Preview.
+
 ## 2026-06-09 — Google Customer Reviews: theme-inject REJECTED, app path chosen (NO theme change)
 
 Requested: inject the Google Merchant Center survey opt-in snippet (merchant_id
