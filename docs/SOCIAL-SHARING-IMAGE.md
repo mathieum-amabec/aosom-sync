@@ -3,6 +3,28 @@
 **Store:** 27u5y2-kp.myshopify.com · **Thème live:** `160059195497` (NE PAS éditer)
 **Constat:** l'og:image actuel de la home est le **logo**, pas une image lifestyle.
 
+## ✅ APPLIQUÉ sur le thème PREVIEW `160213696617` (Unsplash)
+
+Image lifestyle Unsplash sélectionnée (patio résidentiel moderne avec plantes, paysage,
+recadrée **1200×630** via les paramètres Unsplash, sans marque) :
+`unsplash.com/photos/UQXMWJHusQs` (par Kristaps Ungurs). Ping de téléchargement Unsplash
+déclenché (ToS). Uploadée comme asset `assets/og-image-social.jpg` (226 Ko, image/jpeg) sur
+le preview, puis injectée dans `layout/theme.liquid` avant `</head>` :
+
+```liquid
+<meta property="og:image" content="{{ 'og-image-social.jpg' | asset_url }}">
+```
+
+**⚠️ Caveat (à revoir en preview):** Shopify injecte déjà une `og:image` (le logo) via
+`{{ content_for_header }}`. Notre balise s'ajoute **après** → la page preview a **2 balises
+og:image**. Les scrapers (Facebook/LinkedIn) prennent en général la **première** (donc le logo),
+ce qui pourrait neutraliser l'override. La solution propre **sans doublon** reste le réglage
+admin ci-dessous (Social sharing image), qui remplace la source à la racine. À valider au
+**Facebook Sharing Debugger** sur l'URL de preview avant publication. Live `160059195497` non
+touché.
+
+---
+
 ## Diagnostic (read-only)
 
 `scripts/audit-home-meta.mjs` sur le rendu live (`https://ameublodirect.ca/`) :
