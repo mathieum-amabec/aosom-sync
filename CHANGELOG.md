@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.2] - 2026-06-10
+
+### Docs
+- **PDP + video Phase 0 audit (read-only).** `docs/audit-pdp-video.md` answers the 6
+  Phase-0 questions with exact `file:line` citations and live Shopify/Turso evidence:
+  featured-image selection (`selectProductImages`, lifestyle-URL promotion else CSV order),
+  the Aosom CSV `Video` MP4 field (2210/11126 products populated), the Shopify video media
+  path + granted scopes (`write_products` yes, `read_orders` no), the PDP title/`##` finding
+  (published pages clean; symptom traced to draft-URL→home redirect + leading marketing
+  `<h2>`), the home carousels (featured-collection on `rabais`/`coups-de-coeur`/
+  `mobiliers-exterieurs-et-jardins`, best-selling sort, no sold-out filter under dropship),
+  and a top-30 best-seller shortlist by inferred stock velocity. Read-only diagnostic
+  scripts under `scripts/audit-*.mjs`. No writes performed.
+
 ## [0.5.53.1] - 2026-06-09
 
 ### Docs
