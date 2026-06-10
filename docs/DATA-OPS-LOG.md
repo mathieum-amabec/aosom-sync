@@ -28,8 +28,9 @@ strip the brand from the **title**, no vendor change. The report's `vendor_propo
 therefore equals `vendor_actuel` on every row. The `--apply` mode updates **title only**
 (GraphQL `productUpdate`), never vendor, never handle.
 
-**Shopify writes performed this op:** none yet (dry-run). The 7-title `--apply` write is
-pending Mat's explicit go.
+**Shopify writes performed this op (2026-06-10, `--apply`, Mat go):** 7 product **titles**
+updated via `productUpdate` (7 OK / 0 fail). Vendor and handles untouched. Post-write
+re-scan confirms **0** titles still contain a supplier brand.
 
 ## 2026-06-09 — Google Customer Reviews: theme-inject REJECTED, app path chosen (NO theme change)
 
