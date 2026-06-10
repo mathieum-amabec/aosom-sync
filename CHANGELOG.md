@@ -2,18 +2,53 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.2] - 2026-06-10
+## [0.5.53.5] - 2026-06-10
 
 ### Added
-- **A1 supplier-brand title cleanup — DRY-RUN tooling (no writes).** New read-only
-  `scripts/brand-cleanup-dry-run.mjs` scans all products via Admin GraphQL for Aosom
-  house-brand tokens leaking into `title` (Outsunny, HOMCOM, Aosom, Vinsetto, Kleankin,
-  Zonekiz + Soozier/Qaba/PawHut/Sportnow/Aiyaplay/Rosefray; third-party makers like
-  Teamson excluded). Proposes a cleaned title (brand removed, double space/comma and
-  orphan separators tidied, word-joining hyphens like "Brise-Vue" preserved, handles
-  untouched). Vendor left unchanged ("Aosom"), per Mat. Output:
-  `docs/brand-cleanup-dry-run.csv` (UTF-8 BOM). **7 of 502 titles affected.** Default is
-  dry-run; `--apply` updates title only. No writes performed yet.
+- **A1 supplier-brand title cleanup — applied.** New `scripts/brand-cleanup-dry-run.mjs`
+  scans all products via Admin GraphQL for Aosom house-brand tokens leaking into `title`
+  (Outsunny, HOMCOM, Aosom, Vinsetto, Kleankin, Zonekiz +
+  Soozier/Qaba/PawHut/Sportnow/Aiyaplay/Rosefray; third-party makers like Teamson
+  excluded). Cleans the title (brand removed, double space/comma and orphan separators
+  tidied, word-joining hyphens like "Brise-Vue" preserved, handles untouched). Vendor left
+  unchanged ("Aosom"), per Mat. **7 of 502 titles affected and updated** via `--apply`
+  (`productUpdate`, title only); post-write re-scan confirms 0 remaining. Dry-run report:
+  `docs/brand-cleanup-dry-run.csv` (UTF-8 BOM).
+
+## [0.5.53.4] - 2026-06-10
+
+### Docs
+- **A4 — Homepage meta description rewrite proposed.** Current description is ~230 chars in
+  shouty CAPS with "free shipping" twice. `docs/HOME-META-DESCRIPTION.md` proposes two
+  ~145-char natural-language FR variants (seasonal/local vs evergreen catalogue) with a
+  recommendation. The home renders `{{ page_description }}` from the shop-level
+  **Online Store → Preferences → Homepage meta description** SEO setting — not a theme file
+  and not writable via the public Admin API — so the doc gives the exact admin path. No
+  live-theme edit.
+
+## [0.5.53.3] - 2026-06-10
+
+### Docs
+- **A3 — Social sharing image (og:image) documented.** The home og:image is currently the
+  488px logo, not a 1200×630 lifestyle image. Diagnosed (`scripts/audit-home-meta.mjs`) that
+  og:image is the shop-level **Online Store → Preferences → Social sharing image** setting —
+  not a theme file and not writable via the public Admin API (Shopify injects it via
+  `content_for_header`, falling back to the logo). `docs/SOCIAL-SHARING-IMAGE.md` gives the
+  exact admin steps + a 1200×630 lifestyle-image recommendation. No live-theme edit.
+
+## [0.5.53.2] - 2026-06-10
+
+### Docs
+- **PDP + video Phase 0 audit (read-only).** `docs/audit-pdp-video.md` answers the 6
+  Phase-0 questions with exact `file:line` citations and live Shopify/Turso evidence:
+  featured-image selection (`selectProductImages`, lifestyle-URL promotion else CSV order),
+  the Aosom CSV `Video` MP4 field (2210/11126 products populated), the Shopify video media
+  path + granted scopes (`write_products` yes, `read_orders` no), the PDP title/`##` finding
+  (published pages clean; symptom traced to draft-URL→home redirect + leading marketing
+  `<h2>`), the home carousels (featured-collection on `rabais`/`coups-de-coeur`/
+  `mobiliers-exterieurs-et-jardins`, best-selling sort, no sold-out filter under dropship),
+  and a top-30 best-seller shortlist by inferred stock velocity. Read-only diagnostic
+  scripts under `scripts/audit-*.mjs`. No writes performed.
 
 ## [0.5.53.1] - 2026-06-09
 
