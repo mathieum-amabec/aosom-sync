@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.12] - 2026-06-10
+
+### Fixed (P0, PREVIEW theme `160213696617` — live untouched)
+- **featured-collection Liquid render error.** The Phase-1 `where: 'available'` pre-filter
+  produced a plain Array, which `{% paginate %}` rejects: *"Array 'cc_available_products' is
+  not paginateable"* (`sections/featured-collection.liquid:108`). Restored pagination over
+  `section.settings.collection.products` (the original working construct) and moved the
+  availability check **inside** the loop (`{%- if product.available -%}`). Keeps the
+  sold-out-skip intent without the broken array; fixes all featured-collection instances
+  (one shared section file). Verified: 0 `cc_available_products` remain.
+
 ## [0.5.53.11] - 2026-06-10
 
 ### Changed (PREVIEW theme `160213696617` only — live untouched)
