@@ -17,6 +17,7 @@ vi.mock("@/lib/variant-merger", () => ({
   mergeVariants: vi.fn(),
   buildSkuIndex: vi.fn(),
   selectProductImages: vi.fn((imgs: string[]) => imgs),
+  selectProductImagesAsync: vi.fn(async (imgs: string[]) => imgs),
 }));
 vi.mock("@/lib/content-generator", () => ({
   generateProductContent: vi.fn(),

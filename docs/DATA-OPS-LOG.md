@@ -3,6 +3,24 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-10 — Phase 2: lifestyle featured-image heuristic (DRY-RUN, no writes)
+
+Ran `scripts/lifestyle-image-dry-run.mts` (read-only) on the **30 top-seller SKUs**
+(docs/audit-pdp-video.md §6). For each, compared the current featured image (sync
+`selectProductImages`, pos 0) with what the new white-background heuristic promotes
+(`classifyImageBackground`: download ≤5s/≤2MB → sharp border-10% near-white ratio; >80% =
+white studio bg, <80% = lifestyle; failsafe = keep CSV order).
+
+**Result: 24 / 30 would change featured image** (white studio → lifestyle). 6 already
+lifestyle. Current-image classes: 21 `fond_blanc`, 6 `lifestyle`, 3 `inconnu` (analysis
+failed on the current pos-0 image; a confirmed lifestyle was promoted instead). Every
+*proposed* pos-0 is `lifestyle` — the heuristic never promotes a white-bg shot when a
+non-white one exists.
+
+Report: `docs/lifestyle-image-dry-run.csv` (UTF-8 BOM). **No Shopify/DB writes.** New
+imports already use the heuristic (import-pipeline); **backfill of existing live products is
+NOT done** — awaiting Mat's validation of this dry-run.
+
 ## 2026-06-10 — A2: product-card fixes on PREVIEW theme (no live edit)
 
 Target theme: **`160213696617`** (UNPUBLISHED). Live **`160059195497` NOT touched**.

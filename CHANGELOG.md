@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.11] - 2026-06-10
+
+### Added (Phase 2 — lifestyle featured image, DRY-RUN)
+- **White-background detection for featured-image selection.** `variant-merger.ts` gains an
+  async curation path: `classifyImageBackground` downloads an image (≤5s, ≤2MB) and measures
+  the near-white pixel ratio in its outer-10% border via `sharp` (lazy-imported); >80% reads
+  as a white studio background, <80% as lifestyle. `selectProductImagesAsync` orders images
+  lifestyle-first (URL regex OR border analysis) → CSV order (unknown/failed) → white
+  backgrounds last, keeping the sub-800px filter and 8-image cap. Every failure path
+  (timeout, oversize, decode/network error) degrades to "keep CSV order" (failsafe).
+- **Job 3 integration:** `import-pipeline.ts` (`queueForImport`) now curates images via the
+  async path, so **new imports** get the lifestyle-first ordering. The daily sync is
+  untouched (the sync URL-only `selectProductImages` stays for catalog-scale paths).
+- **DRY-RUN report:** `scripts/lifestyle-image-dry-run.mts` (read-only) ran the heuristic on
+  the 30 top-seller SKUs (docs/audit-pdp-video.md). **24/30 would switch their featured image
+  from a white-studio shot to a lifestyle shot**; 6 already lifestyle. Report:
+  `docs/lifestyle-image-dry-run.csv`. No Shopify/DB writes. Backfill of existing products
+  awaits Mat's validation.
+- Tests: `classifyImageBackground` + `selectProductImagesAsync` covered (sharp-generated
+  fixtures, injected fetch, failsafe). Full suite 765 green, `tsc --noEmit` clean.
+
 ## [0.5.53.10] - 2026-06-10
 
 ### Changed
