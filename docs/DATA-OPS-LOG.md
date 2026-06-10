@@ -3,6 +3,24 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-10 — Phase 3: Aosom video ingest (DRY-RUN, no upload/no product change)
+
+Tested the Shopify API path for attaching Aosom MP4s, via
+`scripts/aosom-video-ingest-dry-run.mjs` (read-only). **No video uploaded, no product
+modified.**
+
+- **Scopes** (`GET /admin/oauth/access_scopes.json`): `write_products` ✅;
+  `write_files` ❌ and `read_files` ❌ **missing**.
+- **`stagedUploadsCreate(resource: VIDEO)`** tested on 3 top-30 SKUs with a `products.video`
+  URL (17/30 have one): `01-0893`, `823-002V80`, `823-010V81`. **All 3 returned valid
+  staged targets** (GCS upload URL + `external_video_id` + signed params), no `userErrors`
+  — despite the missing file scopes. Product videos go through the **product-media** path
+  (`stagedUploadsCreate` + `productCreateMedia`, covered by `write_products`), not the
+  Files API.
+
+Report: `docs/aosom-video-ingest-dry-run.md`. Real ingestion (upload bytes +
+`productCreateMedia` + poll READY) **NOT executed** — awaiting Mat's validation.
+
 ## 2026-06-10 — P0 fix: featured-collection pagination on PREVIEW theme (no live edit)
 
 Fixed the Liquid render error on the preview theme `160213696617` introduced by the Phase-1
