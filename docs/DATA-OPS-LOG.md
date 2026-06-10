@@ -3,6 +3,30 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-10 — P0 fix: featured-collection pagination on PREVIEW theme (no live edit)
+
+Fixed the Liquid render error on the preview theme `160213696617` introduced by the Phase-1
+`where: 'available'` pre-filter: *"Array 'cc_available_products' is not paginateable"*
+(`sections/featured-collection.liquid` line 108). The `| where:` filter returns a plain Array,
+which `{% paginate %}` rejects.
+
+Fix (`sections/featured-collection.liquid`, PUT 200): restored pagination over
+`section.settings.collection.products` (the original working construct, identical to the live
+theme) and moved the availability check **inside** the loop:
+
+```liquid
+{% paginate section.settings.collection.products by section.settings.products_to_show %}
+  {%- for product in section.settings.collection.products limit: section.settings.products_to_show -%}
+    {%- if product.available -%} …card… {%- endif -%}
+```
+
+Keeps the sold-out-skip intent (moot under dropship `inventory_management: null`, but harmless)
+without the non-paginateable array. A full-asset scan confirmed `featured-collection.liquid`
+was the **only** file with `cc_available_products` (one shared section file → fixes all
+featured-collection instances: Meilleures offres, Coups de cœur, Mobilier extérieur). Verified
+via Admin API: 0 `cc_available_products` remain, `paginate` targets `collection.products`,
+in-loop `product.available` present. Live `160059195497` NOT touched.
+
 ## 2026-06-10 — B4: fix duplicate "500" social-proof numbers on the PREVIEW theme (no live edit)
 
 Target: PREVIEW theme `160213696617` ("Copie de Copie de Trade v2", unpublished). Live
