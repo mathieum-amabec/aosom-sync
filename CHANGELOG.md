@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.8] - 2026-06-10
+
+### Changed (LIVE theme `160059195497` — authorized)
+- **A3 og:image on the home — LIVE.** Patched `snippets/meta-tags.liquid` with an
+  `{% if request.page_type == 'index' %}` branch so the homepage og:image is the 1200×630
+  Unsplash patio asset (`assets/og-image-social.jpg`, uploaded to the live theme) instead of
+  the 488px logo. Single og:image tag (the earlier `layout/theme.liquid` injection that
+  duplicated the tag was reverted from backup). Other page types keep `page_image`.
+- **A4 home meta description — LIVE.** Not settable via the public Admin API (the
+  `global.description_tag` metafield is ignored by the theme; the home is not a Page). Applied
+  via the same index-branch theme approach in `layout/theme.liquid` (`<meta name="description">`)
+  and `meta-tags.liquid` (`og_description` → og/twitter): the home now uses the FR V1 text;
+  other pages unchanged.
+
+### Removed
+- **Orphan shop metafields** `global.description_tag` and `global.og_image` deleted — they were
+  created earlier but never read by the theme (verified no render effect).
+
+### Ops
+- `docs/DATA-OPS-LOG.md` logs the live writes (with backups). Scripts:
+  `apply-seo-metafields.mjs`, `apply-og-live-v2.mjs`, `apply-meta-desc-live.mjs`,
+  `verify-og-live.mjs`.
+
 ## [0.5.53.7] - 2026-06-10
 
 ### Changed
