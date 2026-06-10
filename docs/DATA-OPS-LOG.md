@@ -24,6 +24,35 @@ present, `lc_newsletter` absent from sections+order, og:image line present in
 theme.liquid. Public `?preview_theme_id=` render serves the published theme (Shopify
 ignores the param without a staff session), so visual QA is done via admin Theme Preview.
 
+## 2026-06-10 — A1: Supplier-brand removal from product titles (DRY-RUN, no writes)
+
+Scanned all **502** products via Admin GraphQL (`products`, read-only, ~2 req/s) for
+Aosom house-brand tokens leaking into `title`. Brand set: Outsunny, HOMCOM, Aosom,
+Vinsetto, Kleankin, Zonekiz + the rest of the family (Soozier, Qaba, PawHut, Sportnow,
+Aiyaplay, Rosefray), word-boundary + case-insensitive. Third-party makers like Teamson
+are deliberately excluded.
+
+**Result: 7 titles affected** (6× Outsunny, 1× Aosom). The import pipeline already
+strips `[BRAND NAME]` from the other 495.
+
+Cleaning rules applied to the proposed title:
+- remove the brand token; collapse double spaces, double commas, edge orphan separators
+- **word-joining hyphens preserved** (e.g. "Brise-Vue" is NOT split)
+- structure "Type, caractéristique, taille — couleur" kept (no reorder)
+- **handles never read or touched** (feed risk)
+
+Report: `docs/brand-cleanup-dry-run.csv` (UTF-8 BOM). Generator:
+`scripts/brand-cleanup-dry-run.mjs` (idempotent; dry-run by default, `--apply` to write).
+
+**DECISION (Mat, 2026-06-10):** `vendor` stays **"Aosom"** for all products — we only
+strip the brand from the **title**, no vendor change. The report's `vendor_propose` column
+therefore equals `vendor_actuel` on every row. The `--apply` mode updates **title only**
+(GraphQL `productUpdate`), never vendor, never handle.
+
+**Shopify writes performed this op (2026-06-10, `--apply`, Mat go):** 7 product **titles**
+updated via `productUpdate` (7 OK / 0 fail). Vendor and handles untouched. Post-write
+re-scan confirms **0** titles still contain a supplier brand.
+
 ## 2026-06-09 — Google Customer Reviews: theme-inject REJECTED, app path chosen (NO theme change)
 
 Requested: inject the Google Merchant Center survey opt-in snippet (merchant_id

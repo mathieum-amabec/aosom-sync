@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.5] - 2026-06-10
+## [0.5.53.6] - 2026-06-10
 
 ### Changed (preview theme `160213696617` only — live untouched)
 - **A3 og:image:** uploaded an Unsplash 1200×630 patio-lifestyle image as
@@ -20,6 +20,19 @@ All notable changes to Aosom Sync will be documented in this file.
   and the exact admin path (Online Store → Preferences → Homepage meta description) — not
   API-writable. `docs/DATA-OPS-LOG.md` logs the three preview-theme writes. The apply script
   hard-aborts if the target is the live theme or not unpublished.
+
+## [0.5.53.5] - 2026-06-10
+
+### Added
+- **A1 supplier-brand title cleanup — applied.** New `scripts/brand-cleanup-dry-run.mjs`
+  scans all products via Admin GraphQL for Aosom house-brand tokens leaking into `title`
+  (Outsunny, HOMCOM, Aosom, Vinsetto, Kleankin, Zonekiz +
+  Soozier/Qaba/PawHut/Sportnow/Aiyaplay/Rosefray; third-party makers like Teamson
+  excluded). Cleans the title (brand removed, double space/comma and orphan separators
+  tidied, word-joining hyphens like "Brise-Vue" preserved, handles untouched). Vendor left
+  unchanged ("Aosom"), per Mat. **7 of 502 titles affected and updated** via `--apply`
+  (`productUpdate`, title only); post-write re-scan confirms 0 remaining. Dry-run report:
+  `docs/brand-cleanup-dry-run.csv` (UTF-8 BOM).
 
 ## [0.5.53.4] - 2026-06-10
 
