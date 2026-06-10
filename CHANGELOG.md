@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.10] - 2026-06-10
+
+### Changed (PREVIEW theme `160213696617` only — live untouched)
+- **B4 — fixed the duplicate "500" social-proof numbers on the home.** Real counts:
+  497 active products (not 500+, so the claim was slightly overstated). In
+  `templates/index.json`: `lc_hero` and `lc_howit` product counts → "490" (497 rounded down
+  to the nearest ten, conservative + accurate); `lc_trust` H2 "Plus de 500 familles
+  canadiennes nous font confiance" (unverifiable, duplicate number) → "Satisfaction garantie
+  30 jours" / "30-day satisfaction guarantee" (verifiable via the 30-day return policy). 6
+  string replacements, verified by re-read (0 stale "500" social-proof strings remain).
+  `scripts/apply-social-proof-preview.mjs` (hard-aborts if not the unpublished preview).
+
 ## [0.5.53.9] - 2026-06-10
 
 ### Docs
