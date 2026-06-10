@@ -3,6 +3,34 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-10 — A1: Supplier-brand removal from product titles (DRY-RUN, no writes)
+
+Scanned all **502** products via Admin GraphQL (`products`, read-only, ~2 req/s) for
+Aosom house-brand tokens leaking into `title`. Brand set: Outsunny, HOMCOM, Aosom,
+Vinsetto, Kleankin, Zonekiz + the rest of the family (Soozier, Qaba, PawHut, Sportnow,
+Aiyaplay, Rosefray), word-boundary + case-insensitive. Third-party makers like Teamson
+are deliberately excluded.
+
+**Result: 7 titles affected** (6× Outsunny, 1× Aosom). The import pipeline already
+strips `[BRAND NAME]` from the other 495.
+
+Cleaning rules applied to the proposed title:
+- remove the brand token; collapse double spaces, double commas, edge orphan separators
+- **word-joining hyphens preserved** (e.g. "Brise-Vue" is NOT split)
+- structure "Type, caractéristique, taille — couleur" kept (no reorder)
+- **handles never read or touched** (feed risk)
+
+Report: `docs/brand-cleanup-dry-run.csv` (UTF-8 BOM). Generator:
+`scripts/brand-cleanup-dry-run.mjs` (idempotent, read-only).
+
+**OPEN QUESTION for Mat (blocks any write):** the report proposes
+`vendor_propose = <detected brand>` (e.g. Outsunny), per "mettre la marque dans le champ
+vendor". But all 499 products currently use `vendor = "Aosom"`. Confirm whether vendor
+should become the sub-brand (Outsunny/…) or stay "Aosom" with the brand only removed from
+the title. **No product writes until Mat validates.**
+
+**Shopify writes performed this op:** none (read-only `products` GraphQL).
+
 ## 2026-06-09 — Google Customer Reviews: theme-inject REJECTED, app path chosen (NO theme change)
 
 Requested: inject the Google Merchant Center survey opt-in snippet (merchant_id

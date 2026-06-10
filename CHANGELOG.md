@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.2] - 2026-06-10
+
+### Added
+- **A1 supplier-brand title cleanup — DRY-RUN tooling (no writes).** New read-only
+  `scripts/brand-cleanup-dry-run.mjs` scans all products via Admin GraphQL for Aosom
+  house-brand tokens leaking into `title` (Outsunny, HOMCOM, Aosom, Vinsetto, Kleankin,
+  Zonekiz + Soozier/Qaba/PawHut/Sportnow/Aiyaplay/Rosefray; third-party makers like
+  Teamson excluded). Proposes a cleaned title (brand removed, double space/comma and
+  orphan separators tidied, word-joining hyphens like "Brise-Vue" preserved, handles
+  untouched) and a proposed vendor. Output: `docs/brand-cleanup-dry-run.csv` (UTF-8 BOM).
+  **7 of 502 titles affected.** No product writes — awaiting Mat's validation (incl. the
+  open vendor question logged in `docs/DATA-OPS-LOG.md`).
+
 ## [0.5.53.1] - 2026-06-09
 
 ### Docs
