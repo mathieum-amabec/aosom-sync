@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.1] - 2026-06-09
+
+### Docs
+- **Google Customer Reviews setup documented (no theme change).** The requested injection of
+  the GMC survey opt-in (merchant `5804673777`) into the order-confirmation page is not
+  possible on this store: theme `160059195497` is Online Store 2.0 (no `checkout.liquid` /
+  order-status section), the plan is Basic, and the confirmation page is checkout-owned. The
+  legacy injection points (order-status Additional Scripts and `order_status` ScriptTags) were
+  disabled by Shopify on 2025-08-28. Added `docs/GOOGLE-CUSTOMER-REVIEWS-SETUP.md` (runbook for
+  the supported Google & YouTube channel app + Merchant Center path) and a `docs/DATA-OPS-LOG.md`
+  entry. No theme/app code changed; no Shopify writes performed.
+
 ## [0.5.53.0] - 2026-06-09
 
 Live Shop Pay widget cleanup on the product page + the 2026-06-09 security audit.
