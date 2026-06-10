@@ -3,6 +3,29 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-10 — Phase 1: anti-cheap PDP/home fixes on PREVIEW theme (no live edit)
+
+Target theme: **`160213696617`** "Copie de Copie de Trade v2" (UNPUBLISHED). The live
+theme **`160059195497` was NOT touched** (the script hard-codes the preview id and refuses
+to run against live). Applied via `scripts/preview-pdp-cheap-fixes.mjs` (idempotent; re-run
+reports 0 changes / 5 already-applied).
+
+**Theme assets written (5):**
+1. `sections/main-product.liquid` — removed the redundant `<h2 class="h1">` title link
+   (duplicate title) → single `<h1>`.
+2. `locales/fr.json` — `products.product.quantity.decrease/increase` shortened to
+   "Réduire/Augmenter la quantité" (dropped "de {{ product }}").
+3. `templates/index.json` — `why_us` multicolumn (emoji titles) → `custom-liquid` row of
+   thin-line navy (#1B2A4A) inline SVG reassurance icons.
+4. `sections/header-group.json` — stripped emojis (🚚🔄🔒⭐) from the two announcement-bar
+   blocks.
+5. `sections/featured-collection.liquid` — added `| where: 'available', true` pre-filter so
+   carousels skip sold-out products.
+
+Each JSON asset validated (parse) before + after write. **Not applied:** literal "##" in
+descriptions — 0/502 descriptions contain "##" (read-only scan), nothing to strip; flagged
+for Mat. **Awaiting Mat's visual checkpoint** on preview before any live promotion.
+
 ## 2026-06-10 — og:image + newsletter dedup on PREVIEW theme 160213696617 (live untouched)
 
 Three Shopify Admin API writes, all on the **unpublished preview** theme

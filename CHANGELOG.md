@@ -2,6 +2,28 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.7] - 2026-06-10
+
+### Changed
+- **Phase 1 anti-cheap PDP/home fixes — PREVIEW theme `160213696617` only** (never live
+  `160059195497`). Applied via the idempotent `scripts/preview-pdp-cheap-fixes.mjs` (Asset
+  API, anti-clobber guards, JSON validation):
+  1. **Duplicate PDP title** removed — `sections/main-product.liquid` rendered the title
+     twice (`<h1>` + a redundant `<h2 class="h1">` link); now a single clean `<h1>`.
+  2. **Verbose quantity labels** shortened at the root — `locales/fr.json`
+     `quantity.decrease/increase` were "Réduire/Augmenter la quantité **de {{ product }}**";
+     now sober "Réduire/Augmenter la quantité" (fixes PDP, cart, featured at once).
+  3. **Emoji reassurance badges → thin-line navy (#1B2A4A) SVG.** The home `why_us`
+     multicolumn (🚚🏆🔄📞 titles) became a custom-liquid row of inline SVG icons
+     (livraison / qualité / retours / support); announcement-bar emojis (🚚🔄🔒⭐) stripped
+     for clean text (SVG impractical in a text strip).
+  4. **Sold-out products excluded from carousels** — `sections/featured-collection.liquid`
+     now pre-filters `collection.products | where: 'available', true`, so home carousels
+     (Meilleures offres, Coups de cœur) and any featured-collection skip out-of-stock items.
+- **Not applied: literal "##" in descriptions.** A full scan found **0/502** product
+  descriptions contain "##"; the description block renders raw HTML with nothing to strip.
+  Flagged for Mat (needs a specific example URL — likely a custom_liquid block or metafield).
+
 ## [0.5.53.6] - 2026-06-10
 
 ### Changed (preview theme `160213696617` only — live untouched)
