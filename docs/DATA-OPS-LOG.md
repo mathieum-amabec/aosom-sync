@@ -21,6 +21,76 @@ Report: `docs/lifestyle-image-dry-run.csv` (UTF-8 BOM). **No Shopify/DB writes.*
 imports already use the heuristic (import-pipeline); **backfill of existing live products is
 NOT done** — awaiting Mat's validation of this dry-run.
 
+## 2026-06-10 — B2/B3 + preview SEO finalize on PREVIEW theme 160213696617 (no live edit)
+
+All writes on the unpublished preview `160213696617`; live `160059195497` not touched
+(`scripts/apply-homepage-improvements.mjs` + `apply-preview-seo-finalize.mjs` are preview-guarded).
+
+- **B2 testimonials:** the fabricated "Évaluations de nos clients" multicolumn
+  (`multicolumn_eWXcry`, 5 invented reviews incl. 2 "Anonyme") was **removed** from
+  `templates/index.json` (section + order). Per Mat's decision — **not** replaced with new
+  fabricated named testimonials (deceptive advertising / QC Consumer Protection Act). The real
+  Judge.me widget on the home is kept. Judge.me public API returned 401 (no token), so review
+  count could not be auto-verified.
+- **B3 carousels:** removed the redundant 3rd carousel `featured_collection1` ("Mobilier
+  extérieur", manual collection) — it overlapped "Coups de cœur" by **217/≈233 products
+  (~93%)**. Kept "Meilleures offres" (`rabais`) + "Coups de cœur" (`coups-de-coeur`, smart).
+- **B3 "livraison gratuite" repetition:** home went from 8 mentions to 3. Kept `lc_hero`
+  (headline) + `lc_trustbar` (✓ reassurance bar); the structural `why_us` SVG icon kept.
+  Removed/reworded in `lc_story2`, `lc_trust`, `lc_howit` (step → "Livraison à domicile"),
+  `shop_pay_home` mini-bar, and the all-caps `rich_text` banner.
+- **Preview SEO finalize (promotion-safety):** the preview lacked A3/A4 (those were applied to
+  the live theme only — promoting the preview would have reverted them). Applied the same
+  clean edits to the preview: removed the old duplicate og injection from `layout/theme.liquid`,
+  added the `request.page_type == 'index'` og:image branch to `meta-tags.liquid` (asset already
+  on preview), and the meta-description index branch in `theme.liquid` + `meta-tags.liquid`.
+
+QA (`scripts/preview-qa.mjs`): **16 ✅ / 0 ❌ / 0 ⚠️**. Report: `docs/preview-qa-report.md`.
+
+## 2026-06-10 — P0 fix: featured-collection pagination on PREVIEW theme (no live edit)
+
+Fixed the Liquid render error on the preview theme `160213696617` introduced by the Phase-1
+`where: 'available'` pre-filter: *"Array 'cc_available_products' is not paginateable"*
+(`sections/featured-collection.liquid` line 108). The `| where:` filter returns a plain Array,
+which `{% paginate %}` rejects.
+
+Fix (`sections/featured-collection.liquid`, PUT 200): restored pagination over
+`section.settings.collection.products` (the original working construct, identical to the live
+theme) and moved the availability check **inside** the loop:
+
+```liquid
+{% paginate section.settings.collection.products by section.settings.products_to_show %}
+  {%- for product in section.settings.collection.products limit: section.settings.products_to_show -%}
+    {%- if product.available -%} …card… {%- endif -%}
+```
+
+Keeps the sold-out-skip intent (moot under dropship `inventory_management: null`, but harmless)
+without the non-paginateable array. A full-asset scan confirmed `featured-collection.liquid`
+was the **only** file with `cc_available_products` (one shared section file → fixes all
+featured-collection instances: Meilleures offres, Coups de cœur, Mobilier extérieur). Verified
+via Admin API: 0 `cc_available_products` remain, `paginate` targets `collection.products`,
+in-loop `product.available` present. Live `160059195497` NOT touched.
+
+## 2026-06-10 — B4: fix duplicate "500" social-proof numbers on the PREVIEW theme (no live edit)
+
+Target: PREVIEW theme `160213696617` ("Copie de Copie de Trade v2", unpublished). Live
+`160059195497` NOT touched (`scripts/apply-social-proof-preview.mjs` hard-aborts otherwise).
+
+Real counts (Admin API `products/count.json`): **497 active**, 502 total. So "Plus de 500
+produits" was actually slightly **overstated** (497 < 500), not understated. Using 497 rounded
+down to the nearest ten → **490**.
+
+`templates/index.json` — 6 string replacements (PUT 200), verified by re-read:
+- `lc_hero`: "Plus de 500 produits" / "500+ products" → "490".
+- `lc_howit`: "catalogue de 500+ produits" / "catalog of 500+ products" → "490+".
+- `lc_trust` H2: "Plus de 500 familles canadiennes nous font confiance" (unverifiable +
+  duplicate number) → **"Satisfaction garantie 30 jours"** (verifiable via the 30-day return
+  policy; EN "30-day satisfaction guarantee"). The section's `<p>` ("Livraison gratuite ·
+  Retours faciles · Service québécois") left unchanged.
+
+Verified: all 6 new strings present, 0 stale "500" social-proof strings remain. Visual QA via
+admin Theme Preview (`?preview_theme_id=` serves the published theme without a staff session).
+
 ## 2026-06-10 — A2: product-card fixes on PREVIEW theme (no live edit)
 
 Target theme: **`160213696617`** (UNPUBLISHED). Live **`160059195497` NOT touched**.

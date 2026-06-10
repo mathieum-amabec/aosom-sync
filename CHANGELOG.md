@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.11] - 2026-06-10
+## [0.5.53.14] - 2026-06-10
 
 ### Added (Phase 2 — lifestyle featured image, DRY-RUN)
 - **White-background detection for featured-image selection.** `variant-merger.ts` gains an
@@ -22,6 +22,49 @@ All notable changes to Aosom Sync will be documented in this file.
   awaits Mat's validation.
 - Tests: `classifyImageBackground` + `selectProductImagesAsync` covered (sharp-generated
   fixtures, injected fetch, failsafe). Full suite 765 green, `tsc --noEmit` clean.
+
+## [0.5.53.13] - 2026-06-10
+
+### Changed (PREVIEW theme `160213696617` only — live untouched)
+- **B2 — removed fabricated testimonials.** The "Évaluations de nos clients" multicolumn (5
+  invented reviews, 2 "Anonyme") was removed from `index.json` rather than replaced with new
+  fake named testimonials (deceptive advertising). The real Judge.me widget stays.
+- **B3 — carousels 3 → 2.** Removed `featured_collection1` ("Mobilier extérieur"), which
+  overlapped "Coups de cœur" by ~93% (217/≈233 products). Kept "Meilleures offres" (rabais) +
+  "Coups de cœur".
+- **B3 — reduced "livraison gratuite" repetition** on the home from 8 mentions to 3 (kept the
+  hero headline + reassurance bar + structural `why_us` icon; removed/reworded `lc_story2`,
+  `lc_trust`, `lc_howit`, `shop_pay_home`, `rich_text`).
+- **Preview SEO finalize.** Applied A3 (og:image) + A4 (meta description) to the preview too,
+  so promoting it does not revert the live SEO. Removed the earlier duplicate og injection.
+
+### Added
+- **`docs/preview-qa-report.md`** — automated QA across the live storefront + preview assets:
+  **16 ✅ / 0 ❌ / 0 ⚠️**. Scripts under `scripts/*qa*`, `apply-homepage-improvements.mjs`,
+  `apply-preview-seo-finalize.mjs` (all preview-guarded).
+
+## [0.5.53.12] - 2026-06-10
+
+### Fixed (P0, PREVIEW theme `160213696617` — live untouched)
+- **featured-collection Liquid render error.** The Phase-1 `where: 'available'` pre-filter
+  produced a plain Array, which `{% paginate %}` rejects: *"Array 'cc_available_products' is
+  not paginateable"* (`sections/featured-collection.liquid:108`). Restored pagination over
+  `section.settings.collection.products` (the original working construct) and moved the
+  availability check **inside** the loop (`{%- if product.available -%}`). Keeps the
+  sold-out-skip intent without the broken array; fixes all featured-collection instances
+  (one shared section file). Verified: 0 `cc_available_products` remain.
+
+## [0.5.53.11] - 2026-06-10
+
+### Changed (PREVIEW theme `160213696617` only — live untouched)
+- **B4 — fixed the duplicate "500" social-proof numbers on the home.** Real counts:
+  497 active products (not 500+, so the claim was slightly overstated). In
+  `templates/index.json`: `lc_hero` and `lc_howit` product counts → "490" (497 rounded down
+  to the nearest ten, conservative + accurate); `lc_trust` H2 "Plus de 500 familles
+  canadiennes nous font confiance" (unverifiable, duplicate number) → "Satisfaction garantie
+  30 jours" / "30-day satisfaction guarantee" (verifiable via the 30-day return policy). 6
+  string replacements, verified by re-read (0 stale "500" social-proof strings remain).
+  `scripts/apply-social-proof-preview.mjs` (hard-aborts if not the unpublished preview).
 
 ## [0.5.53.10] - 2026-06-10
 
