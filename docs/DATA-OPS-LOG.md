@@ -3,6 +3,26 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-10 — B4: fix duplicate "500" social-proof numbers on the PREVIEW theme (no live edit)
+
+Target: PREVIEW theme `160213696617` ("Copie de Copie de Trade v2", unpublished). Live
+`160059195497` NOT touched (`scripts/apply-social-proof-preview.mjs` hard-aborts otherwise).
+
+Real counts (Admin API `products/count.json`): **497 active**, 502 total. So "Plus de 500
+produits" was actually slightly **overstated** (497 < 500), not understated. Using 497 rounded
+down to the nearest ten → **490**.
+
+`templates/index.json` — 6 string replacements (PUT 200), verified by re-read:
+- `lc_hero`: "Plus de 500 produits" / "500+ products" → "490".
+- `lc_howit`: "catalogue de 500+ produits" / "catalog of 500+ products" → "490+".
+- `lc_trust` H2: "Plus de 500 familles canadiennes nous font confiance" (unverifiable +
+  duplicate number) → **"Satisfaction garantie 30 jours"** (verifiable via the 30-day return
+  policy; EN "30-day satisfaction guarantee"). The section's `<p>` ("Livraison gratuite ·
+  Retours faciles · Service québécois") left unchanged.
+
+Verified: all 6 new strings present, 0 stale "500" social-proof strings remain. Visual QA via
+admin Theme Preview (`?preview_theme_id=` serves the published theme without a staff session).
+
 ## 2026-06-10 — A2: product-card fixes on PREVIEW theme (no live edit)
 
 Target theme: **`160213696617`** (UNPUBLISHED). Live **`160059195497` NOT touched**.
