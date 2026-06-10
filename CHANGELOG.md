@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.15] - 2026-06-10
+
+### Added (Phase 3 — Aosom video ingest, DRY-RUN)
+- **`scripts/aosom-video-ingest-dry-run.mjs`** (read-only): validates the Shopify API path
+  for attaching Aosom MP4s to products without ingesting anything.
+  - **Scopes:** token has `write_products` ✅ but is **missing `write_files` / `read_files`**
+    (the Phase-0 audit had assumed `write_products` sufficed).
+  - **API test:** `stagedUploadsCreate(resource: VIDEO)` **succeeded for all 3** tested
+    top-30 SKUs (17/30 have a `products.video` URL) — returned GCS staging targets +
+    `external_video_id`, proving product videos route through the **product-media** path
+    (covered by `write_products`), not the Files API. **No upload, no product change.**
+  - Report: `docs/aosom-video-ingest-dry-run.md`. Real ingestion (upload bytes +
+    `productCreateMedia` + poll to READY) is **NOT** done — awaiting Mat's validation.
+
 ## [0.5.53.14] - 2026-06-10
 
 ### Added (Phase 2 — lifestyle featured image, DRY-RUN)
