@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.3] - 2026-06-10
+
+### Docs
+- **A3 — Social sharing image (og:image) documented.** The home og:image is currently the
+  488px logo, not a 1200×630 lifestyle image. Diagnosed (`scripts/audit-home-meta.mjs`) that
+  og:image is the shop-level **Online Store → Preferences → Social sharing image** setting —
+  not a theme file and not writable via the public Admin API (Shopify injects it via
+  `content_for_header`, falling back to the logo). `docs/SOCIAL-SHARING-IMAGE.md` gives the
+  exact admin steps + a 1200×630 lifestyle-image recommendation. No live-theme edit.
+
 ## [0.5.53.2] - 2026-06-10
 
 ### Docs
