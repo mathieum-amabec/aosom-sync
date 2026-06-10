@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.10] - 2026-06-10
+## [0.5.53.11] - 2026-06-10
 
 ### Changed (PREVIEW theme `160213696617` only — live untouched)
 - **B4 — fixed the duplicate "500" social-proof numbers on the home.** Real counts:
@@ -13,6 +13,22 @@ All notable changes to Aosom Sync will be documented in this file.
   30 jours" / "30-day satisfaction guarantee" (verifiable via the 30-day return policy). 6
   string replacements, verified by re-read (0 stale "500" social-proof strings remain).
   `scripts/apply-social-proof-preview.mjs` (hard-aborts if not the unpublished preview).
+
+## [0.5.53.10] - 2026-06-10
+
+### Changed
+- **A2 — quantity steppers removed from product cards (PREVIEW `160213696617` only).**
+  The +/- steppers appeared on cards only where a section used `quick_add: "bulk"`
+  (single-variant → `card-product.liquid` renders `quantity-input`). The idempotent
+  `scripts/preview-card-fixes.mjs` switches those to `quick_add: "standard"` (keeps a single
+  add-to-cart button, drops the stepper) across `templates/index.json` (3 home carousels)
+  and `templates/collection.json` (1). Quantity belongs on the PDP, not the card.
+
+### Not applied
+- **"Default Title" variant label on cards.** A full theme scan found **no visible
+  `variant.title` render** on cards (only aria-labels, already de-verbosed by the Phase-1
+  `fr.json` change). There is nothing to guard with `{% unless variant.title == 'Default
+  Title' %}`. Awaiting an example card URL from Mat to locate the actual source.
 
 ## [0.5.53.9] - 2026-06-10
 
