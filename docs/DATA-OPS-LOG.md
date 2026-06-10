@@ -3,6 +3,21 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-10 — A2: product-card fixes on PREVIEW theme (no live edit)
+
+Target theme: **`160213696617`** (UNPUBLISHED). Live **`160059195497` NOT touched**.
+Applied via `scripts/preview-card-fixes.mjs` (idempotent; re-run = 0 changes).
+
+**Theme assets written (2):** `templates/index.json` (3 sections) and
+`templates/collection.json` (1 section): `"quick_add": "bulk"` → `"standard"`, which removes
+the quantity +/- stepper from product cards (it only renders in bulk mode) while keeping a
+single add-to-cart button. Both JSON validated before + after.
+
+**Not applied:** hiding the "Default Title" variant label on cards — a full theme scan found
+**no visible `variant.title` render** on cards (only aria-labels, already de-verbosed by the
+Phase-1 `fr.json` change). Nothing to guard. **Need an example card URL from Mat** where
+"Default Title" is visibly shown, to locate the real source (possibly an app or a metafield).
+
 ## 2026-06-10 — B1: Discount credibility audit (DRY-RUN, no writes)
 
 Scanned all **502** Shopify products via Admin GraphQL (read-only, ~2 req/s, 3 pages) for
