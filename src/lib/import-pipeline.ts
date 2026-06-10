@@ -1,5 +1,5 @@
 import { fetchAosomCatalog } from "./csv-fetcher";
-import { mergeVariants, buildSkuIndex, selectProductImages } from "./variant-merger";
+import { mergeVariants, buildSkuIndex, selectProductImagesAsync } from "./variant-merger";
 import { generateProductContent, backfillSeoFields, type GeneratedContent } from "./content-generator";
 import { createShopifyProduct, addProductToCollection } from "./shopify-client";
 import { findCollectionsForProduct, getProduct, linkProductToShopify } from "./database";
@@ -59,11 +59,12 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
   const jobs: ImportJob[] = [];
 
   for (const rawProduct of merged) {
-    // Curate images for the customer-facing product (Étape 1): drop sub-800px
-    // images with a detectable size, promote a lifestyle shot to position 1,
-    // cap at 8. Done here (import path only) so the daily sync/diff never
-    // re-images products that are already live.
-    const product = { ...rawProduct, images: selectProductImages(rawProduct.images) };
+    // Curate images for the customer-facing product (Étape 1+2): drop sub-800px
+    // images with a detectable size, then order lifestyle shots first (URL regex
+    // OR white-background analysis), CSV order next, white studio shots last; cap
+    // at 8. Async because it downloads/analyses images — affordable here (import
+    // path only, per curated product) but never run at daily-sync scale.
+    const product = { ...rawProduct, images: await selectProductImagesAsync(rawProduct.images) };
 
     // Idempotency: skip any product whose SKU already maps to a Shopify product.
     // Re-importing would create a duplicate (createShopifyProduct always POSTs),
