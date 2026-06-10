@@ -11,9 +11,9 @@ All notable changes to Aosom Sync will be documented in this file.
   Zonekiz + Soozier/Qaba/PawHut/Sportnow/Aiyaplay/Rosefray; third-party makers like
   Teamson excluded). Proposes a cleaned title (brand removed, double space/comma and
   orphan separators tidied, word-joining hyphens like "Brise-Vue" preserved, handles
-  untouched) and a proposed vendor. Output: `docs/brand-cleanup-dry-run.csv` (UTF-8 BOM).
-  **7 of 502 titles affected.** No product writes — awaiting Mat's validation (incl. the
-  open vendor question logged in `docs/DATA-OPS-LOG.md`).
+  untouched). Vendor left unchanged ("Aosom"), per Mat. Output:
+  `docs/brand-cleanup-dry-run.csv` (UTF-8 BOM). **7 of 502 titles affected.** Default is
+  dry-run; `--apply` updates title only. No writes performed yet.
 
 ## [0.5.53.1] - 2026-06-09
 

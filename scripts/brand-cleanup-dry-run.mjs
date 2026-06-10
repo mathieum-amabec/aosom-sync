@@ -1,19 +1,21 @@
-// Chantier A1 — DRY-RUN ONLY (no writes whatsoever).
+// Chantier A1 — supplier-brand removal from product TITLES.
+//
+// DEFAULT = DRY-RUN (no writes). Pass --apply to perform the title updates.
 //
 // Scans every Shopify product and reports the ones whose TITLE still contains an
 // Aosom house-brand token (Outsunny, HOMCOM, Aosom, Vinsetto, Kleankin, Zonekiz +
-// the rest of the Aosom family). Produces docs/brand-cleanup-dry-run.csv with the
-// proposed cleaned title and proposed vendor, so Mat can validate before any write.
+// the rest of the Aosom family). Writes docs/brand-cleanup-dry-run.csv.
 //
-// Rules:
+// Rules (validated by Mat 2026-06-10):
 //   - remove the brand token from the title
 //   - collapse double spaces, orphan dashes and double commas left behind
 //   - keep the existing "Type, caractéristique, taille — couleur" structure (no reorder)
-//   - the brand belongs in the `vendor` field only (proposed_vendor = detected brand)
+//   - VENDOR IS LEFT UNCHANGED ("Aosom" for all) — we only strip the brand from the title
 //   - HANDLES ARE NEVER TOUCHED (feed risk) — not even read into the change set
 //
-// Run:  node scripts/brand-cleanup-dry-run.mjs
-// Reads Shopify creds from .env.local via _shopify-lib.mjs. Read-only Admin GraphQL.
+// Run (dry-run):  node scripts/brand-cleanup-dry-run.mjs
+// Run (apply):    node scripts/brand-cleanup-dry-run.mjs --apply
+// Reads Shopify creds from .env.local via _shopify-lib.mjs.
 
 import { writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -21,6 +23,7 @@ import { dirname, join } from "node:path";
 import { gql, sleep } from "./_shopify-lib.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const APPLY = process.argv.includes("--apply");
 
 // Mat's six + the remaining Aosom house brands ("toute autre marque Aosom").
 // Only confirmed Aosom-owned brands — NOT third-party makers (e.g. Teamson is a
@@ -62,7 +65,7 @@ const Q = `query($cursor: String){
   }
 }`;
 
-console.log("Scanning Shopify catalog (read-only)…\n");
+console.log(`Scanning Shopify catalog (${APPLY ? "APPLY MODE" : "read-only"})…\n`);
 
 let cursor = null, total = 0, pages = 0;
 const rows = [];
@@ -73,17 +76,14 @@ while (true) {
   for (const p of data.products.nodes) {
     total++;
     if (!detectRe.test(p.title)) continue;
-    const brand = detectBrand(p.title);
-    const cleaned = cleanTitle(p.title);
     rows.push({
+      gid: p.id,
       product_id: p.legacyResourceId,
-      marque_detectee: brand,
+      marque_detectee: detectBrand(p.title),
       ancien_titre: p.title,
-      titre_nettoye_propose: cleaned,
+      titre_nettoye_propose: cleanTitle(p.title),
       vendor_actuel: p.vendor || "",
-      // The brand lives in `vendor` only. Keep "Aosom" when the leaked token *is* the
-      // supplier itself; otherwise propose the specific house brand.
-      vendor_propose: brand && brand.toLowerCase() === "aosom" ? (p.vendor || "Aosom") : brand,
+      vendor_propose: p.vendor || "", // unchanged — Mat: vendor stays "Aosom"
     });
   }
   if (!data.products.pageInfo.hasNextPage) break;
@@ -104,8 +104,7 @@ const csv = "﻿" + [headers.join(","), ...rows.map((r) => headers.map((h) => es
 
 const outDir = join(__dirname, "..", "docs");
 mkdirSync(outDir, { recursive: true });
-const outPath = join(outDir, "brand-cleanup-dry-run.csv");
-writeFileSync(outPath, csv, "utf8");
+writeFileSync(join(outDir, "brand-cleanup-dry-run.csv"), csv, "utf8");
 
 // ---- Console report ----
 console.log(`Scanned ${total} products across ${pages} page(s).`);
@@ -113,11 +112,34 @@ console.log(`Titles still containing a supplier brand: ${rows.length}\n`);
 console.log("SAMPLE (first 20):");
 console.log("─".repeat(80));
 for (const r of rows.slice(0, 20)) {
-  console.log(`#${r.product_id}  [${r.marque_detectee}]  vendor ${r.vendor_actuel} -> ${r.vendor_propose}`);
+  console.log(`#${r.product_id}  [strip ${r.marque_detectee}]  (vendor ${r.vendor_actuel} — unchanged)`);
   console.log(`   avant : ${r.ancien_titre}`);
   console.log(`   après : ${r.titre_nettoye_propose}`);
 }
 console.log("─".repeat(80));
 console.log(`\nTOTAL à corriger : ${rows.length}`);
 console.log(`CSV écrit : docs/brand-cleanup-dry-run.csv  (${rows.length} lignes)`);
-console.log("\nDRY-RUN — aucune écriture effectuée. En attente de validation de Mat.");
+
+if (!APPLY) {
+  console.log("\nDRY-RUN — aucune écriture effectuée. Relancer avec --apply pour écrire les titres.");
+  process.exit(0);
+}
+
+// ---- APPLY: title-only update (vendor untouched) ----
+console.log("\n--apply : mise à jour des titres (vendor inchangé)…\n");
+const M = `mutation($input: ProductInput!){
+  productUpdate(input: $input){ product { legacyResourceId title } userErrors { field message } }
+}`;
+let ok = 0, fail = 0;
+for (const r of rows) {
+  if (r.titre_nettoye_propose === r.ancien_titre) { console.log(`skip #${r.product_id} (no change)`); continue; }
+  if (!r.titre_nettoye_propose) { console.log(`SKIP #${r.product_id} (empty cleaned title!)`); fail++; continue; }
+  try {
+    const { data } = await gql(M, { input: { id: r.gid, title: r.titre_nettoye_propose } });
+    const errs = data.productUpdate.userErrors;
+    if (errs.length) { console.log(`FAIL #${r.product_id}: ${JSON.stringify(errs)}`); fail++; }
+    else { console.log(`OK   #${r.product_id}: ${data.productUpdate.product.title}`); ok++; }
+  } catch (e) { console.log(`FAIL #${r.product_id}: ${e.message}`); fail++; }
+  await sleep(550);
+}
+console.log(`\nApply terminé : ${ok} OK, ${fail} échec(s).`);

@@ -21,15 +21,15 @@ Cleaning rules applied to the proposed title:
 - **handles never read or touched** (feed risk)
 
 Report: `docs/brand-cleanup-dry-run.csv` (UTF-8 BOM). Generator:
-`scripts/brand-cleanup-dry-run.mjs` (idempotent, read-only).
+`scripts/brand-cleanup-dry-run.mjs` (idempotent; dry-run by default, `--apply` to write).
 
-**OPEN QUESTION for Mat (blocks any write):** the report proposes
-`vendor_propose = <detected brand>` (e.g. Outsunny), per "mettre la marque dans le champ
-vendor". But all 499 products currently use `vendor = "Aosom"`. Confirm whether vendor
-should become the sub-brand (Outsunny/…) or stay "Aosom" with the brand only removed from
-the title. **No product writes until Mat validates.**
+**DECISION (Mat, 2026-06-10):** `vendor` stays **"Aosom"** for all products — we only
+strip the brand from the **title**, no vendor change. The report's `vendor_propose` column
+therefore equals `vendor_actuel` on every row. The `--apply` mode updates **title only**
+(GraphQL `productUpdate`), never vendor, never handle.
 
-**Shopify writes performed this op:** none (read-only `products` GraphQL).
+**Shopify writes performed this op:** none yet (dry-run). The 7-title `--apply` write is
+pending Mat's explicit go.
 
 ## 2026-06-09 — Google Customer Reviews: theme-inject REJECTED, app path chosen (NO theme change)
 
