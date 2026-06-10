@@ -18,6 +18,40 @@ single add-to-cart button. Both JSON validated before + after.
 Phase-1 `fr.json` change). Nothing to guard. **Need an example card URL from Mat** where
 "Default Title" is visibly shown, to locate the real source (possibly an app or a metafield).
 
+## 2026-06-10 — A3/A4 finalized on the LIVE theme 160059195497: og:image + home meta description (authorized)
+
+Mat authorized editing the live theme this round. Two SEO changes applied to the LIVE theme
+plus cleanup of two ineffective shop metafields.
+
+**Metafields deleted (ineffective):** `global.description_tag` and `global.og_image` shop
+metafields had been created but are NOT read by the theme — the storefront renders
+`page_description` from Online Store Preferences and og:image from the theme's meta-tags
+snippet, neither of which reads these metafields (verified: no render change). Both DELETEd (200).
+
+**og:image (A3) — LIVE:** the real source is `snippets/meta-tags.liquid` (`{% render 'meta-tags' %}`),
+which emits og:image from `page_image` (the 488×168 logo on the home). A first attempt that
+injected a tag into `layout/theme.liquid` before `content_for_header` produced a duplicate that
+rendered AFTER the meta-tags og:image (logo stayed primary), so it was **reverted from backup**.
+Clean fix: patched `meta-tags.liquid` with an `{% if request.page_type == 'index' %}` branch so
+the home uses `assets/og-image-social.jpg` (1200×630, uploaded to the live theme). Single
+og:image tag = our image; verified on fresh cache-busted renders.
+
+**Home meta description (A4) — LIVE:** not settable via the public Admin API (the
+`description_tag` metafield is ignored; the home is not a Page resource). Applied via the same
+index-branch theme approach: `layout/theme.liquid` `<meta name="description">` and
+`meta-tags.liquid` `og_description` now use the FR V1 text when `request.page_type == 'index'`;
+all other page types unchanged. Verified: home `<meta name="description">` + og:/twitter
+description render the new text on fresh loads.
+
+FR text applied: "Aménagez votre patio et votre jardin pour l'été québécois : mobilier
+d'extérieur, BBQ, déco et accessoires, livrés gratuitement partout au Canada."
+
+Backups: `.git/live-theme-liquid-backup*-2026-06-10.liquid`,
+`.git/live-meta-tags-backup*-2026-06-10.liquid`. Scripts: `scripts/apply-seo-metafields.mjs`
+(metafield attempt), `scripts/apply-og-live-v2.mjs` (og:image), `scripts/apply-meta-desc-live.mjs`
+(meta description + metafield delete), `scripts/verify-og-live.mjs`. Storefront edge cache may
+serve the old home for a few minutes; validate via the Facebook Sharing Debugger.
+
 ## 2026-06-10 — Phase 1: anti-cheap PDP/home fixes on PREVIEW theme (no live edit)
 
 Target theme: **`160213696617`** "Copie de Copie de Trade v2" (UNPUBLISHED). The live
