@@ -3,6 +3,36 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-09 — Google Customer Reviews: theme-inject REJECTED, app path chosen (NO theme change)
+
+Requested: inject the Google Merchant Center survey opt-in snippet (merchant_id
+`5804673777`) into the order-confirmation page of the live theme `160059195497` (PUT a
+theme file before `</body>`).
+
+**Did NOT touch the theme.** Investigation showed the prescribed approach cannot work:
+
+- Live theme `160059195497` is **Online Store 2.0** (Trade v2). It has **no**
+  `layout/checkout.liquid` (Plus-only) and **no** `sections/order-status.liquid`. Only
+  `layout/theme.liquid` + `layout/password.liquid` exist. `templates/customers/order.json`
+  is the **customer-account** order page, not the post-checkout "thank you" page.
+- Shop plan = **Basic** (non-Plus), country CA (`/admin/api/2025-01/shop.json`).
+- The order-confirmation / order-status page is **owned by Shopify Checkout, not the theme**.
+  Injecting the snippet into `layout/theme.liquid` would (a) fire on **every** storefront
+  page, and (b) render `{{ order.* }}` / `{{ customer.email }}` / `{{ shipping_address.* }}`
+  **empty** (those Liquid objects don't exist outside checkout) — GCR would receive no
+  order_id/email and fail.
+- The legacy injection points (order-status **Additional Scripts** box and
+  **ScriptTags** with `display_scope=order_status`) were **disabled by Shopify on
+  2025-08-28** as part of the forced checkout-extensibility migration. ~9 months past that
+  cutoff, neither fires on the confirmation page.
+
+**Decision (confirmed with Mat):** install via the supported path — the **Google & YouTube**
+Shopify channel app linked to Merchant Center `5804673777`, with Customer Reviews enabled in
+Merchant Center. No code injection, no theme PUT, no ScriptTag. Runbook:
+`docs/GOOGLE-CUSTOMER-REVIEWS-SETUP.md`.
+
+**Shopify writes performed this op:** none (read-only: `themes/*/assets.json`, `shop.json`).
+
 ## 2026-06-07 — Deploy double-opt-in price_drop_alert widget to the LIVE theme
 
 Deployed the canonical double-opt-in price-alert widget
