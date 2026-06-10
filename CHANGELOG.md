@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.4] - 2026-06-10
+
+### Docs
+- **A4 — Homepage meta description rewrite proposed.** Current description is ~230 chars in
+  shouty CAPS with "free shipping" twice. `docs/HOME-META-DESCRIPTION.md` proposes two
+  ~145-char natural-language FR variants (seasonal/local vs evergreen catalogue) with a
+  recommendation. The home renders `{{ page_description }}` from the shop-level
+  **Online Store → Preferences → Homepage meta description** SEO setting — not a theme file
+  and not writable via the public Admin API — so the doc gives the exact admin path. No
+  live-theme edit.
+
 ## [0.5.53.3] - 2026-06-10
 
 ### Docs
