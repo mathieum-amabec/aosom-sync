@@ -3,6 +3,17 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-12 — Video ingest products 2+3 (LIVE) + SSRF P2-6 fix
+
+- **Video ingest** (`apply-video-ingest.mjs`, Mat-authorized): ingested the Aosom MP4 into 2 more
+  LIVE products — `01-0893` (gid 7796435877993 → Video 39506155339881) and `120307-025` (gid
+  7796433551465 → Video 39506156290153), both **READY**; logged to Turso `video_ingest_log`.
+  `01-0415` skipped (idempotent — already had a video). **3/3 test products now carry their video.**
+  Reversible (delete the media). Next: scale to the full top-30/2210 batch on Mat's go.
+- **SSRF P2-6 fix** (code, no store write): `classifyImageBackground` now validates
+  `assertPublicHttpsUrl` + `redirect: "error"` before fetching image URLs; guard extracted to
+  `src/lib/url-safety.ts`. `docs/SECURITY-BACKLOG.md` P2-6 → RESOLVED. tsc clean, 774 tests green.
+
 ## 2026-06-12 — Full swatch map + EN parity (PREVIEW) + FIRST real video ingest (1 LIVE product)
 
 - **C1 swatches** (`apply-swatches-full.mjs`, PREVIEW): `main-product.liquid` swatch color map

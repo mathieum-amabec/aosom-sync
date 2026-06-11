@@ -289,7 +289,15 @@ Enfants menu/swatches, phase-6 voice, catalog routes). Theme work this period is
 - **Secrets:** no hardcoded secret patterns in src changes since 2026-06-07; scan clean.
 
 ### New P2 — SSRF defense-in-depth gap
-### P2-6: `classifyImageBackground` fetches image URLs with no SSRF guard
+### P2-6: `classifyImageBackground` fetches image URLs with no SSRF guard — ✅ RESOLVED (2026-06-12, v0.5.53.29)
+**Fix shipped.** `classifyImageBackground` now calls `assertPublicHttpsUrl(new URL(url))` before the
+fetch and passes `redirect: "error"` (no auto-follow of 30x into internal hosts). Any violation
+throws → caught → returns `"unknown"` (failsafe, identical to a fetch error). The guard helper was
+extracted to the dependency-free `src/lib/url-safety.ts` (re-exported from `image-composer.ts` for
+existing callers) so `variant-merger` doesn't pull the config/sharp graph. Unit-tested
+(`tests/variant-merger.test.ts`: http / localhost / 127.* / 169.254.169.254 / 10.* / malformed all
+return `"unknown"` and never hit the network). Original finding below.
+
 `src/lib/variant-merger.ts:289` does a raw `fetchImpl(url, { signal })` on product image URLs to
 measure border whiteness during import. Unlike the hardened `downloadImage`/`assertPublicHttpsUrl`
 path (`image-composer.ts:44–107`), it does **not**: enforce HTTPS, deny internal/link-local hosts
