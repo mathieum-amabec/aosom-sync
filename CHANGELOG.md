@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.26] - 2026-06-12
+
+### Changed (PREVIEW theme `160213696617` + preview-only menu — live untouched)
+- **Enfants mega-menu.** Uploaded 2 Unsplash assets (`cat-enfants-furniture.jpg`,
+  `cat-enfants-toys.jpg`) for the Enfants mega cards and repointed the **Enfants parent → the
+  unified `enfants` collection** (37 products) via `menuUpdate` on `preview-main-menu` (children
+  Jouets/Meubles preserved). Kept dedicated collections rather than `?type=` filters (the
+  collection's product types are Google-taxonomy strings, and the mega resolves images by handle).
+- **PDP color swatches.** `sections/main-product.liquid` now renders the "Couleur"/"Color"
+  variant option as round color swatches (name→hex map FR/EN, partial-match fallback); the
+  selected swatch gets a gold `#D4A853` ring. Non-color options keep text buttons. Layered on
+  Dawn's picker (no snippet change). QA `scripts/verify-enfants-swatches.mjs`: 10 ✅.
+
 ## [0.5.53.25] - 2026-06-11
 
 ### Changed (Phase 6 — voice + cross-sell + final audit, PREVIEW `160213696617` only)
