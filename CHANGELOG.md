@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.21] - 2026-06-11
+
+### Changed (uniform mega-menu + hero buttons — PREVIEW `160213696617` only, live untouched)
+- **Catalog-fit uniform mega-menu.** A collection audit showed the store can't support a
+  4-card mega for all 8 proposed categories — **no electronics** (0 collections), and
+  Déco/Jardin/Enfants lack dedicated collections. Per Mat's decision (catalog-fit): image
+  mega-menus for **Mobilier extérieur (4) · Meubles (4) · Animaux (3) · Enfants (2)**;
+  **Rabais 🔥 · Jardin · Coups de cœur · Catalogue** as direct links; **Électronique + Déco
+  dropped**. `snippets/mega-menu.liquid` now carries **13 image cards** (Unsplash, navy
+  overlay `rgba(27,42,74,.34)`, DM Sans Bold, hover `scale(1.02)`); `header-mega-menu.liquid`
+  delegates to it. Separate `preview-main-menu` (menuUpdate); live `main-menu` untouched.
+  Script: `apply-menu-uniform-preview.mjs` (idempotent, self-contained).
+- **Hero buttons visibility fix** (`lc_hero`): primary = solid navy `#1B2A4A` + gold border;
+  secondary = semi-transparent white + navy text + gold border; title/subtitle `text-shadow`;
+  bottom gradient overlay (transparent → `rgba(0,0,0,.45)`) + button drop-shadow so the CTAs
+  stand out against the photo. Script: `apply-hero-buttons-preview.mjs`.
+- **Verification** (`verify-menu-uniform-preview.mjs`): **23 ✅ / 0 ❌** (incl. live
+  `main-menu` untouched + liquid tag-balance sanity on both edited snippets).
+
 ## [0.5.53.20] - 2026-06-11
 
 ### Changed (PREVIEW theme `160213696617` only — live untouched)
