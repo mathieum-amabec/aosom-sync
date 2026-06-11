@@ -3,6 +3,31 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-11 — Uniform mega-menu (catalog-fit) + hero buttons on PREVIEW (live untouched)
+
+Target **`160213696617`** (UNPUBLISHED); live **`160059195497` NOT touched**.
+
+**Collection audit (read-only, `_collections-audit.mjs`):** 25 collections total. The proposed
+8-category × 4-subcat menu is **not catalog-supported**: Mobilier extérieur (8 cols) ✓,
+Meubles (6) ✓, Animaux 3, Enfants 2, Jardin 1 dedicated, Déco 0 dedicated
+(`meubles-et-decorations` = Meubles), **Électronique 0 (store sells no electronics)**.
+
+**Decision (Mat — catalog-fit):** mega-menus for Mobilier extérieur (4) / Meubles (4) /
+Animaux (3: Chiens, Chats, Accessoires) / Enfants (2: Jouets, Meubles enfants); Rabais 🔥 /
+Jardin (`jardinage-et-serres`) / Coups de cœur / Catalogue as direct links; **Électronique +
+Déco dropped**.
+
+**Writes (preview only):** GraphQL `menuUpdate` on the separate `preview-main-menu` (live
+`main-menu` untouched, still used by the live theme); `snippets/mega-menu.liquid` (13 Unsplash
+image cards, navy overlay/DM Sans Bold/hover scale; ToS download pinged), `header-mega-menu.liquid`
+(delegation), `sections/header-group.json` (repoint), `templates/index.json` (`lc_hero` button
+visibility fix: navy-solid + gold-border primary, semi-transparent-white + navy secondary,
+title/subtitle text-shadow, bottom gradient overlay). All PUT 200.
+
+**Verify** (`verify-menu-uniform-preview.mjs`): **23 ✅ / 0 ❌**. Animaux (3) / Enfants (2)
+megas are sub-4 by catalog reality; Animaux/Enfants parent links reuse a child collection (no
+broader "all" collection exists). **Awaiting Mat's visual checkpoint.**
+
 ## 2026-06-11 — Navigation + hero premium on PREVIEW theme (live untouched)
 
 Target theme **`160213696617`** (UNPUBLISHED); live **`160059195497` NOT touched**. Scripts
