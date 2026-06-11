@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.22] - 2026-06-11
+
+### Added (3 data dry-runs — read-only, no writes)
+- **C1 — collection match counts** (`scripts/collections-match-dry-run.mjs`): tested the 4
+  proposed smart-collection rules against all 502 products. Électronique **18** (mostly
+  electric ride-on toys), Décoration **25** (mixes outdoor lighting), Jardin **195** (too
+  broad), Enfants **37** (cleanest). No collection created.
+- **C2 — EN-title parity** (`scripts/en-titles-parity-dry-run.mjs`): the 7 A1-cleaned products
+  still carry the brand in their **EN** titles (6 Translations API, 1 `custom.title_en`
+  metafield). **7/7 would change**; before/after reported. No writes.
+- **C3 — P0 remediation audit** (`scripts/p0-remediation-audit.mjs`): leading marketing
+  heading in `body_html` still present on **26/502** active products (the "duplicate title"
+  culprit — a **data** fix, not CSS; some headings repeat the brand); `##` markdown **0/502**;
+  the draft "2 H1" is the draft→home redirect, **not a PDP bug** (5 drafts; published PDPs = 1
+  H1). No security P0/P1 outstanding.
+- Report: `docs/data-chantiers-dry-run.md`. `tsc` clean, 765 tests green. All apply steps
+  await Mat's validation.
+
 ## [0.5.53.21] - 2026-06-11
 
 ### Changed (uniform mega-menu + hero buttons — PREVIEW `160213696617` only, live untouched)
