@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.16] - 2026-06-11
+## [0.5.53.17] - 2026-06-11
 
 ### Changed (navigation + hero premium — PREVIEW theme `160213696617` only, live untouched)
 - **Premium navigation with image mega-menu.** The shared `main-menu` is store-wide (editing
@@ -24,6 +24,23 @@ All notable changes to Aosom Sync will be documented in this file.
 - **Flag:** no dedicated "Déco" collection exists — "Déco" currently points to
   `meubles-et-decorations` (same as Meubles). Mat to create/curate a real Déco collection if
   he wants it distinct.
+
+## [0.5.53.16] - 2026-06-11
+
+### Changed (PREVIEW theme `160213696617` only — live untouched)
+- **Homepage premium — shipping mentions.** Reduced "livraison gratuite" on the home from 4
+  to 2 (kept announcement bar + `lc_trustbar`). Replaced `lc_hero` H1 ("Livraison gratuite au
+  Canada" → "Satisfaction garantie 30 jours") and the `why_us` truck icon ("Livraison gratuite"
+  → "Plus de 490 produits").
+- **Homepage premium — category tiles.** Replaced the native `collection_list` ("Magasinez par
+  catégorie", 6 plain cards) with a `cat_tiles` custom-liquid grid: Unsplash lifestyle
+  backgrounds (uploaded as `assets/cat-tile-1..6.jpg`), navy `#1B2A4A` 50% overlay, white DM
+  Sans Bold bilingual titles, hover `scale(1.02)` + lighter overlay, responsive 3×2 / 2-col.
+
+### Added
+- **`docs/homepage-audit.md`** — read-only audit (sections/order, navigation, "livraison"
+  occurrences, category buttons) produced before any change. QA: `scripts/verify-premium.mjs`
+  all ✅. Scripts under `scripts/*premium*`, `homepage-audit.mjs` (preview-guarded).
 
 ## [0.5.53.15] - 2026-06-10
 
