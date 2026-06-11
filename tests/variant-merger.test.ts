@@ -247,6 +247,18 @@ describe("classifyImageBackground", () => {
   it("returns unknown on a non-ok response", async () => {
     expect(await classifyImageBackground("https://x.com/missing.jpg", fetchImpl)).toBe("unknown");
   });
+
+  it("SSRF guard: rejects non-HTTPS and internal hosts before fetching (failsafe)", async () => {
+    let fetched = false;
+    const spyFetch = (async (...a: unknown[]) => { fetched = true; return fetchImpl(...(a as Parameters<typeof fetch>)); }) as unknown as typeof fetch;
+    expect(await classifyImageBackground("http://x.com/a.jpg", spyFetch)).toBe("unknown"); // not https
+    expect(await classifyImageBackground("https://localhost/a.jpg", spyFetch)).toBe("unknown"); // internal
+    expect(await classifyImageBackground("https://127.0.0.1/a.jpg", spyFetch)).toBe("unknown");
+    expect(await classifyImageBackground("https://169.254.169.254/latest/meta-data", spyFetch)).toBe("unknown"); // cloud metadata
+    expect(await classifyImageBackground("https://10.0.0.5/a.jpg", spyFetch)).toBe("unknown");
+    expect(await classifyImageBackground("not-a-url", spyFetch)).toBe("unknown");
+    expect(fetched).toBe(false); // never reached the network for any blocked URL
+  });
 });
 
 describe("selectProductImagesAsync", () => {

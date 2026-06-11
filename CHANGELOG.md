@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.29] - 2026-06-12
+
+### Added (video ingest 2+3) / Security (SSRF P2-6 fix)
+- **C1 — Aosom video ingest for the other 2 test products** (`apply-video-ingest.mjs`,
+  Mat-authorized): `01-0893` + `120307-025` ingested (staged → multipart POST to GCS 204 →
+  productCreateMedia → **READY**), logged to Turso `video_ingest_log`. Idempotent — `01-0415`
+  skipped (already has a video). **Final: 3/3 READY.** Pipeline validated end-to-end.
+- **C2 — SSRF P2-6 fixed** (`classifyImageBackground`): now calls `assertPublicHttpsUrl(new
+  URL(url))` before the fetch and uses `redirect: "error"` (no auto-follow into internal
+  hosts); any violation → `"unknown"` failsafe. The guard was extracted to a dependency-free
+  `src/lib/url-safety.ts` (re-exported from `image-composer.ts`) so `variant-merger` doesn't
+  pull the config/sharp graph. Unit-tested (http/localhost/127.*/169.254.*/10.*/malformed all
+  → `"unknown"`, network never hit). Marked **RESOLVED** in `docs/SECURITY-BACKLOG.md`.
+- `tsc` clean, **774 tests** green.
+
 ## [0.5.53.28] - 2026-06-12
 
 ### Changed / Added (swatches + EN parity on PREVIEW; first real video ingest)
