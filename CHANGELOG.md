@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.19] - 2026-06-11
+
+### Docs
+- **Pre-publish audit checklist (read-only, no writes).** `docs/pre-publish-checklist.md`
+  compares the preview theme `160213696617` against the live `160059195497` and checks SEO,
+  home content, performance, and theme security before publishing. Verdict: **publish-ready**,
+  26 ✅ / 3 ⚠️ / 0 ❌. The ⚠️ items: confirm the preview render has no liquid error via admin
+  Theme → Preview; confirm the Meta Pixel (absent from `theme.liquid` + rendered HTML — may be
+  a sandboxed Web Pixel via the Facebook app); plus notes on `preview-main-menu` and the popup
+  10% code (Klaviyo flow). Scripts: `scripts/pre-publish-audit.mjs`, `pre-publish-followup.mjs`.
+
 ## [0.5.53.18] - 2026-06-11
 
 ### Added (PREVIEW theme `160213696617` only — live untouched)
