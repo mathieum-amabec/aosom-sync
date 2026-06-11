@@ -28,6 +28,31 @@ title/subtitle text-shadow, bottom gradient overlay). All PUT 200.
 megas are sub-4 by catalog reality; Animaux/Enfants parent links reuse a child collection (no
 broader "all" collection exists). **Awaiting Mat's visual checkpoint.**
 
+## 2026-06-11 — Homepage polish final on PREVIEW theme 160213696617 (live untouched)
+
+All writes on the unpublished preview; live `160059195497` not touched
+(`scripts/apply-polish-final.mjs` preview-guarded). Read-only audit first:
+`docs/preview-final-audit.md`. Single `templates/index.json` PUT (then a popup-form patch PUT).
+
+- **why_us premium (Chantier 3):** rebuilt to 4 distinct points with navy thin-line SVG icons
+  on a `#FAFAF8` background — "Catalogue de 490+ produits" (grid), "Livraison gratuite au
+  Canada" (truck — the single reassurance shipping mention), "Retours faciles 30 jours" (return
+  arrow), "Service client québécois" (leaf).
+- **`lc_trustbar`:** dropped the "Livraison gratuite" span (kept Retours · Paiement · Service).
+  Home "livraison gratuite" = **2** (announcement bar + why_us).
+- **Removed `rich_text`** (the all-caps "PAIEMENT SÉCURISÉ | RETOUR FACILE | SERVICE RAPIDE"
+  strip) — fixed the only CAPS marketing + a redundant reassurance bar.
+- **`featured_sale`:** removed the 🔥 from the heading → "Meilleures offres du moment".
+- **Entry popup (Chantier 2):** new `entry_popup` custom-liquid section — discreet 10%-off email
+  capture, navy/gold DM Sans, FR/EN, opens after **5 s OR 50 % scroll** (once per visitor via
+  `localStorage` `lc_pop_seen_v1`), close ×/overlay/Esc, mobile-friendly. Email submits via a
+  **plain HTML `<form method=post action=/contact>` with `form_type=customer`** (newsletter →
+  Shopify customer → Klaviyo sync) — NOT `/api/price-alert` (a price-drop system needing a
+  sku/price). Liquid-safe (no `{% form %}` tag).
+
+QA (`scripts/verify-polish-final.mjs`): **8 ✅ / 0 ❌**. **Follow-up:** the 10% code itself is
+delivered by Klaviyo's Welcome flow — ensure that flow has a Shopify discount code attached.
+
 ## 2026-06-11 — Navigation + hero premium on PREVIEW theme (live untouched)
 
 Target theme **`160213696617`** (UNPUBLISHED); live **`160059195497` NOT touched**. Scripts

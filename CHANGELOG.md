@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.18] - 2026-06-11
+## [0.5.53.19] - 2026-06-11
 
 ### Changed (uniform mega-menu + hero buttons — PREVIEW `160213696617` only, live untouched)
 - **Catalog-fit uniform mega-menu.** A collection audit showed the store can't support a
@@ -20,6 +20,27 @@ All notable changes to Aosom Sync will be documented in this file.
   stand out against the photo. Script: `apply-hero-buttons-preview.mjs`.
 - **Verification** (`verify-menu-uniform-preview.mjs`): **23 ✅ / 0 ❌** (incl. live
   `main-menu` untouched + liquid tag-balance sanity on both edited snippets).
+
+## [0.5.53.18] - 2026-06-11
+
+### Added (PREVIEW theme `160213696617` only — live untouched)
+- **First-order discount popup.** New `entry_popup` custom-liquid section: a discreet 10%-off
+  email capture (navy/gold DM Sans, FR/EN), opens after 5 s OR 50 % scroll, once per visitor
+  (`localStorage`), with close ×/overlay/Esc, mobile-friendly. Email submits via a plain
+  Shopify `form_type=customer` newsletter form (→ Klaviyo), not `/api/price-alert`. The 10%
+  code itself is delivered by the Klaviyo Welcome flow (attach a discount code there).
+
+### Changed (PREVIEW)
+- **"Pourquoi nous choisir" (`why_us`) premium.** 4 distinct points with navy thin-line SVG
+  icons on `#FAFAF8`: Catalogue 490+ produits · Livraison gratuite au Canada · Retours faciles
+  30 jours · Service client québécois. The reassurance "livraison gratuite" now lives here once.
+- **Reduced repetition / polish.** Dropped the "Livraison gratuite" span from `lc_trustbar`
+  (home "livraison gratuite" = 2: announcement bar + why_us). Removed the redundant all-caps
+  `rich_text` strip. Stripped the 🔥 from the "Meilleures offres du moment" heading.
+
+### Added
+- **`docs/preview-final-audit.md`** — read-only audit (livraison/emojis/CAPS/redundancy). QA
+  `scripts/verify-polish-final.mjs`: 8 ✅. Scripts under `scripts/*polish*` (preview-guarded).
 
 ## [0.5.53.17] - 2026-06-11
 
