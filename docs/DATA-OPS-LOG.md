@@ -3,6 +3,32 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-11 — Phase 5: home video showcase section on PREVIEW theme 160213696617 (live untouched)
+
+All writes on the unpublished preview; live `160059195497` not touched
+(`scripts/apply-home-video.mjs` preview-guarded). 2 assets PUT (200 each).
+
+- **Candidate query (Turso, read-only):** products with a non-empty `video` (Aosom MP4 URL)
+  AND a `shopify_product_id` AND a `shopify_handle` — 20 shown. The 6 chosen for the section
+  were filtered to **`status=active` + `published_at` set** (so `all_products[handle]` resolves
+  and the card link works): gazebo `84C-546V00CG`, patio steel `84G-683V00BK`, patio rattan
+  `860-394V00BG`, dining chairs `83A-212V02BK`, pet stroller `D00-210V00CG`, file cabinet
+  `924-077V80GY` (varied: outdoor / furniture / pet / office).
+- **`sections/home-video-showcase.liquid`** (new): "Voyez-le chez vous" / "See it at home" +
+  subtitle, a responsive grid (3 desktop / 2 tablet / 1 mobile) of **6** video cards on a
+  `#FAFAF8` background with navy DM Sans Bold titles. Each card: `<video muted loop playsinline
+  preload="none">`, **lazy-loaded via IntersectionObserver** (the MP4 `src` is set and `play()`
+  called only when the card scrolls into view; paused off-screen — no MP4 downloaded on initial
+  load), poster + title + price pulled live via `all_products[handle]`, navy hover overlay,
+  whole card links to the product. The Aosom video URLs are hardcoded (they live in Turso, not
+  on the Shopify product).
+- **`templates/index.json`**: added `home_video` (type `home-video-showcase`) right **after the
+  carousels** (`featured_collection2`).
+
+QA (`scripts/verify-home-video.mjs`): **10 ✅ / 0 ❌**. PageSpeed audit (read-only, live):
+`docs/pagespeed-audit.md` — healthy (0 render-blocking JS, DM Sans loaded, 102/121 imgs lazy);
+refinements: width/height on 6 imgs (CLS), lazy on 18 more, trim inline JS/CSS.
+
 ## 2026-06-11 — 3 data dry-runs: collection matches, EN-title parity, P0 audit (no writes)
 
 All read-only against live Shopify (Admin GraphQL). **No Shopify writes.** Full report:

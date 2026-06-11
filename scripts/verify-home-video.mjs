@@ -1,0 +1,17 @@
+import { getAsset } from "./_shopify-lib.mjs";
+const P = "160213696617";
+const rec = (ok, l, d) => console.log(`${ok ? "✅" : "❌"} ${l} — ${d}`);
+const s = await getAsset("sections/home-video-showcase.liquid", P);
+rec(/Voyez-le chez vous/.test(s) && /See it at home/.test(s), "bilingual title", "Voyez-le chez vous / See it at home");
+const cardCount = (s.match(/class="hv-card"/g) || []).length;
+const vids = (s.match(/<video /g) || []).length;
+rec(cardCount === 6 && vids === 6, "6 video cards", `${cardCount} cards, ${vids} <video>`);
+rec(/muted/.test(s) && /loop/.test(s) && /playsinline/.test(s) && /preload="none"/.test(s), "autoplay muted loop playsinline preload=none", "all attrs present");
+rec(/IntersectionObserver/.test(s) && /data-src/.test(s), "lazy-load (IO + data-src)", "MP4 loads only when visible");
+rec(/all_products\[/.test(s) && /p\.url/.test(s), "links to product page", "all_products[handle] -> p.url");
+rec(/rgba\(27,42,74/.test(s) && /hv-ov/.test(s), "navy hover overlay (title+price)", "hv-ov gradient navy");
+rec(/#FAFAF8/.test(s) && /DM Sans/.test(s), "off-white bg + navy DM Sans", "#FAFAF8 + DM Sans");
+rec(/grid-template-columns:repeat\(3/.test(s) && /repeat\(2/.test(s) && /1fr/.test(s), "responsive 3/2/1 cols", "desktop/tablet/mobile");
+rec(/\{% schema %\}/.test(s), "section schema present", "valid section");
+const idx = JSON.parse(await getAsset("templates/index.json", P));
+rec(idx.sections.home_video && idx.order.includes("home_video"), "added to index.json after carousels", `position ${idx.order.indexOf("home_video")}, after featured_collection2=${idx.order.indexOf("featured_collection2")}`);
