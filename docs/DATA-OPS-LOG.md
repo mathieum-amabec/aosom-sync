@@ -28,6 +28,18 @@ NOT touched). `scripts/apply-enfants.mjs` + `apply-swatches.mjs`.
 QA (`scripts/verify-enfants-swatches.mjs`): **10 ✅ / 0 ❌**. Visual confirm via admin Theme →
 Preview before publishing.
 
+## 2026-06-11 — Phase 6: voice + PDP cross-sell on PREVIEW theme (live untouched)
+
+Target **`160213696617`** (UNPUBLISHED); live **`160059195497` NOT touched** (scripts guarded).
+
+- **C1 voice** (`apply-phase6-voice.mjs`): `templates/index.json` + `sections/header-group.json`
+  PUT 200 — featured_sale subtitle, why_us 4 warmer titles, shop_pay tweaks, announcement bar.
+- **C2 cross-sell** (`apply-phase6-crosssell.mjs`): `templates/product.json` PUT 200 — existing
+  `related-products` section re-titled "Vous aimerez aussi", products_to_show 5→4, cols 5→4.
+- **C3 final audit** (`verify-final-audit.mjs`, read-only): **18 ✅ / 0 ❌** →
+  `docs/final-theme-audit.md`. Verdict **PRÊT À PUBLIER** (2 non-blocking follow-ups: FR swatch
+  config, EN parity on 2 native settings). Final liquid-render confirm via admin Theme → Preview.
+
 ## 2026-06-11 — C3 applied: strip leading marketing heading from 26 product descriptions
 
 Production write (Mat-authorized). Backfilled the 26 active products whose `body_html`
