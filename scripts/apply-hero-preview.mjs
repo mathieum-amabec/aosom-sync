@@ -11,14 +11,15 @@ async function put(k, v) {
   const r = await rest(`/themes/${THEME}/assets.json`, { method: "PUT", body: JSON.stringify({ asset: { key: k, value: v } }) });
   if (!r.ok) throw new Error(`put ${k}: ${r.status} ${await r.text()}`);
   await sleep(550);
+  return r.status;
 }
 
 const HERO = `{%- assign loc = request.locale.iso_code | downcase -%}<div class="lc-hero" style="position:relative;background:url('{{ 'lc-hero.jpg' | asset_url }}') center/cover no-repeat;min-height:480px;display:flex;align-items:flex-start">
   <div class="lc-hero-ov" style="position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,.6) 0%,rgba(0,0,0,.18) 45%,transparent 72%),linear-gradient(to right,rgba(0,0,0,.55) 0%,rgba(0,0,0,.22) 65%,transparent 100%)"></div>
   <div class="page-width lc-hero-in" style="position:relative;color:#fff;max-width:660px;font-family:'DM Sans',sans-serif">
-    <span class="lc-hero-badge">&#11088; {% if loc == 'en' %}Quebec service &middot; 30-day returns{% else %}Service qu&eacute;b&eacute;cois &middot; Retours 30 jours{% endif %}</span>
+    <span class="lc-hero-badge">&#11088; {% if loc == 'en' %}490+ products &middot; Secure payment{% else %}Plus de 490 produits &middot; Paiement s&eacute;curis&eacute;{% endif %}</span>
     <h1>{% if loc == 'en' %}Furnish your space, your way.{% else %}Meublez votre espace &agrave; votre image.{% endif %}</h1>
-    <p>{% if loc == 'en' %}Modern furniture, free shipping across Canada.{% else %}Mobilier moderne, livraison gratuite partout au Canada.{% endif %}</p>
+    <p>{% if loc == 'en' %}Modern furniture, Quebec service, 30-day returns.{% else %}Mobilier moderne, service qu&eacute;b&eacute;cois, retours 30 jours.{% endif %}</p>
     <div class="lc-hero-cta">
       <a href="/collections/all" class="lc-btn lc-btn--navy" data-umami-event="Hero CTA shop">{% if loc == 'en' %}Shop now{% else %}Magasinez maintenant{% endif %}</a>
       <a href="/collections/rabais" class="lc-btn lc-btn--gold" data-umami-event="Hero CTA deals">{% if loc == 'en' %}See the deals{% else %}Voir les rabais{% endif %}</a>
@@ -44,6 +45,6 @@ if (!idx.sections.lc_hero) throw new Error("lc_hero section not found");
 const already = (idx.sections.lc_hero.settings.custom_liquid || "").includes("votre image");
 idx.sections.lc_hero.settings.custom_liquid = HERO;
 JSON.parse(JSON.stringify(idx)); // sanity
-await put("templates/index.json", JSON.stringify(idx, null, 2));
-console.log(already ? "• hero re-applied (was already updated)" : "✔ hero updated (new headline, 2 CTAs, badge)");
+const status = await put("templates/index.json", JSON.stringify(idx, null, 2));
+console.log(`${already ? "• hero re-applied" : "✔ hero updated"} (headline, 2 CTAs, badge, subtitle) — PUT templates/index.json → HTTP ${status}`);
 console.log("Preview: https://27u5y2-kp.myshopify.com/?preview_theme_id=" + THEME);
