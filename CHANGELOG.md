@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.30] - 2026-06-11
+
+### Added (batch video ingest — top-30)
+- **`scripts/aosom-video-ingest-batch.mjs`.** Batch sibling of the single-product ingest: attaches
+  each top-30 SKU's `products.video` Aosom MP4 to its Shopify product as VIDEO media via
+  `stagedUploadsCreate(VIDEO)` → multipart POST to the staged GCS target → `productCreateMedia` →
+  poll `status` to `READY`. Throttled to ≤2 Shopify req/s. `--dry-run` (default) lists candidates;
+  `--apply` executes. Idempotent on three layers: `video_ingest_log` `READY` skip, in-run
+  sibling-product dedup (one product carries one video), and a Shopify-side existing-`READY`-video
+  skip. Logs every outcome to Turso `video_ingest_log` (matches the live schema, adds a nullable
+  `error` column; atomic delete-then-insert upsert).
+- **Applied (live):** 17 SKUs with a video URL → 14 unique products. **12 ingested / 5 skipped / 0
+  errors** (3 sibling pairs deduped + the 3 already-validated test products). All 14 products now
+  carry exactly one `READY` video. Note: these products are currently unpublished to the Online
+  Store, so the videos render once each is published. See `docs/DATA-OPS-LOG.md` (2026-06-11).
+
 ## [0.5.53.29] - 2026-06-12
 
 ### Added (video ingest 2+3) / Security (SSRF P2-6 fix)
