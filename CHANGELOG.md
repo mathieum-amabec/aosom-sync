@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.16] - 2026-06-11
+
+### Changed (navigation + hero premium — PREVIEW theme `160213696617` only, live untouched)
+- **Premium navigation with image mega-menu.** The shared `main-menu` is store-wide (editing
+  it would change the live storefront), so a **separate `preview-main-menu`** was created and
+  only the preview theme's header repointed at it (live keeps `main-menu`). New top categories:
+  **Rabais 🔥 · Mobilier extérieur · Meubles · Jardin · Animaux · Déco · Catalogue**. New
+  `snippets/mega-menu.liquid` renders image cards (8 Unsplash photos keyed by the collection
+  handle in each link's URL, navy `#1B2A4A` / gold `#C17F3E`, DM Sans) for the two mega items
+  (Mobilier extérieur, Meubles, 4 sub-categories each → existing collections);
+  `snippets/header-mega-menu.liquid` now delegates the mega panel to it. Sticky header already
+  on (`reduce-logo-size`). Scripts: `apply-nav-preview.mjs`, idempotent.
+- **Hero refonte** (`templates/index.json` `lc_hero`): headline → "Meublez votre espace à
+  votre image.", subtitle → "Mobilier moderne, livraison gratuite partout au Canada.", two
+  CTAs (navy primary "Magasinez maintenant" → /collections/all; outline-gold secondary "Voir
+  les rabais" → /collections/rabais), and a floating badge "⭐ Service québécois · Retours 30
+  jours". Existing `lc-hero.jpg` kept. Bilingual FR/EN. Script: `apply-hero-preview.mjs`.
+- **Verification** (`verify-nav-hero-preview.mjs`): **17 ✅ / 0 ❌** (incl. live `main-menu`
+  confirmed untouched).
+- **Flag:** no dedicated "Déco" collection exists — "Déco" currently points to
+  `meubles-et-decorations` (same as Meubles). Mat to create/curate a real Déco collection if
+  he wants it distinct.
+
 ## [0.5.53.15] - 2026-06-10
 
 ### Added (Phase 3 — Aosom video ingest, DRY-RUN)
