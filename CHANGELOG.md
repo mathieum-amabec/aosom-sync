@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.16] - 2026-06-11
+
+### Changed (PREVIEW theme `160213696617` only — live untouched)
+- **Homepage premium — shipping mentions.** Reduced "livraison gratuite" on the home from 4
+  to 2 (kept announcement bar + `lc_trustbar`). Replaced `lc_hero` H1 ("Livraison gratuite au
+  Canada" → "Satisfaction garantie 30 jours") and the `why_us` truck icon ("Livraison gratuite"
+  → "Plus de 490 produits").
+- **Homepage premium — category tiles.** Replaced the native `collection_list` ("Magasinez par
+  catégorie", 6 plain cards) with a `cat_tiles` custom-liquid grid: Unsplash lifestyle
+  backgrounds (uploaded as `assets/cat-tile-1..6.jpg`), navy `#1B2A4A` 50% overlay, white DM
+  Sans Bold bilingual titles, hover `scale(1.02)` + lighter overlay, responsive 3×2 / 2-col.
+
+### Added
+- **`docs/homepage-audit.md`** — read-only audit (sections/order, navigation, "livraison"
+  occurrences, category buttons) produced before any change. QA: `scripts/verify-premium.mjs`
+  all ✅. Scripts under `scripts/*premium*`, `homepage-audit.mjs` (preview-guarded).
+
 ## [0.5.53.15] - 2026-06-10
 
 ### Added (Phase 3 — Aosom video ingest, DRY-RUN)

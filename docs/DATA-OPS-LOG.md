@@ -3,6 +3,30 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-11 — Homepage premium: shipping-mention reduction + category tiles (PREVIEW, no live edit)
+
+All writes on the unpublished preview `160213696617`; live `160059195497` not touched
+(`scripts/apply-premium-c1.mjs` / `apply-premium-c2.mjs` are preview-guarded). Read-only audit
+first: `docs/homepage-audit.md`.
+
+- **Chantier 1 — "livraison gratuite" 4 → 2 on the home.** Kept the announcement bar
+  (`header-group.json`) + `lc_trustbar` reassurance bar. Replaced the two other mentions in
+  `index.json`: `lc_hero` H1 2nd line "Livraison gratuite au Canada" → "Satisfaction garantie
+  30 jours" (FR+EN); `why_us` first icon (truck "Livraison gratuite") → grid icon "Plus de 490
+  produits". Verified: index.json now has 1 "livraison gratuite" (trustbar).
+- **Chantier 2 — premium category tiles.** Replaced the native `collection_list` ("Magasinez
+  par catégorie", 6 plain collection cards) with a new `cat_tiles` custom-liquid section: a
+  responsive grid (3×2 desktop / 2-col mobile) of Unsplash lifestyle tiles with a navy
+  `rgba(27,42,74,.5)` overlay, white DM Sans Bold bilingual titles, and `:hover scale(1.02)` +
+  lighter overlay. 6 Unsplash images uploaded as preview assets `assets/cat-tile-1..6.jpg`
+  (download pings triggered per Unsplash ToS); each tile links to its `/collections/<handle>`.
+  `collection_list` removed from sections + order.
+
+QA (`scripts/verify-premium.mjs`): **all ✅** (cat_tiles in, collection_list out, 6/6 tiles
+linked + uploaded, navy overlay + hover present, hero/why_us shipping replaced, 2 home
+"livraison" mentions, no live liquid error). Promote the preview to publish (it already carries
+A3/A4 + prior B-fixes).
+
 ## 2026-06-10 — Phase 3: Aosom video ingest (DRY-RUN, no upload/no product change)
 
 Tested the Shopify API path for attaching Aosom MP4s, via
