@@ -3,6 +3,21 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-11 — 3 data dry-runs: collection matches, EN-title parity, P0 audit (no writes)
+
+All read-only against live Shopify (Admin GraphQL). **No Shopify writes.** Full report:
+`docs/data-chantiers-dry-run.md`.
+
+- **C1 collection matches** (`collections-match-dry-run.mjs`): 4 proposed rules vs 502
+  products → Électronique 18, Décoration 25, Jardin 195, Enfants 37. No collection created.
+- **C2 EN-title parity** (`en-titles-parity-dry-run.mjs`): the 7 A1 products still have the
+  brand in EN (6 Translations API, 1 `custom.title_en` metafield); 7/7 would clean. No writes.
+- **C3 P0 audit** (`p0-remediation-audit.mjs`): 26/502 active `body_html` open with an
+  `<h2>/<h3>` marketing heading (data fix, not CSS); `##` 0/502; 5 drafts — the "2 H1" is the
+  draft→home redirect, not a PDP bug. No security P0/P1 outstanding.
+
+All apply steps await Mat's validation.
+
 ## 2026-06-11 — Uniform mega-menu (catalog-fit) + hero buttons on PREVIEW (live untouched)
 
 Target **`160213696617`** (UNPUBLISHED); live **`160059195497` NOT touched**.
