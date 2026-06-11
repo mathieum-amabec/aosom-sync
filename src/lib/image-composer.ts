@@ -1,6 +1,7 @@
 import path from "path";
 import fs from "fs";
 import { SOCIAL } from "./config";
+import { assertPublicHttpsUrl } from "./url-safety";
 
 const WIDTH = SOCIAL.IMAGE_WIDTH;
 const HEIGHT = SOCIAL.IMAGE_HEIGHT;
@@ -35,24 +36,10 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024; // 15 MB — guards against decompress
 const DOWNLOAD_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 3;
 
-/**
- * SSRF guard: reject non-HTTPS and any host that resolves (by name) to a
- * private/link-local/internal range. Applied to the INITIAL url AND re-applied
- * to every redirect hop in downloadImage — a host-only check on the first URL
- * is bypassable by an attacker-controlled 30x redirect to an internal address.
- */
-export function assertPublicHttpsUrl(url: URL): void {
-  if (url.protocol !== "https:") throw new Error("Only HTTPS image URLs allowed");
-  const host = url.hostname.toLowerCase();
-  if (host === "localhost" || host === "::1" || host === "[::1]" ||
-      host.startsWith("127.") || host.startsWith("10.") || host.startsWith("0.") ||
-      host.startsWith("172.") || host.startsWith("192.168.") ||
-      host === "169.254.169.254" || host.startsWith("169.254.") || host.startsWith("[") ||
-      /^fe[89ab]/i.test(host) || /^fd/i.test(host) || /^fc/i.test(host) ||
-      host.endsWith(".internal") || host.endsWith(".local")) {
-    throw new Error("Image URL points to internal network");
-  }
-}
+// SSRF guard moved to the dependency-free ./url-safety so lighter modules (e.g.
+// variant-merger) can use it without pulling image-composer's config graph.
+// Re-exported here for backward compatibility with existing importers.
+export { assertPublicHttpsUrl };
 
 /** Read a response body into a Buffer, aborting if it exceeds `max` bytes. */
 async function readCapped(res: Response, max: number): Promise<Buffer> {

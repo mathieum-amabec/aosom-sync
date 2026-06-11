@@ -37,6 +37,37 @@ whose Shopify product already has a `READY` video, is skipped.
   `/products/<handle>` 302s to home and the videos are **not shopper-visible yet** — they're the
   store's draft-import backlog. The videos are staged + READY and will render once each product
   is published. Not auto-published (business decision, out of scope).
+- **Relation to concurrent work:** this batch extends the parallel "first real video ingest"
+  (`01-0415`) and "video ingest 2+3" (`01-0893`, `120307-025`) entries below — those 3 validated
+  products are the pre-existing `video_ingest_log` rows this batch detected and skipped.
+
+## 2026-06-12 — Video ingest products 2+3 (LIVE) + SSRF P2-6 fix
+
+- **Video ingest** (`apply-video-ingest.mjs`, Mat-authorized): ingested the Aosom MP4 into 2 more
+  LIVE products — `01-0893` (gid 7796435877993 → Video 39506155339881) and `120307-025` (gid
+  7796433551465 → Video 39506156290153), both **READY**; logged to Turso `video_ingest_log`.
+  `01-0415` skipped (idempotent — already had a video). **3/3 test products now carry their video.**
+  Reversible (delete the media). Next: scale to the full top-30/2210 batch on Mat's go.
+- **SSRF P2-6 fix** (code, no store write): `classifyImageBackground` now validates
+  `assertPublicHttpsUrl` + `redirect: "error"` before fetching image URLs; guard extracted to
+  `src/lib/url-safety.ts`. `docs/SECURITY-BACKLOG.md` P2-6 → RESOLVED. tsc clean, 774 tests green.
+
+## 2026-06-12 — Full swatch map + EN parity (PREVIEW) + FIRST real video ingest (1 LIVE product)
+
+- **C1 swatches** (`apply-swatches-full.mjs`, PREVIEW): `main-product.liquid` swatch color map
+  → full 69-entry FR+EN map. PUT 200. Live untouched.
+- **C2 EN parity** (`apply-en-parity.mjs`, PREVIEW): bilingual rendering added in
+  `related-products.liquid` ("You might also like") + `featured-collection.liquid` sale subtitle
+  ("Unbeatable prices…"), gated on the FR text; `locales/en.default.json` keys added (inert for
+  user-set values — these are NOT exposed by the public Translations API in 2025-01). 3× PUT 200.
+- **C3 video ingest — FIRST REAL PRODUCT (live store write, Mat-authorized test):**
+  `apply-video-ingest-1.mjs` ran the full Phase-3 pipeline on **product `01-0415`** (gid
+  `7798393897065`): stagedUploadsCreate(VIDEO) → 3.5 MB multipart POST to GCS (204) →
+  `productCreateMedia` → polled **READY** (15 s). The Aosom MP4
+  (`…/01-0415/01-0415-Outsunny-WEB.mp4`) is now a video media on that product's PDP. Logged to a
+  new Turso table **`video_ingest_log`** (sku, product_id, media_id, status, video_url). httpMethod
+  POST (GCS form policy, not PUT). Idempotent (skips if a video media already exists). **The other
+  2 candidates (`01-0893`, `120307-025`) await Mat's validation.** Reversible (delete the media).
 
 ## 2026-06-12 — Enfants mega-menu + PDP color swatches on PREVIEW theme 160213696617 (live untouched)
 

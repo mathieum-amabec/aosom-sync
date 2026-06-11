@@ -2,6 +2,41 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.29] - 2026-06-12
+
+### Added (video ingest 2+3) / Security (SSRF P2-6 fix)
+- **C1 — Aosom video ingest for the other 2 test products** (`apply-video-ingest.mjs`,
+  Mat-authorized): `01-0893` + `120307-025` ingested (staged → multipart POST to GCS 204 →
+  productCreateMedia → **READY**), logged to Turso `video_ingest_log`. Idempotent — `01-0415`
+  skipped (already has a video). **Final: 3/3 READY.** Pipeline validated end-to-end.
+- **C2 — SSRF P2-6 fixed** (`classifyImageBackground`): now calls `assertPublicHttpsUrl(new
+  URL(url))` before the fetch and uses `redirect: "error"` (no auto-follow into internal
+  hosts); any violation → `"unknown"` failsafe. The guard was extracted to a dependency-free
+  `src/lib/url-safety.ts` (re-exported from `image-composer.ts`) so `variant-merger` doesn't
+  pull the config/sharp graph. Unit-tested (http/localhost/127.*/169.254.*/10.*/malformed all
+  → `"unknown"`, network never hit). Marked **RESOLVED** in `docs/SECURITY-BACKLOG.md`.
+- `tsc` clean, **774 tests** green.
+
+## [0.5.53.28] - 2026-06-12
+
+### Changed / Added (swatches + EN parity on PREVIEW; first real video ingest)
+- **C1 — full FR+EN swatch map** (`apply-swatches-full.mjs`, PUT 200): replaced the PDP swatch
+  color map in `main-product.liquid` with the complete 69-entry FR+EN map (gris clair, bleu
+  ciel, sauge, lavande, violet, bambou, rotin, acier, bronze, cuivre, lin, mixte gradient, …).
+- **C2 — EN parity featured_sale + cross-sell** (`apply-en-parity.mjs`, 3× PUT 200): these are
+  user-set native section values (NOT localizable via locale files / public Translations API),
+  so true bilingual rendering was added in the section liquids — `related-products.liquid`
+  heading → "You might also like", `featured-collection.liquid` sale subtitle → "Unbeatable
+  prices on our favourite picks." (both gated on the FR text so other instances are
+  unaffected). The requested `locales/en.default.json` keys were added too (inert for user
+  values; documented).
+- **C3 — first REAL Aosom video ingest** (`apply-video-ingest-1.mjs`, Mat-authorized test on
+  **1 product only**): full pipeline validated — stagedUploadsCreate(VIDEO) → 3.5 MB multipart
+  POST to GCS (204) → productCreateMedia → polled **READY** (15 s) → logged to Turso
+  `video_ingest_log`. Product `01-0415` (gid 7798393897065). httpMethod is POST (GCS policy
+  form), not PUT. Idempotent (skips if the product already has a video). **The other 2 products
+  await Mat's validation.** `tsc` clean, 773 tests green.
+
 ## [0.5.53.27] - 2026-06-11
 
 ### Security (docs-only — `/cso` daily audit, no code change)

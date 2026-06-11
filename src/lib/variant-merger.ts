@@ -3,6 +3,7 @@ import type {
   AosomMergedProduct,
   AosomVariant,
 } from "@/types/aosom";
+import { assertPublicHttpsUrl } from "./url-safety";
 
 /**
  * French color map ported from reference aosom-shopify/merger.js.
@@ -286,7 +287,11 @@ export async function classifyImageBackground(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), IMG_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetchImpl(url, { signal: controller.signal });
+    // SSRF guard (P2-6): HTTPS-only + internal-host denylist, and never auto-follow
+    // redirects (an attacker-controlled 30x could point at an internal address). Any
+    // violation throws → caught below → "unknown" (failsafe, same as a fetch error).
+    assertPublicHttpsUrl(new URL(url));
+    const res = await fetchImpl(url, { signal: controller.signal, redirect: "error" });
     if (!res.ok) return "unknown";
     const len = res.headers.get("content-length");
     if (len && Number(len) > IMG_MAX_BYTES) return "unknown";
