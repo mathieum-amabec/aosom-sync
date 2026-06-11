@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.20] - 2026-06-11
+## [0.5.53.21] - 2026-06-11
 
 ### Changed (uniform mega-menu + hero buttons — PREVIEW `160213696617` only, live untouched)
 - **Catalog-fit uniform mega-menu.** A collection audit showed the store can't support a
@@ -20,6 +20,18 @@ All notable changes to Aosom Sync will be documented in this file.
   stand out against the photo. Script: `apply-hero-buttons-preview.mjs`.
 - **Verification** (`verify-menu-uniform-preview.mjs`): **23 ✅ / 0 ❌** (incl. live
   `main-menu` untouched + liquid tag-balance sanity on both edited snippets).
+
+## [0.5.53.20] - 2026-06-11
+
+### Changed (PREVIEW theme `160213696617` only — live untouched)
+- **Phase 4 — PDP redesign.** `sections/main-product.liquid`: added a category **eyebrow**
+  (`product.type`, navy uppercase DM Sans) above the H1, the **Judge.me preview badge under the
+  H1** (metafield-badge placement), and a **navy `#1B2A4A` ATC button** (radius 4px, hover
+  lighter, full-width on mobile). `snippets/price.liquid`: shows **"Économisez X$" only when the
+  discount ≥ 10 %**. `templates/product.json` `trust_badges`: under-ATC reassurance converted
+  from emoji (🚚🔄🔒⭐) to **navy thin-line SVG** (Livraison gratuite · Retours 30 j · Paiement
+  sécurisé · Service québécois). Gallery unchanged (media[0] already featured). QA
+  `scripts/verify-pdp-redesign.mjs`: 8 ✅.
 
 ## [0.5.53.19] - 2026-06-11
 

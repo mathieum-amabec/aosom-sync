@@ -28,6 +28,28 @@ title/subtitle text-shadow, bottom gradient overlay). All PUT 200.
 megas are sub-4 by catalog reality; Animaux/Enfants parent links reuse a child collection (no
 broader "all" collection exists). **Awaiting Mat's visual checkpoint.**
 
+## 2026-06-11 — Phase 4: PDP redesign on PREVIEW theme 160213696617 (live untouched)
+
+All writes on the unpublished preview; live `160059195497` not touched
+(`scripts/apply-pdp-redesign.mjs` preview-guarded). 3 assets PUT (200 each):
+
+- **`sections/main-product.liquid`** (title block + buy_buttons case): **eyebrow**
+  `<p class="product-eyebrow">{{ product.type }}</p>` above the `<h1>` (DM Sans, uppercase,
+  letter-spaced, navy `#1B2A4A`); **Judge.me stars under the H1** via the metafield-badge
+  placement `<div class="jdgm-widget jdgm-preview-badge" data-id="{{ product.id }}">{{
+  product.metafields.judgeme.badge }}</div>` (no `judgeme_widgets` snippet in the theme; the
+  full review widget stays in its existing `apps` section below); **ATC navy** scoped `<style>`
+  → `.product-form__submit` `#1B2A4A`/white/radius 4px, hover `#2a3f6b`, full-width mobile.
+- **`snippets/price.liquid`**: "Économisez {{ savings }}" (FR) / "Save …" (EN) shown **only when
+  discount ≥ 10 %** (`disc_pct = (compare_at − price) × 100 / compare_at`); green, under the price.
+- **`templates/product.json`** `trust_badges` block: under-ATC reassurance grid converted from
+  emoji (🚚🔄🔒⭐) to **navy thin-line SVG** — Livraison gratuite · Retours 30 jours · Paiement
+  sécurisé · Service québécois (4th replaces the old "Judge.me reviews" badge; stars now under H1).
+
+Gallery: no change (Dawn renders `product.media` in order, `media[0]` featured; import already
+promotes the lifestyle shot). QA (`scripts/verify-pdp-redesign.mjs`): **8 ✅ / 0 ❌**. Visual
+confirm via admin Theme → Preview before publishing.
+
 ## 2026-06-11 — Homepage polish final on PREVIEW theme 160213696617 (live untouched)
 
 All writes on the unpublished preview; live `160059195497` not touched
