@@ -3,6 +3,31 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-12 — Enfants mega-menu + PDP color swatches on PREVIEW theme 160213696617 (live untouched)
+
+Preview theme `160213696617` + the **preview-only** `preview-main-menu` (live `main-menu`
+NOT touched). `scripts/apply-enfants.mjs` + `apply-swatches.mjs`.
+
+- **Enfants mega (Chantier 1):** "Enfants" was already in `preview-main-menu` + `mega-menu.liquid`
+  (children `jouets-pour-enfants` + `meubles-pour-enfants`). The task's `?type=furniture/toys`
+  was **not used** — the `enfants` collection's product types are full Google-taxonomy strings
+  ("Toys & Games > …"), so `?type=` would match nothing, and the mega resolves card images by
+  collection handle so both `?type=enfants` cards would collapse to one image. Instead, kept the
+  2 dedicated collections (distinct images) and: uploaded 2 Unsplash assets
+  (`cat-enfants-furniture.jpg` ← children bedroom, `cat-enfants-toys.jpg` ← kids playroom; ToS
+  pings sent), swapped the 2 Enfants `mega-menu.liquid` case images to those assets, and
+  **`menuUpdate`** repointed the **Enfants parent → the unified `enfants` collection** (37
+  products) so "Voir tout «Enfants»" lands there (2 children preserved). All PUT/mutation 200.
+- **PDP color swatches (Chantier 2):** `sections/main-product.liquid` — appended a scoped
+  `<style>`+`<script>` after `{% render 'product-variant-picker' %}` that turns the **"Couleur"/
+  "Color"** option's text pills into round color swatches (name→hex map: Blanc/Noir/Gris/Brun/
+  Beige/Bleu/Vert/Rouge/… + EN, partial-match fallback), selected swatch gets a **gold `#D4A853`**
+  ring (`input:checked + label`). Non-color options keep text buttons; unknown color names stay
+  text (graceful). Layered on Dawn's picker (no snippet edit).
+
+QA (`scripts/verify-enfants-swatches.mjs`): **10 ✅ / 0 ❌**. Visual confirm via admin Theme →
+Preview before publishing.
+
 ## 2026-06-11 — Phase 5: home video showcase section on PREVIEW theme 160213696617 (live untouched)
 
 All writes on the unpublished preview; live `160059195497` not touched
