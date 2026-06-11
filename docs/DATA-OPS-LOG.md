@@ -3,6 +3,28 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-11 — Navigation + hero premium on PREVIEW theme (live untouched)
+
+Target theme **`160213696617`** (UNPUBLISHED); live **`160059195497` NOT touched**. Scripts
+hard-abort against the live id.
+
+- **Navigation menu — store-wide caveat:** the navigation menu (`main-menu`) is **store-level
+  data, not theme-scoped** — editing it would change the live storefront. So a **new menu
+  `preview-main-menu`** was created via GraphQL `menuCreate` (gid recorded by the script) and
+  **only the preview theme's `header-group.json`** repointed to it (`menu`:
+  `main-menu` → `preview-main-menu`). Live `main-menu` is unchanged and still used by the live
+  theme. New structure: Rabais 🔥 / Mobilier extérieur (4 children) / Meubles (4 children) /
+  Jardin / Animaux / Déco / Catalogue, all linking existing collections (COLLECTION/CATALOG
+  menu items).
+- **Theme assets PUT (preview):** `snippets/mega-menu.liquid` (new — image mega cards, 8
+  Unsplash photos, navy/gold DM Sans), `snippets/header-mega-menu.liquid` (delegates mega
+  panel to the snippet), `sections/header-group.json` (menu repoint), `templates/index.json`
+  (`lc_hero` refonte: new headline/subtitle, 2 CTAs, floating badge; existing image kept).
+- **Verification:** `verify-nav-hero-preview.mjs` → **17 ✅ / 0 ❌**.
+- **Open:** no dedicated "Déco" collection — currently points to `meubles-et-decorations`
+  (overlaps Meubles); Mat to curate a real one if wanted. Unsplash ToS download endpoint was
+  pinged for the 8 images. **Awaiting Mat's visual checkpoint** before any live promotion.
+
 ## 2026-06-11 — Homepage premium: shipping-mention reduction + category tiles (PREVIEW, no live edit)
 
 All writes on the unpublished preview `160213696617`; live `160059195497` not touched
