@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.27] - 2026-06-12
+
+### Changed / Added (swatches + EN parity on PREVIEW; first real video ingest)
+- **C1 — full FR+EN swatch map** (`apply-swatches-full.mjs`, PUT 200): replaced the PDP swatch
+  color map in `main-product.liquid` with the complete 69-entry FR+EN map (gris clair, bleu
+  ciel, sauge, lavande, violet, bambou, rotin, acier, bronze, cuivre, lin, mixte gradient, …).
+- **C2 — EN parity featured_sale + cross-sell** (`apply-en-parity.mjs`, 3× PUT 200): these are
+  user-set native section values (NOT localizable via locale files / public Translations API),
+  so true bilingual rendering was added in the section liquids — `related-products.liquid`
+  heading → "You might also like", `featured-collection.liquid` sale subtitle → "Unbeatable
+  prices on our favourite picks." (both gated on the FR text so other instances are
+  unaffected). The requested `locales/en.default.json` keys were added too (inert for user
+  values; documented).
+- **C3 — first REAL Aosom video ingest** (`apply-video-ingest-1.mjs`, Mat-authorized test on
+  **1 product only**): full pipeline validated — stagedUploadsCreate(VIDEO) → 3.5 MB multipart
+  POST to GCS (204) → productCreateMedia → polled **READY** (15 s) → logged to Turso
+  `video_ingest_log`. Product `01-0415` (gid 7798393897065). httpMethod is POST (GCS policy
+  form), not PUT. Idempotent (skips if the product already has a video). **The other 2 products
+  await Mat's validation.** `tsc` clean, 773 tests green.
+
 ## [0.5.53.26] - 2026-06-12
 
 ### Changed (PREVIEW theme `160213696617` + preview-only menu — live untouched)
