@@ -3,6 +3,41 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-11 — Phase 3: Aosom video ingest BATCH (top-30, real upload to Shopify)
+
+`scripts/aosom-video-ingest-batch.mjs --apply`. Attached Aosom product MP4s to the **live
+Shopify products** as VIDEO media, via the product-media path (`stagedUploadsCreate(VIDEO)` →
+POST bytes to the staged GCS target → `productCreateMedia` → poll `status` to `READY`), covered
+by `write_products`. Source = `products.video` for the 30 top-seller SKUs (docs/audit-pdp-video.md
+§6); 17 carry a video URL. Throttled to ≤2 Shopify req/s. Idempotent: a SKU logged `READY`, or
+whose Shopify product already has a `READY` video, is skipped.
+
+- **Candidates:** 17 SKUs with a `products.video` URL → **14 unique Shopify products** (3 pairs of
+  color-variant SKUs share one product: `845-774V00BK`/`SR` → `7793456087145`;
+  `84A-054V05BK`/`BN` → `7793456250985`; `84B-136`/`84B-136BK` → `7798393700457`). One product
+  carries one video — the first SKU per product is ingested, siblings skipped.
+- **Result:** **12 ingérés / 5 skippés / 0 erreurs.**
+  - 12 newly attached: `823-010V81`, `845-039V01GY`, `845-335`, `845-518GY`, `845-774V00BK`,
+    `845-792V00YL`, `84A-054V05BK`, `84B-136`, `84B-146BU`, `84C-226CG`, `84H-209V00CG`, `D51-277V01`.
+  - 5 skipped: `01-0893` (already `READY` from the 3-product validation), `823-002V80` (already had
+    a `READY` video — see note), `845-774V00SR` / `84A-054V05BN` / `84B-136BK` (sibling variants).
+- **`video_ingest_log` (Turso):** pre-existing table from the manual 3-product validation
+  (`01-0415`, `01-0893`, `120307-025`), columns `(sku, product_id, media_id, status, video_url,
+  created_at)`. The batch matches that schema and additively adds a nullable `error` column.
+  Final state: **16 `READY` + 3 `SKIPPED` = 19 rows.** Each `READY` row carries its
+  `gid://shopify/Video/...` media id.
+- **Note (partial first run):** the initial `--apply` attached `823-002V80`'s video to Shopify
+  (`gid://shopify/Video/39506176868457`) but the log write threw — the live table lacked the
+  `shopify_product_id` column the first draft assumed. Fixed the script to the real schema; the
+  re-run's existing-video check detected the already-attached video and logged it `READY` (no
+  duplicate upload). No products were double-attached.
+- **QA (post-ingest):** sampled 5 products via Admin API → each has exactly **1 `READY` VIDEO
+  media** (sibling-sharing products show VIDEO=1, dedup confirmed). **Caveat:** all 14 ingested
+  products are `status: ACTIVE` but `publishedAt: null` (not on the Online Store channel), so
+  `/products/<handle>` 302s to home and the videos are **not shopper-visible yet** — they're the
+  store's draft-import backlog. The videos are staged + READY and will render once each product
+  is published. Not auto-published (business decision, out of scope).
+
 ## 2026-06-12 — Enfants mega-menu + PDP color swatches on PREVIEW theme 160213696617 (live untouched)
 
 Preview theme `160213696617` + the **preview-only** `preview-main-menu` (live `main-menu`
