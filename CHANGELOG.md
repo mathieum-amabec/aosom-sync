@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.25] - 2026-06-11
+
+### Changed (Phase 6 — voice + cross-sell + final audit, PREVIEW `160213696617` only)
+- **C1 — Québécois voice on the homepage** (`apply-phase6-voice.mjs`, PUT 200): `featured_sale`
+  subtitle "Des prix imbattables sur nos coups de cœur du moment."; `why_us` 4 warmer titles
+  (incl. "On est d'ici. On vous répond en français."); `shop_pay` naturalness tweaks
+  ("Aucun intérêt", "Approbation instantanée"); announcement bar → "Livraison gratuite au
+  Canada · Retours 30 jours · Paiement sécurisé".
+- **C2 — curated PDP cross-sell** (`apply-phase6-crosssell.mjs`, PUT 200): the existing
+  `related-products` section (Shopify category recommendations + card-product) re-titled
+  **"Vous aimerez aussi"**, limited to **4** products. (Config lives in `product.json`, not
+  `main-product.liquid`; sold-out moot under dropship.)
+- **C3 — final theme audit** (`verify-final-audit.mjs` → `docs/final-theme-audit.md`):
+  **18 ✅ / 0 ❌**. Verdict **PRÊT À PUBLIER**, with 2 non-blocking follow-ups (FR color
+  swatch config to confirm; EN parity on 2 native settings).
+- EN note: `featured_sale` subtitle + `related-products` heading are native monolingual
+  settings (FR shown); a theme translation would localize them.
+
 ## [0.5.53.24] - 2026-06-11
 
 ### Added / Changed (C3 — leading-heading strip + on-push guard)
