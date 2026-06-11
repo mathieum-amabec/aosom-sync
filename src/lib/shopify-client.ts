@@ -1,6 +1,7 @@
 import type { ShopifyExistingProduct, ShopifyExistingVariant } from "@/types/sync";
 import type { AosomMergedProduct } from "@/types/aosom";
 import { slugify, type GeneratedContent } from "./content-generator";
+import { stripLeadingHeading } from "./html-utils";
 import { env, SHOPIFY, SYNC } from "./config";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
@@ -131,7 +132,9 @@ export async function createShopifyProduct(
     product: {
       title: content.titleFr,
       ...(handle ? { handle } : {}),
-      body_html: content.descriptionFr,
+      // Strip a leading marketing heading the model sometimes opens with (reads as a
+      // duplicate title under the product H1). See html-utils.stripLeadingHeading.
+      body_html: stripLeadingHeading(content.descriptionFr),
       vendor: merged.brand || "Aosom",
       product_type: merged.productType,
       // TODO(taxonomy): on a (re)creation, only generated tags are written here.

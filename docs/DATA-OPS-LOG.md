@@ -3,6 +3,19 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-11 — C3 applied: strip leading marketing heading from 26 product descriptions
+
+Production write (Mat-authorized). Backfilled the 26 active products whose `body_html`
+opened with a marketing `<h2>/<h3>` (the perceived "duplicate title" under the PDP H1).
+
+- **`scripts/apply-strip-h2.mts`** → `productUpdate(descriptionHtml)` on **26/26 OK** (2 req/s,
+  idempotent; re-run reports 0 to fix). The strip removes only the FIRST leading heading and
+  keeps the rest (`<p>…`). Several removed headings also carried the brand
+  (Aosom/Outsunny/Qaba) — now gone from the description opener.
+- **On-push guard:** `src/lib/html-utils.ts` `stripLeadingHeading()` is now applied in
+  `shopify-client.ts` (`body_html`), so future imports won't reintroduce it. Unit-tested
+  (`tests/html-utils.test.ts`, 8 cases). `tsc` clean, 773 tests green.
+
 ## 2026-06-11 — Phase 5: home video showcase section on PREVIEW theme 160213696617 (live untouched)
 
 All writes on the unpublished preview; live `160059195497` not touched
