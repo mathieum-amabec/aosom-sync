@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.24] - 2026-06-12
+## [0.5.53.25] - 2026-06-12
 
 ### Changed (PREVIEW theme `160213696617` + preview-only menu — live untouched)
 - **Enfants mega-menu.** Uploaded 2 Unsplash assets (`cat-enfants-furniture.jpg`,
@@ -14,6 +14,18 @@ All notable changes to Aosom Sync will be documented in this file.
   variant option as round color swatches (name→hex map FR/EN, partial-match fallback); the
   selected swatch gets a gold `#D4A853` ring. Non-color options keep text buttons. Layered on
   Dawn's picker (no snippet change). QA `scripts/verify-enfants-swatches.mjs`: 10 ✅.
+
+## [0.5.53.24] - 2026-06-11
+
+### Added / Changed (C3 — leading-heading strip + on-push guard)
+- **On-push guard.** New pure `src/lib/html-utils.ts` `stripLeadingHeading()` removes a single
+  leading `<h1>/<h2>/<h3>` from a description (idempotent, only the first element). Wired into
+  `shopify-client.ts` so **new imports** never reintroduce the "duplicate title" marketing
+  heading. Tested: `tests/html-utils.test.ts` (8 cases).
+- **Backfill applied.** `scripts/apply-strip-h2.mts` (reuses the same helper) stripped the
+  leading heading on **26/26** affected products via `productUpdate` (2 req/s, idempotent;
+  re-run = 0). Many removed headings also carried the brand (Aosom/Outsunny/Qaba), now gone.
+- `tsc` clean, **773 tests** green (765 + 8 new).
 
 ## [0.5.53.23] - 2026-06-11
 
