@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.23] - 2026-06-11
+
+### Changed (C1 + C2 applied; C3 dry-run pending)
+- **C1 — "Enfants et famille" smart collection created** (`scripts/apply-enfants-collection.mjs`,
+  Mat-authorized store write). Rules: `type` contains Kid/Child/Baby/Toy OR `title` contains
+  enfant/jouet, disjunctive, published. **37 products**, `/collections/enfants`. Idempotent.
+- **C2 — EN-title brand cleanup applied to the 7 A1 products** (`scripts/apply-en-titles.mjs`):
+  **7/7 OK** — 6 via `translationsRegister` (en title), 1 via `metafieldsSet` (`custom.title_en`).
+  Pure string cleaning (no Claude calls); 2 req/s. EN now matches the cleaned FR.
+- **C3 — leading-heading strip is DRY-RUN only** (`scripts/strip-h2-dry-run.mjs`): **26/502**
+  active `body_html` open with an `<h2>/<h3>` marketing heading; strip removes it and keeps the
+  rest (`<p>…`). 5 before/after shown. **No writes — awaiting Mat's validation before apply.**
+- `tsc` clean, 765 tests green.
+
 ## [0.5.53.22] - 2026-06-11
 
 ### Added (3 data dry-runs — read-only, no writes)

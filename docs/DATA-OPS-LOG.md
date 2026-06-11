@@ -3,6 +3,22 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-11 — C1 + C2 applied (collection + EN titles); C3 still dry-run
+
+Production writes (Mat-authorized). Live store data, not theme-scoped.
+
+- **C1 — smart collection created** (`scripts/apply-enfants-collection.mjs`): POST
+  `smart_collections.json` → "Enfants et famille" (`/collections/enfants`, id 473988169833),
+  rules `type contains Kid/Child/Baby/Toy OR title contains enfant/jouet`, disjunctive,
+  published. **37 products** matched. Idempotent (skips if handle `enfants` exists).
+- **C2 — EN titles brand cleanup** (`scripts/apply-en-titles.mjs`) on the 7 A1 products:
+  **7/7 OK** — 6 via GraphQL `translationsRegister` (en `title`, with
+  `translatableContentDigest`), 1 via `metafieldsSet` (`custom.title_en`, #7752208449641).
+  Pure string cleaning (no Claude). 2 req/s. EN titles now match the A1-cleaned FR.
+- **C3 — NOT applied (dry-run only):** 26/502 active `body_html` open with a marketing
+  `<h2>/<h3>`; `scripts/strip-h2-dry-run.mjs` shows the strip (5 before/after). **Awaiting
+  Mat's validation before the write/backfill.**
+
 ## 2026-06-11 — 3 data dry-runs: collection matches, EN-title parity, P0 audit (no writes)
 
 All read-only against live Shopify (Admin GraphQL). **No Shopify writes.** Full report:
