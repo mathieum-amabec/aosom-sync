@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.27] - 2026-06-12
+## [0.5.53.28] - 2026-06-12
 
 ### Changed / Added (swatches + EN parity on PREVIEW; first real video ingest)
 - **C1 — full FR+EN swatch map** (`apply-swatches-full.mjs`, PUT 200): replaced the PDP swatch
@@ -21,6 +21,19 @@ All notable changes to Aosom Sync will be documented in this file.
   `video_ingest_log`. Product `01-0415` (gid 7798393897065). httpMethod is POST (GCS policy
   form), not PUT. Idempotent (skips if the product already has a video). **The other 2 products
   await Mat's validation.** `tsc` clean, 773 tests green.
+
+## [0.5.53.27] - 2026-06-11
+
+### Security (docs-only — `/cso` daily audit, no code change)
+- **`/cso` audit (code surface since 2026-06-08, PRs #149–#155).** Appended a dated entry to
+  `docs/SECURITY-BACKLOG.md`. One new **P2-6**: `classifyImageBackground`
+  (`variant-merger.ts:289`) fetches product image URLs with a raw `fetch` and no SSRF guard —
+  no HTTPS enforcement, no internal-host denylist, default auto-follow redirects — unlike the
+  hardened `downloadImage`/`assertPublicHttpsUrl` path. Rated P2 (blind, GET-only,
+  supplier-feed source). Fix noted in the backlog (reuse `assertPublicHttpsUrl` + manual
+  redirects). Verified clean: `stripLeadingHeading` regex (no ReDoS), `/api/video-serve`
+  (id-validated, DB-controlled paths), `/api/catalog/stats` (middleware-gated, counts only),
+  secret scan.
 
 ## [0.5.53.26] - 2026-06-12
 
