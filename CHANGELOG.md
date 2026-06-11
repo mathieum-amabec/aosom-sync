@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.16] - 2026-06-10
+
+### Added (lifestyle backfill — extended DRY-RUN, no writes)
+- **`scripts/lifestyle-backfill-all-dry-run.mts`** (read-only): runs the validated
+  `classifyProductImages` heuristic over **all 497 active Shopify products** (Admin GraphQL,
+  ~2 req/s, media in gallery order), and reports whether the featured image (media pos 0)
+  would change to a lifestyle shot. Report: `docs/lifestyle-backfill-all-dry-run.csv`
+  (product_id, handle, current url, proposed url, changement).
+- **Result: 361 / 497 would change** their featured image; 136 already lifestyle-first; **0
+  have white-bg-only galleries**; 0 missing images. The 73% change rate is high — Mat to
+  **spot-check a visual sample** before approving the backfill. **No Shopify writes.** The
+  apply step (Étape 2: `productUpdateMedia` reorder, idempotent, 2 req/s) is **not** built
+  here — it awaits validation.
+
 ## [0.5.53.15] - 2026-06-10
 
 ### Added (Phase 3 — Aosom video ingest, DRY-RUN)

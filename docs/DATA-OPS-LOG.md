@@ -3,6 +3,26 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-10 — Lifestyle backfill on ALL active products (extended DRY-RUN, no writes)
+
+Ran `scripts/lifestyle-backfill-all-dry-run.mts` (read-only) over **all 497 active Shopify
+products** (Admin GraphQL `products(query:"status:active")`, ~2 req/s; media fetched in
+gallery order). For each product, classified every image with `classifyProductImages`
+(download ≤5s/≤2MB → sharp border-10% near-white ratio; >80% white studio, <80% lifestyle)
+and compared the first lifestyle image vs the current featured image (media pos 0).
+
+**Result:**
+- Total analysed: **497**
+- Would change featured image: **361** (73%)
+- Already correct (lifestyle already pos 0): **136**
+- White-bg-only galleries (no lifestyle): **0**
+- No images: **0**
+
+Report: `docs/lifestyle-backfill-all-dry-run.csv`. **No Shopify writes.** The 73% change
+rate is aggressive and `0` white-bg-only is notable — **Mat to spot-check a visual sample**
+before approving the apply step. Étape 2 (reorder via `productUpdateMedia`, idempotent,
+2 req/s) is **NOT** implemented yet — awaiting validation.
+
 ## 2026-06-10 — Phase 3: Aosom video ingest (DRY-RUN, no upload/no product change)
 
 Tested the Shopify API path for attaching Aosom MP4s, via
