@@ -267,6 +267,42 @@ copies (`social-scheduled`, `social/content/generate`) already wrap `env.cronSec
 try/catch; the shared helper should adopt that fail-closed form for all.
 
 ---
+
+## Audit 2026-06-11 — daily mode (code surface since 2026-06-08)
+
+Scope: src changes merged in PRs #149–#155 (PDP redesign, home-video, strip-leading-heading,
+Enfants menu/swatches, phase-6 voice, catalog routes). Theme work this period is Shopify-side
+(no app surface). Gate: 8/10 confidence.
+
+### Clean (verified this run)
+- **ReDoS — `stripLeadingHeading` (`src/lib/html-utils.ts:18`):** regex
+  `/^\s*<h([1-3])\b[^>]*>[\s\S]*?<\/h\1>\s*/i` is `^`-anchored (single start position),
+  the inner `[\s\S]*?` is lazy with a required backreferenced close tag, and there is no
+  nested/overlapping quantifier. No catastrophic backtracking on adversarial `body_html`. Safe.
+- **`/api/video-serve/[id]` (now PUBLIC, `proxy.ts` allowlist):** `id` is `parseInt`+positive-int
+  validated; `video_path`/`video_url` come from the DB row (pipeline-controlled, never request),
+  redirect target is `isHttpUrl`-checked. Videos are public marketing assets (Graph API fetches
+  them). No IDOR of sensitive data, no path-traversal from request input. (Note: the DB-set
+  `video_path` containment + redirect host-allowlist hardening remain tracked as P3-5/P3-6.)
+- **`/api/catalog/stats`:** no inline auth but gated by `proxy.ts` (not in PUBLIC_PATHS); returns
+  only aggregate `COUNT(*)`s. No request params reach the query. Consistent with `/api/catalog`.
+- **Secrets:** no hardcoded secret patterns in src changes since 2026-06-07; scan clean.
+
+### New P2 — SSRF defense-in-depth gap
+### P2-6: `classifyImageBackground` fetches image URLs with no SSRF guard
+`src/lib/variant-merger.ts:289` does a raw `fetchImpl(url, { signal })` on product image URLs to
+measure border whiteness during import. Unlike the hardened `downloadImage`/`assertPublicHttpsUrl`
+path (`image-composer.ts:44–107`), it does **not**: enforce HTTPS, deny internal/link-local hosts
+(`169.254.169.254`, `127.*`, `10.*`, `.internal`…), or re-check redirect hops (default `fetch`
+auto-follows 30x, so even a public HTTPS URL can 302 into the internal network). **Why only P2,
+not P1:** the URL source is the Aosom supplier CSV (semi-trusted, not arbitrary end-user input),
+the SSRF is **blind** — only a 1-trit classification (`white_bg`/`lifestyle`/`unknown`) is ever
+returned, never the response body — and it is GET-only on a manually-triggered import path.
+**Fix:** call `assertPublicHttpsUrl(new URL(url))` before the fetch and pass `redirect: "manual"`
+with a per-hop re-check (or refactor `classifyImageBackground` to reuse `downloadImage`'s buffer
+under the existing size/timeout caps). Trivial — the guard helper is already exported.
+
+---
 **Disclaimer:** `/cso` is an AI-assisted scan that catches common patterns. It is not a
 substitute for a professional penetration test. For production systems handling PII or
 payments, engage a qualified security firm.
