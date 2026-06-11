@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.22] - 2026-06-11
+
+### Added (PREVIEW theme `160213696617` only — live untouched)
+- **Home "Voyez-le chez vous" video section.** New `sections/home-video-showcase.liquid`: a
+  responsive grid (3/2/1) of **6** product videos (Aosom MP4s) on `#FAFAF8` with navy DM Sans
+  titles. Each card autoplays muted/looped **only when scrolled into view** (IntersectionObserver
+  + `preload="none"`, so no MP4 downloads on initial load), shows a poster + a navy hover overlay
+  with the live title/price (`all_products[handle]`), and links to the product. Added to
+  `index.json` after the carousels. The 6 products were filtered to active+published. QA
+  `scripts/verify-home-video.mjs`: 10 ✅.
+- **`docs/pagespeed-audit.md`** — read-only home perf audit: healthy (0 render-blocking JS, DM
+  Sans loaded + preloaded, 102/121 images lazy); refinements flagged (width/height on 6 images,
+  lazy on 18 more, trim ~45 KB inline JS).
+
 ## [0.5.53.21] - 2026-06-11
 
 ### Changed (uniform mega-menu + hero buttons — PREVIEW `160213696617` only, live untouched)
