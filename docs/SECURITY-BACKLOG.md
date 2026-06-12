@@ -310,6 +310,73 @@ returned, never the response body — and it is GET-only on a manually-triggered
 with a per-hop re-check (or refactor `classifyImageBackground` to reuse `downloadImage`'s buffer
 under the existing size/timeout caps). Trivial — the guard helper is already exported.
 
+## Audit 2026-06-11 (pm) — branch `fix/reingest-84B146BU-cso` (daily, 8/10 gate)
+
+Scope: full daily audit run alongside the 84B-146BU video re-ingest. Covered the auth/proxy
+model, all 9 cron routes, the public route surface, the SQL builders, the SSRF guard, and a
+fresh `bun audit` dependency sweep. Independent re-verification of each candidate against the
+FP filter. **No P0/P1 findings.** Every candidate is a moderate dependency advisory (no
+high/critical) or an already-tracked item.
+
+### Verified clean (active verification)
+- **Auth/proxy model unchanged and sound.** `src/proxy.ts` (this Next version's middleware)
+  gates every non-static, non-`PUBLIC_PATHS` route on a valid HMAC-signed session cookie and
+  applies the reviewer-role 403. `src/lib/auth.ts` signs/verifies tokens with HMAC-SHA256 and
+  constant-time comparison, with expiry + role-allowlist checks.
+- **All 9 cron routes self-gate.** Each `/api/cron/*` route calls `verifyCronSecret`
+  (length check + `crypto.timingSafeEqual`, fail-closed on missing `CRON_SECRET`) despite the
+  `/api/cron` prefix being public. Re-confirmed across `sync*`, `social*`, `blog`, `content`,
+  `csv-precache`.
+- **Public LLM route still gated.** `/api/social/content/generate` requires a valid session OR
+  a constant-time `CRON_SECRET` Bearer (401/403 otherwise) before any paid Anthropic call. The
+  prompt is built from DB templates + constant vars — no request input reaches the system prompt.
+- **SQL injection: none.** Dynamic `UPDATE`/`WHERE` builders whitelist column names
+  (`IMPORT_JOB_COLUMNS.has(key)` → throw) and pass all values as `?` args.
+- **SSRF guard intact.** `downloadImage` (`src/lib/image-composer.ts`) fetches with
+  `redirect: "manual"` and re-runs `assertPublicHttpsUrl` (`src/lib/url-safety.ts`) on every
+  hop, with timeout + size cap. `/api/image-preview` sources its image URL from the DB (not the
+  request) and host-allowlists the fallback redirect.
+- **CI is clean.** `.github/workflows/vercel-deploy.yml` triggers only on push-to-main, stores
+  the deploy-hook URL in a GitHub Actions secret (repo is public), and has no
+  `pull_request_target` or `${{ github.event.* }}` script-injection sink.
+- **Secrets:** none tracked, none in git history (AKIA/ghp_/sk-ant/sk_live/xoxb scans empty);
+  `.env*` + `.env*.local` gitignored. Lockfiles (`bun.lock`, `package-lock.json`) tracked.
+
+### Dependency sweep — `bun audit` (6 moderate, 0 high/critical)
+All moderate. Per FP rule #8 these are tracked here as supply-chain hygiene, not individual
+findings. Remediation is version bumps; none is an exploitable path into this app today.
+
+| Package | Advisory | Reachable here? |
+|---------|----------|-----------------|
+| `dompurify` (<3.4.0, via `isomorphic-dompurify` ^3.7.1) | 4× XSS / 1× proto-pollution bypass | **No** — the only call is `DOMPurify.sanitize(description)` with **default config**; every advisory requires non-default options (`ADD_TAGS`/`FORBID_TAGS`/`RETURN_DOM`/`CUSTOM_ELEMENT_HANDLING`) this app never passes. |
+| `@anthropic-ai/sdk` (^0.82.0, <0.91.1) | Insecure default file perms in Local Filesystem Memory Tool (GHSA-p7fg-763f-g4gf) | **No** — app uses only `messages.create`, never the memory tool. Already tracked as **P2-2**. |
+| `postcss` (<8.5.10) | XSS via unescaped `</style>` (GHSA-qx2v-qp2m-jg93) | **No** — build-time/transitive via `next`. Already tracked as **P2-3**. |
+| `ws` (>=8.0.0 <8.20.1) | Uninitialized memory disclosure (CVSS 4.4, PR:H) | **No** — transitive, high-privilege precondition. |
+| `brace-expansion` (<5.0.6) | Large numeric range DoS (CWE-400) | DoS class — excluded by FP hard-exclusion #1. |
+
+### New P3 — Low / informational
+### P3-8: Bump `isomorphic-dompurify` so bundled `dompurify` is ≥3.4.0
+Not exploitable today (default-config `sanitize`, see table) but it is the single
+`dangerouslySetInnerHTML` sink in the app (`import/page.tsx:528`, auth-gated dashboard). Bump
+`isomorphic-dompurify` to a release that vendors `dompurify` ≥3.4.0 so the sink stays safe even
+if a future change starts passing `ADD_TAGS`/custom-element options. Pure hygiene, no behavior
+change. Bundle the `ws` bump (≥8.20.1) opportunistically in the same dep PR.
+
+### P3-9: Operator video-ingest scripts fetch `products.video` with no SSRF guard
+`scripts/reingest-84B146BU.mjs` (added this branch) and the existing
+`scripts/aosom-video-ingest-batch.mjs` / `apply-video-ingest*.mjs` do a raw `fetch(p.video)` on
+the URL stored in `products.video`, with no `assertPublicHttpsUrl`. **Not a web finding:** these
+are operator-run CLI tools (not request handlers), the URL is supplier-sourced (Aosom CDN), and
+there is no untrusted request input. Tracked only for parity with the in-app SSRF discipline —
+if these scripts are ever wired into a request-triggered path, apply the `url-safety` guard first.
+
+### Status updates on prior items
+- **P2-2 (@anthropic-ai/sdk), P2-3 (postcss):** still open, re-confirmed by this run's `bun
+  audit`. Both remain not-reachable; bump when convenient (avoid `audit fix --force` — it
+  proposes breaking majors/downgrades, per the original notes).
+- **P3-5 / P3-6 (`/api/video-serve` path containment + redirect host-allowlist):** not in this
+  audit's scope (no `video-serve` change on this branch); remain open from 2026-06-08/09.
+
 ---
 **Disclaimer:** `/cso` is an AI-assisted scan that catches common patterns. It is not a
 substitute for a professional penetration test. For production systems handling PII or
