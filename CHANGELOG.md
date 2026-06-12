@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.32] - 2026-06-11
+
+### Fixed (Aosom video — product 7793455792233 / SKU 84B-146BU)
+- **Re-ingested the 84B-146BU product video.** Force-replaced the existing READY media
+  (`gid://shopify/Video/39506307907689`) with a fresh upload from the Turso `products.video`
+  URL via the validated pipeline (stagedUploadsCreate → GCS upload → productCreateMedia →
+  poll READY). New media `gid://shopify/Video/39508139671657` is READY on the live product;
+  `video_ingest_log` upserted.
+
+### Added (tooling)
+- **`scripts/reingest-84B146BU.mjs`** — single-SKU force re-ingest. Uploads + attaches the
+  new video and polls READY **before** deleting the prior media, so a mid-pipeline failure
+  can never strand the live product with no video. Download/upload timeouts, a `gql()` data
+  guard, and timeout-state logging were added under `/review`.
+
+### Security (/cso daily audit, 8/10 gate)
+- No P0/P1. Auth/proxy, 9 cron-secret gates, SQL builders, the SSRF guard, CI, and secrets
+  verified clean. `bun audit`: 6 moderate / 0 high-critical, none reachable. Appended
+  **P3-8** (bump dompurify/ws) and **P3-9** (operator-script SSRF parity note) to
+  `docs/SECURITY-BACKLOG.md`.
+
 ## [0.5.53.31] - 2026-06-11
 
 ### Fixed (home video section — preview theme 160213696617)
