@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.35] - 2026-06-11
+
+### Changed (home video section — mobile horizontal swipe carousel)
+- **Mobile (<750px):** the stacked vertical grid of "Voyez-le chez vous" is now a horizontal
+  swipe carousel on `sections/home-video-showcase.liquid` (preview theme `160213696617`).
+  `display:flex; overflow-x:scroll; scroll-snap-type:x mandatory; scroll-snap-align:start`,
+  cards `flex:0 0 80vw` (max 320px) so the next card's edge peeks to invite swiping, scrollbar
+  hidden (Firefox `scrollbar-width:none` + webkit `::-webkit-scrollbar`), iOS momentum scroll.
+  All 6 cards reachable by swipe; overlay (title/price) always visible. Frees vertical space.
+- **Desktop (≥750px):** unchanged — 4-column grid, hover-to-play, cards 5-6 hidden, IO/hover JS
+  branch untouched. Live theme (`160059195497`) not touched.
+- Adds `scripts/apply-video-horizontal-scroll.mjs` (guarded string-replace apply, preview-only)
+  and `scripts/verify-video-horizontal-scroll.mjs` (14 checks). QA: mobile 390 + desktop 1280
+  in headless Chromium, 0 bugs, health 100.
+
 ## [0.5.53.34] - 2026-06-11
 
 ### Security (Voyez-le page — generator hardening)
