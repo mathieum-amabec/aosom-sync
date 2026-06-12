@@ -23,7 +23,7 @@ rec(/@media\(min-width:750px\)\{\.hv-card:nth-child\(n\+5\)\{display:none\}\}/.t
 rec(/grid-template-columns:repeat\(4,1fr\)/.test(s), "desktop 4-up grid", "repeat(4,1fr)");
 rec(/@media\(max-width:749px\)/.test(s) && /\.hv-ov\{opacity:1\}/.test(s), "mobile <750px shows all + overlay", "max-width:749 overrides");
 rec(/mouseenter/.test(s) && /load\(v\); play\(v\)/.test(s), "desktop hover-to-play JS", "mouseenter -> load+play");
-rec(/matchMedia\('\(min-width:750px\)'\)/.test(s), "desktop/mobile branch on 750px", "matchMedia gate");
+rec(/matchMedia\('\(hover:hover\) and \(pointer:fine\)'\)/.test(s), "JS playback gated on hover capability", "tablets/touch autoplay, mouse hovers (not width-based)");
 rec(/IntersectionObserver/.test(s) && /data-src/.test(s), "mobile lazy autoplay retained", "IO + data-src");
 rec(/\.hv-card:hover \.hv-ov/.test(s) && /:focus-within \.hv-ov\{opacity:1\}/.test(s), "hover overlay CSS present", "hv-card:hover/:focus-within hv-ov");
 rec(/preload="none"/.test(s), "preload=none (no upfront fetch)", "video preload none");

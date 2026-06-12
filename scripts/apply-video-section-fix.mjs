@@ -59,11 +59,15 @@ ${cardLiquid}
     if(!cards.length) return;
     function load(v){ var s=v.querySelector('source[data-src]'); if(s && !s.src){ s.src=s.getAttribute('data-src'); v.load(); } }
     function play(v){ var pr=v.play(); if(pr&&pr.catch)pr.catch(function(){}); }
-    var desktop = window.matchMedia && window.matchMedia('(min-width:750px)').matches;
-    if(desktop){
-      // Desktop: static poster, load + play on hover/focus only — no upfront video fetch.
+    // Gate on input capability, not viewport width: hover + fine pointer (mouse/trackpad)
+    // = desktop hover-to-play; touch devices (incl. tablets >=750px) fall through to autoplay.
+    // This is resize-proof (capability doesn't change with width) and fixes touch tablets
+    // where width-based gating left mouseenter firing without mouseleave (video stuck playing).
+    var canHover = window.matchMedia && window.matchMedia('(hover:hover) and (pointer:fine)').matches;
+    if(canHover){
+      // Desktop/mouse: static poster, load + play on hover/focus only — no upfront video fetch.
       cards.forEach(function(card){
-        var v=card.querySelector('.hv-vid'); if(!v) return;
+        var v=card.querySelector('.hv-vid'); if(!v || v.__hvBound) return; v.__hvBound=1;
         function start(){ load(v); play(v); }
         function stop(){ v.pause(); }
         card.addEventListener('mouseenter',start);
