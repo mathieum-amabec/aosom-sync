@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.31] - 2026-06-11
+
+### Fixed (home video section — preview theme 160213696617)
+- **Repositioned "Voyez-le chez vous"** (`home-video-showcase`) above the product carousels:
+  now directly after `shop_pay_home`, before `featured_sale` / `featured_collection2` in
+  `templates/index.json`. Higher visibility for the video gallery on the homepage.
+- **Desktop perf fix (≥750px):** static product poster, MP4 loads + plays on hover/focus only
+  (`preload="none"`, no upfront fetch); 4 of 6 cards shown in a single row. Eliminates the
+  upfront download of multiple videos on desktop page load.
+- **Playback gated on input capability, not viewport width** (`(hover:hover) and (pointer:fine)`):
+  touch tablets ≥750px now autoplay via IntersectionObserver instead of being stuck on a hover
+  that never fires (review finding). Mobile (<750px) unchanged: all 6 cards, lazy autoplay.
+
+### Added (deploy + QA tooling)
+- **`scripts/apply-video-section-fix.mjs`** — guarded apply (preview-only; live theme aborted) of the
+  section + index reorder.
+- **`scripts/verify-video-section-fix.mjs`** — 14 structural checks against the live preview asset.
+- **`scripts/qa-render-harness.mjs`** — builds a standalone browser harness from the deployed asset to
+  exercise the desktop/tablet/phone branches in headless Chromium (4 scenarios, 0 bugs).
+- **`scripts/inspect-video-state.mjs`** / **`scripts/dump-video-section.mjs`** — read-only inspection helpers.
+
 ## [0.5.53.30] - 2026-06-11
 
 ### Added (batch video ingest — top-30)
