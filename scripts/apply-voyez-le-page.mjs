@@ -47,7 +47,13 @@ for (const row of ready.rows) {
   if (!p) continue;
   if (!p.publishedAt) { skippedUnpublished++; continue; } // not on Online Store → all_products[] is blank
   const cols = p.collections.nodes.map((c) => c.handle);
-  cards.push({ handle: p.handle, video: String(row.video_url), cat: categorize(p.productType || "", cols), sku: row.sku });
+  const handle = p.handle, video = String(row.video_url);
+  // Validate before baking into generated Liquid — blocks Liquid/HTML injection
+  // via DB/Shopify values. handle must be a real Shopify handle; video a clean
+  // https Aosom-CDN .mp4 with no quote/bracket/space chars that could break out.
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(handle)) { console.log(`⚠ skip ${row.sku}: non-standard handle '${handle}'`); continue; }
+  if (!/^https:\/\/[a-z0-9.-]+\.aosomcdn\.com\/[^"'<>\s]+\.mp4(\?[^"'<>\s]*)?$/i.test(video)) { console.log(`⚠ skip ${row.sku}: unexpected video url '${video}'`); continue; }
+  cards.push({ handle, video, cat: categorize(p.productType || "", cols), sku: row.sku });
 }
 const ORDER = { patio: 0, jardin: 1, meubles: 2 };
 cards.sort((a, b) => (ORDER[a.cat] - ORDER[b.cat]) || String(a.sku).localeCompare(String(b.sku)));
@@ -56,12 +62,15 @@ console.log(`Cards: ${cards.length} published (skipped ${skippedUnpublished} unp
 if (!cards.length) throw new Error("ABORT: no published video products");
 
 // ── ÉTAPE 3a — sections/page-voyez-le.liquid ─────────────────────────────────
+// handle is whitelist-validated above (safe in the Liquid string literal); video
+// + cat land in double-quoted HTML attributes, so HTML-escape them defensively.
+const attr = (s) => String(s).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const cardLiquid = cards.map((c) => `        {%- assign p = all_products['${c.handle}'] -%}
         {%- if p != blank -%}
-        <article class="vl-card" data-cat="${c.cat}">
+        <article class="vl-card" data-cat="${attr(c.cat)}">
           <a class="vl-media" href="{{ p.url }}" aria-label="{{ p.title | escape }}" data-umami-event="Voyez-le {{ p.title | escape }}">
             <video class="vl-vid" muted loop playsinline preload="none"{% if p.featured_image %} poster="{{ p.featured_image | image_url: width: 640 }}"{% endif %}>
-              <source data-src="${c.video}" type="video/mp4">
+              <source data-src="${attr(c.video)}" type="video/mp4">
             </video>
           </a>
           <div class="vl-body">

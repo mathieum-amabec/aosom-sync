@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.33] - 2026-06-11
+
+### Security (Voyez-le page — generator hardening)
+- **`scripts/apply-voyez-le-page.mjs`**: validate `handle` (`^[a-z0-9-]+$`) and the source
+  `video_url` (https Aosom-CDN `.mp4`, no quote/bracket/space chars) before baking them into
+  the generated Liquid, and HTML-escape the `data-src` / `data-cat` attribute values. Closes
+  a markup/Liquid-injection path where a malformed Turso `video_url` could break out of the
+  `<source data-src="…">` attribute on the generated section. Re-ran the generator on PREVIEW
+  theme 160213696617 (15 published cards) — live theme untouched. Follow-up hardening on the
+  page shipped in #160.
+
 ## [0.5.53.32] - 2026-06-11
 
 ### Fixed (Aosom video — product 7793455792233 / SKU 84B-146BU)
