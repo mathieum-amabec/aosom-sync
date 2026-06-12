@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.33] - 2026-06-11
+## [0.5.53.34] - 2026-06-11
 
 ### Security (Voyez-le page — generator hardening)
 - **`scripts/apply-voyez-le-page.mjs`**: validate `handle` (`^[a-z0-9-]+$`) and the source
@@ -12,6 +12,24 @@ All notable changes to Aosom Sync will be documented in this file.
   `<source data-src="…">` attribute on the generated section. Re-ran the generator on PREVIEW
   theme 160213696617 (15 published cards) — live theme untouched. Follow-up hardening on the
   page shipped in #160.
+
+## [0.5.53.33] - 2026-06-11
+
+### Added (preview readiness audit)
+- **`docs/preview-ready-checklist.md`.** Read-only audit of preview theme `160213696617`
+  (homepage / page "Voyez-le chez vous" / PDP) via Shopify Admin API. Verdict: **PRÊT À PUBLIER**,
+  aucun écart bloquant; 3 items signalés pour confirmation visuelle manuelle (provenance Unsplash
+  des tuiles, compte exact des swatches couleur côté app, dernier coup d'œil liquid runtime au
+  storefront preview). Live (`160059195497`) non touché.
+- **`scripts/preview-ready-audit.mjs` / `preview-audit-pdp.mjs` / `preview-audit-tiles.mjs`.**
+  Scripts d'audit en lecture seule (GET assets/pages + une requête GraphQL menus) qui produisent
+  le checklist : position de la section vidéo, gate hover desktop, autoplay mobile, méga-menu,
+  tuiles, why_us, mentions livraison, page Voyez-le, et blocs PDP (eyebrow / Judge.me / ATC navy /
+  cross-sell / swatches bilingues).
+
+### Tooling
+- Mise à jour gstack `1.57.6.0 → 1.57.10.0` (global, hors dépôt). `/review` `/qa` `/ship` `/cso`
+  vérifiés au chargement post-MAJ.
 
 ## [0.5.53.32] - 2026-06-11
 
