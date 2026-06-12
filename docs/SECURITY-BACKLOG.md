@@ -378,6 +378,49 @@ if these scripts are ever wired into a request-triggered path, apply the `url-sa
   audit's scope (no `video-serve` change on this branch); remain open from 2026-06-08/09.
 
 ---
+
+## Audit 2026-06-12 — branch `chore/cso-audit-0612` (daily, 8/10 gate)
+
+Scope: everything merged since the 2026-06-11 audit (which covered through #155) —
+PRs #156–#161. The new surface is almost entirely Shopify-side / ops scripts:
+#157 swatches + EN parity + first video ingest, #158 video ingest 2+3 **+ the P2-6 SSRF
+fix** (audited & resolved below), #159 batch Aosom video ingest (`scripts/aosom-video-ingest-batch.mjs`),
+#160 dedicated "Voyez-le chez vous" page (`scripts/apply-voyez-le-page.mjs`), #161 home-video
+section reposition + desktop perf (preview theme + QA scripts). **No new P0/P1.**
+**No new P2/P3** — every candidate is either already tracked or verified clean.
+
+### Verified clean (active verification)
+- **Only one un-audited `src/` change: `shopify-client.ts` (+4 lines).** It wires
+  `stripLeadingHeading(content.descriptionFr)` into `body_html`. Pure string transform on
+  already-trusted Claude content; the regex was verified non-ReDoS in the 2026-06-11 audit.
+  No new surface.
+- **New ops scripts (`aosom-video-ingest-batch.mjs`, `apply-voyez-le-page.mjs`, the #161 video-section
+  apply/verify/QA helpers):** no hardcoded secrets (token read from `.env.local` via `loadEnv()`;
+  `.env*` gitignored). The video-ingest batch builds Shopify staged uploads and POSTs the supplier
+  MP4 URL server-side from a fixed top-N list (not request input). `apply-voyez-le-page` and the
+  #161 apply script write only to the **unpublished preview theme** (guarded: `role === "unpublished"`,
+  `PREVIEW !== LIVE`) and bake Shopify product handles / a trusted-CDN video URL into Liquid — no
+  user input, no injection sink.
+- **Catch-all high-signal scan clean.** No `child_process` shell exec (the only `exec(` hits are
+  `RegExp.exec`); FFmpeg still uses `spawn` with an arg array. The single
+  `dangerouslySetInnerHTML` (`import/page.tsx:528`) stays `DOMPurify.sanitize()`-wrapped. No
+  `eval` / `new Function`. `proxy.ts` `PUBLIC_PATHS` unchanged and intentional.
+- **Dependencies:** `npm audit --omit=dev` → **3 moderate, 0 high/critical** — the same
+  transitive set already tracked (`@anthropic-ai/sdk` P2-2, `next`→`postcss` P2-3). No drift.
+
+### Status updates on prior items
+- **P2-6 (`classifyImageBackground` SSRF) — RESOLVED** (shipped v0.5.53.29, #158). Re-confirmed:
+  `variant-merger.ts` now calls `assertPublicHttpsUrl` + `redirect: "error"`, unit-tested.
+
+### Persistent (still open, re-confirmed — defense-in-depth, none exploitable today)
+- **P2-2** `@anthropic-ai/sdk` memory-tool advisory (path not used; bump when convenient).
+- **P2-3** `postcss` XSS via Next.js (build-time transitive; bump Next minor).
+- **P2-4** mutating routes authenticate but don't enforce `admin` role (reviewer is trusted).
+- **P3-1** LLM blog HTML not server-sanitized before Shopify post (inputs trusted today).
+- **P3-5 / P3-6** `/api/video-serve` `video_path` containment + redirect host-allowlist.
+- **P3-7** `verifyCronSecret` copy-pasted across cron routes (extract one helper).
+
+---
 **Disclaimer:** `/cso` is an AI-assisted scan that catches common patterns. It is not a
 substitute for a professional penetration test. For production systems handling PII or
 payments, engage a qualified security firm.
