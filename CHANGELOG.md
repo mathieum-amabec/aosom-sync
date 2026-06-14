@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.45] - 2026-06-14
+
+### Docs
+- Added `docs/site-health-report.md` — full read-only production health check (2026-06-14):
+  storefront live + new theme active (hero/title/og/meta/0 Liquid errors), 4/4 feeds HTTP 200
+  (1064 products each), « Voyez-le chez vous » page (15 `<video>`), 16 `video_ingest_log` rows
+  `READY`, Turso responding (11 205 products). **8/8 checks ✅.** No site/data mutations.
+
 ## [0.5.53.44] - 2026-06-14
 
 ### Fixed (blog cron blocked by auth middleware)
