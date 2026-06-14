@@ -3,7 +3,6 @@ import {
   buildCatalogWhere,
   parseBoolParam,
   LOW_STOCK_THRESHOLD,
-  PRODUCT_HAS_DISCOUNT_SQL,
 } from "@/lib/catalog-filters";
 
 describe("buildCatalogWhere", () => {
@@ -28,11 +27,10 @@ describe("buildCatalogWhere", () => {
     expect(LOW_STOCK_THRESHOLD).toBe(5);
   });
 
-  it("withDiscount embeds the correlated last-price predicate (no args)", () => {
+  it("withDiscount uses the precomputed has_discount flag (no args)", () => {
     const r = buildCatalogWhere({ withDiscount: true });
-    expect(r.conditions).toContain(PRODUCT_HAS_DISCOUNT_SQL);
-    expect(r.where).toContain("ROW_NUMBER()");
-    expect(r.where).toContain("products.price");
+    expect(r.conditions).toContain("has_discount = 1");
+    expect(r.where).toContain("has_discount = 1");
     expect(r.args).toEqual([]);
   });
 
