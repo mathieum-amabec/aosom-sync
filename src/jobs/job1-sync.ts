@@ -28,6 +28,8 @@ import {
   rebuildProductTypeCounts,
   recordPriceChanges,
   purgeOldPriceHistory,
+  purgeOldSyncLogs,
+  recomputeHasDiscount,
   getProduct,
   getProductsSnapshot,
   getSetting,
@@ -943,6 +945,27 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
       log("purgeOldPriceHistory done", { phase: "finalize", duration_ms: Date.now() - t0Purge, purged });
     } catch (purgeErr) {
       log(`purgeOldPriceHistory failed (non-fatal): ${purgeErr instanceof Error ? purgeErr.message : String(purgeErr)}`, { phase: "finalize" });
+    }
+
+    // Recompute the precomputed has_discount flag now that prices + price_history reflect
+    // today's sync. This moves the correlated discount EXISTS off the per-page-load path
+    // (getCatalogStats / catalog filter) to once/day here. Non-fatal.
+    try {
+      const t0Disc = Date.now();
+      await recomputeHasDiscount();
+      log("recomputeHasDiscount done", { phase: "finalize", duration_ms: Date.now() - t0Disc });
+    } catch (discErr) {
+      log(`recomputeHasDiscount failed (non-fatal): ${discErr instanceof Error ? discErr.message : String(discErr)}`, { phase: "finalize" });
+    }
+
+    // Retention: drop sync_logs older than 7 days (the UI only reads the current run's
+    // logs; the table grows unbounded otherwise). Non-fatal.
+    try {
+      const t0Logs = Date.now();
+      const purgedLogs = await purgeOldSyncLogs(7);
+      log("purgeOldSyncLogs done", { phase: "finalize", duration_ms: Date.now() - t0Logs, purged: purgedLogs });
+    } catch (logErr) {
+      log(`purgeOldSyncLogs failed (non-fatal): ${logErr instanceof Error ? logErr.message : String(logErr)}`, { phase: "finalize" });
     }
 
     await completeSyncRun(syncRun.id, {

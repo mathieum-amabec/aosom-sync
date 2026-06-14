@@ -3,6 +3,7 @@ import { createClient, type Client } from "@libsql/client";
 import path from "path";
 import fs from "fs";
 import { isValidCheckpoint } from "@/lib/database";
+import { PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
 import { storeLink, STOREFRONT_BASE_URL } from "@/lib/insights";
 
 const TEST_DB_PATH = path.join(__dirname, "fixtures", "test-db.sqlite");
@@ -841,13 +842,16 @@ describe("new performance indexes (DDL validity + usage)", () => {
   beforeEach(() => { db = setupTestDb(); });
   afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
 
-  it("creates the price_history + facebook_drafts composite indexes without error", async () => {
+  it("creates the price_history + facebook_drafts + products(has_discount) indexes without error", async () => {
     await db.batch([
       `CREATE TABLE price_history (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT, old_price REAL, change_type TEXT, detected_at INTEGER)`,
       `CREATE TABLE facebook_drafts (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT, status TEXT, trigger_type TEXT, created_at INTEGER)`,
+      `CREATE TABLE products (sku TEXT PRIMARY KEY, price REAL, has_discount INTEGER DEFAULT 0)`,
       `CREATE INDEX IF NOT EXISTS idx_price_history_sku_detected ON price_history(sku, detected_at)`,
       `CREATE INDEX IF NOT EXISTS idx_price_history_changetype_detected ON price_history(change_type, detected_at)`,
       `CREATE INDEX IF NOT EXISTS idx_facebook_drafts_status_created ON facebook_drafts(status, created_at)`,
+      // partial index — validates the WHERE-clause DDL is accepted
+      `CREATE INDEX IF NOT EXISTS idx_products_has_discount ON products(has_discount) WHERE has_discount = 1`,
     ], "write");
 
     const idx = await db.execute(
@@ -857,6 +861,7 @@ describe("new performance indexes (DDL validity + usage)", () => {
     expect(names).toContain("idx_price_history_sku_detected");
     expect(names).toContain("idx_price_history_changetype_detected");
     expect(names).toContain("idx_facebook_drafts_status_created");
+    expect(names).toContain("idx_products_has_discount");
   });
 
   it("uses idx_facebook_drafts_status_created for the stale-draft scan (status + created_at)", async () => {
@@ -882,5 +887,69 @@ describe("new performance indexes (DDL validity + usage)", () => {
     );
     const detail = plan.rows.map((r) => String((r as unknown as Record<string, unknown>).detail)).join(" | ");
     expect(detail).toContain("idx_price_history_sku_detected");
+  });
+});
+
+describe("recomputeHasDiscount (precomputed rabais flag)", () => {
+  let db: Client;
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  // Use the REAL exported predicate so this test fails if PRODUCT_HAS_DISCOUNT_SQL drifts
+  // (it's the single source of truth shared by recomputeHasDiscount, the count, and the badge).
+  const RECOMPUTE = `UPDATE products SET has_discount = CASE WHEN ${PRODUCT_HAS_DISCOUNT_SQL} THEN 1 ELSE 0 END`;
+
+  it("sets has_discount from each SKU's latest price-change vs current price", async () => {
+    await db.batch([
+      `CREATE TABLE products (sku TEXT PRIMARY KEY, price REAL, has_discount INTEGER DEFAULT 0)`,
+      `CREATE TABLE price_history (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT, old_price REAL, change_type TEXT, detected_at INTEGER)`,
+    ]);
+    const now = Math.floor(Date.now() / 1000);
+    await db.batch([
+      // DROP: latest change is a drop from 100, current 80 → discounted
+      { sql: `INSERT INTO products VALUES ('DROP', 80, 0)`, args: [] },
+      { sql: `INSERT INTO price_history (sku, old_price, change_type, detected_at) VALUES ('DROP', 100, 'price_drop', ?)`, args: [now - 5 * 86400] },
+      // RECOVER: older drop (100) then newer increase (old 80), current 90 → latest row 80 > 90 false → NOT discounted
+      { sql: `INSERT INTO products VALUES ('RECOVER', 90, 0)`, args: [] },
+      { sql: `INSERT INTO price_history (sku, old_price, change_type, detected_at) VALUES ('RECOVER', 100, 'price_drop', ?)`, args: [now - 10 * 86400] },
+      { sql: `INSERT INTO price_history (sku, old_price, change_type, detected_at) VALUES ('RECOVER', 80, 'price_increase', ?)`, args: [now - 2 * 86400] },
+      // NONE: stale has_discount=1 but no history → must reset to 0
+      { sql: `INSERT INTO products VALUES ('NONE', 50, 1)`, args: [] },
+      // STOCKONLY: only stock_change rows → excluded → 0
+      { sql: `INSERT INTO products VALUES ('STOCKONLY', 50, 0)`, args: [] },
+      { sql: `INSERT INTO price_history (sku, old_price, change_type, detected_at) VALUES ('STOCKONLY', NULL, 'stock_change', ?)`, args: [now - 1 * 86400] },
+    ], "write");
+
+    await db.execute(RECOMPUTE);
+
+    const rows = await db.execute(`SELECT sku, has_discount FROM products ORDER BY sku`);
+    const flags = Object.fromEntries(rows.rows.map((r) => {
+      const o = r as unknown as Record<string, unknown>;
+      return [o.sku as string, Number(o.has_discount)];
+    }));
+    expect(flags).toEqual({ DROP: 1, NONE: 0, RECOVER: 0, STOCKONLY: 0 });
+  });
+});
+
+describe("purgeOldSyncLogs (retention by ISO timestamp)", () => {
+  let db: Client;
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  it("deletes rows older than the ISO cutoff and keeps recent ones", async () => {
+    await db.execute(`CREATE TABLE sync_logs (id TEXT PRIMARY KEY, sync_run_id TEXT, timestamp TEXT, sku TEXT)`);
+    const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
+    await db.batch([
+      { sql: `INSERT INTO sync_logs VALUES ('a', 'r1', ?, 'X')`, args: [iso(30 * 86400 * 1000)] }, // 30d old → purge
+      { sql: `INSERT INTO sync_logs VALUES ('b', 'r1', ?, 'Y')`, args: [iso(8 * 86400 * 1000)] },  // 8d old → purge
+      { sql: `INSERT INTO sync_logs VALUES ('c', 'r2', ?, 'Z')`, args: [iso(2 * 86400 * 1000)] },  // 2d old → keep
+    ], "write");
+
+    const cutoff = new Date(Date.now() - 7 * 86400 * 1000).toISOString();
+    const del = await db.execute({ sql: `DELETE FROM sync_logs WHERE timestamp < ?`, args: [cutoff] });
+    expect(Number(del.rowsAffected)).toBe(2);
+
+    const remaining = await db.execute(`SELECT id FROM sync_logs`);
+    expect(remaining.rows.map((r) => (r as unknown as Record<string, unknown>).id)).toEqual(["c"]);
   });
 });
