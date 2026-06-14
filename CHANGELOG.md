@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.38] - 2026-06-14
+
+### Performance (Turso row-read reduction, P1)
+- **Precomputed `products.has_discount` flag** replaces the correlated `EXISTS` that the
+  catalog "Avec rabais" count (`getCatalogStats`) and the `withDiscount` filter ran live on
+  every Catalogue load (one `price_history` pass per product, ~11k rows → hundreds of
+  thousands of row-reads per page). `PRODUCT_HAS_DISCOUNT_SQL` is now `has_discount = 1`
+  (a partial-indexed column scan); the authoritative correlated definition moves to
+  `PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL`, used only at sync time.
+  - Idempotent migration: ALTER + partial index `idx_products_has_discount … WHERE has_discount = 1`
+    + one-time backfill committed in **one atomic batch** (a crash between steps can't strand the
+    column without its index/backfill).
+  - `rebuildDiscountFlags()` recomputes the flag once per sync (manual `runSync` + daily
+    `runSyncFinalize`), after `recordPriceChanges`. Writes only rows whose flag flips (protects
+    the tighter row-write quota). A failure in the daily path raises a notification, since a
+    stale flag means a wrong catalog count.
+  - Complements the v0.5.53.37 `price_history(sku, detected_at)` index: that index now
+    accelerates the sync-time recompute instead of a per-load query.
+- **`purgeOldCronLogs(30)`** in the daily finalize trims `cron_runs` (`ran_at`) and `feed_syncs`
+  (`fetched_at`) older than 30 days — both grew unbounded and are scanned by the dashboard.
+  Keeps the latest row per cron name / feed type even when older than the window, so the
+  "last sync" / "last fetch per feed" widgets never go blank.
+- Reviewed cron full-scans (`getProductsSnapshot`, `getAllProductsAsAosom`): inherent
+  full-catalog diffs with no safe `WHERE`/`LIMIT`. The frequent filtered cron query
+  (`getEligibleHighlightProduct`) already uses indexed columns, so no new index was added —
+  avoids write-amplification against the tighter write quota.
+
 ## [0.5.53.37] - 2026-06-14
 
 ### Performance (Turso row-read reduction)
