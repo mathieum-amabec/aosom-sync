@@ -37,10 +37,16 @@ const PROFILES = {
   fr: {
     label: "Ameublo Direct (FR)",
     pageId: "1057151924144231",
-    adsetId: "52556997397005",            // exists: "Retargeting ? Visiteurs 30j" ($20/day, PAUSED)
-    campaignId: "52556997335005",         // exists: OUTCOME_TRAFFIC
-    catalogId: "1103064966519153",        // personal catalog — BLOCKED for ads (see header)
-    productSetId: "1718195966267686",     // "All Products"
+    // The old ad set 52556997397005 is locked to a personal catalog (promoted_object is
+    // immutable — Meta rejects re-point, subcode 1885090). So create a NEW ad set under the
+    // SAME campaign, cloning its Canada-FR retargeting targeting, with the Business catalog.
+    adsetId: null,                        // null → create a new ad set (see sourceAdsetId)
+    campaignId: "52556997335005",         // reuse existing OUTCOME_TRAFFIC campaign
+    sourceAdsetId: "52556997397005",      // clone targeting + optimization/billing from here
+    dailyBudget: 2000,                    // $20/day in cents — unchanged
+    catalogId: "384890002574549",         // Business "Shopify Product Catalog" (ads-eligible)
+    productSetId: "2891699814486850",     // "Store collection · All Products" (1069, Business catalog)
+    newAdsetName: "Retargeting — Visiteurs 30j (Business)",
     creativeName: "Ameublo Direct — Catalogue Dynamic",
     adName: "Dynamic Ad — Visiteurs 30j",
     creative: {
@@ -144,19 +150,40 @@ async function main() {
     if (APPLY) die("Création impossible tant que le ad set pointe un catalogue personnel. Corriger le catalogue d'abord.");
   }
 
-  // EN: campaign/ad set don't exist yet → dry-run only (show the full structure to create).
-  if (!cfg.adsetId) {
+  // Build the ad set to target. When cfg.adsetId is null we create a NEW ad set under the
+  // existing campaign, cloning the source ad set's targeting/optimization but with the Business
+  // catalog + product set (the old ad set's catalog is immutable, so re-point is impossible).
+  let newAdsetPayload = null;
+  if (!cfg.adsetId && !cfg.sourceAdsetId) {
+    // No existing ad set AND nothing to clone (e.g. EN: campaign + ad set don't exist yet) →
+    // dry-run only; show the structure to create, refuse --apply.
     if (APPLY) die(`Profil ${PROFILE}: la campagne/ad set "${cfg.campaignName}" n'existe pas encore — créer la campagne + ad set d'abord (dry-run uniquement ici).`);
     console.log(`\n${line}\nÀ CRÉER D'ABORD — Campaign + Ad set (n'existent pas encore)\n${line}`);
     console.log(JSON.stringify({
       campaign: { name: cfg.campaignName, objective: "OUTCOME_TRAFFIC", status: "PAUSED", special_ad_categories: [] },
       adset: {
-        name: "Retargeting — Visitors 30d", daily_budget: 2000, status: "PAUSED",
+        name: "Retargeting — Visitors 30d", daily_budget: cfg.dailyBudget || 2000, status: "PAUSED",
         optimization_goal: "LANDING_PAGE_VIEWS", billing_event: "IMPRESSIONS",
-        promoted_object: { product_catalog_id: "<catalogue Business ads-eligible>" },
-        targeting: "<audience retargeting visiteurs 30j — ex. 52556992755405 ou équivalent EN>",
+        promoted_object: { product_catalog_id: cfg.catalogId, product_set_id: cfg.productSetId },
+        targeting: "<audience retargeting visiteurs 30j — créer/choisir pour EN>",
       },
     }, null, 2));
+  } else if (!cfg.adsetId) {
+    const src = await get(cfg.sourceAdsetId, { fields: "id,name,campaign_id,daily_budget,status,optimization_goal,billing_event,targeting" });
+    console.log(`\nAd set source (clonage targeting) : ${src.id} "${src.name}" — opt=${src.optimization_goal} billing=${src.billing_event} budget=${src.daily_budget}`);
+    if (cfg.campaignId && src.campaign_id !== cfg.campaignId) die(`Ad set source ${cfg.sourceAdsetId} appartient à ${src.campaign_id}, pas ${cfg.campaignId}`);
+    newAdsetPayload = {
+      name: cfg.newAdsetName,
+      campaign_id: cfg.campaignId,
+      daily_budget: cfg.dailyBudget,
+      billing_event: src.billing_event,
+      optimization_goal: src.optimization_goal,
+      promoted_object: { product_catalog_id: cfg.catalogId, product_set_id: cfg.productSetId },
+      targeting: src.targeting,           // same Canada-FR retargeting audience as the source
+      status: "PAUSED",
+    };
+    console.log(`\n${line}\nÉTAPE 1 — POST ${ACT}/adsets  (NOUVEL ad set, catalogue Business, PAUSED)\n${line}`);
+    console.log(JSON.stringify(newAdsetPayload, null, 2));
   } else {
     const adset = await get(cfg.adsetId, { fields: "id,name,campaign_id,daily_budget,status,promoted_object,optimization_goal" });
     console.log("\nAd set cible :", JSON.stringify(adset));
@@ -173,11 +200,20 @@ async function main() {
   console.log(`\n${line}\nÉTAPE 2 — POST ${ACT}/adcreatives\n${line}`);
   console.log(JSON.stringify(creativePayload, null, 2));
   console.log(`\n${line}\nÉTAPE 3 — POST ${ACT}/ads  (creative_id rempli après l'étape 2)\n${line}`);
-  console.log(JSON.stringify(adPayload("{id_du_créatif}", cfg.adsetId || "{id_du_ad_set}"), null, 2));
+  console.log(JSON.stringify(adPayload("{id_du_créatif}", cfg.adsetId || "{nouvel ad set — étape 1}"), null, 2));
 
   if (!APPLY) {
-    console.log(`\n${line}\nDRY-RUN terminé — rien n'a été envoyé.${cfg.adsetId ? " Relancer avec --apply pour créer (en PAUSED)." : ""}\n${line}`);
+    console.log(`\n${line}\nDRY-RUN terminé — rien n'a été envoyé. Relancer avec --apply pour créer (ad set + créatif + ad, tous PAUSED).\n${line}`);
     return;
+  }
+
+  // ── ÉTAPE 1 (apply): create the new ad set if we're not attaching to an existing one ──
+  let targetAdsetId = cfg.adsetId;
+  if (!targetAdsetId) {
+    if (!newAdsetPayload) die("Aucun ad set existant et aucun payload de nouvel ad set — impossible de créer l'ad.");
+    const createdAdset = await post(`${ACT}/adsets`, newAdsetPayload);
+    targetAdsetId = createdAdset.id;
+    console.log(`\n[ok] Ad set créé (PAUSED) : ${targetAdsetId}`);
   }
 
   // ── ÉTAPE 2: create (or reuse) the creative ───────────────────────────────
@@ -195,7 +231,7 @@ async function main() {
   if (existingAd) {
     console.log(`[skip] Ad déjà présente → ${existingAd.id} (aucune création)`);
   } else {
-    const ad = await post(`${ACT}/ads`, adPayload(creativeId, cfg.adsetId));
+    const ad = await post(`${ACT}/ads`, adPayload(creativeId, targetAdsetId));
     console.log(`[ok] Ad créée (PAUSED) : ${ad.id}`);
   }
   console.log(`\n${line}\nTerminé. La campagne reste PAUSED — activer manuellement dans Ads Manager.\n${line}`);
