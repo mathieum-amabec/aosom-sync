@@ -95,6 +95,23 @@ not `furnishdirect.ca`, because that domain is **not connected yet**
 5. Confirm sender domain authentication (DKIM/SPF) before flipping to Live.
 6. Flip each flow `draft → live`.
 
+## Welcome coupon — BIENVENUE10 (created 2026-06-14)
+
+The Welcome flow hands out a 10%-off code. Created in Shopify via
+`scripts/shopify-create-discount.mjs --apply` (idempotent; needs the token's
+`write_discounts` scope):
+
+| Resource | ID | Detail |
+| --- | --- | --- |
+| Price rule | `1916108374121` | percentage **−10%**, `customer_selection: all`, `once_per_customer: true`, `usage_limit: null`, **no expiry** (`ends_at: null`) |
+| Discount code | `17247691178089` | code **`BIENVENUE10`** |
+
+**Remaining (dashboard, human):** insert `BIENVENUE10` into the Welcome Series email
+(`XJghtC`, template `[Flow] Welcome 1 — Bienvenue` `XiwKGi`) and flip the flow
+`draft → live` after the pre-launch checklist above. The code is store-wide (any
+customer who types it gets 10% once), so the Welcome email is just the distribution
+channel — there's no per-flow "attach" in Klaviyo.
+
 ## Re-running / idempotency
 
 `node scripts/setup-klaviyo-flows.mjs` is **idempotent**: it matches existing lists,
