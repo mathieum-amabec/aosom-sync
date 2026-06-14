@@ -27,6 +27,7 @@ import {
   refreshProducts,
   rebuildProductTypeCounts,
   recordPriceChanges,
+  purgeOldPriceHistory,
   getProduct,
   getProductsSnapshot,
   getSetting,
@@ -932,6 +933,17 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
       await recordPriceChanges(priceChangeEntries);
     }
     log("recordPriceChanges done", { phase: "finalize", duration_ms: Date.now() - t0Record, entries: priceChangeEntries.length });
+
+    // Retention: drop price_history older than 90 days now that today's changes are
+    // recorded. Caps Turso storage + the cost of the correlated discount query.
+    // Non-fatal — a purge failure must not fail an otherwise-successful sync.
+    try {
+      const t0Purge = Date.now();
+      const purged = await purgeOldPriceHistory(90);
+      log("purgeOldPriceHistory done", { phase: "finalize", duration_ms: Date.now() - t0Purge, purged });
+    } catch (purgeErr) {
+      log(`purgeOldPriceHistory failed (non-fatal): ${purgeErr instanceof Error ? purgeErr.message : String(purgeErr)}`, { phase: "finalize" });
+    }
 
     await completeSyncRun(syncRun.id, {
       status: "completed",

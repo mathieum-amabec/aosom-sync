@@ -59,6 +59,11 @@ describe("GET /api/catalog/stats", () => {
     });
   });
 
+  it("sets a CDN cache header so the expensive discount count isn't run per request", async () => {
+    const res = await statsGET();
+    expect(res.headers.get("Cache-Control")).toBe("public, s-maxage=600, stale-while-revalidate=60");
+  });
+
   it("500s when the DB call throws", async () => {
     db.getCatalogStats.mockRejectedValue(new Error("boom"));
     const res = await statsGET();
