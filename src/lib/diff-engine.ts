@@ -3,7 +3,6 @@ import type {
   ShopifyExistingProduct,
   ProductDiff,
   FieldChange,
-  ChangeType,
 } from "@/types/sync";
 
 /**
@@ -123,6 +122,12 @@ export function computeDiffs(
     }
   }
 
+  // Prioritize diffs that include a price change so money-affecting corrections drain
+  // first out of the per-day Phase-2 chunk queue (image/description-only diffs follow).
+  // Stable sort (V8): preserves original order within each group.
+  const hasPrice = (d: ProductDiff) => (d.changes.some((c) => c.field === "price") ? 0 : 1);
+  diffs.sort((a, b) => hasPrice(a) - hasPrice(b));
+
   return diffs;
 }
 
@@ -161,15 +166,13 @@ function diffProduct(
       });
     }
 
-    // Stock change
-    if (shopifyVariant.inventoryQuantity !== aosomVariant.qty) {
-      changes.push({
-        field: "stock",
-        sku: aosomVariant.sku,
-        oldValue: shopifyVariant.inventoryQuantity,
-        newValue: aosomVariant.qty,
-      });
-    }
+    // NOTE: stock is intentionally NOT diffed here. Dropship variants are untracked in
+    // Shopify (`inventory_management: null`; stock lives only in catalog_snapshots), so
+    // applyToShopify never pushes inventory. Emitting a `stock` change generated a diff
+    // for ~every product every day that could never be resolved, permanently saturating
+    // the per-day Phase-2 chunk queue (10/run × 3 runs) and starving real price/image/
+    // description updates in the tail. Phase 1 still records stock movements separately
+    // (detectChanges → price_history.stock_change) for the dashboard + social signals.
   }
 
   // Check for removed variants (in Shopify but not in Aosom)
@@ -238,10 +241,7 @@ export function summarizeDiffs(diffs: ProductDiff[]) {
       (n, d) => n + d.changes.filter((c) => c.field === "price").length,
       0
     ),
-    stockChanges: diffs.reduce(
-      (n, d) => n + d.changes.filter((c) => c.field === "stock").length,
-      0
-    ),
+    // stock is no longer diffed in Phase 2 (dropship untracked) — see diffProduct.
     imageChanges: diffs.reduce(
       (n, d) => n + d.changes.filter((c) => c.field === "images").length,
       0
