@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.37] - 2026-06-14
+
+### Performance (Turso row-read reduction)
+- **Composite indexes** added in `ensureSchema()`:
+  - `price_history(sku, detected_at)` — accelerates the correlated "Avec rabais" subquery
+    (`PRODUCT_HAS_DISCOUNT_SQL`) and the `last_price` CTE; EXPLAIN QUERY PLAN confirms the
+    temp-b-tree sort is eliminated. This is the #1 catalog read-cost path.
+  - `price_history(change_type, detected_at)` — covering index for the dashboard new-product
+    count and the best_sellers/price_drop aggregates.
+  - `facebook_drafts(status, created_at)` — serves the drafts review list (status filter +
+    `ORDER BY created_at`) and the dashboard stale-draft scan. (Chose `created_at` over
+    `trigger_type`: the planner only seeks `status` and post-filters `trigger_type`, so a
+    `(status, trigger_type)` index would add write cost with no read benefit.)
+- **Dashboard metrics cache:** `getDashboardSummary` / `getDashboardAlerts` now use a 5-minute
+  in-memory TTL cache, gated to production (Turso) so local/tests stay uncached. Cuts repeated
+  COUNT/aggregate reads when the dashboard is polled. `clearMetricsCache()` exposed for tests.
+- Audited the other index candidates (`shopify_product_id`, `sku` PK, `cron_runs`, `feed_syncs`,
+  `video_jobs.status`) — already indexed, not re-added. `getProducts()` already selects only
+  catalog columns (no heavy `description`/`body_html`), so no SELECT trimming was needed.
+
 ## [0.5.53.36] - 2026-06-14
 
 ### Fixed (P0 — Turso quota + dashboard login lockout)
