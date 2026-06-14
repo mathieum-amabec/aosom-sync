@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.36] - 2026-06-14
+
+### Fixed (P0 — Turso quota + dashboard login lockout)
+- **DB-independent emergency admin login** (`src/app/api/auth/route.ts`): when Turso is blocked
+  (monthly row-read quota exceeded) or down, `getUserByUsername()` threw and *nobody* could log
+  into the dashboard. Added a fallback that verifies the submitted password against `AUTH_PASSWORD`
+  with a constant-time compare and issues an admin session **without any DB query** — runs before
+  `ensureSeededUsers()` so an outage never even attempts a query on this path. Restricted to
+  username `admin`; rate-limited; non-string JSON inputs now coerced (no more opaque 500s).
+- **CDN cache on `GET /api/catalog/stats`** (`s-maxage=600`): the "Avec rabais" count is a
+  correlated subquery over `price_history` (one pass per product, ~11k rows) that ran on every
+  catalog page mount, uncached. Caching it cuts Turso row-reads on this route ~144×/day.
+- **`price_history` retention** (`purgeOldPriceHistory`, called at the end of the daily sync):
+  deletes rows older than 90 days to cap storage + discount-query read cost. Keeps each SKU's
+  *latest* price-change row so a still-on-sale product (last drop >90 days ago) never silently
+  loses its rabais badge / "Avec rabais" count.
+- Diagnostic + Turso plan/upgrade analysis documented in `docs/TURSO-UPGRADE.md`.
+
 ## [0.5.53.35] - 2026-06-11
 
 ### Changed (home video section — mobile horizontal swipe carousel)
