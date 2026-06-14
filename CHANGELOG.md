@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.38] - 2026-06-14
+
+### Fixed (Turso row-quota purge + auto-purge retention)
+- **Daily auto-purge tightened 90d → 30d:** `runSyncFinalize` (`src/jobs/job1-sync.ts`) now calls
+  `purgeOldPriceHistory(30)`. The 90-day window never fired while `price_history` data spanned
+  <90 days, letting the table reach 242k+ rows and breach the Turso row quota. The guarded purge
+  keeps each SKU's latest `price_drop`/`price_increase` row regardless of age, so the "Avec rabais"
+  badge (`PRODUCT_HAS_DISCOUNT_SQL`) is preserved.
+- **One-time manual purge (2026-06-14):** atomic transaction deleted 104,497 aged `price_history`
+  rows (242,695 → 138,198) plus 24 published `facebook_drafts` >30d. Full audit trail in
+  `docs/DATA-OPS-LOG.md`, including the accepted side-effect on the internal catalog "Avec rabais"
+  filter (not customer-facing; self-heals on next price change).
+- **Ops scripts** (read-only audit + dry-run + guarded apply): `scripts/turso-purge-audit.mjs`,
+  `scripts/turso-purge-dryrun.mjs`, `scripts/turso-purge-apply.mjs`. The apply script mirrors the
+  production retention guard so a re-run cannot over-delete latest-per-SKU price-change rows.
+
 ## [0.5.53.37] - 2026-06-14
 
 ### Performance (Turso row-read reduction)
