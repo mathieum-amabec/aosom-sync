@@ -30,6 +30,7 @@ import {
   purgeOldPriceHistory,
   purgeOldSyncLogs,
   recomputeHasDiscount,
+  purgeOldNotifications,
   getProduct,
   getProductsSnapshot,
   getSetting,
@@ -963,14 +964,23 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
       log(`recomputeHasDiscount failed (non-fatal): ${discErr instanceof Error ? discErr.message : String(discErr)}`, { phase: "finalize" });
     }
 
-    // Retention: drop sync_logs older than 7 days (the UI only reads the current run's
-    // logs; the table grows unbounded otherwise). Non-fatal.
+    // Retention: sync_logs grows one row per changed field per sync (~10k after weeks);
+    // the history UI only reads recent runs, so keep 7 days. Non-fatal.
     try {
-      const t0Logs = Date.now();
-      const purgedLogs = await purgeOldSyncLogs(7);
-      log("purgeOldSyncLogs done", { phase: "finalize", duration_ms: Date.now() - t0Logs, purged: purgedLogs });
-    } catch (logErr) {
-      log(`purgeOldSyncLogs failed (non-fatal): ${logErr instanceof Error ? logErr.message : String(logErr)}`, { phase: "finalize" });
+      const t0SyncLogs = Date.now();
+      const purgedSyncLogs = await purgeOldSyncLogs(7);
+      log("purgeOldSyncLogs done", { phase: "finalize", duration_ms: Date.now() - t0SyncLogs, purged: purgedSyncLogs });
+    } catch (purgeErr) {
+      log(`purgeOldSyncLogs failed (non-fatal): ${purgeErr instanceof Error ? purgeErr.message : String(purgeErr)}`, { phase: "finalize" });
+    }
+
+    // Retention: notifications are transient dashboard alerts; keep 30 days. Non-fatal.
+    try {
+      const t0Notifs = Date.now();
+      const purgedNotifs = await purgeOldNotifications(30);
+      log("purgeOldNotifications done", { phase: "finalize", duration_ms: Date.now() - t0Notifs, purged: purgedNotifs });
+    } catch (purgeErr) {
+      log(`purgeOldNotifications failed (non-fatal): ${purgeErr instanceof Error ? purgeErr.message : String(purgeErr)}`, { phase: "finalize" });
     }
 
     await completeSyncRun(syncRun.id, {

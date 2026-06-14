@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.39] - 2026-06-14
+## [0.5.53.40] - 2026-06-14
 
 ### Performance (Turso reads — root-cause fix for the catalog "Avec rabais" path)
 - **Precomputed `products.has_discount` flag.** The catalog rabais count (`getCatalogStats`)
@@ -14,10 +14,28 @@ All notable changes to Aosom Sync will be documented in this file.
   `products.price` and `price_history` only change during the daily sync, so the flag is accurate
   between syncs. Partial index `idx_products_has_discount ... WHERE has_discount = 1`; one-time
   backfill in the schema migration.
-- **`sync_logs` retention** (`purgeOldSyncLogs`, 7 days) at sync finalize — the table grew
-  unbounded (10k+ rows); the UI only reads the current run's logs. Cutoff is an ISO-8601 string
-  compare (the column stores `toISOString()` values, not epoch).
 - `/api/catalog/stats` CDN cache (`s-maxage=600`) was already shipped in #167 — verified, unchanged.
+  (The `sync_logs` 7-day retention this PR originally added was superseded by the same purge merged
+  from main in 0.5.53.39 — a single `purgeOldSyncLogs` now serves both.)
+
+## [0.5.53.39] - 2026-06-14
+
+### Fixed (Turso row-quota — sync_logs + notifications retention)
+- **Auto-purge `sync_logs` (7 days)** added to the daily sync finalize via `purgeOldSyncLogs(7)`.
+  `sync_logs` grows one row per changed field per sync (~10k rows after weeks); the history UI only
+  reads recent runs. `sync_logs.timestamp` is an ISO-8601 TEXT string (not an epoch column), so the
+  retention parses it with `unixepoch(timestamp)` for a correct numeric comparison.
+- **Auto-purge `notifications` (30 days)** added via `purgeOldNotifications(30)`. Transient dashboard
+  alerts regenerated each sync; `created_at` is epoch seconds (uses the existing index). Purges read
+  and unread alike (age-based).
+- Both purges run in their own non-fatal try/catch in `runSyncFinalize`, mirroring
+  `purgeOldPriceHistory` — a purge failure never fails an otherwise-successful sync. Retention-SQL
+  tests added for both, including NULL/unparseable-timestamp safety and read/unread parity.
+
+### Docs
+- Documented the `AUTH_PASSWORD` fallback login (PR #167) in `docs/TURSO-UPGRADE.md` §7, including the
+  **action item for Mat to add `AUTH_PASSWORD` to Vercel env vars** (Production + Preview) so the
+  Turso-independent admin login works in prod. `.env.local` / `.env.example` already carry it.
 
 ## [0.5.53.38] - 2026-06-14
 
