@@ -9,7 +9,8 @@ All notable changes to Aosom Sync will be documented in this file.
   Meta makes an ad set's `promoted_object` immutable (re-point rejected, code 100 / subcode
   1885090), so the FR profile builds a fresh ad set under the existing campaign `52556997335005`,
   cloning the source ad set `52556997397005`'s Canada-FR retargeting targeting + optimization
-  (LANDING_PAGE_VIEWS / IMPRESSIONS), at $20/day, with
+  (LANDING_PAGE_VIEWS / IMPRESSIONS) + **bid strategy** (`LOWEST_COST_WITHOUT_CAP` — cloning it is
+  required or Meta infers one needing a bid_amount, subcode 2490487), at $20/day, with
   `promoted_object = { product_catalog_id: 384890002574549 (Business), product_set_id: 2891699814486850 }`.
   `--apply` creates ad set + creative + ad, all **PAUSED**. The EN from-scratch placeholder path is
   preserved. Verified via dry-run (no API mutation in this PR).

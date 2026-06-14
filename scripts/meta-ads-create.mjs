@@ -169,8 +169,8 @@ async function main() {
       },
     }, null, 2));
   } else if (!cfg.adsetId) {
-    const src = await get(cfg.sourceAdsetId, { fields: "id,name,campaign_id,daily_budget,status,optimization_goal,billing_event,targeting" });
-    console.log(`\nAd set source (clonage targeting) : ${src.id} "${src.name}" — opt=${src.optimization_goal} billing=${src.billing_event} budget=${src.daily_budget}`);
+    const src = await get(cfg.sourceAdsetId, { fields: "id,name,campaign_id,daily_budget,status,optimization_goal,billing_event,bid_strategy,bid_amount,targeting" });
+    console.log(`\nAd set source (clonage targeting) : ${src.id} "${src.name}" — opt=${src.optimization_goal} billing=${src.billing_event} bid=${src.bid_strategy}${src.bid_amount ? `/${src.bid_amount}` : ""} budget=${src.daily_budget}`);
     if (cfg.campaignId && src.campaign_id !== cfg.campaignId) die(`Ad set source ${cfg.sourceAdsetId} appartient à ${src.campaign_id}, pas ${cfg.campaignId}`);
     newAdsetPayload = {
       name: cfg.newAdsetName,
@@ -178,6 +178,10 @@ async function main() {
       daily_budget: cfg.dailyBudget,
       billing_event: src.billing_event,
       optimization_goal: src.optimization_goal,
+      // Clone the bid strategy explicitly — without it Meta infers one that requires a
+      // bid_amount and rejects the create (subcode 2490487). LOWEST_COST_WITHOUT_CAP needs none.
+      bid_strategy: src.bid_strategy,
+      ...(src.bid_amount ? { bid_amount: src.bid_amount } : {}),
       promoted_object: { product_catalog_id: cfg.catalogId, product_set_id: cfg.productSetId },
       targeting: src.targeting,           // same Canada-FR retargeting audience as the source
       status: "PAUSED",
