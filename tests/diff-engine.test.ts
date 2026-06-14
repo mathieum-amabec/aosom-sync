@@ -106,12 +106,29 @@ describe("computeDiffs", () => {
     expect(Number(priceChange.newValue)).toBeGreaterThanOrEqual(85.99);
   });
 
-  it("detects stock change", () => {
+  it("does NOT diff stock (dropship is untracked in Shopify; stock changes never pushed)", () => {
     const aosom = makeAosom();
-    aosom.variants[0].qty = 0;
+    aosom.variants[0].qty = 0; // only stock differs
     const diffs = computeDiffs([aosom], [makeShopify()]);
-    expect(diffs).toHaveLength(1);
-    expect(diffs[0].changes.some((c) => c.field === "stock")).toBe(true);
+    expect(diffs).toHaveLength(0);
+  });
+
+  it("puts price-containing diffs ahead of image/description-only diffs", () => {
+    const priced = makeAosom();
+    priced.variants[0].price = 109.99; // price diff
+    const descOnly = makeAosom({
+      groupKey: "G-DESC",
+      variants: [{ ...makeAosom().variants[0], sku: "DESC-001" }],
+      description: "<p>changed</p>",
+    });
+    const shopifyDesc = makeShopify({
+      shopifyId: "SHOP-DESC",
+      variants: [{ ...makeShopify().variants[0], sku: "DESC-001" }],
+    });
+    // descOnly passed first, priced second — expect priced sorted to the front.
+    const diffs = computeDiffs([descOnly, priced], [makeShopify(), shopifyDesc]);
+    expect(diffs.length).toBeGreaterThanOrEqual(2);
+    expect(diffs[0].changes.some((c) => c.field === "price")).toBe(true);
   });
 
   it("detects image change", () => {

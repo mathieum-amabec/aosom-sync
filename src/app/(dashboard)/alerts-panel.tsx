@@ -5,11 +5,14 @@ import { useState, useEffect } from "react";
 interface ErroredImportJob { id: string; groupKey: string; sku: string | null; error: string | null; updatedAt: string; }
 interface FeedSync { feedType: string; lastSuccessAt: number | null; itemCount: number | null; lastStatus: string | null; }
 interface MetaToken { configured: boolean; state?: string; daysLeft?: number | null; expiresAt?: number; }
+interface PriceFloorItem { sku: string; shopify_price: number; aosom_price: number; gap: number; }
+interface PriceFloor { belowFloorCount: number; total: number; auditedAt: number | null; topItems: PriceFloorItem[]; }
 interface Alerts {
   erroredImportJobs: ErroredImportJob[];
   staleDraftCount: number;
   feeds: FeedSync[];
   metaToken: MetaToken;
+  priceFloor: PriceFloor | null;
 }
 
 const FEED_LABELS: Record<string, string> = {
@@ -53,8 +56,9 @@ export function AlertsPanel() {
   const token = data.metaToken;
   const tokenAlert =
     token.configured && (token.state === "expired" || token.state === "expiring_soon" || token.state === "unknown");
+  const belowFloor = data.priceFloor?.belowFloorCount ?? 0;
   const hasAlerts = data.erroredImportJobs.length > 0 || data.staleDraftCount > 0 || tokenAlert ||
-    data.feeds.some((f) => f.lastStatus === "error");
+    belowFloor > 0 || data.feeds.some((f) => f.lastStatus === "error");
 
   return (
     <section className="mb-8">
@@ -75,6 +79,27 @@ export function AlertsPanel() {
                 <li key={j.id} className="px-4 py-2 text-xs text-gray-400">
                   <span className="text-gray-300">{j.sku || j.groupKey}</span>
                   {j.error ? <span className="text-red-400/80"> — {j.error}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Price floor — Shopify selling below the Aosom feed price */}
+        {belowFloor > 0 && data.priceFloor && (
+          <div className="bg-red-950/20 border border-red-800/40 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 text-sm font-medium text-red-300">
+              {belowFloor} produit{belowFloor > 1 ? "s" : ""} vendu{belowFloor > 1 ? "s" : ""} sous le prix plancher Aosom
+              <span className="text-red-400/70 font-normal"> · sur {data.priceFloor.total} comparés{data.priceFloor.auditedAt ? ` · ${timeAgoEpoch(data.priceFloor.auditedAt)}` : ""}</span>
+            </div>
+            <ul className="divide-y divide-red-900/30">
+              {data.priceFloor.topItems.slice(0, 8).map((it) => (
+                <li key={it.sku} className="flex items-center justify-between gap-3 px-4 py-2 text-xs">
+                  <span className="text-gray-300">{it.sku}</span>
+                  <span className="text-gray-500 shrink-0">
+                    Shopify {it.shopify_price.toFixed(2)}$ · Aosom {it.aosom_price.toFixed(2)}$
+                    <span className="text-red-400"> · {it.gap.toFixed(2)}$</span>
+                  </span>
                 </li>
               ))}
             </ul>

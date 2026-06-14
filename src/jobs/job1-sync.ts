@@ -31,6 +31,9 @@ import {
   purgeOldPriceHistory,
   purgeOldSyncLogs,
   purgeOldNotifications,
+  purgeOldCronRuns,
+  purgeOldFeedSyncs,
+  recomputeHasDiscount,
   getProduct,
   getProductsSnapshot,
   getSetting,
@@ -978,6 +981,28 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
       log("purgeOldNotifications done", { phase: "finalize", duration_ms: Date.now() - t0Notifs, purged: purgedNotifs });
     } catch (purgeErr) {
       log(`purgeOldNotifications failed (non-fatal): ${purgeErr instanceof Error ? purgeErr.message : String(purgeErr)}`, { phase: "finalize" });
+    }
+
+    // Retention: cron_runs + feed_syncs grow one row per invocation/fetch (social-scheduled
+    // alone = 96/day); the dashboard only reads the latest per name/feed. Keep 30 days. Non-fatal.
+    try {
+      const t0Cron = Date.now();
+      const purgedCron = await purgeOldCronRuns(30);
+      const purgedFeeds = await purgeOldFeedSyncs(30);
+      log("purgeOldCronRuns/FeedSyncs done", { phase: "finalize", duration_ms: Date.now() - t0Cron, purgedCron, purgedFeeds });
+    } catch (purgeErr) {
+      log(`purgeOldCronRuns/FeedSyncs failed (non-fatal): ${purgeErr instanceof Error ? purgeErr.message : String(purgeErr)}`, { phase: "finalize" });
+    }
+
+    // Recompute the precomputed has_discount flag now that prices + price_history reflect
+    // today's sync. Moves the correlated discount EXISTS off the per-page-load path
+    // (getCatalogStats / catalog filter) to once/day here. Non-fatal.
+    try {
+      const t0Disc = Date.now();
+      await recomputeHasDiscount();
+      log("recomputeHasDiscount done", { phase: "finalize", duration_ms: Date.now() - t0Disc });
+    } catch (discErr) {
+      log(`recomputeHasDiscount failed (non-fatal): ${discErr instanceof Error ? discErr.message : String(discErr)}`, { phase: "finalize" });
     }
 
     await completeSyncRun(syncRun.id, {

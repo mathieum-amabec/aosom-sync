@@ -62,9 +62,16 @@ async function _initSchemaImpl(): Promise<void> {
       material TEXT, gtin TEXT, weight REAL, out_of_stock_expected TEXT, estimated_arrival TEXT,
       shopify_product_id TEXT, shopify_variant_id TEXT, shopify_handle TEXT,
       last_seen_at INTEGER, last_posted_at INTEGER,
+      has_discount INTEGER DEFAULT 0,
       created_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type)`,
+    // Precomputed "Avec rabais" flag (recomputed each sync via recomputeHasDiscount).
+    // Lets getCatalogStats + the catalog filter use a cheap indexed scan instead of a
+    // correlated EXISTS over price_history on every page load. PARTIAL index on the
+    // discounted subset only — has_discount is a 0/1 boolean, so a full index is too
+    // low-selectivity; the partial index is a compact list of discounted SKUs.
+    `CREATE INDEX IF NOT EXISTS idx_products_has_discount ON products(has_discount) WHERE has_discount = 1`,
     `CREATE INDEX IF NOT EXISTS idx_products_shopify_id ON products(shopify_product_id)`,
     `CREATE INDEX IF NOT EXISTS idx_products_price ON products(price)`,
     `CREATE INDEX IF NOT EXISTS idx_products_qty ON products(qty)`,
@@ -327,6 +334,12 @@ async function _initSchemaImpl(): Promise<void> {
   if (!productCols.has("shopify_handle")) {
     alters.push(`ALTER TABLE products ADD COLUMN shopify_handle TEXT`);
   }
+  // has_discount: precomputed rabais flag (see recomputeHasDiscount). Backfilled once
+  // below when the column is first added; refreshed every sync thereafter.
+  const hasDiscountColExisted = productCols.has("has_discount");
+  if (!hasDiscountColExisted) {
+    alters.push(`ALTER TABLE products ADD COLUMN has_discount INTEGER DEFAULT 0`);
+  }
 
   // price_alerts double opt-in columns (table shipped in #99 without them).
   const priceAlertsInfo = await db.execute(`PRAGMA table_info(price_alerts)`);
@@ -343,6 +356,13 @@ async function _initSchemaImpl(): Promise<void> {
 
   if (alters.length > 0) {
     await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
+  }
+
+  // One-time backfill of products.has_discount when the column was just added. Uses the
+  // local `db` (not recomputeHasDiscount → ensureSchema) to avoid awaiting the in-flight
+  // schema promise. Refreshed every sync thereafter via recomputeHasDiscount().
+  if (!hasDiscountColExisted) {
+    await db.execute(`UPDATE products SET has_discount = CASE WHEN ${PRODUCT_HAS_DISCOUNT_SQL} THEN 1 ELSE 0 END`);
   }
 
   // content_templates column migration (frequency_per_month + scopes + mode)
@@ -906,7 +926,9 @@ export async function getCatalogStats(): Promise<CatalogStats> {
   const [totalR, importedR, discountR, syncR] = await Promise.all([
     db.execute(`SELECT COUNT(*) AS c FROM products`),
     db.execute(`SELECT COUNT(*) AS c FROM products WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''`),
-    db.execute(`SELECT COUNT(*) AS c FROM products WHERE ${PRODUCT_HAS_DISCOUNT_SQL}`),
+    // Precomputed flag (recomputeHasDiscount, refreshed each sync) — a cheap indexed scan
+    // instead of the correlated EXISTS over price_history this used to run per page load.
+    db.execute(`SELECT COUNT(*) AS c FROM products WHERE has_discount = 1`),
     // Bare name/status come from the MAX(ran_at) row (SQLite single-MAX rule).
     db.execute(`SELECT name, status, MAX(ran_at) AS ran_at FROM cron_runs WHERE name LIKE 'sync%'`),
   ]);
@@ -1199,6 +1221,49 @@ export async function purgeOldNotifications(days = 30): Promise<number> {
   return Number(result.rowsAffected) || 0;
 }
 
+/**
+ * Delete cron_runs rows older than `days` (default 30). One row is written per cron
+ * invocation (social-scheduled alone = 96/day), so the table grows fast; the dashboard
+ * only reads the latest run per cron name. `ran_at` is a unix-seconds INTEGER. Called
+ * once/day at the end of the sync. Returns rows deleted.
+ */
+export async function purgeOldCronRuns(days = 30): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `DELETE FROM cron_runs WHERE ran_at < unixepoch('now', ?)`,
+    args: [`-${days} days`],
+  });
+  return Number(result.rowsAffected) || 0;
+}
+
+/**
+ * Delete feed_syncs rows older than `days` (default 30). One row per feed fetch; the
+ * dashboard only reads the latest success/attempt per feed_type. `fetched_at` is a
+ * unix-seconds INTEGER. Called once/day at the end of the sync. Returns rows deleted.
+ */
+export async function purgeOldFeedSyncs(days = 30): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `DELETE FROM feed_syncs WHERE fetched_at < unixepoch('now', ?)`,
+    args: [`-${days} days`],
+  });
+  return Number(result.rowsAffected) || 0;
+}
+
+/**
+ * Recompute products.has_discount for every product using the canonical
+ * PRODUCT_HAS_DISCOUNT_SQL predicate (single source of truth, also used by the
+ * ▼ badge logic). Runs once/day at sync finalize instead of evaluating the
+ * correlated EXISTS on every catalog/dashboard page load. getCatalogStats and the
+ * "Avec rabais" filter then read the precomputed, partial-indexed flag — a cheap scan.
+ * products.price + price_history only change during the daily sync, so the flag stays
+ * accurate between syncs.
+ */
+export async function recomputeHasDiscount(): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute(`UPDATE products SET has_discount = CASE WHEN ${PRODUCT_HAS_DISCOUNT_SQL} THEN 1 ELSE 0 END`);
+}
+
 export async function getRecentPriceChanges(limit = 50): Promise<Record<string, unknown>[]> {
   const db = await ensureSchema();
   const result = await db.execute({
@@ -1397,6 +1462,20 @@ export async function setSetting(key: string, value: string): Promise<void> {
   const db = await ensureSchema();
   const now = Math.floor(Date.now() / 1000);
   await db.execute({ sql: `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, args: [key, value, now] });
+}
+
+/**
+ * Minimal sku→price projection for the price-floor audit (price-audit.ts). Only priced rows;
+ * `price` is the Aosom feed price used as the floor. Kept tiny (2 cols, ~11k rows) so the audit
+ * doesn't pull heavy catalog columns.
+ */
+export async function getProductsForPriceAudit(): Promise<{ sku: string; price: number }[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT sku, price FROM products WHERE price > 0` });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    return { sku: o.sku as string, price: Number(o.price) || 0 };
+  });
 }
 
 export async function getAllSettings(): Promise<Record<string, string>> {
@@ -1604,10 +1683,19 @@ async function _loadDashboardSummary(): Promise<DashboardSummary> {
   };
 }
 
+export interface PriceFloorAlert {
+  belowFloorCount: number;
+  total: number;
+  auditedAt: number | null; // epoch seconds of the last audit, null if never run
+  topItems: { sku: string; shopify_price: number; aosom_price: number; gap: number }[];
+}
+
 export interface DashboardAlerts {
   erroredImportJobs: ErroredImportJob[];
   staleDraftCount: number;
   feeds: FeedSyncSummary[];
+  /** Last price-floor audit summary (from settings.price_audit_result). null if never run. */
+  priceFloor: PriceFloorAlert | null;
 }
 
 /** "Alertes" DB metrics (Meta token expiry is added by the route via debug_token). */
@@ -1618,7 +1706,7 @@ export async function getDashboardAlerts(): Promise<DashboardAlerts> {
 async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
   const db = await ensureSchema();
   const weekAgo = epochDaysAgo(new Date(), 7);
-  const [errs, stale, feeds] = await Promise.all([
+  const [errs, stale, feeds, priceAudit] = await Promise.all([
     db.execute({ sql: `SELECT id, group_key, product_data, error, updated_at FROM import_jobs WHERE status = 'error' ORDER BY updated_at DESC LIMIT 20` }),
     db.execute({ sql: `SELECT COUNT(*) AS c FROM facebook_drafts WHERE status IN ('draft', 'pending') AND created_at < ?`, args: [weekAgo] }),
     // Per feed: time + count of the last SUCCESS, plus the status of the most recent
@@ -1628,6 +1716,9 @@ async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
         (SELECT s.status FROM feed_syncs s WHERE s.feed_type = f.feed_type ORDER BY s.fetched_at DESC, s.id DESC LIMIT 1) AS last_status,
         (SELECT s.item_count FROM feed_syncs s WHERE s.feed_type = f.feed_type AND s.status = 'success' ORDER BY s.fetched_at DESC, s.id DESC LIMIT 1) AS item_count
       FROM feed_syncs f GROUP BY f.feed_type ORDER BY f.feed_type ASC` }),
+    // Last price-floor audit summary (written by /api/health/price-audit). Cheap one-row read;
+    // the expensive Shopify comparison runs in that endpoint, never on dashboard load.
+    db.execute({ sql: `SELECT value FROM settings WHERE key = 'price_audit_result'` }),
   ]);
   const erroredImportJobs: ErroredImportJob[] = errs.rows.map((r) => {
     const o = rowToObj(r);
@@ -1639,6 +1730,18 @@ async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
     } catch { /* product_data not JSON — fall back to group_key */ }
     return { id: o.id as string, groupKey: o.group_key as string, sku, error: (o.error as string) ?? null, updatedAt: (o.updated_at as string) ?? "" };
   });
+  let priceFloor: PriceFloorAlert | null = null;
+  if (priceAudit.rows.length > 0) {
+    try {
+      const s = JSON.parse((rowToObj(priceAudit.rows[0]).value as string) || "{}") as Record<string, unknown>;
+      priceFloor = {
+        belowFloorCount: Number(s.belowFloor) || 0,
+        total: Number(s.total) || 0,
+        auditedAt: s.auditedAt != null ? Number(s.auditedAt) : null,
+        topItems: Array.isArray(s.topItems) ? (s.topItems as PriceFloorAlert["topItems"]) : [],
+      };
+    } catch { /* malformed setting — treat as no audit */ }
+  }
   return {
     erroredImportJobs,
     staleDraftCount: Number(rowToObj(stale.rows[0]).c) || 0,
@@ -1651,6 +1754,7 @@ async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
         lastStatus: (o.last_status as string) ?? null,
       };
     }),
+    priceFloor,
   };
 }
 
