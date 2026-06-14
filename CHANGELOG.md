@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.50] - 2026-06-14
+
+### Fixed (Shopify price-sync starvation — ~428 SKUs were stuck below Aosom cost)
+- **`diff-engine.ts`: stop emitting `stock` diffs.** Dropship variants are untracked in
+  Shopify (`inventory_management: null`), so `applyToShopify` never pushed stock — yet a
+  `stock` diff was generated for ~every product every day. Those unresolvable diffs
+  permanently saturated the per-day Phase-2 chunk queue (`SHOPIFY_PUSH_CHUNK_SIZE=10` × 3
+  cron slots = 30/day, checkpoint resets daily to the front of a stable-ordered list),
+  starving real price/image/description updates in the tail — so Aosom price increases
+  recorded since mid-May never reached Shopify and ~428 SKUs sold below cost. Phase 1 still
+  records stock movements separately (`detectChanges` → `price_history.stock_change`).
+- **`diff-engine.ts`: price-first ordering** in `computeDiffs` so money-affecting
+  corrections drain out of the chunk queue before image/description-only diffs.
+- **`scripts/fix-prices-reconcile.mjs`** (one-shot, dry-run by default): raises Shopify
+  variant prices that are below `products.price` (Aosom cost) up to cost; only ever raises
+  (never lowers, preserving manual markup); strict 2 req/sec; logs each write. Executed
+  2026-06-14: **428 corrected, 0 failed**.
+
 ## [0.5.53.46] - 2026-06-14
 
 ### Added (Klaviyo Welcome coupon — BIENVENUE10)
