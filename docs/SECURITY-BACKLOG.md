@@ -421,6 +421,39 @@ section reposition + desktop perf (preview theme + QA scripts). **No new P0/P1.*
 - **P3-7** `verifyCronSecret` copy-pasted across cron routes (extract one helper).
 
 ---
+
+## Audit run — 2026-06-14 (branch `feature/meta-ads-activation`, daily mode, 8/10 gate)
+
+Focused pass over the delta since the prior run (#168/#169/#172 Turso-quota work +
+`scripts/turso-purge-*.mjs`) plus a fresh high-signal sweep of the whole tree.
+
+**Result: no open P0/P1. No new P2/P3.** Prior persistent items (P2-2/P2-3/P2-4,
+P3-1, P3-5/6, P3-7) stand unchanged.
+
+Verified this run:
+- **Secrets:** no `.env*` tracked by git (`.gitignore` covers `.env*`); `scripts/turso-purge-*.mjs`
+  read `TURSO_AUTH_TOKEN` from env, no hardcoded credentials.
+- **SQL injection:** all new purge functions (`purgeOldCronLogs`, `purgeOldSyncLogs`,
+  `purgeOldNotifications`) are fully parameterized (`unixepoch('now', ?)`). The 3 dynamic
+  `UPDATE … SET ${sets}` builders (`updateImportJob`, video jobs, facebook drafts) each
+  validate every key against a column allowlist and throw on an unknown key — no key is
+  attacker-controlled.
+- **Auth boundary:** `src/proxy.ts` is correctly registered (Next 16.2.6 first-class `proxy`
+  middleware convention — `PROXY_FILENAME='proxy'`, `(?:src/)?proxy` in
+  `node_modules/next/dist/lib/constants.js`). This centralized `/((?!_next…).*)` guard now
+  satisfies the old **P2-1 "better fix"** (one middleware instead of per-route checks); the
+  previously-unauthenticated read routes (`/api/catalog`, `/api/insights`, `/api/sync/history`,
+  `/api/notifications`, …) are now session-gated. `PUBLIC_PATHS` is intentional and each public
+  child self-gates (cron + `/api/social/content/*` on `CRON_SECRET` → 401; `/api/price-alert`
+  CORS-locked + rate-limited; `/api/pixel/script` interpolates a digits-only-validated id).
+- **Injection sinks:** one `dangerouslySetInnerHTML` (`import/page.tsx:528`) stays
+  `DOMPurify.sanitize()`-wrapped; `child_process` only via `spawn(arg[])` (no shell); no
+  `eval` / `new Function`. The only `exec(` hits are `RegExp.exec`.
+
+Status note: **old P2-1 (unauthenticated read routes) — effectively RESOLVED** by `proxy.ts`
+centralized auth. Superseded by P2-4 (role granularity).
+
+---
 **Disclaimer:** `/cso` is an AI-assisted scan that catches common patterns. It is not a
 substitute for a professional penetration test. For production systems handling PII or
 payments, engage a qualified security firm.

@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.41] - 2026-06-14
+## [0.5.53.42] - 2026-06-14
 
 ### Fixed (ops tooling)
 - **`scripts/verify-live-storefront.mjs` — hero/title checks now match the real live HTML.** The
@@ -18,6 +18,25 @@ All notable changes to Aosom Sync will be documented in this file.
   found **already applied** (preview `160213696617` already `role:main`), so no publish was
   performed; the script's abort gate correctly refused. Includes the read-only storefront
   verification.
+
+## [0.5.53.41] - 2026-06-14
+
+### Added (Meta Dynamic Ads activation)
+- **`scripts/meta-ads-create.mjs`** — creates the missing Ad Creative + Ad for the (PAUSED)
+  retargeting campaign so it becomes operational. **Dry-run by default** (lists current state
+  and prints the exact creative/ad payloads, sends nothing); `--apply` creates both as PAUSED
+  and is idempotent by name (reuses an existing creative, skips a duplicate ad). Verified live
+  against the Graph API v21.0: ad set `52556997397005` → campaign `52556997335005`, catalog
+  `1103064966519153`, product set `1718195966267686` (1000 products); no existing catalog
+  creative or ad on the ad set. Real ad creation is deferred to running `--apply` after the
+  payloads are validated.
+
+### Security (/cso audit — daily, 8/10 gate)
+- Ran `/cso` over the current tree + recent Turso-quota merges. **No open P0/P1.** Appended a
+  dated run entry to `docs/SECURITY-BACKLOG.md`: secrets clean (`.env*` gitignored, scripts use
+  env), SQL fully parameterized (dynamic UPDATEs use column allowlists), `src/proxy.ts` is the
+  correctly-wired Next 16 `proxy` middleware (centralized auth resolves the old P2-1). Prior
+  P2/P3 items re-confirmed; none exploitable today.
 
 ## [0.5.53.40] - 2026-06-14
 
