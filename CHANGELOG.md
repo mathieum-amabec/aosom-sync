@@ -2,6 +2,28 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.47] - 2026-06-14
+
+### Added (pricing floor — never sell below the Aosom CSV price)
+- Decision (Mat): sell at exactly the Aosom CSV price (**0% markup**, competitive) but
+  **NEVER below it**. The Aosom price is the absolute floor — it protects the ~18%
+  Aosom supplier-discount margin (cost ≈ `aosomPrice × 0.82`).
+- **`src/lib/pricing.ts`** (new): `targetSellPrice()` is the single pricing rule, floors
+  the result at the Aosom price, and returns `NaN` for a missing/≤0 CSV price so callers
+  **skip** instead of pushing $0.
+- **Job 1 sync** (`diff-engine.ts`): the price target is `targetSellPrice(aosomPrice)`; a
+  Shopify price below the floor is force-corrected upward, and price changes are skipped
+  when the Aosom price is invalid.
+- **Job 3 import** (`createShopifyProduct`): variant price floored the same way (raw-price
+  fallback so a bad CSV value can never emit `"NaN"`).
+- **`applied_to_shopify` now actually gets set**: `markPriceChangeAppliedBySku(sku, newPrice)`
+  flags the matching recorded `price_history` row after each successful push in
+  `applyToShopify` (shared by `runSync` + Phase 2 `runShopifyPush`). Matched on SKU **and**
+  the pushed price so Phase 2 / floor-only corrections can't flag the wrong row; wrapped in
+  its own try/catch so a bookkeeping write can never fail an already-successful price push.
+- Tests: pricing (floor + NaN-on-invalid), diff-engine floor (force-up / never-below),
+  mark-applied SQL (price-matched, no-op on no match).
+
 ## [0.5.53.46] - 2026-06-14
 
 ### Added (Klaviyo Welcome coupon — BIENVENUE10)
