@@ -26,6 +26,18 @@ verified as epoch **seconds**. Cutoff computed in-SQL as `cast(strftime('%s','no
   **not** included in this DELETE.
 - **Read-only artifacts:** `scripts/turso-purge-audit.mjs` (table sizes + schema introspection),
   `scripts/turso-purge-dryrun.mjs` (count-only preview).
+- **⚠ Known side-effect (accepted):** the first apply run used an **unguarded** delete
+  (`detected_at < now-30d`) — unlike the production retention `purgeOldPriceHistory()`, it did
+  **not** keep each SKU's most-recent `price_drop`/`price_increase` row. The oldest remaining
+  price-change row is now 2026-05-16 (was 2026-04-11). Consequence: the **internal catalog
+  browser** "Avec rabais" filter + header counts (`PRODUCT_HAS_DISCOUNT_SQL`, getProducts /
+  getCatalogStats) under-count products whose last price move was 30-64d ago and are still on
+  sale. **Not customer-facing** — the live Shopify storefront uses Shopify's own
+  `compare_at_price`, independent of `price_history`. Decision: **accept** — each affected SKU's
+  badge re-appears on its next price change (daily sync re-records the row). The committed
+  `scripts/turso-purge-apply.mjs` was hardened post-hoc with the same `id NOT IN (SELECT MAX(id)
+  … GROUP BY sku)` guard so a re-run cannot repeat the over-delete; the daily cron purge
+  (`purgeOldPriceHistory(30)`) already carries the guard.
 
 ## 2026-06-11 — Phase 3: Aosom video ingest BATCH (top-30, real upload to Shopify)
 
