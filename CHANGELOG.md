@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.47] - 2026-06-14
+## [0.5.53.49] - 2026-06-14
 
 ### Added (pricing floor — never sell below the Aosom CSV price)
 - Decision (Mat): sell at exactly the Aosom CSV price (**0% markup**, competitive) but
