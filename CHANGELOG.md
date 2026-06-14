@@ -2,13 +2,40 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.43] - 2026-06-14
+## [0.5.53.45] - 2026-06-14
 
 ### Docs
 - Added `docs/site-health-report.md` — full read-only production health check (2026-06-14):
   storefront live + new theme active (hero/title/og/meta/0 Liquid errors), 4/4 feeds HTTP 200
   (1064 products each), « Voyez-le chez vous » page (15 `<video>`), 16 `video_ingest_log` rows
   `READY`, Turso responding (11 205 products). **8/8 checks ✅.** No site/data mutations.
+
+## [0.5.53.44] - 2026-06-14
+
+### Fixed (blog cron blocked by auth middleware)
+- **Allowlist `/api/blog` in `src/proxy.ts` `PUBLIC_PATHS`.** The blog cron does a
+  server-to-server `fetch` to `/api/blog/generate` with `Authorization: Bearer CRON_SECRET`
+  and no session cookie. The middleware ran first, ignored the Bearer header, and
+  307-redirected the POST to `/login` → 405 → both FR and EN sub-calls failed →
+  `"Both FR and EN blog generations failed"` in `cron_runs` (last success 2026-06-09).
+  The route already self-gates on CRON_SECRET + session (auth-first, returns 401 for
+  unauthenticated requests), exactly like the already-allowlisted `/api/social/content`,
+  so making the prefix public exposes nothing — it just lets the cron's request reach the route.
+
+## [0.5.53.43] - 2026-06-14
+
+### Meta Dynamic Ads — activation attempt (blocked upstream) + EN profile
+- Ran `scripts/meta-ads-create.mjs --apply` to create the FR Dynamic Ad. **Meta rejected it**
+  (`code 10 / subcode 3379015`): the ad set's catalog `1103064966519153` is a *personal*
+  Marketplace catalog, which cannot run ads. **No creative/ad was created** — an upstream
+  configuration blocker, not a code bug.
+- **Script:** added a catalog ads-eligibility **preflight** (fails fast with the remediation
+  instead of a raw 400) and a `--profile en` path for Furnish Direct (EN). EN dry-run validated
+  (campaign + ad set don't exist yet, so it prints the full structure to create + the EN
+  creative/ad payloads). EN held for validation — dry-run only.
+- **Docs:** `docs/META-ADS-SETUP.md` documents the blocker, the ads-eligible Business catalog
+  `384890002574549` (only 5 products synced — needs the Shopify→Meta sync completed), the exact
+  remediation (re-point the ad set to the Business catalog, then re-run `--apply`), and the EN plan.
 
 ## [0.5.53.42] - 2026-06-14
 
