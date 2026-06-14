@@ -5,6 +5,7 @@ import type {
   FieldChange,
   ChangeType,
 } from "@/types/sync";
+import { targetSellPrice } from "@/lib/pricing";
 
 /**
  * Compare Aosom catalog (merged) against existing Shopify products.
@@ -151,13 +152,18 @@ function diffProduct(
       continue;
     }
 
-    // Price change
-    if (Math.abs(shopifyVariant.price - aosomVariant.price) > 0.01) {
+    // Price change — sell at the Aosom CSV price (0% markup) and NEVER below it.
+    // targetSellPrice() floors the result at the Aosom price, so a Shopify price that
+    // sits below the floor (e.g. a manual under-price) is force-corrected upward, and
+    // we never emit a price under the Aosom floor. See src/lib/pricing.ts.
+    const targetPrice = targetSellPrice(aosomVariant.price);
+    // Skip when the Aosom price is missing/invalid — never push a $0/NaN price live.
+    if (Number.isFinite(targetPrice) && targetPrice > 0 && Math.abs(shopifyVariant.price - targetPrice) > 0.01) {
       changes.push({
         field: "price",
         sku: aosomVariant.sku,
         oldValue: shopifyVariant.price,
-        newValue: aosomVariant.price,
+        newValue: targetPrice,
       });
     }
 

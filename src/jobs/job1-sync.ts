@@ -27,6 +27,7 @@ import {
   refreshProducts,
   rebuildProductTypeCounts,
   recordPriceChanges,
+  markPriceChangeAppliedBySku,
   purgeOldPriceHistory,
   purgeOldSyncLogs,
   purgeOldNotifications,
@@ -203,12 +204,20 @@ async function applyToShopify(
         const priceChanges = diff.changes.filter((c) => c.field === "price");
         const shopifyProduct = shopifyMap.get(diff.shopifyId);
         await Promise.all(
-          priceChanges.map((change) => {
+          priceChanges.map(async (change) => {
             const variant = shopifyProduct?.variants.find((v) => v.sku === change.sku);
             if (variant && change.newValue !== null) {
               log(`Prix mis à jour: ${change.sku} ${change.oldValue}$ → ${change.newValue}$`);
               const oldPrice = change.oldValue !== null ? Number(change.oldValue) : undefined;
-              return updateShopifyVariantPrice(variant.variantId, Number(change.newValue), oldPrice);
+              const newPrice = Number(change.newValue);
+              await updateShopifyVariantPrice(variant.variantId, newPrice, oldPrice);
+              // Push succeeded → flag the matching recorded price_history row as applied.
+              // Non-fatal: a bookkeeping write must never fail an already-successful push.
+              try {
+                await markPriceChangeAppliedBySku(change.sku, newPrice);
+              } catch (markErr) {
+                log(`markPriceChangeApplied failed for ${change.sku}: ${markErr instanceof Error ? markErr.message : String(markErr)}`);
+              }
             }
           })
         );

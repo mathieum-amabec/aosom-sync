@@ -80,6 +80,32 @@ describe("computeDiffs", () => {
     expect(priceChange.newValue).toBe(109.99);
   });
 
+  it("price floor: forces a below-Aosom Shopify price UP to the Aosom price", () => {
+    // Shopify is priced below the Aosom CSV price (e.g. a manual under-price) — the
+    // diff must emit a price change that raises it back to the Aosom floor.
+    const aosom = makeAosom();
+    aosom.variants[0].price = 85.99;
+    const shopify = makeShopify();
+    shopify.variants[0].price = 79.99; // below the Aosom floor
+    const diffs = computeDiffs([aosom], [shopify]);
+    const priceChange = diffs[0].changes.find((c) => c.field === "price")!;
+    expect(priceChange.oldValue).toBe(79.99);
+    expect(priceChange.newValue).toBe(85.99); // raised to the Aosom floor
+    expect(Number(priceChange.newValue)).toBeGreaterThanOrEqual(85.99); // never below floor
+  });
+
+  it("never emits a price below the Aosom floor (realign-down stays at Aosom)", () => {
+    // Shopify above Aosom → realign down to the Aosom price, never under it.
+    const aosom = makeAosom();
+    aosom.variants[0].price = 85.99;
+    const shopify = makeShopify();
+    shopify.variants[0].price = 120.0;
+    const diffs = computeDiffs([aosom], [shopify]);
+    const priceChange = diffs[0].changes.find((c) => c.field === "price")!;
+    expect(priceChange.newValue).toBe(85.99);
+    expect(Number(priceChange.newValue)).toBeGreaterThanOrEqual(85.99);
+  });
+
   it("detects stock change", () => {
     const aosom = makeAosom();
     aosom.variants[0].qty = 0;

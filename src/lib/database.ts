@@ -1107,6 +1107,32 @@ export async function markPriceChangeApplied(id: number): Promise<void> {
 }
 
 /**
+ * Mark the price_history row matching a just-pushed price as applied to Shopify
+ * (`applied_to_shopify = 1`). Called after a successful `updateShopifyVariantPrice`
+ * in `applyToShopify` (shared by the manual sync and Phase 2 `runShopifyPush`).
+ *
+ * The push path works from diffs, not price_history ids, so we resolve the row by
+ * **SKU + the pushed price** (`new_price ≈ newPrice`): the newest un-applied
+ * price-change row whose recorded new price equals what we just pushed. Matching on
+ * `new_price` (not just SKU) is what keeps this correct when Phase 2 pushes without a
+ * fresh `recordPriceChanges`, and when a floor-correction has no recorded row at all
+ * (then there's simply no match → no-op). Returns rows updated (0 or 1).
+ */
+export async function markPriceChangeAppliedBySku(sku: string, newPrice: number): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE price_history SET applied_to_shopify = 1
+          WHERE id = (
+            SELECT MAX(id) FROM price_history
+            WHERE sku = ? AND change_type IN ('price_drop', 'price_increase')
+              AND applied_to_shopify = 0 AND ABS(new_price - ?) < 0.01
+          )`,
+    args: [sku, newPrice],
+  });
+  return Number(result.rowsAffected) || 0;
+}
+
+/**
  * Delete price_history rows older than `days` (default 90). price_history grows
  * unbounded — every sync inserts price/stock change rows — which inflates both
  * Turso storage AND the row-reads of the correlated "Avec rabais" discount query

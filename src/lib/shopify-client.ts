@@ -3,6 +3,7 @@ import type { AosomMergedProduct } from "@/types/aosom";
 import { slugify, type GeneratedContent } from "./content-generator";
 import { stripLeadingHeading } from "./html-utils";
 import { env, SHOPIFY, SYNC } from "./config";
+import { targetSellPrice } from "./pricing";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -148,7 +149,10 @@ export async function createShopifyProduct(
       options,
       variants: merged.variants.map((v) => ({
         sku: v.sku,
-        price: String(v.price),
+        // Floor at the Aosom price (0% markup, never below) — same rule as the sync. See pricing.ts.
+        // Fall back to the raw price if the Aosom price is invalid (targetSellPrice → NaN),
+        // so we never emit the string "NaN" to Shopify (bad CSV data is a separate concern).
+        price: String(targetSellPrice(v.price) || v.price),
         inventory_management: null, // dropship — no inventory tracking
         requires_shipping: true,
         weight: v.weight,
