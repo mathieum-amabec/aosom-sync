@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.46] - 2026-06-14
+
+### Added (Klaviyo Welcome coupon — BIENVENUE10)
+- **`scripts/shopify-create-discount.mjs`** — creates the `BIENVENUE10` welcome discount in
+  Shopify (10% off, `once_per_customer`, no expiry). Dry-run by default; `--apply` creates it,
+  idempotent (skips if the code already exists). Needs the token's `write_discounts` scope.
+- **Created live (2026-06-14):** price rule `1916108374121`, discount code `17247691178089`
+  (`BIENVENUE10`). Verified: `value -10.0` percentage, `once_per_customer: true`,
+  `usage_limit: null`, `ends_at: null`.
+- **Docs:** `docs/KLAVIYO-FLOWS.md` records the IDs + the remaining manual steps (insert the code
+  into the Welcome email, flip the 4 flows `draft → live` after the pre-launch checklist). Klaviyo
+  flow activation stays a dashboard/human action (no `KLAVIYO_API_KEY` in this env, and the
+  Cart/Price-Drop emails still need dynamic blocks before going live).
+
 ## [0.5.53.45] - 2026-06-14
 
 ### Docs
