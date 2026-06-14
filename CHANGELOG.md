@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.41] - 2026-06-14
+
+### Fixed (ops tooling)
+- **`scripts/verify-live-storefront.mjs` — hero/title checks now match the real live HTML.** The
+  hero assertion used a plain-accent literal (`Meublez votre espace à votre image`) that never
+  matched: the live theme emits the accent as the HTML entity `&agrave;` with a trailing period,
+  and the page has a hidden a11y `<h1>` before the hero. The check now decodes HTML entities and
+  substring-matches, and additionally asserts the real `<title>`
+  (`Ameublo Direct | Meubles et mobiliers extérieurs`). All 6 checks pass against
+  https://ameublodirect.ca/.
+
+### Docs
+- `docs/DATA-OPS-LOG.md`: recorded the 2026-06-14 theme publish op — the preview→live swap was
+  found **already applied** (preview `160213696617` already `role:main`), so no publish was
+  performed; the script's abort gate correctly refused. Includes the read-only storefront
+  verification.
+
 ## [0.5.53.40] - 2026-06-14
 
 ### Chore (ops tooling)
