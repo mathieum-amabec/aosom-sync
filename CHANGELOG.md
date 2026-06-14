@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.45] - 2026-06-14
+
+### Docs
+- Added `docs/site-health-report.md` — full read-only production health check (2026-06-14):
+  storefront live + new theme active (hero/title/og/meta/0 Liquid errors), 4/4 feeds HTTP 200
+  (1064 products each), « Voyez-le chez vous » page (15 `<video>`), 16 `video_ingest_log` rows
+  `READY`, Turso responding (11 205 products). **8/8 checks ✅.** No site/data mutations.
+
+## [0.5.53.44] - 2026-06-14
+
+### Fixed (blog cron blocked by auth middleware)
+- **Allowlist `/api/blog` in `src/proxy.ts` `PUBLIC_PATHS`.** The blog cron does a
+  server-to-server `fetch` to `/api/blog/generate` with `Authorization: Bearer CRON_SECRET`
+  and no session cookie. The middleware ran first, ignored the Bearer header, and
+  307-redirected the POST to `/login` → 405 → both FR and EN sub-calls failed →
+  `"Both FR and EN blog generations failed"` in `cron_runs` (last success 2026-06-09).
+  The route already self-gates on CRON_SECRET + session (auth-first, returns 401 for
+  unauthenticated requests), exactly like the already-allowlisted `/api/social/content`,
+  so making the prefix public exposes nothing — it just lets the cron's request reach the route.
+
 ## [0.5.53.43] - 2026-06-14
 
 ### Meta Dynamic Ads — activation attempt (blocked upstream) + EN profile
