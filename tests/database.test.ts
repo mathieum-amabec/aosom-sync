@@ -771,3 +771,66 @@ describe("getProducts catalog projection — shopify_handle drives the storefron
     expect(notImported.shopifyUrl).toBeNull();
   });
 });
+
+describe("purgeOldPriceHistory (retention SQL)", () => {
+  let db: Client;
+
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  // Mirrors purgeOldPriceHistory()'s DELETE so we validate the unixepoch() retention
+  // window AND the "keep the latest price-change row per SKU" guard against a real
+  // SQLite engine without needing the module's DB singleton.
+  const PURGE_SQL = `DELETE FROM price_history
+    WHERE detected_at < unixepoch('now', ?)
+      AND id NOT IN (
+        SELECT MAX(id) FROM price_history
+        WHERE change_type IN ('price_drop', 'price_increase')
+        GROUP BY sku
+      )`;
+
+  function createTable() {
+    return db.execute(`CREATE TABLE price_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL,
+      old_price REAL, new_price REAL, change_type TEXT,
+      detected_at INTEGER DEFAULT (strftime('%s','now'))
+    )`);
+  }
+
+  it("purges superseded + stock rows but keeps each SKU's latest price-change", async () => {
+    await createTable();
+    const now = Math.floor(Date.now() / 1000);
+    // Insertion order sets autoincrement ids 1..7.
+    await db.batch([
+      { sql: `INSERT INTO price_history (sku, change_type, detected_at) VALUES ('MULTI', 'price_drop', ?)`, args: [now - 120 * 86400] }, // id1 superseded → purge
+      { sql: `INSERT INTO price_history (sku, change_type, detected_at) VALUES ('MULTI', 'price_drop', ?)`, args: [now - 100 * 86400] }, // id2 latest for MULTI → keep
+      { sql: `INSERT INTO price_history (sku, change_type, detected_at) VALUES ('STALE', 'price_drop', ?)`, args: [now - 110 * 86400] }, // id3 only/latest, still on sale → keep
+      { sql: `INSERT INTO price_history (sku, change_type, detected_at) VALUES ('STOCK', 'stock_change', ?)`, args: [now - 110 * 86400] }, // id4 no price-change → purge
+      { sql: `INSERT INTO price_history (sku, change_type, detected_at) VALUES ('MIXED', 'stock_change', ?)`, args: [now - 105 * 86400] }, // id5 old stock → purge
+      { sql: `INSERT INTO price_history (sku, change_type, detected_at) VALUES ('MIXED', 'price_drop', ?)`, args: [now - 100 * 86400] }, // id6 latest price-change → keep
+      { sql: `INSERT INTO price_history (sku, change_type, detected_at) VALUES ('RECENT', 'price_drop', ?)`, args: [now - 10 * 86400] }, // id7 within window → keep
+    ], "write");
+
+    const del = await db.execute({ sql: PURGE_SQL, args: ["-90 days"] });
+    expect(Number(del.rowsAffected)).toBe(3); // id1, id4, id5
+
+    const remaining = await db.execute(`SELECT id FROM price_history ORDER BY id`);
+    expect(remaining.rows.map((r) => Number((r as unknown as Record<string, unknown>).id))).toEqual([2, 3, 6, 7]);
+  });
+
+  it("never drops a still-on-sale SKU whose only price-change predates the window", async () => {
+    await createTable();
+    const now = Math.floor(Date.now() / 1000);
+    await db.execute({ sql: `INSERT INTO price_history (sku, change_type, detected_at) VALUES ('STALE', 'price_drop', ?)`, args: [now - 200 * 86400] });
+    const del = await db.execute({ sql: PURGE_SQL, args: ["-90 days"] });
+    expect(Number(del.rowsAffected)).toBe(0); // the row is the SKU's latest price-change → protected
+  });
+
+  it("is a no-op when everything is within the window", async () => {
+    await createTable();
+    const now = Math.floor(Date.now() / 1000);
+    await db.execute({ sql: `INSERT INTO price_history (sku, change_type, detected_at) VALUES ('A', 'price_drop', ?)`, args: [now - 5 * 86400] });
+    const del = await db.execute({ sql: PURGE_SQL, args: ["-90 days"] });
+    expect(Number(del.rowsAffected)).toBe(0);
+  });
+});

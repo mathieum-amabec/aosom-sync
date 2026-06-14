@@ -1093,6 +1093,34 @@ export async function markPriceChangeApplied(id: number): Promise<void> {
   await db.execute({ sql: `UPDATE price_history SET applied_to_shopify = 1 WHERE id = ?`, args: [id] });
 }
 
+/**
+ * Delete price_history rows older than `days` (default 90). price_history grows
+ * unbounded — every sync inserts price/stock change rows — which inflates both
+ * Turso storage AND the row-reads of the correlated "Avec rabais" discount query
+ * (catalog-filters PRODUCT_HAS_DISCOUNT_SQL).
+ *
+ * IMPORTANT: the discount badge / "Avec rabais" count read each SKU's *most recent*
+ * price-change row (price_drop/price_increase). A product whose last price move was
+ * >90 days ago is still on sale, so we must NOT purge that row or the product would
+ * silently drop its badge. We therefore keep the latest price-change row per SKU and
+ * only purge everything else older than the window (old stock_change rows + superseded
+ * price-change rows). Called once/day at the end of the sync. Returns rows deleted.
+ */
+export async function purgeOldPriceHistory(days = 90): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `DELETE FROM price_history
+          WHERE detected_at < unixepoch('now', ?)
+            AND id NOT IN (
+              SELECT MAX(id) FROM price_history
+              WHERE change_type IN ('price_drop', 'price_increase')
+              GROUP BY sku
+            )`,
+    args: [`-${days} days`],
+  });
+  return Number(result.rowsAffected) || 0;
+}
+
 export async function getRecentPriceChanges(limit = 50): Promise<Record<string, unknown>[]> {
   const db = await ensureSchema();
   const result = await db.execute({

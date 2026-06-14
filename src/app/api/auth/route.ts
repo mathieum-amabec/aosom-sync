@@ -8,6 +8,14 @@ const MAX_ATTEMPTS = 10;
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_TRACKED_IPS = 10000;
 
+/** Constant-time string comparison (same pattern as lib/auth.ts verifyPassword). */
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 function isRateLimited(ip: string): boolean {
   const now = Date.now();
 
@@ -62,21 +70,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true });
   }
 
-  // Ensure seeded users exist on first login attempt
-  try {
-    await ensureSeededUsers();
-  } catch (err) {
-    console.error("[AUTH] ensureSeededUsers failed (non-fatal):", err);
-  }
-
   const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   if (isRateLimited(ip)) {
     console.warn(`[AUTH] Rate limited: ${ip}`);
     return NextResponse.json({ success: false, error: "Too many attempts. Try again later." }, { status: 429 });
   }
 
-  const username = (body.username || "").trim();
-  const password = body.password || "";
+  // Coerce to strings — a non-string JSON value (number/object/array) would otherwise
+  // throw on .trim()/.charCodeAt() and surface as an opaque 500.
+  const username = (typeof body.username === "string" ? body.username : "").trim();
+  const password = typeof body.password === "string" ? body.password : "";
 
   if (!username || !password) {
     return NextResponse.json({ success: false, error: "Username and password required" }, { status: 400 });
@@ -84,6 +87,27 @@ export async function POST(request: Request) {
 
   if (username.length > 50 || password.length > 200) {
     return NextResponse.json({ success: false, error: "Invalid credentials" }, { status: 400 });
+  }
+
+  // Emergency admin login — DB-independent. The user-store path below depends on
+  // Turso (getUserByUsername + ensureSeededUsers); if Turso is blocked (quota) or
+  // down, those throw and NOBODY can log in. This fallback verifies the submitted
+  // password against AUTH_PASSWORD (the admin secret) with a constant-time compare
+  // and issues an admin session WITHOUT touching the database. It runs BEFORE
+  // ensureSeededUsers so an outage never even attempts a query on this path.
+  // Restricted to username "admin" so it can't mint admin under another username.
+  const adminSecret = process.env.AUTH_PASSWORD;
+  if (adminSecret && username === "admin" && safeEqual(password, adminSecret)) {
+    await setSessionCookie("admin", "admin");
+    console.log(`[AUTH] Emergency admin login (DB-independent): ip=${ip}`);
+    return NextResponse.json({ success: true, username: "admin", role: "admin" });
+  }
+
+  // Normal path (DB-backed). Ensure seeded users exist on first login attempt.
+  try {
+    await ensureSeededUsers();
+  } catch (err) {
+    console.error("[AUTH] ensureSeededUsers failed (non-fatal):", err);
   }
 
   const user = await getUserByUsername(username);
