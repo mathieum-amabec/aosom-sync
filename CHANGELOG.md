@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.47] - 2026-06-14
+
+### Added (price-floor monitoring)
+- **`GET /api/health/price-audit`** (CRON_SECRET) — compares the live Shopify price of every
+  variant against `products.price` (the Aosom feed price = floor) and returns
+  `{ total, below_floor, items: [{ sku, shopify_price, aosom_price, gap }] }` (gap = shopify −
+  aosom; negative = below floor). Pure `computePriceFloorViolations()` (cents-rounded, exact-match
+  counts as at-floor, not below) with 6 unit tests. `maxDuration` 300s.
+- **Dashboard red alert** in the "Alertes" panel when `below_floor > 0`, showing the worst items.
+  The endpoint persists a compact summary to `settings.price_audit_result`; the dashboard reads
+  that cached row (`getDashboardAlerts`) — the expensive Shopify fetch never runs on dashboard load.
+- **Daily Vercel cron** at 09:30 UTC (after the morning sync + Shopify price push) so the alert
+  stays current.
+- First live run: **428 of 1058** live Shopify variants are currently priced below the Aosom floor.
+
 ## [0.5.53.46] - 2026-06-14
 
 ### Added (Klaviyo Welcome coupon — BIENVENUE10)
