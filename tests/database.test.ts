@@ -835,6 +835,112 @@ describe("purgeOldPriceHistory (retention SQL)", () => {
   });
 });
 
+describe("purgeOldSyncLogs (retention SQL)", () => {
+  let db: Client;
+
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  // Mirrors purgeOldSyncLogs()'s DELETE. The key subtlety: sync_logs.timestamp is an
+  // ISO-8601 TEXT string (not an epoch int), so the retention compares unixepoch(timestamp)
+  // against unixepoch('now', ?). Validates that against a real SQLite engine.
+  const PURGE_SQL = `DELETE FROM sync_logs WHERE unixepoch(timestamp) < unixepoch('now', ?)`;
+
+  function createTable() {
+    return db.execute(`CREATE TABLE sync_logs (
+      id TEXT PRIMARY KEY, sync_run_id TEXT NOT NULL, timestamp TEXT NOT NULL,
+      shopify_product_id TEXT, sku TEXT NOT NULL, action TEXT NOT NULL,
+      field TEXT NOT NULL, old_value TEXT, new_value TEXT
+    )`);
+  }
+  // Insert a row whose ISO timestamp is `daysAgo` days before now (matches the real
+  // `new Date().toISOString()` format, e.g. 2026-06-14T16:25:39.612Z).
+  function insertAt(id: string, daysAgo: number) {
+    const iso = new Date(Date.now() - daysAgo * 86400_000).toISOString();
+    return db.execute({
+      sql: `INSERT INTO sync_logs (id, sync_run_id, timestamp, sku, action, field) VALUES (?, 'run1', ?, 'SKU', 'update', 'price')`,
+      args: [id, iso],
+    });
+  }
+
+  it("purges rows older than the window, keeps recent ones", async () => {
+    await createTable();
+    await insertAt("old1", 10);  // older than 7d → purge
+    await insertAt("old2", 8);   // older than 7d → purge
+    await insertAt("new1", 3);   // within 7d → keep
+    await insertAt("new2", 0);   // today → keep
+    const del = await db.execute({ sql: PURGE_SQL, args: ["-7 days"] });
+    expect(Number(del.rowsAffected)).toBe(2);
+    const remaining = await db.execute(`SELECT id FROM sync_logs ORDER BY id`);
+    expect(remaining.rows.map((r) => (r as unknown as Record<string, unknown>).id)).toEqual(["new1", "new2"]);
+  });
+
+  it("is a no-op when everything is within the window", async () => {
+    await createTable();
+    await insertAt("a", 2);
+    const del = await db.execute({ sql: PURGE_SQL, args: ["-7 days"] });
+    expect(Number(del.rowsAffected)).toBe(0);
+  });
+
+  it("leaves rows with a NULL/unparseable timestamp in place (never over-deletes)", async () => {
+    await createTable();
+    // unixepoch(NULL) → NULL, and NULL < x is NULL (not true), so the row survives.
+    await db.execute({ sql: `INSERT INTO sync_logs (id, sync_run_id, timestamp, sku, action, field) VALUES ('bad', 'run1', 'not-a-date', 'SKU', 'update', 'price')` });
+    const del = await db.execute({ sql: PURGE_SQL, args: ["-7 days"] });
+    expect(Number(del.rowsAffected)).toBe(0);
+  });
+});
+
+describe("purgeOldNotifications (retention SQL)", () => {
+  let db: Client;
+
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  // Mirrors purgeOldNotifications()'s DELETE. created_at is unix-seconds INTEGER.
+  const PURGE_SQL = `DELETE FROM notifications WHERE created_at < unixepoch('now', ?)`;
+
+  function createTable() {
+    return db.execute(`CREATE TABLE notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, title TEXT NOT NULL,
+      message TEXT NOT NULL, read INTEGER DEFAULT 0,
+      created_at INTEGER DEFAULT (strftime('%s','now'))
+    )`);
+  }
+  function insert(daysAgo: number, read = 0) {
+    const ts = Math.floor(Date.now() / 1000) - daysAgo * 86400;
+    return db.execute({
+      sql: `INSERT INTO notifications (type, title, message, read, created_at) VALUES ('sync', 't', 'm', ?, ?)`,
+      args: [read, ts],
+    });
+  }
+
+  it("purges notifications older than the window, keeps recent ones", async () => {
+    await createTable();
+    await insert(40);  // > 30d → purge
+    await insert(31);  // > 30d → purge
+    await insert(15);  // within → keep
+    await insert(0);   // today → keep
+    const del = await db.execute({ sql: PURGE_SQL, args: ["-30 days"] });
+    expect(Number(del.rowsAffected)).toBe(2);
+  });
+
+  it("purges read and unread alike (retention is age-based only)", async () => {
+    await createTable();
+    await insert(40, 0); // unread, old → still purged
+    await insert(40, 1); // read, old → purged
+    const del = await db.execute({ sql: PURGE_SQL, args: ["-30 days"] });
+    expect(Number(del.rowsAffected)).toBe(2);
+  });
+
+  it("is a no-op when everything is within the window", async () => {
+    await createTable();
+    await insert(5);
+    const del = await db.execute({ sql: PURGE_SQL, args: ["-30 days"] });
+    expect(Number(del.rowsAffected)).toBe(0);
+  });
+});
+
 describe("new performance indexes (DDL validity + usage)", () => {
   let db: Client;
 
