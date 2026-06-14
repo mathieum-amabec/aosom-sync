@@ -1438,6 +1438,20 @@ export async function setSetting(key: string, value: string): Promise<void> {
   await db.execute({ sql: `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, args: [key, value, now] });
 }
 
+/**
+ * Minimal sku→price projection for the price-floor audit (price-audit.ts). Only priced rows;
+ * `price` is the Aosom feed price used as the floor. Kept tiny (2 cols, ~11k rows) so the audit
+ * doesn't pull heavy catalog columns.
+ */
+export async function getProductsForPriceAudit(): Promise<{ sku: string; price: number }[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT sku, price FROM products WHERE price > 0` });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    return { sku: o.sku as string, price: Number(o.price) || 0 };
+  });
+}
+
 export async function getAllSettings(): Promise<Record<string, string>> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT key, value FROM settings`);
@@ -1643,10 +1657,19 @@ async function _loadDashboardSummary(): Promise<DashboardSummary> {
   };
 }
 
+export interface PriceFloorAlert {
+  belowFloorCount: number;
+  total: number;
+  auditedAt: number | null; // epoch seconds of the last audit, null if never run
+  topItems: { sku: string; shopify_price: number; aosom_price: number; gap: number }[];
+}
+
 export interface DashboardAlerts {
   erroredImportJobs: ErroredImportJob[];
   staleDraftCount: number;
   feeds: FeedSyncSummary[];
+  /** Last price-floor audit summary (from settings.price_audit_result). null if never run. */
+  priceFloor: PriceFloorAlert | null;
 }
 
 /** "Alertes" DB metrics (Meta token expiry is added by the route via debug_token). */
@@ -1657,7 +1680,7 @@ export async function getDashboardAlerts(): Promise<DashboardAlerts> {
 async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
   const db = await ensureSchema();
   const weekAgo = epochDaysAgo(new Date(), 7);
-  const [errs, stale, feeds] = await Promise.all([
+  const [errs, stale, feeds, priceAudit] = await Promise.all([
     db.execute({ sql: `SELECT id, group_key, product_data, error, updated_at FROM import_jobs WHERE status = 'error' ORDER BY updated_at DESC LIMIT 20` }),
     db.execute({ sql: `SELECT COUNT(*) AS c FROM facebook_drafts WHERE status IN ('draft', 'pending') AND created_at < ?`, args: [weekAgo] }),
     // Per feed: time + count of the last SUCCESS, plus the status of the most recent
@@ -1667,6 +1690,9 @@ async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
         (SELECT s.status FROM feed_syncs s WHERE s.feed_type = f.feed_type ORDER BY s.fetched_at DESC, s.id DESC LIMIT 1) AS last_status,
         (SELECT s.item_count FROM feed_syncs s WHERE s.feed_type = f.feed_type AND s.status = 'success' ORDER BY s.fetched_at DESC, s.id DESC LIMIT 1) AS item_count
       FROM feed_syncs f GROUP BY f.feed_type ORDER BY f.feed_type ASC` }),
+    // Last price-floor audit summary (written by /api/health/price-audit). Cheap one-row read;
+    // the expensive Shopify comparison runs in that endpoint, never on dashboard load.
+    db.execute({ sql: `SELECT value FROM settings WHERE key = 'price_audit_result'` }),
   ]);
   const erroredImportJobs: ErroredImportJob[] = errs.rows.map((r) => {
     const o = rowToObj(r);
@@ -1678,6 +1704,18 @@ async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
     } catch { /* product_data not JSON — fall back to group_key */ }
     return { id: o.id as string, groupKey: o.group_key as string, sku, error: (o.error as string) ?? null, updatedAt: (o.updated_at as string) ?? "" };
   });
+  let priceFloor: PriceFloorAlert | null = null;
+  if (priceAudit.rows.length > 0) {
+    try {
+      const s = JSON.parse((rowToObj(priceAudit.rows[0]).value as string) || "{}") as Record<string, unknown>;
+      priceFloor = {
+        belowFloorCount: Number(s.belowFloor) || 0,
+        total: Number(s.total) || 0,
+        auditedAt: s.auditedAt != null ? Number(s.auditedAt) : null,
+        topItems: Array.isArray(s.topItems) ? (s.topItems as PriceFloorAlert["topItems"]) : [],
+      };
+    } catch { /* malformed setting — treat as no audit */ }
+  }
   return {
     erroredImportJobs,
     staleDraftCount: Number(rowToObj(stale.rows[0]).c) || 0,
@@ -1690,6 +1728,7 @@ async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
         lastStatus: (o.last_status as string) ?? null,
       };
     }),
+    priceFloor,
   };
 }
 
