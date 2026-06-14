@@ -121,3 +121,24 @@ indexable). Cohérent avec le pattern `product_type_counts` déjà en place.
    dehors par un incident DB.
 3. **P1 (cette semaine)** : #1 (cache stats) + #3 (rétention price_history).
 4. **P2** : #2 (précalcul rabais) + #5 (cold-start) → viser le retour au Free.
+
+## 7. Variable `AUTH_PASSWORD` (login de secours #4, PR #167)
+
+Le login admin de secours (§5 #4) vérifie la variable d'environnement **`AUTH_PASSWORD`**
+directement, sans passer par `getUserByUsername` (donc sans Turso). C'est le filet qui
+garantit l'accès au dashboard même quand la DB est indisponible (incident Turso, quota
+dépassé, cold start qui échoue).
+
+**À configurer dans les trois endroits :**
+
+| Endroit | Statut | Note |
+|---------|--------|------|
+| `.env.local` (dev local) | ✅ présent | non commité (gitignored) — valeur réelle locale |
+| `.env.example` | ✅ placeholder `AUTH_PASSWORD=` | gabarit pour les nouveaux clones |
+| **Vercel → Settings → Environment Variables** | ⚠️ **À AJOUTER PAR MAT** | sinon le fallback ne marche pas en prod |
+
+> **Action Mat :** ajouter `AUTH_PASSWORD` dans les variables d'environnement Vercel
+> (environnements Production + Preview) avec la même valeur que `.env.local`, puis
+> redéployer. Sans cette variable en prod, le login de secours échoue silencieusement
+> et un incident Turso peut t'enfermer dehors — c'est exactement le scénario que le
+> P0 #4 visait à éliminer.
