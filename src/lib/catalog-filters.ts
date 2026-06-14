@@ -12,13 +12,27 @@
 export const LOW_STOCK_THRESHOLD = 5;
 
 /**
- * "Avec rabais" predicate. This schema has no `compare_at_price` column; the
- * discount signal is the most recent price-change's old_price being above the
- * current price — the same value the catalog renders as the ▼ badge (the
- * `last_price` CTE in getProducts). Correlated on `products.sku` / `products.price`
- * so it can drop straight into a WHERE clause.
+ * "Avec rabais" predicate, used by the catalog listing filter (`withDiscount`) and
+ * the header count (getCatalogStats).
+ *
+ * This now reads the precomputed `products.has_discount` flag (a single indexed
+ * column) instead of a correlated subquery. The old correlated `EXISTS` was
+ * re-evaluated once per product row and scanned each SKU's `price_history` slice,
+ * so a single Catalogue page load could read hundreds of thousands of rows — a
+ * top driver of Turso row-reads. `has_discount` is recomputed once per sync by
+ * `rebuildDiscountFlags()` from PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL below.
  */
-export const PRODUCT_HAS_DISCOUNT_SQL = `EXISTS (
+export const PRODUCT_HAS_DISCOUNT_SQL = `has_discount = 1`;
+
+/**
+ * The authoritative discount definition, evaluated only at sync time to refill
+ * `products.has_discount` (and the one-time migration backfill). This schema has
+ * no `compare_at_price`; the discount signal is the most recent price-change's
+ * old_price being above the current price — the same value the catalog renders as
+ * the ▼ badge (the `last_price` CTE in getProducts). Correlated on `products.sku`
+ * / `products.price` so it drops straight into the rebuild's `UPDATE … WHERE`.
+ */
+export const PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL = `EXISTS (
   SELECT 1 FROM (
     SELECT old_price,
       ROW_NUMBER() OVER (PARTITION BY sku ORDER BY detected_at DESC, id DESC) AS rn

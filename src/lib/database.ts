@@ -6,7 +6,7 @@ import type { SyncRun, SyncLogEntry, ChangeType } from "@/types/sync";
 import type { UserRole } from "@/lib/config";
 import type { AosomProduct } from "@/types/aosom";
 import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
-import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
+import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL, PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL } from "@/lib/catalog-filters";
 
 let client: Client | null = null;
 
@@ -313,6 +313,22 @@ async function _initSchemaImpl(): Promise<void> {
   const productCols = new Set(productsInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
   if (!productCols.has("shopify_handle")) {
     alters.push(`ALTER TABLE products ADD COLUMN shopify_handle TEXT`);
+  }
+  // has_discount: precomputed "Avec rabais" flag. Replaces the correlated EXISTS that
+  // getCatalogStats / the withDiscount filter used to run live (millions of price_history
+  // reads per Catalogue load). Refreshed each sync by rebuildDiscountFlags().
+  //
+  // Column + partial index + one-time backfill go in the SAME alters batch so they
+  // commit atomically. If only the ADD COLUMN landed (crash between batches), a later
+  // boot would see the column present, skip this block, and never create the index or
+  // backfill — stranding every row at 0. db.batch runs statements sequentially in one
+  // transaction, so the column exists for the CREATE INDEX / UPDATE that follow it.
+  // The index is partial (discounted rows only) so it stays tiny and serves both
+  // `COUNT(*) WHERE has_discount = 1` and the listing filter.
+  if (!productCols.has("has_discount")) {
+    alters.push(`ALTER TABLE products ADD COLUMN has_discount INTEGER NOT NULL DEFAULT 0`);
+    alters.push(`CREATE INDEX IF NOT EXISTS idx_products_has_discount ON products(has_discount) WHERE has_discount = 1`);
+    alters.push(`UPDATE products SET has_discount = 1 WHERE ${PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL}`);
   }
 
   // price_alerts double opt-in columns (table shipped in #99 without them).
@@ -755,6 +771,26 @@ export async function rebuildProductTypeCounts(): Promise<void> {
   await db.batch([{ sql: `DELETE FROM product_type_counts`, args: [] }, ...inserts], "write");
 }
 
+/**
+ * Recompute the precomputed `products.has_discount` flag for every product from the
+ * authoritative correlated definition (PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL). One
+ * full-table UPDATE per sync replaces the per-page-load correlated EXISTS that
+ * getCatalogStats / the withDiscount filter used to run — turning millions of
+ * Catalogue row-reads into a single scan once a day. Called after recordPriceChanges
+ * so it reflects the day's price moves.
+ */
+export async function rebuildDiscountFlags(): Promise<void> {
+  const db = await ensureSchema();
+  // Two targeted UPDATEs that write only rows whose flag actually flips — Turso bills
+  // row *writes* (the tighter quota), so we don't rewrite all ~11k rows every sync.
+  // The "clear" pass filters on has_discount = 1 first, so the partial index narrows it
+  // to the small flagged set before the correlated re-check.
+  await db.batch([
+    { sql: `UPDATE products SET has_discount = 1 WHERE has_discount = 0 AND ${PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL}`, args: [] },
+    { sql: `UPDATE products SET has_discount = 0 WHERE has_discount = 1 AND NOT (${PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL})`, args: [] },
+  ], "write");
+}
+
 export async function getProducts(filters: {
   productType?: string;
   search?: string;
@@ -1119,6 +1155,35 @@ export async function purgeOldPriceHistory(days = 90): Promise<number> {
     args: [`-${days} days`],
   });
   return Number(result.rowsAffected) || 0;
+}
+
+/**
+ * Delete cron_runs (ran_at) and feed_syncs (fetched_at) rows older than `days`
+ * (default 30). Both tables are append-only audit logs that grow without bound and
+ * are scanned by the dashboard (last-sync / last-feed-fetch widgets). Note the
+ * column names differ — cron_runs uses `ran_at`, feed_syncs uses `fetched_at`;
+ * neither has a `created_at`. Called once/day at the end of the sync, non-fatal.
+ * Returns total rows deleted across both tables.
+ */
+export async function purgeOldCronLogs(days = 30): Promise<number> {
+  const db = await ensureSchema();
+  // Keep the most recent row per cron name / feed type even when it is older than the
+  // window, so the dashboard's "last sync" / "last fetch per feed" widgets never go
+  // blank for a job that hasn't run in >30 days. Mirrors purgeOldPriceHistory's
+  // keep-the-latest-per-key guard.
+  const [cron, feeds] = await db.batch([
+    {
+      sql: `DELETE FROM cron_runs WHERE ran_at < unixepoch('now', ?)
+              AND id NOT IN (SELECT MAX(id) FROM cron_runs GROUP BY name)`,
+      args: [`-${days} days`],
+    },
+    {
+      sql: `DELETE FROM feed_syncs WHERE fetched_at < unixepoch('now', ?)
+              AND id NOT IN (SELECT MAX(id) FROM feed_syncs GROUP BY feed_type)`,
+      args: [`-${days} days`],
+    },
+  ], "write");
+  return (Number(cron.rowsAffected) || 0) + (Number(feeds.rowsAffected) || 0);
 }
 
 export async function getRecentPriceChanges(limit = 50): Promise<Record<string, unknown>[]> {

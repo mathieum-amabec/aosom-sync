@@ -26,8 +26,10 @@ import {
   addSyncLogsBatch,
   refreshProducts,
   rebuildProductTypeCounts,
+  rebuildDiscountFlags,
   recordPriceChanges,
   purgeOldPriceHistory,
+  purgeOldCronLogs,
   getProduct,
   getProductsSnapshot,
   getSetting,
@@ -378,6 +380,18 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
     log(`recordPriceChanges done`, {
       phase: "recordPriceChanges", duration_ms: timing.recordPriceChanges, entries: changes.priceChangeEntries.length,
     });
+    await updateSyncRunTiming(syncRun.id, timing);
+
+    // Keep the precomputed has_discount flag in sync after a manual run too (same
+    // rationale as the finalize path). Non-fatal: a stale flag is harmless.
+    try {
+      const t0Discount = Date.now();
+      await rebuildDiscountFlags();
+      timing.rebuildDiscountFlags = Date.now() - t0Discount;
+      log("rebuildDiscountFlags done", { phase: "rebuildDiscountFlags", duration_ms: timing.rebuildDiscountFlags });
+    } catch (discErr) {
+      log(`rebuildDiscountFlags failed (non-fatal): ${discErr instanceof Error ? discErr.message : String(discErr)}`);
+    }
     await updateSyncRunTiming(syncRun.id, timing);
 
     // Step 4: Apply to Shopify (skip if shopifyPush=false for cron phase 1)
@@ -934,6 +948,21 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
     }
     log("recordPriceChanges done", { phase: "finalize", duration_ms: Date.now() - t0Record, entries: priceChangeEntries.length });
 
+    // Refresh the precomputed has_discount flag now that today's price moves are in
+    // price_history — keeps the catalog "Avec rabais" count/filter a single indexed
+    // scan instead of a per-load correlated query. Non-fatal: a stale flag is harmless.
+    try {
+      const t0Discount = Date.now();
+      await rebuildDiscountFlags();
+      log("rebuildDiscountFlags done", { phase: "finalize", duration_ms: Date.now() - t0Discount });
+    } catch (discErr) {
+      const dmsg = discErr instanceof Error ? discErr.message : String(discErr);
+      log(`rebuildDiscountFlags failed (non-fatal): ${dmsg}`, { phase: "finalize" });
+      // Non-fatal for the sync, but a stale flag means the catalog "Avec rabais"
+      // count/filter is wrong until the next successful rebuild — surface it.
+      await createNotification("error", "Compteur rabais non recalculé", dmsg.slice(0, 200));
+    }
+
     // Retention: drop price_history older than 90 days now that today's changes are
     // recorded. Caps Turso storage + the cost of the correlated discount query.
     // Non-fatal — a purge failure must not fail an otherwise-successful sync.
@@ -943,6 +972,16 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
       log("purgeOldPriceHistory done", { phase: "finalize", duration_ms: Date.now() - t0Purge, purged });
     } catch (purgeErr) {
       log(`purgeOldPriceHistory failed (non-fatal): ${purgeErr instanceof Error ? purgeErr.message : String(purgeErr)}`, { phase: "finalize" });
+    }
+
+    // Retention: trim cron_runs / feed_syncs audit logs older than 30 days. Both grow
+    // unbounded and are scanned by the dashboard. Non-fatal — never fail the sync.
+    try {
+      const t0CronPurge = Date.now();
+      const purgedLogs = await purgeOldCronLogs(30);
+      log("purgeOldCronLogs done", { phase: "finalize", duration_ms: Date.now() - t0CronPurge, purged: purgedLogs });
+    } catch (cronPurgeErr) {
+      log(`purgeOldCronLogs failed (non-fatal): ${cronPurgeErr instanceof Error ? cronPurgeErr.message : String(cronPurgeErr)}`, { phase: "finalize" });
     }
 
     await completeSyncRun(syncRun.id, {

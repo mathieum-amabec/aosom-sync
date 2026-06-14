@@ -4,6 +4,7 @@ import {
   parseBoolParam,
   LOW_STOCK_THRESHOLD,
   PRODUCT_HAS_DISCOUNT_SQL,
+  PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL,
 } from "@/lib/catalog-filters";
 
 describe("buildCatalogWhere", () => {
@@ -28,12 +29,21 @@ describe("buildCatalogWhere", () => {
     expect(LOW_STOCK_THRESHOLD).toBe(5);
   });
 
-  it("withDiscount embeds the correlated last-price predicate (no args)", () => {
+  it("withDiscount uses the precomputed has_discount flag (no args, no correlated scan)", () => {
     const r = buildCatalogWhere({ withDiscount: true });
     expect(r.conditions).toContain(PRODUCT_HAS_DISCOUNT_SQL);
-    expect(r.where).toContain("ROW_NUMBER()");
-    expect(r.where).toContain("products.price");
+    expect(PRODUCT_HAS_DISCOUNT_SQL).toBe("has_discount = 1");
+    // The hot path must NOT embed the correlated subquery anymore.
+    expect(r.where).not.toContain("ROW_NUMBER()");
+    expect(r.where).toContain("has_discount = 1");
     expect(r.args).toEqual([]);
+  });
+
+  it("PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL keeps the authoritative correlated definition (sync-time only)", () => {
+    // Used by rebuildDiscountFlags() / the one-time backfill — never in a hot read path.
+    expect(PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL).toContain("ROW_NUMBER()");
+    expect(PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL).toContain("products.price");
+    expect(PRODUCT_HAS_DISCOUNT_RECOMPUTE_SQL).toContain("products.sku");
   });
 
   it("keeps conditions and args in lockstep across mixed filters", () => {
