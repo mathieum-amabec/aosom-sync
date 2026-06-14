@@ -79,6 +79,13 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_price_history_sku ON price_history(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_price_history_change_type ON price_history(change_type)`,
     `CREATE INDEX IF NOT EXISTS idx_price_history_detected_at ON price_history(detected_at)`,
+    // Composite (sku, detected_at): serves the per-SKU correlated "Avec rabais" subquery
+    // (catalog-filters PRODUCT_HAS_DISCOUNT_SQL) and the last_price CTE — both seek by sku
+    // then need the newest row by detected_at. The #1 catalog read-cost path on Turso.
+    `CREATE INDEX IF NOT EXISTS idx_price_history_sku_detected ON price_history(sku, detected_at)`,
+    // Composite (change_type, detected_at): serves the dashboard new_product count and the
+    // best_sellers/price_drop aggregates, which filter change_type AND a detected_at window.
+    `CREATE INDEX IF NOT EXISTS idx_price_history_changetype_detected ON price_history(change_type, detected_at)`,
     `CREATE TABLE IF NOT EXISTS facebook_drafts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, trigger_type TEXT NOT NULL,
       language TEXT NOT NULL, post_text TEXT NOT NULL, image_path TEXT, image_url TEXT,
@@ -91,6 +98,12 @@ async function _initSchemaImpl(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_facebook_drafts_sku ON facebook_drafts(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_facebook_drafts_status ON facebook_drafts(status)`,
+    // Composite (status, created_at): the drafts review list (getDraftsForReview) filters by
+    // status and ORDER BY created_at DESC, and the dashboard stale-draft scan filters
+    // status IN (...) AND created_at < ?. A (status, trigger_type) index does NOT help — the
+    // planner only seeks status then post-filters trigger_type (verified via EXPLAIN QUERY PLAN);
+    // created_at as the 2nd key serves both the range filter and the sort.
+    `CREATE INDEX IF NOT EXISTS idx_facebook_drafts_status_created ON facebook_drafts(status, created_at)`,
     // Migrations for tables created before multi-channel columns existed (no-op if already present)
     `CREATE TABLE IF NOT EXISTS social_autopost_counter (
       day TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0
@@ -1537,8 +1550,37 @@ export interface DashboardSummary {
   crons: CronRunSummary[];
 }
 
+// ─── Dashboard metrics cache (in-memory, per-process, TTL) ──────────────
+// The dashboard panels re-fire their COUNT/aggregate queries on every load/poll.
+// A 5-minute TTL cache cuts repeated Turso row-reads for warm serverless instances
+// (cache is per-instance and resets on cold start — acceptable; these panels tolerate
+// minutes of staleness). Gated to production (Turso): local SQLite has no read quota,
+// and bypassing in tests avoids cross-test contamination from a shared module cache.
+const _metricsCache = new Map<string, { data: unknown; expires: number }>();
+const METRICS_TTL_MS = 5 * 60 * 1000;
+
+async function cachedMetric<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  if (!process.env.TURSO_DATABASE_URL) return fn(); // no cache locally / in tests
+  const hit = _metricsCache.get(key);
+  if (hit && Date.now() < hit.expires) return hit.data as T;
+  const data = await fn();
+  _metricsCache.set(key, { data, expires: Date.now() + ttlMs });
+  return data;
+}
+
+/** Clear the dashboard metrics cache. The cache is intentionally not auto-invalidated on
+ * writes — the panels tolerate ≤5 min of staleness, so writers don't call this. Exposed for
+ * tests and for any caller that explicitly wants the next dashboard read to recompute. */
+export function clearMetricsCache(): void {
+  _metricsCache.clear();
+}
+
 /** "Résumé du jour" DB metrics (Meta-Ads revenue is merged client-side from /api/ads/insights). */
 export async function getDashboardSummary(): Promise<DashboardSummary> {
+  return cachedMetric("dashboard_summary", METRICS_TTL_MS, _loadDashboardSummary);
+}
+
+async function _loadDashboardSummary(): Promise<DashboardSummary> {
   const db = await ensureSchema();
   const now = new Date();
   const todayStart = startOfUtcDayEpoch(now);
@@ -1570,6 +1612,10 @@ export interface DashboardAlerts {
 
 /** "Alertes" DB metrics (Meta token expiry is added by the route via debug_token). */
 export async function getDashboardAlerts(): Promise<DashboardAlerts> {
+  return cachedMetric("dashboard_alerts", METRICS_TTL_MS, _loadDashboardAlerts);
+}
+
+async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
   const db = await ensureSchema();
   const weekAgo = epochDaysAgo(new Date(), 7);
   const [errs, stale, feeds] = await Promise.all([
