@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.39] - 2026-06-14
+## [0.5.53.40] - 2026-06-14
 
 ### Performance (Turso row-read reduction, P1)
 - **Precomputed `products.has_discount` flag** replaces the correlated `EXISTS` that the
@@ -28,6 +28,25 @@ All notable changes to Aosom Sync will be documented in this file.
   full-catalog diffs with no safe `WHERE`/`LIMIT`. The frequent filtered cron query
   (`getEligibleHighlightProduct`) already uses indexed columns, so no new index was added —
   avoids write-amplification against the tighter write quota.
+
+## [0.5.53.39] - 2026-06-14
+
+### Fixed (Turso row-quota — sync_logs + notifications retention)
+- **Auto-purge `sync_logs` (7 days)** added to the daily sync finalize via `purgeOldSyncLogs(7)`.
+  `sync_logs` grows one row per changed field per sync (~10k rows after weeks); the history UI only
+  reads recent runs. `sync_logs.timestamp` is an ISO-8601 TEXT string (not an epoch column), so the
+  retention parses it with `unixepoch(timestamp)` for a correct numeric comparison.
+- **Auto-purge `notifications` (30 days)** added via `purgeOldNotifications(30)`. Transient dashboard
+  alerts regenerated each sync; `created_at` is epoch seconds (uses the existing index). Purges read
+  and unread alike (age-based).
+- Both purges run in their own non-fatal try/catch in `runSyncFinalize`, mirroring
+  `purgeOldPriceHistory` — a purge failure never fails an otherwise-successful sync. Retention-SQL
+  tests added for both, including NULL/unparseable-timestamp safety and read/unread parity.
+
+### Docs
+- Documented the `AUTH_PASSWORD` fallback login (PR #167) in `docs/TURSO-UPGRADE.md` §7, including the
+  **action item for Mat to add `AUTH_PASSWORD` to Vercel env vars** (Production + Preview) so the
+  Turso-independent admin login works in prod. `.env.local` / `.env.example` already carry it.
 
 ## [0.5.53.38] - 2026-06-14
 
