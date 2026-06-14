@@ -2,6 +2,70 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.43] - 2026-06-14
+
+### Meta Dynamic Ads — activation attempt (blocked upstream) + EN profile
+- Ran `scripts/meta-ads-create.mjs --apply` to create the FR Dynamic Ad. **Meta rejected it**
+  (`code 10 / subcode 3379015`): the ad set's catalog `1103064966519153` is a *personal*
+  Marketplace catalog, which cannot run ads. **No creative/ad was created** — an upstream
+  configuration blocker, not a code bug.
+- **Script:** added a catalog ads-eligibility **preflight** (fails fast with the remediation
+  instead of a raw 400) and a `--profile en` path for Furnish Direct (EN). EN dry-run validated
+  (campaign + ad set don't exist yet, so it prints the full structure to create + the EN
+  creative/ad payloads). EN held for validation — dry-run only.
+- **Docs:** `docs/META-ADS-SETUP.md` documents the blocker, the ads-eligible Business catalog
+  `384890002574549` (only 5 products synced — needs the Shopify→Meta sync completed), the exact
+  remediation (re-point the ad set to the Business catalog, then re-run `--apply`), and the EN plan.
+
+## [0.5.53.42] - 2026-06-14
+
+### Fixed (ops tooling)
+- **`scripts/verify-live-storefront.mjs` — hero/title checks now match the real live HTML.** The
+  hero assertion used a plain-accent literal (`Meublez votre espace à votre image`) that never
+  matched: the live theme emits the accent as the HTML entity `&agrave;` with a trailing period,
+  and the page has a hidden a11y `<h1>` before the hero. The check now decodes HTML entities and
+  substring-matches, and additionally asserts the real `<title>`
+  (`Ameublo Direct | Meubles et mobiliers extérieurs`). All 6 checks pass against
+  https://ameublodirect.ca/.
+
+### Docs
+- `docs/DATA-OPS-LOG.md`: recorded the 2026-06-14 theme publish op — the preview→live swap was
+  found **already applied** (preview `160213696617` already `role:main`), so no publish was
+  performed; the script's abort gate correctly refused. Includes the read-only storefront
+  verification.
+
+## [0.5.53.41] - 2026-06-14
+
+### Added (Meta Dynamic Ads activation)
+- **`scripts/meta-ads-create.mjs`** — creates the missing Ad Creative + Ad for the (PAUSED)
+  retargeting campaign so it becomes operational. **Dry-run by default** (lists current state
+  and prints the exact creative/ad payloads, sends nothing); `--apply` creates both as PAUSED
+  and is idempotent by name (reuses an existing creative, skips a duplicate ad). Verified live
+  against the Graph API v21.0: ad set `52556997397005` → campaign `52556997335005`, catalog
+  `1103064966519153`, product set `1718195966267686` (1000 products); no existing catalog
+  creative or ad on the ad set. Real ad creation is deferred to running `--apply` after the
+  payloads are validated.
+
+### Security (/cso audit — daily, 8/10 gate)
+- Ran `/cso` over the current tree + recent Turso-quota merges. **No open P0/P1.** Appended a
+  dated run entry to `docs/SECURITY-BACKLOG.md`: secrets clean (`.env*` gitignored, scripts use
+  env), SQL fully parameterized (dynamic UPDATEs use column allowlists), `src/proxy.ts` is the
+  correctly-wired Next 16 `proxy` middleware (centralized auth resolves the old P2-1). Prior
+  P2/P3 items re-confirmed; none exploitable today.
+
+## [0.5.53.40] - 2026-06-14
+
+### Chore (ops tooling)
+- Added three standalone theme-publication ops scripts under `scripts/` (recreated from a sibling
+  clone where they had only ever existed as untracked working-tree files, never committed):
+  - `themes-list.mjs` — read-only theme list + pre-publish gate check (preview/live id + name + role).
+  - `publish-preview-live.mjs` — publish the preview theme to live (`role:main`) with an abort gate
+    on unexpected state and a post-publish swap confirmation.
+  - `verify-live-storefront.mjs` — fetch the live storefront and assert hero title / og:image /
+    meta description / no Liquid errors / video section present.
+- No application code touched; scripts are run manually via Node. Two reuse the existing
+  `scripts/_shopify-lib.mjs` REST helper.
+
 ## [0.5.53.39] - 2026-06-14
 
 ### Fixed (Turso row-quota — sync_logs + notifications retention)
