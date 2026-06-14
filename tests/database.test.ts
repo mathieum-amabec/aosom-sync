@@ -834,3 +834,53 @@ describe("purgeOldPriceHistory (retention SQL)", () => {
     expect(Number(del.rowsAffected)).toBe(0);
   });
 });
+
+describe("new performance indexes (DDL validity + usage)", () => {
+  let db: Client;
+
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  it("creates the price_history + facebook_drafts composite indexes without error", async () => {
+    await db.batch([
+      `CREATE TABLE price_history (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT, old_price REAL, change_type TEXT, detected_at INTEGER)`,
+      `CREATE TABLE facebook_drafts (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT, status TEXT, trigger_type TEXT, created_at INTEGER)`,
+      `CREATE INDEX IF NOT EXISTS idx_price_history_sku_detected ON price_history(sku, detected_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_price_history_changetype_detected ON price_history(change_type, detected_at)`,
+      `CREATE INDEX IF NOT EXISTS idx_facebook_drafts_status_created ON facebook_drafts(status, created_at)`,
+    ], "write");
+
+    const idx = await db.execute(
+      `SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%' ORDER BY name`
+    );
+    const names = idx.rows.map((r) => (r as unknown as Record<string, unknown>).name);
+    expect(names).toContain("idx_price_history_sku_detected");
+    expect(names).toContain("idx_price_history_changetype_detected");
+    expect(names).toContain("idx_facebook_drafts_status_created");
+  });
+
+  it("uses idx_facebook_drafts_status_created for the stale-draft scan (status + created_at)", async () => {
+    await db.batch([
+      `CREATE TABLE facebook_drafts (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT, status TEXT, trigger_type TEXT, created_at INTEGER)`,
+      `CREATE INDEX idx_facebook_drafts_status_created ON facebook_drafts(status, created_at)`,
+    ], "write");
+    const plan = await db.execute(
+      `EXPLAIN QUERY PLAN SELECT COUNT(*) FROM facebook_drafts WHERE status = 'draft' AND created_at < 123`
+    );
+    const detail = plan.rows.map((r) => String((r as unknown as Record<string, unknown>).detail)).join(" | ");
+    expect(detail).toContain("idx_facebook_drafts_status_created");
+  });
+
+  it("uses idx_price_history_sku_detected for the per-SKU latest-change lookup", async () => {
+    await db.batch([
+      `CREATE TABLE price_history (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT, old_price REAL, change_type TEXT, detected_at INTEGER)`,
+      `CREATE INDEX idx_price_history_sku_detected ON price_history(sku, detected_at)`,
+    ], "write");
+    // EXPLAIN QUERY PLAN should pick the composite for a sku-scoped, detected_at-ordered scan.
+    const plan = await db.execute(
+      `EXPLAIN QUERY PLAN SELECT old_price FROM price_history WHERE sku = 'X' ORDER BY detected_at DESC`
+    );
+    const detail = plan.rows.map((r) => String((r as unknown as Record<string, unknown>).detail)).join(" | ");
+    expect(detail).toContain("idx_price_history_sku_detected");
+  });
+});
