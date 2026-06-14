@@ -936,12 +936,17 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
     }
     log("recordPriceChanges done", { phase: "finalize", duration_ms: Date.now() - t0Record, entries: priceChangeEntries.length });
 
-    // Retention: drop price_history older than 90 days now that today's changes are
+    // Retention: drop price_history older than 30 days now that today's changes are
     // recorded. Caps Turso storage + the cost of the correlated discount query.
+    // 30d (was 90d) — price_history grows ~4-5k rows/day and the 90d window never
+    // actually triggered while data spanned <90d, letting the table reach 240k+ rows
+    // and breach the Turso row quota (2026-06-14 manual purge: 242k→138k). The safe
+    // window keeps each SKU's latest price-change row regardless of age (see
+    // purgeOldPriceHistory) so "Avec rabais" badges are preserved.
     // Non-fatal — a purge failure must not fail an otherwise-successful sync.
     try {
       const t0Purge = Date.now();
-      const purged = await purgeOldPriceHistory(90);
+      const purged = await purgeOldPriceHistory(30);
       log("purgeOldPriceHistory done", { phase: "finalize", duration_ms: Date.now() - t0Purge, purged });
     } catch (purgeErr) {
       log(`purgeOldPriceHistory failed (non-fatal): ${purgeErr instanceof Error ? purgeErr.message : String(purgeErr)}`, { phase: "finalize" });
