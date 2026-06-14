@@ -3,6 +3,7 @@ import { createClient, type Client } from "@libsql/client";
 import path from "path";
 import fs from "fs";
 import { isValidCheckpoint } from "@/lib/database";
+import { PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
 import { storeLink, STOREFRONT_BASE_URL } from "@/lib/insights";
 
 const TEST_DB_PATH = path.join(__dirname, "fixtures", "test-db.sqlite");
@@ -988,5 +989,69 @@ describe("new performance indexes (DDL validity + usage)", () => {
     );
     const detail = plan.rows.map((r) => String((r as unknown as Record<string, unknown>).detail)).join(" | ");
     expect(detail).toContain("idx_price_history_sku_detected");
+  });
+});
+
+describe("has_discount precompute + cron/feed retention (fix/has-discount-precompute)", () => {
+  let db: Client;
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  it("partial index idx_products_has_discount DDL is valid + used for has_discount = 1", async () => {
+    await db.batch([
+      `CREATE TABLE products (sku TEXT PRIMARY KEY, price REAL, has_discount INTEGER DEFAULT 0)`,
+      `CREATE INDEX IF NOT EXISTS idx_products_has_discount ON products(has_discount) WHERE has_discount = 1`,
+    ], "write");
+    const plan = await db.execute(`EXPLAIN QUERY PLAN SELECT COUNT(*) FROM products WHERE has_discount = 1`);
+    const detail = plan.rows.map((r) => String((r as unknown as Record<string, unknown>).detail)).join(" | ");
+    expect(detail).toContain("idx_products_has_discount");
+  });
+
+  it("recomputeHasDiscount UPDATE sets the flag from each SKU's latest price-change (real predicate)", async () => {
+    // Uses the REAL exported PRODUCT_HAS_DISCOUNT_SQL so this fails if the predicate drifts.
+    const RECOMPUTE = `UPDATE products SET has_discount = CASE WHEN ${PRODUCT_HAS_DISCOUNT_SQL} THEN 1 ELSE 0 END`;
+    await db.batch([
+      `CREATE TABLE products (sku TEXT PRIMARY KEY, price REAL, has_discount INTEGER DEFAULT 0)`,
+      `CREATE TABLE price_history (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT, old_price REAL, change_type TEXT, detected_at INTEGER)`,
+    ]);
+    const now = Math.floor(Date.now() / 1000);
+    await db.batch([
+      { sql: `INSERT INTO products VALUES ('DROP', 80, 0)`, args: [] },                 // latest drop 100>80 → 1
+      { sql: `INSERT INTO price_history (sku, old_price, change_type, detected_at) VALUES ('DROP', 100, 'price_drop', ?)`, args: [now - 5 * 86400] },
+      { sql: `INSERT INTO products VALUES ('RECOVER', 90, 0)`, args: [] },              // latest increase 80<90 → 0
+      { sql: `INSERT INTO price_history (sku, old_price, change_type, detected_at) VALUES ('RECOVER', 100, 'price_drop', ?)`, args: [now - 10 * 86400] },
+      { sql: `INSERT INTO price_history (sku, old_price, change_type, detected_at) VALUES ('RECOVER', 80, 'price_increase', ?)`, args: [now - 2 * 86400] },
+      { sql: `INSERT INTO products VALUES ('NONE', 50, 1)`, args: [] },                 // no history, stale 1 → reset 0
+    ], "write");
+
+    await db.execute(RECOMPUTE);
+
+    const rows = await db.execute(`SELECT sku, has_discount FROM products ORDER BY sku`);
+    const flags = Object.fromEntries(rows.rows.map((r) => {
+      const o = r as unknown as Record<string, unknown>;
+      return [o.sku as string, Number(o.has_discount)];
+    }));
+    expect(flags).toEqual({ DROP: 1, NONE: 0, RECOVER: 0 });
+  });
+
+  it("purgeOldCronRuns / purgeOldFeedSyncs delete rows older than the window (epoch cols)", async () => {
+    await db.batch([
+      `CREATE TABLE cron_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, status TEXT, detail TEXT, ran_at INTEGER)`,
+      `CREATE TABLE feed_syncs (id INTEGER PRIMARY KEY AUTOINCREMENT, feed_type TEXT, status TEXT, fetched_at INTEGER)`,
+    ], "write");
+    const now = Math.floor(Date.now() / 1000);
+    await db.batch([
+      { sql: `INSERT INTO cron_runs (name, status, ran_at) VALUES ('sync', 'success', ?)`, args: [now - 40 * 86400] }, // purge
+      { sql: `INSERT INTO cron_runs (name, status, ran_at) VALUES ('sync', 'success', ?)`, args: [now - 5 * 86400] },  // keep
+      { sql: `INSERT INTO feed_syncs (feed_type, status, fetched_at) VALUES ('google', 'success', ?)`, args: [now - 40 * 86400] }, // purge
+      { sql: `INSERT INTO feed_syncs (feed_type, status, fetched_at) VALUES ('google', 'success', ?)`, args: [now - 5 * 86400] },  // keep
+    ], "write");
+
+    const dc = await db.execute({ sql: `DELETE FROM cron_runs WHERE ran_at < unixepoch('now', ?)`, args: ["-30 days"] });
+    const df = await db.execute({ sql: `DELETE FROM feed_syncs WHERE fetched_at < unixepoch('now', ?)`, args: ["-30 days"] });
+    expect(Number(dc.rowsAffected)).toBe(1);
+    expect(Number(df.rowsAffected)).toBe(1);
+    expect((await db.execute(`SELECT COUNT(*) AS c FROM cron_runs`)).rows[0].c).toBe(1);
+    expect((await db.execute(`SELECT COUNT(*) AS c FROM feed_syncs`)).rows[0].c).toBe(1);
   });
 });

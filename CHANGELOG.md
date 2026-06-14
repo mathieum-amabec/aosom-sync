@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.47] - 2026-06-14
+
+### Performance (Turso reads — has_discount precompute + cron/feed retention)
+Consolidates the only pieces still missing from `main` out of the (now-closed) stale PRs
+#170 + #171; the `sync_logs`/`notifications`/`price_history` purges already landed via #172.
+- **Precomputed `products.has_discount` flag** (+ partial index `idx_products_has_discount
+  ... WHERE has_discount = 1`). `getCatalogStats` and the "Avec rabais" filter now read the
+  cheap indexed flag instead of a correlated `EXISTS` over `price_history` on every page
+  load. Recomputed once/day at sync finalize (`recomputeHasDiscount`) via the canonical
+  `PRODUCT_HAS_DISCOUNT_SQL` predicate (single source of truth shared with the ▼ badge, so
+  count/filter/badge stay consistent). One-time backfill in the schema migration.
+- **`cron_runs` + `feed_syncs` retention** (`purgeOldCronRuns(30)` / `purgeOldFeedSyncs(30)`
+  at sync finalize). `cron_runs` grows ~96 rows/day from `social-scheduled` alone; the
+  dashboard only reads the latest run per name/feed. 30-day window can't orphan those rows
+  (every cron runs at least daily).
+
 ## [0.5.53.46] - 2026-06-14
 
 ### Added (Klaviyo Welcome coupon — BIENVENUE10)

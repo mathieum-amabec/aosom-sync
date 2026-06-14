@@ -62,9 +62,16 @@ async function _initSchemaImpl(): Promise<void> {
       material TEXT, gtin TEXT, weight REAL, out_of_stock_expected TEXT, estimated_arrival TEXT,
       shopify_product_id TEXT, shopify_variant_id TEXT, shopify_handle TEXT,
       last_seen_at INTEGER, last_posted_at INTEGER,
+      has_discount INTEGER DEFAULT 0,
       created_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type)`,
+    // Precomputed "Avec rabais" flag (recomputed each sync via recomputeHasDiscount).
+    // Lets getCatalogStats + the catalog filter use a cheap indexed scan instead of a
+    // correlated EXISTS over price_history on every page load. PARTIAL index on the
+    // discounted subset only — has_discount is a 0/1 boolean, so a full index is too
+    // low-selectivity; the partial index is a compact list of discounted SKUs.
+    `CREATE INDEX IF NOT EXISTS idx_products_has_discount ON products(has_discount) WHERE has_discount = 1`,
     `CREATE INDEX IF NOT EXISTS idx_products_shopify_id ON products(shopify_product_id)`,
     `CREATE INDEX IF NOT EXISTS idx_products_price ON products(price)`,
     `CREATE INDEX IF NOT EXISTS idx_products_qty ON products(qty)`,
@@ -327,6 +334,12 @@ async function _initSchemaImpl(): Promise<void> {
   if (!productCols.has("shopify_handle")) {
     alters.push(`ALTER TABLE products ADD COLUMN shopify_handle TEXT`);
   }
+  // has_discount: precomputed rabais flag (see recomputeHasDiscount). Backfilled once
+  // below when the column is first added; refreshed every sync thereafter.
+  const hasDiscountColExisted = productCols.has("has_discount");
+  if (!hasDiscountColExisted) {
+    alters.push(`ALTER TABLE products ADD COLUMN has_discount INTEGER DEFAULT 0`);
+  }
 
   // price_alerts double opt-in columns (table shipped in #99 without them).
   const priceAlertsInfo = await db.execute(`PRAGMA table_info(price_alerts)`);
@@ -343,6 +356,13 @@ async function _initSchemaImpl(): Promise<void> {
 
   if (alters.length > 0) {
     await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
+  }
+
+  // One-time backfill of products.has_discount when the column was just added. Uses the
+  // local `db` (not recomputeHasDiscount → ensureSchema) to avoid awaiting the in-flight
+  // schema promise. Refreshed every sync thereafter via recomputeHasDiscount().
+  if (!hasDiscountColExisted) {
+    await db.execute(`UPDATE products SET has_discount = CASE WHEN ${PRODUCT_HAS_DISCOUNT_SQL} THEN 1 ELSE 0 END`);
   }
 
   // content_templates column migration (frequency_per_month + scopes + mode)
@@ -906,7 +926,9 @@ export async function getCatalogStats(): Promise<CatalogStats> {
   const [totalR, importedR, discountR, syncR] = await Promise.all([
     db.execute(`SELECT COUNT(*) AS c FROM products`),
     db.execute(`SELECT COUNT(*) AS c FROM products WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''`),
-    db.execute(`SELECT COUNT(*) AS c FROM products WHERE ${PRODUCT_HAS_DISCOUNT_SQL}`),
+    // Precomputed flag (recomputeHasDiscount, refreshed each sync) — a cheap indexed scan
+    // instead of the correlated EXISTS over price_history this used to run per page load.
+    db.execute(`SELECT COUNT(*) AS c FROM products WHERE has_discount = 1`),
     // Bare name/status come from the MAX(ran_at) row (SQLite single-MAX rule).
     db.execute(`SELECT name, status, MAX(ran_at) AS ran_at FROM cron_runs WHERE name LIKE 'sync%'`),
   ]);
@@ -1171,6 +1193,49 @@ export async function purgeOldNotifications(days = 30): Promise<number> {
     args: [`-${days} days`],
   });
   return Number(result.rowsAffected) || 0;
+}
+
+/**
+ * Delete cron_runs rows older than `days` (default 30). One row is written per cron
+ * invocation (social-scheduled alone = 96/day), so the table grows fast; the dashboard
+ * only reads the latest run per cron name. `ran_at` is a unix-seconds INTEGER. Called
+ * once/day at the end of the sync. Returns rows deleted.
+ */
+export async function purgeOldCronRuns(days = 30): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `DELETE FROM cron_runs WHERE ran_at < unixepoch('now', ?)`,
+    args: [`-${days} days`],
+  });
+  return Number(result.rowsAffected) || 0;
+}
+
+/**
+ * Delete feed_syncs rows older than `days` (default 30). One row per feed fetch; the
+ * dashboard only reads the latest success/attempt per feed_type. `fetched_at` is a
+ * unix-seconds INTEGER. Called once/day at the end of the sync. Returns rows deleted.
+ */
+export async function purgeOldFeedSyncs(days = 30): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `DELETE FROM feed_syncs WHERE fetched_at < unixepoch('now', ?)`,
+    args: [`-${days} days`],
+  });
+  return Number(result.rowsAffected) || 0;
+}
+
+/**
+ * Recompute products.has_discount for every product using the canonical
+ * PRODUCT_HAS_DISCOUNT_SQL predicate (single source of truth, also used by the
+ * ▼ badge logic). Runs once/day at sync finalize instead of evaluating the
+ * correlated EXISTS on every catalog/dashboard page load. getCatalogStats and the
+ * "Avec rabais" filter then read the precomputed, partial-indexed flag — a cheap scan.
+ * products.price + price_history only change during the daily sync, so the flag stays
+ * accurate between syncs.
+ */
+export async function recomputeHasDiscount(): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute(`UPDATE products SET has_discount = CASE WHEN ${PRODUCT_HAS_DISCOUNT_SQL} THEN 1 ELSE 0 END`);
 }
 
 export async function getRecentPriceChanges(limit = 50): Promise<Record<string, unknown>[]> {
