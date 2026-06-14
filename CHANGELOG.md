@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.51] - 2026-06-14
+
+### Fixed (Meta Dynamic Ads — FR ad set on Business catalog)
+- **`scripts/meta-ads-create.mjs` (FR profile) now creates a NEW ad set instead of re-pointing.**
+  Meta makes an ad set's `promoted_object` immutable (re-point rejected, code 100 / subcode
+  1885090), so the FR profile builds a fresh ad set under the existing campaign `52556997335005`,
+  cloning the source ad set `52556997397005`'s Canada-FR retargeting targeting + optimization
+  (LANDING_PAGE_VIEWS / IMPRESSIONS), at $20/day, with
+  `promoted_object = { product_catalog_id: 384890002574549 (Business), product_set_id: 2891699814486850 }`.
+  `--apply` creates ad set + creative + ad, all **PAUSED**. The EN from-scratch placeholder path is
+  preserved. Verified via dry-run (no API mutation in this PR).
+
 ## [0.5.53.50] - 2026-06-14
 
 ### Added (pricing floor — never sell below the Aosom CSV price)
