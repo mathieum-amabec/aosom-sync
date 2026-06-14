@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.40] - 2026-06-14
+
+### Chore (ops tooling)
+- Added three standalone theme-publication ops scripts under `scripts/` (recreated from a sibling
+  clone where they had only ever existed as untracked working-tree files, never committed):
+  - `themes-list.mjs` — read-only theme list + pre-publish gate check (preview/live id + name + role).
+  - `publish-preview-live.mjs` — publish the preview theme to live (`role:main`) with an abort gate
+    on unexpected state and a post-publish swap confirmation.
+  - `verify-live-storefront.mjs` — fetch the live storefront and assert hero title / og:image /
+    meta description / no Liquid errors / video section present.
+- No application code touched; scripts are run manually via Node. Two reuse the existing
+  `scripts/_shopify-lib.mjs` REST helper.
+
 ## [0.5.53.39] - 2026-06-14
 
 ### Fixed (Turso row-quota — sync_logs + notifications retention)
