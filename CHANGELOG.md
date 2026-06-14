@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.38] - 2026-06-14
+
+### Performance (Turso reads — root-cause fix for the catalog "Avec rabais" path)
+- **Precomputed `products.has_discount` flag.** The catalog rabais count (`getCatalogStats`)
+  and the "Avec rabais" filter ran a correlated `EXISTS` over `price_history` on **every page
+  load** (one pass per product → millions of rows read). They now read a precomputed,
+  partial-indexed `has_discount = 1` flag. The flag is recomputed once/day at sync finalize
+  (`recomputeHasDiscount`) using the canonical `PRODUCT_HAS_DISCOUNT_SQL` predicate — the single
+  source of truth shared with the ▼ badge, so count, filter, and badge stay consistent.
+  `products.price` and `price_history` only change during the daily sync, so the flag is accurate
+  between syncs. Partial index `idx_products_has_discount ... WHERE has_discount = 1`; one-time
+  backfill in the schema migration.
+- **`sync_logs` retention** (`purgeOldSyncLogs`, 7 days) at sync finalize — the table grew
+  unbounded (10k+ rows); the UI only reads the current run's logs. Cutoff is an ISO-8601 string
+  compare (the column stores `toISOString()` values, not epoch).
+- `/api/catalog/stats` CDN cache (`s-maxage=600`) was already shipped in #167 — verified, unchanged.
+
 ## [0.5.53.37] - 2026-06-14
 
 ### Performance (Turso row-read reduction)
