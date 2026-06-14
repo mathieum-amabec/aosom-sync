@@ -174,3 +174,60 @@ catalog), `--objective <obj>` (default `PRODUCT_CATALOG_SALES`), `--daily-budget
 | `Meta Ads API: ... (code 200/10)` | Missing `ads_read`/`ads_management` permission |
 | `Meta Ads rate limit reached (200/hour)` | Client guardrail tripped — wait, or raise `META_ADS.RATE_LIMIT_PER_HOUR` |
 | Empty `accounts` array | Token's user/system-user has no ad account assigned (step 2B.2) |
+| `code 10 / subcode 3379015` "Catalog tried to get used for purpose it is not allowed" | Ad set points at a **personal** Marketplace catalog. Switch to a Business catalog (see Dynamic Ads status below). |
+
+## Dynamic Ads activation — status (2026-06-14)
+
+Script: `scripts/meta-ads-create.mjs` (dry-run default; `--apply` to create; `--profile en` for Furnish Direct). Ad account `act_20658834`.
+
+### FR — Ameublo Direct (campaign already configured, PAUSED)
+| Resource | ID | Note |
+|----------|-----|------|
+| Campaign (OUTCOME_TRAFFIC) | `52556997335005` | exists, PAUSED |
+| Ad set "Retargeting ? Visiteurs 30j" | `52556997397005` | exists, $20/day, PAUSED, goal LANDING_PAGE_VIEWS |
+| Page (Ameublo Direct) | `1057151924144231` | |
+| Audience (visiteurs 30j) | `52556992755405` | |
+| Product set "All Products" | `1718195966267686` | 1000 products |
+| **Creative + Ad** | **NOT created** | blocked — see below |
+
+### 🚫 Blocker: the ad set points at a *personal* catalog
+`--apply` failed with `code 10 / subcode 3379015`. The ad set's
+`promoted_object.product_catalog_id` is **`1103064966519153`** =
+*"Products for Mathieu personal catalog"* — a personal/Marketplace catalog that
+has **no Business owner**. Meta forbids personal catalogs from running ads, so no
+creative can be attached. This is a configuration issue, not a code one.
+
+**Available ads-eligible catalog (under the Shopify Business Manager,
+business `853563322151547`):**
+| Catalog | ID | Products | Ads-eligible |
+|---------|-----|----------|--------------|
+| Shopify Product Catalog | `384890002574549` | **5** (sync incomplete) | ✅ yes (Business-owned) |
+| Products for Mathieu personal catalog | `1103064966519153` | 1000 | ❌ no (personal) |
+
+**Remediation (Mat, in Commerce Manager / Shopify):**
+1. Complete the **Shopify → Meta catalog sync** so all ~490+ live products land in
+   the Business catalog `384890002574549` (Shopify admin → Facebook & Instagram
+   sales channel → Catalog/data feed). Today only 5 products are synced.
+2. In Ads Manager, edit ad set `52556997397005` → set its catalog
+   (`promoted_object.product_catalog_id`) to `384890002574549`, and create/select a
+   product set in that catalog (replace `1718195966267686`).
+3. Re-run `node scripts/meta-ads-create.mjs --apply`. The preflight now verifies the
+   catalog is Business-owned and refuses to POST otherwise, so it will succeed once
+   steps 1–2 are done. Creative + ad are created **PAUSED** (no spend).
+
+### EN — Furnish Direct (campaign does NOT exist yet — dry-run only)
+Validated via `--profile en` dry-run. Same catalog blocker applies, **and** the EN
+campaign + ad set must be created first (they don't exist):
+| Resource | Value |
+|----------|-------|
+| Campaign name | `Furnish Direct — Retargeting EN` (OUTCOME_TRAFFIC, PAUSED) |
+| Page (Furnish Direct EN) | `1080288908505354` |
+| Link | `https://ameublodirect.ca/en/` (→ `https://furnishdirect.ca` once DNS is ready) |
+| Message (EN) | "Discover our selection of furniture and outdoor living. Free shipping across Canada." |
+| Creative name | `Furnish Direct — Catalog Dynamic` |
+| Ad name | `Dynamic Ad — Visitors 30d` |
+
+EN next steps (after the FR catalog fix): create the EN campaign + ad set (audience:
+an EN/Furnish-Direct retargeting Website Custom Audience, or reuse `52556992755405`),
+then add `adsetId`/`campaignId` to the `en` profile in `scripts/meta-ads-create.mjs`
+and run `--profile en --apply`. **Held for validation** (dry-run only for now).
