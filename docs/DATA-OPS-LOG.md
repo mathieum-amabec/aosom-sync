@@ -3,6 +3,30 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-14 — Turso quota purge: price_history >30d + facebook_drafts published >30d
+
+`scripts/turso-purge-apply.mjs`. Single **atomic transaction** (`db.batch([...], "write")`,
+rolls back on any error) deleting aged rows to reclaim Turso row quota. Both timestamp columns
+verified as epoch **seconds**. Cutoff computed in-SQL as `cast(strftime('%s','now','-30 days') as integer)`.
+
+- **Rules applied:**
+  - `DELETE FROM price_history WHERE detected_at < now-30d`
+  - `DELETE FROM facebook_drafts WHERE status='published' AND created_at < now-30d`
+- **Counts (exact, reconciled before==after+deleted):**
+  - `price_history`: **242 695 → 138 198** (deleted **104 497**)
+  - `facebook_drafts`: **184 → 160** (deleted **24** published rows)
+  - Total deleted: **104 521 rows.** Counts reconciled OK.
+- **Context:** `price_history` is the dominant table and grows ~4 000–4 800 rows/day. Data only
+  spanned ~64 days (2026-04-11 → 2026-06-13), so the earlier `>90d` retention rule freed nothing;
+  the `>30d` window is the first that reclaims real quota. `facebook_drafts` purge only touches
+  `status='published'` rows (drafts/approved/rejected untouched).
+- **Schema notes (vs original task SQL):** the dry-run also covered `video_ingest_log`,
+  `cron_runs` (col is `ran_at`, not `created_at`), `feed_syncs` (col is `fetched_at`) — all 0 rows
+  eligible (data younger than their retention windows after the v0.5.53.36 P0 purge), so they were
+  **not** included in this DELETE.
+- **Read-only artifacts:** `scripts/turso-purge-audit.mjs` (table sizes + schema introspection),
+  `scripts/turso-purge-dryrun.mjs` (count-only preview).
+
 ## 2026-06-11 — Phase 3: Aosom video ingest BATCH (top-30, real upload to Shopify)
 
 `scripts/aosom-video-ingest-batch.mjs --apply`. Attached Aosom product MP4s to the **live
