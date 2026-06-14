@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.47] - 2026-06-14
+## [0.5.53.48] - 2026-06-14
 
 ### Added (price-floor monitoring)
 - **`GET /api/health/price-audit`** (CRON_SECRET) — compares the live Shopify price of every
