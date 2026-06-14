@@ -6,13 +6,29 @@ console.log(`GET ${URL} -> ${res.status}, ${html.length} bytes`);
 
 const rec = (ok, l, d) => console.log(`${ok ? "✅" : "❌"} ${l} — ${d}`);
 
-// Hero title
-const heroTitle = "Meublez votre espace à votre image";
-rec(html.includes(heroTitle), "Titre hero présent", heroTitle);
+// Minimal HTML-entity decode for the named/numeric entities the theme emits in headings.
+const decode = (s) =>
+  s.replace(/&agrave;/g, "à").replace(/&eacute;/g, "é").replace(/&egrave;/g, "è")
+    .replace(/&ccedil;/g, "ç").replace(/&ucirc;/g, "û").replace(/&ocirc;/g, "ô")
+    .replace(/&acirc;/g, "â").replace(/&ecirc;/g, "ê").replace(/&icirc;/g, "î")
+    .replace(/&amp;/g, "&").replace(/&#39;|&rsquo;|&apos;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/&quot;/g, '"');
+const text = (raw) => decode(raw.replace(/<[^>]+>/g, "")).replace(/\s+/g, " ").trim();
 
-// <title> tag
-const titleTag = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "";
-console.log(`   <title>: ${titleTag.trim().slice(0, 120)}`);
+// Hero title. The live theme encodes the accent as `&agrave;` and ends with a period, AND the
+// page has multiple <h1> tags (a hidden a11y one precedes the hero), so neither a literal
+// includes() of the plain-accent string nor "first <h1>" works. Decode the whole HTML and
+// substring-match. Actual live hero (2026-06-14): "Meublez votre espace à votre image."
+const heroExpected = "Meublez votre espace à votre image";
+const heroFound = decode(html).includes(heroExpected);
+// Surface which <h1> actually carries it, for the log.
+const heroH1 = [...html.matchAll(/<h1[^>]*>([\s\S]*?)<\/h1>/gi)].map((m) => text(m[1])).find(Boolean) || "(none)";
+rec(heroFound, "Titre hero présent", `"${heroExpected}" (h1 live: "${heroH1}")`);
+
+// <title> tag — assert the real live title (2026-06-14).
+const titleExpected = "Ameublo Direct | Meubles et mobiliers extérieurs";
+const titleTag = text((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "");
+rec(titleTag === titleExpected, "<title> correct", `"${titleTag}" (attendu "${titleExpected}")`);
 
 // og:image
 const og = (html.match(/<meta[^>]+property=["']og:image["'][^>]*>/i) || [])[0] || "";

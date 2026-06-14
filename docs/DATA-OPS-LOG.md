@@ -3,6 +3,32 @@
 Audit trail for manual/destructive operations against production data stores
 (Turso DB + Shopify). Each entry records the date, the exact rules, and the exact counts.
 
+## 2026-06-14 — Theme publish (preview → live): found ALREADY PUBLISHED, no action taken
+
+Requested op: publish preview theme `160213696617` "Copie de Copie de Trade v2" to live
+(`role:main`) via `scripts/publish-preview-live.mjs`, then verify. **Outcome: the swap had
+already happened before this session ran — no publish was performed by me.**
+
+- **ÉTAPE 1 (`themes-list.mjs`, read-only) — gate FAIL (= already swapped):**
+  - `160213696617` "Copie de Copie de Trade v2" → role=**main** (already LIVE)
+  - `160059195497` "Copie de Trade v2" → role=**unpublished** (already demoted)
+  - The script's gate expects the *pre*-publish state (preview=unpublished, live=main) and reported
+    `GATE: FAIL — DO NOT publish`, correctly refusing because the target end-state already exists.
+- **`publish-preview-live.mjs` NOT run** — its abort gate (`p0.role !== "unpublished"`) would throw,
+  and the desired end-state was already achieved. No mutation performed.
+- **ÉTAPE 4 (`verify-live-storefront.mjs`, read-only) on https://ameublodirect.ca/ → 200:**
+  - ✅ new theme live (sanity markers `hv-grid` / "Voyez-le chez vous" present)
+  - ✅ og:image present (`/cdn/shop/t/7/assets/og-image-social.jpg`)
+  - ✅ meta description present
+  - ✅ 0 Liquid errors
+  - ❌ hero title "Meublez votre espace à votre image" NOT found in HTML; `<title>` is
+    "Ameublo Direct | Meubles et mobiliers extérieurs". Likely a stale hardcoded expectation in
+    `verify-live-storefront.mjs` (or a client-rendered hero) — NOT a publish failure, since the
+    new-theme markers confirm `160213696617` is serving. Worth reconciling the script's expected
+    hero string against the actual live copy.
+- **Note:** the ops scripts were run from branch `chore/ops-scripts-cleanup` (PR #173, still OPEN —
+  the task's "PR #173 merged" premise was inaccurate; the scripts are not yet on `main`).
+
 ## 2026-06-14 — Turso quota purge: price_history >30d + facebook_drafts published >30d
 
 `scripts/turso-purge-apply.mjs`. Single **atomic transaction** (`db.batch([...], "write")`,
