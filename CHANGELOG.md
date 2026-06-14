@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.43] - 2026-06-14
+
+### Meta Dynamic Ads — activation attempt (blocked upstream) + EN profile
+- Ran `scripts/meta-ads-create.mjs --apply` to create the FR Dynamic Ad. **Meta rejected it**
+  (`code 10 / subcode 3379015`): the ad set's catalog `1103064966519153` is a *personal*
+  Marketplace catalog, which cannot run ads. **No creative/ad was created** — an upstream
+  configuration blocker, not a code bug.
+- **Script:** added a catalog ads-eligibility **preflight** (fails fast with the remediation
+  instead of a raw 400) and a `--profile en` path for Furnish Direct (EN). EN dry-run validated
+  (campaign + ad set don't exist yet, so it prints the full structure to create + the EN
+  creative/ad payloads). EN held for validation — dry-run only.
+- **Docs:** `docs/META-ADS-SETUP.md` documents the blocker, the ads-eligible Business catalog
+  `384890002574549` (only 5 products synced — needs the Shopify→Meta sync completed), the exact
+  remediation (re-point the ad set to the Business catalog, then re-run `--apply`), and the EN plan.
+
 ## [0.5.53.42] - 2026-06-14
 
 ### Fixed (ops tooling)
