@@ -97,7 +97,10 @@ export function buildCatalogWhere(f: CatalogFilterInput): CatalogWhere {
     args.push(LOW_STOCK_THRESHOLD);
   }
   if (f.withDiscount) {
-    conditions.push(PRODUCT_HAS_DISCOUNT_SQL);
+    // Use the precomputed flag (recomputeHasDiscount, refreshed each sync) so the filter
+    // is a cheap indexed scan and stays consistent with the getCatalogStats count. The
+    // canonical PRODUCT_HAS_DISCOUNT_SQL predicate defines the flag's value.
+    conditions.push(`has_discount = 1`);
   }
 
   return {

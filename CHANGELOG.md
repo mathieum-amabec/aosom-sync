@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.50] - 2026-06-14
+## [0.5.53.49] - 2026-06-14
 
 ### Fixed (Shopify price-sync starvation — ~428 SKUs were stuck below Aosom cost)
 - **`diff-engine.ts`: stop emitting `stock` diffs.** Dropship variants are untracked in
@@ -19,6 +19,37 @@ All notable changes to Aosom Sync will be documented in this file.
   variant prices that are below `products.price` (Aosom cost) up to cost; only ever raises
   (never lowers, preserving manual markup); strict 2 req/sec; logs each write. Executed
   2026-06-14: **428 corrected, 0 failed**.
+
+## [0.5.53.48] - 2026-06-14
+
+### Added (price-floor monitoring)
+- **`GET /api/health/price-audit`** (CRON_SECRET) — compares the live Shopify price of every
+  variant against `products.price` (the Aosom feed price = floor) and returns
+  `{ total, below_floor, items: [{ sku, shopify_price, aosom_price, gap }] }` (gap = shopify −
+  aosom; negative = below floor). Pure `computePriceFloorViolations()` (cents-rounded, exact-match
+  counts as at-floor, not below) with 6 unit tests. `maxDuration` 300s.
+- **Dashboard red alert** in the "Alertes" panel when `below_floor > 0`, showing the worst items.
+  The endpoint persists a compact summary to `settings.price_audit_result`; the dashboard reads
+  that cached row (`getDashboardAlerts`) — the expensive Shopify fetch never runs on dashboard load.
+- **Daily Vercel cron** at 09:30 UTC (after the morning sync + Shopify price push) so the alert
+  stays current.
+- First live run: **428 of 1058** live Shopify variants are currently priced below the Aosom floor.
+
+## [0.5.53.47] - 2026-06-14
+
+### Performance (Turso reads — has_discount precompute + cron/feed retention)
+Consolidates the only pieces still missing from `main` out of the (now-closed) stale PRs
+#170 + #171; the `sync_logs`/`notifications`/`price_history` purges already landed via #172.
+- **Precomputed `products.has_discount` flag** (+ partial index `idx_products_has_discount
+  ... WHERE has_discount = 1`). `getCatalogStats` and the "Avec rabais" filter now read the
+  cheap indexed flag instead of a correlated `EXISTS` over `price_history` on every page
+  load. Recomputed once/day at sync finalize (`recomputeHasDiscount`) via the canonical
+  `PRODUCT_HAS_DISCOUNT_SQL` predicate (single source of truth shared with the ▼ badge, so
+  count/filter/badge stay consistent). One-time backfill in the schema migration.
+- **`cron_runs` + `feed_syncs` retention** (`purgeOldCronRuns(30)` / `purgeOldFeedSyncs(30)`
+  at sync finalize). `cron_runs` grows ~96 rows/day from `social-scheduled` alone; the
+  dashboard only reads the latest run per name/feed. 30-day window can't orphan those rows
+  (every cron runs at least daily).
 
 ## [0.5.53.46] - 2026-06-14
 
