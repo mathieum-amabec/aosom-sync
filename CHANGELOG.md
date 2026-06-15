@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.57] - 2026-06-15
+
+### Added (publication queue — unified scheduling for social / drafts / blog)
+- **`src/lib/database.ts`** — new `publication_queue` table (in `initSchema`) plus
+  queue functions: `addToQueue`, `getNextPending`, `claimQueueItem`, `markPublished`,
+  `markFailed`, `getPendingQueue`, `getOccupiedQueueSlots`. Timestamps are SQLite
+  `datetime()` TEXT (`YYYY-MM-DD HH:MM:SS` UTC), distinct from `facebook_drafts`'
+  unix-seconds integers, so the `scheduled_at <= datetime('now')` due-scan compares
+  lexicographically. Hardening beyond the base spec: `CHECK` constraints on
+  `content_type`/`platform`/`status` (a typo'd status would otherwise vanish from every
+  status-filtered query); a partial `UNIQUE(platform, scheduled_at)` index over active
+  rows as a double-book backstop; `claimQueueItem` (atomic `pending → publishing`) so a
+  future consumer cron can't double-publish under Vercel's overlapping cron instances
+  (mirrors `claimFacebookDraft`); and `addToQueue` rejects a non-`datetime()` timestamp
+  up front since the lexicographic due-check depends on the format.
+- **`src/lib/draft-scheduler.ts`** — `toSqliteUtc` (unix → SQLite datetime TEXT),
+  `isSqliteUtc` (format guard), and `nextFreeSlot` (next free M/W/F 15:00 UTC slot for a
+  platform, as a SQLite datetime string). Pure and unit-tested.
+- **`src/app/api/queue/add/route.ts`** — new `POST /api/queue/add` (session auth, blocks
+  the `reviewer` role). Validates `content_type`/`platform`/`content_id`/`payload` (with
+  size caps), computes the next free slot for the platform, inserts, and returns
+  `{ queued: true, scheduled_at }`. On the rare concurrent slot collision it catches the
+  unique-index conflict and retries the next slot.
+- Tests: `tests/publication-queue.test.ts` (queue SQL semantics, the unique-slot
+  backstop, claim atomicity, CHECK enforcement) and additions to
+  `tests/draft-scheduler.test.ts` (`toSqliteUtc`/`isSqliteUtc`/`nextFreeSlot`).
+
 ## [0.5.53.56] - 2026-06-15
 
 ### Fixed (schema init — retry after transient failure, issue #186)
