@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.56] - 2026-06-15
+
+### Fixed (schema init — retry after transient failure, issue #186)
+- **`src/lib/database.ts`** — `initSchema()` memoized the promise from
+  `_initSchemaImpl()` even when it rejected, so a single transient failure (e.g. a
+  flaky `db.batch` during schema build) wedged every later `ensureSchema()` caller on
+  the cached rejection until the next cold start. It now attaches
+  `.catch(err => { schemaPromise = null; throw err })` so the next caller re-runs
+  `_initSchemaImpl()` instead of replaying the cached reject.
+- Wrapped the 8 `db.batch()` calls in `_initSchemaImpl()` with a `runBatch(label, stmts)`
+  helper that logs the step label + error before re-throwing, so a schema-init failure
+  reports which batch broke instead of an opaque stack.
+
 ## [0.5.53.55] - 2026-06-15
 
 ### Fixed (content cron — diagnosable failures)
