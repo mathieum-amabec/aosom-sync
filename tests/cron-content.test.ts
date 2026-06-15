@@ -170,6 +170,29 @@ describe("GET /api/cron/content", () => {
     expect(body.drafts[1].error).toMatch(/unreachable/);
   });
 
+  it("propagates each language's error into the failure message (cron_runs.detail)", async () => {
+    // Regression: content cron only ever recorded the generic "Both FR and EN
+    // content generations failed" wrapper in cron_runs.detail; the real
+    // per-language cause stayed buried in Vercel logs. The thrown message
+    // (re-thrown verbatim by trackCron → recordCronRun → cron_runs.detail, and
+    // mirrored into the 500 response's `error`) must now carry each language's
+    // actual failure.
+    vi.doMock("@/lib/content-template-selector", () => ({
+      selectRandomTemplate: vi.fn().mockResolvedValue({ id: 1, slug: "conseil_deco_piece", content_type: "education" }),
+    }));
+    // Fresh Response per call — a body can only be read once. Both fail with HTTP 502.
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({ success: false, error: "Claude timeout" }), { status: 502 }),
+    )));
+    const { GET } = await import("@/app/api/cron/content/route");
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toContain("Both FR and EN content generations failed");
+    expect(body.error).toContain("FR: Generation failed (HTTP 502)");
+    expect(body.error).toContain("EN: Generation failed (HTTP 502)");
+  });
+
   it("calls generate twice — FR then EN — with correct slug and Bearer auth", async () => {
     vi.doMock("@/lib/content-template-selector", () => ({
       selectRandomTemplate: vi.fn().mockResolvedValue({ id: 2, slug: "guide_achat_categorie", content_type: "education" }),
