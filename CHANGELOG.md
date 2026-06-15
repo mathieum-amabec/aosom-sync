@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.55] - 2026-06-15
+
+### Fixed (content cron — diagnosable failures)
+- **`src/app/api/cron/content/route.ts`** — when both the FR and EN draft
+  generations fail, the cron threw a generic `"Both FR and EN content generations
+  failed"` message, which `trackCron` recorded verbatim in `cron_runs.detail`. The
+  real per-language cause (`Generation failed (HTTP <status>)` / `Generate endpoint
+  unreachable`) stayed buried in Vercel function logs. The thrown message now appends
+  each language's actual error (`FR: … | EN: …`), so the dashboard "Résumé du jour"
+  panel and the 500 response surface the cause directly. Bounded by design — only the
+  short status strings are propagated, never raw response bodies.
+- Regression test in `tests/cron-content.test.ts` asserts the both-fail message carries
+  each language's error.
+
 ## [0.5.53.54] - 2026-06-15
 
 ### Added (Meta Ads — multi-copy Advantage+ creative)
