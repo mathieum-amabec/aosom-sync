@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.53] - 2026-06-14
+
+### Added (Meta traffic campaign tooling)
+- **`scripts/meta-traffic-campaign.mjs`** — creates a broad **$5/day Canada FR/EN traffic
+  campaign** (campaign → ad set → creative → ad, all **PAUSED**) driving link clicks to
+  `ameublodirect.ca` with a dynamic single-image creative from the Business catalog
+  `384890002574549`. **Dry-run by default**; `--apply` creates all four objects, idempotent
+  by name. Objective mapped to `OUTCOME_TRAFFIC` (ODAX; Meta rejects legacy `LINK_CLICKS` as a
+  campaign objective) with ad-set `optimization_goal: LINK_CLICKS`. Ad set targets Canada,
+  25–65, broad (Advantage+ audience + automatic placements). Bilingual FR/EN titles +
+  descriptions via `asset_feed_spec`, CTA `SHOP_NOW`, page `1057151924144231`. Real creation
+  deferred to running `--apply` after the dry-run payloads are validated.
+
 ## [0.5.53.52] - 2026-06-14
 
 ### Fixed (P0 — production DB unreachable, `/api/health` db:false)
