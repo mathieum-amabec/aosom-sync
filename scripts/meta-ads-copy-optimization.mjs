@@ -1,16 +1,18 @@
-// Meta — replace the generic FR creative on the traffic ad set with a multi-copy
-// Advantage+ creative (asset_feed_spec: 5 primary texts × 5 headlines × 2 descriptions).
-// Meta picks/optimizes the best combination per user. CTA SHOP_NOW → ameublodirect.ca.
+// Meta — replace the creative on the traffic ad set with a multi-copy DYNAMIC
+// (catalogue) creative: asset_feed_spec carries 5 primary texts × 5 headlines × 2
+// descriptions, ad_formats AUTOMATIC_FORMAT, and product_set_id so Meta pulls the
+// product images from the catalogue automatically and tests the copy/headline matrix
+// per user. CTA SHOP_NOW → ameublodirect.ca.
 //
 // SAFE BY DEFAULT: no flag = DRY-RUN (prints the full asset_feed_spec payload + the existing
-// ad it WOULD delete, sends nothing). --apply deletes the current ad on the ad set, creates
-// the new creative, and creates the ad in PAUSED state (never activates).
+// ad it WOULD delete, sends nothing). --apply creates the new creative + ad (PAUSED) FIRST,
+// then deletes the old ad — so a creative failure can never strand the ad set with zero ads.
 //
 //   node scripts/meta-ads-copy-optimization.mjs            # dry-run (default)
 //   node scripts/meta-ads-copy-optimization.mjs --apply    # delete old ad + create new (PAUSED)
 //
 // On Windows ARM run under x64 node (global fetch): see CLAUDE.md / dev.ps1.
-import { readFileSync, appendFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loadEnv } from "./_shopify-lib.mjs";
@@ -25,6 +27,7 @@ const ACT = "act_20658834";
 const CAMPAIGN_ID = "52562992827605";  // traffic campaign created this evening (reference)
 const ADSET_ID = "52562995963805";     // traffic ad set — the creative target
 const PAGE_ID = "1057151924144231";    // Ameublo Direct FB page
+const PRODUCT_SET_ID = "2891699814486850";  // catalogue product set — Meta pulls images dynamically
 const LINK = "https://ameublodirect.ca";
 const CREATIVE_NAME = "Trafic — Multi-copy Advantage+ FR";
 const AD_NAME = "Trafic — Multi-copy Advantage+ FR";
@@ -92,11 +95,14 @@ const assetFeedSpec = {
   descriptions: DESCRIPTIONS.map((text) => ({ text })),
   call_to_action_types: ["SHOP_NOW"],
   link_urls: [{ website_url: LINK }],
-  ad_formats: ["SINGLE_IMAGE"],
+  ad_formats: ["AUTOMATIC_FORMAT"],
 };
+// Dynamic (catalogue) creative: product_set_id supplies the images, so no image_hash
+// is required. asset_feed_spec still drives the 5×5×2 copy/headline/description matrix.
 const creativePayload = {
   name: CREATIVE_NAME,
   object_story_spec: { page_id: PAGE_ID },
+  product_set_id: PRODUCT_SET_ID,
   asset_feed_spec: assetFeedSpec,
 };
 const adPayload = (creativeId) => ({
@@ -114,7 +120,7 @@ async function main() {
   const ads = (await get(`${ACT}/ads`, { fields: "id,name,status,adset_id,creative", limit: "200" })).data || [];
   const onAdset = ads.filter((a) => String(a.adset_id) === ADSET_ID);
   console.log(`\nAds déjà sur l'ad set ${ADSET_ID}: ${onAdset.length ? onAdset.map((a) => `${a.id} ("${a.name}", ${a.status})`).join(", ") : "aucune"}`);
-  if (onAdset.length) console.log(`→ ${APPLY ? "seront SUPPRIMÉES" : "seraient supprimées (--apply)"} avant la nouvelle création.`);
+  if (onAdset.length) console.log(`→ ${APPLY ? "seront SUPPRIMÉES" : "seraient supprimées (--apply)"} APRÈS la création de la nouvelle ad (create-before-delete).`);
 
   // Count assertion — the whole point is the multi-copy matrix.
   console.log(`\n${line}\nasset_feed_spec — counts: bodies=${assetFeedSpec.bodies.length}/5, titles=${assetFeedSpec.titles.length}/5, descriptions=${assetFeedSpec.descriptions.length}/2\n${line}`);
@@ -127,9 +133,9 @@ async function main() {
   console.log(`\n${line}\nÉTAPE 2 — POST ${ACT}/ads  (creative_id rempli après l'étape 1)\n${line}`);
   console.log(JSON.stringify(adPayload("{creative_id}"), null, 2));
 
-  console.log(`\n⚠ NOTE: ad_formats SINGLE_IMAGE dans un asset_feed_spec exige normalement un asset image
-  (images:[{hash}]) ou un product_set_id. Le spec fourni n'en contient pas — si Meta renvoie une
-  erreur "image required" au --apply, ajouter un image_hash. À confirmer au checkpoint avec Mat.`);
+  console.log(`\n✓ NOTE: creative DYNAMIQUE — ad_formats AUTOMATIC_FORMAT + product_set_id ${PRODUCT_SET_ID}.
+  Meta tire les images du catalogue automatiquement (aucun image_hash requis) et teste la
+  matrice 5 bodies × 5 titles × 2 descriptions. Ordre --apply : créer AVANT de supprimer.`);
 
   if (!APPLY) {
     console.log(`\n${line}\nDRY-RUN terminé — rien n'a été envoyé. Relancer avec --apply (crée en PAUSED).\n${line}`);
@@ -137,14 +143,16 @@ async function main() {
   }
 
   // ── Apply ──────────────────────────────────────────────────────────────────
-  for (const a of onAdset) {
-    await del(a.id);
-    console.log(`[ok] Ad supprimée: ${a.id} ("${a.name}")`);
-  }
+  // Create the new creative + ad (PAUSED) FIRST. Only once the replacement exists do we
+  // delete the old ad(s) — so a failure here can never leave the ad set with zero ads.
   const creativeId = (await post(`${ACT}/adcreatives`, creativePayload)).id;
   console.log(`[ok] Creative créé: ${creativeId}`);
   const ad = await post(`${ACT}/ads`, adPayload(creativeId));
   console.log(`[ok] Ad créée (PAUSED): ${ad.id}`);
+  for (const a of onAdset) {
+    await del(a.id);
+    console.log(`[ok] Ancienne ad supprimée: ${a.id} ("${a.name}")`);
+  }
 
   // Log the created Ad ID to the ops doc.
   const docPath = join(__dirname, "..", "docs", "META-ADS-SETUP.md");
