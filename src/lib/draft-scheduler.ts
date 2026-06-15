@@ -74,6 +74,36 @@ export function findSlot(
   return null;
 }
 
+/** Format a unix-seconds instant as SQLite's datetime() text: 'YYYY-MM-DD HH:MM:SS' (UTC). */
+export function toSqliteUtc(unixSec: number): string {
+  return new Date(unixSec * 1000).toISOString().slice(0, 19).replace("T", " ");
+}
+
+/**
+ * True iff `s` is exactly SQLite datetime() shape: 'YYYY-MM-DD HH:MM:SS'. Producers MUST
+ * store slots in this format — the publication_queue `scheduled_at <= datetime('now')` due
+ * check is a lexicographic string compare, so an ISO 'T'/'Z' form ('T' 0x54 > ' ' 0x20)
+ * would sort after every space-form timestamp and never read as due. Guards that invariant.
+ */
+export function isSqliteUtc(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(s);
+}
+
+/**
+ * The next posting slot (M/W/F at SLOT_HOUR_UTC) strictly after `afterSec` whose
+ * SQLite-formatted timestamp is not already in `occupied`, as a SQLite datetime
+ * string. Used by the publication queue to pick the next free slot for a platform.
+ * Returns null if every slot within the horizon is taken. Pure — the caller supplies
+ * the reference time and the occupancy set.
+ */
+export function nextFreeSlot(afterSec: number, occupied: Set<string>): string | null {
+  for (const slot of upcomingSlots(afterSec, HORIZON_SLOTS)) {
+    const iso = toSqliteUtc(slot);
+    if (!occupied.has(iso)) return iso;
+  }
+  return null;
+}
+
 /**
  * Build a slot → occupancy map from already-scheduled drafts, keyed by raw
  * scheduled_at. Off-grid manual schedules (timestamps not on the M/W/F 15:00 UTC grid)
