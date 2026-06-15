@@ -103,7 +103,16 @@ export async function GET(request: Request) {
       drafts = [fr, en];
       const count = drafts.filter((d) => d.success).length;
       console.log(`[CRON] Bilingual generation complete — ${count}/2 drafts created`);
-      if (count === 0) throw new Error("Both FR and EN content generations failed");
+      if (count === 0) {
+        // Propagate each language's real failure (HTTP status / "unreachable")
+        // into the thrown message so trackCron records it in cron_runs.detail.
+        // Without this the dashboard only ever shows the generic wrapper text
+        // and the actual cause stays buried in Vercel function logs.
+        const detail = drafts
+          .map((d) => `${d.language.toUpperCase()}: ${d.success ? "ok" : d.error}`)
+          .join(" | ");
+        throw new Error(`Both FR and EN content generations failed — ${detail}`);
+      }
       return count;
     });
 
