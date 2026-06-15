@@ -66,12 +66,11 @@ async function _initSchemaImpl(): Promise<void> {
       created_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type)`,
-    // Precomputed "Avec rabais" flag (recomputed each sync via recomputeHasDiscount).
-    // Lets getCatalogStats + the catalog filter use a cheap indexed scan instead of a
-    // correlated EXISTS over price_history on every page load. PARTIAL index on the
-    // discounted subset only — has_discount is a 0/1 boolean, so a full index is too
-    // low-selectivity; the partial index is a compact list of discounted SKUs.
-    `CREATE INDEX IF NOT EXISTS idx_products_has_discount ON products(has_discount) WHERE has_discount = 1`,
+    // NOTE: idx_products_has_discount (partial index on the precomputed "Avec rabais" flag)
+    // is created LATER — after the has_discount column migration below — NOT in this batch.
+    // On a pre-existing products table the column doesn't exist yet when this batch runs,
+    // so a partial index referencing it threw "no such column: has_discount" and aborted
+    // the entire schema init (→ db unreachable). See the post-migration block.
     `CREATE INDEX IF NOT EXISTS idx_products_shopify_id ON products(shopify_product_id)`,
     `CREATE INDEX IF NOT EXISTS idx_products_price ON products(price)`,
     `CREATE INDEX IF NOT EXISTS idx_products_qty ON products(qty)`,
@@ -357,6 +356,12 @@ async function _initSchemaImpl(): Promise<void> {
   if (alters.length > 0) {
     await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
   }
+
+  // has_discount partial index — created HERE, after the ALTER above guarantees the column
+  // exists (fresh DBs get it from CREATE TABLE; existing DBs from the ALTER). Creating it in
+  // the early schemaStatements batch threw "no such column: has_discount" on the pre-existing
+  // production table (column not added yet) and aborted schema init. Idempotent (IF NOT EXISTS).
+  await db.execute(`CREATE INDEX IF NOT EXISTS idx_products_has_discount ON products(has_discount) WHERE has_discount = 1`);
 
   // One-time backfill of products.has_discount when the column was just added. Uses the
   // local `db` (not recomputeHasDiscount → ensureSchema) to avoid awaiting the in-flight

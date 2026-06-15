@@ -1055,3 +1055,25 @@ describe("has_discount precompute + cron/feed retention (fix/has-discount-precom
     expect((await db.execute(`SELECT COUNT(*) AS c FROM feed_syncs`)).rows[0].c).toBe(1);
   });
 });
+
+describe("has_discount index ordering (regression — prod db:false outage)", () => {
+  let db: Client;
+  beforeEach(() => { db = setupTestDb(); });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  it("partial index on has_discount THROWS when the column does not exist yet (the bug)", async () => {
+    // Mirrors a pre-existing prod products table created before has_discount existed.
+    await db.execute(`CREATE TABLE products (sku TEXT PRIMARY KEY, price REAL)`);
+    await expect(
+      db.execute(`CREATE INDEX idx_products_has_discount ON products(has_discount) WHERE has_discount = 1`),
+    ).rejects.toThrow(/no such column/i);
+  });
+
+  it("succeeds when the column is added (ALTER) BEFORE the index (the fix)", async () => {
+    await db.execute(`CREATE TABLE products (sku TEXT PRIMARY KEY, price REAL)`);
+    await db.execute(`ALTER TABLE products ADD COLUMN has_discount INTEGER DEFAULT 0`);
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_products_has_discount ON products(has_discount) WHERE has_discount = 1`);
+    const idx = await db.execute(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_products_has_discount'`);
+    expect(idx.rows.length).toBe(1);
+  });
+});

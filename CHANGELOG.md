@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.52] - 2026-06-14
+
+### Fixed (P0 — production DB unreachable, `/api/health` db:false)
+- **`idx_products_has_discount` is now created AFTER the `has_discount` column migration**, not
+  in the early `schemaStatements` batch. Since #180, the partial index ran before the
+  `ALTER TABLE products ADD COLUMN has_discount` — on the pre-existing prod `products` table the
+  column didn't exist yet → `no such column: has_discount` → the whole `initSchema()` write-batch
+  threw → `ensureSchema()` rejected (memoized, never retried) → every query failed → `db:false`
+  on every deploy since #180. The ALTER was never reached, so the column never got added.
+  Moved the `CREATE INDEX IF NOT EXISTS` to a standalone statement after the ALTER (idempotent;
+  fresh DBs unaffected). Regression tests added (index throws without the column; succeeds after).
+  Turso itself was healthy throughout (raw `SELECT 1` → 200); the fault was schema-init ordering.
+
 ## [0.5.53.51] - 2026-06-14
 
 ### Fixed (Meta Dynamic Ads — FR ad set on Business catalog)
