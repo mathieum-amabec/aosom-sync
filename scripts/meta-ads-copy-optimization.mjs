@@ -28,7 +28,7 @@ const CAMPAIGN_ID = "52562992827605";  // traffic campaign created this evening 
 const ADSET_ID = "52562995963805";     // traffic ad set — the creative target
 const PAGE_ID = "1057151924144231";    // Ameublo Direct FB page
 const PRODUCT_SET_ID = "2891699814486850";  // catalogue product set — Meta pulls images dynamically
-const LINK = "https://ameublodirect.ca";
+const LINK = "https://ameublodirect.ca/";
 const CREATIVE_NAME = "Trafic — Multi-copy Advantage+ FR";
 const AD_NAME = "Trafic — Multi-copy Advantage+ FR";
 
@@ -88,22 +88,38 @@ async function del(path) {
   return json;
 }
 
-// ── asset_feed_spec (multi-copy Advantage+) ──────────────────────────────────
+// ── Multi-copy DYNAMIC (catalogue) creative ──────────────────────────────────
+// Mirrors the structure of the proven working creative on THIS ad set (998268586467995):
+// catalogue formats CAROUSEL/COLLECTION + optimization_type FORMAT_AUTOMATION pull the
+// product images from product_set_id (so NO image_hash and NOT ad_formats AUTOMATIC_FORMAT,
+// which is the non-catalogue format that demands uploaded images). On top of that proven
+// base we layer the 5 bodies × 5 titles × 2 descriptions matrix for Meta to test per user.
 const assetFeedSpec = {
+  ad_formats: ["CAROUSEL", "COLLECTION"],
+  optimization_type: "FORMAT_AUTOMATION",
   bodies: PRIMARY_TEXTS.map((text) => ({ text })),
   titles: HEADLINES.map((text) => ({ text })),
   descriptions: DESCRIPTIONS.map((text) => ({ text })),
   call_to_action_types: ["SHOP_NOW"],
   link_urls: [{ website_url: LINK }],
-  ad_formats: ["AUTOMATIC_FORMAT"],
 };
-// Dynamic (catalogue) creative: product_set_id supplies the images, so no image_hash
-// is required. asset_feed_spec still drives the 5×5×2 copy/headline/description matrix.
 const creativePayload = {
   name: CREATIVE_NAME,
-  object_story_spec: { page_id: PAGE_ID },
   product_set_id: PRODUCT_SET_ID,
   asset_feed_spec: assetFeedSpec,
+  // template_data is what the working catalogue creative uses to render product images;
+  // message/name seed the base copy (the asset_feed_spec arrays drive the A/B matrix).
+  object_story_spec: {
+    page_id: PAGE_ID,
+    template_data: {
+      link: LINK,
+      message: PRIMARY_TEXTS[0],
+      name: HEADLINES[0],
+      call_to_action: { type: "SHOP_NOW" },
+      multi_share_end_card: true,
+      show_multiple_images: false,
+    },
+  },
 };
 const adPayload = (creativeId) => ({
   name: AD_NAME,
@@ -133,9 +149,10 @@ async function main() {
   console.log(`\n${line}\nÉTAPE 2 — POST ${ACT}/ads  (creative_id rempli après l'étape 1)\n${line}`);
   console.log(JSON.stringify(adPayload("{creative_id}"), null, 2));
 
-  console.log(`\n✓ NOTE: creative DYNAMIQUE — ad_formats AUTOMATIC_FORMAT + product_set_id ${PRODUCT_SET_ID}.
-  Meta tire les images du catalogue automatiquement (aucun image_hash requis) et teste la
-  matrice 5 bodies × 5 titles × 2 descriptions. Ordre --apply : créer AVANT de supprimer.`);
+  console.log(`\n✓ NOTE: creative DYNAMIQUE catalogue — ad_formats CAROUSEL/COLLECTION + FORMAT_AUTOMATION
+  + product_set_id ${PRODUCT_SET_ID} + object_story_spec.template_data (structure calquée sur le
+  creative qui fonctionne déjà sur cet ad set). Meta tire les images du catalogue (aucun image_hash)
+  et teste la matrice 5 bodies × 5 titles × 2 descriptions. Ordre --apply : créer AVANT de supprimer.`);
 
   if (!APPLY) {
     console.log(`\n${line}\nDRY-RUN terminé — rien n'a été envoyé. Relancer avec --apply (crée en PAUSED).\n${line}`);
