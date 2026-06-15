@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.54] - 2026-06-15
+
+### Added (Meta Ads — multi-copy Advantage+ creative)
+- **`scripts/meta-ads-copy-optimization.mjs`** — replaces the generic FR creative on the
+  traffic ad set (`52562995963805`, campaign `52562992827605`) with an `asset_feed_spec`
+  multi-copy creative: **5 primary texts × 5 headlines × 2 descriptions**, `SHOP_NOW` →
+  ameublodirect.ca, `SINGLE_IMAGE`. Meta optimizes the best combination per user.
+- Safe-by-design: **dry-run by default** (prints the full payload, asserts 5/5/2); `--apply`
+  deletes the current ad on the ad set then creates the new creative + ad in **PAUSED** state
+  (never activates); Graph **#190 / token errors STOP** with a "tell Mat" message; logs the
+  created Ad ID to `docs/META-ADS-SETUP.md` on apply.
+
 ## [0.5.53.53] - 2026-06-14
 
 ### Added (Meta traffic campaign tooling)
