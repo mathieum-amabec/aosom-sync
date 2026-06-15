@@ -1,4 +1,4 @@
-import { createClient, type Client, type Row, type InValue } from "@libsql/client";
+import { createClient, type Client, type Row, type InValue, type InStatement } from "@libsql/client";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
@@ -45,13 +45,28 @@ let schemaPromise: Promise<void> | null = null;
 
 export async function initSchema(): Promise<void> {
   if (!schemaPromise) {
-    schemaPromise = _initSchemaImpl();
+    // Reset the memoized promise on failure so the next caller retries instead of
+    // re-throwing the cached rejection forever (issue #186: a transient init failure
+    // otherwise wedged the process down until the next cold start).
+    schemaPromise = _initSchemaImpl().catch((err) => {
+      schemaPromise = null;
+      throw err;
+    });
   }
   return schemaPromise;
 }
 
 async function _initSchemaImpl(): Promise<void> {
   const db = getDb();
+
+  // Run a schema-init batch, naming the step in the log before re-throwing on failure.
+  // _initSchemaImpl's rejection is what initSchema() memoizes, so a labelled error turns
+  // an otherwise opaque "schema init failed" into an actionable "which step broke" (#186).
+  const runBatch = (label: string, stmts: InStatement[]) =>
+    db.batch(stmts, "write").catch((err) => {
+      console.error(`[initSchema] batch "${label}" failed:`, err);
+      throw err;
+    });
 
   // Schema statements inlined for Vercel compatibility (serverless has no access to src/ files at runtime)
   const schemaStatements = [
@@ -289,7 +304,7 @@ async function _initSchemaImpl(): Promise<void> {
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
-  await db.batch(allStatements.map(sql => ({ sql, args: [] })), "write");
+  await runBatch("schema+legacy DDL", allStatements.map(sql => ({ sql, args: [] })));
 
   // Column migrations for facebook_drafts (post_text_en, channels) — SQLite can't IF NOT EXISTS on ALTER
   const info = await db.execute(`PRAGMA table_info(facebook_drafts)`);
@@ -354,7 +369,7 @@ async function _initSchemaImpl(): Promise<void> {
   }
 
   if (alters.length > 0) {
-    await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
+    await runBatch("column ALTERs", alters.map(sql => ({ sql, args: [] })));
   }
 
   // has_discount partial index — created HERE, after the ALTER above guarantees the column
@@ -384,7 +399,7 @@ async function _initSchemaImpl(): Promise<void> {
     ctAlters.push(`ALTER TABLE content_templates ADD COLUMN mode TEXT NOT NULL DEFAULT 'hook_seeded'`);
   }
   if (ctAlters.length > 0) {
-    await db.batch(ctAlters.map(sql => ({ sql, args: [] })), "write");
+    await runBatch("content_templates ALTERs", ctAlters.map(sql => ({ sql, args: [] })));
   }
 
   // One-shot: assign mode values + update generative prompts (runs only when mode column is new)
@@ -415,7 +430,7 @@ async function _initSchemaImpl(): Promise<void> {
       { slug: "saisonnier_indoor",
         replacement: "Commence par une accroche évocatrice que tu génères toi-même — 8-15 mots, évoque l'ambiance saisonnière intérieure au Québec en {{season}}." },
     ];
-    await db.batch([
+    await runBatch("content_templates mode seed", [
       ...GENERATIVE_SEEDED_SLUGS.map(slug => ({
         sql: `UPDATE content_templates SET mode = 'generative_seeded' WHERE slug = ?`,
         args: [slug] as import("@libsql/client").InValue[],
@@ -428,7 +443,7 @@ async function _initSchemaImpl(): Promise<void> {
         sql: `UPDATE content_templates SET prompt_pattern_fr = REPLACE(prompt_pattern_fr, 'Commence exactement par cette accroche: {{hook}}', ?) WHERE slug = ?`,
         args: [replacement, slug] as import("@libsql/client").InValue[],
       })),
-    ], "write");
+    ]);
   }
 
   // Tutoiement v1 — add mandatory tutoiement constraint to 6 inspiration/seasonal templates.
@@ -439,7 +454,7 @@ async function _initSchemaImpl(): Promise<void> {
       "inspiration_ambiance_maison", "inspiration_vie_outdoor", "inspiration_animaux",
       "inspiration_famille", "saisonnier_outdoor", "saisonnier_indoor",
     ];
-    await db.batch([
+    await runBatch("tutoiement v1", [
       ...TUTOIEMENT_SLUGS.map(slug => ({
         sql: `UPDATE content_templates SET prompt_pattern_fr = REPLACE(prompt_pattern_fr, 'Contraintes:', 'Contraintes:' || char(10) || '- Tutoiement OBLIGATOIRE (tu/te/ton) dans tout le post — corps ET CTA. Jamais de vous/votre/vos.') WHERE slug = ?`,
         args: [slug] as import("@libsql/client").InValue[],
@@ -448,7 +463,7 @@ async function _initSchemaImpl(): Promise<void> {
         sql: `UPDATE content_templates SET prompt_pattern_fr = REPLACE(prompt_pattern_fr, 'C''est quoi votre activité préférée en famille à la maison?', 'C''est quoi ton activité préférée en famille à la maison?') WHERE slug = 'inspiration_famille'`,
         args: [] as import("@libsql/client").InValue[],
       },
-    ], "write");
+    ]);
     // Flag written after updates succeed — separate statement so partial batch failure leaves flag unset
     await db.execute(`INSERT OR IGNORE INTO settings (key, value) VALUES ('tutoiement_v1_migrated', '1')`);
   }
@@ -493,12 +508,12 @@ async function _initSchemaImpl(): Promise<void> {
     ['social_logo_position', 'bottom-right'],
   ];
 
-  await db.batch(
+  await runBatch(
+    "default settings",
     defaultSettings.map(([key, value]) => ({
       sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
       args: [key, value],
     })),
-    "write"
   );
 
   // Migrate content templates to megastore spec (one-shot: detects old slugs by checking for new slug)
@@ -508,7 +523,8 @@ async function _initSchemaImpl(): Promise<void> {
   if (ctMigrateCheck.rows.length === 0) {
     const { MEGASTORE_TEMPLATES } = await import("@/lib/seed/content-templates-megastore");
     await db.execute("DELETE FROM content_templates");
-    await db.batch(
+    await runBatch(
+      "megastore templates seed",
       MEGASTORE_TEMPLATES.map((t) => ({
         sql: `INSERT INTO content_templates
               (slug, content_type, display_name_fr, display_name_en,
@@ -521,7 +537,6 @@ async function _initSchemaImpl(): Promise<void> {
           t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes), t.mode,
         ],
       })),
-      "write"
     );
   }
 
@@ -531,7 +546,8 @@ async function _initSchemaImpl(): Promise<void> {
   // the unique slug. Safe to run on every cold start.
   {
     const { CLICKBAIT_TEMPLATES } = await import("@/lib/seed/content-templates-megastore");
-    await db.batch(
+    await runBatch(
+      "clickbait templates seed",
       CLICKBAIT_TEMPLATES.map((t) => ({
         sql: `INSERT OR IGNORE INTO content_templates
               (slug, content_type, display_name_fr, display_name_en,
@@ -544,7 +560,6 @@ async function _initSchemaImpl(): Promise<void> {
           t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes), t.mode,
         ],
       })),
-      "write"
     );
   }
 
