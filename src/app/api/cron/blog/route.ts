@@ -4,6 +4,7 @@ import { env } from "@/lib/config";
 import {
   selectBilingualTopic,
   type Language,
+  type Season,
 } from "@/lib/blog-topics";
 import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
 import { trackCron } from "@/lib/cron-tracking";
@@ -21,7 +22,16 @@ const BETWEEN_LANGS_DELAY_MS = 3_000;
 const SHARED_IMAGE_COUNT = 3;
 
 type LangOutcome =
-  | { language: Language; success: true; articleId: string; adminUrl: string; title: string }
+  | {
+      language: Language;
+      success: true;
+      articleId: string;
+      adminUrl: string;
+      title: string;
+      published: boolean;
+      score: number | null;
+      publishReason: string;
+    }
   | { language: Language; success: false; error: string };
 
 function verifyCronSecret(header: string | null): boolean {
@@ -38,6 +48,9 @@ interface BlogGenerateResponse {
   title: string;
   handle: string;
   blogId: number;
+  score?: number | null;
+  published?: boolean;
+  publishReason?: string;
 }
 
 /**
@@ -70,6 +83,7 @@ async function generateBlog(
   topic: string,
   lang: Language,
   keywords: string[],
+  season: Season,
   images: UnsplashImage[] | undefined,
 ): Promise<LangOutcome> {
   const url = `${origin}/api/blog/generate`;
@@ -84,7 +98,8 @@ async function generateBlog(
         "Content-Type": "application/json",
       },
       // `images` is omitted when undefined → generate falls back to its own search.
-      body: JSON.stringify({ topic, lang, keywords, ...(images ? { images } : {}) }),
+      // season + autoPublish drive the quality/season/cap auto-publish gate in generate.
+      body: JSON.stringify({ topic, lang, keywords, season, autoPublish: true, ...(images ? { images } : {}) }),
     });
   } catch (err) {
     console.error(`[CRON/blog] ${tag} fetch threw:`, err);
@@ -98,13 +113,20 @@ async function generateBlog(
   }
 
   const result = (await res.json()) as BlogGenerateResponse;
-  console.log(`[CRON/blog] ${tag} article created: ${result.articleId} (${result.title})`);
+  const published = result.published === true;
+  console.log(
+    `[CRON/blog] ${tag} article created: ${result.articleId} (${result.title}) — ` +
+      `score=${result.score ?? "n/a"} published=${published} (${result.publishReason ?? "n/a"})`,
+  );
   return {
     language: lang,
     success: true,
     articleId: result.articleId,
     adminUrl: result.adminUrl,
     title: result.title,
+    published,
+    score: result.score ?? null,
+    publishReason: result.publishReason ?? "n/a",
   };
 }
 
@@ -130,16 +152,17 @@ export async function GET(request: Request) {
       sharedCount = sharedImages ? sharedImages.length : 0;
       console.log(`[CRON/blog] shared images: ${sharedImages ? sharedImages.length : "none (self-fetch)"}`);
 
-      const fr = await generateBlog(origin, sel.fr, "fr", sel.keywordsFr, sharedImages);
+      const fr = await generateBlog(origin, sel.fr, "fr", sel.keywordsFr, sel.season, sharedImages);
 
       console.log(`[CRON/blog] Waiting ${BETWEEN_LANGS_DELAY_MS}ms before EN`);
       await new Promise((r) => setTimeout(r, BETWEEN_LANGS_DELAY_MS));
 
-      const en = await generateBlog(origin, sel.en, "en", sel.keywordsEn, sharedImages);
+      const en = await generateBlog(origin, sel.en, "en", sel.keywordsEn, sel.season, sharedImages);
 
       articles = [fr, en];
       const count = articles.filter((a) => a.success).length;
-      console.log(`[CRON/blog] Complete — ${count}/2 articles created`);
+      const publishedCount = articles.filter((a) => a.success && a.published).length;
+      console.log(`[CRON/blog] Complete — ${count}/2 articles created, ${publishedCount} auto-published`);
       if (count === 0) throw new Error("Both FR and EN blog generations failed");
       return count;
     });

@@ -1,12 +1,14 @@
-import { createClient, type Client, type Row, type InValue } from "@libsql/client";
+import { createClient, type Client, type Row, type InValue, type InStatement } from "@libsql/client";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import type { SyncRun, SyncLogEntry, ChangeType } from "@/types/sync";
 import type { UserRole } from "@/lib/config";
+import { DEFAULT_PUBLICATION_SCHEDULE, DEFAULT_BLOG_SCHEDULE } from "@/lib/config";
 import type { AosomProduct } from "@/types/aosom";
 import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
 import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
+import { isSqliteUtc } from "@/lib/draft-scheduler";
 
 let client: Client | null = null;
 
@@ -45,13 +47,28 @@ let schemaPromise: Promise<void> | null = null;
 
 export async function initSchema(): Promise<void> {
   if (!schemaPromise) {
-    schemaPromise = _initSchemaImpl();
+    // Reset the memoized promise on failure so the next caller retries instead of
+    // re-throwing the cached rejection forever (issue #186: a transient init failure
+    // otherwise wedged the process down until the next cold start).
+    schemaPromise = _initSchemaImpl().catch((err) => {
+      schemaPromise = null;
+      throw err;
+    });
   }
   return schemaPromise;
 }
 
 async function _initSchemaImpl(): Promise<void> {
   const db = getDb();
+
+  // Run a schema-init batch, naming the step in the log before re-throwing on failure.
+  // _initSchemaImpl's rejection is what initSchema() memoizes, so a labelled error turns
+  // an otherwise opaque "schema init failed" into an actionable "which step broke" (#186).
+  const runBatch = (label: string, stmts: InStatement[]) =>
+    db.batch(stmts, "write").catch((err) => {
+      console.error(`[initSchema] batch "${label}" failed:`, err);
+      throw err;
+    });
 
   // Schema statements inlined for Vercel compatibility (serverless has no access to src/ files at runtime)
   const schemaStatements = [
@@ -113,6 +130,11 @@ async function _initSchemaImpl(): Promise<void> {
     // Migrations for tables created before multi-channel columns existed (no-op if already present)
     `CREATE TABLE IF NOT EXISTS social_autopost_counter (
       day TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0
+    )`,
+    // Per-ISO-week count of blog articles auto-published, for the weekly cap. Keyed by
+    // isoWeekKey() ('YYYY-Www'); old weeks just sit dormant (negligible row count).
+    `CREATE TABLE IF NOT EXISTS blog_publish_counter (
+      week TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0
     )`,
     `CREATE TABLE IF NOT EXISTS notifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, title TEXT NOT NULL,
@@ -286,10 +308,36 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_price_alerts_pending ON price_alerts(notified_at)`,
     `CREATE INDEX IF NOT EXISTS idx_cron_runs_name_at ON cron_runs(name, ran_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_feed_syncs_type_at ON feed_syncs(feed_type, fetched_at DESC)`,
+    // publication_queue: unified scheduling queue for social posts, Shopify product
+    // drafts, and blog articles. scheduled_at/created_at/published_at are SQLite
+    // datetime() TEXT ('YYYY-MM-DD HH:MM:SS' UTC) — distinct from facebook_drafts which
+    // uses unix-seconds integers. payload is the JSON-stringified content the consumer
+    // cron publishes for the slot. CHECK constraints reject typo'd enum values that would
+    // otherwise make a row invisible to every status-filtered query.
+    `CREATE TABLE IF NOT EXISTS publication_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog')),
+      content_id TEXT NOT NULL,      -- ID of the source draft/post
+      platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
+      payload TEXT NOT NULL,         -- JSON-stringified content
+      scheduled_at TEXT NOT NULL,    -- SQLite datetime TEXT of the slot (UTC)
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled')),
+      error TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      published_at TEXT
+    )`,
+    // Composite (status, scheduled_at): serves the consumer cron's "due pending items,
+    // oldest slot first" scan (getNextPending) — seek by status then order by scheduled_at.
+    `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`,
+    // Partial UNIQUE (platform, scheduled_at) over ACTIVE rows only: enforces "one active
+    // item per platform per slot" as a hard integrity backstop, so the read-compute-insert
+    // in /api/queue/add can't silently double-book a slot under concurrent requests. failed/
+    // cancelled rows drop out of the index, freeing their slot for rebooking.
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
-  await db.batch(allStatements.map(sql => ({ sql, args: [] })), "write");
+  await runBatch("schema+legacy DDL", allStatements.map(sql => ({ sql, args: [] })));
 
   // Column migrations for facebook_drafts (post_text_en, channels) — SQLite can't IF NOT EXISTS on ALTER
   const info = await db.execute(`PRAGMA table_info(facebook_drafts)`);
@@ -354,7 +402,7 @@ async function _initSchemaImpl(): Promise<void> {
   }
 
   if (alters.length > 0) {
-    await db.batch(alters.map(sql => ({ sql, args: [] })), "write");
+    await runBatch("column ALTERs", alters.map(sql => ({ sql, args: [] })));
   }
 
   // has_discount partial index — created HERE, after the ALTER above guarantees the column
@@ -384,7 +432,7 @@ async function _initSchemaImpl(): Promise<void> {
     ctAlters.push(`ALTER TABLE content_templates ADD COLUMN mode TEXT NOT NULL DEFAULT 'hook_seeded'`);
   }
   if (ctAlters.length > 0) {
-    await db.batch(ctAlters.map(sql => ({ sql, args: [] })), "write");
+    await runBatch("content_templates ALTERs", ctAlters.map(sql => ({ sql, args: [] })));
   }
 
   // One-shot: assign mode values + update generative prompts (runs only when mode column is new)
@@ -415,7 +463,7 @@ async function _initSchemaImpl(): Promise<void> {
       { slug: "saisonnier_indoor",
         replacement: "Commence par une accroche évocatrice que tu génères toi-même — 8-15 mots, évoque l'ambiance saisonnière intérieure au Québec en {{season}}." },
     ];
-    await db.batch([
+    await runBatch("content_templates mode seed", [
       ...GENERATIVE_SEEDED_SLUGS.map(slug => ({
         sql: `UPDATE content_templates SET mode = 'generative_seeded' WHERE slug = ?`,
         args: [slug] as import("@libsql/client").InValue[],
@@ -428,7 +476,7 @@ async function _initSchemaImpl(): Promise<void> {
         sql: `UPDATE content_templates SET prompt_pattern_fr = REPLACE(prompt_pattern_fr, 'Commence exactement par cette accroche: {{hook}}', ?) WHERE slug = ?`,
         args: [replacement, slug] as import("@libsql/client").InValue[],
       })),
-    ], "write");
+    ]);
   }
 
   // Tutoiement v1 — add mandatory tutoiement constraint to 6 inspiration/seasonal templates.
@@ -439,7 +487,7 @@ async function _initSchemaImpl(): Promise<void> {
       "inspiration_ambiance_maison", "inspiration_vie_outdoor", "inspiration_animaux",
       "inspiration_famille", "saisonnier_outdoor", "saisonnier_indoor",
     ];
-    await db.batch([
+    await runBatch("tutoiement v1", [
       ...TUTOIEMENT_SLUGS.map(slug => ({
         sql: `UPDATE content_templates SET prompt_pattern_fr = REPLACE(prompt_pattern_fr, 'Contraintes:', 'Contraintes:' || char(10) || '- Tutoiement OBLIGATOIRE (tu/te/ton) dans tout le post — corps ET CTA. Jamais de vous/votre/vos.') WHERE slug = ?`,
         args: [slug] as import("@libsql/client").InValue[],
@@ -448,7 +496,7 @@ async function _initSchemaImpl(): Promise<void> {
         sql: `UPDATE content_templates SET prompt_pattern_fr = REPLACE(prompt_pattern_fr, 'C''est quoi votre activité préférée en famille à la maison?', 'C''est quoi ton activité préférée en famille à la maison?') WHERE slug = 'inspiration_famille'`,
         args: [] as import("@libsql/client").InValue[],
       },
-    ], "write");
+    ]);
     // Flag written after updates succeed — separate statement so partial batch failure leaves flag unset
     await db.execute(`INSERT OR IGNORE INTO settings (key, value) VALUES ('tutoiement_v1_migrated', '1')`);
   }
@@ -491,14 +539,16 @@ async function _initSchemaImpl(): Promise<void> {
     ['social_store_display_name', ''],
     ['social_banner_opacity', '75'],
     ['social_logo_position', 'bottom-right'],
+    ['publication_schedule', JSON.stringify(DEFAULT_PUBLICATION_SCHEDULE)],
+    ['blog_schedule', JSON.stringify(DEFAULT_BLOG_SCHEDULE)],
   ];
 
-  await db.batch(
+  await runBatch(
+    "default settings",
     defaultSettings.map(([key, value]) => ({
       sql: `INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`,
       args: [key, value],
     })),
-    "write"
   );
 
   // Migrate content templates to megastore spec (one-shot: detects old slugs by checking for new slug)
@@ -508,7 +558,8 @@ async function _initSchemaImpl(): Promise<void> {
   if (ctMigrateCheck.rows.length === 0) {
     const { MEGASTORE_TEMPLATES } = await import("@/lib/seed/content-templates-megastore");
     await db.execute("DELETE FROM content_templates");
-    await db.batch(
+    await runBatch(
+      "megastore templates seed",
       MEGASTORE_TEMPLATES.map((t) => ({
         sql: `INSERT INTO content_templates
               (slug, content_type, display_name_fr, display_name_en,
@@ -521,7 +572,6 @@ async function _initSchemaImpl(): Promise<void> {
           t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes), t.mode,
         ],
       })),
-      "write"
     );
   }
 
@@ -531,7 +581,8 @@ async function _initSchemaImpl(): Promise<void> {
   // the unique slug. Safe to run on every cold start.
   {
     const { CLICKBAIT_TEMPLATES } = await import("@/lib/seed/content-templates-megastore");
-    await db.batch(
+    await runBatch(
+      "clickbait templates seed",
       CLICKBAIT_TEMPLATES.map((t) => ({
         sql: `INSERT OR IGNORE INTO content_templates
               (slug, content_type, display_name_fr, display_name_en,
@@ -544,7 +595,6 @@ async function _initSchemaImpl(): Promise<void> {
           t.active ? 1 : 0, t.frequency_per_month, JSON.stringify(t.scopes), t.mode,
         ],
       })),
-      "write"
     );
   }
 
@@ -2417,6 +2467,159 @@ export async function deleteFacebookDraft(id: number): Promise<void> {
   await db.execute({ sql: `DELETE FROM facebook_drafts WHERE id = ?`, args: [id] });
 }
 
+// ─── Publication Queue ───────────────────────────────────────────────
+//
+// Unified scheduling queue (social posts / Shopify drafts / blog articles).
+// Unlike facebook_drafts (unix-seconds integers), all timestamps here are
+// SQLite datetime() TEXT — 'YYYY-MM-DD HH:MM:SS' UTC — so the `<=` slot scan in
+// getNextPending compares lexicographically against datetime('now'). Producers
+// MUST store slots in that exact format (see toSqliteUtc in draft-scheduler).
+
+export type QueueContentType = "social" | "draft" | "blog";
+export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog";
+export type QueueStatus = "pending" | "publishing" | "published" | "failed" | "cancelled";
+
+export interface PublicationQueueItem {
+  id: number;
+  contentType: QueueContentType;
+  contentId: string;
+  platform: QueuePlatform;
+  payload: string; // JSON-stringified content
+  scheduledAt: string; // SQLite datetime TEXT (UTC)
+  status: QueueStatus;
+  error: string | null;
+  createdAt: string;
+  publishedAt: string | null;
+}
+
+function mapQueueItem(o: Record<string, unknown>): PublicationQueueItem {
+  return {
+    id: Number(o.id),
+    contentType: o.content_type as QueueContentType,
+    contentId: String(o.content_id),
+    platform: o.platform as QueuePlatform,
+    payload: String(o.payload),
+    scheduledAt: String(o.scheduled_at),
+    status: o.status as QueueStatus,
+    error: (o.error as string) || null,
+    createdAt: String(o.created_at),
+    publishedAt: (o.published_at as string) || null,
+  };
+}
+
+/** Thrown when a slot is already taken on a platform (partial-unique-index violation). */
+export class QueueSlotTakenError extends Error {
+  constructor(platform: string, scheduledAt: string) {
+    super(`Slot ${scheduledAt} already taken on platform '${platform}'`);
+    this.name = "QueueSlotTakenError";
+  }
+}
+
+/**
+ * Queue a single item for publishing at `scheduledAt` (SQLite datetime TEXT, UTC).
+ * Rejects a malformed `scheduledAt` up front: the due-check in getNextPending is a
+ * lexicographic compare, so a non-'YYYY-MM-DD HH:MM:SS' value would silently never be due.
+ * Surfaces the partial-unique-index conflict as QueueSlotTakenError so callers can react
+ * (e.g. recompute the next free slot) instead of seeing a raw SQLite error.
+ */
+export async function addToQueue(item: {
+  contentType: QueueContentType;
+  contentId: string;
+  platform: QueuePlatform;
+  payload: string;
+  scheduledAt: string;
+}): Promise<number> {
+  if (!isSqliteUtc(item.scheduledAt)) {
+    throw new Error(`addToQueue: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${item.scheduledAt}')`);
+  }
+  const db = await ensureSchema();
+  try {
+    const result = await db.execute({
+      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at)
+            VALUES (?, ?, ?, ?, ?)`,
+      args: [item.contentType, item.contentId, item.platform, item.payload, item.scheduledAt],
+    });
+    return Number(result.lastInsertRowid);
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+      throw new QueueSlotTakenError(item.platform, item.scheduledAt);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Due pending items (scheduled_at at/before now), oldest slot first. The consumer
+ * cron drains this, calling markPublished / markFailed per item. Served by
+ * idx_publication_queue_status_scheduled.
+ */
+export async function getNextPending(limit = 10): Promise<PublicationQueueItem[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM publication_queue
+          WHERE status = 'pending' AND scheduled_at <= datetime('now')
+          ORDER BY scheduled_at ASC
+          LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
+ * Atomically claim a pending item for publishing (pending → publishing). Returns true if
+ * this caller won the claim (rowsAffected === 1), false if another cron instance already
+ * took it. The consumer cron MUST claim before publishing so Vercel's overlapping cron
+ * instances never double-publish the same item — mirrors claimFacebookDraft.
+ */
+export async function claimQueueItem(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue SET status = 'publishing' WHERE id = ? AND status = 'pending'`,
+    args: [id],
+  });
+  return (result.rowsAffected ?? 0) === 1;
+}
+
+export async function markPublished(id: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE publication_queue SET status = 'published', published_at = datetime('now'), error = NULL WHERE id = ?`,
+    args: [id],
+  });
+}
+
+export async function markFailed(id: number, error: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE publication_queue SET status = 'failed', error = ? WHERE id = ?`,
+    args: [error, id],
+  });
+}
+
+/** All pending items (regardless of due time), oldest slot first — for the dashboard. */
+export async function getPendingQueue(): Promise<PublicationQueueItem[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(
+    `SELECT * FROM publication_queue WHERE status = 'pending' ORDER BY scheduled_at ASC`,
+  );
+  return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
+ * Slot timestamps (SQLite datetime TEXT) already taken on `platform` by an active
+ * (pending, publishing, or published) queue item — the same predicate as the partial
+ * unique index, so the next-free-slot search and the integrity backstop agree. Failed/
+ * cancelled items free their slot.
+ */
+export async function getOccupiedQueueSlots(platform: string): Promise<string[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT scheduled_at FROM publication_queue WHERE platform = ? AND status IN ('pending', 'publishing', 'published')`,
+    args: [platform],
+  });
+  return result.rows.map((r) => String(rowToObj(r).scheduled_at));
+}
+
 // ─── Auto-post daily counter ─────────────────────────────────────────
 
 function todayKey(): string {
@@ -2441,6 +2644,38 @@ export async function incrementAutopostCountToday(): Promise<number> {
   });
   const r = await db.execute({ sql: `SELECT count FROM social_autopost_counter WHERE day = ?`, args: [day] });
   return Number(rowToObj(r.rows[0]).count || 0);
+}
+
+// ─── Blog auto-publish: weekly cap ───────────────────────────────────
+
+/**
+ * Atomically reserve one publish slot for `week` if the count is below `cap`.
+ * Returns true if a slot was reserved (caller may publish), false if the cap is reached.
+ * The conditional upsert makes "check < cap AND increment" a single statement, so two
+ * concurrent runs can't both slip past the cap. Release the slot if the publish then
+ * fails (see releaseBlogPublishSlot).
+ */
+export async function reserveBlogPublishSlot(week: string, cap: number): Promise<boolean> {
+  if (cap < 1) return false; // cap 0 → never auto-publish (the INSERT path would bypass the WHERE)
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO blog_publish_counter (week, count) VALUES (?, 1)
+          ON CONFLICT(week) DO UPDATE SET count = count + 1 WHERE count < ?
+          RETURNING count`,
+    args: [week, cap],
+  });
+  // INSERT (new week) or a satisfied conditional UPDATE returns a row; an at-cap conflict
+  // updates nothing and returns no row.
+  return r.rows.length > 0;
+}
+
+/** Give back a slot reserved via reserveBlogPublishSlot when the publish ultimately failed. */
+export async function releaseBlogPublishSlot(week: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE blog_publish_counter SET count = MAX(0, count - 1) WHERE week = ?`,
+    args: [week],
+  });
 }
 
 export async function getLastPostDate(sku: string): Promise<number | null> {

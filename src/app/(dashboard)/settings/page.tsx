@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import PublicationScheduleTab from "./PublicationScheduleTab";
 
 interface Settings {
   [key: string]: string;
@@ -213,6 +214,7 @@ export default function SettingsPage() {
   const [testResults, setTestResults] = useState<Record<string, string>>({});
   const [testingPrompt, setTestingPrompt] = useState<string | null>(null);
   const [promptPreview, setPromptPreview] = useState<Record<string, string>>({});
+  const [tab, setTab] = useState<"general" | "publication">("general");
 
   useEffect(() => {
     fetch("/api/settings")
@@ -333,7 +335,7 @@ export default function SettingsPage() {
           <h2 className="text-2xl font-bold text-white">Settings</h2>
           <p className="text-gray-400 text-sm mt-1">Configure sync, social media, and API connections</p>
         </div>
-        {dirty.size > 0 && (
+        {tab === "general" && dirty.size > 0 && (
           <button
             onClick={saveChanges}
             disabled={saving}
@@ -344,7 +346,28 @@ export default function SettingsPage() {
         )}
       </div>
 
-      <div className="space-y-6">
+      <div className="flex gap-1 mb-6 border-b border-gray-800">
+        {([
+          { key: "general", label: "Général" },
+          { key: "publication", label: "Publication" },
+        ] as const).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === t.key
+                ? "border-blue-500 text-white"
+                : "border-transparent text-gray-400 hover:text-gray-200"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "publication" && <PublicationScheduleTab />}
+
+      <div className={`space-y-6 ${tab === "general" ? "" : "hidden"}`}>
         {SECTIONS.map((section) => (
           <div key={section.title} className="bg-gray-900 border border-gray-800 rounded-xl p-4 md:p-5">
             <h3 className="text-white font-semibold mb-4">{section.title}</h3>

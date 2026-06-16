@@ -231,3 +231,5 @@ EN next steps (after the FR catalog fix): create the EN campaign + ad set (audie
 an EN/Furnish-Direct retargeting Website Custom Audience, or reuse `52556992755405`),
 then add `adsetId`/`campaignId` to the `en` profile in `scripts/meta-ads-create.mjs`
 and run `--profile en --apply`. **Held for validation** (dry-run only for now).
+
+- 2026-06-15 — Multi-copy Advantage+ FR creative 2864145800626490 + ad **52563672744205** (PAUSED) on ad set 52562995963805 (campaign 52562992827605). 5 bodies × 5 titles × 2 descriptions.

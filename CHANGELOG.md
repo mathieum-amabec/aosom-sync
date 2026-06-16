@@ -2,6 +2,222 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.63] - 2026-06-15
+
+### Changed (Approve enqueues into publication_queue on the configurable schedule)
+- **`src/app/api/social/route.ts`** — the `approve` action no longer writes a
+  `scheduled` `facebook_draft` on the fixed Mon/Wed/Fri 15:00 UTC `draft-scheduler`
+  grid. It now reads `publication_schedule` from settings, picks the next free slot via
+  `getNextAvailableSlot` (publication-scheduler), and enqueues the draft into
+  `publication_queue` (consumed by `/api/cron/publisher`). The draft stays `approved`
+  in `facebook_drafts` — so `/api/cron/social-scheduled` can't also pick it up
+  (no double-publish). Falls back to plain `approved` (no queue entry) when the
+  schedule is disabled or no slot is free. Response keeps `scheduledAt` as unix
+  seconds (the dashboard's contract) and adds `queued` / `queuedCount`.
+- **`src/lib/social-publisher.ts`** — new `draftToQueueItems(draft, activeKeys)`:
+  maps a draft to one valid `SocialQueuePayload` per brand (ameublo → FR `postText`,
+  furnish → EN `postTextEn`), with brand-localized images and `platform` `"both"`
+  vs the single active platform. Without this the queue consumer's
+  `parseSocialPayload` (which requires `caption` + `brand`) would reject a raw draft
+  and every approved post would fail to publish.
+- **`src/lib/publication-scheduler.ts`** — `getNextAvailableSlot` now also returns
+  `sqlite` (the slot as SQLite `datetime()` text), so the queue path gets the exact
+  shape `addToQueue` requires without importing the converter from `draft-scheduler`.
+- **`CLAUDE.md`** — documents the two publishing paths and the deprecation of
+  `/api/cron/social-scheduled` for Approve (still serves the manual `schedule` action
+  + legacy `scheduled` rows). `TODOS.md` tracks surfacing `publication_queue` in the UI.
+- **Tests** — `tests/draft-to-queue-items.test.ts` (per-brand mapping: bilingual split,
+  EN-caption-missing skip, single-platform collapse, image localization) and
+  `tests/social-approve-queue.test.ts` (the approve route enqueues mapped payloads,
+  per-brand fan-out, `QueueSlotTakenError` retry, disabled→fallback, 404).
+
+## [0.5.53.62] - 2026-06-15
+
+### Changed (de-dup FB/IG publish routing — no behavior change)
+- **`src/lib/social-publisher.ts`** — new exported `publishSocialPayload(platform, payload)`:
+  the single implementation of "which media → which Graph API call" (facebook: video →
+  album → photo → text; instagram: reel → photo). `publishDraftToChannel` now builds a
+  payload and delegates to it instead of carrying its own inline routing.
+- **`src/lib/queue-publisher.ts`** — dropped its duplicate `publishToFacebook`/
+  `publishToInstagram` (added in #193); `publishQueueItem` and the `both` path now call
+  the shared `publishSocialPayload` (via a small `toSocialPayload` normalizer that folds a
+  singular `imageUrl` into `imageUrls`). Both the draft and queue publish paths now share
+  one routing implementation.
+- Behavior-preserving refactor (verified equivalent: the `||`→`??` and array-length
+  details are neutralized by `mapDraft`'s `|| null` / `length > 0` normalization). The
+  only surface change is the Instagram no-media error text. New
+  `tests/social-payload.test.ts` locks the routing contract; all existing
+  social-publisher / queue-publisher tests stay green.
+
+## [0.5.53.61] - 2026-06-15
+
+### Added (blog auto-publish — quality + season gated, weekly-capped)
+- **`src/lib/blog-auto-publish.ts`** — after the weekly blog cron creates a draft, an
+  article goes **live** only if all gates pass: a Claude "judge" quality score
+  >= `BLOG.AUTO_PUBLISH_SCORE_THRESHOLD` (80), the topic is **in season**, and the
+  weekly cap isn't reached. `scoreArticle` runs a second Claude call (untrusted-content
+  delimited to resist prompt injection); a judge failure leaves the article as a draft.
+- **`src/lib/blog-topics.ts`** — each of the 30 topics tagged with a `season`
+  (`spring|summer|fall|winter|all`); helpers `seasonOf`, `isSeasonActive`,
+  `isTopicInSeason`, and `isoWeekKey` (ISO-week-year aware, so the cap counter never splits
+  a week at the Dec/Jan boundary). `selectBilingualTopic` now carries the season.
+- **`src/lib/shopify-blog.ts`** — `publishBlogArticle(blogId, articleId)` flips a draft
+  live (`PUT … {published:true}`).
+- **Weekly cap** — `blog_publish_counter` table + atomic `reserveBlogPublishSlot` /
+  `releaseBlogPublishSlot` (a failed publish releases its slot). The cap and an on/off
+  switch come from the existing **`blog_schedule`** setting (#194's `BlogSchedule`:
+  `posts_per_week` + `enabled`), read via `parseBlogSchedule` — no new setting introduced.
+- **`/api/blog/generate`** accepts `season` + `autoPublish` and runs the gate after
+  creating the draft, returning `{score, published, publishReason}`. Manual/session calls
+  default to draft-only (unchanged behavior). The weekly cron passes the topic season and
+  `autoPublish: true`.
+- Tests: season helpers + ISO-week-key boundary (`tests/blog-topics.test.ts`), the gate
+  branches (`tests/blog-auto-publish.test.ts`), the atomic cap SQL (`tests/blog-publish-cap.test.ts`),
+  and `publishBlogArticle` (`tests/shopify-blog-publish.test.ts`).
+
+## [0.5.53.60] - 2026-06-15
+
+### Added (configurable publication + blog schedule)
+- **`src/lib/config.ts`** — `PublicationSchedule` / `BlogSchedule` types,
+  `DEFAULT_PUBLICATION_SCHEDULE` (Mon/Wed/Fri/Sat local slots, `America/Toronto`,
+  `max_per_day` 3) and `DEFAULT_BLOG_SCHEDULE` (2/week, Tue+Thu, 10:00), plus the
+  `publication_schedule` / `blog_schedule` keys in `ALLOWED_SETTINGS_KEYS`.
+- **`src/lib/database.ts`** — seeds both schedule blobs as `settings` defaults
+  (`INSERT OR IGNORE`, no migration needed for existing DBs).
+- **`src/lib/publication-scheduler.ts`** — new module: timezone/DST-aware slot math
+  and `getNextAvailableSlot(platform, settings)` which reads `publication_schedule`,
+  skips slots already occupied in the scheduled-draft queue, respects `max_per_day`,
+  and returns the next free slot (unix seconds). Pure parse/normalize/enumerate
+  helpers are fully unit-tested; wall-clock→UTC conversion resolves the offset twice
+  so instants near a DST transition land correctly.
+- **`src/app/api/settings/schedule/route.ts`** — `GET` returns the normalized
+  schedules (defaults on missing/invalid); `PATCH` validates + persists each block
+  (admin-only, reviewers forbidden). Out-of-range / invalid input is clamped or
+  dropped rather than rejected (e.g. `max_per_day` 9→5, bad timezone→default).
+- **`src/app/(dashboard)/settings/PublicationScheduleTab.tsx`** + **`page.tsx`** —
+  new "Publication" tab on Settings: enable toggles, a day×time checkbox grid,
+  `max_per_day` slider, timezone selector, and blog cadence (posts/week + preferred
+  days/time). The existing settings move under a "Général" tab.
+- **`tests/publication-scheduler.test.ts`** — 16 cases covering validators,
+  parse/normalize (clamping, dedupe, weekday-order filtering, default fallbacks),
+  slot enumeration (DST winter/summer), and `getNextAvailableSlot` (occupancy skip,
+  `max_per_day` rollover, disabled→null).
+
+## [0.5.53.59] - 2026-06-15
+
+### Added (publication queue — consumer cron that drains the queue)
+- **`src/app/api/cron/publisher/route.ts`** — new `GET /api/cron/publisher` (Bearer
+  CRON_SECRET, same `timingSafeEqual` pattern as the other crons) + `POST` manual trigger
+  (session). Wraps `drainPublisherQueue()` in `trackCron("publisher", …)` so the run lands
+  in `cron_runs`. `maxDuration = 300`.
+- **`src/lib/queue-publisher.ts`** — `drainPublisherQueue()` drains up to 5 due items: for
+  each it `claimQueueItem` (atomic `pending → publishing`, skips if another instance won the
+  claim — no double-publish), publishes, then `markPublished`/`markFailed`. 2s spacing
+  between publishes; a wall-clock budget (240s, under maxDuration) stops claiming new items
+  so a long run can't get SIGKILLed mid-publish and strand a claim. `publishQueueItem`
+  dispatches by platform to the existing clients: `facebook` (video → album → photo → text),
+  `instagram` (reel → photo), `both` (publishes to both; succeeds if at least one does, so a
+  retry can't double-post), `shopify_blog` (`createBlogArticle`). Validated payload contract
+  (`parseSocialPayload`/`parseBlogPayload`) and a content_type↔platform pairing guard fail
+  loud (→ `markFailed`) instead of posting garbage.
+- **`vercel.json`** — hourly cron `"0 * * * *"` for `/api/cron/publisher`.
+- `proxy.ts` is unchanged: `/api/cron/publisher` is already public via the existing
+  `/api/cron` prefix in `PUBLIC_PATHS` (same as every other cron).
+- Known limitation: an item claimed (`publishing`) but not marked before a hard crash/OOM
+  stays stranded (no reaper yet — same gap as `claimFacebookDraft`; the time budget removes
+  the common timeout cause). Recover with `UPDATE publication_queue SET status='pending'
+  WHERE status='publishing'`. A `claimed_at`-based reaper is a follow-up in the queue-engine.
+- Tests: `tests/queue-publisher.test.ts` (per-platform dispatch, `both` partial/total
+  failure, payload + pairing validation, claim/skip/fail lifecycle, rate-limit spacing,
+  budget deferral).
+
+## [0.5.53.58] - 2026-06-15
+
+### Added (social — Approve queues to the publishing schedule)
+- **`src/app/api/social/route.ts`** — the `approve` action no longer just marks a
+  draft `approved`; it now auto-schedules the draft onto the next free Mon/Wed/Fri
+  15:00 UTC publishing slot (`status='scheduled'`, reusing `draft-scheduler`'s
+  `langsOf`/`findSlot`/`buildOccupancy` + `getScheduledDraftSlots`). The existing
+  `/api/cron/social-scheduled` cron then publishes it when the slot arrives, so
+  approval queues rather than publishes immediately. Falls back to `approved` when
+  no slot is free within the horizon. Response now returns `scheduledAt`.
+- **`src/app/(dashboard)/social/page.tsx`** — Approve shows a `Schedulé pour [date]`
+  confirmation, scheduled drafts render a `🕑 Schedulé — [date]` badge (year shown
+  when the slot is not in the current year), and the manual **Publish** button is
+  disabled for `scheduled` drafts so an operator can't race the cron and double-post.
+- **`src/app/(dashboard)/publication-queue-panel.tsx`** (new) — a "File de publication"
+  dashboard panel listing the upcoming queued posts; surfaces fetch errors distinctly
+  from an empty queue.
+
+## [0.5.53.57] - 2026-06-15
+
+### Added (publication queue — unified scheduling for social / drafts / blog)
+- **`src/lib/database.ts`** — new `publication_queue` table (in `initSchema`) plus
+  queue functions: `addToQueue`, `getNextPending`, `claimQueueItem`, `markPublished`,
+  `markFailed`, `getPendingQueue`, `getOccupiedQueueSlots`. Timestamps are SQLite
+  `datetime()` TEXT (`YYYY-MM-DD HH:MM:SS` UTC), distinct from `facebook_drafts`'
+  unix-seconds integers, so the `scheduled_at <= datetime('now')` due-scan compares
+  lexicographically. Hardening beyond the base spec: `CHECK` constraints on
+  `content_type`/`platform`/`status` (a typo'd status would otherwise vanish from every
+  status-filtered query); a partial `UNIQUE(platform, scheduled_at)` index over active
+  rows as a double-book backstop; `claimQueueItem` (atomic `pending → publishing`) so a
+  future consumer cron can't double-publish under Vercel's overlapping cron instances
+  (mirrors `claimFacebookDraft`); and `addToQueue` rejects a non-`datetime()` timestamp
+  up front since the lexicographic due-check depends on the format.
+- **`src/lib/draft-scheduler.ts`** — `toSqliteUtc` (unix → SQLite datetime TEXT),
+  `isSqliteUtc` (format guard), and `nextFreeSlot` (next free M/W/F 15:00 UTC slot for a
+  platform, as a SQLite datetime string). Pure and unit-tested.
+- **`src/app/api/queue/add/route.ts`** — new `POST /api/queue/add` (session auth, blocks
+  the `reviewer` role). Validates `content_type`/`platform`/`content_id`/`payload` (with
+  size caps), computes the next free slot for the platform, inserts, and returns
+  `{ queued: true, scheduled_at }`. On the rare concurrent slot collision it catches the
+  unique-index conflict and retries the next slot.
+- Tests: `tests/publication-queue.test.ts` (queue SQL semantics, the unique-slot
+  backstop, claim atomicity, CHECK enforcement) and additions to
+  `tests/draft-scheduler.test.ts` (`toSqliteUtc`/`isSqliteUtc`/`nextFreeSlot`).
+
+## [0.5.53.56] - 2026-06-15
+
+### Fixed (schema init — retry after transient failure, issue #186)
+- **`src/lib/database.ts`** — `initSchema()` memoized the promise from
+  `_initSchemaImpl()` even when it rejected, so a single transient failure (e.g. a
+  flaky `db.batch` during schema build) wedged every later `ensureSchema()` caller on
+  the cached rejection until the next cold start. It now attaches
+  `.catch(err => { schemaPromise = null; throw err })` so the next caller re-runs
+  `_initSchemaImpl()` instead of replaying the cached reject.
+- Wrapped the 8 `db.batch()` calls in `_initSchemaImpl()` with a `runBatch(label, stmts)`
+  helper that logs the step label + error before re-throwing, so a schema-init failure
+  reports which batch broke instead of an opaque stack.
+
+## [0.5.53.55] - 2026-06-15
+
+### Fixed (content cron — diagnosable failures)
+- **`src/app/api/cron/content/route.ts`** — when both the FR and EN draft
+  generations fail, the cron threw a generic `"Both FR and EN content generations
+  failed"` message, which `trackCron` recorded verbatim in `cron_runs.detail`. The
+  real per-language cause (`Generation failed (HTTP <status>)` / `Generate endpoint
+  unreachable`) stayed buried in Vercel function logs. The thrown message now appends
+  each language's actual error (`FR: … | EN: …`), so the dashboard "Résumé du jour"
+  panel and the 500 response surface the cause directly. Bounded by design — only the
+  short status strings are propagated, never raw response bodies.
+- Regression test in `tests/cron-content.test.ts` asserts the both-fail message carries
+  each language's error.
+
+## [0.5.53.54] - 2026-06-15
+
+### Added (Meta Ads — multi-copy Advantage+ creative)
+- **`scripts/meta-ads-copy-optimization.mjs`** — replaces the creative on the traffic ad
+  set (`52562995963805`, campaign `52562992827605`) with a **dynamic (catalogue)**
+  `asset_feed_spec` multi-copy creative: **5 primary texts × 5 headlines × 2 descriptions**,
+  `SHOP_NOW` → ameublodirect.ca, `ad_formats: AUTOMATIC_FORMAT` with
+  `product_set_id 2891699814486850` so Meta pulls the product images from the catalogue
+  automatically (no `image_hash` needed) and tests the copy/headline matrix per user.
+- Safe-by-design: **dry-run by default** (prints the full payload, asserts 5/5/2); `--apply`
+  creates the new creative + ad in **PAUSED** state **first**, then deletes the old ad
+  (create-before-delete, so a creative failure can never strand the ad set with zero ads);
+  Graph **#190 / token errors STOP** with a "tell Mat" message; logs the created Ad ID to
+  `docs/META-ADS-SETUP.md` on apply.
+
 ## [0.5.53.53] - 2026-06-14
 
 ### Added (Meta traffic campaign tooling)
