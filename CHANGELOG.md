@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.65] - 2026-06-16
+## [0.5.53.66] - 2026-06-16
 
 ### Added (unit tests for ensureSchema/initSchema retry — #186)
 - **`tests/ensure-schema-retry.test.ts`** — covers the `initSchema()` retry contract that
@@ -15,6 +15,21 @@ All notable changes to Aosom Sync will be documented in this file.
   `__setInitSchemaImplForTests` / `__getSchemaPromiseForTests`) so a fail-once-then-succeed
   impl can be injected without a live DB. Production behaviour is unchanged: `initSchema()`
   always runs the real `_initSchemaImpl` unless a test overrides it.
+
+## [0.5.53.65] - 2026-06-16
+
+### Fixed (dashboard "File de publication" read the wrong store)
+- **The publication queue panel now reads `publication_queue` instead of `facebook_drafts`.**
+  Since Approve switched to enqueuing into `publication_queue` (and stopped writing `scheduled`
+  facebook_drafts), the panel — which fetched `/api/social?status=scheduled` — was showing a
+  near-empty list. New **`GET /api/queue`** (session-auth) returns pending queue items
+  (`getPendingQueue()`, oldest slot first) as a lean DTO: `scheduledAt` (converted from the
+  table's UTC datetime TEXT to unix seconds), `platform`, `contentType`, `status`, a truncated
+  caption/title `preview`, and an `https`-only `imageUrl`. Response capped at 50 items; full
+  `payload` never leaves the server.
+- **Panel UI** now shows, per post: scheduled time, platform (Facebook / Instagram / both / Blog),
+  content preview, and a colour-coded status badge (pending / publishing / published / failed /
+  cancelled).
 
 ## [0.5.53.64] - 2026-06-16
 
