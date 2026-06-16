@@ -30,6 +30,10 @@
       "schedule": "0,15,30,45 * * * *"
     },
     {
+      "path": "/api/cron/publisher",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/cron/csv-precache",
       "schedule": "0 4 * * *"
     },

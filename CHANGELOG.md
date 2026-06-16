@@ -2,6 +2,34 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.59] - 2026-06-15
+
+### Added (publication queue — consumer cron that drains the queue)
+- **`src/app/api/cron/publisher/route.ts`** — new `GET /api/cron/publisher` (Bearer
+  CRON_SECRET, same `timingSafeEqual` pattern as the other crons) + `POST` manual trigger
+  (session). Wraps `drainPublisherQueue()` in `trackCron("publisher", …)` so the run lands
+  in `cron_runs`. `maxDuration = 300`.
+- **`src/lib/queue-publisher.ts`** — `drainPublisherQueue()` drains up to 5 due items: for
+  each it `claimQueueItem` (atomic `pending → publishing`, skips if another instance won the
+  claim — no double-publish), publishes, then `markPublished`/`markFailed`. 2s spacing
+  between publishes; a wall-clock budget (240s, under maxDuration) stops claiming new items
+  so a long run can't get SIGKILLed mid-publish and strand a claim. `publishQueueItem`
+  dispatches by platform to the existing clients: `facebook` (video → album → photo → text),
+  `instagram` (reel → photo), `both` (publishes to both; succeeds if at least one does, so a
+  retry can't double-post), `shopify_blog` (`createBlogArticle`). Validated payload contract
+  (`parseSocialPayload`/`parseBlogPayload`) and a content_type↔platform pairing guard fail
+  loud (→ `markFailed`) instead of posting garbage.
+- **`vercel.json`** — hourly cron `"0 * * * *"` for `/api/cron/publisher`.
+- `proxy.ts` is unchanged: `/api/cron/publisher` is already public via the existing
+  `/api/cron` prefix in `PUBLIC_PATHS` (same as every other cron).
+- Known limitation: an item claimed (`publishing`) but not marked before a hard crash/OOM
+  stays stranded (no reaper yet — same gap as `claimFacebookDraft`; the time budget removes
+  the common timeout cause). Recover with `UPDATE publication_queue SET status='pending'
+  WHERE status='publishing'`. A `claimed_at`-based reaper is a follow-up in the queue-engine.
+- Tests: `tests/queue-publisher.test.ts` (per-platform dispatch, `both` partial/total
+  failure, payload + pairing validation, claim/skip/fail lifecycle, rate-limit spacing,
+  budget deferral).
+
 ## [0.5.53.58] - 2026-06-15
 
 ### Added (social — Approve queues to the publishing schedule)
