@@ -11,7 +11,7 @@ import {
   facebookBrandCreds,
   type FacebookBrand,
 } from "./facebook-client";
-import { publishPhoto, publishReel as publishInstagramReel } from "./instagram-client";
+import { publishPhoto, publishCarousel, publishReel as publishInstagramReel } from "./instagram-client";
 import { CHANNEL_META, type ChannelKey } from "./config";
 import {
   getFacebookDraft,
@@ -65,7 +65,7 @@ export interface SocialPayload {
  * Publish one normalized payload to one platform, picking the right Graph API call from the
  * available media:
  *   facebook  → video → multi-photo album (≥2) → single photo → text(+link)
- *   instagram → reel (reelsVideoUrl ?? videoUrl) → single photo (IG requires media)
+ *   instagram → reel (reelsVideoUrl ?? videoUrl) → carousel (≥2) → single photo (IG requires media)
  * Returns the published post id. Throws on a publish failure or when Instagram has no media.
  */
 export async function publishSocialPayload(
@@ -91,7 +91,7 @@ export async function publishSocialPayload(
     return { postId: r.postId };
   }
 
-  // instagram — requires media; prefer a Reel, else a single photo.
+  // instagram — requires media; prefer a Reel, else a carousel (≥2) / single photo.
   const reel = p.reelsVideoUrl ?? p.videoUrl;
   if (reel) {
     const r = await publishInstagramReel({ caption: p.caption, videoUrl: reel, brand: p.brand });
@@ -99,6 +99,11 @@ export async function publishSocialPayload(
   }
   if (images.length === 0) {
     throw new Error("Instagram requires an image or video URL");
+  }
+  if (images.length >= 2) {
+    // IG caps a carousel at 10 items; trim extras (mirrors the publishCarousel guard).
+    const r = await publishCarousel({ caption: p.caption, imageUrls: images.slice(0, 10), brand: p.brand });
+    return { postId: r.id };
   }
   const r = await publishPhoto({ caption: p.caption, imageUrl: images[0], brand: p.brand });
   return { postId: r.id };
