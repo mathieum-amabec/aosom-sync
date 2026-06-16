@@ -4,6 +4,7 @@ import fs from "fs";
 import crypto from "crypto";
 import type { SyncRun, SyncLogEntry, ChangeType } from "@/types/sync";
 import type { UserRole } from "@/lib/config";
+import { DEFAULT_PUBLICATION_SCHEDULE, DEFAULT_BLOG_SCHEDULE } from "@/lib/config";
 import type { AosomProduct } from "@/types/aosom";
 import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
 import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
@@ -533,6 +534,8 @@ async function _initSchemaImpl(): Promise<void> {
     ['social_store_display_name', ''],
     ['social_banner_opacity', '75'],
     ['social_logo_position', 'bottom-right'],
+    ['publication_schedule', JSON.stringify(DEFAULT_PUBLICATION_SCHEDULE)],
+    ['blog_schedule', JSON.stringify(DEFAULT_BLOG_SCHEDULE)],
   ];
 
   await runBatch(

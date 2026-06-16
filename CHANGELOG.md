@@ -2,6 +2,34 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.60] - 2026-06-15
+
+### Added (configurable publication + blog schedule)
+- **`src/lib/config.ts`** — `PublicationSchedule` / `BlogSchedule` types,
+  `DEFAULT_PUBLICATION_SCHEDULE` (Mon/Wed/Fri/Sat local slots, `America/Toronto`,
+  `max_per_day` 3) and `DEFAULT_BLOG_SCHEDULE` (2/week, Tue+Thu, 10:00), plus the
+  `publication_schedule` / `blog_schedule` keys in `ALLOWED_SETTINGS_KEYS`.
+- **`src/lib/database.ts`** — seeds both schedule blobs as `settings` defaults
+  (`INSERT OR IGNORE`, no migration needed for existing DBs).
+- **`src/lib/publication-scheduler.ts`** — new module: timezone/DST-aware slot math
+  and `getNextAvailableSlot(platform, settings)` which reads `publication_schedule`,
+  skips slots already occupied in the scheduled-draft queue, respects `max_per_day`,
+  and returns the next free slot (unix seconds). Pure parse/normalize/enumerate
+  helpers are fully unit-tested; wall-clock→UTC conversion resolves the offset twice
+  so instants near a DST transition land correctly.
+- **`src/app/api/settings/schedule/route.ts`** — `GET` returns the normalized
+  schedules (defaults on missing/invalid); `PATCH` validates + persists each block
+  (admin-only, reviewers forbidden). Out-of-range / invalid input is clamped or
+  dropped rather than rejected (e.g. `max_per_day` 9→5, bad timezone→default).
+- **`src/app/(dashboard)/settings/PublicationScheduleTab.tsx`** + **`page.tsx`** —
+  new "Publication" tab on Settings: enable toggles, a day×time checkbox grid,
+  `max_per_day` slider, timezone selector, and blog cadence (posts/week + preferred
+  days/time). The existing settings move under a "Général" tab.
+- **`tests/publication-scheduler.test.ts`** — 16 cases covering validators,
+  parse/normalize (clamping, dedupe, weekday-order filtering, default fallbacks),
+  slot enumeration (DST winter/summer), and `getNextAvailableSlot` (occupancy skip,
+  `max_per_day` rollover, disabled→null).
+
 ## [0.5.53.59] - 2026-06-15
 
 ### Added (publication queue — consumer cron that drains the queue)
