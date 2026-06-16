@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.65] - 2026-06-16
+
+### Added (unit tests for ensureSchema/initSchema retry — #186)
+- **`tests/ensure-schema-retry.test.ts`** — covers the `initSchema()` retry contract that
+  shipped without tests (#186, `DONE_WITH_CONCERNS`). Two cases: (1) when the schema-init
+  impl throws, the memoized `schemaPromise` is nulled and the next call retries instead of
+  re-throwing the cached rejection; (2) when the first attempt fails but the retry succeeds,
+  init resolves, the success is memoized (no further re-runs), and the DB it initialized is
+  accessible normally.
+- **`src/lib/database.ts`** — added a small test-only DI seam (`activeInitSchemaImpl` behind
+  `__setInitSchemaImplForTests` / `__getSchemaPromiseForTests`) so a fail-once-then-succeed
+  impl can be injected without a live DB. Production behaviour is unchanged: `initSchema()`
+  always runs the real `_initSchemaImpl` unless a test overrides it.
+
 ## [0.5.53.64] - 2026-06-16
 
 ### Fixed (deprecated Claude model — sync content generation)
