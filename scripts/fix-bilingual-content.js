@@ -62,7 +62,7 @@ if (!TOKEN) { console.error("ERROR: SHOPIFY_ACCESS_TOKEN not set"); process.exit
 if (!ANTHROPIC_KEY) { console.error("ERROR: ANTHROPIC_API_KEY not set"); process.exit(1); }
 if (!TURSO_URL || !TURSO_TOKEN) { console.error("ERROR: TURSO_DATABASE_URL / TURSO_AUTH_TOKEN not set"); process.exit(1); }
 
-const CLAUDE_MODEL = "claude-sonnet-4-20250514";
+const CLAUDE_MODEL = "claude-sonnet-4-6";
 
 // ─── helpers ─────────────────────────────────────────────────────────
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }

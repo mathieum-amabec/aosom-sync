@@ -377,7 +377,7 @@ Interface de configuration complète, aucune modification de code requise après
 
 **Claude API**
 - API Key (masqué)
-- Modèle à utiliser (défaut : `claude-sonnet-4-20250514`)
+- Modèle à utiliser (défaut : `claude-sonnet-4-6`)
 - Bouton "Tester la connexion"
 
 ---

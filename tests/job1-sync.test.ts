@@ -109,7 +109,7 @@ vi.mock("@/lib/config", () => ({
   env: { shopifyAccessToken: "test", hasShopifyToken: true, anthropicApiKey: "test", cronSecret: "test" },
   SHOPIFY: { STORE: "test.myshopify.com", API_VERSION: "2025-01" },
   SYNC: { MAX_PRODUCTS: 10000, PRICE_CHANGE_NOTIFICATION_THRESHOLD: 5 },
-  CLAUDE: { MODEL: "claude-sonnet-4-20250514", MAX_TOKENS_CONTENT: 2048 },
+  CLAUDE: { MODEL: "claude-sonnet-4-6", MAX_TOKENS_CONTENT: 2048 },
   AUTH: {
     COOKIE_NAME: "aosom_session",
     SESSION_MAX_AGE: 604800,

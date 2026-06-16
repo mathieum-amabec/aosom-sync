@@ -174,7 +174,7 @@ export const AOSOM = {
 // ─── Claude API ─────────────────────────────────────────────────────
 
 export const CLAUDE = {
-  MODEL: "claude-sonnet-4-20250514",
+  MODEL: "claude-sonnet-4-6",
   MAX_TOKENS_CONTENT: 4000,
   MAX_TOKENS_SOCIAL: 500,
 } as const;
