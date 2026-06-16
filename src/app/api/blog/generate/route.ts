@@ -20,6 +20,8 @@ import { getAnthropicClient } from "@/lib/content-generator";
 import { CLAUDE, env } from "@/lib/config";
 import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
 import { createBlogArticle, type BlogLang } from "@/lib/shopify-blog";
+import { maybeAutoPublish } from "@/lib/blog-auto-publish";
+import { type Season } from "@/lib/blog-topics";
 import { checkRateLimit } from "@/lib/rate-limiter";
 
 // Claude article generation (~25-45s) + 3 Unsplash searches + 3 download
@@ -41,6 +43,11 @@ interface BlogGenerateBody {
   /** Pre-fetched shared photo set (from the bilingual cron) — when present,
    *  this endpoint skips its own Unsplash search so FR + EN match exactly. */
   images?: UnsplashImage[];
+  /** Topic season (from the cron's selection) — used by the auto-publish season gate. */
+  season?: Season;
+  /** Opt in to the quality/season/cap auto-publish gate. The cron sets this true;
+   *  manual/session calls default to draft-only (preserving the prior behavior). */
+  autoPublish?: boolean;
 }
 
 const IMAGE_FIELDS = [
@@ -109,7 +116,18 @@ function parseBody(raw: unknown): BlogGenerateBody | { error: string } {
 
   const images = parseImages(obj.images);
 
-  return { topic, lang, keywords, images };
+  let season: Season | undefined;
+  if (obj.season !== undefined) {
+    const s = obj.season;
+    if (s !== "spring" && s !== "summer" && s !== "fall" && s !== "winter" && s !== "all") {
+      return { error: "`season` must be one of: spring, summer, fall, winter, all" };
+    }
+    season = s;
+  }
+
+  const autoPublish = obj.autoPublish === true;
+
+  return { topic, lang, keywords, images, season, autoPublish };
 }
 
 function langPromptFragment(lang: BlogLang): string {
@@ -334,6 +352,20 @@ export async function POST(request: Request) {
       metaDescription: article.metaDescription,
     });
 
+    // 6. Auto-publish gate (opt-in via autoPublish — the cron sets it). The article is
+    //    created as a draft above regardless; here we flip it live only if it clears
+    //    quality (Claude judge >= threshold) AND season AND the weekly cap. Any miss
+    //    leaves it as a draft for manual review. Gates evaluated in cheapest-credible
+    //    order; the cap is reserved atomically and released if the publish then fails.
+    const { published, score, publishReason } = await maybeAutoPublish({
+      autoPublish: input.autoPublish ?? false,
+      lang: input.lang,
+      season: input.season,
+      article,
+      blogId: created.blogId,
+      articleId: created.articleId,
+    });
+
     return NextResponse.json({
       success: true,
       articleId: created.articleId,
@@ -342,6 +374,9 @@ export async function POST(request: Request) {
       blogId: created.blogId,
       title: article.title,
       imagesUsed: images.map((i) => ({ id: i.id, photographer: i.photographer })),
+      score,
+      published,
+      publishReason,
     });
   } catch (err) {
     // Full upstream error (Shopify/Claude/Unsplash payloads, stack) goes to
