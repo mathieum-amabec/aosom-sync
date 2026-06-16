@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.64] - 2026-06-16
+
+### Fixed (deprecated Claude model — sync content generation)
+- **Replaced the deprecated `claude-sonnet-4-20250514` model ID with `claude-sonnet-4-6`** across
+  the shared `CLAUDE.MODEL` constant (`src/lib/config.ts`), the standalone
+  `scripts/fix-bilingual-content.js`, the `job1-sync` test fixture, and the `PLAN.md` default.
+  Claude Sonnet 4 is deprecated; `claude-sonnet-4-6` is Anthropic's drop-in replacement. All
+  callers use a plain `model` + `max_tokens` + `system` + single user-message shape (no assistant
+  prefills, no `budget_tokens`/`temperature`), so the swap needed no other code changes. Note: the
+  originally-proposed `claude-sonnet-4-5-20250514` was an invalid ID (would 404) and was not used.
+
 ## [0.5.53.63] - 2026-06-15
 
 ### Changed (Approve enqueues into publication_queue on the configurable schedule)
