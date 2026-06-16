@@ -4,6 +4,9 @@ import {
   findSlot,
   buildOccupancy,
   langsOf,
+  toSqliteUtc,
+  isSqliteUtc,
+  nextFreeSlot,
   POSTING_WEEKDAYS_UTC,
   SLOT_HOUR_UTC,
 } from "@/lib/draft-scheduler";
@@ -101,5 +104,58 @@ describe("langsOf", () => {
     expect(langsOf("Bonjour", "")).toEqual({ fr: true, en: false });
     expect(langsOf("   ", null)).toEqual({ fr: false, en: false });
     expect(langsOf(null, "Hello")).toEqual({ fr: false, en: true });
+  });
+});
+
+describe("toSqliteUtc", () => {
+  it("formats a unix instant as SQLite datetime() text (UTC, space separator, no ms/zone)", () => {
+    expect(toSqliteUtc(MON_SLOT)).toBe("2026-01-05 15:00:00");
+  });
+
+  it("matches the format SQLite's own datetime('now') produces (string-comparable)", () => {
+    // datetime() output is 'YYYY-MM-DD HH:MM:SS' — exactly 19 chars, no 'T', no 'Z'.
+    const s = toSqliteUtc(sec(2026, 5, 1, 9, 7));
+    expect(s).toBe("2026-06-01 09:07:00");
+    expect(s).toHaveLength(19);
+    expect(s).not.toContain("T");
+    expect(s).not.toContain("Z");
+  });
+});
+
+describe("isSqliteUtc", () => {
+  it("accepts the exact SQLite datetime() shape", () => {
+    expect(isSqliteUtc("2026-01-05 15:00:00")).toBe(true);
+    expect(isSqliteUtc(toSqliteUtc(MON_SLOT))).toBe(true);
+  });
+
+  it("rejects ISO 'T'/'Z' forms and other shapes that would break the lexicographic due-check", () => {
+    expect(isSqliteUtc("2026-01-05T15:00:00")).toBe(false); // 'T' sorts after ' '
+    expect(isSqliteUtc("2026-01-05T15:00:00.000Z")).toBe(false);
+    expect(isSqliteUtc("2026-01-05 15:00:00+00:00")).toBe(false);
+    expect(isSqliteUtc("2026-1-5 9:0:0")).toBe(false); // unpadded
+    expect(isSqliteUtc("")).toBe(false);
+    expect(isSqliteUtc("not a date")).toBe(false);
+  });
+});
+
+describe("nextFreeSlot", () => {
+  it("returns the first grid slot as a SQLite datetime string when nothing is occupied", () => {
+    expect(nextFreeSlot(MON, new Set())).toBe("2026-01-05 15:00:00");
+  });
+
+  it("skips an occupied slot and returns the next free one", () => {
+    const occupied = new Set([toSqliteUtc(MON_SLOT)]);
+    expect(nextFreeSlot(MON, occupied)).toBe(toSqliteUtc(WED_SLOT));
+  });
+
+  it("skips multiple consecutive occupied slots", () => {
+    const occupied = new Set([toSqliteUtc(MON_SLOT), toSqliteUtc(WED_SLOT)]);
+    expect(nextFreeSlot(MON, occupied)).toBe(toSqliteUtc(FRI_SLOT));
+  });
+
+  it("never returns a slot at/before the reference time", () => {
+    // 15:30 Monday → Monday's slot has passed, so the first candidate is Wednesday.
+    const slot = nextFreeSlot(sec(2026, 0, 5, 15, 30), new Set());
+    expect(slot).toBe(toSqliteUtc(WED_SLOT));
   });
 });
