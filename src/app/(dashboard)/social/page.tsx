@@ -67,6 +67,21 @@ function formatPublishedAt(unixSeconds: number): string {
   });
 }
 
+// Like formatPublishedAt but includes the year when the slot is not in the current
+// year — scheduled slots can land weeks/months out, so a yearless date is ambiguous.
+function formatSlot(unixSeconds: number): string {
+  const d = new Date(unixSeconds * 1000);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleString("fr-CA", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(sameYear ? {} : { year: "numeric" }),
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function ChannelBadge({ channelKey, state }: { channelKey: string; state: ChannelState }) {
   const label = CHANNEL_LABELS[channelKey]?.short || channelKey;
   const color =
@@ -145,6 +160,25 @@ export default function SocialPage() {
     if (!data.success && data.error) alert(`Error: ${data.error}`);
     fetchDrafts();
     return data;
+  }
+
+  async function approveToQueue(id: number) {
+    const res = await fetch("/api/social", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "approve", id }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      alert(`Error: ${data.error || "Échec de l'approbation"}`);
+      return;
+    }
+    fetchDrafts();
+    if (typeof data.scheduledAt === "number") {
+      alert(`Schedulé pour ${formatSlot(data.scheduledAt)}`);
+    } else {
+      alert("Approuvé — aucun créneau libre trouvé, à planifier manuellement.");
+    }
   }
 
   async function generateHighlight() {
@@ -579,10 +613,10 @@ export default function SocialPage() {
                         </div>
                       )}
 
-                      {draft.scheduledAt && (
-                        <p className="text-xs text-blue-400 mt-1">
-                          Scheduled: {new Date(draft.scheduledAt * 1000).toLocaleString()}
-                        </p>
+                      {draft.scheduledAt && draft.status === "scheduled" && (
+                        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-blue-900/40 text-blue-400 border-blue-800/50">
+                          🕑 Schedulé — {formatSlot(draft.scheduledAt)}
+                        </span>
                       )}
                       {isPublished(draft) && draft.publishedAt !== null && (
                         <p className="text-xs text-purple-400 mt-1">
@@ -594,7 +628,7 @@ export default function SocialPage() {
                     {draft.status !== "rejected" && (
                       <div className="grid grid-cols-2 md:flex md:flex-col gap-1 md:shrink-0">
                         {draft.status === "draft" && (
-                          <button onClick={() => doAction("approve", draft.id)} className="px-3 py-1.5 bg-green-600/20 text-green-400 text-xs rounded-lg hover:bg-green-600/30 border border-green-800/50">
+                          <button onClick={() => approveToQueue(draft.id)} className="px-3 py-1.5 bg-green-600/20 text-green-400 text-xs rounded-lg hover:bg-green-600/30 border border-green-800/50">
                             Approve
                           </button>
                         )}
@@ -609,16 +643,25 @@ export default function SocialPage() {
                             Schedule
                           </button>
                         )}
-                        <button
-                          onClick={() => {
-                            setPublishId(draft.id);
-                            setPublishChannels(new Set(activeChannels));
-                          }}
-                          disabled={isPublished(draft)}
-                          className={`px-3 py-1.5 bg-purple-600/20 text-purple-400 text-xs rounded-lg border border-purple-800/50 ${isPublished(draft) ? "opacity-40 cursor-not-allowed" : "hover:bg-purple-600/30"}`}
-                        >
-                          Publish
-                        </button>
+                        {(() => {
+                          // Queued (scheduled) drafts are published by the social-scheduled cron.
+                          // Disable manual publish so an operator can't race the cron and double-post.
+                          // To publish early, unschedule the draft first (reverts it to draft).
+                          const publishDisabled = isPublished(draft) || draft.status === "scheduled";
+                          return (
+                            <button
+                              onClick={() => {
+                                setPublishId(draft.id);
+                                setPublishChannels(new Set(activeChannels));
+                              }}
+                              disabled={publishDisabled}
+                              title={draft.status === "scheduled" ? "En file — déschedulez pour publier maintenant" : undefined}
+                              className={`px-3 py-1.5 bg-purple-600/20 text-purple-400 text-xs rounded-lg border border-purple-800/50 ${publishDisabled ? "opacity-40 cursor-not-allowed" : "hover:bg-purple-600/30"}`}
+                            >
+                              Publish
+                            </button>
+                          );
+                        })()}
                         <button
                           onClick={() => {
                             setEditingId(draft.id);

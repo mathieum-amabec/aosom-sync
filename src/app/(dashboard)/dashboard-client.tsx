@@ -5,6 +5,7 @@ import type { SyncRun } from "@/types/sync";
 import { MetaAdsPanel } from "./meta-ads-panel";
 import { DaySummaryPanel } from "./day-summary-panel";
 import { AlertsPanel } from "./alerts-panel";
+import { PublicationQueuePanel } from "./publication-queue-panel";
 
 interface PriceChange {
   sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string; inStore: boolean; shopifyUrl: string | null;
@@ -67,6 +68,7 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
       {/* Today's summary + alerts (top of dashboard) */}
       <DaySummaryPanel />
       <AlertsPanel />
+      <PublicationQueuePanel />
 
       {/* Last Sync Banner */}
       {latestRun && (

@@ -5,10 +5,12 @@ import {
   updateFacebookDraft,
   deleteFacebookDraft,
   setDraftChannelState,
+  getScheduledDraftSlots,
 } from "@/lib/database";
 import { testConnection as testFacebookConnection, type FacebookBrand } from "@/lib/facebook-client";
 import { testConnection as testInstagramConnection } from "@/lib/instagram-client";
 import { publishDraftToChannel, publishDraftToChannels } from "@/lib/social-publisher";
+import { langsOf, findSlot, buildOccupancy } from "@/lib/draft-scheduler";
 import { triggerNewProduct, triggerPriceDrop, triggerStockHighlight } from "@/jobs/job4-social";
 import { CHANNELS, activeChannels, type ChannelKey } from "@/lib/config";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
@@ -79,9 +81,29 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: true, data: result });
       }
 
-      case "approve":
-        await updateFacebookDraft(body.id, { status: "approved" });
-        return NextResponse.json({ success: true, data: await getFacebookDraft(body.id) });
+      case "approve": {
+        // Approve = enqueue onto the next free publishing slot (M/W/F 15:00 UTC, 1 FR + 1 EN
+        // per slot). The /api/cron/social-scheduled cron publishes the draft when its slot
+        // arrives — so approval no longer publishes immediately, it queues. If no slot is free
+        // within the horizon, fall back to plain 'approved' for manual scheduling.
+        const draft = await getFacebookDraft(body.id);
+        if (!draft) {
+          return NextResponse.json({ success: false, error: "Draft introuvable" }, { status: 404 });
+        }
+        const langs = langsOf(draft.postText, draft.postTextEn);
+        const occupancy = buildOccupancy(await getScheduledDraftSlots());
+        const slot = findSlot(Math.floor(Date.now() / 1000), langs, occupancy);
+        if (slot != null) {
+          await updateFacebookDraft(body.id, { status: "scheduled", scheduled_at: slot });
+        } else {
+          await updateFacebookDraft(body.id, { status: "approved" });
+        }
+        return NextResponse.json({
+          success: true,
+          data: await getFacebookDraft(body.id),
+          scheduledAt: slot ?? undefined,
+        });
+      }
 
       case "reject":
         await updateFacebookDraft(body.id, { status: "rejected" });
