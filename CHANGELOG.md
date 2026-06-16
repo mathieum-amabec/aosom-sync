@@ -2,6 +2,32 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.61] - 2026-06-15
+
+### Added (blog auto-publish — quality + season gated, weekly-capped)
+- **`src/lib/blog-auto-publish.ts`** — after the weekly blog cron creates a draft, an
+  article goes **live** only if all gates pass: a Claude "judge" quality score
+  >= `BLOG.AUTO_PUBLISH_SCORE_THRESHOLD` (80), the topic is **in season**, and the
+  weekly cap isn't reached. `scoreArticle` runs a second Claude call (untrusted-content
+  delimited to resist prompt injection); a judge failure leaves the article as a draft.
+- **`src/lib/blog-topics.ts`** — each of the 30 topics tagged with a `season`
+  (`spring|summer|fall|winter|all`); helpers `seasonOf`, `isSeasonActive`,
+  `isTopicInSeason`, and `isoWeekKey` (ISO-week-year aware, so the cap counter never splits
+  a week at the Dec/Jan boundary). `selectBilingualTopic` now carries the season.
+- **`src/lib/shopify-blog.ts`** — `publishBlogArticle(blogId, articleId)` flips a draft
+  live (`PUT … {published:true}`).
+- **Weekly cap** — `blog_publish_counter` table + atomic `reserveBlogPublishSlot` /
+  `releaseBlogPublishSlot` (a failed publish releases its slot). The cap and an on/off
+  switch come from the existing **`blog_schedule`** setting (#194's `BlogSchedule`:
+  `posts_per_week` + `enabled`), read via `parseBlogSchedule` — no new setting introduced.
+- **`/api/blog/generate`** accepts `season` + `autoPublish` and runs the gate after
+  creating the draft, returning `{score, published, publishReason}`. Manual/session calls
+  default to draft-only (unchanged behavior). The weekly cron passes the topic season and
+  `autoPublish: true`.
+- Tests: season helpers + ISO-week-key boundary (`tests/blog-topics.test.ts`), the gate
+  branches (`tests/blog-auto-publish.test.ts`), the atomic cap SQL (`tests/blog-publish-cap.test.ts`),
+  and `publishBlogArticle` (`tests/shopify-blog-publish.test.ts`).
+
 ## [0.5.53.60] - 2026-06-15
 
 ### Added (configurable publication + blog schedule)

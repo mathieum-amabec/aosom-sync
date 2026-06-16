@@ -161,6 +161,11 @@ export const BLOG = {
   EN_ID: 91161428073,
   ADMIN_ARTICLE_URL: (id: string | number) =>
     `${SHOPIFY.ADMIN_URL}/articles/${id}`,
+  // Auto-publish: an article goes live only if Claude's quality judge scores it at/above
+  // this (0-100) AND its topic is in season AND the weekly cap isn't reached. The weekly
+  // cap + on/off switch live in the `blog_schedule` setting (BlogSchedule.posts_per_week /
+  // .enabled), edited via /api/settings/schedule.
+  AUTO_PUBLISH_SCORE_THRESHOLD: 80,
 } as const;
 
 // ─── Aosom Feed ─────────────────────────────────────────────────────
@@ -413,7 +418,8 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   "social_autopost_min_drop_percent",
   "social_autopost_max_per_day",
   "social_autopost_channels",
-  // Publication schedule (JSON blobs, edited via /api/settings/schedule)
+  // Publication schedule (JSON blobs, edited via /api/settings/schedule).
+  // blog_schedule (BlogSchedule) carries posts_per_week — the blog auto-publish weekly cap.
   "publication_schedule",
   "blog_schedule",
 ]);

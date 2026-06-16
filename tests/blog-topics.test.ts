@@ -2,9 +2,16 @@ import { describe, it, expect } from "vitest";
 import {
   BILINGUAL_TOPICS,
   isoWeekNumber,
+  isoWeekKey,
   extractKeywords,
   selectBilingualTopic,
+  seasonOf,
+  isSeasonActive,
+  isTopicInSeason,
+  type Season,
 } from "@/lib/blog-topics";
+
+const VALID_SEASONS: Season[] = ["spring", "summer", "fall", "winter", "all"];
 
 describe("BILINGUAL_TOPICS catalogue", () => {
   it("has at least 30 bilingual topics", () => {
@@ -32,6 +39,66 @@ describe("BILINGUAL_TOPICS catalogue", () => {
     for (const t of BILINGUAL_TOPICS) {
       expect(t.fr).not.toBe(t.en);
     }
+  });
+
+  it("every entry has a valid season tag", () => {
+    for (const t of BILINGUAL_TOPICS) {
+      expect(VALID_SEASONS).toContain(t.season);
+    }
+  });
+});
+
+describe("seasonOf", () => {
+  it("maps months to spring/summer/fall/winter (0-indexed)", () => {
+    expect([0, 1].map(seasonOf)).toEqual(["winter", "winter"]); // Jan, Feb
+    expect([2, 3, 4].map(seasonOf)).toEqual(["spring", "spring", "spring"]); // Mar-May
+    expect([5, 6, 7].map(seasonOf)).toEqual(["summer", "summer", "summer"]); // Jun-Aug
+    expect([8, 9, 10].map(seasonOf)).toEqual(["fall", "fall", "fall"]); // Sep-Nov
+    expect(seasonOf(11)).toBe("winter"); // Dec
+  });
+});
+
+describe("isSeasonActive / isTopicInSeason", () => {
+  const jan = new Date("2026-01-15T12:00:00Z"); // winter
+  const jul = new Date("2026-07-15T12:00:00Z"); // summer
+
+  it("evergreen ('all') is active in every season", () => {
+    expect(isSeasonActive("all", jan)).toBe(true);
+    expect(isSeasonActive("all", jul)).toBe(true);
+  });
+
+  it("a seasonal tag is active only in its season", () => {
+    expect(isSeasonActive("summer", jul)).toBe(true);
+    expect(isSeasonActive("summer", jan)).toBe(false);
+    expect(isSeasonActive("winter", jan)).toBe(true);
+    expect(isSeasonActive("winter", jul)).toBe(false);
+  });
+
+  it("isTopicInSeason gates a summer patio topic out of January", () => {
+    const summerTopic = BILINGUAL_TOPICS.find((t) => t.season === "summer")!;
+    expect(isTopicInSeason(summerTopic, jul)).toBe(true);
+    expect(isTopicInSeason(summerTopic, jan)).toBe(false);
+  });
+});
+
+describe("isoWeekKey", () => {
+  it("formats as YYYY-Www with a zero-padded week", () => {
+    expect(isoWeekKey(new Date("2021-01-04T00:00:00Z"))).toBe("2021-W01");
+  });
+
+  it("is stable within a week and changes across weeks", () => {
+    const mon = new Date("2026-06-08T00:00:00Z");
+    const wed = new Date("2026-06-10T00:00:00Z");
+    const nextMon = new Date("2026-06-15T00:00:00Z");
+    expect(isoWeekKey(mon)).toBe(isoWeekKey(wed));
+    expect(isoWeekKey(mon)).not.toBe(isoWeekKey(nextMon));
+  });
+
+  it("uses the ISO-week year at the Dec/Jan boundary (no phantom key)", () => {
+    // 2025-12-31 is a Wednesday belonging to ISO week 2026-W01.
+    expect(isoWeekKey(new Date("2025-12-31T00:00:00Z"))).toBe("2026-W01");
+    // 2026-01-01 (Thursday) is the same ISO week → same key, so the cap counter is shared.
+    expect(isoWeekKey(new Date("2026-01-01T00:00:00Z"))).toBe("2026-W01");
   });
 });
 
@@ -81,6 +148,11 @@ describe("selectBilingualTopic — synchronization guarantees", () => {
   it("shares one image query across FR and EN", () => {
     const sel = selectBilingualTopic(new Date("2026-03-01T12:00:00Z"));
     expect(sel.imageQuery).toBe(BILINGUAL_TOPICS[sel.idx].imageQuery);
+  });
+
+  it("carries the selected topic's season", () => {
+    const sel = selectBilingualTopic(new Date("2026-03-01T12:00:00Z"));
+    expect(sel.season).toBe(BILINGUAL_TOPICS[sel.idx].season);
   });
 
   it("derives non-empty per-language keyword sets", () => {
