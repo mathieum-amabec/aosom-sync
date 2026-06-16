@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.57] - 2026-06-15
+## [0.5.53.60] - 2026-06-15
 
 ### Added (configurable publication + blog schedule)
 - **`src/lib/config.ts`** — `PublicationSchedule` / `BlogSchedule` types,
@@ -29,6 +29,79 @@ All notable changes to Aosom Sync will be documented in this file.
   parse/normalize (clamping, dedupe, weekday-order filtering, default fallbacks),
   slot enumeration (DST winter/summer), and `getNextAvailableSlot` (occupancy skip,
   `max_per_day` rollover, disabled→null).
+
+## [0.5.53.59] - 2026-06-15
+
+### Added (publication queue — consumer cron that drains the queue)
+- **`src/app/api/cron/publisher/route.ts`** — new `GET /api/cron/publisher` (Bearer
+  CRON_SECRET, same `timingSafeEqual` pattern as the other crons) + `POST` manual trigger
+  (session). Wraps `drainPublisherQueue()` in `trackCron("publisher", …)` so the run lands
+  in `cron_runs`. `maxDuration = 300`.
+- **`src/lib/queue-publisher.ts`** — `drainPublisherQueue()` drains up to 5 due items: for
+  each it `claimQueueItem` (atomic `pending → publishing`, skips if another instance won the
+  claim — no double-publish), publishes, then `markPublished`/`markFailed`. 2s spacing
+  between publishes; a wall-clock budget (240s, under maxDuration) stops claiming new items
+  so a long run can't get SIGKILLed mid-publish and strand a claim. `publishQueueItem`
+  dispatches by platform to the existing clients: `facebook` (video → album → photo → text),
+  `instagram` (reel → photo), `both` (publishes to both; succeeds if at least one does, so a
+  retry can't double-post), `shopify_blog` (`createBlogArticle`). Validated payload contract
+  (`parseSocialPayload`/`parseBlogPayload`) and a content_type↔platform pairing guard fail
+  loud (→ `markFailed`) instead of posting garbage.
+- **`vercel.json`** — hourly cron `"0 * * * *"` for `/api/cron/publisher`.
+- `proxy.ts` is unchanged: `/api/cron/publisher` is already public via the existing
+  `/api/cron` prefix in `PUBLIC_PATHS` (same as every other cron).
+- Known limitation: an item claimed (`publishing`) but not marked before a hard crash/OOM
+  stays stranded (no reaper yet — same gap as `claimFacebookDraft`; the time budget removes
+  the common timeout cause). Recover with `UPDATE publication_queue SET status='pending'
+  WHERE status='publishing'`. A `claimed_at`-based reaper is a follow-up in the queue-engine.
+- Tests: `tests/queue-publisher.test.ts` (per-platform dispatch, `both` partial/total
+  failure, payload + pairing validation, claim/skip/fail lifecycle, rate-limit spacing,
+  budget deferral).
+
+## [0.5.53.58] - 2026-06-15
+
+### Added (social — Approve queues to the publishing schedule)
+- **`src/app/api/social/route.ts`** — the `approve` action no longer just marks a
+  draft `approved`; it now auto-schedules the draft onto the next free Mon/Wed/Fri
+  15:00 UTC publishing slot (`status='scheduled'`, reusing `draft-scheduler`'s
+  `langsOf`/`findSlot`/`buildOccupancy` + `getScheduledDraftSlots`). The existing
+  `/api/cron/social-scheduled` cron then publishes it when the slot arrives, so
+  approval queues rather than publishes immediately. Falls back to `approved` when
+  no slot is free within the horizon. Response now returns `scheduledAt`.
+- **`src/app/(dashboard)/social/page.tsx`** — Approve shows a `Schedulé pour [date]`
+  confirmation, scheduled drafts render a `🕑 Schedulé — [date]` badge (year shown
+  when the slot is not in the current year), and the manual **Publish** button is
+  disabled for `scheduled` drafts so an operator can't race the cron and double-post.
+- **`src/app/(dashboard)/publication-queue-panel.tsx`** (new) — a "File de publication"
+  dashboard panel listing the upcoming queued posts; surfaces fetch errors distinctly
+  from an empty queue.
+
+## [0.5.53.57] - 2026-06-15
+
+### Added (publication queue — unified scheduling for social / drafts / blog)
+- **`src/lib/database.ts`** — new `publication_queue` table (in `initSchema`) plus
+  queue functions: `addToQueue`, `getNextPending`, `claimQueueItem`, `markPublished`,
+  `markFailed`, `getPendingQueue`, `getOccupiedQueueSlots`. Timestamps are SQLite
+  `datetime()` TEXT (`YYYY-MM-DD HH:MM:SS` UTC), distinct from `facebook_drafts`'
+  unix-seconds integers, so the `scheduled_at <= datetime('now')` due-scan compares
+  lexicographically. Hardening beyond the base spec: `CHECK` constraints on
+  `content_type`/`platform`/`status` (a typo'd status would otherwise vanish from every
+  status-filtered query); a partial `UNIQUE(platform, scheduled_at)` index over active
+  rows as a double-book backstop; `claimQueueItem` (atomic `pending → publishing`) so a
+  future consumer cron can't double-publish under Vercel's overlapping cron instances
+  (mirrors `claimFacebookDraft`); and `addToQueue` rejects a non-`datetime()` timestamp
+  up front since the lexicographic due-check depends on the format.
+- **`src/lib/draft-scheduler.ts`** — `toSqliteUtc` (unix → SQLite datetime TEXT),
+  `isSqliteUtc` (format guard), and `nextFreeSlot` (next free M/W/F 15:00 UTC slot for a
+  platform, as a SQLite datetime string). Pure and unit-tested.
+- **`src/app/api/queue/add/route.ts`** — new `POST /api/queue/add` (session auth, blocks
+  the `reviewer` role). Validates `content_type`/`platform`/`content_id`/`payload` (with
+  size caps), computes the next free slot for the platform, inserts, and returns
+  `{ queued: true, scheduled_at }`. On the rare concurrent slot collision it catches the
+  unique-index conflict and retries the next slot.
+- Tests: `tests/publication-queue.test.ts` (queue SQL semantics, the unique-slot
+  backstop, claim atomicity, CHECK enforcement) and additions to
+  `tests/draft-scheduler.test.ts` (`toSqliteUtc`/`isSqliteUtc`/`nextFreeSlot`).
 
 ## [0.5.53.56] - 2026-06-15
 
