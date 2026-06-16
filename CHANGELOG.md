@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.66] - 2026-06-16
+## [0.5.53.67] - 2026-06-16
 
 ### Added (Instagram carousel — multi-photo posts)
 - **`publishCarousel()` in `src/lib/instagram-client.ts`** — publishes a 2–10 image
@@ -21,6 +21,35 @@ All notable changes to Aosom Sync will be documented in this file.
   queue path (`queue-publisher`).
 - Tests: +8 (carousel payload shape, child-failure abort, 2–10 guard, container-error,
   and the `≥2 → carousel` / `>10 → cap` routing).
+
+## [0.5.53.66] - 2026-06-16
+
+### Added (unit tests for ensureSchema/initSchema retry — #186)
+- **`tests/ensure-schema-retry.test.ts`** — covers the `initSchema()` retry contract that
+  shipped without tests (#186, `DONE_WITH_CONCERNS`). Two cases: (1) when the schema-init
+  impl throws, the memoized `schemaPromise` is nulled and the next call retries instead of
+  re-throwing the cached rejection; (2) when the first attempt fails but the retry succeeds,
+  init resolves, the success is memoized (no further re-runs), and the DB it initialized is
+  accessible normally.
+- **`src/lib/database.ts`** — added a small test-only DI seam (`activeInitSchemaImpl` behind
+  `__setInitSchemaImplForTests` / `__getSchemaPromiseForTests`) so a fail-once-then-succeed
+  impl can be injected without a live DB. Production behaviour is unchanged: `initSchema()`
+  always runs the real `_initSchemaImpl` unless a test overrides it.
+
+## [0.5.53.65] - 2026-06-16
+
+### Fixed (dashboard "File de publication" read the wrong store)
+- **The publication queue panel now reads `publication_queue` instead of `facebook_drafts`.**
+  Since Approve switched to enqueuing into `publication_queue` (and stopped writing `scheduled`
+  facebook_drafts), the panel — which fetched `/api/social?status=scheduled` — was showing a
+  near-empty list. New **`GET /api/queue`** (session-auth) returns pending queue items
+  (`getPendingQueue()`, oldest slot first) as a lean DTO: `scheduledAt` (converted from the
+  table's UTC datetime TEXT to unix seconds), `platform`, `contentType`, `status`, a truncated
+  caption/title `preview`, and an `https`-only `imageUrl`. Response capped at 50 items; full
+  `payload` never leaves the server.
+- **Panel UI** now shows, per post: scheduled time, platform (Facebook / Instagram / both / Blog),
+  content preview, and a colour-coded status badge (pending / publishing / published / failed /
+  cancelled).
 
 ## [0.5.53.64] - 2026-06-16
 
