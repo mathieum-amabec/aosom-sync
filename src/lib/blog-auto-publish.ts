@@ -7,10 +7,11 @@ import { getAnthropicClient } from "./content-generator";
 import { CLAUDE, BLOG } from "./config";
 import { isSeasonActive, isoWeekKey, type Season } from "./blog-topics";
 import {
-  getBlogScheduleConfig,
+  getSetting,
   reserveBlogPublishSlot,
   releaseBlogPublishSlot,
 } from "./database";
+import { parseBlogSchedule } from "./publication-scheduler";
 import { publishBlogArticle, type BlogLang } from "./shopify-blog";
 
 /** Minimal article shape the judge needs (structurally satisfied by the generated article). */
@@ -111,6 +112,14 @@ export async function maybeAutoPublish(p: AutoPublishParams): Promise<AutoPublis
     return { published: false, score: null, publishReason: "auto-publish not requested" };
   }
 
+  // Master switch + weekly cap come from the shared blog_schedule setting (#194's
+  // BlogSchedule). `enabled=false` turns auto-publish off entirely; `posts_per_week` is
+  // the cap the user edits via /api/settings/schedule.
+  const schedule = parseBlogSchedule(await getSetting("blog_schedule"));
+  if (!schedule.enabled) {
+    return { published: false, score: null, publishReason: "auto-publish disabled (blog_schedule)" };
+  }
+
   // 1. Quality score — a judge failure keeps the article as a draft (never crash).
   let score: number;
   try {
@@ -130,11 +139,11 @@ export async function maybeAutoPublish(p: AutoPublishParams): Promise<AutoPublis
     return { published: false, score, publishReason: `topic out of season (${season})` };
   }
 
-  // 3. Weekly cap — atomic reserve.
+  // 3. Weekly cap (blog_schedule.posts_per_week) — atomic reserve.
   const week = isoWeekKey(now);
-  const { maxPerWeek } = await getBlogScheduleConfig();
-  if (!(await reserveBlogPublishSlot(week, maxPerWeek))) {
-    return { published: false, score, publishReason: `weekly cap reached (${maxPerWeek})` };
+  const cap = schedule.posts_per_week;
+  if (!(await reserveBlogPublishSlot(week, cap))) {
+    return { published: false, score, publishReason: `weekly cap reached (${cap})` };
   }
 
   // 4. Publish live; release the reserved slot if Shopify rejects it.

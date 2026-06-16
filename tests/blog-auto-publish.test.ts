@@ -7,9 +7,12 @@ vi.mock("@/lib/content-generator", () => ({
   getAnthropicClient: () => ({ messages: { create: createMessage } }),
 }));
 vi.mock("@/lib/database", () => ({
-  getBlogScheduleConfig: vi.fn().mockResolvedValue({ maxPerWeek: 2 }),
+  getSetting: vi.fn().mockResolvedValue(null),
   reserveBlogPublishSlot: vi.fn().mockResolvedValue(true),
   releaseBlogPublishSlot: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/publication-scheduler", () => ({
+  parseBlogSchedule: vi.fn(() => ({ enabled: true, posts_per_week: 2, preferred_days: ["tue", "thu"], preferred_time: "10:00" })),
 }));
 vi.mock("@/lib/shopify-blog", () => ({
   publishBlogArticle: vi.fn().mockResolvedValue(undefined),
@@ -17,7 +20,8 @@ vi.mock("@/lib/shopify-blog", () => ({
 
 import { maybeAutoPublish, scoreArticle } from "@/lib/blog-auto-publish";
 import { publishBlogArticle } from "@/lib/shopify-blog";
-import { getBlogScheduleConfig, reserveBlogPublishSlot, releaseBlogPublishSlot } from "@/lib/database";
+import { reserveBlogPublishSlot, releaseBlogPublishSlot } from "@/lib/database";
+import { parseBlogSchedule } from "@/lib/publication-scheduler";
 
 const article = { title: "T", bodyHtml: "<p>x</p>", metaDescription: "m", tags: ["a", "b"] };
 
@@ -119,10 +123,18 @@ describe("maybeAutoPublish — gate", () => {
     expect(reserveBlogPublishSlot).not.toHaveBeenCalled();
   });
 
-  it("respects a custom cap from getBlogScheduleConfig", async () => {
+  it("respects posts_per_week from blog_schedule as the cap", async () => {
     judgeReturns(90);
-    vi.mocked(getBlogScheduleConfig).mockResolvedValueOnce({ maxPerWeek: 5 });
+    vi.mocked(parseBlogSchedule).mockReturnValueOnce({ enabled: true, posts_per_week: 5, preferred_days: ["tue"], preferred_time: "10:00" });
     await maybeAutoPublish(baseParams);
     expect(reserveBlogPublishSlot).toHaveBeenCalledWith("2026-W29", 5);
+  });
+
+  it("does not publish when blog_schedule.enabled is false (master switch)", async () => {
+    vi.mocked(parseBlogSchedule).mockReturnValueOnce({ enabled: false, posts_per_week: 2, preferred_days: ["tue"], preferred_time: "10:00" });
+    const r = await maybeAutoPublish(baseParams);
+    expect(r).toEqual({ published: false, score: null, publishReason: "auto-publish disabled (blog_schedule)" });
+    expect(createMessage).not.toHaveBeenCalled(); // gated before the judge call
+    expect(reserveBlogPublishSlot).not.toHaveBeenCalled();
   });
 });

@@ -4,10 +4,11 @@ import fs from "fs";
 import crypto from "crypto";
 import type { SyncRun, SyncLogEntry, ChangeType } from "@/types/sync";
 import type { UserRole } from "@/lib/config";
-import { BLOG } from "@/lib/config";
+import { DEFAULT_PUBLICATION_SCHEDULE, DEFAULT_BLOG_SCHEDULE } from "@/lib/config";
 import type { AosomProduct } from "@/types/aosom";
 import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
 import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
+import { isSqliteUtc } from "@/lib/draft-scheduler";
 
 let client: Client | null = null;
 
@@ -307,6 +308,32 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_price_alerts_pending ON price_alerts(notified_at)`,
     `CREATE INDEX IF NOT EXISTS idx_cron_runs_name_at ON cron_runs(name, ran_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_feed_syncs_type_at ON feed_syncs(feed_type, fetched_at DESC)`,
+    // publication_queue: unified scheduling queue for social posts, Shopify product
+    // drafts, and blog articles. scheduled_at/created_at/published_at are SQLite
+    // datetime() TEXT ('YYYY-MM-DD HH:MM:SS' UTC) — distinct from facebook_drafts which
+    // uses unix-seconds integers. payload is the JSON-stringified content the consumer
+    // cron publishes for the slot. CHECK constraints reject typo'd enum values that would
+    // otherwise make a row invisible to every status-filtered query.
+    `CREATE TABLE IF NOT EXISTS publication_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog')),
+      content_id TEXT NOT NULL,      -- ID of the source draft/post
+      platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
+      payload TEXT NOT NULL,         -- JSON-stringified content
+      scheduled_at TEXT NOT NULL,    -- SQLite datetime TEXT of the slot (UTC)
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled')),
+      error TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      published_at TEXT
+    )`,
+    // Composite (status, scheduled_at): serves the consumer cron's "due pending items,
+    // oldest slot first" scan (getNextPending) — seek by status then order by scheduled_at.
+    `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`,
+    // Partial UNIQUE (platform, scheduled_at) over ACTIVE rows only: enforces "one active
+    // item per platform per slot" as a hard integrity backstop, so the read-compute-insert
+    // in /api/queue/add can't silently double-book a slot under concurrent requests. failed/
+    // cancelled rows drop out of the index, freeing their slot for rebooking.
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
@@ -512,6 +539,8 @@ async function _initSchemaImpl(): Promise<void> {
     ['social_store_display_name', ''],
     ['social_banner_opacity', '75'],
     ['social_logo_position', 'bottom-right'],
+    ['publication_schedule', JSON.stringify(DEFAULT_PUBLICATION_SCHEDULE)],
+    ['blog_schedule', JSON.stringify(DEFAULT_BLOG_SCHEDULE)],
   ];
 
   await runBatch(
@@ -2438,6 +2467,159 @@ export async function deleteFacebookDraft(id: number): Promise<void> {
   await db.execute({ sql: `DELETE FROM facebook_drafts WHERE id = ?`, args: [id] });
 }
 
+// ─── Publication Queue ───────────────────────────────────────────────
+//
+// Unified scheduling queue (social posts / Shopify drafts / blog articles).
+// Unlike facebook_drafts (unix-seconds integers), all timestamps here are
+// SQLite datetime() TEXT — 'YYYY-MM-DD HH:MM:SS' UTC — so the `<=` slot scan in
+// getNextPending compares lexicographically against datetime('now'). Producers
+// MUST store slots in that exact format (see toSqliteUtc in draft-scheduler).
+
+export type QueueContentType = "social" | "draft" | "blog";
+export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog";
+export type QueueStatus = "pending" | "publishing" | "published" | "failed" | "cancelled";
+
+export interface PublicationQueueItem {
+  id: number;
+  contentType: QueueContentType;
+  contentId: string;
+  platform: QueuePlatform;
+  payload: string; // JSON-stringified content
+  scheduledAt: string; // SQLite datetime TEXT (UTC)
+  status: QueueStatus;
+  error: string | null;
+  createdAt: string;
+  publishedAt: string | null;
+}
+
+function mapQueueItem(o: Record<string, unknown>): PublicationQueueItem {
+  return {
+    id: Number(o.id),
+    contentType: o.content_type as QueueContentType,
+    contentId: String(o.content_id),
+    platform: o.platform as QueuePlatform,
+    payload: String(o.payload),
+    scheduledAt: String(o.scheduled_at),
+    status: o.status as QueueStatus,
+    error: (o.error as string) || null,
+    createdAt: String(o.created_at),
+    publishedAt: (o.published_at as string) || null,
+  };
+}
+
+/** Thrown when a slot is already taken on a platform (partial-unique-index violation). */
+export class QueueSlotTakenError extends Error {
+  constructor(platform: string, scheduledAt: string) {
+    super(`Slot ${scheduledAt} already taken on platform '${platform}'`);
+    this.name = "QueueSlotTakenError";
+  }
+}
+
+/**
+ * Queue a single item for publishing at `scheduledAt` (SQLite datetime TEXT, UTC).
+ * Rejects a malformed `scheduledAt` up front: the due-check in getNextPending is a
+ * lexicographic compare, so a non-'YYYY-MM-DD HH:MM:SS' value would silently never be due.
+ * Surfaces the partial-unique-index conflict as QueueSlotTakenError so callers can react
+ * (e.g. recompute the next free slot) instead of seeing a raw SQLite error.
+ */
+export async function addToQueue(item: {
+  contentType: QueueContentType;
+  contentId: string;
+  platform: QueuePlatform;
+  payload: string;
+  scheduledAt: string;
+}): Promise<number> {
+  if (!isSqliteUtc(item.scheduledAt)) {
+    throw new Error(`addToQueue: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${item.scheduledAt}')`);
+  }
+  const db = await ensureSchema();
+  try {
+    const result = await db.execute({
+      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at)
+            VALUES (?, ?, ?, ?, ?)`,
+      args: [item.contentType, item.contentId, item.platform, item.payload, item.scheduledAt],
+    });
+    return Number(result.lastInsertRowid);
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+      throw new QueueSlotTakenError(item.platform, item.scheduledAt);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Due pending items (scheduled_at at/before now), oldest slot first. The consumer
+ * cron drains this, calling markPublished / markFailed per item. Served by
+ * idx_publication_queue_status_scheduled.
+ */
+export async function getNextPending(limit = 10): Promise<PublicationQueueItem[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM publication_queue
+          WHERE status = 'pending' AND scheduled_at <= datetime('now')
+          ORDER BY scheduled_at ASC
+          LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
+ * Atomically claim a pending item for publishing (pending → publishing). Returns true if
+ * this caller won the claim (rowsAffected === 1), false if another cron instance already
+ * took it. The consumer cron MUST claim before publishing so Vercel's overlapping cron
+ * instances never double-publish the same item — mirrors claimFacebookDraft.
+ */
+export async function claimQueueItem(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue SET status = 'publishing' WHERE id = ? AND status = 'pending'`,
+    args: [id],
+  });
+  return (result.rowsAffected ?? 0) === 1;
+}
+
+export async function markPublished(id: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE publication_queue SET status = 'published', published_at = datetime('now'), error = NULL WHERE id = ?`,
+    args: [id],
+  });
+}
+
+export async function markFailed(id: number, error: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE publication_queue SET status = 'failed', error = ? WHERE id = ?`,
+    args: [error, id],
+  });
+}
+
+/** All pending items (regardless of due time), oldest slot first — for the dashboard. */
+export async function getPendingQueue(): Promise<PublicationQueueItem[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(
+    `SELECT * FROM publication_queue WHERE status = 'pending' ORDER BY scheduled_at ASC`,
+  );
+  return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
+ * Slot timestamps (SQLite datetime TEXT) already taken on `platform` by an active
+ * (pending, publishing, or published) queue item — the same predicate as the partial
+ * unique index, so the next-free-slot search and the integrity backstop agree. Failed/
+ * cancelled items free their slot.
+ */
+export async function getOccupiedQueueSlots(platform: string): Promise<string[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT scheduled_at FROM publication_queue WHERE platform = ? AND status IN ('pending', 'publishing', 'published')`,
+    args: [platform],
+  });
+  return result.rows.map((r) => String(rowToObj(r).scheduled_at));
+}
+
 // ─── Auto-post daily counter ─────────────────────────────────────────
 
 function todayKey(): string {
@@ -2494,23 +2676,6 @@ export async function releaseBlogPublishSlot(week: string): Promise<void> {
     sql: `UPDATE blog_publish_counter SET count = MAX(0, count - 1) WHERE week = ?`,
     args: [week],
   });
-}
-
-/** Blog auto-publish schedule config from the `blog_schedule` setting, with safe defaults. */
-export async function getBlogScheduleConfig(): Promise<{ maxPerWeek: number }> {
-  const raw = await getSetting("blog_schedule");
-  let maxPerWeek: number = BLOG.DEFAULT_MAX_PUBLISH_PER_WEEK;
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as { maxPerWeek?: unknown };
-      if (typeof parsed.maxPerWeek === "number" && Number.isFinite(parsed.maxPerWeek) && parsed.maxPerWeek >= 0) {
-        maxPerWeek = Math.floor(parsed.maxPerWeek);
-      }
-    } catch {
-      // Malformed setting → fall back to the default cap rather than blocking publishing.
-    }
-  }
-  return { maxPerWeek };
 }
 
 export async function getLastPostDate(sku: string): Promise<number | null> {

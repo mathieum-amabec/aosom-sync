@@ -162,11 +162,10 @@ export const BLOG = {
   ADMIN_ARTICLE_URL: (id: string | number) =>
     `${SHOPIFY.ADMIN_URL}/articles/${id}`,
   // Auto-publish: an article goes live only if Claude's quality judge scores it at/above
-  // this (0-100) AND its topic is in season AND the weekly cap isn't reached.
+  // this (0-100) AND its topic is in season AND the weekly cap isn't reached. The weekly
+  // cap + on/off switch live in the `blog_schedule` setting (BlogSchedule.posts_per_week /
+  // .enabled), edited via /api/settings/schedule.
   AUTO_PUBLISH_SCORE_THRESHOLD: 80,
-  // Default max articles auto-published per ISO week. Overridable via the `blog_schedule`
-  // setting (JSON `{ "maxPerWeek": N }`); see getBlogScheduleConfig in database.ts.
-  DEFAULT_MAX_PUBLISH_PER_WEEK: 2,
 } as const;
 
 // ─── Aosom Feed ─────────────────────────────────────────────────────
@@ -336,6 +335,59 @@ export const AUTH = {
 
 export type UserRole = (typeof AUTH.ROLES)[number];
 
+// ─── Publication Schedule ───────────────────────────────────────────
+// Configurable auto-posting cadence. Replaces the fixed M/W/F grid baked into
+// draft-scheduler.ts with a per-weekday set of local times. Stored as JSON in
+// the `settings` table under `publication_schedule` / `blog_schedule`.
+
+export type WeekdayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+// Monday-first ordering for display + iteration.
+export const WEEKDAY_KEYS: readonly WeekdayKey[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+export interface PublicationSlot {
+  day: WeekdayKey;
+  /** "HH:MM" 24h wall-clock times, local to the schedule's `timezone`. */
+  times: string[];
+}
+
+export interface PublicationSchedule {
+  enabled: boolean;
+  slots: PublicationSlot[];
+  /** IANA timezone, e.g. "America/Toronto". */
+  timezone: string;
+  /** Hard cap on posts auto-scheduled to any single calendar day (1..5). */
+  max_per_day: number;
+}
+
+export interface BlogSchedule {
+  enabled: boolean;
+  /** 1..3 */
+  posts_per_week: number;
+  preferred_days: WeekdayKey[];
+  /** "HH:MM" 24h wall-clock time. */
+  preferred_time: string;
+}
+
+export const DEFAULT_PUBLICATION_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: [
+    { day: "mon", times: ["09:00", "12:00", "18:00"] },
+    { day: "wed", times: ["09:00", "18:00"] },
+    { day: "fri", times: ["09:00", "12:00", "18:00"] },
+    { day: "sat", times: ["10:00"] },
+  ],
+  timezone: "America/Toronto",
+  max_per_day: 3,
+};
+
+export const DEFAULT_BLOG_SCHEDULE: BlogSchedule = {
+  enabled: true,
+  posts_per_week: 2,
+  preferred_days: ["tue", "thu"],
+  preferred_time: "10:00",
+};
+
 // ─── Settings Allowlist ─────────────────────────────────────────────
 // Single source of truth — used by both the API route and the UI.
 
@@ -366,6 +418,8 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   "social_autopost_min_drop_percent",
   "social_autopost_max_per_day",
   "social_autopost_channels",
-  // Blog auto-publish schedule: JSON `{ "maxPerWeek": N }` cap on articles published/week.
+  // Publication schedule (JSON blobs, edited via /api/settings/schedule).
+  // blog_schedule (BlogSchedule) carries posts_per_week — the blog auto-publish weekly cap.
+  "publication_schedule",
   "blog_schedule",
 ]);
