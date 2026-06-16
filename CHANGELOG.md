@@ -2,6 +2,35 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.63] - 2026-06-15
+
+### Changed (Approve enqueues into publication_queue on the configurable schedule)
+- **`src/app/api/social/route.ts`** — the `approve` action no longer writes a
+  `scheduled` `facebook_draft` on the fixed Mon/Wed/Fri 15:00 UTC `draft-scheduler`
+  grid. It now reads `publication_schedule` from settings, picks the next free slot via
+  `getNextAvailableSlot` (publication-scheduler), and enqueues the draft into
+  `publication_queue` (consumed by `/api/cron/publisher`). The draft stays `approved`
+  in `facebook_drafts` — so `/api/cron/social-scheduled` can't also pick it up
+  (no double-publish). Falls back to plain `approved` (no queue entry) when the
+  schedule is disabled or no slot is free. Response keeps `scheduledAt` as unix
+  seconds (the dashboard's contract) and adds `queued` / `queuedCount`.
+- **`src/lib/social-publisher.ts`** — new `draftToQueueItems(draft, activeKeys)`:
+  maps a draft to one valid `SocialQueuePayload` per brand (ameublo → FR `postText`,
+  furnish → EN `postTextEn`), with brand-localized images and `platform` `"both"`
+  vs the single active platform. Without this the queue consumer's
+  `parseSocialPayload` (which requires `caption` + `brand`) would reject a raw draft
+  and every approved post would fail to publish.
+- **`src/lib/publication-scheduler.ts`** — `getNextAvailableSlot` now also returns
+  `sqlite` (the slot as SQLite `datetime()` text), so the queue path gets the exact
+  shape `addToQueue` requires without importing the converter from `draft-scheduler`.
+- **`CLAUDE.md`** — documents the two publishing paths and the deprecation of
+  `/api/cron/social-scheduled` for Approve (still serves the manual `schedule` action
+  + legacy `scheduled` rows). `TODOS.md` tracks surfacing `publication_queue` in the UI.
+- **Tests** — `tests/draft-to-queue-items.test.ts` (per-brand mapping: bilingual split,
+  EN-caption-missing skip, single-platform collapse, image localization) and
+  `tests/social-approve-queue.test.ts` (the approve route enqueues mapped payloads,
+  per-brand fan-out, `QueueSlotTakenError` retry, disabled→fallback, 404).
+
 ## [0.5.53.62] - 2026-06-15
 
 ### Changed (de-dup FB/IG publish routing — no behavior change)

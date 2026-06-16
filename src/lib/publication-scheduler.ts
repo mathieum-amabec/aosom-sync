@@ -252,6 +252,13 @@ export interface NextSlot {
   at: number;
   /** Same instant as an ISO-8601 UTC string, for display/logging. */
   iso: string;
+  /**
+   * Same instant as SQLite `datetime()` text — `'YYYY-MM-DD HH:MM:SS'` (UTC).
+   * This is the exact shape `publication_queue.scheduled_at` requires (and that
+   * `addToQueue`/`isSqliteUtc` validate), so the queue path can use it directly
+   * without importing the unix→SQLite converter from `draft-scheduler`.
+   */
+  sqlite: string;
 }
 
 /**
@@ -293,7 +300,8 @@ export async function getNextAvailableSlot(
     if (occupiedSet.has(slot)) continue;
     const dayKey = localDayKey(schedule.timezone, slot);
     if ((perDayCount.get(dayKey) ?? 0) >= schedule.max_per_day) continue;
-    return { platform, at: slot, iso: new Date(slot * 1000).toISOString() };
+    const iso = new Date(slot * 1000).toISOString();
+    return { platform, at: slot, iso, sqlite: iso.slice(0, 19).replace("T", " ") };
   }
   return null;
 }

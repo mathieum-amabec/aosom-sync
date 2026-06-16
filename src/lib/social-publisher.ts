@@ -18,7 +18,10 @@ import {
   setDraftChannelState,
   updateFacebookDraft,
   type ChannelState,
+  type FacebookDraft,
+  type QueuePlatform,
 } from "./database";
+import type { SocialQueuePayload } from "./queue-publisher";
 
 /**
  * The branded hero image (GET /api/image-preview) is stored on a draft with locale=fr
@@ -221,4 +224,66 @@ export async function publishDraftToChannels(
   }
 
   return results;
+}
+
+export interface DraftQueueItem {
+  platform: QueuePlatform; // "facebook" | "instagram" | "both"
+  payload: SocialQueuePayload;
+}
+
+/**
+ * Map an approved draft to one `publication_queue` item per brand it can post to.
+ *
+ * Mirrors `publishDraftToChannel`'s brand/language/image resolution so the
+ * `queue-publisher` consumer gets a payload it can actually publish (it requires
+ * `caption` + `brand`, which a raw FacebookDraft lacks):
+ *  - **ameublo** posts the FR caption (`postText`); **furnish** posts the EN
+ *    caption (`postTextEn`).
+ *  - A brand is skipped when it has no active channel, or (furnish) no EN caption —
+ *    matching the publisher's refusal to post French to an EN channel.
+ *  - `platform` is `"both"` when the brand has an active FB *and* IG channel, else
+ *    the single active platform.
+ *  - Images are brand-localized (EN channels get the EN-branded hero).
+ *
+ * Pure (no I/O) so it's unit-testable; the caller passes `activeKeys`
+ * (`activeChannels()`).
+ */
+export function draftToQueueItems(
+  draft: FacebookDraft,
+  activeKeys: ChannelKey[],
+): DraftQueueItem[] {
+  const byBrand = new Map<FacebookBrand, { fb: boolean; ig: boolean }>();
+  for (const key of activeKeys) {
+    const meta = CHANNEL_META[key];
+    const present = byBrand.get(meta.brand) ?? { fb: false, ig: false };
+    if (meta.platform === "facebook") present.fb = true;
+    else if (meta.platform === "instagram") present.ig = true;
+    byBrand.set(meta.brand, present);
+  }
+
+  const items: DraftQueueItem[] = [];
+  for (const [brand, present] of byBrand) {
+    if (!present.fb && !present.ig) continue;
+    const language = brand === "furnish" ? "EN" : "FR";
+    const caption = language === "EN" ? draft.postTextEn : draft.postText;
+    if (!caption || caption.trim() === "") continue; // no caption for this brand → can't post it
+    const platform: QueuePlatform = present.fb && present.ig ? "both" : present.fb ? "facebook" : "instagram";
+
+    const localizedUrls =
+      draft.imageUrls && draft.imageUrls.length > 0
+        ? localizeBrandedImageUrls(draft.imageUrls, language)
+        : draft.imageUrl
+          ? localizeBrandedImageUrls([draft.imageUrl], language)
+          : [];
+
+    const payload: SocialQueuePayload = {
+      caption,
+      brand,
+      ...(localizedUrls.length > 0 ? { imageUrls: localizedUrls, imageUrl: localizedUrls[0] } : {}),
+      ...(draft.videoUrl ? { videoUrl: draft.videoUrl } : {}),
+      ...(draft.reelsVideoUrl ? { reelsVideoUrl: draft.reelsVideoUrl } : {}),
+    };
+    items.push({ platform, payload });
+  }
+  return items;
 }

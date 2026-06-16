@@ -5,12 +5,15 @@ import {
   updateFacebookDraft,
   deleteFacebookDraft,
   setDraftChannelState,
-  getScheduledDraftSlots,
+  getSetting,
+  addToQueue,
+  getOccupiedQueueSlots,
+  QueueSlotTakenError,
 } from "@/lib/database";
 import { testConnection as testFacebookConnection, type FacebookBrand } from "@/lib/facebook-client";
 import { testConnection as testInstagramConnection } from "@/lib/instagram-client";
-import { publishDraftToChannel, publishDraftToChannels } from "@/lib/social-publisher";
-import { langsOf, findSlot, buildOccupancy } from "@/lib/draft-scheduler";
+import { publishDraftToChannel, publishDraftToChannels, draftToQueueItems } from "@/lib/social-publisher";
+import { getNextAvailableSlot } from "@/lib/publication-scheduler";
 import { triggerNewProduct, triggerPriceDrop, triggerStockHighlight } from "@/jobs/job4-social";
 import { CHANNELS, activeChannels, type ChannelKey } from "@/lib/config";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
@@ -40,6 +43,11 @@ function assertChannelKey(key: unknown): asserts key is ChannelKey {
   if (typeof key !== "string" || !VALID_CHANNEL_KEYS.has(key)) {
     throw new Error(`Invalid channel key: ${String(key)}`);
   }
+}
+
+/** SQLite datetime() text ('YYYY-MM-DD HH:MM:SS' UTC) → unix seconds. */
+function sqliteToUnixSec(s: string): number {
+  return Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
 }
 
 /**
@@ -82,26 +90,64 @@ export async function POST(request: Request) {
       }
 
       case "approve": {
-        // Approve = enqueue onto the next free publishing slot (M/W/F 15:00 UTC, 1 FR + 1 EN
-        // per slot). The /api/cron/social-scheduled cron publishes the draft when its slot
-        // arrives — so approval no longer publishes immediately, it queues. If no slot is free
-        // within the horizon, fall back to plain 'approved' for manual scheduling.
+        // Approve = enqueue the draft into publication_queue on the next free slot from the
+        // configurable `publication_schedule` (platform 'both' = FB + IG). /api/cron/publisher
+        // drains the queue and publishes when the slot arrives. The draft stays 'approved' in
+        // facebook_drafts and is NO LONGER written as a 'scheduled' facebook_draft, so the
+        // legacy /api/cron/social-scheduled path can't also pick it up (no double-publish).
+        // Falls back to plain 'approved' with no queue entry when the schedule is disabled or
+        // no slot is free within the horizon, leaving the draft for manual scheduling.
         const draft = await getFacebookDraft(body.id);
         if (!draft) {
           return NextResponse.json({ success: false, error: "Draft introuvable" }, { status: 404 });
         }
-        const langs = langsOf(draft.postText, draft.postTextEn);
-        const occupancy = buildOccupancy(await getScheduledDraftSlots());
-        const slot = findSlot(Math.floor(Date.now() / 1000), langs, occupancy);
-        if (slot != null) {
-          await updateFacebookDraft(body.id, { status: "scheduled", scheduled_at: slot });
-        } else {
-          await updateFacebookDraft(body.id, { status: "approved" });
+
+        const settings = { publication_schedule: (await getSetting("publication_schedule")) ?? "" };
+        const nowSec = Math.floor(Date.now() / 1000);
+        // One queue item per brand the draft can post to (ameublo/FR, furnish/EN), each
+        // carrying a payload the publisher can actually publish (caption + brand + images).
+        const items = draftToQueueItems(draft, activeChannels());
+
+        let queuedCount = 0;
+        let earliestSec: number | undefined; // earliest booked slot (unix sec) for the response
+        for (const item of items) {
+          // Occupancy is per-platform: convert the queue's SQLite-datetime slots to unix sec.
+          const occupied = (await getOccupiedQueueSlots(item.platform)).map(sqliteToUnixSec);
+          // Two approvals can pick the same slot; the queue's partial-unique index rejects the
+          // loser with QueueSlotTakenError, so retry past the now-taken slot (mirrors /api/queue/add).
+          for (let attempt = 0; attempt < 5; attempt++) {
+            const next = await getNextAvailableSlot("facebook", settings, { nowSec, occupied });
+            if (!next) break; // schedule disabled or no free slot within the horizon
+            try {
+              await addToQueue({
+                contentType: "social",
+                contentId: String(body.id),
+                platform: item.platform,
+                payload: JSON.stringify(item.payload),
+                scheduledAt: next.sqlite,
+              });
+              queuedCount++;
+              earliestSec = earliestSec === undefined ? next.at : Math.min(earliestSec, next.at);
+              break;
+            } catch (err) {
+              if (err instanceof QueueSlotTakenError) {
+                occupied.push(next.at); // lost the race for this slot — recompute past it
+                continue;
+              }
+              throw err;
+            }
+          }
         }
+
+        // Keep the draft approved; it is no longer written into the facebook_drafts scheduled queue.
+        await updateFacebookDraft(body.id, { status: "approved" });
+
         return NextResponse.json({
           success: true,
           data: await getFacebookDraft(body.id),
-          scheduledAt: slot ?? undefined,
+          queued: queuedCount > 0,
+          queuedCount,
+          scheduledAt: earliestSec, // unix seconds — matches the dashboard's `typeof === "number"` check
         });
       }
 
