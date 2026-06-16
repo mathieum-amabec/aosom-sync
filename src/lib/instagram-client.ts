@@ -103,6 +103,79 @@ export async function publishPhoto(opts: {
   return { id: publishData.id, creationId };
 }
 
+const CAROUSEL_MIN_ITEMS = 2;
+const CAROUSEL_MAX_ITEMS = 10;
+const CAROUSEL_UPLOAD_DELAY_MS = 500; // Meta throttles rapid /media POSTs (mirrors the FB album path)
+
+/**
+ * Publish a multi-photo carousel to an Instagram Business account (2–10 images).
+ *
+ * Three-step flow (per Meta Graph API docs):
+ *   1. One child container per image → POST /{ig-user-id}/media with image_url +
+ *      is_carousel_item=true (NO caption on children). Collect each returned id.
+ *   2. Carousel container → POST /{ig-user-id}/media with media_type=CAROUSEL,
+ *      children=<child ids>, and the caption.
+ *   3. Publish → POST /{ig-user-id}/media_publish with the carousel creation_id.
+ *
+ * Unlike Reels, image containers process near-instantly, so (like publishPhoto)
+ * there's no status polling. Every child upload must succeed: a partial carousel
+ * would publish in the wrong order / with missing photos, so any child failure
+ * aborts before publishing. Use publishPhoto for a single image.
+ */
+export async function publishCarousel(opts: {
+  caption: string;
+  imageUrls: string[];
+  brand: InstagramBrand;
+}): Promise<InstagramPublishResult> {
+  if (opts.imageUrls.length < CAROUSEL_MIN_ITEMS || opts.imageUrls.length > CAROUSEL_MAX_ITEMS) {
+    throw new Error(
+      `Instagram carousel requires ${CAROUSEL_MIN_ITEMS}–${CAROUSEL_MAX_ITEMS} images (got ${opts.imageUrls.length})`,
+    );
+  }
+
+  const { igUserId, token, label } = brandCreds(opts.brand);
+  const caption = opts.caption.length > 2200 ? opts.caption.slice(0, 2197) + "..." : opts.caption;
+
+  // Step 1: create one child container per image (no caption on children).
+  const childIds: string[] = [];
+  for (let i = 0; i < opts.imageUrls.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, CAROUSEL_UPLOAD_DELAY_MS));
+    const res = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ image_url: opts.imageUrls[i], is_carousel_item: true }),
+    });
+    if (res.status === 429) throw new Error(`${label}: Instagram rate limit on carousel item ${i + 1}, retry later`);
+    const data = await res.json();
+    if (data.error) throw new Error(`${label} (carousel item ${i + 1}): ${data.error.message}`);
+    if (!data.id) throw new Error(`${label}: no creation_id for carousel item ${i + 1}`);
+    childIds.push(String(data.id));
+  }
+
+  // Step 2: create the parent CAROUSEL container referencing the children.
+  const createRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ media_type: "CAROUSEL", children: childIds.join(","), caption }),
+  });
+  if (createRes.status === 429) throw new Error(`${label}: Instagram rate limit on carousel container, retry later`);
+  const createData = await createRes.json();
+  if (createData.error) throw new Error(`${label} (create carousel): ${createData.error.message}`);
+  const creationId: string = createData.id;
+  if (!creationId) throw new Error(`${label}: no creation_id returned for carousel`);
+
+  // Step 3: publish the carousel container.
+  const publishRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media_publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ creation_id: creationId }),
+  });
+  const publishData = await publishRes.json();
+  if (publishData.error) throw new Error(`${label} (publish carousel): ${publishData.error.message}`);
+  console.log(`[PUBLISH] ${label} carousel posted with ${childIds.length} photos (media: ${publishData.id})`);
+  return { id: publishData.id, creationId };
+}
+
 const REEL_POLL_INTERVAL_MS = 4_000;
 const REEL_POLL_TIMEOUT_MS = 120_000; // IG transcode of a short clip is usually < 1min
 

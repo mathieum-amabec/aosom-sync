@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.66] - 2026-06-16
+
+### Added (Instagram carousel — multi-photo posts)
+- **`publishCarousel()` in `src/lib/instagram-client.ts`** — publishes a 2–10 image
+  Instagram carousel via Meta's three-step Graph API flow: one child container per
+  image (`POST /{ig-user-id}/media` with `is_carousel_item=true`, no caption on
+  children), then a parent `CAROUSEL` container (`media_type=CAROUSEL`, `children=…`,
+  caption), then `media_publish`. Image containers process near-instantly so there's
+  no status polling (unlike `publishReel`). Every child upload must succeed — any
+  failure throws before publishing, since a partial carousel would post in the wrong
+  order or with missing photos. 500ms spacing between child uploads mirrors the FB
+  album path; caption trimmed to 2200 chars like `publishPhoto`/`publishReel`.
+- **`publishSocialPayload` Instagram routing** — `≥2 images → publishCarousel`,
+  single image → `publishPhoto` (unchanged). Symmetric with the existing Facebook
+  album branch. Images are capped at 10 (IG's limit) before the call. Routing lives
+  in one place, so this covers both the draft path (`publishDraftToChannel`) and the
+  queue path (`queue-publisher`).
+- Tests: +8 (carousel payload shape, child-failure abort, 2–10 guard, container-error,
+  and the `≥2 → carousel` / `>10 → cap` routing).
+
 ## [0.5.53.64] - 2026-06-16
 
 ### Fixed (deprecated Claude model — sync content generation)

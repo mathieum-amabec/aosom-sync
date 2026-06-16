@@ -10,6 +10,7 @@ vi.mock("@/lib/facebook-client", () => ({
 }));
 vi.mock("@/lib/instagram-client", () => ({
   publishPhoto: vi.fn().mockResolvedValue({ id: "ig-photo", creationId: "c1" }),
+  publishCarousel: vi.fn().mockResolvedValue({ id: "ig-carousel", creationId: "c3" }),
   publishReel: vi.fn().mockResolvedValue({ id: "ig-reel", creationId: "c2" }),
 }));
 vi.mock("@/lib/config", () => ({ CHANNEL_META: {} }));
@@ -26,7 +27,7 @@ import {
   publishWithImages,
   publishText,
 } from "@/lib/facebook-client";
-import { publishPhoto, publishReel } from "@/lib/instagram-client";
+import { publishPhoto, publishCarousel, publishReel } from "@/lib/instagram-client";
 
 const base = { caption: "Bonjour", brand: "ameublo" as const };
 
@@ -76,10 +77,26 @@ describe("publishSocialPayload — instagram routing", () => {
     expect(publishReel).toHaveBeenCalledWith(expect.objectContaining({ videoUrl: "sq.mp4" }));
   });
 
-  it("image → publishPhoto", async () => {
+  it("single image → publishPhoto", async () => {
     const r = await publishSocialPayload("instagram", { ...base, imageUrls: ["a.jpg"] });
     expect(publishPhoto).toHaveBeenCalledWith(expect.objectContaining({ imageUrl: "a.jpg" }));
+    expect(publishCarousel).not.toHaveBeenCalled();
     expect(r).toEqual({ postId: "ig-photo" });
+  });
+
+  it("2+ images → publishCarousel, returns the media id as postId", async () => {
+    const r = await publishSocialPayload("instagram", { ...base, imageUrls: ["a.jpg", "b.jpg"] });
+    expect(publishCarousel).toHaveBeenCalledWith(expect.objectContaining({ imageUrls: ["a.jpg", "b.jpg"] }));
+    expect(publishPhoto).not.toHaveBeenCalled();
+    expect(r).toEqual({ postId: "ig-carousel" });
+  });
+
+  it("caps a >10-image carousel at 10 items", async () => {
+    const urls = Array.from({ length: 12 }, (_, i) => `${i}.jpg`);
+    await publishSocialPayload("instagram", { ...base, imageUrls: urls });
+    expect(publishCarousel).toHaveBeenCalledWith(
+      expect.objectContaining({ imageUrls: urls.slice(0, 10) }),
+    );
   });
 
   it("no media → throws (IG requires media)", async () => {
