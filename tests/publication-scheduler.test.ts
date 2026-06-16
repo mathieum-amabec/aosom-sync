@@ -163,6 +163,13 @@ describe("getNextAvailableSlot", () => {
     expect(next!.iso).toBe(new Date(next!.at * 1000).toISOString());
   });
 
+  it("exposes a SQLite-datetime `sqlite` field matching the queue's required shape", async () => {
+    const next = await getNextAvailableSlot("facebook", settings, { nowSec: NOW, occupied: [] });
+    // 'YYYY-MM-DD HH:MM:SS' (space, no T/Z) — what publication_queue.scheduled_at requires.
+    expect(next!.sqlite).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    expect(next!.sqlite).toBe(next!.iso.slice(0, 19).replace("T", " "));
+  });
+
   it("skips a slot already occupied in the queue", async () => {
     const first = (await getNextAvailableSlot("facebook", settings, { nowSec: NOW, occupied: [] }))!.at;
     const next = await getNextAvailableSlot("facebook", settings, { nowSec: NOW, occupied: [first] });

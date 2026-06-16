@@ -97,6 +97,18 @@
 
 ## Social Media / Job 4
 
+### Surface publication_queue in the dashboard (approve-to-queue follow-up)
+**Priority:** P2 (MEDIUM)
+
+Since Approve enqueues into `publication_queue` (not `facebook_drafts.status='scheduled'`),
+an approved+queued draft is invisible in the UI: the "File de publication" panel
+(`publication-queue-panel.tsx`) reads `/api/social?status=scheduled` and the social
+calendar gates on `draft.status === "scheduled"`. The queued item (and its slot) only
+lives in `publication_queue`, so the operator can't see, audit, or cancel it beyond the
+transient approve-time alert. Add a `GET /api/queue` (back it with `getPendingQueue()`)
+and point the panel at it; optionally show a "queued" badge on the draft. Until then the
+only queue visibility is the DB + the `/api/cron/publisher` run logs.
+
 ### Hook mismatch pour content_template drafts — filtrer les hooks stock/promo
 
 **Priority:** P2 (MEDIUM)
