@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.57] - 2026-06-15
+
+### Added (social — Approve queues to the publishing schedule)
+- **`src/app/api/social/route.ts`** — the `approve` action no longer just marks a
+  draft `approved`; it now auto-schedules the draft onto the next free Mon/Wed/Fri
+  15:00 UTC publishing slot (`status='scheduled'`, reusing `draft-scheduler`'s
+  `langsOf`/`findSlot`/`buildOccupancy` + `getScheduledDraftSlots`). The existing
+  `/api/cron/social-scheduled` cron then publishes it when the slot arrives, so
+  approval queues rather than publishes immediately. Falls back to `approved` when
+  no slot is free within the horizon. Response now returns `scheduledAt`.
+- **`src/app/(dashboard)/social/page.tsx`** — Approve shows a `Schedulé pour [date]`
+  confirmation, scheduled drafts render a `🕑 Schedulé — [date]` badge (year shown
+  when the slot is not in the current year), and the manual **Publish** button is
+  disabled for `scheduled` drafts so an operator can't race the cron and double-post.
+- **`src/app/(dashboard)/publication-queue-panel.tsx`** (new) — a "File de publication"
+  dashboard panel listing the upcoming queued posts; surfaces fetch errors distinctly
+  from an empty queue.
+
 ## [0.5.53.56] - 2026-06-15
 
 ### Fixed (schema init — retry after transient failure, issue #186)
