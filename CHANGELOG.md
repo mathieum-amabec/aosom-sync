@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.62] - 2026-06-15
+
+### Changed (de-dup FB/IG publish routing — no behavior change)
+- **`src/lib/social-publisher.ts`** — new exported `publishSocialPayload(platform, payload)`:
+  the single implementation of "which media → which Graph API call" (facebook: video →
+  album → photo → text; instagram: reel → photo). `publishDraftToChannel` now builds a
+  payload and delegates to it instead of carrying its own inline routing.
+- **`src/lib/queue-publisher.ts`** — dropped its duplicate `publishToFacebook`/
+  `publishToInstagram` (added in #193); `publishQueueItem` and the `both` path now call
+  the shared `publishSocialPayload` (via a small `toSocialPayload` normalizer that folds a
+  singular `imageUrl` into `imageUrls`). Both the draft and queue publish paths now share
+  one routing implementation.
+- Behavior-preserving refactor (verified equivalent: the `||`→`??` and array-length
+  details are neutralized by `mapDraft`'s `|| null` / `length > 0` normalization). The
+  only surface change is the Instagram no-media error text. New
+  `tests/social-payload.test.ts` locks the routing contract; all existing
+  social-publisher / queue-publisher tests stay green.
+
 ## [0.5.53.61] - 2026-06-15
 
 ### Added (blog auto-publish — quality + season gated, weekly-capped)

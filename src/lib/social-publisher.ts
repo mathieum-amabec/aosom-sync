@@ -41,6 +41,67 @@ export function localizeBrandedImageUrls(urls: string[], language: "FR" | "EN"):
 }
 
 /**
+ * Normalized social-post payload — the single source of truth for "which media → which
+ * Graph API call". Both the draft publisher (publishDraftToChannel) and the queue consumer
+ * (queue-publisher) build one of these so the FB/IG media routing lives in exactly one place.
+ */
+export interface SocialPayload {
+  caption: string;
+  brand: FacebookBrand; // === InstagramBrand ("ameublo" | "furnish")
+  /** Public image URLs already localized/branded by the caller. */
+  imageUrls?: string[];
+  /** Square video for the Facebook feed. */
+  videoUrl?: string;
+  /** Vertical 9:16 video for an Instagram Reel (falls back to videoUrl). */
+  reelsVideoUrl?: string;
+  /** Optional link for a Facebook text-only post (ignored by Instagram). */
+  link?: string;
+}
+
+/**
+ * Publish one normalized payload to one platform, picking the right Graph API call from the
+ * available media:
+ *   facebook  → video → multi-photo album (≥2) → single photo → text(+link)
+ *   instagram → reel (reelsVideoUrl ?? videoUrl) → single photo (IG requires media)
+ * Returns the published post id. Throws on a publish failure or when Instagram has no media.
+ */
+export async function publishSocialPayload(
+  platform: "facebook" | "instagram",
+  p: SocialPayload,
+): Promise<{ postId: string }> {
+  const images = (p.imageUrls ?? []).filter((u) => typeof u === "string" && u.trim() !== "");
+
+  if (platform === "facebook") {
+    if (p.videoUrl) {
+      const r = await publishVideo({ caption: p.caption, videoUrl: p.videoUrl, brand: p.brand });
+      return { postId: r.postId };
+    }
+    if (images.length >= 2) {
+      const r = await publishWithImages({ caption: p.caption, imageUrls: images, brand: p.brand });
+      return { postId: r.postId };
+    }
+    if (images.length === 1) {
+      const r = await publishWithImage({ caption: p.caption, imageUrl: images[0], brand: p.brand });
+      return { postId: r.postId };
+    }
+    const r = await publishText({ message: p.caption, brand: p.brand, link: p.link });
+    return { postId: r.postId };
+  }
+
+  // instagram — requires media; prefer a Reel, else a single photo.
+  const reel = p.reelsVideoUrl ?? p.videoUrl;
+  if (reel) {
+    const r = await publishInstagramReel({ caption: p.caption, videoUrl: reel, brand: p.brand });
+    return { postId: r.id };
+  }
+  if (images.length === 0) {
+    throw new Error("Instagram requires an image or video URL");
+  }
+  const r = await publishPhoto({ caption: p.caption, imageUrl: images[0], brand: p.brand });
+  return { postId: r.id };
+}
+
+/**
  * Publish a Reel to a Facebook Page from a public video URL.
  *
  * The locale selects the brand's Page token (fr → Ameublo, en → Furnish Direct)
@@ -109,60 +170,25 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
       : [];
   // Per-channel logo: EN channels get the EN-branded hero image.
   const localizedImageUrls = localizeBrandedImageUrls(imageUrls, meta.language);
-  const primaryImageUrl = localizedImageUrls[0] || null;
+  if (meta.platform !== "facebook" && meta.platform !== "instagram") {
+    return { status: "error", error: `Unknown platform: ${meta.platform}` };
+  }
 
   try {
-    if (meta.platform === "facebook") {
-      const brand = meta.brand as FacebookBrand;
-      // Prefer the rendered video when available (higher engagement); else
-      // multi-photo album (2+ URLs), single photo (1), or text-only (none).
-      const result =
-        draft.videoUrl
-          ? await publishVideo({ caption, videoUrl: draft.videoUrl, brand })
-          : imageUrls.length >= 2
-          ? await publishWithImages({ caption, imageUrls: localizedImageUrls, brand })
-          : primaryImageUrl
-          ? await publishWithImage({ caption, imageUrl: primaryImageUrl, brand })
-          : await publishText({ message: caption, brand });
-      return {
-        status: "published",
-        publishedId: result.postId,
-        publishedAt: Math.floor(Date.now() / 1000),
-      };
-    }
-
-    if (meta.platform === "instagram") {
-      const igBrand = meta.brand as "ameublo" | "furnish";
-      // Prefer a Reel when a video is available: the vertical 9:16 reel render, or the
-      // square video as a fallback (still better reach than skipping the video, which
-      // is what the publisher used to do). Otherwise post the primary image.
-      const reelUrl = draft.reelsVideoUrl || draft.videoUrl;
-      if (reelUrl) {
-        const result = await publishInstagramReel({ caption, videoUrl: reelUrl, brand: igBrand });
-        return {
-          status: "published",
-          publishedId: result.id,
-          publishedAt: Math.floor(Date.now() / 1000),
-        };
-      }
-      if (!primaryImageUrl) {
-        return { status: "error", error: "No public image URL or video available for Instagram (regenerate draft)" };
-      }
-      // TODO: IG carousel (3 API calls + parent container) — out of scope for v0.1.8.0.
-      // For now, post only the primary image to IG.
-      const result = await publishPhoto({
-        caption,
-        imageUrl: primaryImageUrl,
-        brand: igBrand,
-      });
-      return {
-        status: "published",
-        publishedId: result.id,
-        publishedAt: Math.floor(Date.now() / 1000),
-      };
-    }
-
-    return { status: "error", error: `Unknown platform: ${meta.platform}` };
+    // Shared FB/IG media routing — the same implementation the queue consumer uses, so the
+    // "which media → which Graph call" logic lives in exactly one place (publishSocialPayload).
+    const { postId } = await publishSocialPayload(meta.platform, {
+      caption,
+      brand: meta.brand as FacebookBrand,
+      imageUrls: localizedImageUrls,
+      videoUrl: draft.videoUrl ?? undefined,
+      reelsVideoUrl: draft.reelsVideoUrl ?? undefined,
+    });
+    return {
+      status: "published",
+      publishedId: postId,
+      publishedAt: Math.floor(Date.now() / 1000),
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { status: "error", error: msg };

@@ -16,20 +16,8 @@
  *
  * A malformed payload throws (→ markFailed), so a bad producer never silently no-ops.
  */
-import {
-  publishText,
-  publishWithImage,
-  publishWithImages,
-  publishVideo,
-  type FacebookBrand,
-  type PublishResult,
-} from "./facebook-client";
-import {
-  publishPhoto,
-  publishReel,
-  type InstagramBrand,
-  type InstagramPublishResult,
-} from "./instagram-client";
+import { type FacebookBrand } from "./facebook-client";
+import { publishSocialPayload, type SocialPayload } from "./social-publisher";
 import { createBlogArticle } from "./shopify-blog";
 import {
   getNextPending,
@@ -123,26 +111,19 @@ export function parseBlogPayload(raw: unknown): BlogQueuePayload {
   };
 }
 
-/** Pick the right Facebook client call for the available media (video → album → photo → text). */
-function publishToFacebook(p: SocialQueuePayload): Promise<PublishResult> {
-  const brand = p.brand;
-  if (p.videoUrl) return publishVideo({ caption: p.caption, videoUrl: p.videoUrl, brand });
-  if (p.imageUrls && p.imageUrls.length >= 2) {
-    return publishWithImages({ caption: p.caption, imageUrls: p.imageUrls, brand });
-  }
-  const image = p.imageUrl ?? p.imageUrls?.[0];
-  if (image) return publishWithImage({ caption: p.caption, imageUrl: image, brand });
-  return publishText({ message: p.caption, brand, link: p.link });
-}
-
-/** Pick the right Instagram client call. IG requires media — reel video preferred, else photo. */
-function publishToInstagram(p: SocialQueuePayload): Promise<InstagramPublishResult> {
-  const brand: InstagramBrand = p.brand;
-  const reel = p.reelsVideoUrl ?? p.videoUrl;
-  if (reel) return publishReel({ caption: p.caption, videoUrl: reel, brand });
-  const image = p.imageUrl ?? p.imageUrls?.[0];
-  if (!image) throw new Error("Instagram requires an image or video URL");
-  return publishPhoto({ caption: p.caption, imageUrl: image, brand });
+/**
+ * Normalize a queue payload (which also allows a singular `imageUrl`) into the shared
+ * SocialPayload consumed by publishSocialPayload — the one place FB/IG media routing lives.
+ */
+function toSocialPayload(p: SocialQueuePayload): SocialPayload {
+  return {
+    caption: p.caption,
+    brand: p.brand,
+    imageUrls: p.imageUrls ?? (p.imageUrl ? [p.imageUrl] : undefined),
+    videoUrl: p.videoUrl,
+    reelsVideoUrl: p.reelsVideoUrl,
+    link: p.link,
+  };
 }
 
 export interface PublishItemResult {
@@ -158,16 +139,17 @@ export interface PublishItemResult {
  * `partialError` (logged by the caller) — the item is still marked published.
  */
 async function publishToBoth(p: SocialQueuePayload): Promise<PublishItemResult> {
+  const sp = toSocialPayload(p);
   let fbId: string | undefined;
   let igId: string | undefined;
   const errors: string[] = [];
   try {
-    fbId = (await publishToFacebook(p)).postId;
+    fbId = (await publishSocialPayload("facebook", sp)).postId;
   } catch (err) {
     errors.push(`facebook: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
-    igId = (await publishToInstagram(p)).id;
+    igId = (await publishSocialPayload("instagram", sp)).postId;
   } catch (err) {
     errors.push(`instagram: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -210,9 +192,9 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
 
   switch (item.platform) {
     case "facebook":
-      return { postId: (await publishToFacebook(parseSocialPayload(raw))).postId };
+      return { postId: (await publishSocialPayload("facebook", toSocialPayload(parseSocialPayload(raw)))).postId };
     case "instagram":
-      return { postId: (await publishToInstagram(parseSocialPayload(raw))).id };
+      return { postId: (await publishSocialPayload("instagram", toSocialPayload(parseSocialPayload(raw)))).postId };
     case "both":
       return publishToBoth(parseSocialPayload(raw));
     case "shopify_blog":
