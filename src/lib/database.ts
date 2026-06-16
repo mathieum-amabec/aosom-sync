@@ -45,16 +45,36 @@ function rowToObj(row: Row): Record<string, unknown> {
 
 let schemaPromise: Promise<void> | null = null;
 
+// Schema-init behind a swappable reference. Production always runs _initSchemaImpl;
+// tests inject a fail-once-then-succeed impl (via __setInitSchemaImplForTests) to
+// exercise the retry/reset contract below (#186) without a live DB.
+let activeInitSchemaImpl: () => Promise<void> = _initSchemaImpl;
+
 export async function initSchema(): Promise<void> {
   if (!schemaPromise) {
     // Reset the memoized promise on failure so the next caller retries instead of
     // re-throwing the cached rejection forever (issue #186: a transient init failure
     // otherwise wedged the process down until the next cold start).
-    schemaPromise = _initSchemaImpl().catch((err) => {
+    schemaPromise = activeInitSchemaImpl().catch((err) => {
       schemaPromise = null;
       throw err;
     });
   }
+  return schemaPromise;
+}
+
+/**
+ * Test-only (#186): swap the schema-init implementation and clear the memoized
+ * promise so initSchema()'s retry-after-failure behaviour can be unit-tested.
+ * Call with no argument to restore the real implementation.
+ */
+export function __setInitSchemaImplForTests(impl?: () => Promise<void>): void {
+  activeInitSchemaImpl = impl ?? _initSchemaImpl;
+  schemaPromise = null;
+}
+
+/** Test-only (#186): read the memoized schema promise (null after a failed init). */
+export function __getSchemaPromiseForTests(): Promise<void> | null {
   return schemaPromise;
 }
 
