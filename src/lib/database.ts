@@ -4,6 +4,7 @@ import fs from "fs";
 import crypto from "crypto";
 import type { SyncRun, SyncLogEntry, ChangeType } from "@/types/sync";
 import type { UserRole } from "@/lib/config";
+import { BLOG } from "@/lib/config";
 import type { AosomProduct } from "@/types/aosom";
 import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
 import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
@@ -128,6 +129,11 @@ async function _initSchemaImpl(): Promise<void> {
     // Migrations for tables created before multi-channel columns existed (no-op if already present)
     `CREATE TABLE IF NOT EXISTS social_autopost_counter (
       day TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0
+    )`,
+    // Per-ISO-week count of blog articles auto-published, for the weekly cap. Keyed by
+    // isoWeekKey() ('YYYY-Www'); old weeks just sit dormant (negligible row count).
+    `CREATE TABLE IF NOT EXISTS blog_publish_counter (
+      week TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0
     )`,
     `CREATE TABLE IF NOT EXISTS notifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, title TEXT NOT NULL,
@@ -2456,6 +2462,55 @@ export async function incrementAutopostCountToday(): Promise<number> {
   });
   const r = await db.execute({ sql: `SELECT count FROM social_autopost_counter WHERE day = ?`, args: [day] });
   return Number(rowToObj(r.rows[0]).count || 0);
+}
+
+// ─── Blog auto-publish: weekly cap ───────────────────────────────────
+
+/**
+ * Atomically reserve one publish slot for `week` if the count is below `cap`.
+ * Returns true if a slot was reserved (caller may publish), false if the cap is reached.
+ * The conditional upsert makes "check < cap AND increment" a single statement, so two
+ * concurrent runs can't both slip past the cap. Release the slot if the publish then
+ * fails (see releaseBlogPublishSlot).
+ */
+export async function reserveBlogPublishSlot(week: string, cap: number): Promise<boolean> {
+  if (cap < 1) return false; // cap 0 → never auto-publish (the INSERT path would bypass the WHERE)
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO blog_publish_counter (week, count) VALUES (?, 1)
+          ON CONFLICT(week) DO UPDATE SET count = count + 1 WHERE count < ?
+          RETURNING count`,
+    args: [week, cap],
+  });
+  // INSERT (new week) or a satisfied conditional UPDATE returns a row; an at-cap conflict
+  // updates nothing and returns no row.
+  return r.rows.length > 0;
+}
+
+/** Give back a slot reserved via reserveBlogPublishSlot when the publish ultimately failed. */
+export async function releaseBlogPublishSlot(week: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE blog_publish_counter SET count = MAX(0, count - 1) WHERE week = ?`,
+    args: [week],
+  });
+}
+
+/** Blog auto-publish schedule config from the `blog_schedule` setting, with safe defaults. */
+export async function getBlogScheduleConfig(): Promise<{ maxPerWeek: number }> {
+  const raw = await getSetting("blog_schedule");
+  let maxPerWeek: number = BLOG.DEFAULT_MAX_PUBLISH_PER_WEEK;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as { maxPerWeek?: unknown };
+      if (typeof parsed.maxPerWeek === "number" && Number.isFinite(parsed.maxPerWeek) && parsed.maxPerWeek >= 0) {
+        maxPerWeek = Math.floor(parsed.maxPerWeek);
+      }
+    } catch {
+      // Malformed setting → fall back to the default cap rather than blocking publishing.
+    }
+  }
+  return { maxPerWeek };
 }
 
 export async function getLastPostDate(sku: string): Promise<number | null> {

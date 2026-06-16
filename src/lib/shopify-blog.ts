@@ -105,3 +105,21 @@ export async function createBlogArticle(
     adminUrl: BLOG.ADMIN_ARTICLE_URL(articleId),
   };
 }
+
+/**
+ * Flip an existing draft article live by setting `published: true`. Shopify stamps
+ * `published_at` to now. Idempotent on Shopify's side — re-publishing an already-live
+ * article is a no-op. Used by the blog auto-publisher once an article clears the quality
+ * + season + weekly-cap gates.
+ */
+export async function publishBlogArticle(blogId: number, articleId: string): Promise<void> {
+  const response = await shopifyFetch(`/blogs/${blogId}/articles/${articleId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ article: { id: Number(articleId), published: true } }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify blog article publish failed: ${response.status} — ${text}`);
+  }
+}

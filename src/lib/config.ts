@@ -161,6 +161,12 @@ export const BLOG = {
   EN_ID: 91161428073,
   ADMIN_ARTICLE_URL: (id: string | number) =>
     `${SHOPIFY.ADMIN_URL}/articles/${id}`,
+  // Auto-publish: an article goes live only if Claude's quality judge scores it at/above
+  // this (0-100) AND its topic is in season AND the weekly cap isn't reached.
+  AUTO_PUBLISH_SCORE_THRESHOLD: 80,
+  // Default max articles auto-published per ISO week. Overridable via the `blog_schedule`
+  // setting (JSON `{ "maxPerWeek": N }`); see getBlogScheduleConfig in database.ts.
+  DEFAULT_MAX_PUBLISH_PER_WEEK: 2,
 } as const;
 
 // ─── Aosom Feed ─────────────────────────────────────────────────────
@@ -360,4 +366,6 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   "social_autopost_min_drop_percent",
   "social_autopost_max_per_day",
   "social_autopost_channels",
+  // Blog auto-publish schedule: JSON `{ "maxPerWeek": N }` cap on articles published/week.
+  "blog_schedule",
 ]);
