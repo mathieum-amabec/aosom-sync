@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.78] - 2026-06-17
+
+### Fixed (de-brand the import source — no supplier name on new products)
+- **`createShopifyProduct` (`shopify-client.ts`) now sets the public `vendor` field to
+  "Ameublo Direct"** instead of `merged.brand || "Aosom"`. New imports never surface the
+  supplier name via the vendor field (feeds + analytics). The real supplier brand is still
+  recorded internally in the `custom.brand_fr` metafield (unchanged — internal only).
+- **`createBlogArticle` (`shopify-blog.ts`) default author byline "Aosom" → "Ameublo Direct"**
+  — caught during review: any blog article created without an explicit author (e.g. the blog
+  auto-publish cron) would otherwise show "Aosom" as the public byline.
+
 ## [0.5.53.77] - 2026-06-17
 
 ### Fixed (content generator — debrand)
