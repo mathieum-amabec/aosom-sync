@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.75] - 2026-06-17
+
+### Added (Shopify vendor debrand tool — dry-run default)
+- **`scripts/fix-shopify-vendors.mjs`** — rewrites every Shopify product `vendor`
+  to « Ameublo Direct » via the Admin API (`PUT /products/{id}.json`). Dry-run by
+  default (prints the per-vendor count + a 10-item preview, no writes); `--apply`
+  to execute. 2 req/s strict (≥500ms between calls), capped 429-retry/backoff,
+  idempotent (skips products already conformant), logs `ancien vendor → "Ameublo Direct"`.
+  Closes the supplier-name leak in the Shopify `vendor` field (analytics meta / feeds),
+  complementing the JSON-LD `brand` which is already « Ameublo Direct ».
+- Dry-run baseline (638 products): Aosom 606 · Qaba 29 · Soozier 2 · Outsunny 1 → all
+  to « Ameublo Direct ». **`--apply` is gated on Mat's approval (not run by ship).**
+
 ## [0.5.53.74] - 2026-06-17
 
 ### Fixed (import de-brands product handles at the source)
