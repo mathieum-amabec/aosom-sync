@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.70] - 2026-06-16
+## [0.5.53.72] - 2026-06-17
 
 ### Added (SEO/AEO content engine — lot 1, dry-run)
 - **`scripts/generate-seo-articles.mjs`** — generates FR SEO/AEO blog articles via the
@@ -19,6 +19,54 @@ All notable changes to Aosom Sync will be documented in this file.
   the real « Gazébos, parasols et abris » collection). **« Entrée et vestibule » flagged as a
   non-existent collection** — to create or repoint before publish.
 - **`dry_run: true`** on every article — nothing pushed to Shopify; pending Mat's editorial approval.
+
+## [0.5.53.71] - 2026-06-16
+
+### Added (Projet #1 — visibilité commerce agentique, AEO/GEO)
+Artefacts thème Shopify (déployés sur le thème `160213696617` via Asset API ; voir
+`shopify-theme/README.md`) + livrable AEO. Non destructif côté données produits.
+
+- **robots.txt — aucun override (décision après test en prod).** Le store sert déjà le
+  défaut Shopify nouvelle génération, optimisé agents (`Allow: /` + publicité
+  `agents.md` / `/.well-known/ucp` / UCP-MCP / `shop.app/SKILL.md`). Un
+  `templates/robots.txt.liquid` custom **remplace** ce défaut riche par le ruleset
+  classique et **supprime ces publicités UCP** = régression. Testé en prod puis
+  rollback immédiat. Les agents IA listés sont déjà autorisés par le défaut. Voir
+  `shopify-theme/README.md`.
+- **`shopify-theme/snippets/agentic-structured-data.liquid`** — remplace
+  `{{ product | structured_data }}` sur la PDP. Corrige la fuite `brand = product.vendor`
+  (= fournisseur « Aosom ») en forçant `brand = shop.name` ; scrub des noms fournisseur
+  dans la description ; `offers` en CAD avec `availability` + `priceValidUntil` ;
+  `gtin`/`aggregateRating` (Judge.me) émis seulement si la donnée existe ; FAQPage JSON-LD.
+- **`docs/aeo-format.md`** — gabarit de description optimisée agents IA
+  (accroche → specs → cas d'usage → matériaux/entretien) + 3 exemples réels.
+
+## [0.5.53.70] - 2026-06-16
+
+### Added (multichannel product feeds)
+- **`GET /api/feeds/bing`** — Bing / Microsoft Shopping feed (RSS 2.0 + g:; Microsoft ingests
+  the Google Shopping format). Fields: id, title, description, link, image_link, price,
+  availability, brand, product_type, shipping.
+- **`GET /api/feeds/reddit`** — Reddit Dynamic Product Ads catalog feed (RSS 2.0 + g:). Fields:
+  id, title, description, availability, condition, price, link, image_link, brand, product_type.
+- Both reuse the shared `getFeedItems()`/`FeedItem` layer, the 10-min CDN window, and on-demand
+  refresh via `POST /api/revalidate` (added to its feed list).
+
+### Changed (Google feed enrichment + supplier de-branding)
+- **Google feed now emits `g:color`** (derived from the SKU suffix via `parseSku`+`COLOR_MAP`,
+  e.g. `…GY` → "Gris"; 859/999 items) and a constant **`g:shipping`** block (CA, 0 CAD).
+- **Supplier name "Aosom" is hidden from all feeds** ("0 nom fournisseur"): the brand fallback
+  is now "Ameublo Direct" (real product vendors like Outsunny/Qaba/Soozier are kept), and
+  "Aosom" is scrubbed from feed titles + descriptions. Verified live: 0 occurrences in
+  brand/title/description across 999 items.
+  - **Known residual (Shopify-side follow-up):** 666/999 product **URL handles** still embed
+    "aosom" (e.g. `/products/…-aosom-…`). These are live Shopify handles and can't be rewritten
+    in the feed without 404ing the link — they need a Shopify-side handle rename + redirects.
+
+### Fixed
+- **`/api/revalidate` added to the proxy `PUBLIC_PATHS`.** It self-gates on Bearer CRON_SECRET
+  (like `/api/cron`), but wasn't allowlisted, so the proxy 307-redirected it to `/login` before
+  its own auth ran — the endpoint (shipped in v0.5.53.69) was non-functional. Now reachable.
 
 ## [0.5.53.69] - 2026-06-16
 

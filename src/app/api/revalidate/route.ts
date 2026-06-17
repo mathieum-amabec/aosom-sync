@@ -7,7 +7,7 @@ import { env } from "@/lib/config";
 // from one shared Shopify product fetch tagged 'feeds' in lib/feeds/source.ts. Refreshing
 // the feeds = bust that Data Cache tag + revalidate each feed route's path. The route
 // names double as the URL segment under /api/feeds/.
-const FEEDS = ["google", "pinterest", "pinterest-en", "meta", "meta-xml"] as const;
+const FEEDS = ["google", "pinterest", "pinterest-en", "meta", "meta-xml", "bing", "reddit"] as const;
 
 /** Constant-time Bearer CRON_SECRET check (mirrors the cron routes). */
 function verifyCronSecret(header: string | null): boolean {
