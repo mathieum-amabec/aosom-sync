@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.68] - 2026-06-16
+
+### Fixed (Google Merchant "Product page unavailable" on ~267 offers)
+- **Storefront product feeds (Google / Pinterest / Meta) now exclude products that aren't live
+  on the Online Store.** `shopifyToFeedItems` kept every `status:"active"` product, but ~78 of
+  them are active-yet-unpublished (or scheduled for a future publish) — their `/products/{handle}`
+  page 404s, so Google Merchant flagged the offers "Product page unavailable". The `g:link`
+  handles were already correct (taken verbatim from Shopify's `handle`); the bug was *which
+  products* shipped, not how the URL was built. Added `published_at` to the Shopify fetch and a
+  mapper guard `if (!p.published_at || new Date(p.published_at) > now) continue;` (excludes
+  never-published and not-yet-live scheduled products), with the excluded count logged.
+- Note: the feed route is CDN-cached 24h (`s-maxage=86400`) — after deploy, purge/revalidate
+  `/api/feeds/google` (and the Pinterest/Meta feed routes) so the fix takes effect immediately
+  instead of after the cache expires.
+
 ## [0.5.53.67] - 2026-06-16
 
 ### Added (Instagram carousel — multi-photo posts)
