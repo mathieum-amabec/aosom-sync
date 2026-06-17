@@ -27,12 +27,13 @@ par Mat. Un upload d'asset prend effet **immédiatement**.
 
 | Fichier | Asset Shopify | Action | État |
 |---|---|---|---|
-| `snippets/agentic-structured-data.liquid` | `snippets/agentic-structured-data.liquid` | CRÉE | ✅ déployé |
-| (édition en place) | `sections/main-product.liquid` | **1 ligne** swap | ✅ déployé |
+| `snippets/agentic-structured-data.liquid` | `snippets/agentic-structured-data.liquid` | Product JSON-LD (FAQ retiré → `agentic-faq`) | ✅ déployé |
+| `snippets/agentic-faq.liquid` | `snippets/agentic-faq.liquid` | CRÉE — FAQPage JSON-LD + accordéon visible | à déployer |
+| (édition en place) | `sections/main-product.liquid` | swap `structured_data` + insertion `agentic-faq` après description | à déployer |
 
 ### Édition `sections/main-product.liquid`
 
-Le bloc natif :
+1) Le bloc natif :
 
 ```liquid
     <script type="application/ld+json">
@@ -50,13 +51,26 @@ est remplacé par :
 Raison : `product | structured_data` natif émet `brand = product.vendor` = « Aosom »
 (fournisseur). Le snippet force la marque boutique (`shop.name`) et enrichit le balisage.
 
+2) **FAQ accordéon** — dans la boucle `for block in section.blocks`, à la fin du
+`{%- when 'description' -%}` (après le `</div>` de la description), insérer :
+
+```liquid
+                {% comment %} FAQ accordéon visible + FAQPage JSON-LD (conforme Google) {% endcomment %}
+                {% render 'agentic-faq', product: product %}
+```
+
+Place la FAQ **après la description, avant les specs** (les blocs `collapsible_tab`
+viennent ensuite). Le FAQPage JSON-LD est désormais ici (retiré de
+`agentic-structured-data.liquid`) pour qu'il corresponde au contenu visible.
+
 ## Déploiement (reproductible)
 
 Pour chaque asset : `PUT /admin/api/2025-01/themes/160213696617/assets.json`
 avec `{ "asset": { "key": "...", "value": "<contenu>" } }`.
 
-1. `snippets/agentic-structured-data.liquid` (inerte tant que main-product ne l'appelle pas)
-2. `sections/main-product.liquid` (édité)
+1. `snippets/agentic-faq.liquid` (nouveau)
+2. `snippets/agentic-structured-data.liquid` (FAQ retiré)
+3. `sections/main-product.liquid` (swap + insertion `agentic-faq`)
 
 ## Vérification post-déploiement
 

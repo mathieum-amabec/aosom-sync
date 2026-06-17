@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.75] - 2026-06-17
+## [0.5.53.76] - 2026-06-17
 
 ### Added (Shopify vendor debrand tool — dry-run default)
 - **`scripts/fix-shopify-vendors.mjs`** — rewrites every Shopify product `vendor`
@@ -14,6 +14,21 @@ All notable changes to Aosom Sync will be documented in this file.
   complementing the JSON-LD `brand` which is already « Ameublo Direct ».
 - Dry-run baseline (638 products): Aosom 606 · Qaba 29 · Soozier 2 · Outsunny 1 → all
   to « Ameublo Direct ». **`--apply` is gated on Mat's approval (not run by ship).**
+
+## [0.5.53.75] - 2026-06-17
+
+### Added (FAQ accordion visible sur les PDP — conforme Google Rich Results)
+- **`shopify-theme/snippets/agentic-faq.liquid`** (nouveau) — accordéon FAQ **visible**
+  (HTML5 `<details>/<summary>`, **zéro JS**, accessible : aria-labelledby, focus-visible)
+  + FAQPage JSON-LD, générés depuis **une seule source** de 4 Q/R. Le balisage correspond
+  donc exactement au contenu visible (exigence Google, sinon action manuelle). Tokens
+  marque : Navy `#1B2A4A`, Gold `#D4A853`, police DM Sans (fallback système). Mobile-first.
+- **`shopify-theme/snippets/agentic-structured-data.liquid`** — le FAQPage JSON-LD
+  (auparavant invisible) en est **retiré** ; il vit maintenant dans `agentic-faq.liquid`
+  pour éviter un doublon et garantir balisage = visible. Product JSON-LD inchangé.
+- **`sections/main-product.liquid`** (thème live 160213696617) — `{% render 'agentic-faq' %}`
+  inséré à la fin du bloc `description` → FAQ **après la description, avant les specs**.
+  Voir `shopify-theme/README.md`.
 
 ## [0.5.53.74] - 2026-06-17
 
