@@ -127,7 +127,16 @@ export async function createShopifyProduct(
 
   // Fall back to a title-derived slug if the model's handle slugified to empty;
   // an empty handle lets Shopify auto-generate one from the title.
-  const handle = content.urlHandleFr.trim() || slugify(content.titleFr);
+  // De-brand the handle: the model sometimes embeds the supplier name "aosom" in
+  // urlHandleFr/the title despite the "no-brand" prompt rule, which puts it in the
+  // public URL. Strip it here so new imports don't re-introduce branded handles
+  // (the existing 347 were fixed by scripts/fix-shopify-handles.mjs, PR #208). The
+  // trailing trim guards against a leading/trailing dash when "aosom" was a prefix
+  // or suffix (e.g. "aosom-x" → "x", "x-aosom" → "x").
+  const handle = (content.urlHandleFr.trim() || slugify(content.titleFr))
+    .replace(/(^|-)aosom(-|$)/gi, "$1$2")
+    .replace(/--+/g, "-")
+    .replace(/^-|-$/g, "");
 
   const payload = {
     product: {
