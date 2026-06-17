@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.70] - 2026-06-16
+
+### Added (Projet #1 — visibilité commerce agentique, AEO/GEO)
+Artefacts thème Shopify (déployés sur le thème `160213696617` via Asset API ; voir
+`shopify-theme/README.md`) + livrable AEO. Non destructif côté données produits.
+
+- **`shopify-theme/templates/robots.txt.liquid`** — rend les groupes par défaut de
+  Shopify inchangés, puis ajoute des groupes `User-agent` explicites pour les agents
+  IA (GPTBot, OAI-SearchBot, ChatGPT-User, PerplexityBot, Perplexity-User,
+  Google-Extended, Applebot-Extended, meta-externalagent, Bingbot, BingPreview).
+  Chaque groupe IA **clone l'intégralité des règles du groupe `*`** (Allow + Disallow)
+  pour autoriser le contenu sans retirer aucune protection transactionnelle.
+- **`shopify-theme/snippets/agentic-structured-data.liquid`** — remplace
+  `{{ product | structured_data }}` sur la PDP. Corrige la fuite `brand = product.vendor`
+  (= fournisseur « Aosom ») en forçant `brand = shop.name` ; scrub des noms fournisseur
+  dans la description ; `offers` en CAD avec `availability` + `priceValidUntil` ;
+  `gtin`/`aggregateRating` (Judge.me) émis seulement si la donnée existe ; FAQPage JSON-LD.
+- **`docs/aeo-format.md`** — gabarit de description optimisée agents IA
+  (accroche → specs → cas d'usage → matériaux/entretien) + 3 exemples réels.
+
 ## [0.5.53.69] - 2026-06-16
 
 ### Added (on-demand feed revalidation)

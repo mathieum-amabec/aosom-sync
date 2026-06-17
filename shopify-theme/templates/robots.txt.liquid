@@ -1,0 +1,57 @@
+{%- comment -%}
+  robots.txt — Projet #1 « Visibilité commerce agentique » (AEO/GEO)
+
+  Objectif : accueillir EXPLICITEMENT les agents IA, SANS retirer aucune
+  protection légitime existante (admin, panier, checkout, compte, pièges de crawl…).
+
+  Fonctionnement :
+  1) On rend d'abord les groupes par défaut de Shopify tels quels
+     (`robots.default_groups`). Toutes les protections existantes restent en
+     place et continueront de suivre les mises à jour automatiques de Shopify.
+  2) On ajoute ensuite un groupe `User-agent` EXPLICITE par agent IA listé.
+
+  ⚠️ Subtilité robots.txt : un robot qui matche un groupe spécifique IGNORE
+  totalement le groupe « * ». Donc, pour ne RIEN retirer comme protection,
+  chaque groupe IA ré-émet les mêmes règles `Disallow` que le groupe « * »
+  (transactionnel / admin / privé), en plus de `Allow: /`.
+{%- endcomment -%}
+{%- for group in robots.default_groups -%}
+  {{- group.user_agent }}
+
+  {%- for rule in group.rules -%}
+    {{ rule }}
+  {%- endfor -%}
+
+  {%- if group.sitemap != blank -%}
+    {{ group.sitemap }}
+  {%- endif -%}
+{% endfor -%}
+
+{%- comment -%} Repère le groupe « * » pour réutiliser ses règles protectrices {%- endcomment -%}
+{%- for group in robots.default_groups -%}
+  {%- if group.user_agent.value == '*' -%}
+    {%- assign wildcard_group = group -%}
+  {%- endif -%}
+{%- endfor -%}
+
+{%- comment -%}
+  Agents IA accueillis explicitement (ChatGPT, Perplexity, Google AI, Apple, Meta, Bing).
+  Chaque groupe CLONE l'INTÉGRALITÉ des règles du groupe « * » (Allow + Disallow,
+  dans l'ordre d'origine) : l'agent obtient donc exactement le même accès au
+  contenu (Allow: /) ET toutes les protections (admin, panier, checkout, compte,
+  pièges de crawl). Aucune protection retirée — seulement une autorisation rendue
+  explicite et nommée. Si « * » est introuvable, repli sûr sur `Allow: /`.
+{%- endcomment -%}
+{%- assign ai_agents = 'GPTBot,OAI-SearchBot,ChatGPT-User,PerplexityBot,Perplexity-User,Google-Extended,Applebot-Extended,meta-externalagent,Bingbot,BingPreview' | split: ',' -%}
+{%- for agent in ai_agents %}
+
+# {{ agent }} — mêmes règles que « * » (protections conservées) + accès contenu pour visibilité IA (AEO/GEO).
+User-agent: {{ agent }}
+{%- if wildcard_group -%}
+  {%- for rule in wildcard_group.rules %}
+{{ rule }}
+  {%- endfor -%}
+{%- else %}
+Allow: /
+{%- endif -%}
+{%- endfor %}

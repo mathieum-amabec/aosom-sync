@@ -1,0 +1,134 @@
+{%- comment -%}
+  agentic-structured-data.liquid — Projet #1 « Visibilité commerce agentique »
+
+  Remplace `{{ product | structured_data }}` (Dawn/Trade) sur la PDP.
+  Pourquoi : le filtre natif utilise `product.vendor` comme `brand` — or le
+  vendor ici est le FOURNISSEUR (Aosom). On force donc la marque BOUTIQUE.
+
+  Règles respectées :
+  - brand = marque boutique (`shop.name`), JAMAIS le fournisseur.
+  - Aucun nom fournisseur dans le balisage : « Aosom » / « Outsunny » scrubés
+    de la description.
+  - Devise CAD (`shop.currency`), `availability`, `priceValidUntil` (+1 an).
+  - `gtin` émis seulement si un code-barres existe.
+  - `aggregateRating` émis seulement si Judge.me rapporte ≥ 1 avis.
+  - FAQPage générée à partir des attributs produit (livraison, dimensions,
+    matériaux/entretien). Note : invisible (ciblage agents IA, pas rich-results
+    Google — voir docs/aeo-format.md).
+
+  Usage : {% render 'agentic-structured-data', product: product %}
+{%- endcomment -%}
+
+{%- liquid
+  assign v = product.selected_or_first_available_variant
+  assign brand = shop.name
+  assign price_amount = v.price | divided_by: 100.0
+
+  assign desc = product.description | strip_html
+  assign desc = desc | replace: 'Outsunny', '' | replace: 'outsunny', '' | replace: 'OUTSUNNY', ''
+  assign desc = desc | replace: 'Aosom', '' | replace: 'aosom', '' | replace: 'AOSOM', ''
+  assign desc = desc | replace: '  ', ' ' | strip | truncatewords: 60
+
+  assign availability = 'https://schema.org/OutOfStock'
+  if v.available
+    assign availability = 'https://schema.org/InStock'
+  endif
+
+  assign price_valid_until = 'now' | date: '%s' | plus: 31536000 | date: '%Y-%m-%d'
+  assign product_abs_url = request.origin | append: product.url
+
+  assign color = ''
+  for opt in product.options_with_values
+    assign name_down = opt.name | downcase
+    if name_down contains 'couleur' or name_down contains 'color'
+      assign color = opt.selected_value
+    endif
+  endfor
+
+  assign jm = product.metafields.judgeme.review_widget_data.value
+-%}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org/",
+  "@type": "Product",
+  "name": {{ product.title | json }},
+  "description": {{ desc | json }},
+  "brand": {
+    "@type": "Brand",
+    "name": {{ brand | json }}
+  },
+  "sku": {{ v.sku | json }},
+  {%- if v.barcode != blank %}
+  "gtin": {{ v.barcode | json }},
+  {%- endif %}
+  {%- if color != blank %}
+  "color": {{ color | json }},
+  {%- endif %}
+  "category": {{ product.type | json }},
+  "image": [
+    {%- for image in product.images limit: 5 -%}
+    {{ image | image_url: width: 1600 | json }}{%- unless forloop.last %},{% endunless -%}
+    {%- endfor -%}
+  ],
+  {%- if jm != blank and jm.number_of_reviews and jm.number_of_reviews > 0 %}
+  "aggregateRating": {
+    "@type": "AggregateRating",
+    "ratingValue": "{{ jm.average_rating }}",
+    "reviewCount": {{ jm.number_of_reviews }}
+  },
+  {%- endif %}
+  "offers": {
+    "@type": "Offer",
+    "url": {{ product_abs_url | json }},
+    "priceCurrency": {{ shop.currency | json }},
+    "price": "{{ price_amount | round: 2 }}",
+    "priceValidUntil": {{ price_valid_until | json }},
+    "availability": {{ availability | json }},
+    "itemCondition": "https://schema.org/NewCondition",
+    "seller": {
+      "@type": "Organization",
+      "name": {{ brand | json }}
+    }
+  }
+}
+</script>
+
+{%- comment -%} FAQPage — Q/R génériques alimentées par les attributs produit {%- endcomment -%}
+{%- liquid
+  assign q_dim = "Quelles sont les dimensions de " | append: product.title | append: " ?"
+  assign a_dim = "Les dimensions complètes sont indiquées dans la section caractéristiques de la fiche. Vérifiez l'espace disponible avant l'achat pour un ajustement optimal."
+  assign q_ship = "Livrez-vous ce produit partout au Canada ?"
+  assign a_ship = "Oui. Nous expédions partout au Canada. Les délais et frais estimés s'affichent au paiement selon votre code postal."
+  assign q_care = "Comment entretenir ce produit ?"
+  assign a_care = "Nettoyez avec un linge humide et un savon doux ; évitez les abrasifs. Pour un produit d'extérieur, un rangement à l'abri hors saison prolonge sa durée de vie."
+  assign q_assembly = "L'assemblage est-il requis ?"
+  assign a_assembly = "Le produit est livré avec les instructions et la visserie nécessaires. La plupart des montages se font à deux en moins d'une heure."
+-%}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org/",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": {{ q_dim | json }},
+      "acceptedAnswer": { "@type": "Answer", "text": {{ a_dim | json }} }
+    },
+    {
+      "@type": "Question",
+      "name": {{ q_ship | json }},
+      "acceptedAnswer": { "@type": "Answer", "text": {{ a_ship | json }} }
+    },
+    {
+      "@type": "Question",
+      "name": {{ q_care | json }},
+      "acceptedAnswer": { "@type": "Answer", "text": {{ a_care | json }} }
+    },
+    {
+      "@type": "Question",
+      "name": {{ q_assembly | json }},
+      "acceptedAnswer": { "@type": "Answer", "text": {{ a_assembly | json }} }
+    }
+  ]
+}
+</script>
