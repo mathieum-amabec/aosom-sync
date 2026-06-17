@@ -1,0 +1,127 @@
+{%- comment -%}
+  agentic-faq.liquid — FAQ produit : accordéon VISIBLE (HTML5 natif, zéro JS) +
+  FAQPage JSON-LD, générés depuis UNE SEULE source de Q/R.
+
+  Pourquoi une source unique : Google exige que le balisage FAQPage corresponde
+  au contenu visible sur la page (sinon action manuelle). En définissant les Q/R
+  ici une fois et en émettant les deux, le balisage et l'accordéon ne peuvent pas
+  diverger. Remplace le FAQPage JSON-LD (invisible) qui vivait dans
+  agentic-structured-data.liquid.
+
+  - Accessibilité : <details>/<summary> natif (clavier + lecteurs d'écran),
+    aria-labelledby sur la section, focus-visible.
+  - Mobile-first : styles de base pour petit écran, @media min-width pour agrandir.
+  - Tokens marque : Navy #1B2A4A, Gold #D4A853, police DM Sans (fallback système).
+  - Placement : rendu après la description, avant les specs (voir main-product.liquid).
+
+  Usage : {% render 'agentic-faq', product: product %}
+{%- endcomment -%}
+{%- liquid
+  assign q1 = "Quelles sont les dimensions de " | append: product.title | append: " ?"
+  assign a1 = "Les dimensions complètes sont indiquées dans la section caractéristiques de la fiche. Vérifiez l'espace disponible avant l'achat pour un ajustement optimal."
+  assign q2 = "Livrez-vous ce produit partout au Canada ?"
+  assign a2 = "Oui. Nous expédions partout au Canada. Les délais et frais estimés s'affichent au paiement selon votre code postal."
+  assign q3 = "Comment entretenir ce produit ?"
+  assign a3 = "Nettoyez avec un linge humide et un savon doux ; évitez les abrasifs. Pour un produit d'extérieur, un rangement à l'abri hors saison prolonge sa durée de vie."
+  assign q4 = "L'assemblage est-il requis ?"
+  assign a4 = "Le produit est livré avec les instructions et la visserie nécessaires. La plupart des montages se font à deux en moins d'une heure."
+-%}
+
+{%- comment -%} Balisage structuré — mêmes Q/R que l'accordéon ci-dessous {%- endcomment -%}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org/",
+  "@type": "FAQPage",
+  "mainEntity": [
+    { "@type": "Question", "name": {{ q1 | json }}, "acceptedAnswer": { "@type": "Answer", "text": {{ a1 | json }} } },
+    { "@type": "Question", "name": {{ q2 | json }}, "acceptedAnswer": { "@type": "Answer", "text": {{ a2 | json }} } },
+    { "@type": "Question", "name": {{ q3 | json }}, "acceptedAnswer": { "@type": "Answer", "text": {{ a3 | json }} } },
+    { "@type": "Question", "name": {{ q4 | json }}, "acceptedAnswer": { "@type": "Answer", "text": {{ a4 | json }} } }
+  ]
+}
+</script>
+
+{%- comment -%} Accordéon visible (mêmes Q/R — conforme Google Rich Results) {%- endcomment -%}
+<section class="agentic-faq" aria-labelledby="agentic-faq-title">
+  <h2 id="agentic-faq-title" class="agentic-faq__title">Questions fréquentes</h2>
+
+  <details class="agentic-faq__item">
+    <summary class="agentic-faq__q">{{ q1 }}</summary>
+    <div class="agentic-faq__a"><p>{{ a1 }}</p></div>
+  </details>
+  <details class="agentic-faq__item">
+    <summary class="agentic-faq__q">{{ q2 }}</summary>
+    <div class="agentic-faq__a"><p>{{ a2 }}</p></div>
+  </details>
+  <details class="agentic-faq__item">
+    <summary class="agentic-faq__q">{{ q3 }}</summary>
+    <div class="agentic-faq__a"><p>{{ a3 }}</p></div>
+  </details>
+  <details class="agentic-faq__item">
+    <summary class="agentic-faq__q">{{ q4 }}</summary>
+    <div class="agentic-faq__a"><p>{{ a4 }}</p></div>
+  </details>
+</section>
+
+<style>
+  .agentic-faq {
+    --faq-navy: #1B2A4A;
+    --faq-gold: #D4A853;
+    max-width: 48rem;
+    margin: 2rem auto;
+    font-family: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .agentic-faq__title {
+    color: var(--faq-navy);
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin: 0 0 1rem;
+  }
+  .agentic-faq__item {
+    border: 1px solid rgba(27, 42, 74, 0.12);
+    border-radius: 0.5rem;
+    margin-bottom: 0.5rem;
+    background: #fff;
+    overflow: hidden;
+  }
+  .agentic-faq__item[open] {
+    border-color: var(--faq-gold);
+  }
+  .agentic-faq__q {
+    cursor: pointer;
+    list-style: none;
+    padding: 1rem 1.25rem;
+    font-weight: 600;
+    color: var(--faq-navy);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+  }
+  /* hide the native disclosure triangle, use a + / – affordance instead */
+  .agentic-faq__q::-webkit-details-marker { display: none; }
+  .agentic-faq__q::after {
+    content: "+";
+    color: var(--faq-gold);
+    font-size: 1.5rem;
+    line-height: 1;
+    font-weight: 400;
+    flex: 0 0 auto;
+  }
+  .agentic-faq__item[open] .agentic-faq__q::after { content: "\2013"; }
+  .agentic-faq__q:hover { color: var(--faq-gold); }
+  .agentic-faq__q:focus-visible {
+    outline: 2px solid var(--faq-gold);
+    outline-offset: 2px;
+  }
+  .agentic-faq__a {
+    padding: 0 1.25rem 1.25rem;
+    color: var(--faq-navy);
+    line-height: 1.6;
+  }
+  .agentic-faq__a p { margin: 0; }
+  @media (min-width: 750px) {
+    .agentic-faq__title { font-size: 1.5rem; }
+    .agentic-faq__q { font-size: 1.0625rem; }
+  }
+</style>
