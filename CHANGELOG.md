@@ -10,10 +10,14 @@ All notable changes to Aosom Sync will be documented in this file.
   fournisseur »). **Dry-run par défaut** ; `--apply` requis pour écrire. Transform :
   `handle.replace(/(^|-)aosom(-|$)/g,'$1$2').replace(/--+/g,'-').replace(/^-|-$/g,'')`
   (couvre préfixe/suffixe/milieu — 347/347 handles). Throttle **2 req/sec strict** +
-  backoff 429. Shopify crée automatiquement la redirection 301 old → new. Détecte les
-  collisions (Shopify suffixe `-1`) et logge chaque `ancien → nouveau`.
-  Diagnostic live (2026-06-17) : 638 produits, **347** handles « aosom », **2** collisions.
-  ⚠️ `--apply` non encore exécuté (décision Mat séparée — écritures sur boutique live).
+  backoff 429. Détecte les collisions (Shopify suffixe `-1`) et logge chaque `ancien → nouveau`.
+- ⚠️ **Le renommage via l'API REST ne crée PAS de redirection automatique** (vérifié en
+  prod 2026-06-17 : l'ancienne URL 404). Le script **crée donc explicitement** un 301
+  (`POST /redirects.json` path → target) après chaque rename, avec le handle réellement
+  stocké (gère `-1` collision) et saute les redirections existantes (422) en re-run.
+  Diagnostic live : 638 produits, **347** handles « aosom », **2** collisions.
+  Canary `--apply --limit 5` exécuté (5 renommés + 5 redirections 301 vérifiées live).
+  ⚠️ `--apply` complet (342 restants) non exécuté — checkpoint Mat.
 
 ## [0.5.53.71] - 2026-06-16
 

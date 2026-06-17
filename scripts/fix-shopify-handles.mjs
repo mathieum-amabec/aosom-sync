@@ -4,9 +4,13 @@
 // storefront/feed links no longer embed the supplier name (Projet #1, suite).
 //
 // DRY-RUN BY DEFAULT — prints the transformations and never writes.
-// Pass --apply to perform the PUTs. Changing a product handle via the Admin API
-// makes Shopify auto-create a 301 redirect old → new (Online Store channel), so
-// existing links / SEO are preserved.
+// Pass --apply to perform the PUTs.
+//
+// ⚠️ Shopify does NOT auto-create a redirect when the handle is changed via the
+// REST Admin API (that auto-behavior only fires from the Online Store admin UI).
+// Verified live 2026-06-17: API rename → old URL 404, no redirect. So on --apply
+// this script EXPLICITLY creates a 301 (POST /redirects.json path → target) after
+// each rename, using the handle Shopify actually stored (may be -1 on collision).
 //
 // Transform (widened per Mat's checkpoint decision to cover prefix/suffix too,
 // so all "aosom" handles are de-branded, not just the dash-wrapped ones):
@@ -166,9 +170,10 @@ if (!APPLY) {
 }
 
 const work = toChange.slice(0, LIMIT);
-console.log(`\n=== APPLYING ${work.length} renames (>=${RATE_MS}ms apart) ===`);
+console.log(`\n=== APPLYING ${work.length} renames (2 calls/product: PUT handle + POST redirect, >=${RATE_MS}ms apart) ===`);
 let ok = 0;
 let failed = 0;
+let redirectFails = 0;
 const errors = [];
 for (const r of work) {
   const res = await rest(`/products/${r.id}.json`, {
@@ -185,9 +190,25 @@ for (const r of work) {
   const { product } = await res.json();
   const actual = product.handle; // Shopify may have suffixed -1 on collision
   ok++;
-  console.log(`✓ ${r.from} → ${actual}${actual !== r.to ? `  (proposé: ${r.to})` : ""}`);
+
+  // Explicitly create the 301 (API rename does NOT auto-redirect).
+  const redRes = await rest(`/redirects.json`, {
+    method: "POST",
+    body: JSON.stringify({ redirect: { path: `/products/${r.from}`, target: `/products/${actual}` } }),
+  });
+  let redNote;
+  if (redRes.ok) {
+    redNote = "301 ✓";
+  } else if (redRes.status === 422) {
+    redNote = "301 exists"; // path already redirected (re-run) — fine
+  } else {
+    redNote = `301 FAILED ${redRes.status}`;
+    redirectFails++;
+    errors.push({ id: r.id, from: r.from, redirectStatus: redRes.status, body: (await redRes.text()).slice(0, 200) });
+  }
+  console.log(`✓ ${r.from} → ${actual}${actual !== r.to ? `  (proposé: ${r.to})` : ""}  [${redNote}]`);
 }
 
-console.log(`\n=== DONE: ${ok} renamed, ${failed} failed ===`);
+console.log(`\n=== DONE: ${ok} renamed, ${failed} failed, ${redirectFails} redirects failed ===`);
 if (errors.length) console.log(JSON.stringify(errors, null, 2));
-console.log(`Shopify auto-creates 301 redirects old → new for the Online Store channel.`);
+console.log(`Each rename created an explicit 301 redirect (path → target). Re-runs skip existing redirects (422).`);
