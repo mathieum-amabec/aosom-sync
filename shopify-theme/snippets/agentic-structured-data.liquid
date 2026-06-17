@@ -12,9 +12,8 @@
   - Devise CAD (`shop.currency`), `availability`, `priceValidUntil` (+1 an).
   - `gtin` émis seulement si un code-barres existe.
   - `aggregateRating` émis seulement si Judge.me rapporte ≥ 1 avis.
-  - FAQPage générée à partir des attributs produit (livraison, dimensions,
-    matériaux/entretien). Note : invisible (ciblage agents IA, pas rich-results
-    Google — voir docs/aeo-format.md).
+  - Le FAQPage JSON-LD + l'accordéon FAQ visible vivent dans `agentic-faq.liquid`
+    (source unique des Q/R, conforme Google : balisage = contenu visible).
 
   Usage : {% render 'agentic-structured-data', product: product %}
 {%- endcomment -%}
@@ -90,45 +89,5 @@
       "name": {{ brand | json }}
     }
   }
-}
-</script>
-
-{%- comment -%} FAQPage — Q/R génériques alimentées par les attributs produit {%- endcomment -%}
-{%- liquid
-  assign q_dim = "Quelles sont les dimensions de " | append: product.title | append: " ?"
-  assign a_dim = "Les dimensions complètes sont indiquées dans la section caractéristiques de la fiche. Vérifiez l'espace disponible avant l'achat pour un ajustement optimal."
-  assign q_ship = "Livrez-vous ce produit partout au Canada ?"
-  assign a_ship = "Oui. Nous expédions partout au Canada. Les délais et frais estimés s'affichent au paiement selon votre code postal."
-  assign q_care = "Comment entretenir ce produit ?"
-  assign a_care = "Nettoyez avec un linge humide et un savon doux ; évitez les abrasifs. Pour un produit d'extérieur, un rangement à l'abri hors saison prolonge sa durée de vie."
-  assign q_assembly = "L'assemblage est-il requis ?"
-  assign a_assembly = "Le produit est livré avec les instructions et la visserie nécessaires. La plupart des montages se font à deux en moins d'une heure."
--%}
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org/",
-  "@type": "FAQPage",
-  "mainEntity": [
-    {
-      "@type": "Question",
-      "name": {{ q_dim | json }},
-      "acceptedAnswer": { "@type": "Answer", "text": {{ a_dim | json }} }
-    },
-    {
-      "@type": "Question",
-      "name": {{ q_ship | json }},
-      "acceptedAnswer": { "@type": "Answer", "text": {{ a_ship | json }} }
-    },
-    {
-      "@type": "Question",
-      "name": {{ q_care | json }},
-      "acceptedAnswer": { "@type": "Answer", "text": {{ a_care | json }} }
-    },
-    {
-      "@type": "Question",
-      "name": {{ q_assembly | json }},
-      "acceptedAnswer": { "@type": "Answer", "text": {{ a_assembly | json }} }
-    }
-  ]
 }
 </script>
