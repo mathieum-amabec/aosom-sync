@@ -21,6 +21,10 @@ export interface ShopifyFeedProduct {
   status: string;
   product_type?: string | null;
   body_html?: string | null;
+  /** Shopify Online Store publish timestamp (ISO) — null when the product is active but
+   * NOT published to the storefront. Such a product's /products/{handle} page 404s, so it
+   * must be excluded from the feed (Google Merchant: "Product page unavailable"). */
+  published_at?: string | null;
   images?: Array<{ src: string }>;
   variants?: ShopifyFeedVariant[];
   /** English product title from the custom.title_en metafield. Only populated for the
@@ -44,8 +48,15 @@ export function shopifyToFeedItems(
   const items: FeedItem[] = [];
   const seenIds = new Set<string>();
   let dupCount = 0;
+  let unpublishedCount = 0;
   for (const p of products) {
-    if (p.status !== "active") continue;          // published only
+    if (p.status !== "active") continue;          // active status
+    // Must be published to the Online Store *now* — an active product is only live on the
+    // storefront when published_at is set AND not in the future. null = never published;
+    // a future timestamp = a scheduled publish that isn't live yet. Either way
+    // /products/{handle} 404s and Google Merchant flags "Product page unavailable", so
+    // exclude it rather than ship a dead link.
+    if (!p.published_at || new Date(p.published_at).getTime() > Date.now()) { unpublishedCount++; continue; }
     if (!p.handle) continue;
     const images = (p.images ?? []).map((i) => i.src).filter(Boolean);
     if (images.length === 0) continue;            // Google/Pinterest/Meta require an image
@@ -91,6 +102,7 @@ export function shopifyToFeedItems(
       });
     }
   }
+  if (unpublishedCount > 0) console.warn(`[FEED] excluded ${unpublishedCount} active products not published to the Online Store (storefront would 404)`);
   if (dupCount > 0) console.warn(`[FEED] skipped ${dupCount} variants with duplicate SKUs (g:id must be unique)`);
   return items;
 }
@@ -205,7 +217,7 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
   let pageInfo: string | null = null;
   let pages = 0;
   do {
-    const params = new URLSearchParams({ limit: "250", fields: "id,title,handle,vendor,status,product_type,body_html,images,variants" });
+    const params = new URLSearchParams({ limit: "250", fields: "id,title,handle,vendor,status,product_type,body_html,images,variants,published_at" });
     if (pageInfo) params.set("page_info", pageInfo);
     const res = await fetchWithRetry(`${base}/products.json?${params}`, token);
     if (!res.ok) throw new Error(`Shopify products fetch failed: ${res.status}`);
