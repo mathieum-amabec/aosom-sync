@@ -14,11 +14,18 @@ export interface FeedItem {
   availability: "in stock" | "out of stock";
   condition: "new";
   brand: string;
+  color?: string | null;         // FR colour from the SKU suffix (g:color), null when none
   productType: string;           // Aosom taxonomy path (g:product_type)
   googleCategoryId: number;      // g:google_product_category
 }
 
 const CURRENCY = "CAD";
+
+// Flat free shipping to Canada (Ameublo Direct absorbs shipping). Emitted as a constant
+// item-level <g:shipping> block on the feeds that carry shipping (Google, Bing). Indented
+// to sit at the 6-space item-field level once joined.
+const SHIPPING_BLOCK =
+  "<g:shipping>\n        <g:country>CA</g:country>\n        <g:price>0 CAD</g:price>\n      </g:shipping>";
 
 // XML 1.0 forbids these control chars entirely — a single one anywhere makes the WHOLE
 // RSS document invalid and Google/Pinterest reject the entire feed. Built from escapes so
@@ -69,9 +76,11 @@ function googleItemXml(it: FeedItem): string {
     `<g:price>${escapeXml(formatPrice(it.price))}</g:price>`,
     `<g:condition>${it.condition}</g:condition>`,
     `<g:brand>${escapeXml(it.brand)}</g:brand>`,
+    it.color ? `<g:color>${escapeXml(it.color)}</g:color>` : "",
     `<g:google_product_category>${it.googleCategoryId}</g:google_product_category>`,
     it.productType ? `<g:product_type>${escapeXml(it.productType)}</g:product_type>` : "",
     it.itemGroupId ? `<g:item_group_id>${escapeXml(it.itemGroupId)}</g:item_group_id>` : "",
+    SHIPPING_BLOCK,
     `<g:identifier_exists>false</g:identifier_exists>`, // no GTIN/MPN in the catalog
   ].filter(Boolean);
   return `    <item>\n      ${g.join("\n      ")}\n    </item>`;
@@ -85,6 +94,70 @@ export function buildGoogleFeed(items: FeedItem[], opts: { title: string; link: 
     <link>${escapeXml(opts.link)}</link>
     <description>${escapeXml(opts.description)}</description>
 ${items.map(googleItemXml).join("\n")}
+  </channel>
+</rss>`;
+}
+
+// ── Bing / Microsoft Shopping feed (RSS 2.0 + g:) ─────────────────────────
+// Microsoft Advertising ingests the Google Shopping feed format, so we emit the same
+// RSS+g: shape with the Bing field subset: id, title, description, link, image_link,
+// price, availability, brand, product_type, shipping. No condition/category needed.
+function bingItemXml(it: FeedItem): string {
+  const g: string[] = [
+    `<g:id>${escapeXml(it.id)}</g:id>`,
+    `<title>${escapeXml(it.title)}</title>`,
+    `<description>${escapeXml(it.description)}</description>`,
+    `<link>${escapeXml(it.link)}</link>`,
+    `<g:image_link>${escapeXml(it.imageLink)}</g:image_link>`,
+    `<g:price>${escapeXml(formatPrice(it.price))}</g:price>`,
+    `<g:availability>${it.availability}</g:availability>`,
+    `<g:brand>${escapeXml(it.brand)}</g:brand>`,
+    it.productType ? `<g:product_type>${escapeXml(it.productType)}</g:product_type>` : "",
+    SHIPPING_BLOCK,
+  ].filter(Boolean);
+  return `    <item>\n      ${g.join("\n      ")}\n    </item>`;
+}
+
+export function buildBingFeed(items: FeedItem[], opts: { title: string; link: string; description: string }): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
+  <channel>
+    <title>${escapeXml(opts.title)}</title>
+    <link>${escapeXml(opts.link)}</link>
+    <description>${escapeXml(opts.description)}</description>
+${items.map(bingItemXml).join("\n")}
+  </channel>
+</rss>`;
+}
+
+// ── Reddit DPA catalog feed (RSS 2.0 + g:) ────────────────────────────────
+// Reddit's Dynamic Product Ads catalog ingests the standard RSS+g: product feed.
+// Field subset: id, title, description, availability, condition, price, link,
+// image_link, brand, product_type. No shipping/category.
+function redditItemXml(it: FeedItem): string {
+  const g: string[] = [
+    `<g:id>${escapeXml(it.id)}</g:id>`,
+    `<title>${escapeXml(it.title)}</title>`,
+    `<description>${escapeXml(it.description)}</description>`,
+    `<g:availability>${it.availability}</g:availability>`,
+    `<g:condition>${it.condition}</g:condition>`,
+    `<g:price>${escapeXml(formatPrice(it.price))}</g:price>`,
+    `<link>${escapeXml(it.link)}</link>`,
+    `<g:image_link>${escapeXml(it.imageLink)}</g:image_link>`,
+    `<g:brand>${escapeXml(it.brand)}</g:brand>`,
+    it.productType ? `<g:product_type>${escapeXml(it.productType)}</g:product_type>` : "",
+  ].filter(Boolean);
+  return `    <item>\n      ${g.join("\n      ")}\n    </item>`;
+}
+
+export function buildRedditFeed(items: FeedItem[], opts: { title: string; link: string; description: string }): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
+  <channel>
+    <title>${escapeXml(opts.title)}</title>
+    <link>${escapeXml(opts.link)}</link>
+    <description>${escapeXml(opts.description)}</description>
+${items.map(redditItemXml).join("\n")}
   </channel>
 </rss>`;
 }
