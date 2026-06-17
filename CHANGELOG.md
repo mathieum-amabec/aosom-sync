@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.77] - 2026-06-17
+
+### Fixed (content generator — debrand)
+- **`src/lib/content-generator.ts`** — stop the supplier brand from reaching generated content:
+  the `[BRAND NAME]` placeholder now resolves to « Ameublo Direct » (was `product.brand`, the
+  supplier name) in both the description and short description before Claude sees them; and the
+  SYSTEM_PROMPT prohibition is broadened from the product title to **anywhere in the response**
+  (full supplier list — Outsunny, HOMCOM, Aosom, … — unchanged).
+- Note: `parsed.brand = product.brand` still records the supplier brand on the output object
+  (tested behavior); debranding that field is a separate, follow-up decision.
+
 ## [0.5.53.76] - 2026-06-17
 
 ### Added (Shopify vendor debrand tool — dry-run default)
