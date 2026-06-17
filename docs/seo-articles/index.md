@@ -6,7 +6,7 @@ poussé vers Shopify. Approbation de Mat requise avant toute mise en ligne.
 
 - **Marché :** Québec, français primaire — ton éditorial, sans survente.
 - **Contraintes respectées :** 0 nom fournisseur, 0 image, « livraison gratuite » 0×, méta ≤ 155 car., FAQPage JSON-LD valide (6 Q/R/article), slugs sans accents.
-- **Liens internes :** vérifiés contre la Shopify Admin API (26 collections réelles). 1 handle corrigé (`chaises-et-tables-de-patio` → `chaises-et-tables-de-patio-1`), 1 repointé (`gazébos et abris` → collection réelle « Gazébos, parasols et abris »). ⚠ 1 cible inexistante : **« Entrée et vestibule »** (article #5) — à créer sur Shopify ou repointer.
+- **Liens internes :** vérifiés contre la Shopify Admin API (26 collections réelles). 1 handle corrigé (`chaises-et-tables-de-patio` → `chaises-et-tables-de-patio-1`), 2 repointés vers des collections réelles (`gazébos et abris` → « Gazébos, parasols et abris » ; **« Entrée et vestibule » (#5) → « Meubles et décorations »**, collection réelle la plus proche). Aucun lien interne mort.
 
 | # | Article | Catégorie | Intention | Méta (car.) |
 |---|---------|-----------|-----------|-------------|
@@ -32,6 +32,6 @@ node scripts/fix-collection-handles.mjs                  # SHOPIFY_ACCESS_TOKEN 
 
 ## À trancher avant publication
 
-1. **« Entrée et vestibule »** (#5) : collection absente de Shopify. Créer la collection, ou repointer le lien.
+1. **« Entrée et vestibule »** (#5) : **résolu** — repointé vers « Meubles et décorations » (collection réelle la plus proche). Optionnel : créer une vraie collection « Entrée et vestibule » plus tard pour un ciblage plus fin.
 2. Validation éditoriale des 10 articles par Mat.
 3. Pipeline de publication (création des articles de blogue Shopify) — étape non couverte par ce lot dry-run.

@@ -31,7 +31,7 @@ Une étagère à plusieurs niveaux occupe peu de profondeur (souvent 25 à 30 cm
 
 ### 3. Le meuble à chaussures avec portes
 
-Si vous préférez cacher le contenu pour un effet plus soigné, un meuble fermé avec portes battantes ou coulissantes est une excellente option. Certains modèles minces font à peine 25 cm de profondeur, ce qui les rend utilisables même dans les couloirs les plus serrés. Consultez notre sélection de [meubles d'entrée et de vestibule](https://ameublodirect.ca/collections/entree-et-vestibule) pour trouver un format adapté à votre espace.
+Si vous préférez cacher le contenu pour un effet plus soigné, un meuble fermé avec portes battantes ou coulissantes est une excellente option. Certains modèles minces font à peine 25 cm de profondeur, ce qui les rend utilisables même dans les couloirs les plus serrés. Consultez notre sélection de [meubles d'entrée et de rangement](https://ameublodirect.ca/collections/meubles-et-decorations) pour trouver un format adapté à votre espace.
 
 ### 4. Les rangements muraux et panneaux à crochets
 
@@ -93,7 +93,6 @@ Les bottes hautes nécessitent un espace vertical plus important que la plupart 
 
 ## Maillage interne
 
-- [Entrée et vestibule](https://ameublodirect.ca/collections/entree-et-vestibule) _(⚠ collection inexistante sur Shopify — à créer ou repointer; décision Mat)_
 - [Meubles et décorations](https://ameublodirect.ca/collections/meubles-et-decorations) _(handle vérifié ✓)_
 
 <script type="application/ld+json">
