@@ -58,10 +58,12 @@ describe("text helpers", () => {
   });
 });
 
+const PUBLISHED = "2024-01-01T00:00:00Z"; // a non-null Online Store publish timestamp
+
 const fixtureProducts: ShopifyFeedProduct[] = [
   {
     id: 111, title: "Chaise de patio", handle: "chaise-de-patio", vendor: "Outsunny",
-    status: "active", product_type: "Patio & Garden > Patio Furniture > Patio Chairs",
+    status: "active", published_at: PUBLISHED, product_type: "Patio & Garden > Patio Furniture > Patio Chairs",
     body_html: "<p>Une <b>belle</b> chaise</p>",
     images: [{ src: "https://img/1.jpg" }, { src: "https://img/2.jpg" }],
     variants: [
@@ -69,9 +71,10 @@ const fixtureProducts: ShopifyFeedProduct[] = [
       { sku: "PAT-001BK", price: "129.99", inventory_management: "shopify", inventory_quantity: 0, title: "Noir" },
     ],
   },
-  { id: 222, title: "Brouillon", handle: "brouillon", status: "draft", images: [{ src: "x" }], variants: [{ sku: "D1", price: "10" }] }, // draft → skipped
-  { id: 333, title: "Sans image", handle: "sans-image", status: "active", images: [], variants: [{ sku: "N1", price: "10" }] }, // no image → skipped
-  { id: 444, title: "Prix zéro", handle: "px0", status: "active", images: [{ src: "y" }], variants: [{ sku: "Z1", price: "0" }] }, // price 0 → skipped
+  { id: 222, title: "Brouillon", handle: "brouillon", status: "draft", published_at: PUBLISHED, images: [{ src: "x" }], variants: [{ sku: "D1", price: "10" }] }, // draft → skipped
+  { id: 333, title: "Sans image", handle: "sans-image", status: "active", published_at: PUBLISHED, images: [], variants: [{ sku: "N1", price: "10" }] }, // no image → skipped
+  { id: 444, title: "Prix zéro", handle: "px0", status: "active", published_at: PUBLISHED, images: [{ src: "y" }], variants: [{ sku: "Z1", price: "0" }] }, // price 0 → skipped
+  { id: 888, title: "Actif non publié", handle: "actif-non-publie", status: "active", published_at: null, images: [{ src: "z" }], variants: [{ sku: "U1", price: "20" }] }, // active but unpublished → excluded (storefront 404)
 ];
 
 describe("shopifyToFeedItems", () => {
@@ -84,6 +87,21 @@ describe("shopifyToFeedItems", () => {
     expect(items.find((i) => i.id === "D1")).toBeUndefined();
     expect(items.find((i) => i.id === "N1")).toBeUndefined();
     expect(items.find((i) => i.id === "Z1")).toBeUndefined();
+  });
+  it("excludes active products not published to the Online Store (published_at null → storefront 404)", () => {
+    // id 888 / SKU U1 is active with an image and a priced variant, but published_at is null.
+    expect(items.find((i) => i.id === "U1")).toBeUndefined();
+    // A published clone of the same product IS included — proves publish status is the only difference.
+    const published = shopifyToFeedItems([
+      { id: 889, title: "Actif publié", handle: "actif-publie", status: "active", published_at: PUBLISHED, images: [{ src: "z" }], variants: [{ sku: "U2", price: "20", inventory_management: null }] },
+    ]);
+    expect(published.map((i) => i.id)).toEqual(["U2"]);
+  });
+  it("excludes a scheduled (future-dated published_at) product — not live on the storefront yet", () => {
+    const scheduled = shopifyToFeedItems([
+      { id: 890, title: "Publication planifiée", handle: "planifie", status: "active", published_at: "2999-01-01T00:00:00Z", images: [{ src: "z" }], variants: [{ sku: "F1", price: "20", inventory_management: null }] },
+    ]);
+    expect(scheduled).toEqual([]);
   });
   it("builds storefront links, brand, category, and groups variants", () => {
     const gy = items.find((i) => i.id === "PAT-001GY")!;
@@ -106,8 +124,8 @@ describe("shopifyToFeedItems", () => {
   });
   it("deduplicates g:id (SKU) across the whole feed", () => {
     const dup = shopifyToFeedItems([
-      { id: 1, title: "A", handle: "a", status: "active", images: [{ src: "i" }], variants: [{ sku: "SAME", price: "10", inventory_management: null }] },
-      { id: 2, title: "B", handle: "b", status: "active", images: [{ src: "i" }], variants: [{ sku: "SAME", price: "20", inventory_management: null }] },
+      { id: 1, title: "A", handle: "a", status: "active", published_at: PUBLISHED, images: [{ src: "i" }], variants: [{ sku: "SAME", price: "10", inventory_management: null }] },
+      { id: 2, title: "B", handle: "b", status: "active", published_at: PUBLISHED, images: [{ src: "i" }], variants: [{ sku: "SAME", price: "20", inventory_management: null }] },
     ]);
     expect(dup.map((i) => i.id)).toEqual(["SAME"]); // only the first wins
   });
@@ -117,18 +135,18 @@ describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => 
   const enProducts: ShopifyFeedProduct[] = [
     {
       id: 700, title: "Chaise de patio", titleEn: "Patio Chair", handle: "chaise-de-patio",
-      vendor: "Outsunny", status: "active",
+      vendor: "Outsunny", status: "active", published_at: PUBLISHED,
       product_type: "Patio & Garden > Patio Furniture > Patio Chairs",
       images: [{ src: "https://img/1.jpg" }],
       variants: [{ sku: "EN-001", price: "129.99", inventory_management: null }],
     },
     {
-      id: 701, title: "Niche pour chien", titleEn: "  ", handle: "niche", status: "active", // blank EN → fallback
+      id: 701, title: "Niche pour chien", titleEn: "  ", handle: "niche", status: "active", published_at: PUBLISHED, // blank EN → fallback
       images: [{ src: "https://img/2.jpg" }],
       variants: [{ sku: "EN-002", price: "59.99", inventory_management: null }],
     },
     {
-      id: 702, title: "Tente de jardin", handle: "tente", status: "active", // no EN at all → fallback
+      id: 702, title: "Tente de jardin", handle: "tente", status: "active", published_at: PUBLISHED, // no EN at all → fallback
       images: [{ src: "https://img/3.jpg" }],
       variants: [{ sku: "EN-003", price: "89.99", inventory_management: null }],
     },
@@ -200,7 +218,7 @@ describe("buildMetaFeed", () => {
 // Sale-price fixture: a product whose variant has a compare_at_price (regular > current).
 const saleProducts: ShopifyFeedProduct[] = [
   {
-    id: 555, title: "Parasol en solde", handle: "parasol", vendor: "Outsunny", status: "active",
+    id: 555, title: "Parasol en solde", handle: "parasol", vendor: "Outsunny", status: "active", published_at: PUBLISHED,
     product_type: "Patio & Garden > Patio Shade > Patio Umbrellas",
     images: [{ src: "https://img/p.jpg" }],
     variants: [
