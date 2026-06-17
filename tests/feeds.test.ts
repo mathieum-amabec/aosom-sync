@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import { mapToGoogleCategory, DEFAULT_GOOGLE_CATEGORY } from "@/lib/feeds/google-category";
 import {
   escapeXml, stripHtml, truncate, formatPrice,
-  buildGoogleFeed, buildPinterestFeed, buildMetaFeed, buildMetaXmlFeed, type FeedItem,
+  buildGoogleFeed, buildPinterestFeed, buildMetaFeed, buildMetaXmlFeed,
+  buildBingFeed, buildRedditFeed, type FeedItem,
 } from "@/lib/feeds/feed";
 import { shopifyToFeedItems, type ShopifyFeedProduct } from "@/lib/feeds/source";
 
@@ -114,13 +115,37 @@ describe("shopifyToFeedItems", () => {
     expect(gy.additionalImageLinks).toEqual(["https://img/2.jpg"]);
     expect(gy.description).toBe("Une belle chaise");
   });
+  it("derives FR colour from the SKU suffix (g:color source)", () => {
+    expect(items.find((i) => i.id === "PAT-001GY")!.color).toBe("Gris");
+    expect(items.find((i) => i.id === "PAT-001BK")!.color).toBe("Noir");
+    // A SKU with no recognised colour suffix → null.
+    const noColor = shopifyToFeedItems([
+      { id: 5, title: "X", handle: "x", status: "active", published_at: PUBLISHED, images: [{ src: "i" }], variants: [{ sku: "WIDGET99", price: "5", inventory_management: null }] },
+    ]);
+    expect(noColor[0].color).toBeNull();
+  });
   it("treats untracked variants as in stock and tracked-zero as out of stock", () => {
     expect(items.find((i) => i.id === "PAT-001GY")!.availability).toBe("in stock");
     expect(items.find((i) => i.id === "PAT-001BK")!.availability).toBe("out of stock");
   });
-  it("defaults brand to Aosom when vendor is missing", () => {
+  it("hides the supplier: brand falls back to the house brand, never 'Aosom'", () => {
     const noVendor = shopifyToFeedItems([{ ...fixtureProducts[0], id: 9, vendor: null, handle: "h", variants: [{ sku: "S", price: "5", inventory_management: null }] }]);
-    expect(noVendor[0].brand).toBe("Aosom");
+    expect(noVendor[0].brand).toBe("Ameublo Direct");
+    // An explicit vendor of "Aosom" is also replaced.
+    const aosomVendor = shopifyToFeedItems([{ ...fixtureProducts[0], id: 10, vendor: "Aosom", handle: "h2", variants: [{ sku: "S2", price: "5", inventory_management: null }] }]);
+    expect(aosomVendor[0].brand).toBe("Ameublo Direct");
+    // A real product vendor is kept.
+    expect(items.find((i) => i.id === "PAT-001GY")!.brand).toBe("Outsunny");
+  });
+  it("scrubs 'Aosom' out of the title and description", () => {
+    const scrubbed = shopifyToFeedItems([{
+      id: 11, title: "Tour pour chat Aosom 168cm", handle: "tour", status: "active", published_at: PUBLISHED,
+      vendor: null, body_html: "<p>Cette tour Aosom est solide. Marque Aosom.</p>",
+      images: [{ src: "i" }], variants: [{ sku: "CAT-1", price: "20", inventory_management: null }],
+    }]);
+    expect(scrubbed[0].title).not.toMatch(/aosom/i);
+    expect(scrubbed[0].description).not.toMatch(/aosom/i);
+    expect(scrubbed[0].title).toContain("Ameublo Direct");
   });
   it("deduplicates g:id (SKU) across the whole feed", () => {
     const dup = shopifyToFeedItems([
@@ -188,6 +213,56 @@ describe("buildGoogleFeed", () => {
   });
   it("contains exactly one <item> per feed item", () => {
     expect((xml.match(/<item>/g) || []).length).toBe(sample.length);
+  });
+  it("emits g:color from the SKU suffix and a constant g:shipping block", () => {
+    expect(xml).toContain("<g:color>Gris</g:color>");
+    expect(xml).toContain("<g:color>Noir</g:color>");
+    expect(xml).toContain("<g:shipping>");
+    expect(xml).toContain("<g:country>CA</g:country>");
+    expect(xml).toContain("<g:price>0 CAD</g:price>");
+  });
+});
+
+describe("buildBingFeed", () => {
+  const xml = buildBingFeed(sample, { title: "Bing", link: "https://x", description: "d" });
+  it("is RSS 2.0 with the g: namespace", () => {
+    expect(xml).toContain(`<?xml version="1.0" encoding="UTF-8"?>`);
+    expect(xml).toContain(`xmlns:g="http://base.google.com/ns/1.0"`);
+  });
+  it("emits the Bing field set incl. shipping, one item per feed item", () => {
+    expect(xml).toContain("<g:id>PAT-001GY</g:id>");
+    expect(xml).toContain("<link>https://ameublodirect.ca/products/chaise-de-patio</link>");
+    expect(xml).toContain("<g:image_link>https://img/1.jpg</g:image_link>");
+    expect(xml).toContain("<g:price>129.99 CAD</g:price>");
+    expect(xml).toContain("<g:availability>in stock</g:availability>");
+    expect(xml).toContain("<g:brand>Outsunny</g:brand>");
+    expect(xml).toContain("<g:product_type>Patio &amp; Garden &gt; Patio Furniture &gt; Patio Chairs</g:product_type>");
+    expect(xml).toContain("<g:shipping>");
+    expect((xml.match(/<item>/g) || []).length).toBe(sample.length);
+  });
+  it("omits Google-only fields not in the Bing set (condition, category)", () => {
+    expect(xml).not.toContain("<g:condition>");
+    expect(xml).not.toContain("<g:google_product_category>");
+  });
+});
+
+describe("buildRedditFeed", () => {
+  const xml = buildRedditFeed(sample, { title: "Reddit", link: "https://x", description: "d" });
+  it("is RSS 2.0 with the g: namespace", () => {
+    expect(xml).toContain(`xmlns:g="http://base.google.com/ns/1.0"`);
+  });
+  it("emits the Reddit field set incl. condition, one item per feed item", () => {
+    expect(xml).toContain("<g:id>PAT-001GY</g:id>");
+    expect(xml).toContain("<g:condition>new</g:condition>");
+    expect(xml).toContain("<g:availability>in stock</g:availability>");
+    expect(xml).toContain("<g:price>129.99 CAD</g:price>");
+    expect(xml).toContain("<link>https://ameublodirect.ca/products/chaise-de-patio</link>");
+    expect(xml).toContain("<g:brand>Outsunny</g:brand>");
+    expect((xml.match(/<item>/g) || []).length).toBe(sample.length);
+  });
+  it("omits fields not in the Reddit set (shipping, category)", () => {
+    expect(xml).not.toContain("<g:shipping>");
+    expect(xml).not.toContain("<g:google_product_category>");
   });
 });
 

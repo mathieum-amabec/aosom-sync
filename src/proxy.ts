@@ -18,7 +18,10 @@ import { AUTH } from "@/lib/config";
 // "/api/blog/generate" (Bearer CRON_SECRET, no session cookie) isn't 307-redirected
 // to /login by this middleware. The route self-gates on CRON_SECRET + session,
 // mirroring "/api/social/content".
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/feeds", "/api/image-preview", "/api/price-alert", "/api/video-serve"];
+// "/api/revalidate" is public for the same reason: it's called server-to-server with
+// Bearer CRON_SECRET (no session cookie) to refresh the feeds; the route self-gates on
+// CRON_SECRET. Without this it would 307 to /login before its own auth runs.
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/feeds", "/api/revalidate", "/api/image-preview", "/api/price-alert", "/api/video-serve"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(
