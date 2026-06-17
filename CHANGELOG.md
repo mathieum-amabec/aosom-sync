@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.74] - 2026-06-17
+
+### Fixed (import de-brands product handles at the source)
+- **`src/lib/shopify-client.ts` (`createShopifyProduct`)** — the Job 3 handle
+  (`content.urlHandleFr` or `slugify(titleFr)`) is now stripped of the supplier name
+  before the Shopify create: `.replace(/(^|-)aosom(-|$)/gi,'$1$2').replace(/--+/g,'-').replace(/^-|-$/g,'')`.
+  The model sometimes embeds "aosom" despite the no-brand prompt rule, which leaked it
+  into the public URL (347 existing handles were fixed in PR #208). This closes the loop
+  so new imports don't re-introduce branded handles. The trailing trim prevents an orphan
+  dash when "aosom" was a prefix/suffix. Tests added in `tests/shopify-client.test.ts`
+  (mid/prefix/suffix/case-insensitive + title-fallback path).
+
 ## [0.5.53.73] - 2026-06-17
 
 ### Added (de-brand Shopify product handles — script, dry-run)

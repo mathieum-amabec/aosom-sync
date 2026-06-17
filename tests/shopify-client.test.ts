@@ -93,6 +93,34 @@ describe("createShopifyProduct — metafield + handle safety", () => {
     expect(body.product.handle).toBe("custom-slug");
   });
 
+  // De-branding: the model sometimes embeds "aosom" in the handle despite the
+  // no-brand prompt rule. Strip it so new imports don't re-create branded URLs.
+  it("strips supplier name from the handle (mid / prefix / suffix, no orphan dash)", async () => {
+    const cases = [
+      ["arbre-a-chat-aosom-177cm", "arbre-a-chat-177cm"], // mid
+      ["aosom-voiture-electrique-12v", "voiture-electrique-12v"], // prefix
+      ["paravent-exterieur-aosom", "paravent-exterieur"], // suffix
+      ["chaise-AOSOM-grise", "chaise-grise"], // case-insensitive
+    ];
+    for (const [input, expected] of cases) {
+      mockFetch.mockClear();
+      await createShopifyProduct(mergedFixture(), contentFixture({ urlHandleFr: input }));
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.product.handle).toBe(expected);
+      expect(body.product.handle).not.toMatch(/aosom/i);
+      expect(body.product.handle).not.toMatch(/(^-|-$|--)/); // no orphan/double dash
+    }
+  });
+
+  it("de-brands a title-derived fallback handle too", async () => {
+    await createShopifyProduct(
+      mergedFixture(),
+      contentFixture({ urlHandleFr: "", titleFr: "Gazébo Aosom 3x3m" }),
+    );
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.product.handle).toBe("gazebo-3x3m");
+  });
+
   it("publishes the product live (status active) on import", async () => {
     await createShopifyProduct(mergedFixture(), contentFixture({}));
 
