@@ -4,6 +4,7 @@
 import { SHOPIFY } from "@/lib/config";
 import { STOREFRONT_BASE_URL } from "@/lib/insights";
 import { type FeedItem, mapToGoogleCategory, stripHtml, truncate } from "./feed";
+import { parseSku } from "../variant-merger";
 
 export interface ShopifyFeedVariant {
   sku: string | null;
@@ -34,6 +35,28 @@ export interface ShopifyFeedProduct {
 
 const DESCRIPTION_MAX = 5000;
 
+// Hide the dropship supplier ("Aosom") from public feeds — "Ameublo Direct" is the
+// storefront brand customers should see. Drives the brand fallback and scrubs the supplier
+// name out of titles/descriptions so the feeds carry zero supplier references.
+// NOTE: a product's URL handle can still embed "aosom" (e.g. /products/...-aosom-...);
+// those are live Shopify handles and must be changed Shopify-side (+ redirects) — they
+// cannot be rewritten in the feed without producing 404 links.
+const HOUSE_BRAND = "Ameublo Direct";
+const SUPPLIER_WORD = /\baosom\b/i; // single match (no /g — safe with .test())
+const SUPPLIER_GLOBAL = /\baosom\b/gi; // replace-all
+
+/** Replace any "Aosom" occurrence with the house brand and tidy whitespace. */
+export function scrubSupplier(s: string): string {
+  return s.replace(SUPPLIER_GLOBAL, HOUSE_BRAND).replace(/\s{2,}/g, " ").trim();
+}
+
+/** Brand to show: keep a real product vendor (Outsunny, …); replace empty or the
+ * supplier name ("Aosom") with the house brand. */
+function resolveBrand(vendor: string | null | undefined): string {
+  const v = (vendor ?? "").trim();
+  return !v || SUPPLIER_WORD.test(v) ? HOUSE_BRAND : v;
+}
+
 /** Pure: map raw Shopify products to feed items (one per variant SKU). Active only.
  * g:id (SKU) is deduplicated across the whole feed — a duplicate g:id makes Google
  * reject/merge unpredictably, and dropship catalogs do reuse SKUs.
@@ -61,8 +84,8 @@ export function shopifyToFeedItems(
     const images = (p.images ?? []).map((i) => i.src).filter(Boolean);
     if (images.length === 0) continue;            // Google/Pinterest/Meta require an image
     const link = `${STOREFRONT_BASE_URL}/products/${encodeURIComponent(p.handle)}`;
-    const description = truncate(stripHtml(p.body_html ?? ""), DESCRIPTION_MAX);
-    const brand = (p.vendor && p.vendor.trim()) || "Aosom";
+    const description = truncate(scrubSupplier(stripHtml(p.body_html ?? "")), DESCRIPTION_MAX);
+    const brand = resolveBrand(p.vendor);
     const cat = mapToGoogleCategory(p.product_type);
     const variants = (p.variants ?? []).filter((v) => v.sku && String(v.sku).trim() !== "");
     const multi = variants.length > 1;
@@ -87,7 +110,7 @@ export function shopifyToFeedItems(
       items.push({
         id,
         itemGroupId: multi ? String(p.id) : null,
-        title: truncate(`${baseTitle}${variantTitle}`, 150),
+        title: truncate(scrubSupplier(`${baseTitle}${variantTitle}`), 150),
         description,
         link,
         imageLink: images[0],
@@ -97,6 +120,9 @@ export function shopifyToFeedItems(
         availability,
         condition: "new",
         brand,
+        // FR colour from the SKU suffix (COLOR_MAP), e.g. ...GY → "Gris". null when the
+        // SKU has no recognised colour suffix. Drives <g:color> on the Google feed.
+        color: parseSku(id).color,
         productType: p.product_type ?? "",
         googleCategoryId: cat.id,
       });
