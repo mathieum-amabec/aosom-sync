@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.72] - 2026-06-17
+
+### Added (de-brand Shopify product handles — script, dry-run)
+- **`scripts/fix-shopify-handles.mjs`** — renomme les handles produits contenant
+  « aosom » pour retirer le nom du fournisseur des URLs (suite Projet #1, « 0 nom
+  fournisseur »). **Dry-run par défaut** ; `--apply` requis pour écrire. Transform :
+  `handle.replace(/(^|-)aosom(-|$)/g,'$1$2').replace(/--+/g,'-').replace(/^-|-$/g,'')`
+  (couvre préfixe/suffixe/milieu — 347/347 handles). Throttle **2 req/sec strict** +
+  backoff 429. Shopify crée automatiquement la redirection 301 old → new. Détecte les
+  collisions (Shopify suffixe `-1`) et logge chaque `ancien → nouveau`.
+  Diagnostic live (2026-06-17) : 638 produits, **347** handles « aosom », **2** collisions.
+  ⚠️ `--apply` non encore exécuté (décision Mat séparée — écritures sur boutique live).
+
 ## [0.5.53.71] - 2026-06-16
 
 ### Added (Projet #1 — visibilité commerce agentique, AEO/GEO)
