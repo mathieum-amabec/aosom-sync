@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.72] - 2026-06-17
+## [0.5.53.73] - 2026-06-17
 
 ### Added (de-brand Shopify product handles — script, dry-run)
 - **`scripts/fix-shopify-handles.mjs`** — renomme les handles produits contenant
@@ -18,6 +18,24 @@ All notable changes to Aosom Sync will be documented in this file.
   Diagnostic live : 638 produits, **347** handles « aosom », **2** collisions.
   Canary `--apply --limit 5` exécuté (5 renommés + 5 redirections 301 vérifiées live).
   ⚠️ `--apply` complet (342 restants) non exécuté — checkpoint Mat.
+
+## [0.5.53.72] - 2026-06-17
+
+### Added (SEO/AEO content engine — lot 1, dry-run)
+- **`scripts/generate-seo-articles.mjs`** — generates FR SEO/AEO blog articles via the
+  Anthropic API (`claude-sonnet-4-6`): structured JSON output, per-article constraint
+  post-checks (no supplier names, no images, « livraison gratuite » ≤1×, méta ≤155 car.),
+  2s rate-limit between calls. Writes `docs/seo-articles/<slug>.md`.
+- **`scripts/fix-collection-handles.mjs`** — verifies internal-link collection handles
+  against the Shopify Admin API (GET only, `custom_collections` + `smart_collections`)
+  and corrects drift in the generated markdown.
+- **`docs/seo-articles/` — 10 FR articles + `index.md`** across Mobilier extérieur /
+  Meubles / Animaux / Enfants (informational, comparative, how-to). Each: ~150-word intro,
+  H2/H3 body, 6-Q FAQ + valid FAQPage JSON-LD, accent-free slug, 2 internal collection links.
+  Handles verified vs Shopify (1 corrected: `chaises-et-tables-de-patio-1`; 1 repointed to
+  the real « Gazébos, parasols et abris » collection). **« Entrée et vestibule » flagged as a
+  non-existent collection** — to create or repoint before publish.
+- **`dry_run: true`** on every article — nothing pushed to Shopify; pending Mat's editorial approval.
 
 ## [0.5.53.71] - 2026-06-16
 
