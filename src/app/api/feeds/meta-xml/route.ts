@@ -5,7 +5,7 @@ import { recordFeedSync } from "@/lib/database";
 
 // Public (allowlisted in proxy.ts) — Meta Commerce ingests RSS/ATOM XML (not JSON).
 // Same RSS 2.0 + g: shape as the Google feed, plus g:custom_label_0 + g:sale_price.
-const CACHE = "public, max-age=0, s-maxage=86400, stale-while-revalidate=43200"; // CDN-cached 24h
+const CACHE = "public, max-age=0, s-maxage=600, stale-while-revalidate=600"; // CDN-cached 10 min — on-demand refresh via POST /api/revalidate
 
 export async function GET() {
   try {
