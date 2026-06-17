@@ -145,7 +145,10 @@ export async function createShopifyProduct(
       // Strip a leading marketing heading the model sometimes opens with (reads as a
       // duplicate title under the product H1). See html-utils.stripLeadingHeading.
       body_html: stripLeadingHeading(content.descriptionFr),
-      vendor: merged.brand || "Aosom",
+      // Public vendor field (surfaced in feeds + analytics) is always the store brand —
+      // never the supplier. The real supplier brand is kept internally in the
+      // `custom.brand_fr` metafield below. Matches the de-brand of existing products.
+      vendor: "Ameublo Direct",
       product_type: merged.productType,
       // TODO(taxonomy): on a (re)creation, only generated tags are written here.
       // Manually-added taxonomy slugs (e.g. "bbq-cuisson", "rangement-exterieur")
