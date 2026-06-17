@@ -8,12 +8,13 @@ All notable changes to Aosom Sync will be documented in this file.
 Artefacts thème Shopify (déployés sur le thème `160213696617` via Asset API ; voir
 `shopify-theme/README.md`) + livrable AEO. Non destructif côté données produits.
 
-- **`shopify-theme/templates/robots.txt.liquid`** — rend les groupes par défaut de
-  Shopify inchangés, puis ajoute des groupes `User-agent` explicites pour les agents
-  IA (GPTBot, OAI-SearchBot, ChatGPT-User, PerplexityBot, Perplexity-User,
-  Google-Extended, Applebot-Extended, meta-externalagent, Bingbot, BingPreview).
-  Chaque groupe IA **clone l'intégralité des règles du groupe `*`** (Allow + Disallow)
-  pour autoriser le contenu sans retirer aucune protection transactionnelle.
+- **robots.txt — aucun override (décision après test en prod).** Le store sert déjà le
+  défaut Shopify nouvelle génération, optimisé agents (`Allow: /` + publicité
+  `agents.md` / `/.well-known/ucp` / UCP-MCP / `shop.app/SKILL.md`). Un
+  `templates/robots.txt.liquid` custom **remplace** ce défaut riche par le ruleset
+  classique et **supprime ces publicités UCP** = régression. Testé en prod puis
+  rollback immédiat. Les agents IA listés sont déjà autorisés par le défaut. Voir
+  `shopify-theme/README.md`.
 - **`shopify-theme/snippets/agentic-structured-data.liquid`** — remplace
   `{{ product | structured_data }}` sur la PDP. Corrige la fuite `brand = product.vendor`
   (= fournisseur « Aosom ») en forçant `brand = shop.name` ; scrub des noms fournisseur
