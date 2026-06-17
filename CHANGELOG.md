@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.72] - 2026-06-17
+
+### Added (SEO/AEO content engine — lot 1, dry-run)
+- **`scripts/generate-seo-articles.mjs`** — generates FR SEO/AEO blog articles via the
+  Anthropic API (`claude-sonnet-4-6`): structured JSON output, per-article constraint
+  post-checks (no supplier names, no images, « livraison gratuite » ≤1×, méta ≤155 car.),
+  2s rate-limit between calls. Writes `docs/seo-articles/<slug>.md`.
+- **`scripts/fix-collection-handles.mjs`** — verifies internal-link collection handles
+  against the Shopify Admin API (GET only, `custom_collections` + `smart_collections`)
+  and corrects drift in the generated markdown.
+- **`docs/seo-articles/` — 10 FR articles + `index.md`** across Mobilier extérieur /
+  Meubles / Animaux / Enfants (informational, comparative, how-to). Each: ~150-word intro,
+  H2/H3 body, 6-Q FAQ + valid FAQPage JSON-LD, accent-free slug, 2 internal collection links.
+  Handles verified vs Shopify (1 corrected: `chaises-et-tables-de-patio-1`; 1 repointed to
+  the real « Gazébos, parasols et abris » collection). **« Entrée et vestibule » flagged as a
+  non-existent collection** — to create or repoint before publish.
+- **`dry_run: true`** on every article — nothing pushed to Shopify; pending Mat's editorial approval.
+
 ## [0.5.53.71] - 2026-06-16
 
 ### Added (Projet #1 — visibilité commerce agentique, AEO/GEO)
