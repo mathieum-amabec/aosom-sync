@@ -103,7 +103,7 @@ GLOBAL RULES
 
 PRODUCT TITLE (titleFr / titleEn) — strict pattern:
   [Product type] [distinctive feature] [size/capacity if relevant] — [color if relevant]
-  - NEVER include a supplier brand: Outsunny, HOMCOM, HomCom, Aosom, Vinsetto, Pawhut,
+  - NEVER include a supplier brand name ANYWHERE in your response: Outsunny, HOMCOM, HomCom, Aosom, Vinsetto, Pawhut,
     PawHut, Soozier, Qaba, ShopEZ, Wikinger, Portland, Aousthop.
   - Maximum 10 words, strict — truncate if necessary. Product type FIRST (SEO). No brand, no model number.
   - Color, only if relevant, after an em dash "—".
@@ -148,8 +148,8 @@ export async function generateProductContent(
   const client = getAnthropicClient();
 
   const cleanName = stripColorFromTitle(product.name);
-  const cleanDesc = sanitizeHtml(product.description.replace(/\[BRAND NAME\]/gi, product.brand));
-  const cleanShort = sanitizeHtml(product.shortDescription.replace(/\[BRAND NAME\]/gi, product.brand));
+  const cleanDesc = sanitizeHtml(product.description.replace(/\[BRAND NAME\]/gi, "Ameublo Direct"));
+  const cleanShort = sanitizeHtml(product.shortDescription.replace(/\[BRAND NAME\]/gi, "Ameublo Direct"));
 
   const variantInfo = product.variants
     .map((v) => `- SKU: ${v.sku}, Price: $${v.price}`)
