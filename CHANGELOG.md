@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.69] - 2026-06-16
+
+### Added (on-demand feed revalidation)
+- **`POST /api/revalidate` (Bearer CRON_SECRET)** — refreshes the storefront product feeds
+  (Google / Pinterest / Pinterest-EN / Meta / Meta-XML) on demand, e.g. right after a catalog
+  sync, instead of waiting out the CDN cache. Calls `revalidateTag('feeds', 'max')` (busts the
+  shared Shopify product Data Cache) + `revalidatePath` on each feed route. Returns
+  `{ revalidated: true, feeds: [...] }`.
+- **`src/lib/feeds/source.ts`** — the shared Shopify products fetch is now Data-Cached and tagged
+  (`next: { revalidate: 86400, tags: ['feeds'] }`): a 24h baseline that `POST /api/revalidate`
+  can invalidate early.
+
+### Changed
+- **Feed CDN window 24h → 10 min** (`s-maxage=600`) across all 5 feed routes, so on-demand
+  revalidation propagates to the live feed within ~10 min. The heavy Shopify data stays in the
+  Data Cache, so CDN re-pulls remain cheap. (Routes kept request-time; `force-static` was avoided
+  because it would crawl Shopify at build and make deploys fragile. Per Next 16 `cdn-caching.md`,
+  `revalidateTag`/`revalidatePath` bust Next's server cache but not the CDN copy — the 10-min
+  `s-maxage` is the bounded propagation window, not an instant purge.)
+
 ## [0.5.53.68] - 2026-06-16
 
 ### Fixed (Google Merchant "Product page unavailable" on ~267 offers)

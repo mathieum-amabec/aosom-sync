@@ -3,7 +3,7 @@ import { buildMetaFeed } from "@/lib/feeds/feed";
 import { recordFeedSync } from "@/lib/database";
 
 // Public (allowlisted in proxy.ts) — Meta Commerce catalog data feed (JSON), no session.
-const CACHE = "public, max-age=0, s-maxage=86400, stale-while-revalidate=43200"; // CDN-cached 24h
+const CACHE = "public, max-age=0, s-maxage=600, stale-while-revalidate=600"; // CDN-cached 10 min — on-demand refresh via POST /api/revalidate
 
 export async function GET() {
   try {

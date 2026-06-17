@@ -119,7 +119,13 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** GET with retry/backoff for 429 + 5xx, honoring Retry-After (Shopify is ~2 req/s). */
 async function fetchWithRetry(url: string, token: string, tries = 5): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, { headers: { "X-Shopify-Access-Token": token } });
+    // Cache the (paginated) Shopify product data in Next's Data Cache, tagged 'feeds'.
+    // revalidate=86400 keeps a 24h baseline; POST /api/revalidate calls
+    // revalidateTag('feeds') to refresh on demand (e.g. right after a catalog sync).
+    const res = await fetch(url, {
+      headers: { "X-Shopify-Access-Token": token },
+      next: { revalidate: 86400, tags: ["feeds"] },
+    });
     if ((res.status === 429 || res.status >= 500) && attempt < tries) {
       const retryAfter = parseFloat(res.headers.get("Retry-After") || "");
       const waitSec = !Number.isNaN(retryAfter) ? Math.min(retryAfter, 30) : Math.min(2 ** attempt, 20);
@@ -168,7 +174,10 @@ async function graphqlWithRetry(
 }
 
 /** Fetch a map of Shopify product id → custom.title_en metafield value (non-empty only).
- * REST products.json does not return metafields, so the EN title is resolved via GraphQL. */
+ * REST products.json does not return metafields, so the EN title is resolved via GraphQL.
+ * Note: this is a POST, which Next does not Data-Cache — so EN titles are always fetched
+ * fresh and are NOT covered by the 'feeds' tag / POST /api/revalidate. Only the EN feed
+ * (pinterest-en) pays this per regeneration. */
 export async function fetchTitleEnMap(): Promise<Map<string, string>> {
   const token = process.env.SHOPIFY_ACCESS_TOKEN;
   if (!token) throw new Error("SHOPIFY_ACCESS_TOKEN not configured");

@@ -7,7 +7,7 @@ import { recordFeedSync } from "@/lib/database";
 // crawler fetches this with no session.
 // English-title variant of /api/feeds/pinterest: titles come from custom.title_en
 // (falling back to the FR title), to maximize reach with the anglophone Canadian audience.
-const CACHE = "public, max-age=0, s-maxage=86400, stale-while-revalidate=43200"; // CDN-cached 24h
+const CACHE = "public, max-age=0, s-maxage=600, stale-while-revalidate=600"; // CDN-cached 10 min — on-demand refresh via POST /api/revalidate
 
 export async function GET() {
   try {
