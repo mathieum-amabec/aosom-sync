@@ -24,7 +24,8 @@ export interface CreateBlogArticleInput {
   summaryHtml?: string;
   /** Optional comma-joined tag list, or array. */
   tags?: string | string[];
-  /** Author byline. Defaults to "Aosom". */
+  /** Author byline. Defaults to the store brand "Ameublo Direct" (public byline — never
+   * the supplier name). */
   author?: string;
   /** SEO meta description (used as `metafields_global_description_tag`). */
   metaDescription?: string;
@@ -58,7 +59,7 @@ export async function createBlogArticle(
   const article: Record<string, unknown> = {
     title: input.title.slice(0, 255),
     body_html: input.bodyHtml,
-    author: input.author ?? "Aosom",
+    author: input.author ?? "Ameublo Direct",
     tags,
     published: false,
   };
