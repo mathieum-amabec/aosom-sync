@@ -2,6 +2,28 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.84] - 2026-06-17
+
+### Added (Demand Gen video pipeline + uploader)
+- **`scripts/render-demand-gen.mjs`** — FFmpeg renderer that turns real product MP4s into
+  branded Demand Gen ad assets: trims each clip's clean window (skips burned-in EN title
+  cards), scales/pads to 16:9 · 1:1 · 9:16 at 6s/15s/30s, overlays the FR product title +
+  "Livraison gratuite au Canada" (DM Sans), and `delogo`s the supplier corner logo. Reads
+  `src/*.mp4` → writes `out/demand-gen/{sku}/`. Produced 87 assets from 13 viable sources.
+- **`scripts/build-manifest.mjs` / `scripts/build-index.mjs`** — build
+  `out/demand-gen-manifest.json` (per-source trim/delogo/variant plan + audit notes) and a
+  local preview contact sheet.
+- **`scripts/upload-demand-gen.mjs`** — uploads the rendered assets to Vercel Blob (`put()`,
+  public, `demand-gen/{sku}/{file}`) and records each `blob_url` back into the manifest.
+  Dry-run by default; `--apply` to upload; 2 uploads/sec; idempotent (skips already-recorded
+  assets; atomic re-read + merge of the manifest so a concurrent renderer's writes aren't
+  clobbered); refuses a partially-rendered set unless `--force`.
+- **`fonts/DMSans.ttf`** — brand font for the overlay.
+
+### Changed
+- **`.gitignore`** — ignore `src/*.mp4` (73MB of source product videos, re-fetchable via the
+  manifest `source_url`) and `tmp_lines/` (FFmpeg drawtext scratch).
+
 ## [0.5.53.82] - 2026-06-17
 
 ### Changed (vitest skips agent worktree copies)
