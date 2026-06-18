@@ -114,7 +114,7 @@ function buildFilter(ratio, cfg, drawChain, delogo) {
            `[bg][fg]overlay=(W-w)/2:(H-h)/2[base]`;
   }
   const Hs = Math.round(SCRIM_FRACTION * H);
-  const scrim = `color=c=0x1B2A4A:s=${W}x${Hs}:r=30,format=rgba,` +
+  const scrim = `color=c=${NAVY}:s=${W}x${Hs}:r=30,format=rgba,` +
                 `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${SCRIM_OPACITY}*255*(Y/(H-1))'[scrim]`;
   return `${base};${scrim};[base][scrim]overlay=0:${H - Hs}:shortest=1[scr];[scr]${drawChain}[vout]`;
 }
