@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.92] - 2026-06-18
+
+### Added (YouTube uploader for Demand Gen)
+- **`scripts/upload-youtube.mjs`** — uploads the 16:9 Demand Gen assets recorded in
+  `video_demand_gen` to YouTube via Data API v3 (`videos.insert`, resumable), then writes
+  `youtube_video_id` + `youtube_status` back into each row. Raw `fetch` (no googleapis SDK):
+  OAuth2 `refresh_token` → access token, then resumable init → single-shot PUT. Source bytes
+  come from `blob_url` (runs from any clone). `privacyStatus: unlisted`. Descriptions link to
+  the real storefront product via its **handle**, resolved from the Shopify Admin API (the
+  `shopify_product_id` column is a GID, which the storefront can't resolve). **DRY-RUN by
+  default** (lists candidates, zero YouTube quota); `--apply` uploads, `--limit N` batches,
+  `--force` re-uploads. Hard quota guard: refuses any run over the 10000-unit/day quota
+  (~6 uploads/day at 1600 units each), escapable only by `--limit`. Idempotent — rows with a
+  `youtube_video_id` are skipped. Run under x64 node (see CLAUDE.md).
+
 ## [0.5.53.91] - 2026-06-18
 
 ### Changed (Demand Gen overlay retouches)
