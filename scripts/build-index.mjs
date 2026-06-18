@@ -37,7 +37,7 @@ const html = `<!doctype html><meta charset="utf-8">
  .cap{color:#D4A853}
 </style>
 <h1>Demand Gen — planche complète · ${r.ok ?? "?"} assets · ${r.total_mb ?? "?"} MB · rendu ${r.elapsed_sec ?? "?"}s</h1>
-<p class="sub">Overlay FR (DM Sans) + « Livraison gratuite au Canada » (Gold) sur scrim Navy 35%. Trim fenêtre propre par SKU; delogo sur 845-774V00BK. <span class="cap">(Ns)</span> = durée réelle si &lt; bucket.</p>
+<p class="sub">Overlay FR (DM Sans, titre MAJUSCULES +25%, fond Navy 70%) + badge Gold « Livraison gratuite au Canada » sur scrim Navy 50%. Trim fenêtre propre par SKU; delogo sur 845-774V00BK. <span class="cap">(Ns)</span> = durée réelle si &lt; bucket.</p>
 ${sections}`;
 writeFileSync("out/demand-gen/_previews/index.html", html);
 console.log("Wrote out/demand-gen/_previews/index.html");
