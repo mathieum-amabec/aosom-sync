@@ -156,12 +156,55 @@ export async function POST(request: Request) {
         return NextResponse.json({ success: true, data: await getFacebookDraft(body.id) });
 
       case "schedule": {
+        // Manual schedule = operator picks an explicit time. This NO LONGER writes a
+        // 'scheduled' facebook_draft (the legacy /api/cron/social-scheduled path is retired);
+        // it enqueues the draft into publication_queue at the chosen slot instead, so
+        // /api/cron/publisher drains and publishes it — the same path as 'approve', with no
+        // double-publish. The draft stays 'approved' in facebook_drafts.
         const scheduledAt = typeof body.scheduledAt === "number" ? body.scheduledAt : null;
         if (!scheduledAt || scheduledAt < Math.floor(Date.now() / 1000)) {
           return NextResponse.json({ success: false, error: "Valid future scheduledAt timestamp required" }, { status: 400 });
         }
-        await updateFacebookDraft(body.id, { status: "scheduled", scheduled_at: scheduledAt });
-        return NextResponse.json({ success: true, data: await getFacebookDraft(body.id) });
+
+        const draft = await getFacebookDraft(body.id);
+        if (!draft) {
+          return NextResponse.json({ success: false, error: "Draft introuvable" }, { status: 404 });
+        }
+
+        // unix sec → SQLite datetime() text ('YYYY-MM-DD HH:MM:SS' UTC), the shape addToQueue requires.
+        const slotSqlite = new Date(scheduledAt * 1000).toISOString().slice(0, 19).replace("T", " ");
+        // One queue item per active brand (caption + brand + images), mirroring 'approve'.
+        const items = draftToQueueItems(draft, activeChannels());
+
+        let queuedCount = 0;
+        for (const item of items) {
+          try {
+            await addToQueue({
+              contentType: "social",
+              contentId: String(body.id),
+              platform: item.platform,
+              payload: JSON.stringify(item.payload),
+              scheduledAt: slotSqlite,
+            });
+            queuedCount++;
+          } catch (err) {
+            // Operator picked this exact slot — if it's already taken on this platform, skip
+            // that brand rather than silently shifting the post to a different time.
+            if (err instanceof QueueSlotTakenError) continue;
+            throw err;
+          }
+        }
+
+        // Keep the draft approved; it is no longer written into the facebook_drafts scheduled queue.
+        await updateFacebookDraft(body.id, { status: "approved" });
+
+        return NextResponse.json({
+          success: true,
+          data: await getFacebookDraft(body.id),
+          queued: queuedCount > 0,
+          queuedCount,
+          scheduledAt, // unix seconds — matches the dashboard's `typeof === "number"` check
+        });
       }
 
       case "publish": {

@@ -1,18 +1,31 @@
 import { NextResponse } from "next/server";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
-import { getFacebookDraft, updateFacebookDraft } from "@/lib/database";
+import {
+  getFacebookDraft,
+  updateFacebookDraft,
+  addToQueue,
+  cancelPendingQueueItems,
+  QueueSlotTakenError,
+} from "@/lib/database";
+import { draftToQueueItems } from "@/lib/social-publisher";
+import { activeChannels } from "@/lib/config";
 
 /**
  * POST /api/social/drafts/:id/schedule
  *
  * Body: { scheduled_at: number }  // unix seconds, must be in the future
  *
- * Sets status='scheduled' + scheduled_at on the draft so the
- * `/api/cron/social-scheduled` cron (every 15 min, processScheduledDrafts)
- * picks it up at the requested time.
+ * Enqueues the draft into `publication_queue` at the chosen time so
+ * `/api/cron/publisher` (hourly) publishes it. This NO LONGER writes a
+ * 'scheduled' facebook_draft — the legacy `/api/cron/social-scheduled` cron is
+ * retired, so a 'scheduled' row would never publish. Same queue path as
+ * `POST /api/social {action:"approve"}`, with no double-publish.
  *
- * Implicit approval: a 'draft' is moved straight to 'scheduled' without
- * passing through 'approved', because scheduling is itself an approval act.
+ * Re-schedule safe: cancels the draft's existing pending queue rows first, then
+ * enqueues at the new slot, so changing the time moves the post (no duplicates).
+ *
+ * Implicit approval: scheduling is itself an approval act, so the draft is left
+ * 'approved' (it no longer passes through a 'scheduled' state).
  */
 export async function POST(
   request: Request,
@@ -60,24 +73,54 @@ export async function POST(
     );
   }
 
-  await updateFacebookDraft(id, {
-    status: "scheduled",
-    scheduled_at: scheduledAt,
-  });
+  // Re-schedule: drop any existing pending queue rows for this draft so the new time
+  // replaces the old one instead of stacking a second publish.
+  await cancelPendingQueueItems("social", String(id));
+
+  // unix sec → SQLite datetime() text ('YYYY-MM-DD HH:MM:SS' UTC), the shape addToQueue requires.
+  const slotSqlite = new Date(scheduledAt * 1000).toISOString().slice(0, 19).replace("T", " ");
+  // One queue item per active brand (caption + brand + images), mirroring the approve flow.
+  const items = draftToQueueItems(draft, activeChannels());
+
+  let queuedCount = 0;
+  for (const item of items) {
+    try {
+      await addToQueue({
+        contentType: "social",
+        contentId: String(id),
+        platform: item.platform,
+        payload: JSON.stringify(item.payload),
+        scheduledAt: slotSqlite,
+      });
+      queuedCount++;
+    } catch (err) {
+      // Operator picked this exact slot — if it's already taken on this platform, skip
+      // that brand rather than silently shifting the post to a different time.
+      if (err instanceof QueueSlotTakenError) continue;
+      throw err;
+    }
+  }
+
+  // Scheduling is an approval act; leave the draft 'approved' (no 'scheduled' state anymore).
+  await updateFacebookDraft(id, { status: "approved" });
 
   return NextResponse.json({
     success: true,
     id,
-    status: "scheduled",
+    status: "approved",
     scheduled_at: scheduledAt,
+    queued: queuedCount > 0,
+    queuedCount,
   });
 }
 
 /**
  * DELETE /api/social/drafts/:id/schedule
  *
- * Clears scheduled_at and reverts status='scheduled' → 'draft' so the cron
- * stops considering it. Only allowed when the draft is currently scheduled.
+ * Unschedules a draft: cancels its pending `publication_queue` rows (freeing their
+ * slots) and reverts the draft to 'draft'. Blocks terminal/in-flight states so we
+ * never yank a publish in progress. Also clears any legacy `scheduled_at` left on
+ * pre-migration rows.
  */
 export async function DELETE(
   _request: Request,
@@ -100,17 +143,19 @@ export async function DELETE(
   if (!draft) {
     return NextResponse.json({ error: "Draft not found" }, { status: 404 });
   }
-  if (draft.status !== "scheduled") {
+  // Only block in-flight/terminal states. A queued draft is 'approved' now (not 'scheduled').
+  if (!(draft.status === "draft" || draft.status === "approved" || draft.status === "scheduled")) {
     return NextResponse.json(
-      { error: `Draft is not scheduled (current: ${draft.status})` },
+      { error: `Cannot unschedule a ${draft.status} draft` },
       { status: 409 },
     );
   }
 
+  const cancelled = await cancelPendingQueueItems("social", String(id));
   await updateFacebookDraft(id, {
     status: "draft",
     scheduled_at: null,
   });
 
-  return NextResponse.json({ success: true, id, status: "draft" });
+  return NextResponse.json({ success: true, id, status: "draft", cancelled });
 }

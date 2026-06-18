@@ -26,10 +26,6 @@
       "schedule": "0 15 * * 2"
     },
     {
-      "path": "/api/cron/social-scheduled",
-      "schedule": "0,15,30,45 * * * *"
-    },
-    {
       "path": "/api/cron/publisher",
       "schedule": "0 * * * *"
     },
