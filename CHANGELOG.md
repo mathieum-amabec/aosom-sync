@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.85] - 2026-06-18
+
+### Added (Meta token verification)
+- **`scripts/verify-meta-token.mjs`** — read-only/dry-run check of `META_ACCESS_TOKEN` via
+  Graph `debug_token`. Reports token **type** (`USER` vs `SYSTEM_USER`), `expires_at` +
+  `data_access_expires_at` (with relative/expired hints), validity, and granted **scopes**
+  (flags missing `ads_read`/`ads_management`). GET-only — never creates, edits, or rotates
+  anything. Run under x64 node (see CLAUDE.md). Reference: `docs/META-ADS-SETUP.md` §2.
+
 ## [0.5.53.84] - 2026-06-17
 
 ### Added (Demand Gen video pipeline + uploader)
