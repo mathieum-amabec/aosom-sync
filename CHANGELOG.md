@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.80] - 2026-06-17
+
+### Changed (vitest skips agent worktree copies)
+- **`vitest.config.ts`** — `test.exclude` now `[...configDefaults.exclude, '**/.claude/**', '**/out/**']`.
+  Parallel agent sessions create full repo copies under `.claude/worktrees/`; without
+  this, vitest discovered and ran their (stale) test files from the main clone. Spreads
+  `configDefaults.exclude` so vitest's built-in ignores (node_modules, dist, …) are kept —
+  a bare `exclude` would have overridden them and made vitest scan node_modules.
+
 ## [0.5.53.79] - 2026-06-17
 
 ### Chore
