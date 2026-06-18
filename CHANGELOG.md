@@ -12,6 +12,22 @@ All notable changes to Aosom Sync will be documented in this file.
   into a handle can no longer leak into product URLs (e.g. `/products/outsunny-...`). The
   system prompt already forbids brand names; this enforces it in code. Tests added in
   `tests/content-generator.test.ts` (case-folding, kebab-embedded brands, word-boundary guard).
+  Also reuses this shared helper for the title safety net introduced in 0.5.53.86 (replacing
+  that change's inline regex), so titles and handles strip brands through one code path.
+
+## [0.5.53.86] - 2026-06-18
+
+### Fixed (Supplier brand names in generated titles)
+- **`src/lib/content-generator.ts`** — programmatic safety net after the Claude response:
+  strip supplier brands (Outsunny, HOMCOM, Aosom, Vinsetto, PawHut, Soozier, Qaba,
+  ShopEZ, Wikinger, Portland, Aousthop) from `titleFr`/`titleEn`. The model is instructed
+  never to put the supplier brand in the title but sometimes does anyway; this enforces it
+  deterministically. Runs before the length / meta-title / URL-handle derivation so those
+  stay brand-free too. Adds 3 regression tests covering leading, mid-title, case-insensitive,
+  and multiple-brand stripping (plus clean-title pass-through).
+
+### Chore
+- Synced `package.json` version to `VERSION` (drift from a prior bump that updated VERSION only).
 
 ## [0.5.53.85] - 2026-06-18
 

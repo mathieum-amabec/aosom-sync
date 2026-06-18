@@ -235,6 +235,13 @@ Return JSON with this exact structure:
     if (!Array.isArray(parsed.tags)) throw new Error("Missing or invalid field: tags");
     parsed.tags = parsed.tags.filter((t: unknown) => typeof t === "string").slice(0, 20);
 
+    // Programmatic safety net: strip supplier brand names the model may still echo
+    // into titles. Runs before length/meta/handle derivation so those stay clean too.
+    // Uses the shared stripSupplierBrands() helper (also applied to URL handles below);
+    // collapse the whitespace gaps it leaves behind so titles don't keep double spaces.
+    parsed.titleFr = stripSupplierBrands(parsed.titleFr).replace(/\s+/g, " ").trim();
+    parsed.titleEn = stripSupplierBrands(parsed.titleEn).replace(/\s+/g, " ").trim();
+
     // Enforce length / format limits
     parsed.titleFr = parsed.titleFr.slice(0, 200);
     parsed.titleEn = parsed.titleEn.slice(0, 200);
