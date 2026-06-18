@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.93] - 2026-06-18
+
+### Changed (retire the `social-scheduled` cron; unify scheduling on `publication_queue`)
+- **`vercel.json`** — removed the `/api/cron/social-scheduled` cron (was `0,15,30,45 * * * *`,
+  96 runs/day). The `facebook_drafts.status='scheduled'` queue it drained is empty, so it ran
+  to nothing every 15 minutes.
+- **`src/app/api/social/route.ts`** — `{action:"schedule"}` no longer writes a `scheduled`
+  facebook_draft. It now enqueues the draft into `publication_queue` at the operator-chosen
+  time (one item per active brand via `draftToQueueItems`), leaving the draft `approved` —
+  the same path as `approve`, published by `/api/cron/publisher`. With the legacy cron gone, a
+  `scheduled` row would never publish, so writing one would have been a silent no-op.
+- **`src/app/api/social/drafts/[id]/schedule/route.ts`** — same redirect for the REST schedule
+  endpoint used by the `/drafts` page. POST cancels the draft's existing pending queue rows
+  first (re-schedule moves the post, no duplicate), then enqueues at the chosen slot; DELETE
+  cancels the pending rows and reverts the draft to `draft`. A slot already taken on a platform
+  (`QueueSlotTakenError`) skips that brand rather than shifting the chosen time.
+- **`src/lib/database.ts`** — new `cancelPendingQueueItems(contentType, contentId)`: flips a
+  content item's still-`pending` queue rows to `cancelled` (freeing their slots), leaving
+  `publishing`/`published` rows untouched. Backs re-schedule and unschedule.
+- **`src/app/(dashboard)/drafts/drafts-client.tsx`** — schedule helper copy updated: posts now
+  enter the publication queue and fire at the chosen time (hourly publisher), not the removed
+  15-minute cron.
+- **Tests** — `tests/social-schedule-queue.test.ts` and `tests/drafts-schedule-route.test.ts`
+  (12 cases): enqueue at the chosen slot, bilingual one-item-per-brand, `QueueSlotTakenError`
+  skip, past/missing-time → 400, missing draft → 404, terminal draft → 409, DELETE cancels +
+  reverts.
+
 ## [0.5.53.92] - 2026-06-18
 
 ### Added (YouTube uploader for Demand Gen)
