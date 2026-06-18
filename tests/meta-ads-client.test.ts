@@ -9,6 +9,9 @@ import {
   createCampaign,
   createAdSet,
   getInsights,
+  uploadAdVideo,
+  getAdVideoStatus,
+  pollAdVideoReady,
   __resetRateLimit,
 } from "@/lib/meta-ads-client";
 import { META_ADS } from "@/lib/config";
@@ -169,5 +172,83 @@ describe("meta-ads-client", () => {
       await getAdAccounts();
     }
     await expect(getAdAccounts()).rejects.toThrow(/rate limit reached/i);
+  });
+
+  it("uploadAdVideo POSTs file_url (+name) to /act_<id>/advideos and returns the video id", async () => {
+    global.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      calls.push({ url: url.toString(), method: init?.method || "GET", body: init?.body ? JSON.parse(init.body as string) : null });
+      return new Response(JSON.stringify({ id: "vid_1" }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const res = await uploadAdVideo("111", { fileUrl: "https://blob.example/v.mp4", name: "SKU 16:9 15s" });
+    expect(res.id).toBe("vid_1");
+    const post = calls.find((c) => c.method === "POST")!;
+    expect(post.url).toContain("/act_111/advideos");
+    expect(post.body).toMatchObject({ file_url: "https://blob.example/v.mp4", name: "SKU 16:9 15s" });
+  });
+
+  it("uploadAdVideo omits name when not provided", async () => {
+    global.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      calls.push({ url: url.toString(), method: init?.method || "GET", body: init?.body ? JSON.parse(init.body as string) : null });
+      return new Response(JSON.stringify({ id: "vid_2" }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await uploadAdVideo("act_111", { fileUrl: "https://blob.example/v.mp4" });
+    const post = calls.find((c) => c.method === "POST")!;
+    expect(post.body).toEqual({ file_url: "https://blob.example/v.mp4" });
+    expect(post.body).not.toHaveProperty("name");
+  });
+
+  it("getAdVideoStatus maps video_status ready/processing/error", async () => {
+    const mk = (vs: string) =>
+      (global.fetch = vi.fn(async (url: string | URL) => {
+        calls.push({ url: url.toString(), method: "GET", body: null });
+        return new Response(JSON.stringify({ status: { video_status: vs } }), { status: 200 });
+      }) as unknown as typeof fetch);
+
+    mk("ready");
+    expect((await getAdVideoStatus("vid_1")).status).toBe("ready");
+    expect(calls[0].url).toContain("/vid_1");
+    expect(decodeURIComponent(calls[0].url)).toContain("fields=status");
+
+    __resetRateLimit();
+    mk("processing");
+    expect((await getAdVideoStatus("vid_1")).status).toBe("processing");
+
+    __resetRateLimit();
+    mk("error");
+    expect((await getAdVideoStatus("vid_1")).status).toBe("error");
+  });
+
+  it("getAdVideoStatus treats an unknown/missing video_status as processing", async () => {
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ status: {} }), { status: 200 })) as unknown as typeof fetch;
+    expect((await getAdVideoStatus("vid_1")).status).toBe("processing");
+  });
+
+  it("pollAdVideoReady resolves once status flips to ready", async () => {
+    let n = 0;
+    global.fetch = vi.fn(async () => {
+      n++;
+      const vs = n >= 2 ? "ready" : "processing";
+      return new Response(JSON.stringify({ status: { video_status: vs } }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const info = await pollAdVideoReady("vid_1", { timeoutMs: 5_000, intervalMs: 1 });
+    expect(info.status).toBe("ready");
+    expect(n).toBeGreaterThanOrEqual(2);
+  });
+
+  it("pollAdVideoReady throws on a Meta error status", async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ status: { video_status: "error", errors: [{ message: "bad codec" }] } }), { status: 200 }),
+    ) as unknown as typeof fetch;
+    await expect(pollAdVideoReady("vid_1", { timeoutMs: 5_000, intervalMs: 1 })).rejects.toThrow(/processing failed/i);
+  });
+
+  it("pollAdVideoReady throws when the timeout elapses before ready", async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ status: { video_status: "processing" } }), { status: 200 }),
+    ) as unknown as typeof fetch;
+    await expect(pollAdVideoReady("vid_1", { timeoutMs: 5, intervalMs: 1 })).rejects.toThrow(/not ready after/i);
   });
 });

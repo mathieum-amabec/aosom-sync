@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.89] - 2026-06-18
+## [0.5.53.94] - 2026-06-18
 
 ### Fixed (Brand sanitization — EN title metafields)
 - **`scripts/fix-title-en.mjs`** — one-off de-brand of the 6 `custom.title_en`
@@ -13,6 +13,96 @@ All notable changes to Aosom Sync will be documented in this file.
   by default; `--apply` writes. Idempotent (re-run is a no-op) and guards against
   emptying a title. Applied to production: all 6 fixed, re-scan confirms 638/638
   EN titles brand-free. Run under x64 node — see CLAUDE.md "Windows ARM64".
+
+## [0.5.53.93] - 2026-06-18
+
+### Changed (retire the `social-scheduled` cron; unify scheduling on `publication_queue`)
+- **`vercel.json`** — removed the `/api/cron/social-scheduled` cron (was `0,15,30,45 * * * *`,
+  96 runs/day). The `facebook_drafts.status='scheduled'` queue it drained is empty, so it ran
+  to nothing every 15 minutes.
+- **`src/app/api/social/route.ts`** — `{action:"schedule"}` no longer writes a `scheduled`
+  facebook_draft. It now enqueues the draft into `publication_queue` at the operator-chosen
+  time (one item per active brand via `draftToQueueItems`), leaving the draft `approved` —
+  the same path as `approve`, published by `/api/cron/publisher`. With the legacy cron gone, a
+  `scheduled` row would never publish, so writing one would have been a silent no-op.
+- **`src/app/api/social/drafts/[id]/schedule/route.ts`** — same redirect for the REST schedule
+  endpoint used by the `/drafts` page. POST cancels the draft's existing pending queue rows
+  first (re-schedule moves the post, no duplicate), then enqueues at the chosen slot; DELETE
+  cancels the pending rows and reverts the draft to `draft`. A slot already taken on a platform
+  (`QueueSlotTakenError`) skips that brand rather than shifting the chosen time.
+- **`src/lib/database.ts`** — new `cancelPendingQueueItems(contentType, contentId)`: flips a
+  content item's still-`pending` queue rows to `cancelled` (freeing their slots), leaving
+  `publishing`/`published` rows untouched. Backs re-schedule and unschedule.
+- **`src/app/(dashboard)/drafts/drafts-client.tsx`** — schedule helper copy updated: posts now
+  enter the publication queue and fire at the chosen time (hourly publisher), not the removed
+  15-minute cron.
+- **Tests** — `tests/social-schedule-queue.test.ts` and `tests/drafts-schedule-route.test.ts`
+  (12 cases): enqueue at the chosen slot, bilingual one-item-per-brand, `QueueSlotTakenError`
+  skip, past/missing-time → 400, missing draft → 404, terminal draft → 409, DELETE cancels +
+  reverts.
+
+## [0.5.53.92] - 2026-06-18
+
+### Added (YouTube uploader for Demand Gen)
+- **`scripts/upload-youtube.mjs`** — uploads the 16:9 Demand Gen assets recorded in
+  `video_demand_gen` to YouTube via Data API v3 (`videos.insert`, resumable), then writes
+  `youtube_video_id` + `youtube_status` back into each row. Raw `fetch` (no googleapis SDK):
+  OAuth2 `refresh_token` → access token, then resumable init → single-shot PUT. Source bytes
+  come from `blob_url` (runs from any clone). `privacyStatus: unlisted`. Descriptions link to
+  the real storefront product via its **handle**, resolved from the Shopify Admin API (the
+  `shopify_product_id` column is a GID, which the storefront can't resolve). **DRY-RUN by
+  default** (lists candidates, zero YouTube quota); `--apply` uploads, `--limit N` batches,
+  `--force` re-uploads. Hard quota guard: refuses any run over the 10000-unit/day quota
+  (~6 uploads/day at 1600 units each), escapable only by `--limit`. Idempotent — rows with a
+  `youtube_video_id` are skipped. Run under x64 node (see CLAUDE.md).
+
+## [0.5.53.91] - 2026-06-18
+
+### Changed (Demand Gen overlay retouches)
+- **`scripts/render-demand-gen.mjs`** — overlay redesign for the Demand Gen video assets:
+  - Title moved to the TOP safe zone (y=15%) and **+25%** larger; benefit line is now a
+    Gold pill (Navy text) at the BOTTOM safe zone (y=82%).
+  - **Titles UPPERCASE** via `toLocaleUpperCase("fr-CA")` (FFmpeg `drawtext` has no
+    `upper()` — it renders the literal token; fr-CA handles é→É, à→À, ç→Ç).
+  - **Navy backing box** behind each title line (`box=1:boxcolor=0x1B2A4A@0.70:boxborderw=4|8`,
+    i.e. 4px vertical / 8px horizontal padding; square corners — FFmpeg has no rounded box).
+  - **Scrim** strengthened: Navy peak alpha 0.35→**0.50**, band height 18%→**25%**.
+  - Title pipeline now `sanitizeTitle` (strip em/en dashes) + `truncate` to 35 chars + max 2
+    lines; faux-bold via same-color outline; optional CLI SKU filter for canary re-renders.
+  - Scrim color reuses the `NAVY` const instead of a duplicated `0x1B2A4A` literal.
+- **`scripts/build-index.mjs`** — contact-sheet caption updated to describe the new overlay
+  (titre MAJUSCULES +25%, fond Navy 70%, scrim Navy 50%).
+
+### Added
+- **`scripts/preview-server.mjs`** — tiny static server (`:8080`) for the Demand Gen contact
+  sheet, used to visually validate canary re-renders before a full batch.
+
+## [0.5.53.90] - 2026-06-18
+
+### Added (Meta ad video upload — advideos file_url ingest)
+- **`src/lib/meta-ads-client.ts`** — `uploadAdVideo(adAccountId, { fileUrl, name })` (POST
+  `/act_<id>/advideos` via server-side `file_url` ingest — Meta fetches the public MP4
+  itself), `getAdVideoStatus(videoId)` (GET `/{videoId}?fields=status`, normalized to
+  `ready`/`processing`/`error`), and `pollAdVideoReady(videoId, { timeoutMs=300_000, intervalMs=5_000 })`
+  (polls until ready, throws on Meta error or timeout). Fills the `video_demand_gen.meta_video_id`
+  pipeline.
+- **`scripts/upload-meta-advideos.mjs`** — pushes rendered Demand Gen videos into the Meta ad
+  library and records the result. Selects `video_demand_gen WHERE meta_video_id IS NULL`, uploads
+  each `blob_url` → polls status → `UPDATE meta_video_id + meta_status`. Dry-run by default
+  (lists candidates, no network mutation, DB untouched); `--apply` to execute; `--limit N` /
+  `--ad-account act_…` flags. Throttled to ≤2 Graph req/s. Idempotent (recorded rows skipped;
+  upload failure leaves `meta_video_id` NULL for retry). `advideos` only ingests — it never
+  spends. Run under x64 node (see CLAUDE.md). Verified dry-run: 87 pending assets.
+
+## [0.5.53.89] - 2026-06-18
+
+### Docs (Meta token rotation runbook)
+- **`docs/META-TOKEN-ROTATION.md`** — step-by-step to replace the short-lived USER
+  `META_ACCESS_TOKEN` (issued 2026-06-07, ~60-day lifetime) with a non-expiring
+  **System User** token: creation steps, required scopes (`ads_read`, `ads_management`,
+  `business_management`, `catalog_management`), where to update (`.env.local` + Vercel
+  Production + Preview, with redeploy note), and a `debug_token` verification command.
+  ⏰ Rotate **before 2026-08-06** (hard data-access cutoff 2026-09-07).
 
 ## [0.5.53.88] - 2026-06-18
 
