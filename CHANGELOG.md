@@ -2,11 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.87] - 2026-06-18
+
+### Fixed (Brand sanitization — URL handles)
+- **`src/lib/content-generator.ts`** — added `stripSupplierBrands()`, a deterministic
+  backstop that removes supplier brand tokens (Outsunny, HOMCOM, Aosom, Vinsetto, PawHut,
+  Soozier, Qaba, ShopEZ, Wikinger, Portland, Aousthop) from a string. Applied to both
+  `urlHandleFr` and `urlHandleEn` before `slugify()`, so a brand name the model echoes
+  into a handle can no longer leak into product URLs (e.g. `/products/outsunny-...`). The
+  system prompt already forbids brand names; this enforces it in code. Tests added in
+  `tests/content-generator.test.ts` (case-folding, kebab-embedded brands, word-boundary guard).
+  Also reuses this shared helper for the title safety net introduced in 0.5.53.86 (replacing
+  that change's inline regex), so titles and handles strip brands through one code path.
+
 ## [0.5.53.86] - 2026-06-18
 
 ### Fixed (Supplier brand names in generated titles)
 - **`src/lib/content-generator.ts`** — programmatic safety net after the Claude response:
-  regex-strip supplier brands (Outsunny, HOMCOM, Aosom, Vinsetto, PawHut, Soozier, Qaba,
+  strip supplier brands (Outsunny, HOMCOM, Aosom, Vinsetto, PawHut, Soozier, Qaba,
   ShopEZ, Wikinger, Portland, Aousthop) from `titleFr`/`titleEn`. The model is instructed
   never to put the supplier brand in the title but sometimes does anyway; this enforces it
   deterministically. Runs before the length / meta-title / URL-handle derivation so those
