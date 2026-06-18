@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.80] - 2026-06-17
+## [0.5.53.81] - 2026-06-17
 
 ### Changed (vitest skips agent worktree copies)
 - **`vitest.config.ts`** — `test.exclude` now `[...configDefaults.exclude, '**/.claude/**', '**/out/**']`.
@@ -10,6 +10,20 @@ All notable changes to Aosom Sync will be documented in this file.
   this, vitest discovered and ran their (stale) test files from the main clone. Spreads
   `configDefaults.exclude` so vitest's built-in ignores (node_modules, dist, …) are kept —
   a bare `exclude` would have overridden them and made vitest scan node_modules.
+
+## [0.5.53.80] - 2026-06-17
+
+### Added (Shopify descriptions debrand tool — dry-run default)
+- **`scripts/fix-shopify-descriptions.mjs`** — strips supplier brand tokens (Aosom, Outsunny,
+  Qaba) from existing products' `body_html`, tidies the resulting spacing/punctuation/caps, then
+  PUTs the cleaned description back to Shopify. Backfills the 429 live products that still carry a
+  supplier name in their description (complements the generation-time content-generator fix in
+  0.5.53.77 and the vendor debrand in 0.5.53.76 / 0.5.53.78).
+- Dry-run by default (prints 5 before/after examples); `--apply` executes. Strict 2 req/sec,
+  429 retry-after, and only writes products whose cleaned body actually changes.
+- Cleanup also drops a leading preposition bound to the brand
+  (`from/with/by/of/avec/de/du/des/par` + brand) so "cat tree from Aosom, rest" → "cat tree,
+  rest" instead of leaving a dangling "from," (decided at the Mat checkpoint after dry-run).
 
 ## [0.5.53.79] - 2026-06-17
 
