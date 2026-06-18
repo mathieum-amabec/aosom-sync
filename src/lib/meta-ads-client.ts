@@ -37,6 +37,8 @@ export function __resetRateLimit(): void {
   callTimestamps = [];
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 // ── low-level Graph call ───────────────────────────────────────────────────
 interface GraphError {
   message: string;
@@ -265,4 +267,78 @@ export async function getTokenInfo(): Promise<TokenDebugInfo> {
   });
   const d = res.data ?? {};
   return { isValid: !!d.is_valid, expiresAt: Number(d.expires_at) || 0, scopes: d.scopes ?? [] };
+}
+
+// ── ad video upload (server-side file_url ingest) ──────────────────────────
+
+/** Terminal/intermediate phase of a Meta ad video's server-side processing. */
+export type AdVideoStatus = "ready" | "processing" | "error";
+
+export interface AdVideoStatusInfo {
+  /** Normalized phase: ready (usable in a creative) | processing | error. */
+  status: AdVideoStatus;
+  /** Raw Graph `status` object (e.g. { video_status, processing_progress, errors }). */
+  raw?: Record<string, unknown>;
+}
+
+/**
+ * Upload a video to an ad account's video library via **server-side `file_url` ingest**:
+ * Meta fetches the public MP4 itself — we never stream the bytes (same model as the Page
+ * `/videos` + `/video_reels` publishers in facebook-client.ts). `fileUrl` MUST be a public
+ * URL (the Vercel Blob `blob_url` of a `video_demand_gen` asset).
+ *
+ * The returned id references a video that is **still processing** — Meta transcodes
+ * asynchronously. Call {@link pollAdVideoReady} before attaching it to an ad creative.
+ */
+export async function uploadAdVideo(
+  adAccountId: string,
+  opts: { fileUrl: string; name?: string },
+): Promise<{ id: string }> {
+  const body: Record<string, unknown> = { file_url: opts.fileUrl };
+  if (opts.name) body.name = opts.name;
+  return graph<{ id: string }>(`${actId(adAccountId)}/advideos`, { method: "POST", body });
+}
+
+/**
+ * Fetch a video's processing status via `GET /{videoId}?fields=status`. Maps Meta's
+ * `status.video_status` to a normalized phase: anything other than `ready`/`error` is
+ * treated as still `processing`.
+ */
+export async function getAdVideoStatus(videoId: string): Promise<AdVideoStatusInfo> {
+  const res = await graph<{ status?: { video_status?: string } & Record<string, unknown> }>(videoId, {
+    params: { fields: "status" },
+  });
+  const vs = res.status?.video_status;
+  const status: AdVideoStatus = vs === "ready" ? "ready" : vs === "error" ? "error" : "processing";
+  return { status, raw: res.status };
+}
+
+/**
+ * Poll {@link getAdVideoStatus} until the video is `ready`, fails (`error`), or the timeout
+ * elapses. Returns the `ready` status info. Throws on Meta `error` or timeout so callers can
+ * surface a clear failure (and avoid attaching a half-processed video to a creative).
+ *
+ * @param opts.timeoutMs total budget before giving up (default 300_000 = 300s)
+ * @param opts.intervalMs delay between polls (default 5_000)
+ */
+export async function pollAdVideoReady(
+  videoId: string,
+  opts: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<AdVideoStatusInfo> {
+  const timeoutMs = opts.timeoutMs ?? 300_000;
+  const intervalMs = opts.intervalMs ?? 5_000;
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    const info = await getAdVideoStatus(videoId);
+    if (info.status === "ready") return info;
+    if (info.status === "error") {
+      throw new Error(`Ad video ${videoId} processing failed: ${JSON.stringify(info.raw ?? {})}`);
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      throw new Error(`Ad video ${videoId} not ready after ${Math.round(timeoutMs / 1000)}s (last status: ${info.status}).`);
+    }
+    await sleep(Math.min(intervalMs, remaining));
+  }
 }

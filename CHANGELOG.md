@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.90] - 2026-06-18
+
+### Added (Meta ad video upload — advideos file_url ingest)
+- **`src/lib/meta-ads-client.ts`** — `uploadAdVideo(adAccountId, { fileUrl, name })` (POST
+  `/act_<id>/advideos` via server-side `file_url` ingest — Meta fetches the public MP4
+  itself), `getAdVideoStatus(videoId)` (GET `/{videoId}?fields=status`, normalized to
+  `ready`/`processing`/`error`), and `pollAdVideoReady(videoId, { timeoutMs=300_000, intervalMs=5_000 })`
+  (polls until ready, throws on Meta error or timeout). Fills the `video_demand_gen.meta_video_id`
+  pipeline.
+- **`scripts/upload-meta-advideos.mjs`** — pushes rendered Demand Gen videos into the Meta ad
+  library and records the result. Selects `video_demand_gen WHERE meta_video_id IS NULL`, uploads
+  each `blob_url` → polls status → `UPDATE meta_video_id + meta_status`. Dry-run by default
+  (lists candidates, no network mutation, DB untouched); `--apply` to execute; `--limit N` /
+  `--ad-account act_…` flags. Throttled to ≤2 Graph req/s. Idempotent (recorded rows skipped;
+  upload failure leaves `meta_video_id` NULL for retry). `advideos` only ingests — it never
+  spends. Run under x64 node (see CLAUDE.md). Verified dry-run: 87 pending assets.
+
 ## [0.5.53.89] - 2026-06-18
 
 ### Docs (Meta token rotation runbook)
