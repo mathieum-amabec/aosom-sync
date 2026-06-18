@@ -2663,6 +2663,24 @@ export async function getOccupiedQueueSlots(platform: string): Promise<string[]>
   return result.rows.map((r) => String(rowToObj(r).scheduled_at));
 }
 
+/**
+ * Cancel a content item's still-pending queue rows (pending → cancelled), freeing their
+ * slots for rebooking. 'publishing'/'published' rows are left untouched (already in flight
+ * or done). Used when an operator re-schedules (cancel-then-enqueue) or unschedules a draft.
+ * Returns the number of rows cancelled.
+ */
+export async function cancelPendingQueueItems(
+  contentType: QueueContentType,
+  contentId: string,
+): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue SET status = 'cancelled' WHERE content_type = ? AND content_id = ? AND status = 'pending'`,
+    args: [contentType, contentId],
+  });
+  return result.rowsAffected ?? 0;
+}
+
 // ─── Auto-post daily counter ─────────────────────────────────────────
 
 function todayKey(): string {

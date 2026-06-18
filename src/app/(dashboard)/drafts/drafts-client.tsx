@@ -515,7 +515,7 @@ export default function DraftsClient() {
                   </h3>
                   <p className="text-xs text-gray-500 mb-3">
                     La publication automatique se fait sur les canaux configurés (Settings → Auto-post).
-                    Vérification toutes les 15 minutes.
+                    Le post entre dans la file de publication et part à l’heure choisie (vérification horaire).
                   </p>
                   <div className="flex gap-2 flex-wrap">
                     <input

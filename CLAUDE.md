@@ -57,27 +57,35 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
 - `POST /api/import/generate` — generate Claude content for one job
 - `POST /api/import/push` — push reviewed job to Shopify
 
-## Publication scheduling — `publication_queue` vs legacy `facebook_drafts`
+## Publication scheduling — `publication_queue` (unified)
 
-Two publishing paths coexist. New work feeds the **publication queue**; the legacy
-draft queue is kept only for the manual-schedule action and pre-existing rows.
+All publishing now flows through the **publication queue**. The legacy
+`facebook_drafts.status='scheduled'` path is retired: its cron
+(`/api/cron/social-scheduled`) was removed from `vercel.json` (v0.5.53.93), so a
+`scheduled` row would never publish.
 
-- **Queue path (current):** `POST /api/social {action:"approve"}` enqueues the draft
-  into `publication_queue` (platform `both`) on the next free slot from the configurable
-  `publication_schedule` (settings, edited via `/api/settings/schedule`, computed by
-  `getNextAvailableSlot` in `publication-scheduler.ts`). The draft stays `approved` in
-  `facebook_drafts` — Approve no longer writes a `scheduled` facebook_draft.
-  **`GET /api/cron/publisher`** (hourly) drains the queue and publishes.
-- **Legacy path:** `POST /api/social {action:"schedule"}` (operator picks an explicit
-  time) still writes `facebook_drafts.status='scheduled'`, and **`GET /api/cron/social-scheduled`**
-  publishes those. `draft-scheduler.ts` (fixed M/W/F 15:00 UTC grid) backs only this path now.
+- **Approve:** `POST /api/social {action:"approve"}` enqueues the draft into
+  `publication_queue` (one item per active brand) on the next free slot from the
+  configurable `publication_schedule` (settings, edited via `/api/settings/schedule`,
+  computed by `getNextAvailableSlot` in `publication-scheduler.ts`). The draft stays
+  `approved` in `facebook_drafts`.
+- **Manual schedule (operator picks a time):** both `POST /api/social {action:"schedule"}`
+  and `POST /api/social/drafts/:id/schedule` enqueue into `publication_queue` at the chosen
+  time (cancel-then-enqueue via `cancelPendingQueueItems`, so re-scheduling moves the post
+  instead of duplicating it). The draft stays `approved` — neither writes
+  `status='scheduled'` anymore. `DELETE /api/social/drafts/:id/schedule` cancels the draft's
+  pending queue rows and reverts it to `draft`.
+- **Publish:** **`GET /api/cron/publisher`** (hourly) drains the queue and publishes.
 
-⚠️ **`social-scheduled` is deprecated for Approve.** It remains live for the manual
-`schedule` action and any `facebook_drafts` rows already `scheduled` before this change.
-**Double-publish risk:** never both *approve* and *manually schedule* the same draft — it
-would land in both `publication_queue` (→ `publisher`) and `facebook_drafts` (→
-`social-scheduled`) and publish twice. Once the legacy `scheduled` rows have drained and the
-manual `schedule` action is retired, `social-scheduled` + `draft-scheduler.ts` can be removed.
+Slot collisions are rejected by `publication_queue`'s partial-unique index as
+`QueueSlotTakenError`: approve retries the next free slot; the explicit-time schedule
+paths skip the colliding brand (they can't shift the operator's chosen time).
+
+⚠️ **Legacy leftovers (no longer triggered):** `/api/cron/social-scheduled`,
+`processScheduledDrafts()`, and `draft-scheduler.ts` still exist but nothing schedules them
+now (the `social-scheduled` route is a manual fallback only). They can be deleted once any
+pre-migration `facebook_drafts.status='scheduled'` rows have drained — with the cron gone,
+no double-publish risk remains.
 
 ## Env Vars
 
