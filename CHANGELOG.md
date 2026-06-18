@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.80] - 2026-06-17
+
+### Added (debrand — product descriptions)
+- **`scripts/fix-shopify-descriptions.mjs`** — one-off backfill that strips supplier brand
+  names (Aosom, Outsunny, HOMCOM, Qaba, Soozier, Vinsetto, PawHut) from existing Shopify
+  product `body_html`. Hybrid strategy: **mechanical strip** for the clean majority (brand
+  word removed + spacing/punctuation repaired), **Claude rewrite** (`claude-sonnet-4-6`) for
+  the minority where a plain strip would break grammar (brand after a preposition+punctuation,
+  or brand at a sentence start). Dry-run by default; `--apply` performs the PUTs.
+- Safety: dumps every original `body_html` to a timestamped `descriptions-backup-*.json`
+  before the first write; refuses any cleaned body that still contains a brand, that came back
+  truncated (`stop_reason: max_tokens`), or that lost >40% of its length; 2 req/s on Shopify
+  with capped 429 backoff; idempotent (re-run only re-touches descriptions still carrying a brand).
+- Scope at run time: 429/638 descriptions affected (400 mechanical + 29 Claude).
+
 ## [0.5.53.78] - 2026-06-17
 
 ### Fixed (de-brand the import source — no supplier name on new products)
