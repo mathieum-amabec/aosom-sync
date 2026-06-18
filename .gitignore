@@ -63,3 +63,9 @@ yarn-error.log*
 next-env.d.ts
 .gstack/
 .env*.local
+
+# Claude Code — agent worktrees + scratch (e.g. .claude/worktrees/ created by other
+# sessions). Not project config to commit.
+.claude/
+# build output (root /out/ is covered above; this also catches nested out/ dirs)
+out/
