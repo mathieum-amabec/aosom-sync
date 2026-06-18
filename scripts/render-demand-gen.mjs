@@ -2,8 +2,9 @@
 // Transforms existing real product MP4s into Demand Gen assets. No AI generation.
 //   16:9 → scale+pad (native ratio)   |   1:1 / 9:16 → blurred-fill padded canvas
 //   Per source: trim to the clean window (ss + cleanDur), delogo only where a logo is persistent.
-//   Overlay (drawtext): FR title (white, DM Sans) + benefit line (Gold) over a Navy 35% bottom scrim,
-//   bottom-centered, 10% safe zone.
+//   Overlay (drawtext): FR title (white, faux-bold, drop shadow, Navy 70% backing box) at the TOP safe zone (y=15%) +
+//   benefit as a Gold pill (Navy text) at the BOTTOM safe zone (y=82%), over a Navy 50%/25%-tall scrim.
+//   Titles: UPPERCASE (fr-CA), em/en dashes stripped, truncated to 35 chars, max 2 lines.
 // Run from the worktree root:  node scripts/render-demand-gen.mjs
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, rmSync, statSync } from "node:fs";
@@ -12,9 +13,10 @@ const FFMPEG = process.env.FFMPEG_BIN ||
   "C:\\Users\\vente\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.1-full_build\\bin\\ffmpeg.exe";
 const FONT = "fonts/DMSans.ttf";
 const GOLD = "0xD4A853";
+const NAVY = "0x1B2A4A";
 const BENEFIT = "Livraison gratuite au Canada";
-const SCRIM_OPACITY = 0.35;   // Navy bottom gradient peak alpha
-const SCRIM_FRACTION = 0.18;  // band height = 18% of canvas
+const SCRIM_OPACITY = 0.50;   // Navy bottom gradient peak alpha (was 0.35)
+const SCRIM_FRACTION = 0.25;  // band height = 25% of canvas (was 0.18)
 
 // 13 viable sources (audit). ss/cleanDur = clean-window trim (s). buckets = duration cuts to emit.
 const SOURCES = [
@@ -51,22 +53,51 @@ function wrap(text, max) {
   return lines;
 }
 
+// Strip em/en dashes from titles before rendering (" — " → " · ").
+function sanitizeTitle(t) {
+  return t.replace(/\s*[—–]\s*/g, " · ").replace(/\s+/g, " ").trim();
+}
+
+// Truncate to `max` chars; back up to a word boundary only when the cut lands
+// mid-word, then append an ellipsis.
+function truncate(t, max) {
+  if (t.length <= max) return t;
+  let cut = t.slice(0, max - 1);
+  if (/\S/.test(t[max - 1])) {            // boundary char is non-space → mid-word
+    const sp = cut.lastIndexOf(" ");
+    if (sp > 0) cut = cut.slice(0, sp);
+  }
+  return cut.replace(/[\s·]+$/, "") + "…";
+}
+
 function overlayChain(cfg, titleLines, lineDir) {
-  const { H, titleFs, benFs } = cfg;
-  const bottomMargin = Math.round(0.10 * H);
-  const spacing = Math.round(titleFs * 1.34);
-  const benTop = H - bottomMargin - Math.round(benFs * 1.15);
-  const shadow = "shadowcolor=black@0.55:shadowx=3:shadowy=3";
-  const parts = []; const t = titleLines.length;
+  const { H, titleFs: baseTitleFs, benFs } = cfg;
+  const titleFs = Math.round(baseTitleFs * 1.25);          // title +25%
+  // Only DMSans.ttf is shipped (no bold cut) — fake bold with a same-color outline.
+  const boldW = Math.max(2, Math.round(titleFs * 0.045));
+  const titleShadow = "shadowcolor=black@0.8:shadowx=2:shadowy=2";
+  // Navy 70% backing box behind each title line for legibility. boxborderw=4|8 =
+  // 4px vertical / 8px horizontal padding. Square corners — drawtext/drawbox have
+  // no rounded-corner option in FFmpeg (same as the Gold benefit pill below).
+  const titleBox = `box=1:boxcolor=${NAVY}@0.70:boxborderw=4|8`;
+  const lineSpacing = Math.round(titleFs * 1.30);
+  const titleTop = Math.round(0.15 * H);                   // top safe zone
+  const parts = [];
   titleLines.forEach((line, i) => {
     const file = `${lineDir}/t${i}.txt`;
-    writeFileSync(file, line, "utf8");
-    const y = benTop - spacing * (t - i);
-    parts.push(`drawtext=fontfile=${FONT}:textfile=${file}:fontcolor=white:fontsize=${titleFs}:x=(w-text_w)/2:y=${y}:${shadow}`);
+    // Title in UPPERCASE. FFmpeg drawtext has no upper() function (it renders the
+    // literal token), so we uppercase in JS — fr-CA locale handles é→É, à→À, ç→Ç.
+    writeFileSync(file, line.toLocaleUpperCase("fr-CA"), "utf8");
+    const y = titleTop + lineSpacing * i;
+    parts.push(`drawtext=fontfile=${FONT}:textfile=${file}:fontcolor=white:fontsize=${titleFs}:borderw=${boldW}:bordercolor=white:${titleBox}:x=(w-text_w)/2:y=${y}:${titleShadow}`);
   });
+  // Benefit: Navy text on a Gold padded box (pill) at the bottom safe zone.
+  // Note: drawtext boxes are square-cornered; padding gives the pill shape.
   const benFile = `${lineDir}/ben.txt`;
   writeFileSync(benFile, BENEFIT, "utf8");
-  parts.push(`drawtext=fontfile=${FONT}:textfile=${benFile}:fontcolor=${GOLD}:fontsize=${benFs}:x=(w-text_w)/2:y=${benTop}:${shadow}`);
+  const benY = Math.round(0.82 * H);
+  const pad = Math.round(benFs * 0.55);
+  parts.push(`drawtext=fontfile=${FONT}:textfile=${benFile}:fontcolor=${NAVY}:fontsize=${benFs}:box=1:boxcolor=${GOLD}@1:boxborderw=${pad}:x=(w-text_w)/2:y=${benY}`);
   return parts.join(",");
 }
 
@@ -91,12 +122,20 @@ function buildFilter(ratio, cfg, drawChain, delogo) {
 const t0 = Date.now();
 const report = [];
 let ok = 0, fail = 0, bytes = 0;
-for (const s of SOURCES) {
+// Optional CLI SKU filter: `node scripts/render-demand-gen.mjs 01-0415 845-774V00BK`
+const ONLY = process.argv.slice(2).filter((a) => !a.startsWith("-"));
+const sources = ONLY.length ? SOURCES.filter((s) => ONLY.includes(s.sku)) : SOURCES;
+if (ONLY.length) {
+  const missing = ONLY.filter((x) => !sources.some((s) => s.sku === x));
+  if (missing.length) { console.error("Unknown SKU(s):", missing.join(", ")); process.exit(1); }
+  console.log(`Rendering ${sources.length} source(s): ${sources.map((s) => s.sku).join(", ")}`);
+}
+for (const s of sources) {
   const src = `src/${s.sku}.mp4`;
   const outDir = `out/demand-gen/${s.sku}`;
   mkdirSync(outDir, { recursive: true });
   for (const [ratio, cfg] of Object.entries(RATIOS)) {
-    const titleLines = wrap(s.title, cfg.wrap);
+    const titleLines = wrap(truncate(sanitizeTitle(s.title), 35), cfg.wrap).slice(0, 2);
     for (const bucket of s.buckets) {
       const effDur = Math.min(bucket, s.cleanDur);
       const rtag = ratio.replace(":", "x");
