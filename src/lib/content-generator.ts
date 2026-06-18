@@ -55,6 +55,26 @@ export function clampMetaTitle(title: string, max: number): string {
   return name.trimEnd() + suffix;
 }
 
+/**
+ * Supplier brand names that must never surface in customer-facing output.
+ * Mirrors the forbidden list in SYSTEM_PROMPT (the prompt asks Claude to omit
+ * them; this is the deterministic backstop). Case-insensitive, so HOMCOM/HomCom
+ * and PawHut/Pawhut collapse to one entry each.
+ */
+const SUPPLIER_BRANDS = [
+  "Outsunny", "HOMCOM", "Aosom", "Vinsetto", "PawHut",
+  "Soozier", "Qaba", "ShopEZ", "Wikinger", "Portland", "Aousthop",
+];
+const SUPPLIER_BRAND_RE = new RegExp(`\\b(?:${SUPPLIER_BRANDS.join("|")})\\b`, "gi");
+
+/**
+ * Strip any supplier brand token from a string. Safe to run before slugify():
+ * slugify collapses the whitespace gaps left behind into clean kebab-case.
+ */
+export function stripSupplierBrands(s: string): string {
+  return s.replace(SUPPLIER_BRAND_RE, " ");
+}
+
 export function slugify(s: string): string {
   return s
     .normalize("NFD")
@@ -226,8 +246,8 @@ Return JSON with this exact structure:
     parsed.metaTitleEn = clampMetaTitle(parsed.metaTitleEn, 65);
     parsed.metaDescriptionFr = parsed.metaDescriptionFr.slice(0, 155);
     parsed.metaDescriptionEn = parsed.metaDescriptionEn.slice(0, 155);
-    parsed.urlHandleFr = slugify(parsed.urlHandleFr);
-    parsed.urlHandleEn = slugify(parsed.urlHandleEn);
+    parsed.urlHandleFr = slugify(stripSupplierBrands(parsed.urlHandleFr));
+    parsed.urlHandleEn = slugify(stripSupplierBrands(parsed.urlHandleEn));
 
     // Supplier brand is echoed from the source (never invented by the model) so it
     // can be the Shopify vendor + stored in custom.brand_fr.

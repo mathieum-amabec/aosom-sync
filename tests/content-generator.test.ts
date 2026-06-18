@@ -7,8 +7,33 @@ vi.mock("@/lib/config", () => ({
   CLAUDE: { MODEL: "claude-test", MAX_TOKENS_CONTENT: 1000 },
 }));
 
-const { slugify, clampMetaTitle, backfillSeoFields } = await import("@/lib/content-generator");
+const { slugify, clampMetaTitle, backfillSeoFields, stripSupplierBrands } = await import("@/lib/content-generator");
 import type { GeneratedContent } from "@/lib/content-generator";
+
+describe("stripSupplierBrands", () => {
+  it("removes supplier brand tokens regardless of case", () => {
+    // Brands become a space; the assertion normalizes whitespace since slugify
+    // (the only caller) collapses gaps anyway. HOMCOM/HomCom and PawHut/Pawhut
+    // collapse under the /i flag.
+    const norm = (s: string) => stripSupplierBrands(s).replace(/\s+/g, " ").trim();
+    expect(norm("Outsunny Chaise Longue")).toBe("Chaise Longue");
+    expect(norm("HomCom desk")).toBe("desk");
+    expect(norm("pawhut niche")).toBe("niche");
+  });
+
+  it("strips brands embedded in a kebab handle, leaving gaps for slugify to collapse", () => {
+    expect(slugify(stripSupplierBrands("outsunny-chaise-longue-grise"))).toBe("chaise-longue-grise");
+    expect(slugify(stripSupplierBrands("qaba-soozier-tapis"))).toBe("tapis");
+  });
+
+  it("leaves brand-free strings untouched", () => {
+    expect(stripSupplierBrands("chaise-longue-grise")).toBe("chaise-longue-grise");
+  });
+
+  it("does not strip a brand name fused into a larger word (word-boundary guard)", () => {
+    expect(stripSupplierBrands("qabardine")).toBe("qabardine");
+  });
+});
 
 describe("slugify", () => {
   it("strips accents, lowercases, and hyphenates", () => {
