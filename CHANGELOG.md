@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.94] - 2026-06-18
+
+### Changed (publisher cron run summary in cron_runs.detail)
+- **`src/lib/cron-tracking.ts`** — `trackCron` now takes an optional `summarize(result)`
+  callback that records a one-line `detail` on success, so the dashboard "Résumé du jour"
+  shows what a run did, not just that it ran. Backward-compatible: all 9 existing 2-arg
+  callers are unchanged. The summarizer runs after `fn` resolves and is best-effort — a
+  throw inside it is swallowed (detail dropped), never turning a run whose work already
+  succeeded into a failure (same posture as `safeRecord`'s write failures).
+- **`src/app/api/cron/publisher/route.ts`** — passes a summarizer that records
+  `"X due, Y published, Z failed"` (due = items the run saw this hour, handled + deferred
+  past the time budget). Previously the publisher's `cron_runs.detail` was always empty, so
+  hourly runs were indistinguishable on the dashboard whether they published 0 or 5 posts.
+- Tests: `tests/cron-tracking.test.ts` adds coverage for the success-detail path and the
+  summarizer-throw safety net.
+
 ## [0.5.53.93] - 2026-06-18
 
 ### Changed (retire the `social-scheduled` cron; unify scheduling on `publication_queue`)
