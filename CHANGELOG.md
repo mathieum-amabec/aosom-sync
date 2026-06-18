@@ -2,6 +2,56 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.88] - 2026-06-18
+
+### Added (Demand Gen video URL persistence)
+- **`src/lib/database.ts`** — new `video_demand_gen` table in `initSchema`: durable index
+  of the rendered+uploaded Demand Gen assets, one row per `(sku, ratio, duration_sec)`.
+  Holds the Vercel Blob source URL plus reserved `meta_video_id` / `youtube_video_id` +
+  `*_status` columns for the downstream ad-push jobs (Meta `advideos` `file_url` ingest,
+  YouTube upload for Google Demand Gen).
+- **`scripts/load-demand-gen-db.mjs`** — reads `out/demand-gen-manifest.json`, upserts the
+  87 assets into `video_demand_gen` (idempotent via `ON CONFLICT` — refreshes source fields,
+  preserves downstream IDs), and emits `docs/demand-gen-urls.json`. Dry-run by default;
+  `--apply` writes to Turso (run under x64 node — see CLAUDE.md "Windows ARM64").
+- **`docs/demand-gen-urls.json`** — committed human-readable snapshot of the 87 blob URLs.
+
+## [0.5.53.87] - 2026-06-18
+
+### Fixed (Brand sanitization — URL handles)
+- **`src/lib/content-generator.ts`** — added `stripSupplierBrands()`, a deterministic
+  backstop that removes supplier brand tokens (Outsunny, HOMCOM, Aosom, Vinsetto, PawHut,
+  Soozier, Qaba, ShopEZ, Wikinger, Portland, Aousthop) from a string. Applied to both
+  `urlHandleFr` and `urlHandleEn` before `slugify()`, so a brand name the model echoes
+  into a handle can no longer leak into product URLs (e.g. `/products/outsunny-...`). The
+  system prompt already forbids brand names; this enforces it in code. Tests added in
+  `tests/content-generator.test.ts` (case-folding, kebab-embedded brands, word-boundary guard).
+  Also reuses this shared helper for the title safety net introduced in 0.5.53.86 (replacing
+  that change's inline regex), so titles and handles strip brands through one code path.
+
+## [0.5.53.86] - 2026-06-18
+
+### Fixed (Supplier brand names in generated titles)
+- **`src/lib/content-generator.ts`** — programmatic safety net after the Claude response:
+  strip supplier brands (Outsunny, HOMCOM, Aosom, Vinsetto, PawHut, Soozier, Qaba,
+  ShopEZ, Wikinger, Portland, Aousthop) from `titleFr`/`titleEn`. The model is instructed
+  never to put the supplier brand in the title but sometimes does anyway; this enforces it
+  deterministically. Runs before the length / meta-title / URL-handle derivation so those
+  stay brand-free too. Adds 3 regression tests covering leading, mid-title, case-insensitive,
+  and multiple-brand stripping (plus clean-title pass-through).
+
+### Chore
+- Synced `package.json` version to `VERSION` (drift from a prior bump that updated VERSION only).
+
+## [0.5.53.85] - 2026-06-18
+
+### Added (Meta token verification)
+- **`scripts/verify-meta-token.mjs`** — read-only/dry-run check of `META_ACCESS_TOKEN` via
+  Graph `debug_token`. Reports token **type** (`USER` vs `SYSTEM_USER`), `expires_at` +
+  `data_access_expires_at` (with relative/expired hints), validity, and granted **scopes**
+  (flags missing `ads_read`/`ads_management`). GET-only — never creates, edits, or rotates
+  anything. Run under x64 node (see CLAUDE.md). Reference: `docs/META-ADS-SETUP.md` §2.
+
 ## [0.5.53.84] - 2026-06-17
 
 ### Added (Demand Gen video pipeline + uploader)

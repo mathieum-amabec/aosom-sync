@@ -7,8 +7,43 @@ vi.mock("@/lib/config", () => ({
   CLAUDE: { MODEL: "claude-test", MAX_TOKENS_CONTENT: 1000 },
 }));
 
-const { slugify, clampMetaTitle, backfillSeoFields } = await import("@/lib/content-generator");
+// Mock the Anthropic SDK so generateProductContent runs without a network call.
+// `create` is hoisted so each test sets the canned Claude response per case.
+const { create } = vi.hoisted(() => ({ create: vi.fn() }));
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: class {
+    messages = { create };
+  },
+}));
+
+const { slugify, clampMetaTitle, backfillSeoFields, stripSupplierBrands, generateProductContent } =
+  await import("@/lib/content-generator");
 import type { GeneratedContent } from "@/lib/content-generator";
+
+describe("stripSupplierBrands", () => {
+  it("removes supplier brand tokens regardless of case", () => {
+    // Brands become a space; the assertion normalizes whitespace since slugify
+    // (the only caller) collapses gaps anyway. HOMCOM/HomCom and PawHut/Pawhut
+    // collapse under the /i flag.
+    const norm = (s: string) => stripSupplierBrands(s).replace(/\s+/g, " ").trim();
+    expect(norm("Outsunny Chaise Longue")).toBe("Chaise Longue");
+    expect(norm("HomCom desk")).toBe("desk");
+    expect(norm("pawhut niche")).toBe("niche");
+  });
+
+  it("strips brands embedded in a kebab handle, leaving gaps for slugify to collapse", () => {
+    expect(slugify(stripSupplierBrands("outsunny-chaise-longue-grise"))).toBe("chaise-longue-grise");
+    expect(slugify(stripSupplierBrands("qaba-soozier-tapis"))).toBe("tapis");
+  });
+
+  it("leaves brand-free strings untouched", () => {
+    expect(stripSupplierBrands("chaise-longue-grise")).toBe("chaise-longue-grise");
+  });
+
+  it("does not strip a brand name fused into a larger word (word-boundary guard)", () => {
+    expect(stripSupplierBrands("qabardine")).toBe("qabardine");
+  });
+});
 
 describe("slugify", () => {
   it("strips accents, lowercases, and hyphenates", () => {
@@ -86,5 +121,71 @@ describe("backfillSeoFields", () => {
     expect(out.metaTitleFr).toBe("Already set | x");
     expect(out.urlHandleFr).toBe("custom-handle");
     expect(out.brand).toBe("HOMCOM"); // existing brand wins over the fallback arg
+  });
+});
+
+// Regression: brand-sanitize — supplier brand names leaked into generated titles
+// Found by /qa on 2026-06-18
+// The model is told never to put the supplier brand in the title, but it
+// sometimes does anyway. generateProductContent must strip them programmatically.
+function makeProduct() {
+  return {
+    name: "Chaise longue grise",
+    description: "<p>Une chaise.</p>",
+    shortDescription: "<p>Court.</p>",
+    brand: "Outsunny",
+    productType: "Chaise",
+    material: "Acier",
+    variants: [{ sku: "ABC-GY", price: 99 }],
+  } as never;
+}
+
+function claudeReturns(titleFr: string, titleEn: string) {
+  create.mockResolvedValue({
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          titleFr,
+          titleEn,
+          descriptionFr: "<p>fr</p>",
+          descriptionEn: "<p>en</p>",
+          seoDescriptionFr: "desc fr",
+          seoDescriptionEn: "desc en",
+          metaTitleFr: "m fr | Livraison gratuite — Ameublo Direct",
+          metaTitleEn: "m en | Free Shipping — Furnish Direct",
+          metaDescriptionFr: "md fr",
+          metaDescriptionEn: "md en",
+          urlHandleFr: "chaise-fr",
+          urlHandleEn: "chair-en",
+          tags: ["jardin"],
+        }),
+      },
+    ],
+  });
+}
+
+describe("generateProductContent — supplier brand stripping", () => {
+  it("strips a leading supplier brand from titleFr and titleEn", async () => {
+    claudeReturns("Outsunny Chaise longue grise", "HOMCOM Grey lounge chair");
+    const out = await generateProductContent(makeProduct());
+    expect(out.titleFr).toBe("Chaise longue grise");
+    expect(out.titleEn).toBe("Grey lounge chair");
+  });
+
+  it("strips brands case-insensitively and from the middle of the title", async () => {
+    claudeReturns("Chaise pliante PawHut grise", "Folding chair by aosom grey");
+    const out = await generateProductContent(makeProduct());
+    expect(out.titleFr).toBe("Chaise pliante grise");
+    expect(out.titleEn).toBe("Folding chair by grey");
+    expect(out.titleFr).not.toMatch(/pawhut/i);
+    expect(out.titleEn).not.toMatch(/aosom/i);
+  });
+
+  it("strips multiple brands in one title and leaves clean titles untouched", async () => {
+    claudeReturns("Vinsetto Soozier Bureau", "Clean Office Desk");
+    const out = await generateProductContent(makeProduct());
+    expect(out.titleFr).toBe("Bureau");
+    expect(out.titleEn).toBe("Clean Office Desk"); // no brand, unchanged
   });
 });

@@ -1,0 +1,892 @@
+{
+  "generated_from": "out/demand-gen-manifest.json",
+  "generated_at": "2026-06-18T15:07:31.464Z",
+  "count": 87,
+  "skus": [
+    "01-0415",
+    "01-0893",
+    "845-039V01GY",
+    "845-335",
+    "845-518GY",
+    "845-774V00BK",
+    "845-792V00YL",
+    "84A-054V05BK",
+    "84B-136",
+    "84B-146BU",
+    "84C-226CG",
+    "84H-209V00CG",
+    "D51-277V01"
+  ],
+  "assets": [
+    {
+      "sku": "01-0415",
+      "shopify_product_id": "gid://shopify/Product/7798393897065",
+      "title_fr": "Base de parasol carrée résine 9 kg — bronze",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/01-0415/01-0415_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_1x1_6s.mp4",
+      "bytes": 2300536
+    },
+    {
+      "sku": "01-0415",
+      "shopify_product_id": "gid://shopify/Product/7798393897065",
+      "title_fr": "Base de parasol carrée résine 9 kg — bronze",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/01-0415/01-0415_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_1x1_15s.mp4",
+      "bytes": 5623471
+    },
+    {
+      "sku": "01-0415",
+      "shopify_product_id": "gid://shopify/Product/7798393897065",
+      "title_fr": "Base de parasol carrée résine 9 kg — bronze",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/01-0415/01-0415_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_16x9_6s.mp4",
+      "bytes": 4331131
+    },
+    {
+      "sku": "01-0415",
+      "shopify_product_id": "gid://shopify/Product/7798393897065",
+      "title_fr": "Base de parasol carrée résine 9 kg — bronze",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/01-0415/01-0415_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_16x9_15s.mp4",
+      "bytes": 10734685
+    },
+    {
+      "sku": "01-0415",
+      "shopify_product_id": "gid://shopify/Product/7798393897065",
+      "title_fr": "Base de parasol carrée résine 9 kg — bronze",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/01-0415/01-0415_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_9x16_6s.mp4",
+      "bytes": 2827063
+    },
+    {
+      "sku": "01-0415",
+      "shopify_product_id": "gid://shopify/Product/7798393897065",
+      "title_fr": "Base de parasol carrée résine 9 kg — bronze",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/01-0415/01-0415_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_9x16_15s.mp4",
+      "bytes": 6943994
+    },
+    {
+      "sku": "01-0893",
+      "shopify_product_id": "gid://shopify/Product/7796435877993",
+      "title_fr": "Balançoire de jardin double à bascule pour patio",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/01-0893/01-0893_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_1x1_6s.mp4",
+      "bytes": 3063594
+    },
+    {
+      "sku": "01-0893",
+      "shopify_product_id": "gid://shopify/Product/7796435877993",
+      "title_fr": "Balançoire de jardin double à bascule pour patio",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/01-0893/01-0893_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_1x1_15s.mp4",
+      "bytes": 7381942
+    },
+    {
+      "sku": "01-0893",
+      "shopify_product_id": "gid://shopify/Product/7796435877993",
+      "title_fr": "Balançoire de jardin double à bascule pour patio",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/01-0893/01-0893_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_16x9_6s.mp4",
+      "bytes": 5652813
+    },
+    {
+      "sku": "01-0893",
+      "shopify_product_id": "gid://shopify/Product/7796435877993",
+      "title_fr": "Balançoire de jardin double à bascule pour patio",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/01-0893/01-0893_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_16x9_15s.mp4",
+      "bytes": 14236470
+    },
+    {
+      "sku": "01-0893",
+      "shopify_product_id": "gid://shopify/Product/7796435877993",
+      "title_fr": "Balançoire de jardin double à bascule pour patio",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/01-0893/01-0893_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_9x16_6s.mp4",
+      "bytes": 3634709
+    },
+    {
+      "sku": "01-0893",
+      "shopify_product_id": "gid://shopify/Product/7796435877993",
+      "title_fr": "Balançoire de jardin double à bascule pour patio",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/01-0893/01-0893_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_9x16_15s.mp4",
+      "bytes": 8586125
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_1x1_6s.mp4",
+      "bytes": 3896818
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_1x1_15s.mp4",
+      "bytes": 10679119
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "1:1",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_1x1_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_1x1_30s.mp4",
+      "bytes": 19854260
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_16x9_6s.mp4",
+      "bytes": 6961250
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_16x9_15s.mp4",
+      "bytes": 19761410
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "16:9",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_16x9_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_16x9_30s.mp4",
+      "bytes": 37340301
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_9x16_6s.mp4",
+      "bytes": 4354246
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_9x16_15s.mp4",
+      "bytes": 11873687
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "9:16",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_9x16_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_9x16_30s.mp4",
+      "bytes": 21883903
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-335/845-335_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_1x1_6s.mp4",
+      "bytes": 4270739
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-335/845-335_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_1x1_15s.mp4",
+      "bytes": 10585190
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "1:1",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/845-335/845-335_1x1_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_1x1_30s.mp4",
+      "bytes": 21067332
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-335/845-335_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_16x9_6s.mp4",
+      "bytes": 8351909
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-335/845-335_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_16x9_15s.mp4",
+      "bytes": 20087037
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "16:9",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/845-335/845-335_16x9_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_16x9_30s.mp4",
+      "bytes": 39468106
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-335/845-335_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_9x16_6s.mp4",
+      "bytes": 4870480
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-335/845-335_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_9x16_15s.mp4",
+      "bytes": 12171970
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "9:16",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/845-335/845-335_9x16_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_9x16_30s.mp4",
+      "bytes": 24367180
+    },
+    {
+      "sku": "845-518GY",
+      "shopify_product_id": "gid://shopify/Product/7798394617961",
+      "title_fr": "Bac de jardinage surélevé galvanisé 241 x 91 x 30 cm",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-518GY/845-518GY_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_1x1_6s.mp4",
+      "bytes": 3258135
+    },
+    {
+      "sku": "845-518GY",
+      "shopify_product_id": "gid://shopify/Product/7798394617961",
+      "title_fr": "Bac de jardinage surélevé galvanisé 241 x 91 x 30 cm",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-518GY/845-518GY_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_1x1_15s.mp4",
+      "bytes": 6886454
+    },
+    {
+      "sku": "845-518GY",
+      "shopify_product_id": "gid://shopify/Product/7798394617961",
+      "title_fr": "Bac de jardinage surélevé galvanisé 241 x 91 x 30 cm",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-518GY/845-518GY_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_16x9_6s.mp4",
+      "bytes": 5626817
+    },
+    {
+      "sku": "845-518GY",
+      "shopify_product_id": "gid://shopify/Product/7798394617961",
+      "title_fr": "Bac de jardinage surélevé galvanisé 241 x 91 x 30 cm",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-518GY/845-518GY_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_16x9_15s.mp4",
+      "bytes": 12483001
+    },
+    {
+      "sku": "845-518GY",
+      "shopify_product_id": "gid://shopify/Product/7798394617961",
+      "title_fr": "Bac de jardinage surélevé galvanisé 241 x 91 x 30 cm",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-518GY/845-518GY_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_9x16_6s.mp4",
+      "bytes": 3532119
+    },
+    {
+      "sku": "845-518GY",
+      "shopify_product_id": "gid://shopify/Product/7798394617961",
+      "title_fr": "Bac de jardinage surélevé galvanisé 241 x 91 x 30 cm",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-518GY/845-518GY_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_9x16_15s.mp4",
+      "bytes": 7392968
+    },
+    {
+      "sku": "845-774V00BK",
+      "shopify_product_id": "gid://shopify/Product/7793456087145",
+      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_1x1_6s.mp4",
+      "bytes": 3144035
+    },
+    {
+      "sku": "845-774V00BK",
+      "shopify_product_id": "gid://shopify/Product/7793456087145",
+      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_1x1_15s.mp4",
+      "bytes": 6621375
+    },
+    {
+      "sku": "845-774V00BK",
+      "shopify_product_id": "gid://shopify/Product/7793456087145",
+      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_16x9_6s.mp4",
+      "bytes": 6157378
+    },
+    {
+      "sku": "845-774V00BK",
+      "shopify_product_id": "gid://shopify/Product/7793456087145",
+      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_16x9_15s.mp4",
+      "bytes": 12916453
+    },
+    {
+      "sku": "845-774V00BK",
+      "shopify_product_id": "gid://shopify/Product/7793456087145",
+      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_9x16_6s.mp4",
+      "bytes": 3589195
+    },
+    {
+      "sku": "845-774V00BK",
+      "shopify_product_id": "gid://shopify/Product/7793456087145",
+      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_9x16_15s.mp4",
+      "bytes": 7889172
+    },
+    {
+      "sku": "845-792V00YL",
+      "shopify_product_id": "gid://shopify/Product/7796435255401",
+      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_1x1_6s.mp4",
+      "bytes": 3201163
+    },
+    {
+      "sku": "845-792V00YL",
+      "shopify_product_id": "gid://shopify/Product/7796435255401",
+      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_1x1_15s.mp4",
+      "bytes": 6357191
+    },
+    {
+      "sku": "845-792V00YL",
+      "shopify_product_id": "gid://shopify/Product/7796435255401",
+      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_16x9_6s.mp4",
+      "bytes": 6069365
+    },
+    {
+      "sku": "845-792V00YL",
+      "shopify_product_id": "gid://shopify/Product/7796435255401",
+      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_16x9_15s.mp4",
+      "bytes": 11864178
+    },
+    {
+      "sku": "845-792V00YL",
+      "shopify_product_id": "gid://shopify/Product/7796435255401",
+      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_9x16_6s.mp4",
+      "bytes": 3739759
+    },
+    {
+      "sku": "845-792V00YL",
+      "shopify_product_id": "gid://shopify/Product/7796435255401",
+      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_9x16_15s.mp4",
+      "bytes": 6789414
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_1x1_6s.mp4",
+      "bytes": 2842728
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_1x1_15s.mp4",
+      "bytes": 5729774
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "1:1",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_1x1_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_1x1_30s.mp4",
+      "bytes": 9415269
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_16x9_6s.mp4",
+      "bytes": 5159871
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_16x9_15s.mp4",
+      "bytes": 10805920
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "16:9",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_16x9_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_16x9_30s.mp4",
+      "bytes": 18279940
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_9x16_6s.mp4",
+      "bytes": 3618974
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_9x16_15s.mp4",
+      "bytes": 7050598
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "9:16",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_9x16_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_9x16_30s.mp4",
+      "bytes": 11552241
+    },
+    {
+      "sku": "84B-136",
+      "shopify_product_id": "gid://shopify/Product/7798393700457",
+      "title_fr": "Coussins de remplacement pour banc 3 places extérieur",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84B-136/84B-136_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_1x1_6s.mp4",
+      "bytes": 2389915
+    },
+    {
+      "sku": "84B-136",
+      "shopify_product_id": "gid://shopify/Product/7798393700457",
+      "title_fr": "Coussins de remplacement pour banc 3 places extérieur",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84B-136/84B-136_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_1x1_15s.mp4",
+      "bytes": 4312767
+    },
+    {
+      "sku": "84B-136",
+      "shopify_product_id": "gid://shopify/Product/7798393700457",
+      "title_fr": "Coussins de remplacement pour banc 3 places extérieur",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84B-136/84B-136_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_16x9_6s.mp4",
+      "bytes": 4463336
+    },
+    {
+      "sku": "84B-136",
+      "shopify_product_id": "gid://shopify/Product/7798393700457",
+      "title_fr": "Coussins de remplacement pour banc 3 places extérieur",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84B-136/84B-136_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_16x9_15s.mp4",
+      "bytes": 7942382
+    },
+    {
+      "sku": "84B-136",
+      "shopify_product_id": "gid://shopify/Product/7798393700457",
+      "title_fr": "Coussins de remplacement pour banc 3 places extérieur",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84B-136/84B-136_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_9x16_6s.mp4",
+      "bytes": 2874185
+    },
+    {
+      "sku": "84B-136",
+      "shopify_product_id": "gid://shopify/Product/7798393700457",
+      "title_fr": "Coussins de remplacement pour banc 3 places extérieur",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84B-136/84B-136_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_9x16_15s.mp4",
+      "bytes": 5199897
+    },
+    {
+      "sku": "84B-146BU",
+      "shopify_product_id": "gid://shopify/Product/7793455792233",
+      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84B-146BU/84B-146BU_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_1x1_6s.mp4",
+      "bytes": 2762405
+    },
+    {
+      "sku": "84B-146BU",
+      "shopify_product_id": "gid://shopify/Product/7793455792233",
+      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84B-146BU/84B-146BU_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_1x1_15s.mp4",
+      "bytes": 6086352
+    },
+    {
+      "sku": "84B-146BU",
+      "shopify_product_id": "gid://shopify/Product/7793455792233",
+      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84B-146BU/84B-146BU_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_16x9_6s.mp4",
+      "bytes": 5341282
+    },
+    {
+      "sku": "84B-146BU",
+      "shopify_product_id": "gid://shopify/Product/7793455792233",
+      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84B-146BU/84B-146BU_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_16x9_15s.mp4",
+      "bytes": 11572628
+    },
+    {
+      "sku": "84B-146BU",
+      "shopify_product_id": "gid://shopify/Product/7793455792233",
+      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84B-146BU/84B-146BU_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_9x16_6s.mp4",
+      "bytes": 3360813
+    },
+    {
+      "sku": "84B-146BU",
+      "shopify_product_id": "gid://shopify/Product/7793455792233",
+      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84B-146BU/84B-146BU_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_9x16_15s.mp4",
+      "bytes": 7439638
+    },
+    {
+      "sku": "84C-226CG",
+      "shopify_product_id": "gid://shopify/Product/7798393831529",
+      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84C-226CG/84C-226CG_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_1x1_6s.mp4",
+      "bytes": 1281318
+    },
+    {
+      "sku": "84C-226CG",
+      "shopify_product_id": "gid://shopify/Product/7798393831529",
+      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84C-226CG/84C-226CG_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_1x1_15s.mp4",
+      "bytes": 2549998
+    },
+    {
+      "sku": "84C-226CG",
+      "shopify_product_id": "gid://shopify/Product/7798393831529",
+      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84C-226CG/84C-226CG_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_16x9_6s.mp4",
+      "bytes": 2445548
+    },
+    {
+      "sku": "84C-226CG",
+      "shopify_product_id": "gid://shopify/Product/7798393831529",
+      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84C-226CG/84C-226CG_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_16x9_15s.mp4",
+      "bytes": 4935840
+    },
+    {
+      "sku": "84C-226CG",
+      "shopify_product_id": "gid://shopify/Product/7798393831529",
+      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84C-226CG/84C-226CG_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_9x16_6s.mp4",
+      "bytes": 1513051
+    },
+    {
+      "sku": "84C-226CG",
+      "shopify_product_id": "gid://shopify/Product/7798393831529",
+      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84C-226CG/84C-226CG_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_9x16_15s.mp4",
+      "bytes": 3101859
+    },
+    {
+      "sku": "84H-209V00CG",
+      "shopify_product_id": "gid://shopify/Product/7796435714153",
+      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_1x1_6s.mp4",
+      "bytes": 5304168
+    },
+    {
+      "sku": "84H-209V00CG",
+      "shopify_product_id": "gid://shopify/Product/7796435714153",
+      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_1x1_15s.mp4",
+      "bytes": 12213202
+    },
+    {
+      "sku": "84H-209V00CG",
+      "shopify_product_id": "gid://shopify/Product/7796435714153",
+      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_16x9_6s.mp4",
+      "bytes": 10157576
+    },
+    {
+      "sku": "84H-209V00CG",
+      "shopify_product_id": "gid://shopify/Product/7796435714153",
+      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_16x9_15s.mp4",
+      "bytes": 22840201
+    },
+    {
+      "sku": "84H-209V00CG",
+      "shopify_product_id": "gid://shopify/Product/7796435714153",
+      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_9x16_6s.mp4",
+      "bytes": 5944304
+    },
+    {
+      "sku": "84H-209V00CG",
+      "shopify_product_id": "gid://shopify/Product/7796435714153",
+      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_9x16_15s.mp4",
+      "bytes": 13905859
+    },
+    {
+      "sku": "D51-277V01",
+      "shopify_product_id": "gid://shopify/Product/7798393995369",
+      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/D51-277V01/D51-277V01_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_1x1_6s.mp4",
+      "bytes": 2803056
+    },
+    {
+      "sku": "D51-277V01",
+      "shopify_product_id": "gid://shopify/Product/7798393995369",
+      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/D51-277V01/D51-277V01_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_1x1_15s.mp4",
+      "bytes": 9217602
+    },
+    {
+      "sku": "D51-277V01",
+      "shopify_product_id": "gid://shopify/Product/7798393995369",
+      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/D51-277V01/D51-277V01_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_16x9_6s.mp4",
+      "bytes": 5507387
+    },
+    {
+      "sku": "D51-277V01",
+      "shopify_product_id": "gid://shopify/Product/7798393995369",
+      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/D51-277V01/D51-277V01_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_16x9_15s.mp4",
+      "bytes": 17305737
+    },
+    {
+      "sku": "D51-277V01",
+      "shopify_product_id": "gid://shopify/Product/7798393995369",
+      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/D51-277V01/D51-277V01_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_9x16_6s.mp4",
+      "bytes": 3265544
+    },
+    {
+      "sku": "D51-277V01",
+      "shopify_product_id": "gid://shopify/Product/7798393995369",
+      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/D51-277V01/D51-277V01_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_9x16_15s.mp4",
+      "bytes": 10514375
+    }
+  ]
+}

@@ -293,6 +293,29 @@ async function _initSchemaImpl(): Promise<void> {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     )`,
+    // video_demand_gen: durable index of the rendered+uploaded Demand Gen video
+    // assets (blob_url is the Vercel Blob source). One row per (sku, ratio,
+    // duration). meta_video_id / youtube_video_id + *_status are filled later by
+    // the ad-push jobs (Meta advideos file_url ingest, YouTube upload for Google
+    // Demand Gen). created_at/updated_at are unix seconds. See scripts/load-demand-gen-db.mjs.
+    `CREATE TABLE IF NOT EXISTS video_demand_gen (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sku TEXT NOT NULL,
+      shopify_product_id TEXT,
+      title_fr TEXT,
+      ratio TEXT NOT NULL,
+      duration_sec INTEGER NOT NULL,
+      blob_path TEXT NOT NULL,
+      blob_url TEXT NOT NULL,
+      bytes INTEGER,
+      meta_video_id TEXT,
+      meta_status TEXT,
+      youtube_video_id TEXT,
+      youtube_status TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      UNIQUE(sku, ratio, duration_sec)
+    )`,
     `CREATE TABLE IF NOT EXISTS price_alerts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL,
