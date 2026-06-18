@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.89] - 2026-06-18
+
+### Docs (Meta token rotation runbook)
+- **`docs/META-TOKEN-ROTATION.md`** — step-by-step to replace the short-lived USER
+  `META_ACCESS_TOKEN` (issued 2026-06-07, ~60-day lifetime) with a non-expiring
+  **System User** token: creation steps, required scopes (`ads_read`, `ads_management`,
+  `business_management`, `catalog_management`), where to update (`.env.local` + Vercel
+  Production + Preview, with redeploy note), and a `debug_token` verification command.
+  ⏰ Rotate **before 2026-08-06** (hard data-access cutoff 2026-09-07).
+
 ## [0.5.53.88] - 2026-06-18
 
 ### Added (Demand Gen video URL persistence)
