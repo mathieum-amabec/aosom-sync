@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.88] - 2026-06-18
+
+### Added (Demand Gen video URL persistence)
+- **`src/lib/database.ts`** — new `video_demand_gen` table in `initSchema`: durable index
+  of the rendered+uploaded Demand Gen assets, one row per `(sku, ratio, duration_sec)`.
+  Holds the Vercel Blob source URL plus reserved `meta_video_id` / `youtube_video_id` +
+  `*_status` columns for the downstream ad-push jobs (Meta `advideos` `file_url` ingest,
+  YouTube upload for Google Demand Gen).
+- **`scripts/load-demand-gen-db.mjs`** — reads `out/demand-gen-manifest.json`, upserts the
+  87 assets into `video_demand_gen` (idempotent via `ON CONFLICT` — refreshes source fields,
+  preserves downstream IDs), and emits `docs/demand-gen-urls.json`. Dry-run by default;
+  `--apply` writes to Turso (run under x64 node — see CLAUDE.md "Windows ARM64").
+- **`docs/demand-gen-urls.json`** — committed human-readable snapshot of the 87 blob URLs.
+
 ## [0.5.53.87] - 2026-06-18
 
 ### Fixed (Brand sanitization — URL handles)
