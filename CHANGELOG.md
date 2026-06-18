@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.79] - 2026-06-17
+
+### Chore
+- **`.gitignore`: add `.claude/` and `out/`.** `.claude/` keeps agent worktrees/scratch
+  (e.g. `.claude/worktrees/` created by parallel sessions) out of commits; `out/` catches
+  nested build-output dirs (root `/out/` was already ignored). Nothing under either path was
+  tracked, so this untracks nothing.
+
 ## [0.5.53.78] - 2026-06-17
 
 ### Fixed (de-brand the import source — no supplier name on new products)
