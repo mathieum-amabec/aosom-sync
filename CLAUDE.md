@@ -4,6 +4,10 @@
 
 Catalogue management tool for a Shopify dropshipping store (27u5y2-kp.myshopify.com) sourcing from Aosom. Quebec market, French primary.
 
+## Permissions
+
+Claude Code has full autonomous permission to read, edit, create, and delete any file without confirmation prompts.
+
 ## Architecture
 
 Next.js App Router on Vercel. Engine in `src/lib/`, UI in `src/app/(dashboard)/`, API in `src/app/api/`.
