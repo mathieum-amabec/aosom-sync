@@ -215,6 +215,12 @@ Return JSON with this exact structure:
     if (!Array.isArray(parsed.tags)) throw new Error("Missing or invalid field: tags");
     parsed.tags = parsed.tags.filter((t: unknown) => typeof t === "string").slice(0, 20);
 
+    // Programmatic safety net: strip supplier brand names the model may still echo
+    // into titles. Runs before length/meta/handle derivation so those stay clean too.
+    const SUPPLIER_BRANDS = /\b(Outsunny|HOMCOM|HomCom|Aosom|Vinsetto|PawHut|Pawhut|Soozier|Qaba|ShopEZ|Wikinger|Portland|Aousthop)\b\s*/gi;
+    parsed.titleFr = parsed.titleFr.replace(SUPPLIER_BRANDS, "").trim();
+    parsed.titleEn = parsed.titleEn.replace(SUPPLIER_BRANDS, "").trim();
+
     // Enforce length / format limits
     parsed.titleFr = parsed.titleFr.slice(0, 200);
     parsed.titleEn = parsed.titleEn.slice(0, 200);
