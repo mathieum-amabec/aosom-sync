@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.80] - 2026-06-17
+## [0.5.53.81] - 2026-06-17
 
 ### Added (debrand — product descriptions)
 - **`scripts/fix-shopify-descriptions.mjs`** — one-off backfill that strips supplier brand
@@ -16,6 +16,32 @@ All notable changes to Aosom Sync will be documented in this file.
   truncated (`stop_reason: max_tokens`), or that lost >40% of its length; 2 req/s on Shopify
   with capped 429 backoff; idempotent (re-run only re-touches descriptions still carrying a brand).
 - Scope at run time: 429/638 descriptions affected (400 mechanical + 29 Claude).
+- **Supersedes the v0.5.53.80 `fix-shopify-descriptions.mjs`** (mechanical-only, 3 brands, no
+  backup) — this version adds the original-`body_html` backup, truncation + length-loss guards,
+  the Claude grammar-rewrite path, and 4 more brands (HOMCOM, Soozier, Vinsetto, PawHut). Neither
+  version's `--apply` had been run, so no descriptions were touched by the replaced script.
+
+## [0.5.53.80] - 2026-06-17
+
+### Added (Shopify descriptions debrand tool — dry-run default)
+- **`scripts/fix-shopify-descriptions.mjs`** — strips supplier brand tokens (Aosom, Outsunny,
+  Qaba) from existing products' `body_html`, tidies the resulting spacing/punctuation/caps, then
+  PUTs the cleaned description back to Shopify. Backfills the 429 live products that still carry a
+  supplier name in their description (complements the generation-time content-generator fix in
+  0.5.53.77 and the vendor debrand in 0.5.53.76 / 0.5.53.78).
+- Dry-run by default (prints 5 before/after examples); `--apply` executes. Strict 2 req/sec,
+  429 retry-after, and only writes products whose cleaned body actually changes.
+- Cleanup also drops a leading preposition bound to the brand
+  (`from/with/by/of/avec/de/du/des/par` + brand) so "cat tree from Aosom, rest" → "cat tree,
+  rest" instead of leaving a dangling "from," (decided at the Mat checkpoint after dry-run).
+
+## [0.5.53.79] - 2026-06-17
+
+### Chore
+- **`.gitignore`: add `.claude/` and `out/`.** `.claude/` keeps agent worktrees/scratch
+  (e.g. `.claude/worktrees/` created by parallel sessions) out of commits; `out/` catches
+  nested build-output dirs (root `/out/` was already ignored). Nothing under either path was
+  tracked, so this untracks nothing.
 
 ## [0.5.53.78] - 2026-06-17
 
