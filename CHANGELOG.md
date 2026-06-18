@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.79] - 2026-06-17
+## [0.5.53.80] - 2026-06-17
 
 ### Added (Shopify descriptions debrand tool — dry-run default)
 - **`scripts/fix-shopify-descriptions.mjs`** — strips supplier brand tokens (Aosom, Outsunny,
@@ -15,6 +15,14 @@ All notable changes to Aosom Sync will be documented in this file.
 - Cleanup also drops a leading preposition bound to the brand
   (`from/with/by/of/avec/de/du/des/par` + brand) so "cat tree from Aosom, rest" → "cat tree,
   rest" instead of leaving a dangling "from," (decided at the Mat checkpoint after dry-run).
+
+## [0.5.53.79] - 2026-06-17
+
+### Chore
+- **`.gitignore`: add `.claude/` and `out/`.** `.claude/` keeps agent worktrees/scratch
+  (e.g. `.claude/worktrees/` created by parallel sessions) out of commits; `out/` catches
+  nested build-output dirs (root `/out/` was already ignored). Nothing under either path was
+  tracked, so this untracks nothing.
 
 ## [0.5.53.78] - 2026-06-17
 
