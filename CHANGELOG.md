@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.90] - 2026-06-18
+
+### Changed (Demand Gen overlay retouches)
+- **`scripts/render-demand-gen.mjs`** — overlay redesign for the Demand Gen video assets:
+  - Title moved to the TOP safe zone (y=15%) and **+25%** larger; benefit line is now a
+    Gold pill (Navy text) at the BOTTOM safe zone (y=82%).
+  - **Titles UPPERCASE** via `toLocaleUpperCase("fr-CA")` (FFmpeg `drawtext` has no
+    `upper()` — it renders the literal token; fr-CA handles é→É, à→À, ç→Ç).
+  - **Navy backing box** behind each title line (`box=1:boxcolor=0x1B2A4A@0.70:boxborderw=4|8`,
+    i.e. 4px vertical / 8px horizontal padding; square corners — FFmpeg has no rounded box).
+  - **Scrim** strengthened: Navy peak alpha 0.35→**0.50**, band height 18%→**25%**.
+  - Title pipeline now `sanitizeTitle` (strip em/en dashes) + `truncate` to 35 chars + max 2
+    lines; faux-bold via same-color outline; optional CLI SKU filter for canary re-renders.
+  - Scrim color reuses the `NAVY` const instead of a duplicated `0x1B2A4A` literal.
+- **`scripts/build-index.mjs`** — contact-sheet caption updated to describe the new overlay
+  (titre MAJUSCULES +25%, fond Navy 70%, scrim Navy 50%).
+
+### Added
+- **`scripts/preview-server.mjs`** — tiny static server (`:8080`) for the Demand Gen contact
+  sheet, used to visually validate canary re-renders before a full batch.
+
 ## [0.5.53.88] - 2026-06-18
 
 ### Added (Demand Gen video URL persistence)
