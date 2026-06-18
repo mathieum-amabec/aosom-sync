@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.94] - 2026-06-18
+
+### Fixed (Brand sanitization — EN title metafields)
+- **`scripts/fix-title-en.mjs`** — one-off de-brand of the 6 `custom.title_en`
+  metafields that still opened with the supplier brand `Outsunny ` (all other EN
+  titles were already clean — full-catalog audit: 638 products scanned, 6 offenders,
+  0 HOMCOM/Aosom/Qaba). Strips a leading `Outsunny ` (case-insensitive) and `PUT`s
+  the cleaned value back via the Admin API, preserving the metafield `type`. Dry-run
+  by default; `--apply` writes. Idempotent (re-run is a no-op) and guards against
+  emptying a title. Applied to production: all 6 fixed, re-scan confirms 638/638
+  EN titles brand-free. Run under x64 node — see CLAUDE.md "Windows ARM64".
+
 ## [0.5.53.93] - 2026-06-18
 
 ### Changed (retire the `social-scheduled` cron; unify scheduling on `publication_queue`)
