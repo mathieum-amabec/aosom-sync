@@ -61,6 +61,16 @@ const NAV_ITEMS = [
     ),
   },
   {
+    href: "/demand-gen-videos",
+    label: "Demand Gen",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h9.75c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-9.75A1.125 1.125 0 0 1 3.75 14.625v-9.75ZM8.25 8.25l3.75 2.25-3.75 2.25v-4.5Z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 7.5l.97-.582a.75.75 0 0 1 1.13.643v8.878a.75.75 0 0 1-1.13.643L19.5 16.5" />
+      </svg>
+    ),
+  },
+  {
     href: "/social",
     label: "Social Media",
     icon: (

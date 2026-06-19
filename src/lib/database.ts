@@ -2681,6 +2681,60 @@ export async function cancelPendingQueueItems(
   return result.rowsAffected ?? 0;
 }
 
+// ─── Demand Gen video assets ─────────────────────────────────────────
+
+export interface DemandGenAsset {
+  id: number;
+  sku: string;
+  shopifyProductId: string | null;
+  titleFr: string | null;
+  ratio: string;
+  durationSec: number;
+  blobPath: string;
+  blobUrl: string;
+  bytes: number | null;
+  metaVideoId: string | null;
+  metaStatus: string | null;
+  youtubeVideoId: string | null;
+  youtubeStatus: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function mapDemandGenAsset(o: Record<string, unknown>): DemandGenAsset {
+  return {
+    id: Number(o.id),
+    sku: String(o.sku),
+    shopifyProductId: (o.shopify_product_id as string) || null,
+    titleFr: (o.title_fr as string) || null,
+    ratio: String(o.ratio),
+    durationSec: Number(o.duration_sec),
+    blobPath: String(o.blob_path),
+    blobUrl: String(o.blob_url),
+    bytes: o.bytes == null ? null : Number(o.bytes),
+    metaVideoId: (o.meta_video_id as string) || null,
+    metaStatus: (o.meta_status as string) || null,
+    youtubeVideoId: (o.youtube_video_id as string) || null,
+    youtubeStatus: (o.youtube_status as string) || null,
+    createdAt: Number(o.created_at),
+    updatedAt: Number(o.updated_at),
+  };
+}
+
+/**
+ * All Demand Gen video assets (one row per sku/ratio/duration), ordered for the
+ * dashboard table. Read-only; the table is populated by scripts/load-demand-gen-db.mjs
+ * and the Meta/YouTube ad-push jobs. meta_video_id / youtube_video_id stay null until
+ * the asset is uploaded to that platform.
+ */
+export async function getDemandGenAssets(): Promise<DemandGenAsset[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(
+    `SELECT * FROM video_demand_gen ORDER BY sku ASC, ratio ASC, duration_sec ASC`,
+  );
+  return result.rows.map((r) => mapDemandGenAsset(rowToObj(r)));
+}
+
 // ─── Auto-post daily counter ─────────────────────────────────────────
 
 function todayKey(): string {
