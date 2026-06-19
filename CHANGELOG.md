@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.108] - 2026-06-19
+
+### Added (stock-state tags: out-of-stock / back-in-stock)
+- **`src/lib/diff-engine.ts`** — `applyStockTags(tags, inStock)` + `productInStock(variants)`:
+  product-level stock-state tags driven off the BUFFERED availability. A product is in stock when
+  ANY variant buffers > 0 → `back-in-stock`; all buffer to 0 → `out-of-stock` (mutually exclusive
+  pair, other tags preserved, case-insensitive de-dup). `diffProduct` emits a `tags` change only when
+  the resulting set differs from Shopify's current tags (fires on the >0↔0 transition; no churn).
+- **`src/jobs/job1-sync.ts`** — `applyToShopify` recomputes the tag set and pushes it via
+  `updateShopifyProduct` (now accepts `tags`); logs `stock tags: <product> → back-in-stock|out-of-stock`.
+- **`src/lib/shopify-client.ts`** — product fetch now includes `tags` (comma-split onto
+  `ShopifyExistingProduct.tags`); `ChangeType` gains `"tags"`.
+- **`scripts/backfill-inventory.mjs`** — product-level tag pass sets each product's current stock-state
+  tag; conservative (skips products with no `products`-table qty). Same dry-run / `--apply` gate.
+- Tests: `applyStockTags` pair behavior + case-insensitive de-dup, `computeDiffs` tag transitions.
+
 ## [0.5.53.107] - 2026-06-19
 
 ### Fixed (Oversell stop-gap — tag qty=0 products)
