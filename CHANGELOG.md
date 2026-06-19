@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.100] - 2026-06-18
+
+### Changed (comment cleanup — retire stale social-scheduled references)
+- **`src/app/api/social/route.ts`**, **`src/jobs/job1-sync.ts`**, **`src/lib/database.ts`** —
+  updated 3 stale code comments that referenced the removed `social-scheduled` cron as if it
+  still ran. The `cron_runs` retention notes cited "social-scheduled alone = 96/day"; that cron
+  was deleted in v0.5.53.97, so the notes now point at the live high-frequency crons (publisher
+  hourly, csv-precache 4x/day). No behavior change.
+
 ## [0.5.53.99] - 2026-06-18
 
 ### Fixed (approveDraft auto-schedule → publication_queue; remove dead social-scheduled code)

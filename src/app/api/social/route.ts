@@ -93,8 +93,8 @@ export async function POST(request: Request) {
         // Approve = enqueue the draft into publication_queue on the next free slot from the
         // configurable `publication_schedule` (platform 'both' = FB + IG). /api/cron/publisher
         // drains the queue and publishes when the slot arrives. The draft stays 'approved' in
-        // facebook_drafts and is NO LONGER written as a 'scheduled' facebook_draft, so the
-        // legacy /api/cron/social-scheduled path can't also pick it up (no double-publish).
+        // facebook_drafts and is never written as a 'scheduled' facebook_draft (that legacy
+        // status was drained by the social-scheduled cron, since removed).
         // Falls back to plain 'approved' with no queue entry when the schedule is disabled or
         // no slot is free within the horizon, leaving the draft for manual scheduling.
         const draft = await getFacebookDraft(body.id);
