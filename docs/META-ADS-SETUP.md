@@ -233,3 +233,19 @@ then add `adsetId`/`campaignId` to the `en` profile in `scripts/meta-ads-create.
 and run `--profile en --apply`. **Held for validation** (dry-run only for now).
 
 - 2026-06-15 — Multi-copy Advantage+ FR creative 2864145800626490 + ad **52563672744205** (PAUSED) on ad set 52562995963805 (campaign 52562992827605). 5 bodies × 5 titles × 2 descriptions.
+
+## Été 2026 — campagnes DPA (PAUSED)
+
+- 2026-06-19 — **Été 2026 — Patio & Jardin (DPA)** (summer, 200 SKUs, $3.00 budget/j, PAUSED)
+  - product_set: `1587636003067125`
+  - campaign: `52567563994205`
+  - ad_set: `52567579182405`
+  - creative: `1537451907891976`
+  - ad: `52567579251005`
+
+- 2026-06-19 — **Best-sellers (DPA)** (bestsellers, 50 SKUs, $3.00 budget/j, PAUSED)
+  - product_set: `2218845485631893`
+  - campaign: `52567579441605`
+  - ad_set: `52567579450805`
+  - creative: `1481546723256431`
+  - ad: `52567579495605`
