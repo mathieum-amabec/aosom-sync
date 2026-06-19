@@ -644,9 +644,11 @@ export default function SocialPage() {
                           </button>
                         )}
                         {(() => {
-                          // Queued (scheduled) drafts are published by the social-scheduled cron.
-                          // Disable manual publish so an operator can't race the cron and double-post.
-                          // To publish early, unschedule the draft first (reverts it to draft).
+                          // 'scheduled' is a legacy status: scheduling now flows through
+                          // publication_queue and the social-scheduled cron that drained these
+                          // rows is gone, so nothing writes this status anymore. Keep manual
+                          // publish disabled for any historical 'scheduled' rows (no automatic
+                          // publisher) — unschedule first to revert to draft, then publish.
                           const publishDisabled = isPublished(draft) || draft.status === "scheduled";
                           return (
                             <button

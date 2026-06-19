@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.99] - 2026-06-18
+
+### Fixed (approveDraft auto-schedule → publication_queue; remove dead social-scheduled code)
+- **`src/app/(dashboard)/drafts/actions.ts`** — `approveDraft()` auto-scheduled `content_template`
+  drafts by writing `facebook_drafts.status='scheduled'` onto the M/W/F grid, drained by the
+  `social-scheduled` cron. That cron was retired in v0.5.53.93, so those rows would never publish.
+  It now enqueues into `publication_queue` (one item per active brand via `draftToQueueItems`) on
+  the next free `publication_schedule` slot — same path as `/api/social {action:"approve"}` —
+  leaving the draft `approved`. Slot collisions retry past the taken slot (`QueueSlotTakenError`).
+  Behavior note: auto-scheduling now respects `publication_schedule.enabled`; if disabled, the
+  draft stays `approved` and unscheduled (was always M/W/F before).
+
+### Removed (dead `social-scheduled` path)
+- **`src/app/api/cron/social-scheduled/route.ts`** — deleted. The route was already out of
+  `vercel.json` (v0.5.53.93) and was the only caller of `processScheduledDrafts()`.
+- **`processScheduledDrafts()` in `src/jobs/job4-social.ts`** — deleted, plus its now-orphaned
+  `getFacebookDrafts` / `claimFacebookDraft` / `updateFacebookDraft` imports.
+- **`tests/scheduled-posts.test.ts`** — deleted (covered the removed function + route).
+- `draft-scheduler.ts` is **kept**: `isSqliteUtc` (validates queue slots in `addToQueue`) and
+  `nextFreeSlot` (`/api/queue/add`) are still live.
+
+### Tests / docs
+- **`tests/approve-draft-queue.test.ts`** — 6 cases: content_template enqueue, bilingual earliest
+  slot, schedule-disabled no-op, non-content_template skip, `QueueSlotTakenError` retry, best-effort
+  swallow on enqueue failure.
+- Updated the CLAUDE.md publication-scheduling section and a stale `social/page.tsx` comment.
+
 ## [0.5.53.98] - 2026-06-18
 
 ### Fixed (enqueue orphaned approved drafts into publication_queue)

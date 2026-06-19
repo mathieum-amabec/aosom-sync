@@ -18,9 +18,6 @@ import {
   getAllSettings,
   getProduct,
   createFacebookDraft,
-  claimFacebookDraft,
-  getFacebookDrafts,
-  updateFacebookDraft,
   getEligibleHighlightProduct,
   markProductPosted,
   createNotification,
@@ -479,85 +476,6 @@ export async function maybeAutopostPriceDrop(
   }
 }
 
-// ─── Scheduled draft processing ──────────────────────────────────────
-
-export interface ScheduledDraftsResult {
-  processed: number;
-  success: number;
-  failed: number;
-}
-
-/**
- * Publish all drafts whose scheduled_at <= now.
- * Claim each draft via status='publishing' before starting publication
- * so a re-entrant cron call won't double-post the same draft.
- * On all-channels-fail: set status='failed' (per-channel errors are in the channels JSON).
- * On any-channel-success: publishDraftToChannels already sets status='published'.
- */
-export async function processScheduledDrafts(): Promise<ScheduledDraftsResult> {
-  const now = Math.floor(Date.now() / 1000);
-  const allScheduled = await getFacebookDrafts({ status: "scheduled" });
-  const due = allScheduled.filter((d) => d.scheduledAt !== null && d.scheduledAt <= now);
-
-  log(`processScheduledDrafts: ${due.length} due draft(s)`, { phase: "processScheduledDrafts", count: due.length });
-
-  const settings = await getAllSettings();
-  const channelsStr = settings.social_autopost_channels || "fb_ameublo,fb_furnish,ig_ameublo";
-  const validKeys = new Set<string>(Object.values(CHANNELS));
-  const keys = channelsStr
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => validKeys.has(s)) as ChannelKey[];
-
-  let success = 0;
-  let failed = 0;
-
-  for (const draft of due) {
-    const t0 = Date.now();
-    const claimed = await claimFacebookDraft(draft.id);
-    if (!claimed) {
-      log(`Draft #${draft.id}: claim failed — already claimed by another instance`, { phase: "processScheduledDrafts", draft_id: draft.id });
-      continue;
-    }
-
-    try {
-      if (keys.length === 0) {
-        await updateFacebookDraft(draft.id, { status: "failed" });
-        logError(`Draft #${draft.id}: no valid channels configured`, { draft_id: draft.id });
-        failed++;
-        continue;
-      }
-
-      const results = await publishDraftToChannels(draft.id, keys);
-      const successCount = results.filter((r) => r.state.status === "published").length;
-      const failCount = results.length - successCount;
-      const duration_ms = Date.now() - t0;
-
-      if (successCount === 0) {
-        const errors = results.map((r) => `${r.channel}=${r.state.error ?? "unknown"}`).join("; ");
-        await updateFacebookDraft(draft.id, { status: "failed" });
-        logError(`Draft #${draft.id}: all channels failed`, {
-          phase: "processScheduledDrafts", draft_id: draft.id,
-          channels: keys.join(","), errors, duration_ms,
-        });
-        failed++;
-      } else {
-        // publishDraftToChannels already set status='published'
-        log(`Draft #${draft.id} published`, {
-          phase: "processScheduledDrafts", draft_id: draft.id,
-          channels_attempted: keys.length, success_count: successCount,
-          fail_count: failCount, duration_ms,
-        });
-        success++;
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await updateFacebookDraft(draft.id, { status: "failed" });
-      logError(`Draft #${draft.id}: unexpected error`, { phase: "processScheduledDrafts", draft_id: draft.id, error: msg });
-      failed++;
-    }
-  }
-
-  log(`processScheduledDrafts complete`, { phase: "processScheduledDrafts", processed: due.length, success, failed });
-  return { processed: due.length, success, failed };
-}
+// processScheduledDrafts() and its /api/cron/social-scheduled route were removed when the
+// social-scheduled cron was retired: all scheduling now flows through publication_queue,
+// published by /api/cron/publisher. See the publication-scheduling section in CLAUDE.md.

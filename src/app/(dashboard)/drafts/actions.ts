@@ -1,40 +1,75 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { approveDraftDb, rejectDraftDb, getFacebookDraft, updateFacebookDraft, getScheduledDraftSlots } from "@/lib/database";
+import {
+  approveDraftDb,
+  rejectDraftDb,
+  getFacebookDraft,
+  updateFacebookDraft,
+  getSetting,
+  addToQueue,
+  getOccupiedQueueSlots,
+  QueueSlotTakenError,
+} from "@/lib/database";
 import { isAuthenticated } from "@/lib/auth";
 import { publishText } from "@/lib/facebook-client";
 import type { FacebookBrand } from "@/lib/facebook-client";
-import { langsOf, findSlot, buildOccupancy } from "@/lib/draft-scheduler";
+import { getNextAvailableSlot } from "@/lib/publication-scheduler";
+import { draftToQueueItems } from "@/lib/social-publisher";
+import { activeChannels } from "@/lib/config";
+
+/** SQLite datetime() text ('YYYY-MM-DD HH:MM:SS' UTC) → unix seconds. */
+function sqliteToUnixSec(s: string): number {
+  return Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
+}
 
 export async function approveDraft(draftId: number): Promise<{ error?: string; scheduledAt?: number }> {
   try {
     await approveDraftDb(draftId);
 
-    // Auto-schedule content_template drafts onto the next free Mon/Wed/Fri 10:00 EST
-    // (15:00 UTC) slot — 1 FR + 1 EN per slot. Product drafts stay 'approved' for
-    // manual scheduling. Failure here must not undo the approval, so it's best-effort.
-    // The per-slot cap is best-effort under concurrency: this is a read-compute-write
-    // without a lock, so two simultaneous approvals could pick the same slot. Acceptable
-    // for a single-operator manual-approval tool; revisit with a transaction/unique index
-    // if approvals ever become concurrent/automated. If no slot is free within the
-    // horizon, the draft stays 'approved' for manual scheduling.
+    // Auto-schedule content_template drafts into the publication queue — one item per active
+    // brand (caption + brand + images via draftToQueueItems) on the next free slot from the
+    // configurable `publication_schedule`. /api/cron/publisher drains the queue and publishes.
+    // Product drafts stay 'approved' for manual scheduling. The draft itself stays 'approved'
+    // (the schedule now lives in publication_queue, not facebook_drafts.status='scheduled' —
+    // the legacy social-scheduled cron is retired). Best-effort: a failure here must not undo
+    // the approval. Slot collisions are rejected by the queue's partial-unique index as
+    // QueueSlotTakenError, so retry past the now-taken slot (mirrors /api/social approve).
     let scheduledAt: number | undefined;
     try {
       const draft = await getFacebookDraft(draftId);
       if (draft && draft.triggerType === "content_template") {
-        const langs = langsOf(draft.postText, draft.postTextEn);
-        if (langs.fr || langs.en) {
-          const occupancy = buildOccupancy(await getScheduledDraftSlots());
-          const slot = findSlot(Math.floor(Date.now() / 1000), langs, occupancy);
-          if (slot != null) {
-            await updateFacebookDraft(draftId, { status: "scheduled", scheduled_at: slot });
-            scheduledAt = slot;
+        const settings = { publication_schedule: (await getSetting("publication_schedule")) ?? "" };
+        const nowSec = Math.floor(Date.now() / 1000);
+        const items = draftToQueueItems(draft, activeChannels());
+        for (const item of items) {
+          // Occupancy is per-platform; convert the queue's SQLite-datetime slots to unix sec.
+          const occupied = (await getOccupiedQueueSlots(item.platform)).map(sqliteToUnixSec);
+          for (let attempt = 0; attempt < 5; attempt++) {
+            const next = await getNextAvailableSlot("facebook", settings, { nowSec, occupied });
+            if (!next) break; // schedule disabled or no free slot within the horizon
+            try {
+              await addToQueue({
+                contentType: "social",
+                contentId: String(draftId),
+                platform: item.platform,
+                payload: JSON.stringify(item.payload),
+                scheduledAt: next.sqlite,
+              });
+              scheduledAt = scheduledAt === undefined ? next.at : Math.min(scheduledAt, next.at);
+              break;
+            } catch (err) {
+              if (err instanceof QueueSlotTakenError) {
+                occupied.push(next.at); // lost the race for this slot — recompute past it
+                continue;
+              }
+              throw err;
+            }
           }
         }
       }
     } catch (schedErr) {
-      console.error(`[approveDraft] auto-schedule failed for #${draftId}:`, schedErr);
+      console.error(`[approveDraft] auto-enqueue failed for #${draftId}:`, schedErr);
     }
 
     revalidatePath("/drafts");
