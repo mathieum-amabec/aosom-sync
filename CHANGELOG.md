@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.101] - 2026-06-18
+## [0.5.53.103] - 2026-06-18
 
 ### Added (`--repoll-errors` recovery mode for Meta advideos)
 - **`scripts/upload-meta-advideos.mjs`** — new `--repoll-errors` mode recovers rows stuck in
@@ -15,6 +15,34 @@ All notable changes to Aosom Sync will be documented in this file.
   batch. Exits non-zero if any row is still in error. Run under x64 node (see CLAUDE.md).
   Context: the v0.5.53.96 `--apply` run landed 70/87 ready and left 17 in error (SKUs
   84C-226CG, 84H-209V00CG, D51-277V01) when the Graph app quota tripped during polling.
+
+## [0.5.53.102] - 2026-06-18
+
+### Fixed (Brand sanitization — product URL handles, round 2)
+- **`scripts/fix-shopify-handles-2.mjs`** — de-brand the 117 Shopify product handles
+  that still embedded a supplier brand (`outsunny` ×113, `qaba` ×4 distinct — Google
+  feed audit found 160 `<link>` incl. variant dupes, 117 distinct products). Follow-up to
+  `fix-shopify-handles.mjs` (PR #208, which only stripped `aosom`). Strips the dash-anchored
+  brand token, renames via `PUT /products/{id}`, and **explicitly creates a 301**
+  (`POST /redirects.json`) per rename — the REST API does NOT auto-redirect (verified live;
+  the brief's auto-301 assumption was wrong), so without this the old indexed URLs would 404.
+  Dry-run by default; `--apply` writes. Backs up all originals to `data/shopify-backup/`
+  (gitignored) before any write; 2 req/s throttle + 429 backoff; idempotent (re-run skips
+  renamed handles, existing 301 → 422). Applied to prod: 117 renamed, 0 failed, 0 redirect
+  failures; re-scan 0 branded handles, 301→200 verified. Run under x64 node (see CLAUDE.md).
+
+## [0.5.53.101] - 2026-06-18
+
+### Added (Demand Gen videos dashboard)
+- **`src/app/(dashboard)/demand-gen-videos/`** — read-only dashboard page listing
+  the `video_demand_gen` assets (87 rows): SKU, FR title, ratio, duration, size,
+  Meta/YouTube upload badges (green when `meta_video_id` / `youtube_video_id` is
+  set), and a ▶ link to the public blob. Filterable by ratio and SKU, with
+  total / Meta `X/87` / YouTube `X/87` counters.
+- **`getDemandGenAssets()`** in `database.ts` and **`GET /api/demand-gen-videos`**
+  (auth-gated, https-only blob URLs) back the page. Uploads remain script-driven
+  (`upload-meta-advideos.mjs`, `upload-youtube.mjs`) — this view is read-only.
+- Sidebar nav entry "Demand Gen" (hidden from the reviewer role).
 
 ## [0.5.53.100] - 2026-06-18
 
