@@ -983,8 +983,9 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
       log(`purgeOldNotifications failed (non-fatal): ${purgeErr instanceof Error ? purgeErr.message : String(purgeErr)}`, { phase: "finalize" });
     }
 
-    // Retention: cron_runs + feed_syncs grow one row per invocation/fetch (social-scheduled
-    // alone = 96/day); the dashboard only reads the latest per name/feed. Keep 30 days. Non-fatal.
+    // Retention: cron_runs + feed_syncs grow one row per invocation/fetch (the publisher runs
+    // hourly, csv-precache 4x/day); the dashboard only reads the latest per name/feed. Keep 30
+    // days. Non-fatal.
     try {
       const t0Cron = Date.now();
       const purgedCron = await purgeOldCronRuns(30);
