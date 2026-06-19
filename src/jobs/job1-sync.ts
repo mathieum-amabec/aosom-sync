@@ -18,6 +18,9 @@ import {
   updateShopifyProduct,
   updateShopifyVariantPrice,
   draftShopifyProduct,
+  getPrimaryLocationId,
+  enableVariantTracking,
+  setInventoryLevel,
 } from "@/lib/shopify-client";
 import {
   createSyncRun,
@@ -224,6 +227,25 @@ async function applyToShopify(
             }
           })
         );
+
+        // Stock — push the safety-buffered quantity to Shopify inventory. The diff already
+        // applied the buffer (newValue = safeQty); enable tracking first (idempotent, and
+        // covers variants created untracked since the backfill), then set the level.
+        const stockChanges = diff.changes.filter((c) => c.field === "stock");
+        if (stockChanges.length > 0) {
+          const locationId = await getPrimaryLocationId();
+          await Promise.all(
+            stockChanges.map(async (change) => {
+              const variant = shopifyProduct?.variants.find((v) => v.sku === change.sku);
+              if (!variant || !variant.inventoryItemId || change.newValue === null) return;
+              const safeQty = Number(change.newValue);
+              const aosomQty = diff.aosomProduct?.variants.find((v) => v.sku === change.sku)?.qty ?? safeQty;
+              log(`stock buffer applied: aosom=${aosomQty} → shopify=${safeQty}`);
+              await enableVariantTracking(variant.inventoryItemId);
+              await setInventoryLevel(variant.inventoryItemId, locationId, safeQty);
+            })
+          );
+        }
       } else if (diff.action === "archive" && diff.shopifyId) {
         await draftShopifyProduct(diff.shopifyId);
         log(`Archivé: ${diff.groupKey}`);

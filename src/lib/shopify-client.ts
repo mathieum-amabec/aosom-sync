@@ -100,6 +100,7 @@ function mapShopifyProduct(raw: Record<string, unknown>): ShopifyExistingProduct
         sku: (v.sku as string) || "",
         price: parseFloat(v.price as string) || 0,
         inventoryQuantity: (v.inventory_quantity as number) || 0,
+        inventoryItemId: v.inventory_item_id != null ? String(v.inventory_item_id) : "",
         option1: (v.option1 as string) || null,
         option2: (v.option2 as string) || null,
         weight: parseFloat(v.weight as string) || 0,
@@ -306,6 +307,92 @@ export async function updateShopifyVariantPrice(
 
 export async function draftShopifyProduct(shopifyId: string): Promise<void> {
   await updateShopifyProduct(shopifyId, { status: "draft" });
+}
+
+// ─── Inventory tracking ─────────────────────────────────────────────
+// Dropship products historically shipped with `inventory_management: null`
+// (untracked — see createShopifyProduct). To push a safety-buffered quantity we
+// (1) resolve the store's primary location, (2) enable tracking on the variant's
+// inventory item, and (3) set its available level at that location.
+
+let _cachedLocationId: string | null = null;
+
+/**
+ * The store's primary location id (cached for the process). Prefers an active
+ * location, falling back to the first returned. Needs the `read_locations` scope.
+ */
+export async function getPrimaryLocationId(): Promise<string> {
+  if (_cachedLocationId) return _cachedLocationId;
+  const response = await shopifyFetch("/locations.json");
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify locations fetch failed: ${response.status} — ${text}`);
+  }
+  const data = await response.json();
+  const locations: Record<string, unknown>[] = data.locations || [];
+  const chosen = locations.find((l) => l.active === true) ?? locations[0];
+  if (!chosen) throw new Error("Shopify returned no locations");
+  _cachedLocationId = String(chosen.id);
+  return _cachedLocationId;
+}
+
+/**
+ * Enable Shopify inventory tracking for a variant's inventory item. Idempotent —
+ * re-running on an already-tracked item is a harmless no-op write. On API 2025-01
+ * this is the supported path (writing `variant.inventory_management` is deprecated).
+ * Needs the `write_inventory` scope.
+ */
+export async function enableVariantTracking(inventoryItemId: string): Promise<void> {
+  const response = await shopifyFetch(`/inventory_items/${inventoryItemId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ inventory_item: { id: Number(inventoryItemId), tracked: true } }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify enable tracking failed (${inventoryItemId}): ${response.status} — ${text}`);
+  }
+}
+
+/**
+ * Set the absolute available quantity for an inventory item at a location. If the
+ * item isn't stocked at the location yet, `set.json` 422s with a "not stocked"
+ * error — connect it first (`connect.json`), then retry the set. Needs
+ * `write_inventory` (and the item must already be tracked — see enableVariantTracking).
+ */
+export async function setInventoryLevel(
+  inventoryItemId: string,
+  locationId: string,
+  available: number,
+): Promise<void> {
+  const body = JSON.stringify({
+    location_id: Number(locationId),
+    inventory_item_id: Number(inventoryItemId),
+    available,
+  });
+  let response = await shopifyFetch("/inventory_levels/set.json", { method: "POST", body });
+
+  if (response.status === 422) {
+    const text = await response.text();
+    // Item not connected to this location yet → connect, then retry the set once.
+    if (/not stocked|connect/i.test(text)) {
+      const connect = await shopifyFetch("/inventory_levels/connect.json", {
+        method: "POST",
+        body: JSON.stringify({ location_id: Number(locationId), inventory_item_id: Number(inventoryItemId) }),
+      });
+      if (!connect.ok) {
+        const ctext = await connect.text();
+        throw new Error(`Shopify inventory connect failed (${inventoryItemId}): ${connect.status} — ${ctext}`);
+      }
+      response = await shopifyFetch("/inventory_levels/set.json", { method: "POST", body });
+    } else {
+      throw new Error(`Shopify set inventory failed (${inventoryItemId}): 422 — ${text}`);
+    }
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify set inventory failed (${inventoryItemId}): ${response.status} — ${text}`);
+  }
 }
 
 /**
