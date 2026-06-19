@@ -20,6 +20,7 @@
 //   --apply                           actually create (default: dry-run, sends nothing)
 //   --limit <N>                       cap the SKU set (default: bestsellers 50, summer 200)
 //   --daily-budget <cents>            ad set daily budget, account minor units (default 1500 = $15)
+//   --product-set-id <id>             reuse an existing product set (resume a retry; skips creation)
 //   --ad-account <act_…>              override the ad account id
 //
 // Campaign definitions (adapted to the REAL schema — see src/lib/database.ts):
@@ -75,6 +76,14 @@ function fail(msg) {
 }
 
 const APPLY = process.argv.includes("--apply");
+// Reuse an already-created product set instead of creating a new one. Meta rejects a
+// second set with an identical filter ((#10803) duplicate filter), so on a retry after a
+// mid-chain failure, pass the product_set_id from the first run to resume cleanly.
+const PRODUCT_SET_ID = flag("product-set-id");
+// Same idea for the campaign: resume from an already-created campaign after a mid-chain
+// failure (e.g. the ad set POST failed) instead of orphaning a fresh PAUSED campaign.
+const REUSE_CAMPAIGN_ID = flag("campaign-id");
+const REUSE_ADSET_ID = flag("adset-id");
 const CAMPAIGN = (flag("campaign") || "").toLowerCase();
 const DAILY_BUDGET = flag("daily-budget") ? Math.max(100, parseInt(flag("daily-budget"), 10)) : 1500;
 if (CAMPAIGN !== "summer" && CAMPAIGN !== "bestsellers") {
@@ -86,6 +95,18 @@ const LIMIT = flag("limit")
 
 const env = loadEnv();
 const TOKEN = env.META_ACCESS_TOKEN;
+// OUTCOME_SALES + OFFSITE_CONVERSIONS optimizes for the PURCHASE pixel event, so the ad
+// set's promoted_object needs the pixel id alongside the product set. NOTE: this is the AD
+// ACCOUNT's conversion pixel, which can differ from the storefront's client-side pixel
+// (NEXT_PUBLIC_META_PIXEL_ID). Referencing a pixel the ad account can't optimize against
+// fails with a generic Graph "(#2) unexpected error". Override with --pixel-id.
+const PIXEL_ID = flag("pixel-id") || env.META_ADS_PIXEL_ID || env.NEXT_PUBLIC_META_PIXEL_ID;
+// This ad account has NO ads-linked Instagram account (act/instagram_accounts is empty),
+// so the ad set runs Facebook-only placements (below) and the creative needs no IG actor.
+// Pass --instagram-id only if a valid *ads* IG account id is later linked (the organic
+// content-publishing IG id in INSTAGRAM_AMEUBLO_ACCOUNT_ID is a different namespace and is
+// rejected as "not a valid Instagram account id").
+const IG_ACTOR_ID = flag("instagram-id");
 const AD_ACCOUNT = (() => {
   const a = flag("ad-account") || env.META_AD_ACCOUNT_ID || "20658834";
   return a.startsWith("act_") ? a : `act_${a}`;
@@ -177,15 +198,30 @@ function buildPayloads(skus) {
   };
   const campaign = {
     name: COPY.campaignName,
-    objective: "PRODUCT_CATALOG_SALES",
+    // ODAX objective for catalog/DPA sales. The legacy PRODUCT_CATALOG_SALES is rejected
+    // by Graph v18 ((#100) invalid objective); OUTCOME_SALES + a product-set promoted_object
+    // on the ad set is the current DPA path.
+    objective: "OUTCOME_SALES",
     status: "PAUSED",
     special_ad_categories: ["NONE"],
+    // Required by OUTCOME_SALES when budget lives on the ad set (no campaign budget):
+    // Meta (#100) demands an explicit True/False. False = each ad set keeps its own budget.
+    is_adset_budget_sharing_enabled: false,
   };
   const adSet = {
     name: `${COPY.campaignName} — Prospection CA`,
-    // campaign_id + promoted_object.product_set_id filled in after creation
-    promoted_object: { product_set_id: "<product_set_id>", custom_event_type: "PURCHASE" },
-    targeting: { geo_locations: { countries: ["CA"] } },
+    // Mirrors a working catalog ad set on this account: WEBSITE destination + a promoted_object
+    // carrying product_catalog_id AND product_set_id, plus the pixel + PURCHASE event for
+    // OFFSITE_CONVERSIONS. (product_set_id filled in after creation.)
+    destination_type: "WEBSITE",
+    promoted_object: {
+      product_set_id: "<product_set_id>",
+      pixel_id: PIXEL_ID,
+      custom_event_type: "PURCHASE",
+    },
+    // Facebook-only: this ad account has no ads-linked IG account, and an all-placements
+    // ad set forces the ad to demand an Instagram actor it can't supply.
+    targeting: { geo_locations: { countries: ["CA"] }, publisher_platforms: ["facebook"] },
     billing_event: "IMPRESSIONS",
     optimization_goal: "OFFSITE_CONVERSIONS",
     bid_strategy: "LOWEST_COST_WITHOUT_CAP",
@@ -197,6 +233,7 @@ function buildPayloads(skus) {
     product_set_id: "<product_set_id>",
     object_story_spec: {
       page_id: PAGE_ID,
+      ...(IG_ACTOR_ID ? { instagram_actor_id: IG_ACTOR_ID } : {}),
       template_data: {
         message: COPY.message,
         link: STORE_URL,
@@ -282,22 +319,41 @@ try {
   if (!dbg.data?.is_valid) fail("Token is not valid (debug_token). Rotate per docs/META-TOKEN-ROTATION.md.");
   const scopes = dbg.data?.scopes ?? [];
   if (!scopes.includes("ads_management")) fail(`Token lacks ads_management scope (has: ${scopes.join(", ") || "none"}).`);
+  if (!PIXEL_ID) fail("NEXT_PUBLIC_META_PIXEL_ID not set in .env.local — required for OUTCOME_SALES purchase optimization.");
   console.log("  token valid, ads_management present.");
 
-  console.log("\n1) Creating product set …");
-  const productSet = await graph(`${CATALOG_ID}/product_sets`, { method: "POST", body: payloads.productSet });
-  console.log("  product_set_id =", productSet.id);
+  let productSet;
+  if (PRODUCT_SET_ID) {
+    console.log(`\n1) Reusing existing product set ${PRODUCT_SET_ID} (skipping creation) …`);
+    productSet = { id: PRODUCT_SET_ID };
+  } else {
+    console.log("\n1) Creating product set …");
+    productSet = await graph(`${CATALOG_ID}/product_sets`, { method: "POST", body: payloads.productSet });
+    console.log("  product_set_id =", productSet.id);
+  }
 
-  console.log("2) Creating campaign (PAUSED) …");
-  const campaign = await graph(`${AD_ACCOUNT}/campaigns`, { method: "POST", body: payloads.campaign });
-  console.log("  campaign_id =", campaign.id);
+  let campaign;
+  if (REUSE_CAMPAIGN_ID) {
+    console.log(`2) Reusing existing campaign ${REUSE_CAMPAIGN_ID} (skipping creation) …`);
+    campaign = { id: REUSE_CAMPAIGN_ID };
+  } else {
+    console.log("2) Creating campaign (PAUSED) …");
+    campaign = await graph(`${AD_ACCOUNT}/campaigns`, { method: "POST", body: payloads.campaign });
+    console.log("  campaign_id =", campaign.id);
+  }
 
-  console.log("3) Creating ad set (PAUSED) …");
-  const adSet = await graph(`${AD_ACCOUNT}/adsets`, {
-    method: "POST",
-    body: { ...payloads.adSet, campaign_id: campaign.id, promoted_object: { product_set_id: productSet.id, custom_event_type: "PURCHASE" } },
-  });
-  console.log("  adset_id =", adSet.id);
+  let adSet;
+  if (REUSE_ADSET_ID) {
+    console.log(`3) Reusing existing ad set ${REUSE_ADSET_ID} (skipping creation) …`);
+    adSet = { id: REUSE_ADSET_ID };
+  } else {
+    console.log("3) Creating ad set (PAUSED) …");
+    adSet = await graph(`${AD_ACCOUNT}/adsets`, {
+      method: "POST",
+      body: { ...payloads.adSet, campaign_id: campaign.id, promoted_object: { product_set_id: productSet.id, pixel_id: PIXEL_ID, custom_event_type: "PURCHASE" } },
+    });
+    console.log("  adset_id =", adSet.id);
+  }
 
   console.log("4) Creating ad creative (PAUSED) …");
   const creative = await graph(`${AD_ACCOUNT}/adcreatives`, {
