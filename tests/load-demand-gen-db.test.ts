@@ -53,6 +53,7 @@ describe("buildRows", () => {
   it("falls back to null metadata when the sku is missing from videos[]", () => {
     const rows = buildRows(FIXTURE);
     const r = rows.find((x) => x.sku === "01-0415");
+    if (!r) throw new Error("expected a 01-0415 row in the result");
     expect(r.title_fr).toBeNull();
     expect(r.shopify_product_id).toBeNull();
   });

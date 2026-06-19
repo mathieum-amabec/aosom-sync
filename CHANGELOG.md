@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.95] - 2026-06-18
+
+### Fixed (Typecheck — demand-gen test)
+- **`tests/load-demand-gen-db.test.ts`** — `buildRows(...).find(...)` returns `T | undefined`,
+  so accessing `.title_fr` / `.shopify_product_id` tripped `TS18048 'r' is possibly undefined`
+  under `tsc --noEmit` (the project's typecheck was red on `main`). Added an `if (!r) throw`
+  guard that narrows the type and fails the test clearly if the expected `01-0415` row ever
+  goes missing, instead of silencing it with a non-null assertion.
+
 ## [0.5.53.94] - 2026-06-18
 
 ### Fixed (Brand sanitization — EN title metafields)
