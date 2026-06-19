@@ -55,6 +55,7 @@ function makeShopifyProduct(overrides: Partial<ShopifyExistingProduct> & {
     bodyHtml: "<p>Some description</p>",
     productType: "Furniture",
     images: ["https://cdn.example.com/img.jpg"],
+    tags: [],
     variants: [
       {
         variantId,

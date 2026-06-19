@@ -9,7 +9,7 @@
  */
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { mergeVariants } from "@/lib/variant-merger";
-import { computeDiffs, summarizeDiffs } from "@/lib/diff-engine";
+import { computeDiffs, summarizeDiffs, applyStockTags, productInStock } from "@/lib/diff-engine";
 import { SYNC } from "@/lib/config";
 import type { AosomProduct } from "@/types/aosom";
 import type { SyncLogEntry } from "@/types/sync";
@@ -202,6 +202,14 @@ async function applyToShopify(
         const productUpdates: Parameters<typeof updateShopifyProduct>[1] = {};
         if (diff.changes.some((c) => c.field === "images")) productUpdates.images = diff.aosomProduct.images;
         if (diff.changes.some((c) => c.field === "description")) productUpdates.bodyHtml = diff.aosomProduct.description;
+        if (diff.changes.some((c) => c.field === "tags")) {
+          const sp = shopifyMap.get(diff.shopifyId);
+          if (sp) {
+            const inStock = productInStock(diff.aosomProduct.variants);
+            productUpdates.tags = applyStockTags(sp.tags, inStock);
+            log(`stock tags: ${diff.productName} → ${inStock ? "back-in-stock" : "out-of-stock"}`);
+          }
+        }
 
         if (Object.keys(productUpdates).length > 0) {
           await updateShopifyProduct(diff.shopifyId, productUpdates);

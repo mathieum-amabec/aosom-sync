@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeDiffs, summarizeDiffs, stockBufferQty } from "@/lib/diff-engine";
+import { computeDiffs, summarizeDiffs, stockBufferQty, applyStockTags } from "@/lib/diff-engine";
 import type { AosomMergedProduct } from "@/types/aosom";
 import type { ShopifyExistingProduct } from "@/types/sync";
 
@@ -46,6 +46,8 @@ function makeShopify(overrides: Partial<ShopifyExistingProduct> = {}): ShopifyEx
     bodyHtml: "<p>Description</p>",
     productType: "Test",
     images: ["https://img.com/1.jpg"],
+    // Baseline aosom qty 10 → buffered 7 (in stock), so the consistent tag is back-in-stock.
+    tags: ["back-in-stock"],
     variants: [
       {
         variantId: "V1",
@@ -213,6 +215,44 @@ describe("stockBufferQty (safety buffer: qty<=5 → 0, else qty-3)", () => {
     expect(stockBufferQty(6)).toBe(3); // boundary: first above → 6 - 3
     expect(stockBufferQty(8)).toBe(5);
     expect(stockBufferQty(100)).toBe(97);
+  });
+});
+
+describe("applyStockTags (mutually-exclusive stock-state pair, preserves others)", () => {
+  it("adds back-in-stock and removes out-of-stock when in stock", () => {
+    expect(applyStockTags(["sale", "out-of-stock"], true)).toEqual(["sale", "back-in-stock"]);
+  });
+  it("adds out-of-stock and removes back-in-stock when out", () => {
+    expect(applyStockTags(["sale", "back-in-stock"], false)).toEqual(["sale", "out-of-stock"]);
+  });
+  it("is case-insensitive on the pair (no duplicates)", () => {
+    expect(applyStockTags(["Back-In-Stock"], false)).toEqual(["out-of-stock"]);
+  });
+});
+
+describe("stock-state tag transitions (computeDiffs)", () => {
+  it("flips to out-of-stock when all variants buffer to 0", () => {
+    const aosom = makeAosom();
+    aosom.variants[0].qty = 4; // <=5 → 0 → out of stock
+    const diffs = computeDiffs([aosom], [makeShopify()]); // baseline tags ["back-in-stock"]
+    const tagChange = diffs[0].changes.find((c) => c.field === "tags")!;
+    expect(tagChange).toBeDefined();
+    expect(tagChange.newValue).toBe("out-of-stock");
+  });
+
+  it("flips to back-in-stock when a variant returns to (buffered) stock", () => {
+    const aosom = makeAosom(); // qty 10 → buffered 7 → in stock
+    const shopify = makeShopify({ tags: ["out-of-stock"] });
+    shopify.variants[0].inventoryQuantity = 0;
+    const diffs = computeDiffs([aosom], [shopify]);
+    const tagChange = diffs[0].changes.find((c) => c.field === "tags")!;
+    expect(tagChange.newValue).toBe("back-in-stock");
+  });
+
+  it("emits no tag change when the stock state already matches the tags", () => {
+    // Baseline: in stock + tags already ["back-in-stock"] → no tag diff.
+    const diffs = computeDiffs([makeAosom()], [makeShopify()]);
+    expect(diffs.some((d) => d.changes.some((c) => c.field === "tags"))).toBe(false);
   });
 });
 

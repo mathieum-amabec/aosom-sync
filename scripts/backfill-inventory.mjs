@@ -1,8 +1,13 @@
 #!/usr/bin/env node
 /**
- * One-time backfill: enable Shopify inventory tracking on every existing variant and
- * set its available level to the safety-buffered Aosom quantity. After this runs once,
- * the daily sync (diff-engine → applyToShopify) keeps levels current.
+ * One-time backfill: enable Shopify inventory tracking on every existing variant, set its
+ * available level to the safety-buffered Aosom quantity, and set each product's stock-state
+ * tag (out-of-stock / back-in-stock) off the buffered availability. After this runs once,
+ * the daily sync (diff-engine → applyToShopify) keeps levels and tags current.
+ *
+ * Stock-state tags are product-level (a product is in stock when ANY variant buffers > 0):
+ *   all variants buffer to 0 → "out-of-stock" (back-in-stock removed)
+ *   any variant buffers > 0  → "back-in-stock" (out-of-stock removed)
  *
  * Safety buffer (MUST match stockBufferQty in src/lib/diff-engine.ts):
  *   aosom_qty <= 5 → 0 (épuisé) ;  aosom_qty > 5 → aosom_qty - 3
@@ -35,6 +40,24 @@ const LIMIT = limitArg !== -1 ? parseInt(process.argv[limitArg + 1], 10) : Infin
 
 // Keep in sync with stockBufferQty() in src/lib/diff-engine.ts.
 const safeQtyOf = (q) => (q <= 5 ? 0 : q - 3);
+
+// Stock-state tags (mutually exclusive), driven off buffered availability.
+// Keep in sync with applyStockTags() in src/lib/diff-engine.ts.
+const TAG_OUT = "out-of-stock";
+const TAG_BACK = "back-in-stock";
+function applyStockTags(currentTags, inStock) {
+  const kept = currentTags.filter((t) => {
+    const lc = t.toLowerCase();
+    return lc !== TAG_OUT && lc !== TAG_BACK;
+  });
+  kept.push(inStock ? TAG_BACK : TAG_OUT);
+  return kept;
+}
+function tagsEqual(a, b) {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort(), sb = [...b].sort();
+  return sa.every((t, i) => t === sb[i]);
+}
 
 function envVal(name) {
   if (process.env[name]) return process.env[name];
@@ -94,6 +117,14 @@ async function setLevel(itemId, locationId, available) {
   if (!r.ok) throw new Error(`set level ${itemId}: ${r.status} — ${await r.text()}`);
 }
 
+async function setProductTags(productId, tags) {
+  const r = await req(`/products/${productId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ product: { id: Number(productId), tags: tags.join(", ") } }),
+  });
+  if (!r.ok) throw new Error(`set tags ${productId}: ${r.status} — ${await r.text()}`);
+}
+
 console.log(`Mode: ${APPLY ? "APPLY (writing)" : "DRY-RUN (no writes)"}${LIMIT !== Infinity ? `  limit=${LIMIT}` : ""}\n`);
 
 // 1. Aosom qty per SKU from the products table.
@@ -111,28 +142,37 @@ if (!location) throw new Error("no Shopify locations");
 const locationId = String(location.id);
 console.log(`location: ${locationId} "${location.name}"\n`);
 
-// 3. All Shopify variants (sku → inventory_item_id).
+// 3. All Shopify products + variants (sku → inventory_item_id; product → tags).
 const variants = [];
+const products = []; // { id, tags:[], skus:[] } — tags are product-level
 let pageInfo = null;
 do {
-  const params = new URLSearchParams({ limit: "250", fields: "id,variants" });
+  const params = new URLSearchParams({ limit: "250", fields: "id,variants,tags" });
   if (pageInfo) params.set("page_info", pageInfo);
   const r = await req(`/products.json?${params}`);
   if (!r.ok) throw new Error(`products: ${r.status} — ${await r.text()}`);
   const data = await r.json();
-  for (const p of data.products) for (const v of (p.variants || [])) {
-    if (v.sku && v.inventory_item_id) variants.push({ sku: v.sku, itemId: String(v.inventory_item_id), inventory_management: v.inventory_management, current: v.inventory_quantity });
+  for (const p of data.products) {
+    const skus = [];
+    for (const v of (p.variants || [])) {
+      if (v.sku && v.inventory_item_id) {
+        variants.push({ sku: v.sku, itemId: String(v.inventory_item_id), inventory_management: v.inventory_management, current: v.inventory_quantity });
+        skus.push(v.sku);
+      }
+    }
+    const tags = typeof p.tags === "string" ? p.tags.split(",").map((t) => t.trim()).filter(Boolean) : [];
+    products.push({ id: String(p.id), tags, skus });
   }
   const link = r.headers.get("Link"); const m = link && link.match(/<[^>]*page_info=([^&>]+)[^>]*>;\s*rel="next"/);
   pageInfo = m ? m[1] : null;
 } while (pageInfo);
-console.log(`shopify variants: ${variants.length}\n`);
+console.log(`shopify products: ${products.length}, variants: ${variants.length}\n`);
 
-// 4. Backup pre-migration state.
+// 4. Backup pre-migration state (variants + product tags).
 mkdirSync("data/shopify-backup", { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const backupPath = `data/shopify-backup/inventory-backfill-${stamp}.json`;
-writeFileSync(backupPath, JSON.stringify({ locationId, variants }, null, 2));
+writeFileSync(backupPath, JSON.stringify({ locationId, variants, products }, null, 2));
 console.log(`backup written: ${backupPath}\n`);
 
 // 5. Process.
@@ -157,9 +197,30 @@ for (const v of variants) {
   }
 }
 
+// 6. Product stock-state tags (out-of-stock / back-in-stock), driven off buffered
+// availability: a product is in stock when ANY of its variants buffers > 0. --limit
+// caps the inventory pass above, not tags. Only writes when the tag set changes.
+console.log(`\n--- tags ---`);
+let tagChanged = 0, tagSkipped = 0, tagFailed = 0;
+for (const p of products) {
+  const known = p.skus.filter((s) => qtyBySku.has(s));
+  if (known.length === 0) { tagSkipped++; continue; } // no products-table qty → leave tags alone
+  const inStock = known.some((s) => safeQtyOf(qtyBySku.get(s)) > 0);
+  const desired = applyStockTags(p.tags, inStock);
+  if (tagsEqual(desired, p.tags)) { tagSkipped++; continue; }
+  console.log(`product ${p.id} : ${inStock ? "back-in-stock" : "out-of-stock"}  (was: [${p.tags.join(", ")}])`);
+  if (!APPLY) { tagChanged++; continue; }
+  try {
+    await setProductTags(p.id, desired);
+    await sleep(THROTTLE_MS);
+    tagChanged++;
+  } catch (err) {
+    tagFailed++;
+    console.error(`  ✗ product ${p.id}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 console.log(`\n=== SUMMARY ===`);
-console.log(`processed:        ${processed}`);
-console.log(`${APPLY ? "written" : "would write"}: ${changed}`);
-console.log(`skipped (no qty in products table): ${skippedNoQty}`);
-console.log(`failed:           ${failed}`);
+console.log(`inventory: processed=${processed}  ${APPLY ? "written" : "would write"}=${changed}  skipped(no qty)=${skippedNoQty}  failed=${failed}`);
+console.log(`tags:      ${APPLY ? "written" : "would write"}=${tagChanged}  unchanged/skipped=${tagSkipped}  failed=${tagFailed}`);
 console.log(APPLY ? "Applied." : "Dry-run only. Re-run with --apply to write.");

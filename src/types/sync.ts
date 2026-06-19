@@ -12,6 +12,8 @@ export interface ShopifyExistingProduct {
   images: string[];
   bodyHtml: string;
   productType: string;
+  /** Product tags (Shopify stores these comma-separated; split into a list here). */
+  tags: string[];
 }
 
 export interface ShopifyExistingVariant {
@@ -30,6 +32,7 @@ export interface ShopifyExistingVariant {
 export type ChangeType =
   | "price"
   | "stock"
+  | "tags"
   | "images"
   | "description"
   | "title"

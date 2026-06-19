@@ -66,7 +66,7 @@ export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[
   do {
     const params = new URLSearchParams({
       limit: "250",
-      fields: "id,title,status,variants,images,body_html,product_type",
+      fields: "id,title,status,variants,images,body_html,product_type,tags",
     });
     if (pageInfo) params.set("page_info", pageInfo);
 
@@ -93,6 +93,10 @@ function mapShopifyProduct(raw: Record<string, unknown>): ShopifyExistingProduct
     status: (raw.status as "active" | "draft" | "archived") || "active",
     bodyHtml: (raw.body_html as string) || "",
     productType: (raw.product_type as string) || "",
+    // Shopify returns tags as a comma-separated string; normalize to a trimmed list.
+    tags: typeof raw.tags === "string"
+      ? raw.tags.split(",").map((t) => t.trim()).filter(Boolean)
+      : [],
     images: images.map((img) => (img.src as string) || ""),
     variants: variants.map(
       (v): ShopifyExistingVariant => ({
@@ -256,6 +260,7 @@ export async function updateShopifyProduct(
     bodyHtml?: string;
     images?: string[];
     status?: "active" | "draft" | "archived";
+    tags?: string[];
   }
 ): Promise<void> {
   const payload: Record<string, unknown> = { id: shopifyId };
@@ -265,6 +270,7 @@ export async function updateShopifyProduct(
   if (updates.images !== undefined) {
     payload.images = updates.images.map((src) => ({ src }));
   }
+  if (updates.tags !== undefined) payload.tags = updates.tags.join(", ");
 
   const response = await shopifyFetch(`/products/${shopifyId}.json`, {
     method: "PUT",
