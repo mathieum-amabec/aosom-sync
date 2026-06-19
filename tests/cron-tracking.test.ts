@@ -27,6 +27,22 @@ describe("trackCron", () => {
     expect(rec).toHaveBeenCalledWith("csv-precache", "error", "weird");
   });
 
+  it("records the summarize() output as the success detail", async () => {
+    const result = await trackCron(
+      "publisher",
+      async () => ({ processed: 3, deferred: 1, published: 2, failed: 1 }),
+      (r) => `${r.processed + r.deferred} due, ${r.published} published, ${r.failed} failed`,
+    );
+    expect(result).toEqual({ processed: 3, deferred: 1, published: 2, failed: 1 });
+    expect(rec).toHaveBeenCalledWith("publisher", "success", "4 due, 2 published, 1 failed");
+  });
+
+  it("swallows a summarize() throw and still records success without detail", async () => {
+    const result = await trackCron("publisher", async () => 7, () => { throw new Error("fmt bug"); });
+    expect(result).toBe(7);
+    expect(rec).toHaveBeenCalledWith("publisher", "success", undefined);
+  });
+
   // Best-effort recording (a recordCronRun failure must not fail the cron run, nor
   // mask the original error) is covered end-to-end by the route tests: cron-content
   // and csv-precache partial-mock @/lib/database WITHOUT recordCronRun, so the call

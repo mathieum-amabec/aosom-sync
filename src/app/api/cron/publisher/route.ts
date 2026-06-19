@@ -31,7 +31,13 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await trackCron("publisher", () => drainPublisherQueue());
+    const result = await trackCron(
+      "publisher",
+      () => drainPublisherQueue(),
+      // "due" = items the run actually saw this hour (handled + deferred past the time
+      // budget), capped at the drain limit. Surfaces the run's effect on the dashboard.
+      (r) => `${r.processed + r.deferred} due, ${r.published} published, ${r.failed} failed`,
+    );
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
     console.error(`[CRON] publisher drain failed:`, err);
