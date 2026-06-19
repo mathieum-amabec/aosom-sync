@@ -17,6 +17,19 @@ All notable changes to Aosom Sync will be documented in this file.
   renamed handles, existing 301 → 422). Applied to prod: 117 renamed, 0 failed, 0 redirect
   failures; re-scan 0 branded handles, 301→200 verified. Run under x64 node (see CLAUDE.md).
 
+## [0.5.53.101] - 2026-06-18
+
+### Added (Demand Gen videos dashboard)
+- **`src/app/(dashboard)/demand-gen-videos/`** — read-only dashboard page listing
+  the `video_demand_gen` assets (87 rows): SKU, FR title, ratio, duration, size,
+  Meta/YouTube upload badges (green when `meta_video_id` / `youtube_video_id` is
+  set), and a ▶ link to the public blob. Filterable by ratio and SKU, with
+  total / Meta `X/87` / YouTube `X/87` counters.
+- **`getDemandGenAssets()`** in `database.ts` and **`GET /api/demand-gen-videos`**
+  (auth-gated, https-only blob URLs) back the page. Uploads remain script-driven
+  (`upload-meta-advideos.mjs`, `upload-youtube.mjs`) — this view is read-only.
+- Sidebar nav entry "Demand Gen" (hidden from the reviewer role).
+
 ## [0.5.53.100] - 2026-06-18
 
 ### Changed (comment cleanup — retire stale social-scheduled references)
