@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.102] - 2026-06-18
+
+### Fixed (Brand sanitization — product URL handles, round 2)
+- **`scripts/fix-shopify-handles-2.mjs`** — de-brand the 117 Shopify product handles
+  that still embedded a supplier brand (`outsunny` ×113, `qaba` ×4 distinct — Google
+  feed audit found 160 `<link>` incl. variant dupes, 117 distinct products). Follow-up to
+  `fix-shopify-handles.mjs` (PR #208, which only stripped `aosom`). Strips the dash-anchored
+  brand token, renames via `PUT /products/{id}`, and **explicitly creates a 301**
+  (`POST /redirects.json`) per rename — the REST API does NOT auto-redirect (verified live;
+  the brief's auto-301 assumption was wrong), so without this the old indexed URLs would 404.
+  Dry-run by default; `--apply` writes. Backs up all originals to `data/shopify-backup/`
+  (gitignored) before any write; 2 req/s throttle + 429 backoff; idempotent (re-run skips
+  renamed handles, existing 301 → 422). Applied to prod: 117 renamed, 0 failed, 0 redirect
+  failures; re-scan 0 branded handles, 301→200 verified. Run under x64 node (see CLAUDE.md).
+
 ## [0.5.53.100] - 2026-06-18
 
 ### Changed (comment cleanup — retire stale social-scheduled references)
