@@ -2,6 +2,36 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.106] - 2026-06-19
+
+### Added (Shopify inventory tracking + stock safety buffer)
+- **`src/lib/shopify-client.ts`** — three inventory functions: `getPrimaryLocationId()`
+  (`GET /locations.json`, cached), `enableVariantTracking(inventoryItemId)`
+  (`PUT /inventory_items/{id}.json {tracked:true}` — the supported path on API 2025-01,
+  where writing `variant.inventory_management` is deprecated), and
+  `setInventoryLevel(inventoryItemId, locationId, available)` (`POST /inventory_levels/set.json`,
+  with a `connect.json` fallback on the not-stocked 422). `fetchAllShopifyProducts` now maps
+  `inventory_item_id` onto each variant (`ShopifyExistingVariant.inventoryItemId`).
+- **`src/lib/diff-engine.ts`** — reactivated the variant stock diff (disabled since dropship
+  went untracked). New exported `stockBufferQty(qty)`: **`qty <= 5 → 0` (épuisé), else `qty - 3`**.
+  Emits a `stock` change only when the buffered qty differs from Shopify's current available
+  (no no-op churn). `summarizeDiffs` counts `stockChanges` again.
+- **`src/jobs/job1-sync.ts`** — `applyToShopify` pushes buffered stock on `update` diffs:
+  `enableVariantTracking` then `setInventoryLevel(inventory_item_id, locationId, safeQty)`,
+  logging `stock buffer applied: aosom=X → shopify=Y`.
+- **`scripts/backfill-inventory.mjs`** — one-time migration for the existing catalogue:
+  per variant, enable tracking + set the buffered level (qty from the `products` table).
+  Dry-run by default (`--apply` to write, `--limit N`), 2 req/s throttle, pre-migration
+  backup to `data/shopify-backup/`, idempotent. Logs `SKU X : aosom=Y → shopify=Z`.
+- Tests: `stockBufferQty` boundary (5→0, 6→3) + diff/no-diff stock behavior.
+
+⚠️ **Activation is gated.** The current `SHOPIFY_ACCESS_TOKEN` lacks `read_locations` /
+`read_inventory` / `write_inventory` — add those scopes before any live push. Enabling
+tracking with `inventory_policy=deny` (all 1126 variants today) makes a variant at
+available=0 **unbuyable**; measure how many `products.qty <= 5` before the backfill. Run the
+backfill (`--apply`) only after scopes are confirmed + a checkpoint. Daily sync stock-push
+should be enabled only after the backfill, so the first run doesn't flood the Phase-2 queue.
+
 ## [0.5.53.104] - 2026-06-19
 
 ### Added (Meta DPA campaign builder — summer + best-sellers)
