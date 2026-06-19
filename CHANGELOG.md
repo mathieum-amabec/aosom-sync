@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.98] - 2026-06-18
+
+### Fixed (enqueue orphaned approved drafts into publication_queue)
+- **`scripts/fix-orphan-drafts.mjs`** — one-off backfill for 6 approved
+  `facebook_drafts` (ids 345, 332, 324, 287, 282, 281) that predated the queue
+  cutover and were never enqueued, so neither cron path would ever publish them.
+  Replays the `/api/social` `approve` path exactly — reuses `draftToQueueItems`,
+  `getNextAvailableSlot`, and `addToQueue` rather than reimplementing scheduling
+  or payload logic, so it can't drift from production behavior. Enqueues
+  platform-correct, publishable items (`caption` + `brand`) onto the next free
+  `publication_schedule` slots, with per-platform occupancy accumulated in-memory
+  so each item lands on a distinct slot. Dry-run by default; `--apply` writes.
+  Idempotent — skips any `(content_id, platform)` already in the queue. Applied to
+  production: 11 items enqueued (6 ameublo `both` + 5 furnish `facebook`), 0
+  approved orphans remain. Run under x64 node — see CLAUDE.md "Windows ARM64".
+
 ## [0.5.53.96] - 2026-06-18
 
 ### Changed (publisher cron run summary in cron_runs.detail)
