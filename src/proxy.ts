@@ -11,6 +11,8 @@ import { AUTH } from "@/lib/config";
 // "/api/price-alert" is public so the Shopify storefront can POST price-drop
 // signups (cross-origin, CORS-guarded, rate-limited); its /notify cron child
 // self-gates on CRON_SECRET.
+// "/api/waitlist" is public for the same reason: the Shopify storefront POSTs
+// "notify me when back in stock" signups (cross-origin, CORS-guarded, rate-limited).
 // "/api/video-serve" is public so the Facebook/Instagram Graph APIs can fetch a
 // generated video by id when publishing a Reel (they fetch the URL themselves,
 // with no session). The route only serves video_jobs rows that exist in the DB.
@@ -21,7 +23,7 @@ import { AUTH } from "@/lib/config";
 // "/api/revalidate" is public for the same reason: it's called server-to-server with
 // Bearer CRON_SECRET (no session cookie) to refresh the feeds; the route self-gates on
 // CRON_SECRET. Without this it would 307 to /login before its own auth runs.
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/feeds", "/api/revalidate", "/api/image-preview", "/api/price-alert", "/api/video-serve"];
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/feeds", "/api/revalidate", "/api/image-preview", "/api/price-alert", "/api/waitlist", "/api/video-serve"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(

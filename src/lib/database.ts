@@ -329,6 +329,23 @@ async function _initSchemaImpl(): Promise<void> {
       token_expires_at INTEGER,
       UNIQUE(email, sku)
     )`,
+    // back_in_stock_waitlist: storefront "notify me when back in stock" signups.
+    // One row per (email, sku); notified_at stamped once the restock email fires
+    // (Job 1 detectChanges → notifyBackInStockWaitlist). Double opt-in (CASL):
+    // confirmed=0 until the recipient clicks the emailed token, and only confirmed
+    // rows are ever emailed on restock — mirrors price_alerts.
+    `CREATE TABLE IF NOT EXISTS back_in_stock_waitlist (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      sku TEXT NOT NULL,
+      shopify_product_id TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      notified_at INTEGER,
+      confirmed INTEGER DEFAULT 0,
+      confirm_token TEXT,
+      token_expires_at INTEGER,
+      UNIQUE(email, sku)
+    )`,
     // cron_runs: one row per cron invocation (last-run status surfaced on the dashboard).
     `CREATE TABLE IF NOT EXISTS cron_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -349,6 +366,8 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_video_jobs_created_at ON video_jobs(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_price_alerts_sku ON price_alerts(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_price_alerts_pending ON price_alerts(notified_at)`,
+    // (sku, notified_at): serves getPendingWaitlist — seek by sku, filter notified_at IS NULL.
+    `CREATE INDEX IF NOT EXISTS idx_waitlist_sku_pending ON back_in_stock_waitlist(sku, notified_at)`,
     `CREATE INDEX IF NOT EXISTS idx_cron_runs_name_at ON cron_runs(name, ran_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_feed_syncs_type_at ON feed_syncs(feed_type, fetched_at DESC)`,
     // publication_queue: unified scheduling queue for social posts, Shopify product
@@ -1496,6 +1515,84 @@ export async function markPriceAlertsNotified(ids: number[]): Promise<void> {
   const placeholders = ids.map(() => "?").join(",");
   await db.execute({
     sql: `UPDATE price_alerts SET notified_at = ? WHERE id IN (${placeholders})`,
+    args: [now, ...ids],
+  });
+}
+
+// ─── Back-in-stock waitlist ─────────────────────────────────────────
+/**
+ * Record a "notify me when back in stock" signup. Idempotent per (email, sku):
+ * a repeat signup refreshes the row and re-arms it (notified_at → NULL, confirmed
+ * → 0, new token) so a customer can re-confirm and be alerted again after the item
+ * goes out of stock and returns. Stored unconfirmed (double opt-in, CASL).
+ */
+export async function upsertWaitlistEntry(entry: {
+  email: string;
+  sku: string;
+  shopifyProductId?: string | null;
+  confirmToken: string;
+  tokenExpiresAt: number;
+}): Promise<void> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  await db.execute({
+    sql: `INSERT INTO back_in_stock_waitlist (email, sku, shopify_product_id, created_at, notified_at, confirmed, confirm_token, token_expires_at)
+          VALUES (?, ?, ?, ?, NULL, 0, ?, ?)
+          ON CONFLICT(email, sku) DO UPDATE SET
+            shopify_product_id = excluded.shopify_product_id,
+            created_at = excluded.created_at,
+            notified_at = NULL,
+            confirmed = 0,
+            confirm_token = excluded.confirm_token,
+            token_expires_at = excluded.token_expires_at`,
+    args: [entry.email, entry.sku, entry.shopifyProductId ?? null, now, entry.confirmToken, entry.tokenExpiresAt],
+  });
+}
+
+/**
+ * Confirm a waitlist signup by its token (double opt-in). Matches a non-expired,
+ * still-unconfirmed token; sets confirmed=1 and clears the token (single use).
+ * Returns the sku + product handle for the success redirect, or null when the
+ * token is unknown/expired/already used.
+ */
+export async function confirmWaitlist(
+  token: string,
+): Promise<{ sku: string; shopifyHandle: string | null } | null> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const found = await db.execute({
+    sql: `SELECT w.id, w.sku, p.shopify_handle AS shopify_handle
+          FROM back_in_stock_waitlist w LEFT JOIN products p ON p.sku = w.sku
+          WHERE w.confirm_token = ? AND w.confirmed = 0 AND w.token_expires_at > ?`,
+    args: [token, now],
+  });
+  if (found.rows.length === 0) return null;
+  const row = found.rows[0];
+  await db.execute({
+    sql: `UPDATE back_in_stock_waitlist SET confirmed = 1, confirm_token = NULL, token_expires_at = NULL WHERE id = ?`,
+    args: [Number(row.id)],
+  });
+  return { sku: String(row.sku), shopifyHandle: (row.shopify_handle as string) || null };
+}
+
+/** Pending (confirmed + un-notified) waitlist subscribers for a SKU. */
+export async function getPendingWaitlist(sku: string): Promise<{ id: number; email: string }[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT id, email FROM back_in_stock_waitlist WHERE sku = ? AND notified_at IS NULL AND confirmed = 1`,
+    args: [sku],
+  });
+  return result.rows.map((r) => ({ id: Number(r.id), email: String(r.email) }));
+}
+
+/** Stamp notified_at on the given waitlist ids so they aren't re-notified. */
+export async function markWaitlistNotified(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const placeholders = ids.map(() => "?").join(",");
+  await db.execute({
+    sql: `UPDATE back_in_stock_waitlist SET notified_at = ? WHERE id IN (${placeholders})`,
     args: [now, ...ids],
   });
 }

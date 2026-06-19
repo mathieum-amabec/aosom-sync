@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.110] - 2026-06-19
+
+### Added (Back-in-stock waitlist — storefront "notify me", CASL double opt-in)
+- **`back_in_stock_waitlist` table** (`database.ts`) — one row per `(email, sku)` with
+  `confirmed` / `confirm_token` / `token_expires_at` (double opt-in) + `notified_at`, plus
+  `idx_waitlist_sku_pending`. Helpers: `upsertWaitlistEntry` (stores unconfirmed, re-arms on
+  re-signup), `confirmWaitlist` (single-use token, 24h expiry), `getPendingWaitlist`
+  (confirmed + un-notified only), `markWaitlistNotified`.
+- **`POST /api/waitlist`** — public storefront signup (CORS allow-list, per-IP + 1/email/SKU/hr
+  rate limits, email + SKU validation, SKU must exist). Stores unconfirmed and sends a Klaviyo
+  **"Back In Stock Confirmation"** event with a confirm link. **`GET /api/waitlist/confirm`**
+  flips the row to confirmed and redirects to the product page. Both allow-listed in `proxy.ts`.
+- **Restock trigger (`job1-sync.ts`)** — `detectChanges` collects SKUs that restock `0 → >5`
+  units; `notifyBackInStockWaitlist` fires a Klaviyo **"Back In Stock"** event
+  (`sku, title_fr, price, product_url, image_url`) to each confirmed, un-notified subscriber and
+  stamps `notified_at` per-recipient (crash-safe, no double-send). Wired into **both** `runSync`
+  (manual trigger) and `runSyncInit` (the daily cron path). No-ops when Klaviyo is unconfigured.
+- Tests: `waitlist-route`, `waitlist-confirm-route`, `waitlist-db` (10 cases).
+
 ## [0.5.53.109] - 2026-06-19
 
 ### Added (out-of-stock "Populaire" badge — preview theme)
