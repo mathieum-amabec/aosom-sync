@@ -27,6 +27,8 @@ import {
   refreshProducts,
   rebuildProductTypeCounts,
   recordPriceChanges,
+  getPendingWaitlist,
+  markWaitlistNotified,
   markPriceChangeAppliedBySku,
   purgeOldPriceHistory,
   purgeOldSyncLogs,
@@ -50,6 +52,8 @@ import {
   type ProductSnapshot,
 } from "@/lib/database";
 import type { ChangeTypeHistory } from "@/lib/database";
+import { isKlaviyoConfigured, trackEvent } from "@/lib/klaviyo-client";
+import { storeLink } from "@/lib/insights";
 import { diffProductsLight } from "@/lib/product-diff";
 import {
   savePhase1Blob,
@@ -92,10 +96,16 @@ export interface PriceChangeEntry {
 interface ChangeDetectionResult {
   priceChangeEntries: PriceChangeEntry[];
   socialDraftSkus: { sku: string; oldPrice: number; newPrice: number }[];
+  /** SKUs that meaningfully restocked (0 → >5 units) — back-in-stock waitlist notify. */
+  restockSkus: string[];
   priceUpdates: number;
   stockChanges: number;
   newProducts: number;
 }
+
+// Minimum on-hand units before a restock is "real" enough to email the waitlist.
+// Avoids notifying on a flaky 1–2 unit blip that may sell out again immediately.
+const BACK_IN_STOCK_MIN_QTY = 5;
 
 // ─── Sub-functions ──────────────────────────────────────────────────
 
@@ -131,6 +141,7 @@ function aosomToProductRow(p: AosomProduct) {
 async function detectChanges(aosomProducts: AosomProduct[], snapshot: Map<string, ProductSnapshot>): Promise<ChangeDetectionResult> {
   const priceChangeEntries: PriceChangeEntry[] = [];
   const socialDraftSkus: { sku: string; oldPrice: number; newPrice: number }[] = [];
+  const restockSkus: string[] = [];
   const threshold = parseFloat(await getSetting("social_price_drop_threshold") || SYNC.DEFAULT_PRICE_DROP_THRESHOLD);
   let priceUpdates = 0;
   let stockChanges = 0;
@@ -169,6 +180,9 @@ async function detectChanges(aosomProducts: AosomProduct[], snapshot: Map<string
       if (isRestock) {
         priceChangeEntries.push({ sku: csv.sku, oldPrice: existing.price, newPrice: csv.price, oldQty: 0, newQty: csv.qty, changeType: "restock" });
         log(`Restock: ${csv.sku} 0 → ${csv.qty} unités`);
+        // Only email the waitlist on a meaningful restock — a 1–2 unit blip can sell
+        // out before the email lands, so gate on BACK_IN_STOCK_MIN_QTY.
+        if (csv.qty > BACK_IN_STOCK_MIN_QTY) restockSkus.push(csv.sku);
       } else if (!skusWithPriceChange.has(csv.sku)) {
         priceChangeEntries.push({ sku: csv.sku, oldPrice: existing.price, newPrice: csv.price, oldQty: existing.qty, newQty: csv.qty, changeType: "stock_change" });
       }
@@ -176,7 +190,7 @@ async function detectChanges(aosomProducts: AosomProduct[], snapshot: Map<string
     }
   }
 
-  return { priceChangeEntries, socialDraftSkus, priceUpdates, stockChanges, newProducts };
+  return { priceChangeEntries, socialDraftSkus, restockSkus, priceUpdates, stockChanges, newProducts };
 }
 
 /** Apply pre-computed diffs to Shopify and log entries. */
@@ -268,6 +282,51 @@ function triggerSocialDrafts(skus: { sku: string; oldPrice: number; newPrice: nu
       }
     }
   }).catch((err) => log(`Social module load failed: ${err}`));
+}
+
+/**
+ * Email the back-in-stock waitlist for each restocked SKU via Klaviyo.
+ * Awaited (not fire-and-forget) so the events actually flush before the sync
+ * function returns. Only successfully-sent rows are stamped notified, so a
+ * transient Klaviyo failure leaves the subscriber pending. No-ops when Klaviyo
+ * is unconfigured.
+ */
+async function notifyBackInStockWaitlist(skus: string[]): Promise<void> {
+  if (skus.length === 0) return;
+  if (!isKlaviyoConfigured()) {
+    log(`Back-in-stock: ${skus.length} restock(s) détecté(s) mais Klaviyo non configuré — notifications ignorées`);
+    return;
+  }
+  for (const sku of skus) {
+    try {
+      const pending = await getPendingWaitlist(sku);
+      if (pending.length === 0) continue;
+      const product = await getProduct(sku);
+      if (!product) continue;
+      const productUrl = storeLink(product.shopify_product_id, product.shopify_handle).shopifyUrl;
+      let sent = 0;
+      for (const { id, email } of pending) {
+        const res = await trackEvent("Back In Stock", email, {
+          sku,
+          title_fr: product.name || sku,
+          price: product.price,
+          product_url: productUrl,
+          image_url: product.image1 || null,
+        });
+        if (res.ok) {
+          // Stamp this recipient immediately — if the function is killed mid-batch
+          // (Vercel SIGKILL / 800s), the next run must not re-email anyone already sent.
+          await markWaitlistNotified([id]);
+          sent++;
+        } else {
+          log(`Back-in-stock notify échec ${email}/${sku}: ${res.error ?? (res.skipped ? "skipped" : "unknown")}`);
+        }
+      }
+      log(`Back-in-stock: ${sent}/${pending.length} avisé(s) pour ${sku}`);
+    } catch (err) {
+      log(`Back-in-stock notify failed for ${sku}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 }
 
 // ─── Main Entry Point ───────────────────────────────────────────────
@@ -393,6 +452,10 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
       phase: "recordPriceChanges", duration_ms: timing.recordPriceChanges, entries: changes.priceChangeEntries.length,
     });
     await updateSyncRunTiming(syncRun.id, timing);
+
+    // Back-in-stock waitlist emails — fire on detection (Phase 1), independent of
+    // the Shopify push, since stock lives in the catalog snapshot, not Shopify.
+    await notifyBackInStockWaitlist(changes.restockSkus);
 
     // Step 4: Apply to Shopify (skip if shopifyPush=false for cron phase 1)
     let shopifyResult = { archived: 0, errors: 0, errorMessages: [] as string[], logEntries: [] as Omit<SyncLogEntry, "id">[], updates: 0 };
@@ -696,6 +759,13 @@ export async function runSyncInit(): Promise<SyncInitResult> {
       new_products: changes.newProducts,
     });
     await updateSyncRunTiming(syncRun.id, timing);
+
+    // Back-in-stock waitlist emails — this is the PRODUCTION path (cron → runSyncFull
+    // → runSyncInit). Fire here, before the checkpoint is saved, so a crash mid-notify
+    // re-runs init on the 06:30 retry and finishes the un-sent rows (per-recipient
+    // notified_at stamping makes that safe — no double-send). runSync (manual trigger)
+    // has its own call.
+    await notifyBackInStockWaitlist(changes.restockSkus);
 
     const totalChunks = toWrite.length > 0 ? Math.ceil(toWrite.length / REFRESH_CHUNK_SIZE) : 0;
 
