@@ -68,7 +68,8 @@ All publishing now flows through the **publication queue**. The legacy
   `publication_queue` (one item per active brand) on the next free slot from the
   configurable `publication_schedule` (settings, edited via `/api/settings/schedule`,
   computed by `getNextAvailableSlot` in `publication-scheduler.ts`). The draft stays
-  `approved` in `facebook_drafts`.
+  `approved` in `facebook_drafts`. The `/drafts`-page approve server action
+  (`drafts/actions.ts`) auto-enqueues `content_template` drafts the same way.
 - **Manual schedule (operator picks a time):** both `POST /api/social {action:"schedule"}`
   and `POST /api/social/drafts/:id/schedule` enqueue into `publication_queue` at the chosen
   time (cancel-then-enqueue via `cancelPendingQueueItems`, so re-scheduling moves the post
@@ -81,11 +82,11 @@ Slot collisions are rejected by `publication_queue`'s partial-unique index as
 `QueueSlotTakenError`: approve retries the next free slot; the explicit-time schedule
 paths skip the colliding brand (they can't shift the operator's chosen time).
 
-⚠️ **Legacy leftovers (no longer triggered):** `/api/cron/social-scheduled`,
-`processScheduledDrafts()`, and `draft-scheduler.ts` still exist but nothing schedules them
-now (the `social-scheduled` route is a manual fallback only). They can be deleted once any
-pre-migration `facebook_drafts.status='scheduled'` rows have drained — with the cron gone,
-no double-publish risk remains.
+**Cleanup (done):** `/api/cron/social-scheduled` and `processScheduledDrafts()` have been
+removed — nothing writes or drains `facebook_drafts.status='scheduled'` anymore.
+`draft-scheduler.ts` is **kept**: `isSqliteUtc` (validates queue slots in `addToQueue`) and
+`nextFreeSlot` (used by `/api/queue/add`) are live. The `scheduled` status value survives only
+for any historical rows; no code produces new ones.
 
 ## Env Vars
 
