@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.105] - 2026-06-19
+
+### Fixed (meta-ads-dpa-create — make `--apply` actually work against Graph v18)
+- **`scripts/meta-ads-dpa-create.mjs`** — the v0.5.53.104 `--apply` path was untested and failed
+  on live Graph API. Fixed against the real account config (discovered via read-only probes of
+  working ad sets):
+  - **Objective** `PRODUCT_CATALOG_SALES` → **`OUTCOME_SALES`** (legacy objective is rejected
+    `(#100)` on v18) + `is_adset_budget_sharing_enabled: false` (required when budget is on the ad set).
+  - **Pixel**: the ad set's `promoted_object` needs the **ad-account conversion pixel**, which is
+    NOT the storefront `NEXT_PUBLIC_META_PIXEL_ID` — a wrong pixel fails with a generic `(#2)`.
+    Resolved via `--pixel-id` / `META_ADS_PIXEL_ID`.
+  - **Ad set**: `destination_type: "WEBSITE"`; dropped `product_catalog_id` from `promoted_object`
+    (unsupported for the resolved objective); **Facebook-only placements** (`publisher_platforms:
+    ["facebook"]`) since the account has no ads-linked Instagram account (an all-placements ad set
+    forces an IG actor it can't supply).
+  - **Resume flags** `--product-set-id` / `--campaign-id` / `--adset-id` to continue after a
+    mid-chain failure instead of orphaning fresh PAUSED objects (Meta rejects a duplicate
+    product-set filter `(#10803)`).
+- Verified end-to-end: both campaigns created (all PAUSED, $3/day) — see "Été 2026" in
+  `docs/META-ADS-SETUP.md`.
+
 ## [0.5.53.104] - 2026-06-19
 
 ### Added (Meta DPA campaign builder — summer + best-sellers)
