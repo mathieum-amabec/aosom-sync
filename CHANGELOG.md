@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.104] - 2026-06-19
+
+### Added (Meta DPA campaign builder — summer + best-sellers)
+- **`scripts/meta-ads-dpa-create.mjs`** — builds a full Dynamic Product Ads (PRODUCT_CATALOG_AD)
+  object chain from the catalog: product_set → campaign → ad set → ad creative → ad, **all
+  created PAUSED** (nothing spends until activated in Ads Manager after review). Two campaigns:
+  - `--campaign bestsellers` — top movers by the catalog's canonical 14-day velocity
+    (`SUM(old_qty - new_qty)` over `price_history` `change_type='stock_change'`, restocks
+    excluded — same definition as the `best_sellers` catalog sort), in-stock + live only.
+  - `--campaign summer` — in-stock, live `product_type LIKE 'Patio & Garden%'` (the catalog's
+    seasonal taxonomy), ranked by the same velocity.
+  - Product set uses `{retailer_id:{is_any:[…SKUs]}}` — retailer_id == our variant SKU (catalog feed).
+  - DRY-RUN by default (prints selected SKUs + every payload, zero network, DB untouched);
+    `--apply` creates; `--limit N` / `--daily-budget` / `--ad-account` flags. Created ids are
+    logged to `docs/META-ADS-SETUP.md` ("Été 2026" section). Meta OAuth error **#190** stops the
+    run with a token-rotation advisory (never spends). Distinct from `meta-ads-create.mjs`
+    (which attaches a creative+ad to the existing FR/EN retargeting campaigns).
+
 ## [0.5.53.103] - 2026-06-18
 
 ### Added (`--repoll-errors` recovery mode for Meta advideos)
