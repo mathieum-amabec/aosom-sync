@@ -11,6 +11,13 @@
 //   node scripts/upload-meta-advideos.mjs --apply         # upload each pending asset (PAUSED-safe: advideos only stores the video)
 //   node scripts/upload-meta-advideos.mjs --apply --limit 3   # cap the batch (smoke test)
 //   node scripts/upload-meta-advideos.mjs --ad-account act_20658834
+//   node scripts/upload-meta-advideos.mjs --repoll-errors          # DRY-RUN: list rows stuck in meta_status='error'
+//   node scripts/upload-meta-advideos.mjs --repoll-errors --apply  # re-poll their existing video ids (no re-upload) → update meta_status
+//
+// --repoll-errors recovers rows whose advideos upload succeeded (meta_video_id set)
+// but whose ready-poll failed — e.g. Meta "(#4) Application request limit reached"
+// during a large batch. It re-polls the EXISTING video ids (never re-uploads, so no
+// duplicate videos in the library) and flips meta_status to ready/error.
 //
 // Selects video_demand_gen rows WHERE meta_video_id IS NULL (and a non-empty
 // blob_url). For each: POST /act_<id>/advideos { file_url } → poll GET
@@ -55,6 +62,7 @@ function flag(name) {
   return i !== -1 ? process.argv[i + 1] : undefined;
 }
 const APPLY = process.argv.includes("--apply");
+const REPOLL = process.argv.includes("--repoll-errors");
 const LIMIT = flag("limit") ? Math.max(0, parseInt(flag("limit"), 10)) : undefined;
 
 function fail(msg) {
@@ -119,6 +127,65 @@ if (!env.TURSO_DATABASE_URL) fail("TURSO_DATABASE_URL not found in .env.local");
 const { createClient } = await import("@libsql/client");
 const db = createClient({ url: env.TURSO_DATABASE_URL, authToken: env.TURSO_AUTH_TOKEN });
 
+// ── --repoll-errors: recover rows stuck in meta_status='error' ───────────────
+// Their advideos upload already succeeded (meta_video_id set) but the ready-poll
+// failed (e.g. Meta "(#4) Application request limit reached"). Re-poll the existing
+// video ids — never re-uploads, so no duplicate videos — and flip meta_status.
+if (REPOLL) {
+  if (APPLY && !env.META_ACCESS_TOKEN) fail("META_ACCESS_TOKEN not found in .env.local");
+
+  const errSel = await db.execute(
+    `SELECT id, sku, ratio, duration_sec, meta_video_id
+       FROM video_demand_gen
+      WHERE meta_status = 'error' AND meta_video_id IS NOT NULL
+      ORDER BY sku, ratio, duration_sec`,
+  );
+  let errRows = errSel.rows;
+  if (LIMIT != null) errRows = errRows.slice(0, LIMIT);
+
+  console.log(`Meta advideos re-poll — ${APPLY ? "APPLY" : "DRY-RUN"}   ad account: ${AD_ACCOUNT}`);
+  console.log(`  error rows (meta_status='error', meta_video_id set): ${errSel.rows.length}${LIMIT != null ? `  → capped to ${errRows.length} via --limit` : ""}\n`);
+
+  for (const r of errRows) {
+    console.log(`  ${APPLY ? "re-poll" : "would re-poll"}  #${r.id} ${r.sku} ${r.ratio} ${r.duration_sec}s  →  video ${r.meta_video_id}`);
+  }
+
+  if (!APPLY) {
+    console.log(`\n── DRY RUN — nothing polled, DB untouched. ──`);
+    console.log(`Re-run with --apply to re-poll each video's status and update meta_status.`);
+    await db.close?.();
+    process.exit(0);
+  }
+
+  if (!errRows.length) {
+    console.log("\nNothing to re-poll — no rows in meta_status='error'.");
+    await db.close?.();
+    process.exit(0);
+  }
+
+  let recovered = 0;
+  let stillError = 0;
+  const tStart = Date.now();
+  for (const r of errRows) {
+    try {
+      const status = await pollAdVideoReady(r.meta_video_id); // "ready" or throws
+      await recordRepollStatus(r.id, status);
+      recovered++;
+      console.log(`  ✓ #${r.id} ${r.sku} ${r.ratio} ${r.duration_sec}s → video ${r.meta_video_id} (${status})`);
+    } catch (pollErr) {
+      // Leave the existing meta_video_id intact; just keep meta_status='error' so a
+      // later re-poll (after the quota resets) can pick it up again.
+      await recordRepollStatus(r.id, "error");
+      stillError++;
+      console.error(`  ✗ #${r.id} ${r.sku}: video ${r.meta_video_id} ${pollErr.message} (still meta_status=error)`);
+    }
+  }
+
+  await db.close?.();
+  console.log(`\nRecovered ${recovered}, still error ${stillError}, of ${errRows.length} re-polled, in ${((Date.now() - tStart) / 1000).toFixed(0)}s.`);
+  process.exit(stillError ? 1 : 0);
+}
+
 const sel = await db.execute(
   `SELECT id, sku, ratio, duration_sec, title_fr, blob_url
      FROM video_demand_gen
@@ -156,6 +223,14 @@ async function recordStatus(id, videoId, status) {
   await db.execute({
     sql: `UPDATE video_demand_gen SET meta_video_id = ?, meta_status = ?, updated_at = ? WHERE id = ?`,
     args: [videoId, status, Math.floor(Date.now() / 1000), id],
+  });
+}
+
+// Re-poll path: the meta_video_id is already correct, so only the status changes.
+async function recordRepollStatus(id, status) {
+  await db.execute({
+    sql: `UPDATE video_demand_gen SET meta_status = ?, updated_at = ? WHERE id = ?`,
+    args: [status, Math.floor(Date.now() / 1000), id],
   });
 }
 

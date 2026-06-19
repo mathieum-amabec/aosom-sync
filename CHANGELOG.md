@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.101] - 2026-06-18
+
+### Added (`--repoll-errors` recovery mode for Meta advideos)
+- **`scripts/upload-meta-advideos.mjs`** — new `--repoll-errors` mode recovers rows stuck in
+  `meta_status='error'` whose advideos upload actually succeeded (`meta_video_id` is set) but
+  whose ready-poll failed mid-batch — e.g. Meta `(#4) Application request limit reached` after
+  ~70 uploads. It selects `WHERE meta_status='error' AND meta_video_id IS NOT NULL`, re-polls
+  each existing video id (`GET /{id}?fields=status` until ready/error), and updates only
+  `meta_status` — **never re-uploads**, so it can't create duplicate videos in the ad library.
+  Dry-run by default (lists candidates, DB untouched); `--apply` writes; `--limit N` caps the
+  batch. Exits non-zero if any row is still in error. Run under x64 node (see CLAUDE.md).
+  Context: the v0.5.53.96 `--apply` run landed 70/87 ready and left 17 in error (SKUs
+  84C-226CG, 84H-209V00CG, D51-277V01) when the Graph app quota tripped during polling.
+
 ## [0.5.53.100] - 2026-06-18
 
 ### Changed (comment cleanup — retire stale social-scheduled references)
