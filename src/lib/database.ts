@@ -1321,7 +1321,7 @@ export async function purgeOldNotifications(days = 30): Promise<number> {
 
 /**
  * Delete cron_runs rows older than `days` (default 30). One row is written per cron
- * invocation (social-scheduled alone = 96/day), so the table grows fast; the dashboard
+ * invocation (the publisher runs hourly), so the table grows fast; the dashboard
  * only reads the latest run per cron name. `ran_at` is a unix-seconds INTEGER. Called
  * once/day at the end of the sync. Returns rows deleted.
  */
