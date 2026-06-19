@@ -19,6 +19,8 @@ export interface ShopifyExistingVariant {
   sku: string;
   price: number;
   inventoryQuantity: number;
+  /** Shopify inventory_item_id — target for inventory_levels/set (empty if unknown). */
+  inventoryItemId: string;
   option1: string | null; // color
   option2: string | null; // size
   weight: number;

@@ -61,6 +61,7 @@ function makeShopifyProduct(overrides: Partial<ShopifyExistingProduct> & {
         sku: variantSku,
         price: variantPrice,
         inventoryQuantity: 0,
+        inventoryItemId: "inv-001",
         option1: null,
         option2: null,
         weight: 10,
