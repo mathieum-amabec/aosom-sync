@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.109] - 2026-06-19
+
+### Added (out-of-stock "Populaire" badge — preview theme)
+- **`scripts/apply-out-of-stock-badge.mjs`** — one-off Shopify Asset API edit for
+  the preview theme (160213696617). On `sections/main-product.liquid`: inserts a
+  `<div class="popular-badge">⭐ Article populaire — Revenez bientôt !</div>` after
+  the product `<h1>`, gated on `product.tags contains 'out-of-stock'`, plus the
+  `.popular-badge` amber CSS in the existing `{%- style -%}` block. On
+  `snippets/card-product.liquid`: a `⭐ Populaire` badge in both `card__badge`
+  blocks gated on `card_product.tags contains 'out-of-stock'`, plus
+  `.popular-badge-card` amber CSS via a `{% style %}` block (loads on collection
+  pages). Dry-run by default; `--apply` writes; idempotent; verify retries past
+  the Asset API's read-after-write lag. Applied to the preview theme. Run under
+  x64 node — see CLAUDE.md "Windows ARM64".
+
 ## [0.5.53.108] - 2026-06-19
 
 ### Added (stock-state tags: out-of-stock / back-in-stock)
@@ -63,7 +78,6 @@ tracking with `inventory_policy=deny` (all 1126 variants today) makes a variant 
 available=0 **unbuyable**; measure how many `products.qty <= 5` before the backfill. Run the
 backfill (`--apply`) only after scopes are confirmed + a checkpoint. Daily sync stock-push
 should be enabled only after the backfill, so the first run doesn't flood the Phase-2 queue.
-
 ## [0.5.53.105] - 2026-06-19
 
 ### Fixed (meta-ads-dpa-create — make `--apply` actually work against Graph v18)
