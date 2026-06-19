@@ -32,6 +32,41 @@ available=0 **unbuyable**; measure how many `products.qty <= 5` before the backf
 backfill (`--apply`) only after scopes are confirmed + a checkpoint. Daily sync stock-push
 should be enabled only after the backfill, so the first run doesn't flood the Phase-2 queue.
 
+### Added (stock-state tags: out-of-stock / back-in-stock)
+- **`src/lib/diff-engine.ts`** — `applyStockTags(tags, inStock)` + `productInStock(variants)`:
+  product-level stock-state tags driven off the BUFFERED availability. A product is in stock when
+  ANY variant buffers > 0 → `back-in-stock`; all buffer to 0 → `out-of-stock` (mutually exclusive
+  pair, other tags preserved, case-insensitive de-dup). `diffProduct` emits a `tags` change only when
+  the resulting set differs from Shopify's current tags (fires on the >0↔0 transition; no churn).
+- **`src/jobs/job1-sync.ts`** — `applyToShopify` recomputes the tag set and pushes it via
+  `updateShopifyProduct` (now accepts `tags`); logs `stock tags: <product> → back-in-stock|out-of-stock`.
+- **`src/lib/shopify-client.ts`** — product fetch now includes `tags` (comma-split onto
+  `ShopifyExistingProduct.tags`); `ChangeType` gains `"tags"`.
+- **`scripts/backfill-inventory.mjs`** — product-level tag pass sets each product's current stock-state
+  tag; conservative (skips products with no `products`-table qty). Same dry-run / `--apply` gate.
+- Tests: `applyStockTags` pair behavior + case-insensitive de-dup, `computeDiffs` tag transitions.
+
+## [0.5.53.105] - 2026-06-19
+
+### Fixed (meta-ads-dpa-create — make `--apply` actually work against Graph v18)
+- **`scripts/meta-ads-dpa-create.mjs`** — the v0.5.53.104 `--apply` path was untested and failed
+  on live Graph API. Fixed against the real account config (discovered via read-only probes of
+  working ad sets):
+  - **Objective** `PRODUCT_CATALOG_SALES` → **`OUTCOME_SALES`** (legacy objective is rejected
+    `(#100)` on v18) + `is_adset_budget_sharing_enabled: false` (required when budget is on the ad set).
+  - **Pixel**: the ad set's `promoted_object` needs the **ad-account conversion pixel**, which is
+    NOT the storefront `NEXT_PUBLIC_META_PIXEL_ID` — a wrong pixel fails with a generic `(#2)`.
+    Resolved via `--pixel-id` / `META_ADS_PIXEL_ID`.
+  - **Ad set**: `destination_type: "WEBSITE"`; dropped `product_catalog_id` from `promoted_object`
+    (unsupported for the resolved objective); **Facebook-only placements** (`publisher_platforms:
+    ["facebook"]`) since the account has no ads-linked Instagram account (an all-placements ad set
+    forces an IG actor it can't supply).
+  - **Resume flags** `--product-set-id` / `--campaign-id` / `--adset-id` to continue after a
+    mid-chain failure instead of orphaning fresh PAUSED objects (Meta rejects a duplicate
+    product-set filter `(#10803)`).
+- Verified end-to-end: both campaigns created (all PAUSED, $3/day) — see "Été 2026" in
+  `docs/META-ADS-SETUP.md`.
+
 ## [0.5.53.104] - 2026-06-19
 
 ### Added (Meta DPA campaign builder — summer + best-sellers)
