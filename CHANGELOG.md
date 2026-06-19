@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.107] - 2026-06-19
+
+### Fixed (Oversell stop-gap — tag qty=0 products)
+- **`scripts/fix-zero-stock.mjs`** — one-shot: tag the imported products whose Aosom
+  stock is qty=0 with `out-of-stock`, so they're flagged while inventory tracking is
+  still off (dropship `inventory_management: null` → they stay orderable despite zero
+  supplier stock). Stop-gap until the inventory-tracking + stock-buffer feature lands.
+  GETs current tags and **appends** `out-of-stock` to the merged set — a plain
+  `PUT { tags: "out-of-stock" }` would WIPE all existing tags (Shopify replaces the
+  field wholesale), so the read-merge-write is mandatory. Status left untouched (Active
+  stays Active — no draft/archive). Dry-run by default; `--apply` writes; backs up
+  original tags to `data/shopify-backup/` (gitignored) first; 2 req/s throttle;
+  idempotent (skips already-tagged). Applied to prod: 16 tagged, 0 failed, 1 skipped
+  (product 7752227815529 returned 404 — deleted from Shopify since the catalog snapshot).
+  Run under x64 node (see CLAUDE.md).
+
 ## [0.5.53.105] - 2026-06-19
 
 ### Fixed (meta-ads-dpa-create — make `--apply` actually work against Graph v18)
