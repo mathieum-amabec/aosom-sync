@@ -151,7 +151,7 @@ function resetAllMocks() {
   vi.mocked(blobStorage.deletePhase1Blob).mockResolvedValue(undefined);
   vi.mocked(shopifyClient.fetchAllShopifyProducts).mockResolvedValue([]);
   vi.mocked(diffEngine.computeDiffs).mockReturnValue([]);
-  vi.mocked(diffEngine.summarizeDiffs).mockReturnValue({ total: 0, updates: 0, archives: 0, creates: 0, priceChanges: 0, imageChanges: 0, descriptionChanges: 0 });
+  vi.mocked(diffEngine.summarizeDiffs).mockReturnValue({ total: 0, updates: 0, archives: 0, creates: 0, priceChanges: 0, stockChanges: 0, tagChanges: 0, imageChanges: 0, descriptionChanges: 0 });
 }
 
 // ─── Scenario 1: runSync completes normally ───────────────────────────

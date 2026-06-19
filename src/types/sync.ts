@@ -12,6 +12,8 @@ export interface ShopifyExistingProduct {
   images: string[];
   bodyHtml: string;
   productType: string;
+  /** Product tags (Shopify stores these comma-separated; split into a list here). */
+  tags: string[];
 }
 
 export interface ShopifyExistingVariant {
@@ -19,6 +21,8 @@ export interface ShopifyExistingVariant {
   sku: string;
   price: number;
   inventoryQuantity: number;
+  /** Shopify inventory_item_id — target for inventory_levels/set (empty if unknown). */
+  inventoryItemId: string;
   option1: string | null; // color
   option2: string | null; // size
   weight: number;
@@ -28,6 +32,7 @@ export interface ShopifyExistingVariant {
 export type ChangeType =
   | "price"
   | "stock"
+  | "tags"
   | "images"
   | "description"
   | "title"

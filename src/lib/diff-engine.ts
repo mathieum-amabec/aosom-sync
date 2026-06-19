@@ -7,6 +7,52 @@ import type {
 import { targetSellPrice } from "@/lib/pricing";
 
 /**
+ * Stock safety buffer applied before pushing Aosom quantity to Shopify inventory:
+ * low supplier stock is treated as sold out, and a margin is shaved off the rest so
+ * we never sell more than Aosom can ship.
+ *   aosom_qty <= 5 → 0 (épuisé)
+ *   aosom_qty  > 5 → aosom_qty - 3
+ * Kept in one place so the daily sync (diff-engine), the apply path, and the one-time
+ * backfill script agree. (The backfill .mjs inlines the same formula — keep in sync.)
+ */
+export function stockBufferQty(aosomQty: number): number {
+  return aosomQty <= 5 ? 0 : aosomQty - 3;
+}
+
+/** Mutually-exclusive stock-state tags driven off the BUFFERED availability. */
+export const STOCK_TAG_OUT = "out-of-stock";
+export const STOCK_TAG_BACK = "back-in-stock";
+
+/**
+ * Apply the stock-state tag pair to a product's tag list. The two tags are mutually
+ * exclusive and reflect the buffered availability the customer sees:
+ *   in stock (any variant buffers > 0) → "back-in-stock"  (out-of-stock removed)
+ *   out of stock (all variants buffer to 0) → "out-of-stock" (back-in-stock removed)
+ * Other tags are preserved. Match is case-insensitive so we don't duplicate on casing.
+ * Shared by the daily sync (diff-engine) and the one-time backfill (.mjs inlines the same).
+ */
+export function applyStockTags(currentTags: string[], inStock: boolean): string[] {
+  const kept = currentTags.filter((t) => {
+    const lc = t.toLowerCase();
+    return lc !== STOCK_TAG_OUT && lc !== STOCK_TAG_BACK;
+  });
+  kept.push(inStock ? STOCK_TAG_BACK : STOCK_TAG_OUT);
+  return kept;
+}
+
+/** True if any variant has buffered (sellable) stock. */
+export function productInStock(variants: { qty: number }[]): boolean {
+  return variants.some((v) => stockBufferQty(v.qty) > 0);
+}
+
+function tagsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((t, i) => t === sb[i]);
+}
+
+/**
  * Compare Aosom catalog (merged) against existing Shopify products.
  * Returns a list of diffs describing what needs to change.
  *
@@ -172,13 +218,22 @@ function diffProduct(
       });
     }
 
-    // NOTE: stock is intentionally NOT diffed here. Dropship variants are untracked in
-    // Shopify (`inventory_management: null`; stock lives only in catalog_snapshots), so
-    // applyToShopify never pushes inventory. Emitting a `stock` change generated a diff
-    // for ~every product every day that could never be resolved, permanently saturating
-    // the per-day Phase-2 chunk queue (10/run × 3 runs) and starving real price/image/
-    // description updates in the tail. Phase 1 still records stock movements separately
-    // (detectChanges → price_history.stock_change) for the dashboard + social signals.
+    // Stock — push a safety-buffered quantity to Shopify inventory so we never sell
+    // more than the supplier can actually ship. The buffer treats low Aosom stock as
+    // sold-out and shaves a margin off the rest (see stockBufferQty). Only emit when the
+    // buffered qty differs from Shopify's current available, so a stable qty doesn't
+    // regenerate a no-op diff every run (the saturation risk that previously kept stock
+    // out of the diff). applyToShopify pushes it via setInventoryLevel after ensuring the
+    // variant is inventory-tracked.
+    const safeQty = stockBufferQty(aosomVariant.qty);
+    if (safeQty !== shopifyVariant.inventoryQuantity) {
+      changes.push({
+        field: "stock",
+        sku: aosomVariant.sku,
+        oldValue: shopifyVariant.inventoryQuantity,
+        newValue: safeQty,
+      });
+    }
   }
 
   // Check for removed variants (in Shopify but not in Aosom)
@@ -192,6 +247,20 @@ function diffProduct(
         newValue: null,
       });
     }
+  }
+
+  // Stock-state tags — flip "out-of-stock"/"back-in-stock" to match the buffered
+  // availability. Only emit when the resulting tag set differs from Shopify's current
+  // tags, so a steady-state product doesn't re-tag every run (the change fires exactly
+  // on the >0↔0 transition). applyToShopify recomputes + pushes the tags.
+  const desiredTags = applyStockTags(shopify.tags, productInStock(aosom.variants));
+  if (!tagsEqual(desiredTags, shopify.tags)) {
+    changes.push({
+      field: "tags",
+      sku: aosom.variants[0].sku,
+      oldValue: shopify.tags.join(", "),
+      newValue: desiredTags.join(", "),
+    });
   }
 
   // Image change — compare sorted URL lists
@@ -247,7 +316,14 @@ export function summarizeDiffs(diffs: ProductDiff[]) {
       (n, d) => n + d.changes.filter((c) => c.field === "price").length,
       0
     ),
-    // stock is no longer diffed in Phase 2 (dropship untracked) — see diffProduct.
+    stockChanges: diffs.reduce(
+      (n, d) => n + d.changes.filter((c) => c.field === "stock").length,
+      0
+    ),
+    tagChanges: diffs.reduce(
+      (n, d) => n + d.changes.filter((c) => c.field === "tags").length,
+      0
+    ),
     imageChanges: diffs.reduce(
       (n, d) => n + d.changes.filter((c) => c.field === "images").length,
       0

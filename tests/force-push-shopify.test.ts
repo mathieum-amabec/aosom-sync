@@ -55,12 +55,14 @@ function makeShopifyProduct(overrides: Partial<ShopifyExistingProduct> & {
     bodyHtml: "<p>Some description</p>",
     productType: "Furniture",
     images: ["https://cdn.example.com/img.jpg"],
+    tags: [],
     variants: [
       {
         variantId,
         sku: variantSku,
         price: variantPrice,
         inventoryQuantity: 0,
+        inventoryItemId: "inv-001",
         option1: null,
         option2: null,
         weight: 10,
