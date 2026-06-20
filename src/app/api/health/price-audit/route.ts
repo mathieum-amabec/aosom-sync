@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/config";
 import { runPriceAuditAndCorrect, persistPriceAudit } from "@/lib/price-audit";
+import { trackCron } from "@/lib/cron-tracking";
 
 function verifyCronSecret(header: string | null): boolean {
   if (!header) return false;
@@ -29,8 +30,18 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const result = await runPriceAuditAndCorrect();
-    await persistPriceAudit(result, Math.floor(Date.now() / 1000));
+    // Wrap in trackCron so the run (success/error) lands in `cron_runs` like the other
+    // crons — without it, price-audit was invisible to the dashboard cron-health view and
+    // there was no run/outcome trail. The detail summarizes what the run did.
+    const result = await trackCron(
+      "price-audit",
+      async () => {
+        const r = await runPriceAuditAndCorrect();
+        await persistPriceAudit(r, Math.floor(Date.now() / 1000));
+        return r;
+      },
+      (r) => `corrected=${r.corrected} failed=${r.failed} deferred=${r.deferred} violations=${r.below_floor}`,
+    );
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     console.error("[API] GET /api/health/price-audit failed:", err);
