@@ -1,7 +1,7 @@
 // CHANTIER 2 — premium category tiles on PREVIEW (Unsplash bg + navy overlay + hover).
 // Replaces the native collection_list with a custom-liquid tile grid. PREVIEW only.
-import { loadEnv, rest, getAsset, putAsset } from "./_shopify-lib.mjs";
-const LIVE = "160059195497", PREVIEW = "160213696617";
+import { loadEnv, rest, getAsset, putAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+const LIVE = LIVE_THEME_ID, PREVIEW = "160213696617";
 if (PREVIEW === LIVE) throw new Error("ABORT");
 const t = (await (await rest("/themes.json")).json()).themes.find((x) => String(x.id) === PREVIEW);
 if (!t || t.role !== "unpublished") throw new Error("ABORT: not unpublished preview");

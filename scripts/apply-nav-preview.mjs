@@ -5,12 +5,12 @@
 // `main-menu` would change the LIVE storefront. Instead we create a SEPARATE
 // `preview-main-menu` and point ONLY the preview theme's header at it; live keeps
 // using `main-menu`, untouched. Idempotent.
-import { gql, sleep } from "./_shopify-lib.mjs";
+import { gql, sleep, LIVE_THEME_ID } from "./_shopify-lib.mjs";
 import { rest } from "./_shopify-lib.mjs";
 
 const THEME = "160213696617";
 const MENU_HANDLE = "preview-main-menu";
-if (THEME === "160059195497") throw new Error("refusing to run against the LIVE theme");
+if (THEME === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 
 async function getAsset(key) {
   const r = await rest(`/themes/${THEME}/assets.json?asset[key]=${encodeURIComponent(key)}`);

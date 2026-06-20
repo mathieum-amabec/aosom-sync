@@ -4,9 +4,9 @@
 // one Google reads) AND og_description in snippets/meta-tags.liquid (og/twitter), so the
 // home description is consistent everywhere. Backups + verify. Non-index pages unchanged.
 import { writeFileSync } from "node:fs";
-import { rest, getAsset, putAsset } from "./_shopify-lib.mjs";
+import { rest, getAsset, putAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
 
-const LIVE = "160059195497";
+const LIVE = LIVE_THEME_ID;
 const META = "Aménagez votre patio et votre jardin pour l'été québécois : mobilier d'extérieur, BBQ, déco et accessoires, livrés gratuitement partout au Canada.";
 
 // 1. Delete orphan shop metafields (global.description_tag, global.og_image).

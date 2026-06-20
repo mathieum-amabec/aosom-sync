@@ -136,3 +136,76 @@ describe("dashboard alerts queries (direct SQL)", () => {
     expect(by.pinterest.last_status).toBe("error");    // but flags the failing latest attempt
   });
 });
+
+// QA: price-floor auto-correction data contract (settings summary → priceFloor the panel renders,
+// and the recent-changes feed excluding floor_correction rows). In-memory DB, no Shopify writes.
+describe("price-floor auto-correction dashboard contract (direct SQL)", () => {
+  let db: Client;
+  beforeEach(async () => {
+    db = setupDb();
+    await db.batch([
+      `CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER)`,
+      `CREATE TABLE price_history (id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT, old_price REAL, new_price REAL, old_qty INTEGER, new_qty INTEGER, change_type TEXT, detected_at INTEGER, applied_to_shopify INTEGER DEFAULT 0)`,
+      `CREATE TABLE products (sku TEXT PRIMARY KEY, name TEXT, image1 TEXT, shopify_product_id TEXT, shopify_handle TEXT)`,
+    ]);
+  });
+  afterEach(() => db.close());
+
+  // Mirror of _loadDashboardAlerts' priceFloor parse (database.ts).
+  function parsePriceFloor(s: Record<string, unknown>) {
+    return {
+      belowFloorCount: Number(s.belowFloor) || 0,
+      total: Number(s.total) || 0,
+      corrected: Number(s.corrected) || 0,
+      failed: Number(s.failed) || 0,
+      deferred: Number(s.deferred) || 0,
+      auditedAt: s.auditedAt != null ? Number(s.auditedAt) : null,
+      topItems: Array.isArray(s.topItems) ? s.topItems : [],
+    };
+  }
+
+  it("parses a current audit summary into the corrected/failed/deferred shape the panel reads", async () => {
+    const summary = {
+      auditedAt: NOW_EPOCH, total: 500, belowFloor: 3, corrected: 1, failed: 1, deferred: 1,
+      topItems: [
+        { sku: "BAD", shopify_price: 70, aosom_price: 90, gap: -20, corrected_price: 90, status: "failed", error: "429" },
+        { sku: "OK", shopify_price: 80, aosom_price: 100, gap: -20, corrected_price: 100, status: "corrected" },
+      ],
+    };
+    await db.execute({ sql: `INSERT INTO settings (key, value) VALUES ('price_audit_result', ?)`, args: [JSON.stringify(summary)] });
+
+    const row = (await db.execute(`SELECT value FROM settings WHERE key = 'price_audit_result'`)).rows[0] as unknown as Record<string, unknown>;
+    const pf = parsePriceFloor(JSON.parse(row.value as string));
+
+    expect(pf).toMatchObject({ belowFloorCount: 3, corrected: 1, failed: 1, deferred: 1, total: 500 });
+    expect(pf.topItems[0]).toMatchObject({ sku: "BAD", status: "failed" });
+  });
+
+  it("defaults corrected/failed/deferred to 0 for a legacy summary (pre auto-correction)", async () => {
+    const legacy = { auditedAt: NOW_EPOCH, total: 500, belowFloor: 2, topItems: [{ sku: "X", shopify_price: 70, aosom_price: 90, gap: -20 }] };
+    await db.execute({ sql: `INSERT INTO settings (key, value) VALUES ('price_audit_result', ?)`, args: [JSON.stringify(legacy)] });
+
+    const row = (await db.execute(`SELECT value FROM settings WHERE key = 'price_audit_result'`)).rows[0] as unknown as Record<string, unknown>;
+    const pf = parsePriceFloor(JSON.parse(row.value as string));
+
+    // belowFloorCount survives so the panel's legacy fallback still raises an alert.
+    expect(pf).toMatchObject({ belowFloorCount: 2, corrected: 0, failed: 0, deferred: 0 });
+  });
+
+  // Mirror of getRecentPriceChanges' query (database.ts), which now excludes floor_correction.
+  const recentChangesSql = `SELECT ph.*, p.name FROM price_history ph LEFT JOIN products p ON ph.sku = p.sku
+    WHERE ph.change_type != 'floor_correction' ORDER BY ph.detected_at DESC LIMIT ?`;
+
+  it("keeps floor_correction rows out of the recent-changes feed (so they don't crowd real changes)", async () => {
+    await db.batch([
+      { sql: `INSERT INTO price_history (sku, change_type, detected_at, applied_to_shopify) VALUES ('A', 'floor_correction', ?, 1)`, args: [NOW_EPOCH - 5] },
+      { sql: `INSERT INTO price_history (sku, change_type, detected_at, applied_to_shopify) VALUES ('B', 'floor_correction', ?, 0)`, args: [NOW_EPOCH - 4] },
+      { sql: `INSERT INTO price_history (sku, change_type, detected_at) VALUES ('C', 'price_drop', ?)`, args: [NOW_EPOCH - 3] },
+      { sql: `INSERT INTO price_history (sku, change_type, detected_at) VALUES ('D', 'price_increase', ?)`, args: [NOW_EPOCH - 2] },
+    ]);
+    const rows = (await db.execute({ sql: recentChangesSql, args: [20] })).rows.map((x) => x as unknown as Record<string, unknown>);
+
+    expect(rows.map((r) => r.sku)).toEqual(["D", "C"]); // newest first, floor_correction excluded
+    expect(rows.some((r) => r.change_type === "floor_correction")).toBe(false);
+  });
+});
