@@ -1215,7 +1215,7 @@ export async function linkProductToShopify(skus: string[], shopifyProductId: str
 
 // ─── Price History (enriched) ────────────────────────────────────────
 
-export type ChangeTypeHistory = "price_drop" | "price_increase" | "stock_change" | "new_product" | "restock";
+export type ChangeTypeHistory = "price_drop" | "price_increase" | "stock_change" | "new_product" | "restock" | "floor_correction";
 
 export async function recordPriceChange(entry: {
   sku: string; oldPrice: number | null; newPrice: number | null;
@@ -1238,6 +1238,21 @@ export async function recordPriceChanges(entries: {
   for (let i = 0; i < stmts.length; i += 100) {
     await db.batch(stmts.slice(i, i + 100), "write");
   }
+}
+
+/**
+ * Record a price-floor auto-correction (change_type='floor_correction'). `applied` is set to
+ * 1 when the corrected price was successfully pushed to Shopify, 0 when the push failed (or no
+ * variant was matched) — the latter keeps an audit trail of the unresolved violation.
+ */
+export async function recordFloorCorrection(entry: {
+  sku: string; oldPrice: number; newPrice: number; applied: boolean;
+}): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type, applied_to_shopify) VALUES (?, ?, ?, NULL, NULL, 'floor_correction', ?)`,
+    args: [entry.sku, entry.oldPrice, entry.newPrice, entry.applied ? 1 : 0],
+  });
 }
 
 export async function markPriceChangeApplied(id: number): Promise<void> {
@@ -1383,9 +1398,13 @@ export async function recomputeHasDiscount(): Promise<void> {
 
 export async function getRecentPriceChanges(limit = 50): Promise<Record<string, unknown>[]> {
   const db = await ensureSchema();
+  // Exclude 'floor_correction' rows: they are audit auto-corrections (surfaced on the
+  // dedicated dashboard floor card), not feed-driven price changes. Including them would let a
+  // batch of corrections crowd real price_drop/price_increase events out of this limited window.
   const result = await db.execute({
     sql: `SELECT ph.*, p.name, p.image1, p.shopify_product_id, p.shopify_handle
     FROM price_history ph LEFT JOIN products p ON ph.sku = p.sku
+    WHERE ph.change_type != 'floor_correction'
     ORDER BY ph.detected_at DESC LIMIT ?`,
     args: [limit],
   });
@@ -1881,8 +1900,22 @@ async function _loadDashboardSummary(): Promise<DashboardSummary> {
 export interface PriceFloorAlert {
   belowFloorCount: number;
   total: number;
+  /** Below-floor variants auto-corrected on Shopify in the last audit. */
+  corrected: number;
+  /** Below-floor variants whose correction failed (need manual attention). */
+  failed: number;
+  /** Below-floor variants deferred past the per-run cap (corrected on a later run). */
+  deferred: number;
   auditedAt: number | null; // epoch seconds of the last audit, null if never run
-  topItems: { sku: string; shopify_price: number; aosom_price: number; gap: number }[];
+  topItems: {
+    sku: string;
+    shopify_price: number;
+    aosom_price: number;
+    gap: number;
+    corrected_price?: number;
+    status?: "corrected" | "failed";
+    error?: string;
+  }[];
 }
 
 export interface DashboardAlerts {
@@ -1932,6 +1965,9 @@ async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
       priceFloor = {
         belowFloorCount: Number(s.belowFloor) || 0,
         total: Number(s.total) || 0,
+        corrected: Number(s.corrected) || 0,
+        failed: Number(s.failed) || 0,
+        deferred: Number(s.deferred) || 0,
         auditedAt: s.auditedAt != null ? Number(s.auditedAt) : null,
         topItems: Array.isArray(s.topItems) ? (s.topItems as PriceFloorAlert["topItems"]) : [],
       };

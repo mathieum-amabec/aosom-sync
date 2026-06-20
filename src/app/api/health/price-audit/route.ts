@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/config";
-import { runPriceAudit, persistPriceAudit } from "@/lib/price-audit";
+import { runPriceAuditAndCorrect, persistPriceAudit } from "@/lib/price-audit";
 
 function verifyCronSecret(header: string | null): boolean {
   if (!header) return false;
@@ -11,13 +11,15 @@ function verifyCronSecret(header: string | null): boolean {
 }
 
 /**
- * GET /api/health/price-audit — compares the live Shopify price of every variant against
- * `products.price` (the Aosom feed price = the FLOOR), and reports variants priced below it.
+ * GET /api/health/price-audit — audit + AUTO-CORRECTION. Compares the live Shopify price of
+ * every variant against `products.price` (the Aosom feed price = the FLOOR), and for every
+ * variant priced below it, immediately pushes the corrected (floor) price back to Shopify and
+ * logs it to price_history (change_type='floor_correction').
  *
- * Protected by CRON_SECRET (Bearer). Returns { total, below_floor, items:[{sku, shopify_price,
- * aosom_price, gap}] } where gap = shopify_price - aosom_price (negative = below floor). Also
- * persists a compact summary to settings so the dashboard "Alertes" panel can flag below_floor>0
- * without re-running the (expensive) full Shopify fetch on every load.
+ * Protected by CRON_SECRET (Bearer). Returns { total, below_floor, corrected, failed,
+ * items, corrections } where each correction carries status 'corrected' | 'failed'. Also
+ * persists a compact summary to settings so the dashboard "Alertes" panel can show
+ * green (auto-corrected) / red (failed) without re-running the expensive Shopify fetch.
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -27,7 +29,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const result = await runPriceAudit();
+    const result = await runPriceAuditAndCorrect();
     await persistPriceAudit(result, Math.floor(Date.now() / 1000));
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
