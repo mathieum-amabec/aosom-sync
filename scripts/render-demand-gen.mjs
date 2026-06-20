@@ -7,7 +7,7 @@
 //   Titles: UPPERCASE (fr-CA), em/en dashes stripped, truncated to 35 chars, max 2 lines.
 // Run from the worktree root:  node scripts/render-demand-gen.mjs
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, statSync, existsSync } from "node:fs";
 
 const FFMPEG = process.env.FFMPEG_BIN ||
   "C:\\Users\\vente\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.1-full_build\\bin\\ffmpeg.exe";
@@ -17,6 +17,34 @@ const NAVY = "0x1B2A4A";
 const BENEFIT = "Livraison gratuite au Canada";
 const SCRIM_OPACITY = 0.50;   // Navy bottom gradient peak alpha (was 0.35)
 const SCRIM_FRACTION = 0.25;  // band height = 25% of canvas (was 0.18)
+
+// Background music (v2). Replaces the source-clip audio. Chosen track: ambient/chill,
+// suited to furniture/outdoor lifestyle. Swap via MUSIC_BIN env or this constant.
+const MUSIC = process.env.MUSIC_BIN || "src/audio/joyinsound-no-copyright-chill-music-403411.mp3";
+const MUSIC_VOL = 0.2;        // -20dB-ish; sits under the (silent) visuals
+const AUDIO_FADE = 1.0;       // music fade in/out (s)
+const VIDEO_FADE = 0.5;       // video fade from/to black (s)
+const TITLE_FADE_START = 0.8; // title fade-in begins (s)
+const TITLE_FADE_DUR = 0.5;   // title fade-in ramp (s)
+// Brand watermark is now the real logo (image overlay), not drawtext text.
+// Transparent PNG produced from logo/Ameublo/officiel.webp via colorkey=white.
+const LOGO = process.env.LOGO_BIN || "Logo/officiel-transparent.png";
+const LOGO_W = 300;   // logo width px on every ratio
+// The transparent PNG is the tight 1284×168 lockup, so it scales cleanly.
+const LOGO_H = Math.round(LOGO_W * 168 / 1284);  // ≈39
+// White semi-transparent backing plate so the navy wordmark reads on any footage.
+const PLATE_W = 352;   // logo + even padding (logo centered on the plate)
+const PLATE_H = 85;
+const PLATE_ALPHA = 0.7;
+
+// Fail loud if the brand font or logo is missing: drawtext silently skips text
+// when fontfile can't be opened, and a missing overlay input errors mid-render.
+for (const [label, p] of [["Font", FONT], ["Logo", LOGO]]) {
+  if (!existsSync(p)) {
+    console.error(`✗ ${label} not found: ${p} (run from the worktree root).`);
+    process.exit(1);
+  }
+}
 
 // 13 viable sources (audit). ss/cleanDur = clean-window trim (s). buckets = duration cuts to emit.
 const SOURCES = [
@@ -82,6 +110,11 @@ function overlayChain(cfg, titleLines, lineDir) {
   const titleBox = `box=1:boxcolor=${NAVY}@0.70:boxborderw=4|8`;
   const lineSpacing = Math.round(titleFs * 1.30);
   const titleTop = Math.round(0.15 * H);                   // top safe zone
+  // Title fade-in: alpha 0→1 ramping from TITLE_FADE_START over TITLE_FADE_DUR.
+  // Commas are escaped (\,) so the filtergraph parser keeps them inside the expr
+  // instead of splitting filters. Animates the whole title element (text+box+border).
+  const titleAlpha =
+    `alpha=min(1\\,max(0\\,(t-${TITLE_FADE_START})/${TITLE_FADE_DUR}))`;
   const parts = [];
   titleLines.forEach((line, i) => {
     const file = `${lineDir}/t${i}.txt`;
@@ -89,7 +122,7 @@ function overlayChain(cfg, titleLines, lineDir) {
     // literal token), so we uppercase in JS — fr-CA locale handles é→É, à→À, ç→Ç.
     writeFileSync(file, line.toLocaleUpperCase("fr-CA"), "utf8");
     const y = titleTop + lineSpacing * i;
-    parts.push(`drawtext=fontfile=${FONT}:textfile=${file}:fontcolor=white:fontsize=${titleFs}:borderw=${boldW}:bordercolor=white:${titleBox}:x=(w-text_w)/2:y=${y}:${titleShadow}`);
+    parts.push(`drawtext=fontfile=${FONT}:textfile=${file}:fontcolor=white:fontsize=${titleFs}:borderw=${boldW}:bordercolor=white:${titleBox}:x=(w-text_w)/2:y=${y}:${titleShadow}:${titleAlpha}`);
   });
   // Benefit: Navy text on a Gold padded box (pill) at the bottom safe zone.
   // Note: drawtext boxes are square-cornered; padding gives the pill shape.
@@ -98,10 +131,12 @@ function overlayChain(cfg, titleLines, lineDir) {
   const benY = Math.round(0.82 * H);
   const pad = Math.round(benFs * 0.55);
   parts.push(`drawtext=fontfile=${FONT}:textfile=${benFile}:fontcolor=${NAVY}:fontsize=${benFs}:box=1:boxcolor=${GOLD}@1:boxborderw=${pad}:x=(w-text_w)/2:y=${benY}`);
+  // The brand watermark is no longer drawtext — it's the real logo overlaid as an
+  // image in buildFilter() (input [2:v]). overlayChain now only emits title + benefit.
   return parts.join(",");
 }
 
-function buildFilter(ratio, cfg, drawChain, delogo) {
+function buildFilter(ratio, cfg, drawChain, delogo, effDur) {
   const { W, H } = cfg;
   const pre = delogo ? `${delogo},` : "";
   let base;
@@ -116,7 +151,25 @@ function buildFilter(ratio, cfg, drawChain, delogo) {
   const Hs = Math.round(SCRIM_FRACTION * H);
   const scrim = `color=c=${NAVY}:s=${W}x${Hs}:r=30,format=rgba,` +
                 `geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='${SCRIM_OPACITY}*255*(Y/(H-1))'[scrim]`;
-  return `${base};${scrim};[base][scrim]overlay=0:${H - Hs}:shortest=1[scr];[scr]${drawChain}[vout]`;
+  // Video transitions: fade from black at start, to black at end (last VIDEO_FADE s).
+  const fadeOutSt = Math.max(0, effDur - VIDEO_FADE).toFixed(3);
+  const fade = `fade=t=in:d=${VIDEO_FADE},fade=t=out:st=${fadeOutSt}:d=${VIDEO_FADE}`;
+  // Brand logo (input [2:v]) on a white semi-transparent plate so the navy wordmark
+  // reads on light/busy footage. Scale logo → center it on the plate → overlay the
+  // backed logo bottom-left (20px left, 30px bottom). Before the fade so it fades too.
+  const logo =
+    `[2:v]scale=${LOGO_W}:${LOGO_H}[logo_s];` +
+    `color=white@${PLATE_ALPHA}:size=${PLATE_W}x${PLATE_H}:r=30[plate];` +
+    `[plate][logo_s]overlay=(W-w)/2:(H-h)/2:shortest=1[logo_backed]`;
+  return `${base};${scrim};[base][scrim]overlay=0:${H - Hs}:shortest=1[scr];${logo};` +
+         `[scr]${drawChain}[txt];[txt][logo_backed]overlay=20:H-h-30[brand];[brand]${fade}[vout]`;
+}
+
+// Background-music branch (input #1): 20% volume, 1s fade in/out, looped to fill
+// (the input is opened with -stream_loop -1). Replaces the source-clip audio.
+function buildAudioChain(effDur) {
+  const aFadeOutSt = Math.max(0, effDur - AUDIO_FADE).toFixed(3);
+  return `[1:a]volume=${MUSIC_VOL},afade=t=in:d=${AUDIO_FADE},afade=t=out:st=${aFadeOutSt}:d=${AUDIO_FADE}[aout]`;
 }
 
 const t0 = Date.now();
@@ -141,13 +194,16 @@ for (const s of sources) {
       const rtag = ratio.replace(":", "x");
       const lineDir = `tmp_lines/${s.sku}_${rtag}_${bucket}`;
       mkdirSync(lineDir, { recursive: true });
-      const filter = buildFilter(ratio, cfg, overlayChain(cfg, titleLines, lineDir), s.delogo);
+      const videoGraph = buildFilter(ratio, cfg, overlayChain(cfg, titleLines, lineDir), s.delogo, effDur);
+      const filter = `${videoGraph};${buildAudioChain(effDur)}`;
       const out = `${outDir}/${s.sku}_${rtag}_${bucket}s.mp4`;
       const args = [
         "-y", "-nostdin", "-loglevel", "error",
-        "-ss", String(s.ss), "-i", src, "-t", String(effDur),
-        "-filter_complex", filter, "-map", "[vout]", "-map", "0:a?",
-        "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
+        "-ss", String(s.ss), "-i", src,        // input 0: product clip (seeked)
+        "-stream_loop", "-1", "-i", MUSIC,      // input 1: bg music, looped to fill
+        "-loop", "1", "-i", LOGO,               // input 2: brand logo (held for whole clip)
+        "-t", String(effDur),                   // output duration cap (bounds all)
+        "-filter_complex", filter, "-map", "[vout]", "-map", "[aout]",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "high", "-crf", "20", "-preset", "medium",
         "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", out,
       ];
