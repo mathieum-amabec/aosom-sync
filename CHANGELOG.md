@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.122] - 2026-06-20
+
+### Added (Draft TTL cron — auto-reject stale new_product drafts)
+- **`GET /api/cron/draft-ttl`** (daily 10:00 UTC, `vercel.json`) — auto-rejects still-unapproved
+  `new_product` drafts older than 7 days. A "new product" post is no longer new after a week, and
+  content generation outpaces publishing, so the draft backlog can never drain — this caps it.
+- **`expireStaleNewProductDrafts(maxAgeDays=7)`** (`database.ts`) — `UPDATE` to `status='rejected'`,
+  `reviewed_by='auto-ttl'`, `review_notes='Auto-expiré: new_product >7j'`. Touches **only**
+  `status='draft'` rows, so an approved/queued draft is never affected. Returns rows expired.
+  Bearer CRON_SECRET; records the run in `cron_runs` ("expired=N") via `trackCron`.
+- Tests: `cron-draft-ttl` — route (auth, success "expired=N", error path) + the TTL `UPDATE`
+  SQL (rejects only stale unapproved new_product, leaves fresh/other-type/approved, idempotent).
+
 ## [0.5.53.121] - 2026-06-20
 
 ### Fixed (Social captions — strip LLM scaffolding)
