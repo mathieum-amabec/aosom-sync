@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.120] - 2026-06-20
+## [0.5.53.121] - 2026-06-20
 
 ### Fixed (Social captions — strip LLM scaffolding)
 - **`stripScaffold()` in `/api/social/content/generate`** — defensive cleanup of the model's
@@ -14,6 +14,19 @@ All notable changes to Aosom Sync will be documented in this file.
   a bare `.trim()` — removes the preamble variants, leading `---` rules, markdown bold, and
   collapses triple newlines. Applied to both FR and EN. Unit tests cover dirty→clean,
   preamble variants, and clean→unchanged.
+
+## [0.5.53.120] - 2026-06-20
+
+### Added (Blog drafts cleanup script)
+- **`scripts/clean-blog-articles.mjs`** — tidies unpublished blog drafts on both blogs
+  (FR `90302349417`, EN `91161428073`). Two surgical edits per article: removes the in-body
+  duplicate `<h1>` + `<p class="post-meta">` byline (the theme already renders `article.title`
+  as the page H1, so the body `<h1>` was a second H1), and adds `summary_html` (first prose
+  paragraph, ~155 chars, word-boundary truncation) when missing. **Unsplash credit captions
+  are deliberately preserved** — they are the license-required attribution, not body text.
+  Idempotent; dry-run by default, `--apply` to write; only touches unpublished articles.
+- Applied to the live drafts: **16 of 23 articles updated** (7 were already clean), verified
+  idempotent (re-run reports 0 changes). Originals backed up before write.
 
 ## [0.5.53.119] - 2026-06-20
 
