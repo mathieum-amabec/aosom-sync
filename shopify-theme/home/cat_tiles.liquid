@@ -1,0 +1,61 @@
+{%- assign loc = request.locale.iso_code | downcase -%}
+{%- if loc == 'en' -%}{%- assign kick = 'Category' -%}{%- assign cta = 'Shop' -%}{%- else -%}{%- assign kick = 'Cat&eacute;gorie' -%}{%- assign cta = 'Magasiner' -%}{%- endif -%}
+<div class="page-width lc-cat lc-reveal">
+  <h2 class="lc-cat__title">{% if loc == 'en' %}Shop by category{% else %}Magasinez par cat&eacute;gorie{% endif %}</h2>
+  <div class="lc-cat-grid">
+    <a class="lc-cat-tile lc-cat-tile--lg" href="/collections/meubles-et-decorations" data-umami-event="Cat tile Furniture & decor">
+      <span class="lc-cat-tile__img" style="background-image:url('{{ 'cat-tile-1.jpg' | asset_url }}')"></span>
+      <span class="lc-cat-tile__ov"></span>
+      <span class="lc-cat-tile__body">
+        <span class="lc-cat-tile__kicker">{{ kick }}</span>
+        <span class="lc-cat-tile__label">{% if loc == 'en' %}Furniture &amp; decor{% else %}Meubles et d&eacute;corations{% endif %}</span>
+        <span class="lc-cat-tile__cta">{{ cta }} <span>&rarr;</span></span>
+      </span>
+    </a>
+    <a class="lc-cat-tile" href="/collections/mobiliers-exterieurs-et-jardins" data-umami-event="Cat tile Outdoor & garden">
+      <span class="lc-cat-tile__img" style="background-image:url('{{ 'cat-tile-2.jpg' | asset_url }}')"></span>
+      <span class="lc-cat-tile__ov"></span>
+      <span class="lc-cat-tile__body">
+        <span class="lc-cat-tile__kicker">{{ kick }}</span>
+        <span class="lc-cat-tile__label">{% if loc == 'en' %}Outdoor &amp; garden{% else %}Mobilier ext&eacute;rieur et jardin{% endif %}</span>
+        <span class="lc-cat-tile__cta">{{ cta }} <span>&rarr;</span></span>
+      </span>
+    </a>
+    <a class="lc-cat-tile" href="/collections/chaises-et-tables-de-patio-1" data-umami-event="Cat tile Patio chairs & tables">
+      <span class="lc-cat-tile__img" style="background-image:url('{{ 'cat-tile-3.jpg' | asset_url }}')"></span>
+      <span class="lc-cat-tile__ov"></span>
+      <span class="lc-cat-tile__body">
+        <span class="lc-cat-tile__kicker">{{ kick }}</span>
+        <span class="lc-cat-tile__label">{% if loc == 'en' %}Patio chairs &amp; tables{% else %}Chaises et tables de patio{% endif %}</span>
+        <span class="lc-cat-tile__cta">{{ cta }} <span>&rarr;</span></span>
+      </span>
+    </a>
+    <a class="lc-cat-tile" href="/collections/jardinage-et-serres" data-umami-event="Cat tile Gardening & greenhouses">
+      <span class="lc-cat-tile__img" style="background-image:url('{{ 'cat-tile-4.jpg' | asset_url }}')"></span>
+      <span class="lc-cat-tile__ov"></span>
+      <span class="lc-cat-tile__body">
+        <span class="lc-cat-tile__kicker">{{ kick }}</span>
+        <span class="lc-cat-tile__label">{% if loc == 'en' %}Gardening &amp; greenhouses{% else %}Jardinage et serres{% endif %}</span>
+        <span class="lc-cat-tile__cta">{{ cta }} <span>&rarr;</span></span>
+      </span>
+    </a>
+    <a class="lc-cat-tile" href="/collections/accessoires-pour-animaux" data-umami-event="Cat tile Pet supplies">
+      <span class="lc-cat-tile__img" style="background-image:url('{{ 'cat-tile-5.jpg' | asset_url }}')"></span>
+      <span class="lc-cat-tile__ov"></span>
+      <span class="lc-cat-tile__body">
+        <span class="lc-cat-tile__kicker">{{ kick }}</span>
+        <span class="lc-cat-tile__label">{% if loc == 'en' %}Pet supplies{% else %}Accessoires pour animaux{% endif %}</span>
+        <span class="lc-cat-tile__cta">{{ cta }} <span>&rarr;</span></span>
+      </span>
+    </a>
+    <a class="lc-cat-tile" href="/collections/sports-et-loisirs" data-umami-event="Cat tile Sports & leisure">
+      <span class="lc-cat-tile__img" style="background-image:url('{{ 'cat-tile-6.jpg' | asset_url }}')"></span>
+      <span class="lc-cat-tile__ov"></span>
+      <span class="lc-cat-tile__body">
+        <span class="lc-cat-tile__kicker">{{ kick }}</span>
+        <span class="lc-cat-tile__label">{% if loc == 'en' %}Sports &amp; leisure{% else %}Sports et loisirs{% endif %}</span>
+        <span class="lc-cat-tile__cta">{{ cta }} <span>&rarr;</span></span>
+      </span>
+    </a>
+  </div>
+</div>

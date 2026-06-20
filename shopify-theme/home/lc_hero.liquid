@@ -1,0 +1,18 @@
+{%- comment -%} Homepage redesign — hero. CSS/JS loaded once here (homepage-scoped). {%- endcomment -%}
+{{ 'lc-home.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'lc-home.js' | asset_url }}" defer></script>
+{%- assign loc = request.locale.iso_code | downcase -%}
+<section class="lc-hero">
+  <div class="lc-hero__bg" style="background-image:url('{{ 'lc-hero.jpg' | asset_url }}')"></div>
+  <div class="lc-hero__ov"></div>
+  <div class="page-width lc-hero__in">
+    <span class="lc-hero__kicker">{% if loc == 'en' %}FURNITURE &middot; OUTDOOR &middot; GARDEN{% else %}MOBILIER &middot; EXT&Eacute;RIEUR &middot; JARDIN{% endif %}</span>
+    <span class="lc-hero__badge">&#11088; {% if loc == 'en' %}490+ products &middot; Secure payment{% else %}Plus de 490 produits &middot; Paiement s&eacute;curis&eacute;{% endif %}</span>
+    <h1 class="lc-hero__title">{% if loc == 'en' %}Furnish your space, your way.{% else %}Meublez votre espace &agrave; votre image.{% endif %}</h1>
+    <p class="lc-hero__sub">{% if loc == 'en' %}Modern furniture, Quebec service, 30-day returns.{% else %}Mobilier moderne, service qu&eacute;b&eacute;cois, retours 30 jours.{% endif %}</p>
+    <div class="lc-hero__cta">
+      <a href="/collections/all" class="lc-btn lc-btn--navy" data-umami-event="Hero CTA shop">{% if loc == 'en' %}Shop now{% else %}Magasinez maintenant{% endif %}</a>
+      <a href="/collections/rabais" class="lc-btn lc-btn--ghost" data-umami-event="Hero CTA deals">{% if loc == 'en' %}See the deals{% else %}Voir les rabais{% endif %}</a>
+    </div>
+  </div>
+</section>
