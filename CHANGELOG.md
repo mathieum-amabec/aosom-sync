@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.119] - 2026-06-20
+
+### Added (PDP SEO — BreadcrumbList)
+- **`shopify-theme/snippets/agentic-structured-data.liquid`** now emits a second JSON-LD
+  block: a **`BreadcrumbList`** (Accueil › Collection › Produit). Falls back to
+  `product.collections.first` when the `collection` global is nil (direct `/products/` URL)
+  and drops the middle node entirely if the product is in no collection. All values escaped
+  via `| json`; absolute URLs via `request.origin`. Closes the only structured-data gap found
+  in the PDP SEO audit (the `Product`/`Offer`/`FAQPage`/`AggregateRating` schema was already
+  present; `AggregateRating` is correctly gated on Judge.me reviews ≥ 1).
+- Mirrors the edit already applied to the live theme (`160213696617`) so the next theme
+  deploy doesn't revert it. Verified rendering on a live PDP (3-level breadcrumb, valid JSON).
+
 ## [0.5.53.118] - 2026-06-20
 
 ### Added (Storefront "M'avertir" back-in-stock form)
