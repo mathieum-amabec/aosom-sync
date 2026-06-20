@@ -1,5 +1,7 @@
 {%- comment -%} Homepage redesign — hero. CSS/JS loaded once here (homepage-scoped). {%- endcomment -%}
 {{ 'lc-home.css' | asset_url | stylesheet_tag }}
+{%- comment -%} Fail-safe: if JS is disabled, never hide the scroll-reveal sections. {%- endcomment -%}
+<noscript><style>.lc-reveal{opacity:1 !important;transform:none !important}</style></noscript>
 <script src="{{ 'lc-home.js' | asset_url }}" defer></script>
 {%- assign loc = request.locale.iso_code | downcase -%}
 <section class="lc-hero">
