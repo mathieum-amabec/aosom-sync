@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.118] - 2026-06-20
+
+### Added (Storefront "M'avertir" back-in-stock form)
+- **Waitlist signup form in the live theme** (`sections/main-product.liquid`, theme `160213696617`).
+  Rendered `{%- unless product.available -%}` right under the buy buttons: an email field + "M'avertir"
+  button that POSTs `{ email, sku, shopify_product_id }` to the back-in-stock API. Closes the gap from
+  the #243 back-in-stock feature, whose backend (`/api/waitlist`, Klaviyo double opt-in, restock trigger)
+  shipped with **no storefront entry point** — customers had no way to subscribe.
+- **Cross-origin fix:** the form POSTs to the absolute app URL `https://aosom-sync.vercel.app/api/waitlist`
+  (not a relative path) — the storefront (`ameublodirect.ca` / `furnishdirect.ca`) and the API are different
+  origins, and `/api/waitlist`'s CORS allow-list authorizes those storefront origins.
+- This is a Shopify theme asset (not bundled by the app build). The pre-change live asset is checkpointed
+  at `shopify-theme/backups/main-product.liquid.PRE-waitlist.bak`; the deployed version is recorded at
+  `shopify-theme/sections/main-product.liquid`. Verified live: form present, CORS preflight + validation
+  pass cross-origin (no test signup created).
+
 ## [0.5.53.117] - 2026-06-20
 
 ### Added (In-app help guide)
