@@ -2,6 +2,30 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.111] - 2026-06-20
+
+### Changed (Price-floor audit → auto-correction)
+- **`/api/health/price-audit` now corrects, not just alerts** (`price-audit.ts`, `route.ts`).
+  The daily 09:30 UTC cron still detects Shopify variants priced below the Aosom floor, but now
+  immediately pushes the corrected floor price back to Shopify (`updateShopifyVariantPrice`) and
+  logs each fix to `price_history` with `change_type='floor_correction'` (`applied_to_shopify=1`
+  on success, `0` on a failed push / unmatched variant — kept as an audit trail).
+- **Per-run safety cap** — corrections are pushed worst-gap first, capped at
+  `MAX_CORRECTIONS_PER_RUN` (200) so a large backlog (first run after deploy, or a sync
+  regression) can't exhaust the 300s cron budget; the overflow is reported as `deferred` and
+  drained by the next daily run. The corrected price reuses `targetSellPrice`, so it can never
+  push `$0`/`NaN`/below-floor; recording is best-effort (a successful push is never downgraded to
+  failed by a history-write error).
+- **Dashboard "Alertes" panel** (`alerts-panel.tsx`) — green card for auto-corrected variants
+  (Shopify price → floor), red card for failed corrections (need manual attention), amber for
+  deferred. Legacy pre-deploy summaries still raise a below-floor alert via a fallback.
+- **`getRecentPriceChanges` excludes `floor_correction`** (`database.ts`) so audit auto-corrections
+  (shown on the dedicated floor card) don't crowd real feed-driven price changes out of the
+  sync-history feed.
+- Tests: `price-audit` (correction success/failure/missing-variant, best-effort recording,
+  per-run cap worst-first, persisted-summary shape) and `dashboard-db` (settings → priceFloor
+  contract incl. legacy fallback, recent-changes floor_correction exclusion).
+
 ## [0.5.53.110] - 2026-06-19
 
 ### Added (Back-in-stock waitlist — storefront "notify me", CASL double opt-in)

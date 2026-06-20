@@ -5,8 +5,8 @@ import { useState, useEffect } from "react";
 interface ErroredImportJob { id: string; groupKey: string; sku: string | null; error: string | null; updatedAt: string; }
 interface FeedSync { feedType: string; lastSuccessAt: number | null; itemCount: number | null; lastStatus: string | null; }
 interface MetaToken { configured: boolean; state?: string; daysLeft?: number | null; expiresAt?: number; }
-interface PriceFloorItem { sku: string; shopify_price: number; aosom_price: number; gap: number; }
-interface PriceFloor { belowFloorCount: number; total: number; auditedAt: number | null; topItems: PriceFloorItem[]; }
+interface PriceFloorItem { sku: string; shopify_price: number; aosom_price: number; gap: number; corrected_price?: number; status?: "corrected" | "failed"; error?: string; }
+interface PriceFloor { belowFloorCount: number; total: number; corrected: number; failed: number; deferred: number; auditedAt: number | null; topItems: PriceFloorItem[]; }
 interface Alerts {
   erroredImportJobs: ErroredImportJob[];
   staleDraftCount: number;
@@ -56,9 +56,19 @@ export function AlertsPanel() {
   const token = data.metaToken;
   const tokenAlert =
     token.configured && (token.state === "expired" || token.state === "expiring_soon" || token.state === "unknown");
-  const belowFloor = data.priceFloor?.belowFloorCount ?? 0;
+  const floorCorrected = data.priceFloor?.corrected ?? 0;
+  const floorFailed = data.priceFloor?.failed ?? 0;
+  const floorDeferred = data.priceFloor?.deferred ?? 0;
+  const floorBelow = data.priceFloor?.belowFloorCount ?? 0;
+  // Legacy summary (written before auto-correction shipped) has belowFloorCount but no
+  // corrected/failed/deferred breakdown — surface it as a plain below-floor alert until the
+  // next audit repopulates the richer fields.
+  const floorLegacy = floorBelow > 0 && floorCorrected === 0 && floorFailed === 0 && floorDeferred === 0;
+  // Failed corrections (or an un-broken-down legacy backlog) are alerts; auto-corrected ones are good news.
   const hasAlerts = data.erroredImportJobs.length > 0 || data.staleDraftCount > 0 || tokenAlert ||
-    belowFloor > 0 || data.feeds.some((f) => f.lastStatus === "error");
+    floorFailed > 0 || floorLegacy || data.feeds.some((f) => f.lastStatus === "error");
+  const floorAuditedAt = data.priceFloor?.auditedAt;
+  const floorAge = floorAuditedAt ? ` · ${timeAgoEpoch(floorAuditedAt)}` : "";
 
   return (
     <section className="mb-8">
@@ -72,7 +82,7 @@ export function AlertsPanel() {
         {data.erroredImportJobs.length > 0 && (
           <div className="bg-red-950/20 border border-red-800/40 rounded-xl overflow-hidden">
             <div className="px-4 py-2.5 text-sm font-medium text-red-300">
-              {data.erroredImportJobs.length} job{data.erroredImportJobs.length > 1 ? "s" : ""} d'import en erreur
+              {data.erroredImportJobs.length} job{data.erroredImportJobs.length > 1 ? "s" : ""} d&apos;import en erreur
             </div>
             <ul className="divide-y divide-red-900/30">
               {data.erroredImportJobs.slice(0, 8).map((j) => (
@@ -85,17 +95,74 @@ export function AlertsPanel() {
           </div>
         )}
 
-        {/* Price floor — Shopify selling below the Aosom feed price */}
-        {belowFloor > 0 && data.priceFloor && (
+        {/* Price floor — corrections that FAILED to push (red, need manual fix) */}
+        {floorFailed > 0 && data.priceFloor && (
           <div className="bg-red-950/20 border border-red-800/40 rounded-xl overflow-hidden">
             <div className="px-4 py-2.5 text-sm font-medium text-red-300">
-              {belowFloor} produit{belowFloor > 1 ? "s" : ""} vendu{belowFloor > 1 ? "s" : ""} sous le prix plancher Aosom
-              <span className="text-red-400/70 font-normal"> · sur {data.priceFloor.total} comparés{data.priceFloor.auditedAt ? ` · ${timeAgoEpoch(data.priceFloor.auditedAt)}` : ""}</span>
+              {floorFailed} prix sous le plancher non corrigé{floorFailed > 1 ? "s" : ""}
+              <span className="text-red-400/70 font-normal"> · échec du push Shopify{floorAge}</span>
+            </div>
+            <ul className="divide-y divide-red-900/30">
+              {data.priceFloor.topItems.filter((it) => it.status === "failed").slice(0, 8).map((it) => (
+                <li key={it.sku} className="flex items-center justify-between gap-3 px-4 py-2 text-xs">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="w-2 h-2 rounded-full shrink-0 bg-red-400" />
+                    <span className="text-gray-300 truncate">{it.sku}</span>
+                  </span>
+                  <span className="text-gray-500 shrink-0">
+                    Shopify {it.shopify_price.toFixed(2)}$ · Aosom {it.aosom_price.toFixed(2)}$
+                    <span className="text-red-400"> · {it.gap.toFixed(2)}$</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Price floor — variants auto-corrected to the Aosom floor (green, informational) */}
+        {floorCorrected > 0 && data.priceFloor && (
+          <div className="bg-green-950/20 border border-green-800/40 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 text-sm font-medium text-green-300">
+              {floorCorrected} prix auto-corrigé{floorCorrected > 1 ? "s" : ""} au plancher Aosom
+              <span className="text-green-400/70 font-normal"> · sur {data.priceFloor.total} comparés{floorAge}</span>
+            </div>
+            <ul className="divide-y divide-green-900/30">
+              {data.priceFloor.topItems.filter((it) => it.status === "corrected").slice(0, 8).map((it) => (
+                <li key={it.sku} className="flex items-center justify-between gap-3 px-4 py-2 text-xs">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="w-2 h-2 rounded-full shrink-0 bg-green-400" />
+                    <span className="text-gray-300 truncate">{it.sku}</span>
+                  </span>
+                  <span className="text-gray-500 shrink-0">
+                    {it.shopify_price.toFixed(2)}$
+                    <span className="text-green-400"> → {(it.corrected_price ?? it.aosom_price).toFixed(2)}$</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Price floor — variants deferred past the per-run cap (amber, corrected next run) */}
+        {floorDeferred > 0 && data.priceFloor && (
+          <Row
+            tone="warn"
+            title={`${floorDeferred} prix sous le plancher en attente de correction`}
+            detail={`Au-delà du plafond par exécution — corrigés au prochain audit quotidien${floorAge}.`}
+          />
+        )}
+
+        {/* Price floor — legacy summary (pre auto-correction), no per-item breakdown */}
+        {floorLegacy && data.priceFloor && (
+          <div className="bg-red-950/20 border border-red-800/40 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 text-sm font-medium text-red-300">
+              {floorBelow} produit{floorBelow > 1 ? "s" : ""} vendu{floorBelow > 1 ? "s" : ""} sous le prix plancher Aosom
+              <span className="text-red-400/70 font-normal"> · sur {data.priceFloor.total} comparés{floorAge}</span>
             </div>
             <ul className="divide-y divide-red-900/30">
               {data.priceFloor.topItems.slice(0, 8).map((it) => (
                 <li key={it.sku} className="flex items-center justify-between gap-3 px-4 py-2 text-xs">
-                  <span className="text-gray-300">{it.sku}</span>
+                  <span className="text-gray-300 truncate">{it.sku}</span>
                   <span className="text-gray-500 shrink-0">
                     Shopify {it.shopify_price.toFixed(2)}$ · Aosom {it.aosom_price.toFixed(2)}$
                     <span className="text-red-400"> · {it.gap.toFixed(2)}$</span>
