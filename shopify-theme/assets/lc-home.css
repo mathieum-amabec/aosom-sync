@@ -1,0 +1,331 @@
+/* ==========================================================================
+   lc-home.css — Homepage redesign (hero + categories + scroll reveal)
+   Deployed to LIVE theme 160213696617 via Asset API.
+   Loaded once from the lc_hero custom-liquid section (scoped to the homepage).
+   Dawn base sets html{font-size:62.5%} so 1rem = 10px.
+   ========================================================================== */
+
+:root {
+  /* Brand tokens (single source of truth — previously duplicated inline ~15x) */
+  --lc-navy: #1B2A4A;
+  --lc-navy-deep: #16223C;
+  --lc-ink: #1A1A2E;
+  --lc-gold: #C17F3E;
+  --lc-gold-soft: #D4A853;
+  --lc-cream: #FAFAF8;
+  --lc-muted: #797068;
+
+  /* Unified motion language (Étape 5) */
+  --lc-ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --lc-dur: 0.35s;
+}
+
+/* ==========================================================================
+   HERO (lc_hero) — Étape 2
+   ========================================================================== */
+.lc-hero {
+  position: relative;
+  min-height: 480px;
+  display: flex;
+  align-items: flex-start;
+  overflow: hidden; /* clip the Ken Burns zoom */
+}
+
+/* Ken Burns layer — separate element so the zoom never moves the text/overlay */
+.lc-hero__bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  transform-origin: center;
+  animation: lc-kenburns 20s var(--lc-ease) infinite alternate;
+  will-change: transform;
+}
+
+@keyframes lc-kenburns {
+  from { transform: scale(1); }
+  to   { transform: scale(1.08); }
+}
+
+/* Navy-toned gradient overlay (replaces the flat triple-black overlay) */
+.lc-hero__ov {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(105deg, rgba(27,42,74,.82) 0%, rgba(27,42,74,.5) 36%, rgba(27,42,74,.08) 68%, rgba(27,42,74,0) 100%),
+    linear-gradient(to top, rgba(27,42,74,.45) 0%, rgba(27,42,74,0) 32%);
+}
+
+.lc-hero__in {
+  position: relative;
+  z-index: 1;
+  color: #fff;
+  max-width: 660px;
+  padding: 9% 0 52px;
+  font-family: 'DM Sans', sans-serif;
+}
+
+/* Staggered reveal — each child rises in sequence */
+.lc-hero__kicker,
+.lc-hero__badge,
+.lc-hero__title,
+.lc-hero__sub,
+.lc-hero__cta {
+  opacity: 0;
+  animation: lc-rise 0.7s var(--lc-ease) forwards;
+}
+.lc-hero__kicker { animation-delay: .05s; }
+.lc-hero__badge  { animation-delay: .15s; }
+.lc-hero__title  { animation-delay: .30s; }
+.lc-hero__sub    { animation-delay: .45s; }
+.lc-hero__cta    { animation-delay: .60s; }
+
+@keyframes lc-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.lc-hero__kicker {
+  display: block;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--lc-gold-soft);
+  margin: 0 0 .9rem;
+  text-shadow: 0 1px 6px rgba(0,0,0,.45);
+}
+
+.lc-hero__badge {
+  display: inline-block;
+  background: rgba(255,255,255,.16);
+  border: 1px solid rgba(255,255,255,.34);
+  color: #fff;
+  font-weight: 600;
+  font-size: 1.25rem;
+  padding: 7px 16px;
+  border-radius: 999px;
+  margin-bottom: 1.1rem;
+  backdrop-filter: blur(4px);
+}
+
+.lc-hero__title {
+  /* Explicit white: Dawn's base `h1 { color }` rule overrides the inherited
+     color from .lc-hero__in, so the headline must set its own. */
+  color: #fff;
+  font-size: clamp(2.6rem, 5.2vw, 4.8rem);
+  line-height: 1.05;
+  letter-spacing: -0.5px;
+  margin: 0 0 1rem;
+  font-weight: 700;
+  text-shadow: 0 2px 12px rgba(0,0,0,.5);
+}
+
+.lc-hero__sub {
+  font-size: 1.7rem;
+  margin: 0 0 2rem;
+  max-width: 34ch;
+  text-shadow: 0 1px 8px rgba(0,0,0,.55);
+}
+
+.lc-hero__cta {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   Unified buttons (Étape 5)
+   ========================================================================== */
+.lc-btn {
+  display: inline-block;
+  padding: 14px 28px;
+  border-radius: 8px;
+  font-weight: 700;
+  text-decoration: none;
+  font-size: 1.5rem;
+  font-family: 'DM Sans', sans-serif;
+  transition: transform var(--lc-dur) var(--lc-ease),
+              background var(--lc-dur) var(--lc-ease),
+              color var(--lc-dur) var(--lc-ease),
+              box-shadow var(--lc-dur) var(--lc-ease);
+  box-shadow: 0 4px 16px rgba(0,0,0,.28);
+}
+.lc-btn--navy { background: var(--lc-navy); color: #fff; border: 2px solid var(--lc-gold); }
+.lc-btn--navy:hover { background: var(--lc-navy-deep); transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0,0,0,.34); }
+.lc-btn--ghost { background: rgba(255,255,255,.85); color: var(--lc-navy); border: 2px solid var(--lc-gold); }
+.lc-btn--ghost:hover { background: #fff; transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0,0,0,.22); }
+.lc-btn--gold { background: var(--lc-gold); color: #fff; border: 0; }
+.lc-btn--gold:hover { background: var(--lc-navy); transform: translateY(-2px); }
+
+@media (max-width: 749px) {
+  .lc-hero__in { text-align: center; margin: 0 auto; padding: 16% 0 40px; }
+  .lc-hero__title { font-size: clamp(2.1rem, 6vw, 2.8rem); }
+  .lc-hero__sub { margin-left: auto; margin-right: auto; }
+  .lc-hero__cta { justify-content: center; }
+}
+
+/* ==========================================================================
+   CATEGORIES (cat_tiles) — Étape 3 — bento asymmetric grid
+   ========================================================================== */
+.lc-cat { padding: 48px 0 60px; }
+
+.lc-cat__title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: clamp(2rem, 3.5vw, 2.6rem);
+  text-align: center;
+  margin: 0 0 1.8rem;
+  color: var(--lc-ink);
+}
+
+/* Bento: 3 cols x 3 rows. Tile 1 (Meubles & déco) spans 2x2, top-left. */
+.lc-cat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 190px;
+  gap: 16px;
+}
+.lc-cat-tile--lg { grid-column: 1 / 3; grid-row: 1 / 3; }
+
+.lc-cat-tile {
+  position: relative;
+  display: block;
+  border-radius: 12px;
+  overflow: hidden;
+  text-decoration: none;
+  box-shadow: 0 4px 14px rgba(27,42,74,.10);
+  transition: box-shadow var(--lc-dur) var(--lc-ease);
+}
+.lc-cat-tile:hover { box-shadow: 0 12px 30px rgba(27,42,74,.22); }
+
+/* Image lives in its own layer so it zooms inside the fixed frame */
+.lc-cat-tile__img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  transform: scale(1);
+  transition: transform .6s var(--lc-ease);
+  will-change: transform;
+}
+.lc-cat-tile:hover .lc-cat-tile__img { transform: scale(1.06); }
+
+/* Bottom-to-top gradient (replaces the flat 50% navy veil) */
+.lc-cat-tile__ov {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(27,42,74,.78) 0%, rgba(27,42,74,.32) 42%, rgba(27,42,74,.06) 72%, rgba(27,42,74,0) 100%);
+  transition: background var(--lc-dur) var(--lc-ease);
+}
+.lc-cat-tile:hover .lc-cat-tile__ov {
+  background: linear-gradient(to top, rgba(27,42,74,.7) 0%, rgba(27,42,74,.22) 50%, rgba(27,42,74,0) 100%);
+}
+
+.lc-cat-tile__body {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 1;
+  padding: 16px 18px 18px;
+  color: #fff;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.lc-cat-tile__kicker {
+  display: block;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,.72);
+  margin: 0 0 .25rem;
+}
+
+.lc-cat-tile__label {
+  display: block;
+  font-weight: 700;
+  font-size: 1.7rem;
+  line-height: 1.2;
+  text-shadow: 0 1px 4px rgba(0,0,0,.4);
+  transform: translateY(10px);
+  transition: transform var(--lc-dur) var(--lc-ease);
+}
+.lc-cat-tile--lg .lc-cat-tile__label { font-size: 2.4rem; }
+.lc-cat-tile:hover .lc-cat-tile__label { transform: translateY(0); }
+
+/* Copper accent line — grows in on hover */
+.lc-cat-tile__label::after {
+  content: "";
+  display: block;
+  height: 3px;
+  width: 46px;
+  margin-top: .5rem;
+  background: var(--lc-gold);
+  border-radius: 2px;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--lc-dur) var(--lc-ease);
+}
+.lc-cat-tile:hover .lc-cat-tile__label::after { transform: scaleX(1); }
+
+/* "Magasiner →" CTA — hidden until hover */
+.lc-cat-tile__cta {
+  display: block;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #fff;
+  margin-top: .5rem;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity var(--lc-dur) var(--lc-ease), transform var(--lc-dur) var(--lc-ease);
+}
+.lc-cat-tile:hover .lc-cat-tile__cta { opacity: 1; transform: none; }
+.lc-cat-tile__cta span { transition: margin-left var(--lc-dur) var(--lc-ease); }
+.lc-cat-tile:hover .lc-cat-tile__cta span { margin-left: 4px; }
+
+/* Keyboard focus parity with hover */
+.lc-cat-tile:focus-visible { outline: 3px solid var(--lc-gold); outline-offset: 2px; }
+.lc-cat-tile:focus-visible .lc-cat-tile__img { transform: scale(1.06); }
+.lc-cat-tile:focus-visible .lc-cat-tile__cta { opacity: 1; transform: none; }
+.lc-cat-tile:focus-visible .lc-cat-tile__label::after { transform: scaleX(1); }
+
+@media (max-width: 749px) {
+  .lc-cat-grid { grid-template-columns: repeat(2, 1fr); grid-auto-rows: 150px; gap: 12px; }
+  /* Large tile spans the full width and two rows so it stays a hero on mobile too. */
+  .lc-cat-tile--lg { grid-column: 1 / 3; grid-row: span 2; }
+  .lc-cat-tile__label { font-size: 1.5rem; transform: none; }
+  .lc-cat-tile--lg .lc-cat-tile__label { font-size: 1.9rem; }
+  /* Touch has no hover — reveal the CTA + accent line by default on mobile */
+  .lc-cat-tile__cta { opacity: 1; transform: none; }
+  .lc-cat-tile__label::after { transform: scaleX(1); }
+}
+
+/* ==========================================================================
+   SCROLL REVEAL (Étape 4) — applied to lc_story1/2, cat_tiles, why_us
+   ========================================================================== */
+.lc-reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity .6s var(--lc-ease), transform .6s var(--lc-ease);
+}
+.lc-reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* ==========================================================================
+   prefers-reduced-motion guard (Étapes 2 & 4)
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .lc-hero__bg { animation: none; }
+  .lc-hero__kicker,
+  .lc-hero__badge,
+  .lc-hero__title,
+  .lc-hero__sub,
+  .lc-hero__cta { opacity: 1; animation: none; }
+  .lc-cat-tile__img,
+  .lc-cat-tile__label,
+  .lc-cat-tile__cta { transition: none; }
+  .lc-reveal { opacity: 1; transform: none; transition: none; }
+  .lc-btn { transition: none; }
+}

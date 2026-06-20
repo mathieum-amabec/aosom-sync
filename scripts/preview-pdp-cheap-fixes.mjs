@@ -17,10 +17,10 @@
 // scan found 0/502 descriptions contain "##"; nothing to strip. See DATA-OPS-LOG.
 //
 // Run:  node scripts/preview-pdp-cheap-fixes.mjs
-import { rest, sleep } from "./_shopify-lib.mjs";
+import { rest, sleep, LIVE_THEME_ID } from "./_shopify-lib.mjs";
 
 const THEME = "160213696617"; // PREVIEW — hard-coded so we never touch live
-if (THEME === "160059195497") throw new Error("refusing to run against the LIVE theme");
+if (THEME === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 
 async function getAsset(key) {
   const res = await rest(`/themes/${THEME}/assets.json?asset[key]=${encodeURIComponent(key)}`);

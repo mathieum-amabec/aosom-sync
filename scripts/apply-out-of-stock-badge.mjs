@@ -20,9 +20,11 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { LIVE_THEME_ID } from "./_shopify-lib.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const THEME_ID = "160213696617";
+if (THEME_ID === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 const STORE = "27u5y2-kp.myshopify.com";
 const API = `https://${STORE}/admin/api/2024-01`;
 const APPLY = process.argv.includes("--apply");

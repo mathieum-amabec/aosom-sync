@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.112] - 2026-06-20
+## [0.5.53.114] - 2026-06-20
 
 ### Added (Ops tooling)
 - **`scripts/sync-shopify-handles.mjs`** — one-shot maintenance script that resyncs
@@ -13,6 +13,49 @@ All notable changes to Aosom Sync will be documented in this file.
   checkpoint), `--apply` replays the reviewed checkpoint with a drift guard
   (`WHERE shopify_handle = <old>`). Read-only against Shopify; the only write is to the DB.
   First run reconciled 458/638 stale handles.
+
+## [0.5.53.113] - 2026-06-20
+
+### Fixed (Theme-ID constants — live/preview role swap)
+- **`scripts/_shopify-lib.mjs` now exports `LIVE_THEME_ID` (`160213696617`) and
+  `BACKUP_THEME_ID` (`160059195497`)** as the single source of truth for theme roles.
+  Verified via `GET /admin/api/2025-01/themes.json`: the published (`role:main`) theme is now
+  `160213696617` "Copie de Copie de Trade v2"; the former live `160059195497` "Copie de Trade v2"
+  is `unpublished`. The two themes swapped roles when the preview was published
+  (see `publish-preview-live.mjs`), but the scripts still hard-coded the pre-swap IDs.
+- **All theme guard-rails now reference `LIVE_THEME_ID`** instead of the stale literal
+  `160059195497`. The `if (THEME === …) throw "refusing to run against the LIVE theme"` guards
+  (and the `const LIVE` / `PREVIEW === LIVE` checks) previously protected the now-unpublished
+  theme while leaving the real live theme (`160213696617`) writable. Every preview `apply-*`
+  script now correctly aborts when pointed at the live theme.
+- Added guards to two previously unguarded scripts that targeted the now-live theme
+  (`apply-out-of-stock-badge.mjs`, `apply-seo-metafields.mjs`). Pointed `verify-og-live.mjs`
+  and the `apply-*-live` scripts' `LIVE` constant at the real live theme.
+  `getAsset`/`putAsset` default to `BACKUP_THEME_ID` (non-live; same value as the old default).
+
+## [0.5.53.112] - 2026-06-20
+
+### Changed (Homepage redesign — premium hero + bento categories)
+- **Theme-only change** deployed to the LIVE Shopify theme (`160213696617`) via the Asset API;
+  no Next.js app/runtime code changed. Source versioned under `shopify-theme/` for review.
+- **New `assets/lc-home.css`** extracts the homepage CSS out of the inline `custom-liquid` JSON
+  blobs into a single asset with design tokens (`--lc-navy`, `--lc-gold`, `--lc-ease`, `--lc-dur`),
+  so colours/easing/duration are no longer duplicated ~15× inline.
+- **Hero (`lc_hero`)** — dedicated Ken Burns background layer (scale 1.0→1.08 over 20s), kicker
+  (`MOBILIER · EXTÉRIEUR · JARDIN`), staggered text reveal (badge→H1→sub→CTA), navy gradient
+  overlay replacing the flat black one, larger/tighter H1. Explicit white H1 (Dawn's base `h1`
+  colour otherwise wins). FR/EN preserved.
+- **Categories (`cat_tiles`)** — asymmetric bento grid (large "Meubles & déco" 2×2 + 5 secondary),
+  image-zoom-in-fixed-frame hover, bottom→top gradient, animated label + "Magasiner →" CTA + copper
+  accent line. 2-col on mobile with the large tile full-width.
+- **Scroll reveal** — `assets/lc-home.js` (IntersectionObserver, respects `prefers-reduced-motion`,
+  no-JS `<noscript>` fallback so sections never stay hidden) fades in `lc_story1/2`, `cat_tiles`,
+  `why_us` as they enter the viewport.
+- **Unified motion language** — single easing `cubic-bezier(0.25,0.46,0.45,0.94)` + `0.35s` duration
+  across buttons and cards; full `prefers-reduced-motion` guard.
+- **LCP** — homepage-scoped `<link rel="preload">` of `lc-hero.jpg` added to `layout/theme.liquid`.
+- Deploy/rollback via `scripts/apply-homepage-redesign.mjs` (dry-run by default, `--apply` pushes
+  and backs up `index.json` + `theme.liquid` to `shopify-theme/backups/`).
 
 ## [0.5.53.111] - 2026-06-20
 
