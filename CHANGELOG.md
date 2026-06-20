@@ -2,7 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.116] - 2026-06-20
+## [0.5.53.117] - 2026-06-20
+
+### Added (In-app help guide)
+- **New `/help` page** (`src/app/(dashboard)/help/page.tsx`) — « Guide d’utilisation — Aosom Sync ».
+  A tutorial with one accordion section per dashboard page (10 total), ordered by daily
+  usage importance (Dashboard → Drafts → Social → Import → Catalogue → Collections → Vidéos →
+  Demand Gen → Settings → Sync History). Each section gives the page's role in one sentence,
+  a 3-step typical flow, and usage tips. Server component (native `<details>` accordion, no
+  client JS), navy/gold accents over the dashboard's dark panels, DM Sans via `next/font`.
+- **Sidebar** (`sidebar.tsx`) — added the « Aide » nav item linking to `/help` (admin role;
+  not surfaced for the Meta-reviewer role).
+
 
 ### Added (Price-audit cron-run tracking)
 - **`/api/health/price-audit` now records to `cron_runs`** (`route.ts`) via `trackCron`, like the
