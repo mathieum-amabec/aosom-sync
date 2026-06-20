@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.116] - 2026-06-20
+
+### Added (Price-audit cron-run tracking)
+- **`/api/health/price-audit` now records to `cron_runs`** (`route.ts`) via `trackCron`, like the
+  other 9 crons. Previously it only wrote `settings.price_audit_result`, so it was invisible to the
+  dashboard cron-health view with no run/outcome trail. Each run logs a one-line `detail`:
+  `corrected=N failed=M deferred=K violations=V` on success, or the thrown message on error.
+  Recording is best-effort (a `cron_runs` write failure can't fail the audit or mask a real error).
+- Tests: `cron-price-audit` (success detail format, error detail, auth gate) against the real
+  `cron-tracking` path.
+
 ## [0.5.53.115] - 2026-06-20
 
 ### Fixed (feed titles — strip imperial dimension suffixes)
