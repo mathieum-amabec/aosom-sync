@@ -75,3 +75,4 @@ out/
 /src/*.mp4
 # Demand Gen render scratch (FFmpeg drawtext textfiles)
 /tmp_lines/
+src/audio/
