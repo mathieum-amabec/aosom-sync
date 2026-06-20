@@ -23,7 +23,16 @@ export function loadEnv() {
 
 export const STORE = "27u5y2-kp.myshopify.com";
 export const API_VERSION = "2025-01";
-export const PREVIEW_THEME_ID = "160059195497"; // "Copie de Trade v2" — now role:main (PUBLISHED/live theme as of 2026-06)
+
+// Theme roles verified via GET /admin/api/2025-01/themes.json (source of truth):
+//   160213696617 "Copie de Copie de Trade v2" → role:main        (LIVE / published)
+//   160059195497 "Copie de Trade v2"           → role:unpublished (previous live, kept as backup)
+// The two themes swapped roles when the preview was published (see publish-preview-live.mjs).
+export const LIVE_THEME_ID = "160213696617"; // current main / published (LIVE) theme
+export const BACKUP_THEME_ID = "160059195497"; // unpublished — previous live, kept as backup
+// Deprecated alias kept for older imports. Points at the non-live backup theme so the
+// default asset-write target can never hit production. New code should use BACKUP_THEME_ID.
+export const PREVIEW_THEME_ID = BACKUP_THEME_ID;
 const TOKEN = loadEnv().SHOPIFY_ACCESS_TOKEN;
 
 export async function rest(endpoint, options = {}) {
@@ -51,14 +60,14 @@ export async function gql(query, variables = {}) {
   return json;
 }
 
-export async function getAsset(key, themeId = PREVIEW_THEME_ID) {
+export async function getAsset(key, themeId = BACKUP_THEME_ID) {
   const res = await rest(`/themes/${themeId}/assets.json?asset[key]=${encodeURIComponent(key)}`);
   if (!res.ok) throw new Error(`getAsset ${key} failed: ${res.status} ${await res.text()}`);
   const data = await res.json();
   return data.asset.value;
 }
 
-export async function putAsset(key, value, themeId = PREVIEW_THEME_ID) {
+export async function putAsset(key, value, themeId = BACKUP_THEME_ID) {
   const res = await rest(`/themes/${themeId}/assets.json`, {
     method: "PUT",
     body: JSON.stringify({ asset: { key, value } }),

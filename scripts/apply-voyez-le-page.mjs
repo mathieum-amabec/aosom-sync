@@ -8,10 +8,10 @@
 // Cards = every product with a READY video in video_ingest_log (Turso), published on the
 // Online Store. Live data (url/title/price/poster) resolved at render via all_products[handle];
 // the source video URL + category are baked. Hover-to-play on desktop, autoplay-in-view on mobile.
-import { loadEnv, gql, rest, getAsset, putAsset, sleep } from "./_shopify-lib.mjs";
+import { loadEnv, gql, rest, getAsset, putAsset, sleep, LIVE_THEME_ID } from "./_shopify-lib.mjs";
 import { createClient } from "@libsql/client";
 
-const LIVE = "160059195497";
+const LIVE = LIVE_THEME_ID;
 const PREVIEW = "160213696617";
 const MENU_HANDLE = "preview-main-menu";
 const PAGE_HANDLE = "voyez-le-chez-vous";

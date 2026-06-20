@@ -1,6 +1,6 @@
 // CHANTIER 1 — Enfants mega images + parent -> /collections/enfants (PREVIEW only).
-import { loadEnv, rest, gql, getAsset, putAsset } from "./_shopify-lib.mjs";
-const LIVE = "160059195497", PREVIEW = "160213696617";
+import { loadEnv, rest, gql, getAsset, putAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+const LIVE = LIVE_THEME_ID, PREVIEW = "160213696617";
 const t = (await (await rest("/themes.json")).json()).themes.find((x) => String(x.id) === PREVIEW);
 if (!t || t.role !== "unpublished") throw new Error("ABORT: not unpublished preview");
 const env = loadEnv();

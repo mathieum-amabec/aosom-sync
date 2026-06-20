@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.112] - 2026-06-20
+
+### Fixed (Theme-ID constants — live/preview role swap)
+- **`scripts/_shopify-lib.mjs` now exports `LIVE_THEME_ID` (`160213696617`) and
+  `BACKUP_THEME_ID` (`160059195497`)** as the single source of truth for theme roles.
+  Verified via `GET /admin/api/2025-01/themes.json`: the published (`role:main`) theme is now
+  `160213696617` "Copie de Copie de Trade v2"; the former live `160059195497` "Copie de Trade v2"
+  is `unpublished`. The two themes swapped roles when the preview was published
+  (see `publish-preview-live.mjs`), but the scripts still hard-coded the pre-swap IDs.
+- **All theme guard-rails now reference `LIVE_THEME_ID`** instead of the stale literal
+  `160059195497`. The `if (THEME === …) throw "refusing to run against the LIVE theme"` guards
+  (and the `const LIVE` / `PREVIEW === LIVE` checks) previously protected the now-unpublished
+  theme while leaving the real live theme (`160213696617`) writable. Every preview `apply-*`
+  script now correctly aborts when pointed at the live theme.
+- Added guards to two previously unguarded scripts that targeted the now-live theme
+  (`apply-out-of-stock-badge.mjs`, `apply-seo-metafields.mjs`). Pointed `verify-og-live.mjs`
+  and the `apply-*-live` scripts' `LIVE` constant at the real live theme.
+  `getAsset`/`putAsset` default to `BACKUP_THEME_ID` (non-live; same value as the old default).
+
 ## [0.5.53.111] - 2026-06-20
 
 ### Changed (Price-floor audit → auto-correction)
