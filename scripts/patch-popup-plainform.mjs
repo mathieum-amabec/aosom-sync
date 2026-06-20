@@ -1,7 +1,7 @@
 // Replace the popup's {% form 'customer' %} with a plain HTML form (form_type=customer)
 // to remove any liquid-error risk in custom_liquid. PREVIEW only.
-import { rest, getAsset, putAsset } from "./_shopify-lib.mjs";
-const LIVE = "160059195497", PREVIEW = "160213696617";
+import { rest, getAsset, putAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+const LIVE = LIVE_THEME_ID, PREVIEW = "160213696617";
 if (PREVIEW === LIVE) throw new Error("ABORT");
 const t = (await (await rest("/themes.json")).json()).themes.find((x) => String(x.id) === PREVIEW);
 if (!t || t.role !== "unpublished") throw new Error("ABORT: not unpublished preview");

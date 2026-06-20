@@ -1,8 +1,8 @@
 // Applies the og:image + newsletter-dedup edits to the PREVIEW theme ONLY.
 // HARD GUARD: refuses to run against the live theme.
-import { loadEnv, rest, getAsset, putAsset } from "./_shopify-lib.mjs";
+import { loadEnv, rest, getAsset, putAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
 
-const LIVE = "160059195497";
+const LIVE = LIVE_THEME_ID;
 const PREVIEW = "160213696617"; // "Copie de Copie de Trade v2" (unpublished)
 if (PREVIEW === LIVE) throw new Error("ABORT: preview id equals live id");
 

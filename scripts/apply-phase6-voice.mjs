@@ -1,8 +1,8 @@
 // Phase 6 C1 — warmer Québécois marketing voice on the homepage. PREVIEW only (160213696617).
 // Idempotent string replacements + section setting updates. PUT index.json + header-group.json.
-import { rest, sleep } from "./_shopify-lib.mjs";
+import { rest, sleep, LIVE_THEME_ID } from "./_shopify-lib.mjs";
 const T = "160213696617";
-if (T === "160059195497") throw new Error("refusing to run against the LIVE theme");
+if (T === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 const get = async (k) => (await (await rest(`/themes/${T}/assets.json?asset[key]=${encodeURIComponent(k)}`)).json()).asset.value;
 async function put(k, v) {
   const r = await rest(`/themes/${T}/assets.json`, { method: "PUT", body: JSON.stringify({ asset: { key: k, value: v } }) });

@@ -1,5 +1,5 @@
-import { getAsset } from "./_shopify-lib.mjs";
-const LIVE = "160059195497";
+import { getAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+const LIVE = LIVE_THEME_ID;
 
 const s = await getAsset("snippets/meta-tags.liquid", LIVE);
 console.log("meta-tags has index branch:", s.includes("request.page_type == 'index'"));
