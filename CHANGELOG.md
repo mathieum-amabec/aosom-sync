@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.120] - 2026-06-20
+
+### Added (Blog drafts cleanup script)
+- **`scripts/clean-blog-articles.mjs`** — tidies unpublished blog drafts on both blogs
+  (FR `90302349417`, EN `91161428073`). Two surgical edits per article: removes the in-body
+  duplicate `<h1>` + `<p class="post-meta">` byline (the theme already renders `article.title`
+  as the page H1, so the body `<h1>` was a second H1), and adds `summary_html` (first prose
+  paragraph, ~155 chars, word-boundary truncation) when missing. **Unsplash credit captions
+  are deliberately preserved** — they are the license-required attribution, not body text.
+  Idempotent; dry-run by default, `--apply` to write; only touches unpublished articles.
+- Applied to the live drafts: **16 of 23 articles updated** (7 were already clean), verified
+  idempotent (re-run reports 0 changes). Originals backed up before write.
+
 ## [0.5.53.119] - 2026-06-20
 
 ### Added (PDP SEO — BreadcrumbList)
