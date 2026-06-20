@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.114] - 2026-06-20
+
+### Added (Ops tooling)
+- **`scripts/sync-shopify-handles.mjs`** — one-shot maintenance script that resyncs
+  `products.shopify_handle` (Turso) from the live Shopify product handles. Brand-cleanup
+  renames on Shopify (stripping `-outsunny-`/`-aosom-` tokens) had left the DB column stale, so
+  URLs built from it relied on a 301 redirect hop. Fetches every live handle via GraphQL
+  (250/page), diffs against the DB, and `UPDATE`s the stale rows. Dry-run by default (writes a
+  checkpoint), `--apply` replays the reviewed checkpoint with a drift guard
+  (`WHERE shopify_handle = <old>`). Read-only against Shopify; the only write is to the DB.
+  First run reconciled 458/638 stale handles.
+
 ## [0.5.53.113] - 2026-06-20
 
 ### Fixed (Theme-ID constants — live/preview role swap)
