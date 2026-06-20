@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.121] - 2026-06-20
+
+### Fixed (Social captions — strip LLM scaffolding)
+- **`stripScaffold()` in `/api/social/content/generate`** — defensive cleanup of the model's
+  raw caption output before it is persisted to a draft. The prompt asks Claude to "return only
+  the post", but LLMs occasionally prepend conversational scaffolding ("Here's a Facebook post
+  for your product:"), a markdown `---` rule, or wrap lines in `**bold**`. Relying on the prompt
+  alone let a single disobedient generation get saved verbatim and queued for publishing (seen on
+  the furnish/EN caption of content 526). `generatePostText` now runs `stripScaffold` instead of
+  a bare `.trim()` — removes the preamble variants, leading `---` rules, markdown bold, and
+  collapses triple newlines. Applied to both FR and EN. Unit tests cover dirty→clean,
+  preamble variants, and clean→unchanged.
+
 ## [0.5.53.120] - 2026-06-20
 
 ### Added (Blog drafts cleanup script)
