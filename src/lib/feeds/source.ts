@@ -50,6 +50,38 @@ export function scrubSupplier(s: string): string {
   return s.replace(SUPPLIER_GLOBAL, HOUSE_BRAND).replace(/\s{2,}/g, " ").trim();
 }
 
+// Aosom variant "size" options carry English/imperial measurements that leak into the FR
+// title as a trailing `… - Couleur / <dims>` suffix, e.g. `42.1" x 24.6" x 17.3"`,
+// `15.7" W x 11.8" D x 19.3" H` (spaces optional before the L/W/D/H letter), an adjustable
+// range `43.75"-46.75" H`, or a width-only `47"`. For the Quebec FR / metric market those
+// suffixes are noise, so we drop the trailing block.
+//
+// Matched conservatively so a real product name is never eaten. Only the TRAILING run is
+// removed, in one of two shapes:
+//   ALT1 — a `/`-delimited run: " / " (the variant-option delimiter) followed by any inch
+//          run. The leading-space requirement keeps fractions like `1/2"` from matching.
+//   ALT2 — no slash, but unambiguous: two+ axes joined by `x`, OR a single axis that bears a
+//          dimension letter (L/W/D/H). A lone bare `50"` in a real name has neither → kept.
+// Each axis allows an adjustable `N"-M"` range and an optional trailing dimension letter.
+const AXIS = `\\d+(?:\\.\\d+)?\\s*"\\s*(?:[-\\u2013]\\s*\\d+(?:\\.\\d+)?\\s*"\\s*)?[LWDH]?`;
+const AXES = `${AXIS}(?:\\s*[x\\u00d7]\\s*${AXIS})*`; // one or more axes joined by x
+const AXES_MULTI = `${AXIS}(?:\\s*[x\\u00d7]\\s*${AXIS})+`; // two or more axes
+const AXIS_LETTERED = `\\d+(?:\\.\\d+)?\\s*"\\s*(?:[-\\u2013]\\s*\\d+(?:\\.\\d+)?\\s*"\\s*)?[LWDH]`;
+const IMPERIAL_DIM_SUFFIX = new RegExp(
+  `(?:\\s+/\\s*${AXES}|\\s*[,\\u2013\\u2014-]?\\s*(?:${AXES_MULTI}|${AXIS_LETTERED}))\\s*$`,
+  "i",
+);
+
+/** Strip a trailing imperial dimension suffix from a feed title (see IMPERIAL_DIM_SUFFIX).
+ * Returns the title unchanged when no such suffix is present; otherwise removes it and
+ * tidies any leftover trailing separator/comma/whitespace. */
+export function stripImperialDimensions(title: string): string {
+  const src = String(title ?? "");
+  const cleaned = src.replace(IMPERIAL_DIM_SUFFIX, "");
+  if (cleaned === src) return src;
+  return cleaned.replace(/[\s,/–—-]+$/u, "").trim();
+}
+
 /** Brand to show: keep a real product vendor (Outsunny, …); replace empty or the
  * supplier name ("Aosom") with the house brand. */
 function resolveBrand(vendor: string | null | undefined): string {
@@ -110,7 +142,7 @@ export function shopifyToFeedItems(
       items.push({
         id,
         itemGroupId: multi ? String(p.id) : null,
-        title: truncate(scrubSupplier(`${baseTitle}${variantTitle}`), 150),
+        title: truncate(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`)), 150),
         description,
         link,
         imageLink: images[0],
