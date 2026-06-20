@@ -3309,3 +3309,22 @@ export async function rejectDraftDb(id: number, notes: string, reviewedBy = "adm
     args: [reviewedBy, notes, id],
   });
 }
+
+/**
+ * TTL cleanup: auto-reject still-unapproved `new_product` drafts older than `maxAgeDays`.
+ * A "new product" announcement loses relevance after ~a week, and the publication queue
+ * can't drain the backlog (generation outpaces publishing), so stale ones are rejected —
+ * kept for audit (status='rejected', reviewed_by='auto-ttl'), never published. Only touches
+ * status='draft' rows, so an approved/queued draft is never affected. Returns rows expired.
+ */
+export async function expireStaleNewProductDrafts(maxAgeDays = 7): Promise<number> {
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `UPDATE facebook_drafts
+          SET status = 'rejected', approved_at = strftime('%s','now'), reviewed_by = 'auto-ttl', review_notes = ?
+          WHERE status = 'draft' AND trigger_type = 'new_product'
+            AND created_at < unixepoch() - 86400 * ?`,
+    args: [`Auto-expiré: new_product >${maxAgeDays}j`, maxAgeDays],
+  });
+  return res.rowsAffected;
+}
