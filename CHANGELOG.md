@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.111] - 2026-06-20
+
+### Fixed (feed titles — strip imperial dimension suffixes)
+- **`stripImperialDimensions()` (`feeds/source.ts`)** — removes the trailing English/imperial
+  size suffix that Aosom variant "size" options leak into the FR feed titles, e.g.
+  `… - Gris / 15.7" W x 11.8" D x 19.3" H`, `… / 42.1" x 24.6" x 17.3"`, an adjustable range
+  `43.75"-46.75" H`, or a width-only `47"`. Applied to the composed title in
+  `shopifyToFeedItems` **before** truncation, so it cleans every channel feed (Google, Bing,
+  Reddit, Pinterest, Meta). Conservative: only the trailing run is stripped — a lone bare `50"`
+  or a fraction like `1/2"` inside a real product name is left intact, and no partial/broken
+  residue is left behind. Validated against all 999 live Google-feed titles: 450 cleaned,
+  0 emptied, 0 broken.
+- Tests: new `stripImperialDimensions` unit cases (multi-axis, W/D/H letters, ranges,
+  width-only, unicode `×`, and conservative no-strip cases) + a `shopifyToFeedItems`
+  integration case.
+
 ## [0.5.53.110] - 2026-06-19
 
 ### Added (Back-in-stock waitlist — storefront "notify me", CASL double opt-in)

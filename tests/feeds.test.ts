@@ -5,7 +5,7 @@ import {
   buildGoogleFeed, buildPinterestFeed, buildMetaFeed, buildMetaXmlFeed,
   buildBingFeed, buildRedditFeed, type FeedItem,
 } from "@/lib/feeds/feed";
-import { shopifyToFeedItems, type ShopifyFeedProduct } from "@/lib/feeds/source";
+import { shopifyToFeedItems, stripImperialDimensions, type ShopifyFeedProduct } from "@/lib/feeds/source";
 
 describe("mapToGoogleCategory", () => {
   const cases: Array<[string, number]> = [
@@ -56,6 +56,54 @@ describe("text helpers", () => {
   it("truncate does not split an astral emoji into a lone surrogate", () => {
     const out = truncate("😀".repeat(5), 3);
     expect([...out].every((ch) => ch === "😀" || ch === "…")).toBe(true);
+  });
+});
+
+describe("stripImperialDimensions", () => {
+  // Real shapes pulled from the live Google feed (FR title + trailing variant size).
+  const strips: Array<[string, string]> = [
+    // 3-axis with W/D/H letters (spaced and unspaced)
+    ["Tables de chevet 2 pièces - Noir / 15.7\" W x 11.8\" D x 19.3\" H", "Tables de chevet 2 pièces - Noir"],
+    ["Table de toilettage - Noir / 43\"L x 23.5\"W x 64.6\"H", "Table de toilettage - Noir"],
+    // 2- and 3-axis with no letters
+    ["Armoire pharmacie murale miroir 71 x 61 cm - White / 28\" x 24\"", "Armoire pharmacie murale miroir 71 x 61 cm - White"],
+    ["Canapé 2 places - Crème / 55.5\" x 27.6\" x 30.7\"", "Canapé 2 places - Crème"],
+    // single measurement that carries a dimension letter
+    ["Canapé 3 places en lin - Beige / 75\" W", "Canapé 3 places en lin - Beige"],
+    // L/W/H ordering, spaced
+    ["Voiture électrique 24V - Bleu / 47.2\" L x 31.5\" W x 29.5\" H", "Voiture électrique 24V - Bleu"],
+    // unicode × separator
+    ["Bureau - Noir / 28\" × 24\" × 44.9\"", "Bureau - Noir"],
+    // dims directly after the color separator (no slash) — trailing " - " must be cleaned
+    ["Étagère compacte - 30\" W x 12\" D", "Étagère compacte"],
+    // width-only single bare inch after the " / " variant delimiter
+    ["Table à manger 119 cm - Noir / 47\"", "Table à manger 119 cm - Noir"],
+    ["Barrière pour animaux 76-131 cm - Blanc / 30\"", "Barrière pour animaux 76-131 cm - Blanc"],
+    // adjustable range on the last axis (spaced and unspaced hyphen) — must strip the whole block
+    ["Chaise massage inclinable - Beige / 26.5\" W x 28.25\" D x 43.75\"-46.75\" H", "Chaise massage inclinable - Beige"],
+    ["Chaise sans bras réglable - Noir / 22.8\" W x 22\" D x 26.8\" -29.9\" H", "Chaise sans bras réglable - Noir"],
+    ["Tabourets de bar ajustables - Gris / 18.1\" x 19.7\" x 33.5\" -41.7\"", "Tabourets de bar ajustables - Gris"],
+  ];
+  for (const [input, expected] of strips) {
+    it(`strips: ${input}`, () => expect(stripImperialDimensions(input)).toBe(expected));
+  }
+
+  // Conservative: must NOT strip when there's no unambiguous dimension block.
+  const keeps = [
+    "Téléviseur 50\"",                                  // lone bare inch, no letter/x, no " / " → kept
+    "Armoire 71 x 61 cm",                                // metric, no inch mark → kept
+    "Parasol 10' déporté",                               // feet apostrophe, not inch → kept
+    "Chaise de patio - Gris",                            // no measurement at all → kept
+    "Table console étroite 99 cm avec tiroirs",          // number mid-title, no inch → kept
+    "Tuyau 1/2\"",                                       // fraction (no space before slash) → kept
+  ];
+  for (const input of keeps) {
+    it(`keeps: ${input}`, () => expect(stripImperialDimensions(input)).toBe(input));
+  }
+
+  it("handles empty/whitespace input safely", () => {
+    expect(stripImperialDimensions("")).toBe("");
+    expect(stripImperialDimensions("   ")).toBe("   ");
   });
 });
 
@@ -146,6 +194,18 @@ describe("shopifyToFeedItems", () => {
     expect(scrubbed[0].title).not.toMatch(/aosom/i);
     expect(scrubbed[0].description).not.toMatch(/aosom/i);
     expect(scrubbed[0].title).toContain("Ameublo Direct");
+  });
+  it("strips the imperial dimension suffix from the composed variant title", () => {
+    const dims = shopifyToFeedItems([{
+      id: 12, title: "Table de chevet", handle: "chevet", status: "active", published_at: PUBLISHED,
+      vendor: "Outsunny", images: [{ src: "i" }],
+      variants: [
+        { sku: "CHV-1GY", price: "59.99", inventory_management: null, title: "Gris / 15.7\" W x 11.8\" D x 19.3\" H" },
+        { sku: "CHV-1BK", price: "59.99", inventory_management: null, title: "Noir / 15.7\" W x 11.8\" D x 19.3\" H" },
+      ],
+    }]);
+    expect(dims.find((i) => i.id === "CHV-1GY")!.title).toBe("Table de chevet - Gris");
+    expect(dims.find((i) => i.id === "CHV-1BK")!.title).toBe("Table de chevet - Noir");
   });
   it("deduplicates g:id (SKU) across the whole feed", () => {
     const dup = shopifyToFeedItems([
