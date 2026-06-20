@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.118] - 2026-06-20
+
+### Added (PDP BreadcrumbList structured data)
+- **`shopify-theme/snippets/agentic-structured-data.liquid`** — appends a second JSON-LD
+  block emitting `BreadcrumbList` (Accueil → collection → produit) alongside the existing
+  `Product`/`Offer` schema. The breadcrumb collection is the product's first real collection
+  (skipping `all`/`frontpage`), falling back to the handleized `product.type` when the product
+  is in no collection. Reuses `product_abs_url`/`request.origin` already in scope; the Product
+  block is unchanged. Rendered output validated as well-formed JSON-LD across the
+  collection-present, type-fallback, and blank-type cases.
+
 ## [0.5.53.117] - 2026-06-20
 
 ### Added (In-app help guide)

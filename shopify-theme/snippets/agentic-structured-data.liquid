@@ -91,3 +91,51 @@
   }
 }
 </script>
+
+{%- liquid
+  assign bc_collection = nil
+  for col in product.collections
+    unless col.handle == 'all' or col.handle == 'frontpage'
+      assign bc_collection = col
+      break
+    endunless
+  endfor
+  if bc_collection == nil
+    assign bc_type_handle = product.type | handleize
+  endif
+-%}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Accueil",
+      "item": {{ request.origin | json }}
+    },
+    {%- if bc_collection != nil %}
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": {{ bc_collection.title | json }},
+      "item": {{ request.origin | append: '/collections/' | append: bc_collection.handle | json }}
+    },
+    {%- else %}
+    {
+      "@type": "ListItem",
+      "position": 2,
+      "name": {{ product.type | json }},
+      "item": {{ request.origin | append: '/collections/' | append: bc_type_handle | json }}
+    },
+    {%- endif %}
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": {{ product.title | json }},
+      "item": {{ product_abs_url | json }}
+    }
+  ]
+}
+</script>
