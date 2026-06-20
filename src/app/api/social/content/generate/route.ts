@@ -124,6 +124,25 @@ function interpolateTemplate(template: string, vars: Record<string, string>): st
   return result;
 }
 
+/**
+ * Defensive cleanup of the model's raw output. The prompt asks Claude to "return
+ * only the post", but LLMs occasionally prepend conversational scaffolding
+ * ("Here's a Facebook post for your product:"), a markdown "---" rule, or wrap
+ * lines in **bold**. Relying on the prompt alone is not enough — without this
+ * strip a single disobedient generation gets persisted verbatim into the draft
+ * and then published. Exported for unit testing.
+ */
+export function stripScaffold(text: string): string {
+  return text
+    .replace(/^(here'?s?\s+a\s+facebook\s+post[^:\n]*:\s*\n?)/i, "")
+    .replace(/^(here\s+is\s+a[^:\n]*:\s*\n?)/i, "")
+    .replace(/^(sure[,!]?\s+here'?s?[^:\n]*:\s*\n?)/i, "")
+    .replace(/^---+\s*\n?/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 async function generatePostText(prompt: string, isEn: boolean): Promise<string> {
   const client = getAnthropicClient();
   const message = await client.messages.create(
@@ -135,7 +154,7 @@ async function generatePostText(prompt: string, isEn: boolean): Promise<string> 
     },
     { signal: AbortSignal.timeout(ANTHROPIC_CALL_TIMEOUT_MS) },
   );
-  return message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
+  return message.content[0]?.type === "text" ? stripScaffold(message.content[0].text) : "";
 }
 
 export async function POST(request: Request) {
