@@ -315,6 +315,25 @@ export async function draftShopifyProduct(shopifyId: string): Promise<void> {
   await updateShopifyProduct(shopifyId, { status: "draft" });
 }
 
+/** Current status + tags for a single product — what the intraday stock-check needs to flip
+ * the stock-state tags (preserving the rest) without paging the whole catalog. Returns null
+ * if the product no longer exists (404). Tags come back comma-separated; normalized to a list. */
+export async function getShopifyStockState(
+  shopifyId: string
+): Promise<{ status: "active" | "draft" | "archived"; tags: string[] } | null> {
+  const response = await shopifyFetch(`/products/${shopifyId}.json?fields=id,status,tags`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Shopify product fetch failed: ${response.status}`);
+  const raw = ((await response.json()) as { product?: Record<string, unknown> }).product;
+  if (!raw) return null;
+  return {
+    status: (raw.status as "active" | "draft" | "archived") || "active",
+    tags: typeof raw.tags === "string"
+      ? raw.tags.split(",").map((t) => t.trim()).filter(Boolean)
+      : [],
+  };
+}
+
 // ─── Inventory tracking ─────────────────────────────────────────────
 // Dropship products historically shipped with `inventory_management: null`
 // (untracked — see createShopifyProduct). To push a safety-buffered quantity we

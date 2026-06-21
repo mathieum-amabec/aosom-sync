@@ -22,6 +22,10 @@ export function stockBufferQty(aosomQty: number): number {
 /** Mutually-exclusive stock-state tags driven off the BUFFERED availability. */
 export const STOCK_TAG_OUT = "out-of-stock";
 export const STOCK_TAG_BACK = "back-in-stock";
+/** Marker tag the intraday stock-check cron stamps on a product it auto-drafts (sold out +
+ * gone from the feed >7d). It lets the same cron safely auto-reactivate ONLY its own drafts
+ * on restock, never resurrecting a product an operator drafted by hand. See stock-reconcile.ts. */
+export const STOCK_TAG_AUTODRAFTED = "auto-drafted";
 
 /**
  * Apply the stock-state tag pair to a product's tag list. The two tags are mutually
