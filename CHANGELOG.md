@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.125] - 2026-06-21
+
+### Changed (Stale-catalog threshold 14 → 30 days)
+- **`STALE_DAYS` 14 → 30** (`stale-catalog.ts`) — the daily stale-catalog cron now only drafts
+  imported in-stock products absent from the Aosom CSV for **>30 days** (was >14). More
+  conservative: a product needs a full month out of the feed before being auto-drafted, avoiding
+  false positives from temporary Aosom feed gaps. Route docstring + `getStaleImportedProducts`
+  default updated to match.
+
 ## [0.5.53.124] - 2026-06-21
 
 ### Added (Stale-catalog cron — auto-draft discontinued products)
