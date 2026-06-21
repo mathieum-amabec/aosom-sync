@@ -12,6 +12,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicClient } from "@/lib/content-generator";
+import { stripMarkdown } from "@/lib/strip-markdown";
 import { composeImage } from "@/lib/image-composer";
 import { env, CLAUDE, SYNC, CHANNELS, getPublicAppUrl, type ChannelKey } from "@/lib/config";
 import {
@@ -92,7 +93,8 @@ async function generatePostText(prompt: string): Promise<string> {
     { signal: AbortSignal.timeout(ANTHROPIC_CALL_TIMEOUT_MS) },
   );
   log("anthropic call completed", { duration_ms: Date.now() - t0 });
-  return message.content[0]?.type === "text" ? message.content[0].text.trim() : "";
+  // Strip any Markdown the model emitted — Facebook renders **, #, --- literally.
+  return message.content[0]?.type === "text" ? stripMarkdown(message.content[0].text) : "";
 }
 
 /** Generate FR and EN captions in parallel, with one retry on Anthropic timeout. */
