@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.124] - 2026-06-21
+
+### Added (Stale-catalog cron — auto-draft discontinued products)
+- **`GET /api/cron/stale-catalog`** (daily 07:30 UTC, `vercel.json`) — drafts Shopify products
+  that are imported (`shopify_product_id` not null) + still in stock (`qty>0`) but absent from the
+  Aosom CSV for >14 days (`last_seen_at`). These are likely discontinued at Aosom yet still
+  sellable on the storefront — an **oversell risk**. Closes that gap automatically (the recurring
+  counterpart to the one-shot `scripts/fix-stale-products.mjs`).
+- **`src/lib/stale-catalog.ts`** — `computeStaleDrafts` (dependency-injected, unit-tested) +
+  `runStaleCatalogDraft`. Reads every product's live status with one paginated
+  `fetchAllShopifyProducts`, drafts only the `active` stale ones (already draft/archived → skipped,
+  deleted-on-Shopify → failed), Shopify writes rate-limited to 2 req/sec. Idempotent across runs.
+- **`getStaleImportedProducts(maxAgeDays=14)`** (`database.ts`). Records `cron_runs` detail
+  `stale=N drafted=X skipped=Y failed=Z` via `trackCron`.
+- Tests: `stale-catalog` (decision matrix: active→draft, draft/archived→skip, deleted→fail,
+  thrown-write→fail, empty) + `cron-stale-catalog` (route auth, success detail, error path).
+- Data fix: nulled the dangling `shopify_product_id` on `84G-351V00BG` / `84B-146RD` (deleted on
+  Shopify) so the scan no longer 404s on them.
+
 ## [0.5.53.123] - 2026-06-20
 
 ### Added (intraday stock-check cron — faster Aosom rupture/restock capture)
