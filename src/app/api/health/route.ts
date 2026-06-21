@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getLatestSyncRun } from "@/lib/database";
+import { getLatestSyncRun, clearStaleLockIfNeeded } from "@/lib/database";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +8,13 @@ export async function GET() {
   let lastSync: { timestamp: string | null; status: string; age_minutes: number } | null = null;
 
   try {
+    // Self-heal orphaned runs. A Fluid Compute function killed by timeout (>800s) leaves its
+    // sync_runs row stuck at status='running' until the NEXT sync calls clearStaleLockIfNeeded.
+    // Between syncs that orphan would otherwise show here as a live "running" run for hours, so
+    // sweep stale (>15 min, past the 13-min maxDuration) running rows on each health poll.
+    // Best-effort: a sweep failure must never flip the health check to "down".
+    try { await clearStaleLockIfNeeded(15); } catch { /* non-fatal */ }
+
     const run = await getLatestSyncRun();
     dbOk = true;
 
