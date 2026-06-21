@@ -321,7 +321,7 @@ function triggerSocialDrafts(skus: { sku: string; oldPrice: number; newPrice: nu
  * transient Klaviyo failure leaves the subscriber pending. No-ops when Klaviyo
  * is unconfigured.
  */
-async function notifyBackInStockWaitlist(skus: string[]): Promise<void> {
+export async function notifyBackInStockWaitlist(skus: string[]): Promise<void> {
   if (skus.length === 0) return;
   if (!isKlaviyoConfigured()) {
     log(`Back-in-stock: ${skus.length} restock(s) détecté(s) mais Klaviyo non configuré — notifications ignorées`);
