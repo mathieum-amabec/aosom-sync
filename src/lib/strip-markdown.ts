@@ -15,7 +15,7 @@
  */
 export function stripMarkdown(text: string): string {
   return text
-    .replace(/^\s{0,3}#{1,6}[ \t]+/gm, "")        // "# Heading" / "### Heading" → "Heading" (NOT "#hashtag")
+    .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "")     // "# Heading" / "### Heading" → "Heading" (NOT "#hashtag")
     .replace(/^[ \t]*([-*_])\1{2,}[ \t]*(?:\r?\n|$)/gm, "") // horizontal-rule line (+ its newline): ---, ***, ___
     .replace(/\*\*([^*]+)\*\*/g, "$1")            // **bold** → bold
     .replace(/__([^_]+)__/g, "$1")                // __bold__ → bold
