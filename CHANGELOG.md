@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.128] - 2026-06-21
+
+### Added (Ops tooling — product image reorder)
+- **`scripts/reorder-product-images.mjs`** — one-shot maintenance script that puts the Aosom
+  white-background shot (`products.image1`) in Shopify image **position 1**. Aosom hosts each
+  image under a hash that Shopify preserves as the filename prefix before an optional `_<uuid>`
+  suffix, so the script matches on that prefix. Per **product** (not per variant): collects every
+  variant's `image1` hash, leaves it alone if position-1 already matches any of them, else moves
+  the first matching white-bg image to position 1 (`PUT .../images/{id}.json` position=1). Skips
+  products whose white-bg image isn't on Shopify. Rate-limited to 2 req/sec, **dry-run by default**
+  (`--apply` to write). First run reconciled **165 products** (401 already correct, 83 white-bg
+  not on Shopify, 7 deleted/404), 0 PUT failures.
+
 ## [0.5.53.127] - 2026-06-21
 
 ### Added (stale-catalog `exclude-stale` opt-out)
