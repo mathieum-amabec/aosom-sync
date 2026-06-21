@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.127] - 2026-06-21
+
+### Added (stale-catalog `exclude-stale` opt-out)
+- **`stale-catalog` now honors an `exclude-stale` Shopify tag** (`src/lib/stale-catalog.ts`).
+  A product carrying this tag is never auto-drafted, regardless of staleness or stock —
+  the operator opt-out for seasonal or still-procurable products that should stay live even
+  while absent from the Aosom feed. Tag match is case-insensitive. Tags are already fetched by
+  `fetchAllShopifyProducts`, so the check costs no extra API calls. New `excluded` counter in
+  `StaleCatalogResult`; cron `detail` is now `stale=N drafted=X skipped=Y excluded=W failed=Z`.
+- Tagged the cantilever patio umbrella (`7752208121961`, 94 units) `exclude-stale` after
+  restoring it to `active` — it had been drafted by the 30-day run at peak summer season.
+- Tests: new `computeStaleDrafts` case for the exclusion path; cron-route assertions updated.
+
+### Fixed
+- Repaired a VERSION / package.json drift (package.json was a patch behind).
+
 ## [0.5.53.126] - 2026-06-21
 
 ### Fixed (capture live hero `<img>` fix into git)
