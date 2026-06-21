@@ -15,7 +15,7 @@ const auth = (s = "test-secret-123") =>
 
 describe("GET /api/cron/stale-catalog", () => {
   beforeEach(() => {
-    runMock.mockReset().mockResolvedValue({ stale: 106, drafted: 103, skipped: 1, failed: 2 });
+    runMock.mockReset().mockResolvedValue({ stale: 106, drafted: 103, skipped: 1, excluded: 0, failed: 2 });
     recMock.mockReset().mockResolvedValue(undefined);
   });
 
@@ -26,11 +26,11 @@ describe("GET /api/cron/stale-catalog", () => {
     expect(recMock).not.toHaveBeenCalled();
   });
 
-  it("records 'stale=N drafted=X skipped=Y failed=Z' and returns the result", async () => {
+  it("records 'stale=N drafted=X skipped=Y excluded=W failed=Z' and returns the result", async () => {
     const res = await GET(auth());
     expect(res.status).toBe(200);
-    expect(recMock).toHaveBeenCalledWith("stale-catalog", "success", "stale=106 drafted=103 skipped=1 failed=2");
-    expect(await res.json()).toEqual({ success: true, stale: 106, drafted: 103, skipped: 1, failed: 2 });
+    expect(recMock).toHaveBeenCalledWith("stale-catalog", "success", "stale=106 drafted=103 skipped=1 excluded=0 failed=2");
+    expect(await res.json()).toEqual({ success: true, stale: 106, drafted: 103, skipped: 1, excluded: 0, failed: 2 });
   });
 
   it("records an error run and returns 500 when the draft pass throws", async () => {

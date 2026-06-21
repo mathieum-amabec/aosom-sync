@@ -14,10 +14,11 @@ function verifyCronSecret(header: string | null): boolean {
 /**
  * GET /api/cron/stale-catalog — daily catalog hygiene. Drafts Shopify products that are
  * imported + still in stock (qty>0) but haven't appeared in the Aosom CSV for >30 days
- * (likely discontinued at Aosom → oversell risk). Already draft/archived products are skipped.
+ * (likely discontinued at Aosom → oversell risk). Already draft/archived products are skipped,
+ * and products tagged `exclude-stale` are left live (operator opt-out).
  *
  * Protected by CRON_SECRET (Bearer). Shopify writes are rate-limited to 2 req/sec. Records the
- * run in cron_runs with detail "stale=N drafted=X skipped=Y failed=Z". Runs daily at 07:30 UTC.
+ * run in cron_runs with detail "stale=N drafted=X skipped=Y excluded=W failed=Z". Daily 07:30 UTC.
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
     const result = await trackCron(
       "stale-catalog",
       () => runStaleCatalogDraft(),
-      (r) => `stale=${r.stale} drafted=${r.drafted} skipped=${r.skipped} failed=${r.failed}`,
+      (r) => `stale=${r.stale} drafted=${r.drafted} skipped=${r.skipped} excluded=${r.excluded} failed=${r.failed}`,
     );
     return NextResponse.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
