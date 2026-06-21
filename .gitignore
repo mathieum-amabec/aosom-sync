@@ -76,3 +76,4 @@ out/
 # Demand Gen render scratch (FFmpeg drawtext textfiles)
 /tmp_lines/
 src/audio/
+.context/
