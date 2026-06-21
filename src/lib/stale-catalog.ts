@@ -14,6 +14,14 @@ import { fetchAllShopifyProducts, draftShopifyProduct } from "@/lib/shopify-clie
 export const STALE_DAYS = 30;
 /** Spacing between Shopify draft writes → 2 requests/second. */
 export const RATE_LIMIT_MS = 500;
+/**
+ * Operator opt-out: a Shopify product carrying this tag is NEVER auto-drafted by
+ * stale-catalog, regardless of staleness or stock. Apply it in the Shopify admin to
+ * seasonal or still-procurable products you want to keep live even while absent from
+ * the Aosom feed. Tags are already fetched by `fetchAllShopifyProducts`, so this costs
+ * no extra API calls.
+ */
+export const EXCLUDE_TAG = "exclude-stale";
 
 export interface StaleCatalogResult {
   /** Stale candidates found in the catalog. */
@@ -22,6 +30,8 @@ export interface StaleCatalogResult {
   drafted: number;
   /** Already draft/archived on Shopify — left alone. */
   skipped: number;
+  /** Left live because the product carries the `exclude-stale` tag (operator opt-out). */
+  excluded: number;
   /** Draft write failed, or the product no longer exists on Shopify. */
   failed: number;
 }
@@ -29,7 +39,8 @@ export interface StaleCatalogResult {
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Pure orchestration. For each stale product, look up its live Shopify status:
+ * Pure orchestration. For each stale product, decide what to do:
+ * - in `excludedIds` (carries the `exclude-stale` tag) → leave live (operator opt-out)
  * - active   → draft it (rate-limited via `sleepMs`)
  * - draft/archived → skip
  * - absent from the map (deleted on Shopify) → failed
@@ -40,9 +51,11 @@ export async function computeStaleDrafts(
   statusById: Map<string, string>,
   draftFn: (shopifyId: string) => Promise<void>,
   sleepMs: number = RATE_LIMIT_MS,
+  excludedIds: Set<string> = new Set(),
 ): Promise<StaleCatalogResult> {
-  let drafted = 0, skipped = 0, failed = 0;
+  let drafted = 0, skipped = 0, excluded = 0, failed = 0;
   for (const p of stale) {
+    if (excludedIds.has(p.shopify_product_id)) { excluded++; continue; } // operator opt-out
     const status = statusById.get(p.shopify_product_id);
     if (status === undefined) { failed++; continue; }   // deleted on Shopify (stale id in our DB)
     if (status !== "active") { skipped++; continue; }    // already draft/archived
@@ -55,18 +68,23 @@ export async function computeStaleDrafts(
     }
     if (sleepMs > 0) await wait(sleepMs); // 2 req/sec
   }
-  return { stale: stale.length, drafted, skipped, failed };
+  return { stale: stale.length, drafted, skipped, excluded, failed };
 }
 
 /** Run the stale-catalog draft against Turso + the live Shopify catalog. */
 export async function runStaleCatalogDraft(maxAgeDays = STALE_DAYS): Promise<StaleCatalogResult> {
   const stale = await getStaleImportedProducts(maxAgeDays);
-  if (stale.length === 0) return { stale: 0, drafted: 0, skipped: 0, failed: 0 };
+  if (stale.length === 0) return { stale: 0, drafted: 0, skipped: 0, excluded: 0, failed: 0 };
 
   // One paginated fetch for every product's current status — cheaper and gentler on the API
   // than a GET per stale product, and lets us skip ones already drafted (idempotent re-runs).
+  // The same fetch already carries tags, so the `exclude-stale` opt-out is free.
   const live = await fetchAllShopifyProducts();
   const statusById = new Map(live.map((p) => [p.shopifyId, p.status]));
+  const excludedIds = new Set(
+    // Case-insensitive: it's a human-applied ops tag, so "Exclude-Stale" must protect too.
+    live.filter((p) => p.tags.some((t) => t.toLowerCase() === EXCLUDE_TAG)).map((p) => p.shopifyId),
+  );
 
-  return computeStaleDrafts(stale, statusById, draftShopifyProduct);
+  return computeStaleDrafts(stale, statusById, draftShopifyProduct, RATE_LIMIT_MS, excludedIds);
 }
