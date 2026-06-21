@@ -61,6 +61,18 @@ const SOURCES = [
   { sku:"84C-226CG",    title:"Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé", ss:0.5, cleanDur:11.5, delogo:null, buckets:[6,15] },
   { sku:"84H-209V00CG", title:"Bac surélevé galvanisé 152 x 91 x 61 cm", ss:7.0, cleanDur:16.0, delogo:null, buckets:[6,15] },
   { sku:"D51-277V01",   title:"Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m", ss:0.5, cleanDur:22.5, delogo:null, buckets:[6,15] },
+  // --- Patio & Garden pilot (audit 2026-06-20, filmstrip 1fps). All 852x480 → soft 9:16 upscale. ---
+  // Solid (clean window confirmed by full-frame grabs):
+  { sku:"331-015",      title:"Ensemble jeu 4-en-1 glissoire balançoire panier basketball", ss:4.0, cleanDur:36.0, delogo:null, buckets:[6,15,30] },
+  { sku:"841-086",      title:"Ensemble sectionnelle patio 4 pièces rotin tressé", ss:3.0, cleanDur:15.0, delogo:null, buckets:[6,15] },
+  { sku:"343-049RD",    title:"Bac à sable octogonal avec couvercle et bancs", ss:4.0, cleanDur:14.0, delogo:null, buckets:[6,15] },
+  { sku:"840-150GY",    title:"Auvent rétractable patio aluminium réglable", ss:5.0, cleanDur:12.0, delogo:null, buckets:[6,15] },
+  { sku:"840-183GY",    title:"Store rétractable manuel patio 305x152cm ajustable", ss:6.0, cleanDur:13.0, delogo:null, buckets:[6,15] },
+  // Marginal (6s only — short clean window / decorative graphics):
+  { sku:"01-0368",      title:"Chaise longue pliable avec trou visage 3 positions", ss:15.0, cleanDur:8.0, delogo:null, buckets:[6] },
+  { sku:"840-070CG",    title:"Parasol de patio rond 10 pieds avec manivelle", ss:2.0, cleanDur:10.0, delogo:null, buckets:[6] },
+  { sku:"840-014V01BG", title:"Tente pliable 10x10 pieds avec parois maillées", ss:10.0, cleanDur:9.0, delogo:null, buckets:[6] },
+  { sku:"343-029",      title:"Bac à sable en bois avec auvent réglable pour enfants", ss:25.0, cleanDur:7.0, delogo:null, buckets:[6] },
 ];
 
 const RATIOS = {
