@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.126] - 2026-06-21
+
+### Fixed (capture live hero `<img>` fix into git)
+- **`shopify-theme/templates/index.json`** — the hero fix (custom-liquid section: the
+  `.lc-hero__bg` background-image div replaced with a real `<img src="{{ 'lc-hero.jpg' | asset_url }}">`
+  element, full-bleed `object-fit:cover`) was applied directly on the live theme and was not
+  in the repo. This commits the current theme `templates/index.json` (theme 160213696617) so
+  the source of truth lives in git. Validated as well-formed JSON; the hero block now uses
+  `<img>` (no inline `background-image`).
+
 ## [0.5.53.125] - 2026-06-21
 
 ### Changed (Stale-catalog threshold 14 → 30 days)

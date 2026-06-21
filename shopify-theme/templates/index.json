@@ -1,0 +1,205 @@
+{
+  "sections": {
+    "featured_collection2": {
+      "type": "featured-collection",
+      "settings": {
+        "collection": "coups-de-coeur",
+        "products_to_show": 16,
+        "title": "Coups de cœur",
+        "heading_size": "h2",
+        "description": "",
+        "show_description": false,
+        "description_style": "body",
+        "columns_desktop": 5,
+        "enable_desktop_slider": true,
+        "full_width": false,
+        "show_view_all": false,
+        "view_all_style": "solid",
+        "color_scheme": "",
+        "image_ratio": "adapt",
+        "image_shape": "default",
+        "show_secondary_image": true,
+        "show_vendor": false,
+        "show_rating": false,
+        "quick_add": "standard",
+        "columns_mobile": "2",
+        "swipe_on_mobile": true,
+        "padding_top": 36,
+        "padding_bottom": 52
+      }
+    },
+    "1774571510a047e4d5": {
+      "type": "apps",
+      "blocks": {
+        "judge_me_reviews_review_widget_homepage_rfjYgX": {
+          "type": "shopify:\/\/apps\/judge-me-reviews\/blocks\/review_widget_homepage\/61ccd3b1-a9f2-4160-9fe9-4fec8413e5d8",
+          "settings": {
+            "product": "",
+            "review_data": "sample_data",
+            "max_width": 1200
+          }
+        },
+        "judge_me_reviews_preview_badge_HjpwYA": {
+          "type": "shopify:\/\/apps\/judge-me-reviews\/blocks\/preview_badge\/61ccd3b1-a9f2-4160-9fe9-4fec8413e5d8",
+          "settings": {}
+        }
+      },
+      "block_order": [
+        "judge_me_reviews_review_widget_homepage_rfjYgX",
+        "judge_me_reviews_preview_badge_HjpwYA"
+      ],
+      "settings": {
+        "include_margins": true
+      }
+    },
+    "why_us": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "<div class=\"lc-why-wrap lc-reveal\" style=\"background:#FAFAF8;padding:44px 0\"><div class=\"page-width lc-why\"><div class=\"lc-why-grid\" style=\"display:grid;grid-template-columns:repeat(4,1fr);gap:24px;text-align:center\"><div class=\"lc-why-col\"><div class=\"lc-why-ico\" style=\"height:40px;display:flex;align-items:center;justify-content:center;margin-bottom:.6rem\"><svg viewBox=\"0 0 24 24\" width=\"34\" height=\"34\" fill=\"none\" stroke=\"#1B2A4A\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"\/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"\/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"\/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"\/><\/svg><\/div><h3 style=\"font-size:1.5rem;margin:0 0 .25rem;color:#1A1A2E\">Plus de 490 produits pour tous les espaces<\/h3><p style=\"font-size:1.3rem;margin:0;color:#797068\">Meubles, extérieur, jardin et animaux<\/p><\/div><div class=\"lc-why-col\"><div class=\"lc-why-ico\" style=\"height:40px;display:flex;align-items:center;justify-content:center;margin-bottom:.6rem\"><svg viewBox=\"0 0 24 24\" width=\"34\" height=\"34\" fill=\"none\" stroke=\"#1B2A4A\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M1 4h13v11H1z\"\/><path d=\"M14 7h4l3 3v5h-7z\"\/><circle cx=\"5.5\" cy=\"18\" r=\"1.6\"\/><circle cx=\"17.5\" cy=\"18\" r=\"1.6\"\/><\/svg><\/div><h3 style=\"font-size:1.5rem;margin:0 0 .25rem;color:#1A1A2E\">Livraison gratuite partout au Canada<\/h3><p style=\"font-size:1.3rem;margin:0;color:#797068\">Aucuns frais, partout au pays<\/p><\/div><div class=\"lc-why-col\"><div class=\"lc-why-ico\" style=\"height:40px;display:flex;align-items:center;justify-content:center;margin-bottom:.6rem\"><svg viewBox=\"0 0 24 24\" width=\"34\" height=\"34\" fill=\"none\" stroke=\"#1B2A4A\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M3 8V3\"\/><path d=\"M3 8h5\"\/><path d=\"M3.6 8a9 9 0 1 1-1.1 6.4\"\/><\/svg><\/div><h3 style=\"font-size:1.5rem;margin:0 0 .25rem;color:#1A1A2E\">Retours faciles, sans tracas<\/h3><p style=\"font-size:1.3rem;margin:0;color:#797068\">Changez d'avis sans souci<\/p><\/div><div class=\"lc-why-col\"><div class=\"lc-why-ico\" style=\"height:40px;display:flex;align-items:center;justify-content:center;margin-bottom:.6rem\"><svg viewBox=\"0 0 24 24\" width=\"34\" height=\"34\" fill=\"none\" stroke=\"#1B2A4A\" stroke-width=\"1.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M11 21c5-1 9-6 9-13V4h-4C9 4 4 9 4 16c0 2 1 4 1 4\"\/><path d=\"M5 20c3-6 7-9 12-10\"\/><\/svg><\/div><h3 style=\"font-size:1.5rem;margin:0 0 .25rem;color:#1A1A2E\">On est d'ici. On vous répond en français.<\/h3><p style=\"font-size:1.3rem;margin:0;color:#797068\">Une équipe humaine, locale<\/p><\/div><\/div><\/div><\/div><style>.lc-why-ico svg{display:block}@media(max-width:749px){.lc-why-grid{grid-template-columns:repeat(2,1fr);gap:20px}}<\/style>",
+        "color_scheme": "scheme-3",
+        "padding_top": 36,
+        "padding_bottom": 36
+      }
+    },
+    "lc_hero": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "{%- comment -%} Homepage redesign — hero. CSS\/JS loaded once here (homepage-scoped). {%- endcomment -%}\n{{ 'lc-home.css' | asset_url | stylesheet_tag }}\n{%- comment -%} Fail-safe: if JS is disabled, never hide the scroll-reveal sections. {%- endcomment -%}\n<noscript><style>.lc-reveal{opacity:1 !important;transform:none !important}<\/style><\/noscript>\n<script src=\"{{ 'lc-home.js' | asset_url }}\" defer><\/script>\n{%- assign loc = request.locale.iso_code | downcase -%}\n<section class=\"lc-hero\">\n  <div class=\"lc-hero__bg\"><img src=\"{{ 'lc-hero.jpg' | asset_url }}\" alt=\"\" style=\"position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;\"><\/div>\n  <div class=\"lc-hero__ov\"><\/div>\n  <div class=\"page-width lc-hero__in\">\n    <span class=\"lc-hero__kicker\">{% if loc == 'en' %}FURNITURE &middot; OUTDOOR &middot; GARDEN{% else %}MOBILIER &middot; EXT&Eacute;RIEUR &middot; JARDIN{% endif %}<\/span>\n    <span class=\"lc-hero__badge\">&#11088; {% if loc == 'en' %}490+ products &middot; Secure payment{% else %}Plus de 490 produits &middot; Paiement s&eacute;curis&eacute;{% endif %}<\/span>\n    <h1 class=\"lc-hero__title\">{% if loc == 'en' %}Furnish your space, your way.{% else %}Meublez votre espace &agrave; votre image.{% endif %}<\/h1>\n    <p class=\"lc-hero__sub\">{% if loc == 'en' %}Modern furniture, Quebec service, 30-day returns.{% else %}Mobilier moderne, service qu&eacute;b&eacute;cois, retours 30 jours.{% endif %}<\/p>\n    <div class=\"lc-hero__cta\">\n      <a href=\"\/collections\/all\" class=\"lc-btn lc-btn--navy\" data-umami-event=\"Hero CTA shop\">{% if loc == 'en' %}Shop now{% else %}Magasinez maintenant{% endif %}<\/a>\n      <a href=\"\/collections\/rabais\" class=\"lc-btn lc-btn--ghost\" data-umami-event=\"Hero CTA deals\">{% if loc == 'en' %}See the deals{% else %}Voir les rabais{% endif %}<\/a>\n    <\/div>\n  <\/div>\n<\/section>\n",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    },
+    "lc_story1": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "{%- assign loc = request.locale.iso_code | downcase -%}<div class=\"page-width lc-story lc-reveal\" style=\"display:flex;flex-wrap:wrap;gap:32px;align-items:center;padding:48px 0\">\n  <div style=\"flex:1 1 320px;position:relative;border-radius:8px;overflow:hidden\"><img src=\"{{ 'lc-meubles.jpg' | asset_url }}\" alt=\"Meubles\" loading=\"lazy\" style=\"width:100%;display:block\"><div style=\"position:absolute;inset:0;background:linear-gradient(180deg,rgba(26,26,46,0) 55%,rgba(26,26,46,.18))\"><\/div><\/div>\n  <div style=\"flex:1 1 320px\"><h2 style=\"font-size:clamp(2rem,3.5vw,3rem);margin:0 0 1rem\">{% if loc == 'en' %}Furniture that lasts, at a fair price{% else %}Des meubles qui durent, à prix juste{% endif %}<\/h2>\n    <p style=\"font-size:1.6rem;line-height:1.6;margin:0 0 1.5rem\">{% if loc == 'en' %}Every piece in our catalog is selected for its quality and value. No inflated brands, just beautiful, accessible furniture.{% else %}Chaque pièce de notre catalogue est sélectionnée pour sa qualité et son rapport qualité-prix. Pas de marques gonflées, juste du beau mobilier accessible.{% endif %}<\/p>\n    <a href=\"\/collections\/meubles-et-decorations\" class=\"lc-btn\" style=\"display:inline-block;background:#C17F3E;color:#fff;padding:12px 24px;border-radius:6px;font-weight:700;text-decoration:none\">{% if loc == 'en' %}Discover furniture{% else %}Découvrir les meubles{% endif %}<\/a><\/div>\n<\/div>\n<style>@media(max-width:749px){.lc-story{text-align:center}}<\/style>",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    },
+    "lc_story2": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "{%- assign loc = request.locale.iso_code | downcase -%}<div class=\"page-width lc-story lc-reveal\" style=\"display:flex;flex-wrap:wrap-reverse;gap:32px;align-items:center;padding:48px 0\">\n  <div style=\"flex:1 1 320px\"><h2 style=\"font-size:clamp(2rem,3.5vw,3rem);margin:0 0 1rem\">{% if loc == 'en' %}Transform your outdoor space{% else %}Transformez votre espace extérieur{% endif %}<\/h2>\n    <p style=\"font-size:1.6rem;line-height:1.6;margin:0 0 1.5rem\">{% if loc == 'en' %}Patios, gardens, BBQ: everything to enjoy the outdoors.{% else %}Patios, jardins, BBQ : tout pour profiter du plein air québécois.{% endif %}<\/p>\n    <a href=\"\/collections\/mobiliers-exterieurs-et-jardins\" class=\"lc-btn\" style=\"display:inline-block;background:#C17F3E;color:#fff;padding:12px 24px;border-radius:6px;font-weight:700;text-decoration:none\">{% if loc == 'en' %}Explore outdoor{% else %}Explorer l'extérieur{% endif %}<\/a><\/div>\n  <div style=\"flex:1 1 320px;position:relative;border-radius:8px;overflow:hidden\"><img src=\"{{ 'lc-exterieur.jpg' | asset_url }}\" alt=\"Extérieur\" loading=\"lazy\" style=\"width:100%;display:block\"><div style=\"position:absolute;inset:0;background:linear-gradient(180deg,rgba(26,26,46,0) 55%,rgba(26,26,46,.18))\"><\/div><\/div>\n<\/div>\n<style>@media(max-width:749px){.lc-story{text-align:center}}<\/style>",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    },
+    "lc_trust": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "{%- assign loc = request.locale.iso_code | downcase -%}<div style=\"position:relative;background:url('{{ 'lc-famille.jpg' | asset_url }}') center\/cover no-repeat;min-height:340px;display:flex;align-items:center;text-align:center\">\n  <div style=\"position:absolute;inset:0;background:linear-gradient(180deg,rgba(26,26,46,.45),rgba(26,26,46,.62))\"><\/div>\n  <div class=\"page-width\" style=\"position:relative;color:#fff;width:100%;padding:48px 0\">\n    <h2 style=\"font-size:clamp(2rem,4vw,3.2rem);margin:0 0 .8rem\">{% if loc == 'en' %}30-day satisfaction guarantee{% else %}Satisfaction garantie 30 jours{% endif %}<\/h2>\n    <p style=\"font-size:1.6rem;margin:0\">{% if loc == 'en' %}Easy returns · Canadian service{% else %}Retours faciles · Service québécois{% endif %}<\/p>\n  <\/div>\n<\/div>",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    },
+    "lc_trustbar": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "{%- comment -%}sp-mobile-hide{%- endcomment -%}<style>@media(max-width:749px){div:has(> .lc-tb){display:none!important;}}<\/style>{%- assign loc = request.locale.iso_code | downcase -%}<div style=\"background:#FAFAF8;border-bottom:1px solid rgba(26,26,46,.08)\">\n  <div class=\"page-width lc-tb\" style=\"display:flex;gap:20px;justify-content:center;align-items:center;padding:12px 0;font-size:1.35rem;font-weight:600;color:#1A1A2E;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none\">\n    <span style=\"white-space:nowrap\">{% if loc == 'en' %}✓ 30-day returns{% else %}✓ Retours 30 jours{% endif %}<\/span><span style=\"white-space:nowrap\">{% if loc == 'en' %}✓ Secure payment{% else %}✓ Paiement sécurisé{% endif %}<\/span><span style=\"white-space:nowrap\">{% if loc == 'en' %}✓ Canadian service{% else %}✓ Service québécois{% endif %}<\/span>\n  <\/div>\n<\/div>\n<style>.lc-tb::-webkit-scrollbar{display:none}@media(max-width:749px){.lc-tb{justify-content:flex-start;gap:14px;font-size:.8rem;padding:10px 16px}}<\/style>",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    },
+    "lc_howit": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "{%- assign loc = request.locale.iso_code | downcase -%}\n<div class=\"lc-how\" style=\"background:#FAFAF8\">\n  <div class=\"page-width\" style=\"padding:56px 0;text-align:center\">\n    <h2 style=\"font-size:clamp(2rem,3.5vw,3rem);margin:0 0 2.8rem\">{% if loc == 'en' %}How it works{% else %}Comment ça marche{% endif %}<\/h2>\n    <div class=\"lc-how-steps\">\n      <div class=\"lc-how-step\">\n        <div class=\"lc-how-num\">1<\/div>\n        <div class=\"lc-how-ico\">🛋️<\/div>\n        <h3 class=\"lc-how-t\">{% if loc == 'en' %}Choose your furniture{% else %}Choisissez vos meubles{% endif %}<\/h3>\n        <p class=\"lc-how-d\">{% if loc == 'en' %}Browse our catalog of 490+ products{% else %}Parcourez notre catalogue de 490+ produits{% endif %}<\/p>\n      <\/div>\n      <div class=\"lc-how-step\">\n        <div class=\"lc-how-num\">2<\/div>\n        <div class=\"lc-how-ico\">📦<\/div>\n        <h3 class=\"lc-how-t\">{% if loc == 'en' %}Home delivery{% else %}Livraison à domicile{% endif %}<\/h3>\n        <p class=\"lc-how-d\">{% if loc == 'en' %}We deliver across Canada, free of charge{% else %}On livre partout au Canada, sans frais{% endif %}<\/p>\n      <\/div>\n      <div class=\"lc-how-step\">\n        <div class=\"lc-how-num\">3<\/div>\n        <div class=\"lc-how-ico\">✨<\/div>\n        <h3 class=\"lc-how-t\">{% if loc == 'en' %}Enjoy{% else %}Profitez{% endif %}<\/h3>\n        <p class=\"lc-how-d\">{% if loc == 'en' %}Simple assembly, and you're all set!{% else %}Montage simple, et c'est prêt !{% endif %}<\/p>\n      <\/div>\n    <\/div>\n  <\/div>\n<\/div>\n<style>\n.lc-how-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:24px;position:relative;max-width:860px;margin:0 auto}\n.lc-how-steps::before{content:'';position:absolute;top:23px;left:16.66%;width:66.66%;border-top:2px dashed #C17F3E;z-index:0}\n.lc-how-step{position:relative;z-index:1;text-align:center}\n.lc-how-num{width:48px;height:48px;border-radius:50%;background:#C17F3E;color:#fff;font-weight:700;font-size:1.2rem;display:flex;align-items:center;justify-content:center;margin:0 auto;position:relative;z-index:1}\n.lc-how-ico{font-size:2.2rem;margin:.7rem 0 .3rem;line-height:1}\n.lc-how-t{margin:.2rem 0 .4rem;font-size:1.6rem}\n.lc-how-d{color:#797068;margin:0;font-size:1.4rem}\n@media(max-width:749px){\n.lc-how-steps{grid-template-columns:1fr;gap:0;max-width:430px;text-align:left}\n.lc-how-steps::before{display:none}\n.lc-how-step{display:grid;grid-template-columns:48px 1fr;column-gap:16px;text-align:left;padding-bottom:30px}\n.lc-how-num{grid-column:1;grid-row:1}\n.lc-how-ico{grid-column:2;grid-row:1;font-size:1.8rem;margin:0;align-self:center}\n.lc-how-t{grid-column:2;grid-row:2;margin:.1rem 0 .2rem}\n.lc-how-d{grid-column:2;grid-row:3;margin:0}\n.lc-how-step:not(:last-child)::before{content:'';position:absolute;left:23px;top:48px;bottom:0;border-left:2px dashed #C17F3E;z-index:0}\n}\n<\/style>",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    },
+    "lc_blog": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "{%- assign loc = request.locale.iso_code | downcase -%}\n{%- if loc == 'en' -%}\n  {%- assign blog_handle = 'blog' -%}{%- assign blog_title = 'Tips & inspiration' -%}{%- assign blog_cta = 'View all articles' -%}\n{%- else -%}\n  {%- assign blog_handle = 'actualites' -%}{%- assign blog_title = 'Conseils et inspirations' -%}{%- assign blog_cta = 'Voir tous les articles' -%}\n{%- endif -%}\n{%- assign lc_b = blogs[blog_handle] -%}\n<div style=\"background:#FAFAF8\">\n  <div class=\"page-width lc-blog-wrap\" style=\"padding:56px 0;text-align:center\">\n    <h2 style=\"font-size:clamp(2rem,3.5vw,3rem);margin:0 0 2rem\">{{ blog_title }}<\/h2>\n    <div class=\"lc-blog-grid\" style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:24px;text-align:left\">\n      {%- for article in lc_b.articles limit: 3 -%}\n        <a href=\"{{ article.url }}\" class=\"lc-blog-card\" style=\"text-decoration:none;color:#1A1A2E;display:block\">\n          {%- if article.image -%}\n            <div style=\"border-radius:8px;overflow:hidden;margin-bottom:.7rem\"><img src=\"{{ article.image | image_url: width: 600 }}\" alt=\"{{ article.title | escape }}\" loading=\"lazy\" style=\"width:100%;aspect-ratio:16\/9;object-fit:cover;display:block\"><\/div>\n          {%- else -%}\n            <div style=\"aspect-ratio:16\/9;background:#E8E0D8;border-radius:8px;margin-bottom:.7rem\"><\/div>\n          {%- endif -%}\n          <div style=\"font-size:1.2rem;color:#797068\">{{ article.published_at | date: format: 'abbreviated_date' }}<\/div>\n          <h3 style=\"font-size:1.6rem;margin:.3rem 0 0;line-height:1.3\">{{ article.title | escape }}<\/h3>\n        <\/a>\n      {%- else -%}\n        <p style=\"grid-column:1\/-1;color:#797068\">{{ blog_title }}<\/p>\n      {%- endfor -%}\n    <\/div>\n    <div style=\"margin-top:1.8rem\"><a href=\"\/blogs\/{{ blog_handle }}\" class=\"lc-btn\" style=\"display:inline-block;background:#C17F3E;color:#fff;padding:12px 24px;border-radius:6px;font-weight:700;text-decoration:none\">{{ blog_cta }}<\/a><\/div>\n  <\/div>\n<\/div>\n<style>.lc-blog-card:hover h3{text-decoration:underline}@media(max-width:749px){.lc-blog-wrap{padding:36px 0!important}.lc-blog-grid{display:flex!important;grid-template-columns:none!important;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:14px;padding-bottom:6px}.lc-blog-grid::-webkit-scrollbar{display:none}.lc-blog-card{flex:0 0 85vw;scroll-snap-align:start}}<\/style>",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    },
+    "featured_sale": {
+      "type": "featured-collection",
+      "settings": {
+        "collection": "rabais",
+        "products_to_show": 12,
+        "title": "Meilleures offres du moment",
+        "heading_size": "h2",
+        "description": "<p>Des prix imbattables sur nos coups de cœur du moment.<\/p>",
+        "show_description": true,
+        "description_style": "body",
+        "columns_desktop": 4,
+        "enable_desktop_slider": true,
+        "full_width": false,
+        "show_view_all": true,
+        "view_all_style": "solid",
+        "color_scheme": "",
+        "image_ratio": "adapt",
+        "image_shape": "default",
+        "show_secondary_image": true,
+        "show_vendor": false,
+        "show_rating": false,
+        "quick_add": "standard",
+        "columns_mobile": "2",
+        "swipe_on_mobile": true,
+        "padding_top": 36,
+        "padding_bottom": 40
+      }
+    },
+    "lc_loop": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "<style>.slider-counter{display:none!important}[id$=\"__featured_collection1\"] ul.slider,[id$=\"__featured_collection2\"] ul.slider,[id$=\"__featured_sale\"] ul.slider{scroll-snap-type:none!important;scroll-behavior:auto!important}[data-loop-clone]{pointer-events:none}<\/style><script>(function(){function setup(ul){if(!ul||ul.dataset.loopInit)return;var items=Array.prototype.slice.call(ul.children);if(items.length<2)return;ul.dataset.loopInit='1';var n=items.length;items.forEach(function(li){var c=li.cloneNode(true);try{c.inert=true;}catch(e){}c.setAttribute('aria-hidden','true');c.setAttribute('data-loop-clone','1');c.querySelectorAll('[id]').forEach(function(e){e.removeAttribute('id');});ul.appendChild(c);});var spanPx=0;function measure(){spanPx=ul.children[n].offsetLeft-ul.children[0].offsetLeft;}requestAnimationFrame(measure);window.addEventListener('resize',measure);var jumping=false;ul.addEventListener('scroll',function(){if(jumping)return;if(!spanPx)measure();if(spanPx>0&&ul.scrollLeft>=spanPx){jumping=true;ul.scrollLeft-=spanPx;jumping=false;}},{passive:true});}function sec(sfx){return document.querySelector('[id^=\"shopify-section-\"][id$=\"__'+sfx+'\"]')||document.getElementById('shopify-section-'+sfx);}function init(){['featured_collection1','featured_collection2','featured_sale'].forEach(function(sfx){var s=sec(sfx);if(!s)return;var ul=s.querySelector('ul.slider')||s.querySelector('.slider');if(ul)setup(ul);});}if(document.readyState!=='loading')init();else document.addEventListener('DOMContentLoaded',init);})();<\/script>",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    },
+    "shop_pay_home": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "<style>@media(max-width:749px){[class*=\"__featured_sale-padding\"]{padding-top:8px!important;padding-bottom:24px!important}}<\/style>{%- assign loc = request.locale.iso_code -%}\n<style>\n  .sp-bar{max-width:1100px;margin:0 auto;padding:0 18px;font-family:'DM Sans',sans-serif;}\n  .sp-bar__inner{background:#FAFAF8;border:1px solid rgba(27,42,74,.08);border-bottom:2px solid #D4A853;border-radius:10px;display:grid;grid-template-columns:repeat(4,1fr);}\n  .sp-col{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:22px 16px;border-right:1px solid rgba(27,42,74,.10);}\n  .sp-col:last-child{border-right:0;}\n  .sp-col svg{width:26px;height:26px;color:#1B2A4A;flex-shrink:0;}\n  .sp-col__t{font-size:14px;font-weight:600;color:#1B2A4A;line-height:1.3;}\n  .sp-tb-mini{display:none;}\n  @media(max-width:749px){\n    .sp-bar{padding:8px 10px 0;margin-top:0;}\n    .sp-bar__inner{grid-template-columns:repeat(4,1fr);gap:0;}\n    .sp-col{padding:8px 4px;gap:4px;border-right:1px solid rgba(27,42,74,.10);border-bottom:0;}\n    .sp-col:last-child{border-right:0;}\n    .sp-col svg{width:20px;height:20px;}\n    .sp-col__t{font-size:10px;line-height:1.2;}\n    .sp-tb-mini{display:block;text-align:center;font-size:9px;color:#666;margin:6px 0 0;line-height:1.3;}\n  }\n<\/style>\n<div class=\"sp-bar\">\n  <div class=\"sp-bar__inner\">\n    <div class=\"sp-col\">\n      <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect x=\"2\" y=\"5\" width=\"20\" height=\"14\" rx=\"2\"\/><line x1=\"2\" y1=\"10\" x2=\"22\" y2=\"10\"\/><\/svg>\n      <span class=\"sp-col__t\">{% if loc == 'fr' %}4 versements sans intérêt{% else %}4 interest-free payments{% endif %}<\/span>\n    <\/div>\n    <div class=\"sp-col\">\n      <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><line x1=\"19\" y1=\"5\" x2=\"5\" y2=\"19\"\/><circle cx=\"6.5\" cy=\"6.5\" r=\"2.5\"\/><circle cx=\"17.5\" cy=\"17.5\" r=\"2.5\"\/><\/svg>\n      <span class=\"sp-col__t\">{% if loc == 'fr' %}Aucun intérêt{% else %}No interest{% endif %}<\/span>\n    <\/div>\n    <div class=\"sp-col\">\n      <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><polygon points=\"13 2 3 14 12 14 11 22 21 10 12 10 13 2\"\/><\/svg>\n      <span class=\"sp-col__t\">{% if loc == 'fr' %}Approbation instantanée{% else %}Instant approval{% endif %}<\/span>\n    <\/div>\n    <div class=\"sp-col\">\n      <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z\"\/><\/svg>\n      <span class=\"sp-col__t\">{% if loc == 'fr' %}Shop Pay sécurisé{% else %}Secure Shop Pay{% endif %}<\/span>\n    <\/div>\n  <\/div>\n  <p class=\"sp-tb-mini\">{% if loc == 'fr' %}✓ Retours 30j · ✓ Paiement sécurisé{% else %}✓ 30-day returns · ✓ Secure payment{% endif %}<\/p>\n<\/div>",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    },
+    "cat_tiles": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "{%- assign loc = request.locale.iso_code | downcase -%}\n{%- if loc == 'en' -%}{%- assign kick = 'Category' -%}{%- assign cta = 'Shop' -%}{%- else -%}{%- assign kick = 'Cat&eacute;gorie' -%}{%- assign cta = 'Magasiner' -%}{%- endif -%}\n<div class=\"page-width lc-cat lc-reveal\">\n  <h2 class=\"lc-cat__title\">{% if loc == 'en' %}Shop by category{% else %}Magasinez par cat&eacute;gorie{% endif %}<\/h2>\n  <div class=\"lc-cat-grid\">\n    <a class=\"lc-cat-tile lc-cat-tile--lg\" href=\"\/collections\/meubles-et-decorations\" data-umami-event=\"Cat tile Furniture & decor\">\n      <span class=\"lc-cat-tile__img\" style=\"background-image:url('{{ 'cat-tile-1.jpg' | asset_url }}')\"><\/span>\n      <span class=\"lc-cat-tile__ov\"><\/span>\n      <span class=\"lc-cat-tile__body\">\n        <span class=\"lc-cat-tile__kicker\">{{ kick }}<\/span>\n        <span class=\"lc-cat-tile__label\">{% if loc == 'en' %}Furniture &amp; decor{% else %}Meubles et d&eacute;corations{% endif %}<\/span>\n        <span class=\"lc-cat-tile__cta\">{{ cta }} <span aria-hidden=\"true\">&rarr;<\/span><\/span>\n      <\/span>\n    <\/a>\n    <a class=\"lc-cat-tile\" href=\"\/collections\/mobiliers-exterieurs-et-jardins\" data-umami-event=\"Cat tile Outdoor & garden\">\n      <span class=\"lc-cat-tile__img\" style=\"background-image:url('{{ 'cat-tile-2.jpg' | asset_url }}')\"><\/span>\n      <span class=\"lc-cat-tile__ov\"><\/span>\n      <span class=\"lc-cat-tile__body\">\n        <span class=\"lc-cat-tile__kicker\">{{ kick }}<\/span>\n        <span class=\"lc-cat-tile__label\">{% if loc == 'en' %}Outdoor &amp; garden{% else %}Mobilier ext&eacute;rieur et jardin{% endif %}<\/span>\n        <span class=\"lc-cat-tile__cta\">{{ cta }} <span aria-hidden=\"true\">&rarr;<\/span><\/span>\n      <\/span>\n    <\/a>\n    <a class=\"lc-cat-tile\" href=\"\/collections\/chaises-et-tables-de-patio-1\" data-umami-event=\"Cat tile Patio chairs & tables\">\n      <span class=\"lc-cat-tile__img\" style=\"background-image:url('{{ 'cat-tile-3.jpg' | asset_url }}')\"><\/span>\n      <span class=\"lc-cat-tile__ov\"><\/span>\n      <span class=\"lc-cat-tile__body\">\n        <span class=\"lc-cat-tile__kicker\">{{ kick }}<\/span>\n        <span class=\"lc-cat-tile__label\">{% if loc == 'en' %}Patio chairs &amp; tables{% else %}Chaises et tables de patio{% endif %}<\/span>\n        <span class=\"lc-cat-tile__cta\">{{ cta }} <span aria-hidden=\"true\">&rarr;<\/span><\/span>\n      <\/span>\n    <\/a>\n    <a class=\"lc-cat-tile\" href=\"\/collections\/jardinage-et-serres\" data-umami-event=\"Cat tile Gardening & greenhouses\">\n      <span class=\"lc-cat-tile__img\" style=\"background-image:url('{{ 'cat-tile-4.jpg' | asset_url }}')\"><\/span>\n      <span class=\"lc-cat-tile__ov\"><\/span>\n      <span class=\"lc-cat-tile__body\">\n        <span class=\"lc-cat-tile__kicker\">{{ kick }}<\/span>\n        <span class=\"lc-cat-tile__label\">{% if loc == 'en' %}Gardening &amp; greenhouses{% else %}Jardinage et serres{% endif %}<\/span>\n        <span class=\"lc-cat-tile__cta\">{{ cta }} <span aria-hidden=\"true\">&rarr;<\/span><\/span>\n      <\/span>\n    <\/a>\n    <a class=\"lc-cat-tile\" href=\"\/collections\/accessoires-pour-animaux\" data-umami-event=\"Cat tile Pet supplies\">\n      <span class=\"lc-cat-tile__img\" style=\"background-image:url('{{ 'cat-tile-5.jpg' | asset_url }}')\"><\/span>\n      <span class=\"lc-cat-tile__ov\"><\/span>\n      <span class=\"lc-cat-tile__body\">\n        <span class=\"lc-cat-tile__kicker\">{{ kick }}<\/span>\n        <span class=\"lc-cat-tile__label\">{% if loc == 'en' %}Pet supplies{% else %}Accessoires pour animaux{% endif %}<\/span>\n        <span class=\"lc-cat-tile__cta\">{{ cta }} <span aria-hidden=\"true\">&rarr;<\/span><\/span>\n      <\/span>\n    <\/a>\n    <a class=\"lc-cat-tile\" href=\"\/collections\/sports-et-loisirs\" data-umami-event=\"Cat tile Sports & leisure\">\n      <span class=\"lc-cat-tile__img\" style=\"background-image:url('{{ 'cat-tile-6.jpg' | asset_url }}')\"><\/span>\n      <span class=\"lc-cat-tile__ov\"><\/span>\n      <span class=\"lc-cat-tile__body\">\n        <span class=\"lc-cat-tile__kicker\">{{ kick }}<\/span>\n        <span class=\"lc-cat-tile__label\">{% if loc == 'en' %}Sports &amp; leisure{% else %}Sports et loisirs{% endif %}<\/span>\n        <span class=\"lc-cat-tile__cta\">{{ cta }} <span aria-hidden=\"true\">&rarr;<\/span><\/span>\n      <\/span>\n    <\/a>\n  <\/div>\n<\/div>\n",
+        "color_scheme": "",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    },
+    "entry_popup": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "{%- assign loc = request.locale.iso_code | downcase -%}\n<div id=\"lc-pop\" class=\"lc-pop\" role=\"dialog\" aria-modal=\"true\" aria-hidden=\"true\" aria-label=\"{% if loc == 'en' %}First order discount{% else %}Rabais premiere commande{% endif %}\">\n  <div class=\"lc-pop__ov\" data-pop-close><\/div>\n  <div class=\"lc-pop__card\">\n    <button class=\"lc-pop__x\" type=\"button\" data-pop-close aria-label=\"{% if loc == 'en' %}Close{% else %}Fermer{% endif %}\">&times;<\/button>\n    <div class=\"lc-pop__inner\">\n      <span class=\"lc-pop__badge\">10%<\/span>\n      <h2 class=\"lc-pop__title\">{% if loc == 'en' %}Get 10% off your first order{% else %}Obtenez 10% sur votre premiere commande{% endif %}<\/h2>\n      <p class=\"lc-pop__sub\">{% if loc == 'en' %}Sign up and receive your code by email.{% else %}Inscrivez-vous et recevez votre code par courriel.{% endif %}<\/p>\n      <form class=\"lc-pop__form\" method=\"post\" action=\"\/contact\" accept-charset=\"UTF-8\" novalidate>\n        <input type=\"hidden\" name=\"form_type\" value=\"customer\">\n        <input type=\"hidden\" name=\"utf8\" value=\"✓\">\n        <input type=\"hidden\" name=\"contact[tags]\" value=\"newsletter, popup-10off\">\n        <input class=\"lc-pop__email\" type=\"email\" name=\"contact[email]\" required autocomplete=\"email\" placeholder=\"{% if loc == 'en' %}your@email.com{% else %}votre@courriel.com{% endif %}\">\n        <button class=\"lc-pop__btn\" type=\"submit\">{% if loc == 'en' %}Get my discount{% else %}Je veux mon rabais{% endif %}<\/button>\n        <p class=\"lc-pop__msg\" role=\"alert\" hidden><\/p>\n      <\/form>\n      <div class=\"lc-pop__ok\" hidden><p>{% if loc == 'en' %}Check your email for your 10% code!{% else %}Verifiez votre courriel pour votre code 10%!{% endif %}<\/p><\/div>\n    <\/div>\n  <\/div>\n<\/div>\n<style>\n.lc-pop{position:fixed;inset:0;z-index:99999;display:none;align-items:center;justify-content:center;padding:16px;font-family:'DM Sans',sans-serif}\n.lc-pop.is-open{display:flex}\n.lc-pop__ov{position:absolute;inset:0;background:rgba(26,26,46,.55)}\n.lc-pop__card{position:relative;background:#fff;border-radius:14px;max-width:420px;width:100%;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:lc-pop-in .3s ease both}\n@keyframes lc-pop-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}\n.lc-pop__x{position:absolute;top:6px;right:12px;background:none;border:0;font-size:30px;line-height:1;color:#fff;cursor:pointer;z-index:2;opacity:.85}\n.lc-pop__x:hover{opacity:1}\n.lc-pop__inner::before{content:'';display:block;height:88px;background:#1B2A4A}\n.lc-pop__badge{position:absolute;top:54px;left:50%;transform:translateX(-50%);width:68px;height:68px;border-radius:50%;background:#D4A853;color:#1B2A4A;font-weight:700;font-size:1.9rem;display:flex;align-items:center;justify-content:center;border:4px solid #fff}\n.lc-pop__title{margin:46px 24px 6px;text-align:center;font-size:1.9rem;font-weight:700;color:#1B2A4A;line-height:1.2}\n.lc-pop__sub{margin:0 24px 18px;text-align:center;font-size:1.4rem;color:#5b6172}\n.lc-pop__form{margin:0 24px 24px;display:flex;flex-direction:column;gap:10px}\n.lc-pop__email{padding:12px 14px;border:1px solid #d9d2c7;border-radius:8px;font-size:1.5rem;font-family:inherit}\n.lc-pop__email:focus{outline:2px solid #C17F3E;outline-offset:0;border-color:#C17F3E}\n.lc-pop__btn{padding:13px;background:#1B2A4A;color:#fff;border:0;border-radius:8px;font-weight:700;font-size:1.5rem;cursor:pointer;font-family:inherit}\n.lc-pop__btn:hover{background:#C17F3E}\n.lc-pop__btn:disabled{opacity:.7;cursor:default}\n.lc-pop__msg{margin:0;font-size:1.3rem;color:#c0392b;text-align:center}\n.lc-pop__ok{padding:0 24px 26px;text-align:center;font-size:1.5rem;color:#1B2A4A;font-weight:600}\n@media(max-width:749px){.lc-pop__card{max-width:none}.lc-pop__title{font-size:1.7rem}}\n<\/style>\n<script>\n(function(){\n  var KEY='lc_pop_seen_v1';\n  try{ if(localStorage.getItem(KEY)) return; }catch(e){}\n  var pop=document.getElementById('lc-pop'); if(!pop) return;\n  var shown=false, timer;\n  function show(){ if(shown) return; shown=true; pop.classList.add('is-open'); pop.setAttribute('aria-hidden','false'); try{localStorage.setItem(KEY,'1');}catch(e){} clearTimeout(timer); window.removeEventListener('scroll',onScroll); }\n  function close(){ pop.classList.remove('is-open'); pop.setAttribute('aria-hidden','true'); }\n  function onScroll(){ var sc=window.scrollY||document.documentElement.scrollTop; var h=document.documentElement.scrollHeight-window.innerHeight; if(h>0 && sc\/h>=0.5) show(); }\n  timer=setTimeout(show,5000);\n  window.addEventListener('scroll',onScroll,{passive:true});\n  pop.addEventListener('click',function(e){ if(e.target.closest('[data-pop-close]')) close(); });\n  document.addEventListener('keydown',function(e){ if(e.key==='Escape') close(); });\n  var form=pop.querySelector('.lc-pop__form');\n  if(form) form.addEventListener('submit',function(e){\n    e.preventDefault();\n    var email=form.querySelector('.lc-pop__email'); var msg=form.querySelector('.lc-pop__msg');\n    var re=\/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$\/;\n    if(!re.test((email.value||'').trim())){ msg.hidden=false; msg.textContent=\"{% if loc == 'en' %}Please enter a valid email.{% else %}Entrez un courriel valide.{% endif %}\"; return; }\n    var btn=form.querySelector('.lc-pop__btn'); btn.disabled=true;\n    fetch(form.action,{method:'POST',body:new FormData(form),headers:{'Accept':'text\/html'}})\n      .then(function(){ done(); }).catch(function(){ done(); });\n    function done(){ form.hidden=true; pop.querySelector('.lc-pop__ok').hidden=false; }\n  });\n})();\n<\/script>",
+        "color_scheme": "",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    },
+    "home_video": {
+      "type": "home-video-showcase",
+      "settings": {}
+    }
+  },
+  "order": [
+    "lc_hero",
+    "lc_trustbar",
+    "shop_pay_home",
+    "home_video",
+    "featured_sale",
+    "lc_story1",
+    "cat_tiles",
+    "featured_collection2",
+    "lc_story2",
+    "why_us",
+    "1774571510a047e4d5",
+    "lc_blog",
+    "lc_howit",
+    "lc_trust",
+    "lc_loop",
+    "entry_popup"
+  ]
+}
