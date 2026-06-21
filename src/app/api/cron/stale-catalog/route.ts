@@ -13,7 +13,7 @@ function verifyCronSecret(header: string | null): boolean {
 
 /**
  * GET /api/cron/stale-catalog — daily catalog hygiene. Drafts Shopify products that are
- * imported + still in stock (qty>0) but haven't appeared in the Aosom CSV for >14 days
+ * imported + still in stock (qty>0) but haven't appeared in the Aosom CSV for >30 days
  * (likely discontinued at Aosom → oversell risk). Already draft/archived products are skipped.
  *
  * Protected by CRON_SECRET (Bearer). Shopify writes are rate-limited to 2 req/sec. Records the

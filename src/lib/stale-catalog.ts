@@ -11,7 +11,7 @@
 import { getStaleImportedProducts } from "@/lib/database";
 import { fetchAllShopifyProducts, draftShopifyProduct } from "@/lib/shopify-client";
 
-export const STALE_DAYS = 14;
+export const STALE_DAYS = 30;
 /** Spacing between Shopify draft writes → 2 requests/second. */
 export const RATE_LIMIT_MS = 500;
 

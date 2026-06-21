@@ -1739,7 +1739,7 @@ export async function getProductsForPriceAudit(): Promise<{ sku: string; price: 
  * for `maxAgeDays` days. These are likely discontinued at Aosom yet still sellable on the
  * storefront (oversell risk). Consumed by the stale-catalog cron, which drafts them.
  */
-export async function getStaleImportedProducts(maxAgeDays = 14): Promise<{ sku: string; shopify_product_id: string }[]> {
+export async function getStaleImportedProducts(maxAgeDays = 30): Promise<{ sku: string; shopify_product_id: string }[]> {
   const db = await ensureSchema();
   const result = await db.execute({
     sql: `SELECT sku, shopify_product_id FROM products
