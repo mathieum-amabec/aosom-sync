@@ -56,6 +56,10 @@
     {
       "path": "/api/cron/draft-ttl",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/stale-catalog",
+      "schedule": "30 7 * * *"
     }
   ]
 }

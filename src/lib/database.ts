@@ -1692,6 +1692,26 @@ export async function getProductsForPriceAudit(): Promise<{ sku: string; price: 
   });
 }
 
+/**
+ * Imported products that have gone stale in the Aosom feed: present on Shopify
+ * (`shopify_product_id` not null), still showing stock (`qty > 0`), but not seen in the CSV
+ * for `maxAgeDays` days. These are likely discontinued at Aosom yet still sellable on the
+ * storefront (oversell risk). Consumed by the stale-catalog cron, which drafts them.
+ */
+export async function getStaleImportedProducts(maxAgeDays = 14): Promise<{ sku: string; shopify_product_id: string }[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT sku, shopify_product_id FROM products
+          WHERE shopify_product_id IS NOT NULL AND qty > 0 AND last_seen_at < unixepoch() - 86400 * ?
+          ORDER BY last_seen_at ASC`,
+    args: [maxAgeDays],
+  });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    return { sku: o.sku as string, shopify_product_id: String(o.shopify_product_id) };
+  });
+}
+
 export async function getAllSettings(): Promise<Record<string, string>> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT key, value FROM settings`);
