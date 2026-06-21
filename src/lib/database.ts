@@ -792,6 +792,47 @@ export async function getProduct(sku: string): Promise<ProductRow | null> {
   return result.rows.length > 0 ? rowToProduct(result.rows[0]) : null;
 }
 
+/** Imported catalog rows (shopify_product_id set), trimmed to what the intraday stock-check
+ * needs: sku, baseline qty, Shopify product id, and last_seen_at. */
+export interface StockBaselineRow {
+  sku: string;
+  qty: number;
+  shopifyProductId: string;
+  lastSeenAt: number;
+}
+
+export async function getStockBaseline(): Promise<StockBaselineRow[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(
+    `SELECT sku, qty, shopify_product_id, last_seen_at FROM products WHERE shopify_product_id IS NOT NULL`
+  );
+  return result.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      sku: (o.sku as string) || "",
+      qty: Number(o.qty) || 0,
+      shopifyProductId: String(o.shopify_product_id),
+      lastSeenAt: Number(o.last_seen_at) || 0,
+    };
+  });
+}
+
+/** Write back the new baseline qty (and bump last_seen_at) for the SKUs the stock-check
+ * acted on, so the next run diffs from the current state. Batched; no-op on empty input. */
+export async function updateStockBaselineQty(updates: Array<{ sku: string; qty: number }>): Promise<void> {
+  if (updates.length === 0) return;
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const stmts = updates.map((u) => ({
+    sql: `UPDATE products SET qty = ?, last_seen_at = ? WHERE sku = ?`,
+    args: [u.qty, now, u.sku],
+  }));
+  const BATCH_SIZE = 1000;
+  for (let i = 0; i < stmts.length; i += BATCH_SIZE) {
+    await db.batch(stmts.slice(i, i + BATCH_SIZE), "write");
+  }
+}
+
 export interface ProductSnapshot {
   sku: string;
   name: string;

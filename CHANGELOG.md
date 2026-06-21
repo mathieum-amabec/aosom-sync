@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.123] - 2026-06-21
+## [0.5.53.124] - 2026-06-21
 
 ### Added (Stale-catalog cron — auto-draft discontinued products)
 - **`GET /api/cron/stale-catalog`** (daily 07:30 UTC, `vercel.json`) — drafts Shopify products
@@ -20,6 +20,28 @@ All notable changes to Aosom Sync will be documented in this file.
   thrown-write→fail, empty) + `cron-stale-catalog` (route auth, success detail, error path).
 - Data fix: nulled the dangling `shopify_product_id` on `84G-351V00BG` / `84B-146RD` (deleted on
   Shopify) so the scan no longer 404s on them.
+
+## [0.5.53.123] - 2026-06-20
+
+### Added (intraday stock-check cron — faster Aosom rupture/restock capture)
+- **`GET /api/cron/stock-check`** (`vercel.json`: 10:00 / 16:00 / 22:00 UTC) — a lightweight,
+  re-runnable reconciliation that re-fetches **only** the Aosom CSV and diffs **qty** (no
+  prices/images/titles, no Shopify inventory levels). No date checkpoint → convergent and safe
+  to re-run, unlike the date-idempotent daily `sync`.
+  - **Went out of stock** → tag `out-of-stock` (stays active; badge + waitlist still work).
+  - **Back in stock** (buffered qty > 0) → tag `back-in-stock`; reactivate **iff** we auto-drafted
+    it (`auto-drafted` marker tag distinguishes our drafts from operator drafts); fire the
+    back-in-stock waitlist via the existing `notifyBackInStockWaitlist`.
+  - **Sold out AND gone from the feed > 7 days** → draft + `auto-drafted` marker (discontinued).
+  - Availability uses the daily sync's `stockBufferQty` threshold (qty ≤ 5 sold out), product-level.
+  - `?dryRun=1` plans without writing.
+- **Hardening:** a **feed-completeness guard** aborts with no writes when the fetched CSV covers
+  < 80% of imported SKUs (a truncated feed can't mass-flip the catalog), and a **per-run write
+  cap** (150, worst-first: OOS/draft before restock) updates the baseline **after each write**
+  (not batched at the end) so a budget-killed run persists its progress and the next run resumes.
+- **`src/lib/stock-reconcile.ts`** — pure, fully unit-tested planning core; all I/O lives in the route.
+- DB helpers `getStockBaseline` / `updateStockBaselineQty`; Shopify `getShopifyStockState`;
+  `STOCK_TAG_AUTODRAFTED` constant; `notifyBackInStockWaitlist` now exported.
 
 ## [0.5.53.122] - 2026-06-20
 
