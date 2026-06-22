@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.129] - 2026-06-21
+## [0.5.53.130] - 2026-06-22
 
 ### Fixed (Social captions — strip Markdown)
 - **New `src/lib/strip-markdown.ts`** (`stripMarkdown`) — strips Markdown an LLM may emit so it
@@ -16,6 +16,17 @@ All notable changes to Aosom Sync will be documented in this file.
     Markdown into `publication_queue`; now stripped.
 - Tests: `tests/strip-markdown.test.ts` (bold, headers, hashtag preservation, rules, whitespace,
   clean-unchanged, full leaked-shape); existing `social-caption-scaffold` test still green.
+
+## [0.5.53.129] - 2026-06-21
+
+### Fixed (orphaned sync-run self-heal)
+- **`/api/health` now sweeps stale `running` sync runs on each poll** (`clearStaleLockIfNeeded(15)`).
+  A Fluid Compute function killed by timeout (>800s) leaves its `sync_runs` row stuck at
+  `status='running'` until the *next* sync clears it — between syncs the health endpoint and
+  dashboard reported a phantom live "running" run for hours. The sweep (best-effort, never flips
+  health to "down") closes that gap on the read path; the existing sync-start guard is unchanged.
+- One-off data fix: marked the orphan run `efb22093…` (stuck `running` ~11h after a timeout)
+  as `failed` with proper ISO `completed_at` + JSON `error_messages`.
 
 ## [0.5.53.128] - 2026-06-21
 

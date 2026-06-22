@@ -1,0 +1,30 @@
+{
+  "date": "2026-06-21",
+  "window": "7d",
+  "metrics": {
+    "commits": 181,
+    "contributors": 1,
+    "prs_merged": 90,
+    "insertions": 28418,
+    "deletions": 1506,
+    "net_loc": 26912,
+    "test_loc": 4309,
+    "test_ratio": 0.15,
+    "active_days": 7,
+    "feat_commits": 58,
+    "fix_commits": 35,
+    "chore_commits": 73,
+    "peak_hour": 20,
+    "ai_assisted_commits": 181
+  },
+  "authors": {
+    "Mathieu Marleau": { "commits": 181, "insertions": 28418, "deletions": 1506, "test_ratio": 0.15, "top_area": "src/lib/" }
+  },
+  "version_range": ["0.5.53.36", "0.5.53.125"],
+  "streak_days": 7,
+  "tweetable": "Week of Jun 14: 181 commits (solo, AI-assisted), ~90 PRs, +28.4k/-1.5k LOC, 15% tests, v.36 -> v.125 (89 bumps), peak: 8pm",
+  "test_health": {
+    "total_test_files": null,
+    "test_ratio_pct": 15
+  }
+}
