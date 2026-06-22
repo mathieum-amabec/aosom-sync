@@ -2,6 +2,52 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.136] - 2026-06-22
+
+### Added (Demand Gen — Phase 2: Home Furnishings)
+- **`scripts/render-demand-gen.mjs`** — added 13 Home Furnishings source SKUs to `SOURCES[]`
+  (portable air conditioners, stand/tower fans, medicine cabinets, a queen bed frame, sideboards,
+  a bar table set) with per-source `ss`/`cleanDur`/`delogo`/`buckets` from the 2026-06-22 1fps
+  filmstrip audit. Produces 93 demand-gen assets (31 clips × 3 ratios: 16:9 / 1:1 / 9:16), uploaded
+  to the public Vercel Blob store (`jcskqp8orcub9i0l.public…`).
+- **`scripts/build-manifest.mjs`** — added the same 13 SKUs to the manifest audit array (`A[]`),
+  `TITLES`, and `URLS`; extended `SRC_30_OK` with the 5 sources long enough for a 30s cut. Re-audited
+  `823-002V80` / `823-010V81` (previously marked weak/not-viable) as viable (ss=3, cleanDur=18) with
+  a HOMCOM corner-logo `delogo` patch — superseding the prior audit.
+## [0.5.53.135] - 2026-06-22
+
+### Added (Social images — Instagram brand footer watermark)
+- **Instagram now watermarks photos and carousels**, matching the Facebook footer shipped in
+  v0.5.53.133. Because the Instagram Graph API only accepts a public `image_url` (it cannot take a
+  binary upload like Facebook), `image-watermark.ts` gains `uploadWatermarkedImage(imageUrl, brand)`:
+  it stamps the footer to a PNG buffer, uploads it to **Vercel Blob** (public), and returns that URL
+  plus a `cleanup()` that deletes the temp blob after publishing. `instagram-client.ts`
+  `publishPhoto` / `publishCarousel` now host each image this way and clean up in a `finally`.
+  If watermarking fails, the publish fails (and the hourly publisher retries) rather than posting an
+  unbranded image.
+- **DM Sans is now bundled** so the footer renders in the brand face instead of a system sans-serif.
+  The footer is SVG text rendered by librsvg/Pango, which resolve fonts via **fontconfig** — not
+  Sharp's `fontFile` option (that only applies to `sharp({text})`). So `src/fonts/DMSans-Regular.ttf`
+  and `DMSans-Bold.ttf` are committed and registered via a generated fontconfig file
+  (`FONTCONFIG_FILE`, Linux/Vercel-runtime only, best-effort — falls back to the system face if
+  setup fails, so it can never break publishing). The TTFs are traced into the publish-route bundles
+  (`/api/cron/publisher`, `/api/cron/social`, `/api/social`) via `next.config.ts`
+  `outputFileTracingIncludes`.
+
+### Tests
+- `tests/image-watermark.test.ts` — DM Sans TTFs present + valid, fontconfig doc shape,
+  `uploadWatermarkedImage` hosts a public PNG and `cleanup()` deletes the blob.
+- `tests/instagram-client.test.ts` — `publishPhoto`/`publishCarousel` create containers with the
+  hosted blob URL (not the raw CDN URL), temp blobs cleaned up on success and on failure.
+
+## [0.5.53.134] - 2026-06-22
+
+### Docs
+- **CLAUDE.md** — corrected the stale "Draft imports" claim. New products are auto-published as
+  `active` (live) on import, not draft — `createShopifyProduct` sets `status: "active"` (switched
+  draft→active in commit beb00b4, 2026-06-07). Updated the architecture diagram (line 22) and the
+  Key Patterns bullet. No code change; the doc was simply out of date.
+
 ## [0.5.53.133] - 2026-06-22
 
 ### Added (Social images — brand footer watermark)

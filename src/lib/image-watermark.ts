@@ -1,3 +1,8 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import crypto from "node:crypto";
+import { put, del } from "@vercel/blob";
 import sharp from "sharp";
 import type { FacebookBrand } from "./facebook-client";
 
@@ -16,6 +21,59 @@ export const FOOTER_HEIGHT = 60;
 const FOOTER_NAVY = "#1B2A4A";
 const SLOGAN = "Livraison gratuite au Canada";
 const DOWNLOAD_TIMEOUT_MS = 20_000;
+
+/** Directory where the bundled DM Sans TTFs live (traced into the function bundle). */
+export function bundledFontsDir(): string {
+  return path.join(process.cwd(), "src", "fonts");
+}
+
+/**
+ * Build the fontconfig document that adds our bundled fonts dir to the search path.
+ * Keeps the system fonts via an ignore-missing include (so the SVG's Arial/sans-serif
+ * fallback still resolves where a system config exists).
+ */
+export function buildFontconfigXml(fontsDir: string, cacheDir: string): string {
+  return `<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>${fontsDir}</dir>
+  <cachedir>${cacheDir}</cachedir>
+  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+</fontconfig>`;
+}
+
+/**
+ * Register the bundled DM Sans TTFs with the SVG text renderer.
+ *
+ * The footer is drawn as SVG text rendered by librsvg/Pango, which resolve fonts via
+ * **fontconfig** — NOT Sharp's `fontfile` option (that only applies to `sharp({text})`).
+ * So to make `font-family: "DM Sans"` actually render DM Sans (instead of falling back
+ * to a system sans-serif), we write a fontconfig file pointing at src/fonts and set
+ * FONTCONFIG_FILE before the first render.
+ *
+ * Scoped to Linux (the Vercel runtime that renders these posts): on dev machines we
+ * leave the platform font resolution untouched to avoid perturbing the local Sharp
+ * build. Best-effort — any failure falls back to the previous behaviour (the footer
+ * still renders, just in the fallback face), so font setup can never break publishing.
+ */
+function configureBundledFonts(): void {
+  if (process.platform !== "linux") return;
+  if (process.env.FONTCONFIG_FILE) return; // already configured by us or the platform
+  try {
+    const fontsDir = bundledFontsDir();
+    if (!fs.existsSync(path.join(fontsDir, "DMSans-Bold.ttf"))) return; // not bundled in this function
+    const cacheDir = path.join(os.tmpdir(), "fontconfig-cache");
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const confPath = path.join(os.tmpdir(), "aosom-fonts.conf");
+    fs.writeFileSync(confPath, buildFontconfigXml(fontsDir, cacheDir));
+    process.env.FONTCONFIG_FILE = confPath;
+  } catch {
+    // non-fatal — fall back to system font resolution
+  }
+}
+
+// Runs once at module load, before any Sharp/libvips render in this function.
+configureBundledFonts();
 
 const BRAND_LABEL: Record<FacebookBrand, string> = {
   ameublo: "Ameublo Direct",
@@ -80,4 +138,44 @@ export async function addWatermarkToImage(imageUrl: string, brand: FacebookBrand
     .composite([{ input: footerSvg(width, label), top: height, left: 0 }])
     .png()
     .toBuffer();
+}
+
+const WATERMARK_BLOB_PREFIX = "social-watermark";
+
+export interface HostedWatermark {
+  /** Public Vercel Blob URL of the watermarked PNG, suitable for Instagram's image_url. */
+  url: string;
+  /** Delete the temporary blob. Call after publishing (Meta has fetched it by then). */
+  cleanup: () => Promise<void>;
+}
+
+/**
+ * Watermark an image and host it at a public URL for Instagram.
+ *
+ * Unlike Facebook (which uploads the watermarked buffer as binary), the Instagram Graph
+ * API only accepts a public `image_url` it can fetch server-side. So we stamp the footer
+ * to a PNG buffer, upload it to Vercel Blob (public), and return that URL. The caller MUST
+ * invoke `cleanup()` once publishing is done so the temporary blob doesn't accumulate.
+ */
+export async function uploadWatermarkedImage(imageUrl: string, brand: FacebookBrand): Promise<HostedWatermark> {
+  const buffer = await addWatermarkToImage(imageUrl, brand);
+  const blobPath = `${WATERMARK_BLOB_PREFIX}/${brand}/${crypto.randomUUID()}.png`;
+  const blob = await put(blobPath, buffer, {
+    access: "public",
+    contentType: "image/png",
+    addRandomSuffix: false,
+  });
+  return {
+    url: blob.url,
+    cleanup: async () => {
+      try {
+        await del(blob.url);
+      } catch (err) {
+        // Non-fatal — never let cleanup break a successful publish. But log it: if del
+        // starts failing (token/permission/rate-limit) these temp blobs accumulate, and a
+        // silent catch would hide that until the storage bill does.
+        console.warn(`[watermark] failed to delete temp blob ${blob.url}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  };
 }

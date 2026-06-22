@@ -80,6 +80,21 @@ const SOURCES = [
   { sku:"837-339V80WT", title:"Armoire de pharmacie murale avec tablettes ajustables et porte unique", ss:5.0, cleanDur:12.0, delogo:null, buckets:[6,15] },
   { sku:"838-075",      title:"Buffet sideboard haute brillance 2 tiroirs 2 portes — gris et noir", ss:31.0, cleanDur:9.0, delogo:null, buckets:[6] },
   { sku:"838-075WT",    title:"Buffet sideboard haute brillance 2 tiroirs 2 portes — blanc", ss:21.0, cleanDur:9.0, delogo:null, buckets:[6] },
+  // --- Phase 2: Home Furnishings (audit 2026-06-22, filmstrip 1fps). 852x478/480 except 837 (1080p). ---
+  // 13 ✅ "prêts". delogo only where a persistent HOMCOM corner watermark is present (852-wide).
+  { sku:"823-002V80",   title:"Climatiseur portatif 10 000 BTU 3-en-1 blanc", ss:3.0, cleanDur:18.0, delogo:"delogo=x=6:y=6:w=108:h=70", buckets:[6,15] },
+  { sku:"823-010V81",   title:"Climatiseur portatif 10 000 BTU silencieux noir", ss:3.0, cleanDur:18.0, delogo:"delogo=x=6:y=6:w=108:h=70", buckets:[6,15] },
+  { sku:"824-033BK",    title:"Ventilateur sur pied oscillant avec télécommande", ss:1.0, cleanDur:19.0, delogo:null, buckets:[6,15] },
+  { sku:"824-051V80BK", title:"Ventilateur tour oscillant 3 vitesses minuterie", ss:1.0, cleanDur:34.0, delogo:null, buckets:[6,15,30] },
+  { sku:"824-056V80BK", title:"Ventilateur tour oscillant silencieux pour chambre", ss:1.0, cleanDur:34.0, delogo:null, buckets:[6,15,30] },
+  { sku:"834-295",      title:"Armoire à pharmacie murale acier verrouillable", ss:1.0, cleanDur:15.0, delogo:null, buckets:[6,15] },
+  { sku:"831-790V01WT", title:"Cadre de lit queen en métal avec tête de lit", ss:1.0, cleanDur:30.0, delogo:"delogo=x=6:y=6:w=108:h=70", buckets:[6,15,30] },
+  { sku:"838-075BK",    title:"Buffet enfilade laqué 2 tiroirs 2 portes noir", ss:1.0, cleanDur:20.0, delogo:null, buckets:[6,15] },
+  { sku:"83A-188V81BK", title:"Buffet de cuisine rangement tablettes réglables noir", ss:4.0, cleanDur:16.0, delogo:null, buckets:[6,15] },
+  { sku:"83A-188V81WT", title:"Buffet de cuisine moderne rangement blanc", ss:4.0, cleanDur:18.0, delogo:null, buckets:[6,15] },
+  { sku:"835-511GY",    title:"Buffet enfilade moderne tiroirs et rangement gris", ss:4.0, cleanDur:30.0, delogo:null, buckets:[6,15,30] },
+  { sku:"835-511WT",    title:"Buffet enfilade moderne avec tablettes blanc", ss:4.0, cleanDur:28.0, delogo:null, buckets:[6,15,30] },
+  { sku:"835-135V80RB", title:"Ensemble table de bar 3 pièces avec tabourets", ss:4.0, cleanDur:14.0, delogo:null, buckets:[6,15] },
 ];
 
 const RATIOS = {
