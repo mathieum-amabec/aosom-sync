@@ -73,6 +73,13 @@ const SOURCES = [
   { sku:"840-070CG",    title:"Parasol de patio rond 10 pieds avec manivelle", ss:2.0, cleanDur:10.0, delogo:null, buckets:[6] },
   { sku:"840-014V01BG", title:"Tente pliable 10x10 pieds avec parois maillées", ss:10.0, cleanDur:9.0, delogo:null, buckets:[6] },
   { sku:"343-029",      title:"Bac à sable en bois avec auvent réglable pour enfants", ss:25.0, cleanDur:7.0, delogo:null, buckets:[6] },
+  // --- Phase 2 marginal SKUs (audit). cleanDur≥10 → [6,15] (3 fans + cabinet); sideboards (cleanDur 9) → [6]. ---
+  { sku:"824-033WT",    title:"Ventilateur sur pied oscillant avec télécommande et écran LED — blanc", ss:3.0, cleanDur:13.0, delogo:null, buckets:[6,15] },
+  { sku:"824-048V80RD", title:"Ventilateur tour oscillant 3 vitesses avec minuterie 12h et télécommande", ss:31.0, cleanDur:11.0, delogo:null, buckets:[6,15] },
+  { sku:"824-056V80WT", title:"Ventilateur tour oscillant avec écran LED tactile et télécommande — blanc", ss:26.0, cleanDur:14.0, delogo:null, buckets:[6,15] },
+  { sku:"837-339V80WT", title:"Armoire de pharmacie murale avec tablettes ajustables et porte unique", ss:5.0, cleanDur:12.0, delogo:null, buckets:[6,15] },
+  { sku:"838-075",      title:"Buffet sideboard haute brillance 2 tiroirs 2 portes — gris et noir", ss:31.0, cleanDur:9.0, delogo:null, buckets:[6] },
+  { sku:"838-075WT",    title:"Buffet sideboard haute brillance 2 tiroirs 2 portes — blanc", ss:21.0, cleanDur:9.0, delogo:null, buckets:[6] },
 ];
 
 const RATIOS = {

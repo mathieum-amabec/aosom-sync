@@ -21,6 +21,13 @@ const TITLES = {
   "84C-226CG":"Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
   "84H-209V00CG":"Bac surélevé galvanisé 152 x 91 x 61 cm",
   "D51-277V01":"Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
+  // Phase 2 (fans / furniture)
+  "824-033WT":"Ventilateur sur pied oscillant avec télécommande et écran LED — blanc",
+  "824-048V80RD":"Ventilateur tour oscillant 3 vitesses avec minuterie 12h et télécommande",
+  "824-056V80WT":"Ventilateur tour oscillant avec écran LED tactile et télécommande — blanc",
+  "837-339V80WT":"Armoire de pharmacie murale avec tablettes ajustables et porte unique",
+  "838-075":"Buffet sideboard haute brillance 2 tiroirs 2 portes — gris et noir",
+  "838-075WT":"Buffet sideboard haute brillance 2 tiroirs 2 portes — blanc",
 };
 
 // res/dur/fps from ffprobe; ss + cleanDur from the filmstrip audit (seconds).
@@ -58,6 +65,19 @@ const A = [
     audit:"'Garden Bed' EN label 0-6s; clean bed shots 7-23s; Outsunny end ~24s. Full 15s OK." },
   { sku:"D51-277V01", pid:"7798393995369", w:852,h:480,dur:24.28,fps:25, ss:0.5, cleanDur:22.5, delogo:null,
     audit:"CLEANEST (file '-WEB-NT' = no text): no EN cards, no logo. Clean ~0.5-23s. Full 15s OK." },
+  // --- Phase 2 (fans / furniture). dims/dur/fps from ffprobe; ss/cleanDur from audit. ---
+  { sku:"824-033WT", pid:"9364961362025", w:852,h:480,dur:22.36,fps:25, ss:3.0, cleanDur:13.0, delogo:null,
+    audit:"Phase 2 fan. Clean window 3-16s (cleanDur 13s → 6s + 15s capped 13s)." },
+  { sku:"824-048V80RD", pid:"9364961427561", w:852,h:480,dur:42.79,fps:24, ss:31.0, cleanDur:11.0, delogo:null,
+    audit:"Phase 2 tower fan. Clean window 31-42s (cleanDur 11s → 6s + 15s capped 11s)." },
+  { sku:"824-056V80WT", pid:"9364961493097", w:852,h:480,dur:40.71,fps:24, ss:26.0, cleanDur:14.0, delogo:null,
+    audit:"Phase 2 tower fan. Clean window 26-40s (cleanDur 14s → 6s + 15s capped 14s)." },
+  { sku:"837-339V80WT", pid:"9364962246761", w:1920,h:1080,dur:33.24,fps:25, ss:5.0, cleanDur:12.0, delogo:null,
+    audit:"Phase 2 cabinet (1080p). Clean window 5-17s (cleanDur 12s → 6s + 15s capped 12s)." },
+  { sku:"838-075", pid:"7752188985449", w:852,h:480,dur:44.96,fps:24, ss:31.0, cleanDur:9.0, delogo:null,
+    audit:"Phase 2 sideboard. Clean window 31-40s (cleanDur 9s → 6s only; <10s, no 15s cut)." },
+  { sku:"838-075WT", pid:"7752188985449", w:852,h:480,dur:36.08,fps:24, ss:21.0, cleanDur:9.0, delogo:null,
+    audit:"Phase 2 sideboard. Clean window 21-30s (cleanDur 9s → 6s only; <10s, no 15s cut)." },
 ];
 
 const DUR_BUCKETS = [6, 15, 30];
@@ -124,6 +144,13 @@ const URLS = {
   "84C-226CG":"https://uspm.aosomcdn.com/videos/en/8/84C-226CG/84C-226CG-Outsunny-WEB.mp4",
   "84H-209V00CG":"https://uspm.aosomcdn.com/videos/en/8/84H-209V00CG/84H-209V00CG-Outsunny-WEB.mp4",
   "D51-277V01":"https://uspm.aosomcdn.com/videos/en/D/D51-277V01/D51-277V01-WEB-NT.mp4",
+  // Phase 2 (fans / furniture)
+  "824-033WT":"https://uspm.aosomcdn.com/videos/en/8/824-033WT/824-033WT-WEB.mp4",
+  "824-048V80RD":"https://uspm.aosomcdn.com/aosomweb/product/CA/home/8/824-048V80RD.mp4",
+  "824-056V80WT":"https://uspm.aosomcdn.com/aosomweb/product/CA/home/8/824-056V80WT.mp4",
+  "837-339V80WT":"https://uspm.aosomcdn.com/videos/en/8/837-339V80WT/837-339V80WT.mp4",
+  "838-075":"https://uspm.aosomcdn.com/videos/en/8/838-075/838-075-WEB-NT.mp4",
+  "838-075WT":"https://uspm.aosomcdn.com/videos/en/8/838-075WT/838-075WT-WEB.mp4",
 };
 for (const v of videos) v.source_url = URLS[v.sku];
 
