@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.132] - 2026-06-22
+
+### Fixed (Social captions — strip *italic* emphasis)
+- **`src/lib/strip-markdown.ts`** — `stripMarkdown()` now also strips single-asterisk `*italic*`
+  emphasis to its inner text, closing the gap left by the [0.5.53.130] strip (which only handled
+  `**bold**`, `#` headers, and `---` rules). LLM social captions occasionally emit `*word*`, which
+  Facebook renders literally (asterisks visible) — draft #553's EN caption shipped `*right now*`
+  verbatim. The new `.replace(/\*([^*\n]+)\*/g, "$1")` runs **after** the `**bold**` strip so it
+  never eats bold markers, and is **same-line only** (`[^*\n]`) so a leading `* ` bullet can't pair
+  with the next line's `*`.
+- Tests: `tests/strip-markdown.test.ts` + `tests/social-caption-scaffold.test.ts` — cover the #553
+  leak case, multi-emphasis on one line, the bold+italic ordering guard, lone-asterisk preservation,
+  and the cross-line bullet-safety regression.
+- Operational: the 8 already-pending draft fields carrying leaked `*italic*` (drafts #490, #496, #500,
+  #519 ×2, #528, #550, #553) were cleaned in-place in `facebook_drafts` with the same transform.
+
 ## [0.5.53.131] - 2026-06-22
 
 ### Changed (Drafts approve — auto-enqueue all draft types)
