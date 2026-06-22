@@ -21,6 +21,17 @@ const TITLES = {
   "84C-226CG":"Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
   "84H-209V00CG":"Bac surélevé galvanisé 152 x 91 x 61 cm",
   "D51-277V01":"Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
+  "824-033BK":"Ventilateur sur pied oscillant avec télécommande",
+  "824-051V80BK":"Ventilateur tour oscillant 3 vitesses minuterie",
+  "824-056V80BK":"Ventilateur tour oscillant silencieux pour chambre",
+  "834-295":"Armoire à pharmacie murale acier verrouillable",
+  "831-790V01WT":"Cadre de lit queen en métal avec tête de lit",
+  "838-075BK":"Buffet enfilade laqué 2 tiroirs 2 portes noir",
+  "83A-188V81BK":"Buffet de cuisine rangement tablettes réglables noir",
+  "83A-188V81WT":"Buffet de cuisine moderne rangement blanc",
+  "835-511GY":"Buffet enfilade moderne tiroirs et rangement gris",
+  "835-511WT":"Buffet enfilade moderne avec tablettes blanc",
+  "835-135V80RB":"Ensemble table de bar 3 pièces avec tabourets",
 };
 
 // res/dur/fps from ffprobe; ss + cleanDur from the filmstrip audit (seconds).
@@ -34,10 +45,10 @@ const A = [
     audit:"EN card 0-1s; Outsunny end-card ~17s. Clean 2-16s." },
   { sku:"120307-025", pid:"7796433551465", w:852,h:480,dur:18.84,fps:25, ss:12.0, cleanDur:3.0, delogo:null,
     audit:"FRAGMENTED: EN cards + floral/diagram graphic segments throughout; HOMCOM end-card. Max clean run ~3s. NOT VIABLE." },
-  { sku:"823-002V80", pid:"7796432633961", w:852,h:478,dur:22.04,fps:25, ss:10.0, cleanDur:5.5, delogo:null,
-    audit:"WEAK: EN feature callouts ~2-3s + scattered; end graphic ~16s. Best clean run ~5.5s (6s marginal, no 15s)." },
-  { sku:"823-010V81", pid:"7798393176169", w:852,h:478,dur:22.04,fps:25, ss:12.0, cleanDur:4.0, delogo:null,
-    audit:"WEAK: EN callouts ~2-3s, teal transitions ~10-11s. Best clean run ~4s. NOT VIABLE for 6s." },
+  { sku:"823-002V80", pid:"7796432633961", w:852,h:478,dur:22.04,fps:25, ss:3.0, cleanDur:18.0, delogo:"delogo=x=6:y=6:w=108:h=70",
+    audit:"Phase-2 re-audit (filmstrip 1fps): person+text intro 0-2s; persistent HOMCOM top-left logo → delogo; clean product+airflow 3-21s. ✅ [6,15] (supersedes prior weak call)." },
+  { sku:"823-010V81", pid:"7798393176169", w:852,h:478,dur:22.04,fps:25, ss:3.0, cleanDur:18.0, delogo:"delogo=x=6:y=6:w=108:h=70",
+    audit:"Phase-2 re-audit (filmstrip 1fps): person+text intro 0-2s; persistent HOMCOM top-left logo → delogo; clean product+airflow 3-21s. ✅ [6,15] (supersedes prior weak call)." },
   { sku:"845-039V01GY", pid:"7793455923305", w:852,h:480,dur:32.52,fps:25, ss:3.0, cleanDur:27.0, delogo:null,
     audit:"GOOD: green-studio intro logo 0-2s, then long clean product footage. Supports 30s (~27s clean)." },
   { sku:"845-335", pid:"9359738732649", w:852,h:480,dur:42.875,fps:24, ss:1.0, cleanDur:34.0, delogo:null,
@@ -58,10 +69,35 @@ const A = [
     audit:"'Garden Bed' EN label 0-6s; clean bed shots 7-23s; Outsunny end ~24s. Full 15s OK." },
   { sku:"D51-277V01", pid:"7798393995369", w:852,h:480,dur:24.28,fps:25, ss:0.5, cleanDur:22.5, delogo:null,
     audit:"CLEANEST (file '-WEB-NT' = no text): no EN cards, no logo. Clean ~0.5-23s. Full 15s OK." },
+  // --- Phase 2: Home Furnishings (audit 2026-06-22, filmstrip 1fps). All 852x480/478 → soft 9:16 upscale. ---
+  { sku:"824-033BK", pid:"9364961362025", w:852,h:480,dur:22.36,fps:25, ss:1.0, cleanDur:19.0, delogo:null,
+    audit:"Stand fan; clean start on product, minor grey transition ~8s, airflow viz tail. ✅ [6,15]." },
+  { sku:"824-051V80BK", pid:"9369986236521", w:852,h:480,dur:43.0,fps:24, ss:1.0, cleanDur:34.0, delogo:null,
+    audit:"Tower fan black; clean start, long usable window, LED/feature demos. ✅ supports 30s." },
+  { sku:"824-056V80BK", pid:"9364961493097", w:852,h:480,dur:42.63,fps:24, ss:1.0, cleanDur:34.0, delogo:null,
+    audit:"Tower fan black; clean product + control demos + lifestyle tail. ✅ supports 30s." },
+  { sku:"834-295", pid:"9364960706665", w:852,h:480,dur:20.2,fps:25, ss:1.0, cleanDur:15.0, delogo:null,
+    audit:"Steel medicine cabinet (kleankin); clean 1-16s, kleankin outro card 17-20s. ✅ [6,15]." },
+  { sku:"831-790V01WT", pid:"7752236630121", w:852,h:478,dur:31.96,fps:25, ss:1.0, cleanDur:30.0, delogo:"delogo=x=6:y=6:w=108:h=70",
+    audit:"Queen bed frame; persistent HOMCOM top-left logo → delogo; lots of bedroom lifestyle. ✅ supports 30s." },
+  { sku:"838-075BK", pid:"7752188985449", w:852,h:480,dur:25.71,fps:24, ss:1.0, cleanDur:20.0, delogo:null,
+    audit:"Black sideboard; clean product + drawer demos; 'THE END' outro ~22s. ✅ [6,15]." },
+  { sku:"83A-188V81BK", pid:"7752239218793", w:852,h:478,dur:26.76,fps:25, ss:4.0, cleanDur:16.0, delogo:null,
+    audit:"Kitchen cabinet black; 'Sideboard' text card 0-3s + HOMCOM outro; clean 4-20s. ✅ [6,15]." },
+  { sku:"83A-188V81WT", pid:"7752239218793", w:852,h:478,dur:30.56,fps:25, ss:4.0, cleanDur:18.0, delogo:null,
+    audit:"Kitchen cabinet white; 'Sideboard' text card + HOMCOM outro; clean 4-22s. ✅ [6,15]." },
+  { sku:"835-511GY", pid:"7752196653161", w:852,h:480,dur:41.29,fps:24, ss:4.0, cleanDur:30.0, delogo:null,
+    audit:"Buffet sideboard grey; 'Sideboard' text card; long clean window. ✅ supports 30s." },
+  { sku:"835-511WT", pid:"7752196653161", w:852,h:480,dur:36.75,fps:24, ss:4.0, cleanDur:28.0, delogo:null,
+    audit:"Buffet sideboard white; 'Sideboard' text card; long clean window. ✅ supports 30s." },
+  { sku:"835-135V80RB", pid:"7750490718313", w:852,h:480,dur:22.48,fps:25, ss:4.0, cleanDur:14.0, delogo:null,
+    audit:"Bar table set; 'Bar Table Set' text card 0-3s + HOMCOM outro; clean 4-18s. ✅ [6,15]." },
 ];
 
 const DUR_BUCKETS = [6, 15, 30];
-const SRC_30_OK = new Set(["845-039V01GY", "845-335", "84A-054V05BK"]); // sources long enough for a 30s cut
+const SRC_30_OK = new Set(["845-039V01GY", "845-335", "84A-054V05BK",
+  // Phase 2 sources long enough for a 30s cut:
+  "824-051V80BK", "824-056V80BK", "831-790V01WT", "835-511GY", "835-511WT"]);
 function variantsFor(a) {
   const out = [];
   for (const b of DUR_BUCKETS) {
@@ -124,6 +160,17 @@ const URLS = {
   "84C-226CG":"https://uspm.aosomcdn.com/videos/en/8/84C-226CG/84C-226CG-Outsunny-WEB.mp4",
   "84H-209V00CG":"https://uspm.aosomcdn.com/videos/en/8/84H-209V00CG/84H-209V00CG-Outsunny-WEB.mp4",
   "D51-277V01":"https://uspm.aosomcdn.com/videos/en/D/D51-277V01/D51-277V01-WEB-NT.mp4",
+  "824-033BK":"https://uspm.aosomcdn.com/videos/en/8/824-033BK/824-033BK-WEB.mp4",
+  "824-051V80BK":"https://uspm.aosomcdn.com/aosomweb/product/CA/home/8/824-051V80BK.mp4",
+  "824-056V80BK":"https://uspm.aosomcdn.com/aosomweb/product/CA/home/8/824-056V80BK.mp4",
+  "834-295":"https://uspm.aosomcdn.com/videos/en/8/834-295/834-295-kleankin-WEB.mp4",
+  "831-790V01WT":"https://uspm.aosomcdn.com/videos/en/8/831-790V01WT/831-790V01WT-HOMCOM-WEB.mp4",
+  "838-075BK":"https://uspm.aosomcdn.com/videos/en/8/838-075BK/838-075BK-WEB-NT.mp4",
+  "83A-188V81BK":"https://uspm.aosomcdn.com/videos/en/8/83A-188V81BK/83A-188V81BK-HOMCOM-WEB.mp4",
+  "83A-188V81WT":"https://uspm.aosomcdn.com/videos/en/8/83A-188V81WT/83A-188V81WT-HOMCOM-WEB.mp4",
+  "835-511GY":"https://uspm.aosomcdn.com/videos/en/8/835-511GY/835-511GY-WEB.mp4",
+  "835-511WT":"https://uspm.aosomcdn.com/videos/en/8/835-511WT/835-511WT-WEB.mp4",
+  "835-135V80RB":"https://uspm.aosomcdn.com/videos/en/8/835-135V80RB/835-135V80RB-HOMCOM-WEB.mp4",
 };
 for (const v of videos) v.source_url = URLS[v.sku];
 
