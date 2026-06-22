@@ -1,4 +1,5 @@
 import { env, FACEBOOK } from "./config";
+import { addWatermarkToImage } from "./image-watermark";
 
 /**
  * Facebook Graph API wrapper for multi-brand Page publishing.
@@ -7,10 +8,11 @@ import { env, FACEBOOK } from "./config";
  * Brand selection: pass `brand: "ameublo" | "furnish"` to pick which Page to publish to.
  * Each brand resolves to its own Page ID + Page Access Token from env.
  *
- * Image upload: we pass a public image URL to the Graph API `/photos` endpoint.
- * Meta fetches the image server-side. We DO NOT upload binaries because Vercel
- * serverless /tmp is per-instance and ephemeral — the file written during
- * `generate` is not reachable from the `publish` request. Same mechanism as IG.
+ * Image upload: photos are branded with a footer (see image-watermark.ts) and uploaded
+ * as a binary `source` (multipart) to the Graph API `/photos` endpoint. Download → watermark
+ * → upload all happen in-memory within THIS publish request, so the old Vercel /tmp hazard
+ * (file written in `generate` is unreachable from `publish`) does not apply — nothing is
+ * persisted to disk. Videos/reels still hand Meta a public URL (we never stream those bytes).
  */
 
 export type FacebookBrand = "ameublo" | "furnish";
@@ -55,13 +57,37 @@ export async function testConnection(brand: FacebookBrand = "ameublo"): Promise<
 }
 
 /**
+ * Upload a watermarked photo buffer to a Page's /photos endpoint as multipart
+ * binary (`source`). `fields` carries the extra Graph params (message, published,
+ * scheduled_publish_time). Returns the raw fetch Response so callers handle 429
+ * and error parsing in their own context (single post vs album member).
+ */
+async function postPhotoBinary(
+  pageId: string,
+  token: string,
+  buffer: Buffer,
+  fields: Record<string, string>,
+): Promise<Response> {
+  const form = new FormData();
+  // Wrap the buffer in a fresh Uint8Array so it's a valid BlobPart (Node's Buffer type
+  // is Buffer<ArrayBufferLike>, which TS won't accept directly), then send as a file part.
+  form.append("source", new Blob([new Uint8Array(buffer)], { type: "image/png" }), "image.png");
+  for (const [k, v] of Object.entries(fields)) form.append(k, v);
+
+  // Do NOT set Content-Type — FormData sets the multipart boundary itself.
+  return fetch(`${FACEBOOK.GRAPH_API_URL}/${pageId}/photos`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+}
+
+/**
  * Publish a post with an image to a brand's Facebook Page.
- * imageUrl MUST be a public HTTP URL — Meta fetches it server-side.
  *
- * Historically this function read the composed image from /tmp and uploaded
- * binary. That broke on Vercel because /tmp is per-serverless-instance:
- * the file written during `generate` doesn't exist when `publish` runs.
- * Now we pass a URL and let Meta pull the image.
+ * The Shopify CDN image is downloaded, stamped with the brand footer
+ * (addWatermarkToImage), and uploaded as a binary `source`. All in-memory in this
+ * request — no /tmp, so the historical Vercel cross-request file hazard doesn't apply.
  */
 export async function publishWithImage(opts: {
   caption: string;
@@ -71,20 +97,15 @@ export async function publishWithImage(opts: {
 }): Promise<PublishResult> {
   const { pageId, token, label } = brandCreds(opts.brand);
 
-  const body: Record<string, string> = {
-    url: opts.imageUrl,
-    message: opts.caption,
-  };
+  const buffer = await addWatermarkToImage(opts.imageUrl, opts.brand);
+
+  const fields: Record<string, string> = { message: opts.caption };
   if (opts.scheduledAt) {
-    body.published = "false";
-    body.scheduled_publish_time = String(opts.scheduledAt);
+    fields.published = "false";
+    fields.scheduled_publish_time = String(opts.scheduledAt);
   }
 
-  const res = await fetch(`${FACEBOOK.GRAPH_API_URL}/${pageId}/photos`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-  });
+  const res = await postPhotoBinary(pageId, token, buffer, fields);
 
   if (res.status === 429) {
     throw new Error(`${label}: Facebook rate limit, retry later`);
@@ -240,11 +261,9 @@ export async function publishWithImages(opts: {
     const url = opts.imageUrls[i];
     if (i > 0) await new Promise((r) => setTimeout(r, 500));
     try {
-      const res = await fetch(`${FACEBOOK.GRAPH_API_URL}/${pageId}/photos`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ url, published: "false" }),
-      });
+      // Watermark this album member, then upload it unpublished as binary.
+      const buffer = await addWatermarkToImage(url, opts.brand);
+      const res = await postPhotoBinary(pageId, token, buffer, { published: "false" });
       if (res.status === 429) {
         uploadErrors.push(`photo ${i + 1}: rate limited`);
         continue;
