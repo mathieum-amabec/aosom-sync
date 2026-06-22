@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.130] - 2026-06-22
+
+### Fixed (Social captions — strip Markdown)
+- **New `src/lib/strip-markdown.ts`** (`stripMarkdown`) — strips Markdown an LLM may emit so it
+  isn't published verbatim to Facebook (which renders `**`, `#`, `---` literally): `**bold**`/`__bold__`,
+  ATX `#` headers (keeps the text, **preserves `#hashtags`** with no trailing space), `---`/`***`/`___`
+  rules, and trailing/blank whitespace. Conservative — leaves emoji, punctuation, and prose intact.
+- Applied after generation in both caption paths:
+  - `src/app/api/social/content/generate/route.ts` — `stripScaffold` now removes the conversational
+    preamble then delegates to `stripMarkdown` (gains `#` header stripping; existing behavior preserved).
+  - `src/jobs/job4-social.ts` — previously `.trim()` only, so auto-generated product drafts leaked raw
+    Markdown into `publication_queue`; now stripped.
+- Tests: `tests/strip-markdown.test.ts` (bold, headers, hashtag preservation, rules, whitespace,
+  clean-unchanged, full leaked-shape); existing `social-caption-scaffold` test still green.
+
 ## [0.5.53.129] - 2026-06-21
 
 ### Fixed (orphaned sync-run self-heal)

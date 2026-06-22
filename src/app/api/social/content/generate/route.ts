@@ -4,6 +4,7 @@ import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { getContentTemplateBySlug, createFacebookDraft, getAnyProductSku, selectCompatibleHooks, getRecentlyUsedHookIds, recordHookUsage } from "@/lib/database";
 import { mapProductTypeToScope } from "@/lib/hook-selector";
 import { getAnthropicClient } from "@/lib/content-generator";
+import { stripMarkdown } from "@/lib/strip-markdown";
 import { searchImages, triggerDownload } from "@/lib/unsplash";
 import { CLAUDE, env } from "@/lib/config";
 
@@ -133,14 +134,13 @@ function interpolateTemplate(template: string, vars: Record<string, string>): st
  * and then published. Exported for unit testing.
  */
 export function stripScaffold(text: string): string {
-  return text
+  // 1) Remove conversational preamble ("Here's a Facebook post:"), then
+  // 2) strip any Markdown (bold, # headers, --- rules, trailing whitespace).
+  const withoutPreamble = text
     .replace(/^(here'?s?\s+a\s+facebook\s+post[^:\n]*:\s*\n?)/i, "")
     .replace(/^(here\s+is\s+a[^:\n]*:\s*\n?)/i, "")
-    .replace(/^(sure[,!]?\s+here'?s?[^:\n]*:\s*\n?)/i, "")
-    .replace(/^---+\s*\n?/gm, "")
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/^(sure[,!]?\s+here'?s?[^:\n]*:\s*\n?)/i, "");
+  return stripMarkdown(withoutPreamble);
 }
 
 async function generatePostText(prompt: string, isEn: boolean): Promise<string> {
