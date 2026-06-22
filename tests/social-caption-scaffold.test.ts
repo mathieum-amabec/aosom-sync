@@ -26,6 +26,13 @@ describe("stripScaffold", () => {
     expect(stripScaffold("Sure! Here's the caption:\nReal content")).toBe("Real content");
   });
 
+  it("strips *italic* emphasis that LLMs leak into captions", () => {
+    // Draft #553 (EN) shipped "*right now*" verbatim before this strip existed.
+    expect(
+      stripScaffold("You waited 8 months — that's exactly why *right now* matters."),
+    ).toBe("You waited 8 months — that's exactly why right now matters.");
+  });
+
   it("leaves an already-clean post unchanged", () => {
     const clean =
       "Un meuble qui dure 15 ans coûte moins cher qu'un meuble qui dure 3.\n\n" +

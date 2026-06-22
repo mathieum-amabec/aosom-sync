@@ -6,6 +6,9 @@
  *
  * Conservative on purpose — only touches:
  *  - **bold** / __bold__        → inner text
+ *  - *italic*                   → inner text (single-asterisk emphasis; run AFTER **bold**
+ *                                 so it never eats bold markers, and same-line only so a
+ *                                 leading `* ` bullet can't pair with the next line's `*`)
  *  - `# .. ###### ` ATX headers → heading text (leading hashes dropped)
  *  - `---` / `***` / `___` rules → removed (whole line)
  *  - trailing whitespace + 3+ blank lines collapsed, then trimmed
@@ -18,6 +21,7 @@ export function stripMarkdown(text: string): string {
     .replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, "")     // "# Heading" / "### Heading" → "Heading" (NOT "#hashtag")
     .replace(/^[ \t]*([-*_])\1{2,}[ \t]*(?:\r?\n|$)/gm, "") // horizontal-rule line (+ its newline): ---, ***, ___
     .replace(/\*\*([^*]+)\*\*/g, "$1")            // **bold** → bold
+    .replace(/\*([^*\n]+)\*/g, "$1")              // *italic* → italic (after **bold**; same-line only)
     .replace(/__([^_]+)__/g, "$1")                // __bold__ → bold
     .replace(/[ \t]+$/gm, "")                      // trailing whitespace per line
     .replace(/\n{3,}/g, "\n\n")                    // collapse 3+ newlines
