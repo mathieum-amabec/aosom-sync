@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.134] - 2026-06-22
+
+### Docs
+- **CLAUDE.md** — corrected the stale "Draft imports" claim. New products are auto-published as
+  `active` (live) on import, not draft — `createShopifyProduct` sets `status: "active"` (switched
+  draft→active in commit beb00b4, 2026-06-07). Updated the architecture diagram (line 22) and the
+  Key Patterns bullet. No code change; the doc was simply out of date.
+
 ## [0.5.53.133] - 2026-06-22
 
 ### Added (Social images — brand footer watermark)
