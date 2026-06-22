@@ -8,6 +8,30 @@ describe("stripMarkdown", () => {
     );
   });
 
+  it("strips *italic* single-asterisk emphasis to inner text", () => {
+    // The exact artifact that leaked into draft #553's EN caption.
+    expect(stripMarkdown("That's exactly why *right now* matters so much.")).toBe(
+      "That's exactly why right now matters so much.",
+    );
+    // Multiple emphases on one line.
+    expect(stripMarkdown("*Vraiment* le *bon* moment")).toBe("Vraiment le bon moment");
+  });
+
+  it("strips **bold** and *italic* together without eating bold markers (ordering guard)", () => {
+    expect(stripMarkdown("**Gros** rabais *vraiment* fou")).toBe("Gros rabais vraiment fou");
+  });
+
+  it("leaves a lone unpaired asterisk untouched", () => {
+    expect(stripMarkdown("Rabais 50% * conditions")).toBe("Rabais 50% * conditions");
+  });
+
+  it("does NOT mangle `* ` bullets across lines (same-line only)", () => {
+    // A leading bullet `*` must not pair with the next line's bullet `*`.
+    expect(stripMarkdown("* premier item\n* second item")).toBe(
+      "* premier item\n* second item",
+    );
+  });
+
   it("strips ATX # headers but keeps the heading text", () => {
     expect(stripMarkdown("# Grand titre\nLigne de corps")).toBe("Grand titre\nLigne de corps");
     expect(stripMarkdown("### Sous-titre")).toBe("Sous-titre");
