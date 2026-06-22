@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.131] - 2026-06-22
+
+### Changed (Drafts approve — auto-enqueue all draft types)
+- **`src/app/(dashboard)/drafts/actions.ts`** — `approveDraft()` now auto-enqueues **every** approved
+  draft into `publication_queue` (one item per active brand via `draftToQueueItems` + `addToQueue` on
+  the next free `publication_schedule` slot), not just `content_template` drafts. Removed the
+  `triggerType === "content_template"` gate; the `if (draft)` null-check stays. `new_product` (and any
+  other) drafts approved from `/drafts` now schedule automatically instead of sitting `approved` for
+  manual scheduling. Brings the `/drafts` server action in line with the `/api/social {action:"approve"}`
+  path, which was already trigger-type-agnostic.
+- Test: `tests/approve-draft-queue.test.ts` — the former "does NOT auto-enqueue non-content_template
+  drafts" case now asserts the opposite (a `new_product` draft enqueues the mapped per-brand payload).
+
 ## [0.5.53.130] - 2026-06-22
 
 ### Fixed (Social captions — strip Markdown)
