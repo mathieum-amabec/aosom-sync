@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.133] - 2026-06-22
+
+### Added (Social images — brand footer watermark)
+- **New `src/lib/image-watermark.ts`** (`addWatermarkToImage(imageUrl, brand)`) — downloads a copy
+  of the Shopify CDN image (never touches the source asset; 20s download timeout) and composites a
+  90%-opacity navy (`#1B2A4A`) footer bar across the bottom: brand name left (`Ameublo Direct` /
+  `Furnish Direct`), `Livraison gratuite au Canada` right, white text. Returns a PNG buffer.
+  Output = same width, height + 60px. Uses Sharp (already a dependency).
+- **`src/lib/facebook-client.ts`** — both `/photos` publish paths (`publishWithImage` single +
+  `publishWithImages` album) now watermark each image and upload the binary as multipart `source`
+  instead of handing Meta a raw URL. Download → watermark → upload happen in-memory within the
+  publish request, so the old Vercel `/tmp` cross-request hazard does not apply. Videos/reels are
+  unchanged (still public-URL based). Instagram is out of scope.
+- Tests: `tests/image-watermark.test.ts` (buffer non-empty, output dims ≥ input, footer height,
+  both brands, download-failure + unknown-brand error paths); `tests/facebook-client-multiphoto.test.ts`
+  updated to assert the new multipart binary upload (FormData `source`) instead of the JSON `url` body.
+
+> **Note (font):** the footer renders in the system sans-serif fallback, not DM Sans — libvips has no
+> DM Sans installed on Vercel. Bundle the .ttf + fontconfig later if exact brand-font fidelity is needed.
+
 ## [0.5.53.132] - 2026-06-22
 
 ### Fixed (Social captions — strip *italic* emphasis)
