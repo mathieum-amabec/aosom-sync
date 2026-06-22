@@ -19,7 +19,7 @@ CSV Feed (Aosom) → csv-fetcher → variant-merger → diff-engine → Vercel B
                                        ↓                                  ↓
                                   Catalog Browser UI              rebuildCounts + notify
                                        ↓
-                               Import Pipeline → Claude API → Shopify (as draft)
+                               Import Pipeline → Claude API → Shopify (as active/live)
 ```
 
 Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s, Vercel Pro):
@@ -42,7 +42,7 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
 - **COLOR_MAP**: 2-letter SKU suffix → French color name (e.g., BK→Noir, GY→Gris). See `variant-merger.ts`
 - **PSIN grouping**: Aosom's Parent SKU groups color/size variants. Fallback: parseSku()
 - **Dropship**: `inventory_management: null`. Stock is NOT tracked in Shopify, only in catalog_snapshots
-- **Draft imports**: All new products import as draft for manual review
+- **Active imports**: New products are auto-published as `active` (live) on import — `createShopifyProduct` sets `status: "active"` (see `shopify-client.ts`; switched from draft→active in commit beb00b4, 2026-06-07). No manual-review draft step.
 - **[BRAND NAME]**: Aosom HTML descriptions contain this placeholder. Replaced with actual brand before Claude processing
 
 ## API Routes

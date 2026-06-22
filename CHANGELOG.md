@@ -2,6 +2,63 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.134] - 2026-06-22
+
+### Docs
+- **CLAUDE.md** — corrected the stale "Draft imports" claim. New products are auto-published as
+  `active` (live) on import, not draft — `createShopifyProduct` sets `status: "active"` (switched
+  draft→active in commit beb00b4, 2026-06-07). Updated the architecture diagram (line 22) and the
+  Key Patterns bullet. No code change; the doc was simply out of date.
+
+## [0.5.53.133] - 2026-06-22
+
+### Added (Social images — brand footer watermark)
+- **New `src/lib/image-watermark.ts`** (`addWatermarkToImage(imageUrl, brand)`) — downloads a copy
+  of the Shopify CDN image (never touches the source asset; 20s download timeout) and composites a
+  90%-opacity navy (`#1B2A4A`) footer bar across the bottom: brand name left (`Ameublo Direct` /
+  `Furnish Direct`), `Livraison gratuite au Canada` right, white text. Returns a PNG buffer.
+  Output = same width, height + 60px. Uses Sharp (already a dependency).
+- **`src/lib/facebook-client.ts`** — both `/photos` publish paths (`publishWithImage` single +
+  `publishWithImages` album) now watermark each image and upload the binary as multipart `source`
+  instead of handing Meta a raw URL. Download → watermark → upload happen in-memory within the
+  publish request, so the old Vercel `/tmp` cross-request hazard does not apply. Videos/reels are
+  unchanged (still public-URL based). Instagram is out of scope.
+- Tests: `tests/image-watermark.test.ts` (buffer non-empty, output dims ≥ input, footer height,
+  both brands, download-failure + unknown-brand error paths); `tests/facebook-client-multiphoto.test.ts`
+  updated to assert the new multipart binary upload (FormData `source`) instead of the JSON `url` body.
+
+> **Note (font):** the footer renders in the system sans-serif fallback, not DM Sans — libvips has no
+> DM Sans installed on Vercel. Bundle the .ttf + fontconfig later if exact brand-font fidelity is needed.
+
+## [0.5.53.132] - 2026-06-22
+
+### Fixed (Social captions — strip *italic* emphasis)
+- **`src/lib/strip-markdown.ts`** — `stripMarkdown()` now also strips single-asterisk `*italic*`
+  emphasis to its inner text, closing the gap left by the [0.5.53.130] strip (which only handled
+  `**bold**`, `#` headers, and `---` rules). LLM social captions occasionally emit `*word*`, which
+  Facebook renders literally (asterisks visible) — draft #553's EN caption shipped `*right now*`
+  verbatim. The new `.replace(/\*([^*\n]+)\*/g, "$1")` runs **after** the `**bold**` strip so it
+  never eats bold markers, and is **same-line only** (`[^*\n]`) so a leading `* ` bullet can't pair
+  with the next line's `*`.
+- Tests: `tests/strip-markdown.test.ts` + `tests/social-caption-scaffold.test.ts` — cover the #553
+  leak case, multi-emphasis on one line, the bold+italic ordering guard, lone-asterisk preservation,
+  and the cross-line bullet-safety regression.
+- Operational: the 8 already-pending draft fields carrying leaked `*italic*` (drafts #490, #496, #500,
+  #519 ×2, #528, #550, #553) were cleaned in-place in `facebook_drafts` with the same transform.
+
+## [0.5.53.131] - 2026-06-22
+
+### Changed (Drafts approve — auto-enqueue all draft types)
+- **`src/app/(dashboard)/drafts/actions.ts`** — `approveDraft()` now auto-enqueues **every** approved
+  draft into `publication_queue` (one item per active brand via `draftToQueueItems` + `addToQueue` on
+  the next free `publication_schedule` slot), not just `content_template` drafts. Removed the
+  `triggerType === "content_template"` gate; the `if (draft)` null-check stays. `new_product` (and any
+  other) drafts approved from `/drafts` now schedule automatically instead of sitting `approved` for
+  manual scheduling. Brings the `/drafts` server action in line with the `/api/social {action:"approve"}`
+  path, which was already trigger-type-agnostic.
+- Test: `tests/approve-draft-queue.test.ts` — the former "does NOT auto-enqueue non-content_template
+  drafts" case now asserts the opposite (a `new_product` draft enqueues the mapped per-brand payload).
+
 ## [0.5.53.130] - 2026-06-22
 
 ### Fixed (Social captions — strip Markdown)
