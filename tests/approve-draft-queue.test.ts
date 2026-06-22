@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Verifies the /drafts-page approveDraft() server action now auto-enqueues content_template
-// drafts into publication_queue (one item per brand via draftToQueueItems + addToQueue) on the
-// next free publication_schedule slot, leaving the draft 'approved' — it no longer writes
-// facebook_drafts.status='scheduled' for the retired social-scheduled cron. Mirrors the
-// /api/social {action:"approve"} path.
+// Verifies the /drafts-page approveDraft() server action now auto-enqueues EVERY approved draft
+// (regardless of triggerType) into publication_queue (one item per brand via draftToQueueItems +
+// addToQueue) on the next free publication_schedule slot, leaving the draft 'approved' — it no
+// longer writes facebook_drafts.status='scheduled' for the retired social-scheduled cron. Mirrors
+// the /api/social {action:"approve"} path.
 
 class QueueSlotTakenError extends Error {
   constructor(msg = "slot taken") {
@@ -43,7 +43,7 @@ function mockDatabase(over: Record<string, unknown> = {}) {
   return fns;
 }
 
-describe("approveDraft() → publication_queue (content_template auto-schedule)", () => {
+describe("approveDraft() → publication_queue (all draft types auto-schedule)", () => {
   beforeEach(() => vi.resetModules());
 
   it("enqueues the mapped per-brand payload at the next slot and keeps the draft approved", async () => {
@@ -101,20 +101,26 @@ describe("approveDraft() → publication_queue (content_template auto-schedule)"
     expect(result).toEqual({}); // no scheduledAt — draft stays approved, unscheduled
   });
 
-  it("does NOT auto-enqueue non-content_template drafts", async () => {
+  it("auto-enqueues non-content_template drafts (e.g. new_product) too", async () => {
     mockCommon();
     const db = mockDatabase({ getFacebookDraft: vi.fn().mockResolvedValue({ ...CT_DRAFT, triggerType: "new_product" }) });
-    const draftToQueueItems = vi.fn();
+    const draftToQueueItems = vi.fn().mockReturnValue([AMEUBLO_ITEM]);
     vi.doMock("@/lib/social-publisher", () => ({ draftToQueueItems }));
-    vi.doMock("@/lib/publication-scheduler", () => ({ getNextAvailableSlot: vi.fn() }));
+    vi.doMock("@/lib/publication-scheduler", () => ({ getNextAvailableSlot: vi.fn().mockResolvedValue(SLOT) }));
 
     const { approveDraft } = await import("@/app/(dashboard)/drafts/actions");
     const result = await approveDraft(1);
 
     expect(db.approveDraftDb).toHaveBeenCalledWith(1);
-    expect(draftToQueueItems).not.toHaveBeenCalled();
-    expect(db.addToQueue).not.toHaveBeenCalled();
-    expect(result).toEqual({});
+    expect(draftToQueueItems).toHaveBeenCalled(); // gate removed — trigger type no longer matters
+    expect(db.addToQueue).toHaveBeenCalledWith({
+      contentType: "social",
+      contentId: "1",
+      platform: "both",
+      payload: JSON.stringify(AMEUBLO_ITEM.payload),
+      scheduledAt: SLOT.sqlite,
+    });
+    expect(result.scheduledAt).toBe(SLOT.at);
   });
 
   it("retries past a slot lost to QueueSlotTakenError", async () => {

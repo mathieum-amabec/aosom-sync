@@ -27,18 +27,18 @@ export async function approveDraft(draftId: number): Promise<{ error?: string; s
   try {
     await approveDraftDb(draftId);
 
-    // Auto-schedule content_template drafts into the publication queue — one item per active
+    // Auto-schedule every approved draft into the publication queue — one item per active
     // brand (caption + brand + images via draftToQueueItems) on the next free slot from the
     // configurable `publication_schedule`. /api/cron/publisher drains the queue and publishes.
-    // Product drafts stay 'approved' for manual scheduling. The draft itself stays 'approved'
-    // (the schedule now lives in publication_queue, not facebook_drafts.status='scheduled' —
-    // the legacy social-scheduled cron is retired). Best-effort: a failure here must not undo
-    // the approval. Slot collisions are rejected by the queue's partial-unique index as
-    // QueueSlotTakenError, so retry past the now-taken slot (mirrors /api/social approve).
+    // The draft itself stays 'approved' (the schedule now lives in publication_queue, not
+    // facebook_drafts.status='scheduled' — the legacy social-scheduled cron is retired).
+    // Best-effort: a failure here must not undo the approval. Slot collisions are rejected by
+    // the queue's partial-unique index as QueueSlotTakenError, so retry past the now-taken slot
+    // (mirrors /api/social approve).
     let scheduledAt: number | undefined;
     try {
       const draft = await getFacebookDraft(draftId);
-      if (draft && draft.triggerType === "content_template") {
+      if (draft) {
         const settings = { publication_schedule: (await getSetting("publication_schedule")) ?? "" };
         const nowSec = Math.floor(Date.now() / 1000);
         const items = draftToQueueItems(draft, activeChannels());
