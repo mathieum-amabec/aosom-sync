@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.136] - 2026-06-22
+
+### Added (Demand Gen — Phase 2: Home Furnishings)
+- **`scripts/render-demand-gen.mjs`** — added 13 Home Furnishings source SKUs to `SOURCES[]`
+  (portable air conditioners, stand/tower fans, medicine cabinets, a queen bed frame, sideboards,
+  a bar table set) with per-source `ss`/`cleanDur`/`delogo`/`buckets` from the 2026-06-22 1fps
+  filmstrip audit. Produces 93 demand-gen assets (31 clips × 3 ratios: 16:9 / 1:1 / 9:16), uploaded
+  to the public Vercel Blob store (`jcskqp8orcub9i0l.public…`).
+- **`scripts/build-manifest.mjs`** — added the same 13 SKUs to the manifest audit array (`A[]`),
+  `TITLES`, and `URLS`; extended `SRC_30_OK` with the 5 sources long enough for a 30s cut. Re-audited
+  `823-002V80` / `823-010V81` (previously marked weak/not-viable) as viable (ss=3, cleanDur=18) with
+  a HOMCOM corner-logo `delogo` patch — superseding the prior audit.
+
 ## [0.5.53.134] - 2026-06-22
 
 ### Docs
