@@ -1,6 +1,22 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
 import sharp from "sharp";
-import { addWatermarkToImage, FOOTER_HEIGHT } from "@/lib/image-watermark";
+import {
+  addWatermarkToImage,
+  uploadWatermarkedImage,
+  bundledFontsDir,
+  buildFontconfigXml,
+  FOOTER_HEIGHT,
+} from "@/lib/image-watermark";
+
+// Spy-able Vercel Blob so the IG-hosting path never hits the network.
+const blobPut = vi.fn(async (p: string) => ({ url: `https://blob.test/${p}` }));
+const blobDel = vi.fn(async () => {});
+vi.mock("@vercel/blob", () => ({
+  put: (...args: unknown[]) => blobPut(...(args as [string])),
+  del: (...args: unknown[]) => blobDel(...(args as [])),
+}));
 
 /** Build a solid-colour PNG of the given size to act as a fake Shopify CDN image. */
 async function makeImage(width: number, height: number): Promise<Buffer> {
@@ -66,5 +82,50 @@ describe("addWatermarkToImage", () => {
     stubFetchWith(await makeImage(100, 100));
     // @ts-expect-error — deliberately passing an invalid brand
     await expect(addWatermarkToImage("https://cdn.example.com/a.jpg", "nope")).rejects.toThrow(/unknown brand/);
+  });
+});
+
+describe("DM Sans bundling (fontconfig)", () => {
+  it("ships valid Regular + Bold TTFs in src/fonts", () => {
+    const dir = bundledFontsDir();
+    expect(dir.replace(/\\/g, "/")).toMatch(/src\/fonts$/);
+    for (const file of ["DMSans-Regular.ttf", "DMSans-Bold.ttf"]) {
+      const p = path.join(dir, file);
+      expect(fs.existsSync(p), `${file} should exist`).toBe(true);
+      // TrueType magic: 0x00010000
+      const magic = fs.readFileSync(p).subarray(0, 4);
+      expect([...magic]).toEqual([0x00, 0x01, 0x00, 0x00]);
+    }
+  });
+
+  it("fontconfig doc registers the fonts dir + cache and keeps the system include", () => {
+    const xml = buildFontconfigXml("/var/task/src/fonts", "/tmp/fc");
+    expect(xml).toContain("<dir>/var/task/src/fonts</dir>");
+    expect(xml).toContain("<cachedir>/tmp/fc</cachedir>");
+    expect(xml).toContain('<include ignore_missing="yes">/etc/fonts/fonts.conf</include>');
+  });
+});
+
+describe("uploadWatermarkedImage (Instagram blob hosting)", () => {
+  afterEach(() => { vi.unstubAllGlobals(); blobPut.mockClear(); blobDel.mockClear(); });
+
+  it("watermarks, uploads a PNG to Blob, and returns a public URL", async () => {
+    stubFetchWith(await makeImage(300, 200));
+    const hosted = await uploadWatermarkedImage("https://cdn.example.com/a.jpg", "ameublo");
+
+    expect(hosted.url).toMatch(/^https:\/\/blob\.test\/social-watermark\/ameublo\/.+\.png$/);
+    expect(blobPut).toHaveBeenCalledTimes(1);
+    const [, buffer, opts] = blobPut.mock.calls[0] as unknown as [string, Buffer, { access: string; contentType: string }];
+    expect(Buffer.isBuffer(buffer)).toBe(true);
+    expect(buffer.subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47])); // PNG magic
+    expect(opts.access).toBe("public");
+    expect(opts.contentType).toBe("image/png");
+  });
+
+  it("cleanup() deletes the temp blob", async () => {
+    stubFetchWith(await makeImage(120, 120));
+    const hosted = await uploadWatermarkedImage("https://cdn.example.com/a.jpg", "furnish");
+    await hosted.cleanup();
+    expect(blobDel).toHaveBeenCalledWith(hosted.url);
   });
 });
