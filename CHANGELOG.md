@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.142] - 2026-06-23
+
+### Added (Scripts — Meta video ad sets)
+- **`scripts/create-meta-video-adsets.mjs`** — builds Meta VIDEO sales ads from the
+  demand-gen videos already uploaded to Meta (`video_demand_gen.meta_video_id`). Selects
+  the top-N SKUs (default 6) with a 9:16 video, ranked by 14-day units-moved velocity, one
+  duration each (prefers 15s). For each: a plain VIDEO creative (`object_story_spec.video_data`)
+  whose SHOP_NOW CTA links to the SKU's product page — not a catalog/DPA creative, since this
+  account has no working video+product_set creative (`AUTOMATIC_FORMAT` → code 100/1885373).
+  **DRY-RUN by default** (prints selections + payloads, sends nothing); `--apply` creates one
+  campaign + per-SKU adset/creative/ad, **all PAUSED** (no spend until activated in Ads Manager).
+  Reads `META_ACCESS_TOKEN` from `.env.local`, hard-stops on OAuth #190, Facebook-only
+  placements + CA geo (mirrors `meta-ads-dpa-create.mjs`). Manual ops script — not wired into
+  any route.
+
 ## [0.5.53.141] - 2026-06-23
 
 ### Added (Publisher — FB/IG Reels from demand-gen videos)
