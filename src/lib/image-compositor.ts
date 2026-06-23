@@ -17,6 +17,12 @@
 import path from "path";
 import fs from "fs";
 import { downloadImage } from "./image-composer";
+import { registerBrandFonts } from "./register-brand-fonts";
+
+// Make DM Sans resolvable for the price/badge SVG text. Without it, librsvg has no
+// font on the Vercel render host and the text composites as tofu boxes (the "carrés"
+// bug). Runs once at module load, before any compose. Best-effort + idempotent.
+registerBrandFonts();
 
 // ─── Layout constants (1080×1080 Instagram/Facebook square) ──────────────
 export const CANVAS = 1080;
@@ -27,7 +33,10 @@ export const PRODUCT_AREA_HEIGHT = CANVAS - BAND_HEIGHT; // 880
 export const PRODUCT_FIT_RATIO = 0.8;
 export const PRODUCT_MAX_WIDTH = Math.round(CANVAS * PRODUCT_FIT_RATIO); // 864
 export const PRODUCT_MAX_HEIGHT = Math.round(PRODUCT_AREA_HEIGHT * PRODUCT_FIT_RATIO); // 704
-export const LOGO_MAX_WIDTH = 200;
+// Logo bumped 200→260 (+30%) for legibility — the brand mark was too small to read
+// in-feed. Still fits the 200px band: the logo is wide (mark + wordmark), so at 260px
+// wide its height stays well under the band and it remains vertically centred.
+export const LOGO_MAX_WIDTH = 260;
 export const LOGO_MARGIN_X = 48;
 /** Cap on decoded product-image pixels — guards sharp against decompression bombs. */
 export const MAX_INPUT_PIXELS = 100_000_000; // 100 MP
@@ -106,7 +115,8 @@ export function buildBrandedSvg(opts: ComposeProductImageOptions): string {
   const bandTop = PRODUCT_AREA_HEIGHT;
   const priceBaseline = bandTop + BAND_HEIGHT / 2 + 13;
 
-  return `<svg width="${CANVAS}" height="${CANVAS}" xmlns="http://www.w3.org/2000/svg">
+  return `<?xml version="1.0" encoding="UTF-8"?>
+  <svg width="${CANVAS}" height="${CANVAS}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="${bandTop}" width="${CANVAS}" height="${BAND_HEIGHT}" fill="${COLORS.band}"/>
     <text x="${CANVAS - LOGO_MARGIN_X}" y="${priceBaseline}" font-family="'DM Sans',Arial,Helvetica,sans-serif" font-size="36" font-weight="700" fill="${COLORS.text}" text-anchor="end">${price}</text>${badgeSvg}
   </svg>`;

@@ -45,6 +45,7 @@ import {
   BAND_HEIGHT,
   PRODUCT_MAX_WIDTH,
   PRODUCT_MAX_HEIGHT,
+  LOGO_MAX_WIDTH,
 } from "@/lib/image-compositor";
 import { downloadImage } from "@/lib/image-composer";
 
@@ -109,6 +110,21 @@ describe("buildBrandedSvg", () => {
     const svg = buildBrandedSvg({ productImageUrl: "x", price: "<b>&amp;</b>", locale: "fr" });
     expect(svg).not.toMatch(/<b>&amp;<\/b>/);
     expect(svg).toContain("&lt;b&gt;");
+  });
+
+  it("declares UTF-8 and renders text in DM Sans (so it doesn't tofu on the render host)", () => {
+    const svg = buildBrandedSvg({ productImageUrl: "x", price: "10 CAD", locale: "fr", badge: "new" });
+    expect(svg).toContain('encoding="UTF-8"');
+    // Both text elements (price + badge) must name DM Sans first so the bundled TTF resolves.
+    const fontDecls = svg.match(/font-family="[^"]*"/g) ?? [];
+    expect(fontDecls.length).toBeGreaterThanOrEqual(2);
+    for (const decl of fontDecls) expect(decl).toContain("DM Sans");
+  });
+});
+
+describe("logo sizing", () => {
+  it("is bumped to 260px (+30% over the old 200) for in-feed legibility", () => {
+    expect(LOGO_MAX_WIDTH).toBe(260);
   });
 });
 

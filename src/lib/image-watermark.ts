@@ -1,10 +1,11 @@
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import crypto from "node:crypto";
 import { put, del } from "@vercel/blob";
 import sharp from "sharp";
 import type { FacebookBrand } from "./facebook-client";
+import { registerBrandFonts, bundledFontsDir, buildFontconfigXml } from "./register-brand-fonts";
+
+// Re-exported so existing importers/tests keep their `@/lib/image-watermark` entry point.
+export { bundledFontsDir, buildFontconfigXml };
 
 /**
  * Brand footer watermarking for social images.
@@ -22,58 +23,8 @@ const FOOTER_NAVY = "#1B2A4A";
 const SLOGAN = "Livraison gratuite au Canada";
 const DOWNLOAD_TIMEOUT_MS = 20_000;
 
-/** Directory where the bundled DM Sans TTFs live (traced into the function bundle). */
-export function bundledFontsDir(): string {
-  return path.join(process.cwd(), "src", "fonts");
-}
-
-/**
- * Build the fontconfig document that adds our bundled fonts dir to the search path.
- * Keeps the system fonts via an ignore-missing include (so the SVG's Arial/sans-serif
- * fallback still resolves where a system config exists).
- */
-export function buildFontconfigXml(fontsDir: string, cacheDir: string): string {
-  return `<?xml version="1.0"?>
-<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
-<fontconfig>
-  <dir>${fontsDir}</dir>
-  <cachedir>${cacheDir}</cachedir>
-  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
-</fontconfig>`;
-}
-
-/**
- * Register the bundled DM Sans TTFs with the SVG text renderer.
- *
- * The footer is drawn as SVG text rendered by librsvg/Pango, which resolve fonts via
- * **fontconfig** — NOT Sharp's `fontfile` option (that only applies to `sharp({text})`).
- * So to make `font-family: "DM Sans"` actually render DM Sans (instead of falling back
- * to a system sans-serif), we write a fontconfig file pointing at src/fonts and set
- * FONTCONFIG_FILE before the first render.
- *
- * Scoped to Linux (the Vercel runtime that renders these posts): on dev machines we
- * leave the platform font resolution untouched to avoid perturbing the local Sharp
- * build. Best-effort — any failure falls back to the previous behaviour (the footer
- * still renders, just in the fallback face), so font setup can never break publishing.
- */
-function configureBundledFonts(): void {
-  if (process.platform !== "linux") return;
-  if (process.env.FONTCONFIG_FILE) return; // already configured by us or the platform
-  try {
-    const fontsDir = bundledFontsDir();
-    if (!fs.existsSync(path.join(fontsDir, "DMSans-Bold.ttf"))) return; // not bundled in this function
-    const cacheDir = path.join(os.tmpdir(), "fontconfig-cache");
-    fs.mkdirSync(cacheDir, { recursive: true });
-    const confPath = path.join(os.tmpdir(), "aosom-fonts.conf");
-    fs.writeFileSync(confPath, buildFontconfigXml(fontsDir, cacheDir));
-    process.env.FONTCONFIG_FILE = confPath;
-  } catch {
-    // non-fatal — fall back to system font resolution
-  }
-}
-
 // Runs once at module load, before any Sharp/libvips render in this function.
-configureBundledFonts();
+registerBrandFonts();
 
 const BRAND_LABEL: Record<FacebookBrand, string> = {
   ameublo: "Ameublo Direct",

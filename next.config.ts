@@ -1,15 +1,19 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // The branded image compositor reads Logo/*.png at runtime. These live outside
-  // the route's traced module graph, so include them explicitly in the function
-  // bundle for /api/image-preview (the only route that composes branded images).
-  //
-  // The social watermark renders SVG text in DM Sans, resolved via fontconfig from the
-  // bundled TTFs (see image-watermark.ts). They're read at runtime (not imported), so
-  // every route that publishes to Facebook/Instagram must trace them into its bundle.
+  // Branded social images read Logo/*.png and the DM Sans TTFs at runtime (not via the
+  // module graph), so each route that composes them must trace those assets into its
+  // bundle. The TTFs are registered with fontconfig (see register-brand-fonts.ts) so the
+  // SVG text renders in DM Sans instead of tofu boxes on the Vercel render host.
+  // /api/image-preview composes the branded hero (logo + price + badge); the publish
+  // routes additionally stamp the footer watermark.
   outputFileTracingIncludes: {
-    "/api/image-preview": ["./Logo/logo-fr.png", "./Logo/logo-en.png"],
+    "/api/image-preview": [
+      "./Logo/logo-fr.png",
+      "./Logo/logo-en.png",
+      "./src/fonts/DMSans-Regular.ttf",
+      "./src/fonts/DMSans-Bold.ttf",
+    ],
     "/api/cron/publisher": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf"],
     "/api/cron/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf"],
     "/api/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf"],
