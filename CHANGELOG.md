@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.139] - 2026-06-22
+
+### Fixed (Social images — footer quality)
+- **Tofu boxes ("carrés") in branded post images are gone.** The branded hero
+  (`image-compositor.ts`, served by `/api/image-preview`) draws the price and the
+  NEW/SALE badge as SVG text, which librsvg/Pango render via **fontconfig**. On the
+  Vercel render host there was no usable font, so that text composited as `□□□□` tofu.
+  The DM Sans registration that already fixed the watermark footer (v0.5.53.135) is now
+  extracted into `src/lib/register-brand-fonts.ts` and called at module load by **both**
+  compositors, and the TTFs are traced into the `/api/image-preview` bundle. The SVG also
+  declares `encoding="UTF-8"` explicitly.
+- **Logo is more legible** — `LOGO_MAX_WIDTH` 200 → 260 (+30%). Still fits the 200px band
+  (the wordmark is wide, ~47px tall at 260px wide) and stays vertically centred.
+
+### Tests
+- `tests/image-compositor.test.ts` — branded SVG declares UTF-8 and names DM Sans for
+  every text element; `LOGO_MAX_WIDTH` is 260.
+- Verified visually: real `composeProductImage` render shows clean DM Sans price/badge
+  (no tofu) and the larger logo.
+
 ## [0.5.53.138] - 2026-06-22
 
 ### Added (Demand Gen — 6 Phase 2 SKUs: fans + cabinet + sideboards)
