@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.144] - 2026-06-23
+
+### Added (Demand-gen videos — one-click Reel publish)
+- **`/demand-gen-videos` table gains a "Reel" column** with **📱 Reel FR** / **📱 Reel EN**
+  buttons on each `9:16` row (other ratios show "—"). Click → `POST /api/social/queue-reel`
+  `{ sku, ratio:"9:16", language, duration_sec, caption? }`, with inline feedback
+  (✅ Planifié le {slot} / ❌ {erreur}). The button disables after a successful enqueue to
+  prevent double-publishing, and re-enables after an error for retry.
+- **EN captions:** the endpoint requires a caption for English (`video_demand_gen` has no EN
+  title), so **Reel EN** prompts for one (and Reel FR prompts too when the asset has no
+  `title_fr`); FR-with-title is captioned server-side. The row's `duration_sec` is sent so the
+  button queues the exact clip on that line, not the SKU's longest cut.
+
 ## [0.5.53.143] - 2026-06-23
 
 ### Fixed (Meta video ad sets — create-meta-video-adsets.mjs)
