@@ -249,3 +249,17 @@ and run `--profile en --apply`. **Held for validation** (dry-run only for now).
   - ad_set: `52567579450805`
   - creative: `1481546723256431`
   - ad: `52567579495605`
+
+## Vidéos produit — annonces vidéo (PAUSED)
+
+- 2026-06-23 — **Vidéos produit — Test (CA)** (1 SKUs, $5.00/j chacun, OUTCOME_TRAFFIC, PAUSED)
+  - campaign: `52570683145805`
+  - 84A-054V05BK (15s): creative `1699104127660343` · adset `52570683151805` · ad `52570683191205`
+
+- 2026-06-23 — **Vidéos produit — Test (CA)** (5 SKUs, $5.00/j chacun, OUTCOME_TRAFFIC, PAUSED)
+  - campaign: `52570683145805`
+  - 84C-226CG (15s): creative `1707936553859924` · adset `52570688752205` · ad `52570688814005`
+  - 84B-136 (15s): creative `1784226126080575` · adset `52570688853205` · ad `52570688902005`
+  - 824-051V80BK (15s): creative `1572975397879056` · adset `52570688921605` · ad `52570688965005`
+  - 01-0415 (15s): creative `1990792144876104` · adset `52570688974405` · ad `52570689008005`
+  - 01-0893 (15s): creative `2626473921205437` · adset `52570689019405` · ad `52570689093405`

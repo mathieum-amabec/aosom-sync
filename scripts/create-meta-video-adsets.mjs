@@ -127,6 +127,9 @@ const campaignPayload = {
   objective: OBJECTIVE,
   status: "PAUSED",
   special_ad_categories: ["NONE"],
+  // Required by OUTCOME_* when budget lives on the ad set (no campaign budget): Meta (#100)
+  // demands an explicit True/False. False = each ad set keeps its own budget.
+  is_adset_budget_sharing_enabled: false,
 };
 function adSetPayload(v) {
   return {
@@ -217,8 +220,19 @@ try {
   if (REUSE_CAMPAIGN_ID) { campaign = { id: REUSE_CAMPAIGN_ID }; console.log(`\nReusing campaign ${REUSE_CAMPAIGN_ID}.`); }
   else { console.log("\nCreating campaign (PAUSED) …"); campaign = await graph(`${AD_ACCOUNT}/campaigns`, { method: "POST", body: campaignPayload }); console.log("  campaign_id =", campaign.id); }
 
+  // Idempotent resume: skip SKUs that already have an ad set in this campaign (adset name "Vidéo — {sku}").
+  let toCreate = vids;
+  if (REUSE_CAMPAIGN_ID) {
+    const existing = await graph(`${campaign.id}/adsets`, { params: { fields: "name", limit: 200 } });
+    const doneSkus = new Set((existing.data || []).map((a) => (String(a.name).match(/^Vidéo — (\S+)/) || [])[1]).filter(Boolean));
+    const before = toCreate.length;
+    toCreate = toCreate.filter((v) => !doneSkus.has(v.sku));
+    console.log(`  ${doneSkus.size} SKU(s) already in campaign; creating ${toCreate.length} new (skipped ${before - toCreate.length} already-done).`);
+  }
+  if (!toCreate.length) { console.log("\nNothing new to create — all selected SKUs already exist in this campaign."); await db.close?.(); process.exit(0); }
+
   const created = [];
-  for (const v of vids) {
+  for (const v of toCreate) {
     console.log(`\n${v.sku}: thumbnail → adset → creative → ad …`);
     const pic = await graph(v.meta_video_id, { params: { fields: "picture" } }).catch(() => ({}));
     const creativeBody = creativePayload(v);
