@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.143] - 2026-06-23
+## [0.5.53.144] - 2026-06-23
 
 ### Added (Demand-gen videos — one-click Reel publish)
 - **`/demand-gen-videos` table gains a "Reel" column** with **📱 Reel FR** / **📱 Reel EN**
@@ -14,6 +14,21 @@ All notable changes to Aosom Sync will be documented in this file.
   title), so **Reel EN** prompts for one (and Reel FR prompts too when the asset has no
   `title_fr`); FR-with-title is captioned server-side. The row's `duration_sec` is sent so the
   button queues the exact clip on that line, not the SKU's longest cut.
+
+## [0.5.53.143] - 2026-06-23
+
+### Fixed (Meta video ad sets — create-meta-video-adsets.mjs)
+- **`scripts/create-meta-video-adsets.mjs`** — added `is_adset_budget_sharing_enabled: false` to the
+  campaign payload. The shipped version was **missing it**, so `--apply` failed at the campaign POST
+  with Meta `(#100) "You must specify True or False in is_adset_budget_sharing_enabled"` (required by
+  OUTCOME_* when budget lives on the ad set). Verified by creating campaign `52570683145805` with 6
+  PAUSED video ad sets (top patio/garden SKUs, $5/day each).
+- **Idempotent `--campaign-id` resume**: when reusing a campaign, the script now GETs its existing ad
+  sets and skips SKUs already built (adset name `Vidéo — {sku}`), so re-running to add the remaining
+  SKUs can't duplicate the ones already created.
+- Confirms the creative approach: a plain `video_data` sales ad (video → product page) is the proven
+  shape on this account; a video tied to a dynamic catalogue creative is rejected (AUTOMATIC_FORMAT,
+  subcode 1885373), so DPA-video is intentionally not attempted here.
 
 ## [0.5.53.142] - 2026-06-23
 
