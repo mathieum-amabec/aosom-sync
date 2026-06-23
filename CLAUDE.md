@@ -94,6 +94,15 @@ for any historical rows; no code produces new ones.
 - `ANTHROPIC_API_KEY` — Claude API
 - `CRON_SECRET` — Vercel Cron auth
 - `AUTH_PASSWORD` — simple password auth for 2 users
+- `BLOB_READ_WRITE_TOKEN` — Vercel Blob (Phase1Checkpoint + demand-gen video assets)
+
+⚠️ **Demand-gen uploads need a PUBLIC Blob store.** `scripts/upload-demand-gen.mjs` calls
+`put(..., { access: "public" })` because Meta/YouTube ad ingest fetch the asset `file_url`
+directly — a private store rejects the upload with `Cannot use public access on a private store`.
+The canonical public store is `jcskqp8orcub9i0l.public.blob.vercel-storage.com` (token prefix
+`vercel_blob_rw_jcSkqp8…`). Some clones' `.env.local` carry a **different, private** store token
+(e.g. `…elo1Mrx…`) and will fail every upload. If uploads fail this way, run with the public-store
+token, e.g. `BLOB_READ_WRITE_TOKEN=<public-token> node-x64 scripts/upload-demand-gen.mjs --apply`.
 
 ## Dev Setup
 

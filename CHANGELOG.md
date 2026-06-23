@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.137] - 2026-06-22
+## [0.5.53.138] - 2026-06-22
 
 ### Added (Demand Gen — 6 Phase 2 SKUs: fans + cabinet + sideboards)
 - **`scripts/render-demand-gen.mjs`** + **`scripts/build-manifest.mjs`** — added 6 SKUs to the
@@ -15,6 +15,17 @@ All notable changes to Aosom Sync will be documented in this file.
   and manifest consistent. dims/dur/fps from ffprobe; ss/cleanDur from the phase-2 audit; pids from Turso.
 - **30 assets rendered** (3 ratios × buckets, 0 fail) and uploaded to the public Vercel Blob store
   (`demand-gen/{sku}/{file}.mp4`). Render output (`out/`) is gitignored — code only in this PR.
+
+## [0.5.53.137] - 2026-06-22
+
+### Docs (Demand Gen — Phase 2 record)
+- **`docs/demand-gen-urls.json`** — rebuilt as the union of Phase-1 (patio, 87) + Phase-2
+  (home furnishings, 93) = **180 assets / 26 SKUs**, so the committed URL record keeps both
+  phases. The `video_demand_gen` Turso table was loaded with the 93 Phase-2 rows
+  (`load-demand-gen-db.mjs --apply`; table now holds 180 total).
+- **`CLAUDE.md`** — documented that demand-gen uploads require the **public** Vercel Blob store
+  (`jcskqp8orcub9i0l.public…`); some clones carry a private-store `BLOB_READ_WRITE_TOKEN` that
+  fails every upload with `Cannot use public access on a private store`.
 
 ## [0.5.53.136] - 2026-06-22
 
