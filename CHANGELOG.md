@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.139] - 2026-06-22
+## [0.5.53.140] - 2026-06-22
 
 ### Fixed (Social images — footer quality)
 - **Tofu boxes ("carrés") in branded post images are gone.** The branded hero
@@ -21,6 +21,14 @@ All notable changes to Aosom Sync will be documented in this file.
   every text element; `LOGO_MAX_WIDTH` is 260.
 - Verified visually: real `composeProductImage` render shows clean DM Sans price/badge
   (no tofu) and the larger logo.
+
+## [0.5.53.139] - 2026-06-22
+
+### Docs (Demand Gen — full URL record)
+- **`docs/demand-gen-urls.json`** — regenerated directly from the `video_demand_gen` Turso table
+  (authoritative export) so the committed record == DB: **210 assets / 32 SKUs** = Phase-1 patio +
+  Phase-2 home furnishings + the 6 fans/cabinets rendered by T3. Previously the committed doc
+  trailed the DB (it only held a subset). No code change.
 
 ## [0.5.53.138] - 2026-06-22
 
