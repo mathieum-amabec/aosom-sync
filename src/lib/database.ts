@@ -316,6 +316,34 @@ async function _initSchemaImpl(): Promise<void> {
       updated_at INTEGER NOT NULL,
       UNIQUE(sku, ratio, duration_sec)
     )`,
+    // video_schedule: scheduled publication of Demand Gen videos as Reels, independent of
+    // publication_queue (which handles social posts). One row per scheduled video. Mirrors the
+    // queue's TEXT datetime (UTC) + drain/slot-guard idioms so a future video-publisher cron can
+    // reuse `scheduled_at <= datetime('now')` and the partial-unique active-slot index.
+    // video_demand_gen_id links back to the source asset; blob_url/meta_video_id/ratio/duration
+    // are snapshotted so a re-render can't change an already-scheduled post. captions are picked
+    // by language at publish time (caption_en required for the EN brand — enforced app-side).
+    `CREATE TABLE IF NOT EXISTS video_schedule (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sku TEXT NOT NULL,
+      video_demand_gen_id INTEGER REFERENCES video_demand_gen(id),
+      ratio TEXT NOT NULL CHECK (ratio IN ('16:9','1:1','9:16')),
+      duration_sec INTEGER NOT NULL,
+      language TEXT NOT NULL CHECK (language IN ('fr','en')),
+      platform TEXT NOT NULL CHECK (platform IN ('facebook','instagram','both')),
+      scheduled_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','publishing','published','failed','cancelled')),
+      blob_url TEXT NOT NULL,
+      meta_video_id TEXT,
+      caption_fr TEXT,
+      caption_en TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      published_at TEXT,
+      FOREIGN KEY (sku) REFERENCES products(sku)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_video_schedule_status_scheduled ON video_schedule(status, scheduled_at)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_video_schedule_active_slot ON video_schedule(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`,
     `CREATE TABLE IF NOT EXISTS price_alerts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL,
