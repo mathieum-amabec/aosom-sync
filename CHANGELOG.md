@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.139] - 2026-06-22
+
+### Docs (Demand Gen — full URL record)
+- **`docs/demand-gen-urls.json`** — regenerated directly from the `video_demand_gen` Turso table
+  (authoritative export) so the committed record == DB: **210 assets / 32 SKUs** = Phase-1 patio +
+  Phase-2 home furnishings + the 6 fans/cabinets rendered by T3. Previously the committed doc
+  trailed the DB (it only held a subset). No code change.
+
 ## [0.5.53.138] - 2026-06-22
 
 ### Added (Demand Gen — 6 Phase 2 SKUs: fans + cabinet + sideboards)
