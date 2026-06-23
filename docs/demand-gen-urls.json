@@ -1,21 +1,27 @@
 {
-  "generated_from": "out/demand-gen-manifest.json (union: Phase-1 patio + Phase-2 home furnishings)",
-  "generated_at": "2026-06-22T23:38:25.534Z",
-  "count": 180,
+  "generated_from": "video_demand_gen (Turso) — authoritative DB export; Phase-1 patio + Phase-2 home furnishings + fans/cabinets",
+  "generated_at": "2026-06-23T00:11:05.963Z",
+  "count": 210,
   "skus": [
     "01-0415",
     "01-0893",
     "823-002V80",
     "823-010V81",
     "824-033BK",
+    "824-033WT",
+    "824-048V80RD",
     "824-051V80BK",
     "824-056V80BK",
+    "824-056V80WT",
     "831-790V01WT",
     "834-295",
     "835-135V80RB",
     "835-511GY",
     "835-511WT",
+    "837-339V80WT",
+    "838-075",
     "838-075BK",
+    "838-075WT",
     "83A-188V81BK",
     "83A-188V81WT",
     "845-039V01GY",
@@ -35,21 +41,11 @@
       "sku": "01-0415",
       "shopify_product_id": "gid://shopify/Product/7798393897065",
       "title_fr": "Base de parasol carrée résine 9 kg — bronze",
-      "ratio": "1:1",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/01-0415/01-0415_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_1x1_15s.mp4",
-      "bytes": 5623471
-    },
-    {
-      "sku": "01-0415",
-      "shopify_product_id": "gid://shopify/Product/7798393897065",
-      "title_fr": "Base de parasol carrée résine 9 kg — bronze",
-      "ratio": "1:1",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/01-0415/01-0415_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_1x1_6s.mp4",
-      "bytes": 2300536
+      "blob_path": "demand-gen/01-0415/01-0415_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_16x9_6s.mp4",
+      "bytes": 4331131
     },
     {
       "sku": "01-0415",
@@ -65,21 +61,21 @@
       "sku": "01-0415",
       "shopify_product_id": "gid://shopify/Product/7798393897065",
       "title_fr": "Base de parasol carrée résine 9 kg — bronze",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/01-0415/01-0415_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_16x9_6s.mp4",
-      "bytes": 4331131
+      "blob_path": "demand-gen/01-0415/01-0415_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_1x1_6s.mp4",
+      "bytes": 2300536
     },
     {
       "sku": "01-0415",
       "shopify_product_id": "gid://shopify/Product/7798393897065",
       "title_fr": "Base de parasol carrée résine 9 kg — bronze",
-      "ratio": "9:16",
+      "ratio": "1:1",
       "duration_sec": 15,
-      "blob_path": "demand-gen/01-0415/01-0415_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_9x16_15s.mp4",
-      "bytes": 6943994
+      "blob_path": "demand-gen/01-0415/01-0415_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_1x1_15s.mp4",
+      "bytes": 5623471
     },
     {
       "sku": "01-0415",
@@ -92,34 +88,14 @@
       "bytes": 2827063
     },
     {
-      "sku": "01-0893",
-      "shopify_product_id": "gid://shopify/Product/7796435877993",
-      "title_fr": "Balançoire de jardin double à bascule pour patio",
-      "ratio": "1:1",
+      "sku": "01-0415",
+      "shopify_product_id": "gid://shopify/Product/7798393897065",
+      "title_fr": "Base de parasol carrée résine 9 kg — bronze",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/01-0893/01-0893_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_1x1_15s.mp4",
-      "bytes": 7381942
-    },
-    {
-      "sku": "01-0893",
-      "shopify_product_id": "gid://shopify/Product/7796435877993",
-      "title_fr": "Balançoire de jardin double à bascule pour patio",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/01-0893/01-0893_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_1x1_6s.mp4",
-      "bytes": 3063594
-    },
-    {
-      "sku": "01-0893",
-      "shopify_product_id": "gid://shopify/Product/7796435877993",
-      "title_fr": "Balançoire de jardin double à bascule pour patio",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/01-0893/01-0893_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_16x9_15s.mp4",
-      "bytes": 14236470
+      "blob_path": "demand-gen/01-0415/01-0415_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0415/01-0415_9x16_15s.mp4",
+      "bytes": 6943994
     },
     {
       "sku": "01-0893",
@@ -135,11 +111,31 @@
       "sku": "01-0893",
       "shopify_product_id": "gid://shopify/Product/7796435877993",
       "title_fr": "Balançoire de jardin double à bascule pour patio",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/01-0893/01-0893_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_9x16_15s.mp4",
-      "bytes": 8586125
+      "blob_path": "demand-gen/01-0893/01-0893_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_16x9_15s.mp4",
+      "bytes": 14236470
+    },
+    {
+      "sku": "01-0893",
+      "shopify_product_id": "gid://shopify/Product/7796435877993",
+      "title_fr": "Balançoire de jardin double à bascule pour patio",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/01-0893/01-0893_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_1x1_6s.mp4",
+      "bytes": 3063594
+    },
+    {
+      "sku": "01-0893",
+      "shopify_product_id": "gid://shopify/Product/7796435877993",
+      "title_fr": "Balançoire de jardin double à bascule pour patio",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/01-0893/01-0893_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_1x1_15s.mp4",
+      "bytes": 7381942
     },
     {
       "sku": "01-0893",
@@ -152,34 +148,14 @@
       "bytes": 3634709
     },
     {
-      "sku": "823-002V80",
-      "shopify_product_id": "gid://shopify/Product/7796432633961",
-      "title_fr": "Climatiseur portable 10 000 BTU multifonction avec minuterie",
-      "ratio": "1:1",
+      "sku": "01-0893",
+      "shopify_product_id": "gid://shopify/Product/7796435877993",
+      "title_fr": "Balançoire de jardin double à bascule pour patio",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/823-002V80/823-002V80_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-002V80/823-002V80_1x1_15s.mp4",
-      "bytes": 4321147
-    },
-    {
-      "sku": "823-002V80",
-      "shopify_product_id": "gid://shopify/Product/7796432633961",
-      "title_fr": "Climatiseur portable 10 000 BTU multifonction avec minuterie",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/823-002V80/823-002V80_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-002V80/823-002V80_1x1_6s.mp4",
-      "bytes": 1452069
-    },
-    {
-      "sku": "823-002V80",
-      "shopify_product_id": "gid://shopify/Product/7796432633961",
-      "title_fr": "Climatiseur portable 10 000 BTU multifonction avec minuterie",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/823-002V80/823-002V80_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-002V80/823-002V80_16x9_15s.mp4",
-      "bytes": 8172146
+      "blob_path": "demand-gen/01-0893/01-0893_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/01-0893/01-0893_9x16_15s.mp4",
+      "bytes": 8586125
     },
     {
       "sku": "823-002V80",
@@ -195,11 +171,31 @@
       "sku": "823-002V80",
       "shopify_product_id": "gid://shopify/Product/7796432633961",
       "title_fr": "Climatiseur portable 10 000 BTU multifonction avec minuterie",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/823-002V80/823-002V80_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-002V80/823-002V80_9x16_15s.mp4",
-      "bytes": 5240788
+      "blob_path": "demand-gen/823-002V80/823-002V80_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-002V80/823-002V80_16x9_15s.mp4",
+      "bytes": 8172146
+    },
+    {
+      "sku": "823-002V80",
+      "shopify_product_id": "gid://shopify/Product/7796432633961",
+      "title_fr": "Climatiseur portable 10 000 BTU multifonction avec minuterie",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/823-002V80/823-002V80_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-002V80/823-002V80_1x1_6s.mp4",
+      "bytes": 1452069
+    },
+    {
+      "sku": "823-002V80",
+      "shopify_product_id": "gid://shopify/Product/7796432633961",
+      "title_fr": "Climatiseur portable 10 000 BTU multifonction avec minuterie",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/823-002V80/823-002V80_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-002V80/823-002V80_1x1_15s.mp4",
+      "bytes": 4321147
     },
     {
       "sku": "823-002V80",
@@ -212,34 +208,14 @@
       "bytes": 1712203
     },
     {
-      "sku": "823-010V81",
-      "shopify_product_id": "gid://shopify/Product/7798393176169",
-      "title_fr": "Climatiseur portable 10000 BTU avec déshumidificateur et ventilateur",
-      "ratio": "1:1",
+      "sku": "823-002V80",
+      "shopify_product_id": "gid://shopify/Product/7796432633961",
+      "title_fr": "Climatiseur portable 10 000 BTU multifonction avec minuterie",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/823-010V81/823-010V81_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-010V81/823-010V81_1x1_15s.mp4",
-      "bytes": 4621057
-    },
-    {
-      "sku": "823-010V81",
-      "shopify_product_id": "gid://shopify/Product/7798393176169",
-      "title_fr": "Climatiseur portable 10000 BTU avec déshumidificateur et ventilateur",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/823-010V81/823-010V81_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-010V81/823-010V81_1x1_6s.mp4",
-      "bytes": 1448348
-    },
-    {
-      "sku": "823-010V81",
-      "shopify_product_id": "gid://shopify/Product/7798393176169",
-      "title_fr": "Climatiseur portable 10000 BTU avec déshumidificateur et ventilateur",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/823-010V81/823-010V81_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-010V81/823-010V81_16x9_15s.mp4",
-      "bytes": 9045856
+      "blob_path": "demand-gen/823-002V80/823-002V80_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-002V80/823-002V80_9x16_15s.mp4",
+      "bytes": 5240788
     },
     {
       "sku": "823-010V81",
@@ -255,11 +231,31 @@
       "sku": "823-010V81",
       "shopify_product_id": "gid://shopify/Product/7798393176169",
       "title_fr": "Climatiseur portable 10000 BTU avec déshumidificateur et ventilateur",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/823-010V81/823-010V81_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-010V81/823-010V81_9x16_15s.mp4",
-      "bytes": 5552873
+      "blob_path": "demand-gen/823-010V81/823-010V81_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-010V81/823-010V81_16x9_15s.mp4",
+      "bytes": 9045856
+    },
+    {
+      "sku": "823-010V81",
+      "shopify_product_id": "gid://shopify/Product/7798393176169",
+      "title_fr": "Climatiseur portable 10000 BTU avec déshumidificateur et ventilateur",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/823-010V81/823-010V81_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-010V81/823-010V81_1x1_6s.mp4",
+      "bytes": 1448348
+    },
+    {
+      "sku": "823-010V81",
+      "shopify_product_id": "gid://shopify/Product/7798393176169",
+      "title_fr": "Climatiseur portable 10000 BTU avec déshumidificateur et ventilateur",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/823-010V81/823-010V81_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-010V81/823-010V81_1x1_15s.mp4",
+      "bytes": 4621057
     },
     {
       "sku": "823-010V81",
@@ -272,34 +268,14 @@
       "bytes": 1713779
     },
     {
-      "sku": "824-033BK",
-      "shopify_product_id": "gid://shopify/Product/9364961362025",
-      "title_fr": "Ventilateur sur pied oscillant avec télécommande",
-      "ratio": "1:1",
+      "sku": "823-010V81",
+      "shopify_product_id": "gid://shopify/Product/7798393176169",
+      "title_fr": "Climatiseur portable 10000 BTU avec déshumidificateur et ventilateur",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/824-033BK/824-033BK_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033BK/824-033BK_1x1_15s.mp4",
-      "bytes": 6455092
-    },
-    {
-      "sku": "824-033BK",
-      "shopify_product_id": "gid://shopify/Product/9364961362025",
-      "title_fr": "Ventilateur sur pied oscillant avec télécommande",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/824-033BK/824-033BK_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033BK/824-033BK_1x1_6s.mp4",
-      "bytes": 3314547
-    },
-    {
-      "sku": "824-033BK",
-      "shopify_product_id": "gid://shopify/Product/9364961362025",
-      "title_fr": "Ventilateur sur pied oscillant avec télécommande",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/824-033BK/824-033BK_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033BK/824-033BK_16x9_15s.mp4",
-      "bytes": 11535705
+      "blob_path": "demand-gen/823-010V81/823-010V81_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/823-010V81/823-010V81_9x16_15s.mp4",
+      "bytes": 5552873
     },
     {
       "sku": "824-033BK",
@@ -315,11 +291,31 @@
       "sku": "824-033BK",
       "shopify_product_id": "gid://shopify/Product/9364961362025",
       "title_fr": "Ventilateur sur pied oscillant avec télécommande",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/824-033BK/824-033BK_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033BK/824-033BK_9x16_15s.mp4",
-      "bytes": 7957786
+      "blob_path": "demand-gen/824-033BK/824-033BK_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033BK/824-033BK_16x9_15s.mp4",
+      "bytes": 11535705
+    },
+    {
+      "sku": "824-033BK",
+      "shopify_product_id": "gid://shopify/Product/9364961362025",
+      "title_fr": "Ventilateur sur pied oscillant avec télécommande",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/824-033BK/824-033BK_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033BK/824-033BK_1x1_6s.mp4",
+      "bytes": 3314547
+    },
+    {
+      "sku": "824-033BK",
+      "shopify_product_id": "gid://shopify/Product/9364961362025",
+      "title_fr": "Ventilateur sur pied oscillant avec télécommande",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/824-033BK/824-033BK_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033BK/824-033BK_1x1_15s.mp4",
+      "bytes": 6455092
     },
     {
       "sku": "824-033BK",
@@ -332,34 +328,144 @@
       "bytes": 4083410
     },
     {
-      "sku": "824-051V80BK",
-      "shopify_product_id": "gid://shopify/Product/9369986236521",
-      "title_fr": "Ventilateur tour oscillant 3 vitesses minuterie",
-      "ratio": "1:1",
+      "sku": "824-033BK",
+      "shopify_product_id": "gid://shopify/Product/9364961362025",
+      "title_fr": "Ventilateur sur pied oscillant avec télécommande",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/824-051V80BK/824-051V80BK_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-051V80BK/824-051V80BK_1x1_15s.mp4",
-      "bytes": 2439285
+      "blob_path": "demand-gen/824-033BK/824-033BK_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033BK/824-033BK_9x16_15s.mp4",
+      "bytes": 7957786
     },
     {
-      "sku": "824-051V80BK",
-      "shopify_product_id": "gid://shopify/Product/9369986236521",
-      "title_fr": "Ventilateur tour oscillant 3 vitesses minuterie",
-      "ratio": "1:1",
-      "duration_sec": 30,
-      "blob_path": "demand-gen/824-051V80BK/824-051V80BK_1x1_30s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-051V80BK/824-051V80BK_1x1_30s.mp4",
-      "bytes": 4457550
+      "sku": "824-033WT",
+      "shopify_product_id": "gid://shopify/Product/9364961362025",
+      "title_fr": "Ventilateur sur pied oscillant avec télécommande et écran LED — blanc",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/824-033WT/824-033WT_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033WT/824-033WT_16x9_6s.mp4",
+      "bytes": 6471297
     },
     {
-      "sku": "824-051V80BK",
-      "shopify_product_id": "gid://shopify/Product/9369986236521",
-      "title_fr": "Ventilateur tour oscillant 3 vitesses minuterie",
+      "sku": "824-033WT",
+      "shopify_product_id": "gid://shopify/Product/9364961362025",
+      "title_fr": "Ventilateur sur pied oscillant avec télécommande et écran LED — blanc",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/824-033WT/824-033WT_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033WT/824-033WT_16x9_15s.mp4",
+      "bytes": 10546215
+    },
+    {
+      "sku": "824-033WT",
+      "shopify_product_id": "gid://shopify/Product/9364961362025",
+      "title_fr": "Ventilateur sur pied oscillant avec télécommande et écran LED — blanc",
       "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/824-051V80BK/824-051V80BK_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-051V80BK/824-051V80BK_1x1_6s.mp4",
-      "bytes": 1158606
+      "blob_path": "demand-gen/824-033WT/824-033WT_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033WT/824-033WT_1x1_6s.mp4",
+      "bytes": 3886687
+    },
+    {
+      "sku": "824-033WT",
+      "shopify_product_id": "gid://shopify/Product/9364961362025",
+      "title_fr": "Ventilateur sur pied oscillant avec télécommande et écran LED — blanc",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/824-033WT/824-033WT_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033WT/824-033WT_1x1_15s.mp4",
+      "bytes": 5865323
+    },
+    {
+      "sku": "824-033WT",
+      "shopify_product_id": "gid://shopify/Product/9364961362025",
+      "title_fr": "Ventilateur sur pied oscillant avec télécommande et écran LED — blanc",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/824-033WT/824-033WT_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033WT/824-033WT_9x16_6s.mp4",
+      "bytes": 4700376
+    },
+    {
+      "sku": "824-033WT",
+      "shopify_product_id": "gid://shopify/Product/9364961362025",
+      "title_fr": "Ventilateur sur pied oscillant avec télécommande et écran LED — blanc",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/824-033WT/824-033WT_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-033WT/824-033WT_9x16_15s.mp4",
+      "bytes": 7193709
+    },
+    {
+      "sku": "824-048V80RD",
+      "shopify_product_id": "gid://shopify/Product/9364961427561",
+      "title_fr": "Ventilateur tour oscillant 3 vitesses avec minuterie 12h et télécommande",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/824-048V80RD/824-048V80RD_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-048V80RD/824-048V80RD_16x9_6s.mp4",
+      "bytes": 1899509
+    },
+    {
+      "sku": "824-048V80RD",
+      "shopify_product_id": "gid://shopify/Product/9364961427561",
+      "title_fr": "Ventilateur tour oscillant 3 vitesses avec minuterie 12h et télécommande",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/824-048V80RD/824-048V80RD_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-048V80RD/824-048V80RD_16x9_15s.mp4",
+      "bytes": 3528170
+    },
+    {
+      "sku": "824-048V80RD",
+      "shopify_product_id": "gid://shopify/Product/9364961427561",
+      "title_fr": "Ventilateur tour oscillant 3 vitesses avec minuterie 12h et télécommande",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/824-048V80RD/824-048V80RD_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-048V80RD/824-048V80RD_1x1_6s.mp4",
+      "bytes": 1090637
+    },
+    {
+      "sku": "824-048V80RD",
+      "shopify_product_id": "gid://shopify/Product/9364961427561",
+      "title_fr": "Ventilateur tour oscillant 3 vitesses avec minuterie 12h et télécommande",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/824-048V80RD/824-048V80RD_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-048V80RD/824-048V80RD_1x1_15s.mp4",
+      "bytes": 2004490
+    },
+    {
+      "sku": "824-048V80RD",
+      "shopify_product_id": "gid://shopify/Product/9364961427561",
+      "title_fr": "Ventilateur tour oscillant 3 vitesses avec minuterie 12h et télécommande",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/824-048V80RD/824-048V80RD_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-048V80RD/824-048V80RD_9x16_6s.mp4",
+      "bytes": 1485374
+    },
+    {
+      "sku": "824-048V80RD",
+      "shopify_product_id": "gid://shopify/Product/9364961427561",
+      "title_fr": "Ventilateur tour oscillant 3 vitesses avec minuterie 12h et télécommande",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/824-048V80RD/824-048V80RD_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-048V80RD/824-048V80RD_9x16_15s.mp4",
+      "bytes": 2667464
+    },
+    {
+      "sku": "824-051V80BK",
+      "shopify_product_id": "gid://shopify/Product/9369986236521",
+      "title_fr": "Ventilateur tour oscillant 3 vitesses minuterie",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/824-051V80BK/824-051V80BK_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-051V80BK/824-051V80BK_16x9_6s.mp4",
+      "bytes": 2244214
     },
     {
       "sku": "824-051V80BK",
@@ -385,11 +491,41 @@
       "sku": "824-051V80BK",
       "shopify_product_id": "gid://shopify/Product/9369986236521",
       "title_fr": "Ventilateur tour oscillant 3 vitesses minuterie",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/824-051V80BK/824-051V80BK_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-051V80BK/824-051V80BK_16x9_6s.mp4",
-      "bytes": 2244214
+      "blob_path": "demand-gen/824-051V80BK/824-051V80BK_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-051V80BK/824-051V80BK_1x1_6s.mp4",
+      "bytes": 1158606
+    },
+    {
+      "sku": "824-051V80BK",
+      "shopify_product_id": "gid://shopify/Product/9369986236521",
+      "title_fr": "Ventilateur tour oscillant 3 vitesses minuterie",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/824-051V80BK/824-051V80BK_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-051V80BK/824-051V80BK_1x1_15s.mp4",
+      "bytes": 2439285
+    },
+    {
+      "sku": "824-051V80BK",
+      "shopify_product_id": "gid://shopify/Product/9369986236521",
+      "title_fr": "Ventilateur tour oscillant 3 vitesses minuterie",
+      "ratio": "1:1",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/824-051V80BK/824-051V80BK_1x1_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-051V80BK/824-051V80BK_1x1_30s.mp4",
+      "bytes": 4457550
+    },
+    {
+      "sku": "824-051V80BK",
+      "shopify_product_id": "gid://shopify/Product/9369986236521",
+      "title_fr": "Ventilateur tour oscillant 3 vitesses minuterie",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/824-051V80BK/824-051V80BK_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-051V80BK/824-051V80BK_9x16_6s.mp4",
+      "bytes": 1579502
     },
     {
       "sku": "824-051V80BK",
@@ -412,44 +548,14 @@
       "bytes": 6177738
     },
     {
-      "sku": "824-051V80BK",
-      "shopify_product_id": "gid://shopify/Product/9369986236521",
-      "title_fr": "Ventilateur tour oscillant 3 vitesses minuterie",
-      "ratio": "9:16",
+      "sku": "824-056V80BK",
+      "shopify_product_id": "gid://shopify/Product/9364961493097",
+      "title_fr": "Ventilateur tour oscillant silencieux pour chambre",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/824-051V80BK/824-051V80BK_9x16_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-051V80BK/824-051V80BK_9x16_6s.mp4",
-      "bytes": 1579502
-    },
-    {
-      "sku": "824-056V80BK",
-      "shopify_product_id": "gid://shopify/Product/9364961493097",
-      "title_fr": "Ventilateur tour oscillant silencieux pour chambre",
-      "ratio": "1:1",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/824-056V80BK/824-056V80BK_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80BK/824-056V80BK_1x1_15s.mp4",
-      "bytes": 2349904
-    },
-    {
-      "sku": "824-056V80BK",
-      "shopify_product_id": "gid://shopify/Product/9364961493097",
-      "title_fr": "Ventilateur tour oscillant silencieux pour chambre",
-      "ratio": "1:1",
-      "duration_sec": 30,
-      "blob_path": "demand-gen/824-056V80BK/824-056V80BK_1x1_30s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80BK/824-056V80BK_1x1_30s.mp4",
-      "bytes": 4499411
-    },
-    {
-      "sku": "824-056V80BK",
-      "shopify_product_id": "gid://shopify/Product/9364961493097",
-      "title_fr": "Ventilateur tour oscillant silencieux pour chambre",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/824-056V80BK/824-056V80BK_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80BK/824-056V80BK_1x1_6s.mp4",
-      "bytes": 1045352
+      "blob_path": "demand-gen/824-056V80BK/824-056V80BK_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80BK/824-056V80BK_16x9_6s.mp4",
+      "bytes": 1921952
     },
     {
       "sku": "824-056V80BK",
@@ -475,11 +581,41 @@
       "sku": "824-056V80BK",
       "shopify_product_id": "gid://shopify/Product/9364961493097",
       "title_fr": "Ventilateur tour oscillant silencieux pour chambre",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/824-056V80BK/824-056V80BK_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80BK/824-056V80BK_16x9_6s.mp4",
-      "bytes": 1921952
+      "blob_path": "demand-gen/824-056V80BK/824-056V80BK_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80BK/824-056V80BK_1x1_6s.mp4",
+      "bytes": 1045352
+    },
+    {
+      "sku": "824-056V80BK",
+      "shopify_product_id": "gid://shopify/Product/9364961493097",
+      "title_fr": "Ventilateur tour oscillant silencieux pour chambre",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/824-056V80BK/824-056V80BK_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80BK/824-056V80BK_1x1_15s.mp4",
+      "bytes": 2349904
+    },
+    {
+      "sku": "824-056V80BK",
+      "shopify_product_id": "gid://shopify/Product/9364961493097",
+      "title_fr": "Ventilateur tour oscillant silencieux pour chambre",
+      "ratio": "1:1",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/824-056V80BK/824-056V80BK_1x1_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80BK/824-056V80BK_1x1_30s.mp4",
+      "bytes": 4499411
+    },
+    {
+      "sku": "824-056V80BK",
+      "shopify_product_id": "gid://shopify/Product/9364961493097",
+      "title_fr": "Ventilateur tour oscillant silencieux pour chambre",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/824-056V80BK/824-056V80BK_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80BK/824-056V80BK_9x16_6s.mp4",
+      "bytes": 1421789
     },
     {
       "sku": "824-056V80BK",
@@ -502,44 +638,74 @@
       "bytes": 6205206
     },
     {
-      "sku": "824-056V80BK",
+      "sku": "824-056V80WT",
       "shopify_product_id": "gid://shopify/Product/9364961493097",
-      "title_fr": "Ventilateur tour oscillant silencieux pour chambre",
-      "ratio": "9:16",
+      "title_fr": "Ventilateur tour oscillant avec écran LED tactile et télécommande — blanc",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/824-056V80BK/824-056V80BK_9x16_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80BK/824-056V80BK_9x16_6s.mp4",
-      "bytes": 1421789
+      "blob_path": "demand-gen/824-056V80WT/824-056V80WT_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80WT/824-056V80WT_16x9_6s.mp4",
+      "bytes": 985363
     },
     {
-      "sku": "831-790V01WT",
-      "shopify_product_id": "gid://shopify/Product/7752236630121",
-      "title_fr": "Cadre de lit queen en métal avec tête de lit",
+      "sku": "824-056V80WT",
+      "shopify_product_id": "gid://shopify/Product/9364961493097",
+      "title_fr": "Ventilateur tour oscillant avec écran LED tactile et télécommande — blanc",
+      "ratio": "16:9",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/824-056V80WT/824-056V80WT_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80WT/824-056V80WT_16x9_15s.mp4",
+      "bytes": 3214792
+    },
+    {
+      "sku": "824-056V80WT",
+      "shopify_product_id": "gid://shopify/Product/9364961493097",
+      "title_fr": "Ventilateur tour oscillant avec écran LED tactile et télécommande — blanc",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/824-056V80WT/824-056V80WT_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80WT/824-056V80WT_1x1_6s.mp4",
+      "bytes": 604173
+    },
+    {
+      "sku": "824-056V80WT",
+      "shopify_product_id": "gid://shopify/Product/9364961493097",
+      "title_fr": "Ventilateur tour oscillant avec écran LED tactile et télécommande — blanc",
       "ratio": "1:1",
       "duration_sec": 15,
-      "blob_path": "demand-gen/831-790V01WT/831-790V01WT_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/831-790V01WT/831-790V01WT_1x1_15s.mp4",
-      "bytes": 4288522
+      "blob_path": "demand-gen/824-056V80WT/824-056V80WT_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80WT/824-056V80WT_1x1_15s.mp4",
+      "bytes": 1829251
     },
     {
-      "sku": "831-790V01WT",
-      "shopify_product_id": "gid://shopify/Product/7752236630121",
-      "title_fr": "Cadre de lit queen en métal avec tête de lit",
-      "ratio": "1:1",
-      "duration_sec": 30,
-      "blob_path": "demand-gen/831-790V01WT/831-790V01WT_1x1_30s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/831-790V01WT/831-790V01WT_1x1_30s.mp4",
-      "bytes": 8359046
-    },
-    {
-      "sku": "831-790V01WT",
-      "shopify_product_id": "gid://shopify/Product/7752236630121",
-      "title_fr": "Cadre de lit queen en métal avec tête de lit",
-      "ratio": "1:1",
+      "sku": "824-056V80WT",
+      "shopify_product_id": "gid://shopify/Product/9364961493097",
+      "title_fr": "Ventilateur tour oscillant avec écran LED tactile et télécommande — blanc",
+      "ratio": "9:16",
       "duration_sec": 6,
-      "blob_path": "demand-gen/831-790V01WT/831-790V01WT_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/831-790V01WT/831-790V01WT_1x1_6s.mp4",
-      "bytes": 1426984
+      "blob_path": "demand-gen/824-056V80WT/824-056V80WT_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80WT/824-056V80WT_9x16_6s.mp4",
+      "bytes": 847916
+    },
+    {
+      "sku": "824-056V80WT",
+      "shopify_product_id": "gid://shopify/Product/9364961493097",
+      "title_fr": "Ventilateur tour oscillant avec écran LED tactile et télécommande — blanc",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/824-056V80WT/824-056V80WT_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/824-056V80WT/824-056V80WT_9x16_15s.mp4",
+      "bytes": 2518768
+    },
+    {
+      "sku": "831-790V01WT",
+      "shopify_product_id": "gid://shopify/Product/7752236630121",
+      "title_fr": "Cadre de lit queen en métal avec tête de lit",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/831-790V01WT/831-790V01WT_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/831-790V01WT/831-790V01WT_16x9_6s.mp4",
+      "bytes": 2755655
     },
     {
       "sku": "831-790V01WT",
@@ -565,11 +731,41 @@
       "sku": "831-790V01WT",
       "shopify_product_id": "gid://shopify/Product/7752236630121",
       "title_fr": "Cadre de lit queen en métal avec tête de lit",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/831-790V01WT/831-790V01WT_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/831-790V01WT/831-790V01WT_16x9_6s.mp4",
-      "bytes": 2755655
+      "blob_path": "demand-gen/831-790V01WT/831-790V01WT_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/831-790V01WT/831-790V01WT_1x1_6s.mp4",
+      "bytes": 1426984
+    },
+    {
+      "sku": "831-790V01WT",
+      "shopify_product_id": "gid://shopify/Product/7752236630121",
+      "title_fr": "Cadre de lit queen en métal avec tête de lit",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/831-790V01WT/831-790V01WT_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/831-790V01WT/831-790V01WT_1x1_15s.mp4",
+      "bytes": 4288522
+    },
+    {
+      "sku": "831-790V01WT",
+      "shopify_product_id": "gid://shopify/Product/7752236630121",
+      "title_fr": "Cadre de lit queen en métal avec tête de lit",
+      "ratio": "1:1",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/831-790V01WT/831-790V01WT_1x1_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/831-790V01WT/831-790V01WT_1x1_30s.mp4",
+      "bytes": 8359046
+    },
+    {
+      "sku": "831-790V01WT",
+      "shopify_product_id": "gid://shopify/Product/7752236630121",
+      "title_fr": "Cadre de lit queen en métal avec tête de lit",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/831-790V01WT/831-790V01WT_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/831-790V01WT/831-790V01WT_9x16_6s.mp4",
+      "bytes": 1907969
     },
     {
       "sku": "831-790V01WT",
@@ -592,34 +788,14 @@
       "bytes": 10640820
     },
     {
-      "sku": "831-790V01WT",
-      "shopify_product_id": "gid://shopify/Product/7752236630121",
-      "title_fr": "Cadre de lit queen en métal avec tête de lit",
-      "ratio": "9:16",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/831-790V01WT/831-790V01WT_9x16_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/831-790V01WT/831-790V01WT_9x16_6s.mp4",
-      "bytes": 1907969
-    },
-    {
       "sku": "834-295",
       "shopify_product_id": "gid://shopify/Product/9364960706665",
       "title_fr": "Armoire à pharmacie murale acier verrouillable",
-      "ratio": "1:1",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/834-295/834-295_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/834-295/834-295_1x1_15s.mp4",
-      "bytes": 1907439
-    },
-    {
-      "sku": "834-295",
-      "shopify_product_id": "gid://shopify/Product/9364960706665",
-      "title_fr": "Armoire à pharmacie murale acier verrouillable",
-      "ratio": "1:1",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/834-295/834-295_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/834-295/834-295_1x1_6s.mp4",
-      "bytes": 873676
+      "blob_path": "demand-gen/834-295/834-295_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/834-295/834-295_16x9_6s.mp4",
+      "bytes": 1435265
     },
     {
       "sku": "834-295",
@@ -635,21 +811,21 @@
       "sku": "834-295",
       "shopify_product_id": "gid://shopify/Product/9364960706665",
       "title_fr": "Armoire à pharmacie murale acier verrouillable",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/834-295/834-295_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/834-295/834-295_16x9_6s.mp4",
-      "bytes": 1435265
+      "blob_path": "demand-gen/834-295/834-295_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/834-295/834-295_1x1_6s.mp4",
+      "bytes": 873676
     },
     {
       "sku": "834-295",
       "shopify_product_id": "gid://shopify/Product/9364960706665",
       "title_fr": "Armoire à pharmacie murale acier verrouillable",
-      "ratio": "9:16",
+      "ratio": "1:1",
       "duration_sec": 15,
-      "blob_path": "demand-gen/834-295/834-295_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/834-295/834-295_9x16_15s.mp4",
-      "bytes": 2766650
+      "blob_path": "demand-gen/834-295/834-295_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/834-295/834-295_1x1_15s.mp4",
+      "bytes": 1907439
     },
     {
       "sku": "834-295",
@@ -662,34 +838,14 @@
       "bytes": 1233901
     },
     {
-      "sku": "835-135V80RB",
-      "shopify_product_id": "gid://shopify/Product/7750490718313",
-      "title_fr": "Ensemble table de bar 3 pièces avec tabourets",
-      "ratio": "1:1",
+      "sku": "834-295",
+      "shopify_product_id": "gid://shopify/Product/9364960706665",
+      "title_fr": "Armoire à pharmacie murale acier verrouillable",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/835-135V80RB/835-135V80RB_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-135V80RB/835-135V80RB_1x1_15s.mp4",
-      "bytes": 3320107
-    },
-    {
-      "sku": "835-135V80RB",
-      "shopify_product_id": "gid://shopify/Product/7750490718313",
-      "title_fr": "Ensemble table de bar 3 pièces avec tabourets",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/835-135V80RB/835-135V80RB_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-135V80RB/835-135V80RB_1x1_6s.mp4",
-      "bytes": 1256599
-    },
-    {
-      "sku": "835-135V80RB",
-      "shopify_product_id": "gid://shopify/Product/7750490718313",
-      "title_fr": "Ensemble table de bar 3 pièces avec tabourets",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/835-135V80RB/835-135V80RB_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-135V80RB/835-135V80RB_16x9_15s.mp4",
-      "bytes": 6144871
+      "blob_path": "demand-gen/834-295/834-295_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/834-295/834-295_9x16_15s.mp4",
+      "bytes": 2766650
     },
     {
       "sku": "835-135V80RB",
@@ -705,11 +861,31 @@
       "sku": "835-135V80RB",
       "shopify_product_id": "gid://shopify/Product/7750490718313",
       "title_fr": "Ensemble table de bar 3 pièces avec tabourets",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/835-135V80RB/835-135V80RB_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-135V80RB/835-135V80RB_9x16_15s.mp4",
-      "bytes": 4375571
+      "blob_path": "demand-gen/835-135V80RB/835-135V80RB_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-135V80RB/835-135V80RB_16x9_15s.mp4",
+      "bytes": 6144871
+    },
+    {
+      "sku": "835-135V80RB",
+      "shopify_product_id": "gid://shopify/Product/7750490718313",
+      "title_fr": "Ensemble table de bar 3 pièces avec tabourets",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/835-135V80RB/835-135V80RB_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-135V80RB/835-135V80RB_1x1_6s.mp4",
+      "bytes": 1256599
+    },
+    {
+      "sku": "835-135V80RB",
+      "shopify_product_id": "gid://shopify/Product/7750490718313",
+      "title_fr": "Ensemble table de bar 3 pièces avec tabourets",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/835-135V80RB/835-135V80RB_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-135V80RB/835-135V80RB_1x1_15s.mp4",
+      "bytes": 3320107
     },
     {
       "sku": "835-135V80RB",
@@ -722,34 +898,24 @@
       "bytes": 1637757
     },
     {
-      "sku": "835-511GY",
-      "shopify_product_id": "gid://shopify/Product/7752196653161",
-      "title_fr": "Buffet enfilade moderne tiroirs et rangement gris",
-      "ratio": "1:1",
+      "sku": "835-135V80RB",
+      "shopify_product_id": "gid://shopify/Product/7750490718313",
+      "title_fr": "Ensemble table de bar 3 pièces avec tabourets",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/835-511GY/835-511GY_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511GY/835-511GY_1x1_15s.mp4",
-      "bytes": 3032945
+      "blob_path": "demand-gen/835-135V80RB/835-135V80RB_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-135V80RB/835-135V80RB_9x16_15s.mp4",
+      "bytes": 4375571
     },
     {
       "sku": "835-511GY",
       "shopify_product_id": "gid://shopify/Product/7752196653161",
       "title_fr": "Buffet enfilade moderne tiroirs et rangement gris",
-      "ratio": "1:1",
-      "duration_sec": 30,
-      "blob_path": "demand-gen/835-511GY/835-511GY_1x1_30s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511GY/835-511GY_1x1_30s.mp4",
-      "bytes": 5422726
-    },
-    {
-      "sku": "835-511GY",
-      "shopify_product_id": "gid://shopify/Product/7752196653161",
-      "title_fr": "Buffet enfilade moderne tiroirs et rangement gris",
-      "ratio": "1:1",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/835-511GY/835-511GY_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511GY/835-511GY_1x1_6s.mp4",
-      "bytes": 1386101
+      "blob_path": "demand-gen/835-511GY/835-511GY_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511GY/835-511GY_16x9_6s.mp4",
+      "bytes": 2591312
     },
     {
       "sku": "835-511GY",
@@ -775,11 +941,41 @@
       "sku": "835-511GY",
       "shopify_product_id": "gid://shopify/Product/7752196653161",
       "title_fr": "Buffet enfilade moderne tiroirs et rangement gris",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/835-511GY/835-511GY_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511GY/835-511GY_16x9_6s.mp4",
-      "bytes": 2591312
+      "blob_path": "demand-gen/835-511GY/835-511GY_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511GY/835-511GY_1x1_6s.mp4",
+      "bytes": 1386101
+    },
+    {
+      "sku": "835-511GY",
+      "shopify_product_id": "gid://shopify/Product/7752196653161",
+      "title_fr": "Buffet enfilade moderne tiroirs et rangement gris",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/835-511GY/835-511GY_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511GY/835-511GY_1x1_15s.mp4",
+      "bytes": 3032945
+    },
+    {
+      "sku": "835-511GY",
+      "shopify_product_id": "gid://shopify/Product/7752196653161",
+      "title_fr": "Buffet enfilade moderne tiroirs et rangement gris",
+      "ratio": "1:1",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/835-511GY/835-511GY_1x1_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511GY/835-511GY_1x1_30s.mp4",
+      "bytes": 5422726
+    },
+    {
+      "sku": "835-511GY",
+      "shopify_product_id": "gid://shopify/Product/7752196653161",
+      "title_fr": "Buffet enfilade moderne tiroirs et rangement gris",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/835-511GY/835-511GY_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511GY/835-511GY_9x16_6s.mp4",
+      "bytes": 1872514
     },
     {
       "sku": "835-511GY",
@@ -802,44 +998,14 @@
       "bytes": 7554878
     },
     {
-      "sku": "835-511GY",
+      "sku": "835-511WT",
       "shopify_product_id": "gid://shopify/Product/7752196653161",
-      "title_fr": "Buffet enfilade moderne tiroirs et rangement gris",
-      "ratio": "9:16",
+      "title_fr": "Buffet enfilade moderne avec tablettes blanc",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/835-511GY/835-511GY_9x16_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511GY/835-511GY_9x16_6s.mp4",
-      "bytes": 1872514
-    },
-    {
-      "sku": "835-511WT",
-      "shopify_product_id": "gid://shopify/Product/7752196653161",
-      "title_fr": "Buffet enfilade moderne avec tablettes blanc",
-      "ratio": "1:1",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/835-511WT/835-511WT_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511WT/835-511WT_1x1_15s.mp4",
-      "bytes": 2771591
-    },
-    {
-      "sku": "835-511WT",
-      "shopify_product_id": "gid://shopify/Product/7752196653161",
-      "title_fr": "Buffet enfilade moderne avec tablettes blanc",
-      "ratio": "1:1",
-      "duration_sec": 30,
-      "blob_path": "demand-gen/835-511WT/835-511WT_1x1_30s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511WT/835-511WT_1x1_30s.mp4",
-      "bytes": 5049921
-    },
-    {
-      "sku": "835-511WT",
-      "shopify_product_id": "gid://shopify/Product/7752196653161",
-      "title_fr": "Buffet enfilade moderne avec tablettes blanc",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/835-511WT/835-511WT_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511WT/835-511WT_1x1_6s.mp4",
-      "bytes": 1226659
+      "blob_path": "demand-gen/835-511WT/835-511WT_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511WT/835-511WT_16x9_6s.mp4",
+      "bytes": 2269768
     },
     {
       "sku": "835-511WT",
@@ -865,11 +1031,41 @@
       "sku": "835-511WT",
       "shopify_product_id": "gid://shopify/Product/7752196653161",
       "title_fr": "Buffet enfilade moderne avec tablettes blanc",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/835-511WT/835-511WT_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511WT/835-511WT_16x9_6s.mp4",
-      "bytes": 2269768
+      "blob_path": "demand-gen/835-511WT/835-511WT_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511WT/835-511WT_1x1_6s.mp4",
+      "bytes": 1226659
+    },
+    {
+      "sku": "835-511WT",
+      "shopify_product_id": "gid://shopify/Product/7752196653161",
+      "title_fr": "Buffet enfilade moderne avec tablettes blanc",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/835-511WT/835-511WT_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511WT/835-511WT_1x1_15s.mp4",
+      "bytes": 2771591
+    },
+    {
+      "sku": "835-511WT",
+      "shopify_product_id": "gid://shopify/Product/7752196653161",
+      "title_fr": "Buffet enfilade moderne avec tablettes blanc",
+      "ratio": "1:1",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/835-511WT/835-511WT_1x1_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511WT/835-511WT_1x1_30s.mp4",
+      "bytes": 5049921
+    },
+    {
+      "sku": "835-511WT",
+      "shopify_product_id": "gid://shopify/Product/7752196653161",
+      "title_fr": "Buffet enfilade moderne avec tablettes blanc",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/835-511WT/835-511WT_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511WT/835-511WT_9x16_6s.mp4",
+      "bytes": 1720559
     },
     {
       "sku": "835-511WT",
@@ -892,44 +1088,94 @@
       "bytes": 7123719
     },
     {
-      "sku": "835-511WT",
-      "shopify_product_id": "gid://shopify/Product/7752196653161",
-      "title_fr": "Buffet enfilade moderne avec tablettes blanc",
-      "ratio": "9:16",
+      "sku": "837-339V80WT",
+      "shopify_product_id": "gid://shopify/Product/9364962246761",
+      "title_fr": "Armoire de pharmacie murale avec tablettes ajustables et porte unique",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/835-511WT/835-511WT_9x16_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/835-511WT/835-511WT_9x16_6s.mp4",
-      "bytes": 1720559
+      "blob_path": "demand-gen/837-339V80WT/837-339V80WT_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/837-339V80WT/837-339V80WT_16x9_6s.mp4",
+      "bytes": 1315058
     },
     {
-      "sku": "838-075BK",
-      "shopify_product_id": "gid://shopify/Product/7752188985449",
-      "title_fr": "Buffet enfilade laqué 2 tiroirs 2 portes noir",
-      "ratio": "1:1",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/838-075BK/838-075BK_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075BK/838-075BK_1x1_15s.mp4",
-      "bytes": 3104450
-    },
-    {
-      "sku": "838-075BK",
-      "shopify_product_id": "gid://shopify/Product/7752188985449",
-      "title_fr": "Buffet enfilade laqué 2 tiroirs 2 portes noir",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/838-075BK/838-075BK_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075BK/838-075BK_1x1_6s.mp4",
-      "bytes": 1345175
-    },
-    {
-      "sku": "838-075BK",
-      "shopify_product_id": "gid://shopify/Product/7752188985449",
-      "title_fr": "Buffet enfilade laqué 2 tiroirs 2 portes noir",
+      "sku": "837-339V80WT",
+      "shopify_product_id": "gid://shopify/Product/9364962246761",
+      "title_fr": "Armoire de pharmacie murale avec tablettes ajustables et porte unique",
       "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/838-075BK/838-075BK_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075BK/838-075BK_16x9_15s.mp4",
-      "bytes": 5734405
+      "blob_path": "demand-gen/837-339V80WT/837-339V80WT_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/837-339V80WT/837-339V80WT_16x9_15s.mp4",
+      "bytes": 3241320
+    },
+    {
+      "sku": "837-339V80WT",
+      "shopify_product_id": "gid://shopify/Product/9364962246761",
+      "title_fr": "Armoire de pharmacie murale avec tablettes ajustables et porte unique",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/837-339V80WT/837-339V80WT_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/837-339V80WT/837-339V80WT_1x1_6s.mp4",
+      "bytes": 712374
+    },
+    {
+      "sku": "837-339V80WT",
+      "shopify_product_id": "gid://shopify/Product/9364962246761",
+      "title_fr": "Armoire de pharmacie murale avec tablettes ajustables et porte unique",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/837-339V80WT/837-339V80WT_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/837-339V80WT/837-339V80WT_1x1_15s.mp4",
+      "bytes": 1741131
+    },
+    {
+      "sku": "837-339V80WT",
+      "shopify_product_id": "gid://shopify/Product/9364962246761",
+      "title_fr": "Armoire de pharmacie murale avec tablettes ajustables et porte unique",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/837-339V80WT/837-339V80WT_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/837-339V80WT/837-339V80WT_9x16_6s.mp4",
+      "bytes": 1050254
+    },
+    {
+      "sku": "837-339V80WT",
+      "shopify_product_id": "gid://shopify/Product/9364962246761",
+      "title_fr": "Armoire de pharmacie murale avec tablettes ajustables et porte unique",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/837-339V80WT/837-339V80WT_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/837-339V80WT/837-339V80WT_9x16_15s.mp4",
+      "bytes": 2604394
+    },
+    {
+      "sku": "838-075",
+      "shopify_product_id": "gid://shopify/Product/7752188985449",
+      "title_fr": "Buffet sideboard haute brillance 2 tiroirs 2 portes — gris et noir",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/838-075/838-075_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075/838-075_16x9_6s.mp4",
+      "bytes": 2695508
+    },
+    {
+      "sku": "838-075",
+      "shopify_product_id": "gid://shopify/Product/7752188985449",
+      "title_fr": "Buffet sideboard haute brillance 2 tiroirs 2 portes — gris et noir",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/838-075/838-075_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075/838-075_1x1_6s.mp4",
+      "bytes": 1482643
+    },
+    {
+      "sku": "838-075",
+      "shopify_product_id": "gid://shopify/Product/7752188985449",
+      "title_fr": "Buffet sideboard haute brillance 2 tiroirs 2 portes — gris et noir",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/838-075/838-075_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075/838-075_9x16_6s.mp4",
+      "bytes": 1992650
     },
     {
       "sku": "838-075BK",
@@ -945,11 +1191,31 @@
       "sku": "838-075BK",
       "shopify_product_id": "gid://shopify/Product/7752188985449",
       "title_fr": "Buffet enfilade laqué 2 tiroirs 2 portes noir",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/838-075BK/838-075BK_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075BK/838-075BK_9x16_15s.mp4",
-      "bytes": 4215987
+      "blob_path": "demand-gen/838-075BK/838-075BK_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075BK/838-075BK_16x9_15s.mp4",
+      "bytes": 5734405
+    },
+    {
+      "sku": "838-075BK",
+      "shopify_product_id": "gid://shopify/Product/7752188985449",
+      "title_fr": "Buffet enfilade laqué 2 tiroirs 2 portes noir",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/838-075BK/838-075BK_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075BK/838-075BK_1x1_6s.mp4",
+      "bytes": 1345175
+    },
+    {
+      "sku": "838-075BK",
+      "shopify_product_id": "gid://shopify/Product/7752188985449",
+      "title_fr": "Buffet enfilade laqué 2 tiroirs 2 portes noir",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/838-075BK/838-075BK_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075BK/838-075BK_1x1_15s.mp4",
+      "bytes": 3104450
     },
     {
       "sku": "838-075BK",
@@ -962,34 +1228,44 @@
       "bytes": 1763631
     },
     {
-      "sku": "83A-188V81BK",
-      "shopify_product_id": "gid://shopify/Product/7752239218793",
-      "title_fr": "Buffet de cuisine rangement tablettes réglables noir",
-      "ratio": "1:1",
+      "sku": "838-075BK",
+      "shopify_product_id": "gid://shopify/Product/7752188985449",
+      "title_fr": "Buffet enfilade laqué 2 tiroirs 2 portes noir",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/83A-188V81BK/83A-188V81BK_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81BK/83A-188V81BK_1x1_15s.mp4",
-      "bytes": 2760261
+      "blob_path": "demand-gen/838-075BK/838-075BK_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075BK/838-075BK_9x16_15s.mp4",
+      "bytes": 4215987
     },
     {
-      "sku": "83A-188V81BK",
-      "shopify_product_id": "gid://shopify/Product/7752239218793",
-      "title_fr": "Buffet de cuisine rangement tablettes réglables noir",
+      "sku": "838-075WT",
+      "shopify_product_id": "gid://shopify/Product/7752188985449",
+      "title_fr": "Buffet sideboard haute brillance 2 tiroirs 2 portes — blanc",
+      "ratio": "16:9",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/838-075WT/838-075WT_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075WT/838-075WT_16x9_6s.mp4",
+      "bytes": 1530540
+    },
+    {
+      "sku": "838-075WT",
+      "shopify_product_id": "gid://shopify/Product/7752188985449",
+      "title_fr": "Buffet sideboard haute brillance 2 tiroirs 2 portes — blanc",
       "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/83A-188V81BK/83A-188V81BK_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81BK/83A-188V81BK_1x1_6s.mp4",
-      "bytes": 1176931
+      "blob_path": "demand-gen/838-075WT/838-075WT_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075WT/838-075WT_1x1_6s.mp4",
+      "bytes": 885882
     },
     {
-      "sku": "83A-188V81BK",
-      "shopify_product_id": "gid://shopify/Product/7752239218793",
-      "title_fr": "Buffet de cuisine rangement tablettes réglables noir",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/83A-188V81BK/83A-188V81BK_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81BK/83A-188V81BK_16x9_15s.mp4",
-      "bytes": 5495372
+      "sku": "838-075WT",
+      "shopify_product_id": "gid://shopify/Product/7752188985449",
+      "title_fr": "Buffet sideboard haute brillance 2 tiroirs 2 portes — blanc",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/838-075WT/838-075WT_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/838-075WT/838-075WT_9x16_6s.mp4",
+      "bytes": 1261708
     },
     {
       "sku": "83A-188V81BK",
@@ -1005,11 +1281,31 @@
       "sku": "83A-188V81BK",
       "shopify_product_id": "gid://shopify/Product/7752239218793",
       "title_fr": "Buffet de cuisine rangement tablettes réglables noir",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/83A-188V81BK/83A-188V81BK_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81BK/83A-188V81BK_9x16_15s.mp4",
-      "bytes": 3579502
+      "blob_path": "demand-gen/83A-188V81BK/83A-188V81BK_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81BK/83A-188V81BK_16x9_15s.mp4",
+      "bytes": 5495372
+    },
+    {
+      "sku": "83A-188V81BK",
+      "shopify_product_id": "gid://shopify/Product/7752239218793",
+      "title_fr": "Buffet de cuisine rangement tablettes réglables noir",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/83A-188V81BK/83A-188V81BK_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81BK/83A-188V81BK_1x1_6s.mp4",
+      "bytes": 1176931
+    },
+    {
+      "sku": "83A-188V81BK",
+      "shopify_product_id": "gid://shopify/Product/7752239218793",
+      "title_fr": "Buffet de cuisine rangement tablettes réglables noir",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/83A-188V81BK/83A-188V81BK_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81BK/83A-188V81BK_1x1_15s.mp4",
+      "bytes": 2760261
     },
     {
       "sku": "83A-188V81BK",
@@ -1022,34 +1318,14 @@
       "bytes": 1466440
     },
     {
-      "sku": "83A-188V81WT",
+      "sku": "83A-188V81BK",
       "shopify_product_id": "gid://shopify/Product/7752239218793",
-      "title_fr": "Buffet de cuisine moderne rangement blanc",
-      "ratio": "1:1",
+      "title_fr": "Buffet de cuisine rangement tablettes réglables noir",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/83A-188V81WT/83A-188V81WT_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81WT/83A-188V81WT_1x1_15s.mp4",
-      "bytes": 2958589
-    },
-    {
-      "sku": "83A-188V81WT",
-      "shopify_product_id": "gid://shopify/Product/7752239218793",
-      "title_fr": "Buffet de cuisine moderne rangement blanc",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/83A-188V81WT/83A-188V81WT_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81WT/83A-188V81WT_1x1_6s.mp4",
-      "bytes": 1301945
-    },
-    {
-      "sku": "83A-188V81WT",
-      "shopify_product_id": "gid://shopify/Product/7752239218793",
-      "title_fr": "Buffet de cuisine moderne rangement blanc",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/83A-188V81WT/83A-188V81WT_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81WT/83A-188V81WT_16x9_15s.mp4",
-      "bytes": 5852946
+      "blob_path": "demand-gen/83A-188V81BK/83A-188V81BK_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81BK/83A-188V81BK_9x16_15s.mp4",
+      "bytes": 3579502
     },
     {
       "sku": "83A-188V81WT",
@@ -1065,11 +1341,31 @@
       "sku": "83A-188V81WT",
       "shopify_product_id": "gid://shopify/Product/7752239218793",
       "title_fr": "Buffet de cuisine moderne rangement blanc",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/83A-188V81WT/83A-188V81WT_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81WT/83A-188V81WT_9x16_15s.mp4",
-      "bytes": 3803595
+      "blob_path": "demand-gen/83A-188V81WT/83A-188V81WT_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81WT/83A-188V81WT_16x9_15s.mp4",
+      "bytes": 5852946
+    },
+    {
+      "sku": "83A-188V81WT",
+      "shopify_product_id": "gid://shopify/Product/7752239218793",
+      "title_fr": "Buffet de cuisine moderne rangement blanc",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/83A-188V81WT/83A-188V81WT_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81WT/83A-188V81WT_1x1_6s.mp4",
+      "bytes": 1301945
+    },
+    {
+      "sku": "83A-188V81WT",
+      "shopify_product_id": "gid://shopify/Product/7752239218793",
+      "title_fr": "Buffet de cuisine moderne rangement blanc",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/83A-188V81WT/83A-188V81WT_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81WT/83A-188V81WT_1x1_15s.mp4",
+      "bytes": 2958589
     },
     {
       "sku": "83A-188V81WT",
@@ -1082,34 +1378,24 @@
       "bytes": 1632094
     },
     {
-      "sku": "845-039V01GY",
-      "shopify_product_id": "gid://shopify/Product/7793455923305",
-      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
-      "ratio": "1:1",
+      "sku": "83A-188V81WT",
+      "shopify_product_id": "gid://shopify/Product/7752239218793",
+      "title_fr": "Buffet de cuisine moderne rangement blanc",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_1x1_15s.mp4",
-      "bytes": 10679119
+      "blob_path": "demand-gen/83A-188V81WT/83A-188V81WT_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/83A-188V81WT/83A-188V81WT_9x16_15s.mp4",
+      "bytes": 3803595
     },
     {
       "sku": "845-039V01GY",
       "shopify_product_id": "gid://shopify/Product/7793455923305",
       "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
-      "ratio": "1:1",
-      "duration_sec": 30,
-      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_1x1_30s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_1x1_30s.mp4",
-      "bytes": 19854260
-    },
-    {
-      "sku": "845-039V01GY",
-      "shopify_product_id": "gid://shopify/Product/7793455923305",
-      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
-      "ratio": "1:1",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_1x1_6s.mp4",
-      "bytes": 3896818
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_16x9_6s.mp4",
+      "bytes": 6961250
     },
     {
       "sku": "845-039V01GY",
@@ -1135,11 +1421,41 @@
       "sku": "845-039V01GY",
       "shopify_product_id": "gid://shopify/Product/7793455923305",
       "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_16x9_6s.mp4",
-      "bytes": 6961250
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_1x1_6s.mp4",
+      "bytes": 3896818
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_1x1_15s.mp4",
+      "bytes": 10679119
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "1:1",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_1x1_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_1x1_30s.mp4",
+      "bytes": 19854260
+    },
+    {
+      "sku": "845-039V01GY",
+      "shopify_product_id": "gid://shopify/Product/7793455923305",
+      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_9x16_6s.mp4",
+      "bytes": 4354246
     },
     {
       "sku": "845-039V01GY",
@@ -1162,44 +1478,14 @@
       "bytes": 21883903
     },
     {
-      "sku": "845-039V01GY",
-      "shopify_product_id": "gid://shopify/Product/7793455923305",
-      "title_fr": "Jardinière surélevée galvanisée acier 120x60x30cm",
-      "ratio": "9:16",
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/845-039V01GY/845-039V01GY_9x16_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-039V01GY/845-039V01GY_9x16_6s.mp4",
-      "bytes": 4354246
-    },
-    {
-      "sku": "845-335",
-      "shopify_product_id": "gid://shopify/Product/9359738732649",
-      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
-      "ratio": "1:1",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/845-335/845-335_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_1x1_15s.mp4",
-      "bytes": 10585190
-    },
-    {
-      "sku": "845-335",
-      "shopify_product_id": "gid://shopify/Product/9359738732649",
-      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
-      "ratio": "1:1",
-      "duration_sec": 30,
-      "blob_path": "demand-gen/845-335/845-335_1x1_30s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_1x1_30s.mp4",
-      "bytes": 21067332
-    },
-    {
-      "sku": "845-335",
-      "shopify_product_id": "gid://shopify/Product/9359738732649",
-      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/845-335/845-335_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_1x1_6s.mp4",
-      "bytes": 4270739
+      "blob_path": "demand-gen/845-335/845-335_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_16x9_6s.mp4",
+      "bytes": 8351909
     },
     {
       "sku": "845-335",
@@ -1225,11 +1511,41 @@
       "sku": "845-335",
       "shopify_product_id": "gid://shopify/Product/9359738732649",
       "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/845-335/845-335_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_16x9_6s.mp4",
-      "bytes": 8351909
+      "blob_path": "demand-gen/845-335/845-335_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_1x1_6s.mp4",
+      "bytes": 4270739
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-335/845-335_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_1x1_15s.mp4",
+      "bytes": 10585190
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "1:1",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/845-335/845-335_1x1_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_1x1_30s.mp4",
+      "bytes": 21067332
+    },
+    {
+      "sku": "845-335",
+      "shopify_product_id": "gid://shopify/Product/9359738732649",
+      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-335/845-335_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_9x16_6s.mp4",
+      "bytes": 4870480
     },
     {
       "sku": "845-335",
@@ -1252,34 +1568,14 @@
       "bytes": 24367180
     },
     {
-      "sku": "845-335",
-      "shopify_product_id": "gid://shopify/Product/9359738732649",
-      "title_fr": "Agenouilloir de jardin pliable avec coussin mousse EVA",
-      "ratio": "9:16",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/845-335/845-335_9x16_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-335/845-335_9x16_6s.mp4",
-      "bytes": 4870480
-    },
-    {
       "sku": "845-518GY",
       "shopify_product_id": "gid://shopify/Product/7798394617961",
       "title_fr": "Bac de jardinage surélevé galvanisé 241 x 91 x 30 cm",
-      "ratio": "1:1",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/845-518GY/845-518GY_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_1x1_15s.mp4",
-      "bytes": 6886454
-    },
-    {
-      "sku": "845-518GY",
-      "shopify_product_id": "gid://shopify/Product/7798394617961",
-      "title_fr": "Bac de jardinage surélevé galvanisé 241 x 91 x 30 cm",
-      "ratio": "1:1",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/845-518GY/845-518GY_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_1x1_6s.mp4",
-      "bytes": 3258135
+      "blob_path": "demand-gen/845-518GY/845-518GY_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_16x9_6s.mp4",
+      "bytes": 5626817
     },
     {
       "sku": "845-518GY",
@@ -1295,21 +1591,21 @@
       "sku": "845-518GY",
       "shopify_product_id": "gid://shopify/Product/7798394617961",
       "title_fr": "Bac de jardinage surélevé galvanisé 241 x 91 x 30 cm",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/845-518GY/845-518GY_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_16x9_6s.mp4",
-      "bytes": 5626817
+      "blob_path": "demand-gen/845-518GY/845-518GY_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_1x1_6s.mp4",
+      "bytes": 3258135
     },
     {
       "sku": "845-518GY",
       "shopify_product_id": "gid://shopify/Product/7798394617961",
       "title_fr": "Bac de jardinage surélevé galvanisé 241 x 91 x 30 cm",
-      "ratio": "9:16",
+      "ratio": "1:1",
       "duration_sec": 15,
-      "blob_path": "demand-gen/845-518GY/845-518GY_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_9x16_15s.mp4",
-      "bytes": 7392968
+      "blob_path": "demand-gen/845-518GY/845-518GY_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_1x1_15s.mp4",
+      "bytes": 6886454
     },
     {
       "sku": "845-518GY",
@@ -1322,34 +1618,14 @@
       "bytes": 3532119
     },
     {
-      "sku": "845-774V00BK",
-      "shopify_product_id": "gid://shopify/Product/7793456087145",
-      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
-      "ratio": "1:1",
+      "sku": "845-518GY",
+      "shopify_product_id": "gid://shopify/Product/7798394617961",
+      "title_fr": "Bac de jardinage surélevé galvanisé 241 x 91 x 30 cm",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_1x1_15s.mp4",
-      "bytes": 6621375
-    },
-    {
-      "sku": "845-774V00BK",
-      "shopify_product_id": "gid://shopify/Product/7793456087145",
-      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_1x1_6s.mp4",
-      "bytes": 3144035
-    },
-    {
-      "sku": "845-774V00BK",
-      "shopify_product_id": "gid://shopify/Product/7793456087145",
-      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_16x9_15s.mp4",
-      "bytes": 12916453
+      "blob_path": "demand-gen/845-518GY/845-518GY_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-518GY/845-518GY_9x16_15s.mp4",
+      "bytes": 7392968
     },
     {
       "sku": "845-774V00BK",
@@ -1365,11 +1641,31 @@
       "sku": "845-774V00BK",
       "shopify_product_id": "gid://shopify/Product/7793456087145",
       "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_9x16_15s.mp4",
-      "bytes": 7889172
+      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_16x9_15s.mp4",
+      "bytes": 12916453
+    },
+    {
+      "sku": "845-774V00BK",
+      "shopify_product_id": "gid://shopify/Product/7793456087145",
+      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_1x1_6s.mp4",
+      "bytes": 3144035
+    },
+    {
+      "sku": "845-774V00BK",
+      "shopify_product_id": "gid://shopify/Product/7793456087145",
+      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_1x1_15s.mp4",
+      "bytes": 6621375
     },
     {
       "sku": "845-774V00BK",
@@ -1382,34 +1678,14 @@
       "bytes": 3589195
     },
     {
-      "sku": "845-792V00YL",
-      "shopify_product_id": "gid://shopify/Product/7796435255401",
-      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
-      "ratio": "1:1",
+      "sku": "845-774V00BK",
+      "shopify_product_id": "gid://shopify/Product/7793456087145",
+      "title_fr": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_1x1_15s.mp4",
-      "bytes": 6357191
-    },
-    {
-      "sku": "845-792V00YL",
-      "shopify_product_id": "gid://shopify/Product/7796435255401",
-      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_1x1_6s.mp4",
-      "bytes": 3201163
-    },
-    {
-      "sku": "845-792V00YL",
-      "shopify_product_id": "gid://shopify/Product/7796435255401",
-      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_16x9_15s.mp4",
-      "bytes": 11864178
+      "blob_path": "demand-gen/845-774V00BK/845-774V00BK_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-774V00BK/845-774V00BK_9x16_15s.mp4",
+      "bytes": 7889172
     },
     {
       "sku": "845-792V00YL",
@@ -1425,11 +1701,31 @@
       "sku": "845-792V00YL",
       "shopify_product_id": "gid://shopify/Product/7796435255401",
       "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_9x16_15s.mp4",
-      "bytes": 6789414
+      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_16x9_15s.mp4",
+      "bytes": 11864178
+    },
+    {
+      "sku": "845-792V00YL",
+      "shopify_product_id": "gid://shopify/Product/7796435255401",
+      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_1x1_6s.mp4",
+      "bytes": 3201163
+    },
+    {
+      "sku": "845-792V00YL",
+      "shopify_product_id": "gid://shopify/Product/7796435255401",
+      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_1x1_15s.mp4",
+      "bytes": 6357191
     },
     {
       "sku": "845-792V00YL",
@@ -1442,34 +1738,24 @@
       "bytes": 3739759
     },
     {
-      "sku": "84A-054V05BK",
-      "shopify_product_id": "gid://shopify/Product/7793456250985",
-      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
-      "ratio": "1:1",
+      "sku": "845-792V00YL",
+      "shopify_product_id": "gid://shopify/Product/7796435255401",
+      "title_fr": "Jardinière surélevée avec treillis pour plantes grimpantes — jaune",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_1x1_15s.mp4",
-      "bytes": 5729774
+      "blob_path": "demand-gen/845-792V00YL/845-792V00YL_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/845-792V00YL/845-792V00YL_9x16_15s.mp4",
+      "bytes": 6789414
     },
     {
       "sku": "84A-054V05BK",
       "shopify_product_id": "gid://shopify/Product/7793456250985",
       "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
-      "ratio": "1:1",
-      "duration_sec": 30,
-      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_1x1_30s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_1x1_30s.mp4",
-      "bytes": 9415269
-    },
-    {
-      "sku": "84A-054V05BK",
-      "shopify_product_id": "gid://shopify/Product/7793456250985",
-      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
-      "ratio": "1:1",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_1x1_6s.mp4",
-      "bytes": 2842728
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_16x9_6s.mp4",
+      "bytes": 5159871
     },
     {
       "sku": "84A-054V05BK",
@@ -1495,11 +1781,41 @@
       "sku": "84A-054V05BK",
       "shopify_product_id": "gid://shopify/Product/7793456250985",
       "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_16x9_6s.mp4",
-      "bytes": 5159871
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_1x1_6s.mp4",
+      "bytes": 2842728
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_1x1_15s.mp4",
+      "bytes": 5729774
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "1:1",
+      "duration_sec": 30,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_1x1_30s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_1x1_30s.mp4",
+      "bytes": 9415269
+    },
+    {
+      "sku": "84A-054V05BK",
+      "shopify_product_id": "gid://shopify/Product/7793456250985",
+      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
+      "ratio": "9:16",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_9x16_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_9x16_6s.mp4",
+      "bytes": 3618974
     },
     {
       "sku": "84A-054V05BK",
@@ -1522,34 +1838,14 @@
       "bytes": 11552241
     },
     {
-      "sku": "84A-054V05BK",
-      "shopify_product_id": "gid://shopify/Product/7793456250985",
-      "title_fr": "Balancelle de patio 3 places avec auvent ajustable",
-      "ratio": "9:16",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/84A-054V05BK/84A-054V05BK_9x16_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84A-054V05BK/84A-054V05BK_9x16_6s.mp4",
-      "bytes": 3618974
-    },
-    {
       "sku": "84B-136",
       "shopify_product_id": "gid://shopify/Product/7798393700457",
       "title_fr": "Coussins de remplacement pour banc 3 places extérieur",
-      "ratio": "1:1",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/84B-136/84B-136_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_1x1_15s.mp4",
-      "bytes": 4312767
-    },
-    {
-      "sku": "84B-136",
-      "shopify_product_id": "gid://shopify/Product/7798393700457",
-      "title_fr": "Coussins de remplacement pour banc 3 places extérieur",
-      "ratio": "1:1",
+      "ratio": "16:9",
       "duration_sec": 6,
-      "blob_path": "demand-gen/84B-136/84B-136_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_1x1_6s.mp4",
-      "bytes": 2389915
+      "blob_path": "demand-gen/84B-136/84B-136_16x9_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_16x9_6s.mp4",
+      "bytes": 4463336
     },
     {
       "sku": "84B-136",
@@ -1565,21 +1861,21 @@
       "sku": "84B-136",
       "shopify_product_id": "gid://shopify/Product/7798393700457",
       "title_fr": "Coussins de remplacement pour banc 3 places extérieur",
-      "ratio": "16:9",
+      "ratio": "1:1",
       "duration_sec": 6,
-      "blob_path": "demand-gen/84B-136/84B-136_16x9_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_16x9_6s.mp4",
-      "bytes": 4463336
+      "blob_path": "demand-gen/84B-136/84B-136_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_1x1_6s.mp4",
+      "bytes": 2389915
     },
     {
       "sku": "84B-136",
       "shopify_product_id": "gid://shopify/Product/7798393700457",
       "title_fr": "Coussins de remplacement pour banc 3 places extérieur",
-      "ratio": "9:16",
+      "ratio": "1:1",
       "duration_sec": 15,
-      "blob_path": "demand-gen/84B-136/84B-136_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_9x16_15s.mp4",
-      "bytes": 5199897
+      "blob_path": "demand-gen/84B-136/84B-136_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_1x1_15s.mp4",
+      "bytes": 4312767
     },
     {
       "sku": "84B-136",
@@ -1592,34 +1888,14 @@
       "bytes": 2874185
     },
     {
-      "sku": "84B-146BU",
-      "shopify_product_id": "gid://shopify/Product/7793455792233",
-      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
-      "ratio": "1:1",
+      "sku": "84B-136",
+      "shopify_product_id": "gid://shopify/Product/7798393700457",
+      "title_fr": "Coussins de remplacement pour banc 3 places extérieur",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/84B-146BU/84B-146BU_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_1x1_15s.mp4",
-      "bytes": 6086352
-    },
-    {
-      "sku": "84B-146BU",
-      "shopify_product_id": "gid://shopify/Product/7793455792233",
-      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/84B-146BU/84B-146BU_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_1x1_6s.mp4",
-      "bytes": 2762405
-    },
-    {
-      "sku": "84B-146BU",
-      "shopify_product_id": "gid://shopify/Product/7793455792233",
-      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/84B-146BU/84B-146BU_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_16x9_15s.mp4",
-      "bytes": 11572628
+      "blob_path": "demand-gen/84B-136/84B-136_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-136/84B-136_9x16_15s.mp4",
+      "bytes": 5199897
     },
     {
       "sku": "84B-146BU",
@@ -1635,11 +1911,31 @@
       "sku": "84B-146BU",
       "shopify_product_id": "gid://shopify/Product/7793455792233",
       "title_fr": "Chaise longue pliante 5 positions avec trou visage",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/84B-146BU/84B-146BU_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_9x16_15s.mp4",
-      "bytes": 7439638
+      "blob_path": "demand-gen/84B-146BU/84B-146BU_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_16x9_15s.mp4",
+      "bytes": 11572628
+    },
+    {
+      "sku": "84B-146BU",
+      "shopify_product_id": "gid://shopify/Product/7793455792233",
+      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84B-146BU/84B-146BU_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_1x1_6s.mp4",
+      "bytes": 2762405
+    },
+    {
+      "sku": "84B-146BU",
+      "shopify_product_id": "gid://shopify/Product/7793455792233",
+      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84B-146BU/84B-146BU_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_1x1_15s.mp4",
+      "bytes": 6086352
     },
     {
       "sku": "84B-146BU",
@@ -1652,34 +1948,14 @@
       "bytes": 3360813
     },
     {
-      "sku": "84C-226CG",
-      "shopify_product_id": "gid://shopify/Product/7798393831529",
-      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
-      "ratio": "1:1",
+      "sku": "84B-146BU",
+      "shopify_product_id": "gid://shopify/Product/7793455792233",
+      "title_fr": "Chaise longue pliante 5 positions avec trou visage",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/84C-226CG/84C-226CG_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_1x1_15s.mp4",
-      "bytes": 2549998
-    },
-    {
-      "sku": "84C-226CG",
-      "shopify_product_id": "gid://shopify/Product/7798393831529",
-      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/84C-226CG/84C-226CG_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_1x1_6s.mp4",
-      "bytes": 1281318
-    },
-    {
-      "sku": "84C-226CG",
-      "shopify_product_id": "gid://shopify/Product/7798393831529",
-      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/84C-226CG/84C-226CG_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_16x9_15s.mp4",
-      "bytes": 4935840
+      "blob_path": "demand-gen/84B-146BU/84B-146BU_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84B-146BU/84B-146BU_9x16_15s.mp4",
+      "bytes": 7439638
     },
     {
       "sku": "84C-226CG",
@@ -1695,11 +1971,31 @@
       "sku": "84C-226CG",
       "shopify_product_id": "gid://shopify/Product/7798393831529",
       "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/84C-226CG/84C-226CG_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_9x16_15s.mp4",
-      "bytes": 3101859
+      "blob_path": "demand-gen/84C-226CG/84C-226CG_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_16x9_15s.mp4",
+      "bytes": 4935840
+    },
+    {
+      "sku": "84C-226CG",
+      "shopify_product_id": "gid://shopify/Product/7798393831529",
+      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84C-226CG/84C-226CG_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_1x1_6s.mp4",
+      "bytes": 1281318
+    },
+    {
+      "sku": "84C-226CG",
+      "shopify_product_id": "gid://shopify/Product/7798393831529",
+      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84C-226CG/84C-226CG_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_1x1_15s.mp4",
+      "bytes": 2549998
     },
     {
       "sku": "84C-226CG",
@@ -1712,34 +2008,14 @@
       "bytes": 1513051
     },
     {
-      "sku": "84H-209V00CG",
-      "shopify_product_id": "gid://shopify/Product/7796435714153",
-      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
-      "ratio": "1:1",
+      "sku": "84C-226CG",
+      "shopify_product_id": "gid://shopify/Product/7798393831529",
+      "title_fr": "Rideaux gazebo universels 4 panneaux 10' x 12' — Foncé",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_1x1_15s.mp4",
-      "bytes": 12213202
-    },
-    {
-      "sku": "84H-209V00CG",
-      "shopify_product_id": "gid://shopify/Product/7796435714153",
-      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_1x1_6s.mp4",
-      "bytes": 5304168
-    },
-    {
-      "sku": "84H-209V00CG",
-      "shopify_product_id": "gid://shopify/Product/7796435714153",
-      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_16x9_15s.mp4",
-      "bytes": 22840201
+      "blob_path": "demand-gen/84C-226CG/84C-226CG_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84C-226CG/84C-226CG_9x16_15s.mp4",
+      "bytes": 3101859
     },
     {
       "sku": "84H-209V00CG",
@@ -1755,11 +2031,31 @@
       "sku": "84H-209V00CG",
       "shopify_product_id": "gid://shopify/Product/7796435714153",
       "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_9x16_15s.mp4",
-      "bytes": 13905859
+      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_16x9_15s.mp4",
+      "bytes": 22840201
+    },
+    {
+      "sku": "84H-209V00CG",
+      "shopify_product_id": "gid://shopify/Product/7796435714153",
+      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_1x1_6s.mp4",
+      "bytes": 5304168
+    },
+    {
+      "sku": "84H-209V00CG",
+      "shopify_product_id": "gid://shopify/Product/7796435714153",
+      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_1x1_15s.mp4",
+      "bytes": 12213202
     },
     {
       "sku": "84H-209V00CG",
@@ -1772,34 +2068,14 @@
       "bytes": 5944304
     },
     {
-      "sku": "D51-277V01",
-      "shopify_product_id": "gid://shopify/Product/7798393995369",
-      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
-      "ratio": "1:1",
+      "sku": "84H-209V00CG",
+      "shopify_product_id": "gid://shopify/Product/7796435714153",
+      "title_fr": "Bac surélevé galvanisé 152 x 91 x 61 cm",
+      "ratio": "9:16",
       "duration_sec": 15,
-      "blob_path": "demand-gen/D51-277V01/D51-277V01_1x1_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_1x1_15s.mp4",
-      "bytes": 9217602
-    },
-    {
-      "sku": "D51-277V01",
-      "shopify_product_id": "gid://shopify/Product/7798393995369",
-      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
-      "ratio": "1:1",
-      "duration_sec": 6,
-      "blob_path": "demand-gen/D51-277V01/D51-277V01_1x1_6s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_1x1_6s.mp4",
-      "bytes": 2803056
-    },
-    {
-      "sku": "D51-277V01",
-      "shopify_product_id": "gid://shopify/Product/7798393995369",
-      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
-      "ratio": "16:9",
-      "duration_sec": 15,
-      "blob_path": "demand-gen/D51-277V01/D51-277V01_16x9_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_16x9_15s.mp4",
-      "bytes": 17305737
+      "blob_path": "demand-gen/84H-209V00CG/84H-209V00CG_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/84H-209V00CG/84H-209V00CG_9x16_15s.mp4",
+      "bytes": 13905859
     },
     {
       "sku": "D51-277V01",
@@ -1815,11 +2091,31 @@
       "sku": "D51-277V01",
       "shopify_product_id": "gid://shopify/Product/7798393995369",
       "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
-      "ratio": "9:16",
+      "ratio": "16:9",
       "duration_sec": 15,
-      "blob_path": "demand-gen/D51-277V01/D51-277V01_9x16_15s.mp4",
-      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_9x16_15s.mp4",
-      "bytes": 10514375
+      "blob_path": "demand-gen/D51-277V01/D51-277V01_16x9_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_16x9_15s.mp4",
+      "bytes": 17305737
+    },
+    {
+      "sku": "D51-277V01",
+      "shopify_product_id": "gid://shopify/Product/7798393995369",
+      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
+      "ratio": "1:1",
+      "duration_sec": 6,
+      "blob_path": "demand-gen/D51-277V01/D51-277V01_1x1_6s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_1x1_6s.mp4",
+      "bytes": 2803056
+    },
+    {
+      "sku": "D51-277V01",
+      "shopify_product_id": "gid://shopify/Product/7798393995369",
+      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
+      "ratio": "1:1",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/D51-277V01/D51-277V01_1x1_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_1x1_15s.mp4",
+      "bytes": 9217602
     },
     {
       "sku": "D51-277V01",
@@ -1830,6 +2126,16 @@
       "blob_path": "demand-gen/D51-277V01/D51-277V01_9x16_6s.mp4",
       "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_9x16_6s.mp4",
       "bytes": 3265544
+    },
+    {
+      "sku": "D51-277V01",
+      "shopify_product_id": "gid://shopify/Product/7798393995369",
+      "title_fr": "Enclos pour poules extérieur avec toit 3,0 x 4,0 x 2,0 m",
+      "ratio": "9:16",
+      "duration_sec": 15,
+      "blob_path": "demand-gen/D51-277V01/D51-277V01_9x16_15s.mp4",
+      "blob_url": "https://jcskqp8orcub9i0l.public.blob.vercel-storage.com/demand-gen/D51-277V01/D51-277V01_9x16_15s.mp4",
+      "bytes": 10514375
     }
   ]
 }
