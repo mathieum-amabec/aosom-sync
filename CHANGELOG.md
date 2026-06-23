@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.141] - 2026-06-23
+
+### Added (Publisher — FB/IG Reels from demand-gen videos)
+- **`POST /api/social/queue-reel`** — enqueues a rendered demand-gen video as a Reel:
+  body `{sku, ratio:"9:16", language, duration_sec?, caption?}`, looks it up in
+  `video_demand_gen`, builds a `reelsVideoUrl` payload, dedups prior pending rows, and
+  auto-schedules into `publication_queue` (drained hourly by `/api/cron/publisher`).
+  Requires an explicit caption for English (no French caption on the EN brand); 9:16 only.
+- **`publishSocialPayload`** — a reel-only payload (`reelsVideoUrl` with no square `videoUrl`)
+  now publishes a true **Facebook Reel** (`/video_reels`) as well as an Instagram Reel.
+  Payloads carrying both keep the existing contract (square `videoUrl` → FB feed).
+
 ## [0.5.53.140] - 2026-06-22
 
 ### Fixed (Social images — footer quality)

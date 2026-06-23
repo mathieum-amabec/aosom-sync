@@ -64,7 +64,7 @@ export interface SocialPayload {
 /**
  * Publish one normalized payload to one platform, picking the right Graph API call from the
  * available media:
- *   facebook  → video → multi-photo album (≥2) → single photo → text(+link)
+ *   facebook  → reel (reelsVideoUrl, only when no square videoUrl) → video → multi-photo album (≥2) → single photo → text(+link)
  *   instagram → reel (reelsVideoUrl ?? videoUrl) → carousel (≥2) → single photo (IG requires media)
  * Returns the published post id. Throws on a publish failure or when Instagram has no media.
  */
@@ -75,6 +75,15 @@ export async function publishSocialPayload(
   const images = (p.imageUrls ?? []).filter((u) => typeof u === "string" && u.trim() !== "");
 
   if (platform === "facebook") {
+    // A vertical 9:16 reel video publishes as a true Facebook Reel (/video_reels) — but only
+    // when there is no square videoUrl. A payload carrying BOTH keeps the documented contract
+    // (square videoUrl → FB feed, reelsVideoUrl → IG reel); the reel path is for reel-only
+    // payloads (e.g. /api/social/queue-reel), so existing drafts that set both are unaffected.
+    if (p.reelsVideoUrl && !p.videoUrl) {
+      const { pageId, token, label } = facebookBrandCreds(p.brand);
+      const r = await publishFacebookReel({ caption: p.caption, videoUrl: p.reelsVideoUrl, pageId, token, label });
+      return { postId: r.postId };
+    }
     if (p.videoUrl) {
       const r = await publishVideo({ caption: p.caption, videoUrl: p.videoUrl, brand: p.brand });
       return { postId: r.postId };

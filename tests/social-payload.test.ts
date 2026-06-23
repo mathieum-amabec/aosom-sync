@@ -26,6 +26,8 @@ import {
   publishWithImage,
   publishWithImages,
   publishText,
+  publishFacebookReel,
+  facebookBrandCreds,
 } from "@/lib/facebook-client";
 import { publishPhoto, publishCarousel, publishReel } from "@/lib/instagram-client";
 
@@ -34,6 +36,25 @@ const base = { caption: "Bonjour", brand: "ameublo" as const };
 beforeEach(() => vi.clearAllMocks());
 
 describe("publishSocialPayload — facebook routing", () => {
+  it("reelsVideoUrl only → publishFacebookReel (true Reel), beats images", async () => {
+    vi.mocked(facebookBrandCreds).mockReturnValue({ pageId: "PAGE", token: "TOK", label: "Ameublo Direct" } as never);
+    vi.mocked(publishFacebookReel).mockResolvedValue({ id: "fb-reel", postId: "fb-reel" } as never);
+    const r = await publishSocialPayload("facebook", { ...base, reelsVideoUrl: "r.mp4", imageUrls: ["a.jpg", "b.jpg"] });
+    expect(facebookBrandCreds).toHaveBeenCalledWith("ameublo");
+    expect(publishFacebookReel).toHaveBeenCalledWith(
+      expect.objectContaining({ videoUrl: "r.mp4", pageId: "PAGE", token: "TOK", caption: "Bonjour" }),
+    );
+    expect(publishVideo).not.toHaveBeenCalled();
+    expect(publishWithImages).not.toHaveBeenCalled();
+    expect(r).toEqual({ postId: "fb-reel" });
+  });
+
+  it("reelsVideoUrl + square videoUrl → feed video (contract preserved, no FB reel)", async () => {
+    await publishSocialPayload("facebook", { ...base, reelsVideoUrl: "r.mp4", videoUrl: "sq.mp4" });
+    expect(publishVideo).toHaveBeenCalledWith(expect.objectContaining({ videoUrl: "sq.mp4" }));
+    expect(publishFacebookReel).not.toHaveBeenCalled();
+  });
+
   it("video → publishVideo, returns postId", async () => {
     const r = await publishSocialPayload("facebook", { ...base, videoUrl: "v.mp4", imageUrls: ["a.jpg"] });
     expect(publishVideo).toHaveBeenCalledWith(expect.objectContaining({ videoUrl: "v.mp4", brand: "ameublo", caption: "Bonjour" }));
