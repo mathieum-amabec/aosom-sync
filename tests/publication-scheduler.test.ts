@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   parsePublicationSchedule,
   parseBlogSchedule,
+  parseVideoSchedule,
   normalizePublicationSchedule,
   normalizeBlogSchedule,
+  normalizeVideoSchedule,
   enumerateSlots,
   getNextAvailableSlot,
   isHHMM,
@@ -12,6 +14,7 @@ import {
 } from "@/lib/publication-scheduler";
 import {
   DEFAULT_PUBLICATION_SCHEDULE,
+  DEFAULT_VIDEO_SCHEDULE,
   DEFAULT_BLOG_SCHEDULE,
   type PublicationSchedule,
 } from "@/lib/config";
@@ -193,5 +196,42 @@ describe("getNextAvailableSlot", () => {
     // Not the 3rd slot of the same Monday — must roll to the next week.
     expect(next!.at).toBeGreaterThan(enumerateSlots(JSON.parse(capped.publication_schedule), NOW)[2]);
     expect(local(next!.at, TZ).weekday).toBe("Mon");
+  });
+});
+
+describe("video schedule", () => {
+  it("parse/normalize fall back to the VIDEO default (not the social one)", () => {
+    expect(parseVideoSchedule(null)).toEqual(DEFAULT_VIDEO_SCHEDULE);
+    expect(parseVideoSchedule("not json")).toEqual(DEFAULT_VIDEO_SCHEDULE);
+    expect(normalizeVideoSchedule(undefined)).toEqual(DEFAULT_VIDEO_SCHEDULE);
+    // The video default is distinct from the social default (lighter cadence).
+    expect(DEFAULT_VIDEO_SCHEDULE.max_per_day).toBe(2);
+    expect(DEFAULT_VIDEO_SCHEDULE).not.toEqual(DEFAULT_PUBLICATION_SCHEDULE);
+  });
+
+  it("round-trips a stored video schedule and clamps per-field", () => {
+    const stored = JSON.stringify({ enabled: false, timezone: "UTC", max_per_day: 99, slots: [{ day: "wed", times: ["10:00", "bad"] }] });
+    const out = parseVideoSchedule(stored);
+    expect(out.enabled).toBe(false);
+    expect(out.timezone).toBe("UTC");
+    expect(out.max_per_day).toBe(5); // clamped to 1..5
+    expect(out.slots).toEqual([{ day: "wed", times: ["10:00"] }]); // invalid time dropped
+  });
+
+  it("getNextAvailableSlot honours an explicit `schedule` override (video) over settings", async () => {
+    const videoSchedule = normalizeVideoSchedule({
+      enabled: true, timezone: TZ, max_per_day: 2,
+      slots: [{ day: "wed", times: ["10:00"] }],
+    });
+    // settings.publication_schedule is deliberately a DIFFERENT day/time — the override must win.
+    const settings = { publication_schedule: JSON.stringify({ enabled: true, timezone: TZ, max_per_day: 3, slots: [{ day: "mon", times: ["09:00"] }] }) };
+    const next = await getNextAvailableSlot("facebook", settings, { nowSec: NOW, occupied: [], schedule: videoSchedule });
+    expect(next).not.toBeNull();
+    expect(local(next!.at, TZ)).toEqual({ weekday: "Wed", time: "10:00" });
+  });
+
+  it("getNextAvailableSlot returns null when the video schedule is disabled", async () => {
+    const disabled = normalizeVideoSchedule({ ...DEFAULT_VIDEO_SCHEDULE, enabled: false });
+    expect(await getNextAvailableSlot("facebook", {}, { nowSec: NOW, occupied: [], schedule: disabled })).toBeNull();
   });
 });
