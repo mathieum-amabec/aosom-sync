@@ -271,6 +271,13 @@ describe("buildGoogleFeed", () => {
     expect(xml).toContain("<g:item_group_id>111</g:item_group_id>");
     expect(xml).toContain("<g:additional_image_link>https://img/2.jpg</g:additional_image_link>");
   });
+  it("emits g:mpn (= SKU) and identifier_exists=true (Aosom catalog has no GTIN)", () => {
+    expect(xml).toContain("<g:mpn>PAT-001GY</g:mpn>");
+    expect(xml).toContain("<g:identifier_exists>true</g:identifier_exists>");
+    expect(xml).not.toContain("<g:identifier_exists>false</g:identifier_exists>");
+    // every product carries its own g:mpn (one per item)
+    expect((xml.match(/<g:mpn>/g) || []).length).toBe(sample.length);
+  });
   it("contains exactly one <item> per feed item", () => {
     expect((xml.match(/<item>/g) || []).length).toBe(sample.length);
   });

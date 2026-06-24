@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.145] - 2026-06-23
+
+### Changed (Google Merchant feed — emit g:mpn for PMax)
+- **`src/lib/feeds/feed.ts`** — the Google Merchant feed (`googleItemXml`) now emits
+  **`<g:mpn>{SKU}</g:mpn>`** (the Aosom item number == `g:id`, which is the supplier part
+  number) and **`<g:identifier_exists>true</g:identifier_exists>`**, replacing the previous
+  hardcoded `identifier_exists=false`. The Aosom catalog has no GTINs (`products.gtin` is 0%
+  populated), so `brand + MPN` is the available identifier pair — it improves Shopping /
+  Performance Max product matching and surface eligibility vs. declaring no identifier.
+- `g:brand` is intentionally left as "Ameublo Direct" for now (manufacturer-brand mapping is a
+  separate decision). The Pinterest feed reuses this builder, so it gains `g:mpn` too.
+- Test: `tests/feeds.test.ts` — asserts `g:mpn` per product, `identifier_exists=true`, and no
+  residual `identifier_exists=false`.
+
 ## [0.5.53.144] - 2026-06-23
 
 ### Added (Demand-gen videos — one-click Reel publish)

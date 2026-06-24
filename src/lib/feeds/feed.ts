@@ -81,7 +81,11 @@ function googleItemXml(it: FeedItem): string {
     it.productType ? `<g:product_type>${escapeXml(it.productType)}</g:product_type>` : "",
     it.itemGroupId ? `<g:item_group_id>${escapeXml(it.itemGroupId)}</g:item_group_id>` : "",
     SHIPPING_BLOCK,
-    `<g:identifier_exists>false</g:identifier_exists>`, // no GTIN/MPN in the catalog
+    // No GTIN in the Aosom catalog, but the Aosom item SKU (== g:id) is the supplier part
+    // number, so we emit it as g:mpn. brand + MPN is a valid Google identifier pair, which
+    // lets us declare identifier_exists=true (better Shopping/PMax matching than false).
+    `<g:mpn>${escapeXml(it.id)}</g:mpn>`,
+    `<g:identifier_exists>true</g:identifier_exists>`,
   ].filter(Boolean);
   return `    <item>\n      ${g.join("\n      ")}\n    </item>`;
 }
