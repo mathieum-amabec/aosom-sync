@@ -2,7 +2,34 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.151] - 2026-06-24
+## [0.5.53.152] - 2026-06-24
+
+### Changed (independent video queue — Reels no longer crowded out by social posts)
+- **`getOccupiedQueueSlots(platform, contentType?)`** (`database.ts`) — optional `content_type`
+  filter so occupancy can be scoped to one queue. Omitted = the shared cross-type view
+  (backward compatible). Status set stays pending/publishing/published.
+- **`getNextAvailableSlot`** (`publication-scheduler.ts`) — new `opts.contentType`; when no
+  precomputed `occupied` is passed it now reads the live `publication_queue` via
+  `getOccupiedQueueSlots(platform, contentType)` instead of the **retired** `facebook_drafts`
+  scheduled path (`getScheduledDraftSlots`).
+- **`queue-reel`** now slots Reels against `content_type='video'` occupancy (and the
+  `video_schedule` grid) — they get their own slot pool + `max_per_day` and stop competing
+  with social posts for July slots. The partial-unique `(platform, scheduled_at)` index still
+  prevents two active rows sharing a physical slot across types; the existing
+  `QueueSlotTakenError` retry skips past any rare collision.
+
+### Added (Reel clickbait at publish time)
+- **`generateReelCaption(productText, language)`** (`queue-publisher.ts`) — at publish, a
+  `content_type='video'` item with a `reelsVideoUrl` gets a fresh 2-3 sentence clickbait
+  caption from Claude (`claude-sonnet-4-6`), language by brand (furnish→EN, ameublo→FR),
+  replacing the stored caption. Generation failure falls back to the original caption — it
+  never blocks the publish.
+
+### Notes
+- Only the video queue is isolated here; social/blog/draft keep the shared (conservative)
+  occupancy view, so they still avoid video slots. Full per-type isolation for those would
+  just mean passing their `content_type` at their call sites — deferred (not needed to fix
+  the reported Reels-pushed-to-July symptom).
 
 ### Added (Video schedule — ratio + platform)
 - **`src/lib/config.ts`** — new `VideoSchedule` type (extends `PublicationSchedule`) with
