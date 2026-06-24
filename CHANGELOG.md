@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.145] - 2026-06-23
+
+### Added (Settings — independent video/Reel schedule)
+- **`video_schedule` setting** (`PublicationSchedule` shape, default wed/fri/sat 10:00, max 2/day,
+  America/Toronto) — Reels now publish on their own cadence, independent of social posts + the blog.
+  New `config.ts` `DEFAULT_VIDEO_SCHEDULE` + `parseVideoSchedule`/`normalizeVideoSchedule` in
+  `publication-scheduler.ts`; `getNextAvailableSlot` gains an optional `schedule` override so the
+  video path reuses the same slot/occupancy/max_per_day logic.
+- **`publication_queue.content_type` extended to `'video'`** — `queue-reel` now enqueues reels with
+  `content_type='video'` and slots them from `video_schedule` (not `publication_schedule`). The
+  existing `/api/cron/publisher` drains them via the same platform dispatch (FB/IG Reel) — works
+  end-to-end with no new cron. Occupancy stays per-platform so a video can't double-book a social slot.
+- **Migration:** SQLite can't `ALTER` a CHECK, so `database.ts` rebuilds `publication_queue` with the
+  new CHECK when the live DDL lacks `'video'` (guarded → at-most-once, idempotent re-run; preserves
+  rows + both indexes; drops any leftover scratch table first). No-op on fresh DBs.
+- **Settings → Vidéos UI** (`PublicationScheduleTab.tsx`) — new section with the same weekly grid +
+  enabled toggle + max/day + timezone as the social section (extracted a shared `ScheduleGrid`).
+  `/api/settings/schedule` GET/PATCH round-trips `video_schedule`.
+- Tests: `publication-scheduler.test.ts` (video defaults distinct from social, `schedule` override,
+  disabled→null) + `queue-reel-route.test.ts` updated (`content_type='video'`).
+
 ## [0.5.53.144] - 2026-06-23
 
 ### Added (Demand-gen videos — one-click Reel publish)
