@@ -25,7 +25,10 @@ import {
   DEFAULT_VIDEO_SCHEDULE,
   DEFAULT_BLOG_SCHEDULE,
 } from "@/lib/config";
-import { getScheduledDraftSlots } from "@/lib/database";
+import { getOccupiedQueueSlots, type QueueContentType } from "@/lib/database";
+
+/** SQLite datetime() text ('YYYY-MM-DD HH:MM:SS' UTC) → unix seconds. */
+const sqliteToUnixSec = (s: string): number => Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
 
 /** Platforms that post on the shared `publication_schedule`. */
 export type PublishPlatform = "facebook" | "instagram";
@@ -297,20 +300,25 @@ export interface NextSlot {
 /**
  * Find the next free publication slot for `platform`.
  *
- * Reads `publication_schedule` from `settings`, then walks the configured slots
- * forward from now and returns the first that is (a) not already occupied by a
- * scheduled draft and (b) on a day that hasn't reached `max_per_day`. Returns
- * null when scheduling is disabled or no slot opens within the horizon.
+ * Reads `publication_schedule` from `settings` (or `opts.schedule`), then walks the
+ * configured slots forward from now and returns the first that is (a) not already
+ * occupied and (b) on a day that hasn't reached `max_per_day`. Returns null when
+ * scheduling is disabled or no slot opens within the horizon.
  *
- * The publication queue (`facebook_drafts`) is shared across platforms, so
- * occupancy is computed from all scheduled drafts; `platform` is carried through
- * for the caller and reserved for future per-platform queues. Pass `opts.nowSec`
- * / `opts.occupied` to drive the function deterministically in tests.
+ * Occupancy is read from the live `publication_queue`. Pass `opts.contentType` to scope
+ * it to one queue (independent slot pools — a Reel doesn't count against social posts);
+ * omit it for the shared, cross-type view. Pass `opts.nowSec` / `opts.occupied` to drive
+ * the function deterministically in tests (and `opts.occupied` for the caller's retry loop).
  */
 export async function getNextAvailableSlot(
   platform: PublishPlatform,
   settings: Record<string, string>,
-  opts: { nowSec?: number; occupied?: number[]; schedule?: PublicationSchedule } = {},
+  opts: {
+    nowSec?: number;
+    occupied?: number[];
+    schedule?: PublicationSchedule;
+    contentType?: QueueContentType;
+  } = {},
 ): Promise<NextSlot | null> {
   // `opts.schedule` lets callers slot against a non-default schedule (e.g. video_schedule)
   // while keeping the same occupancy + max_per_day logic. Defaults to publication_schedule.
@@ -318,11 +326,13 @@ export async function getNextAvailableSlot(
   if (!schedule.enabled) return null;
 
   const nowSec = opts.nowSec ?? Math.floor(Date.now() / 1000);
+  // Occupancy comes from the live publication_queue (the legacy facebook_drafts scheduled
+  // path is retired). `opts.contentType` scopes it to one queue so each content_type has an
+  // independent slot pool + max_per_day — a Reel doesn't count against social posts. Callers
+  // usually precompute `opts.occupied` (already content-type-filtered) for the retry loop.
   const occupied =
     opts.occupied ??
-    (await getScheduledDraftSlots())
-      .map((s) => s.scheduledAt)
-      .filter((n): n is number => n != null);
+    (await getOccupiedQueueSlots(platform, opts.contentType)).map(sqliteToUnixSec);
 
   const occupiedSet = new Set(occupied);
   const perDayCount = new Map<string, number>();
