@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.145] - 2026-06-23
+
+### Added
+- **`video_schedule` table** — scheduled publication of Demand Gen videos as Reels,
+  independent of `publication_queue` (which handles social posts). Added to `initSchema`
+  in `database.ts`. Mirrors the queue's TEXT datetime (UTC) plus a `(status, scheduled_at)`
+  drain index and a partial-unique `(platform, scheduled_at)` active-slot guard, so a future
+  video-publisher cron can reuse the proven `scheduled_at <= datetime('now')` drain pattern.
+  `ratio` (`16:9`/`1:1`/`9:16`), `language` (`fr`/`en`), `platform` (`facebook`/`instagram`/`both`)
+  and `status` (`pending`/`publishing`/`published`/`failed`/`cancelled`) are CHECK-constrained;
+  `FK sku → products(sku)` and `video_demand_gen_id → video_demand_gen(id)` for lineage;
+  `blob_url`/`meta_video_id`/`ratio`/`duration` snapshotted. Applied to prod Turso (idempotent).
+
 ## [0.5.53.144] - 2026-06-23
 
 ### Added (Demand-gen videos — one-click Reel publish)
