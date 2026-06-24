@@ -369,6 +369,21 @@ export interface BlogSchedule {
   preferred_time: string;
 }
 
+// Video reels carry two extra knobs beyond the publication shape: the rendered
+// aspect ratio to publish and which platform(s) to target.
+export type VideoRatio = "9:16" | "1:1" | "16:9";
+export type VideoPlatform = "facebook" | "instagram" | "both";
+
+export const VIDEO_RATIOS: readonly VideoRatio[] = ["9:16", "1:1", "16:9"];
+export const VIDEO_PLATFORMS: readonly VideoPlatform[] = ["facebook", "instagram", "both"];
+
+export interface VideoSchedule extends PublicationSchedule {
+  /** Rendered aspect ratio to publish (selects the matching demand-gen asset). */
+  ratio: VideoRatio;
+  /** Target platform(s); intersected with the brand's active channels at publish time. */
+  platform: VideoPlatform;
+}
+
 export const DEFAULT_PUBLICATION_SCHEDULE: PublicationSchedule = {
   enabled: true,
   slots: [
@@ -390,7 +405,7 @@ export const DEFAULT_BLOG_SCHEDULE: BlogSchedule = {
 
 // Video reels publish on their OWN schedule, independent of social posts and the blog
 // (same shape as PublicationSchedule). Lighter default cadence than social.
-export const DEFAULT_VIDEO_SCHEDULE: PublicationSchedule = {
+export const DEFAULT_VIDEO_SCHEDULE: VideoSchedule = {
   enabled: true,
   slots: [
     { day: "wed", times: ["10:00"] },
@@ -399,6 +414,8 @@ export const DEFAULT_VIDEO_SCHEDULE: PublicationSchedule = {
   ],
   timezone: "America/Toronto",
   max_per_day: 2,
+  ratio: "9:16",
+  platform: "both",
 };
 
 // ─── Settings Allowlist ─────────────────────────────────────────────

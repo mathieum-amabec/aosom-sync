@@ -10,7 +10,7 @@ import {
   type QueuePlatform,
 } from "@/lib/database";
 import { getNextAvailableSlot, parseVideoSchedule } from "@/lib/publication-scheduler";
-import { activeChannels, CHANNEL_META } from "@/lib/config";
+import { activeChannels, CHANNEL_META, VIDEO_RATIOS } from "@/lib/config";
 import type { SocialQueuePayload } from "@/lib/queue-publisher";
 
 /**
@@ -49,11 +49,22 @@ export async function POST(request: Request) {
   }
   const o = (body ?? {}) as Record<string, unknown>;
   const sku = typeof o.sku === "string" ? o.sku.trim() : "";
-  const ratio = typeof o.ratio === "string" ? o.ratio.trim() : "";
   const language = o.language;
   if (!sku) return NextResponse.json({ error: "`sku` is required" }, { status: 400 });
-  if (ratio !== "9:16") {
-    return NextResponse.json({ error: "`ratio` must be '9:16' — queue-reel publishes vertical Reels" }, { status: 400 });
+
+  // Ratio + platform are driven by the saved video_schedule (operator's choice in
+  // Settings → Vidéos). The request body may override the ratio per-call; platform is
+  // schedule-driven only, then intersected with the brand's active channels below.
+  // NOTE: Instagram Reels must be vertical (9:16) — a non-9:16 ratio targeting IG will
+  // produce a non-Reel-valid post. Surfaced as a product caveat, not hard-blocked here.
+  const videoSchedule = parseVideoSchedule(await getSetting("video_schedule"));
+  const ratio =
+    typeof o.ratio === "string" && o.ratio.trim() !== "" ? o.ratio.trim() : videoSchedule.ratio;
+  if (!(VIDEO_RATIOS as readonly string[]).includes(ratio)) {
+    return NextResponse.json(
+      { error: `\`ratio\` must be one of ${VIDEO_RATIOS.join(", ")} (got '${ratio}')` },
+      { status: 400 },
+    );
   }
   if (language !== "fr" && language !== "en") {
     return NextResponse.json({ error: "`language` must be 'fr' or 'en'" }, { status: 400 });
@@ -90,7 +101,8 @@ export async function POST(request: Request) {
     );
   }
 
-  // Platform = the brand's active channels (both FB+IG, or whichever is active).
+  // Platform = the video_schedule's target, intersected with the brand's active channels
+  // (never post to a channel that isn't configured/active).
   let fb = false;
   let ig = false;
   for (const key of activeChannels()) {
@@ -99,9 +111,16 @@ export async function POST(request: Request) {
     if (meta.platform === "facebook") fb = true;
     else ig = true;
   }
-  const platform: QueuePlatform | null = fb && ig ? "both" : fb ? "facebook" : ig ? "instagram" : null;
+  const want = videoSchedule.platform;
+  const useFb = (want === "facebook" || want === "both") && fb;
+  const useIg = (want === "instagram" || want === "both") && ig;
+  const platform: QueuePlatform | null =
+    useFb && useIg ? "both" : useFb ? "facebook" : useIg ? "instagram" : null;
   if (!platform) {
-    return NextResponse.json({ error: `No active channel for brand '${brand}'` }, { status: 400 });
+    return NextResponse.json(
+      { error: `No active channel for brand '${brand}' matching video_schedule.platform='${want}'` },
+      { status: 400 },
+    );
   }
 
   // reelsVideoUrl drives a true Reel on both platforms (publishSocialPayload).
@@ -112,10 +131,10 @@ export async function POST(request: Request) {
   // moves the post instead of double-publishing (mirrors /api/social/drafts/:id/schedule).
   await cancelPendingQueueItems("video", contentId);
 
-  // Auto-schedule on the next free slot from the VIDEO schedule (independent of social
-  // posts + blog). Occupancy is still per-platform (FB/IG), so a video and a social post
-  // can't double-book the same platform slot — the QueueSlotTakenError retry skips past it.
-  const videoSchedule = parseVideoSchedule(await getSetting("video_schedule"));
+  // Auto-schedule on the next free slot from the VIDEO schedule (read above; independent
+  // of social posts + blog). Occupancy is still per-platform (FB/IG), so a video and a
+  // social post can't double-book the same platform slot — the QueueSlotTakenError retry
+  // skips past it.
   const nowSec = Math.floor(Date.now() / 1000);
   const occupied = (await getOccupiedQueueSlots(platform)).map(sqliteToUnixSec);
 
