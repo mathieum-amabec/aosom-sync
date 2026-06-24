@@ -109,7 +109,8 @@ export async function POST(request: Request) {
   // and pick the same slot; the partial unique index rejects the loser with
   // QueueSlotTakenError, so retry past the now-taken slot a few times before giving up.
   const nowSec = Math.floor(Date.now() / 1000);
-  const taken = new Set(await getOccupiedQueueSlots(platform));
+  // Scope occupancy to this request's content_type — each queue has an independent slot pool.
+  const taken = new Set(await getOccupiedQueueSlots(platform, contentType as QueueContentType));
   for (let attempt = 0; attempt < 5; attempt++) {
     const scheduledAt = nextFreeSlot(nowSec, taken);
     if (scheduledAt === null) {

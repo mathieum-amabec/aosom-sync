@@ -120,8 +120,9 @@ describe('POST /api/social action="approve" → publication_queue', () => {
 
     expect(body.queuedCount).toBe(2);
     expect(db.addToQueue).toHaveBeenCalledTimes(2);
-    expect(db.getOccupiedQueueSlots).toHaveBeenCalledWith("both");
-    expect(db.getOccupiedQueueSlots).toHaveBeenCalledWith("facebook");
+    // Occupancy is now scoped to the 'social' queue (independent slot pool).
+    expect(db.getOccupiedQueueSlots).toHaveBeenCalledWith("both", "social");
+    expect(db.getOccupiedQueueSlots).toHaveBeenCalledWith("facebook", "social");
     // scheduledAt is the EARLIEST of the two booked slots.
     expect(body.scheduledAt).toBe(SLOT.at);
   });

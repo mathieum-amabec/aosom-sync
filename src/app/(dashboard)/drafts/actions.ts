@@ -43,10 +43,11 @@ export async function approveDraft(draftId: number): Promise<{ error?: string; s
         const nowSec = Math.floor(Date.now() / 1000);
         const items = draftToQueueItems(draft, activeChannels());
         for (const item of items) {
-          // Occupancy is per-platform; convert the queue's SQLite-datetime slots to unix sec.
-          const occupied = (await getOccupiedQueueSlots(item.platform)).map(sqliteToUnixSec);
+          // Occupancy is scoped to the 'social' queue (independent slot pool / max_per_day —
+          // social posts don't count video Reels). Convert SQLite-datetime → unix sec.
+          const occupied = (await getOccupiedQueueSlots(item.platform, "social")).map(sqliteToUnixSec);
           for (let attempt = 0; attempt < 5; attempt++) {
-            const next = await getNextAvailableSlot("facebook", settings, { nowSec, occupied });
+            const next = await getNextAvailableSlot("facebook", settings, { nowSec, occupied, contentType: "social" });
             if (!next) break; // schedule disabled or no free slot within the horizon
             try {
               await addToQueue({
