@@ -1,7 +1,26 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import type { PublicationSchedule, BlogSchedule, WeekdayKey } from "@/lib/config";
+import type {
+  PublicationSchedule,
+  BlogSchedule,
+  WeekdayKey,
+  VideoSchedule,
+  VideoRatio,
+  VideoPlatform,
+} from "@/lib/config";
+import { VIDEO_RATIOS, VIDEO_PLATFORMS } from "@/lib/config";
+
+const RATIO_LABELS: Record<VideoRatio, string> = {
+  "9:16": "📱 9:16",
+  "1:1": "⬛ 1:1",
+  "16:9": "🖥️ 16:9",
+};
+const PLATFORM_LABELS: Record<VideoPlatform, string> = {
+  facebook: "Facebook",
+  instagram: "Instagram",
+  both: "Les deux",
+};
 
 // Monday-first display order.
 const DAYS: { key: WeekdayKey; label: string }[] = [
@@ -152,7 +171,7 @@ function ScheduleGrid({
 
 export default function PublicationScheduleTab() {
   const [pub, setPub] = useState<PublicationSchedule | null>(null);
-  const [video, setVideo] = useState<PublicationSchedule | null>(null);
+  const [video, setVideo] = useState<VideoSchedule | null>(null);
   const [blog, setBlog] = useState<BlogSchedule | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -239,7 +258,59 @@ export default function PublicationScheduleTab() {
           </div>
           <Toggle on={video.enabled} onClick={() => setVideo({ ...video, enabled: !video.enabled })} />
         </div>
-        <ScheduleGrid schedule={video} onChange={setVideo} idPrefix="video" />
+
+        <div className={video.enabled ? "" : "opacity-50 pointer-events-none"}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Format (ratio)</label>
+              <div className="flex flex-wrap gap-2">
+                {VIDEO_RATIOS.map((r) => {
+                  const active = video.ratio === r;
+                  return (
+                    <button
+                      key={r}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setVideo({ ...video, ratio: r })}
+                      className={`px-3 py-1.5 rounded-lg text-sm border transition-colors font-mono ${
+                        active
+                          ? "bg-blue-600 border-blue-500 text-white"
+                          : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600"
+                      }`}
+                    >
+                      {RATIO_LABELS[r]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm text-gray-400 mb-2">Plateforme</label>
+              <div className="flex flex-wrap gap-2">
+                {VIDEO_PLATFORMS.map((p) => {
+                  const active = video.platform === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setVideo({ ...video, platform: p })}
+                      className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
+                        active
+                          ? "bg-blue-600 border-blue-500 text-white"
+                          : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600"
+                      }`}
+                    >
+                      {PLATFORM_LABELS[p]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <ScheduleGrid schedule={video} onChange={(next) => setVideo({ ...video, ...next })} idPrefix="video" />
       </div>
 
       {/* ── Blog ── */}

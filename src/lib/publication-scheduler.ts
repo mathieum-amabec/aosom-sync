@@ -15,7 +15,12 @@ import {
   type PublicationSlot,
   type BlogSchedule,
   type WeekdayKey,
+  type VideoSchedule,
+  type VideoRatio,
+  type VideoPlatform,
   WEEKDAY_KEYS,
+  VIDEO_RATIOS,
+  VIDEO_PLATFORMS,
   DEFAULT_PUBLICATION_SCHEDULE,
   DEFAULT_VIDEO_SCHEDULE,
   DEFAULT_BLOG_SCHEDULE,
@@ -99,9 +104,17 @@ export function normalizePublicationSchedule(raw: unknown): PublicationSchedule 
   return normalizeScheduleWith(raw, DEFAULT_PUBLICATION_SCHEDULE);
 }
 
-/** Coerce arbitrary JSON into a valid video schedule (same shape, video defaults). */
-export function normalizeVideoSchedule(raw: unknown): PublicationSchedule {
-  return normalizeScheduleWith(raw, DEFAULT_VIDEO_SCHEDULE);
+/** Coerce arbitrary JSON into a valid video schedule (base shape + ratio/platform). */
+export function normalizeVideoSchedule(raw: unknown): VideoSchedule {
+  const base = normalizeScheduleWith(raw, DEFAULT_VIDEO_SCHEDULE);
+  const r = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const ratio = (VIDEO_RATIOS as readonly string[]).includes(r.ratio as string)
+    ? (r.ratio as VideoRatio)
+    : DEFAULT_VIDEO_SCHEDULE.ratio;
+  const platform = (VIDEO_PLATFORMS as readonly string[]).includes(r.platform as string)
+    ? (r.platform as VideoPlatform)
+    : DEFAULT_VIDEO_SCHEDULE.platform;
+  return { ...base, ratio, platform };
 }
 
 /** Collapse multiple slots for the same weekday into one, in weekday order. */
@@ -151,8 +164,8 @@ export function parseBlogSchedule(rawJson: string | null | undefined): BlogSched
   }
 }
 
-/** Parse the stored video_schedule JSON (or null) into a PublicationSchedule; video defaults on error. */
-export function parseVideoSchedule(rawJson: string | null | undefined): PublicationSchedule {
+/** Parse the stored video_schedule JSON (or null) into a VideoSchedule; video defaults on error. */
+export function parseVideoSchedule(rawJson: string | null | undefined): VideoSchedule {
   if (!rawJson) return clone(DEFAULT_VIDEO_SCHEDULE);
   try {
     return normalizeVideoSchedule(JSON.parse(rawJson));

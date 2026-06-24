@@ -2,6 +2,30 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.151] - 2026-06-24
+
+### Added (Video schedule — ratio + platform)
+- **`src/lib/config.ts`** — new `VideoSchedule` type (extends `PublicationSchedule`) with
+  `ratio: '9:16' | '1:1' | '16:9'` (default `9:16`) and `platform: 'facebook' | 'instagram' | 'both'`
+  (default `both`), plus `VIDEO_RATIOS` / `VIDEO_PLATFORMS` constants. `DEFAULT_VIDEO_SCHEDULE`
+  now carries both fields.
+- **`src/lib/publication-scheduler.ts`** — `normalizeVideoSchedule` / `parseVideoSchedule` now
+  validate and persist `ratio` + `platform`, falling back to the defaults on invalid input.
+  `/api/settings/schedule` (GET + PATCH) round-trips them unchanged (it delegates to these).
+- **`src/app/(dashboard)/settings/PublicationScheduleTab.tsx`** — the Vidéos section gains a
+  **ratio selector** (📱 9:16 / ⬛ 1:1 / 🖥️ 16:9) and a **platform selector**
+  (Facebook / Instagram / Les deux).
+
+### Changed (queue-reel — schedule-driven)
+- **`src/app/api/social/queue-reel/route.ts`** — `ratio` is now driven by `video_schedule.ratio`
+  (request body may still override per-call; validated against `VIDEO_RATIOS`), replacing the
+  hardcoded `9:16`-only rule. `platform` is driven by `video_schedule.platform`, intersected with
+  the brand's active channels (never posts to an inactive channel).
+- Caveat: Instagram Reels must be vertical (9:16); a non-9:16 ratio targeting IG yields a
+  non-Reel-valid post. Not hard-blocked — flagged as a product decision.
+- Tests: `tests/queue-reel-route.test.ts` updated for the schedule-driven contract (+ ratio
+  default-from-schedule, platform-narrowing, and inactive-channel cases).
+
 ## [0.5.53.150] - 2026-06-24
 
 ### Changed (demand-gen render — exclude supplier-logo SKUs)
