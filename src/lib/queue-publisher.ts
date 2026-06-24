@@ -19,6 +19,8 @@
 import { type FacebookBrand } from "./facebook-client";
 import { publishSocialPayload, type SocialPayload } from "./social-publisher";
 import { createBlogArticle } from "./shopify-blog";
+import { getAnthropicClient } from "./content-generator";
+import { CLAUDE } from "./config";
 import {
   getNextPending,
   claimQueueItem,
@@ -160,6 +162,40 @@ async function publishToBoth(p: SocialQueuePayload): Promise<PublishItemResult> 
   };
 }
 
+const LANG_LABEL = { fr: "français", en: "anglais" } as const;
+
+/**
+ * Generate a short clickbait caption for a Reel at publish time, so the posted copy is
+ * punchier than the stored product title. Returns the generated text, or `null` on any
+ * failure (empty/refused/non-text response, API error) — the caller then keeps the original
+ * caption. Caption generation must NEVER block a publish, so every failure path is non-fatal.
+ */
+export async function generateReelCaption(
+  productText: string,
+  language: "fr" | "en",
+): Promise<string | null> {
+  const prompt =
+    `Génère un texte Facebook/Instagram clickbait de 2-3 phrases en ${LANG_LABEL[language]} ` +
+    `pour ce produit : ${productText}. Accrocheur, émoji, appel à l'action. Max 150 caractères. ` +
+    `Pas de hashtags — ils seront ajoutés séparément. Réponds uniquement avec le texte, sans guillemets.`;
+  try {
+    const message = await getAnthropicClient().messages.create({
+      model: CLAUDE.MODEL,
+      max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const block = message.content[0];
+    if (!block || block.type !== "text") return null;
+    const text = block.text.trim().replace(/^["']+|["']+$/g, "").trim();
+    return text || null;
+  } catch (err) {
+    console.warn(
+      `[publisher] Reel clickbait generation failed, keeping original caption: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}
+
 /**
  * Guard that content_type agrees with platform before dispatch. The DB CHECK constraints
  * allow any combination, and dispatch keys only on platform — so a row with
@@ -188,6 +224,28 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
     raw = JSON.parse(item.payload);
   } catch {
     throw new Error("payload is not valid JSON");
+  }
+
+  // Reels (content_type='video' with a reelsVideoUrl): regenerate the caption as fresh
+  // clickbait at publish time. Language follows the brand (furnish → EN, ameublo → FR).
+  // If generation fails, keep the stored caption — never block the publish.
+  if (item.contentType === "video") {
+    const social = parseSocialPayload(raw);
+    if (social.reelsVideoUrl) {
+      const language: "fr" | "en" = social.brand === "furnish" ? "en" : "fr";
+      const clickbait = await generateReelCaption(social.caption, language);
+      const finalPayload: SocialQueuePayload = clickbait ? { ...social, caption: clickbait } : social;
+      switch (item.platform) {
+        case "facebook":
+          return { postId: (await publishSocialPayload("facebook", toSocialPayload(finalPayload))).postId };
+        case "instagram":
+          return { postId: (await publishSocialPayload("instagram", toSocialPayload(finalPayload))).postId };
+        case "both":
+          return publishToBoth(finalPayload);
+        default:
+          throw new Error(`Unsupported platform for video content_type: ${item.platform}`);
+      }
+    }
   }
 
   switch (item.platform) {
