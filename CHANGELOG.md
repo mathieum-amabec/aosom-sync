@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.148] - 2026-06-24
+
+### Removed (dedupe — Vidéos settings UI)
+- **Deleted `src/app/(dashboard)/settings/VideoScheduleTab.tsx`** and its dedicated "Vidéos" tab in
+  `settings/page.tsx`. It was a non-functional stub (parallel PR #285): it fetched a
+  `/api/settings/video-schedule` endpoint that doesn't exist (404) and its Save was a disabled
+  placeholder. The **functional** Vidéos schedule UI ships in the **Publication** tab
+  (`PublicationScheduleTab.tsx`, v0.5.53.145) — wired to `/api/settings/schedule` + the `video_schedule`
+  setting + `publication_queue`. Removing the stub leaves one source of truth.
+
 ## [0.5.53.147] - 2026-06-23
 
 ### Added (Settings — Vidéos tab, static UI)
