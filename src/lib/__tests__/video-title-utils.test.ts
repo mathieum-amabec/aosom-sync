@@ -98,10 +98,13 @@ describe("formatVideoTitle — slideshow mode (preserve case, no catalogue clean
     );
   });
 
-  it("still strips ellipsis and the 'avec …' tail, and cuts on a word boundary", () => {
+  it("KEEPS the 'avec …' clause (only aggressive mode drops it) but strips ellipsis", () => {
     expect(formatVideoTitle("Buffet enfilade moderne avec tiroirs…", 48, slideshow)).toBe(
-      "Buffet enfilade moderne",
+      "Buffet enfilade moderne avec tiroirs",
     );
+  });
+
+  it("still cuts an over-length name on a word boundary, never an ellipsis", () => {
     const long = formatVideoTitle(
       "Jardinière surélevée en acier galvanisé avec tiges renforcées 180 cm",
       48,
@@ -109,6 +112,7 @@ describe("formatVideoTitle — slideshow mode (preserve case, no catalogue clean
     );
     expect(long.length).toBeLessThanOrEqual(48);
     expect(long).not.toContain("…");
-    expect(long).toBe("Jardinière surélevée en acier galvanisé"); // cut at " avec …"
+    // cut lands right after "avec" → the dangling connector is stripped
+    expect(long).toBe("Jardinière surélevée en acier galvanisé");
   });
 });

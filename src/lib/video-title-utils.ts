@@ -56,8 +56,9 @@ export interface FormatVideoTitleOptions {
  * Produit un titre court et lisible pour les overlays vidéo.
  * - Max `maxChars` caractères (défaut 40), coupé UNIQUEMENT sur un espace.
  * - Jamais de "…"/"..." (les ellipses existantes sont retirées, aucune n'est ajoutée).
- * - Retire le suffixe "AVEC …" et les mots de remplissage finaux.
- * - En mode `aggressive` : retire les descripteurs décoratifs + met en MAJUSCULES (fr-CA).
+ * - Retire les mots de remplissage finaux (connecteurs orphelins en fin de chaîne).
+ * - En mode `aggressive` : retire aussi le suffixe "AVEC …", les descripteurs décoratifs
+ *   et met en MAJUSCULES (fr-CA). En mode non-aggressive, la casse et la clause "avec …" sont conservées.
  */
 export function formatVideoTitle(
   rawTitle: string,
@@ -75,11 +76,11 @@ export function formatVideoTitle(
     .replace(/\s+/g, " ")
     .trim();
 
-  // 2. Drop the "AVEC …" suffix (and a bare trailing "AVEC"), case-insensitive.
-  t = t.replace(/\s+AVEC\b.*$/iu, "").trim();
-
-  // 3. Catalogue cleanup (demand-gen overlays) — operates on the upper-cased form.
+  // 2. Catalogue cleanup (demand-gen overlays) — operates on the upper-cased form.
+  //    The "AVEC …" clause drop is aggressive-only: the generic slideshow keeps it
+  //    (a product name like "Table avec rallonge incluse" must stay intact).
   if (aggressive) {
+    t = t.replace(/\s+AVEC\b.*$/iu, "").trim(); // drop the "AVEC …" tail
     t = up(t);
     const lead = t.split(" ");
     if (lead.length > 1 && LEADING_DROP.has(lead[0])) t = lead.slice(1).join(" ");

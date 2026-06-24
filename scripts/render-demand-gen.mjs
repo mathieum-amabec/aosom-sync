@@ -140,8 +140,8 @@ function formatVideoTitle(rawTitle, maxChars = 40, opts = {}) {
     .replace(/\s*[—–]\s*/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  t = t.replace(/\s+AVEC\b.*$/iu, "").trim();
   if (aggressive) {
+    t = t.replace(/\s+AVEC\b.*$/iu, "").trim(); // drop the "AVEC …" tail (aggressive only)
     t = up(t);
     const lead = t.split(" ");
     if (lead.length > 1 && LEADING_DROP.has(lead[0])) t = lead.slice(1).join(" ");
