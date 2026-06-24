@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.147] - 2026-06-23
+
+### Added (Settings — Vidéos tab, static UI)
+- **`src/app/(dashboard)/settings/VideoScheduleTab.tsx`** (new) — a "Vidéos" schedule tab
+  mirroring `PublicationScheduleTab`: enable toggle, ratio selector (9:16 / 1:1 / 16:9),
+  platform selector (Facebook / Instagram / Les deux), day×time slot grid, max-per-day, and
+  timezone. `load()`/`save()` are wired as stubs against `GET`/`PATCH /api/settings/video-schedule`
+  but tolerate the endpoint not existing yet (404/network error → keep local defaults).
+- **`src/app/(dashboard)/settings/page.tsx`** — mounts the new tab: adds `"video"` to the tab
+  union and the tab bar (`Vidéos`), renders `<VideoScheduleTab />` when selected.
+- The `VideoSchedule` type is defined locally (marked `TODO(T1)`) pending the shared type +
+  endpoint from the video-schedule backend work. A ⚠ banner stays visible until the endpoint
+  answers (`endpointReady` flips on a successful load/save), so the UI never silently pretends
+  to persist. No new API route is added in this change.
+
 ## [0.5.53.146] - 2026-06-23
 
 ### Changed (Google Merchant feed — emit g:mpn for PMax)
