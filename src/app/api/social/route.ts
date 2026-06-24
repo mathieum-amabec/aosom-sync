@@ -111,12 +111,13 @@ export async function POST(request: Request) {
         let queuedCount = 0;
         let earliestSec: number | undefined; // earliest booked slot (unix sec) for the response
         for (const item of items) {
-          // Occupancy is per-platform: convert the queue's SQLite-datetime slots to unix sec.
-          const occupied = (await getOccupiedQueueSlots(item.platform)).map(sqliteToUnixSec);
+          // Occupancy is scoped to the 'social' queue (independent slot pool / max_per_day —
+          // social posts don't count video Reels). Convert SQLite-datetime → unix sec.
+          const occupied = (await getOccupiedQueueSlots(item.platform, "social")).map(sqliteToUnixSec);
           // Two approvals can pick the same slot; the queue's partial-unique index rejects the
           // loser with QueueSlotTakenError, so retry past the now-taken slot (mirrors /api/queue/add).
           for (let attempt = 0; attempt < 5; attempt++) {
-            const next = await getNextAvailableSlot("facebook", settings, { nowSec, occupied });
+            const next = await getNextAvailableSlot("facebook", settings, { nowSec, occupied, contentType: "social" });
             if (!next) break; // schedule disabled or no free slot within the horizon
             try {
               await addToQueue({

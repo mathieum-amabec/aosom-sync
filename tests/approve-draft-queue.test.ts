@@ -82,8 +82,9 @@ describe("approveDraft() → publication_queue (all draft types auto-schedule)",
     const result = await approveDraft(1);
 
     expect(db.addToQueue).toHaveBeenCalledTimes(2);
-    expect(db.getOccupiedQueueSlots).toHaveBeenCalledWith("both");
-    expect(db.getOccupiedQueueSlots).toHaveBeenCalledWith("facebook");
+    // Occupancy is now scoped to the 'social' queue (independent slot pool).
+    expect(db.getOccupiedQueueSlots).toHaveBeenCalledWith("both", "social");
+    expect(db.getOccupiedQueueSlots).toHaveBeenCalledWith("facebook", "social");
     expect(result.scheduledAt).toBe(SLOT.at); // earliest of the two
   });
 
