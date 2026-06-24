@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.150] - 2026-06-24
+
+### Changed (demand-gen render — exclude supplier-logo SKUs)
+- **`scripts/render-demand-gen.mjs`** — added `EXCLUDED_SKUS = ['823-002V80', '823-010V81']` and
+  filtered the render set so these two SKUs are skipped. Their source footage burns in a HOMCOM
+  supplier logo the delogo crop can't fully remove, so we don't ship demand-gen videos for them.
+  The filter applies even when a SKU is named explicitly via `--only`.
+
 ## [0.5.53.149] - 2026-06-24
 
 ### Fixed (Demand-gen video titles)

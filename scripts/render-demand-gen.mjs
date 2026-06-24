@@ -98,6 +98,11 @@ const SOURCES = [
   { sku:"835-135V80RB", title:"Ensemble table de bar 3 pièces avec tabourets", ss:4.0, cleanDur:14.0, delogo:null, buckets:[6,15] },
 ];
 
+// SKUs to skip at render: the source footage burns in a HOMCOM supplier logo that the
+// delogo crop can't fully remove, so we don't ship demand-gen videos for them. Filtered
+// out of the render set below (even if named via --only).
+const EXCLUDED_SKUS = ['823-002V80', '823-010V81'];
+
 const RATIOS = {
   "16:9": { W:1920, H:1080, titleFs:54, benFs:46, wrap:42 },
   "1:1":  { W:1080, H:1080, titleFs:46, benFs:40, wrap:24 },
@@ -239,7 +244,9 @@ const report = [];
 let ok = 0, fail = 0, bytes = 0;
 // Optional CLI SKU filter: `node scripts/render-demand-gen.mjs 01-0415 845-774V00BK`
 const ONLY = process.argv.slice(2).filter((a) => !a.startsWith("-"));
-const sources = ONLY.length ? SOURCES.filter((s) => ONLY.includes(s.sku)) : SOURCES;
+const selected = ONLY.length ? SOURCES.filter((s) => ONLY.includes(s.sku)) : SOURCES;
+// Always drop EXCLUDED_SKUS (supplier-logo footage) — even if explicitly named via --only.
+const sources = selected.filter((s) => !EXCLUDED_SKUS.includes(s.sku));
 if (ONLY.length) {
   const missing = ONLY.filter((x) => !sources.some((s) => s.sku === x));
   if (missing.length) { console.error("Unknown SKU(s):", missing.join(", ")); process.exit(1); }
