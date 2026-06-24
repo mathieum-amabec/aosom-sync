@@ -38,7 +38,10 @@ function mockAll(dbOver: Record<string, unknown> = {}) {
       ig_furnish: { platform: "instagram", brand: "furnish" },
     },
   }));
-  vi.doMock("@/lib/publication-scheduler", () => ({ getNextAvailableSlot: vi.fn().mockResolvedValue(SLOT) }));
+  vi.doMock("@/lib/publication-scheduler", () => ({
+    getNextAvailableSlot: vi.fn().mockResolvedValue(SLOT),
+    parseVideoSchedule: vi.fn().mockReturnValue({ enabled: true, slots: [], timezone: "America/Toronto", max_per_day: 2 }),
+  }));
   const db = {
     getDemandGenAssets: vi.fn().mockResolvedValue(ASSETS),
     getSetting: vi.fn().mockResolvedValue('{"enabled":true}'),
@@ -65,12 +68,12 @@ describe("POST /api/social/queue-reel", () => {
     expect(json.platform).toBe("both");
     expect(json.durationSec).toBe(30); // longest cut chosen by default
     expect(db.addToQueue).toHaveBeenCalledWith(
-      expect.objectContaining({ contentType: "social", platform: "both", scheduledAt: SLOT.sqlite }),
+      expect.objectContaining({ contentType: "video", platform: "both", scheduledAt: SLOT.sqlite }),
     );
     const payload = JSON.parse((db.addToQueue as ReturnType<typeof vi.fn>).mock.calls[0][0].payload);
     expect(payload).toEqual({ caption: "Ventilateur tour", brand: "ameublo", reelsVideoUrl: "https://blob/30.mp4" });
-    // re-queue safety: prior pending rows for this exact reel are cancelled first
-    expect(db.cancelPendingQueueItems).toHaveBeenCalledWith("social", "reel:824-051V80BK:9:16:30");
+    // re-queue safety: prior pending rows for this exact reel are cancelled first (content_type='video')
+    expect(db.cancelPendingQueueItems).toHaveBeenCalledWith("video", "reel:824-051V80BK:9:16:30");
   });
 
   it("honours explicit duration_sec", async () => {
@@ -126,7 +129,10 @@ describe("POST /api/social/queue-reel", () => {
     const addToQueue = vi.fn().mockRejectedValueOnce(new QueueSlotTakenError()).mockResolvedValueOnce(43);
     const getNextAvailableSlot = vi.fn().mockResolvedValueOnce(SLOT).mockResolvedValueOnce(SLOT2);
     mockAll({ addToQueue });
-    vi.doMock("@/lib/publication-scheduler", () => ({ getNextAvailableSlot }));
+    vi.doMock("@/lib/publication-scheduler", () => ({
+      getNextAvailableSlot,
+      parseVideoSchedule: vi.fn().mockReturnValue({ enabled: true, slots: [], timezone: "America/Toronto", max_per_day: 2 }),
+    }));
     const { POST } = await import("@/app/api/social/queue-reel/route");
     const res = await POST(req({ sku: "824-051V80BK", ratio: "9:16", language: "fr" }));
     const json = await res.json();

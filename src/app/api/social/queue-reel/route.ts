@@ -9,7 +9,7 @@ import {
   QueueSlotTakenError,
   type QueuePlatform,
 } from "@/lib/database";
-import { getNextAvailableSlot } from "@/lib/publication-scheduler";
+import { getNextAvailableSlot, parseVideoSchedule } from "@/lib/publication-scheduler";
 import { activeChannels, CHANNEL_META } from "@/lib/config";
 import type { SocialQueuePayload } from "@/lib/queue-publisher";
 
@@ -110,15 +110,17 @@ export async function POST(request: Request) {
 
   // Re-queue safety: drop any existing pending rows for this exact reel so a repeat call
   // moves the post instead of double-publishing (mirrors /api/social/drafts/:id/schedule).
-  await cancelPendingQueueItems("social", contentId);
+  await cancelPendingQueueItems("video", contentId);
 
-  // Auto-schedule on the next free slot (mirrors POST /api/social {action:"approve"}).
-  const settings = { publication_schedule: (await getSetting("publication_schedule")) ?? "" };
+  // Auto-schedule on the next free slot from the VIDEO schedule (independent of social
+  // posts + blog). Occupancy is still per-platform (FB/IG), so a video and a social post
+  // can't double-book the same platform slot — the QueueSlotTakenError retry skips past it.
+  const videoSchedule = parseVideoSchedule(await getSetting("video_schedule"));
   const nowSec = Math.floor(Date.now() / 1000);
   const occupied = (await getOccupiedQueueSlots(platform)).map(sqliteToUnixSec);
 
   for (let attempt = 0; attempt < 5; attempt++) {
-    const next = await getNextAvailableSlot("facebook", settings, { nowSec, occupied });
+    const next = await getNextAvailableSlot("facebook", {}, { nowSec, occupied, schedule: videoSchedule });
     if (!next) {
       return NextResponse.json(
         { error: "No free publication slot (schedule disabled or full within the horizon)" },
@@ -127,7 +129,7 @@ export async function POST(request: Request) {
     }
     try {
       const queueId = await addToQueue({
-        contentType: "social",
+        contentType: "video",
         contentId,
         platform,
         payload: JSON.stringify(payload),
