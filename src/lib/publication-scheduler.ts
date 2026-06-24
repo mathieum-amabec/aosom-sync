@@ -17,6 +17,7 @@ import {
   type WeekdayKey,
   WEEKDAY_KEYS,
   DEFAULT_PUBLICATION_SCHEDULE,
+  DEFAULT_VIDEO_SCHEDULE,
   DEFAULT_BLOG_SCHEDULE,
 } from "@/lib/config";
 import { getScheduledDraftSlots } from "@/lib/database";
@@ -78,9 +79,8 @@ function normalizeSlot(raw: unknown): PublicationSlot | null {
   return { day: r.day, times: unique };
 }
 
-/** Coerce arbitrary JSON into a valid PublicationSchedule, falling back to defaults per-field. */
-export function normalizePublicationSchedule(raw: unknown): PublicationSchedule {
-  const d = DEFAULT_PUBLICATION_SCHEDULE;
+/** Coerce arbitrary JSON into a valid PublicationSchedule, falling back per-field to `d`. */
+function normalizeScheduleWith(raw: unknown, d: PublicationSchedule): PublicationSchedule {
   if (!raw || typeof raw !== "object") return clone(d);
   const r = raw as Record<string, unknown>;
   const slots = Array.isArray(r.slots)
@@ -92,6 +92,16 @@ export function normalizePublicationSchedule(raw: unknown): PublicationSchedule 
     timezone: isValidTimeZone(r.timezone) ? r.timezone : d.timezone,
     max_per_day: clampInt(r.max_per_day, 1, 5, d.max_per_day),
   };
+}
+
+/** Coerce arbitrary JSON into a valid PublicationSchedule (social defaults). */
+export function normalizePublicationSchedule(raw: unknown): PublicationSchedule {
+  return normalizeScheduleWith(raw, DEFAULT_PUBLICATION_SCHEDULE);
+}
+
+/** Coerce arbitrary JSON into a valid video schedule (same shape, video defaults). */
+export function normalizeVideoSchedule(raw: unknown): PublicationSchedule {
+  return normalizeScheduleWith(raw, DEFAULT_VIDEO_SCHEDULE);
 }
 
 /** Collapse multiple slots for the same weekday into one, in weekday order. */
@@ -138,6 +148,16 @@ export function parseBlogSchedule(rawJson: string | null | undefined): BlogSched
     return normalizeBlogSchedule(JSON.parse(rawJson));
   } catch {
     return clone(DEFAULT_BLOG_SCHEDULE);
+  }
+}
+
+/** Parse the stored video_schedule JSON (or null) into a PublicationSchedule; video defaults on error. */
+export function parseVideoSchedule(rawJson: string | null | undefined): PublicationSchedule {
+  if (!rawJson) return clone(DEFAULT_VIDEO_SCHEDULE);
+  try {
+    return normalizeVideoSchedule(JSON.parse(rawJson));
+  } catch {
+    return clone(DEFAULT_VIDEO_SCHEDULE);
   }
 }
 
@@ -277,9 +297,11 @@ export interface NextSlot {
 export async function getNextAvailableSlot(
   platform: PublishPlatform,
   settings: Record<string, string>,
-  opts: { nowSec?: number; occupied?: number[] } = {},
+  opts: { nowSec?: number; occupied?: number[]; schedule?: PublicationSchedule } = {},
 ): Promise<NextSlot | null> {
-  const schedule = parsePublicationSchedule(settings.publication_schedule);
+  // `opts.schedule` lets callers slot against a non-default schedule (e.g. video_schedule)
+  // while keeping the same occupancy + max_per_day logic. Defaults to publication_schedule.
+  const schedule = opts.schedule ?? parsePublicationSchedule(settings.publication_schedule);
   if (!schedule.enabled) return null;
 
   const nowSec = opts.nowSec ?? Math.floor(Date.now() / 1000);
