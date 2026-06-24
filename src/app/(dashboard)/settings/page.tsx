@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import PublicationScheduleTab from "./PublicationScheduleTab";
+import VideoScheduleTab from "./VideoScheduleTab";
 
 interface Settings {
   [key: string]: string;
@@ -214,7 +215,7 @@ export default function SettingsPage() {
   const [testResults, setTestResults] = useState<Record<string, string>>({});
   const [testingPrompt, setTestingPrompt] = useState<string | null>(null);
   const [promptPreview, setPromptPreview] = useState<Record<string, string>>({});
-  const [tab, setTab] = useState<"general" | "publication">("general");
+  const [tab, setTab] = useState<"general" | "publication" | "video">("general");
 
   useEffect(() => {
     fetch("/api/settings")
@@ -350,6 +351,7 @@ export default function SettingsPage() {
         {([
           { key: "general", label: "Général" },
           { key: "publication", label: "Publication" },
+          { key: "video", label: "Vidéos" },
         ] as const).map((t) => (
           <button
             key={t.key}
@@ -366,6 +368,8 @@ export default function SettingsPage() {
       </div>
 
       {tab === "publication" && <PublicationScheduleTab />}
+
+      {tab === "video" && <VideoScheduleTab />}
 
       <div className={`space-y-6 ${tab === "general" ? "" : "hidden"}`}>
         {SECTIONS.map((section) => (
