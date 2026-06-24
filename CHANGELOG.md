@@ -2,7 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.152] - 2026-06-24
+## [0.5.53.153] - 2026-06-24
+
+### Changed (full 4-way queue isolation)
+- Completes the per-content-type slot pools started in v0.5.53.152. The remaining `getNextAvailableSlot`
+  callers now scope occupancy to their own `content_type`, so no queue crowds out another:
+  - **`drafts/actions.ts`** + **`api/social/route.ts`** (approve → enqueue) pass `content_type='social'`.
+  - **`api/queue/add/route.ts`** passes the request's `content_type`.
+  - Blog stays isolated by its `shopify_blog` platform (no change needed).
+- All these callers already have the `QueueSlotTakenError` retry loop, so independent pools can't
+  hard-fail on a rare physical (platform, scheduled_at) collision — they skip past it.
+- Tests: `approve-draft-queue` / `social-approve-queue` now assert occupancy is queried with the
+  `'social'` scope.
 
 ### Changed (independent video queue — Reels no longer crowded out by social posts)
 - **`getOccupiedQueueSlots(platform, contentType?)`** (`database.ts`) — optional `content_type`
