@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.149] - 2026-06-24
+
+### Fixed (Demand-gen video titles)
+- **No more truncated `…` titles.** New `src/lib/video-title-utils.ts` `formatVideoTitle()` shortens
+  overlay titles on a word boundary (never mid-word), strips any existing ellipsis, drops the
+  `AVEC …` tail + decorative descriptors, and upper-cases (fr-CA). Replaces the old
+  `truncate(…,35)+"…"` in `scripts/render-demand-gen.mjs` (the demand-gen Reel renderer) and the
+  hard `product.name.slice(0,48)` in `video-engines/ffmpeg-slideshow.ts`.
+  - Slideshow mode (`{uppercase:false, aggressive:false}`) preserves the product name's casing and
+    keeps meaningful `avec …` clauses; only the demand-gen overlays get the aggressive cleanup.
+  - 22 unit tests (the 7 catalogue cases + edge cases + slideshow mode).
+- **De-flaked** `tests/queue-reel-route.test.ts` slot-retry test — `publication-scheduler` was
+  `vi.doMock`'d twice (nondeterministic winner); routed the override through `mockAll` so the module
+  is mocked once.
+
 ## [0.5.53.148] - 2026-06-24
 
 ### Removed (dedupe — Vidéos settings UI)
