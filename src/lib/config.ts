@@ -388,6 +388,19 @@ export const DEFAULT_BLOG_SCHEDULE: BlogSchedule = {
   preferred_time: "10:00",
 };
 
+// Video reels publish on their OWN schedule, independent of social posts and the blog
+// (same shape as PublicationSchedule). Lighter default cadence than social.
+export const DEFAULT_VIDEO_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: [
+    { day: "wed", times: ["10:00"] },
+    { day: "fri", times: ["10:00"] },
+    { day: "sat", times: ["10:00"] },
+  ],
+  timezone: "America/Toronto",
+  max_per_day: 2,
+};
+
 // ─── Settings Allowlist ─────────────────────────────────────────────
 // Single source of truth — used by both the API route and the UI.
 
@@ -422,4 +435,6 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   // blog_schedule (BlogSchedule) carries posts_per_week — the blog auto-publish weekly cap.
   "publication_schedule",
   "blog_schedule",
+  // video_schedule (PublicationSchedule shape) — independent reel/video cadence.
+  "video_schedule",
 ]);

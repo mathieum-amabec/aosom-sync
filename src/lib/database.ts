@@ -378,7 +378,7 @@ async function _initSchemaImpl(): Promise<void> {
     // otherwise make a row invisible to every status-filtered query.
     `CREATE TABLE IF NOT EXISTS publication_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog')),
+      content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video')),
       content_id TEXT NOT NULL,      -- ID of the source draft/post
       platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
       payload TEXT NOT NULL,         -- JSON-stringified content
@@ -400,6 +400,40 @@ async function _initSchemaImpl(): Promise<void> {
 
   const allStatements = [...schemaStatements, ...legacyStatements];
   await runBatch("schema+legacy DDL", allStatements.map(sql => ({ sql, args: [] })));
+
+  // publication_queue.content_type CHECK migration: ('social','draft','blog') → +'video'.
+  // SQLite can't ALTER a CHECK, so rebuild the table when the live DDL still lacks 'video'.
+  // Guarded on the stored table SQL → runs at most once, and is a no-op on fresh DBs (whose
+  // CREATE already includes 'video'). runBatch is transactional, so the swap is atomic.
+  const pqDef = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='publication_queue'`,
+  );
+  const pqSql = pqDef.rows[0] ? String((pqDef.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (pqSql && !pqSql.includes("'video'")) {
+    await runBatch("publication_queue content_type CHECK +video", [
+      // Drop any leftover scratch table from a crashed prior attempt so the rebuild is re-runnable.
+      { sql: `DROP TABLE IF EXISTS publication_queue_new`, args: [] },
+      { sql: `CREATE TABLE publication_queue_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video')),
+        content_id TEXT NOT NULL,
+        platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
+        payload TEXT NOT NULL,
+        scheduled_at TEXT NOT NULL,
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled')),
+        error TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        published_at TEXT
+      )`, args: [] },
+      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at)
+              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at FROM publication_queue`, args: [] },
+      { sql: `DROP TABLE publication_queue`, args: [] },
+      { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
+      // Indexes were dropped with the old table — recreate both on the rebuilt one.
+      { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
+      { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
+    ]);
+  }
 
   // Column migrations for facebook_drafts (post_text_en, channels) — SQLite can't IF NOT EXISTS on ALTER
   const info = await db.execute(`PRAGMA table_info(facebook_drafts)`);
@@ -2712,7 +2746,7 @@ export async function deleteFacebookDraft(id: number): Promise<void> {
 // getNextPending compares lexicographically against datetime('now'). Producers
 // MUST store slots in that exact format (see toSqliteUtc in draft-scheduler).
 
-export type QueueContentType = "social" | "draft" | "blog";
+export type QueueContentType = "social" | "draft" | "blog" | "video";
 export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog";
 export type QueueStatus = "pending" | "publishing" | "published" | "failed" | "cancelled";
 
