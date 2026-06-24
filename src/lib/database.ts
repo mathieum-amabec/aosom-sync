@@ -2882,11 +2882,20 @@ export async function getPendingQueue(): Promise<PublicationQueueItem[]> {
  * unique index, so the next-free-slot search and the integrity backstop agree. Failed/
  * cancelled items free their slot.
  */
-export async function getOccupiedQueueSlots(platform: string): Promise<string[]> {
+export async function getOccupiedQueueSlots(
+  platform: string,
+  contentType?: QueueContentType,
+): Promise<string[]> {
   const db = await ensureSchema();
+  // `contentType` scopes occupancy to one queue (independent slot pools per content_type):
+  // pass 'video' and only video rows count, so Reels never get crowded out by social posts.
+  // Omit it for the legacy shared view (counts every content_type on the platform).
+  // The status set stays pending/publishing/published — a published slot is still taken.
   const result = await db.execute({
-    sql: `SELECT scheduled_at FROM publication_queue WHERE platform = ? AND status IN ('pending', 'publishing', 'published')`,
-    args: [platform],
+    sql: `SELECT scheduled_at FROM publication_queue
+          WHERE platform = ? AND status IN ('pending', 'publishing', 'published')
+            AND (? IS NULL OR content_type = ?)`,
+    args: [platform, contentType ?? null, contentType ?? null],
   });
   return result.rows.map((r) => String(rowToObj(r).scheduled_at));
 }

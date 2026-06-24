@@ -19,6 +19,7 @@ vi.mock("@/lib/database", () => ({
   markPublished: vi.fn().mockResolvedValue(undefined),
   markFailed: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/content-generator", () => ({ getAnthropicClient: vi.fn() }));
 
 import {
   publishQueueItem,
@@ -35,6 +36,17 @@ import {
 import { publishPhoto, publishReel } from "@/lib/instagram-client";
 import { createBlogArticle } from "@/lib/shopify-blog";
 import { getNextPending, claimQueueItem, markPublished, markFailed } from "@/lib/database";
+import { getAnthropicClient } from "@/lib/content-generator";
+
+const mockGetClient = getAnthropicClient as unknown as ReturnType<typeof vi.fn>;
+/** Stub the Anthropic client so messages.create returns `text` (or throws if `text` is null). */
+function stubClaude(text: string | null) {
+  const create = text === null
+    ? vi.fn().mockRejectedValue(new Error("claude down"))
+    : vi.fn().mockResolvedValue({ content: [{ type: "text", text }] });
+  mockGetClient.mockReturnValue({ messages: { create } } as never);
+  return create;
+}
 
 function item(overrides: Partial<{ id: number; platform: string; payload: unknown; contentType: string }>) {
   const payload = overrides.payload;
@@ -240,5 +252,62 @@ describe("drainPublisherQueue", () => {
     expect(claimQueueItem).toHaveBeenCalledTimes(1); // only item 1 claimed
     expect(markPublished).toHaveBeenCalledTimes(1);
     expect(res).toMatchObject({ processed: 1, published: 1, deferred: 2 });
+  });
+});
+
+
+describe("publishQueueItem — Reel clickbait caption (content_type=video)", () => {
+  it("replaces the stored caption with Claude-generated clickbait before posting (IG reel)", async () => {
+    const create = stubClaude("🔥 Ce ventilateur va vous rafraîchir! Commandez maintenant 👉");
+    await publishQueueItem(
+      item({
+        platform: "instagram",
+        contentType: "video",
+        payload: social({ reelsVideoUrl: "https://blob/r.mp4", caption: "Ventilateur tour oscillant" }),
+      }),
+    );
+    expect(create).toHaveBeenCalledOnce();
+    expect(publishReel).toHaveBeenCalledWith(
+      expect.objectContaining({ caption: "🔥 Ce ventilateur va vous rafraîchir! Commandez maintenant 👉" }),
+    );
+  });
+
+  it("uses the EN prompt for the furnish brand", async () => {
+    const create = stubClaude("🔥 This fan is a game-changer! Grab yours now 👉");
+    await publishQueueItem(
+      item({
+        platform: "instagram",
+        contentType: "video",
+        payload: social({ reelsVideoUrl: "https://blob/r.mp4", brand: "furnish", caption: "Tower fan" }),
+      }),
+    );
+    expect(create).toHaveBeenCalledOnce();
+    const prompt = String(create.mock.calls[0][0].messages[0].content);
+    expect(prompt).toContain("anglais");
+    expect(publishReel).toHaveBeenCalledWith(
+      expect.objectContaining({ caption: "🔥 This fan is a game-changer! Grab yours now 👉" }),
+    );
+  });
+
+  it("keeps the original caption when generation fails (never blocks the publish)", async () => {
+    stubClaude(null); // Claude API throws
+    await publishQueueItem(
+      item({
+        platform: "instagram",
+        contentType: "video",
+        payload: social({ reelsVideoUrl: "https://blob/r.mp4", caption: "Ventilateur tour oscillant" }),
+      }),
+    );
+    expect(publishReel).toHaveBeenCalledWith(
+      expect.objectContaining({ caption: "Ventilateur tour oscillant" }),
+    );
+  });
+
+  it("does NOT call Claude for non-video content (a normal social post)", async () => {
+    const create = stubClaude("should not be used");
+    await publishQueueItem(
+      item({ platform: "instagram", contentType: "social", payload: social({ imageUrl: "a.jpg" }) }),
+    );
+    expect(create).not.toHaveBeenCalled();
   });
 });
