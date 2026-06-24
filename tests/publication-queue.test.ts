@@ -10,7 +10,7 @@ import { createClient, type Client } from "@libsql/client";
 // Kept byte-for-byte in lockstep with initSchema's publication_queue DDL (database.ts).
 const TABLE_DDL = `CREATE TABLE IF NOT EXISTS publication_queue (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog')),
+  content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video')),
   content_id TEXT NOT NULL,
   platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
   payload TEXT NOT NULL,
@@ -146,10 +146,14 @@ describe("publication_queue — getOccupiedQueueSlots", () => {
   });
   afterEach(() => db.close());
 
-  const occupied = (platform: string) =>
+  // Mirrors getOccupiedQueueSlots(platform, contentType?): active slots on a platform,
+  // optionally scoped to one content_type (independent per-queue occupancy).
+  const occupied = (platform: string, contentType?: string) =>
     db.execute({
-      sql: `SELECT scheduled_at FROM publication_queue WHERE platform = ? AND status IN ('pending', 'publishing', 'published')`,
-      args: [platform],
+      sql: `SELECT scheduled_at FROM publication_queue
+            WHERE platform = ? AND status IN ('pending', 'publishing', 'published')
+              AND (? IS NULL OR content_type = ?)`,
+      args: [platform, contentType ?? null, contentType ?? null],
     });
 
   it("returns active (pending/publishing/published) slots, excluding freed (failed/cancelled) ones", async () => {
@@ -172,6 +176,24 @@ describe("publication_queue — getOccupiedQueueSlots", () => {
     const r = await occupied("instagram");
     expect(r.rows).toHaveLength(1);
     expect(String(r.rows[0].scheduled_at)).toBe("2026-01-05 15:00:00");
+  });
+
+  it("content_type='video' counts ONLY video rows — social posts don't crowd out Reels", async () => {
+    await insert(db, { platform: "facebook", content_type: "social", scheduled_at: "2026-01-05 15:00:00" });
+    await insert(db, { platform: "facebook", content_type: "social", scheduled_at: "2026-01-06 15:00:00" });
+    await insert(db, { platform: "facebook", content_type: "video", scheduled_at: "2026-01-08 15:00:00" });
+    const r = await occupied("facebook", "video");
+    expect(r.rows.map((row) => String(row.scheduled_at))).toEqual(["2026-01-08 15:00:00"]);
+  });
+
+  it("no content_type → shared view counts every content_type (backward compatible)", async () => {
+    await insert(db, { platform: "facebook", content_type: "social", scheduled_at: "2026-01-05 15:00:00" });
+    await insert(db, { platform: "facebook", content_type: "video", scheduled_at: "2026-01-08 15:00:00" });
+    const r = await occupied("facebook");
+    expect(r.rows.map((row) => String(row.scheduled_at)).sort()).toEqual([
+      "2026-01-05 15:00:00",
+      "2026-01-08 15:00:00",
+    ]);
   });
 });
 
