@@ -132,14 +132,21 @@ export async function POST(request: Request) {
   await cancelPendingQueueItems("video", contentId);
 
   // Auto-schedule on the next free slot from the VIDEO schedule (read above; independent
-  // of social posts + blog). Occupancy is still per-platform (FB/IG), so a video and a
-  // social post can't double-book the same platform slot — the QueueSlotTakenError retry
-  // skips past it.
+  // of social posts + blog). Occupancy is scoped to content_type='video' so Reels have
+  // their own slot pool + max_per_day and never get crowded out by social posts. The
+  // partial-unique (platform, scheduled_at) index still forbids two ACTIVE rows in one
+  // physical slot across types, so if a social post already booked this FB/IG slot the
+  // QueueSlotTakenError retry skips past it.
   const nowSec = Math.floor(Date.now() / 1000);
-  const occupied = (await getOccupiedQueueSlots(platform)).map(sqliteToUnixSec);
+  const occupied = (await getOccupiedQueueSlots(platform, "video")).map(sqliteToUnixSec);
 
   for (let attempt = 0; attempt < 5; attempt++) {
-    const next = await getNextAvailableSlot("facebook", {}, { nowSec, occupied, schedule: videoSchedule });
+    const next = await getNextAvailableSlot("facebook", {}, {
+      nowSec,
+      occupied,
+      schedule: videoSchedule,
+      contentType: "video",
+    });
     if (!next) {
       return NextResponse.json(
         { error: "No free publication slot (schedule disabled or full within the horizon)" },
