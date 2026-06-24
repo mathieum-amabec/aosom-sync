@@ -30,6 +30,7 @@ import fs from "fs";
 import { spawn } from "child_process";
 import { downloadImage } from "@/lib/image-composer";
 import { VIDEO_BRAND } from "@/lib/video-brand-tokens";
+import { formatVideoTitle } from "@/lib/video-title-utils";
 
 const { width: WIDTH, height: HEIGHT } = VIDEO_BRAND.format;
 const FPS = 25;
@@ -136,7 +137,9 @@ export function listMusicTracks(): string[] {
  */
 export function buildProductOverlaySvg(product: SlideshowProduct, locale: VideoLocale): string {
   const { navy, gold, offWhite } = VIDEO_BRAND.colors;
-  const title = escapeXml(product.name.slice(0, 48));
+  // Smart shorten (no mid-word cut, no ellipsis) instead of a hard 48-char slice.
+  // Preserve the slideshow's own casing/wording — no UPPERCASE, no catalogue cleanup.
+  const title = escapeXml(formatVideoTitle(product.name, 48, { uppercase: false, aggressive: false }));
   const price = escapeXml(formatPrice(product.price, locale));
   const cta = escapeXml(ctaText(locale));
   const titleFont = VIDEO_BRAND.font.family;

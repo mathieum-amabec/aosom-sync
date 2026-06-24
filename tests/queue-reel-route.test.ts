@@ -24,7 +24,10 @@ const req = (body: Record<string, unknown>) =>
     body: JSON.stringify(body),
   });
 
-function mockAll(dbOver: Record<string, unknown> = {}) {
+function mockAll(
+  dbOver: Record<string, unknown> = {},
+  schedulerOver: Record<string, unknown> = {},
+) {
   vi.doMock("@/lib/auth", () => ({
     isAuthenticated: vi.fn().mockResolvedValue(true),
     getSessionRole: vi.fn().mockResolvedValue("admin"),
@@ -41,6 +44,7 @@ function mockAll(dbOver: Record<string, unknown> = {}) {
   vi.doMock("@/lib/publication-scheduler", () => ({
     getNextAvailableSlot: vi.fn().mockResolvedValue(SLOT),
     parseVideoSchedule: vi.fn().mockReturnValue({ enabled: true, slots: [], timezone: "America/Toronto", max_per_day: 2 }),
+    ...schedulerOver,
   }));
   const db = {
     getDemandGenAssets: vi.fn().mockResolvedValue(ASSETS),
@@ -128,11 +132,9 @@ describe("POST /api/social/queue-reel", () => {
     const SLOT2 = { ...SLOT, at: 1765292400, sqlite: "2025-12-09 15:00:00" };
     const addToQueue = vi.fn().mockRejectedValueOnce(new QueueSlotTakenError()).mockResolvedValueOnce(43);
     const getNextAvailableSlot = vi.fn().mockResolvedValueOnce(SLOT).mockResolvedValueOnce(SLOT2);
-    mockAll({ addToQueue });
-    vi.doMock("@/lib/publication-scheduler", () => ({
-      getNextAvailableSlot,
-      parseVideoSchedule: vi.fn().mockReturnValue({ enabled: true, slots: [], timezone: "America/Toronto", max_per_day: 2 }),
-    }));
+    // Route the scheduler override THROUGH mockAll so publication-scheduler is doMock'd
+    // exactly once — a second vi.doMock of the same module raced nondeterministically.
+    mockAll({ addToQueue }, { getNextAvailableSlot });
     const { POST } = await import("@/app/api/social/queue-reel/route");
     const res = await POST(req({ sku: "824-051V80BK", ratio: "9:16", language: "fr" }));
     const json = await res.json();

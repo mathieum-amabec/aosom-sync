@@ -4,7 +4,8 @@
 //   Per source: trim to the clean window (ss + cleanDur), delogo only where a logo is persistent.
 //   Overlay (drawtext): FR title (white, faux-bold, drop shadow, Navy 70% backing box) at the TOP safe zone (y=15%) +
 //   benefit as a Gold pill (Navy text) at the BOTTOM safe zone (y=82%), over a Navy 50%/25%-tall scrim.
-//   Titles: UPPERCASE (fr-CA), em/en dashes stripped, truncated to 35 chars, max 2 lines.
+//   Titles: UPPERCASE (fr-CA), em/en dashes stripped, smart-shortened to ~40 chars on a
+//   word boundary (formatVideoTitle — no ellipsis, drops decorative/filler words), max 2 lines.
 // Run from the worktree root:  node scripts/render-demand-gen.mjs
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, rmSync, statSync, existsSync } from "node:fs";
@@ -115,21 +116,48 @@ function wrap(text, max) {
   return lines;
 }
 
-// Strip em/en dashes from titles before rendering (" — " → " · ").
-function sanitizeTitle(t) {
-  return t.replace(/\s*[—–]\s*/g, " · ").replace(/\s+/g, " ").trim();
-}
+// Smart title shortener for the overlay — no ellipsis, no mid-word cut, drops
+// decorative descriptors + trailing filler so the title fits ~40 chars and reads well.
+// PORT of src/lib/video-title-utils.ts formatVideoTitle — keep the two in sync.
+const REMOVE_WORDS = new Set(["PORTATIF", "OSCILLANT", "CARRÉ", "CARRÉE", "RÉSINE"]);
+const LEADING_DROP = new Set(["ENSEMBLE"]);
+const TRAILING_FILLER = new Set(["AVEC", "EN", "DE", "ET", "POUR"]);
+const MATERIALS = ["MÉTAL", "ACIER", "BOIS", "ROTIN", "VERRE", "ALUMINIUM"];
+const PHRASE_REDUCTIONS = [[/\bBASE DE PARASOL\b/g, "BASE PARASOL"]];
 
-// Truncate to `max` chars; back up to a word boundary only when the cut lands
-// mid-word, then append an ellipsis.
-function truncate(t, max) {
-  if (t.length <= max) return t;
-  let cut = t.slice(0, max - 1);
-  if (/\S/.test(t[max - 1])) {            // boundary char is non-space → mid-word
-    const sp = cut.lastIndexOf(" ");
-    if (sp > 0) cut = cut.slice(0, sp);
+const up = (s) => s.toLocaleUpperCase("fr-CA");
+function stripTrailingFiller(t) {
+  const parts = t.split(" ");
+  while (parts.length > 1 && TRAILING_FILLER.has(up(parts[parts.length - 1]))) parts.pop();
+  return parts.join(" ");
+}
+function formatVideoTitle(rawTitle, maxChars = 40, opts = {}) {
+  const { uppercase = true, aggressive = true } = opts;
+  if (!rawTitle) return "";
+  let t = rawTitle
+    .replace(/…/g, " ")
+    .replace(/\.\.\./g, " ")
+    .replace(/\s*[—–]\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (aggressive) {
+    t = t.replace(/\s+AVEC\b.*$/iu, "").trim(); // drop the "AVEC …" tail (aggressive only)
+    t = up(t);
+    const lead = t.split(" ");
+    if (lead.length > 1 && LEADING_DROP.has(lead[0])) t = lead.slice(1).join(" ");
+    t = t.replace(new RegExp(`\\bEN (${MATERIALS.join("|")})\\b`, "gu"), "$1");
+    for (const [pattern, replacement] of PHRASE_REDUCTIONS) t = t.replace(pattern, replacement);
+    t = t.split(" ").filter((w) => !REMOVE_WORDS.has(w)).join(" ").replace(/\s+/g, " ").trim();
   }
-  return cut.replace(/[\s·]+$/, "") + "…";
+  t = stripTrailingFiller(t);
+  if (t.length > maxChars) {
+    const slice = t.slice(0, maxChars + 1);
+    const lastSpace = slice.lastIndexOf(" ");
+    t = (lastSpace > 0 ? slice.slice(0, lastSpace) : t.slice(0, maxChars)).trim();
+    t = stripTrailingFiller(t);
+  }
+  t = t.trim();
+  return uppercase ? up(t) : t;
 }
 
 function overlayChain(cfg, titleLines, lineDir) {
@@ -222,7 +250,7 @@ for (const s of sources) {
   const outDir = `out/demand-gen/${s.sku}`;
   mkdirSync(outDir, { recursive: true });
   for (const [ratio, cfg] of Object.entries(RATIOS)) {
-    const titleLines = wrap(truncate(sanitizeTitle(s.title), 35), cfg.wrap).slice(0, 2);
+    const titleLines = wrap(formatVideoTitle(s.title), cfg.wrap).slice(0, 2);
     for (const bucket of s.buckets) {
       const effDur = Math.min(bucket, s.cleanDur);
       const rtag = ratio.replace(":", "x");
