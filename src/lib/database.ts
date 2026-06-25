@@ -514,6 +514,32 @@ async function _initSchemaImpl(): Promise<void> {
     await db.execute(`UPDATE products SET has_discount = CASE WHEN ${PRODUCT_HAS_DISCOUNT_SQL} THEN 1 ELSE 0 END`);
   }
 
+  // Composite indexes for the slideshow content selectors (src/lib/selectors).
+  // Created HERE (post-ALTER), like the has_discount index above, because some
+  // referenced columns (created_at) may be absent on a pre-existing products
+  // table — a CREATE INDEX on a missing column throws and aborts schema init.
+  // NOTE: the original spec asked for idx_products_category to include
+  // compare_at_price; this schema has NO such column (the rabais signal lives in
+  // price_history — see catalog-filters.PRODUCT_HAS_DISCOUNT_SQL), so it is
+  // deliberately omitted to keep the index valid.
+  const selectorIndexes: string[] = [
+    // best-sellers velocity aggregate: SUM(old_qty-new_qty) per sku over a window.
+    `CREATE INDEX IF NOT EXISTS idx_ph_velocity ON price_history(sku, detected_at, old_qty, new_qty)`,
+    // by-category / price ordering: seek by product_type + imported, range/order on price.
+    `CREATE INDEX IF NOT EXISTS idx_products_category ON products(product_type, shopify_product_id, price)`,
+    // low-stock: qty range scan over imported products.
+    `CREATE INDEX IF NOT EXISTS idx_products_stock ON products(qty, shopify_product_id)`,
+  ];
+  // created_at may not exist on legacy tables — guard before indexing it.
+  if (productCols.has("created_at")) {
+    selectorIndexes.push(
+      `CREATE INDEX IF NOT EXISTS idx_products_created ON products(created_at, shopify_product_id)`,
+    );
+  }
+  for (const sql of selectorIndexes) {
+    await db.execute(sql);
+  }
+
   // content_templates column migration (frequency_per_month + scopes + mode)
   const ctInfo = await db.execute(`PRAGMA table_info(content_templates)`);
   const ctCols = new Set(ctInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));

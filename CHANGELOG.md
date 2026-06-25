@@ -2,6 +2,38 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.154] - 2026-06-25
+
+### Added (slideshow engine — shared core: Module A + Module B)
+- **`src/lib/slideshow/`** — Turso-driven slideshow/montage render core, reusing the existing
+  FFmpeg pipeline primitives (`resolveFfmpegPath`, `formatPrice`/`ctaText`, brand tokens,
+  `downloadImage`'s SSRF guard):
+  - `types.ts` — shared contract every downstream module (C/D/E/F/G) builds on: `SlideshowItem`,
+    `SlideshowConfig`, `SlideshowResult`, `SlideshowManifest`, `SlideshowTemplate` (8 templates).
+  - `validate.ts` — config gate: **every image must be `https://cdn.shopify.com/`** (Aosom CDN
+    403s our render workers), 1–20 items, valid ratio/brand/language. Centralizes the discount-badge
+    rule (`shouldShowBadge`: `compare_at >= price * 1.10`, float-tolerant).
+  - `music.ts` — `getDefaultMusicTrack()` resolves the existing bundled royalty-free track
+    (`src/audio/…`), null-safe (silent fallback).
+  - `render.ts` — `renderSlideshow()`: **dry-run returns a manifest and writes nothing**; real render
+    builds branded intro/outro cards + per-slide Ken Burns + xfade crossfades + faded music, then
+    uploads the MP4 to the **public** Vercel Blob store at
+    `slideshows/{brand}/{template}/{ratio}/{ts}.mp4`. Overlays cleaned via `formatVideoTitle`
+    (no ellipsis, no supplier brand names); discount badge only when ≥10%.
+- **`src/lib/selectors/`** — content selectors over the catalog (Turso), 5-minute in-memory cache,
+  Shopify-CDN image resolution (rate-limited 2 req/sec, per-product cached):
+  `bestSellers`, `bestSellerImageSeries`, `priceDrops`, `lowStock`, `wowDiscovery`, `byCategory`,
+  `seasonal`. Each returns normalized `ProductItem[]`.
+- **Indexes (`database.ts`)** — `idx_ph_velocity`, `idx_products_category`, `idx_products_stock`,
+  `idx_products_created` (created post-ALTER, column-guarded; idempotent `IF NOT EXISTS`).
+
+### Notes (schema adaptations vs. original spec)
+- This schema has **no `compare_at_price` column**; "compare-at" is **derived** from the most recent
+  `price_history` drop (same model as `catalog-filters.PRODUCT_HAS_DISCOUNT_SQL`).
+- Catalog images (`products.image1..7`) are **Aosom-CDN** URLs; selectors resolve **Shopify-CDN**
+  images from the live product instead, so `images[]` only ever holds `cdn.shopify.com` URLs.
+- `idx_products_category` deliberately omits `compare_at_price` (nonexistent → would abort schema init).
+
 ## [0.5.53.153] - 2026-06-24
 
 ### Changed (full 4-way queue isolation)
