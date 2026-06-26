@@ -12,5 +12,6 @@ export { lowStock } from "./low-stock";
 export { wowDiscovery } from "./wow-discovery";
 export { byCategory } from "./by-category";
 export { seasonal, SEASONAL_THEMES } from "./seasonal";
+export { productsBySkus } from "./by-skus";
 export { clearSelectorCache } from "./cache";
 export { resolveProductImages, clearImageCache } from "./shopify-images";

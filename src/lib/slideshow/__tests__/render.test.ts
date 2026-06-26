@@ -4,6 +4,7 @@ import {
   buildManifest,
   ratioDimensions,
   estimateDurationSec,
+  perSlideSeconds,
   blobPath,
   buildXfadeFilterComplex,
 } from "@/lib/slideshow/render";
@@ -153,6 +154,19 @@ describe("pure render helpers", () => {
   it("estimates duration with crossfade overlaps", () => {
     // intro(2) + 2 slides(3.5) + outro(2) = 11, minus 3 xfades * 0.5 = 9.5
     expect(estimateDurationSec(2)).toBe(9.5);
+  });
+
+  it("paces to a target total duration when requested", () => {
+    // A 15s target over 5 slides lands on (about) 15s, not the default pacing.
+    expect(estimateDurationSec(5, 15)).toBeCloseTo(15, 1);
+    // The default (no target) stays the fixed pacing.
+    expect(perSlideSeconds(5)).toBe(3.5);
+    // A reachable target solves the per-slide hold within the clamp.
+    const ps = perSlideSeconds(5, 15);
+    expect(ps).toBeGreaterThanOrEqual(1.5);
+    expect(ps).toBeLessThanOrEqual(8);
+    // An absurdly long target clamps the per-slide hold to the max.
+    expect(perSlideSeconds(3, 999)).toBe(8);
   });
 
   it("builds the canonical Blob path", () => {

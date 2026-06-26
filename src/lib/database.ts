@@ -1288,6 +1288,22 @@ export async function getProductCount(): Promise<number> {
   return Number(rowToObj(result.rows[0]).cnt) || 0;
 }
 
+/**
+ * Distinct product_types among IMPORTED products (have a Shopify id), sorted A→Z.
+ * Powers the category dropdown in the slideshow generation panel. Served by the
+ * idx_products_category composite index.
+ */
+export async function getImportedProductTypes(): Promise<string[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(
+    `SELECT DISTINCT product_type FROM products
+     WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''
+       AND product_type IS NOT NULL AND product_type != ''
+     ORDER BY product_type ASC`,
+  );
+  return result.rows.map((row) => String(rowToObj(row).product_type)).filter(Boolean);
+}
+
 export async function getImportedProductCount(): Promise<number> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT COUNT(*) as cnt FROM products WHERE shopify_product_id IS NOT NULL`);

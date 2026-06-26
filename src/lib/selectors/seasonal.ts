@@ -15,6 +15,7 @@ export const SEASONAL_THEMES: Record<string, string[]> = {
   rentree: ["Office Furniture", "Storage", "Kids"],
   ete: ["Patio", "Garden", "Pool", "Outdoor"],
   hiver: ["Indoor Furniture", "Heating", "Christmas"],
+  maison: ["Indoor Furniture", "Storage", "Decor"],
 };
 
 export async function seasonal(theme: string, opts: SelectorOptions = {}): Promise<ProductItem[]> {

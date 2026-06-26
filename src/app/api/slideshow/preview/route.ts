@@ -53,6 +53,9 @@ export async function GET(request: Request) {
     const n = Number(v);
     return Number.isFinite(n) ? n : undefined;
   };
+  /** Target duration is clamped to a sane band (the engine also clamps per-slide). */
+  const clampDuration = (v: number | undefined): number | undefined =>
+    v === undefined ? undefined : Math.min(60, Math.max(4, v));
 
   const opts: BuildSlideshowOptions = {
     ratio,
@@ -68,6 +71,7 @@ export async function GET(request: Request) {
     strategy: (q.get("strategy") as BuildSlideshowOptions["strategy"]) ?? undefined,
     theme: q.get("theme") ?? undefined,
     title: q.get("title") ?? undefined,
+    durationSec: clampDuration(num("durationSec")),
   };
 
   try {
