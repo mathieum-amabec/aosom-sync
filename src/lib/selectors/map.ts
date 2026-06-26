@@ -18,6 +18,12 @@ import { resolveProductImages } from "./shopify-images";
  * in the outer query (default "products").
  */
 export function compareAtSubquery(alias = "products"): string {
+  // `alias` is interpolated into SQL (libsql can't parameterize identifiers), so
+  // reject anything that isn't a bare SQL identifier — closes the latent
+  // injection sink even though every current caller passes a literal.
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
+    throw new Error(`compareAtSubquery: invalid table alias "${alias}"`);
+  }
   return `(
     SELECT lpx.old_price FROM (
       SELECT old_price,
