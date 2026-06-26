@@ -45,6 +45,8 @@ export interface BuildSlideshowOptions {
   brand?: SlideshowBrand;
   language?: SlideshowLanguage;
   title?: string;
+  /** Target total runtime in seconds (e.g. 6/15/30); the renderer paces to it. */
+  durationSec?: number;
   dryRun?: boolean;
   /** Max products to include (capped at MAX_ITEMS). */
   limit?: number;
@@ -224,6 +226,7 @@ export async function buildSlideshow(
     language,
     title: opts.title,
     musicUrl: opts.musicUrl,
+    targetDurationSec: opts.durationSec,
     dryRun: opts.dryRun,
   };
   const result = await renderSlideshow(config);

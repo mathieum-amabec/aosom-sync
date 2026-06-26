@@ -68,6 +68,7 @@ export async function GET(request: Request) {
     strategy: (q.get("strategy") as BuildSlideshowOptions["strategy"]) ?? undefined,
     theme: q.get("theme") ?? undefined,
     title: q.get("title") ?? undefined,
+    durationSec: num("durationSec"),
   };
 
   try {

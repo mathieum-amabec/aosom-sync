@@ -139,7 +139,13 @@ export async function POST(request: Request) {
     }
 
     // ── Enqueue into publication_queue as a video Reel ──
-    const platform = resolvePlatform(brand, slideshowSettings.platform);
+    // Platform: optional per-request override (the panel's platform buttons),
+    // else the saved slideshow default. Validated against VIDEO_PLATFORMS.
+    const wantPlatform =
+      typeof b.platform === "string" && (["facebook", "instagram", "both"] as string[]).includes(b.platform)
+        ? (b.platform as "facebook" | "instagram" | "both")
+        : slideshowSettings.platform;
+    const platform = resolvePlatform(brand, wantPlatform);
     if (!platform) {
       return NextResponse.json(
         {

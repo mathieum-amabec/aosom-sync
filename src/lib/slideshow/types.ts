@@ -75,6 +75,12 @@ export interface SlideshowConfig {
   language: SlideshowLanguage;
   /** Slideshow title shown on the intro card. */
   title?: string;
+  /**
+   * Target total runtime in seconds (e.g. 6/15/30). The renderer solves the
+   * per-slide hold to land near this, clamped to a watchable range. Omit for the
+   * default fixed pacing.
+   */
+  targetDurationSec?: number;
   /** When true, renderSlideshow returns a manifest and writes nothing. */
   dryRun?: boolean;
 }

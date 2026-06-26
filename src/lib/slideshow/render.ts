@@ -43,6 +43,9 @@ const FPS = 25;
 const INTRO_SEC = 2;
 const OUTRO_SEC = 2;
 const PER_SLIDE_SEC = 3.5;
+/** Bounds for the per-slide hold when a target duration is requested. */
+const PER_SLIDE_MIN = 1.5;
+const PER_SLIDE_MAX = 8;
 const XFADE_SEC = 0.5;
 const MUSIC_FADE_IN_SEC = 1;
 const MUSIC_FADE_OUT_SEC = 2;
@@ -74,17 +77,33 @@ export function segmentCount(itemCount: number): number {
   return itemCount + 2;
 }
 
+/**
+ * Per-slide hold (seconds). Default is the fixed PER_SLIDE_SEC pacing; when a
+ * `targetDurationSec` is requested, the hold is solved so the total runtime lands
+ * on the target (intro/outro and the xfade overlaps held constant), then clamped
+ * to a watchable range. A target the clamp can't reach yields the nearest pacing.
+ */
+export function perSlideSeconds(itemCount: number, targetDurationSec?: number): number {
+  if (!targetDurationSec || itemCount <= 0) return PER_SLIDE_SEC;
+  // total = INTRO + OUTRO + N*perSlide - (N+1)*XFADE  ⇒  solve for perSlide.
+  const perSlide = (targetDurationSec - INTRO_SEC - OUTRO_SEC + (itemCount + 1) * XFADE_SEC) / itemCount;
+  return Math.min(PER_SLIDE_MAX, Math.max(PER_SLIDE_MIN, perSlide));
+}
+
 /** Per-segment durations (seconds): [intro, ...slides, outro]. */
-export function segmentDurations(itemCount: number): number[] {
-  return [INTRO_SEC, ...Array.from({ length: itemCount }, () => PER_SLIDE_SEC), OUTRO_SEC];
+export function segmentDurations(itemCount: number, targetDurationSec?: number): number[] {
+  const perSlide = perSlideSeconds(itemCount, targetDurationSec);
+  return [INTRO_SEC, ...Array.from({ length: itemCount }, () => perSlide), OUTRO_SEC];
 }
 
 /**
  * Total runtime with xfade overlaps: sum(segments) - (segments-1) * xfade.
- * Each crossfade swallows XFADE_SEC of overlap between adjacent segments.
+ * Each crossfade swallows XFADE_SEC of overlap between adjacent segments. Returns
+ * the ACTUAL runtime (after per-slide clamping), which may differ slightly from a
+ * requested target.
  */
-export function estimateDurationSec(itemCount: number): number {
-  const durs = segmentDurations(itemCount);
+export function estimateDurationSec(itemCount: number, targetDurationSec?: number): number {
+  const durs = segmentDurations(itemCount, targetDurationSec);
   const total = durs.reduce((a, b) => a + b, 0) - (durs.length - 1) * XFADE_SEC;
   return Math.round(total * 100) / 100;
 }
@@ -169,7 +188,7 @@ export function buildManifest(config: SlideshowConfig, timestamp: number): Slide
     language: config.language,
     title: config.title,
     music,
-    estimatedDurationSec: estimateDurationSec(config.items.length),
+    estimatedDurationSec: estimateDurationSec(config.items.length, config.targetDurationSec),
     wouldUploadTo: blobPath(config.brand, config.template, config.ratio, timestamp),
     dryRun: true,
   };
@@ -427,8 +446,8 @@ export async function renderSlideshow(config: SlideshowConfig): Promise<Slidesho
 
   const dims = ratioDimensions(config.ratio);
   const locale = localeOf(config);
-  const durations = segmentDurations(config.items.length);
-  const totalSec = estimateDurationSec(config.items.length);
+  const durations = segmentDurations(config.items.length, config.targetDurationSec);
+  const totalSec = estimateDurationSec(config.items.length, config.targetDurationSec);
   const workDir = getWorkDir();
 
   try {

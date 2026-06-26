@@ -2,6 +2,28 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.160] - 2026-06-26
+
+### Added (video generation UI — product selection modes + dry-run previews)
+- **`/api/slideshow/products-preview`** — dry-run of product SELECTION: returns the products that
+  would feed a slideshow for a mode (`best_sellers` / `by_category` / `price_drops` / `seasonal` /
+  `low_stock` / `manual`), with Shopify-CDN images, derived compare-at and `discount_pct`. Admin-only.
+- **`/api/products/categories`** — distinct imported `product_type`s for the category dropdown
+  (10-min in-process cache). Admin-only. Backed by `getImportedProductTypes()` (`database.ts`,
+  served by `idx_products_category`).
+- **`productsBySkus()`** selector (`src/lib/selectors/by-skus.ts`) — fetch specific SKUs in request
+  order with resolved Shopify-CDN images (manual mode).
+- **`seasonal`** gains a `maison` theme (Indoor Furniture / Storage / Decor).
+- **Duration target** — optional `targetDurationSec` on `SlideshowConfig` (threaded from
+  `BuildSlideshowOptions.durationSec` + the preview/generate routes). The renderer solves the
+  per-slide hold to land near the target (6/15/30s), clamped to a watchable range.
+- **`SlideshowSettingsTab.tsx`** — enriched manual-generation panel (no rewrite of the working
+  flow): 5 selection-mode tabs with contextual params (limit / category dropdown / min-rabais /
+  seasonal themes), full video params (template, ratio, durée, plateforme, langue), a **product
+  grid dry-run** (images, titles, discount badges), a **formatted manifest dry-run**, and a
+  **Generate button gated on the dry-run** that surfaces the scheduled slot on success.
+- The generate route accepts an optional per-request `platform` override.
+
 ## [0.5.53.159] - 2026-06-26
 
 ### Fixed (post-merge build fix — Module D Remotion)
