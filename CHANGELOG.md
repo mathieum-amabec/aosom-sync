@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.155] - 2026-06-25
+## [0.5.53.156] - 2026-06-26
 
 ### Added (slideshow remix engine — Module F)
 - **`src/lib/slideshow/remix/`** — compiles the existing demand-gen video library
@@ -21,6 +21,40 @@ All notable changes to Aosom Sync will be documented in this file.
   - `index.ts` — `buildEteCour` / `buildMaison` / `buildEnfants` / `buildSoldes` shortcuts.
 - **`src/lib/database.ts`** — `idx_vdg_ratio_blob` covering index on
   `video_demand_gen(ratio, blob_url, sku, duration_sec)` for the remix selector.
+
+## [0.5.53.155] - 2026-06-25
+
+### Added (slideshow video templates — Module C)
+- **`src/lib/slideshow/templates/`** — six content templates over the Module B selectors that
+  each map `ProductItem[]` → `SlideshowItem[]` and delegate to `renderSlideshow()` (Module A):
+  - `showcase.ts` — `buildShowcase(sku, opts)`: one hero SKU, one slide per Shopify-CDN image
+    (max 8) via `bestSellerImageSeries`; intro card carries store identity (no supplier brand).
+  - `best-sellers.ts` — `buildBestSellers(opts)`: top movers (`bestSellers`, 14-day velocity).
+  - `price-drop.ts` — `buildPriceDrop(opts)`: active rabais (`priceDrops`, `minPct` default 10),
+    so every slide badges (`compare_at >= price * 1.10`).
+  - `urgency.ts` — `buildUrgency(opts)`: low stock (`lowStock`, threshold default 5) with a
+    scarcity overlay ("Plus que X en stock !" / "Only X left!").
+  - `lookbook.ts` — `buildLookbook(opts)`: `byCategory` (or `bestSellers` fallback). Fetches
+    ambiance B-roll (Pexels → Unsplash, never throws); see constraint note below.
+  - `discovery.ts` — `buildDiscovery(opts)`: WoW edit (`wowDiscovery`, margin/new/random).
+  - `index.ts` — barrel + `buildSlideshow(template, opts)` factory (async; rejects on missing
+    `sku`/`strategy` or unsupported COUNTDOWN/REMIX).
+- All templates: FR-primary (language defaults from brand — ameublo→fr, furnish→en), bilingual
+  titles, `dryRun` returns a manifest without upload, and drop products without a `cdn.shopify.com`
+  image (the renderer would reject them) with a clear error when nothing renderable remains.
+- **Tests** — `templates/__tests__/templates.test.ts` (12): dry-run manifests, price-drop ≥10%
+  filtering + badges, urgency stock threshold, showcase image series, discovery, lookbook
+  product-only fallback without a B-roll key, and the factory's routing/guards.
+
+### Notes (constraint vs. original spec)
+- **Lookbook B-roll is fetched but not rendered.** Module A enforces a hard invariant — every
+  rendered image must be a `https://cdn.shopify.com/` URL — and every template must delegate to
+  `renderSlideshow()`. External Pexels/Unsplash frames are neither Shopify-CDN nor re-hosted, so
+  interleaving them as slides would violate that invariant or fork the shared engine. Lookbook
+  therefore renders **product-only** and logs B-roll availability (warns either way).
+- **Urgency overlay color is the fixed brand palette** (gold on navy); the renderer has no
+  per-template overlay color, so urgency emphasis is carried by the scarcity copy + title card
+  rather than a red/orange overlay (changing it would mean editing the shared Module A engine).
 
 ## [0.5.53.154] - 2026-06-25
 
