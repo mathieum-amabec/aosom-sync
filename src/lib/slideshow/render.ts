@@ -28,7 +28,7 @@ import {
   type VideoLocale,
 } from "@/lib/video-engines/ffmpeg-slideshow";
 import { getDefaultMusicTrack } from "./music";
-import { validateSlideshowConfig, shouldShowBadge, discountPct } from "./validate";
+import { validateSlideshowConfig, shouldShowBadge, discountPct, isShopifyCdnUrl } from "./validate";
 import {
   type SlideshowConfig,
   type SlideshowItem,
@@ -107,6 +107,36 @@ export function blobPath(
 /** Locale for the price/CTA helpers, derived from the config language. */
 function localeOf(config: SlideshowConfig): VideoLocale {
   return config.language === "en" ? "en" : "fr";
+}
+
+/** Audio dirs a caller-supplied `musicUrl` override is allowed to point inside. */
+const ALLOWED_MUSIC_ROOTS = ["public/music", "src/audio"];
+const AUDIO_EXT = /\.(mp3|m4a|aac|wav|ogg)$/i;
+
+/**
+ * Guard a caller-supplied `musicUrl`. ffmpeg's `-i` natively opens http(s)://,
+ * file://, tcp:// etc., so an unvalidated value is an SSRF / arbitrary-file-read
+ * sink. Overrides must resolve to a real bundled track under public/music or
+ * src/audio — no URL schemes, no traversal, no absolute paths outside those
+ * roots. Throws on anything else. `undefined` is fine (the default track is used).
+ */
+export function assertSafeMusicPath(musicUrl: string | undefined): void {
+  if (musicUrl === undefined) return;
+  if (typeof musicUrl !== "string" || musicUrl.includes("://")) {
+    throw new Error("renderSlideshow: musicUrl must be a local bundled track path, not a URL");
+  }
+  if (!AUDIO_EXT.test(musicUrl)) {
+    throw new Error("renderSlideshow: musicUrl must be an audio file (mp3/m4a/aac/wav/ogg)");
+  }
+  const root = process.cwd();
+  const resolved = path.resolve(root, musicUrl);
+  const insideAllowed = ALLOWED_MUSIC_ROOTS.some((rel) => {
+    const base = path.resolve(root, rel);
+    return resolved === base || resolved.startsWith(base + path.sep);
+  });
+  if (!insideAllowed) {
+    throw new Error(`renderSlideshow: musicUrl must be under ${ALLOWED_MUSIC_ROOTS.join(" or ")}`);
+  }
 }
 
 /**
@@ -342,6 +372,12 @@ async function renderSlidePng(
 
   let base: import("sharp").Sharp;
   try {
+    // Defense in depth: validateSlideshowConfig already enforces this, but never
+    // hand a non-Shopify-CDN URL to the downloader (Aosom CDN 403s; arbitrary
+    // hosts are an SSRF surface). isShopifyCdnUrl is the same gate as validation.
+    if (!isShopifyCdnUrl(item.image_url)) {
+      throw new Error(`refusing to fetch non-cdn.shopify.com image: ${item.image_url}`);
+    }
     const buf = await downloadImage(item.image_url);
     base = sharpFn(buf).resize(dims.width, dims.height, { fit: "contain", background: navy }).flatten({ background: navy });
   } catch {
@@ -374,6 +410,9 @@ export async function renderSlideshow(config: SlideshowConfig): Promise<Slidesho
   if (!validation.valid) {
     throw new Error(`Invalid slideshow config: ${validation.errors.join("; ")}`);
   }
+  // musicUrl isn't part of the pure config validation (it needs path resolution);
+  // gate it here so neither the dry-run manifest nor a real render trusts a URL.
+  assertSafeMusicPath(config.musicUrl);
 
   const timestamp = Date.now();
 

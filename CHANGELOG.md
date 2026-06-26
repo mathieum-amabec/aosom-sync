@@ -27,6 +27,16 @@ All notable changes to Aosom Sync will be documented in this file.
 - **Indexes (`database.ts`)** — `idx_ph_velocity`, `idx_products_category`, `idx_products_stock`,
   `idx_products_created` (created post-ALTER, column-guarded; idempotent `IF NOT EXISTS`).
 
+### Security (hardening from pre-landing review)
+- `validate.ts` — allowlist `template` (it feeds the Blob object key; an unlisted value
+  could escape the `slideshows/` prefix).
+- `render.ts` — `assertSafeMusicPath`: a caller-supplied `musicUrl` must resolve to a bundled
+  track under `public/music`/`src/audio` (no URL schemes, no traversal) before it reaches
+  ffmpeg `-i` (closes an SSRF / arbitrary-file-read sink). Plus a defense-in-depth
+  `cdn.shopify.com` check immediately before `downloadImage`.
+- `selectors/map.ts` — `compareAtSubquery` rejects any non-identifier table alias (closes a
+  latent SQL-injection sink; identifiers can't be parameterized).
+
 ### Notes (schema adaptations vs. original spec)
 - This schema has **no `compare_at_price` column**; "compare-at" is **derived** from the most recent
   `price_history` drop (same model as `catalog-filters.PRODUCT_HAS_DISCOUNT_SQL`).
