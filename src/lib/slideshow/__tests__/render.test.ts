@@ -55,6 +55,14 @@ describe("renderSlideshow (dry run)", () => {
       renderSlideshow(config({ dryRun: true, items: [item({ image_url: "https://img-us.aosomcdn.com/x.jpg" })] })),
     ).rejects.toThrow(/cdn\.shopify\.com/);
   });
+
+  it("rejects a musicUrl that is a URL or escapes the audio roots (SSRF guard)", async () => {
+    await expect(renderSlideshow(config({ dryRun: true, musicUrl: "http://169.254.169.254/x.mp3" }))).rejects.toThrow(/musicUrl/);
+    await expect(renderSlideshow(config({ dryRun: true, musicUrl: "../../etc/shadow.mp3" }))).rejects.toThrow(/musicUrl/);
+    // A bundled track under an allowed root is accepted.
+    const ok = await renderSlideshow(config({ dryRun: true, musicUrl: "public/music/track.mp3" }));
+    expect(ok.manifest?.music).toBe("public/music/track.mp3");
+  });
 });
 
 describe("validateSlideshowConfig", () => {
@@ -77,6 +85,14 @@ describe("validateSlideshowConfig", () => {
     const v = validateSlideshowConfig(config({ items }));
     expect(v.valid).toBe(false);
     expect(v.errors.join(" ")).toMatch(/at most 20/);
+  });
+
+  it("rejects an unlisted template (Blob-key safety)", () => {
+    const v = validateSlideshowConfig(
+      config({ template: "../../etc" as unknown as SlideshowConfig["template"] }),
+    );
+    expect(v.valid).toBe(false);
+    expect(v.errors.join(" ")).toMatch(/template/);
   });
 
   it("rejects an invalid ratio and brand", () => {

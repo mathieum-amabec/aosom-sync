@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.155] - 2026-06-25
+## [0.5.53.158] - 2026-06-26
 
 ### Added (slideshow — publication integration + settings UI: Module G)
 - **`src/lib/slideshow/build.ts`** — `buildSlideshow(template, opts)` factory that bridges the
@@ -28,6 +28,98 @@ All notable changes to Aosom Sync will be documented in this file.
 - **`config.ts` / `publication-scheduler.ts`** — `SlideshowSettings` type, defaults, template-key
   list + labels, and `normalizeSlideshowSettings` / `parseSlideshowSettings`.
 
+## [0.5.53.157] - 2026-06-26
+
+### Added (slideshow engine — Module D: Remotion countdown + Module E: image carousels)
+- **`src/remotion/`** — [Remotion](https://remotion.dev) composition for the **"Top 5 du mois"
+  countdown Reel** (9:16 only):
+  - `timing.ts` — pure, Remotion-free timing model (`computeCountdownTiming`): intro (30f) →
+    reveal #5…#2 (60f each) → #1 winner (90f) → outro (30f) = **390 frames / 13 s @ 30 fps**.
+    Shared by the composition, the Node-side template, and the manifest so they never disagree.
+  - `compositions/TopFiveCountdown.tsx` — dark, gold-accented stage; ranks slide in from the
+    bottom; product photo (`images[0]`), `formatVideoTitle`-cleaned title, language-aware price,
+    and a gold discount badge only when `compare_at >= price * 1.10`.
+  - `Root.tsx` / `index.ts` — composition registry + bundle entry (`registerRoot`).
+- **`src/lib/slideshow/templates/countdown.ts`** — `buildCountdown()`: picks the 5 best sellers
+  with a Shopify-CDN photo; **dry-run returns a manifest** (no Remotion, no Blob — never even
+  loads the runtime); real render bundles `src/remotion`, renders the MP4 with `@remotion/renderer`,
+  and uploads to the **public** Vercel Blob store at `slideshows/{brand}/countdown/9x16/{ts}.mp4`.
+- **`src/lib/slideshow/carousel/`** — branded image carousels (Sharp), 1:1 (`1080x1080`) or 4:5
+  (`1080x1350`):
+  - `render.ts` — `renderCarousel()`: **dry-run returns a manifest**; real render draws one PNG
+    per item (photo on a navy field + title/price/discount-badge overlay + store logo), each
+    uploaded to `slideshows/{brand}/carousel/{format}/{ts}/{i}.png`. Registers DM Sans via
+    `registerBrandFonts()` so SVG text never renders as tofu. Same CDN/title/badge rules as video.
+  - `templates.ts` — `buildBestSellersCarousel` / `buildPriceDropCarousel` / `buildUrgencyCarousel`,
+    reusing the Module B selectors (drops any product without a Shopify-CDN image).
+- Tests: countdown dry-run (mocked selectors, no Remotion), carousel dry-run + URL validation +
+  overlay SVG, and the pure countdown timing model — **17 new tests**.
+
+> **Deployment note.** `buildCountdown`'s **real** render path does not run inside a standard Vercel
+> Node function — it bundles `src/remotion` by source path (not traced by Next) and launches a
+> headless Chromium (`@remotion/renderer`). Run real renders on a host with the repo source + a
+> browser (dedicated worker / CI box / `@remotion/lambda`), loading DM Sans there. The `dryRun`
+> manifest path runs anywhere; the carousel (Sharp) and existing video (ffmpeg) real paths run on
+> the standard Node runtime.
+
+> **⚠️ Remotion licence.** Remotion is **free** for individuals and companies with **≤ 3 employees**
+> (our current case). Larger teams need a paid **company licence** (~$100/month) — see
+> https://remotion.dev/license. Documented in the README; re-evaluate before the team grows past 3.
+
+## [0.5.53.156] - 2026-06-26
+
+### Added (slideshow remix engine — Module F)
+- **`src/lib/slideshow/remix/`** — compiles the existing demand-gen video library
+  (`video_demand_gen`, ~210 rendered clips with public `blob_url`) into new thematic
+  compilations without re-rendering from source — marginal cost is one FFmpeg concat
+  plus one Blob upload:
+  - `types.ts` — `RemixConfig` / `RemixClip` / `RemixManifest` / `RemixResult` contract.
+  - `selector.ts` — `selectRemixClips` (cached previews) + `fetchRemixClips` (fresh draw
+    for real renders). Theme→`product_type` map (`ete-cour`, `maison`, `enfants`, `bureau`,
+    `animaux`, `soldes`), reuses the Module B 5-min cache + injectable DB seam. Skips
+    null `blob_url`, clamps `max_clips ≥ 1`, escapes LIKE metacharacters.
+  - `render.ts` — `renderRemix()`: **dry-run returns a manifest and writes nothing**; real
+    render downloads each clip, xfade-concats them with branded intro/outro cards and
+    royalty-free music, uploads the MP4 to the **public** Vercel Blob store at
+    `slideshows/{brand}/remix/{theme}/{ratio}/{ts}.mp4`, and cleans up temp files.
+  - `index.ts` — `buildEteCour` / `buildMaison` / `buildEnfants` / `buildSoldes` shortcuts.
+- **`src/lib/database.ts`** — `idx_vdg_ratio_blob` covering index on
+  `video_demand_gen(ratio, blob_url, sku, duration_sec)` for the remix selector.
+
+## [0.5.53.155] - 2026-06-25
+
+### Added (slideshow video templates — Module C)
+- **`src/lib/slideshow/templates/`** — six content templates over the Module B selectors that
+  each map `ProductItem[]` → `SlideshowItem[]` and delegate to `renderSlideshow()` (Module A):
+  - `showcase.ts` — `buildShowcase(sku, opts)`: one hero SKU, one slide per Shopify-CDN image
+    (max 8) via `bestSellerImageSeries`; intro card carries store identity (no supplier brand).
+  - `best-sellers.ts` — `buildBestSellers(opts)`: top movers (`bestSellers`, 14-day velocity).
+  - `price-drop.ts` — `buildPriceDrop(opts)`: active rabais (`priceDrops`, `minPct` default 10),
+    so every slide badges (`compare_at >= price * 1.10`).
+  - `urgency.ts` — `buildUrgency(opts)`: low stock (`lowStock`, threshold default 5) with a
+    scarcity overlay ("Plus que X en stock !" / "Only X left!").
+  - `lookbook.ts` — `buildLookbook(opts)`: `byCategory` (or `bestSellers` fallback). Fetches
+    ambiance B-roll (Pexels → Unsplash, never throws); see constraint note below.
+  - `discovery.ts` — `buildDiscovery(opts)`: WoW edit (`wowDiscovery`, margin/new/random).
+  - `index.ts` — barrel + `buildSlideshow(template, opts)` factory (async; rejects on missing
+    `sku`/`strategy` or unsupported COUNTDOWN/REMIX).
+- All templates: FR-primary (language defaults from brand — ameublo→fr, furnish→en), bilingual
+  titles, `dryRun` returns a manifest without upload, and drop products without a `cdn.shopify.com`
+  image (the renderer would reject them) with a clear error when nothing renderable remains.
+- **Tests** — `templates/__tests__/templates.test.ts` (12): dry-run manifests, price-drop ≥10%
+  filtering + badges, urgency stock threshold, showcase image series, discovery, lookbook
+  product-only fallback without a B-roll key, and the factory's routing/guards.
+
+### Notes (constraint vs. original spec)
+- **Lookbook B-roll is fetched but not rendered.** Module A enforces a hard invariant — every
+  rendered image must be a `https://cdn.shopify.com/` URL — and every template must delegate to
+  `renderSlideshow()`. External Pexels/Unsplash frames are neither Shopify-CDN nor re-hosted, so
+  interleaving them as slides would violate that invariant or fork the shared engine. Lookbook
+  therefore renders **product-only** and logs B-roll availability (warns either way).
+- **Urgency overlay color is the fixed brand palette** (gold on navy); the renderer has no
+  per-template overlay color, so urgency emphasis is carried by the scarcity copy + title card
+  rather than a red/orange overlay (changing it would mean editing the shared Module A engine).
+
 ## [0.5.53.154] - 2026-06-25
 
 ### Added (slideshow engine — shared core: Module A + Module B)
@@ -52,6 +144,16 @@ All notable changes to Aosom Sync will be documented in this file.
   `seasonal`. Each returns normalized `ProductItem[]`.
 - **Indexes (`database.ts`)** — `idx_ph_velocity`, `idx_products_category`, `idx_products_stock`,
   `idx_products_created` (created post-ALTER, column-guarded; idempotent `IF NOT EXISTS`).
+
+### Security (hardening from pre-landing review)
+- `validate.ts` — allowlist `template` (it feeds the Blob object key; an unlisted value
+  could escape the `slideshows/` prefix).
+- `render.ts` — `assertSafeMusicPath`: a caller-supplied `musicUrl` must resolve to a bundled
+  track under `public/music`/`src/audio` (no URL schemes, no traversal) before it reaches
+  ffmpeg `-i` (closes an SSRF / arbitrary-file-read sink). Plus a defense-in-depth
+  `cdn.shopify.com` check immediately before `downloadImage`.
+- `selectors/map.ts` — `compareAtSubquery` rejects any non-identifier table alias (closes a
+  latent SQL-injection sink; identifiers can't be parameterized).
 
 ### Notes (schema adaptations vs. original spec)
 - This schema has **no `compare_at_price` column**; "compare-at" is **derived** from the most recent
