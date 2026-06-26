@@ -18,12 +18,16 @@ import {
   type VideoSchedule,
   type VideoRatio,
   type VideoPlatform,
+  type SlideshowSettings,
+  type SlideshowTemplateKey,
   WEEKDAY_KEYS,
   VIDEO_RATIOS,
   VIDEO_PLATFORMS,
+  SLIDESHOW_TEMPLATE_KEYS,
   DEFAULT_PUBLICATION_SCHEDULE,
   DEFAULT_VIDEO_SCHEDULE,
   DEFAULT_BLOG_SCHEDULE,
+  DEFAULT_SLIDESHOW_SETTINGS,
 } from "@/lib/config";
 import { getOccupiedQueueSlots, type QueueContentType } from "@/lib/database";
 
@@ -174,6 +178,42 @@ export function parseVideoSchedule(rawJson: string | null | undefined): VideoSch
     return normalizeVideoSchedule(JSON.parse(rawJson));
   } catch {
     return clone(DEFAULT_VIDEO_SCHEDULE);
+  }
+}
+
+/**
+ * Normalize a raw slideshow_settings object: per-template booleans default to
+ * the engine defaults, ratio/platform fall back when not a recognized value.
+ */
+export function normalizeSlideshowSettings(raw: unknown): SlideshowSettings {
+  const d = DEFAULT_SLIDESHOW_SETTINGS;
+  if (!raw || typeof raw !== "object") return clone(d);
+  const r = raw as Record<string, unknown>;
+  const rawToggles =
+    r.enabled_templates && typeof r.enabled_templates === "object"
+      ? (r.enabled_templates as Record<string, unknown>)
+      : {};
+  const enabled_templates = {} as Record<SlideshowTemplateKey, boolean>;
+  for (const k of SLIDESHOW_TEMPLATE_KEYS) {
+    enabled_templates[k] =
+      typeof rawToggles[k] === "boolean" ? (rawToggles[k] as boolean) : d.enabled_templates[k];
+  }
+  const default_ratio = (VIDEO_RATIOS as readonly string[]).includes(r.default_ratio as string)
+    ? (r.default_ratio as VideoRatio)
+    : d.default_ratio;
+  const platform = (VIDEO_PLATFORMS as readonly string[]).includes(r.platform as string)
+    ? (r.platform as VideoPlatform)
+    : d.platform;
+  return { enabled_templates, default_ratio, platform };
+}
+
+/** Parse the stored slideshow_settings JSON (or null); defaults on any error. */
+export function parseSlideshowSettings(rawJson: string | null | undefined): SlideshowSettings {
+  if (!rawJson) return clone(DEFAULT_SLIDESHOW_SETTINGS);
+  try {
+    return normalizeSlideshowSettings(JSON.parse(rawJson));
+  } catch {
+    return clone(DEFAULT_SLIDESHOW_SETTINGS);
   }
 }
 

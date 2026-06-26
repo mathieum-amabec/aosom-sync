@@ -2,6 +2,32 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.155] - 2026-06-25
+
+### Added (slideshow — publication integration + settings UI: Module G)
+- **`src/lib/slideshow/build.ts`** — `buildSlideshow(template, opts)` factory that bridges the
+  content selectors (Module B) and the render engine (Module A): for a template it calls the
+  matching selector, maps each `ProductItem` → `SlideshowItem` (keeping only slides with a usable
+  `cdn.shopify.com` image), and renders a dry-run manifest or a real MP4. Returns the resolved
+  slides alongside the result so the queue layer can derive a caption without re-selecting.
+  `isSlideshowTemplate` guard + `languageForBrand` helper.
+- **`src/lib/slideshow/captions.ts`** — `getSlideshowCaption(template, language, items)`: default
+  per-template caption (lead + up to 3 product names). This is the queue caption; the publisher
+  rewrites it into clickbait at publish time, so it carries real product material (never empty).
+- **`POST /api/slideshow/generate`** — admin-only. `{ template, opts?, dryRun?, enqueue? }`.
+  `dryRun` returns the manifest (no upload); a real render uploads the MP4 and, with `enqueue:true`,
+  enqueues it into `publication_queue` as `content_type='video'` with a `reelsVideoUrl` payload — so
+  the existing hourly `/api/cron/publisher` publishes it as a Reel (re-captioned by Claude at publish
+  time; **no publisher change needed**). Platform from `slideshow_settings`, slot from the
+  independent `video_schedule` pool, with `QueueSlotTakenError` retry. Real renders are serialized.
+- **`GET /api/slideshow/preview`** — admin-only dry-run manifest for a template (query-param knobs).
+- **Settings → "Contenu vidéo" tab** (`SlideshowSettingsTab.tsx`) — per-template activation toggles,
+  default ratio + platform, and a manual generation panel (template + contextual params → "Aperçu
+  (dry-run)" / "Générer & mettre en file"). Persists `slideshow_settings` via
+  `PATCH /api/settings/schedule` (now also reads/writes `slideshow_settings`).
+- **`config.ts` / `publication-scheduler.ts`** — `SlideshowSettings` type, defaults, template-key
+  list + labels, and `normalizeSlideshowSettings` / `parseSlideshowSettings`.
+
 ## [0.5.53.154] - 2026-06-25
 
 ### Added (slideshow engine — shared core: Module A + Module B)

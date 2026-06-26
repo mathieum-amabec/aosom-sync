@@ -418,6 +418,73 @@ export const DEFAULT_VIDEO_SCHEDULE: VideoSchedule = {
   platform: "both",
 };
 
+// ─── Slideshow content settings ─────────────────────────────────────
+// Operator controls for the slideshow/montage content engine (Module G). The
+// template keys mirror SlideshowTemplate in src/lib/slideshow/types.ts but are
+// kept as plain string literals here so config has no dependency on the render
+// engine (which pulls in ffmpeg/sharp).
+export type SlideshowTemplateKey =
+  | "SHOWCASE"
+  | "BEST_SELLERS"
+  | "PRICE_DROP"
+  | "URGENCY"
+  | "LOOKBOOK"
+  | "DISCOVERY"
+  | "COUNTDOWN"
+  | "REMIX";
+
+export const SLIDESHOW_TEMPLATE_KEYS: readonly SlideshowTemplateKey[] = [
+  "SHOWCASE",
+  "BEST_SELLERS",
+  "PRICE_DROP",
+  "URGENCY",
+  "LOOKBOOK",
+  "DISCOVERY",
+  "COUNTDOWN",
+  "REMIX",
+];
+
+/** Human labels (FR) for the slideshow templates, used by the settings UI. */
+export const SLIDESHOW_TEMPLATE_LABELS: Record<SlideshowTemplateKey, string> = {
+  SHOWCASE: "Showcase (un produit, multi-angles)",
+  BEST_SELLERS: "Meilleurs vendeurs",
+  PRICE_DROP: "Rabais en cours",
+  URGENCY: "Urgence (stock faible)",
+  LOOKBOOK: "Lookbook (par catégorie)",
+  DISCOVERY: "Découverte",
+  COUNTDOWN: "Top 5 / Countdown saisonnier",
+  REMIX: "Remix thématique",
+};
+
+export interface SlideshowSettings {
+  /**
+   * Per-template enable toggles. These gate FUTURE automated generation
+   * (cron/Modules C–F); the manual generation panel can still produce any
+   * template explicitly chosen by the operator.
+   */
+  enabled_templates: Record<SlideshowTemplateKey, boolean>;
+  /** Default rendered aspect ratio for new slideshows. */
+  default_ratio: VideoRatio;
+  /** Target platform(s); intersected with the brand's active channels at publish time. */
+  platform: VideoPlatform;
+}
+
+export const DEFAULT_SLIDESHOW_SETTINGS: SlideshowSettings = {
+  enabled_templates: {
+    SHOWCASE: true,
+    BEST_SELLERS: true,
+    PRICE_DROP: true,
+    URGENCY: true,
+    LOOKBOOK: true,
+    DISCOVERY: true,
+    COUNTDOWN: true,
+    // REMIX needs a prior rendered set (Modules C–F); off until those land.
+    REMIX: false,
+  },
+  default_ratio: "9:16",
+  platform: "both",
+};
+
 // ─── Settings Allowlist ─────────────────────────────────────────────
 // Single source of truth — used by both the API route and the UI.
 
