@@ -48,62 +48,86 @@ function durationFromFilter(filter?: string): number | null {
 }
 
 /**
- * Select clips for a remix. Only rows with a non-null `blob_url` are eligible
- * (a clip with no uploaded asset can't be concatenated). Random order so each
- * build is a fresh edit. Cached 5 minutes per (theme, category, ratio,
- * duration_filter, max_clips) — same pattern as the Module B selectors.
+ * Clamp max_clips to a sane LIMIT. A negative value would become SQLite's
+ * `LIMIT -1` (no limit at all — the whole library in one render), and 0 would
+ * produce an empty draw that reads as "no clips matched"; both are reachable
+ * from the public RemixConfig surface, so floor at 1.
+ */
+function clampLimit(max?: number): number {
+  return Math.max(1, Math.floor(max ?? DEFAULT_MAX_CLIPS));
+}
+
+/** Escape LIKE metacharacters so a literal category/type matches literally
+ * (paired with `ESCAPE '\'`). Without this, a category like "50%" or one
+ * containing "_" would silently over-match. */
+function likeEscape(s: string): string {
+  return s.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/**
+ * Run the clip query (no caching). Only rows with a non-null `blob_url` are
+ * eligible (a clip with no uploaded asset can't be concatenated). `ORDER BY
+ * RANDOM()` makes each call a fresh edit — so the real render path calls this
+ * directly (see renderRemix), bypassing the cache that selectRemixClips adds.
+ */
+export async function fetchRemixClips(config: RemixConfig): Promise<RemixClip[]> {
+  const limit = clampLimit(config.max_clips);
+  const durationSec = durationFromFilter(config.duration_filter);
+  const db = await getSelectorDb();
+
+  const where: string[] = ["vd.ratio = ?", "vd.blob_url IS NOT NULL"];
+  const args: (string | number)[] = [config.ratio];
+
+  // Explicit category overrides the theme map. Otherwise expand the theme to
+  // its product_type set; an empty set ("soldes"/unknown) skips the filter.
+  if (config.category) {
+    where.push("p.product_type LIKE ? ESCAPE '\\'");
+    args.push(`%${likeEscape(config.category)}%`);
+  } else {
+    const types = THEME_PRODUCT_TYPES[config.theme] ?? [];
+    if (types.length > 0) {
+      where.push(`(${types.map(() => "p.product_type LIKE ? ESCAPE '\\'").join(" OR ")})`);
+      for (const t of types) args.push(`%${likeEscape(t)}%`);
+    }
+  }
+
+  if (durationSec !== null) {
+    where.push("vd.duration_sec = ?");
+    args.push(durationSec);
+  }
+
+  const sql = `
+    SELECT vd.sku, vd.title_fr, vd.blob_url, vd.duration_sec, vd.ratio
+    FROM video_demand_gen vd
+    JOIN products p ON p.sku = vd.sku
+    WHERE ${where.join(" AND ")}
+    ORDER BY RANDOM()
+    LIMIT ?`;
+  args.push(limit);
+
+  const result = await db.execute({ sql, args });
+  return result.rows.map((r) => ({
+    sku: String(r.sku),
+    title_fr: r.title_fr != null ? String(r.title_fr) : "",
+    blob_url: String(r.blob_url),
+    duration_sec: Number(r.duration_sec),
+    ratio: String(r.ratio),
+  }));
+}
+
+/**
+ * Cached clip selection for PREVIEWS (the dry-run manifest path). Cached 5
+ * minutes per (theme, category, ratio, duration_filter, max_clips) — same
+ * pattern and TTL as the Module B selectors (Turso bills per row read). Real
+ * renders use fetchRemixClips so each build is a genuinely fresh random edit.
  */
 export async function selectRemixClips(config: RemixConfig): Promise<RemixClip[]> {
-  const limit = config.max_clips ?? DEFAULT_MAX_CLIPS;
-  const durationSec = durationFromFilter(config.duration_filter);
   const key = cacheKey("selectRemixClips", {
     theme: config.theme,
     category: config.category ?? null,
     ratio: config.ratio,
     duration_filter: config.duration_filter ?? null,
-    max_clips: limit,
+    max_clips: clampLimit(config.max_clips),
   });
-
-  return cached(key, async () => {
-    const db = await getSelectorDb();
-
-    const where: string[] = ["vd.ratio = ?", "vd.blob_url IS NOT NULL"];
-    const args: (string | number)[] = [config.ratio];
-
-    // Explicit category overrides the theme map. Otherwise expand the theme to
-    // its product_type set; an empty set ("soldes"/unknown) skips the filter.
-    if (config.category) {
-      where.push("p.product_type LIKE ?");
-      args.push(`%${config.category}%`);
-    } else {
-      const types = THEME_PRODUCT_TYPES[config.theme] ?? [];
-      if (types.length > 0) {
-        where.push(`(${types.map(() => "p.product_type LIKE ?").join(" OR ")})`);
-        for (const t of types) args.push(`%${t}%`);
-      }
-    }
-
-    if (durationSec !== null) {
-      where.push("vd.duration_sec = ?");
-      args.push(durationSec);
-    }
-
-    const sql = `
-      SELECT vd.sku, vd.title_fr, vd.blob_url, vd.duration_sec, vd.ratio
-      FROM video_demand_gen vd
-      JOIN products p ON p.sku = vd.sku
-      WHERE ${where.join(" AND ")}
-      ORDER BY RANDOM()
-      LIMIT ?`;
-    args.push(limit);
-
-    const result = await db.execute({ sql, args });
-    return result.rows.map((r) => ({
-      sku: String(r.sku),
-      title_fr: r.title_fr != null ? String(r.title_fr) : "",
-      blob_url: String(r.blob_url),
-      duration_sec: Number(r.duration_sec),
-      ratio: String(r.ratio),
-    }));
-  });
+  return cached(key, () => fetchRemixClips(config));
 }

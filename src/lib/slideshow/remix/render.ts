@@ -23,7 +23,7 @@ import { VIDEO_BRAND } from "@/lib/video-brand-tokens";
 import { resolveFfmpegPath } from "@/lib/video-engines/ffmpeg-slideshow";
 import { ratioDimensions } from "@/lib/slideshow/render";
 import { getDefaultMusicTrack } from "../music";
-import { selectRemixClips } from "./selector";
+import { selectRemixClips, fetchRemixClips } from "./selector";
 import type { SlideshowBrand, SlideshowLanguage, SlideshowRatio } from "../types";
 import type { RemixConfig, RemixClip, RemixResult, RemixManifest } from "./types";
 
@@ -179,6 +179,9 @@ export function buildRemixFilterComplex(opts: {
   const x = opts.xfadeSec ?? XFADE_SEC;
   const { width: w, height: h } = opts.dims;
   const count = opts.durations.length;
+  if (count === 0) {
+    throw new Error("buildRemixFilterComplex: durations must contain at least one segment");
+  }
   const pad = opts.padColor ?? ffmpegColor(VIDEO_BRAND.colors.navy);
   const parts: string[] = [];
 
@@ -287,12 +290,16 @@ function runFfmpeg(binary: string, args: string[]): Promise<void> {
  * theme, the config is unusable, or the Blob token is missing.
  */
 export async function renderRemix(config: RemixConfig): Promise<RemixResult> {
-  const clips = await selectRemixClips(config);
   const timestamp = Date.now();
 
   if (config.dryRun) {
-    return { manifest: buildRemixManifest(config, clips, timestamp), clipCount: clips.length };
+    // Previews can use the cached selection (cheap, repeatable).
+    const preview = await selectRemixClips(config);
+    return { manifest: buildRemixManifest(config, preview, timestamp), clipCount: preview.length };
   }
+
+  // Real render: fresh random draw each build (bypass the 5-min preview cache).
+  const clips = await fetchRemixClips(config);
 
   if (clips.length === 0) {
     throw new Error(
