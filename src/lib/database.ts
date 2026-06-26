@@ -316,6 +316,9 @@ async function _initSchemaImpl(): Promise<void> {
       updated_at INTEGER NOT NULL,
       UNIQUE(sku, ratio, duration_sec)
     )`,
+    // Covering index for the remix selector (Module F): filters by ratio +
+    // non-null blob_url, joins/returns sku + duration_sec.
+    `CREATE INDEX IF NOT EXISTS idx_vdg_ratio_blob ON video_demand_gen(ratio, blob_url, sku, duration_sec)`,
     `CREATE TABLE IF NOT EXISTS price_alerts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL,
