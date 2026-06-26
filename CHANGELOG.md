@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.159] - 2026-06-26
+
+### Fixed (post-merge build fix — Module D Remotion)
+- `src/remotion/compositions/TopFiveCountdown.tsx` — add the `[key: string]: unknown`
+  index signature Remotion v4 requires on composition props (`<Composition>`,
+  `selectComposition`, `renderMedia` constrain props to `Record<string, unknown>`).
+  Without it the integrated tree failed `tsc` after Module D landed. The explicit
+  keys keep their real types (`props.items` stays `ProductItem[]`).
+
 ## [0.5.53.158] - 2026-06-26
 
 ### Added (slideshow — publication integration + settings UI: Module G)

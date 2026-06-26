@@ -31,6 +31,10 @@ export interface TopFiveCountdownProps {
   items: ProductItem[];
   brand: CountdownBrand;
   language: CountdownLanguage;
+  // Remotion's <Composition>/selectComposition/renderMedia constrain props to
+  // `Record<string, unknown>`; this index signature satisfies that while the
+  // explicit keys above keep their real types (props.items stays ProductItem[]).
+  [key: string]: unknown;
 }
 
 const STAGE = "#0E1116";
