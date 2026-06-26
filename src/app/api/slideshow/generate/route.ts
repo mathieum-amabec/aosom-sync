@@ -4,11 +4,12 @@ import {
   getSetting,
   getOccupiedQueueSlots,
   addToQueue,
+  cancelPendingQueueItems,
   QueueSlotTakenError,
   type QueuePlatform,
 } from "@/lib/database";
 import { getNextAvailableSlot, parseVideoSchedule, parseSlideshowSettings } from "@/lib/publication-scheduler";
-import { activeChannels, CHANNEL_META } from "@/lib/config";
+import { activeChannels, CHANNEL_META, VIDEO_RATIOS } from "@/lib/config";
 import { buildSlideshow, isSlideshowTemplate, languageForBrand, type BuildSlideshowOptions } from "@/lib/slideshow/build";
 import { getSlideshowCaption } from "@/lib/slideshow/captions";
 import { SlideshowTemplate, type SlideshowBrand, type SlideshowRatio } from "@/lib/slideshow/types";
@@ -81,8 +82,21 @@ export async function POST(request: Request) {
   // caller overrides them in opts.
   const slideshowSettings = parseSlideshowSettings(await getSetting("slideshow_settings"));
   const ratio: SlideshowRatio = reqOpts.ratio ?? slideshowSettings.default_ratio;
+  if (!(VIDEO_RATIOS as readonly string[]).includes(ratio)) {
+    return NextResponse.json(
+      { error: `\`opts.ratio\` must be one of ${VIDEO_RATIOS.join(", ")} (got '${ratio}')` },
+      { status: 400 },
+    );
+  }
   const brand: SlideshowBrand = reqOpts.brand ?? "ameublo";
-  const language = reqOpts.language ?? languageForBrand(brand);
+  if (brand !== "ameublo" && brand !== "furnish") {
+    return NextResponse.json({ error: "`opts.brand` must be 'ameublo' or 'furnish'" }, { status: 400 });
+  }
+  // Language ALWAYS follows the brand: the publisher re-derives the caption language from the
+  // brand at publish time (ameublo → fr, furnish → en), so forcing it here keeps the on-frame
+  // overlays and the published caption in the same language. A caller-supplied opts.language is
+  // intentionally ignored to prevent that divergence.
+  const language = languageForBrand(brand);
   const opts: BuildSlideshowOptions = { ...reqOpts, ratio, brand, language, dryRun };
 
   // ── Dry run: cheap, no lock, no upload, no enqueue ──
@@ -101,7 +115,14 @@ export async function POST(request: Request) {
   }
   GENERATING = true;
   try {
-    const built = await buildSlideshow(template, opts);
+    let built;
+    try {
+      built = await buildSlideshow(template, opts);
+    } catch (err) {
+      // buildSlideshow throws on user-fixable input (invalid config, no eligible products,
+      // REMIX without a prior set) — surface as 400, matching the dry-run path.
+      return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 400 });
+    }
     const blobUrl = built.result.blobUrl;
     if (!blobUrl) {
       return NextResponse.json({ error: "Render produced no blob URL" }, { status: 500 });
@@ -125,7 +146,13 @@ export async function POST(request: Request) {
 
     const caption = getSlideshowCaption(template, language, built.items);
     const payload: SocialQueuePayload = { caption, brand, reelsVideoUrl: blobUrl };
-    const contentId = `slideshow:${template}:${ratio}:${Date.now()}`;
+    // Deterministic id so a repeat generation REPLACES the still-pending post for the same
+    // template/ratio (+ SKU for SHOWCASE) instead of double-publishing near-identical Reels
+    // (mirrors queue-reel's re-queue safety). The freshly rendered MP4's blob URL still
+    // overwrites the payload, so the moved post points at the latest render.
+    const discriminator = template === SlideshowTemplate.SHOWCASE && opts.sku ? `:${opts.sku}` : "";
+    const contentId = `slideshow:${template}:${ratio}${discriminator}`;
+    await cancelPendingQueueItems("video", contentId);
 
     // Slideshows share the video slot pool (content_type='video') and cadence (video_schedule).
     const videoSchedule = parseVideoSchedule(await getSetting("video_schedule"));

@@ -48,6 +48,7 @@ function mockAll(over: { build?: Record<string, unknown>; db?: Record<string, un
     getSessionRole: vi.fn().mockResolvedValue("admin"),
   }));
   vi.doMock("@/lib/config", () => ({
+    VIDEO_RATIOS: ["9:16", "1:1", "16:9"],
     activeChannels: vi.fn().mockReturnValue(["fb_ameublo", "ig_ameublo"]),
     CHANNEL_META: {
       fb_ameublo: { platform: "facebook", brand: "ameublo" },
@@ -81,6 +82,7 @@ function mockAll(over: { build?: Record<string, unknown>; db?: Record<string, un
     getSetting: vi.fn().mockResolvedValue(null),
     getOccupiedQueueSlots: vi.fn().mockResolvedValue([]),
     addToQueue: vi.fn().mockResolvedValue(42),
+    cancelPendingQueueItems: vi.fn().mockResolvedValue(0),
     QueueSlotTakenError,
     ...over.db,
   };
@@ -128,6 +130,36 @@ describe("POST /api/slideshow/generate", () => {
     expect(payload.reelsVideoUrl).toBe("https://blob/slideshow.mp4");
     expect(payload.brand).toBe("ameublo");
     expect(payload.caption).toContain("Chaise de bureau"); // caption carries product material for clickbait
+    // Re-queue safety: deterministic contentId (no Date.now()) + cancel prior pending rows.
+    const contentId = (db.addToQueue as ReturnType<typeof vi.fn>).mock.calls[0][0].contentId;
+    expect(contentId).toBe("slideshow:BEST_SELLERS:9:16");
+    expect(db.cancelPendingQueueItems).toHaveBeenCalledWith("video", "slideshow:BEST_SELLERS:9:16");
+  });
+
+  it("400 (not 500) when buildSlideshow rejects on a real render (no eligible products)", async () => {
+    const buildSlideshow = vi.fn().mockRejectedValue(new Error("buildSlideshow: no eligible products for template BEST_SELLERS"));
+    const { db } = mockAll({ build: { buildSlideshow } });
+    const { POST } = await import("@/app/api/slideshow/generate/route");
+    const res = await POST(postReq({ template: "BEST_SELLERS", dryRun: false, enqueue: true }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/no eligible products/);
+    expect(db.addToQueue).not.toHaveBeenCalled();
+  });
+
+  it("400 on an invalid ratio in opts", async () => {
+    mockAll();
+    const { POST } = await import("@/app/api/slideshow/generate/route");
+    const res = await POST(postReq({ template: "BEST_SELLERS", dryRun: true, opts: { ratio: "4:5" } }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/ratio/i);
+  });
+
+  it("400 on an invalid brand in opts", async () => {
+    mockAll();
+    const { POST } = await import("@/app/api/slideshow/generate/route");
+    const res = await POST(postReq({ template: "BEST_SELLERS", dryRun: true, opts: { brand: "furnsh" } }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/brand/i);
   });
 
   it("dryRun:false enqueue:false → renders, returns blobUrl, no queue row", async () => {
@@ -215,5 +247,23 @@ describe("GET /api/slideshow/preview", () => {
     const { GET } = await import("@/app/api/slideshow/preview/route");
     const res = await GET(getReq("template=BEST_SELLERS"));
     expect(res.status).toBe(401);
+  });
+
+  it("403 for reviewers (read-only, blocked like generate)", async () => {
+    mockAll();
+    vi.doMock("@/lib/auth", () => ({
+      isAuthenticated: vi.fn().mockResolvedValue(true),
+      getSessionRole: vi.fn().mockResolvedValue("reviewer"),
+    }));
+    const { GET } = await import("@/app/api/slideshow/preview/route");
+    const res = await GET(getReq("template=BEST_SELLERS"));
+    expect(res.status).toBe(403);
+  });
+
+  it("400 on an invalid ratio query param", async () => {
+    mockAll();
+    const { GET } = await import("@/app/api/slideshow/preview/route");
+    const res = await GET(getReq("template=BEST_SELLERS&ratio=4:5"));
+    expect(res.status).toBe(400);
   });
 });

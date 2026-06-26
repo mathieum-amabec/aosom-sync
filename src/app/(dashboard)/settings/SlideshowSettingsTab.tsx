@@ -97,10 +97,14 @@ export default function SlideshowSettingsTab() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setMsg(null);
     try {
       const res = await fetch("/api/settings/schedule");
       const d = await res.json();
       if (d.success) setSettings(d.data.slideshow_settings);
+      else setMsg({ ok: false, text: d.error || "Échec du chargement des préférences." });
+    } catch (err) {
+      setMsg({ ok: false, text: String(err) });
     } finally {
       setLoading(false);
     }
@@ -173,8 +177,21 @@ export default function SlideshowSettingsTab() {
     }
   }
 
-  if (loading || !settings) {
+  if (loading) {
     return <div className="p-2 text-gray-500">Chargement des préférences vidéo…</div>;
+  }
+  if (!settings) {
+    return (
+      <div className="p-2 space-y-3">
+        <p className="text-sm text-red-400">{msg?.text || "Impossible de charger les préférences vidéo."}</p>
+        <button
+          onClick={load}
+          className="px-3 py-1.5 bg-gray-700 text-white text-sm rounded-lg hover:bg-gray-600"
+        >
+          Réessayer
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -294,7 +311,9 @@ export default function SlideshowSettingsTab() {
               onChange={(e) => setForm({ ...form, template: e.target.value as SlideshowTemplateKey })}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300"
             >
-              {SLIDESHOW_TEMPLATE_KEYS.map((k) => (
+              {/* REMIX replays a prior rendered set (Modules C–F) — not generatable yet, so it's
+                  omitted from manual generation (it stays in the activation toggles above). */}
+              {SLIDESHOW_TEMPLATE_KEYS.filter((k) => k !== "REMIX").map((k) => (
                 <option key={k} value={k}>
                   {SLIDESHOW_TEMPLATE_LABELS[k]}
                 </option>

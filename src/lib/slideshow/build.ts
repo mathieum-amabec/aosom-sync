@@ -140,7 +140,8 @@ export async function selectSlidesForTemplate(
   opts: BuildSlideshowOptions,
 ): Promise<SlideshowItem[]> {
   const language = opts.language ?? languageForBrand(opts.brand ?? "ameublo");
-  const limit = Math.min(opts.limit ?? DEFAULT_LIMIT, MAX_ITEMS);
+  // A non-positive limit (e.g. 0 typed into the UI) means "use the default", not "zero products".
+  const limit = Math.min(opts.limit && opts.limit > 0 ? opts.limit : DEFAULT_LIMIT, MAX_ITEMS);
 
   // Explicit slides bypass selection (REMIX / pre-resolved callers).
   if (opts.items && opts.items.length > 0) return opts.items.slice(0, MAX_ITEMS);
@@ -164,9 +165,13 @@ export async function selectSlidesForTemplate(
     case SlideshowTemplate.COUNTDOWN:
       return toSlides(await seasonal(opts.theme ?? "", { limit, language }), language);
     case SlideshowTemplate.REMIX:
-      // REMIX replays a prior rendered set (Modules C–F). Until those exist, an
-      // explicit `items` array is required; otherwise fall back to a random mix.
-      return toSlides(await wowDiscovery({ limit, language, strategy: "random" }), language);
+      // REMIX replays a PRIOR rendered set (Modules C–F), which don't exist yet.
+      // Explicit `items` are handled above; reaching here means there's nothing to
+      // remix. Fail clearly rather than silently shipping a random montage captioned
+      // as a curated "remix".
+      throw new Error(
+        "REMIX requires an explicit `items` set — no prior rendered set is available yet",
+      );
     default:
       return [];
   }

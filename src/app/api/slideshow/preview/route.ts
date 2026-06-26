@@ -1,14 +1,10 @@
 import { NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
+import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { getSetting } from "@/lib/database";
 import { parseSlideshowSettings } from "@/lib/publication-scheduler";
+import { VIDEO_RATIOS } from "@/lib/config";
 import { buildSlideshow, isSlideshowTemplate, languageForBrand, type BuildSlideshowOptions } from "@/lib/slideshow/build";
-import {
-  SlideshowTemplate,
-  type SlideshowBrand,
-  type SlideshowRatio,
-  type SlideshowLanguage,
-} from "@/lib/slideshow/types";
+import { SlideshowTemplate, type SlideshowBrand, type SlideshowRatio } from "@/lib/slideshow/types";
 
 /**
  * GET /api/slideshow/preview?template=BEST_SELLERS&ratio=9:16&brand=ameublo&language=fr&...
@@ -23,6 +19,10 @@ export async function GET(request: Request) {
   if (!(await isAuthenticated())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  // Same gate as generation: reviewers are read-only and may not drive the selection pipeline.
+  if ((await getSessionRole()) === "reviewer") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const url = new URL(request.url);
   const q = url.searchParams;
@@ -36,10 +36,16 @@ export async function GET(request: Request) {
   const template = templateParam;
 
   const settings = parseSlideshowSettings(await getSetting("slideshow_settings"));
-  const brand = (q.get("brand") === "furnish" ? "furnish" : "ameublo") as SlideshowBrand;
+  const brand: SlideshowBrand = q.get("brand") === "furnish" ? "furnish" : "ameublo";
   const ratio = (q.get("ratio") ?? settings.default_ratio) as SlideshowRatio;
-  const langParam = q.get("language");
-  const language: SlideshowLanguage = langParam === "en" || langParam === "fr" ? langParam : languageForBrand(brand);
+  if (!(VIDEO_RATIOS as readonly string[]).includes(ratio)) {
+    return NextResponse.json(
+      { error: `\`ratio\` must be one of ${VIDEO_RATIOS.join(", ")} (got '${ratio}')` },
+      { status: 400 },
+    );
+  }
+  // Language follows the brand (matches the generate path + publish-time caption language).
+  const language = languageForBrand(brand);
 
   const num = (key: string): number | undefined => {
     const v = q.get(key);
