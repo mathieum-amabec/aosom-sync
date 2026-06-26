@@ -83,6 +83,12 @@ export async function POST(request: Request) {
     ...((b.opts && typeof b.opts === "object" ? b.opts : {}) as BuildSlideshowOptions),
     musicUrl: undefined,
   };
+  // Clamp a caller-supplied target duration to a sane band (engine also clamps
+  // per-slide); drop non-finite values so they never reach the pacing math.
+  reqOpts.durationSec =
+    typeof reqOpts.durationSec === "number" && Number.isFinite(reqOpts.durationSec)
+      ? Math.min(60, Math.max(4, reqOpts.durationSec))
+      : undefined;
 
   // Slideshow defaults (ratio + platform) come from the saved settings unless the
   // caller overrides them in opts.

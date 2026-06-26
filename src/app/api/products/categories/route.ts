@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
+import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { getImportedProductTypes } from "@/lib/database";
 
 /**
@@ -16,6 +16,10 @@ let cache: { data: string[]; expiry: number } | null = null;
 export async function GET() {
   if (!(await isAuthenticated())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // Admin-only, matching the slideshow routes — reviewers can't enumerate the catalog.
+  if ((await getSessionRole()) === "reviewer") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (cache && cache.expiry > Date.now()) {

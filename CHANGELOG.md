@@ -24,6 +24,15 @@ All notable changes to Aosom Sync will be documented in this file.
   **Generate button gated on the dry-run** that surfaces the scheduled slot on success.
 - The generate route accepts an optional per-request `platform` override.
 
+### Fixed / hardened (pre-landing review)
+- UI: `template` is now the single source of truth — the contextual inputs follow the chosen
+  template whether picked via a mode tab or the template dropdown (fixes a desync that hid the
+  category/theme/SKU field), and the URGENCY stock-threshold input is surfaced.
+- `/api/products/categories` now also blocks reviewer sessions (403), matching its admin-only
+  contract and the slideshow routes.
+- `durationSec` is clamped to [4, 60]s at the route layer (the engine already clamps per-slide).
+- The generation result's blob link is rendered only when it's an `https://` URL.
+
 ## [0.5.53.159] - 2026-06-26
 
 ### Fixed (post-merge build fix — Module D Remotion)

@@ -63,9 +63,9 @@ const LIMIT_CHOICES = ["5", "10", "20"];
 const MINPCT_CHOICES = ["10", "15", "20", "25"];
 const DURATION_CHOICES = ["6", "15", "30"];
 
-/** Full manual-generation form. */
+/** Full manual-generation form. `template` is the single source of truth; the
+ * mode tabs and the contextual inputs are derived from TEMPLATE_PREVIEW_MODE. */
 type GenForm = {
-  mode: SelectMode;
   template: SlideshowTemplateKey;
   brand: Brand;
   ratio: VideoRatio;
@@ -82,7 +82,6 @@ type GenForm = {
 };
 
 const DEFAULT_FORM: GenForm = {
-  mode: "best_sellers",
   template: "BEST_SELLERS",
   brand: "ameublo",
   ratio: "9:16",
@@ -173,14 +172,13 @@ export default function SlideshowSettingsTab() {
     setGenResult(null);
   }, []);
 
-  /** Pick a selection mode → also sets the matching template. */
-  const pickMode = useCallback(
-    (mode: SelectMode) => {
-      const tab = MODE_TABS.find((t) => t.key === mode);
-      patch({ mode, template: tab ? tab.template : form.template });
+  /** Pick a selection mode → sets the matching template (the source of truth). */
+  const pickTemplate = useCallback(
+    (template: SlideshowTemplateKey) => {
+      patch({ template });
       setProducts(null);
     },
-    [patch, form.template],
+    [patch],
   );
 
   const load = useCallback(async () => {
@@ -451,13 +449,13 @@ export default function SlideshowSettingsTab() {
         <label className="block text-sm text-gray-400 mb-2">Mode de sélection</label>
         <div className="flex flex-wrap gap-2 mb-4">
           {MODE_TABS.map((t) => {
-            const active = form.mode === t.key;
+            const active = previewMode === t.key;
             return (
               <button
                 key={t.key}
                 type="button"
                 aria-pressed={active}
-                onClick={() => pickMode(t.key)}
+                onClick={() => pickTemplate(t.template)}
                 className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
                   active
                     ? "bg-blue-600 border-blue-500 text-white"
@@ -470,9 +468,9 @@ export default function SlideshowSettingsTab() {
           })}
         </div>
 
-        {/* B. Paramètres contextuels selon le mode */}
+        {/* B. Paramètres contextuels selon le mode (dérivés du template = source de vérité) */}
         <div className="mb-4">
-          {form.mode === "manual" && (
+          {previewMode === "manual" && (
             <Field label="SKU(s) — séparés par des virgules (la vidéo Showcase utilise le 1er)">
               <input
                 value={form.sku}
@@ -482,7 +480,7 @@ export default function SlideshowSettingsTab() {
               />
             </Field>
           )}
-          {form.mode === "by_category" && (
+          {previewMode === "by_category" && (
             <Field label="Catégorie">
               {categories.length > 0 ? (
                 <select
@@ -505,7 +503,7 @@ export default function SlideshowSettingsTab() {
               )}
             </Field>
           )}
-          {form.mode === "price_drops" && (
+          {previewMode === "price_drops" && (
             <Field label="Rabais minimum">
               <Segmented
                 choices={MINPCT_CHOICES.map((v) => ({ value: v, label: `${v}%` }))}
@@ -514,7 +512,19 @@ export default function SlideshowSettingsTab() {
               />
             </Field>
           )}
-          {form.mode === "seasonal" && (
+          {previewMode === "low_stock" && (
+            <Field label="Seuil de stock (urgence)">
+              <input
+                type="number"
+                min={1}
+                value={form.threshold}
+                placeholder="5"
+                onChange={(e) => patch({ threshold: e.target.value })}
+                className="w-full sm:w-40 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300"
+              />
+            </Field>
+          )}
+          {previewMode === "seasonal" && (
             <Field label="Thème saisonnier">
               <div className="flex flex-wrap gap-2">
                 {THEME_BUTTONS.map((t) => {
@@ -536,7 +546,7 @@ export default function SlideshowSettingsTab() {
               </div>
             </Field>
           )}
-          {form.mode !== "manual" && (
+          {previewMode !== "manual" && (
             <div className="mt-3">
               <Field label="Nombre de produits">
                 <Segmented
@@ -695,7 +705,7 @@ export default function SlideshowSettingsTab() {
             }`}
           >
             <p>{genResult.text}</p>
-            {genResult.blobUrl && (
+            {genResult.blobUrl?.startsWith("https://") && (
               <a href={genResult.blobUrl} target="_blank" rel="noopener noreferrer" className="underline text-xs break-all">
                 Voir la vidéo
               </a>
