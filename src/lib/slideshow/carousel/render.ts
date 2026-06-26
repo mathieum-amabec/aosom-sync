@@ -19,7 +19,7 @@ import { registerBrandFonts } from "@/lib/register-brand-fonts";
 import { VIDEO_BRAND } from "@/lib/video-brand-tokens";
 import { formatVideoTitle } from "@/lib/video-title-utils";
 import { formatPrice, type VideoLocale } from "@/lib/video-engines/ffmpeg-slideshow";
-import { isShopifyCdnUrl, shouldShowBadge, discountPct } from "@/lib/slideshow/validate";
+import { isShopifyCdnUrl, shouldShowBadge, discountPct, MAX_ITEMS } from "@/lib/slideshow/validate";
 import type { SlideshowItem, SlideshowBrand } from "@/lib/slideshow/types";
 import type {
   CarouselConfig,
@@ -197,11 +197,19 @@ export async function renderCarousel(config: CarouselConfig): Promise<CarouselRe
   if (!Array.isArray(config.items) || config.items.length < 1) {
     throw new Error("renderCarousel: at least one item is required");
   }
+  // Same caps as validateSlideshowConfig — renderCarousel is exported, so guard a
+  // direct caller against unbounded Blob uploads and "$0.00" cards.
+  if (config.items.length > MAX_ITEMS) {
+    throw new Error(`renderCarousel: at most ${MAX_ITEMS} items (got ${config.items.length})`);
+  }
   config.items.forEach((item, i) => {
     if (!isShopifyCdnUrl(item.image_url)) {
       throw new Error(
         `renderCarousel: items[${i}].image_url must start with https://cdn.shopify.com/ (got "${item.image_url}")`,
       );
+    }
+    if (typeof item.price !== "number" || !Number.isFinite(item.price) || item.price <= 0) {
+      throw new Error(`renderCarousel: items[${i}].price must be a positive number (got ${item.price})`);
     }
   });
 

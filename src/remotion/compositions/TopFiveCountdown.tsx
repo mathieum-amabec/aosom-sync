@@ -16,6 +16,11 @@ import { AbsoluteFill, Img, Sequence, interpolate, spring, useCurrentFrame, useV
 import type { ProductItem } from "../../lib/selectors/types";
 import { formatVideoTitle } from "../../lib/video-title-utils";
 import { VIDEO_BRAND } from "../../lib/video-brand-tokens";
+// Share the canonical badge/discount predicate so the rendered video agrees with
+// the dry-run manifest (which also uses validate.ts) — including the float
+// tolerance for an exact 10% off. validate.ts is pure (no @/ alias, no heavy
+// deps), so it bundles cleanly into the Remotion composition.
+import { shouldShowBadge, discountPct } from "../../lib/slideshow/validate";
 import { computeCountdownTiming, COUNTDOWN_WIDTH, COUNTDOWN_HEIGHT } from "../timing";
 
 export type CountdownBrand = "ameublo" | "furnish";
@@ -59,14 +64,6 @@ function formatCountdownPrice(price: number, language: CountdownLanguage): strin
 function titleOf(item: ProductItem, language: CountdownLanguage): string {
   const raw = language === "en" ? item.title_en : item.title_fr;
   return formatVideoTitle(raw, 34, { uppercase: false, aggressive: false });
-}
-
-/** Discount badge rule, mirrored from slideshow/validate (kept inline: no @/ alias). */
-function discountPctOf(item: ProductItem): number | undefined {
-  const { price, compare_at_price: was } = item;
-  if (typeof was !== "number" || !Number.isFinite(was) || !(price > 0)) return undefined;
-  if (was < price * 1.1) return undefined;
-  return Math.round(((was - price) / was) * 100);
 }
 
 /** Slide-in-from-bottom wrapper driven by a spring on its first `enterFrames`. */
@@ -127,7 +124,9 @@ function RevealCard({
   winner: boolean;
 }) {
   const image = item.images?.[0];
-  const pct = discountPctOf(item);
+  const pct = shouldShowBadge(item.price, item.compare_at_price)
+    ? discountPct(item.price, item.compare_at_price)
+    : undefined;
   return (
     <AbsoluteFill style={{ background: `linear-gradient(180deg, ${STAGE} 0%, ${STAGE_2} 100%)` }}>
       {/* Rank number, large and gold, pinned top-left. */}

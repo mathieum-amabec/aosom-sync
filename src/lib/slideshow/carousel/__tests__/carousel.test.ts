@@ -44,6 +44,17 @@ describe("renderCarousel (dry run)", () => {
   it("throws on an empty item list", async () => {
     await expect(renderCarousel(config({ dryRun: true, items: [] }))).rejects.toThrow(/at least one item/);
   });
+
+  it("throws on a non-positive price (guards against $0.00 cards)", async () => {
+    await expect(
+      renderCarousel(config({ dryRun: true, items: [item({ price: 0 })] })),
+    ).rejects.toThrow(/price must be a positive number/);
+  });
+
+  it("throws above the 20-item cap (guards against unbounded uploads)", async () => {
+    const items = Array.from({ length: 21 }, () => item());
+    await expect(renderCarousel(config({ dryRun: true, items }))).rejects.toThrow(/at most 20 items/);
+  });
 });
 
 describe("carousel manifest — discount badge rule (compare_at >= price * 1.10)", () => {
@@ -56,6 +67,13 @@ describe("carousel manifest — discount badge rule (compare_at >= price * 1.10)
     expect(manifest.items[0].discountPct).toBe(23); // (130-100)/130 ≈ 23%
     expect(manifest.items[1].showsBadge).toBe(false);
     expect(manifest.items[1].discountPct).toBeUndefined();
+  });
+
+  it("treats an exact 10% off as a badge (float tolerance, matches the rendered video)", () => {
+    // price*1.1 = 110.00000000000001 in float; the shared predicate tolerates it.
+    const manifest = buildCarouselManifest(config({ items: [item({ price: 100, compare_at: 110 })] }), 1);
+    expect(manifest.items[0].showsBadge).toBe(true);
+    expect(manifest.items[0].discountPct).toBe(9); // (110-100)/110 ≈ 9%
   });
 
   it("cleans the overlay text (no ellipsis, no mid-word cut)", () => {

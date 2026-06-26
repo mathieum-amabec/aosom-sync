@@ -4,7 +4,9 @@
  * buildCountdown picks the 5 best sellers (by stock-depletion velocity), keeps
  * only those with a Shopify-CDN photo, and either:
  *   - dryRun:true  → returns a MANIFEST (what would render) with NO Remotion
- *     bundle/render and NO Blob write; or
+ *     bundle/render, NO Sharp, and NO Blob write. (The best-seller selector still
+ *     resolves Shopify-CDN image URLs — a metadata lookup — but downloads no image
+ *     bytes.) or
  *   - dryRun:false → bundles src/remotion, renders the TopFiveCountdown MP4 with
  *     @remotion/renderer, and uploads it to the PUBLIC Vercel Blob store.
  *
@@ -121,7 +123,14 @@ export async function buildCountdown(opts: BuildCountdownOptions): Promise<Slide
     throw new Error("buildCountdown: BLOB_READ_WRITE_TOKEN is required for a real render (public store)");
   }
 
-  // Heavy Remotion runtime loaded ONLY for a real render.
+  // ⚠️ DEPLOYMENT: this real-render path does NOT run inside a standard Vercel
+  // Node function. `bundle()` references the `src/remotion` source tree by path
+  // (Next's file tracer can't see it) and `@remotion/renderer` launches a
+  // headless Chromium that a serverless function doesn't ship. Run it on a host
+  // that has the source + a browser (a dedicated worker, a box with the repo, or
+  // @remotion/lambda). The DM Sans brand font and per-image load failures must
+  // also be handled on that host. The dryRun manifest path above is what runs in
+  // the app today. See README / CHANGELOG "Remotion licence" + deployment notes.
   const { bundle } = await import("@remotion/bundler");
   const { selectComposition, renderMedia } = await import("@remotion/renderer");
 
@@ -131,10 +140,13 @@ export async function buildCountdown(opts: BuildCountdownOptions): Promise<Slide
   const workBase = process.env.VERCEL ? "/tmp" : path.join(process.cwd(), "public", "social-videos", ".work");
   fs.mkdirSync(workBase, { recursive: true });
   const workDir = fs.mkdtempSync(path.join(workBase, "countdown-"));
+  // Bundle INTO workDir so the webpack output is removed with it (no warm-instance
+  // /tmp leak across repeated renders).
+  const bundleDir = path.join(workDir, "bundle");
   const outPath = path.join(workDir, "countdown.mp4");
 
   try {
-    const serveUrl = await bundle({ entryPoint });
+    const serveUrl = await bundle({ entryPoint, outDir: bundleDir });
     const composition = await selectComposition({ serveUrl, id: "TopFiveCountdown", inputProps });
     await renderMedia({ composition, serveUrl, codec: "h264", outputLocation: outPath, inputProps });
 

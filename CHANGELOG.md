@@ -29,6 +29,13 @@ All notable changes to Aosom Sync will be documented in this file.
 - Tests: countdown dry-run (mocked selectors, no Remotion), carousel dry-run + URL validation +
   overlay SVG, and the pure countdown timing model — **17 new tests**.
 
+> **Deployment note.** `buildCountdown`'s **real** render path does not run inside a standard Vercel
+> Node function — it bundles `src/remotion` by source path (not traced by Next) and launches a
+> headless Chromium (`@remotion/renderer`). Run real renders on a host with the repo source + a
+> browser (dedicated worker / CI box / `@remotion/lambda`), loading DM Sans there. The `dryRun`
+> manifest path runs anywhere; the carousel (Sharp) and existing video (ffmpeg) real paths run on
+> the standard Node runtime.
+
 > **⚠️ Remotion licence.** Remotion is **free** for individuals and companies with **≤ 3 employees**
 > (our current case). Larger teams need a paid **company licence** (~$100/month) — see
 > https://remotion.dev/license. Documented in the README; re-evaluate before the team grows past 3.
