@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.156] - 2026-06-26
+
+### Added (slideshow remix engine — Module F)
+- **`src/lib/slideshow/remix/`** — compiles the existing demand-gen video library
+  (`video_demand_gen`, ~210 rendered clips with public `blob_url`) into new thematic
+  compilations without re-rendering from source — marginal cost is one FFmpeg concat
+  plus one Blob upload:
+  - `types.ts` — `RemixConfig` / `RemixClip` / `RemixManifest` / `RemixResult` contract.
+  - `selector.ts` — `selectRemixClips` (cached previews) + `fetchRemixClips` (fresh draw
+    for real renders). Theme→`product_type` map (`ete-cour`, `maison`, `enfants`, `bureau`,
+    `animaux`, `soldes`), reuses the Module B 5-min cache + injectable DB seam. Skips
+    null `blob_url`, clamps `max_clips ≥ 1`, escapes LIKE metacharacters.
+  - `render.ts` — `renderRemix()`: **dry-run returns a manifest and writes nothing**; real
+    render downloads each clip, xfade-concats them with branded intro/outro cards and
+    royalty-free music, uploads the MP4 to the **public** Vercel Blob store at
+    `slideshows/{brand}/remix/{theme}/{ratio}/{ts}.mp4`, and cleans up temp files.
+  - `index.ts` — `buildEteCour` / `buildMaison` / `buildEnfants` / `buildSoldes` shortcuts.
+- **`src/lib/database.ts`** — `idx_vdg_ratio_blob` covering index on
+  `video_demand_gen(ratio, blob_url, sku, duration_sec)` for the remix selector.
+
 ## [0.5.53.155] - 2026-06-25
 
 ### Added (slideshow video templates — Module C)
