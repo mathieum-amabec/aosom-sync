@@ -8,6 +8,7 @@
  * is rejected outright rather than fetched-and-failed.
  */
 import {
+  SlideshowTemplate,
   type SlideshowConfig,
   type SlideshowItem,
   type SlideshowRatio,
@@ -26,6 +27,7 @@ export const MAX_ITEMS = 20;
 
 const VALID_RATIOS: readonly SlideshowRatio[] = ["9:16", "1:1", "16:9"];
 const VALID_BRANDS: readonly SlideshowBrand[] = ["ameublo", "furnish"];
+const VALID_TEMPLATES: readonly string[] = Object.values(SlideshowTemplate);
 
 /** True when `url` is a usable Shopify-CDN image URL. */
 export function isShopifyCdnUrl(url: unknown): url is string {
@@ -92,6 +94,13 @@ export function validateSlideshowConfig(config: SlideshowConfig): ValidationResu
 
   if (!VALID_BRANDS.includes(config.brand)) {
     errors.push(`brand must be one of ${VALID_BRANDS.join(", ")} (got "${config.brand}")`);
+  }
+
+  // template feeds the Blob object key (blobPath); an unlisted value would let a
+  // crafted string escape the slideshows/ prefix. Allowlist it (the enum is
+  // erased at runtime, so a deserialized payload can carry anything).
+  if (!VALID_TEMPLATES.includes(config.template as unknown as string)) {
+    errors.push(`template must be one of ${VALID_TEMPLATES.join(", ")} (got "${config.template}")`);
   }
 
   if (config.language !== "fr" && config.language !== "en") {
