@@ -2,6 +2,44 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.157] - 2026-06-26
+
+### Added (slideshow engine — Module D: Remotion countdown + Module E: image carousels)
+- **`src/remotion/`** — [Remotion](https://remotion.dev) composition for the **"Top 5 du mois"
+  countdown Reel** (9:16 only):
+  - `timing.ts` — pure, Remotion-free timing model (`computeCountdownTiming`): intro (30f) →
+    reveal #5…#2 (60f each) → #1 winner (90f) → outro (30f) = **390 frames / 13 s @ 30 fps**.
+    Shared by the composition, the Node-side template, and the manifest so they never disagree.
+  - `compositions/TopFiveCountdown.tsx` — dark, gold-accented stage; ranks slide in from the
+    bottom; product photo (`images[0]`), `formatVideoTitle`-cleaned title, language-aware price,
+    and a gold discount badge only when `compare_at >= price * 1.10`.
+  - `Root.tsx` / `index.ts` — composition registry + bundle entry (`registerRoot`).
+- **`src/lib/slideshow/templates/countdown.ts`** — `buildCountdown()`: picks the 5 best sellers
+  with a Shopify-CDN photo; **dry-run returns a manifest** (no Remotion, no Blob — never even
+  loads the runtime); real render bundles `src/remotion`, renders the MP4 with `@remotion/renderer`,
+  and uploads to the **public** Vercel Blob store at `slideshows/{brand}/countdown/9x16/{ts}.mp4`.
+- **`src/lib/slideshow/carousel/`** — branded image carousels (Sharp), 1:1 (`1080x1080`) or 4:5
+  (`1080x1350`):
+  - `render.ts` — `renderCarousel()`: **dry-run returns a manifest**; real render draws one PNG
+    per item (photo on a navy field + title/price/discount-badge overlay + store logo), each
+    uploaded to `slideshows/{brand}/carousel/{format}/{ts}/{i}.png`. Registers DM Sans via
+    `registerBrandFonts()` so SVG text never renders as tofu. Same CDN/title/badge rules as video.
+  - `templates.ts` — `buildBestSellersCarousel` / `buildPriceDropCarousel` / `buildUrgencyCarousel`,
+    reusing the Module B selectors (drops any product without a Shopify-CDN image).
+- Tests: countdown dry-run (mocked selectors, no Remotion), carousel dry-run + URL validation +
+  overlay SVG, and the pure countdown timing model — **17 new tests**.
+
+> **Deployment note.** `buildCountdown`'s **real** render path does not run inside a standard Vercel
+> Node function — it bundles `src/remotion` by source path (not traced by Next) and launches a
+> headless Chromium (`@remotion/renderer`). Run real renders on a host with the repo source + a
+> browser (dedicated worker / CI box / `@remotion/lambda`), loading DM Sans there. The `dryRun`
+> manifest path runs anywhere; the carousel (Sharp) and existing video (ffmpeg) real paths run on
+> the standard Node runtime.
+
+> **⚠️ Remotion licence.** Remotion is **free** for individuals and companies with **≤ 3 employees**
+> (our current case). Larger teams need a paid **company licence** (~$100/month) — see
+> https://remotion.dev/license. Documented in the README; re-evaluate before the team grows past 3.
+
 ## [0.5.53.156] - 2026-06-26
 
 ### Added (slideshow remix engine — Module F)
