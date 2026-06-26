@@ -5,9 +5,11 @@ import {
   parsePublicationSchedule,
   parseBlogSchedule,
   parseVideoSchedule,
+  parseSlideshowSettings,
   normalizePublicationSchedule,
   normalizeBlogSchedule,
   normalizeVideoSchedule,
+  normalizeSlideshowSettings,
 } from "@/lib/publication-scheduler";
 
 /**
@@ -18,10 +20,11 @@ import {
  */
 export async function GET() {
   try {
-    const [pubRaw, blogRaw, videoRaw] = await Promise.all([
+    const [pubRaw, blogRaw, videoRaw, slideshowRaw] = await Promise.all([
       getSetting("publication_schedule"),
       getSetting("blog_schedule"),
       getSetting("video_schedule"),
+      getSetting("slideshow_settings"),
     ]);
     return NextResponse.json({
       success: true,
@@ -29,6 +32,7 @@ export async function GET() {
         publication_schedule: parsePublicationSchedule(pubRaw),
         blog_schedule: parseBlogSchedule(blogRaw),
         video_schedule: parseVideoSchedule(videoRaw),
+        slideshow_settings: parseSlideshowSettings(slideshowRaw),
       },
     });
   } catch (err) {
@@ -63,9 +67,17 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ success: false, error: "Body must be an object" }, { status: 400 });
   }
   const b = body as Record<string, unknown>;
-  if (b.publication_schedule === undefined && b.blog_schedule === undefined && b.video_schedule === undefined) {
+  if (
+    b.publication_schedule === undefined &&
+    b.blog_schedule === undefined &&
+    b.video_schedule === undefined &&
+    b.slideshow_settings === undefined
+  ) {
     return NextResponse.json(
-      { success: false, error: "Provide `publication_schedule`, `blog_schedule`, and/or `video_schedule`" },
+      {
+        success: false,
+        error: "Provide `publication_schedule`, `blog_schedule`, `video_schedule`, and/or `slideshow_settings`",
+      },
       { status: 400 },
     );
   }
@@ -83,11 +95,16 @@ export async function PATCH(request: Request) {
       const normalized = normalizeVideoSchedule(b.video_schedule);
       await setSetting("video_schedule", JSON.stringify(normalized));
     }
+    if (b.slideshow_settings !== undefined) {
+      const normalized = normalizeSlideshowSettings(b.slideshow_settings);
+      await setSetting("slideshow_settings", JSON.stringify(normalized));
+    }
 
-    const [pubRaw, blogRaw, videoRaw] = await Promise.all([
+    const [pubRaw, blogRaw, videoRaw, slideshowRaw] = await Promise.all([
       getSetting("publication_schedule"),
       getSetting("blog_schedule"),
       getSetting("video_schedule"),
+      getSetting("slideshow_settings"),
     ]);
     return NextResponse.json({
       success: true,
@@ -95,6 +112,7 @@ export async function PATCH(request: Request) {
         publication_schedule: parsePublicationSchedule(pubRaw),
         blog_schedule: parseBlogSchedule(blogRaw),
         video_schedule: parseVideoSchedule(videoRaw),
+        slideshow_settings: parseSlideshowSettings(slideshowRaw),
       },
     });
   } catch (err) {
