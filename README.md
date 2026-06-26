@@ -20,6 +20,24 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Slideshow & carousel content engine
+
+The social-content engine lives under `src/lib/slideshow/` (+ `src/lib/selectors/`) and
+renders branded product media from the catalog:
+
+- **Video slideshow** (`render.ts`) and **Top-5 countdown Reel** (`templates/countdown.ts`,
+  rendered with [Remotion](https://remotion.dev) in `src/remotion/`).
+- **Image carousels** (`carousel/`) — branded square/portrait PNGs via Sharp.
+
+Every renderer supports a **dry run** (`dryRun: true`) that returns a manifest and writes
+nothing — no image download, no Remotion/Sharp/ffmpeg, no Blob upload. Real renders upload to
+the **public** Vercel Blob store (Meta/YouTube fetch the asset URLs directly).
+
+> **⚠️ Remotion licence.** Remotion is **free** for individuals and companies with **≤ 3
+> employees** (our current case). Teams above that threshold need a paid **company licence**
+> (~$100/month). See the [Remotion licence](https://remotion.dev/license). Re-evaluate before
+> the team grows past 3 employees.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
