@@ -111,6 +111,11 @@ async function selectCountdownItems(opts: BuildCountdownOptions): Promise<Produc
  * dryRun → { manifest }. Real → renders the MP4 and returns { blobUrl }.
  */
 export async function buildCountdown(opts: BuildCountdownOptions): Promise<SlideshowResult> {
+  // brand lands in the public Blob key — reject anything off the union in case an
+  // untyped (JSON-parsed) caller slips a bad value through.
+  if (opts.brand !== "ameublo" && opts.brand !== "furnish") {
+    throw new Error(`buildCountdown: invalid brand "${opts.brand}"`);
+  }
   const items = await selectCountdownItems(opts);
   const timestamp = Date.now();
 

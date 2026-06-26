@@ -33,6 +33,10 @@ import type {
 // the bundled DM Sans before the first card or titles render as tofu on Linux.
 registerBrandFonts();
 
+/** Allowed brands / formats — validated at runtime since both land in the Blob key. */
+const VALID_BRANDS: readonly SlideshowBrand[] = ["ameublo", "furnish"];
+const VALID_FORMATS: readonly CarouselFormat[] = ["1080x1080", "1080x1350"];
+
 /** Pixel dimensions for a carousel format. */
 export function carouselDimensions(format: CarouselFormat): { width: number; height: number } {
   return format === "1080x1350" ? { width: 1080, height: 1350 } : { width: 1080, height: 1080 };
@@ -196,6 +200,14 @@ async function renderCardPng(
 export async function renderCarousel(config: CarouselConfig): Promise<CarouselResult> {
   if (!Array.isArray(config.items) || config.items.length < 1) {
     throw new Error("renderCarousel: at least one item is required");
+  }
+  // brand + format land in the public Blob key — reject anything off the unions
+  // in case an untyped (JSON-parsed) caller slips a bad value through.
+  if (!VALID_BRANDS.includes(config.brand)) {
+    throw new Error(`renderCarousel: invalid brand "${config.brand}"`);
+  }
+  if (!VALID_FORMATS.includes(config.format)) {
+    throw new Error(`renderCarousel: invalid format "${config.format}"`);
   }
   // Same caps as validateSlideshowConfig — renderCarousel is exported, so guard a
   // direct caller against unbounded Blob uploads and "$0.00" cards.
