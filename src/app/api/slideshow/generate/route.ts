@@ -76,7 +76,13 @@ export async function POST(request: Request) {
   const template = b.template;
   const dryRun = b.dryRun === true;
   const enqueue = b.enqueue === true;
-  const reqOpts = (b.opts && typeof b.opts === "object" ? b.opts : {}) as BuildSlideshowOptions;
+  // Strip musicUrl: it would flow to `ffmpeg -i <musicUrl>` (arbitrary local-path / URL
+  // read), and Module G has no need for caller-chosen music — the engine uses the bundled
+  // royalty-free default. Force it undefined before it reaches buildSlideshow/renderSlideshow.
+  const reqOpts: BuildSlideshowOptions = {
+    ...((b.opts && typeof b.opts === "object" ? b.opts : {}) as BuildSlideshowOptions),
+    musicUrl: undefined,
+  };
 
   // Slideshow defaults (ratio + platform) come from the saved settings unless the
   // caller overrides them in opts.
