@@ -2,6 +2,30 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.164] - 2026-06-27
+
+### Changed (/videos page cleanup — reflect the real generation workflow)
+- **Générer tab**: replaced the in-app `SlideshowGenerator` panel with an info box
+  (navy/gold, 🎬) explaining that slideshow videos are generated locally via the Claude Code
+  terminal script (`scripts/generate-slideshow-batch.mts`). FFmpeg doesn't run on Vercel.
+  - The engine dropdown keeps FFmpeg / Kling / Creatomate / Slideshow, each with a reality
+    note: FFmpeg "génération locale uniquement (non dispo sur Vercel)", Slideshow "via le
+    script Claude Code", Kling "🔜 compte Kling AI actif requis", Creatomate "🔜 compte
+    Creatomate payant requis". Selecting Slideshow now shows guidance instead of a form;
+    FFmpeg/Kling/Creatomate keep their product-selection form.
+  - Removed the now-orphaned `SlideshowGenerator.tsx` (640 lines) — generation moved to terminal.
+- **Bibliothèque tab**: now shows ALL videos, not just legacy `video_jobs`:
+  - **Section A — Slideshows générés**: every non-cancelled slideshow from
+    `publication_queue` (content_type='video', via `/api/slideshow/queue`), with inline
+    video preview, status badge, and approve/delete on drafts / scheduled + published dates.
+  - **Section B — Vidéos Demand Gen**: the 6 most recent `video_demand_gen` assets with
+    preview, SKU, ratio/duration, a "📱 Publier comme Reel" action (FR/EN, 9:16, reusing
+    `/api/social/queue-reel`), and a link to the full `/demand-gen-videos` library.
+  - Legacy FFmpeg/Kling/Creatomate renders kept under their own heading.
+- **File d'attente tab**: the slideshow video queue fetch + approve/delete are lifted to the
+  parent so the tab badge and section header show **"X vidéos en attente d'approbation"**
+  (draft count); the queue + library share one source and one approve/delete action.
+
 ## [0.5.53.163] - 2026-06-27
 
 ### Added (batch slideshow generation script)
