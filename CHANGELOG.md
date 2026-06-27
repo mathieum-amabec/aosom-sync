@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.167] - 2026-06-27
+
+### Fixed (strip supplier brand names from video titles)
+- **`video-title-utils.ts`** — `formatVideoTitle` now strips a leading supplier brand
+  (Outsunny / HOMCOM / Aosom / Qaba / PawHut / Vinsetto, incl. `®`) **first**, before any
+  other processing, so no brand name reaches a video overlay. E.g. "Qaba Kids Seesaw" →
+  "Kids Seesaw", "Outsunny Patio Glider" → "Patio Glider". Word-boundary anchored (a real
+  word starting with a brand is never truncated); stacked brands are stripped too.
+  The inline port in `scripts/render-demand-gen.mjs` is kept in sync, so demand-gen
+  overlays are brand-free as well.
+
 ## [0.5.53.166] - 2026-06-27
 
 ### Changed (slideshow — white-bg images only + stronger clickbait hooks)

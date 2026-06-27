@@ -37,6 +37,26 @@ const MATERIALS = ["MÉTAL", "ACIER", "BOIS", "ROTIN", "VERRE", "ALUMINIUM"];
  */
 const PHRASE_REDUCTIONS: Array<[RegExp, string]> = [[/\bBASE DE PARASOL\b/g, "BASE PARASOL"]];
 
+/**
+ * Supplier brand names that must never appear in a video overlay (Aosom's own
+ * brands). Stripped from the START of the title, before any other processing.
+ */
+export const SUPPLIER_BRANDS = ["Outsunny", "HOMCOM", "Aosom", "Qaba", "PawHut", "Vinsetto"];
+// `®?` covers the registered-mark variants; `\s+` requires a word boundary so a
+// real word starting with a brand ("Aosomething") is never truncated.
+const BRAND_PREFIX_RE = new RegExp(`^\\s*(?:${SUPPLIER_BRANDS.join("|")})®?\\s+`, "i");
+
+/** Strip a leading supplier brand (repeated, to catch a rare stacked "Aosom Qaba …"). */
+export function stripSupplierBrand(title: string): string {
+  let prev: string;
+  let out = title;
+  do {
+    prev = out;
+    out = out.replace(BRAND_PREFIX_RE, "");
+  } while (out !== prev);
+  return out;
+}
+
 const up = (s: string): string => s.toLocaleUpperCase("fr-CA");
 
 function stripTrailingFiller(t: string): string {
@@ -68,8 +88,10 @@ export function formatVideoTitle(
   const { uppercase = true, aggressive = true } = opts;
   if (!rawTitle) return "";
 
+  // 0. Strip a leading supplier brand (Qaba/Outsunny/HOMCOM/…) FIRST, so no
+  //    downstream rule (uppercase, removal, length cap) ever sees the brand.
   // 1. Strip any existing ellipsis, normalize dashes + whitespace (casing preserved here).
-  let t = rawTitle
+  let t = stripSupplierBrand(rawTitle)
     .replace(/…/g, " ")
     .replace(/\.\.\./g, " ")
     .replace(/\s*[—–]\s*/g, " ")
