@@ -41,10 +41,32 @@ async function throttle(): Promise<void> {
   return wait;
 }
 
+/** How many lead images to keep — the first 1-2 are the hero shots; specs/
+ * infographics sit later in the Aosom gallery. */
+const MAX_PRODUCT_IMAGES = 2;
+
 /**
- * Default resolver: GET /products/{id}.json?fields=images and keep only
- * cdn.shopify.com sources. Returns [] on any failure (no token, 404, network)
- * so a missing image never breaks content selection.
+ * URL substrings that flag a spec/infographic/diagram image (case-insensitive),
+ * plus the `-B0`..`-F0` filename suffixes Aosom uses for those gallery shots.
+ * An image whose URL contains any of these is dropped — slideshows want clean
+ * product photos, not measurement diagrams.
+ */
+const SPEC_IMAGE_KEYWORDS = [
+  "diagram", "spec", "measure", "size", "dimension", "chart", "infographic",
+  "instruction", "manual", "-b0", "-c0", "-d0", "-e0", "-f0",
+];
+
+/** True when the image URL looks like a spec/infographic shot, not a product photo. */
+export function isSpecImageUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  return SPEC_IMAGE_KEYWORDS.some((kw) => u.includes(kw));
+}
+
+/**
+ * Default resolver: GET /products/{id}.json?fields=images, keep only
+ * cdn.shopify.com sources, drop spec/infographic shots, and return the first
+ * MAX_PRODUCT_IMAGES (the clean hero photos). Returns [] on any failure (no
+ * token, 404, network) so a missing image never breaks content selection.
  */
 async function defaultResolveShopifyCdnImages(shopifyProductId: string): Promise<string[]> {
   const id = (shopifyProductId || "").trim();
@@ -62,7 +84,8 @@ async function defaultResolveShopifyCdnImages(shopifyProductId: string): Promise
       const data = (await res.json()) as { product?: { images?: { src?: string }[] } };
       urls = (data.product?.images ?? [])
         .map((img) => (typeof img.src === "string" ? img.src : ""))
-        .filter((src) => src.startsWith(SHOPIFY_CDN_PREFIX));
+        .filter((src) => src.startsWith(SHOPIFY_CDN_PREFIX) && !isSpecImageUrl(src))
+        .slice(0, MAX_PRODUCT_IMAGES);
     }
   } catch {
     urls = [];

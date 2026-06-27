@@ -41,7 +41,7 @@ const T = (s: string): SlideshowTemplate => s as unknown as SlideshowTemplate;
 
 /** Dynamically load the engine functions from their concrete modules. */
 async function loadLib() {
-  const [bs, bis, pd, ls, wd, sea, bsk, buildM, valM, remRenderM, remSelM, capM] = await Promise.all([
+  const [bs, bis, pd, ls, wd, sea, bsk, buildM, valM, remRenderM, remSelM, capM, hooksM, unsplashM] = await Promise.all([
     import("@/lib/selectors/best-sellers"),
     import("@/lib/selectors/best-seller-image-series"),
     import("@/lib/selectors/price-drops"),
@@ -54,6 +54,8 @@ async function loadLib() {
     import("@/lib/slideshow/remix/render"),
     import("@/lib/slideshow/remix/selector"),
     import("@/lib/slideshow/captions"),
+    import("@/lib/slideshow/hooks"),
+    import("@/lib/unsplash"),
   ]);
   return {
     bestSellers: bs.bestSellers,
@@ -68,6 +70,10 @@ async function loadLib() {
     renderRemix: remRenderM.renderRemix,
     selectRemixClips: remSelM.selectRemixClips,
     getSlideshowCaption: capM.getSlideshowCaption,
+    getSlideshowHook: hooksM.getSlideshowHook,
+    getSlogan: hooksM.getSlogan,
+    searchImages: unsplashM.searchImages,
+    triggerDownload: unsplashM.triggerDownload,
   };
 }
 type Lib = Awaited<ReturnType<typeof loadLib>>;
@@ -88,6 +94,13 @@ interface Series {
   strategy?: "margin" | "new" | "random";
   patterns?: string[];
   sku?: string;
+  /** Hook category for the intro card (getSlideshowHook). 'slogan'/'lifestyle'
+   * use hookText instead. */
+  hook?: string;
+  /** Explicit hook seed for slogan (Claude-refined) / lifestyle (hero overlay). */
+  hookText?: string;
+  /** Lifestyle hero: Unsplash search query for the opening full-bleed slide. */
+  unsplashQuery?: string;
 }
 
 interface ReportRow {
@@ -119,28 +132,46 @@ function range(a: number, b: number): number[] {
   return Array.from({ length: b - a + 1 }, (_, i) => a + i);
 }
 
+// Quality v2: every series ≤15s and ≤5 products (3-5 slides + intro + outro keeps
+// the Reel punchy ~10-15s), with a marketing hook (never the technical id).
 const STATIC_CONFIG: Series[] = [
-  // 1-5 — best sellers (random sample from the velocity pool → varied each run)
-  ...range(1, 5).map((n): Series => ({ id: `best-sellers-${n}`, type: "best_sellers", limit: 10, ratio: "9:16", duration: 30 })),
-  // 11-13 — ride-on / cars for kids (fuzzy product_type)
-  ...range(1, 3).map((n): Series => ({ id: `enfants-voitures-${n}`, type: "by_like", patterns: ["%Ride%", "%Car%", "%Toy Vehicle%"], limit: 6, ratio: "9:16", duration: 15 })),
-  // 14-16 — kids toys (Qaba)
-  ...range(1, 3).map((n): Series => ({ id: `enfants-jouets-${n}`, type: "by_like", patterns: ["%Toy%", "%Kids%", "%Baby%"], limit: 6, ratio: "9:16", duration: 15 })),
-  // 17-19 — summer seasonal
-  ...range(1, 3).map((n): Series => ({ id: `saison-ete-${n}`, type: "seasonal", theme: "ete", limit: 8, ratio: "9:16", duration: 30 })),
-  // 20-22 — top discounts
-  ...range(1, 3).map((n): Series => ({ id: `rabais-top5-${n}`, type: "price_drops", limit: 5, ratio: "9:16", duration: 15 })),
-  // 23-25 — low stock urgency
-  ...range(1, 3).map((n): Series => ({ id: `urgence-stock-${n}`, type: "low_stock", threshold: 5, limit: 6, ratio: "9:16", duration: 15 })),
-  // 26-28 — thematic remix of the demand-gen library
-  { id: "remix-ete-cour", type: "remix", theme: "ete-cour", ratio: "9:16", duration: 30 },
-  { id: "remix-maison", type: "remix", theme: "maison", ratio: "9:16", duration: 30 },
-  { id: "remix-enfants", type: "remix", theme: "enfants", ratio: "9:16", duration: 30 },
-  // 29-30 — WoW discovery
-  { id: "decouverte-margin-1", type: "wow_discovery", strategy: "margin", limit: 6, ratio: "9:16", duration: 15 },
-  { id: "decouverte-new", type: "wow_discovery", strategy: "new", limit: 6, ratio: "9:16", duration: 15 },
-  // 31-32 — office (Vinsetto)
-  ...range(1, 2).map((n): Series => ({ id: `bureau-${n}`, type: "by_like", patterns: ["%Office%", "%Desk%"], limit: 6, ratio: "9:16", duration: 15 })),
+  // best sellers (random sample from the velocity pool → varied each run)
+  ...range(1, 5).map((n): Series => ({ id: `best-sellers-${n}`, type: "best_sellers", limit: 5, ratio: "9:16", duration: 15, hook: "best_sellers" })),
+  // ride-on / cars for kids (fuzzy product_type)
+  ...range(1, 3).map((n): Series => ({ id: `enfants-voitures-${n}`, type: "by_like", patterns: ["%Ride%", "%Car%", "%Toy Vehicle%"], limit: 5, ratio: "9:16", duration: 15, hook: "kids_cars" })),
+  // kids toys (Qaba)
+  ...range(1, 3).map((n): Series => ({ id: `enfants-jouets-${n}`, type: "by_like", patterns: ["%Toy%", "%Kids%", "%Baby%"], limit: 5, ratio: "9:16", duration: 15, hook: "kids_toys" })),
+  // summer seasonal
+  ...range(1, 3).map((n): Series => ({ id: `saison-ete-${n}`, type: "seasonal", theme: "ete", limit: 5, ratio: "9:16", duration: 15, hook: "seasonal_ete" })),
+  // top discounts
+  ...range(1, 3).map((n): Series => ({ id: `rabais-top5-${n}`, type: "price_drops", limit: 5, ratio: "9:16", duration: 15, hook: "price_drops" })),
+  // low stock urgency
+  ...range(1, 3).map((n): Series => ({ id: `urgence-stock-${n}`, type: "low_stock", threshold: 5, limit: 5, ratio: "9:16", duration: 15, hook: "low_stock" })),
+  // thematic remix of the demand-gen library
+  { id: "remix-ete-cour", type: "remix", theme: "ete-cour", ratio: "9:16", duration: 15, hook: "seasonal_ete" },
+  { id: "remix-maison", type: "remix", theme: "maison", ratio: "9:16", duration: 15, hook: "best_sellers" },
+  { id: "remix-enfants", type: "remix", theme: "enfants", ratio: "9:16", duration: 15, hook: "kids_toys" },
+  // WoW discovery
+  { id: "decouverte-margin-1", type: "wow_discovery", strategy: "margin", limit: 5, ratio: "9:16", duration: 15, hook: "wow_discovery" },
+  { id: "decouverte-new", type: "wow_discovery", strategy: "new", limit: 5, ratio: "9:16", duration: 15, hook: "wow_discovery" },
+  // office (Vinsetto)
+  ...range(1, 2).map((n): Series => ({ id: `bureau-${n}`, type: "by_like", patterns: ["%Office%", "%Desk%"], limit: 5, ratio: "9:16", duration: 15, hook: "office" })),
+
+  // ── Top 3 (short, punchy) ──
+  { id: "top3-must-have", type: "best_sellers", limit: 3, ratio: "9:16", duration: 10, hook: "top3" },
+  { id: "top3-maison", type: "by_like", patterns: ["%Furniture%"], limit: 3, ratio: "9:16", duration: 10, hook: "top3" },
+  { id: "top3-enfants", type: "by_like", patterns: ["%Kids%", "%Toy%", "%Baby%"], limit: 3, ratio: "9:16", duration: 10, hook: "top3" },
+  { id: "top3-rabais", type: "price_drops", limit: 3, ratio: "9:16", duration: 10, hook: "top3" },
+
+  // ── Emotional slogans (hook refined by Claude) ──
+  { id: "slogan-budget", type: "best_sellers", limit: 4, ratio: "9:16", duration: 15, hook: "slogan", hookText: "Tu veux mettre plus d'argent de côté mais tu dois remeubler ?" },
+  { id: "slogan-ete", type: "seasonal", theme: "ete", limit: 4, ratio: "9:16", duration: 15, hook: "slogan", hookText: "L'été québécois est court — profites-en à fond 🌞" },
+  { id: "slogan-bureau", type: "by_like", patterns: ["%Office%", "%Desk%"], limit: 4, ratio: "9:16", duration: 15, hook: "slogan", hookText: "Ton bureau à la maison mérite mieux que ça 💻" },
+
+  // ── Lifestyle (Unsplash hero opener, then products) ──
+  { id: "lifestyle-terrasse", type: "seasonal", theme: "ete", limit: 4, ratio: "9:16", duration: 15, hook: "lifestyle", unsplashQuery: "sunny patio terrace summer", hookText: "☀️ Ta terrasse de rêve t'attend..." },
+  { id: "lifestyle-salon", type: "by_like", patterns: ["%Furniture%"], limit: 4, ratio: "9:16", duration: 15, hook: "lifestyle", unsplashQuery: "cozy modern living room interior", hookText: "🏡 Un salon qui te ressemble..." },
+  { id: "lifestyle-bureau", type: "by_like", patterns: ["%Office%", "%Desk%"], limit: 4, ratio: "9:16", duration: 15, hook: "lifestyle", unsplashQuery: "modern home office workspace", hookText: "💼 Ton espace de travail idéal..." },
 ];
 
 /** Seasonal theme → fuzzy product_type LIKE patterns (the catalog uses
@@ -297,6 +328,44 @@ async function enqueueDraft(
   return { queueId, scheduledAt: slot.sqlite };
 }
 
+/** Display hook (no Claude call) — the intro card line, never the series id. */
+function previewHook(series: Series, lib: Lib): string {
+  if (series.hook === "slogan" || series.hook === "lifestyle") {
+    return series.hookText ?? lib.getSlideshowHook("best_sellers", LANGUAGE);
+  }
+  return lib.getSlideshowHook(series.hook ?? "best_sellers", LANGUAGE);
+}
+
+/** Final hook for a real render — refines a slogan seed via Claude (fallback to seed). */
+async function finalHook(series: Series, lib: Lib): Promise<string> {
+  if (series.hook === "slogan") return lib.getSlogan(series.hookText ?? "", LANGUAGE);
+  return previewHook(series, lib);
+}
+
+/**
+ * Lifestyle opener: an Unsplash full-bleed hero slide with the hookText overlay.
+ * Returns null (→ products lead) when not a lifestyle series, no query, no
+ * UNSPLASH_ACCESS_KEY, or the search fails.
+ */
+async function fetchLifestyleHero(series: Series, lib: Lib): Promise<SlideshowItem | null> {
+  if (series.hook !== "lifestyle" || !series.unsplashQuery) return null;
+  if (!process.env.UNSPLASH_ACCESS_KEY) {
+    console.warn("    ⚠ UNSPLASH_ACCESS_KEY absent — pas de hero lifestyle, les produits ouvrent la vidéo");
+    return null;
+  }
+  try {
+    const imgs = await lib.searchImages(series.unsplashQuery, 1);
+    const hit = imgs[0];
+    if (!hit?.url) return null;
+    // Unsplash API guideline: ping the download endpoint when a photo is USED.
+    await lib.triggerDownload(hit.downloadLocation);
+    return { image_url: hit.url, overlay_text: series.hookText ?? "", price: 0, hero: true };
+  } catch (err) {
+    console.warn(`    ⚠ Unsplash a échoué (${err instanceof Error ? err.message : String(err)}) — pas de hero`);
+    return null;
+  }
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
   console.log(`\n🎬 Slideshow batch — ${APPLY ? "APPLY (render + upload + draft rows)" : "DRY-RUN (no render, no writes)"}\n`);
@@ -304,7 +373,7 @@ async function main(): Promise<void> {
 
   // Resolve the dynamic showcase series (top 5 SKUs by 14-day velocity).
   const topSellers = await lib.bestSellers({ limit: 5, language: LANGUAGE, resolveImages: false });
-  const showcaseSeries: Series[] = topSellers.map((p): Series => ({ id: `showcase-${p.sku}`, type: "showcase", sku: p.sku, ratio: "9:16", duration: 15 }));
+  const showcaseSeries: Series[] = topSellers.map((p): Series => ({ id: `showcase-${p.sku}`, type: "showcase", sku: p.sku, ratio: "9:16", duration: 15, hook: "best_sellers" }));
 
   let config: Series[] = [...STATIC_CONFIG.slice(0, 5), ...showcaseSeries, ...STATIC_CONFIG.slice(5)];
   if (ONLY_SERIES) config = config.filter((s) => s.id === ONLY_SERIES);
@@ -337,6 +406,7 @@ async function main(): Promise<void> {
       // ----- SLIDESHOW -----
       const products = selection.products ?? [];
       console.log(`▸ ${series.id}  [${series.type}]  ${products.length} produit(s)`);
+      console.log(`    🎬 Hook: "${previewHook(series, lib)}"${series.hook === "lifestyle" ? `  (+ hero Unsplash: ${series.unsplashQuery})` : ""}`);
       products.forEach((p, i) => {
         const disc = typeof p.discount_pct === "number" && p.discount_pct >= 10 ? `  -${p.discount_pct}%` : "";
         console.log(`    ${i + 1}. ${String(p.sku).padEnd(14)} ${Number(p.price).toFixed(2)}$${disc}  ${p.title_fr ?? ""}`);
@@ -368,13 +438,17 @@ async function main(): Promise<void> {
       if (skipped > 0) console.warn(`    ⚠ ${skipped} produit(s)/image(s) sans image cdn.shopify.com — ignoré(s)`);
       if (slides.length === 0) { report.push({ id: series.id, type: series.type, count: 0, status: "skip (no cdn.shopify image)" }); continue; }
 
+      // Lifestyle: prepend an Unsplash full-bleed hero slide (falls back to products).
+      const hero = await fetchLifestyleHero(series, lib);
+      if (hero) slides = [hero, ...slides];
+
       const built = await lib.buildSlideshow(template, {
         items: slides,
         ratio: series.ratio,
         brand: BRAND,
         language: LANGUAGE,
         durationSec: series.duration,
-        title: series.id,
+        title: await finalHook(series, lib), // marketing hook on the intro card
         dryRun: false,
       });
       const blobUrl = built.result.blobUrl;

@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.165] - 2026-06-27
+
+### Changed (slideshow quality v2 — hooks, image filtering, Top 3, slogans, lifestyle)
+- **Marketing hooks** (`src/lib/slideshow/hooks.ts`): the intro card now shows a catchy,
+  rotation-randomized hook per content category (best sellers, price drops, summer, low stock,
+  Top 3, kids cars/toys, discovery, office) — never the technical series id. `getSlogan` refines
+  an emotional seed into a punchy one-liner via Claude (safe fallback to the seed). Intro card
+  font enlarged (92) and wrapped to ≤2 lines.
+- **Title overlays** (`render.ts`): product titles capped at 28 chars (mobile), wrapped to ≤2
+  lines on a word boundary, font −10% — no more overflow/ellipsis.
+- **Image filtering** (`selectors/shopify-images.ts`): keep only the first 2 clean cdn.shopify.com
+  photos per product; drop spec/diagram/infographic shots and the `-B0`..`-F0` gallery suffixes.
+- **Batch series** (`scripts/generate-slideshow-batch.mts`): every series ≤15s and ≤5 products
+  (Top 3 = 3 / 10s) for punchy Reels. New series: **Top 3 ×4**, emotional **slogans ×3**
+  (Claude-refined), and **lifestyle ×3** with an Unsplash full-bleed hero opener + hook overlay.
+- **Hero slides** (`render.ts` + `validate.ts`): a new `SlideshowItem.hero` opener may use an
+  Unsplash image (an already-trusted host) with big centered hook text and no price; **product
+  slides remain cdn.shopify.com-only** (the invariant is narrowed, not removed).
+
 ## [0.5.53.164] - 2026-06-27
 
 ### Changed (/videos page cleanup — reflect the real generation workflow)

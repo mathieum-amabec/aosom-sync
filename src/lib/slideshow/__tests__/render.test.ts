@@ -7,6 +7,8 @@ import {
   perSlideSeconds,
   blobPath,
   buildXfadeFilterComplex,
+  wrapTitle,
+  buildSlideOverlaySvg,
 } from "@/lib/slideshow/render";
 import { validateSlideshowConfig, shouldShowBadge } from "@/lib/slideshow/validate";
 import {
@@ -141,6 +143,51 @@ describe("overlay text cleanup (formatVideoTitle per slide)", () => {
     expect(cleaned.length).toBeLessThanOrEqual(48);
     // No trailing partial word: the cleaned text is a prefix of the original words.
     expect(dirty.startsWith(cleaned.split(" ").slice(0, 2).join(" "))).toBe(true);
+  });
+});
+
+describe("title wrap + overlays (quality v2)", () => {
+  it("wraps a title onto at most 2 lines on a word boundary", () => {
+    expect(wrapTitle("Chaise", 16)).toEqual(["Chaise"]);
+    const two = wrapTitle("Ventilateur tour oscillant silencieux", 16);
+    expect(two.length).toBe(2);
+    expect(two.join(" ")).toBe("Ventilateur tour oscillant silencieux"); // no words lost
+    expect(two[0].length).toBeLessThanOrEqual(20);
+  });
+
+  it("a product overlay caps the title at 28 chars (no ellipsis) and shows the price", () => {
+    const svg = buildSlideOverlaySvg(
+      { image_url: `${CDN}/x.jpg`, overlay_text: "Climatiseur portatif 10 000 BTU pour grande pièce", price: 99 },
+      { width: 1080, height: 1920 },
+      "fr",
+    );
+    expect(svg).not.toContain("…");
+    expect(svg).toContain("99.00 $");
+  });
+
+  it("a hero slide renders centered text with no price", () => {
+    const svg = buildSlideOverlaySvg(
+      { image_url: "https://images.unsplash.com/photo-1", overlay_text: "☀️ Ta terrasse t'attend", price: 0, hero: true },
+      { width: 1080, height: 1920 },
+      "fr",
+    );
+    expect(svg).toContain('text-anchor="middle"');
+    expect(svg).not.toContain("$"); // no price on a hero
+  });
+});
+
+describe("hero slide validation (quality v2)", () => {
+  it("accepts an Unsplash image only for a hero item, not a product item", () => {
+    const unsplash = "https://images.unsplash.com/photo-1";
+    // hero: allowed, and no price required
+    const heroOk = validateSlideshowConfig(
+      config({ items: [{ image_url: unsplash, overlay_text: "hook", price: 0, hero: true }] }),
+    );
+    expect(heroOk.valid).toBe(true);
+    // same Unsplash url as a normal product slide: rejected
+    const productBad = validateSlideshowConfig(config({ items: [item({ image_url: unsplash })] }));
+    expect(productBad.valid).toBe(false);
+    expect(productBad.errors.join(" ")).toMatch(/unsplash|cdn\.shopify/);
   });
 });
 
