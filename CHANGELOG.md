@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.163] - 2026-06-27
+
+### Added (batch slideshow generation script)
+- **`scripts/generate-slideshow-batch.mts`** — one-command batch generator over 32 series
+  (best-sellers, showcase, kids cars/toys, summer seasonal, top discounts, low-stock urgency,
+  thematic remix, WoW discovery, office). Reuses the REAL selectors + slideshow/remix engine
+  (imported via tsx) so behaviour can't drift from the app.
+  - **`--dry-run` (default)**: selects + prints the products per series, renders/writes nothing.
+  - **`--apply`**: renders each MP4 via local FFmpeg, uploads to the PUBLIC Vercel Blob store, and
+    enqueues a `status='draft'` row into `publication_queue` for approval in /videos.
+  - `--series <id>` / `--limit <n>` to target one series or cap the count.
+  - Shopify-CDN images only (Aosom-CDN URLs 403 the render workers); products without one are
+    skipped + warned. Seasonal themes match product_type fuzzily (LIKE) since the catalog uses
+    values like `Patio Furniture` that the exact-match `seasonal()` selector misses.
+  - It's a `.mts` (not `.mjs`): a native-ESM `.mjs` can't reliably import the tsx-transpiled
+    engine, and `.mjs` isn't type-checked by tsconfig — `.mts` is the codebase convention for
+    engine-importing scripts. Run: `node-x64 --env-file=.env.local node_modules/tsx/dist/cli.mjs
+    scripts/generate-slideshow-batch.mts`.
+
 ## [0.5.53.162] - 2026-06-26
 
 ### Added (video approval flow before publication)
