@@ -3037,8 +3037,11 @@ export async function getQueueItemById(id: number): Promise<PublicationQueueItem
  */
 export async function getVideoQueueItems(limit = 50): Promise<PublicationQueueItem[]> {
   const db = await ensureSchema();
+  // Exclude 'cancelled' (re-generation cancels prior rows) so dead rows don't
+  // consume the LIMIT budget and push live drafts/scheduled items off the list.
   const result = await db.execute({
-    sql: `SELECT * FROM publication_queue WHERE content_type = 'video'
+    sql: `SELECT * FROM publication_queue
+          WHERE content_type = 'video' AND status != 'cancelled'
           ORDER BY created_at DESC, id DESC LIMIT ?`,
     args: [limit],
   });
