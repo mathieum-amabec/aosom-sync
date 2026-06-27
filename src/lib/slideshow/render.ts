@@ -28,7 +28,7 @@ import {
   type VideoLocale,
 } from "@/lib/video-engines/ffmpeg-slideshow";
 import { getDefaultMusicTrack } from "./music";
-import { validateSlideshowConfig, shouldShowBadge, discountPct, isShopifyCdnUrl } from "./validate";
+import { validateSlideshowConfig, shouldShowBadge, discountPct, isShopifyCdnUrl, isHeroImageUrl } from "./validate";
 import {
   type SlideshowConfig,
   type SlideshowItem,
@@ -211,9 +211,28 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
 }
 
 /**
- * Per-slide overlay SVG: cleaned title, current price, and — only when
- * compare_at >= price * 1.10 — a struck-through compare-at price and a gold
- * discount badge. Sized to the output dimensions.
+ * Wrap a (already-shortened) title onto at most 2 lines, breaking on the word
+ * boundary nearest `maxPerLine` chars so a long mobile title doesn't overflow.
+ */
+export function wrapTitle(text: string, maxPerLine = 16): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [""];
+  const line1: string[] = [];
+  let i = 0;
+  for (; i < words.length; i++) {
+    const next = [...line1, words[i]].join(" ");
+    if (line1.length > 0 && next.length > maxPerLine) break;
+    line1.push(words[i]);
+  }
+  const line2 = words.slice(i).join(" ");
+  return line2 ? [line1.join(" "), line2] : [line1.join(" ")];
+}
+
+/**
+ * Per-slide overlay SVG: cleaned 1-2 line title (≤28 chars, mobile-sized),
+ * current price, and — only when compare_at >= price * 1.10 — a struck-through
+ * compare-at price and a gold discount badge. A `hero` item renders its text big
+ * and centered with no price (lifestyle/Unsplash opening slide).
  */
 export function buildSlideOverlaySvg(
   item: SlideshowItem,
@@ -222,26 +241,51 @@ export function buildSlideOverlaySvg(
 ): string {
   const { gold, offWhite } = VIDEO_BRAND.colors;
   const font = VIDEO_BRAND.font.family;
-  const title = escapeXml(formatVideoTitle(item.overlay_text, 48, { uppercase: false, aggressive: false }));
+
+  // Hero (lifestyle opener): big centered hook text on the image, no price/badge.
+  if (item.hero) {
+    const heroLines = wrapTitle(item.overlay_text, 22);
+    const cx = dims.width / 2;
+    const cy = dims.height / 2;
+    const gap = 92;
+    const top = cy - ((heroLines.length - 1) * gap) / 2;
+    const heroParts = heroLines.map(
+      (ln, i) =>
+        `<text x="${cx}" y="${top + i * gap}" font-family="${font},Arial,sans-serif" font-size="80" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${offWhite}" text-anchor="middle" stroke="${VIDEO_BRAND.colors.navy}" stroke-width="2">${escapeXml(ln)}</text>`,
+    );
+    return `<svg width="${dims.width}" height="${dims.height}" xmlns="http://www.w3.org/2000/svg">${heroParts.join("")}</svg>`;
+  }
+
+  // Title: cap at 28 chars (mobile), wrap to ≤2 lines, font −10% (64 → 58).
+  const cleaned = formatVideoTitle(item.overlay_text, 28, { uppercase: false, aggressive: false });
+  const lines = wrapTitle(cleaned, 16);
+  const titleFs = 58;
+  const lineGap = 66;
+  const titleTop = 200;
   const price = escapeXml(formatPrice(item.price, locale));
   const showBadge = shouldShowBadge(item.price, item.compare_at);
   const pct = discountPct(item.price, item.compare_at);
 
-  const parts: string[] = [
-    `<rect x="80" y="120" width="${dims.width - 160}" height="6" fill="${gold}"/>`,
-    `<text x="80" y="220" font-family="${font},Arial,sans-serif" font-size="64" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${offWhite}">${title}</text>`,
-    `<text x="80" y="330" font-family="${font},Arial,sans-serif" font-size="88" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${gold}">${price}</text>`,
-  ];
+  const parts: string[] = [`<rect x="80" y="120" width="${dims.width - 160}" height="6" fill="${gold}"/>`];
+  lines.forEach((ln, i) => {
+    parts.push(
+      `<text x="80" y="${titleTop + i * lineGap}" font-family="${font},Arial,sans-serif" font-size="${titleFs}" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${offWhite}">${escapeXml(ln)}</text>`,
+    );
+  });
+  const priceY = titleTop + lines.length * lineGap + 44;
+  parts.push(
+    `<text x="80" y="${priceY}" font-family="${font},Arial,sans-serif" font-size="88" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${gold}">${price}</text>`,
+  );
 
   if (showBadge && item.compare_at !== undefined) {
     const was = escapeXml(formatPrice(item.compare_at, locale));
     parts.push(
-      `<text x="80" y="400" font-family="${font},Arial,sans-serif" font-size="44" fill="${offWhite}" text-decoration="line-through" opacity="0.75">${was}</text>`,
+      `<text x="80" y="${priceY + 70}" font-family="${font},Arial,sans-serif" font-size="44" fill="${offWhite}" text-decoration="line-through" opacity="0.75">${was}</text>`,
     );
     if (pct !== undefined) {
       parts.push(
-        `<rect x="80" y="430" width="200" height="72" rx="36" fill="${gold}"/>`,
-        `<text x="180" y="478" font-family="${font},Arial,sans-serif" font-size="40" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${VIDEO_BRAND.colors.navy}" text-anchor="middle">-${pct}%</text>`,
+        `<rect x="80" y="${priceY + 100}" width="200" height="72" rx="36" fill="${gold}"/>`,
+        `<text x="180" y="${priceY + 148}" font-family="${font},Arial,sans-serif" font-size="40" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${VIDEO_BRAND.colors.navy}" text-anchor="middle">-${pct}%</text>`,
       );
     }
   }
@@ -249,19 +293,29 @@ export function buildSlideOverlaySvg(
   return `<svg width="${dims.width}" height="${dims.height}" xmlns="http://www.w3.org/2000/svg">${parts.join("")}</svg>`;
 }
 
-/** Intro card SVG: store title + slideshow title, centered. */
+/**
+ * Intro card SVG: the marketing HOOK in large type (config.title carries the
+ * hook, never a technical series id), wrapped to ≤2 lines, with a gold accent.
+ */
 export function buildIntroCardSvg(
   config: SlideshowConfig,
   dims: { width: number; height: number },
 ): string {
   const { gold, offWhite } = VIDEO_BRAND.colors;
   const font = VIDEO_BRAND.font.family;
-  const title = escapeXml(config.title ?? BRAND_STORE_URL[config.brand]);
+  const hookLines = wrapTitle(config.title ?? BRAND_STORE_URL[config.brand], 20);
   const cx = dims.width / 2;
   const cy = dims.height / 2;
+  const gap = 104;
+  const top = cy - 30 - ((hookLines.length - 1) * gap) / 2;
+  const lines = hookLines.map(
+    (ln, i) =>
+      `<text x="${cx}" y="${top + i * gap}" font-family="${font},Arial,sans-serif" font-size="92" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${offWhite}" text-anchor="middle">${escapeXml(ln)}</text>`,
+  );
+  const ruleY = top + hookLines.length * gap;
   return `<svg width="${dims.width}" height="${dims.height}" xmlns="http://www.w3.org/2000/svg">
-    <text x="${cx}" y="${cy - 20}" font-family="${font},Arial,sans-serif" font-size="76" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${offWhite}" text-anchor="middle">${title}</text>
-    <rect x="${cx - 120}" y="${cy + 30}" width="240" height="8" fill="${gold}"/>
+    ${lines.join("")}
+    <rect x="${cx - 120}" y="${ruleY}" width="240" height="8" fill="${gold}"/>
   </svg>`;
 }
 
@@ -392,13 +446,18 @@ async function renderSlidePng(
   let base: import("sharp").Sharp;
   try {
     // Defense in depth: validateSlideshowConfig already enforces this, but never
-    // hand a non-Shopify-CDN URL to the downloader (Aosom CDN 403s; arbitrary
-    // hosts are an SSRF surface). isShopifyCdnUrl is the same gate as validation.
-    if (!isShopifyCdnUrl(item.image_url)) {
-      throw new Error(`refusing to fetch non-cdn.shopify.com image: ${item.image_url}`);
+    // hand an unexpected host to the downloader (Aosom CDN 403s; arbitrary hosts
+    // are an SSRF surface). Product slides: cdn.shopify only; hero slides also
+    // allow Unsplash — the same gate as validation.
+    const ok = item.hero ? isHeroImageUrl(item.image_url) : isShopifyCdnUrl(item.image_url);
+    if (!ok) {
+      throw new Error(`refusing to fetch disallowed image host: ${item.image_url}`);
     }
     const buf = await downloadImage(item.image_url);
-    base = sharpFn(buf).resize(dims.width, dims.height, { fit: "contain", background: navy }).flatten({ background: navy });
+    // Hero fills the frame (full-bleed lifestyle); product photos are contained.
+    base = item.hero
+      ? sharpFn(buf).resize(dims.width, dims.height, { fit: "cover" })
+      : sharpFn(buf).resize(dims.width, dims.height, { fit: "contain", background: navy }).flatten({ background: navy });
   } catch {
     base = sharpFn({ create: { width: dims.width, height: dims.height, channels: 3, background: navy } });
   }

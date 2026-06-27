@@ -62,6 +62,12 @@ export interface SlideshowItem {
   compare_at?: number;
   /** Optional product SKU (for traceability / REMIX). */
   sku?: string;
+  /**
+   * Lifestyle opener: a non-product hero slide whose `image_url` may be an
+   * Unsplash photo (an allow-listed host) and whose `overlay_text` is a big
+   * centered hook (no price/badge). Product slides stay cdn.shopify.com-only.
+   */
+  hero?: boolean;
 }
 
 /** A fully-specified render request. */

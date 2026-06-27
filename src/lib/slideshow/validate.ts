@@ -18,6 +18,10 @@ import {
 
 /** The only image host a slide may use. */
 export const SHOPIFY_CDN_PREFIX = "https://cdn.shopify.com/";
+/** Hosts a lifestyle HERO slide may use (a non-product opener). Unsplash is an
+ * already-trusted host (see image-preview ALLOWED_IMAGE_HOSTS). Product slides
+ * stay cdn.shopify.com-only. */
+export const HERO_IMAGE_HOSTS = ["https://cdn.shopify.com/", "https://images.unsplash.com/"];
 
 /** A discount badge is shown only when the saving is at least this fraction. */
 export const MIN_DISCOUNT_RATIO = 1.1; // compare_at >= price * 1.10
@@ -32,6 +36,11 @@ const VALID_TEMPLATES: readonly string[] = Object.values(SlideshowTemplate);
 /** True when `url` is a usable Shopify-CDN image URL. */
 export function isShopifyCdnUrl(url: unknown): url is string {
   return typeof url === "string" && url.startsWith(SHOPIFY_CDN_PREFIX);
+}
+
+/** True when `url` is allowed for a HERO slide (Shopify CDN or Unsplash). */
+export function isHeroImageUrl(url: unknown): url is string {
+  return typeof url === "string" && HERO_IMAGE_HOSTS.some((h) => url.startsWith(h));
 }
 
 /**
@@ -58,10 +67,13 @@ export function discountPct(price: number, compareAt?: number): number | undefin
 
 function validateItem(item: SlideshowItem, index: number, errors: string[]): void {
   const at = `items[${index}]`;
-  if (!isShopifyCdnUrl(item.image_url)) {
-    errors.push(`${at}.image_url must start with ${SHOPIFY_CDN_PREFIX} (got "${item.image_url}")`);
+  // Product slides: cdn.shopify.com only. Hero (lifestyle) slides also allow Unsplash.
+  if (item.hero ? !isHeroImageUrl(item.image_url) : !isShopifyCdnUrl(item.image_url)) {
+    const allowed = item.hero ? HERO_IMAGE_HOSTS.join(" or ") : SHOPIFY_CDN_PREFIX;
+    errors.push(`${at}.image_url must start with ${allowed} (got "${item.image_url}")`);
   }
-  if (typeof item.price !== "number" || !Number.isFinite(item.price) || item.price <= 0) {
+  // Hero slides carry no price (a non-product opener); skip the price check for them.
+  if (!item.hero && (typeof item.price !== "number" || !Number.isFinite(item.price) || item.price <= 0)) {
     errors.push(`${at}.price must be a positive number (got ${item.price})`);
   }
   if (item.compare_at !== undefined && (typeof item.compare_at !== "number" || !Number.isFinite(item.compare_at))) {
