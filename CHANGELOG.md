@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.162] - 2026-06-26
+
+### Added (video approval flow before publication)
+- Generated slideshow Reels now enqueue into `publication_queue` as **`status='draft'`** instead of
+  `pending`, so nothing publishes until an operator approves it. The publisher cron is unchanged
+  (it drains `status='pending'`, so drafts are inert).
+- **`status` CHECK gains `'draft'`** (guarded table-rebuild migration, like the `+video` one).
+  Drafts are excluded from the active-slot unique index, so they don't reserve a slot.
+- **`POST /api/slideshow/approve`** `{queueId}` — flip a draft → pending, reserving a real slot
+  (keeps the draft's tentative slot when free, recomputes + retries on a slot collision). Returns
+  `scheduledAt`. **`DELETE`** cancels the draft. Admin-only.
+- **`GET /api/slideshow/queue`** — video rows (`content_type='video'`), newest first, with parsed
+  payload (reelsVideoUrl/caption/brand) for the approval list. Admin-only.
+- **Vidéos → File d'attente** now shows a "Vidéos en attente d'approbation" section: draft cards with
+  a video preview + **Approuver** / **Supprimer**, and status badges (Planifié / Publié / Échec).
+- The Slideshow generator now reports "généré — en attente d'approbation" (no longer "planifié").
+- DB helpers: `addToQueue` `status` param; `cancelQueueItemsForContent` (cancels pending+draft on
+  re-generation); `getVideoQueueItems`; `getQueueItemById`; `approveVideoDraft`; `cancelVideoDraft`.
+
 ## [0.5.53.161] - 2026-06-26
 
 ### Changed (slideshow generation moved to the Vidéos page)

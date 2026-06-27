@@ -263,8 +263,7 @@ export default function SlideshowGenerator() {
       if (res.ok && d.success) {
         setGenResult({
           ok: true,
-          text: d.scheduledAt ? `✅ Vidéo planifiée le ${d.scheduledAt}` : "✅ Vidéo générée.",
-          scheduledAt: d.scheduledAt,
+          text: "✅ Vidéo générée — en attente d’approbation. Approuve-la dans l’onglet « File d’attente » pour la planifier.",
           blobUrl: d.blobUrl,
         });
       } else {

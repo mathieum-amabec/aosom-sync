@@ -4,8 +4,7 @@ import {
   getSetting,
   getOccupiedQueueSlots,
   addToQueue,
-  cancelPendingQueueItems,
-  QueueSlotTakenError,
+  cancelQueueItemsForContent,
   type QueuePlatform,
 } from "@/lib/database";
 import { getNextAvailableSlot, parseVideoSchedule, parseSlideshowSettings } from "@/lib/publication-scheduler";
@@ -170,53 +169,47 @@ export async function POST(request: Request) {
     // overwrites the payload, so the moved post points at the latest render.
     const discriminator = template === SlideshowTemplate.SHOWCASE && opts.sku ? `:${opts.sku}` : "";
     const contentId = `slideshow:${template}:${ratio}${discriminator}`;
-    await cancelPendingQueueItems("video", contentId);
+    // A fresh render replaces any prior take for this content — pending OR not-yet-
+    // approved draft — so re-generating doesn't leave a stale draft behind.
+    await cancelQueueItemsForContent("video", contentId);
 
-    // Slideshows share the video slot pool (content_type='video') and cadence (video_schedule).
+    // The video is enqueued as a DRAFT: it awaits operator approval before the
+    // publisher (which drains status='pending') can publish it. The slot computed
+    // here is TENTATIVE for display — drafts don't reserve a slot (excluded from the
+    // active-slot unique index), and approval recomputes/reserves the real slot.
     const videoSchedule = parseVideoSchedule(await getSetting("video_schedule"));
     const nowSec = Math.floor(Date.now() / 1000);
     const occupied = (await getOccupiedQueueSlots(platform, "video")).map(sqliteToUnixSec);
-
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const next = await getNextAvailableSlot("facebook", {}, {
-        nowSec,
-        occupied,
-        schedule: videoSchedule,
-        contentType: "video",
-      });
-      if (!next) {
-        return NextResponse.json(
-          { error: "No free publication slot (schedule disabled or full) — rendered but not queued", blobUrl },
-          { status: 409 },
-        );
-      }
-      try {
-        const queueId = await addToQueue({
-          contentType: "video",
-          contentId,
-          platform,
-          payload: JSON.stringify(payload),
-          scheduledAt: next.sqlite,
-        });
-        return NextResponse.json({
-          success: true,
-          blobUrl,
-          durationSec: built.result.durationSec,
-          queueId,
-          brand,
-          platform,
-          scheduledAt: next.at,
-          slot: next.sqlite,
-        });
-      } catch (err) {
-        if (err instanceof QueueSlotTakenError) {
-          occupied.push(next.at); // lost the race for this slot — recompute past it
-          continue;
-        }
-        throw err;
-      }
+    const tentative = await getNextAvailableSlot("facebook", {}, {
+      nowSec,
+      occupied,
+      schedule: videoSchedule,
+      contentType: "video",
+    });
+    if (!tentative) {
+      return NextResponse.json(
+        { error: "No free publication slot (schedule disabled or full) — rendered but not queued", blobUrl },
+        { status: 409 },
+      );
     }
-    return NextResponse.json({ error: "Could not secure a free slot after retries", blobUrl }, { status: 409 });
+    const queueId = await addToQueue({
+      contentType: "video",
+      contentId,
+      platform,
+      payload: JSON.stringify(payload),
+      scheduledAt: tentative.sqlite,
+      status: "draft",
+    });
+    return NextResponse.json({
+      success: true,
+      status: "draft",
+      blobUrl,
+      durationSec: built.result.durationSec,
+      queueId,
+      brand,
+      platform,
+      tentativeSlot: tentative.at,
+    });
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   } finally {

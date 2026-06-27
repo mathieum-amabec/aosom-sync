@@ -386,7 +386,9 @@ async function _initSchemaImpl(): Promise<void> {
       platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
       payload TEXT NOT NULL,         -- JSON-stringified content
       scheduled_at TEXT NOT NULL,    -- SQLite datetime TEXT of the slot (UTC)
-      status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled')),
+      -- 'draft': generated content awaiting operator approval (NOT drained by the
+      -- publisher, which selects status='pending'). Approval flips draft → pending.
+      status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled', 'draft')),
       error TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       published_at TEXT
@@ -423,7 +425,7 @@ async function _initSchemaImpl(): Promise<void> {
         platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
         payload TEXT NOT NULL,
         scheduled_at TEXT NOT NULL,
-        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled')),
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled', 'draft')),
         error TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         published_at TEXT
@@ -433,6 +435,39 @@ async function _initSchemaImpl(): Promise<void> {
       { sql: `DROP TABLE publication_queue`, args: [] },
       { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
       // Indexes were dropped with the old table — recreate both on the rebuilt one.
+      { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
+      { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
+    ]);
+  }
+
+  // publication_queue.status CHECK migration: add 'draft' (generated videos await
+  // operator approval before becoming 'pending'). Same rebuild pattern as +video.
+  // Guard on the STATUS check signature "'cancelled', 'draft'" specifically — the
+  // content_type CHECK already contains the literal 'draft', so a bare
+  // includes("'draft'") would false-positive and skip the migration.
+  const pqDef2 = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='publication_queue'`,
+  );
+  const pqSql2 = pqDef2.rows[0] ? String((pqDef2.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (pqSql2 && !pqSql2.includes("'cancelled', 'draft'")) {
+    await runBatch("publication_queue status CHECK +draft", [
+      { sql: `DROP TABLE IF EXISTS publication_queue_new`, args: [] },
+      { sql: `CREATE TABLE publication_queue_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video')),
+        content_id TEXT NOT NULL,
+        platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
+        payload TEXT NOT NULL,
+        scheduled_at TEXT NOT NULL,
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled', 'draft')),
+        error TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        published_at TEXT
+      )`, args: [] },
+      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at)
+              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at FROM publication_queue`, args: [] },
+      { sql: `DROP TABLE publication_queue`, args: [] },
+      { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
       { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
       { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
     ]);
@@ -2793,7 +2828,7 @@ export async function deleteFacebookDraft(id: number): Promise<void> {
 
 export type QueueContentType = "social" | "draft" | "blog" | "video";
 export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog";
-export type QueueStatus = "pending" | "publishing" | "published" | "failed" | "cancelled";
+export type QueueStatus = "pending" | "publishing" | "published" | "failed" | "cancelled" | "draft";
 
 export interface PublicationQueueItem {
   id: number;
@@ -2844,16 +2879,19 @@ export async function addToQueue(item: {
   platform: QueuePlatform;
   payload: string;
   scheduledAt: string;
+  /** Initial status. Default 'pending'. 'draft' = awaits approval (not slot-reserving). */
+  status?: QueueStatus;
 }): Promise<number> {
   if (!isSqliteUtc(item.scheduledAt)) {
     throw new Error(`addToQueue: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${item.scheduledAt}')`);
   }
   const db = await ensureSchema();
+  const status = item.status ?? "pending";
   try {
     const result = await db.execute({
-      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at)
-            VALUES (?, ?, ?, ?, ?)`,
-      args: [item.contentType, item.contentId, item.platform, item.payload, item.scheduledAt],
+      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at, status)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [item.contentType, item.contentId, item.platform, item.payload, item.scheduledAt, status],
     });
     return Number(result.lastInsertRowid);
   } catch (err) {
@@ -2961,6 +2999,91 @@ export async function cancelPendingQueueItems(
     args: [contentType, contentId],
   });
   return result.rowsAffected ?? 0;
+}
+
+/**
+ * Cancel a content item's still-pending OR still-draft queue rows. Used when a
+ * fresh generation replaces a prior take for the same content_id (a not-yet-
+ * approved draft or an approved-but-unpublished pending). 'publishing'/'published'
+ * rows are left untouched. Returns the number of rows cancelled.
+ */
+export async function cancelQueueItemsForContent(
+  contentType: QueueContentType,
+  contentId: string,
+): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue SET status = 'cancelled'
+          WHERE content_type = ? AND content_id = ? AND status IN ('pending', 'draft')`,
+    args: [contentType, contentId],
+  });
+  return result.rowsAffected ?? 0;
+}
+
+/** A single queue row by id, or null. */
+export async function getQueueItemById(id: number): Promise<PublicationQueueItem | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM publication_queue WHERE id = ?`,
+    args: [id],
+  });
+  return result.rows.length > 0 ? mapQueueItem(rowToObj(result.rows[0])) : null;
+}
+
+/**
+ * Video queue rows (content_type='video'), newest first — drives the /videos
+ * approval list. Includes every status so the operator sees drafts, scheduled
+ * (pending), published, and failed items.
+ */
+export async function getVideoQueueItems(limit = 50): Promise<PublicationQueueItem[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM publication_queue WHERE content_type = 'video'
+          ORDER BY created_at DESC, id DESC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
+ * Approve a video draft: flip status draft → pending at `scheduledAt`, reserving
+ * the slot. Only acts on a row that is currently a 'draft' video (idempotent /
+ * safe against double-approve). Surfaces the partial-unique-index conflict as
+ * QueueSlotTakenError so the caller can recompute a free slot and retry. Returns
+ * true if this call flipped the row, false if it was not an eligible draft.
+ */
+export async function approveVideoDraft(id: number, scheduledAt: string): Promise<boolean> {
+  if (!isSqliteUtc(scheduledAt)) {
+    throw new Error(`approveVideoDraft: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${scheduledAt}')`);
+  }
+  const db = await ensureSchema();
+  try {
+    const result = await db.execute({
+      sql: `UPDATE publication_queue SET status = 'pending', scheduled_at = ?
+            WHERE id = ? AND status = 'draft' AND content_type = 'video'`,
+      args: [scheduledAt, id],
+    });
+    return (result.rowsAffected ?? 0) === 1;
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+      throw new QueueSlotTakenError("video", scheduledAt);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Cancel a video draft (draft → cancelled). Only acts on a 'draft' video row.
+ * Returns true if a row was cancelled.
+ */
+export async function cancelVideoDraft(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue SET status = 'cancelled'
+          WHERE id = ? AND status = 'draft' AND content_type = 'video'`,
+    args: [id],
+  });
+  return (result.rowsAffected ?? 0) === 1;
 }
 
 // ─── Demand Gen video assets ─────────────────────────────────────────
