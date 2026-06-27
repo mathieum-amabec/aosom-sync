@@ -1,5 +1,34 @@
 import { describe, it, expect } from "vitest";
-import { formatVideoTitle } from "@/lib/video-title-utils";
+import { formatVideoTitle, stripSupplierBrand } from "@/lib/video-title-utils";
+
+describe("formatVideoTitle — strips supplier brand names (first, before anything else)", () => {
+  // Slideshow style (casing preserved) so the expected output matches the catalog wording.
+  it.each([
+    ["Qaba Kids Seesaw", "Kids Seesaw"],
+    ["Outsunny 10x12 Gazebo", "10x12 Gazebo"],
+    ["HOMCOM Garbage Bin", "Garbage Bin"],
+    ["Outsunny Patio Glider", "Patio Glider"],
+    ["Qaba 5 in 1 Toddler Slide", "5 in 1 Toddler Slide"],
+    ["Vinsetto Office Chair", "Office Chair"],
+    ["PawHut Dog Crate", "Dog Crate"],
+    ["Outsunny® Banana Umbrella", "Banana Umbrella"],
+  ])("%s → %s", (input, expected) => {
+    expect(formatVideoTitle(input, 48, { uppercase: false, aggressive: false })).toBe(expected);
+  });
+
+  it("strips the brand even in the default uppercase/aggressive mode", () => {
+    expect(formatVideoTitle("Qaba Kids Seesaw")).toBe("KIDS SEESAW");
+  });
+
+  it("requires a word boundary — never truncates a real word starting with a brand", () => {
+    expect(formatVideoTitle("Aosomething Cool", 48, { uppercase: false, aggressive: false })).toBe("Aosomething Cool");
+  });
+
+  it("strips a stacked brand and leaves a brandless title untouched", () => {
+    expect(stripSupplierBrand("Aosom Qaba Toddler Trike")).toBe("Toddler Trike");
+    expect(stripSupplierBrand("Patio Glider Chair")).toBe("Patio Glider Chair");
+  });
+});
 
 describe("formatVideoTitle — documented catalogue cases", () => {
   // The 7 transformations from the spec.
