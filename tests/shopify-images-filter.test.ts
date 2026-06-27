@@ -31,16 +31,15 @@ describe("isSpecImageUrl", () => {
 });
 
 describe("resolveProductImages (default resolver)", () => {
-  it("keeps only the first 2 clean cdn.shopify.com photos, dropping specs", async () => {
+  it("keeps only the FIRST clean cdn photo (Aosom's white-bg shot at index 0)", async () => {
     shop.shopifyFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
         product: {
           images: [
-            { src: `${CDN}/hero-1.jpg` },
+            { src: `${CDN}/824-white.jpg` }, // index 0 = official white-bg shot → kept
+            { src: `${CDN}/824-lifestyle.jpg` }, // index 1 = ambiance → beyond the 1-image cap
             { src: `${CDN}/diagram-dimensions.jpg` }, // spec → dropped
-            { src: `${CDN}/hero-2.jpg` },
-            { src: `${CDN}/hero-3.jpg` }, // beyond the 2-image cap → dropped
             { src: "https://img-us.aosomcdn.com/x.jpg" }, // non-cdn → dropped
           ],
         },
@@ -48,7 +47,15 @@ describe("resolveProductImages (default resolver)", () => {
     });
 
     const urls = await resolveProductImages("123");
-    expect(urls).toEqual([`${CDN}/hero-1.jpg`, `${CDN}/hero-2.jpg`]);
+    expect(urls).toEqual([`${CDN}/824-white.jpg`]);
+  });
+
+  it("falls through to the next clean photo when the first image is a spec shot", async () => {
+    shop.shopifyFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ product: { images: [{ src: `${CDN}/spec.jpg` }, { src: `${CDN}/hero.jpg` }] } }),
+    });
+    expect(await resolveProductImages("789")).toEqual([`${CDN}/hero.jpg`]);
   });
 
   it("returns [] when there are no clean cdn images", async () => {

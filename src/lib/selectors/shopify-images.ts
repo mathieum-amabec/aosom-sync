@@ -41,9 +41,10 @@ async function throttle(): Promise<void> {
   return wait;
 }
 
-/** How many lead images to keep — the first 1-2 are the hero shots; specs/
- * infographics sit later in the Aosom gallery. */
-const MAX_PRODUCT_IMAGES = 2;
+/** Keep only the first image: Aosom always places the official white-background
+ * product shot at gallery position 1 (index 0); lifestyle/ambiance and spec
+ * shots sit at position 2+. One clean white-bg photo per product. */
+const MAX_PRODUCT_IMAGES = 1;
 
 /**
  * URL substrings that flag a spec/infographic/diagram image (case-insensitive),
