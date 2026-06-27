@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import SlideshowGenerator from "./SlideshowGenerator";
 
 // ─── Shared types (mirror /lib/database VideoJob) ────────────────────
 
@@ -33,10 +34,16 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "publish", label: "Publier" },
 ];
 
-const ENGINES: { value: VideoEngine; label: string }[] = [
+// The "Générer" tab also offers the Slideshow engine, which has its own panel
+// (modes, dry-runs) and enqueues a Reel into publication_queue rather than
+// creating a video_job — so it's not part of the VideoJob `engine` union.
+type GenEngine = VideoEngine | "slideshow";
+
+const ENGINES: { value: GenEngine; label: string }[] = [
   { value: "ffmpeg", label: "FFmpeg (Gratuit)" },
   { value: "kling", label: "Kling (~$0.35)" },
   { value: "creatomate", label: "Creatomate (~$0.10)" },
+  { value: "slideshow", label: "Slideshow (Gratuit)" },
 ];
 
 const CONTENT_TYPES: { value: VideoContentType; label: string }[] = [
@@ -223,7 +230,7 @@ interface ProductHit {
 }
 
 function GenerateTab({ onCreated }: { onCreated: () => void }) {
-  const [engine, setEngine] = useState<VideoEngine>("ffmpeg");
+  const [engine, setEngine] = useState<GenEngine>("ffmpeg");
   const [contentType, setContentType] = useState<VideoContentType>("product");
   const [localeChoice, setLocaleChoice] = useState<"fr" | "en" | "both">("fr");
   const [skus, setSkus] = useState<ProductHit[]>([]);
@@ -268,16 +275,21 @@ function GenerateTab({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <div className="max-w-xl space-y-5">
+    <div className={engine === "slideshow" ? "max-w-3xl space-y-5" : "max-w-xl space-y-5"}>
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1.5">Moteur</label>
-        <select value={engine} onChange={(e) => setEngine(e.target.value as VideoEngine)} className={INPUT_CLASS}>
+        <select value={engine} onChange={(e) => setEngine(e.target.value as GenEngine)} className={INPUT_CLASS}>
           {ENGINES.map((e) => (
             <option key={e.value} value={e.value}>{e.label}</option>
           ))}
         </select>
       </div>
 
+      {/* Slideshow has its own selection/dry-run/generate panel (enqueues a Reel). */}
+      {engine === "slideshow" && <SlideshowGenerator />}
+
+      {engine !== "slideshow" && (
+      <>
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1.5">Type</label>
         <select value={contentType} onChange={(e) => setContentType(e.target.value as VideoContentType)} className={INPUT_CLASS}>
@@ -335,6 +347,8 @@ function GenerateTab({ onCreated }: { onCreated: () => void }) {
       >
         {submitting ? "Création…" : "Générer"}
       </button>
+      </>
+      )}
     </div>
   );
 }
