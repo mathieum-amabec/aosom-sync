@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.161] - 2026-06-26
+
+### Changed (slideshow generation moved to the Vidéos page)
+- The full slideshow generation panel (5 selection modes, video params, product dry-run, manifest
+  dry-run, Generate) moved from **Settings → Contenu vidéo** to **Vidéos → Générer** as a new engine
+  option ("Slideshow"), alongside FFmpeg / Kling / Creatomate. Extracted into a self-contained
+  `videos/SlideshowGenerator.tsx` (no behavior change).
+- **Settings → Contenu vidéo** (`SlideshowSettingsTab.tsx`) is now passive config only: per-template
+  activation toggles + default ratio + default platform. (Publishing cadence stays on the
+  Publication tab / `video_schedule`.)
+
 ## [0.5.53.160] - 2026-06-26
 
 ### Added (video generation UI — product selection modes + dry-run previews)
