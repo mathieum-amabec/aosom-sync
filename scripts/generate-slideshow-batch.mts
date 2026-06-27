@@ -269,7 +269,7 @@ async function enqueueDraft(
   template: SlideshowTemplate,
   lib: Lib,
 ): Promise<{ queueId: number; scheduledAt: string } | null> {
-  const { addToQueue, cancelQueueItemsForContent, getOccupiedQueueSlots, getSetting } = await import("@/lib/database");
+  const { addToQueue, getOccupiedQueueSlots, getSetting } = await import("@/lib/database");
   const { getNextAvailableSlot, parseVideoSchedule } = await import("@/lib/publication-scheduler");
   const platform = "both" as const;
   const videoSchedule = parseVideoSchedule(await getSetting("video_schedule"));
@@ -279,7 +279,13 @@ async function enqueueDraft(
   if (!slot) return null;
   const caption = lib.getSlideshowCaption(template, LANGUAGE, items);
   const contentId = `slideshow:batch:${serieId}`;
-  await cancelQueueItemsForContent("video", contentId);
+  // Replace only a prior unapproved DRAFT for this series — never an already-
+  // approved 'pending' post (re-running the batch must not silently un-schedule it).
+  await direct().execute({
+    sql: `UPDATE publication_queue SET status='cancelled'
+          WHERE content_type='video' AND content_id=? AND status='draft'`,
+    args: [contentId],
+  });
   const queueId = await addToQueue({
     contentType: "video",
     contentId,
@@ -348,8 +354,12 @@ async function main(): Promise<void> {
       if (series.type === "showcase") {
         const s = products[0] as ShowcaseProduct;
         const angles = (s?.allImages ?? []).filter(lib.isShopifyCdnUrl);
-        candidateCount = s?.allImages?.length ?? 0;
         slides = angles.slice(0, 8).map((image_url) => ({ image_url, overlay_text: s.title_fr || s.sku, price: s.price, compare_at: s.compare_at_price, sku: s.sku }));
+        // The 8-slide cap is a deliberate trim, not a missing-image skip; only warn
+        // about genuinely cdn-less angles. Suppress the generic skip warning below.
+        candidateCount = slides.length;
+        const noCdn = (s?.allImages?.length ?? 0) - angles.length;
+        if (noCdn > 0) console.warn(`    ⚠ ${noCdn} image(s) sans cdn.shopify.com — ignorée(s)`);
       } else {
         candidateCount = products.length;
         slides = products.map((p) => toSlide(p, lib)).filter((x): x is SlideshowItem => x !== null);
