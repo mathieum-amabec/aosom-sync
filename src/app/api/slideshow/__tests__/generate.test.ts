@@ -82,7 +82,7 @@ function mockAll(over: { build?: Record<string, unknown>; db?: Record<string, un
     getSetting: vi.fn().mockResolvedValue(null),
     getOccupiedQueueSlots: vi.fn().mockResolvedValue([]),
     addToQueue: vi.fn().mockResolvedValue(42),
-    cancelPendingQueueItems: vi.fn().mockResolvedValue(0),
+    cancelQueueItemsForContent: vi.fn().mockResolvedValue(0),
     QueueSlotTakenError,
     ...over.db,
   };
@@ -112,28 +112,29 @@ describe("POST /api/slideshow/generate", () => {
     expect(db.addToQueue).not.toHaveBeenCalled();
   });
 
-  it("dryRun:false enqueue:true → renders and creates a publication_queue row", async () => {
+  it("dryRun:false enqueue:true → renders and enqueues a DRAFT awaiting approval", async () => {
     const { db, buildSlideshow } = mockAll();
     const { POST } = await import("@/app/api/slideshow/generate/route");
     const res = await POST(postReq({ template: "BEST_SELLERS", dryRun: false, enqueue: true }));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
+    expect(json.status).toBe("draft"); // awaits operator approval, not yet publishable
     expect(json.blobUrl).toBe("https://blob/slideshow.mp4");
     expect(json.queueId).toBe(42);
     expect(json.platform).toBe("both");
     expect(buildSlideshow).toHaveBeenCalledWith("BEST_SELLERS", expect.objectContaining({ dryRun: false }));
     expect(db.addToQueue).toHaveBeenCalledWith(
-      expect.objectContaining({ contentType: "video", platform: "both", scheduledAt: SLOT.sqlite }),
+      expect.objectContaining({ contentType: "video", platform: "both", scheduledAt: SLOT.sqlite, status: "draft" }),
     );
     const payload = JSON.parse((db.addToQueue as ReturnType<typeof vi.fn>).mock.calls[0][0].payload);
     expect(payload.reelsVideoUrl).toBe("https://blob/slideshow.mp4");
     expect(payload.brand).toBe("ameublo");
     expect(payload.caption).toContain("Chaise de bureau"); // caption carries product material for clickbait
-    // Re-queue safety: deterministic contentId (no Date.now()) + cancel prior pending rows.
+    // Re-queue safety: deterministic contentId (no Date.now()) + cancel prior pending/draft rows.
     const contentId = (db.addToQueue as ReturnType<typeof vi.fn>).mock.calls[0][0].contentId;
     expect(contentId).toBe("slideshow:BEST_SELLERS:9:16");
-    expect(db.cancelPendingQueueItems).toHaveBeenCalledWith("video", "slideshow:BEST_SELLERS:9:16");
+    expect(db.cancelQueueItemsForContent).toHaveBeenCalledWith("video", "slideshow:BEST_SELLERS:9:16");
   });
 
   it("400 (not 500) when buildSlideshow rejects on a real render (no eligible products)", async () => {
@@ -172,19 +173,17 @@ describe("POST /api/slideshow/generate", () => {
     expect(db.addToQueue).not.toHaveBeenCalled();
   });
 
-  it("retries past a slot taken by another platform race", async () => {
-    const SLOT2 = { ...SLOT, at: 1765292400, sqlite: "2025-12-09 15:00:00" };
-    const addToQueue = vi.fn().mockRejectedValueOnce(new QueueSlotTakenError()).mockResolvedValueOnce(43);
-    const getNextAvailableSlot = vi.fn().mockResolvedValueOnce(SLOT).mockResolvedValueOnce(SLOT2);
-    const { db } = mockAll({ db: { addToQueue }, scheduler: { getNextAvailableSlot } });
+  it("409 when no free slot is available (rendered but not queued)", async () => {
+    // Drafts don't reserve a slot, but generation still needs a tentative slot to
+    // display; with the schedule full/disabled there's none, so it 409s after rendering.
+    const getNextAvailableSlot = vi.fn().mockResolvedValue(null);
+    const { db } = mockAll({ scheduler: { getNextAvailableSlot } });
     const { POST } = await import("@/app/api/slideshow/generate/route");
     const res = await POST(postReq({ template: "BEST_SELLERS", dryRun: false, enqueue: true }));
     const json = await res.json();
-    expect(res.status).toBe(200);
-    expect(json.queueId).toBe(43);
-    expect(json.slot).toBe(SLOT2.sqlite);
-    expect(getNextAvailableSlot).toHaveBeenCalledTimes(2);
-    expect(db).toBeDefined();
+    expect(res.status).toBe(409);
+    expect(json.blobUrl).toBe("https://blob/slideshow.mp4"); // rendered, just not queued
+    expect(db.addToQueue).not.toHaveBeenCalled();
   });
 
   it("400 on an invalid template", async () => {

@@ -464,38 +464,193 @@ function ProductSearch({
 // ─── File d'attente ──────────────────────────────────────────────────
 
 function QueueTab({ jobs }: { jobs: VideoJob[] }) {
-  if (jobs.length === 0) {
-    return <EmptyState text="Aucun job en attente." />;
-  }
   return (
-    <div className="space-y-2">
-      {jobs.map((job) => (
-        <div
-          key={job.id}
-          className="p-4 bg-gray-900 border border-gray-800 rounded-xl flex items-center justify-between gap-4"
-        >
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <StatusBadge status={job.status} />
-              <span className="text-sm text-gray-300">
-                {engineLabel(job.engine)} · {contentTypeLabel(job.content_type)} · {job.locale.toUpperCase()}
-              </span>
-            </div>
-            <p className="text-xs text-gray-500 mt-1 truncate">
-              {job.product_skus.length > 0 ? job.product_skus.join(", ") : "Aucun SKU"}
-            </p>
-          </div>
-          {/* Kling generation is asynchronous — show an indeterminate progress bar while generating. */}
-          {job.engine === "kling" && job.status === "generating" && (
-            <div className="w-40 shrink-0">
-              <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                <div className="h-full w-1/3 bg-blue-500 rounded-full animate-pulse" />
+    <div className="space-y-8">
+      {/* Slideshow Reels awaiting approval / scheduled in publication_queue. */}
+      <SlideshowApprovalQueue />
+
+      {/* Legacy render jobs (FFmpeg / Kling / Creatomate via video_jobs). */}
+      <div>
+        <h3 className="text-sm font-semibold text-gray-300 mb-3">Jobs de rendu (FFmpeg / Kling / Creatomate)</h3>
+        {jobs.length === 0 ? (
+          <EmptyState text="Aucun job de rendu en attente." />
+        ) : (
+          <div className="space-y-2">
+            {jobs.map((job) => (
+              <div
+                key={job.id}
+                className="p-4 bg-gray-900 border border-gray-800 rounded-xl flex items-center justify-between gap-4"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <StatusBadge status={job.status} />
+                    <span className="text-sm text-gray-300">
+                      {engineLabel(job.engine)} · {contentTypeLabel(job.content_type)} · {job.locale.toUpperCase()}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 truncate">
+                    {job.product_skus.length > 0 ? job.product_skus.join(", ") : "Aucun SKU"}
+                  </p>
+                </div>
+                {job.engine === "kling" && job.status === "generating" && (
+                  <div className="w-40 shrink-0">
+                    <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                      <div className="h-full w-1/3 bg-blue-500 rounded-full animate-pulse" />
+                    </div>
+                    <p className="text-[10px] text-gray-500 mt-1 text-right">Génération Kling…</p>
+                  </div>
+                )}
               </div>
-              <p className="text-[10px] text-gray-500 mt-1 text-right">Génération Kling…</p>
-            </div>
-          )}
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Slideshow approval queue (publication_queue, content_type='video') ──────
+
+interface VideoQueueItem {
+  id: number;
+  content_id: string;
+  status: string;
+  scheduled_at: string;
+  created_at: string;
+  payload: { reelsVideoUrl?: string; caption?: string; brand?: string };
+}
+
+const QUEUE_STATUS_META: Record<string, { label: string; cls: string }> = {
+  draft: { label: "📝 Brouillon", cls: "bg-gray-800 text-gray-300 border-gray-700" },
+  pending: { label: "⏳ Planifié", cls: "bg-blue-900/40 text-blue-300 border-blue-800/50" },
+  publishing: { label: "📤 Publication…", cls: "bg-blue-900/40 text-blue-300 border-blue-800/50" },
+  published: { label: "✅ Publié", cls: "bg-green-900/40 text-green-300 border-green-800/50" },
+  failed: { label: "❌ Échec", cls: "bg-red-950/40 text-red-300 border-red-800/50" },
+  cancelled: { label: "🚫 Annulé", cls: "bg-gray-800 text-gray-500 border-gray-700" },
+};
+
+/** Format a SQLite UTC datetime ('YYYY-MM-DD HH:MM:SS') for display (fr-CA). */
+function formatSlot(sqliteUtc: string): string {
+  const d = new Date(`${sqliteUtc.replace(" ", "T")}Z`);
+  return Number.isNaN(d.getTime())
+    ? sqliteUtc
+    : d.toLocaleString("fr-CA", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function SlideshowApprovalQueue() {
+  const [items, setItems] = useState<VideoQueueItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [acting, setActing] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/slideshow/queue");
+      const d = await res.json();
+      if (res.ok && Array.isArray(d.items)) setItems(d.items);
+      else setError(d.error || "Échec du chargement de la file vidéo.");
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function act(id: number, method: "POST" | "DELETE") {
+    setActing(id);
+    setError(null);
+    try {
+      const res = await fetch("/api/slideshow/approve", {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ queueId: id }),
+      });
+      const d = await res.json();
+      if (!res.ok) setError(d.error || "Action échouée.");
+      await load();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setActing(null);
+    }
+  }
+
+  // Cancelled items are noise in the approval view — hide them.
+  const visible = items.filter((it) => it.status !== "cancelled");
+
+  return (
+    <div>
+      <h3 className="text-sm font-semibold text-gray-300 mb-3">Vidéos en attente d’approbation</h3>
+      {error && <p className="text-xs text-red-400 mb-2">{error}</p>}
+      {loading ? (
+        <p className="text-gray-500 text-sm">Chargement…</p>
+      ) : visible.length === 0 ? (
+        <EmptyState text="Aucune vidéo slideshow. Génère-en une dans l’onglet Générer (moteur « Slideshow »)." />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {visible.map((it) => {
+            const meta = QUEUE_STATUS_META[it.status] ?? { label: it.status, cls: "bg-gray-800 text-gray-400 border-gray-700" };
+            const url = it.payload.reelsVideoUrl;
+            return (
+              <div key={it.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col">
+                <div className="aspect-video bg-gray-950 flex items-center justify-center">
+                  {url?.startsWith("https://") ? (
+                    <video src={url} controls preload="metadata" className="w-full h-full object-contain" />
+                  ) : (
+                    <span className="text-xs text-gray-600">Aperçu indisponible</span>
+                  )}
+                </div>
+                <div className="p-3 flex-1 flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${meta.cls}`}>
+                      {meta.label}
+                    </span>
+                    {it.payload.brand && <span className="text-xs text-gray-500">{it.payload.brand}</span>}
+                  </div>
+                  {it.payload.caption && (
+                    <p className="text-xs text-gray-400 line-clamp-2" title={it.payload.caption}>{it.payload.caption}</p>
+                  )}
+                  {it.status === "pending" && (
+                    <p className="text-xs text-blue-300">Planifié le {formatSlot(it.scheduled_at)}</p>
+                  )}
+                  {it.status === "draft" && (
+                    <div className="flex flex-wrap gap-2 mt-auto pt-1">
+                      <button
+                        onClick={() => act(it.id, "POST")}
+                        disabled={acting === it.id}
+                        className="px-2.5 py-1 text-xs font-medium bg-green-900/40 hover:bg-green-900/60 text-green-400 border border-green-800/50 rounded-md transition-colors disabled:opacity-50"
+                      >
+                        {acting === it.id ? "…" : "✅ Approuver"}
+                      </button>
+                      <button
+                        onClick={() => act(it.id, "DELETE")}
+                        disabled={acting === it.id}
+                        className="px-2.5 py-1 text-xs font-medium bg-red-950/40 hover:bg-red-950/60 text-red-400 border border-red-800/50 rounded-md transition-colors disabled:opacity-50"
+                      >
+                        {acting === it.id ? "…" : "🗑️ Supprimer"}
+                      </button>
+                      {url?.startsWith("https://") && (
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2.5 py-1 text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-md transition-colors"
+                        >
+                          Ouvrir
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
-      ))}
+      )}
     </div>
   );
 }
