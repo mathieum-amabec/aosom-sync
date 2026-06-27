@@ -10,6 +10,8 @@ All notable changes to Aosom Sync will be documented in this file.
   other processing, so no brand name reaches a video overlay. E.g. "Qaba Kids Seesaw" →
   "Kids Seesaw", "Outsunny Patio Glider" → "Patio Glider". Word-boundary anchored (a real
   word starting with a brand is never truncated); stacked brands are stripped too.
+  The inline port in `scripts/render-demand-gen.mjs` is kept in sync, so demand-gen
+  overlays are brand-free as well.
 
 ## [0.5.53.166] - 2026-06-27
 

@@ -130,6 +130,16 @@ const TRAILING_FILLER = new Set(["AVEC", "EN", "DE", "ET", "POUR"]);
 const MATERIALS = ["MÉTAL", "ACIER", "BOIS", "ROTIN", "VERRE", "ALUMINIUM"];
 const PHRASE_REDUCTIONS = [[/\bBASE DE PARASOL\b/g, "BASE PARASOL"]];
 
+// Supplier brands stripped from the START of the title, before anything else —
+// kept in sync with src/lib/video-title-utils.ts (no supplier brand in overlays).
+const SUPPLIER_BRANDS = ["Outsunny", "HOMCOM", "Aosom", "Qaba", "PawHut", "Vinsetto"];
+const BRAND_PREFIX_RE = new RegExp(`^\\s*(?:${SUPPLIER_BRANDS.join("|")})®?\\s+`, "i");
+function stripSupplierBrand(title) {
+  let prev, out = title;
+  do { prev = out; out = out.replace(BRAND_PREFIX_RE, ""); } while (out !== prev);
+  return out;
+}
+
 const up = (s) => s.toLocaleUpperCase("fr-CA");
 function stripTrailingFiller(t) {
   const parts = t.split(" ");
@@ -139,7 +149,7 @@ function stripTrailingFiller(t) {
 function formatVideoTitle(rawTitle, maxChars = 40, opts = {}) {
   const { uppercase = true, aggressive = true } = opts;
   if (!rawTitle) return "";
-  let t = rawTitle
+  let t = stripSupplierBrand(rawTitle)
     .replace(/…/g, " ")
     .replace(/\.\.\./g, " ")
     .replace(/\s*[—–]\s*/g, " ")
