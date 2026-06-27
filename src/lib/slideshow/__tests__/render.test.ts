@@ -8,6 +8,7 @@ import {
   blobPath,
   buildXfadeFilterComplex,
   wrapTitle,
+  wrapLines,
   buildSlideOverlaySvg,
 } from "@/lib/slideshow/render";
 import { validateSlideshowConfig, shouldShowBadge } from "@/lib/slideshow/validate";
@@ -143,6 +144,29 @@ describe("overlay text cleanup (formatVideoTitle per slide)", () => {
     expect(cleaned.length).toBeLessThanOrEqual(48);
     // No trailing partial word: the cleaned text is a prefix of the original words.
     expect(dirty.startsWith(cleaned.split(" ").slice(0, 2).join(" "))).toBe(true);
+  });
+});
+
+describe("wrapLines (intro hook — every line bounded, ≤ maxLines)", () => {
+  it("bounds all but the last line and never loses words", () => {
+    const hooks = [
+      "🔥 Soldes qui font MAL au portefeuille (en bien)",
+      "😮 Ces produits cachés valent VRAIMENT le détour",
+      "🚨 Alerte best-seller — stocks limités !",
+      "🎯 3 produits que tu DOIS voir aujourd'hui",
+    ];
+    for (const h of hooks) {
+      const lines = wrapLines(h, 18, 3);
+      expect(lines.length).toBeGreaterThanOrEqual(1);
+      expect(lines.length).toBeLessThanOrEqual(3);
+      expect(lines.join(" ")).toBe(h); // no words dropped
+      // Every line except possibly the last (which takes the remainder) is ≤18.
+      lines.slice(0, -1).forEach((l) => expect(l.length).toBeLessThanOrEqual(18));
+    }
+  });
+
+  it("a short hook stays on one line", () => {
+    expect(wrapLines("⚡ Best-sellers", 18, 3)).toEqual(["⚡ Best-sellers"]);
   });
 });
 

@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.166] - 2026-06-27
+
+### Changed (slideshow — white-bg images only + stronger clickbait hooks)
+- **One image per product** (`selectors/shopify-images.ts`): keep only the FIRST clean
+  cdn.shopify.com photo (index 0 = Aosom's official white-background shot); lifestyle/ambiance
+  shots at position 2+ no longer leak in. `MAX_PRODUCT_IMAGES` 2 → 1 (spec/diagram filtering kept).
+- **Stronger hooks** (`slideshow/hooks.ts`): replaced the intro-card hooks with punchier
+  clickbait lines per category (urgency / curiosity, strong lead emoji), 5 per category, FR + EN.
+
 ## [0.5.53.165] - 2026-06-27
 
 ### Changed (slideshow quality v2 — hooks, image filtering, Top 3, slogans, lifestyle)

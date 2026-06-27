@@ -229,6 +229,45 @@ export function wrapTitle(text: string, maxPerLine = 16): string[] {
 }
 
 /**
+ * Greedily wrap text into up to `maxLines` lines, each ≤ `maxPerLine` chars
+ * (every line is bounded, unlike wrapTitle whose 2nd line is the unbounded
+ * remainder). Used for the intro hook, which can be a long clickbait line or a
+ * Claude slogan — keeps it from clipping the frame edges.
+ */
+export function wrapLines(text: string, maxPerLine: number, maxLines: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [""];
+  const lines: string[] = [];
+  let cur = "";
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    const next = cur ? `${cur} ${w}` : w;
+    if (cur && next.length > maxPerLine) {
+      lines.push(cur);
+      if (lines.length === maxLines - 1) {
+        // Last allowed line takes all remaining words as-is.
+        cur = words.slice(i).join(" ");
+        break;
+      }
+      cur = w;
+    } else {
+      cur = next;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/** Intro font sized so the longest wrapped line fits the frame width (no clipping). */
+function introFontSize(lines: string[]): number {
+  const longest = lines.reduce((m, l) => Math.max(m, l.length), 0);
+  if (longest <= 16) return 92;
+  if (longest <= 20) return 80;
+  if (longest <= 26) return 68;
+  return 58;
+}
+
+/**
  * Per-slide overlay SVG: cleaned 1-2 line title (≤28 chars, mobile-sized),
  * current price, and — only when compare_at >= price * 1.10 — a struck-through
  * compare-at price and a gold discount badge. A `hero` item renders its text big
@@ -295,7 +334,8 @@ export function buildSlideOverlaySvg(
 
 /**
  * Intro card SVG: the marketing HOOK in large type (config.title carries the
- * hook, never a technical series id), wrapped to ≤2 lines, with a gold accent.
+ * hook, never a technical series id), wrapped to ≤3 lines with EVERY line bounded
+ * (≤18 chars) and the font auto-sized so the longest line never clips the frame.
  */
 export function buildIntroCardSvg(
   config: SlideshowConfig,
@@ -303,14 +343,15 @@ export function buildIntroCardSvg(
 ): string {
   const { gold, offWhite } = VIDEO_BRAND.colors;
   const font = VIDEO_BRAND.font.family;
-  const hookLines = wrapTitle(config.title ?? BRAND_STORE_URL[config.brand], 20);
+  const hookLines = wrapLines(config.title ?? BRAND_STORE_URL[config.brand], 18, 3);
+  const fs = introFontSize(hookLines);
+  const gap = Math.round(fs * 1.18);
   const cx = dims.width / 2;
   const cy = dims.height / 2;
-  const gap = 104;
   const top = cy - 30 - ((hookLines.length - 1) * gap) / 2;
   const lines = hookLines.map(
     (ln, i) =>
-      `<text x="${cx}" y="${top + i * gap}" font-family="${font},Arial,sans-serif" font-size="92" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${offWhite}" text-anchor="middle">${escapeXml(ln)}</text>`,
+      `<text x="${cx}" y="${top + i * gap}" font-family="${font},Arial,sans-serif" font-size="${fs}" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${offWhite}" text-anchor="middle">${escapeXml(ln)}</text>`,
   );
   const ruleY = top + hookLines.length * gap;
   return `<svg width="${dims.width}" height="${dims.height}" xmlns="http://www.w3.org/2000/svg">
