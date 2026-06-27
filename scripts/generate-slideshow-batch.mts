@@ -73,6 +73,7 @@ async function loadLib() {
     getSlideshowHook: hooksM.getSlideshowHook,
     getSlogan: hooksM.getSlogan,
     searchImages: unsplashM.searchImages,
+    triggerDownload: unsplashM.triggerDownload,
   };
 }
 type Lib = Awaited<ReturnType<typeof loadLib>>;
@@ -354,9 +355,11 @@ async function fetchLifestyleHero(series: Series, lib: Lib): Promise<SlideshowIt
   }
   try {
     const imgs = await lib.searchImages(series.unsplashQuery, 1);
-    const url = imgs[0]?.url;
-    if (!url) return null;
-    return { image_url: url, overlay_text: series.hookText ?? "", price: 0, hero: true };
+    const hit = imgs[0];
+    if (!hit?.url) return null;
+    // Unsplash API guideline: ping the download endpoint when a photo is USED.
+    await lib.triggerDownload(hit.downloadLocation);
+    return { image_url: hit.url, overlay_text: series.hookText ?? "", price: 0, hero: true };
   } catch (err) {
     console.warn(`    ⚠ Unsplash a échoué (${err instanceof Error ? err.message : String(err)}) — pas de hero`);
     return null;
