@@ -2,6 +2,13 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.168] - 2026-06-27
+
+### Changed
+- Homepage (thème preview "Copie de Copie de Copie de Trade v2", id 160584859753) : CTA hero "Magasinez maintenant" redirige vers l'anchor #categories (scroll) plutôt que /collections/all
+- Homepage : Nouvelle section `category-grid` insérée immédiatement après le hero — 6 tuiles visuelles (fallback navy #1B2A4A), scroll horizontal snap sur mobile
+- /collections/all : Bandeau sticky de navigation rapide par catégorie (7 pilules) ajouté en haut de `main-collection-product-grid.liquid`, affiché uniquement sur la collection `all`
+
 ## [0.5.53.167] - 2026-06-27
 
 ### Fixed (strip supplier brand names from video titles)
