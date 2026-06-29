@@ -1,0 +1,131 @@
+{% comment %} sections/category-grid.liquid {% endcomment %}
+<section id="categories" class="category-grid-section" aria-label="Magasiner par catégorie">
+  <div class="category-grid-inner">
+    <h2 class="category-grid-title">{{ section.settings.title }}</h2>
+    <div class="category-grid-track">
+      {% for block in section.blocks %}
+        {% if block.type == 'category' %}
+          <a href="{{ block.settings.url }}" class="category-tile" {{ block.shopify_attributes }}>
+            <div class="category-tile-bg" style="position:absolute;inset:0;background-size:cover;background-position:center;{% if block.settings.image != blank %}background-image:url('{{ block.settings.image | img_url: '600x400', crop: 'center' }}');{% elsif block.settings.image_asset != blank %}background-image:url('{{ block.settings.image_asset | asset_url }}');{% endif %}"></div>
+            <div class="category-tile-overlay"></div>
+            <span class="category-tile-label">{{ block.settings.label }}</span>
+          </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+{% schema %}
+{
+  "name": "Catégories visuelles",
+  "tag": "section",
+  "class": "section-category-grid",
+  "settings": [
+    {
+      "type": "text",
+      "id": "title",
+      "label": "Titre de section",
+      "default": "Magasinez par catégorie"
+    }
+  ],
+  "blocks": [
+    {
+      "type": "category",
+      "name": "Catégorie",
+      "settings": [
+        { "type": "image_picker", "id": "image", "label": "Image" },
+        { "type": "text", "id": "image_asset", "label": "Nom du fichier asset (ex: lc-meubles.jpg)" },
+        { "type": "text", "id": "label", "label": "Nom de la catégorie" },
+        { "type": "url", "id": "url", "label": "Lien" }
+      ]
+    }
+  ],
+  "presets": [{ "name": "Catégories visuelles" }]
+}
+{% endschema %}
+
+{% stylesheet %}
+.category-grid-section {
+  padding: 2.5rem 1rem 3rem;
+  background: #fff;
+}
+.category-grid-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.category-grid-title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1B2A4A;
+  margin-bottom: 1.25rem;
+  text-align: center;
+}
+.category-grid-track {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+.category-tile {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  height: 180px;
+  border-radius: 10px;
+  overflow: hidden;
+  text-decoration: none;
+  background: #1B2A4A;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.category-tile:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(27,42,74,0.18);
+}
+.category-tile-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  transition: transform 0.3s ease;
+}
+.category-tile:hover .category-tile-bg {
+  transform: scale(1.04);
+}
+.category-tile-overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(27,42,74,0.72) 0%, rgba(27,42,74,0.15) 60%, transparent 100%);
+}
+.category-tile-label {
+  position: relative;
+  z-index: 1;
+  padding: 0.75rem 1rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  letter-spacing: 0.01em;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+
+/* Mobile : scroll horizontal */
+@media (max-width: 767px) {
+  .category-grid-track {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    gap: 0.75rem;
+    padding-bottom: 0.5rem;
+    -webkit-overflow-scrolling: touch;
+  }
+  .category-grid-track::-webkit-scrollbar { display: none; }
+  .category-tile {
+    flex: 0 0 160px;
+    height: 160px;
+    scroll-snap-align: start;
+    border-radius: 8px;
+  }
+}
+{% endstylesheet %}
