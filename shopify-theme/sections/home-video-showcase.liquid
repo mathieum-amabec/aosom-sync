@@ -25,24 +25,10 @@
           <span class="hv-ov"><span class="hv-t">{{ p.title | escape }}</span><span class="hv-p">{{ p.price | money }}</span></span>
         </a>
       {%- endif -%}
-      {%- assign p = all_products['ensemble-4-chaises-salle-a-manger-rembourrees-pieds-metal'] -%}
-      {%- if p != blank -%}
-        <a class="hv-card" href="{{ p.url }}" data-umami-event="Home video {{ p.title | escape }}">
-          <video class="hv-vid" muted loop playsinline preload="none" poster="{% if p.featured_image %}{{ p.featured_image | image_url: width: 640 }}{% endif %}"><source data-src="https://uspm.aosomcdn.com/videos/en/8/83A-212V02BK/83A-212V02BK-HOMCOM-WEB.mp4" type="video/mp4"></video>
-          <span class="hv-ov"><span class="hv-t">{{ p.title | escape }}</span><span class="hv-p">{{ p.price | money }}</span></span>
-        </a>
-      {%- endif -%}
       {%- assign p = all_products['poussette-pliable-pour-grands-chiens-avec-4-roues-et-amortisseurs'] -%}
       {%- if p != blank -%}
         <a class="hv-card" href="{{ p.url }}" data-umami-event="Home video {{ p.title | escape }}">
           <video class="hv-vid" muted loop playsinline preload="none" poster="{% if p.featured_image %}{{ p.featured_image | image_url: width: 640 }}{% endif %}"><source data-src="https://uspm.aosomcdn.com/videos/en/D/D00-210V00CG/D00-210V00CG-PawHut-WEB.mp4" type="video/mp4"></video>
-          <span class="hv-ov"><span class="hv-t">{{ p.title | escape }}</span><span class="hv-p">{{ p.price | money }}</span></span>
-        </a>
-      {%- endif -%}
-      {%- assign p = all_products['classeur-2-tiroirs-verrouillable-avec-barre-ajustable'] -%}
-      {%- if p != blank -%}
-        <a class="hv-card" href="{{ p.url }}" data-umami-event="Home video {{ p.title | escape }}">
-          <video class="hv-vid" muted loop playsinline preload="none" poster="{% if p.featured_image %}{{ p.featured_image | image_url: width: 640 }}{% endif %}"><source data-src="https://uspm.aosomcdn.com/videos/en/9/924-077V80GY/924-077V80GY-HOMCOM-WEB.mp4" type="video/mp4"></video>
           <span class="hv-ov"><span class="hv-t">{{ p.title | escape }}</span><span class="hv-p">{{ p.price | money }}</span></span>
         </a>
       {%- endif -%}
@@ -62,7 +48,7 @@
   .hv-p{color:#D4A853;font-weight:700;font-size:1.4rem}
   /* Desktop (>=750px): 4 cards in one row; video plays on hover only (static poster otherwise) */
   @media(min-width:750px){.hv-card:nth-child(n+5){display:none}}
-  /* Mobile (<750px): horizontal swipe carousel — snap per card, no scrollbar, all 6 cards */
+  /* Mobile (<750px): horizontal swipe carousel — snap per card, no scrollbar, all 4 cards */
   @media(max-width:749px){
     .hv-grid{display:flex;flex-direction:row;overflow-x:scroll;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:12px;padding:0 16px 16px}
     .hv-grid::-webkit-scrollbar{display:none}
