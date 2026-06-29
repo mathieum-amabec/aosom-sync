@@ -2,6 +2,28 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.171] - 2026-06-28
+
+### Changed (homepage Option B final — preview theme 160584859753)
+Mirrors the changes applied directly to the Shopify **preview** theme this session
+(source of truth is the deployed theme; repo `shopify-theme/` is the record). Live theme
+160213696617 was never touched.
+- **`templates/index.json`** — removed the `category-grid` section entirely (order + section
+  object); the earlier CSS fixes for it were abandoned. Moved `cat_tiles` up to position 2,
+  immediately after `lc_hero`. Renamed the `featured_collection2` section from "Coups de cœur"
+  to **"Nouveaux arrivages"**, repointed it at the new `nouveaux-arrivages` collection, and
+  capped it at 8 products.
+- **`home/cat_tiles.liquid`** — categories section reworked: mobile horizontal snap-scroll
+  carousel (`flex:0 0 62vw`, hidden scrollbar, `scroll-snap`), desktop grid unchanged. Added 3
+  tiles (Enfants, Électro & Tech, Rabais 🔥 with a gold `#D4A853` overlay). Image box model is
+  inlined on each tile so it never depends on a section stylesheet.
+- **`assets/cat-tile-sports.jpg`, `cat-tile-electro.jpg`, `cat-tile-rabais.jpg`** — new dedicated
+  tile images (no more shared-image duplicates). `cat-tile-electro.jpg` is small home appliances
+  (kitchen).
+- **Smart collection `nouveaux-arrivages`** created via Admin API (`sort_order: created-desc`,
+  catch-all rule, published) so the featured-collection section shows newest products first
+  (Dawn `featured-collection` has no per-section sort). This is store-level data, not in the repo.
+
 ## [0.5.53.170] - 2026-06-28
 
 ### Security (/cso hardening — no P0/P1; defense-in-depth fixes)
