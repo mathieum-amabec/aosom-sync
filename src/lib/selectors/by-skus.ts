@@ -5,7 +5,7 @@
  */
 import { cached, cacheKey } from "./cache";
 import { getSelectorDb } from "./db";
-import { productColumns, rowToProductItem, hydrateImages } from "./map";
+import { productColumns, rowToProductItem, hydrateItems } from "./map";
 import type { ProductItem, SelectorOptions } from "./types";
 
 /** Hard cap so a pasted SKU list can't build an enormous IN clause. */
@@ -20,7 +20,7 @@ export async function productsBySkus(
   ).slice(0, MAX_SKUS);
   if (clean.length === 0) return [];
 
-  const key = cacheKey("productsBySkus", { skus: clean, resolveImages: opts.resolveImages });
+  const key = cacheKey("productsBySkus", { skus: clean, language: opts.language, resolveImages: opts.resolveImages });
 
   return cached(key, async () => {
     const db = await getSelectorDb();
@@ -36,6 +36,6 @@ export async function productsBySkus(
     }
     // Preserve the requested order; drop SKUs that don't exist.
     const items = clean.map((sku) => byKey.get(sku)).filter((x): x is ProductItem => Boolean(x));
-    return hydrateImages(items, opts);
+    return hydrateItems(items, opts);
   });
 }

@@ -11,6 +11,7 @@ import type { Row } from "@libsql/client";
 import type { ProductItem, SelectorOptions } from "./types";
 import { discountPct } from "@/lib/slideshow/validate";
 import { resolveProductImages } from "./shopify-images";
+import { resolveProductTitleFr } from "./shopify-titles";
 
 /**
  * Correlated subquery yielding the derived compare-at price for a product, or
@@ -73,8 +74,11 @@ export function rowToProductItem(row: Row): ProductItem {
   const name = typeof o.name === "string" ? o.name : "";
   return {
     sku: String(o.sku ?? ""),
+    // `products.name` is the RAW ENGLISH Aosom title. title_fr is overwritten
+    // with the live Shopify FR title in hydrateItems (when language !== 'en');
+    // until then both default to the English name as a safe fallback.
     title_fr: name,
-    title_en: name, // EN lives in Shopify metafields; FR name is the fallback.
+    title_en: name,
     price,
     compare_at_price: compareAt,
     images: [],
@@ -88,11 +92,26 @@ export function rowToProductItem(row: Row): ProductItem {
 }
 
 /**
- * Populate `images` on each item with Shopify-CDN URLs unless
- * `opts.resolveImages === false`. Runs through the throttled, cached resolver,
- * so a batch of items costs at most one Shopify request per uncached product.
+ * Hydrate the network-resolved fields of each item:
+ *
+ *  1. FR title — the catalog `name` is the raw English Aosom title, so for the
+ *     FR language (anything but 'en') the live Shopify title (curated French) is
+ *     fetched and written to `title_fr`, falling back to the English name when
+ *     absent. This ALWAYS runs (even when `resolveImages === false`) so a dry-run
+ *     still surfaces the real FR overlay text. title_en keeps the English name.
+ *  2. Images — Shopify-CDN URLs, unless `opts.resolveImages === false`.
+ *
+ * Both go through throttled, cached resolvers, so a batch of items costs at most
+ * one Shopify request per uncached product per field.
  */
-export async function hydrateImages(items: ProductItem[], opts?: SelectorOptions): Promise<ProductItem[]> {
+export async function hydrateItems(items: ProductItem[], opts?: SelectorOptions): Promise<ProductItem[]> {
+  if (opts?.language !== "en") {
+    for (const item of items) {
+      if (!item.shopify_product_id) continue;
+      const fr = await resolveProductTitleFr(item.shopify_product_id);
+      if (fr) item.title_fr = fr;
+    }
+  }
   if (opts?.resolveImages === false) return items;
   for (const item of items) {
     item.images = item.shopify_product_id ? await resolveProductImages(item.shopify_product_id) : [];

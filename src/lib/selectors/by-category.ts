@@ -11,7 +11,7 @@
  */
 import { cached, cacheKey } from "./cache";
 import { getSelectorDb } from "./db";
-import { productColumns, rowToProductItem, hydrateImages } from "./map";
+import { productColumns, rowToProductItem, hydrateItems } from "./map";
 import type { ProductItem, SelectorOptions } from "./types";
 
 type CategorySort = "velocity" | "price_asc" | "price_desc" | "discount";
@@ -29,6 +29,7 @@ export async function byCategory(
     sort: opts.sort,
     limit,
     windowDays,
+    language: opts.language,
     resolveImages: opts.resolveImages,
   });
 
@@ -71,6 +72,6 @@ export async function byCategory(
 
     const result = await db.execute({ sql, args });
     const items = result.rows.map(rowToProductItem);
-    return hydrateImages(items, opts);
+    return hydrateItems(items, opts);
   });
 }

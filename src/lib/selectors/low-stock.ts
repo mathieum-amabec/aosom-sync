@@ -6,7 +6,7 @@
  */
 import { cached, cacheKey } from "./cache";
 import { getSelectorDb } from "./db";
-import { productColumns, rowToProductItem, hydrateImages } from "./map";
+import { productColumns, rowToProductItem, hydrateItems } from "./map";
 import type { ProductItem, SelectorOptions } from "./types";
 
 export async function lowStock(
@@ -14,7 +14,7 @@ export async function lowStock(
 ): Promise<ProductItem[]> {
   const limit = opts.limit ?? 10;
   const threshold = opts.threshold ?? 5;
-  const key = cacheKey("lowStock", { limit, threshold, resolveImages: opts.resolveImages });
+  const key = cacheKey("lowStock", { limit, threshold, language: opts.language, resolveImages: opts.resolveImages });
 
   return cached(key, async () => {
     const db = await getSelectorDb();
@@ -31,6 +31,6 @@ export async function lowStock(
       args: [threshold, limit],
     });
     const items = result.rows.map(rowToProductItem);
-    return hydrateImages(items, opts);
+    return hydrateItems(items, opts);
   });
 }
