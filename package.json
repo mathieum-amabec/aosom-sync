@@ -1,6 +1,6 @@
 {
   "name": "aosom-sync",
-  "version": "0.5.53.170",
+  "version": "0.5.53.171",
   "private": true,
   "scripts": {
     "dev": "next dev",
