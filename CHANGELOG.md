@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.169] - 2026-06-28
+
+### Fixed (homepage "Voyez-le chez vous" — remove HOMCOM-branded videos)
+- **`shopify-theme/sections/home-video-showcase.liquid`** — removed the two video cards
+  whose source clips carry a burned-in **HOMCOM by Aosom** supplier logo: card 4
+  `83A-212V02BK-HOMCOM` (ensemble 4 chaises) and card 6 `924-077V80GY-HOMCOM`
+  (classeur 2 tiroirs). The section now shows 4 brand-clean videos (3 Outsunny + 1 PawHut),
+  exactly one full desktop row; the mobile carousel no longer surfaces a HOMCOM clip either.
+  Applied to the **preview theme `160584859753`** only — live `160213696617` untouched.
+
 ## [0.5.53.167] - 2026-06-27
 
 ### Fixed (strip supplier brand names from video titles)
