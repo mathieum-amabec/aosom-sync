@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.169] - 2026-06-28
+
+### Fixed (category-grid tiles rendered navy on Safari iOS)
+- **`shopify-theme/sections/category-grid.liquid`** — tiles rendered as the navy `#1B2A4A`
+  fallback because `.category-tile-bg` got its `position:absolute; inset:0` only from the
+  section's `{% stylesheet %}` block. When that scoped CSS didn't apply, the image layer
+  collapsed to zero height and the tile's navy background showed through. (The earlier
+  protocol-relative-URL theory was wrong: the working `cat_tiles` section renders the same
+  `//...` `asset_url` output and displays fine.) Fix mirrors the proven `cat_tiles` pattern:
+  the image filter (`img_url`/`asset_url`) is now called **inline** in the `style` attribute
+  with no intermediate `{% assign %}`, and the critical box model
+  (`position:absolute;inset:0;background-size:cover;background-position:center`) is written
+  inline on the div so the image layer is always sized, independent of the section
+  stylesheet. Blocks with an empty `image_asset` (cat-6, cat-8) stay navy by design until an
+  image is set.
+
 ## [0.5.53.167] - 2026-06-27
 
 ### Fixed (strip supplier brand names from video titles)
