@@ -1,21 +1,10 @@
-import crypto from "crypto";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
-import { env } from "@/lib/config";
 import { trackCron } from "@/lib/cron-tracking";
 import { drainPublisherQueue } from "@/lib/queue-publisher";
 
-function verifyCronSecret(header: string | null): boolean {
-  if (!header) return false;
-  let expected: string;
-  try {
-    expected = `Bearer ${env.cronSecret}`;
-  } catch {
-    return false; // CRON_SECRET missing → 401, not 500
-  }
-  if (header.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
-}
+
 
 /**
  * GET /api/cron/publisher

@@ -1,6 +1,6 @@
 {
   "name": "aosom-sync",
-  "version": "0.5.53.155",
+  "version": "0.5.53.170",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -12,7 +12,7 @@
     "test:ci": "vitest run --reporter=verbose"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.82.0",
+    "@anthropic-ai/sdk": "^0.91.1",
     "@libsql/client": "^0.17.2",
     "@remotion/bundler": "^4.0.0",
     "@remotion/renderer": "^4.0.0",

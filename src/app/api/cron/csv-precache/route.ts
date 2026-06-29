@@ -1,7 +1,7 @@
-import crypto from "crypto";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { put, del } from "@vercel/blob";
-import { env, AOSOM } from "@/lib/config";
+import { AOSOM } from "@/lib/config";
 import { upsertBlobCache, getCachedBlobUrl } from "@/lib/database";
 import { trackCron } from "@/lib/cron-tracking";
 
@@ -23,12 +23,7 @@ function validateCsvContent(csvText: string): void {
   }
 }
 
-function verifyCronSecret(header: string | null): boolean {
-  if (!header) return false;
-  const expected = `Bearer ${env.cronSecret}`;
-  if (header.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
-}
+
 
 function log(msg: string, extra?: Record<string, unknown>): void {
   console.log(JSON.stringify({ ts: new Date().toISOString(), job: "csv-precache", msg, ...extra }));

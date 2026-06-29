@@ -1,7 +1,6 @@
-import crypto from "crypto";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { revalidateTag, revalidatePath } from "next/cache";
-import { env } from "@/lib/config";
 
 // Every storefront feed (Google / Pinterest / Meta, incl. the EN + XML variants) derives
 // from one shared Shopify product fetch tagged 'feeds' in lib/feeds/source.ts. Refreshing
@@ -9,18 +8,7 @@ import { env } from "@/lib/config";
 // names double as the URL segment under /api/feeds/.
 const FEEDS = ["google", "pinterest", "pinterest-en", "meta", "meta-xml", "bing", "reddit"] as const;
 
-/** Constant-time Bearer CRON_SECRET check (mirrors the cron routes). */
-function verifyCronSecret(header: string | null): boolean {
-  if (!header) return false;
-  let expected: string;
-  try {
-    expected = `Bearer ${env.cronSecret}`;
-  } catch {
-    return false; // CRON_SECRET not configured → 401, not 500
-  }
-  if (header.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
-}
+
 
 /**
  * POST /api/revalidate — Bearer CRON_SECRET.

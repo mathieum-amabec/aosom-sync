@@ -6,9 +6,8 @@
  * the email flow), and stamps notified_at so they aren't re-notified. Protected
  * by CRON_SECRET (constant-time check), matching the other cron routes.
  */
-import crypto from "crypto";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
-import { env } from "@/lib/config";
 import { getTriggeredPriceAlerts, markPriceAlertsNotified } from "@/lib/database";
 import { trackEvent } from "@/lib/klaviyo-client";
 
@@ -16,17 +15,7 @@ export const maxDuration = 60;
 
 const STOREFRONT_BASE = "https://ameublodirect.ca";
 
-function verifyCronSecret(header: string | null): boolean {
-  if (!header) return false;
-  let expected: string;
-  try {
-    expected = `Bearer ${env.cronSecret}`;
-  } catch {
-    return false; // CRON_SECRET unset → unauthenticated, not 500
-  }
-  if (header.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
-}
+
 
 export async function GET(request: Request) {
   if (!verifyCronSecret(request.headers.get("authorization"))) {
