@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.170] - 2026-06-28
+
+### Security (/cso hardening — no P0/P1; defense-in-depth fixes)
+- **P3-7 — single `verifyCronSecret` helper.** Extracted the constant-time Bearer
+  `CRON_SECRET` check (previously copy-pasted into 16 cron/public routes) into
+  `src/lib/cron-auth.ts`: fail-closed on a missing `CRON_SECRET` (→ 401, not a 500
+  "Bearer undefined") and length-guarded `crypto.timingSafeEqual`. New routes opt in by
+  import, so there's one answer to "is this route authenticated?".
+- **P2-4 — admin guard on paid Anthropic routes.** New `isAdmin()` helper (strict
+  `role === "admin"`); `/api/import/generate` and `/api/blog/generate` (manual/session
+  path) now require an admin session. The cron Bearer paths are unchanged. A `reviewer`
+  session can no longer trigger billable generation even if the proxy reviewer-allowlist
+  later widens. (`slideshow/generate`, `videos/generate`, `social/content/generate`,
+  `generate-weekly-mix` already blocked `reviewer`.)
+- **P2-A — `@anthropic-ai/sdk` `0.82.0` → `0.91.1`.** Clears GHSA-p7fg-763f-g4gf
+  (insecure default file perms in the Local Filesystem Memory Tool; path unused here —
+  app uses only `messages.create`). Tight caret avoids the breaking `0.100.x` major.
+  The `undici` HIGH advisories stay deferred: vulnerable copy is `jsdom`-only (dev /
+  client-only DOMPurify, never loaded in prod), `@vercel/blob` uses `undici` 6.x, and a
+  global override would break it while bun can't express a scoped one. See
+  `docs/SECURITY-BACKLOG.md` (2026-06-28).
 ## [0.5.53.169] - 2026-06-28
 
 ### Fixed (homepage "Voyez-le chez vous" — remove HOMCOM-branded videos)

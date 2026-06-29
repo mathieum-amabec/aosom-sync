@@ -148,6 +148,18 @@ export async function getSessionRole(): Promise<UserRole | null> {
   return session?.role ?? null;
 }
 
+/**
+ * True only for an authenticated `admin` session. Paid routes (Anthropic / Kling
+ * spend) and admin-only mutations gate on this so a non-admin role — today only
+ * `reviewer`, seeded for Meta App Review — can never trigger billable work even
+ * if a future change widens the `proxy.ts` reviewer allowlist. Strict `=== "admin"`
+ * (not `!== "reviewer"`) so any role added later is denied by default.
+ * See SECURITY-BACKLOG P2-4.
+ */
+export async function isAdmin(): Promise<boolean> {
+  return (await getSessionRole()) === "admin";
+}
+
 export function isPathAllowedForRole(pathname: string, role: UserRole): boolean {
   if (role === "admin") return true;
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(

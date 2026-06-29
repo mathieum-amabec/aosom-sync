@@ -15,7 +15,7 @@
 
 import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/auth";
+import { isAuthenticated, isAdmin } from "@/lib/auth";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { CLAUDE, env } from "@/lib/config";
 import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
@@ -284,8 +284,16 @@ function injectInlineImages(
 
 export async function POST(request: Request) {
   const cronOk = isCronAuthorized(request.headers.get("authorization"));
-  if (!cronOk && !(await isAuthenticated())) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!cronOk) {
+    // Manual (session) generation is admin-only (P2-4): paid Anthropic spend must
+    // not be reachable by a reviewer session. The cron path (Bearer CRON_SECRET)
+    // is server-to-server and keeps working unchanged.
+    if (!(await isAuthenticated())) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (!(await isAdmin())) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   // Rate limit: 6 generations per minute per process (room for retries

@@ -1,15 +1,7 @@
-import crypto from "crypto";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
-import { env } from "@/lib/config";
 import { trackCron } from "@/lib/cron-tracking";
 import { expireStaleNewProductDrafts } from "@/lib/database";
-
-function verifyCronSecret(header: string | null): boolean {
-  if (!header) return false;
-  const expected = `Bearer ${env.cronSecret}`;
-  if (header.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
-}
 
 /**
  * GET /api/cron/draft-ttl — daily TTL for stale unapproved drafts. Auto-rejects

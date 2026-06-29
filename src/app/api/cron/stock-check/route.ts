@@ -1,6 +1,5 @@
-import crypto from "crypto";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
-import { env } from "@/lib/config";
 import { trackCron } from "@/lib/cron-tracking";
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { getStockBaseline, updateStockBaselineQty } from "@/lib/database";
@@ -14,13 +13,6 @@ import { notifyBackInStockWaitlist } from "@/jobs/job1-sync";
 // detection; the overflow is reported as `deferred` and drained by the next (convergent) run.
 const WRITE_CAP = 150;
 const ACTION_RANK: Record<string, number> = { oos: 0, draft: 1, restock: 2 };
-
-function verifyCronSecret(header: string | null): boolean {
-  if (!header) return false;
-  const expected = `Bearer ${env.cronSecret}`;
-  if (header.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
-}
 
 const hasAutoDraft = (tags: string[]) => tags.some((t) => t.toLowerCase() === STOCK_TAG_AUTODRAFTED);
 const withoutAutoDraft = (tags: string[]) => tags.filter((t) => t.toLowerCase() !== STOCK_TAG_AUTODRAFTED);
