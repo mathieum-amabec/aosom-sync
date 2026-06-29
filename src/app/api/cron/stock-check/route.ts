@@ -14,8 +14,6 @@ import { notifyBackInStockWaitlist } from "@/jobs/job1-sync";
 const WRITE_CAP = 150;
 const ACTION_RANK: Record<string, number> = { oos: 0, draft: 1, restock: 2 };
 
-
-
 const hasAutoDraft = (tags: string[]) => tags.some((t) => t.toLowerCase() === STOCK_TAG_AUTODRAFTED);
 const withoutAutoDraft = (tags: string[]) => tags.filter((t) => t.toLowerCase() !== STOCK_TAG_AUTODRAFTED);
 

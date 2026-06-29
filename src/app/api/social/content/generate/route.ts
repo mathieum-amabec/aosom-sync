@@ -10,8 +10,6 @@ import { CLAUDE } from "@/lib/config";
 
 const ANTHROPIC_CALL_TIMEOUT_MS = 45_000;
 
-
-
 // Clickbait style layer applied to every generated post. Templates may still
 // specify an exact opener/closer (e.g. {{hook}} posts) — those take precedence;
 // otherwise these rules shape the voice toward scroll-stopping engagement.

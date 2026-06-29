@@ -17,8 +17,6 @@ type LangOutcome =
   | { language: Language; success: true; draftId: number; hookId: number | null }
   | { language: Language; success: false; error: string };
 
-
-
 /**
  * Generate one content draft in a single language by calling the generate
  * endpoint. Never throws — a failure is returned as a LangOutcome so the

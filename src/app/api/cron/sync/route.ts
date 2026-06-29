@@ -3,8 +3,6 @@ import { NextResponse } from "next/server";
 import { runSyncFull } from "@/jobs/job1-sync";
 import { trackCron } from "@/lib/cron-tracking";
 
-
-
 /**
  * Cron handler — Fluid Compute single-function Phase 1 orchestrator.
  * Runs at 06:00 UTC (primary) and 06:30 UTC (idempotent retry).

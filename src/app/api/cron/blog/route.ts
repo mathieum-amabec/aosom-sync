@@ -34,8 +34,6 @@ type LangOutcome =
     }
   | { language: Language; success: false; error: string };
 
-
-
 interface BlogGenerateResponse {
   success: true;
   articleId: string;

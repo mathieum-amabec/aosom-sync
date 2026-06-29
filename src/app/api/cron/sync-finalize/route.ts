@@ -3,8 +3,6 @@ import { NextResponse } from "next/server";
 import { runSyncFinalize } from "@/jobs/job1-sync";
 import { trackCron } from "@/lib/cron-tracking";
 
-
-
 /**
  * Manual fallback — Phase 1 finalize (rebuildCounts + recordPriceChanges + notify).
  * No longer triggered by Vercel cron (removed in v0.4.0.0 — replaced by runSyncFull).

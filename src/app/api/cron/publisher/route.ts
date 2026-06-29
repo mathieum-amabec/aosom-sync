@@ -4,8 +4,6 @@ import { isAuthenticated } from "@/lib/auth";
 import { trackCron } from "@/lib/cron-tracking";
 import { drainPublisherQueue } from "@/lib/queue-publisher";
 
-
-
 /**
  * GET /api/cron/publisher
  *

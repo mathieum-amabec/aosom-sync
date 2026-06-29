@@ -8,8 +8,6 @@ import { revalidateTag, revalidatePath } from "next/cache";
 // names double as the URL segment under /api/feeds/.
 const FEEDS = ["google", "pinterest", "pinterest-en", "meta", "meta-xml", "bing", "reddit"] as const;
 
-
-
 /**
  * POST /api/revalidate — Bearer CRON_SECRET.
  *

@@ -3,8 +3,6 @@ import { NextResponse } from "next/server";
 import { trackCron } from "@/lib/cron-tracking";
 import { runStaleCatalogDraft } from "@/lib/stale-catalog";
 
-
-
 /**
  * GET /api/cron/stale-catalog — daily catalog hygiene. Drafts Shopify products that are
  * imported + still in stock (qty>0) but haven't appeared in the Aosom CSV for >30 days

@@ -15,8 +15,6 @@ export const maxDuration = 60;
 
 const STOREFRONT_BASE = "https://ameublodirect.ca";
 
-
-
 export async function GET(request: Request) {
   if (!verifyCronSecret(request.headers.get("authorization"))) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });

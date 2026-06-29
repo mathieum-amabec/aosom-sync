@@ -3,8 +3,6 @@ import { NextResponse } from "next/server";
 import { runShopifyPush } from "@/jobs/job1-sync";
 import { trackCron } from "@/lib/cron-tracking";
 
-
-
 /**
  * Cron handler — Phase 2: apply pending Shopify diffs.
  * Runs 10 minutes after the DB sync to allow it to complete first.

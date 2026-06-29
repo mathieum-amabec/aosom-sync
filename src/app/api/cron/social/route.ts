@@ -3,8 +3,6 @@ import { NextResponse } from "next/server";
 import { triggerStockHighlight } from "@/jobs/job4-social";
 import { trackCron } from "@/lib/cron-tracking";
 
-
-
 /**
  * Cron handler — daily stock highlight post generation.
  * Protected by CRON_SECRET header.

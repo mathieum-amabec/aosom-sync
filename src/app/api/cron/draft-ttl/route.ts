@@ -3,8 +3,6 @@ import { NextResponse } from "next/server";
 import { trackCron } from "@/lib/cron-tracking";
 import { expireStaleNewProductDrafts } from "@/lib/database";
 
-
-
 /**
  * GET /api/cron/draft-ttl — daily TTL for stale unapproved drafts. Auto-rejects
  * status='draft' `new_product` posts older than TTL_DAYS (a "new product" post is no longer

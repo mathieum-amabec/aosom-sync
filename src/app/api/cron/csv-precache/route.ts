@@ -23,8 +23,6 @@ function validateCsvContent(csvText: string): void {
   }
 }
 
-
-
 function log(msg: string, extra?: Record<string, unknown>): void {
   console.log(JSON.stringify({ ts: new Date().toISOString(), job: "csv-precache", msg, ...extra }));
 }
