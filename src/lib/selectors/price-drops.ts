@@ -7,7 +7,7 @@
  */
 import { cached, cacheKey } from "./cache";
 import { getSelectorDb } from "./db";
-import { productColumns, rowToProductItem, hydrateImages } from "./map";
+import { productColumns, rowToProductItem, hydrateItems } from "./map";
 import type { ProductItem, SelectorOptions } from "./types";
 
 export async function priceDrops(
@@ -16,7 +16,7 @@ export async function priceDrops(
   const limit = opts.limit ?? 10;
   const minPct = opts.minPct ?? 10;
   const ratio = 1 + minPct / 100;
-  const key = cacheKey("priceDrops", { limit, minPct, resolveImages: opts.resolveImages });
+  const key = cacheKey("priceDrops", { limit, minPct, language: opts.language, resolveImages: opts.resolveImages });
 
   return cached(key, async () => {
     const db = await getSelectorDb();
@@ -35,6 +35,6 @@ export async function priceDrops(
       args: [ratio, limit],
     });
     const items = result.rows.map(rowToProductItem);
-    return hydrateImages(items, opts);
+    return hydrateItems(items, opts);
   });
 }
