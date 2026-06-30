@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.171] - 2026-06-28
+## [0.5.53.173] - 2026-06-30
 
 ### Fixed (slideshow overlays showed English titles — bilingual `--store`)
 - **Root cause**: `products.name` in the catalog is the RAW ENGLISH Aosom title, but
@@ -23,6 +23,88 @@ All notable changes to Aosom Sync will be documented in this file.
   **`--store=furnish` (EN)** flag drives brand + overlay/caption/hook language; flags now
   accept `--name=value` as well as `--name value`; `--dry-run` accepted explicitly. Overlay
   text picks `title_fr` (FR) or `title_en` (EN) per store.
+
+
+## [0.5.53.172] - 2026-06-28
+
+### Added (taxonomie catégories complète + smart collections Shopify)
+Built a coherent 2-level category taxonomy from the real catalog's `product_type`
+(Google taxonomy) and provisioned it as Shopify smart collections. Store-level
+collections + the **draft** theme `160606093417` only; live theme `160584859753`
+was never touched.
+- **41 smart collections** created/updated (39 new, 2 updated: `electro-et-tech`,
+  `enfants`, + 1 rule fix). 9 parent categories (Meubles & Déco, Extérieur & Jardin,
+  Animaux, Enfants & Jouets, Bureau & Travail, Sports & Loisirs, Électro & Tech,
+  Bricolage & Outils, Santé & Beauté) + ~32 sub-categories. Each driven by a
+  `product_type contains "<branch>"` rule so future Aosom imports self-classify.
+- **Conflicts resolved**: air-conditioners/fans moved out of Meubles into Électro &
+  Tech (`contains "Home Furnishings" AND not_contains "Appliances"`); outdoor
+  furniture + patio chairs/tables merged under Extérieur & Jardin as non-redundant
+  sub-categories; Animaux split into Chiens/Chats/Petits animaux/Oiseaux; Meubles
+  split into Salon/Chambre/Cuisine/Rangement/Salle de bain/Décoration.
+- **Draft theme**: `cat_tiles` rebuilt to 8 parent tiles pointing at the new
+  collections; new Shopify menu `taxonomie-categories` (9 parents + subs) wired to
+  the draft header (theme-scoped). Live nav untouched.
+- **Coverage**: of 737 imported Shopify products, 86% fall in a parent and 85% in a
+  sub-category; orphan branches documented for future sub-category work.
+- **NBSP fix**: 12 `product_type` values carry a non-breaking space (U+00A0) in their
+  leaf; only `electro-petit-electromenager` needed an ASCII-safe condition
+  (`Appliances > Small`).
+- Full report: `docs/taxonomie-categories.md` (taxonomy tree, per-collection counts,
+  orphans, import recommendations).
+
+## [0.5.53.171] - 2026-06-28
+
+### Changed (homepage Option B final — preview theme 160584859753)
+Mirrors the changes applied directly to the Shopify **preview** theme this session
+(source of truth is the deployed theme; repo `shopify-theme/` is the record). Live theme
+160213696617 was never touched.
+- **`templates/index.json`** — removed the `category-grid` section entirely (order + section
+  object); the earlier CSS fixes for it were abandoned. Moved `cat_tiles` up to position 2,
+  immediately after `lc_hero`. Renamed the `featured_collection2` section from "Coups de cœur"
+  to **"Nouveaux arrivages"**, repointed it at the new `nouveaux-arrivages` collection, and
+  capped it at 8 products.
+- **`home/cat_tiles.liquid`** — categories section reworked: mobile horizontal snap-scroll
+  carousel (`flex:0 0 62vw`, hidden scrollbar, `scroll-snap`), desktop grid unchanged. Added 3
+  tiles (Enfants, Électro & Tech, Rabais 🔥 with a gold `#D4A853` overlay). Image box model is
+  inlined on each tile so it never depends on a section stylesheet.
+- **`assets/cat-tile-sports.jpg`, `cat-tile-electro.jpg`, `cat-tile-rabais.jpg`** — new dedicated
+  tile images (no more shared-image duplicates). `cat-tile-electro.jpg` is small home appliances
+  (kitchen).
+- **Smart collection `nouveaux-arrivages`** created via Admin API (`sort_order: created-desc`,
+  catch-all rule, published) so the featured-collection section shows newest products first
+  (Dawn `featured-collection` has no per-section sort). This is store-level data, not in the repo.
+
+## [0.5.53.170] - 2026-06-28
+
+### Security (/cso hardening — no P0/P1; defense-in-depth fixes)
+- **P3-7 — single `verifyCronSecret` helper.** Extracted the constant-time Bearer
+  `CRON_SECRET` check (previously copy-pasted into 16 cron/public routes) into
+  `src/lib/cron-auth.ts`: fail-closed on a missing `CRON_SECRET` (→ 401, not a 500
+  "Bearer undefined") and length-guarded `crypto.timingSafeEqual`. New routes opt in by
+  import, so there's one answer to "is this route authenticated?".
+- **P2-4 — admin guard on paid Anthropic routes.** New `isAdmin()` helper (strict
+  `role === "admin"`); `/api/import/generate` and `/api/blog/generate` (manual/session
+  path) now require an admin session. The cron Bearer paths are unchanged. A `reviewer`
+  session can no longer trigger billable generation even if the proxy reviewer-allowlist
+  later widens. (`slideshow/generate`, `videos/generate`, `social/content/generate`,
+  `generate-weekly-mix` already blocked `reviewer`.)
+- **P2-A — `@anthropic-ai/sdk` `0.82.0` → `0.91.1`.** Clears GHSA-p7fg-763f-g4gf
+  (insecure default file perms in the Local Filesystem Memory Tool; path unused here —
+  app uses only `messages.create`). Tight caret avoids the breaking `0.100.x` major.
+  The `undici` HIGH advisories stay deferred: vulnerable copy is `jsdom`-only (dev /
+  client-only DOMPurify, never loaded in prod), `@vercel/blob` uses `undici` 6.x, and a
+  global override would break it while bun can't express a scoped one. See
+  `docs/SECURITY-BACKLOG.md` (2026-06-28).
+## [0.5.53.169] - 2026-06-28
+
+### Fixed (homepage "Voyez-le chez vous" — remove HOMCOM-branded videos)
+- **`shopify-theme/sections/home-video-showcase.liquid`** — removed the two video cards
+  whose source clips carry a burned-in **HOMCOM by Aosom** supplier logo: card 4
+  `83A-212V02BK-HOMCOM` (ensemble 4 chaises) and card 6 `924-077V80GY-HOMCOM`
+  (classeur 2 tiroirs). The section now shows 4 brand-clean videos (3 Outsunny + 1 PawHut),
+  exactly one full desktop row; the mobile carousel no longer surfaces a HOMCOM clip either.
+  Applied to the **preview theme `160584859753`** only — live `160213696617` untouched.
 
 ## [0.5.53.167] - 2026-06-27
 

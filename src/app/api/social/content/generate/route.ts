@@ -1,4 +1,4 @@
-import crypto from "crypto";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { getContentTemplateBySlug, createFacebookDraft, getAnyProductSku, selectCompatibleHooks, getRecentlyUsedHookIds, recordHookUsage } from "@/lib/database";
@@ -6,26 +6,9 @@ import { mapProductTypeToScope } from "@/lib/hook-selector";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { stripMarkdown } from "@/lib/strip-markdown";
 import { searchImages, triggerDownload } from "@/lib/unsplash";
-import { CLAUDE, env } from "@/lib/config";
+import { CLAUDE } from "@/lib/config";
 
 const ANTHROPIC_CALL_TIMEOUT_MS = 45_000;
-
-/**
- * Constant-time cron-secret check, matching the other cron routes. Using `===`
- * here is a timing oracle on the secret that gates this public-prefixed,
- * paid-LLM endpoint — compare in constant time and fail closed on missing env.
- */
-function verifyCronSecret(header: string | null): boolean {
-  if (!header) return false;
-  let expected: string;
-  try {
-    expected = `Bearer ${env.cronSecret}`;
-  } catch {
-    return false; // CRON_SECRET missing → treat as unauthenticated, not 500
-  }
-  if (header.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
-}
 
 // Clickbait style layer applied to every generated post. Templates may still
 // specify an exact opener/closer (e.g. {{hook}} posts) — those take precedence;

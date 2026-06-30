@@ -1,15 +1,7 @@
-import crypto from "crypto";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { runSyncRefreshChunk } from "@/jobs/job1-sync";
-import { env } from "@/lib/config";
 import { trackCron } from "@/lib/cron-tracking";
-
-function verifyCronSecret(header: string | null): boolean {
-  if (!header) return false;
-  const expected = `Bearer ${env.cronSecret}`;
-  if (header.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
-}
 
 /**
  * Manual fallback — Phase 1 refresh chunk (writes one REFRESH_CHUNK_SIZE slice to DB).

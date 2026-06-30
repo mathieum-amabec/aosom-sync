@@ -454,6 +454,82 @@ Status note: **old P2-1 (unauthenticated read routes) — effectively RESOLVED**
 centralized auth. Superseded by P2-4 (role granularity).
 
 ---
+
+## Audit 2026-06-28 — branch `fix/security-hardening` (daily, 8/10 gate)
+
+Scope: full daily audit over the delta since the 2026-06-14 run — the slideshow / Remotion
+pipeline (`src/lib/slideshow/**`, `src/remotion/**`), the new routes (`/api/slideshow/*`,
+`/api/demand-gen-videos`, `/api/waitlist[/confirm]`, `/api/queue[/add]`, `/api/social/queue-reel`,
+`/api/settings/schedule`, `/api/feeds/{bing,reddit}`, `/api/revalidate`) and the new cron routes
+(`draft-ttl`, `stale-catalog`, `stock-check`, `publisher`). Independent re-verification of each
+candidate against the FP filter. **No P0/P1 findings.** Three already-tracked items were fixed
+inline this branch.
+
+### Verified clean (active verification)
+- **Auth/proxy model unchanged and sound.** `src/proxy.ts` gates every non-static route outside
+  `PUBLIC_PATHS` on the HMAC session cookie + reviewer-role 403. New session-only routes
+  (`/api/slideshow/*`, `/api/demand-gen-videos`, `/api/queue*`, `/api/settings/schedule`) are not
+  in `PUBLIC_PATHS`, so they 307→/login (page) / 403 (api) without a session.
+- **All new public/cron routes self-gate.** `draft-ttl`, `stale-catalog`, `stock-check`,
+  `publisher`, `revalidate` each call `verifyCronSecret` (constant-time). `/api/waitlist` is
+  CORS-allowlisted + per-IP rate-limited + email/SKU-validated + CASL double opt-in;
+  `/api/waitlist/confirm` is a single-use token lookup. Feeds (`bing`/`reddit`) are read-only and
+  `escapeXml`-escaped via the shared feed builder.
+- **Paid LLM routes gated.** `slideshow/generate`, `videos/generate`, `social/content/generate`,
+  `generate-weekly-mix` all require a session AND block the `reviewer` role before any paid call.
+- **No command injection in the slideshow pipeline.** `src/lib/slideshow/render.ts` +
+  `remix/render.ts` invoke ffmpeg via `spawn(binary, args[], …)` (argument array, never a shell
+  string). Every ffmpeg `-i` input is a **local file path**; product images are fetched through the
+  hardened `downloadImage()` (SSRF guard: `assertPublicHttpsUrl` + manual redirect + size/timeout
+  caps) and written to disk before ffmpeg reads them. `musicUrl` overrides are validated against
+  `ALLOWED_MUSIC_ROOTS`.
+- **Secrets:** `.env.local` gitignored (`.env*` + `.env*.local`); only `.env.example` tracked
+  (empty placeholder values); no secret patterns (`shpat_/sk-ant-/AKIA/ghp_/xoxb/JWT`) in `src/`,
+  `scripts/`, or git history. **Tokens in logs:** no `console.*` of token/secret/password/env in
+  non-test code.
+- **SQL injection: none.** The 3 template-literal `db.execute` calls interpolate constant SQL
+  fragments (column lists / boolean expressions), not request input. **XSS:** one
+  `dangerouslySetInnerHTML` (`import/page.tsx:528`), `DOMPurify.sanitize()`-wrapped, in a
+  `"use client"` component.
+
+### Fixed inline this branch
+- **P3-7 — RESOLVED.** Extracted the copy-pasted `verifyCronSecret` (16 routes) into one
+  `src/lib/cron-auth.ts` helper: fail-closed on missing `CRON_SECRET` (caught → 401, never a 500
+  "Bearer undefined") + length-guarded `crypto.timingSafeEqual`. New cron/public routes opt in by
+  import, so "is this route authenticated?" has a single answer. 16 call sites migrated; `tsc` +
+  1294 tests pass.
+- **P2-4 (paid-route subset) — RESOLVED.** Added `isAdmin()` to `src/lib/auth.ts` (strict
+  `=== "admin"`) and gated the two paid Anthropic routes that lacked a role check —
+  `/api/import/generate` and `/api/blog/generate` (session path; the cron Bearer path is
+  unchanged). The other paid routes already block `reviewer`. A reviewer session can no longer
+  trigger billable generation even if the `proxy.ts` reviewer allowlist later widens. **Note:**
+  `/api/import/push` and `/api/sync/trigger` (mutating, not paid) remain proxy-gated admin-only;
+  handler-level `isAdmin()` on those is still open as defense-in-depth.
+- **P2-A (`@anthropic-ai/sdk`) — RESOLVED.** Bumped `^0.82.0` → `^0.91.1`, clearing
+  GHSA-p7fg-763f-g4gf (the path — the Local Filesystem Memory Tool — is unused; app uses only
+  `messages.create`). Tight caret (`<0.92`) avoids the breaking `0.100.x` major. Both lockfiles
+  (`bun.lock`, `package-lock.json`) updated; `tsc` + full suite green.
+
+### Deferred (documented, not exploitable)
+- **P2-A (`undici` HIGH advisories) — DEFERRED, not reachable.** The vulnerable `undici`
+  (`>=7.23.0 <7.28.0`) is pulled only by `jsdom` — via `vitest` (dev) and `isomorphic-dompurify`,
+  whose **only** import is the `"use client"` `import/page.tsx`, so `jsdom` never loads in
+  production (browser DOMPurify uses the native DOM). `@vercel/blob` (production) resolves `undici`
+  **6.x** (`^6.23.0`), unaffected. A global `overrides` would force `undici` 7.x onto
+  `@vercel/blob`'s `^6` (breaking), and **bun does not support nested/scoped overrides**, so a
+  `jsdom`-scoped pin cannot be expressed in `bun.lock`. The HIGH advisories require `undici`'s
+  SOCKS5 `ProxyAgent` or WebSocket client — neither is used here. Revisit when `vitest` /
+  `isomorphic-dompurify` ship `jsdom` with `undici >= 7.28.0`.
+
+### Persistent (still open from prior audits, re-confirmed)
+- **P2-3** `postcss` XSS via Next.js (build-time transitive; bump Next minor).
+- **P3-1** LLM blog HTML not server-sanitized before Shopify post (inputs trusted today).
+- **P3-5 / P3-6** `/api/video-serve` `video_path` containment + redirect host-allowlist
+  (pipeline-set values, safe today).
+- **P3-8** Bump `isomorphic-dompurify` so bundled `dompurify` ≥3.4.0 (default-config `sanitize`,
+  safe today).
+
+---
 **Disclaimer:** `/cso` is an AI-assisted scan that catches common patterns. It is not a
 substitute for a professional penetration test. For production systems handling PII or
 payments, engage a qualified security firm.

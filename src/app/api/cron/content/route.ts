@@ -1,4 +1,4 @@
-import crypto from "crypto";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { env } from "@/lib/config";
 import { selectRandomTemplate } from "@/lib/content-template-selector";
@@ -16,13 +16,6 @@ type Language = "fr" | "en";
 type LangOutcome =
   | { language: Language; success: true; draftId: number; hookId: number | null }
   | { language: Language; success: false; error: string };
-
-function verifyCronSecret(header: string | null): boolean {
-  if (!header) return false;
-  const expected = `Bearer ${env.cronSecret}`;
-  if (header.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
-}
 
 /**
  * Generate one content draft in a single language by calling the generate
