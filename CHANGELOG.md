@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.175] - 2026-06-30
+
+### Fixed (scripts/_shopify-lib.mjs — stale theme constants)
+The shared Shopify helper carried **stale theme IDs**: `LIVE_THEME_ID = "160213696617"`
+and `PREVIEW_THEME_ID = "160059195497"`, neither of which is the current published theme.
+~40 `apply-*.mjs` scripts guard production with `if (THEME === LIVE_THEME_ID) throw
+"refusing to run against the LIVE theme"` — with a wrong `LIVE_THEME_ID`, that guard would
+**not** catch a write to the real live theme.
+- `LIVE_THEME_ID` → **`160584859753`** (verified `role:main` via `GET /themes.json`). The
+  production guard now protects the real live theme.
+- Added `DRAFT_THEME_ID = "160606093417"` (verified `role:unpublished`) — the active
+  working draft, the safe write target for new scripts.
+- `BACKUP_THEME_ID` (`160059195497`) and `PREVIEW_THEME_ID` (alias) kept unchanged for
+  backwards-compat with existing importers; `getAsset`/`putAsset` defaults untouched.
+- Refreshed the header comment with the real theme roles as of 2026-06-30.
+
 ## [0.5.53.174] - 2026-06-30
 
 ### Fixed (draft theme mobile issues — draft 160606093417 only, live 160584859753 untouched)
