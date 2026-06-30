@@ -258,7 +258,8 @@ async function main(): Promise<void> {
     }
 
     rows.push(row);
-    counts[action === "ERROR" ? "ERROR" : action]++;
+    // Count by the row's final action: a SWAP whose PUT failed above is now ERROR.
+    counts[row.action]++;
     if (n % 100 === 0) console.log(`  …${n}/${products.length}  (OK=${counts.OK} SWAP=${counts.SWAP} NO_MATCH=${counts.NO_MATCH} ERR=${counts.ERROR})`);
   }
 
