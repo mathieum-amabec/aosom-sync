@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.174] - 2026-06-30
+## [0.5.53.175] - 2026-06-30
 
 ### Changed (full FR ameublo slideshow regeneration on the bilingual engine)
 - **Regenerated the complete FR ameublo slideshow batch** — 40 videos across 42
@@ -18,6 +18,34 @@ All notable changes to Aosom Sync will be documented in this file.
 - **No code change in this release** — the `flagValue` parser fix (`--flag=value` as
   well as `--flag value`) requested for the regeneration was already shipped in
   `0.5.53.173` (#308). This is a release marker documenting the regeneration.
+
+## [0.5.53.174] - 2026-06-30
+
+### Fixed (draft theme mobile issues — draft 160606093417 only, live 160584859753 untouched)
+Four issues fixed on the **draft** theme `160606093417`. All writes via Shopify Admin
+API to `27u5y2-kp.myshopify.com`; the live theme `160584859753` was verified unchanged
+before/after (`templates/index.json` updated_at stayed `2026-06-28T21:31:07-04:00`).
+- **P1 — Hero "Magasinez maintenant" CTA dead anchor**: the CTA already targeted
+  `#categories`, but the `cat_tiles` section rendered no matching element, so the scroll
+  went nowhere. Added `id="categories"` (+ `scroll-margin-top:100px` for the sticky
+  header) to the `cat_tiles` wrapper in `templates/index.json`.
+- **P2 — /collections/rabais had no category filter**: prepended a conditional
+  `quick-cat-banner` (`collection.handle == 'rabais'`) to
+  `sections/main-collection-product-grid.liquid`, mirroring the existing /collections/all
+  banner. Six navy category pills (Meubles, Extérieur, Électro & Tech, Animaux, Enfants,
+  Sports & Loisirs) → `/collections/{handle}?sort_by=price-ascending`, plus a gold
+  `--promo` Rabais pill. Same CSS as the existing banner.
+- **P3 — branded supplier video in "Voyez-le chez vous"**: removed the
+  `poussette-pliable-pour-grands-chiens` block (PawHut-branded `D00-210V00CG-PawHut-WEB.mp4`)
+  from `sections/home-video-showcase.liquid`. Three Outsunny patio/gazebo videos remain.
+- **P4 — subcategory navigation**: verified, no change needed. The draft header
+  (`menu: taxonomie-categories`, `menu_type_desktop: mega`) already exposes all
+  sub-categories via the mega-menu for the 7 parents that have them (Meubles 7,
+  Extérieur 9, Animaux 4, Enfants 3, Bureau 3, Sports 4, Électro 2); Bricolage & Santé
+  have no sub-categories by design.
+
+This PR is the record; the live artifacts are the draft-theme assets already written via
+`scripts/draft-theme-fix-*.mjs`. Merging deploys nothing to Shopify.
 
 ## [0.5.53.173] - 2026-06-30
 
@@ -40,7 +68,6 @@ All notable changes to Aosom Sync will be documented in this file.
   **`--store=furnish` (EN)** flag drives brand + overlay/caption/hook language; flags now
   accept `--name=value` as well as `--name value`; `--dry-run` accepted explicitly. Overlay
   text picks `title_fr` (FR) or `title_en` (EN) per store.
-
 
 ## [0.5.53.172] - 2026-06-28
 
