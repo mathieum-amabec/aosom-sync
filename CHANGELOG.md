@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.174] - 2026-06-30
+
+### Changed (full FR ameublo slideshow regeneration on the bilingual engine)
+- **Regenerated the complete FR ameublo slideshow batch** — 40 videos across 42
+  series (2 remix series skipped: 0 clips) via local FFmpeg, uploaded to the public
+  Blob store, enqueued as `status='draft'` (queueIds **#222–#261**). All overlays now
+  carry the curated **French** Shopify titles thanks to the bilingual title engine
+  shipped in `0.5.53.173` (#308); the prior drafts had rendered the raw English
+  `products.name`.
+- The batch's `enqueueDraft` cancel-then-insert replaced every prior same-`content_id`
+  draft; **2 stale `showcase-*` orphans** (#181, #182, SKUs no longer in the top-5
+  rotation, English-titled) were cancelled explicitly so the queue holds exactly the
+  40 fresh FR videos.
+- **No code change in this release** — the `flagValue` parser fix (`--flag=value` as
+  well as `--flag value`) requested for the regeneration was already shipped in
+  `0.5.53.173` (#308). This is a release marker documenting the regeneration.
+
 ## [0.5.53.173] - 2026-06-30
 
 ### Fixed (slideshow overlays showed English titles — bilingual `--store`)
