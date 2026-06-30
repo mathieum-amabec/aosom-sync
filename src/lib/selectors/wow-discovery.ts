@@ -7,7 +7,7 @@
  */
 import { cached, cacheKey } from "./cache";
 import { getSelectorDb } from "./db";
-import { productColumns, rowToProductItem, hydrateImages } from "./map";
+import { productColumns, rowToProductItem, hydrateItems } from "./map";
 import type { ProductItem, SelectorOptions } from "./types";
 
 type WowStrategy = "margin" | "new" | "random";
@@ -23,6 +23,7 @@ export async function wowDiscovery(
     strategy: opts.strategy,
     limit,
     windowDays,
+    language: opts.language,
     resolveImages: opts.resolveImages,
   });
 
@@ -60,6 +61,6 @@ export async function wowDiscovery(
 
     const result = await db.execute({ sql, args });
     const items = result.rows.map(rowToProductItem);
-    return hydrateImages(items, opts);
+    return hydrateItems(items, opts);
   });
 }

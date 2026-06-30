@@ -8,6 +8,7 @@ import { cached, cacheKey } from "./cache";
 import { getSelectorDb } from "./db";
 import { productColumns, rowToProductItem } from "./map";
 import { resolveProductImages } from "./shopify-images";
+import { resolveProductTitleFr } from "./shopify-titles";
 import type { ProductItem } from "./types";
 
 export async function bestSellerImageSeries(
@@ -24,6 +25,12 @@ export async function bestSellerImageSeries(
     if (result.rows.length === 0) return null;
 
     const item = rowToProductItem(result.rows[0]);
+    // Showcase is always the FR (ameublo) brand: overwrite the English catalog
+    // `name` with the live Shopify FR title (fallback to the name when absent).
+    if (item.shopify_product_id) {
+      const fr = await resolveProductTitleFr(item.shopify_product_id);
+      if (fr) item.title_fr = fr;
+    }
     const allImages = item.shopify_product_id
       ? await resolveProductImages(item.shopify_product_id)
       : [];

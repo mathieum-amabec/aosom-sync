@@ -20,7 +20,7 @@
  * Run under x64 Node (libsql/sharp/ffmpeg-static have no win-arm64 build), with
  * prod creds from .env.local, THROUGH the tsx CLI:
  *
- *   # dry-run (default — selects + prints, renders/writes nothing):
+ *   # dry-run (default — selects + prints + resolves titles, renders/writes nothing):
  *   node-x64 --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/generate-slideshow-batch.mts
  *   # render everything, upload to Blob, create draft queue rows:
  *   …node_modules/tsx/dist/cli.mjs scripts/generate-slideshow-batch.mts --apply
@@ -28,12 +28,27 @@
  *   …generate-slideshow-batch.mts --series rabais-top5-1
  *   …generate-slideshow-batch.mts --apply --limit 3
  *
+ * STORE / LANGUAGE: --store=ameublo (default → FR) or --store=furnish (→ EN) sets
+ * the brand identity AND the overlay/caption/hook language. Flags accept both
+ * `--name value` and `--name=value`.
+ *
+ * TITLES: the catalog `products.name` is the RAW ENGLISH Aosom title. For the FR
+ * store the live Shopify product title (curated French) is resolved per product
+ * (selectors → shopify-titles.ts) and used for the overlay; furnish keeps the
+ * English name. Title resolution runs in the dry-run too (lightweight, cached).
+ *
  * IMAGES: only cdn.shopify.com images are used (the catalog's Aosom-CDN URLs 403
  * the render workers). A product with no Shopify-CDN image is skipped + warned.
  */
 import { createClient } from "@libsql/client";
 import type { ProductItem } from "@/lib/selectors/types";
-import type { SlideshowTemplate, SlideshowItem, SlideshowRatio } from "@/lib/slideshow/types";
+import type {
+  SlideshowTemplate,
+  SlideshowItem,
+  SlideshowRatio,
+  SlideshowBrand,
+  SlideshowLanguage,
+} from "@/lib/slideshow/types";
 import type { RemixClip } from "@/lib/slideshow/remix";
 
 /** Cast a template literal to the nominal enum type (runtime value is the string). */
@@ -116,16 +131,28 @@ interface ReportRow {
 
 // ── CLI ──────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
-const APPLY = argv.includes("--apply");
+// --dry-run is the DEFAULT (selects + prints, writes nothing); --apply opts into
+// render + upload + queue. An explicit --dry-run always wins over --apply.
+const APPLY = argv.includes("--apply") && !argv.includes("--dry-run");
+/** Read `--name value` OR `--name=value`. Returns null when absent/empty. */
 const flagValue = (name: string): string | null => {
+  const eq = argv.find((a) => a.startsWith(`${name}=`));
+  if (eq) return eq.slice(name.length + 1) || null;
   const i = argv.indexOf(name);
   return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[i + 1] : null;
 };
 const ONLY_SERIES = flagValue("--series");
 const SERIES_LIMIT = flagValue("--limit") ? Number(flagValue("--limit")) : null;
 
-const BRAND = "ameublo" as const;
-const LANGUAGE = "fr" as const;
+// --store selects the brand identity AND the overlay/caption/hook language:
+//   ameublo → FR (live Shopify FR titles)  |  furnish → EN (catalog English name).
+const STORE = flagValue("--store") ?? "ameublo";
+if (STORE !== "ameublo" && STORE !== "furnish") {
+  console.error(`Invalid --store '${STORE}'. Use --store=ameublo (FR) or --store=furnish (EN).`);
+  process.exit(1);
+}
+const BRAND: SlideshowBrand = STORE;
+const LANGUAGE: SlideshowLanguage = STORE === "furnish" ? "en" : "fr";
 
 // ── Static series config (showcase is generated dynamically below) ─────────
 function range(a: number, b: number): number[] {
@@ -285,11 +312,21 @@ async function selectForSeries(series: Series, resolveImages: boolean, lib: Lib)
   }
 }
 
+/**
+ * Overlay title for the active store language: FR (ameublo) uses the resolved
+ * Shopify `title_fr`, EN (furnish) uses `title_en` (the catalog English name).
+ * Falls back across the other field then to the SKU.
+ */
+function titleForLang(p: { title_fr?: string; title_en?: string; sku?: string }): string {
+  const primary = LANGUAGE === "en" ? p.title_en : p.title_fr;
+  return (primary || p.title_fr || p.title_en || p.sku || "").trim();
+}
+
 /** Map a ProductItem to a render-safe SlideshowItem (cdn.shopify image), or null. */
 function toSlide(p: ProductItem, lib: Lib): SlideshowItem | null {
   const image_url = p.images.find(lib.isShopifyCdnUrl);
   if (!image_url) return null;
-  return { image_url, overlay_text: p.title_fr || p.title_en || p.sku, price: p.price, compare_at: p.compare_at_price, sku: p.sku };
+  return { image_url, overlay_text: titleForLang(p), price: p.price, compare_at: p.compare_at_price, sku: p.sku };
 }
 
 /** Compute a tentative video slot + enqueue a draft row. Returns {queueId, scheduledAt} or null. */
@@ -368,7 +405,7 @@ async function fetchLifestyleHero(series: Series, lib: Lib): Promise<SlideshowIt
 
 // ── Main ─────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
-  console.log(`\n🎬 Slideshow batch — ${APPLY ? "APPLY (render + upload + draft rows)" : "DRY-RUN (no render, no writes)"}\n`);
+  console.log(`\n🎬 Slideshow batch — store=${BRAND} (${LANGUAGE.toUpperCase()}) — ${APPLY ? "APPLY (render + upload + draft rows)" : "DRY-RUN (no render, no writes)"}\n`);
   const lib = await loadLib();
 
   // Resolve the dynamic showcase series (top 5 SKUs by 14-day velocity).
@@ -409,7 +446,7 @@ async function main(): Promise<void> {
       console.log(`    🎬 Hook: "${previewHook(series, lib)}"${series.hook === "lifestyle" ? `  (+ hero Unsplash: ${series.unsplashQuery})` : ""}`);
       products.forEach((p, i) => {
         const disc = typeof p.discount_pct === "number" && p.discount_pct >= 10 ? `  -${p.discount_pct}%` : "";
-        console.log(`    ${i + 1}. ${String(p.sku).padEnd(14)} ${Number(p.price).toFixed(2)}$${disc}  ${p.title_fr ?? ""}`);
+        console.log(`    ${i + 1}. ${String(p.sku).padEnd(14)} ${Number(p.price).toFixed(2)}$${disc}  ${titleForLang(p)}`);
       });
       if (products.length === 0) { report.push({ id: series.id, type: series.type, count: 0, status: "skip (no products)" }); continue; }
 
@@ -424,7 +461,7 @@ async function main(): Promise<void> {
       if (series.type === "showcase") {
         const s = products[0] as ShowcaseProduct;
         const angles = (s?.allImages ?? []).filter(lib.isShopifyCdnUrl);
-        slides = angles.slice(0, 8).map((image_url) => ({ image_url, overlay_text: s.title_fr || s.sku, price: s.price, compare_at: s.compare_at_price, sku: s.sku }));
+        slides = angles.slice(0, 8).map((image_url) => ({ image_url, overlay_text: titleForLang(s), price: s.price, compare_at: s.compare_at_price, sku: s.sku }));
         // The 8-slide cap is a deliberate trim, not a missing-image skip; only warn
         // about genuinely cdn-less angles. Suppress the generic skip warning below.
         candidateCount = slides.length;

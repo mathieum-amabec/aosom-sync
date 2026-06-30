@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.173] - 2026-06-30
+## [0.5.53.174] - 2026-06-30
 
 ### Fixed (draft theme mobile issues — draft 160606093417 only, live 160584859753 untouched)
 Four issues fixed on the **draft** theme `160606093417`. All writes via Shopify Admin
@@ -29,6 +29,28 @@ before/after (`templates/index.json` updated_at stayed `2026-06-28T21:31:07-04:0
 
 This PR is the record; the live artifacts are the draft-theme assets already written via
 `scripts/draft-theme-fix-*.mjs`. Merging deploys nothing to Shopify.
+
+## [0.5.53.173] - 2026-06-30
+
+### Fixed (slideshow overlays showed English titles — bilingual `--store`)
+- **Root cause**: `products.name` in the catalog is the RAW ENGLISH Aosom title, but
+  `selectors/map.ts` aliased it to BOTH `title_fr` and `title_en`, so every slideshow
+  overlay (and the 40 draft videos #174–213) rendered the English name even for the
+  French ameublo brand. The store is French-primary — the curated FR title lives only
+  on the live Shopify product.
+- **New `selectors/shopify-titles.ts`** — `resolveProductTitleFr(shopify_product_id)`
+  fetches the live Shopify product title (curated French) via
+  `GET /products/{id}.json?fields=title`, cached 5 min + throttled to ~2 req/s
+  (mirrors `shopify-images.ts`). Returns `""` on any failure → caller falls back to `name`.
+- **`selectors/map.ts`** — `hydrateImages` → **`hydrateItems`**: now also resolves the FR
+  title (when `language !== 'en'`) and writes it to `title_fr`, falling back to the English
+  `name`. Runs even in a dry-run (no images) so the real FR overlay text is surfaced.
+  `bestSellerImageSeries` (showcase) resolves the FR title too. `language` added to every
+  selector cache key so FR/EN don't share a cached result set.
+- **`scripts/generate-slideshow-batch.mts`** — new **`--store=ameublo` (FR, default)** /
+  **`--store=furnish` (EN)** flag drives brand + overlay/caption/hook language; flags now
+  accept `--name=value` as well as `--name value`; `--dry-run` accepted explicitly. Overlay
+  text picks `title_fr` (FR) or `title_en` (EN) per store.
 
 ## [0.5.53.172] - 2026-06-28
 
