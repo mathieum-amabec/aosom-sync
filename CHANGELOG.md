@@ -2,6 +2,34 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.172] - 2026-06-28
+
+### Added (taxonomie catégories complète + smart collections Shopify)
+Built a coherent 2-level category taxonomy from the real catalog's `product_type`
+(Google taxonomy) and provisioned it as Shopify smart collections. Store-level
+collections + the **draft** theme `160606093417` only; live theme `160584859753`
+was never touched.
+- **41 smart collections** created/updated (39 new, 2 updated: `electro-et-tech`,
+  `enfants`, + 1 rule fix). 9 parent categories (Meubles & Déco, Extérieur & Jardin,
+  Animaux, Enfants & Jouets, Bureau & Travail, Sports & Loisirs, Électro & Tech,
+  Bricolage & Outils, Santé & Beauté) + ~32 sub-categories. Each driven by a
+  `product_type contains "<branch>"` rule so future Aosom imports self-classify.
+- **Conflicts resolved**: air-conditioners/fans moved out of Meubles into Électro &
+  Tech (`contains "Home Furnishings" AND not_contains "Appliances"`); outdoor
+  furniture + patio chairs/tables merged under Extérieur & Jardin as non-redundant
+  sub-categories; Animaux split into Chiens/Chats/Petits animaux/Oiseaux; Meubles
+  split into Salon/Chambre/Cuisine/Rangement/Salle de bain/Décoration.
+- **Draft theme**: `cat_tiles` rebuilt to 8 parent tiles pointing at the new
+  collections; new Shopify menu `taxonomie-categories` (9 parents + subs) wired to
+  the draft header (theme-scoped). Live nav untouched.
+- **Coverage**: of 737 imported Shopify products, 86% fall in a parent and 85% in a
+  sub-category; orphan branches documented for future sub-category work.
+- **NBSP fix**: 12 `product_type` values carry a non-breaking space (U+00A0) in their
+  leaf; only `electro-petit-electromenager` needed an ASCII-safe condition
+  (`Appliances > Small`).
+- Full report: `docs/taxonomie-categories.md` (taxonomy tree, per-collection counts,
+  orphans, import recommendations).
+
 ## [0.5.53.171] - 2026-06-28
 
 ### Changed (homepage Option B final — preview theme 160584859753)
