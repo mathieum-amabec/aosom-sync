@@ -1,0 +1,59 @@
+{
+  "ts": null,
+  "store": "27u5y2-kp.myshopify.com",
+  "marked": [
+    {
+      "shopify_product_id": "7736539218025",
+      "skus": [
+        "84H-209V00YG",
+        "84H-209V00LG",
+        "84H-209V00BK",
+        "84H-209V00GN",
+        "84H-209V00DR"
+      ]
+    },
+    {
+      "shopify_product_id": "7751702610025",
+      "skus": [
+        "839-622V01CG"
+      ]
+    },
+    {
+      "shopify_product_id": "7752224604265",
+      "skus": [
+        "84G-230V00GN",
+        "84G-230V00GY",
+        "84G-230V00CW",
+        "84G-230V00BU",
+        "84G-230V00LG",
+        "84G-230V00CG"
+      ]
+    },
+    {
+      "shopify_product_id": "7752227815529",
+      "skus": [
+        "84G-351V00BU",
+        "84G-351V00BK",
+        "84G-351V00CG"
+      ]
+    },
+    {
+      "shopify_product_id": "7796432830569",
+      "skus": [
+        "84B-136WR"
+      ]
+    },
+    {
+      "shopify_product_id": "7798394749033",
+      "skus": [
+        "845-774V00CG"
+      ]
+    },
+    {
+      "shopify_product_id": "7798394912873",
+      "skus": [
+        "84K-241V00CG"
+      ]
+    }
+  ]
+}
