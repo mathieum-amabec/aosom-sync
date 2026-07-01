@@ -21,14 +21,14 @@
 844-793V00BK,7736555044969,"Clôture décorative de jardin 8 panneaux grille métal","Garden Fencing","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
 844-646V01BN,7736553177193,"Clôture jardin métal polyvalente 152 cm","Garden Fencing","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
 84J-211V00BK,7736576245865,"Écran intimité extérieur autoportant 120 x 174 cm","Outdoor Privacy Screen","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
-844-097,7736550850665,"Fontaine d'eau en bois 2 niveaux avec pompe électrique","Garden Fountains","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
-84J-183V80CG,7736576147561,"Fontaine d'eau extérieure 3 étages avec lumières LED et jardinière","Fontaine de jardin","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
-84J-184V80MX,7736576180329,"Fontaine d'eau extérieure 5 niveaux avec éclairage DEL 80 cm","Garden & Outdoor","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
+844-097,7736550850665,"Fontaine d'eau en bois 2 niveaux avec pompe électrique","Garden Fountains","(aucune)","Patio & Garden > Outdoor Décor",jardin-decoration,FIX
+84J-183V80CG,7736576147561,"Fontaine d'eau extérieure 3 étages avec lumières LED et jardinière","Fontaine de jardin","(aucune)","Patio & Garden > Outdoor Décor",jardin-decoration,FIX
+84J-184V80MX,7736576180329,"Fontaine d'eau extérieure 5 niveaux avec éclairage DEL 80 cm","Garden & Outdoor","(aucune)","Patio & Garden > Outdoor Décor",jardin-decoration,FIX
 845-040V01LG,7736556388457,"Jardinière surélevée acier galvanisé 120x120x30cm","Raised Garden Bed","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
 84H-077V00BK,7736572084329,"Jardinière surélevée avec treillis pour plantes grimpantes","Jardinière et Treillis","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
-B30-021BK,7736577228905,"Lampadaire Solaire 196cm Détecteur Mouvement Extérieur Noir","Outdoor Lighting","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
-842-135,7736550228073,"Lampadaire solaire LED 3 têtes avec jardinière","Outdoor Lighting","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
-866-066BK,7736577130601,"Lampe solaire tressée décorative extérieur LED automatique","Outdoor Lighting","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
+B30-021BK,7736577228905,"Lampadaire Solaire 196cm Détecteur Mouvement Extérieur Noir","Outdoor Lighting","(aucune)","Patio & Garden > Outdoor Lighting",jardin-eclairage,FIX
+842-135,7736550228073,"Lampadaire solaire LED 3 têtes avec jardinière","Outdoor Lighting","(aucune)","Patio & Garden > Outdoor Lighting",jardin-eclairage,FIX
+866-066BK,7736577130601,"Lampe solaire tressée décorative extérieur LED automatique","Outdoor Lighting","(aucune)","Patio & Garden > Outdoor Lighting",jardin-eclairage,FIX
 84J-037V00BK,7736575426665,"Panneau décoratif extérieur avec support autoportant","Garden & Patio","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
 84J-045V00BK,7736575557737,"Panneau décoratif extérieur avec support sur pied","Outdoor Privacy Screen","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
 84J-168V00BK,7736575787113,"Paravent extérieur décoratif métal 183 x 97 cm","Outdoor Privacy Screen","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
@@ -59,27 +59,27 @@ B30-021BK,7736577228905,"Lampadaire Solaire 196cm Détecteur Mouvement Extérieu
 845-402V00GN,7736562679913,"Serre Tunnel Protection Plantes 244 x 122 cm Portes Zippées","Garden Protection","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
 845-298V00WT,7736561074281,"Serre tunnel résistante vent 213 x 366 x 213 cm","Greenhouse","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
 84H-198V02GN,7736572444777,"Serre tunnel spacieuse avec filet d'ombrage 305 x 396 cm","Greenhouse","(aucune)","Patio & Garden > Lawn & Garden",jardin-jardinage,FIX
-84C-022V03CG,7736568971369,"Gazebo 10×13 pi avec Murs Moustiquaire - Tente de Jardin","Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-771V00CG,7736571494505,"Gazébo 3x3m Toit Dur Acier Galvanisé Cadre Aluminium Gris Foncé","Gazebos & Pergolas","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-762V00CG,7736571297897,"Gazébo à toit rigide 10x10 avec rideaux","Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-484V00CG,7736570478697,"Gazebo à toit rigide 4x3m avec rideaux et moustiquaires","Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-01-0865,7736546820201,"Gazebo à toit rigide polycarbonate 305 x 365 cm","Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-517V00CG,7736570609769,"Gazébo de jardin 10x10 pieds avec moustiquaire","Garden Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-710V00TK,7736571166825,"Gazebo de patio double toit 3x3.6m avec moustiquaire","Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-579V00LG,7736570904681,"Gazebo double toit avec panneaux écran 3x3m","Gazebos & Pergolas","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-290GY,7736570347625,"Gazebo extérieur double toit 305 x 396 cm","Gazebos & Pergolas","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-747V00CG,7736571199593,"Gazebo extérieur double toit avec rideaux et moustiquaire 10' x 12.5'","Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-771V01CG,7736571592809,"Gazebo Hardtop 10' x 12' Toit Acier Galvanisé Cadre Aluminium","Gazebos & Pergolas","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-750V00CG,7736537645161,"Gazébo patio double toit 3 x 3 m avec rangement","Patio Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-133V00CG,7736569987177,"Gazebo patio toit double moustiquaire 2,9m x 2,9m","Garden Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-546V00CG,7736570740841,"Gazebo toit rigide 10' x 10' polycarbonate double niveau","Outdoor Furniture","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-095V04CG,7736569626729,"Gazebo Toit Rigide 10x12 Cadre Aluminium Moustiquaire","Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-145V07LG,7736570183785,"Gazébo toit rigide 3x3,7m double niveau moustiquaire","Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-618V00WN,7736571101289,"Gazebo toit rigide 3x3m métal galvanisé rideaux moustiquaire","Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-770V00KK,7736571330665,"Gazebo toit rigide polycarbonate double 3m x 3,6m — Kaki","Gazebo","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-195V31GY,9365039677545,"Tente de jardin 3x3m double toit avec moustiquaire","(empty)","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-433V00WT,9359739650153,"Tente de Jardin Portable 3x3m Pliable Protection UV","(empty)","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
-84C-432V00WT,9369986465897,"Tente de réception portative avec pieds habillés — 274 cm","(empty)","(aucune)","Patio & Garden > Wedding & Events Tents",exterieur-gazebos-tentes,FIX
+84C-022V03CG,7736568971369,"Gazebo 10×13 pi avec Murs Moustiquaire - Tente de Jardin","Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-771V00CG,7736571494505,"Gazébo 3x3m Toit Dur Acier Galvanisé Cadre Aluminium Gris Foncé","Gazebos & Pergolas","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-762V00CG,7736571297897,"Gazébo à toit rigide 10x10 avec rideaux","Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-484V00CG,7736570478697,"Gazebo à toit rigide 4x3m avec rideaux et moustiquaires","Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+01-0865,7736546820201,"Gazebo à toit rigide polycarbonate 305 x 365 cm","Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-517V00CG,7736570609769,"Gazébo de jardin 10x10 pieds avec moustiquaire","Garden Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-710V00TK,7736571166825,"Gazebo de patio double toit 3x3.6m avec moustiquaire","Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-579V00LG,7736570904681,"Gazebo double toit avec panneaux écran 3x3m","Gazebos & Pergolas","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-290GY,7736570347625,"Gazebo extérieur double toit 305 x 396 cm","Gazebos & Pergolas","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-747V00CG,7736571199593,"Gazebo extérieur double toit avec rideaux et moustiquaire 10' x 12.5'","Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-771V01CG,7736571592809,"Gazebo Hardtop 10' x 12' Toit Acier Galvanisé Cadre Aluminium","Gazebos & Pergolas","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-750V00CG,7736537645161,"Gazébo patio double toit 3 x 3 m avec rangement","Patio Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-133V00CG,7736569987177,"Gazebo patio toit double moustiquaire 2,9m x 2,9m","Garden Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-546V00CG,7736570740841,"Gazebo toit rigide 10' x 10' polycarbonate double niveau","Outdoor Furniture","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-095V04CG,7736569626729,"Gazebo Toit Rigide 10x12 Cadre Aluminium Moustiquaire","Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-145V07LG,7736570183785,"Gazébo toit rigide 3x3,7m double niveau moustiquaire","Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-618V00WN,7736571101289,"Gazebo toit rigide 3x3m métal galvanisé rideaux moustiquaire","Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-770V00KK,7736571330665,"Gazebo toit rigide polycarbonate double 3m x 3,6m — Kaki","Gazebo","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-195V31GY,9365039677545,"Tente de jardin 3x3m double toit avec moustiquaire","(empty)","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-433V00WT,9359739650153,"Tente de Jardin Portable 3x3m Pliable Protection UV","(empty)","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
+84C-432V00WT,9369986465897,"Tente de réception portative avec pieds habillés — 274 cm","(empty)","(aucune)","Patio & Garden > Gazebos & Pergolas",gazebos-et-pergolas,FIX
 860-466V01GY,7736577097833,"Canapé patio 3 places rotin avec coussins","Outdoor Furniture","(aucune)","Patio & Garden > Patio Furniture",patio-mobilier,FIX
 841-158V00GY,7736549539945,"Ensemble de conversation extérieur 4 pièces en rotin","Patio Furniture","(aucune)","Patio & Garden > Patio Furniture",patio-mobilier,FIX
 84K-019V00GY,7736576344169,"Ensemble de meubles de patio 4 pièces avec coussins épais","Patio Furniture Sets","(aucune)","Patio & Garden > Patio Furniture",patio-mobilier,FIX
