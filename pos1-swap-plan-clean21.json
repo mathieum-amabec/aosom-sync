@@ -1,0 +1,2315 @@
+[
+  {
+    "id": 9364962410601,
+    "handle": "arbres-artificiels-lavande-ensemble-2-pots",
+    "title": "Arbres artificiels lavande ensemble 2 boules fleuries",
+    "image_count": 7,
+    "confidence": 0.97,
+    "hero_image_id": 35696871571561,
+    "hero_current_position": 2,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35696871735401,
+        "filename": "qDC24619e72017e51.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35696871571561,
+        "filename": "gP593f19e72017e51.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35696871604329,
+        "filename": "iuj53d19e72017e51.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35696871637097,
+        "filename": "pod24919e72017e51.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35696871669865,
+        "filename": "qpDdff19e72017e51.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35696871702633,
+        "filename": "WWvae219e72017e51.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35696871768169,
+        "filename": "W6o83d19e72017e51.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35696871571561,
+        "filename": "gP593f19e72017e51.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35696871735401,
+        "filename": "qDC24619e72017e51.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35696871604329,
+        "filename": "iuj53d19e72017e51.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35696871637097,
+        "filename": "pod24919e72017e51.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35696871669865,
+        "filename": "qpDdff19e72017e51.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35696871702633,
+        "filename": "WWvae219e72017e51.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35696871768169,
+        "filename": "W6o83d19e72017e51.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9364962410601/images/35696871571561.json",
+      "body": {
+        "image": {
+          "id": 35696871571561,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 7736576311401,
+    "handle": "arche-de-jardin-8-pi-treillis-noir-pour-plantes-grimpantes",
+    "title": "Arche de jardin 8 pieds treillis métal plantes grimpantes",
+    "image_count": 7,
+    "confidence": 0.97,
+    "hero_image_id": 35252752777321,
+    "hero_current_position": 3,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35252752711785,
+        "filename": "FCj16c19ca029b975_30acb58f-b05b-45fc-8f78-b4a6fa0fbd76.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35252752744553,
+        "filename": "5jh2f219ca029b975_721eb6cb-838e-4987-a21c-b7df9f26347c.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35252752777321,
+        "filename": "X2O3f519ca029b975_6aa59747-69dd-4cae-9f55-1a5ab0afa674.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35252752810089,
+        "filename": "iGlf1c19ca029b975_8db0414b-f741-4c00-a56c-af6ddd1ea4a2.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35252752842857,
+        "filename": "VgSa9919ca029b975_38da3ebf-28eb-4f74-8312-ac84c3576ef5.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35252752875625,
+        "filename": "8193b319ca029b975_21e3058e-25c7-4838-958f-a5c61f606cbf.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35252752908393,
+        "filename": "PbZ26219ca029b975_74258b10-154e-4778-812c-ca4ea6dc802b.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35252752777321,
+        "filename": "X2O3f519ca029b975_6aa59747-69dd-4cae-9f55-1a5ab0afa674.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35252752711785,
+        "filename": "FCj16c19ca029b975_30acb58f-b05b-45fc-8f78-b4a6fa0fbd76.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35252752744553,
+        "filename": "5jh2f219ca029b975_721eb6cb-838e-4987-a21c-b7df9f26347c.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35252752810089,
+        "filename": "iGlf1c19ca029b975_8db0414b-f741-4c00-a56c-af6ddd1ea4a2.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35252752842857,
+        "filename": "VgSa9919ca029b975_38da3ebf-28eb-4f74-8312-ac84c3576ef5.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35252752875625,
+        "filename": "8193b319ca029b975_21e3058e-25c7-4838-958f-a5c61f606cbf.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35252752908393,
+        "filename": "PbZ26219ca029b975_74258b10-154e-4778-812c-ca4ea6dc802b.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/7736576311401/images/35252752777321.json",
+      "body": {
+        "image": {
+          "id": 35252752777321,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9365035843689,
+    "handle": "base-parasol-ronde-roues",
+    "title": "Base de parasol ronde 52 cm avec roues",
+    "image_count": 7,
+    "confidence": 0.98,
+    "hero_image_id": 35825577787497,
+    "hero_current_position": 3,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35825577721961,
+        "filename": "6eb49319d3453b380_79c24607-7ae8-48ce-8526-04bddfd49f0b.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35825577754729,
+        "filename": "4myf4119d3453b380_666cc8f9-ec27-4213-8ed0-5c4adb2c67c0.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35825577787497,
+        "filename": "IF37a519494ae824a_066ba834-7725-4234-af62-23dab7fa78bb.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35825577820265,
+        "filename": "bzL29e19494ae824a_1e0e9ab7-d5fd-4ee5-a3c7-90fed75144d4.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35825577853033,
+        "filename": "CJG2e819d3453b380_8b442954-7066-4692-9f84-f3574e99e136.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35825577885801,
+        "filename": "NZz42119494ae824a_302ac9d6-6f4e-45eb-86c3-8d90473e565b.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35825577918569,
+        "filename": "mtQf371969f5df27b_ca3f1ae1-230a-4336-96a0-8f55095495e6.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35825577787497,
+        "filename": "IF37a519494ae824a_066ba834-7725-4234-af62-23dab7fa78bb.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35825577721961,
+        "filename": "6eb49319d3453b380_79c24607-7ae8-48ce-8526-04bddfd49f0b.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35825577754729,
+        "filename": "4myf4119d3453b380_666cc8f9-ec27-4213-8ed0-5c4adb2c67c0.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35825577820265,
+        "filename": "bzL29e19494ae824a_1e0e9ab7-d5fd-4ee5-a3c7-90fed75144d4.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35825577853033,
+        "filename": "CJG2e819d3453b380_8b442954-7066-4692-9f84-f3574e99e136.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35825577885801,
+        "filename": "NZz42119494ae824a_302ac9d6-6f4e-45eb-86c3-8d90473e565b.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35825577918569,
+        "filename": "mtQf371969f5df27b_ca3f1ae1-230a-4336-96a0-8f55095495e6.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9365035843689/images/35825577787497.json",
+      "body": {
+        "image": {
+          "id": 35825577787497,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 7751791902825,
+    "handle": "classeur-mobile-3-tiroirs-avec-roulettes-rangement-bureau",
+    "title": "Classeur mobile 3 tiroirs avec roulettes",
+    "image_count": 14,
+    "confidence": 0.97,
+    "hero_image_id": 35768876302441,
+    "hero_current_position": 4,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35768876466281,
+        "filename": "DnH16c19a4de58228.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35768876236905,
+        "filename": "Afkba6197e5849fe3_7b52e353-f0fe-40a0-a16b-1e168a69f1c7.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35768876269673,
+        "filename": "I7ge4619492c11b73_fa54208d-877e-4089-8554-9aaaf03be8d1.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35768876302441,
+        "filename": "U4iffc19492c11b73_63819dc4-459f-44b0-98be-947a1d2672bf.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35768876335209,
+        "filename": "sI699b19492c11b73_09b1bf8e-132f-4222-b0bf-76ec2eed9bdd.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35768876367977,
+        "filename": "icoccc19492c11b73_041b3b52-b422-4c2c-b717-e0a6acb4b62e.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35768876400745,
+        "filename": "VJJ28719492c11b73_68708f2d-6e3b-4d43-b688-b3af1424fc04.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35768876433513,
+        "filename": "l1W75619a4deb9cca_f596b83a-cd6b-49da-b39d-60716df90c6e.jpg"
+      },
+      {
+        "position": 9,
+        "image_id": 35768876499049,
+        "filename": "F6t3c719a4de5c524.jpg"
+      },
+      {
+        "position": 10,
+        "image_id": 35768876531817,
+        "filename": "cNfade19942514cde.jpg"
+      },
+      {
+        "position": 11,
+        "image_id": 35768876564585,
+        "filename": "0P209719942514cde.jpg"
+      },
+      {
+        "position": 12,
+        "image_id": 35768876597353,
+        "filename": "kmh00b19942514cde.jpg"
+      },
+      {
+        "position": 13,
+        "image_id": 35768876630121,
+        "filename": "n5r4f019942514cde.jpg"
+      },
+      {
+        "position": 14,
+        "image_id": 35768876662889,
+        "filename": "xWX98719942514cde.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35768876302441,
+        "filename": "U4iffc19492c11b73_63819dc4-459f-44b0-98be-947a1d2672bf.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35768876466281,
+        "filename": "DnH16c19a4de58228.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35768876236905,
+        "filename": "Afkba6197e5849fe3_7b52e353-f0fe-40a0-a16b-1e168a69f1c7.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35768876269673,
+        "filename": "I7ge4619492c11b73_fa54208d-877e-4089-8554-9aaaf03be8d1.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35768876335209,
+        "filename": "sI699b19492c11b73_09b1bf8e-132f-4222-b0bf-76ec2eed9bdd.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35768876367977,
+        "filename": "icoccc19492c11b73_041b3b52-b422-4c2c-b717-e0a6acb4b62e.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35768876400745,
+        "filename": "VJJ28719492c11b73_68708f2d-6e3b-4d43-b688-b3af1424fc04.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35768876433513,
+        "filename": "l1W75619a4deb9cca_f596b83a-cd6b-49da-b39d-60716df90c6e.jpg"
+      },
+      {
+        "position": 9,
+        "image_id": 35768876499049,
+        "filename": "F6t3c719a4de5c524.jpg"
+      },
+      {
+        "position": 10,
+        "image_id": 35768876531817,
+        "filename": "cNfade19942514cde.jpg"
+      },
+      {
+        "position": 11,
+        "image_id": 35768876564585,
+        "filename": "0P209719942514cde.jpg"
+      },
+      {
+        "position": 12,
+        "image_id": 35768876597353,
+        "filename": "kmh00b19942514cde.jpg"
+      },
+      {
+        "position": 13,
+        "image_id": 35768876630121,
+        "filename": "n5r4f019942514cde.jpg"
+      },
+      {
+        "position": 14,
+        "image_id": 35768876662889,
+        "filename": "xWX98719942514cde.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/7751791902825/images/35768876302441.json",
+      "body": {
+        "image": {
+          "id": 35768876302441,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 7750890225769,
+    "handle": "table-console-102cm-a-2-niveaux-design-x",
+    "title": "Console 40po design X rangement 2 niveaux",
+    "image_count": 7,
+    "confidence": 0.97,
+    "hero_image_id": 35724820611177,
+    "hero_current_position": 3,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35724820545641,
+        "filename": "GkNd9c1983ffa0729_2fa6bbfb-d167-445f-ab90-c860b80cfb32.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35724820578409,
+        "filename": "RI9182198950a4be0_a4f3c019-0f20-4912-8c6c-6e0a5081caf9.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35724820611177,
+        "filename": "yWo5141987a56c644_ad3cc4e7-762a-45a9-a2be-3ae5abd46dc2.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35724820643945,
+        "filename": "HBy1aa19835fefff6_e7108f54-148d-48c1-8771-f7f89d5fe340.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35724820676713,
+        "filename": "5PS31619835fefff6_331f2e83-5e74-4275-9e6e-39586063d539.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35724820709481,
+        "filename": "LuK97419835fefff6_643dbb92-449d-46f2-872d-49b0d8f372c8.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35724820742249,
+        "filename": "KE542c19835fefff6_bed57b5c-da84-4d30-a22c-527d18fa7296.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35724820611177,
+        "filename": "yWo5141987a56c644_ad3cc4e7-762a-45a9-a2be-3ae5abd46dc2.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35724820545641,
+        "filename": "GkNd9c1983ffa0729_2fa6bbfb-d167-445f-ab90-c860b80cfb32.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35724820578409,
+        "filename": "RI9182198950a4be0_a4f3c019-0f20-4912-8c6c-6e0a5081caf9.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35724820643945,
+        "filename": "HBy1aa19835fefff6_e7108f54-148d-48c1-8771-f7f89d5fe340.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35724820676713,
+        "filename": "5PS31619835fefff6_331f2e83-5e74-4275-9e6e-39586063d539.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35724820709481,
+        "filename": "LuK97419835fefff6_643dbb92-449d-46f2-872d-49b0d8f372c8.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35724820742249,
+        "filename": "KE542c19835fefff6_bed57b5c-da84-4d30-a22c-527d18fa7296.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/7750890225769/images/35724820611177.json",
+      "body": {
+        "image": {
+          "id": 35724820611177,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9376662650985,
+    "handle": "ensemble-halteres-hexagonaux-avec-support-45kg",
+    "title": "Ensemble d'haltères hexagonaux avec support 45 kg",
+    "image_count": 7,
+    "confidence": 0.92,
+    "hero_image_id": 35859928449129,
+    "hero_current_position": 4,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35859928350825,
+        "filename": "sHi09c1975ec3de09.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35859928383593,
+        "filename": "LJz9731975ec3de09.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35859928416361,
+        "filename": "qVD1de1975ec3de09.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35859928449129,
+        "filename": "I5h9921975ec3de09.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35859928481897,
+        "filename": "B5Aed11975ec3de09.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35859928514665,
+        "filename": "r2f21f1975ec3de09.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35859928547433,
+        "filename": "76329f1975ec3de09.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35859928449129,
+        "filename": "I5h9921975ec3de09.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35859928350825,
+        "filename": "sHi09c1975ec3de09.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35859928383593,
+        "filename": "LJz9731975ec3de09.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35859928416361,
+        "filename": "qVD1de1975ec3de09.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35859928481897,
+        "filename": "B5Aed11975ec3de09.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35859928514665,
+        "filename": "r2f21f1975ec3de09.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35859928547433,
+        "filename": "76329f1975ec3de09.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9376662650985/images/35859928449129.json",
+      "body": {
+        "image": {
+          "id": 35859928449129,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 7736576442473,
+    "handle": "ensemble-de-patio-rotin-6-pieces-mobilier-exterieur-bleu-marine",
+    "title": "Ensemble de patio sectionnel rotin 6 pièces avec table",
+    "image_count": 28,
+    "confidence": 0.97,
+    "hero_image_id": 35252668334185,
+    "hero_current_position": 2,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35252668792937,
+        "filename": "RLt69b19a28944ab9.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35252668334185,
+        "filename": "oeE35e19494d46938_e01826f6-81df-4c48-96a4-ebbee3d666fe.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35252668366953,
+        "filename": "oN6c7719494d46938_f87ca7e4-e8bc-4d2a-bd81-4318cdc9b42d.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35252668399721,
+        "filename": "pAVc17195f148f59f_07e190f1-30b7-4a0f-8282-a04970464848.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35252668432489,
+        "filename": "200407196b36d6ebf_fe899543-8715-4d33-b640-f0e1b0a0654c.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35252668465257,
+        "filename": "G8ha6b19494d46938_68b56797-6afd-493b-b1bb-0caf0af5a1de.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35252668498025,
+        "filename": "5jHf6b19494d46938_4d8a962a-78e3-4bff-b7ca-d6e1b2347178.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35252668530793,
+        "filename": "eod12919494d46938_d1777752-04cf-47ea-b510-5cdc7be4ac77.jpg"
+      },
+      {
+        "position": 9,
+        "image_id": 35252668563561,
+        "filename": "OoW94e194932e81f9_151e10fa-196d-48f0-bf5f-d6ee43c23941.jpg"
+      },
+      {
+        "position": 10,
+        "image_id": 35252668596329,
+        "filename": "9eAd87194932e81f9_d34b9d56-1c7c-4513-bc54-d6525340cd1a.jpg"
+      },
+      {
+        "position": 11,
+        "image_id": 35252668629097,
+        "filename": "9B2a0919546154d06_b64314db-7697-4388-aaf2-f27670b857ce.jpg"
+      },
+      {
+        "position": 12,
+        "image_id": 35252668661865,
+        "filename": "hVN88c19546154d17_81a496f5-7284-444e-87f7-11f771da3e4a.jpg"
+      },
+      {
+        "position": 13,
+        "image_id": 35252668694633,
+        "filename": "4fKb1019546154cf4_7a9a69e9-9b84-43cb-bd13-f7c79365e08a.jpg"
+      },
+      {
+        "position": 14,
+        "image_id": 35252668727401,
+        "filename": "9FKaee1915015070b_c27b4237-abd1-4511-a822-9e16fd3375a5.jpg"
+      },
+      {
+        "position": 15,
+        "image_id": 35252668760169,
+        "filename": "i4p5b7194932e81f9_3a23c398-ccb4-403a-b8da-267ef1a10adf.jpg"
+      },
+      {
+        "position": 16,
+        "image_id": 35252668825705,
+        "filename": "18Tb5919a28944ab9.jpg"
+      },
+      {
+        "position": 17,
+        "image_id": 35252668858473,
+        "filename": "Yz2b9019a28944ab9.jpg"
+      },
+      {
+        "position": 18,
+        "image_id": 35252668891241,
+        "filename": "Neu11f19a28944ab9.jpg"
+      },
+      {
+        "position": 19,
+        "image_id": 35252668924009,
+        "filename": "7jUdb519a28944ab9.jpg"
+      },
+      {
+        "position": 20,
+        "image_id": 35252668956777,
+        "filename": "XU258119a28944ab9.jpg"
+      },
+      {
+        "position": 21,
+        "image_id": 35252668989545,
+        "filename": "iC4d5219a28944ab9.jpg"
+      },
+      {
+        "position": 22,
+        "image_id": 35252669022313,
+        "filename": "I8Bad019494545ccf_3da4d8bd-8e77-49da-972f-5ab9befb7fb0.jpg"
+      },
+      {
+        "position": 23,
+        "image_id": 35252669055081,
+        "filename": "ZJYf7f19494545ccf_05697c10-f65e-4fb0-944a-e71295475036.jpg"
+      },
+      {
+        "position": 24,
+        "image_id": 35252669087849,
+        "filename": "aMyda619494545ccf_1253d99e-ae7c-4314-ac22-1d17059c6f6b.jpg"
+      },
+      {
+        "position": 25,
+        "image_id": 35252669120617,
+        "filename": "xYC01e19494545ccf_58d8f630-5502-422e-a8b9-73306ad2fb1f.jpg"
+      },
+      {
+        "position": 26,
+        "image_id": 35252669153385,
+        "filename": "ySS75219494545ccf_4b91e62e-99be-4497-bacc-2aeddc0d2b76.jpg"
+      },
+      {
+        "position": 27,
+        "image_id": 35252669186153,
+        "filename": "jaC66b19494545ccf_4c28997b-f4be-4579-bb8a-cfca2c8e3683.jpg"
+      },
+      {
+        "position": 28,
+        "image_id": 35252669218921,
+        "filename": "d7A47a19494545ccf_0e44be67-19dd-4c18-b66e-c15c98cc5303.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35252668334185,
+        "filename": "oeE35e19494d46938_e01826f6-81df-4c48-96a4-ebbee3d666fe.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35252668792937,
+        "filename": "RLt69b19a28944ab9.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35252668366953,
+        "filename": "oN6c7719494d46938_f87ca7e4-e8bc-4d2a-bd81-4318cdc9b42d.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35252668399721,
+        "filename": "pAVc17195f148f59f_07e190f1-30b7-4a0f-8282-a04970464848.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35252668432489,
+        "filename": "200407196b36d6ebf_fe899543-8715-4d33-b640-f0e1b0a0654c.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35252668465257,
+        "filename": "G8ha6b19494d46938_68b56797-6afd-493b-b1bb-0caf0af5a1de.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35252668498025,
+        "filename": "5jHf6b19494d46938_4d8a962a-78e3-4bff-b7ca-d6e1b2347178.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35252668530793,
+        "filename": "eod12919494d46938_d1777752-04cf-47ea-b510-5cdc7be4ac77.jpg"
+      },
+      {
+        "position": 9,
+        "image_id": 35252668563561,
+        "filename": "OoW94e194932e81f9_151e10fa-196d-48f0-bf5f-d6ee43c23941.jpg"
+      },
+      {
+        "position": 10,
+        "image_id": 35252668596329,
+        "filename": "9eAd87194932e81f9_d34b9d56-1c7c-4513-bc54-d6525340cd1a.jpg"
+      },
+      {
+        "position": 11,
+        "image_id": 35252668629097,
+        "filename": "9B2a0919546154d06_b64314db-7697-4388-aaf2-f27670b857ce.jpg"
+      },
+      {
+        "position": 12,
+        "image_id": 35252668661865,
+        "filename": "hVN88c19546154d17_81a496f5-7284-444e-87f7-11f771da3e4a.jpg"
+      },
+      {
+        "position": 13,
+        "image_id": 35252668694633,
+        "filename": "4fKb1019546154cf4_7a9a69e9-9b84-43cb-bd13-f7c79365e08a.jpg"
+      },
+      {
+        "position": 14,
+        "image_id": 35252668727401,
+        "filename": "9FKaee1915015070b_c27b4237-abd1-4511-a822-9e16fd3375a5.jpg"
+      },
+      {
+        "position": 15,
+        "image_id": 35252668760169,
+        "filename": "i4p5b7194932e81f9_3a23c398-ccb4-403a-b8da-267ef1a10adf.jpg"
+      },
+      {
+        "position": 16,
+        "image_id": 35252668825705,
+        "filename": "18Tb5919a28944ab9.jpg"
+      },
+      {
+        "position": 17,
+        "image_id": 35252668858473,
+        "filename": "Yz2b9019a28944ab9.jpg"
+      },
+      {
+        "position": 18,
+        "image_id": 35252668891241,
+        "filename": "Neu11f19a28944ab9.jpg"
+      },
+      {
+        "position": 19,
+        "image_id": 35252668924009,
+        "filename": "7jUdb519a28944ab9.jpg"
+      },
+      {
+        "position": 20,
+        "image_id": 35252668956777,
+        "filename": "XU258119a28944ab9.jpg"
+      },
+      {
+        "position": 21,
+        "image_id": 35252668989545,
+        "filename": "iC4d5219a28944ab9.jpg"
+      },
+      {
+        "position": 22,
+        "image_id": 35252669022313,
+        "filename": "I8Bad019494545ccf_3da4d8bd-8e77-49da-972f-5ab9befb7fb0.jpg"
+      },
+      {
+        "position": 23,
+        "image_id": 35252669055081,
+        "filename": "ZJYf7f19494545ccf_05697c10-f65e-4fb0-944a-e71295475036.jpg"
+      },
+      {
+        "position": 24,
+        "image_id": 35252669087849,
+        "filename": "aMyda619494545ccf_1253d99e-ae7c-4314-ac22-1d17059c6f6b.jpg"
+      },
+      {
+        "position": 25,
+        "image_id": 35252669120617,
+        "filename": "xYC01e19494545ccf_58d8f630-5502-422e-a8b9-73306ad2fb1f.jpg"
+      },
+      {
+        "position": 26,
+        "image_id": 35252669153385,
+        "filename": "ySS75219494545ccf_4b91e62e-99be-4497-bacc-2aeddc0d2b76.jpg"
+      },
+      {
+        "position": 27,
+        "image_id": 35252669186153,
+        "filename": "jaC66b19494545ccf_4c28997b-f4be-4579-bb8a-cfca2c8e3683.jpg"
+      },
+      {
+        "position": 28,
+        "image_id": 35252669218921,
+        "filename": "d7A47a19494545ccf_0e44be67-19dd-4c18-b66e-c15c98cc5303.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/7736576442473/images/35252668334185.json",
+      "body": {
+        "image": {
+          "id": 35252668334185,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9367324360809,
+    "handle": "ensemble-table-chaises-enfant-parasol-coccinelle",
+    "title": "Ensemble table et chaises enfant avec parasol — Coccinelle",
+    "image_count": 7,
+    "confidence": 0.92,
+    "hero_image_id": 35721264595049,
+    "hero_current_position": 4,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35721264693353,
+        "filename": "TwVe1819e3a8a60fd.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35721264529513,
+        "filename": "D1p64a19057c799f5.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35721264562281,
+        "filename": "L8A2b119057c799f5.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35721264595049,
+        "filename": "0337b419496796fb8.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35721264627817,
+        "filename": "9r49fc19057c799f5.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35721264660585,
+        "filename": "D9ma6019057c799f5.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35721264726121,
+        "filename": "vAv15e19057c799f5.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35721264595049,
+        "filename": "0337b419496796fb8.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35721264693353,
+        "filename": "TwVe1819e3a8a60fd.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35721264529513,
+        "filename": "D1p64a19057c799f5.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35721264562281,
+        "filename": "L8A2b119057c799f5.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35721264627817,
+        "filename": "9r49fc19057c799f5.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35721264660585,
+        "filename": "D9ma6019057c799f5.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35721264726121,
+        "filename": "vAv15e19057c799f5.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9367324360809/images/35721264595049.json",
+      "body": {
+        "image": {
+          "id": 35721264595049,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9365034532969,
+    "handle": "parasol-marche-bambou-305-cm",
+    "title": "Parasol de marché rond bambou 305 cm",
+    "image_count": 7,
+    "confidence": 0.97,
+    "hero_image_id": 35697785765993,
+    "hero_current_position": 4,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35697785798761,
+        "filename": "9fuafe1971eed8727.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35697785700457,
+        "filename": "WGZ3f21903a3dedaf.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35697785733225,
+        "filename": "Yhkf011903a3dedaf.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35697785765993,
+        "filename": "CdWaf41949478e95f.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35697785831529,
+        "filename": "qjucc81903a3dedaf.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35697785864297,
+        "filename": "1xt86b1903a3dedaf.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35697785897065,
+        "filename": "rjt4061903a3dedaf.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35697785765993,
+        "filename": "CdWaf41949478e95f.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35697785798761,
+        "filename": "9fuafe1971eed8727.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35697785700457,
+        "filename": "WGZ3f21903a3dedaf.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35697785733225,
+        "filename": "Yhkf011903a3dedaf.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35697785831529,
+        "filename": "qjucc81903a3dedaf.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35697785864297,
+        "filename": "1xt86b1903a3dedaf.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35697785897065,
+        "filename": "rjt4061903a3dedaf.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9365034532969/images/35697785765993.json",
+      "body": {
+        "image": {
+          "id": 35697785765993,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9376663666793,
+    "handle": "parasol-patio-solaire-24-del-inclinable",
+    "title": "Parasol de patio solaire 24 DEL inclinable",
+    "image_count": 7,
+    "confidence": 0.98,
+    "hero_image_id": 35859970949225,
+    "hero_current_position": 2,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35859970916457,
+        "filename": "AHP44b18e7db54d6b.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35859970949225,
+        "filename": "pKLdf8194941d180b.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35859970981993,
+        "filename": "gQyee818e7db54d6b.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35859971014761,
+        "filename": "kn8b2e18e7db54d6b.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35859971047529,
+        "filename": "xGp0e818e7db54d6b.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35859971080297,
+        "filename": "Lgf23418e7db54d6b.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35859971113065,
+        "filename": "0eyb0418e7db54d6c.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35859970949225,
+        "filename": "pKLdf8194941d180b.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35859970916457,
+        "filename": "AHP44b18e7db54d6b.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35859970981993,
+        "filename": "gQyee818e7db54d6b.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35859971014761,
+        "filename": "kn8b2e18e7db54d6b.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35859971047529,
+        "filename": "xGp0e818e7db54d6b.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35859971080297,
+        "filename": "Lgf23418e7db54d6b.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35859971113065,
+        "filename": "0eyb0418e7db54d6c.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9376663666793/images/35859970949225.json",
+      "body": {
+        "image": {
+          "id": 35859970949225,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 7736575623273,
+    "handle": "paravent-exterieur-3-panneaux-pliable-176cm-uv30-gris-fonce",
+    "title": "Paravent extérieur pliable 3 panneaux 177 cm — Foncé",
+    "image_count": 11,
+    "confidence": 0.9,
+    "hero_image_id": 35126637723753,
+    "hero_current_position": 2,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35126637756521,
+        "filename": "KnC72a196390591fb.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35126637723753,
+        "filename": "yzyd5b196390591fb.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35126637789289,
+        "filename": "KoF944196390591fb.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35126637822057,
+        "filename": "eGN26e196390591fb.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35126637854825,
+        "filename": "VTa2ca196390591fb.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35126637887593,
+        "filename": "2i2355196390591fb.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35126637920361,
+        "filename": "vvAb13196390591fb.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35126637953129,
+        "filename": "aP1171196390591fb.jpg"
+      },
+      {
+        "position": 9,
+        "image_id": 35126637985897,
+        "filename": "tm4413196390591fb.jpg"
+      },
+      {
+        "position": 10,
+        "image_id": 35126638018665,
+        "filename": "0300cb196390591fb.jpg"
+      },
+      {
+        "position": 11,
+        "image_id": 35126638051433,
+        "filename": "mFpfe8196390591fb.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35126637723753,
+        "filename": "yzyd5b196390591fb.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35126637756521,
+        "filename": "KnC72a196390591fb.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35126637789289,
+        "filename": "KoF944196390591fb.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35126637822057,
+        "filename": "eGN26e196390591fb.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35126637854825,
+        "filename": "VTa2ca196390591fb.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35126637887593,
+        "filename": "2i2355196390591fb.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35126637920361,
+        "filename": "vvAb13196390591fb.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35126637953129,
+        "filename": "aP1171196390591fb.jpg"
+      },
+      {
+        "position": 9,
+        "image_id": 35126637985897,
+        "filename": "tm4413196390591fb.jpg"
+      },
+      {
+        "position": 10,
+        "image_id": 35126638018665,
+        "filename": "0300cb196390591fb.jpg"
+      },
+      {
+        "position": 11,
+        "image_id": 35126638051433,
+        "filename": "mFpfe8196390591fb.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/7736575623273/images/35126637723753.json",
+      "body": {
+        "image": {
+          "id": 35126637723753,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9369986170985,
+    "handle": "parc-chien-octogonal-8-panneaux-pliable",
+    "title": "Parc pour chien octogonal 8 panneaux pliable",
+    "image_count": 7,
+    "confidence": 0.97,
+    "hero_image_id": 35750387417193,
+    "hero_current_position": 4,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35750387449961,
+        "filename": "1sA0521980a558d6d.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35750387351657,
+        "filename": "RLo22a194961d334a.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35750387384425,
+        "filename": "yIq2d2194961d334a.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35750387417193,
+        "filename": "b6026e194961d334a.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35750387482729,
+        "filename": "a1h84019d73f5d9ab.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35750387515497,
+        "filename": "w6D882194961d334a.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35750387548265,
+        "filename": "gVfd8c194961d334a.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35750387417193,
+        "filename": "b6026e194961d334a.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35750387449961,
+        "filename": "1sA0521980a558d6d.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35750387351657,
+        "filename": "RLo22a194961d334a.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35750387384425,
+        "filename": "yIq2d2194961d334a.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35750387482729,
+        "filename": "a1h84019d73f5d9ab.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35750387515497,
+        "filename": "w6D882194961d334a.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35750387548265,
+        "filename": "gVfd8c194961d334a.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9369986170985/images/35750387417193.json",
+      "body": {
+        "image": {
+          "id": 35750387417193,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9371092648041,
+    "handle": "sapin-noel-artificiel-210cm-ornements",
+    "title": "Sapin de Noël artificiel 210 cm avec ornements",
+    "image_count": 7,
+    "confidence": 0.97,
+    "hero_image_id": 35764346159209,
+    "hero_current_position": 3,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35764346224745,
+        "filename": "dtQd7c1973fe14399.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35764346126441,
+        "filename": "oQ5f521973fe14399.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35764346159209,
+        "filename": "BR3ad21973fe14399.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35764346191977,
+        "filename": "Cgs23c1973fe14399.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35764346257513,
+        "filename": "MZ85c119d73d75605.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35764346290281,
+        "filename": "Pxpd911973fe14399.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35764346323049,
+        "filename": "nfI33b1973fe14399.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35764346159209,
+        "filename": "BR3ad21973fe14399.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35764346224745,
+        "filename": "dtQd7c1973fe14399.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35764346126441,
+        "filename": "oQ5f521973fe14399.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35764346191977,
+        "filename": "Cgs23c1973fe14399.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35764346257513,
+        "filename": "MZ85c119d73d75605.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35764346290281,
+        "filename": "Pxpd911973fe14399.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35764346323049,
+        "filename": "nfI33b1973fe14399.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9371092648041/images/35764346159209.json",
+      "body": {
+        "image": {
+          "id": 35764346159209,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9371092844649,
+    "handle": "sapin-noel-artificiel-enneige-mince-213cm",
+    "title": "Sapin de Noël artificiel enneigé mince 213 cm",
+    "image_count": 7,
+    "confidence": 0.98,
+    "hero_image_id": 35764348878953,
+    "hero_current_position": 3,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35764348911721,
+        "filename": "cJ14b81973ffdf89c.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35764348846185,
+        "filename": "VOJ4cf1973ffdf89c.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35764348878953,
+        "filename": "AWe8ad1973ffdf89c.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35764348944489,
+        "filename": "ac0b5519d3cea2365.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35764348977257,
+        "filename": "1ILd5b1973ffdf89c.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35764349010025,
+        "filename": "TGz41f1973ffdf89c.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35764349042793,
+        "filename": "hi245e1973ffdf89c.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35764348878953,
+        "filename": "AWe8ad1973ffdf89c.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35764348911721,
+        "filename": "cJ14b81973ffdf89c.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35764348846185,
+        "filename": "VOJ4cf1973ffdf89c.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35764348944489,
+        "filename": "ac0b5519d3cea2365.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35764348977257,
+        "filename": "1ILd5b1973ffdf89c.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35764349010025,
+        "filename": "TGz41f1973ffdf89c.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35764349042793,
+        "filename": "hi245e1973ffdf89c.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9371092844649/images/35764348878953.json",
+      "body": {
+        "image": {
+          "id": 35764348878953,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9371093008489,
+    "handle": "sapin-noel-crayon-artificiel-6pi",
+    "title": "Sapin de Noël crayon artificiel 6 pi",
+    "image_count": 8,
+    "confidence": 0.98,
+    "hero_image_id": 35764352942185,
+    "hero_current_position": 2,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35764353073257,
+        "filename": "irN09e197f0cdf0c7.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35764352942185,
+        "filename": "Oon42219496f9d794.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35764352974953,
+        "filename": "NEMecd19495c238fe.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35764353007721,
+        "filename": "IzSc8219495c238fe.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35764353040489,
+        "filename": "YTk56519496f9d794.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35764353106025,
+        "filename": "URFc821990f93f556.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35764353138793,
+        "filename": "km58b619496f9d794.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35764353171561,
+        "filename": "H2767819496f9d794.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35764352942185,
+        "filename": "Oon42219496f9d794.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35764353073257,
+        "filename": "irN09e197f0cdf0c7.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35764352974953,
+        "filename": "NEMecd19495c238fe.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35764353007721,
+        "filename": "IzSc8219495c238fe.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35764353040489,
+        "filename": "YTk56519496f9d794.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35764353106025,
+        "filename": "URFc821990f93f556.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35764353138793,
+        "filename": "km58b619496f9d794.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35764353171561,
+        "filename": "H2767819496f9d794.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9371093008489/images/35764352942185.json",
+      "body": {
+        "image": {
+          "id": 35764352942185,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9371092942953,
+    "handle": "sapin-noel-crayon-enneige-183cm-517-branches",
+    "title": "Sapin de Noël crayon enneigé 517 branches — Vert",
+    "image_count": 8,
+    "confidence": 0.98,
+    "hero_image_id": 35764349927529,
+    "hero_current_position": 3,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35764350058601,
+        "filename": "263de4194959e3e33.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35764349894761,
+        "filename": "xAya11194959e3e33.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35764349927529,
+        "filename": "SCuf47194959e3e33.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35764349960297,
+        "filename": "iM3c24194939c7e48.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35764349993065,
+        "filename": "cQTc9f194939c7e48.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35764350025833,
+        "filename": "ADMa3d194939c7e48.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35764350091369,
+        "filename": "oqIbb61994de776bf.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35764350124137,
+        "filename": "Ws19e6194959e3e33.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35764349927529,
+        "filename": "SCuf47194959e3e33.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35764350058601,
+        "filename": "263de4194959e3e33.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35764349894761,
+        "filename": "xAya11194959e3e33.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35764349960297,
+        "filename": "iM3c24194939c7e48.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35764349993065,
+        "filename": "cQTc9f194939c7e48.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35764350025833,
+        "filename": "ADMa3d194939c7e48.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35764350091369,
+        "filename": "oqIbb61994de776bf.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35764350124137,
+        "filename": "Ws19e6194959e3e33.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9371092942953/images/35764349927529.json",
+      "body": {
+        "image": {
+          "id": 35764349927529,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9371092746345,
+    "handle": "sapin-noel-crayon-enneige-183cm",
+    "title": "Sapin de Noël crayon enneigé pliable 183 cm",
+    "image_count": 8,
+    "confidence": 0.98,
+    "hero_image_id": 35764347371625,
+    "hero_current_position": 4,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35764347502697,
+        "filename": "yqtac519494e705d2.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35764347306089,
+        "filename": "Xct02e19494e705d2.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35764347338857,
+        "filename": "hjCd7a19494e705d2.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35764347371625,
+        "filename": "yPZb3b19494e705d2.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35764347404393,
+        "filename": "Cjk145194961d5914.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35764347437161,
+        "filename": "VvK7d8194961d5914.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35764347469929,
+        "filename": "6zS058194961d5914.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35764347535465,
+        "filename": "wyd0e71990f58d293.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35764347371625,
+        "filename": "yPZb3b19494e705d2.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35764347502697,
+        "filename": "yqtac519494e705d2.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35764347306089,
+        "filename": "Xct02e19494e705d2.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35764347338857,
+        "filename": "hjCd7a19494e705d2.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35764347404393,
+        "filename": "Cjk145194961d5914.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35764347437161,
+        "filename": "VvK7d8194961d5914.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35764347469929,
+        "filename": "6zS058194961d5914.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35764347535465,
+        "filename": "wyd0e71990f58d293.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9371092746345/images/35764347371625.json",
+      "body": {
+        "image": {
+          "id": 35764347371625,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9376661471337,
+    "handle": "support-c-chaise-hamac-acier-interieur-exterieur",
+    "title": "Support en C pour chaise hamac intérieur/extérieur",
+    "image_count": 7,
+    "confidence": 0.97,
+    "hero_image_id": 35859895353449,
+    "hero_current_position": 2,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35859895320681,
+        "filename": "YAv88c185616aafdf.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35859895353449,
+        "filename": "Fmc756185616aafdf.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35859895386217,
+        "filename": "ULQ9d519490d1cca2.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35859895418985,
+        "filename": "Uli98a185616aafdf.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35859895451753,
+        "filename": "mJY74219490d1cca2.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35859895484521,
+        "filename": "mCja09185616aafdf.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35859895517289,
+        "filename": "JMeb10185616aafdf.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35859895353449,
+        "filename": "Fmc756185616aafdf.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35859895320681,
+        "filename": "YAv88c185616aafdf.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35859895386217,
+        "filename": "ULQ9d519490d1cca2.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35859895418985,
+        "filename": "Uli98a185616aafdf.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35859895451753,
+        "filename": "mJY74219490d1cca2.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35859895484521,
+        "filename": "mCja09185616aafdf.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35859895517289,
+        "filename": "JMeb10185616aafdf.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9376661471337/images/35859895353449.json",
+      "body": {
+        "image": {
+          "id": 35859895353449,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9369985745001,
+    "handle": "table-patio-verre-trempe-trou-parasol",
+    "title": "Table de patio en verre trempé avec trou pour parasol",
+    "image_count": 8,
+    "confidence": 0.98,
+    "hero_image_id": 35750380175465,
+    "hero_current_position": 4,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35750380077161,
+        "filename": "eTfda319496b10bbd.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35750380109929,
+        "filename": "mQ715619496b10bbd.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35750380142697,
+        "filename": "WJV73e19496b10bbd.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35750380175465,
+        "filename": "Z3ia0d19496b10bbd.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35750380208233,
+        "filename": "BY9ef11949342504b.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35750380241001,
+        "filename": "oyr61a1949342504b.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35750380273769,
+        "filename": "Te0c501949342504b.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35750380306537,
+        "filename": "hiRccb1949342504b.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35750380175465,
+        "filename": "Z3ia0d19496b10bbd.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35750380077161,
+        "filename": "eTfda319496b10bbd.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35750380109929,
+        "filename": "mQ715619496b10bbd.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35750380142697,
+        "filename": "WJV73e19496b10bbd.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35750380208233,
+        "filename": "BY9ef11949342504b.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35750380241001,
+        "filename": "oyr61a1949342504b.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35750380273769,
+        "filename": "Te0c501949342504b.jpg"
+      },
+      {
+        "position": 8,
+        "image_id": 35750380306537,
+        "filename": "hiRccb1949342504b.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9369985745001/images/35750380175465.json",
+      "body": {
+        "image": {
+          "id": 35750380175465,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 7752200355945,
+    "handle": "ensemble-de-2-tables-de-chevet-avec-3-tiroirs-brillants-pour-chambre",
+    "title": "Tables de chevet modernes ensemble de 2 avec 3 tiroirs",
+    "image_count": 7,
+    "confidence": 0.98,
+    "hero_image_id": 35716970512489,
+    "hero_current_position": 3,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35716970446953,
+        "filename": "JKEbf119a28936ddd_2702edfc-60d1-4f1b-9200-e4eccfc0f7ed.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35716970479721,
+        "filename": "8O445e19a28936ddd_59cf0081-1fce-4193-b856-7feff9cb8816.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35716970512489,
+        "filename": "IDcc8a19a28936ddd_0448b301-bcdb-4452-a0a8-e111ee680460.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35716970545257,
+        "filename": "iKAb8e19a28936ddd_1b2bb234-8345-4fa2-88c0-c9c968d86958.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35716970578025,
+        "filename": "64A4a519a28936ddd_4862e7da-b998-4965-841a-b515f616de5e.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35716970610793,
+        "filename": "VeQ74719a28936ddd_ffe65204-7759-439c-a6b0-35c52110f892.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35716970643561,
+        "filename": "lmj18c19a28936ddd_11d946eb-8477-4e12-a378-ba3e2b819a27.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35716970512489,
+        "filename": "IDcc8a19a28936ddd_0448b301-bcdb-4452-a0a8-e111ee680460.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35716970446953,
+        "filename": "JKEbf119a28936ddd_2702edfc-60d1-4f1b-9200-e4eccfc0f7ed.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35716970479721,
+        "filename": "8O445e19a28936ddd_59cf0081-1fce-4193-b856-7feff9cb8816.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35716970545257,
+        "filename": "iKAb8e19a28936ddd_1b2bb234-8345-4fa2-88c0-c9c968d86958.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35716970578025,
+        "filename": "64A4a519a28936ddd_4862e7da-b998-4965-841a-b515f616de5e.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35716970610793,
+        "filename": "VeQ74719a28936ddd_ffe65204-7759-439c-a6b0-35c52110f892.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35716970643561,
+        "filename": "lmj18c19a28936ddd_11d946eb-8477-4e12-a378-ba3e2b819a27.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/7752200355945/images/35716970512489.json",
+      "body": {
+        "image": {
+          "id": 35716970512489,
+          "position": 1
+        }
+      }
+    }
+  },
+  {
+    "id": 9365262925929,
+    "handle": "toilette-portable-camping-rincable-20l",
+    "title": "Toilette portable de camping rinçable avec réservoirs 20L",
+    "image_count": 7,
+    "confidence": 0.98,
+    "hero_image_id": 35702716825705,
+    "hero_current_position": 4,
+    "before": [
+      {
+        "position": 1,
+        "image_id": 35702716858473,
+        "filename": "e5N42a197a2284993.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35702716760169,
+        "filename": "t70859197a2284993.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35702716792937,
+        "filename": "td20cd197a2284993.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35702716825705,
+        "filename": "KrT3f6197a2284993.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35702716891241,
+        "filename": "z706be197a2284993.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35702716924009,
+        "filename": "UYaa4f197a2284993.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35702716956777,
+        "filename": "7M4441197a2284993.jpg"
+      }
+    ],
+    "after": [
+      {
+        "position": 1,
+        "image_id": 35702716825705,
+        "filename": "KrT3f6197a2284993.jpg"
+      },
+      {
+        "position": 2,
+        "image_id": 35702716858473,
+        "filename": "e5N42a197a2284993.jpg"
+      },
+      {
+        "position": 3,
+        "image_id": 35702716760169,
+        "filename": "t70859197a2284993.jpg"
+      },
+      {
+        "position": 4,
+        "image_id": 35702716792937,
+        "filename": "td20cd197a2284993.jpg"
+      },
+      {
+        "position": 5,
+        "image_id": 35702716891241,
+        "filename": "z706be197a2284993.jpg"
+      },
+      {
+        "position": 6,
+        "image_id": 35702716924009,
+        "filename": "UYaa4f197a2284993.jpg"
+      },
+      {
+        "position": 7,
+        "image_id": 35702716956777,
+        "filename": "7M4441197a2284993.jpg"
+      }
+    ],
+    "apply": {
+      "method": "PUT",
+      "endpoint": "/products/9365262925929/images/35702716825705.json",
+      "body": {
+        "image": {
+          "id": 35702716825705,
+          "position": 1
+        }
+      }
+    }
+  }
+]

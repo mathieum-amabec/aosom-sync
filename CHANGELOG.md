@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.184] - 2026-07-01
+
+### Added — lifestyle image classifier (catalogue tooling, read-only on Shopify)
+- `scripts/classify-lifestyle-images.mjs`: classifies the first 4 images of every
+  Shopify product via Claude Vision (`claude-sonnet-4-6`) into
+  `white_background` / `lifestyle_no_people` / `lifestyle_with_people` / `detail` / `other`,
+  plus a `has_text_overlay` flag (marketing text burned into the image). GET-only on
+  Shopify, rate-limited (Shopify 2 req/s, Claude 1 req/s), resumable via a per-product
+  checkpoint (`lifestyle-classification.checkpoint.jsonl`).
+- `scripts/plan-pos1-swaps.mjs`: DRY-RUN planner — computes the pos-1 reorder (move the
+  clean lifestyle hero to position 1) for the clean-hero SWAP set. GET-only; emits
+  `pos1-swap-plan-clean21.json`. Applies no writes.
+- `scripts/recover-checkpoint-from-log.mjs`: one-off recovery of a killed run's checkpoint
+  from its stderr log (re-fetches image URLs only).
+- Data: `lifestyle-classification-first759.csv` + `.detail.json` — full classification of
+  all 759 products (SWAP 312 / NO_LIFESTYLE 434 / OK 13; 21 clean-hero swap candidates).
+  `pos1-swap-plan-clean21.json` — the 21-product dry-run swap plan.
+- No Shopify writes performed; no pos-1 swaps applied (pending approval).
+
 ## [0.5.53.183] - 2026-07-01
 
 ### Changed (theme IDs — re-point DRAFT to the real live copy 160656818281)
