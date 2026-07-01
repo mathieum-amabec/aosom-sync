@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.182] - 2026-07-01
+
+### Fixed (product FAQ rendered French for EN visitors — theme i18n on draft 160655114345)
+The product-page FAQ (`snippets/agentic-faq.liquid`, rendered at
+`sections/main-product.liquid:225`) **hardcoded all its text in French** (title +
+4 Q/A via Liquid `assign`, zero `| t`), so EN visitors saw French — including the
+FAQPage JSON-LD fed from the same source.
+- **Fix (draft `160655114345`):** added a `faq.{title,q1..q4,a1..a4}` namespace to
+  **both** `locales/en.default.json` (EN) and `locales/fr.json` (FR), then converted the
+  snippet's hardcoded strings to `{{ '…' | t }}` (`q1` uses `| t: title: product.title`
+  for the interpolated product name). Single source preserved → visible accordion and
+  JSON-LD both localize together. Verified on the draft: `/en/` renders "Frequently asked
+  questions"; FR renders "Questions fréquentes".
+- **Draft provisioning fix (blocker resolved):** the draft `160655114345` created in
+  #319 (v0.5.53.180) was an **empty shell** — Shopify REST `POST /themes.json` **ignores
+  `source_theme_id`** (GraphQL-only, and no duplicate-by-id exists: `themeDuplicate` is not
+  a mutation; `themeCreate`/REST `src` need a zip URL). Populated it **in place** by copying
+  all 410 live assets via REST (`scripts/theme-copy-assets.mjs`, order-retried the 2
+  `*-group.json` files). `DRAFT_THEME_ID` stays `160655114345` (no re-point needed).
+- Read-only live `160606093417`; all writes to the draft. Scripts: `faq-i18n-diagnose.mjs`,
+  `faq-i18n-step3.mjs`, `faq-i18n-apply.mjs`, `theme-copy-assets.mjs`. Store-level theme
+  change; merging deploys nothing.
+
 ## [0.5.53.181] - 2026-07-01
 
 ### Changed (theme IDs — homepage/taxonomy draft published to LIVE)
