@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.180] - 2026-07-01
+
+### Changed (theme IDs — homepage/taxonomy draft published to LIVE)
+On 2026-07-01 the working draft `160606093417` (homepage Option B + taxonomie nav +
+mobile fixes) was **published to LIVE** via `PUT /admin/api/2024-01/themes/{id}.json`
+`{role:"main"}`, demoting the former live `160584859753` to `unpublished` (kept as the
+rollback target). A fresh unpublished copy `160655114345` was created as the new working
+draft (`source_theme_id: 160606093417`; name trimmed to Shopify's 50-char limit).
+- `scripts/_shopify-lib.mjs`: **`LIVE_THEME_ID` `160584859753` → `160606093417`** (real
+  published theme — keeps the `apply-*.mjs` production guard pointing at the right theme);
+  **`DRAFT_THEME_ID` `160606093417` → `160655114345`** (new safe write target). Comment
+  refreshed with the current roles.
+- Scripts added for the record: `publish-draft-to-live.mjs`, `create-draft-theme.mjs`.
+- Store-level theme-role change (not a code deploy); merging deploys nothing.
+
 ## [0.5.53.179] - 2026-06-30
 
 ### Fixed (102 produits orphelins invisibles dans la navigation — cohérence `product_type`)
