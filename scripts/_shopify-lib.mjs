@@ -24,15 +24,17 @@ export function loadEnv() {
 export const STORE = "27u5y2-kp.myshopify.com";
 export const API_VERSION = "2025-01";
 
-// Theme roles verified via GET /admin/api/2025-01/themes.json (source of truth, 2026-06-30):
-//   160584859753 "Copie de Copie de Copie de Trade v2"          → role:main        (LIVE / published)
-//   160606093417 "Copie de Copie de Copie de Copie de Trade v2" → role:unpublished (active working DRAFT)
-//   160059195497 "Copie de Trade v2"                            → role:unpublished (older backup)
+// Theme roles verified via GET /admin/api/2024-01/themes.json (source of truth, 2026-07-01):
+//   160606093417 "Copie de Copie de Copie de Copie de Trade v2"        → role:main        (LIVE / published)
+//   160655114345 "Copie de Copie de Copie de Copie de Copie Trade v2"  → role:unpublished (active working DRAFT)
+//   160584859753 "Copie de Copie de Copie de Trade v2"                 → role:unpublished (PREVIOUS live — rollback target)
+//   160059195497 "Copie de Trade v2"                                   → role:unpublished (older backup)
+// On 2026-07-01 the former draft 160606093417 was published to LIVE, demoting 160584859753;
+// a fresh copy (160655114345) is the new working DRAFT.
 // IMPORTANT: the LIVE_THEME_ID guard in apply-*.mjs ("refusing to run against the LIVE
-// theme") only protects production when this is the REAL published theme. The previous
-// values (160213696617 / 160059195497) went stale after later theme copies were published.
-export const LIVE_THEME_ID = "160584859753"; // current main / published (LIVE) theme — NEVER write here
-export const DRAFT_THEME_ID = "160606093417"; // active unpublished DRAFT — safe write target
+// theme") only protects production when this is the REAL published theme. Keep it current.
+export const LIVE_THEME_ID = "160606093417"; // current main / published (LIVE) theme — NEVER write here
+export const DRAFT_THEME_ID = "160655114345"; // active unpublished DRAFT — safe write target
 export const BACKUP_THEME_ID = "160059195497"; // older unpublished theme, kept as backup
 // Deprecated alias kept for older imports. Points at a non-live theme so the default
 // asset-write target can never hit production. New code should use DRAFT_THEME_ID.
