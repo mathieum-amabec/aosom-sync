@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.180] - 2026-06-30
+
+### Added (bandeau de sous-catégories en tête des pages collection parentes — thème draft)
+Un shopper qui arrive sur une collection parente (ex. « Meubles & Déco ») voit
+maintenant, en haut de page, un bandeau de tuiles vers les sous-collections au lieu
+d'une grille de produits en vrac sans filtre. Déployé sur le thème **draft**
+`160606093417` uniquement ; live `160584859753` jamais touché.
+- **`snippets/subcategory-banner.liquid`** (nouveau) — auto-détecte les sous-catégories
+  selon `collection.handle` (map parent→subs vérifiée contre le store : 7 parents,
+  29 sous-collections uniques). Rien à configurer dans le customizer. Rend `nothing`
+  sur une collection non-parente. Tuiles : scroll-snap horizontal 45vw sur mobile,
+  grille 5 colonnes (4 en tablette, ≤2 rangées) sur desktop. Style calqué sur
+  `cat_tiles` (navy `#1B2A4A`, DM Sans, radius 12px, accent gold `#C17F3E`), self-contained.
+- **Image par tuile** : asset thème `cat-sub-{handle}.jpg` pour les 25 sous-collections
+  qui en ont un → sinon image collection/produit live → sinon tuile navy (les 4
+  collections vides : animaux-oiseaux, electro-chauffage, sport-exercice, sport-salle-de-jeux).
+  Libellés/liens tirés de `collection.title`/`collection.url` (titres FR curatés). Tout
+  output dynamique est échappé (`| escape`).
+- **`sections/main-collection-product-grid.liquid`** — injection conditionnelle en tête
+  (`{% render 'subcategory-banner' %}` sur les 7 handles parents). Snippet car `render`
+  ne charge que depuis `snippets/`. La grille est un snapshot du fichier déployé ; seul
+  le bloc d'injection (5 lignes en tête) est nouveau.
+
 ## [0.5.53.179] - 2026-06-30
 
 ### Fixed (102 produits orphelins invisibles dans la navigation — cohérence `product_type`)
