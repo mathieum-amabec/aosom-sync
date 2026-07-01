@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.177] - 2026-06-30
+## [0.5.53.178] - 2026-06-30
 
 ### Fixed (Turso orphan products — rows pointing at deleted Shopify products)
 Cleaned up `products` rows whose `shopify_product_id` referenced a **deleted** Shopify
@@ -18,6 +18,25 @@ rows spanned 8 distinct product IDs, but one (`7750489899113` / `83B-652V00`) wa
   for reversibility. Scripts: `turso-orphan-investigate.mjs` (read-only re-verify) +
   `turso-orphan-apply.mjs` (re-checks each id is still 404 before nulling).
 - **This is a prod Turso data operation**, not a code deploy; the PR is the record.
+
+## [0.5.53.177] - 2026-06-30
+
+### Added (fix-primary-image — Aosom white-background shot at Shopify position 1)
+- **New `scripts/fix-primary-image.mts`** — puts the Aosom white-background primary
+  (`products.image1`, the image Aosom orders first) at Shopify position 1 so the store
+  shows a uniform white-bg main image. Detection is **positional + stem-based**: there is
+  no URL keyword for "white bg"; the intended primary is `image1`, matched against Shopify
+  images by the **Aosom hash stem** (Shopify appends a `_<uuid>` suffix on ingest, so
+  `BCf8da…​.jpg` and `BCf8da…​_<uuid>.jpg` are the same image).
+- **Three outcomes** per product: `OK` (image1 already at pos1), `SWAP` (image1 exists in
+  Shopify at pos>1 → reorder via `PUT /products/{id}/images/{img}.json {position:1}`),
+  `NO_MATCH` (image1 absent from Shopify = stale image set vs current feed; reported only,
+  never auto-touched). Dry-run by default → CSV report; `--apply --from-csv <report>`
+  reorders only the SWAP products, **deduped by `shopify_product_id`** (one reorder per
+  product, deterministic). All Shopify calls throttled to ~1.8 req/s with 429 retry.
+- **Applied**: 215 distinct products reordered (from 290 SWAP rows across variants). Dry-run
+  population of 1240 products: 585 OK, 290 SWAP, 346 NO_MATCH, 19 errors (18 deleted
+  products, 1 transient 429). Data-only via Shopify Admin API — no theme changes.
 
 ## [0.5.53.176] - 2026-06-30
 
