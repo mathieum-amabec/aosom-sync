@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.174] - 2026-06-30
+## [0.5.53.179] - 2026-06-30
 
 ### Fixed (102 produits orphelins invisibles dans la navigation — cohérence `product_type`)
 - **Root cause**: 102 des 737 produits Shopify portaient un `product_type` en **libellé libre**
@@ -22,6 +22,108 @@ All notable changes to Aosom Sync will be documented in this file.
 - **Comptes live**: `exterieur-et-jardin` 261→360, `jardin-jardinage` 35→89, `patio-mobilier`
   58→77, `gazebos-et-pergolas` 47, `enfants-vehicules` 22, `bricolage-et-outils` 2→3.
 - Détail + CSV ligne-à-ligne : `docs/product-type-coherence.md`.
+
+- **CSV réconcilié au live** (post-audit): 27 lignes de `docs/product-type-coherence-fixes.csv`
+  portaient des valeurs de planification périmées en `product_type_correct` (21 Wedding & Events
+  Tents, 3+3 Lawn & Garden) ne correspondant pas au `product_type` réellement appliqué (Gazebos &
+  Pergolas, Outdoor Décor, Outdoor Lighting). Colonnes regénérées depuis Shopify live — le CSV
+  reflète maintenant l'état appliqué (état du store inchangé).
+
+## [0.5.53.178] - 2026-06-30
+
+### Fixed (Turso orphan products — rows pointing at deleted Shopify products)
+Cleaned up `products` rows whose `shopify_product_id` referenced a **deleted** Shopify
+product (HTTP 404 on `GET /admin/api/2024-01/products/{id}.json`). Sourced from the
+`fix-primary-image-report.csv` ERROR rows, then **re-verified live** — the CSV's 19 ERROR
+rows spanned 8 distinct product IDs, but one (`7750489899113` / `83B-652V00`) was a stale
+**HTTP 429** (rate limit), not a deletion, and is **alive (200)** — so it was excluded.
+- **7 confirmed-deleted products → 18 SKU rows** set `shopify_product_id = NULL` (rows kept,
+  no `DELETE`, so the SKU/catalog trace survives): `84H-209V00 BK/DR/GN/LG/YG`,
+  `839-622V01CG`, `84G-230V00 BU/CG/CW/GN/GY/LG`, `84G-351V00 BK/BU/CG`, `84B-136WR`,
+  `845-774V00CG`, `84K-241V00CG`.
+- Old `shopify_product_id → SKUs` mapping recorded in `scripts/turso-orphan-trace.json`
+  for reversibility. Scripts: `turso-orphan-investigate.mjs` (read-only re-verify) +
+  `turso-orphan-apply.mjs` (re-checks each id is still 404 before nulling).
+- **This is a prod Turso data operation**, not a code deploy; the PR is the record.
+
+## [0.5.53.177] - 2026-06-30
+
+### Added (fix-primary-image — Aosom white-background shot at Shopify position 1)
+- **New `scripts/fix-primary-image.mts`** — puts the Aosom white-background primary
+  (`products.image1`, the image Aosom orders first) at Shopify position 1 so the store
+  shows a uniform white-bg main image. Detection is **positional + stem-based**: there is
+  no URL keyword for "white bg"; the intended primary is `image1`, matched against Shopify
+  images by the **Aosom hash stem** (Shopify appends a `_<uuid>` suffix on ingest, so
+  `BCf8da…​.jpg` and `BCf8da…​_<uuid>.jpg` are the same image).
+- **Three outcomes** per product: `OK` (image1 already at pos1), `SWAP` (image1 exists in
+  Shopify at pos>1 → reorder via `PUT /products/{id}/images/{img}.json {position:1}`),
+  `NO_MATCH` (image1 absent from Shopify = stale image set vs current feed; reported only,
+  never auto-touched). Dry-run by default → CSV report; `--apply --from-csv <report>`
+  reorders only the SWAP products, **deduped by `shopify_product_id`** (one reorder per
+  product, deterministic). All Shopify calls throttled to ~1.8 req/s with 429 retry.
+- **Applied**: 215 distinct products reordered (from 290 SWAP rows across variants). Dry-run
+  population of 1240 products: 585 OK, 290 SWAP, 346 NO_MATCH, 19 errors (18 deleted
+  products, 1 transient 429). Data-only via Shopify Admin API — no theme changes.
+
+## [0.5.53.176] - 2026-06-30
+
+### Changed (full FR ameublo slideshow regeneration on the bilingual engine)
+- **Regenerated the complete FR ameublo slideshow batch** — 40 videos across 42
+  series (2 remix series skipped: 0 clips) via local FFmpeg, uploaded to the public
+  Blob store, enqueued as `status='draft'` (queueIds **#222–#261**). All overlays now
+  carry the curated **French** Shopify titles thanks to the bilingual title engine
+  shipped in `0.5.53.173` (#308); the prior drafts had rendered the raw English
+  `products.name`.
+- The batch's `enqueueDraft` cancel-then-insert replaced every prior same-`content_id`
+  draft; **2 stale `showcase-*` orphans** (#181, #182, SKUs no longer in the top-5
+  rotation, English-titled) were cancelled explicitly so the queue holds exactly the
+  40 fresh FR videos.
+- **No code change in this release** — the `flagValue` parser fix (`--flag=value` as
+  well as `--flag value`) requested for the regeneration was already shipped in
+  `0.5.53.173` (#308). This is a release marker documenting the regeneration.
+
+## [0.5.53.175] - 2026-06-30
+### Fixed (scripts/_shopify-lib.mjs — stale theme constants)
+The shared Shopify helper carried **stale theme IDs**: `LIVE_THEME_ID = "160213696617"`
+and `PREVIEW_THEME_ID = "160059195497"`, neither of which is the current published theme.
+~40 `apply-*.mjs` scripts guard production with `if (THEME === LIVE_THEME_ID) throw
+"refusing to run against the LIVE theme"` — with a wrong `LIVE_THEME_ID`, that guard would
+**not** catch a write to the real live theme.
+- `LIVE_THEME_ID` → **`160584859753`** (verified `role:main` via `GET /themes.json`). The
+  production guard now protects the real live theme.
+- Added `DRAFT_THEME_ID = "160606093417"` (verified `role:unpublished`) — the active
+  working draft, the safe write target for new scripts.
+- `BACKUP_THEME_ID` (`160059195497`) and `PREVIEW_THEME_ID` (alias) kept unchanged for
+  backwards-compat with existing importers; `getAsset`/`putAsset` defaults untouched.
+- Refreshed the header comment with the real theme roles as of 2026-06-30.
+
+## [0.5.53.174] - 2026-06-30
+
+### Fixed (draft theme mobile issues — draft 160606093417 only, live 160584859753 untouched)
+Four issues fixed on the **draft** theme `160606093417`. All writes via Shopify Admin
+API to `27u5y2-kp.myshopify.com`; the live theme `160584859753` was verified unchanged
+before/after (`templates/index.json` updated_at stayed `2026-06-28T21:31:07-04:00`).
+- **P1 — Hero "Magasinez maintenant" CTA dead anchor**: the CTA already targeted
+  `#categories`, but the `cat_tiles` section rendered no matching element, so the scroll
+  went nowhere. Added `id="categories"` (+ `scroll-margin-top:100px` for the sticky
+  header) to the `cat_tiles` wrapper in `templates/index.json`.
+- **P2 — /collections/rabais had no category filter**: prepended a conditional
+  `quick-cat-banner` (`collection.handle == 'rabais'`) to
+  `sections/main-collection-product-grid.liquid`, mirroring the existing /collections/all
+  banner. Six navy category pills (Meubles, Extérieur, Électro & Tech, Animaux, Enfants,
+  Sports & Loisirs) → `/collections/{handle}?sort_by=price-ascending`, plus a gold
+  `--promo` Rabais pill. Same CSS as the existing banner.
+- **P3 — branded supplier video in "Voyez-le chez vous"**: removed the
+  `poussette-pliable-pour-grands-chiens` block (PawHut-branded `D00-210V00CG-PawHut-WEB.mp4`)
+  from `sections/home-video-showcase.liquid`. Three Outsunny patio/gazebo videos remain.
+- **P4 — subcategory navigation**: verified, no change needed. The draft header
+  (`menu: taxonomie-categories`, `menu_type_desktop: mega`) already exposes all
+  sub-categories via the mega-menu for the 7 parents that have them (Meubles 7,
+  Extérieur 9, Animaux 4, Enfants 3, Bureau 3, Sports 4, Électro 2); Bricolage & Santé
+  have no sub-categories by design.
+
+This PR is the record; the live artifacts are the draft-theme assets already written via
+`scripts/draft-theme-fix-*.mjs`. Merging deploys nothing to Shopify.
 
 ## [0.5.53.173] - 2026-06-30
 
@@ -44,7 +146,6 @@ All notable changes to Aosom Sync will be documented in this file.
   **`--store=furnish` (EN)** flag drives brand + overlay/caption/hook language; flags now
   accept `--name=value` as well as `--name value`; `--dry-run` accepted explicitly. Overlay
   text picks `title_fr` (FR) or `title_en` (EN) per store.
-
 
 ## [0.5.53.172] - 2026-06-28
 
