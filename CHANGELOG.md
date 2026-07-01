@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.179] - 2026-06-30
+
+### Fixed (102 produits orphelins invisibles dans la navigation — cohérence `product_type`)
+- **Root cause**: 102 des 737 produits Shopify portaient un `product_type` en **libellé libre**
+  (`Gazebo`, `Greenhouse`, `Garden Bed`, `Patio Furniture`, `Outdoor Lighting`…) sans le préfixe
+  taxonomie Google (`Patio & Garden > …`) exigé par les règles `type contains` des smart
+  collections. Résultat : ils ne tombaient dans **aucune** collection parente → invisibles.
+  Tous des produits Extérieur & Jardin (sauf 1 rampe d'escalier → Bricolage). Les exemples
+  climatiseur/classeur étaient déjà réglés par la refonte du 2026-06-28 ; **0 conflit multi-parent.**
+- **Phase 2** — `product_type` corrigé pour les 102 (PUT `/products/{id}.json`, champ
+  `product_type` uniquement, 2 req/s) : 54 → `Lawn & Garden`, 21 → `Gazebos & Pergolas`,
+  19 → `Patio Furniture`, 3 → `Outdoor Décor`, 3 → `Outdoor Lighting`, 1 → `Patio Shade`,
+  1 → `Home Improvement > Tools`. **102/102 OK.** Orphelins **102 → 0** (vérifié).
+- **6 nouvelles smart collections** (`published`, `best-selling`): `gazebos-et-pergolas`,
+  `jardin-eclairage`, `jardin-decoration`, `piscines-et-spas`, `electro-chauffage`,
+  `enfants-vehicules`. 13 collisions de handle réutilisent l'existant au lieu de dupliquer ;
+  électro clim/ventilation gardée combinée ; `meubles-bureau` non créée.
+- **Comptes live**: `exterieur-et-jardin` 261→360, `jardin-jardinage` 35→89, `patio-mobilier`
+  58→77, `gazebos-et-pergolas` 47, `enfants-vehicules` 22, `bricolage-et-outils` 2→3.
+- Détail + CSV ligne-à-ligne : `docs/product-type-coherence.md`.
+
+- **CSV réconcilié au live** (post-audit): 27 lignes de `docs/product-type-coherence-fixes.csv`
+  portaient des valeurs de planification périmées en `product_type_correct` (21 Wedding & Events
+  Tents, 3+3 Lawn & Garden) ne correspondant pas au `product_type` réellement appliqué (Gazebos &
+  Pergolas, Outdoor Décor, Outdoor Lighting). Colonnes regénérées depuis Shopify live — le CSV
+  reflète maintenant l'état appliqué (état du store inchangé).
+
 ## [0.5.53.178] - 2026-06-30
 
 ### Fixed (Turso orphan products — rows pointing at deleted Shopify products)
