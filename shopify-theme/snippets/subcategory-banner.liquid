@@ -1,0 +1,183 @@
+{%- comment -%}
+  subcategory-banner.liquid  (SNIPPET)
+  ─────────────────────────────────────────────────────────────────────────────
+  A visual sub-category navigator shown at the TOP of a parent collection page.
+  Lets a shopper who landed on a broad parent collection (e.g. "Meubles & Déco")
+  jump straight into a sub-collection instead of scrolling a mixed product grid.
+
+  RENDERED AS A SNIPPET (not a section): the collection grid injects it with
+    {% render 'subcategory-banner', collection: collection %}
+  `render` only loads from snippets/, so this file lives there. Pass `collection`
+  in; optionally pass `title` to override the heading.
+
+  ZERO-CONFIG / AUTO-DETECT
+  Tiles are derived from `collection.handle` via the PARENT → SUB map below.
+  On a non-parent collection it renders nothing.
+
+  IMAGE SOURCE (per tile), in order:
+    1. Theme asset  cat-sub-{handle}.jpg   — for the 25 handles that have one
+    2. collection.image                    — live collection image (fallback)
+    3. first product's featured_image      — live product image (fallback)
+    4. none → solid navy tile + label      — for the 4 empty collections
+  Label ← collection.title (curated FR titles already on the store).
+  Link  ← collection.url.
+
+  THEME SAFETY: presentation only. Reads collections; writes nothing. Scoped
+  `sc-subcat` classes + self-contained <style> (does not depend on lc-home.css,
+  which isn't loaded on collection pages). Visual language mirrors cat_tiles:
+  navy #1B2A4A overlay, DM Sans, 12px radius, gold #C17F3E accent.
+{%- endcomment -%}
+
+{%- assign loc = request.locale.iso_code | downcase -%}
+{%- if title != blank -%}
+  {%- assign banner_title = title -%}
+{%- elsif loc == 'en' -%}
+  {%- assign banner_title = 'Shop by sub-category' -%}
+{%- else -%}
+  {%- assign banner_title = 'Magasinez par sous-catégorie' -%}
+{%- endif -%}
+
+{%- comment -%} PARENT → SUB handle map (verified against the store, Phase 1). {%- endcomment -%}
+{%- assign sub_handles = '' -%}
+{%- case collection.handle -%}
+  {%- when 'meubles-et-decorations' -%}
+    {%- assign sub_handles = 'meubles-salon,meubles-chambre,meubles-rangement,meubles-cuisine-salle-a-manger,meubles-decoration,bureau-bureaux' -%}
+  {%- when 'exterieur-et-jardin' -%}
+    {%- assign sub_handles = 'patio-mobilier,chaises-et-tables-de-patio-1,gazebos-et-pergolas,patio-ombrage,jardin-jardinage,jardin-eclairage,jardin-decoration,exterieur-bbq,exterieur-camping' -%}
+  {%- when 'accessoires-pour-animaux' -%}
+    {%- assign sub_handles = 'animaux-chiens,animaux-chats,animaux-petits,animaux-oiseaux' -%}
+  {%- when 'enfants' -%}
+    {%- assign sub_handles = 'enfants-jeux-exterieur,enfants-meubles,enfants-vehicules' -%}
+  {%- when 'electro-et-tech' -%}
+    {%- assign sub_handles = 'electro-climatisation-ventilation,electro-petit-electromenager,electro-chauffage' -%}
+  {%- when 'sports-et-loisirs' -%}
+    {%- assign sub_handles = 'sport-exercice,sport-salle-de-jeux,exterieur-camping' -%}
+  {%- when 'bureau-et-travail' -%}
+    {%- assign sub_handles = 'bureau-bureaux,bureau-chaises,bureau-rangement' -%}
+{%- endcase -%}
+
+{%- comment -%} Handles that HAVE a curated cat-sub-{handle}.jpg theme asset (Phase 4, 25 of 29). {%- endcomment -%}
+{%- assign asset_handles = 'meubles-salon,meubles-chambre,meubles-rangement,meubles-cuisine-salle-a-manger,meubles-decoration,patio-mobilier,chaises-et-tables-de-patio-1,gazebos-et-pergolas,patio-ombrage,jardin-jardinage,jardin-eclairage,jardin-decoration,exterieur-bbq,exterieur-camping,animaux-chiens,animaux-chats,animaux-petits,enfants-jeux-exterieur,enfants-meubles,enfants-vehicules,electro-climatisation-ventilation,electro-petit-electromenager,bureau-bureaux,bureau-chaises,bureau-rangement' | split: ',' -%}
+
+{%- if sub_handles != blank -%}
+<style>
+  .sc-subcat{
+    padding:22px 0 8px;
+    font-family:'DM Sans','Helvetica Neue',Arial,sans-serif;
+  }
+  .sc-subcat__title{
+    font-family:'DM Sans','Helvetica Neue',Arial,sans-serif;
+    font-size:clamp(1.35rem,2.6vw,1.9rem);
+    font-weight:700;
+    color:#1A1A2E;
+    margin:0 0 1rem;
+  }
+  /* Desktop: 5-column grid, tiles stay in ≤2 rows for our ≤9-item parents. */
+  .sc-subcat__grid{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:14px;
+  }
+  .sc-subcat__tile{
+    position:relative;
+    display:block;
+    height:132px;
+    border-radius:12px;
+    overflow:hidden;
+    text-decoration:none;
+    box-shadow:0 4px 14px rgba(27,42,74,.10);
+    transition:box-shadow .35s cubic-bezier(0.25,0.46,0.45,0.94),
+               transform .35s cubic-bezier(0.25,0.46,0.45,0.94);
+  }
+  .sc-subcat__tile:hover{ transform:translateY(-2px); box-shadow:0 12px 30px rgba(27,42,74,.22); }
+  .sc-subcat__img{
+    position:absolute; inset:0;
+    background-size:cover; background-position:center; background-color:#1B2A4A;
+    transform:scale(1);
+    transition:transform .6s cubic-bezier(0.25,0.46,0.45,0.94);
+    will-change:transform;
+  }
+  .sc-subcat__tile:hover .sc-subcat__img{ transform:scale(1.06); }
+  /* Even navy veil (label is centered, so a flat overlay reads best) */
+  .sc-subcat__ov{
+    position:absolute; inset:0;
+    background:linear-gradient(rgba(27,42,74,.42) 0%, rgba(27,42,74,.66) 100%);
+    transition:background .35s cubic-bezier(0.25,0.46,0.45,0.94);
+  }
+  .sc-subcat__tile:hover .sc-subcat__ov{
+    background:linear-gradient(rgba(27,42,74,.34) 0%, rgba(27,42,74,.58) 100%);
+  }
+  .sc-subcat__label{
+    position:absolute; inset:0; z-index:1;
+    display:flex; align-items:center; justify-content:center;
+    padding:10px 12px;
+    text-align:center;
+    color:#fff; font-weight:700; font-size:1.02rem; line-height:1.22;
+    text-shadow:0 1px 4px rgba(0,0,0,.45);
+  }
+  /* Gold underline accent — grows in on hover, mirrors cat_tiles */
+  .sc-subcat__label::after{
+    content:""; position:absolute; left:50%; bottom:14px;
+    width:34px; height:3px; margin-left:-17px;
+    background:#C17F3E; border-radius:2px;
+    transform:scaleX(0); transform-origin:center;
+    transition:transform .35s cubic-bezier(0.25,0.46,0.45,0.94);
+  }
+  .sc-subcat__tile:hover .sc-subcat__label::after,
+  .sc-subcat__tile:focus-visible .sc-subcat__label::after{ transform:scaleX(1); }
+  .sc-subcat__tile:focus-visible{ outline:3px solid #C17F3E; outline-offset:2px; }
+
+  @media (max-width:1024px){
+    .sc-subcat__grid{ grid-template-columns:repeat(4,1fr); }
+  }
+  /* Mobile: horizontal snap-scroll carousel, 45vw per tile. */
+  @media (max-width:767px){
+    .sc-subcat__grid{
+      display:flex; flex-wrap:nowrap;
+      overflow-x:auto;
+      scroll-snap-type:x mandatory;
+      -webkit-overflow-scrolling:touch;
+      scrollbar-width:none;
+      gap:12px;
+      padding-bottom:4px;
+      margin:0 -4px; padding-left:4px; padding-right:4px;
+    }
+    .sc-subcat__grid::-webkit-scrollbar{ display:none; }
+    .sc-subcat__tile{
+      flex:0 0 45vw;
+      height:118px;
+      scroll-snap-align:start;
+    }
+    .sc-subcat__label{ font-size:.98rem; }
+  }
+  @media (prefers-reduced-motion:reduce){
+    .sc-subcat__tile,.sc-subcat__img,.sc-subcat__label::after{ transition:none; }
+  }
+</style>
+
+<div class="page-width sc-subcat">
+  <h2 class="sc-subcat__title">{{ banner_title }}</h2>
+  <div class="sc-subcat__grid">
+    {%- assign sub_list = sub_handles | split: ',' -%}
+    {%- for h in sub_list -%}
+      {%- assign col = collections[h] -%}
+      {%- if col != blank -%}
+        {%- comment -%} Image: curated theme asset first, then live collection/product image. {%- endcomment -%}
+        {%- assign t_img = '' -%}
+        {%- if asset_handles contains h -%}
+          {%- assign t_img = 'cat-sub-' | append: h | append: '.jpg' | asset_url -%}
+        {%- elsif col.image != blank -%}
+          {%- assign t_img = col.image | image_url: width: 640 -%}
+        {%- elsif col.products.first.featured_image != blank -%}
+          {%- assign t_img = col.products.first.featured_image | image_url: width: 640 -%}
+        {%- endif -%}
+        <a class="sc-subcat__tile" href="{{ col.url }}" aria-label="{{ col.title | escape }}" data-umami-event="Subcat tile {{ col.title | escape }}">
+          <span class="sc-subcat__img"{% if t_img != blank %} style="background-image:url('{{ t_img }}')"{% endif %}></span>
+          <span class="sc-subcat__ov"></span>
+          <span class="sc-subcat__label">{{ col.title | escape }}</span>
+        </a>
+      {%- endif -%}
+    {%- endfor -%}
+  </div>
+</div>
+{%- endif -%}
