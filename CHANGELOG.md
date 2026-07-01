@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.177] - 2026-06-30
+
+### Fixed (Turso orphan products — rows pointing at deleted Shopify products)
+Cleaned up `products` rows whose `shopify_product_id` referenced a **deleted** Shopify
+product (HTTP 404 on `GET /admin/api/2024-01/products/{id}.json`). Sourced from the
+`fix-primary-image-report.csv` ERROR rows, then **re-verified live** — the CSV's 19 ERROR
+rows spanned 8 distinct product IDs, but one (`7750489899113` / `83B-652V00`) was a stale
+**HTTP 429** (rate limit), not a deletion, and is **alive (200)** — so it was excluded.
+- **7 confirmed-deleted products → 18 SKU rows** set `shopify_product_id = NULL` (rows kept,
+  no `DELETE`, so the SKU/catalog trace survives): `84H-209V00 BK/DR/GN/LG/YG`,
+  `839-622V01CG`, `84G-230V00 BU/CG/CW/GN/GY/LG`, `84G-351V00 BK/BU/CG`, `84B-136WR`,
+  `845-774V00CG`, `84K-241V00CG`.
+- Old `shopify_product_id → SKUs` mapping recorded in `scripts/turso-orphan-trace.json`
+  for reversibility. Scripts: `turso-orphan-investigate.mjs` (read-only re-verify) +
+  `turso-orphan-apply.mjs` (re-checks each id is still 404 before nulling).
+- **This is a prod Turso data operation**, not a code deploy; the PR is the record.
+
 ## [0.5.53.176] - 2026-06-30
 
 ### Changed (full FR ameublo slideshow regeneration on the bilingual engine)
