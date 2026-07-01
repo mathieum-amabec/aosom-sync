@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.183] - 2026-07-01
+
+### Changed (theme IDs — re-point DRAFT to the real live copy 160656818281)
+- `scripts/_shopify-lib.mjs`: **`DRAFT_THEME_ID` `160655114345` → `160656818281`**
+  ("Copie de LIVE NOW", a real full copy of the live theme, verified `role:unpublished`
+  with 410 assets). `LIVE_THEME_ID` unchanged (`160606093417` = "LIVE NOW", `role:main`).
+  Comment refreshed; all references to the superseded `160655114345` removed from the file.
+- Version skips `.182` (claimed by the in-flight FAQ-i18n PR #321) to avoid a collision.
+- Config-constant change only; no store writes here.
+
 ## [0.5.53.181] - 2026-07-01
 
 ### Changed (theme IDs — homepage/taxonomy draft published to LIVE)
