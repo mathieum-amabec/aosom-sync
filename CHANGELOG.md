@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.185] - 2026-07-02
+
+### Fixed (P2-7 — reviewer role could trigger generation + test posts)
+- **`api/social/route.ts`** — added `generate`, `test-prompt`, `test-facebook`,
+  `test-instagram` to `REVIEWER_BLOCKED_ACTIONS`. A `reviewer` session could
+  previously call these (content generation via Claude, and test posts to
+  Facebook/Instagram) since only the mutating queue actions were gated. Now all
+  write/side-effecting `POST /api/social` actions return 403 for `reviewer`.
+- Security backlog item **P3-10** left documented for later (exploitability 3/10,
+  low priority) — no code change here.
+
 ## [0.5.53.184] - 2026-07-01
 
 ### Added — lifestyle image classifier (catalogue tooling, read-only on Shopify)
