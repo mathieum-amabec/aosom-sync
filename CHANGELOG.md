@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.187] - 2026-07-02
+
+### Changed — lifestyle pos-1 swap, 324 products (v2, extended positions)
+- Executed pos-1 image swaps for the **324 `SWAP_CLEAN`** products from the v2 recheck
+  (clean lifestyle photo found beyond the first 4 positions). Each product's best lifestyle
+  image moved to position 1 via `PUT /products/{id}/images/{image_id}` (position:1), 2 req/s,
+  verified by re-GET. **Result: 324/324 PUT 200, 324 verified, 0 failed, 0 swapped twice.**
+- `scripts/build-pos1-plan-v2.mjs` (GET-only plan builder, resumable) →
+  `pos1-swap-plan-clean324.json`; `scripts/apply-pos1-swaps-v2.mjs` (executor, resumable,
+  per-product error skip) → `pos1-swap-report-v2.json`.
+- Product-data change (image order); independent of #325 (classification) and #323 (first 21).
+
 ## [0.5.53.185] - 2026-07-02
 
 ### Fixed (P2-7 — reviewer role could trigger generation + test posts)
