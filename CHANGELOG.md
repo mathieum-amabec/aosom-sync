@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.186] - 2026-07-02
+
+### Added — lifestyle classifier v2: NO_LIFESTYLE recheck across all image positions
+- `scripts/classify-lifestyle-images-v2.mjs` (per-image) and
+  `scripts/classify-lifestyle-images-v2-batch.mjs` (batch): re-classify the 434 products
+  that v1 marked `NO_LIFESTYLE`, scanning all image positions (not just the first 4), with
+  a `has_text_overlay` flag. Read-only on Shopify (GET), rate-limited, resumable via
+  per-product checkpoint.
+- Data: `lifestyle-classification-v2-no_lifestyle_recheck.csv` — recheck result for the 434
+  products: **SWAP_CLEAN 324 / SWAP_TEXT 41 / STILL_NO_LIFESTYLE 69**. Plus the batch-run
+  checkpoint `lifestyle-classification-v2b-batch.checkpoint.jsonl` (434 records).
+- Classification-only: no Shopify writes, no pos-1 swaps applied. Branch stacks on #323
+  (v0.5.53.184); version skips `.185` (on main) to avoid a collision.
+
 ## [0.5.53.184] - 2026-07-01
 
 ### Added — lifestyle image classifier (catalogue tooling, read-only on Shopify)
