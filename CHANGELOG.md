@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.197] - 2026-07-04
+
+### Fixed — two homepage polish items from the pre-publication audit (draft theme)
+- **Product-count badge** (`scripts/homepage-minor-fixes.mjs`): "490+ products / Plus de 490 produits"
+  → **759** (the real catalog count), in the hero badge + why_us + howit sections, FR + EN
+  (6 occurrences in `templates/index.json`). PUT 200 + verified.
+- **"Voyez-le chez vous" video carousel** (`scripts/homepage-video-carousel-clean.mjs`): audit +
+  frame-by-frame vetting found **9 of the 10 videos carry burned-in English text and/or supplier
+  logos** (Outsunny/HOMCOM/PawHut, and an **"AOSOM" watermark** on the police-car video) — not just
+  the parasol. Clean no-text (`-WEB-NT`) cuts were verified per-video (the suffix is NOT a reliable
+  guarantee — #6 cage104's `-WEB-NT` still had "Universal Wheel" text). Result:
+  - Swapped 4 to their verified-clean `-WEB-NT` cut: parasol, tente, chaise, cage-bois.
+  - Kept socle (already `-WEB-NT`).
+  - **Removed the 5 with no verified-clean version**: ensemble (403/hotlink-protected, no NT),
+    cage104 (NT still texted), tour-chat (no NT), voiture (AOSOM logo, no NT), lit (no NT).
+  - Carousel is now **5 clean no-text cards**. PUT 200 + verified on the storefront (0 branded URLs).
+- Draft theme `160656818281` only; merging deploys nothing. NB: the 5 removed products lose their
+  homepage video slot — re-add if/when the team produces no-text cuts for them.
+
 ## [0.5.53.196] - 2026-07-04
 
 ### Fixed — compare-at strikethrough + Sale badge now respect the ≥10% discount rule (draft theme)
