@@ -4,10 +4,13 @@ The four core email flows were created **programmatically** against the live Kla
 account on **2026-06-08** by `scripts/setup-klaviyo-flows.mjs`. This file records the
 flow/template/trigger IDs for future reference and wiring.
 
-> **All flows are in `draft` status — nothing sends.** Klaviyo will not deliver any
-> email until a human reviews the copy and switches each flow to **Live** in the
-> dashboard (Flows → flow → top-right status toggle). This is intentional: the API
-> builds the structure; a human approves the marketing before it goes out.
+> **Flows were created in `draft` status.** ⚠️ **Update 2026-07-04:** the
+> `Post-Purchase — Review Request` flow (`TGfezb`) has since been flipped to **`live`**
+> (verified via `GET /api/flows/TGfezb`) and is now sending. Before relying on the
+> statuses here, re-check each flow's live status in the dashboard. See
+> [REVIEWS-AUTOMATION.md](./REVIEWS-AUTOMATION.md) — the post-purchase flow is
+> mis-triggered (`Placed Order` instead of `Fulfilled Order`) and Judge.me native
+> review requests are the recommended path instead.
 
 > For account/dashboard setup, the bilingual strategy, and the deliverability
 > checklist, see **[KLAVIYO-SETUP.md](./KLAVIYO-SETUP.md)**. This file is the
