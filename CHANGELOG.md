@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.196] - 2026-07-04
+
+### Fixed — compare-at strikethrough + Sale badge now respect the ≥10% discount rule (draft theme)
+- Pre-publication audit found the compare-at strikethrough (and the Sale/Promotion badge) showing
+  for sub-10% discounts, violating the "strikethrough only when discount ≥ 10%" rule. Root cause:
+  the `>= 10` check in `snippets/price.liquid` gated ONLY the custom "Économisez/Save $X" savings
+  line — the Dawn strikethrough (`price--on-sale` class + `.price__sale` block) and the Sale badges
+  were left on the bare `compare_at_price > price` condition (any discount > 0).
+- **`scripts/compare-at-threshold-fix.mjs`** (role-gated, draft `160656818281` only) computes a
+  `disc_pct >= 10` gate (`lc_show_strike`) once and applies it to all **5 locations**: price.liquid
+  `price--on-sale` class, `volume-pricing--sale-badge` class, `.price__sale` strikethrough render,
+  and `price__badge-sale`; plus `card-product.liquid`'s two Sale-badge conditions. Idempotent.
+- **Impact:** 3 sub-10% products stop showing a false strikethrough/badge (Ensemble patio 8.3%,
+  bac-sureleve-120 3.0%, jardiniere-treillis 6.1%); the other 26 on-sale products (≥10%) are
+  unchanged. Applied (both assets PUT 200 + verified) and visually confirmed on the storefront:
+  Ensemble patio card + page show no strikethrough/badge; ≥10% products still show theirs. Theme
+  change on the draft only; merging deploys nothing.
+
 ## [0.5.53.195] - 2026-07-04
 
 ### Fixed — forbidden supplier names still visible on the EN storefront (translations layer PR #331 missed)
