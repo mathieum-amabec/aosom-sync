@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.190] - 2026-07-03
+
+### Fixed (FAQ i18n script pointed at the wrong draft theme — footgun correction)
+- **`scripts/faq-i18n-apply.mjs`**: corrected the `DRAFT` constant from
+  `160655114345` (an abandoned empty-shell draft created by mistake in #319) to
+  the real working draft **`160656818281`** ("Copie de LIVE NOW", which carries the
+  premium desktop design). The v0.5.53.189 fix (#321) applied cleanly but to the
+  wrong theme; re-running the old script would have hit the dead shell again.
+- The i18n fix itself was **re-applied to `160656818281`** out-of-band (locales
+  `faq.*` added to en+fr, `agentic-faq.liquid` converted to `| t`; all 3 assets
+  HTTP 200 + content-verified). This commit only stops the script from pointing at
+  the wrong theme in the future. Store-level theme change; merging deploys nothing.
+
 ## [0.5.53.189] - 2026-07-03
 
 ### Fixed (product FAQ rendered French for EN visitors — theme i18n on draft 160655114345)

@@ -1,4 +1,7 @@
-// Fix FAQ i18n on the DRAFT theme 160655114345 ONLY.
+// Fix FAQ i18n on the DRAFT theme 160656818281 ONLY.
+// NOTE: originally targeted 160655114345, but that was an abandoned empty-shell
+// draft; the real working draft ("Copie de LIVE NOW", premium desktop design) is
+// 160656818281. Applied there 2026-07-03 (all 3 assets HTTP 200 + verified).
 // 1) add faq.* keys to locales/en.default.json + locales/fr.json
 // 2) convert snippets/agentic-faq.liquid hardcoded FR strings -> {{ ... | t }}
 // Gated: refuses unless draft is unpublished and live 160606093417 is main.
@@ -12,7 +15,7 @@ function loadEnv() {
 }
 const env = loadEnv();
 const STORE = "27u5y2-kp.myshopify.com", API = "2024-01";
-const DRAFT = "160655114345", LIVE = "160606093417";
+const DRAFT = "160656818281", LIVE = "160606093417";
 const H = { "X-Shopify-Access-Token": env.SHOPIFY_ACCESS_TOKEN, "Content-Type": "application/json" };
 const APPLY = process.argv.includes("--apply");
 
