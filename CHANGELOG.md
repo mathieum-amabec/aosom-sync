@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.192] - 2026-07-03
+
+### Fixed (flaky auth tests — order-dependent mock leak in the full vitest run)
+- **`src/app/api/slideshow/__tests__/generate.test.ts`** and
+  **`tests/queue-reel-route.test.ts`**: the auth tests (401 unauthenticated / 403
+  reviewer) called the `mockAll()` helper — which does `vi.doMock("@/lib/auth", …admin)`
+  — and then stacked a **second** `vi.doMock("@/lib/auth", …)` to override it. That
+  double-registration of the same module is order-dependent: it wins in isolation but
+  intermittently loses to module-registry state left by earlier files in a full
+  `vitest run`, so the route saw the admin mock and returned 200 instead of 401/403.
+- **Fix:** thread the auth state through `mockAll` (new `auth`/`authOver` param) so each
+  test registers `@/lib/auth` **exactly once**. No behavior change, tests only.
+- Verified: file passes in isolation, and **5 consecutive full `vitest run`s are
+  1303/1303 green** (previously flaked ~1 in 2). Test-only change; merging deploys nothing.
+
 ## [0.5.53.191] - 2026-07-03
 
 ### Added — lifestyle classifier v2: NO_LIFESTYLE recheck across all image positions

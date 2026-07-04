@@ -27,10 +27,16 @@ const req = (body: Record<string, unknown>) =>
 function mockAll(
   dbOver: Record<string, unknown> = {},
   schedulerOver: Record<string, unknown> = {},
+  authOver: { authenticated?: boolean; role?: string } = {},
 ) {
+  // Auth mocked EXACTLY ONCE (state via authOver) — never stack a second
+  // vi.doMock("@/lib/auth") in a test. The double-registration leaked the admin
+  // mock into the unauth case on full-suite runs (passed in isolation).
+  const authenticated = authOver.authenticated ?? true;
+  const role = authOver.role ?? "admin";
   vi.doMock("@/lib/auth", () => ({
-    isAuthenticated: vi.fn().mockResolvedValue(true),
-    getSessionRole: vi.fn().mockResolvedValue("admin"),
+    isAuthenticated: vi.fn().mockResolvedValue(authenticated),
+    getSessionRole: vi.fn().mockResolvedValue(role),
   }));
   vi.doMock("@/lib/config", () => ({
     VIDEO_RATIOS: ["9:16", "1:1", "16:9"],
@@ -185,8 +191,7 @@ describe("POST /api/social/queue-reel", () => {
   });
 
   it("401 when unauthenticated", async () => {
-    mockAll();
-    vi.doMock("@/lib/auth", () => ({ isAuthenticated: vi.fn().mockResolvedValue(false), getSessionRole: vi.fn() }));
+    mockAll({}, {}, { authenticated: false });
     const { POST } = await import("@/app/api/social/queue-reel/route");
     const res = await POST(req({ sku: "824-051V80BK", ratio: "9:16", language: "fr" }));
     expect(res.status).toBe(401);
