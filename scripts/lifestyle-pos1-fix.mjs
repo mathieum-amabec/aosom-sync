@@ -15,6 +15,9 @@ const env = loadEnv();
 const STORE = "27u5y2-kp.myshopify.com", API = "2024-01", TOKEN = env.SHOPIFY_ACCESS_TOKEN;
 const TAG = "lifestyle-verified";
 const APPLY = process.argv.includes("--apply");
+const planIdx = process.argv.indexOf("--plan");
+const PLAN_NAME = planIdx >= 0 ? process.argv[planIdx + 1] : "lifestyle-pos1-plan.json";
+const BASE = PLAN_NAME.replace(/\.json$/, "");
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 let last = 0;
@@ -31,8 +34,8 @@ async function api(path, opts = {}) {
 const getImages = async (id) => ((await api(`/products/${id}/images.json`)).images || []).slice().sort((a, b) => a.position - b.position);
 const stem = (src) => (src || "").split("?")[0];
 
-const plan = JSON.parse(readFileSync(new URL("../lifestyle-pos1-plan.json", import.meta.url), "utf8"));
-const CK = new URL("../lifestyle-pos1-fix.checkpoint.jsonl", import.meta.url);
+const plan = JSON.parse(readFileSync(new URL(`../${PLAN_NAME}`, import.meta.url), "utf8"));
+const CK = new URL(`../${BASE}.checkpoint.jsonl`, import.meta.url);
 const done = new Set();
 if (existsSync(CK)) for (const l of readFileSync(CK, "utf8").split(/\r?\n/)) { if (!l.trim()) continue; try { const o = JSON.parse(l); if (o.ok) done.add(o.key); } catch {} }
 
@@ -95,6 +98,6 @@ for (const u of plan.untags) {
   } catch (e) { console.log(`  [untag FAIL] ${u.handle}: ${e.message}`); csv.push(["untag", u.id, u.handle, "", "", "ERROR:" + e.message].map(cell).join(",")); failed++; }
 }
 
-writeFileSync(new URL("../lifestyle-pos1-fix.dryrun.csv", import.meta.url), csv.join("\n"));
-console.log(`\n${APPLY ? "APPLIED" : "DRY-RUN"} DONE. swapOk=${swapOk} untagOk=${untagOk} skipped=${skipped} failed=${failed}. CSV: lifestyle-pos1-fix.dryrun.csv`);
+writeFileSync(new URL(`../${BASE}.dryrun.csv`, import.meta.url), csv.join("\n"));
+console.log(`\n${APPLY ? "APPLIED" : "DRY-RUN"} DONE. swapOk=${swapOk} untagOk=${untagOk} skipped=${skipped} failed=${failed}. CSV: ${BASE}.dryrun.csv`);
 if (failed) process.exitCode = 1;

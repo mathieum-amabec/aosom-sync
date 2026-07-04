@@ -1,0 +1,70 @@
+{
+  "round": 2,
+  "note": "strict re-check false negatives",
+  "swaps": [
+    {
+      "id": "9365036367977",
+      "handle": "base-parasol-demi-lune-motif-floral-bronze",
+      "title": "Base de parasol demi-lune 20 livres motif floral — bronze",
+      "action": "swap",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/qUV4ea19494546e15_0bc0d553-5be4-4aac-b827-ebfb4361aa20.jpg",
+      "target_position_at_scan": 14,
+      "target_conf": 0.82,
+      "pos1_verdict": "multi_panel_collage"
+    },
+    {
+      "id": "9371100905577",
+      "handle": "rideaux-lateraux-gazebo-10x12",
+      "title": "Rideaux de gazebo de remplacement 10' x 12'",
+      "action": "swap",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/KYU57e19d454ac91b.jpg",
+      "target_position_at_scan": 14,
+      "target_conf": 0.88,
+      "pos1_verdict": "multi_panel_collage"
+    }
+  ],
+  "untags": [
+    {
+      "id": "7751785775209",
+      "handle": "voiture-electrique-police-12v-pour-2-enfants-avec-telecommande",
+      "title": "Auto électrique police 2 places 12V",
+      "action": "untag",
+      "pos1_verdict": "other"
+    },
+    {
+      "id": "7796432633961",
+      "handle": "climatiseur-portable-10-000-btu-4-en-1-avec-minuterie-24h",
+      "title": "Climatiseur portable 10 000 BTU multifonction avec minuterie",
+      "action": "untag",
+      "pos1_verdict": "lifestyle_no_people+text"
+    },
+    {
+      "id": "7798393176169",
+      "handle": "climatiseur-portable-10000-btu-avec-ventilateur-et-deshumidificateur",
+      "title": "Climatiseur portable 10000 BTU avec déshumidificateur et ventilateur",
+      "action": "untag",
+      "pos1_verdict": "lifestyle_no_people+text"
+    },
+    {
+      "id": "9367414210665",
+      "handle": "vtt-electrique-enfant-6v-musique-phares",
+      "title": "VTT électrique enfant 6V avec musique et phares",
+      "action": "untag",
+      "pos1_verdict": "multi_panel_collage"
+    },
+    {
+      "id": "9371101167721",
+      "handle": "climatiseur-portatif-8000-btu-deshumidificateur-telecommande",
+      "title": "Climatiseur portatif 8000 BTU avec déshumidificateur et télécommande",
+      "action": "untag",
+      "pos1_verdict": "lifestyle_no_people+text"
+    },
+    {
+      "id": "9371101266025",
+      "handle": "climatiseur-portatif-8000-btu-4-fonctions-minuterie",
+      "title": "Climatiseur portatif 8 000 BTU 4 fonctions avec minuterie",
+      "action": "untag",
+      "pos1_verdict": "lifestyle_no_people+text"
+    }
+  ]
+}
