@@ -25,9 +25,16 @@ All notable changes to Aosom Sync will be documented in this file.
   `rabais-lifestyle` (tag==lifestyle-verified AND variant_compare_at_price>0 → **32**).
   NOTE: the live `rabais` is disjunctive (compare_at>0 OR tag sale OR tag rabais); Shopify can't
   AND a tag with an OR-group, so `rabais-lifestyle` uses the compare_at signal (32 of rabais' 34).
-- **NOT DONE (awaiting approval)**: the draft-theme `templates/index.json` section rewrite
-  (`featured_sale` / `featured_collection2` → the new collections) is deliberately unshipped —
-  Phase 3 STEP 5. Product-data + tag + collection change; merging this PR deploys nothing.
+- **Phase 3 STEP 5 (done, DRAFT only)** — `lifestyle-theme-step5.mjs` repointed two homepage
+  sections in `templates/index.json` on the **draft theme `160656818281` only** (role-gated,
+  never live `160606093417`): `featured_sale` `rabais`→`rabais-lifestyle` and
+  `featured_collection2` `nouveaux-arrivages`→`nouveaux-arrivages-lifestyle` (PUT 200 + verified).
+  The change lives on the draft; it reaches shoppers only when that theme is published (separate
+  operator decision). Merging this PR still deploys nothing (scripts + data; Shopify tags,
+  collections, and the draft-theme edit are already applied out-of-band).
+- `rabais-lifestyle` count is **32**, which is the true `rabais ∩ lifestyle-verified` — the 2
+  products short of rabais' 34 are genuinely non-lifestyle (a white-bg 12V toy car =
+  STILL_NO_LIFESTYLE, a text-overlay gazebo = SWAP_TEXT), correctly excluded.
 
 ### Fixed (flaky auth tests — order-dependent mock leak in the full vitest run)
 - **`src/app/api/slideshow/__tests__/generate.test.ts`** and
