@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.195] - 2026-07-04
+
+### Fixed — forbidden supplier names still visible on the EN storefront (translations layer PR #331 missed)
+- Pre-publication visual audit of the draft theme caught "Outsunny"/"Aosom" STILL rendering on
+  EN product pages. Root cause: the /en storefront renders Shopify's **native Translate & Adapt
+  translations** (`translation.title`, `translation.body_html`, locale en), NOT the
+  `custom.*_en` metafields that PR #331 cleaned. The native translations were never touched.
+- **`scripts/supplier-name-cleanup-en-translations.mjs`** cleaned **648 fields across 473 products**:
+  94 native EN `title` + 86 native EN `body_html` (via `translationsRegister` with source digests)
+  + **468 `custom.meta_description_en`** SEO metafields (also never in #331's scope). Same validated
+  method (word-boundary removal + tidy; 185 sentence-subject/leading-noun fields Claude-rewritten).
+- **Result: 648/648 applied, 0 failed. Verified 0 remaining** via API re-scan (native translations
+  + meta) AND an 8-product EN storefront render sweep (0 dirty). Plan + apply checkpoint committed.
+- NB: my initial audit scan false-negatived here because a template-literal `\b` became a backspace
+  char; the fix script uses regex literals + a startup self-test guard. Content-only; deploys nothing.
+
 ## [0.5.53.194] - 2026-07-04
 
 ### Fixed — removed forbidden supplier brand names from product content (Aosom + 5 sub-brands)
