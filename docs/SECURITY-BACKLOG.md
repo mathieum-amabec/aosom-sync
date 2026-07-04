@@ -529,6 +529,56 @@ inline this branch.
 - **P3-8** Bump `isomorphic-dompurify` so bundled `dompurify` ≥3.4.0 (default-config `sanitize`,
   safe today).
 
+## Audit 2026-07-02 — branch `main` (daily, 8/10 gate)
+
+Scope: full daily audit over the delta since the 2026-06-28 run (lifestyle image classifier +
+pos-1 swap planner #323, theme-id re-point commits, product-type coherence, new operator
+scripts) plus a full re-verification of the entire surface — ~71 API routes, 12 crons, the
+slideshow/Remotion pipeline — via **4 parallel specialist auditors** (secrets, access-control,
+injection/SSRF/LLM/XSS, supply-chain/CI-CD), each with independent FP filtering at the 8/10 gate.
+**No P0/P1.** One new P2 and one new P3 surfaced; the rest of the surface re-confirmed clean.
+**8 consecutive audits with no P0/P1.**
+
+### New — P2-7: `/api/social` lets the `reviewer` role spend Anthropic credits (breaks the P2-4 admin-only-paid invariant) — ✅ RESOLVED (PR #324, v0.5.53.185, 2026-07-02)
+* **Severity:** MEDIUM  **Confidence:** 9/10  **Status:** RESOLVED
+* **Category:** OWASP A01 (Broken Access Control) / LLM cost amplification (financial risk, not DoS)
+* **File:** `src/app/api/social/route.ts:71` (`REVIEWER_BLOCKED_ACTIONS`), paid branches at `:279-288` (`test-prompt`) and `:77-90` (`generate` → `job4-social.ts:87 client.messages.create`)
+* **Description:** `/api/social` is in `REVIEWER_ALLOWED_PREFIXES` (`config.ts:328`), so a `reviewer` session reaches it. The POST handler blocks reviewers only for a subset of actions —
+  `REVIEWER_BLOCKED_ACTIONS = {approve, reject, schedule, publish, publish-multi, retry-channel, update, delete}` — which **omits `generate`, `test-prompt`, `test-facebook`, `test-instagram`**. Those actions call the paid Anthropic API with no `isAdmin()` gate and no rate limit. The sibling paid routes (`/api/import/generate:12`, `/api/blog/generate:294`) correctly use `isAdmin()`; this one predates / was missed by the P2-4 fix.
+* **Exploit scenario:** The `reviewer` login is a real seeded credential handed to **external Meta App Review**. A holder POSTs `{"action":"test-prompt","promptText":"<up to 2000 chars>"}` → unbounded arbitrary prompts billed to the store's `ANTHROPIC_API_KEY`; or `{"action":"generate","triggerType":"stock_highlight"}` → paid generation + a `facebook_drafts` row write. No per-IP/email rate limit on the route.
+* **Impact:** Uncapped third-party (semi-trusted external reviewer) spend on the store's Anthropic key; unsolicited draft rows.
+* **Recommendation:** Add `generate`, `test-prompt`, `test-facebook`, `test-instagram` to `REVIEWER_BLOCKED_ACTIONS`, **or** gate the paid branches with `isAdmin()`; add `checkRateLimit` to `test-prompt`/`generate` as defense-in-depth. (Report-only this run — no code changed.)
+* **Resolution (2026-07-02):** Fixed in **PR #324** (`fix(security): block reviewer from generate + test actions`, merged to `main` @ `108cefb`, **v0.5.53.185**). `src/app/api/social/route.ts:71` now includes `generate`, `test-prompt`, `test-facebook`, `test-instagram` in `REVIEWER_BLOCKED_ACTIONS` → all 12 mutating/paid actions return 403 for the `reviewer` role. Enum-completeness verified against the route's `switch(action)`; admin unaffected. **Follow-up (open):** add a regression test asserting reviewer→403 on the paid actions.
+
+### New — P3-10: Claude product `descriptionFr/En` → Shopify product `body_html` unsanitized (variant of P3-1)
+* **Severity:** LOW  **Confidence (gap present):** 9/10  **Confidence (real exploit):** ~3/10  **Status:** VERIFIED (defense-in-depth)
+* **File:** `src/lib/content-generator.ts:150-160` (`sanitizeHtml` is applied to the **Aosom source input**, not to the model output) and `:248-249` (model `descriptionFr/En` only `.slice(0,10000)`), then pushed to Shopify product `body_html`.
+* **Description:** Same class as P3-1 (blog). The dashboard preview *is* safe (`import/page.tsx:528` wraps in `DOMPurify.sanitize`), but the value written to Shopify is not server-sanitized. LLM output, admin/server-triggered, renders on the separate `ameublodirect.ca` Shopify storefront — low real-world exploitability, but warrants a sanitizer at the Shopify-write boundary.
+* **Recommendation:** Sanitize `descriptionFr/En` (allowlist dropping `script`/`style`/`on*`/`iframe`) before the product `body_html` write, mirroring the preview's DOMPurify — same fix shape as P3-1.
+
+### Verified clean (active verification, 4 independent auditors)
+- **Secrets / git history:** no hardcoded secrets or token literals in `src/`, `scripts/`, or any revision; `.env.local` + `.gstack/` gitignored; `.env.example` tracked with empty values; new operator scripts (`create-draft-theme`, `publish-draft-to-live`, `draft-theme-fix-*`, `turso-orphan-*`, `fix-primary-image`, `recover-checkpoint-from-log`, `plan-pos1-swaps`) read `process.env` only; `verify-meta-token.mjs` masks to last-6.
+- **Access control:** `proxy.ts` gates every non-static route outside `PUBLIC_PATHS` on the HMAC session cookie + reviewer 403. All public/cron-prefixed mutating/paid routes self-gate (`verifyCronSecret` or `isAdmin()`). IDOR: single-tenant app; `price-alert/confirm` + `waitlist/confirm` tokens are `crypto.randomUUID()` v4 + 24h TTL + single-use. Session + cron auth both constant-time, fail-closed.
+- **SQL injection:** none — parameterized `{sql,args}` throughout `database.ts`; dynamic `ORDER BY` via `switch` allowlist; `IN (?, ?…)` generated placeholders; template-literal SQL interpolates only code-defined column/boolean constants.
+- **Command injection:** none — ffmpeg via `spawn(binary, args[])` (no shell) across all render paths; every `-i` input is a local file; product images fetched via SSRF-guarded `downloadImage` before ffmpeg; `assertSafeMusicPath` (render.ts:534) confines `musicUrl` to `public/music`/`src/audio` (rejects `://`, traversal) and the HTTP route strips `musicUrl` to `undefined` (regression-tested against `169.254.169.254`).
+- **SSRF:** none reachable — `assertPublicHttpsUrl` re-checked per redirect hop (hop cap 3, 15s/15MB caps) rejects localhost/RFC-1918/link-local/`.internal`/`.local`; `/api/image-preview` layers an explicit CDN host allowlist; `video-serve` is DB-sourced + integer-id + http(s)-validated. (DNS-rebinding TOCTOU is theoretical only — hosts are DB/CDN-sourced.)
+- **XSS / XML injection:** none — sole `dangerouslySetInnerHTML` (`import/page.tsx:528`) is `DOMPurify.sanitize`-wrapped; all feed serializers `escapeXml` every product field; `/api/pixel/script` validates `pixelId` as `^[0-9]+$` before interpolation.
+- **Supply chain / CI-CD:** 0 critical / 0 reachable-high (`npm audit --omit=dev`: 0 crit, 1 high, 3 moderate — all non-reachable per below); both lockfiles git-tracked; the only workflow (`vercel-deploy.yml`) has no `pull_request_target`, no third-party `uses:`, secret scoped to push-to-main; all 12 `vercel.json` crons gated by `verifyCronSecret`; no committed build artifacts / `node_modules`.
+
+### Deferred / below-gate (unchanged from 2026-06-28)
+- **`undici` HIGH** (WebSocket-DoS 6.x via `@vercel/blob`; TLS-bypass/SOCKS5 7.x via `jsdom`←`isomorphic-dompurify`) — **not reachable** (no WebSocket/SOCKS5/ProxyAgent client; jsdom never loads in prod). Same non-reachable surface as prior; advisory IDs are newer entries, same package.
+- **`postcss` < 8.5.10** (MODERATE, build-time transitive via Next) and **`dompurify` ≤ 3.4.10 / P3-8** (MODERATE, needs attacker `setConfig`) — below the daily gate.
+- **`ffmpeg-static`** — informational: the only prod dep with an `install` hook (downloads the ffmpeg binary at install). Legitimate; lockfile integrity hashes cover it. Consider an exact version pin.
+
+### Persistent (still open from prior audits, re-confirmed)
+- **P2-3** `postcss` XSS via Next.js (build-time transitive; bump Next minor).
+- **P3-1** LLM **blog** HTML not server-sanitized before Shopify post (admin/server-triggered today) — plus new **P3-10** product-description variant above.
+- **P3-5 / P3-6** `/api/video-serve` `video_path` containment + redirect host-allowlist (pipeline-set values, safe today).
+- **P3-8** Bump `isomorphic-dompurify` so bundled `dompurify` ≥ 3.4.0 (default-config `sanitize`, safe today).
+
+### Trend
+Compared to 2026-06-28: **→ STABLE** (still 0 P0/P1, 8 consecutive clean-of-critical audits). P3-7, P2-4 (paid subset), and the `@anthropic-ai/sdk` advisory remain resolved. **New this run:** P2-7 (reviewer paid-spend — the one actionable item, **RESOLVED same-day in PR #324, v0.5.53.185**) and P3-10 (product-desc LLM variant, open). No regressions.
+
 ---
 **Disclaimer:** `/cso` is an AI-assisted scan that catches common patterns. It is not a
 substitute for a professional penetration test. For production systems handling PII or
