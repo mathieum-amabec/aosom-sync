@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.186] - 2026-07-02
+## [0.5.53.191] - 2026-07-03
 
 ### Added — lifestyle classifier v2: NO_LIFESTYLE recheck across all image positions
 - `scripts/classify-lifestyle-images-v2.mjs` (per-image) and
@@ -15,6 +15,83 @@ All notable changes to Aosom Sync will be documented in this file.
   checkpoint `lifestyle-classification-v2b-batch.checkpoint.jsonl` (434 records).
 - Classification-only: no Shopify writes, no pos-1 swaps applied. Branch stacks on #323
   (v0.5.53.184); version skips `.185` (on main) to avoid a collision.
+
+## [0.5.53.190] - 2026-07-03
+
+### Fixed (FAQ i18n script pointed at the wrong draft theme — footgun correction)
+- **`scripts/faq-i18n-apply.mjs`**: corrected the `DRAFT` constant from
+  `160655114345` (an abandoned empty-shell draft created by mistake in #319) to
+  the real working draft **`160656818281`** ("Copie de LIVE NOW", which carries the
+  premium desktop design). The v0.5.53.189 fix (#321) applied cleanly but to the
+  wrong theme; re-running the old script would have hit the dead shell again.
+- The i18n fix itself was **re-applied to `160656818281`** out-of-band (locales
+  `faq.*` added to en+fr, `agentic-faq.liquid` converted to `| t`; all 3 assets
+  HTTP 200 + content-verified). This commit only stops the script from pointing at
+  the wrong theme in the future. Store-level theme change; merging deploys nothing.
+
+## [0.5.53.189] - 2026-07-03
+
+### Fixed (product FAQ rendered French for EN visitors — theme i18n on draft 160655114345)
+The product-page FAQ (`snippets/agentic-faq.liquid`, rendered at
+`sections/main-product.liquid:225`) **hardcoded all its text in French** (title +
+4 Q/A via Liquid `assign`, zero `| t`), so EN visitors saw French — including the
+FAQPage JSON-LD fed from the same source.
+- **Fix (draft `160655114345`):** added a `faq.{title,q1..q4,a1..a4}` namespace to
+  **both** `locales/en.default.json` (EN) and `locales/fr.json` (FR), then converted the
+  snippet's hardcoded strings to `{{ '…' | t }}` (`q1` uses `| t: title: product.title`
+  for the interpolated product name). Single source preserved → visible accordion and
+  JSON-LD both localize together. Verified on the draft: `/en/` renders "Frequently asked
+  questions"; FR renders "Questions fréquentes".
+- **Draft provisioning fix (blocker resolved):** the draft `160655114345` created in
+  #319 (v0.5.53.180) was an **empty shell** — Shopify REST `POST /themes.json` **ignores
+  `source_theme_id`** (GraphQL-only, and no duplicate-by-id exists: `themeDuplicate` is not
+  a mutation; `themeCreate`/REST `src` need a zip URL). Populated it **in place** by copying
+  all 410 live assets via REST (`scripts/theme-copy-assets.mjs`, order-retried the 2
+  `*-group.json` files). `DRAFT_THEME_ID` stays `160655114345` (no re-point needed).
+- Read-only live `160606093417`; all writes to the draft. Scripts: `faq-i18n-diagnose.mjs`,
+  `faq-i18n-step3.mjs`, `faq-i18n-apply.mjs`, `theme-copy-assets.mjs`. Store-level theme
+  change; merging deploys nothing.
+
+## [0.5.53.188] - 2026-07-03
+
+### Added (EN translations for taxonomy collections + menu nav — bilingual gap fix)
+- **New `scripts/register-en-translations.mts`** — registers missing EN `title`
+  translations via the Shopify Translations API (`translationsRegister`), throttled
+  ~1.9 req/s. Zero theme edits — data only. Dry-run by default; `--apply` writes.
+- **Context**: store is FR-primary with EN published as a live locale, but the
+  taxonomy refonte shipped its collections + menus with **no EN titles**, so English
+  shoppers saw French category names in nav and on collection pages (P0 from the
+  bilingual audit).
+- **Registered 96 EN titles, 0 failures**: **46 category collections** (all that were
+  missing EN — store now 0/72 missing) + **50 navigation LINK labels** (the 41
+  `taxonomie-categories` items plus 9 identical labels duplicated in
+  `main-menu`/`preview-main-menu`, for a consistent EN nav). Menu labels are LINK
+  resources (`gid://shopify/Link/…`), not `MenuItem`.
+- Verified: 5 sampled collections resolve EN via the Translations API; full-store
+  recount confirms 0 collections without an EN title.
+
+## [0.5.53.187] - 2026-07-02
+
+### Changed — lifestyle pos-1 swap, 324 products (v2, extended positions)
+- Executed pos-1 image swaps for the **324 `SWAP_CLEAN`** products from the v2 recheck
+  (clean lifestyle photo found beyond the first 4 positions). Each product's best lifestyle
+  image moved to position 1 via `PUT /products/{id}/images/{image_id}` (position:1), 2 req/s,
+  verified by re-GET. **Result: 324/324 PUT 200, 324 verified, 0 failed, 0 swapped twice.**
+- `scripts/build-pos1-plan-v2.mjs` (GET-only plan builder, resumable) →
+  `pos1-swap-plan-clean324.json`; `scripts/apply-pos1-swaps-v2.mjs` (executor, resumable,
+  per-product error skip) → `pos1-swap-report-v2.json`.
+- Product-data change (image order); independent of #325 (classification) and #323 (first 21).
+
+## [0.5.53.185] - 2026-07-02
+
+### Fixed (P2-7 — reviewer role could trigger generation + test posts)
+- **`api/social/route.ts`** — added `generate`, `test-prompt`, `test-facebook`,
+  `test-instagram` to `REVIEWER_BLOCKED_ACTIONS`. A `reviewer` session could
+  previously call these (content generation via Claude, and test posts to
+  Facebook/Instagram) since only the mutating queue actions were gated. Now all
+  write/side-effecting `POST /api/social` actions return 403 for `reviewer`.
+- Security backlog item **P3-10** left documented for later (exploitability 3/10,
+  low priority) — no code change here.
 
 ## [0.5.53.184] - 2026-07-01
 

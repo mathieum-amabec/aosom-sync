@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const REVIEWER_BLOCKED_ACTIONS = new Set(["approve", "reject", "schedule", "publish", "publish-multi", "retry-channel", "update", "delete"]);
+    const REVIEWER_BLOCKED_ACTIONS = new Set(["approve", "reject", "schedule", "publish", "publish-multi", "retry-channel", "update", "delete", "generate", "test-prompt", "test-facebook", "test-instagram"]);
     if (REVIEWER_BLOCKED_ACTIONS.has(action) && (await getSessionRole()) === "reviewer") {
       return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
     }
