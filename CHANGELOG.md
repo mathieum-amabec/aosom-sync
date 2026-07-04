@@ -2,7 +2,39 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.192] - 2026-07-03
+## [0.5.53.193] - 2026-07-04
+
+### Added — complete lifestyle catalog map + homepage "lifestyle-verified" filter (Phases 1-2 + tags/collections)
+- **Premise correction**: the catalog is **759 products total** (687 active + 70 draft + 2
+  archived), not ~980-1400. There are **zero never-scanned** products — v1 already covered all
+  759. The real unresolved set was **304** products (291 v1-SWAP never executed + 13 v1-OK)
+  that prior PRs left half-finished, not "~649 unscanned".
+- **Phase 1** — `lifestyle-map-catalog.mjs` buckets all 759; `lifestyle-classify-304(-batch).mjs`
+  re-classify the 304 with the validated v2 method (all positions + `has_text_overlay`,
+  claude-sonnet-4-6, READ-ONLY on Shopify), adding OK detection (clean lifestyle already at
+  pos-1). Result: **SWAP_CLEAN 259, OK 6, SWAP_TEXT 37, STILL_NO_LIFESTYLE 2**.
+  Consolidated into `lifestyle-catalog-status-complete.csv`.
+- **Phase 2** — `lifestyle-build-plan-304.mjs` + `lifestyle-apply-swaps-304.mjs` executed the
+  **259 new pos-1 swaps** (PUT position:1, verified by re-GET, 2 req/sec): **259/259 PUT 200,
+  259 verified, 0 failed**.
+- **Clean-pos-1 total: 610** = 345 (prior #323/#326) + 259 (new swaps) + 6 (already OK).
+  149 remain not-clean (78 SWAP_TEXT + 71 STILL_NO_LIFESTYLE).
+- **Phase 3 (tags + collections)** — tagged **`lifestyle-verified` on all 610** (merged, never
+  overwritten; 610/610 PUT 200). Created two published smart collections:
+  `nouveaux-arrivages-lifestyle` (tag==lifestyle-verified, created-desc → **610**) and
+  `rabais-lifestyle` (tag==lifestyle-verified AND variant_compare_at_price>0 → **32**).
+  NOTE: the live `rabais` is disjunctive (compare_at>0 OR tag sale OR tag rabais); Shopify can't
+  AND a tag with an OR-group, so `rabais-lifestyle` uses the compare_at signal (32 of rabais' 34).
+- **Phase 3 STEP 5 (done, DRAFT only)** — `lifestyle-theme-step5.mjs` repointed two homepage
+  sections in `templates/index.json` on the **draft theme `160656818281` only** (role-gated,
+  never live `160606093417`): `featured_sale` `rabais`→`rabais-lifestyle` and
+  `featured_collection2` `nouveaux-arrivages`→`nouveaux-arrivages-lifestyle` (PUT 200 + verified).
+  The change lives on the draft; it reaches shoppers only when that theme is published (separate
+  operator decision). Merging this PR still deploys nothing (scripts + data; Shopify tags,
+  collections, and the draft-theme edit are already applied out-of-band).
+- `rabais-lifestyle` count is **32**, which is the true `rabais ∩ lifestyle-verified` — the 2
+  products short of rabais' 34 are genuinely non-lifestyle (a white-bg 12V toy car =
+  STILL_NO_LIFESTYLE, a text-overlay gazebo = SWAP_TEXT), correctly excluded.
 
 ### Fixed (flaky auth tests — order-dependent mock leak in the full vitest run)
 - **`src/app/api/slideshow/__tests__/generate.test.ts`** and
