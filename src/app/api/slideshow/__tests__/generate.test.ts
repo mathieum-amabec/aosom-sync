@@ -42,10 +42,16 @@ const postReq = (body: Record<string, unknown>) =>
 
 const getReq = (qs: string) => new Request(`http://localhost/api/slideshow/preview?${qs}`);
 
-function mockAll(over: { build?: Record<string, unknown>; db?: Record<string, unknown>; scheduler?: Record<string, unknown> } = {}) {
+function mockAll(over: { build?: Record<string, unknown>; db?: Record<string, unknown>; scheduler?: Record<string, unknown>; auth?: { authenticated?: boolean; role?: string } } = {}) {
+  // Auth is mocked EXACTLY ONCE here (state threaded via over.auth) so tests never
+  // stack a second vi.doMock("@/lib/auth") on top — that double-registration was
+  // order-dependent and leaked the admin mock into the unauth/reviewer cases on
+  // full-suite runs (passed in isolation). One doMock per module = deterministic.
+  const authenticated = over.auth?.authenticated ?? true;
+  const role = over.auth?.role ?? "admin";
   vi.doMock("@/lib/auth", () => ({
-    isAuthenticated: vi.fn().mockResolvedValue(true),
-    getSessionRole: vi.fn().mockResolvedValue("admin"),
+    isAuthenticated: vi.fn().mockResolvedValue(authenticated),
+    getSessionRole: vi.fn().mockResolvedValue(role),
   }));
   vi.doMock("@/lib/config", () => ({
     VIDEO_RATIOS: ["9:16", "1:1", "16:9"],
@@ -195,19 +201,14 @@ describe("POST /api/slideshow/generate", () => {
   });
 
   it("401 when unauthenticated", async () => {
-    mockAll();
-    vi.doMock("@/lib/auth", () => ({ isAuthenticated: vi.fn().mockResolvedValue(false), getSessionRole: vi.fn() }));
+    mockAll({ auth: { authenticated: false } });
     const { POST } = await import("@/app/api/slideshow/generate/route");
     const res = await POST(postReq({ template: "BEST_SELLERS", dryRun: true }));
     expect(res.status).toBe(401);
   });
 
   it("403 for reviewers", async () => {
-    mockAll();
-    vi.doMock("@/lib/auth", () => ({
-      isAuthenticated: vi.fn().mockResolvedValue(true),
-      getSessionRole: vi.fn().mockResolvedValue("reviewer"),
-    }));
+    mockAll({ auth: { role: "reviewer" } });
     const { POST } = await import("@/app/api/slideshow/generate/route");
     const res = await POST(postReq({ template: "BEST_SELLERS", dryRun: true }));
     expect(res.status).toBe(403);
@@ -241,19 +242,14 @@ describe("GET /api/slideshow/preview", () => {
   });
 
   it("401 when unauthenticated", async () => {
-    mockAll();
-    vi.doMock("@/lib/auth", () => ({ isAuthenticated: vi.fn().mockResolvedValue(false), getSessionRole: vi.fn() }));
+    mockAll({ auth: { authenticated: false } });
     const { GET } = await import("@/app/api/slideshow/preview/route");
     const res = await GET(getReq("template=BEST_SELLERS"));
     expect(res.status).toBe(401);
   });
 
   it("403 for reviewers (read-only, blocked like generate)", async () => {
-    mockAll();
-    vi.doMock("@/lib/auth", () => ({
-      isAuthenticated: vi.fn().mockResolvedValue(true),
-      getSessionRole: vi.fn().mockResolvedValue("reviewer"),
-    }));
+    mockAll({ auth: { role: "reviewer" } });
     const { GET } = await import("@/app/api/slideshow/preview/route");
     const res = await GET(getReq("template=BEST_SELLERS"));
     expect(res.status).toBe(403);
