@@ -1,0 +1,293 @@
+{
+  "generated_from": "lifestyle pos-1 vision scan (claude-sonnet-4-6)",
+  "collection": "nouveaux-arrivages-lifestyle (476206760041)",
+  "tag": "lifestyle-verified",
+  "swaps": [
+    {
+      "id": "9376661471337",
+      "handle": "support-c-chaise-hamac-acier-interieur-exterieur",
+      "title": "Support en C pour chaise hamac intérieur/extérieur",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/Fmc756185616aafdf_15a628d1-dc20-43c1-8f27-354b784b4078.jpg",
+      "target_position_at_scan": 6,
+      "target_conf": 0.97
+    },
+    {
+      "id": "9371100872809",
+      "handle": "toilette-portable-camping-chasse-eau-20l",
+      "title": "Toilette portable de camping avec chasse d'eau 20 L",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/ytr90f1983bdde68b_dbd94c1d-5670-44af-9429-113959712231.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.92
+    },
+    {
+      "id": "9371092680809",
+      "handle": "excavatrice-porteur-enfant-rangement-sons",
+      "title": "Excavatrice porteur enfant avec rangement et sons",
+      "action": "swap",
+      "pos1_verdict": "lifestyle_with_people",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/NQOdc819e8cd47ea5_bfd48fec-7739-46c1-bb6c-e53e480d02ea.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.92
+    },
+    {
+      "id": "9369986302057",
+      "handle": "armoire-rangement-39-tiroirs-montage-mural",
+      "title": "Armoire de rangement 39 tiroirs montage mural",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/PnHcf619495e7f8b2_e2856883-52d7-4a8d-b652-96729a249ac5.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.95
+    },
+    {
+      "id": "9371100545129",
+      "handle": "socle-parasol-ciment-rond-20kg",
+      "title": "Socle de parasol en ciment rond 20 kg résistant",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/CCIf6119f1ea318a0.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.97
+    },
+    {
+      "id": "9369986170985",
+      "handle": "parc-chien-octogonal-8-panneaux-pliable",
+      "title": "Parc pour chien octogonal 8 panneaux pliable",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/b6026e194961d334a_0c153c50-5bce-46e6-be6a-34f55f1037e5.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.97
+    },
+    {
+      "id": "9365034532969",
+      "handle": "parasol-marche-bambou-305-cm",
+      "title": "Parasol de marché rond bambou 305 cm",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/CdWaf41949478e95f_f300d422-8fcd-4b4a-bd34-a1401f2359df.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.97
+    },
+    {
+      "id": "9369985745001",
+      "handle": "table-patio-verre-trempe-trou-parasol",
+      "title": "Table de patio en verre trempé avec trou pour parasol",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/hiRccb1949342504b_cd26c012-afe6-47ab-a801-45245e415cb1.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.98
+    },
+    {
+      "id": "7752211693673",
+      "handle": "kart-a-pedales-enfant-avec-frein-a-main-et-siege-ajustable",
+      "title": "Kart à pédales pour enfants avec freins",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/d7ae4d196ceec8ac3_b59e554a-bc3e-422c-bd24-eb8e30502b21.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.95
+    },
+    {
+      "id": "7798394028137",
+      "handle": "ventilateur-sur-pied-avec-telecommande-ventilateur-electrique-ajustable",
+      "title": "Ventilateur sur pied avec télécommande hauteur réglable",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/cpT491194960d084c_cb791c99-f297-40b8-a029-6c06061a49a7.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.97
+    },
+    {
+      "id": "9365033975913",
+      "handle": "parasol-terrasse-inclinable-kaki",
+      "title": "Parasol de terrasse inclinable avec 6 baleines — kaki",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/Eqqfb719eaade6256.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.98
+    },
+    {
+      "id": "7793456087145",
+      "handle": "bac-de-jardinage-sureleve-en-acier-galvanise-avec-barres-renforcees",
+      "title": "Jardinière surélevée acier galvanisé avec tiges renforcées 180cm",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/GlE1e7196ae984d5a.jpg",
+      "target_position_at_scan": 13,
+      "target_conf": 0.97
+    },
+    {
+      "id": "9359656648809",
+      "handle": "gazebo-bbq-courbe-7x5",
+      "title": "Gazebo BBQ courbé 7' x 5'",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/C4i39019ed9f7cac0_538749ba-5733-4d98-8baa-d00791cbe8ea.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.97
+    },
+    {
+      "id": "7752210612329",
+      "handle": "parasol-deporte-carre-245x245-cm-avec-rotation-360",
+      "title": "Parasol déporté carré 245 cm rotation 360°",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/aXM29c19495542ae5_72d69971-6513-4ca7-b286-7f7c49940ee6.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.97
+    },
+    {
+      "id": "7752205467753",
+      "handle": "ensemble-de-2-tabourets-de-bar-cuir-pu-vintage-style-retro",
+      "title": "Tabourets de bar hauteur comptoir ensemble de 2",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/WFH436194969db3e7_c140334d-3695-4050-89e4-0ed6f1655049.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.97
+    },
+    {
+      "id": "7752208121961",
+      "handle": "parasol-deporte-8-5-pi-avec-base-rotation-360-patio-jardin",
+      "title": "Parasol déporté cantilever 8,5 pieds avec base",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/ApVe49194930bd0c3_446a53cd-9c48-4110-8654-2f41a0d0efdd.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.97
+    },
+    {
+      "id": "7752189968489",
+      "handle": "enclos-exterieur-pour-chat-catio-en-bois-avec-toit-asphalte",
+      "title": "Enclos extérieur pour chats avec 6 plateformes",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/HVodae19493b01fe2.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.95
+    },
+    {
+      "id": "7752191901801",
+      "handle": "poussette-3-roues-pliable-pour-petits-chiens-avec-auvent-ajustable",
+      "title": "Poussette pour chiens 3 roues pliable avec auvent ajustable",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/io71cb19a28947d32_4890351b-a9d9-43a5-bd1e-5e9a8406de8f.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.97
+    },
+    {
+      "id": "7752210186345",
+      "handle": "parasol-de-patio-195x295cm-avec-eclairage-solaire-led",
+      "title": "Parasol de patio rectangulaire avec éclairage DEL solaire 195x295cm",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/NdGd721949342545b.jpg",
+      "target_position_at_scan": 14,
+      "target_conf": 0.97
+    },
+    {
+      "id": "7752194162793",
+      "handle": "chaise-de-bureau-mi-hauteur-en-velours-avec-dossier-coquille",
+      "title": "Chaise de bureau mi-hauteur velours forme festonnée pivotante",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/wfcd0419ec3a7edfd.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.98
+    },
+    {
+      "id": "7752198029417",
+      "handle": "tricycle-4-en-1-poussette-convertible-pour-tout-petits-1-5-ans",
+      "title": "Tricycle évolutif 5-en-1 pour tout-petits",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/WCN1e119ed7d48d9b_957b8613-ae07-43f8-ab9c-b552ba903fe4.jpg",
+      "target_position_at_scan": 14,
+      "target_conf": 0.97
+    },
+    {
+      "id": "7752196096105",
+      "handle": "moto-electrique-enfant-12v-avec-roues-dentrainement",
+      "title": "Moto électrique enfant 12V roues amovibles",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/8LB44f19496674a87_f282a4f6-3e44-4ae5-9074-330a798bb707.jpg",
+      "target_position_at_scan": 14,
+      "target_conf": 0.95
+    },
+    {
+      "id": "7736570347625",
+      "handle": "gazebo-exterieur-3x4m-double-toit-gris-livraison-gratuite",
+      "title": "Gazebo extérieur double toit 305 x 396 cm",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/3rH59119f129e5b46.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.97
+    },
+    {
+      "id": "7752188985449",
+      "handle": "buffet-avec-tiroirs-et-portes-rangement-cuisine-design",
+      "title": "Buffet laqué avec tiroirs et portes push-open",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/cca19a196b423c6a6.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.97
+    },
+    {
+      "id": "7752189280361",
+      "handle": "maison-pour-chat-2-etages-exterieur-catio-bois-avec-toit-ouvrant",
+      "title": "Maison pour chat extérieure 2 étages avec toit ouvrant",
+      "action": "swap",
+      "pos1_verdict": "lifestyle_no_people+text",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/DmS212194949c3df8_963911fd-d933-4afb-aa32-fe1e62254361.jpg",
+      "target_position_at_scan": 14,
+      "target_conf": 0.97
+    },
+    {
+      "id": "7751753203817",
+      "handle": "chaise-de-bureau-en-velours-fauteuil-pivotant-rembourre",
+      "title": "Chaise bureau velours style français boutons cristal",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/Ick3e71949530dbe3.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.98
+    },
+    {
+      "id": "7752180269161",
+      "handle": "bureau-dordinateur-119-cm-avec-tiroirs-et-classeur-mobile",
+      "title": "Bureau informatique tiroirs amovibles 47 po",
+      "action": "swap",
+      "pos1_verdict": "white_background",
+      "target_url": "https://cdn.shopify.com/s/files/1/0678/1327/7801/files/5zw4b619bda64b165.jpg",
+      "target_position_at_scan": 7,
+      "target_conf": 0.98
+    }
+  ],
+  "untags": [
+    {
+      "id": "9371101495401",
+      "handle": "chariot-kayak-aluminium-largeur-ajustable",
+      "title": "Chariot de kayak aluminium à largeur ajustable",
+      "action": "untag",
+      "pos1_verdict": "lifestyle_with_people"
+    },
+    {
+      "id": "7788348964969",
+      "handle": "chaise-de-bureau-massage-inclinable-dossier-haut-executif",
+      "title": "Fauteuil bureau massant inclinable dossier haut pivotant",
+      "action": "untag",
+      "pos1_verdict": "white_background"
+    }
+  ]
+}
