@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.188] - 2026-07-03
+
+### Added (EN translations for taxonomy collections + menu nav — bilingual gap fix)
+- **New `scripts/register-en-translations.mts`** — registers missing EN `title`
+  translations via the Shopify Translations API (`translationsRegister`), throttled
+  ~1.9 req/s. Zero theme edits — data only. Dry-run by default; `--apply` writes.
+- **Context**: store is FR-primary with EN published as a live locale, but the
+  taxonomy refonte shipped its collections + menus with **no EN titles**, so English
+  shoppers saw French category names in nav and on collection pages (P0 from the
+  bilingual audit).
+- **Registered 96 EN titles, 0 failures**: **46 category collections** (all that were
+  missing EN — store now 0/72 missing) + **50 navigation LINK labels** (the 41
+  `taxonomie-categories` items plus 9 identical labels duplicated in
+  `main-menu`/`preview-main-menu`, for a consistent EN nav). Menu labels are LINK
+  resources (`gid://shopify/Link/…`), not `MenuItem`.
+- Verified: 5 sampled collections resolve EN via the Translations API; full-store
+  recount confirms 0 collections without an EN title.
+
 ## [0.5.53.187] - 2026-07-02
 
 ### Changed — lifestyle pos-1 swap, 324 products (v2, extended positions)
