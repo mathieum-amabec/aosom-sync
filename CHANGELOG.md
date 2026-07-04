@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.182] - 2026-07-01
+## [0.5.53.189] - 2026-07-03
 
 ### Fixed (product FAQ rendered French for EN visitors — theme i18n on draft 160655114345)
 The product-page FAQ (`snippets/agentic-faq.liquid`, rendered at
@@ -24,6 +24,76 @@ FAQPage JSON-LD fed from the same source.
 - Read-only live `160606093417`; all writes to the draft. Scripts: `faq-i18n-diagnose.mjs`,
   `faq-i18n-step3.mjs`, `faq-i18n-apply.mjs`, `theme-copy-assets.mjs`. Store-level theme
   change; merging deploys nothing.
+
+## [0.5.53.188] - 2026-07-03
+
+### Added (EN translations for taxonomy collections + menu nav — bilingual gap fix)
+- **New `scripts/register-en-translations.mts`** — registers missing EN `title`
+  translations via the Shopify Translations API (`translationsRegister`), throttled
+  ~1.9 req/s. Zero theme edits — data only. Dry-run by default; `--apply` writes.
+- **Context**: store is FR-primary with EN published as a live locale, but the
+  taxonomy refonte shipped its collections + menus with **no EN titles**, so English
+  shoppers saw French category names in nav and on collection pages (P0 from the
+  bilingual audit).
+- **Registered 96 EN titles, 0 failures**: **46 category collections** (all that were
+  missing EN — store now 0/72 missing) + **50 navigation LINK labels** (the 41
+  `taxonomie-categories` items plus 9 identical labels duplicated in
+  `main-menu`/`preview-main-menu`, for a consistent EN nav). Menu labels are LINK
+  resources (`gid://shopify/Link/…`), not `MenuItem`.
+- Verified: 5 sampled collections resolve EN via the Translations API; full-store
+  recount confirms 0 collections without an EN title.
+
+## [0.5.53.187] - 2026-07-02
+
+### Changed — lifestyle pos-1 swap, 324 products (v2, extended positions)
+- Executed pos-1 image swaps for the **324 `SWAP_CLEAN`** products from the v2 recheck
+  (clean lifestyle photo found beyond the first 4 positions). Each product's best lifestyle
+  image moved to position 1 via `PUT /products/{id}/images/{image_id}` (position:1), 2 req/s,
+  verified by re-GET. **Result: 324/324 PUT 200, 324 verified, 0 failed, 0 swapped twice.**
+- `scripts/build-pos1-plan-v2.mjs` (GET-only plan builder, resumable) →
+  `pos1-swap-plan-clean324.json`; `scripts/apply-pos1-swaps-v2.mjs` (executor, resumable,
+  per-product error skip) → `pos1-swap-report-v2.json`.
+- Product-data change (image order); independent of #325 (classification) and #323 (first 21).
+
+## [0.5.53.185] - 2026-07-02
+
+### Fixed (P2-7 — reviewer role could trigger generation + test posts)
+- **`api/social/route.ts`** — added `generate`, `test-prompt`, `test-facebook`,
+  `test-instagram` to `REVIEWER_BLOCKED_ACTIONS`. A `reviewer` session could
+  previously call these (content generation via Claude, and test posts to
+  Facebook/Instagram) since only the mutating queue actions were gated. Now all
+  write/side-effecting `POST /api/social` actions return 403 for `reviewer`.
+- Security backlog item **P3-10** left documented for later (exploitability 3/10,
+  low priority) — no code change here.
+
+## [0.5.53.184] - 2026-07-01
+
+### Added — lifestyle image classifier (catalogue tooling, read-only on Shopify)
+- `scripts/classify-lifestyle-images.mjs`: classifies the first 4 images of every
+  Shopify product via Claude Vision (`claude-sonnet-4-6`) into
+  `white_background` / `lifestyle_no_people` / `lifestyle_with_people` / `detail` / `other`,
+  plus a `has_text_overlay` flag (marketing text burned into the image). GET-only on
+  Shopify, rate-limited (Shopify 2 req/s, Claude 1 req/s), resumable via a per-product
+  checkpoint (`lifestyle-classification.checkpoint.jsonl`).
+- `scripts/plan-pos1-swaps.mjs`: DRY-RUN planner — computes the pos-1 reorder (move the
+  clean lifestyle hero to position 1) for the clean-hero SWAP set. GET-only; emits
+  `pos1-swap-plan-clean21.json`. Applies no writes.
+- `scripts/recover-checkpoint-from-log.mjs`: one-off recovery of a killed run's checkpoint
+  from its stderr log (re-fetches image URLs only).
+- Data: `lifestyle-classification-first759.csv` + `.detail.json` — full classification of
+  all 759 products (SWAP 312 / NO_LIFESTYLE 434 / OK 13; 21 clean-hero swap candidates).
+  `pos1-swap-plan-clean21.json` — the 21-product dry-run swap plan.
+- No Shopify writes performed; no pos-1 swaps applied (pending approval).
+
+## [0.5.53.183] - 2026-07-01
+
+### Changed (theme IDs — re-point DRAFT to the real live copy 160656818281)
+- `scripts/_shopify-lib.mjs`: **`DRAFT_THEME_ID` `160655114345` → `160656818281`**
+  ("Copie de LIVE NOW", a real full copy of the live theme, verified `role:unpublished`
+  with 410 assets). `LIVE_THEME_ID` unchanged (`160606093417` = "LIVE NOW", `role:main`).
+  Comment refreshed; all references to the superseded `160655114345` removed from the file.
+- Version skips `.182` (claimed by the in-flight FAQ-i18n PR #321) to avoid a collision.
+- Config-constant change only; no store writes here.
 
 ## [0.5.53.181] - 2026-07-01
 
