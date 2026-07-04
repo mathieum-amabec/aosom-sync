@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.194] - 2026-07-04
+
+### Fixed — removed forbidden supplier brand names from product content (Aosom + 5 sub-brands)
+- Diagnostic found the forbidden supplier names in product descriptions (never titles):
+  **Aosom in 406 products** (strictly forbidden), Outsunny 92, Qaba 23, HOMCOM/PawHut/Vinsetto 0.
+  Concentrated in the EN body metafield (`custom.body_html_en`) + some FR bodies; 0 in titles.
+- **`scripts/supplier-name-cleanup-apply.mjs`** removed all 6 names across **507 products**
+  (union), via `productUpdate` (FR `descriptionHtml` + `custom.title_en`/`custom.body_html_en`
+  metafields), 2 req/sec, resumable. **507/507 updated, 0 failed. Post-scan: 0 products still
+  contain any forbidden name.**
+- Method: scripted word-boundary removal + whitespace/punctuation tidy + drop of dangling
+  "prep + Name" before punctuation (628 of 635 field-changes). The **7 sentence-subject fields**
+  (where a name was the grammatical subject, e.g. "Aosom offers a base") were **Claude-rewritten**
+  to restore grammar ("This base features…") — see `supplier-rewrites-7.json`. Full before/after
+  audit in `supplier-cleanup-dryrun-6names.csv`.
+- Content-only change (Shopify product data + metafields); merging deploys nothing.
+
 ## [0.5.53.193] - 2026-07-04
 
 ### Added — complete lifestyle catalog map + homepage "lifestyle-verified" filter (Phases 1-2 + tags/collections)
