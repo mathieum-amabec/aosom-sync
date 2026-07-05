@@ -3240,6 +3240,46 @@ export async function getEligibleHighlightProduct(minDaysBetween: number): Promi
   return result.rows.length > 0 ? rowToObj(result.rows[0]) : null;
 }
 
+/**
+ * Return up to `limit` randomly-ordered eligible highlight products (same
+ * eligibility as getEligibleHighlightProduct). The caller filters these by an
+ * out-of-band signal that isn't in the catalog DB — the Shopify `lifestyle-verified`
+ * tag — and posts the first match, so we hand back a small random batch instead of a
+ * single pick. Same two-step pattern (cheap SKU scan → point lookups) to avoid the
+ * 60-82s full-table ORDER BY RANDOM() that 504s the social cron.
+ */
+export async function getEligibleHighlightCandidates(
+  minDaysBetween: number,
+  limit: number
+): Promise<Record<string, unknown>[]> {
+  const db = await ensureSchema();
+  const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
+
+  const skusResult = await db.execute({
+    sql: `SELECT sku FROM products
+          WHERE shopify_product_id IS NOT NULL AND qty > 0
+            AND (last_posted_at IS NULL OR last_posted_at < ?)`,
+    args: [cutoff],
+  });
+  if (skusResult.rows.length === 0) return [];
+
+  const skus = skusResult.rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
+  // Fisher-Yates shuffle, then take the first `limit`.
+  for (let i = skus.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [skus[i], skus[j]] = [skus[j], skus[i]];
+  }
+  const pick = skus.slice(0, Math.max(1, limit));
+
+  // Single IN() lookup; re-validates qty/shopify_product_id against a sync race.
+  const placeholders = pick.map(() => "?").join(", ");
+  const rowsRes = await db.execute({
+    sql: `SELECT * FROM products WHERE sku IN (${placeholders}) AND shopify_product_id IS NOT NULL AND qty > 0`,
+    args: pick,
+  });
+  return rowsRes.rows.map((r) => rowToObj(r));
+}
+
 export async function markProductPosted(sku: string): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `UPDATE products SET last_posted_at = strftime('%s','now') WHERE sku = ?`, args: [sku] });

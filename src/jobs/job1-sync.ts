@@ -305,8 +305,11 @@ function triggerSocialDrafts(skus: { sku: string; oldPrice: number; newPrice: nu
     for (const { sku, oldPrice, newPrice } of skus) {
       try {
         const draft = await triggerPriceDrop(sku, oldPrice, newPrice);
-        // Auto-post if enabled + threshold met + under daily limit
-        await maybeAutopostPriceDrop(draft.draftId, oldPrice, newPrice);
+        // draft is null when the product isn't lifestyle-verified (skipped, no post).
+        if (draft) {
+          // Auto-post if enabled + threshold met + under daily limit
+          await maybeAutopostPriceDrop(draft.draftId, oldPrice, newPrice);
+        }
       } catch (err) {
         log(`Social draft failed for ${sku}: ${err}`);
       }

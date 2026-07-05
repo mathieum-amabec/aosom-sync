@@ -19,7 +19,7 @@ import {
   getAllSettings,
   getProduct,
   createFacebookDraft,
-  getEligibleHighlightProduct,
+  getEligibleHighlightCandidates,
   markProductPosted,
   createNotification,
   getAutopostCountToday,
@@ -27,6 +27,24 @@ import {
 } from "@/lib/database";
 import { selectHook, buildHookedPrompt, buildHookedPromptEn } from "@/lib/hook-selector";
 import { publishDraftToChannels } from "@/lib/social-publisher";
+import { resolveLifestyle } from "@/lib/selectors/shopify-images";
+
+// How many eligible products to sample when hunting for a lifestyle-verified one
+// for the daily stock highlight. ~80% of the catalog is tagged, so a handful of
+// Shopify tag lookups (throttled 2/s, 5-min cached) almost always yields a match.
+const HIGHLIGHT_LIFESTYLE_SAMPLE = 15;
+
+/**
+ * Gate: only lifestyle-verified products may be posted. The `lifestyle-verified`
+ * Shopify tag guarantees the product's Shopify position-1 photo is a clean
+ * lifestyle shot (never a white-background studio image) — and image-preview
+ * composes the branded hero from exactly that photo. Products without the tag are
+ * skipped rather than posted with a white-bg image. Never throws.
+ */
+async function isLifestyleVerified(shopifyProductId: string | null | undefined): Promise<boolean> {
+  const life = await resolveLifestyle((shopifyProductId ?? "").trim());
+  return life.verified;
+}
 
 // Job 4 generates STATIC posts only (branded images). Video generation has been
 // decoupled out of this job — the new FFmpeg-based slideshow pipeline owns video
@@ -208,7 +226,7 @@ interface BrandedImages {
  * fetch the EN-branded variant — one draft, correct logo on each page.
  */
 function brandImages(
-  trigger: "new_product" | "stock_highlight",
+  trigger: "new_product" | "stock_highlight" | "price_drop",
   sku: string,
   price: number,
   rawImageUrls: string[]
@@ -222,10 +240,16 @@ function brandImages(
   // the CDN could serve a stale price after the product's price changes.
   const params = new URLSearchParams({ sku, locale: "fr", price: Number(price).toFixed(2) });
   if (trigger === "new_product") params.set("badge", "new");
+  else if (trigger === "price_drop") params.set("badge", "sale");
   const brandedUrl = `${base}/api/image-preview?${params.toString()}`;
+  // Post ONLY the branded hero — image-preview composes it from the product's
+  // Shopify position-1 lifestyle photo (guaranteed clean for lifestyle-verified
+  // products). The raw Aosom gallery is deliberately dropped: it is the untouched
+  // feed order and still contains white-background and spec/infographic shots,
+  // which must never reach a post.
   return {
     applied: true,
-    imageUrls: [brandedUrl, ...rawImageUrls],
+    imageUrls: [brandedUrl],
     imageUrl: brandedUrl,
     imagePath: brandedUrl,
   };
@@ -234,12 +258,20 @@ function brandImages(
 /**
  * Generate a social draft for a new product import.
  */
-export async function triggerNewProduct(sku: string): Promise<GenerateDraftResult> {
+export async function triggerNewProduct(sku: string): Promise<GenerateDraftResult | null> {
   log(`new_product trigger for ${sku}`);
   const settings = await getAllSettings();
   const product = await getProduct(sku);
   if (!product) throw new Error(`Product ${sku} not found`);
   const productName = (product.name as string) || sku;
+
+  // Only post lifestyle-verified products (never a white-bg image). New imports are
+  // typically untagged until the lifestyle classification runs, so most new_product
+  // triggers skip here — that is intended.
+  if (!(await isLifestyleVerified(product.shopify_product_id))) {
+    log(`Skip new_product ${sku}: not lifestyle-verified`);
+    return null;
+  }
 
   const { fr, en, hookId } = await generateBilingual(settings, "new_product", {
     product_name: productName,
@@ -293,12 +325,18 @@ export async function triggerPriceDrop(
   sku: string,
   oldPrice: number,
   newPrice: number
-): Promise<GenerateDraftResult> {
+): Promise<GenerateDraftResult | null> {
   log(`price_drop trigger for ${sku}: ${oldPrice}$ -> ${newPrice}$`);
   const settings = await getAllSettings();
   const product = await getProduct(sku);
   if (!product) throw new Error(`Product ${sku} not found`);
   const productName = (product.name as string) || sku;
+
+  // Only post lifestyle-verified products (never a white-bg image).
+  if (!(await isLifestyleVerified(product.shopify_product_id))) {
+    log(`Skip price_drop ${sku}: not lifestyle-verified`);
+    return null;
+  }
 
   const { fr, en, hookId } = await generateBilingual(settings, "price_drop", {
     product_name: productName,
@@ -309,16 +347,19 @@ export async function triggerPriceDrop(
   }, product.product_type as string | null);
 
   const imgSettings = getImageSettings(settings);
-  let imagePath: string | null = null;
-  const imageUrls = pickRandomImages(product);
-  const imageUrl = imageUrls[0] ?? null;
-  if (imageUrl) {
+  const rawImageUrls = pickRandomImages(product);
+  // Branded lifestyle hero (badge=sale). image-preview sources the Shopify
+  // position-1 lifestyle photo; the sale caption carries the old→new price.
+  const branded = brandImages("price_drop", sku, newPrice, rawImageUrls);
+  let imagePath = branded.imagePath;
+  if (!branded.applied && rawImageUrls[0]) {
+    // No public base URL (local dev) — fall back to the legacy overlay preview.
     try {
       imagePath = await composeImage({
         sku,
         templateType: "price_drop",
         productName,
-        imageUrl,
+        imageUrl: rawImageUrls[0],
         price: newPrice,
         oldPrice,
         language: "FR",
@@ -336,8 +377,8 @@ export async function triggerPriceDrop(
     postText: fr,
     postTextEn: en,
     imagePath,
-    imageUrl,
-    imageUrls,
+    imageUrl: branded.imageUrl,
+    imageUrls: branded.imageUrls,
     oldPrice,
     newPrice,
     hookId,
@@ -348,8 +389,8 @@ export async function triggerPriceDrop(
     "Draft prix réduit",
     `${productName.slice(0, 40)}: ${oldPrice}$ -> ${newPrice}$`
   );
-  log(`Draft #${draftId} created for price drop ${sku} (${imageUrls.length} photos)`);
-  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl, imageUrls };
+  log(`Draft #${draftId} created for price drop ${sku} (branded=${branded.applied})`);
+  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl: branded.imageUrl, imageUrls: branded.imageUrls };
 }
 
 /**
@@ -362,10 +403,24 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
     settings.social_min_days_between_reposts || SYNC.DEFAULT_MIN_DAYS_BETWEEN_REPOSTS,
     10
   );
-  const product = await getEligibleHighlightProduct(minDays);
 
-  if (!product) {
+  // Sample a small random batch of eligible products, then post the first that is
+  // lifestyle-verified. A non-verified product is skipped (never posted with a
+  // white-bg image) — matching the new_product / price_drop gate.
+  const candidates = await getEligibleHighlightCandidates(minDays, HIGHLIGHT_LIFESTYLE_SAMPLE);
+  if (candidates.length === 0) {
     log("No eligible product for stock highlight");
+    return null;
+  }
+  let product: Record<string, unknown> | null = null;
+  for (const candidate of candidates) {
+    if (await isLifestyleVerified(candidate.shopify_product_id as string | null)) {
+      product = candidate;
+      break;
+    }
+  }
+  if (!product) {
+    log(`No lifestyle-verified product among ${candidates.length} eligible candidates — skipping stock highlight`);
     return null;
   }
 

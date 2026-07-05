@@ -112,3 +112,77 @@ export function __setImageResolverForTests(fn: ImageResolver | null): void {
 export function clearImageCache(): void {
   imgCache.clear();
 }
+
+// ─── Lifestyle-verified resolution (tag + clean position-1 photo) ──────────
+/**
+ * A product is "lifestyle-verified" when it carries the Shopify tag
+ * `lifestyle-verified`. For those products the Shopify gallery position-1 image is
+ * the clean lifestyle photo — the pos-1 swap (scripts/lifestyle-pos1-fix.mjs)
+ * reordered *Shopify* images only; the Aosom/Turso feed order (and thus
+ * products.image1) is unaffected, so the lifestyle shot can ONLY be resolved from
+ * Shopify, never from the catalog DB.
+ */
+export interface LifestyleInfo {
+  verified: boolean;
+  /** Shopify-CDN position-1 photo (spec/infographic shots dropped), or null. */
+  primaryImageUrl: string | null;
+}
+
+const LIFESTYLE_TAG = "lifestyle-verified";
+const lifestyleCache = new Map<string, { info: LifestyleInfo; expiry: number }>();
+
+/**
+ * Default resolver: GET /products/{id}.json?fields=tags,images. Returns the
+ * lifestyle tag presence + the first cdn.shopify.com, non-spec image by position.
+ * Never throws (returns a "miss" on no token / 404 / network) so a Shopify blip
+ * degrades to "not verified" rather than breaking selection or the image route.
+ */
+async function defaultResolveLifestyle(shopifyProductId: string): Promise<LifestyleInfo> {
+  const miss: LifestyleInfo = { verified: false, primaryImageUrl: null };
+  const id = (shopifyProductId || "").trim();
+  if (!id || !env.hasShopifyToken) return miss;
+
+  const hit = lifestyleCache.get(id);
+  if (hit && hit.expiry > Date.now()) return hit.info;
+
+  let info: LifestyleInfo = miss;
+  try {
+    await throttle();
+    const res = await shopifyFetch(`/products/${encodeURIComponent(id)}.json?fields=tags,images`);
+    if (res.ok) {
+      const data = (await res.json()) as {
+        product?: { tags?: string; images?: { src?: string; position?: number }[] };
+      };
+      const tags = (data.product?.tags ?? "").split(",").map((t) => t.trim().toLowerCase());
+      const primaryImageUrl =
+        (data.product?.images ?? [])
+          .slice()
+          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+          .map((img) => (typeof img.src === "string" ? img.src : ""))
+          .filter((src) => src.startsWith(SHOPIFY_CDN_PREFIX) && !isSpecImageUrl(src))[0] ?? null;
+      info = { verified: tags.includes(LIFESTYLE_TAG), primaryImageUrl };
+    }
+  } catch {
+    info = miss;
+  }
+  lifestyleCache.set(id, { info, expiry: Date.now() + IMG_TTL_MS });
+  return info;
+}
+
+export type LifestyleResolver = (shopifyProductId: string) => Promise<LifestyleInfo>;
+let lifestyleResolver: LifestyleResolver = defaultResolveLifestyle;
+
+/** Resolve a product's lifestyle-verified status + clean position-1 photo (cached, throttled). */
+export function resolveLifestyle(shopifyProductId: string): Promise<LifestyleInfo> {
+  return lifestyleResolver(shopifyProductId);
+}
+
+/** Test-only: swap the lifestyle resolver (pass null to restore the real one). */
+export function __setLifestyleResolverForTests(fn: LifestyleResolver | null): void {
+  lifestyleResolver = fn ?? defaultResolveLifestyle;
+}
+
+/** Test/maintenance helper: drop the per-product lifestyle cache. */
+export function clearLifestyleCache(): void {
+  lifestyleCache.clear();
+}
