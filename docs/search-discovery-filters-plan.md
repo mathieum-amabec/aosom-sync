@@ -37,7 +37,9 @@ enrichir ces filtres via **Shopify Search & Discovery** (app first-party gratuit
   Un filtre couleur brut afficherait **`Noir` ET `Black` comme deux facettes séparées** → mauvaise UX.
 - **Deux voies pour corriger** (au choix, avant d'activer le filtre) :
   1. **Grouping dans S&D** (manuel, non destructif) — l'app permet de regrouper des valeurs
-     d'option sous une étiquette unique + swatch (`Black`→`Noir`, etc.). Recommandé en 1er.
+     d'option sous une étiquette unique + swatch (`Black`→`Noir`, etc.). **Voie retenue.**
+     → **Guide pas-à-pas : [`docs/couleur-sd-grouping-guide.md`](couleur-sd-grouping-guide.md)**
+     (19 groupes de fusion + 15 renommages → 41 couleurs propres, à faire dans l'admin S&D).
   2. **Normalisation des données** (scriptable) — bulk-rename des valeurs anglaises vers
      le référentiel FR de `COLOR_MAP` (`variant-merger.ts`). Dry-run + validation Mat requis.
      → **Dry-run livré : [`docs/couleur-normalization-dry-run.csv`](couleur-normalization-dry-run.csv)**
