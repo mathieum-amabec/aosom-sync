@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.198] - 2026-07-05
+
+### Changed — mobile homepage polish, mirrored from the working draft `160749813865`
+Three fixes were applied to the **draft theme `160749813865`** (Admin Asset API, PUT 200 each,
+verified on the draft preview) and are mirrored here for a versioned trace. **Merging deploys
+nothing** — the changes are already live on the draft; publishing the draft is a separate manual step.
+- **Mobile section rhythm** (`templates/index.json`, `lc_design_system` block): the flat
+  `padding-top/bottom: 1.5rem !important` on every section had no mobile reduction. Added a
+  `@media (max-width:767px)` override → section padding **1.5rem → 0.85rem**, inter-section margin
+  **20px → 12px** (homepage-scoped `.section + .section` override rather than the global
+  `--spacing-sections-mobile`, to avoid blast radius on product/collection pages). Header→hero flush
+  preserved. Result: inter-section gap ~50px → ~29px, page height 8084px → 7760px on a 390px viewport.
+- **Video carousel swipe-dots** (`sections/home-video-showcase.liquid`): added a 5-dot indicator
+  under the "Voyez-le chez vous" coverflow (active dot = gold pill, synced to the centered card,
+  click-to-scroll). Reassures that all 5 videos are swipeable on mobile without changing the coverflow
+  pattern. Also trimmed the carousel's mobile scroll padding (32/40px → 18/22px).
+- **Drawer z-index nit** (`sections/home-video-showcase.liquid`): `isolation:isolate` on `.hv-wrap`
+  so the floating ‹ › carousel arrows no longer bleed through the open mobile hamburger drawer.
+
+**NB:** the `shopify-theme/` snapshot of both files was stale (pre-#338), so this commit also
+re-syncs them to the current deployed draft content (the #338 5-video coverflow + the above). The
+hamburger menu was intentionally left text-only (standard mobile pattern).
+
 ## [0.5.53.197] - 2026-07-04
 
 ### Fixed — two homepage polish items from the pre-publication audit (draft theme)
