@@ -7,6 +7,12 @@ _Source de vérité des décisions : [`couleur-normalization-dry-run.csv`](coule
 données produit — on regroupe/renomme uniquement l'affichage du filtre. Résultat : **75 valeurs
 brutes → 41 couleurs propres en français.**
 
+> **📊 Statut au 2026-07-05 (vérifié sur le storefront) : 7 / 34 faits.**
+> ✅ Groupes créés et confirmés live : **Noir, Blanc, Gris, Bleu, Vert, Rouge, Argent**.
+> ⬜ Restant : **12 fusions** (Tableau 1) + **15 renommages** (Tableau 2) = **27 actions**.
+> Doublons/anglais encore visibles tant que ce n'est pas terminé (ex. `ensembles-de-patio`
+> affiche `Brown` + `Brun` + `Light Brown` séparément).
+
 ---
 
 ## Où cliquer (une seule fois)
@@ -30,27 +36,29 @@ brutes → 41 couleurs propres en français.**
 
 Chaque groupe fusionne ≥ 2 valeurs. Trié par impact (variantes couvertes).
 
-| Nom du groupe (FR) | Cocher ces valeurs | Variantes |
-|---|---|---|
-| **Noir** | `Noir`, `Black` | 243 |
-| **Blanc** | `Blanc`, `White` | 144 |
-| **Gris** | `Gris`, `Grey`, `Mixed Grey` | 133 |
-| **Gris foncé** | `Gris foncé`, `Dark Grey` | 88 |
-| **Brun** | `Brun`, `Brown` | 61 |
-| **Crème** | `Crème`, `Cream White`, `Cream` | 54 |
-| **Bleu** | `Bleu`, `Blue` | 52 |
-| **Gris pâle** | `Gris pâle`, `Light Grey`, `Light grey`, `Ash Grey` | 51 |
-| **Vert** | `Vert`, `Green` | 42 |
-| **Rouge** | `Rouge`, `Red` | 40 |
-| **Multicolore** | `Multi Colour`, `Multicolour`, `multi-colored`, `Grey, Black`, `Grey, White, Black`, `Red, Yellow, Blue`, `Black, Yellow`, `Green, Black`, `Black, Grey Geometric`, `Natural, Blue`, `Brown, Green, White`, `Natural, Black`, `Flower Pattern` | 19 |
-| **Argent** | `Argent`, `Silver` | 16 |
-| **Café** | `Café`, `Coffee` | 12 |
-| **Kaki** | `Kaki`, `Khaki` | 11 |
-| **Naturel** | `Naturel`, `Natural`, `Natural Finish` | 8 |
-| **Bronze** | `Bronze`, `Bronze Tone` | 6 |
-| **Bois naturel** | `Natural Wood`, `Natural wood finish` | 5 |
-| **Gris charbon** | `Gris charbon`, `Carbon Grey` | 3 |
-| **Noyer** | `Noyer`, `Walnut` | 2 |
+| Statut | Nom du groupe (FR) | Cocher ces valeurs | Variantes |
+|---|---|---|---|
+| ✅ | **Noir** | `Noir`, `Black` | 243 |
+| ✅ | **Blanc** | `Blanc`, `White` | 144 |
+| ✅ | **Gris** | `Gris`, `Grey`, `Mixed Grey` | 133 |
+| ⬜ | **Gris foncé** | `Gris foncé`, `Dark Grey` | 88 |
+| ⬜ | **Brun** | `Brun`, `Brown` | 61 |
+| ⬜ | **Crème** | `Crème`, `Cream White`, `Cream` | 54 |
+| ✅ | **Bleu** | `Bleu`, `Blue` | 52 |
+| ⬜ | **Gris pâle** | `Gris pâle`, `Light Grey`, `Light grey`, `Ash Grey` | 51 |
+| ✅ | **Vert** | `Vert`, `Green` | 42 |
+| ✅ | **Rouge** | `Rouge`, `Red` | 40 |
+| ⬜ | **Multicolore** | `Multi Colour`, `Multicolour`, `multi-colored`, `Grey, Black`, `Grey, White, Black`, `Red, Yellow, Blue`, `Black, Yellow`, `Green, Black`, `Black, Grey Geometric`, `Natural, Blue`, `Brown, Green, White`, `Natural, Black`, `Flower Pattern` | 19 |
+| ✅ | **Argent** | `Argent`, `Silver` | 16 |
+| ⬜ | **Café** | `Café`, `Coffee` | 12 |
+| ⬜ | **Kaki** | `Kaki`, `Khaki` | 11 |
+| ⬜ | **Naturel** | `Naturel`, `Natural`, `Natural Finish` | 8 |
+| ⬜ | **Bronze** | `Bronze`, `Bronze Tone` | 6 |
+| ⬜ | **Bois naturel** | `Natural Wood`, `Natural wood finish` | 5 |
+| ⬜ | **Gris charbon** | `Gris charbon`, `Carbon Grey` | 3 |
+| ⬜ | **Noyer** | `Noyer`, `Walnut` | 2 |
+
+_✅ 7 faits · ⬜ 12 à faire._
 
 ---
 
@@ -61,23 +69,25 @@ lieu de l'anglais/faute de frappe. Faible volume (≤ 11 variantes). _Optionnel 
 vite : ces cas isolés seront de toute façon nettoyés proprement si on fait plus tard la
 normalisation des données. Mais tant qu'à y être, ils enlèvent l'anglais du filtre._
 
-| Nom du groupe (FR) | Valeur d'origine | Variantes |
-|---|---|---|
-| **Jaune** | `Yellow` | 11 |
-| **Brun rustique** | `Rustic Brown` | 5 |
-| **Rouge vin** | `Wine Red` | 5 |
-| **Brun pâle** | `Light Brown` | 3 |
-| **Vert foncé** | `Dark Green` | 3 |
-| **Bleu ciel** | `Sky Blue` | 2 |
-| **Brun café** | `Coffee Brown` | 2 |
-| **Naturel vintage** | `Vintage Natural` | 1 |
-| **Chêne** | `Oak` | 1 |
-| **Noyer foncé** | `Dark Walunt` _(faute → corrigée)_ | 1 |
-| **Havane** | `Tan` | 1 |
-| **Carbonisé** | `Carbonized` | 1 |
-| **Vert-de-gris** | `Verdigris (Green)` | 1 |
-| **Vert armée** | `Army Green` | 1 |
-| **Violet** | `Purple` | 1 |
+| Statut | Nom du groupe (FR) | Valeur d'origine | Variantes |
+|---|---|---|---|
+| ⬜ | **Jaune** | `Yellow` | 11 |
+| ⬜ | **Brun rustique** | `Rustic Brown` | 5 |
+| ⬜ | **Rouge vin** | `Wine Red` | 5 |
+| ⬜ | **Brun pâle** | `Light Brown` | 3 |
+| ⬜ | **Vert foncé** | `Dark Green` | 3 |
+| ⬜ | **Bleu ciel** | `Sky Blue` | 2 |
+| ⬜ | **Brun café** | `Coffee Brown` | 2 |
+| ⬜ | **Naturel vintage** | `Vintage Natural` | 1 |
+| ⬜ | **Chêne** | `Oak` | 1 |
+| ⬜ | **Noyer foncé** | `Dark Walunt` _(faute → corrigée)_ | 1 |
+| ⬜ | **Havane** | `Tan` | 1 |
+| ⬜ | **Carbonisé** | `Carbonized` | 1 |
+| ⬜ | **Vert-de-gris** | `Verdigris (Green)` | 1 |
+| ⬜ | **Vert armée** | `Army Green` | 1 |
+| ⬜ | **Violet** | `Purple` | 1 |
+
+_⬜ 0 fait · 15 à faire._
 
 ---
 
