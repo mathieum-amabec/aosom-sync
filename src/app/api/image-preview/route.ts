@@ -82,7 +82,19 @@ export async function GET(request: Request) {
   const shopifyId = (product as unknown as Record<string, unknown>).shopify_product_id;
   if (typeof shopifyId === "string" && shopifyId.trim()) {
     const life = await resolveLifestyle(shopifyId);
-    if (life.verified && life.primaryImageUrl) productImageUrl = life.primaryImageUrl;
+    if (life.verified) {
+      // A lifestyle-verified product must render its clean Shopify photo — never the
+      // Turso white-bg primary. If the tag says verified but no clean photo resolves,
+      // refuse (404) rather than silently compose + cache the white-bg image. Unverified
+      // products still fall back to the Turso primary (dashboard preview / legacy).
+      if (!life.primaryImageUrl) {
+        return NextResponse.json(
+          { error: "Lifestyle-verified product has no clean Shopify image" },
+          { status: 404 },
+        );
+      }
+      productImageUrl = life.primaryImageUrl;
+    }
   }
   if (!productImageUrl) {
     return NextResponse.json({ error: "Product has no image" }, { status: 404 });

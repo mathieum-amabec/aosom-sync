@@ -3212,41 +3212,14 @@ export async function getLastPostDate(sku: string): Promise<number | null> {
   return val != null ? Number(val) : null;
 }
 
-export async function getEligibleHighlightProduct(minDaysBetween: number): Promise<Record<string, unknown> | null> {
-  const db = await ensureSchema();
-  const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
-
-  // Two-step pattern: fetch eligible SKUs only (fast ~4s), then pick randomly in JS.
-  // ORDER BY RANDOM() on 10k+ products forces a full table scan on Turso = 60-82s,
-  // which exceeds Vercel's 120s maxDuration and causes 504 on the social cron.
-  const skusResult = await db.execute({
-    sql: `SELECT sku FROM products
-          WHERE shopify_product_id IS NOT NULL AND qty > 0
-            AND (last_posted_at IS NULL OR last_posted_at < ?)`,
-    args: [cutoff],
-  });
-
-  if (skusResult.rows.length === 0) return null;
-
-  const skus = skusResult.rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
-  const randomSku = skus[Math.floor(Math.random() * skus.length)];
-
-  // Re-validate eligibility to guard against sync-race: a concurrent sync run
-  // could zero qty or clear shopify_product_id between the two queries.
-  const result = await db.execute({
-    sql: `SELECT * FROM products WHERE sku = ? AND shopify_product_id IS NOT NULL AND qty > 0`,
-    args: [randomSku],
-  });
-  return result.rows.length > 0 ? rowToObj(result.rows[0]) : null;
-}
-
 /**
- * Return up to `limit` randomly-ordered eligible highlight products (same
- * eligibility as getEligibleHighlightProduct). The caller filters these by an
- * out-of-band signal that isn't in the catalog DB — the Shopify `lifestyle-verified`
- * tag — and posts the first match, so we hand back a small random batch instead of a
- * single pick. Same two-step pattern (cheap SKU scan → point lookups) to avoid the
- * 60-82s full-table ORDER BY RANDOM() that 504s the social cron.
+ * Return up to `limit` randomly-ordered eligible highlight products. Eligible =
+ * imported (shopify_product_id set), in stock (qty > 0), and not reposted within
+ * `minDaysBetween`. The caller filters these by an out-of-band signal that isn't in
+ * the catalog DB — the Shopify `lifestyle-verified` tag — and posts the first match,
+ * so we hand back a small random batch instead of a single pick. Two-step pattern
+ * (cheap SKU scan → point lookups) avoids the 60-82s full-table ORDER BY RANDOM()
+ * that 504s the social cron.
  */
 export async function getEligibleHighlightCandidates(
   minDaysBetween: number,
@@ -3277,7 +3250,13 @@ export async function getEligibleHighlightCandidates(
     sql: `SELECT * FROM products WHERE sku IN (${placeholders}) AND shopify_product_id IS NOT NULL AND qty > 0`,
     args: pick,
   });
-  return rowsRes.rows.map((r) => rowToObj(r));
+  // Reorder to the shuffled `pick` order: SQLite returns IN() rows in rowid order,
+  // so without this the caller (which posts the first verified candidate) would
+  // deterministically favor low-rowid products, defeating the random highlight.
+  const bySku = new Map(rowsRes.rows.map((r) => { const o = rowToObj(r); return [o.sku as string, o]; }));
+  return pick
+    .map((s) => bySku.get(s))
+    .filter((o): o is Record<string, unknown> => o !== undefined);
 }
 
 export async function markProductPosted(sku: string): Promise<void> {

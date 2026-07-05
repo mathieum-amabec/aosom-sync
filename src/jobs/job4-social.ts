@@ -35,15 +35,16 @@ import { resolveLifestyle } from "@/lib/selectors/shopify-images";
 const HIGHLIGHT_LIFESTYLE_SAMPLE = 15;
 
 /**
- * Gate: only lifestyle-verified products may be posted. The `lifestyle-verified`
- * Shopify tag guarantees the product's Shopify position-1 photo is a clean
- * lifestyle shot (never a white-background studio image) — and image-preview
- * composes the branded hero from exactly that photo. Products without the tag are
- * skipped rather than posted with a white-bg image. Never throws.
+ * Gate: a product may be posted only if it is `lifestyle-verified` AND actually
+ * resolves to a clean Shopify position-1 photo. Requiring the photo (not just the
+ * tag) closes the hole where a tagged product whose Shopify gallery yields no
+ * clean cdn.shopify.com image (`primaryImageUrl === null`) would otherwise be
+ * selected and then fall back to the white-background Turso image in image-preview.
+ * Never throws.
  */
-async function isLifestyleVerified(shopifyProductId: string | null | undefined): Promise<boolean> {
+async function isLifestylePostable(shopifyProductId: string | null | undefined): Promise<boolean> {
   const life = await resolveLifestyle((shopifyProductId ?? "").trim());
-  return life.verified;
+  return life.verified && !!life.primaryImageUrl;
 }
 
 // Job 4 generates STATIC posts only (branded images). Video generation has been
@@ -265,11 +266,11 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
   if (!product) throw new Error(`Product ${sku} not found`);
   const productName = (product.name as string) || sku;
 
-  // Only post lifestyle-verified products (never a white-bg image). New imports are
-  // typically untagged until the lifestyle classification runs, so most new_product
-  // triggers skip here — that is intended.
-  if (!(await isLifestyleVerified(product.shopify_product_id))) {
-    log(`Skip new_product ${sku}: not lifestyle-verified`);
+  // Only post lifestyle-verified products with a resolvable clean photo (never a
+  // white-bg image). New imports are typically untagged until the lifestyle
+  // classification runs, so most new_product triggers skip here — that is intended.
+  if (!(await isLifestylePostable(product.shopify_product_id))) {
+    log(`Skip new_product ${sku}: not lifestyle-verified (or no clean photo)`);
     return null;
   }
 
@@ -332,9 +333,9 @@ export async function triggerPriceDrop(
   if (!product) throw new Error(`Product ${sku} not found`);
   const productName = (product.name as string) || sku;
 
-  // Only post lifestyle-verified products (never a white-bg image).
-  if (!(await isLifestyleVerified(product.shopify_product_id))) {
-    log(`Skip price_drop ${sku}: not lifestyle-verified`);
+  // Only post lifestyle-verified products with a resolvable clean photo.
+  if (!(await isLifestylePostable(product.shopify_product_id))) {
+    log(`Skip price_drop ${sku}: not lifestyle-verified (or no clean photo)`);
     return null;
   }
 
@@ -414,13 +415,20 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
   }
   let product: Record<string, unknown> | null = null;
   for (const candidate of candidates) {
-    if (await isLifestyleVerified(candidate.shopify_product_id as string | null)) {
+    if (await isLifestylePostable(candidate.shopify_product_id as string | null)) {
       product = candidate;
       break;
     }
   }
   if (!product) {
+    // Not a silent skip: if the whole sample is unverified (e.g. tagging regressed
+    // or coverage dropped), posting would otherwise stop with no signal.
     log(`No lifestyle-verified product among ${candidates.length} eligible candidates — skipping stock highlight`);
+    await createNotification(
+      "warning",
+      "Stock highlight ignoré",
+      `Aucun produit lifestyle-verified parmi ${candidates.length} candidats échantillonnés`
+    );
     return null;
   }
 

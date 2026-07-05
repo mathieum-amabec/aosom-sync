@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { triggerNewProduct, triggerStockHighlight } from "@/jobs/job4-social";
+import { triggerNewProduct, triggerStockHighlight, triggerPriceDrop } from "@/jobs/job4-social";
 
 // ─── Mocks ────────────────────────────────────────────────────────────
 //
@@ -59,6 +59,8 @@ const SETTINGS = {
   prompt_new_product_en: "Post EN {product_name}",
   prompt_highlight_fr: "Post FR {product_name}",
   prompt_highlight_en: "Post EN {product_name}",
+  prompt_price_drop_fr: "Baisse {product_name}",
+  prompt_price_drop_en: "Drop {product_name}",
 };
 
 const PRODUCT = {
@@ -116,6 +118,28 @@ describe("job4 branding integration", () => {
   it("new_product: skips (returns null) when the product is not lifestyle-verified", async () => {
     vi.mocked(resolveLifestyle).mockResolvedValue({ verified: false, primaryImageUrl: null });
     const result = await triggerNewProduct("TEST-001");
+    expect(result).toBeNull();
+    expect(createFacebookDraft).not.toHaveBeenCalled();
+  });
+
+  it("new_product: skips when tagged but no clean photo resolves (verified, url=null)", async () => {
+    vi.mocked(resolveLifestyle).mockResolvedValue({ verified: true, primaryImageUrl: null });
+    const result = await triggerNewProduct("TEST-001");
+    expect(result).toBeNull();
+    expect(createFacebookDraft).not.toHaveBeenCalled();
+  });
+
+  it("price_drop: posts a single branded badge=sale hero when verified", async () => {
+    const result = await triggerPriceDrop("TEST-001", 100, 80);
+    const branded = "https://app.example.com/api/image-preview?sku=TEST-001&locale=fr&price=80.00&badge=sale";
+    expect(result).not.toBeNull();
+    expect(result!.imageUrls).toEqual([branded]);
+    expect(composeImage).not.toHaveBeenCalled();
+  });
+
+  it("price_drop: skips (returns null) when not lifestyle-verified", async () => {
+    vi.mocked(resolveLifestyle).mockResolvedValue({ verified: false, primaryImageUrl: null });
+    const result = await triggerPriceDrop("TEST-001", 100, 80);
     expect(result).toBeNull();
     expect(createFacebookDraft).not.toHaveBeenCalled();
   });
