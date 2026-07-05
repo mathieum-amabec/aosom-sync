@@ -1,0 +1,76 @@
+status,current_value,proposed_value,products_affected,variants_affected
+REVIEW,"Rustic Brown","Brun rustique",5,5
+REVIEW,"Wine Red","Rouge vin",5,5
+REVIEW,"Natural Wood","Bois naturel",4,4
+REVIEW,"Natural Finish","Naturel",4,4
+REVIEW,"Light Brown","Brun pâle",3,3
+REVIEW,"Dark Green","Vert foncé",3,3
+REVIEW,"Sky Blue","Bleu ciel",2,2
+REVIEW,"Coffee Brown","Brun café",2,2
+REVIEW,"Vintage Natural","Naturel vintage",1,1
+REVIEW,"Oak","Chêne",1,1
+REVIEW,"Grey, Black","Gris et noir",1,1
+REVIEW,"Flower Pattern","Motif floral",1,1
+REVIEW,"Grey, White, Black","Multicolore",1,1
+REVIEW,"Dark Walunt","Noyer foncé",1,1
+REVIEW,"Tan","Havane",1,1
+REVIEW,"Red, Yellow, Blue","Multicolore",1,1
+REVIEW,"Natural, Black","Naturel et noir",1,1
+REVIEW,"Black, Yellow","Noir et jaune",1,1
+REVIEW,"Green, Black","Vert et noir",1,1
+REVIEW,"Verdigris (Green)","Vert-de-gris",1,1
+REVIEW,"Black, Grey Geometric","Gris et noir",1,1
+REVIEW,"Natural, Blue","Naturel et bleu",1,1
+REVIEW,"Brown, Green, White","Multicolore",1,1
+REVIEW,"Natural wood finish","Bois naturel",1,1
+REVIEW,"Army Green","Vert armée",1,1
+RENAME,"Black","Noir",30,31
+RENAME,"White","Blanc",21,21
+RENAME,"Brown","Brun",12,12
+RENAME,"Grey","Gris",11,11
+RENAME,"Yellow","Jaune",11,11
+RENAME,"Multi Colour","Multicolore",5,5
+RENAME,"Light Grey","Gris pâle",4,4
+RENAME,"Khaki","Kaki",4,4
+RENAME,"Natural","Naturel",3,4
+RENAME,"Cream White","Crème",4,4
+RENAME,"Green","Vert",3,3
+RENAME,"Blue","Bleu",3,3
+RENAME,"multi-colored","Multicolore",3,3
+RENAME,"Dark Grey","Gris foncé",2,2
+RENAME,"Silver","Argent",2,2
+RENAME,"Carbon Grey","Gris charbon",1,2
+RENAME,"Coffee","Café",1,1
+RENAME,"Light grey","Gris pâle",1,1
+RENAME,"Ash Grey","Gris pâle",1,1
+RENAME,"Walnut","Noyer",1,1
+RENAME,"Carbonized","Carbonisé",1,1
+RENAME,"Mixed Grey","Gris",1,1
+RENAME,"Red","Rouge",1,1
+RENAME,"Multicolour","Multicolore",1,1
+RENAME,"Cream","Crème",1,1
+RENAME,"Purple","Violet",1,1
+RENAME,"Bronze Tone","Bronze",1,1
+KEEP,"Noir","Noir",208,212
+KEEP,"Blanc","Blanc",120,123
+KEEP,"Gris","Gris",120,121
+KEEP,"Gris foncé","Gris foncé",86,86
+KEEP,"Crème","Crème",49,49
+KEEP,"Brun","Brun",47,49
+KEEP,"Bleu","Bleu",49,49
+KEEP,"Rose","Rose",45,46
+KEEP,"Gris pâle","Gris pâle",45,45
+KEEP,"Vert","Vert",37,39
+KEEP,"Rouge","Rouge",39,39
+KEEP,"Bleu foncé","Bleu foncé",31,32
+KEEP,"Beige","Beige",27,29
+KEEP,"Argent","Argent",13,14
+KEEP,"Orange","Orange",14,14
+KEEP,"Café","Café",11,11
+KEEP,"Brun foncé","Brun foncé",8,8
+KEEP,"Vert pâle","Vert pâle",7,7
+KEEP,"Kaki","Kaki",7,7
+KEEP,"Bronze","Bronze",5,5
+KEEP,"Vert forêt","Vert forêt",3,3
+KEEP,"Gris charbon","Gris charbon",1,1
+KEEP,"Noyer","Noyer",1,1
