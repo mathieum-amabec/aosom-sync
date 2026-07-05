@@ -7,11 +7,59 @@ _Source de vérité des décisions : [`couleur-normalization-dry-run.csv`](coule
 données produit — on regroupe/renomme uniquement l'affichage du filtre. Résultat : **75 valeurs
 brutes → 41 couleurs propres en français.**
 
-> **📊 Statut au 2026-07-05 (vérifié sur le storefront) : 7 / 34 faits.**
-> ✅ Groupes créés et confirmés live : **Noir, Blanc, Gris, Bleu, Vert, Rouge, Argent**.
-> ⬜ Restant : **12 fusions** (Tableau 1) + **15 renommages** (Tableau 2) = **27 actions**.
-> Doublons/anglais encore visibles tant que ce n'est pas terminé (ex. `ensembles-de-patio`
-> affiche `Brown` + `Brun` + `Light Brown` séparément).
+> **📊 Statut au 2026-07-05 (2e vérif — 24 collections, FR + /en) : 10 / ~34 faits.**
+>
+> **✅ Faits (10 groupes live) :** `Argent`, `Beige`, `Blanc`, `Bleu`, `Brun`, `Gris`, `Noir`,
+> `Noyer Foncé`, `Rouge`, `Vert`. Leurs variantes anglaises sont bien absorbées
+> (`Black`→Noir, `White`→Blanc, `Brown`→Brun, `Green`→Vert…) → **zéro doublon pour ces familles.** 👍
+>
+> **⬜ Reste ~24 actions** (voir section ci-dessous). Doublons/anglais encore visibles, ex.
+> `Kaki`+`Khaki` (6 collections), `Bronze`+`Bronze Tone`, `Café`+`Coffee`, `Crème`+`Cream`.
+
+---
+
+## ⬜ RESTE À FAIRE (post-audit 2026-07-05)
+
+### A. FUSIONS (7) — créer le groupe, cocher **toutes** les valeurs listées
+
+| Groupe (FR) | Cocher ces valeurs | Doublon constaté à l'audit |
+|---|---|---|
+| **Kaki** | `Kaki` + `Khaki` | 6 collections |
+| **Café** | `Café` + `Coffee` | nouveaux-arrivages, animaux |
+| **Bronze** | `Bronze` + `Bronze Tone` | nouveaux-arrivages (+4) |
+| **Crème** | `Crème` + `Cream` | nouveaux-arrivages (/en) |
+| **Naturel** | `Natural` + `Natural Finish` + `Natural Wood` + `Natural wood finish` | nouveaux-arrivages |
+| **Multicolore** | `Multi Colour` + `Multicolour` + `Brown, Green, White` + `Grey, White, Black` + `Red, Yellow, Blue` | nouveaux-arrivages |
+| **Noyer** | `Walnut` _(distinct de **Noyer Foncé**, déjà fait)_ | nouveaux-arrivages |
+
+> _Au plan initial mais **non observés** dans l'audit (à faire seulement si ces valeurs existent
+> en catalogue) : **Gris foncé** (`+Dark Grey`), **Gris pâle** (`+Light Grey`/`Ash Grey`),
+> **Gris charbon** (`+Carbon Grey`)._
+
+### B. RENOMMAGES (14) — groupe à **une seule valeur**, juste pour le libellé FR
+
+| Groupe (FR) | Valeur d'origine |
+|---|---|
+| **Jaune** | `Yellow` |
+| **Chêne** | `Oak` |
+| **Violet** | `Purple` |
+| **Naturel vintage** | `Vintage Natural` |
+| **Brun clair** | `Light Brown` |
+| **Brun rustique** | `Rustic Brown` |
+| **Rouge vin** | `Wine Red` |
+| **Vert foncé** | `Dark Green` |
+| **Bleu ciel** | `Sky Blue` |
+| **Brun café** | `Coffee Brown` |
+| **Havane** | `Tan` |
+| **Carbonisé** | `Carbonized` |
+| **Vert-de-gris** | `Verdigris (Green)` |
+| **Vert armée** | `Army Green` |
+
+**Total restant : 7 fusions + 14 renommages = 21 sûrs (+3 nuances de gris à vérifier ≈ 24).**
+
+> ⚠️ Un seul faux positif d'index : `ensembles-de-patio` montrait encore `Brun` en brut alors que
+> `Brun` est bien groupé partout ailleurs → simple **lag de réindexation** de cette collection,
+> se corrige seul. Tous les autres manques sont réels (consistants sur les collections fraîches).
 
 ---
 
@@ -32,33 +80,35 @@ brutes → 41 couleurs propres en français.**
 
 ---
 
-## Tableau 1 — GROUPES DE FUSION (priorité ✱ — 19 groupes)
+## Tableau 1 — GROUPES DE FUSION (référence détaillée — 19 groupes)
 
 Chaque groupe fusionne ≥ 2 valeurs. Trié par impact (variantes couvertes).
+_(Statut synchronisé avec la section « Reste à faire » ci-dessus.)_
 
 | Statut | Nom du groupe (FR) | Cocher ces valeurs | Variantes |
 |---|---|---|---|
 | ✅ | **Noir** | `Noir`, `Black` | 243 |
 | ✅ | **Blanc** | `Blanc`, `White` | 144 |
 | ✅ | **Gris** | `Gris`, `Grey`, `Mixed Grey` | 133 |
-| ⬜ | **Gris foncé** | `Gris foncé`, `Dark Grey` | 88 |
-| ⬜ | **Brun** | `Brun`, `Brown` | 61 |
+| ⬜ | **Gris foncé** | `Gris foncé`, `Dark Grey` _(non observé à l'audit)_ | 88 |
+| ✅ | **Brun** | `Brun`, `Brown` | 61 |
 | ⬜ | **Crème** | `Crème`, `Cream White`, `Cream` | 54 |
 | ✅ | **Bleu** | `Bleu`, `Blue` | 52 |
-| ⬜ | **Gris pâle** | `Gris pâle`, `Light Grey`, `Light grey`, `Ash Grey` | 51 |
+| ⬜ | **Gris pâle** | `Gris pâle`, `Light Grey`, `Light grey`, `Ash Grey` _(non observé)_ | 51 |
 | ✅ | **Vert** | `Vert`, `Green` | 42 |
 | ✅ | **Rouge** | `Rouge`, `Red` | 40 |
 | ⬜ | **Multicolore** | `Multi Colour`, `Multicolour`, `multi-colored`, `Grey, Black`, `Grey, White, Black`, `Red, Yellow, Blue`, `Black, Yellow`, `Green, Black`, `Black, Grey Geometric`, `Natural, Blue`, `Brown, Green, White`, `Natural, Black`, `Flower Pattern` | 19 |
 | ✅ | **Argent** | `Argent`, `Silver` | 16 |
 | ⬜ | **Café** | `Café`, `Coffee` | 12 |
 | ⬜ | **Kaki** | `Kaki`, `Khaki` | 11 |
-| ⬜ | **Naturel** | `Naturel`, `Natural`, `Natural Finish` | 8 |
+| ⬜ | **Naturel** | `Naturel`, `Natural`, `Natural Finish`, `Natural Wood`, `Natural wood finish` _(inclut l'ancien « Bois naturel »)_ | 13 |
 | ⬜ | **Bronze** | `Bronze`, `Bronze Tone` | 6 |
-| ⬜ | **Bois naturel** | `Natural Wood`, `Natural wood finish` | 5 |
-| ⬜ | **Gris charbon** | `Gris charbon`, `Carbon Grey` | 3 |
+| ⬜ | ~~**Bois naturel**~~ | → **fusionné dans Naturel** (décision Mat) | — |
+| ⬜ | **Gris charbon** | `Gris charbon`, `Carbon Grey` _(non observé)_ | 3 |
 | ⬜ | **Noyer** | `Noyer`, `Walnut` | 2 |
 
-_✅ 7 faits · ⬜ 12 à faire._
+_✅ 8 faits (Noir, Blanc, Gris, Brun, Bleu, Vert, Rouge, Argent) · ⬜ 10 à faire dans ce tableau._
+_(**Beige** et **Noyer Foncé** aussi faits — voir Tableau 3 / Tableau 2.)_
 
 ---
 
@@ -74,20 +124,20 @@ normalisation des données. Mais tant qu'à y être, ils enlèvent l'anglais du 
 | ⬜ | **Jaune** | `Yellow` | 11 |
 | ⬜ | **Brun rustique** | `Rustic Brown` | 5 |
 | ⬜ | **Rouge vin** | `Wine Red` | 5 |
-| ⬜ | **Brun pâle** | `Light Brown` | 3 |
+| ⬜ | **Brun clair** | `Light Brown` | 3 |
 | ⬜ | **Vert foncé** | `Dark Green` | 3 |
 | ⬜ | **Bleu ciel** | `Sky Blue` | 2 |
 | ⬜ | **Brun café** | `Coffee Brown` | 2 |
 | ⬜ | **Naturel vintage** | `Vintage Natural` | 1 |
 | ⬜ | **Chêne** | `Oak` | 1 |
-| ⬜ | **Noyer foncé** | `Dark Walunt` _(faute → corrigée)_ | 1 |
+| ✅ | **Noyer Foncé** | `Dark Walunt` _(faute → corrigée ; fait par Mat)_ | 1 |
 | ⬜ | **Havane** | `Tan` | 1 |
 | ⬜ | **Carbonisé** | `Carbonized` | 1 |
 | ⬜ | **Vert-de-gris** | `Verdigris (Green)` | 1 |
 | ⬜ | **Vert armée** | `Army Green` | 1 |
 | ⬜ | **Violet** | `Purple` | 1 |
 
-_⬜ 0 fait · 15 à faire._
+_✅ 1 fait (Noyer Foncé) · ⬜ 14 à faire._
 
 ---
 
@@ -96,6 +146,8 @@ _⬜ 0 fait · 15 à faire._
 Ces valeurs sont déjà en français et sans doublon — ne rien faire, elles s'affichent telles quelles :
 
 `Rose` (46), `Bleu foncé` (32), `Beige` (29), `Orange` (14), `Brun foncé` (8), `Vert pâle` (7), `Vert forêt` (3).
+
+> _Note : Mat a quand même créé un **groupe « Beige »** (✅) — sans impact négatif, ça reste une seule facette propre._
 
 ---
 
