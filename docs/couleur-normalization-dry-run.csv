@@ -1,0 +1,76 @@
+final_label,current_value,action,products_affected,variants_affected,group_total_variants,group_value_count
+"Noir","Noir",ANCHOR,208,212,243,2
+"Noir","Black",MERGE,30,31,243,2
+"Blanc","Blanc",ANCHOR,120,123,144,2
+"Blanc","White",MERGE,21,21,144,2
+"Gris","Gris",ANCHOR,120,121,133,3
+"Gris","Grey",MERGE,11,11,133,3
+"Gris","Mixed Grey",MERGE,1,1,133,3
+"Gris foncé","Gris foncé",ANCHOR,86,86,88,2
+"Gris foncé","Dark Grey",MERGE,2,2,88,2
+"Brun","Brun",ANCHOR,47,49,61,2
+"Brun","Brown",MERGE,12,12,61,2
+"Crème","Crème",ANCHOR,49,49,54,3
+"Crème","Cream White",MERGE,4,4,54,3
+"Crème","Cream",MERGE,1,1,54,3
+"Bleu","Bleu",ANCHOR,49,49,52,2
+"Bleu","Blue",MERGE,3,3,52,2
+"Gris pâle","Gris pâle",ANCHOR,45,45,51,4
+"Gris pâle","Light Grey",MERGE,4,4,51,4
+"Gris pâle","Light grey",MERGE,1,1,51,4
+"Gris pâle","Ash Grey",MERGE,1,1,51,4
+"Rose","Rose",ANCHOR,45,46,46,1
+"Vert","Vert",ANCHOR,37,39,42,2
+"Vert","Green",MERGE,3,3,42,2
+"Rouge","Rouge",ANCHOR,39,39,40,2
+"Rouge","Red",MERGE,1,1,40,2
+"Bleu foncé","Bleu foncé",ANCHOR,31,32,32,1
+"Beige","Beige",ANCHOR,27,29,29,1
+"Multicolore","Grey, Black",MERGE,1,1,19,13
+"Multicolore","Flower Pattern",MERGE,1,1,19,13
+"Multicolore","Grey, White, Black",MERGE,1,1,19,13
+"Multicolore","Red, Yellow, Blue",MERGE,1,1,19,13
+"Multicolore","Natural, Black",MERGE,1,1,19,13
+"Multicolore","Black, Yellow",MERGE,1,1,19,13
+"Multicolore","Green, Black",MERGE,1,1,19,13
+"Multicolore","multi-colored",MERGE,3,3,19,13
+"Multicolore","Black, Grey Geometric",MERGE,1,1,19,13
+"Multicolore","Multi Colour",MERGE,5,5,19,13
+"Multicolore","Natural, Blue",MERGE,1,1,19,13
+"Multicolore","Brown, Green, White",MERGE,1,1,19,13
+"Multicolore","Multicolour",MERGE,1,1,19,13
+"Argent","Argent",ANCHOR,13,14,16,2
+"Argent","Silver",MERGE,2,2,16,2
+"Orange","Orange",ANCHOR,14,14,14,1
+"Café","Café",ANCHOR,11,11,12,2
+"Café","Coffee",MERGE,1,1,12,2
+"Jaune","Yellow",MERGE,11,11,11,1
+"Kaki","Kaki",ANCHOR,7,7,11,2
+"Kaki","Khaki",MERGE,4,4,11,2
+"Brun foncé","Brun foncé",ANCHOR,8,8,8,1
+"Naturel","Natural",MERGE,3,4,8,2
+"Naturel","Natural Finish",MERGE,4,4,8,2
+"Vert pâle","Vert pâle",ANCHOR,7,7,7,1
+"Bronze","Bronze",ANCHOR,5,5,6,2
+"Bronze","Bronze Tone",MERGE,1,1,6,2
+"Bois naturel","Natural Wood",MERGE,4,4,5,2
+"Bois naturel","Natural wood finish",MERGE,1,1,5,2
+"Brun rustique","Rustic Brown",MERGE,5,5,5,1
+"Rouge vin","Wine Red",MERGE,5,5,5,1
+"Brun pâle","Light Brown",MERGE,3,3,3,1
+"Gris charbon","Gris charbon",ANCHOR,1,1,3,2
+"Gris charbon","Carbon Grey",MERGE,1,2,3,2
+"Vert foncé","Dark Green",MERGE,3,3,3,1
+"Vert forêt","Vert forêt",ANCHOR,3,3,3,1
+"Bleu ciel","Sky Blue",MERGE,2,2,2,1
+"Brun café","Coffee Brown",MERGE,2,2,2,1
+"Noyer","Noyer",ANCHOR,1,1,2,2
+"Noyer","Walnut",MERGE,1,1,2,2
+"Carbonisé","Carbonized",MERGE,1,1,1,1
+"Chêne","Oak",MERGE,1,1,1,1
+"Havane","Tan",MERGE,1,1,1,1
+"Naturel vintage","Vintage Natural",MERGE,1,1,1,1
+"Noyer foncé","Dark Walunt",MERGE,1,1,1,1
+"Vert armée","Army Green",MERGE,1,1,1,1
+"Vert-de-gris","Verdigris (Green)",MERGE,1,1,1,1
+"Violet","Purple",MERGE,1,1,1,1
