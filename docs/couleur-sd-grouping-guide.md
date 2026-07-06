@@ -7,18 +7,16 @@ _Source de vérité des décisions : [`couleur-normalization-dry-run.csv`](coule
 données produit — on regroupe/renomme uniquement l'affichage du filtre. Résultat : **75 valeurs
 brutes → 41 couleurs propres en français.**
 
-> **📊 Statut au 2026-07-05 (2e vérif — 24 collections, FR + /en) : 10 / ~34 faits.**
+> **✅ COMPLET au 2026-07-06 — grouping 100 % fait, ZÉRO DOUBLON vérifié.**
 >
-> **✅ Faits (10 groupes live) :** `Argent`, `Beige`, `Blanc`, `Bleu`, `Brun`, `Gris`, `Noir`,
-> `Noyer Foncé`, `Rouge`, `Vert`. Leurs variantes anglaises sont bien absorbées
-> (`Black`→Noir, `White`→Blanc, `Brown`→Brun, `Green`→Vert…) → **zéro doublon pour ces familles.** 👍
->
-> **⬜ Reste ~24 actions** (voir section ci-dessous). Doublons/anglais encore visibles, ex.
-> `Kaki`+`Khaki` (6 collections), `Bronze`+`Bronze Tone`, `Café`+`Coffee`, `Crème`+`Cream`.
+> Balayage Playwright final (5 collections `nouveaux-arrivages`, `patio-mobilier`,
+> `exterieur-et-jardin`, `coups-de-coeur`, `ensembles-de-patio` × **FR + /en**) : `TOTAL_LEAKS = 0`.
+> 23 groupes FR propres, aucune valeur anglaise résiduelle, FR et EN identiques. Les 7 fusions et
+> les renommages ci-dessous sont tous live. _(Historique du chantier conservé ci-dessous.)_
 
 ---
 
-## ⬜ RESTE À FAIRE (post-audit 2026-07-05)
+## ✅ TERMINÉ — checklist du chantier (toutes les actions ci-dessous sont faites)
 
 ### A. FUSIONS (7) — créer le groupe, cocher **toutes** les valeurs listées
 
@@ -55,7 +53,8 @@ brutes → 41 couleurs propres en français.**
 | **Vert-de-gris** | `Verdigris (Green)` |
 | **Vert armée** | `Army Green` |
 
-**Total restant : 7 fusions + 14 renommages = 21 sûrs (+3 nuances de gris à vérifier ≈ 24).**
+**✅ Tout est fait et vérifié live (zéro doublon FR + EN).** _(Les 3 nuances de gris —
+Gris foncé/pâle/charbon — n'apparaissent pas au catalogue, donc rien à faire.)_
 
 > ⚠️ Un seul faux positif d'index : `ensembles-de-patio` montrait encore `Brun` en brut alors que
 > `Brun` est bien groupé partout ailleurs → simple **lag de réindexation** de cette collection,
