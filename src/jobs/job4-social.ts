@@ -13,8 +13,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { stripMarkdown } from "@/lib/strip-markdown";
-import { composeImage } from "@/lib/image-composer";
-import { env, CLAUDE, SYNC, CHANNELS, getPublicAppUrl, type ChannelKey } from "@/lib/config";
+import { env, CLAUDE, SYNC, CHANNELS, type ChannelKey } from "@/lib/config";
 import {
   getAllSettings,
   getProduct,
@@ -47,9 +46,10 @@ async function postableLifestyleUrl(shopifyProductId: string | null | undefined)
   return life.verified && life.primaryImageUrl ? life.primaryImageUrl : null;
 }
 
-// Job 4 generates STATIC posts only (branded images). Video generation has been
-// decoupled out of this job — the new FFmpeg-based slideshow pipeline owns video
-// rendering and populates the draft's video_url separately. See
+// Job 4 generates STATIC posts only: the product's clean Shopify position-1
+// lifestyle photo, posted RAW (no compositing, watermark, price footer or badge —
+// Mat, 2026-07). Video generation is decoupled: the FFmpeg-based slideshow pipeline
+// owns video rendering and populates the draft's video_url separately. See
 // src/lib/video-engines/ and src/lib/video-brand-tokens.ts.
 
 const ANTHROPIC_CALL_TIMEOUT_MS = 45_000;
@@ -75,20 +75,6 @@ function logError(msg: string, data?: Record<string, unknown>): void {
 
 function getClient() {
   return getAnthropicClient();
-}
-
-function getImageSettings(settings: Record<string, string>): {
-  accentColor: string;
-  textColor: string;
-  storeName: string;
-  bannerOpacity: number;
-} {
-  return {
-    accentColor: settings.social_accent_color || "#2563eb",
-    textColor: settings.social_text_color || "#ffffff",
-    storeName: settings.social_store_display_name || env.storeName,
-    bannerOpacity: parseInt(settings.social_banner_opacity || "75", 10),
-  };
 }
 
 function interpolatePrompt(template: string, vars: Record<string, string>): string {
@@ -178,88 +164,6 @@ interface GenerateDraftResult {
 }
 
 /**
- * Pick between 1 and min(5, available) random images from a product row.
- * Varies both count and order so auto-generated posts don't all look identical.
- * Returns [] if no images are available.
- */
-export function pickRandomImages(product: { image1?: string; image2?: string; image3?: string; image4?: string; image5?: string; image6?: string; image7?: string }): string[] {
-  const candidates: string[] = [];
-  const keys = ["image1", "image2", "image3", "image4", "image5", "image6", "image7"] as const;
-  for (const key of keys) {
-    const v = product[key];
-    if (typeof v === "string" && v.trim().length > 0) candidates.push(v.trim());
-  }
-  if (candidates.length === 0) return [];
-  // Fisher-Yates shuffle
-  for (let i = candidates.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
-  }
-  const maxPick = Math.min(5, candidates.length);
-  const n = 1 + Math.floor(Math.random() * maxPick);
-  return candidates.slice(0, n);
-}
-
-interface BrandedImages {
-  /** True when a branded preview URL was produced and prepended. */
-  applied: boolean;
-  imageUrls: string[];
-  imageUrl: string | null;
-  imagePath: string | null;
-}
-
-/**
- * Build the branded hero image for a draft (new_product / stock_highlight).
- *
- * The branded image is served by GET /api/image-preview, which composes the
- * product photo + Ameublo Direct logo + price (+ "NOUVEAU" badge for new
- * products). We prepend that public URL as imageUrls[0] so the publisher posts
- * the branded image first, keeping the raw Aosom photos as a gallery, and store
- * the same URL in image_path as a reference (not base64 — the Graph APIs fetch
- * the URL themselves).
- *
- * Returns applied=false when no public base URL is configured (e.g. local dev
- * without NEXT_PUBLIC_APP_URL) so callers fall back to the legacy overlay rather
- * than emit a localhost URL the platforms can't reach.
- *
- * The stored URL uses locale=fr (Ameublo). The publisher rewrites it per channel
- * (localizeBrandedImageUrls in social-publisher.ts) so EN channels (Furnish Direct)
- * fetch the EN-branded variant — one draft, correct logo on each page.
- */
-function brandImages(
-  trigger: "new_product" | "stock_highlight" | "price_drop",
-  sku: string,
-  price: number,
-  lifestyleImageUrl: string
-): BrandedImages {
-  const base = getPublicAppUrl();
-  if (!base) {
-    // Local dev (no public base URL): can't brand through image-preview, so post the
-    // clean Shopify lifestyle photo raw — still never a white-bg image.
-    return { applied: false, imageUrls: [lifestyleImageUrl], imageUrl: lifestyleImageUrl, imagePath: null };
-  }
-  // Price goes in the URL so the composed image is cache-keyed on it — otherwise
-  // the CDN could serve a stale price after the product's price changes. `img` pins
-  // the compose source to the already-resolved Shopify lifestyle photo so image-preview
-  // does NOT re-hit Shopify at render time (blip-proof + no public amplification).
-  const params = new URLSearchParams({ sku, locale: "fr", price: Number(price).toFixed(2), img: lifestyleImageUrl });
-  if (trigger === "new_product") params.set("badge", "new");
-  else if (trigger === "price_drop") params.set("badge", "sale");
-  const brandedUrl = `${base}/api/image-preview?${params.toString()}`;
-  // Post ONLY the branded hero — image-preview composes it from the product's
-  // Shopify position-1 lifestyle photo (guaranteed clean for lifestyle-verified
-  // products). The raw Aosom gallery is deliberately dropped: it is the untouched
-  // feed order and still contains white-background and spec/infographic shots,
-  // which must never reach a post.
-  return {
-    applied: true,
-    imageUrls: [brandedUrl],
-    imageUrl: brandedUrl,
-    imagePath: brandedUrl,
-  };
-}
-
-/**
  * Generate a social draft for a new product import.
  */
 export async function triggerNewProduct(sku: string): Promise<GenerateDraftResult | null> {
@@ -284,26 +188,9 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
     store_name: env.storeName,
   }, product.product_type as string | null);
 
-  const imgSettings = getImageSettings(settings);
-  const rawImageUrls = pickRandomImages(product);
-  const branded = brandImages("new_product", sku, Number(product.price), lifestyleUrl);
-  let imagePath = branded.imagePath;
-  if (!branded.applied && rawImageUrls[0]) {
-    // No public base URL — fall back to the legacy overlay preview.
-    try {
-      imagePath = await composeImage({
-        sku,
-        templateType: "new_product",
-        productName,
-        imageUrl: rawImageUrls[0],
-        price: Number(product.price),
-        language: "FR",
-        ...imgSettings,
-      });
-    } catch (err) {
-      log(`Image composition failed for ${sku}: ${err}`);
-    }
-  }
+  // Post the clean Shopify position-1 lifestyle photo RAW — the Graph APIs fetch
+  // this URL directly; no compositing, watermark, price footer or badge.
+  const imageUrls = [lifestyleUrl];
 
   const draftId = await createFacebookDraft({
     sku,
@@ -311,16 +198,16 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
     language: "FR",
     postText: fr,
     postTextEn: en,
-    imagePath,
-    imageUrl: branded.imageUrl,
-    imageUrls: branded.imageUrls,
+    imagePath: lifestyleUrl,
+    imageUrl: lifestyleUrl,
+    imageUrls,
     hookId,
   });
 
   await markProductPosted(sku);
   await createNotification("info", "Nouveau draft social", `Nouveau produit: ${productName.slice(0, 60)}`);
-  log(`Draft #${draftId} created for new product ${sku} (${branded.imageUrls.length} photos, branded=${branded.applied})`);
-  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl: branded.imageUrl, imageUrls: branded.imageUrls };
+  log(`Draft #${draftId} created for new product ${sku} (raw lifestyle photo)`);
+  return { draftId, postText: fr, postTextEn: en, imagePath: lifestyleUrl, imageUrl: lifestyleUrl, imageUrls };
 }
 
 /**
@@ -352,29 +239,9 @@ export async function triggerPriceDrop(
     store_name: env.storeName,
   }, product.product_type as string | null);
 
-  const imgSettings = getImageSettings(settings);
-  const rawImageUrls = pickRandomImages(product);
-  // Branded lifestyle hero (badge=sale) pinned to the resolved Shopify photo; the
-  // sale caption carries the old→new price.
-  const branded = brandImages("price_drop", sku, newPrice, lifestyleUrl);
-  let imagePath = branded.imagePath;
-  if (!branded.applied && rawImageUrls[0]) {
-    // No public base URL (local dev) — fall back to the legacy overlay preview.
-    try {
-      imagePath = await composeImage({
-        sku,
-        templateType: "price_drop",
-        productName,
-        imageUrl: rawImageUrls[0],
-        price: newPrice,
-        oldPrice,
-        language: "FR",
-        ...imgSettings,
-      });
-    } catch (err) {
-      log(`Image composition failed for ${sku}: ${err}`);
-    }
-  }
+  // Post the clean Shopify position-1 lifestyle photo RAW; the sale caption carries
+  // the old→new price (no price footer / badge baked into the image anymore).
+  const imageUrls = [lifestyleUrl];
 
   const draftId = await createFacebookDraft({
     sku,
@@ -382,9 +249,9 @@ export async function triggerPriceDrop(
     language: "FR",
     postText: fr,
     postTextEn: en,
-    imagePath,
-    imageUrl: branded.imageUrl,
-    imageUrls: branded.imageUrls,
+    imagePath: lifestyleUrl,
+    imageUrl: lifestyleUrl,
+    imageUrls,
     oldPrice,
     newPrice,
     hookId,
@@ -395,8 +262,8 @@ export async function triggerPriceDrop(
     "Draft prix réduit",
     `${productName.slice(0, 40)}: ${oldPrice}$ -> ${newPrice}$`
   );
-  log(`Draft #${draftId} created for price drop ${sku} (branded=${branded.applied})`);
-  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl: branded.imageUrl, imageUrls: branded.imageUrls };
+  log(`Draft #${draftId} created for price drop ${sku} (raw lifestyle photo)`);
+  return { draftId, postText: fr, postTextEn: en, imagePath: lifestyleUrl, imageUrl: lifestyleUrl, imageUrls };
 }
 
 /**
@@ -450,27 +317,8 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
     store_name: env.storeName,
   }, product.product_type as string | null);
 
-  const imgSettings = getImageSettings(settings);
-  const rawImageUrls = pickRandomImages(product);
-  const branded = brandImages("stock_highlight", sku, Number(product.price), lifestyleUrl);
-  let imagePath = branded.imagePath;
-  if (!branded.applied && rawImageUrls[0]) {
-    // No public base URL — fall back to the legacy overlay preview.
-    try {
-      imagePath = await composeImage({
-        sku,
-        templateType: "stock_highlight",
-        productName,
-        imageUrl: rawImageUrls[0],
-        price: Number(product.price),
-        qty: Number(product.qty),
-        language: "FR",
-        ...imgSettings,
-      });
-    } catch (err) {
-      log(`Image composition failed for ${sku}: ${err}`);
-    }
-  }
+  // Post the clean Shopify position-1 lifestyle photo RAW.
+  const imageUrls = [lifestyleUrl];
 
   const draftId = await createFacebookDraft({
     sku,
@@ -478,15 +326,15 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
     language: "FR",
     postText: fr,
     postTextEn: en,
-    imagePath,
-    imageUrl: branded.imageUrl,
-    imageUrls: branded.imageUrls,
+    imagePath: lifestyleUrl,
+    imageUrl: lifestyleUrl,
+    imageUrls,
     hookId,
   });
 
   await markProductPosted(sku);
-  log(`Draft #${draftId} created for stock highlight ${sku} (${branded.imageUrls.length} photos, branded=${branded.applied})`);
-  return { draftId, postText: fr, postTextEn: en, imagePath, imageUrl: branded.imageUrl, imageUrls: branded.imageUrls };
+  log(`Draft #${draftId} created for stock highlight ${sku} (raw lifestyle photo)`);
+  return { draftId, postText: fr, postTextEn: en, imagePath: lifestyleUrl, imageUrl: lifestyleUrl, imageUrls };
 }
 
 // ─── Auto-post orchestration ────────────────────────────────────────

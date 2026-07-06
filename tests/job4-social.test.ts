@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Anthropic from "@anthropic-ai/sdk";
-import { pickRandomImages, triggerStockHighlight, triggerNewProduct } from "@/jobs/job4-social";
+import { triggerStockHighlight, triggerNewProduct, triggerPriceDrop } from "@/jobs/job4-social";
 
 // ─── Mock factories ───────────────────────────────────────────────────
 
@@ -28,18 +28,11 @@ vi.mock("@/lib/selectors/shopify-images", () => ({
   resolveLifestyle: vi.fn(),
 }));
 
-vi.mock("@/lib/image-composer", () => ({
-  composeImage: vi.fn().mockResolvedValue(null),
-}));
-
 vi.mock("@/lib/config", () => ({
   env: { storeName: "TestStore" },
   CLAUDE: { MODEL: "claude-test", MAX_TOKENS_SOCIAL: 500 },
   SYNC: { DEFAULT_MIN_DAYS_BETWEEN_REPOSTS: "30" },
   CHANNELS: {},
-  // Null base URL → branding is skipped, so these tests exercise the legacy
-  // (raw image) path. Branding is covered in job4-branding.test.ts.
-  getPublicAppUrl: () => null,
 }));
 
 vi.mock("@/lib/social-publisher", () => ({
@@ -91,56 +84,60 @@ function makeTimeout() {
   return new Anthropic.APIUserAbortError();
 }
 
-// ─── pickRandomImages ─────────────────────────────────────────────────
+// ─── raw lifestyle image (no branding/compositor) ─────────────────────
+//
+// Job 4 posts the product's clean Shopify position-1 lifestyle photo RAW: the
+// draft's imageUrls is exactly [primaryImageUrl] — never a composed
+// /api/image-preview URL, and never a white-bg / gallery image. When the product
+// is not lifestyle-verified (or no clean photo resolves), the trigger skips.
 
-describe("pickRandomImages", () => {
-  it("returns empty array when product has no images", () => {
-    expect(pickRandomImages({})).toEqual([]);
-    expect(pickRandomImages({ image1: "", image2: "  " })).toEqual([]);
+describe("raw lifestyle image", () => {
+  const LIFESTYLE_URL = "https://cdn.shopify.com/s/files/lifestyle.jpg";
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(getAllSettings).mockResolvedValue({
+      ...SETTINGS,
+      prompt_new_product_fr: "Post FR {product_name}",
+      prompt_new_product_en: "Post EN {product_name}",
+      prompt_price_drop_fr: "Baisse {product_name}",
+      prompt_price_drop_en: "Drop {product_name}",
+    });
+    vi.mocked(getEligibleHighlightCandidates).mockResolvedValue([PRODUCT] as never);
+    vi.mocked(getProduct).mockResolvedValue(PRODUCT as never);
+    vi.mocked(createFacebookDraft).mockResolvedValue(DRAFT_ID);
+    vi.mocked(markProductPosted).mockResolvedValue(undefined);
+    vi.mocked(resolveLifestyle).mockResolvedValue({ ...LIFESTYLE_VERIFIED });
+    mockCreate.mockResolvedValue(makeMsg("text"));
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    ["new_product", () => triggerNewProduct("TEST-001")],
+    ["price_drop", () => triggerPriceDrop("TEST-001", 100, 80)],
+    ["stock_highlight", () => triggerStockHighlight()],
+  ] as const)("%s: posts the raw lifestyle URL, one image, no compositor", async (_name, run) => {
+    const result = await run();
+    expect(result).not.toBeNull();
+    expect(result!.imageUrls).toEqual([LIFESTYLE_URL]);
+    expect(result!.imageUrl).toBe(LIFESTYLE_URL);
+    expect(result!.imagePath).toBe(LIFESTYLE_URL);
+    // Never a composed /api/image-preview URL.
+    expect(result!.imageUrls.some((u) => u.includes("/api/image-preview"))).toBe(false);
+
+    const draftArg = vi.mocked(createFacebookDraft).mock.calls[0][0];
+    expect(draftArg.imageUrls).toEqual([LIFESTYLE_URL]);
   });
 
-  it("caps selection at the number of available images", () => {
-    const product = { image1: "a", image2: "b" };
-    for (let i = 0; i < 50; i++) {
-      const picked = pickRandomImages(product);
-      expect(picked.length).toBeGreaterThanOrEqual(1);
-      expect(picked.length).toBeLessThanOrEqual(2);
-      for (const u of picked) expect(["a", "b"]).toContain(u);
-    }
-  });
-
-  it("never picks more than 5 even when 7 are available", () => {
-    const product = {
-      image1: "a", image2: "b", image3: "c", image4: "d",
-      image5: "e", image6: "f", image7: "g",
-    };
-    for (let i = 0; i < 100; i++) {
-      const picked = pickRandomImages(product);
-      expect(picked.length).toBeGreaterThanOrEqual(1);
-      expect(picked.length).toBeLessThanOrEqual(5);
-      expect(new Set(picked).size).toBe(picked.length);
-    }
-  });
-
-  it("varies the count across many runs (not always the same N)", () => {
-    const product = {
-      image1: "a", image2: "b", image3: "c", image4: "d", image5: "e",
-    };
-    const counts = new Set<number>();
-    for (let i = 0; i < 200; i++) counts.add(pickRandomImages(product).length);
-    expect(counts.size).toBeGreaterThanOrEqual(2);
-  });
-
-  it("varies the order across runs (shuffle is applied)", () => {
-    const product = {
-      image1: "a", image2: "b", image3: "c", image4: "d", image5: "e",
-    };
-    const firsts = new Set<string>();
-    for (let i = 0; i < 200; i++) {
-      const picked = pickRandomImages(product);
-      if (picked.length > 0) firsts.add(picked[0]);
-    }
-    expect(firsts.size).toBeGreaterThanOrEqual(2);
+  it.each([
+    ["new_product", () => triggerNewProduct("TEST-001")],
+    ["price_drop", () => triggerPriceDrop("TEST-001", 100, 80)],
+    ["stock_highlight", () => triggerStockHighlight()],
+  ] as const)("%s: skips (returns null, no draft) when not lifestyle-verified", async (_name, run) => {
+    vi.mocked(resolveLifestyle).mockResolvedValue({ verified: false, primaryImageUrl: null });
+    const result = await run();
+    expect(result).toBeNull();
+    expect(createFacebookDraft).not.toHaveBeenCalled();
   });
 });
 

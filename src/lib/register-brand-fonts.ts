@@ -5,15 +5,15 @@ import path from "node:path";
 /**
  * Make the bundled DM Sans TTFs resolvable by the SVG text renderer.
  *
- * Both social-image compositors (image-watermark.ts footer bar, image-compositor.ts
- * branded hero) draw text as SVG rendered by librsvg/Pango, which resolve fonts via
- * **fontconfig** — NOT Sharp's `fontfile` option (that only applies to `sharp({text})`).
+ * The FFmpeg slideshow render (src/lib/slideshow) draws its slide text as SVG rendered
+ * by librsvg/Pango, which resolve fonts via **fontconfig** — NOT Sharp's `fontfile`
+ * option (that only applies to `sharp({text})`).
  * Without a usable font on the render host the text renders as tofu boxes (the "carrés"
  * bug). So we write a fontconfig file pointing at src/fonts and set FONTCONFIG_FILE
  * before the first render, which makes `font-family: "DM Sans"` resolve to our TTFs.
  *
- * Call `registerBrandFonts()` at module load in every module that composes branded
- * images. It is idempotent (no-ops if FONTCONFIG_FILE is already set) and best-effort
+ * Call `registerBrandFonts()` at module load in every module that renders SVG text.
+ * It is idempotent (no-ops if FONTCONFIG_FILE is already set) and best-effort
  * (any failure falls back to the system font resolution), so it can never break a render.
  */
 

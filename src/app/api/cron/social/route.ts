@@ -13,9 +13,9 @@ export async function GET(request: Request) {
   }
 
   // Daily stock highlight: pick the first lifestyle-verified product among a random
-  // eligible batch and generate a bilingual draft. The post carries a single branded
-  // hero composed (by /api/image-preview) from the product's Shopify position-1
-  // lifestyle photo. Returns null (skipped) when no eligible product is verified.
+  // eligible batch and generate a bilingual draft. The post carries the product's
+  // Shopify position-1 lifestyle photo, posted raw (no compositing/watermark).
+  // Returns null (skipped) when no eligible product is verified.
   try {
     const result = await trackCron("social", () => triggerStockHighlight());
     if (!result) {

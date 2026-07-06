@@ -1,19 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Branded social images read Logo/*.png and the DM Sans TTFs at runtime (not via the
-  // module graph), so each route that composes them must trace those assets into its
-  // bundle. The TTFs are registered with fontconfig (see register-brand-fonts.ts) so the
-  // SVG text renders in DM Sans instead of tofu boxes on the Vercel render host.
-  // /api/image-preview composes the branded hero (logo + price + badge); the publish
-  // routes additionally stamp the footer watermark.
+  // The FFmpeg slideshow render (reached via the publish/cron routes) reads the DM Sans
+  // TTFs at runtime (not via the module graph), registered with fontconfig (see
+  // register-brand-fonts.ts) so slide text renders in DM Sans instead of tofu boxes on
+  // the Vercel render host. (Social photo posts are now raw — no logo/watermark tracing.)
   outputFileTracingIncludes: {
-    "/api/image-preview": [
-      "./Logo/logo-fr.png",
-      "./Logo/logo-en.png",
-      "./src/fonts/DMSans-Regular.ttf",
-      "./src/fonts/DMSans-Bold.ttf",
-    ],
     "/api/cron/publisher": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf"],
     "/api/cron/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf"],
     "/api/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf"],

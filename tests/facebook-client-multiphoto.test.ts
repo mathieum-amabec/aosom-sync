@@ -6,16 +6,7 @@ process.env.FACEBOOK_AMEUBLO_PAGE_TOKEN = "TEST_PAGE_TOKEN";
 process.env.FACEBOOK_FURNISH_PAGE_ID = "TEST_FURNISH_ID";
 process.env.FACEBOOK_FURNISH_PAGE_TOKEN = "TEST_FURNISH_TOKEN";
 
-// Photos are now branded + binary-uploaded. Stub the watermarker so this test stays
-// about the Graph API transport (album flow), not image processing — and so it never
-// hits the network. The returned buffer is what should land in the multipart `source`.
-vi.mock("@/lib/image-watermark", () => ({
-  FOOTER_HEIGHT: 60,
-  addWatermarkToImage: vi.fn(async (url: string) => Buffer.from(`WM:${url}`)),
-}));
-
 import { publishWithImages } from "@/lib/facebook-client";
-import { addWatermarkToImage } from "@/lib/image-watermark";
 
 interface FakeCall {
   url: string;
@@ -23,28 +14,18 @@ interface FakeCall {
   body: Record<string, unknown>;
 }
 
-/** Normalize an init.body into a plain object: FormData fields (with a `source` Blob) or parsed JSON. */
+/** Parse a JSON request body into a plain object (photos + feed are both JSON now). */
 function readBody(init?: RequestInit): Record<string, unknown> {
-  if (init?.body instanceof FormData) {
-    const fd = init.body;
-    const out: Record<string, unknown> = { __form: true };
-    for (const key of ["source", "message", "published", "scheduled_publish_time"]) {
-      const v = fd.get(key);
-      if (v !== null) out[key] = v;
-    }
-    return out;
-  }
   if (typeof init?.body === "string") return JSON.parse(init.body);
   return {};
 }
 
-describe("publishWithImages — multi-photo Facebook album (watermarked binary upload)", () => {
+describe("publishWithImages — multi-photo Facebook album (raw URL, no watermark)", () => {
   let calls: FakeCall[] = [];
   let originalFetch: typeof fetch;
 
   beforeEach(() => {
     calls = [];
-    vi.mocked(addWatermarkToImage).mockClear();
     originalFetch = global.fetch;
     global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       const urlStr = typeof url === "string" ? url : url.toString();
@@ -74,16 +55,13 @@ describe("publishWithImages — multi-photo Facebook album (watermarked binary u
     const feedCalls = calls.filter((c) => c.url.includes("/feed"));
     expect(photoCalls).toHaveLength(1);
     expect(feedCalls).toHaveLength(0);
-    // Single-photo path uploads the watermarked binary + message.
-    expect(photoCalls[0].body.__form).toBe(true);
-    expect(photoCalls[0].body.source).toBeInstanceOf(Blob);
+    // Single-photo path posts the raw image URL + message (Meta fetches the URL).
+    expect(photoCalls[0].body.url).toBe("https://cdn.example.com/a.jpg");
     expect(photoCalls[0].body.message).toBe("hello");
-    // The image was watermarked for the right brand before upload.
-    expect(addWatermarkToImage).toHaveBeenCalledWith("https://cdn.example.com/a.jpg", "ameublo");
     expect(result.postId).toBeTruthy();
   });
 
-  it("three photos uploads each unpublished, then posts /feed with attached_media array", async () => {
+  it("three photos uploads each unpublished by URL, then posts /feed with attached_media array", async () => {
     const urls = [
       "https://cdn.example.com/a.jpg",
       "https://cdn.example.com/b.jpg",
@@ -98,15 +76,13 @@ describe("publishWithImages — multi-photo Facebook album (watermarked binary u
     const photoCalls = calls.filter((c) => c.url.includes("/photos"));
     const feedCalls = calls.filter((c) => c.url.includes("/feed"));
 
-    // Each photo watermarked + uploaded once, unpublished, as binary.
+    // Each photo posted once, unpublished, by raw URL.
     expect(photoCalls).toHaveLength(3);
-    expect(addWatermarkToImage).toHaveBeenCalledTimes(3);
     for (let i = 0; i < 3; i++) {
-      expect(photoCalls[i].body.source).toBeInstanceOf(Blob);
+      expect(photoCalls[i].body.url).toBe(urls[i]);
       expect(photoCalls[i].body.published).toBe("false");
       // Single-photo path artifacts must NOT leak into the unpublished uploads.
       expect(photoCalls[i].body.message).toBeUndefined();
-      expect(addWatermarkToImage).toHaveBeenNthCalledWith(i + 1, urls[i], "ameublo");
     }
 
     // /feed gets a single call with attached_media as a JSON array (NOT bracket notation).
@@ -143,7 +119,7 @@ describe("publishWithImages — multi-photo Facebook album (watermarked binary u
     global.fetch = vi.fn(async (url: string | URL | Request) => {
       const urlStr = typeof url === "string" ? url : url.toString();
       if (urlStr.includes("/photos")) {
-        return new Response(JSON.stringify({ error: { message: "Invalid source" } }), { status: 400 });
+        return new Response(JSON.stringify({ error: { message: "Invalid url" } }), { status: 400 });
       }
       return new Response("{}", { status: 200 });
     }) as unknown as typeof fetch;
