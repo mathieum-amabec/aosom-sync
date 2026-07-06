@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.199] - 2026-07-06
+
+### Changed — dedup Shopify fetch: one request per product for images + title + lifestyle
+- **New `src/lib/selectors/shopify-product.ts`**: shared `resolveProductFields()` issues a single
+  `GET /products/{id}.json?fields=images,title,tags` per product, caches the combined result
+  (5 min) and throttles to Shopify's ~2 req/sec. `resolveProductImages`, `resolveProductTitleFr`,
+  and `resolveLifestyle` are now thin wrappers that read their slice off this shared cache, so
+  resolving a product's images, FR title, and lifestyle status costs **one Shopify request instead
+  of up to three** (dedup in `hydrateItems`, `bestSellerImageSeries`, and the social/image-preview paths).
+- The three separate throttle chains collapse into one (2 req/sec ceiling honored). Public API,
+  test seams, and per-view image logic (array-order hero vs position-sorted lifestyle photo) unchanged.
+
 ## [0.5.53.198] - 2026-07-05
 
 ### Changed — social auto-posts publish ONLY lifestyle-verified products with a clean photo (#340)
