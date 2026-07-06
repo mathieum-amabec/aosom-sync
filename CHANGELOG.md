@@ -2,6 +2,32 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.200] - 2026-07-06
+
+### Changed — social posts now publish the RAW Shopify lifestyle photo (no compositor, no watermark)
+Mat asked to simplify radically: Job 4 posts the product's clean Shopify position-1
+lifestyle photo **as-is** — no synthetic branded image, overlay, watermark, price footer,
+or NOUVEAU/sale badge. The raw `cdn.shopify.com` URL (resolved by `resolveLifestyle`) is
+handed straight to the Graph API, which fetches it itself.
+- **`job4-social.ts`**: all three triggers (new_product / price_drop / stock_highlight) set
+  `imageUrls = [lifestyleUrl]`. Removed `brandImages()`, `pickRandomImages()`,
+  `getImageSettings()`, and the `composeImage()` fallback. The lifestyle-verified gate stays
+  (unverified products are still skipped, never posted).
+- **`facebook-client.ts`**: photos post by public URL (`POST /photos {url}` / album
+  `attached_media`) instead of download → watermark → multipart binary upload. Removed
+  `addWatermarkToImage`.
+- **`instagram-client.ts`**: photo + carousel hand Meta the raw `image_url` instead of a
+  watermarked Vercel Blob (removed the Blob host + cleanup). Reels unchanged.
+- **Removed (now dead):** `GET /api/image-preview` route, `image-compositor.ts`,
+  `image-watermark.ts`, `composeImage()`/`resolveImagePath()` in `image-composer.ts`
+  (kept `downloadImage` — still used by the slideshow/FFmpeg engines). Dropped the
+  image-preview entries from `next.config.ts` + `proxy.ts`. No `sharp` in the social
+  publish path anymore.
+- **Note:** the publish-time watermark removal applies to **all** social posts (product +
+  content_template), and EN channels now post the identical raw photo as FR (no per-brand
+  logo differentiation — intended). Tests rewritten to the raw-URL contract; deleted the
+  compositor/watermark/preview-route/branding test files.
+
 ## [0.5.53.199] - 2026-07-06
 
 ### Changed — dedup Shopify fetch: one request per product for images + title + lifestyle
