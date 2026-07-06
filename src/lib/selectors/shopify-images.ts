@@ -1,99 +1,31 @@
 /**
- * Resolve Shopify-CDN images for a catalog product.
+ * Resolve Shopify-CDN images + lifestyle status for a catalog product.
  *
  * Why this exists: the catalog DB stores Aosom-CDN image URLs
  * (img-us.aosomcdn.com), which 403 our render workers and must never appear in
- * content. The live Shopify product, however, serves the same photos rehosted on
- * cdn.shopify.com. This module fetches those, filters to cdn.shopify.com only,
- * caches per-product for 5 minutes, and throttles to Shopify's 2 req/sec budget.
+ * content. The live Shopify product serves the same photos rehosted on
+ * cdn.shopify.com. This module returns those, plus the lifestyle-verified tag +
+ * position-1 photo used by the social/image-preview paths.
  *
- * A test seam (`__setImageResolverForTests`) lets the selector suite inject
- * deterministic images without hitting the network.
+ * The actual fetch/filter/cache/throttle lives in `shopify-product.ts`, shared
+ * with the title resolver so images, title, and lifestyle info all come from a
+ * single per-product request.
+ *
+ * Test seams (`__setImageResolverForTests`, `__setLifestyleResolverForTests`)
+ * let the selector suite inject deterministic values without hitting the network.
  */
-import { shopifyFetch } from "@/lib/shopify-client";
-import { env } from "@/lib/config";
-import { SHOPIFY_CDN_PREFIX } from "@/lib/slideshow/validate";
+import { resolveProductFields, isSpecImageUrl, clearProductCache, type LifestyleInfo } from "./shopify-product";
+
+// Re-exported for callers/tests that import them from this module.
+export { isSpecImageUrl };
+export type { LifestyleInfo };
 
 /** A function that returns the Shopify-CDN image URLs for a product id. */
 export type ImageResolver = (shopifyProductId: string) => Promise<string[]>;
 
-const IMG_TTL_MS = 5 * 60 * 1000;
-/** Shopify allows ~2 req/sec on REST; one request per 500ms stays safely under. */
-const MIN_REQUEST_GAP_MS = 500;
-
-const imgCache = new Map<string, { urls: string[]; expiry: number }>();
-
-// Serialize Shopify requests through a single chain so concurrent selector calls
-// can't burst past the rate limit.
-let throttleChain: Promise<void> = Promise.resolve();
-let lastRequestAt = 0;
-
-async function throttle(): Promise<void> {
-  const wait = throttleChain.then(async () => {
-    const elapsed = Date.now() - lastRequestAt;
-    if (elapsed < MIN_REQUEST_GAP_MS) {
-      await new Promise((r) => setTimeout(r, MIN_REQUEST_GAP_MS - elapsed));
-    }
-    lastRequestAt = Date.now();
-  });
-  // Keep the chain alive even if a link rejects, so the throttle never wedges.
-  throttleChain = wait.catch(() => undefined);
-  return wait;
-}
-
-/** Keep only the first image: Aosom always places the official white-background
- * product shot at gallery position 1 (index 0); lifestyle/ambiance and spec
- * shots sit at position 2+. One clean white-bg photo per product. */
-const MAX_PRODUCT_IMAGES = 1;
-
-/**
- * URL substrings that flag a spec/infographic/diagram image (case-insensitive),
- * plus the `-B0`..`-F0` filename suffixes Aosom uses for those gallery shots.
- * An image whose URL contains any of these is dropped — slideshows want clean
- * product photos, not measurement diagrams.
- */
-const SPEC_IMAGE_KEYWORDS = [
-  "diagram", "spec", "measure", "size", "dimension", "chart", "infographic",
-  "instruction", "manual", "-b0", "-c0", "-d0", "-e0", "-f0",
-];
-
-/** True when the image URL looks like a spec/infographic shot, not a product photo. */
-export function isSpecImageUrl(url: string): boolean {
-  const u = url.toLowerCase();
-  return SPEC_IMAGE_KEYWORDS.some((kw) => u.includes(kw));
-}
-
-/**
- * Default resolver: GET /products/{id}.json?fields=images, keep only
- * cdn.shopify.com sources, drop spec/infographic shots, and return the first
- * MAX_PRODUCT_IMAGES (the clean hero photos). Returns [] on any failure (no
- * token, 404, network) so a missing image never breaks content selection.
- */
+/** Default resolver: the images slice of the shared per-product fetch. */
 async function defaultResolveShopifyCdnImages(shopifyProductId: string): Promise<string[]> {
-  const id = (shopifyProductId || "").trim();
-  if (!id) return [];
-  if (!env.hasShopifyToken) return [];
-
-  const hit = imgCache.get(id);
-  if (hit && hit.expiry > Date.now()) return hit.urls;
-
-  let urls: string[] = [];
-  try {
-    await throttle();
-    const res = await shopifyFetch(`/products/${encodeURIComponent(id)}.json?fields=images`);
-    if (res.ok) {
-      const data = (await res.json()) as { product?: { images?: { src?: string }[] } };
-      urls = (data.product?.images ?? [])
-        .map((img) => (typeof img.src === "string" ? img.src : ""))
-        .filter((src) => src.startsWith(SHOPIFY_CDN_PREFIX) && !isSpecImageUrl(src))
-        .slice(0, MAX_PRODUCT_IMAGES);
-    }
-  } catch {
-    urls = [];
-  }
-
-  imgCache.set(id, { urls, expiry: Date.now() + IMG_TTL_MS });
-  return urls;
+  return (await resolveProductFields(shopifyProductId)).images;
 }
 
 let resolver: ImageResolver = defaultResolveShopifyCdnImages;
@@ -108,7 +40,40 @@ export function __setImageResolverForTests(fn: ImageResolver | null): void {
   resolver = fn ?? defaultResolveShopifyCdnImages;
 }
 
-/** Test/maintenance helper: drop the per-product image cache. */
+/** Test/maintenance helper: drop the per-product cache (shared across resolvers). */
 export function clearImageCache(): void {
-  imgCache.clear();
+  clearProductCache();
+}
+
+// ─── Lifestyle-verified resolution (tag + clean position-1 photo) ──────────
+/**
+ * A product is "lifestyle-verified" when it carries the Shopify tag
+ * `lifestyle-verified`. For those products the Shopify gallery position-1 image is
+ * the clean lifestyle photo — the pos-1 swap (scripts/lifestyle-pos1-fix.mjs)
+ * reordered *Shopify* images only; the Aosom/Turso feed order (and thus
+ * products.image1) is unaffected, so the lifestyle shot can ONLY be resolved from
+ * Shopify, never from the catalog DB.
+ */
+export type LifestyleResolver = (shopifyProductId: string) => Promise<LifestyleInfo>;
+
+/** Default resolver: the lifestyle slice of the shared per-product fetch. */
+async function defaultResolveLifestyle(shopifyProductId: string): Promise<LifestyleInfo> {
+  return (await resolveProductFields(shopifyProductId)).lifestyle;
+}
+
+let lifestyleResolver: LifestyleResolver = defaultResolveLifestyle;
+
+/** Resolve a product's lifestyle-verified status + clean position-1 photo (cached, throttled). */
+export function resolveLifestyle(shopifyProductId: string): Promise<LifestyleInfo> {
+  return lifestyleResolver(shopifyProductId);
+}
+
+/** Test-only: swap the lifestyle resolver (pass null to restore the real one). */
+export function __setLifestyleResolverForTests(fn: LifestyleResolver | null): void {
+  lifestyleResolver = fn ?? defaultResolveLifestyle;
+}
+
+/** Test/maintenance helper: drop the per-product cache (shared across resolvers). */
+export function clearLifestyleCache(): void {
+  clearProductCache();
 }

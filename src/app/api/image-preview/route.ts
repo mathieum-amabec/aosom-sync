@@ -17,6 +17,7 @@ import { NextResponse } from "next/server";
 import { getProduct } from "@/lib/database";
 import { composeProductImage, type Locale, type Badge } from "@/lib/image-compositor";
 import { assertPublicHttpsUrl } from "@/lib/image-composer";
+import { resolveLifestyle } from "@/lib/selectors/shopify-images";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -71,7 +72,50 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unknown sku" }, { status: 404 });
   }
 
-  const productImageUrl = primaryImage(product as unknown as Record<string, unknown>);
+  // Source photo: prefer the Shopify position-1 lifestyle shot for lifestyle-verified
+  // products. The pos-1 swap only reordered Shopify images (the Aosom/Turso feed order —
+  // and thus products.image1 — is unaffected), so the clean lifestyle photo is only
+  // knowable from Shopify. Fall back to the Turso primary when the product isn't verified
+  // or on any Shopify failure (resolveLifestyle never throws). cdn.shopify.com is already
+  // an allow-listed host for the fallback redirect below, so this stays SSRF-safe.
+  let productImageUrl = primaryImage(product as unknown as Record<string, unknown>);
+
+  // Explicit source override: the social pipeline passes the already-resolved Shopify
+  // lifestyle photo as `img`, so the compose source is pinned and this route makes NO
+  // render-time Shopify call (blip-proof + no unauthenticated amplification). Accepted
+  // only for an allow-listed HTTPS image host, so it can't become an SSRF/open-redirect.
+  const imgOverride = searchParams.get("img");
+  let overrideApplied = false;
+  if (imgOverride) {
+    try {
+      const u = new URL(imgOverride);
+      assertPublicHttpsUrl(u);
+      if (isAllowedImageHost(u.hostname)) {
+        productImageUrl = imgOverride;
+        overrideApplied = true;
+      }
+    } catch {
+      /* malformed / disallowed override — ignore and fall through to normal resolution */
+    }
+  }
+
+  const shopifyId = (product as unknown as Record<string, unknown>).shopify_product_id;
+  if (!overrideApplied && typeof shopifyId === "string" && shopifyId.trim()) {
+    const life = await resolveLifestyle(shopifyId);
+    if (life.verified) {
+      // A lifestyle-verified product must render its clean Shopify photo — never the
+      // Turso white-bg primary. If the tag says verified but no clean photo resolves,
+      // refuse (404) rather than silently compose + cache the white-bg image. Unverified
+      // products still fall back to the Turso primary (dashboard preview / legacy).
+      if (!life.primaryImageUrl) {
+        return NextResponse.json(
+          { error: "Lifestyle-verified product has no clean Shopify image" },
+          { status: 404 },
+        );
+      }
+      productImageUrl = life.primaryImageUrl;
+    }
+  }
   if (!productImageUrl) {
     return NextResponse.json({ error: "Product has no image" }, { status: 404 });
   }
