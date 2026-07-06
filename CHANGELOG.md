@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.53.200] - 2026-07-06
+## [0.5.53.202] - 2026-07-06
 
 ### Changed — social posts now publish the RAW Shopify lifestyle photo (no compositor, no watermark)
 Mat asked to simplify radically: Job 4 posts the product's clean Shopify position-1
@@ -27,6 +27,16 @@ handed straight to the Graph API, which fetches it itself.
   content_template), and EN channels now post the identical raw photo as FR (no per-brand
   logo differentiation — intended). Tests rewritten to the raw-URL contract; deleted the
   compositor/watermark/preview-route/branding test files.
+
+## [0.5.53.201] - 2026-07-06
+
+### Docs — Search & Discovery collection filters (Couleur grouping plan + verified live)
+- `docs/search-discovery-filters-plan.md`, `docs/couleur-normalization-dry-run.csv`,
+  `docs/couleur-sd-grouping-guide.md`: plan, decision record (75 raw `Couleur` values → 41 clean
+  FR labels), and step-by-step S&D grouping guide for the Couleur collection filter.
+- Grouping is now **100 % live and verified** — Playwright sweep of 5 collections (FR + /en)
+  shows `TOTAL_LEAKS = 0`: 23 clean grouped FR colors, zero FR/EN duplicate, zero English leak.
+- Docs-only; no code or runtime change.
 
 ## [0.5.53.199] - 2026-07-06
 
