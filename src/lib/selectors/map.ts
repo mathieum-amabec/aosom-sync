@@ -101,8 +101,9 @@ export function rowToProductItem(row: Row): ProductItem {
  *     still surfaces the real FR overlay text. title_en keeps the English name.
  *  2. Images — Shopify-CDN URLs, unless `opts.resolveImages === false`.
  *
- * Both go through throttled, cached resolvers, so a batch of items costs at most
- * one Shopify request per uncached product per field.
+ * Both go through throttled, cached resolvers backed by a single shared
+ * per-product fetch (shopify-product.ts), so a batch of items costs at most one
+ * Shopify request per uncached product — the title and images come together.
  */
 export async function hydrateItems(items: ProductItem[], opts?: SelectorOptions): Promise<ProductItem[]> {
   if (opts?.language !== "en") {
