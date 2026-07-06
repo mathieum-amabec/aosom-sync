@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.198] - 2026-07-05
+
+### Changed — social auto-posts publish ONLY lifestyle-verified products with a clean photo (#340)
+- **`job4-social.ts`**: all three triggers (`new_product` / `price_drop` / `stock_highlight`)
+  now **skip** any product lacking the Shopify `lifestyle-verified` tag AND a resolvable clean
+  Shopify position-1 photo, and post a **single branded hero** — never the raw Aosom white-bg /
+  spec gallery. `stock_highlight` samples a random eligible batch and posts the first postable one;
+  an all-unverified sample now fires a `createNotification` instead of stopping silently.
+  *Consequence:* new imports don't auto-post until the lifestyle classification tags them (intended).
+- **`selectors/shopify-images.ts`**: new `resolveLifestyle(shopifyId)` → `{verified, primaryImageUrl}`
+  (tag + clean pos-1 by position, cached 5 min, throttled 2/s, never throws). The pos-1 swap only
+  reordered Shopify images, so lifestyle status + the clean photo are resolved from Shopify, not Turso.
+- **`/api/image-preview`**: lifestyle-aware source — composes the branded hero from the Shopify
+  pos-1 lifestyle photo for verified products (Turso primary fallback for unverified /
+  dashboard-preview). A verified-but-null product 404s rather than compose the white-bg image.
+  New allow-listed `?img=` override lets the social pipeline pin the compose source, so publishing
+  makes **no** render-time Shopify call (blip-proof + no unauthenticated amplification).
+- **`database.ts`**: `getEligibleHighlightCandidates(minDays, limit)` (returns rows in shuffled
+  `pick` order so the daily highlight is truly random); removed the now-orphaned
+  `getEligibleHighlightProduct`.
+- Tests: `resolveLifestyle` units, image-preview lifestyle + `?img=` override branches, `price_drop`
+  gate/`badge=sale`, and the `IN()`-reorder guard. Full suite 1320 tests green.
+
 ## [0.5.53.197] - 2026-07-04
 
 ### Fixed — two homepage polish items from the pre-publication audit (draft theme)
