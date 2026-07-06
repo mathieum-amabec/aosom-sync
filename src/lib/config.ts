@@ -250,17 +250,17 @@ export const SOCIAL = {
  * Resolve the app's public base URL (no trailing slash), or null when it can't
  * be determined reliably.
  *
- * Used to build absolute, publicly-fetchable URLs for the branded image
- * compositor (`/api/image-preview`): Facebook/Instagram fetch the image
- * themselves, so a relative path or a localhost URL is useless to them.
+ * Used to build absolute, publicly-fetchable URLs (e.g. price-alert / waitlist
+ * confirmation links, video brand assets): external clients fetch these, so a
+ * relative path or a localhost URL is useless to them.
  *
  * Priority:
  *  1. NEXT_PUBLIC_APP_URL — explicit override (set this for custom domains).
  *  2. VERCEL_PROJECT_PRODUCTION_URL — the STABLE production alias on Vercel.
  *     Deliberately NOT VERCEL_URL, which is a per-deployment preview host
  *     (see api/cron/content/route.ts for the same reasoning).
- *  3. null — caller must skip branding and fall back to raw image URLs rather
- *     than emit a localhost URL that the social platforms can't reach.
+ *  3. null — caller must fall back (or skip) rather than emit a localhost URL
+ *     that an external client can't reach.
  */
 export function getPublicAppUrl(): string | null {
   const explicit = process.env.NEXT_PUBLIC_APP_URL;

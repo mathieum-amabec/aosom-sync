@@ -218,10 +218,9 @@ export async function importToShopify(
       }
     }
 
-    // Fire-and-forget social draft for the new product. Re-enabled now that the
-    // image infra is in place: triggerNewProduct calls pickRandomImages() to capture
-    // the Aosom product photos into image_urls, and the publisher falls back to
-    // products.image1 (JOIN) when needed — so product posts always carry an image.
+    // Fire-and-forget social draft for the new product. triggerNewProduct posts the
+    // product's clean Shopify position-1 lifestyle photo raw, and self-skips when the
+    // product isn't lifestyle-verified yet (typical for a brand-new import).
     const primarySku = product.variants[0]?.sku;
     if (primarySku) {
       import("@/jobs/job4-social").then(({ triggerNewProduct }) => {

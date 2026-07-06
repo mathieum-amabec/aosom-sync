@@ -12,8 +12,7 @@
  *
  * Design: all heavy I/O (download, sharp, ffmpeg spawn) lives in
  * `generateSlideshowVideo`. The pure builders below (duration math, filter
- * graph, arg vector, SVG) are exported and unit-tested without invoking ffmpeg,
- * mirroring how job4-social exposes `pickRandomImages` for isolated testing.
+ * graph, arg vector, SVG) are exported and unit-tested without invoking ffmpeg.
  *
  * ── FFmpeg availability ──────────────────────────────────────────────────
  * The ffmpeg binary is resolved at runtime by `resolveFfmpegPath`:

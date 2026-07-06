@@ -5,9 +5,6 @@ import { AUTH } from "@/lib/config";
 // "/api/pixel/script" is public so Shopify's storefront ScriptTag can fetch it
 // (no session). "/api/pixel/install" is intentionally NOT public — it stays
 // session-gated for the dashboard.
-// "/api/image-preview" is public so Facebook/Instagram can fetch a draft's
-// branded image when publishing (the Graph APIs fetch the URL themselves, with
-// no session). The route only composes images for SKUs that exist in the DB.
 // "/api/price-alert" is public so the Shopify storefront can POST price-drop
 // signups (cross-origin, CORS-guarded, rate-limited); its /notify cron child
 // self-gates on CRON_SECRET.
@@ -23,7 +20,7 @@ import { AUTH } from "@/lib/config";
 // "/api/revalidate" is public for the same reason: it's called server-to-server with
 // Bearer CRON_SECRET (no session cookie) to refresh the feeds; the route self-gates on
 // CRON_SECRET. Without this it would 307 to /login before its own auth runs.
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/feeds", "/api/revalidate", "/api/image-preview", "/api/price-alert", "/api/waitlist", "/api/video-serve"];
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/video-serve"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(

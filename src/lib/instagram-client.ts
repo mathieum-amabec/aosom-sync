@@ -1,13 +1,12 @@
 import { env, META } from "./config";
-import { uploadWatermarkedImage, type HostedWatermark } from "./image-watermark";
 
 /**
  * Instagram Graph API wrapper for Business account publishing.
  *
- * Instagram requires a PUBLIC image_url (Meta's servers fetch it).
- * Unlike Facebook, it does NOT accept binary uploads. So for photos/carousels we stamp
- * the brand footer (see image-watermark.ts), host the watermarked PNG on Vercel Blob,
- * and hand Meta that public URL — then delete the temp blob once publishing is done.
+ * Instagram requires a PUBLIC image_url (Meta's servers fetch it). For photos and
+ * carousels we hand Meta the source image URL RAW — no watermark/compositing and no
+ * Blob hosting; the post shows the photo exactly as hosted (cdn.shopify.com URLs are
+ * already public). (Mat, 2026-07: "publier la photo telle quelle".)
  *
  * Publish flow is two-step:
  *   1. POST /{ig_user_id}/media  → returns creation_id
@@ -64,10 +63,8 @@ export async function testConnection(brand: InstagramBrand = "ameublo"): Promise
 /**
  * Publish a photo post to an Instagram Business account.
  *
- * The source image is watermarked with the brand footer and hosted on Vercel Blob;
- * Meta fetches that public URL server-side (IG can't take a binary upload). The temp
- * blob is deleted in `finally` — by the time publish returns, Meta has already ingested
- * the image at container creation.
+ * Meta fetches the RAW source `image_url` server-side (IG can't take a binary upload).
+ * No watermark and no Blob hosting — the URL must be public (cdn.shopify.com is).
  *
  * Note: Instagram caption limit is 2200 characters, up to 30 hashtags.
  */
@@ -81,38 +78,32 @@ export async function publishPhoto(opts: {
   // Instagram caps captions at 2200 chars; trim defensively
   const caption = opts.caption.length > 2200 ? opts.caption.slice(0, 2197) + "..." : opts.caption;
 
-  // Watermark → host on Blob → hand IG the public URL.
-  const hosted = await uploadWatermarkedImage(opts.imageUrl, opts.brand);
-  try {
-    // Step 1: Create media container
-    const createRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ image_url: hosted.url, caption }),
-    });
+  // Step 1: Create media container with the raw public image URL.
+  const createRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ image_url: opts.imageUrl, caption }),
+  });
 
-    if (createRes.status === 429) {
-      throw new Error(`${label}: Instagram rate limit, retry later`);
-    }
-
-    const createData = await createRes.json();
-    if (createData.error) throw new Error(`${label} (create): ${createData.error.message}`);
-    const creationId: string = createData.id;
-    if (!creationId) throw new Error(`${label}: no creation_id returned`);
-
-    // Step 2: Publish the container
-    const publishRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media_publish`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ creation_id: creationId }),
-    });
-
-    const publishData = await publishRes.json();
-    if (publishData.error) throw new Error(`${label} (publish): ${publishData.error.message}`);
-    return { id: publishData.id, creationId };
-  } finally {
-    await hosted.cleanup();
+  if (createRes.status === 429) {
+    throw new Error(`${label}: Instagram rate limit, retry later`);
   }
+
+  const createData = await createRes.json();
+  if (createData.error) throw new Error(`${label} (create): ${createData.error.message}`);
+  const creationId: string = createData.id;
+  if (!creationId) throw new Error(`${label}: no creation_id returned`);
+
+  // Step 2: Publish the container
+  const publishRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media_publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ creation_id: creationId }),
+  });
+
+  const publishData = await publishRes.json();
+  if (publishData.error) throw new Error(`${label} (publish): ${publishData.error.message}`);
+  return { id: publishData.id, creationId };
 }
 
 const CAROUSEL_MIN_ITEMS = 2;
@@ -148,53 +139,45 @@ export async function publishCarousel(opts: {
   const { igUserId, token, label } = brandCreds(opts.brand);
   const caption = opts.caption.length > 2200 ? opts.caption.slice(0, 2197) + "..." : opts.caption;
 
-  // Each child needs a public URL, so watermark+host every image on Blob; track the
-  // hosted blobs so we can delete them all once publishing finishes (or fails).
-  const hosted: HostedWatermark[] = [];
-  try {
-    // Step 1: create one child container per image (no caption on children).
-    const childIds: string[] = [];
-    for (let i = 0; i < opts.imageUrls.length; i++) {
-      if (i > 0) await new Promise((r) => setTimeout(r, CAROUSEL_UPLOAD_DELAY_MS));
-      const h = await uploadWatermarkedImage(opts.imageUrls[i], opts.brand);
-      hosted.push(h);
-      const res = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ image_url: h.url, is_carousel_item: true }),
-      });
-      if (res.status === 429) throw new Error(`${label}: Instagram rate limit on carousel item ${i + 1}, retry later`);
-      const data = await res.json();
-      if (data.error) throw new Error(`${label} (carousel item ${i + 1}): ${data.error.message}`);
-      if (!data.id) throw new Error(`${label}: no creation_id for carousel item ${i + 1}`);
-      childIds.push(String(data.id));
-    }
-
-    // Step 2: create the parent CAROUSEL container referencing the children.
-    const createRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
+  // Step 1: create one child container per image (no caption on children), each with
+  // the raw public image URL — Meta fetches it directly (no watermark/Blob hosting).
+  const childIds: string[] = [];
+  for (let i = 0; i < opts.imageUrls.length; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, CAROUSEL_UPLOAD_DELAY_MS));
+    const res = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ media_type: "CAROUSEL", children: childIds.join(","), caption }),
+      body: JSON.stringify({ image_url: opts.imageUrls[i], is_carousel_item: true }),
     });
-    if (createRes.status === 429) throw new Error(`${label}: Instagram rate limit on carousel container, retry later`);
-    const createData = await createRes.json();
-    if (createData.error) throw new Error(`${label} (create carousel): ${createData.error.message}`);
-    const creationId: string = createData.id;
-    if (!creationId) throw new Error(`${label}: no creation_id returned for carousel`);
-
-    // Step 3: publish the carousel container.
-    const publishRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media_publish`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ creation_id: creationId }),
-    });
-    const publishData = await publishRes.json();
-    if (publishData.error) throw new Error(`${label} (publish carousel): ${publishData.error.message}`);
-    console.log(`[PUBLISH] ${label} carousel posted with ${childIds.length} photos (media: ${publishData.id})`);
-    return { id: publishData.id, creationId };
-  } finally {
-    await Promise.all(hosted.map((h) => h.cleanup()));
+    if (res.status === 429) throw new Error(`${label}: Instagram rate limit on carousel item ${i + 1}, retry later`);
+    const data = await res.json();
+    if (data.error) throw new Error(`${label} (carousel item ${i + 1}): ${data.error.message}`);
+    if (!data.id) throw new Error(`${label}: no creation_id for carousel item ${i + 1}`);
+    childIds.push(String(data.id));
   }
+
+  // Step 2: create the parent CAROUSEL container referencing the children.
+  const createRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ media_type: "CAROUSEL", children: childIds.join(","), caption }),
+  });
+  if (createRes.status === 429) throw new Error(`${label}: Instagram rate limit on carousel container, retry later`);
+  const createData = await createRes.json();
+  if (createData.error) throw new Error(`${label} (create carousel): ${createData.error.message}`);
+  const creationId: string = createData.id;
+  if (!creationId) throw new Error(`${label}: no creation_id returned for carousel`);
+
+  // Step 3: publish the carousel container.
+  const publishRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media_publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ creation_id: creationId }),
+  });
+  const publishData = await publishRes.json();
+  if (publishData.error) throw new Error(`${label} (publish carousel): ${publishData.error.message}`);
+  console.log(`[PUBLISH] ${label} carousel posted with ${childIds.length} photos (media: ${publishData.id})`);
+  return { id: publishData.id, creationId };
 }
 
 const REEL_POLL_INTERVAL_MS = 4_000;
