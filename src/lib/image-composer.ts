@@ -1,10 +1,9 @@
-import path from "path";
 import { assertPublicHttpsUrl } from "./url-safety";
 
 // This module used to also compose branded social images (product photo + SVG overlay
 // via sharp). That path was removed when Job 4 switched to posting the raw Shopify
-// lifestyle photo (Mat, 2026-07). What remains is the SSRF/DoS-guarded `downloadImage`
-// (used by the slideshow / FFmpeg engines) and the `resolveImagePath` helper.
+// lifestyle photo (Mat, 2026-07). What remains is the SSRF/DoS-guarded `downloadImage`,
+// used by the slideshow / FFmpeg engines.
 
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024; // 15 MB — guards against decompression-bomb / OOM
 const DOWNLOAD_TIMEOUT_MS = 15_000;
@@ -65,20 +64,4 @@ export async function downloadImage(url: string): Promise<Buffer> {
     return readCapped(res, MAX_IMAGE_BYTES);
   }
   throw new Error("Too many redirects while downloading image");
-}
-
-/**
- * Resolve an image path for reading (handles both /tmp and public/ paths).
- */
-export function resolveImagePath(imagePath: string): string {
-  if (imagePath.startsWith("/tmp/")) {
-    // Prevent path traversal from /tmp/
-    const resolved = path.resolve(imagePath);
-    if (!resolved.startsWith("/tmp/")) throw new Error("Invalid image path");
-    return resolved;
-  }
-  const resolved = path.resolve(process.cwd(), "public", imagePath);
-  const publicDir = path.resolve(process.cwd(), "public");
-  if (!resolved.startsWith(publicDir)) throw new Error("Invalid image path");
-  return resolved;
 }
