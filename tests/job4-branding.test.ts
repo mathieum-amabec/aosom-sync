@@ -94,24 +94,27 @@ describe("job4 branding integration", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it("new_product: posts ONLY the branded badge=new hero (no white-bg gallery)", async () => {
+  const LIFESTYLE_URL = "https://cdn.shopify.com/s/files/lifestyle.jpg";
+
+  it("new_product: posts ONLY the branded badge=new hero pinned to the lifestyle photo", async () => {
     const result = await triggerNewProduct("TEST-001");
     expect(result).not.toBeNull();
 
-    const branded = "https://app.example.com/api/image-preview?sku=TEST-001&locale=fr&price=249.99&badge=new";
-    expect(result!.imageUrls[0]).toBe(branded);
-    expect(result!.imageUrl).toBe(branded);
-    expect(result!.imagePath).toBe(branded);
+    // Exactly one image — the branded hero — and no raw Aosom gallery appended.
+    expect(result!.imageUrls).toHaveLength(1);
+    const u = new URL(result!.imageUrls[0]);
+    expect(u.origin + u.pathname).toBe("https://app.example.com/api/image-preview");
+    expect(u.searchParams.get("sku")).toBe("TEST-001");
+    expect(u.searchParams.get("locale")).toBe("fr");
+    expect(u.searchParams.get("price")).toBe("249.99");
+    expect(u.searchParams.get("badge")).toBe("new");
+    // img pins the compose source to the resolved Shopify photo (no render-time lookup).
+    expect(u.searchParams.get("img")).toBe(LIFESTYLE_URL);
+    expect(result!.imageUrl).toBe(result!.imageUrls[0]);
+    expect(result!.imagePath).toBe(result!.imageUrls[0]);
 
-    // The raw Aosom gallery must NOT be appended — only the branded lifestyle hero.
-    expect(result!.imageUrls).toEqual([branded]);
-
-    // The branded URL was persisted to the draft as the sole image.
     const draftArg = vi.mocked(createFacebookDraft).mock.calls[0][0];
-    expect(draftArg.imageUrls).toEqual([branded]);
-    expect(draftArg.imagePath).toBe(branded);
-
-    // Legacy overlay must be bypassed when branding is active.
+    expect(draftArg.imageUrls).toEqual(result!.imageUrls);
     expect(composeImage).not.toHaveBeenCalled();
   });
 
@@ -129,11 +132,14 @@ describe("job4 branding integration", () => {
     expect(createFacebookDraft).not.toHaveBeenCalled();
   });
 
-  it("price_drop: posts a single branded badge=sale hero when verified", async () => {
+  it("price_drop: posts a single branded badge=sale hero pinned to the lifestyle photo", async () => {
     const result = await triggerPriceDrop("TEST-001", 100, 80);
-    const branded = "https://app.example.com/api/image-preview?sku=TEST-001&locale=fr&price=80.00&badge=sale";
     expect(result).not.toBeNull();
-    expect(result!.imageUrls).toEqual([branded]);
+    expect(result!.imageUrls).toHaveLength(1);
+    const u = new URL(result!.imageUrls[0]);
+    expect(u.searchParams.get("badge")).toBe("sale");
+    expect(u.searchParams.get("price")).toBe("80.00");
+    expect(u.searchParams.get("img")).toBe(LIFESTYLE_URL);
     expect(composeImage).not.toHaveBeenCalled();
   });
 
@@ -144,11 +150,13 @@ describe("job4 branding integration", () => {
     expect(createFacebookDraft).not.toHaveBeenCalled();
   });
 
-  it("stock_highlight: branded URL has no badge param and is the only image", async () => {
+  it("stock_highlight: branded URL has no badge param, pinned to the lifestyle photo", async () => {
     const result = await triggerStockHighlight();
-    const branded = "https://app.example.com/api/image-preview?sku=TEST-001&locale=fr&price=249.99";
-    expect(result?.imageUrls).toEqual([branded]);
-    expect(result?.imagePath).toBe(branded);
+    expect(result?.imageUrls).toHaveLength(1);
+    const u = new URL(result!.imageUrls[0]);
+    expect(u.searchParams.get("badge")).toBeNull();
+    expect(u.searchParams.get("img")).toBe(LIFESTYLE_URL);
+    expect(result?.imagePath).toBe(result!.imageUrls[0]);
     expect(composeImage).not.toHaveBeenCalled();
   });
 

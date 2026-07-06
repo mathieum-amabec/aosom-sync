@@ -35,16 +35,16 @@ import { resolveLifestyle } from "@/lib/selectors/shopify-images";
 const HIGHLIGHT_LIFESTYLE_SAMPLE = 15;
 
 /**
- * Gate: a product may be posted only if it is `lifestyle-verified` AND actually
- * resolves to a clean Shopify position-1 photo. Requiring the photo (not just the
- * tag) closes the hole where a tagged product whose Shopify gallery yields no
- * clean cdn.shopify.com image (`primaryImageUrl === null`) would otherwise be
- * selected and then fall back to the white-background Turso image in image-preview.
+ * Gate + source resolver: returns the product's clean Shopify position-1 photo URL
+ * when it is `lifestyle-verified` AND actually resolves to a clean cdn.shopify.com
+ * photo, else null (→ skip, never post). Returning the URL (not just a bool) lets the
+ * caller pass it to image-preview via `?img=`, so the composed hero never depends on
+ * a second render-time Shopify lookup (no blip→white-bg, no public amplification).
  * Never throws.
  */
-async function isLifestylePostable(shopifyProductId: string | null | undefined): Promise<boolean> {
+async function postableLifestyleUrl(shopifyProductId: string | null | undefined): Promise<string | null> {
   const life = await resolveLifestyle((shopifyProductId ?? "").trim());
-  return life.verified && !!life.primaryImageUrl;
+  return life.verified && life.primaryImageUrl ? life.primaryImageUrl : null;
 }
 
 // Job 4 generates STATIC posts only (branded images). Video generation has been
@@ -230,16 +230,19 @@ function brandImages(
   trigger: "new_product" | "stock_highlight" | "price_drop",
   sku: string,
   price: number,
-  rawImageUrls: string[]
+  lifestyleImageUrl: string
 ): BrandedImages {
   const base = getPublicAppUrl();
-  const rawPrimary = rawImageUrls[0] ?? null;
-  if (!base || rawImageUrls.length === 0) {
-    return { applied: false, imageUrls: rawImageUrls, imageUrl: rawPrimary, imagePath: null };
+  if (!base) {
+    // Local dev (no public base URL): can't brand through image-preview, so post the
+    // clean Shopify lifestyle photo raw — still never a white-bg image.
+    return { applied: false, imageUrls: [lifestyleImageUrl], imageUrl: lifestyleImageUrl, imagePath: null };
   }
   // Price goes in the URL so the composed image is cache-keyed on it — otherwise
-  // the CDN could serve a stale price after the product's price changes.
-  const params = new URLSearchParams({ sku, locale: "fr", price: Number(price).toFixed(2) });
+  // the CDN could serve a stale price after the product's price changes. `img` pins
+  // the compose source to the already-resolved Shopify lifestyle photo so image-preview
+  // does NOT re-hit Shopify at render time (blip-proof + no public amplification).
+  const params = new URLSearchParams({ sku, locale: "fr", price: Number(price).toFixed(2), img: lifestyleImageUrl });
   if (trigger === "new_product") params.set("badge", "new");
   else if (trigger === "price_drop") params.set("badge", "sale");
   const brandedUrl = `${base}/api/image-preview?${params.toString()}`;
@@ -269,7 +272,8 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
   // Only post lifestyle-verified products with a resolvable clean photo (never a
   // white-bg image). New imports are typically untagged until the lifestyle
   // classification runs, so most new_product triggers skip here — that is intended.
-  if (!(await isLifestylePostable(product.shopify_product_id))) {
+  const lifestyleUrl = await postableLifestyleUrl(product.shopify_product_id);
+  if (!lifestyleUrl) {
     log(`Skip new_product ${sku}: not lifestyle-verified (or no clean photo)`);
     return null;
   }
@@ -282,7 +286,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
 
   const imgSettings = getImageSettings(settings);
   const rawImageUrls = pickRandomImages(product);
-  const branded = brandImages("new_product", sku, Number(product.price), rawImageUrls);
+  const branded = brandImages("new_product", sku, Number(product.price), lifestyleUrl);
   let imagePath = branded.imagePath;
   if (!branded.applied && rawImageUrls[0]) {
     // No public base URL — fall back to the legacy overlay preview.
@@ -334,7 +338,8 @@ export async function triggerPriceDrop(
   const productName = (product.name as string) || sku;
 
   // Only post lifestyle-verified products with a resolvable clean photo.
-  if (!(await isLifestylePostable(product.shopify_product_id))) {
+  const lifestyleUrl = await postableLifestyleUrl(product.shopify_product_id);
+  if (!lifestyleUrl) {
     log(`Skip price_drop ${sku}: not lifestyle-verified (or no clean photo)`);
     return null;
   }
@@ -349,9 +354,9 @@ export async function triggerPriceDrop(
 
   const imgSettings = getImageSettings(settings);
   const rawImageUrls = pickRandomImages(product);
-  // Branded lifestyle hero (badge=sale). image-preview sources the Shopify
-  // position-1 lifestyle photo; the sale caption carries the old→new price.
-  const branded = brandImages("price_drop", sku, newPrice, rawImageUrls);
+  // Branded lifestyle hero (badge=sale) pinned to the resolved Shopify photo; the
+  // sale caption carries the old→new price.
+  const branded = brandImages("price_drop", sku, newPrice, lifestyleUrl);
   let imagePath = branded.imagePath;
   if (!branded.applied && rawImageUrls[0]) {
     // No public base URL (local dev) — fall back to the legacy overlay preview.
@@ -414,13 +419,16 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
     return null;
   }
   let product: Record<string, unknown> | null = null;
+  let lifestyleUrl: string | null = null;
   for (const candidate of candidates) {
-    if (await isLifestylePostable(candidate.shopify_product_id as string | null)) {
+    const url = await postableLifestyleUrl(candidate.shopify_product_id as string | null);
+    if (url) {
       product = candidate;
+      lifestyleUrl = url;
       break;
     }
   }
-  if (!product) {
+  if (!product || !lifestyleUrl) {
     // Not a silent skip: if the whole sample is unverified (e.g. tagging regressed
     // or coverage dropped), posting would otherwise stop with no signal.
     log(`No lifestyle-verified product among ${candidates.length} eligible candidates — skipping stock highlight`);
@@ -444,7 +452,7 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
 
   const imgSettings = getImageSettings(settings);
   const rawImageUrls = pickRandomImages(product);
-  const branded = brandImages("stock_highlight", sku, Number(product.price), rawImageUrls);
+  const branded = brandImages("stock_highlight", sku, Number(product.price), lifestyleUrl);
   let imagePath = branded.imagePath;
   if (!branded.applied && rawImageUrls[0]) {
     // No public base URL — fall back to the legacy overlay preview.

@@ -95,4 +95,24 @@ describe("GET /api/image-preview", () => {
     expect(res.status).toBe(200);
     expect(vi.mocked(composeProductImage).mock.calls[0][0].productImageUrl).toBe("https://cdn.shopify.com/turso.jpg");
   });
+
+  it("img override (allow-listed): composes from it and skips the render-time Shopify lookup", async () => {
+    vi.mocked(getProduct).mockResolvedValue(productWithId("https://img-us.aosomcdn.com/whitebg.jpg", "111"));
+    vi.mocked(composeProductImage).mockResolvedValue(Buffer.from("PNG"));
+    const override = "https://cdn.shopify.com/s/files/pinned.jpg";
+    const res = await GET(req(`sku=ABC&img=${encodeURIComponent(override)}`));
+    expect(res.status).toBe(200);
+    expect(vi.mocked(composeProductImage).mock.calls[0][0].productImageUrl).toBe(override);
+    expect(resolveLifestyle).not.toHaveBeenCalled();
+  });
+
+  it("img override (non-allow-listed host): ignored, falls through to normal resolution", async () => {
+    vi.mocked(getProduct).mockResolvedValue(productWithId("https://cdn.shopify.com/turso.jpg", "111"));
+    vi.mocked(resolveLifestyle).mockResolvedValue({ verified: false, primaryImageUrl: null });
+    vi.mocked(composeProductImage).mockResolvedValue(Buffer.from("PNG"));
+    const res = await GET(req(`sku=ABC&img=${encodeURIComponent("https://evil.example.com/x.jpg")}`));
+    expect(res.status).toBe(200);
+    expect(vi.mocked(composeProductImage).mock.calls[0][0].productImageUrl).toBe("https://cdn.shopify.com/turso.jpg");
+    expect(resolveLifestyle).toHaveBeenCalled();
+  });
 });

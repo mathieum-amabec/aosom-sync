@@ -79,8 +79,28 @@ export async function GET(request: Request) {
   // or on any Shopify failure (resolveLifestyle never throws). cdn.shopify.com is already
   // an allow-listed host for the fallback redirect below, so this stays SSRF-safe.
   let productImageUrl = primaryImage(product as unknown as Record<string, unknown>);
+
+  // Explicit source override: the social pipeline passes the already-resolved Shopify
+  // lifestyle photo as `img`, so the compose source is pinned and this route makes NO
+  // render-time Shopify call (blip-proof + no unauthenticated amplification). Accepted
+  // only for an allow-listed HTTPS image host, so it can't become an SSRF/open-redirect.
+  const imgOverride = searchParams.get("img");
+  let overrideApplied = false;
+  if (imgOverride) {
+    try {
+      const u = new URL(imgOverride);
+      assertPublicHttpsUrl(u);
+      if (isAllowedImageHost(u.hostname)) {
+        productImageUrl = imgOverride;
+        overrideApplied = true;
+      }
+    } catch {
+      /* malformed / disallowed override — ignore and fall through to normal resolution */
+    }
+  }
+
   const shopifyId = (product as unknown as Record<string, unknown>).shopify_product_id;
-  if (typeof shopifyId === "string" && shopifyId.trim()) {
+  if (!overrideApplied && typeof shopifyId === "string" && shopifyId.trim()) {
     const life = await resolveLifestyle(shopifyId);
     if (life.verified) {
       // A lifestyle-verified product must render its clean Shopify photo — never the
