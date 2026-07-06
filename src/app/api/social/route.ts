@@ -86,6 +86,14 @@ export async function POST(request: Request) {
         } else {
           return NextResponse.json({ success: false, error: "Invalid trigger type" }, { status: 400 });
         }
+        // null = product isn't lifestyle-verified (or no eligible one) — skipped so no
+        // white-background image is ever posted. Surface it instead of a silent success.
+        if (!result) {
+          return NextResponse.json(
+            { success: false, error: "Aucun produit lifestyle-verified — post ignoré (jamais d'image fond blanc)" },
+            { status: 422 },
+          );
+        }
         return NextResponse.json({ success: true, data: result });
       }
 

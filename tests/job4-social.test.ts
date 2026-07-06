@@ -13,13 +13,19 @@ vi.mock("@/lib/content-generator", () => ({
 
 vi.mock("@/lib/database", () => ({
   getAllSettings: vi.fn(),
-  getEligibleHighlightProduct: vi.fn(),
+  getEligibleHighlightCandidates: vi.fn(),
   createFacebookDraft: vi.fn(),
   markProductPosted: vi.fn(),
   getProduct: vi.fn(),
   createNotification: vi.fn(),
   getAutopostCountToday: vi.fn(),
   incrementAutopostCountToday: vi.fn(),
+}));
+
+// Lifestyle gate: default verified so triggers proceed; individual tests can
+// override to exercise the skip path.
+vi.mock("@/lib/selectors/shopify-images", () => ({
+  resolveLifestyle: vi.fn(),
 }));
 
 vi.mock("@/lib/image-composer", () => ({
@@ -44,11 +50,12 @@ vi.mock("@/lib/social-publisher", () => ({
 
 import {
   getAllSettings,
-  getEligibleHighlightProduct,
+  getEligibleHighlightCandidates,
   getProduct,
   createFacebookDraft,
   markProductPosted,
 } from "@/lib/database";
+import { resolveLifestyle } from "@/lib/selectors/shopify-images";
 
 const SETTINGS = {
   social_min_days_between_reposts: "30",
@@ -63,8 +70,14 @@ const PRODUCT = {
   name: "Test Product",
   price: 99.99,
   qty: 5,
+  shopify_product_id: "111",
   image1: "https://cdn.example.com/img.jpg",
 };
+
+const LIFESTYLE_VERIFIED = {
+  verified: true,
+  primaryImageUrl: "https://cdn.shopify.com/s/files/lifestyle.jpg",
+} as const;
 
 const DRAFT_ID = 42;
 
@@ -139,9 +152,10 @@ describe("triggerStockHighlight — Anthropic timeout handling", () => {
     vi.resetAllMocks();
 
     vi.mocked(getAllSettings).mockResolvedValue(SETTINGS);
-    vi.mocked(getEligibleHighlightProduct).mockResolvedValue(PRODUCT);
+    vi.mocked(getEligibleHighlightCandidates).mockResolvedValue([PRODUCT] as never);
     vi.mocked(createFacebookDraft).mockResolvedValue(DRAFT_ID);
     vi.mocked(markProductPosted).mockResolvedValue(undefined);
+    vi.mocked(resolveLifestyle).mockResolvedValue({ ...LIFESTYLE_VERIFIED });
   });
 
   afterEach(() => {
@@ -253,6 +267,7 @@ describe("triggerNewProduct — static posts only (Creatomate decoupled)", () =>
     );
     vi.mocked(createFacebookDraft).mockResolvedValue(DRAFT_ID);
     vi.mocked(markProductPosted).mockResolvedValue(undefined);
+    vi.mocked(resolveLifestyle).mockResolvedValue({ ...LIFESTYLE_VERIFIED });
   });
 
   afterEach(() => {
@@ -266,7 +281,8 @@ describe("triggerNewProduct — static posts only (Creatomate decoupled)", () =>
 
     const result = await triggerNewProduct("TEST-001");
 
-    expect(result.draftId).toBe(DRAFT_ID);
+    expect(result).not.toBeNull();
+    expect(result!.draftId).toBe(DRAFT_ID);
     expect(createFacebookDraft).toHaveBeenCalledOnce();
 
     // The draft payload must carry neither a square nor a reels video URL —

@@ -371,10 +371,11 @@ describe("isCacheStale (pure function)", () => {
   });
 });
 
-// Two-step SQL logic used by getEligibleHighlightProduct after the ORDER BY RANDOM()
-// bottleneck fix (2026-05-08). Tests validate the replacement queries, not the full
-// function (which connects to Turso via ensureSchema).
-describe("getEligibleHighlightProduct SQL logic (two-step pattern)", () => {
+// Two-step SQL logic shared by getEligibleHighlightCandidates (the lifestyle-aware
+// batch selector) after the ORDER BY RANDOM() bottleneck fix (2026-05-08). Tests
+// validate the replacement queries, not the full function (which connects to Turso
+// via ensureSchema).
+describe("getEligibleHighlightCandidates SQL logic (two-step pattern)", () => {
   let db: ReturnType<typeof setupTestDb>;
   const now = Math.floor(Date.now() / 1000);
 
@@ -453,6 +454,24 @@ describe("getEligibleHighlightProduct SQL logic (two-step pattern)", () => {
     await db.execute({ sql: `DELETE FROM products WHERE sku = ?`, args: ["SKU-GONE"] });
     const { rows } = await db.execute({ sql: `SELECT * FROM products WHERE sku = ?`, args: ["SKU-GONE"] });
     expect(rows).toHaveLength(0); // function returns null in this case
+  });
+
+  // Guards the reorder fix: SQLite returns IN() rows in rowid order, so the batch
+  // selector must reorder to the shuffled `pick` order — otherwise the caller (posts
+  // the first verified candidate) would deterministically favor low-rowid products.
+  it("IN() returns rowid order; map-by-sku restores the shuffled pick order", async () => {
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-1", "P1", 10, 5, "shop-1", null] });
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-2", "P2", 20, 3, "shop-2", null] });
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-3", "P3", 30, 1, "shop-3", null] });
+    const pick = ["SKU-3", "SKU-1", "SKU-2"]; // simulated post-shuffle order
+    const placeholders = pick.map(() => "?").join(", ");
+    const { rows } = await db.execute({ sql: `SELECT * FROM products WHERE sku IN (${placeholders})`, args: pick });
+    // Raw IN() ignores the arg order (rowid/insertion order here).
+    expect(rows.map((r) => (r as Record<string, unknown>).sku)).toEqual(["SKU-1", "SKU-2", "SKU-3"]);
+    // The reorder step the function applies restores `pick` order.
+    const bySku = new Map(rows.map((r) => [(r as Record<string, unknown>).sku as string, r]));
+    const reordered = pick.map((s) => bySku.get(s)).filter(Boolean).map((r) => (r as Record<string, unknown>).sku);
+    expect(reordered).toEqual(pick);
   });
 });
 
