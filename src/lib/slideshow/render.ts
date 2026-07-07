@@ -483,10 +483,12 @@ export function introBackgroundUrl(items: SlideshowItem[]): string | null {
 
 /**
  * Build the xfade-crossfade `-filter_complex` graph over `count` visual
- * segments (intro + slides + outro), each a still looped to its duration and
- * Ken-Burns zoomed, plus optional faded music. Pure — unit-testable.
+ * segments (intro + slides + outro). Each segment has a photo layer (Ken-Burns
+ * zoomed) and a static transparent text layer overlaid on top, plus optional
+ * faded music. Pure — unit-testable.
  *
- * Inputs are ordered [0..count-1] segments, then music (if any).
+ * Inputs are ordered [0..count-1] photo layers, then [count..2*count-1] text
+ * layers, then music (if any).
  */
 export function buildXfadeFilterComplex(opts: {
   count: number;
@@ -508,17 +510,22 @@ export function buildXfadeFilterComplex(opts: {
   const transAt = (j: number): string => opts.transitions?.[j] ?? rotatedTransition(j);
   const parts: string[] = [];
 
-  // Each segment: scale/pad to frame, per-segment Ken Burns (alternating zoom
-  // in/out + rotating pan anchor), normalize sar/fps/format.
+  // Two inputs per segment: the product/photo layer [i] and a transparent text
+  // layer [count+i] (scrim + title + price + CTA). Ken Burns (alternating zoom
+  // in/out + rotating pan anchor) animates ONLY the photo; the text is overlaid
+  // static on top so titles/prices never scale, pan, or crop off-frame.
   for (let i = 0; i < opts.count; i++) {
     const frames = Math.round(opts.durations[i] * fps);
     const kb = kenBurnsExpr(i);
+    const textIdx = opts.count + i;
     parts.push(
       `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,` +
         `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=0x1A2340,` +
         `zoompan=z='${kb.z}':d=${frames}:s=${w}x${h}:fps=${fps}` +
-        `:x='${kb.x}':y='${kb.y}',setsar=1,format=yuv420p[v${i}]`,
+        `:x='${kb.x}':y='${kb.y}',setsar=1[p${i}]`,
     );
+    parts.push(`[${textIdx}:v]scale=${w}:${h},setsar=1,format=rgba[t${i}]`);
+    parts.push(`[p${i}][t${i}]overlay=0:0:format=auto,format=yuv420p[v${i}]`);
   }
 
   // Chain xfades with rotating transitions. offset_i = sum(dur[0..i]) - (i+1)*x.
@@ -536,7 +543,7 @@ export function buildXfadeFilterComplex(opts: {
 
   let audioLabel: string | null = null;
   if (opts.hasMusic) {
-    const musicIdx = opts.count; // music input follows the segments
+    const musicIdx = 2 * opts.count; // music input follows the photo + text layers
     const fadeOutStart = Math.max(0, opts.totalSec - MUSIC_FADE_OUT_SEC);
     parts.push(
       `[${musicIdx}:a]volume=${opts.musicVolumeDb}dB,` +
@@ -584,16 +591,38 @@ function runFfmpeg(binary: string, args: string[]): Promise<void> {
   });
 }
 
-/** Render an SVG-overlaid slide PNG from a downloaded product image. */
-async function renderSlidePng(
+type Dims = { width: number; height: number };
+/** A rendered segment = a photo layer (Ken-Burns zoomed) + a static text layer. */
+type SegmentLayers = { photoPath: string; textPath: string };
+
+/** Write the transparent text-overlay layer (scrim + title/price/CTA) as a PNG. */
+async function writeTextLayer(svg: string, outPath: string): Promise<void> {
+  const sharpFn = (await import("sharp")).default;
+  await sharpFn(Buffer.from(svg)).png().toFile(outPath);
+}
+
+/** Write a full-frame solid-navy PNG (photo layer for cards with no photo). */
+async function writeNavyLayer(dims: Dims, outPath: string): Promise<void> {
+  const sharpFn = (await import("sharp")).default;
+  const navy = hexToRgb(VIDEO_BRAND.colors.navy);
+  await sharpFn({ create: { width: dims.width, height: dims.height, channels: 3, background: navy } })
+    .png()
+    .toFile(outPath);
+}
+
+/**
+ * Render a product slide's two layers: the photo (contained/cover on navy, no
+ * text — this is what Ken Burns zooms) and the transparent text overlay (scrim +
+ * title + price + CTA, held static on top so it never scales or pans off-frame).
+ */
+async function renderSlideLayers(
   item: SlideshowItem,
-  dims: { width: number; height: number },
+  dims: Dims,
   locale: VideoLocale,
-  outPath: string,
+  layers: SegmentLayers,
   storeUrl: string,
 ): Promise<void> {
-  const sharpModule = await import("sharp");
-  const sharpFn = sharpModule.default;
+  const sharpFn = (await import("sharp")).default;
   const navy = hexToRgb(VIDEO_BRAND.colors.navy);
 
   let base: import("sharp").Sharp;
@@ -614,50 +643,41 @@ async function renderSlidePng(
   } catch {
     base = sharpFn({ create: { width: dims.width, height: dims.height, channels: 3, background: navy } });
   }
-  const overlay = Buffer.from(buildSlideOverlaySvg(item, dims, locale, storeUrl));
-  await base.composite([{ input: overlay, top: 0, left: 0 }]).png().toFile(outPath);
+  await base.png().toFile(layers.photoPath);
+  await writeTextLayer(buildSlideOverlaySvg(item, dims, locale, storeUrl), layers.textPath);
 }
 
-/** Render a full-frame card PNG (navy background + the given SVG overlay). */
-async function renderCardPng(svg: string, dims: { width: number; height: number }, outPath: string): Promise<void> {
-  const sharpModule = await import("sharp");
-  const sharpFn = sharpModule.default;
-  const navy = hexToRgb(VIDEO_BRAND.colors.navy);
-  await sharpFn({ create: { width: dims.width, height: dims.height, channels: 3, background: navy } })
-    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-    .png()
-    .toFile(outPath);
+/** Render an outro (or any navy) card as photo (navy) + text overlay layers. */
+async function renderCardLayers(svg: string, dims: Dims, layers: SegmentLayers): Promise<void> {
+  await writeNavyLayer(dims, layers.photoPath);
+  await writeTextLayer(svg, layers.textPath);
 }
 
 /**
- * Render the intro card. For non-lifestyle series (the first item is a product,
- * not a hero) the first product photo becomes the card background (cover) with a
- * navy scrim + the hook over it, instead of the plain navy card. Falls back to the
- * navy card on any download failure or when no product photo is available.
+ * Render the intro card's two layers. For non-lifestyle series (the first item is
+ * a product, not a hero) the first product photo becomes the photo layer (cover)
+ * under a navy scrim + hook; otherwise the photo layer is plain navy. The hook
+ * text is always the static overlay. Falls back to navy on any download failure.
  */
-async function renderIntroCardPng(
+async function renderIntroLayers(
   config: SlideshowConfig,
-  dims: { width: number; height: number },
+  dims: Dims,
   bgImageUrl: string | null,
-  outPath: string,
+  layers: SegmentLayers,
 ): Promise<void> {
-  if (!bgImageUrl) {
-    await renderCardPng(buildIntroCardSvg(config, dims, false), dims, outPath);
-    return;
-  }
   const sharpFn = (await import("sharp")).default;
-  const navy = hexToRgb(VIDEO_BRAND.colors.navy);
-  let base: import("sharp").Sharp;
-  try {
-    const buf = await downloadImage(bgImageUrl);
-    base = sharpFn(buf).resize(dims.width, dims.height, { fit: "cover" });
-  } catch {
-    // Unreachable photo → fall back to the plain navy intro card.
-    await renderCardPng(buildIntroCardSvg(config, dims, false), dims, outPath);
-    return;
+  let hasBg = false;
+  if (bgImageUrl) {
+    try {
+      const buf = await downloadImage(bgImageUrl);
+      await sharpFn(buf).resize(dims.width, dims.height, { fit: "cover" }).png().toFile(layers.photoPath);
+      hasBg = true;
+    } catch {
+      // Unreachable photo → fall back to the plain navy intro photo layer.
+    }
   }
-  const overlay = Buffer.from(buildIntroCardSvg(config, dims, true));
-  await base.composite([{ input: overlay, top: 0, left: 0 }]).png().toFile(outPath);
+  if (!hasBg) await writeNavyLayer(dims, layers.photoPath);
+  await writeTextLayer(buildIntroCardSvg(config, dims, hasBg), layers.textPath);
 }
 
 /**
@@ -696,38 +716,48 @@ export async function renderSlideshow(config: SlideshowConfig): Promise<Slidesho
   const workDir = getWorkDir();
 
   try {
-    // 1. Intro card, slides, outro card (in segment order). Non-lifestyle series
-    // (the first item is a product, not a hero) use the first product photo as the
-    // intro background (cover + navy scrim) instead of a plain navy card.
-    const introPath = path.join(workDir, "intro.png");
-    const outroPath = path.join(workDir, "outro.png");
+    // 1. Each segment renders two layers: a photo (Ken-Burns zoomed) and a static
+    // text overlay. Intro: non-lifestyle series (first item is a product, not a
+    // hero) use the first product photo as the intro photo layer (cover + navy
+    // scrim) instead of plain navy. Outro: navy card.
+    const layerFor = (name: string): SegmentLayers => ({
+      photoPath: path.join(workDir, `${name}.photo.png`),
+      textPath: path.join(workDir, `${name}.text.png`),
+    });
     const introBgUrl = introBackgroundUrl(config.items);
-    await renderIntroCardPng(config, dims, introBgUrl, introPath);
-    const slidePaths: string[] = [];
+    const segmentLayers: SegmentLayers[] = [];
+    const intro = layerFor("intro");
+    await renderIntroLayers(config, dims, introBgUrl, intro);
+    segmentLayers.push(intro);
     for (let i = 0; i < config.items.length; i++) {
-      const p = path.join(workDir, `slide-${i}.png`);
-      await renderSlidePng(config.items[i], dims, locale, p, storeUrl);
-      slidePaths.push(p);
+      const slide = layerFor(`slide-${i}`);
+      await renderSlideLayers(config.items[i], dims, locale, slide, storeUrl);
+      segmentLayers.push(slide);
     }
-    await renderCardPng(buildOutroCardSvg(config, dims), dims, outroPath);
-    const segmentPaths = [introPath, ...slidePaths, outroPath];
+    const outro = layerFor("outro");
+    await renderCardLayers(buildOutroCardSvg(config, dims), dims, outro);
+    segmentLayers.push(outro);
 
     // 2. Music: config override → a rotated bundled royalty-free track → silent.
     const musicPath = config.musicUrl ?? pickMusicTrack();
 
-    // 3. ffmpeg arg vector: each segment looped to its duration, then xfade.
+    // 3. ffmpeg arg vector: photo layers, then text layers (each looped to its
+    // segment duration), then music — the input order buildXfadeFilterComplex expects.
     const args: string[] = [];
-    segmentPaths.forEach((p, i) => {
-      args.push("-loop", "1", "-t", String(durations[i]), "-i", p);
+    segmentLayers.forEach((s, i) => {
+      args.push("-loop", "1", "-t", String(durations[i]), "-i", s.photoPath);
+    });
+    segmentLayers.forEach((s, i) => {
+      args.push("-loop", "1", "-t", String(durations[i]), "-i", s.textPath);
     });
     if (musicPath) args.push("-i", musicPath);
 
     const { filterComplex, videoLabel, audioLabel } = buildXfadeFilterComplex({
-      count: segmentPaths.length,
+      count: segmentLayers.length,
       durations,
       dims,
       xfadeSec: effXfade,
-      transitions: transitionsFor(config.template, segmentPaths.length),
+      transitions: transitionsFor(config.template, segmentLayers.length),
       hasMusic: !!musicPath,
       musicVolumeDb: VIDEO_BRAND.music.volume,
       totalSec,

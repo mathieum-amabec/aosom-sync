@@ -266,6 +266,29 @@ describe("pure render helpers", () => {
     expect(filterComplex).toContain("xfade=transition=smoothleft");
     expect(filterComplex).toContain("afade=t=in:st=0:d=0.3");
     expect(filterComplex).toContain("afade=t=out:st=4.5:d=2");
+    // Music input follows the photo + text layers: index 2*count (6 for count=3).
+    expect(filterComplex).toContain("[6:a]");
+  });
+
+  it("separates the Ken-Burns photo layer from a static (un-zoomed) text overlay", () => {
+    // count=2, no music → photo inputs [0,1], text inputs [2,3].
+    const { filterComplex } = buildXfadeFilterComplex({
+      count: 2,
+      durations: [2, 2],
+      dims: { width: 1080, height: 1920 },
+      hasMusic: false,
+      musicVolumeDb: -18,
+      totalSec: 3.72,
+    });
+    // Photo layer i is zoompan'd into [p{i}]; the text layer (input count+i) is
+    // scaled but NEVER zoompan'd, then overlaid static on top → [v{i}].
+    expect(filterComplex).toContain("zoompan=");
+    expect(filterComplex).toContain("[2:v]scale=1080:1920,setsar=1,format=rgba[t0]");
+    expect(filterComplex).toContain("[p0][t0]overlay=0:0:format=auto,format=yuv420p[v0]");
+    expect(filterComplex).toContain("[3:v]scale=1080:1920,setsar=1,format=rgba[t1]");
+    expect(filterComplex).toContain("[p1][t1]overlay=0:0:format=auto,format=yuv420p[v1]");
+    // The text overlay must not be swallowed by a zoompan (would scale/crop text).
+    expect(filterComplex).not.toContain("zoompan=z='min(1+0.0022*on,1.5)':d=60:s=1080x1920:fps=30:x='0':y='0',setsar=1[v0]");
   });
 });
 
