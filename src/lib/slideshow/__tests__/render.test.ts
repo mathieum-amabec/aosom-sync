@@ -10,6 +10,9 @@ import {
   wrapTitle,
   wrapLines,
   buildSlideOverlaySvg,
+  transitionsFor,
+  xfadeSecFor,
+  kenBurnsExpr,
 } from "@/lib/slideshow/render";
 import { validateSlideshowConfig, shouldShowBadge } from "@/lib/slideshow/validate";
 import {
@@ -223,21 +226,21 @@ describe("pure render helpers", () => {
   });
 
   it("estimates duration with crossfade overlaps", () => {
-    // intro(2) + 2 slides(3.5) + outro(2) = 11, minus 3 xfades * 0.5 = 9.5
-    expect(estimateDurationSec(2)).toBe(9.5);
+    // intro(1.2) + 2 slides(2.4) + outro(1.3) = 7.3, minus 3 xfades * 0.28 = 6.46
+    expect(estimateDurationSec(2)).toBe(6.46);
   });
 
   it("paces to a target total duration when requested", () => {
-    // A 15s target over 5 slides lands on (about) 15s, not the default pacing.
-    expect(estimateDurationSec(5, 15)).toBeCloseTo(15, 1);
+    // A 12s target over 5 slides lands on (about) 12s, not the default pacing.
+    expect(estimateDurationSec(5, 12)).toBeCloseTo(12, 1);
     // The default (no target) stays the fixed pacing.
-    expect(perSlideSeconds(5)).toBe(3.5);
+    expect(perSlideSeconds(5)).toBe(2.4);
     // A reachable target solves the per-slide hold within the clamp.
-    const ps = perSlideSeconds(5, 15);
+    const ps = perSlideSeconds(5, 12);
     expect(ps).toBeGreaterThanOrEqual(1.5);
-    expect(ps).toBeLessThanOrEqual(8);
+    expect(ps).toBeLessThanOrEqual(4);
     // An absurdly long target clamps the per-slide hold to the max.
-    expect(perSlideSeconds(3, 999)).toBe(8);
+    expect(perSlideSeconds(3, 999)).toBe(4);
   });
 
   it("builds the canonical Blob path", () => {
@@ -257,8 +260,57 @@ describe("pure render helpers", () => {
     });
     expect(videoLabel).toBe("vout");
     expect(audioLabel).toBe("aout");
-    expect(filterComplex).toContain("xfade=transition=fade");
-    expect(filterComplex).toContain("afade=t=in:st=0:d=1");
+    // Junctions rotate through the transition set (not a flat fade).
+    expect(filterComplex).toContain("xfade=transition=slideleft");
+    expect(filterComplex).toContain("xfade=transition=smoothleft");
+    expect(filterComplex).toContain("afade=t=in:st=0:d=0.3");
     expect(filterComplex).toContain("afade=t=out:st=4.5:d=2");
+  });
+});
+
+describe("dynamic transitions + Ken Burns (quality v3)", () => {
+  it("rotates xfade transitions for normal templates, hard-cuts urgency/price-drop", () => {
+    // 4 segments → 3 junctions. Normal → rotation; hard-cut → all 'fade'.
+    expect(transitionsFor(SlideshowTemplate.BEST_SELLERS, 4)).toEqual([
+      "slideleft", "smoothleft", "wiperight",
+    ]);
+    expect(transitionsFor(SlideshowTemplate.URGENCY, 4)).toEqual(["fade", "fade", "fade"]);
+    expect(transitionsFor(SlideshowTemplate.PRICE_DROP, 3)).toEqual(["fade", "fade"]);
+  });
+
+  it("uses a near-zero crossfade (hard cut) for urgency/price-drop only", () => {
+    expect(xfadeSecFor(SlideshowTemplate.URGENCY)).toBe(0.04);
+    expect(xfadeSecFor(SlideshowTemplate.PRICE_DROP)).toBe(0.04);
+    expect(xfadeSecFor(SlideshowTemplate.BEST_SELLERS)).toBe(0.28);
+  });
+
+  it("alternates zoom-in / zoom-out and rotates the pan anchor per slide", () => {
+    const a = kenBurnsExpr(0); // zoom-in, top-left
+    expect(a.z).toContain("min(zoom+");
+    expect(a.x).toBe("0");
+    expect(a.y).toBe("0");
+    const b = kenBurnsExpr(1); // zoom-out, top-right
+    expect(b.z).toContain("max(zoom-");
+    expect(b.x).toBe("iw-iw/zoom");
+    expect(b.y).toBe("0");
+    const c = kenBurnsExpr(2); // zoom-in, bottom-left
+    expect(c.z).toContain("min(zoom+");
+    expect(c.x).toBe("0");
+    expect(c.y).toBe("ih-ih/zoom");
+  });
+});
+
+describe("product overlay legibility + persistent CTA (quality v3)", () => {
+  it("adds a navy scrim, text stroke, and a store-URL CTA pill on product slides", () => {
+    const svg = buildSlideOverlaySvg(
+      { image_url: `${CDN}/x.jpg`, overlay_text: "Chaise de jardin", price: 100, compare_at: 130 },
+      { width: 1080, height: 1920 },
+      "fr",
+      "ameublodirect.ca",
+    );
+    expect(svg).toContain('opacity="0.55"'); // scrim behind title/price
+    expect(svg).toContain('stroke-width="2"'); // text stroke for legibility
+    expect(svg).toContain("ameublodirect.ca"); // persistent CTA pill
+    expect(svg).toContain("-23%"); // discount badge still renders ((130-100)/130 ≈ 23%)
   });
 });

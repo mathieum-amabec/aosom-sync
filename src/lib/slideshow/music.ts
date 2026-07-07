@@ -52,3 +52,23 @@ export function getDefaultMusicTrack(): string | null {
   // none found, so renders fall back to a silent video.
   return null;
 }
+
+/** All bundled royalty-free tracks (src/audio + public/music), absolute paths. */
+export function listAllMusicTracks(): string[] {
+  const root = process.cwd();
+  return [
+    ...listTracks(path.resolve(root, "src/audio")),
+    ...listTracks(path.resolve(root, "public/music")),
+  ];
+}
+
+/**
+ * A randomly-chosen bundled track for this render, so consecutive slideshows don't
+ * all share the same music (rotation). Falls back to getDefaultMusicTrack()'s single
+ * track when only one exists, and null when none is bundled (silent video).
+ */
+export function pickMusicTrack(): string | null {
+  const all = listAllMusicTracks();
+  if (all.length === 0) return null;
+  return all[Math.floor(Math.random() * all.length)];
+}

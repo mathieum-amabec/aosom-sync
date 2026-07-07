@@ -100,9 +100,11 @@ export function formatPrice(price: number, locale: VideoLocale): string {
   return locale === "fr" ? `${v} $` : `$${v}`;
 }
 
-/** CTA copy per locale. */
+/** CTA copy per locale. The 👆 renders via the bundled monochrome Noto Emoji
+ * fallback (registerBrandFonts); on hosts without it, it degrades to a tofu box
+ * but the text still reads. */
 export function ctaText(locale: VideoLocale): string {
-  return locale === "fr" ? "Magasinez maintenant" : "Shop now";
+  return locale === "fr" ? "Lien en bio 👆" : "Link in bio 👆";
 }
 
 /**

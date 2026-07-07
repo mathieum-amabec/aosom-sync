@@ -159,30 +159,30 @@ function range(a: number, b: number): number[] {
   return Array.from({ length: b - a + 1 }, (_, i) => a + i);
 }
 
-// Quality v2: every series ≤15s and ≤5 products (3-5 slides + intro + outro keeps
-// the Reel punchy ~10-15s), with a marketing hook (never the technical id).
+// Quality v3: every series ≤12s and ≤5 products (3-5 slides + intro + outro keeps
+// the Reel punchy ~8-12s; top3 stays 10s), with a marketing hook (never the technical id).
 const STATIC_CONFIG: Series[] = [
   // best sellers (random sample from the velocity pool → varied each run)
-  ...range(1, 5).map((n): Series => ({ id: `best-sellers-${n}`, type: "best_sellers", limit: 5, ratio: "9:16", duration: 15, hook: "best_sellers" })),
+  ...range(1, 5).map((n): Series => ({ id: `best-sellers-${n}`, type: "best_sellers", limit: 5, ratio: "9:16", duration: 12, hook: "best_sellers" })),
   // ride-on / cars for kids (fuzzy product_type)
-  ...range(1, 3).map((n): Series => ({ id: `enfants-voitures-${n}`, type: "by_like", patterns: ["%Ride%", "%Car%", "%Toy Vehicle%"], limit: 5, ratio: "9:16", duration: 15, hook: "kids_cars" })),
+  ...range(1, 3).map((n): Series => ({ id: `enfants-voitures-${n}`, type: "by_like", patterns: ["%Ride%", "%Car%", "%Toy Vehicle%"], limit: 5, ratio: "9:16", duration: 12, hook: "kids_cars" })),
   // kids toys (Qaba)
-  ...range(1, 3).map((n): Series => ({ id: `enfants-jouets-${n}`, type: "by_like", patterns: ["%Toy%", "%Kids%", "%Baby%"], limit: 5, ratio: "9:16", duration: 15, hook: "kids_toys" })),
+  ...range(1, 3).map((n): Series => ({ id: `enfants-jouets-${n}`, type: "by_like", patterns: ["%Toy%", "%Kids%", "%Baby%"], limit: 5, ratio: "9:16", duration: 12, hook: "kids_toys" })),
   // summer seasonal
-  ...range(1, 3).map((n): Series => ({ id: `saison-ete-${n}`, type: "seasonal", theme: "ete", limit: 5, ratio: "9:16", duration: 15, hook: "seasonal_ete" })),
+  ...range(1, 3).map((n): Series => ({ id: `saison-ete-${n}`, type: "seasonal", theme: "ete", limit: 5, ratio: "9:16", duration: 12, hook: "seasonal_ete" })),
   // top discounts
-  ...range(1, 3).map((n): Series => ({ id: `rabais-top5-${n}`, type: "price_drops", limit: 5, ratio: "9:16", duration: 15, hook: "price_drops" })),
+  ...range(1, 3).map((n): Series => ({ id: `rabais-top5-${n}`, type: "price_drops", limit: 5, ratio: "9:16", duration: 12, hook: "price_drops" })),
   // low stock urgency
-  ...range(1, 3).map((n): Series => ({ id: `urgence-stock-${n}`, type: "low_stock", threshold: 5, limit: 5, ratio: "9:16", duration: 15, hook: "low_stock" })),
+  ...range(1, 3).map((n): Series => ({ id: `urgence-stock-${n}`, type: "low_stock", threshold: 5, limit: 5, ratio: "9:16", duration: 12, hook: "low_stock" })),
   // thematic remix of the demand-gen library
-  { id: "remix-ete-cour", type: "remix", theme: "ete-cour", ratio: "9:16", duration: 15, hook: "seasonal_ete" },
-  { id: "remix-maison", type: "remix", theme: "maison", ratio: "9:16", duration: 15, hook: "best_sellers" },
-  { id: "remix-enfants", type: "remix", theme: "enfants", ratio: "9:16", duration: 15, hook: "kids_toys" },
+  { id: "remix-ete-cour", type: "remix", theme: "ete-cour", ratio: "9:16", duration: 12, hook: "seasonal_ete" },
+  { id: "remix-maison", type: "remix", theme: "maison", ratio: "9:16", duration: 12, hook: "best_sellers" },
+  { id: "remix-enfants", type: "remix", theme: "enfants", ratio: "9:16", duration: 12, hook: "kids_toys" },
   // WoW discovery
-  { id: "decouverte-margin-1", type: "wow_discovery", strategy: "margin", limit: 5, ratio: "9:16", duration: 15, hook: "wow_discovery" },
-  { id: "decouverte-new", type: "wow_discovery", strategy: "new", limit: 5, ratio: "9:16", duration: 15, hook: "wow_discovery" },
+  { id: "decouverte-margin-1", type: "wow_discovery", strategy: "margin", limit: 5, ratio: "9:16", duration: 12, hook: "wow_discovery" },
+  { id: "decouverte-new", type: "wow_discovery", strategy: "new", limit: 5, ratio: "9:16", duration: 12, hook: "wow_discovery" },
   // office (Vinsetto)
-  ...range(1, 2).map((n): Series => ({ id: `bureau-${n}`, type: "by_like", patterns: ["%Office%", "%Desk%"], limit: 5, ratio: "9:16", duration: 15, hook: "office" })),
+  ...range(1, 2).map((n): Series => ({ id: `bureau-${n}`, type: "by_like", patterns: ["%Office%", "%Desk%"], limit: 5, ratio: "9:16", duration: 12, hook: "office" })),
 
   // ── Top 3 (short, punchy) ──
   { id: "top3-must-have", type: "best_sellers", limit: 3, ratio: "9:16", duration: 10, hook: "top3" },
@@ -191,14 +191,14 @@ const STATIC_CONFIG: Series[] = [
   { id: "top3-rabais", type: "price_drops", limit: 3, ratio: "9:16", duration: 10, hook: "top3" },
 
   // ── Emotional slogans (hook refined by Claude) ──
-  { id: "slogan-budget", type: "best_sellers", limit: 4, ratio: "9:16", duration: 15, hook: "slogan", hookText: "Tu veux mettre plus d'argent de côté mais tu dois remeubler ?" },
-  { id: "slogan-ete", type: "seasonal", theme: "ete", limit: 4, ratio: "9:16", duration: 15, hook: "slogan", hookText: "L'été québécois est court — profites-en à fond 🌞" },
-  { id: "slogan-bureau", type: "by_like", patterns: ["%Office%", "%Desk%"], limit: 4, ratio: "9:16", duration: 15, hook: "slogan", hookText: "Ton bureau à la maison mérite mieux que ça 💻" },
+  { id: "slogan-budget", type: "best_sellers", limit: 4, ratio: "9:16", duration: 12, hook: "slogan", hookText: "Tu veux mettre plus d'argent de côté mais tu dois remeubler ?" },
+  { id: "slogan-ete", type: "seasonal", theme: "ete", limit: 4, ratio: "9:16", duration: 12, hook: "slogan", hookText: "L'été québécois est court — profites-en à fond 🌞" },
+  { id: "slogan-bureau", type: "by_like", patterns: ["%Office%", "%Desk%"], limit: 4, ratio: "9:16", duration: 12, hook: "slogan", hookText: "Ton bureau à la maison mérite mieux que ça 💻" },
 
   // ── Lifestyle (Unsplash hero opener, then products) ──
-  { id: "lifestyle-terrasse", type: "seasonal", theme: "ete", limit: 4, ratio: "9:16", duration: 15, hook: "lifestyle", unsplashQuery: "sunny patio terrace summer", hookText: "☀️ Ta terrasse de rêve t'attend..." },
-  { id: "lifestyle-salon", type: "by_like", patterns: ["%Furniture%"], limit: 4, ratio: "9:16", duration: 15, hook: "lifestyle", unsplashQuery: "cozy modern living room interior", hookText: "🏡 Un salon qui te ressemble..." },
-  { id: "lifestyle-bureau", type: "by_like", patterns: ["%Office%", "%Desk%"], limit: 4, ratio: "9:16", duration: 15, hook: "lifestyle", unsplashQuery: "modern home office workspace", hookText: "💼 Ton espace de travail idéal..." },
+  { id: "lifestyle-terrasse", type: "seasonal", theme: "ete", limit: 4, ratio: "9:16", duration: 12, hook: "lifestyle", unsplashQuery: "sunny patio terrace summer", hookText: "☀️ Ta terrasse de rêve t'attend..." },
+  { id: "lifestyle-salon", type: "by_like", patterns: ["%Furniture%"], limit: 4, ratio: "9:16", duration: 12, hook: "lifestyle", unsplashQuery: "cozy modern living room interior", hookText: "🏡 Un salon qui te ressemble..." },
+  { id: "lifestyle-bureau", type: "by_like", patterns: ["%Office%", "%Desk%"], limit: 4, ratio: "9:16", duration: 12, hook: "lifestyle", unsplashQuery: "modern home office workspace", hookText: "💼 Ton espace de travail idéal..." },
 ];
 
 /** Seasonal theme → fuzzy product_type LIKE patterns (the catalog uses
@@ -410,7 +410,7 @@ async function main(): Promise<void> {
 
   // Resolve the dynamic showcase series (top 5 SKUs by 14-day velocity).
   const topSellers = await lib.bestSellers({ limit: 5, language: LANGUAGE, resolveImages: false });
-  const showcaseSeries: Series[] = topSellers.map((p): Series => ({ id: `showcase-${p.sku}`, type: "showcase", sku: p.sku, ratio: "9:16", duration: 15, hook: "best_sellers" }));
+  const showcaseSeries: Series[] = topSellers.map((p): Series => ({ id: `showcase-${p.sku}`, type: "showcase", sku: p.sku, ratio: "9:16", duration: 12, hook: "best_sellers" }));
 
   let config: Series[] = [...STATIC_CONFIG.slice(0, 5), ...showcaseSeries, ...STATIC_CONFIG.slice(5)];
   if (ONLY_SERIES) config = config.filter((s) => s.id === ONLY_SERIES);
