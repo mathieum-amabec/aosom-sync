@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.3] - 2026-07-07
+
+### Fixed — slideshow/carousel video prices use the Quebec comma separator
+FR product prices in the generated slideshow and carousel video overlays now show
+`432,99 $` (Quebec convention) instead of `432.99 $`. Fixed in the shared
+`formatPrice` helper that every overlay builder routes through (current price and
+struck-through compare-at). English overlays keep `$432.99`. The Google/Bing/Reddit/
+Meta product feeds are unaffected — they use a separate formatter whose machine-read
+`<g:price>` field must keep the period.
+
 ## [0.5.54.2] - 2026-07-07
 
 ### Fixed — social posts no longer start with a "Post Facebook 🌿" label
