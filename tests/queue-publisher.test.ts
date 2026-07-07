@@ -289,6 +289,24 @@ describe("publishQueueItem — Reel clickbait caption (content_type=video)", () 
     );
   });
 
+  it("strips a leading platform label / Markdown from the generated reel caption before posting", async () => {
+    // This caption publishes unreviewed, so a disobedient "Post Facebook 🌿"
+    // (or markdown-titled) generation must be cleaned at this call-site, not
+    // shipped verbatim. cleanSocialCaption strips Markdown first, then the label.
+    const create = stubClaude("**Post Instagram 🌿**\n\n🔥 Ce ventilateur va vous rafraîchir 👉");
+    await publishQueueItem(
+      item({
+        platform: "instagram",
+        contentType: "video",
+        payload: social({ reelsVideoUrl: "https://blob/r.mp4", caption: "Ventilateur tour oscillant" }),
+      }),
+    );
+    expect(create).toHaveBeenCalledOnce();
+    expect(publishReel).toHaveBeenCalledWith(
+      expect.objectContaining({ caption: "🔥 Ce ventilateur va vous rafraîchir 👉" }),
+    );
+  });
+
   it("keeps the original caption when generation fails (never blocks the publish)", async () => {
     stubClaude(null); // Claude API throws
     await publishQueueItem(

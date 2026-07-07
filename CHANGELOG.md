@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.2] - 2026-07-07
+
+### Fixed — social posts no longer start with a "Post Facebook 🌿" label
+Generated social captions sometimes opened with a platform-label prefix the model
+prepended ("Post Facebook 🌿", "Publication Instagram :", "Facebook Post:"). That
+prefix now never reaches a published post — the caption starts directly with the
+marketing hook.
+- All three caption generators route through one shared `cleanSocialCaption` helper
+  (product posts, content-template posts, and publish-time Reel captions), so no
+  path can skip the cleanup. The Reel path matters most: it publishes unreviewed on
+  the hourly cron.
+- Handles the label whether it sits on its own header line (dropped entirely) or
+  inline ahead of the hook (only the label token and its `:`/`-`/emoji decoration
+  are removed — the real hook is always kept, never silently truncated).
+- Also strips Markdown the model may emit (`**bold**`, `#` headers, `---` rules) so
+  Facebook/Instagram don't render it literally.
+
 ## [0.5.54.1] - 2026-07-07
 
 ### Added — sticky Add-To-Cart bar on product pages (draft theme, not published)
