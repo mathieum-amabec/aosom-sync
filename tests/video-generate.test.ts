@@ -73,27 +73,44 @@ describe("selectProductImage", () => {
 // ─── toSlideshowProducts ──────────────────────────────────────────────
 
 describe("toSlideshowProducts", () => {
-  it("maps rows to {name, price, imageUrl} with numeric price", () => {
-    const out = toSlideshowProducts([
-      { sku: "A", name: "Sofa", price: 499.99, image1: "https://x/a.jpg" },
-      { sku: "B", name: "Lamp", price: "39.5", image2: "https://x/b.jpg" },
-    ]);
+  const CDN = "https://cdn.shopify.com/s/files";
+  // Stub the injected Shopify image resolver (keyed by shopify_product_id).
+  const IMAGES: Record<string, string[]> = {
+    "sp-A": [`${CDN}/a.jpg`],
+    "sp-B": [`${CDN}/b.jpg`],
+    // A non-Shopify URL must be rejected by the find(isShopifyCdnUrl) filter.
+    "sp-aosom": ["https://img-us.aosomcdn.com/x.jpg"],
+  };
+  const resolver = async (id: string): Promise<string[]> => IMAGES[id] ?? [];
+
+  it("uses the product's Shopify-CDN image (not the Aosom image1..7 columns)", async () => {
+    const out = await toSlideshowProducts(
+      [
+        { sku: "A", name: "Sofa", price: 499.99, shopify_product_id: "sp-A", image1: "https://img-us.aosomcdn.com/a.jpg" },
+        { sku: "B", name: "Lamp", price: "39.5", shopify_product_id: "sp-B" },
+      ],
+      resolver,
+    );
     expect(out).toEqual([
-      { name: "Sofa", price: 499.99, imageUrl: "https://x/a.jpg" },
-      { name: "Lamp", price: 39.5, imageUrl: "https://x/b.jpg" },
+      { name: "Sofa", price: 499.99, imageUrl: `${CDN}/a.jpg` },
+      { name: "Lamp", price: 39.5, imageUrl: `${CDN}/b.jpg` },
     ]);
   });
 
-  it("falls back to sku then 'Produit' for name, 0 for bad price, '' for no image", () => {
-    expect(toSlideshowProducts([{ sku: "SKU1", price: "abc" }])).toEqual([
+  it("imageUrl='' when the resolver returns no Shopify-CDN image (navy fallback)", async () => {
+    // Missing id, unknown id, and a non-cdn.shopify.com URL all yield "".
+    expect(await toSlideshowProducts([{ sku: "SKU1", price: "abc" }], resolver)).toEqual([
       { name: "SKU1", price: 0, imageUrl: "" },
     ]);
-    expect(toSlideshowProducts([{}])).toEqual([{ name: "Produit", price: 0, imageUrl: "" }]);
+    expect(await toSlideshowProducts([{ shopify_product_id: "sp-aosom", name: "X", price: 1 }], resolver)).toEqual([
+      { name: "X", price: 1, imageUrl: "" },
+    ]);
+    expect(await toSlideshowProducts([{}], resolver)).toEqual([{ name: "Produit", price: 0, imageUrl: "" }]);
   });
 
-  it("caps the result at MAX_VIDEO_PRODUCTS", () => {
+  it("caps the result at MAX_VIDEO_PRODUCTS", async () => {
     const rows = Array.from({ length: 10 }, (_, i) => ({ sku: `S${i}`, name: `N${i}`, price: i }));
-    expect(toSlideshowProducts(rows)).toHaveLength(MAX_VIDEO_PRODUCTS);
+    expect(await toSlideshowProducts(rows, resolver)).toHaveLength(MAX_VIDEO_PRODUCTS);
   });
 });
 

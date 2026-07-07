@@ -32,9 +32,12 @@ describe("slideshow duration", () => {
     }
   });
 
-  it("1 product is padded up to the minimum (15s), 6 fills the max (30s)", () => {
-    expect(slideshowDurationSeconds(1)).toBe(15);
-    expect(slideshowDurationSeconds(6)).toBe(30);
+  it("holds 2.4s/slide for 3-6 products; floors 1-2 to the 6s minimum", () => {
+    // BASE_CLIP_SECONDS=2.4, durationTarget.min=6.
+    expect(slideshowDurationSeconds(1)).toBe(6); // 2.4 floored to 6
+    expect(slideshowDurationSeconds(2)).toBe(6); // 4.8 floored to 6
+    expect(slideshowDurationSeconds(3)).toBeCloseTo(7.2, 5); // 3 × 2.4
+    expect(slideshowDurationSeconds(6)).toBeCloseTo(14.4, 5); // 6 × 2.4
   });
 
   it("per-clip seconds * count equals the clamped total", () => {
@@ -43,9 +46,9 @@ describe("slideshow duration", () => {
     }
   });
 
-  it("3 products → 5s/clip → 125 frames (matches the brief's d=125)", () => {
-    expect(perClipSeconds(3)).toBe(5);
-    expect(perClipFrames(3)).toBe(125);
+  it("3 products → 2.4s/clip → 60 frames (2.4s/slide baseline)", () => {
+    expect(perClipSeconds(3)).toBeCloseTo(2.4, 5);
+    expect(perClipFrames(3)).toBe(60);
   });
 
   it("perClipSeconds(0) is 0 and does not divide by zero", () => {
