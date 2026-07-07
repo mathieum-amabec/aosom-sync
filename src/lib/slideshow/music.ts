@@ -63,9 +63,10 @@ export function listAllMusicTracks(): string[] {
 }
 
 /**
- * A randomly-chosen bundled track for this render, so consecutive slideshows don't
- * all share the same music (rotation). Falls back to getDefaultMusicTrack()'s single
- * track when only one exists, and null when none is bundled (silent video).
+ * A uniformly-random bundled track for this render, so consecutive slideshows don't
+ * all share the same music (rotation). Unlike getDefaultMusicTrack() it does NOT
+ * prefer PREFERRED_TRACK — every bundled track has an equal chance. With one track
+ * bundled it returns that track; with none it returns null (silent video).
  */
 export function pickMusicTrack(): string | null {
   const all = listAllMusicTracks();

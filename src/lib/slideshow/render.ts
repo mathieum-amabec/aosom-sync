@@ -68,9 +68,15 @@ const HARD_CUT_TEMPLATES: ReadonlySet<SlideshowTemplate> = new Set([
   SlideshowTemplate.URGENCY,
   SlideshowTemplate.PRICE_DROP,
 ]);
-/** Ken Burns zoom rate per frame and zoom cap (shared by zoom-in/out variants). */
+/** Ken Burns zoom rate per frame and zoom bounds (shared by zoom-in/out variants). */
 const KB_ZOOM_INC = 0.0022;
 const KB_ZOOM_MAX = 1.5;
+const KB_ZOOM_MIN = 1.0;
+
+/** Rotate through XFADE_TRANSITIONS by index (shared by transitionsFor + the fallback). */
+function rotatedTransition(index: number): string {
+  return XFADE_TRANSITIONS[index % XFADE_TRANSITIONS.length];
+}
 
 /** Effective crossfade duration for a template: a hard cut for urgency/price-drop. */
 export function xfadeSecFor(template: SlideshowTemplate): number {
@@ -85,19 +91,23 @@ export function xfadeSecFor(template: SlideshowTemplate): number {
 export function transitionsFor(template: SlideshowTemplate, count: number): string[] {
   const junctions = Math.max(0, count - 1);
   if (HARD_CUT_TEMPLATES.has(template)) return Array.from({ length: junctions }, () => "fade");
-  return Array.from({ length: junctions }, (_, i) => XFADE_TRANSITIONS[i % XFADE_TRANSITIONS.length]);
+  return Array.from({ length: junctions }, (_, i) => rotatedTransition(i));
 }
 
 /**
  * Ken Burns zoompan expression for segment `index`: alternates zoom-in / zoom-out
  * and rotates the pan anchor through the four corners, so consecutive slides move
  * differently instead of all zooming into the centre.
+ *
+ * The zoom is a PURE function of the output-frame counter `on` (0-indexed), not the
+ * `zoom` accumulator — so zoom-out starts at KB_ZOOM_MAX on frame 0 (no first-frame
+ * pop from the accumulator's 1.0 init), and both directions are deterministic.
  */
 export function kenBurnsExpr(index: number): { z: string; x: string; y: string } {
   const zoomIn = index % 2 === 0;
   const z = zoomIn
-    ? `min(zoom+${KB_ZOOM_INC},${KB_ZOOM_MAX})`
-    : `if(eq(on,1),${KB_ZOOM_MAX},max(zoom-${KB_ZOOM_INC},1.0))`;
+    ? `min(${KB_ZOOM_MIN}+${KB_ZOOM_INC}*on,${KB_ZOOM_MAX})`
+    : `max(${KB_ZOOM_MAX}-${KB_ZOOM_INC}*on,${KB_ZOOM_MIN})`;
   // Pan anchors: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right.
   const corner = index % 4;
   const left = corner === 0 || corner === 2;
@@ -234,6 +244,8 @@ export function buildManifest(config: SlideshowConfig, timestamp: number): Slide
     };
   });
 
+  // Dry-run preview only: shows the DEFAULT track. A real render rotates via
+  // pickMusicTrack(), so the shipped track may differ (unless musicUrl pins one).
   const music = config.musicUrl ?? getDefaultMusicTrack();
 
   return {
@@ -333,7 +345,7 @@ export function buildSlideOverlaySvg(
   item: SlideshowItem,
   dims: { width: number; height: number },
   locale: VideoLocale,
-  storeUrl: string = "ameublodirect.ca",
+  storeUrl: string = BRAND_STORE_URL.ameublo,
 ): string {
   const { navy, gold, offWhite } = VIDEO_BRAND.colors;
   const font = VIDEO_BRAND.font.family;
@@ -460,6 +472,16 @@ export function buildOutroCardSvg(
 }
 
 /**
+ * Intro-card background: the first product photo (cdn.shopify) for non-lifestyle
+ * series, or null when the opener is a hero (lifestyle keeps its navy card) or the
+ * first item has no usable Shopify photo. Pure — unit-testable.
+ */
+export function introBackgroundUrl(items: SlideshowItem[]): string | null {
+  const first = items[0];
+  return first && !first.hero && isShopifyCdnUrl(first.image_url) ? first.image_url : null;
+}
+
+/**
  * Build the xfade-crossfade `-filter_complex` graph over `count` visual
  * segments (intro + slides + outro), each a still looped to its duration and
  * Ken-Burns zoomed, plus optional faded music. Pure — unit-testable.
@@ -483,7 +505,7 @@ export function buildXfadeFilterComplex(opts: {
   const x = opts.xfadeSec ?? XFADE_SEC;
   const musicFadeIn = opts.musicFadeInSec ?? MUSIC_FADE_IN_SEC;
   const { width: w, height: h } = opts.dims;
-  const transAt = (j: number): string => opts.transitions?.[j] ?? XFADE_TRANSITIONS[j % XFADE_TRANSITIONS.length];
+  const transAt = (j: number): string => opts.transitions?.[j] ?? rotatedTransition(j);
   const parts: string[] = [];
 
   // Each segment: scale/pad to frame, per-segment Ken Burns (alternating zoom
@@ -679,8 +701,7 @@ export async function renderSlideshow(config: SlideshowConfig): Promise<Slidesho
     // intro background (cover + navy scrim) instead of a plain navy card.
     const introPath = path.join(workDir, "intro.png");
     const outroPath = path.join(workDir, "outro.png");
-    const first = config.items[0];
-    const introBgUrl = first && !first.hero && isShopifyCdnUrl(first.image_url) ? first.image_url : null;
+    const introBgUrl = introBackgroundUrl(config.items);
     await renderIntroCardPng(config, dims, introBgUrl, introPath);
     const slidePaths: string[] = [];
     for (let i = 0; i < config.items.length; i++) {

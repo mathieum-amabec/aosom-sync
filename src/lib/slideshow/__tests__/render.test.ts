@@ -13,6 +13,7 @@ import {
   transitionsFor,
   xfadeSecFor,
   kenBurnsExpr,
+  introBackgroundUrl,
 } from "@/lib/slideshow/render";
 import { validateSlideshowConfig, shouldShowBadge } from "@/lib/slideshow/validate";
 import {
@@ -278,25 +279,75 @@ describe("dynamic transitions + Ken Burns (quality v3)", () => {
     expect(transitionsFor(SlideshowTemplate.PRICE_DROP, 3)).toEqual(["fade", "fade"]);
   });
 
+  it("wraps the rotation past the set length and returns [] for a single segment", () => {
+    // 6 segments → 5 junctions: reaches zoomin (index 3) and wraps back to slideleft.
+    expect(transitionsFor(SlideshowTemplate.BEST_SELLERS, 6)).toEqual([
+      "slideleft", "smoothleft", "wiperight", "zoomin", "slideleft",
+    ]);
+    expect(transitionsFor(SlideshowTemplate.BEST_SELLERS, 1)).toEqual([]);
+  });
+
   it("uses a near-zero crossfade (hard cut) for urgency/price-drop only", () => {
     expect(xfadeSecFor(SlideshowTemplate.URGENCY)).toBe(0.04);
     expect(xfadeSecFor(SlideshowTemplate.PRICE_DROP)).toBe(0.04);
     expect(xfadeSecFor(SlideshowTemplate.BEST_SELLERS)).toBe(0.28);
   });
 
-  it("alternates zoom-in / zoom-out and rotates the pan anchor per slide", () => {
+  it("a smaller (hard-cut) crossfade yields a LONGER runtime (fewer overlap seconds)", () => {
+    // Same segments, 0.04 hard-cut vs 0.28 default → 0.04 overlaps less → longer total.
+    expect(estimateDurationSec(2, undefined, 0.04)).toBeGreaterThan(estimateDurationSec(2));
+    // And the manifest reflects the template's effective crossfade.
+    const urgency = buildManifest(config({ template: SlideshowTemplate.URGENCY, items: [item(), item()] }), 1);
+    const showcase = buildManifest(config({ template: SlideshowTemplate.SHOWCASE, items: [item(), item()] }), 1);
+    expect(urgency.estimatedDurationSec).toBeGreaterThan(showcase.estimatedDurationSec);
+  });
+
+  it("Ken Burns: pure-on zoom (no accumulator pop) alternating in/out, 4-corner pan", () => {
     const a = kenBurnsExpr(0); // zoom-in, top-left
-    expect(a.z).toContain("min(zoom+");
+    expect(a.z).toContain("min(1+0.0022*on");
     expect(a.x).toBe("0");
     expect(a.y).toBe("0");
-    const b = kenBurnsExpr(1); // zoom-out, top-right
-    expect(b.z).toContain("max(zoom-");
+    const b = kenBurnsExpr(1); // zoom-out (starts at max on frame 0), top-right
+    expect(b.z).toContain("max(1.5-0.0022*on");
     expect(b.x).toBe("iw-iw/zoom");
     expect(b.y).toBe("0");
     const c = kenBurnsExpr(2); // zoom-in, bottom-left
-    expect(c.z).toContain("min(zoom+");
+    expect(c.z).toContain("min(1+0.0022*on");
     expect(c.x).toBe("0");
     expect(c.y).toBe("ih-ih/zoom");
+    const d = kenBurnsExpr(3); // zoom-out, bottom-right
+    expect(d.z).toContain("max(1.5-0.0022*on");
+    expect(d.x).toBe("iw-iw/zoom");
+    expect(d.y).toBe("ih-ih/zoom");
+  });
+
+  it("hard-cut path: explicit transitions + xfadeSec produce fade@0.04 in the graph", () => {
+    const { filterComplex } = buildXfadeFilterComplex({
+      count: 3, durations: [1.2, 2.4, 1.3], dims: { width: 1080, height: 1920 },
+      transitions: ["fade", "fade"], xfadeSec: 0.04,
+      hasMusic: false, musicVolumeDb: -18, totalSec: 4.6,
+    });
+    expect(filterComplex).toContain("xfade=transition=fade:duration=0.04");
+    expect(filterComplex).not.toContain("xfade=transition=slideleft");
+  });
+
+  it("single segment: no xfade, video exposed directly", () => {
+    const { filterComplex, videoLabel } = buildXfadeFilterComplex({
+      count: 1, durations: [3], dims: { width: 1080, height: 1920 },
+      hasMusic: false, musicVolumeDb: -18, totalSec: 3,
+    });
+    expect(videoLabel).toBe("v0");
+    expect(filterComplex).not.toContain("xfade=");
+  });
+
+  it("introBackgroundUrl: first product photo for non-lifestyle, null for a hero opener", () => {
+    // Non-lifestyle: first product's cdn.shopify photo backs the intro.
+    expect(introBackgroundUrl([item({ image_url: `${CDN}/a.jpg` }), item()])).toBe(`${CDN}/a.jpg`);
+    // Lifestyle: hero opener → null (intro keeps the navy card).
+    expect(introBackgroundUrl([{ image_url: "https://images.unsplash.com/p", overlay_text: "h", price: 0, hero: true }, item()])).toBeNull();
+    // Empty / non-cdn first item → null.
+    expect(introBackgroundUrl([])).toBeNull();
+    expect(introBackgroundUrl([item({ image_url: "https://img-us.aosomcdn.com/x.jpg" })])).toBeNull();
   });
 });
 
