@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.203] - 2026-07-06
+
+### Added — slide-out cart drawer on the Shopify theme (draft only, NOT published to live)
+Replaced the classic cart page flow with Dawn's slide-out cart drawer on the **draft theme
+`160749813865`** (store 27u5y2-kp). Add-to-cart now opens a right-side drawer without leaving
+the page: item list, +/- qty stepper per item, estimated total, explicit **"Livraison gratuite"
+/ "Free shipping"** line, and a **"Passer à la caisse" / "Check out"** CTA. Bilingual FR/EN via
+`request.locale.iso_code`. Verified live on the draft preview (FR + `/en`), screenshots captured.
+- **Activation (theme config, on the draft):** `settings.cart_type` `notification` → `drawer`
+  (both `current` and the "Default" preset). This alone lights up the drawer stack already wired
+  in `layout/theme.liquid` (CSS + `<cart-drawer>` render + `cart-drawer.js`, all gated on
+  `cart_type == 'drawer'`); `product-form.js` opens it on add, `cart-drawer.js` on cart-icon click.
+- **Enhancement (`snippets/cart-drawer.liquid`, on the draft):** added the explicit bilingual
+  free-shipping line (green, truck icon) in the footer and set the checkout CTA to the requested
+  wording ("Passer à la caisse" / "Check out"; the `sections.cart.checkout` key rendered
+  "Procéder au paiement").
+- **This repo change is a versioned trace only:** `shopify-theme/snippets/cart-drawer.liquid`
+  mirrors the enhanced snippet. The `cart_type` flip lives in the theme's `settings_data.json`
+  on the draft (documented here, not mirrored — it's a config value, not code). **Merging deploys
+  nothing**; publishing the draft theme is a separate manual step (live `160656818281` untouched).
+
 ## [0.5.53.202] - 2026-07-06
 
 ### Changed — social posts now publish the RAW Shopify lifestyle photo (no compositor, no watermark)
