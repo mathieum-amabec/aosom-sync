@@ -138,6 +138,16 @@
                     price_class: 'price--large'
                   -%}
                 </div>
+                <div class="lc-price-why">
+                  {%- if lc_loc == 'en' -%}
+                    &#128161; Low price because we&rsquo;re 100% online &mdash; no showroom rent to pass on to you.
+                  {%- else -%}
+                    &#128161; Prix bas parce qu&rsquo;on est 100&nbsp;% en ligne &mdash; aucun loyer de salle de montre &agrave; payer.
+                  {%- endif -%}
+                </div>
+                {%- style -%}
+                  .lc-price-why{margin:.55rem 0 .25rem;padding:.6rem .85rem;background:rgba(212,168,83,.12);border-left:3px solid #D4A853;border-radius:6px;font-size:.9rem;line-height:1.4;color:#1A2340;}
+                {%- endstyle -%}
                 {%- if product.quantity_price_breaks_configured? -%}
                   <div class="volume-pricing-note" id="Volume-Note-{{ section.id }}">
                     <span>{{ 'products.product.volume_pricing.note' | t }}</span>
