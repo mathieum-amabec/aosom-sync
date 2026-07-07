@@ -65,8 +65,8 @@ describe("locale formatting", () => {
   });
 
   it("localizes the CTA", () => {
-    expect(ctaText("fr")).toBe("Magasinez maintenant");
-    expect(ctaText("en")).toBe("Shop now");
+    expect(ctaText("fr")).toBe("Lien en bio 👆");
+    expect(ctaText("en")).toBe("Link in bio 👆");
   });
 });
 
@@ -91,7 +91,7 @@ describe("SVG overlays", () => {
     const svg = buildProductOverlaySvg(PRODUCT, "fr");
     expect(svg).toContain("Canapé sectionnel réversible");
     expect(svg).toContain("499.99 $");
-    expect(svg).toContain("Magasinez maintenant");
+    expect(svg).toContain("Lien en bio");
     expect(svg).toContain(VIDEO_BRAND.colors.gold);
     expect(svg).toMatch(new RegExp(`width="${VIDEO_BRAND.format.width}"`));
     expect(svg).toMatch(new RegExp(`height="${VIDEO_BRAND.format.height}"`));

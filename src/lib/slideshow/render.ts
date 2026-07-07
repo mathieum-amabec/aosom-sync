@@ -19,6 +19,7 @@ import path from "path";
 import fs from "fs";
 import { spawn } from "child_process";
 import { downloadImage } from "@/lib/image-composer";
+import { registerBrandFonts } from "@/lib/register-brand-fonts";
 import { VIDEO_BRAND } from "@/lib/video-brand-tokens";
 import { formatVideoTitle } from "@/lib/video-title-utils";
 import {
@@ -27,9 +28,10 @@ import {
   ctaText,
   type VideoLocale,
 } from "@/lib/video-engines/ffmpeg-slideshow";
-import { getDefaultMusicTrack } from "./music";
+import { getDefaultMusicTrack, pickMusicTrack } from "./music";
 import { validateSlideshowConfig, shouldShowBadge, discountPct, isShopifyCdnUrl, isHeroImageUrl } from "./validate";
 import {
+  SlideshowTemplate,
   type SlideshowConfig,
   type SlideshowItem,
   type SlideshowResult,
@@ -39,17 +41,81 @@ import {
   type SlideshowBrand,
 } from "./types";
 
-const FPS = 25;
-const INTRO_SEC = 2;
-const OUTRO_SEC = 2;
-const PER_SLIDE_SEC = 3.5;
+// SVG text is rendered by librsvg/fontconfig (not Sharp's fontfile), so register
+// the bundled DM Sans + Noto Emoji before the first slide/card renders — otherwise
+// titles + the CTA emoji render as tofu boxes on the Linux render host.
+registerBrandFonts();
+
+const FPS = 30;
+const INTRO_SEC = 1.2;
+const OUTRO_SEC = 1.3;
+const PER_SLIDE_SEC = 2.4;
 /** Bounds for the per-slide hold when a target duration is requested. */
 const PER_SLIDE_MIN = 1.5;
-const PER_SLIDE_MAX = 8;
-const XFADE_SEC = 0.5;
-const MUSIC_FADE_IN_SEC = 1;
+const PER_SLIDE_MAX = 4;
+const XFADE_SEC = 0.28;
+/** Hard-cut series (urgency / price-drop) use a near-zero crossfade — a visual cut,
+ * kept inside the xfade graph so segment offsets/timing stay uniform. */
+const HARD_CUT_SEC = 0.04;
+const MUSIC_FADE_IN_SEC = 0.3;
 const MUSIC_FADE_OUT_SEC = 2;
 const RENDER_TIMEOUT_MS = 5 * 60_000;
+
+/** Rotated xfade transitions for slide junctions (dynamic pacing, not a flat fade). */
+export const XFADE_TRANSITIONS = ["slideleft", "smoothleft", "wiperight", "zoomin"] as const;
+/** Templates that get hard cuts (punchy scarcity/deal energy) instead of crossfades. */
+const HARD_CUT_TEMPLATES: ReadonlySet<SlideshowTemplate> = new Set([
+  SlideshowTemplate.URGENCY,
+  SlideshowTemplate.PRICE_DROP,
+]);
+/** Ken Burns zoom rate per frame and zoom bounds (shared by zoom-in/out variants). */
+const KB_ZOOM_INC = 0.0022;
+const KB_ZOOM_MAX = 1.5;
+const KB_ZOOM_MIN = 1.0;
+
+/** Rotate through XFADE_TRANSITIONS by index (shared by transitionsFor + the fallback). */
+function rotatedTransition(index: number): string {
+  return XFADE_TRANSITIONS[index % XFADE_TRANSITIONS.length];
+}
+
+/** Effective crossfade duration for a template: a hard cut for urgency/price-drop. */
+export function xfadeSecFor(template: SlideshowTemplate): number {
+  return HARD_CUT_TEMPLATES.has(template) ? HARD_CUT_SEC : XFADE_SEC;
+}
+
+/**
+ * Per-junction transition name for `count` segments (intro + slides + outro).
+ * Hard-cut templates get `fade` at the near-zero HARD_CUT_SEC (a clean cut);
+ * others rotate through XFADE_TRANSITIONS so no two adjacent joins look identical.
+ */
+export function transitionsFor(template: SlideshowTemplate, count: number): string[] {
+  const junctions = Math.max(0, count - 1);
+  if (HARD_CUT_TEMPLATES.has(template)) return Array.from({ length: junctions }, () => "fade");
+  return Array.from({ length: junctions }, (_, i) => rotatedTransition(i));
+}
+
+/**
+ * Ken Burns zoompan expression for segment `index`: alternates zoom-in / zoom-out
+ * and rotates the pan anchor through the four corners, so consecutive slides move
+ * differently instead of all zooming into the centre.
+ *
+ * The zoom is a PURE function of the output-frame counter `on` (0-indexed), not the
+ * `zoom` accumulator — so zoom-out starts at KB_ZOOM_MAX on frame 0 (no first-frame
+ * pop from the accumulator's 1.0 init), and both directions are deterministic.
+ */
+export function kenBurnsExpr(index: number): { z: string; x: string; y: string } {
+  const zoomIn = index % 2 === 0;
+  const z = zoomIn
+    ? `min(${KB_ZOOM_MIN}+${KB_ZOOM_INC}*on,${KB_ZOOM_MAX})`
+    : `max(${KB_ZOOM_MAX}-${KB_ZOOM_INC}*on,${KB_ZOOM_MIN})`;
+  // Pan anchors: 0=top-left, 1=top-right, 2=bottom-left, 3=bottom-right.
+  const corner = index % 4;
+  const left = corner === 0 || corner === 2;
+  const top = corner === 0 || corner === 1;
+  const x = left ? "0" : "iw-iw/zoom";
+  const y = top ? "0" : "ih-ih/zoom";
+  return { z, x, y };
+}
 
 /** Per-brand store identity for the cards (colors/font come from VIDEO_BRAND). */
 const BRAND_STORE_URL: Record<SlideshowBrand, string> = {
@@ -83,16 +149,16 @@ export function segmentCount(itemCount: number): number {
  * on the target (intro/outro and the xfade overlaps held constant), then clamped
  * to a watchable range. A target the clamp can't reach yields the nearest pacing.
  */
-export function perSlideSeconds(itemCount: number, targetDurationSec?: number): number {
+export function perSlideSeconds(itemCount: number, targetDurationSec?: number, xfadeSec: number = XFADE_SEC): number {
   if (!targetDurationSec || itemCount <= 0) return PER_SLIDE_SEC;
-  // total = INTRO + OUTRO + N*perSlide - (N+1)*XFADE  ⇒  solve for perSlide.
-  const perSlide = (targetDurationSec - INTRO_SEC - OUTRO_SEC + (itemCount + 1) * XFADE_SEC) / itemCount;
+  // total = INTRO + OUTRO + N*perSlide - (N+1)*xfade  ⇒  solve for perSlide.
+  const perSlide = (targetDurationSec - INTRO_SEC - OUTRO_SEC + (itemCount + 1) * xfadeSec) / itemCount;
   return Math.min(PER_SLIDE_MAX, Math.max(PER_SLIDE_MIN, perSlide));
 }
 
 /** Per-segment durations (seconds): [intro, ...slides, outro]. */
-export function segmentDurations(itemCount: number, targetDurationSec?: number): number[] {
-  const perSlide = perSlideSeconds(itemCount, targetDurationSec);
+export function segmentDurations(itemCount: number, targetDurationSec?: number, xfadeSec: number = XFADE_SEC): number[] {
+  const perSlide = perSlideSeconds(itemCount, targetDurationSec, xfadeSec);
   return [INTRO_SEC, ...Array.from({ length: itemCount }, () => perSlide), OUTRO_SEC];
 }
 
@@ -102,9 +168,9 @@ export function segmentDurations(itemCount: number, targetDurationSec?: number):
  * the ACTUAL runtime (after per-slide clamping), which may differ slightly from a
  * requested target.
  */
-export function estimateDurationSec(itemCount: number, targetDurationSec?: number): number {
-  const durs = segmentDurations(itemCount, targetDurationSec);
-  const total = durs.reduce((a, b) => a + b, 0) - (durs.length - 1) * XFADE_SEC;
+export function estimateDurationSec(itemCount: number, targetDurationSec?: number, xfadeSec: number = XFADE_SEC): number {
+  const durs = segmentDurations(itemCount, targetDurationSec, xfadeSec);
+  const total = durs.reduce((a, b) => a + b, 0) - (durs.length - 1) * xfadeSec;
   return Math.round(total * 100) / 100;
 }
 
@@ -178,6 +244,8 @@ export function buildManifest(config: SlideshowConfig, timestamp: number): Slide
     };
   });
 
+  // Dry-run preview only: shows the DEFAULT track. A real render rotates via
+  // pickMusicTrack(), so the shipped track may differ (unless musicUrl pins one).
   const music = config.musicUrl ?? getDefaultMusicTrack();
 
   return {
@@ -188,7 +256,7 @@ export function buildManifest(config: SlideshowConfig, timestamp: number): Slide
     language: config.language,
     title: config.title,
     music,
-    estimatedDurationSec: estimateDurationSec(config.items.length, config.targetDurationSec),
+    estimatedDurationSec: estimateDurationSec(config.items.length, config.targetDurationSec, xfadeSecFor(config.template)),
     wouldUploadTo: blobPath(config.brand, config.template, config.ratio, timestamp),
     dryRun: true,
   };
@@ -277,8 +345,9 @@ export function buildSlideOverlaySvg(
   item: SlideshowItem,
   dims: { width: number; height: number },
   locale: VideoLocale,
+  storeUrl: string = BRAND_STORE_URL.ameublo,
 ): string {
-  const { gold, offWhite } = VIDEO_BRAND.colors;
+  const { navy, gold, offWhite } = VIDEO_BRAND.colors;
   const font = VIDEO_BRAND.font.family;
 
   // Hero (lifestyle opener): big centered hook text on the image, no price/badge.
@@ -305,29 +374,47 @@ export function buildSlideOverlaySvg(
   const showBadge = shouldShowBadge(item.price, item.compare_at);
   const pct = discountPct(item.price, item.compare_at);
 
-  const parts: string[] = [`<rect x="80" y="120" width="${dims.width - 160}" height="6" fill="${gold}"/>`];
+  const priceY = titleTop + lines.length * lineGap + 44;
+  // Semi-transparent navy scrim behind the title + price block so the text stays
+  // legible over any product photo (mirrors the hero readability, which had none).
+  const scrimTop = 96;
+  const scrimBottom = priceY + (showBadge ? 190 : 40);
+  const parts: string[] = [
+    `<rect x="40" y="${scrimTop}" width="${dims.width - 80}" height="${scrimBottom - scrimTop}" rx="28" fill="${navy}" opacity="0.55"/>`,
+    `<rect x="80" y="120" width="${dims.width - 160}" height="6" fill="${gold}"/>`,
+  ];
+  // Title: navy stroke + drop shadow, same legibility treatment the hero already had.
   lines.forEach((ln, i) => {
     parts.push(
-      `<text x="80" y="${titleTop + i * lineGap}" font-family="${font},Arial,sans-serif" font-size="${titleFs}" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${offWhite}">${escapeXml(ln)}</text>`,
+      `<text x="80" y="${titleTop + i * lineGap}" font-family="${font},Arial,sans-serif" font-size="${titleFs}" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${offWhite}" stroke="${navy}" stroke-width="2" paint-order="stroke">${escapeXml(ln)}</text>`,
     );
   });
-  const priceY = titleTop + lines.length * lineGap + 44;
   parts.push(
-    `<text x="80" y="${priceY}" font-family="${font},Arial,sans-serif" font-size="88" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${gold}">${price}</text>`,
+    `<text x="80" y="${priceY}" font-family="${font},Arial,sans-serif" font-size="88" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${gold}" stroke="${navy}" stroke-width="2" paint-order="stroke">${price}</text>`,
   );
 
   if (showBadge && item.compare_at !== undefined) {
     const was = escapeXml(formatPrice(item.compare_at, locale));
     parts.push(
-      `<text x="80" y="${priceY + 70}" font-family="${font},Arial,sans-serif" font-size="44" fill="${offWhite}" text-decoration="line-through" opacity="0.75">${was}</text>`,
+      `<text x="80" y="${priceY + 70}" font-family="${font},Arial,sans-serif" font-size="44" fill="${offWhite}" text-decoration="line-through" opacity="0.85">${was}</text>`,
     );
     if (pct !== undefined) {
       parts.push(
         `<rect x="80" y="${priceY + 100}" width="200" height="72" rx="36" fill="${gold}"/>`,
-        `<text x="180" y="${priceY + 148}" font-family="${font},Arial,sans-serif" font-size="40" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${VIDEO_BRAND.colors.navy}" text-anchor="middle">-${pct}%</text>`,
+        `<text x="180" y="${priceY + 148}" font-family="${font},Arial,sans-serif" font-size="40" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${navy}" text-anchor="middle">-${pct}%</text>`,
       );
     }
   }
+
+  // Persistent, discreet CTA pill bottom-centre: the store URL on a navy pill so
+  // every product slide carries the destination even mid-scroll.
+  const cx = dims.width / 2;
+  const pillW = 460;
+  const pillY = dims.height - 150;
+  parts.push(
+    `<rect x="${cx - pillW / 2}" y="${pillY}" width="${pillW}" height="72" rx="36" fill="${navy}" opacity="0.72"/>`,
+    `<text x="${cx}" y="${pillY + 48}" font-family="${font},Arial,sans-serif" font-size="36" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${gold}" text-anchor="middle" letter-spacing="1">${escapeXml(storeUrl)}</text>`,
+  );
 
   return `<svg width="${dims.width}" height="${dims.height}" xmlns="http://www.w3.org/2000/svg">${parts.join("")}</svg>`;
 }
@@ -340,8 +427,9 @@ export function buildSlideOverlaySvg(
 export function buildIntroCardSvg(
   config: SlideshowConfig,
   dims: { width: number; height: number },
+  hasBgImage: boolean = false,
 ): string {
-  const { gold, offWhite } = VIDEO_BRAND.colors;
+  const { navy, gold, offWhite } = VIDEO_BRAND.colors;
   const font = VIDEO_BRAND.font.family;
   const hookLines = wrapLines(config.title ?? BRAND_STORE_URL[config.brand], 18, 3);
   const fs = introFontSize(hookLines);
@@ -349,13 +437,19 @@ export function buildIntroCardSvg(
   const cx = dims.width / 2;
   const cy = dims.height / 2;
   const top = cy - 30 - ((hookLines.length - 1) * gap) / 2;
+  // Over a product photo, add a full-frame navy scrim + a text stroke so the hook
+  // reads; over the plain navy card neither is needed.
+  const scrim = hasBgImage
+    ? `<rect x="0" y="0" width="${dims.width}" height="${dims.height}" fill="${navy}" opacity="0.5"/>`
+    : "";
+  const strokeAttr = hasBgImage ? ` stroke="${navy}" stroke-width="3" paint-order="stroke"` : "";
   const lines = hookLines.map(
     (ln, i) =>
-      `<text x="${cx}" y="${top + i * gap}" font-family="${font},Arial,sans-serif" font-size="${fs}" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${offWhite}" text-anchor="middle">${escapeXml(ln)}</text>`,
+      `<text x="${cx}" y="${top + i * gap}" font-family="${font},Arial,sans-serif" font-size="${fs}" font-weight="${VIDEO_BRAND.font.titleWeight}" fill="${offWhite}" text-anchor="middle"${strokeAttr}>${escapeXml(ln)}</text>`,
   );
   const ruleY = top + hookLines.length * gap;
   return `<svg width="${dims.width}" height="${dims.height}" xmlns="http://www.w3.org/2000/svg">
-    ${lines.join("")}
+    ${scrim}${lines.join("")}
     <rect x="${cx - 120}" y="${ruleY}" width="240" height="8" fill="${gold}"/>
   </svg>`;
 }
@@ -378,11 +472,23 @@ export function buildOutroCardSvg(
 }
 
 /**
+ * Intro-card background: the first product photo (cdn.shopify) for non-lifestyle
+ * series, or null when the opener is a hero (lifestyle keeps its navy card) or the
+ * first item has no usable Shopify photo. Pure — unit-testable.
+ */
+export function introBackgroundUrl(items: SlideshowItem[]): string | null {
+  const first = items[0];
+  return first && !first.hero && isShopifyCdnUrl(first.image_url) ? first.image_url : null;
+}
+
+/**
  * Build the xfade-crossfade `-filter_complex` graph over `count` visual
- * segments (intro + slides + outro), each a still looped to its duration and
- * Ken-Burns zoomed, plus optional faded music. Pure — unit-testable.
+ * segments (intro + slides + outro). Each segment has a photo layer (Ken-Burns
+ * zoomed) and a static transparent text layer overlaid on top, plus optional
+ * faded music. Pure — unit-testable.
  *
- * Inputs are ordered [0..count-1] segments, then music (if any).
+ * Inputs are ordered [0..count-1] photo layers, then [count..2*count-1] text
+ * layers, then music (if any).
  */
 export function buildXfadeFilterComplex(opts: {
   count: number;
@@ -390,34 +496,46 @@ export function buildXfadeFilterComplex(opts: {
   dims: { width: number; height: number };
   fps?: number;
   xfadeSec?: number;
+  /** Per-junction transition names (length count-1). Defaults to the rotation. */
+  transitions?: string[];
   hasMusic: boolean;
   musicVolumeDb: number;
   totalSec: number;
+  musicFadeInSec?: number;
 }): { filterComplex: string; videoLabel: string; audioLabel: string | null } {
   const fps = opts.fps ?? FPS;
   const x = opts.xfadeSec ?? XFADE_SEC;
+  const musicFadeIn = opts.musicFadeInSec ?? MUSIC_FADE_IN_SEC;
   const { width: w, height: h } = opts.dims;
+  const transAt = (j: number): string => opts.transitions?.[j] ?? rotatedTransition(j);
   const parts: string[] = [];
 
-  // Each segment: scale/pad to frame, Ken Burns zoom, normalize sar/fps/format.
+  // Two inputs per segment: the product/photo layer [i] and a transparent text
+  // layer [count+i] (scrim + title + price + CTA). Ken Burns (alternating zoom
+  // in/out + rotating pan anchor) animates ONLY the photo; the text is overlaid
+  // static on top so titles/prices never scale, pan, or crop off-frame.
   for (let i = 0; i < opts.count; i++) {
     const frames = Math.round(opts.durations[i] * fps);
+    const kb = kenBurnsExpr(i);
+    const textIdx = opts.count + i;
     parts.push(
       `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,` +
         `pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=0x1A2340,` +
-        `zoompan=z='min(zoom+0.0012,1.4)':d=${frames}:s=${w}x${h}:fps=${fps}` +
-        `:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)',setsar=1,format=yuv420p[v${i}]`,
+        `zoompan=z='${kb.z}':d=${frames}:s=${w}x${h}:fps=${fps}` +
+        `:x='${kb.x}':y='${kb.y}',setsar=1[p${i}]`,
     );
+    parts.push(`[${textIdx}:v]scale=${w}:${h},setsar=1,format=rgba[t${i}]`);
+    parts.push(`[p${i}][t${i}]overlay=0:0:format=auto,format=yuv420p[v${i}]`);
   }
 
-  // Chain xfades. offset_i = sum(dur[0..i]) - (i+1)*x.
+  // Chain xfades with rotating transitions. offset_i = sum(dur[0..i]) - (i+1)*x.
   let prev = "v0";
   let cumulative = 0;
   for (let i = 1; i < opts.count; i++) {
     cumulative += opts.durations[i - 1];
     const offset = Math.max(0, Math.round((cumulative - i * x) * 1000) / 1000);
     const out = i === opts.count - 1 ? "vout" : `xf${i}`;
-    parts.push(`[${prev}][v${i}]xfade=transition=fade:duration=${x}:offset=${offset}[${out}]`);
+    parts.push(`[${prev}][v${i}]xfade=transition=${transAt(i - 1)}:duration=${x}:offset=${offset}[${out}]`);
     prev = out;
   }
   // Single-segment edge case: no xfade, expose v0 directly.
@@ -425,11 +543,11 @@ export function buildXfadeFilterComplex(opts: {
 
   let audioLabel: string | null = null;
   if (opts.hasMusic) {
-    const musicIdx = opts.count; // music input follows the segments
+    const musicIdx = 2 * opts.count; // music input follows the photo + text layers
     const fadeOutStart = Math.max(0, opts.totalSec - MUSIC_FADE_OUT_SEC);
     parts.push(
       `[${musicIdx}:a]volume=${opts.musicVolumeDb}dB,` +
-        `afade=t=in:st=0:d=${MUSIC_FADE_IN_SEC},` +
+        `afade=t=in:st=0:d=${musicFadeIn},` +
         `afade=t=out:st=${fadeOutStart}:d=${MUSIC_FADE_OUT_SEC}[aout]`,
     );
     audioLabel = "aout";
@@ -473,15 +591,38 @@ function runFfmpeg(binary: string, args: string[]): Promise<void> {
   });
 }
 
-/** Render an SVG-overlaid slide PNG from a downloaded product image. */
-async function renderSlidePng(
+type Dims = { width: number; height: number };
+/** A rendered segment = a photo layer (Ken-Burns zoomed) + a static text layer. */
+type SegmentLayers = { photoPath: string; textPath: string };
+
+/** Write the transparent text-overlay layer (scrim + title/price/CTA) as a PNG. */
+async function writeTextLayer(svg: string, outPath: string): Promise<void> {
+  const sharpFn = (await import("sharp")).default;
+  await sharpFn(Buffer.from(svg)).png().toFile(outPath);
+}
+
+/** Write a full-frame solid-navy PNG (photo layer for cards with no photo). */
+async function writeNavyLayer(dims: Dims, outPath: string): Promise<void> {
+  const sharpFn = (await import("sharp")).default;
+  const navy = hexToRgb(VIDEO_BRAND.colors.navy);
+  await sharpFn({ create: { width: dims.width, height: dims.height, channels: 3, background: navy } })
+    .png()
+    .toFile(outPath);
+}
+
+/**
+ * Render a product slide's two layers: the photo (contained/cover on navy, no
+ * text — this is what Ken Burns zooms) and the transparent text overlay (scrim +
+ * title + price + CTA, held static on top so it never scales or pans off-frame).
+ */
+async function renderSlideLayers(
   item: SlideshowItem,
-  dims: { width: number; height: number },
+  dims: Dims,
   locale: VideoLocale,
-  outPath: string,
+  layers: SegmentLayers,
+  storeUrl: string,
 ): Promise<void> {
-  const sharpModule = await import("sharp");
-  const sharpFn = sharpModule.default;
+  const sharpFn = (await import("sharp")).default;
   const navy = hexToRgb(VIDEO_BRAND.colors.navy);
 
   let base: import("sharp").Sharp;
@@ -502,19 +643,41 @@ async function renderSlidePng(
   } catch {
     base = sharpFn({ create: { width: dims.width, height: dims.height, channels: 3, background: navy } });
   }
-  const overlay = Buffer.from(buildSlideOverlaySvg(item, dims, locale));
-  await base.composite([{ input: overlay, top: 0, left: 0 }]).png().toFile(outPath);
+  await base.png().toFile(layers.photoPath);
+  await writeTextLayer(buildSlideOverlaySvg(item, dims, locale, storeUrl), layers.textPath);
 }
 
-/** Render a full-frame card PNG (navy background + the given SVG overlay). */
-async function renderCardPng(svg: string, dims: { width: number; height: number }, outPath: string): Promise<void> {
-  const sharpModule = await import("sharp");
-  const sharpFn = sharpModule.default;
-  const navy = hexToRgb(VIDEO_BRAND.colors.navy);
-  await sharpFn({ create: { width: dims.width, height: dims.height, channels: 3, background: navy } })
-    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-    .png()
-    .toFile(outPath);
+/** Render an outro (or any navy) card as photo (navy) + text overlay layers. */
+async function renderCardLayers(svg: string, dims: Dims, layers: SegmentLayers): Promise<void> {
+  await writeNavyLayer(dims, layers.photoPath);
+  await writeTextLayer(svg, layers.textPath);
+}
+
+/**
+ * Render the intro card's two layers. For non-lifestyle series (the first item is
+ * a product, not a hero) the first product photo becomes the photo layer (cover)
+ * under a navy scrim + hook; otherwise the photo layer is plain navy. The hook
+ * text is always the static overlay. Falls back to navy on any download failure.
+ */
+async function renderIntroLayers(
+  config: SlideshowConfig,
+  dims: Dims,
+  bgImageUrl: string | null,
+  layers: SegmentLayers,
+): Promise<void> {
+  const sharpFn = (await import("sharp")).default;
+  let hasBg = false;
+  if (bgImageUrl) {
+    try {
+      const buf = await downloadImage(bgImageUrl);
+      await sharpFn(buf).resize(dims.width, dims.height, { fit: "cover" }).png().toFile(layers.photoPath);
+      hasBg = true;
+    } catch {
+      // Unreachable photo → fall back to the plain navy intro photo layer.
+    }
+  }
+  if (!hasBg) await writeNavyLayer(dims, layers.photoPath);
+  await writeTextLayer(buildIntroCardSvg(config, dims, hasBg), layers.textPath);
 }
 
 /**
@@ -546,38 +709,55 @@ export async function renderSlideshow(config: SlideshowConfig): Promise<Slidesho
 
   const dims = ratioDimensions(config.ratio);
   const locale = localeOf(config);
-  const durations = segmentDurations(config.items.length, config.targetDurationSec);
-  const totalSec = estimateDurationSec(config.items.length, config.targetDurationSec);
+  const storeUrl = BRAND_STORE_URL[config.brand];
+  const effXfade = xfadeSecFor(config.template);
+  const durations = segmentDurations(config.items.length, config.targetDurationSec, effXfade);
+  const totalSec = estimateDurationSec(config.items.length, config.targetDurationSec, effXfade);
   const workDir = getWorkDir();
 
   try {
-    // 1. Intro card, slides, outro card (in segment order).
-    const introPath = path.join(workDir, "intro.png");
-    const outroPath = path.join(workDir, "outro.png");
-    await renderCardPng(buildIntroCardSvg(config, dims), dims, introPath);
-    const slidePaths: string[] = [];
+    // 1. Each segment renders two layers: a photo (Ken-Burns zoomed) and a static
+    // text overlay. Intro: non-lifestyle series (first item is a product, not a
+    // hero) use the first product photo as the intro photo layer (cover + navy
+    // scrim) instead of plain navy. Outro: navy card.
+    const layerFor = (name: string): SegmentLayers => ({
+      photoPath: path.join(workDir, `${name}.photo.png`),
+      textPath: path.join(workDir, `${name}.text.png`),
+    });
+    const introBgUrl = introBackgroundUrl(config.items);
+    const segmentLayers: SegmentLayers[] = [];
+    const intro = layerFor("intro");
+    await renderIntroLayers(config, dims, introBgUrl, intro);
+    segmentLayers.push(intro);
     for (let i = 0; i < config.items.length; i++) {
-      const p = path.join(workDir, `slide-${i}.png`);
-      await renderSlidePng(config.items[i], dims, locale, p);
-      slidePaths.push(p);
+      const slide = layerFor(`slide-${i}`);
+      await renderSlideLayers(config.items[i], dims, locale, slide, storeUrl);
+      segmentLayers.push(slide);
     }
-    await renderCardPng(buildOutroCardSvg(config, dims), dims, outroPath);
-    const segmentPaths = [introPath, ...slidePaths, outroPath];
+    const outro = layerFor("outro");
+    await renderCardLayers(buildOutroCardSvg(config, dims), dims, outro);
+    segmentLayers.push(outro);
 
-    // 2. Music (config override → bundled royalty-free default → silent).
-    const musicPath = config.musicUrl ?? getDefaultMusicTrack();
+    // 2. Music: config override → a rotated bundled royalty-free track → silent.
+    const musicPath = config.musicUrl ?? pickMusicTrack();
 
-    // 3. ffmpeg arg vector: each segment looped to its duration, then xfade.
+    // 3. ffmpeg arg vector: photo layers, then text layers (each looped to its
+    // segment duration), then music — the input order buildXfadeFilterComplex expects.
     const args: string[] = [];
-    segmentPaths.forEach((p, i) => {
-      args.push("-loop", "1", "-t", String(durations[i]), "-i", p);
+    segmentLayers.forEach((s, i) => {
+      args.push("-loop", "1", "-t", String(durations[i]), "-i", s.photoPath);
+    });
+    segmentLayers.forEach((s, i) => {
+      args.push("-loop", "1", "-t", String(durations[i]), "-i", s.textPath);
     });
     if (musicPath) args.push("-i", musicPath);
 
     const { filterComplex, videoLabel, audioLabel } = buildXfadeFilterComplex({
-      count: segmentPaths.length,
+      count: segmentLayers.length,
       durations,
       dims,
+      xfadeSec: effXfade,
+      transitions: transitionsFor(config.template, segmentLayers.length),
       hasMusic: !!musicPath,
       musicVolumeDb: VIDEO_BRAND.music.volume,
       totalSec,

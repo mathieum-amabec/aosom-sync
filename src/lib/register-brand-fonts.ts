@@ -26,6 +26,11 @@ export function bundledFontsDir(): string {
  * Build the fontconfig document that adds our bundled fonts dir to the search path.
  * Keeps the system fonts via an ignore-missing include (so an Arial/sans-serif
  * fallback still resolves where a system config exists).
+ *
+ * Emoji: the bundled `NotoEmoji.ttf` (monochrome — librsvg does NOT render COLR/CBDT
+ * color-emoji glyphs, only outline glyphs) is appended as a weak fallback to
+ * `DM Sans` and `sans-serif`, so an emoji codepoint in overlay text (e.g. the CTA
+ * "Lien en bio 👆") resolves to a glyph instead of tofu.
  */
 export function buildFontconfigXml(fontsDir: string, cacheDir: string): string {
   return `<?xml version="1.0"?>
@@ -34,6 +39,14 @@ export function buildFontconfigXml(fontsDir: string, cacheDir: string): string {
   <dir>${fontsDir}</dir>
   <cachedir>${cacheDir}</cachedir>
   <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+  <match target="pattern">
+    <test name="family"><string>DM Sans</string></test>
+    <edit name="family" mode="append" binding="weak"><string>Noto Emoji</string></edit>
+  </match>
+  <match target="pattern">
+    <test name="family"><string>sans-serif</string></test>
+    <edit name="family" mode="append" binding="weak"><string>Noto Emoji</string></edit>
+  </match>
 </fontconfig>`;
 }
 
