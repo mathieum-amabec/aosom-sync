@@ -20,6 +20,7 @@ import { type FacebookBrand } from "./facebook-client";
 import { publishSocialPayload, type SocialPayload } from "./social-publisher";
 import { createBlogArticle } from "./shopify-blog";
 import { getAnthropicClient } from "./content-generator";
+import { cleanSocialCaption } from "./strip-markdown";
 import { CLAUDE } from "./config";
 import {
   getNextPending,
@@ -186,7 +187,10 @@ export async function generateReelCaption(
     });
     const block = message.content[0];
     if (!block || block.type !== "text") return null;
-    const text = block.text.trim().replace(/^["']+|["']+$/g, "").trim();
+    // Same cleanup as the draft paths: strip surrounding quotes, Markdown, and a
+    // leading platform-label line ("Post Facebook 🌿") — this reel caption is
+    // published unreviewed, so it must not ship a label prefix.
+    const text = cleanSocialCaption(block.text.trim().replace(/^["']+|["']+$/g, ""));
     return text || null;
   } catch (err) {
     console.warn(

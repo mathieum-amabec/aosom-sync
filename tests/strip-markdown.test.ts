@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripMarkdown, stripLeadingPlatformLabel } from "@/lib/strip-markdown";
+import { stripMarkdown, stripLeadingPlatformLabel, cleanSocialCaption } from "@/lib/strip-markdown";
 
 describe("stripMarkdown", () => {
   it("strips **bold** and __bold__ to inner text", () => {
@@ -75,6 +75,9 @@ describe("stripLeadingPlatformLabel", () => {
     expect(stripLeadingPlatformLabel("Post IG\nContenu")).toBe("Contenu");
     expect(stripLeadingPlatformLabel("Publication Facebook :\nContenu")).toBe("Contenu");
     expect(stripLeadingPlatformLabel("Facebook Post: something\nContenu")).toBe("Contenu");
+    // Short-form "<Platform> Post" labels are stripped on both branches.
+    expect(stripLeadingPlatformLabel("FB Post\nContenu")).toBe("Contenu");
+    expect(stripLeadingPlatformLabel("IG Post: été\nContenu")).toBe("Contenu");
   });
 
   it("eats leading blank lines before the label", () => {
@@ -88,5 +91,37 @@ describe("stripLeadingPlatformLabel", () => {
     expect(stripLeadingPlatformLabel("Partage sur Facebook ce que tu aimes 👇")).toBe(
       "Partage sur Facebook ce que tu aimes 👇",
     );
+  });
+});
+
+describe("cleanSocialCaption", () => {
+  it("strips a markdown-titled platform label (# / **) — order matters", () => {
+    // The label is wrapped in Markdown, so it survives stripLeadingPlatformLabel
+    // alone; cleanSocialCaption strips Markdown FIRST, then the bare label line.
+    expect(cleanSocialCaption("# Post Facebook 🌿\n\nTa terrasse mérite mieux 👇")).toBe(
+      "Ta terrasse mérite mieux 👇",
+    );
+    expect(cleanSocialCaption("**Post Facebook 🌿**\n\nTa terrasse mérite mieux 👇")).toBe(
+      "Ta terrasse mérite mieux 👇",
+    );
+  });
+
+  it("strips both Markdown and a plain leading label together", () => {
+    expect(cleanSocialCaption("Post Instagram ☀️\n\n**Gros** rabais *fou* 👇")).toBe(
+      "Gros rabais fou 👇",
+    );
+  });
+
+  it("never returns empty for a degenerate label-only generation", () => {
+    // If the whole caption is just the label, fall back to the markdown-clean
+    // text (the bare label) rather than persisting/publishing an empty string.
+    const out = cleanSocialCaption("# Post Facebook 🌿");
+    expect(out.length).toBeGreaterThan(0);
+    expect(out).toBe("Post Facebook 🌿");
+  });
+
+  it("leaves a clean caption unchanged", () => {
+    const clean = "Un meuble qui dure 15 ans. 👇\n\n#AmeubloDirect";
+    expect(cleanSocialCaption(clean)).toBe(clean);
   });
 });

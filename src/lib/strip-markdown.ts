@@ -42,7 +42,24 @@ export function stripMarkdown(text: string): string {
  */
 export function stripLeadingPlatformLabel(text: string): string {
   return text.replace(
-    /^\s*(?:(?:post|publication)\s+(?:facebook|instagram|fb|ig)|(?:facebook|instagram)\s+post)\b[^\n]*(?:\r?\n+|$)/i,
+    /^\s*(?:(?:post|publication)\s+(?:facebook|instagram|fb|ig)|(?:facebook|instagram|fb|ig)\s+post)\b[^\n]*(?:\r?\n+|$)/i,
     "",
   );
+}
+
+/**
+ * Full cleanup for a social caption before it is stored/published. Order matters:
+ * strip Markdown FIRST (so a markdown-titled label like `# Post Facebook 🌿` or
+ * `**Post Facebook 🌿**` becomes a bare label line), THEN strip the leading
+ * platform label. Never returns empty — if the label strip would consume the
+ * whole caption (a degenerate label-only generation), fall back to the
+ * markdown-clean text so we never persist/publish an empty caption.
+ *
+ * This is the single entry point every social-caption generator should use
+ * (product posts, content templates, and publish-time Reel captions) so a new
+ * path can't silently skip the cleanup.
+ */
+export function cleanSocialCaption(raw: string): string {
+  const md = stripMarkdown(raw);
+  return stripLeadingPlatformLabel(md) || md;
 }

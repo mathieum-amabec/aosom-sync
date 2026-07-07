@@ -12,7 +12,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicClient } from "@/lib/content-generator";
-import { stripMarkdown, stripLeadingPlatformLabel } from "@/lib/strip-markdown";
+import { cleanSocialCaption } from "@/lib/strip-markdown";
 import { env, CLAUDE, SYNC, CHANNELS, type ChannelKey } from "@/lib/config";
 import {
   getAllSettings,
@@ -98,11 +98,9 @@ async function generatePostText(prompt: string): Promise<string> {
     { signal: AbortSignal.timeout(ANTHROPIC_CALL_TIMEOUT_MS) },
   );
   log("anthropic call completed", { duration_ms: Date.now() - t0 });
-  // Drop any leading platform-label line ("Post Facebook 🌿") the model prepends,
-  // then strip Markdown — Facebook renders **, #, --- literally.
-  return message.content[0]?.type === "text"
-    ? stripMarkdown(stripLeadingPlatformLabel(message.content[0].text))
-    : "";
+  // Clean the caption: strip Markdown (FB renders **, #, --- literally) and any
+  // leading platform-label line ("Post Facebook 🌿") the model prepends.
+  return message.content[0]?.type === "text" ? cleanSocialCaption(message.content[0].text) : "";
 }
 
 /** Generate FR and EN captions in parallel, with one retry on Anthropic timeout. */

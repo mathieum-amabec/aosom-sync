@@ -4,7 +4,7 @@ import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { getContentTemplateBySlug, createFacebookDraft, getAnyProductSku, selectCompatibleHooks, getRecentlyUsedHookIds, recordHookUsage } from "@/lib/database";
 import { mapProductTypeToScope } from "@/lib/hook-selector";
 import { getAnthropicClient } from "@/lib/content-generator";
-import { stripMarkdown, stripLeadingPlatformLabel } from "@/lib/strip-markdown";
+import { cleanSocialCaption } from "@/lib/strip-markdown";
 import { searchImages, triggerDownload } from "@/lib/unsplash";
 import { CLAUDE } from "@/lib/config";
 
@@ -119,13 +119,13 @@ function interpolateTemplate(template: string, vars: Record<string, string>): st
  */
 export function stripScaffold(text: string): string {
   // 1) Remove conversational preamble ("Here's a Facebook post:"), then
-  // 2) drop a leading platform-label line ("Post Facebook 🌿"), then
-  // 3) strip any Markdown (bold, # headers, --- rules, trailing whitespace).
+  // 2) cleanSocialCaption: strip Markdown, then a leading platform-label line
+  //    ("Post Facebook 🌿" — including its markdown-titled `# …` / `**…**` form).
   const withoutPreamble = text
     .replace(/^(here'?s?\s+a\s+facebook\s+post[^:\n]*:\s*\n?)/i, "")
     .replace(/^(here\s+is\s+a[^:\n]*:\s*\n?)/i, "")
     .replace(/^(sure[,!]?\s+here'?s?[^:\n]*:\s*\n?)/i, "");
-  return stripMarkdown(stripLeadingPlatformLabel(withoutPreamble));
+  return cleanSocialCaption(withoutPreamble);
 }
 
 async function generatePostText(prompt: string, isEn: boolean): Promise<string> {
