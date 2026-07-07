@@ -84,6 +84,18 @@ describe("stripLeadingPlatformLabel", () => {
     expect(stripLeadingPlatformLabel("\n\nPost Facebook 🌿\nContenu")).toBe("Contenu");
   });
 
+  it("intentionally strips ANY first line opening with '<platform> post' (aggressive by design)", () => {
+    // Boundary pin: the second alternation branch removes a first line that
+    // opens with "<platform> post ...", including prose that happens to start
+    // that way. This is a deliberate tradeoff — Claude's real label leak is
+    // "Post Facebook 🌿" / "Facebook Post:", store captions never open with
+    // "Instagram post ...", and only the FIRST line is dropped. Documenting it
+    // here so a future reader knows the over-strip is intended, not a bug.
+    expect(
+      stripLeadingPlatformLabel("Instagram post reach dropped 40%\nVoici pourquoi 👇"),
+    ).toBe("Voici pourquoi 👇");
+  });
+
   it("leaves a real marketing hook untouched (no label)", () => {
     const hook = "☀️ Ta terrasse de rêve t'attend...\n\nDécouvre la collection 👇";
     expect(stripLeadingPlatformLabel(hook)).toBe(hook);
