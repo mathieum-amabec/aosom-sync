@@ -60,7 +60,7 @@ describe("slideshow duration", () => {
 
 describe("locale formatting", () => {
   it("formats price per locale (CA conventions)", () => {
-    expect(formatPrice(249.9, "fr")).toBe("249.90 $");
+    expect(formatPrice(249.9, "fr")).toBe("249,90 $"); // Quebec convention: comma decimal separator
     expect(formatPrice(249.9, "en")).toBe("$249.90");
   });
 
@@ -90,7 +90,7 @@ describe("SVG overlays", () => {
   it("product overlay embeds title, localized price and CTA, and brand colors", () => {
     const svg = buildProductOverlaySvg(PRODUCT, "fr");
     expect(svg).toContain("Canapé sectionnel réversible");
-    expect(svg).toContain("499.99 $");
+    expect(svg).toContain("499,99 $"); // Quebec convention: comma decimal separator
     expect(svg).toContain("Lien en bio");
     expect(svg).toContain(VIDEO_BRAND.colors.gold);
     expect(svg).toMatch(new RegExp(`width="${VIDEO_BRAND.format.width}"`));

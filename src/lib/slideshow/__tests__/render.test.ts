@@ -190,7 +190,7 @@ describe("title wrap + overlays (quality v2)", () => {
       "fr",
     );
     expect(svg).not.toContain("…");
-    expect(svg).toContain("99.00 $");
+    expect(svg).toContain("99,00 $"); // Quebec convention: comma decimal separator
   });
 
   it("a hero slide renders centered text with no price", () => {
