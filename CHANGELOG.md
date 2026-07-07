@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.1] - 2026-07-07
+
+### Added — sticky Add-To-Cart bar on product pages (draft theme, not published)
+New `shopify-theme/snippets/sticky-atc.liquid` rendered from `sections/main-product.liquid`.
+A self-contained snippet (markup + scoped `<style>` + vanilla-JS `<script>`, no new asset
+files) that shows a bottom-fixed ATC bar when the main "Ajouter au panier" button scrolls out
+of the viewport (`IntersectionObserver`), and hides it when the button returns.
+- **Content**: product thumbnail + shortened title (ellipsis-truncated) + price + gold ATC
+  button. Title mirrors `lc_product_title` (locale-aware: EN metafield on `/en`, else FR).
+  Price mirrors `#price-{section.id}` and the button label + disabled state mirror the main
+  submit button via `MutationObserver`, so both stay variant-aware and bilingual (FR/EN) with
+  no hardcoded strings.
+- **Action**: the sticky button clicks the real `#ProductSubmitButton-{section.id}`, reusing
+  the `product-form` flow — respects the selected variant and opens the cart drawer. Auto-hides
+  while the cart drawer is open.
+- **Design**: navy `#1A2340` bar, offWhite `#FAFAF8` text, gold `#D4A853` button, slide-up
+  animation; responsive ≤749px; iPhone safe-area inset; respects `prefers-reduced-motion`.
+- **A11y**: hidden state uses `visibility:hidden` (with transition delay) so the button leaves
+  the tab order when the bar is off-screen, matching `aria-hidden`. Idempotency guard prevents
+  double-binding observers.
+- Verified live on draft theme 160749813865 via Playwright: desktop + mobile (390×844), FR +
+  EN, all states + cart-drawer open. Draft only — live theme not touched, theme not published.
+
 ## [0.5.54.0] - 2026-07-07
 
 ### Changed — slideshow render engine quality upgrade (Moteur A, `src/lib/slideshow/render.ts`)

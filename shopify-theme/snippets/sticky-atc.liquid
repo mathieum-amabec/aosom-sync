@@ -1,0 +1,252 @@
+{% comment %}
+  Renders a sticky Add-To-Cart bar on the product page.
+
+  Appears when the main "Ajouter au panier" button leaves the viewport
+  (IntersectionObserver) and hides when it returns. The sticky button clicks
+  the main submit button, so it reuses the product-form flow — respects the
+  selected variant and opens the cart drawer. Price + button label + disabled
+  state are mirrored from the main product-info elements (variant-aware,
+  bilingual FR/EN with no locale conditionals).
+
+  Accepts:
+  - product: {Object} product object
+  - section_id: {String} the main-product section id
+  - product_title: {String} locale-aware product title (lc_product_title)
+
+  Usage:
+  {%- render 'sticky-atc', product: product, section_id: section.id, product_title: lc_product_title -%}
+{% endcomment %}
+{%- if product != blank -%}
+  <sticky-atc class="sticky-atc" data-section-id="{{ section_id }}" aria-hidden="true">
+    <div class="sticky-atc__inner page-width">
+      {%- if product.featured_image != blank -%}
+        <img
+          class="sticky-atc__image"
+          src="{{ product.featured_image | image_url: width: 160 }}"
+          alt="{{ product.title | escape }}"
+          width="56"
+          height="56"
+          loading="lazy"
+        >
+      {%- endif -%}
+      <div class="sticky-atc__info">
+        <span class="sticky-atc__title">{{ product_title | default: product.title | escape }}</span>
+        <span class="sticky-atc__price" id="StickyAtcPrice-{{ section_id }}">
+          {%- render 'price', product: product, use_variant: true, show_compare_at_price: true -%}
+        </span>
+      </div>
+      <button
+        type="button"
+        class="sticky-atc__button"
+        data-sticky-atc-add
+        {% unless product.selected_or_first_available_variant.available %}disabled{% endunless %}
+      >
+        <span class="sticky-atc__button-label">
+          {%- if product.selected_or_first_available_variant.available -%}
+            {{ 'products.product.add_to_cart' | t }}
+          {%- else -%}
+            {{ 'products.product.sold_out' | t }}
+          {%- endif -%}
+        </span>
+      </button>
+    </div>
+  </sticky-atc>
+
+  <style>
+    .sticky-atc {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 4;
+      background: #1A2340;
+      color: #FAFAF8;
+      box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.18);
+      transform: translateY(110%);
+      visibility: hidden;
+      transition: transform 0.32s cubic-bezier(0.22, 0.61, 0.36, 1), visibility 0s linear 0.32s;
+      will-change: transform;
+    }
+    .sticky-atc.is-visible {
+      transform: translateY(0);
+      visibility: visible;
+      transition: transform 0.32s cubic-bezier(0.22, 0.61, 0.36, 1);
+    }
+    .sticky-atc__inner {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding-top: 0.7rem;
+      padding-bottom: calc(0.7rem + env(safe-area-inset-bottom, 0px));
+    }
+    .sticky-atc__image {
+      width: 56px;
+      height: 56px;
+      object-fit: cover;
+      border-radius: 8px;
+      flex: 0 0 auto;
+      background: #fafaf8;
+    }
+    .sticky-atc__info {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1 1 auto;
+      gap: 0.15rem;
+    }
+    .sticky-atc__title {
+      font-weight: 600;
+      font-size: 1.4rem;
+      line-height: 1.25;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #fafaf8;
+    }
+    .sticky-atc__price {
+      font-size: 1.4rem;
+      color: #fafaf8;
+    }
+    .sticky-atc__price .price,
+    .sticky-atc__price .price__container,
+    .sticky-atc__price .price-item {
+      color: #fafaf8;
+      font-size: 1.4rem;
+    }
+    .sticky-atc__price .price__regular,
+    .sticky-atc__price .price__sale {
+      margin: 0;
+    }
+    .sticky-atc__price .price__badges,
+    .sticky-atc__price .visually-hidden,
+    .sticky-atc__price .price__availability {
+      display: none;
+    }
+    .sticky-atc__price .price--on-sale .price-item--regular {
+      font-size: 1.15rem;
+    }
+    .sticky-atc__button {
+      flex: 0 0 auto;
+      background: #d4a853;
+      color: #1a2340;
+      border: 0;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 1.4rem;
+      padding: 1.1rem 1.8rem;
+      cursor: pointer;
+      transition: background 0.2s ease, opacity 0.2s ease;
+      white-space: nowrap;
+    }
+    .sticky-atc__button:hover {
+      background: #c39a45;
+    }
+    .sticky-atc__button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    @media screen and (max-width: 749px) {
+      .sticky-atc__inner {
+        gap: 0.7rem;
+        padding-top: 0.55rem;
+        padding-bottom: calc(0.55rem + env(safe-area-inset-bottom, 0px));
+      }
+      .sticky-atc__image {
+        width: 46px;
+        height: 46px;
+      }
+      .sticky-atc__title {
+        font-size: 1.25rem;
+      }
+      .sticky-atc__price,
+      .sticky-atc__price .price {
+        font-size: 1.25rem;
+      }
+      .sticky-atc__button {
+        padding: 1rem 1.3rem;
+        font-size: 1.3rem;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .sticky-atc {
+        transition: none;
+      }
+    }
+  </style>
+
+  <script>
+    (function () {
+      var section = {{ section_id | json }};
+      var bar = document.querySelector('sticky-atc[data-section-id="' + section + '"]');
+      if (!bar || bar.dataset.bound) return;
+      bar.dataset.bound = '1';
+      var mainBtn = document.getElementById('ProductSubmitButton-' + section);
+      if (!mainBtn) return;
+      var mainPrice = document.getElementById('price-' + section);
+      var stickyBtn = bar.querySelector('[data-sticky-atc-add]');
+      var stickyBtnLabel = bar.querySelector('.sticky-atc__button-label');
+      var stickyPrice = document.getElementById('StickyAtcPrice-' + section);
+      var cartDrawer = document.querySelector('cart-drawer');
+      var drawerOpen = function () {
+        return !!(cartDrawer && cartDrawer.classList.contains('active'));
+      };
+      var offscreen = false;
+
+      // Sticky button reuses the main submit flow (variant-aware + opens drawer)
+      stickyBtn.addEventListener('click', function () {
+        if (stickyBtn.hasAttribute('disabled')) return;
+        mainBtn.click();
+      });
+
+      // Mirror price on variant change (product-info.js updates #price-{id}.innerHTML)
+      if (mainPrice && stickyPrice) {
+        new MutationObserver(function () {
+          stickyPrice.innerHTML = mainPrice.innerHTML;
+        }).observe(mainPrice, { childList: true, subtree: true });
+      }
+
+      // Mirror the main button's disabled state + label (bilingual, variant-aware)
+      var syncBtn = function () {
+        if (mainBtn.hasAttribute('disabled')) stickyBtn.setAttribute('disabled', '');
+        else stickyBtn.removeAttribute('disabled');
+        var span = mainBtn.querySelector('span');
+        if (span && stickyBtnLabel) stickyBtnLabel.textContent = span.textContent.trim();
+      };
+      new MutationObserver(syncBtn).observe(mainBtn, {
+        attributes: true,
+        attributeFilter: ['disabled'],
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      syncBtn();
+
+      var render = function () {
+        if (offscreen && !drawerOpen()) {
+          bar.classList.add('is-visible');
+          bar.setAttribute('aria-hidden', 'false');
+        } else {
+          bar.classList.remove('is-visible');
+          bar.setAttribute('aria-hidden', 'true');
+        }
+      };
+
+      // Show the bar whenever the main ATC button is out of the viewport
+      new IntersectionObserver(
+        function (entries) {
+          offscreen = !entries[0].isIntersecting;
+          render();
+        },
+        { threshold: 0 }
+      ).observe(mainBtn);
+
+      // Keep the bar hidden while the cart drawer is open; re-evaluate on close
+      if (cartDrawer) {
+        new MutationObserver(render).observe(cartDrawer, {
+          attributes: true,
+          attributeFilter: ['class'],
+        });
+      }
+    })();
+  </script>
+{%- endif -%}
