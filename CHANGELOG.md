@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.6] - 2026-07-07
+
+### Fixed — 5 theme-write scripts pointed their DRAFT target at the live theme
+Five `scripts/*.mjs` hardcoded `const DRAFT = "160656818281"` — which became the
+LIVE (published) theme after a publish moved the roles. Re-running any of them would
+have written to production. They now import `DRAFT_THEME_ID` / `LIVE_THEME_ID` from
+`_shopify-lib` (the single source of truth, verified via `themes.json`), so a publish
+can't leave their write-target on the wrong theme.
+- Scripts: `compare-at-threshold-fix`, `faq-i18n-apply`, `homepage-minor-fixes`,
+  `homepage-video-carousel-clean`, `lifestyle-theme-step5`. Operative header comments
+  de-hardcoded too. No app or test code imports these scripts.
+
 ## [0.5.54.4] - 2026-07-07
 
 ### Fixed — stale Shopify theme IDs in `scripts/_shopify-lib.mjs`
