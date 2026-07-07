@@ -20,6 +20,22 @@ assets (no store-level page-body or translation writes → live theme untouched)
 - Verified live on draft theme 160749813865 (footer FR+EN, About FR+EN). The homepage equation
   band + trustbar reword (REC 1/3) stay on the draft only — the repo's `index.json` is a much older
   homepage snapshot and can't take them without an unrelated full re-sync.
+## [0.5.54.5] - 2026-07-07
+
+### Added — gold "-X%" discount badge on collection product cards (draft theme)
+Product cards in collections now show a gold discount badge, bottom-left over the
+image, on any product with a compare-at price and a discount ≥ 10% (the rule
+already used elsewhere in the theme).
+- Single-price products show the exact percentage, e.g. `-23%`.
+- Multi-variant products whose variants have different prices show a gold
+  `Solde` / `Sale` badge instead of a number — because Shopify's product-level
+  `price` (lowest variant) and `compare_at_price` (lowest compare-at) can come
+  from different variants, an exact percentage there could misstate the discount
+  vs the displayed "À partir de / From" price.
+- Below 10% or no compare-at: no badge. Sold-out and "Populaire" badges unchanged.
+- Mirrors `shopify-theme/snippets/card-product.liquid` from the working draft
+  theme (160749813865) into the repo. Draft only — live theme untouched. This is
+  a theme snippet; it does not affect the app build or tests.
 
 ## [0.5.54.4] - 2026-07-07
 
