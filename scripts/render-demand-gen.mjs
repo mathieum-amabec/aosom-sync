@@ -14,7 +14,7 @@ const FFMPEG = process.env.FFMPEG_BIN ||
   "C:\\Users\\vente\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.1-full_build\\bin\\ffmpeg.exe";
 const FONT = "fonts/DMSans.ttf";
 const GOLD = "0xD4A853";
-const NAVY = "0x1B2A4A";
+const NAVY = "0x1A2340"; // brand navy (VIDEO_BRAND.colors.navy #1A2340)
 const BENEFIT = "Livraison gratuite au Canada";
 const SCRIM_OPACITY = 0.50;   // Navy bottom gradient peak alpha (was 0.35)
 const SCRIM_FRACTION = 0.25;  // band height = 25% of canvas (was 0.18)
