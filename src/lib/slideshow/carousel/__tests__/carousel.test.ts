@@ -88,7 +88,7 @@ describe("buildCarouselOverlaySvg", () => {
   it("draws the title and price", () => {
     const svg = buildCarouselOverlaySvg(item({ overlay_text: "Table de jardin", price: 249.99 }), { width: 1080, height: 1080 }, "fr");
     expect(svg).toContain("Table de jardin");
-    expect(svg).toContain("249.99 $");
+    expect(svg).toContain("249,99 $"); // Quebec convention: comma decimal separator
     expect(svg).not.toMatch(/-\d+%/); // no discount badge without compare_at
   });
 

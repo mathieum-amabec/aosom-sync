@@ -97,10 +97,11 @@ export function perClipFrames(productCount: number, fps: number = FPS): number {
   return Math.round(perClipSeconds(productCount) * fps);
 }
 
-/** Format a price for the given locale (CA: "249.99 $" FR, "$249.99" EN). */
+/** Format a price for the given locale (CA: "249,99 $" FR — Quebec convention uses
+ * the comma as decimal separator; "$249.99" EN). */
 export function formatPrice(price: number, locale: VideoLocale): string {
   const v = Number(price).toFixed(2);
-  return locale === "fr" ? `${v} $` : `$${v}`;
+  return locale === "fr" ? `${v.replace(".", ",")} $` : `$${v}`;
 }
 
 /** CTA copy per locale. The 👆 renders via the bundled monochrome Noto Emoji
