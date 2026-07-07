@@ -3,9 +3,11 @@
  *
  * Deliberately DB-free (no `@/lib/database` / libsql import) so these can be
  * unit-tested in isolation — the route handler stays thin and delegates request
- * validation, product→slide mapping, and path resolution here.
+ * validation, product→slide mapping, and path resolution here. The Shopify image
+ * resolver is INJECTED (not imported) for the same reason.
  */
 import path from "path";
+import { isShopifyCdnUrl } from "@/lib/slideshow/validate";
 import type { SlideshowProduct, VideoLocale } from "./ffmpeg-slideshow";
 import type { KlingProduct } from "./kling-client";
 
@@ -36,6 +38,8 @@ export interface ProductLike {
   sku?: string | null;
   name?: string | null;
   price?: number | string | null;
+  /** Live Shopify product id — used to resolve cdn.shopify.com images. */
+  shopify_product_id?: string | null;
   image1?: string | null;
   image2?: string | null;
   image3?: string | null;
@@ -44,6 +48,9 @@ export interface ProductLike {
   image6?: string | null;
   image7?: string | null;
 }
+
+/** Resolves a product's live Shopify-CDN image URLs (injected so this stays DB-free). */
+export type ShopifyImageResolver = (shopifyProductId: string) => Promise<string[]>;
 
 const LOCALES: VideoLocale[] = ["fr", "en"];
 
@@ -80,7 +87,9 @@ export function parseGenerateRequest(body: unknown): ParseResult {
   return { ok: true, value: { engine: obj.engine as GenerateEngine, productSkus: skus, locale: obj.locale as VideoLocale } };
 }
 
-/** First non-empty product image (image1..image7), or null if none. */
+/** First non-empty catalog image (image1..image7 = Aosom CDN), or null if none.
+ * Legacy helper: NOT used for video slides anymore (Aosom CDN 403s render workers
+ * — video slides use Shopify CDN via toSlideshowProducts). Kept for other callers. */
 export function selectProductImage(row: ProductLike): string | null {
   const keys = ["image1", "image2", "image3", "image4", "image5", "image6", "image7"] as const;
   for (const k of keys) {
@@ -91,16 +100,30 @@ export function selectProductImage(row: ProductLike): string | null {
 }
 
 /**
- * Map DB product rows to the slideshow's product shape. Rows with no usable
- * image are kept (the engine renders a navy fallback slide), but the result is
- * capped at MAX_VIDEO_PRODUCTS to stay within generateSlideshowVideo's limit.
+ * Map DB product rows to the slideshow's product shape.
+ *
+ * The image is the product's live **cdn.shopify.com** photo, resolved per row via
+ * the injected `resolveShopifyImages` — matching Moteur A (build.ts: the first
+ * `isShopifyCdnUrl` image). The catalog `image1..7` columns hold Aosom-CDN URLs
+ * (`img-us.aosomcdn.com`) which 403 the render workers, so they are NOT used for
+ * video slides. A row that has no Shopify image keeps `imageUrl: ""` (the engine
+ * renders a navy fallback slide). Capped at MAX_VIDEO_PRODUCTS.
  */
-export function toSlideshowProducts(rows: ProductLike[]): SlideshowProduct[] {
-  return rows.slice(0, MAX_VIDEO_PRODUCTS).map((row) => ({
-    name: (row.name ?? row.sku ?? "Produit") || "Produit",
-    price: typeof row.price === "number" ? row.price : Number(row.price) || 0,
-    imageUrl: selectProductImage(row) ?? "",
-  }));
+export async function toSlideshowProducts(
+  rows: ProductLike[],
+  resolveShopifyImages: ShopifyImageResolver,
+): Promise<SlideshowProduct[]> {
+  const capped = rows.slice(0, MAX_VIDEO_PRODUCTS);
+  return Promise.all(
+    capped.map(async (row) => {
+      const images = await resolveShopifyImages((row.shopify_product_id ?? "").trim());
+      return {
+        name: (row.name ?? row.sku ?? "Produit") || "Produit",
+        price: typeof row.price === "number" ? row.price : Number(row.price) || 0,
+        imageUrl: images.find(isShopifyCdnUrl) ?? "",
+      };
+    }),
+  );
 }
 
 /** All non-empty product images (image1..image7), in position order. */

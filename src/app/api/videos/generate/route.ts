@@ -26,6 +26,7 @@ import { readFile } from "node:fs/promises";
 import { put } from "@vercel/blob";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { createVideoJob, updateVideoJob, getProduct } from "@/lib/database";
+import { resolveProductImages } from "@/lib/selectors";
 import { generateSlideshowVideo } from "@/lib/video-engines/ffmpeg-slideshow";
 import { generateKlingVideo, isKlingConfigured, type KlingProduct } from "@/lib/video-engines/kling-client";
 import {
@@ -173,7 +174,9 @@ export async function POST(request: Request) {
     const product = toKlingProduct(rows[0] as ProductLike);
     after(() => runKlingGeneration(job.id, product, locale, outputPath));
   } else {
-    const products = toSlideshowProducts(rows as ProductLike[]);
+    // Video slides use the live Shopify-CDN image (Aosom CDN 403s the render
+    // workers), resolved per product exactly like Moteur A.
+    const products = await toSlideshowProducts(rows as ProductLike[], resolveProductImages);
     after(() => runFfmpegGeneration(job.id, products, locale, outputPath));
   }
 

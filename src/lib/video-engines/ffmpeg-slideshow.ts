@@ -33,8 +33,11 @@ import { formatVideoTitle } from "@/lib/video-title-utils";
 
 const { width: WIDTH, height: HEIGHT } = VIDEO_BRAND.format;
 const FPS = 25;
-/** Baseline seconds per slide; total runtime is clamped into durationTarget. */
-const BASE_CLIP_SECONDS = 5;
+/** Baseline seconds per slide; total runtime is clamped into durationTarget.
+ * 2.4s aligns the per-slide pace with Moteur A (the slideshow engine). With
+ * durationTarget.min lowered to 6s, per-slide is exactly 2.4s for 3-6 products
+ * (the realistic range); 1-2 products floor to the 6s minimum. */
+const BASE_CLIP_SECONDS = 2.4;
 const MAX_PRODUCTS = 6;
 /** Hard ceiling so a stuck render never hangs a serverless invocation. */
 const RENDER_TIMEOUT_MS = 4 * 60_000;

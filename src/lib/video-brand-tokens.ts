@@ -29,7 +29,10 @@ export const VIDEO_BRAND = {
     width: 1080,
     height: 1920,
     aspectRatio: '9:16',
-    durationTarget: { min: 15, max: 30 },
+    // min lowered from 15→6 so the 2.4s/slide baseline is honored for the
+    // realistic 3-6 product range (3→7.2s … 6→14.4s). 1-2 products floor to 6s
+    // (a literal 2.4s single-slide clip isn't a publishable video).
+    durationTarget: { min: 6, max: 30 },
   },
   overlay: {
     bandHeight: 200,
