@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.54.5] - 2026-07-07
+## [0.5.54.7] - 2026-07-07
 
 ### Added — showroom-messaging: footer + About + PDP buy-box (draft only, not published)
 Mirrors 3 of the "online-only = lower prices" showroom-messaging draft changes into the repo.
