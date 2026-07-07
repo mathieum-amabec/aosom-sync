@@ -70,30 +70,35 @@ describe("stripLeadingPlatformLabel", () => {
     );
   });
 
-  it("removes the platform-label variants (Instagram, FB/IG, Publication, '<Platform> Post:')", () => {
-    expect(stripLeadingPlatformLabel("Post Instagram ☀️ — Été\nContenu")).toBe("Contenu");
+  it("removes a decoration-only label header line (all variants → clean body)", () => {
+    // Each of these is a pure header: label token + only emoji/`:`/`-`/spaces on
+    // its line, real caption below. The whole header line is dropped.
+    expect(stripLeadingPlatformLabel("Post Instagram ☀️\nContenu")).toBe("Contenu");
     expect(stripLeadingPlatformLabel("Post IG\nContenu")).toBe("Contenu");
     expect(stripLeadingPlatformLabel("Publication Facebook :\nContenu")).toBe("Contenu");
-    expect(stripLeadingPlatformLabel("Facebook Post: something\nContenu")).toBe("Contenu");
+    expect(stripLeadingPlatformLabel("Facebook Post:\nContenu")).toBe("Contenu");
     // Short-form "<Platform> Post" labels are stripped on both branches.
     expect(stripLeadingPlatformLabel("FB Post\nContenu")).toBe("Contenu");
-    expect(stripLeadingPlatformLabel("IG Post: été\nContenu")).toBe("Contenu");
+    expect(stripLeadingPlatformLabel("IG Post —\nContenu")).toBe("Contenu");
   });
 
   it("eats leading blank lines before the label", () => {
     expect(stripLeadingPlatformLabel("\n\nPost Facebook 🌿\nContenu")).toBe("Contenu");
   });
 
-  it("intentionally strips ANY first line opening with '<platform> post' (aggressive by design)", () => {
-    // Boundary pin: the second alternation branch removes a first line that
-    // opens with "<platform> post ...", including prose that happens to start
-    // that way. This is a deliberate tradeoff — Claude's real label leak is
-    // "Post Facebook 🌿" / "Facebook Post:", store captions never open with
-    // "Instagram post ...", and only the FIRST line is dropped. Documenting it
-    // here so a future reader knows the over-strip is intended, not a bug.
+  it("keeps inline content after the label instead of eating the whole line", () => {
+    // The model wrote the label AHEAD of the real hook on line 1, with a body
+    // below. Only the label token + separator is dropped — the hook survives.
+    // (A greedy whole-line strip here would silently delete the hook on the
+    // unreviewed reel publish path.)
+    expect(
+      stripLeadingPlatformLabel("Publication Instagram : Découvrez nos supports muraux !\n\nLivraison gratuite 🌿"),
+    ).toBe("Découvrez nos supports muraux !\n\nLivraison gratuite 🌿");
+    // Only the leading "<platform> post" token is removed from a prose opener,
+    // not the sentence after it.
     expect(
       stripLeadingPlatformLabel("Instagram post reach dropped 40%\nVoici pourquoi 👇"),
-    ).toBe("Voici pourquoi 👇");
+    ).toBe("reach dropped 40%\nVoici pourquoi 👇");
   });
 
   it("leaves a real marketing hook untouched (no label)", () => {

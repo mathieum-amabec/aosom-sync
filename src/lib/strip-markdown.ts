@@ -36,22 +36,24 @@ export function stripMarkdown(text: string): string {
  * instead of the marketing hook.
  *
  * Conservative: only strips a FIRST line that clearly opens with such a label —
- * `Post`/`Publication` + platform, or `<Platform> post`. Two shapes:
- *  - **Label as a header** (a newline follows on the first line): the model put
- *    the label on its own line with the real caption below, so the WHOLE first
- *    line is scaffolding — drop it and the trailing newline(s).
- *  - **Label inline** (no newline — single-line generation): drop only the label
- *    token and its trailing decoration (`:`/`-`/emoji/spaces), and KEEP the real
- *    words that follow. This is why the tail stops at the first letter/number
- *    (`[^\p{L}\p{N}]*`): otherwise `"Publication Instagram: Découvrez…"` would
- *    lose "Découvrez…" (and, being consumed whole, get re-added by the caller's
- *    empty-fallback). A label-only generation ("Post Facebook 🌿") strips to ""
- *    — the correct signal for callers to reject/fall back, not publish the label.
- * Exported for unit testing.
+ * `Post`/`Publication` + platform, or `<Platform> post`. After the label token,
+ * the tail is deliberately content-preserving:
+ *  - **Decoration-only label line** (`[^\p{L}\p{N}\n]*` then a newline): the model
+ *    put the label alone on its own line — only `:`/`-`/emoji/spaces after the
+ *    token — so it's a pure header. Drop the whole line and the newline(s).
+ *  - **Otherwise** (`[^\p{L}\p{N}]*`): drop only the label token and its trailing
+ *    decoration, and KEEP the real words that follow — whether on the same line
+ *    ("Publication Instagram: Découvrez…" → "Découvrez…") or with a body below.
+ *    The first branch stops at the first letter/number, so it never crosses a
+ *    real word to eat the rest of the line: that would silently delete the hook
+ *    when the model writes the label inline ahead of it (published unreviewed on
+ *    the reel path). Better to leave a stray label title than to lose the hook.
+ * A label-only generation ("Post Facebook 🌿") strips to "" — the correct signal
+ * for callers to reject/fall back, not publish the label. Exported for unit testing.
  */
 export function stripLeadingPlatformLabel(text: string): string {
   return text.replace(
-    /^\s*(?:(?:post|publication)\s+(?:facebook|instagram|fb|ig)|(?:facebook|instagram|fb|ig)\s+post)\b(?:[^\n]*\r?\n+|[^\p{L}\p{N}]*)/iu,
+    /^\s*(?:(?:post|publication)\s+(?:facebook|instagram|fb|ig)|(?:facebook|instagram|fb|ig)\s+post)\b(?:[^\p{L}\p{N}\n]*\r?\n+|[^\p{L}\p{N}]*)/iu,
     "",
   );
 }
