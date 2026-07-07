@@ -175,9 +175,19 @@ export async function POST(request: Request) {
     after(() => runKlingGeneration(job.id, product, locale, outputPath));
   } else {
     // Video slides use the live Shopify-CDN image (Aosom CDN 403s the render
-    // workers), resolved per product exactly like Moteur A.
-    const products = await toSlideshowProducts(rows as ProductLike[], resolveProductImages);
-    after(() => runFfmpegGeneration(job.id, products, locale, outputPath));
+    // workers), resolved per product exactly like Moteur A. Resolution runs in
+    // the BACKGROUND: resolveProductImages is throttled to ~2 req/s, so awaiting
+    // it in the request path would delay the jobId response by several seconds
+    // (and much longer if Shopify is degraded). Keep it in after().
+    after(async () => {
+      try {
+        const products = await toSlideshowProducts(rows as ProductLike[], resolveProductImages);
+        await runFfmpegGeneration(job.id, products, locale, outputPath);
+      } catch (err) {
+        const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+        await updateVideoJob(job.id, { status: "error", error_message: message });
+      }
+    });
   }
 
   return NextResponse.json({ jobId: job.id }, { status: 202 });
