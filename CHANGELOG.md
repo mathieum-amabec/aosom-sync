@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.5] - 2026-07-07
+
+### Added — showroom-messaging: footer + About + PDP buy-box (draft only, not published)
+Mirrors 3 of the "online-only = lower prices" showroom-messaging draft changes into the repo.
+Bilingual FR/EN via `request.locale.iso_code`, gold `#D4A853` accent, all self-contained theme
+assets (no store-level page-body or translation writes → live theme untouched).
+- **`sections/footer.liquid`**: a line under the brand blurb — FR *"Boutique 100 % en ligne :
+  sans salle de montre ni loyer, des prix imbattables."* / EN *"A 100% online store: no showroom,
+  no rent — just unbeatable prices."* Gated on the brand text block's heading. (New file — the
+  footer section was not previously tracked in the repo.)
+- **`templates/page.json`**: new `custom-liquid` section `lc_about_online`, gated on
+  `page.handle == 'a-propos'`, adding the "Notre secret / Our secret" paragraph to the About page
+  via the theme (the store-level `page.body_html` is untouched, so it renders only on the draft
+  theme, not live). (New file.)
+- **`sections/main-product.liquid`**: bilingual buy-box price-justification line under the price.
+- Verified live on draft theme 160749813865 (footer FR+EN, About FR+EN). The homepage equation
+  band + trustbar reword (REC 1/3) stay on the draft only — the repo's `index.json` is a much older
+  homepage snapshot and can't take them without an unrelated full re-sync.
+
 ## [0.5.54.4] - 2026-07-07
 
 ### Fixed — stale Shopify theme IDs in `scripts/_shopify-lib.mjs`
