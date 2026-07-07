@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.4] - 2026-07-07
+
+### Fixed — stale Shopify theme IDs in `scripts/_shopify-lib.mjs`
+Theme roles move on every publish. Verified via `themes.json` (2026-07-07):
+`160656818281` is now the LIVE (published) theme and `160749813865` is the active
+working draft.
+- `LIVE_THEME_ID` `160606093417` → `160656818281` (real current published theme).
+- `DRAFT_THEME_ID` `160656818281` → `160749813865` (real current working draft).
+- **Why it mattered:** `DRAFT_THEME_ID` was `160656818281`, which is now the LIVE
+  theme, so the `apply-*.mjs` default asset-write target pointed at production while
+  the `LIVE_THEME_ID` guard protected a since-demoted theme. Fixing `LIVE` alone would
+  have left `DRAFT == LIVE`, so both are corrected together. Only `scripts/apply-*.mjs`
+  tooling imports these constants; no app or test code does.
+
 ## [0.5.54.3] - 2026-07-07
 
 ### Fixed — slideshow/carousel video prices use the Quebec comma separator
