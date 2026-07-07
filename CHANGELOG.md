@@ -2,6 +2,36 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.0] - 2026-07-07
+
+### Changed — slideshow render engine quality upgrade (Moteur A, `src/lib/slideshow/render.ts`)
+A full pass on the ffmpeg slideshow so short-form product videos read as intentional
+motion, not a static grid. All changes verified with a local 3-product render (frames
+inspected): intro-on-visual, product slides, rotating transitions, and outro.
+- **Legible text over motion (the headline fix)**: each segment now renders as TWO ffmpeg
+  layers — a photo layer that gets the Ken Burns zoompan, and a SEPARATE transparent text
+  overlay (scrim + title + price + CTA) composited **static** on top. Previously the title/
+  price/CTA were baked into the photo and the zoom-out (starts at 1.5×) + corner pans scaled
+  and shoved the centered text off-frame, worst at the start of every other slide. Inputs are
+  now ordered `[photos…][texts…][music]` (music index `2*count`).
+- **Fonts + emoji**: `registerBrandFonts()` runs at module load and the fontconfig now
+  falls back to Noto Emoji, so DM Sans titles and the 👆 CTA emoji stop rendering as tofu on
+  the Linux render host. `src/fonts/NotoEmoji.ttf` (monochrome — librsvg can't rasterize color
+  emoji) is bundled and traced into the render functions in `next.config.ts`.
+- **Pacing**: faster, tighter — `INTRO` 2→1.2 s, `OUTRO` 2→1.3 s, per-slide 3.5→2.4 s
+  (max 8→4 s), 25→30 fps; batch series target 15→12 s.
+- **Transitions**: `XFADE` 0.5→0.28 s, rotating through slideleft / smoothleft / wiperight /
+  zoomin instead of a uniform fade; urgency / price-drop series get a hard cut.
+- **Ken Burns**: larger zoom increment (0.0012→0.0022, cap 1.4→1.5), alternating zoom-in/out
+  with a 4-corner pan rotation per slide.
+- **Scrim + legibility**: navy semi-transparent scrim + text stroke behind the title/price;
+  persistent discreet CTA pill (store URL) on each product slide.
+- **CTA copy**: "Magasinez maintenant" → "Lien en bio 👆" / "Link in bio 👆".
+- **Music**: fade-in 1→0.3 s, uniform-random rotation across bundled royalty-free tracks.
+- **Hook on visual**: non-lifestyle series (best-sellers, enfants, rabais, urgence, top3) use
+  the first product's pos-1 Shopify photo as the intro-card background (cover + navy scrim +
+  hook), instead of a plain navy card.
+
 ## [0.5.53.204] - 2026-07-06
 
 ### Fixed — legacy FFmpeg slideshow engine (Moteur B)
