@@ -24,17 +24,19 @@ export function loadEnv() {
 export const STORE = "27u5y2-kp.myshopify.com";
 export const API_VERSION = "2025-01";
 
-// Theme roles verified via GET /admin/api/2024-01/themes.json (source of truth, 2026-07-01):
-//   160606093417 "LIVE NOW"                           → role:main        (LIVE / published)
-//   160656818281 "Copie de LIVE NOW"                  → role:unpublished (active working DRAFT — real copy of live)
-//   160584859753 "Copie de Copie de Copie de Trade v2"→ role:unpublished (PREVIOUS live — rollback target)
+// Theme roles verified via GET /admin/api/2025-01/themes.json (source of truth, 2026-07-07):
+//   160656818281 "Copie de LIVE NOW"                  → role:main        (LIVE / published)
+//   160749813865 "DRAFT DE TRAVAIL 2026-07-05"        → role:unpublished (active working DRAFT)
+//   160606093417 "LIVE NOW"                           → role:unpublished (PREVIOUS live — rollback target)
 //   160059195497 "Copie de Trade v2"                  → role:unpublished (older backup)
-// 160606093417 was published to LIVE on 2026-07-01 (demoting 160584859753); the working
-// DRAFT is now a fresh full copy of the live, 160656818281.
+// Roles MOVE on every publish: since the 2026-07-01 note, 160656818281 was published to LIVE
+// (demoting the old 160606093417), and a fresh full copy, 160749813865, became the working DRAFT.
+// Re-verify via themes.json after ANY publish — a stale LIVE_THEME_ID makes the apply-*.mjs
+// guard "protect" the wrong theme, and a stale DRAFT_THEME_ID can point writes at production.
 // IMPORTANT: the LIVE_THEME_ID guard in apply-*.mjs ("refusing to run against the LIVE
 // theme") only protects production when this is the REAL published theme. Keep it current.
-export const LIVE_THEME_ID = "160606093417"; // current main / published (LIVE) theme — NEVER write here
-export const DRAFT_THEME_ID = "160656818281"; // active unpublished DRAFT — safe write target
+export const LIVE_THEME_ID = "160656818281"; // current main / published (LIVE) theme — NEVER write here
+export const DRAFT_THEME_ID = "160749813865"; // active unpublished DRAFT — safe write target
 export const BACKUP_THEME_ID = "160059195497"; // older unpublished theme, kept as backup
 // Deprecated alias kept for older imports. Points at a non-live theme so the default
 // asset-write target can never hit production. New code should use DRAFT_THEME_ID.
