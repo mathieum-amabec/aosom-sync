@@ -4,7 +4,7 @@ import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { getContentTemplateBySlug, createFacebookDraft, getAnyProductSku, selectCompatibleHooks, getRecentlyUsedHookIds, recordHookUsage } from "@/lib/database";
 import { mapProductTypeToScope } from "@/lib/hook-selector";
 import { getAnthropicClient } from "@/lib/content-generator";
-import { stripMarkdown } from "@/lib/strip-markdown";
+import { stripMarkdown, stripLeadingPlatformLabel } from "@/lib/strip-markdown";
 import { searchImages, triggerDownload } from "@/lib/unsplash";
 import { CLAUDE } from "@/lib/config";
 
@@ -111,19 +111,21 @@ function interpolateTemplate(template: string, vars: Record<string, string>): st
 /**
  * Defensive cleanup of the model's raw output. The prompt asks Claude to "return
  * only the post", but LLMs occasionally prepend conversational scaffolding
- * ("Here's a Facebook post for your product:"), a markdown "---" rule, or wrap
- * lines in **bold**. Relying on the prompt alone is not enough — without this
- * strip a single disobedient generation gets persisted verbatim into the draft
- * and then published. Exported for unit testing.
+ * ("Here's a Facebook post for your product:"), a platform-label title
+ * ("Post Facebook 🌿"), a markdown "---" rule, or wrap lines in **bold**. Relying
+ * on the prompt alone is not enough — without this strip a single disobedient
+ * generation gets persisted verbatim into the draft and then published. Exported
+ * for unit testing.
  */
 export function stripScaffold(text: string): string {
   // 1) Remove conversational preamble ("Here's a Facebook post:"), then
-  // 2) strip any Markdown (bold, # headers, --- rules, trailing whitespace).
+  // 2) drop a leading platform-label line ("Post Facebook 🌿"), then
+  // 3) strip any Markdown (bold, # headers, --- rules, trailing whitespace).
   const withoutPreamble = text
     .replace(/^(here'?s?\s+a\s+facebook\s+post[^:\n]*:\s*\n?)/i, "")
     .replace(/^(here\s+is\s+a[^:\n]*:\s*\n?)/i, "")
     .replace(/^(sure[,!]?\s+here'?s?[^:\n]*:\s*\n?)/i, "");
-  return stripMarkdown(withoutPreamble);
+  return stripMarkdown(stripLeadingPlatformLabel(withoutPreamble));
 }
 
 async function generatePostText(prompt: string, isEn: boolean): Promise<string> {

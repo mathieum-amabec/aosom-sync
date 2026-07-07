@@ -33,6 +33,16 @@ describe("stripScaffold", () => {
     ).toBe("You waited 8 months — that's exactly why right now matters.");
   });
 
+  it("strips a leading 'Post Facebook 🌿' platform-label title", () => {
+    expect(stripScaffold("Post Facebook 🌿\n\nTa terrasse mérite mieux 👇")).toBe(
+      "Ta terrasse mérite mieux 👇",
+    );
+    // Even combined with a conversational preamble on the line above.
+    expect(stripScaffold("Here's a Facebook post:\nPost Instagram ☀️\nContenu 👇")).toBe(
+      "Contenu 👇",
+    );
+  });
+
   it("leaves an already-clean post unchanged", () => {
     const clean =
       "Un meuble qui dure 15 ans coûte moins cher qu'un meuble qui dure 3.\n\n" +

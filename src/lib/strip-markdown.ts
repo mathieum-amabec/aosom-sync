@@ -27,3 +27,22 @@ export function stripMarkdown(text: string): string {
     .replace(/\n{3,}/g, "\n\n")                    // collapse 3+ newlines
     .trim();
 }
+
+/**
+ * Remove a leading platform-label line the model sometimes prepends as a title —
+ * e.g. "Post Facebook 🌿", "Publication Instagram", "Facebook Post:". The prompts
+ * ask Claude to return only the post, but a disobedient generation puts a label on
+ * the first line; without this the caption publishes starting with that label
+ * instead of the marketing hook.
+ *
+ * Conservative: only strips a FIRST line that clearly IS such a label —
+ * `Post`/`Publication` + platform, or `<Platform> post` — plus any trailing
+ * emoji/`:`/`-`/title text on that line. Never touches real prose (a marketing
+ * caption never opens with "Post Facebook"). Exported for unit testing.
+ */
+export function stripLeadingPlatformLabel(text: string): string {
+  return text.replace(
+    /^\s*(?:(?:post|publication)\s+(?:facebook|instagram|fb|ig)|(?:facebook|instagram)\s+post)\b[^\n]*(?:\r?\n+|$)/i,
+    "",
+  );
+}

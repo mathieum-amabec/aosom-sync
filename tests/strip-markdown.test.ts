@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripMarkdown } from "@/lib/strip-markdown";
+import { stripMarkdown, stripLeadingPlatformLabel } from "@/lib/strip-markdown";
 
 describe("stripMarkdown", () => {
   it("strips **bold** and __bold__ to inner text", () => {
@@ -60,5 +60,33 @@ describe("stripMarkdown", () => {
   it("handles the full leaked-markdown shape", () => {
     const dirty = "## Votre espace\n\n☀️ **Le ton** est donné.\n\n---\n\nVotre style? 👇   ";
     expect(stripMarkdown(dirty)).toBe("Votre espace\n\n☀️ Le ton est donné.\n\nVotre style? 👇");
+  });
+});
+
+describe("stripLeadingPlatformLabel", () => {
+  it("removes a 'Post Facebook 🌿' label line, keeping the hook as the opening", () => {
+    expect(stripLeadingPlatformLabel("Post Facebook 🌿\n\nTa terrasse mérite mieux 👇")).toBe(
+      "Ta terrasse mérite mieux 👇",
+    );
+  });
+
+  it("removes the platform-label variants (Instagram, FB/IG, Publication, '<Platform> Post:')", () => {
+    expect(stripLeadingPlatformLabel("Post Instagram ☀️ — Été\nContenu")).toBe("Contenu");
+    expect(stripLeadingPlatformLabel("Post IG\nContenu")).toBe("Contenu");
+    expect(stripLeadingPlatformLabel("Publication Facebook :\nContenu")).toBe("Contenu");
+    expect(stripLeadingPlatformLabel("Facebook Post: something\nContenu")).toBe("Contenu");
+  });
+
+  it("eats leading blank lines before the label", () => {
+    expect(stripLeadingPlatformLabel("\n\nPost Facebook 🌿\nContenu")).toBe("Contenu");
+  });
+
+  it("leaves a real marketing hook untouched (no label)", () => {
+    const hook = "☀️ Ta terrasse de rêve t'attend...\n\nDécouvre la collection 👇";
+    expect(stripLeadingPlatformLabel(hook)).toBe(hook);
+    // A hook that merely mentions Facebook mid-sentence is not a label line.
+    expect(stripLeadingPlatformLabel("Partage sur Facebook ce que tu aimes 👇")).toBe(
+      "Partage sur Facebook ce que tu aimes 👇",
+    );
   });
 });
