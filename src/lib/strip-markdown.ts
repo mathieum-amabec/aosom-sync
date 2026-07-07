@@ -35,14 +35,23 @@ export function stripMarkdown(text: string): string {
  * the first line; without this the caption publishes starting with that label
  * instead of the marketing hook.
  *
- * Conservative: only strips a FIRST line that clearly IS such a label —
- * `Post`/`Publication` + platform, or `<Platform> post` — plus any trailing
- * emoji/`:`/`-`/title text on that line. Never touches real prose (a marketing
- * caption never opens with "Post Facebook"). Exported for unit testing.
+ * Conservative: only strips a FIRST line that clearly opens with such a label —
+ * `Post`/`Publication` + platform, or `<Platform> post`. Two shapes:
+ *  - **Label as a header** (a newline follows on the first line): the model put
+ *    the label on its own line with the real caption below, so the WHOLE first
+ *    line is scaffolding — drop it and the trailing newline(s).
+ *  - **Label inline** (no newline — single-line generation): drop only the label
+ *    token and its trailing decoration (`:`/`-`/emoji/spaces), and KEEP the real
+ *    words that follow. This is why the tail stops at the first letter/number
+ *    (`[^\p{L}\p{N}]*`): otherwise `"Publication Instagram: Découvrez…"` would
+ *    lose "Découvrez…" (and, being consumed whole, get re-added by the caller's
+ *    empty-fallback). A label-only generation ("Post Facebook 🌿") strips to ""
+ *    — the correct signal for callers to reject/fall back, not publish the label.
+ * Exported for unit testing.
  */
 export function stripLeadingPlatformLabel(text: string): string {
   return text.replace(
-    /^\s*(?:(?:post|publication)\s+(?:facebook|instagram|fb|ig)|(?:facebook|instagram|fb|ig)\s+post)\b[^\n]*(?:\r?\n+|$)/i,
+    /^\s*(?:(?:post|publication)\s+(?:facebook|instagram|fb|ig)|(?:facebook|instagram|fb|ig)\s+post)\b(?:[^\n]*\r?\n+|[^\p{L}\p{N}]*)/iu,
     "",
   );
 }
@@ -51,15 +60,20 @@ export function stripLeadingPlatformLabel(text: string): string {
  * Full cleanup for a social caption before it is stored/published. Order matters:
  * strip Markdown FIRST (so a markdown-titled label like `# Post Facebook 🌿` or
  * `**Post Facebook 🌿**` becomes a bare label line), THEN strip the leading
- * platform label. Never returns empty — if the label strip would consume the
- * whole caption (a degenerate label-only generation), fall back to the
- * markdown-clean text so we never persist/publish an empty caption.
+ * platform label.
+ *
+ * Returns "" only for a degenerate label-only generation (the model emitted
+ * nothing but a label). That empty is the CORRECT signal — every caller handles
+ * it safely: the reel path (`text || null`) keeps the original stored caption,
+ * the content route returns 502, and a product draft is caught in human review.
+ * Do NOT re-add a `|| md` fallback here: `md` still starts with the label, so it
+ * would re-publish the exact prefix this function exists to remove — on the
+ * unreviewed reel cron path.
  *
  * This is the single entry point every social-caption generator should use
  * (product posts, content templates, and publish-time Reel captions) so a new
  * path can't silently skip the cleanup.
  */
 export function cleanSocialCaption(raw: string): string {
-  const md = stripMarkdown(raw);
-  return stripLeadingPlatformLabel(md) || md;
+  return stripLeadingPlatformLabel(stripMarkdown(raw));
 }

@@ -124,12 +124,25 @@ describe("cleanSocialCaption", () => {
     );
   });
 
-  it("never returns empty for a degenerate label-only generation", () => {
-    // If the whole caption is just the label, fall back to the markdown-clean
-    // text (the bare label) rather than persisting/publishing an empty string.
-    const out = cleanSocialCaption("# Post Facebook 🌿");
-    expect(out.length).toBeGreaterThan(0);
-    expect(out).toBe("Post Facebook 🌿");
+  it("returns '' for a degenerate label-only generation (never re-adds the label)", () => {
+    // If the whole caption is just the label, the RIGHT answer is empty — callers
+    // reject/fall back on empty (reel keeps original, route 502s). Returning the
+    // bare label would re-publish the exact prefix we exist to strip.
+    expect(cleanSocialCaption("# Post Facebook 🌿")).toBe("");
+    expect(cleanSocialCaption("**Post Facebook 🌿**")).toBe("");
+    expect(cleanSocialCaption("Post Facebook 🌿")).toBe("");
+  });
+
+  it("keeps same-line content after an inline label (single-line generation)", () => {
+    // The model put the label and the real hook on ONE line. Strip only the
+    // label + its separator, KEEP the hook — do not swallow the whole line
+    // (which previously made the empty-fallback re-add the label).
+    expect(cleanSocialCaption("Publication Instagram: Découvrez notre canapé 🌿")).toBe(
+      "Découvrez notre canapé 🌿",
+    );
+    expect(cleanSocialCaption("Facebook Post — Ta terrasse mérite mieux 👇")).toBe(
+      "Ta terrasse mérite mieux 👇",
+    );
   });
 
   it("leaves a clean caption unchanged", () => {
