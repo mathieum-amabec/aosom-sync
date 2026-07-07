@@ -826,6 +826,8 @@
     {% comment %} Projet #1 : JSON-LD boutique (brand = boutique, pas le vendor/fournisseur) {% endcomment %}
     {% render "agentic-structured-data", product: product %}
   </div>
+
+  {%- render 'sticky-atc', product: product, section_id: section.id, product_title: lc_product_title -%}
 </product-info>
 
 {% schema %}
