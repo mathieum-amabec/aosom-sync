@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.53.204] - 2026-07-06
+
+### Fixed — legacy FFmpeg slideshow engine (Moteur B)
+- **`video-generate.ts` / `videos/generate/route.ts`**: video slides now use each
+  product's live **cdn.shopify.com** image (resolved via `resolveProductImages`,
+  like Moteur A) instead of the Turso `image1..7` columns, which hold Aosom-CDN
+  URLs that **403 the render workers** (produced all-navy slides). Resolution runs
+  in the background so the `jobId` still returns immediately; a resolution failure
+  flips the job to `error`. No-Shopify-image products keep the navy fallback.
+- **Pacing**: `BASE_CLIP_SECONDS` 5→2.4 and `durationTarget.min` 15→6 so per-slide
+  is 2.4 s for 3-6 products (1-2 floor to a 6 s minimum), aligned with Moteur A.
+- **`render-demand-gen.mjs`**: navy `0x1B2A4A`→`0x1A2340` to match `VIDEO_BRAND.colors.navy`.
+
 ## [0.5.53.203] - 2026-07-06
 
 ### Added — slide-out cart drawer on the Shopify theme (draft only, NOT published to live)
