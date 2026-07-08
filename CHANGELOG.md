@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.8] - 2026-07-08
+
+### Changed — slideshow/demand-gen music volume −18dB → −12dB
+Raised `VIDEO_BRAND.music.volume` (`src/lib/video-brand-tokens.ts`) from −18 to −12 dB so the
+royalty-free background bed sits more present in generated videos. The ffmpeg engine reads the
+token at render time (`buildXfadeFilterComplex` / demand-gen `volume=<db>dB`). Measured effect:
+mean loudness across the 40-video slideshow batch rose from ~−35 dB to ~−29 dB. No test impact —
+the filter-builder unit tests pass `musicVolumeDb` explicitly (they don't read the token).
+
 ## [0.5.54.7] - 2026-07-07
 
 ### Added — showroom-messaging: footer + About + PDP buy-box (draft only, not published)
