@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.9] - 2026-07-08
+
+### Added — sequential_ad pipeline (4-message patio ads: hero-slides + demand-gen)
+New `content_type='sequential_ad'` on the unified `publication_queue` plus a `metadata` JSON
+column (`{style, campaign}`), a dedicated `/sequential-ads` dashboard, and a two-style renderer.
+Reuses the existing video draft→approve→schedule→publish rails — `getNextPending` is
+content_type-agnostic and the publisher's Reels path now also handles `sequential_ad`, so **no
+new cron**. The 4 sequential FR messages mirror the "Entrepôts à Rabais" competitor style.
+- **db** (`database.ts`): `metadata` column + `'sequential_ad'` CHECK via a guarded table-rebuild
+  migration (same pattern as `+video`/`+draft`); `addToQueue` metadata; `mapQueueItem` metadata;
+  `getSequentialAdQueueItems` / `approveSequentialAdDraft` / `cancelSequentialAdDraft`.
+- **publisher** (`queue-publisher.ts`): the video Reels branch now also matches `sequential_ad`
+  (publish-time clickbait caption + `reelsVideoUrl` routing).
+- **dashboard**: `/sequential-ads` page + client (list, status, style/campaign badges, campaign
+  filter, approve/cancel), `/api/sequential-ads/{queue,approve}`, sidebar link.
+- **renderer** (`scripts/render-sequential-ads.mts`): Style A hero-slides (top-N patio by 14d
+  velocity ∩ Shopify `lifestyle-verified`, 4 messages over cdn.shopify photos) + Style B
+  demand-gen (4 timed `drawtext` messages over live-action clips); uploads to
+  `slideshows/sequential-ads/`, enqueues drafts.
+- Verified: `tsc` clean, full suite 1300 tests pass, 3-specialist review clean, sample render
+  10 hero + 6 demand-gen (queueIds 392–407) landed as drafts with audio. (Production `next build`
+  + dashboard UI validate on Vercel preview — local build blocked by the arm64 Tailwind binding.)
+
 ## [0.5.54.8] - 2026-07-08
 
 ### Changed — slideshow/demand-gen music volume −18dB → −12dB

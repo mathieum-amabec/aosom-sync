@@ -230,10 +230,10 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
     throw new Error("payload is not valid JSON");
   }
 
-  // Reels (content_type='video' with a reelsVideoUrl): regenerate the caption as fresh
-  // clickbait at publish time. Language follows the brand (furnish → EN, ameublo → FR).
-  // If generation fails, keep the stored caption — never block the publish.
-  if (item.contentType === "video") {
+  // Reels (content_type='video' or 'sequential_ad' with a reelsVideoUrl): regenerate the
+  // caption as fresh clickbait at publish time. Language follows the brand (furnish → EN,
+  // ameublo → FR). If generation fails, keep the stored caption — never block the publish.
+  if (item.contentType === "video" || item.contentType === "sequential_ad") {
     const social = parseSocialPayload(raw);
     if (social.reelsVideoUrl) {
       const language: "fr" | "en" = social.brand === "furnish" ? "en" : "fr";

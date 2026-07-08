@@ -381,7 +381,7 @@ async function _initSchemaImpl(): Promise<void> {
     // otherwise make a row invisible to every status-filtered query.
     `CREATE TABLE IF NOT EXISTS publication_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video')),
+      content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video', 'sequential_ad')),
       content_id TEXT NOT NULL,      -- ID of the source draft/post
       platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
       payload TEXT NOT NULL,         -- JSON-stringified content
@@ -391,7 +391,8 @@ async function _initSchemaImpl(): Promise<void> {
       status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled', 'draft')),
       error TEXT,
       created_at TEXT DEFAULT (datetime('now')),
-      published_at TEXT
+      published_at TEXT,
+      metadata TEXT                  -- JSON {style, campaign} for sequential_ad rows (nullable)
     )`,
     // Composite (status, scheduled_at): serves the consumer cron's "due pending items,
     // oldest slot first" scan (getNextPending) — seek by status then order by scheduled_at.
@@ -466,6 +467,48 @@ async function _initSchemaImpl(): Promise<void> {
       )`, args: [] },
       { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at)
               SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at FROM publication_queue`, args: [] },
+      { sql: `DROP TABLE publication_queue`, args: [] },
+      { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
+      { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
+    ]);
+  }
+
+  // publication_queue: add `metadata` (JSON {style, campaign}) as a plain nullable column.
+  // No CHECK to rebuild, so a guarded ALTER ADD COLUMN suffices. Runs BEFORE the CHECK
+  // rebuild below so that rebuild's INSERT…SELECT can carry the column through.
+  const pqInfo = await db.execute(`PRAGMA table_info(publication_queue)`);
+  const pqCols = new Set(pqInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!pqCols.has("metadata")) {
+    await runBatch("publication_queue add metadata", [
+      { sql: `ALTER TABLE publication_queue ADD COLUMN metadata TEXT`, args: [] },
+    ]);
+  }
+
+  // publication_queue.content_type CHECK migration: (…,'video') → +'sequential_ad'. Same guarded
+  // table-rebuild pattern as +video / +draft above. Carries the metadata column through the copy.
+  const pqDef3 = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='publication_queue'`,
+  );
+  const pqSql3 = pqDef3.rows[0] ? String((pqDef3.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (pqSql3 && !pqSql3.includes("'sequential_ad'")) {
+    await runBatch("publication_queue content_type CHECK +sequential_ad", [
+      { sql: `DROP TABLE IF EXISTS publication_queue_new`, args: [] },
+      { sql: `CREATE TABLE publication_queue_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video', 'sequential_ad')),
+        content_id TEXT NOT NULL,
+        platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
+        payload TEXT NOT NULL,
+        scheduled_at TEXT NOT NULL,
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled', 'draft')),
+        error TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        published_at TEXT,
+        metadata TEXT
+      )`, args: [] },
+      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata)
+              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata FROM publication_queue`, args: [] },
       { sql: `DROP TABLE publication_queue`, args: [] },
       { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
       { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
@@ -2826,7 +2869,7 @@ export async function deleteFacebookDraft(id: number): Promise<void> {
 // getNextPending compares lexicographically against datetime('now'). Producers
 // MUST store slots in that exact format (see toSqliteUtc in draft-scheduler).
 
-export type QueueContentType = "social" | "draft" | "blog" | "video";
+export type QueueContentType = "social" | "draft" | "blog" | "video" | "sequential_ad";
 export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog";
 export type QueueStatus = "pending" | "publishing" | "published" | "failed" | "cancelled" | "draft";
 
@@ -2841,6 +2884,8 @@ export interface PublicationQueueItem {
   error: string | null;
   createdAt: string;
   publishedAt: string | null;
+  /** Parsed JSON metadata (sequential_ad: {style, campaign}); null for legacy rows. */
+  metadata: Record<string, unknown> | null;
 }
 
 function mapQueueItem(o: Record<string, unknown>): PublicationQueueItem {
@@ -2855,7 +2900,21 @@ function mapQueueItem(o: Record<string, unknown>): PublicationQueueItem {
     error: (o.error as string) || null,
     createdAt: String(o.created_at),
     publishedAt: (o.published_at as string) || null,
+    metadata: parseJsonObject(o.metadata),
   };
+}
+
+/** Parse a JSON-object DB column into a record, or null on empty/invalid/non-object. */
+function parseJsonObject(v: unknown): Record<string, unknown> | null {
+  if (typeof v !== "string" || v.trim() === "") return null;
+  try {
+    const parsed = JSON.parse(v);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Thrown when a slot is already taken on a platform (partial-unique-index violation). */
@@ -2881,6 +2940,8 @@ export async function addToQueue(item: {
   scheduledAt: string;
   /** Initial status. Default 'pending'. 'draft' = awaits approval (not slot-reserving). */
   status?: QueueStatus;
+  /** Optional JSON metadata (sequential_ad: {style, campaign}); stored in the metadata column. */
+  metadata?: Record<string, unknown>;
 }): Promise<number> {
   if (!isSqliteUtc(item.scheduledAt)) {
     throw new Error(`addToQueue: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${item.scheduledAt}')`);
@@ -2889,9 +2950,9 @@ export async function addToQueue(item: {
   const status = item.status ?? "pending";
   try {
     const result = await db.execute({
-      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at, status)
-            VALUES (?, ?, ?, ?, ?, ?)`,
-      args: [item.contentType, item.contentId, item.platform, item.payload, item.scheduledAt, status],
+      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at, status, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [item.contentType, item.contentId, item.platform, item.payload, item.scheduledAt, status, item.metadata ? JSON.stringify(item.metadata) : null],
     });
     return Number(result.lastInsertRowid);
   } catch (err) {
@@ -3084,6 +3145,58 @@ export async function cancelVideoDraft(id: number): Promise<boolean> {
   const result = await db.execute({
     sql: `UPDATE publication_queue SET status = 'cancelled'
           WHERE id = ? AND status = 'draft' AND content_type = 'video'`,
+    args: [id],
+  });
+  return (result.rowsAffected ?? 0) === 1;
+}
+
+// ─── Sequential-ad queue (content_type='sequential_ad') ──────────────
+// Same draft→pending→published lifecycle as 'video', drained by the same
+// publisher; drives the /sequential-ads dashboard. metadata carries {style, campaign}.
+
+/** Sequential-ad queue rows, newest first (excludes cancelled). Drives /sequential-ads. */
+export async function getSequentialAdQueueItems(limit = 50): Promise<PublicationQueueItem[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM publication_queue
+          WHERE content_type = 'sequential_ad' AND status != 'cancelled'
+          ORDER BY created_at DESC, id DESC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
+ * Approve a sequential-ad draft: flip draft → pending at `scheduledAt` (reserves the slot).
+ * Only acts on a 'draft' sequential_ad row (idempotent). Surfaces a slot collision as
+ * QueueSlotTakenError so the caller can retry the next free slot. Mirrors approveVideoDraft.
+ */
+export async function approveSequentialAdDraft(id: number, scheduledAt: string): Promise<boolean> {
+  if (!isSqliteUtc(scheduledAt)) {
+    throw new Error(`approveSequentialAdDraft: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${scheduledAt}')`);
+  }
+  const db = await ensureSchema();
+  try {
+    const result = await db.execute({
+      sql: `UPDATE publication_queue SET status = 'pending', scheduled_at = ?
+            WHERE id = ? AND status = 'draft' AND content_type = 'sequential_ad'`,
+      args: [scheduledAt, id],
+    });
+    return (result.rowsAffected ?? 0) === 1;
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+      throw new QueueSlotTakenError("sequential_ad", scheduledAt);
+    }
+    throw err;
+  }
+}
+
+/** Cancel a sequential-ad draft (draft → cancelled). Only acts on a 'draft' sequential_ad row. */
+export async function cancelSequentialAdDraft(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue SET status = 'cancelled'
+          WHERE id = ? AND status = 'draft' AND content_type = 'sequential_ad'`,
     args: [id],
   });
   return (result.rowsAffected ?? 0) === 1;
