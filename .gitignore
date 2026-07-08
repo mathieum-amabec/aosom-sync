@@ -73,6 +73,9 @@ out/
 # Demand Gen render inputs — source product videos (73MB). Re-fetchable via each
 # clip's source_url in out/demand-gen-manifest.json; not committed to keep history lean.
 /src/*.mp4
+# Aosom customer/UGC reels (aosomweb/customer/{CA,US}/{SKU}.mp4) — re-fetchable via
+# products.video_ugc; large binaries, not committed.
+/src/ugc/
 # Demand Gen render scratch (FFmpeg drawtext textfiles)
 /tmp_lines/
 src/audio/

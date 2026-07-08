@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.10] - 2026-07-08
+
+### Added — `products.video_ugc`: Aosom customer/UGC reels
+Aosom hosts authentic UGC reels (real unboxing + assembly + in-home lifestyle, portrait 9:16) at
+`aosomweb/customer/{CA,US}/{SKU}.mp4` — a path the CSV feed never references, so we never ingested
+them. New **`products.video_ugc`** column (guarded `ALTER`, mirrors `shopify_handle`) stores that
+reel URL (CA-priority, US fallback). NOT carried by the feed — backfilled by a probe script; it
+**survives the daily sync** because `refreshProducts`' UPSERT never lists it. ~3.8% of live SKUs
+have one (47 found + downloaded to the gitignored `src/ugc/`). Also: `render-sequential-ads.mts`
+`CLIP_DIR` now defaults to the main-clone `src/` (was the retired demand-gen worktree).
+
 ## [0.5.54.9] - 2026-07-08
 
 ### Added — sequential_ad pipeline (4-message patio ads: hero-slides + demand-gen)
