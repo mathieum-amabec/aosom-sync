@@ -71,6 +71,15 @@ const NAV_ITEMS = [
     ),
   },
   {
+    href: "/sequential-ads",
+    label: "Pubs séquentielles",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 20.25h12m-7.5-3v3m3-3v3m-10.125-3h17.25c.621 0 1.125-.504 1.125-1.125V4.875c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125Z" />
+      </svg>
+    ),
+  },
+  {
     href: "/social",
     label: "Social Media",
     icon: (
