@@ -298,19 +298,26 @@ function renderDemandGen(sku: string, outFile: string): void {
 // ── enqueue ────────────────────────────────────────────────────────────────
 const sqliteToUnixSec = (s: string): number => Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
 
+const STYLE_KEY = STYLE === "hero" ? "hero_slides" : "demand_gen_messages";
+
 async function uploadBlob(localFile: string, sku: string): Promise<string> {
   const { put } = await import("@vercel/blob");
-  const key = `slideshows/sequential-ads/${STYLE}/${CAMPAIGN}/${Date.now()}-${sku}.mp4`;
+  // Sanitize the sku in the key (defense in depth; a '/' would reshape the Blob path).
+  const safeSku = sku.replace(/[^A-Za-z0-9._-]/g, "_");
+  const key = `slideshows/sequential-ads/${STYLE}/${CAMPAIGN}/${Date.now()}-${safeSku}.mp4`;
   const buf = await fs.promises.readFile(localFile);
   const blob = await put(key, buf, { access: "public", contentType: "video/mp4", addRandomSuffix: false, allowOverwrite: true });
   return blob.url;
 }
 
-async function enqueue(lib: Lib, sku: string, caption: string, blobUrl: string, occupied: number[]): Promise<{ queueId: number; slot: string } | null> {
-  const style = STYLE === "hero" ? "hero_slides" : "demand_gen_messages";
-  const contentId = `seqad:${style}:${CAMPAIGN}:${sku}`;
-  // Re-running replaces a prior UNAPPROVED draft for this sku/style/campaign (never an
-  // already-approved 'pending' post). Direct UPDATE mirrors generate-slideshow-batch.
+/**
+ * Reserve a tentative slot for this sku BEFORE uploading, so a slotless run never
+ * strands a blob with no queue row. Cancels any prior UNAPPROVED draft for this
+ * sku/style/campaign first (never an approved 'pending' post) — mirrors the batch,
+ * and frees that slot for reuse. Returns null when the schedule has no free slot.
+ */
+async function pickSlot(lib: Lib, sku: string, occupied: number[]): Promise<{ contentId: string; sqlite: string; at: number } | null> {
+  const contentId = `seqad:${STYLE_KEY}:${CAMPAIGN}:${sku}`;
   await direct().execute({
     sql: `UPDATE publication_queue SET status='cancelled'
           WHERE content_type='sequential_ad' AND content_id=? AND status='draft'`,
@@ -320,17 +327,22 @@ async function enqueue(lib: Lib, sku: string, caption: string, blobUrl: string, 
   const nowSec = Math.floor(Date.now() / 1000);
   const slot = await lib.getNextAvailableSlot("facebook", {}, { nowSec, occupied, schedule: videoSchedule, contentType: "sequential_ad" });
   if (!slot) return null;
+  return { contentId, sqlite: slot.sqlite, at: slot.at };
+}
+
+/** Insert the draft row for an already-reserved slot + uploaded blob. */
+async function insertDraft(lib: Lib, slot: { contentId: string; sqlite: string; at: number }, caption: string, blobUrl: string, occupied: number[]): Promise<number> {
   const queueId = await lib.addToQueue({
     contentType: "sequential_ad",
-    contentId,
+    contentId: slot.contentId,
     platform: "both",
     payload: JSON.stringify({ caption, brand: BRAND, reelsVideoUrl: blobUrl }),
     scheduledAt: slot.sqlite,
     status: "draft",
-    metadata: { style, campaign: CAMPAIGN },
+    metadata: { style: STYLE_KEY, campaign: CAMPAIGN },
   });
   occupied.push(slot.at); // so the next draft picks a distinct slot
-  return { queueId, slot: slot.sqlite };
+  return queueId;
 }
 
 // ── main ─────────────────────────────────────────────────────────────────
@@ -367,35 +379,43 @@ async function main(): Promise<void> {
     ? (await lib.getOccupiedQueueSlots("both", "sequential_ad")).map(sqliteToUnixSec)
     : [];
 
-  for (const sku of skus) {
-    const p = bySku.get(sku);
-    const title = (p?.title_fr || p?.title_en || sku) as string;
-    try {
-      if (STYLE === "hero") {
-        const imgs = (p?.images || []).filter(lib.isShopifyCdnUrl);
-        if (imgs.length === 0) { report.push({ sku, title, images: 0, status: "skip (no cdn.shopify image)" }); continue; }
-        if (!APPLY) { report.push({ sku, title, images: imgs.length, status: "dry-run" }); continue; }
-        const out = path.join(OUT_TMP, `${sku}.mp4`);
-        await renderHero(imgs.slice(0, 4), out, lib);
-        const url = await uploadBlob(out, sku);
-        const enq = await enqueue(lib, sku, title, url, occupied);
-        report.push({ sku, title, images: imgs.length, queueId: enq?.queueId, slot: enq?.slot, status: enq ? "draft" : "rendered (no slot)" });
-      } else {
-        if (!APPLY) { report.push({ sku, title, status: "dry-run" }); continue; }
-        const out = path.join(OUT_TMP, `${sku}.mp4`);
-        renderDemandGen(sku, out);
-        const url = await uploadBlob(out, sku);
-        const enq = await enqueue(lib, sku, title, url, occupied);
-        report.push({ sku, title, queueId: enq?.queueId, slot: enq?.slot, status: enq ? "draft" : "rendered (no slot)" });
+  try {
+    for (const sku of skus) {
+      const p = bySku.get(sku);
+      const title = (p?.title_fr || p?.title_en || sku) as string;
+      try {
+        // Render locally first, THEN reserve a slot, THEN upload — so a slotless run
+        // never leaves a blob in the store with no queue row pointing at it.
+        const out = path.join(OUT_TMP, `${sku.replace(/[^A-Za-z0-9._-]/g, "_")}.mp4`);
+        let images: number | undefined;
+        if (STYLE === "hero") {
+          const imgs = (p?.images || []).filter(lib.isShopifyCdnUrl);
+          images = imgs.length;
+          if (imgs.length === 0) { report.push({ sku, title, images: 0, status: "skip (no cdn.shopify image)" }); continue; }
+          if (!APPLY) { report.push({ sku, title, images: imgs.length, status: "dry-run" }); continue; }
+          await renderHero(imgs.slice(0, 4), out, lib);
+        } else {
+          if (!APPLY) { report.push({ sku, title, status: "dry-run" }); continue; }
+          renderDemandGen(sku, out);
+        }
+        const slot = await pickSlot(lib, sku, occupied);
+        if (!slot) {
+          report.push({ sku, title, images, status: "rendered (no slot)" });
+        } else {
+          const url = await uploadBlob(out, sku);
+          const queueId = await insertDraft(lib, slot, title, url, occupied);
+          report.push({ sku, title, images, queueId, slot: slot.sqlite, status: "draft" });
+        }
+        console.log(`  ✓ ${sku.padEnd(14)} ${report[report.length - 1].status.padEnd(20)} ${title}`);
+      } catch (err) {
+        report.push({ sku, title, status: `error: ${err instanceof Error ? err.message : String(err)}` });
+        console.error(`  ✗ ${sku}: ${err instanceof Error ? err.message : String(err)}`);
       }
-      console.log(`  ✓ ${sku.padEnd(14)} ${report[report.length - 1].status.padEnd(20)} ${title}`);
-    } catch (err) {
-      report.push({ sku, title, status: `error: ${err instanceof Error ? err.message : String(err)}` });
-      console.error(`  ✗ ${sku}: ${err instanceof Error ? err.message : String(err)}`);
     }
+  } finally {
+    fs.rmSync(OUT_TMP, { recursive: true, force: true });
+    fs.rmSync("tmp_seqdg", { recursive: true, force: true }); // demand-gen line files
   }
-  fs.rmSync(OUT_TMP, { recursive: true, force: true });
-  fs.rmSync("tmp_seqdg", { recursive: true, force: true }); // demand-gen line files
 
   console.log(`\n=== RÉCAP (${report.length}) — style=${STYLE} ===`);
   for (const r of report) console.log(`${r.sku.padEnd(14)} q=${String(r.queueId ?? "-").padEnd(5)} ${r.status.padEnd(22)} ${r.title}`);
