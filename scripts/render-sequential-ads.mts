@@ -16,12 +16,12 @@
  * then enqueues a status='draft' row (approve in /sequential-ads to schedule; the
  * existing hourly publisher drains it). Dry-run by default; --apply renders + writes.
  *
- * Run under x64 Node with the MAIN clone's prod creds + WinGet ffmpeg. src/audio and
- * the demand-gen clips are gitignored, so point at them by absolute path:
+ * Run from the MAIN clone under x64 Node with prod creds + WinGet ffmpeg. src/audio +
+ * the demand-gen clips (src/{sku}.mp4) are gitignored but present in the main clone, so
+ * MUSIC + CLIP_DIR default there — only FFMPEG_BIN is needed (SEQ_MUSIC / SEQ_CLIP_DIR
+ * override only if the assets live elsewhere):
  *
  *   FFMPEG_BIN="…/ffmpeg.exe" \
- *   SEQ_MUSIC="C:\\Users\\vente\\Documents\\aosom-sync\\src\\audio\\sigmamusicart-no-copyright-music-514564.mp3" \
- *   SEQ_CLIP_DIR="C:\\Users\\vente\\Documents\\aosom-sync\\.claude\\worktrees\\feature+demand-gen-video\\src" \
  *   node-x64 --env-file=C:\\Users\\vente\\Documents\\aosom-sync\\.env.local \
  *     node_modules/tsx/dist/cli.mjs scripts/render-sequential-ads.mts --style hero --campaign patio-ete-2026 --limit 10 --apply
  */
@@ -49,7 +49,9 @@ const LIMIT = flag("--limit") ? Number(flag("--limit")) : STYLE === "hero" ? 50 
 const FFMPEG = process.env.FFMPEG_BIN ||
   "C:\\Users\\vente\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.1-full_build\\bin\\ffmpeg.exe";
 const MUSIC = process.env.SEQ_MUSIC || path.resolve(process.cwd(), "src/audio/sigmamusicart-no-copyright-music-514564.mp3");
-const CLIP_DIR = process.env.SEQ_CLIP_DIR || ".claude/worktrees/feature+demand-gen-video/src";
+// Demand-gen source clips live in the MAIN clone's src/{sku}.mp4 (gitignored; the
+// -WEB-NT no-text clips downloaded there). Override with SEQ_CLIP_DIR if elsewhere.
+const CLIP_DIR = process.env.SEQ_CLIP_DIR || "src";
 const FONT = process.env.SEQ_FONT || "fonts/DMSans.ttf";
 const NAVY = "0x1A2340";
 

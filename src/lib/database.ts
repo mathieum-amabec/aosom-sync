@@ -100,6 +100,7 @@ async function _initSchemaImpl(): Promise<void> {
       shopify_product_id TEXT, shopify_variant_id TEXT, shopify_handle TEXT,
       last_seen_at INTEGER, last_posted_at INTEGER,
       has_discount INTEGER DEFAULT 0,
+      video_ugc TEXT,
       created_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type)`,
@@ -563,6 +564,12 @@ async function _initSchemaImpl(): Promise<void> {
   const hasDiscountColExisted = productCols.has("has_discount");
   if (!hasDiscountColExisted) {
     alters.push(`ALTER TABLE products ADD COLUMN has_discount INTEGER DEFAULT 0`);
+  }
+  // video_ugc: Aosom customer/UGC reel URL (aosomweb/customer/{CA,US}/{SKU}.mp4), CA-priority.
+  // NOT carried by the CSV feed — backfilled by the UGC-probe script. The sync UPSERT
+  // (refreshProducts) never lists this column in its DO UPDATE SET, so it survives daily syncs.
+  if (!productCols.has("video_ugc")) {
+    alters.push(`ALTER TABLE products ADD COLUMN video_ugc TEXT`);
   }
 
   // price_alerts double opt-in columns (table shipped in #99 without them).
