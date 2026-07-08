@@ -40,6 +40,6 @@ export const VIDEO_BRAND = {
   },
   music: {
     dir: 'public/music/',
-    volume: -18, // dB
+    volume: -12, // dB
   },
 } as const;
