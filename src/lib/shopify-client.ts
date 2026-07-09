@@ -84,6 +84,39 @@ export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[
   return products;
 }
 
+/**
+ * Fetch only the DRAFT products (id + tags), for the intraday reactivation pass. Uses
+ * Shopify's `status=draft` server-side filter so we pull a small slice, not the whole
+ * catalog. Returns [] when no token is configured.
+ */
+export async function fetchDraftProductStates(): Promise<Array<{ shopifyId: string; tags: string[] }>> {
+  if (!env.hasShopifyToken) return [];
+
+  const out: Array<{ shopifyId: string; tags: string[] }> = [];
+  let pageInfo: string | null = null;
+
+  do {
+    const params = new URLSearchParams({ limit: "250", fields: "id,tags" });
+    // Shopify rejects extra filters (status) alongside page_info on paginated follow-ups.
+    if (pageInfo) params.set("page_info", pageInfo);
+    else params.set("status", "draft");
+
+    const response = await shopifyFetch(`/products.json?${params}`);
+    if (!response.ok) throw new Error(`Shopify draft fetch failed: ${response.status}`);
+
+    const data = await response.json();
+    for (const p of data.products) {
+      out.push({
+        shopifyId: String(p.id),
+        tags: typeof p.tags === "string" ? p.tags.split(",").map((t: string) => t.trim()).filter(Boolean) : [],
+      });
+    }
+    pageInfo = parseLinkHeader(response.headers.get("Link"));
+  } while (pageInfo);
+
+  return out;
+}
+
 function mapShopifyProduct(raw: Record<string, unknown>): ShopifyExistingProduct {
   const variants = (raw.variants as Record<string, unknown>[]) || [];
   const images = (raw.images as Record<string, unknown>[]) || [];

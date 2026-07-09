@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.12] - 2026-07-08
+
+### Fixed — auto-drafted products are republished when they return to the feed
+A product drafted while it was gone from the Aosom feed stayed drafted forever once it came back:
+`stale-catalog` only ever drafts (never republishes), and `stock-reconcile`'s reactivation only
+fired on a sold-out→in-stock baseline flip — which a `stale-catalog` draft never triggers (its
+`qty` freezes > 0). Result: procurable products stuck unpublished = lost sales (32 found on
+2026-07-08). Two changes close the loop:
+- **`stale-catalog`** now stamps the `auto-drafted` marker when it drafts (via `updateShopifyProduct`
+  + `addAutoDraftedTag`), so its drafts become reactivation-eligible — mirroring what `stock-reconcile`
+  already did for its own drafts.
+- **`stock-reconcile`** gains a `reactivate` action: a product PRESENT in the feed and sellable that
+  is in the auto-drafted set is republished even when the baseline never went sold-out. The
+  `stock-check` route builds the auto-drafted set from a `status=draft` Shopify slice
+  (`fetchDraftProductStates`, non-fatal), excludes `exclude-stale`, and re-checks draft + auto-drafted
+  + not `exclude-stale` at apply time — so it **never** resurrects a draft an operator set by hand nor
+  fights an operator opt-out. Reactivation also un-freezes the stale baseline `qty`. The restock-path
+  reactivation now respects `exclude-stale` too (consistency).
+
+New shared tag helpers in `diff-engine` (`hasAutoDraftedTag`/`addAutoDraftedTag`/`removeAutoDraftedTag`).
+Note: the 32 pre-existing `stale-catalog` drafts have no `auto-drafted` tag, so they are triaged/republished
+by hand; this fix covers drafts going forward + `stock-reconcile`'s own drafts.
+
 ## [0.5.54.11] - 2026-07-08
 
 ### Fixed — SKUs that vanish from the Aosom feed no longer oversell

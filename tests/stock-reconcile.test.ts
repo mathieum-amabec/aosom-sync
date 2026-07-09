@@ -138,8 +138,73 @@ describe("planStockActions — grouping & counts", () => {
       csvQtyBySku: csv([["OOS-1", 0], ["BACK-1", 99], ["STABLE-1", 25]]),
       nowEpoch: NOW,
     });
-    expect(plan.counts).toEqual({ products: 4, wentOOS: 1, restocked: 1, drafted: 1 });
+    expect(plan.counts).toEqual({ products: 4, wentOOS: 1, restocked: 1, drafted: 1, reactivated: 0 });
     const byPid = Object.fromEntries(plan.actions.map((a) => [a.shopifyProductId, a.action]));
     expect(byPid).toEqual({ P1: "oos", P2: "restock", P4: "draft" });
+  });
+});
+
+describe("planStockActions — reactivate (auto-drafted product returns to feed)", () => {
+  const auto = (ids: string[]) => new Set(ids);
+
+  it("reactivates a draft+auto-drafted product that is present and sellable, even with a frozen in-stock baseline", () => {
+    // baseline qty 10 (buffered 7 > 0 → prevInStock true, the stale-catalog freeze case),
+    // feed qty 20 (sellable). Product is in the auto-drafted set → reactivate.
+    const plan = planStockActions({
+      baseline: [row("A-1", 10, "P1")], csvQtyBySku: csv([["A-1", 20]]), nowEpoch: NOW,
+      autoDraftedIds: auto(["P1"]),
+    });
+    expect(plan.actions).toEqual([
+      { shopifyProductId: "P1", skus: ["A-1"], action: "reactivate", targetInStock: true, restockSkus: [] },
+    ]);
+    expect(plan.counts.reactivated).toBe(1);
+    // baseline qty un-frozen to the current feed qty
+    expect(plan.qtyUpdates).toEqual([{ sku: "A-1", qty: 20 }]);
+  });
+
+  it("does NOT reactivate when the product is not in the auto-drafted set (stable in-stock → no action)", () => {
+    const plan = planStockActions({
+      baseline: [row("A-1", 10, "P1")], csvQtyBySku: csv([["A-1", 20]]), nowEpoch: NOW,
+      autoDraftedIds: auto(["OTHER"]),
+    });
+    expect(plan.actions).toEqual([]);
+    expect(plan.counts.reactivated).toBe(0);
+  });
+
+  it("does NOT reactivate an auto-drafted product that is present but not sellable (feed qty <= 5)", () => {
+    const plan = planStockActions({
+      baseline: [row("A-1", 10, "P1")], csvQtyBySku: csv([["A-1", 3]]), nowEpoch: NOW,
+      autoDraftedIds: auto(["P1"]),
+    });
+    // prevInStock true, newInStock false → oos (it went out of stock), never reactivate
+    expect(plan.actions[0].action).toBe("oos");
+    expect(plan.counts.reactivated).toBe(0);
+  });
+
+  it("prefers restock over reactivate when the baseline was sold out (route reactivates via restock path)", () => {
+    const plan = planStockActions({
+      baseline: [row("A-1", 0, "P1")], csvQtyBySku: csv([["A-1", 20]]), nowEpoch: NOW,
+      autoDraftedIds: auto(["P1"]),
+    });
+    expect(plan.actions[0].action).toBe("restock");
+    expect(plan.counts.reactivated).toBe(0);
+  });
+
+  it("does NOT reactivate an auto-drafted product that is absent from the feed", () => {
+    // absent + still in stock in baseline → no action (stays drafted; not sold out so not re-drafted either)
+    const plan = planStockActions({
+      baseline: [row("A-1", 10, "P1")], csvQtyBySku: csv([["B-9", 20]]), nowEpoch: NOW,
+      autoDraftedIds: auto(["P1"]),
+    });
+    expect(plan.actions).toEqual([]);
+    expect(plan.counts.reactivated).toBe(0);
+  });
+
+  it("no autoDraftedIds supplied → never reactivates (back-compat)", () => {
+    const plan = planStockActions({
+      baseline: [row("A-1", 10, "P1")], csvQtyBySku: csv([["A-1", 20]]), nowEpoch: NOW,
+    });
+    expect(plan.actions).toEqual([]);
+    expect(plan.counts.reactivated).toBe(0);
   });
 });
