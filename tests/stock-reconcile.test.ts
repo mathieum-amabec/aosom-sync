@@ -38,11 +38,11 @@ describe("planStockActions — availability flips (present in feed)", () => {
     expect(stayIn.qtyUpdates).toEqual([]); // stable product never churns the DB
   });
 
-  it("uses the buffered threshold (qty<=5 sold out, qty>5 sellable) at the boundary", () => {
-    // 5 -> buffered 0 (out); was in -> oos
-    expect(planStockActions({ baseline: [row("A", 20, "P1")], csvQtyBySku: csv([["A", 5]]), nowEpoch: NOW }).actions[0].action).toBe("oos");
-    // 6 -> buffered 3 (in); was out -> restock
-    expect(planStockActions({ baseline: [row("A", 0, "P1")], csvQtyBySku: csv([["A", 6]]), nowEpoch: NOW }).actions[0].action).toBe("restock");
+  it("uses the buffered threshold (qty<=10 sold out, qty>10 sellable) at the boundary", () => {
+    // 10 -> buffered 0 (out); was in -> oos
+    expect(planStockActions({ baseline: [row("A", 30, "P1")], csvQtyBySku: csv([["A", 10]]), nowEpoch: NOW }).actions[0].action).toBe("oos");
+    // 11 -> buffered 8 (in); was out -> restock
+    expect(planStockActions({ baseline: [row("A", 0, "P1")], csvQtyBySku: csv([["A", 11]]), nowEpoch: NOW }).actions[0].action).toBe("restock");
   });
 });
 
@@ -148,10 +148,10 @@ describe("planStockActions — reactivate (auto-drafted product returns to feed)
   const auto = (ids: string[]) => new Set(ids);
 
   it("reactivates a draft+auto-drafted product that is present and sellable, even with a frozen in-stock baseline", () => {
-    // baseline qty 10 (buffered 7 > 0 → prevInStock true, the stale-catalog freeze case),
+    // baseline qty 20 (buffered 17 > 0 → prevInStock true, the stale-catalog freeze case),
     // feed qty 20 (sellable). Product is in the auto-drafted set → reactivate.
     const plan = planStockActions({
-      baseline: [row("A-1", 10, "P1")], csvQtyBySku: csv([["A-1", 20]]), nowEpoch: NOW,
+      baseline: [row("A-1", 20, "P1")], csvQtyBySku: csv([["A-1", 20]]), nowEpoch: NOW,
       autoDraftedIds: auto(["P1"]),
     });
     expect(plan.actions).toEqual([
@@ -164,16 +164,16 @@ describe("planStockActions — reactivate (auto-drafted product returns to feed)
 
   it("does NOT reactivate when the product is not in the auto-drafted set (stable in-stock → no action)", () => {
     const plan = planStockActions({
-      baseline: [row("A-1", 10, "P1")], csvQtyBySku: csv([["A-1", 20]]), nowEpoch: NOW,
+      baseline: [row("A-1", 20, "P1")], csvQtyBySku: csv([["A-1", 20]]), nowEpoch: NOW,
       autoDraftedIds: auto(["OTHER"]),
     });
     expect(plan.actions).toEqual([]);
     expect(plan.counts.reactivated).toBe(0);
   });
 
-  it("does NOT reactivate an auto-drafted product that is present but not sellable (feed qty <= 5)", () => {
+  it("does NOT reactivate an auto-drafted product that is present but not sellable (feed qty <= 10)", () => {
     const plan = planStockActions({
-      baseline: [row("A-1", 10, "P1")], csvQtyBySku: csv([["A-1", 3]]), nowEpoch: NOW,
+      baseline: [row("A-1", 20, "P1")], csvQtyBySku: csv([["A-1", 8]]), nowEpoch: NOW,
       autoDraftedIds: auto(["P1"]),
     });
     // prevInStock true, newInStock false → oos (it went out of stock), never reactivate
@@ -193,7 +193,7 @@ describe("planStockActions — reactivate (auto-drafted product returns to feed)
   it("does NOT reactivate an auto-drafted product that is absent from the feed", () => {
     // absent + still in stock in baseline → no action (stays drafted; not sold out so not re-drafted either)
     const plan = planStockActions({
-      baseline: [row("A-1", 10, "P1")], csvQtyBySku: csv([["B-9", 20]]), nowEpoch: NOW,
+      baseline: [row("A-1", 20, "P1")], csvQtyBySku: csv([["B-9", 20]]), nowEpoch: NOW,
       autoDraftedIds: auto(["P1"]),
     });
     expect(plan.actions).toEqual([]);
@@ -202,7 +202,7 @@ describe("planStockActions — reactivate (auto-drafted product returns to feed)
 
   it("no autoDraftedIds supplied → never reactivates (back-compat)", () => {
     const plan = planStockActions({
-      baseline: [row("A-1", 10, "P1")], csvQtyBySku: csv([["A-1", 20]]), nowEpoch: NOW,
+      baseline: [row("A-1", 20, "P1")], csvQtyBySku: csv([["A-1", 20]]), nowEpoch: NOW,
     });
     expect(plan.actions).toEqual([]);
     expect(plan.counts.reactivated).toBe(0);

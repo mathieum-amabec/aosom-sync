@@ -7,16 +7,24 @@ import type {
 import { targetSellPrice } from "@/lib/pricing";
 
 /**
+ * Low-supplier-stock danger threshold: at or below this Aosom qty, the variant is treated
+ * as SOLD OUT (buffered to 0) so `inventory_policy=deny` blocks the sale before Aosom
+ * actually runs dry. Raised 5 → 10 (2026-07-09) after an oversell: qty 6–10 is too thin to
+ * risk, and dropshipping has no restock latency buffer of our own. See stockBufferQty.
+ */
+export const STOCK_SOLD_OUT_MAX = 10;
+
+/**
  * Stock safety buffer applied before pushing Aosom quantity to Shopify inventory:
  * low supplier stock is treated as sold out, and a margin is shaved off the rest so
  * we never sell more than Aosom can ship.
- *   aosom_qty <= 5 → 0 (épuisé)
- *   aosom_qty  > 5 → aosom_qty - 3
+ *   aosom_qty <= 10 → 0 (épuisé — danger zone)
+ *   aosom_qty  > 10 → aosom_qty - 3
  * Kept in one place so the daily sync (diff-engine), the apply path, and the one-time
  * backfill script agree. (The backfill .mjs inlines the same formula — keep in sync.)
  */
 export function stockBufferQty(aosomQty: number): number {
-  return aosomQty <= 5 ? 0 : aosomQty - 3;
+  return aosomQty <= STOCK_SOLD_OUT_MAX ? 0 : aosomQty - 3;
 }
 
 /** Mutually-exclusive stock-state tags driven off the BUFFERED availability. */

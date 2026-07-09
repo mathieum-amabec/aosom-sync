@@ -23,7 +23,7 @@ function makeAosom(overrides: Partial<AosomMergedProduct> = {}): AosomMergedProd
       {
         sku: "TEST-001",
         price: 99.99,
-        qty: 10,
+        qty: 20,
         color: "Noir",
         size: "",
         gtin: "",
@@ -49,14 +49,14 @@ function makeShopify(overrides: Partial<ShopifyExistingProduct> = {}): ShopifyEx
     bodyHtml: "<p>Description</p>",
     productType: "Test",
     images: ["https://img.com/1.jpg"],
-    // Baseline aosom qty 10 → buffered 7 (in stock), so the consistent tag is back-in-stock.
+    // Baseline aosom qty 20 → buffered 17 (in stock), so the consistent tag is back-in-stock.
     tags: ["back-in-stock"],
     variants: [
       {
         variantId: "V1",
         sku: "TEST-001",
         price: 99.99,
-        inventoryQuantity: 7, // = stockBufferQty(10): aosom qty 10 → 10 - 3, so the baseline has no stock diff
+        inventoryQuantity: 17, // = stockBufferQty(20): aosom qty 20 → 20 - 3, so the baseline has no stock diff
         inventoryItemId: "INV1",
         option1: "Noir",
         option2: null,
@@ -112,19 +112,19 @@ describe("computeDiffs", () => {
     expect(Number(priceChange.newValue)).toBeGreaterThanOrEqual(85.99);
   });
 
-  it("diffs stock with the safety buffer (qty > 5 → qty - 3)", () => {
+  it("diffs stock with the safety buffer (qty > 10 → qty - 3)", () => {
     const aosom = makeAosom();
-    aosom.variants[0].qty = 20; // buffered → 17; Shopify baseline is 7
+    aosom.variants[0].qty = 30; // buffered → 27; Shopify baseline is 17
     const diffs = computeDiffs([aosom], [makeShopify()]);
     const stock = diffs[0].changes.find((c) => c.field === "stock")!;
     expect(stock).toBeDefined();
-    expect(stock.oldValue).toBe(7);
-    expect(stock.newValue).toBe(17);
+    expect(stock.oldValue).toBe(17);
+    expect(stock.newValue).toBe(27);
   });
 
-  it("buffers low Aosom stock to 0 (épuisé at qty <= 5)", () => {
+  it("buffers low Aosom stock to 0 (épuisé at qty <= 10, the danger zone)", () => {
     const aosom = makeAosom();
-    aosom.variants[0].qty = 4; // <= 5 → 0
+    aosom.variants[0].qty = 8; // <= 10 → 0 (was sellable under the old ≤5 threshold)
     const diffs = computeDiffs([aosom], [makeShopify()]);
     const stock = diffs[0].changes.find((c) => c.field === "stock")!;
     expect(stock.newValue).toBe(0);
@@ -132,7 +132,7 @@ describe("computeDiffs", () => {
 
   it("emits no stock change when the buffered qty already matches Shopify available", () => {
     const aosom = makeAosom();
-    aosom.variants[0].qty = 10; // buffered → 7 = baseline inventoryQuantity
+    aosom.variants[0].qty = 20; // buffered → 17 = baseline inventoryQuantity
     const diffs = computeDiffs([aosom], [makeShopify()]);
     expect(diffs).toHaveLength(0);
   });
@@ -207,16 +207,17 @@ describe("computeDiffs", () => {
   });
 });
 
-describe("stockBufferQty (safety buffer: qty<=5 → 0, else qty-3)", () => {
+describe("stockBufferQty (safety buffer: qty<=10 → 0, else qty-3)", () => {
   it("treats the threshold and below as sold out (0)", () => {
     expect(stockBufferQty(0)).toBe(0);
     expect(stockBufferQty(1)).toBe(0);
-    expect(stockBufferQty(5)).toBe(0); // boundary: 5 → 0
+    expect(stockBufferQty(5)).toBe(0);
+    expect(stockBufferQty(10)).toBe(0); // boundary: 10 → 0 (danger zone)
   });
 
   it("shaves the margin above the threshold", () => {
-    expect(stockBufferQty(6)).toBe(3); // boundary: first above → 6 - 3
-    expect(stockBufferQty(8)).toBe(5);
+    expect(stockBufferQty(11)).toBe(8); // boundary: first above → 11 - 3
+    expect(stockBufferQty(13)).toBe(10);
     expect(stockBufferQty(100)).toBe(97);
   });
 });
@@ -244,7 +245,7 @@ describe("stock-state tag transitions (computeDiffs)", () => {
   });
 
   it("flips to back-in-stock when a variant returns to (buffered) stock", () => {
-    const aosom = makeAosom(); // qty 10 → buffered 7 → in stock
+    const aosom = makeAosom(); // qty 20 → buffered 17 → in stock
     const shopify = makeShopify({ tags: ["out-of-stock"] });
     shopify.variants[0].inventoryQuantity = 0;
     const diffs = computeDiffs([aosom], [shopify]);

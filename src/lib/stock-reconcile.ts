@@ -6,7 +6,7 @@
 // notify, and the baseline write live in the route; this module is fully unit-testable.
 //
 // Availability uses the SAME buffered threshold as the daily sync (stockBufferQty:
-// qty<=5 -> sold out, else qty-3), so the two never disagree. Availability is product-level:
+// qty<=10 -> sold out, else qty-3), so the two never disagree. Availability is product-level:
 // a product is in stock if ANY of its variants is sellable.
 import { stockBufferQty } from "./diff-engine";
 
