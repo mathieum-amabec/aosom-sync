@@ -7,13 +7,20 @@
  * inventory stays frozen while inventory_policy=deny waits for a 0 that never comes.
  *
  * This sweep is feed-aware and covers EVERY active tracked variant, not just changed ones.
- * It acts ONLY on the 0-boundary — the oversell surface:
- *   inv > 0 but absent / feed_qty <= STOCK_SOLD_OUT_MAX → 0   (deny blocks the sale)
- *   inv = 0 but back in the feed with stock            → stockBufferQty(feed_qty) (self-heal)
- * The restore half makes it idempotent AND self-healing: a variant zeroed on one run because
- * it was transiently absent from a single feed fetch is restored on the next run once it
- * reappears — no stuck-at-0. A nonzero→nonzero inventory drift (Shopify 39 vs buffered 13) is
- * left to the daily push; this stays a focused oversell guard, not a full inventory rewrite.
+ * It is a DOWNWARD-SAFE reconcile toward the buffered target stockBufferQty(feed_qty) — the
+ * same target the daily push computes:
+ *   absent / feed_qty <= STOCK_SOLD_OUT_MAX → 0            (deny blocks the sale)
+ *   feed_qty > STOCK_SOLD_OUT_MAX           → feed_qty - 3 (buffered, sellable)
+ * The daily push (Phase 2) only touches variants whose DB row changed today, so a threshold
+ * change, a failed push, or an over-count leaves Shopify drifted ABOVE the supplier cap with
+ * no self-correction — a latent oversell. This sweep closes that for the whole catalog: it
+ * writes a variant DOWN to the cap whenever Shopify sits above it, and self-heals a fully
+ * zeroed variant back into the feed (0→N). It deliberately does NOT raise a sold-down nonzero
+ * variant back up: under deny, the Shopify count is the only intraday oversell guard against a
+ * feed that refreshes just once at 06:00, so refilling it here would reopen the oversell. That
+ * upward "restore" stays with the change-gated push, which fires on a real feed move. Writing
+ * only on a real difference keeps it idempotent; zeros are written first (worst-first) so the
+ * per-run cap never starves the oversell-stopping half.
  * Variant-level → live siblings keep selling; no drafting, no SEO/URL loss.
  *
  * Guard: if the fetched feed covers < MIN_ACTIVE_COVERAGE of active tracked variant SKUs,
@@ -48,7 +55,7 @@ export interface SweepVariant {
 
 export interface InventorySweepPlan {
   guard: { activeTracked: number; covered: number; coverage: number; ok: boolean };
-  /** Variants whose Shopify inventory != feed target (to = 0 for sold-out/absent, else buffered). */
+  /** Variants whose Shopify inventory != buffered feed target (to = 0 for sold-out/absent, else buffered). */
   toSet: Array<{ sku: string; inventoryItemId: string; from: number; to: number }>;
 }
 
@@ -89,19 +96,23 @@ export function planInventorySweep(input: {
   const guard = { activeTracked, covered, coverage, ok };
   if (!ok) return { guard, toSet: [] };
 
-  // Only act on the 0-boundary — the oversell surface:
-  //   inv > 0 but target 0 (absent / sold-out) → zero it (stop oversell)
-  //   inv = 0 but target > 0 (back in feed)      → restore it (self-heal a wrongful/transient zero)
-  // A nonzero→nonzero inventory drift (e.g. Shopify 39 vs buffered 13) is a separate
-  // inventory-sync concern owned by the daily push, NOT touched here — this pass stays a
-  // focused oversell guard, not a full-catalog inventory rewrite.
+  // Downward-safe reconcile: correct every oversell-direction drift, but NEVER raise a
+  // sold-down nonzero variant back up. Under inventory_policy=deny the Shopify count is the
+  // ONLY intraday oversell guard (the feed refreshes once at 06:00; the sweep runs off that
+  // same-day feed), so topping a variant that sold 11→3 back up to 11 would let it oversell a
+  // stale feed — the exact failure this workstream exists to kill. We write only when:
+  //   to < inv                    → tighten the cap: absent/sold-out (to=0) OR over-count → down
+  //   inv === 0 AND to > 0        → self-heal a fully-zeroed variant back into the feed (0→N)
+  // We deliberately do NOT write when to > inv AND inv > 0 (a sold-down nonzero variant): that
+  // upward "restore" is left to the change-gated daily push, which fires on a real feed move.
   const toSet: InventorySweepPlan["toSet"] = [];
   for (const v of input.variants) {
     if (!v.tracked || !v.inventoryItemId) continue;   // can't set inventory on an untracked/unknown item
     const to = targetInventory(v.sku, input.feedQty, soldOutMax);
-    const flipToZero = v.inventoryQuantity > 0 && to === 0;
-    const flipFromZero = v.inventoryQuantity === 0 && to > 0;
-    if (flipToZero || flipFromZero) toSet.push({ sku: v.sku, inventoryItemId: v.inventoryItemId, from: v.inventoryQuantity, to });
+    if (!Number.isFinite(to)) continue;               // bad CSV qty → NaN target; never write NaN / thrash
+    const tightenCap = to < v.inventoryQuantity;                        // down: stop oversell / over-count
+    const healZero = v.inventoryQuantity === 0 && to > 0;              // 0→N: self-heal a transient zero
+    if (tightenCap || healZero) toSet.push({ sku: v.sku, inventoryItemId: v.inventoryItemId, from: v.inventoryQuantity, to });
   }
   return { guard, toSet };
 }
@@ -113,7 +124,7 @@ export interface InventorySweepResult {
   scanned: number;
   /** Variants set to 0 (sold-out/absent). */
   zeroed: number;
-  /** Variants restored to a positive buffered qty (self-heal). */
+  /** Variants set to a positive buffered qty (self-heal 0→N or drift correction N→M). */
   restored: number;
   failed: number;
   /** Planned writes beyond the per-run cap, deferred to the next run. */
@@ -181,7 +192,7 @@ export async function runInventorySweep(deps: InventorySweepDeps = {}): Promise<
     }
     if (rate > 0) await wait(rate);
   }
-  log(`sweep terminé: ${zeroed} zéros, ${restored} restaurés, ${failed} échecs, ${deferred} reportés sur ${variants.length} variantes`, {
+  log(`sweep terminé: ${zeroed} zéros, ${restored} restaurés/ajustés, ${failed} échecs, ${deferred} reportés sur ${variants.length} variantes`, {
     coverage: plan.guard.coverage,
   });
   return { ran: true, guardTripped: false, coverage: plan.guard.coverage, scanned: variants.length, zeroed, restored, failed, deferred };
