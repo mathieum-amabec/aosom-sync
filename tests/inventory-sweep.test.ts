@@ -58,15 +58,22 @@ describe("planInventorySweep — feed-aware reconcile", () => {
     expect(plan.toSet).toEqual([]);
   });
 
-  it("feed-completeness guard trips (< 80% coverage) → no writes at all", () => {
-    const variants = ["A", "B", "C", "D", "E"].map((s) => v(s, 20));
+  it("feed-completeness guard trips (< 70% coverage) → no writes at all", () => {
+    const variants = ["A", "B", "C", "D", "E"].map((s) => v(s, 20));   // 3/5 = 0.6 < 0.7
     const plan = planInventorySweep({ variants, feedQty: feed([["A", 40], ["B", 40], ["C", 40]]), soldOutMax: 10 });
     expect(plan.guard.ok).toBe(false);
     expect(plan.guard.coverage).toBeCloseTo(0.6);
     expect(plan.toSet).toEqual([]);
   });
 
-  it("proceeds at >= 80% coverage, zeroing the absent ones", () => {
+  it("70% threshold boundary: 7/10 proceeds, 6/10 trips", () => {
+    const mk = (n: number) => Array.from({ length: 10 }, (_, i) => v(`X${i}`, 20));
+    const covers = (n: number) => feed(Array.from({ length: n }, (_, i) => [`X${i}`, 40] as [string, number]));
+    expect(planInventorySweep({ variants: mk(10), feedQty: covers(7), soldOutMax: 10 }).guard.ok).toBe(true);  // 0.70 → ok
+    expect(planInventorySweep({ variants: mk(10), feedQty: covers(6), soldOutMax: 10 }).guard.ok).toBe(false); // 0.60 → trip
+  });
+
+  it("proceeds at >= 70% coverage, zeroing the absent ones", () => {
     const covered = Array.from({ length: 8 }, (_, i) => v(`C${i}`, 37));   // in feed at 40 → target 37 → no write
     const gone = [v("G1", 15), v("G2", 15)];                                // absent → 0
     const feedMap = feed(covered.map((x) => [x.sku, 40] as [string, number]));
@@ -81,9 +88,19 @@ describe("runInventorySweep — I/O wiring (injected deps)", () => {
   const fillers = (n: number) => Array.from({ length: n }, (_, i) => v(`F${i}`, 37)); // in feed@40 → target 37 → no write
   const fillerFeed = (n: number) => Array.from({ length: n }, (_, i) => [`F${i}`, 40] as [string, number]);
   const baseDeps = (variants: SweepVariant[], feedEntries: Array<[string, number]>) => {
-    const setInventory = vi.fn().mockResolvedValue(undefined);
+    // Simulated Shopify inventory store: setInventory writes it, readInventory (canary) reads it,
+    // so a write "sticks" by default and the post-write canary verifies cleanly unless overridden.
+    const store = new Map<string, number>();
+    const setInventory = vi.fn(async (itemId: string, _loc: string, avail: number) => { store.set(itemId, avail); });
+    // Real readInventoryLevels omits ids Shopify has no level for; mirror that (present ids only).
+    const readInventory = vi.fn(async (ids: string[]): Promise<Map<string, number>> => {
+      const m = new Map<string, number>();
+      for (const id of ids) { const val = store.get(id); if (val !== undefined) m.set(id, val); }
+      return m;
+    });
+    const notify = vi.fn().mockResolvedValue(1);
     return {
-      setInventory,
+      store, setInventory, readInventory, notify,
       fetchFeed: vi.fn().mockResolvedValue(feedEntries.map(([sku, qty]) => ({ sku, qty }))),
       fetchVariants: vi.fn().mockResolvedValue(variants),
       getLocation: vi.fn().mockResolvedValue("loc-1"),
@@ -116,12 +133,57 @@ describe("runInventorySweep — I/O wiring (injected deps)", () => {
     expect(deps.setInventory).not.toHaveBeenCalledWith("i-SOLD", "loc-1", 37);
   });
 
-  it("guard tripped → no location fetch, no writes", async () => {
+  it("guard tripped → no location fetch, no writes, RAISES a notification", async () => {
     const deps = baseDeps([v("A", 20), v("B", 20), v("C", 20), v("D", 20)], [["Z", 40]]);
     const res = await runInventorySweep(deps);
     expect(res.guardTripped).toBe(true);
     expect(deps.getLocation).not.toHaveBeenCalled();
     expect(deps.setInventory).not.toHaveBeenCalled();
+    // Fix #2: the abort is surfaced in the dashboard, not silent.
+    expect(deps.notify).toHaveBeenCalledWith("inventory-sweep", expect.stringContaining("aborté"), expect.stringContaining("couverture"));
+  });
+
+  it("post-write canary re-reads what it wrote and confirms it stuck (verified count)", async () => {
+    const deps = baseDeps([v("GONE", 12), v("OVER", 60), ...fillers(8)], [["OVER", 40], ...fillerFeed(8)]);
+    const res = await runInventorySweep(deps);
+    expect(res.zeroed).toBe(1);            // GONE → 0
+    expect(res.restored).toBe(1);          // OVER 60 → 37
+    expect(res.verified).toBe(2);          // both re-read and matched the simulated store
+    expect(res.verifyMismatch).toBe(0);
+    expect(deps.readInventory).toHaveBeenCalled();
+    expect(deps.notify).not.toHaveBeenCalled();
+  });
+
+  it("canary MISMATCH: variant ABOVE its cap after write (oversell) → counts + notifies", async () => {
+    const deps = baseDeps([v("GONE", 12), ...fillers(8)], fillerFeed(8));
+    // Simulate Shopify NOT applying the write: live value is still ABOVE the target (99 > 0).
+    deps.readInventory.mockResolvedValueOnce(new Map([["i-GONE", 99]]));
+    const res = await runInventorySweep(deps);
+    expect(res.zeroed).toBe(1);
+    expect(res.verified).toBe(0);
+    expect(res.verifyMismatch).toBe(1);
+    expect(deps.notify).toHaveBeenCalledWith("inventory-sweep", expect.stringContaining("oversell"), expect.stringContaining("GONE"));
+  });
+
+  it("canary does NOT flag a live value BELOW the cap (intraday sale) as a mismatch", async () => {
+    // OVER 60 → cap 37. A customer buys after the write → Shopify reads 30 (< 37). Under deny that
+    // is safe (not oversellable), so it must count as verified, NOT a mismatch (no false alert).
+    const deps = baseDeps([v("OVER", 60), ...fillers(8)], [["OVER", 40], ...fillerFeed(8)]);
+    deps.readInventory.mockResolvedValueOnce(new Map([["i-OVER", 30]]));
+    const res = await runInventorySweep(deps);
+    expect(res.restored).toBe(1);
+    expect(res.verified).toBe(1);         // 30 <= 37 → at/below cap → safe
+    expect(res.verifyMismatch).toBe(0);
+    expect(deps.notify).not.toHaveBeenCalled();
+  });
+
+  it("a canary read failure never fails the sweep (writes already succeeded)", async () => {
+    const deps = baseDeps([v("GONE", 12), ...fillers(8)], fillerFeed(8));
+    deps.readInventory.mockRejectedValueOnce(new Error("timeout"));
+    const res = await runInventorySweep(deps);
+    expect(res.zeroed).toBe(1);
+    expect(res.verified).toBe(0);
+    expect(res.verifyMismatch).toBe(0);   // read failed → no verification, but no crash
   });
 
   it("processes zeros before restores and caps writes per run (convergent)", async () => {

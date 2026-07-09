@@ -109,16 +109,23 @@ describe("planStockActions — discontinued sweep (absent from feed)", () => {
 describe("assertFeedComplete — truncated-feed guard", () => {
   const base = [row("A", 0, "P1"), row("B", 0, "P2"), row("C", 0, "P3"), row("D", 0, "P4"), row("E", 0, "P5")];
 
-  it("passes when the feed covers >= 80% of imported SKUs", () => {
-    // 4 of 5 present = 80%
+  it("passes when the feed covers >= 70% of imported SKUs", () => {
+    // 4 of 5 present = 80% ≥ 70%
     expect(() => assertFeedComplete(csv([["A", 1], ["B", 1], ["C", 1], ["D", 1]]), base)).not.toThrow();
   });
 
-  it("throws (no plan) when the feed covers < 80% of imported SKUs", () => {
-    // 3 of 5 = 60%
+  it("throws (no plan) when the feed covers < 70% of imported SKUs", () => {
+    // 3 of 5 = 60% < 70%
     expect(() => assertFeedComplete(csv([["A", 1], ["B", 1], ["C", 1]]), base)).toThrow(/truncated/i);
     // an empty feed against a non-empty catalog is the worst case
     expect(() => assertFeedComplete(csv([]), base)).toThrow(/truncated/i);
+  });
+
+  it("70% boundary: 7/10 passes, 6/10 throws (the lowered threshold)", () => {
+    const base10 = Array.from({ length: 10 }, (_, i) => row(`S${i}`, 0, `P${i}`));
+    const cover = (n: number) => csv(Array.from({ length: n }, (_, i) => [`S${i}`, 1] as [string, number]));
+    expect(() => assertFeedComplete(cover(7), base10)).not.toThrow(); // 0.70 → ok (would have thrown at 0.80)
+    expect(() => assertFeedComplete(cover(6), base10)).toThrow(/truncated/i); // 0.60 → still blocked
   });
 
   it("never throws on an empty baseline (nothing imported yet)", () => {

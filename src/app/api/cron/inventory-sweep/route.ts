@@ -12,11 +12,12 @@ import { runInventorySweep } from "@/lib/inventory-sweep";
  * threshold change, failed push) and self-heals a fully-zeroed variant (0→N), but never tops a
  * sold-down nonzero variant back up (that would reopen intraday oversell against the 06:00
  * feed; left to the change-gated push). Writes only on a difference → idempotent. Variant-level
- * (live siblings keep selling), no drafting. Aborts before
- * any write if the feed covers < 80% of active tracked variants (truncated-feed guard); a per-run
- * WRITE_CAP bounds blast radius (convergent). Protected by CRON_SECRET (Bearer), Shopify writes
- * rate-limited to 2 req/sec. cron_runs detail "scanned=N zeroed=X restored=Y …". Runs after the
- * daily Shopify push.
+ * (live siblings keep selling), no drafting. Aborts before any write if the feed covers < 70% of
+ * active tracked variants (truncated-feed guard) AND raises a dashboard notification so the abort
+ * is never silent. After writing, a canary re-reads a sample of the just-written variants to
+ * confirm the value stuck (notifies on mismatch). A per-run WRITE_CAP bounds blast radius
+ * (convergent). Protected by CRON_SECRET (Bearer), Shopify writes rate-limited to 2 req/sec.
+ * cron_runs detail "scanned=N zeroed=X restored=Y … verify=V/S". Runs after the daily Shopify push.
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -30,8 +31,8 @@ export async function GET(request: Request) {
       "inventory-sweep",
       () => runInventorySweep(),
       (r) => (r.guardTripped
-        ? `GUARD tripped (coverage ${(r.coverage * 100).toFixed(1)}%) — no writes`
-        : `scanned=${r.scanned} zeroed=${r.zeroed} restored=${r.restored} failed=${r.failed}${r.deferred ? ` deferred=${r.deferred}` : ""}`),
+        ? `GUARD tripped (coverage ${(r.coverage * 100).toFixed(1)}%) — no writes, notified`
+        : `scanned=${r.scanned} zeroed=${r.zeroed} restored=${r.restored} failed=${r.failed}${r.deferred ? ` deferred=${r.deferred}` : ""} verify=${r.verified}/${r.verified + r.verifyMismatch}${r.verifyMismatch ? " MISMATCH" : ""}`),
     );
     return NextResponse.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {

@@ -33,15 +33,24 @@ import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import {
   fetchActiveVariantInventory,
   getPrimaryLocationId,
+  readInventoryLevels,
   setInventoryLevel,
 } from "@/lib/shopify-client";
+import { createNotification } from "@/lib/database";
 
-/** Minimum fraction of active tracked variant SKUs the feed must cover before we reconcile. */
-export const MIN_ACTIVE_COVERAGE = 0.8;
+/** Minimum fraction of active tracked variant SKUs the feed must cover before we reconcile.
+ * 0.70 (was 0.80): the live Aosom feed dips to ~79.9% on truncated days (observed 2026-07-08),
+ * which false-aborted the sweep. 70% still blocks a genuinely broken/half-downloaded CSV from
+ * mass-flipping the catalog, but stops skipping protection on normal feed wobble. A trip now
+ * raises a dashboard notification (see runInventorySweep) so a real truncation is never silent. */
+export const MIN_ACTIVE_COVERAGE = 0.7;
 /** Spacing between Shopify inventory writes → ~2 req/second (Shopify Admin limit). */
 export const RATE_LIMIT_MS = 550;
 /** Max inventory writes per run — bounds blast radius; convergent (next run drains the rest). */
 export const WRITE_CAP = 250;
+/** After writing, re-read this many of the just-written variants from Shopify to confirm the
+ * write stuck (post-write verification canary). ≤50 (Shopify inventory_levels ids/call cap). */
+export const CANARY_SAMPLE = 10;
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -129,6 +138,10 @@ export interface InventorySweepResult {
   failed: number;
   /** Planned writes beyond the per-run cap, deferred to the next run. */
   deferred: number;
+  /** Post-write canary: sampled writes re-read from Shopify whose live value matched the target. */
+  verified: number;
+  /** Post-write canary: sampled writes whose live Shopify value did NOT match (raises a notification). */
+  verifyMismatch: number;
 }
 
 export interface InventorySweepDeps {
@@ -136,9 +149,14 @@ export interface InventorySweepDeps {
   fetchVariants?: () => Promise<SweepVariant[]>;
   getLocation?: () => Promise<string>;
   setInventory?: (inventoryItemId: string, locationId: string, available: number) => Promise<void>;
+  /** Re-read live inventory for the post-write canary. Returns available qty by inventory_item_id. */
+  readInventory?: (inventoryItemIds: string[], locationId: string) => Promise<Map<string, number>>;
+  /** Raise a dashboard notification (guard trip, canary mismatch). Defaults to createNotification. */
+  notify?: (type: string, title: string, message: string) => Promise<unknown>;
   log?: (msg: string, extra?: Record<string, unknown>) => void;
   rateLimitMs?: number;
   writeCap?: number;
+  canarySample?: number;
 }
 
 const defaultLog = (msg: string, extra?: Record<string, unknown>) =>
@@ -151,17 +169,32 @@ export async function runInventorySweep(deps: InventorySweepDeps = {}): Promise<
   const feedQty = new Map<string, number>();
   for (const p of csv) feedQty.set(p.sku.toUpperCase(), p.qty);
 
+  const notify = deps.notify ?? createNotification;
+  // A notification write must never crash the cron — degrade to a log line.
+  const safeNotify = async (title: string, message: string) => {
+    try { await notify("inventory-sweep", title, message); }
+    catch (err) { log(`notification échouée: ${err instanceof Error ? err.message : String(err)}`); }
+  };
+
   const variants = deps.fetchVariants ? await deps.fetchVariants() : await fetchActiveVariantInventory();
   const plan = planInventorySweep({ variants, feedQty });
   const empty: InventorySweepResult = {
     ran: true, guardTripped: false, coverage: plan.guard.coverage, scanned: variants.length,
-    zeroed: 0, restored: 0, failed: 0, deferred: 0,
+    zeroed: 0, restored: 0, failed: 0, deferred: 0, verified: 0, verifyMismatch: 0,
   };
 
   if (!plan.guard.ok) {
-    log(`GARDE-FOU: couverture ${(plan.guard.coverage * 100).toFixed(1)}% < ${MIN_ACTIVE_COVERAGE * 100}% — feed suspect, aucune écriture`, {
+    const pct = (plan.guard.coverage * 100).toFixed(1);
+    log(`GARDE-FOU: couverture ${pct}% < ${MIN_ACTIVE_COVERAGE * 100}% — feed suspect, aucune écriture`, {
       active_tracked: plan.guard.activeTracked, covered: plan.guard.covered,
     });
+    // Surface the abort in the dashboard — a silent skip could hide a day with zero oversell
+    // protection. (The stock-check guard already errors visibly; this sweep trip is a `success`.)
+    await safeNotify(
+      "Sweep aborté — feed suspect",
+      `Sweep aborté — couverture feed ${pct}% < seuil ${MIN_ACTIVE_COVERAGE * 100}% ` +
+        `(${plan.guard.covered}/${plan.guard.activeTracked} variantes actives couvertes). Aucune écriture ce run.`,
+    );
     return { ...empty, guardTripped: true };
   }
   if (plan.toSet.length === 0) {
@@ -177,14 +210,17 @@ export async function runInventorySweep(deps: InventorySweepDeps = {}): Promise<
 
   const getLocation = deps.getLocation ?? getPrimaryLocationId;
   const setInventory = deps.setInventory ?? setInventoryLevel;
+  const readInventory = deps.readInventory ?? readInventoryLevels;
   const rate = deps.rateLimitMs ?? RATE_LIMIT_MS;
   const locationId = await getLocation();
 
   let zeroed = 0, restored = 0, failed = 0;
+  const written: Array<{ inventoryItemId: string; sku: string; to: number }> = [];
   for (const t of batch) {
     try {
       await setInventory(t.inventoryItemId, locationId, t.to);
       if (t.to === 0) zeroed++; else restored++;
+      written.push({ inventoryItemId: t.inventoryItemId, sku: t.sku, to: t.to });
       log(`inv ${t.from}→${t.to}`, { sku: t.sku });
     } catch (err) {
       failed++;
@@ -192,8 +228,40 @@ export async function runInventorySweep(deps: InventorySweepDeps = {}): Promise<
     }
     if (rate > 0) await wait(rate);
   }
-  log(`sweep terminé: ${zeroed} zéros, ${restored} restaurés/ajustés, ${failed} échecs, ${deferred} reportés sur ${variants.length} variantes`, {
+
+  // Post-write verification canary: re-read a sample of what we JUST wrote and confirm the write
+  // held the variant AT OR BELOW its cap. The canary guards the OVERSELL direction only: a live
+  // value ABOVE the target (or a missing level) means the write didn't stick and the variant is
+  // still oversellable → raise a notification. A live value BELOW the target is expected and safe
+  // (a customer bought a unit under inventory_policy=deny, or the item was already lower) — NOT a
+  // failure, so it does not alert (that would be constant false positives on a live catalog).
+  // Non-fatal: a read failure never fails the sweep (the writes already returned 200).
+  let verified = 0, verifyMismatch = 0;
+  const sample = written.slice(0, deps.canarySample ?? CANARY_SAMPLE);
+  if (sample.length > 0) {
+    try {
+      const levels = await readInventory(sample.map((s) => s.inventoryItemId), locationId);
+      const over: string[] = [];
+      for (const s of sample) {
+        const got = levels.get(s.inventoryItemId);
+        if (got !== undefined && got <= s.to) verified++;                 // at/below cap → safe
+        else { verifyMismatch++; over.push(`${s.sku}(cap ${s.to}, lu ${got ?? "absent"})`); } // above cap / missing → still oversellable
+      }
+      log(`verify: ${verified}/${sample.length} au cap ou en-dessous`, { mismatch: verifyMismatch });
+      if (verifyMismatch > 0) {
+        await safeNotify(
+          "Sweep — écritures non appliquées (oversell possible)",
+          `${verifyMismatch}/${sample.length} variantes échantillonnées restent AU-DESSUS de leur cap ` +
+            `après écriture (write non appliqué → oversell possible): ${over.slice(0, 10).join(", ")}`,
+        );
+      }
+    } catch (err) {
+      log(`verify ignoré (lecture échouée): ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  log(`sweep terminé: ${zeroed} zéros, ${restored} restaurés/ajustés, ${failed} échecs, ${deferred} reportés, verify ${verified}/${sample.length} sur ${variants.length} variantes`, {
     coverage: plan.guard.coverage,
   });
-  return { ran: true, guardTripped: false, coverage: plan.guard.coverage, scanned: variants.length, zeroed, restored, failed, deferred };
+  return { ran: true, guardTripped: false, coverage: plan.guard.coverage, scanned: variants.length, zeroed, restored, failed, deferred, verified, verifyMismatch };
 }

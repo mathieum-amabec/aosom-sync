@@ -65,8 +65,11 @@ interface Group {
   rows: StockBaselineRow[];
 }
 
-/** Minimum fraction of imported SKUs the fetched feed must cover before we trust it. */
-export const FEED_MIN_COVERAGE = 0.8;
+/** Minimum fraction of imported SKUs the fetched feed must cover before we trust it.
+ * 0.70 (was 0.80): the live Aosom feed dips to ~79.9% on truncated days (the 2026-07-08
+ * stock-check false-aborted at 996/1247). 70% still blocks a genuinely broken/half-downloaded
+ * CSV from mass-flipping the catalog, but stops skipping the intraday reconcile on normal wobble. */
+export const FEED_MIN_COVERAGE = 0.7;
 
 /**
  * Feed-completeness guard. A truncated / garbage CSV must never be allowed to mass-flip the

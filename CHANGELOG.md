@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.16] - 2026-07-09
+
+### Changed — oversell-guard hardening (threshold, guard alert, post-write canary)
+Three fixes on top of the sweep, driven by a live prod audit of the oversell protection:
+
+- **Feed-completeness threshold 0.80 → 0.70** (`inventory-sweep.ts`, `stock-reconcile.ts`). The live
+  Aosom feed dips to ~79.9% on truncated days (the 2026-07-08 stock-check false-aborted at 996/1247).
+  70% still blocks a genuinely broken/half-downloaded CSV from mass-flipping the catalog, but stops
+  skipping protection on normal feed wobble. `removed-catalog.ts` kept at 0.80 on purpose — it *drafts*
+  products (harder to reverse than a zeroed inventory the sweep self-heals).
+- **Guard-trip notification.** When the sweep aborts on low coverage it now raises a dashboard
+  notification ("Sweep aborté — couverture feed X% < seuil Y%") via `createNotification`, so a real
+  truncation is never a silent success. Wrapped in `safeNotify` — a notification write failure degrades
+  to a log, never crashes the cron.
+- **Post-write verification canary.** After writing, the sweep re-reads a sample (≤10) of the
+  just-written variants via the new `readInventoryLevels()` Shopify helper and confirms each sits AT OR
+  BELOW its cap. It guards the OVERSELL direction only: a live value above the cap (or a missing level)
+  means the write didn't stick → notification; a value below is expected (a sale under `deny`) and is
+  NOT flagged, so a live catalog doesn't generate constant false alerts. Non-fatal: a read failure
+  never fails the sweep. cron_runs detail gains `verify=V/S`.
+
 ## [0.5.54.15] - 2026-07-09
 
 ### Changed — inventory sweep widened to a downward-safe catalog-wide reconcile
