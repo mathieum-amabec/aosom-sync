@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.13] - 2026-07-09
+
+### Fixed — oversell guard: sold-out threshold raised 5 → 10
+An active product stayed buyable while Aosom was out of stock: Shopify `inventory_quantity` was
+frozen at an old buffered value and `inventory_policy=deny` only blocks at 0, and nothing zeroed a
+variant whose feed qty went low or absent. Audit (2026-07-09) found **131 buyable-but-unshippable
+variants** (~2 100 phantom units), zeroed on the spot via the new script.
+
+- **`stockBufferQty` sold-out threshold raised 5 → 10** (`STOCK_SOLD_OUT_MAX`): `feed_qty` 6–10 is
+  too thin for dropship (no restock latency of our own), so it now buffers to 0 → `deny` blocks. A
+  variant that **drops** into the 0–10 band gets zeroed on its next Phase-2 push. Ripples
+  consistently to `productInStock` / stock tags / OOS / restock / drafts.
+- **`scripts/zero-inventory-oos.mjs`** — operational tool (dry-run default, `--apply`, `--le N`) for
+  stale/absent variants the daily push can't reach (Phase-2's `getAllProductsAsAosom` only sees
+  today-changed rows). Used to zero today's 131. `backfill-inventory.mjs` threshold synced.
+
+Note: a fully-*absent* variant whose row didn't change today is not auto-reached by Phase-2 —
+closing that needs a dedicated feed-aware daily inventory pass (follow-up); the script covers it
+on demand meanwhile.
+
 ## [0.5.54.12] - 2026-07-08
 
 ### Fixed — auto-drafted products are republished when they return to the feed
