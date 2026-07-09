@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.11] - 2026-07-08
+
+### Fixed — SKUs that vanish from the Aosom feed no longer oversell
+A variant that disappears from the Aosom CSV entirely (not qty=0, but *gone*) used to stay
+`active` and buyable on Shopify: the daily sync discarded `diffProductsLight.removed`, so `qty`
+froze at its last value, and `stock-reconcile` only drafts absent products that are *also* sold-out
+in the baseline — so "vanished while in stock" was left live until the 30-day `stale-catalog` net
+(or never, when tagged `exclude-stale`). That is an oversell window on discontinued items.
+
+New **`src/lib/removed-catalog.ts`** reconciles removed SKUs at sync time (`runSyncInit` prod path +
+`runSync` manual, both non-fatal):
+- **qty → 0** in Turso (new `zeroQtyForRemovedSkus`, which leaves `last_seen_at` intact so the
+  30-day net still works for anything skipped)
+- **Shopify DRAFT** for products whose *every* variant is gone from the feed, intersected with the
+  diff's `removed` set (never touches a manual/non-Aosom product whose SKUs were never in the feed)
+- **rename guard:** a removed SKU with a prefix-relative still in the feed (Aosom variant-suffix
+  rename, e.g. `84D-082` → `84D-082V00BG`) is left live
+- **`exclude-stale`** opt-out respected; a **feed-completeness guard** (≥80% of *active* variants
+  covered) blocks a truncated feed from mass-drafting the catalog
+- logs `removed_from_feed` per drafted product
+
+The 30-day `stale-catalog` cron stays as the secondary net. Pure decision core is unit-tested.
+
 ## [0.5.54.10] - 2026-07-08
 
 ### Added — `products.video_ugc`: Aosom customer/UGC reels

@@ -981,6 +981,30 @@ export async function updateStockBaselineQty(updates: Array<{ sku: string; qty: 
   }
 }
 
+/**
+ * Set qty=0 for SKUs that VANISHED from the Aosom feed (removed_from_feed reconcile).
+ * Deliberately does NOT touch last_seen_at: these SKUs were NOT seen in the feed, so
+ * stamping last_seen_at=now would both be wrong and disable the 30-day stale-catalog
+ * secondary net for anything the immediate draft skipped/failed. Only rows that are not
+ * already 0 are written; returns the number of rows actually changed. Idempotent.
+ */
+export async function zeroQtyForRemovedSkus(skus: string[]): Promise<number> {
+  if (skus.length === 0) return 0;
+  const db = await ensureSchema();
+  let affected = 0;
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < skus.length; i += BATCH_SIZE) {
+    const chunk = skus.slice(i, i + BATCH_SIZE);
+    const placeholders = chunk.map(() => "?").join(",");
+    const res = await db.execute({
+      sql: `UPDATE products SET qty = 0 WHERE qty != 0 AND sku IN (${placeholders})`,
+      args: chunk,
+    });
+    affected += Number(res.rowsAffected ?? 0);
+  }
+  return affected;
+}
+
 export interface ProductSnapshot {
   sku: string;
   name: string;

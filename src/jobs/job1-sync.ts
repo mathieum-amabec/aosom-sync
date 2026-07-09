@@ -58,6 +58,7 @@ import type { ChangeTypeHistory } from "@/lib/database";
 import { isKlaviyoConfigured, trackEvent } from "@/lib/klaviyo-client";
 import { storeLink } from "@/lib/insights";
 import { diffProductsLight } from "@/lib/product-diff";
+import { runRemovedFromFeedDraft } from "@/lib/removed-catalog";
 import {
   savePhase1Blob,
   readPhase1Blob,
@@ -467,6 +468,20 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
     }
     await updateSyncRunTiming(syncRun.id, timing);
 
+    // Phase 6b: Reconcile SKUs that vanished from the feed — qty→0 + immediate Shopify
+    // draft (closes the oversell window instead of waiting for the 30-day stale-catalog
+    // net). Non-fatal: a Shopify/feed hiccup must never fail the DB sync. Only when
+    // pushing this phase (shopifyProducts is already in scope + Shopify writes intended).
+    if (shopifyPush && diffResult.removed.length > 0) {
+      try {
+        const feedSkus = new Set(aosomProducts.map((p) => p.sku.toUpperCase()));
+        const removedRes = await runRemovedFromFeedDraft(diffResult.removed, feedSkus, { shopifyProducts });
+        log("removed-from-feed reconcile", { phase: "removedFromFeed", ...removedRes });
+      } catch (removedErr) {
+        log(`removed-from-feed reconcile failed (non-fatal): ${removedErr instanceof Error ? removedErr.message : String(removedErr)}`, { phase: "removedFromFeed" });
+      }
+    }
+
     // Phase 7: Rebuild product type counts
     const t0Rebuild = Date.now();
     log("Mise à jour des compteurs de catégories...");
@@ -799,6 +814,20 @@ export async function runSyncInit(): Promise<SyncInitResult> {
     // notified_at stamping makes that safe — no double-send). runSync (manual trigger)
     // has its own call.
     await notifyBackInStockWaitlist(changes.restockSkus);
+
+    // Reconcile SKUs that vanished from the feed — qty→0 + immediate Shopify draft
+    // (closes the oversell window; the 30-day stale-catalog cron stays as the secondary
+    // net). This is the production path (cron → runSyncFull → runSyncInit), which does
+    // NOT pre-fetch Shopify, so the runner fetches the catalog itself. Non-fatal.
+    if (diffResult.removed.length > 0) {
+      try {
+        const feedSkus = new Set(aosomProducts.map((p) => p.sku.toUpperCase()));
+        const removedRes = await runRemovedFromFeedDraft(diffResult.removed, feedSkus);
+        log("removed-from-feed reconcile", { phase: "removedFromFeed", ...removedRes });
+      } catch (removedErr) {
+        log(`removed-from-feed reconcile failed (non-fatal): ${removedErr instanceof Error ? removedErr.message : String(removedErr)}`, { phase: "removedFromFeed" });
+      }
+    }
 
     const totalChunks = toWrite.length > 0 ? Math.ceil(toWrite.length / REFRESH_CHUNK_SIZE) : 0;
 
