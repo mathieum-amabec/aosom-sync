@@ -29,10 +29,17 @@ describe("planInventorySweep — feed-aware reconcile", () => {
     expect(plan.toSet).toEqual([]);
   });
 
-  it("leaves a nonzero→nonzero drift alone (not the oversell boundary — daily push owns it)", () => {
-    // Shopify 39 vs feed 16 → buffered target 13, but both sides > 0 → out of scope, no write
-    const plan = planInventorySweep({ variants: [v("A", 39)], feedQty: feed([["A", 16]]), soldOutMax: 10 });
+  it("LEAVES a sold-down nonzero variant alone (never refills upward against the 06:00 feed)", () => {
+    // Shopify 20 vs feed 40 → buffered target 37. Refilling 20→37 would reopen intraday
+    // oversell under deny, so downward-safe reconcile leaves it for the change-gated push.
+    const plan = planInventorySweep({ variants: [v("A", 20)], feedQty: feed([["A", 40]]), soldOutMax: 10 });
     expect(plan.toSet).toEqual([]);
+  });
+
+  it("CORRECTS an over-count downward (Shopify above the buffered cap → tighten)", () => {
+    // Shopify 39 vs feed 16 → buffered target 13. 13 < 39 → write 39→13 (stop the oversell).
+    const plan = planInventorySweep({ variants: [v("A", 39)], feedQty: feed([["A", 16]]), soldOutMax: 10 });
+    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 39, to: 13 }]);
   });
 
   it("no write when absent AND already 0 (idempotent)", () => {
@@ -96,6 +103,17 @@ describe("runInventorySweep — I/O wiring (injected deps)", () => {
     expect(deps.setInventory).toHaveBeenCalledWith("i-LOW", "loc-1", 0);
     expect(deps.setInventory).toHaveBeenCalledWith("i-BACK", "loc-1", 37);
     expect(deps.setInventory).not.toHaveBeenCalledWith("i-OK", "loc-1", 37);
+  });
+
+  it("leaves a sold-down nonzero variant alone but still tightens an over-count", async () => {
+    // SOLD 22 vs feed 40 (target 37) → upward, left alone. OVER 60 vs feed 40 (target 37) →
+    // downward over-count, written 60→37. Downward-safe: only the tighten happens.
+    const deps = baseDeps([v("SOLD", 22), v("OVER", 60), ...fillers(8)], [["SOLD", 40], ["OVER", 40], ...fillerFeed(8)]);
+    const res = await runInventorySweep(deps);
+    expect(res.zeroed).toBe(0);
+    expect(res.restored).toBe(1); // OVER 60→37 (positive target) buckets as restored/adjusted
+    expect(deps.setInventory).toHaveBeenCalledWith("i-OVER", "loc-1", 37);
+    expect(deps.setInventory).not.toHaveBeenCalledWith("i-SOLD", "loc-1", 37);
   });
 
   it("guard tripped → no location fetch, no writes", async () => {

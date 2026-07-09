@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.15] - 2026-07-09
+
+### Changed — inventory sweep widened to a downward-safe catalog-wide reconcile
+`#361` shipped the sweep as a 0-boundary-only guard. It stopped the frozen-inventory oversell but
+left the bigger drift untouched: ~78% of active tracked variants had Shopify inventory !=
+`stockBufferQty(current feed_qty)`, because the change-filtered Phase-2 push only re-syncs variants
+whose feed row moved *today*. Over-counts (threshold change, failed push) sat above the supplier cap
+= latent oversell, never corrected.
+
+`planInventorySweep` now reconciles the WHOLE catalog toward the buffered target, but **downward-safe**:
+- `to < inv` → write it down (absent/sold-out → 0, over-count → buffered cap): all oversell-direction drift
+- `inv = 0` and `to > 0` → self-heal a fully-zeroed variant back into the feed (`0→N`)
+- **never** tops a sold-down *nonzero* variant back up (`3→11`)
+
+That last exclusion is deliberate: under `inventory_policy=deny` the Shopify count is the only intraday
+oversell guard against a feed that refreshes once at 06:00, so refilling a sold-down variant here would
+reopen the exact oversell this workstream kills. Upward "restore" stays with the change-gated daily push,
+which fires on a real feed move. NaN feed qty is skipped (never writes/thrashes `NaN`). All existing
+guards kept: 80% coverage floor, `WRITE_CAP=250`/run (convergent), 2 req/s, variant-level (live siblings
+keep selling), zeros written first so the cap never starves the safety half.
+
 ## [0.5.54.14] - 2026-07-09
 
 ### Added — daily feed-aware inventory sweep (complete oversell guard)
