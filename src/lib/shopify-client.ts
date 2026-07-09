@@ -495,6 +495,32 @@ export async function setInventoryLevel(
 }
 
 /**
+ * Read current `available` inventory for a batch of inventory items at one location.
+ * Used by the daily sweep's post-write verification canary to confirm a write stuck.
+ * Shopify caps inventory_item_ids at 50 per call — callers pass a small sample.
+ * Returns a map keyed by inventory_item_id (string) → available qty.
+ */
+export async function readInventoryLevels(
+  inventoryItemIds: string[],
+  locationId: string,
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (inventoryItemIds.length === 0) return out;
+  const ids = inventoryItemIds.slice(0, 50).map((i) => Number(i)).join(",");
+  const response = await shopifyFetch(
+    `/inventory_levels.json?location_ids=${Number(locationId)}&inventory_item_ids=${ids}`,
+  );
+  if (!response.ok) {
+    throw new Error(`Shopify read inventory levels failed: ${response.status}`);
+  }
+  const json = (await response.json()) as { inventory_levels?: Array<{ inventory_item_id: number; available: number }> };
+  for (const lvl of json.inventory_levels ?? []) {
+    out.set(String(lvl.inventory_item_id), Number(lvl.available));
+  }
+  return out;
+}
+
+/**
  * Add a product to a collection via the Collects API.
  */
 export async function addProductToCollection(productId: string, collectionId: string): Promise<void> {
