@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.14] - 2026-07-09
+
+### Added — daily feed-aware inventory sweep (complete oversell guard)
+`#360` raised the sold-out threshold but only caught variants that *change* into the danger band.
+The Phase-2 push is change-filtered (`getAllProductsAsAosom` = `last_seen_at >= today`) + chunked,
+so a variant that vanished from the feed without "changing" keeps a frozen Shopify inventory > 0
+while `inventory_policy=deny` waits for a 0 that never comes.
+
+New **`/api/cron/inventory-sweep`** — feed-aware pass over EVERY active tracked variant, acting on
+the 0-boundary (the oversell surface):
+- `inv > 0` but **absent** from the feed OR `feed_qty ≤ STOCK_SOLD_OUT_MAX` → set **0** (`deny` blocks the sale)
+- `inv = 0` but **back** in the feed with stock → **restore** to the buffered qty (self-heal a transient/wrongful zero)
+
+A nonzero→nonzero drift is left to the daily push — this stays a focused oversell guard, not a full
+rewrite. Guards: aborts before any write if the feed covers < 80% of active tracked variants
+(truncated-feed protection); `WRITE_CAP=250`/run bounds blast radius (convergent); one
+`setInventoryLevel` per item = true 2 req/s; non-fatal per item. Crons 08:45 & 20:45 UTC. Pure core
+unit-tested. `scripts/zero-inventory-oos.mjs` becomes redundant once this runs.
+
+Note (separate, bigger finding): ~78% of active tracked variants (790/1011) have Shopify inventory
+!= `stockBufferQty(current feed_qty)` — the daily push isn't keeping inventory in sync (many
+overstated = latent oversell). Deliberately NOT rolled into this focused guard.
+
 ## [0.5.54.13] - 2026-07-09
 
 ### Fixed — oversell guard: sold-out threshold raised 5 → 10
