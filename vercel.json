@@ -72,6 +72,14 @@
     {
       "path": "/api/cron/stale-catalog",
       "schedule": "30 7 * * *"
+    },
+    {
+      "path": "/api/cron/inventory-sweep",
+      "schedule": "45 8 * * *"
+    },
+    {
+      "path": "/api/cron/inventory-sweep",
+      "schedule": "45 20 * * *"
     }
   ]
 }

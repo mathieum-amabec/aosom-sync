@@ -117,6 +117,47 @@ export async function fetchDraftProductStates(): Promise<Array<{ shopifyId: stri
   return out;
 }
 
+/**
+ * Flat list of every ACTIVE product's variants with the fields the daily inventory sweep
+ * needs (sku + current available + inventory_item_id + whether tracked). Uses the
+ * `status=active` server filter. Returns [] with no token.
+ */
+export async function fetchActiveVariantInventory(): Promise<
+  Array<{ sku: string; inventoryQuantity: number; inventoryItemId: string; tracked: boolean }>
+> {
+  if (!env.hasShopifyToken) return [];
+
+  const out: Array<{ sku: string; inventoryQuantity: number; inventoryItemId: string; tracked: boolean }> = [];
+  let pageInfo: string | null = null;
+
+  do {
+    const params = new URLSearchParams({ limit: "250", fields: "id,variants" });
+    // status filter only on the first page; page_info follow-ups reject extra filters.
+    if (pageInfo) params.set("page_info", pageInfo);
+    else params.set("status", "active");
+
+    const response = await shopifyFetch(`/products.json?${params}`);
+    if (!response.ok) throw new Error(`Shopify active-variant fetch failed: ${response.status}`);
+
+    const data = await response.json();
+    for (const p of data.products) {
+      for (const v of (p.variants as Record<string, unknown>[]) || []) {
+        const sku = (v.sku as string) || "";
+        if (!sku) continue;
+        out.push({
+          sku,
+          inventoryQuantity: (v.inventory_quantity as number) || 0,
+          inventoryItemId: v.inventory_item_id != null ? String(v.inventory_item_id) : "",
+          tracked: v.inventory_management === "shopify",
+        });
+      }
+    }
+    pageInfo = parseLinkHeader(response.headers.get("Link"));
+  } while (pageInfo);
+
+  return out;
+}
+
 function mapShopifyProduct(raw: Record<string, unknown>): ShopifyExistingProduct {
   const variants = (raw.variants as Record<string, unknown>[]) || [];
   const images = (raw.images as Record<string, unknown>[]) || [];
