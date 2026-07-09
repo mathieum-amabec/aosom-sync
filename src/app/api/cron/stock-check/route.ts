@@ -3,19 +3,22 @@ import { NextResponse } from "next/server";
 import { trackCron } from "@/lib/cron-tracking";
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { getStockBaseline, updateStockBaselineQty } from "@/lib/database";
-import { getShopifyStockState, updateShopifyProduct } from "@/lib/shopify-client";
-import { applyStockTags, STOCK_TAG_AUTODRAFTED } from "@/lib/diff-engine";
+import { getShopifyStockState, updateShopifyProduct, fetchDraftProductStates } from "@/lib/shopify-client";
+import { applyStockTags, hasAutoDraftedTag, removeAutoDraftedTag, STOCK_TAG_AUTODRAFTED } from "@/lib/diff-engine";
+import { EXCLUDE_TAG } from "@/lib/stale-catalog";
 import { planStockActions, assertFeedComplete, type PlannedAction } from "@/lib/stock-reconcile";
 import { notifyBackInStockWaitlist } from "@/jobs/job1-sync";
 
 // Cap Shopify writes per run so a mass-rupture day can't blow the function budget mid-loop.
-// Actions are processed worst-first (OOS/draft before restock) so the cap never starves rupture
-// detection; the overflow is reported as `deferred` and drained by the next (convergent) run.
+// Actions are processed worst-first (OOS/draft before restock/reactivate) so the cap never
+// starves rupture detection; the overflow is reported as `deferred` and drained by the next
+// (convergent) run.
 const WRITE_CAP = 150;
-const ACTION_RANK: Record<string, number> = { oos: 0, draft: 1, restock: 2 };
+const ACTION_RANK: Record<string, number> = { oos: 0, draft: 1, restock: 2, reactivate: 3 };
 
-const hasAutoDraft = (tags: string[]) => tags.some((t) => t.toLowerCase() === STOCK_TAG_AUTODRAFTED);
-const withoutAutoDraft = (tags: string[]) => tags.filter((t) => t.toLowerCase() !== STOCK_TAG_AUTODRAFTED);
+const hasAutoDraft = (tags: string[]) => hasAutoDraftedTag(tags);
+const withoutAutoDraft = (tags: string[]) => removeAutoDraftedTag(tags);
+const hasExcludeStale = (tags: string[]) => tags.some((t) => t.toLowerCase() === EXCLUDE_TAG);
 
 interface StockCheckResult {
   dryRun: boolean;
@@ -23,6 +26,7 @@ interface StockCheckResult {
   wentOOS: number;
   restocked: number;
   drafted: number;
+  reactivated: number;
   skipped: number;
   deferred: number;
   errors: number;
@@ -35,6 +39,7 @@ interface StockCheckResult {
  * Aosom CSV, diffs qty (not prices/images), and flips the customer-visible stock state:
  *   - went out of stock  -> tag `out-of-stock` (stays active; badge + waitlist still work)
  *   - back in stock      -> tag `back-in-stock`; reactivate iff WE auto-drafted it; notify waitlist
+ *   - auto-drafted & returned to the feed with sellable stock -> reactivate (publish, drop marker)
  *   - sold out & gone from the feed >7d -> draft + `auto-drafted` marker (discontinued)
  * No date checkpoint: convergent and freely re-runnable. `?dryRun=1` plans without writing.
  */
@@ -48,7 +53,7 @@ export async function GET(request: Request) {
     const result = await trackCron(
       dryRun ? "stock-check-dryrun" : "stock-check",
       () => runStockCheck(dryRun),
-      (r) => `${r.scanned} scanned, ${r.wentOOS} OOS, ${r.restocked} restock, ${r.drafted} draft, ${r.notified} notified${r.deferred ? `, ${r.deferred} deferred` : ""}${r.errors ? `, ${r.errors} errors` : ""}${r.dryRun ? " [dry-run]" : ""}`,
+      (r) => `${r.scanned} scanned, ${r.wentOOS} OOS, ${r.restocked} restock, ${r.drafted} draft, ${r.reactivated} reactivated, ${r.notified} notified${r.deferred ? `, ${r.deferred} deferred` : ""}${r.errors ? `, ${r.errors} errors` : ""}${r.dryRun ? " [dry-run]" : ""}`,
     );
     return NextResponse.json({ success: true, data: result });
   } catch (err) {
@@ -67,11 +72,28 @@ async function runStockCheck(dryRun: boolean): Promise<StockCheckResult> {
   // fetched feed is implausibly thin, so a truncated CSV can't mass-flip the catalog.
   assertFeedComplete(csvQtyBySku, baseline);
 
-  const plan = planStockActions({ csvQtyBySku, baseline, nowEpoch: Math.floor(Date.now() / 1000) });
+  // Reactivation candidates: products currently DRAFT + carrying OUR `auto-drafted` marker and
+  // NOT `exclude-stale`. Gating planStockActions on this set means we only ever republish
+  // products we drafted ourselves — never a draft an operator set by hand. Uses the small
+  // status=draft slice, not the full catalog.
+  // Non-fatal: reactivation is the least-critical feature, so a Shopify hiccup here must NOT
+  // abort the critical OOS/draft rupture detection below — degrade to no reactivation this run
+  // (convergent: the next run retries).
+  let autoDraftedIds = new Set<string>();
+  try {
+    const draftStates = await fetchDraftProductStates();
+    autoDraftedIds = new Set(
+      draftStates.filter((p) => hasAutoDraft(p.tags) && !hasExcludeStale(p.tags)).map((p) => p.shopifyId),
+    );
+  } catch (err) {
+    console.error("[stock-check] draft-states fetch failed — skipping reactivation this run:", err);
+  }
+
+  const plan = planStockActions({ csvQtyBySku, baseline, nowEpoch: Math.floor(Date.now() / 1000), autoDraftedIds });
 
   const res: StockCheckResult = {
     dryRun, scanned: plan.counts.products,
-    wentOOS: 0, restocked: 0, drafted: 0, skipped: 0, deferred: 0, errors: 0, notified: 0,
+    wentOOS: 0, restocked: 0, drafted: 0, reactivated: 0, skipped: 0, deferred: 0, errors: 0, notified: 0,
     ...(dryRun ? { planned: plan.actions } : {}),
   };
 
@@ -96,7 +118,9 @@ async function runStockCheck(dryRun: boolean): Promise<StockCheckResult> {
         res.wentOOS++;
       } else if (a.action === "restock") {
         let tags = applyStockTags(state.tags, true);
-        const reactivate = state.status === "draft" && hasAutoDraft(state.tags);
+        // Reactivate iff WE auto-drafted it AND the operator hasn't pinned it with exclude-stale
+        // (same opt-out the new `reactivate` action respects — keep the two paths consistent).
+        const reactivate = state.status === "draft" && hasAutoDraft(state.tags) && !hasExcludeStale(state.tags);
         if (reactivate) tags = withoutAutoDraft(tags); // clear our marker as we bring it back
         if (!dryRun) {
           await updateShopifyProduct(a.shopifyProductId, reactivate ? { status: "active", tags } : { tags });
@@ -106,6 +130,15 @@ async function runStockCheck(dryRun: boolean): Promise<StockCheckResult> {
         }
         res.notified += a.restockSkus.length;
         res.restocked++;
+      } else if (a.action === "reactivate") {
+        // Republish a product WE auto-drafted that has returned to the feed with sellable stock.
+        // Re-check live state (the plan was built from a slightly older draft fetch): only act if
+        // it is STILL draft + auto-drafted + not exclude-stale, so we never resurrect a draft an
+        // operator set by hand, nor fight an operator opt-out.
+        if (state.status !== "draft" || !hasAutoDraft(state.tags) || hasExcludeStale(state.tags)) { res.skipped++; continue; }
+        const tags = withoutAutoDraft(applyStockTags(state.tags, true)); // back-in-stock + drop our marker
+        if (!dryRun) await updateShopifyProduct(a.shopifyProductId, { status: "active", tags });
+        res.reactivated++;
       } else { // draft
         if (state.status !== "active") { res.skipped++; continue; } // already draft/archived (no write, no cap)
         const tags = [...applyStockTags(state.tags, false), STOCK_TAG_AUTODRAFTED];

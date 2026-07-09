@@ -49,6 +49,21 @@ export function productInStock(variants: { qty: number }[]): boolean {
   return variants.some((v) => stockBufferQty(v.qty) > 0);
 }
 
+/** True if the tag list carries the auto-drafted marker (case-insensitive). */
+export function hasAutoDraftedTag(tags: string[]): boolean {
+  return tags.some((t) => t.toLowerCase() === STOCK_TAG_AUTODRAFTED);
+}
+
+/** Append the auto-drafted marker if absent (case-insensitive, no duplicate). */
+export function addAutoDraftedTag(tags: string[]): string[] {
+  return hasAutoDraftedTag(tags) ? tags : [...tags, STOCK_TAG_AUTODRAFTED];
+}
+
+/** Drop the auto-drafted marker (case-insensitive) — used when we bring a product back live. */
+export function removeAutoDraftedTag(tags: string[]): string[] {
+  return tags.filter((t) => t.toLowerCase() !== STOCK_TAG_AUTODRAFTED);
+}
+
 function tagsEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const sa = [...a].sort();

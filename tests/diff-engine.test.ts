@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { computeDiffs, summarizeDiffs, stockBufferQty, applyStockTags } from "@/lib/diff-engine";
+import {
+  computeDiffs, summarizeDiffs, stockBufferQty, applyStockTags,
+  hasAutoDraftedTag, addAutoDraftedTag, removeAutoDraftedTag, STOCK_TAG_AUTODRAFTED,
+} from "@/lib/diff-engine";
 import type { AosomMergedProduct } from "@/types/aosom";
 import type { ShopifyExistingProduct } from "@/types/sync";
 
@@ -269,5 +272,23 @@ describe("summarizeDiffs", () => {
     expect(summary.updates).toBe(1);
     expect(summary.creates).toBe(1);
     expect(summary.priceChanges).toBe(1);
+  });
+});
+
+describe("auto-drafted tag helpers", () => {
+  it("hasAutoDraftedTag detects the marker case-insensitively", () => {
+    expect(hasAutoDraftedTag(["a", STOCK_TAG_AUTODRAFTED])).toBe(true);
+    expect(hasAutoDraftedTag(["a", "Auto-Drafted"])).toBe(true);
+    expect(hasAutoDraftedTag(["a", "b"])).toBe(false);
+  });
+  it("addAutoDraftedTag appends once, never duplicates", () => {
+    expect(addAutoDraftedTag(["x"])).toEqual(["x", STOCK_TAG_AUTODRAFTED]);
+    expect(addAutoDraftedTag(["x", STOCK_TAG_AUTODRAFTED])).toEqual(["x", STOCK_TAG_AUTODRAFTED]);
+    expect(addAutoDraftedTag(["x", "Auto-Drafted"])).toEqual(["x", "Auto-Drafted"]); // case-insensitive no-op
+  });
+  it("removeAutoDraftedTag strips the marker case-insensitively, keeps the rest", () => {
+    expect(removeAutoDraftedTag(["keep", STOCK_TAG_AUTODRAFTED])).toEqual(["keep"]);
+    expect(removeAutoDraftedTag(["keep", "Auto-Drafted"])).toEqual(["keep"]);
+    expect(removeAutoDraftedTag(["keep"])).toEqual(["keep"]);
   });
 });

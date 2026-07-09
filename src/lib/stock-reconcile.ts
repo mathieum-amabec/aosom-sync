@@ -30,9 +30,16 @@ export interface StockReconcileInput {
   nowEpoch: number;
   /** a product absent from the feed this long (and sold out) is treated as discontinued. Default 7. */
   staleDays?: number;
+  /**
+   * Shopify product ids currently DRAFT and carrying our `auto-drafted` marker (and NOT
+   * `exclude-stale`) — the only products eligible for reactivation. Supplied by the route
+   * from a Shopify status=draft fetch; absent/empty means no reactivation this run. Gating
+   * on this set guarantees we never resurrect a product an operator drafted by hand.
+   */
+  autoDraftedIds?: Set<string>;
 }
 
-export type StockAction = "oos" | "restock" | "draft";
+export type StockAction = "oos" | "restock" | "draft" | "reactivate";
 
 export interface PlannedAction {
   shopifyProductId: string;
@@ -50,7 +57,7 @@ export interface StockPlan {
   /** CSV-present SKUs of flipped products to write back as the new baseline qty (keeps the
    * next run diffing from the current state). Drafted (absent) products contribute nothing. */
   qtyUpdates: Array<{ sku: string; qty: number }>;
-  counts: { products: number; wentOOS: number; restocked: number; drafted: number };
+  counts: { products: number; wentOOS: number; restocked: number; drafted: number; reactivated: number };
 }
 
 interface Group {
@@ -98,6 +105,9 @@ function anySellableFromCsv(rows: StockBaselineRow[], csv: Map<string, number>):
  *  - Present in feed:
  *      in -> out  => `oos`     (tag out-of-stock, stay active)
  *      out -> in  => `restock` (tag back-in-stock; caller reactivates iff auto-drafted)
+ *      sellable + in `autoDraftedIds` (baseline never flipped) => `reactivate`
+ *        (drafted-while-gone → returned to the feed; caller publishes iff still draft +
+ *         auto-drafted + not exclude-stale)
  *  - Absent from feed AND sold out everywhere in the baseline AND last seen > staleDays ago:
  *      => `draft`  (discontinued; caller drafts only if still active)
  *  - Everything else: no action (convergent — safe to re-run).
@@ -116,7 +126,7 @@ export function planStockActions(input: StockReconcileInput): StockPlan {
 
   const actions: PlannedAction[] = [];
   const qtyUpdates: Array<{ sku: string; qty: number }> = [];
-  let wentOOS = 0, restocked = 0, drafted = 0;
+  let wentOOS = 0, restocked = 0, drafted = 0, reactivated = 0;
 
   for (const g of groups.values()) {
     const skus = g.rows.map((r) => r.sku);
@@ -125,19 +135,30 @@ export function planStockActions(input: StockReconcileInput): StockPlan {
 
     if (presentInFeed) {
       const newInStock = anySellableFromCsv(g.rows, input.csvQtyBySku);
+      let didReactivate = false;
       if (prevInStock && !newInStock) {
         actions.push({ shopifyProductId: g.shopifyProductId, skus, action: "oos", targetInStock: false, restockSkus: [] });
         wentOOS++;
       } else if (!prevInStock && newInStock) {
+        // Sold-out → sellable. The route reactivates iff the product is draft + auto-drafted.
         const restockSkus = g.rows
           .filter((r) => { const q = input.csvQtyBySku.get(r.sku); return q != null && stockBufferQty(q) > 0; })
           .map((r) => r.sku);
         actions.push({ shopifyProductId: g.shopifyProductId, skus, action: "restock", targetInStock: true, restockSkus });
         restocked++;
+      } else if (newInStock && input.autoDraftedIds?.has(g.shopifyProductId)) {
+        // Sellable AND one of OUR auto-drafted products, but the baseline never went sold-out
+        // (a stale-catalog draft freezes qty > 0), so the restock branch above never fires.
+        // This is the reactivation net for "drafted while gone → returned to the feed". The
+        // route re-checks draft + auto-drafted + not exclude-stale before publishing.
+        actions.push({ shopifyProductId: g.shopifyProductId, skus, action: "reactivate", targetInStock: true, restockSkus: [] });
+        reactivated++;
+        didReactivate = true;
       }
-      // Refresh baseline for every CSV-present variant of a flipped product (only flips write,
-      // so a stable product never churns the DB). Done for both oos and restock.
-      if (prevInStock !== newInStock) {
+      // Refresh baseline for every CSV-present variant of a flipped OR reactivated product
+      // (only these write, so a stable product never churns the DB). Reactivation un-freezes
+      // the stale qty that kept the product looking "in stock" while it sat drafted.
+      if (prevInStock !== newInStock || didReactivate) {
         for (const r of g.rows) {
           const q = input.csvQtyBySku.get(r.sku);
           if (q != null) qtyUpdates.push({ sku: r.sku, qty: q });
@@ -155,5 +176,5 @@ export function planStockActions(input: StockReconcileInput): StockPlan {
     }
   }
 
-  return { actions, qtyUpdates, counts: { products: groups.size, wentOOS, restocked, drafted } };
+  return { actions, qtyUpdates, counts: { products: groups.size, wentOOS, restocked, drafted, reactivated } };
 }
