@@ -2,6 +2,31 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.17] - 2026-07-09
+
+### Security — session tokens signed with a dedicated `SESSION_SECRET`
+Closes the CSO audit's one HIGH finding: the dashboard session cookie was signed
+(HMAC-SHA256) with `AUTH_PASSWORD`, the same low-entropy human login password that
+also backs the emergency admin login. Because a token's payload (`ts:role:username`)
+is non-secret, any holder of one valid token (e.g. the seeded Meta-review `reviewer`
+account) could brute-force `AUTH_PASSWORD` offline from that known-plaintext/signature
+pair, then forge an admin token — bypassing the login rate limiter entirely.
+
+- **`src/lib/auth.ts`** now signs and verifies with `process.env.SESSION_SECRET`,
+  falling back to `AUTH_PASSWORD` only when `SESSION_SECRET` is unset (deploy safety —
+  no login lockout, keeps behavior unchanged until the env var is set). The value is
+  trimmed, and a `< 32`-char or whitespace-only secret is rejected (falls back + warns)
+  so a fat-fingered env line can't silently become a weak signing key.
+- **`.env.example`** documents `SESSION_SECRET` (`openssl rand -hex 32`).
+- Tests: `auth-session-secret.test.ts` proves an `AUTH_PASSWORD`-forged token is
+  rejected once `SESSION_SECRET` is set; `auth-session-secret-fallback.test.ts` proves
+  the whitespace-trim fallback.
+
+> ⚠️ **Deploy action required:** set `SESSION_SECRET` in Vercel **Production AND Preview**
+> (`openssl rand -hex 32`) for the fix to take effect. Until it is set, signing falls back
+> to the old `AUTH_PASSWORD` key. Setting it logs out existing sessions once (re-login);
+> the emergency admin login is unaffected (it validates `AUTH_PASSWORD` independently).
+
 ## [0.5.54.16] - 2026-07-09
 
 ### Changed — oversell-guard hardening (threshold, guard alert, post-write canary)
