@@ -44,14 +44,17 @@ if (STYLE !== "hero" && STYLE !== "demand-gen") {
   console.error("Invalid --style. Use --style hero | --style demand-gen"); process.exit(1);
 }
 const CAMPAIGN = flag("--campaign") ?? "patio-ete-2026";
-const LIMIT = flag("--limit") ? Number(flag("--limit")) : STYLE === "hero" ? 50 : 12;
+// --ugc: demand-gen sources the authentic Aosom customer/UGC reels (products.video_ugc,
+// clips in src/ugc/) instead of the patio -WEB-NT clips. Any product_type, no LV/patio gate.
+const UGC = argv.includes("--ugc");
+const LIMIT = flag("--limit") ? Number(flag("--limit")) : STYLE === "hero" ? 50 : UGC ? 50 : 12;
 
 const FFMPEG = process.env.FFMPEG_BIN ||
   "C:\\Users\\vente\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.1-full_build\\bin\\ffmpeg.exe";
 const MUSIC = process.env.SEQ_MUSIC || path.resolve(process.cwd(), "src/audio/sigmamusicart-no-copyright-music-514564.mp3");
 // Demand-gen source clips live in the MAIN clone's src/{sku}.mp4 (gitignored; the
 // -WEB-NT no-text clips downloaded there). Override with SEQ_CLIP_DIR if elsewhere.
-const CLIP_DIR = process.env.SEQ_CLIP_DIR || "src";
+const CLIP_DIR = process.env.SEQ_CLIP_DIR || (UGC ? "src/ugc" : "src");
 const FONT = process.env.SEQ_FONT || "fonts/DMSans.ttf";
 const NAVY = "0x1A2340";
 
@@ -130,6 +133,24 @@ async function patioClipSkus(): Promise<string[]> {
     args: clips,
   });
   return res.rows.map((r) => String((r as Record<string, unknown>).sku));
+}
+
+/** SKUs whose Aosom UGC reel is downloaded in CLIP_DIR (src/ugc) AND have products.video_ugc set.
+ *  Any product_type — the customer/ reels span all categories. Returns the on-disk clip stems. */
+async function ugcClipSkus(): Promise<string[]> {
+  let clips: string[] = [];
+  try { clips = fs.readdirSync(CLIP_DIR).filter((f) => f.endsWith(".mp4")).map((f) => f.replace(/\.mp4$/, "")); } catch {}
+  if (clips.length === 0) return [];
+  const ph = clips.map(() => "?").join(",");
+  const res = await direct().execute({
+    sql: `SELECT UPPER(sku) sku FROM products
+          WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''
+            AND video_ugc IS NOT NULL AND video_ugc != ''
+            AND UPPER(sku) IN (${ph})`,
+    args: clips.map((c) => c.toUpperCase()),
+  });
+  const matched = new Set(res.rows.map((r) => String((r as Record<string, unknown>).sku)));
+  return clips.filter((c) => matched.has(c.toUpperCase())).sort();
 }
 
 /** All Shopify `lifestyle-verified` variant SKUs (paginated). */
@@ -353,11 +374,15 @@ async function main(): Promise<void> {
   const lib = await loadLib();
   if (APPLY && !fs.existsSync(MUSIC)) throw new Error(`music not found: ${MUSIC} (set SEQ_MUSIC to the main clone's absolute path)`);
 
-  // Selection
-  const lvSkus = await lifestyleVerifiedSkus();
-  console.log(`lifestyle-verified SKUs on Shopify: ${lvSkus.size}`);
+  // Selection. UGC needs no Shopify lifestyle-verified lookup.
+  const lvSkus = UGC ? new Set<string>() : await lifestyleVerifiedSkus();
+  if (!UGC) console.log(`lifestyle-verified SKUs on Shopify: ${lvSkus.size}`);
   let skus: string[];
-  if (STYLE === "hero") {
+  if (UGC) {
+    const clips = await ugcClipSkus();
+    skus = clips.slice(0, LIMIT);
+    console.log(`UGC clips (products.video_ugc set + present in ${CLIP_DIR}): ${clips.length} → using ${skus.length}`);
+  } else if (STYLE === "hero") {
     const ranked = await patioByVelocity(LIMIT);
     skus = ranked.filter((s) => lvSkus.has(s)).slice(0, LIMIT);
     console.log(`patio-by-velocity (∩ lifestyle-verified): ${skus.length} SKUs`);
@@ -390,7 +415,7 @@ async function main(): Promise<void> {
         // never leaves a blob in the store with no queue row pointing at it.
         const out = path.join(OUT_TMP, `${sku.replace(/[^A-Za-z0-9._-]/g, "_")}.mp4`);
         let images: number | undefined;
-        if (STYLE === "hero") {
+        if (STYLE === "hero" && !UGC) {
           const imgs = (p?.images || []).filter(lib.isShopifyCdnUrl);
           images = imgs.length;
           if (imgs.length === 0) { report.push({ sku, title, images: 0, status: "skip (no cdn.shopify image)" }); continue; }
