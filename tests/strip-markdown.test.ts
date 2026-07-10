@@ -70,6 +70,25 @@ describe("stripLeadingPlatformLabel", () => {
     );
   });
 
+  it("removes a label preceded by leading emoji / decoration (draft #680 shape)", () => {
+    // The model wrote "🌿 Post Facebook ⏳ <hook>" — an emoji BEFORE the label, so a
+    // whitespace-only anchor (\s*) never reached it and the label leaked into the
+    // published caption. The [^\p{L}\p{N}]* anchor skips the leading emoji too.
+    expect(
+      stripLeadingPlatformLabel("🌿 Post Facebook ⏳ Profitez-en avant que ça parte !"),
+    ).toBe("Profitez-en avant que ça parte !");
+    expect(stripLeadingPlatformLabel("☀️ Publication Instagram : Découvrez")).toBe("Découvrez");
+    // Decoration-only header on its own line, emoji-prefixed → whole line dropped.
+    expect(stripLeadingPlatformLabel("🌿 Post Facebook ⏳\nContenu")).toBe("Contenu");
+  });
+
+  it("does NOT strip a label that is not the first word (emoji + real word first)", () => {
+    // "Post Facebook" appears after a real opening word — that's prose, not a header.
+    expect(stripLeadingPlatformLabel("🌿 Salut ! Poste sur Facebook 👇")).toBe(
+      "🌿 Salut ! Poste sur Facebook 👇",
+    );
+  });
+
   it("removes a decoration-only label header line (all variants → clean body)", () => {
     // Each of these is a pure header: label token + only emoji/`:`/`-`/spaces on
     // its line, real caption below. The whole header line is dropped.

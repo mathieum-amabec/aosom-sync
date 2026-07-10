@@ -30,10 +30,16 @@ export function stripMarkdown(text: string): string {
 
 /**
  * Remove a leading platform-label line the model sometimes prepends as a title —
- * e.g. "Post Facebook 🌿", "Publication Instagram", "Facebook Post:". The prompts
- * ask Claude to return only the post, but a disobedient generation puts a label on
- * the first line; without this the caption publishes starting with that label
- * instead of the marketing hook.
+ * e.g. "Post Facebook 🌿", "🌿 Post Facebook ⏳", "Publication Instagram",
+ * "Facebook Post:". The prompts ask Claude to return only the post, but a
+ * disobedient generation puts a label on the first line; without this the caption
+ * publishes starting with that label instead of the marketing hook.
+ *
+ * The leading anchor skips any decoration BEFORE the label — whitespace AND
+ * leading emoji / punctuation (`[^\p{L}\p{N}]*`, so "🌿 Post Facebook …" is caught,
+ * not just "Post Facebook …"). It stops at the first letter/number, so a caption
+ * that opens with a real word ("Salut 🌿 Post Facebook…") never matches — the label
+ * must be the first *word*, never mid-sentence.
  *
  * Conservative: only strips a FIRST line that clearly opens with such a label —
  * `Post`/`Publication` + platform, or `<Platform> post`. After the label token,
@@ -53,7 +59,7 @@ export function stripMarkdown(text: string): string {
  */
 export function stripLeadingPlatformLabel(text: string): string {
   return text.replace(
-    /^\s*(?:(?:post|publication)\s+(?:facebook|instagram|fb|ig)|(?:facebook|instagram|fb|ig)\s+post)\b(?:[^\p{L}\p{N}\n]*\r?\n+|[^\p{L}\p{N}]*)/iu,
+    /^[^\p{L}\p{N}]*(?:(?:post|publication)\s+(?:facebook|instagram|fb|ig)|(?:facebook|instagram|fb|ig)\s+post)\b(?:[^\p{L}\p{N}\n]*\r?\n+|[^\p{L}\p{N}]*)/iu,
     "",
   );
 }
