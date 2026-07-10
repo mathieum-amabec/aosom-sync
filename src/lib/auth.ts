@@ -56,13 +56,44 @@ export async function verifyPassword(password: string, stored: string): Promise<
 
 // ─── Session Tokens (HMAC-SHA256, Edge-compatible) ──────────────────
 
-const HMAC_SECRET = process.env.AUTH_PASSWORD;
+// Dedicated session-signing key, DISTINCT from the human login password.
+//
+// A session token is base64("<ts>:<role>:<username>:<HMAC(SESSION_SECRET, payload)>").
+// The payload is non-secret (anyone can base64-decode a cookie to read it), so if the
+// signing key were a low-entropy human password, any single valid token would be an
+// offline known-plaintext cracking oracle for that password — and recovering it would
+// forge admin tokens AND unlock the emergency admin login in api/auth/route.ts. So the
+// key MUST be high-entropy and separate from AUTH_PASSWORD. Generate: openssl rand -hex 32.
+//
+// Fallback to AUTH_PASSWORD only when SESSION_SECRET is unset — a migration/deploy safety
+// net (no login lockout, keeps existing tests green) that reproduces the OLD weak behavior.
+// Set SESSION_SECRET in the environment to actually close the oracle.
+//
+// Trim first so a fat-fingered value (a stray space or newline in the env line) can't
+// silently become a near-empty signing key: after trimming, an empty value falls back
+// instead of signing with " ".
+const rawSessionSecret = process.env.SESSION_SECRET?.trim();
+const SESSION_SECRET = rawSessionSecret || process.env.AUTH_PASSWORD;
+
+if (process.env.NODE_ENV === "production") {
+  if (!rawSessionSecret && process.env.AUTH_PASSWORD) {
+    console.warn(
+      "[AUTH] SESSION_SECRET not set — falling back to AUTH_PASSWORD for session signing. " +
+        "Set a dedicated high-entropy SESSION_SECRET (openssl rand -hex 32) to close the token-forgery oracle."
+    );
+  } else if (rawSessionSecret && rawSessionSecret.length < 32) {
+    console.warn(
+      "[AUTH] SESSION_SECRET is shorter than 32 chars — signing with a low-entropy key. " +
+        "Use a high-entropy value (openssl rand -hex 32)."
+    );
+  }
+}
 
 async function hmacSign(data: string): Promise<string> {
-  if (!HMAC_SECRET) throw new Error("AUTH_PASSWORD env var must be set");
+  if (!SESSION_SECRET) throw new Error("SESSION_SECRET (or AUTH_PASSWORD fallback) env var must be set");
   const enc = new TextEncoder();
   const key = await globalThis.crypto.subtle.importKey(
-    "raw", enc.encode(HMAC_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    "raw", enc.encode(SESSION_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
   );
   const sig = await globalThis.crypto.subtle.sign("HMAC", key, enc.encode(data));
   return bufToHex(sig);
