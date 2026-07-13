@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.19] - 2026-07-13
+
+### Fixed — Custom Web Pixel Purchase now saves + fires (sandbox-safe fetch beacon)
+The `docs/meta-custom-web-pixel.js` Purchase pixel wouldn't save in Shopify Admin →
+Customer events: custom pixels run in a **lax sandbox** (iframe, no top-frame DOM), so
+the `fbq`/`fbevents.js` SDK loader is rejected. Rewrote the send path to a `fetch()`
+beacon to `https://www.facebook.com/tr/` (Meta's noscript GET mechanism) — no SDK, no
+DOM. Data extraction is unchanged (SKU `content_ids` + `contents`, `value`, `currency`,
+`num_items`, `eid`=checkout token for phase-2 CAPI dedup); page URL from
+`event.context.document.location`. All expressions single-line, no `undefined` literal
+(the pixel editor's linter rejects both). Verified end-to-end: real $0 checkout →
+Purchase **Processed** in Meta Test Events (dataset `214720653324969`).
+
+- **`CLAUDE.md`** — new "Meta Pixel" section documenting the two-part setup: ScriptTag
+  (storefront events) + the **manually-installed** Custom Web Pixel (Purchase); the repo
+  file is only the paste-source, there is no code/API path that installs it.
+
 ## [0.5.54.18] - 2026-07-12
 
 ### Fixed — Meta Pixel `content_ids` now match the catalog; Purchase fires again
