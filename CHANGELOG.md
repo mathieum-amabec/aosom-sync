@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.18] - 2026-07-12
+
+### Fixed — Meta Pixel `content_ids` now match the catalog; Purchase fires again
+The storefront pixel sent the numeric Shopify `variant.id` for `content_ids`, but the
+Meta catalog (`384890002574549`) keys products on `retailer_id` = the **SKU** (e.g.
+`01-0901`), so ViewContent/AddToCart never matched the catalog. Purchase never fired at
+all: ScriptTags no longer run on the Checkout-Extensibility Thank-You page.
+
+- **`src/app/api/pixel/script/route.ts`** — `content_ids` now use `variant.sku`
+  everywhere. ViewContent reads the **selected** variant (`?variant=`), not always
+  `variants[0]`. AddToCart resolves the added variant's SKU + price (reads the form
+  field or the `/cart/add` `FormData`/`URLSearchParams` body), dedupes the
+  submit-plus-fetch double-fire on AJAX themes, and converts `value` to the buyer's
+  presentment currency via `Shopify.currency.rate`. The dead `window.Shopify.checkout`
+  Purchase block is removed.
+- **`docs/meta-custom-web-pixel.js`** (new) — Custom Web Pixel for Settings → Customer
+  events. Subscribes to `checkout_completed` and fires Purchase with SKU-based
+  `content_ids`, `value`, `currency`, and an `eventID` (checkout token) for future
+  Conversions API dedup. Paste-once, manual admin step.
+
 ## [0.5.54.17] - 2026-07-09
 
 ### Security — session tokens signed with a dedicated `SESSION_SECRET`
