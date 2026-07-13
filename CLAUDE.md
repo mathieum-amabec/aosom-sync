@@ -45,6 +45,21 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
 - **Active imports**: New products are auto-published as `active` (live) on import — `createShopifyProduct` sets `status: "active"` (see `shopify-client.ts`; switched from draft→active in commit beb00b4, 2026-06-07). No manual-review draft step.
 - **[BRAND NAME]**: Aosom HTML descriptions contain this placeholder. Replaced with actual brand before Claude processing
 
+## Meta Pixel (two parts — web dataset `214720653324969`)
+
+- **Storefront events (PageView / ViewContent / AddToCart)**: a Shopify **ScriptTag**
+  (id `222592598121`) pointing at `/api/pixel/script` (see `src/app/api/pixel/script/route.ts`,
+  installed via `/api/pixel/install`). `content_ids` everywhere = `variant.sku` (matches the
+  Meta catalog `retailer_id`, e.g. `01-0901` — NOT the numeric `variant.id`).
+- **Purchase**: a **Custom Web Pixel installed MANUALLY** in **Shopify Admin → Settings →
+  Customer events → Add custom pixel** — there is **no code path or Admin API that creates it**.
+  The source of truth for the pasted code is `docs/meta-custom-web-pixel.js`; editing that repo
+  file does nothing until an operator pastes it into the pixel manager and re-Saves.
+  ScriptTags no longer run on the Checkout-Extensibility Thank-You page, so Purchase cannot live
+  in the ScriptTag. The custom pixel runs in Shopify's **lax sandbox** (iframe, no top-frame
+  DOM), so it sends Purchase via `fetch()` to `https://www.facebook.com/tr/` (the noscript
+  beacon) — NOT the `fbq`/`fbevents.js` SDK, which the sandbox rejects.
+
 ## API Routes
 
 - `GET /api/catalog` — browse catalog with filters (reads from Turso, not CSV)
