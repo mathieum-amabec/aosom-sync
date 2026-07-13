@@ -30,7 +30,13 @@ fbq('track', 'PageView');
   try {
     var meta = (window.ShopifyAnalytics && window.ShopifyAnalytics.meta) || {};
     var page = meta.page || {};
-    var currency = (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) || 'CAD';
+    var cur = (window.Shopify && window.Shopify.currency) || {};
+    var currency = cur.active || 'CAD';
+    // meta.product prices are base-currency cents; convert to the buyer's
+    // presentment currency so value matches the currency label under
+    // multi-currency / Shopify Markets (rate is 1 when no conversion applies).
+    var rate = parseFloat(cur.rate || '1') || 1;
+    function toMoney(cents) { return typeof cents === 'number' ? (cents / 100) * rate : undefined; }
 
     // content_ids everywhere = variant SKU, to match the Meta catalog whose
     // retailer_id is the SKU (e.g. "01-0901") — NOT the numeric variant.id.
@@ -57,7 +63,7 @@ fbq('track', 'PageView');
         content_type: 'product',
         content_ids: variant.sku ? [String(variant.sku)] : [],
         content_name: p.type || '',
-        value: typeof variant.price === 'number' ? variant.price / 100 : undefined,
+        value: toMoney(variant.price),
         currency: currency
       });
     }
@@ -76,12 +82,20 @@ fbq('track', 'PageView');
       for (var i = 0; i < vs.length; i++) variantsById[String(vs[i].id)] = vs[i];
     })();
 
+    // Themes that POST the <form> AND fetch /cart/add.js fire both handlers
+    // below for a single click; collapse the pair so AddToCart isn't counted
+    // twice. The form (submit) path runs first and carries the SKU, so it wins.
+    var lastAtcTs = 0;
     function fireAddToCart(variantId) {
+      var now = Date.now();
+      if (now - lastAtcTs < 1000) return;
+      lastAtcTs = now;
       var v = variantId ? variantsById[String(variantId)] : null;
       var payload = { content_type: 'product', currency: currency };
       if (v && v.sku) {
         payload.content_ids = [String(v.sku)];
-        if (typeof v.price === 'number') payload.value = v.price / 100;
+        var val = toMoney(v.price);
+        if (val !== undefined) payload.value = val;
       }
       fbq('track', 'AddToCart', payload);
     }
@@ -105,9 +119,11 @@ fbq('track', 'PageView');
           if (/\\/cart\\/add(\\.js)?/.test(href)) {
             var vid = null;
             var body = arguments[1] && arguments[1].body;
-            if (typeof body === 'string') {
-              var jm = /"id"\\s*:\\s*"?(\\d+)"?/.exec(body);   // JSON body
-              var um = /(?:^|&)id=(\\d+)/.exec(body);          // urlencoded body
+            if (body && typeof body.get === 'function') {
+              vid = body.get('id');                             // FormData / URLSearchParams (Dawn)
+            } else if (typeof body === 'string') {
+              var jm = /"id"\\s*:\\s*"?(\\d+)"?/.exec(body);      // JSON body
+              var um = /(?:^|&)id=(\\d+)/.exec(body);            // urlencoded body
               vid = (jm && jm[1]) || (um && um[1]) || null;
             }
             fireAddToCart(vid);
