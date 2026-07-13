@@ -30,38 +30,68 @@ fbq('track', 'PageView');
   try {
     var meta = (window.ShopifyAnalytics && window.ShopifyAnalytics.meta) || {};
     var page = meta.page || {};
+    var currency = (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) || 'CAD';
+
+    // content_ids everywhere = variant SKU, to match the Meta catalog whose
+    // retailer_id is the SKU (e.g. "01-0901") — NOT the numeric variant.id.
+    // ShopifyAnalytics.meta.product.variants[] carries { id, price, sku }.
+
+    // Pick the SELECTED variant (?variant= in the URL), falling back to the
+    // first variant. Avoids always reporting variants[0] on multi-variant PDPs.
+    function pickVariant(product) {
+      var variants = (product && product.variants) || [];
+      var m = /[?&]variant=(\\d+)/.exec(window.location.search);
+      if (m) {
+        for (var i = 0; i < variants.length; i++) {
+          if (String(variants[i].id) === m[1]) return variants[i];
+        }
+      }
+      return variants[0] || {};
+    }
 
     // ViewContent — product pages
     if (page.pageType === 'product' && meta.product) {
       var p = meta.product;
-      var variant = (p.variants && p.variants[0]) || {};
+      var variant = pickVariant(p);
       fbq('track', 'ViewContent', {
         content_type: 'product',
-        content_ids: [String(variant.id || p.id || '')],
+        content_ids: variant.sku ? [String(variant.sku)] : [],
         content_name: p.type || '',
-        value: variant.price ? variant.price / 100 : undefined,
-        currency: (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) || 'CAD'
+        value: typeof variant.price === 'number' ? variant.price / 100 : undefined,
+        currency: currency
       });
     }
 
-    // Purchase — legacy order-status / thank-you page exposes Shopify.checkout
-    if (window.Shopify && window.Shopify.checkout) {
-      var c = window.Shopify.checkout;
-      fbq('track', 'Purchase', {
-        value: parseFloat(c.total_price || c.subtotal_price || 0),
-        currency: c.currency || 'CAD',
-        content_ids: (c.line_items || []).map(function (li) { return String(li.product_id || li.id); }),
-        content_type: 'product'
-      });
+    // Purchase is fired by the Custom Web Pixel (Settings > Customer events),
+    // not here: ScriptTags no longer run on the Checkout-Extensibility
+    // Thank-You page, so the old window.Shopify.checkout block was dead code.
+    // See docs/meta-custom-web-pixel.js.
+
+    // AddToCart — intercept storefront cart/add (form post and fetch/XHR to
+    // /cart/add.js). Resolve the added variant's SKU + price from the meta
+    // lookup so content_ids matches the catalog; fall back to currency-only.
+    var variantsById = {};
+    (function () {
+      var vs = (meta.product && meta.product.variants) || [];
+      for (var i = 0; i < vs.length; i++) variantsById[String(vs[i].id)] = vs[i];
+    })();
+
+    function fireAddToCart(variantId) {
+      var v = variantId ? variantsById[String(variantId)] : null;
+      var payload = { content_type: 'product', currency: currency };
+      if (v && v.sku) {
+        payload.content_ids = [String(v.sku)];
+        if (typeof v.price === 'number') payload.value = v.price / 100;
+      }
+      fbq('track', 'AddToCart', payload);
     }
 
-    // AddToCart — intercept storefront cart/add (form post and fetch/XHR to /cart/add.js)
-    var currency = (window.Shopify && window.Shopify.currency && window.Shopify.currency.active) || 'CAD';
     document.addEventListener('submit', function (ev) {
       try {
         var form = ev.target;
         if (form && form.action && /\\/cart\\/add/.test(form.action)) {
-          fbq('track', 'AddToCart', { currency: currency });
+          var idField = form.querySelector('[name="id"]');
+          fireAddToCart(idField && idField.value);
         }
       } catch (e) {}
     }, true);
@@ -73,7 +103,14 @@ fbq('track', 'PageView');
           var url = arguments[0];
           var href = typeof url === 'string' ? url : (url && url.url) || '';
           if (/\\/cart\\/add(\\.js)?/.test(href)) {
-            fbq('track', 'AddToCart', { currency: currency });
+            var vid = null;
+            var body = arguments[1] && arguments[1].body;
+            if (typeof body === 'string') {
+              var jm = /"id"\\s*:\\s*"?(\\d+)"?/.exec(body);   // JSON body
+              var um = /(?:^|&)id=(\\d+)/.exec(body);          // urlencoded body
+              vid = (jm && jm[1]) || (um && um[1]) || null;
+            }
+            fireAddToCart(vid);
           }
         } catch (e) {}
         return _fetch.apply(this, arguments);
