@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.21] - 2026-07-14
+
+### Fixed — social posts auto-generate again (daily pending sweep + batch)
+Since the `lifestyle-verified` gate landed (#340, 2026-07-05), the per-event social
+triggers (`new_product` on import, `price_drop` on sync) evaluated the one just-changed
+product — which isn't verified yet (classification runs later) — so they skipped and the
+event was lost forever (no re-trigger). Result: `new_product` drafts stopped 2026-07-01
+and `price_drop` = 0 in 30 days despite 287 qualifying drops; only the daily
+random-highlight cron survived.
+
+- **`src/lib/database.ts`** — new `getPendingSocialCandidates()`: recently **imported**
+  products (joined via `import_jobs.shopify_id`, the real Shopify-import time — not
+  `products.created_at`, which only tracks first feed appearance) first, then recent
+  **≥ threshold price drops** (`price_history`), both in-stock, live, and not posted within
+  `social_min_days_between_reposts`.
+- **`src/jobs/job4-social.ts`** — new `generateSocialBatch(count=3)`: sweeps pending
+  candidates (re-firing the dropped import/price-drop events now that the products are
+  verified) then tops up with random stock highlights. `triggerStockHighlight(count=1)` is
+  now a batch (returns an array); `triggerPriceDrop` now marks the product posted (prevents
+  a same-run double post). Per-candidate try/catch + a wall-clock budget so one bad draft
+  can't abort the batch or blow the cron timeout.
+- **`/api/cron/social`** now runs `generateSocialBatch(3)` daily (`maxDuration` 200→300s);
+  **`/api/social`** `generate` makes `stock_highlight` a batch (`count`); the dashboard
+  **"Generate Highlights"** button generates 3 per click.
+- **Note:** `social_price_drop_threshold` = 10 (%). Price drops weren't zero for lack of
+  drops (287 ≥10% in 14 days) — the gate skipped them all; the sweep recovers them.
+
 ## [0.5.54.19] - 2026-07-13
 
 ### Fixed — Custom Web Pixel Purchase now saves + fires (sandbox-safe fetch beacon)

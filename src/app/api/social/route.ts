@@ -76,13 +76,24 @@ export async function POST(request: Request) {
     switch (action) {
       case "generate": {
         const { triggerType, sku, oldPrice, newPrice } = body;
+        // stock_highlight is a batch generator (1..5). The "Generate Highlights"
+        // button sends count=3.
+        if (triggerType === "stock_highlight") {
+          const count = Math.min(Math.max(1, Number(body.count) || 1), 5);
+          const arr = await triggerStockHighlight(count);
+          if (arr.length === 0) {
+            return NextResponse.json(
+              { success: false, error: "Aucun produit lifestyle-verified — post ignoré (jamais d'image fond blanc)" },
+              { status: 422 },
+            );
+          }
+          return NextResponse.json({ success: true, data: arr, count: arr.length });
+        }
         let result;
         if (triggerType === "new_product") {
           result = await triggerNewProduct(sku);
         } else if (triggerType === "price_drop") {
           result = await triggerPriceDrop(sku, oldPrice, newPrice);
-        } else if (triggerType === "stock_highlight") {
-          result = await triggerStockHighlight();
         } else {
           return NextResponse.json({ success: false, error: "Invalid trigger type" }, { status: 400 });
         }

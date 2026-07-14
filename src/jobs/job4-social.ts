@@ -19,6 +19,7 @@ import {
   getProduct,
   createFacebookDraft,
   getEligibleHighlightCandidates,
+  getPendingSocialCandidates,
   markProductPosted,
   createNotification,
   getAutopostCountToday,
@@ -32,6 +33,15 @@ import { resolveLifestyle } from "@/lib/selectors/shopify-images";
 // for the daily stock highlight. ~80% of the catalog is tagged, so a handful of
 // Shopify tag lookups (throttled 2/s, 5-min cached) almost always yields a match.
 const HIGHLIGHT_LIFESTYLE_SAMPLE = 15;
+
+// Daily social batch: how many posts to generate per run (cron + manual button).
+export const SOCIAL_DAILY_BATCH = 3;
+// Soft wall-clock budget for a batch, kept under the cron's maxDuration (300s).
+const SOCIAL_BATCH_BUDGET_MS = 250_000;
+// Pending-sweep window (days) for "recently imported" + "recently price-dropped",
+// and how many of each kind to sample when hunting for a lifestyle-verified one.
+const PENDING_WINDOW_DAYS = 7;
+const PENDING_SAMPLE_PER_KIND = 12;
 
 /**
  * Gate + source resolver: returns the product's clean Shopify position-1 photo URL
@@ -258,6 +268,10 @@ export async function triggerPriceDrop(
     hookId,
   });
 
+  // Mark posted so the same product can't be re-picked as a stock_highlight in the
+  // same batch run (matches triggerNewProduct / stock_highlight).
+  await markProductPosted(sku);
+
   await createNotification(
     "info",
     "Draft prix réduit",
@@ -268,16 +282,15 @@ export async function triggerPriceDrop(
 }
 
 /**
- * Daily stock highlight: pick a random eligible product and generate a draft.
+ * Generate ONE stock-highlight draft: sample a random eligible batch, post the
+ * first lifestyle-verified product (raw pos-1 photo). Returns null when the whole
+ * sample is unverified or nothing is eligible. Never notifies — the batch wrapper
+ * decides whether an empty run warrants a warning.
  */
-export async function triggerStockHighlight(): Promise<GenerateDraftResult | null> {
-  log("stock_highlight trigger");
-  const settings = await getAllSettings();
-  const minDays = parseInt(
-    settings.social_min_days_between_reposts || SYNC.DEFAULT_MIN_DAYS_BETWEEN_REPOSTS,
-    10
-  );
-
+async function generateOneStockHighlight(
+  settings: Awaited<ReturnType<typeof getAllSettings>>,
+  minDays: number,
+): Promise<GenerateDraftResult | null> {
   // Sample a small random batch of eligible products, then post the first that is
   // lifestyle-verified. A non-verified product is skipped (never posted with a
   // white-bg image) — matching the new_product / price_drop gate.
@@ -297,14 +310,7 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
     }
   }
   if (!product || !lifestyleUrl) {
-    // Not a silent skip: if the whole sample is unverified (e.g. tagging regressed
-    // or coverage dropped), posting would otherwise stop with no signal.
-    log(`No lifestyle-verified product among ${candidates.length} eligible candidates — skipping stock highlight`);
-    await createNotification(
-      "warning",
-      "Stock highlight ignoré",
-      `Aucun produit lifestyle-verified parmi ${candidates.length} candidats échantillonnés`
-    );
+    log(`No lifestyle-verified product among ${candidates.length} eligible candidates`);
     return null;
   }
 
@@ -336,6 +342,94 @@ export async function triggerStockHighlight(): Promise<GenerateDraftResult | nul
   await markProductPosted(sku);
   log(`Draft #${draftId} created for stock highlight ${sku} (raw lifestyle photo)`);
   return { draftId, postText: fr, postTextEn: en, imagePath: lifestyleUrl, imageUrl: lifestyleUrl, imageUrls };
+}
+
+/**
+ * Daily stock highlight — generate up to `count` distinct highlights. Each posted
+ * product is marked (markProductPosted) so subsequent picks in the same run differ.
+ * Stops early if a sample yields no lifestyle-verified product (retrying the same
+ * run won't help), and surfaces a warning only when nothing at all was produced.
+ */
+export async function triggerStockHighlight(count = 1): Promise<GenerateDraftResult[]> {
+  log(`stock_highlight trigger (count=${count})`);
+  const settings = await getAllSettings();
+  const minDays = parseInt(
+    settings.social_min_days_between_reposts || SYNC.DEFAULT_MIN_DAYS_BETWEEN_REPOSTS,
+    10
+  );
+  const results: GenerateDraftResult[] = [];
+  for (let i = 0; i < Math.max(1, count); i++) {
+    const r = await generateOneStockHighlight(settings, minDays);
+    if (!r) break;
+    results.push(r);
+  }
+  if (results.length === 0) {
+    await createNotification(
+      "warning",
+      "Stock highlight ignoré",
+      "Aucun produit lifestyle-verified parmi les candidats échantillonnés"
+    );
+  }
+  return results;
+}
+
+/**
+ * Daily social batch orchestrator (cron + manual "Generate Highlights" button).
+ * FIX for the "sync/import no longer generates posts" regression: the per-event
+ * triggers (new_product on import, price_drop on sync) drop the event when the
+ * product isn't lifestyle-verified YET (verification runs later). This sweeps
+ * products that have SINCE become verified — recently imported first, then recent
+ * significant price drops — and tops up with random stock highlights until `count`
+ * drafts exist. The lifestyle-verified gate is applied by the triggers themselves.
+ */
+export async function generateSocialBatch(count = SOCIAL_DAILY_BATCH): Promise<GenerateDraftResult[]> {
+  const settings = await getAllSettings();
+  const dropThreshold = parseFloat(
+    settings.social_price_drop_threshold || SYNC.DEFAULT_PRICE_DROP_THRESHOLD
+  );
+  const minDays = parseInt(
+    settings.social_min_days_between_reposts || SYNC.DEFAULT_MIN_DAYS_BETWEEN_REPOSTS,
+    10
+  );
+
+  // Soft time budget: leave headroom under the cron maxDuration so a slow Anthropic
+  // draft can't get the function hard-killed mid-batch. Once exceeded, stop starting
+  // new drafts and return what we have.
+  const startedAt = Date.now();
+  const overBudget = () => Date.now() - startedAt > SOCIAL_BATCH_BUDGET_MS;
+
+  const results: GenerateDraftResult[] = [];
+
+  const pending = await getPendingSocialCandidates(
+    minDays,
+    dropThreshold,
+    PENDING_WINDOW_DAYS,
+    PENDING_SAMPLE_PER_KIND
+  );
+  for (const c of pending) {
+    if (results.length >= count || overBudget()) break;
+    try {
+      const r =
+        c.kind === "new_product"
+          ? await triggerNewProduct(c.sku)
+          : await triggerPriceDrop(c.sku, c.oldPrice ?? 0, c.newPrice ?? 0);
+      if (r) results.push(r);
+    } catch (err) {
+      // A single bad candidate (Anthropic hiccup, missing product) must not abort the
+      // batch or skip the stock-highlight fallback below.
+      log(`pending ${c.kind} ${c.sku} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Fill the rest with random stock highlights. Not caught: a throw here is a
+  // systemic failure (e.g. Anthropic outage) that should surface as a cron 500.
+  if (results.length < count && !overBudget()) {
+    const fill = await triggerStockHighlight(count - results.length);
+    results.push(...fill);
+  }
+
+  log(`social batch: ${results.length}/${count} drafts (${pending.length} pending candidates swept)`);
+  return results;
 }
 
 // ─── Auto-post orchestration ────────────────────────────────────────

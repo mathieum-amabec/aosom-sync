@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import Anthropic from "@anthropic-ai/sdk";
-import { triggerStockHighlight, triggerNewProduct, triggerPriceDrop } from "@/jobs/job4-social";
+import { triggerStockHighlight, triggerNewProduct, triggerPriceDrop, generateSocialBatch } from "@/jobs/job4-social";
 
 // ─── Mock factories ───────────────────────────────────────────────────
 
@@ -14,6 +14,7 @@ vi.mock("@/lib/content-generator", () => ({
 vi.mock("@/lib/database", () => ({
   getAllSettings: vi.fn(),
   getEligibleHighlightCandidates: vi.fn(),
+  getPendingSocialCandidates: vi.fn(),
   createFacebookDraft: vi.fn(),
   markProductPosted: vi.fn(),
   getProduct: vi.fn(),
@@ -44,6 +45,7 @@ vi.mock("@/lib/social-publisher", () => ({
 import {
   getAllSettings,
   getEligibleHighlightCandidates,
+  getPendingSocialCandidates,
   getProduct,
   createFacebookDraft,
   markProductPosted,
@@ -115,7 +117,7 @@ describe("raw lifestyle image", () => {
   it.each([
     ["new_product", () => triggerNewProduct("TEST-001")],
     ["price_drop", () => triggerPriceDrop("TEST-001", 100, 80)],
-    ["stock_highlight", () => triggerStockHighlight()],
+    ["stock_highlight", async () => (await triggerStockHighlight())[0] ?? null],
   ] as const)("%s: posts the raw lifestyle URL, one image, no compositor", async (_name, run) => {
     const result = await run();
     expect(result).not.toBeNull();
@@ -132,12 +134,59 @@ describe("raw lifestyle image", () => {
   it.each([
     ["new_product", () => triggerNewProduct("TEST-001")],
     ["price_drop", () => triggerPriceDrop("TEST-001", 100, 80)],
-    ["stock_highlight", () => triggerStockHighlight()],
+    ["stock_highlight", async () => (await triggerStockHighlight())[0] ?? null],
   ] as const)("%s: skips (returns null, no draft) when not lifestyle-verified", async (_name, run) => {
     vi.mocked(resolveLifestyle).mockResolvedValue({ verified: false, primaryImageUrl: null });
     const result = await run();
     expect(result).toBeNull();
     expect(createFacebookDraft).not.toHaveBeenCalled();
+  });
+});
+
+// ─── generateSocialBatch — pending sweep before highlights ────────────
+
+describe("generateSocialBatch — pending sweep before highlights", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(getAllSettings).mockResolvedValue({
+      ...SETTINGS,
+      social_price_drop_threshold: "10",
+      prompt_new_product_fr: "New FR {product_name}",
+      prompt_new_product_en: "New EN {product_name}",
+      prompt_price_drop_fr: "Drop FR {product_name}",
+      prompt_price_drop_en: "Drop EN {product_name}",
+    });
+    vi.mocked(getProduct).mockResolvedValue(PRODUCT as never);
+    vi.mocked(getEligibleHighlightCandidates).mockResolvedValue([PRODUCT] as never);
+    vi.mocked(createFacebookDraft).mockResolvedValue(DRAFT_ID);
+    vi.mocked(markProductPosted).mockResolvedValue(undefined);
+    vi.mocked(resolveLifestyle).mockResolvedValue({ ...LIFESTYLE_VERIFIED });
+    mockCreate.mockResolvedValue(makeMsg("text"));
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("sweeps a pending new_product first, then fills the rest with highlights", async () => {
+    vi.mocked(getPendingSocialCandidates).mockResolvedValue([
+      { sku: "PENDING-1", kind: "new_product", oldPrice: null, newPrice: null },
+    ]);
+
+    const results = await generateSocialBatch(3);
+
+    expect(getPendingSocialCandidates).toHaveBeenCalledOnce();
+    expect(results).toHaveLength(3);
+    // Pending has priority: first draft is the swept new_product, rest are highlights.
+    const triggerTypes = vi.mocked(createFacebookDraft).mock.calls.map((c) => c[0].triggerType);
+    expect(triggerTypes).toEqual(["new_product", "stock_highlight", "stock_highlight"]);
+  });
+
+  it("empty pending → falls back to a full batch of stock highlights", async () => {
+    vi.mocked(getPendingSocialCandidates).mockResolvedValue([]);
+
+    const results = await generateSocialBatch(3);
+
+    expect(results).toHaveLength(3);
+    const triggerTypes = vi.mocked(createFacebookDraft).mock.calls.map((c) => c[0].triggerType);
+    expect(triggerTypes).toEqual(["stock_highlight", "stock_highlight", "stock_highlight"]);
   });
 });
 
@@ -166,7 +215,7 @@ describe("triggerStockHighlight — Anthropic timeout handling", () => {
       .mockResolvedValueOnce(makeMsg("Texte FR généré"))   // fr
       .mockResolvedValueOnce(makeMsg("Generated EN text")); // en
 
-    const result = await triggerStockHighlight();
+    const [result] = await triggerStockHighlight();
 
     expect(result?.draftId).toBe(DRAFT_ID);
     expect(result?.postText).toBe("Texte FR généré");
@@ -190,7 +239,7 @@ describe("triggerStockHighlight — Anthropic timeout handling", () => {
       .mockResolvedValueOnce(makeMsg("Texte FR retry"))
       .mockResolvedValueOnce(makeMsg("Text EN retry"));
 
-    const result = await triggerStockHighlight();
+    const [result] = await triggerStockHighlight();
 
     expect(result?.draftId).toBe(DRAFT_ID);
     expect(result?.postText).toBe("Texte FR retry");

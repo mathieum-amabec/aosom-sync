@@ -3408,6 +3408,90 @@ export async function markProductPosted(sku: string): Promise<void> {
   await db.execute({ sql: `UPDATE products SET last_posted_at = strftime('%s','now') WHERE sku = ?`, args: [sku] });
 }
 
+export interface PendingSocialCandidate {
+  sku: string;
+  kind: "new_product" | "price_drop";
+  oldPrice: number | null;
+  newPrice: number | null;
+}
+
+/**
+ * Candidates for the daily social sweep, prioritised: recently-imported products
+ * first, then recent significant price drops. Both are filtered to in-stock, live
+ * (shopify_product_id NOT NULL) products NOT posted within `minDaysBetween` days.
+ *
+ * The `lifestyle-verified` gate is a runtime Shopify tag lookup (in the job4
+ * triggers), not a DB column, so this only returns a small prioritised sample per
+ * kind for the caller to iterate — it recovers the import/price-drop events the
+ * per-event triggers dropped when the product wasn't lifestyle-verified yet.
+ */
+export async function getPendingSocialCandidates(
+  minDaysBetween: number,
+  dropThresholdPct: number,
+  windowDays: number,
+  perKindLimit: number,
+): Promise<PendingSocialCandidate[]> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const repostCutoff = now - minDaysBetween * 86400;
+  const windowCutoff = now - windowDays * 86400;
+  // import_jobs.updated_at is an ISO-8601 string; compare against an ISO cutoff
+  // (lexicographic order matches chronological order for ISO-8601).
+  const importIsoCutoff = new Date((now - windowDays * 86400) * 1000).toISOString();
+
+  // Priority 1: products imported to Shopify within the window, in stock, not yet
+  // posted. We join import_jobs on the Shopify product id — products.created_at only
+  // tracks first appearance in the Aosom feed (insert-only), NOT the Shopify import,
+  // so a product curated from an old feed entry would otherwise never be swept.
+  const importsRes = await db.execute({
+    sql: `SELECT p.sku AS sku, MAX(ij.updated_at) AS imported_at
+          FROM products p
+          JOIN import_jobs ij ON ij.shopify_id = p.shopify_product_id
+          WHERE ij.status = 'done' AND ij.updated_at > ?
+            AND p.shopify_product_id IS NOT NULL AND p.qty > 0
+            AND (p.last_posted_at IS NULL OR p.last_posted_at < ?)
+          GROUP BY p.sku
+          ORDER BY imported_at DESC
+          LIMIT ?`,
+    args: [importIsoCutoff, repostCutoff, perKindLimit],
+  });
+
+  // Priority 2: recent >= threshold% price drops, not yet posted. One row per sku
+  // (the latest drop — with MAX(detected_at), SQLite returns that row's bare columns).
+  const dropsRes = await db.execute({
+    sql: `SELECT ph.sku AS sku, ph.old_price AS old_price, ph.new_price AS new_price, MAX(ph.detected_at) AS latest
+          FROM price_history ph
+          JOIN products p ON p.sku = ph.sku
+          WHERE ph.change_type = 'price_drop'
+            AND ph.new_price < ph.old_price
+            AND (ph.old_price - ph.new_price) * 100.0 / ph.old_price >= ?
+            AND ph.detected_at > ?
+            AND p.shopify_product_id IS NOT NULL AND p.qty > 0
+            AND (p.last_posted_at IS NULL OR p.last_posted_at < ?)
+          GROUP BY ph.sku
+          ORDER BY latest DESC
+          LIMIT ?`,
+    args: [dropThresholdPct, windowCutoff, repostCutoff, perKindLimit],
+  });
+
+  const seen = new Set<string>();
+  const out: PendingSocialCandidate[] = [];
+  for (const r of importsRes.rows) {
+    const sku = (r as unknown as Record<string, unknown>).sku as string;
+    if (seen.has(sku)) continue;
+    seen.add(sku);
+    out.push({ sku, kind: "new_product", oldPrice: null, newPrice: null });
+  }
+  for (const r of dropsRes.rows) {
+    const o = r as unknown as Record<string, unknown>;
+    const sku = o.sku as string;
+    if (seen.has(sku)) continue; // already queued as a fresh import — post it as new_product
+    seen.add(sku);
+    out.push({ sku, kind: "price_drop", oldPrice: Number(o.old_price), newPrice: Number(o.new_price) });
+  }
+  return out;
+}
+
 // ─── Phase 2 helpers ─────────────────────────────────────────────────
 
 /**
