@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.20] - 2026-07-13
+
+### Chore — re-point theme IDs after the 2026-07-13 conversion/UX publish
+Published the conversion + UX-polish draft to live (`160944193641` "DRAFT CONVERSION 2026-07-13").
+Re-pointed the tooling constants so the `apply-*.mjs` production guard protects the right theme:
+
+- **`scripts/_shopify-lib.mjs`** — `LIVE_THEME_ID` `160749813865` → `160944193641`;
+  `DRAFT_THEME_ID` `160856965225` → `160945012841` (fresh `themeDuplicate` of the new live);
+  `BACKUP_THEME_ID` `160656818281` → `160749813865` (the just-demoted previous live = rollback target).
+- **`CLAUDE.md`** — new "Shopify theme IDs (live vs draft)" section documenting the current
+  live/draft/backup IDs and the "roles move on every publish — trust themes.json, not names" rule.
+
 ## [0.5.54.19] - 2026-07-13
 
 ### Fixed — Custom Web Pixel Purchase now saves + fires (sandbox-safe fetch beacon)

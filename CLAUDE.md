@@ -60,6 +60,20 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
   DOM), so it sends Purchase via `fetch()` to `https://www.facebook.com/tr/` (the noscript
   beacon) — NOT the `fbq`/`fbevents.js` SDK, which the sandbox rejects.
 
+## Shopify theme IDs (live vs draft)
+
+⚠️ **Roles MOVE on every publish; names are misleading — trust `themes.json` roles, never the name.**
+Source of truth for the tooling: `scripts/_shopify-lib.mjs` (`LIVE_THEME_ID` / `DRAFT_THEME_ID` /
+`BACKUP_THEME_ID`) — re-point it after EVERY publish or the `apply-*.mjs` guard protects the wrong theme.
+
+As of **2026-07-13** (publish of the conversion/UX draft):
+- **LIVE / `main` (NEVER write):** `160944193641` "DRAFT CONVERSION 2026-07-13"
+- **Active working DRAFT (safe write target):** `160945012841` "DRAFT DE TRAVAIL 2026-07-13"
+- **Rollback backup (previous live):** `160749813865` "DRAFT DE TRAVAIL 2026-07-05"
+
+Publish a draft: `PUT /admin/api/2025-01/themes/{id}.json {theme:{id,role:"main"}}`. Make a fresh draft:
+GraphQL `themeDuplicate` of the new live. Verify roles: `GET /admin/api/2025-01/themes.json?fields=id,name,role`.
+
 ## API Routes
 
 - `GET /api/catalog` — browse catalog with filters (reads from Turso, not CSV)
