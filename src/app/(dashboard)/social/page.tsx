@@ -186,7 +186,7 @@ export default function SocialPage() {
     await fetch("/api/social", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "generate", triggerType: "stock_highlight" }),
+      body: JSON.stringify({ action: "generate", triggerType: "stock_highlight", count: 3 }),
     });
     setGenerating(false);
     fetchDrafts();
@@ -279,7 +279,7 @@ export default function SocialPage() {
           disabled={generating}
           className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors"
         >
-          {generating ? "Generating..." : "Generate Highlight"}
+          {generating ? "Generating..." : "Generate Highlights"}
         </button>
       </div>
 

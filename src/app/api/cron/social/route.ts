@@ -1,10 +1,10 @@
 import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
-import { triggerStockHighlight } from "@/jobs/job4-social";
+import { generateSocialBatch, SOCIAL_DAILY_BATCH } from "@/jobs/job4-social";
 import { trackCron } from "@/lib/cron-tracking";
 
 /**
- * Cron handler — daily stock highlight post generation.
+ * Cron handler — daily social batch generation.
  * Protected by CRON_SECRET header.
  */
 export async function GET(request: Request) {
@@ -12,19 +12,20 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  // Daily stock highlight: pick the first lifestyle-verified product among a random
-  // eligible batch and generate a bilingual draft. The post carries the product's
-  // Shopify position-1 lifestyle photo, posted raw (no compositing/watermark).
-  // Returns null (skipped) when no eligible product is verified.
+  // Daily social batch (default 3): first sweep recently-imported then
+  // recently-price-dropped products that are now lifestyle-verified (recovering
+  // the sync/import events the per-event triggers dropped when the product wasn't
+  // verified yet), then top up with random stock highlights. Every post carries a
+  // clean Shopify position-1 lifestyle photo, posted raw (no compositing).
   try {
-    const result = await trackCron("social", () => triggerStockHighlight());
-    if (!result) {
-      return NextResponse.json({ success: true, data: null, skipped: "no eligible product for stock highlight" });
+    const results = await trackCron("social", () => generateSocialBatch(SOCIAL_DAILY_BATCH));
+    if (results.length === 0) {
+      return NextResponse.json({ success: true, data: [], skipped: "no eligible lifestyle-verified product" });
     }
     return NextResponse.json({
       success: true,
-      draftId: result.draftId,
-      photos: result.imageUrls.length,
+      count: results.length,
+      draftIds: results.map((r) => r.draftId),
       triggeredAt: new Date().toISOString(),
     });
   } catch (err) {
@@ -34,4 +35,4 @@ export async function GET(request: Request) {
   }
 }
 
-export const maxDuration = 200;
+export const maxDuration = 300;
