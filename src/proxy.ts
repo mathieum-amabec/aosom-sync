@@ -20,7 +20,9 @@ import { AUTH } from "@/lib/config";
 // "/api/revalidate" is public for the same reason: it's called server-to-server with
 // Bearer CRON_SECRET (no session cookie) to refresh the feeds; the route self-gates on
 // CRON_SECRET. Without this it would 307 to /login before its own auth runs.
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/video-serve"];
+// "/api/ugc-videos" is public so the homepage "Voyez-le chez vous" video reel can fetch
+// the 5 UGC-video products (cross-origin GET from the storefront, CORS-guarded, edge-cached).
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/ugc-videos", "/api/video-serve"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(

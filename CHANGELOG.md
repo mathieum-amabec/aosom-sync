@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.23] - 2026-07-14
+
+### Added — `/api/ugc-videos` (homepage "Voyez-le chez vous" UGC video reel — backend)
+Public, edge-cached storefront endpoint that returns the 5 most-in-stock products carrying a
+clean CA/US customer unboxing video (`products.video_ugc`), each with curated FR + EN titles,
+price, PDP handle, and a clean `cdn.shopify.com` image. Backs the coming theme video-reel
+section. Titles resolve from Shopify (curated), never from the raw English `products.name`.
+
+- **`src/lib/database.ts`** — `getUgcVideoCandidates()`: video_ugc products, CA/US-only (source
+  country parsed from the `/customer/{CC}/` URL path — FR/Skeepers forbidden, UK/DE excluded),
+  in stock, live on Shopify, most-in-stock first.
+- **`src/lib/ugc-reel.ts`** — `getUgcVideoReel()`: enriches each with FR title + `cdn.shopify.com`
+  image (via `resolveProductFields`) and EN title (via `custom.title_en` metafield, FR fallback).
+- **`src/app/api/ugc-videos/route.ts`** — GET, CORS allow-listed to storefront origins,
+  `Cache-Control: s-maxage=1800` so Shopify is hit ~1×/30 min, not per homepage load.
+- **`src/proxy.ts`** — `/api/ugc-videos` added to the public allowlist.
+
 ## [0.5.54.22] - 2026-07-14
 
 ### Fixed — social caption: strip platform label even when an emoji precedes it
