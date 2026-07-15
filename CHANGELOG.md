@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.25] - 2026-07-14
+
+### Added — `runPublishReconcile`: publish imported products that sit unpublished
+`createShopifyProduct` only auto-publishes to the Online Store **at creation**; flipping an
+existing product draft→active does NOT publish it, and legacy pre-`beb00b4` (2026-06-07) draft
+imports never activated stay hidden. This reconcile (the inverse of `stale-catalog`) publishes
+every imported product sellable in **today's** Aosom CSV that is either `draft` (untagged) or
+`active`-but-unpublished. It excludes `auto-drafted` (intentional aosom-sync drafts) and
+`exclude-stale`, publishes only `stockBufferQty>0` items (no oversell), guards on the same
+`assertFeedComplete` (FEED_MIN_COVERAGE 0.70) as `stock-check`, and caps writes at 67/run.
+
+- **`src/lib/publish-reconcile.ts`** — pure `computePublishReconcile` (dependency-injected,
+  unit-tested) + `runPublishReconcile({apply})`; DRY-RUN by default. `PUBLISH_WRITE_CAP=67`.
+- **`src/lib/shopify-client.ts`** — `publishShopifyProduct` (REST `published:true`, optional
+  draft→active) + `fetchProductPublishStates` (id/status/published/tags in one paginated pass).
+- **`src/app/api/cron/publish-reconcile/route.ts`** — `GET` dry-run; `?apply=1` publishes.
+  Bearer `CRON_SECRET`, 2 req/sec. **Not** on any cron schedule (operator-triggered only).
+- **`tests/publish-reconcile.test.ts`** — 11 tests (publish/activate targets, all exclusions,
+  write-cap deferral). Verified e2e against prod: guard passes at 80.7% coverage, 47 candidates.
+
 ## [0.5.54.24] - 2026-07-14
 
 ### Changed — `/api/ugc-videos` serves the live Shopify variant price
