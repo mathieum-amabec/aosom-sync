@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.24] - 2026-07-14
+
+### Changed — `/api/ugc-videos` serves the live Shopify variant price
+The reel card price now comes from the live Shopify first-variant price (fetched alongside the
+EN-title metafield), not the daily-synced Turso `products.price`, so cards match the PDP exactly.
+Turso price remains a last-resort fallback.
+
+- **`src/lib/ugc-reel.ts`** — `resolveShopifyPrice()` (`/products/{id}.json?fields=variants`),
+  resolved in parallel with the EN title.
+
 ## [0.5.54.23] - 2026-07-14
 
 ### Added — `/api/ugc-videos` (homepage "Voyez-le chez vous" UGC video reel — backend)

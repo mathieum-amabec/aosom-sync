@@ -27,6 +27,20 @@ export interface UgcReelItem {
   videoUrl: string;
 }
 
+/** Resolve the live Shopify variant price (first variant); null on any failure. */
+async function resolveShopifyPrice(shopifyProductId: string): Promise<number | null> {
+  try {
+    const res = await shopifyFetch(`/products/${encodeURIComponent(shopifyProductId)}.json?fields=variants`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { product?: { variants?: Array<{ price?: string }> } };
+    const raw = data.product?.variants?.[0]?.price;
+    const n = raw == null ? NaN : Number(raw);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Resolve the curated EN title from the `custom.title_en` metafield; FR fallback. */
 async function resolveTitleEn(shopifyProductId: string, fallback: string): Promise<string> {
   try {
@@ -56,12 +70,16 @@ export async function getUgcVideoReel(count = 5): Promise<UgcReelItem[]> {
     const fields = await resolveProductFields(c.shopifyProductId);
     const titleFr = fields.titleFr?.trim();
     if (!titleFr) continue;
-    const titleEn = await resolveTitleEn(c.shopifyProductId, titleFr);
+    const [titleEn, shopifyPrice] = await Promise.all([
+      resolveTitleEn(c.shopifyProductId, titleFr),
+      resolveShopifyPrice(c.shopifyProductId),
+    ]);
     items.push({
       sku: c.sku,
       titleFr,
       titleEn,
-      price: c.price,
+      // Live Shopify variant price; Turso price only as a last-resort fallback.
+      price: shopifyPrice ?? c.price,
       currency: "CAD",
       handle: c.shopifyHandle,
       imageUrl: fields.images[0] ?? null,
