@@ -940,6 +940,47 @@ export async function getProduct(sku: string): Promise<ProductRow | null> {
   return result.rows.length > 0 ? rowToProduct(result.rows[0]) : null;
 }
 
+export interface UgcVideoCandidate {
+  sku: string;
+  name: string;
+  price: number | null;
+  qty: number;
+  shopifyProductId: string | null;
+  shopifyHandle: string | null;
+  videoUgc: string;
+}
+
+/**
+ * Products with a customer UGC unboxing video, restricted to clean CA/US sources
+ * (FR = Skeepers, forbidden; UK/DE = mixed, excluded here), in stock and live on
+ * Shopify, most-in-stock first. Feeds the homepage "Voyez-le chez vous" video reel
+ * (see `/api/ugc-videos`). The source country is encoded in the `video_ugc` URL
+ * path (`.../customer/{CC}/{sku}.mp4`), so the CA/US filter is a URL LIKE.
+ */
+export async function getUgcVideoCandidates(limit = 9): Promise<UgcVideoCandidate[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT sku, name, price, qty, shopify_product_id, shopify_handle, video_ugc
+          FROM products
+          WHERE video_ugc IS NOT NULL AND TRIM(video_ugc) <> ''
+            AND qty > 0
+            AND shopify_handle IS NOT NULL AND TRIM(shopify_handle) <> ''
+            AND (video_ugc LIKE '%/customer/CA/%' OR video_ugc LIKE '%/customer/US/%')
+          ORDER BY qty DESC
+          LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => ({
+    sku: String(r.sku),
+    name: r.name == null ? "" : String(r.name),
+    price: r.price == null ? null : Number(r.price),
+    qty: Number(r.qty ?? 0),
+    shopifyProductId: r.shopify_product_id == null ? null : String(r.shopify_product_id),
+    shopifyHandle: r.shopify_handle == null ? null : String(r.shopify_handle),
+    videoUgc: String(r.video_ugc),
+  }));
+}
+
 /** Imported catalog rows (shopify_product_id set), trimmed to what the intraday stock-check
  * needs: sku, baseline qty, Shopify product id, and last_seen_at. */
 export interface StockBaselineRow {
