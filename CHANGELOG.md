@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.22] - 2026-07-14
+
+### Fixed — social caption: strip platform label even when an emoji precedes it
+`stripLeadingPlatformLabel` anchored its leading skip on `\s*` (whitespace only), so a
+caption like `"🌿 Post Facebook ⏳ <hook>"` — an emoji BEFORE the label — never reached the
+label token and published with the label still attached (draft #680). The anchor now uses
+`[^\p{L}\p{N}]*`, which skips leading emoji/punctuation too while still stopping at the first
+letter/number, so the label must remain the first *word* (a real opening word like
+`"Salut 🌿 Post Facebook…"` never matches). Regression tests added for the emoji-prefixed
+case and the negative (real-word-first) case.
+
+- **`src/lib/strip-markdown.ts`** — leading anchor `^\s*` → `^[^\p{L}\p{N}]*`.
+- **`tests/strip-markdown.test.ts`** — +2 cases (emoji-prefixed strip, real-word-first no-op).
+
 ## [0.5.54.21] - 2026-07-14
 
 ### Fixed — social posts auto-generate again (daily pending sweep + batch)
