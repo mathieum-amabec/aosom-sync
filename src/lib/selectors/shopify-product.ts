@@ -34,6 +34,12 @@ export interface ProductFields {
   titleFr: string;
   /** Lifestyle tag presence + position-sorted primary photo (resolveLifestyle). */
   lifestyle: LifestyleInfo;
+  /** Live Shopify product handle (authoritative for the PDP URL), or null. */
+  handle: string | null;
+  /** Live Shopify product status ("active" | "draft" | "archived"), or null. */
+  status: string | null;
+  /** Live first-variant price as a string (e.g. "73.99"), or null. */
+  price: string | null;
 }
 
 const TTL_MS = 5 * 60 * 1000;
@@ -98,10 +104,22 @@ const EMPTY_FIELDS = (): ProductFields => ({
   images: [],
   titleFr: "",
   lifestyle: { verified: false, primaryImageUrl: null },
+  handle: null,
+  status: null,
+  price: null,
 });
 
 function computeFields(
-  product: { images?: RawImage[]; title?: string; tags?: string } | undefined,
+  product:
+    | {
+        images?: RawImage[];
+        title?: string;
+        tags?: string;
+        handle?: string;
+        status?: string;
+        variants?: Array<{ price?: string }>;
+      }
+    | undefined,
 ): ProductFields {
   const rawImages = product?.images ?? [];
   // resolveProductImages view: array-order (Aosom white-bg at index 0), capped.
@@ -111,7 +129,14 @@ function computeFields(
   const primaryImageUrl = cleanCdnSrcs(byPosition)[0] ?? null;
   const tags = (product?.tags ?? "").split(",").map((t) => t.trim().toLowerCase());
   const titleFr = typeof product?.title === "string" ? product.title.trim() : "";
-  return { images, titleFr, lifestyle: { verified: tags.includes(LIFESTYLE_TAG), primaryImageUrl } };
+  return {
+    images,
+    titleFr,
+    lifestyle: { verified: tags.includes(LIFESTYLE_TAG), primaryImageUrl },
+    handle: typeof product?.handle === "string" ? product.handle : null,
+    status: typeof product?.status === "string" ? product.status : null,
+    price: product?.variants?.[0]?.price ?? null,
+  };
 }
 
 /**
@@ -130,10 +155,19 @@ export async function resolveProductFields(shopifyProductId: string): Promise<Pr
   let fields = EMPTY_FIELDS();
   try {
     await throttle();
-    const res = await shopifyFetch(`/products/${encodeURIComponent(id)}.json?fields=images,title,tags`);
+    const res = await shopifyFetch(
+      `/products/${encodeURIComponent(id)}.json?fields=images,title,tags,handle,status,variants`,
+    );
     if (res.ok) {
       const data = (await res.json()) as {
-        product?: { images?: RawImage[]; title?: string; tags?: string };
+        product?: {
+          images?: RawImage[];
+          title?: string;
+          tags?: string;
+          handle?: string;
+          status?: string;
+          variants?: Array<{ price?: string }>;
+        };
       };
       fields = computeFields(data.product);
     }

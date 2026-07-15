@@ -4,10 +4,11 @@
  *
  * Called cross-origin from the Shopify storefront, so it answers CORS preflight
  * and echoes an allow-listed Origin. Public (allow-listed in `proxy.ts`). Returns
- * the 5 most-in-stock products that have a clean CA/US customer unboxing video,
- * each with curated FR + EN titles, price, PDP handle, a clean cdn.shopify.com
- * image, and the video URL. Response is edge-cached (`s-maxage`) so Shopify is hit
- * at most ~once per 30 min, not on every homepage load.
+ * up to 15 most-in-stock products that have a clean CA/US customer unboxing video
+ * AND are live (`status: "active"`) on Shopify, each with curated FR + EN titles,
+ * live Shopify price, authoritative PDP handle, a clean cdn.shopify.com image, and
+ * the video URL. Response is edge-cached (`s-maxage`) so Shopify is hit at most
+ * ~once per 30 min, not on every homepage load.
  */
 import { NextResponse } from "next/server";
 import { getUgcVideoReel } from "@/lib/ugc-reel";
@@ -42,7 +43,7 @@ export async function OPTIONS(request: Request) {
 export async function GET(request: Request) {
   const cors = corsHeaders(request.headers.get("origin"));
   try {
-    const items = await getUgcVideoReel(5);
+    const items = await getUgcVideoReel(15);
     return NextResponse.json(
       { items, count: items.length },
       {

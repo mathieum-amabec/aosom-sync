@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.26] - 2026-07-14
+
+### Changed — `/api/ugc-videos` returns up to 15 videos, active-only, live handles
+The homepage UGC reel now returns **up to 15** products (was 5). Each is verified **live on
+Shopify** (`status: "active"` — draft/archived skipped) and its **PDP handle + price come from
+the live Shopify record** (authoritative), not Turso. Extra candidates are pulled as headroom so
+we still reach 15 when some drop out; if fewer than 15 clean CA/US active candidates exist, the
+best available are returned.
+
+- **`src/lib/selectors/shopify-product.ts`** — `resolveProductFields` now also returns `handle`,
+  `status`, and `price` from the same single cached fetch (`?fields=…,handle,status,variants`).
+- **`src/lib/ugc-reel.ts`** — filters to `status === "active"`, uses the authoritative Shopify
+  handle, pulls `count + 8` candidates; default count 15.
+- **`src/app/api/ugc-videos/route.ts`** — requests 15.
+
 ## [0.5.54.25] - 2026-07-14
 
 ### Added — `runPublishReconcile`: publish imported products that sit unpublished
