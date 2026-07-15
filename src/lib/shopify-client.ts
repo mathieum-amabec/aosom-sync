@@ -389,6 +389,66 @@ export async function draftShopifyProduct(shopifyId: string): Promise<void> {
   await updateShopifyProduct(shopifyId, { status: "draft" });
 }
 
+/**
+ * Publish a product to the Online Store via REST `published: true`. Optionally also flips
+ * status draft→active in the same PUT (`activate`) — needed for legacy products imported
+ * before beb00b4 (2026-06-07) as `draft` and never activated. `createShopifyProduct` only
+ * auto-publishes at CREATION; nothing re-publishes an existing product, so this is the
+ * reconcile write. Idempotent: re-publishing an already-live product is a no-op Shopify-side.
+ */
+export async function publishShopifyProduct(
+  shopifyId: string,
+  opts: { activate?: boolean } = {},
+): Promise<void> {
+  const product: Record<string, unknown> = { id: shopifyId, published: true };
+  if (opts.activate) product.status = "active";
+  const response = await shopifyFetch(`/products/${shopifyId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ product }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify publish failed: ${response.status} — ${text}`);
+  }
+}
+
+/**
+ * Fetch every product's publication state (id + status + Online-Store published flag + tags)
+ * in one paginated pass. Consumed by publish-reconcile to find imported+sellable products
+ * that sit unpublished. `published` = `published_at` set AND not in the future. Archived
+ * products aren't returned by the unfiltered products.json, so they're naturally excluded.
+ */
+export async function fetchProductPublishStates(): Promise<
+  Array<{ shopifyId: string; status: "active" | "draft" | "archived"; published: boolean; tags: string[] }>
+> {
+  if (!env.hasShopifyToken) return [];
+
+  const out: Array<{ shopifyId: string; status: "active" | "draft" | "archived"; published: boolean; tags: string[] }> = [];
+  let pageInfo: string | null = null;
+
+  do {
+    const params = new URLSearchParams({ limit: "250", fields: "id,status,published_at,tags" });
+    if (pageInfo) params.set("page_info", pageInfo);
+
+    const response = await shopifyFetch(`/products.json?${params}`);
+    if (!response.ok) throw new Error(`Shopify publish-state fetch failed: ${response.status}`);
+
+    const data = await response.json();
+    for (const p of data.products) {
+      const publishedAt = p.published_at as string | null;
+      out.push({
+        shopifyId: String(p.id),
+        status: (p.status as "active" | "draft" | "archived") || "active",
+        published: !!publishedAt && new Date(publishedAt).getTime() <= Date.now(),
+        tags: typeof p.tags === "string" ? p.tags.split(",").map((t: string) => t.trim()).filter(Boolean) : [],
+      });
+    }
+    pageInfo = parseLinkHeader(response.headers.get("Link"));
+  } while (pageInfo);
+
+  return out;
+}
+
 /** Current status + tags for a single product — what the intraday stock-check needs to flip
  * the stock-state tags (preserving the rest) without paging the whole catalog. Returns null
  * if the product no longer exists (404). Tags come back comma-separated; normalized to a list. */
