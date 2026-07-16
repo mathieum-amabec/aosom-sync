@@ -1,0 +1,56 @@
+{% comment %}
+  Sous-catégories d'une collection parente. Retrouve la collection courante comme item de
+  2e niveau dans le menu 'taxonomie-categories' et affiche ses enfants (3e niveau) en chips.
+  Ne rend RIEN si la collection n'a pas d'enfants dans ce menu (sûr sur toutes les pages).
+{% endcomment %}
+{%- liquid
+  assign kids = empty
+  assign menu = linklists['taxonomie-categories']
+  for l1 in menu.links
+    for l2 in l1.links
+      assign l2handle = l2.url | split: '/collections/' | last | split: '?' | first | split: '#' | first
+      if l2handle == collection.handle
+        assign kids = l2.links
+        break
+      endif
+    endfor
+    if kids != empty
+      break
+    endif
+  endfor
+-%}
+{%- if kids != empty and kids.size > 0 -%}
+  <div class="lc-subcats page-width">
+    {%- if section.settings.title != blank -%}
+      <h2 class="lc-subcats__title">{{ section.settings.title | escape }}</h2>
+    {%- endif -%}
+    <ul class="lc-subcats__grid" role="list">
+      {%- for k in kids -%}
+        <li>
+          <a class="lc-subcats__chip{% if k.current %} lc-subcats__chip--active{% endif %}" href="{{ k.url }}">
+            {{- k.title | escape -}}
+          </a>
+        </li>
+      {%- endfor -%}
+    </ul>
+  </div>
+  {%- style -%}
+    .lc-subcats{padding:{{ section.settings.padding_top }}px 0 {{ section.settings.padding_bottom }}px;font-family:'DM Sans',sans-serif}
+    .lc-subcats__title{font-size:1.6rem;font-weight:800;color:#1B2A4A;margin:0 0 1.2rem}
+    .lc-subcats__grid{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:.7rem}
+    .lc-subcats__chip{display:inline-block;padding:.6rem 1.4rem;border:1px solid #d9dee8;border-radius:999px;background:#fff;font-size:1.35rem;font-weight:600;color:#1B2A4A;text-decoration:none;transition:background .15s ease,border-color .15s ease,color .15s ease}
+    .lc-subcats__chip:hover{background:#1B2A4A;border-color:#1B2A4A;color:#fff}
+    .lc-subcats__chip--active{background:#C17F3E;border-color:#C17F3E;color:#fff}
+  {%- endstyle -%}
+{%- endif -%}
+{% schema %}
+{
+  "name": "Sous-catégories",
+  "settings": [
+    { "type": "text", "id": "title", "label": "Titre", "default": "Magasiner par sous-catégorie" },
+    { "type": "range", "id": "padding_top", "min": 0, "max": 60, "step": 4, "unit": "px", "label": "Marge haut", "default": 20 },
+    { "type": "range", "id": "padding_bottom", "min": 0, "max": 60, "step": 4, "unit": "px", "label": "Marge bas", "default": 8 }
+  ],
+  "presets": [{ "name": "Sous-catégories" }]
+}
+{% endschema %}
