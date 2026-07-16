@@ -1,0 +1,45 @@
+{% comment %}
+  Premium mega-menu panel — one image card per sub-category. The tile image is
+  resolved from the sub-collection handle (seg) in each child link's URL, using
+  the SAME pattern as snippets/subcategory-banner.liquid:
+    1. curated theme asset  cat-sub-{seg}.jpg   (the 25 sub-collections that have one)
+    2. collections[seg].image                    (live collection image)
+    3. first product's featured_image            (live product image)
+    4. solid navy #1B2A4A tile                    (no grey placeholder)
+  Render: {% render 'mega-menu', link: link %}
+{% endcomment %}
+{%- assign asset_handles = 'meubles-salon,meubles-chambre,meubles-rangement,meubles-cuisine-salle-a-manger,meubles-decoration,meubles-salle-de-bain,patio-mobilier,chaises-et-tables-de-patio-1,gazebos-et-pergolas,patio-ombrage,jardin-jardinage,jardin-eclairage,jardin-decoration,exterieur-bbq,exterieur-camping,animaux-chiens,animaux-chats,animaux-petits,animaux-oiseaux,enfants-jeux-exterieur,enfants-meubles,enfants-vehicules,electro-climatisation-ventilation,electro-petit-electromenager,bureau-bureaux,bureau-chaises,bureau-rangement' | split: ',' -%}
+<div class="lc-mega page-width">
+  {%- for childlink in link.links -%}
+    {%- assign seg = childlink.url | split: '/collections/' | last | split: '?' | first | split: '#' | first -%}
+    {%- assign img = '' -%}
+    {%- if asset_handles contains seg -%}
+      {%- assign img = 'cat-sub-' | append: seg | append: '.jpg' | asset_url -%}
+    {%- else -%}
+      {%- assign col = collections[seg] -%}
+      {%- if col.image != blank -%}
+        {%- assign img = col.image | image_url: width: 440 -%}
+      {%- elsif col.products.first.featured_image != blank -%}
+        {%- assign img = col.products.first.featured_image | image_url: width: 440 -%}
+      {%- endif -%}
+    {%- endif -%}
+    <a class="lc-mega-card" href="{{ childlink.url }}">
+      <span class="lc-mega-img"{% if img != blank %} style="background-image:url('{{ img }}')"{% else %} style="background-color:#1B2A4A"{% endif %}></span>
+      <span class="lc-mega-name">{{ childlink.title | escape }}</span>
+    </a>
+  {%- endfor -%}
+  <a class="lc-mega-all" href="{{ link.url }}">Voir tout « {{ link.title | escape }} » &rarr;</a>
+</div>
+<style>
+  .lc-mega{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:24px 0 28px;font-family:'DM Sans',sans-serif}
+  .lc-mega-card{display:block;text-decoration:none;color:#1B2A4A;position:relative}
+  .lc-mega-img{display:block;width:100%;aspect-ratio:4/3;border-radius:10px;background-size:cover;background-position:center;background-color:#1B2A4A;box-shadow:0 2px 10px rgba(27,42,74,.12);transition:transform .2s ease,box-shadow .2s ease}
+  .lc-mega-img::after{content:'';position:absolute;inset:0;border-radius:10px;background:rgba(27,42,74,.34);transition:background .2s ease}
+  .lc-mega-card:hover .lc-mega-img{transform:scale(1.02);box-shadow:0 10px 24px rgba(27,42,74,.22)}
+  .lc-mega-card:hover .lc-mega-img::after{background:rgba(27,42,74,.18)}
+  .lc-mega-name{display:block;margin-top:.55rem;font-size:1.4rem;font-weight:700}
+  .lc-mega-card:hover .lc-mega-name{color:#C17F3E}
+  .lc-mega-all{grid-column:1 / -1;justify-self:start;margin-top:.3rem;font-weight:700;font-size:1.35rem;color:#C17F3E;text-decoration:none}
+  .lc-mega-all:hover{text-decoration:underline}
+  @media(max-width:989px){.lc-mega{grid-template-columns:repeat(2,1fr)}}
+</style>
