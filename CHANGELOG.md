@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.27] - 2026-07-17
+
+### Fixed — strip the EN preamble platform-label from social captions
+`stripLeadingPlatformLabel` (and therefore `cleanSocialCaption`, used by every
+caption path: product posts, content templates, publish-time Reel captions, and
+the EN content route's `stripScaffold`) now also removes the English preamble form
+the model sometimes prepends — **"This is your Facebook post"**, "Here's your
+Instagram post", "Here is your …", "Below is your …" — immediately followed by a
+`<Platform> post` / `Post <Platform>` label. The plain `Facebook post:` /
+`Instagram post:` forms were already stripped; this closes the EN-preamble gap so
+those labels no longer publish at the top of an English caption.
+
+- The preamble is optional and only matches when a platform label follows it, so a
+  real opener like "This is your chance…" or "Here's your weekend project:" is left
+  untouched (regression tests added).
+- **`src/lib/strip-markdown.ts`** — extended the leading-label regex with an
+  optional EN preamble group.
+
 ## [0.5.54.26] - 2026-07-14
 
 ### Changed — `/api/ugc-videos` returns up to 15 videos, active-only, live handles
