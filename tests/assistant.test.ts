@@ -93,9 +93,9 @@ describe("runAssistant", () => {
       .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
     await runAssistant({ message: "canapé", locale: "fr" });
     // The tool_result handed back to the model must NOT leak internal fields (handle/image).
-    const secondCallMessages = create.mock.calls[1][0].messages;
-    const toolResultMsg = secondCallMessages.find((m: { role: string }) => m.role === "user" && Array.isArray((m as { content: unknown }).content));
-    const payload = JSON.parse(toolResultMsg.content[0].content);
+    const secondCallMessages = create.mock.calls[1][0].messages as Array<{ role: string; content: unknown }>;
+    const toolResultMsg = secondCallMessages.find((m) => m.role === "user" && Array.isArray(m.content));
+    const payload = JSON.parse(((toolResultMsg!.content as Array<{ content: string }>)[0]).content);
     expect(payload[0]).toHaveProperty("sku");
     expect(payload[0]).not.toHaveProperty("handle");
     expect(payload[0]).not.toHaveProperty("image");
