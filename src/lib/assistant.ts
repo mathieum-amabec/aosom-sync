@@ -3,8 +3,10 @@
  *
  * A bounded Claude tool-use loop over the live catalog (Turso): the model calls
  * `search_catalog` to look up real products, then returns a short reply plus 3-4
- * recommended SKUs with a per-product reason. Only imported + published products
- * (those with a storefront handle) are eligible, so every card deep-links to a real PDP.
+ * recommended SKUs with a per-product reason. Eligible = imported into Shopify AND has a
+ * storefront handle (Turso has no publish-status column, so a small tail of legacy
+ * draft/not-published-to-Online-Store imports can slip through — their PDP would 404; the
+ * pilot imports are created active+published, so this is an edge case, not the norm).
  *
  * Security / cost posture (this is a PUBLIC endpoint):
  *  - The user message is untrusted. The system prompt pins the model to furniture
@@ -39,7 +41,7 @@ export interface AssistantTurn {
   content: string;
 }
 
-const MAX_STEPS = 4; // total model calls (tool loop + final)
+const MAX_STEPS = 3; // total model calls (tool loop + final) — bounds per-request Claude spend
 const SEARCH_LIMIT = 12; // rows returned to the model per search
 const MAX_CARDS = 4;
 const STORE_URL: Record<Locale, string> = {
@@ -209,7 +211,9 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
 /**
  * "Complétez la pièce" — given the product a shopper is viewing, suggest 3 complementary
  * pieces from OTHER categories. Reuses the same secured catalog loop. `name`/`productType`
- * come from our own DB (trusted), not the visitor.
+ * are caller-supplied (the route reads them from the request body), so treat them as
+ * UNTRUSTED: they are length-capped here and only steer the model's own reply — they never
+ * reach a query or another user's session.
  */
 export async function runComplementary(opts: { name: string; productType: string; locale?: Locale }): Promise<AssistantResult> {
   const locale: Locale = opts.locale === "en" ? "en" : "fr";

@@ -10,28 +10,44 @@ import { checkRateLimit } from "@/lib/rate-limiter";
  * Body (PDP complement): { mode: "complementary", name: string, productType: string, locale?: "fr"|"en" }
  */
 
-// Storefront origins allowed to call this endpoint cross-origin.
+// Storefront origins allowed to call this endpoint cross-origin. Scoped to OUR storefronts
+// only (both custom domains + our Shopify preview host) so another store can't point its
+// theme at our paid endpoint.
 const ALLOWED_ORIGIN = [
   /^https:\/\/(www\.)?ameublodirect\.ca$/,
   /^https:\/\/(www\.)?furnishdirect\.ca$/,
-  /^https:\/\/[a-z0-9][a-z0-9-]*\.myshopify\.com$/, // theme preview
+  /^https:\/\/27u5y2-kp\.myshopify\.com$/, // our theme preview host
 ];
 
+function isAllowedOrigin(origin: string | null): origin is string {
+  return !!origin && ALLOWED_ORIGIN.some((re) => re.test(origin));
+}
+
 function corsHeaders(origin: string | null): Record<string, string> {
-  const allow = origin && ALLOWED_ORIGIN.some((re) => re.test(origin));
   const h: Record<string, string> = {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
-  if (allow && origin) h["Access-Control-Allow-Origin"] = origin;
+  if (isAllowedOrigin(origin)) h["Access-Control-Allow-Origin"] = origin;
   return h;
 }
 
+/**
+ * Best-effort client IP for rate-limiting. Prefer `x-real-ip` (set by Vercel to the real
+ * client IP); otherwise take the LAST `x-forwarded-for` hop (Vercel appends the true client
+ * IP at the end — the FIRST entry is attacker-supplied and must never be trusted).
+ */
 function clientIp(request: Request): string {
+  const real = request.headers.get("x-real-ip");
+  if (real && real.trim()) return real.trim();
   const xff = request.headers.get("x-forwarded-for");
-  return (xff ? xff.split(",")[0] : "").trim() || request.headers.get("x-real-ip") || "unknown";
+  if (xff) {
+    const hops = xff.split(",").map((s) => s.trim()).filter(Boolean);
+    if (hops.length) return hops[hops.length - 1];
+  }
+  return "unknown";
 }
 
 export function OPTIONS(request: Request): Response {
@@ -43,6 +59,21 @@ export async function POST(request: Request): Promise<Response> {
   const cors = corsHeaders(origin);
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json", ...cors } });
+
+  // Server-side origin gate. CORS response headers are advisory (browser-enforced only) and
+  // do NOT stop a direct caller; this rejects any request whose Origin isn't one of our
+  // storefronts. Browsers always send Origin on the cross-origin POST the widget makes, so
+  // legitimate traffic is unaffected while curl-without-Origin is blocked outright.
+  if (!isAllowedOrigin(origin)) {
+    return json({ success: false, error: "forbidden_origin" }, 403);
+  }
+
+  // Global cost backstop — caps total spend across ALL callers (defends against distributed
+  // / IP-rotating abuse that a per-IP limit can't). In-memory per instance, so it's a floor,
+  // not a ceiling; a platform WAF / spend alert should back it in production.
+  if (!checkRateLimit("assistant:global", 90, 60_000).allowed) {
+    return json({ success: false, error: "busy", retryAfter: 30 }, 429);
+  }
 
   // Per-IP rate limit — public endpoint that spends Claude credits. 12 req / 60s.
   const { allowed, retryAfterMs } = checkRateLimit(`assistant:${clientIp(request)}`, 12, 60_000);
