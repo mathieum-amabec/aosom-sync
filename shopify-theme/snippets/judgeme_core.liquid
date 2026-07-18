@@ -1,0 +1,91 @@
+{%- comment -%}
+  Judge.me widgets via the PUBLIC widget API (self-contained, Option 3).
+  Does NOT depend on the app's shopify_v2.js or a full jdgmSettings config: it
+  fetches the already-rendered widget HTML from judge.me/api/v1/widgets/* with the
+  public token and injects it into the theme placeholders on product pages.
+  A MutationObserver re-asserts our content so the app-injected shopify_v2.js (which
+  can only render an empty/invisible widget without the full config) can't win the
+  race and blank it out. The jdgm / jdgmSettings stubs only silence shopify_v2.js's
+  "not defined" errors; they do not drive rendering.
+{%- endcomment -%}
+<script>
+  window.jdgmSettings = window.jdgmSettings || {
+    shop: "27u5y2-kp.myshopify.com",
+    publicKey: "NUZrHBQpbht0-nHvK_4MlzovnDI",
+    loadCSS: true,
+    loadJS: true
+  };
+  window.jdgm = window.jdgm || {};
+  window.jdgm.data = window.jdgm.data || {};
+</script>
+{%- if template contains 'product' -%}
+<link rel="stylesheet" href="https://cdn.judge.me/shopify_v2.css" media="all">
+<style>
+  /* The API badge ships hidden (inline display:none + JM CSS default); force it visible. */
+  .jdgm-preview-badge, .jdgm-widget.jdgm-preview-badge { display: inline-block !important; }
+  .jdgm-preview-badge .jdgm-prev-badge, .jdgm-prev-badge-link .jdgm-prev-badge { display: inline-flex !important; align-items: center; gap: .3rem; }
+</style>
+<script>
+(function () {
+  var SHOP = "27u5y2-kp.myshopify.com";
+  var TOKEN = "NUZrHBQpbht0-nHvK_4MlzovnDI";
+  var PID = "{{ product.id }}";
+  var LOC = "{{ request.locale.iso_code | downcase }}";
+  var EMPTY = (LOC === "en") ? "Be the first to write a review" : "Soyez le premier à laisser un avis";
+  var TITLE = (LOC === "en") ? "Customer Reviews" : "Avis clients";
+  var MARK = "<span data-o3 hidden></span>";
+
+  function api(path) {
+    var url = "https://judge.me/api/v1/widgets/" + path +
+      "?shop_domain=" + SHOP + "&api_token=" + TOKEN + "&external_id=" + encodeURIComponent(PID);
+    return fetch(url, { headers: { Accept: "application/json" } }).then(function (r) { return r.json(); });
+  }
+
+  // Inject `html` into `el` and keep re-asserting it if anything (shopify_v2.js)
+  // overwrites it, until it sticks. `mine()` = our marker span is present.
+  function own(el, html, onApply) {
+    if (!el) return;
+    function mine() { return !!el.querySelector("[data-o3]"); }
+    function apply() { el.innerHTML = html; if (onApply) onApply(el); }
+    apply();
+    var obs = new MutationObserver(function () { if (!mine()) apply(); });
+    obs.observe(el, { childList: true });
+    var n = 0, iv = setInterval(function () {
+      if (!mine()) apply();
+      if (++n > 14) { clearInterval(iv); obs.disconnect(); } // ~10s cap
+    }, 700);
+  }
+
+  function runBadge() {
+    api("preview_badge").then(function (d) {
+      if (!d || !d.badge) return;
+      var el = document.querySelector(".jdgm-preview-badge, .jdgm-widget.jdgm-preview-badge");
+      var html = d.badge.replace(/style\s*=\s*(['"])\s*display:\s*none\s*\1/i, "") + MARK;
+      own(el, html, function (node) {
+        node.style.display = "";
+        var b = node.querySelector(".jdgm-prev-badge");
+        if (b) { b.style.setProperty("display", "inline-flex", "important"); }
+      });
+    }).catch(function () {});
+  }
+
+  function runReviews() {
+    api("product_review").then(function (d) {
+      var el = document.getElementById("judgeme_product_reviews");
+      var raw = (d && d.widget) ? d.widget.trim() : "";
+      var stripped = raw.replace(/<div>\s*<\/div>/i, "").trim();
+      var html = (stripped.length > 0)
+        ? (raw + MARK)
+        : ("<div class='jdgm-rev-widg'>" +
+             "<h2 class='jdgm-rev-widg__title' style='font-size:1.6rem;font-weight:700;color:#1B2A4A;margin:0 0 1rem'>" + TITLE + "</h2>" +
+             "<div class='jdgm-rev-widg__reviews' style='padding:1.2rem 0;color:#5b6172;font-size:1.4rem'>" + EMPTY + "</div>" +
+           "</div>" + MARK);
+      own(el, html);
+    }).catch(function () {});
+  }
+
+  function run() { runBadge(); runReviews(); }
+  if (document.readyState !== "loading") { run(); } else { document.addEventListener("DOMContentLoaded", run); }
+})();
+</script>
+{%- endif -%}
