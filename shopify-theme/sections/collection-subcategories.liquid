@@ -1,12 +1,18 @@
 {% comment %}
-  Sous-catégories d'une collection parente. Retrouve la collection courante comme item de
-  2e niveau dans le menu 'taxonomie-categories' et affiche ses enfants (3e niveau) en chips.
+  Sous-catégories d'une collection parente. Retrouve la collection courante dans le menu 'taxonomie-categories' :
+  - si c'est un item de 1er niveau (categorie top), affiche ses enfants (2e niveau) en chips ;
+  - si c'est un item de 2e niveau, affiche ses enfants (3e niveau) en chips.
   Ne rend RIEN si la collection n'a pas d'enfants dans ce menu (sûr sur toutes les pages).
 {% endcomment %}
 {%- liquid
   assign kids = empty
   assign menu = linklists['taxonomie-categories']
   for l1 in menu.links
+    assign l1handle = l1.url | split: '/collections/' | last | split: '?' | first | split: '#' | first
+    if l1handle == collection.handle
+      assign kids = l1.links
+      break
+    endif
     for l2 in l1.links
       assign l2handle = l2.url | split: '/collections/' | last | split: '?' | first | split: '#' | first
       if l2handle == collection.handle
