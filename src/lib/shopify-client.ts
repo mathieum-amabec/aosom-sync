@@ -84,6 +84,52 @@ export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[
   return products;
 }
 
+export interface ShopifyProductImage {
+  id: number;
+  position: number;
+  src: string;
+}
+
+/**
+ * Fetch every image of one product, sorted by position ascending (pos-1 first).
+ * Returns [] when no Shopify token is configured.
+ */
+export async function fetchProductImages(productId: string | number): Promise<ShopifyProductImage[]> {
+  if (!env.hasShopifyToken) return [];
+  const response = await shopifyFetch(`/products/${productId}/images.json`);
+  if (!response.ok) throw new Error(`Shopify images fetch failed (${productId}): ${response.status}`);
+  const data = await response.json();
+  const images = (data.images as Array<Record<string, unknown>>) || [];
+  return images
+    .map((im) => ({ id: Number(im.id), position: Number(im.position), src: String(im.src || "") }))
+    .sort((a, b) => a.position - b.position);
+}
+
+/**
+ * Move a product image to position 1 — the storefront pos-1 / featured image — then verify.
+ * Same mechanism as the 141 manual pos-1 swaps: PUT position:1, then re-GET to confirm
+ * (Shopify reorders asynchronously). Returns true only once pos-1 is confirmed to be
+ * `imageId`; false if it never settled. Throws on a non-OK PUT.
+ */
+export async function moveImageToFirstPosition(
+  productId: string | number,
+  imageId: string | number,
+): Promise<boolean> {
+  const put = await shopifyFetch(`/products/${productId}/images/${imageId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ image: { id: Number(imageId), position: 1 } }),
+  });
+  if (!put.ok) throw new Error(`Shopify image reorder failed (${productId}/${imageId}): ${put.status}`);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const images = await fetchProductImages(productId);
+    const pos1 = images.find((im) => im.position === 1);
+    if (pos1 && String(pos1.id) === String(imageId)) return true;
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  return false;
+}
+
 /**
  * Fetch only the DRAFT products (id + tags), for the intraday reactivation pass. Uses
  * Shopify's `status=draft` server-side filter so we pull a small slice, not the whole
