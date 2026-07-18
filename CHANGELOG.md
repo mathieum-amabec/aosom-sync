@@ -2,6 +2,36 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.30] - 2026-07-18
+
+### Added — "Trouvez le meuble parfait" AI shopping assistant + PDP complementary section
+
+A bilingual (FR/EN) shopping advisor that recommends real catalog products, plus a
+storefront chat widget and a PDP "Complétez la pièce" section (draft theme `161069989993`).
+
+- **`POST /api/assistant`** (`src/app/api/assistant/route.ts` + `src/lib/assistant.ts`) — a
+  **bounded Claude tool-use loop** (`claude-sonnet-4-6`) over the Turso catalog. A
+  `search_catalog` tool returns only imported products with a storefront handle (real PDP
+  links); the model replies with 3-4 picks + a FR/EN reason per product. `runComplementary`
+  powers the PDP section (3 items from other categories).
+- **Public-endpoint hardening** (no auth — called from the storefront): server-side Origin
+  gate (CORS headers alone don't stop a direct caller), rate-limit keyed on `x-real-ip` /
+  last XFF hop (never the spoofable first hop), a global cost backstop, `MAX_STEPS` capped,
+  strict input caps, and a "model cannot invent a product" guarantee (picked SKUs are
+  resolved against the pool the tool actually returned — name/price/image/URL never come
+  from model text). 16 unit tests.
+- **Theme (draft `161069989993`, applied via Asset API — not in this PR):**
+  `snippets/lc-assistant-widget.liquid` (floating "🛋️ Aide au choix / Help me choose"
+  button + navy/gold chat modal) wired into `theme.liquid`; `snippets/lc-complete-the-room.liquid`
+  wired into `main-product.liquid`. All model-emitted text is rendered via `textContent`/escape
+  (no DOM-XSS). Widget/PDP call the endpoint, so they are live only after this deploys.
+
+### Added — "Prix en baisse" price-drop badge on collection cards
+
+`snippets/card-product.liquid` (draft `161069989993`): a gold, bottom-left "📉 Prix en baisse /
+Price drop" badge shown when `product.metafields.custom.price_badge == "price_drop"`, styled
+identically to the existing `-X%` badge, added to both the media and no-media card blocks.
+
 ## [0.5.54.29] - 2026-07-18
 
 ### Added — 3 conversion features (30-day price badge, back-in-stock waitlist, orphan menu collections)
