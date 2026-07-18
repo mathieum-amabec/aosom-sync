@@ -24,23 +24,23 @@ export function loadEnv() {
 export const STORE = "27u5y2-kp.myshopify.com";
 export const API_VERSION = "2025-01";
 
-// Theme roles verified via GET /admin/api/2025-01/themes.json (source of truth, 2026-07-18):
-//   160970178665 "DRAFT DE TRAVAIL 2026-07-14"        → role:main        (LIVE / published 2026-07-18 — name still says DRAFT!)
-//   161062551657 "DRAFT DE TRAVAIL 2026-07-18"        → role:unpublished (active working DRAFT — themeDuplicate of the live, 2026-07-18)
-//   160944193641 "DRAFT CONVERSION 2026-07-13"        → role:unpublished (PREVIOUS live, published until 2026-07-18 — rollback target)
-//   160945012841 "DRAFT DE TRAVAIL 2026-07-13"        → role:unpublished (older working draft)
-// Roles MOVE on every publish: on 2026-07-18, 160970178665 was published to LIVE (demoting the
-// previous live 160944193641 to unpublished/rollback). A fresh full copy of the new live,
-// 161062551657, was made the working DRAFT via GraphQL themeDuplicate (API 2026-01).
-// NOTE: theme NAMES are misleading (the LIVE one is named "DRAFT DE TRAVAIL 2026-07-14") — do NOT
+// Theme roles verified via GET /admin/api/2025-01/themes.json (source of truth, 2026-07-18, 2nd publish of the day):
+//   161062551657 "DRAFT DE TRAVAIL 2026-07-18"        → role:main        (LIVE / published 2026-07-18 w/ conversion features — name still says DRAFT!)
+//   161069989993 "DRAFT DE TRAVAIL 2026-07-18 v2"     → role:unpublished (active working DRAFT — themeDuplicate of the new live, 2026-07-18)
+//   160970178665 "DRAFT DE TRAVAIL 2026-07-14"        → role:unpublished (PREVIOUS live, published until 2026-07-18 — rollback target)
+//   160944193641 "DRAFT CONVERSION 2026-07-13"        → role:unpublished (older previous live)
+// Roles MOVE on every publish: on 2026-07-18, 161062551657 was published to LIVE (demoting the
+// previous live 160970178665 to unpublished/rollback). A fresh full copy of the new live,
+// 161069989993, was made the working DRAFT via GraphQL themeDuplicate (API 2026-01).
+// NOTE: theme NAMES are misleading (the LIVE one is named "DRAFT DE TRAVAIL 2026-07-18") — do NOT
 // eyeball by name; trust the role from themes.json.
 // Re-verify via themes.json after ANY publish — a stale LIVE_THEME_ID makes the apply-*.mjs
 // guard "protect" the wrong theme, and a stale DRAFT_THEME_ID can point writes at production.
 // IMPORTANT: the LIVE_THEME_ID guard in apply-*.mjs ("refusing to run against the LIVE
 // theme") only protects production when this is the REAL published theme. Keep it current.
-export const LIVE_THEME_ID = "160970178665"; // current main / published (LIVE) theme — NEVER write here
-export const DRAFT_THEME_ID = "161062551657"; // active unpublished DRAFT (dup'd 2026-07-18) — safe write target
-export const BACKUP_THEME_ID = "160944193641"; // previous live (published until 2026-07-18), now rollback target
+export const LIVE_THEME_ID = "161062551657"; // current main / published (LIVE) theme — NEVER write here
+export const DRAFT_THEME_ID = "161069989993"; // active unpublished DRAFT (dup'd 2026-07-18) — safe write target
+export const BACKUP_THEME_ID = "160970178665"; // previous live (published until 2026-07-18), now rollback target
 // Deprecated alias kept for older imports. Points at a non-live theme so the default
 // asset-write target can never hit production. New code should use DRAFT_THEME_ID.
 export const PREVIEW_THEME_ID = BACKUP_THEME_ID;
