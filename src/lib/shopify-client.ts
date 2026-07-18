@@ -403,6 +403,56 @@ export async function updateShopifyProduct(
   }
 }
 
+/**
+ * Upsert a single product metafield. Shopify upserts by (namespace, key) when the
+ * metafield is nested in a product PUT, so this is a single API call — no read first.
+ */
+export async function setProductMetafield(
+  productId: string,
+  namespace: string,
+  key: string,
+  type: string,
+  value: string,
+): Promise<void> {
+  const response = await shopifyFetch(`/products/${productId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({
+      product: { id: productId, metafields: [{ namespace, key, type, value }] },
+    }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify set metafield failed: ${response.status} — ${text}`);
+  }
+}
+
+/**
+ * Delete a product metafield by (namespace, key). No-op when it is absent.
+ */
+export async function deleteProductMetafield(
+  productId: string,
+  namespace: string,
+  key: string,
+): Promise<void> {
+  const listRes = await shopifyFetch(
+    `/products/${productId}/metafields.json?namespace=${encodeURIComponent(namespace)}&key=${encodeURIComponent(key)}`,
+  );
+  if (!listRes.ok) {
+    const text = await listRes.text();
+    throw new Error(`Shopify list metafields failed: ${listRes.status} — ${text}`);
+  }
+  const metafields = ((await listRes.json()).metafields ?? []) as { id: number }[];
+  for (const mf of metafields) {
+    const del = await shopifyFetch(`/products/${productId}/metafields/${mf.id}.json`, {
+      method: "DELETE",
+    });
+    if (!del.ok && del.status !== 404) {
+      const text = await del.text();
+      throw new Error(`Shopify delete metafield failed: ${del.status} — ${text}`);
+    }
+  }
+}
+
 export async function updateShopifyVariantPrice(
   variantId: string,
   price: number,
