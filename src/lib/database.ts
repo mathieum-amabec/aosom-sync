@@ -923,7 +923,7 @@ export async function refreshProducts(products: Omit<ProductRow, "shopify_produc
       material=excluded.material, gtin=excluded.gtin, weight=excluded.weight,
       out_of_stock_expected=excluded.out_of_stock_expected,
       estimated_arrival=excluded.estimated_arrival, last_seen_at=excluded.last_seen_at,
-      image_checked_at=CASE WHEN excluded.image1 <> products.image1 THEN NULL ELSE products.image_checked_at END`,
+      image_checked_at=CASE WHEN excluded.image1 IS NOT products.image1 THEN NULL ELSE products.image_checked_at END`,
     args: [
       p.sku, p.name, p.price, p.qty, p.color, p.size, p.product_type,
       p.image1, p.image2, p.image3, p.image4, p.image5, p.image6, p.image7,

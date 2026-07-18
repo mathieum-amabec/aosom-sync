@@ -60,9 +60,12 @@ function mediaTypeFor(src: string): "image/jpeg" | "image/png" | "image/webp" | 
 
 /**
  * For a Shopify CDN URL, request the 1024×1024 resized variant to keep the base64
- * payload small. No-ops on non-Shopify URLs that lack a file extension.
+ * payload small. Restricted to Shopify CDN hosts — the `_1024x1024` suffix is a
+ * Shopify-specific transform, so rewriting an arbitrary CDN URL would 404. Any
+ * non-Shopify URL (or one without a file extension) is returned unchanged.
  */
 function resizedUrl(src: string): string {
+  if (!/(^|\.)shopify(cdn)?\.com\//.test(src) && !src.includes("/s/files/")) return src;
   const [path, query] = src.split("?");
   if (!/\.[a-zA-Z]+$/.test(path)) return src;
   const resized = path.replace(/(\.[a-zA-Z]+)$/, "_1024x1024$1");

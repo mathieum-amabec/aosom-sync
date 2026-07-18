@@ -20,6 +20,7 @@ import {
   markImageChecked,
   addSyncLogsBatch,
 } from "./database";
+import { env } from "./config";
 import type { SyncLogEntry } from "@/types/sync";
 
 export const DEFAULT_MAX_CLASSIFICATIONS = 20;
@@ -33,8 +34,11 @@ export interface ImageComplianceResult {
   nonCompliant: number;
   /** Non-compliant products where pos-1 was swapped for a clean gallery image. */
   swapped: number;
-  /** Non-compliant products with no clean alternative in the gallery. */
+  /** Non-compliant products where the WHOLE gallery was scanned and no clean image exists. */
   noAlternative: number;
+  /** Non-compliant products left unresolved because the budget ran out mid-scan — NOT stamped
+   * checked, so a future run finishes the scan. */
+  deferred: number;
   /** Total Claude vision calls consumed (capped at maxClassifications). */
   classifications: number;
   /** Per-product / per-image errors (non-fatal). */
@@ -46,7 +50,7 @@ function log(msg: string, extra?: Record<string, unknown>): void {
 }
 
 const emptyResult = (): ImageComplianceResult => ({
-  checked: 0, compliant: 0, nonCompliant: 0, swapped: 0, noAlternative: 0, classifications: 0, errors: 0,
+  checked: 0, compliant: 0, nonCompliant: 0, swapped: 0, noAlternative: 0, deferred: 0, classifications: 0, errors: 0,
 });
 
 /**
@@ -59,6 +63,14 @@ export async function runImageCompliance(opts: {
   const result = emptyResult();
   const maxClassifications = opts.maxClassifications ?? DEFAULT_MAX_CLASSIFICATIONS;
   if (maxClassifications <= 0) return result;
+
+  // Without a Shopify token every image fetch returns [] — which would otherwise mark each
+  // candidate "checked" without ever classifying it, permanently skipping the product. Bail
+  // before touching the checked flag so a token-less/misconfigured run is a true no-op.
+  if (!env.hasShopifyToken) {
+    log("no Shopify token — skipping image compliance");
+    return result;
+  }
 
   // Never classify more products than the budget allows even in the best case (1 call each).
   let candidates;
@@ -77,7 +89,19 @@ export async function runImageCompliance(opts: {
   let budgetLeft = maxClassifications;
   const logEntries: Omit<SyncLogEntry, "id">[] = [];
   const now = new Date().toISOString();
-  const checkedIds: string[] = [];
+
+  // Stamp ONE product checked as soon as it's genuinely resolved (compliant / swapped /
+  // whole-gallery-had-no-clean-image). Per-product (≤20 tiny UPDATEs/run) so a mid-run
+  // timeout can't lose the idempotency flag and re-burn the budget next run. Products left
+  // UNSTAMPED on failure/deferral are deliberately retried by a future run — better a couple
+  // wasted calls than silently leaving a marketing overlay live at pos-1.
+  async function markResolved(productId: string): Promise<void> {
+    try {
+      await markImageChecked([productId]);
+    } catch (err) {
+      log("markImageChecked failed (non-fatal)", { product_id: productId, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   for (const c of candidates) {
     if (budgetLeft <= 0) break;
@@ -85,8 +109,8 @@ export async function runImageCompliance(opts: {
       const images = await fetchProductImages(c.shopifyProductId);
       const pos1 = images.find((im) => im.position === 1) ?? images[0];
       if (!pos1 || !pos1.src) {
-        // No image to classify — mark checked so we don't retry it every run.
-        checkedIds.push(c.shopifyProductId);
+        // No image to classify — resolved (nothing to do), don't retry every run.
+        await markResolved(c.shopifyProductId);
         continue;
       }
 
@@ -95,10 +119,10 @@ export async function runImageCompliance(opts: {
       result.classifications++;
       const verdict = await classifyProductImage(pos1.src);
       result.checked++;
-      checkedIds.push(c.shopifyProductId); // classified → mark checked (won't recheck until image1 changes)
 
       if (verdict.compliant) {
         result.compliant++;
+        await markResolved(c.shopifyProductId);
         continue;
       }
       result.nonCompliant++;
@@ -108,8 +132,9 @@ export async function runImageCompliance(opts: {
       const alternatives = images.filter((im) => im.id !== pos1.id && im.src);
       let swapTo: ShopifyProductImage | null = null;
       let altReason = "";
+      let scanTruncated = false;
       for (const alt of alternatives) {
-        if (budgetLeft <= 0) break;
+        if (budgetLeft <= 0) { scanTruncated = true; break; }
         budgetLeft--;
         result.classifications++;
         let altVerdict;
@@ -127,45 +152,50 @@ export async function runImageCompliance(opts: {
         }
       }
 
-      if (!swapTo) {
-        result.noAlternative++;
-        log("non-compliant, no clean alternative", { sku: c.sku, product_id: c.shopifyProductId, reason: verdict.reason });
+      if (swapTo) {
+        const verified = await moveImageToFirstPosition(c.shopifyProductId, swapTo.id);
+        if (verified) {
+          result.swapped++;
+          await markResolved(c.shopifyProductId); // resolved — pos-1 is now clean
+          log("swapped pos-1", { sku: c.sku, product_id: c.shopifyProductId, new_image_id: swapTo.id, was_position: swapTo.position });
+          logEntries.push({
+            syncRunId: opts.syncRunId,
+            timestamp: now,
+            shopifyProductId: c.shopifyProductId,
+            sku: c.sku,
+            action: "update",
+            field: "images",
+            oldValue: `pos-1 non conforme: ${pos1.src.split("?")[0]} — ${verdict.reason}`.slice(0, 255),
+            newValue: `pos-1 remplacé par image #${swapTo.id} (était pos ${swapTo.position}) — ${altReason}`.slice(0, 255),
+          });
+        } else {
+          // Shopify never confirmed the reorder — leave UNSTAMPED so the next run retries.
+          result.errors++;
+          log("swap not verified by Shopify — will retry next run", { sku: c.sku, product_id: c.shopifyProductId, image_id: swapTo.id });
+        }
         continue;
       }
 
-      const verified = await moveImageToFirstPosition(c.shopifyProductId, swapTo.id);
-      if (verified) {
-        result.swapped++;
-        log("swapped pos-1", { sku: c.sku, product_id: c.shopifyProductId, new_image_id: swapTo.id, was_position: swapTo.position });
-        logEntries.push({
-          syncRunId: opts.syncRunId,
-          timestamp: now,
-          shopifyProductId: c.shopifyProductId,
-          sku: c.sku,
-          action: "update",
-          field: "images",
-          oldValue: `pos-1 non conforme: ${pos1.src.split("?")[0]} — ${verdict.reason}`.slice(0, 255),
-          newValue: `pos-1 remplacé par image #${swapTo.id} (était pos ${swapTo.position}) — ${altReason}`.slice(0, 255),
-        });
+      if (scanTruncated) {
+        // Budget ran out before the whole gallery was scanned — a clean image may still
+        // exist further down. Leave UNSTAMPED so a future run finishes the scan.
+        result.deferred++;
+        log("gallery scan truncated by budget — deferring to next run", { sku: c.sku, product_id: c.shopifyProductId });
       } else {
-        result.errors++;
-        log("swap not verified by Shopify", { sku: c.sku, product_id: c.shopifyProductId, image_id: swapTo.id });
+        // Whole gallery scanned, nothing clean — genuinely no alternative. Resolved.
+        result.noAlternative++;
+        await markResolved(c.shopifyProductId);
+        log("non-compliant, no clean alternative", { sku: c.sku, product_id: c.shopifyProductId, reason: verdict.reason });
       }
     } catch (err) {
+      // Unresolved (fetch/classify threw) — leave UNSTAMPED so it's retried next run.
       result.errors++;
-      log("candidate error (non-fatal)", { sku: c.sku, product_id: c.shopifyProductId, error: err instanceof Error ? err.message : String(err) });
+      log("candidate error (non-fatal) — will retry next run", { sku: c.sku, product_id: c.shopifyProductId, error: err instanceof Error ? err.message : String(err) });
     }
   }
 
-  // Stamp checked products + persist swap logs. Both non-fatal — bookkeeping must never
-  // fail the sync, and a partial-budget run still records what it did.
-  if (checkedIds.length > 0) {
-    try {
-      await markImageChecked(checkedIds);
-    } catch (err) {
-      log("markImageChecked failed (non-fatal)", { error: err instanceof Error ? err.message : String(err) });
-    }
-  }
+  // Persist swap audit rows. Non-fatal — losing an audit row is harmless (the swap itself
+  // already persisted to Shopify and the product is stamped).
   if (logEntries.length > 0) {
     try {
       await addSyncLogsBatch(logEntries);

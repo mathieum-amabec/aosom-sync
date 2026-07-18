@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ─── Module mocks (declared before the import under test) ──────────────
+// env.hasShopifyToken gates the whole pass — mock config so the token is present.
+vi.mock("@/lib/config", () => ({ env: { hasShopifyToken: true } }));
+
 const classifyProductImage = vi.fn();
 vi.mock("@/lib/vision-classifier", () => ({ classifyProductImage }));
 
@@ -106,10 +109,13 @@ describe("runImageCompliance", () => {
 
     const res = await runImageCompliance({ syncRunId: "run-1", maxClassifications: 1 });
 
-    // Budget of 1 is fully spent on pos-1; the gallery scan can't run → noAlternative.
+    // Budget of 1 is fully spent on pos-1; the gallery scan can't run. This is a DEFERRAL,
+    // not a real "no alternative" — the product must stay UNSTAMPED so a later run finishes it.
     expect(res.classifications).toBe(1);
     expect(classifyProductImage).toHaveBeenCalledTimes(1);
-    expect(res.noAlternative).toBe(1);
+    expect(res.deferred).toBe(1);
+    expect(res.noAlternative).toBe(0);
+    expect(markImageChecked).not.toHaveBeenCalled();
   });
 
   it("counts an unverified Shopify swap as an error, not a swap", async () => {
@@ -128,6 +134,9 @@ describe("runImageCompliance", () => {
     expect(res.swapped).toBe(0);
     expect(res.errors).toBe(1);
     expect(addSyncLogsBatch).not.toHaveBeenCalled();
+    // The overlay is still live at pos-1 — the product must NOT be stamped checked, so the
+    // next run retries the swap instead of abandoning it permanently.
+    expect(markImageChecked).not.toHaveBeenCalled();
   });
 
   it("marks a product with no images as checked without classifying", async () => {

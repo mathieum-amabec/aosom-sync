@@ -58,6 +58,13 @@ describe("classifyProductImage", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://cdn.shopify.com/s/files/1/pic_1024x1024.png?v=123");
   });
 
+  it("does NOT rewrite a non-Shopify CDN url (the _1024x1024 transform is Shopify-only)", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    create.mockResolvedValue(claudeJson({ has_marketing_overlay: false, confidence: 1, reason: "ok" }));
+    await classifyProductImage("https://feed-us.aosomcdn.com/pic.jpg");
+    expect(fetchMock).toHaveBeenCalledWith("https://feed-us.aosomcdn.com/pic.jpg");
+  });
+
   it("sends the image with the correct media_type derived from the extension", async () => {
     create.mockResolvedValue(claudeJson({ has_marketing_overlay: false, confidence: 1, reason: "ok" }));
     await classifyProductImage("https://cdn.example.com/pic.webp");
