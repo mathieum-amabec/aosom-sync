@@ -1518,6 +1518,91 @@ export async function recordPriceChanges(entries: {
   }
 }
 
+export type PriceBadge = "best_30d" | "price_drop";
+
+/**
+ * Pure decision for the 30-day price badge, given the current price, the 30-day
+ * minimum recorded price (`min30`, null if none), and a reference price ~30 days
+ * ago (`reference`, null if none). Extracted from getPriceBadge so the branching
+ * is unit-testable without a DB.
+ *   - "best_30d"   — current price is the lowest known in the window (ties win here)
+ *   - "price_drop" — current price is below the reference (but not the window low)
+ *   - null         — no recorded activity, or price sits above both
+ */
+export function decidePriceBadge(
+  currentPrice: number,
+  min30: number | null,
+  reference: number | null,
+): PriceBadge | null {
+  if (min30 == null && reference == null) return null;
+  const EPS = 0.005;
+  const overallMin = Math.min(
+    currentPrice,
+    min30 ?? Number.POSITIVE_INFINITY,
+    reference ?? Number.POSITIVE_INFINITY,
+  );
+  if (currentPrice <= overallMin + EPS) return "best_30d";
+  if (reference != null && currentPrice < reference - EPS) return "price_drop";
+  return null;
+}
+
+/**
+ * Compute the 30-day price badge for a product, identified by its variant SKUs.
+ *   - "best_30d"   — the current price is the lowest it has been in the last 30 days
+ *   - "price_drop" — the current price is below the reference price ~30 days ago
+ *                    (but not the 30-day low)
+ *   - null         — no qualifying signal / no recorded price activity in the window
+ *
+ * `price_history` is pruned to 30 days by runSyncFinalize, so the reference "price
+ * 30 days ago" is resolved as: the newest recorded price at/just-before the 30-day
+ * cutoff, else the price just before the oldest change inside the window (that row's
+ * `old_price`). A product with a flat price and no recorded change in the window gets
+ * no badge — the badge is a recent-price-activity signal, not a label on every price.
+ */
+export async function getPriceBadge(skus: string[]): Promise<PriceBadge | null> {
+  const cleanSkus = skus.filter(Boolean);
+  if (cleanSkus.length === 0) return null;
+  const db = await ensureSchema();
+  const ph = cleanSkus.map(() => "?").join(", ");
+
+  const curRes = await db.execute({
+    sql: `SELECT MIN(price) AS p FROM products WHERE sku IN (${ph})`,
+    args: cleanSkus,
+  });
+  const currentPrice = curRes.rows[0]?.p as number | null;
+  if (currentPrice == null) return null;
+
+  const cutoff = Math.floor(Date.now() / 1000) - 30 * 86400;
+
+  const minRes = await db.execute({
+    sql: `SELECT MIN(new_price) AS m FROM price_history
+          WHERE sku IN (${ph}) AND new_price IS NOT NULL AND detected_at >= ?`,
+    args: [...cleanSkus, cutoff],
+  });
+  const min30 = minRes.rows[0]?.m as number | null;
+
+  // Reference price ~30 days ago: prefer the price active at the cutoff, else the
+  // price just before the first change recorded inside the window.
+  const beforeRes = await db.execute({
+    sql: `SELECT new_price AS p FROM price_history
+          WHERE sku IN (${ph}) AND new_price IS NOT NULL AND detected_at <= ?
+          ORDER BY detected_at DESC LIMIT 1`,
+    args: [...cleanSkus, cutoff],
+  });
+  let reference = beforeRes.rows[0]?.p as number | null;
+  if (reference == null) {
+    const firstInWindow = await db.execute({
+      sql: `SELECT old_price AS p FROM price_history
+            WHERE sku IN (${ph}) AND old_price IS NOT NULL AND detected_at >= ?
+            ORDER BY detected_at ASC LIMIT 1`,
+      args: [...cleanSkus, cutoff],
+    });
+    reference = firstInWindow.rows[0]?.p as number | null;
+  }
+
+  return decidePriceBadge(currentPrice, min30, reference);
+}
+
 /**
  * Record a price-floor auto-correction (change_type='floor_correction'). `applied` is set to
  * 1 when the corrected price was successfully pushed to Shopify, 0 when the push failed (or no

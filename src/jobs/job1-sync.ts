@@ -21,6 +21,8 @@ import {
   getPrimaryLocationId,
   enableVariantTracking,
   setInventoryLevel,
+  setProductMetafield,
+  deleteProductMetafield,
 } from "@/lib/shopify-client";
 import {
   createSyncRun,
@@ -30,6 +32,7 @@ import {
   refreshProducts,
   rebuildProductTypeCounts,
   recordPriceChanges,
+  getPriceBadge,
   getPendingWaitlist,
   markWaitlistNotified,
   markPriceChangeAppliedBySku,
@@ -251,6 +254,25 @@ async function applyToShopify(
             }
           })
         );
+
+        // Price badge (custom.price_badge) — recompute whenever the price changed
+        // today: best_30d / price_drop / delete otherwise. The PDP renders a badge
+        // under the price from this metafield. Non-fatal — a badge write must never
+        // fail an already-successful price/stock push.
+        if (priceChanges.length > 0 && diff.aosomProduct) {
+          try {
+            const skus = diff.aosomProduct.variants.map((v) => v.sku).filter(Boolean);
+            const badge = await getPriceBadge(skus);
+            if (badge) {
+              await setProductMetafield(diff.shopifyId, "custom", "price_badge", "single_line_text_field", badge);
+            } else {
+              await deleteProductMetafield(diff.shopifyId, "custom", "price_badge");
+            }
+            log(`price badge: ${diff.productName} → ${badge ?? "aucun"}`);
+          } catch (badgeErr) {
+            log(`price badge failed for ${diff.groupKey}: ${badgeErr instanceof Error ? badgeErr.message : String(badgeErr)}`);
+          }
+        }
 
         // Stock — push the safety-buffered quantity to Shopify inventory. The diff already
         // applied the buffer (newValue = safeQty); enable tracking first (idempotent, and

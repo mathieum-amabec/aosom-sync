@@ -2,6 +2,37 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.29] - 2026-07-18
+
+### Added — 3 conversion features (30-day price badge, back-in-stock waitlist, orphan menu collections)
+
+**Feature 1 — 30-day price badge.** The daily sync now tags each price-changed product
+with a `custom.price_badge` metafield the PDP renders under the price:
+- `src/lib/database.ts` — `getPriceBadge(skus)` / `decidePriceBadge(current, min30, reference)`
+  compute `best_30d` (current price = the 30-day low) or `price_drop` (below the reference
+  price ~30 days ago, but not the low), else nothing. Retention-aware: since `price_history`
+  is pruned to 30 days, the reference falls back to the oldest-in-window `old_price` when no
+  row precedes the cutoff. A flat-price product with no recorded change gets no badge — the
+  badge is a recent-price-activity signal, not a label on every price.
+- `src/lib/shopify-client.ts` — `setProductMetafield` (single-call nested-PUT upsert, verified
+  in-place) / `deleteProductMetafield` (list + delete by namespace/key, no-op when absent).
+- `src/jobs/job1-sync.ts` — `applyToShopify` writes/deletes the badge for each price-changed
+  product. Non-fatal: a badge write never fails an already-successful price/stock push.
+- `tests/price-badge.test.ts` — `decidePriceBadge` branch coverage + SQL-shape coverage.
+
+**Theme (applied to the working DRAFT `161062551657` only — not in this diff):**
+- Feature 1: bilingual badge (💚 Meilleur prix des 30 derniers jours / 📉 Prix en baisse,
+  and EN equivalents) under the price on the PDP.
+- Feature 2 — back-in-stock waitlist: on an out-of-stock PDP the ATC button is replaced by a
+  bilingual "Avertissez-moi / Notify me" email form that POSTs to `/api/waitlist`
+  `{email, sku, shopify_product_id}` (double opt-in). Replaced the earlier FR-only draft form.
+
+**Feature 3 — orphan collections in the mega-menu (store-level `menuUpdate`, applied):**
+"Véhicules pour enfants" (`enfants-vehicules`) under Enfants & Jouets and "Chauffage"
+(`electro-chauffage`) under Électro & Tech in `taxonomie-categories`. All 9 top-level items
+preserved by ID. Chips verified via Playwright on `/collections/enfants` and
+`/collections/electro-et-tech`.
+
 ## [0.5.54.28] - 2026-07-18
 
 ### Added — automatic pos-1 image compliance (marketing-overlay auto-swap)
