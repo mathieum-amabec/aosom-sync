@@ -2,6 +2,35 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.28] - 2026-07-18
+
+### Added — automatic pos-1 image compliance (marketing-overlay auto-swap)
+
+The daily sync now polices the primary (pos-1) product image the way the 141 manual
+swaps did, automatically. After products are written, it classifies the newest
+never-checked live products' pos-1 image with `claude-sonnet-4-6` and, when that image
+carries a **marketing text overlay** (slogans, prices, badges, added logos — diegetic
+text like a brand engraved on the product or a book title in the scene is explicitly
+excluded), swaps in the first clean image from the gallery (`PUT` position:1 + verify,
+the same mechanism as the manual pass). Every swap is recorded in `sync_logs`.
+
+- **`src/lib/vision-classifier.ts`** — `classifyProductImage(url)` → `{ compliant, reason }`,
+  the strict validated overlay prompt. Throws on download/API/parse failure so a failed
+  classification is never mistaken for a clean image.
+- **`src/lib/image-compliance.ts`** — `runImageCompliance()` orchestrator. Cost-guarded at
+  **20 Claude calls/run** (shared across pos-1 checks + the gallery scan), newest-import-first
+  (`products.created_at DESC`), fully non-fatal. A product is stamped checked only once it is
+  genuinely resolved (compliant / verified swap / whole-gallery-had-no-clean-image); transient
+  Shopify failures and budget-truncated scans stay unstamped so a later run retries instead of
+  abandoning a live overlay.
+- **`src/lib/shopify-client.ts`** — `fetchProductImages` + `moveImageToFirstPosition`.
+- **`src/lib/database.ts`** — `image_checked_at` column (guarded migration; reset to NULL in
+  `refreshProducts` when `image1` changes, NULL-safe) + `getImageComplianceCandidates`
+  (deduped per Shopify product) + `markImageChecked`.
+- **`src/jobs/job1-sync.ts`** — wired after `refreshProducts` in `runSync` (manual, gated on
+  Shopify push) and in `runSyncFinalize` (daily cron, once per sync).
+- Tests: 20 new unit cases (classifier + orchestrator). No token → true no-op.
+
 ## [0.5.54.27] - 2026-07-17
 
 ### Fixed — strip the EN preamble platform-label from social captions

@@ -101,6 +101,7 @@ async function _initSchemaImpl(): Promise<void> {
       last_seen_at INTEGER, last_posted_at INTEGER,
       has_discount INTEGER DEFAULT 0,
       video_ugc TEXT,
+      image_checked_at INTEGER,
       created_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type)`,
@@ -571,6 +572,12 @@ async function _initSchemaImpl(): Promise<void> {
   if (!productCols.has("video_ugc")) {
     alters.push(`ALTER TABLE products ADD COLUMN video_ugc TEXT`);
   }
+  // image_checked_at: epoch (s) of the last pos-1 image-compliance classification (see
+  // image-compliance.ts). NULL = never checked → eligible next sync. refreshProducts
+  // resets it to NULL whenever image1 changes so a new pos-1 image is re-classified.
+  if (!productCols.has("image_checked_at")) {
+    alters.push(`ALTER TABLE products ADD COLUMN image_checked_at INTEGER`);
+  }
 
   // price_alerts double opt-in columns (table shipped in #99 without them).
   const priceAlertsInfo = await db.execute(`PRAGMA table_info(price_alerts)`);
@@ -915,7 +922,8 @@ export async function refreshProducts(products: Omit<ProductRow, "shopify_produc
       description=excluded.description, short_description=excluded.short_description,
       material=excluded.material, gtin=excluded.gtin, weight=excluded.weight,
       out_of_stock_expected=excluded.out_of_stock_expected,
-      estimated_arrival=excluded.estimated_arrival, last_seen_at=excluded.last_seen_at`,
+      estimated_arrival=excluded.estimated_arrival, last_seen_at=excluded.last_seen_at,
+      image_checked_at=CASE WHEN excluded.image1 IS NOT products.image1 THEN NULL ELSE products.image_checked_at END`,
     args: [
       p.sku, p.name, p.price, p.qty, p.color, p.size, p.product_type,
       p.image1, p.image2, p.image3, p.image4, p.image5, p.image6, p.image7,
@@ -2327,6 +2335,63 @@ function mapSyncLog(row: Record<string, unknown>): SyncLogEntry {
     oldValue: (row.old_value as string) || null,
     newValue: (row.new_value as string) || null,
   };
+}
+
+// ─── Image Compliance (pos-1) ────────────────────────────────────────
+
+export interface ImageComplianceCandidate {
+  sku: string;
+  shopifyProductId: string;
+  name: string;
+}
+
+/**
+ * Products eligible for a pos-1 image-compliance check: live on Shopify
+ * (shopify_product_id set) and never checked (image_checked_at IS NULL — the flag is
+ * reset to NULL by refreshProducts whenever image1 changes). Deduped to ONE row per
+ * Shopify product (variants share an id) and ordered newest-import-first so fresh
+ * products are prioritized, per the auto-compliance spec.
+ */
+export async function getImageComplianceCandidates(limit: number): Promise<ImageComplianceCandidate[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT shopify_product_id AS shopify_product_id,
+                 MIN(sku) AS sku,
+                 MAX(name) AS name,
+                 MAX(created_at) AS created_at
+          FROM products
+          WHERE shopify_product_id IS NOT NULL AND shopify_product_id <> ''
+            AND image_checked_at IS NULL
+          GROUP BY shopify_product_id
+          ORDER BY created_at DESC
+          LIMIT ?`,
+    args: [Math.max(0, Math.floor(limit))],
+  });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    return {
+      sku: (o.sku as string) || "",
+      shopifyProductId: String(o.shopify_product_id || ""),
+      name: (o.name as string) || "",
+    };
+  });
+}
+
+/**
+ * Stamp image_checked_at=now on every SKU row of the given Shopify products so they are
+ * not re-classified until image1 changes again. No-op on an empty list.
+ */
+export async function markImageChecked(shopifyProductIds: string[]): Promise<void> {
+  if (shopifyProductIds.length === 0) return;
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const stmts = shopifyProductIds.map((id) => ({
+    sql: `UPDATE products SET image_checked_at = ? WHERE shopify_product_id = ?`,
+    args: [now, id],
+  }));
+  for (let i = 0; i < stmts.length; i += 100) {
+    await db.batch(stmts.slice(i, i + 100), "write");
+  }
 }
 
 // ─── Import Jobs ─────────────────────────────────────────────────────

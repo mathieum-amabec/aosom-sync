@@ -59,6 +59,7 @@ import { isKlaviyoConfigured, trackEvent } from "@/lib/klaviyo-client";
 import { storeLink } from "@/lib/insights";
 import { diffProductsLight } from "@/lib/product-diff";
 import { runRemovedFromFeedDraft } from "@/lib/removed-catalog";
+import { runImageCompliance } from "@/lib/image-compliance";
 import {
   savePhase1Blob,
   readPhase1Blob,
@@ -479,6 +480,19 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
         log("removed-from-feed reconcile", { phase: "removedFromFeed", ...removedRes });
       } catch (removedErr) {
         log(`removed-from-feed reconcile failed (non-fatal): ${removedErr instanceof Error ? removedErr.message : String(removedErr)}`, { phase: "removedFromFeed" });
+      }
+    }
+
+    // Phase 6c: auto pos-1 image compliance. Classify the newest never-checked live products
+    // and swap in a clean gallery image when pos-1 carries a marketing text overlay (same
+    // mechanism as the 141 manual swaps). Capped at 20 Claude calls/run. Only when pushing to
+    // Shopify (needs the image reorder writes). Non-fatal — must never fail the sync.
+    if (shopifyPush) {
+      try {
+        const imgRes = await runImageCompliance({ syncRunId: syncRun.id });
+        log("image-compliance done", { phase: "imageCompliance", ...imgRes });
+      } catch (imgErr) {
+        log(`image-compliance failed (non-fatal): ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`, { phase: "imageCompliance" });
       }
     }
 
@@ -1079,6 +1093,17 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
       await recordPriceChanges(priceChangeEntries);
     }
     log("recordPriceChanges done", { phase: "finalize", duration_ms: Date.now() - t0Record, entries: priceChangeEntries.length });
+
+    // Auto pos-1 image compliance (production path). Runs ONCE per daily sync, after every
+    // refresh chunk has written products. DB-driven (newest never-checked live products
+    // first), capped at 20 Claude calls. Non-fatal — must never fail finalize.
+    try {
+      const t0Img = Date.now();
+      const imgRes = await runImageCompliance({ syncRunId: syncRun.id });
+      log("image-compliance done", { phase: "finalize", duration_ms: Date.now() - t0Img, ...imgRes });
+    } catch (imgErr) {
+      log(`image-compliance failed (non-fatal): ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`, { phase: "finalize" });
+    }
 
     // Retention: drop price_history older than 30 days now that today's changes are
     // recorded. Caps Turso storage + the cost of the correlated discount query.
