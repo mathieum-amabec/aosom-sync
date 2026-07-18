@@ -128,6 +128,32 @@ describe("stripLeadingPlatformLabel", () => {
       "Partage sur Facebook ce que tu aimes 👇",
     );
   });
+
+  it("strips the EN preamble form ('This is your Facebook post', 'Here's your …')", () => {
+    // The English generator sometimes prepends "This is your <platform> post" —
+    // an EN preamble in front of the "<Platform> post" label. Strip it like any
+    // other leading label, keeping the hook.
+    expect(
+      stripLeadingPlatformLabel("This is your Facebook post 🌿\n\nTa terrasse mérite mieux 👇"),
+    ).toBe("Ta terrasse mérite mieux 👇");
+    expect(stripLeadingPlatformLabel("This is your Instagram post: Discover our sofas!")).toBe(
+      "Discover our sofas!",
+    );
+    expect(stripLeadingPlatformLabel("Here's your Facebook post\nContent")).toBe("Content");
+    expect(stripLeadingPlatformLabel("Here is your Instagram post —\nContent")).toBe("Content");
+    expect(stripLeadingPlatformLabel("Below is your FB post\nContent")).toBe("Content");
+    // Label-only EN preamble generation → "" (the correct reject/fallback signal).
+    expect(stripLeadingPlatformLabel("This is your Facebook post")).toBe("");
+  });
+
+  it("does NOT strip an EN preamble that isn't followed by a platform label", () => {
+    // "This is your …" only strips when a platform label immediately follows it.
+    // A real opener that happens to start the same way must survive untouched.
+    const a = "This is your chance to refresh the patio 👇";
+    expect(stripLeadingPlatformLabel(a)).toBe(a);
+    const b = "Here's your weekend project: a cozy reading nook 📚";
+    expect(stripLeadingPlatformLabel(b)).toBe(b);
+  });
 });
 
 describe("cleanSocialCaption", () => {
@@ -167,6 +193,17 @@ describe("cleanSocialCaption", () => {
     expect(cleanSocialCaption("Facebook Post — Ta terrasse mérite mieux 👇")).toBe(
       "Ta terrasse mérite mieux 👇",
     );
+  });
+
+  it("strips an EN-preamble label, including its markdown-titled form", () => {
+    expect(cleanSocialCaption("**This is your Facebook post 🌿**\n\nYour patio deserves better 👇")).toBe(
+      "Your patio deserves better 👇",
+    );
+    expect(cleanSocialCaption("This is your Instagram post: Discover our wall shelves 🌿")).toBe(
+      "Discover our wall shelves 🌿",
+    );
+    // Label-only EN preamble → "" (callers reject/fall back; never re-publish the label).
+    expect(cleanSocialCaption("# This is your Facebook post 🌿")).toBe("");
   });
 
   it("leaves a clean caption unchanged", () => {

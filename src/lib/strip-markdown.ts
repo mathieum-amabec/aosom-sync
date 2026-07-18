@@ -31,9 +31,11 @@ export function stripMarkdown(text: string): string {
 /**
  * Remove a leading platform-label line the model sometimes prepends as a title —
  * e.g. "Post Facebook 🌿", "🌿 Post Facebook ⏳", "Publication Instagram",
- * "Facebook Post:". The prompts ask Claude to return only the post, but a
- * disobedient generation puts a label on the first line; without this the caption
- * publishes starting with that label instead of the marketing hook.
+ * "Facebook Post:", and the EN preamble form the English generator emits
+ * ("This is your Facebook post:", "Here's your Instagram post"). The prompts ask
+ * Claude to return only the post, but a disobedient generation puts a label on the
+ * first line; without this the caption publishes starting with that label instead
+ * of the marketing hook.
  *
  * The leading anchor skips any decoration BEFORE the label — whitespace AND
  * leading emoji / punctuation (`[^\p{L}\p{N}]*`, so "🌿 Post Facebook …" is caught,
@@ -42,7 +44,11 @@ export function stripMarkdown(text: string): string {
  * must be the first *word*, never mid-sentence.
  *
  * Conservative: only strips a FIRST line that clearly opens with such a label —
- * `Post`/`Publication` + platform, or `<Platform> post`. After the label token,
+ * `Post`/`Publication` + platform, `<Platform> post`, or an EN preamble
+ * (`This is your` / `Here is your` / `Here's your` / `Below is your`) immediately
+ * followed by one of those labels. The preamble is optional and only matches when
+ * the platform label follows it, so a real opener like "This is your chance…"
+ * never matches. After the label token,
  * the tail is deliberately content-preserving:
  *  - **Decoration-only label line** (`[^\p{L}\p{N}\n]*` then a newline): the model
  *    put the label alone on its own line — only `:`/`-`/emoji/spaces after the
@@ -59,7 +65,7 @@ export function stripMarkdown(text: string): string {
  */
 export function stripLeadingPlatformLabel(text: string): string {
   return text.replace(
-    /^[^\p{L}\p{N}]*(?:(?:post|publication)\s+(?:facebook|instagram|fb|ig)|(?:facebook|instagram|fb|ig)\s+post)\b(?:[^\p{L}\p{N}\n]*\r?\n+|[^\p{L}\p{N}]*)/iu,
+    /^[^\p{L}\p{N}]*(?:(?:this\s+is|here\s+is|here['’]?s|below\s+is)\s+your\s+)?(?:(?:post|publication)\s+(?:facebook|instagram|fb|ig)|(?:facebook|instagram|fb|ig)\s+post)\b(?:[^\p{L}\p{N}\n]*\r?\n+|[^\p{L}\p{N}]*)/iu,
     "",
   );
 }
