@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.33] - 2026-07-19
+
+### Fixed — `/api/assistant` reachable from the storefront (proxy allowlist)
+
+`src/proxy.ts` PUBLIC_PATHS now includes `/api/assistant`. The auth gate (this app uses
+`proxy.ts`, not `middleware.ts`) was 307-redirecting the storefront shopping-assistant
+widget + PDP "Complétez la pièce" to `/login`, so they were non-functional in production
+after 0.5.54.32. The route self-guards (server-side Origin allowlist, per-IP + global rate
+limits, daily LLM token budget), so making it public is safe. Regression test added
+(`tests/proxy-public-paths.test.ts`) pinning `/api/assistant` public + a private route still
+redirecting.
+
+Note: a prior `/cso` pass flagged `/api/collections/mappings`, `/api/notifications`, and
+`/api/insights` as unauthenticated — those were **false positives**: `proxy.ts` already
+307-gates them to `/login` (verified against prod). No change needed there.
+
 ## [0.5.54.32] - 2026-07-19
 
 ### Added — "Trouvez le meuble parfait" AI shopping assistant + PDP complementary section

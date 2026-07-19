@@ -22,7 +22,11 @@ import { AUTH } from "@/lib/config";
 // CRON_SECRET. Without this it would 307 to /login before its own auth runs.
 // "/api/ugc-videos" is public so the homepage "Voyez-le chez vous" video reel can fetch
 // the 5 UGC-video products (cross-origin GET from the storefront, CORS-guarded, edge-cached).
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/ugc-videos", "/api/video-serve"];
+// "/api/assistant" is public so the storefront shopping-assistant widget + PDP "Complétez la
+// pièce" can POST from ameublodirect.ca / furnishdirect.ca (unauthenticated visitors). The
+// route self-guards: server-side Origin allowlist, per-IP + global rate limits, and the
+// daily LLM token budget. Without this it 307-redirects to /login and the widget breaks.
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/ugc-videos", "/api/video-serve", "/api/assistant"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(
