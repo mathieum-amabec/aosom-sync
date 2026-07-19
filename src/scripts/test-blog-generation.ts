@@ -18,6 +18,7 @@
  */
 
 import { getAnthropicClient } from "@/lib/content-generator";
+import { budgetedCreate } from "@/lib/llm-budget";
 import { CLAUDE } from "@/lib/config";
 import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
 import { createBlogArticle, type BlogLang } from "@/lib/shopify-blog";
@@ -50,7 +51,7 @@ function langFragment(lang: BlogLang): string {
 
 async function generateJson(topic: string, lang: BlogLang, keywords: string[]): Promise<ArticleJson> {
   const client = getAnthropicClient();
-  const message = await client.messages.create({
+  const message = await budgetedCreate(client, {
     model: CLAUDE.MODEL,
     max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
     system: SYSTEM_PROMPT,

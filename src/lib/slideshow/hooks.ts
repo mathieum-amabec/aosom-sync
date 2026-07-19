@@ -7,6 +7,7 @@
  * seed into a punchy one-liner via Claude (with a safe fallback).
  */
 import { getAnthropicClient } from "@/lib/content-generator";
+import { budgetedCreate } from "@/lib/llm-budget";
 import { CLAUDE } from "@/lib/config";
 
 export type HookLanguage = "fr" | "en";
@@ -192,7 +193,7 @@ export async function getSlogan(seed: string, language: HookLanguage = "fr"): Pr
     `(max 60 caractères, 1 emoji max, ton chaleureux, tutoiement). ` +
     `Réponds UNIQUEMENT avec le slogan, sans guillemets. Idée : ${trimmed}`;
   try {
-    const message = await getAnthropicClient().messages.create({
+    const message = await budgetedCreate(getAnthropicClient(), {
       model: CLAUDE.MODEL,
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       messages: [{ role: "user", content: prompt }],

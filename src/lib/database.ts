@@ -363,6 +363,13 @@ async function _initSchemaImpl(): Promise<void> {
       feed_type TEXT NOT NULL, item_count INTEGER, status TEXT NOT NULL, error TEXT,
       fetched_at INTEGER NOT NULL
     )`,
+    // daily_llm_budget: global Anthropic spend guardrail. One row per UTC day
+    // (resets at 00:00 UTC by keying on the date string). Every Claude call
+    // asserts today's tokens_used < budget (fail-closed) then adds its usage.
+    `CREATE TABLE IF NOT EXISTS daily_llm_budget (
+      day TEXT PRIMARY KEY,
+      tokens_used INTEGER NOT NULL DEFAULT 0
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_run ON sync_logs(sync_run_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_sku ON sync_logs(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_runs_date ON sync_runs(started_at)`,
@@ -1516,6 +1523,34 @@ export async function recordPriceChanges(entries: {
   for (let i = 0; i < stmts.length; i += 100) {
     await db.batch(stmts.slice(i, i + 100), "write");
   }
+}
+
+// ─── Daily LLM token budget (global Anthropic spend guardrail) ───────
+
+/** UTC date key (YYYY-MM-DD) — the budget resets at 00:00 UTC by keying on this. */
+function utcDayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Tokens consumed by Claude calls so far today (UTC). 0 when no row yet. */
+export async function getDailyLlmTokensUsed(): Promise<number> {
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT tokens_used FROM daily_llm_budget WHERE day = ?`,
+    args: [utcDayKey()],
+  });
+  return (res.rows[0]?.tokens_used as number | undefined) ?? 0;
+}
+
+/** Add `tokens` to today's (UTC) LLM budget counter. No-op for non-positive input. */
+export async function addDailyLlmTokens(tokens: number): Promise<void> {
+  if (!Number.isFinite(tokens) || tokens <= 0) return;
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO daily_llm_budget (day, tokens_used) VALUES (?, ?)
+          ON CONFLICT(day) DO UPDATE SET tokens_used = tokens_used + excluded.tokens_used`,
+    args: [utcDayKey(), Math.ceil(tokens)],
+  });
 }
 
 export type PriceBadge = "best_30d" | "price_drop";

@@ -4,6 +4,8 @@ import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import { getContentTemplateBySlug, createFacebookDraft, getAnyProductSku, selectCompatibleHooks, getRecentlyUsedHookIds, recordHookUsage } from "@/lib/database";
 import { mapProductTypeToScope } from "@/lib/hook-selector";
 import { getAnthropicClient } from "@/lib/content-generator";
+import { budgetedCreate } from "@/lib/llm-budget";
+import { checkRateLimit } from "@/lib/rate-limiter";
 import { cleanSocialCaption } from "@/lib/strip-markdown";
 import { searchImages, triggerDownload } from "@/lib/unsplash";
 import { CLAUDE } from "@/lib/config";
@@ -130,7 +132,7 @@ export function stripScaffold(text: string): string {
 
 async function generatePostText(prompt: string, isEn: boolean): Promise<string> {
   const client = getAnthropicClient();
-  const message = await client.messages.create(
+  const message = await budgetedCreate(client,
     {
       model: CLAUDE.MODEL,
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
@@ -153,6 +155,17 @@ export async function POST(request: Request) {
       if ((await getSessionRole()) === "reviewer") {
         return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
       }
+    }
+
+    // Per-process burst cap before Anthropic billing escalates. The global daily
+    // token budget in budgetedCreate() is the cross-instance financial backstop;
+    // this bounds a single instance's rate.
+    const rl = checkRateLimit("social-content-generate", 10, 60_000);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: "Rate limit exceeded", retryAfterMs: rl.retryAfterMs },
+        { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs / 1000)) } },
+      );
     }
 
     let body: Record<string, unknown>;
