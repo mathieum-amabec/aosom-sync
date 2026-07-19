@@ -18,6 +18,7 @@ vi.mock("next/headers", () => ({
 // Set AUTH_PASSWORD before importing auth.ts (module-level HMAC_SECRET reads it at import time)
 const TEST_SECRET = "test-secret-for-vitest";
 process.env.AUTH_PASSWORD = TEST_SECRET;
+process.env.SESSION_SECRET = "test-session-secret-0123456789abcdef-xyz";
 
 // Import after env is set
 const { createSessionToken, verifySessionToken, isPathAllowedForRole } = await import("@/lib/auth");

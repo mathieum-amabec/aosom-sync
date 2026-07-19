@@ -20,6 +20,7 @@ import { type FacebookBrand } from "./facebook-client";
 import { publishSocialPayload, type SocialPayload } from "./social-publisher";
 import { createBlogArticle } from "./shopify-blog";
 import { getAnthropicClient } from "./content-generator";
+import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "./strip-markdown";
 import { CLAUDE } from "./config";
 import {
@@ -180,7 +181,7 @@ export async function generateReelCaption(
     `pour ce produit : ${productText}. Accrocheur, émoji, appel à l'action. Max 150 caractères. ` +
     `Pas de hashtags — ils seront ajoutés séparément. Réponds uniquement avec le texte, sans guillemets.`;
   try {
-    const message = await getAnthropicClient().messages.create({
+    const message = await budgetedCreate(getAnthropicClient(), {
       model: CLAUDE.MODEL,
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       messages: [{ role: "user", content: prompt }],

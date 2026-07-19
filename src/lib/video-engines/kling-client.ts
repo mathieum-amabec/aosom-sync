@@ -21,6 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { env, CLAUDE } from "../config";
 import { getAnthropicClient } from "../content-generator";
+import { budgetedCreate } from "@/lib/llm-budget";
 import { applyBrandOverlay } from "./ffmpeg-brand";
 import type { VideoLocale } from "./video-brand";
 
@@ -88,7 +89,7 @@ export async function buildCinematicPrompt(product: KlingProduct, locale: VideoL
   try {
     const client = getAnthropicClient();
     const langNote = locale === "en" ? "English" : "French";
-    const message = await client.messages.create({
+    const message = await budgetedCreate(client, {
       model: CLAUDE.MODEL,
       max_tokens: 200,
       system:

@@ -17,6 +17,7 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { isAuthenticated, isAdmin } from "@/lib/auth";
 import { getAnthropicClient } from "@/lib/content-generator";
+import { budgetedCreate } from "@/lib/llm-budget";
 import { CLAUDE, env } from "@/lib/config";
 import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
 import { createBlogArticle, type BlogLang } from "@/lib/shopify-blog";
@@ -171,7 +172,7 @@ Return JSON with this exact shape:
 
 async function generateArticleJson(input: BlogGenerateBody): Promise<ClaudeArticleJson> {
   const client = getAnthropicClient();
-  const message = await client.messages.create({
+  const message = await budgetedCreate(client, {
     model: CLAUDE.MODEL,
     max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
     system: SYSTEM_PROMPT_BASE,

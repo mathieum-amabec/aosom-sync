@@ -17,6 +17,7 @@
  */
 import type Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicClient } from "./content-generator";
+import { budgetedCreate } from "./llm-budget";
 import { getProducts } from "./database";
 import { CLAUDE } from "./config";
 
@@ -166,7 +167,10 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
   const pool = new Map<string, Card>();
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const res = await client.messages.create({
+    // Route through the global daily token budget (llm-budget) so this public endpoint's
+    // spend counts against — and is capped by — the same fail-closed backstop as every
+    // other Claude call. Budget-exhausted throws → the route returns a 500 (fails closed).
+    const res = await budgetedCreate(client, {
       model: CLAUDE.MODEL,
       max_tokens: 1024,
       system: systemPrompt(locale),

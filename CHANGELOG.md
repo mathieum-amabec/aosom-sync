@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.54.30] - 2026-07-18
+## [0.5.54.32] - 2026-07-19
 
 ### Added — "Trouvez le meuble parfait" AI shopping assistant + PDP complementary section
 
@@ -31,6 +31,31 @@ storefront chat widget and a PDP "Complétez la pièce" section (draft theme `16
 `snippets/card-product.liquid` (draft `161069989993`): a gold, bottom-left "📉 Prix en baisse /
 Price drop" badge shown when `product.metafields.custom.price_badge == "price_drop"`, styled
 identically to the existing `-X%` badge, added to both the media and no-media card blocks.
+
+- **`/api/assistant` routes through the global LLM budget** (`budgetedCreate`, added in
+  0.5.54.31) so this public endpoint's Claude calls also respect the daily token cap.
+
+## [0.5.54.31] - 2026-07-18
+
+### Security — 3 CSO audit findings fixed
+
+- **Finding 1 (LLM output trust boundary):** `sanitizeHtml()` (`content-generator.ts`)
+  now strips executable/XSS vectors (`script`/`style`/`iframe`/`object`/`embed` blocks,
+  `on*=` handlers, `javascript:`/`vbscript:` URLs) on top of the existing content cleanup,
+  and is applied to Claude's **output** `descriptionFr`/`descriptionEn` before they are
+  written to Shopify `body_html` (rendered unescaped on the storefront) — closing the
+  stored-XSS gap where input was sanitized but output was not. `sanitizeHtml` exported + tested.
+- **Finding 2 (global Anthropic spend cap):** new `src/lib/llm-budget.ts` — `budgetedCreate()`
+  asserts a daily token budget (`LLM_DAILY_TOKEN_BUDGET`, default 500k) before every Claude
+  call (fail-closed when exceeded; fail-open only when the counter store is unreachable) and
+  records input+output tokens after. Counter persisted in Turso (`daily_llm_budget`, keyed by
+  UTC day → resets 00:00 UTC) so the cap holds across Fluid Compute instances. All 11 runtime
+  `messages.create()` sites routed through it; added `checkRateLimit` to the previously
+  uncapped `/api/social/content/generate`.
+- **Finding 3 (SESSION_SECRET mandatory):** `auth.ts` drops the `AUTH_PASSWORD` fallback for
+  session signing — sessions fail closed when `SESSION_SECRET` is unset, closing the
+  known-plaintext oracle. ⚠️ **`SESSION_SECRET` must be set in the Vercel prod env before
+  this deploys, or login breaks for both users.**
 
 ## [0.5.54.29] - 2026-07-18
 

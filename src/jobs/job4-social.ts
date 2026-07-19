@@ -12,6 +12,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicClient } from "@/lib/content-generator";
+import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "@/lib/strip-markdown";
 import { env, CLAUDE, SYNC, CHANNELS, type ChannelKey } from "@/lib/config";
 import {
@@ -99,7 +100,7 @@ async function generatePostText(prompt: string): Promise<string> {
   const client = getClient();
   const t0 = Date.now();
   log("anthropic call started", { prompt_tokens: Math.ceil(prompt.length / 4) });
-  const message = await client.messages.create(
+  const message = await budgetedCreate(client,
     {
       model: CLAUDE.MODEL,
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,

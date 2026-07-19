@@ -9,6 +9,12 @@ vi.mock("@/lib/config", () => ({
 const { create } = vi.hoisted(() => ({ create: vi.fn() }));
 vi.mock("@anthropic-ai/sdk", () => ({ default: class { messages = { create }; } }));
 
+// budgetedCreate wraps client.messages.create with the daily-budget guard; delegate to the
+// mocked create so these tests exercise the tool loop, not the budget bookkeeping.
+vi.mock("@/lib/llm-budget", () => ({
+  budgetedCreate: (client: { messages: { create: typeof create } }, params: unknown) => client.messages.create(params),
+}));
+
 const getProducts = vi.fn();
 vi.mock("@/lib/database", () => ({ getProducts }));
 
