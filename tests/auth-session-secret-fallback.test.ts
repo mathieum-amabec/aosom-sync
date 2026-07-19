@@ -1,32 +1,24 @@
-// Companion to auth-session-secret.test.ts: proves a whitespace-only SESSION_SECRET
-// (a fat-fingered env value) is trimmed to empty and falls back to AUTH_PASSWORD,
-// rather than silently signing tokens with " ". Separate file because auth.ts reads
-// its signing key once at import time.
+// CSO Finding 3: SESSION_SECRET is REQUIRED — the AUTH_PASSWORD fallback is removed.
+// A whitespace-only SESSION_SECRET trims to empty and is treated as unset, so session
+// signing/verification FAILS CLOSED rather than silently signing with the low-entropy
+// AUTH_PASSWORD. Separate file because auth.ts reads its signing key once at import.
 
 import { describe, it, expect } from "vitest";
 
-const AUTH_PASSWORD = "login-password-fallback";
-process.env.SESSION_SECRET = "   "; // whitespace-only → trimmed to "" → falls back
-process.env.AUTH_PASSWORD = AUTH_PASSWORD;
+process.env.SESSION_SECRET = "   "; // whitespace-only → trimmed to "" → treated as unset
+process.env.AUTH_PASSWORD = "login-password-not-a-signing-fallback";
 
 const { createSessionToken, verifySessionToken } = await import("@/lib/auth");
 
-async function signWith(secret: string, payload: string): Promise<string> {
-  const enc = new TextEncoder();
-  const key = await globalThis.crypto.subtle.importKey(
-    "raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
-  );
-  const sig = await globalThis.crypto.subtle.sign("HMAC", key, enc.encode(payload));
-  const hex = Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  return btoa(`${payload}:${hex}`);
-}
+describe("whitespace SESSION_SECRET fails closed — no AUTH_PASSWORD fallback (Finding 3)", () => {
+  it("refuses to SIGN a session when SESSION_SECRET is effectively unset", async () => {
+    await expect(createSessionToken("admin", "admin")).rejects.toThrow(/SESSION_SECRET/);
+  });
 
-describe("whitespace SESSION_SECRET trims to empty and falls back (Finding 2)", () => {
-  it("signs with AUTH_PASSWORD, not the whitespace value", async () => {
-    const token = await createSessionToken("admin", "admin");
-    expect(await verifySessionToken(token)).toEqual({ username: "admin", role: "admin" });
-    // A token forged with the literal whitespace key must NOT verify.
-    const bogus = await signWith("   ", `${Date.now()}:admin:admin`);
-    expect(await verifySessionToken(bogus)).toBeNull();
+  it("verifies to null (no session) — never falls back to AUTH_PASSWORD", async () => {
+    // A fresh, well-formed token still can't be verified without a real secret:
+    // hmacSign throws inside verify and the guard returns null (access denied).
+    const freshToken = btoa(`${Date.now()}:admin:admin:deadbeef`);
+    expect(await verifySessionToken(freshToken)).toBeNull();
   });
 });

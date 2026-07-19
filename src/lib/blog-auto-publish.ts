@@ -4,6 +4,7 @@
  * Kept out of the route handler so the decision logic is unit-testable in isolation.
  */
 import { getAnthropicClient } from "./content-generator";
+import { budgetedCreate } from "@/lib/llm-budget";
 import { CLAUDE, BLOG } from "./config";
 import { isSeasonActive, isoWeekKey, type Season } from "./blog-topics";
 import {
@@ -52,7 +53,7 @@ ${article.bodyHtml}
  */
 export async function scoreArticle(article: ScorableArticle, lang: BlogLang): Promise<ArticleScore> {
   const client = getAnthropicClient();
-  const message = await client.messages.create({
+  const message = await budgetedCreate(client, {
     model: CLAUDE.MODEL,
     max_tokens: 300,
     system: JUDGE_SYSTEM_PROMPT,

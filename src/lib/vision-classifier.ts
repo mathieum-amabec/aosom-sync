@@ -11,6 +11,7 @@
  * is the same validated one used for that pass (marketing overlay only, diegetic excluded).
  */
 import { getAnthropicClient } from "./content-generator";
+import { budgetedCreate } from "@/lib/llm-budget";
 import { CLAUDE } from "./config";
 
 export interface ImageClassification {
@@ -92,7 +93,7 @@ export async function classifyProductImage(imageUrl: string): Promise<ImageClass
   const b64 = await downloadBase64(imageUrl);
   const client = getAnthropicClient();
 
-  const message = await client.messages.create({
+  const message = await budgetedCreate(client, {
     model: CLAUDE.MODEL,
     max_tokens: 200,
     system: STRICT_OVERLAY_PROMPT,

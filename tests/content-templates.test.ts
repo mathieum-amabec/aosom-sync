@@ -285,7 +285,22 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
+// The generate route now goes through the global LLM budget guard + per-process
+// rate limit (CSO Finding 2). These tests exercise content-generation logic, not
+// spend controls, so pass both through (budget/rate-limit have their own tests).
+vi.mock("@/lib/llm-budget", () => ({
+  budgetedCreate: async (client: { messages: { create: (p: unknown, o?: unknown) => unknown } }, params: unknown, opts?: unknown) =>
+    client.messages.create(params, opts),
+  assertLlmBudget: async () => {},
+  recordLlmUsage: async () => {},
+  dailyTokenBudget: () => 500_000,
+}));
+vi.mock("@/lib/rate-limiter", () => ({
+  checkRateLimit: () => ({ allowed: true, remaining: 999, retryAfterMs: 0 }),
+}));
+
 process.env.AUTH_PASSWORD = "test-secret-for-vitest";
+process.env.SESSION_SECRET = "test-session-secret-0123456789abcdef-xyz";
 
 const makeRequest = (body: unknown) =>
   new Request("http://localhost/api/social/content/generate", {

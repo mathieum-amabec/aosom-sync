@@ -65,32 +65,26 @@ export async function verifyPassword(password: string, stored: string): Promise<
 // forge admin tokens AND unlock the emergency admin login in api/auth/route.ts. So the
 // key MUST be high-entropy and separate from AUTH_PASSWORD. Generate: openssl rand -hex 32.
 //
-// Fallback to AUTH_PASSWORD only when SESSION_SECRET is unset — a migration/deploy safety
-// net (no login lockout, keeps existing tests green) that reproduces the OLD weak behavior.
-// Set SESSION_SECRET in the environment to actually close the oracle.
+// SESSION_SECRET is REQUIRED — there is no AUTH_PASSWORD fallback (CSO Finding 3).
+// The old fallback signed sessions with the low-entropy human login password, turning
+// any valid cookie into an offline oracle to crack AUTH_PASSWORD. Sessions now fail
+// closed (hmacSign/verify throw) when SESSION_SECRET is unset.
 //
-// Trim first so a fat-fingered value (a stray space or newline in the env line) can't
-// silently become a near-empty signing key: after trimming, an empty value falls back
-// instead of signing with " ".
+// Trim first so a fat-fingered value (a stray space/newline in the env line) can't
+// silently become a near-empty signing key: after trimming, an empty value is treated
+// as unset (fail closed) rather than signing with " ".
 const rawSessionSecret = process.env.SESSION_SECRET?.trim();
-const SESSION_SECRET = rawSessionSecret || process.env.AUTH_PASSWORD;
+const SESSION_SECRET = rawSessionSecret || undefined;
 
-if (process.env.NODE_ENV === "production") {
-  if (!rawSessionSecret && process.env.AUTH_PASSWORD) {
-    console.warn(
-      "[AUTH] SESSION_SECRET not set — falling back to AUTH_PASSWORD for session signing. " +
-        "Set a dedicated high-entropy SESSION_SECRET (openssl rand -hex 32) to close the token-forgery oracle."
-    );
-  } else if (rawSessionSecret && rawSessionSecret.length < 32) {
-    console.warn(
-      "[AUTH] SESSION_SECRET is shorter than 32 chars — signing with a low-entropy key. " +
-        "Use a high-entropy value (openssl rand -hex 32)."
-    );
-  }
+if (process.env.NODE_ENV === "production" && rawSessionSecret && rawSessionSecret.length < 32) {
+  console.warn(
+    "[AUTH] SESSION_SECRET is shorter than 32 chars — signing with a low-entropy key. " +
+      "Use a high-entropy value (openssl rand -hex 32)."
+  );
 }
 
 async function hmacSign(data: string): Promise<string> {
-  if (!SESSION_SECRET) throw new Error("SESSION_SECRET (or AUTH_PASSWORD fallback) env var must be set");
+  if (!SESSION_SECRET) throw new Error("SESSION_SECRET env var is required (openssl rand -hex 32) — refusing to sign/verify sessions");
   const enc = new TextEncoder();
   const key = await globalThis.crypto.subtle.importKey(
     "raw", enc.encode(SESSION_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]

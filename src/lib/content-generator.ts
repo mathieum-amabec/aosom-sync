@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { AosomMergedProduct } from "@/types/aosom";
 import { stripColorFromTitle } from "./variant-merger";
 import { env, CLAUDE } from "./config";
+import { budgetedCreate } from "@/lib/llm-budget";
 
 let anthropicClient: Anthropic | null = null;
 
@@ -144,11 +145,22 @@ URL HANDLE (urlHandleFr / urlHandleEn):
 Return valid JSON only, no markdown fences.`;
 
 /**
- * Sanitize Aosom HTML before passing to Claude.
- * Strips inline styles, normalizes bullet characters, removes spec tables.
+ * Sanitize HTML for both the Aosom INPUT (before Claude) and the Claude OUTPUT
+ * (before it is written to Shopify `body_html`, which themes render UNESCAPED).
+ * First strips executable/XSS vectors (script/style/iframe/… blocks, `on*=`
+ * event handlers, `javascript:`/`vbscript:` URLs) so a prompt-injected feed
+ * entry can never land runnable markup on the storefront, then does the content
+ * cleanup (inline styles, dash/quote normalization, spec/package sections).
  */
-function sanitizeHtml(html: string): string {
+export function sanitizeHtml(html: string): string {
   return html
+    // XSS strip (LLM output trust boundary): remove executable elements + handlers.
+    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta|base)\b[\s\S]*?<\/\s*\1\s*>/gi, "")
+    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta|base)\b[^>]*\/?>/gi, "")
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "") // on*="..." event handlers
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, "") // on*='...' event handlers
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi, "") // on*=unquoted event handlers
+    .replace(/(href|src|xlink:href)\s*=\s*(["'])\s*(?:javascript|vbscript):[^"']*\2/gi, "") // js: URLs
     .replace(/\s*style="[^"]*"/gi, "") // strip inline styles
     .replace(/\u2013|\u2014/g, "-") // normalize dashes
     .replace(/\u2018|\u2019/g, "'") // normalize quotes
@@ -206,7 +218,7 @@ Return JSON with this exact structure:
   "tags": ["tag1", "tag2"]
 }`;
 
-  const message = await client.messages.create({
+  const message = await budgetedCreate(client, {
     model: CLAUDE.MODEL,
     max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
     system: SYSTEM_PROMPT,
@@ -245,8 +257,10 @@ Return JSON with this exact structure:
     // Enforce length / format limits
     parsed.titleFr = parsed.titleFr.slice(0, 200);
     parsed.titleEn = parsed.titleEn.slice(0, 200);
-    parsed.descriptionFr = parsed.descriptionFr.slice(0, 10000);
-    parsed.descriptionEn = parsed.descriptionEn.slice(0, 10000);
+    // LLM output trust boundary: sanitize the model's HTML (same allow-list as the
+    // input) BEFORE it is persisted to Shopify body_html / custom.body_html_en.
+    parsed.descriptionFr = sanitizeHtml(parsed.descriptionFr).slice(0, 10000);
+    parsed.descriptionEn = sanitizeHtml(parsed.descriptionEn).slice(0, 10000);
     parsed.seoDescriptionFr = parsed.seoDescriptionFr.slice(0, 200);
     parsed.seoDescriptionEn = parsed.seoDescriptionEn.slice(0, 200);
     parsed.metaTitleFr = clampMetaTitle(parsed.metaTitleFr, 65);
