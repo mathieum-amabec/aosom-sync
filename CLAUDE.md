@@ -60,6 +60,34 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
   DOM), so it sends Purchase via `fetch()` to `https://www.facebook.com/tr/` (the noscript
   beacon) — NOT the `fbq`/`fbevents.js` SDK, which the sandbox rejects.
 
+## Meta DPA retargeting — "Retargeting DPA — ViewContent + ATC" (campaign ACTIVE; ATC ad set rebuilt 2026-07-19)
+
+Ad account `act_20658834`, catalog `384890002574549`, pixel `214720653324969`. Built by
+`scripts/rebuild-dpa-retargeting.mjs` (dry-run default, `--apply`). Replaced the old generic
+"Visiteurs 30j" website CA (built on the WRONG pixel `2027065584856990`).
+
+- **Campaign** `52583438066005` (OUTCOME_SALES), ACTIVE.
+- **Ad Set 1 — ATC (ADD_TO_CART):** `52584773091805` "ATC 30j — Abandon panier — ADD_TO_CART",
+  **ACTIVE**, → CA **AddToCart 30j** `52583438803605`. Rebuilt 2026-07-19; the old ATC set
+  `52583438197005` (PURCHASE) is **PAUSED** — it starved at 0 delivery because a ~1000-person
+  audience optimized for the rare PURCHASE event can't deliver.
+- **Ad Set 2 — "ViewContent — Produit exact vu"** `52583438211605` → CA **ViewContent 30j**
+  `52583438060205`, EXCLUDES the ATC CA. Still on PURCHASE (delivers well — 7.7% CTR).
+- **Ad Set 3 — "Prospection Broad — Best-sellers"** `52583438225405` → broad 25-65 + Advantage+,
+  product set Best-sellers `2218845485631893`.
+- Retargeting sets (1 & 2) use the **All Products** set `2891699814486850` so DPA shows the exact
+  viewed product; only prospection uses Best-sellers.
+- **Conversion-data reality:** the store has only ~10 real confirmed Shopify sales total and the
+  pixel was broken before ~July 2026, so Meta has almost no PURCHASE signal — "0 purchases" is
+  expected, not a defect. Optimize mid-funnel (ADD_TO_CART) until real purchase volume accrues.
+- API gotchas (each cost a failed apply): `product_catalog_id` is rejected in `promoted_object`
+  for OUTCOME_SALES (use `product_set_id` only); Meta auto-converts single-format DPA template
+  creatives to FORMAT_AUTOMATION CAROUSEL/COLLECTION; do NOT round-trip a GET `?fields=targeting`
+  back into a POST (drops geo — rebuild explicitly); **you CANNOT edit the conversion event /
+  optimization on a PUBLISHED ad set** (`error_subcode 3260011`) — rebuild from scratch (`POST
+  act_.../adsets` with `targeting.targeting_automation.advantage_audience` set explicitly;
+  `/copies` fails on >3 objects and on the missing advantage_audience flag), then copy its ads in.
+
 ## Shopify theme IDs (live vs draft)
 
 ⚠️ **Roles MOVE on every publish; names are misleading — trust `themes.json` roles, never the name.**
