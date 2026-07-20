@@ -82,9 +82,11 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
       continue;
     }
 
-    const id = crypto.randomUUID();
-    await upsertImportJob({
-      id,
+    // Use the id the upsert actually persisted: ON CONFLICT(group_key) keeps a
+    // pre-existing row's id, so a stale row from an earlier failed attempt would
+    // otherwise leave `jobs` pointing at a non-existent id ("Job not found").
+    const id = await upsertImportJob({
+      id: crypto.randomUUID(),
       groupKey: product.groupKey,
       productData: JSON.stringify(product),
       status: "pending",

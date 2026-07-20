@@ -235,6 +235,33 @@ function mapShopifyProduct(raw: Record<string, unknown>): ShopifyExistingProduct
 }
 
 /**
+ * De-collide duplicate variant option signatures in place.
+ *
+ * Aosom occasionally ships two SKUs in one PSIN group that map to the SAME
+ * (option1, option2) pair — e.g. B30-054V00BK and B30-054V01BK both resolve to
+ * Couleur "Noir" / Taille "9.3\" x 9.3\" x 72.4\"". Shopify rejects the whole
+ * product create with 422 "The variant '…' already exists." because option
+ * combinations must be unique. We suffix the colliding label(s) with a numeric
+ * counter ("Noir" → "Noir 1", "Noir 2") so every variant stays distinct and the
+ * product imports instead of 422-ing. Suffix the LAST populated option (Taille if
+ * present, else Couleur) so the distinguishing dimension reads naturally.
+ */
+function dedupeVariantOptionLabels<T extends { option1?: string | null; option2?: string | null }>(variants: T[]): T[] {
+  const seen = new Map<string, number>();
+  for (const v of variants) {
+    const sig = `${v.option1 ?? ""}${v.option2 ?? ""}`;
+    const n = (seen.get(sig) ?? 0) + 1;
+    seen.set(sig, n);
+    if (n > 1) {
+      // 2nd+ occurrence of this exact pair — suffix the last populated option.
+      if (v.option2 != null && v.option2 !== "") v.option2 = `${v.option2} ${n}`;
+      else v.option1 = `${v.option1 ?? "Défaut"} ${n}`;
+    }
+  }
+  return variants;
+}
+
+/**
  * Create a Shopify product with FR primary + EN metafields.
  * Published live ('active') on import. No inventory tracking (dropship).
  */
@@ -263,6 +290,29 @@ export async function createShopifyProduct(
     .replace(/--+/g, "-")
     .replace(/^-|-$/g, "");
 
+  // Build variants, then de-collide duplicate (option1, option2) pairs so a group
+  // with two SKUs that map to the same Couleur/Taille imports instead of 422-ing.
+  const builtVariants = dedupeVariantOptionLabels(
+    merged.variants.map((v) => ({
+      sku: v.sku,
+      // Floor at the Aosom price (0% markup, never below) — same rule as the sync. See pricing.ts.
+      // Fall back to the raw price if the Aosom price is invalid (targetSellPrice → NaN),
+      // so we never emit the string "NaN" to Shopify (bad CSV data is a separate concern).
+      price: String(targetSellPrice(v.price) || v.price),
+      inventory_management: null as null, // dropship — no inventory tracking
+      requires_shipping: true,
+      weight: v.weight,
+      weight_unit: "kg",
+      barcode: v.gtin,
+      option1: hasColor
+        ? v.color || "Défaut"
+        : hasSize
+          ? v.size || "Défaut"
+          : "Titre par défaut",
+      option2: hasColor && hasSize ? v.size || "Défaut" : undefined as string | undefined,
+    })),
+  );
+
   const payload = {
     product: {
       title: content.titleFr,
@@ -284,24 +334,7 @@ export async function createShopifyProduct(
       tags: content.tags.join(", "),
       status: "active",
       options,
-      variants: merged.variants.map((v) => ({
-        sku: v.sku,
-        // Floor at the Aosom price (0% markup, never below) — same rule as the sync. See pricing.ts.
-        // Fall back to the raw price if the Aosom price is invalid (targetSellPrice → NaN),
-        // so we never emit the string "NaN" to Shopify (bad CSV data is a separate concern).
-        price: String(targetSellPrice(v.price) || v.price),
-        inventory_management: null, // dropship — no inventory tracking
-        requires_shipping: true,
-        weight: v.weight,
-        weight_unit: "kg",
-        barcode: v.gtin,
-        option1: hasColor
-          ? v.color || "Défaut"
-          : hasSize
-            ? v.size || "Défaut"
-            : "Titre par défaut",
-        option2: hasColor && hasSize ? v.size || "Défaut" : undefined,
-      })),
+      variants: builtVariants,
       images: merged.images.map((src) => ({ src })),
       metafields: [
         // Native Shopify SEO (store default locale = FR). EN equivalents kept in
