@@ -2520,13 +2520,24 @@ const IMPORT_JOB_COLUMNS = new Set([
   "status", "content", "shopify_id", "error", "product_data", "group_key",
 ]);
 
-export async function upsertImportJob(job: { id: string; groupKey: string; productData: string; status: string; createdAt: string; updatedAt: string }): Promise<void> {
+/**
+ * Upsert an import job keyed by group_key, returning the row's ACTUAL id.
+ *
+ * The ON CONFLICT(group_key) branch keeps the pre-existing row's id, so the caller
+ * MUST NOT assume the id it passed in was used — a stale row from an earlier failed
+ * attempt keeps its old id and the passed-in id is discarded. Returning the real id
+ * (via RETURNING) lets the caller address the row it actually owns; trusting the
+ * passed-in id caused "Job <uuid> not found" on re-imports of a previously-failed group.
+ */
+export async function upsertImportJob(job: { id: string; groupKey: string; productData: string; status: string; createdAt: string; updatedAt: string }): Promise<string> {
   const db = await ensureSchema();
-  await db.execute({
+  const result = await db.execute({
     sql: `INSERT INTO import_jobs (id, group_key, product_data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(group_key) DO UPDATE SET product_data=excluded.product_data, status='pending', updated_at=excluded.updated_at`,
+     ON CONFLICT(group_key) DO UPDATE SET product_data=excluded.product_data, status='pending', updated_at=excluded.updated_at
+     RETURNING id`,
     args: [job.id, job.groupKey, job.productData, job.status, job.createdAt, job.updatedAt],
   });
+  return (result.rows[0]?.id as string) ?? job.id;
 }
 
 export async function getImportJobs(): Promise<Record<string, unknown>[]> {

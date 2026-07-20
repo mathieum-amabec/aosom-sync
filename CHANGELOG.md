@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.35] - 2026-07-20
+
+### Fixed — import pipeline: variant-option collisions + import-job id
+
+- `createShopifyProduct` 422'd ("variant already exists") for PSIN groups whose two SKUs map
+  to the same (Couleur, Taille) pair (e.g. `B30-054V00BK`/`V01BK`). New `dedupeVariantOptionLabels`
+  suffixes the 2nd+ identical pair so every variant stays distinct and the product imports.
+- `queueForImport` hit "Job not found" re-importing a previously-failed group: `upsertImportJob`'s
+  `ON CONFLICT(group_key)` keeps the existing row's id, so the fresh UUID was orphaned. It now
+  `RETURN`s the real id and `queueForImport` uses it. (`shopify-client.ts`, `database.ts`, `import-pipeline.ts`.)
+
 ## [0.5.54.34] - 2026-07-19
 
 ### Fixed — AI assistant returns curated FR titles
