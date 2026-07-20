@@ -168,16 +168,22 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
   const pool = new Map<string, Card>();
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    // Route through the global daily token budget (llm-budget) so this public endpoint's
-    // spend counts against — and is capped by — the same fail-closed backstop as every
-    // other Claude call. Budget-exhausted throws → the route returns a 500 (fails closed).
-    const res = await budgetedCreate(client, {
-      model: CLAUDE.MODEL,
-      max_tokens: 1024,
-      system: systemPrompt(locale),
-      tools: [SEARCH_TOOL],
-      messages,
-    });
+    // Route through the DEDICATED "assistant" budget pool (llm-budget) — a reservation
+    // separate from the "batch" pool that imports/content/social draw from, so a bulk
+    // batch run can never starve this public endpoint. Budget-exhausted throws → the
+    // route returns a 500 (fails closed).
+    const res = await budgetedCreate(
+      client,
+      {
+        model: CLAUDE.MODEL,
+        max_tokens: 1024,
+        system: systemPrompt(locale),
+        tools: [SEARCH_TOOL],
+        messages,
+      },
+      undefined,
+      "assistant",
+    );
 
     if (res.stop_reason === "tool_use") {
       const toolUses = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");

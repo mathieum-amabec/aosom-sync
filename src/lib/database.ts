@@ -363,12 +363,18 @@ async function _initSchemaImpl(): Promise<void> {
       feed_type TEXT NOT NULL, item_count INTEGER, status TEXT NOT NULL, error TEXT,
       fetched_at INTEGER NOT NULL
     )`,
-    // daily_llm_budget: global Anthropic spend guardrail. One row per UTC day
-    // (resets at 00:00 UTC by keying on the date string). Every Claude call
-    // asserts today's tokens_used < budget (fail-closed) then adds its usage.
+    // daily_llm_budget: Anthropic spend guardrail, split into independent pools so a
+    // bulk batch run can never starve the public storefront assistant. One row per
+    // (UTC day, pool) — pools are 'assistant' (only /api/assistant) and 'batch'
+    // (imports, content generation, social — everything else). Resets at 00:00 UTC by
+    // keying on the date string. Every Claude call asserts its pool's tokens_used <
+    // that pool's budget (fail-closed) then adds its usage. (Legacy single-key tables
+    // are migrated to this composite key in the migration block below.)
     `CREATE TABLE IF NOT EXISTS daily_llm_budget (
-      day TEXT PRIMARY KEY,
-      tokens_used INTEGER NOT NULL DEFAULT 0
+      day TEXT NOT NULL,
+      pool TEXT NOT NULL DEFAULT 'batch',
+      tokens_used INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, pool)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_run ON sync_logs(sync_run_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_sku ON sync_logs(sku)`,
@@ -491,6 +497,31 @@ async function _initSchemaImpl(): Promise<void> {
   if (!pqCols.has("metadata")) {
     await runBatch("publication_queue add metadata", [
       { sql: `ALTER TABLE publication_queue ADD COLUMN metadata TEXT`, args: [] },
+    ]);
+  }
+
+  // daily_llm_budget: split the single global counter into per-pool counters
+  // (assistant vs batch) so a bulk batch run can never exhaust the assistant's
+  // reservation. Migrate the legacy (day PRIMARY KEY) table to a composite
+  // (day, pool) key, assigning ALL pre-split usage to the 'batch' pool — the
+  // 'assistant' pool therefore starts fresh, so the public assistant recovers
+  // immediately on deploy instead of waiting for the 00:00 UTC reset. SQLite can't
+  // ALTER a PRIMARY KEY, so this is a guarded table rebuild.
+  const llmInfo = await db.execute(`PRAGMA table_info(daily_llm_budget)`);
+  const llmCols = new Set(llmInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!llmCols.has("pool")) {
+    await runBatch("daily_llm_budget split into (day,pool)", [
+      { sql: `DROP TABLE IF EXISTS daily_llm_budget_new`, args: [] },
+      { sql: `CREATE TABLE daily_llm_budget_new (
+        day TEXT NOT NULL,
+        pool TEXT NOT NULL DEFAULT 'batch',
+        tokens_used INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (day, pool)
+      )`, args: [] },
+      { sql: `INSERT INTO daily_llm_budget_new (day, pool, tokens_used)
+              SELECT day, 'batch', tokens_used FROM daily_llm_budget`, args: [] },
+      { sql: `DROP TABLE daily_llm_budget`, args: [] },
+      { sql: `ALTER TABLE daily_llm_budget_new RENAME TO daily_llm_budget`, args: [] },
     ]);
   }
 
@@ -1533,23 +1564,31 @@ function utcDayKey(): string {
 }
 
 /** Tokens consumed by Claude calls so far today (UTC). 0 when no row yet. */
-export async function getDailyLlmTokensUsed(): Promise<number> {
+/**
+ * LLM budget pools. Kept separate so a bulk 'batch' run (imports, content, social)
+ * can never exhaust the 'assistant' pool that the public storefront /api/assistant
+ * draws from. Each pool has its own daily counter row and its own budget env var.
+ */
+export type LlmBudgetPool = "assistant" | "batch";
+
+/** Tokens the given pool consumed so far today (UTC). 0 when no row yet. */
+export async function getDailyLlmTokensUsed(pool: LlmBudgetPool): Promise<number> {
   const db = await ensureSchema();
   const res = await db.execute({
-    sql: `SELECT tokens_used FROM daily_llm_budget WHERE day = ?`,
-    args: [utcDayKey()],
+    sql: `SELECT tokens_used FROM daily_llm_budget WHERE day = ? AND pool = ?`,
+    args: [utcDayKey(), pool],
   });
   return (res.rows[0]?.tokens_used as number | undefined) ?? 0;
 }
 
-/** Add `tokens` to today's (UTC) LLM budget counter. No-op for non-positive input. */
-export async function addDailyLlmTokens(tokens: number): Promise<void> {
+/** Add `tokens` to the given pool's today (UTC) counter. No-op for non-positive input. */
+export async function addDailyLlmTokens(pool: LlmBudgetPool, tokens: number): Promise<void> {
   if (!Number.isFinite(tokens) || tokens <= 0) return;
   const db = await ensureSchema();
   await db.execute({
-    sql: `INSERT INTO daily_llm_budget (day, tokens_used) VALUES (?, ?)
-          ON CONFLICT(day) DO UPDATE SET tokens_used = tokens_used + excluded.tokens_used`,
-    args: [utcDayKey(), Math.ceil(tokens)],
+    sql: `INSERT INTO daily_llm_budget (day, pool, tokens_used) VALUES (?, ?, ?)
+          ON CONFLICT(day, pool) DO UPDATE SET tokens_used = tokens_used + excluded.tokens_used`,
+    args: [utcDayKey(), pool, Math.ceil(tokens)],
   });
 }
 
