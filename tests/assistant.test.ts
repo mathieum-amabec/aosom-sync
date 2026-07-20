@@ -18,6 +18,11 @@ vi.mock("@/lib/llm-budget", () => ({
 const getProducts = vi.fn();
 vi.mock("@/lib/database", () => ({ getProducts }));
 
+// FR-title resolution calls shopifyFetch(/graphql.json). Mock it; default = no match
+// (so cards fall back to the catalog name unless a test opts into FR titles).
+const shopifyFetch = vi.fn();
+vi.mock("@/lib/shopify-client", () => ({ shopifyFetch }));
+
 const { runAssistant, runComplementary } = await import("@/lib/assistant");
 
 const prod = (over: Partial<Record<string, unknown>> = {}) => ({
@@ -31,6 +36,8 @@ const final = (obj: unknown) => ({ stop_reason: "end_turn", content: [{ type: "t
 beforeEach(() => {
   create.mockReset();
   getProducts.mockReset().mockResolvedValue({ products: [prod()], total: 1, productTypes: [] });
+  // default: FR-title lookup returns no nodes -> cards fall back to the catalog name
+  shopifyFetch.mockReset().mockResolvedValue({ ok: true, json: async () => ({ data: { products: { nodes: [] } } }) });
 });
 
 describe("runAssistant", () => {
@@ -56,6 +63,36 @@ describe("runAssistant", () => {
       .mockResolvedValueOnce(final({ reply: "Here you go.", products: [{ sku: "A-1", reason: "Comfy" }] }));
     const res = await runAssistant({ message: "I need a sofa", locale: "en" });
     expect(res.products[0].url).toBe("https://furnishdirect.ca/products/sofa-sectionnel-gris");
+  });
+
+  it("swaps the raw EN catalog name for the curated Shopify FR title on locale=fr", async () => {
+    shopifyFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { products: { nodes: [{ handle: "sofa-sectionnel-gris", title: "Canapé sectionnel gris moderne" }] } } }),
+    });
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
+    const res = await runAssistant({ message: "canapé", locale: "fr" });
+    expect(res.products[0].name).toBe("Canapé sectionnel gris moderne");
+  });
+
+  it("does NOT fetch FR titles for locale=en (keeps the catalog/EN name)", async () => {
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
+    const res = await runAssistant({ message: "I need a sofa", locale: "en" });
+    expect(shopifyFetch).not.toHaveBeenCalled();
+    expect(res.products[0].name).toBe("Sofa sectionnel");
+  });
+
+  it("falls back to the catalog name when the FR-title lookup fails", async () => {
+    shopifyFetch.mockRejectedValue(new Error("shopify down"));
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
+    const res = await runAssistant({ message: "canapé", locale: "fr" });
+    expect(res.products[0].name).toBe("Sofa sectionnel");
   });
 
   it("drops a picked SKU the tool never returned (model cannot invent a product)", async () => {

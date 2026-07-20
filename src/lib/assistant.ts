@@ -20,6 +20,7 @@ import { getAnthropicClient } from "./content-generator";
 import { budgetedCreate } from "./llm-budget";
 import { getProducts } from "./database";
 import { CLAUDE } from "./config";
+import { shopifyFetch } from "./shopify-client";
 
 export type Locale = "fr" | "en";
 
@@ -201,14 +202,14 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
     // Final answer.
     const text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
     const { reply, picks } = parseFinal(text);
-    const products = resolveCards(picks, pool, locale);
+    const products = await resolveCards(picks, pool, locale);
     return { reply: reply || (locale === "en" ? "Here are a few options I found for you." : "Voici quelques options que j'ai trouvées pour vous."), products };
   }
 
   // Ran out of steps without a final JSON — fall back to the pool's first few products.
   return {
     reply: locale === "en" ? "Here are a few options that might fit." : "Voici quelques options qui pourraient convenir.",
-    products: resolveCards([...pool.values()].slice(0, MAX_CARDS).map((p) => ({ sku: p.sku, reason: "" })), pool, locale),
+    products: await resolveCards([...pool.values()].slice(0, MAX_CARDS).map((p) => ({ sku: p.sku, reason: "" })), pool, locale),
   };
 }
 
@@ -230,19 +231,45 @@ export async function runComplementary(opts: { name: string; productType: string
 }
 
 /** Resolve picked SKUs to full cards from the pool, dropping unknowns / handle-less entries. */
-function resolveCards(picks: Array<{ sku: string; reason: string }>, pool: Map<string, Card>, locale: Locale): AssistantProduct[] {
-  const out: AssistantProduct[] = [];
+/**
+ * Resolve the curated FR titles for the final picks by Shopify handle. The Turso
+ * catalog `name` is the RAW ENGLISH Aosom title; the customer-facing FR title lives
+ * only on the live Shopify product. One GraphQL round-trip for the 3-4 final cards.
+ * Non-fatal: any failure falls back to the catalog name (never breaks a reply).
+ */
+async function frTitlesByHandle(handles: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  if (handles.length === 0) return map;
+  const search = handles.map((h) => `handle:${h}`).join(" OR ");
+  const query = `query { products(first: ${handles.length}, query: ${JSON.stringify(search)}) { nodes { handle title } } }`;
+  try {
+    const res = await shopifyFetch("/graphql.json", { method: "POST", body: JSON.stringify({ query }) });
+    if (!res.ok) return map;
+    const data = await res.json();
+    for (const n of data?.data?.products?.nodes ?? []) {
+      if (n?.handle && n?.title) map.set(String(n.handle), String(n.title));
+    }
+  } catch {
+    /* non-fatal — fall back to the catalog (EN) name */
+  }
+  return map;
+}
+
+async function resolveCards(picks: Array<{ sku: string; reason: string }>, pool: Map<string, Card>, locale: Locale): Promise<AssistantProduct[]> {
+  const cards: Array<{ c: Card; reason: string }> = [];
   for (const pick of picks) {
     const c = pool.get(pick.sku);
     if (!c || !c.handle) continue; // never emit a card the model invented or one without a real PDP link
-    out.push({
-      sku: c.sku,
-      name: c.name,
-      price: c.price,
-      image: c.image,
-      url: `${STORE_URL[locale]}/products/${c.handle}`,
-      reason: pick.reason,
-    });
+    cards.push({ c, reason: pick.reason });
   }
-  return out;
+  // On the FR storefront, swap the raw EN catalog name for the curated Shopify FR title.
+  const frTitles = locale === "fr" ? await frTitlesByHandle(cards.map((x) => x.c.handle)) : new Map<string, string>();
+  return cards.map(({ c, reason }) => ({
+    sku: c.sku,
+    name: locale === "fr" ? frTitles.get(c.handle) || c.name : c.name,
+    price: c.price,
+    image: c.image,
+    url: `${STORE_URL[locale]}/products/${c.handle}`,
+    reason,
+  }));
 }

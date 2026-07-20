@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.34] - 2026-07-19
+
+### Fixed — AI assistant returns curated FR titles
+
+- `/api/assistant` recommended products showed the raw ENGLISH Aosom catalog title inside
+  the French UI. `resolveCards` now resolves the curated Shopify FR `product.title` by handle
+  (one GraphQL round-trip for the final 3-4 picks) when `locale=fr`; EN is unchanged. Non-fatal:
+  falls back to the catalog name if the lookup fails. (`src/lib/assistant.ts`, +4 tests.)
+
 ## [0.5.54.33] - 2026-07-19
 
 ### Fixed — `/api/assistant` reachable from the storefront (proxy allowlist)
