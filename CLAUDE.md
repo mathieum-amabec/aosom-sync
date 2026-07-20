@@ -94,10 +94,10 @@ Ad account `act_20658834`, catalog `384890002574549`, pixel `214720653324969`. B
 Source of truth for the tooling: `scripts/_shopify-lib.mjs` (`LIVE_THEME_ID` / `DRAFT_THEME_ID` /
 `BACKUP_THEME_ID`) — re-point it after EVERY publish or the `apply-*.mjs` guard protects the wrong theme.
 
-As of **2026-07-13** (publish of the conversion/UX draft):
-- **LIVE / `main` (NEVER write):** `160944193641` "DRAFT CONVERSION 2026-07-13"
-- **Active working DRAFT (safe write target):** `160945012841` "DRAFT DE TRAVAIL 2026-07-13"
-- **Rollback backup (previous live):** `160749813865` "DRAFT DE TRAVAIL 2026-07-05"
+As of **2026-07-19** (publish of the price-badge-on-cards draft):
+- **LIVE / `main` (NEVER write):** `161069989993` "DRAFT DE TRAVAIL 2026-07-18 v2"
+- **Active working DRAFT (safe write target):** `161090928745` "DRAFT DE TRAVAIL 2026-07-19"
+- **Rollback backup (previous live):** `161062551657` "DRAFT DE TRAVAIL 2026-07-18"
 
 Publish a draft: `PUT /admin/api/2025-01/themes/{id}.json {theme:{id,role:"main"}}`. Make a fresh draft:
 GraphQL `themeDuplicate` of the new live. Verify roles: `GET /admin/api/2025-01/themes.json?fields=id,name,role`.

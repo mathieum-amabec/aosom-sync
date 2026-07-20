@@ -38,9 +38,9 @@ export const API_VERSION = "2025-01";
 // guard "protect" the wrong theme, and a stale DRAFT_THEME_ID can point writes at production.
 // IMPORTANT: the LIVE_THEME_ID guard in apply-*.mjs ("refusing to run against the LIVE
 // theme") only protects production when this is the REAL published theme. Keep it current.
-export const LIVE_THEME_ID = "161062551657"; // current main / published (LIVE) theme — NEVER write here
-export const DRAFT_THEME_ID = "161069989993"; // active unpublished DRAFT (dup'd 2026-07-18) — safe write target
-export const BACKUP_THEME_ID = "160970178665"; // previous live (published until 2026-07-18), now rollback target
+export const LIVE_THEME_ID = "161069989993"; // current main / published (LIVE) theme (published 2026-07-19) — NEVER write here
+export const DRAFT_THEME_ID = "161090928745"; // active unpublished DRAFT (dup'd 2026-07-19) — safe write target
+export const BACKUP_THEME_ID = "161062551657"; // previous live (published until 2026-07-19), now rollback target
 // Deprecated alias kept for older imports. Points at a non-live theme so the default
 // asset-write target can never hit production. New code should use DRAFT_THEME_ID.
 export const PREVIEW_THEME_ID = BACKUP_THEME_ID;
