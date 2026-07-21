@@ -8,7 +8,7 @@
  *
  * Two pools, so a bulk run can never starve the public storefront:
  *   - `assistant` — ONLY `/api/assistant` (the public shopping assistant). Budget:
- *     `LLM_ASSISTANT_DAILY_BUDGET` (default 200k).
+ *     `LLM_ASSISTANT_DAILY_BUDGET` (default 500k).
  *   - `batch` — everything else (imports, product/blog content, social captions,
  *     slideshow/video hooks, vision). Budget: `LLM_DAILY_TOKEN_BUDGET` (default 1.3M).
  * A bulk import drains only the `batch` pool, so the `assistant` pool — and shoppers —
@@ -27,7 +27,7 @@ import { getDailyLlmTokensUsed, addDailyLlmTokens, type LlmBudgetPool } from "@/
 export type BudgetPool = LlmBudgetPool;
 
 const DEFAULT_BATCH_TOKEN_BUDGET = 1_300_000;
-const DEFAULT_ASSISTANT_TOKEN_BUDGET = 200_000;
+const DEFAULT_ASSISTANT_TOKEN_BUDGET = 500_000;
 
 /** Resolve a pool's daily token budget from its env var, falling back to the default. */
 export function poolBudget(pool: BudgetPool): number {

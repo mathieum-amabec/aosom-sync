@@ -44,12 +44,12 @@ describe("llm-budget pools", () => {
     expect(poolBudget("batch")).toBe(1_300_000);
   });
 
-  it("assistant default is 200k (LLM_ASSISTANT_DAILY_BUDGET); env overrides", () => {
-    expect(poolBudget("assistant")).toBe(200_000);
+  it("assistant default is 500k (LLM_ASSISTANT_DAILY_BUDGET); env overrides", () => {
+    expect(poolBudget("assistant")).toBe(500_000);
     process.env.LLM_ASSISTANT_DAILY_BUDGET = "500";
     expect(poolBudget("assistant")).toBe(500);
     process.env.LLM_ASSISTANT_DAILY_BUDGET = "0"; // invalid → fallback
-    expect(poolBudget("assistant")).toBe(200_000);
+    expect(poolBudget("assistant")).toBe(500_000);
   });
 
   it("assertLlmBudget passes under the pool budget, throws at/over (fail-closed)", async () => {

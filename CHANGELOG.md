@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.38] - 2026-07-21
+
+### Changed — raise the assistant LLM budget-pool default 200k → 500k
+
+- The `assistant` pool's default daily budget (`LLM_ASSISTANT_DAILY_BUDGET`) is now 500k
+  (was 200k). A day of normal storefront traffic plus operator QA of the live assistant
+  exhausted the 200k pool, fail-closing `/api/assistant` with 500 until the 00:00 UTC reset.
+  500k gives comfortable headroom; the pool is still isolated from `batch`, so a bulk import
+  can never touch it. Deploying this immediately restores an assistant that hit the old cap
+  (used < 500k). (`src/lib/llm-budget.ts`, test updated.)
+
 ## [0.5.54.37] - 2026-07-21
 
 ### Improved — AI assistant refines across turns + indoor/outdoor intent
