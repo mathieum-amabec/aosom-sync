@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/auth";
 import { AUTH } from "@/lib/config";
 
-// "/api/pixel/script" is public so Shopify's storefront ScriptTag can fetch it
-// (no session). "/api/pixel/install" is intentionally NOT public — it stays
-// session-gated for the dashboard.
+// "/api/pixel/script" and "/api/pixel/pinterest-script" are public so Shopify's
+// storefront ScriptTags (Meta + Pinterest) can fetch them with no session.
+// "/api/pixel/install" is intentionally NOT public — it stays session-gated for
+// the dashboard.
 // "/api/price-alert" is public so the Shopify storefront can POST price-drop
 // signups (cross-origin, CORS-guarded, rate-limited); its /notify cron child
 // self-gates on CRON_SECRET.
@@ -26,7 +27,7 @@ import { AUTH } from "@/lib/config";
 // pièce" can POST from ameublodirect.ca / furnishdirect.ca (unauthenticated visitors). The
 // route self-guards: server-side Origin allowlist, per-IP + global rate limits, and the
 // daily LLM token budget. Without this it 307-redirects to /login and the widget breaks.
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/ugc-videos", "/api/video-serve", "/api/assistant"];
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/pixel/pinterest-script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/ugc-videos", "/api/video-serve", "/api/assistant"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(
