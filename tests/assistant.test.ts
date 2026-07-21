@@ -57,6 +57,37 @@ describe("runAssistant", () => {
     expect(create).toHaveBeenCalledTimes(2);
   });
 
+  it("forwards prior conversation history into the model messages (multi-turn refinement)", async () => {
+    create.mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+    await runAssistant({
+      message: "je préfère le gris",
+      locale: "fr",
+      history: [
+        { role: "user", content: "je cherche un canapé pour un petit salon" },
+        { role: "assistant", content: "Voici quelques options." },
+        { role: "user", content: "j'ai un budget de 500$" },
+      ],
+    });
+    const sentMessages = create.mock.calls[0][0].messages as Array<{ role: string; content: unknown }>;
+    // history turns must precede the latest user message, in order.
+    const textOf = (m: { content: unknown }) => (typeof m.content === "string" ? m.content : "");
+    expect(sentMessages.map(textOf)).toEqual([
+      "je cherche un canapé pour un petit salon",
+      "Voici quelques options.",
+      "j'ai un budget de 500$",
+      "je préfère le gris",
+    ]);
+  });
+
+  it("system prompt distinguishes indoor vs outdoor and instructs multi-turn refinement", async () => {
+    create.mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+    await runAssistant({ message: "un canapé pour mon salon", locale: "fr" });
+    const system = create.mock.calls[0][0].system as string;
+    expect(system).toMatch(/INDOOR vs OUTDOOR/);
+    expect(system).toMatch(/patio|outdoor/i);
+    expect(system).toMatch(/refine|accumulated|maxPrice/i);
+  });
+
   it("uses the EN store domain for locale=en", async () => {
     create
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))

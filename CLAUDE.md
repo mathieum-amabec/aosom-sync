@@ -60,6 +60,27 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
   DOM), so it sends Purchase via `fetch()` to `https://www.facebook.com/tr/` (the noscript
   beacon) — NOT the `fbq`/`fbevents.js` SDK, which the sandbox rejects.
 
+## Pinterest Tag (mirrors Meta exactly — env `PINTEREST_TAG_ID`)
+
+A direct mirror of the Meta pixel, same two-part split. `PINTEREST_TAG_ID` (numeric, from
+Pinterest Ads Manager → Conversions) gates both halves; unset ⇒ inert no-op script.
+`product_id`/`content_ids` everywhere = `variant.sku` = the Pinterest catalog feed `g:id`
+(same SKU as the Meta catalog `retailer_id`).
+
+- **Storefront events (page / pagevisit / viewcategory / search / addtocart)**: a Shopify
+  **ScriptTag** → `/api/pixel/pinterest-script` (`src/app/api/pixel/pinterest-script/route.ts`,
+  loads `s.pinimg.com/ct/core.js` + `pintrk`). Installed/removed by the SAME
+  `/api/pixel/install` route as Meta (it now manages BOTH tags — POST installs both, GET
+  reports both, DELETE removes both; Meta fields stay top-level, Pinterest under `pinterest`).
+  ScriptTag lib: `src/lib/pinterest-pixel.ts`. Route is public (allowlisted in `proxy.ts`).
+- **Checkout (conversion)**: a **Custom Web Pixel installed MANUALLY** (Settings → Customer
+  events), source of truth `docs/pinterest-custom-web-pixel.js` — replace the `PINTEREST_TAG_ID`
+  placeholder with the real numeric id before pasting. Same sandbox constraint as Meta: sends the
+  `checkout` event via `fetch()` to `https://ct.pinterest.com/v3/` (the noscript beacon), NOT the
+  `pintrk` SDK. `event_id` = checkout token (future Conversions API dedupe key).
+- **Prereqs (account-side, before tracking works):** create the Pinterest Tag in Ads Manager to
+  get the id, claim the domain, set `PINTEREST_TAG_ID`, then POST `/api/pixel/install`.
+
 ## Meta DPA retargeting — "Retargeting DPA — ViewContent + ATC" (campaign ACTIVE; ATC ad set rebuilt 2026-07-19)
 
 Ad account `act_20658834`, catalog `384890002574549`, pixel `214720653324969`. Built by

@@ -88,6 +88,14 @@ export const env = {
   get hasMetaPixel(): boolean {
     return !!process.env.NEXT_PUBLIC_META_PIXEL_ID;
   },
+  /** Pinterest Tag ID. Optional — when unset, the injected Pinterest script is a no-op.
+   * Read server-side at request time by /api/pixel/pinterest-script (no NEXT_PUBLIC needed). */
+  get pinterestTagId(): string | undefined {
+    return process.env.PINTEREST_TAG_ID || undefined;
+  },
+  get hasPinterestTag(): boolean {
+    return !!process.env.PINTEREST_TAG_ID;
+  },
   /** Meta Marketing API access token (Ads management). Throws when the Ads features
    * are used without it configured. */
   get metaAccessToken(): string {

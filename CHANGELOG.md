@@ -2,6 +2,31 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.37] - 2026-07-21
+
+### Improved — AI assistant refines across turns + indoor/outdoor intent
+
+- Verified the conversation history the widget sends is actually forwarded to Claude (route →
+  `runAssistant` → model `messages`), and added a regression test locking that in.
+- System prompt now (a) treats the chat as multi-turn: apply EVERY constraint given so far
+  (room, budget, colour, size) and search again with accumulated filters when the shopper adds
+  one, instead of repeating the same picks; (b) matches setting to intent — indoor room cues →
+  indoor furniture, patio/garden cues → outdoor, don't mix. (`src/lib/assistant.ts`, +2 tests.)
+
+### Added — Pinterest Tag (storefront ScriptTag + checkout Custom Web Pixel), mirrors Meta
+
+- `PINTEREST_TAG_ID` (numeric, from Pinterest Ads Manager) gates both halves; unset ⇒ inert no-op.
+- Storefront events (page / pagevisit / viewcategory / search / addtocart) via a ScriptTag →
+  `/api/pixel/pinterest-script` (loads `pintrk`). `product_id` = `variant.sku` = the Pinterest feed
+  `g:id` (same SKU as the Meta catalog). Route is public (`proxy.ts` allowlist).
+- `/api/pixel/install` now manages BOTH tags (Meta + Pinterest) — POST installs both, GET reports
+  both (`pinterest` sub-object; Meta fields stay top-level), DELETE removes both. Lib:
+  `src/lib/pinterest-pixel.ts`.
+- Checkout conversion via a Custom Web Pixel: `docs/pinterest-custom-web-pixel.js` (paste into
+  Settings → Customer events; replace the tag-id placeholder). Same lax-sandbox constraint as Meta
+  — sends `checkout` via `fetch()` to `https://ct.pinterest.com/v3/`, not the `pintrk` SDK.
+  (`config.ts`, `.env.example`, `CLAUDE.md`, +3 route tests.)
+
 ## [0.5.54.36] - 2026-07-20
 
 ### Fixed — split the LLM daily budget into isolated pools (assistant vs batch)
