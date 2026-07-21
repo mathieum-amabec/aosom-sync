@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.36] - 2026-07-20
+
+### Fixed — split the LLM daily budget into isolated pools (assistant vs batch)
+
+- A bulk import could exhaust the single shared `daily_llm_budget` counter and take the
+  **public storefront assistant** (`/api/assistant`) down with a 500 until the 00:00 UTC
+  reset — imports and shoppers drew from the same fail-closed cap.
+- The budget is now two independent pools, keyed by `(UTC day, pool)` in the same
+  `daily_llm_budget` table: **`assistant`** (only `/api/assistant`, `LLM_ASSISTANT_DAILY_BUDGET`,
+  default 200k) and **`batch`** (imports, product/blog content, social, slideshow/video, vision
+  — everything else, `LLM_DAILY_TOKEN_BUDGET`, default 1.3M). A bulk `batch` run can no longer
+  starve the `assistant` pool.
+- `budgetedCreate(client, params, options?, pool="batch")` — pool defaults to `batch`, so a new
+  caller can never accidentally spend against the assistant reservation; only `assistant.ts`
+  passes `"assistant"`. `assertLlmBudget`/`recordLlmUsage`/`getDailyLlmTokensUsed`/`addDailyLlmTokens`
+  are all pool-scoped.
+- Guarded migration rebuilds the legacy `day PRIMARY KEY` table to composite `(day, pool)`,
+  assigning all pre-split usage to `batch` — so the `assistant` pool starts fresh and the
+  endpoint recovers immediately on deploy instead of waiting for 00:00 UTC.
+  (`llm-budget.ts`, `database.ts`, `assistant.ts`, +9 budget tests incl. pool isolation.)
+
 ## [0.5.54.35] - 2026-07-20
 
 ### Fixed — import pipeline: variant-option collisions + import-job id
