@@ -14,9 +14,34 @@ export interface FeedItem {
   availability: "in stock" | "out of stock";
   condition: "new";
   brand: string;
-  color?: string | null;         // FR colour from the SKU suffix (g:color), null when none
+  color?: string | null;         // FR colour, from the Shopify option or the SKU suffix (g:color)
+  size?: string | null;          // Shopify "Taille" option value (g:size), null when none
   productType: string;           // Aosom taxonomy path (g:product_type)
   googleCategoryId: number;      // g:google_product_category
+}
+
+// Google renders a strikethrough "was" price only when the feed splits price/sale_price:
+// `price` must carry the REGULAR price and `sale_price` the amount actually charged.
+//
+// The 10% floor mirrors the storefront, which only shows its own strikethrough at >= 10%
+// off. Keeping the two in sync matters: Google crawls the landing page and compares it to
+// the feed, so claiming a sale the page does not display invites a price-mismatch
+// disapproval. Below the floor we keep the single-price shape (price = what you pay),
+// which is always consistent with the page.
+const SALE_MIN_DISCOUNT = 0.1;
+
+/** Split an item into the (regular, sale) pair Google expects.
+ * `salePrice` is null when the item is not on a qualifying sale, in which case `price`
+ * stays the current selling price exactly as before. */
+export function saleSplit(it: Pick<FeedItem, "price" | "compareAtPrice">): {
+  price: number;
+  salePrice: number | null;
+} {
+  const regular = it.compareAtPrice ?? 0;
+  if (!(regular > it.price) || it.price <= 0) return { price: it.price, salePrice: null };
+  const discount = (regular - it.price) / regular;
+  if (discount < SALE_MIN_DISCOUNT) return { price: it.price, salePrice: null };
+  return { price: regular, salePrice: it.price };
 }
 
 const CURRENCY = "CAD";
@@ -65,6 +90,7 @@ export function formatPrice(price: number): string {
 
 // ── Google Merchant feed (RSS 2.0 + g: namespace) ─────────────────────────
 function googleItemXml(it: FeedItem): string {
+  const { price, salePrice } = saleSplit(it);
   const g: string[] = [
     `<g:id>${escapeXml(it.id)}</g:id>`,
     `<title>${escapeXml(it.title)}</title>`,
@@ -73,10 +99,12 @@ function googleItemXml(it: FeedItem): string {
     `<g:image_link>${escapeXml(it.imageLink)}</g:image_link>`,
     ...it.additionalImageLinks.slice(0, 10).map((u) => `<g:additional_image_link>${escapeXml(u)}</g:additional_image_link>`),
     `<g:availability>${it.availability}</g:availability>`,
-    `<g:price>${escapeXml(formatPrice(it.price))}</g:price>`,
+    `<g:price>${escapeXml(formatPrice(price))}</g:price>`,
+    salePrice != null ? `<g:sale_price>${escapeXml(formatPrice(salePrice))}</g:sale_price>` : "",
     `<g:condition>${it.condition}</g:condition>`,
     `<g:brand>${escapeXml(it.brand)}</g:brand>`,
     it.color ? `<g:color>${escapeXml(it.color)}</g:color>` : "",
+    it.size ? `<g:size>${escapeXml(it.size)}</g:size>` : "",
     `<g:google_product_category>${it.googleCategoryId}</g:google_product_category>`,
     it.productType ? `<g:product_type>${escapeXml(it.productType)}</g:product_type>` : "",
     it.itemGroupId ? `<g:item_group_id>${escapeXml(it.itemGroupId)}</g:item_group_id>` : "",

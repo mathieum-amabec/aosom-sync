@@ -3,9 +3,9 @@ import { mapToGoogleCategory, DEFAULT_GOOGLE_CATEGORY } from "@/lib/feeds/google
 import {
   escapeXml, stripHtml, truncate, formatPrice,
   buildGoogleFeed, buildPinterestFeed, buildMetaFeed, buildMetaXmlFeed,
-  buildBingFeed, buildRedditFeed, type FeedItem,
+  buildBingFeed, buildRedditFeed, saleSplit, type FeedItem,
 } from "@/lib/feeds/feed";
-import { shopifyToFeedItems, stripImperialDimensions, stripPromoText, type ShopifyFeedProduct } from "@/lib/feeds/source";
+import { shopifyToFeedItems, stripImperialDimensions, stripPromoText, frenchifyColor, optionValue, type ShopifyFeedProduct } from "@/lib/feeds/source";
 
 describe("mapToGoogleCategory", () => {
   const cases: Array<[string, number]> = [
@@ -437,5 +437,132 @@ describe("buildMetaXmlFeed", () => {
     const block = xml.split("<item>").find((b) => b.includes("<g:id>PAT-001GY</g:id>"))!;
     expect(block).toContain("<g:price>129.99 CAD</g:price>");
     expect(block).not.toContain("<g:sale_price>");
+  });
+});
+
+// ── Google Shopping excellence: sale price + variant attributes ────────────
+
+describe("saleSplit", () => {
+  const at = (price: number, compareAtPrice: number | null) => saleSplit({ price, compareAtPrice });
+
+  it("splits price/sale_price when the discount reaches 10%", () => {
+    expect(at(79.99, 129.99)).toEqual({ price: 129.99, salePrice: 79.99 }); // 38% off
+    expect(at(90, 100)).toEqual({ price: 100, salePrice: 90 });             // exactly 10%
+  });
+  it("keeps a single price below the 10% floor (storefront shows no strikethrough there)", () => {
+    expect(at(95, 100)).toEqual({ price: 95, salePrice: null });   // 5% off
+    expect(at(99.99, 104.99)).toEqual({ price: 99.99, salePrice: null }); // ~4.8% off
+  });
+  it("keeps a single price when there is no real discount", () => {
+    expect(at(79.99, null)).toEqual({ price: 79.99, salePrice: null });
+    expect(at(79.99, 50)).toEqual({ price: 79.99, salePrice: null });   // compare < price
+    expect(at(79.99, 79.99)).toEqual({ price: 79.99, salePrice: null }); // equal
+  });
+  it("never divides by zero or emits a zero regular price", () => {
+    expect(at(0, 100)).toEqual({ price: 0, salePrice: null });
+    expect(at(50, 0)).toEqual({ price: 50, salePrice: null });
+  });
+});
+
+describe("frenchifyColor", () => {
+  const cases: Array<[string, string]> = [
+    ["Black", "Noir"], ["White", "Blanc"], ["Grey", "Gris"], ["Gray", "Gris"],
+    ["Rustic Brown", "Rustique Brun"],
+    ["Charcoal Grey", "Anthracite Gris"],
+    ["Multi Colour", "Multicolore"],           // "Colour" maps to empty and is dropped
+    ["Natural Finish", "Naturel"],             // "Finish" maps to empty
+    ["Green, Black", "Vert, Noir"],            // compound, comma-separated
+    ["Brown, Green, White", "Brun, Vert, Blanc"],
+    ["White Wood Grain", "Blanc Bois"],
+  ];
+  for (const [input, expected] of cases) {
+    it(`maps "${input}" → "${expected}"`, () => expect(frenchifyColor(input)).toBe(expected));
+  }
+  it("passes unknown values through unchanged", () => {
+    expect(frenchifyColor("Gris foncé")).toBe("Gris foncé");
+    expect(frenchifyColor("Chêne clair")).toBe("Chêne clair");
+  });
+  it("returns null for empty input", () => {
+    expect(frenchifyColor("")).toBeNull();
+    expect(frenchifyColor(null)).toBeNull();
+    expect(frenchifyColor(undefined)).toBeNull();
+  });
+});
+
+// Variant-attribute fixture: real option shapes from the live catalog (Couleur + Taille).
+const OPT_PUBLISHED = "2020-01-01T00:00:00-05:00";
+const optionProducts: ShopifyFeedProduct[] = [
+  {
+    id: 777, title: "Abri de jardin", handle: "abri", vendor: "Ameublo Direct", status: "active",
+    published_at: OPT_PUBLISHED, product_type: "Patio & Garden > Sheds",
+    images: [{ src: "https://img/a.jpg" }],
+    options: [{ name: "Couleur", position: 1 }, { name: "Taille", position: 2 }],
+    variants: [
+      { sku: "SHD-1GN", price: "199.99", option1: "Vert", option2: "7' x 4' x 6'", inventory_management: null },
+      { sku: "SHD-2YL", price: "199.99", option1: "Earthy Yellow", option2: "7x4ft", inventory_management: null },
+    ],
+  },
+  {
+    // Single-variant product: Shopify's "Title / Default Title" placeholder carries nothing.
+    id: 778, title: "Table basse", handle: "table", vendor: "Ameublo Direct", status: "active",
+    published_at: OPT_PUBLISHED, product_type: "Home Furnishings > Tables",
+    images: [{ src: "https://img/t.jpg" }],
+    options: [{ name: "Title", position: 1 }],
+    variants: [{ sku: "TBL-1", price: "89.99", option1: "Default Title", inventory_management: null }],
+  },
+];
+
+describe("optionValue", () => {
+  const p = optionProducts[0];
+  it("resolves a value through the option's position", () => {
+    expect(optionValue(p, p.variants![0], /^couleur$/i)).toBe("Vert");
+    expect(optionValue(p, p.variants![0], /^taille$/i)).toBe("7' x 4' x 6'");
+  });
+  it("returns null for an option the product does not have", () => {
+    expect(optionValue(p, p.variants![0], /^mati[eè]re$/i)).toBeNull();
+  });
+  it("treats Shopify's Default Title placeholder as absent", () => {
+    const q = optionProducts[1];
+    expect(optionValue(q, q.variants![0], /^title$/i)).toBeNull();
+  });
+});
+
+describe("shopifyToFeedItems — colour and size from Shopify options", () => {
+  const items = shopifyToFeedItems(optionProducts);
+  it("prefers the Couleur option over the SKU suffix and translates it", () => {
+    expect(items.find((i) => i.id === "SHD-1GN")!.color).toBe("Vert");
+    expect(items.find((i) => i.id === "SHD-2YL")!.color).toBe("Terreux Jaune"); // was "Earthy Yellow"
+  });
+  it("carries the Taille option through as size", () => {
+    expect(items.find((i) => i.id === "SHD-1GN")!.size).toBe("7' x 4' x 6'");
+    expect(items.find((i) => i.id === "SHD-2YL")!.size).toBe("7x4ft");
+  });
+  it("leaves size null on a single-variant product", () => {
+    expect(items.find((i) => i.id === "TBL-1")!.size).toBeNull();
+  });
+});
+
+describe("buildGoogleFeed — sale price and variant attributes", () => {
+  const items = shopifyToFeedItems([...saleProducts, ...optionProducts]);
+  const xml = buildGoogleFeed(items, { title: "G", link: "https://x", description: "d" });
+  const blockFor = (id: string) => xml.split("<item>").find((b) => b.includes(`<g:id>${id}</g:id>`))!;
+
+  it("emits g:price = regular and g:sale_price = charged for a qualifying discount", () => {
+    const b = blockFor("UMB-1");
+    expect(b).toContain("<g:price>129.99 CAD</g:price>");
+    expect(b).toContain("<g:sale_price>79.99 CAD</g:sale_price>");
+  });
+  it("omits g:sale_price when compare_at does not exceed the price", () => {
+    const b = blockFor("UMB-2");
+    expect(b).toContain("<g:price>79.99 CAD</g:price>");
+    expect(b).not.toContain("<g:sale_price>");
+  });
+  it("emits g:color and g:size from the Shopify options", () => {
+    const b = blockFor("SHD-2YL");
+    expect(b).toContain("<g:color>Terreux Jaune</g:color>");
+    expect(b).toContain("<g:size>7x4ft</g:size>");
+  });
+  it("omits g:size when the product has no size option", () => {
+    expect(blockFor("TBL-1")).not.toContain("<g:size>");
   });
 });

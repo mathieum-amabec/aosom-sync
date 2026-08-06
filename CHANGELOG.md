@@ -2,6 +2,38 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.55.0] - 2026-08-06
+
+### Added — sale prices and variant attributes in the Google feed
+
+- **`g:sale_price`** — Google only draws a strikethrough "was" price when the feed splits
+  the pair, so a discounted item now ships `g:price` = the regular price and
+  `g:sale_price` = what the shopper actually pays. 32 catalog items qualify today.
+- The split applies only at **10% off or more**, mirroring the storefront, which shows its
+  own strikethrough at the same threshold. Google crawls the landing page and compares it
+  to the feed; claiming a sale the page does not display invites a price-mismatch
+  disapproval. The 2 items discounted below the floor keep the single-price shape.
+- **`g:size`** — new, from the Shopify "Taille" option. 2106 of 2184 variants (96%).
+- **`g:color`** now prefers the Shopify "Couleur" option over the 2-letter SKU suffix,
+  which lifts coverage from 80% to **97%** and distinguishes "Gris foncé" from "Gris".
+  English option values inherited from the supplier ("Rustic Brown", "Charcoal Grey",
+  "Multi Colour") are translated token by token for the French market; unknown values pass
+  through unchanged rather than being dropped.
+
+### Added — `mpn` in the product-page structured data
+
+- The PDP JSON-LD (`snippets/agentic-structured-data.liquid`) now carries `mpn` alongside
+  `sku`, so the page declares the same brand + MPN identifier pair the Google feed does.
+  Applied to the working draft theme `161090928745`; the repo mirror is re-synced from it.
+
+### Not shipped, and why
+
+- **`g:sale_price_effective_date`** is omitted. Shopify's `compare_at_price` carries no
+  start or end timestamp, so there is no schedule to publish — emitting a window would mean
+  inventing dates.
+- **`g:material`** is omitted. The catalog has no Material option and no material metafield;
+  parsing it out of description prose reached 1% coverage with visible bleed between fields.
+
 ## [0.5.54.40] - 2026-08-06
 
 ### Fixed — strip promotional shipping claims from every shopping feed

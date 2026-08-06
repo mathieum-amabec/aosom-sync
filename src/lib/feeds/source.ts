@@ -13,6 +13,10 @@ export interface ShopifyFeedVariant {
   inventory_quantity?: number | null;
   inventory_management?: string | null;
   title?: string | null;
+  /** Shopify variant option values, positionally aligned with product.options. */
+  option1?: string | null;
+  option2?: string | null;
+  option3?: string | null;
 }
 export interface ShopifyFeedProduct {
   id: number | string;
@@ -22,6 +26,9 @@ export interface ShopifyFeedProduct {
   status: string;
   product_type?: string | null;
   body_html?: string | null;
+  /** Option definitions (name + 1-based position). The catalog only ever uses
+   * "Couleur" and "Taille"; `position` tells us which variant.optionN to read. */
+  options?: Array<{ name?: string | null; position?: number | null }>;
   /** Shopify Online Store publish timestamp (ISO) — null when the product is active but
    * NOT published to the storefront. Such a product's /products/{handle} page 404s, so it
    * must be excluded from the feed (Google Merchant: "Product page unavailable"). */
@@ -71,6 +78,63 @@ const PROMO_SHIPPING =
 export function stripPromoText(s: string): string {
   return s.replace(PROMO_SHIPPING, " ").replace(/\s{2,}/g, " ").trim();
 }
+
+// The catalog's "Couleur" option is mostly French already, but ~19 of the 61 distinct values
+// arrived from Aosom in English ("Rustic Brown", "Charcoal Grey", "Multi Colour"). The feed
+// targets a Quebec French audience, so map what we can and pass through anything unknown
+// unchanged — a slightly-off colour is far better than a dropped attribute.
+//
+// Compound values ("Green, Black", "Brown, Green, White") are translated part by part.
+const COLOR_EN_FR: Record<string, string> = {
+  black: "Noir", white: "Blanc", grey: "Gris", gray: "Gris", green: "Vert",
+  blue: "Bleu", red: "Rouge", yellow: "Jaune", brown: "Brun", beige: "Beige",
+  pink: "Rose", purple: "Violet", orange: "Orange", cream: "Crème", ivory: "Ivoire",
+  navy: "Bleu marine", silver: "Argent", gold: "Or", natural: "Naturel", teak: "Teck",
+  charcoal: "Anthracite", wood: "Bois", multi: "Multicolore", colour: "", color: "",
+  rustic: "Rustique", earthy: "Terreux", finish: "", grain: "",
+};
+
+/** Translate a Shopify colour option value to French, part by part.
+ * "Rustic Brown" → "Brun rustique" is out of scope — we keep word order and only swap
+ * known tokens, so "Rustic Brown" → "Rustique Brun". Unknown tokens pass through. */
+export function frenchifyColor(value: string | null | undefined): string | null {
+  const raw = (value ?? "").trim();
+  if (!raw) return null;
+  const parts = raw.split(/\s*,\s*/).map((part) =>
+    part
+      .split(/\s+/)
+      .map((word) => {
+        const hit = COLOR_EN_FR[word.toLowerCase().replace(/[^a-z]/g, "")];
+        return hit === undefined ? word : hit;
+      })
+      .filter(Boolean)
+      .join(" ")
+      .trim(),
+  );
+  const out = parts.filter(Boolean).join(", ").replace(/\s{2,}/g, " ").trim();
+  return out || null;
+}
+
+/** Read a variant's value for the product option whose name matches `match`.
+ * Shopify stores option values positionally (variant.option1..3) against
+ * product.options[].position, so we resolve the position first. */
+export function optionValue(
+  product: ShopifyFeedProduct,
+  variant: ShopifyFeedVariant,
+  match: RegExp,
+): string | null {
+  const opt = (product.options ?? []).find((o) => match.test((o?.name ?? "").trim()));
+  const pos = opt?.position;
+  if (pos !== 1 && pos !== 2 && pos !== 3) return null;
+  const value = pos === 1 ? variant.option1 : pos === 2 ? variant.option2 : variant.option3;
+  const trimmed = (value ?? "").trim();
+  // Shopify's placeholder for a single-variant product carries no information.
+  if (!trimmed || trimmed === "Default Title") return null;
+  return trimmed;
+}
+
+const COLOUR_OPTION = /^(couleur|color|colour)$/i;
+const SIZE_OPTION = /^(taille|size|dimension|dimensions)$/i;
 
 // Aosom variant "size" options carry English/imperial measurements that leak into the FR
 // title as a trailing `… - Couleur / <dims>` suffix, e.g. `42.1" x 24.6" x 17.3"`,
@@ -174,9 +238,15 @@ export function shopifyToFeedItems(
         availability,
         condition: "new",
         brand,
-        // FR colour from the SKU suffix (COLOR_MAP), e.g. ...GY → "Gris". null when the
-        // SKU has no recognised colour suffix. Drives <g:color> on the Google feed.
-        color: parseSku(id).color,
+        // Colour for <g:color>. The Shopify "Couleur" option is the richer source (it
+        // distinguishes "Gris foncé" from "Gris", which the 2-letter SKU suffix cannot), so
+        // prefer it and fall back to the SKU suffix (COLOR_MAP) when the product has no
+        // colour option. English option values are mapped to French for the FR market.
+        color: frenchifyColor(optionValue(p, v, COLOUR_OPTION)) ?? parseSku(id).color,
+        // <g:size> from the Shopify "Taille" option. Values are Aosom's imperial dimension
+        // strings; Google accepts free-form size text, and having it lets Shopping tell
+        // same-product variants apart in the same item_group.
+        size: optionValue(p, v, SIZE_OPTION),
         productType: p.product_type ?? "",
         googleCategoryId: cat.id,
       });
@@ -306,7 +376,7 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
   let pageInfo: string | null = null;
   let pages = 0;
   do {
-    const params = new URLSearchParams({ limit: "250", fields: "id,title,handle,vendor,status,product_type,body_html,images,variants,published_at" });
+    const params = new URLSearchParams({ limit: "250", fields: "id,title,handle,vendor,status,product_type,body_html,images,variants,published_at,options" });
     if (pageInfo) params.set("page_info", pageInfo);
     const res = await fetchWithRetry(`${base}/products.json?${params}`, token);
     if (!res.ok) throw new Error(`Shopify products fetch failed: ${res.status}`);
