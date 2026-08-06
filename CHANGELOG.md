@@ -2,6 +2,29 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.39] - 2026-08-05
+
+### Added — two read-only diagnostics for the Google Merchant "Product page unavailable" flags
+
+- `scripts/google-feed-handle-diagnostic.mjs` answers whether the feed's product URLs
+  drift from the storefront's real handles. It rebuilds the feed items exactly as
+  `src/lib/feeds/source.ts` emits them, compares each one against Turso's
+  `products.shopify_handle`, and HTTP-checks a live sample. Verdict on the 267 flagged
+  products: they are stale Merchant Center ghosts, not broken pages. The feed reads
+  `p.handle` live from the Shopify Admin API and never touches `shopify_handle`, so
+  handle drift is impossible by construction — no code fix was needed.
+- `scripts/google-feed-url-sweep.mjs` is the wider net: it HTTP-checks every current
+  feed URL against the live storefront and reports the status breakdown.
+- Both scripts write nothing, anywhere. They pace Shopify Admin calls at 550ms (the
+  ≤2 req/s ceiling) and retry storefront 429s with `Retry-After` backoff, keeping any
+  still-throttled URL in its own bucket. That last part matters: a rate-limited sweep
+  would otherwise report throttling as mass page-unavailability and send you chasing a
+  bug that isn't there. Requests carry a 20s timeout so one hung connection can't stall
+  a 1000-URL run.
+
+Operator tooling only — `scripts/` is outside the Next build, so nothing about the
+running app changes.
+
 ## [0.5.54.38] - 2026-07-21
 
 ### Changed — raise the assistant LLM budget-pool default 200k → 500k

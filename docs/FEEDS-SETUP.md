@@ -130,3 +130,34 @@ done
 - **Product count sanity check:** all three feeds should report the same count
   (966 on 2026-06-07). A large divergence between feeds indicates a
   generation problem in one format.
+
+## Diagnostics — "Product page unavailable" (Google Merchant)
+
+Two read-only scripts investigate GMC flagging feed products as unavailable. Neither
+writes anywhere; both need `.env.local` (Shopify + Turso) and run under x64 Node.
+
+- **`scripts/google-feed-url-sweep.mjs`** — HTTP-checks *every* current feed URL against
+  the live storefront and prints the status breakdown. This is the ground truth.
+- **`scripts/google-feed-handle-diagnostic.mjs`** — tests whether feed URLs drift from the
+  storefront's real handles: rebuilds the feed items the way `src/lib/feeds/source.ts`
+  does, compares each against Turso's `products.shopify_handle`, then HTTP-checks a
+  sample of up to 40.
+
+```bash
+node-x64 scripts/google-feed-url-sweep.mjs
+node-x64 scripts/google-feed-handle-diagnostic.mjs
+```
+
+**Read the 429 line before trusting a run.** The storefront rate-limits aggressive
+sweeps. Both scripts retry 429s with `Retry-After` backoff and report anything still
+throttled in a separate bucket — a throttled URL is *not* a dead page. If that bucket is
+non-empty, the run is incomplete: re-run later or raise `PACING_MS`.
+
+**Handle drift is impossible by construction**, so rule it out before chasing it:
+`source.ts` builds every product link from `p.handle` returned live by the Shopify Admin
+API and never reads `products.shopify_handle`. The 2026-07-05 investigation of 267 flagged
+products found them all to be stale Merchant Center ghosts, not broken pages.
+
+The one real staleness window: feeds are cached 24h (`revalidate: 86400`), so renaming a
+handle in Shopify leaves dead URLs in the feed for up to a day. `POST /api/revalidate`
+(`revalidateTag('feeds')`) closes it — run it after any handle rename.
