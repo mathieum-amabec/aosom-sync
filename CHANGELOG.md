@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.54.40] - 2026-08-06
+
+### Fixed — strip promotional shipping claims from every shopping feed
+
+- Google prohibits promotional text in the `title` and `description` attributes, naming
+  "free shipping" as its example. 18 live Google-feed descriptions carried a
+  "Livraison gratuite partout au Canada" tail (written into the Shopify copy at import
+  time), making those offers non-compliant even though their price and link are correct.
+  `stripPromoText` now removes the claim in the feed layer, so all seven feeds (Google,
+  Bing, Pinterest FR/EN, Meta, Meta-XML, Reddit) ship compliant copy.
+- Scrubbed in the feed only, never in Shopify: the storefront may legitimately advertise
+  free shipping, only the feed must not.
+- Matched conservatively — the trailing qualifier is an explicit word list, never a greedy
+  run. Verified against all 2188 live descriptions: 18/18 cleaned, 0 residual, and 0 of the
+  2170 clean descriptions altered. Legitimate copy such as "Livraison en 3 à 5 jours
+  ouvrables" or "Frais de livraison calculés à la caisse" survives untouched, and French
+  spacing before `:` / `!` / `?` is preserved. (`src/lib/feeds/source.ts`, +16 tests.)
+
 ## [0.5.54.39] - 2026-08-05
 
 ### Added — two read-only diagnostics for the Google Merchant "Product page unavailable" flags
