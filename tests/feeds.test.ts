@@ -5,7 +5,7 @@ import {
   buildGoogleFeed, buildPinterestFeed, buildMetaFeed, buildMetaXmlFeed,
   buildBingFeed, buildRedditFeed, type FeedItem,
 } from "@/lib/feeds/feed";
-import { shopifyToFeedItems, stripImperialDimensions, type ShopifyFeedProduct } from "@/lib/feeds/source";
+import { shopifyToFeedItems, stripImperialDimensions, stripPromoText, type ShopifyFeedProduct } from "@/lib/feeds/source";
 
 describe("mapToGoogleCategory", () => {
   const cases: Array<[string, number]> = [
@@ -87,6 +87,45 @@ describe("stripImperialDimensions", () => {
   for (const [input, expected] of strips) {
     it(`strips: ${input}`, () => expect(stripImperialDimensions(input)).toBe(expected));
   }
+
+  describe("stripPromoText", () => {
+    // Every phrasing below was pulled verbatim from a live Google-feed description on
+    // 2026-08-06 (18 items carried one). Google prohibits promotional text in title and
+    // description, so none of these may survive into the feed.
+    const strips: Array<[string, string]> = [
+      ["Instructions incluses pour un montage simple Livraison gratuite partout au Canada!", "Instructions incluses pour un montage simple"],
+      ["…zone de plantation : 168 x 85 x 30 cm Livraison gratuite partout au Canada Matériaux : Acier galvanisé", "…zone de plantation : 168 x 85 x 30 cm Matériaux : Acier galvanisé"],
+      ["Table 73 x 65 x 32 cm Livraison gratuite partout au Canada. Assemblage requis.", "Table 73 x 65 x 32 cm Assemblage requis."],
+      ["Assemblage requis. Livraison gratuite partout au Canada.", "Assemblage requis."],
+      ["espace piscine Livraison gratuite au Canada. Assemblage requis.", "espace piscine Assemblage requis."],
+      ["idéale pour les patios et jardins Livraison gratuite - Partout au Canada Spécifications techniques :", "idéale pour les patios et jardins Spécifications techniques :"],
+      ["surface stable (béton, bois) Livraison gratuite disponible. Créez votre oasis", "surface stable (béton, bois) Créez votre oasis"],
+      ["à longueur d'année Livraison gratuite partout au Canada ! Commencez votre jardin", "à longueur d'année Commencez votre jardin"],
+      // English equivalent — the EN feed (pinterest-en) must be covered too.
+      ["Assembly required. Free shipping across Canada!", "Assembly required."],
+      ["Sturdy steel frame Free shipping available. Built to last", "Sturdy steel frame Built to last"],
+    ];
+    for (const [input, expected] of strips) {
+      it(`strips: ${input.slice(0, 60)}…`, () => expect(stripPromoText(input)).toBe(expected));
+    }
+
+    // Conservative: legitimate copy that merely mentions delivery must survive intact.
+    const keeps = [
+      "Livraison en 3 à 5 jours ouvrables",              // delivery info, not a free-shipping claim
+      "Frais de livraison calculés à la caisse",          // explicitly NOT free
+      "Poignée de transport gratuite incluse",            // "gratuite" unrelated to shipping
+      "Shipping weight: 12 kg",                           // spec line, not a claim
+      "Assemblage requis. Instructions incluses.",        // no promo at all
+    ];
+    for (const input of keeps) {
+      it(`keeps: ${input}`, () => expect(stripPromoText(input)).toBe(input));
+    }
+
+    it("is idempotent", () => {
+      const once = stripPromoText("Montage simple Livraison gratuite partout au Canada!");
+      expect(stripPromoText(once)).toBe(once);
+    });
+  });
 
   // Conservative: must NOT strip when there's no unambiguous dimension block.
   const keeps = [
