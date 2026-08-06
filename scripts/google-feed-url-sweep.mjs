@@ -35,25 +35,49 @@ do {
 
 console.log(`Feed products to check: ${feed.length}\n`);
 
+const PACING_MS = 320;
+const MAX_429_RETRIES = 5;
+
+// A 429 is the storefront throttling US — it is NOT "product page unavailable".
+// Counting it as one would manufacture exactly the false positive this script
+// exists to rule out (an 8-way parallel burst once returned 1055/1096 as 429).
+// So: retry on 429 honouring Retry-After, and keep anything still throttled
+// after the retries in its own bucket, out of the non-200 tally.
+async function check(handle) {
+  for (let attempt = 0; ; attempt++) {
+    let r;
+    try {
+      const resp = await fetch(`${STOREFRONT}/products/${handle}`, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(20000), headers: { "User-Agent": "feed-diagnostic/1.0" } });
+      r = { status: resp.status, loc: resp.headers.get("location") || "", retryAfter: parseFloat(resp.headers.get("Retry-After") || "") };
+    } catch (e) { return { status: 0, loc: `ERR ${e.message}` }; }
+    if (r.status !== 429 || attempt >= MAX_429_RETRIES) return r;
+    const waitSec = Number.isNaN(r.retryAfter) ? Math.min(2 ** attempt, 30) : Math.min(r.retryAfter, 60);
+    await sleep(waitSec * 1000);
+  }
+}
+
 const tally = {};
 const nonOk = [];
+const throttled = [];
 let i = 0;
 for (const f of feed) {
   i++;
-  let r;
-  try {
-    const resp = await fetch(`${STOREFRONT}/products/${f.handle}`, { method: "GET", redirect: "manual", headers: { "User-Agent": "feed-diagnostic/1.0" } });
-    r = { status: resp.status, loc: resp.headers.get("location") || "" };
-  } catch (e) { r = { status: 0, loc: `ERR ${e.message}` }; }
+  const r = await check(f.handle);
   tally[r.status] = (tally[r.status] || 0) + 1;
-  if (r.status !== 200) nonOk.push({ ...f, ...r });
+  if (r.status === 429) throttled.push({ ...f, ...r });
+  else if (r.status !== 200) nonOk.push({ ...f, ...r });
   if (i % 100 === 0) console.log(`  ...${i}/${feed.length}  running tally ${JSON.stringify(tally)}`);
-  await sleep(320);
+  await sleep(PACING_MS);
 }
 
 console.log(`\n=== RESULT ===`);
 console.log(`status tally: ${JSON.stringify(tally)}`);
-console.log(`non-200 count: ${nonOk.length}`);
+console.log(`non-200 count (throttled excluded): ${nonOk.length}`);
 for (const n of nonOk.slice(0, 60)) console.log(`  [${n.status}] ${n.handle}  ${n.loc ? "→ " + n.loc.slice(0, 70) : ""}`);
 if (nonOk.length > 60) console.log(`  ...and ${nonOk.length - 60} more`);
+if (throttled.length) {
+  console.log(`\n!! ${throttled.length} URLs still rate-limited (429) after ${MAX_429_RETRIES} retries.`);
+  console.log(`   These are NOT dead pages — the sweep above is INCOMPLETE. Re-run later,`);
+  console.log(`   or raise PACING_MS (currently ${PACING_MS}ms) and try again.`);
+}
 process.exit(0);

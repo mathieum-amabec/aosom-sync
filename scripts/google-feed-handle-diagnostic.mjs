@@ -50,7 +50,8 @@ console.log(`\n[Shopify] pages=${pages}  active=${activeCount}  excluded(unpubli
 
 // ── 2) Load Turso handles ───────────────────────────────────────────────────
 const pcols = new Set((await db.execute(`PRAGMA table_info(products)`)).rows.map((r) => String(r.name)));
-if (!pcols.has("shopify_handle")) { console.log("Turso products.shopify_handle column MISSING"); }
+// Bail here rather than let the SELECT below throw an opaque SQL error.
+if (!pcols.has("shopify_handle")) { console.log("Turso products.shopify_handle column MISSING — cannot compare handle sources."); process.exit(1); }
 const trows = (await db.execute(`SELECT sku, shopify_product_id, shopify_handle FROM products`)).rows;
 const tursoByPid = new Map(), tursoBySku = new Map();
 let tursoWithHandle = 0;
@@ -86,11 +87,21 @@ for (const e of examples) {
 }
 
 // ── 4) HTTP-check a sample of the ACTUAL feed URLs (ground truth) ────────────
+// A 429 is the storefront throttling US, not a dead product page — retry it
+// (honouring Retry-After) so a throttled run can never be read as "page unavailable".
+const MAX_429_RETRIES = 5;
 async function check(url) {
-  try {
-    const res = await fetch(url, { method: "GET", redirect: "manual", headers: { "User-Agent": "Mozilla/5.0 (compatible; feed-diagnostic/1.0)" } });
-    return { status: res.status, location: res.headers.get("location") || "" };
-  } catch (e) { return { status: 0, location: `ERR ${e.message}` }; }
+  for (let attempt = 0; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, { method: "GET", redirect: "manual", signal: AbortSignal.timeout(20000), headers: { "User-Agent": "Mozilla/5.0 (compatible; feed-diagnostic/1.0)" } });
+    } catch (e) { return { status: 0, location: `ERR ${e.message}` }; }
+    if (res.status !== 429 || attempt >= MAX_429_RETRIES) {
+      return { status: res.status, location: res.headers.get("location") || "" };
+    }
+    const retryAfter = parseFloat(res.headers.get("Retry-After") || "");
+    await sleep((Number.isNaN(retryAfter) ? Math.min(2 ** attempt, 30) : Math.min(retryAfter, 60)) * 1000);
+  }
 }
 // Sample: up to 40 feed products, prioritising mismatches, then a spread of the rest.
 const sample = [];
@@ -102,11 +113,14 @@ for (let i = 0; i < feedProducts.length && sample.length < 40; i += Math.max(1, 
 console.log(`\n=== LIVE STOREFRONT HTTP CHECK (sample of ${sample.length} current feed URLs) ===`);
 const tally = {};
 const bad = [];
+let throttledCount = 0;
 for (const s of sample) {
   const url = `${STOREFRONT}/products/${s.handle}`;
   const r = await check(url);
   tally[r.status] = (tally[r.status] || 0) + 1;
-  if (r.status !== 200) {
+  if (r.status === 429) {
+    throttledCount++; // still throttled after the retries — not a dead page
+  } else if (r.status !== 200) {
     let alt = null;
     if (s.turso && s.turso !== s.handle) { await sleep(400); alt = await check(`${STOREFRONT}/products/${s.turso}`); }
     bad.push({ title: s.title.slice(0, 40), handle: s.handle, status: r.status, location: r.location.slice(0, 60), turso: s.turso, altStatus: alt?.status });
@@ -120,4 +134,9 @@ if (bad.length) {
 } else {
   console.log(`  all sampled current feed URLs returned 200 ✓`);
 }
+if (throttledCount) {
+  console.log(`  !! ${throttledCount} URLs still rate-limited (429) after ${MAX_429_RETRIES} retries —`);
+  console.log(`     NOT dead pages; that slice of the sample is inconclusive. Re-run later.`);
+}
 console.log(`\nDONE (read-only — nothing written).`);
+process.exit(0); // libsql client is never closed; don't let it hold the event loop
