@@ -50,6 +50,28 @@ export function scrubSupplier(s: string): string {
   return s.replace(SUPPLIER_GLOBAL, HOUSE_BRAND).replace(/\s{2,}/g, " ").trim();
 }
 
+// Google's title and description guidelines prohibit promotional text — "free shipping" is
+// the named example. Product copy generated at import time sometimes ends up with a
+// "Livraison gratuite partout au Canada" tail (18 live descriptions as of 2026-08-06), which
+// makes the offer non-compliant even though the price and link are fine. Strip it in the feed
+// layer rather than rewriting Shopify: the storefront may legitimately advertise free
+// shipping, only the feed must not.
+//
+// Matched conservatively — the trailing qualifier is an explicit word list, never a greedy
+// run — so a real sentence is never swallowed. Covers the observed variants:
+//   "Livraison gratuite partout au Canada" / "… au Canada." / "… au Canada!" / "… au Canada !"
+//   "Livraison gratuite - Partout au Canada" / "Livraison gratuite disponible."
+// plus the English equivalent for the EN feed.
+const PROMO_SHIPPING =
+  /\s*(?:livraison\s+gratuite|free\s+shipping)(?:\s*[-–—]\s*)?(?:\s*(?:partout|everywhere))?(?:\s*(?:au|en|across|in|to)\s+canada)?(?:\s*(?:disponible|available))?\s*[!.]*\s*/gi;
+
+/** Remove promotional shipping claims (Google prohibits them in title/description).
+ * Only whitespace is normalised afterwards — no punctuation tightening, because French
+ * typography puts a space before `:`, `!` and `?` and collapsing it would corrupt the copy. */
+export function stripPromoText(s: string): string {
+  return s.replace(PROMO_SHIPPING, " ").replace(/\s{2,}/g, " ").trim();
+}
+
 // Aosom variant "size" options carry English/imperial measurements that leak into the FR
 // title as a trailing `… - Couleur / <dims>` suffix, e.g. `42.1" x 24.6" x 17.3"`,
 // `15.7" W x 11.8" D x 19.3" H` (spaces optional before the L/W/D/H letter), an adjustable
@@ -116,7 +138,7 @@ export function shopifyToFeedItems(
     const images = (p.images ?? []).map((i) => i.src).filter(Boolean);
     if (images.length === 0) continue;            // Google/Pinterest/Meta require an image
     const link = `${STOREFRONT_BASE_URL}/products/${encodeURIComponent(p.handle)}`;
-    const description = truncate(scrubSupplier(stripHtml(p.body_html ?? "")), DESCRIPTION_MAX);
+    const description = truncate(stripPromoText(scrubSupplier(stripHtml(p.body_html ?? ""))), DESCRIPTION_MAX);
     const brand = resolveBrand(p.vendor);
     const cat = mapToGoogleCategory(p.product_type);
     const variants = (p.variants ?? []).filter((v) => v.sku && String(v.sku).trim() !== "");
@@ -142,7 +164,7 @@ export function shopifyToFeedItems(
       items.push({
         id,
         itemGroupId: multi ? String(p.id) : null,
-        title: truncate(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`)), 150),
+        title: truncate(stripPromoText(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`))), 150),
         description,
         link,
         imageLink: images[0],
