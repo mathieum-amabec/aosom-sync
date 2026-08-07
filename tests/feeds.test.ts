@@ -5,7 +5,7 @@ import {
   buildGoogleFeed, buildPinterestFeed, buildMetaFeed, buildMetaXmlFeed,
   buildBingFeed, buildRedditFeed, saleSplit, salePriceEffectiveDate, type FeedItem,
 } from "@/lib/feeds/feed";
-import { shopifyToFeedItems, stripImperialDimensions, stripPromoText, frenchifyColor, optionValue, extractMaterial, type ShopifyFeedProduct } from "@/lib/feeds/source";
+import { shopifyToFeedItems, stripImperialDimensions, stripPromoText, frenchifyColor, optionValue, materialFromMetafields, MATERIAL_METAFIELD_KEYS, type ShopifyFeedProduct } from "@/lib/feeds/source";
 
 describe("mapToGoogleCategory", () => {
   const cases: Array<[string, number]> = [
@@ -569,56 +569,50 @@ describe("buildGoogleFeed — sale price and variant attributes", () => {
 
 // ── g:material and g:sale_price_effective_date ────────────────────────────
 
-describe("extractMaterial", () => {
-  const cases: Array<[string, string | null]> = [
-    ["Structure en acier galvanisé résistant aux intempéries", "acier galvanisé"],
-    ["Cadre en acier enduit de poudre", "acier"],
-    ["Plateau en bois d'ingénierie (MDF)", "bois d'ingénierie"],
-    ["Toile en polyester imperméable 180g", "polyester"],
-    ["Assise en rotin synthétique tressé main", "rotin synthétique"],
-    ["Dessus en verre trempé de 5 mm", "verre trempé"],
-    ["Structure en aluminium léger", "aluminium"],
-  ];
-  for (const [input, expected] of cases) {
-    it(`reads "${expected}" from: ${input.slice(0, 40)}…`, () => expect(extractMaterial(input)).toBe(expected));
-  }
-
-  it("prefers the most specific material when several are named", () => {
-    // "acier galvanisé" must win over the bare "acier" that it contains.
-    expect(extractMaterial("Acier galvanisé et nylon")).toBe("acier galvanisé");
+describe("materialFromMetafields", () => {
+  it("reads the first recognised key, in priority order", () => {
+    expect(materialFromMetafields({ "custom.material": "Acier galvanisé" })).toBe("Acier galvanisé");
+    expect(materialFromMetafields({ "custom.matiere": "Rotin synthétique" })).toBe("Rotin synthétique");
+    expect(materialFromMetafields({ "mm-google-shopping.material": "Bois" })).toBe("Bois");
   });
-
-  it("matches on word boundaries, not substrings", () => {
-    // Every one of these contains a material name as a substring and must NOT match.
-    for (const s of ["offert", "fermé", "différent", "transfert", "verrouillable", "boisson", "métallurgie"]) {
-      expect(extractMaterial(s)).toBeNull();
-    }
+  it("prefers custom.material when several are set", () => {
+    expect(materialFromMetafields({ "custom.matiere": "Bois", "custom.material": "Acier" })).toBe("Acier");
   });
-
-  it("is accent- and case-insensitive", () => {
-    expect(extractMaterial("ACIER GALVANISE")).toBe("acier galvanisé");
-    expect(extractMaterial("Polyethylene haute densite")).toBe("polyéthylène");
+  it("trims surrounding whitespace", () => {
+    expect(materialFromMetafields({ "custom.material": "  Aluminium  " })).toBe("Aluminium");
   });
-
-  it("returns null for empty or material-free copy", () => {
-    expect(extractMaterial("")).toBeNull();
-    expect(extractMaterial(null)).toBeNull();
-    expect(extractMaterial(undefined)).toBeNull();
-    expect(extractMaterial("Assemblage requis. Instructions incluses.")).toBeNull();
+  it("omits rather than invents — blank, missing and unrelated keys all yield null", () => {
+    expect(materialFromMetafields({ "custom.material": "" })).toBeNull();
+    expect(materialFromMetafields({ "custom.material": "   " })).toBeNull();
+    expect(materialFromMetafields({ "custom.title_en": "Steel shed" })).toBeNull();
+    expect(materialFromMetafields({})).toBeNull();
+    expect(materialFromMetafields(null)).toBeNull();
+    expect(materialFromMetafields(undefined)).toBeNull();
+  });
+  it("never derives a value from prose", () => {
+    // The description names a material; the attribute must still be absent without a metafield.
+    expect(materialFromMetafields({ "custom.body": "Structure en acier galvanisé" })).toBeNull();
+  });
+  it("exposes its key list so the feed and the runbook cannot drift", () => {
+    expect(MATERIAL_METAFIELD_KEYS[0]).toBe("custom.material");
+    expect(MATERIAL_METAFIELD_KEYS).toContain("mm-google-shopping.material");
   });
 });
 
 describe("salePriceEffectiveDate", () => {
   const now = new Date("2026-08-06T12:00:00.000Z");
-  it("emits an ISO 8601 interval anchored on the given instant", () => {
-    expect(salePriceEffectiveDate(now)).toBe("2026-08-06T12:00:00Z/2026-08-13T12:00:00Z");
+  it("emits a 30-day ISO 8601 interval anchored on the given instant", () => {
+    expect(salePriceEffectiveDate(now)).toBe("2026-08-06T12:00:00Z/2026-09-05T12:00:00Z");
   });
   it("drops milliseconds (Google rejects sub-second precision)", () => {
     expect(salePriceEffectiveDate(new Date("2026-08-06T12:00:00.456Z"))).not.toContain(".456");
   });
-  it("spans exactly 7 days", () => {
+  it("spans exactly 30 days", () => {
     const [start, end] = salePriceEffectiveDate(now).split("/");
-    expect(new Date(end).getTime() - new Date(start).getTime()).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(new Date(end).getTime() - new Date(start).getTime()).toBe(30 * 24 * 60 * 60 * 1000);
+  });
+  it("crosses month and year boundaries correctly", () => {
+    expect(salePriceEffectiveDate(new Date("2026-12-20T00:00:00Z"))).toBe("2026-12-20T00:00:00Z/2027-01-19T00:00:00Z");
   });
 });
 
@@ -630,12 +624,14 @@ describe("buildGoogleFeed — material and sale window", () => {
       published_at: "2020-01-01T00:00:00-05:00", product_type: "Patio & Garden > Sheds",
       body_html: "<p>Structure en acier galvanisé résistant aux intempéries. Assemblage requis.</p>",
       images: [{ src: "https://img/s.jpg" }],
+      metafields: { "custom.material": "Acier galvanisé" },
       variants: [{ sku: "MAT-1", price: "89.99", compare_at_price: "129.99", inventory_management: null }],
     },
     {
+      // Description names a material but no metafield is set — the attribute must be absent.
       id: 902, title: "Coussin", handle: "coussin", vendor: "Ameublo Direct", status: "active",
       published_at: "2020-01-01T00:00:00-05:00", product_type: "Home Furnishings > Cushions",
-      body_html: "<p>Assemblage requis. Instructions incluses.</p>",
+      body_html: "<p>Housse en polyester déhoussable. Assemblage requis.</p>",
       images: [{ src: "https://img/c.jpg" }],
       variants: [{ sku: "MAT-2", price: "19.99", inventory_management: null }],
     },
@@ -644,22 +640,21 @@ describe("buildGoogleFeed — material and sale window", () => {
   const xml = buildGoogleFeed(items, { title: "G", link: "https://x", description: "d" }, NOW);
   const blockFor = (id: string) => xml.split("<item>").find((b) => b.includes(`<g:id>${id}</g:id>`))!;
 
-  it("emits g:material when the description names one", () => {
-    expect(blockFor("MAT-1")).toContain("<g:material>acier galvanisé</g:material>");
+  it("emits g:material from the metafield", () => {
+    expect(blockFor("MAT-1")).toContain("<g:material>Acier galvanisé</g:material>");
   });
-  it("omits g:material when no material is recognised", () => {
+  it("omits g:material when only the description names one", () => {
     expect(blockFor("MAT-2")).not.toContain("<g:material>");
   });
-  it("pairs g:sale_price with g:sale_price_effective_date", () => {
+  it("pairs g:sale_price with a 30-day g:sale_price_effective_date", () => {
     const b = blockFor("MAT-1");
     expect(b).toContain("<g:sale_price>89.99 CAD</g:sale_price>");
-    expect(b).toContain("<g:sale_price_effective_date>2026-08-06T12:00:00Z/2026-08-13T12:00:00Z</g:sale_price_effective_date>");
+    expect(b).toContain("<g:sale_price_effective_date>2026-08-06T12:00:00Z/2026-09-05T12:00:00Z</g:sale_price_effective_date>");
   });
   it("emits no effective date when there is no sale", () => {
     expect(blockFor("MAT-2")).not.toContain("<g:sale_price_effective_date>");
   });
   it("passes a real Date to every item (map index must not leak into `now`)", () => {
-    // buildGoogleFeed maps with an arrow so the array index is never taken as `now`.
     expect(() => buildGoogleFeed(items, { title: "G", link: "https://x", description: "d" })).not.toThrow();
   });
 });

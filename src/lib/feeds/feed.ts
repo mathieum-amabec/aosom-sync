@@ -52,9 +52,9 @@ export function saleSplit(it: Pick<FeedItem, "price" | "compareAtPrice">): {
 //
 // That is honest because the feed is regenerated on every fetch and Google re-fetches
 // daily: the moment the merchant ends a sale, the next feed drops both sale_price and this
-// date, and Google honours the newest feed. 7 days is long enough to survive a delayed
-// fetch and short enough not to over-claim.
-const SALE_WINDOW_DAYS = 7;
+// date, and Google honours the newest feed — so the declared window is always superseded
+// by fresher data long before it expires.
+const SALE_WINDOW_DAYS = 30;
 
 const isoSecond = (d: Date): string => d.toISOString().replace(/\.\d{3}Z$/, "Z");
 

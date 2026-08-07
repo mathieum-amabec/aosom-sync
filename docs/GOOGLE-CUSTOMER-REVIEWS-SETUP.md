@@ -82,3 +82,70 @@ channel below.
 - If a future migration to **Shopify Plus** happens, a Checkout UI Extension becomes an
   option, but the Google-app path above remains the recommended way to collect GCR.
 - Logged in `docs/DATA-OPS-LOG.md` (2026-06-09 entry).
+
+---
+
+## Why a Thank-you page UI extension cannot carry GCR either
+
+Checkout Extensibility's replacement for additional scripts is "a compatible app from the
+Shopify App Store or **UI extensions and web pixels**". A Thank-you page UI extension is
+therefore the right *shape* — but it still cannot host Google Customer Reviews, for a
+reason that is structural rather than a policy choice:
+
+> Customer account UI extensions run in a **sandboxed Web Worker, not in the browser page
+> itself.**
+> — [Enable extension capabilities](https://shopify.dev/docs/apps/build/customer-accounts/capabilities)
+
+> The UI components for post-purchase checkout extensions are **managed by Shopify**.
+> — [Build a post-purchase product offer](https://shopify.dev/docs/apps/build/checkout/product-offers/build-a-post-purchase-offer)
+
+GCR's opt-in is `gapi.surveyoptin.render()`: it loads Google's own JavaScript and renders a
+widget into the page DOM. An extension has neither — no third-party script loading, no DOM,
+only Shopify's component set. Extensions can make network calls (with `network_access = true`),
+so an extension could POST order data to our backend, but Google exposes no server-side
+endpoint that registers an opt-in, so that chain dead-ends.
+
+**Do not scaffold the extension.** It would look like progress and could never work.
+
+## The route that does work: a Merchant Center order feed
+
+GCR has a second integration that needs no page script at all. Merchant Center accepts an
+**order feed**; Google emails the survey itself. The required fields are exactly:
+
+| Field | Source |
+| --- | --- |
+| `order_id` | Shopify order `name` / `id` |
+| `email` | Shopify order `email` |
+| `country_code` | `shipping_address.country_code` |
+| `estimated_delivery_date` | order date + 8 business days |
+| `products` (optional) | line-item SKUs, matching the Google feed `g:id` |
+
+This fits the repo's existing shape — it is another route beside `/api/feeds/*`.
+
+### Blocker: the Shopify token lacks `read_orders`
+
+Verified 2026-08-06:
+
+```
+GET /admin/api/2025-01/orders.json  ->  403
+{"errors":"[API] This action requires merchant approval for read_orders scope."}
+```
+
+The token carries 31 scopes (products, themes, inventory, discounts, translations, …) but
+**no order scope at all**. Orders are protected customer data, so Shopify requires an
+explicit merchant grant.
+
+**To unblock:** Shopify admin → Settings → Apps and sales channels → Develop apps → the
+custom app → Configuration → Admin API scopes → tick **`read_orders`** → Save, then
+reinstall/refresh the token and update `SHOPIFY_ACCESS_TOKEN`.
+
+### Security requirement before this ships
+
+An order feed carries **customer email addresses**. Unlike the product feeds it must never
+be public: `src/lib/proxy.ts` allowlists the whole `/api/feeds` prefix, so this route has to
+live outside it (or be explicitly excluded) and be gated by a secret Merchant Center fetches
+with — Google supports HTTP basic auth on feed URLs. Shipping it on the public prefix would
+publish every customer's email.
+
+That combination — a scope we cannot grant ourselves plus a PII surface that must be gated
+correctly on the first try — is why the code is specified here rather than merged blind.
