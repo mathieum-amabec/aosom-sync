@@ -20,6 +20,41 @@ The raw GMC opt-in snippet (`gapi.surveyoptin.render({merchant_id: 5804673777, .
 ever worked inside the now-removed Additional Scripts box. The supported replacement is the
 Google channel app + Merchant Center, below.
 
+### "Just use Settings → Checkout → Order status page additional scripts"
+
+That box no longer exists. It is not the modern Checkout-Extensibility route — it is the
+thing Checkout Extensibility **removed**. From Shopify's own developer changelog:
+
+> Checkout Extensibility replaces checkout.liquid, apps with script tags and **additional
+> scripts** on the Thank you and Order status pages. […] **August 28, 2025 — the removal
+> date of checkout.liquid, apps with script tags and additional scripts on the thank you and
+> order status page.**
+> — [UI extensions on the Thank you and Order status pages have launched](https://shopify.dev/changelog/ui-extensions-on-the-thank-you-and-order-status-pages-have-launched)
+
+And specifically for Basic / Shopify / Advanced plans (this store is **Basic**):
+
+> Additional scripts and apps with script tags on the Thank you and Order status pages **will
+> be turned off** […] These must be replaced with a compatible app from the Shopify App Store
+> or rebuilt with **UI extensions and web pixels**.
+> — [New checkout functionality for merchants on Basic, Shopify, and Advanced plans](https://shopify.dev/changelog/new-checkout-functionality-for-merchants-on-basic-shopify-and-advanced-plans)
+
+Re-verified against the live store on 2026-08-06:
+
+| Check | Result |
+| --- | --- |
+| `shop.plan_name` | `basic` (so `checkout.liquid` is not available at all — Plus-only) |
+| `layout/checkout.liquid` on the live theme | **absent** |
+| any `order-status` template/section | **absent** |
+| ScriptTags with `display_scope=order_status` | **0** (only 2 `online_store` pixel tags) |
+
+**Nor can a Web Pixel carry it.** Custom pixels run in Shopify's sandboxed iframe with no
+top-frame DOM (the same constraint documented for the Meta Purchase pixel in `CLAUDE.md`).
+GCR's opt-in is a rendered widget — `gapi.surveyoptin.render()` needs the real page DOM — so
+the web-pixel route that replaces additional scripts for *tracking* cannot host it either.
+
+That leaves exactly one supported path: the App Store app, which is the Google & YouTube
+channel below.
+
 ## Install steps (one-time, ~5 min, requires store-owner login)
 
 1. **Shopify admin → Apps → Shopify App Store** → install **"Google & YouTube"** (publisher:
