@@ -149,3 +149,35 @@ publish every customer's email.
 
 That combination — a scope we cannot grant ourselves plus a PII surface that must be gated
 correctly on the first try — is why the code is specified here rather than merged blind.
+
+---
+
+## 2026-08-07: the account-order-page snippet reaches nobody either
+
+`snippets/lc-gcr-optin.liquid` ships on the live theme, guarded on
+`request.page_type == 'customers/order'`. On this store that guard can never fire.
+
+The shop runs **new customer accounts**:
+
+```
+shop.customerAccountsV2.customerAccountsVersion = "NEW_CUSTOMER_ACCOUNTS"
+
+GET https://ameublodirect.ca/account         -> 302 https://account.ameublodirect.ca/
+GET https://ameublodirect.ca/account/orders  -> 302 https://account.ameublodirect.ca/
+```
+
+Both account routes redirect to Shopify's hosted account portal on a separate domain. The
+theme's `templates/customers/order.json` is never rendered, so `request.page_type` is never
+`customers/order`, and the snippet never outputs anything.
+
+That closes the question for good: **there is no themeable page anywhere in this store's
+post-purchase or account journey.** Not the thank-you page (owned by Checkout), not the
+order-status page (additional scripts removed 2025-08-28), not a checkout UI extension
+(sandboxed Web Worker, no DOM for `gapi.surveyoptin.render()`), and not the account order
+page (hosted by Shopify off-theme).
+
+The snippet is left in place — it is inert, costs nothing, and starts working if the store
+ever reverts to classic customer accounts. But do not count on it for opt-ins.
+
+**The two routes that reach buyers remain unchanged:** the Google & YouTube channel app, or
+the Merchant Center order feed (blocked only on granting `read_orders`, see above).
