@@ -38,6 +38,9 @@ export interface ShopifyFeedProduct {
   /** English product title from the custom.title_en metafield. Only populated for the
    * EN feed; absent/empty falls back to the FR `title`. */
   titleEn?: string | null;
+  /** Selected product metafields keyed "namespace.key". Only the keys the feed actually
+   * reads are populated (see MATERIAL_METAFIELD_KEYS); absent when none are defined. */
+  metafields?: Record<string, string | null | undefined> | null;
 }
 
 const DESCRIPTION_MAX = 5000;
@@ -136,36 +139,32 @@ export function optionValue(
 const COLOUR_OPTION = /^(couleur|color|colour)$/i;
 const SIZE_OPTION = /^(taille|size|dimension|dimensions)$/i;
 
-// <g:material> has no structured source: the catalog exposes only "Couleur" and "Taille"
-// options and carries no material metafield (checked across every namespace in use —
-// judgeme.*, global.*, custom.*). The description prose does name the material, so we read
-// it from there against a closed whitelist of what this catalog actually contains.
+// <g:material> comes from a Shopify metafield and nowhere else. Deriving it from the
+// description prose was tried and removed: the value read fine most of the time, but it was
+// inferred rather than declared, and a feed attribute that guesses is worse than one that is
+// absent — Google treats `material` as a factual product claim.
 //
-// Ordered longest/most-specific first so "acier galvanisé" wins over "acier", and matched
-// on WORD BOUNDARIES over accent-stripped text — a plain substring test makes "fer" fire
-// inside "offert", "fermé" and "différent". Coverage on the live feed: 1572/2182 (72%).
-const MATERIALS = [
-  "acier inoxydable", "acier galvanisé", "acier", "aluminium",
-  "bois d'ingénierie", "bois massif", "bois",
-  "polypropylène", "polyéthylène", "polyester", "polycarbonate", "résine",
-  "rotin synthétique", "rotin", "osier", "bambou",
-  "verre trempé", "verre", "mdf", "panneau de particules", "aggloméré",
-  "métal", "plastique", "tissu", "velours", "cuir", "fer forgé", "nylon", "pvc",
-];
+// Recognised metafield keys, in priority order. None of these exist on the store today
+// (verified against metafieldDefinitions for PRODUCT and PRODUCTVARIANT on 2026-08-06), so
+// the attribute is simply omitted. Populate any one of them and it starts flowing with no
+// code change.
+export const MATERIAL_METAFIELD_KEYS = [
+  "custom.material",
+  "custom.matiere",
+  "custom.matière",
+  "mm-google-shopping.material",
+] as const;
 
-const deaccent = (s: string): string => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-
-const MATERIAL_RX: Array<{ label: string; re: RegExp }> = MATERIALS.map((label) => ({
-  label,
-  re: new RegExp("(?<![a-z])" + deaccent(label).replace(/'/g, "['’]") + "(?![a-z])", "i"),
-}));
-
-/** Primary material named in the product description, or null when none is recognised.
- * Returns a single value — Google's `material` is one attribute, not a list. */
-export function extractMaterial(description: string | null | undefined): string | null {
-  const d = deaccent(String(description ?? ""));
-  if (!d) return null;
-  for (const { label, re } of MATERIAL_RX) if (re.test(d)) return label;
+/** Pick the material from a product's metafields, or null when none is set.
+ * `metafields` is keyed "namespace.key" exactly as MATERIAL_METAFIELD_KEYS spells them. */
+export function materialFromMetafields(
+  metafields: Record<string, string | null | undefined> | null | undefined,
+): string | null {
+  if (!metafields) return null;
+  for (const key of MATERIAL_METAFIELD_KEYS) {
+    const value = metafields[key];
+    if (typeof value === "string" && value.trim() !== "") return value.trim();
+  }
   return null;
 }
 
@@ -280,9 +279,9 @@ export function shopifyToFeedItems(
         // strings; Google accepts free-form size text, and having it lets Shopping tell
         // same-product variants apart in the same item_group.
         size: optionValue(p, v, SIZE_OPTION),
-        // <g:material> read from the description prose — see MATERIALS. Product-level, so
-        // every variant of a product shares it.
-        material: extractMaterial(description),
+        // <g:material> from a Shopify metafield only — never inferred. Product-level, so
+        // every variant of a product shares it. Null today: no material metafield exists.
+        material: materialFromMetafields(p.metafields),
         productType: p.product_type ?? "",
         googleCategoryId: cat.id,
       });
@@ -402,6 +401,65 @@ export async function fetchTitleEnMap(): Promise<Map<string, string>> {
   return map;
 }
 
+/** Fetch product-id → material for whichever of MATERIAL_METAFIELD_KEYS is defined.
+ *
+ * Gated on a definition existing, so on a store with no material metafield (which is the
+ * case today) this costs ONE cheap GraphQL call and never paginates. The moment someone
+ * defines `custom.material`, the full pass turns on by itself. Returns an empty map — never
+ * throws — because a missing material must degrade to an omitted attribute, not a dead feed.
+ */
+export async function fetchMaterialMap(): Promise<Map<string, string>> {
+  const empty = new Map<string, string>();
+  const token = process.env.SHOPIFY_ACCESS_TOKEN;
+  if (!token) return empty;
+  const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}/graphql.json`;
+
+  try {
+    const defs = await graphqlWithRetry(
+      url,
+      token,
+      `{ metafieldDefinitions(first: 100, ownerType: PRODUCT) { nodes { namespace key } } }`,
+      {},
+    );
+    const nodes =
+      (defs.data as { metafieldDefinitions?: { nodes: Array<{ namespace: string; key: string }> } })
+        ?.metafieldDefinitions?.nodes ?? [];
+    const defined = new Set(nodes.map((n) => `${n.namespace}.${n.key}`));
+    const wanted = MATERIAL_METAFIELD_KEYS.filter((k) => defined.has(k));
+    if (wanted.length === 0) return empty; // nothing defined — skip the expensive pass
+
+    const [namespace, key] = wanted[0].split(".");
+    const query = `query Material($cursor: String) {
+      products(first: 250, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { legacyResourceId metafield(namespace: "${namespace}", key: "${key}") { value } }
+      }
+    }`;
+    const map = new Map<string, string>();
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const body = await graphqlWithRetry(url, token, query, { cursor });
+      const conn = (body.data as {
+        products?: {
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+          nodes: Array<{ legacyResourceId: string; metafield: { value: string } | null }>;
+        };
+      })?.products;
+      if (!conn) break;
+      for (const node of conn.nodes) {
+        const value = node.metafield?.value?.trim();
+        if (value) map.set(String(node.legacyResourceId), value);
+      }
+      cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+      pages++;
+    } while (cursor && pages < MAX_PAGES);
+    return map;
+  } catch {
+    return empty; // never let a metafield lookup take the whole feed down
+  }
+}
+
 /** Fetch all products from Shopify (paginated) and return feed items.
  * Pass `{ english: true }` to overlay custom.title_en titles for the Pinterest EN feed. */
 export async function getFeedItems(opts: { english?: boolean } = {}): Promise<FeedItem[]> {
@@ -424,6 +482,16 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
 
   // Fail loud rather than silently serve (and CDN-cache for 24h) a truncated catalog.
   if (pageInfo) throw new Error(`Feed pagination exceeded ${MAX_PAGES} pages — catalog larger than expected; refusing to serve a partial feed`);
+
+  // Overlay <g:material> from its metafield. No-op (one cheap call) until one is defined.
+  const materialMap = await fetchMaterialMap();
+  if (materialMap.size > 0) {
+    const [materialKey] = MATERIAL_METAFIELD_KEYS;
+    for (const p of products) {
+      const value = materialMap.get(String(p.id));
+      if (value) p.metafields = { ...(p.metafields ?? {}), [materialKey]: value };
+    }
+  }
 
   if (opts.english) {
     const titleEnMap = await fetchTitleEnMap();
