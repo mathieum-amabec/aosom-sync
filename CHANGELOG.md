@@ -2,6 +2,32 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.57.1] - 2026-08-06
+
+### Added — Google Customer Reviews opt-in on the customer-account order page
+
+- New `snippets/lc-gcr-optin.liquid`, rendered from `layout/theme.liquid`, emitting the GCR
+  survey opt-in (`merchant_id 5804673777`) with the order name, customer email, delivery
+  country and an estimated delivery date of **order date + 8 business days**. Liquid has no
+  business-day arithmetic, so weekends are skipped explicitly: 10 calendar days for a Mon/Tue
+  order, 12 for Wed–Sun, because the run then crosses a second weekend.
+- **Read this before expecting opt-ins.** The guard is `request.page_type ==
+  'customers/order'` — the signed-in customer's "my order" page. It is **not** the
+  post-checkout thank-you page: that page is rendered by Shopify Checkout, not the theme, so
+  `layout/theme.liquid` never executes there. `request.page_type` has no value for it at all;
+  the documented set is `404, article, blog, captcha, cart, collection, list-collections,
+  customers/*, gift_card, index, metaobject, page, password, policy, product, search`. A
+  guard written as `request.page_type == 'order'` would have matched nothing, silently.
+- Practical reach on a mostly-guest-checkout store is therefore small. The routes that reach
+  every buyer remain the Google & YouTube channel app, or a Merchant Center order feed once
+  the token gains `read_orders` — both written up in
+  `docs/GOOGLE-CUSTOMER-REVIEWS-SETUP.md`.
+- Applied to the working draft `161090928745` only; the live theme is untouched. Verified on
+  the draft preview that the script is absent from the product page, collections, cart and
+  home, and that the single Product JSON-LD is unaffected. Passes Shopify Theme Check (one
+  informational warning: Google's `platform.js` is not on the Shopify CDN, which is inherent
+  to GCR).
+
 ## [0.5.57.0] - 2026-08-06
 
 ### Changed — `g:sale_price_effective_date` window is now 30 days
