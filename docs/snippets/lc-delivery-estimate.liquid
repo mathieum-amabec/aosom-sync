@@ -1,0 +1,28 @@
+{%- comment -%}
+  Delivery estimate surfaced near the CTA (PDP) and near checkout (cart).
+  Delay is the published shipping policy value for the core market (Qc/Ont); the
+  link points to the full regional policy. Optional param: compact (cart).
+  Usage: {% render 'lc-delivery-estimate' %} | {% render 'lc-delivery-estimate', compact: true %}
+{%- endcomment -%}
+{%- assign lc_loc = request.locale.iso_code | downcase -%}
+<div class="lc-deliv{% if compact %} lc-deliv--compact{% endif %}">
+  <span class="lc-deliv__ico" aria-hidden="true">&#128666;</span>
+  <span class="lc-deliv__txt">
+    {%- if lc_loc == 'en' -%}
+      Delivered in <strong>5&#8211;10 business days</strong> (QC/ON)
+    {%- else -%}
+      Livr&eacute; en <strong>5&#8211;10 jours ouvrables</strong> (Qc/Ont)
+    {%- endif -%}
+    {%- if shop.shipping_policy.url != blank -%}
+      <a class="lc-deliv__link" href="{{ shop.shipping_policy.url }}">{% if lc_loc == 'en' %}shipping details{% else %}d&eacute;tails livraison{% endif %}</a>
+    {%- endif -%}
+  </span>
+</div>
+<style>
+  .lc-deliv{display:flex;align-items:center;gap:.5rem;margin:.9rem 0 .3rem;font-family:'DM Sans',sans-serif;font-size:1.35rem;line-height:1.35;color:#1B2A4A}
+  .lc-deliv__ico{font-size:1.6rem;flex-shrink:0;line-height:1}
+  .lc-deliv strong{font-weight:700}
+  .lc-deliv__link{color:#C17F3E;text-decoration:underline;margin-left:.4rem;white-space:nowrap}
+  .lc-deliv__link:hover{color:#1B2A4A}
+  .lc-deliv--compact{justify-content:center;text-align:center;font-size:1.25rem;margin:.4rem 0 .7rem}
+</style>
