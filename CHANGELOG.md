@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.57.2] - 2026-08-06
+
+### Changed — the GCR guard now accepts `order` alongside `customers/order`
+
+- `snippets/lc-gcr-optin.liquid` matches either page type. `customers/order` is the one that
+  fires today; `order` is carried so the guard already covers that value should Shopify ever
+  introduce it — it is not in the documented `request.page_type` set as of 2026-08, so on its
+  own it would match nothing. `order != blank` remains the real safety check: no order
+  object, no markup.
+- Re-verified on the draft preview after the change: the GCR script stays absent from the
+  product page, collections, cart and home, and every JSON-LD block still parses.
+
+### Note — the rest of this batch was already live
+
+No code was needed for the other three items; this records where they landed.
+
+- **Structured data, all three blocks** — `Product` and `BreadcrumbList` render on the product
+  page and `WebSite` on the home page, the latter already carrying a complete `SearchAction`
+  (`/search?q={search_term_string}` with `query-input`) for the sitelinks searchbox. Shipped
+  in `v0.5.56.0`.
+- **Sale prices** — the 30-day `sale_price_effective_date` window and the ≥10% floor
+  (`SALE_MIN_DISCOUNT = 0.1`) are both in effect: 32 items carry `sale_price` and 32 carry the
+  matching window. Shipped in `v0.5.55.0` and `v0.5.57.0`.
+- **Variant attributes** — `g:color` on 2160 items (99%), `g:size` on 2104 (96%), `g:material`
+  omitted when empty, which is every item today because no material metafield exists. Shipped
+  in `v0.5.55.0` and `v0.5.57.0`.
+
 ## [0.5.57.1] - 2026-08-06
 
 ### Added — Google Customer Reviews opt-in on the customer-account order page
