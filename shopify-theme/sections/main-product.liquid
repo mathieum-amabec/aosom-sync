@@ -1,6 +1,7 @@
 {%- liquid
   assign lc_loc = request.locale.iso_code | downcase
   assign lc_mp_en = product.metafields.custom.title_en.value
+  assign lc_mp_desc_en = product.metafields.custom.body_html_en.value
   if lc_loc == 'en' and lc_mp_en != blank
     assign lc_product_title = lc_mp_en
   else
@@ -119,7 +120,7 @@
                 </p>
               {%- when 'title' -%}
                 <div class="product__title" {{ block.shopify_attributes }}>
-                  {%- if product.type != blank -%}<p class="product-eyebrow" style="font-family:'DM Sans',sans-serif;font-size:1.15rem;letter-spacing:.12em;text-transform:uppercase;color:#1B2A4A;font-weight:600;margin:0 0 .4rem">{{ product.type | escape }}</p>{%- endif -%}
+                  {% render 'lc-type-breadcrumb', product: product %}
                   <h1>{{ lc_product_title | escape }}</h1>
                   {%- if product.tags contains 'out-of-stock' -%}
                     <div class="popular-badge">
@@ -138,6 +139,20 @@
                     price_class: 'price--large'
                   -%}
                 </div>
+                {%- comment -%} 30-day price badge (draft only) — driven by the custom.price_badge metafield written by job1-sync; bilingual {%- endcomment -%}
+                {%- assign lc_price_badge = product.metafields.custom.price_badge.value -%}
+                {%- if lc_price_badge == 'best_30d' -%}
+                  <div class="lc-price-badge lc-price-badge--best">{%- if lc_loc == 'en' -%}💚 Best price in the last 30 days{%- else -%}💚 Meilleur prix des 30 derniers jours{%- endif -%}</div>
+                {%- elsif lc_price_badge == 'price_drop' -%}
+                  <div class="lc-price-badge lc-price-badge--drop">{%- if lc_loc == 'en' -%}📉 Price drop{%- else -%}📉 Prix en baisse{%- endif -%}</div>
+                {%- endif -%}
+                {%- if lc_price_badge == 'best_30d' or lc_price_badge == 'price_drop' -%}
+                  {%- style -%}
+                    .lc-price-badge{display:inline-block;margin:.55rem 0 .15rem;padding:.32rem .72rem;border-radius:999px;font-size:.86rem;font-weight:700;line-height:1.2}
+                    .lc-price-badge--best{background:rgba(45,122,58,.12);color:#2D7A3A;border:1px solid rgba(45,122,58,.35)}
+                    .lc-price-badge--drop{background:rgba(198,40,40,.10);color:#C62828;border:1px solid rgba(198,40,40,.30)}
+                  {%- endstyle -%}
+                {%- endif -%}
                 <div class="lc-price-why">
                   {%- if lc_loc == 'en' -%}
                     &#128161; Low price because we&rsquo;re 100% online &mdash; no showroom rent to pass on to you.
@@ -163,7 +178,7 @@
                       {{ 'products.product.duties_included' | t }}
                     {%- endif -%}
                     {%- if shop.shipping_policy.body != blank -%}
-                      {{ 'products.product.shipping_policy_html' | t: link: shop.shipping_policy.url }}
+                      
                     {%- endif -%}
                   </div>
                 {%- endif -%}
@@ -226,7 +241,11 @@
                   {%- endif -%}
                 </p>
               {%- when 'description' -%}
-                {%- if product.description != blank -%}
+                {%- if lc_loc == 'en' and lc_mp_desc_en != blank -%}
+                  <div class="product__description rte quick-add-hidden" {{ block.shopify_attributes }}>
+                    {{ lc_mp_desc_en }}
+                  </div>
+                {%- elsif product.description != blank -%}
                   <div class="product__description rte quick-add-hidden" {{ block.shopify_attributes }}>
                     {{ product.description }}
                   </div>
@@ -537,55 +556,91 @@
                 </script>
               {%- when 'buy_buttons' -%}
                 <style>.product-form__submit{background:#1B2A4A!important;color:#fff!important;border:1px solid #1B2A4A!important;border-radius:4px!important;font-weight:700}.product-form__submit:hover{background:#2a3f6b!important;border-color:#2a3f6b!important}.product-form__submit>*{color:#fff!important}@media(max-width:749px){.product-form__submit{width:100%!important}}</style>
-                {%- render 'buy-buttons',
-                  block: block,
-                  product: product,
-                  product_form_id: product_form_id,
-                  section_id: section.id,
-                  show_pickup_availability: true
-                -%}
-
-                {%- unless product.available -%}
-                <div class="waitlist-form" style="margin-top:1rem;">
-                  <p style="font-size:0.9rem;color:#797068;margin-bottom:0.5rem;">
-                    ⭐ Cet article est populaire — inscrivez-vous pour être notifié à son retour.
-                  </p>
-                  <form id="waitlist-form-{{ product.id }}">
-                    <input type="email" placeholder="Votre courriel" required
-                      style="padding:0.5rem;border:1px solid #1B2A4A;border-radius:4px;width:70%;margin-right:0.5rem;">
-                    <button type="submit"
-                      style="padding:0.5rem 1rem;background:#1B2A4A;color:#fff;border:none;border-radius:4px;cursor:pointer;">
-                      M'avertir
-                    </button>
-                  </form>
-                  <p id="waitlist-msg-{{ product.id }}" style="display:none;color:#1B2A4A;margin-top:0.5rem;font-size:0.85rem;"></p>
+                {%- comment -%} In-stock indicator (draft only) — bilingual; uses .available (untracked dropship → inventory_quantity is 0) {%- endcomment -%}
+                {%- if product.selected_or_first_available_variant.available -%}
+                  <div class="lc-instock">
+                    <span class="lc-instock__ic">✔</span>
+                    <span class="lc-instock__tx">{%- if lc_loc == 'en' -%}In stock — ships within 24-48h{%- else -%}En stock — expédition sous 24-48h{%- endif -%}</span>
+                  </div>
+                  <style>
+                    .lc-instock{display:flex;align-items:center;gap:0.45rem;margin:0.5rem 0 0.9rem;font-size:0.95rem;font-weight:700;color:#2D7A3A}
+                    .lc-instock__ic{display:inline-flex;align-items:center;justify-content:center;width:1.15rem;height:1.15rem;border-radius:50%;background:#2D7A3A;color:#fff;font-size:0.72rem;line-height:1;flex:0 0 auto}
+                  </style>
+                {%- endif -%}
+                {%- comment -%} Out of stock → replace the ATC button with a back-in-stock waitlist form (bilingual). In stock → normal buy buttons. {%- endcomment -%}
+                {%- if product.available -%}
+                  {%- render 'buy-buttons',
+                    block: block,
+                    product: product,
+                    product_form_id: product_form_id,
+                    section_id: section.id,
+                    show_pickup_availability: true
+                  -%}
+                {%- else -%}
+                  {%- assign lc_wl_sku = product.selected_or_first_available_variant.sku | default: product.variants.first.sku -%}
+                  <div class="lc-waitlist" style="margin:.4rem 0 .2rem;">
+                    <p class="lc-waitlist__lead" style="font-size:.92rem;color:#5b6172;margin:0 0 .6rem;font-weight:600;">
+                      {%- if lc_loc == 'en' -%}⭐ This item is out of stock — get notified the moment it&rsquo;s back.{%- else -%}⭐ Cet article est épuisé — soyez averti dès son retour en stock.{%- endif -%}
+                    </p>
+                    <form id="lc-waitlist-form-{{ product.id }}" class="lc-waitlist__form" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:stretch;">
+                      <input type="email" required
+                        placeholder="{%- if lc_loc == 'en' -%}Your email{%- else -%}Votre courriel{%- endif -%}"
+                        aria-label="{%- if lc_loc == 'en' -%}Your email{%- else -%}Votre courriel{%- endif -%}"
+                        style="flex:1 1 auto;min-width:180px;padding:.7rem .8rem;border:1px solid #1B2A4A;border-radius:4px;font-size:.95rem;">
+                      <button type="submit"
+                        style="flex:0 0 auto;padding:.7rem 1.2rem;background:#1B2A4A;color:#fff;border:none;border-radius:4px;font-weight:700;cursor:pointer;">
+                        {%- if lc_loc == 'en' -%}Notify me{%- else -%}Avertissez-moi{%- endif -%}
+                      </button>
+                    </form>
+                    <p id="lc-waitlist-msg-{{ product.id }}" class="lc-waitlist__msg" style="display:none;margin:.6rem 0 0;font-size:.88rem;color:#1B2A4A;"></p>
+                  </div>
                   <script>
-                    document.getElementById('waitlist-form-{{ product.id }}').addEventListener('submit', async function(e) {
-                      e.preventDefault();
-                      const email = this.querySelector('input[type=email]').value;
-                      const msg = document.getElementById('waitlist-msg-{{ product.id }}');
-                      try {
-                        const r = await fetch('https://aosom-sync.vercel.app/api/waitlist', {
-                          method: 'POST',
-                          headers: {'Content-Type':'application/json'},
-                          body: JSON.stringify({
-                            email,
-                            sku: '{{ product.variants.first.sku }}',
-                            shopify_product_id: '{{ product.id }}'
-                          })
-                        });
-                        const d = await r.json();
-                        msg.style.display = 'block';
-                        msg.textContent = d.message || 'Merci ! Vérifiez votre courriel.';
-                        this.style.display = 'none';
-                      } catch(err) {
-                        msg.style.display = 'block';
-                        msg.textContent = 'Une erreur est survenue. Réessayez.';
-                      }
-                    });
+                    (function () {
+                      var form = document.getElementById('lc-waitlist-form-{{ product.id }}');
+                      if (!form) return;
+                      var msg = document.getElementById('lc-waitlist-msg-{{ product.id }}');
+                      var isEN = {% if lc_loc == 'en' %}true{% else %}false{% endif %};
+                      form.addEventListener('submit', async function (e) {
+                        e.preventDefault();
+                        var email = form.querySelector('input[type=email]').value;
+                        try {
+                          var r = await fetch('https://aosom-sync.vercel.app/api/waitlist', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ email: email, sku: {{ lc_wl_sku | json }}, shopify_product_id: '{{ product.id }}' })
+                          });
+                          var d = await r.json();
+                          msg.style.display = 'block';
+                          if (d && d.success) {
+                            msg.textContent = d.message || (isEN ? 'Thanks! Check your email to confirm.' : 'Merci ! Vérifiez votre courriel pour confirmer.');
+                            form.style.display = 'none';
+                          } else {
+                            msg.textContent = (d && d.error) || (isEN ? 'Something went wrong. Please try again.' : 'Une erreur est survenue. Réessayez.');
+                          }
+                        } catch (err) {
+                          msg.style.display = 'block';
+                          msg.textContent = isEN ? 'Something went wrong. Please try again.' : 'Une erreur est survenue. Réessayez.';
+                        }
+                      });
+                    })();
                   </script>
+                {%- endif -%}
+
+                {%- render 'lc-delivery-estimate' -%}
+                {%- comment -%} Trust badges (draft only) — bilingual via lc_loc {%- endcomment -%}
+                <div class="lc-trust-badges">
+                  <style>
+                    .lc-trust-badges{margin-top:1rem;padding:0.85rem 0.7rem;background:rgba(212,168,83,0.09);border:1px solid rgba(212,168,83,0.35);border-radius:10px;display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:0.55rem 0.5rem}
+                    .lc-trust-badge{display:flex;align-items:center;gap:0.5rem}
+                    .lc-trust-badge .lc-tb-ic{font-size:1.2rem;line-height:1;flex:0 0 auto}
+                    .lc-trust-badge .lc-tb-tx{font-size:0.78rem;font-weight:600;color:#1A2340;line-height:1.2}
+                  </style>
+                  <div class="lc-trust-badge" style="grid-column:1/-1"><span class="lc-tb-ic">🚚</span><span class="lc-tb-tx">{%- if lc_loc == 'en' -%}Free shipping (QC/ON){%- else -%}Livraison gratuite (Qc/Ont){%- endif -%}</span></div>
+                  <div class="lc-trust-badge"><span class="lc-tb-ic">↩️</span><span class="lc-tb-tx">{%- if lc_loc == 'en' -%}Easy 30-day returns{%- else -%}Retours faciles 30 jours{%- endif -%}</span></div>
+                  <div class="lc-trust-badge"><span class="lc-tb-ic">🔒</span><span class="lc-tb-tx">{%- if lc_loc == 'en' -%}Secure payment{%- else -%}Paiement sécurisé{%- endif -%}</span></div>
+                  <div class="lc-trust-badge"><span class="lc-tb-ic">🇨🇦</span><span class="lc-tb-tx">{%- if lc_loc == 'en' -%}French support{%- else -%}Support en français{%- endif -%}</span></div>
+                  <div class="lc-trust-badge"><span class="lc-tb-ic">✅</span><span class="lc-tb-tx">{%- if lc_loc == 'en' -%}Unbeatable price guaranteed{%- else -%}Prix imbattables garanti{%- endif -%}</span></div>
                 </div>
-                {%- endunless -%}
               {%- when 'rating' -%}
                 {%- if product.metafields.reviews.rating.value != blank -%}
                   <div class="rating-wrapper">
@@ -834,11 +889,13 @@
     -%}
 
     {% comment %} Projet #1 : JSON-LD boutique (brand = boutique, pas le vendor/fournisseur) {% endcomment %}
-    {% render "agentic-structured-data", product: product %}
+    {%- comment -%} Product JSON-LD moved to layout/theme.liquid via lc-structured-data. {%- endcomment -%}
   </div>
 
   {%- render 'sticky-atc', product: product, section_id: section.id, product_title: lc_product_title -%}
 </product-info>
+
+{%- if product -%}{% render 'lc-complete-the-room' %}{%- endif -%}
 
 {% schema %}
 {

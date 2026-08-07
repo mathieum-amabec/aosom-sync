@@ -2,6 +2,46 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.56.0] - 2026-08-06
+
+### Added — `g:material` and `g:sale_price_effective_date` in the Google feed
+
+- **`g:material`** — the catalog has no Material option and no material metafield (checked
+  across every namespace in use), so the value is read from the description prose against a
+  closed whitelist of the ~29 materials this catalog actually contains. Ordered
+  most-specific first so "acier galvanisé" beats "acier", and matched on **word boundaries**
+  over accent-stripped text — a plain substring test makes "fer" fire inside "offert",
+  "fermé" and "différent". Coverage: **1572 of 2182 items (72%)**, led by polyester (375),
+  métal (309), acier (233) and MDF (203).
+- **`g:sale_price_effective_date`** — emitted alongside `g:sale_price` as an ISO 8601
+  interval. Shopify's `compare_at_price` stores no schedule, so this is not a promotion
+  being reported: it is a 7-day forward validity window anchored to feed-generation time.
+  That holds because the feed is rebuilt on every fetch and Google re-fetches daily, so
+  ending a sale drops both attributes from the next feed.
+
+### Changed — product JSON-LD moves to the page `<head>`
+
+- New `snippets/lc-structured-data.liquid`, rendered from `layout/theme.liquid` before
+  `</head>` so the markup sits where crawlers read it first. The content is the canonical
+  schema previously rendered from `sections/main-product.liquid`; that render call is
+  removed, so exactly **one** Product entity exists per URL — two would make Google pick
+  arbitrarily.
+- The snippet is guarded on `product`, because `theme.liquid` runs on every page. Verified
+  on the draft preview: the product page emits 1 Product schema in `<head>` with `sku`,
+  `mpn`, `color`, brand = the shop (never the supplier) and `aggregateRating` correctly
+  absent at 0 reviews; collections, cart, search and home emit **zero** Product schemas.
+- Applied to the working draft `161090928745` only; the live theme is untouched.
+
+### Documented — Google Customer Reviews cannot use "additional scripts"
+
+- `docs/GOOGLE-CUSTOMER-REVIEWS-SETUP.md` now cites Shopify's changelog directly: additional
+  scripts on the Thank-you / Order-status pages were **removed on 2025-08-28**, and are the
+  thing Checkout Extensibility replaced rather than its modern route. Re-verified on the live
+  store: plan `basic`, no `checkout.liquid`, no order-status template, 0 ScriptTags scoped to
+  `order_status`. A Web Pixel cannot host it either — GCR's opt-in renders a widget and
+  pixels run sandboxed with no top-frame DOM. The Google & YouTube channel app remains the
+  only supported path.
+
 ## [0.5.55.0] - 2026-08-06
 
 ### Added — sale prices and variant attributes in the Google feed

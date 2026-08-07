@@ -136,6 +136,39 @@ export function optionValue(
 const COLOUR_OPTION = /^(couleur|color|colour)$/i;
 const SIZE_OPTION = /^(taille|size|dimension|dimensions)$/i;
 
+// <g:material> has no structured source: the catalog exposes only "Couleur" and "Taille"
+// options and carries no material metafield (checked across every namespace in use —
+// judgeme.*, global.*, custom.*). The description prose does name the material, so we read
+// it from there against a closed whitelist of what this catalog actually contains.
+//
+// Ordered longest/most-specific first so "acier galvanisé" wins over "acier", and matched
+// on WORD BOUNDARIES over accent-stripped text — a plain substring test makes "fer" fire
+// inside "offert", "fermé" and "différent". Coverage on the live feed: 1572/2182 (72%).
+const MATERIALS = [
+  "acier inoxydable", "acier galvanisé", "acier", "aluminium",
+  "bois d'ingénierie", "bois massif", "bois",
+  "polypropylène", "polyéthylène", "polyester", "polycarbonate", "résine",
+  "rotin synthétique", "rotin", "osier", "bambou",
+  "verre trempé", "verre", "mdf", "panneau de particules", "aggloméré",
+  "métal", "plastique", "tissu", "velours", "cuir", "fer forgé", "nylon", "pvc",
+];
+
+const deaccent = (s: string): string => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+const MATERIAL_RX: Array<{ label: string; re: RegExp }> = MATERIALS.map((label) => ({
+  label,
+  re: new RegExp("(?<![a-z])" + deaccent(label).replace(/'/g, "['’]") + "(?![a-z])", "i"),
+}));
+
+/** Primary material named in the product description, or null when none is recognised.
+ * Returns a single value — Google's `material` is one attribute, not a list. */
+export function extractMaterial(description: string | null | undefined): string | null {
+  const d = deaccent(String(description ?? ""));
+  if (!d) return null;
+  for (const { label, re } of MATERIAL_RX) if (re.test(d)) return label;
+  return null;
+}
+
 // Aosom variant "size" options carry English/imperial measurements that leak into the FR
 // title as a trailing `… - Couleur / <dims>` suffix, e.g. `42.1" x 24.6" x 17.3"`,
 // `15.7" W x 11.8" D x 19.3" H` (spaces optional before the L/W/D/H letter), an adjustable
@@ -247,6 +280,9 @@ export function shopifyToFeedItems(
         // strings; Google accepts free-form size text, and having it lets Shopping tell
         // same-product variants apart in the same item_group.
         size: optionValue(p, v, SIZE_OPTION),
+        // <g:material> read from the description prose — see MATERIALS. Product-level, so
+        // every variant of a product shares it.
+        material: extractMaterial(description),
         productType: p.product_type ?? "",
         googleCategoryId: cat.id,
       });

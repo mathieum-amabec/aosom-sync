@@ -16,6 +16,7 @@ export interface FeedItem {
   brand: string;
   color?: string | null;         // FR colour, from the Shopify option or the SKU suffix (g:color)
   size?: string | null;          // Shopify "Taille" option value (g:size), null when none
+  material?: string | null;      // primary material read from the description (g:material)
   productType: string;           // Aosom taxonomy path (g:product_type)
   googleCategoryId: number;      // g:google_product_category
 }
@@ -42,6 +43,26 @@ export function saleSplit(it: Pick<FeedItem, "price" | "compareAtPrice">): {
   const discount = (regular - it.price) / regular;
   if (discount < SALE_MIN_DISCOUNT) return { price: it.price, salePrice: null };
   return { price: regular, salePrice: it.price };
+}
+
+// Shopify's compare_at_price carries NO schedule — there is no promo start or end stored
+// anywhere. So this window is not a Shopify promotion being reported; it is a forward
+// validity declaration anchored to feed-generation time: "this sale price holds from now
+// for SALE_WINDOW_DAYS".
+//
+// That is honest because the feed is regenerated on every fetch and Google re-fetches
+// daily: the moment the merchant ends a sale, the next feed drops both sale_price and this
+// date, and Google honours the newest feed. 7 days is long enough to survive a delayed
+// fetch and short enough not to over-claim.
+const SALE_WINDOW_DAYS = 7;
+
+const isoSecond = (d: Date): string => d.toISOString().replace(/\.\d{3}Z$/, "Z");
+
+/** Google's `sale_price_effective_date`: an ISO 8601 interval "<start>/<end>".
+ * `now` is injectable so the output is deterministic under test. */
+export function salePriceEffectiveDate(now: Date = new Date()): string {
+  const end = new Date(now.getTime() + SALE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  return `${isoSecond(now)}/${isoSecond(end)}`;
 }
 
 const CURRENCY = "CAD";
@@ -89,7 +110,7 @@ export function formatPrice(price: number): string {
 }
 
 // ── Google Merchant feed (RSS 2.0 + g: namespace) ─────────────────────────
-function googleItemXml(it: FeedItem): string {
+function googleItemXml(it: FeedItem, now?: Date): string {
   const { price, salePrice } = saleSplit(it);
   const g: string[] = [
     `<g:id>${escapeXml(it.id)}</g:id>`,
@@ -101,10 +122,12 @@ function googleItemXml(it: FeedItem): string {
     `<g:availability>${it.availability}</g:availability>`,
     `<g:price>${escapeXml(formatPrice(price))}</g:price>`,
     salePrice != null ? `<g:sale_price>${escapeXml(formatPrice(salePrice))}</g:sale_price>` : "",
+    salePrice != null ? `<g:sale_price_effective_date>${escapeXml(salePriceEffectiveDate(now))}</g:sale_price_effective_date>` : "",
     `<g:condition>${it.condition}</g:condition>`,
     `<g:brand>${escapeXml(it.brand)}</g:brand>`,
     it.color ? `<g:color>${escapeXml(it.color)}</g:color>` : "",
     it.size ? `<g:size>${escapeXml(it.size)}</g:size>` : "",
+    it.material ? `<g:material>${escapeXml(it.material)}</g:material>` : "",
     `<g:google_product_category>${it.googleCategoryId}</g:google_product_category>`,
     it.productType ? `<g:product_type>${escapeXml(it.productType)}</g:product_type>` : "",
     it.itemGroupId ? `<g:item_group_id>${escapeXml(it.itemGroupId)}</g:item_group_id>` : "",
@@ -118,14 +141,14 @@ function googleItemXml(it: FeedItem): string {
   return `    <item>\n      ${g.join("\n      ")}\n    </item>`;
 }
 
-export function buildGoogleFeed(items: FeedItem[], opts: { title: string; link: string; description: string }): string {
+export function buildGoogleFeed(items: FeedItem[], opts: { title: string; link: string; description: string }, now?: Date): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
   <channel>
     <title>${escapeXml(opts.title)}</title>
     <link>${escapeXml(opts.link)}</link>
     <description>${escapeXml(opts.description)}</description>
-${items.map(googleItemXml).join("\n")}
+${items.map((it) => googleItemXml(it, now)).join("\n")}
   </channel>
 </rss>`;
 }
