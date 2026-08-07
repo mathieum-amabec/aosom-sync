@@ -346,6 +346,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="{{ 'favicon-180.png' | asset_url }}">
 <meta name="google-site-verification" content="tOFocTqrpRpwpSFknJSufmdtU1tkfEO5xiG-5Q_VWaU" />
 <meta name="p:domain_verify" content="848f4b63265c8afcedd2f5e255f0522f"/>
+  {% render 'lc-structured-data', product: product %}
 </head>
 
   <body class="gradient{% if settings.animations_hover_elements != 'none' %} animate--hover-{{ settings.animations_hover_elements }}{% endif %}">
@@ -439,5 +440,6 @@
       @media (max-width:749px){.lc-msgr{bottom:90px;right:16px}.lc-msgr::after,.lc-msgr::before{display:none}}
       @media (prefers-reduced-motion:reduce){.lc-msgr{animation:none}}
     </style>
+      {% render 'lc-assistant-widget' %}
   </body>
 </html>
