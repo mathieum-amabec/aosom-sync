@@ -2,6 +2,43 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.57.0] - 2026-08-06
+
+### Changed — `g:sale_price_effective_date` window is now 30 days
+
+- Was 7 days. The window is a forward validity declaration anchored to feed-generation time,
+  not a Shopify promotion (`compare_at_price` stores no schedule), and it is superseded by
+  every daily refetch — so the length is a presentation choice rather than a correctness one.
+
+### Changed — `g:material` now comes from a metafield, or not at all
+
+- The previous release derived the material from the description prose (72% coverage). That
+  value read correctly most of the time but it was **inferred, not declared**, and Google
+  treats `material` as a factual product claim. A feed attribute that guesses is worse than
+  one that is absent, so the derivation is removed.
+- `material` is now read from the first Shopify metafield present among `custom.material`,
+  `custom.matiere`, `custom.matière`, `mm-google-shopping.material`. None exists on the store
+  today — verified against `metafieldDefinitions` for both PRODUCT and PRODUCTVARIANT — so
+  **`g:material` is currently emitted on 0 items, down from 1572.** Define any one of those
+  metafields and it starts flowing with no code change.
+- The lookup is gated on a definition existing, so it costs one cheap GraphQL call and never
+  paginates while no material metafield is defined. It also swallows its own errors: a
+  metafield lookup must degrade to an omitted attribute, never take the feed down.
+
+### Documented — Google Customer Reviews: the extension route, and the one that works
+
+- A Thank-you page UI extension is the right *shape* under Checkout Extensibility but cannot
+  host GCR: extensions run in a **sandboxed Web Worker with Shopify-managed components**,
+  while GCR's opt-in loads Google's own JS and renders into the page DOM. No third-party
+  script, no DOM, and Google exposes no server-side opt-in endpoint to POST to instead. The
+  runbook now says explicitly not to scaffold it.
+- The route that does work is a **Merchant Center order feed** — no page script, and it takes
+  exactly the fields wanted (order id, email, country, estimated delivery = order + 8
+  business days). Specified in the runbook, not merged, for two reasons: the Shopify token
+  has **no `read_orders` scope** (403, "requires merchant approval"), and an order feed
+  carries customer emails, so it must be excluded from the public `/api/feeds` allowlist and
+  gated behind auth — a PII surface worth getting right deliberately rather than blind.
+
 ## [0.5.56.0] - 2026-08-06
 
 ### Added — `g:material` and `g:sale_price_effective_date` in the Google feed
