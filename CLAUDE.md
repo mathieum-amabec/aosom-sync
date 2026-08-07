@@ -115,10 +115,24 @@ Ad account `act_20658834`, catalog `384890002574549`, pixel `214720653324969`. B
 Source of truth for the tooling: `scripts/_shopify-lib.mjs` (`LIVE_THEME_ID` / `DRAFT_THEME_ID` /
 `BACKUP_THEME_ID`) — re-point it after EVERY publish or the `apply-*.mjs` guard protects the wrong theme.
 
-As of **2026-07-19** (publish of the price-badge-on-cards draft):
-- **LIVE / `main` (NEVER write):** `161069989993` "DRAFT DE TRAVAIL 2026-07-18 v2"
-- **Active working DRAFT (safe write target):** `161090928745` "DRAFT DE TRAVAIL 2026-07-19"
-- **Rollback backup (previous live):** `161062551657` "DRAFT DE TRAVAIL 2026-07-18"
+As of **2026-08-07** (publish of the Google Shopping structured-data draft):
+- **LIVE / `main` (NEVER write):** `161529233513` "DRAFT GOOGLE SHOPPING 2026-08-07"
+- **Rollback backup + safe write base:** `161069989993` "DRAFT DE TRAVAIL 2026-07-18 v2" (previous live)
+- **No dedicated working draft** — `themeDuplicate` of the freshly published theme returns
+  `newTheme: null` with no `userErrors` (retried twice). Duplicate `161529233513` before the
+  next substantial theme change and re-point `DRAFT_THEME_ID`.
+
+⚠️ **Do NOT publish or branch from `161090928745`.** It was copied from the live on 07-19, but
+the live was edited on 07-21, so that draft is missing the **Judge.me app embed**
+(`config/settings_data.json`) and an **app section plus several block settings** on the product
+page (`templates/product.json`). Publishing it silently reverts them. Caught by an asset
+checksum diff on 2026-08-07, before publishing.
+
+**Always diff before publishing.** A draft is a point-in-time copy; the live keeps changing
+underneath it via the theme editor. Compare asset checksums between the draft and the current
+live and confirm the only differences are yours. `161529233513` was built that way: duplicated
+from the then-live `161069989993`, two snippets added on top, diff verified as exactly 2
+additions + 2 modifications and zero unrelated changes.
 
 Publish a draft: `PUT /admin/api/2025-01/themes/{id}.json {theme:{id,role:"main"}}`. Make a fresh draft:
 GraphQL `themeDuplicate` of the new live. Verify roles: `GET /admin/api/2025-01/themes.json?fields=id,name,role`.
