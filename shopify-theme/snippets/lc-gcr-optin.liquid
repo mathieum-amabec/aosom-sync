@@ -24,10 +24,16 @@
   so weekends are skipped explicitly: 8 business days is 10 calendar days when the order
   falls Mon/Tue, and 12 when it falls Wed–Sun (the run crosses a second weekend).
 
+  The guard accepts BOTH `customers/order` and `order`. Only the first matches today; the
+  second is carried so the guard already covers that value should Shopify ever introduce it.
+  `order != blank` is what actually keeps this safe either way — no order object, no markup.
+
   Usage: {% render 'lc-gcr-optin' %}
 {%- endcomment -%}
 
-{%- if request.page_type == 'customers/order' and order != blank -%}
+{%- assign gcr_page_type = request.page_type -%}
+{%- if gcr_page_type == 'customers/order' or gcr_page_type == 'order' -%}
+{%- if order != blank -%}
   {%- liquid
     assign gcr_email = order.email
     if gcr_email == blank
@@ -71,4 +77,5 @@
       };
     </script>
   {%- endif -%}
+{%- endif -%}
 {%- endif -%}
