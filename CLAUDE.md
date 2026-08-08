@@ -115,12 +115,15 @@ Ad account `act_20658834`, catalog `384890002574549`, pixel `214720653324969`. B
 Source of truth for the tooling: `scripts/_shopify-lib.mjs` (`LIVE_THEME_ID` / `DRAFT_THEME_ID` /
 `BACKUP_THEME_ID`) — re-point it after EVERY publish or the `apply-*.mjs` guard protects the wrong theme.
 
-As of **2026-08-07** (publish of the Google Shopping structured-data draft):
-- **LIVE / `main` (NEVER write):** `161529233513` "DRAFT GOOGLE SHOPPING 2026-08-07"
-- **Rollback backup + safe write base:** `161069989993` "DRAFT DE TRAVAIL 2026-07-18 v2" (previous live)
-- **No dedicated working draft** — `themeDuplicate` of the freshly published theme returns
-  `newTheme: null` with no `userErrors` (retried twice). Duplicate `161529233513` before the
-  next substantial theme change and re-point `DRAFT_THEME_ID`.
+As of **2026-08-08** (publish of the `priceValidUntil` fix):
+- **LIVE / `main` (NEVER write):** `161562099817` "DRAFT DE TRAVAIL 2026-08-08"
+- **Rollback backup + safe write base:** `161529233513` "DRAFT GOOGLE SHOPPING 2026-08-07" (previous live)
+
+⚠️ **Theme slots: 20/20 — Shopify's hard cap.** At the cap `themeDuplicate` fails by returning
+`newTheme: null` with **no `userErrors`**: a completely silent failure. If duplication appears
+to do nothing, **count the themes first** — that is the cause. Freeing one slot made it work on
+the next attempt. `141164904553` "Horizon" was deleted for this; it was unpublished, untouched
+since March, and `theme_store_id: 2481` means it can be re-downloaded from the Theme Store.
 
 ⚠️ **Do NOT publish or branch from `161090928745`.** It was copied from the live on 07-19, but
 the live was edited on 07-21, so that draft is missing the **Judge.me app embed**
