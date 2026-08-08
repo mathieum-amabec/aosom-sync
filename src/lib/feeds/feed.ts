@@ -56,13 +56,62 @@ export function saleSplit(it: Pick<FeedItem, "price" | "compareAtPrice">): {
 // by fresher data long before it expires.
 const SALE_WINDOW_DAYS = 30;
 
-const isoSecond = (d: Date): string => d.toISOString().replace(/\.\d{3}Z$/, "Z");
+// The window is expressed in STORE-LOCAL time (America/Toronto) on whole-day boundaries —
+// 00:00:00 on the start day through 23:59:59 on the end day — which is how a merchant thinks
+// about "this price is good for 30 days". Google accepts both a `Z` instant and an explicit
+// offset; the offset form is easier to read against the storefront.
+//
+// The offset is computed from the zone, never hardcoded. Quebec is -05:00 in winter (EST) and
+// -04:00 in summer (EDT), so a literal "-05:00" would be wrong an hour a day for eight months
+// of the year.
+const STORE_TIME_ZONE = "America/Toronto";
 
-/** Google's `sale_price_effective_date`: an ISO 8601 interval "<start>/<end>".
+/** Store-local Y/M/D plus the zone's UTC offset at that instant, e.g. "-04:00". */
+function localParts(d: Date): { y: number; m: number; day: number; offset: string } {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: STORE_TIME_ZONE,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    timeZoneName: "longOffset",
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(d).map((p) => [p.type, p.value]));
+  // longOffset renders "GMT-04:00"; strip the prefix. "GMT" alone means +00:00.
+  const raw = String(parts.timeZoneName ?? "").replace(/^GMT/, "");
+  return {
+    y: Number(parts.year),
+    m: Number(parts.month),
+    day: Number(parts.day),
+    offset: raw === "" ? "+00:00" : raw,
+  };
+}
+
+const pad = (n: number): string => String(n).padStart(2, "0");
+
+/** Google's `sale_price_effective_date`: an ISO 8601 interval "<start>/<end>" in store-local
+ * time with an explicit UTC offset, on whole-day boundaries.
  * `now` is injectable so the output is deterministic under test. */
 export function salePriceEffectiveDate(now: Date = new Date()): string {
-  const end = new Date(now.getTime() + SALE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  return `${isoSecond(now)}/${isoSecond(end)}`;
+  const start = localParts(now);
+  const end = localParts(new Date(now.getTime() + SALE_WINDOW_DAYS * 24 * 60 * 60 * 1000));
+  const startIso = `${start.y}-${pad(start.m)}-${pad(start.day)}T00:00:00${start.offset}`;
+  const endIso = `${end.y}-${pad(end.m)}-${pad(end.day)}T23:59:59${end.offset}`;
+  return `${startIso}/${endIso}`;
+}
+
+// Google and Pinterest disagree on this attribute and BOTH are strict about it:
+//   Google    -> in_stock / out_of_stock   (underscores; the spaced forms are prose, not values)
+//   Pinterest -> "in stock" / "out of stock" / "preorder"   (spaces; availability is REQUIRED)
+// buildPinterestFeed delegates to buildGoogleFeed, so the format has to be a parameter rather
+// than a constant, or fixing one channel silently invalidates the other on every item.
+export type AvailabilityFormat = "underscore" | "spaced";
+
+const AVAILABILITY_UNDERSCORE: Record<FeedItem["availability"], string> = {
+  "in stock": "in_stock",
+  "out of stock": "out_of_stock",
+};
+
+/** Render an item's availability in the shape the target channel requires. */
+export function availabilityValue(it: Pick<FeedItem, "availability">, fmt: AvailabilityFormat): string {
+  return fmt === "underscore" ? AVAILABILITY_UNDERSCORE[it.availability] : it.availability;
 }
 
 const CURRENCY = "CAD";
@@ -110,7 +159,7 @@ export function formatPrice(price: number): string {
 }
 
 // ── Google Merchant feed (RSS 2.0 + g: namespace) ─────────────────────────
-function googleItemXml(it: FeedItem, now?: Date): string {
+function googleItemXml(it: FeedItem, now?: Date, fmt: AvailabilityFormat = "underscore"): string {
   const { price, salePrice } = saleSplit(it);
   const g: string[] = [
     `<g:id>${escapeXml(it.id)}</g:id>`,
@@ -119,7 +168,7 @@ function googleItemXml(it: FeedItem, now?: Date): string {
     `<link>${escapeXml(it.link)}</link>`,
     `<g:image_link>${escapeXml(it.imageLink)}</g:image_link>`,
     ...it.additionalImageLinks.slice(0, 10).map((u) => `<g:additional_image_link>${escapeXml(u)}</g:additional_image_link>`),
-    `<g:availability>${it.availability}</g:availability>`,
+    `<g:availability>${availabilityValue(it, fmt)}</g:availability>`,
     `<g:price>${escapeXml(formatPrice(price))}</g:price>`,
     salePrice != null ? `<g:sale_price>${escapeXml(formatPrice(salePrice))}</g:sale_price>` : "",
     salePrice != null ? `<g:sale_price_effective_date>${escapeXml(salePriceEffectiveDate(now))}</g:sale_price_effective_date>` : "",
@@ -141,14 +190,19 @@ function googleItemXml(it: FeedItem, now?: Date): string {
   return `    <item>\n      ${g.join("\n      ")}\n    </item>`;
 }
 
-export function buildGoogleFeed(items: FeedItem[], opts: { title: string; link: string; description: string }, now?: Date): string {
+export function buildGoogleFeed(
+  items: FeedItem[],
+  opts: { title: string; link: string; description: string },
+  now?: Date,
+  fmt: AvailabilityFormat = "underscore",
+): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:g="http://base.google.com/ns/1.0">
   <channel>
     <title>${escapeXml(opts.title)}</title>
     <link>${escapeXml(opts.link)}</link>
     <description>${escapeXml(opts.description)}</description>
-${items.map((it) => googleItemXml(it, now)).join("\n")}
+${items.map((it) => googleItemXml(it, now, fmt)).join("\n")}
   </channel>
 </rss>`;
 }
@@ -221,7 +275,12 @@ ${items.map(redditItemXml).join("\n")}
 export function buildPinterestFeed(items: FeedItem[], opts: { title: string; link: string; description: string }): string {
   // Pinterest consumes the same RSS+g: shape as Google. We keep additional_image_link
   // (Pinterest prefers larger/square images — those are surfaced via these extras).
-  return buildGoogleFeed(items, opts);
+  //
+  // One deliberate divergence: Pinterest documents availability as "in stock" / "out of stock"
+  // / "preorder" WITH SPACES and treats the attribute as required, while Google accepts only
+  // in_stock / out_of_stock. Passing "spaced" here is what keeps the Google fix from
+  // invalidating every Pinterest item.
+  return buildGoogleFeed(items, opts, undefined, "spaced");
 }
 
 // ── Meta Catalog feed (RSS 2.0 + g:) — Meta rejects JSON; it ingests RSS/ATOM XML ──

@@ -3,7 +3,7 @@ import { mapToGoogleCategory, DEFAULT_GOOGLE_CATEGORY } from "@/lib/feeds/google
 import {
   escapeXml, stripHtml, truncate, formatPrice,
   buildGoogleFeed, buildPinterestFeed, buildMetaFeed, buildMetaXmlFeed,
-  buildBingFeed, buildRedditFeed, saleSplit, salePriceEffectiveDate, type FeedItem,
+  buildBingFeed, buildRedditFeed, saleSplit, salePriceEffectiveDate, availabilityValue, type FeedItem,
 } from "@/lib/feeds/feed";
 import { shopifyToFeedItems, stripImperialDimensions, stripPromoText, frenchifyColor, optionValue, materialFromMetafields, MATERIAL_METAFIELD_KEYS, type ShopifyFeedProduct } from "@/lib/feeds/source";
 
@@ -303,7 +303,9 @@ describe("buildGoogleFeed", () => {
   it("emits required g: fields per item", () => {
     expect(xml).toContain("<g:id>PAT-001GY</g:id>");
     expect(xml).toContain("<g:price>129.99 CAD</g:price>");
-    expect(xml).toContain("<g:availability>in stock</g:availability>");
+    // Google accepts ONLY the underscore form; the spaced form is prose in their docs.
+    expect(xml).toContain("<g:availability>in_stock</g:availability>");
+    expect(xml).not.toContain("<g:availability>in stock</g:availability>");
     expect(xml).toContain("<g:condition>new</g:condition>");
     expect(xml).toContain("<g:brand>Outsunny</g:brand>");
     expect(xml).toContain("<g:google_product_category>6792</g:google_product_category>");
@@ -600,24 +602,82 @@ describe("materialFromMetafields", () => {
 });
 
 describe("salePriceEffectiveDate", () => {
-  const now = new Date("2026-08-06T12:00:00.000Z");
-  it("emits a 30-day ISO 8601 interval anchored on the given instant", () => {
-    expect(salePriceEffectiveDate(now)).toBe("2026-08-06T12:00:00Z/2026-09-05T12:00:00Z");
+  it("emits store-local whole-day boundaries with an explicit offset (summer, EDT)", () => {
+    // 2026-08-06 16:00Z is 12:00 in Toronto, which is on EDT (-04:00).
+    expect(salePriceEffectiveDate(new Date("2026-08-06T16:00:00Z")))
+      .toBe("2026-08-06T00:00:00-04:00/2026-09-05T23:59:59-04:00");
   });
-  it("drops milliseconds (Google rejects sub-second precision)", () => {
-    expect(salePriceEffectiveDate(new Date("2026-08-06T12:00:00.456Z"))).not.toContain(".456");
+
+  it("uses -05:00 in winter (EST) — the offset is derived, never hardcoded", () => {
+    expect(salePriceEffectiveDate(new Date("2026-01-15T17:00:00Z")))
+      .toBe("2026-01-15T00:00:00-05:00/2026-02-14T23:59:59-05:00");
   });
-  it("spans exactly 30 days", () => {
-    const [start, end] = salePriceEffectiveDate(now).split("/");
-    expect(new Date(end).getTime() - new Date(start).getTime()).toBe(30 * 24 * 60 * 60 * 1000);
+
+  it("handles a window that starts on EST and ends on EDT (spring forward)", () => {
+    // 2026-02-25 + 30d lands on 2026-03-27, after the second-Sunday-of-March switch.
+    const out = salePriceEffectiveDate(new Date("2026-02-25T17:00:00Z"));
+    expect(out).toBe("2026-02-25T00:00:00-05:00/2026-03-27T23:59:59-04:00");
   });
-  it("crosses month and year boundaries correctly", () => {
-    expect(salePriceEffectiveDate(new Date("2026-12-20T00:00:00Z"))).toBe("2026-12-20T00:00:00Z/2027-01-19T00:00:00Z");
+
+  it("carries no milliseconds and no bare Z", () => {
+    const out = salePriceEffectiveDate(new Date("2026-08-06T16:00:00.456Z"));
+    expect(out).not.toContain(".456");
+    expect(out).not.toContain("Z");
+  });
+
+  it("spans 30 calendar days in store-local terms", () => {
+    const [start, end] = salePriceEffectiveDate(new Date("2026-08-06T16:00:00Z")).split("/");
+    expect(start.slice(0, 10)).toBe("2026-08-06");
+    expect(end.slice(0, 10)).toBe("2026-09-05");
+  });
+
+  it("crosses the year boundary correctly", () => {
+    expect(salePriceEffectiveDate(new Date("2026-12-20T17:00:00Z")))
+      .toBe("2026-12-20T00:00:00-05:00/2027-01-19T23:59:59-05:00");
+  });
+
+  it("resolves the local day from the store zone, not from UTC", () => {
+    // 2026-08-07 02:00Z is still 2026-08-06 22:00 in Toronto — the local day must win.
+    expect(salePriceEffectiveDate(new Date("2026-08-07T02:00:00Z")).slice(0, 10)).toBe("2026-08-06");
+  });
+});
+
+describe("availabilityValue — Google and Pinterest disagree, both strictly", () => {
+  it("maps to underscores for Google", () => {
+    expect(availabilityValue({ availability: "in stock" }, "underscore")).toBe("in_stock");
+    expect(availabilityValue({ availability: "out of stock" }, "underscore")).toBe("out_of_stock");
+  });
+  it("passes the spaced form through for Pinterest", () => {
+    expect(availabilityValue({ availability: "in stock" }, "spaced")).toBe("in stock");
+    expect(availabilityValue({ availability: "out of stock" }, "spaced")).toBe("out of stock");
+  });
+});
+
+describe("availability per channel — the Pinterest regression guard", () => {
+  const opts = { title: "T", link: "https://x", description: "d" };
+  it("Google emits in_stock", () => {
+    const xml = buildGoogleFeed(sample, opts);
+    expect(xml).toContain("<g:availability>in_stock</g:availability>");
+    expect(xml).not.toContain("<g:availability>in stock</g:availability>");
+  });
+  it("Pinterest keeps the spaced form even though it reuses the Google builder", () => {
+    const xml = buildPinterestFeed(sample, opts);
+    expect(xml).toContain("<g:availability>in stock</g:availability>");
+    expect(xml).not.toContain("<g:availability>in_stock</g:availability>");
+  });
+  it("Bing, Reddit and Meta-XML are untouched by the Google change", () => {
+    for (const xml of [buildBingFeed(sample, opts), buildRedditFeed(sample, opts), buildMetaXmlFeed(sample, opts)]) {
+      expect(xml).toContain("<g:availability>in stock</g:availability>");
+      expect(xml).not.toContain("<g:availability>in_stock</g:availability>");
+    }
+  });
+  it("the Meta JSON feed keeps the spaced form", () => {
+    expect(buildMetaFeed(sample)[0].availability).toBe("in stock");
   });
 });
 
 describe("buildGoogleFeed — material and sale window", () => {
-  const NOW = new Date("2026-08-06T12:00:00.000Z");
+  const NOW = new Date("2026-08-06T16:00:00.000Z"); // 12:00 Toronto (EDT)
   const matProducts: ShopifyFeedProduct[] = [
     {
       id: 901, title: "Abri en acier", handle: "abri-acier", vendor: "Ameublo Direct", status: "active",
@@ -649,7 +709,7 @@ describe("buildGoogleFeed — material and sale window", () => {
   it("pairs g:sale_price with a 30-day g:sale_price_effective_date", () => {
     const b = blockFor("MAT-1");
     expect(b).toContain("<g:sale_price>89.99 CAD</g:sale_price>");
-    expect(b).toContain("<g:sale_price_effective_date>2026-08-06T12:00:00Z/2026-09-05T12:00:00Z</g:sale_price_effective_date>");
+    expect(b).toContain("<g:sale_price_effective_date>2026-08-06T00:00:00-04:00/2026-09-05T23:59:59-04:00</g:sale_price_effective_date>");
   });
   it("emits no effective date when there is no sale", () => {
     expect(blockFor("MAT-2")).not.toContain("<g:sale_price_effective_date>");
