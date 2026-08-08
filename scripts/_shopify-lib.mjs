@@ -42,9 +42,9 @@ export const API_VERSION = "2025-01";
 // Re-pointed 2026-08-07 after publishing 161529233513. The values below had been stale
 // since 2026-07-13 — two publishes behind — which meant the apply-*.mjs "never touch LIVE"
 // guard was protecting a theme that had not been live for three weeks.
-export const LIVE_THEME_ID = "161529233513"; // main / published (LIVE), dup'd from 161069989993 + Google Shopping snippets — NEVER write here
-export const DRAFT_THEME_ID = "161069989993"; // previous live, now unpublished — safe write target AND rollback
-export const BACKUP_THEME_ID = "161069989993"; // same theme: it is both the rollback point and the clean write base
+export const LIVE_THEME_ID = "161562099817"; // main / published (LIVE) — NEVER write here
+export const DRAFT_THEME_ID = "161529233513"; // previous live, now unpublished — safe write target AND rollback
+export const BACKUP_THEME_ID = "161529233513"; // same theme: rollback point and clean write base
 // ⚠️ Do NOT use 161090928745 ("DRAFT DE TRAVAIL 2026-07-19"). It predates the 2026-07-21
 // live edits, so it is missing the Judge.me app embed and several product-page block
 // settings; publishing or branching from it silently reverts them.
