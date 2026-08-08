@@ -2,6 +2,41 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.58.0] - 2026-08-08
+
+### Fixed — `g:availability` was invalid for Google on every item
+
+- Google accepts **only** `in_stock` / `out_of_stock`. The feed was emitting `in stock` /
+  `out of stock` with spaces, which appears in Google's docs as prose, not as a submittable
+  value. All 2182 items carried the wrong form.
+- **Pinterest is the opposite and it is strict too:** it documents `"in stock"` /
+  `"out of stock"` / `"preorder"` with spaces, and `availability` is a *required* attribute.
+  `buildPinterestFeed` delegates to `buildGoogleFeed`, so a one-line fix to Google would have
+  silently invalidated a required field on every Pinterest item. The format is now a
+  parameter (`availabilityValue`), Google gets underscores, Pinterest keeps spaces, and a test
+  asserts each channel independently so the two can never be conflated again.
+- Bing, Reddit, Meta-XML and the Meta JSON feed are untouched and still emit the spaced form.
+
+### Changed — `g:sale_price_effective_date` now uses store-local time with a real offset
+
+- Was an instant pair in UTC (`…T01:51:01Z/…`). Now whole-day boundaries in store-local time:
+  `2026-08-06T00:00:00-04:00/2026-09-05T23:59:59-04:00`, which is how a merchant reads "good
+  for 30 days".
+- **The offset is derived from `America/Toronto`, never hardcoded.** Quebec is `-05:00` in
+  winter and `-04:00` in summer, so a literal `-05:00` would be an hour wrong for eight months
+  of the year. Tests lock EST, EDT, and a window that starts on one and ends on the other.
+
+### Verified as already correct, no change needed
+
+- **`g:id` is already the Aosom SKU** (`String(v.sku)`), e.g. `84C-653V00CG`. The numeric
+  Shopify id is used for `g:item_group_id`, which is what Google wants there — it is the
+  attribute that groups variants of one product.
+- **All ten requested EN→FR colour mappings already existed** in `COLOR_EN_FR` (brown→Brun,
+  grey→Gris, blue→Bleu, red→Rouge, green→Vert, yellow→Jaune, purple→Violet, pink→Rose,
+  orange→Orange, beige→Beige), alongside 18 more.
+- **PDP JSON-LD already emits full schema.org availability URLs** (`https://schema.org/InStock`)
+  and parses clean (0 errors across its 4 blocks, checked in a browser).
+
 ## [0.5.57.2] - 2026-08-06
 
 ### Changed — the GCR guard now accepts `order` alongside `customers/order`
