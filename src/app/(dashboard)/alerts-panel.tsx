@@ -7,16 +7,35 @@ interface FeedSync { feedType: string; lastSuccessAt: number | null; itemCount: 
 interface MetaToken { configured: boolean; state?: string; daysLeft?: number | null; expiresAt?: number; }
 interface PriceFloorItem { sku: string; shopify_price: number; aosom_price: number; gap: number; corrected_price?: number; status?: "corrected" | "failed"; error?: string; }
 interface PriceFloor { belowFloorCount: number; total: number; corrected: number; failed: number; deferred: number; auditedAt: number | null; topItems: PriceFloorItem[]; }
+interface LlmPool { pool: "assistant" | "batch"; state: "ok" | "warning" | "exhausted"; used: number; budget: number; pct: number; }
 interface Alerts {
   erroredImportJobs: ErroredImportJob[];
   staleDraftCount: number;
   feeds: FeedSync[];
   metaToken: MetaToken;
   priceFloor: PriceFloor | null;
+  /** Absent on an older deploy, or [] when the budget store was unreachable. */
+  llmPools?: LlmPool[];
 }
 
 const FEED_LABELS: Record<string, string> = {
   google: "Google", meta: "Meta (JSON)", meta_xml: "Meta (XML)", pinterest: "Pinterest", pinterest_en: "Pinterest (EN)",
+};
+
+const POOL_LABELS: Record<LlmPool["pool"], string> = {
+  assistant: "Assistant IA (vitrine)",
+  batch: "Imports & contenu",
+};
+
+/** What breaks, for whom, when a pool runs dry — so the operator doesn't have to recall it. */
+const POOL_IMPACT: Record<LlmPool["pool"], string> = {
+  assistant: "les clients reçoivent une erreur dans le widget de la boutique",
+  batch: "les imports et la génération de contenu s'arrêtent",
+};
+
+const POOL_ENV: Record<LlmPool["pool"], string> = {
+  assistant: "LLM_ASSISTANT_DAILY_BUDGET",
+  batch: "LLM_DAILY_TOKEN_BUDGET",
 };
 
 export function AlertsPanel() {
@@ -64,9 +83,15 @@ export function AlertsPanel() {
   // corrected/failed/deferred breakdown — surface it as a plain below-floor alert until the
   // next audit repopulates the richer fields.
   const floorLegacy = floorBelow > 0 && floorCorrected === 0 && floorFailed === 0 && floorDeferred === 0;
+  // Pools at or past 80% of their daily budget. Ordered exhausted-first so the pool that is
+  // already refusing calls sits at the top of the panel.
+  const pressuredPools = (data.llmPools ?? [])
+    .filter((p) => p.state !== "ok")
+    .sort((a, b) => (a.state === b.state ? 0 : a.state === "exhausted" ? -1 : 1));
   // Failed corrections (or an un-broken-down legacy backlog) are alerts; auto-corrected ones are good news.
   const hasAlerts = data.erroredImportJobs.length > 0 || data.staleDraftCount > 0 || tokenAlert ||
-    floorFailed > 0 || floorLegacy || data.feeds.some((f) => f.lastStatus === "error");
+    floorFailed > 0 || floorLegacy || data.feeds.some((f) => f.lastStatus === "error") ||
+    pressuredPools.length > 0;
   const floorAuditedAt = data.priceFloor?.auditedAt;
   const floorAge = floorAuditedAt ? ` · ${timeAgoEpoch(floorAuditedAt)}` : "";
 
@@ -77,6 +102,26 @@ export function AlertsPanel() {
         {!hasAlerts && (
           <Row tone="ok" title="Tout va bien" detail="Aucune alerte critique détectée." />
         )}
+
+        {/* LLM daily budget pressure — warns at 80% so there is room to act before the
+            pool fails closed and starts refusing calls. */}
+        {pressuredPools.map((p) => (
+          <Row
+            key={p.pool}
+            tone={p.state === "exhausted" ? "error" : "warn"}
+            title={
+              p.state === "exhausted"
+                ? `Budget LLM épuisé — ${POOL_LABELS[p.pool]}`
+                : `Budget LLM à ${p.pct}% — ${POOL_LABELS[p.pool]}`
+            }
+            detail={
+              `${p.used.toLocaleString("fr-CA")} / ${p.budget.toLocaleString("fr-CA")} tokens aujourd'hui (UTC). ` +
+              (p.state === "exhausted"
+                ? `Les appels sont refusés jusqu'à 00:00 UTC — ${POOL_IMPACT[p.pool]}. Augmentez ${POOL_ENV[p.pool]} dans Vercel pour rétablir tout de suite.`
+                : `Au plafond, ${POOL_IMPACT[p.pool]}. Augmentez ${POOL_ENV[p.pool]} dans Vercel si la journée n'est pas finie.`)
+            }
+          />
+        ))}
 
         {/* Import jobs in error */}
         {data.erroredImportJobs.length > 0 && (
