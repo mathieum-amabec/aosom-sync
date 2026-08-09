@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   startOfUtcDayEpoch, epochDaysAgo, estimatedRevenue, tokenExpiryStatus, tokenNeedsAttention,
+  llmPoolStatus,
 } from "@/lib/dashboard-metrics";
 
 describe("date windows", () => {
@@ -57,3 +58,44 @@ describe("tokenNeedsAttention", () => {
     expect(tokenNeedsAttention({ state: "never", daysLeft: null })).toBe(false);
   });
 });
+
+describe("llmPoolStatus", () => {
+  const B = 500_000; // the assistant pool's default daily budget
+
+  it("is ok below the 80% warn threshold", () => {
+    expect(llmPoolStatus("assistant", 0, B)).toEqual({ pool: "assistant", state: "ok", used: 0, budget: B, pct: 0 });
+    expect(llmPoolStatus("assistant", 399_999, B).state).toBe("ok");
+  });
+
+  it("warns from exactly 80% (inclusive) up to the cap", () => {
+    expect(llmPoolStatus("assistant", 400_000, B)).toEqual({ pool: "assistant", state: "warning", used: 400_000, budget: B, pct: 80 });
+    expect(llmPoolStatus("assistant", 499_999, B).state).toBe("warning");
+  });
+
+  // The boundary that matters: assertLlmBudget throws at used >= budget, so the panel must
+  // never show "warning" for a pool that is already refusing calls.
+  it("is exhausted at exactly the budget, matching assertLlmBudget's >= comparison", () => {
+    expect(llmPoolStatus("assistant", B, B)).toEqual({ pool: "assistant", state: "exhausted", used: B, budget: B, pct: 100 });
+    expect(llmPoolStatus("assistant", B + 1_935, B).state).toBe("exhausted");
+  });
+
+  it("reports pct to one decimal", () => {
+    expect(llmPoolStatus("batch", 1_000_000, 1_300_000).pct).toBe(76.9);
+  });
+
+  it("carries the pool name through so the UI can label the row", () => {
+    expect(llmPoolStatus("batch", 0, B).pool).toBe("batch");
+  });
+
+  it("treats a non-positive or non-finite budget as exhausted, never ok", () => {
+    expect(llmPoolStatus("assistant", 10, 0)).toEqual({ pool: "assistant", state: "exhausted", used: 10, budget: 0, pct: 100 });
+    expect(llmPoolStatus("assistant", 10, -5).state).toBe("exhausted");
+    expect(llmPoolStatus("assistant", 10, Number.NaN).state).toBe("exhausted");
+  });
+
+  it("floors a negative or non-finite used at 0 rather than reporting a negative pct", () => {
+    expect(llmPoolStatus("assistant", -100, B)).toEqual({ pool: "assistant", state: "ok", used: 0, budget: B, pct: 0 });
+    expect(llmPoolStatus("assistant", Number.NaN, B).used).toBe(0);
+  });
+});
+
