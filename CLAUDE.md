@@ -8,6 +8,15 @@ Catalogue management tool for a Shopify dropshipping store (27u5y2-kp.myshopify.
 
 Claude Code has full autonomous permission to read, edit, create, and delete any file without confirmation prompts.
 
+## Comportement Claude Code
+
+**AUTORISATION PERMANENTE :** Claude a l'autorisation complète pour toute session de lire, ouvrir,
+inspecter, créer des dossiers/fichiers temporaires, lancer des commandes read-only (grep, find, cat,
+ls, tsc --noEmit, git status/log/diff, GET API calls, health checks) sans jamais demander
+confirmation. Ne jamais interrompre avec un choix 1/2 pour une action read-only. Seules les écritures
+irréversibles (Shopify live, Turso prod, publications sociales, merges PR) nécessitent confirmation
+explicite.
+
 ## Architecture
 
 Next.js App Router on Vercel. Engine in `src/lib/`, UI in `src/app/(dashboard)/`, API in `src/app/api/`.
