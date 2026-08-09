@@ -119,8 +119,11 @@ const CURRENCY = "CAD";
 // Flat free shipping to Canada (Ameublo Direct absorbs shipping). Emitted as a constant
 // item-level <g:shipping> block on the feeds that carry shipping (Google, Bing). Indented
 // to sit at the 6-space item-field level once joined.
+//
+// <g:service> names the shipping option shown next to the price in Shopping. It is optional,
+// but with a single flat offer the alternative is an unlabelled row, so we name it.
 const SHIPPING_BLOCK =
-  "<g:shipping>\n        <g:country>CA</g:country>\n        <g:price>0 CAD</g:price>\n      </g:shipping>";
+  "<g:shipping>\n        <g:country>CA</g:country>\n        <g:service>Standard</g:service>\n        <g:price>0 CAD</g:price>\n      </g:shipping>";
 
 // XML 1.0 forbids these control chars entirely — a single one anywhere makes the WHOLE
 // RSS document invalid and Google/Pinterest reject the entire feed. Built from escapes so

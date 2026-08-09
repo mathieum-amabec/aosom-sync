@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { mapToGoogleCategory, DEFAULT_GOOGLE_CATEGORY } from "@/lib/feeds/google-category";
+import { mapToGoogleCategory, DEFAULT_GOOGLE_CATEGORY, ALL_GOOGLE_CATEGORIES } from "@/lib/feeds/google-category";
+import taxonomyFixture from "./fixtures/google-taxonomy-ids.json";
+
+/** id (as string) → official Google taxonomy path. Generated from Google's taxonomy dump. */
+const TAXONOMY: Record<string, string> = taxonomyFixture;
 import {
   escapeXml, stripHtml, truncate, formatPrice,
   buildGoogleFeed, buildPinterestFeed, buildMetaFeed, buildMetaXmlFeed,
@@ -9,17 +13,31 @@ import { shopifyToFeedItems, stripImperialDimensions, stripPromoText, frenchifyC
 
 describe("mapToGoogleCategory", () => {
   const cases: Array<[string, number]> = [
-    ["Pet Supplies > Cats > Outdoor Cat Enclosures", 1],          // pet beats "outdoor"
-    ["Patio & Garden > BBQs & Grills > Propane Gas Grills", 3553], // bbq
-    ["Toys & Games > Baby & Toddler Toys > Electric Toy Cars", 220],
-    ["Patio & Garden > Lawn & Garden > Raised Garden Beds > Galvanized Planter Boxes", 2962], // garden beats "patio"
-    ["Patio & Garden > Patio Furniture > Patio Furniture Sets", 6792], // outdoor furniture
-    ["Patio & Garden > Sun Loungers > Lounger Chairs", 6792],
-    ["Home Furnishings > Kitchen & Dining Furniture > Bar Stools", 436],
-    ["Office Products > Office Furniture > Office Chairs > Task Chairs", 436],
-    ["Gazebo", 6792],          // short Shopify type
-    ["Greenhouse", 2962],      // short Shopify type
-    ["Garden Pathway", 2962],  // short Shopify type
+    // Real product_type values taken from the live feed, with their corrected ids.
+    ["Pet Supplies > Cats > Outdoor Cat Enclosures", 4997],        // cat furniture, not bare "Animals"
+    ["Pet Supplies > Birds > Bird Cages", 4989],
+    ["Patio & Garden > BBQs & Grills > Propane Gas Grills", 2985], // was 3553 = Dinnerware > Plates
+    ["Toys & Games > Baby & Toddler Toys > Electric Ride-On Toys > Electric Toy Cars", 1253], // was 220 = Collectible Weapons
+    ["Patio & Garden > Lawn & Garden > Raised Garden Beds > Galvanized Planter Boxes", 721],
+    ["Patio & Garden > Sun Loungers > Lounger Chairs", 4105],      // outdoor seating beats indoor "chair"
+    ["Home Furnishings > Kitchen & Dining Furniture > Bar Stools", 1463],
+    ["Home Furnishings > Kitchen & Dining Furniture > Dining Chairs", 5886],
+    ["Home Furnishings > Kitchen & Dining Furniture > Dining Tables", 4355],
+    ["Home Furnishings > Living Room Furniture > Coffee Tables", 1395],
+    ["Home Furnishings > Living Room Furniture > Room Dividers", 4163],
+    ["Home Furnishings > Living Room Furniture > Sofas & Reclining Chairs > 2-Seater Sofas", 460],
+    ["Home Furnishings > Living Room Furniture > Sofas & Reclining Chairs > Accent Chairs", 6499],
+    ["Home Furnishings > Bedroom Furniture > Bedside Tables", 1549],
+    ["Home Furnishings > Home Décor > Artificial Trees", 6265],
+    ["Office Products > Office Furniture > Office Chairs > Task Chairs", 2045],
+    ["Office Products > Office Furniture > Office Chairs > Massage Chairs", 2919], // massage beats office chair
+    ["Office Products > Office Furniture > Office Cabinets & Cupboards", 6356],
+    ["Home Furnishings > Kitchen & Dining Furniture > Bar Cabinets", 6356], // cabinet beats the loose "dining" table rule
+    ["Home Furnishings > Bedroom Furniture > Wardrobes", 4063],
+    ["Home Furnishings > Living Room Furniture > Bookcases", 465],
+    ["Patio & Garden > Lawn & Garden > Sheds", 720],
+    ["Gazebo", 716],
+    ["Greenhouse", 693],
   ];
   for (const [pt, id] of cases) {
     it(`maps "${pt.split(">").pop()?.trim()}" → ${id}`, () => {
@@ -30,6 +48,29 @@ describe("mapToGoogleCategory", () => {
     expect(mapToGoogleCategory("").id).toBe(DEFAULT_GOOGLE_CATEGORY.id);
     expect(mapToGoogleCategory(null).id).toBe(DEFAULT_GOOGLE_CATEGORY.id);
     expect(mapToGoogleCategory("Totally Unknown Thing").id).toBe(436);
+  });
+});
+
+// The bug this guards against: an id that does not resolve is not a "coarse" category, it is
+// a DIFFERENT category, and nothing at runtime notices. Four ids previously shipped pointing
+// at Collectible Weapons, Dinnerware > Plates, and Fireplaces. The fixture is generated from
+// Google's official taxonomy-with-ids dump, so a hand-edited id/name pair fails here.
+describe("google taxonomy integrity", () => {
+  it("every emitted category id resolves to its stated path in the official taxonomy", () => {
+    const mismatched = ALL_GOOGLE_CATEGORIES
+      .filter((c) => TAXONOMY[String(c.id)] !== c.name)
+      .map((c) => `${c.id}: module says "${c.name}", Google says "${TAXONOMY[String(c.id)] ?? "(id not in taxonomy)"}"`);
+    expect(mismatched).toEqual([]);
+  });
+
+  it("covers every id the rules can emit", () => {
+    for (const c of ALL_GOOGLE_CATEGORIES) {
+      expect(Object.prototype.hasOwnProperty.call(TAXONOMY, String(c.id))).toBe(true);
+    }
+  });
+
+  it("emits meaningfully more than the 6 categories the feed had before", () => {
+    expect(new Set(ALL_GOOGLE_CATEGORIES.map((c) => c.id)).size).toBeGreaterThanOrEqual(30);
   });
 });
 
@@ -195,7 +236,7 @@ describe("shopifyToFeedItems", () => {
     const gy = items.find((i) => i.id === "PAT-001GY")!;
     expect(gy.link).toBe("https://ameublodirect.ca/products/chaise-de-patio");
     expect(gy.brand).toBe("Outsunny");
-    expect(gy.googleCategoryId).toBe(6792);
+    expect(gy.googleCategoryId).toBe(6828);
     expect(gy.itemGroupId).toBe("111");
     expect(gy.title).toContain("Chaise de patio");
     expect(gy.imageLink).toBe("https://img/1.jpg");
@@ -308,7 +349,7 @@ describe("buildGoogleFeed", () => {
     expect(xml).not.toContain("<g:availability>in stock</g:availability>");
     expect(xml).toContain("<g:condition>new</g:condition>");
     expect(xml).toContain("<g:brand>Outsunny</g:brand>");
-    expect(xml).toContain("<g:google_product_category>6792</g:google_product_category>");
+    expect(xml).toContain("<g:google_product_category>6828</g:google_product_category>");
     expect(xml).toContain("<g:item_group_id>111</g:item_group_id>");
     expect(xml).toContain("<g:additional_image_link>https://img/2.jpg</g:additional_image_link>");
   });
@@ -327,6 +368,7 @@ describe("buildGoogleFeed", () => {
     expect(xml).toContain("<g:color>Noir</g:color>");
     expect(xml).toContain("<g:shipping>");
     expect(xml).toContain("<g:country>CA</g:country>");
+    expect(xml).toContain("<g:service>Standard</g:service>");
     expect(xml).toContain("<g:price>0 CAD</g:price>");
   });
 });
@@ -389,7 +431,7 @@ describe("buildMetaFeed", () => {
     expect(it0).toMatchObject({
       id: "PAT-001GY", availability: "in stock", condition: "new",
       price: "129.99 CAD", link: "https://ameublodirect.ca/products/chaise-de-patio",
-      image_link: "https://img/1.jpg", brand: "Outsunny", google_product_category: 6792,
+      image_link: "https://img/1.jpg", brand: "Outsunny", google_product_category: 6828,
       additional_image_link: "https://img/2.jpg", item_group_id: "111",
     });
   });
