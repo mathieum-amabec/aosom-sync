@@ -404,11 +404,15 @@ export const DEFAULT_PUBLICATION_SCHEDULE: PublicationSchedule = {
   max_per_day: 3,
 };
 
+// posts_per_week is counted PER ARTICLE, not per bilingual pair — reserveBlogPublishSlot
+// takes one slot for FR and one for EN. The cron runs twice a week (Mon + Thu) and each run
+// produces a pair, so 2 runs x 2 languages = 4. A lower cap silently blocks the late run's
+// articles from ever publishing while still paying for their generation.
 export const DEFAULT_BLOG_SCHEDULE: BlogSchedule = {
   enabled: true,
-  posts_per_week: 2,
-  preferred_days: ["tue", "thu"],
-  preferred_time: "10:00",
+  posts_per_week: 4,
+  preferred_days: ["mon", "thu"],
+  preferred_time: "08:00",
 };
 
 // Video reels publish on their OWN schedule, independent of social posts and the blog

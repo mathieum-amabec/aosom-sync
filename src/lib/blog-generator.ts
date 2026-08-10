@@ -130,15 +130,19 @@ export async function generateArticleJson(input: GenerateBlogInput): Promise<Cla
   // *inside* the bodyHtml string in a ```html ... ``` fence. The outer JSON-fence strip above
   // does not reach inside the field, so those markers would render as literal "```html" text
   // on the published article. Strip any fence runs here.
+  // Sanitize BEFORE the body goes anywhere else, so the quality judge scores exactly the
+  // markup that will be published rather than a pre-strip version of it.
   const bodyHtml =
     typeof p.bodyHtml === "string"
-      ? p.bodyHtml
-          // Drop a fence opener sitting on its own line (and its ```html lang tag). Anchoring
-          // to a real line break avoids eating a word right after an inline backtick run.
-          .replace(/```+[a-zA-Z]*[ \t]*\r?\n/g, "")
-          // Remove any remaining bare backtick run (the trailing closing fence, strays).
-          .replace(/```+/g, "")
-          .trim()
+      ? sanitizeArticleHtml(
+          p.bodyHtml
+            // Drop a fence opener sitting on its own line (and its ```html lang tag).
+            // Anchoring to a real line break avoids eating a word right after an inline
+            // backtick run.
+            .replace(/```+[a-zA-Z]*[ \t]*\r?\n/g, "")
+            // Remove any remaining bare backtick run (the trailing closing fence, strays).
+            .replace(/```+/g, ""),
+        ).trim()
       : "";
   const excerpt = typeof p.excerpt === "string" ? p.excerpt.trim().slice(0, 300) : "";
   const metaDescription =
@@ -151,6 +155,37 @@ export async function generateArticleJson(input: GenerateBlogInput): Promise<Cla
   if (!bodyHtml) throw new Error("Claude response missing `bodyHtml`");
 
   return { title, bodyHtml, excerpt, metaDescription, tags };
+}
+
+/**
+ * Strip executable markup from model-generated HTML before it is stored on a public
+ * storefront article.
+ *
+ * The system prompt already forbids `<script>` and inline styles, but a prompt is a request,
+ * not a guarantee — and this HTML is rendered verbatim to every visitor on ameublodirect.ca,
+ * so a single stray tag would be stored XSS. In normal operation this function is a no-op
+ * (the model complies); it exists so that "no script tags" is enforced by code rather than
+ * by the model's goodwill.
+ *
+ * Deliberately a denylist of executable vectors, not a general HTML sanitizer: the body is
+ * meant to keep its semantic markup (h2/p/ul/figure), so stripping to a tag allowlist would
+ * destroy legitimate content. Inputs are repo-controlled topic strings, not user input.
+ */
+export function sanitizeArticleHtml(html: string): string {
+  return html
+    // Executable / embedding elements, including their contents.
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "")
+    .replace(/<(iframe|object|embed|form)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+    // Unclosed/self-closing variants of the same elements.
+    .replace(/<\/?(script|style|iframe|object|embed|form)\b[^>]*>/gi, "")
+    // Inline event handlers: onclick="…", onerror='…', onload=… (unquoted).
+    .replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son[a-z]+\s*=\s*'[^']*'/gi, "")
+    .replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "")
+    // javascript:/data: URLs in href/src.
+    .replace(/\s(href|src)\s*=\s*"\s*(?:javascript|data)\s*:[^"]*"/gi, "")
+    .replace(/\s(href|src)\s*=\s*'\s*(?:javascript|data)\s*:[^']*'/gi, "");
 }
 
 export function escapeHtml(s: string): string {

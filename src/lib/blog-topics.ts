@@ -148,6 +148,8 @@ export interface WeeklyTopicSelection {
   idx: number;
   /** ISO week number that produced the selection. */
   week: number;
+  /** Which run within the week produced this selection (0 = early, 1 = late). */
+  slot: number;
   /** FR title hint. */
   fr: string;
   /** EN title hint (same subject as {@link fr}). */
@@ -161,16 +163,39 @@ export interface WeeklyTopicSelection {
 }
 
 /**
- * Pick the bilingual topic for the week containing `date`. FR and EN are read
- * from the SAME index, so the pair always shares a subject.
+ * How many blog runs happen per ISO week. The cron fires Mon + Thu, and BOTH land in the
+ * same ISO week — so an index derived from the week number alone would hand both runs the
+ * SAME topic and publish duplicate articles. The run slot below breaks that tie.
+ */
+export const RUNS_PER_WEEK = 2;
+
+/**
+ * Which run of the week a date belongs to: Mon-Wed → 0 (the early run), Thu-Sun → 1 (the
+ * late run). Total over all 7 days so a manual trigger on any day still resolves, and
+ * constant per weekday so the selection stays deterministic.
+ */
+export function runSlotOf(date: Date): number {
+  const day = date.getUTCDay(); // 0 = Sunday
+  return day === 0 || day >= 4 ? 1 : 0;
+}
+
+/**
+ * Pick the bilingual topic for the run containing `date`. FR and EN are read from the SAME
+ * index, so the pair always shares a subject.
+ *
+ * The index advances once per RUN, not once per week: `week * RUNS_PER_WEEK + slot`. With
+ * 33 topics and 2 runs/week, gcd(2, 33) = 1, so the catalogue still cycles through every
+ * topic exactly once before repeating — it just does it in half the calendar time.
  */
 export function selectBilingualTopic(date: Date): WeeklyTopicSelection {
   const week = isoWeekNumber(date);
-  const idx = week % BILINGUAL_TOPICS.length;
+  const slot = runSlotOf(date);
+  const idx = (week * RUNS_PER_WEEK + slot) % BILINGUAL_TOPICS.length;
   const t = BILINGUAL_TOPICS[idx];
   return {
     idx,
     week,
+    slot,
     fr: t.fr,
     en: t.en,
     imageQuery: t.imageQuery,

@@ -21,9 +21,12 @@ import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplas
 import { generateBlogArticle } from "@/lib/blog-generator";
 import { trackCron } from "@/lib/cron-tracking";
 
-// Two sequential blog generations (Claude article + judge + Shopify create), each ~30-50s,
-// plus one shared Unsplash fetch and a short pause between languages.
-export const maxDuration = 180;
+// Everything now runs inside THIS function: 2 article generations (~25-45s each) + 2 judge
+// calls + the shared Unsplash fetch + 2 Shopify creates + the inter-language pause. That is
+// ~120-160s at p50 with no headroom at 180s, and a timeout mid-Shopify-create would leave an
+// article created but unlogged. 300s is Vercel's current default ceiling and costs nothing
+// when unused (billing is on active CPU, not wall clock).
+export const maxDuration = 300;
 
 // Spacing between FR and EN generations — gives Claude a beat between two large calls.
 const BETWEEN_LANGS_DELAY_MS = 3_000;
@@ -118,7 +121,9 @@ export async function GET(request: Request) {
 
   const sel = selectBilingualTopic(new Date());
 
-  console.log(`[CRON/blog] week=${sel.week} idx=${sel.idx} FR="${sel.fr}" EN="${sel.en}" img="${sel.imageQuery}"`);
+  // slot distinguishes the Mon run from the Thu run — both share an ISO week, so it is the
+  // only thing keeping the two runs on different topics.
+  console.log(`[CRON/blog] week=${sel.week} slot=${sel.slot} idx=${sel.idx} FR="${sel.fr}" EN="${sel.en}" img="${sel.imageQuery}"`);
 
   // trackCron records the run (success/error) in cron_runs for the dashboard. The work throws
   // on total failure so it is logged as 'error'; the outer catch turns that back into the

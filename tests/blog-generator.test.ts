@@ -245,3 +245,60 @@ describe("injectInlineImages", () => {
     expect(out).toContain("&lt;script&gt;");
   });
 });
+
+describe("sanitizeArticleHtml", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("strips script tags and their contents", async () => {
+    const { mod } = await loadGenerator();
+    const out = mod.sanitizeArticleHtml('<p>A</p><script>steal(document.cookie)</script><p>B</p>');
+    expect(out).not.toContain("script");
+    expect(out).not.toContain("steal");
+    expect(out).toBe("<p>A</p><p>B</p>");
+  });
+
+  it("strips iframe, object, embed, form and style blocks", async () => {
+    const { mod } = await loadGenerator();
+    const out = mod.sanitizeArticleHtml(
+      '<p>A</p><iframe src="evil"></iframe><style>body{display:none}</style><form action="x"></form>',
+    );
+    expect(out).toBe("<p>A</p>");
+  });
+
+  it("strips inline event handlers in quoted and unquoted forms", async () => {
+    const { mod } = await loadGenerator();
+    expect(mod.sanitizeArticleHtml('<p onclick="evil()">A</p>')).toBe("<p>A</p>");
+    expect(mod.sanitizeArticleHtml("<p onerror='evil()'>A</p>")).toBe("<p>A</p>");
+    expect(mod.sanitizeArticleHtml("<img onload=evil() />")).toBe("<img />");
+  });
+
+  it("strips javascript: and data: URLs from href/src", async () => {
+    const { mod } = await loadGenerator();
+    expect(mod.sanitizeArticleHtml('<a href="javascript:alert(1)">x</a>')).toBe("<a>x</a>");
+    expect(mod.sanitizeArticleHtml('<img src="data:text/html;base64,PHN2Zz4=" />')).toBe("<img />");
+  });
+
+  it("leaves legitimate semantic markup untouched", async () => {
+    const { mod } = await loadGenerator();
+    const clean = '<p>Intro.</p><h2>Titre</h2><ul><li>Un</li></ul><a href="https://ok.example">lien</a>';
+    expect(mod.sanitizeArticleHtml(clean)).toBe(clean);
+  });
+
+  it("sanitizes the body before it reaches Shopify", async () => {
+    const { mod, createBlogArticle } = await loadGenerator({
+      claude: claudeReturning({
+        ...ARTICLE_JSON,
+        bodyHtml: '<p>Intro.</p><script>evil()</script><h2>Un</h2><p>Corps.</p><p>Fin.</p>',
+      }),
+    });
+
+    await mod.generateBlogArticle({ topic: "Petit salon", lang: "fr" });
+
+    const body = createBlogArticle.mock.calls[0][0].bodyHtml;
+    expect(body).not.toContain("script");
+    expect(body).not.toContain("evil");
+    expect(body).toContain("<h2>Un</h2>");
+  });
+});
