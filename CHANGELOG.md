@@ -7,10 +7,19 @@ All notable changes to Aosom Sync will be documented in this file.
 ### Fixed — the blog cron fired every week and failed 100% of the time
 
 - **Root cause was not in the pipeline.** `/api/cron/blog` did not generate anything itself:
-  it made an HTTP call back to its own `/api/blog/generate` endpoint. Vercel **SSO Deployment
-  Protection** is set to `all_except_custom_domains`, and the project has **no custom domain**
-  (all three hosts are `*.vercel.app`), so that self-call left the function, hit the Vercel
-  edge, and came back as a **401 — before the app's own `CRON_SECRET` check ever ran**.
+  it made an HTTP call back to its own `/api/blog/generate` endpoint, and that self-call was
+  answered with a **401 before the app's own `CRON_SECRET` check ever ran**.
+- **Vercel SSO Deployment Protection is enabled** (`all_except_custom_domains`, no custom
+  domain) but is **not uniform across hosts** — measured on `/api/cron/blog` with no
+  credentials: the **production alias** `aosom-sync.vercel.app` reaches the app (401 from
+  `verifyCronSecret`), while the **per-deployment URL** and the **git-branch alias** both return
+  `302 Redirecting...` from the SSO edge and never reach the app at all. A self-`fetch()` whose
+  origin resolves to either protected host is intercepted; `fetch` follows the 302 into the SSO
+  flow and lands on a 401.
+- **Which host a Vercel Cron invocation presents was not verified.** The old comment in
+  `cron/content/route.ts` asserts `request.url` carries the production origin; that is an
+  assumption, not a measurement. Removing the hop removes every variant of the failure, so the
+  fix does not depend on resolving it.
 - The cron itself was healthy the whole time: 4 runs out of 4 in the 30-day `cron_runs`
   retention window, every one at its scheduled minute, every one an error. Last article
   actually created: **2026-06-22**. `blog_publish_counter` was empty — auto-publish had never
