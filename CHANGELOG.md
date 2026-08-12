@@ -2,6 +2,31 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.59.1] - 2026-08-12
+
+### Fixed — the EN feed announced one brand and linked to another
+
+The Pinterest EN feed served English titles but pointed every offer at the **French**
+storefront and labelled it **"Ameublo Direct"**. An English shopper landed on a French page,
+and the feed's brand did not match the branding on the page it linked to — the
+brand/landing-page mismatch Pinterest and Google both flag.
+
+- **EN offers now link to the `/en` storefront** — `ameublodirect.ca/en/products/{handle}`,
+  verified live (`200`, `<html lang="en">`, page titled "… — Furnish Direct").
+- **EN house brand is now "Furnish Direct"**, the store's actual EN identity. A real vendor
+  (Outsunny, …) still wins over the house brand, exactly as on the FR feed.
+- **Supplier scrubbing is locale-aware.** `scrubSupplier` took the FR brand unconditionally,
+  so an EN description read "the Ameublo Direct shelter". It now takes the locale's brand.
+- **Channel metadata matches** — the EN feed no longer titles itself "Ameublo Direct".
+
+`furnishdirect.ca` was **not** used: it is **NXDOMAIN** at the .ca registry (verified against
+CIRA 2026-08-12; Shopify reports exactly one domain, `ameublodirect.ca`). Linking there would
+have shipped a dead link for all 2 164 offers. Furnish Direct is the `/en` locale of the same
+store, not a separate site. A test locks the domain out of the feed so it cannot creep back in.
+
+Scope: `preferEnglishTitle` is passed by **`/api/feeds/pinterest-en` only** — no Google EN feed
+exists. The FR feeds are byte-identical; regression tests assert their links keep no `/en`.
+
 ## [0.5.59.0] - 2026-08-09
 
 ### Fixed — the blog cron fired every week and failed 100% of the time

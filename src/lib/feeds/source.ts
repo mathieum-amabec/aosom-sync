@@ -55,9 +55,23 @@ const HOUSE_BRAND = "Ameublo Direct";
 const SUPPLIER_WORD = /\baosom\b/i; // single match (no /g — safe with .test())
 const SUPPLIER_GLOBAL = /\baosom\b/gi; // replace-all
 
-/** Replace any "Aosom" occurrence with the house brand and tidy whitespace. */
-export function scrubSupplier(s: string): string {
-  return s.replace(SUPPLIER_GLOBAL, HOUSE_BRAND).replace(/\s{2,}/g, " ").trim();
+// English feeds carry the store's EN identity, "Furnish Direct". That is NOT a separate shop:
+// it is the same 27u5y2-kp store rendered at the `/en` locale path, which is why the EN link
+// is the FR domain + EN_PATH_PREFIX and not a domain of its own.
+//
+// ⚠️ `furnishdirect.ca` is NOT a live domain — it is NXDOMAIN at the .ca registry (verified
+// 2026-08-12 against CIRA; Shopify reports exactly one domain, `ameublodirect.ca`). Pointing
+// feed links there would ship a dead link for every offer. If that domain is ever registered
+// and attached to Shopify as an EN market/alias, swap EN_PATH_PREFIX for the domain here —
+// nothing else in this file needs to change.
+const HOUSE_BRAND_EN = "Furnish Direct";
+const EN_PATH_PREFIX = "/en";
+
+/** Replace any "Aosom" occurrence with the house brand and tidy whitespace.
+ * `houseBrand` selects the locale's identity so an EN description never reads
+ * "Ameublo Direct" on a page that brands itself Furnish Direct. */
+export function scrubSupplier(s: string, houseBrand: string = HOUSE_BRAND): string {
+  return s.replace(SUPPLIER_GLOBAL, houseBrand).replace(/\s{2,}/g, " ").trim();
 }
 
 // Google's title and description guidelines prohibit promotional text — "free shipping" is
@@ -201,23 +215,34 @@ export function stripImperialDimensions(title: string): string {
 }
 
 /** Brand to show: keep a real product vendor (Outsunny, …); replace empty or the
- * supplier name ("Aosom") with the house brand. */
-function resolveBrand(vendor: string | null | undefined): string {
+ * supplier name ("Aosom") with the locale's house brand (FR "Ameublo Direct",
+ * EN "Furnish Direct" — both must match the branding on the landing page the
+ * offer links to, or the channel flags a brand/landing-page mismatch). */
+function resolveBrand(
+  vendor: string | null | undefined,
+  houseBrand: string = HOUSE_BRAND,
+): string {
   const v = (vendor ?? "").trim();
-  return !v || SUPPLIER_WORD.test(v) ? HOUSE_BRAND : v;
+  return !v || SUPPLIER_WORD.test(v) ? houseBrand : v;
 }
 
 /** Pure: map raw Shopify products to feed items (one per variant SKU). Active only.
  * g:id (SKU) is deduplicated across the whole feed — a duplicate g:id makes Google
  * reject/merge unpredictably, and dropship catalogs do reuse SKUs.
  *
- * When `opts.preferEnglishTitle` is set, the base title comes from `p.titleEn`
- * (custom.title_en metafield), falling back to the FR `p.title` when it's missing
- * or blank. Used by the Pinterest EN feed to reach the anglophone audience. */
+ * When `opts.preferEnglishTitle` is set the feed switches to the EN locale wholesale, not
+ * just the title: the base title comes from `p.titleEn` (custom.title_en metafield, falling
+ * back to the FR `p.title` when missing or blank), links point at the `/en` storefront, and
+ * the house brand becomes "Furnish Direct". Those three move together on purpose — an EN
+ * title linking to a FR page, or a "Furnish Direct" brand on a page headed "Ameublo Direct",
+ * is exactly the mismatch Pinterest/Google flag. Used by the Pinterest EN feed. */
 export function shopifyToFeedItems(
   products: ShopifyFeedProduct[],
   opts: { preferEnglishTitle?: boolean } = {},
 ): FeedItem[] {
+  const english = opts.preferEnglishTitle === true;
+  const houseBrand = english ? HOUSE_BRAND_EN : HOUSE_BRAND;
+  const pathPrefix = english ? EN_PATH_PREFIX : "";
   const items: FeedItem[] = [];
   const seenIds = new Set<string>();
   let dupCount = 0;
@@ -233,9 +258,9 @@ export function shopifyToFeedItems(
     if (!p.handle) continue;
     const images = (p.images ?? []).map((i) => i.src).filter(Boolean);
     if (images.length === 0) continue;            // Google/Pinterest/Meta require an image
-    const link = `${STOREFRONT_BASE_URL}/products/${encodeURIComponent(p.handle)}`;
-    const description = truncate(stripPromoText(scrubSupplier(stripHtml(p.body_html ?? ""))), DESCRIPTION_MAX);
-    const brand = resolveBrand(p.vendor);
+    const link = `${STOREFRONT_BASE_URL}${pathPrefix}/products/${encodeURIComponent(p.handle)}`;
+    const description = truncate(stripPromoText(scrubSupplier(stripHtml(p.body_html ?? ""), houseBrand)), DESCRIPTION_MAX);
+    const brand = resolveBrand(p.vendor, houseBrand);
     const cat = mapToGoogleCategory(p.product_type);
     const variants = (p.variants ?? []).filter((v) => v.sku && String(v.sku).trim() !== "");
     const multi = variants.length > 1;
@@ -260,7 +285,7 @@ export function shopifyToFeedItems(
       items.push({
         id,
         itemGroupId: multi ? String(p.id) : null,
-        title: truncate(stripPromoText(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`))), 150),
+        title: truncate(stripPromoText(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`, houseBrand))), 150),
         description,
         link,
         imageLink: images[0],
