@@ -88,12 +88,12 @@ describe("runAssistant", () => {
     expect(system).toMatch(/refine|accumulated|maxPrice/i);
   });
 
-  it("uses the EN store domain for locale=en", async () => {
+  it("uses the /en locale path for locale=en (furnishdirect.ca is NXDOMAIN)", async () => {
     create
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
       .mockResolvedValueOnce(final({ reply: "Here you go.", products: [{ sku: "A-1", reason: "Comfy" }] }));
     const res = await runAssistant({ message: "I need a sofa", locale: "en" });
-    expect(res.products[0].url).toBe("https://furnishdirect.ca/products/sofa-sectionnel-gris");
+    expect(res.products[0].url).toBe("https://ameublodirect.ca/en/products/sofa-sectionnel-gris");
   });
 
   it("swaps the raw EN catalog name for the curated Shopify FR title on locale=fr", async () => {

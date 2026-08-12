@@ -46,9 +46,13 @@ export interface AssistantTurn {
 const MAX_STEPS = 3; // total model calls (tool loop + final) — bounds per-request Claude spend
 const SEARCH_LIMIT = 12; // rows returned to the model per search
 const MAX_CARDS = 4;
+// ⚠️ EN is the `/en` LOCALE PATH of the same storefront, NOT a separate domain.
+// `furnishdirect.ca` was used here and is NXDOMAIN at the .ca registry (verified against
+// CIRA 2026-08-12; Shopify reports exactly one domain, `ameublodirect.ca`), so every EN
+// recommendation was a dead link. Same fix already shipped for the feeds in v0.5.59.1.
 const STORE_URL: Record<Locale, string> = {
   fr: "https://ameublodirect.ca",
-  en: "https://furnishdirect.ca",
+  en: "https://ameublodirect.ca/en",
 };
 
 const SEARCH_TOOL: Anthropic.Tool = {

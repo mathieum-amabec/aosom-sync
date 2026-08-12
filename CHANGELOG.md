@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.59.4] - 2026-08-12
+
+### Fixed — EN assistant links pointed at a domain that does not exist
+
+Re-lands the one-line half of v0.5.59.3 (reverted in #419). STORE_URL.en was
+`https://furnishdirect.ca`, which is NXDOMAIN at the .ca registry (verified against CIRA;
+Shopify reports exactly one domain, `ameublodirect.ca`). Every English recommendation from
+the shopping assistant was a dead link. Now `https://ameublodirect.ca/en`, the live EN
+locale — the same fix shipped for the feeds in v0.5.59.1.
+
+Also re-lands `.github/CODEOWNERS` (no runtime effect).
+
+The behavioural half of v0.5.59.3 (draft filter, budget ceiling, empty-state reply,
+in-stock preference) is deliberately NOT re-landed here — it needs live verification, and
+the assistant LLM budget pool was exhausted at the time of writing.
+
 ## [0.5.59.2] - 2026-08-12
 
 ### Fixed — v0.5.59.1 changed the EN links but NOT the EN brand

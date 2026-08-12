@@ -1,0 +1,12 @@
+# Deploy pipeline and CI config change who can ship to production, so they require an
+# explicit owner review. Without this, any account with write access can edit
+# vercel-deploy.yml to exfiltrate VERCEL_TOKEN or push arbitrary code to prod.
+# Enforcement requires branch protection with "Require review from Code Owners" enabled.
+/.github/                 @mathieum-amabec
+/.github/workflows/       @mathieum-amabec
+
+# Auth, cron authentication and the public LLM endpoint are the security-load-bearing paths.
+/src/proxy.ts             @mathieum-amabec
+/src/lib/cron-auth.ts     @mathieum-amabec
+/src/app/api/assistant/   @mathieum-amabec
+/next.config.ts           @mathieum-amabec
