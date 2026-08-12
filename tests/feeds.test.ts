@@ -330,6 +330,67 @@ describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => 
     const items = shopifyToFeedItems(enProducts);
     expect(items.find((i) => i.id === "EN-001")!.title).toBe("Chaise de patio");
   });
+
+  // The EN feed is the `/en` locale of the SAME storefront, branded "Furnish Direct".
+  // Link, brand and scrubbed copy must move together — an EN offer linking to the FR page,
+  // or branded "Furnish Direct" while the page says "Ameublo Direct", is the brand/landing
+  // -page mismatch Pinterest and Google flag.
+  it("links to the /en storefront, never a bare /products path", () => {
+    const items = shopifyToFeedItems(enProducts, { preferEnglishTitle: true });
+    expect(items.find((i) => i.id === "EN-001")!.link).toBe(
+      "https://ameublodirect.ca/en/products/chaise-de-patio",
+    );
+    for (const i of items) expect(i.link).toContain("/en/products/");
+  });
+
+  it("keeps FR links free of the /en prefix", () => {
+    const items = shopifyToFeedItems(enProducts);
+    expect(items.find((i) => i.id === "EN-001")!.link).toBe(
+      "https://ameublodirect.ca/products/chaise-de-patio",
+    );
+    for (const i of items) expect(i.link).not.toContain("/en/products/");
+  });
+
+  // furnishdirect.ca is NXDOMAIN (verified against the .ca registry 2026-08-12). If it ever
+  // creeps into the feed every offer becomes a dead link, so lock it out explicitly.
+  it("never emits a furnishdirect.ca link", () => {
+    for (const opts of [{ preferEnglishTitle: true }, {}]) {
+      for (const i of shopifyToFeedItems(enProducts, opts)) {
+        expect(i.link).not.toContain("furnishdirect");
+        expect(i.link.startsWith("https://ameublodirect.ca/")).toBe(true);
+      }
+    }
+  });
+
+  it("uses the EN house brand, and still keeps a real vendor", () => {
+    const items = shopifyToFeedItems(enProducts, { preferEnglishTitle: true });
+    expect(items.find((i) => i.id === "EN-002")!.brand).toBe("Furnish Direct"); // no vendor
+    expect(items.find((i) => i.id === "EN-001")!.brand).toBe("Outsunny");       // real vendor wins
+    // Same products on the FR feed keep the FR identity.
+    const fr = shopifyToFeedItems(enProducts);
+    expect(fr.find((i) => i.id === "EN-002")!.brand).toBe("Ameublo Direct");
+  });
+
+  it("scrubs the supplier to the EN house brand in title and description", () => {
+    const supplierNamed: ShopifyFeedProduct[] = [{
+      id: 703, title: "Abri Aosom", titleEn: "Aosom Car Shelter", handle: "abri",
+      vendor: "Aosom", status: "active", published_at: PUBLISHED,
+      body_html: "<p>The Aosom shelter is weatherproof.</p>",
+      images: [{ src: "https://img/4.jpg" }],
+      variants: [{ sku: "EN-004", price: "99.99", inventory_management: null }],
+    }];
+    const en = shopifyToFeedItems(supplierNamed, { preferEnglishTitle: true })[0];
+    expect(en.brand).toBe("Furnish Direct");
+    expect(en.title).toBe("Furnish Direct Car Shelter");
+    expect(en.description).toContain("Furnish Direct shelter");
+    expect(`${en.title} ${en.description} ${en.brand}`).not.toMatch(/aosom/i);
+    expect(`${en.title} ${en.description}`).not.toContain("Ameublo Direct");
+
+    const fr = shopifyToFeedItems(supplierNamed)[0];
+    expect(fr.brand).toBe("Ameublo Direct");
+    expect(fr.title).toBe("Abri Ameublo Direct");
+    expect(`${fr.title} ${fr.description}`).not.toContain("Furnish Direct");
+  });
 });
 
 const sample: FeedItem[] = shopifyToFeedItems(fixtureProducts);
