@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.59.2] - 2026-08-12
+
+### Fixed — v0.5.59.1 changed the EN links but NOT the EN brand
+
+v0.5.59.1 shipped locale-aware branding that did nothing. Verified on the live feed right
+after that deploy: all 2 164 EN links moved to `/en/products/`, but every `<g:brand>` still
+read **"Ameublo Direct"**.
+
+Cause: `resolveBrand` keeps a real product vendor (Outsunny, …) over the house brand, and
+Shopify's `vendor` field is set to **"Ameublo Direct" on 100% of products** (250/250 sampled
+2026-08-12). Our own store name was being treated as a third-party manufacturer, so the
+"a real vendor wins" branch fired and pinned the EN feed to the FR brand. The v0.5.59.1
+change only ever applied to products with an empty or "Aosom" vendor — the catalogue has none.
+
+- `resolveBrand` now recognises **either house brand** in the vendor field (case-insensitive)
+  and replaces it with the locale's brand. A genuine third-party vendor still wins.
+- Symmetric guard: an EN-branded vendor cannot leak "Furnish Direct" into the FR feed.
+
 ## [0.5.59.1] - 2026-08-12
 
 ### Fixed — the EN feed announced one brand and linked to another

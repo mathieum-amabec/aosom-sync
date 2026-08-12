@@ -214,16 +214,27 @@ export function stripImperialDimensions(title: string): string {
   return cleaned.replace(/[\s,/–—-]+$/u, "").trim();
 }
 
-/** Brand to show: keep a real product vendor (Outsunny, …); replace empty or the
- * supplier name ("Aosom") with the locale's house brand (FR "Ameublo Direct",
- * EN "Furnish Direct" — both must match the branding on the landing page the
- * offer links to, or the channel flags a brand/landing-page mismatch). */
+// Either house brand, whichever locale it came from. Used to recognise our OWN name in the
+// Shopify `vendor` field (see resolveBrand).
+const HOUSE_BRANDS = [HOUSE_BRAND, HOUSE_BRAND_EN];
+
+/** Brand to show: keep a real product vendor (Outsunny, …); replace empty, the supplier
+ * name ("Aosom"), or our own house brand with the locale's house brand (FR "Ameublo
+ * Direct", EN "Furnish Direct"). The brand must match the branding on the landing page
+ * the offer links to, or the channel flags a brand/landing-page mismatch.
+ *
+ * The house-brand case is not hypothetical: Shopify's `vendor` field is set to
+ * "Ameublo Direct" on 100% of products (250/250 sampled 2026-08-12). Without this branch
+ * the "a real vendor wins" rule fires on our OWN name and the EN feed silently keeps the
+ * FR brand — which is exactly what shipped in v0.5.59.1 and did nothing. */
 function resolveBrand(
   vendor: string | null | undefined,
   houseBrand: string = HOUSE_BRAND,
 ): string {
   const v = (vendor ?? "").trim();
-  return !v || SUPPLIER_WORD.test(v) ? houseBrand : v;
+  if (!v || SUPPLIER_WORD.test(v)) return houseBrand;
+  if (HOUSE_BRANDS.some((b) => b.toLowerCase() === v.toLowerCase())) return houseBrand;
+  return v;
 }
 
 /** Pure: map raw Shopify products to feed items (one per variant SKU). Active only.
