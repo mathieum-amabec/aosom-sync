@@ -371,6 +371,29 @@ describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => 
     expect(fr.find((i) => i.id === "EN-002")!.brand).toBe("Ameublo Direct");
   });
 
+  // Shopify's `vendor` is literally "Ameublo Direct" on 100% of live products, so the
+  // "a real vendor wins" rule used to fire on our OWN name and pin the EN feed to the FR
+  // brand. Our house brand is not a third-party manufacturer — the EN feed must localize it.
+  it("localizes our own house brand when it arrives via the vendor field", () => {
+    const houseVendor: ShopifyFeedProduct[] = [{
+      id: 704, title: "Table", titleEn: "Table", handle: "table",
+      vendor: "Ameublo Direct", status: "active", published_at: PUBLISHED,
+      images: [{ src: "https://img/5.jpg" }],
+      variants: [{ sku: "EN-005", price: "10.00", inventory_management: null }],
+    }];
+    expect(shopifyToFeedItems(houseVendor, { preferEnglishTitle: true })[0].brand)
+      .toBe("Furnish Direct");
+    expect(shopifyToFeedItems(houseVendor)[0].brand).toBe("Ameublo Direct");
+
+    // Symmetric: an EN-branded vendor must not leak "Furnish Direct" into the FR feed.
+    const enVendor = [{ ...houseVendor[0], vendor: "Furnish Direct" }];
+    expect(shopifyToFeedItems(enVendor)[0].brand).toBe("Ameublo Direct");
+    // Case-insensitive — the vendor field is free text.
+    const lower = [{ ...houseVendor[0], vendor: "ameublo direct" }];
+    expect(shopifyToFeedItems(lower, { preferEnglishTitle: true })[0].brand)
+      .toBe("Furnish Direct");
+  });
+
   it("scrubs the supplier to the EN house brand in title and description", () => {
     const supplierNamed: ShopifyFeedProduct[] = [{
       id: 703, title: "Abri Aosom", titleEn: "Aosom Car Shelter", handle: "abri",
