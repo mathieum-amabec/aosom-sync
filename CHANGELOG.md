@@ -2,6 +2,39 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.59.3] - 2026-08-12
+
+### Fixed — the shopping assistant sent English shoppers to a domain that does not exist
+
+Live QA on `ameublodirect.ca` found the assistant promising options it never delivered:
+**12 of 18 realistic queries returned zero products** under the line "Voici quelques options
+qui pourraient convenir.", and **3 of 5 recommended links were HTTP 404**.
+
+- **EN links pointed at `furnishdirect.ca` — NXDOMAIN.** `STORE_URL.en` is now
+  `https://ameublodirect.ca/en`, the live EN locale (same fix shipped for the feeds in
+  v0.5.59.1). Verified against CIRA; Shopify reports one domain. Every EN recommendation
+  was a dead link. A test locks the domain out.
+- **Draft / unpublished products were recommended.** Turso has no publish-status column, so
+  `status=draft, published_at=NULL` imports reached shoppers and their PDP 404s. The existing
+  FR-title Shopify round-trip now also returns `status` + `onlineStoreUrl` and drops anything
+  not live — **no extra API call**. It runs for EN too (it previously ran only for FR).
+  Fails **open**: a Shopify outage keeps the cards rather than emptying the reply.
+- **Stated budgets were ignored.** `extractBudget` reads a ceiling from free text
+  ("budget 800$", "moins de 500 dollars", "under $1200") and caps cards at `budget × 1.2`.
+  Dimensions and seat counts ("terrasse 10x10 pieds", "sofa 3 places") are not budgets.
+  Skipped when it would empty the list — a slightly-over suggestion beats none.
+- **Empty results no longer promise options.** When zero cards survive, the reply becomes
+  an honest no-match line asking for room/style/budget instead of "here are a few options".
+- **In-stock preference** on catalog search (`qty > 0`), with a fallback to the unfiltered
+  search — this is a dropship catalog where stock lives only in the CSV snapshot and can be
+  stale, so it must never be a hard filter.
+
+### Security
+
+- **CODEOWNERS added.** `.github/**`, `proxy.ts`, `cron-auth.ts`, the assistant route and
+  `next.config.ts` now require owner review. Needs branch protection with "Require review
+  from Code Owners" to take effect.
+
 ## [0.5.59.2] - 2026-08-12
 
 ### Fixed — v0.5.59.1 changed the EN links but NOT the EN brand
