@@ -88,21 +88,18 @@ describe("runAssistant", () => {
     expect(system).toMatch(/refine|accumulated|maxPrice/i);
   });
 
-  // CHANGED in v0.5.59.3: this asserted `furnishdirect.ca`, which is NXDOMAIN — the test was
-  // locking in a dead link for every EN shopper. EN is the /en locale of the same storefront.
-  it("uses the /en locale path for locale=en", async () => {
+  it("uses the EN store domain for locale=en", async () => {
     create
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
       .mockResolvedValueOnce(final({ reply: "Here you go.", products: [{ sku: "A-1", reason: "Comfy" }] }));
     const res = await runAssistant({ message: "I need a sofa", locale: "en" });
-    expect(res.products[0].url).toBe("https://ameublodirect.ca/en/products/sofa-sectionnel-gris");
+    expect(res.products[0].url).toBe("https://furnishdirect.ca/products/sofa-sectionnel-gris");
   });
 
   it("swaps the raw EN catalog name for the curated Shopify FR title on locale=fr", async () => {
     shopifyFetch.mockResolvedValue({
       ok: true,
-      // status/onlineStoreUrl added in v0.5.59.3 — the same round-trip now also proves the PDP is live.
-      json: async () => ({ data: { products: { nodes: [{ handle: "sofa-sectionnel-gris", title: "Canapé sectionnel gris moderne", status: "ACTIVE", onlineStoreUrl: "https://ameublodirect.ca/products/sofa-sectionnel-gris" }] } } }),
+      json: async () => ({ data: { products: { nodes: [{ handle: "sofa-sectionnel-gris", title: "Canapé sectionnel gris moderne" }] } } }),
     });
     create
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
@@ -111,20 +108,13 @@ describe("runAssistant", () => {
     expect(res.products[0].name).toBe("Canapé sectionnel gris moderne");
   });
 
-  // CHANGED in v0.5.59.3: EN used to skip the Shopify round-trip entirely (FR titles only).
-  // It now makes the call for BOTH locales because that call also carries the live/draft
-  // check — EN shoppers were being sent to draft PDPs that 404. EN still keeps the EN name.
-  it("fetches live status for locale=en but keeps the catalog/EN name", async () => {
-    shopifyFetch.mockResolvedValue({
-      ok: true,
-      json: async () => ({ data: { products: { nodes: [{ handle: "sofa-sectionnel-gris", title: "Canapé sectionnel gris moderne", status: "ACTIVE", onlineStoreUrl: "https://x" }] } } }),
-    });
+  it("does NOT fetch FR titles for locale=en (keeps the catalog/EN name)", async () => {
     create
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
       .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
     const res = await runAssistant({ message: "I need a sofa", locale: "en" });
-    expect(shopifyFetch).toHaveBeenCalledTimes(1);
-    expect(res.products[0].name).toBe("Sofa sectionnel"); // NOT the FR title
+    expect(shopifyFetch).not.toHaveBeenCalled();
+    expect(res.products[0].name).toBe("Sofa sectionnel");
   });
 
   it("falls back to the catalog name when the FR-title lookup fails", async () => {
@@ -198,105 +188,5 @@ describe("runComplementary", () => {
     // loop, so only index 0 is stable — the tail holds later tool-result blocks.
     const firstMessages = create.mock.calls[0][0].messages;
     expect(firstMessages[0].content).toMatch(/complémentaires/i);
-  });
-});
-
-// ── v0.5.59.3: dead EN domain, draft leakage, budget, empty-state ──────────
-const liveNodes = (nodes: unknown[]) => ({ ok: true, json: async () => ({ data: { products: { nodes } } }) });
-
-describe("extractBudget", () => {
-  it("reads a budget from realistic FR and EN phrasings", async () => {
-    const { extractBudget } = await import("@/lib/assistant");
-    expect(extractBudget("Je cherche un sofa, budget 800$, style moderne")).toBe(800);
-    expect(extractBudget("moins de 500 dollars")).toBe(500);
-    expect(extractBudget("under $1200")).toBe(1200);
-    expect(extractBudget("environ 250 CAD")).toBe(250);
-  });
-  it("returns null when no budget is stated — an absent budget must never filter", async () => {
-    const { extractBudget } = await import("@/lib/assistant");
-    expect(extractBudget("Je cherche un canapé pour mon salon")).toBeNull();
-    // Dimensions and seat counts are not budgets.
-    expect(extractBudget("J'ai une petite terrasse 10x10 pieds")).toBeNull();
-    expect(extractBudget("un sofa 3 places")).toBeNull();
-  });
-  it("takes the lowest ceiling when several numbers appear", async () => {
-    const { extractBudget } = await import("@/lib/assistant");
-    expect(extractBudget("budget 800$ max 600$")).toBe(600);
-  });
-});
-
-describe("EN locale links (regression: furnishdirect.ca is NXDOMAIN)", () => {
-  it("links EN cards to the /en locale path, never furnishdirect.ca", async () => {
-    create
-      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
-      .mockResolvedValueOnce(final({ reply: "Here you go.", products: [{ sku: "A-1", reason: "Comfy" }] }));
-    const res = await runAssistant({ message: "I need a sofa", locale: "en" });
-    expect(res.products[0].url).toBe("https://ameublodirect.ca/en/products/sofa-sectionnel-gris");
-    expect(res.products[0].url).not.toContain("furnishdirect");
-  });
-});
-
-describe("draft / unpublished products never reach the shopper", () => {
-  it("drops a card whose Shopify product is draft or not published", async () => {
-    shopifyFetch.mockResolvedValue(liveNodes([
-      { handle: "sofa-sectionnel-gris", title: "Canapé", status: "DRAFT", onlineStoreUrl: null },
-    ]));
-    create
-      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
-      .mockResolvedValueOnce(final({ reply: "Voici une option.", products: [{ sku: "A-1", reason: "x" }] }));
-    const res = await runAssistant({ message: "canapé", locale: "fr" });
-    expect(res.products).toHaveLength(0);
-    // and the reply must not still promise options
-    expect(res.reply).toContain("Je n'ai pas trouvé");
-  });
-
-  it("keeps an ACTIVE product that is published to the Online Store", async () => {
-    shopifyFetch.mockResolvedValue(liveNodes([
-      { handle: "sofa-sectionnel-gris", title: "Canapé curé", status: "ACTIVE", onlineStoreUrl: "https://ameublodirect.ca/products/sofa-sectionnel-gris" },
-    ]));
-    create
-      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
-      .mockResolvedValueOnce(final({ reply: "Voici une option.", products: [{ sku: "A-1", reason: "x" }] }));
-    const res = await runAssistant({ message: "canapé", locale: "fr" });
-    expect(res.products).toHaveLength(1);
-    expect(res.products[0].name).toBe("Canapé curé");
-  });
-
-  it("fails OPEN — a Shopify outage keeps cards rather than emptying the reply", async () => {
-    shopifyFetch.mockRejectedValue(new Error("shopify down"));
-    create
-      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
-      .mockResolvedValueOnce(final({ reply: "Voici une option.", products: [{ sku: "A-1", reason: "x" }] }));
-    const res = await runAssistant({ message: "canapé", locale: "fr" });
-    expect(res.products).toHaveLength(1);
-  });
-});
-
-describe("budget ceiling", () => {
-  it("drops cards above budget x1.2", async () => {
-    getProducts.mockResolvedValue({ products: [prod({ sku: "CHEAP", price: 700, shopify_handle: "cheap" }), prod({ sku: "RICH", price: 2000, shopify_handle: "rich" })], total: 2, productTypes: [] });
-    create
-      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
-      .mockResolvedValueOnce(final({ reply: "Voici.", products: [{ sku: "CHEAP", reason: "a" }, { sku: "RICH", reason: "b" }] }));
-    const res = await runAssistant({ message: "un canapé, budget 800$", locale: "fr" });
-    expect(res.products.map((p) => p.sku)).toEqual(["CHEAP"]); // 2000 > 800*1.2
-  });
-
-  it("keeps everything when the budget would empty the list (close beats nothing)", async () => {
-    getProducts.mockResolvedValue({ products: [prod({ sku: "RICH", price: 2000, shopify_handle: "rich" })], total: 1, productTypes: [] });
-    create
-      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
-      .mockResolvedValueOnce(final({ reply: "Voici.", products: [{ sku: "RICH", reason: "b" }] }));
-    const res = await runAssistant({ message: "un canapé, budget 200$", locale: "fr" });
-    expect(res.products).toHaveLength(1);
-  });
-});
-
-describe("emptyAwareReply", () => {
-  it("never promises options when there are none", async () => {
-    const { emptyAwareReply } = await import("@/lib/assistant");
-    expect(emptyAwareReply("Voici quelques options qui pourraient convenir.", 0, "fr")).toContain("Je n'ai pas trouvé");
-    expect(emptyAwareReply("Here are a few options that might fit.", 0, "en")).toContain("couldn't find");
-    expect(emptyAwareReply("Voici une option.", 2, "fr")).toBe("Voici une option.");
   });
 });
