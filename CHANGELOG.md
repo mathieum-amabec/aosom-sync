@@ -2,6 +2,73 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.59.0] - 2026-08-09
+
+### Fixed — the blog cron fired every week and failed 100% of the time
+
+- **Root cause was not in the pipeline.** `/api/cron/blog` did not generate anything itself:
+  it made an HTTP call back to its own `/api/blog/generate` endpoint, and that self-call was
+  answered with a **401 before the app's own `CRON_SECRET` check ever ran**.
+- **Vercel SSO Deployment Protection is enabled** (`all_except_custom_domains`, no custom
+  domain) but is **not uniform across hosts** — measured on `/api/cron/blog` with no
+  credentials: the **production alias** `aosom-sync.vercel.app` reaches the app (401 from
+  `verifyCronSecret`), while the **per-deployment URL** and the **git-branch alias** both return
+  `302 Redirecting...` from the SSO edge and never reach the app at all. A self-`fetch()` whose
+  origin resolves to either protected host is intercepted; `fetch` follows the 302 into the SSO
+  flow and lands on a 401.
+- **Which host a Vercel Cron invocation presents was not verified.** The old comment in
+  `cron/content/route.ts` asserts `request.url` carries the production origin; that is an
+  assumption, not a measurement. Removing the hop removes every variant of the failure, so the
+  fix does not depend on resolving it.
+- The cron itself was healthy the whole time: 4 runs out of 4 in the 30-day `cron_runs`
+  retention window, every one at its scheduled minute, every one an error. Last article
+  actually created: **2026-06-22**. `blog_publish_counter` was empty — auto-publish had never
+  fired once.
+- The sibling `/api/cron/content` shares the architecture and recorded the smoking gun:
+  `FR: Generation failed (HTTP 401) | EN: Generation failed (HTTP 401)`, 13 runs out of 13.
+  Every cron that does its work **in-process** has zero errors. `content` still has the same
+  defect and is **not** fixed here.
+- Generation now lives in `lib/blog-generator.ts` and the cron calls it directly: no edge
+  round-trip, no protection surface, one function invocation instead of two, and the cron no
+  longer consumes `/api/blog/generate`'s 6/min rate limit. The route stays as a thin wrapper
+  for manual/admin use and now shares the fail-closed `verifyCronSecret` helper.
+
+### Fixed — Monday and Thursday runs picked the same topic
+
+- Moving the cron to twice a week put both runs inside the **same ISO week**, and
+  `selectBilingualTopic` derived its index from the week number alone (`idx = week % 30`).
+  Proven: 2026-08-10 (Mon) and 2026-08-13 (Thu) both resolved to `idx=0`. That would have
+  published near-duplicate articles to a live storefront every week — an SEO duplicate-content
+  problem, not merely wasted spend.
+- The index now advances per **run**: `(week * RUNS_PER_WEEK + slot) % len`, slot 0 for
+  Mon-Wed and 1 for Thu-Sun. `week*2+slot` is a true sequential counter, so the step is
+  exactly 1 and the catalogue still cycles through all 30 topics. A step of 2 would have
+  reached only 15 of 30, because the catalogue size is even.
+- `blog_schedule.posts_per_week` 2 → 4. The cap counts **articles, not bilingual pairs**, so
+  two runs × (FR + EN) needs 4. At 2, the Thursday pair could never publish while still
+  costing two Claude generations plus two judge calls every week.
+
+### Added
+
+- **`blog_posts` table** — one row per generated article (`title`, `lang`, `status`,
+  `shopify_article_id`, `created_at`), including failures. Silent breakage is now visible
+  instead of invisible for seven weeks.
+- **`/blog` dashboard** — the article log with status counts and links into Shopify admin.
+- **`sanitizeArticleHtml`** — strips `script`/`style`/`iframe`/`object`/`embed`/`form`, inline
+  `on*` handlers, and `javascript:`/`data:` URLs from the model's HTML before it is stored.
+  The prompt already forbade these, but a prompt is a request, not a guarantee, and this HTML
+  renders verbatim to every visitor. Applied before the quality judge so it scores what ships.
+
+### Changed
+
+- Blog cron moved to **Mon + Thu 08:00 UTC** (was Tue 15:00 UTC). It stays a **GET**: Vercel
+  Cron only issues GET requests, so a POST handler would never fire.
+- Cron `maxDuration` 180 → 300. All generation is in-process now (~120-160s at p50 for two
+  articles plus two judge calls); a timeout mid-Shopify-create would create an article
+  without logging it.
+- The cron propagates each language's real error into `cron_runs.detail`. The old generic
+  "Both FR and EN blog generations failed" is precisely why the 401 hid for so long.
+
 ## [0.5.58.0] - 2026-08-08
 
 ### Fixed — `g:availability` was invalid for Google on every item

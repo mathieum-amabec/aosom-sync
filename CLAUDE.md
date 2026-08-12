@@ -192,6 +192,52 @@ removed — nothing writes or drains `facebook_drafts.status='scheduled'` anymor
 `nextFreeSlot` (used by `/api/queue/add`) are live. The `scheduled` status value survives only
 for any historical rows; no code produces new ones.
 
+## Blog pipeline — and why crons must NEVER self-fetch
+
+⚠️ **A cron must do its work in-process. Never `fetch()` your own app from inside a cron.**
+
+Vercel **SSO Deployment Protection** is enabled on this project
+(`ssoProtection.enabled: true`, `deploymentType: "all_except_custom_domains"`), and the project
+has **no custom domain**. Protection is **not uniform across hosts** — measured 2026-08-09 on
+`/api/cron/blog` with no credentials:
+
+| Host | Result | Answered by |
+|---|---|---|
+| `aosom-sync.vercel.app` (production alias) | `401` + `{"success":false,"error":"Unauthorized"}` | the **app** (`verifyCronSecret`) |
+| `aosom-sync-<hash>-<team>.vercel.app` (per-deployment) | `302 Redirecting...` | the **Vercel SSO edge** |
+| `aosom-sync-git-main-<team>.vercel.app` (branch alias) | `302 Redirecting...` | the **Vercel SSO edge** |
+
+So a self-`fetch()` is intercepted **before the app's own `CRON_SECRET` check** whenever the
+origin resolves to a per-deployment or branch host (`fetch` follows the 302 into the SSO flow
+and ends at a 401). The cron derived its origin from `new URL(request.url).origin`; **which
+host a Vercel Cron invocation actually presents was not verified** — do not assume it is the
+production alias, which is what the old code comment in `cron/content/route.ts` claims.
+
+Either way the hop is the hazard, and removing it removes every variant of the failure. Do not
+re-derive this from the API value alone: `all_except_custom_domains` did **not** mean "every
+`*.vercel.app` host is protected" here. **Measure each host** before concluding.
+
+This silently killed `/api/cron/blog` for ~7 weeks (4 runs / 4 failures, last real article
+2026-06-22) and still kills **`/api/cron/content`** (13 / 13, `FR: Generation failed (HTTP 401)
+| EN: ... (HTTP 401)`) — that one is **not yet fixed**. Every cron that works in-process has
+zero errors. Verify with
+`get_project_deployment_protection`, not by guessing.
+
+- **Generation lives in `src/lib/blog-generator.ts`** (`generateBlogArticle`) and the cron calls
+  it directly. `/api/blog/generate` is a thin wrapper kept for manual/admin use.
+- **`GET /api/cron/blog`, Mon + Thu 08:00 UTC.** GET, not POST — **Vercel Cron only issues GET**,
+  so a POST handler would never fire.
+- **Topic selection advances per RUN, not per week** (`blog-topics.ts`). Mon and Thu share an ISO
+  week, so `idx = week % len` would hand both runs the same topic and publish duplicates.
+  `idx = (week * RUNS_PER_WEEK + slot) % len` is a sequential run counter (step of exactly 1),
+  which also keeps full catalogue coverage — a step of 2 over an even catalogue reaches half.
+- **`blog_schedule.posts_per_week` counts ARTICLES, not bilingual pairs.** 2 runs × (FR + EN) = 4.
+  A lower cap silently blocks the late run while still paying to generate it.
+- **`blog_posts`** logs every outcome including failures → surfaced at `/blog`.
+- Auto-publish gate (`blog-auto-publish.ts`): Claude judge ≥ 80 **AND** in season **AND** under
+  the weekly cap. Any miss leaves the article a draft.
+- Blog IDs: FR `90302349417` (*Actualités*), EN `91161428073` (*Blog*).
+
 ## Env Vars
 
 - `SHOPIFY_ACCESS_TOKEN` — Shopify Admin API token
