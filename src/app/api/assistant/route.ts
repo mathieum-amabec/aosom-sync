@@ -35,6 +35,32 @@ function corsHeaders(origin: string | null): Record<string, string> {
 }
 
 /**
+ * Strip markup and control characters out of shopper text before it reaches Claude.
+ *
+ * This is defence-in-depth, not a prompt-injection fix: the system prompt is a pure function
+ * of `locale`, so shopper text never reaches it, and text in the user-message position is not
+ * injection. What this actually buys us is the echo path — the model can repeat back what the
+ * shopper typed, and the storefront widget renders that reply. If the widget ever uses
+ * innerHTML instead of textContent, `<img onerror=…>` in the shopper's own message becomes
+ * stored-XSS-by-proxy. Cutting the markup here closes that path from the server side, which
+ * we control, rather than relying on a theme snippet that lives outside this repo.
+ */
+export function sanitizeShopperText(input: string): string {
+  const noMarkup = String(input ?? "")
+    .replace(/<[^>]*>/g, " ") // any tag, opening or closing
+    .replace(/[<>]/g, " "); // stray angle brackets (unbalanced markup)
+  // Drop control characters by code point rather than by regex escape: the intent stays
+  // readable and there is no escape sequence to mangle. Tab and newline are kept.
+  const printable = Array.from(noMarkup)
+    .filter((ch) => {
+      const c = ch.codePointAt(0) ?? 0;
+      return c === 9 || c === 10 || (c >= 32 && c !== 127);
+    })
+    .join("");
+  return printable.replace(/\s{2,}/g, " ").trim();
+}
+
+/**
  * Best-effort client IP for rate-limiting. Prefer `x-real-ip` (set by Vercel to the real
  * client IP); otherwise take the LAST `x-forwarded-for` hop (Vercel appends the true client
  * IP at the end — the FIRST entry is attacker-supplied and must never be trusted).
@@ -99,7 +125,7 @@ export async function POST(request: Request): Promise<Response> {
       return json({ success: true, data: result });
     }
 
-    const message = typeof body.message === "string" ? body.message.trim() : "";
+    const message = sanitizeShopperText(typeof body.message === "string" ? body.message : "");
     if (!message) return json({ success: false, error: "message_required" }, 400);
     if (message.length > 1000) return json({ success: false, error: "message_too_long" }, 400);
 
@@ -108,7 +134,8 @@ export async function POST(request: Request): Promise<Response> {
           .filter((t): t is { role: string; content: string } => !!t && typeof (t as { content?: unknown }).content === "string")
           .filter((t) => t.role === "user" || t.role === "assistant")
           .slice(-8)
-          .map((t) => ({ role: t.role as "user" | "assistant", content: t.content }))
+          .map((t) => ({ role: t.role as "user" | "assistant", content: sanitizeShopperText(t.content) }))
+          .filter((t) => t.content)
       : [];
 
     const result = await runAssistant({ message, history, locale });

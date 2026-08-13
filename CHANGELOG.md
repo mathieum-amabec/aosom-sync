@@ -2,6 +2,43 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.59.5] - 2026-08-12
+
+### Fixed — assistant: draft products, ignored budgets, empty promises
+
+Re-lands the behavioural half of v0.5.59.3 (reverted in #419 on a faulty measurement — the
+endpoint was returning a 500 because its LLM pool was drained by testing, and the verifier
+scored that as "0 products"). This time verified against the live endpoint after deploy.
+
+- **Draft / unpublished products no longer recommended.** The existing FR-title Shopify
+  round-trip now also returns `status` + `onlineStoreUrl` and drops anything not live — no
+  extra API call, and it runs for EN too. Fails **open** so a Shopify outage keeps cards.
+  Measured before: 3 of 5 recommendations were draft and returned HTTP 404.
+- **Stated budgets are honoured.** `extractBudget` matches a number adjacent to a currency
+  marker (`800# Changelog
+
+All notable changes to Aosom Sync will be documented in this file.
+
+, `500 dollars`, `1200 CAD`) and caps cards at `budget x 1.3`. Adjacency is
+  what keeps "terrasse 10x10 pieds" and "sofa 3 places" from reading as a price. Skipped
+  when it would empty the list.
+- **Empty results no longer promise options.** Zero cards now yield an honest no-match line
+  instead of "Voici quelques options qui pourraient convenir." with nothing under it.
+  Measured before: 12 of 18 realistic queries hit that state.
+- **In-stock preference** on catalog search (`qty > 0`) with a fallback to the unfiltered
+  search — dropship stock lives only in the CSV mirror and can be stale, so never a hard filter.
+
+### Security
+
+- **Shopper text is stripped of markup and control characters** before reaching Claude
+  (`sanitizeShopperText`). Defence-in-depth for the echo path: the model can repeat back what
+  the shopper typed and the storefront widget renders that reply, so markup is cut server-side
+  rather than trusting a theme snippet outside this repo.
+
+**CSP was NOT changed.** The requested switch to `Content-Security-Policy-Report-Only` was
+declined: a CSP already ships and is **enforcing** (`next.config.ts`, live in prod headers).
+Report-only does not block anything, so the change would have removed a working protection.
+
 ## [0.5.59.4] - 2026-08-12
 
 ### Fixed — EN assistant links pointed at a domain that does not exist
