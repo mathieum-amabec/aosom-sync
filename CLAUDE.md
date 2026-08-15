@@ -109,6 +109,26 @@ Ad account `act_20658834`, catalog `384890002574549`, pixel `214720653324969`. B
   act_.../adsets` with `targeting.targeting_automation.advantage_audience` set explicitly;
   `/copies` fails on >3 objects and on the missing advantage_audience flag), then copy its ads in.
 
+## Google Ads (Shopping) — code ready, credentials NOT provisioned
+
+`src/lib/google-ads-client.ts` (raw REST, no SDK) + `scripts/create-google-shopping-campaign.mts`
+(dry-run default, `--apply`, everything created PAUSED). Full walkthrough: `docs/GOOGLE-ADS-SETUP.md`.
+
+- ⚠ **No `GOOGLE_ADS_*` vars exist in `.env.local`.** The dry-run runs without them; `--apply`
+  cannot. Developer-token approval is **1–3 business days** and gates every live call.
+- **Scope is `.../auth/adwords`, NOT Merchant Center's `.../auth/content`.** A refresh token is
+  bound to its consented scopes, so the GMC token **cannot** be reused — it refreshes fine, then
+  fails every Ads call.
+- Google Ads also needs a `developer-token` header on top of OAuth (no other Google API does).
+- **Three platform limits the config can't work around:** smart bidding
+  (`MAXIMIZE_CONVERSION_VALUE`) **ignores all bid modifiers and the ad group max CPC**; **sitelinks
+  don't render on Shopping ads** (Search only — Shopping promos come from the Merchant Center
+  promotions feed); **dynamic remarketing isn't a Shopping feature**, and Meta/Pinterest pixels can
+  **never** feed Google audiences (needs Google tag / GA4 / Customer Match).
+- Value bidding needs a PURCHASE conversion action — the script's preflight refuses `--apply`
+  without one. Seed on `--bidding maximize-clicks` first, then flip in place via `setCampaignBidding`.
+- `GOOGLE_ADS_API_VERSION` is pinned in the client; Google sunsets a version ~every 4 months.
+
 ## Shopify theme IDs (live vs draft)
 
 ⚠️ **Roles MOVE on every publish; names are misleading — trust `themes.json` roles, never the name.**
