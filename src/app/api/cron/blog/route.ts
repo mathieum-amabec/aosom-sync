@@ -1,24 +1,38 @@
+/**
+ * GET /api/cron/blog — weekly bilingual blog generation (Vercel Cron, Mon + Thu 08:00 UTC).
+ *
+ * **GET, not POST, on purpose:** Vercel Cron only ever issues GET requests. A POST handler
+ * here would never fire.
+ *
+ * Generation runs **in-process** via `generateBlogArticle()`. This route used to `fetch()`
+ * its own `/api/blog/generate` endpoint; with Vercel SSO Deployment Protection on and no
+ * custom domain, the platform answered that self-call with a 401 before the app's own
+ * CRON_SECRET check ran, so every run failed. See lib/blog-generator.ts for the full note.
+ */
+
 import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
-import { env } from "@/lib/config";
 import {
   selectBilingualTopic,
   type Language,
   type Season,
 } from "@/lib/blog-topics";
 import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
+import { generateBlogArticle } from "@/lib/blog-generator";
 import { trackCron } from "@/lib/cron-tracking";
 
-// Two sequential blog generations (Claude article + Shopify draft create),
-// each ~30-50s, plus one shared Unsplash fetch, with a 3s pause between langs.
-export const maxDuration = 180;
+// Everything now runs inside THIS function: 2 article generations (~25-45s each) + 2 judge
+// calls + the shared Unsplash fetch + 2 Shopify creates + the inter-language pause. That is
+// ~120-160s at p50 with no headroom at 180s, and a timeout mid-Shopify-create would leave an
+// article created but unlogged. 300s is Vercel's current default ceiling and costs nothing
+// when unused (billing is on active CPU, not wall clock).
+export const maxDuration = 300;
 
-// Spacing between FR and EN generations — stays well inside the blog/generate
-// rate limiter (6/min) and gives Claude a beat.
+// Spacing between FR and EN generations — gives Claude a beat between two large calls.
 const BETWEEN_LANGS_DELAY_MS = 3_000;
 
-// Images shared across the FR + EN pair so the two articles are visually
-// identical. One photo set per run keeps Unsplash usage and download pings low.
+// Images shared across the FR + EN pair so the two articles are visually identical. One photo
+// set per run keeps Unsplash usage and download pings low.
 const SHARED_IMAGE_COUNT = 3;
 
 type LangOutcome =
@@ -34,23 +48,10 @@ type LangOutcome =
     }
   | { language: Language; success: false; error: string };
 
-interface BlogGenerateResponse {
-  success: true;
-  articleId: string;
-  adminUrl: string;
-  title: string;
-  handle: string;
-  blogId: number;
-  score?: number | null;
-  published?: boolean;
-  publishReason?: string;
-}
-
 /**
- * Fetch the photo set shared by both languages. Returns `undefined` (not an
- * error) when Unsplash fails — callers then let each language self-fetch so a
- * photo hiccup never blocks the articles, at the cost of the "same image"
- * guarantee for that one run.
+ * Fetch the photo set shared by both languages. Returns `undefined` (not an error) when
+ * Unsplash fails — each language then self-fetches, so a photo hiccup never blocks the
+ * articles, at the cost of the "same image" guarantee for that one run.
  */
 async function fetchSharedImages(query: string): Promise<UnsplashImage[] | undefined> {
   try {
@@ -59,8 +60,8 @@ async function fetchSharedImages(query: string): Promise<UnsplashImage[] | undef
       console.error(`[CRON/blog] shared image query "${query}" returned ${images.length}/${SHARED_IMAGE_COUNT}; langs will self-fetch`);
       return undefined;
     }
-    // Trigger download pings once here (Unsplash guideline) since /api/blog/generate
-    // skips its own search + ping when images are supplied.
+    // Trigger the download pings once here (Unsplash guideline) since the generator skips
+    // its own search + ping when images are supplied.
     for (const img of images) {
       await triggerDownload(img.downloadLocation);
     }
@@ -71,56 +72,46 @@ async function fetchSharedImages(query: string): Promise<UnsplashImage[] | undef
   }
 }
 
-async function generateBlog(
-  origin: string,
+/**
+ * Generate one language. Never throws — a failure comes back as a LangOutcome so the other
+ * language is still attempted.
+ */
+async function generateOne(
   topic: string,
   lang: Language,
   keywords: string[],
   season: Season,
   images: UnsplashImage[] | undefined,
 ): Promise<LangOutcome> {
-  const url = `${origin}/api/blog/generate`;
   const tag = lang.toUpperCase();
-
-  let res: Response;
   try {
-    res = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.cronSecret}`,
-        "Content-Type": "application/json",
-      },
-      // `images` is omitted when undefined → generate falls back to its own search.
-      // season + autoPublish drive the quality/season/cap auto-publish gate in generate.
-      body: JSON.stringify({ topic, lang, keywords, season, autoPublish: true, ...(images ? { images } : {}) }),
+    const result = await generateBlogArticle({
+      topic,
+      lang,
+      keywords,
+      season,
+      autoPublish: true,
+      ...(images ? { images } : {}),
     });
+    console.log(
+      `[CRON/blog] ${tag} article created: ${result.articleId} (${result.title}) — ` +
+        `score=${result.score ?? "n/a"} published=${result.published} (${result.publishReason})`,
+    );
+    return {
+      language: lang,
+      success: true,
+      articleId: result.articleId,
+      adminUrl: result.adminUrl,
+      title: result.title,
+      published: result.published,
+      score: result.score,
+      publishReason: result.publishReason,
+    };
   } catch (err) {
-    console.error(`[CRON/blog] ${tag} fetch threw:`, err);
-    return { language: lang, success: false, error: "Generate endpoint unreachable" };
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[CRON/blog] ${tag} generation failed:`, err);
+    return { language: lang, success: false, error: msg };
   }
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.error(`[CRON/blog] ${tag} generation failed (HTTP ${res.status}):`, text);
-    return { language: lang, success: false, error: `Generation failed (HTTP ${res.status})` };
-  }
-
-  const result = (await res.json()) as BlogGenerateResponse;
-  const published = result.published === true;
-  console.log(
-    `[CRON/blog] ${tag} article created: ${result.articleId} (${result.title}) — ` +
-      `score=${result.score ?? "n/a"} published=${published} (${result.publishReason ?? "n/a"})`,
-  );
-  return {
-    language: lang,
-    success: true,
-    articleId: result.articleId,
-    adminUrl: result.adminUrl,
-    title: result.title,
-    published,
-    score: result.score ?? null,
-    publishReason: result.publishReason ?? "n/a",
-  };
 }
 
 export async function GET(request: Request) {
@@ -129,13 +120,14 @@ export async function GET(request: Request) {
   }
 
   const sel = selectBilingualTopic(new Date());
-  const origin = new URL(request.url).origin;
 
-  console.log(`[CRON/blog] week=${sel.week} idx=${sel.idx} FR="${sel.fr}" EN="${sel.en}" img="${sel.imageQuery}"`);
+  // slot distinguishes the Mon run from the Thu run — both share an ISO week, so it is the
+  // only thing keeping the two runs on different topics.
+  console.log(`[CRON/blog] week=${sel.week} slot=${sel.slot} idx=${sel.idx} FR="${sel.fr}" EN="${sel.en}" img="${sel.imageQuery}"`);
 
-  // trackCron records the run (success/error) in cron_runs for the dashboard. The
-  // work throws on total failure so it is logged as 'error'; the outer catch turns
-  // that back into the same 500 response shape the route returned before.
+  // trackCron records the run (success/error) in cron_runs for the dashboard. The work throws
+  // on total failure so it is logged as 'error'; the outer catch turns that back into the
+  // same 500 response shape.
   let articles: LangOutcome[] = [];
   let sharedCount = 0;
   try {
@@ -145,18 +137,27 @@ export async function GET(request: Request) {
       sharedCount = sharedImages ? sharedImages.length : 0;
       console.log(`[CRON/blog] shared images: ${sharedImages ? sharedImages.length : "none (self-fetch)"}`);
 
-      const fr = await generateBlog(origin, sel.fr, "fr", sel.keywordsFr, sel.season, sharedImages);
+      const fr = await generateOne(sel.fr, "fr", sel.keywordsFr, sel.season, sharedImages);
 
       console.log(`[CRON/blog] Waiting ${BETWEEN_LANGS_DELAY_MS}ms before EN`);
       await new Promise((r) => setTimeout(r, BETWEEN_LANGS_DELAY_MS));
 
-      const en = await generateBlog(origin, sel.en, "en", sel.keywordsEn, sel.season, sharedImages);
+      const en = await generateOne(sel.en, "en", sel.keywordsEn, sel.season, sharedImages);
 
       articles = [fr, en];
       const count = articles.filter((a) => a.success).length;
       const publishedCount = articles.filter((a) => a.success && a.published).length;
       console.log(`[CRON/blog] Complete — ${count}/2 articles created, ${publishedCount} auto-published`);
-      if (count === 0) throw new Error("Both FR and EN blog generations failed");
+      if (count === 0) {
+        // Propagate each language's real failure into the thrown message so trackCron records
+        // it in cron_runs.detail. Without this the dashboard only ever showed the generic
+        // wrapper text and the actual cause stayed buried in the Vercel function logs — which
+        // is exactly how a 401 on the old self-fetch went unnoticed for weeks.
+        const detail = articles
+          .map((a) => `${a.language.toUpperCase()}: ${a.success ? "ok" : a.error}`)
+          .join(" | ");
+        throw new Error(`Both FR and EN blog generations failed — ${detail}`);
+      }
       return count;
     });
 

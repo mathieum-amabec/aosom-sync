@@ -24,26 +24,39 @@ export function loadEnv() {
 export const STORE = "27u5y2-kp.myshopify.com";
 export const API_VERSION = "2025-01";
 
-// Theme roles verified via GET /admin/api/2025-01/themes.json (source of truth, 2026-07-18, 2nd publish of the day):
-//   161062551657 "DRAFT DE TRAVAIL 2026-07-18"        → role:main        (LIVE / published 2026-07-18 w/ conversion features — name still says DRAFT!)
-//   161069989993 "DRAFT DE TRAVAIL 2026-07-18 v2"     → role:unpublished (active working DRAFT — themeDuplicate of the new live, 2026-07-18)
-//   160970178665 "DRAFT DE TRAVAIL 2026-07-14"        → role:unpublished (PREVIOUS live, published until 2026-07-18 — rollback target)
-//   160944193641 "DRAFT CONVERSION 2026-07-13"        → role:unpublished (older previous live)
-// Roles MOVE on every publish: on 2026-07-18, 161062551657 was published to LIVE (demoting the
-// previous live 160970178665 to unpublished/rollback). A fresh full copy of the new live,
-// 161069989993, was made the working DRAFT via GraphQL themeDuplicate (API 2026-01).
-// NOTE: theme NAMES are misleading (the LIVE one is named "DRAFT DE TRAVAIL 2026-07-18") — do NOT
-// eyeball by name; trust the role from themes.json.
+// Theme roles verified via GET /admin/api/2025-01/themes.json (source of truth, 2026-08-09):
+//   161562099817 "DRAFT DE TRAVAIL 2026-08-08"        → role:main        (LIVE / published — name still says DRAFT!)
+//   161529233513 "DRAFT GOOGLE SHOPPING 2026-08-07"   → role:unpublished (previous live, demoted 2026-08-08 — newest non-live)
+//   161069989993 "DRAFT DE TRAVAIL 2026-07-18 v2"     → role:unpublished (live until 2026-08-07 — two-step rollback target)
+//   161090928745 "DRAFT DE TRAVAIL 2026-07-19"        → role:unpublished (POISONED — see warning below)
+// Roles MOVE on every publish: 161069989993 was live until 2026-08-07, when 161529233513 was
+// published over it; 161562099817 was then published on 2026-08-08, demoting 161529233513.
+// NOTE: theme NAMES are misleading (every one of them is named "DRAFT", including the LIVE
+// one) — do NOT eyeball by name; trust the role from themes.json.
 // Re-verify via themes.json after ANY publish — a stale LIVE_THEME_ID makes the apply-*.mjs
 // guard "protect" the wrong theme, and a stale DRAFT_THEME_ID can point writes at production.
 // IMPORTANT: the LIVE_THEME_ID guard in apply-*.mjs ("refusing to run against the LIVE
 // theme") only protects production when this is the REAL published theme. Keep it current.
-export const LIVE_THEME_ID = "161069989993"; // current main / published (LIVE) theme (published 2026-07-19) — NEVER write here
-export const DRAFT_THEME_ID = "161090928745"; // active unpublished DRAFT (dup'd 2026-07-19) — safe write target
-export const BACKUP_THEME_ID = "161062551657"; // previous live (published until 2026-07-19), now rollback target
+export const LIVE_THEME_ID = "161562099817"; // main / published (LIVE) — NEVER write here
+export const DRAFT_THEME_ID = "161529233513"; // newest non-live (previous live) — safe write target, closest to LIVE
+export const BACKUP_THEME_ID = "161069989993"; // live until 2026-08-07 — deeper rollback, one publish older than DRAFT
+// DRAFT and BACKUP are now DISTINCT themes, giving a real two-step rollback ladder:
+// LIVE 161562099817 → back one publish to DRAFT 161529233513 → back two to BACKUP 161069989993.
+// They were the same id between 2026-08-07 and 2026-08-09, which meant "roll back" and
+// "write here" pointed at one theme and a bad write destroyed the only rollback point.
+// ⚠️ Do NOT use 161090928745 ("DRAFT DE TRAVAIL 2026-07-19"). It predates the 2026-07-21
+// live edits, so it is missing the Judge.me app embed and several product-page block
+// settings; publishing or branching from it silently reverts them.
+//
+// Shopify refused `themeDuplicate` against the freshly published theme (newTheme: null, no
+// userErrors, retried), so there is no dedicated working draft right now. Duplicate
+// LIVE_THEME_ID before the next substantial theme change and re-point DRAFT_THEME_ID at it.
 // Deprecated alias kept for older imports. Points at a non-live theme so the default
 // asset-write target can never hit production. New code should use DRAFT_THEME_ID.
-export const PREVIEW_THEME_ID = BACKUP_THEME_ID;
+// Aliases DRAFT, not BACKUP: this is a WRITE target, and BACKUP is now a distinct, older
+// theme kept as the deeper rollback point. Pointing writes there would corrupt the very
+// snapshot we roll back to. (It aliased BACKUP while the two ids were identical.)
+export const PREVIEW_THEME_ID = DRAFT_THEME_ID;
 const TOKEN = loadEnv().SHOPIFY_ACCESS_TOKEN;
 
 export async function rest(endpoint, options = {}) {

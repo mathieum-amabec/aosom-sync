@@ -2,6 +2,407 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.59.5] - 2026-08-12
+
+### Fixed — assistant: draft products, ignored budgets, empty promises
+
+Re-lands the behavioural half of v0.5.59.3 (reverted in #419 on a faulty measurement — the
+endpoint was returning a 500 because its LLM pool was drained by testing, and the verifier
+scored that as "0 products"). This time verified against the live endpoint after deploy.
+
+- **Draft / unpublished products no longer recommended.** The existing FR-title Shopify
+  round-trip now also returns `status` + `onlineStoreUrl` and drops anything not live — no
+  extra API call, and it runs for EN too. Fails **open** so a Shopify outage keeps cards.
+  Measured before: 3 of 5 recommendations were draft and returned HTTP 404.
+- **Stated budgets are honoured.** `extractBudget` matches a number adjacent to a currency
+  marker (`800# Changelog
+
+All notable changes to Aosom Sync will be documented in this file.
+
+, `500 dollars`, `1200 CAD`) and caps cards at `budget x 1.3`. Adjacency is
+  what keeps "terrasse 10x10 pieds" and "sofa 3 places" from reading as a price. Skipped
+  when it would empty the list.
+- **Empty results no longer promise options.** Zero cards now yield an honest no-match line
+  instead of "Voici quelques options qui pourraient convenir." with nothing under it.
+  Measured before: 12 of 18 realistic queries hit that state.
+- **In-stock preference** on catalog search (`qty > 0`) with a fallback to the unfiltered
+  search — dropship stock lives only in the CSV mirror and can be stale, so never a hard filter.
+
+### Security
+
+- **Shopper text is stripped of markup and control characters** before reaching Claude
+  (`sanitizeShopperText`). Defence-in-depth for the echo path: the model can repeat back what
+  the shopper typed and the storefront widget renders that reply, so markup is cut server-side
+  rather than trusting a theme snippet outside this repo.
+
+**CSP was NOT changed.** The requested switch to `Content-Security-Policy-Report-Only` was
+declined: a CSP already ships and is **enforcing** (`next.config.ts`, live in prod headers).
+Report-only does not block anything, so the change would have removed a working protection.
+
+## [0.5.59.4] - 2026-08-12
+
+### Fixed — EN assistant links pointed at a domain that does not exist
+
+Re-lands the one-line half of v0.5.59.3 (reverted in #419). STORE_URL.en was
+`https://furnishdirect.ca`, which is NXDOMAIN at the .ca registry (verified against CIRA;
+Shopify reports exactly one domain, `ameublodirect.ca`). Every English recommendation from
+the shopping assistant was a dead link. Now `https://ameublodirect.ca/en`, the live EN
+locale — the same fix shipped for the feeds in v0.5.59.1.
+
+Also re-lands `.github/CODEOWNERS` (no runtime effect).
+
+The behavioural half of v0.5.59.3 (draft filter, budget ceiling, empty-state reply,
+in-stock preference) is deliberately NOT re-landed here — it needs live verification, and
+the assistant LLM budget pool was exhausted at the time of writing.
+
+## [0.5.59.2] - 2026-08-12
+
+### Fixed — v0.5.59.1 changed the EN links but NOT the EN brand
+
+v0.5.59.1 shipped locale-aware branding that did nothing. Verified on the live feed right
+after that deploy: all 2 164 EN links moved to `/en/products/`, but every `<g:brand>` still
+read **"Ameublo Direct"**.
+
+Cause: `resolveBrand` keeps a real product vendor (Outsunny, …) over the house brand, and
+Shopify's `vendor` field is set to **"Ameublo Direct" on 100% of products** (250/250 sampled
+2026-08-12). Our own store name was being treated as a third-party manufacturer, so the
+"a real vendor wins" branch fired and pinned the EN feed to the FR brand. The v0.5.59.1
+change only ever applied to products with an empty or "Aosom" vendor — the catalogue has none.
+
+- `resolveBrand` now recognises **either house brand** in the vendor field (case-insensitive)
+  and replaces it with the locale's brand. A genuine third-party vendor still wins.
+- Symmetric guard: an EN-branded vendor cannot leak "Furnish Direct" into the FR feed.
+
+## [0.5.59.1] - 2026-08-12
+
+### Fixed — the EN feed announced one brand and linked to another
+
+The Pinterest EN feed served English titles but pointed every offer at the **French**
+storefront and labelled it **"Ameublo Direct"**. An English shopper landed on a French page,
+and the feed's brand did not match the branding on the page it linked to — the
+brand/landing-page mismatch Pinterest and Google both flag.
+
+- **EN offers now link to the `/en` storefront** — `ameublodirect.ca/en/products/{handle}`,
+  verified live (`200`, `<html lang="en">`, page titled "… — Furnish Direct").
+- **EN house brand is now "Furnish Direct"**, the store's actual EN identity. A real vendor
+  (Outsunny, …) still wins over the house brand, exactly as on the FR feed.
+- **Supplier scrubbing is locale-aware.** `scrubSupplier` took the FR brand unconditionally,
+  so an EN description read "the Ameublo Direct shelter". It now takes the locale's brand.
+- **Channel metadata matches** — the EN feed no longer titles itself "Ameublo Direct".
+
+`furnishdirect.ca` was **not** used: it is **NXDOMAIN** at the .ca registry (verified against
+CIRA 2026-08-12; Shopify reports exactly one domain, `ameublodirect.ca`). Linking there would
+have shipped a dead link for all 2 164 offers. Furnish Direct is the `/en` locale of the same
+store, not a separate site. A test locks the domain out of the feed so it cannot creep back in.
+
+Scope: `preferEnglishTitle` is passed by **`/api/feeds/pinterest-en` only** — no Google EN feed
+exists. The FR feeds are byte-identical; regression tests assert their links keep no `/en`.
+
+## [0.5.59.0] - 2026-08-09
+
+### Fixed — the blog cron fired every week and failed 100% of the time
+
+- **Root cause was not in the pipeline.** `/api/cron/blog` did not generate anything itself:
+  it made an HTTP call back to its own `/api/blog/generate` endpoint, and that self-call was
+  answered with a **401 before the app's own `CRON_SECRET` check ever ran**.
+- **Vercel SSO Deployment Protection is enabled** (`all_except_custom_domains`, no custom
+  domain) but is **not uniform across hosts** — measured on `/api/cron/blog` with no
+  credentials: the **production alias** `aosom-sync.vercel.app` reaches the app (401 from
+  `verifyCronSecret`), while the **per-deployment URL** and the **git-branch alias** both return
+  `302 Redirecting...` from the SSO edge and never reach the app at all. A self-`fetch()` whose
+  origin resolves to either protected host is intercepted; `fetch` follows the 302 into the SSO
+  flow and lands on a 401.
+- **Which host a Vercel Cron invocation presents was not verified.** The old comment in
+  `cron/content/route.ts` asserts `request.url` carries the production origin; that is an
+  assumption, not a measurement. Removing the hop removes every variant of the failure, so the
+  fix does not depend on resolving it.
+- The cron itself was healthy the whole time: 4 runs out of 4 in the 30-day `cron_runs`
+  retention window, every one at its scheduled minute, every one an error. Last article
+  actually created: **2026-06-22**. `blog_publish_counter` was empty — auto-publish had never
+  fired once.
+- The sibling `/api/cron/content` shares the architecture and recorded the smoking gun:
+  `FR: Generation failed (HTTP 401) | EN: Generation failed (HTTP 401)`, 13 runs out of 13.
+  Every cron that does its work **in-process** has zero errors. `content` still has the same
+  defect and is **not** fixed here.
+- Generation now lives in `lib/blog-generator.ts` and the cron calls it directly: no edge
+  round-trip, no protection surface, one function invocation instead of two, and the cron no
+  longer consumes `/api/blog/generate`'s 6/min rate limit. The route stays as a thin wrapper
+  for manual/admin use and now shares the fail-closed `verifyCronSecret` helper.
+
+### Fixed — Monday and Thursday runs picked the same topic
+
+- Moving the cron to twice a week put both runs inside the **same ISO week**, and
+  `selectBilingualTopic` derived its index from the week number alone (`idx = week % 30`).
+  Proven: 2026-08-10 (Mon) and 2026-08-13 (Thu) both resolved to `idx=0`. That would have
+  published near-duplicate articles to a live storefront every week — an SEO duplicate-content
+  problem, not merely wasted spend.
+- The index now advances per **run**: `(week * RUNS_PER_WEEK + slot) % len`, slot 0 for
+  Mon-Wed and 1 for Thu-Sun. `week*2+slot` is a true sequential counter, so the step is
+  exactly 1 and the catalogue still cycles through all 30 topics. A step of 2 would have
+  reached only 15 of 30, because the catalogue size is even.
+- `blog_schedule.posts_per_week` 2 → 4. The cap counts **articles, not bilingual pairs**, so
+  two runs × (FR + EN) needs 4. At 2, the Thursday pair could never publish while still
+  costing two Claude generations plus two judge calls every week.
+
+### Added
+
+- **`blog_posts` table** — one row per generated article (`title`, `lang`, `status`,
+  `shopify_article_id`, `created_at`), including failures. Silent breakage is now visible
+  instead of invisible for seven weeks.
+- **`/blog` dashboard** — the article log with status counts and links into Shopify admin.
+- **`sanitizeArticleHtml`** — strips `script`/`style`/`iframe`/`object`/`embed`/`form`, inline
+  `on*` handlers, and `javascript:`/`data:` URLs from the model's HTML before it is stored.
+  The prompt already forbade these, but a prompt is a request, not a guarantee, and this HTML
+  renders verbatim to every visitor. Applied before the quality judge so it scores what ships.
+
+### Changed
+
+- Blog cron moved to **Mon + Thu 08:00 UTC** (was Tue 15:00 UTC). It stays a **GET**: Vercel
+  Cron only issues GET requests, so a POST handler would never fire.
+- Cron `maxDuration` 180 → 300. All generation is in-process now (~120-160s at p50 for two
+  articles plus two judge calls); a timeout mid-Shopify-create would create an article
+  without logging it.
+- The cron propagates each language's real error into `cron_runs.detail`. The old generic
+  "Both FR and EN blog generations failed" is precisely why the 401 hid for so long.
+
+## [0.5.58.0] - 2026-08-08
+
+### Fixed — `g:availability` was invalid for Google on every item
+
+- Google accepts **only** `in_stock` / `out_of_stock`. The feed was emitting `in stock` /
+  `out of stock` with spaces, which appears in Google's docs as prose, not as a submittable
+  value. All 2182 items carried the wrong form.
+- **Pinterest is the opposite and it is strict too:** it documents `"in stock"` /
+  `"out of stock"` / `"preorder"` with spaces, and `availability` is a *required* attribute.
+  `buildPinterestFeed` delegates to `buildGoogleFeed`, so a one-line fix to Google would have
+  silently invalidated a required field on every Pinterest item. The format is now a
+  parameter (`availabilityValue`), Google gets underscores, Pinterest keeps spaces, and a test
+  asserts each channel independently so the two can never be conflated again.
+- Bing, Reddit, Meta-XML and the Meta JSON feed are untouched and still emit the spaced form.
+
+### Changed — `g:sale_price_effective_date` now uses store-local time with a real offset
+
+- Was an instant pair in UTC (`…T01:51:01Z/…`). Now whole-day boundaries in store-local time:
+  `2026-08-06T00:00:00-04:00/2026-09-05T23:59:59-04:00`, which is how a merchant reads "good
+  for 30 days".
+- **The offset is derived from `America/Toronto`, never hardcoded.** Quebec is `-05:00` in
+  winter and `-04:00` in summer, so a literal `-05:00` would be an hour wrong for eight months
+  of the year. Tests lock EST, EDT, and a window that starts on one and ends on the other.
+
+### Verified as already correct, no change needed
+
+- **`g:id` is already the Aosom SKU** (`String(v.sku)`), e.g. `84C-653V00CG`. The numeric
+  Shopify id is used for `g:item_group_id`, which is what Google wants there — it is the
+  attribute that groups variants of one product.
+- **All ten requested EN→FR colour mappings already existed** in `COLOR_EN_FR` (brown→Brun,
+  grey→Gris, blue→Bleu, red→Rouge, green→Vert, yellow→Jaune, purple→Violet, pink→Rose,
+  orange→Orange, beige→Beige), alongside 18 more.
+- **PDP JSON-LD already emits full schema.org availability URLs** (`https://schema.org/InStock`)
+  and parses clean (0 errors across its 4 blocks, checked in a browser).
+
+## [0.5.57.2] - 2026-08-06
+
+### Changed — the GCR guard now accepts `order` alongside `customers/order`
+
+- `snippets/lc-gcr-optin.liquid` matches either page type. `customers/order` is the one that
+  fires today; `order` is carried so the guard already covers that value should Shopify ever
+  introduce it — it is not in the documented `request.page_type` set as of 2026-08, so on its
+  own it would match nothing. `order != blank` remains the real safety check: no order
+  object, no markup.
+- Re-verified on the draft preview after the change: the GCR script stays absent from the
+  product page, collections, cart and home, and every JSON-LD block still parses.
+
+### Note — the rest of this batch was already live
+
+No code was needed for the other three items; this records where they landed.
+
+- **Structured data, all three blocks** — `Product` and `BreadcrumbList` render on the product
+  page and `WebSite` on the home page, the latter already carrying a complete `SearchAction`
+  (`/search?q={search_term_string}` with `query-input`) for the sitelinks searchbox. Shipped
+  in `v0.5.56.0`.
+- **Sale prices** — the 30-day `sale_price_effective_date` window and the ≥10% floor
+  (`SALE_MIN_DISCOUNT = 0.1`) are both in effect: 32 items carry `sale_price` and 32 carry the
+  matching window. Shipped in `v0.5.55.0` and `v0.5.57.0`.
+- **Variant attributes** — `g:color` on 2160 items (99%), `g:size` on 2104 (96%), `g:material`
+  omitted when empty, which is every item today because no material metafield exists. Shipped
+  in `v0.5.55.0` and `v0.5.57.0`.
+
+## [0.5.57.1] - 2026-08-06
+
+### Added — Google Customer Reviews opt-in on the customer-account order page
+
+- New `snippets/lc-gcr-optin.liquid`, rendered from `layout/theme.liquid`, emitting the GCR
+  survey opt-in (`merchant_id 5804673777`) with the order name, customer email, delivery
+  country and an estimated delivery date of **order date + 8 business days**. Liquid has no
+  business-day arithmetic, so weekends are skipped explicitly: 10 calendar days for a Mon/Tue
+  order, 12 for Wed–Sun, because the run then crosses a second weekend.
+- **Read this before expecting opt-ins.** The guard is `request.page_type ==
+  'customers/order'` — the signed-in customer's "my order" page. It is **not** the
+  post-checkout thank-you page: that page is rendered by Shopify Checkout, not the theme, so
+  `layout/theme.liquid` never executes there. `request.page_type` has no value for it at all;
+  the documented set is `404, article, blog, captcha, cart, collection, list-collections,
+  customers/*, gift_card, index, metaobject, page, password, policy, product, search`. A
+  guard written as `request.page_type == 'order'` would have matched nothing, silently.
+- Practical reach on a mostly-guest-checkout store is therefore small. The routes that reach
+  every buyer remain the Google & YouTube channel app, or a Merchant Center order feed once
+  the token gains `read_orders` — both written up in
+  `docs/GOOGLE-CUSTOMER-REVIEWS-SETUP.md`.
+- Applied to the working draft `161090928745` only; the live theme is untouched. Verified on
+  the draft preview that the script is absent from the product page, collections, cart and
+  home, and that the single Product JSON-LD is unaffected. Passes Shopify Theme Check (one
+  informational warning: Google's `platform.js` is not on the Shopify CDN, which is inherent
+  to GCR).
+
+## [0.5.57.0] - 2026-08-06
+
+### Changed — `g:sale_price_effective_date` window is now 30 days
+
+- Was 7 days. The window is a forward validity declaration anchored to feed-generation time,
+  not a Shopify promotion (`compare_at_price` stores no schedule), and it is superseded by
+  every daily refetch — so the length is a presentation choice rather than a correctness one.
+
+### Changed — `g:material` now comes from a metafield, or not at all
+
+- The previous release derived the material from the description prose (72% coverage). That
+  value read correctly most of the time but it was **inferred, not declared**, and Google
+  treats `material` as a factual product claim. A feed attribute that guesses is worse than
+  one that is absent, so the derivation is removed.
+- `material` is now read from the first Shopify metafield present among `custom.material`,
+  `custom.matiere`, `custom.matière`, `mm-google-shopping.material`. None exists on the store
+  today — verified against `metafieldDefinitions` for both PRODUCT and PRODUCTVARIANT — so
+  **`g:material` is currently emitted on 0 items, down from 1572.** Define any one of those
+  metafields and it starts flowing with no code change.
+- The lookup is gated on a definition existing, so it costs one cheap GraphQL call and never
+  paginates while no material metafield is defined. It also swallows its own errors: a
+  metafield lookup must degrade to an omitted attribute, never take the feed down.
+
+### Documented — Google Customer Reviews: the extension route, and the one that works
+
+- A Thank-you page UI extension is the right *shape* under Checkout Extensibility but cannot
+  host GCR: extensions run in a **sandboxed Web Worker with Shopify-managed components**,
+  while GCR's opt-in loads Google's own JS and renders into the page DOM. No third-party
+  script, no DOM, and Google exposes no server-side opt-in endpoint to POST to instead. The
+  runbook now says explicitly not to scaffold it.
+- The route that does work is a **Merchant Center order feed** — no page script, and it takes
+  exactly the fields wanted (order id, email, country, estimated delivery = order + 8
+  business days). Specified in the runbook, not merged, for two reasons: the Shopify token
+  has **no `read_orders` scope** (403, "requires merchant approval"), and an order feed
+  carries customer emails, so it must be excluded from the public `/api/feeds` allowlist and
+  gated behind auth — a PII surface worth getting right deliberately rather than blind.
+
+## [0.5.56.0] - 2026-08-06
+
+### Added — `g:material` and `g:sale_price_effective_date` in the Google feed
+
+- **`g:material`** — the catalog has no Material option and no material metafield (checked
+  across every namespace in use), so the value is read from the description prose against a
+  closed whitelist of the ~29 materials this catalog actually contains. Ordered
+  most-specific first so "acier galvanisé" beats "acier", and matched on **word boundaries**
+  over accent-stripped text — a plain substring test makes "fer" fire inside "offert",
+  "fermé" and "différent". Coverage: **1572 of 2182 items (72%)**, led by polyester (375),
+  métal (309), acier (233) and MDF (203).
+- **`g:sale_price_effective_date`** — emitted alongside `g:sale_price` as an ISO 8601
+  interval. Shopify's `compare_at_price` stores no schedule, so this is not a promotion
+  being reported: it is a 7-day forward validity window anchored to feed-generation time.
+  That holds because the feed is rebuilt on every fetch and Google re-fetches daily, so
+  ending a sale drops both attributes from the next feed.
+
+### Changed — product JSON-LD moves to the page `<head>`
+
+- New `snippets/lc-structured-data.liquid`, rendered from `layout/theme.liquid` before
+  `</head>` so the markup sits where crawlers read it first. The content is the canonical
+  schema previously rendered from `sections/main-product.liquid`; that render call is
+  removed, so exactly **one** Product entity exists per URL — two would make Google pick
+  arbitrarily.
+- The snippet is guarded on `product`, because `theme.liquid` runs on every page. Verified
+  on the draft preview: the product page emits 1 Product schema in `<head>` with `sku`,
+  `mpn`, `color`, brand = the shop (never the supplier) and `aggregateRating` correctly
+  absent at 0 reviews; collections, cart, search and home emit **zero** Product schemas.
+- Applied to the working draft `161090928745` only; the live theme is untouched.
+
+### Documented — Google Customer Reviews cannot use "additional scripts"
+
+- `docs/GOOGLE-CUSTOMER-REVIEWS-SETUP.md` now cites Shopify's changelog directly: additional
+  scripts on the Thank-you / Order-status pages were **removed on 2025-08-28**, and are the
+  thing Checkout Extensibility replaced rather than its modern route. Re-verified on the live
+  store: plan `basic`, no `checkout.liquid`, no order-status template, 0 ScriptTags scoped to
+  `order_status`. A Web Pixel cannot host it either — GCR's opt-in renders a widget and
+  pixels run sandboxed with no top-frame DOM. The Google & YouTube channel app remains the
+  only supported path.
+
+## [0.5.55.0] - 2026-08-06
+
+### Added — sale prices and variant attributes in the Google feed
+
+- **`g:sale_price`** — Google only draws a strikethrough "was" price when the feed splits
+  the pair, so a discounted item now ships `g:price` = the regular price and
+  `g:sale_price` = what the shopper actually pays. 32 catalog items qualify today.
+- The split applies only at **10% off or more**, mirroring the storefront, which shows its
+  own strikethrough at the same threshold. Google crawls the landing page and compares it
+  to the feed; claiming a sale the page does not display invites a price-mismatch
+  disapproval. The 2 items discounted below the floor keep the single-price shape.
+- **`g:size`** — new, from the Shopify "Taille" option. 2106 of 2184 variants (96%).
+- **`g:color`** now prefers the Shopify "Couleur" option over the 2-letter SKU suffix,
+  which lifts coverage from 80% to **97%** and distinguishes "Gris foncé" from "Gris".
+  English option values inherited from the supplier ("Rustic Brown", "Charcoal Grey",
+  "Multi Colour") are translated token by token for the French market; unknown values pass
+  through unchanged rather than being dropped.
+
+### Added — `mpn` in the product-page structured data
+
+- The PDP JSON-LD (`snippets/agentic-structured-data.liquid`) now carries `mpn` alongside
+  `sku`, so the page declares the same brand + MPN identifier pair the Google feed does.
+  Applied to the working draft theme `161090928745`; the repo mirror is re-synced from it.
+
+### Not shipped, and why
+
+- **`g:sale_price_effective_date`** is omitted. Shopify's `compare_at_price` carries no
+  start or end timestamp, so there is no schedule to publish — emitting a window would mean
+  inventing dates.
+- **`g:material`** is omitted. The catalog has no Material option and no material metafield;
+  parsing it out of description prose reached 1% coverage with visible bleed between fields.
+
+## [0.5.54.40] - 2026-08-06
+
+### Fixed — strip promotional shipping claims from every shopping feed
+
+- Google prohibits promotional text in the `title` and `description` attributes, naming
+  "free shipping" as its example. 18 live Google-feed descriptions carried a
+  "Livraison gratuite partout au Canada" tail (written into the Shopify copy at import
+  time), making those offers non-compliant even though their price and link are correct.
+  `stripPromoText` now removes the claim in the feed layer, so all seven feeds (Google,
+  Bing, Pinterest FR/EN, Meta, Meta-XML, Reddit) ship compliant copy.
+- Scrubbed in the feed only, never in Shopify: the storefront may legitimately advertise
+  free shipping, only the feed must not.
+- Matched conservatively — the trailing qualifier is an explicit word list, never a greedy
+  run. Verified against all 2188 live descriptions: 18/18 cleaned, 0 residual, and 0 of the
+  2170 clean descriptions altered. Legitimate copy such as "Livraison en 3 à 5 jours
+  ouvrables" or "Frais de livraison calculés à la caisse" survives untouched, and French
+  spacing before `:` / `!` / `?` is preserved. (`src/lib/feeds/source.ts`, +16 tests.)
+
+## [0.5.54.39] - 2026-08-05
+
+### Added — two read-only diagnostics for the Google Merchant "Product page unavailable" flags
+
+- `scripts/google-feed-handle-diagnostic.mjs` answers whether the feed's product URLs
+  drift from the storefront's real handles. It rebuilds the feed items exactly as
+  `src/lib/feeds/source.ts` emits them, compares each one against Turso's
+  `products.shopify_handle`, and HTTP-checks a live sample. Verdict on the 267 flagged
+  products: they are stale Merchant Center ghosts, not broken pages. The feed reads
+  `p.handle` live from the Shopify Admin API and never touches `shopify_handle`, so
+  handle drift is impossible by construction — no code fix was needed.
+- `scripts/google-feed-url-sweep.mjs` is the wider net: it HTTP-checks every current
+  feed URL against the live storefront and reports the status breakdown.
+- Both scripts write nothing, anywhere. They pace Shopify Admin calls at 550ms (the
+  ≤2 req/s ceiling) and retry storefront 429s with `Retry-After` backoff, keeping any
+  still-throttled URL in its own bucket. That last part matters: a rate-limited sweep
+  would otherwise report throttling as mass page-unavailability and send you chasing a
+  bug that isn't there. Requests carry a 20s timeout so one hung connection can't stall
+  a 1000-URL run.
+
+Operator tooling only — `scripts/` is outside the Next build, so nothing about the
+running app changes.
+
 ## [0.5.54.38] - 2026-07-21
 
 ### Changed — raise the assistant LLM budget-pool default 200k → 500k

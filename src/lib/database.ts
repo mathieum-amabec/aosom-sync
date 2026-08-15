@@ -158,6 +158,20 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE TABLE IF NOT EXISTS blog_publish_counter (
       week TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0
     )`,
+    // blog_posts: one row per article the blog pipeline generated, so the /blog dashboard
+    // can show what ran without round-tripping to the Shopify Admin API. Distinct from
+    // blog_publish_counter (a bare weekly cap tally) and from cron_runs (one row per cron
+    // invocation, not per article). `status` is the article's state at record time:
+    // 'draft' = created in Shopify but not live, 'published' = auto-publish gate passed,
+    // 'failed' = generation threw before an article existed (shopify_article_id stays NULL).
+    `CREATE TABLE IF NOT EXISTS blog_posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      lang TEXT NOT NULL DEFAULT 'fr' CHECK (lang IN ('fr', 'en')),
+      status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'failed')),
+      shopify_article_id TEXT,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    )`,
     `CREATE TABLE IF NOT EXISTS notifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, title TEXT NOT NULL,
       message TEXT NOT NULL, read INTEGER DEFAULT 0,
@@ -387,6 +401,8 @@ async function _initSchemaImpl(): Promise<void> {
     // (sku, notified_at): serves getPendingWaitlist — seek by sku, filter notified_at IS NULL.
     `CREATE INDEX IF NOT EXISTS idx_waitlist_sku_pending ON back_in_stock_waitlist(sku, notified_at)`,
     `CREATE INDEX IF NOT EXISTS idx_cron_runs_name_at ON cron_runs(name, ran_at DESC)`,
+    // Serves listBlogPosts — the /blog dashboard reads newest-first, nothing else.
+    `CREATE INDEX IF NOT EXISTS idx_blog_posts_created ON blog_posts(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_feed_syncs_type_at ON feed_syncs(feed_type, fetched_at DESC)`,
     // publication_queue: unified scheduling queue for social posts, Shopify product
     // drafts, and blog articles. scheduled_at/created_at/published_at are SQLite
@@ -3618,6 +3634,76 @@ export async function releaseBlogPublishSlot(week: string): Promise<void> {
   await db.execute({
     sql: `UPDATE blog_publish_counter SET count = MAX(0, count - 1) WHERE week = ?`,
     args: [week],
+  });
+}
+
+// ─── Blog posts (generation log) ────────────────────────────────────
+
+export type BlogPostStatus = "draft" | "published" | "failed";
+
+export interface BlogPostRow {
+  id: number;
+  title: string;
+  lang: "fr" | "en";
+  status: BlogPostStatus;
+  shopify_article_id: string | null;
+  created_at: number;
+}
+
+export interface RecordBlogPostInput {
+  title: string;
+  lang: "fr" | "en";
+  status: BlogPostStatus;
+  /** Absent for 'failed' rows — no Shopify article exists yet. */
+  shopifyArticleId?: string | null;
+}
+
+/**
+ * Log one generated article. Best-effort and never throws: the article already exists in
+ * Shopify by the time this runs, so a telemetry write failure must not turn a successful
+ * generation into an error (same posture as recordCronRun). Returns the new row id, or
+ * null when the write failed.
+ */
+export async function recordBlogPost(input: RecordBlogPostInput): Promise<number | null> {
+  try {
+    const db = await ensureSchema();
+    const r = await db.execute({
+      sql: `INSERT INTO blog_posts (title, lang, status, shopify_article_id, created_at)
+            VALUES (?, ?, ?, ?, ?) RETURNING id`,
+      args: [
+        input.title.slice(0, 300),
+        input.lang,
+        input.status,
+        input.shopifyArticleId ?? null,
+        Math.floor(Date.now() / 1000),
+      ],
+    });
+    return r.rows.length > 0 ? Number(rowToObj(r.rows[0]).id) : null;
+  } catch (err) {
+    console.error("[blog_posts] failed to record post:", err);
+    return null;
+  }
+}
+
+/** Newest-first article log for the /blog dashboard. */
+export async function listBlogPosts(limit = 50): Promise<BlogPostRow[]> {
+  const db = await ensureSchema();
+  const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
+  const r = await db.execute({
+    sql: `SELECT id, title, lang, status, shopify_article_id, created_at
+          FROM blog_posts ORDER BY created_at DESC, id DESC LIMIT ?`,
+    args: [safeLimit],
+  });
+  return r.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      id: Number(o.id),
+      title: String(o.title),
+      lang: o.lang === "en" ? "en" : "fr",
+      status: o.status as BlogPostStatus,
+      shopify_article_id: o.shopify_article_id == null ? null : String(o.shopify_article_id),
+      created_at: Number(o.created_at) || 0,
+    };
   });
 }
 

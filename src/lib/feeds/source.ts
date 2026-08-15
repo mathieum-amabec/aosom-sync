@@ -13,6 +13,10 @@ export interface ShopifyFeedVariant {
   inventory_quantity?: number | null;
   inventory_management?: string | null;
   title?: string | null;
+  /** Shopify variant option values, positionally aligned with product.options. */
+  option1?: string | null;
+  option2?: string | null;
+  option3?: string | null;
 }
 export interface ShopifyFeedProduct {
   id: number | string;
@@ -22,6 +26,9 @@ export interface ShopifyFeedProduct {
   status: string;
   product_type?: string | null;
   body_html?: string | null;
+  /** Option definitions (name + 1-based position). The catalog only ever uses
+   * "Couleur" and "Taille"; `position` tells us which variant.optionN to read. */
+  options?: Array<{ name?: string | null; position?: number | null }>;
   /** Shopify Online Store publish timestamp (ISO) — null when the product is active but
    * NOT published to the storefront. Such a product's /products/{handle} page 404s, so it
    * must be excluded from the feed (Google Merchant: "Product page unavailable"). */
@@ -31,6 +38,9 @@ export interface ShopifyFeedProduct {
   /** English product title from the custom.title_en metafield. Only populated for the
    * EN feed; absent/empty falls back to the FR `title`. */
   titleEn?: string | null;
+  /** Selected product metafields keyed "namespace.key". Only the keys the feed actually
+   * reads are populated (see MATERIAL_METAFIELD_KEYS); absent when none are defined. */
+  metafields?: Record<string, string | null | undefined> | null;
 }
 
 const DESCRIPTION_MAX = 5000;
@@ -45,9 +55,131 @@ const HOUSE_BRAND = "Ameublo Direct";
 const SUPPLIER_WORD = /\baosom\b/i; // single match (no /g — safe with .test())
 const SUPPLIER_GLOBAL = /\baosom\b/gi; // replace-all
 
-/** Replace any "Aosom" occurrence with the house brand and tidy whitespace. */
-export function scrubSupplier(s: string): string {
-  return s.replace(SUPPLIER_GLOBAL, HOUSE_BRAND).replace(/\s{2,}/g, " ").trim();
+// English feeds carry the store's EN identity, "Furnish Direct". That is NOT a separate shop:
+// it is the same 27u5y2-kp store rendered at the `/en` locale path, which is why the EN link
+// is the FR domain + EN_PATH_PREFIX and not a domain of its own.
+//
+// ⚠️ `furnishdirect.ca` is NOT a live domain — it is NXDOMAIN at the .ca registry (verified
+// 2026-08-12 against CIRA; Shopify reports exactly one domain, `ameublodirect.ca`). Pointing
+// feed links there would ship a dead link for every offer. If that domain is ever registered
+// and attached to Shopify as an EN market/alias, swap EN_PATH_PREFIX for the domain here —
+// nothing else in this file needs to change.
+const HOUSE_BRAND_EN = "Furnish Direct";
+const EN_PATH_PREFIX = "/en";
+
+/** Replace any "Aosom" occurrence with the house brand and tidy whitespace.
+ * `houseBrand` selects the locale's identity so an EN description never reads
+ * "Ameublo Direct" on a page that brands itself Furnish Direct. */
+export function scrubSupplier(s: string, houseBrand: string = HOUSE_BRAND): string {
+  return s.replace(SUPPLIER_GLOBAL, houseBrand).replace(/\s{2,}/g, " ").trim();
+}
+
+// Google's title and description guidelines prohibit promotional text — "free shipping" is
+// the named example. Product copy generated at import time sometimes ends up with a
+// "Livraison gratuite partout au Canada" tail (18 live descriptions as of 2026-08-06), which
+// makes the offer non-compliant even though the price and link are fine. Strip it in the feed
+// layer rather than rewriting Shopify: the storefront may legitimately advertise free
+// shipping, only the feed must not.
+//
+// Matched conservatively — the trailing qualifier is an explicit word list, never a greedy
+// run — so a real sentence is never swallowed. Covers the observed variants:
+//   "Livraison gratuite partout au Canada" / "… au Canada." / "… au Canada!" / "… au Canada !"
+//   "Livraison gratuite - Partout au Canada" / "Livraison gratuite disponible."
+// plus the English equivalent for the EN feed.
+const PROMO_SHIPPING =
+  /\s*(?:livraison\s+gratuite|free\s+shipping)(?:\s*[-–—]\s*)?(?:\s*(?:partout|everywhere))?(?:\s*(?:au|en|across|in|to)\s+canada)?(?:\s*(?:disponible|available))?\s*[!.]*\s*/gi;
+
+/** Remove promotional shipping claims (Google prohibits them in title/description).
+ * Only whitespace is normalised afterwards — no punctuation tightening, because French
+ * typography puts a space before `:`, `!` and `?` and collapsing it would corrupt the copy. */
+export function stripPromoText(s: string): string {
+  return s.replace(PROMO_SHIPPING, " ").replace(/\s{2,}/g, " ").trim();
+}
+
+// The catalog's "Couleur" option is mostly French already, but ~19 of the 61 distinct values
+// arrived from Aosom in English ("Rustic Brown", "Charcoal Grey", "Multi Colour"). The feed
+// targets a Quebec French audience, so map what we can and pass through anything unknown
+// unchanged — a slightly-off colour is far better than a dropped attribute.
+//
+// Compound values ("Green, Black", "Brown, Green, White") are translated part by part.
+const COLOR_EN_FR: Record<string, string> = {
+  black: "Noir", white: "Blanc", grey: "Gris", gray: "Gris", green: "Vert",
+  blue: "Bleu", red: "Rouge", yellow: "Jaune", brown: "Brun", beige: "Beige",
+  pink: "Rose", purple: "Violet", orange: "Orange", cream: "Crème", ivory: "Ivoire",
+  navy: "Bleu marine", silver: "Argent", gold: "Or", natural: "Naturel", teak: "Teck",
+  charcoal: "Anthracite", wood: "Bois", multi: "Multicolore", colour: "", color: "",
+  rustic: "Rustique", earthy: "Terreux", finish: "", grain: "",
+};
+
+/** Translate a Shopify colour option value to French, part by part.
+ * "Rustic Brown" → "Brun rustique" is out of scope — we keep word order and only swap
+ * known tokens, so "Rustic Brown" → "Rustique Brun". Unknown tokens pass through. */
+export function frenchifyColor(value: string | null | undefined): string | null {
+  const raw = (value ?? "").trim();
+  if (!raw) return null;
+  const parts = raw.split(/\s*,\s*/).map((part) =>
+    part
+      .split(/\s+/)
+      .map((word) => {
+        const hit = COLOR_EN_FR[word.toLowerCase().replace(/[^a-z]/g, "")];
+        return hit === undefined ? word : hit;
+      })
+      .filter(Boolean)
+      .join(" ")
+      .trim(),
+  );
+  const out = parts.filter(Boolean).join(", ").replace(/\s{2,}/g, " ").trim();
+  return out || null;
+}
+
+/** Read a variant's value for the product option whose name matches `match`.
+ * Shopify stores option values positionally (variant.option1..3) against
+ * product.options[].position, so we resolve the position first. */
+export function optionValue(
+  product: ShopifyFeedProduct,
+  variant: ShopifyFeedVariant,
+  match: RegExp,
+): string | null {
+  const opt = (product.options ?? []).find((o) => match.test((o?.name ?? "").trim()));
+  const pos = opt?.position;
+  if (pos !== 1 && pos !== 2 && pos !== 3) return null;
+  const value = pos === 1 ? variant.option1 : pos === 2 ? variant.option2 : variant.option3;
+  const trimmed = (value ?? "").trim();
+  // Shopify's placeholder for a single-variant product carries no information.
+  if (!trimmed || trimmed === "Default Title") return null;
+  return trimmed;
+}
+
+const COLOUR_OPTION = /^(couleur|color|colour)$/i;
+const SIZE_OPTION = /^(taille|size|dimension|dimensions)$/i;
+
+// <g:material> comes from a Shopify metafield and nowhere else. Deriving it from the
+// description prose was tried and removed: the value read fine most of the time, but it was
+// inferred rather than declared, and a feed attribute that guesses is worse than one that is
+// absent — Google treats `material` as a factual product claim.
+//
+// Recognised metafield keys, in priority order. None of these exist on the store today
+// (verified against metafieldDefinitions for PRODUCT and PRODUCTVARIANT on 2026-08-06), so
+// the attribute is simply omitted. Populate any one of them and it starts flowing with no
+// code change.
+export const MATERIAL_METAFIELD_KEYS = [
+  "custom.material",
+  "custom.matiere",
+  "custom.matière",
+  "mm-google-shopping.material",
+] as const;
+
+/** Pick the material from a product's metafields, or null when none is set.
+ * `metafields` is keyed "namespace.key" exactly as MATERIAL_METAFIELD_KEYS spells them. */
+export function materialFromMetafields(
+  metafields: Record<string, string | null | undefined> | null | undefined,
+): string | null {
+  if (!metafields) return null;
+  for (const key of MATERIAL_METAFIELD_KEYS) {
+    const value = metafields[key];
+    if (typeof value === "string" && value.trim() !== "") return value.trim();
+  }
+  return null;
 }
 
 // Aosom variant "size" options carry English/imperial measurements that leak into the FR
@@ -82,24 +214,46 @@ export function stripImperialDimensions(title: string): string {
   return cleaned.replace(/[\s,/–—-]+$/u, "").trim();
 }
 
-/** Brand to show: keep a real product vendor (Outsunny, …); replace empty or the
- * supplier name ("Aosom") with the house brand. */
-function resolveBrand(vendor: string | null | undefined): string {
+// Either house brand, whichever locale it came from. Used to recognise our OWN name in the
+// Shopify `vendor` field (see resolveBrand).
+const HOUSE_BRANDS = [HOUSE_BRAND, HOUSE_BRAND_EN];
+
+/** Brand to show: keep a real product vendor (Outsunny, …); replace empty, the supplier
+ * name ("Aosom"), or our own house brand with the locale's house brand (FR "Ameublo
+ * Direct", EN "Furnish Direct"). The brand must match the branding on the landing page
+ * the offer links to, or the channel flags a brand/landing-page mismatch.
+ *
+ * The house-brand case is not hypothetical: Shopify's `vendor` field is set to
+ * "Ameublo Direct" on 100% of products (250/250 sampled 2026-08-12). Without this branch
+ * the "a real vendor wins" rule fires on our OWN name and the EN feed silently keeps the
+ * FR brand — which is exactly what shipped in v0.5.59.1 and did nothing. */
+function resolveBrand(
+  vendor: string | null | undefined,
+  houseBrand: string = HOUSE_BRAND,
+): string {
   const v = (vendor ?? "").trim();
-  return !v || SUPPLIER_WORD.test(v) ? HOUSE_BRAND : v;
+  if (!v || SUPPLIER_WORD.test(v)) return houseBrand;
+  if (HOUSE_BRANDS.some((b) => b.toLowerCase() === v.toLowerCase())) return houseBrand;
+  return v;
 }
 
 /** Pure: map raw Shopify products to feed items (one per variant SKU). Active only.
  * g:id (SKU) is deduplicated across the whole feed — a duplicate g:id makes Google
  * reject/merge unpredictably, and dropship catalogs do reuse SKUs.
  *
- * When `opts.preferEnglishTitle` is set, the base title comes from `p.titleEn`
- * (custom.title_en metafield), falling back to the FR `p.title` when it's missing
- * or blank. Used by the Pinterest EN feed to reach the anglophone audience. */
+ * When `opts.preferEnglishTitle` is set the feed switches to the EN locale wholesale, not
+ * just the title: the base title comes from `p.titleEn` (custom.title_en metafield, falling
+ * back to the FR `p.title` when missing or blank), links point at the `/en` storefront, and
+ * the house brand becomes "Furnish Direct". Those three move together on purpose — an EN
+ * title linking to a FR page, or a "Furnish Direct" brand on a page headed "Ameublo Direct",
+ * is exactly the mismatch Pinterest/Google flag. Used by the Pinterest EN feed. */
 export function shopifyToFeedItems(
   products: ShopifyFeedProduct[],
   opts: { preferEnglishTitle?: boolean } = {},
 ): FeedItem[] {
+  const english = opts.preferEnglishTitle === true;
+  const houseBrand = english ? HOUSE_BRAND_EN : HOUSE_BRAND;
+  const pathPrefix = english ? EN_PATH_PREFIX : "";
   const items: FeedItem[] = [];
   const seenIds = new Set<string>();
   let dupCount = 0;
@@ -115,9 +269,9 @@ export function shopifyToFeedItems(
     if (!p.handle) continue;
     const images = (p.images ?? []).map((i) => i.src).filter(Boolean);
     if (images.length === 0) continue;            // Google/Pinterest/Meta require an image
-    const link = `${STOREFRONT_BASE_URL}/products/${encodeURIComponent(p.handle)}`;
-    const description = truncate(scrubSupplier(stripHtml(p.body_html ?? "")), DESCRIPTION_MAX);
-    const brand = resolveBrand(p.vendor);
+    const link = `${STOREFRONT_BASE_URL}${pathPrefix}/products/${encodeURIComponent(p.handle)}`;
+    const description = truncate(stripPromoText(scrubSupplier(stripHtml(p.body_html ?? ""), houseBrand)), DESCRIPTION_MAX);
+    const brand = resolveBrand(p.vendor, houseBrand);
     const cat = mapToGoogleCategory(p.product_type);
     const variants = (p.variants ?? []).filter((v) => v.sku && String(v.sku).trim() !== "");
     const multi = variants.length > 1;
@@ -142,7 +296,7 @@ export function shopifyToFeedItems(
       items.push({
         id,
         itemGroupId: multi ? String(p.id) : null,
-        title: truncate(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`)), 150),
+        title: truncate(stripPromoText(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`, houseBrand))), 150),
         description,
         link,
         imageLink: images[0],
@@ -152,9 +306,18 @@ export function shopifyToFeedItems(
         availability,
         condition: "new",
         brand,
-        // FR colour from the SKU suffix (COLOR_MAP), e.g. ...GY → "Gris". null when the
-        // SKU has no recognised colour suffix. Drives <g:color> on the Google feed.
-        color: parseSku(id).color,
+        // Colour for <g:color>. The Shopify "Couleur" option is the richer source (it
+        // distinguishes "Gris foncé" from "Gris", which the 2-letter SKU suffix cannot), so
+        // prefer it and fall back to the SKU suffix (COLOR_MAP) when the product has no
+        // colour option. English option values are mapped to French for the FR market.
+        color: frenchifyColor(optionValue(p, v, COLOUR_OPTION)) ?? parseSku(id).color,
+        // <g:size> from the Shopify "Taille" option. Values are Aosom's imperial dimension
+        // strings; Google accepts free-form size text, and having it lets Shopping tell
+        // same-product variants apart in the same item_group.
+        size: optionValue(p, v, SIZE_OPTION),
+        // <g:material> from a Shopify metafield only — never inferred. Product-level, so
+        // every variant of a product shares it. Null today: no material metafield exists.
+        material: materialFromMetafields(p.metafields),
         productType: p.product_type ?? "",
         googleCategoryId: cat.id,
       });
@@ -274,6 +437,65 @@ export async function fetchTitleEnMap(): Promise<Map<string, string>> {
   return map;
 }
 
+/** Fetch product-id → material for whichever of MATERIAL_METAFIELD_KEYS is defined.
+ *
+ * Gated on a definition existing, so on a store with no material metafield (which is the
+ * case today) this costs ONE cheap GraphQL call and never paginates. The moment someone
+ * defines `custom.material`, the full pass turns on by itself. Returns an empty map — never
+ * throws — because a missing material must degrade to an omitted attribute, not a dead feed.
+ */
+export async function fetchMaterialMap(): Promise<Map<string, string>> {
+  const empty = new Map<string, string>();
+  const token = process.env.SHOPIFY_ACCESS_TOKEN;
+  if (!token) return empty;
+  const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}/graphql.json`;
+
+  try {
+    const defs = await graphqlWithRetry(
+      url,
+      token,
+      `{ metafieldDefinitions(first: 100, ownerType: PRODUCT) { nodes { namespace key } } }`,
+      {},
+    );
+    const nodes =
+      (defs.data as { metafieldDefinitions?: { nodes: Array<{ namespace: string; key: string }> } })
+        ?.metafieldDefinitions?.nodes ?? [];
+    const defined = new Set(nodes.map((n) => `${n.namespace}.${n.key}`));
+    const wanted = MATERIAL_METAFIELD_KEYS.filter((k) => defined.has(k));
+    if (wanted.length === 0) return empty; // nothing defined — skip the expensive pass
+
+    const [namespace, key] = wanted[0].split(".");
+    const query = `query Material($cursor: String) {
+      products(first: 250, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { legacyResourceId metafield(namespace: "${namespace}", key: "${key}") { value } }
+      }
+    }`;
+    const map = new Map<string, string>();
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const body = await graphqlWithRetry(url, token, query, { cursor });
+      const conn = (body.data as {
+        products?: {
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+          nodes: Array<{ legacyResourceId: string; metafield: { value: string } | null }>;
+        };
+      })?.products;
+      if (!conn) break;
+      for (const node of conn.nodes) {
+        const value = node.metafield?.value?.trim();
+        if (value) map.set(String(node.legacyResourceId), value);
+      }
+      cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+      pages++;
+    } while (cursor && pages < MAX_PAGES);
+    return map;
+  } catch {
+    return empty; // never let a metafield lookup take the whole feed down
+  }
+}
+
 /** Fetch all products from Shopify (paginated) and return feed items.
  * Pass `{ english: true }` to overlay custom.title_en titles for the Pinterest EN feed. */
 export async function getFeedItems(opts: { english?: boolean } = {}): Promise<FeedItem[]> {
@@ -284,7 +506,7 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
   let pageInfo: string | null = null;
   let pages = 0;
   do {
-    const params = new URLSearchParams({ limit: "250", fields: "id,title,handle,vendor,status,product_type,body_html,images,variants,published_at" });
+    const params = new URLSearchParams({ limit: "250", fields: "id,title,handle,vendor,status,product_type,body_html,images,variants,published_at,options" });
     if (pageInfo) params.set("page_info", pageInfo);
     const res = await fetchWithRetry(`${base}/products.json?${params}`, token);
     if (!res.ok) throw new Error(`Shopify products fetch failed: ${res.status}`);
@@ -296,6 +518,16 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
 
   // Fail loud rather than silently serve (and CDN-cache for 24h) a truncated catalog.
   if (pageInfo) throw new Error(`Feed pagination exceeded ${MAX_PAGES} pages — catalog larger than expected; refusing to serve a partial feed`);
+
+  // Overlay <g:material> from its metafield. No-op (one cheap call) until one is defined.
+  const materialMap = await fetchMaterialMap();
+  if (materialMap.size > 0) {
+    const [materialKey] = MATERIAL_METAFIELD_KEYS;
+    for (const p of products) {
+      const value = materialMap.get(String(p.id));
+      if (value) p.metafields = { ...(p.metafields ?? {}), [materialKey]: value };
+    }
+  }
 
   if (opts.english) {
     const titleEnMap = await fetchTitleEnMap();

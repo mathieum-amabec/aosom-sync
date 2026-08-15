@@ -8,6 +8,15 @@ Catalogue management tool for a Shopify dropshipping store (27u5y2-kp.myshopify.
 
 Claude Code has full autonomous permission to read, edit, create, and delete any file without confirmation prompts.
 
+## Comportement Claude Code
+
+**AUTORISATION PERMANENTE :** Claude a l'autorisation complète pour toute session de lire, ouvrir,
+inspecter, créer des dossiers/fichiers temporaires, lancer des commandes read-only (grep, find, cat,
+ls, tsc --noEmit, git status/log/diff, GET API calls, health checks) sans jamais demander
+confirmation. Ne jamais interrompre avec un choix 1/2 pour une action read-only. Seules les écritures
+irréversibles (Shopify live, Turso prod, publications sociales, merges PR) nécessitent confirmation
+explicite.
+
 ## Architecture
 
 Next.js App Router on Vercel. Engine in `src/lib/`, UI in `src/app/(dashboard)/`, API in `src/app/api/`.
@@ -135,10 +144,27 @@ Ad account `act_20658834`, catalog `384890002574549`, pixel `214720653324969`. B
 Source of truth for the tooling: `scripts/_shopify-lib.mjs` (`LIVE_THEME_ID` / `DRAFT_THEME_ID` /
 `BACKUP_THEME_ID`) — re-point it after EVERY publish or the `apply-*.mjs` guard protects the wrong theme.
 
-As of **2026-07-19** (publish of the price-badge-on-cards draft):
-- **LIVE / `main` (NEVER write):** `161069989993` "DRAFT DE TRAVAIL 2026-07-18 v2"
-- **Active working DRAFT (safe write target):** `161090928745` "DRAFT DE TRAVAIL 2026-07-19"
-- **Rollback backup (previous live):** `161062551657` "DRAFT DE TRAVAIL 2026-07-18"
+As of **2026-08-08** (publish of the `priceValidUntil` fix):
+- **LIVE / `main` (NEVER write):** `161562099817` "DRAFT DE TRAVAIL 2026-08-08"
+- **Rollback backup + safe write base:** `161529233513` "DRAFT GOOGLE SHOPPING 2026-08-07" (previous live)
+
+⚠️ **Theme slots: 20/20 — Shopify's hard cap.** At the cap `themeDuplicate` fails by returning
+`newTheme: null` with **no `userErrors`**: a completely silent failure. If duplication appears
+to do nothing, **count the themes first** — that is the cause. Freeing one slot made it work on
+the next attempt. `141164904553` "Horizon" was deleted for this; it was unpublished, untouched
+since March, and `theme_store_id: 2481` means it can be re-downloaded from the Theme Store.
+
+⚠️ **Do NOT publish or branch from `161090928745`.** It was copied from the live on 07-19, but
+the live was edited on 07-21, so that draft is missing the **Judge.me app embed**
+(`config/settings_data.json`) and an **app section plus several block settings** on the product
+page (`templates/product.json`). Publishing it silently reverts them. Caught by an asset
+checksum diff on 2026-08-07, before publishing.
+
+**Always diff before publishing.** A draft is a point-in-time copy; the live keeps changing
+underneath it via the theme editor. Compare asset checksums between the draft and the current
+live and confirm the only differences are yours. `161529233513` was built that way: duplicated
+from the then-live `161069989993`, two snippets added on top, diff verified as exactly 2
+additions + 2 modifications and zero unrelated changes.
 
 Publish a draft: `PUT /admin/api/2025-01/themes/{id}.json {theme:{id,role:"main"}}`. Make a fresh draft:
 GraphQL `themeDuplicate` of the new live. Verify roles: `GET /admin/api/2025-01/themes.json?fields=id,name,role`.
@@ -185,6 +211,52 @@ removed — nothing writes or drains `facebook_drafts.status='scheduled'` anymor
 `draft-scheduler.ts` is **kept**: `isSqliteUtc` (validates queue slots in `addToQueue`) and
 `nextFreeSlot` (used by `/api/queue/add`) are live. The `scheduled` status value survives only
 for any historical rows; no code produces new ones.
+
+## Blog pipeline — and why crons must NEVER self-fetch
+
+⚠️ **A cron must do its work in-process. Never `fetch()` your own app from inside a cron.**
+
+Vercel **SSO Deployment Protection** is enabled on this project
+(`ssoProtection.enabled: true`, `deploymentType: "all_except_custom_domains"`), and the project
+has **no custom domain**. Protection is **not uniform across hosts** — measured 2026-08-09 on
+`/api/cron/blog` with no credentials:
+
+| Host | Result | Answered by |
+|---|---|---|
+| `aosom-sync.vercel.app` (production alias) | `401` + `{"success":false,"error":"Unauthorized"}` | the **app** (`verifyCronSecret`) |
+| `aosom-sync-<hash>-<team>.vercel.app` (per-deployment) | `302 Redirecting...` | the **Vercel SSO edge** |
+| `aosom-sync-git-main-<team>.vercel.app` (branch alias) | `302 Redirecting...` | the **Vercel SSO edge** |
+
+So a self-`fetch()` is intercepted **before the app's own `CRON_SECRET` check** whenever the
+origin resolves to a per-deployment or branch host (`fetch` follows the 302 into the SSO flow
+and ends at a 401). The cron derived its origin from `new URL(request.url).origin`; **which
+host a Vercel Cron invocation actually presents was not verified** — do not assume it is the
+production alias, which is what the old code comment in `cron/content/route.ts` claims.
+
+Either way the hop is the hazard, and removing it removes every variant of the failure. Do not
+re-derive this from the API value alone: `all_except_custom_domains` did **not** mean "every
+`*.vercel.app` host is protected" here. **Measure each host** before concluding.
+
+This silently killed `/api/cron/blog` for ~7 weeks (4 runs / 4 failures, last real article
+2026-06-22) and still kills **`/api/cron/content`** (13 / 13, `FR: Generation failed (HTTP 401)
+| EN: ... (HTTP 401)`) — that one is **not yet fixed**. Every cron that works in-process has
+zero errors. Verify with
+`get_project_deployment_protection`, not by guessing.
+
+- **Generation lives in `src/lib/blog-generator.ts`** (`generateBlogArticle`) and the cron calls
+  it directly. `/api/blog/generate` is a thin wrapper kept for manual/admin use.
+- **`GET /api/cron/blog`, Mon + Thu 08:00 UTC.** GET, not POST — **Vercel Cron only issues GET**,
+  so a POST handler would never fire.
+- **Topic selection advances per RUN, not per week** (`blog-topics.ts`). Mon and Thu share an ISO
+  week, so `idx = week % len` would hand both runs the same topic and publish duplicates.
+  `idx = (week * RUNS_PER_WEEK + slot) % len` is a sequential run counter (step of exactly 1),
+  which also keeps full catalogue coverage — a step of 2 over an even catalogue reaches half.
+- **`blog_schedule.posts_per_week` counts ARTICLES, not bilingual pairs.** 2 runs × (FR + EN) = 4.
+  A lower cap silently blocks the late run while still paying to generate it.
+- **`blog_posts`** logs every outcome including failures → surfaced at `/blog`.
+- Auto-publish gate (`blog-auto-publish.ts`): Claude judge ≥ 80 **AND** in season **AND** under
+  the weekly cap. Any miss leaves the article a draft.
+- Blog IDs: FR `90302349417` (*Actualités*), EN `91161428073` (*Blog*).
 
 ## Env Vars
 

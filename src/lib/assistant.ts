@@ -46,10 +46,34 @@ export interface AssistantTurn {
 const MAX_STEPS = 3; // total model calls (tool loop + final) — bounds per-request Claude spend
 const SEARCH_LIMIT = 12; // rows returned to the model per search
 const MAX_CARDS = 4;
+// ⚠️ EN is the `/en` LOCALE PATH of the same storefront, NOT a separate domain.
+// `furnishdirect.ca` was used here and is NXDOMAIN at the .ca registry (verified against
+// CIRA 2026-08-12; Shopify reports exactly one domain, `ameublodirect.ca`), so every EN
+// recommendation was a dead link. Same fix already shipped for the feeds in v0.5.59.1.
 const STORE_URL: Record<Locale, string> = {
   fr: "https://ameublodirect.ca",
-  en: "https://furnishdirect.ca",
+  en: "https://ameublodirect.ca/en",
 };
+
+/** Budget ceiling tolerance — 30% headroom so a shopper saying "800$" still sees 1040$
+ * options rather than being boxed into an artificially narrow band. */
+const BUDGET_TOLERANCE = 1.3;
+
+/** Pull a spending ceiling out of free text. Deliberately narrow: the number must be
+ * adjacent to a currency marker ("800$", "500 dollars", "1200 CAD"). That adjacency is what
+ * keeps "terrasse 10x10 pieds" and "sofa 3 places" from being read as a price — a false
+ * budget is worse than no budget, because it silently hides the whole catalogue.
+ * Returns null when nothing matches; an absent budget must never filter. */
+export function extractBudget(message: string): number | null {
+  const re = /(\d+)\s*\$|(\d+)\s*(?:dollars?|CAD)/gi;
+  const found: number[] = [];
+  for (const m of String(message ?? "").matchAll(re)) {
+    const n = parseFloat(m[1] ?? m[2] ?? "");
+    if (Number.isFinite(n) && n > 0) found.push(n);
+  }
+  // Lowest stated figure wins — "budget 800$ max 600$" means 600$.
+  return found.length ? Math.min(...found) : null;
+}
 
 const SEARCH_TOOL: Anthropic.Tool = {
   name: "search_catalog",
@@ -85,7 +109,7 @@ interface Card {
 /** Run one catalog search for the tool. Only imported+published products (with a handle). */
 async function searchCatalog(input: Record<string, unknown>): Promise<Card[]> {
   const query = typeof input.query === "string" ? input.query.slice(0, 120) : "";
-  const { products } = await getProducts({
+  const base = {
     search: query || undefined,
     productType: typeof input.productType === "string" ? input.productType.slice(0, 80) : undefined,
     color: typeof input.color === "string" ? input.color.slice(0, 40) : undefined,
@@ -93,7 +117,13 @@ async function searchCatalog(input: Record<string, unknown>): Promise<Card[]> {
     maxPrice: typeof input.maxPrice === "number" && isFinite(input.maxPrice) ? input.maxPrice : undefined,
     page: 1,
     limit: 40,
-  });
+  };
+  // Prefer supplier-in-stock rows (`qty > 0` in the catalog mirror). NOT a hard filter:
+  // this is a dropship catalog where stock lives only in the Aosom CSV snapshot and can be
+  // stale, so an empty in-stock result falls back to the unfiltered search rather than
+  // telling the shopper we sell nothing.
+  let { products } = await getProducts({ ...base, inStock: true });
+  if (products.length === 0) ({ products } = await getProducts(base));
   // Only recommend products that render on the storefront (imported + have a handle).
   return products
     .filter((p) => p.shopify_handle && String(p.shopify_handle).trim() && p.shopify_product_id)
@@ -177,6 +207,8 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
 
   // Pool of every product the tool surfaced this turn, keyed by sku (source of truth for cards).
   const pool = new Map<string, Card>();
+  // A budget stated anywhere in the conversation caps the cards we emit (see resolveCards).
+  const budget = extractBudget([...(opts.history || []).map((t) => t.content), opts.message].join(" "));
 
   for (let step = 0; step < MAX_STEPS; step++) {
     // Route through the DEDICATED "assistant" budget pool (llm-budget) — a reservation
@@ -219,14 +251,25 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
     // Final answer.
     const text = res.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
     const { reply, picks } = parseFinal(text);
-    const products = await resolveCards(picks, pool, locale);
-    return { reply: reply || (locale === "en" ? "Here are a few options I found for you." : "Voici quelques options que j'ai trouvées pour vous."), products };
+    const products = await resolveCards(picks, pool, locale, budget);
+    const fallback = locale === "en" ? "Here are a few options I found for you." : "Voici quelques options que j'ai trouvées pour vous.";
+    return { reply: emptyAwareReply(reply || fallback, products.length, locale), products };
   }
 
   // Ran out of steps without a final JSON — fall back to the pool's first few products.
+  const salvaged = await resolveCards(
+    [...pool.values()].slice(0, MAX_CARDS).map((p) => ({ sku: p.sku, reason: "" })),
+    pool,
+    locale,
+    budget,
+  );
   return {
-    reply: locale === "en" ? "Here are a few options that might fit." : "Voici quelques options qui pourraient convenir.",
-    products: await resolveCards([...pool.values()].slice(0, MAX_CARDS).map((p) => ({ sku: p.sku, reason: "" })), pool, locale),
+    reply: emptyAwareReply(
+      locale === "en" ? "Here are a few options that might fit." : "Voici quelques options qui pourraient convenir.",
+      salvaged.length,
+      locale,
+    ),
+    products: salvaged,
   };
 }
 
@@ -254,36 +297,78 @@ export async function runComplementary(opts: { name: string; productType: string
  * only on the live Shopify product. One GraphQL round-trip for the 3-4 final cards.
  * Non-fatal: any failure falls back to the catalog name (never breaks a reply).
  */
-async function frTitlesByHandle(handles: string[]): Promise<Map<string, string>> {
-  const map = new Map<string, string>();
+type LiveProduct = { title: string; live: boolean };
+
+async function liveByHandle(handles: string[]): Promise<Map<string, LiveProduct>> {
+  const map = new Map<string, LiveProduct>();
   if (handles.length === 0) return map;
   const search = handles.map((h) => `handle:${h}`).join(" OR ");
-  const query = `query { products(first: ${handles.length}, query: ${JSON.stringify(search)}) { nodes { handle title } } }`;
+  // `onlineStoreUrl` is null for anything not published to the Online Store, and `status`
+  // catches drafts — together they are the exact "does this PDP render?" signal.
+  const query = `query { products(first: ${handles.length}, query: ${JSON.stringify(search)}) { nodes { handle title status onlineStoreUrl } } }`;
   try {
     const res = await shopifyFetch("/graphql.json", { method: "POST", body: JSON.stringify({ query }) });
     if (!res.ok) return map;
     const data = await res.json();
     for (const n of data?.data?.products?.nodes ?? []) {
-      if (n?.handle && n?.title) map.set(String(n.handle), String(n.title));
+      if (!n?.handle) continue;
+      map.set(String(n.handle), {
+        title: n.title ? String(n.title) : "",
+        live: String(n.status).toUpperCase() === "ACTIVE" && !!n.onlineStoreUrl,
+      });
     }
   } catch {
-    /* non-fatal — fall back to the catalog (EN) name */
+    /* non-fatal — fall back to the catalog (EN) name and keep the card */
   }
   return map;
 }
 
-async function resolveCards(picks: Array<{ sku: string; reason: string }>, pool: Map<string, Card>, locale: Locale): Promise<AssistantProduct[]> {
+/** Never promise options we aren't showing. When the card list comes back empty the model's
+ * lead-in ("Here are a few options…") is a lie the shopper can see — swap it for an honest
+ * no-match line. Measured before this existed: 12 of 18 realistic queries returned
+ * "Voici quelques options qui pourraient convenir." with zero products underneath. */
+export function emptyAwareReply(reply: string, productCount: number, locale: Locale): string {
+  if (productCount > 0) return reply;
+  return locale === "en"
+    ? "I couldn't find products in that range. Tell me a bit more — room, style, or budget — and I'll look again."
+    : "Je n'ai pas trouvé de produits dans cette gamme. Dites-m'en un peu plus (pièce, style ou budget) et je cherche à nouveau.";
+}
+
+async function resolveCards(
+  picks: Array<{ sku: string; reason: string }>,
+  pool: Map<string, Card>,
+  locale: Locale,
+  budget: number | null = null,
+): Promise<AssistantProduct[]> {
   const cards: Array<{ c: Card; reason: string }> = [];
   for (const pick of picks) {
     const c = pool.get(pick.sku);
     if (!c || !c.handle) continue; // never emit a card the model invented or one without a real PDP link
     cards.push({ c, reason: pick.reason });
   }
-  // On the FR storefront, swap the raw EN catalog name for the curated Shopify FR title.
-  const frTitles = locale === "fr" ? await frTitlesByHandle(cards.map((x) => x.c.handle)) : new Map<string, string>();
-  return cards.map(({ c, reason }) => ({
+
+  // Honour a stated budget. Applied AFTER the model picks so a shopper who says "800$"
+  // never gets a 2000$ card, even when the model ignores the ceiling in its own reasoning.
+  // Skipped entirely if it would empty the list — a too-close-to-budget suggestion beats none.
+  if (budget != null) {
+    const cap = budget * BUDGET_TOLERANCE;
+    const within = cards.filter(({ c }) => !(c.price > cap));
+    if (within.length) cards.splice(0, cards.length, ...within);
+  }
+
+  // One Shopify round-trip for the final 3-4 cards, doing two jobs:
+  //  1. the curated FR title (Turso `name` is the RAW ENGLISH Aosom title)
+  //  2. the live check — Turso has no publish-status column, so draft / not-published
+  //     imports reach this point and their PDP 404s. Measured 3 of 5 live recommendations
+  //     were draft before this filter existed. Drop them rather than ship a dead link.
+  const live = await liveByHandle(cards.map((x) => x.c.handle));
+  const servable = cards.filter(({ c }) => live.get(c.handle)?.live !== false);
+  const dropped = cards.length - servable.length;
+  if (dropped > 0) console.warn(`[assistant] dropped ${dropped} card(s): draft or not published to the Online Store`);
+
+  return servable.map(({ c, reason }) => ({
     sku: c.sku,
-    name: locale === "fr" ? frTitles.get(c.handle) || c.name : c.name,
+    name: (locale === "fr" ? live.get(c.handle)?.title : "") || c.name,
     price: c.price,
     image: c.image,
     url: `${STORE_URL[locale]}/products/${c.handle}`,
