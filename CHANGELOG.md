@@ -2,6 +2,56 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.59.6] - 2026-08-15
+
+### Added — Google Ads API client + Shopping campaign builder (dormant: no credentials yet)
+
+Code to create and manage Google Ads campaigns via the API. **Nothing runs in production** —
+no route, no cron, nothing in `src/app` imports it. `.env.local` has zero `GOOGLE_ADS_*`
+vars, so the live path is unreachable until the account is provisioned.
+
+- **`src/lib/google-ads-client.ts`** — raw REST, no SDK dependency (matches the Meta-ads
+  scripts' plain-`fetch` posture). Handles the OAuth2 refresh, the `developer-token` header
+  Google Ads requires *on top of* OAuth, `login-customer-id` for MCC accounts, retry on
+  429/5xx, and flattens Google's nested error envelope into a readable `GoogleAdsApiError`.
+- **Dry-run mode** records every mutate in `client.plan` and returns synthetic resource names
+  instead of sending. Callers build the whole object chain through one code path with or
+  without credentials — which is why the campaign renders against an empty `.env.local`.
+- **`scripts/create-google-shopping-campaign.mts`** — builds "Ameublo Direct — Google Shopping
+  CA": $15 CAD/day, `MAXIMIZE_CONVERSION_VALUE`, Merchant Center `5804673777` (feed label CA,
+  priority MEDIUM), Canada + FR/EN, 24/7 schedule, 10 negative keywords, ad group "Tous les
+  produits", Shopping ad + all-products listing group, 8 sitelinks (4 FR + 4 EN). Dry-run by
+  default; every object is created PAUSED.
+- **Preflight** refuses `--apply` when the account has no `PURCHASE` conversion action —
+  value bidding without a value signal spends blind.
+- **`docs/GOOGLE-ADS-SETUP.md`** — provisioning walkthrough with the parts that are easy to
+  miss: API Center only exists on a **manager (MCC)** account, Basic developer-token access is
+  a **1-3 business day manual review** that gates every live call, and the scope is
+  `.../auth/adwords` — **not** Merchant Center's `.../auth/content`. A refresh token is bound
+  to its consented scopes, so the GMC token **cannot** be reused: it refreshes fine, then
+  fails every Ads call.
+- 42 tests covering credential resolution/aliasing, bidding-strategy mapping and update masks,
+  header composition, token caching, retry and retry-exhaustion, and error flattening.
+
+### Notes — three platform limits the requested config cannot express
+
+Documented in the code, the docs, and printed by every dry-run rather than silently dropped:
+
+- **Smart bidding ignores bid modifiers and the ad group max CPC.** The requested "+20%
+  evenings and weekends" does not apply under `MAXIMIZE_CONVERSION_VALUE`; the client omits
+  the modifier instead of writing a boost the UI would show and never fire. Use
+  `--bidding manual-cpc` for a real +20%.
+- **Sitelinks do not render on Shopping ads** (Search only). Shopping promotional pricing
+  comes from the Merchant Center promotions feed, not a Google Ads asset.
+- **Dynamic remarketing is not a Shopping feature, and Meta/Pinterest pixels can never feed
+  Google audiences** — those need the Google tag, GA4, or Customer Match.
+
+### Fixed — incidental
+
+- Sitelink URLs: `/pages/livraison`, `/collections/patio-jardin` and `/collections/nouveautes`
+  all 404. Replaced with the real handles (`politique-de-livraison`, `patio-mobilier`,
+  `nouveaux-arrivages`), each verified 200 against the live storefront.
+
 ## [0.5.59.5] - 2026-08-12
 
 ### Fixed — assistant: draft products, ignored budgets, empty promises
