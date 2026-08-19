@@ -25,6 +25,11 @@ through review, the same way `/social` and `/sequential-ads` do for their conten
   confirm dialog says so.
 - **Status transitions are guarded in the `WHERE` clause**, not read-then-write, so two
   operators clicking Approuver at the same time can't both win — the loser gets a 409.
+- **A manual publish counts against the weekly cap but is never blocked by it.** The
+  auto-publisher *reserves* a slot (`reserveBlogPublishSlot`); the dashboard *counts* one
+  (`countBlogPublishSlot`, an unconditional increment). A person clicking Publier shouldn't
+  be stopped by an automation quota — but if manual publishes didn't consume slots, the cron
+  would auto-publish its full quota on top and the week would exceed `posts_per_week`.
 - **Sidebar badge** on Blog counts articles still awaiting approval. It polls every 30s
   and refreshes immediately on approve/publish/delete via a window event, so approving the
   last draft empties the pill right away.
