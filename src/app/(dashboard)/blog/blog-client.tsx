@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { BLOG_DRAFTS_CHANGED } from "@/components/sidebar";
 
 // ─── Types (mirror GET /api/blog/queue) ─────────────────────────────────────
@@ -61,10 +61,16 @@ export default function BlogClient() {
     return s ? `?${s}` : "";
   }, [langFilter, statusFilter]);
 
+  // Flipping filters quickly fires overlapping requests; without this guard a slow earlier
+  // response can land last and repaint the table with the previous filter's rows.
+  const reqSeq = useRef(0);
+
   const load = useCallback(async () => {
+    const seq = ++reqSeq.current;
     try {
       const res = await fetch(`/api/blog/queue${query}`);
       const d = await res.json();
+      if (seq !== reqSeq.current) return; // superseded by a newer request
       if (res.ok && d.success) {
         setPosts(d.data.posts);
         setCounts(d.data.counts ?? EMPTY_COUNTS);
@@ -73,9 +79,9 @@ export default function BlogClient() {
         setError(d.error || "Échec du chargement.");
       }
     } catch (err) {
-      setError(String(err));
+      if (seq === reqSeq.current) setError(String(err));
     } finally {
-      setLoading(false);
+      if (seq === reqSeq.current) setLoading(false);
     }
   }, [query]);
 
