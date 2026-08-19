@@ -2,6 +2,36 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.62.0] - 2026-08-19
+
+### Added — /blog review dashboard (draft → approved → published)
+
+`/blog` was a read-only log of what the generator produced. It now drives the article
+through review, the same way `/social` and `/sequential-ads` do for their content.
+
+- **New status `approved`** on `blog_posts`, between `draft` and `published`. It is a
+  dashboard-only state: Shopify still holds an unpublished article until someone hits
+  Publier. Existing rows migrate in place (guarded `ALTER` for the two new timestamp
+  columns, then a guarded table rebuild for the `CHECK` — SQLite can't alter a constraint).
+- **`/api/blog/[action]`** — one dynamic segment serving `GET queue`, `POST approve`,
+  `POST publish`, and `DELETE :id`. The sibling static `/api/blog/generate` still wins for
+  its own path (Next resolves static segments before dynamic ones).
+- **Publish calls Shopify first, the DB second.** A rejected publish leaves the row
+  `approved` so the operator can retry; flipping the row first would strand it as
+  `published` while the article stayed hidden. Shopify's publish is idempotent, so the
+  retry is safe.
+- **Delete removes the dashboard row only** — the Shopify article is deliberately left
+  alone (deleting it there is irreversible, and an unpublished article is harmless). The
+  confirm dialog says so.
+- **Status transitions are guarded in the `WHERE` clause**, not read-then-write, so two
+  operators clicking Approuver at the same time can't both win — the loser gets a 409.
+- **Sidebar badge** on Blog counts articles still awaiting approval. It polls every 30s
+  and refreshes immediately on approve/publish/delete via a window event, so approving the
+  last draft empties the pill right away.
+- Filters by language and status run **server-side**, so the list reflects the whole table
+  rather than the rows already fetched; the stat cards stay whole-table counts.
+- Mutations are admin-only (`reviewer` sessions get 403), matching the `/api/videos` posture.
+
 ## [0.5.61.0] - 2026-08-19
 
 ### Added — /sequential-ads: publish now + operator-chosen scheduling
