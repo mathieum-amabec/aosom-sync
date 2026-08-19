@@ -3525,6 +3525,40 @@ export async function cancelSequentialAdDraft(id: number): Promise<boolean> {
   return (result.rowsAffected ?? 0) === 1;
 }
 
+/**
+ * Set a sequential ad's publication slot from the dashboard's date picker.
+ *
+ * Accepts a row that is still a `draft` OR already `pending`, and lands it `pending` at
+ * `scheduledAt` either way — one call serves both "approve at a time I choose" and "move an
+ * already-scheduled ad". Deliberately refuses `publishing` / `published` / `failed` /
+ * `cancelled`: rescheduling an item the publisher has already claimed would either
+ * double-publish it or resurrect a terminal row.
+ *
+ * Slot collisions surface as QueueSlotTakenError (the partial-unique index on
+ * (platform, content_type, scheduled_at)) so the caller can tell the operator their chosen
+ * minute is taken instead of silently moving the ad somewhere else — an explicit time picked
+ * by a human must never be quietly overridden.
+ */
+export async function rescheduleSequentialAd(id: number, scheduledAt: string): Promise<boolean> {
+  if (!isSqliteUtc(scheduledAt)) {
+    throw new Error(`rescheduleSequentialAd: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${scheduledAt}')`);
+  }
+  const db = await ensureSchema();
+  try {
+    const result = await db.execute({
+      sql: `UPDATE publication_queue SET status = 'pending', scheduled_at = ?
+            WHERE id = ? AND content_type = 'sequential_ad' AND status IN ('draft', 'pending')`,
+      args: [scheduledAt, id],
+    });
+    return (result.rowsAffected ?? 0) === 1;
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+      throw new QueueSlotTakenError("sequential_ad", scheduledAt);
+    }
+    throw err;
+  }
+}
+
 // ─── Demand Gen video assets ─────────────────────────────────────────
 
 export interface DemandGenAsset {
