@@ -2,6 +2,42 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.60.0] - 2026-08-18
+
+### Added — Pinterest API v5 client + Pin dry-run (dormant: no credentials yet)
+
+Code to publish Pins via the Pinterest API. **Nothing runs in production** — no route, no
+cron, nothing in `src/app` imports it. `.env.local` has zero `PINTEREST_*` API vars, so the
+live path is unreachable until the account is provisioned.
+
+- **`src/lib/pinterest-client.ts`** — raw REST, no SDK (matches the Meta / Google-ads clients'
+  posture). Bearer auth, 20s timeout, retry on 429/5xx honouring `Retry-After`, and a
+  `PinterestApiError` that flattens Pinterest's `{code, message}` envelope.
+- **Dry-run mode** records the request body in `client.plan` and returns a synthetic id
+  instead of sending, so callers build the whole payload through one code path with or
+  without credentials — which is why the script renders a complete Pin against an empty
+  `.env.local`.
+- **`htmlToPinText`** — Aosom's `short_description` is an HTML `<ul>`, and Pinterest renders
+  descriptions as plain text; without this, shoppers would see literal `<li>` tags. Caught by
+  running the dry-run on a real product, not in review.
+- **Field truncation is silent, not fatal** (100 / 800 / 500 chars): a caption two characters
+  over the limit should still publish, not fail a queue item at 3am.
+- **`scripts/pinterest-pin-dryrun.mts`** — renders the exact Pin for a SKU. Dry-run by
+  default; `--apply` refuses without both credentials.
+
+### Notes
+
+`PINTEREST_TAG_ID` **cannot** authenticate this and is deliberately not read by the client:
+it is the storefront conversion tag (public, client-side). There is also no separate
+"Pinterest Ads API" credential — `/v5/ad_accounts` is the same OAuth with *more* scopes.
+Probed against the live API on 2026-08-18: `POST /v5/pins`, `GET /v5/ad_accounts`, and the
+tag id passed as a Bearer all return `401 Authentication failed`.
+
+Queue wiring is intentionally **not** included. `publication_queue.platform` carries a CHECK
+constraint that SQLite cannot ALTER, so adding `pinterest` means rebuilding a table that holds
+live scheduled posts — that migration lands with the credentials, not before. Publishing also
+belongs in `queue-publisher.ts`, not `job4-social.ts`: the latter only generates drafts.
+
 ## [0.5.59.6] - 2026-08-15
 
 ### Added — Google Ads API client + Shopping campaign builder (dormant: no credentials yet)
