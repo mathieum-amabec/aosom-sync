@@ -20,12 +20,14 @@ import {
   approveBlogPost,
   markBlogPostPublished,
   deleteBlogPost,
+  countBlogPublishSlot,
   BLOG_POST_STATUSES,
   type BlogPostLang,
   type BlogPostStatus,
 } from "@/lib/database";
 import { publishBlogArticle, blogIdFor } from "@/lib/shopify-blog";
 import { BLOG } from "@/lib/config";
+import { isoWeekKey } from "@/lib/blog-topics";
 
 const DEFAULT_LIMIT = 100;
 
@@ -58,6 +60,10 @@ async function readId(request: Request): Promise<number | null> {
   } catch {
     return null;
   }
+  // A literal `null` body parses fine (json() only throws on malformed input), so guard
+  // before the property read — otherwise it throws outside the handler's try and the
+  // caller gets an unlogged 500 instead of the 400 this is meant to produce.
+  if (body === null || typeof body !== "object") return null;
   const raw = (body as { id?: unknown }).id;
   const id = typeof raw === "number" ? raw : Number.parseInt(String(raw ?? ""), 10);
   return Number.isInteger(id) && id > 0 ? id : null;
@@ -171,7 +177,25 @@ export async function POST(
     // can retry, whereas flipping the row first would strand it as 'published' while the
     // article stays hidden. Shopify's publish is idempotent, so a retry is safe.
     await publishBlogArticle(blogIdFor(post.lang), post.shopify_article_id);
-    await markBlogPostPublished(id);
+
+    if (!(await markBlogPostPublished(id))) {
+      // The article IS live now, but the guarded UPDATE matched nothing — someone deleted
+      // or re-published the row in between. Loud, because the storefront and the dashboard
+      // have diverged and only the log says so.
+      console.warn(
+        `[API] /api/blog/publish: article ${post.shopify_article_id} published on Shopify but ` +
+          `blog_posts row ${id} was no longer 'approved' — dashboard and storefront may disagree`,
+      );
+    }
+
+    // Count it against the weekly cap so the cron's auto-publisher backs off accordingly.
+    // Best-effort: the article is already live, so a counter write must not fail the request.
+    try {
+      await countBlogPublishSlot(isoWeekKey(new Date()));
+    } catch (err) {
+      console.error("[API] /api/blog/publish: weekly cap counter update failed:", err);
+    }
+
     return NextResponse.json({ success: true, data: await getBlogPost(id) });
   } catch (err) {
     console.error(`[API] POST /api/blog/${action} failed:`, err);

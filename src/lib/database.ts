@@ -3707,6 +3707,21 @@ export async function reserveBlogPublishSlot(week: string, cap: number): Promise
   return r.rows.length > 0;
 }
 
+/**
+ * Count one operator-initiated publish against the week's tally WITHOUT gating on the cap.
+ * A person clicking Publier on /blog should never be blocked by an automation cap — but the
+ * publish still has to consume a slot, otherwise the cron auto-publishes its full quota on
+ * top of it and the week blows past `blog_schedule.posts_per_week`.
+ */
+export async function countBlogPublishSlot(week: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO blog_publish_counter (week, count) VALUES (?, 1)
+          ON CONFLICT(week) DO UPDATE SET count = count + 1`,
+    args: [week],
+  });
+}
+
 /** Give back a slot reserved via reserveBlogPublishSlot when the publish ultimately failed. */
 export async function releaseBlogPublishSlot(week: string): Promise<void> {
   const db = await ensureSchema();

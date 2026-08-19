@@ -114,8 +114,11 @@ export default function BlogClient() {
               },
         );
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) setError(d.error || "Action échouée.");
+        // Refresh FIRST, then surface the error: load() clears `error` on its success path,
+        // so setting it before the refresh would silently wipe it a round-trip later — a
+        // rejected publish would look like nothing happened at all.
         await load();
+        if (!res.ok) setError(d.error || "Action échouée.");
         // Nudge the sidebar badge instead of letting it drift until its next 30s poll —
         // approving the last draft should empty the pill right away.
         window.dispatchEvent(new Event(BLOG_DRAFTS_CHANGED));

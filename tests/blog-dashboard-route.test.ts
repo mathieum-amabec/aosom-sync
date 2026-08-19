@@ -33,6 +33,7 @@ function mockDeps(over: Record<string, unknown> = {}) {
     approveBlogPost: vi.fn().mockResolvedValue(true),
     markBlogPostPublished: vi.fn().mockResolvedValue(true),
     deleteBlogPost: vi.fn().mockResolvedValue(true),
+    countBlogPublishSlot: vi.fn().mockResolvedValue(undefined),
     BLOG_POST_STATUSES: ["draft", "approved", "published", "failed"],
     ...over,
   };
@@ -46,6 +47,7 @@ function mockDeps(over: Record<string, unknown> = {}) {
   vi.doMock("@/lib/config", () => ({
     BLOG: { ADMIN_ARTICLE_URL: (id: string) => `https://admin.example/articles/${id}` },
   }));
+  vi.doMock("@/lib/blog-topics", () => ({ isoWeekKey: () => "2026-W34" }));
   return { db, publishBlogArticle };
 }
 
@@ -264,6 +266,71 @@ describe("POST /api/blog/publish", () => {
 
     const res = await POST(jsonPost("frobnicate", { id: 7 }), params("frobnicate"));
     expect(res.status).toBe(404);
+  });
+
+  it("counts the publish against the weekly cap so the cron backs off", async () => {
+    mockAuth();
+    const { db } = mockDeps({
+      getBlogPost: vi.fn().mockResolvedValue({ ...DRAFT_POST, status: "approved" }),
+    });
+    const { POST } = await import("@/app/api/blog/[action]/route");
+
+    await POST(jsonPost("publish", { id: 7 }), params("publish"));
+    expect(db.countBlogPublishSlot).toHaveBeenCalledWith("2026-W34");
+  });
+
+  it("does not count a publish that Shopify rejected", async () => {
+    mockAuth();
+    const { db } = mockDeps({
+      getBlogPost: vi.fn().mockResolvedValue({ ...DRAFT_POST, status: "approved" }),
+      publishBlogArticle: vi.fn().mockRejectedValue(new Error("Shopify publish failed: 422")),
+    });
+    const { POST } = await import("@/app/api/blog/[action]/route");
+
+    await POST(jsonPost("publish", { id: 7 }), params("publish"));
+    expect(db.countBlogPublishSlot).not.toHaveBeenCalled();
+  });
+
+  it("still succeeds when the cap counter write fails (the article is already live)", async () => {
+    mockAuth();
+    mockDeps({
+      getBlogPost: vi.fn().mockResolvedValue({ ...DRAFT_POST, status: "approved" }),
+      countBlogPublishSlot: vi.fn().mockRejectedValue(new Error("db down")),
+    });
+    const { POST } = await import("@/app/api/blog/[action]/route");
+
+    const res = await POST(jsonPost("publish", { id: 7 }), params("publish"));
+    expect(res.status).toBe(200);
+  });
+
+  it("warns instead of silently succeeding when the row moved out of 'approved'", async () => {
+    mockAuth();
+    mockDeps({
+      getBlogPost: vi.fn().mockResolvedValue({ ...DRAFT_POST, status: "approved" }),
+      markBlogPostPublished: vi.fn().mockResolvedValue(false),
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { POST } = await import("@/app/api/blog/[action]/route");
+
+    const res = await POST(jsonPost("publish", { id: 7 }), params("publish"));
+    expect(res.status).toBe(200); // the article IS live — reporting failure would be wrong
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("no longer 'approved'"));
+    warn.mockRestore();
+  });
+
+  it("400s a literal null body instead of throwing a 500", async () => {
+    mockAuth();
+    const { db } = mockDeps();
+    const { POST } = await import("@/app/api/blog/[action]/route");
+
+    const req = new Request("http://localhost/api/blog/approve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "null",
+    });
+    const res = await POST(req, params("approve"));
+    expect(res.status).toBe(400);
+    expect(db.getBlogPost).not.toHaveBeenCalled();
   });
 });
 
