@@ -15,6 +15,14 @@ export interface SequentialAdQueueItem {
   content_id: string;
   status: string;
   scheduled_at: string;
+  /**
+   * When the ad actually went out, or null while it has not. Distinct from `scheduled_at`,
+   * which is only the PLANNED slot: "Publier maintenant" posts immediately and leaves the
+   * slot untouched, so a published ad routinely carries a scheduled_at still in the future.
+   * The card must read this field, not the slot, or it reports a publish that already
+   * happened as if it were still days away.
+   */
+  published_at: string | null;
   created_at: string;
   payload: { reelsVideoUrl?: string; caption?: string; brand?: string };
   style: string | null;
@@ -49,6 +57,7 @@ export async function GET() {
     content_id: r.contentId,
     status: r.status,
     scheduled_at: r.scheduledAt,
+    published_at: r.publishedAt ?? null,
     created_at: r.createdAt,
     payload: safePayload(r.payload),
     style: typeof r.metadata?.style === "string" ? r.metadata.style : null,

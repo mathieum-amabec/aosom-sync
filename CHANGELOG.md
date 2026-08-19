@@ -2,6 +2,39 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.62.1] - 2026-08-19
+
+### Fixed — /sequential-ads showed a published ad as still scheduled
+
+"Publier maintenant" posts immediately and deliberately leaves `scheduled_at` alone, so a
+published ad routinely carries a slot still in the future. The card rendered
+`Publié le {scheduled_at}`, so an ad that went out on the 19th was labelled "Publié le
+21 août" — reading as if the button had done nothing.
+
+Two real rows made this visible:
+
+| id | scheduled_at | published_at |
+|---|---|---|
+| 468 | 2026-08-21 13:00 | **2026-08-19 01:24:35** |
+| 469 | 2026-08-20 13:00 | **2026-08-19 13:01:46** |
+
+Both carry an empty `error` — the button worked, only the label lied.
+
+- `/api/sequential-ads/queue` now returns `published_at` (the column and
+  `PublicationQueueItem.publishedAt` already existed; the route simply never mapped it).
+- The card reads `published_at`, falling back to the slot only for rows published before the
+  field was exposed, and marks an early publish "en avance sur le créneau".
+
+### Not a bug — /blog publish state
+
+Investigated and could not reproduce: `blog_posts.status` and Shopify agree on all four rows.
+Both `published` rows carry a real `published_at` (636134359145 → 2026-08-13, 636150874217 →
+2026-08-19); both `draft` rows are unpublished, which is correct for a draft.
+`/api/blog/publish` already calls Shopify BEFORE flipping the row, and `publishBlogArticle`
+throws on a non-ok response, so a silent divergence has no path. Drafts also already reach the
+dashboard: `listBlogPosts` applies no default status filter and the client's `statusFilter`
+defaults to `"all"`. No change made.
+
 ## [0.5.62.0] - 2026-08-19
 
 ### Added — /blog review dashboard (draft → approved → published)

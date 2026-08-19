@@ -9,6 +9,8 @@ interface SequentialAdItem {
   content_id: string;
   status: string;
   scheduled_at: string;
+  /** Actual publish time, or null. NOT interchangeable with scheduled_at — see below. */
+  published_at: string | null;
   created_at: string;
   payload: { reelsVideoUrl?: string; caption?: string; brand?: string };
   style: string | null;
@@ -248,8 +250,18 @@ function SequentialAdCard({
         {isPending && (
           <p className="text-xs text-blue-300">Planifié le {formatSlot(item.scheduled_at)}</p>
         )}
+        {/* Read published_at, never scheduled_at. "Publier maintenant" posts immediately and
+            leaves the planned slot alone, so a published ad routinely still carries a FUTURE
+            scheduled_at — rendering that made a successful publish look like it had not
+            happened yet. Falls back to the slot only for rows published before published_at
+            was exposed by the API. */}
         {item.status === "published" && (
-          <p className="text-xs text-green-300">✅ Publié le {formatSlot(item.scheduled_at)}</p>
+          <p className="text-xs text-green-300">
+            ✅ Publié le {formatSlot(item.published_at ?? item.scheduled_at)}
+            {item.published_at && item.published_at < item.scheduled_at && (
+              <span className="text-gray-500"> · en avance sur le créneau</span>
+            )}
+          </p>
         )}
 
         {canSchedule && (
