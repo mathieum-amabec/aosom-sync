@@ -38,7 +38,8 @@ export interface CreatedBlogArticle {
   adminUrl: string;
 }
 
-function blogIdFor(lang: BlogLang): number {
+/** Shopify blog id for a language — FR articles live in "Actualités", EN in "Blog". */
+export function blogIdFor(lang: BlogLang): number {
   return lang === "fr" ? BLOG.FR_ID : BLOG.EN_ID;
 }
 

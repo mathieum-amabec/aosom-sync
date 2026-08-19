@@ -159,17 +159,23 @@ async function _initSchemaImpl(): Promise<void> {
       week TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0
     )`,
     // blog_posts: one row per article the blog pipeline generated, so the /blog dashboard
-    // can show what ran without round-tripping to the Shopify Admin API. Distinct from
-    // blog_publish_counter (a bare weekly cap tally) and from cron_runs (one row per cron
-    // invocation, not per article). `status` is the article's state at record time:
-    // 'draft' = created in Shopify but not live, 'published' = auto-publish gate passed,
+    // can show what ran — and walk the article through review — without round-tripping to
+    // the Shopify Admin API. Distinct from blog_publish_counter (a bare weekly cap tally)
+    // and from cron_runs (one row per cron invocation, not per article). `status`:
+    // 'draft' = created in Shopify but not live, 'approved' = an operator cleared it for
+    // publishing (dashboard-only state — Shopify still holds an unpublished article),
+    // 'published' = live on Shopify (auto-publish gate passed, or published from /blog),
     // 'failed' = generation threw before an article existed (shopify_article_id stays NULL).
+    // approved_at / published_at are unix seconds, stamped by the /blog approve + publish
+    // actions (published_at is also stamped for auto-published rows).
     `CREATE TABLE IF NOT EXISTS blog_posts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
       lang TEXT NOT NULL DEFAULT 'fr' CHECK (lang IN ('fr', 'en')),
-      status TEXT NOT NULL CHECK (status IN ('draft', 'published', 'failed')),
+      status TEXT NOT NULL CHECK (status IN ('draft', 'approved', 'published', 'failed')),
       shopify_article_id TEXT,
+      approved_at INTEGER,
+      published_at INTEGER,
       created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
     )`,
     `CREATE TABLE IF NOT EXISTS notifications (
@@ -569,6 +575,45 @@ async function _initSchemaImpl(): Promise<void> {
       { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
       { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
       { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
+    ]);
+  }
+
+  // blog_posts: add approved_at / published_at, then widen the status CHECK with 'approved'
+  // (the /blog dashboard's draft → approved → published flow). The ALTERs run FIRST so the
+  // CHECK rebuild's INSERT…SELECT can carry both columns through — same ordering rule as
+  // publication_queue's `metadata` above. Fresh DBs get everything from CREATE TABLE, so
+  // both guards no-op there.
+  const bpInfo = await db.execute(`PRAGMA table_info(blog_posts)`);
+  const bpCols = new Set(bpInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  const bpAlters: string[] = [];
+  if (!bpCols.has("approved_at")) bpAlters.push(`ALTER TABLE blog_posts ADD COLUMN approved_at INTEGER`);
+  if (!bpCols.has("published_at")) bpAlters.push(`ALTER TABLE blog_posts ADD COLUMN published_at INTEGER`);
+  if (bpAlters.length > 0) {
+    await runBatch("blog_posts add approved_at/published_at", bpAlters.map((sql) => ({ sql, args: [] })));
+  }
+
+  const bpDef = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='blog_posts'`,
+  );
+  const bpSql = bpDef.rows[0] ? String((bpDef.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (bpSql && !bpSql.includes("'approved'")) {
+    await runBatch("blog_posts status CHECK +approved", [
+      { sql: `DROP TABLE IF EXISTS blog_posts_new`, args: [] },
+      { sql: `CREATE TABLE blog_posts_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        lang TEXT NOT NULL DEFAULT 'fr' CHECK (lang IN ('fr', 'en')),
+        status TEXT NOT NULL CHECK (status IN ('draft', 'approved', 'published', 'failed')),
+        shopify_article_id TEXT,
+        approved_at INTEGER,
+        published_at INTEGER,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      )`, args: [] },
+      { sql: `INSERT INTO blog_posts_new (id, title, lang, status, shopify_article_id, approved_at, published_at, created_at)
+              SELECT id, title, lang, status, shopify_article_id, approved_at, published_at, created_at FROM blog_posts`, args: [] },
+      { sql: `DROP TABLE blog_posts`, args: [] },
+      { sql: `ALTER TABLE blog_posts_new RENAME TO blog_posts`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_blog_posts_created ON blog_posts(created_at DESC)`, args: [] },
     ]);
   }
 
@@ -3662,6 +3707,21 @@ export async function reserveBlogPublishSlot(week: string, cap: number): Promise
   return r.rows.length > 0;
 }
 
+/**
+ * Count one operator-initiated publish against the week's tally WITHOUT gating on the cap.
+ * A person clicking Publier on /blog should never be blocked by an automation cap — but the
+ * publish still has to consume a slot, otherwise the cron auto-publishes its full quota on
+ * top of it and the week blows past `blog_schedule.posts_per_week`.
+ */
+export async function countBlogPublishSlot(week: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO blog_publish_counter (week, count) VALUES (?, 1)
+          ON CONFLICT(week) DO UPDATE SET count = count + 1`,
+    args: [week],
+  });
+}
+
 /** Give back a slot reserved via reserveBlogPublishSlot when the publish ultimately failed. */
 export async function releaseBlogPublishSlot(week: string): Promise<void> {
   const db = await ensureSchema();
@@ -3673,23 +3733,47 @@ export async function releaseBlogPublishSlot(week: string): Promise<void> {
 
 // ─── Blog posts (generation log) ────────────────────────────────────
 
-export type BlogPostStatus = "draft" | "published" | "failed";
+export type BlogPostStatus = "draft" | "approved" | "published" | "failed";
+export type BlogPostLang = "fr" | "en";
+
+export const BLOG_POST_STATUSES: readonly BlogPostStatus[] = [
+  "draft", "approved", "published", "failed",
+] as const;
 
 export interface BlogPostRow {
   id: number;
   title: string;
-  lang: "fr" | "en";
+  lang: BlogPostLang;
   status: BlogPostStatus;
   shopify_article_id: string | null;
+  approved_at: number | null;
+  published_at: number | null;
   created_at: number;
 }
 
 export interface RecordBlogPostInput {
   title: string;
-  lang: "fr" | "en";
+  lang: BlogPostLang;
   status: BlogPostStatus;
   /** Absent for 'failed' rows — no Shopify article exists yet. */
   shopifyArticleId?: string | null;
+}
+
+const BLOG_POST_COLUMNS =
+  "id, title, lang, status, shopify_article_id, approved_at, published_at, created_at";
+
+function rowToBlogPost(row: Row): BlogPostRow {
+  const o = rowToObj(row);
+  return {
+    id: Number(o.id),
+    title: String(o.title),
+    lang: o.lang === "en" ? "en" : "fr",
+    status: o.status as BlogPostStatus,
+    shopify_article_id: o.shopify_article_id == null ? null : String(o.shopify_article_id),
+    approved_at: o.approved_at == null ? null : Number(o.approved_at),
+    published_at: o.published_at == null ? null : Number(o.published_at),
+    created_at: Number(o.created_at) || 0,
+  };
 }
 
 /**
@@ -3701,15 +3785,19 @@ export interface RecordBlogPostInput {
 export async function recordBlogPost(input: RecordBlogPostInput): Promise<number | null> {
   try {
     const db = await ensureSchema();
+    const now = Math.floor(Date.now() / 1000);
     const r = await db.execute({
-      sql: `INSERT INTO blog_posts (title, lang, status, shopify_article_id, created_at)
-            VALUES (?, ?, ?, ?, ?) RETURNING id`,
+      sql: `INSERT INTO blog_posts (title, lang, status, shopify_article_id, published_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
       args: [
         input.title.slice(0, 300),
         input.lang,
         input.status,
         input.shopifyArticleId ?? null,
-        Math.floor(Date.now() / 1000),
+        // An article recorded as already 'published' came straight from the auto-publish
+        // gate, so its live-since stamp is now; every other status starts unstamped.
+        input.status === "published" ? now : null,
+        now,
       ],
     });
     return r.rows.length > 0 ? Number(rowToObj(r.rows[0]).id) : null;
@@ -3719,26 +3807,89 @@ export async function recordBlogPost(input: RecordBlogPostInput): Promise<number
   }
 }
 
-/** Newest-first article log for the /blog dashboard. */
-export async function listBlogPosts(limit = 50): Promise<BlogPostRow[]> {
+/** Newest-first article log for the /blog dashboard, optionally filtered by lang/status. */
+export async function listBlogPosts(
+  limit = 50,
+  filters: { lang?: BlogPostLang; status?: BlogPostStatus } = {},
+): Promise<BlogPostRow[]> {
   const db = await ensureSchema();
   const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
+  const where: string[] = [];
+  const args: InValue[] = [];
+  if (filters.lang) {
+    where.push("lang = ?");
+    args.push(filters.lang);
+  }
+  if (filters.status) {
+    where.push("status = ?");
+    args.push(filters.status);
+  }
   const r = await db.execute({
-    sql: `SELECT id, title, lang, status, shopify_article_id, created_at
-          FROM blog_posts ORDER BY created_at DESC, id DESC LIMIT ?`,
-    args: [safeLimit],
+    sql: `SELECT ${BLOG_POST_COLUMNS} FROM blog_posts
+          ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
+          ORDER BY created_at DESC, id DESC LIMIT ?`,
+    args: [...args, safeLimit],
   });
-  return r.rows.map((row) => {
+  return r.rows.map(rowToBlogPost);
+}
+
+/** Per-status row counts across the WHOLE table (not just the current page/filter). */
+export async function countBlogPostsByStatus(): Promise<Record<BlogPostStatus, number>> {
+  const db = await ensureSchema();
+  const r = await db.execute(`SELECT status, COUNT(*) AS c FROM blog_posts GROUP BY status`);
+  const counts: Record<BlogPostStatus, number> = {
+    draft: 0, approved: 0, published: 0, failed: 0,
+  };
+  for (const row of r.rows) {
     const o = rowToObj(row);
-    return {
-      id: Number(o.id),
-      title: String(o.title),
-      lang: o.lang === "en" ? "en" : "fr",
-      status: o.status as BlogPostStatus,
-      shopify_article_id: o.shopify_article_id == null ? null : String(o.shopify_article_id),
-      created_at: Number(o.created_at) || 0,
-    };
+    const status = String(o.status) as BlogPostStatus;
+    if (status in counts) counts[status] = Number(o.c) || 0;
+  }
+  return counts;
+}
+
+export async function getBlogPost(id: number): Promise<BlogPostRow | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT ${BLOG_POST_COLUMNS} FROM blog_posts WHERE id = ?`,
+    args: [id],
   });
+  return r.rows.length > 0 ? rowToBlogPost(r.rows[0]) : null;
+}
+
+/**
+ * draft → approved. The `status = 'draft'` guard lives in the WHERE clause so two
+ * concurrent approvals can't both "win": the loser gets false and the route answers 409.
+ */
+export async function approveBlogPost(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE blog_posts SET status = 'approved', approved_at = ?
+          WHERE id = ? AND status = 'draft'`,
+    args: [Math.floor(Date.now() / 1000), id],
+  });
+  return r.rowsAffected > 0;
+}
+
+/**
+ * approved → published. Called only AFTER Shopify accepted the publish, so a false return
+ * means someone else already flipped the row (the Shopify publish itself is idempotent).
+ */
+export async function markBlogPostPublished(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE blog_posts SET status = 'published', published_at = ?
+          WHERE id = ? AND status = 'approved'`,
+    args: [Math.floor(Date.now() / 1000), id],
+  });
+  return r.rowsAffected > 0;
+}
+
+/** Delete one dashboard row. The Shopify article (if any) is left untouched. */
+export async function deleteBlogPost(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `DELETE FROM blog_posts WHERE id = ?`, args: [id] });
+  return r.rowsAffected > 0;
 }
 
 export async function getLastPostDate(sku: string): Promise<number | null> {
