@@ -2,6 +2,37 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.61.0] - 2026-08-19
+
+### Added — /sequential-ads: publish now + operator-chosen scheduling
+
+Two controls on the Pubs séquentielles cards. Both reuse the existing publish rails, so a
+manual publish and a cron publish produce byte-identical posts — only the trigger differs.
+
+- **`POST /api/sequential-ads/publish-now`** — publishes an approved ad immediately through
+  `publishQueueItem`, the same function the hourly cron calls. It claims the row first via
+  `claimQueueItem` (the atomic `pending → publishing` flip the cron uses), so if the
+  scheduler grabbed the item a moment earlier the route answers 409 instead of publishing a
+  second copy. On failure the row is marked `failed`, never left stuck in `publishing` where
+  the cron (which only reads `pending`) could never see it again.
+- **`POST /api/sequential-ads/schedule`** — sets an operator-chosen slot. Accepts a `draft`
+  (approve at a chosen time) or a `pending` ad (move it), refuses every other status. Takes
+  an ISO-8601 instant WITH an offset, because a bare `2026-08-20T14:00` from a Montreal
+  browser would silently shift four or five hours against the UTC queue. Past datetimes are
+  refused and point at publish-now rather than posting on the next tick.
+- **`rescheduleSequentialAd(id, slot)`** in `database.ts` — one helper for both cases.
+  Surfaces the partial-unique slot collision as `QueueSlotTakenError` so a taken minute is
+  reported to the operator; a time a human picked is never silently moved.
+- **UI** — a `datetime-local` picker plus a 📅 Planifier button on draft and pending cards,
+  and a 🚀 Publier maintenant button on pending cards that asks for confirmation first
+  (publishing reaches real followers and cannot be undone).
+
+No migration: `publication_queue.scheduled_at` already existed, and the publisher already
+honours it — `getNextPending` selects `status = 'pending' AND scheduled_at <= datetime('now')`,
+so a future slot simply is not picked up until it arrives. Nothing in the cron changed.
+
+20 new tests, including that the claim happens before the publish call.
+
 ## [0.5.60.0] - 2026-08-18
 
 ### Added — Pinterest API v5 client + Pin dry-run (dormant: no credentials yet)

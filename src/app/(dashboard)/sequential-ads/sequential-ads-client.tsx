@@ -37,6 +37,18 @@ function formatSlot(sqliteUtc: string): string {
     : d.toLocaleString("fr-CA", { dateStyle: "medium", timeStyle: "short" });
 }
 
+/**
+ * SQLite UTC → the LOCAL 'YYYY-MM-DDTHH:MM' that <input type="datetime-local"> requires.
+ * Built from the local getters rather than toISOString(), which would re-emit UTC and show
+ * the operator a time four or five hours off their own clock.
+ */
+export function toLocalInputValue(sqliteUtc: string): string {
+  const d = new Date(`${sqliteUtc.replace(" ", "T")}Z`);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export default function SequentialAdsClient() {
   const [items, setItems] = useState<SequentialAdItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,17 +77,18 @@ export default function SequentialAdsClient() {
     load();
   }, [load]);
 
-  const act = useCallback(
-    async (id: number, method: "POST" | "DELETE") => {
+  /** One request helper for every card action — always reloads so the UI shows server truth. */
+  const post = useCallback(
+    async (url: string, method: "POST" | "DELETE", id: number, body: Record<string, unknown>) => {
       setActingId(id);
       setError(null);
       try {
-        const res = await fetch("/api/sequential-ads/approve", {
+        const res = await fetch(url, {
           method,
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ queueId: id }),
+          body: JSON.stringify(body),
         });
-        const d = await res.json();
+        const d = await res.json().catch(() => ({}));
         if (!res.ok) setError(d.error || "Action échouée.");
         await load();
       } catch (err) {
@@ -85,6 +98,28 @@ export default function SequentialAdsClient() {
       }
     },
     [load],
+  );
+
+  const act = useCallback(
+    (id: number, method: "POST" | "DELETE") =>
+      post("/api/sequential-ads/approve", method, id, { queueId: id }),
+    [post],
+  );
+
+  const publishNow = useCallback(
+    (id: number) => post("/api/sequential-ads/publish-now", "POST", id, { queueId: id }),
+    [post],
+  );
+
+  /** `local` is the raw <input type="datetime-local"> value; Date parses it as local time,
+   *  and toISOString sends an unambiguous instant so the server never has to guess a zone. */
+  const schedule = useCallback(
+    (id: number, local: string) =>
+      post("/api/sequential-ads/schedule", "POST", id, {
+        queueId: id,
+        scheduledAt: new Date(local).toISOString(),
+      }),
+    [post],
   );
 
   const campaigns = Array.from(
@@ -102,7 +137,7 @@ export default function SequentialAdsClient() {
           <h2 className="text-2xl font-bold text-white">Pubs séquentielles</h2>
           <p className="text-gray-400 text-sm mt-0.5">
             Vidéos à messages séquentiels (hero-slides &amp; demand-gen). Approuve un
-            brouillon pour le planifier — le publisher horaire s&apos;occupe du reste.
+            brouillon pour le planifier, choisis une date précise, ou publie tout de suite.
           </p>
         </div>
         {campaigns.length > 0 && (
@@ -140,7 +175,14 @@ export default function SequentialAdsClient() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {visible.map((it) => (
-            <SequentialAdCard key={it.id} item={it} acting={actingId} onAct={act} />
+            <SequentialAdCard
+              key={it.id}
+              item={it}
+              acting={actingId}
+              onAct={act}
+              onPublishNow={publishNow}
+              onSchedule={schedule}
+            />
           ))}
         </div>
       )}
@@ -152,10 +194,14 @@ function SequentialAdCard({
   item,
   acting,
   onAct,
+  onPublishNow,
+  onSchedule,
 }: {
   item: SequentialAdItem;
   acting: number | null;
   onAct: (id: number, method: "POST" | "DELETE") => void;
+  onPublishNow: (id: number) => void;
+  onSchedule: (id: number, local: string) => void;
 }) {
   const meta = STATUS_META[item.status] ?? {
     label: item.status,
@@ -164,6 +210,13 @@ function SequentialAdCard({
   const url = item.payload.reelsVideoUrl;
   const title = item.payload.caption || item.content_id;
   const busy = acting === item.id;
+
+  const [slot, setSlot] = useState(() => toLocalInputValue(item.scheduled_at));
+  const [confirmingNow, setConfirmingNow] = useState(false);
+
+  const isDraft = item.status === "draft";
+  const isPending = item.status === "pending";
+  const canSchedule = isDraft || isPending;
 
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden flex flex-col">
@@ -192,38 +245,106 @@ function SequentialAdCard({
           {item.payload.brand && <span className="text-[10px] text-gray-500">{item.payload.brand}</span>}
         </div>
         <p className="text-xs text-gray-400 line-clamp-2" title={title}>{title}</p>
-        {item.status === "pending" && (
+        {isPending && (
           <p className="text-xs text-blue-300">Planifié le {formatSlot(item.scheduled_at)}</p>
         )}
         {item.status === "published" && (
           <p className="text-xs text-green-300">✅ Publié le {formatSlot(item.scheduled_at)}</p>
         )}
-        {item.status === "draft" && (
-          <div className="flex flex-wrap gap-2 mt-auto pt-1">
-            <button
-              onClick={() => onAct(item.id, "POST")}
-              disabled={busy}
-              className="px-2.5 py-1 text-xs font-medium bg-green-900/40 hover:bg-green-900/60 text-green-400 border border-green-800/50 rounded-md transition-colors disabled:opacity-50"
-            >
-              {busy ? "…" : "✅ Approuver"}
-            </button>
-            <button
-              onClick={() => onAct(item.id, "DELETE")}
-              disabled={busy}
-              className="px-2.5 py-1 text-xs font-medium bg-red-950/40 hover:bg-red-950/60 text-red-400 border border-red-800/50 rounded-md transition-colors disabled:opacity-50"
-            >
-              {busy ? "…" : "🗑️ Supprimer"}
-            </button>
-            {url?.startsWith("https://") && (
-              <a
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-2.5 py-1 text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-md transition-colors"
+
+        {canSchedule && (
+          <div className="mt-auto pt-1 flex flex-col gap-2">
+            <div className="flex items-end gap-1.5">
+              <label className="flex-1">
+                <span className="block text-[10px] text-gray-500 mb-0.5">
+                  {isDraft ? "Planifier pour" : "Replanifier"}
+                </span>
+                <input
+                  type="datetime-local"
+                  value={slot}
+                  onChange={(e) => setSlot(e.target.value)}
+                  disabled={busy}
+                  aria-label={isDraft ? "Date de publication" : "Nouvelle date de publication"}
+                  className="w-full px-2 py-1 bg-gray-950 border border-gray-700 rounded-md text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                />
+              </label>
+              <button
+                onClick={() => onSchedule(item.id, slot)}
+                disabled={busy || !slot}
+                title={!slot ? "Choisis une date" : undefined}
+                className="px-2.5 py-1 text-xs font-medium bg-blue-900/40 hover:bg-blue-900/60 text-blue-300 border border-blue-800/50 rounded-md transition-colors disabled:opacity-50"
               >
-                Ouvrir
-              </a>
-            )}
+                {busy ? "…" : "📅 Planifier"}
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {isDraft && (
+                <button
+                  onClick={() => onAct(item.id, "POST")}
+                  disabled={busy}
+                  className="px-2.5 py-1 text-xs font-medium bg-green-900/40 hover:bg-green-900/60 text-green-400 border border-green-800/50 rounded-md transition-colors disabled:opacity-50"
+                >
+                  {busy ? "…" : "✅ Approuver"}
+                </button>
+              )}
+
+              {/* Publishing is irreversible — the post goes out to real followers — so the
+                  button asks once before firing. Drafts never reach here: the API refuses
+                  them, and requiring approval first keeps "publish now" from doubling as a
+                  hidden approval. */}
+              {isPending &&
+                (confirmingNow ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        setConfirmingNow(false);
+                        onPublishNow(item.id);
+                      }}
+                      disabled={busy}
+                      className="px-2.5 py-1 text-xs font-medium bg-amber-900/50 hover:bg-amber-900/70 text-amber-200 border border-amber-700/60 rounded-md transition-colors disabled:opacity-50"
+                    >
+                      {busy ? "…" : "Confirmer la publication"}
+                    </button>
+                    <button
+                      onClick={() => setConfirmingNow(false)}
+                      disabled={busy}
+                      className="px-2.5 py-1 text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-md transition-colors disabled:opacity-50"
+                    >
+                      Annuler
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setConfirmingNow(true)}
+                    disabled={busy}
+                    className="px-2.5 py-1 text-xs font-medium bg-amber-900/40 hover:bg-amber-900/60 text-amber-300 border border-amber-800/50 rounded-md transition-colors disabled:opacity-50"
+                  >
+                    {busy ? "…" : "🚀 Publier maintenant"}
+                  </button>
+                ))}
+
+              {isDraft && (
+                <button
+                  onClick={() => onAct(item.id, "DELETE")}
+                  disabled={busy}
+                  className="px-2.5 py-1 text-xs font-medium bg-red-950/40 hover:bg-red-950/60 text-red-400 border border-red-800/50 rounded-md transition-colors disabled:opacity-50"
+                >
+                  {busy ? "…" : "🗑️ Supprimer"}
+                </button>
+              )}
+
+              {url?.startsWith("https://") && (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2.5 py-1 text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-md transition-colors"
+                >
+                  Ouvrir
+                </a>
+              )}
+            </div>
           </div>
         )}
       </div>
