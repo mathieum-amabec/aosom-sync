@@ -2,6 +2,45 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.63.0] - 2026-08-19
+
+### Security — Next.js 16.2.6 → 16.3.1 (CRITICAL, GHSA-6gpp-xcg3-4w24 proxy bypass)
+
+16.3.1 is npm `latest`. Not installed locally: this worktree's `node_modules` is a junction to
+the main clone, shared with other sessions, so a `bun install` here would swap Next under every
+one of them. Vercel installs from `package.json` and builds against 16.3.1 — that build is the
+verification. `tsc` and the suite ran green against the source.
+
+### Fixed — CSP had no media-src, so every dashboard video preview was blocked (HIGH)
+
+There is no `Content-Security-Policy-Report-Only` header in this app, only an enforcing CSP,
+and it declared no `media-src`. `<video>` therefore fell back to `default-src 'self'` — which
+blocks both `blob:` and the public Vercel Blob store the Reels and sequential-ad renders are
+served from. Added
+`media-src 'self' blob: https://jcskqp8orcub9i0l.public.blob.vercel-storage.com`.
+`frame-ancestors 'none'` is unchanged.
+
+### Fixed — supplier and internal names leaking into published blog articles
+
+A scan of all 50 Shopify articles found **8 carrying a forbidden name, 6 of them published**.
+Two distinct causes, both code:
+
+- **The system prompt introduced the writer as working "for Aosom Canada".** The model wrote
+  what it was told: two published articles opened a paragraph with "Chez Aosom Canada, vous
+  trouverez…". The prompt now names the store correctly (Ameublo Direct / Furnish Direct) and
+  forbids Aosom, HOMCOM, Outsunny, PawHut, Vinsetto, Qaba, Soozier and internal tool names in
+  URLs, UTMs, tags and metadata.
+- **`UNSPLASH_APP_NAME` defaulted to `"aosom-sync"`** and is set nowhere, so every Unsplash
+  photo credit shipped `utm_source=aosom-sync` — 4× per article, 32 occurrences live. A prompt
+  rule cannot fix this: the parameter is appended by `buildAttributionUrl`, never by the model.
+  Default is now `ameublodirect`.
+
+Remediation done on Shopify: the two articles with the prose mention (636134359145,
+635818115177) were unpublished. `blog_posts` row 1 was moved `published` → `approved` to match.
+
+The 32 existing `utm_source=aosom-sync` occurrences across 8 articles are NOT yet rewritten —
+that is a bulk content write awaiting approval.
+
 ## [0.5.62.1] - 2026-08-19
 
 ### Fixed — /sequential-ads showed a published ad as still scheduled
