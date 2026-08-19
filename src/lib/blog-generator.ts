@@ -57,7 +57,15 @@ interface ClaudeArticleJson {
   tags: string[];
 }
 
-const SYSTEM_PROMPT_BASE = `You are a bilingual e-commerce blog writer for Aosom Canada, a Quebec-based retailer of outdoor furniture, gazebos, garden beds, greenhouses, and home goods.
+/**
+ * The store is **Ameublo Direct** (FR) / **Furnish Direct** (EN). It was named "Aosom Canada"
+ * here until 2026-08-19, and the model dutifully wrote what it was told: two published
+ * articles opened a paragraph with "Chez Aosom Canada, vous trouverez…". Aosom is the
+ * SUPPLIER and is strictly forbidden in anything a customer can read, so the store identity
+ * is stated correctly first and the prohibition repeated as a rule — the model cannot avoid
+ * a name it has been handed as its own employer.
+ */
+const SYSTEM_PROMPT_BASE = `You are a bilingual e-commerce blog writer for Ameublo Direct (French) / Furnish Direct (English), a Quebec-based retailer of outdoor furniture, gazebos, garden beds, greenhouses, and home goods.
 
 Rules:
 - Output ONE JSON object — no markdown fences, no commentary.
@@ -68,7 +76,10 @@ Rules:
 - metaDescription is under 160 chars, SEO-friendly.
 - tags is an array of 4-8 short topic tags (lowercase, no leading #).
 - Do NOT mention pricing, shipping, or product SKUs (those change).
-- Do NOT invent specific product names, model numbers, or claims you cannot back up.`;
+- Do NOT invent specific product names, model numbers, or claims you cannot back up.
+- NEVER mention Aosom, HOMCOM, Outsunny, PawHut, Vinsetto, Qaba, Soozier, or any other supplier or manufacturer name. These are our suppliers, not our brand, and must never appear in customer-facing text.
+- NEVER mention aosom-sync, or any internal tool, repository, or system name, anywhere — including URLs, UTM parameters, tags, and metadata.
+- When you need to name the store, write "Ameublo Direct" in French and "Furnish Direct" in English. Never any other name.`;
 
 function langPromptFragment(lang: BlogLang): string {
   return lang === "fr"

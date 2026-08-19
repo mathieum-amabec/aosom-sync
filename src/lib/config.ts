@@ -75,8 +75,17 @@ export const env = {
     if (!v) throw new Error("UNSPLASH_ACCESS_KEY not set in .env.local");
     return v;
   },
+  /**
+   * Name sent as `utm_source` on the Unsplash attribution links baked into every blog
+   * article. This is CUSTOMER-FACING: it ships inside the published article HTML.
+   *
+   * The default was "aosom-sync" — the internal repo name — and `UNSPLASH_APP_NAME` is not
+   * set anywhere, so all 8 generated articles carry `utm_source=aosom-sync` four times each
+   * in their photo credits. A prompt rule cannot fix this: the parameter is appended by
+   * buildAttributionUrl in unsplash.ts, never by the model.
+   */
   get unsplashAppName(): string {
-    return process.env.UNSPLASH_APP_NAME || "aosom-sync";
+    return process.env.UNSPLASH_APP_NAME || "ameublodirect";
   },
   get storeName(): string {
     return process.env.NEXT_PUBLIC_STORE_NAME || "Aosom Sync";
