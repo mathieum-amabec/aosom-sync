@@ -102,7 +102,7 @@ async function generatePostText(prompt: string): Promise<string> {
   log("anthropic call started", { prompt_tokens: Math.ceil(prompt.length / 4) });
   const message = await budgetedCreate(client,
     {
-      model: CLAUDE.MODEL,
+      model: CLAUDE.MODEL_BATCH,
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       messages: [{ role: "user", content: prompt }],
     },

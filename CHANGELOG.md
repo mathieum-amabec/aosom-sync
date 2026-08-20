@@ -2,6 +2,53 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.64.0] - 2026-08-19
+
+### Changed — batch LLM work runs on Haiku 4.5; the customer-facing assistant stays on Sonnet
+
+`CLAUDE.MODEL_BATCH` (new, default `claude-haiku-4-5`, override with `CLAUDE_BATCH_MODEL`) now
+drives every non-assistant caller: product listings, blog articles, social captions, slideshow
+hooks, Kling prompts, image classification. `/api/assistant` keeps `CLAUDE.MODEL`
+(`claude-sonnet-4-6`) — it is the only customer-facing generation path and it is ~86% of all
+recorded token volume, so it was never a candidate.
+
+Haiku 4.5 is priced at exactly one third of Sonnet 4.6 on **both** input ($1 vs $3 / MTok) and
+output ($5 vs $15). The saving on the batch pool is therefore a flat two thirds and does not
+depend on the input/output mix — which matters, because `daily_llm_budget` stores a single
+combined counter and cannot tell us that mix.
+
+**Quality guard.** `generateProductContent` validates every field of the model's JSON. A
+response that fails any check now raises `ContentValidationError` and the *same prompt* is
+re-run on `CLAUDE.MODEL`. Only that error escalates — a budget-exceeded or network failure
+must not silently buy a second paid call. A cheap-model miss therefore costs one retry, never
+output quality. Setting `CLAUDE_BATCH_MODEL=claude-sonnet-4-6` reverts the whole pool with no
+code change.
+
+### Changed — a job's stored content is reused instead of regenerated
+
+Product copy is already generated once per PSIN group: `mergeVariants` folds a group's colour
+and size variants into one merged product whose full variant list is part of the prompt, and
+`import_jobs.group_key` is UNIQUE. What still burned duplicate calls was regenerating a job
+that *already held content* — `upsertImportJob` resets a re-queued group to `pending` without
+clearing `content`, and a retry after a failed Shopify push lands on the same path.
+`generateContent(jobId)` now returns the stored payload when it still satisfies the contract
+`importToShopify` relies on. `generateContent(jobId, { force: true })` (and `{"force": true}`
+on `POST /api/import/generate`) regenerates deliberately, e.g. after a prompt change.
+
+### Fixed — blog generation bypassed the daily spend cap entirely
+
+`generateArticleJson` called `client.messages.create()` directly rather than `budgetedCreate()`.
+Article generation was therefore neither gated by the daily budget nor recorded in
+`daily_llm_budget` — a hole in the CSO Finding 2 guardrail that also made every consumption
+report undercount. It now goes through `budgetedCreate` on the `batch` pool like every other
+caller.
+
+### Fixed — a corrupt `content` column crashed every read of the job
+
+`rowToJob` called `JSON.parse(row.content)` unguarded, so a half-written payload threw on any
+read — including the regeneration that would have repaired it. It now degrades to `null`
+("no content yet"), which callers already handle by regenerating.
+
 ## [0.5.63.0] - 2026-08-19
 
 ### Security — Next.js 16.2.6 → 16.3.1 (CRITICAL, GHSA-6gpp-xcg3-4w24 proxy bypass)

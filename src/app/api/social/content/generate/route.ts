@@ -134,7 +134,7 @@ async function generatePostText(prompt: string, isEn: boolean): Promise<string> 
   const client = getAnthropicClient();
   const message = await budgetedCreate(client,
     {
-      model: CLAUDE.MODEL,
+      model: CLAUDE.MODEL_BATCH,
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       system: isEn ? SYSTEM_STYLE_EN : SYSTEM_STYLE_FR,
       messages: [{ role: "user", content: prompt }],

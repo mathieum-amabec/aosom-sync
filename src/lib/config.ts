@@ -196,7 +196,26 @@ export const AOSOM = {
 // ─── Claude API ─────────────────────────────────────────────────────
 
 export const CLAUDE = {
+  /**
+   * The public shopping assistant's model. Sonnet stays here: /api/assistant is the only
+   * customer-facing generation path, it draws on the dedicated `assistant` budget pool,
+   * and it accounts for ~86% of all recorded token volume.
+   */
   MODEL: "claude-sonnet-4-6",
+  /**
+   * Every non-assistant ("batch") caller: product descriptions, blog articles, social
+   * captions, slideshow hooks, image classification.
+   *
+   * Haiku 4.5 is priced at exactly one third of Sonnet 4.6 on BOTH input ($1 vs $3 per
+   * MTok) and output ($5 vs $15), so moving this pool cuts its cost by two thirds no
+   * matter how the input/output mix falls.
+   *
+   * Override per-deploy with CLAUDE_BATCH_MODEL — setting it to "claude-sonnet-4-6" puts
+   * the whole batch pool back on Sonnet with no code change if quality regresses. The
+   * structured callers additionally escalate to MODEL on a validation failure (see
+   * generateProductContent), so a Haiku miss costs a retry, never output quality.
+   */
+  MODEL_BATCH: process.env.CLAUDE_BATCH_MODEL?.trim() || "claude-haiku-4-5",
   MAX_TOKENS_CONTENT: 4000,
   MAX_TOKENS_SOCIAL: 500,
 } as const;

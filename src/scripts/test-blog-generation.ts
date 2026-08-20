@@ -52,7 +52,7 @@ function langFragment(lang: BlogLang): string {
 async function generateJson(topic: string, lang: BlogLang, keywords: string[]): Promise<ArticleJson> {
   const client = getAnthropicClient();
   const message = await budgetedCreate(client, {
-    model: CLAUDE.MODEL,
+    model: CLAUDE.MODEL_BATCH,
     max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
     system: SYSTEM_PROMPT,
     messages: [

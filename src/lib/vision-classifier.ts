@@ -94,7 +94,7 @@ export async function classifyProductImage(imageUrl: string): Promise<ImageClass
   const client = getAnthropicClient();
 
   const message = await budgetedCreate(client, {
-    model: CLAUDE.MODEL,
+    model: CLAUDE.MODEL_BATCH,
     max_tokens: 200,
     system: STRICT_OVERLAY_PROMPT,
     messages: [

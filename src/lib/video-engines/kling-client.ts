@@ -90,7 +90,7 @@ export async function buildCinematicPrompt(product: KlingProduct, locale: VideoL
     const client = getAnthropicClient();
     const langNote = locale === "en" ? "English" : "French";
     const message = await budgetedCreate(client, {
-      model: CLAUDE.MODEL,
+      model: CLAUDE.MODEL_BATCH,
       max_tokens: 200,
       system:
         "You write concise, single-line cinematic prompts for an AI image-to-video model. " +
