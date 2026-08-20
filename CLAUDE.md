@@ -53,6 +53,11 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
 - **Dropship**: `inventory_management: null`. Stock is NOT tracked in Shopify, only in catalog_snapshots
 - **Active imports**: New products are auto-published as `active` (live) on import — `createShopifyProduct` sets `status: "active"` (see `shopify-client.ts`; switched from draft→active in commit beb00b4, 2026-06-07). No manual-review draft step. Caveat: `status:"active"` only auto-publishes to the Online Store **at creation** — flipping an existing product draft→active does NOT publish it, and legacy pre-beb00b4 draft imports never activated stay hidden. `runPublishReconcile` (`publish-reconcile.ts`, route `GET /api/cron/publish-reconcile`, dry-run unless `?apply=1`) closes that gap: it publishes (`publishShopifyProduct`, REST `published:true`) every imported product sellable in today's Aosom CSV that sits unpublished — excluding `auto-drafted` (intentional aosom-sync drafts) and `exclude-stale`, guarded by the same `assertFeedComplete` (FEED_MIN_COVERAGE 0.70), capped at 67/run. It is the inverse of `stale-catalog` and is NOT on any cron schedule (operator-triggered only).
 - **[BRAND NAME]**: Aosom HTML descriptions contain this placeholder. Replaced with actual brand before Claude processing
+- **Two LLM tiers**: `CLAUDE.MODEL` (`claude-sonnet-4-6`) is **only** for `/api/assistant`, the
+  customer-facing shopping assistant — it is ~86% of token volume and the only path a shopper
+  sees. Every other caller uses `CLAUDE.MODEL_BATCH` (`claude-haiku-4-5`, one third the price on
+  both input and output). New batch callers must use `MODEL_BATCH`. `generateProductContent`
+  re-runs a failed validation on `CLAUDE.MODEL`, so a cheap-model miss costs a retry, not quality
 
 ## Meta Pixel (two parts — web dataset `214720653324969`)
 
@@ -262,6 +267,12 @@ zero errors. Verify with
 
 - `SHOPIFY_ACCESS_TOKEN` — Shopify Admin API token
 - `ANTHROPIC_API_KEY` — Claude API
+- `CLAUDE_BATCH_MODEL` — optional. Model for the **batch** LLM pool (product listings, blog,
+  social captions, hooks, vision). Defaults to `claude-haiku-4-5`; set it to
+  `claude-sonnet-4-6` to move the whole batch pool back to Sonnet without a code change.
+  The customer-facing assistant is **not** affected — it is pinned to `CLAUDE.MODEL`.
+- `LLM_DAILY_TOKEN_BUDGET` / `LLM_ASSISTANT_DAILY_BUDGET` — daily token caps for the `batch`
+  (default 1.3M) and `assistant` (default 500k) pools
 - `CRON_SECRET` — Vercel Cron auth
 - `AUTH_PASSWORD` — simple password auth for 2 users
 - `BLOB_READ_WRITE_TOKEN` — Vercel Blob (Phase1Checkpoint + demand-gen video assets)

@@ -54,7 +54,7 @@ ${article.bodyHtml}
 export async function scoreArticle(article: ScorableArticle, lang: BlogLang): Promise<ArticleScore> {
   const client = getAnthropicClient();
   const message = await budgetedCreate(client, {
-    model: CLAUDE.MODEL,
+    model: CLAUDE.MODEL_BATCH,
     max_tokens: 300,
     system: JUDGE_SYSTEM_PROMPT,
     messages: [{ role: "user", content: buildJudgePrompt(article, lang) }],

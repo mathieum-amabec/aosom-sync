@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // env vars are needed; the functions under test only read CLAUDE.MODEL + anthropicApiKey.
 vi.mock("@/lib/config", () => ({
   env: { anthropicApiKey: "test-key" },
-  CLAUDE: { MODEL: "claude-sonnet-4-6", MAX_TOKENS_CONTENT: 1000, MAX_TOKENS_SOCIAL: 500 },
+  CLAUDE: { MODEL: "claude-sonnet-4-6", MODEL_BATCH: "claude-haiku-4-5", MAX_TOKENS_CONTENT: 1000, MAX_TOKENS_SOCIAL: 500 },
 }));
 
 // Mock the Anthropic SDK — `create` is hoisted so each test sets the canned reply.
@@ -69,7 +69,9 @@ describe("classifyProductImage", () => {
     create.mockResolvedValue(claudeJson({ has_marketing_overlay: false, confidence: 1, reason: "ok" }));
     await classifyProductImage("https://cdn.example.com/pic.webp");
     const arg = create.mock.calls[0][0];
-    expect(arg.model).toBe("claude-sonnet-4-6");
+    // Image classification is batch work, so it rides the cheap batch model, not the
+    // assistant's. Asserted against the mocked MODEL_BATCH value at the top of this file.
+    expect(arg.model).toBe("claude-haiku-4-5");
     const imgBlock = arg.messages[0].content.find((b: { type: string }) => b.type === "image");
     expect(imgBlock.source.media_type).toBe("image/webp");
   });

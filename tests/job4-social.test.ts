@@ -31,7 +31,7 @@ vi.mock("@/lib/selectors/shopify-images", () => ({
 
 vi.mock("@/lib/config", () => ({
   env: { storeName: "TestStore" },
-  CLAUDE: { MODEL: "claude-test", MAX_TOKENS_SOCIAL: 500 },
+  CLAUDE: { MODEL: "claude-test", MODEL_BATCH: "claude-test-batch", MAX_TOKENS_SOCIAL: 500 },
   SYNC: { DEFAULT_MIN_DAYS_BETWEEN_REPOSTS: "30" },
   CHANNELS: {},
 }));

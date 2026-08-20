@@ -16,6 +16,7 @@
  */
 
 import { getAnthropicClient } from "./content-generator";
+import { budgetedCreate } from "@/lib/llm-budget";
 import { CLAUDE } from "./config";
 import { searchImages, triggerDownload, type UnsplashImage } from "./unsplash";
 import { createBlogArticle, type BlogLang } from "./shopify-blog";
@@ -110,8 +111,12 @@ Return JSON with this exact shape:
 
 export async function generateArticleJson(input: GenerateBlogInput): Promise<ClaudeArticleJson> {
   const client = getAnthropicClient();
-  const message = await client.messages.create({
-    model: CLAUDE.MODEL,
+  // Blog generation used to call client.messages.create() directly, which meant it was
+  // neither gated by the daily spend cap nor recorded in daily_llm_budget — a hole in the
+  // CSO guardrail that also made every consumption report undercount. Route it through
+  // budgetedCreate like every other caller (default pool: "batch").
+  const message = await budgetedCreate(client, {
+    model: CLAUDE.MODEL_BATCH,
     max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
     system: SYSTEM_PROMPT_BASE,
     messages: [{ role: "user", content: buildUserPrompt(input) }],

@@ -22,11 +22,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const { jobId } = await request.json();
+    const { jobId, force } = await request.json();
     if (!jobId || typeof jobId !== "string" || jobId.length > 100) {
       return NextResponse.json({ success: false, error: "Valid jobId required" }, { status: 400 });
     }
-    const job = await generateContent(jobId);
+    // `force: true` bypasses the stored-content reuse guard and buys a fresh generation.
+    // Opt-in only, so the default path never pays twice for the same PSIN group.
+    const job = await generateContent(jobId, { force: force === true });
     return NextResponse.json({ success: true, data: job });
   } catch (err) {
     console.error(`[API] /api/import/generate failed:`, err);

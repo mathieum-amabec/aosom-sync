@@ -42,9 +42,10 @@ vi.mock("@/jobs/job4-social", () => ({
   triggerNewProduct: vi.fn().mockResolvedValue({ draftId: 1 }),
 }));
 
-import { importToShopify, queueForImport } from "@/lib/import-pipeline";
+import { importToShopify, queueForImport, generateContent } from "@/lib/import-pipeline";
+import { generateProductContent } from "@/lib/content-generator";
 import { createShopifyProduct } from "@/lib/shopify-client";
-import { getImportJob, getProduct, upsertImportJob } from "@/lib/database";
+import { getImportJob, getProduct, upsertImportJob, updateImportJob } from "@/lib/database";
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { mergeVariants } from "@/lib/variant-merger";
 import { triggerNewProduct } from "@/jobs/job4-social";
@@ -128,5 +129,79 @@ describe("queueForImport — existing-SKU guard", () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0].groupKey).toBe("G2");
     expect(upsertImportJob).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("generateContent — stored-content reuse guard (LLM cost)", () => {
+  const validContent = JSON.stringify({
+    titleFr: "Chaise longue",
+    titleEn: "Lounge chair",
+    descriptionFr: "<p>fr</p>",
+    descriptionEn: "<p>en</p>",
+    tags: [],
+  });
+
+  it("reuses a job's stored content instead of paying for a second generation", async () => {
+    // import_jobs.group_key is UNIQUE per PSIN group, and upsertImportJob resets a
+    // re-queued group to 'pending' WITHOUT clearing content — that is the path this guards.
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ status: "pending", content: validContent }));
+
+    const job = await generateContent("job-1");
+
+    expect(generateProductContent).not.toHaveBeenCalled();
+    expect(job.status).toBe("reviewing");
+    expect(job.content?.titleFr).toBe("Chaise longue");
+  });
+
+  it("regenerates when the caller explicitly forces it", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ status: "pending", content: validContent }));
+    vi.mocked(generateProductContent).mockResolvedValue({ titleFr: "Neuf" } as never);
+
+    await generateContent("job-1", { force: true });
+
+    expect(generateProductContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("regenerates when there is no stored content", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ status: "pending", content: null }));
+    vi.mocked(generateProductContent).mockResolvedValue({ titleFr: "Neuf" } as never);
+
+    await generateContent("job-1");
+
+    expect(generateProductContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("regenerates rather than trusting a stored payload that is corrupt", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ status: "pending", content: "{not json" }));
+    vi.mocked(generateProductContent).mockResolvedValue({ titleFr: "Neuf" } as never);
+
+    await generateContent("job-1");
+
+    expect(generateProductContent).toHaveBeenCalledTimes(1);
+  });
+
+  it("regenerates rather than trusting a stored payload missing required fields", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ status: "pending", content: '{"tags":[]}' }));
+    vi.mocked(generateProductContent).mockResolvedValue({ titleFr: "Neuf" } as never);
+
+    await generateContent("job-1");
+
+    expect(generateProductContent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("generateContent — an already-pushed job keeps its status", () => {
+  it("does not move a 'done' job back to 'reviewing' when reusing its content", async () => {
+    const content = JSON.stringify({ titleFr: "Chaise", descriptionFr: "<p>fr</p>", tags: [] });
+    vi.mocked(getImportJob).mockResolvedValue(
+      makeJobRow({ status: "done", shopify_id: "999", content }),
+    );
+
+    const job = await generateContent("job-1");
+
+    expect(generateProductContent).not.toHaveBeenCalled();
+    expect(updateImportJob).not.toHaveBeenCalled();
+    expect(job.status).toBe("done");
+    expect(job.shopifyId).toBe("999");
   });
 });

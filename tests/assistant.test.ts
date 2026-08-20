@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // config is read at module load via content-generator; mock it (no real env needed).
 vi.mock("@/lib/config", () => ({
   env: { anthropicApiKey: "test-key" },
-  CLAUDE: { MODEL: "claude-sonnet-4-6", MAX_TOKENS_CONTENT: 1000, MAX_TOKENS_SOCIAL: 500 },
+  CLAUDE: { MODEL: "claude-sonnet-4-6", MODEL_BATCH: "claude-haiku-4-5", MAX_TOKENS_CONTENT: 1000, MAX_TOKENS_SOCIAL: 500 },
 }));
 
 const { create } = vi.hoisted(() => ({ create: vi.fn() }));

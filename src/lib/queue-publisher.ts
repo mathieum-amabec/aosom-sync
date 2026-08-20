@@ -182,7 +182,7 @@ export async function generateReelCaption(
     `Pas de hashtags — ils seront ajoutés séparément. Réponds uniquement avec le texte, sans guillemets.`;
   try {
     const message = await budgetedCreate(getAnthropicClient(), {
-      model: CLAUDE.MODEL,
+      model: CLAUDE.MODEL_BATCH,
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       messages: [{ role: "user", content: prompt }],
     });

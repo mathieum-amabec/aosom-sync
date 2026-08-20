@@ -194,7 +194,7 @@ export async function getSlogan(seed: string, language: HookLanguage = "fr"): Pr
     `Réponds UNIQUEMENT avec le slogan, sans guillemets. Idée : ${trimmed}`;
   try {
     const message = await budgetedCreate(getAnthropicClient(), {
-      model: CLAUDE.MODEL,
+      model: CLAUDE.MODEL_BATCH,
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       messages: [{ role: "user", content: prompt }],
     });
