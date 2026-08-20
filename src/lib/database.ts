@@ -396,6 +396,17 @@ async function _initSchemaImpl(): Promise<void> {
       tokens_used INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (day, pool)
     )`,
+    // assistant_rate_limit: one row per accepted /api/assistant message, used for a
+    // per-IP SLIDING window. This lives in Turso rather than in the in-memory limiter
+    // because the in-memory windows are per Fluid Compute instance and reset on cold
+    // start — fine as a burst guard, useless as an hourly quota, which is the limit that
+    // actually bounds what one shopper can spend of the assistant token pool.
+    // Rows are pruned on every check, so the table stays at roughly (active IPs × 10).
+    `CREATE TABLE IF NOT EXISTS assistant_rate_limit (
+      ip TEXT NOT NULL,
+      ts INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_assistant_rl_ip_ts ON assistant_rate_limit(ip, ts)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_run ON sync_logs(sync_run_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_sku ON sync_logs(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_runs_date ON sync_runs(started_at)`,
@@ -1620,6 +1631,18 @@ export async function recordPriceChanges(entries: {
 // ─── Daily LLM token budget (global Anthropic spend guardrail) ───────
 
 /** UTC date key (YYYY-MM-DD) — the budget resets at 00:00 UTC by keying on this. */
+/** Shared with the dashboard cost estimator; see src/lib/llm-usage.ts. */
+function utcDayKeys(days: number): string[] {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now.getTime());
+    d.setUTCDate(d.getUTCDate() - i);
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
 function utcDayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -1650,6 +1673,69 @@ export async function addDailyLlmTokens(pool: LlmBudgetPool, tokens: number): Pr
     sql: `INSERT INTO daily_llm_budget (day, pool, tokens_used) VALUES (?, ?, ?)
           ON CONFLICT(day, pool) DO UPDATE SET tokens_used = tokens_used + excluded.tokens_used`,
     args: [utcDayKey(), pool, Math.ceil(tokens)],
+  });
+}
+
+export interface LlmUsageDay {
+  day: string; // UTC YYYY-MM-DD
+  assistant: number;
+  batch: number;
+}
+
+/**
+ * Per-day, per-pool token counters for the last `days` UTC days, oldest first, with days
+ * that have no row filled in as zero.
+ *
+ * A missing row and a zero row are NOT the same thing operationally — `recordLlmUsage`
+ * only runs after a SUCCESSFUL Claude call, so a stretch of missing rows means calls were
+ * failing (a blocked API key looks exactly like this), not that the app was idle. The
+ * dashboard flattens both to 0 for the chart; the distinction is called out in the UI copy.
+ */
+export async function getLlmUsageWindow(days: number): Promise<LlmUsageDay[]> {
+  const keys = utcDayKeys(days);
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT day, pool, tokens_used FROM daily_llm_budget WHERE day >= ? ORDER BY day`,
+    args: [keys[0]],
+  });
+  const byDay = new Map<string, LlmUsageDay>(
+    keys.map((day) => [day, { day, assistant: 0, batch: 0 }]),
+  );
+  for (const row of res.rows) {
+    const entry = byDay.get(row.day as string);
+    if (!entry) continue; // row older than the window (the >= bound is inclusive of keys[0])
+    const pool = row.pool as LlmBudgetPool;
+    if (pool === "assistant" || pool === "batch") entry[pool] = Number(row.tokens_used) || 0;
+  }
+  return keys.map((day) => byDay.get(day)!);
+}
+
+/**
+ * Count this IP's accepted assistant messages inside the trailing `windowSecs`, after
+ * pruning anything older. Returns the count BEFORE the current request is recorded, so
+ * the caller compares against its limit and decides.
+ *
+ * Read-then-write rather than an atomic upsert: two concurrent requests from one IP can
+ * both read the same count and both be admitted. That is an acceptable ±1 on a quota whose
+ * job is bounding cost, and it avoids a transaction on the hot path of a public endpoint.
+ */
+export async function countAssistantRequests(ip: string, windowSecs: number): Promise<number> {
+  const db = await ensureSchema();
+  const cutoff = Math.floor(Date.now() / 1000) - windowSecs;
+  await db.execute({ sql: `DELETE FROM assistant_rate_limit WHERE ts < ?`, args: [cutoff] });
+  const res = await db.execute({
+    sql: `SELECT COUNT(*) AS n FROM assistant_rate_limit WHERE ip = ? AND ts >= ?`,
+    args: [ip, cutoff],
+  });
+  return Number(res.rows[0]?.n ?? 0);
+}
+
+/** Record one accepted assistant message for this IP. */
+export async function recordAssistantRequest(ip: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO assistant_rate_limit (ip, ts) VALUES (?, ?)`,
+    args: [ip, Math.floor(Date.now() / 1000)],
   });
 }
 

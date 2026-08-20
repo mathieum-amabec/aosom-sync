@@ -2,6 +2,71 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.65.0] - 2026-08-20
+
+### Added — "Consommation API" panel on the dashboard home
+
+Sits between "Résumé du jour" and "Alertes": it is a same-kind daily KPI, and when a pool is
+exhausted or the Anthropic key is spend-capped it explains the import/blog failures the
+alerts panel reports directly underneath. Reads `daily_llm_budget` through
+`GET /api/dashboard/llm-usage` (session-gated, DB-only — it must not depend on the Anthropic
+API, since the API being unavailable is one of the things an operator opens it to see).
+
+Shows per pool: tokens used today against that pool's daily cap, the model that pool runs,
+a progress bar that turns amber at 80% and red at 100%, and an estimated cost. Plus a
+stacked 7-day bar chart and the window total.
+
+**Costs are estimates, and the panel says so.** `daily_llm_budget` stores ONE combined
+token count per (day, pool), so the input/output split is assumed per pool — 90% input for
+`assistant` (system prompt + tool results in, ≤1024 tokens out), 40% for `batch` (a supplier
+description in, up to 4000 tokens of bilingual HTML out). The rates come from the model each
+pool actually runs, so the `CLAUDE_BATCH_MODEL` override is reflected without a code change.
+Two further caveats are printed in the panel: a zero day means no call *succeeded* (the
+counter only increments after a valid response, so a blocked key looks like an idle day),
+and past days are priced at each pool's current model.
+
+### Added — conversation limits on the public assistant
+
+`/api/assistant` now ends a runaway conversation with a hand-off to a human instead of
+spending more Claude calls:
+
+- **10 messages per IP per rolling hour**, as a Turso-backed sliding window
+  (`assistant_rate_limit`). This lives in the DB rather than the in-memory limiter because
+  those windows are per Fluid Compute instance and reset on cold start — fine as a burst
+  guard, useless as an hourly quota. It also *is* the "10 messages per session" rule: a
+  client-supplied session counter is trivially reset, so counting per IP server-side is the
+  only version of that rule with teeth, and both numbers are 10.
+- **3 consecutive shopper turns** with no assistant turn between them — the shopper is
+  firing messages without being helped, so escalate rather than spend three more calls.
+
+Copy, verbatim: FR *"Vous avez atteint la limite de questions. Notre équipe peut vous aider
+directement 😊"*, EN *"You've reached the question limit. Our team can help you directly 😊"*,
+followed by the contact channel.
+
+Contact details are env-overridable (`ASSISTANT_CONTACT_EMAIL`, `ASSISTANT_CONTACT_WHATSAPP`)
+and default to `info@ameublodirect.ca` — the address the docs already use. **No WhatsApp
+number exists anywhere in this repo, so no WhatsApp link is rendered until the env var is
+set**; an invented number would be worse than no button. The personal Gmail on the privacy
+page is deliberately not used as a shopper-facing channel.
+
+Both limits return HTTP **200** with a payload carrying `reply` and `products`, not a 429.
+The deployed storefront widget is a theme snippet outside this repo and does
+`if (j.success && j.data) { addMsg(j.data.reply); addCards(j.data.products) }` — a 429, or a
+payload without those fields, shows the shopper a blank bubble. It inserts text with
+`textContent`, so the address is spelled out in the sentence rather than sent as a link;
+the structured `contact` object is there for a future widget revision that can draw a button.
+
+Failure behaviour: a tripped limit costs no Claude call, a failed generation does not consume
+the shopper's allowance, and an unreachable quota store fails **open** — the storefront
+assistant must not go dark because a counter is unavailable.
+
+### Fixed — the 7-day chart rendered no bars
+
+Bar heights were percentages inside an auto-height flex column, so they resolved to zero and
+every bar was invisible. Sized in pixels against a constant now, with a 2px floor so a small
+day is visible rather than rounded away. Two adjacent-JSX-text spaces were also being
+swallowed ("$0.00estimé"); those strings are built as single expressions.
+
 ## [0.5.64.0] - 2026-08-19
 
 ### Changed — batch LLM work runs on Haiku 4.5; the customer-facing assistant stays on Sonnet

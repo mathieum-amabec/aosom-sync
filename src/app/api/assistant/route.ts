@@ -1,5 +1,12 @@
 import { runAssistant, runComplementary, type AssistantTurn, type Locale } from "@/lib/assistant";
 import { checkRateLimit } from "@/lib/rate-limiter";
+import { countAssistantRequests, recordAssistantRequest } from "@/lib/database";
+import {
+  MAX_MESSAGES_PER_HOUR,
+  RATE_WINDOW_SECS,
+  isRapidFire,
+  limitPayload,
+} from "@/lib/assistant-limits";
 
 /**
  * POST /api/assistant — PUBLIC storefront shopping assistant. No auth (called from the
@@ -138,7 +145,39 @@ export async function POST(request: Request): Promise<Response> {
           .filter((t) => t.content)
       : [];
 
+    // Rapid-fire guard — three shopper turns with no assistant turn between them. Checked
+    // before the quota so a shopper spamming the widget gets the hand-off immediately
+    // instead of burning through their hourly allowance first.
+    if (isRapidFire(history)) {
+      return json({ success: true, data: limitPayload(locale, "consecutive_messages", 60) }, 200);
+    }
+
+    // Hourly per-IP quota (Turso sliding window). Doubles as the session cap — see
+    // src/lib/assistant-limits.ts. Fails OPEN on a DB error: the storefront assistant must
+    // not go dark because the counter is unreachable, and the in-memory limiter above plus
+    // the assistant token pool still bound the damage.
+    const ip = clientIp(request);
+    let used = 0;
+    try {
+      used = await countAssistantRequests(ip, RATE_WINDOW_SECS);
+    } catch (err) {
+      console.warn("[assistant] quota read failed — allowing:", err instanceof Error ? err.message : err);
+      used = -1;
+    }
+    if (used >= MAX_MESSAGES_PER_HOUR) {
+      return json({ success: true, data: limitPayload(locale, "hourly_quota", RATE_WINDOW_SECS) }, 200);
+    }
+
     const result = await runAssistant({ message, history, locale });
+
+    // Recorded only after a SUCCESSFUL answer, so a failed generation doesn't consume the
+    // shopper's allowance. Best-effort: a bookkeeping failure must not fail the reply.
+    if (used >= 0) {
+      try {
+        await recordAssistantRequest(ip);
+      } catch { /* quota bookkeeping is best-effort */ }
+    }
+
     return json({ success: true, data: result });
   } catch (err) {
     console.error("[API] /api/assistant failed:", err);

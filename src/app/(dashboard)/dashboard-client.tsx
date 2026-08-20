@@ -6,6 +6,7 @@ import { MetaAdsPanel } from "./meta-ads-panel";
 import { DaySummaryPanel } from "./day-summary-panel";
 import { AlertsPanel } from "./alerts-panel";
 import { PublicationQueuePanel } from "./publication-queue-panel";
+import { LlmUsagePanel } from "./llm-usage-panel";
 
 interface PriceChange {
   sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string; inStore: boolean; shopifyUrl: string | null;
@@ -67,6 +68,10 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
 
       {/* Today's summary + alerts (top of dashboard) */}
       <DaySummaryPanel />
+      {/* Sits between the day summary and the alerts on purpose: it is a same-kind daily
+          KPI, and when the Anthropic key is capped or a pool is exhausted it explains the
+          import/blog failures the alerts panel reports directly underneath. */}
+      <LlmUsagePanel />
       <AlertsPanel />
       <PublicationQueuePanel />
 
