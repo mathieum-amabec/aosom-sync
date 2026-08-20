@@ -43,6 +43,9 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
 - `import_jobs` — import queue with status machine (pending→generating→reviewing→importing→done)
 - `catalog_snapshots` — latest CSV data for fast catalog browsing
 - `sync_cursor` — chunked sync progress for large stores
+- `assistant_rate_limit` — one row per accepted `/api/assistant` message (`ip`, `ts`), the
+  per-IP hourly sliding window. In Turso rather than in-memory because the in-memory windows
+  are per Fluid Compute instance and reset on cold start. Pruned on every check.
 - `settings` — key-value store; `checkpoint_data` holds both `ShopifyPushCheckpoint` (Phase 2) and `Phase1Checkpoint` (Phase 1 chunked pipeline state)
 
 ## Key Patterns
@@ -177,6 +180,8 @@ GraphQL `themeDuplicate` of the new live. Verify roles: `GET /admin/api/2025-01/
 ## API Routes
 
 - `GET /api/catalog` — browse catalog with filters (reads from Turso, not CSV)
+- `GET /api/dashboard/llm-usage` — "Consommation API" panel: today's tokens per pool vs its
+  cap, estimated USD, and a 7-day window from `daily_llm_budget`. Session-gated, DB-only.
 - `POST /api/sync/trigger` — manual sync (supports `{dryRun: true}`)
 - `GET /api/sync/history` — sync runs + change logs
 - `GET /api/cron/sync` — Vercel Cron: Fluid Compute Phase 1 orchestrator (init+chunks+finalize), fires at 06:00 + 06:30 UTC (Bearer CRON_SECRET, maxDuration 800s)
@@ -273,6 +278,10 @@ zero errors. Verify with
   The customer-facing assistant is **not** affected — it is pinned to `CLAUDE.MODEL`.
 - `LLM_DAILY_TOKEN_BUDGET` / `LLM_ASSISTANT_DAILY_BUDGET` — daily token caps for the `batch`
   (default 1.3M) and `assistant` (default 500k) pools
+- `ASSISTANT_CONTACT_EMAIL` — optional. Shopper-facing address in the assistant's
+  limit-reached hand-off. Defaults to `info@ameublodirect.ca`.
+- `ASSISTANT_CONTACT_WHATSAPP` — optional. Digits only (e.g. `15145550123`). **No WhatsApp
+  link is shown until this is set** — there is no number anywhere in the repo to default to.
 - `CRON_SECRET` — Vercel Cron auth
 - `AUTH_PASSWORD` — simple password auth for 2 users
 - `BLOB_READ_WRITE_TOKEN` — Vercel Blob (Phase1Checkpoint + demand-gen video assets)
