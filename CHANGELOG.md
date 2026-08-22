@@ -2,6 +2,41 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.65.4] - 2026-08-22
+
+### Added — tests for the intraday stock-check cron, which had none
+`GET /api/cron/stock-check` ran three times a day, unattended, deciding which products show
+as out of stock, which get drafted as discontinued and which get republished — at 0% coverage.
+Its failure mode is silent: no crash, just a catalogue saying the wrong thing.
+
+24 tests in `tests/api/cron/stock-check.test.ts`, covering the behaviours that carry the risk:
+- **The feed guard bails before any write.** A thin CSV must not mass-flip the catalogue, so
+  the test asserts `planStockActions` is never even reached, not merely that it 500s.
+- **Worst-first ordering.** OOS/draft are processed before restock/reactivate so the 150-write
+  cap can never starve rupture detection; the overflow is `deferred`, not dropped.
+- **A 404 costs no cap budget.** A catalogue full of deleted products must not eat the run.
+- **We only ever republish what WE drafted.** Both the `restock` and `reactivate` paths are
+  pinned against an operator's hand-set draft and against the `exclude-stale` opt-out, and
+  `reactivate` re-checks live state because the plan was built from an older draft fetch.
+- **Waitlist notification precedes baseline persistence** (at-least-once: a crash between the
+  two must re-notify next run, never drop the alert), and the baseline is written per product
+  rather than batched, so a budget-killed run keeps its progress.
+- Degradation: a failed draft-states fetch skips reactivation instead of aborting rupture
+  detection; one product's failure is counted and the loop continues.
+
+The tag helpers are deliberately not mocked — most assertions are the exact tag list sent to
+Shopify, which is the thing a shopper actually sees.
+
+**Mutation-checked**, as in v0.5.65.3: dropping the worst-first sort, charging a 404 to the
+write cap, skipping the reactivate re-check, letting restock resurrect an operator's draft,
+and an off-by-one on the cap each failed 1-3 tests.
+
+`stock-check/route.ts`: 0% → **97% lines, 80% branches**. Repo total 53.1% → 53.7%.
+
+Test-hygiene note: this file uses `vi.resetAllMocks()`, not `clearAllMocks`. Clear only wipes
+recorded calls, so the throwing `assertFeedComplete` from the feed-guard test leaked into the
+17 tests that followed it.
+
 ## [0.5.65.3] - 2026-08-22
 
 ### Added — the 11 untested Shopify write paths now have tests
