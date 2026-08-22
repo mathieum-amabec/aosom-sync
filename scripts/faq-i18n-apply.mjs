@@ -1,12 +1,13 @@
-// Fix FAQ i18n on the DRAFT theme 160656818281 ONLY.
-// NOTE: originally targeted 160655114345, but that was an abandoned empty-shell
-// draft; the real working draft ("Copie de LIVE NOW", premium desktop design) is
-// 160656818281. Applied there 2026-07-03 (all 3 assets HTTP 200 + verified).
+// Fix FAQ i18n on the active DRAFT theme ONLY (DRAFT_THEME_ID from _shopify-lib).
+// NOTE: theme roles move on every publish — the draft is resolved from _shopify-lib
+// (verified via themes.json) rather than a hardcoded id, so a publish can't leave this
+// pointed at the wrong theme.
 // 1) add faq.* keys to locales/en.default.json + locales/fr.json
 // 2) convert snippets/agentic-faq.liquid hardcoded FR strings -> {{ ... | t }}
-// Gated: refuses unless draft is unpublished and live 160606093417 is main.
+// Gated: refuses unless the draft is unpublished and the live theme (LIVE_THEME_ID) is main.
 // Dry-run by default; pass --apply to PUT.
 import { readFileSync } from "node:fs";
+import { LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 function loadEnv() {
   const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
   const env = {};
@@ -15,7 +16,7 @@ function loadEnv() {
 }
 const env = loadEnv();
 const STORE = "27u5y2-kp.myshopify.com", API = "2024-01";
-const DRAFT = "160656818281", LIVE = "160606093417";
+const DRAFT = DRAFT_THEME_ID, LIVE = LIVE_THEME_ID;
 const H = { "X-Shopify-Access-Token": env.SHOPIFY_ACCESS_TOKEN, "Content-Type": "application/json" };
 const APPLY = process.argv.includes("--apply");
 

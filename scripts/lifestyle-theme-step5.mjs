@@ -1,14 +1,15 @@
-// PHASE 3 STEP 5 — repoint two homepage sections on the DRAFT theme 160656818281 ONLY
+// PHASE 3 STEP 5 — repoint two homepage sections on the active DRAFT theme ONLY (DRAFT_THEME_ID)
 // to the lifestyle-filtered smart collections. Gated: refuses unless draft is non-main and
-// live 160606093417 is main. Asserts the current collection handles before changing.
+// the live theme (LIVE_THEME_ID) is main. Asserts the current collection handles before changing.
 // Dry-run by default; --apply writes + verifies by re-GET.
 //   node scripts/lifestyle-theme-step5.mjs [--apply]
 import { readFileSync } from "node:fs";
+import { LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 function loadEnv() { const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8"); const env = {}; for (const l of raw.split(/\r?\n/)) { const m = l.match(/^([A-Z0-9_]+)=(.*)$/); if (!m) continue; let v = m[2].trim(); if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1); env[m[1]] = v; } return env; }
 const env = loadEnv();
 const STORE = "27u5y2-kp.myshopify.com", API = "2024-01", TOKEN = env.SHOPIFY_ACCESS_TOKEN;
 if (!TOKEN) { console.error("FATAL: no token"); process.exit(2); }
-const DRAFT = "160656818281", LIVE = "160606093417";
+const DRAFT = DRAFT_THEME_ID, LIVE = LIVE_THEME_ID;
 const APPLY = process.argv.includes("--apply");
 const H = { "X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
