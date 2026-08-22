@@ -67,7 +67,7 @@ describe("planInventorySweep — feed-aware reconcile", () => {
   });
 
   it("70% threshold boundary: 7/10 proceeds, 6/10 trips", () => {
-    const mk = (n: number) => Array.from({ length: 10 }, (_, i) => v(`X${i}`, 20));
+    const mk = (n: number) => Array.from({ length: n }, (_, i) => v(`X${i}`, 20));
     const covers = (n: number) => feed(Array.from({ length: n }, (_, i) => [`X${i}`, 40] as [string, number]));
     expect(planInventorySweep({ variants: mk(10), feedQty: covers(7), soldOutMax: 10 }).guard.ok).toBe(true);  // 0.70 → ok
     expect(planInventorySweep({ variants: mk(10), feedQty: covers(6), soldOutMax: 10 }).guard.ok).toBe(false); // 0.60 → trip

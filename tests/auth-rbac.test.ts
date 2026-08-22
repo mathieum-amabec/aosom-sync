@@ -4,7 +4,7 @@
 // Found by /review + /qa on 2026-04-18
 // Report: .gstack/qa-reports/
 
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // Mock next/headers so auth.ts can be imported in vitest (Node env)
 vi.mock("next/headers", () => ({

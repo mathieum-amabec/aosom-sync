@@ -517,10 +517,9 @@ function ProductSearch({
 
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) {
-      setHits([]);
-      return;
-    }
+    // Nothing to fetch for a 1-char query; hits are cleared by the input handler
+    // (clearing here would be a setState inside the effect body).
+    if (q.length < 2) return;
     const ctrl = new AbortController();
     const timer = setTimeout(async () => {
       try {
@@ -567,7 +566,11 @@ function ProductSearch({
       <input
         type="text"
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => {
+          const value = e.target.value;
+          setQuery(value);
+          if (value.trim().length < 2) setHits([]);
+        }}
         onFocus={() => hits.length > 0 && setOpen(true)}
         placeholder="Rechercher par nom ou SKU…"
         className={INPUT_CLASS}

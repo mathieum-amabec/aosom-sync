@@ -7,12 +7,15 @@ vi.mock("@/lib/database", () => ({ getVideoJob: vi.fn() }));
 
 import { GET } from "@/app/api/video-serve/[id]/route";
 import { getVideoJob } from "@/lib/database";
+import { videoOutputDir } from "@/lib/video-engines/video-generate";
 
 const req = (range?: string) =>
   new Request("https://app.test/api/video-serve/1", range ? { headers: { range } } : undefined);
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
 
 // A small real file on disk so the streaming branch exercises fs.stat + createReadStream.
+// It has to sit INSIDE videoOutputDir(): the route rejects any video_path that
+// resolves outside it, so a fixture in os.tmpdir() would 404 rather than stream.
 const BODY = "0123456789"; // 10 bytes
 let tmpFile: string;
 
@@ -26,7 +29,9 @@ function job(over: Record<string, unknown>) {
 
 describe("GET /api/video-serve/:id", () => {
   beforeAll(async () => {
-    tmpFile = path.join(os.tmpdir(), `video-serve-test-${process.pid}.mp4`);
+    const dir = videoOutputDir();
+    await fsp.mkdir(dir, { recursive: true });
+    tmpFile = path.join(dir, `video-serve-test-${process.pid}.mp4`);
     await fsp.writeFile(tmpFile, BODY);
   });
   afterAll(async () => { await fsp.rm(tmpFile, { force: true }); });
@@ -86,7 +91,25 @@ describe("GET /api/video-serve/:id", () => {
   });
 
   it("404s when video_path points at a missing file", async () => {
-    vi.mocked(getVideoJob).mockResolvedValue(job({ video_path: path.join(os.tmpdir(), "nope-xyz.mp4") }));
+    vi.mocked(getVideoJob).mockResolvedValue(job({ video_path: path.join(videoOutputDir(), "nope-xyz.mp4") }));
     expect((await GET(req(), ctx("1"))).status).toBe(404);
+  });
+
+  it("404s on a video_path that escapes the output dir (poisoned DB row)", async () => {
+    for (const evil of [
+      "../../../../etc/passwd",
+      path.join(videoOutputDir(), "..", "..", "package.json"),
+      path.join(os.tmpdir(), "elsewhere.mp4"),
+    ]) {
+      vi.mocked(getVideoJob).mockResolvedValue(job({ video_path: evil }));
+      expect((await GET(req(), ctx("1"))).status).toBe(404);
+    }
+  });
+
+  it("accepts a bare filename, resolved relative to the output dir", async () => {
+    vi.mocked(getVideoJob).mockResolvedValue(job({ video_path: path.basename(tmpFile) }));
+    const res = await GET(req(), ctx("1"));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(BODY);
   });
 });

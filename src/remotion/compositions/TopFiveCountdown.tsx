@@ -21,7 +21,7 @@ import { VIDEO_BRAND } from "../../lib/video-brand-tokens";
 // tolerance for an exact 10% off. validate.ts is pure (no @/ alias, no heavy
 // deps), so it bundles cleanly into the Remotion composition.
 import { shouldShowBadge, discountPct } from "../../lib/slideshow/validate";
-import { computeCountdownTiming, COUNTDOWN_WIDTH, COUNTDOWN_HEIGHT } from "../timing";
+import { computeCountdownTiming, COUNTDOWN_WIDTH } from "../timing";
 
 export type CountdownBrand = "ameublo" | "furnish";
 export type CountdownLanguage = "fr" | "en";

@@ -79,3 +79,24 @@ out/
 # Demand Gen render scratch (FFmpeg drawtext textfiles)
 /tmp_lines/
 src/audio/
+
+# ── Credentials never belong in this repo (it is PUBLIC) ────────────────────
+# Google OAuth client-secret downloads land at the repo root with this exact
+# shape; .env* does not cover them. One `git add -A` would publish the secret.
+client_secret_*.json
+*-credentials.json
+*.credentials.json
+gcp-*.json
+token.json
+
+# ── QA / agent scratch output ───────────────────────────────────────────────
+# Playwright MCP page snapshots + screenshots (36MB and growing), and the loose
+# screenshots QA sessions drop at the repo root.
+/.playwright-mcp/
+/.context/
+/.draft-scratch-cards/
+/*.png
+/*.jpeg
+/*.jpg
+# Editor/agent backup copies of theme files
+*.bak

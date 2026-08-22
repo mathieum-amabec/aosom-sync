@@ -36,11 +36,6 @@ const basePage = {
 
 // ─── GET /api/drafts ─────────────────────────────────────────────────────────
 
-function makeRequest(url: string, authenticated = true): Request {
-  const req = new Request(url);
-  return req;
-}
-
 describe("GET /api/drafts", () => {
   beforeEach(() => {
     vi.resetModules();

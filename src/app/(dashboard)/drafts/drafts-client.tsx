@@ -186,8 +186,6 @@ export default function DraftsClient() {
     setActionLoading(false);
   }
 
-  const statusCount = (s: string) => data?.items.filter((d) => d.status === s).length ?? 0;
-
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* Header */}

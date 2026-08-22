@@ -9,14 +9,15 @@
  * fetch the video themselves when publishing a Reel — they require a hosted URL
  * with no session. The only request input is the numeric id; video_url and
  * video_path come from the DB row (pipeline-controlled), never from the request,
- * so there is no path-traversal or open-redirect surface from user input. The
- * redirect target is still validated to be http(s) as defense in depth against a
- * poisoned DB value.
+ * so there is no path-traversal or open-redirect surface from user input. Both DB
+ * values are still validated as defence in depth against a poisoned row: video_url
+ * must be http(s), and video_path must resolve inside the render output dir.
  */
 import { NextResponse } from "next/server";
 import { createReadStream, promises as fsp } from "fs";
 import { Readable } from "stream";
 import { getVideoJob } from "@/lib/database";
+import { resolveStoredVideoPath } from "@/lib/video-engines/video-generate";
 
 export const runtime = "nodejs";
 
@@ -55,9 +56,18 @@ export async function GET(
 
   // Otherwise stream the local file.
   if (job.video_path) {
+    // Confine the read to the render output dir before touching the filesystem —
+    // the same defence-in-depth video_url gets from isHttpUrl above.
+    let safePath: string;
+    try {
+      safePath = resolveStoredVideoPath(job.video_path);
+    } catch {
+      return new NextResponse(null, { status: 404 });
+    }
+
     let stat;
     try {
-      stat = await fsp.stat(job.video_path);
+      stat = await fsp.stat(safePath);
     } catch {
       return new NextResponse(null, { status: 404 });
     }
@@ -82,7 +92,7 @@ export async function GET(
             headers: { "Content-Range": `bytes */${size}`, "Accept-Ranges": "bytes" },
           });
         }
-        return new NextResponse(toWebStream(createReadStream(job.video_path, { start, end })), {
+        return new NextResponse(toWebStream(createReadStream(safePath, { start, end })), {
           status: 206,
           headers: {
             "Content-Type": "video/mp4",
@@ -94,7 +104,7 @@ export async function GET(
       }
     }
 
-    return new NextResponse(toWebStream(createReadStream(job.video_path)), {
+    return new NextResponse(toWebStream(createReadStream(safePath)), {
       status: 200,
       headers: {
         "Content-Type": "video/mp4",

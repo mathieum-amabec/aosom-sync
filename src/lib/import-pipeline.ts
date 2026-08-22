@@ -1,5 +1,5 @@
 import { fetchAosomCatalog } from "./csv-fetcher";
-import { mergeVariants, buildSkuIndex, selectProductImagesAsync } from "./variant-merger";
+import { mergeVariants, selectProductImagesAsync } from "./variant-merger";
 import { generateProductContent, backfillSeoFields, type GeneratedContent } from "./content-generator";
 import { createShopifyProduct, addProductToCollection } from "./shopify-client";
 import { findCollectionsForProduct, getProduct, linkProductToShopify } from "./database";

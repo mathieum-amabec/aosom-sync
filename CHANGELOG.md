@@ -2,6 +2,43 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.65.2] - 2026-08-22
+
+### Security — the repo is public and nothing ignored credential downloads
+A Google OAuth client-secret JSON (`client_secret_*.apps.googleusercontent.com.json`,
+project `aosom-dropship`) was sitting untracked at the repo root. It was never committed,
+but no `.gitignore` rule covered it — `.env*` does not match — so a single `git add -A`
+would have published it permanently. `.gitignore` now covers credential downloads
+(`client_secret_*.json`, `*-credentials.json`, `gcp-*.json`, `token.json`), plus the QA
+scratch that accumulates at the root: `/.playwright-mcp/` (36 MB of page snapshots),
+`/.context/`, `/.draft-scratch-cards/`, root-level `*.png`/`*.jpeg`/`*.jpg` (112 MB of QA
+screenshots) and `*.bak`. No currently-tracked file becomes ignored.
+
+### Fixed — /api/video-serve trusted video_path while validating video_url
+The route is public (allow-listed in proxy.ts) and validated `video_url` as "defence in
+depth against a poisoned DB value", but passed `video_path` straight to `fs.stat` +
+`createReadStream`. `video_path` now has to resolve inside the render output dir.
+
+The guard could not simply reuse `video-engines/video-store.ts`: that module was **dead
+and divergent**. Nothing imported it, and its `getVideoOutputDir()` pointed at
+`/tmp/product-videos` (local: `public/product-videos`) while the pipeline actually writes
+to `/tmp/videos` (local: `public/social-videos`) via `resolveVideoOutputPath`. Wiring the
+stale resolver in would have 404ed every video in production. `video-store.ts` is deleted;
+`videoOutputDir()` + `resolveStoredVideoPath()` now live in `video-generate.ts` next to the
+writer, so the reader and the writer cannot drift apart again. Two traversal cases added
+to `tests/video-serve-route.test.ts`.
+
+### Removed — unused variables, imports and one dead test helper
+ESLint went from 77 problems to 13. `src` is now error-free; what remains is 8 deliberate
+`no-img-element` warnings (remote Shopify CDN images in the dashboard) and `no-explicit-any`
+in one test file. Notable fixes beyond deleting dead bindings:
+- `videos-client.tsx` cleared search hits with a synchronous `setState` inside an effect
+  body (cascading renders). The clear moved to the input handler that shortens the query;
+  behaviour is identical, since the only other writer, `add()`, already clears hits.
+- `tests/inventory-sweep.test.ts` had `mk(n)` ignore its own argument and always build 10
+  variants. It now honours `n` — every call site already passed 10, so the 70%-threshold
+  assertions are unchanged.
+
 ## [0.5.65.1] - 2026-08-22
 
 ### Fixed — 5 theme-write scripts pointed their DRAFT target at the live theme

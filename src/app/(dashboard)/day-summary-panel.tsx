@@ -70,7 +70,7 @@ export function DaySummaryPanel() {
           <div className="mt-3 bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
             <div className="px-4 py-2 text-xs font-medium text-gray-400 border-b border-gray-800/60">Statut des crons (dernier run)</div>
             {summary.crons.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-gray-500">Aucun run enregistré pour l'instant — les crons s'enregistrent à leur prochaine exécution.</p>
+              <p className="px-4 py-3 text-sm text-gray-500">Aucun run enregistré pour l&apos;instant — les crons s&apos;enregistrent à leur prochaine exécution.</p>
             ) : (
               <ul className="divide-y divide-gray-800/50">
                 {summary.crons.map((c) => (
