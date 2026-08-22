@@ -100,3 +100,4 @@ token.json
 /*.jpg
 # Editor/agent backup copies of theme files
 *.bak
+coverage/
