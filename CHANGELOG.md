@@ -2,6 +2,45 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.65.3] - 2026-08-22
+
+### Added — the 11 untested Shopify write paths now have tests
+Coverage measurement (v0.5.65.2) showed `shopify-client.ts` at 21% lines, and 11 of its 22
+exported functions referenced by no test at all. All 11 have real production callers — none
+were dead code — and they group tellingly: **everything touching inventory and publication**
+was in the list, including the whole of `publish-reconcile` (up to 67 products put live per
+run) and `setInventoryLevel`, which the daily sync calls from three places.
+
+Two files, 42 tests, grouped by concern rather than by function:
+- `tests/shopify-client-inventory.test.ts` — `getPrimaryLocationId` (active-location
+  preference, fallback, process-lifetime cache), `enableVariantTracking`, `setInventoryLevel`
+  (including the 422 "not stocked" → connect → retry branch, and that a non-stocking 422 must
+  NOT trigger a connect), `fetchActiveVariantInventory`.
+- `tests/shopify-client-publish.test.ts` — `publishShopifyProduct` (pins that it sets
+  `published` and leaves `status` alone unless asked: flipping status alone does not publish
+  an existing product, which is the gap publish-reconcile exists to close),
+  `fetchProductPublishStates` (a FUTURE `published_at` counts as not-yet-published),
+  `fetchDraftProductStates`, `getShopifyStockState`, `setProductMetafield`,
+  `deleteProductMetafield` (404 on delete is tolerated; other failures are not),
+  `fetchAllCollections` (returns [] on HTTP failure — unlike its siblings, it does not throw).
+
+Both files pin the documented pagination gotcha the two paginated readers share: the
+`status=` filter goes on the first page only, because Shopify rejects it alongside
+`page_info` on follow-ups.
+
+**The tests were mutation-checked rather than assumed.** Five deliberate breaks in
+`shopify-client.ts` — dropping `published: true`, ignoring a future `published_at`, keeping
+`status=` on page 2, disabling the connect-and-retry, un-tolerating the delete 404 — each
+failed between 1 and 3 of the new tests. Coverage counts a line as covered when it merely
+runs; this confirms these assertions actually bite.
+
+`shopify-client.ts`: 21% → **69% lines**. Repo total 52.1% → 53.1%.
+
+Config note: token presence is a mutable flag inside the `@/lib/config` mock rather than a
+`doMock`/`doUnmock` pair. Unmocking mid-file makes every later `vi.resetModules()` reload the
+real config, which throws on a missing `SHOPIFY_ACCESS_TOKEN` — it broke 17 tests before the
+switch, and only ordering had hidden it in the first file.
+
 ## [0.5.65.2] - 2026-08-22
 
 ### Security — the repo is public and nothing ignored credential downloads
