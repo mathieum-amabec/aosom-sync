@@ -1,13 +1,14 @@
-// Post-audit minor homepage copy/asset fixes on the DRAFT theme 160656818281 ONLY (role-gated).
+// Post-audit minor homepage copy/asset fixes on the active DRAFT theme ONLY (DRAFT_THEME_ID, role-gated).
 //   Item 1: hero/why_us/howit product-count badge "490+" -> "759+" (FR + EN) in templates/index.json
 //   Item 2: (pending) swap the English-text parasol video card in home-video-showcase.liquid
 // Dry-run default; --apply PUTs + verifies.
 //   node scripts/homepage-minor-fixes.mjs [--apply]
 import { readFileSync } from "node:fs";
+import { LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 const env = (() => { const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8"); const e = {}; for (const l of raw.split(/\r?\n/)) { const m = l.match(/^([A-Z0-9_]+)=(.*)$/); if (!m) continue; let v = m[2].trim(); if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1); e[m[1]] = v; } return e; })();
 const STORE = "27u5y2-kp.myshopify.com", API = "2024-01", TOKEN = env.SHOPIFY_ACCESS_TOKEN;
 if (!TOKEN) { console.error("FATAL no token"); process.exit(2); }
-const DRAFT = "160656818281", LIVE = "160606093417";
+const DRAFT = DRAFT_THEME_ID, LIVE = LIVE_THEME_ID;
 const APPLY = process.argv.includes("--apply");
 const H = { "X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

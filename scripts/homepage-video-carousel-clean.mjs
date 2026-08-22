@@ -1,14 +1,15 @@
-// Clean the "Voyez-le chez vous" carousel on the DRAFT theme 160656818281 ONLY (role-gated).
+// Clean the "Voyez-le chez vous" carousel on the active DRAFT theme ONLY (DRAFT_THEME_ID, role-gated).
 // Vetting found 9/10 videos carry burned-in English text / supplier logos. Clean no-text (-WEB-NT)
 // cuts verified for 4; socle already clean. The other 5 have NO verified-clean version -> removed.
 // Result: a clean 5-card carousel (parasol, tente, socle, chaise, cage-bois — all no-text).
 // Dry-run writes /tmp orig+new for diff; --apply PUTs + verifies.
 //   node scripts/homepage-video-carousel-clean.mjs [--apply]
 import { readFileSync, writeFileSync } from "node:fs";
+import { LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 const env = (() => { const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8"); const e = {}; for (const l of raw.split(/\r?\n/)) { const m = l.match(/^([A-Z0-9_]+)=(.*)$/); if (!m) continue; let v = m[2].trim(); if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1); e[m[1]] = v; } return e; })();
 const STORE = "27u5y2-kp.myshopify.com", API = "2024-01", TOKEN = env.SHOPIFY_ACCESS_TOKEN;
 if (!TOKEN) { console.error("FATAL no token"); process.exit(2); }
-const DRAFT = "160656818281", LIVE = "160606093417", KEY = "sections/home-video-showcase.liquid";
+const DRAFT = DRAFT_THEME_ID, LIVE = LIVE_THEME_ID, KEY = "sections/home-video-showcase.liquid";
 const APPLY = process.argv.includes("--apply");
 const H = { "X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
