@@ -5,7 +5,7 @@ import path from "node:path";
 
 vi.mock("@/lib/config", () => ({
   env: { klingApiKey: "kk_test" as string | undefined },
-  CLAUDE: { MODEL: "claude-test" },
+  CLAUDE: { MODEL: "claude-test", MODEL_BATCH: "claude-test-batch" },
 }));
 vi.mock("@/lib/content-generator", () => ({ getAnthropicClient: vi.fn() }));
 vi.mock("@/lib/video-engines/ffmpeg-brand", () => ({ applyBrandOverlay: vi.fn() }));

@@ -21,6 +21,8 @@ import {
   getPrimaryLocationId,
   enableVariantTracking,
   setInventoryLevel,
+  setProductMetafield,
+  deleteProductMetafield,
 } from "@/lib/shopify-client";
 import {
   createSyncRun,
@@ -30,6 +32,7 @@ import {
   refreshProducts,
   rebuildProductTypeCounts,
   recordPriceChanges,
+  getPriceBadge,
   getPendingWaitlist,
   markWaitlistNotified,
   markPriceChangeAppliedBySku,
@@ -58,6 +61,8 @@ import type { ChangeTypeHistory } from "@/lib/database";
 import { isKlaviyoConfigured, trackEvent } from "@/lib/klaviyo-client";
 import { storeLink } from "@/lib/insights";
 import { diffProductsLight } from "@/lib/product-diff";
+import { runRemovedFromFeedDraft } from "@/lib/removed-catalog";
+import { runImageCompliance } from "@/lib/image-compliance";
 import {
   savePhase1Blob,
   readPhase1Blob,
@@ -249,6 +254,25 @@ async function applyToShopify(
             }
           })
         );
+
+        // Price badge (custom.price_badge) — recompute whenever the price changed
+        // today: best_30d / price_drop / delete otherwise. The PDP renders a badge
+        // under the price from this metafield. Non-fatal — a badge write must never
+        // fail an already-successful price/stock push.
+        if (priceChanges.length > 0 && diff.aosomProduct) {
+          try {
+            const skus = diff.aosomProduct.variants.map((v) => v.sku).filter(Boolean);
+            const badge = await getPriceBadge(skus);
+            if (badge) {
+              await setProductMetafield(diff.shopifyId, "custom", "price_badge", "single_line_text_field", badge);
+            } else {
+              await deleteProductMetafield(diff.shopifyId, "custom", "price_badge");
+            }
+            log(`price badge: ${diff.productName} → ${badge ?? "aucun"}`);
+          } catch (badgeErr) {
+            log(`price badge failed for ${diff.groupKey}: ${badgeErr instanceof Error ? badgeErr.message : String(badgeErr)}`);
+          }
+        }
 
         // Stock — push the safety-buffered quantity to Shopify inventory. The diff already
         // applied the buffer (newValue = safeQty); enable tracking first (idempotent, and
@@ -466,6 +490,33 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
       });
     }
     await updateSyncRunTiming(syncRun.id, timing);
+
+    // Phase 6b: Reconcile SKUs that vanished from the feed — qty→0 + immediate Shopify
+    // draft (closes the oversell window instead of waiting for the 30-day stale-catalog
+    // net). Non-fatal: a Shopify/feed hiccup must never fail the DB sync. Only when
+    // pushing this phase (shopifyProducts is already in scope + Shopify writes intended).
+    if (shopifyPush && diffResult.removed.length > 0) {
+      try {
+        const feedSkus = new Set(aosomProducts.map((p) => p.sku.toUpperCase()));
+        const removedRes = await runRemovedFromFeedDraft(diffResult.removed, feedSkus, { shopifyProducts });
+        log("removed-from-feed reconcile", { phase: "removedFromFeed", ...removedRes });
+      } catch (removedErr) {
+        log(`removed-from-feed reconcile failed (non-fatal): ${removedErr instanceof Error ? removedErr.message : String(removedErr)}`, { phase: "removedFromFeed" });
+      }
+    }
+
+    // Phase 6c: auto pos-1 image compliance. Classify the newest never-checked live products
+    // and swap in a clean gallery image when pos-1 carries a marketing text overlay (same
+    // mechanism as the 141 manual swaps). Capped at 20 Claude calls/run. Only when pushing to
+    // Shopify (needs the image reorder writes). Non-fatal — must never fail the sync.
+    if (shopifyPush) {
+      try {
+        const imgRes = await runImageCompliance({ syncRunId: syncRun.id });
+        log("image-compliance done", { phase: "imageCompliance", ...imgRes });
+      } catch (imgErr) {
+        log(`image-compliance failed (non-fatal): ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`, { phase: "imageCompliance" });
+      }
+    }
 
     // Phase 7: Rebuild product type counts
     const t0Rebuild = Date.now();
@@ -800,6 +851,20 @@ export async function runSyncInit(): Promise<SyncInitResult> {
     // has its own call.
     await notifyBackInStockWaitlist(changes.restockSkus);
 
+    // Reconcile SKUs that vanished from the feed — qty→0 + immediate Shopify draft
+    // (closes the oversell window; the 30-day stale-catalog cron stays as the secondary
+    // net). This is the production path (cron → runSyncFull → runSyncInit), which does
+    // NOT pre-fetch Shopify, so the runner fetches the catalog itself. Non-fatal.
+    if (diffResult.removed.length > 0) {
+      try {
+        const feedSkus = new Set(aosomProducts.map((p) => p.sku.toUpperCase()));
+        const removedRes = await runRemovedFromFeedDraft(diffResult.removed, feedSkus);
+        log("removed-from-feed reconcile", { phase: "removedFromFeed", ...removedRes });
+      } catch (removedErr) {
+        log(`removed-from-feed reconcile failed (non-fatal): ${removedErr instanceof Error ? removedErr.message : String(removedErr)}`, { phase: "removedFromFeed" });
+      }
+    }
+
     const totalChunks = toWrite.length > 0 ? Math.ceil(toWrite.length / REFRESH_CHUNK_SIZE) : 0;
 
     const t0Blob = Date.now();
@@ -1050,6 +1115,17 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
       await recordPriceChanges(priceChangeEntries);
     }
     log("recordPriceChanges done", { phase: "finalize", duration_ms: Date.now() - t0Record, entries: priceChangeEntries.length });
+
+    // Auto pos-1 image compliance (production path). Runs ONCE per daily sync, after every
+    // refresh chunk has written products. DB-driven (newest never-checked live products
+    // first), capped at 20 Claude calls. Non-fatal — must never fail finalize.
+    try {
+      const t0Img = Date.now();
+      const imgRes = await runImageCompliance({ syncRunId: syncRun.id });
+      log("image-compliance done", { phase: "finalize", duration_ms: Date.now() - t0Img, ...imgRes });
+    } catch (imgErr) {
+      log(`image-compliance failed (non-fatal): ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`, { phase: "finalize" });
+    }
 
     // Retention: drop price_history older than 30 days now that today's changes are
     // recorded. Caps Turso storage + the cost of the correlated discount query.

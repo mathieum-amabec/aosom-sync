@@ -56,13 +56,38 @@ export async function verifyPassword(password: string, stored: string): Promise<
 
 // ─── Session Tokens (HMAC-SHA256, Edge-compatible) ──────────────────
 
-const HMAC_SECRET = process.env.AUTH_PASSWORD;
+// Dedicated session-signing key, DISTINCT from the human login password.
+//
+// A session token is base64("<ts>:<role>:<username>:<HMAC(SESSION_SECRET, payload)>").
+// The payload is non-secret (anyone can base64-decode a cookie to read it), so if the
+// signing key were a low-entropy human password, any single valid token would be an
+// offline known-plaintext cracking oracle for that password — and recovering it would
+// forge admin tokens AND unlock the emergency admin login in api/auth/route.ts. So the
+// key MUST be high-entropy and separate from AUTH_PASSWORD. Generate: openssl rand -hex 32.
+//
+// SESSION_SECRET is REQUIRED — there is no AUTH_PASSWORD fallback (CSO Finding 3).
+// The old fallback signed sessions with the low-entropy human login password, turning
+// any valid cookie into an offline oracle to crack AUTH_PASSWORD. Sessions now fail
+// closed (hmacSign/verify throw) when SESSION_SECRET is unset.
+//
+// Trim first so a fat-fingered value (a stray space/newline in the env line) can't
+// silently become a near-empty signing key: after trimming, an empty value is treated
+// as unset (fail closed) rather than signing with " ".
+const rawSessionSecret = process.env.SESSION_SECRET?.trim();
+const SESSION_SECRET = rawSessionSecret || undefined;
+
+if (process.env.NODE_ENV === "production" && rawSessionSecret && rawSessionSecret.length < 32) {
+  console.warn(
+    "[AUTH] SESSION_SECRET is shorter than 32 chars — signing with a low-entropy key. " +
+      "Use a high-entropy value (openssl rand -hex 32)."
+  );
+}
 
 async function hmacSign(data: string): Promise<string> {
-  if (!HMAC_SECRET) throw new Error("AUTH_PASSWORD env var must be set");
+  if (!SESSION_SECRET) throw new Error("SESSION_SECRET env var is required (openssl rand -hex 32) — refusing to sign/verify sessions");
   const enc = new TextEncoder();
   const key = await globalThis.crypto.subtle.importKey(
-    "raw", enc.encode(HMAC_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+    "raw", enc.encode(SESSION_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
   );
   const sig = await globalThis.crypto.subtle.sign("HMAC", key, enc.encode(data));
   return bufToHex(sig);

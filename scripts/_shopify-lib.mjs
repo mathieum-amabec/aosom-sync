@@ -24,23 +24,52 @@ export function loadEnv() {
 export const STORE = "27u5y2-kp.myshopify.com";
 export const API_VERSION = "2025-01";
 
-// Theme roles verified via GET /admin/api/2025-01/themes.json (source of truth, 2026-07-07):
-//   160656818281 "Copie de LIVE NOW"                  → role:main        (LIVE / published)
-//   160749813865 "DRAFT DE TRAVAIL 2026-07-05"        → role:unpublished (active working DRAFT)
-//   160606093417 "LIVE NOW"                           → role:unpublished (PREVIOUS live — rollback target)
-//   160059195497 "Copie de Trade v2"                  → role:unpublished (older backup)
-// Roles MOVE on every publish: since the 2026-07-01 note, 160656818281 was published to LIVE
-// (demoting the old 160606093417), and a fresh full copy, 160749813865, became the working DRAFT.
+// Theme roles verified via GET /admin/api/2025-01/themes.json (source of truth, 2026-08-18):
+//   161529233513 "DRAFT GOOGLE SHOPPING 2026-08-07"   → role:main        (LIVE / published — name still says DRAFT!)
+//   161562099817 "DRAFT DE TRAVAIL 2026-08-08"        → role:unpublished (live 08-08 → 08-18 — newest non-live)
+//   161069989993 "DRAFT DE TRAVAIL 2026-07-18 v2"     → role:unpublished (live until 2026-08-07 — two-step rollback target)
+//   161090928745 "DRAFT DE TRAVAIL 2026-07-19"        → role:unpublished (POISONED — see warning below)
+// Roles MOVE on every publish: 161069989993 was live until 2026-08-07, when 161529233513 was
+// published over it; 161562099817 was then published on 2026-08-08, demoting 161529233513;
+// on 2026-08-18 161529233513 was published again (Judge.me homepage widget, card star badge,
+// trustbar reviews benefit), demoting 161562099817. The same id can therefore be LIVE, then
+// not, then LIVE again — which is exactly why nothing here may be inferred from history.
+// NOTE: theme NAMES are misleading (every one of them is named "DRAFT", including the LIVE
+// one) — do NOT eyeball by name; trust the role from themes.json.
 // Re-verify via themes.json after ANY publish — a stale LIVE_THEME_ID makes the apply-*.mjs
 // guard "protect" the wrong theme, and a stale DRAFT_THEME_ID can point writes at production.
 // IMPORTANT: the LIVE_THEME_ID guard in apply-*.mjs ("refusing to run against the LIVE
 // theme") only protects production when this is the REAL published theme. Keep it current.
-export const LIVE_THEME_ID = "160656818281"; // current main / published (LIVE) theme — NEVER write here
-export const DRAFT_THEME_ID = "160749813865"; // active unpublished DRAFT — safe write target
-export const BACKUP_THEME_ID = "160059195497"; // older unpublished theme, kept as backup
+export const LIVE_THEME_ID = "161529233513"; // main / published (LIVE) since 2026-08-18 — NEVER write here
+export const DRAFT_THEME_ID = "161562099817"; // live 08-08 → 08-18 — safe write target, closest to LIVE
+export const BACKUP_THEME_ID = "161069989993"; // live until 2026-08-07 — deeper rollback, one publish older than DRAFT
+// DRAFT and BACKUP stay DISTINCT themes, giving a real two-step rollback ladder:
+// LIVE 161529233513 → back one publish to DRAFT 161562099817 → back two to BACKUP 161069989993.
+// They were the same id between 2026-08-07 and 2026-08-09, which meant "roll back" and
+// "write here" pointed at one theme and a bad write destroyed the only rollback point.
+// ⚠️ Do NOT use 161090928745 ("DRAFT DE TRAVAIL 2026-07-19"). It predates the 2026-07-21
+// live edits, so it is missing the Judge.me app embed and several product-page block
+// settings; publishing or branching from it silently reverts them.
+//
+// ⚠️ DRAFT_THEME_ID is the PREVIOUS LIVE, not a fresh copy of the current one: as of the
+// 2026-08-18 publish it is 4 assets behind (card-product.liquid, mega-menu.liquid,
+// templates/index.json, and it lacks snippets/lc_judgeme_all_reviews.liquid). Writing there
+// is safe, but publishing it would revert those. `themeDuplicate` against the freshly
+// published theme failed again on 2026-08-18 (newTheme: null, no userErrors, retried twice
+// plus a 2-minute poll — theme count stayed at 20), the same way it did on 2026-08-07, so
+// there is still no dedicated working draft. Duplicate LIVE_THEME_ID from the Shopify admin
+// UI before the next substantial theme change and re-point DRAFT_THEME_ID at it.
+//
+// Before ANY publish, checksum-diff the candidate against the current live — the assets
+// index carries a per-asset checksum, so it is one request per theme. The 2026-08-18 publish
+// was caught this way: the draft's lc-structured-data.liquid was 12 days older than live's
+// and would have reverted priceValidUntil from 30 days back to a year.
 // Deprecated alias kept for older imports. Points at a non-live theme so the default
 // asset-write target can never hit production. New code should use DRAFT_THEME_ID.
-export const PREVIEW_THEME_ID = BACKUP_THEME_ID;
+// Aliases DRAFT, not BACKUP: this is a WRITE target, and BACKUP is now a distinct, older
+// theme kept as the deeper rollback point. Pointing writes there would corrupt the very
+// snapshot we roll back to. (It aliased BACKUP while the two ids were identical.)
+export const PREVIEW_THEME_ID = DRAFT_THEME_ID;
 const TOKEN = loadEnv().SHOPIFY_ACCESS_TOKEN;
 
 export async function rest(endpoint, options = {}) {

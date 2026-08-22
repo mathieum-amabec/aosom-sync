@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { AosomMergedProduct } from "@/types/aosom";
 import { stripColorFromTitle } from "./variant-merger";
 import { env, CLAUDE } from "./config";
+import { budgetedCreate } from "@/lib/llm-budget";
 
 let anthropicClient: Anthropic | null = null;
 
@@ -144,11 +145,22 @@ URL HANDLE (urlHandleFr / urlHandleEn):
 Return valid JSON only, no markdown fences.`;
 
 /**
- * Sanitize Aosom HTML before passing to Claude.
- * Strips inline styles, normalizes bullet characters, removes spec tables.
+ * Sanitize HTML for both the Aosom INPUT (before Claude) and the Claude OUTPUT
+ * (before it is written to Shopify `body_html`, which themes render UNESCAPED).
+ * First strips executable/XSS vectors (script/style/iframe/… blocks, `on*=`
+ * event handlers, `javascript:`/`vbscript:` URLs) so a prompt-injected feed
+ * entry can never land runnable markup on the storefront, then does the content
+ * cleanup (inline styles, dash/quote normalization, spec/package sections).
  */
-function sanitizeHtml(html: string): string {
+export function sanitizeHtml(html: string): string {
   return html
+    // XSS strip (LLM output trust boundary): remove executable elements + handlers.
+    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta|base)\b[\s\S]*?<\/\s*\1\s*>/gi, "")
+    .replace(/<\s*(script|style|iframe|object|embed|form|link|meta|base)\b[^>]*\/?>/gi, "")
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "") // on*="..." event handlers
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, "") // on*='...' event handlers
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi, "") // on*=unquoted event handlers
+    .replace(/(href|src|xlink:href)\s*=\s*(["'])\s*(?:javascript|vbscript):[^"']*\2/gi, "") // js: URLs
     .replace(/\s*style="[^"]*"/gi, "") // strip inline styles
     .replace(/\u2013|\u2014/g, "-") // normalize dashes
     .replace(/\u2018|\u2019/g, "'") // normalize quotes
@@ -157,6 +169,19 @@ function sanitizeHtml(html: string): string {
     .replace(/<h3>\s*Package Includes:?\s*<\/h3>[\s\S]*?(?=<h3>|$)/gi, "") // remove package section
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * The model returned something that failed our schema checks — as opposed to the call
+ * itself failing (budget exhausted, network, 5xx). Only this class triggers the
+ * cheap-model → assistant-model escalation in `generateProductContent`, so a transient
+ * infrastructure failure can never silently double the cost of a generation.
+ */
+export class ContentValidationError extends Error {
+  constructor(reason: string) {
+    super(`Claude returned invalid content: ${reason}`);
+    this.name = "ContentValidationError";
+  }
 }
 
 /**
@@ -206,63 +231,87 @@ Return JSON with this exact structure:
   "tags": ["tag1", "tag2"]
 }`;
 
-  const message = await client.messages.create({
-    model: CLAUDE.MODEL,
-    max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: prompt }],
-  });
+  // Two-tier model strategy. The batch model (Haiku by default, see CLAUDE.MODEL_BATCH)
+  // runs first; if its output fails ANY of the schema checks below, the same prompt is
+  // re-run on the assistant-grade model. Every field is validated, so a cheaper model
+  // cannot silently degrade a listing — it either returns a well-formed listing or it
+  // triggers the escalation. Only ContentValidationError escalates: a budget-exceeded
+  // or network failure must not buy a second paid call.
+  const attempt = async (model: string): Promise<GeneratedContent> => {
+    const message = await budgetedCreate(client, {
+      model,
+      max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: prompt }],
+    });
 
-  if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
-    throw new Error("Claude returned empty or non-text content (possible refusal)");
-  }
+    if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
+      throw new ContentValidationError("empty or non-text content (possible refusal)");
+    }
 
-  const text = message.content[0].text;
-  const jsonStr = text.replace(/^```json?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
+    const text = message.content[0].text;
+    const jsonStr = text.replace(/^```json?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
+
+    try {
+      const parsed = JSON.parse(jsonStr);
+      // Validate required string fields (LLM output trust boundary)
+      const stringFields = [
+        "titleFr", "titleEn", "descriptionFr", "descriptionEn",
+        "seoDescriptionFr", "seoDescriptionEn",
+        "metaTitleFr", "metaTitleEn", "metaDescriptionFr", "metaDescriptionEn",
+        "urlHandleFr", "urlHandleEn",
+      ] as const;
+      for (const field of stringFields) {
+        if (typeof parsed[field] !== "string") throw new Error(`Missing or invalid field: ${field}`);
+      }
+      if (!Array.isArray(parsed.tags)) throw new Error("Missing or invalid field: tags");
+      parsed.tags = parsed.tags.filter((t: unknown) => typeof t === "string").slice(0, 20);
+
+      // Programmatic safety net: strip supplier brand names the model may still echo
+      // into titles. Runs before length/meta/handle derivation so those stay clean too.
+      // Uses the shared stripSupplierBrands() helper (also applied to URL handles below);
+      // collapse the whitespace gaps it leaves behind so titles don't keep double spaces.
+      parsed.titleFr = stripSupplierBrands(parsed.titleFr).replace(/\s+/g, " ").trim();
+      parsed.titleEn = stripSupplierBrands(parsed.titleEn).replace(/\s+/g, " ").trim();
+
+      // Enforce length / format limits
+      parsed.titleFr = parsed.titleFr.slice(0, 200);
+      parsed.titleEn = parsed.titleEn.slice(0, 200);
+      // LLM output trust boundary: sanitize the model's HTML (same allow-list as the
+      // input) BEFORE it is persisted to Shopify body_html / custom.body_html_en.
+      parsed.descriptionFr = sanitizeHtml(parsed.descriptionFr).slice(0, 10000);
+      parsed.descriptionEn = sanitizeHtml(parsed.descriptionEn).slice(0, 10000);
+      parsed.seoDescriptionFr = parsed.seoDescriptionFr.slice(0, 200);
+      parsed.seoDescriptionEn = parsed.seoDescriptionEn.slice(0, 200);
+      parsed.metaTitleFr = clampMetaTitle(parsed.metaTitleFr, 65);
+      parsed.metaTitleEn = clampMetaTitle(parsed.metaTitleEn, 65);
+      parsed.metaDescriptionFr = parsed.metaDescriptionFr.slice(0, 155);
+      parsed.metaDescriptionEn = parsed.metaDescriptionEn.slice(0, 155);
+      parsed.urlHandleFr = slugify(stripSupplierBrands(parsed.urlHandleFr));
+      parsed.urlHandleEn = slugify(stripSupplierBrands(parsed.urlHandleEn));
+
+      // Supplier brand is echoed from the source (never invented by the model) so it
+      // can be the Shopify vendor + stored in custom.brand_fr.
+      parsed.brand = product.brand;
+
+      return parsed as GeneratedContent;
+    } catch (err) {
+      // Name the model: with two tiers in play, "invalid content" is only actionable if
+      // the log says which model produced it.
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`[content-generator] ${model} returned invalid content (${reason}):`, text.slice(0, 500));
+      throw new ContentValidationError(`invalid or incomplete JSON payload from ${model}`);
+    }
+  };
 
   try {
-    const parsed = JSON.parse(jsonStr);
-    // Validate required string fields (LLM output trust boundary)
-    const stringFields = [
-      "titleFr", "titleEn", "descriptionFr", "descriptionEn",
-      "seoDescriptionFr", "seoDescriptionEn",
-      "metaTitleFr", "metaTitleEn", "metaDescriptionFr", "metaDescriptionEn",
-      "urlHandleFr", "urlHandleEn",
-    ] as const;
-    for (const field of stringFields) {
-      if (typeof parsed[field] !== "string") throw new Error(`Missing or invalid field: ${field}`);
-    }
-    if (!Array.isArray(parsed.tags)) throw new Error("Missing or invalid field: tags");
-    parsed.tags = parsed.tags.filter((t: unknown) => typeof t === "string").slice(0, 20);
-
-    // Programmatic safety net: strip supplier brand names the model may still echo
-    // into titles. Runs before length/meta/handle derivation so those stay clean too.
-    // Uses the shared stripSupplierBrands() helper (also applied to URL handles below);
-    // collapse the whitespace gaps it leaves behind so titles don't keep double spaces.
-    parsed.titleFr = stripSupplierBrands(parsed.titleFr).replace(/\s+/g, " ").trim();
-    parsed.titleEn = stripSupplierBrands(parsed.titleEn).replace(/\s+/g, " ").trim();
-
-    // Enforce length / format limits
-    parsed.titleFr = parsed.titleFr.slice(0, 200);
-    parsed.titleEn = parsed.titleEn.slice(0, 200);
-    parsed.descriptionFr = parsed.descriptionFr.slice(0, 10000);
-    parsed.descriptionEn = parsed.descriptionEn.slice(0, 10000);
-    parsed.seoDescriptionFr = parsed.seoDescriptionFr.slice(0, 200);
-    parsed.seoDescriptionEn = parsed.seoDescriptionEn.slice(0, 200);
-    parsed.metaTitleFr = clampMetaTitle(parsed.metaTitleFr, 65);
-    parsed.metaTitleEn = clampMetaTitle(parsed.metaTitleEn, 65);
-    parsed.metaDescriptionFr = parsed.metaDescriptionFr.slice(0, 155);
-    parsed.metaDescriptionEn = parsed.metaDescriptionEn.slice(0, 155);
-    parsed.urlHandleFr = slugify(stripSupplierBrands(parsed.urlHandleFr));
-    parsed.urlHandleEn = slugify(stripSupplierBrands(parsed.urlHandleEn));
-
-    // Supplier brand is echoed from the source (never invented by the model) so it
-    // can be the Shopify vendor + stored in custom.brand_fr.
-    parsed.brand = product.brand;
-
-    return parsed as GeneratedContent;
+    return await attempt(CLAUDE.MODEL_BATCH);
   } catch (err) {
-    console.error("[content-generator] Claude returned invalid content:", text.slice(0, 500));
-    throw new Error("Claude returned invalid content");
+    if (!(err instanceof ContentValidationError) || CLAUDE.MODEL_BATCH === CLAUDE.MODEL) throw err;
+    console.warn(
+      `[content-generator] ${CLAUDE.MODEL_BATCH} output rejected (${err.message}) — ` +
+        `re-running "${cleanName}" on ${CLAUDE.MODEL}`,
+    );
+    return await attempt(CLAUDE.MODEL);
   }
 }

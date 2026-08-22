@@ -9,7 +9,8 @@
  * draft/archived on Shopify is skipped, and one that's gone (deleted) counts as failed.
  */
 import { getStaleImportedProducts } from "@/lib/database";
-import { fetchAllShopifyProducts, draftShopifyProduct } from "@/lib/shopify-client";
+import { fetchAllShopifyProducts, updateShopifyProduct } from "@/lib/shopify-client";
+import { addAutoDraftedTag } from "@/lib/diff-engine";
 
 export const STALE_DAYS = 30;
 /** Spacing between Shopify draft writes → 2 requests/second. */
@@ -81,10 +82,18 @@ export async function runStaleCatalogDraft(maxAgeDays = STALE_DAYS): Promise<Sta
   // The same fetch already carries tags, so the `exclude-stale` opt-out is free.
   const live = await fetchAllShopifyProducts();
   const statusById = new Map(live.map((p) => [p.shopifyId, p.status]));
+  const tagsById = new Map(live.map((p) => [p.shopifyId, p.tags]));
   const excludedIds = new Set(
     // Case-insensitive: it's a human-applied ops tag, so "Exclude-Stale" must protect too.
     live.filter((p) => p.tags.some((t) => t.toLowerCase() === EXCLUDE_TAG)).map((p) => p.shopifyId),
   );
 
-  return computeStaleDrafts(stale, statusById, draftShopifyProduct, RATE_LIMIT_MS, excludedIds);
+  // Draft AND stamp the `auto-drafted` marker so the intraday stock-check cron can later
+  // reactivate ONLY the products WE auto-drafted (never a product an operator drafted by
+  // hand) when they return to the feed with sellable stock. Without the marker, a
+  // stale-catalog draft could never come back live. See stock-reconcile.planStockActions.
+  const draftAndTag = (shopifyId: string) =>
+    updateShopifyProduct(shopifyId, { status: "draft", tags: addAutoDraftedTag(tagsById.get(shopifyId) ?? []) });
+
+  return computeStaleDrafts(stale, statusById, draftAndTag, RATE_LIMIT_MS, excludedIds);
 }

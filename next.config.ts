@@ -25,7 +25,21 @@ const nextConfig: NextConfig = {
           {
             key: "Content-Security-Policy",
             // unsafe-eval removed for production hardening; unsafe-inline kept for Next.js inline scripts
-            value: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; font-src 'self'; connect-src 'self' https://api.anthropic.com https://graph.facebook.com; frame-ancestors 'none';",
+            //
+            // media-src is REQUIRED, not cosmetic: without it <video> falls back to
+            // default-src 'self', which blocks every dashboard preview — the Reels and
+            // sequential-ad renders are served from the public Vercel Blob store, and the
+            // client also plays freshly rendered clips from blob: URLs. This directive is
+            // what makes those previews play at all.
+            value:
+              "default-src 'self'; " +
+              "script-src 'self' 'unsafe-inline'; " +
+              "style-src 'self' 'unsafe-inline'; " +
+              "img-src 'self' https: data:; " +
+              "media-src 'self' blob: https://jcskqp8orcub9i0l.public.blob.vercel-storage.com; " +
+              "font-src 'self'; " +
+              "connect-src 'self' https://api.anthropic.com https://graph.facebook.com; " +
+              "frame-ancestors 'none';",
           },
         ],
       },

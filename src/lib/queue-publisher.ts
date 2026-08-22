@@ -20,6 +20,7 @@ import { type FacebookBrand } from "./facebook-client";
 import { publishSocialPayload, type SocialPayload } from "./social-publisher";
 import { createBlogArticle } from "./shopify-blog";
 import { getAnthropicClient } from "./content-generator";
+import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "./strip-markdown";
 import { CLAUDE } from "./config";
 import {
@@ -180,8 +181,8 @@ export async function generateReelCaption(
     `pour ce produit : ${productText}. Accrocheur, émoji, appel à l'action. Max 150 caractères. ` +
     `Pas de hashtags — ils seront ajoutés séparément. Réponds uniquement avec le texte, sans guillemets.`;
   try {
-    const message = await getAnthropicClient().messages.create({
-      model: CLAUDE.MODEL,
+    const message = await budgetedCreate(getAnthropicClient(), {
+      model: CLAUDE.MODEL_BATCH,
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       messages: [{ role: "user", content: prompt }],
     });
@@ -230,10 +231,10 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
     throw new Error("payload is not valid JSON");
   }
 
-  // Reels (content_type='video' with a reelsVideoUrl): regenerate the caption as fresh
-  // clickbait at publish time. Language follows the brand (furnish → EN, ameublo → FR).
-  // If generation fails, keep the stored caption — never block the publish.
-  if (item.contentType === "video") {
+  // Reels (content_type='video' or 'sequential_ad' with a reelsVideoUrl): regenerate the
+  // caption as fresh clickbait at publish time. Language follows the brand (furnish → EN,
+  // ameublo → FR). If generation fails, keep the stored caption — never block the publish.
+  if (item.contentType === "video" || item.contentType === "sequential_ad") {
     const social = parseSocialPayload(raw);
     if (social.reelsVideoUrl) {
       const language: "fr" | "en" = social.brand === "furnish" ? "en" : "fr";

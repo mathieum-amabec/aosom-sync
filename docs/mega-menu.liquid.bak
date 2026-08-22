@@ -1,0 +1,32 @@
+{% comment %}
+  Columns mega panel: each 2nd-level link renders as a column (header + its 3rd-level links).
+  A 2nd-level item with no children falls back to a header-only column.
+  Render: {% render 'mega-menu', link: link %}
+{% endcomment %}
+<div class="lc-mega-cols page-width">
+  {%- for childlink in link.links -%}
+    <div class="lc-mega-col">
+      <a class="lc-mega-col__head" href="{{ childlink.url }}">{{ childlink.title | escape }}</a>
+      {%- if childlink.links != blank -%}
+        <ul class="lc-mega-col__list" role="list">
+          {%- for grandchildlink in childlink.links -%}
+            <li><a class="lc-mega-col__link" href="{{ grandchildlink.url }}">{{ grandchildlink.title | escape }}</a></li>
+          {%- endfor -%}
+        </ul>
+      {%- endif -%}
+    </div>
+  {%- endfor -%}
+  {%- assign lc_view_all = 'Voir tout' -%}{%- if request.locale.iso_code == 'en' -%}{%- assign lc_view_all = 'View all' -%}{%- endif -%}
+  <a class="lc-mega-all" href="{{ link.url }}">{{ lc_view_all }} « {{ link.title | escape }} » &rarr;</a>
+</div>
+<style>
+  .lc-mega-cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:20px 28px;padding:24px 0 28px;font-family:'DM Sans',sans-serif}
+  .lc-mega-col__head{display:block;font-size:1.45rem;font-weight:800;color:#1B2A4A;text-decoration:none;margin-bottom:.5rem;padding-bottom:.35rem;border-bottom:2px solid #C17F3E}
+  .lc-mega-col__head:hover{color:#C17F3E}
+  .lc-mega-col__list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.15rem}
+  .lc-mega-col__link{display:block;padding:.3rem 0;font-size:1.3rem;font-weight:500;color:#3a4a68;text-decoration:none}
+  .lc-mega-col__link:hover{color:#C17F3E}
+  .lc-mega-all{grid-column:1 / -1;justify-self:start;margin-top:.3rem;font-weight:700;font-size:1.35rem;color:#C17F3E;text-decoration:none}
+  .lc-mega-all:hover{text-decoration:underline}
+  @media(max-width:989px){.lc-mega-cols{grid-template-columns:repeat(2,1fr)}}
+</style>

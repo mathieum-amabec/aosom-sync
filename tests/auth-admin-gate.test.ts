@@ -25,6 +25,7 @@ vi.mock("next/headers", () => ({
 
 // HMAC_SECRET is read at import time from AUTH_PASSWORD — set before importing auth.
 process.env.AUTH_PASSWORD = "test-secret-for-vitest";
+process.env.SESSION_SECRET = "test-session-secret-0123456789abcdef-xyz";
 
 const { createSessionToken, isAdmin, getSessionRole } = await import("@/lib/auth");
 const { verifyCronSecret } = await import("@/lib/cron-auth");

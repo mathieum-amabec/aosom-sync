@@ -1,0 +1,47 @@
+<style>@media(max-width:749px){[class*="__featured_sale-padding"]{padding-top:8px!important;padding-bottom:24px!important}}</style>
+{%- assign loc = request.locale.iso_code | downcase -%}
+<div class="lc-valueprop">
+  <div class="lc-vp-inner">
+    <p class="lc-vp-eyebrow">{% if loc == 'en' %}WHY OUR PRICES ARE SO LOW{% else %}POURQUOI NOS PRIX SONT SI BAS{% endif %}</p>
+    <h2 class="lc-vp-title">{% if loc == 'en' %}No showroom = no rent = <span>unbeatable prices</span>{% else %}Sans salle de montre = sans loyer = <span>prix imbattables</span>{% endif %}</h2>
+    <p class="lc-vp-body">{% if loc == 'en' %}Furnish Direct is 100% online. No store, no rent, no commissioned salespeople &mdash; we pass those savings straight to you on every price.{% else %}Ameublo Direct est 100&nbsp;% en ligne. Pas de magasin, pas de loyer, pas de vendeurs &agrave; commission &mdash; ces &eacute;conomies, on vous les redonne sur chaque prix.{% endif %}</p>
+
+    <div class="lc-vp-benefits">
+      <div class="lc-vp-benefit"><span class="lc-vp-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1 3h15v13H1zM16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg></span>
+        <div><strong>{% if loc == 'en' %}Free shipping{% else %}Livraison gratuite{% endif %}</strong><span>{% if loc == 'en' %}Across Canada{% else %}Partout au Canada{% endif %}</span></div></div>
+      <div class="lc-vp-benefit"><span class="lc-vp-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></span>
+        <div><strong>{% if loc == 'en' %}30-day returns{% else %}Retours 30 jours{% endif %}</strong><span>{% if loc == 'en' %}Hassle-free{% else %}Sans tracas{% endif %}</span></div></div>
+      <div class="lc-vp-benefit"><span class="lc-vp-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+        <div><strong>{% if loc == 'en' %}Quebec service{% else %}Service qu&eacute;b&eacute;cois{% endif %}</strong><span>{% if loc == 'en' %}We answer in French{% else %}On r&eacute;pond en fran&ccedil;ais{% endif %}</span></div></div>
+      <div class="lc-vp-benefit"><span class="lc-vp-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></span>
+        <div><strong>{% if loc == 'en' %}Pay in 4 &middot; 0% interest{% else %}Payez en 4&times; sans int&eacute;r&ecirc;t{% endif %}</strong><span>Shop&nbsp;Pay</span></div></div>
+    </div>
+
+    <p class="lc-vp-fin">{% if loc == 'en' %}&#10003; Instant approval &nbsp;&middot;&nbsp; &#10003; Secure Shop Pay &nbsp;&middot;&nbsp; &#10003; Protected payment{% else %}&#10003; Approbation instantan&eacute;e &nbsp;&middot;&nbsp; &#10003; Shop Pay s&eacute;curis&eacute; &nbsp;&middot;&nbsp; &#10003; Paiement prot&eacute;g&eacute;{% endif %}</p>
+  </div>
+</div>
+<style>
+  .lc-valueprop{background:#1A2340;color:#FAFAF8;padding:2.25rem 1.5rem;}
+  .lc-vp-inner{max-width:1100px;margin:0 auto;text-align:center;}
+  .lc-vp-eyebrow{font-family:'DM Sans',sans-serif;font-size:.8rem;letter-spacing:.18em;text-transform:uppercase;color:#D4A853;font-weight:600;margin:0 0 .75rem;}
+  .lc-vp-title{font-size:2rem;line-height:1.25;font-weight:700;color:#FAFAF8;margin:0 0 1rem;}
+  .lc-vp-title span{color:#D4A853;}
+  .lc-vp-body{font-size:1.05rem;line-height:1.6;color:#E8E6DF;max-width:760px;margin:0 auto 1.75rem;}
+  .lc-vp-benefits{display:grid;grid-template-columns:repeat(4,1fr);gap:1.25rem;max-width:920px;margin:0 auto;padding-top:1.75rem;border-top:1px solid rgba(212,168,83,.25);}
+  .lc-vp-benefit{display:flex;flex-direction:column;align-items:center;text-align:center;gap:.6rem;}
+  .lc-vp-ic{display:flex;align-items:center;justify-content:center;width:46px;height:46px;border-radius:50%;background:rgba(212,168,83,.14);flex-shrink:0;}
+  .lc-vp-ic svg{width:23px;height:23px;color:#D4A853;}
+  .lc-vp-benefit strong{display:block;font-family:'DM Sans',sans-serif;font-size:.98rem;font-weight:700;color:#FAFAF8;line-height:1.2;}
+  .lc-vp-benefit span{display:block;font-size:.82rem;color:#C9C6BC;margin-top:.15rem;}
+  .lc-vp-fin{margin:1.5rem 0 0;font-size:.9rem;color:#F4D9A6;font-weight:600;}
+  @media (max-width:1024px){ .lc-vp-benefits{grid-template-columns:repeat(2,1fr);gap:1.25rem 1rem;} }
+  @media (max-width:767px){
+    .lc-valueprop{padding:2rem 1.25rem;}
+    .lc-vp-title{font-size:1.5rem;}
+    .lc-vp-body{font-size:1rem;margin-bottom:1.5rem;}
+    .lc-vp-benefits{grid-template-columns:1fr 1fr;gap:1rem .5rem;padding-top:1.25rem;}
+    .lc-vp-benefit{flex-direction:column;text-align:center;gap:.4rem;}
+    .lc-vp-benefit strong{font-size:.85rem;} .lc-vp-benefit span{font-size:.72rem;}
+    .lc-vp-fin{font-size:.78rem;}
+  }
+</style>

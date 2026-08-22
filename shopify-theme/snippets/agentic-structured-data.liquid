@@ -57,6 +57,9 @@
     "name": {{ brand | json }}
   },
   "sku": {{ v.sku | json }},
+  {%- comment -%} Aosom item SKU doubles as the manufacturer part number; brand + mpn is the
+     identifier pair we also declare in the Google feed (g:mpn / identifier_exists). {%- endcomment -%}
+  "mpn": {{ v.sku | json }},
   {%- if v.barcode != blank %}
   "gtin": {{ v.barcode | json }},
   {%- endif %}
@@ -92,10 +95,18 @@
 }
 </script>
 
-{%- comment -%} BreadcrumbList — Accueil › (Collection) › Produit. Falls back to
-  product.collections.first when `collection` is nil (direct /products/ URL), and
-  drops the middle node entirely if the product is in no collection. {%- endcomment -%}
-{%- assign bc = collection | default: product.collections.first -%}
+{%- liquid
+  assign bc_collection = nil
+  for col in product.collections
+    unless col.handle == 'all' or col.handle == 'frontpage'
+      assign bc_collection = col
+      break
+    endunless
+  endfor
+  if bc_collection == nil
+    assign bc_type_handle = product.type | handleize
+  endif
+-%}
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -105,29 +116,29 @@
       "@type": "ListItem",
       "position": 1,
       "name": "Accueil",
-      "item": {{ request.origin | append: '/' | json }}
+      "item": {{ request.origin | json }}
     },
-    {%- if bc %}
+    {%- if bc_collection != nil %}
     {
       "@type": "ListItem",
       "position": 2,
-      "name": {{ bc.title | json }},
-      "item": {{ request.origin | append: bc.url | json }}
+      "name": {{ bc_collection.title | json }},
+      "item": {{ request.origin | append: '/collections/' | append: bc_collection.handle | json }}
     },
-    {
-      "@type": "ListItem",
-      "position": 3,
-      "name": {{ product.title | json }},
-      "item": {{ request.origin | append: product.url | json }}
-    }
     {%- else %}
     {
       "@type": "ListItem",
       "position": 2,
-      "name": {{ product.title | json }},
-      "item": {{ request.origin | append: product.url | json }}
-    }
+      "name": {{ product.type | json }},
+      "item": {{ request.origin | append: '/collections/' | append: bc_type_handle | json }}
+    },
     {%- endif %}
+    {
+      "@type": "ListItem",
+      "position": 3,
+      "name": {{ product.title | json }},
+      "item": {{ product_abs_url | json }}
+    }
   ]
 }
 </script>

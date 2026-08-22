@@ -169,13 +169,65 @@ describe("selectBilingualTopic — synchronization guarantees", () => {
     expect(a).toEqual(b);
   });
 
-  it("rotates the topic across consecutive weeks (12 distinct indices)", () => {
+  // Rotation is per RUN, not per week: the cron fires twice a week (Mon + Thu) and the index
+  // advances by one each time. Sampling one run per week would step by 2 and — with an even
+  // catalogue size — only ever reach half the topics, which is why this walks both runs.
+  it("rotates through every topic across consecutive runs, no repeats within a cycle", () => {
     const seen = new Set<number>();
-    const base = Date.UTC(2026, 2, 1); // March 1 2026, mid-year (no year wrap)
-    for (let i = 0; i < BILINGUAL_TOPICS.length; i++) {
-      const d = new Date(base + i * 7 * 86_400_000);
-      seen.add(selectBilingualTopic(d).idx);
+    const base = Date.UTC(2026, 2, 2); // Monday, March 2 2026 (mid-year, no ISO year wrap)
+    for (let i = 0; i < BILINGUAL_TOPICS.length / 2; i++) {
+      const monday = new Date(base + i * 7 * 86_400_000);
+      const thursday = new Date(base + i * 7 * 86_400_000 + 3 * 86_400_000);
+      seen.add(selectBilingualTopic(monday).idx);
+      seen.add(selectBilingualTopic(thursday).idx);
     }
     expect(seen.size).toBe(BILINGUAL_TOPICS.length);
+  });
+});
+
+describe("selectBilingualTopic — run slot (Mon vs Thu collision)", () => {
+  // Regression: the cron fires Mon + Thu, and BOTH land in the same ISO week. When the topic
+  // index was derived from the week number alone, the two runs picked the SAME topic and
+  // published duplicate articles to a live storefront.
+  it("gives Monday and Thursday of the same ISO week DIFFERENT topics", () => {
+    const mon = selectBilingualTopic(new Date("2026-08-10T08:00:00Z")); // ISO week 33
+    const thu = selectBilingualTopic(new Date("2026-08-13T08:00:00Z")); // same ISO week
+
+    expect(mon.week).toBe(thu.week); // same week — this is the trap
+    expect(mon.slot).toBe(0);
+    expect(thu.slot).toBe(1);
+    expect(mon.idx).not.toBe(thu.idx);
+    expect(mon.fr).not.toBe(thu.fr);
+    expect(mon.en).not.toBe(thu.en);
+  });
+
+  it("assigns Mon-Wed to slot 0 and Thu-Sun to slot 1", () => {
+    const slotFor = (iso: string) => selectBilingualTopic(new Date(iso)).slot;
+    expect(slotFor("2026-08-10T08:00:00Z")).toBe(0); // Mon
+    expect(slotFor("2026-08-11T08:00:00Z")).toBe(0); // Tue
+    expect(slotFor("2026-08-12T08:00:00Z")).toBe(0); // Wed
+    expect(slotFor("2026-08-13T08:00:00Z")).toBe(1); // Thu
+    expect(slotFor("2026-08-14T08:00:00Z")).toBe(1); // Fri
+    expect(slotFor("2026-08-15T08:00:00Z")).toBe(1); // Sat
+    expect(slotFor("2026-08-16T08:00:00Z")).toBe(1); // Sun
+  });
+
+  it("advances the index by exactly one between consecutive runs", () => {
+    // week*2+slot is a true sequential run counter: Mon(w)=2w, Thu(w)=2w+1, Mon(w+1)=2w+2.
+    // That +1 step is what guarantees full catalogue coverage regardless of catalogue parity.
+    const monA = selectBilingualTopic(new Date("2026-08-10T08:00:00Z"));
+    const thuA = selectBilingualTopic(new Date("2026-08-13T08:00:00Z"));
+    const monB = selectBilingualTopic(new Date("2026-08-17T08:00:00Z"));
+
+    const len = BILINGUAL_TOPICS.length;
+    expect((thuA.idx - monA.idx + len) % len).toBe(1);
+    expect((monB.idx - thuA.idx + len) % len).toBe(1);
+  });
+
+  it("stays deterministic for a given date", () => {
+    const a = selectBilingualTopic(new Date("2026-08-13T08:00:00Z"));
+    const b = selectBilingualTopic(new Date("2026-08-13T23:59:00Z"));
+    expect(a.idx).toBe(b.idx);
+    expect(a.slot).toBe(b.slot);
   });
 });

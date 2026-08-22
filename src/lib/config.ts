@@ -75,8 +75,17 @@ export const env = {
     if (!v) throw new Error("UNSPLASH_ACCESS_KEY not set in .env.local");
     return v;
   },
+  /**
+   * Name sent as `utm_source` on the Unsplash attribution links baked into every blog
+   * article. This is CUSTOMER-FACING: it ships inside the published article HTML.
+   *
+   * The default was "aosom-sync" — the internal repo name — and `UNSPLASH_APP_NAME` is not
+   * set anywhere, so all 8 generated articles carry `utm_source=aosom-sync` four times each
+   * in their photo credits. A prompt rule cannot fix this: the parameter is appended by
+   * buildAttributionUrl in unsplash.ts, never by the model.
+   */
   get unsplashAppName(): string {
-    return process.env.UNSPLASH_APP_NAME || "aosom-sync";
+    return process.env.UNSPLASH_APP_NAME || "ameublodirect";
   },
   get storeName(): string {
     return process.env.NEXT_PUBLIC_STORE_NAME || "Aosom Sync";
@@ -87,6 +96,14 @@ export const env = {
   },
   get hasMetaPixel(): boolean {
     return !!process.env.NEXT_PUBLIC_META_PIXEL_ID;
+  },
+  /** Pinterest Tag ID. Optional — when unset, the injected Pinterest script is a no-op.
+   * Read server-side at request time by /api/pixel/pinterest-script (no NEXT_PUBLIC needed). */
+  get pinterestTagId(): string | undefined {
+    return process.env.PINTEREST_TAG_ID || undefined;
+  },
+  get hasPinterestTag(): boolean {
+    return !!process.env.PINTEREST_TAG_ID;
   },
   /** Meta Marketing API access token (Ads management). Throws when the Ads features
    * are used without it configured. */
@@ -179,7 +196,26 @@ export const AOSOM = {
 // ─── Claude API ─────────────────────────────────────────────────────
 
 export const CLAUDE = {
+  /**
+   * The public shopping assistant's model. Sonnet stays here: /api/assistant is the only
+   * customer-facing generation path, it draws on the dedicated `assistant` budget pool,
+   * and it accounts for ~86% of all recorded token volume.
+   */
   MODEL: "claude-sonnet-4-6",
+  /**
+   * Every non-assistant ("batch") caller: product descriptions, blog articles, social
+   * captions, slideshow hooks, image classification.
+   *
+   * Haiku 4.5 is priced at exactly one third of Sonnet 4.6 on BOTH input ($1 vs $3 per
+   * MTok) and output ($5 vs $15), so moving this pool cuts its cost by two thirds no
+   * matter how the input/output mix falls.
+   *
+   * Override per-deploy with CLAUDE_BATCH_MODEL — setting it to "claude-sonnet-4-6" puts
+   * the whole batch pool back on Sonnet with no code change if quality regresses. The
+   * structured callers additionally escalate to MODEL on a validation failure (see
+   * generateProductContent), so a Haiku miss costs a retry, never output quality.
+   */
+  MODEL_BATCH: process.env.CLAUDE_BATCH_MODEL?.trim() || "claude-haiku-4-5",
   MAX_TOKENS_CONTENT: 4000,
   MAX_TOKENS_SOCIAL: 500,
 } as const;
@@ -396,11 +432,15 @@ export const DEFAULT_PUBLICATION_SCHEDULE: PublicationSchedule = {
   max_per_day: 3,
 };
 
+// posts_per_week is counted PER ARTICLE, not per bilingual pair — reserveBlogPublishSlot
+// takes one slot for FR and one for EN. The cron runs twice a week (Mon + Thu) and each run
+// produces a pair, so 2 runs x 2 languages = 4. A lower cap silently blocks the late run's
+// articles from ever publishing while still paying for their generation.
 export const DEFAULT_BLOG_SCHEDULE: BlogSchedule = {
   enabled: true,
-  posts_per_week: 2,
-  preferred_days: ["tue", "thu"],
-  preferred_time: "10:00",
+  posts_per_week: 4,
+  preferred_days: ["mon", "thu"],
+  preferred_time: "08:00",
 };
 
 // Video reels publish on their OWN schedule, independent of social posts and the blog

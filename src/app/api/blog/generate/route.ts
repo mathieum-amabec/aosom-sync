@@ -1,54 +1,28 @@
 /**
  * POST /api/blog/generate
  *
- * Generate a bilingual-aware (~800-word) blog article using Claude,
- * pull 3 landscape photos from Unsplash (1 featured + 2 inline with
- * required attribution), and create the article as a draft in the
- * language-appropriate Shopify blog.
+ * Manual/admin entry point for one blog article. The generation itself lives in
+ * `lib/blog-generator.ts` — the blog cron calls that directly in-process rather than coming
+ * back through this route over HTTP (see the note in blog-generator.ts: the self-fetch was
+ * being 401'd by Vercel SSO Deployment Protection before this handler ever ran).
  *
  * Request body:
- *   { topic: string, lang: "fr" | "en", keywords?: string[] }
- *
- * Response:
- *   { articleId, adminUrl, title, blogId, handle, imagesUsed }
+ *   { topic: string, lang: "fr" | "en", keywords?: string[], images?: UnsplashImage[],
+ *     season?: Season, autoPublish?: boolean }
  */
 
-import crypto from "crypto";
 import { NextResponse } from "next/server";
+import { verifyCronSecret } from "@/lib/cron-auth";
 import { isAuthenticated, isAdmin } from "@/lib/auth";
-import { getAnthropicClient } from "@/lib/content-generator";
-import { CLAUDE, env } from "@/lib/config";
-import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
-import { createBlogArticle, type BlogLang } from "@/lib/shopify-blog";
-import { maybeAutoPublish } from "@/lib/blog-auto-publish";
+import { type UnsplashImage } from "@/lib/unsplash";
+import { type BlogLang } from "@/lib/shopify-blog";
 import { type Season } from "@/lib/blog-topics";
+import { generateBlogArticle, type GenerateBlogInput } from "@/lib/blog-generator";
 import { checkRateLimit } from "@/lib/rate-limiter";
 
-// Claude article generation (~25-45s) + 3 Unsplash searches + 3 download
-// pings + Shopify article create. Stays under the cron/blog 180s budget
-// while giving Claude room to breathe on cold starts.
+// Claude article generation (~25-45s) + up to 3 Unsplash searches + download pings + the
+// Shopify article create.
 export const maxDuration = 120;
-
-function isCronAuthorized(header: string | null): boolean {
-  if (!header) return false;
-  const expected = `Bearer ${env.cronSecret}`;
-  if (header.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(header), Buffer.from(expected));
-}
-
-interface BlogGenerateBody {
-  topic: string;
-  lang: BlogLang;
-  keywords?: string[];
-  /** Pre-fetched shared photo set (from the bilingual cron) — when present,
-   *  this endpoint skips its own Unsplash search so FR + EN match exactly. */
-  images?: UnsplashImage[];
-  /** Topic season (from the cron's selection) — used by the auto-publish season gate. */
-  season?: Season;
-  /** Opt in to the quality/season/cap auto-publish gate. The cron sets this true;
-   *  manual/session calls default to draft-only (preserving the prior behavior). */
-  autoPublish?: boolean;
-}
 
 const IMAGE_FIELDS = [
   "id", "url", "altDescription", "photographer",
@@ -56,9 +30,9 @@ const IMAGE_FIELDS = [
 ] as const;
 
 /**
- * Validate a caller-supplied image set. Malformed input returns `undefined`
- * (ignored → endpoint falls back to its own search) rather than 400, so a bad
- * `images` field never blocks article creation.
+ * Validate a caller-supplied image set. Malformed input returns `undefined` (ignored → the
+ * generator falls back to its own search) rather than 400, so a bad `images` field never
+ * blocks article creation.
  */
 function parseImages(raw: unknown): UnsplashImage[] | undefined {
   if (!Array.isArray(raw)) return undefined;
@@ -81,15 +55,7 @@ function parseImages(raw: unknown): UnsplashImage[] | undefined {
   return out.length > 0 ? out.slice(0, 6) : undefined;
 }
 
-interface ClaudeArticleJson {
-  title: string;
-  bodyHtml: string;
-  excerpt: string;
-  metaDescription: string;
-  tags: string[];
-}
-
-function parseBody(raw: unknown): BlogGenerateBody | { error: string } {
+function parseBody(raw: unknown): GenerateBlogInput | { error: string } {
   if (!raw || typeof raw !== "object") return { error: "Body must be a JSON object" };
   const obj = raw as Record<string, unknown>;
 
@@ -127,167 +93,13 @@ function parseBody(raw: unknown): BlogGenerateBody | { error: string } {
 
   const autoPublish = obj.autoPublish === true;
 
-  return { topic, lang, keywords, images, season, autoPublish };
-}
-
-function langPromptFragment(lang: BlogLang): string {
-  return lang === "fr"
-    ? "Write in natural Quebec French (not Parisian). Use Canadian spelling and idioms."
-    : "Write in clear North American English suited to Canadian readers.";
-}
-
-const SYSTEM_PROMPT_BASE = `You are a bilingual e-commerce blog writer for Aosom Canada, a Quebec-based retailer of outdoor furniture, gazebos, garden beds, greenhouses, and home goods.
-
-Rules:
-- Output ONE JSON object — no markdown fences, no commentary.
-- Title under 80 characters, descriptive and search-friendly.
-- bodyHtml is 700-900 words of clean semantic HTML: <h2>, <h3>, <p>, <ul>, <li>. No <h1> (Shopify renders title separately). No inline styles, no <img> tags (images are inserted server-side), no <script>.
-- Structure: short intro paragraph, 3-5 H2 sections with body paragraphs, brief conclusion.
-- excerpt is 1-2 sentences (under 200 chars) used as the article summary.
-- metaDescription is under 160 chars, SEO-friendly.
-- tags is an array of 4-8 short topic tags (lowercase, no leading #).
-- Do NOT mention pricing, shipping, or product SKUs (those change).
-- Do NOT invent specific product names, model numbers, or claims you cannot back up.`;
-
-function buildUserPrompt(input: BlogGenerateBody): string {
-  const kw = input.keywords && input.keywords.length > 0
-    ? `Target SEO keywords (weave naturally, do not stuff): ${input.keywords.join(", ")}.`
-    : "No specific SEO keywords — focus on natural readability.";
-
-  return `Write a blog article on this topic: "${input.topic}".
-
-${langPromptFragment(input.lang)}
-${kw}
-
-Return JSON with this exact shape:
-{
-  "title": "...",
-  "bodyHtml": "<p>...</p>...",
-  "excerpt": "...",
-  "metaDescription": "...",
-  "tags": ["...", "..."]
-}`;
-}
-
-async function generateArticleJson(input: BlogGenerateBody): Promise<ClaudeArticleJson> {
-  const client = getAnthropicClient();
-  const message = await client.messages.create({
-    model: CLAUDE.MODEL,
-    max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
-    system: SYSTEM_PROMPT_BASE,
-    messages: [{ role: "user", content: buildUserPrompt(input) }],
-  });
-
-  if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
-    throw new Error("Claude returned empty or non-text content (possible refusal)");
-  }
-
-  const text = message.content[0].text;
-  const jsonStr = text.replace(/^```json?\s*\n?/m, "").replace(/\n?```\s*$/m, "").trim();
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonStr);
-  } catch {
-    throw new Error(`Claude returned invalid JSON: ${text.slice(0, 200)}`);
-  }
-
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("Claude returned a non-object payload");
-  }
-  const p = parsed as Record<string, unknown>;
-
-  const title = typeof p.title === "string" ? p.title.trim().slice(0, 200) : "";
-  // Defensive: even though the prompt forbids fences, the model sometimes wraps the
-  // HTML *inside* the bodyHtml string in a ```html ... ``` fence. The outer JSON-fence
-  // strip above does not reach inside the field, so those markers would render as
-  // literal "```html" / "```" text on the published article. Strip any fence runs here.
-  const bodyHtml =
-    typeof p.bodyHtml === "string"
-      ? p.bodyHtml
-          // Drop a fence opener sitting on its own line (and its ```html lang tag).
-          // Anchoring to a real line break avoids eating a word that happens to sit
-          // right after an inline backtick run.
-          .replace(/```+[a-zA-Z]*[ \t]*\r?\n/g, "")
-          // Remove any remaining bare backtick run (the trailing closing fence, strays).
-          .replace(/```+/g, "")
-          .trim()
-      : "";
-  const excerpt = typeof p.excerpt === "string" ? p.excerpt.trim().slice(0, 300) : "";
-  const metaDescription = typeof p.metaDescription === "string" ? p.metaDescription.trim().slice(0, 320) : "";
-  const tags = Array.isArray(p.tags)
-    ? p.tags.filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean).slice(0, 12)
-    : [];
-
-  if (!title) throw new Error("Claude response missing `title`");
-  if (!bodyHtml) throw new Error("Claude response missing `bodyHtml`");
-
-  return { title, bodyHtml, excerpt, metaDescription, tags };
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function buildFigureHtml(img: UnsplashImage, lang: BlogLang): string {
-  const credit = lang === "fr" ? "Photo par" : "Photo by";
-  const onWord = lang === "fr" ? "sur" : "on";
-  return [
-    "<figure>",
-    `<img src="${escapeHtml(img.url)}" alt="${escapeHtml(img.altDescription)}" loading="lazy" />`,
-    "<figcaption>",
-    `${credit} <a href="${escapeHtml(img.photographerUrl)}" rel="noopener noreferrer nofollow" target="_blank">${escapeHtml(img.photographer)}</a> ${onWord} <a href="${escapeHtml(img.unsplashUrl)}" rel="noopener noreferrer nofollow" target="_blank">Unsplash</a>`,
-    "</figcaption>",
-    "</figure>",
-  ].join("");
-}
-
-/**
- * Insert two inline figures into bodyHtml at roughly the 1/3 and 2/3
- * paragraph boundaries so they break up the text naturally.
- */
-function injectInlineImages(
-  bodyHtml: string,
-  images: UnsplashImage[],
-  lang: BlogLang,
-): string {
-  if (images.length === 0) return bodyHtml;
-  // Split on closing block boundaries that mark natural pause points.
-  // Keep delimiters so we can stitch back together unchanged.
-  const parts = bodyHtml.split(/(<\/p>|<\/h2>|<\/h3>|<\/ul>|<\/ol>)/i);
-  // Reassemble into "blocks" of (content + delimiter) pairs.
-  const blocks: string[] = [];
-  for (let i = 0; i < parts.length; i += 2) {
-    const content = parts[i] ?? "";
-    const delim = parts[i + 1] ?? "";
-    if (content || delim) blocks.push(content + delim);
-  }
-  if (blocks.length < 3) {
-    // Not enough structure — append both images at the end.
-    return bodyHtml + images.map((img) => buildFigureHtml(img, lang)).join("");
-  }
-  const positions = images.length === 1
-    ? [Math.floor(blocks.length / 2)]
-    : [Math.floor(blocks.length / 3), Math.floor((blocks.length * 2) / 3)];
-
-  // Inject in reverse so earlier insertion indices stay valid.
-  const sorted = positions.map((pos, idx) => ({ pos, img: images[idx] })).sort((a, b) => b.pos - a.pos);
-  for (const { pos, img } of sorted) {
-    blocks.splice(pos, 0, buildFigureHtml(img, lang));
-  }
-  return blocks.join("");
+  return { topic, lang: lang as BlogLang, keywords, images, season, autoPublish };
 }
 
 export async function POST(request: Request) {
-  const cronOk = isCronAuthorized(request.headers.get("authorization"));
-  if (!cronOk) {
-    // Manual (session) generation is admin-only (P2-4): paid Anthropic spend must
-    // not be reachable by a reviewer session. The cron path (Bearer CRON_SECRET)
-    // is server-to-server and keeps working unchanged.
+  if (!verifyCronSecret(request.headers.get("authorization"))) {
+    // Manual (session) generation is admin-only (P2-4): paid Anthropic spend must not be
+    // reachable by a reviewer session. The server-to-server path keeps working unchanged.
     if (!(await isAuthenticated())) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -296,8 +108,8 @@ export async function POST(request: Request) {
     }
   }
 
-  // Rate limit: 6 generations per minute per process (room for retries
-  // and bursts, hard cap before Anthropic billing escalates).
+  // Rate limit: 6 generations per minute per process (room for retries and bursts, hard cap
+  // before Anthropic billing escalates). The cron no longer consumes this budget.
   const rl = checkRateLimit("blog-generate", 6, 60_000);
   if (!rl.allowed) {
     return NextResponse.json(
@@ -317,79 +129,14 @@ export async function POST(request: Request) {
   if ("error" in parsed) {
     return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
-  const input = parsed;
 
   try {
-    // 1. Generate article copy via Claude.
-    const article = await generateArticleJson(input);
-
-    // 2. Use the cron-supplied shared photo set when present (keeps the FR + EN
-    //    pair visually identical); otherwise search Unsplash for this topic.
-    let images: UnsplashImage[];
-    if (input.images && input.images.length >= 3) {
-      // Download pings already fired by the caller that fetched the shared set.
-      images = input.images;
-    } else {
-      const searchQuery = [input.topic, ...(input.keywords ?? [])].filter(Boolean).join(" ");
-      images = await searchImages(searchQuery, 3);
-      if (images.length < 3) {
-        throw new Error(`Unsplash returned ${images.length} image(s) for "${searchQuery}", need 3`);
-      }
-
-      // Trigger download notifications (Unsplash API guideline — required).
-      // Fire sequentially to respect API politeness; failures are logged
-      // inside triggerDownload and never block the article.
-      for (const img of images) {
-        await triggerDownload(img.downloadLocation);
-      }
-    }
-
-    // 4. Compose final body: 2 inline images injected into Claude's HTML.
-    const featured = images[0];
-    const inline = images.slice(1, 3);
-    const finalBodyHtml = injectInlineImages(article.bodyHtml, inline, input.lang);
-
-    // 5. Create the Shopify draft article in the right blog.
-    const created = await createBlogArticle({
-      title: article.title,
-      bodyHtml: finalBodyHtml,
-      lang: input.lang,
-      featuredImage: { src: featured.url, alt: featured.altDescription },
-      summaryHtml: `<p>${escapeHtml(article.excerpt)}</p>`,
-      tags: article.tags,
-      metaDescription: article.metaDescription,
-    });
-
-    // 6. Auto-publish gate (opt-in via autoPublish — the cron sets it). The article is
-    //    created as a draft above regardless; here we flip it live only if it clears
-    //    quality (Claude judge >= threshold) AND season AND the weekly cap. Any miss
-    //    leaves it as a draft for manual review. Gates evaluated in cheapest-credible
-    //    order; the cap is reserved atomically and released if the publish then fails.
-    const { published, score, publishReason } = await maybeAutoPublish({
-      autoPublish: input.autoPublish ?? false,
-      lang: input.lang,
-      season: input.season,
-      article,
-      blogId: created.blogId,
-      articleId: created.articleId,
-    });
-
-    return NextResponse.json({
-      success: true,
-      articleId: created.articleId,
-      adminUrl: created.adminUrl,
-      handle: created.handle,
-      blogId: created.blogId,
-      title: article.title,
-      imagesUsed: images.map((i) => ({ id: i.id, photographer: i.photographer })),
-      score,
-      published,
-      publishReason,
-    });
+    const result = await generateBlogArticle(parsed);
+    return NextResponse.json({ success: true, ...result });
   } catch (err) {
-    // Full upstream error (Shopify/Claude/Unsplash payloads, stack) goes to
-    // server logs only. Client gets a generic message + short error code so
-    // admin UI can map to a friendly string without exposing internals.
+    // Full upstream error (Shopify/Claude/Unsplash payloads, stack) goes to server logs only.
+    // The client gets a generic message + a short code the admin UI can map to a friendly
+    // string without exposing internals.
     console.error("[/api/blog/generate] failed:", err);
     const code = err instanceof Error && /^Shopify/i.test(err.message)
       ? "shopify_error"

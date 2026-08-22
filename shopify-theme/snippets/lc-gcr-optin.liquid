@@ -1,0 +1,81 @@
+{%- comment -%}
+  lc-gcr-optin.liquid — Google Customer Reviews opt-in survey module.
+
+  ⚠️ SCOPE — read before assuming this reaches buyers.
+
+  This renders on the CUSTOMER ACCOUNT order page (`request.page_type ==
+  'customers/order'`, template `templates/customers/order.json`), which is where a
+  signed-in customer looks up a past order.
+
+  It does NOT render on the post-checkout "thank you" / order-status page. That page is
+  owned by Shopify Checkout, not the theme: `layout/theme.liquid` never executes there, and
+  `request.page_type` has no value for it at all (the documented set is 404, article, blog,
+  captcha, cart, collection, list-collections, customers/*, gift_card, index, metaobject,
+  page, password, policy, product, search). `request.page_type == 'order'` — a value that
+  does not exist — would silently never match.
+
+  Practical consequence: on a store with mostly guest checkout, very few buyers ever open
+  this page, so opt-in volume from here is small. The two routes that actually reach every
+  buyer are the Google & YouTube channel app, or a Merchant Center order feed once the
+  Shopify token gains `read_orders`. Both are written up in
+  docs/GOOGLE-CUSTOMER-REVIEWS-SETUP.md.
+
+  Estimated delivery = order date + 8 BUSINESS days. Liquid has no business-day arithmetic,
+  so weekends are skipped explicitly: 8 business days is 10 calendar days when the order
+  falls Mon/Tue, and 12 when it falls Wed–Sun (the run crosses a second weekend).
+
+  The guard accepts BOTH `customers/order` and `order`. Only the first matches today; the
+  second is carried so the guard already covers that value should Shopify ever introduce it.
+  `order != blank` is what actually keeps this safe either way — no order object, no markup.
+
+  Usage: {% render 'lc-gcr-optin' %}
+{%- endcomment -%}
+
+{%- assign gcr_page_type = request.page_type -%}
+{%- if gcr_page_type == 'customers/order' or gcr_page_type == 'order' -%}
+{%- if order != blank -%}
+  {%- liquid
+    assign gcr_email = order.email
+    if gcr_email == blank
+      assign gcr_email = order.customer.email
+    endif
+
+    assign gcr_country = order.shipping_address.country_code
+    if gcr_country == blank
+      assign gcr_country = order.billing_address.country_code
+    endif
+    if gcr_country == blank
+      assign gcr_country = 'CA'
+    endif
+
+    comment
+      %w gives 0 (Sunday) through 6 (Saturday). Orders placed Wed–Sun push the 8th
+      business day past a second weekend, so they need 12 calendar days instead of 10.
+    endcomment
+    assign gcr_weekday = order.created_at | date: '%w' | plus: 0
+    assign gcr_offset_days = 12
+    if gcr_weekday == 1 or gcr_weekday == 2
+      assign gcr_offset_days = 10
+    endif
+    assign gcr_offset_seconds = gcr_offset_days | times: 86400
+    assign gcr_delivery = order.created_at | date: '%s' | plus: gcr_offset_seconds | date: '%Y-%m-%d'
+  -%}
+
+  {%- if gcr_email != blank -%}
+    <script src="https://apis.google.com/js/platform.js?onload=renderGcrOptIn" async defer></script>
+    <script>
+      window.renderGcrOptIn = function () {
+        window.gapi.load('surveyoptin', function () {
+          window.gapi.surveyoptin.render({
+            merchant_id: 5804673777,
+            order_id: {{ order.name | json }},
+            email: {{ gcr_email | json }},
+            delivery_country: {{ gcr_country | json }},
+            estimated_delivery_date: {{ gcr_delivery | json }}
+          });
+        });
+      };
+    </script>
+  {%- endif -%}
+{%- endif -%}
+{%- endif -%}

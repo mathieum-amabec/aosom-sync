@@ -44,3 +44,42 @@ export function tokenExpiryStatus(info: TokenInfo, now: Date): TokenExpiryStatus
 export function tokenNeedsAttention(status: TokenExpiryStatus): boolean {
   return status.state === "expired" || status.state === "expiring_soon";
 }
+
+/** Fraction of a pool's daily budget at which the dashboard warns. */
+export const LLM_POOL_WARN_RATIO = 0.8;
+
+export type LlmPoolState = "ok" | "warning" | "exhausted";
+export interface LlmPoolStatus {
+  pool: "assistant" | "batch";
+  state: LlmPoolState;
+  used: number;
+  budget: number;
+  /** Percent of the budget consumed, 0-100, rounded to one decimal. */
+  pct: number;
+}
+
+/**
+ * Classify a pool's daily token consumption so the operator sees pressure BEFORE the
+ * pool fails closed. `assertLlmBudget` throws at `used >= budget`, at which point every
+ * caller in that pool is already down — this warns at 80% so there is room to react.
+ *
+ * The comparison mirrors `assertLlmBudget` exactly (`used >= budget` is exhausted), so
+ * the dashboard can never report "ok" for a pool that is actually refusing calls.
+ * A non-positive budget is treated as exhausted: `poolBudget` only returns a positive
+ * number, so this can only come from a caller passing garbage, and reporting "ok" for
+ * an unusable pool would be the dangerous direction to fail in.
+ */
+export function llmPoolStatus(
+  pool: LlmPoolStatus["pool"],
+  used: number,
+  budget: number,
+): LlmPoolStatus {
+  const safeUsed = Number.isFinite(used) && used > 0 ? used : 0;
+  if (!Number.isFinite(budget) || budget <= 0) {
+    return { pool, state: "exhausted", used: safeUsed, budget: 0, pct: 100 };
+  }
+  const pct = Math.round((safeUsed / budget) * 1000) / 10;
+  const state: LlmPoolState =
+    safeUsed >= budget ? "exhausted" : safeUsed >= budget * LLM_POOL_WARN_RATIO ? "warning" : "ok";
+  return { pool, state, used: safeUsed, budget, pct };
+}

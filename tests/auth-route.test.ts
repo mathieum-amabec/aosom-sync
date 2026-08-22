@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const TEST_SECRET = "emergency-admin-secret";
 process.env.AUTH_PASSWORD = TEST_SECRET;
+process.env.SESSION_SECRET = "test-session-secret-0123456789abcdef-xyz";
 
 // Mock the DB layer (libsql has no win-arm64 build) AND simulate Turso being down by
 // having getUserByUsername throw — the emergency path must not call it at all.

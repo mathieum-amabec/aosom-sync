@@ -10,7 +10,7 @@
  *   any variant buffers > 0  → "back-in-stock" (out-of-stock removed)
  *
  * Safety buffer (MUST match stockBufferQty in src/lib/diff-engine.ts):
- *   aosom_qty <= 5 → 0 (épuisé) ;  aosom_qty > 5 → aosom_qty - 3
+ *   aosom_qty <= 10 → 0 (épuisé) ;  aosom_qty > 10 → aosom_qty - 3
  *
  * DRY-RUN by default (lists every SKU, writes nothing). Pass --apply to write.
  *   --limit N   cap the number of variants processed (for a staged rollout)
@@ -38,8 +38,8 @@ const APPLY = process.argv.includes("--apply");
 const limitArg = process.argv.indexOf("--limit");
 const LIMIT = limitArg !== -1 ? parseInt(process.argv[limitArg + 1], 10) : Infinity;
 
-// Keep in sync with stockBufferQty() in src/lib/diff-engine.ts.
-const safeQtyOf = (q) => (q <= 5 ? 0 : q - 3);
+// Keep in sync with stockBufferQty() in src/lib/diff-engine.ts (sold-out threshold raised 5→10).
+const safeQtyOf = (q) => (q <= 10 ? 0 : q - 3);
 
 // Stock-state tags (mutually exclusive), driven off buffered availability.
 // Keep in sync with applyStockTags() in src/lib/diff-engine.ts.

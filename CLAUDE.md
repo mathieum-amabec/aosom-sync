@@ -8,6 +8,15 @@ Catalogue management tool for a Shopify dropshipping store (27u5y2-kp.myshopify.
 
 Claude Code has full autonomous permission to read, edit, create, and delete any file without confirmation prompts.
 
+## Comportement Claude Code
+
+**AUTORISATION PERMANENTE :** Claude a l'autorisation complète pour toute session de lire, ouvrir,
+inspecter, créer des dossiers/fichiers temporaires, lancer des commandes read-only (grep, find, cat,
+ls, tsc --noEmit, git status/log/diff, GET API calls, health checks) sans jamais demander
+confirmation. Ne jamais interrompre avec un choix 1/2 pour une action read-only. Seules les écritures
+irréversibles (Shopify live, Turso prod, publications sociales, merges PR) nécessitent confirmation
+explicite.
+
 ## Architecture
 
 Next.js App Router on Vercel. Engine in `src/lib/`, UI in `src/app/(dashboard)/`, API in `src/app/api/`.
@@ -34,6 +43,9 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
 - `import_jobs` — import queue with status machine (pending→generating→reviewing→importing→done)
 - `catalog_snapshots` — latest CSV data for fast catalog browsing
 - `sync_cursor` — chunked sync progress for large stores
+- `assistant_rate_limit` — one row per accepted `/api/assistant` message (`ip`, `ts`), the
+  per-IP hourly sliding window. In Turso rather than in-memory because the in-memory windows
+  are per Fluid Compute instance and reset on cold start. Pruned on every check.
 - `settings` — key-value store; `checkpoint_data` holds both `ShopifyPushCheckpoint` (Phase 2) and `Phase1Checkpoint` (Phase 1 chunked pipeline state)
 
 ## Key Patterns
@@ -42,12 +54,134 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
 - **COLOR_MAP**: 2-letter SKU suffix → French color name (e.g., BK→Noir, GY→Gris). See `variant-merger.ts`
 - **PSIN grouping**: Aosom's Parent SKU groups color/size variants. Fallback: parseSku()
 - **Dropship**: `inventory_management: null`. Stock is NOT tracked in Shopify, only in catalog_snapshots
-- **Active imports**: New products are auto-published as `active` (live) on import — `createShopifyProduct` sets `status: "active"` (see `shopify-client.ts`; switched from draft→active in commit beb00b4, 2026-06-07). No manual-review draft step.
+- **Active imports**: New products are auto-published as `active` (live) on import — `createShopifyProduct` sets `status: "active"` (see `shopify-client.ts`; switched from draft→active in commit beb00b4, 2026-06-07). No manual-review draft step. Caveat: `status:"active"` only auto-publishes to the Online Store **at creation** — flipping an existing product draft→active does NOT publish it, and legacy pre-beb00b4 draft imports never activated stay hidden. `runPublishReconcile` (`publish-reconcile.ts`, route `GET /api/cron/publish-reconcile`, dry-run unless `?apply=1`) closes that gap: it publishes (`publishShopifyProduct`, REST `published:true`) every imported product sellable in today's Aosom CSV that sits unpublished — excluding `auto-drafted` (intentional aosom-sync drafts) and `exclude-stale`, guarded by the same `assertFeedComplete` (FEED_MIN_COVERAGE 0.70), capped at 67/run. It is the inverse of `stale-catalog` and is NOT on any cron schedule (operator-triggered only).
 - **[BRAND NAME]**: Aosom HTML descriptions contain this placeholder. Replaced with actual brand before Claude processing
+- **Two LLM tiers**: `CLAUDE.MODEL` (`claude-sonnet-4-6`) is **only** for `/api/assistant`, the
+  customer-facing shopping assistant — it is ~86% of token volume and the only path a shopper
+  sees. Every other caller uses `CLAUDE.MODEL_BATCH` (`claude-haiku-4-5`, one third the price on
+  both input and output). New batch callers must use `MODEL_BATCH`. `generateProductContent`
+  re-runs a failed validation on `CLAUDE.MODEL`, so a cheap-model miss costs a retry, not quality
+
+## Meta Pixel (two parts — web dataset `214720653324969`)
+
+- **Storefront events (PageView / ViewContent / AddToCart)**: a Shopify **ScriptTag**
+  (id `222592598121`) pointing at `/api/pixel/script` (see `src/app/api/pixel/script/route.ts`,
+  installed via `/api/pixel/install`). `content_ids` everywhere = `variant.sku` (matches the
+  Meta catalog `retailer_id`, e.g. `01-0901` — NOT the numeric `variant.id`).
+- **Purchase**: a **Custom Web Pixel installed MANUALLY** in **Shopify Admin → Settings →
+  Customer events → Add custom pixel** — there is **no code path or Admin API that creates it**.
+  The source of truth for the pasted code is `docs/meta-custom-web-pixel.js`; editing that repo
+  file does nothing until an operator pastes it into the pixel manager and re-Saves.
+  ScriptTags no longer run on the Checkout-Extensibility Thank-You page, so Purchase cannot live
+  in the ScriptTag. The custom pixel runs in Shopify's **lax sandbox** (iframe, no top-frame
+  DOM), so it sends Purchase via `fetch()` to `https://www.facebook.com/tr/` (the noscript
+  beacon) — NOT the `fbq`/`fbevents.js` SDK, which the sandbox rejects.
+
+## Pinterest Tag (mirrors Meta exactly — env `PINTEREST_TAG_ID`)
+
+A direct mirror of the Meta pixel, same two-part split. `PINTEREST_TAG_ID` (numeric, from
+Pinterest Ads Manager → Conversions) gates both halves; unset ⇒ inert no-op script.
+`product_id`/`content_ids` everywhere = `variant.sku` = the Pinterest catalog feed `g:id`
+(same SKU as the Meta catalog `retailer_id`).
+
+- **Storefront events (page / pagevisit / viewcategory / search / addtocart)**: a Shopify
+  **ScriptTag** → `/api/pixel/pinterest-script` (`src/app/api/pixel/pinterest-script/route.ts`,
+  loads `s.pinimg.com/ct/core.js` + `pintrk`). Installed/removed by the SAME
+  `/api/pixel/install` route as Meta (it now manages BOTH tags — POST installs both, GET
+  reports both, DELETE removes both; Meta fields stay top-level, Pinterest under `pinterest`).
+  ScriptTag lib: `src/lib/pinterest-pixel.ts`. Route is public (allowlisted in `proxy.ts`).
+- **Checkout (conversion)**: a **Custom Web Pixel installed MANUALLY** (Settings → Customer
+  events), source of truth `docs/pinterest-custom-web-pixel.js` — replace the `PINTEREST_TAG_ID`
+  placeholder with the real numeric id before pasting. Same sandbox constraint as Meta: sends the
+  `checkout` event via `fetch()` to `https://ct.pinterest.com/v3/` (the noscript beacon), NOT the
+  `pintrk` SDK. `event_id` = checkout token (future Conversions API dedupe key).
+- **Prereqs (account-side, before tracking works):** create the Pinterest Tag in Ads Manager to
+  get the id, claim the domain, set `PINTEREST_TAG_ID`, then POST `/api/pixel/install`.
+
+## Meta DPA retargeting — "Retargeting DPA — ViewContent + ATC" (campaign ACTIVE; ATC ad set rebuilt 2026-07-19)
+
+Ad account `act_20658834`, catalog `384890002574549`, pixel `214720653324969`. Built by
+`scripts/rebuild-dpa-retargeting.mjs` (dry-run default, `--apply`). Replaced the old generic
+"Visiteurs 30j" website CA (built on the WRONG pixel `2027065584856990`).
+
+- **Campaign** `52583438066005` (OUTCOME_SALES), ACTIVE.
+- **Ad Set 1 — ATC (ADD_TO_CART):** `52584773091805` "ATC 30j — Abandon panier — ADD_TO_CART",
+  **ACTIVE**, → CA **AddToCart 30j** `52583438803605`. Rebuilt 2026-07-19; the old ATC set
+  `52583438197005` (PURCHASE) is **PAUSED** — it starved at 0 delivery because a ~1000-person
+  audience optimized for the rare PURCHASE event can't deliver.
+- **Ad Set 2 — "ViewContent — Produit exact vu"** `52583438211605` → CA **ViewContent 30j**
+  `52583438060205`, EXCLUDES the ATC CA. Still on PURCHASE (delivers well — 7.7% CTR).
+- **Ad Set 3 — "Prospection Broad — Best-sellers"** `52583438225405` → broad 25-65 + Advantage+,
+  product set Best-sellers `2218845485631893`.
+- Retargeting sets (1 & 2) use the **All Products** set `2891699814486850` so DPA shows the exact
+  viewed product; only prospection uses Best-sellers.
+- **Conversion-data reality:** the store has only ~10 real confirmed Shopify sales total and the
+  pixel was broken before ~July 2026, so Meta has almost no PURCHASE signal — "0 purchases" is
+  expected, not a defect. Optimize mid-funnel (ADD_TO_CART) until real purchase volume accrues.
+- API gotchas (each cost a failed apply): `product_catalog_id` is rejected in `promoted_object`
+  for OUTCOME_SALES (use `product_set_id` only); Meta auto-converts single-format DPA template
+  creatives to FORMAT_AUTOMATION CAROUSEL/COLLECTION; do NOT round-trip a GET `?fields=targeting`
+  back into a POST (drops geo — rebuild explicitly); **you CANNOT edit the conversion event /
+  optimization on a PUBLISHED ad set** (`error_subcode 3260011`) — rebuild from scratch (`POST
+  act_.../adsets` with `targeting.targeting_automation.advantage_audience` set explicitly;
+  `/copies` fails on >3 objects and on the missing advantage_audience flag), then copy its ads in.
+
+## Google Ads (Shopping) — code ready, credentials NOT provisioned
+
+`src/lib/google-ads-client.ts` (raw REST, no SDK) + `scripts/create-google-shopping-campaign.mts`
+(dry-run default, `--apply`, everything created PAUSED). Full walkthrough: `docs/GOOGLE-ADS-SETUP.md`.
+
+- ⚠ **No `GOOGLE_ADS_*` vars exist in `.env.local`.** The dry-run runs without them; `--apply`
+  cannot. Developer-token approval is **1–3 business days** and gates every live call.
+- **Scope is `.../auth/adwords`, NOT Merchant Center's `.../auth/content`.** A refresh token is
+  bound to its consented scopes, so the GMC token **cannot** be reused — it refreshes fine, then
+  fails every Ads call.
+- Google Ads also needs a `developer-token` header on top of OAuth (no other Google API does).
+- **Three platform limits the config can't work around:** smart bidding
+  (`MAXIMIZE_CONVERSION_VALUE`) **ignores all bid modifiers and the ad group max CPC**; **sitelinks
+  don't render on Shopping ads** (Search only — Shopping promos come from the Merchant Center
+  promotions feed); **dynamic remarketing isn't a Shopping feature**, and Meta/Pinterest pixels can
+  **never** feed Google audiences (needs Google tag / GA4 / Customer Match).
+- Value bidding needs a PURCHASE conversion action — the script's preflight refuses `--apply`
+  without one. Seed on `--bidding maximize-clicks` first, then flip in place via `setCampaignBidding`.
+- `GOOGLE_ADS_API_VERSION` is pinned in the client; Google sunsets a version ~every 4 months.
+
+## Shopify theme IDs (live vs draft)
+
+⚠️ **Roles MOVE on every publish; names are misleading — trust `themes.json` roles, never the name.**
+Source of truth for the tooling: `scripts/_shopify-lib.mjs` (`LIVE_THEME_ID` / `DRAFT_THEME_ID` /
+`BACKUP_THEME_ID`) — re-point it after EVERY publish or the `apply-*.mjs` guard protects the wrong theme.
+
+As of **2026-08-08** (publish of the `priceValidUntil` fix):
+- **LIVE / `main` (NEVER write):** `161562099817` "DRAFT DE TRAVAIL 2026-08-08"
+- **Rollback backup + safe write base:** `161529233513` "DRAFT GOOGLE SHOPPING 2026-08-07" (previous live)
+
+⚠️ **Theme slots: 20/20 — Shopify's hard cap.** At the cap `themeDuplicate` fails by returning
+`newTheme: null` with **no `userErrors`**: a completely silent failure. If duplication appears
+to do nothing, **count the themes first** — that is the cause. Freeing one slot made it work on
+the next attempt. `141164904553` "Horizon" was deleted for this; it was unpublished, untouched
+since March, and `theme_store_id: 2481` means it can be re-downloaded from the Theme Store.
+
+⚠️ **Do NOT publish or branch from `161090928745`.** It was copied from the live on 07-19, but
+the live was edited on 07-21, so that draft is missing the **Judge.me app embed**
+(`config/settings_data.json`) and an **app section plus several block settings** on the product
+page (`templates/product.json`). Publishing it silently reverts them. Caught by an asset
+checksum diff on 2026-08-07, before publishing.
+
+**Always diff before publishing.** A draft is a point-in-time copy; the live keeps changing
+underneath it via the theme editor. Compare asset checksums between the draft and the current
+live and confirm the only differences are yours. `161529233513` was built that way: duplicated
+from the then-live `161069989993`, two snippets added on top, diff verified as exactly 2
+additions + 2 modifications and zero unrelated changes.
+
+Publish a draft: `PUT /admin/api/2025-01/themes/{id}.json {theme:{id,role:"main"}}`. Make a fresh draft:
+GraphQL `themeDuplicate` of the new live. Verify roles: `GET /admin/api/2025-01/themes.json?fields=id,name,role`.
 
 ## API Routes
 
 - `GET /api/catalog` — browse catalog with filters (reads from Turso, not CSV)
+- `GET /api/dashboard/llm-usage` — "Consommation API" panel: today's tokens per pool vs its
+  cap, estimated USD, and a 7-day window from `daily_llm_budget`. Session-gated, DB-only.
 - `POST /api/sync/trigger` — manual sync (supports `{dryRun: true}`)
 - `GET /api/sync/history` — sync runs + change logs
 - `GET /api/cron/sync` — Vercel Cron: Fluid Compute Phase 1 orchestrator (init+chunks+finalize), fires at 06:00 + 06:30 UTC (Bearer CRON_SECRET, maxDuration 800s)
@@ -88,10 +222,66 @@ removed — nothing writes or drains `facebook_drafts.status='scheduled'` anymor
 `nextFreeSlot` (used by `/api/queue/add`) are live. The `scheduled` status value survives only
 for any historical rows; no code produces new ones.
 
+## Blog pipeline — and why crons must NEVER self-fetch
+
+⚠️ **A cron must do its work in-process. Never `fetch()` your own app from inside a cron.**
+
+Vercel **SSO Deployment Protection** is enabled on this project
+(`ssoProtection.enabled: true`, `deploymentType: "all_except_custom_domains"`), and the project
+has **no custom domain**. Protection is **not uniform across hosts** — measured 2026-08-09 on
+`/api/cron/blog` with no credentials:
+
+| Host | Result | Answered by |
+|---|---|---|
+| `aosom-sync.vercel.app` (production alias) | `401` + `{"success":false,"error":"Unauthorized"}` | the **app** (`verifyCronSecret`) |
+| `aosom-sync-<hash>-<team>.vercel.app` (per-deployment) | `302 Redirecting...` | the **Vercel SSO edge** |
+| `aosom-sync-git-main-<team>.vercel.app` (branch alias) | `302 Redirecting...` | the **Vercel SSO edge** |
+
+So a self-`fetch()` is intercepted **before the app's own `CRON_SECRET` check** whenever the
+origin resolves to a per-deployment or branch host (`fetch` follows the 302 into the SSO flow
+and ends at a 401). The cron derived its origin from `new URL(request.url).origin`; **which
+host a Vercel Cron invocation actually presents was not verified** — do not assume it is the
+production alias, which is what the old code comment in `cron/content/route.ts` claims.
+
+Either way the hop is the hazard, and removing it removes every variant of the failure. Do not
+re-derive this from the API value alone: `all_except_custom_domains` did **not** mean "every
+`*.vercel.app` host is protected" here. **Measure each host** before concluding.
+
+This silently killed `/api/cron/blog` for ~7 weeks (4 runs / 4 failures, last real article
+2026-06-22) and still kills **`/api/cron/content`** (13 / 13, `FR: Generation failed (HTTP 401)
+| EN: ... (HTTP 401)`) — that one is **not yet fixed**. Every cron that works in-process has
+zero errors. Verify with
+`get_project_deployment_protection`, not by guessing.
+
+- **Generation lives in `src/lib/blog-generator.ts`** (`generateBlogArticle`) and the cron calls
+  it directly. `/api/blog/generate` is a thin wrapper kept for manual/admin use.
+- **`GET /api/cron/blog`, Mon + Thu 08:00 UTC.** GET, not POST — **Vercel Cron only issues GET**,
+  so a POST handler would never fire.
+- **Topic selection advances per RUN, not per week** (`blog-topics.ts`). Mon and Thu share an ISO
+  week, so `idx = week % len` would hand both runs the same topic and publish duplicates.
+  `idx = (week * RUNS_PER_WEEK + slot) % len` is a sequential run counter (step of exactly 1),
+  which also keeps full catalogue coverage — a step of 2 over an even catalogue reaches half.
+- **`blog_schedule.posts_per_week` counts ARTICLES, not bilingual pairs.** 2 runs × (FR + EN) = 4.
+  A lower cap silently blocks the late run while still paying to generate it.
+- **`blog_posts`** logs every outcome including failures → surfaced at `/blog`.
+- Auto-publish gate (`blog-auto-publish.ts`): Claude judge ≥ 80 **AND** in season **AND** under
+  the weekly cap. Any miss leaves the article a draft.
+- Blog IDs: FR `90302349417` (*Actualités*), EN `91161428073` (*Blog*).
+
 ## Env Vars
 
 - `SHOPIFY_ACCESS_TOKEN` — Shopify Admin API token
 - `ANTHROPIC_API_KEY` — Claude API
+- `CLAUDE_BATCH_MODEL` — optional. Model for the **batch** LLM pool (product listings, blog,
+  social captions, hooks, vision). Defaults to `claude-haiku-4-5`; set it to
+  `claude-sonnet-4-6` to move the whole batch pool back to Sonnet without a code change.
+  The customer-facing assistant is **not** affected — it is pinned to `CLAUDE.MODEL`.
+- `LLM_DAILY_TOKEN_BUDGET` / `LLM_ASSISTANT_DAILY_BUDGET` — daily token caps for the `batch`
+  (default 1.3M) and `assistant` (default 500k) pools
+- `ASSISTANT_CONTACT_EMAIL` — optional. Shopper-facing address in the assistant's
+  limit-reached hand-off. Defaults to `info@ameublodirect.ca`.
+- `ASSISTANT_CONTACT_WHATSAPP` — optional. Digits only (e.g. `15145550123`). **No WhatsApp
+  link is shown until this is set** — there is no number anywhere in the repo to default to.
 - `CRON_SECRET` — Vercel Cron auth
 - `AUTH_PASSWORD` — simple password auth for 2 users
 - `BLOB_READ_WRITE_TOKEN` — Vercel Blob (Phase1Checkpoint + demand-gen video assets)

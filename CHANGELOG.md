@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.54.6] - 2026-07-07
+## [0.5.65.1] - 2026-08-22
 
 ### Fixed — 5 theme-write scripts pointed their DRAFT target at the live theme
 Five `scripts/*.mjs` hardcoded `const DRAFT = "160656818281"` — which became the
@@ -13,6 +13,1355 @@ can't leave their write-target on the wrong theme.
 - Scripts: `compare-at-threshold-fix`, `faq-i18n-apply`, `homepage-minor-fixes`,
   `homepage-video-carousel-clean`, `lifestyle-theme-step5`. Operative header comments
   de-hardcoded too. No app or test code imports these scripts.
+
+## [0.5.65.0] - 2026-08-20
+
+### Added — "Consommation API" panel on the dashboard home
+
+Sits between "Résumé du jour" and "Alertes": it is a same-kind daily KPI, and when a pool is
+exhausted or the Anthropic key is spend-capped it explains the import/blog failures the
+alerts panel reports directly underneath. Reads `daily_llm_budget` through
+`GET /api/dashboard/llm-usage` (session-gated, DB-only — it must not depend on the Anthropic
+API, since the API being unavailable is one of the things an operator opens it to see).
+
+Shows per pool: tokens used today against that pool's daily cap, the model that pool runs,
+a progress bar that turns amber at 80% and red at 100%, and an estimated cost. Plus a
+stacked 7-day bar chart and the window total.
+
+**Costs are estimates, and the panel says so.** `daily_llm_budget` stores ONE combined
+token count per (day, pool), so the input/output split is assumed per pool — 90% input for
+`assistant` (system prompt + tool results in, ≤1024 tokens out), 40% for `batch` (a supplier
+description in, up to 4000 tokens of bilingual HTML out). The rates come from the model each
+pool actually runs, so the `CLAUDE_BATCH_MODEL` override is reflected without a code change.
+Two further caveats are printed in the panel: a zero day means no call *succeeded* (the
+counter only increments after a valid response, so a blocked key looks like an idle day),
+and past days are priced at each pool's current model.
+
+### Added — conversation limits on the public assistant
+
+`/api/assistant` now ends a runaway conversation with a hand-off to a human instead of
+spending more Claude calls:
+
+- **10 messages per IP per rolling hour**, as a Turso-backed sliding window
+  (`assistant_rate_limit`). This lives in the DB rather than the in-memory limiter because
+  those windows are per Fluid Compute instance and reset on cold start — fine as a burst
+  guard, useless as an hourly quota. It also *is* the "10 messages per session" rule: a
+  client-supplied session counter is trivially reset, so counting per IP server-side is the
+  only version of that rule with teeth, and both numbers are 10.
+- **3 consecutive shopper turns** with no assistant turn between them — the shopper is
+  firing messages without being helped, so escalate rather than spend three more calls.
+
+Copy, verbatim: FR *"Vous avez atteint la limite de questions. Notre équipe peut vous aider
+directement 😊"*, EN *"You've reached the question limit. Our team can help you directly 😊"*,
+followed by the contact channel.
+
+Contact details are env-overridable (`ASSISTANT_CONTACT_EMAIL`, `ASSISTANT_CONTACT_WHATSAPP`)
+and default to `info@ameublodirect.ca` — the address the docs already use. **No WhatsApp
+number exists anywhere in this repo, so no WhatsApp link is rendered until the env var is
+set**; an invented number would be worse than no button. The personal Gmail on the privacy
+page is deliberately not used as a shopper-facing channel.
+
+Both limits return HTTP **200** with a payload carrying `reply` and `products`, not a 429.
+The deployed storefront widget is a theme snippet outside this repo and does
+`if (j.success && j.data) { addMsg(j.data.reply); addCards(j.data.products) }` — a 429, or a
+payload without those fields, shows the shopper a blank bubble. It inserts text with
+`textContent`, so the address is spelled out in the sentence rather than sent as a link;
+the structured `contact` object is there for a future widget revision that can draw a button.
+
+Failure behaviour: a tripped limit costs no Claude call, a failed generation does not consume
+the shopper's allowance, and an unreachable quota store fails **open** — the storefront
+assistant must not go dark because a counter is unavailable.
+
+### Fixed — the 7-day chart rendered no bars
+
+Bar heights were percentages inside an auto-height flex column, so they resolved to zero and
+every bar was invisible. Sized in pixels against a constant now, with a 2px floor so a small
+day is visible rather than rounded away. Two adjacent-JSX-text spaces were also being
+swallowed ("$0.00estimé"); those strings are built as single expressions.
+
+## [0.5.64.0] - 2026-08-19
+
+### Changed — batch LLM work runs on Haiku 4.5; the customer-facing assistant stays on Sonnet
+
+`CLAUDE.MODEL_BATCH` (new, default `claude-haiku-4-5`, override with `CLAUDE_BATCH_MODEL`) now
+drives every non-assistant caller: product listings, blog articles, social captions, slideshow
+hooks, Kling prompts, image classification. `/api/assistant` keeps `CLAUDE.MODEL`
+(`claude-sonnet-4-6`) — it is the only customer-facing generation path and it is ~86% of all
+recorded token volume, so it was never a candidate.
+
+Haiku 4.5 is priced at exactly one third of Sonnet 4.6 on **both** input ($1 vs $3 / MTok) and
+output ($5 vs $15). The saving on the batch pool is therefore a flat two thirds and does not
+depend on the input/output mix — which matters, because `daily_llm_budget` stores a single
+combined counter and cannot tell us that mix.
+
+**Quality guard.** `generateProductContent` validates every field of the model's JSON. A
+response that fails any check now raises `ContentValidationError` and the *same prompt* is
+re-run on `CLAUDE.MODEL`. Only that error escalates — a budget-exceeded or network failure
+must not silently buy a second paid call. A cheap-model miss therefore costs one retry, never
+output quality. Setting `CLAUDE_BATCH_MODEL=claude-sonnet-4-6` reverts the whole pool with no
+code change.
+
+### Changed — a job's stored content is reused instead of regenerated
+
+Product copy is already generated once per PSIN group: `mergeVariants` folds a group's colour
+and size variants into one merged product whose full variant list is part of the prompt, and
+`import_jobs.group_key` is UNIQUE. What still burned duplicate calls was regenerating a job
+that *already held content* — `upsertImportJob` resets a re-queued group to `pending` without
+clearing `content`, and a retry after a failed Shopify push lands on the same path.
+`generateContent(jobId)` now returns the stored payload when it still satisfies the contract
+`importToShopify` relies on. `generateContent(jobId, { force: true })` (and `{"force": true}`
+on `POST /api/import/generate`) regenerates deliberately, e.g. after a prompt change.
+
+### Fixed — blog generation bypassed the daily spend cap entirely
+
+`generateArticleJson` called `client.messages.create()` directly rather than `budgetedCreate()`.
+Article generation was therefore neither gated by the daily budget nor recorded in
+`daily_llm_budget` — a hole in the CSO Finding 2 guardrail that also made every consumption
+report undercount. It now goes through `budgetedCreate` on the `batch` pool like every other
+caller.
+
+### Fixed — a corrupt `content` column crashed every read of the job
+
+`rowToJob` called `JSON.parse(row.content)` unguarded, so a half-written payload threw on any
+read — including the regeneration that would have repaired it. It now degrades to `null`
+("no content yet"), which callers already handle by regenerating.
+
+## [0.5.63.0] - 2026-08-19
+
+### Security — Next.js 16.2.6 → 16.3.1 (CRITICAL, GHSA-6gpp-xcg3-4w24 proxy bypass)
+
+16.3.1 is npm `latest`. Not installed locally: this worktree's `node_modules` is a junction to
+the main clone, shared with other sessions, so a `bun install` here would swap Next under every
+one of them. Vercel installs from `package.json` and builds against 16.3.1 — that build is the
+verification. `tsc` and the suite ran green against the source.
+
+### Fixed — CSP had no media-src, so every dashboard video preview was blocked (HIGH)
+
+There is no `Content-Security-Policy-Report-Only` header in this app, only an enforcing CSP,
+and it declared no `media-src`. `<video>` therefore fell back to `default-src 'self'` — which
+blocks both `blob:` and the public Vercel Blob store the Reels and sequential-ad renders are
+served from. Added
+`media-src 'self' blob: https://jcskqp8orcub9i0l.public.blob.vercel-storage.com`.
+`frame-ancestors 'none'` is unchanged.
+
+### Fixed — supplier and internal names leaking into published blog articles
+
+A scan of all 50 Shopify articles found **8 carrying a forbidden name, 6 of them published**.
+Two distinct causes, both code:
+
+- **The system prompt introduced the writer as working "for Aosom Canada".** The model wrote
+  what it was told: two published articles opened a paragraph with "Chez Aosom Canada, vous
+  trouverez…". The prompt now names the store correctly (Ameublo Direct / Furnish Direct) and
+  forbids Aosom, HOMCOM, Outsunny, PawHut, Vinsetto, Qaba, Soozier and internal tool names in
+  URLs, UTMs, tags and metadata.
+- **`UNSPLASH_APP_NAME` defaulted to `"aosom-sync"`** and is set nowhere, so every Unsplash
+  photo credit shipped `utm_source=aosom-sync` — 4× per article, 32 occurrences live. A prompt
+  rule cannot fix this: the parameter is appended by `buildAttributionUrl`, never by the model.
+  Default is now `ameublodirect`.
+
+Remediation done on Shopify: the two articles with the prose mention (636134359145,
+635818115177) were unpublished. `blog_posts` row 1 was moved `published` → `approved` to match.
+
+The 32 existing `utm_source=aosom-sync` occurrences across 8 articles are NOT yet rewritten —
+that is a bulk content write awaiting approval.
+
+## [0.5.62.1] - 2026-08-19
+
+### Fixed — /sequential-ads showed a published ad as still scheduled
+
+"Publier maintenant" posts immediately and deliberately leaves `scheduled_at` alone, so a
+published ad routinely carries a slot still in the future. The card rendered
+`Publié le {scheduled_at}`, so an ad that went out on the 19th was labelled "Publié le
+21 août" — reading as if the button had done nothing.
+
+Two real rows made this visible:
+
+| id | scheduled_at | published_at |
+|---|---|---|
+| 468 | 2026-08-21 13:00 | **2026-08-19 01:24:35** |
+| 469 | 2026-08-20 13:00 | **2026-08-19 13:01:46** |
+
+Both carry an empty `error` — the button worked, only the label lied.
+
+- `/api/sequential-ads/queue` now returns `published_at` (the column and
+  `PublicationQueueItem.publishedAt` already existed; the route simply never mapped it).
+- The card reads `published_at`, falling back to the slot only for rows published before the
+  field was exposed, and marks an early publish "en avance sur le créneau".
+
+### Not a bug — /blog publish state
+
+Investigated and could not reproduce: `blog_posts.status` and Shopify agree on all four rows.
+Both `published` rows carry a real `published_at` (636134359145 → 2026-08-13, 636150874217 →
+2026-08-19); both `draft` rows are unpublished, which is correct for a draft.
+`/api/blog/publish` already calls Shopify BEFORE flipping the row, and `publishBlogArticle`
+throws on a non-ok response, so a silent divergence has no path. Drafts also already reach the
+dashboard: `listBlogPosts` applies no default status filter and the client's `statusFilter`
+defaults to `"all"`. No change made.
+
+## [0.5.62.0] - 2026-08-19
+
+### Added — /blog review dashboard (draft → approved → published)
+
+`/blog` was a read-only log of what the generator produced. It now drives the article
+through review, the same way `/social` and `/sequential-ads` do for their content.
+
+- **New status `approved`** on `blog_posts`, between `draft` and `published`. It is a
+  dashboard-only state: Shopify still holds an unpublished article until someone hits
+  Publier. Existing rows migrate in place (guarded `ALTER` for the two new timestamp
+  columns, then a guarded table rebuild for the `CHECK` — SQLite can't alter a constraint).
+- **`/api/blog/[action]`** — one dynamic segment serving `GET queue`, `POST approve`,
+  `POST publish`, and `DELETE :id`. The sibling static `/api/blog/generate` still wins for
+  its own path (Next resolves static segments before dynamic ones).
+- **Publish calls Shopify first, the DB second.** A rejected publish leaves the row
+  `approved` so the operator can retry; flipping the row first would strand it as
+  `published` while the article stayed hidden. Shopify's publish is idempotent, so the
+  retry is safe.
+- **Delete removes the dashboard row only** — the Shopify article is deliberately left
+  alone (deleting it there is irreversible, and an unpublished article is harmless). The
+  confirm dialog says so.
+- **Status transitions are guarded in the `WHERE` clause**, not read-then-write, so two
+  operators clicking Approuver at the same time can't both win — the loser gets a 409.
+- **A manual publish counts against the weekly cap but is never blocked by it.** The
+  auto-publisher *reserves* a slot (`reserveBlogPublishSlot`); the dashboard *counts* one
+  (`countBlogPublishSlot`, an unconditional increment). A person clicking Publier shouldn't
+  be stopped by an automation quota — but if manual publishes didn't consume slots, the cron
+  would auto-publish its full quota on top and the week would exceed `posts_per_week`.
+- **Sidebar badge** on Blog counts articles still awaiting approval. It polls every 30s
+  and refreshes immediately on approve/publish/delete via a window event, so approving the
+  last draft empties the pill right away.
+- Filters by language and status run **server-side**, so the list reflects the whole table
+  rather than the rows already fetched; the stat cards stay whole-table counts.
+- Mutations are admin-only (`reviewer` sessions get 403), matching the `/api/videos` posture.
+
+## [0.5.61.0] - 2026-08-19
+
+### Added — /sequential-ads: publish now + operator-chosen scheduling
+
+Two controls on the Pubs séquentielles cards. Both reuse the existing publish rails, so a
+manual publish and a cron publish produce byte-identical posts — only the trigger differs.
+
+- **`POST /api/sequential-ads/publish-now`** — publishes an approved ad immediately through
+  `publishQueueItem`, the same function the hourly cron calls. It claims the row first via
+  `claimQueueItem` (the atomic `pending → publishing` flip the cron uses), so if the
+  scheduler grabbed the item a moment earlier the route answers 409 instead of publishing a
+  second copy. On failure the row is marked `failed`, never left stuck in `publishing` where
+  the cron (which only reads `pending`) could never see it again.
+- **`POST /api/sequential-ads/schedule`** — sets an operator-chosen slot. Accepts a `draft`
+  (approve at a chosen time) or a `pending` ad (move it), refuses every other status. Takes
+  an ISO-8601 instant WITH an offset, because a bare `2026-08-20T14:00` from a Montreal
+  browser would silently shift four or five hours against the UTC queue. Past datetimes are
+  refused and point at publish-now rather than posting on the next tick.
+- **`rescheduleSequentialAd(id, slot)`** in `database.ts` — one helper for both cases.
+  Surfaces the partial-unique slot collision as `QueueSlotTakenError` so a taken minute is
+  reported to the operator; a time a human picked is never silently moved.
+- **UI** — a `datetime-local` picker plus a 📅 Planifier button on draft and pending cards,
+  and a 🚀 Publier maintenant button on pending cards that asks for confirmation first
+  (publishing reaches real followers and cannot be undone).
+
+No migration: `publication_queue.scheduled_at` already existed, and the publisher already
+honours it — `getNextPending` selects `status = 'pending' AND scheduled_at <= datetime('now')`,
+so a future slot simply is not picked up until it arrives. Nothing in the cron changed.
+
+20 new tests, including that the claim happens before the publish call.
+
+## [0.5.60.0] - 2026-08-18
+
+### Added — Pinterest API v5 client + Pin dry-run (dormant: no credentials yet)
+
+Code to publish Pins via the Pinterest API. **Nothing runs in production** — no route, no
+cron, nothing in `src/app` imports it. `.env.local` has zero `PINTEREST_*` API vars, so the
+live path is unreachable until the account is provisioned.
+
+- **`src/lib/pinterest-client.ts`** — raw REST, no SDK (matches the Meta / Google-ads clients'
+  posture). Bearer auth, 20s timeout, retry on 429/5xx honouring `Retry-After`, and a
+  `PinterestApiError` that flattens Pinterest's `{code, message}` envelope.
+- **Dry-run mode** records the request body in `client.plan` and returns a synthetic id
+  instead of sending, so callers build the whole payload through one code path with or
+  without credentials — which is why the script renders a complete Pin against an empty
+  `.env.local`.
+- **`htmlToPinText`** — Aosom's `short_description` is an HTML `<ul>`, and Pinterest renders
+  descriptions as plain text; without this, shoppers would see literal `<li>` tags. Caught by
+  running the dry-run on a real product, not in review.
+- **Field truncation is silent, not fatal** (100 / 800 / 500 chars): a caption two characters
+  over the limit should still publish, not fail a queue item at 3am.
+- **`scripts/pinterest-pin-dryrun.mts`** — renders the exact Pin for a SKU. Dry-run by
+  default; `--apply` refuses without both credentials.
+
+### Notes
+
+`PINTEREST_TAG_ID` **cannot** authenticate this and is deliberately not read by the client:
+it is the storefront conversion tag (public, client-side). There is also no separate
+"Pinterest Ads API" credential — `/v5/ad_accounts` is the same OAuth with *more* scopes.
+Probed against the live API on 2026-08-18: `POST /v5/pins`, `GET /v5/ad_accounts`, and the
+tag id passed as a Bearer all return `401 Authentication failed`.
+
+Queue wiring is intentionally **not** included. `publication_queue.platform` carries a CHECK
+constraint that SQLite cannot ALTER, so adding `pinterest` means rebuilding a table that holds
+live scheduled posts — that migration lands with the credentials, not before. Publishing also
+belongs in `queue-publisher.ts`, not `job4-social.ts`: the latter only generates drafts.
+
+## [0.5.59.6] - 2026-08-15
+
+### Added — Google Ads API client + Shopping campaign builder (dormant: no credentials yet)
+
+Code to create and manage Google Ads campaigns via the API. **Nothing runs in production** —
+no route, no cron, nothing in `src/app` imports it. `.env.local` has zero `GOOGLE_ADS_*`
+vars, so the live path is unreachable until the account is provisioned.
+
+- **`src/lib/google-ads-client.ts`** — raw REST, no SDK dependency (matches the Meta-ads
+  scripts' plain-`fetch` posture). Handles the OAuth2 refresh, the `developer-token` header
+  Google Ads requires *on top of* OAuth, `login-customer-id` for MCC accounts, retry on
+  429/5xx, and flattens Google's nested error envelope into a readable `GoogleAdsApiError`.
+- **Dry-run mode** records every mutate in `client.plan` and returns synthetic resource names
+  instead of sending. Callers build the whole object chain through one code path with or
+  without credentials — which is why the campaign renders against an empty `.env.local`.
+- **`scripts/create-google-shopping-campaign.mts`** — builds "Ameublo Direct — Google Shopping
+  CA": $15 CAD/day, `MAXIMIZE_CONVERSION_VALUE`, Merchant Center `5804673777` (feed label CA,
+  priority MEDIUM), Canada + FR/EN, 24/7 schedule, 10 negative keywords, ad group "Tous les
+  produits", Shopping ad + all-products listing group, 8 sitelinks (4 FR + 4 EN). Dry-run by
+  default; every object is created PAUSED.
+- **Preflight** refuses `--apply` when the account has no `PURCHASE` conversion action —
+  value bidding without a value signal spends blind.
+- **`docs/GOOGLE-ADS-SETUP.md`** — provisioning walkthrough with the parts that are easy to
+  miss: API Center only exists on a **manager (MCC)** account, Basic developer-token access is
+  a **1-3 business day manual review** that gates every live call, and the scope is
+  `.../auth/adwords` — **not** Merchant Center's `.../auth/content`. A refresh token is bound
+  to its consented scopes, so the GMC token **cannot** be reused: it refreshes fine, then
+  fails every Ads call.
+- 42 tests covering credential resolution/aliasing, bidding-strategy mapping and update masks,
+  header composition, token caching, retry and retry-exhaustion, and error flattening.
+
+### Notes — three platform limits the requested config cannot express
+
+Documented in the code, the docs, and printed by every dry-run rather than silently dropped:
+
+- **Smart bidding ignores bid modifiers and the ad group max CPC.** The requested "+20%
+  evenings and weekends" does not apply under `MAXIMIZE_CONVERSION_VALUE`; the client omits
+  the modifier instead of writing a boost the UI would show and never fire. Use
+  `--bidding manual-cpc` for a real +20%.
+- **Sitelinks do not render on Shopping ads** (Search only). Shopping promotional pricing
+  comes from the Merchant Center promotions feed, not a Google Ads asset.
+- **Dynamic remarketing is not a Shopping feature, and Meta/Pinterest pixels can never feed
+  Google audiences** — those need the Google tag, GA4, or Customer Match.
+
+### Fixed — incidental
+
+- Sitelink URLs: `/pages/livraison`, `/collections/patio-jardin` and `/collections/nouveautes`
+  all 404. Replaced with the real handles (`politique-de-livraison`, `patio-mobilier`,
+  `nouveaux-arrivages`), each verified 200 against the live storefront.
+
+## [0.5.59.5] - 2026-08-12
+
+### Fixed — assistant: draft products, ignored budgets, empty promises
+
+Re-lands the behavioural half of v0.5.59.3 (reverted in #419 on a faulty measurement — the
+endpoint was returning a 500 because its LLM pool was drained by testing, and the verifier
+scored that as "0 products"). This time verified against the live endpoint after deploy.
+
+- **Draft / unpublished products no longer recommended.** The existing FR-title Shopify
+  round-trip now also returns `status` + `onlineStoreUrl` and drops anything not live — no
+  extra API call, and it runs for EN too. Fails **open** so a Shopify outage keeps cards.
+  Measured before: 3 of 5 recommendations were draft and returned HTTP 404.
+- **Stated budgets are honoured.** `extractBudget` matches a number adjacent to a currency
+  marker (`800# Changelog
+
+All notable changes to Aosom Sync will be documented in this file.
+
+, `500 dollars`, `1200 CAD`) and caps cards at `budget x 1.3`. Adjacency is
+  what keeps "terrasse 10x10 pieds" and "sofa 3 places" from reading as a price. Skipped
+  when it would empty the list.
+- **Empty results no longer promise options.** Zero cards now yield an honest no-match line
+  instead of "Voici quelques options qui pourraient convenir." with nothing under it.
+  Measured before: 12 of 18 realistic queries hit that state.
+- **In-stock preference** on catalog search (`qty > 0`) with a fallback to the unfiltered
+  search — dropship stock lives only in the CSV mirror and can be stale, so never a hard filter.
+
+### Security
+
+- **Shopper text is stripped of markup and control characters** before reaching Claude
+  (`sanitizeShopperText`). Defence-in-depth for the echo path: the model can repeat back what
+  the shopper typed and the storefront widget renders that reply, so markup is cut server-side
+  rather than trusting a theme snippet outside this repo.
+
+**CSP was NOT changed.** The requested switch to `Content-Security-Policy-Report-Only` was
+declined: a CSP already ships and is **enforcing** (`next.config.ts`, live in prod headers).
+Report-only does not block anything, so the change would have removed a working protection.
+
+## [0.5.59.4] - 2026-08-12
+
+### Fixed — EN assistant links pointed at a domain that does not exist
+
+Re-lands the one-line half of v0.5.59.3 (reverted in #419). STORE_URL.en was
+`https://furnishdirect.ca`, which is NXDOMAIN at the .ca registry (verified against CIRA;
+Shopify reports exactly one domain, `ameublodirect.ca`). Every English recommendation from
+the shopping assistant was a dead link. Now `https://ameublodirect.ca/en`, the live EN
+locale — the same fix shipped for the feeds in v0.5.59.1.
+
+Also re-lands `.github/CODEOWNERS` (no runtime effect).
+
+The behavioural half of v0.5.59.3 (draft filter, budget ceiling, empty-state reply,
+in-stock preference) is deliberately NOT re-landed here — it needs live verification, and
+the assistant LLM budget pool was exhausted at the time of writing.
+
+## [0.5.59.2] - 2026-08-12
+
+### Fixed — v0.5.59.1 changed the EN links but NOT the EN brand
+
+v0.5.59.1 shipped locale-aware branding that did nothing. Verified on the live feed right
+after that deploy: all 2 164 EN links moved to `/en/products/`, but every `<g:brand>` still
+read **"Ameublo Direct"**.
+
+Cause: `resolveBrand` keeps a real product vendor (Outsunny, …) over the house brand, and
+Shopify's `vendor` field is set to **"Ameublo Direct" on 100% of products** (250/250 sampled
+2026-08-12). Our own store name was being treated as a third-party manufacturer, so the
+"a real vendor wins" branch fired and pinned the EN feed to the FR brand. The v0.5.59.1
+change only ever applied to products with an empty or "Aosom" vendor — the catalogue has none.
+
+- `resolveBrand` now recognises **either house brand** in the vendor field (case-insensitive)
+  and replaces it with the locale's brand. A genuine third-party vendor still wins.
+- Symmetric guard: an EN-branded vendor cannot leak "Furnish Direct" into the FR feed.
+
+## [0.5.59.1] - 2026-08-12
+
+### Fixed — the EN feed announced one brand and linked to another
+
+The Pinterest EN feed served English titles but pointed every offer at the **French**
+storefront and labelled it **"Ameublo Direct"**. An English shopper landed on a French page,
+and the feed's brand did not match the branding on the page it linked to — the
+brand/landing-page mismatch Pinterest and Google both flag.
+
+- **EN offers now link to the `/en` storefront** — `ameublodirect.ca/en/products/{handle}`,
+  verified live (`200`, `<html lang="en">`, page titled "… — Furnish Direct").
+- **EN house brand is now "Furnish Direct"**, the store's actual EN identity. A real vendor
+  (Outsunny, …) still wins over the house brand, exactly as on the FR feed.
+- **Supplier scrubbing is locale-aware.** `scrubSupplier` took the FR brand unconditionally,
+  so an EN description read "the Ameublo Direct shelter". It now takes the locale's brand.
+- **Channel metadata matches** — the EN feed no longer titles itself "Ameublo Direct".
+
+`furnishdirect.ca` was **not** used: it is **NXDOMAIN** at the .ca registry (verified against
+CIRA 2026-08-12; Shopify reports exactly one domain, `ameublodirect.ca`). Linking there would
+have shipped a dead link for all 2 164 offers. Furnish Direct is the `/en` locale of the same
+store, not a separate site. A test locks the domain out of the feed so it cannot creep back in.
+
+Scope: `preferEnglishTitle` is passed by **`/api/feeds/pinterest-en` only** — no Google EN feed
+exists. The FR feeds are byte-identical; regression tests assert their links keep no `/en`.
+
+## [0.5.59.0] - 2026-08-09
+
+### Fixed — the blog cron fired every week and failed 100% of the time
+
+- **Root cause was not in the pipeline.** `/api/cron/blog` did not generate anything itself:
+  it made an HTTP call back to its own `/api/blog/generate` endpoint, and that self-call was
+  answered with a **401 before the app's own `CRON_SECRET` check ever ran**.
+- **Vercel SSO Deployment Protection is enabled** (`all_except_custom_domains`, no custom
+  domain) but is **not uniform across hosts** — measured on `/api/cron/blog` with no
+  credentials: the **production alias** `aosom-sync.vercel.app` reaches the app (401 from
+  `verifyCronSecret`), while the **per-deployment URL** and the **git-branch alias** both return
+  `302 Redirecting...` from the SSO edge and never reach the app at all. A self-`fetch()` whose
+  origin resolves to either protected host is intercepted; `fetch` follows the 302 into the SSO
+  flow and lands on a 401.
+- **Which host a Vercel Cron invocation presents was not verified.** The old comment in
+  `cron/content/route.ts` asserts `request.url` carries the production origin; that is an
+  assumption, not a measurement. Removing the hop removes every variant of the failure, so the
+  fix does not depend on resolving it.
+- The cron itself was healthy the whole time: 4 runs out of 4 in the 30-day `cron_runs`
+  retention window, every one at its scheduled minute, every one an error. Last article
+  actually created: **2026-06-22**. `blog_publish_counter` was empty — auto-publish had never
+  fired once.
+- The sibling `/api/cron/content` shares the architecture and recorded the smoking gun:
+  `FR: Generation failed (HTTP 401) | EN: Generation failed (HTTP 401)`, 13 runs out of 13.
+  Every cron that does its work **in-process** has zero errors. `content` still has the same
+  defect and is **not** fixed here.
+- Generation now lives in `lib/blog-generator.ts` and the cron calls it directly: no edge
+  round-trip, no protection surface, one function invocation instead of two, and the cron no
+  longer consumes `/api/blog/generate`'s 6/min rate limit. The route stays as a thin wrapper
+  for manual/admin use and now shares the fail-closed `verifyCronSecret` helper.
+
+### Fixed — Monday and Thursday runs picked the same topic
+
+- Moving the cron to twice a week put both runs inside the **same ISO week**, and
+  `selectBilingualTopic` derived its index from the week number alone (`idx = week % 30`).
+  Proven: 2026-08-10 (Mon) and 2026-08-13 (Thu) both resolved to `idx=0`. That would have
+  published near-duplicate articles to a live storefront every week — an SEO duplicate-content
+  problem, not merely wasted spend.
+- The index now advances per **run**: `(week * RUNS_PER_WEEK + slot) % len`, slot 0 for
+  Mon-Wed and 1 for Thu-Sun. `week*2+slot` is a true sequential counter, so the step is
+  exactly 1 and the catalogue still cycles through all 30 topics. A step of 2 would have
+  reached only 15 of 30, because the catalogue size is even.
+- `blog_schedule.posts_per_week` 2 → 4. The cap counts **articles, not bilingual pairs**, so
+  two runs × (FR + EN) needs 4. At 2, the Thursday pair could never publish while still
+  costing two Claude generations plus two judge calls every week.
+
+### Added
+
+- **`blog_posts` table** — one row per generated article (`title`, `lang`, `status`,
+  `shopify_article_id`, `created_at`), including failures. Silent breakage is now visible
+  instead of invisible for seven weeks.
+- **`/blog` dashboard** — the article log with status counts and links into Shopify admin.
+- **`sanitizeArticleHtml`** — strips `script`/`style`/`iframe`/`object`/`embed`/`form`, inline
+  `on*` handlers, and `javascript:`/`data:` URLs from the model's HTML before it is stored.
+  The prompt already forbade these, but a prompt is a request, not a guarantee, and this HTML
+  renders verbatim to every visitor. Applied before the quality judge so it scores what ships.
+
+### Changed
+
+- Blog cron moved to **Mon + Thu 08:00 UTC** (was Tue 15:00 UTC). It stays a **GET**: Vercel
+  Cron only issues GET requests, so a POST handler would never fire.
+- Cron `maxDuration` 180 → 300. All generation is in-process now (~120-160s at p50 for two
+  articles plus two judge calls); a timeout mid-Shopify-create would create an article
+  without logging it.
+- The cron propagates each language's real error into `cron_runs.detail`. The old generic
+  "Both FR and EN blog generations failed" is precisely why the 401 hid for so long.
+
+## [0.5.58.0] - 2026-08-08
+
+### Fixed — `g:availability` was invalid for Google on every item
+
+- Google accepts **only** `in_stock` / `out_of_stock`. The feed was emitting `in stock` /
+  `out of stock` with spaces, which appears in Google's docs as prose, not as a submittable
+  value. All 2182 items carried the wrong form.
+- **Pinterest is the opposite and it is strict too:** it documents `"in stock"` /
+  `"out of stock"` / `"preorder"` with spaces, and `availability` is a *required* attribute.
+  `buildPinterestFeed` delegates to `buildGoogleFeed`, so a one-line fix to Google would have
+  silently invalidated a required field on every Pinterest item. The format is now a
+  parameter (`availabilityValue`), Google gets underscores, Pinterest keeps spaces, and a test
+  asserts each channel independently so the two can never be conflated again.
+- Bing, Reddit, Meta-XML and the Meta JSON feed are untouched and still emit the spaced form.
+
+### Changed — `g:sale_price_effective_date` now uses store-local time with a real offset
+
+- Was an instant pair in UTC (`…T01:51:01Z/…`). Now whole-day boundaries in store-local time:
+  `2026-08-06T00:00:00-04:00/2026-09-05T23:59:59-04:00`, which is how a merchant reads "good
+  for 30 days".
+- **The offset is derived from `America/Toronto`, never hardcoded.** Quebec is `-05:00` in
+  winter and `-04:00` in summer, so a literal `-05:00` would be an hour wrong for eight months
+  of the year. Tests lock EST, EDT, and a window that starts on one and ends on the other.
+
+### Verified as already correct, no change needed
+
+- **`g:id` is already the Aosom SKU** (`String(v.sku)`), e.g. `84C-653V00CG`. The numeric
+  Shopify id is used for `g:item_group_id`, which is what Google wants there — it is the
+  attribute that groups variants of one product.
+- **All ten requested EN→FR colour mappings already existed** in `COLOR_EN_FR` (brown→Brun,
+  grey→Gris, blue→Bleu, red→Rouge, green→Vert, yellow→Jaune, purple→Violet, pink→Rose,
+  orange→Orange, beige→Beige), alongside 18 more.
+- **PDP JSON-LD already emits full schema.org availability URLs** (`https://schema.org/InStock`)
+  and parses clean (0 errors across its 4 blocks, checked in a browser).
+
+## [0.5.57.2] - 2026-08-06
+
+### Changed — the GCR guard now accepts `order` alongside `customers/order`
+
+- `snippets/lc-gcr-optin.liquid` matches either page type. `customers/order` is the one that
+  fires today; `order` is carried so the guard already covers that value should Shopify ever
+  introduce it — it is not in the documented `request.page_type` set as of 2026-08, so on its
+  own it would match nothing. `order != blank` remains the real safety check: no order
+  object, no markup.
+- Re-verified on the draft preview after the change: the GCR script stays absent from the
+  product page, collections, cart and home, and every JSON-LD block still parses.
+
+### Note — the rest of this batch was already live
+
+No code was needed for the other three items; this records where they landed.
+
+- **Structured data, all three blocks** — `Product` and `BreadcrumbList` render on the product
+  page and `WebSite` on the home page, the latter already carrying a complete `SearchAction`
+  (`/search?q={search_term_string}` with `query-input`) for the sitelinks searchbox. Shipped
+  in `v0.5.56.0`.
+- **Sale prices** — the 30-day `sale_price_effective_date` window and the ≥10% floor
+  (`SALE_MIN_DISCOUNT = 0.1`) are both in effect: 32 items carry `sale_price` and 32 carry the
+  matching window. Shipped in `v0.5.55.0` and `v0.5.57.0`.
+- **Variant attributes** — `g:color` on 2160 items (99%), `g:size` on 2104 (96%), `g:material`
+  omitted when empty, which is every item today because no material metafield exists. Shipped
+  in `v0.5.55.0` and `v0.5.57.0`.
+
+## [0.5.57.1] - 2026-08-06
+
+### Added — Google Customer Reviews opt-in on the customer-account order page
+
+- New `snippets/lc-gcr-optin.liquid`, rendered from `layout/theme.liquid`, emitting the GCR
+  survey opt-in (`merchant_id 5804673777`) with the order name, customer email, delivery
+  country and an estimated delivery date of **order date + 8 business days**. Liquid has no
+  business-day arithmetic, so weekends are skipped explicitly: 10 calendar days for a Mon/Tue
+  order, 12 for Wed–Sun, because the run then crosses a second weekend.
+- **Read this before expecting opt-ins.** The guard is `request.page_type ==
+  'customers/order'` — the signed-in customer's "my order" page. It is **not** the
+  post-checkout thank-you page: that page is rendered by Shopify Checkout, not the theme, so
+  `layout/theme.liquid` never executes there. `request.page_type` has no value for it at all;
+  the documented set is `404, article, blog, captcha, cart, collection, list-collections,
+  customers/*, gift_card, index, metaobject, page, password, policy, product, search`. A
+  guard written as `request.page_type == 'order'` would have matched nothing, silently.
+- Practical reach on a mostly-guest-checkout store is therefore small. The routes that reach
+  every buyer remain the Google & YouTube channel app, or a Merchant Center order feed once
+  the token gains `read_orders` — both written up in
+  `docs/GOOGLE-CUSTOMER-REVIEWS-SETUP.md`.
+- Applied to the working draft `161090928745` only; the live theme is untouched. Verified on
+  the draft preview that the script is absent from the product page, collections, cart and
+  home, and that the single Product JSON-LD is unaffected. Passes Shopify Theme Check (one
+  informational warning: Google's `platform.js` is not on the Shopify CDN, which is inherent
+  to GCR).
+
+## [0.5.57.0] - 2026-08-06
+
+### Changed — `g:sale_price_effective_date` window is now 30 days
+
+- Was 7 days. The window is a forward validity declaration anchored to feed-generation time,
+  not a Shopify promotion (`compare_at_price` stores no schedule), and it is superseded by
+  every daily refetch — so the length is a presentation choice rather than a correctness one.
+
+### Changed — `g:material` now comes from a metafield, or not at all
+
+- The previous release derived the material from the description prose (72% coverage). That
+  value read correctly most of the time but it was **inferred, not declared**, and Google
+  treats `material` as a factual product claim. A feed attribute that guesses is worse than
+  one that is absent, so the derivation is removed.
+- `material` is now read from the first Shopify metafield present among `custom.material`,
+  `custom.matiere`, `custom.matière`, `mm-google-shopping.material`. None exists on the store
+  today — verified against `metafieldDefinitions` for both PRODUCT and PRODUCTVARIANT — so
+  **`g:material` is currently emitted on 0 items, down from 1572.** Define any one of those
+  metafields and it starts flowing with no code change.
+- The lookup is gated on a definition existing, so it costs one cheap GraphQL call and never
+  paginates while no material metafield is defined. It also swallows its own errors: a
+  metafield lookup must degrade to an omitted attribute, never take the feed down.
+
+### Documented — Google Customer Reviews: the extension route, and the one that works
+
+- A Thank-you page UI extension is the right *shape* under Checkout Extensibility but cannot
+  host GCR: extensions run in a **sandboxed Web Worker with Shopify-managed components**,
+  while GCR's opt-in loads Google's own JS and renders into the page DOM. No third-party
+  script, no DOM, and Google exposes no server-side opt-in endpoint to POST to instead. The
+  runbook now says explicitly not to scaffold it.
+- The route that does work is a **Merchant Center order feed** — no page script, and it takes
+  exactly the fields wanted (order id, email, country, estimated delivery = order + 8
+  business days). Specified in the runbook, not merged, for two reasons: the Shopify token
+  has **no `read_orders` scope** (403, "requires merchant approval"), and an order feed
+  carries customer emails, so it must be excluded from the public `/api/feeds` allowlist and
+  gated behind auth — a PII surface worth getting right deliberately rather than blind.
+
+## [0.5.56.0] - 2026-08-06
+
+### Added — `g:material` and `g:sale_price_effective_date` in the Google feed
+
+- **`g:material`** — the catalog has no Material option and no material metafield (checked
+  across every namespace in use), so the value is read from the description prose against a
+  closed whitelist of the ~29 materials this catalog actually contains. Ordered
+  most-specific first so "acier galvanisé" beats "acier", and matched on **word boundaries**
+  over accent-stripped text — a plain substring test makes "fer" fire inside "offert",
+  "fermé" and "différent". Coverage: **1572 of 2182 items (72%)**, led by polyester (375),
+  métal (309), acier (233) and MDF (203).
+- **`g:sale_price_effective_date`** — emitted alongside `g:sale_price` as an ISO 8601
+  interval. Shopify's `compare_at_price` stores no schedule, so this is not a promotion
+  being reported: it is a 7-day forward validity window anchored to feed-generation time.
+  That holds because the feed is rebuilt on every fetch and Google re-fetches daily, so
+  ending a sale drops both attributes from the next feed.
+
+### Changed — product JSON-LD moves to the page `<head>`
+
+- New `snippets/lc-structured-data.liquid`, rendered from `layout/theme.liquid` before
+  `</head>` so the markup sits where crawlers read it first. The content is the canonical
+  schema previously rendered from `sections/main-product.liquid`; that render call is
+  removed, so exactly **one** Product entity exists per URL — two would make Google pick
+  arbitrarily.
+- The snippet is guarded on `product`, because `theme.liquid` runs on every page. Verified
+  on the draft preview: the product page emits 1 Product schema in `<head>` with `sku`,
+  `mpn`, `color`, brand = the shop (never the supplier) and `aggregateRating` correctly
+  absent at 0 reviews; collections, cart, search and home emit **zero** Product schemas.
+- Applied to the working draft `161090928745` only; the live theme is untouched.
+
+### Documented — Google Customer Reviews cannot use "additional scripts"
+
+- `docs/GOOGLE-CUSTOMER-REVIEWS-SETUP.md` now cites Shopify's changelog directly: additional
+  scripts on the Thank-you / Order-status pages were **removed on 2025-08-28**, and are the
+  thing Checkout Extensibility replaced rather than its modern route. Re-verified on the live
+  store: plan `basic`, no `checkout.liquid`, no order-status template, 0 ScriptTags scoped to
+  `order_status`. A Web Pixel cannot host it either — GCR's opt-in renders a widget and
+  pixels run sandboxed with no top-frame DOM. The Google & YouTube channel app remains the
+  only supported path.
+
+## [0.5.55.0] - 2026-08-06
+
+### Added — sale prices and variant attributes in the Google feed
+
+- **`g:sale_price`** — Google only draws a strikethrough "was" price when the feed splits
+  the pair, so a discounted item now ships `g:price` = the regular price and
+  `g:sale_price` = what the shopper actually pays. 32 catalog items qualify today.
+- The split applies only at **10% off or more**, mirroring the storefront, which shows its
+  own strikethrough at the same threshold. Google crawls the landing page and compares it
+  to the feed; claiming a sale the page does not display invites a price-mismatch
+  disapproval. The 2 items discounted below the floor keep the single-price shape.
+- **`g:size`** — new, from the Shopify "Taille" option. 2106 of 2184 variants (96%).
+- **`g:color`** now prefers the Shopify "Couleur" option over the 2-letter SKU suffix,
+  which lifts coverage from 80% to **97%** and distinguishes "Gris foncé" from "Gris".
+  English option values inherited from the supplier ("Rustic Brown", "Charcoal Grey",
+  "Multi Colour") are translated token by token for the French market; unknown values pass
+  through unchanged rather than being dropped.
+
+### Added — `mpn` in the product-page structured data
+
+- The PDP JSON-LD (`snippets/agentic-structured-data.liquid`) now carries `mpn` alongside
+  `sku`, so the page declares the same brand + MPN identifier pair the Google feed does.
+  Applied to the working draft theme `161090928745`; the repo mirror is re-synced from it.
+
+### Not shipped, and why
+
+- **`g:sale_price_effective_date`** is omitted. Shopify's `compare_at_price` carries no
+  start or end timestamp, so there is no schedule to publish — emitting a window would mean
+  inventing dates.
+- **`g:material`** is omitted. The catalog has no Material option and no material metafield;
+  parsing it out of description prose reached 1% coverage with visible bleed between fields.
+
+## [0.5.54.40] - 2026-08-06
+
+### Fixed — strip promotional shipping claims from every shopping feed
+
+- Google prohibits promotional text in the `title` and `description` attributes, naming
+  "free shipping" as its example. 18 live Google-feed descriptions carried a
+  "Livraison gratuite partout au Canada" tail (written into the Shopify copy at import
+  time), making those offers non-compliant even though their price and link are correct.
+  `stripPromoText` now removes the claim in the feed layer, so all seven feeds (Google,
+  Bing, Pinterest FR/EN, Meta, Meta-XML, Reddit) ship compliant copy.
+- Scrubbed in the feed only, never in Shopify: the storefront may legitimately advertise
+  free shipping, only the feed must not.
+- Matched conservatively — the trailing qualifier is an explicit word list, never a greedy
+  run. Verified against all 2188 live descriptions: 18/18 cleaned, 0 residual, and 0 of the
+  2170 clean descriptions altered. Legitimate copy such as "Livraison en 3 à 5 jours
+  ouvrables" or "Frais de livraison calculés à la caisse" survives untouched, and French
+  spacing before `:` / `!` / `?` is preserved. (`src/lib/feeds/source.ts`, +16 tests.)
+
+## [0.5.54.39] - 2026-08-05
+
+### Added — two read-only diagnostics for the Google Merchant "Product page unavailable" flags
+
+- `scripts/google-feed-handle-diagnostic.mjs` answers whether the feed's product URLs
+  drift from the storefront's real handles. It rebuilds the feed items exactly as
+  `src/lib/feeds/source.ts` emits them, compares each one against Turso's
+  `products.shopify_handle`, and HTTP-checks a live sample. Verdict on the 267 flagged
+  products: they are stale Merchant Center ghosts, not broken pages. The feed reads
+  `p.handle` live from the Shopify Admin API and never touches `shopify_handle`, so
+  handle drift is impossible by construction — no code fix was needed.
+- `scripts/google-feed-url-sweep.mjs` is the wider net: it HTTP-checks every current
+  feed URL against the live storefront and reports the status breakdown.
+- Both scripts write nothing, anywhere. They pace Shopify Admin calls at 550ms (the
+  ≤2 req/s ceiling) and retry storefront 429s with `Retry-After` backoff, keeping any
+  still-throttled URL in its own bucket. That last part matters: a rate-limited sweep
+  would otherwise report throttling as mass page-unavailability and send you chasing a
+  bug that isn't there. Requests carry a 20s timeout so one hung connection can't stall
+  a 1000-URL run.
+
+Operator tooling only — `scripts/` is outside the Next build, so nothing about the
+running app changes.
+
+## [0.5.54.38] - 2026-07-21
+
+### Changed — raise the assistant LLM budget-pool default 200k → 500k
+
+- The `assistant` pool's default daily budget (`LLM_ASSISTANT_DAILY_BUDGET`) is now 500k
+  (was 200k). A day of normal storefront traffic plus operator QA of the live assistant
+  exhausted the 200k pool, fail-closing `/api/assistant` with 500 until the 00:00 UTC reset.
+  500k gives comfortable headroom; the pool is still isolated from `batch`, so a bulk import
+  can never touch it. Deploying this immediately restores an assistant that hit the old cap
+  (used < 500k). (`src/lib/llm-budget.ts`, test updated.)
+
+## [0.5.54.37] - 2026-07-21
+
+### Improved — AI assistant refines across turns + indoor/outdoor intent
+
+- Verified the conversation history the widget sends is actually forwarded to Claude (route →
+  `runAssistant` → model `messages`), and added a regression test locking that in.
+- System prompt now (a) treats the chat as multi-turn: apply EVERY constraint given so far
+  (room, budget, colour, size) and search again with accumulated filters when the shopper adds
+  one, instead of repeating the same picks; (b) matches setting to intent — indoor room cues →
+  indoor furniture, patio/garden cues → outdoor, don't mix. (`src/lib/assistant.ts`, +2 tests.)
+
+### Added — Pinterest Tag (storefront ScriptTag + checkout Custom Web Pixel), mirrors Meta
+
+- `PINTEREST_TAG_ID` (numeric, from Pinterest Ads Manager) gates both halves; unset ⇒ inert no-op.
+- Storefront events (page / pagevisit / viewcategory / search / addtocart) via a ScriptTag →
+  `/api/pixel/pinterest-script` (loads `pintrk`). `product_id` = `variant.sku` = the Pinterest feed
+  `g:id` (same SKU as the Meta catalog). Route is public (`proxy.ts` allowlist).
+- `/api/pixel/install` now manages BOTH tags (Meta + Pinterest) — POST installs both, GET reports
+  both (`pinterest` sub-object; Meta fields stay top-level), DELETE removes both. Lib:
+  `src/lib/pinterest-pixel.ts`.
+- Checkout conversion via a Custom Web Pixel: `docs/pinterest-custom-web-pixel.js` (paste into
+  Settings → Customer events; replace the tag-id placeholder). Same lax-sandbox constraint as Meta
+  — sends `checkout` via `fetch()` to `https://ct.pinterest.com/v3/`, not the `pintrk` SDK.
+  (`config.ts`, `.env.example`, `CLAUDE.md`, +3 route tests.)
+
+## [0.5.54.36] - 2026-07-20
+
+### Fixed — split the LLM daily budget into isolated pools (assistant vs batch)
+
+- A bulk import could exhaust the single shared `daily_llm_budget` counter and take the
+  **public storefront assistant** (`/api/assistant`) down with a 500 until the 00:00 UTC
+  reset — imports and shoppers drew from the same fail-closed cap.
+- The budget is now two independent pools, keyed by `(UTC day, pool)` in the same
+  `daily_llm_budget` table: **`assistant`** (only `/api/assistant`, `LLM_ASSISTANT_DAILY_BUDGET`,
+  default 200k) and **`batch`** (imports, product/blog content, social, slideshow/video, vision
+  — everything else, `LLM_DAILY_TOKEN_BUDGET`, default 1.3M). A bulk `batch` run can no longer
+  starve the `assistant` pool.
+- `budgetedCreate(client, params, options?, pool="batch")` — pool defaults to `batch`, so a new
+  caller can never accidentally spend against the assistant reservation; only `assistant.ts`
+  passes `"assistant"`. `assertLlmBudget`/`recordLlmUsage`/`getDailyLlmTokensUsed`/`addDailyLlmTokens`
+  are all pool-scoped.
+- Guarded migration rebuilds the legacy `day PRIMARY KEY` table to composite `(day, pool)`,
+  assigning all pre-split usage to `batch` — so the `assistant` pool starts fresh and the
+  endpoint recovers immediately on deploy instead of waiting for 00:00 UTC.
+  (`llm-budget.ts`, `database.ts`, `assistant.ts`, +9 budget tests incl. pool isolation.)
+
+## [0.5.54.35] - 2026-07-20
+
+### Fixed — import pipeline: variant-option collisions + import-job id
+
+- `createShopifyProduct` 422'd ("variant already exists") for PSIN groups whose two SKUs map
+  to the same (Couleur, Taille) pair (e.g. `B30-054V00BK`/`V01BK`). New `dedupeVariantOptionLabels`
+  suffixes the 2nd+ identical pair so every variant stays distinct and the product imports.
+- `queueForImport` hit "Job not found" re-importing a previously-failed group: `upsertImportJob`'s
+  `ON CONFLICT(group_key)` keeps the existing row's id, so the fresh UUID was orphaned. It now
+  `RETURN`s the real id and `queueForImport` uses it. (`shopify-client.ts`, `database.ts`, `import-pipeline.ts`.)
+
+## [0.5.54.34] - 2026-07-19
+
+### Fixed — AI assistant returns curated FR titles
+
+- `/api/assistant` recommended products showed the raw ENGLISH Aosom catalog title inside
+  the French UI. `resolveCards` now resolves the curated Shopify FR `product.title` by handle
+  (one GraphQL round-trip for the final 3-4 picks) when `locale=fr`; EN is unchanged. Non-fatal:
+  falls back to the catalog name if the lookup fails. (`src/lib/assistant.ts`, +4 tests.)
+
+## [0.5.54.33] - 2026-07-19
+
+### Fixed — `/api/assistant` reachable from the storefront (proxy allowlist)
+
+`src/proxy.ts` PUBLIC_PATHS now includes `/api/assistant`. The auth gate (this app uses
+`proxy.ts`, not `middleware.ts`) was 307-redirecting the storefront shopping-assistant
+widget + PDP "Complétez la pièce" to `/login`, so they were non-functional in production
+after 0.5.54.32. The route self-guards (server-side Origin allowlist, per-IP + global rate
+limits, daily LLM token budget), so making it public is safe. Regression test added
+(`tests/proxy-public-paths.test.ts`) pinning `/api/assistant` public + a private route still
+redirecting.
+
+Note: a prior `/cso` pass flagged `/api/collections/mappings`, `/api/notifications`, and
+`/api/insights` as unauthenticated — those were **false positives**: `proxy.ts` already
+307-gates them to `/login` (verified against prod). No change needed there.
+
+## [0.5.54.32] - 2026-07-19
+
+### Added — "Trouvez le meuble parfait" AI shopping assistant + PDP complementary section
+
+A bilingual (FR/EN) shopping advisor that recommends real catalog products, plus a
+storefront chat widget and a PDP "Complétez la pièce" section (draft theme `161069989993`).
+
+- **`POST /api/assistant`** (`src/app/api/assistant/route.ts` + `src/lib/assistant.ts`) — a
+  **bounded Claude tool-use loop** (`claude-sonnet-4-6`) over the Turso catalog. A
+  `search_catalog` tool returns only imported products with a storefront handle (real PDP
+  links); the model replies with 3-4 picks + a FR/EN reason per product. `runComplementary`
+  powers the PDP section (3 items from other categories).
+- **Public-endpoint hardening** (no auth — called from the storefront): server-side Origin
+  gate (CORS headers alone don't stop a direct caller), rate-limit keyed on `x-real-ip` /
+  last XFF hop (never the spoofable first hop), a global cost backstop, `MAX_STEPS` capped,
+  strict input caps, and a "model cannot invent a product" guarantee (picked SKUs are
+  resolved against the pool the tool actually returned — name/price/image/URL never come
+  from model text). 16 unit tests.
+- **Theme (draft `161069989993`, applied via Asset API — not in this PR):**
+  `snippets/lc-assistant-widget.liquid` (floating "🛋️ Aide au choix / Help me choose"
+  button + navy/gold chat modal) wired into `theme.liquid`; `snippets/lc-complete-the-room.liquid`
+  wired into `main-product.liquid`. All model-emitted text is rendered via `textContent`/escape
+  (no DOM-XSS). Widget/PDP call the endpoint, so they are live only after this deploys.
+
+### Added — "Prix en baisse" price-drop badge on collection cards
+
+`snippets/card-product.liquid` (draft `161069989993`): a gold, bottom-left "📉 Prix en baisse /
+Price drop" badge shown when `product.metafields.custom.price_badge == "price_drop"`, styled
+identically to the existing `-X%` badge, added to both the media and no-media card blocks.
+
+- **`/api/assistant` routes through the global LLM budget** (`budgetedCreate`, added in
+  0.5.54.31) so this public endpoint's Claude calls also respect the daily token cap.
+
+## [0.5.54.31] - 2026-07-18
+
+### Security — 3 CSO audit findings fixed
+
+- **Finding 1 (LLM output trust boundary):** `sanitizeHtml()` (`content-generator.ts`)
+  now strips executable/XSS vectors (`script`/`style`/`iframe`/`object`/`embed` blocks,
+  `on*=` handlers, `javascript:`/`vbscript:` URLs) on top of the existing content cleanup,
+  and is applied to Claude's **output** `descriptionFr`/`descriptionEn` before they are
+  written to Shopify `body_html` (rendered unescaped on the storefront) — closing the
+  stored-XSS gap where input was sanitized but output was not. `sanitizeHtml` exported + tested.
+- **Finding 2 (global Anthropic spend cap):** new `src/lib/llm-budget.ts` — `budgetedCreate()`
+  asserts a daily token budget (`LLM_DAILY_TOKEN_BUDGET`, default 500k) before every Claude
+  call (fail-closed when exceeded; fail-open only when the counter store is unreachable) and
+  records input+output tokens after. Counter persisted in Turso (`daily_llm_budget`, keyed by
+  UTC day → resets 00:00 UTC) so the cap holds across Fluid Compute instances. All 11 runtime
+  `messages.create()` sites routed through it; added `checkRateLimit` to the previously
+  uncapped `/api/social/content/generate`.
+- **Finding 3 (SESSION_SECRET mandatory):** `auth.ts` drops the `AUTH_PASSWORD` fallback for
+  session signing — sessions fail closed when `SESSION_SECRET` is unset, closing the
+  known-plaintext oracle. ⚠️ **`SESSION_SECRET` must be set in the Vercel prod env before
+  this deploys, or login breaks for both users.**
+
+## [0.5.54.29] - 2026-07-18
+
+### Added — 3 conversion features (30-day price badge, back-in-stock waitlist, orphan menu collections)
+
+**Feature 1 — 30-day price badge.** The daily sync now tags each price-changed product
+with a `custom.price_badge` metafield the PDP renders under the price:
+- `src/lib/database.ts` — `getPriceBadge(skus)` / `decidePriceBadge(current, min30, reference)`
+  compute `best_30d` (current price = the 30-day low) or `price_drop` (below the reference
+  price ~30 days ago, but not the low), else nothing. Retention-aware: since `price_history`
+  is pruned to 30 days, the reference falls back to the oldest-in-window `old_price` when no
+  row precedes the cutoff. A flat-price product with no recorded change gets no badge — the
+  badge is a recent-price-activity signal, not a label on every price.
+- `src/lib/shopify-client.ts` — `setProductMetafield` (single-call nested-PUT upsert, verified
+  in-place) / `deleteProductMetafield` (list + delete by namespace/key, no-op when absent).
+- `src/jobs/job1-sync.ts` — `applyToShopify` writes/deletes the badge for each price-changed
+  product. Non-fatal: a badge write never fails an already-successful price/stock push.
+- `tests/price-badge.test.ts` — `decidePriceBadge` branch coverage + SQL-shape coverage.
+
+**Theme (applied to the working DRAFT `161062551657` only — not in this diff):**
+- Feature 1: bilingual badge (💚 Meilleur prix des 30 derniers jours / 📉 Prix en baisse,
+  and EN equivalents) under the price on the PDP.
+- Feature 2 — back-in-stock waitlist: on an out-of-stock PDP the ATC button is replaced by a
+  bilingual "Avertissez-moi / Notify me" email form that POSTs to `/api/waitlist`
+  `{email, sku, shopify_product_id}` (double opt-in). Replaced the earlier FR-only draft form.
+
+**Feature 3 — orphan collections in the mega-menu (store-level `menuUpdate`, applied):**
+"Véhicules pour enfants" (`enfants-vehicules`) under Enfants & Jouets and "Chauffage"
+(`electro-chauffage`) under Électro & Tech in `taxonomie-categories`. All 9 top-level items
+preserved by ID. Chips verified via Playwright on `/collections/enfants` and
+`/collections/electro-et-tech`.
+
+## [0.5.54.28] - 2026-07-18
+
+### Added — automatic pos-1 image compliance (marketing-overlay auto-swap)
+
+The daily sync now polices the primary (pos-1) product image the way the 141 manual
+swaps did, automatically. After products are written, it classifies the newest
+never-checked live products' pos-1 image with `claude-sonnet-4-6` and, when that image
+carries a **marketing text overlay** (slogans, prices, badges, added logos — diegetic
+text like a brand engraved on the product or a book title in the scene is explicitly
+excluded), swaps in the first clean image from the gallery (`PUT` position:1 + verify,
+the same mechanism as the manual pass). Every swap is recorded in `sync_logs`.
+
+- **`src/lib/vision-classifier.ts`** — `classifyProductImage(url)` → `{ compliant, reason }`,
+  the strict validated overlay prompt. Throws on download/API/parse failure so a failed
+  classification is never mistaken for a clean image.
+- **`src/lib/image-compliance.ts`** — `runImageCompliance()` orchestrator. Cost-guarded at
+  **20 Claude calls/run** (shared across pos-1 checks + the gallery scan), newest-import-first
+  (`products.created_at DESC`), fully non-fatal. A product is stamped checked only once it is
+  genuinely resolved (compliant / verified swap / whole-gallery-had-no-clean-image); transient
+  Shopify failures and budget-truncated scans stay unstamped so a later run retries instead of
+  abandoning a live overlay.
+- **`src/lib/shopify-client.ts`** — `fetchProductImages` + `moveImageToFirstPosition`.
+- **`src/lib/database.ts`** — `image_checked_at` column (guarded migration; reset to NULL in
+  `refreshProducts` when `image1` changes, NULL-safe) + `getImageComplianceCandidates`
+  (deduped per Shopify product) + `markImageChecked`.
+- **`src/jobs/job1-sync.ts`** — wired after `refreshProducts` in `runSync` (manual, gated on
+  Shopify push) and in `runSyncFinalize` (daily cron, once per sync).
+- Tests: 20 new unit cases (classifier + orchestrator). No token → true no-op.
+
+## [0.5.54.27] - 2026-07-17
+
+### Fixed — strip the EN preamble platform-label from social captions
+`stripLeadingPlatformLabel` (and therefore `cleanSocialCaption`, used by every
+caption path: product posts, content templates, publish-time Reel captions, and
+the EN content route's `stripScaffold`) now also removes the English preamble form
+the model sometimes prepends — **"This is your Facebook post"**, "Here's your
+Instagram post", "Here is your …", "Below is your …" — immediately followed by a
+`<Platform> post` / `Post <Platform>` label. The plain `Facebook post:` /
+`Instagram post:` forms were already stripped; this closes the EN-preamble gap so
+those labels no longer publish at the top of an English caption.
+
+- The preamble is optional and only matches when a platform label follows it, so a
+  real opener like "This is your chance…" or "Here's your weekend project:" is left
+  untouched (regression tests added).
+- **`src/lib/strip-markdown.ts`** — extended the leading-label regex with an
+  optional EN preamble group.
+
+## [0.5.54.26] - 2026-07-14
+
+### Changed — `/api/ugc-videos` returns up to 15 videos, active-only, live handles
+The homepage UGC reel now returns **up to 15** products (was 5). Each is verified **live on
+Shopify** (`status: "active"` — draft/archived skipped) and its **PDP handle + price come from
+the live Shopify record** (authoritative), not Turso. Extra candidates are pulled as headroom so
+we still reach 15 when some drop out; if fewer than 15 clean CA/US active candidates exist, the
+best available are returned.
+
+- **`src/lib/selectors/shopify-product.ts`** — `resolveProductFields` now also returns `handle`,
+  `status`, and `price` from the same single cached fetch (`?fields=…,handle,status,variants`).
+- **`src/lib/ugc-reel.ts`** — filters to `status === "active"`, uses the authoritative Shopify
+  handle, pulls `count + 8` candidates; default count 15.
+- **`src/app/api/ugc-videos/route.ts`** — requests 15.
+
+## [0.5.54.25] - 2026-07-14
+
+### Added — `runPublishReconcile`: publish imported products that sit unpublished
+`createShopifyProduct` only auto-publishes to the Online Store **at creation**; flipping an
+existing product draft→active does NOT publish it, and legacy pre-`beb00b4` (2026-06-07) draft
+imports never activated stay hidden. This reconcile (the inverse of `stale-catalog`) publishes
+every imported product sellable in **today's** Aosom CSV that is either `draft` (untagged) or
+`active`-but-unpublished. It excludes `auto-drafted` (intentional aosom-sync drafts) and
+`exclude-stale`, publishes only `stockBufferQty>0` items (no oversell), guards on the same
+`assertFeedComplete` (FEED_MIN_COVERAGE 0.70) as `stock-check`, and caps writes at 67/run.
+
+- **`src/lib/publish-reconcile.ts`** — pure `computePublishReconcile` (dependency-injected,
+  unit-tested) + `runPublishReconcile({apply})`; DRY-RUN by default. `PUBLISH_WRITE_CAP=67`.
+- **`src/lib/shopify-client.ts`** — `publishShopifyProduct` (REST `published:true`, optional
+  draft→active) + `fetchProductPublishStates` (id/status/published/tags in one paginated pass).
+- **`src/app/api/cron/publish-reconcile/route.ts`** — `GET` dry-run; `?apply=1` publishes.
+  Bearer `CRON_SECRET`, 2 req/sec. **Not** on any cron schedule (operator-triggered only).
+- **`tests/publish-reconcile.test.ts`** — 11 tests (publish/activate targets, all exclusions,
+  write-cap deferral). Verified e2e against prod: guard passes at 80.7% coverage, 47 candidates.
+
+## [0.5.54.24] - 2026-07-14
+
+### Changed — `/api/ugc-videos` serves the live Shopify variant price
+The reel card price now comes from the live Shopify first-variant price (fetched alongside the
+EN-title metafield), not the daily-synced Turso `products.price`, so cards match the PDP exactly.
+Turso price remains a last-resort fallback.
+
+- **`src/lib/ugc-reel.ts`** — `resolveShopifyPrice()` (`/products/{id}.json?fields=variants`),
+  resolved in parallel with the EN title.
+
+## [0.5.54.23] - 2026-07-14
+
+### Added — `/api/ugc-videos` (homepage "Voyez-le chez vous" UGC video reel — backend)
+Public, edge-cached storefront endpoint that returns the 5 most-in-stock products carrying a
+clean CA/US customer unboxing video (`products.video_ugc`), each with curated FR + EN titles,
+price, PDP handle, and a clean `cdn.shopify.com` image. Backs the coming theme video-reel
+section. Titles resolve from Shopify (curated), never from the raw English `products.name`.
+
+- **`src/lib/database.ts`** — `getUgcVideoCandidates()`: video_ugc products, CA/US-only (source
+  country parsed from the `/customer/{CC}/` URL path — FR/Skeepers forbidden, UK/DE excluded),
+  in stock, live on Shopify, most-in-stock first.
+- **`src/lib/ugc-reel.ts`** — `getUgcVideoReel()`: enriches each with FR title + `cdn.shopify.com`
+  image (via `resolveProductFields`) and EN title (via `custom.title_en` metafield, FR fallback).
+- **`src/app/api/ugc-videos/route.ts`** — GET, CORS allow-listed to storefront origins,
+  `Cache-Control: s-maxage=1800` so Shopify is hit ~1×/30 min, not per homepage load.
+- **`src/proxy.ts`** — `/api/ugc-videos` added to the public allowlist.
+
+## [0.5.54.22] - 2026-07-14
+
+### Fixed — social caption: strip platform label even when an emoji precedes it
+`stripLeadingPlatformLabel` anchored its leading skip on `\s*` (whitespace only), so a
+caption like `"🌿 Post Facebook ⏳ <hook>"` — an emoji BEFORE the label — never reached the
+label token and published with the label still attached (draft #680). The anchor now uses
+`[^\p{L}\p{N}]*`, which skips leading emoji/punctuation too while still stopping at the first
+letter/number, so the label must remain the first *word* (a real opening word like
+`"Salut 🌿 Post Facebook…"` never matches). Regression tests added for the emoji-prefixed
+case and the negative (real-word-first) case.
+
+- **`src/lib/strip-markdown.ts`** — leading anchor `^\s*` → `^[^\p{L}\p{N}]*`.
+- **`tests/strip-markdown.test.ts`** — +2 cases (emoji-prefixed strip, real-word-first no-op).
+
+## [0.5.54.21] - 2026-07-14
+
+### Fixed — social posts auto-generate again (daily pending sweep + batch)
+Since the `lifestyle-verified` gate landed (#340, 2026-07-05), the per-event social
+triggers (`new_product` on import, `price_drop` on sync) evaluated the one just-changed
+product — which isn't verified yet (classification runs later) — so they skipped and the
+event was lost forever (no re-trigger). Result: `new_product` drafts stopped 2026-07-01
+and `price_drop` = 0 in 30 days despite 287 qualifying drops; only the daily
+random-highlight cron survived.
+
+- **`src/lib/database.ts`** — new `getPendingSocialCandidates()`: recently **imported**
+  products (joined via `import_jobs.shopify_id`, the real Shopify-import time — not
+  `products.created_at`, which only tracks first feed appearance) first, then recent
+  **≥ threshold price drops** (`price_history`), both in-stock, live, and not posted within
+  `social_min_days_between_reposts`.
+- **`src/jobs/job4-social.ts`** — new `generateSocialBatch(count=3)`: sweeps pending
+  candidates (re-firing the dropped import/price-drop events now that the products are
+  verified) then tops up with random stock highlights. `triggerStockHighlight(count=1)` is
+  now a batch (returns an array); `triggerPriceDrop` now marks the product posted (prevents
+  a same-run double post). Per-candidate try/catch + a wall-clock budget so one bad draft
+  can't abort the batch or blow the cron timeout.
+- **`/api/cron/social`** now runs `generateSocialBatch(3)` daily (`maxDuration` 200→300s);
+  **`/api/social`** `generate` makes `stock_highlight` a batch (`count`); the dashboard
+  **"Generate Highlights"** button generates 3 per click.
+- **Note:** `social_price_drop_threshold` = 10 (%). Price drops weren't zero for lack of
+  drops (287 ≥10% in 14 days) — the gate skipped them all; the sweep recovers them.
+
+## [0.5.54.20] - 2026-07-13
+
+### Chore — re-point theme IDs after the 2026-07-13 conversion/UX publish
+Published the conversion + UX-polish draft to live (`160944193641` "DRAFT CONVERSION 2026-07-13").
+Re-pointed the tooling constants so the `apply-*.mjs` production guard protects the right theme:
+
+- **`scripts/_shopify-lib.mjs`** — `LIVE_THEME_ID` `160749813865` → `160944193641`;
+  `DRAFT_THEME_ID` `160856965225` → `160945012841` (fresh `themeDuplicate` of the new live);
+  `BACKUP_THEME_ID` `160656818281` → `160749813865` (the just-demoted previous live = rollback target).
+- **`CLAUDE.md`** — new "Shopify theme IDs (live vs draft)" section documenting the current
+  live/draft/backup IDs and the "roles move on every publish — trust themes.json, not names" rule.
+
+## [0.5.54.19] - 2026-07-13
+
+### Fixed — Custom Web Pixel Purchase now saves + fires (sandbox-safe fetch beacon)
+The `docs/meta-custom-web-pixel.js` Purchase pixel wouldn't save in Shopify Admin →
+Customer events: custom pixels run in a **lax sandbox** (iframe, no top-frame DOM), so
+the `fbq`/`fbevents.js` SDK loader is rejected. Rewrote the send path to a `fetch()`
+beacon to `https://www.facebook.com/tr/` (Meta's noscript GET mechanism) — no SDK, no
+DOM. Data extraction is unchanged (SKU `content_ids` + `contents`, `value`, `currency`,
+`num_items`, `eid`=checkout token for phase-2 CAPI dedup); page URL from
+`event.context.document.location`. All expressions single-line, no `undefined` literal
+(the pixel editor's linter rejects both). Verified end-to-end: real $0 checkout →
+Purchase **Processed** in Meta Test Events (dataset `214720653324969`).
+
+- **`CLAUDE.md`** — new "Meta Pixel" section documenting the two-part setup: ScriptTag
+  (storefront events) + the **manually-installed** Custom Web Pixel (Purchase); the repo
+  file is only the paste-source, there is no code/API path that installs it.
+
+## [0.5.54.18] - 2026-07-12
+
+### Fixed — Meta Pixel `content_ids` now match the catalog; Purchase fires again
+The storefront pixel sent the numeric Shopify `variant.id` for `content_ids`, but the
+Meta catalog (`384890002574549`) keys products on `retailer_id` = the **SKU** (e.g.
+`01-0901`), so ViewContent/AddToCart never matched the catalog. Purchase never fired at
+all: ScriptTags no longer run on the Checkout-Extensibility Thank-You page.
+
+- **`src/app/api/pixel/script/route.ts`** — `content_ids` now use `variant.sku`
+  everywhere. ViewContent reads the **selected** variant (`?variant=`), not always
+  `variants[0]`. AddToCart resolves the added variant's SKU + price (reads the form
+  field or the `/cart/add` `FormData`/`URLSearchParams` body), dedupes the
+  submit-plus-fetch double-fire on AJAX themes, and converts `value` to the buyer's
+  presentment currency via `Shopify.currency.rate`. The dead `window.Shopify.checkout`
+  Purchase block is removed.
+- **`docs/meta-custom-web-pixel.js`** (new) — Custom Web Pixel for Settings → Customer
+  events. Subscribes to `checkout_completed` and fires Purchase with SKU-based
+  `content_ids`, `value`, `currency`, and an `eventID` (checkout token) for future
+  Conversions API dedup. Paste-once, manual admin step.
+
+## [0.5.54.17] - 2026-07-09
+
+### Security — session tokens signed with a dedicated `SESSION_SECRET`
+Closes the CSO audit's one HIGH finding: the dashboard session cookie was signed
+(HMAC-SHA256) with `AUTH_PASSWORD`, the same low-entropy human login password that
+also backs the emergency admin login. Because a token's payload (`ts:role:username`)
+is non-secret, any holder of one valid token (e.g. the seeded Meta-review `reviewer`
+account) could brute-force `AUTH_PASSWORD` offline from that known-plaintext/signature
+pair, then forge an admin token — bypassing the login rate limiter entirely.
+
+- **`src/lib/auth.ts`** now signs and verifies with `process.env.SESSION_SECRET`,
+  falling back to `AUTH_PASSWORD` only when `SESSION_SECRET` is unset (deploy safety —
+  no login lockout, keeps behavior unchanged until the env var is set). The value is
+  trimmed, and a `< 32`-char or whitespace-only secret is rejected (falls back + warns)
+  so a fat-fingered env line can't silently become a weak signing key.
+- **`.env.example`** documents `SESSION_SECRET` (`openssl rand -hex 32`).
+- Tests: `auth-session-secret.test.ts` proves an `AUTH_PASSWORD`-forged token is
+  rejected once `SESSION_SECRET` is set; `auth-session-secret-fallback.test.ts` proves
+  the whitespace-trim fallback.
+
+> ⚠️ **Deploy action required:** set `SESSION_SECRET` in Vercel **Production AND Preview**
+> (`openssl rand -hex 32`) for the fix to take effect. Until it is set, signing falls back
+> to the old `AUTH_PASSWORD` key. Setting it logs out existing sessions once (re-login);
+> the emergency admin login is unaffected (it validates `AUTH_PASSWORD` independently).
+
+## [0.5.54.16] - 2026-07-09
+
+### Changed — oversell-guard hardening (threshold, guard alert, post-write canary)
+Three fixes on top of the sweep, driven by a live prod audit of the oversell protection:
+
+- **Feed-completeness threshold 0.80 → 0.70** (`inventory-sweep.ts`, `stock-reconcile.ts`). The live
+  Aosom feed dips to ~79.9% on truncated days (the 2026-07-08 stock-check false-aborted at 996/1247).
+  70% still blocks a genuinely broken/half-downloaded CSV from mass-flipping the catalog, but stops
+  skipping protection on normal feed wobble. `removed-catalog.ts` kept at 0.80 on purpose — it *drafts*
+  products (harder to reverse than a zeroed inventory the sweep self-heals).
+- **Guard-trip notification.** When the sweep aborts on low coverage it now raises a dashboard
+  notification ("Sweep aborté — couverture feed X% < seuil Y%") via `createNotification`, so a real
+  truncation is never a silent success. Wrapped in `safeNotify` — a notification write failure degrades
+  to a log, never crashes the cron.
+- **Post-write verification canary.** After writing, the sweep re-reads a sample (≤10) of the
+  just-written variants via the new `readInventoryLevels()` Shopify helper and confirms each sits AT OR
+  BELOW its cap. It guards the OVERSELL direction only: a live value above the cap (or a missing level)
+  means the write didn't stick → notification; a value below is expected (a sale under `deny`) and is
+  NOT flagged, so a live catalog doesn't generate constant false alerts. Non-fatal: a read failure
+  never fails the sweep. cron_runs detail gains `verify=V/S`.
+
+## [0.5.54.15] - 2026-07-09
+
+### Changed — inventory sweep widened to a downward-safe catalog-wide reconcile
+`#361` shipped the sweep as a 0-boundary-only guard. It stopped the frozen-inventory oversell but
+left the bigger drift untouched: ~78% of active tracked variants had Shopify inventory !=
+`stockBufferQty(current feed_qty)`, because the change-filtered Phase-2 push only re-syncs variants
+whose feed row moved *today*. Over-counts (threshold change, failed push) sat above the supplier cap
+= latent oversell, never corrected.
+
+`planInventorySweep` now reconciles the WHOLE catalog toward the buffered target, but **downward-safe**:
+- `to < inv` → write it down (absent/sold-out → 0, over-count → buffered cap): all oversell-direction drift
+- `inv = 0` and `to > 0` → self-heal a fully-zeroed variant back into the feed (`0→N`)
+- **never** tops a sold-down *nonzero* variant back up (`3→11`)
+
+That last exclusion is deliberate: under `inventory_policy=deny` the Shopify count is the only intraday
+oversell guard against a feed that refreshes once at 06:00, so refilling a sold-down variant here would
+reopen the exact oversell this workstream kills. Upward "restore" stays with the change-gated daily push,
+which fires on a real feed move. NaN feed qty is skipped (never writes/thrashes `NaN`). All existing
+guards kept: 80% coverage floor, `WRITE_CAP=250`/run (convergent), 2 req/s, variant-level (live siblings
+keep selling), zeros written first so the cap never starves the safety half.
+
+## [0.5.54.14] - 2026-07-09
+
+### Added — daily feed-aware inventory sweep (complete oversell guard)
+`#360` raised the sold-out threshold but only caught variants that *change* into the danger band.
+The Phase-2 push is change-filtered (`getAllProductsAsAosom` = `last_seen_at >= today`) + chunked,
+so a variant that vanished from the feed without "changing" keeps a frozen Shopify inventory > 0
+while `inventory_policy=deny` waits for a 0 that never comes.
+
+New **`/api/cron/inventory-sweep`** — feed-aware pass over EVERY active tracked variant, acting on
+the 0-boundary (the oversell surface):
+- `inv > 0` but **absent** from the feed OR `feed_qty ≤ STOCK_SOLD_OUT_MAX` → set **0** (`deny` blocks the sale)
+- `inv = 0` but **back** in the feed with stock → **restore** to the buffered qty (self-heal a transient/wrongful zero)
+
+A nonzero→nonzero drift is left to the daily push — this stays a focused oversell guard, not a full
+rewrite. Guards: aborts before any write if the feed covers < 80% of active tracked variants
+(truncated-feed protection); `WRITE_CAP=250`/run bounds blast radius (convergent); one
+`setInventoryLevel` per item = true 2 req/s; non-fatal per item. Crons 08:45 & 20:45 UTC. Pure core
+unit-tested. `scripts/zero-inventory-oos.mjs` becomes redundant once this runs.
+
+Note (separate, bigger finding): ~78% of active tracked variants (790/1011) have Shopify inventory
+!= `stockBufferQty(current feed_qty)` — the daily push isn't keeping inventory in sync (many
+overstated = latent oversell). Deliberately NOT rolled into this focused guard.
+
+## [0.5.54.13] - 2026-07-09
+
+### Fixed — oversell guard: sold-out threshold raised 5 → 10
+An active product stayed buyable while Aosom was out of stock: Shopify `inventory_quantity` was
+frozen at an old buffered value and `inventory_policy=deny` only blocks at 0, and nothing zeroed a
+variant whose feed qty went low or absent. Audit (2026-07-09) found **131 buyable-but-unshippable
+variants** (~2 100 phantom units), zeroed on the spot via the new script.
+
+- **`stockBufferQty` sold-out threshold raised 5 → 10** (`STOCK_SOLD_OUT_MAX`): `feed_qty` 6–10 is
+  too thin for dropship (no restock latency of our own), so it now buffers to 0 → `deny` blocks. A
+  variant that **drops** into the 0–10 band gets zeroed on its next Phase-2 push. Ripples
+  consistently to `productInStock` / stock tags / OOS / restock / drafts.
+- **`scripts/zero-inventory-oos.mjs`** — operational tool (dry-run default, `--apply`, `--le N`) for
+  stale/absent variants the daily push can't reach (Phase-2's `getAllProductsAsAosom` only sees
+  today-changed rows). Used to zero today's 131. `backfill-inventory.mjs` threshold synced.
+
+Note: a fully-*absent* variant whose row didn't change today is not auto-reached by Phase-2 —
+closing that needs a dedicated feed-aware daily inventory pass (follow-up); the script covers it
+on demand meanwhile.
+
+## [0.5.54.12] - 2026-07-08
+
+### Fixed — auto-drafted products are republished when they return to the feed
+A product drafted while it was gone from the Aosom feed stayed drafted forever once it came back:
+`stale-catalog` only ever drafts (never republishes), and `stock-reconcile`'s reactivation only
+fired on a sold-out→in-stock baseline flip — which a `stale-catalog` draft never triggers (its
+`qty` freezes > 0). Result: procurable products stuck unpublished = lost sales (32 found on
+2026-07-08). Two changes close the loop:
+- **`stale-catalog`** now stamps the `auto-drafted` marker when it drafts (via `updateShopifyProduct`
+  + `addAutoDraftedTag`), so its drafts become reactivation-eligible — mirroring what `stock-reconcile`
+  already did for its own drafts.
+- **`stock-reconcile`** gains a `reactivate` action: a product PRESENT in the feed and sellable that
+  is in the auto-drafted set is republished even when the baseline never went sold-out. The
+  `stock-check` route builds the auto-drafted set from a `status=draft` Shopify slice
+  (`fetchDraftProductStates`, non-fatal), excludes `exclude-stale`, and re-checks draft + auto-drafted
+  + not `exclude-stale` at apply time — so it **never** resurrects a draft an operator set by hand nor
+  fights an operator opt-out. Reactivation also un-freezes the stale baseline `qty`. The restock-path
+  reactivation now respects `exclude-stale` too (consistency).
+
+New shared tag helpers in `diff-engine` (`hasAutoDraftedTag`/`addAutoDraftedTag`/`removeAutoDraftedTag`).
+Note: the 32 pre-existing `stale-catalog` drafts have no `auto-drafted` tag, so they are triaged/republished
+by hand; this fix covers drafts going forward + `stock-reconcile`'s own drafts.
+
+## [0.5.54.11] - 2026-07-08
+
+### Fixed — SKUs that vanish from the Aosom feed no longer oversell
+A variant that disappears from the Aosom CSV entirely (not qty=0, but *gone*) used to stay
+`active` and buyable on Shopify: the daily sync discarded `diffProductsLight.removed`, so `qty`
+froze at its last value, and `stock-reconcile` only drafts absent products that are *also* sold-out
+in the baseline — so "vanished while in stock" was left live until the 30-day `stale-catalog` net
+(or never, when tagged `exclude-stale`). That is an oversell window on discontinued items.
+
+New **`src/lib/removed-catalog.ts`** reconciles removed SKUs at sync time (`runSyncInit` prod path +
+`runSync` manual, both non-fatal):
+- **qty → 0** in Turso (new `zeroQtyForRemovedSkus`, which leaves `last_seen_at` intact so the
+  30-day net still works for anything skipped)
+- **Shopify DRAFT** for products whose *every* variant is gone from the feed, intersected with the
+  diff's `removed` set (never touches a manual/non-Aosom product whose SKUs were never in the feed)
+- **rename guard:** a removed SKU with a prefix-relative still in the feed (Aosom variant-suffix
+  rename, e.g. `84D-082` → `84D-082V00BG`) is left live
+- **`exclude-stale`** opt-out respected; a **feed-completeness guard** (≥80% of *active* variants
+  covered) blocks a truncated feed from mass-drafting the catalog
+- logs `removed_from_feed` per drafted product
+
+The 30-day `stale-catalog` cron stays as the secondary net. Pure decision core is unit-tested.
+
+## [0.5.54.10] - 2026-07-08
+
+### Added — `products.video_ugc`: Aosom customer/UGC reels
+Aosom hosts authentic UGC reels (real unboxing + assembly + in-home lifestyle, portrait 9:16) at
+`aosomweb/customer/{CA,US}/{SKU}.mp4` — a path the CSV feed never references, so we never ingested
+them. New **`products.video_ugc`** column (guarded `ALTER`, mirrors `shopify_handle`) stores that
+reel URL (CA-priority, US fallback). NOT carried by the feed — backfilled by a probe script; it
+**survives the daily sync** because `refreshProducts`' UPSERT never lists it. ~3.8% of live SKUs
+have one (47 found + downloaded to the gitignored `src/ugc/`). Also: `render-sequential-ads.mts`
+`CLIP_DIR` now defaults to the main-clone `src/` (was the retired demand-gen worktree).
+
+## [0.5.54.9] - 2026-07-08
+
+### Added — sequential_ad pipeline (4-message patio ads: hero-slides + demand-gen)
+New `content_type='sequential_ad'` on the unified `publication_queue` plus a `metadata` JSON
+column (`{style, campaign}`), a dedicated `/sequential-ads` dashboard, and a two-style renderer.
+Reuses the existing video draft→approve→schedule→publish rails — `getNextPending` is
+content_type-agnostic and the publisher's Reels path now also handles `sequential_ad`, so **no
+new cron**. The 4 sequential FR messages mirror the "Entrepôts à Rabais" competitor style.
+- **db** (`database.ts`): `metadata` column + `'sequential_ad'` CHECK via a guarded table-rebuild
+  migration (same pattern as `+video`/`+draft`); `addToQueue` metadata; `mapQueueItem` metadata;
+  `getSequentialAdQueueItems` / `approveSequentialAdDraft` / `cancelSequentialAdDraft`.
+- **publisher** (`queue-publisher.ts`): the video Reels branch now also matches `sequential_ad`
+  (publish-time clickbait caption + `reelsVideoUrl` routing).
+- **dashboard**: `/sequential-ads` page + client (list, status, style/campaign badges, campaign
+  filter, approve/cancel), `/api/sequential-ads/{queue,approve}`, sidebar link.
+- **renderer** (`scripts/render-sequential-ads.mts`): Style A hero-slides (top-N patio by 14d
+  velocity ∩ Shopify `lifestyle-verified`, 4 messages over cdn.shopify photos) + Style B
+  demand-gen (4 timed `drawtext` messages over live-action clips); uploads to
+  `slideshows/sequential-ads/`, enqueues drafts.
+- Verified: `tsc` clean, full suite 1300 tests pass, 3-specialist review clean, sample render
+  10 hero + 6 demand-gen (queueIds 392–407) landed as drafts with audio. (Production `next build`
+  + dashboard UI validate on Vercel preview — local build blocked by the arm64 Tailwind binding.)
+
+## [0.5.54.8] - 2026-07-08
+
+### Changed — slideshow/demand-gen music volume −18dB → −12dB
+Raised `VIDEO_BRAND.music.volume` (`src/lib/video-brand-tokens.ts`) from −18 to −12 dB so the
+royalty-free background bed sits more present in generated videos. The ffmpeg engine reads the
+token at render time (`buildXfadeFilterComplex` / demand-gen `volume=<db>dB`). Measured effect:
+mean loudness across the 40-video slideshow batch rose from ~−35 dB to ~−29 dB. No test impact —
+the filter-builder unit tests pass `musicVolumeDb` explicitly (they don't read the token).
+
+## [0.5.54.7] - 2026-07-07
+
+### Added — showroom-messaging: footer + About + PDP buy-box (draft only, not published)
+Mirrors 3 of the "online-only = lower prices" showroom-messaging draft changes into the repo.
+Bilingual FR/EN via `request.locale.iso_code`, gold `#D4A853` accent, all self-contained theme
+assets (no store-level page-body or translation writes → live theme untouched).
+- **`sections/footer.liquid`**: a line under the brand blurb — FR *"Boutique 100 % en ligne :
+  sans salle de montre ni loyer, des prix imbattables."* / EN *"A 100% online store: no showroom,
+  no rent — just unbeatable prices."* Gated on the brand text block's heading. (New file — the
+  footer section was not previously tracked in the repo.)
+- **`templates/page.json`**: new `custom-liquid` section `lc_about_online`, gated on
+  `page.handle == 'a-propos'`, adding the "Notre secret / Our secret" paragraph to the About page
+  via the theme (the store-level `page.body_html` is untouched, so it renders only on the draft
+  theme, not live). (New file.)
+- **`sections/main-product.liquid`**: bilingual buy-box price-justification line under the price.
+- Verified live on draft theme 160749813865 (footer FR+EN, About FR+EN). The homepage equation
+  band + trustbar reword (REC 1/3) stay on the draft only — the repo's `index.json` is a much older
+  homepage snapshot and can't take them without an unrelated full re-sync.
+## [0.5.54.5] - 2026-07-07
+
+### Added — gold "-X%" discount badge on collection product cards (draft theme)
+Product cards in collections now show a gold discount badge, bottom-left over the
+image, on any product with a compare-at price and a discount ≥ 10% (the rule
+already used elsewhere in the theme).
+- Single-price products show the exact percentage, e.g. `-23%`.
+- Multi-variant products whose variants have different prices show a gold
+  `Solde` / `Sale` badge instead of a number — because Shopify's product-level
+  `price` (lowest variant) and `compare_at_price` (lowest compare-at) can come
+  from different variants, an exact percentage there could misstate the discount
+  vs the displayed "À partir de / From" price.
+- Below 10% or no compare-at: no badge. Sold-out and "Populaire" badges unchanged.
+- Mirrors `shopify-theme/snippets/card-product.liquid` from the working draft
+  theme (160749813865) into the repo. Draft only — live theme untouched. This is
+  a theme snippet; it does not affect the app build or tests.
 
 ## [0.5.54.4] - 2026-07-07
 

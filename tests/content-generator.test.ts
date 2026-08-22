@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 // doesn't require real env vars (the functions under test don't use config).
 vi.mock("@/lib/config", () => ({
   env: { anthropicApiKey: "test-key" },
-  CLAUDE: { MODEL: "claude-test", MAX_TOKENS_CONTENT: 1000 },
+  CLAUDE: { MODEL: "claude-test", MODEL_BATCH: "claude-test-batch", MAX_TOKENS_CONTENT: 1000 },
 }));
 
 // Mock the Anthropic SDK so generateProductContent runs without a network call.

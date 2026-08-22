@@ -26,6 +26,16 @@ async function release(db: Client, week: string): Promise<void> {
   await db.execute({ sql: `UPDATE blog_publish_counter SET count = MAX(0, count - 1) WHERE week = ?`, args: [week] });
 }
 
+// Mirrors countBlogPublishSlot(week): unconditional increment, used by the operator-driven
+// /blog publish — a person is never blocked by the cap, but the publish still consumes a slot.
+async function countSlot(db: Client, week: string): Promise<void> {
+  await db.execute({
+    sql: `INSERT INTO blog_publish_counter (week, count) VALUES (?, 1)
+          ON CONFLICT(week) DO UPDATE SET count = count + 1`,
+    args: [week],
+  });
+}
+
 async function countOf(db: Client, week: string): Promise<number> {
   const r = await db.execute({ sql: `SELECT count FROM blog_publish_counter WHERE week = ?`, args: [week] });
   return r.rows.length ? Number(r.rows[0].count) : 0;
@@ -73,5 +83,20 @@ describe("blog_publish_counter — weekly cap reserve/release", () => {
     await release(db, "2026-W29"); // 0
     await release(db, "2026-W29"); // stays 0
     expect(await countOf(db, "2026-W29")).toBe(0);
+  });
+
+  it("an operator publish counts even past the cap, and then blocks the cron", async () => {
+    // Cap is 2. The operator publishes 3 from /blog — never blocked...
+    await countSlot(db, "2026-W29");
+    await countSlot(db, "2026-W29");
+    await countSlot(db, "2026-W29");
+    expect(await countOf(db, "2026-W29")).toBe(3);
+    // ...but the cron's gated reserve now correctly refuses instead of adding 2 more.
+    expect(await reserve(db, "2026-W29", 2)).toBe(false);
+  });
+
+  it("countSlot creates the week row when it is the first publish of the week", async () => {
+    await countSlot(db, "2026-W30");
+    expect(await countOf(db, "2026-W30")).toBe(1);
   });
 });

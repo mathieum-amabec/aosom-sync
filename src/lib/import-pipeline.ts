@@ -32,13 +32,25 @@ export interface ImportJob {
   updatedAt: string;
 }
 
+function parseContent(raw: unknown): GeneratedContent | null {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    return JSON.parse(raw) as GeneratedContent;
+  } catch {
+    return null;
+  }
+}
+
 function rowToJob(row: Record<string, unknown>): ImportJob {
   return {
     id: row.id as string,
     groupKey: row.group_key as string,
     product: JSON.parse(row.product_data as string),
     status: row.status as ImportStatus,
-    content: row.content ? JSON.parse(row.content as string) : null,
+    // Tolerate an unparseable content column instead of throwing: a corrupt payload must
+    // degrade to "no content yet" (which callers already handle by regenerating), not blow
+    // up every read of the job — including the regeneration that would have repaired it.
+    content: parseContent(row.content),
     shopifyId: (row.shopify_id as string) || null,
     error: (row.error as string) || null,
     createdAt: row.created_at as string,
@@ -82,9 +94,11 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
       continue;
     }
 
-    const id = crypto.randomUUID();
-    await upsertImportJob({
-      id,
+    // Use the id the upsert actually persisted: ON CONFLICT(group_key) keeps a
+    // pre-existing row's id, so a stale row from an earlier failed attempt would
+    // otherwise leave `jobs` pointing at a non-existent id ("Job not found").
+    const id = await upsertImportJob({
+      id: crypto.randomUUID(),
       groupKey: product.groupKey,
       productData: JSON.stringify(product),
       status: "pending",
@@ -110,9 +124,32 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
 /**
  * Generate content for a queued import job.
  */
-export async function generateContent(jobId: string): Promise<ImportJob> {
+export async function generateContent(jobId: string, opts?: { force?: boolean }): Promise<ImportJob> {
   const row = await dbGetImportJob(jobId);
   if (!row) throw new Error(`Job ${jobId} not found`);
+
+  // Reuse guard. import_jobs.group_key is UNIQUE and equals the Aosom PSIN group, and
+  // `mergeVariants` already folds every colour/size of a group into ONE merged product
+  // whose variant list is part of the prompt — so a group's listing is generated exactly
+  // once and already covers its variants. What can still burn a duplicate call is
+  // re-generating a job that already holds content: `upsertImportJob` resets a re-queued
+  // group to 'pending' WITHOUT clearing `content`, and a retry after a failed Shopify push
+  // lands here too. Both used to pay for a fresh generation of near-identical copy.
+  // Pass { force: true } to deliberately regenerate (e.g. after a prompt change).
+  if (!opts?.force) {
+    const cached = parseContent(row.content);
+    // Only trust a payload that still satisfies the contract importToShopify relies on;
+    // anything unparseable or half-written falls through and is regenerated.
+    if (cached && typeof cached.titleFr === "string" && typeof cached.descriptionFr === "string") {
+      console.log(`[import-pipeline] reusing stored content for group ${row.group_key} (no Claude call)`);
+      // A job that already shipped to Shopify keeps its status: moving a 'done' row back
+      // to 'reviewing' would show an imported product as still awaiting review. Reuse made
+      // this call cheap, so it is far likelier to be hit on an already-pushed job than before.
+      if (row.shopify_id) return rowToJob(row);
+      await updateImportJob(jobId, { status: "reviewing" });
+      return { ...rowToJob(row), status: "reviewing", content: cached };
+    }
+  }
 
   await updateImportJob(jobId, { status: "generating" });
 

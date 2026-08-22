@@ -100,6 +100,8 @@ async function _initSchemaImpl(): Promise<void> {
       shopify_product_id TEXT, shopify_variant_id TEXT, shopify_handle TEXT,
       last_seen_at INTEGER, last_posted_at INTEGER,
       has_discount INTEGER DEFAULT 0,
+      video_ugc TEXT,
+      image_checked_at INTEGER,
       created_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_products_product_type ON products(product_type)`,
@@ -155,6 +157,26 @@ async function _initSchemaImpl(): Promise<void> {
     // isoWeekKey() ('YYYY-Www'); old weeks just sit dormant (negligible row count).
     `CREATE TABLE IF NOT EXISTS blog_publish_counter (
       week TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0
+    )`,
+    // blog_posts: one row per article the blog pipeline generated, so the /blog dashboard
+    // can show what ran — and walk the article through review — without round-tripping to
+    // the Shopify Admin API. Distinct from blog_publish_counter (a bare weekly cap tally)
+    // and from cron_runs (one row per cron invocation, not per article). `status`:
+    // 'draft' = created in Shopify but not live, 'approved' = an operator cleared it for
+    // publishing (dashboard-only state — Shopify still holds an unpublished article),
+    // 'published' = live on Shopify (auto-publish gate passed, or published from /blog),
+    // 'failed' = generation threw before an article existed (shopify_article_id stays NULL).
+    // approved_at / published_at are unix seconds, stamped by the /blog approve + publish
+    // actions (published_at is also stamped for auto-published rows).
+    `CREATE TABLE IF NOT EXISTS blog_posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL,
+      lang TEXT NOT NULL DEFAULT 'fr' CHECK (lang IN ('fr', 'en')),
+      status TEXT NOT NULL CHECK (status IN ('draft', 'approved', 'published', 'failed')),
+      shopify_article_id TEXT,
+      approved_at INTEGER,
+      published_at INTEGER,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
     )`,
     `CREATE TABLE IF NOT EXISTS notifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, title TEXT NOT NULL,
@@ -361,6 +383,30 @@ async function _initSchemaImpl(): Promise<void> {
       feed_type TEXT NOT NULL, item_count INTEGER, status TEXT NOT NULL, error TEXT,
       fetched_at INTEGER NOT NULL
     )`,
+    // daily_llm_budget: Anthropic spend guardrail, split into independent pools so a
+    // bulk batch run can never starve the public storefront assistant. One row per
+    // (UTC day, pool) — pools are 'assistant' (only /api/assistant) and 'batch'
+    // (imports, content generation, social — everything else). Resets at 00:00 UTC by
+    // keying on the date string. Every Claude call asserts its pool's tokens_used <
+    // that pool's budget (fail-closed) then adds its usage. (Legacy single-key tables
+    // are migrated to this composite key in the migration block below.)
+    `CREATE TABLE IF NOT EXISTS daily_llm_budget (
+      day TEXT NOT NULL,
+      pool TEXT NOT NULL DEFAULT 'batch',
+      tokens_used INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (day, pool)
+    )`,
+    // assistant_rate_limit: one row per accepted /api/assistant message, used for a
+    // per-IP SLIDING window. This lives in Turso rather than in the in-memory limiter
+    // because the in-memory windows are per Fluid Compute instance and reset on cold
+    // start — fine as a burst guard, useless as an hourly quota, which is the limit that
+    // actually bounds what one shopper can spend of the assistant token pool.
+    // Rows are pruned on every check, so the table stays at roughly (active IPs × 10).
+    `CREATE TABLE IF NOT EXISTS assistant_rate_limit (
+      ip TEXT NOT NULL,
+      ts INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_assistant_rl_ip_ts ON assistant_rate_limit(ip, ts)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_run ON sync_logs(sync_run_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_sku ON sync_logs(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_runs_date ON sync_runs(started_at)`,
@@ -372,6 +418,8 @@ async function _initSchemaImpl(): Promise<void> {
     // (sku, notified_at): serves getPendingWaitlist — seek by sku, filter notified_at IS NULL.
     `CREATE INDEX IF NOT EXISTS idx_waitlist_sku_pending ON back_in_stock_waitlist(sku, notified_at)`,
     `CREATE INDEX IF NOT EXISTS idx_cron_runs_name_at ON cron_runs(name, ran_at DESC)`,
+    // Serves listBlogPosts — the /blog dashboard reads newest-first, nothing else.
+    `CREATE INDEX IF NOT EXISTS idx_blog_posts_created ON blog_posts(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_feed_syncs_type_at ON feed_syncs(feed_type, fetched_at DESC)`,
     // publication_queue: unified scheduling queue for social posts, Shopify product
     // drafts, and blog articles. scheduled_at/created_at/published_at are SQLite
@@ -381,7 +429,7 @@ async function _initSchemaImpl(): Promise<void> {
     // otherwise make a row invisible to every status-filtered query.
     `CREATE TABLE IF NOT EXISTS publication_queue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video')),
+      content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video', 'sequential_ad')),
       content_id TEXT NOT NULL,      -- ID of the source draft/post
       platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
       payload TEXT NOT NULL,         -- JSON-stringified content
@@ -391,7 +439,8 @@ async function _initSchemaImpl(): Promise<void> {
       status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled', 'draft')),
       error TEXT,
       created_at TEXT DEFAULT (datetime('now')),
-      published_at TEXT
+      published_at TEXT,
+      metadata TEXT                  -- JSON {style, campaign} for sequential_ad rows (nullable)
     )`,
     // Composite (status, scheduled_at): serves the consumer cron's "due pending items,
     // oldest slot first" scan (getNextPending) — seek by status then order by scheduled_at.
@@ -473,6 +522,112 @@ async function _initSchemaImpl(): Promise<void> {
     ]);
   }
 
+  // publication_queue: add `metadata` (JSON {style, campaign}) as a plain nullable column.
+  // No CHECK to rebuild, so a guarded ALTER ADD COLUMN suffices. Runs BEFORE the CHECK
+  // rebuild below so that rebuild's INSERT…SELECT can carry the column through.
+  const pqInfo = await db.execute(`PRAGMA table_info(publication_queue)`);
+  const pqCols = new Set(pqInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!pqCols.has("metadata")) {
+    await runBatch("publication_queue add metadata", [
+      { sql: `ALTER TABLE publication_queue ADD COLUMN metadata TEXT`, args: [] },
+    ]);
+  }
+
+  // daily_llm_budget: split the single global counter into per-pool counters
+  // (assistant vs batch) so a bulk batch run can never exhaust the assistant's
+  // reservation. Migrate the legacy (day PRIMARY KEY) table to a composite
+  // (day, pool) key, assigning ALL pre-split usage to the 'batch' pool — the
+  // 'assistant' pool therefore starts fresh, so the public assistant recovers
+  // immediately on deploy instead of waiting for the 00:00 UTC reset. SQLite can't
+  // ALTER a PRIMARY KEY, so this is a guarded table rebuild.
+  const llmInfo = await db.execute(`PRAGMA table_info(daily_llm_budget)`);
+  const llmCols = new Set(llmInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!llmCols.has("pool")) {
+    await runBatch("daily_llm_budget split into (day,pool)", [
+      { sql: `DROP TABLE IF EXISTS daily_llm_budget_new`, args: [] },
+      { sql: `CREATE TABLE daily_llm_budget_new (
+        day TEXT NOT NULL,
+        pool TEXT NOT NULL DEFAULT 'batch',
+        tokens_used INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (day, pool)
+      )`, args: [] },
+      { sql: `INSERT INTO daily_llm_budget_new (day, pool, tokens_used)
+              SELECT day, 'batch', tokens_used FROM daily_llm_budget`, args: [] },
+      { sql: `DROP TABLE daily_llm_budget`, args: [] },
+      { sql: `ALTER TABLE daily_llm_budget_new RENAME TO daily_llm_budget`, args: [] },
+    ]);
+  }
+
+  // publication_queue.content_type CHECK migration: (…,'video') → +'sequential_ad'. Same guarded
+  // table-rebuild pattern as +video / +draft above. Carries the metadata column through the copy.
+  const pqDef3 = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='publication_queue'`,
+  );
+  const pqSql3 = pqDef3.rows[0] ? String((pqDef3.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (pqSql3 && !pqSql3.includes("'sequential_ad'")) {
+    await runBatch("publication_queue content_type CHECK +sequential_ad", [
+      { sql: `DROP TABLE IF EXISTS publication_queue_new`, args: [] },
+      { sql: `CREATE TABLE publication_queue_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video', 'sequential_ad')),
+        content_id TEXT NOT NULL,
+        platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
+        payload TEXT NOT NULL,
+        scheduled_at TEXT NOT NULL,
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled', 'draft')),
+        error TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        published_at TEXT,
+        metadata TEXT
+      )`, args: [] },
+      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata)
+              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata FROM publication_queue`, args: [] },
+      { sql: `DROP TABLE publication_queue`, args: [] },
+      { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
+      { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
+    ]);
+  }
+
+  // blog_posts: add approved_at / published_at, then widen the status CHECK with 'approved'
+  // (the /blog dashboard's draft → approved → published flow). The ALTERs run FIRST so the
+  // CHECK rebuild's INSERT…SELECT can carry both columns through — same ordering rule as
+  // publication_queue's `metadata` above. Fresh DBs get everything from CREATE TABLE, so
+  // both guards no-op there.
+  const bpInfo = await db.execute(`PRAGMA table_info(blog_posts)`);
+  const bpCols = new Set(bpInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  const bpAlters: string[] = [];
+  if (!bpCols.has("approved_at")) bpAlters.push(`ALTER TABLE blog_posts ADD COLUMN approved_at INTEGER`);
+  if (!bpCols.has("published_at")) bpAlters.push(`ALTER TABLE blog_posts ADD COLUMN published_at INTEGER`);
+  if (bpAlters.length > 0) {
+    await runBatch("blog_posts add approved_at/published_at", bpAlters.map((sql) => ({ sql, args: [] })));
+  }
+
+  const bpDef = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='blog_posts'`,
+  );
+  const bpSql = bpDef.rows[0] ? String((bpDef.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (bpSql && !bpSql.includes("'approved'")) {
+    await runBatch("blog_posts status CHECK +approved", [
+      { sql: `DROP TABLE IF EXISTS blog_posts_new`, args: [] },
+      { sql: `CREATE TABLE blog_posts_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        lang TEXT NOT NULL DEFAULT 'fr' CHECK (lang IN ('fr', 'en')),
+        status TEXT NOT NULL CHECK (status IN ('draft', 'approved', 'published', 'failed')),
+        shopify_article_id TEXT,
+        approved_at INTEGER,
+        published_at INTEGER,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      )`, args: [] },
+      { sql: `INSERT INTO blog_posts_new (id, title, lang, status, shopify_article_id, approved_at, published_at, created_at)
+              SELECT id, title, lang, status, shopify_article_id, approved_at, published_at, created_at FROM blog_posts`, args: [] },
+      { sql: `DROP TABLE blog_posts`, args: [] },
+      { sql: `ALTER TABLE blog_posts_new RENAME TO blog_posts`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_blog_posts_created ON blog_posts(created_at DESC)`, args: [] },
+    ]);
+  }
+
   // Column migrations for facebook_drafts (post_text_en, channels) — SQLite can't IF NOT EXISTS on ALTER
   const info = await db.execute(`PRAGMA table_info(facebook_drafts)`);
   const cols = new Set(info.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
@@ -520,6 +675,18 @@ async function _initSchemaImpl(): Promise<void> {
   const hasDiscountColExisted = productCols.has("has_discount");
   if (!hasDiscountColExisted) {
     alters.push(`ALTER TABLE products ADD COLUMN has_discount INTEGER DEFAULT 0`);
+  }
+  // video_ugc: Aosom customer/UGC reel URL (aosomweb/customer/{CA,US}/{SKU}.mp4), CA-priority.
+  // NOT carried by the CSV feed — backfilled by the UGC-probe script. The sync UPSERT
+  // (refreshProducts) never lists this column in its DO UPDATE SET, so it survives daily syncs.
+  if (!productCols.has("video_ugc")) {
+    alters.push(`ALTER TABLE products ADD COLUMN video_ugc TEXT`);
+  }
+  // image_checked_at: epoch (s) of the last pos-1 image-compliance classification (see
+  // image-compliance.ts). NULL = never checked → eligible next sync. refreshProducts
+  // resets it to NULL whenever image1 changes so a new pos-1 image is re-classified.
+  if (!productCols.has("image_checked_at")) {
+    alters.push(`ALTER TABLE products ADD COLUMN image_checked_at INTEGER`);
   }
 
   // price_alerts double opt-in columns (table shipped in #99 without them).
@@ -865,7 +1032,8 @@ export async function refreshProducts(products: Omit<ProductRow, "shopify_produc
       description=excluded.description, short_description=excluded.short_description,
       material=excluded.material, gtin=excluded.gtin, weight=excluded.weight,
       out_of_stock_expected=excluded.out_of_stock_expected,
-      estimated_arrival=excluded.estimated_arrival, last_seen_at=excluded.last_seen_at`,
+      estimated_arrival=excluded.estimated_arrival, last_seen_at=excluded.last_seen_at,
+      image_checked_at=CASE WHEN excluded.image1 IS NOT products.image1 THEN NULL ELSE products.image_checked_at END`,
     args: [
       p.sku, p.name, p.price, p.qty, p.color, p.size, p.product_type,
       p.image1, p.image2, p.image3, p.image4, p.image5, p.image6, p.image7,
@@ -888,6 +1056,47 @@ export async function getProduct(sku: string): Promise<ProductRow | null> {
   const db = await ensureSchema();
   const result = await db.execute({ sql: `SELECT * FROM products WHERE sku = ?`, args: [sku] });
   return result.rows.length > 0 ? rowToProduct(result.rows[0]) : null;
+}
+
+export interface UgcVideoCandidate {
+  sku: string;
+  name: string;
+  price: number | null;
+  qty: number;
+  shopifyProductId: string | null;
+  shopifyHandle: string | null;
+  videoUgc: string;
+}
+
+/**
+ * Products with a customer UGC unboxing video, restricted to clean CA/US sources
+ * (FR = Skeepers, forbidden; UK/DE = mixed, excluded here), in stock and live on
+ * Shopify, most-in-stock first. Feeds the homepage "Voyez-le chez vous" video reel
+ * (see `/api/ugc-videos`). The source country is encoded in the `video_ugc` URL
+ * path (`.../customer/{CC}/{sku}.mp4`), so the CA/US filter is a URL LIKE.
+ */
+export async function getUgcVideoCandidates(limit = 9): Promise<UgcVideoCandidate[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT sku, name, price, qty, shopify_product_id, shopify_handle, video_ugc
+          FROM products
+          WHERE video_ugc IS NOT NULL AND TRIM(video_ugc) <> ''
+            AND qty > 0
+            AND shopify_handle IS NOT NULL AND TRIM(shopify_handle) <> ''
+            AND (video_ugc LIKE '%/customer/CA/%' OR video_ugc LIKE '%/customer/US/%')
+          ORDER BY qty DESC
+          LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => ({
+    sku: String(r.sku),
+    name: r.name == null ? "" : String(r.name),
+    price: r.price == null ? null : Number(r.price),
+    qty: Number(r.qty ?? 0),
+    shopifyProductId: r.shopify_product_id == null ? null : String(r.shopify_product_id),
+    shopifyHandle: r.shopify_handle == null ? null : String(r.shopify_handle),
+    videoUgc: String(r.video_ugc),
+  }));
 }
 
 /** Imported catalog rows (shopify_product_id set), trimmed to what the intraday stock-check
@@ -929,6 +1138,30 @@ export async function updateStockBaselineQty(updates: Array<{ sku: string; qty: 
   for (let i = 0; i < stmts.length; i += BATCH_SIZE) {
     await db.batch(stmts.slice(i, i + BATCH_SIZE), "write");
   }
+}
+
+/**
+ * Set qty=0 for SKUs that VANISHED from the Aosom feed (removed_from_feed reconcile).
+ * Deliberately does NOT touch last_seen_at: these SKUs were NOT seen in the feed, so
+ * stamping last_seen_at=now would both be wrong and disable the 30-day stale-catalog
+ * secondary net for anything the immediate draft skipped/failed. Only rows that are not
+ * already 0 are written; returns the number of rows actually changed. Idempotent.
+ */
+export async function zeroQtyForRemovedSkus(skus: string[]): Promise<number> {
+  if (skus.length === 0) return 0;
+  const db = await ensureSchema();
+  let affected = 0;
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < skus.length; i += BATCH_SIZE) {
+    const chunk = skus.slice(i, i + BATCH_SIZE);
+    const placeholders = chunk.map(() => "?").join(",");
+    const res = await db.execute({
+      sql: `UPDATE products SET qty = 0 WHERE qty != 0 AND sku IN (${placeholders})`,
+      args: chunk,
+    });
+    affected += Number(res.rowsAffected ?? 0);
+  }
+  return affected;
 }
 
 export interface ProductSnapshot {
@@ -1393,6 +1626,202 @@ export async function recordPriceChanges(entries: {
   for (let i = 0; i < stmts.length; i += 100) {
     await db.batch(stmts.slice(i, i + 100), "write");
   }
+}
+
+// ─── Daily LLM token budget (global Anthropic spend guardrail) ───────
+
+/** UTC date key (YYYY-MM-DD) — the budget resets at 00:00 UTC by keying on this. */
+/** Shared with the dashboard cost estimator; see src/lib/llm-usage.ts. */
+function utcDayKeys(days: number): string[] {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now.getTime());
+    d.setUTCDate(d.getUTCDate() - i);
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+function utcDayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/** Tokens consumed by Claude calls so far today (UTC). 0 when no row yet. */
+/**
+ * LLM budget pools. Kept separate so a bulk 'batch' run (imports, content, social)
+ * can never exhaust the 'assistant' pool that the public storefront /api/assistant
+ * draws from. Each pool has its own daily counter row and its own budget env var.
+ */
+export type LlmBudgetPool = "assistant" | "batch";
+
+/** Tokens the given pool consumed so far today (UTC). 0 when no row yet. */
+export async function getDailyLlmTokensUsed(pool: LlmBudgetPool): Promise<number> {
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT tokens_used FROM daily_llm_budget WHERE day = ? AND pool = ?`,
+    args: [utcDayKey(), pool],
+  });
+  return (res.rows[0]?.tokens_used as number | undefined) ?? 0;
+}
+
+/** Add `tokens` to the given pool's today (UTC) counter. No-op for non-positive input. */
+export async function addDailyLlmTokens(pool: LlmBudgetPool, tokens: number): Promise<void> {
+  if (!Number.isFinite(tokens) || tokens <= 0) return;
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO daily_llm_budget (day, pool, tokens_used) VALUES (?, ?, ?)
+          ON CONFLICT(day, pool) DO UPDATE SET tokens_used = tokens_used + excluded.tokens_used`,
+    args: [utcDayKey(), pool, Math.ceil(tokens)],
+  });
+}
+
+export interface LlmUsageDay {
+  day: string; // UTC YYYY-MM-DD
+  assistant: number;
+  batch: number;
+}
+
+/**
+ * Per-day, per-pool token counters for the last `days` UTC days, oldest first, with days
+ * that have no row filled in as zero.
+ *
+ * A missing row and a zero row are NOT the same thing operationally — `recordLlmUsage`
+ * only runs after a SUCCESSFUL Claude call, so a stretch of missing rows means calls were
+ * failing (a blocked API key looks exactly like this), not that the app was idle. The
+ * dashboard flattens both to 0 for the chart; the distinction is called out in the UI copy.
+ */
+export async function getLlmUsageWindow(days: number): Promise<LlmUsageDay[]> {
+  const keys = utcDayKeys(days);
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT day, pool, tokens_used FROM daily_llm_budget WHERE day >= ? ORDER BY day`,
+    args: [keys[0]],
+  });
+  const byDay = new Map<string, LlmUsageDay>(
+    keys.map((day) => [day, { day, assistant: 0, batch: 0 }]),
+  );
+  for (const row of res.rows) {
+    const entry = byDay.get(row.day as string);
+    if (!entry) continue; // row older than the window (the >= bound is inclusive of keys[0])
+    const pool = row.pool as LlmBudgetPool;
+    if (pool === "assistant" || pool === "batch") entry[pool] = Number(row.tokens_used) || 0;
+  }
+  return keys.map((day) => byDay.get(day)!);
+}
+
+/**
+ * Count this IP's accepted assistant messages inside the trailing `windowSecs`, after
+ * pruning anything older. Returns the count BEFORE the current request is recorded, so
+ * the caller compares against its limit and decides.
+ *
+ * Read-then-write rather than an atomic upsert: two concurrent requests from one IP can
+ * both read the same count and both be admitted. That is an acceptable ±1 on a quota whose
+ * job is bounding cost, and it avoids a transaction on the hot path of a public endpoint.
+ */
+export async function countAssistantRequests(ip: string, windowSecs: number): Promise<number> {
+  const db = await ensureSchema();
+  const cutoff = Math.floor(Date.now() / 1000) - windowSecs;
+  await db.execute({ sql: `DELETE FROM assistant_rate_limit WHERE ts < ?`, args: [cutoff] });
+  const res = await db.execute({
+    sql: `SELECT COUNT(*) AS n FROM assistant_rate_limit WHERE ip = ? AND ts >= ?`,
+    args: [ip, cutoff],
+  });
+  return Number(res.rows[0]?.n ?? 0);
+}
+
+/** Record one accepted assistant message for this IP. */
+export async function recordAssistantRequest(ip: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO assistant_rate_limit (ip, ts) VALUES (?, ?)`,
+    args: [ip, Math.floor(Date.now() / 1000)],
+  });
+}
+
+export type PriceBadge = "best_30d" | "price_drop";
+
+/**
+ * Pure decision for the 30-day price badge, given the current price, the 30-day
+ * minimum recorded price (`min30`, null if none), and a reference price ~30 days
+ * ago (`reference`, null if none). Extracted from getPriceBadge so the branching
+ * is unit-testable without a DB.
+ *   - "best_30d"   — current price is the lowest known in the window (ties win here)
+ *   - "price_drop" — current price is below the reference (but not the window low)
+ *   - null         — no recorded activity, or price sits above both
+ */
+export function decidePriceBadge(
+  currentPrice: number,
+  min30: number | null,
+  reference: number | null,
+): PriceBadge | null {
+  if (min30 == null && reference == null) return null;
+  const EPS = 0.005;
+  const overallMin = Math.min(
+    currentPrice,
+    min30 ?? Number.POSITIVE_INFINITY,
+    reference ?? Number.POSITIVE_INFINITY,
+  );
+  if (currentPrice <= overallMin + EPS) return "best_30d";
+  if (reference != null && currentPrice < reference - EPS) return "price_drop";
+  return null;
+}
+
+/**
+ * Compute the 30-day price badge for a product, identified by its variant SKUs.
+ *   - "best_30d"   — the current price is the lowest it has been in the last 30 days
+ *   - "price_drop" — the current price is below the reference price ~30 days ago
+ *                    (but not the 30-day low)
+ *   - null         — no qualifying signal / no recorded price activity in the window
+ *
+ * `price_history` is pruned to 30 days by runSyncFinalize, so the reference "price
+ * 30 days ago" is resolved as: the newest recorded price at/just-before the 30-day
+ * cutoff, else the price just before the oldest change inside the window (that row's
+ * `old_price`). A product with a flat price and no recorded change in the window gets
+ * no badge — the badge is a recent-price-activity signal, not a label on every price.
+ */
+export async function getPriceBadge(skus: string[]): Promise<PriceBadge | null> {
+  const cleanSkus = skus.filter(Boolean);
+  if (cleanSkus.length === 0) return null;
+  const db = await ensureSchema();
+  const ph = cleanSkus.map(() => "?").join(", ");
+
+  const curRes = await db.execute({
+    sql: `SELECT MIN(price) AS p FROM products WHERE sku IN (${ph})`,
+    args: cleanSkus,
+  });
+  const currentPrice = curRes.rows[0]?.p as number | null;
+  if (currentPrice == null) return null;
+
+  const cutoff = Math.floor(Date.now() / 1000) - 30 * 86400;
+
+  const minRes = await db.execute({
+    sql: `SELECT MIN(new_price) AS m FROM price_history
+          WHERE sku IN (${ph}) AND new_price IS NOT NULL AND detected_at >= ?`,
+    args: [...cleanSkus, cutoff],
+  });
+  const min30 = minRes.rows[0]?.m as number | null;
+
+  // Reference price ~30 days ago: prefer the price active at the cutoff, else the
+  // price just before the first change recorded inside the window.
+  const beforeRes = await db.execute({
+    sql: `SELECT new_price AS p FROM price_history
+          WHERE sku IN (${ph}) AND new_price IS NOT NULL AND detected_at <= ?
+          ORDER BY detected_at DESC LIMIT 1`,
+    args: [...cleanSkus, cutoff],
+  });
+  let reference = beforeRes.rows[0]?.p as number | null;
+  if (reference == null) {
+    const firstInWindow = await db.execute({
+      sql: `SELECT old_price AS p FROM price_history
+            WHERE sku IN (${ph}) AND old_price IS NOT NULL AND detected_at >= ?
+            ORDER BY detected_at ASC LIMIT 1`,
+      args: [...cleanSkus, cutoff],
+    });
+    reference = firstInWindow.rows[0]?.p as number | null;
+  }
+
+  return decidePriceBadge(currentPrice, min30, reference);
 }
 
 /**
@@ -2214,19 +2643,87 @@ function mapSyncLog(row: Record<string, unknown>): SyncLogEntry {
   };
 }
 
+// ─── Image Compliance (pos-1) ────────────────────────────────────────
+
+export interface ImageComplianceCandidate {
+  sku: string;
+  shopifyProductId: string;
+  name: string;
+}
+
+/**
+ * Products eligible for a pos-1 image-compliance check: live on Shopify
+ * (shopify_product_id set) and never checked (image_checked_at IS NULL — the flag is
+ * reset to NULL by refreshProducts whenever image1 changes). Deduped to ONE row per
+ * Shopify product (variants share an id) and ordered newest-import-first so fresh
+ * products are prioritized, per the auto-compliance spec.
+ */
+export async function getImageComplianceCandidates(limit: number): Promise<ImageComplianceCandidate[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT shopify_product_id AS shopify_product_id,
+                 MIN(sku) AS sku,
+                 MAX(name) AS name,
+                 MAX(created_at) AS created_at
+          FROM products
+          WHERE shopify_product_id IS NOT NULL AND shopify_product_id <> ''
+            AND image_checked_at IS NULL
+          GROUP BY shopify_product_id
+          ORDER BY created_at DESC
+          LIMIT ?`,
+    args: [Math.max(0, Math.floor(limit))],
+  });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    return {
+      sku: (o.sku as string) || "",
+      shopifyProductId: String(o.shopify_product_id || ""),
+      name: (o.name as string) || "",
+    };
+  });
+}
+
+/**
+ * Stamp image_checked_at=now on every SKU row of the given Shopify products so they are
+ * not re-classified until image1 changes again. No-op on an empty list.
+ */
+export async function markImageChecked(shopifyProductIds: string[]): Promise<void> {
+  if (shopifyProductIds.length === 0) return;
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const stmts = shopifyProductIds.map((id) => ({
+    sql: `UPDATE products SET image_checked_at = ? WHERE shopify_product_id = ?`,
+    args: [now, id],
+  }));
+  for (let i = 0; i < stmts.length; i += 100) {
+    await db.batch(stmts.slice(i, i + 100), "write");
+  }
+}
+
 // ─── Import Jobs ─────────────────────────────────────────────────────
 
 const IMPORT_JOB_COLUMNS = new Set([
   "status", "content", "shopify_id", "error", "product_data", "group_key",
 ]);
 
-export async function upsertImportJob(job: { id: string; groupKey: string; productData: string; status: string; createdAt: string; updatedAt: string }): Promise<void> {
+/**
+ * Upsert an import job keyed by group_key, returning the row's ACTUAL id.
+ *
+ * The ON CONFLICT(group_key) branch keeps the pre-existing row's id, so the caller
+ * MUST NOT assume the id it passed in was used — a stale row from an earlier failed
+ * attempt keeps its old id and the passed-in id is discarded. Returning the real id
+ * (via RETURNING) lets the caller address the row it actually owns; trusting the
+ * passed-in id caused "Job <uuid> not found" on re-imports of a previously-failed group.
+ */
+export async function upsertImportJob(job: { id: string; groupKey: string; productData: string; status: string; createdAt: string; updatedAt: string }): Promise<string> {
   const db = await ensureSchema();
-  await db.execute({
+  const result = await db.execute({
     sql: `INSERT INTO import_jobs (id, group_key, product_data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(group_key) DO UPDATE SET product_data=excluded.product_data, status='pending', updated_at=excluded.updated_at`,
+     ON CONFLICT(group_key) DO UPDATE SET product_data=excluded.product_data, status='pending', updated_at=excluded.updated_at
+     RETURNING id`,
     args: [job.id, job.groupKey, job.productData, job.status, job.createdAt, job.updatedAt],
   });
+  return (result.rows[0]?.id as string) ?? job.id;
 }
 
 export async function getImportJobs(): Promise<Record<string, unknown>[]> {
@@ -2826,7 +3323,7 @@ export async function deleteFacebookDraft(id: number): Promise<void> {
 // getNextPending compares lexicographically against datetime('now'). Producers
 // MUST store slots in that exact format (see toSqliteUtc in draft-scheduler).
 
-export type QueueContentType = "social" | "draft" | "blog" | "video";
+export type QueueContentType = "social" | "draft" | "blog" | "video" | "sequential_ad";
 export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog";
 export type QueueStatus = "pending" | "publishing" | "published" | "failed" | "cancelled" | "draft";
 
@@ -2841,6 +3338,8 @@ export interface PublicationQueueItem {
   error: string | null;
   createdAt: string;
   publishedAt: string | null;
+  /** Parsed JSON metadata (sequential_ad: {style, campaign}); null for legacy rows. */
+  metadata: Record<string, unknown> | null;
 }
 
 function mapQueueItem(o: Record<string, unknown>): PublicationQueueItem {
@@ -2855,7 +3354,21 @@ function mapQueueItem(o: Record<string, unknown>): PublicationQueueItem {
     error: (o.error as string) || null,
     createdAt: String(o.created_at),
     publishedAt: (o.published_at as string) || null,
+    metadata: parseJsonObject(o.metadata),
   };
+}
+
+/** Parse a JSON-object DB column into a record, or null on empty/invalid/non-object. */
+function parseJsonObject(v: unknown): Record<string, unknown> | null {
+  if (typeof v !== "string" || v.trim() === "") return null;
+  try {
+    const parsed = JSON.parse(v);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Thrown when a slot is already taken on a platform (partial-unique-index violation). */
@@ -2881,6 +3394,8 @@ export async function addToQueue(item: {
   scheduledAt: string;
   /** Initial status. Default 'pending'. 'draft' = awaits approval (not slot-reserving). */
   status?: QueueStatus;
+  /** Optional JSON metadata (sequential_ad: {style, campaign}); stored in the metadata column. */
+  metadata?: Record<string, unknown>;
 }): Promise<number> {
   if (!isSqliteUtc(item.scheduledAt)) {
     throw new Error(`addToQueue: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${item.scheduledAt}')`);
@@ -2889,9 +3404,9 @@ export async function addToQueue(item: {
   const status = item.status ?? "pending";
   try {
     const result = await db.execute({
-      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at, status)
-            VALUES (?, ?, ?, ?, ?, ?)`,
-      args: [item.contentType, item.contentId, item.platform, item.payload, item.scheduledAt, status],
+      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at, status, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [item.contentType, item.contentId, item.platform, item.payload, item.scheduledAt, status, item.metadata ? JSON.stringify(item.metadata) : null],
     });
     return Number(result.lastInsertRowid);
   } catch (err) {
@@ -3089,6 +3604,92 @@ export async function cancelVideoDraft(id: number): Promise<boolean> {
   return (result.rowsAffected ?? 0) === 1;
 }
 
+// ─── Sequential-ad queue (content_type='sequential_ad') ──────────────
+// Same draft→pending→published lifecycle as 'video', drained by the same
+// publisher; drives the /sequential-ads dashboard. metadata carries {style, campaign}.
+
+/** Sequential-ad queue rows, newest first (excludes cancelled). Drives /sequential-ads. */
+export async function getSequentialAdQueueItems(limit = 50): Promise<PublicationQueueItem[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM publication_queue
+          WHERE content_type = 'sequential_ad' AND status != 'cancelled'
+          ORDER BY created_at DESC, id DESC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
+ * Approve a sequential-ad draft: flip draft → pending at `scheduledAt` (reserves the slot).
+ * Only acts on a 'draft' sequential_ad row (idempotent). Surfaces a slot collision as
+ * QueueSlotTakenError so the caller can retry the next free slot. Mirrors approveVideoDraft.
+ */
+export async function approveSequentialAdDraft(id: number, scheduledAt: string): Promise<boolean> {
+  if (!isSqliteUtc(scheduledAt)) {
+    throw new Error(`approveSequentialAdDraft: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${scheduledAt}')`);
+  }
+  const db = await ensureSchema();
+  try {
+    const result = await db.execute({
+      sql: `UPDATE publication_queue SET status = 'pending', scheduled_at = ?
+            WHERE id = ? AND status = 'draft' AND content_type = 'sequential_ad'`,
+      args: [scheduledAt, id],
+    });
+    return (result.rowsAffected ?? 0) === 1;
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+      throw new QueueSlotTakenError("sequential_ad", scheduledAt);
+    }
+    throw err;
+  }
+}
+
+/** Cancel a sequential-ad draft (draft → cancelled). Only acts on a 'draft' sequential_ad row. */
+export async function cancelSequentialAdDraft(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue SET status = 'cancelled'
+          WHERE id = ? AND status = 'draft' AND content_type = 'sequential_ad'`,
+    args: [id],
+  });
+  return (result.rowsAffected ?? 0) === 1;
+}
+
+/**
+ * Set a sequential ad's publication slot from the dashboard's date picker.
+ *
+ * Accepts a row that is still a `draft` OR already `pending`, and lands it `pending` at
+ * `scheduledAt` either way — one call serves both "approve at a time I choose" and "move an
+ * already-scheduled ad". Deliberately refuses `publishing` / `published` / `failed` /
+ * `cancelled`: rescheduling an item the publisher has already claimed would either
+ * double-publish it or resurrect a terminal row.
+ *
+ * Slot collisions surface as QueueSlotTakenError (the partial-unique index on
+ * (platform, content_type, scheduled_at)) so the caller can tell the operator their chosen
+ * minute is taken instead of silently moving the ad somewhere else — an explicit time picked
+ * by a human must never be quietly overridden.
+ */
+export async function rescheduleSequentialAd(id: number, scheduledAt: string): Promise<boolean> {
+  if (!isSqliteUtc(scheduledAt)) {
+    throw new Error(`rescheduleSequentialAd: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${scheduledAt}')`);
+  }
+  const db = await ensureSchema();
+  try {
+    const result = await db.execute({
+      sql: `UPDATE publication_queue SET status = 'pending', scheduled_at = ?
+            WHERE id = ? AND content_type = 'sequential_ad' AND status IN ('draft', 'pending')`,
+      args: [scheduledAt, id],
+    });
+    return (result.rowsAffected ?? 0) === 1;
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+      throw new QueueSlotTakenError("sequential_ad", scheduledAt);
+    }
+    throw err;
+  }
+}
+
 // ─── Demand Gen video assets ─────────────────────────────────────────
 
 export interface DemandGenAsset {
@@ -3192,6 +3793,21 @@ export async function reserveBlogPublishSlot(week: string, cap: number): Promise
   return r.rows.length > 0;
 }
 
+/**
+ * Count one operator-initiated publish against the week's tally WITHOUT gating on the cap.
+ * A person clicking Publier on /blog should never be blocked by an automation cap — but the
+ * publish still has to consume a slot, otherwise the cron auto-publishes its full quota on
+ * top of it and the week blows past `blog_schedule.posts_per_week`.
+ */
+export async function countBlogPublishSlot(week: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO blog_publish_counter (week, count) VALUES (?, 1)
+          ON CONFLICT(week) DO UPDATE SET count = count + 1`,
+    args: [week],
+  });
+}
+
 /** Give back a slot reserved via reserveBlogPublishSlot when the publish ultimately failed. */
 export async function releaseBlogPublishSlot(week: string): Promise<void> {
   const db = await ensureSchema();
@@ -3199,6 +3815,167 @@ export async function releaseBlogPublishSlot(week: string): Promise<void> {
     sql: `UPDATE blog_publish_counter SET count = MAX(0, count - 1) WHERE week = ?`,
     args: [week],
   });
+}
+
+// ─── Blog posts (generation log) ────────────────────────────────────
+
+export type BlogPostStatus = "draft" | "approved" | "published" | "failed";
+export type BlogPostLang = "fr" | "en";
+
+export const BLOG_POST_STATUSES: readonly BlogPostStatus[] = [
+  "draft", "approved", "published", "failed",
+] as const;
+
+export interface BlogPostRow {
+  id: number;
+  title: string;
+  lang: BlogPostLang;
+  status: BlogPostStatus;
+  shopify_article_id: string | null;
+  approved_at: number | null;
+  published_at: number | null;
+  created_at: number;
+}
+
+export interface RecordBlogPostInput {
+  title: string;
+  lang: BlogPostLang;
+  status: BlogPostStatus;
+  /** Absent for 'failed' rows — no Shopify article exists yet. */
+  shopifyArticleId?: string | null;
+}
+
+const BLOG_POST_COLUMNS =
+  "id, title, lang, status, shopify_article_id, approved_at, published_at, created_at";
+
+function rowToBlogPost(row: Row): BlogPostRow {
+  const o = rowToObj(row);
+  return {
+    id: Number(o.id),
+    title: String(o.title),
+    lang: o.lang === "en" ? "en" : "fr",
+    status: o.status as BlogPostStatus,
+    shopify_article_id: o.shopify_article_id == null ? null : String(o.shopify_article_id),
+    approved_at: o.approved_at == null ? null : Number(o.approved_at),
+    published_at: o.published_at == null ? null : Number(o.published_at),
+    created_at: Number(o.created_at) || 0,
+  };
+}
+
+/**
+ * Log one generated article. Best-effort and never throws: the article already exists in
+ * Shopify by the time this runs, so a telemetry write failure must not turn a successful
+ * generation into an error (same posture as recordCronRun). Returns the new row id, or
+ * null when the write failed.
+ */
+export async function recordBlogPost(input: RecordBlogPostInput): Promise<number | null> {
+  try {
+    const db = await ensureSchema();
+    const now = Math.floor(Date.now() / 1000);
+    const r = await db.execute({
+      sql: `INSERT INTO blog_posts (title, lang, status, shopify_article_id, published_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+      args: [
+        input.title.slice(0, 300),
+        input.lang,
+        input.status,
+        input.shopifyArticleId ?? null,
+        // An article recorded as already 'published' came straight from the auto-publish
+        // gate, so its live-since stamp is now; every other status starts unstamped.
+        input.status === "published" ? now : null,
+        now,
+      ],
+    });
+    return r.rows.length > 0 ? Number(rowToObj(r.rows[0]).id) : null;
+  } catch (err) {
+    console.error("[blog_posts] failed to record post:", err);
+    return null;
+  }
+}
+
+/** Newest-first article log for the /blog dashboard, optionally filtered by lang/status. */
+export async function listBlogPosts(
+  limit = 50,
+  filters: { lang?: BlogPostLang; status?: BlogPostStatus } = {},
+): Promise<BlogPostRow[]> {
+  const db = await ensureSchema();
+  const safeLimit = Math.max(1, Math.min(500, Math.floor(limit)));
+  const where: string[] = [];
+  const args: InValue[] = [];
+  if (filters.lang) {
+    where.push("lang = ?");
+    args.push(filters.lang);
+  }
+  if (filters.status) {
+    where.push("status = ?");
+    args.push(filters.status);
+  }
+  const r = await db.execute({
+    sql: `SELECT ${BLOG_POST_COLUMNS} FROM blog_posts
+          ${where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""}
+          ORDER BY created_at DESC, id DESC LIMIT ?`,
+    args: [...args, safeLimit],
+  });
+  return r.rows.map(rowToBlogPost);
+}
+
+/** Per-status row counts across the WHOLE table (not just the current page/filter). */
+export async function countBlogPostsByStatus(): Promise<Record<BlogPostStatus, number>> {
+  const db = await ensureSchema();
+  const r = await db.execute(`SELECT status, COUNT(*) AS c FROM blog_posts GROUP BY status`);
+  const counts: Record<BlogPostStatus, number> = {
+    draft: 0, approved: 0, published: 0, failed: 0,
+  };
+  for (const row of r.rows) {
+    const o = rowToObj(row);
+    const status = String(o.status) as BlogPostStatus;
+    if (status in counts) counts[status] = Number(o.c) || 0;
+  }
+  return counts;
+}
+
+export async function getBlogPost(id: number): Promise<BlogPostRow | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT ${BLOG_POST_COLUMNS} FROM blog_posts WHERE id = ?`,
+    args: [id],
+  });
+  return r.rows.length > 0 ? rowToBlogPost(r.rows[0]) : null;
+}
+
+/**
+ * draft → approved. The `status = 'draft'` guard lives in the WHERE clause so two
+ * concurrent approvals can't both "win": the loser gets false and the route answers 409.
+ */
+export async function approveBlogPost(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE blog_posts SET status = 'approved', approved_at = ?
+          WHERE id = ? AND status = 'draft'`,
+    args: [Math.floor(Date.now() / 1000), id],
+  });
+  return r.rowsAffected > 0;
+}
+
+/**
+ * approved → published. Called only AFTER Shopify accepted the publish, so a false return
+ * means someone else already flipped the row (the Shopify publish itself is idempotent).
+ */
+export async function markBlogPostPublished(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE blog_posts SET status = 'published', published_at = ?
+          WHERE id = ? AND status = 'approved'`,
+    args: [Math.floor(Date.now() / 1000), id],
+  });
+  return r.rowsAffected > 0;
+}
+
+/** Delete one dashboard row. The Shopify article (if any) is left untouched. */
+export async function deleteBlogPost(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `DELETE FROM blog_posts WHERE id = ?`, args: [id] });
+  return r.rowsAffected > 0;
 }
 
 export async function getLastPostDate(sku: string): Promise<number | null> {
@@ -3262,6 +4039,90 @@ export async function getEligibleHighlightCandidates(
 export async function markProductPosted(sku: string): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `UPDATE products SET last_posted_at = strftime('%s','now') WHERE sku = ?`, args: [sku] });
+}
+
+export interface PendingSocialCandidate {
+  sku: string;
+  kind: "new_product" | "price_drop";
+  oldPrice: number | null;
+  newPrice: number | null;
+}
+
+/**
+ * Candidates for the daily social sweep, prioritised: recently-imported products
+ * first, then recent significant price drops. Both are filtered to in-stock, live
+ * (shopify_product_id NOT NULL) products NOT posted within `minDaysBetween` days.
+ *
+ * The `lifestyle-verified` gate is a runtime Shopify tag lookup (in the job4
+ * triggers), not a DB column, so this only returns a small prioritised sample per
+ * kind for the caller to iterate — it recovers the import/price-drop events the
+ * per-event triggers dropped when the product wasn't lifestyle-verified yet.
+ */
+export async function getPendingSocialCandidates(
+  minDaysBetween: number,
+  dropThresholdPct: number,
+  windowDays: number,
+  perKindLimit: number,
+): Promise<PendingSocialCandidate[]> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const repostCutoff = now - minDaysBetween * 86400;
+  const windowCutoff = now - windowDays * 86400;
+  // import_jobs.updated_at is an ISO-8601 string; compare against an ISO cutoff
+  // (lexicographic order matches chronological order for ISO-8601).
+  const importIsoCutoff = new Date((now - windowDays * 86400) * 1000).toISOString();
+
+  // Priority 1: products imported to Shopify within the window, in stock, not yet
+  // posted. We join import_jobs on the Shopify product id — products.created_at only
+  // tracks first appearance in the Aosom feed (insert-only), NOT the Shopify import,
+  // so a product curated from an old feed entry would otherwise never be swept.
+  const importsRes = await db.execute({
+    sql: `SELECT p.sku AS sku, MAX(ij.updated_at) AS imported_at
+          FROM products p
+          JOIN import_jobs ij ON ij.shopify_id = p.shopify_product_id
+          WHERE ij.status = 'done' AND ij.updated_at > ?
+            AND p.shopify_product_id IS NOT NULL AND p.qty > 0
+            AND (p.last_posted_at IS NULL OR p.last_posted_at < ?)
+          GROUP BY p.sku
+          ORDER BY imported_at DESC
+          LIMIT ?`,
+    args: [importIsoCutoff, repostCutoff, perKindLimit],
+  });
+
+  // Priority 2: recent >= threshold% price drops, not yet posted. One row per sku
+  // (the latest drop — with MAX(detected_at), SQLite returns that row's bare columns).
+  const dropsRes = await db.execute({
+    sql: `SELECT ph.sku AS sku, ph.old_price AS old_price, ph.new_price AS new_price, MAX(ph.detected_at) AS latest
+          FROM price_history ph
+          JOIN products p ON p.sku = ph.sku
+          WHERE ph.change_type = 'price_drop'
+            AND ph.new_price < ph.old_price
+            AND (ph.old_price - ph.new_price) * 100.0 / ph.old_price >= ?
+            AND ph.detected_at > ?
+            AND p.shopify_product_id IS NOT NULL AND p.qty > 0
+            AND (p.last_posted_at IS NULL OR p.last_posted_at < ?)
+          GROUP BY ph.sku
+          ORDER BY latest DESC
+          LIMIT ?`,
+    args: [dropThresholdPct, windowCutoff, repostCutoff, perKindLimit],
+  });
+
+  const seen = new Set<string>();
+  const out: PendingSocialCandidate[] = [];
+  for (const r of importsRes.rows) {
+    const sku = (r as unknown as Record<string, unknown>).sku as string;
+    if (seen.has(sku)) continue;
+    seen.add(sku);
+    out.push({ sku, kind: "new_product", oldPrice: null, newPrice: null });
+  }
+  for (const r of dropsRes.rows) {
+    const o = r as unknown as Record<string, unknown>;
+    const sku = o.sku as string;
+    if (seen.has(sku)) continue; // already queued as a fresh import — post it as new_product
+    seen.add(sku);
+    out.push({ sku, kind: "price_drop", oldPrice: Number(o.old_price), newPrice: Number(o.new_price) });
+  }
+  return out;
 }
 
 // ─── Phase 2 helpers ─────────────────────────────────────────────────

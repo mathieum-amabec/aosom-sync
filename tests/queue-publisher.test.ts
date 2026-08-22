@@ -61,6 +61,7 @@ function item(overrides: Partial<{ id: number; platform: string; payload: unknow
     error: null,
     createdAt: "2026-06-15 14:00:00",
     publishedAt: null,
+    metadata: null,
   };
 }
 

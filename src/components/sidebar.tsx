@@ -5,7 +5,15 @@ import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { UserRole } from "@/lib/config";
 
-const NAV_ITEMS = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  /** Optional live counter pill rendered at the right of the row. */
+  badge?: "blog-drafts";
+}
+
+const NAV_ITEMS: NavItem[] = [
   {
     href: "/",
     label: "Dashboard",
@@ -71,6 +79,26 @@ const NAV_ITEMS = [
     ),
   },
   {
+    href: "/sequential-ads",
+    label: "Pubs séquentielles",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 20.25h12m-7.5-3v3m3-3v3m-10.125-3h17.25c.621 0 1.125-.504 1.125-1.125V4.875c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125Z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/blog",
+    label: "Blog",
+    // Shows how many generated articles are still sitting in 'draft' (awaiting approval).
+    badge: "blog-drafts" as const,
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 7.5h1.5m-1.5 3h1.5m-7.5 3h7.5m-7.5 3h7.5m3-9h3.375c.621 0 1.125.504 1.125 1.125V18a2.25 2.25 0 0 1-2.25 2.25M16.5 7.5V18a2.25 2.25 0 0 0 2.25 2.25M16.5 7.5V4.875c0-.621-.504-1.125-1.125-1.125H4.125C3.504 3.75 3 4.254 3 4.875V18a2.25 2.25 0 0 0 2.25 2.25h13.5M6 7.5h3v3H6v-3Z" />
+      </svg>
+    ),
+  },
+  {
     href: "/social",
     label: "Social Media",
     icon: (
@@ -121,6 +149,45 @@ function useIsDesktop() {
   return isDesktop;
 }
 
+/**
+ * Window event the /blog page fires after approving/publishing/deleting, so the badge
+ * refreshes immediately instead of drifting until the next poll.
+ */
+export const BLOG_DRAFTS_CHANGED = "blog-drafts-changed";
+
+/**
+ * Poll the count of blog articles still awaiting approval (status='draft'). Disabled for
+ * roles that can't see /blog at all, so a reviewer session never hits the endpoint.
+ * Refreshes on the same 30s cadence as the notification bell.
+ */
+function useBlogDraftCount(enabled: boolean): number {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const fetchCount = () => {
+      // limit=1 — only `counts` is used; the row itself is discarded.
+      fetch("/api/blog/queue?limit=1")
+        .then((r) => r.json())
+        .then((d) => {
+          if (!cancelled && d?.success) setCount(Number(d.data?.counts?.draft) || 0);
+        })
+        .catch(() => {});
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 30000);
+    window.addEventListener(BLOG_DRAFTS_CHANGED, fetchCount);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener(BLOG_DRAFTS_CHANGED, fetchCount);
+    };
+  }, [enabled]);
+
+  return count;
+}
+
 // External Umami Cloud analytics dashboard (cookieless storefront analytics).
 const UMAMI_DASHBOARD_URL = "https://cloud.umami.is";
 
@@ -135,6 +202,7 @@ export function Sidebar({ role = "admin" }: { role?: UserRole }) {
   const navItems = role === "reviewer"
     ? NAV_ITEMS.filter((item) => REVIEWER_VISIBLE_HREFS.has(item.href))
     : NAV_ITEMS;
+  const blogDraftCount = useBlogDraftCount(role !== "reviewer");
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -226,7 +294,12 @@ export function Sidebar({ role = "admin" }: { role?: UserRole }) {
                 }`}
               >
                 {item.icon}
-                {item.label}
+                <span className="flex-1">{item.label}</span>
+                {item.badge === "blog-drafts" && blogDraftCount > 0 && (
+                  <span className="px-1.5 py-0.5 min-w-[1.25rem] text-center bg-yellow-500/15 text-yellow-400 text-[10px] font-bold rounded-full">
+                    {blogDraftCount > 99 ? "99+" : blogDraftCount}
+                  </span>
+                )}
               </Link>
             );
           })}

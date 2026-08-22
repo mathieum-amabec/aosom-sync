@@ -1,0 +1,23 @@
+{
+  "sections": {
+    "main": {
+      "type": "main-page",
+      "settings": {
+        "padding_top": 28,
+        "padding_bottom": 28
+      }
+    },
+    "lc_about_online": {
+      "type": "custom-liquid",
+      "settings": {
+        "custom_liquid": "{%- if page.handle == 'a-propos' -%}\n  {%- assign loc = request.locale.iso_code | downcase -%}\n  <div class=\"lc-about-online\">\n    <p>{% if loc == 'en' %}<strong>Our secret?<\/strong> Staying 100% online. With no showroom to rent and no commissioned salespeople, we keep our overhead low &mdash; and hand you the difference on every price.{% else %}<strong>Notre secret&nbsp;?<\/strong> Rester 100&nbsp;% en ligne. Sans salle de montre &agrave; louer ni vendeurs &agrave; commission, on garde nos frais au minimum &mdash; et on vous redonne la diff&eacute;rence sur chaque prix.{% endif %}<\/p>\n  <\/div>\n  <style>\n    .lc-about-online{max-width:760px;margin:0 auto 2.5rem;padding:0 1.5rem;}\n    .lc-about-online p{font-size:1.05rem;line-height:1.6;color:#1A2340;border-left:3px solid #D4A853;padding:.85rem 0 .85rem 1.1rem;background:rgba(212,168,83,.08);border-radius:0 6px 6px 0;margin:0;}\n  <\/style>\n{%- endif -%}",
+        "padding_top": 0,
+        "padding_bottom": 0
+      }
+    }
+  },
+  "order": [
+    "main",
+    "lc_about_online"
+  ]
+}
