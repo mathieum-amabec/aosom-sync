@@ -2,6 +2,40 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.65.5] - 2026-08-22
+
+### Added — the merchant feeds' network half, and all 7 feed routes
+`lib/feeds/` was the zone with the worst track record this summer (#403, #405, #410, #414 all
+fixed live Google Merchant problems). Its pure mapping helpers were already well covered by
+`feeds.test.ts`; the untested remainder was everything that talks to Shopify, plus all seven
+public routes at 0%.
+
+`tests/feeds-source-fetch.test.ts` (24 tests) covers `getFeedItems`, `fetchTitleEnMap`,
+`fetchMaterialMap` and `scrubSupplier`. What is pinned:
+- **The partial-feed guard.** Past MAX_PAGES the loop must throw, not return what it has: a
+  truncated feed still answers 200, gets CDN-cached, and products silently vanish from Google.
+- The two fetchers' opposite failure postures, which is deliberate and easy to "fix" wrongly:
+  `fetchMaterialMap` swallows everything and returns an empty map (a missing material must
+  degrade to an omitted attribute, never a dead feed), while `fetchTitleEnMap` throws (an EN
+  feed that silently falls back to French titles is worse than no feed).
+- `fetchMaterialMap` costs exactly ONE cheap probe while no material metafield is defined.
+- `scrubSupplier` replaces every occurrence, honours the locale's house brand, and respects the
+  word boundary — the supplier name is strictly forbidden in client-facing copy.
+
+`tests/api/feeds-routes.test.ts` (36 tests, table-driven over the 7 routes) pins the three
+invariants they share: a success is CDN-cached 10 minutes while **a failure is `no-store`** (a
+cached 500 would hand Google an error page for the whole window from one transient blip);
+every outcome is recorded in `feed_syncs` under that route's own key, since that table is the
+only place a silently-dying feed surfaces; and only `pinterest-en` requests English items.
+
+`lib/feeds/source.ts`: 45.7% → **94.6%**. All 7 routes: 0% → **100%**. Repo 53.7% → 55.2%.
+
+**Mutation-checked.** Worth recording that the first attempt at one mutation *survived*:
+forcing the material pass to run with no metafield defined changed nothing observable, because
+the resulting error is absorbed by the function's own catch-all. The replacement mutation —
+making the definition filter accept keys that are not defined — failed 5 tests. A surviving
+mutant is the useful signal; it says the assertion was weaker than it looked.
+
 ## [0.5.65.4] - 2026-08-22
 
 ### Added — tests for the intraday stock-check cron, which had none
