@@ -173,9 +173,20 @@ payload in `client.plan`, and returns synthetic resource names — so callers bu
 object chain through one code path with or without credentials. This is why the campaign script
 renders a complete campaign against an empty `.env.local`.
 
-**API version.** Pinned at `GOOGLE_ADS_API_VERSION` in the client. Google sunsets a version
-roughly every 4 months — check <https://developers.google.com/google-ads/api/docs/release-notes>
-before a live run, and override per-run with `--api-version`.
+**API version.** Pinned at `GOOGLE_ADS_API_VERSION` in the client (v22 as of 2026-08-23).
+Google sunsets a version roughly every 4 months — check
+<https://developers.google.com/google-ads/api/docs/release-notes> before a live run, and
+override per-run with `--api-version`.
+
+A retired version does not answer with an API error: `googleads.googleapis.com` serves a plain
+HTML **404**, so the client reports `HTTP 404` and the cause reads like a wrong URL rather than
+a dead version. If a live run 404s on the first call, check the version before anything else.
+
+**EU political advertising.** Since v22 every campaign create must declare
+`contains_eu_political_advertising` (Regulation (EU) 2024/900); omitting it fails the whole
+create with `REQUIRED`. The client declares `DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING`
+automatically — correct for a retail catalogue. Override per campaign with
+`containsEuPoliticalAdvertising` on `createCampaign` if that ever stops being true.
 
 ### Campaign script — `scripts/create-google-shopping-campaign.mts`
 

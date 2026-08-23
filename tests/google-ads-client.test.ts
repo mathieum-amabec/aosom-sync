@@ -8,6 +8,7 @@ import {
   isSmartBidding,
   toMicros,
   GOOGLE_ADS_SCOPE,
+  GOOGLE_ADS_API_VERSION,
   type GoogleAdsCredentials,
   type BiddingStrategy,
 } from "@/lib/google-ads-client";
@@ -227,6 +228,75 @@ describe("createCampaign", () => {
       campaignPriority: 1,
       enableLocal: false,
     });
+  });
+});
+
+describe("API version", () => {
+  // v21 was retired: googleads.googleapis.com answers a retired version with a plain HTML
+  // 404, so the client reports "HTTP 404" and the real cause (dead version) is invisible.
+  // Probed live 2026-08-23 — v22 answers, v21/v20/v19 do not.
+  it("is pinned to a version Google still serves", () => {
+    expect(GOOGLE_ADS_API_VERSION).toBe("v22");
+  });
+
+  it("puts the pinned version in the request path", async () => {
+    const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).includes("oauth2.googleapis.com")) {
+        return new Response(JSON.stringify({ access_token: "at", expires_in: 3600 }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ results: [{ resourceName: "customers/1/campaignBudgets/9" }] }), { status: 200 });
+    });
+    const client = new GoogleAdsClient(CREDS, { fetchImpl: fetchImpl as unknown as typeof fetch });
+    await client.createCampaignBudget({ name: "B", amountMicros: "1" });
+
+    const apiCall = fetchImpl.mock.calls.find(([u]) => String(u).includes("googleads.googleapis.com"));
+    expect(String(apiCall?.[0])).toContain("/" + GOOGLE_ADS_API_VERSION + "/");
+  });
+
+  it("still honours an explicit override", () => {
+    expect(new GoogleAdsClient(null, { dryRun: true, apiVersion: "v23" }).apiVersion).toBe("v23");
+  });
+});
+
+describe("EU political advertising declaration", () => {
+  // Required on campaign create since v22 (Regulation (EU) 2024/900). Absent, the API
+  // rejects the whole create with REQUIRED on contains_eu_political_advertising — which is
+  // what broke the first live run of create-google-shopping-campaign.
+  it("declares DOES_NOT_CONTAIN by default", async () => {
+    const client = dry();
+    await client.createCampaign({
+      name: "C",
+      budgetResourceName: "b",
+      bidding: { kind: "MAXIMIZE_CLICKS" },
+    });
+    expect(createdBody(client, "campaign").containsEuPoliticalAdvertising).toBe(
+      "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
+    );
+  });
+
+  it("never omits the field, whatever the bidding strategy", async () => {
+    for (const bidding of [
+      { kind: "MAXIMIZE_CLICKS" },
+      { kind: "MAXIMIZE_CONVERSION_VALUE" },
+      { kind: "MANUAL_CPC" },
+    ] as BiddingStrategy[]) {
+      const client = dry();
+      await client.createCampaign({ name: "C", budgetResourceName: "b", bidding });
+      expect(createdBody(client, "campaign")).toHaveProperty("containsEuPoliticalAdvertising");
+    }
+  });
+
+  it("can be overridden for an advertiser that does run political ads", async () => {
+    const client = dry();
+    await client.createCampaign({
+      name: "C",
+      budgetResourceName: "b",
+      bidding: { kind: "MAXIMIZE_CLICKS" },
+      containsEuPoliticalAdvertising: "CONTAINS_EU_POLITICAL_ADVERTISING",
+    });
+    expect(createdBody(client, "campaign").containsEuPoliticalAdvertising).toBe(
+      "CONTAINS_EU_POLITICAL_ADVERTISING",
+    );
   });
 });
 
