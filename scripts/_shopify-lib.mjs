@@ -131,6 +131,10 @@ export async function getAsset(key, themeId = BACKUP_THEME_ID) {
  * The constants above are a cache that goes stale on every publish; this is the truth.
  * Keeping the two separate is the point: the constants say where we MEANT to write, the
  * roles say what that theme actually is right now.
+ *
+ * Cached for the life of the process, which bounds what the guard can promise: a publish
+ * that happens mid-run is not seen by later writes in that same run. Scripts here are short
+ * and operator-launched, so that window is acceptable; re-running picks up the new roles.
  */
 let _rolesPromise = null;
 export async function themeRoles() {
