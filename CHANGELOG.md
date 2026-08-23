@@ -2,6 +2,38 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.66.1] - 2026-08-23
+
+### Fixed — the Google Shopping campaign script could not run at all
+Its first live run failed twice, and neither failure was the developer token.
+
+**HTTP 404 on every call.** The client pinned `v21`, which Google has retired. A retired
+version does not answer with an API error: `googleads.googleapis.com` serves a plain HTML 404,
+so the client surfaced `HTTP 404` and the cause read like a wrong URL or a bad customer id.
+Probed live: v22 answers, v21/v20/v19 do not. Pinned to v22, with the failure mode written
+into the constant's comment and into `docs/GOOGLE-ADS-SETUP.md` so the next 404 is diagnosed
+in seconds instead of hours.
+
+**`REQUIRED` on `contains_eu_political_advertising`.** v22 makes the EU political advertising
+declaration mandatory on campaign create (Regulation (EU) 2024/900); omitting it rejects the
+whole operation. `createCampaign` now declares
+`DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING` — correct for a retail catalogue — overridable per
+campaign via `containsEuPoliticalAdvertising`.
+
+The field name and enum value were confirmed against the live API with `validateOnly`, not
+guessed from documentation. The whole 7-step campaign plan was then replayed against v22 with
+`validateOnly`: **zero schema errors**, so the version bump is proven for the full object chain
+(budget, campaign, ad group, ad, listing group, negative keywords, locations) rather than for
+the one operation that happened to fail.
+
+6 tests. Mutation-checked: reverting to v21, dropping the EU field, and inverting its default
+each fail 1-3 of them.
+
+**Still blocked upstream, and no code can fix it:** `GOOGLE_ADS_CUSTOMER_ID` (2953431617)
+is a MANAGER account, which cannot host campaigns, and no Merchant Center is linked to it. The
+only other accessible account is deactivated. Creating the campaign needs a client account
+under the MCC plus an MC link — both Google Ads UI steps.
+
 ## [0.5.66.0] - 2026-08-22
 
 ### Fixed — theme writes are guarded at the choke point, not per script
