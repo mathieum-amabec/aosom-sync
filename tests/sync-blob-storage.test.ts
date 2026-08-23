@@ -49,7 +49,7 @@ describe("savePhase1Blob", () => {
     expect(url).toBe(VALID_BLOB_URL);
     expect(put).toHaveBeenCalledOnce();
 
-    const [path, _body, opts] = vi.mocked(put).mock.calls[0]!;
+    const [path, , opts] = vi.mocked(put).mock.calls[0]!;
     expect(path).toMatch(/sync-runs\/phase1\/\d{4}-\d{2}-\d{2}\/run-xyz\.json/);
     expect(opts).toMatchObject({
       access: "public",
@@ -64,7 +64,7 @@ describe("savePhase1Blob", () => {
 
     await savePhase1Blob("run-xyz", SAMPLE_DATA);
 
-    const [_path, body] = vi.mocked(put).mock.calls[0]!;
+    const [, body] = vi.mocked(put).mock.calls[0]!;
     const parsed = JSON.parse(body as string) as Phase1BlobData;
     expect(parsed.toWriteMapped).toHaveLength(1);
     expect(parsed.toWriteMapped[0]!.sku).toBe("SKU-001");

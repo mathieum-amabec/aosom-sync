@@ -292,7 +292,7 @@ const DEFAULT_RATE_LIMIT_MS = 2_000;
 // maxDuration (300s) so an in-flight publish (an IG reel transcode can poll ~120s) can
 // finish and the function can return cleanly. A claim we can't finish before Vercel
 // SIGKILLs the function would strand the item in 'publishing' — getNextPending only
-// re-selects 'pending', and there is no reaper today (same gap as claimFacebookDraft).
+// re-selects 'pending', and there is no reaper today.
 // Deferring instead leaves the item 'pending' for the next hourly run. Recover a stranded
 // row manually with:  UPDATE publication_queue SET status='pending' WHERE status='publishing';
 const DEFAULT_BUDGET_MS = 240_000;

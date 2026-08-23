@@ -127,7 +127,7 @@ describe("approveDraft() → publication_queue (all draft types auto-schedule)",
   it("retries past a slot lost to QueueSlotTakenError", async () => {
     mockCommon();
     const addToQueue = vi.fn().mockRejectedValueOnce(new QueueSlotTakenError()).mockResolvedValueOnce(100);
-    const db = mockDatabase({ addToQueue });
+    mockDatabase({ addToQueue });
     vi.doMock("@/lib/social-publisher", () => ({ draftToQueueItems: vi.fn().mockReturnValue([AMEUBLO_ITEM]) }));
     const getNextAvailableSlot = vi.fn().mockResolvedValueOnce(SLOT).mockResolvedValueOnce(SLOT2);
     vi.doMock("@/lib/publication-scheduler", () => ({ getNextAvailableSlot }));

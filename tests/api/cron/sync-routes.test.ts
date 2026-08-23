@@ -26,7 +26,7 @@ vi.mock("@/jobs/job1-sync", () => ({
 import { GET as getSyncInit } from "@/app/api/cron/sync/route";
 import { GET as getSyncRefresh } from "@/app/api/cron/sync-refresh/route";
 import { GET as getSyncFinalize } from "@/app/api/cron/sync-finalize/route";
-import { runSyncFull, runSyncInit, runSyncRefreshChunk, runSyncFinalize } from "@/jobs/job1-sync";
+import { runSyncFull, runSyncRefreshChunk, runSyncFinalize } from "@/jobs/job1-sync";
 
 function makeReq(url: string, auth?: string): Request {
   return new Request(`http://localhost${url}`, {

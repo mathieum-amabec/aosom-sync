@@ -17,7 +17,7 @@ vi.mock("@vercel/blob", () => ({
 
 import { GET } from "@/app/api/cron/csv-precache/route";
 import { put } from "@vercel/blob";
-import { upsertBlobCache, getCachedBlobUrl } from "@/lib/database";
+import { upsertBlobCache } from "@/lib/database";
 
 // 9,000 rows × ~1,300 bytes each ≈ 11.7 MB — passes both MIN_CSV_BYTES (10 MB) and MIN_CSV_ROWS (8 000)
 const DATA_ROW = "SKU-001\tProduct Name\t" + "X".repeat(1280) + "\n";

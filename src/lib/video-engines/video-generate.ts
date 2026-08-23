@@ -155,11 +155,32 @@ export function toKlingProduct(row: ProductLike): KlingProduct {
  * the serverless filesystem), else public/social-videos/ for local dev. The
  * file is served back through GET /api/video-serve/:id (streams video_path).
  */
-export function resolveVideoOutputPath(jobId: number): string {
-  const dir = process.env.VERCEL
+export function videoOutputDir(): string {
+  return process.env.VERCEL
     ? path.join("/tmp", "videos")
     : path.join(process.cwd(), "public", "social-videos");
-  return path.join(dir, `video-${jobId}.mp4`);
+}
+
+export function resolveVideoOutputPath(jobId: number): string {
+  return path.join(videoOutputDir(), `video-${jobId}.mp4`);
+}
+
+/**
+ * Resolve a stored video_jobs.video_path to an absolute path, throwing when it
+ * escapes videoOutputDir(). video_path is pipeline-written, never request input,
+ * but GET /api/video-serve/:id is public — so this keeps a poisoned DB row from
+ * turning that route into an arbitrary-file reader, the same defence video_url
+ * already gets from its http(s) check.
+ */
+export function resolveStoredVideoPath(videoPath: string): string {
+  const base = path.resolve(videoOutputDir());
+  const resolved = path.isAbsolute(videoPath)
+    ? path.resolve(videoPath)
+    : path.resolve(base, videoPath);
+  if (resolved !== base && !resolved.startsWith(base + path.sep)) {
+    throw new Error("Invalid video path");
+  }
+  return resolved;
 }
 
 /** Dashboard-playable URL for a finished job (served by /api/video-serve/:id). */

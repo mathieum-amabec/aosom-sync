@@ -1072,9 +1072,7 @@ describe("runSyncFull — fresh start (no checkpoint)", () => {
 
     // After full savePhase1Checkpoint sequence, finalize will see refreshDone=true
     // We simulate the checkpoint progression via side effects on savePhase1Checkpoint
-    let checkpointState = { date: "", blobUrl: "", totalChunks: 0, chunksProcessed: 0, refreshDone: false, finalized: false, totalProducts: 0, priceUpdates: 0, stockChanges: 0, newProducts: 0 };
     vi.mocked(db.savePhase1Checkpoint).mockImplementation(async (cp) => {
-      checkpointState = { ...cp };
       vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({ ...cp });
     });
 

@@ -1,4 +1,4 @@
-import type { AosomMergedProduct, AosomVariant } from "./aosom";
+import type { AosomMergedProduct } from "./aosom";
 
 /**
  * Represents a product currently in our Shopify store.

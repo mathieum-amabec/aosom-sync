@@ -9,6 +9,14 @@ export default defineConfig({
     // defaults, setting `exclude` would override them and vitest would scan
     // node_modules.
     exclude: [...configDefaults.exclude, "**/.claude/**", "**/out/**"],
+    coverage: {
+      provider: "v8",
+      // Application code only. scripts/ is 228 one-shot ops tools run by hand,
+      // never imported by the app — including them would drown the signal.
+      include: ["src/**/*.{ts,tsx}"],
+      exclude: ["src/**/__tests__/**", "src/**/*.d.ts"],
+      reporter: ["text-summary", "json-summary"],
+    },
   },
   resolve: {
     alias: {

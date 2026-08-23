@@ -249,7 +249,7 @@ async function applyToShopify(
               try {
                 await markPriceChangeAppliedBySku(change.sku, newPrice);
               } catch (markErr) {
-                log(`markPriceChangeApplied failed for ${change.sku}: ${markErr instanceof Error ? markErr.message : String(markErr)}`);
+                log(`markPriceChangeAppliedBySku failed for ${change.sku}: ${markErr instanceof Error ? markErr.message : String(markErr)}`);
               }
             }
           })

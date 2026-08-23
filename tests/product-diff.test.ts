@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { diffProductsLight, type ProductDiffResult } from "@/lib/product-diff";
+import { diffProductsLight } from "@/lib/product-diff";
 import type { AosomProduct } from "@/types/aosom";
 import type { ProductSnapshot } from "@/lib/database";
 

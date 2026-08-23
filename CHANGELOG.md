@@ -2,6 +2,206 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.65.6] - 2026-08-22
+
+### Changed — database.ts triaged by call site, not by coverage percentage
+database.ts sat at 19% lines, the biggest single number on the coverage map. Testing it by
+volume would have been the wrong move: 34 of the 137 test files mock `@/lib/database` and
+assert the contract at the call site, so most of these functions ARE verified — what never
+executes is their SQL body. Two different risks wearing one number.
+
+Tracing all 155 exports against the jobs, crons and pipeline libraries found **68 on an
+unattended/critical path, and only 5 named by no test at all**. Of those 5, two turned out
+to be dead and three were real gaps.
+
+### Removed — two dead exports
+- `claimFacebookDraft` claimed `facebook_drafts` rows with `status='scheduled'`. That
+  publishing path was retired when everything moved to `publication_queue`, so nothing sets
+  that status and nothing calls this — its only other mentions were two code comments.
+  `claimQueueItem` is the live equivalent, and it is tested.
+- `markPriceChangeApplied(id)` has no caller either; the sync uses
+  `markPriceChangeAppliedBySku`, because Phase 2 can push without a fresh price_history row
+  to key on. A log line in job1-sync also named the wrong function — it reported
+  "markPriceChangeApplied failed" for a `markPriceChangeAppliedBySku` failure. Fixed.
+
+### Added — tests for the three live, untested critical queries
+`tests/database-critical-queries.test.ts` (17 tests) drives the REAL exported functions
+against the REAL schema in an in-memory libsql database — not a copy of their SQL pasted into
+the test, which is how the existing DB suites work and which cannot catch the query drifting
+away from the mirror.
+
+- `getStaleImportedProducts` (stale-catalog drafts what it returns): the `qty > 0` filter (the
+  risk is overselling, and a sold-out product cannot oversell), the direction of the
+  `last_seen_at` comparison, the window argument being honoured, and longest-unseen-first
+  ordering so a capped run drafts the worst offenders.
+- `getPendingWaitlist` (decides who gets a back-in-stock email): never an unconfirmed address
+  (double opt-in), never a second email, never another SKU's subscribers.
+- `markWaitlistNotified`: stamps only the given ids, is idempotent, and **issues no query at
+  all** for an empty list.
+
+Also documents, as a failing-on-purpose guard, that a numerically-bound `shopify_product_id`
+round-trips through SQLite's TEXT affinity as `"123456789.0"` and would never match Shopify.
+Every writer types it `string`, so this cannot happen today; the test exists to fail if that
+type is ever widened.
+
+**Mutation-checked, and two of the checks corrected themselves:**
+- The empty-list test originally asserted "does not throw", which SQLite makes vacuous — it
+  accepts `IN ()` and matches nothing, so removing the guard changed nothing observable. The
+  test now counts queries, which is the guard's actual job.
+- One mutation appeared to survive because the anchor matched a *sibling* function sharing the
+  same three lines. Re-anchored on the signature, it fails as it should. The mutant was
+  mis-aimed, not the test — worth recording, because "the mutant survived" is only useful
+  evidence when the mutant hit the code under test.
+
+database.ts: 18.8% → 20.6% lines. Repo total 55.2% → 55.4%. The percentage moves little by
+design: the remaining 835 uncovered lines are overwhelmingly operator-driven admin queries
+reached from the dashboard, where a fault is visible immediately.
+
+## [0.5.65.5] - 2026-08-22
+
+### Added — the merchant feeds' network half, and all 7 feed routes
+`lib/feeds/` was the zone with the worst track record this summer (#403, #405, #410, #414 all
+fixed live Google Merchant problems). Its pure mapping helpers were already well covered by
+`feeds.test.ts`; the untested remainder was everything that talks to Shopify, plus all seven
+public routes at 0%.
+
+`tests/feeds-source-fetch.test.ts` (24 tests) covers `getFeedItems`, `fetchTitleEnMap`,
+`fetchMaterialMap` and `scrubSupplier`. What is pinned:
+- **The partial-feed guard.** Past MAX_PAGES the loop must throw, not return what it has: a
+  truncated feed still answers 200, gets CDN-cached, and products silently vanish from Google.
+- The two fetchers' opposite failure postures, which is deliberate and easy to "fix" wrongly:
+  `fetchMaterialMap` swallows everything and returns an empty map (a missing material must
+  degrade to an omitted attribute, never a dead feed), while `fetchTitleEnMap` throws (an EN
+  feed that silently falls back to French titles is worse than no feed).
+- `fetchMaterialMap` costs exactly ONE cheap probe while no material metafield is defined.
+- `scrubSupplier` replaces every occurrence, honours the locale's house brand, and respects the
+  word boundary — the supplier name is strictly forbidden in client-facing copy.
+
+`tests/api/feeds-routes.test.ts` (36 tests, table-driven over the 7 routes) pins the three
+invariants they share: a success is CDN-cached 10 minutes while **a failure is `no-store`** (a
+cached 500 would hand Google an error page for the whole window from one transient blip);
+every outcome is recorded in `feed_syncs` under that route's own key, since that table is the
+only place a silently-dying feed surfaces; and only `pinterest-en` requests English items.
+
+`lib/feeds/source.ts`: 45.7% → **94.6%**. All 7 routes: 0% → **100%**. Repo 53.7% → 55.2%.
+
+**Mutation-checked.** Worth recording that the first attempt at one mutation *survived*:
+forcing the material pass to run with no metafield defined changed nothing observable, because
+the resulting error is absorbed by the function's own catch-all. The replacement mutation —
+making the definition filter accept keys that are not defined — failed 5 tests. A surviving
+mutant is the useful signal; it says the assertion was weaker than it looked.
+
+## [0.5.65.4] - 2026-08-22
+
+### Added — tests for the intraday stock-check cron, which had none
+`GET /api/cron/stock-check` ran three times a day, unattended, deciding which products show
+as out of stock, which get drafted as discontinued and which get republished — at 0% coverage.
+Its failure mode is silent: no crash, just a catalogue saying the wrong thing.
+
+24 tests in `tests/api/cron/stock-check.test.ts`, covering the behaviours that carry the risk:
+- **The feed guard bails before any write.** A thin CSV must not mass-flip the catalogue, so
+  the test asserts `planStockActions` is never even reached, not merely that it 500s.
+- **Worst-first ordering.** OOS/draft are processed before restock/reactivate so the 150-write
+  cap can never starve rupture detection; the overflow is `deferred`, not dropped.
+- **A 404 costs no cap budget.** A catalogue full of deleted products must not eat the run.
+- **We only ever republish what WE drafted.** Both the `restock` and `reactivate` paths are
+  pinned against an operator's hand-set draft and against the `exclude-stale` opt-out, and
+  `reactivate` re-checks live state because the plan was built from an older draft fetch.
+- **Waitlist notification precedes baseline persistence** (at-least-once: a crash between the
+  two must re-notify next run, never drop the alert), and the baseline is written per product
+  rather than batched, so a budget-killed run keeps its progress.
+- Degradation: a failed draft-states fetch skips reactivation instead of aborting rupture
+  detection; one product's failure is counted and the loop continues.
+
+The tag helpers are deliberately not mocked — most assertions are the exact tag list sent to
+Shopify, which is the thing a shopper actually sees.
+
+**Mutation-checked**, as in v0.5.65.3: dropping the worst-first sort, charging a 404 to the
+write cap, skipping the reactivate re-check, letting restock resurrect an operator's draft,
+and an off-by-one on the cap each failed 1-3 tests.
+
+`stock-check/route.ts`: 0% → **97% lines, 80% branches**. Repo total 53.1% → 53.7%.
+
+Test-hygiene note: this file uses `vi.resetAllMocks()`, not `clearAllMocks`. Clear only wipes
+recorded calls, so the throwing `assertFeedComplete` from the feed-guard test leaked into the
+17 tests that followed it.
+
+## [0.5.65.3] - 2026-08-22
+
+### Added — the 11 untested Shopify write paths now have tests
+Coverage measurement (v0.5.65.2) showed `shopify-client.ts` at 21% lines, and 11 of its 22
+exported functions referenced by no test at all. All 11 have real production callers — none
+were dead code — and they group tellingly: **everything touching inventory and publication**
+was in the list, including the whole of `publish-reconcile` (up to 67 products put live per
+run) and `setInventoryLevel`, which the daily sync calls from three places.
+
+Two files, 42 tests, grouped by concern rather than by function:
+- `tests/shopify-client-inventory.test.ts` — `getPrimaryLocationId` (active-location
+  preference, fallback, process-lifetime cache), `enableVariantTracking`, `setInventoryLevel`
+  (including the 422 "not stocked" → connect → retry branch, and that a non-stocking 422 must
+  NOT trigger a connect), `fetchActiveVariantInventory`.
+- `tests/shopify-client-publish.test.ts` — `publishShopifyProduct` (pins that it sets
+  `published` and leaves `status` alone unless asked: flipping status alone does not publish
+  an existing product, which is the gap publish-reconcile exists to close),
+  `fetchProductPublishStates` (a FUTURE `published_at` counts as not-yet-published),
+  `fetchDraftProductStates`, `getShopifyStockState`, `setProductMetafield`,
+  `deleteProductMetafield` (404 on delete is tolerated; other failures are not),
+  `fetchAllCollections` (returns [] on HTTP failure — unlike its siblings, it does not throw).
+
+Both files pin the documented pagination gotcha the two paginated readers share: the
+`status=` filter goes on the first page only, because Shopify rejects it alongside
+`page_info` on follow-ups.
+
+**The tests were mutation-checked rather than assumed.** Five deliberate breaks in
+`shopify-client.ts` — dropping `published: true`, ignoring a future `published_at`, keeping
+`status=` on page 2, disabling the connect-and-retry, un-tolerating the delete 404 — each
+failed between 1 and 3 of the new tests. Coverage counts a line as covered when it merely
+runs; this confirms these assertions actually bite.
+
+`shopify-client.ts`: 21% → **69% lines**. Repo total 52.1% → 53.1%.
+
+Config note: token presence is a mutable flag inside the `@/lib/config` mock rather than a
+`doMock`/`doUnmock` pair. Unmocking mid-file makes every later `vi.resetModules()` reload the
+real config, which throws on a missing `SHOPIFY_ACCESS_TOKEN` — it broke 17 tests before the
+switch, and only ordering had hidden it in the first file.
+
+## [0.5.65.2] - 2026-08-22
+
+### Security — the repo is public and nothing ignored credential downloads
+A Google OAuth client-secret JSON (`client_secret_*.apps.googleusercontent.com.json`,
+project `aosom-dropship`) was sitting untracked at the repo root. It was never committed,
+but no `.gitignore` rule covered it — `.env*` does not match — so a single `git add -A`
+would have published it permanently. `.gitignore` now covers credential downloads
+(`client_secret_*.json`, `*-credentials.json`, `gcp-*.json`, `token.json`), plus the QA
+scratch that accumulates at the root: `/.playwright-mcp/` (36 MB of page snapshots),
+`/.context/`, `/.draft-scratch-cards/`, root-level `*.png`/`*.jpeg`/`*.jpg` (112 MB of QA
+screenshots) and `*.bak`. No currently-tracked file becomes ignored.
+
+### Fixed — /api/video-serve trusted video_path while validating video_url
+The route is public (allow-listed in proxy.ts) and validated `video_url` as "defence in
+depth against a poisoned DB value", but passed `video_path` straight to `fs.stat` +
+`createReadStream`. `video_path` now has to resolve inside the render output dir.
+
+The guard could not simply reuse `video-engines/video-store.ts`: that module was **dead
+and divergent**. Nothing imported it, and its `getVideoOutputDir()` pointed at
+`/tmp/product-videos` (local: `public/product-videos`) while the pipeline actually writes
+to `/tmp/videos` (local: `public/social-videos`) via `resolveVideoOutputPath`. Wiring the
+stale resolver in would have 404ed every video in production. `video-store.ts` is deleted;
+`videoOutputDir()` + `resolveStoredVideoPath()` now live in `video-generate.ts` next to the
+writer, so the reader and the writer cannot drift apart again. Two traversal cases added
+to `tests/video-serve-route.test.ts`.
+
+### Removed — unused variables, imports and one dead test helper
+ESLint went from 77 problems to 13. `src` is now error-free; what remains is 8 deliberate
+`no-img-element` warnings (remote Shopify CDN images in the dashboard) and `no-explicit-any`
+in one test file. Notable fixes beyond deleting dead bindings:
+- `videos-client.tsx` cleared search hits with a synchronous `setState` inside an effect
+  body (cascading renders). The clear moved to the input handler that shortens the query;
+  behaviour is identical, since the only other writer, `add()`, already clears hits.
+- `tests/inventory-sweep.test.ts` had `mk(n)` ignore its own argument and always build 10
+  variants. It now honours `n` — every call site already passed 10, so the 70%-threshold
+  assertions are unchanged.
+
 ## [0.5.65.1] - 2026-08-22
 
 ### Fixed — 5 theme-write scripts pointed their DRAFT target at the live theme
