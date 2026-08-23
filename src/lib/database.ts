@@ -1839,11 +1839,6 @@ export async function recordFloorCorrection(entry: {
   });
 }
 
-export async function markPriceChangeApplied(id: number): Promise<void> {
-  const db = await ensureSchema();
-  await db.execute({ sql: `UPDATE price_history SET applied_to_shopify = 1 WHERE id = ?`, args: [id] });
-}
-
 /**
  * Mark the price_history row matching a just-pushed price as applied to Shopify
  * (`applied_to_shopify = 1`). Called after a successful `updateShopifyVariantPrice`
@@ -3295,21 +3290,6 @@ export async function updateFacebookDraft(id: number, fields: Record<string, unk
   await db.execute({ sql: `UPDATE facebook_drafts SET ${sets.join(", ")} WHERE id = ?`, args });
 }
 
-/**
- * Atomically claim a scheduled draft for publishing.
- * Returns true if claim succeeded (rowsAffected === 1), false if another
- * instance already claimed it or its status is no longer 'scheduled'.
- * Prevents double-posting when Vercel runs two cron instances in parallel.
- */
-export async function claimFacebookDraft(id: number): Promise<boolean> {
-  const db = await ensureSchema();
-  const result = await db.execute({
-    sql: `UPDATE facebook_drafts SET status = 'publishing' WHERE id = ? AND status = 'scheduled'`,
-    args: [id],
-  });
-  return (result.rowsAffected ?? 0) === 1;
-}
-
 export async function deleteFacebookDraft(id: number): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `DELETE FROM facebook_drafts WHERE id = ?`, args: [id] });
@@ -3438,7 +3418,7 @@ export async function getNextPending(limit = 10): Promise<PublicationQueueItem[]
  * Atomically claim a pending item for publishing (pending → publishing). Returns true if
  * this caller won the claim (rowsAffected === 1), false if another cron instance already
  * took it. The consumer cron MUST claim before publishing so Vercel's overlapping cron
- * instances never double-publish the same item — mirrors claimFacebookDraft.
+ * instances never double-publish the same item.
  */
 export async function claimQueueItem(id: number): Promise<boolean> {
   const db = await ensureSchema();

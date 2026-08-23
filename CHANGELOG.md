@@ -2,6 +2,61 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.65.6] - 2026-08-22
+
+### Changed — database.ts triaged by call site, not by coverage percentage
+database.ts sat at 19% lines, the biggest single number on the coverage map. Testing it by
+volume would have been the wrong move: 34 of the 137 test files mock `@/lib/database` and
+assert the contract at the call site, so most of these functions ARE verified — what never
+executes is their SQL body. Two different risks wearing one number.
+
+Tracing all 155 exports against the jobs, crons and pipeline libraries found **68 on an
+unattended/critical path, and only 5 named by no test at all**. Of those 5, two turned out
+to be dead and three were real gaps.
+
+### Removed — two dead exports
+- `claimFacebookDraft` claimed `facebook_drafts` rows with `status='scheduled'`. That
+  publishing path was retired when everything moved to `publication_queue`, so nothing sets
+  that status and nothing calls this — its only other mentions were two code comments.
+  `claimQueueItem` is the live equivalent, and it is tested.
+- `markPriceChangeApplied(id)` has no caller either; the sync uses
+  `markPriceChangeAppliedBySku`, because Phase 2 can push without a fresh price_history row
+  to key on. A log line in job1-sync also named the wrong function — it reported
+  "markPriceChangeApplied failed" for a `markPriceChangeAppliedBySku` failure. Fixed.
+
+### Added — tests for the three live, untested critical queries
+`tests/database-critical-queries.test.ts` (17 tests) drives the REAL exported functions
+against the REAL schema in an in-memory libsql database — not a copy of their SQL pasted into
+the test, which is how the existing DB suites work and which cannot catch the query drifting
+away from the mirror.
+
+- `getStaleImportedProducts` (stale-catalog drafts what it returns): the `qty > 0` filter (the
+  risk is overselling, and a sold-out product cannot oversell), the direction of the
+  `last_seen_at` comparison, the window argument being honoured, and longest-unseen-first
+  ordering so a capped run drafts the worst offenders.
+- `getPendingWaitlist` (decides who gets a back-in-stock email): never an unconfirmed address
+  (double opt-in), never a second email, never another SKU's subscribers.
+- `markWaitlistNotified`: stamps only the given ids, is idempotent, and **issues no query at
+  all** for an empty list.
+
+Also documents, as a failing-on-purpose guard, that a numerically-bound `shopify_product_id`
+round-trips through SQLite's TEXT affinity as `"123456789.0"` and would never match Shopify.
+Every writer types it `string`, so this cannot happen today; the test exists to fail if that
+type is ever widened.
+
+**Mutation-checked, and two of the checks corrected themselves:**
+- The empty-list test originally asserted "does not throw", which SQLite makes vacuous — it
+  accepts `IN ()` and matches nothing, so removing the guard changed nothing observable. The
+  test now counts queries, which is the guard's actual job.
+- One mutation appeared to survive because the anchor matched a *sibling* function sharing the
+  same three lines. Re-anchored on the signature, it fails as it should. The mutant was
+  mis-aimed, not the test — worth recording, because "the mutant survived" is only useful
+  evidence when the mutant hit the code under test.
+
+database.ts: 18.8% → 20.6% lines. Repo total 55.2% → 55.4%. The percentage moves little by
+design: the remaining 835 uncovered lines are overwhelmingly operator-driven admin queries
+reached from the dashboard, where a fault is visible immediately.
+
 ## [0.5.65.5] - 2026-08-22
 
 ### Added — the merchant feeds' network half, and all 7 feed routes
