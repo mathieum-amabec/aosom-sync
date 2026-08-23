@@ -1,7 +1,7 @@
 // C1 — replace the PDP swatch color map with the full FR+EN map. PREVIEW only (160213696617).
 // Idempotent (skips if the new map is already in place). PUT main-product.liquid.
-import { rest, sleep, LIVE_THEME_ID } from "./_shopify-lib.mjs";
-const T = "160213696617";
+import { rest, sleep, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const T = DRAFT_THEME_ID;
 if (T === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 const get = async (k) => (await (await rest(`/themes/${T}/assets.json?asset[key]=${encodeURIComponent(k)}`)).json()).asset.value;
 async function put(k, v) {

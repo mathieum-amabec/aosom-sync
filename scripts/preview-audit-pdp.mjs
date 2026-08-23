@@ -1,6 +1,6 @@
 // PDP + cat_tiles second pass — correct Liquid files this time.
-import { rest, getAsset } from "./_shopify-lib.mjs";
-const P = "160213696617";
+import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const P = DRAFT_THEME_ID;
 const grab = async (k) => { try { return await getAsset(k, P); } catch { return null; } };
 
 const mainProduct = await grab("sections/main-product.liquid");

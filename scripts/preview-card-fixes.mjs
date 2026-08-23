@@ -14,9 +14,9 @@
 // Title' %}`. Awaiting an example card URL from Mat. See DATA-OPS-LOG.
 //
 // Idempotent. Run:  node scripts/preview-card-fixes.mjs
-import { rest, sleep, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, sleep, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 
-const THEME = "160213696617";
+const THEME = DRAFT_THEME_ID;
 if (THEME === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 
 async function get(key) {

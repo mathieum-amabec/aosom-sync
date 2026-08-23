@@ -1,5 +1,5 @@
-import { getAsset, gql } from "./_shopify-lib.mjs";
-const P = "160213696617";
+import { getAsset, gql, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const P = DRAFT_THEME_ID;
 
 // 1. preview-main-menu structure
 const mq = `{ menus(first: 30) { nodes { id handle title items { title url tags resourceId items { title url } } } } }`;

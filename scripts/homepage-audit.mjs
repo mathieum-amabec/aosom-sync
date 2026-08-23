@@ -1,6 +1,6 @@
 // Read-only audit for the homepage premium redesign (preview 160213696617).
-import { rest, getAsset } from "./_shopify-lib.mjs";
-const PREVIEW = "160213696617";
+import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const PREVIEW = DRAFT_THEME_ID;
 
 // 1+4. Home sections + order
 const idx = JSON.parse(await getAsset("templates/index.json", PREVIEW));

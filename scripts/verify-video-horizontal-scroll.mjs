@@ -1,5 +1,5 @@
-import { getAsset } from "./_shopify-lib.mjs";
-const P = "160213696617";
+import { getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const P = DRAFT_THEME_ID;
 let pass = true;
 const rec = (ok, l, d) => { if (!ok) pass = false; console.log(`${ok ? "✅" : "❌"} ${l} — ${d}`); };
 const s = await getAsset("sections/home-video-showcase.liquid", P);

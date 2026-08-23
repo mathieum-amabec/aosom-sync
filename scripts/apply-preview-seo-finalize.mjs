@@ -1,9 +1,9 @@
 // Make the PREVIEW theme promotion-safe by carrying the same A3/A4 SEO edits that
 // live as on the live theme (otherwise promoting the preview reverts og:image + meta
 // description). PREVIEW-only guard. Mirrors apply-og-live-v2 + apply-meta-desc-live.
-import { rest, getAsset, putAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, putAsset, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 const LIVE = LIVE_THEME_ID;
-const PREVIEW = "160213696617";
+const PREVIEW = DRAFT_THEME_ID;
 if (PREVIEW === LIVE) throw new Error("ABORT: preview equals live");
 const t = (await (await rest("/themes.json")).json()).themes.find((x) => String(x.id) === PREVIEW);
 if (!t || t.role !== "unpublished") throw new Error("ABORT: not an unpublished preview");

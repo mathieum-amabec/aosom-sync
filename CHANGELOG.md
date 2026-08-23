@@ -2,6 +2,56 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.66.0] - 2026-08-22
+
+### Fixed — theme writes are guarded at the choke point, not per script
+86 ops scripts carried a hardcoded Shopify theme id. Roles move on every publish, so an id
+frozen in June says nothing about what that theme is today.
+
+Triaging them changed the plan. 48 are read-only. Of the 38 that write, 19 already re-checked
+the target's role against Shopify — a good guard — and 19 did not. But the sharper problem was
+one level down: **`putAsset`'s default target was `BACKUP_THEME_ID`, and 41 of its 63 call
+sites omit the theme argument**, so any of them wrote to the rollback theme.
+
+So the guard now lives once, inside `putAsset`:
+- `themeRoles()` fetches `themes.json` once per process (a failure is not cached, so a blip
+  cannot poison the rest of a run).
+- `assertWritableTheme(id)` refuses anything that is not an existing **unpublished** theme,
+  and names it in the error — the live theme is called "DRAFT GOOGLE SHOPPING 2026-08-07", so
+  an id alone tells an operator nothing.
+- It asks Shopify rather than comparing against `LIVE_THEME_ID`, because a constant that has
+  drifted since the last publish protects the wrong theme — exactly the failure it exists for.
+- `putAssetToPublishedTheme` is the deliberate exception, and it refuses an *unpublished*
+  target: a script meant to fix production must not quietly edit a dead theme instead.
+
+### Fixed — the ids themselves
+All 85 hardcoded ids now resolve from `_shopify-lib` (`DRAFT_THEME_ID` / `LIVE_THEME_ID`),
+chosen per call site by what the variable meant. Zero literal theme ids remain in script code.
+Notable individual cases:
+- `_apply-card-discount-badge.mjs` compared its target against a hardcoded `LIVE` that had not
+  been live since July — its "never write to live" guard was checking the wrong theme.
+- `create-draft-theme.mjs` duplicated a June theme to make "the next working draft"; it now
+  duplicates the current live one.
+- Five read-only dumps and audits were reporting on an abandoned theme, so their output
+  described assets nobody was looking at.
+- `themes-list.mjs` and `publish-preview-live.mjs` gated on theme **names** ("Copie de Copie de
+  Trade v2"). Names are historical labels that survive a publish, so the check fails on a
+  correct setup and can pass on a wrong one. Both now gate on the role.
+
+### Changed — the token is read lazily, and the environment wins
+`_shopify-lib` read `.env.local` at module load, so importing it anywhere without one threw
+before a single call was made — which is also why nothing in `scripts/` had ever been tested.
+It is now resolved on first request, preferring `process.env.SHOPIFY_ACCESS_TOKEN`: these
+scripts are routinely run as `SHOPIFY_ACCESS_TOKEN=… node-x64 scripts/…` from a clone whose
+`.env.local` holds different credentials, and reading the file first silently used the wrong
+one.
+
+### Added — `tests/shopify-lib-theme-guard.test.ts`
+12 tests, the first over `scripts/`. Covers the refusal of a published target, of an id the
+store does not have (the stale-constant case), of the omitted-argument default; the deliberate
+published-theme path in both directions; and that roles are fetched once but a failure is not
+cached.
+
 ## [0.5.65.6] - 2026-08-22
 
 ### Changed — database.ts triaged by call site, not by coverage percentage

@@ -1,6 +1,6 @@
 // Chantier 4 — verify the catalog-fit uniform menu + hero buttons (read-only).
-import { getAsset, gql } from "./_shopify-lib.mjs";
-const T = "160213696617";
+import { getAsset, gql, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const T = DRAFT_THEME_ID;
 let ok = 0, bad = 0;
 const check = (l, c, d = "") => { console.log(`${c ? "✅" : "❌"} ${l}${d ? " — " + d : ""}`); c ? ok++ : bad++; };
 

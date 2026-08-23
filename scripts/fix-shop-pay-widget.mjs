@@ -5,9 +5,9 @@
 //  - Enlarge the NATIVE <shopify-payment-terms> widget so the real installment
 //    amounts (rendered by Shopify) are prominent.
 // Target: theme 160059195497 (role: main / published / live).
-import { getAsset, putAsset } from "./_shopify-lib.mjs";
+import { getAsset, putAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 
-const THEME = "160059195497";
+const THEME = DRAFT_THEME_ID;
 const KEY = "templates/product.json";
 
 const NEW_LIQUID = `{%- assign loc = request.locale.iso_code -%}

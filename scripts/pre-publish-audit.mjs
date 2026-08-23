@@ -1,6 +1,6 @@
 // Read-only pre-publish audit: preview 160213696617 vs live 160059195497.
-import { rest, getAsset } from "./_shopify-lib.mjs";
-const PREVIEW = "160213696617", LIVE = "160059195497";
+import { rest, getAsset, DRAFT_THEME_ID, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+const PREVIEW = DRAFT_THEME_ID, LIVE = LIVE_THEME_ID;
 const get = (k, th) => getAsset(k, th).catch(() => null);
 
 // ===== AUDIT 1 — preview vs live diffs =====

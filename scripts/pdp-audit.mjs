@@ -1,5 +1,5 @@
-import { getAsset } from "./_shopify-lib.mjs";
-const P = "160213696617";
+import { getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const P = DRAFT_THEME_ID;
 const mp = await getAsset("sections/main-product.liquid", P);
 const win = (label, idx, before = 80, after = 220) => { if (idx < 0) { console.log(`\n[${label}] NOT FOUND`); return; } console.log(`\n[${label}] @${idx}`); console.log(mp.slice(idx - before, idx + after).replace(/\n{2,}/g, "\n")); };
 

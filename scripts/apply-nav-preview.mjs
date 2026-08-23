@@ -5,10 +5,10 @@
 // `main-menu` would change the LIVE storefront. Instead we create a SEPARATE
 // `preview-main-menu` and point ONLY the preview theme's header at it; live keeps
 // using `main-menu`, untouched. Idempotent.
-import { gql, sleep, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { gql, sleep, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 import { rest } from "./_shopify-lib.mjs";
 
-const THEME = "160213696617";
+const THEME = DRAFT_THEME_ID;
 const MENU_HANDLE = "preview-main-menu";
 if (THEME === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 
@@ -170,5 +170,5 @@ hg.sections.header.settings.menu_type_desktop = "mega";
 await putAsset("sections/header-group.json", JSON.stringify(hg, null, 2));
 console.log(`✔ PUT sections/header-group.json (menu ${before} -> ${MENU_HANDLE}, type mega, sticky ${hg.sections.header.settings.sticky_header_type})`);
 
-console.log(`\nDone on PREVIEW ${THEME}. Live 160059195497 untouched (separate menu).`);
+console.log(`\nDone on PREVIEW ${THEME}. Live ${LIVE_THEME_ID} untouched (separate menu).`);
 console.log("Preview: https://27u5y2-kp.myshopify.com/?preview_theme_id=" + THEME);

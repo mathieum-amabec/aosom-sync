@@ -1,6 +1,6 @@
 // CHANTIER 2 — "Voyez-le chez vous" video section on PREVIEW (live untouched; guarded).
-import { rest, getAsset, putAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
-const LIVE = LIVE_THEME_ID, PREVIEW = "160213696617";
+import { rest, getAsset, putAsset, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const LIVE = LIVE_THEME_ID, PREVIEW = DRAFT_THEME_ID;
 if (PREVIEW === LIVE) throw new Error("ABORT");
 const t = (await (await rest("/themes.json")).json()).themes.find((x) => String(x.id) === PREVIEW);
 if (!t || t.role !== "unpublished") throw new Error("ABORT: not unpublished preview");

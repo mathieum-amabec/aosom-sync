@@ -1,12 +1,14 @@
-// ÉTAPE 2+3 — publish preview 160213696617 to LIVE (role:main), then confirm the swap.
+// ÉTAPE 2+3 — publish the working DRAFT to LIVE (role:main), then confirm the swap.
 // Re-runs the gate first; aborts if the live state no longer matches expectation.
-import { rest } from "./_shopify-lib.mjs";
-const PREVIEW = "160213696617", LIVE = "160059195497";
+import { rest, DRAFT_THEME_ID, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+const PREVIEW = DRAFT_THEME_ID, LIVE = LIVE_THEME_ID;
 
 const before = (await (await rest("/themes.json")).json()).themes;
 const p0 = before.find((t) => String(t.id) === PREVIEW);
 const l0 = before.find((t) => String(t.id) === LIVE);
-if (!p0 || p0.role !== "unpublished" || p0.name !== "Copie de Copie de Trade v2")
+// Gate on the role only. The name is a historical label that survives a publish, so
+// asserting it fails on a correct setup as soon as the draft is a differently-named copy.
+if (!p0 || p0.role !== "unpublished")
   throw new Error(`ABORT: preview not in expected state: ${JSON.stringify(p0)}`);
 if (!l0 || l0.role !== "main")
   throw new Error(`ABORT: live not in expected state: ${JSON.stringify(l0)}`);

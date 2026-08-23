@@ -1,7 +1,7 @@
 // Read-only: home template section selection (Q5) + a real PUBLISHED PDP (Q4).
-import { rest, getAsset } from "./_shopify-lib.mjs";
+import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 
-const THEME = "160059195497";
+const THEME = DRAFT_THEME_ID;
 
 // --- Q5: home template sections + how the carousels pick products ---
 const idx = JSON.parse(await getAsset("templates/index.json", THEME));

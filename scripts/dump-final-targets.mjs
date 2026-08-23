@@ -1,5 +1,5 @@
-import { getAsset } from "./_shopify-lib.mjs";
-const idx = JSON.parse(await getAsset("templates/index.json", "160213696617"));
+import { getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const idx = JSON.parse(await getAsset("templates/index.json", DRAFT_THEME_ID));
 for (const id of ["lc_trustbar", "why_us"]) {
   console.log(`\n===== ${id} =====`);
   console.log(idx.sections[id].settings.custom_liquid);

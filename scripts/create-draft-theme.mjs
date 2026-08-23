@@ -2,6 +2,7 @@
 // the next working DRAFT. Shopify copies asynchronously; returns the new id immediately.
 // Loads SHOPIFY_ACCESS_TOKEN from .env.local. Pass --apply to actually create.
 import { readFileSync } from "node:fs";
+import { LIVE_THEME_ID } from "./_shopify-lib.mjs";
 
 function loadEnv() {
   const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
@@ -30,7 +31,7 @@ const res = await fetch(`https://${STORE}/admin/api/${API}/themes.json`, {
     theme: {
       // Shopify caps theme name at 50 chars; requested "...Copie de Trade v2" (53) trimmed to 50.
       name: "Copie de Copie de Copie de Copie de Copie Trade v2",
-      source_theme_id: 160606093417,
+      source_theme_id: Number(LIVE_THEME_ID),
       role: "unpublished",
     },
   }),

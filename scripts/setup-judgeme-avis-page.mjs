@@ -12,9 +12,9 @@
  *
  * Run:  node scripts/setup-judgeme-avis-page.mjs
  */
-import { rest, getAsset, PREVIEW_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, PREVIEW_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 
-const THEME = "160059195497"; // live theme
+const THEME = DRAFT_THEME_ID; // live theme
 const PAGE_HANDLE = "avis-clients";
 const PAGE_TITLE = "Avis clients";
 const SLIDE_ID = "announcement_HgkNDf"; // the Judge.me review slide (preferred id)

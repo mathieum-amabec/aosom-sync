@@ -1,9 +1,9 @@
 // B4 — fix duplicate "500" social-proof numbers on the PREVIEW theme 160213696617.
 // HARD GUARD: refuses to touch the live theme. Idempotent; verifies each replacement.
-import { rest, getAsset, putAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, putAsset, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 
 const LIVE = LIVE_THEME_ID;
-const PREVIEW = "160213696617";
+const PREVIEW = DRAFT_THEME_ID;
 if (PREVIEW === LIVE) throw new Error("ABORT: preview equals live");
 const t = (await (await rest("/themes.json")).json()).themes.find((x) => String(x.id) === PREVIEW);
 if (!t || t.role !== "unpublished") throw new Error(`ABORT: theme ${PREVIEW} not an unpublished preview`);

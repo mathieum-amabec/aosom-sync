@@ -1,6 +1,6 @@
 // Read-only verification of the PREVIEW theme render.
-import { rest, getAsset } from "./_shopify-lib.mjs";
-const PREVIEW = "160213696617";
+import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const PREVIEW = DRAFT_THEME_ID;
 
 // Asset present?
 try {
