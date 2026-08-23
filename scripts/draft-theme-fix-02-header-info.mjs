@@ -1,6 +1,6 @@
 // Read-only: inspect the draft header section settings (which linklist menu + desktop menu type).
-import { rest } from "./_shopify-lib.mjs";
-const DRAFT = "160606093417";
+import { rest, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const DRAFT = DRAFT_THEME_ID;
 const res = await rest(`/themes/${DRAFT}/assets.json?asset[key]=${encodeURIComponent("sections/header-group.json")}`);
 const j = JSON.parse((await res.json()).asset.value);
 for (const [k, s] of Object.entries(j.sections || {})) {

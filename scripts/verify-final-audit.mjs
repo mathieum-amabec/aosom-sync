@@ -1,6 +1,6 @@
 // Phase 6 C3 — final preview-theme audit. Read-only. Checks every homepage + PDP item.
-import { getAsset, gql, rest } from "./_shopify-lib.mjs";
-const T = "160213696617";
+import { getAsset, gql, rest, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const T = DRAFT_THEME_ID;
 const A = {};
 for (const k of ["templates/index.json", "sections/header-group.json", "snippets/header-mega-menu.liquid",
   "snippets/meta-tags.liquid", "layout/theme.liquid", "sections/main-product.liquid", "snippets/price.liquid",

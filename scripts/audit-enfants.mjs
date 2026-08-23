@@ -1,5 +1,5 @@
-import { getAsset, rest } from "./_shopify-lib.mjs";
-const P = "160213696617";
+import { getAsset, rest, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const P = DRAFT_THEME_ID;
 const mm = await getAsset("snippets/mega-menu.liquid", P);
 console.log("=== FULL mega-menu.liquid ===");
 console.log(mm);

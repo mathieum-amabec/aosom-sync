@@ -1,6 +1,6 @@
 // B2 read-only: check Judge.me reviews + locate "Anonyme" testimonials in preview.
-import { rest, getAsset } from "./_shopify-lib.mjs";
-const PREVIEW = "160213696617";
+import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const PREVIEW = DRAFT_THEME_ID;
 const SHOP = "ameublodirect.myshopify.com";
 
 // 1. Judge.me public reviews API (try the literal token the task gave).

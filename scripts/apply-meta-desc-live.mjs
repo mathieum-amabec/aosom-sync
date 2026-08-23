@@ -4,7 +4,7 @@
 // one Google reads) AND og_description in snippets/meta-tags.liquid (og/twitter), so the
 // home description is consistent everywhere. Backups + verify. Non-index pages unchanged.
 import { writeFileSync } from "node:fs";
-import { rest, getAsset, putAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, LIVE_THEME_ID, putAssetToPublishedTheme } from "./_shopify-lib.mjs";
 
 const LIVE = LIVE_THEME_ID;
 const META = "Aménagez votre patio et votre jardin pour l'été québécois : mobilier d'extérieur, BBQ, déco et accessoires, livrés gratuitement partout au Canada.";
@@ -36,7 +36,7 @@ if (layout.includes(`content="${META}"`)) {
 } else if (!layout.includes(L_OLD)) {
   throw new Error("ABORT: description block not found verbatim in theme.liquid");
 } else {
-  await putAsset("layout/theme.liquid", layout.replace(L_OLD, L_NEW), LIVE);
+  await putAssetToPublishedTheme("layout/theme.liquid", layout.replace(L_OLD, L_NEW), LIVE);
   console.log("theme.liquid PUT 200 (description index branch added)");
 }
 
@@ -53,7 +53,7 @@ if (snip.includes(`assign og_description = "${META}"`)) {
 } else if (!snip.includes(S_OLD)) {
   throw new Error("ABORT: og_description assign not found verbatim in meta-tags.liquid");
 } else {
-  await putAsset("snippets/meta-tags.liquid", snip.replace(S_OLD, S_NEW), LIVE);
+  await putAssetToPublishedTheme("snippets/meta-tags.liquid", snip.replace(S_OLD, S_NEW), LIVE);
   console.log("meta-tags.liquid PUT 200 (og_description index override added)");
 }
 

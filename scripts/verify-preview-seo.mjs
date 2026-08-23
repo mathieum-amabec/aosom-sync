@@ -1,5 +1,5 @@
-import { getAsset } from "./_shopify-lib.mjs";
-const P = "160213696617";
+import { getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const P = DRAFT_THEME_ID;
 const META = "Aménagez votre patio";
 const mt = await getAsset("snippets/meta-tags.liquid", P);
 const th = await getAsset("layout/theme.liquid", P);

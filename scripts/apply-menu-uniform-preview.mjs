@@ -10,9 +10,9 @@
 // sub-cats; Animaux has 3, Enfants 2; Jardin 1; Déco/Électronique have no dedicated
 // collections (Mat: drop them). So: mega for Mobilier ext (4) / Meubles (4) / Animaux (3)
 // / Enfants (2); Rabais, Jardin, Coups de cœur, Catalogue are direct links.
-import { gql, rest, sleep, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { gql, rest, sleep, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 
-const THEME = "160213696617";
+const THEME = DRAFT_THEME_ID;
 const MENU_HANDLE = "preview-main-menu";
 if (THEME === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 const getAsset = async (k) => (await (await rest(`/themes/${THEME}/assets.json?asset[key]=${encodeURIComponent(k)}`)).json()).asset.value;

@@ -3,6 +3,7 @@
 //  zip URL we can't get; themeFilesCopy is intra-theme. So copy asset-by-asset.)
 // Gated: draft must be non-main, live must be main. Dry-run unless --apply.
 import { readFileSync } from "node:fs";
+import { LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 function loadEnv() {
   const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
   const env = {};
@@ -11,7 +12,7 @@ function loadEnv() {
 }
 const env = loadEnv();
 const STORE = "27u5y2-kp.myshopify.com", API = "2024-01";
-const LIVE = "160606093417", DRAFT = "160655114345";
+const LIVE = LIVE_THEME_ID, DRAFT = DRAFT_THEME_ID;
 const TOKEN = env.SHOPIFY_ACCESS_TOKEN;
 const APPLY = process.argv.includes("--apply");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

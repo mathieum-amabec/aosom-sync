@@ -4,8 +4,8 @@
 // redundant section, configure it to the spec: heading "Vous aimerez aussi", max 4 products.
 // Sold-out filtering is moot under dropship (inventory_management: null → always available).
 // Config lives in templates/product.json (the section's settings), not main-product.liquid.
-import { rest, sleep, LIVE_THEME_ID } from "./_shopify-lib.mjs";
-const T = "160213696617";
+import { rest, sleep, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const T = DRAFT_THEME_ID;
 if (T === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 const get = async (k) => (await (await rest(`/themes/${T}/assets.json?asset[key]=${encodeURIComponent(k)}`)).json()).asset.value;
 async function put(k, v) {

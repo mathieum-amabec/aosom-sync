@@ -70,7 +70,28 @@ export const BACKUP_THEME_ID = "161069989993"; // live until 2026-08-07 — deep
 // theme kept as the deeper rollback point. Pointing writes there would corrupt the very
 // snapshot we roll back to. (It aliased BACKUP while the two ids were identical.)
 export const PREVIEW_THEME_ID = DRAFT_THEME_ID;
-const TOKEN = loadEnv().SHOPIFY_ACCESS_TOKEN;
+// Resolved on first request, not at import: reading .env.local eagerly makes the module
+// impossible to import anywhere without one (tests included) and turns a missing file into
+// a crash at load time rather than at the call that actually needs a token.
+let _token = null;
+function token() {
+  if (_token === null) {
+    // The environment wins over .env.local: these scripts are routinely run as
+    // `SHOPIFY_ACCESS_TOKEN=… node-x64 scripts/…` from a clone whose .env.local carries a
+    // different store's credentials. Reading the file first would silently use the wrong one.
+    _token = process.env.SHOPIFY_ACCESS_TOKEN || readEnvFileToken();
+    if (!_token) throw new Error("SHOPIFY_ACCESS_TOKEN not set (env or .env.local)");
+  }
+  return _token;
+}
+
+function readEnvFileToken() {
+  try {
+    return loadEnv().SHOPIFY_ACCESS_TOKEN || "";
+  } catch {
+    return ""; // no .env.local — fine as long as the env var is set
+  }
+}
 
 export async function rest(endpoint, options = {}) {
   const url = `https://${STORE}/admin/api/${API_VERSION}${endpoint}`;
@@ -78,7 +99,7 @@ export async function rest(endpoint, options = {}) {
     ...options,
     headers: {
       "Content-Type": "application/json",
-      "X-Shopify-Access-Token": TOKEN,
+      "X-Shopify-Access-Token": token(),
       ...(options.headers || {}),
     },
   });
@@ -104,7 +125,86 @@ export async function getAsset(key, themeId = BACKUP_THEME_ID) {
   return data.asset.value;
 }
 
+/**
+ * Live theme roles, straight from Shopify, fetched once per process.
+ *
+ * The constants above are a cache that goes stale on every publish; this is the truth.
+ * Keeping the two separate is the point: the constants say where we MEANT to write, the
+ * roles say what that theme actually is right now.
+ *
+ * Cached for the life of the process, which bounds what the guard can promise: a publish
+ * that happens mid-run is not seen by later writes in that same run. Scripts here are short
+ * and operator-launched, so that window is acceptable; re-running picks up the new roles.
+ */
+let _rolesPromise = null;
+export async function themeRoles() {
+  if (!_rolesPromise) {
+    _rolesPromise = rest("/themes.json?fields=id,name,role")
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`themes.json failed: ${res.status} ${await res.text()}`);
+        const { themes } = await res.json();
+        return new Map(themes.map((t) => [String(t.id), { role: t.role, name: t.name }]));
+      })
+      .catch((err) => {
+        _rolesPromise = null; // a transient failure must not poison every later call
+        throw err;
+      });
+  }
+  return _rolesPromise;
+}
+
+/**
+ * Refuse to write unless `themeId` is an existing, UNPUBLISHED theme.
+ *
+ * This is the guard that 19 of the 38 writing scripts had and the other 19 did not, now
+ * enforced once at the choke point instead of copy-pasted per script. It deliberately asks
+ * Shopify rather than comparing against LIVE_THEME_ID: a constant that has drifted since the
+ * last publish would "protect" the wrong theme, which is precisely the failure it exists to
+ * stop.
+ *
+ * Deliberate writes to the published theme go through `putAssetToPublishedTheme`.
+ */
+export async function assertWritableTheme(themeId) {
+  const roles = await themeRoles();
+  const entry = roles.get(String(themeId));
+  if (!entry) {
+    throw new Error(
+      `Refusing to write: theme ${themeId} does not exist on ${STORE}. ` +
+        `The id is probably stale — re-check themes.json and update _shopify-lib.`,
+    );
+  }
+  if (entry.role !== "unpublished") {
+    throw new Error(
+      `Refusing to write to theme ${themeId} ("${entry.name}"): its role is "${entry.role}", not "unpublished". ` +
+        `Roles move on every publish. If this write is intentional, use putAssetToPublishedTheme.`,
+    );
+  }
+}
+
 export async function putAsset(key, value, themeId = BACKUP_THEME_ID) {
+  await assertWritableTheme(themeId);
+  return _putAssetUnchecked(key, value, themeId);
+}
+
+/**
+ * Write to the PUBLISHED theme on purpose. A handful of scripts genuinely target production
+ * (the Shop Pay widget fix, the price-alert block). They should say so at the call site
+ * rather than get there by a default that nobody re-read.
+ */
+export async function putAssetToPublishedTheme(key, value, themeId) {
+  const roles = await themeRoles();
+  const entry = roles.get(String(themeId));
+  if (!entry) throw new Error(`Theme ${themeId} does not exist on ${STORE}.`);
+  if (entry.role !== "main") {
+    throw new Error(
+      `putAssetToPublishedTheme: theme ${themeId} ("${entry.name}") has role "${entry.role}", not "main". ` +
+        `This script means to edit the live storefront; it will not edit something else instead.`,
+    );
+  }
+  return _putAssetUnchecked(key, value, themeId);
+}
+
+async function _putAssetUnchecked(key, value, themeId) {
   const res = await rest(`/themes/${themeId}/assets.json`, {
     method: "PUT",
     body: JSON.stringify({ asset: { key, value } }),

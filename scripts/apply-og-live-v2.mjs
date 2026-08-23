@@ -2,7 +2,7 @@
 // then patch snippets/meta-tags.liquid so the HOME (index) uses our 1200x630 asset as
 // the single og:image source. Product/collection/article pages keep page_image.
 import { readFileSync, writeFileSync } from "node:fs";
-import { getAsset, putAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, LIVE_THEME_ID, putAssetToPublishedTheme } from "./_shopify-lib.mjs";
 
 const LIVE = LIVE_THEME_ID;
 
@@ -10,7 +10,7 @@ const LIVE = LIVE_THEME_ID;
 const backup = readFileSync(".git/live-theme-liquid-backup-2026-06-10.liquid", "utf8");
 const curLayout = await getAsset("layout/theme.liquid", LIVE);
 if (curLayout.includes("og-image-social.jpg")) {
-  await putAsset("layout/theme.liquid", backup, LIVE);
+  await putAssetToPublishedTheme("layout/theme.liquid", backup, LIVE);
   console.log("layout/theme.liquid reverted to backup (duplicate og tag removed): PUT 200");
 } else {
   console.log("layout/theme.liquid has no og-image-social — already clean, skipping revert");
@@ -44,7 +44,7 @@ if (snip.includes("og-image-social.jpg")) {
   throw new Error("ABORT: expected og:image block not found verbatim in meta-tags.liquid (no change made)");
 } else {
   const patched = snip.replace(OLD, NEW);
-  await putAsset("snippets/meta-tags.liquid", patched, LIVE);
+  await putAssetToPublishedTheme("snippets/meta-tags.liquid", patched, LIVE);
   console.log("snippets/meta-tags.liquid PUT 200 (index branch added)");
 }
 

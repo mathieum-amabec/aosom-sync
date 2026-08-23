@@ -1,6 +1,7 @@
 // READ-ONLY diagnostic for the FAQ-renders-in-FR-when-EN bug.
 // Live theme 160606093417 (read only). Writes nothing.
 import { readFileSync } from "node:fs";
+import { LIVE_THEME_ID } from "./_shopify-lib.mjs";
 function loadEnv() {
   const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
   const env = {};
@@ -16,7 +17,7 @@ function loadEnv() {
 const env = loadEnv();
 const STORE = "27u5y2-kp.myshopify.com";
 const API = "2024-01";
-const LIVE = "160606093417";
+const LIVE = LIVE_THEME_ID;
 const H = { "X-Shopify-Access-Token": env.SHOPIFY_ACCESS_TOKEN };
 
 async function asset(key) {

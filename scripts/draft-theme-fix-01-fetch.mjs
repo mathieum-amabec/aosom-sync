@@ -1,9 +1,9 @@
 // Read-only: list draft asset keys + dump the assets relevant to this fix session
 // to a local scratch dir for inspection. Draft theme ONLY.
-import { rest } from "./_shopify-lib.mjs";
+import { rest, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 
-const DRAFT = "160606093417";
+const DRAFT = DRAFT_THEME_ID;
 const OUT = process.argv[2] || "./.draft-scratch";
 mkdirSync(OUT, { recursive: true });
 

@@ -1,5 +1,5 @@
-import { getAsset } from "./_shopify-lib.mjs";
-const idx = JSON.parse(await getAsset("templates/index.json", "160213696617"));
+import { getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const idx = JSON.parse(await getAsset("templates/index.json", DRAFT_THEME_ID));
 for (const id of ["lc_story2", "lc_trust", "lc_howit", "shop_pay_home"]) {
   const cl = idx.sections[id].settings.custom_liquid;
   console.log(`\n===== ${id} (len ${cl.length}) =====`);

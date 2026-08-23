@@ -1,5 +1,5 @@
-import { rest } from "./_shopify-lib.mjs";
-const DRAFT="160606093417", LIVE="160584859753";
+import { rest, DRAFT_THEME_ID, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+const DRAFT=DRAFT_THEME_ID, LIVE=LIVE_THEME_ID;
 async function get(themeId,key){const r=await rest(`/themes/${themeId}/assets.json?asset[key]=${encodeURIComponent(key)}`);return (await r.json()).asset;}
 // DRAFT state (parse-aware for JSON)
 const idx=await get(DRAFT,"templates/index.json");

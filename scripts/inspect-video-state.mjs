@@ -1,5 +1,5 @@
-import { rest, getAsset } from "./_shopify-lib.mjs";
-const PREVIEW = "160213696617";
+import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const PREVIEW = DRAFT_THEME_ID;
 
 const themes = (await (await rest("/themes.json")).json()).themes;
 console.log("=== THEMES ===");

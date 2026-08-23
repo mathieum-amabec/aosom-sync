@@ -1,5 +1,5 @@
-import { rest, getAsset } from "./_shopify-lib.mjs";
-const PREVIEW = "160213696617";
+import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const PREVIEW = DRAFT_THEME_ID;
 const handles = ["meubles-et-decorations", "mobiliers-exterieurs-et-jardins", "chaises-et-tables-de-patio-1", "jardinage-et-serres", "accessoires-pour-animaux", "sports-et-loisirs"];
 const rec = (ok, label, detail) => console.log(`${ok ? "✅" : "❌"} ${label} — ${detail}`);
 

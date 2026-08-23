@@ -13,11 +13,11 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { rest, getAsset, putAsset } from "./_shopify-lib.mjs";
+import { rest, getAsset, putAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "..");
-const THEME_ID = "160213696617";
+const THEME_ID = DRAFT_THEME_ID;
 const APPLY = process.argv.includes("--apply");
 
 const read = (p) => readFileSync(join(ROOT, p), "utf8");

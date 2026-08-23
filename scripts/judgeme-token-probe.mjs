@@ -1,5 +1,5 @@
-import { getAsset } from "./_shopify-lib.mjs";
-const PREVIEW = "160213696617";
+import { getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const PREVIEW = DRAFT_THEME_ID;
 
 // Try to find the Judge.me public token + review totals from the live storefront.
 const html = await (await fetch(`https://ameublodirect.ca/?cb=${Date.now()}`)).text();

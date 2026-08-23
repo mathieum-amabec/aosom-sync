@@ -1,7 +1,7 @@
 // feature/video-section-horizontal-scroll — mobile (<750px) horizontal swipe carousel.
 // Desktop (>=750px) untouched. PREVIEW theme only (160213696617); live guarded.
-import { rest, getAsset, putAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
-const LIVE = LIVE_THEME_ID, PREVIEW = "160213696617";
+import { rest, getAsset, putAsset, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const LIVE = LIVE_THEME_ID, PREVIEW = DRAFT_THEME_ID;
 if (PREVIEW === LIVE) throw new Error("ABORT: preview === live");
 
 const t = (await (await rest("/themes.json")).json()).themes.find((x) => String(x.id) === PREVIEW);

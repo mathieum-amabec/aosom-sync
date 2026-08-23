@@ -1,5 +1,6 @@
 // READ-ONLY STEP 3: fetch the FAQ liquid + find where it's rendered on the product page.
 import { readFileSync } from "node:fs";
+import { LIVE_THEME_ID } from "./_shopify-lib.mjs";
 function loadEnv() {
   const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
   const env = {};
@@ -7,7 +8,7 @@ function loadEnv() {
   return env;
 }
 const env = loadEnv();
-const STORE = "27u5y2-kp.myshopify.com", API = "2024-01", LIVE = "160606093417";
+const STORE = "27u5y2-kp.myshopify.com", API = "2024-01", LIVE = LIVE_THEME_ID;
 const H = { "X-Shopify-Access-Token": env.SHOPIFY_ACCESS_TOKEN };
 async function asset(key) { const r = await fetch(`https://${STORE}/admin/api/${API}/themes/${LIVE}/assets.json?asset[key]=${encodeURIComponent(key)}`, { headers: H }); return r.ok ? (await r.json()).asset.value : null; }
 

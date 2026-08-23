@@ -1,6 +1,6 @@
 // Read-only feasibility probe for chantiers 2/3/4.
-import { rest, getAsset } from "./_shopify-lib.mjs";
-const THEME = "160059195497";
+import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const THEME = DRAFT_THEME_ID;
 
 // --- Home page rendered <head>: og:image + meta description ---
 const res = await fetch("https://ameublodirect.ca/");

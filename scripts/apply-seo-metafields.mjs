@@ -1,11 +1,11 @@
 // Set shop-level SEO metafields (description_tag, og_image) and verify the
 // rendered home <head>. Shop metafields are easily reversible (DELETE).
-import { rest, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 
 const META_DESC = "Aménagez votre patio et votre jardin pour l'été québécois : mobilier d'extérieur, BBQ, déco et accessoires, livrés gratuitement partout au Canada.";
 
 // Preview theme asset CDN url (already uploaded). We try to resolve it for the og_image value.
-const PREVIEW = "160213696617";
+const PREVIEW = DRAFT_THEME_ID;
 if (PREVIEW === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 let ogUrl = "";
 try {

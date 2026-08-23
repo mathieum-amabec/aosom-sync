@@ -2,12 +2,12 @@
 // verbatim, wrap faithful 6-card markup, and emit two standalone HTML files that
 // force each JS branch deterministically (matchMedia stubbed) so headless Chromium
 // can exercise desktop hover-to-play and mobile/tablet autoplay without a live theme.
-import { getAsset } from "./_shopify-lib.mjs";
+import { getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const section = await getAsset("sections/home-video-showcase.liquid", "160213696617");
+const section = await getAsset("sections/home-video-showcase.liquid", DRAFT_THEME_ID);
 const style = (section.match(/<style>[\s\S]*?<\/style>/) || [""])[0];
 const script = (section.match(/<script>[\s\S]*?<\/script>/) || [""])[0];
 if (!style || !script) throw new Error("could not extract style/script from asset");

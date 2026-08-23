@@ -1,5 +1,5 @@
-import { getAsset } from "./_shopify-lib.mjs";
-const P = "160213696617";
+import { getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const P = DRAFT_THEME_ID;
 console.log("===== snippets/price.liquid (FULL) =====");
 console.log(await getAsset("snippets/price.liquid", P));
 console.log("\n\n===== trust_badges block custom_liquid =====");

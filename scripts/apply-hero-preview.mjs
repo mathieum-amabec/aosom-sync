@@ -2,9 +2,9 @@
 // Rewrites the lc_hero custom_liquid: new headline + subtitle, two CTAs (navy primary
 // + outline-gold secondary), a floating badge. Keeps the existing lc-hero.jpg image.
 // Idempotent (re-run = no-op once the new headline is present).
-import { rest, sleep, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, sleep, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 
-const THEME = "160213696617";
+const THEME = DRAFT_THEME_ID;
 if (THEME === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 const get = async (k) => (await (await rest(`/themes/${THEME}/assets.json?asset[key]=${encodeURIComponent(k)}`)).json()).asset.value;
 async function put(k, v) {

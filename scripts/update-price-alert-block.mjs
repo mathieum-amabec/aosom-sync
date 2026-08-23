@@ -9,10 +9,10 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { getAsset, putAsset } from "./_shopify-lib.mjs";
+import { getAsset, LIVE_THEME_ID, putAssetToPublishedTheme } from "./_shopify-lib.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const LIVE_THEME = "160059195497";
+const LIVE_THEME = LIVE_THEME_ID;
 const APPLY = process.argv.includes("--apply");
 
 const snippet = readFileSync(join(__dirname, "..", "docs", "snippets", "price-drop-alert.liquid"), "utf8");
@@ -55,5 +55,5 @@ if (!APPLY) {
   process.exit(0);
 }
 
-const result = await putAsset("templates/product.json", next, LIVE_THEME);
+const result = await putAssetToPublishedTheme("templates/product.json", next, LIVE_THEME);
 console.log("PUT ok — asset key:", result?.asset?.key, "updated_at:", result?.asset?.updated_at);

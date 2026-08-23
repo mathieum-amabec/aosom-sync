@@ -2,6 +2,7 @@
 // Loads SHOPIFY_ACCESS_TOKEN from .env.local (repo's admin token; NOT $SHOPIFY_ADMIN_TOKEN).
 // Prints the PUT result then the roles of ALL themes. Pass --apply to actually publish.
 import { readFileSync } from "node:fs";
+import { DRAFT_THEME_ID } from "./_shopify-lib.mjs";
 
 function loadEnv() {
   const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
@@ -19,7 +20,7 @@ const env = loadEnv();
 const STORE = "27u5y2-kp.myshopify.com";
 const API = "2024-01";
 const TOKEN = env.SHOPIFY_ACCESS_TOKEN;
-const DRAFT = "160606093417";
+const DRAFT = DRAFT_THEME_ID;
 const APPLY = process.argv.includes("--apply");
 const H = { "X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json" };
 

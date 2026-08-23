@@ -1,6 +1,6 @@
 // B3 audit (read-only): carousel collection overlap + "livraison gratuite" occurrences.
-import { rest, getAsset } from "./_shopify-lib.mjs";
-const PREVIEW = "160213696617";
+import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+const PREVIEW = DRAFT_THEME_ID;
 
 const cols = {
   "featured_sale → rabais": 473544622185,
