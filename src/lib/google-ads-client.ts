@@ -23,7 +23,11 @@
 
 // Google sunsets an API version roughly every 4 months. Verify against
 // https://developers.google.com/google-ads/api/docs/release-notes before a live run.
-export const GOOGLE_ADS_API_VERSION = "v21";
+//
+// A retired version does NOT answer with an API error: googleads.googleapis.com serves a
+// plain HTML 404, so the client surfaces "HTTP 404" and the cause reads like a wrong URL.
+// Probed 2026-08-23: v22 answers, v21/v20/v19 are gone.
+export const GOOGLE_ADS_API_VERSION = "v22";
 
 /** The ONLY scope Google Ads accepts. Distinct from Merchant Center's `.../auth/content`. */
 export const GOOGLE_ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
@@ -223,10 +227,21 @@ export interface ShoppingSetting {
   enableLocal?: boolean;
 }
 
+/**
+ * EU political advertising declaration, required on every campaign create since v22
+ * (Regulation (EU) 2024/900). Omitting it fails with REQUIRED on
+ * operations.create.contains_eu_political_advertising.
+ */
+export type EuPoliticalAdvertising =
+  | "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING"
+  | "CONTAINS_EU_POLITICAL_ADVERTISING";
+
 export interface CreateCampaignInput {
   name: string;
   budgetResourceName: string;
   bidding: BiddingStrategy;
+  /** Defaults to DOES_NOT_CONTAIN — a retail catalogue is never political advertising. */
+  containsEuPoliticalAdvertising?: EuPoliticalAdvertising;
   advertisingChannelType?: "SHOPPING" | "SEARCH" | "PERFORMANCE_MAX" | "DISPLAY";
   status?: CampaignStatus;
   shoppingSetting?: ShoppingSetting;
@@ -436,6 +451,10 @@ export class GoogleAdsClient {
       status: input.status ?? "PAUSED",
       advertisingChannelType: input.advertisingChannelType ?? "SHOPPING",
       campaignBudget: input.budgetResourceName,
+      // Required since v22. Declared explicitly rather than left to a server default:
+      // the API rejects the create outright when the field is absent.
+      containsEuPoliticalAdvertising:
+        input.containsEuPoliticalAdvertising ?? "DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING",
       ...biddingFields(input.bidding),
     };
     if (input.shoppingSetting) {
