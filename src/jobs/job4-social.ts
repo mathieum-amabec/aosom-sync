@@ -11,6 +11,7 @@
  * future Instagram Furnish EN).
  */
 import Anthropic from "@anthropic-ai/sdk";
+import { STOREFRONT_BASE_URL } from "@/lib/insights";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "@/lib/strip-markdown";
@@ -86,6 +87,28 @@ function logError(msg: string, data?: Record<string, unknown>): void {
 
 function getClient() {
   return getAnthropicClient();
+}
+
+/**
+ * The two prompt vars the direct-response templates need beyond name/price.
+ *
+ * Both MUST be supplied for every trigger: interpolatePrompt only substitutes keys
+ * present in `vars`, so a missing one would leave a literal "{url}" in the text
+ * handed to Claude — which the model then reproduces in the published caption.
+ *
+ * A product with no `shopify_handle` falls back to the storefront root rather than
+ * emitting a 404 PDP link; that is rare (handles are written at import) but a dead
+ * link in a live post is worse than a generic one.
+ */
+function socialPromptVars(product: {
+  product_type?: string | null;
+  shopify_handle?: string | null;
+}): { category: string; url: string } {
+  const handle = product.shopify_handle || null;
+  return {
+    category: product.product_type || "Meubles",
+    url: handle ? `${STOREFRONT_BASE_URL}/products/${handle}` : STOREFRONT_BASE_URL,
+  };
 }
 
 function interpolatePrompt(template: string, vars: Record<string, string>): string {
@@ -198,6 +221,7 @@ export async function triggerNewProduct(sku: string): Promise<GenerateDraftResul
     product_name: productName,
     price: String(product.price),
     store_name: env.storeName,
+    ...socialPromptVars(product),
   }, product.product_type as string | null);
 
   // Post the clean Shopify position-1 lifestyle photo RAW — the Graph APIs fetch
@@ -249,6 +273,7 @@ export async function triggerPriceDrop(
     old_price: String(oldPrice),
     new_price: String(newPrice),
     store_name: env.storeName,
+    ...socialPromptVars(product),
   }, product.product_type as string | null);
 
   // Post the clean Shopify position-1 lifestyle photo RAW; the sale caption carries
@@ -323,6 +348,7 @@ async function generateOneStockHighlight(
     price: String(product.price),
     qty: String(product.qty),
     store_name: env.storeName,
+    ...socialPromptVars(product),
   }, product.product_type as string | null);
 
   // Post the clean Shopify position-1 lifestyle photo RAW.

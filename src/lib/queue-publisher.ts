@@ -23,6 +23,7 @@ import { getAnthropicClient } from "./content-generator";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "./strip-markdown";
 import { CLAUDE } from "./config";
+import { pinterestClientFromEnv, readPinterestCredentials } from "./pinterest-client";
 import {
   getNextPending,
   claimQueueItem,
@@ -221,6 +222,89 @@ function assertContentPlatformPairing(item: PublicationQueueItem): void {
  * Publish one queue item according to its platform. Returns the published post id.
  * Throws on an invalid payload or a publish failure — the caller maps that to markFailed.
  */
+/**
+ * Hard ceiling on how long a Pin may hold up the queue drain.
+ *
+ * pinterest-client retries 429/5xx up to MAX_RETRIES with a Retry-After sleep capped at
+ * 30s, so one createPin can legitimately take ~170s (4 × 20s timeout + 3 × 30s sleep).
+ * drainPublisherQueue only has DEFAULT_BUDGET_MS (240s) inside a 300s maxDuration, so a
+ * single rate-limited Pin could eat most of a run and defer the rest of the queue. The
+ * Pin is the least important side effect here; it yields.
+ */
+const PINTEREST_MIRROR_TIMEOUT_MS = 15_000;
+
+/**
+ * Mirror a published social post to Pinterest as a Pin.
+ *
+ * Best-effort by construction: the queue item has ALREADY published to Facebook/Instagram
+ * by the time this runs, so a Pinterest failure must never propagate — it would mark a
+ * successfully-published item as failed, and the retry would double-post to Meta. Every
+ * exit path is a no-op or a swallowed log.
+ *
+ * Without PINTEREST_ACCESS_TOKEN + PINTEREST_BOARD_ID, pinterestClientFromEnv returns a
+ * dry-run client: the body is built and recorded, nothing leaves the process. That is the
+ * state this ships in — live code on a dormant credential, so the day the token is added
+ * Pins start flowing with no further deploy. That same day this call stops being free,
+ * which is why the timeout above exists now rather than later.
+ *
+ * A Pin needs BOTH a server-fetchable image and a destination link: Pinterest rejects a Pin
+ * without media, and one without a link is a dead end for a storefront. Reels (video, no
+ * image) are therefore skipped rather than half-published.
+ */
+async function mirrorToPinterest(p: SocialQueuePayload): Promise<void> {
+  try {
+    const imageUrl = p.imageUrls?.[0] ?? p.imageUrl;
+    if (!imageUrl || !p.link) return;
+
+    const caption = p.caption.trim();
+    if (!caption) return;
+    // The direct-response captions open with a standalone hook line; it is the best Pin
+    // title available. Fall back to the whole caption when the copy is a single block.
+    const firstLine = caption.split("\n").find((l) => l.trim().length > 0);
+    const title = (firstLine ?? caption).trim();
+
+    const client = pinterestClientFromEnv();
+    const pin = client.createPin({
+      title,
+      description: caption,
+      link: p.link,
+      imageUrl,
+      altText: title,
+    });
+    // The loser of the race must not surface as an unhandled rejection when it settles
+    // after we have already moved on.
+    pin.catch(() => {});
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      pin,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), PINTEREST_MIRROR_TIMEOUT_MS);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+
+    if (!result) {
+      // The Pin may still land server-side; we simply stop waiting for it.
+      console.warn(
+        `[publisher] pinterest mirror timed out after ${PINTEREST_MIRROR_TIMEOUT_MS / 1000}s ` +
+          "(post already published, not retried)",
+      );
+      return;
+    }
+
+    const mode = readPinterestCredentials()
+      ? "published"
+      : "dry-run (no PINTEREST_ACCESS_TOKEN/PINTEREST_BOARD_ID)";
+    console.log("[publisher] pinterest pin " + mode + ": " + result.pinId);
+  } catch (err) {
+    console.warn(
+      "[publisher] pinterest mirror failed (post already published, ignoring): " +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+}
+
 export async function publishQueueItem(item: PublicationQueueItem): Promise<PublishItemResult> {
   assertContentPlatformPairing(item);
 
@@ -255,11 +339,17 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
 
   switch (item.platform) {
     case "facebook":
-      return { postId: (await publishSocialPayload("facebook", toSocialPayload(parseSocialPayload(raw)))).postId };
     case "instagram":
-      return { postId: (await publishSocialPayload("instagram", toSocialPayload(parseSocialPayload(raw)))).postId };
-    case "both":
-      return publishToBoth(parseSocialPayload(raw));
+    case "both": {
+      const social = parseSocialPayload(raw);
+      const result =
+        item.platform === "both"
+          ? await publishToBoth(social)
+          : { postId: (await publishSocialPayload(item.platform, toSocialPayload(social))).postId };
+      // After Meta, never before: no Pin for a post that failed to publish.
+      await mirrorToPinterest(social);
+      return result;
+    }
     case "shopify_blog":
       return { postId: (await createBlogArticle(parseBlogPayload(raw))).articleId };
     default:

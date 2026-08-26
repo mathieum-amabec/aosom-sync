@@ -1,4 +1,5 @@
 import { createClient, type Client, type Row, type InValue, type InStatement } from "@libsql/client";
+import { SOCIAL_PROMPT_SEEDS } from "./social-prompts";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
@@ -855,12 +856,7 @@ async function _initSchemaImpl(): Promise<void> {
     ['social_include_price', 'true'],
     ['social_include_link', 'true'],
     ['social_tone', 'promotional'],
-    ['prompt_new_product_fr', 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur. Rédige un post Facebook engageant pour ce nouveau produit : {product_name}. Prix : {price}$. Ton : enthousiaste et accessible. Maximum 150 mots. Termine avec les hashtags : {hashtags}'],
-    ['prompt_new_product_en', 'You are a marketing expert for a Canadian outdoor furniture store. Write an engaging Facebook post for this new product: {product_name}. Price: {price}$. Tone: enthusiastic and approachable. Maximum 150 words. End with hashtags: {hashtags}'],
-    ['prompt_price_drop_fr', 'Tu es un expert en marketing promotionnel québécois. Rédige un post Facebook pour annoncer une baisse de prix sur : {product_name}. Ancien prix : {old_price}$. Nouveau prix : {new_price}$. Mets en valeur les économies. Maximum 120 mots. Hashtags : {hashtags}'],
-    ['prompt_price_drop_en', 'You are a Canadian promotional marketing expert. Write a Facebook post announcing a price drop on: {product_name}. Old price: {old_price}$. New price: {new_price}$. Highlight the savings. Maximum 120 words. Hashtags: {hashtags}'],
-    ['prompt_highlight_fr', 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur. Rédige un post Facebook pour mettre en valeur ce produit populaire de notre catalogue : {product_name}. Prix : {price}$. Stock disponible : {qty} unités. Maximum 130 mots. Hashtags : {hashtags}'],
-    ['prompt_highlight_en', 'You are a marketing expert for a Canadian outdoor furniture store. Write a Facebook post highlighting this popular product from our catalogue: {product_name}. Price: {price}$. Stock: {qty} units available. Maximum 130 words. Hashtags: {hashtags}'],
+    ...SOCIAL_PROMPT_SEEDS,
     ['social_accent_color', '#2563eb'],
     ['social_text_color', '#ffffff'],
     ['social_store_display_name', ''],

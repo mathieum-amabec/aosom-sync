@@ -2,6 +2,64 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.67.0] - 2026-08-26
+
+### Changed — social captions move to a direct-response prompt
+
+The seeded social prompts asked for an "enthousiaste et accessible" post of up to 150 words.
+They are replaced by one direct-response template per language, shared by all three triggers:
+a scroll-stopping hook, life-benefit framing over feature framing, tutoiement, a 100-word
+ceiling, a single CTA, a banned-cliché list, and a mandatory free-shipping + exact-price line.
+
+The prompts move out of the `database.ts` seed array into `src/lib/social-prompts.ts`, where
+they can be unit-tested.
+
+**This does not change production on its own.** Seeding is `INSERT OR IGNORE`, so an
+environment whose `settings` rows already exist — production does — keeps its stored value.
+Rolling this out needs an explicit `UPDATE settings` on the six `prompt_*` keys, or an
+operator edit under Settings → Prompts. Only a fresh database picks the new copy up from code.
+
+### Fixed — `{category}` and `{url}` were never supplied to the caption prompt
+
+`interpolatePrompt` substitutes only the keys it is handed and leaves anything else verbatim,
+so a prompt referencing `{url}` emitted the literal seven characters into the text sent to
+Claude — which reproduces them in the published caption. No throw, no empty string, just
+`{url}` shown to shoppers.
+
+`socialPromptVars` now derives both from the product row and feeds all three triggers
+(`new_product`, `price_drop`, `highlight`). `category` falls back to "Meubles" and `url` to the
+storefront root when `shopify_handle` is null, because a dead PDP link in a live post is worse
+than a generic one. `tests/social-prompts.test.ts` asserts every placeholder in every seeded
+prompt is one its trigger actually supplies, so the next prompt edit fails in CI instead of
+in a post.
+
+### Added — published social posts mirror to Pinterest
+
+`publishQueueItem` now calls `mirrorToPinterest` after a successful Facebook/Instagram
+publish, reusing the dormant `pinterest-client.ts` shipped in v0.5.60.0 (#425) rather than
+adding a second client.
+
+The mirror is best-effort by construction: the Meta post has already gone out by the time it
+runs, so a Pinterest failure that propagated would mark a published item as failed and the
+retry would double-post to Meta. Every exit path is a no-op or a swallowed log. Reels are
+skipped — a Pin needs both a server-fetchable image and a destination link.
+
+It ships **dormant**: without `PINTEREST_ACCESS_TOKEN` + `PINTEREST_BOARD_ID`,
+`pinterestClientFromEnv` returns a dry-run client that builds the body and sends nothing. Note
+that `PINTEREST_TAG_ID` is the storefront conversion tag and cannot authenticate the API —
+adding real Pins needs an OAuth token scoped `pins:write` + `boards:read`.
+
+### Ops — Meta ad account act_20658834
+
+Created the missing campaign `Ameublo Direct — Carrousel — Août 2026` (`52595062446805`) with
+ad set `52595062447805`, mirroring the existing Single Image campaign's targeting verbatim so
+the two are a true A/B. Both PAUSED, $3.50/day, pixel `214720653324969` / PURCHASE.
+
+Creating it requires `is_adset_budget_sharing_enabled: "false"` whenever the budget sits on the
+ad set rather than the campaign; omitting it fails with `error_subcode 4834011`.
+
+Neither campaign carries any ad yet — both are campaign + ad set only.
+
 ## [0.5.66.0] - 2026-08-22
 
 ### Fixed — theme writes are guarded at the choke point, not per script
