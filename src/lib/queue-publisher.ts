@@ -223,6 +223,17 @@ function assertContentPlatformPairing(item: PublicationQueueItem): void {
  * Throws on an invalid payload or a publish failure — the caller maps that to markFailed.
  */
 /**
+ * Hard ceiling on how long a Pin may hold up the queue drain.
+ *
+ * pinterest-client retries 429/5xx up to MAX_RETRIES with a Retry-After sleep capped at
+ * 30s, so one createPin can legitimately take ~170s (4 × 20s timeout + 3 × 30s sleep).
+ * drainPublisherQueue only has DEFAULT_BUDGET_MS (240s) inside a 300s maxDuration, so a
+ * single rate-limited Pin could eat most of a run and defer the rest of the queue. The
+ * Pin is the least important side effect here; it yields.
+ */
+const PINTEREST_MIRROR_TIMEOUT_MS = 15_000;
+
+/**
  * Mirror a published social post to Pinterest as a Pin.
  *
  * Best-effort by construction: the queue item has ALREADY published to Facebook/Instagram
@@ -233,7 +244,8 @@ function assertContentPlatformPairing(item: PublicationQueueItem): void {
  * Without PINTEREST_ACCESS_TOKEN + PINTEREST_BOARD_ID, pinterestClientFromEnv returns a
  * dry-run client: the body is built and recorded, nothing leaves the process. That is the
  * state this ships in — live code on a dormant credential, so the day the token is added
- * Pins start flowing with no further deploy.
+ * Pins start flowing with no further deploy. That same day this call stops being free,
+ * which is why the timeout above exists now rather than later.
  *
  * A Pin needs BOTH a server-fetchable image and a destination link: Pinterest rejects a Pin
  * without media, and one without a link is a dead end for a storefront. Reels (video, no
@@ -252,17 +264,39 @@ async function mirrorToPinterest(p: SocialQueuePayload): Promise<void> {
     const title = (firstLine ?? caption).trim();
 
     const client = pinterestClientFromEnv();
-    const { pinId } = await client.createPin({
+    const pin = client.createPin({
       title,
       description: caption,
       link: p.link,
       imageUrl,
       altText: title,
     });
+    // The loser of the race must not surface as an unhandled rejection when it settles
+    // after we have already moved on.
+    pin.catch(() => {});
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const result = await Promise.race([
+      pin,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), PINTEREST_MIRROR_TIMEOUT_MS);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+
+    if (!result) {
+      // The Pin may still land server-side; we simply stop waiting for it.
+      console.warn(
+        `[publisher] pinterest mirror timed out after ${PINTEREST_MIRROR_TIMEOUT_MS / 1000}s ` +
+          "(post already published, not retried)",
+      );
+      return;
+    }
+
     const mode = readPinterestCredentials()
       ? "published"
       : "dry-run (no PINTEREST_ACCESS_TOKEN/PINTEREST_BOARD_ID)";
-    console.log("[publisher] pinterest pin " + mode + ": " + pinId);
+    console.log("[publisher] pinterest pin " + mode + ": " + result.pinId);
   } catch (err) {
     console.warn(
       "[publisher] pinterest mirror failed (post already published, ignoring): " +
