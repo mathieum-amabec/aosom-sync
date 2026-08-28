@@ -19,14 +19,25 @@
  */
 import type { AssistantTurn, Locale } from "./assistant";
 
-/** Accepted messages allowed per IP per rolling hour. Also the session-length cap. */
-export const MAX_MESSAGES_PER_HOUR = 10;
+/**
+ * Accepted messages allowed per IP per rolling hour, counted in Turso so the number is
+ * shared across Vercel instances rather than reset by every cold start.
+ *
+ * Raised from 10 to 20 on 2026-08-28 at the operator's instruction. Worth stating plainly:
+ * this LOOSENS the per-IP ceiling — it doubles what one address can spend in an hour. The
+ * quota was already Turso-backed and already enforced; the security gain in this release is
+ * the token gate and the graceful budget path, not this number.
+ *
+ * It no longer doubles as the session-length cap (both used to be 10). The rapid-fire guard
+ * below is what bounds a single runaway conversation now.
+ */
+export const MAX_MESSAGES_PER_HOUR = 20;
 export const RATE_WINDOW_SECS = 3600;
 
 /** Consecutive shopper turns (no assistant turn between) before we hand off to a human. */
 export const MAX_CONSECUTIVE_USER_TURNS = 3;
 
-export type LimitReason = "hourly_quota" | "consecutive_messages";
+export type LimitReason = "hourly_quota" | "consecutive_messages" | "budget_exhausted";
 
 /**
  * Store contact details for the hand-off. Env-overridable because they are business data,
@@ -40,10 +51,35 @@ export function contactChannels(): { email: string; whatsappUrl: string | null }
   return { email, whatsappUrl: raw ? `https://wa.me/${raw}` : null };
 }
 
-const MESSAGE: Record<Locale, string> = {
-  fr: "Vous avez atteint la limite de questions. Notre équipe peut vous aider directement 😊",
-  en: "You've reached the question limit. Our team can help you directly 😊",
-};
+/**
+ * Shopper-facing copy per reason. Localized here, next to the rules that emit them.
+ *
+ * `hourly_quota` takes the minutes left so the shopper is told when to come back rather
+ * than being stonewalled; the other two are terminal for this visit and go straight to the
+ * hand-off. Every one of them still ends with a way to reach a human — a dead end with no
+ * next step is the one outcome worse than the limit itself.
+ */
+function minutesLabel(locale: Locale, mins: number): string {
+  if (locale === "en") return mins <= 1 ? "in about a minute" : `in about ${mins} minutes`;
+  return mins <= 1 ? "dans une minute environ" : `dans environ ${mins} minutes`;
+}
+
+function messageFor(locale: Locale, reason: LimitReason, retryAfterSecs: number): string {
+  const mins = Math.max(1, Math.ceil(retryAfterSecs / 60));
+  if (reason === "hourly_quota") {
+    return locale === "en"
+      ? `Too many requests. Please try again ${minutesLabel(locale, mins)}.`
+      : `Trop de requêtes. Réessayez ${minutesLabel(locale, mins)}.`;
+  }
+  if (reason === "budget_exhausted") {
+    return locale === "en"
+      ? "Our assistant is temporarily unavailable."
+      : "Notre assistant est temporairement indisponible.";
+  }
+  return locale === "en"
+    ? "You've reached the question limit. Our team can help you directly 😊"
+    : "Vous avez atteint la limite de questions. Notre équipe peut vous aider directement 😊";
+}
 
 const CTA: Record<Locale, string> = {
   fr: "Nous écrire",
@@ -80,12 +116,13 @@ export function limitPayload(locale: Locale, reason: LimitReason, retryAfterSecs
   const { email, whatsappUrl } = contactChannels();
   const subject = locale === "en" ? "Help with my order" : "Aide pour ma commande";
   const channels = whatsappUrl ? `${email} · WhatsApp ${whatsappUrl}` : email;
+  const message = messageFor(locale, reason, retryAfterSecs);
   return {
-    reply: `${MESSAGE[locale]} ${REACH_US[locale](channels)}`,
+    reply: `${message} ${REACH_US[locale](channels)}`,
     products: [],
     limitReached: true,
     reason,
-    message: MESSAGE[locale],
+    message,
     contact: {
       label: CTA[locale],
       email,

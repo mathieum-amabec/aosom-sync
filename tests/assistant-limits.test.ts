@@ -58,16 +58,26 @@ describe("limitPayload", () => {
   beforeEach(() => { delete process.env.ASSISTANT_CONTACT_WHATSAPP; });
   afterEach(() => { if (ENV === undefined) delete process.env.ASSISTANT_CONTACT_WHATSAPP; else process.env.ASSISTANT_CONTACT_WHATSAPP = ENV; });
 
+  // The hourly-quota copy changed in v0.5.71.0: it now names the wait instead of only
+  // saying no. The "limite de questions" wording moved to the rapid-fire hand-off, which is
+  // terminal for this visit and has no retry time to quote.
   it("carries the exact French copy", () => {
-    const p = limitPayload("fr", "hourly_quota", 3600);
+    const p = limitPayload("fr", "consecutive_messages", 60);
     expect(p.message).toBe(
       "Vous avez atteint la limite de questions. Notre équipe peut vous aider directement 😊",
     );
   });
 
   it("carries the exact English copy", () => {
-    const p = limitPayload("en", "hourly_quota", 3600);
+    const p = limitPayload("en", "consecutive_messages", 60);
     expect(p.message).toBe("You've reached the question limit. Our team can help you directly 😊");
+  });
+
+  it("names the wait on an hourly-quota trip, in both locales", () => {
+    expect(limitPayload("fr", "hourly_quota", 3600).message)
+      .toBe("Trop de requêtes. Réessayez dans environ 60 minutes.");
+    expect(limitPayload("en", "hourly_quota", 3600).message)
+      .toBe("Too many requests. Please try again in about 60 minutes.");
   });
 
   it("renders in the deployed widget: it has reply + products", () => {
@@ -115,7 +125,9 @@ describe("limitPayload", () => {
 
 describe("documented limits", () => {
   it("matches the requested numbers", () => {
-    expect(MAX_MESSAGES_PER_HOUR).toBe(10);
+    // 10 -> 20 in v0.5.71.0 at the operator's instruction. This LOOSENS the per-IP ceiling;
+    // the security work in that release was the token gate, not this number.
+    expect(MAX_MESSAGES_PER_HOUR).toBe(20);
     expect(MAX_CONSECUTIVE_USER_TURNS).toBe(3);
   });
 });
