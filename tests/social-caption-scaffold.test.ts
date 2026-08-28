@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripScaffold } from "@/app/api/social/content/generate/route";
+import { stripScaffold } from "@/lib/content-template-generator";
 
 describe("stripScaffold", () => {
   it("strips LLM scaffolding (preamble + --- rule + **bold**) into a clean post", () => {

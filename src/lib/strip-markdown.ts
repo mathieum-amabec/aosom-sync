@@ -71,10 +71,52 @@ export function stripLeadingPlatformLabel(text: string): string {
 }
 
 /**
+ * Strip a leading `Accroche:` / `Hook:` label while KEEPING the hook it labels.
+ *
+ * The system prompt orders the model to "ouvre par une accroche qui arrête le
+ * défilement". It obeys, then sometimes narrates the obedience: three of the five
+ * content_template drafts generated on 2026-08-28 (#807, #808, #810) opened with a
+ * literal `Accroche: "Pourquoi ton salon paraît étouffant?"` line. That prefix would
+ * publish verbatim to Facebook.
+ *
+ * The hook itself is good copy and the body never repeats it, so deleting the line
+ * would throw away the scroll-stopper the style guide exists to produce. Only the
+ * label and its quotes come off. The match is anchored to the very start of the text
+ * and the label must be followed by a colon, so a body sentence containing the word
+ * "accroche" is untouched.
+ *
+ * Quotes are unwrapped only when they enclose the whole first line — a hook that
+ * merely contains a quoted phrase keeps its punctuation. Exported for unit testing.
+ */
+export function stripLeadingHookLabel(text: string): string {
+  // After the colon consume ONLY horizontal whitespace, never a generic
+  // "non-letter" run: the hook's own first characters are frequently punctuation
+  // (an opening quote) or an emoji (`☀️ T'as attendu…`, draft #808), and a
+  // `[^\p{L}\p{N}]*` tail eats them — silently truncating the copy this function
+  // exists to preserve.
+  const withoutLabel = text.replace(
+    /^[^\p{L}\p{N}]*(?:accroche|hook)[ \t]*:[ \t]*/iu,
+    "",
+  );
+  if (withoutLabel === text) return text;
+
+  // Unwrap a quote pair that spans the entire first line, e.g. `"L'erreur #1 …"`.
+  const nl = withoutLabel.indexOf("\n");
+  const firstLine = nl === -1 ? withoutLabel : withoutLabel.slice(0, nl);
+  const rest = nl === -1 ? "" : withoutLabel.slice(nl);
+  const unwrapped = firstLine.replace(/^(["'«“])([\s\S]*)(["'»”])$/u, (m, open, inner: string, close) => {
+    const PAIRS: Record<string, string> = { '"': '"', "'": "'", "«": "»", "“": "”" };
+    return PAIRS[open as string] === close && inner.length > 0 ? inner : m;
+  });
+  return unwrapped.trimEnd() + rest;
+}
+
+/**
  * Full cleanup for a social caption before it is stored/published. Order matters:
  * strip Markdown FIRST (so a markdown-titled label like `# Post Facebook 🌿` or
  * `**Post Facebook 🌿**` becomes a bare label line), THEN strip the leading
- * platform label.
+ * platform label, THEN the `Accroche:` label — a generation can carry both, and the
+ * hook label only reaches the start of the string once the platform label is gone.
  *
  * Returns "" only for a degenerate label-only generation (the model emitted
  * nothing but a label). That empty is the CORRECT signal — every caller handles
@@ -89,5 +131,5 @@ export function stripLeadingPlatformLabel(text: string): string {
  * path can't silently skip the cleanup.
  */
 export function cleanSocialCaption(raw: string): string {
-  return stripLeadingPlatformLabel(stripMarkdown(raw));
+  return stripLeadingHookLabel(stripLeadingPlatformLabel(stripMarkdown(raw)));
 }
