@@ -2,6 +2,57 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.70.0] - 2026-08-28
+
+### Fixed — the content cron had not produced a draft since June, and the generator was never the problem
+
+`/api/cron/content` `fetch()`ed its own `/api/social/content/generate`. Vercel Cron invokes a
+function on the **deployment** URL, which SSO Deployment Protection guards, so the platform
+answered that self-call **401 at the edge** before the route's own `CRON_SECRET` check ran.
+Every run from 2026-07-29 to 2026-08-28 failed the same way: **14 runs, 14 errors, zero drafts.**
+The last `content_template` draft before this fix was created **2026-06-22**.
+
+The generator itself worked the whole time. A direct POST to the production alias with the same
+secret creates a draft on the first try, and a bogus slug comes back `404 template not found` —
+proof that auth passes and the handler runs. Only the self-call was blocked.
+
+`/api/cron/blog` hit this identical wall and was moved in-process, leaving a comment saying so.
+This route never got the same treatment. It has it now:
+
+- Generation moved to `lib/content-template-generator.ts`, shared by both callers.
+- The cron calls it directly. No network hop to reach code in its own bundle.
+- The HTTP route stays the operator-facing entry point and is a thin wrapper: auth, rate limit,
+  validation, status mapping. `ContentGenerationError` carries the status so 404 / 422 / 502 /
+  503 survive instead of collapsing into a 500.
+- `maxDuration` 120 → 300: both Claude calls now run inside the cron function rather than in a
+  child route, so its budget has to cover them end to end.
+- A regression test asserts the cron never calls `fetch`. Without it, reintroducing the self-call
+  passes every other test while failing 100% of the time in production.
+
+Verified against production Anthropic + Turso: `GET /api/cron/content` returned
+`{success: true, generated: 2}`, and `cron_runs` recorded its **first ever `success` row** for
+this job. The real Vercel cron had failed again with the same 401 earlier that same day.
+
+### Fixed — the model was writing "Accroche:" in front of its own hook
+
+Three of the five drafts generated on 2026-08-28 (#807, #808, #810) opened with a literal
+`Accroche: "Pourquoi ton salon paraît étouffant?"`. The system prompt orders a scroll-stopping
+opener; the model obeys, then narrates the obedience. That prefix publishes verbatim to Facebook.
+
+The hook is good copy and the body never repeats it, so the line stays and only the label and its
+wrapping quotes come off — deleting it would throw away the opener the style guide exists to
+produce.
+
+Two traps, both caught by tests before commit: consuming a generic non-letter run after the colon
+eats the hook's own opening quote **and** a leading emoji (`Accroche: ☀️ T'as attendu 8 mois…`,
+draft #808), silently truncating the copy. Only horizontal whitespace is consumed now, and quotes
+are unwrapped only when they enclose the whole first line.
+
+The strip lives in `cleanSocialCaption`, the single entry point every social-caption generator
+already uses, so product posts, content templates and publish-time Reel captions are all covered.
+The system prompts now also instruct the model not to write the label, as a first line of defence.
+Tests use the verbatim text of the three leaked drafts.
+
 ## [0.5.69.0] - 2026-08-28
 
 ### Security — the lockfiles were still shipping the versions the last audit told us to replace
