@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { stripMarkdown, stripLeadingPlatformLabel, cleanSocialCaption } from "@/lib/strip-markdown";
+import { stripMarkdown, stripLeadingPlatformLabel, stripLeadingHookLabel, cleanSocialCaption } from "@/lib/strip-markdown";
 
 describe("stripMarkdown", () => {
   it("strips **bold** and __bold__ to inner text", () => {
@@ -209,5 +209,80 @@ describe("cleanSocialCaption", () => {
   it("leaves a clean caption unchanged", () => {
     const clean = "Un meuble qui dure 15 ans. 👇\n\n#AmeubloDirect";
     expect(cleanSocialCaption(clean)).toBe(clean);
+  });
+});
+
+/* ── stripLeadingHookLabel ────────────────────────────────────────────────────
+ * Regression: content_template drafts 807 / 808 / 810 (2026-08-28) each opened
+ * with a literal `Accroche:` line. The label would have published verbatim.
+ * The hook it labels is real copy the body never repeats, so it must survive.
+ */
+
+describe("stripLeadingHookLabel", () => {
+  it("drops the label and its quotes, keeps the hook — draft #810 verbatim", () => {
+    const dirty =
+      'Accroche: "L\'erreur #1 qui tue ton mobilier d\'extérieur en 2 ans"\n\n' +
+      "Ton set de patio va te durer une décennie si tu fais juste ÇA.";
+    expect(stripLeadingHookLabel(dirty)).toBe(
+      "L'erreur #1 qui tue ton mobilier d'extérieur en 2 ans\n\n" +
+        "Ton set de patio va te durer une décennie si tu fais juste ÇA.",
+    );
+  });
+
+  it("keeps an unquoted hook that opens with an emoji — draft #808 verbatim", () => {
+    const dirty =
+      "Accroche: ☀️ T'as attendu 8 mois pour ÇA — profites-tu vraiment de ton été?\n\n" +
+      "T'as rêvé de ton terrasse depuis février.";
+    expect(stripLeadingHookLabel(dirty)).toBe(
+      "☀️ T'as attendu 8 mois pour ÇA — profites-tu vraiment de ton été?\n\n" +
+        "T'as rêvé de ton terrasse depuis février.",
+    );
+  });
+
+  it("handles the English 'Hook:' label", () => {
+    expect(stripLeadingHookLabel('Hook: "Bigger sofa = smaller room"\n\nBody.')).toBe(
+      "Bigger sofa = smaller room\n\nBody.",
+    );
+  });
+
+  it("tolerates the French space before the colon", () => {
+    expect(stripLeadingHookLabel("Accroche : Pourquoi ton salon paraît petit?")).toBe(
+      "Pourquoi ton salon paraît petit?",
+    );
+  });
+
+  it("leaves the body alone when 'accroche' is a real word, not a label", () => {
+    const clean = "Une accroche murale solide change tout. 🔩\n\nEt toi?";
+    expect(stripLeadingHookLabel(clean)).toBe(clean);
+  });
+
+  it("does not match a label that appears mid-post rather than at the start", () => {
+    const clean = "Un meuble qui dure.\n\nAccroche: pas touche.";
+    expect(stripLeadingHookLabel(clean)).toBe(clean);
+  });
+
+  it("keeps quotes that do not wrap the whole line", () => {
+    expect(stripLeadingHookLabel('Accroche: le mythe du "grand divan" est mort')).toBe(
+      'le mythe du "grand divan" est mort',
+    );
+  });
+
+  it("leaves a clean caption untouched", () => {
+    const clean = "Un meuble qui dure 15 ans. 👇\n\n#AmeubloDirect";
+    expect(stripLeadingHookLabel(clean)).toBe(clean);
+  });
+});
+
+describe("cleanSocialCaption + hook label", () => {
+  it("strips a markdown-bold hook label — the shape that reaches the DB", () => {
+    expect(cleanSocialCaption('**Accroche:** "Pourquoi ton salon paraît étouffant?"\n\nCorps.')).toBe(
+      "Pourquoi ton salon paraît étouffant?\n\nCorps.",
+    );
+  });
+
+  it("strips a platform label AND a hook label stacked together", () => {
+    expect(cleanSocialCaption('Post Facebook 🌿\nAccroche: "Le secret des pros"\n\nCorps.')).toBe(
+      "Le secret des pros\n\nCorps.",
+    );
   });
 });
