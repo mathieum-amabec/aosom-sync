@@ -2,6 +2,80 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.71.0] - 2026-08-28
+
+CSO finding 2, the last open item from the 2026-08-28 audit.
+
+### Security — the assistant's only identity gate was a header anyone can set
+
+`POST /api/assistant` is public (the storefront widget calls it cross-origin) and gated on
+`Origin`. That is a request header, not a fact: `curl -H 'Origin: https://ameublodirect.ca'`
+passed it. The route now also requires `X-Assistant-Token` — HMAC-SHA256 of
+`ASSISTANT_SECRET` over the UTC day, truncated to 32 hex chars, compared in constant time.
+
+**This is not authentication, and it would be dishonest to file it as such.** The widget is
+an inline `<script>` in a public Shopify theme, so anything it can compute is readable with
+View Source. What it buys is bounded and real: opportunistic scanners and generic bots are
+out, a scraped token dies within 24 hours, and rotating `ASSISTANT_SECRET` revokes every
+copy at once. The actual spend ceiling is the per-IP quota and the daily pool below.
+
+Yesterday's token is accepted as well. Without that, every shopper mid-conversation at
+00:00 UTC gets a 403 and any page loaded before midnight keeps sending a stale value until
+reloaded — a daily burst of false failures on a customer-facing widget, bought for nothing.
+
+`X-Assistant-Token` is added to `Access-Control-Allow-Headers`. A custom header makes the
+POST non-simple, so without the preflight entry the browser silently drops the header and
+the widget 403s in a way that never reaches our logs.
+
+**Rollout order is load-bearing.** The deployed widget sends no custom headers, so an
+unconditional check would take the storefront assistant down the moment this deploys. The
+gate is keyed on the env var: no `ASSISTANT_SECRET` set means no token required. Update the
+theme snippet first, *then* set the variable in Vercel. `scripts/assistant-token.mts` prints
+the token and the snippet to paste. A test pins the grace path, since losing it silently
+kills the widget.
+
+### Changed — the rate limit now says when to come back, and it says 429
+
+Correcting the premise: the per-IP hourly quota was **already** Turso-backed and already
+shared across Vercel instances — it was never in-memory. What actually changed:
+
+- Cap 10 → 20 per rolling hour, at the operator's instruction. Plainly: this **loosens** the
+  ceiling, doubling what one address can spend per hour. The security gain in this release is
+  the token gate, not this number.
+- The response is `429` instead of `200`, and it names the wait. `secondsUntilAssistantSlot`
+  reads the oldest in-window row for that IP, so "réessayez dans environ 10 minutes" is
+  computed rather than a constant.
+- The body still carries `success: true` and `data.reply` on that 429. Deliberate: the
+  deployed widget does `fetch().then(r => r.json())` with **no status check** and renders
+  `data.reply` only when `j.success` is true. With `success: false` the shopper would get the
+  generic "Désolé, une erreur est survenue" instead of being told when to return. Status for
+  machines, body for humans.
+
+### Fixed — an exhausted budget told shoppers the assistant was broken
+
+`LlmBudgetExceededError` fell through to the generic 500, so a rationed assistant looked like
+a crashed one. It now returns 503 with "Notre assistant est temporairement indisponible" plus
+the contact address, in FR and EN. Caught in the outer handler so the PDP "Complétez la
+pièce" path (`runComplementary`, same pool) gets the same hand-off rather than a 500 —
+wrapping `runAssistant` alone missed it.
+
+This is the common path, not a corner case: the `assistant` pool stood at **501 252 / 500 000**
+when this was verified.
+
+### Verification
+
+Against a running production build on production Turso, not only unit tests:
+
+- The exact spoofed-Origin curl that used to succeed → **403**. Wrong token → 403. Valid
+  token without Origin → 403. Preflight advertises `X-Assistant-Token`.
+- 20 seeded rows for a TEST-NET-3 IP → **HTTP 429**, `retryAfter: 586`, FR "Trop de requêtes.
+  Réessayez dans environ 10 minutes." / EN "Too many requests. Please try again in about 10
+  minutes." Seeded rows removed afterwards.
+- A normal call returned the **503 hand-off card** because the pool was genuinely over cap —
+  the graceful path firing on the real condition it exists for.
+
+1999 tests pass (+34). `tsc --noEmit`, ESLint and `next build` clean.
+
 ## [0.5.70.0] - 2026-08-28
 
 ### Fixed — the content cron had not produced a draft since June, and the generator was never the problem
