@@ -101,11 +101,26 @@ async function analyze(sku, frames) {
 }
 
 // Policy applied here, not by the model.
+//
+// FAIL CLOSED. The model's JSON drives an irreversible delete, so a field that is
+// missing or not the expected type is a REJECT flagged for manual review — never a
+// silent "clean". The dangerous direction is the false NEGATIVE: a dropped field
+// treated as false would publish a non-compliant clip.
+function asBool(val, field, reasons) {
+  if (typeof val === "boolean") return val;
+  reasons.push(`champ "${field}" absent ou non booléen (${JSON.stringify(val)}) — vérif manuelle`);
+  return false;
+}
+
 function verdict(v) {
   const reasons = [];
-  if (v.mentionne_aosom) reasons.push('mention "Aosom"');
-  if (v.mentionne_skeepers) reasons.push("filigrane/mention Skeepers");
-  if (v.plateforme_avis_tierce) reasons.push(`plateforme tierce: ${v.plateforme_avis_tierce}`);
+  if (asBool(v.mentionne_aosom, "mentionne_aosom", reasons)) reasons.push('mention "Aosom"');
+  if (asBool(v.mentionne_skeepers, "mentionne_skeepers", reasons)) reasons.push("filigrane/mention Skeepers");
+  // The model is told to send null here; it sometimes sends the STRING "null".
+  const plat = v.plateforme_avis_tierce;
+  if (plat != null && String(plat).trim() !== "" && String(plat).trim().toLowerCase() !== "null") {
+    reasons.push(`plateforme tierce: ${plat}`);
+  }
   return { ok: reasons.length === 0, reasons };
 }
 
@@ -121,7 +136,10 @@ async function worker() {
       if (!frames.length) { results.push({ sku, country, error: "aucune frame extraite" }); console.log(`✗ ${sku.padEnd(15)} [${country}] aucune frame`); continue; }
       const v = await analyze(sku, frames);
       const d = verdict(v);
-      results.push({ sku, country, durationSec: Math.round(dur), verdict: d.ok ? "CONFORME" : "NON CONFORME", reasons: d.reasons, ...v });
+      // `...v` FIRST: the model's raw JSON is untrusted data, so the trusted fields
+      // that follow always win. Spread last, any key the model emits (sku, verdict,
+      // reasons) would silently overwrite them — and `sku` drives the delete path below.
+      results.push({ ...v, sku, country, durationSec: Math.round(dur), verdict: d.ok ? "CONFORME" : "NON CONFORME", reasons: d.reasons });
       console.log(`${d.ok ? "✓" : "✗"} ${sku.padEnd(15)} [${country}] ${d.ok ? "conforme" : "REJET — " + d.reasons.join(", ")}`);
     } catch (e) {
       results.push({ sku, country, error: String(e.message || e) });
