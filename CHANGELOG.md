@@ -2,6 +2,51 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.69.0] - 2026-08-28
+
+### Security — the lockfiles were still shipping the versions the last audit told us to replace
+
+`/cso` found that `package.json` said `next@16.3.1` (the v0.5.63.0 security bump) while
+**both** lockfiles still resolved `next@16.2.6` — inside `>=16.0.0 <16.2.11`, the vulnerable
+range for the Turbopack + single-locale Middleware/Proxy bypass. This app matches those
+preconditions exactly, and `proxy.ts` is the only auth gate in front of the dashboard and
+every non-public `/api` route.
+
+Production was never exposed: the Vercel build runs a plain `npm install`, which resolves
+past a stale lock and prints "Detected Next.js version: 16.3.1". The hole was that any
+lockfile-honouring install (`npm ci`, `bun install --frozen-lockfile`, a fresh clone) got
+16.2.6, and nothing would have told us. A security bump that lives only in `package.json`
+is a bump that can be silently un-applied by whichever install path an environment takes.
+
+Both lockfiles regenerated. `npm audit --omit=dev` on the production tree goes from
+**7 high + 1 moderate to 0**:
+
+| Package | Was | Now | Why it mattered |
+|---|---|---|---|
+| next | 16.2.6 | 16.3.1 | Middleware/Proxy bypass + 8 more HIGH advisories |
+| dompurify | 3.4.7 | 3.4.14 | 5 sanitizer bypasses, and it guards the one `dangerouslySetInnerHTML` in the app — which renders Aosom feed HTML, i.e. third-party input |
+| undici (under `@vercel/blob`) | 6.26.0 | 6.28.0 | TLS bypass, header injection, cache poisoning |
+| fast-uri | 3.1.2 | 3.1.6 | host confusion |
+| postcss | 8.5.15 | 8.5.23 | sourceMappingURL arbitrary file read |
+| nanoid | 3.3.12 | 3.3.18 | infinite loop on degenerate size |
+
+The three transitive pins that no direct dependency would lift on its own are held by an
+`overrides` block, scoped where the consumers disagree (`@vercel/blob` needs undici 6.x,
+jsdom needs 7.x, so a flat override cannot serve both).
+
+**Known divergence, deliberate:** bun applies flat `overrides` but ignores scoped ones, so
+`bun.lock` keeps `undici@6.25.0` under `@vercel/blob`. A local `bun install` therefore still
+has the vulnerable undici; the npm lock that actually builds production does not. The real
+remedy is to stop tracking two lockfiles that cannot express the same constraints — that is
+a workflow decision, not a security patch, so it stays open.
+
+### Fixed — `.env.example` advertised a fallback that was deleted two releases ago
+
+It told operators that session signing "falls back to AUTH_PASSWORD" when `SESSION_SECRET`
+is unset. That fallback was removed in v0.5.54.31; `auth.ts` now throws and refuses to sign
+or verify. Following the old comment gets you an environment where every login 500s. This
+cost real time during QA of this very release.
+
 ## [0.5.68.0] - 2026-08-28
 
 ### Fixed — the sequential-ads date picker opened on July
