@@ -1730,6 +1730,25 @@ export async function countAssistantRequests(ip: string, windowSecs: number): Pr
   return Number(res.rows[0]?.n ?? 0);
 }
 
+/**
+ * Seconds until this IP's oldest in-window request ages out, i.e. when a slot frees up.
+ *
+ * Lets the 429 tell the shopper "try again in about 12 minutes" instead of an unqualified
+ * refusal. Returns the full window when there is no row to read: over-stating the wait is
+ * the safe direction — under-stating it invites an immediate retry that gets refused again.
+ */
+export async function secondsUntilAssistantSlot(ip: string, windowSecs: number): Promise<number> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const res = await db.execute({
+    sql: `SELECT MIN(ts) AS oldest FROM assistant_rate_limit WHERE ip = ? AND ts >= ?`,
+    args: [ip, now - windowSecs],
+  });
+  const oldest = Number(res.rows[0]?.oldest ?? 0);
+  if (!oldest) return windowSecs;
+  return Math.min(windowSecs, Math.max(1, oldest + windowSecs - now));
+}
+
 /** Record one accepted assistant message for this IP. */
 export async function recordAssistantRequest(ip: string): Promise<void> {
   const db = await ensureSchema();

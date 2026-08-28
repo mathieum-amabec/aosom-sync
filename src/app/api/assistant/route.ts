@@ -1,12 +1,18 @@
 import { runAssistant, runComplementary, type AssistantTurn, type Locale } from "@/lib/assistant";
 import { checkRateLimit } from "@/lib/rate-limiter";
-import { countAssistantRequests, recordAssistantRequest } from "@/lib/database";
+import {
+  countAssistantRequests,
+  recordAssistantRequest,
+  secondsUntilAssistantSlot,
+} from "@/lib/database";
 import {
   MAX_MESSAGES_PER_HOUR,
   RATE_WINDOW_SECS,
   isRapidFire,
   limitPayload,
 } from "@/lib/assistant-limits";
+import { ASSISTANT_TOKEN_HEADER, verifyAssistantToken } from "@/lib/assistant-auth";
+import { LlmBudgetExceededError } from "@/lib/llm-budget";
 
 /**
  * POST /api/assistant — PUBLIC storefront shopping assistant. No auth (called from the
@@ -33,7 +39,10 @@ function isAllowedOrigin(origin: string | null): origin is string {
 function corsHeaders(origin: string | null): Record<string, string> {
   const h: Record<string, string> = {
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    // X-Assistant-Token MUST be listed: a custom header makes the POST non-simple, so the
+    // browser sends a preflight first and drops the real request if the header is not
+    // allowed here. Omitting it breaks the widget in a way that never reaches our logs.
+    "Access-Control-Allow-Headers": "Content-Type, X-Assistant-Token",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -101,6 +110,19 @@ export async function POST(request: Request): Promise<Response> {
     return json({ success: false, error: "forbidden_origin" }, 403);
   }
 
+  // Shared-secret gate on top of the Origin check. Origin is a header any non-browser
+  // client sets freely, so on its own it stops nobody who is trying; the token means a
+  // caller has to know something rather than merely claim it. See lib/assistant-auth.ts for
+  // why this is a doorman and not a vault — the widget is public theme source.
+  //
+  // `not_configured` (no ASSISTANT_SECRET set) deliberately passes: the deployed widget
+  // sends no custom header yet, and failing closed here would take the storefront assistant
+  // down the moment this deploys. Set the env var only AFTER the theme snippet is updated.
+  const verdict = verifyAssistantToken(request.headers.get(ASSISTANT_TOKEN_HEADER));
+  if (verdict === "missing" || verdict === "invalid") {
+    return json({ success: false, error: "forbidden_token" }, 403);
+  }
+
   // Global cost backstop — caps total spend across ALL callers (defends against distributed
   // / IP-rotating abuse that a per-IP limit can't). In-memory per instance, so it's a floor,
   // not a ceiling; a platform WAF / spend alert should back it in production.
@@ -165,7 +187,23 @@ export async function POST(request: Request): Promise<Response> {
       used = -1;
     }
     if (used >= MAX_MESSAGES_PER_HOUR) {
-      return json({ success: true, data: limitPayload(locale, "hourly_quota", RATE_WINDOW_SECS) }, 200);
+      // Tell the shopper WHEN, not just no: seconds until this IP's oldest in-window
+      // request ages out. Best-effort — a read failure falls back to the full window.
+      let retryAfter = RATE_WINDOW_SECS;
+      try {
+        retryAfter = await secondsUntilAssistantSlot(ip, RATE_WINDOW_SECS);
+      } catch { /* fall back to the full window */ }
+
+      // 429 is the honest status for machines (monitoring, any future API client), but the
+      // body still carries `success: true` and `data.reply`. That is not sloppiness: the
+      // DEPLOYED widget does `fetch(...).then(r => r.json())` with NO status check, and
+      // renders `data.reply` only when `j.success && j.data`. With `success: false` the
+      // shopper would get the generic "Désolé, une erreur est survenue" instead of being
+      // told to come back in twelve minutes. Status for machines, body for humans.
+      return json(
+        { success: true, data: limitPayload(locale, "hourly_quota", retryAfter) },
+        429,
+      );
     }
 
     const result = await runAssistant({ message, history, locale });
@@ -180,6 +218,18 @@ export async function POST(request: Request): Promise<Response> {
 
     return json({ success: true, data: result });
   } catch (err) {
+    // Daily assistant token pool exhausted. This used to fall through to the 500 below, and
+    // the widget then showed "Désolé, une erreur est survenue" — telling the shopper the
+    // assistant was broken when it was simply rationed for the day. The pool has been
+    // reaching its cap on most days, so this is a common path, not a corner case.
+    //
+    // Caught out here rather than around runAssistant so the PDP "Complétez la pièce" mode
+    // (runComplementary, same pool, earlier in this try) gets the same graceful hand-off
+    // instead of a 500. `locale` is parsed before the try precisely so it is readable here.
+    if (err instanceof LlmBudgetExceededError) {
+      console.warn("[assistant] daily pool exhausted — serving the hand-off card:", err.message);
+      return json({ success: true, data: limitPayload(locale, "budget_exhausted", 0) }, 503);
+    }
     console.error("[API] /api/assistant failed:", err);
     return json({ success: false, error: "assistant_failed" }, 500);
   }

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { MAX_MESSAGES_PER_HOUR } from "@/lib/assistant-limits";
 
 // Mock the (paid) assistant lib so route tests never call Claude.
 const runAssistant = vi.fn();
@@ -9,7 +10,12 @@ vi.mock("@/lib/assistant", () => ({ runAssistant, runComplementary }));
 // (no sqlite file, no Turso) and so the quota can be driven deterministically.
 const countAssistantRequests = vi.fn();
 const recordAssistantRequest = vi.fn();
-vi.mock("@/lib/database", () => ({ countAssistantRequests, recordAssistantRequest }));
+const secondsUntilAssistantSlot = vi.fn().mockResolvedValue(3600);
+vi.mock("@/lib/database", () => ({
+  countAssistantRequests,
+  recordAssistantRequest,
+  secondsUntilAssistantSlot,
+}));
 
 const { POST, OPTIONS } = await import("@/app/api/assistant/route");
 
@@ -94,22 +100,27 @@ describe("POST /api/assistant — conversation limits", () => {
   });
 
   it("hands off to a human at the hourly quota, without spending a Claude call", async () => {
-    countAssistantRequests.mockResolvedValue(10);
+    countAssistantRequests.mockResolvedValue(MAX_MESSAGES_PER_HOUR);
+    secondsUntilAssistantSlot.mockResolvedValue(9 * 60);
     const res = await post({ message: "un canapé" }, { ip: "10.1.0.2" });
     const body = await res.json();
-    expect(res.status).toBe(200); // 200, not 429 — the widget renders data.reply
+    // 429 for machines; `success: true` + data.reply for the shopper, because the deployed
+    // widget ignores the status and only renders when j.success is true.
+    expect(res.status).toBe(429);
+    expect(body.success).toBe(true);
     expect(body.data.limitReached).toBe(true);
     expect(body.data.reason).toBe("hourly_quota");
-    expect(body.data.reply).toContain("Notre équipe peut vous aider directement");
+    expect(body.data.reply).toContain("9 minutes");
     expect(runAssistant).not.toHaveBeenCalled();
     expect(recordAssistantRequest).not.toHaveBeenCalled();
   });
 
   it("returns the English copy for locale=en", async () => {
-    countAssistantRequests.mockResolvedValue(10);
+    countAssistantRequests.mockResolvedValue(MAX_MESSAGES_PER_HOUR);
+    secondsUntilAssistantSlot.mockResolvedValue(9 * 60);
     const res = await post({ message: "a sofa", locale: "en" }, { ip: "10.1.0.3" });
     const body = await res.json();
-    expect(body.data.reply).toContain("Our team can help you directly");
+    expect(body.data.reply).toContain("Please try again in about 9 minutes");
   });
 
   it("hands off on the 4th consecutive shopper turn, before touching the quota", async () => {
