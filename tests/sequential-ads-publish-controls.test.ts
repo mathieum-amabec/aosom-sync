@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { toLocalInputValue } from "@/app/(dashboard)/sequential-ads/sequential-ads-client";
+import {
+  toLocalInputValue,
+  earliestSlotValue,
+  initialSlotValue,
+} from "@/app/(dashboard)/sequential-ads/sequential-ads-client";
 
 /* ── mocks ──────────────────────────────────────────────────────────────────── */
 
@@ -203,5 +207,48 @@ describe("toLocalInputValue", () => {
 
   it("returns an empty string on garbage rather than 'NaN-NaN-NaN'", () => {
     expect(toLocalInputValue("not-a-date")).toBe("");
+  });
+});
+
+describe("earliestSlotValue", () => {
+  it("is exactly 24h ahead of now, in local wall-clock form", () => {
+    const now = new Date("2026-09-01T15:30:00Z");
+    expect(earliestSlotValue(now)).toBe(
+      toLocalInputValue("2026-09-02 15:30:00"),
+    );
+  });
+
+  it("crosses a month boundary without producing a day 32", () => {
+    const out = earliestSlotValue(new Date("2026-08-31T12:00:00Z"));
+    expect(out).toBe(toLocalInputValue("2026-09-01 12:00:00"));
+  });
+});
+
+describe("initialSlotValue", () => {
+  // The bug this guards: the July patio batch is still in `draft` carrying slots from
+  // 2026-07-08..07-17, so the picker opened on a date the server already refuses.
+  const now = new Date("2026-09-01T15:30:00Z");
+
+  it("does NOT open on a stale July slot — it falls forward to the 24h floor", () => {
+    expect(initialSlotValue("2026-07-08 22:00:00", now)).toBe(earliestSlotValue(now));
+  });
+
+  it("keeps a slot that is still comfortably in the future", () => {
+    const future = "2026-10-15 13:00:00";
+    expect(initialSlotValue(future, now)).toBe(toLocalInputValue(future));
+  });
+
+  it("falls forward for a slot inside the next 24h, since the server would refuse it", () => {
+    expect(initialSlotValue("2026-09-01 18:00:00", now)).toBe(earliestSlotValue(now));
+  });
+
+  it("falls forward on an unparseable stored slot instead of emptying the input", () => {
+    expect(initialSlotValue("not-a-date", now)).toBe(earliestSlotValue(now));
+  });
+
+  it("never returns a value in the past, whatever the row holds", () => {
+    for (const stored of ["2026-07-08 22:00:00", "2026-01-01 00:00:00", "", "garbage"]) {
+      expect(initialSlotValue(stored, now) >= earliestSlotValue(now)).toBe(true);
+    }
   });
 });

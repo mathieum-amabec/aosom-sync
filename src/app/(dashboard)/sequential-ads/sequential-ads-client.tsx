@@ -47,8 +47,40 @@ function formatSlot(sqliteUtc: string): string {
 export function toLocalInputValue(sqliteUtc: string): string {
   const d = new Date(`${sqliteUtc.replace(" ", "T")}Z`);
   if (Number.isNaN(d.getTime())) return "";
+  return toLocalInputValueFromDate(d);
+}
+
+/** Same LOCAL 'YYYY-MM-DDTHH:MM' shape, from a Date the caller already holds. */
+function toLocalInputValueFromDate(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Earliest slot the picker accepts: 24h from now, in the operator's local zone. */
+export function earliestSlotValue(now: Date = new Date()): string {
+  return toLocalInputValueFromDate(new Date(now.getTime() + 24 * 60 * 60 * 1000));
+}
+
+/**
+ * The value the picker opens on.
+ *
+ * NOT simply the row's stored slot. The queue holds sequential ads whose `scheduled_at`
+ * was chosen weeks ago and has long since passed — the July patio batch is still sitting
+ * in `draft` with slots dated 2026-07-08..07-17. Seeding the input with those made the
+ * picker open on a dead date, and clicking "Planifier" without editing sent it straight
+ * into the server's past-slot guard (400 "Cette date est déjà passée"), which reads as a
+ * broken button rather than a stale row.
+ *
+ * So: keep the stored slot while it is still in the future, otherwise fall forward to the
+ * floor. The same floor feeds the input's `min`, so the browser's own picker cannot walk
+ * back into the past either.
+ */
+export function initialSlotValue(sqliteUtc: string, now: Date = new Date()): string {
+  const floor = earliestSlotValue(now);
+  const stored = toLocalInputValue(sqliteUtc);
+  // Lexicographic compare is exact here: both strings are zero-padded, equal-length, same-zone
+  // 'YYYY-MM-DDTHH:MM', so string order is chronological order.
+  return !stored || stored < floor ? floor : stored;
 }
 
 export default function SequentialAdsClient() {
@@ -213,8 +245,17 @@ function SequentialAdCard({
   const title = item.payload.caption || item.content_id;
   const busy = acting === item.id;
 
-  const [slot, setSlot] = useState(() => toLocalInputValue(item.scheduled_at));
+  // Floor is captured once per card rather than recomputed each render, so the `min` the
+  // browser validates against cannot shift under the operator mid-edit.
+  const [minSlot] = useState(() => earliestSlotValue());
+  const [slot, setSlot] = useState(() => initialSlotValue(item.scheduled_at));
   const [confirmingNow, setConfirmingNow] = useState(false);
+  // The picker's own `min` is advisory — a keyboard-typed date bypasses it in several
+  // browsers — so the submit path re-checks rather than letting the server 400 the operator.
+  // Recomputed per render, not read off the frozen `minSlot`: this dashboard is left open
+  // for hours, and a floor captured at mount would have drifted into the past by the time
+  // a long-lived tab is used again.
+  const slotIsPast = !slot || slot < earliestSlotValue();
 
   const isDraft = item.status === "draft";
   const isPending = item.status === "pending";
@@ -274,6 +315,7 @@ function SequentialAdCard({
                 <input
                   type="datetime-local"
                   value={slot}
+                  min={minSlot}
                   onChange={(e) => setSlot(e.target.value)}
                   disabled={busy}
                   aria-label={isDraft ? "Date de publication" : "Nouvelle date de publication"}
@@ -282,8 +324,8 @@ function SequentialAdCard({
               </label>
               <button
                 onClick={() => onSchedule(item.id, slot)}
-                disabled={busy || !slot}
-                title={!slot ? "Choisis une date" : undefined}
+                disabled={busy || slotIsPast}
+                title={slotIsPast ? "Choisis une date d'au moins 24 h dans le futur" : undefined}
                 className="px-2.5 py-1 text-xs font-medium bg-blue-900/40 hover:bg-blue-900/60 text-blue-300 border border-blue-800/50 rounded-md transition-colors disabled:opacity-50"
               >
                 {busy ? "…" : "📅 Planifier"}
