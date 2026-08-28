@@ -1,6 +1,6 @@
 {
   "name": "aosom-sync",
-  "version": "0.5.68.0",
+  "version": "0.5.69.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -42,5 +42,15 @@
     "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.1.2"
+  },
+  "overrides": {
+    "dompurify": "^3.4.13",
+    "@vercel/blob": {
+      "undici": "^6.28.0"
+    },
+    "fast-uri": "^3.1.5",
+    "jsdom": {
+      "undici": "^7.29.0"
+    }
   }
 }
