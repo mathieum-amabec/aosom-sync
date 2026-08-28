@@ -2,6 +2,37 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.68.0] - 2026-08-28
+
+### Fixed — the sequential-ads date picker opened on July
+
+`/sequential-ads` showed dates two months in the past. Not a date-generation bug: the picker
+is a single `<input type="datetime-local">` whose initial value was the queue row's stored
+`scheduled_at`, verbatim. The 57 `sequential_ad` rows still sitting in `draft` were all created
+on 2026-07-08 with slots dated 2026-07-08 through 07-17, so the picker was faithfully showing
+a dead date.
+
+Clicking "📅 Planifier" without editing then hit the server's own past-slot guard in
+`/api/sequential-ads/schedule` and came back 400 "Cette date est déjà passée." The server was
+right; the client was proposing a value it had no business proposing. To an operator that reads
+as a broken button, not a stale row.
+
+- `initialSlotValue()` keeps the stored slot while it is still in the future and otherwise
+  falls forward to a floor of **now + 24 h**. An unparseable slot falls forward too, rather
+  than emptying the input.
+- The same floor feeds the input's `min`, so the browser's native picker cannot walk back into
+  the past either.
+- The submit guard recomputes the floor per render instead of reading the value captured at
+  mount. This dashboard is left open for hours; a floor frozen at mount drifts into the past
+  and would have let a stale tab send exactly the request this change exists to prevent.
+
+Consequence of the 24 h floor, by design: an ad already `pending` for later today can no longer
+be nudged to another slot the same day. Its real créneau stays visible on the card, and leaving
+the field alone changes nothing.
+
+`toLocalInputValue` keeps its existing behaviour and its existing tests; the local wall-clock
+formatting moved into a shared helper rather than being duplicated.
+
 ## [0.5.66.0] - 2026-08-22
 
 ### Fixed — theme writes are guarded at the choke point, not per script
