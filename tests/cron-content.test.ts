@@ -64,14 +64,29 @@ function makeRequest(cronSecret = "test-secret-123"): Request {
   });
 }
 
+/**
+ * The cron calls the generator IN-PROCESS. It used to fetch() its own
+ * /api/social/content/generate, and Vercel's SSO Deployment Protection answered
+ * that self-call 401 at the edge — 13 consecutive failed runs, 2026-07-29 to
+ * 2026-08-26, zero drafts. These tests mock the lib, not fetch, and one of them
+ * asserts fetch is never touched so the self-call cannot come back.
+ */
+function mockTemplate(slug: string, contentType = "education") {
+  vi.doMock("@/lib/content-template-selector", () => ({
+    selectRandomTemplate: vi.fn().mockResolvedValue({ id: 1, slug, content_type: contentType }),
+  }));
+}
+
 describe("GET /api/cron/content", () => {
   beforeEach(() => {
     vi.resetModules();
+    vi.unstubAllGlobals();
     process.env.CRON_SECRET = "test-secret-123";
   });
 
   it("returns 401 for missing auth", async () => {
     vi.doMock("@/lib/content-template-selector", () => ({ selectRandomTemplate: vi.fn() }));
+    vi.doMock("@/lib/content-template-generator", () => ({ generateContentTemplateDraft: vi.fn() }));
     const { GET } = await import("@/app/api/cron/content/route");
     const res = await GET(new Request("https://aosom-sync.vercel.app/api/cron/content"));
     expect(res.status).toBe(401);
@@ -79,6 +94,7 @@ describe("GET /api/cron/content", () => {
 
   it("returns 401 for wrong secret", async () => {
     vi.doMock("@/lib/content-template-selector", () => ({ selectRandomTemplate: vi.fn() }));
+    vi.doMock("@/lib/content-template-generator", () => ({ generateContentTemplateDraft: vi.fn() }));
     const { GET } = await import("@/app/api/cron/content/route");
     const res = await GET(makeRequest("wrong-secret"));
     expect(res.status).toBe(401);
@@ -88,6 +104,7 @@ describe("GET /api/cron/content", () => {
     vi.doMock("@/lib/content-template-selector", () => ({
       selectRandomTemplate: vi.fn().mockResolvedValue(null),
     }));
+    vi.doMock("@/lib/content-template-generator", () => ({ generateContentTemplateDraft: vi.fn() }));
     const { GET } = await import("@/app/api/cron/content/route");
     const res = await GET(makeRequest());
     expect(res.status).toBe(503);
@@ -95,14 +112,11 @@ describe("GET /api/cron/content", () => {
     expect(body.error).toMatch(/No active templates/);
   });
 
-  it("returns 500 when generate endpoint fails", async () => {
-    vi.doMock("@/lib/content-template-selector", () => ({
-      selectRandomTemplate: vi.fn().mockResolvedValue({ id: 1, slug: "conseil_deco_piece", content_type: "education" }),
+  it("returns 500 when generation fails for both languages", async () => {
+    mockTemplate("conseil_deco_piece");
+    vi.doMock("@/lib/content-template-generator", () => ({
+      generateContentTemplateDraft: vi.fn().mockRejectedValue(new Error("Claude returned an empty response")),
     }));
-    // Fresh Response per call — a body can only be read once.
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(
-      new Response(JSON.stringify({ success: false, error: "Claude timeout" }), { status: 502 })
-    )));
     const { GET } = await import("@/app/api/cron/content/route");
     const res = await GET(makeRequest());
     expect(res.status).toBe(500);
@@ -112,13 +126,10 @@ describe("GET /api/cron/content", () => {
   });
 
   it("returns 200 with FR + EN drafts on success", async () => {
-    vi.doMock("@/lib/content-template-selector", () => ({
-      selectRandomTemplate: vi.fn().mockResolvedValue({ id: 3, slug: "sondage_debat", content_type: "engagement" }),
+    mockTemplate("sondage_debat", "engagement");
+    vi.doMock("@/lib/content-template-generator", () => ({
+      generateContentTemplateDraft: vi.fn().mockResolvedValue({ draftId: 99, hookId: 7 }),
     }));
-    // Fresh Response per call — a body can only be read once.
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(
-      new Response(JSON.stringify({ success: true, draftId: 99, hookId: 7 }), { status: 200 })
-    )));
     const { GET } = await import("@/app/api/cron/content/route");
     const res = await GET(makeRequest());
     expect(res.status).toBe(200);
@@ -134,17 +145,12 @@ describe("GET /api/cron/content", () => {
   });
 
   it("returns 200 with partial success when only EN fails", async () => {
-    vi.doMock("@/lib/content-template-selector", () => ({
-      selectRandomTemplate: vi.fn().mockResolvedValue({ id: 1, slug: "conseil_deco_piece", content_type: "education" }),
+    mockTemplate("conseil_deco_piece");
+    vi.doMock("@/lib/content-template-generator", () => ({
+      generateContentTemplateDraft: vi.fn()
+        .mockResolvedValueOnce({ draftId: 11, hookId: null })
+        .mockRejectedValueOnce(new Error("Claude timeout")),
     }));
-    const mockFetch = vi.fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ success: true, draftId: 11, hookId: null }), { status: 200 }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ success: false, error: "Claude timeout" }), { status: 502 }),
-      );
-    vi.stubGlobal("fetch", mockFetch);
     const { GET } = await import("@/app/api/cron/content/route");
     const res = await GET(makeRequest());
     expect(res.status).toBe(200);
@@ -155,70 +161,51 @@ describe("GET /api/cron/content", () => {
     expect(body.drafts[1]).toMatchObject({ language: "en", success: false });
   });
 
-  it("returns 500 when both generate calls fail (network error)", async () => {
-    vi.doMock("@/lib/content-template-selector", () => ({
-      selectRandomTemplate: vi.fn().mockResolvedValue({ id: 1, slug: "conseil_deco_piece", content_type: "education" }),
-    }));
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("ECONNREFUSED")));
-    const { GET } = await import("@/app/api/cron/content/route");
-    const res = await GET(makeRequest());
-    expect(res.status).toBe(500);
-    const body = await res.json();
-    expect(body.success).toBe(false);
-    expect(body.generated).toBe(0);
-    expect(body.drafts[0].error).toMatch(/unreachable/);
-    expect(body.drafts[1].error).toMatch(/unreachable/);
-  });
-
   it("propagates each language's error into the failure message (cron_runs.detail)", async () => {
-    // Regression: content cron only ever recorded the generic "Both FR and EN
+    // Regression: the content cron only ever recorded the generic "Both FR and EN
     // content generations failed" wrapper in cron_runs.detail; the real
-    // per-language cause stayed buried in Vercel logs. The thrown message
+    // per-language cause stayed buried in Vercel logs. That is precisely how a 401
+    // on the old self-fetch went unnoticed for four weeks. The thrown message
     // (re-thrown verbatim by trackCron → recordCronRun → cron_runs.detail, and
-    // mirrored into the 500 response's `error`) must now carry each language's
-    // actual failure.
-    vi.doMock("@/lib/content-template-selector", () => ({
-      selectRandomTemplate: vi.fn().mockResolvedValue({ id: 1, slug: "conseil_deco_piece", content_type: "education" }),
+    // mirrored into the 500 response's `error`) must carry each language's cause.
+    mockTemplate("conseil_deco_piece");
+    vi.doMock("@/lib/content-template-generator", () => ({
+      generateContentTemplateDraft: vi.fn().mockRejectedValue(new Error("Claude timeout")),
     }));
-    // Fresh Response per call — a body can only be read once. Both fail with HTTP 502.
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(
-      new Response(JSON.stringify({ success: false, error: "Claude timeout" }), { status: 502 }),
-    )));
     const { GET } = await import("@/app/api/cron/content/route");
     const res = await GET(makeRequest());
     expect(res.status).toBe(500);
     const body = await res.json();
     expect(body.error).toContain("Both FR and EN content generations failed");
-    expect(body.error).toContain("FR: Generation failed (HTTP 502)");
-    expect(body.error).toContain("EN: Generation failed (HTTP 502)");
+    expect(body.error).toContain("FR: Claude timeout");
+    expect(body.error).toContain("EN: Claude timeout");
   });
 
-  it("calls generate twice — FR then EN — with correct slug and Bearer auth", async () => {
-    vi.doMock("@/lib/content-template-selector", () => ({
-      selectRandomTemplate: vi.fn().mockResolvedValue({ id: 2, slug: "guide_achat_categorie", content_type: "education" }),
-    }));
-    // Fresh Response per call — a body can only be read once.
-    const mockFetch = vi.fn();
-    mockFetch.mockImplementation(() => Promise.resolve(
-      new Response(JSON.stringify({ success: true, draftId: 50, hookId: null }), { status: 200 }),
-    ));
-    vi.stubGlobal("fetch", mockFetch);
+  it("calls the generator twice — FR then EN — with the selected slug", async () => {
+    mockTemplate("guide_achat_categorie");
+    const gen = vi.fn().mockResolvedValue({ draftId: 50, hookId: null });
+    vi.doMock("@/lib/content-template-generator", () => ({ generateContentTemplateDraft: gen }));
     const { GET } = await import("@/app/api/cron/content/route");
     await GET(makeRequest());
 
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(gen).toHaveBeenCalledTimes(2);
+    expect(gen.mock.calls[0]).toEqual(["guide_achat_categorie", "fr"]);
+    expect(gen.mock.calls[1]).toEqual(["guide_achat_categorie", "en"]);
+  });
 
-    const [urlFr, optsFr] = mockFetch.mock.calls[0];
-    expect(urlFr).toContain("/api/social/content/generate");
-    expect(optsFr.method).toBe("POST");
-    expect(optsFr.headers.Authorization).toBe("Bearer test-secret-123");
-    const bodyFr = JSON.parse(optsFr.body);
-    expect(bodyFr.templateSlug).toBe("guide_achat_categorie");
-    expect(bodyFr.language).toBe("fr");
-
-    const [, optsEn] = mockFetch.mock.calls[1];
-    const bodyEn = JSON.parse(optsEn.body);
-    expect(bodyEn.templateSlug).toBe("guide_achat_categorie");
-    expect(bodyEn.language).toBe("en");
+  it("never calls fetch — the self-call is what SSO Deployment Protection 401'd", async () => {
+    // The regression guard for the whole fix. If someone reintroduces a
+    // fetch() to /api/social/content/generate, the cron silently goes back to
+    // failing 100% of the time in production while passing every other test here.
+    mockTemplate("astuces_entretien");
+    vi.doMock("@/lib/content-template-generator", () => ({
+      generateContentTemplateDraft: vi.fn().mockResolvedValue({ draftId: 5, hookId: null }),
+    }));
+    const spyFetch = vi.fn();
+    vi.stubGlobal("fetch", spyFetch);
+    const { GET } = await import("@/app/api/cron/content/route");
+    const res = await GET(makeRequest());
+    expect(res.status).toBe(200);
+    expect(spyFetch).not.toHaveBeenCalled();
   });
 });
