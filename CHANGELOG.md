@@ -2,6 +2,61 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.73.0] - 2026-08-31
+
+Seasonal sequential-ad campaigns are now possible. Two shipped with this change:
+**halloween-2026** (3 ads) and **noel-2026** (8 ads).
+
+### Added — copy that belongs to a campaign instead of the whole catalog
+
+`MESSAGES` in `scripts/render-sequential-ads.mts` was a module constant, so every sequential
+ad in every campaign rendered the same four generic liquidation slates. There was no way to
+write a themed offer: no hook, no price, no deadline.
+
+`CAMPAIGN_COPY` keys copy by campaign name. Templates carry `{price}` and `{title}`, resolved
+per product at render time (`{price}` in fr-CA, `79,99 $`). A campaign absent from the map
+falls back to `MESSAGES`, so `patio-ete-2026` renders byte-identically to before.
+
+`--skus a,b,c` replaces discovery with an explicit list. This was the other half of the block:
+every discovery query is patio-scoped (`patioByVelocity`, `patioClipSkus`) or `video_ugc`-scoped,
+so a seasonal campaign came back empty from all of them however the SKUs were spelled. Per-asset
+checks still run — demand-gen throws on a missing clip, hero skips a product with no
+cdn.shopify image — but the patio and lifestyle-verified gates do not, because the operator
+picked the products.
+
+### Added — sequential ads now carry the brand signature
+
+`renderDemandGen` draws the same lower-third as `scripts/render-ugc-branded-batch.mjs`: navy
+`#1A2340` at 0.65 over the bottom 170px, white logo plate at x=44, gold `ameublodirect.ca`
+right-aligned. Same geometry and colours, so a sequential ad and a branded UGC clip read as
+one brand in the feed instead of two unrelated formats from the same account.
+
+The logo enters as ffmpeg input `[2]`, not `[1]`: the music is `[1]` and the audio graph
+references `[1:a]`, so appending keeps every existing stream index valid. Messages centre on
+H/2 and a 4-line block bottoms out near y=1220, clear of the bar at y=1750.
+
+### Added — re-rendering a campaign no longer discards its schedule
+
+`--replace` re-points an existing draft at a freshly rendered blob in place, keeping id, slot
+and status. Without it a second run goes through `pickSlot`, which cancels the old row and
+books a NEW slot: right for a first run, wrong for a re-render, where it leaves the campaign
+as cancelled rows plus new ids on new dates and silently throws away whatever dates an
+operator chose. Superseded blobs are reported, never auto-deleted — a draft mid-review is
+safer with its old asset still resolvable.
+
+Dry-run prints the resolved copy per SKU: `{price}` substitution is the one thing you cannot
+verify after the fact without re-watching the MP4.
+
+### Fixed
+
+- `--skus` no longer upper-cases the operator's SKUs. Those strings are the canonical SKU
+  downstream (`productsBySkus` compares with case-sensitive SQLite `=`, the clip path embeds
+  them, and so does `content_id`), so with `--replace` a casing mismatch would have failed to
+  match the existing `content_id` and inserted a duplicate instead of replacing. Latent — the
+  catalog has no lower-case SKUs — and the normalisation bought nothing.
+- The first `--skus` implementation filtered after `--limit` had already truncated the
+  candidate list, so a 3-SKU themed run silently rendered nothing.
+
 ## [0.5.72.0] - 2026-08-30
 
 Sold-out variants can no longer be bought when a sibling variant is still in stock.
