@@ -65,11 +65,15 @@ const REPLACE = argv.includes("--replace");
 // so every quality gate the style enforces still applies — this only narrows).
 // Needed for themed campaigns: the UGC selector returns every SKU that has a clip,
 // with no notion of Halloween or Christmas.
-const SKU_FILTER: Set<string> | null = (() => {
+// Casing is preserved verbatim. These strings become the canonical SKU downstream:
+// productsBySkus compares with SQLite `=` (case-sensitive on TEXT), the clip path is
+// `${CLIP_DIR}/${sku}.mp4`, and content_id embeds it — so upper-casing here would make a
+// --replace run miss the existing content_id and insert a duplicate instead of replacing.
+const SKU_FILTER: string[] | null = (() => {
   const raw = flag("--skus");
   if (!raw) return null;
-  const set = new Set(raw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean));
-  return set.size ? set : null;
+  const list = [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
+  return list.length ? list : null;
 })();
 const LIMIT = flag("--limit") ? Number(flag("--limit")) : STYLE === "hero" ? 50 : UGC ? 50 : 12;
 
