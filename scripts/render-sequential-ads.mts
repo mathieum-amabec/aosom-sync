@@ -16,6 +16,17 @@
  * then enqueues a status='draft' row (approve in /sequential-ads to schedule; the
  * existing hourly publisher drains it). Dry-run by default; --apply renders + writes.
  *
+ * Copy is per-campaign (CAMPAIGN_COPY). A campaign with no entry renders the default
+ * MESSAGES, so existing campaigns are unchanged. Campaign templates may carry {price}
+ * and {title}, resolved per product — that is what makes a themed offer ad possible
+ * instead of one generic liquidation slate for the whole catalog.
+ *
+ * --skus a,b,c REPLACES discovery with an explicit list. Themed campaigns need it: every
+ * discovery query here is patio-scoped or video_ugc-scoped, so a Halloween or Christmas
+ * campaign comes back empty from all of them. Per-asset checks still run (demand-gen
+ * throws on a missing clip, hero skips a product with no cdn.shopify image), but the
+ * patio/lifestyle-verified gates do not — the operator picked the products.
+ *
  * Run from the MAIN clone under x64 Node with prod creds + WinGet ffmpeg. src/audio +
  * the demand-gen clips (src/{sku}.mp4) are gitignored but present in the main clone, so
  * MUSIC + CLIP_DIR default there — only FFMPEG_BIN is needed (SEQ_MUSIC / SEQ_CLIP_DIR
@@ -47,6 +58,16 @@ const CAMPAIGN = flag("--campaign") ?? "patio-ete-2026";
 // --ugc: demand-gen sources the authentic Aosom customer/UGC reels (products.video_ugc,
 // clips in src/ugc/) instead of the patio -WEB-NT clips. Any product_type, no LV/patio gate.
 const UGC = argv.includes("--ugc");
+// --skus a,b,c: restrict the run to these SKUs (applied AFTER the normal selection,
+// so every quality gate the style enforces still applies — this only narrows).
+// Needed for themed campaigns: the UGC selector returns every SKU that has a clip,
+// with no notion of Halloween or Christmas.
+const SKU_FILTER: Set<string> | null = (() => {
+  const raw = flag("--skus");
+  if (!raw) return null;
+  const set = new Set(raw.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean));
+  return set.size ? set : null;
+})();
 const LIMIT = flag("--limit") ? Number(flag("--limit")) : STYLE === "hero" ? 50 : UGC ? 50 : 12;
 
 const FFMPEG = process.env.FFMPEG_BIN ||
@@ -58,12 +79,59 @@ const CLIP_DIR = process.env.SEQ_CLIP_DIR || (UGC ? "src/ugc" : "src");
 const FONT = process.env.SEQ_FONT || "fonts/DMSans.ttf";
 const NAVY = "0x1A2340";
 
+/** Default copy — what every campaign used before per-campaign copy existed. */
 const MESSAGES = [
   "GRANDE LIQUIDATION DE MOBILIER D'EXTÉRIEUR",
   "À PRIX IMBATTABLES",
   "LIVRAISON GRATUITE AU CANADA",
   "MAGASINEZ SUR AMEUBLODIRECT.CA",
 ];
+
+/**
+ * Per-campaign message copy. A campaign absent from this map keeps MESSAGES, so
+ * every existing campaign renders byte-identically to before.
+ *
+ * Tokens resolved per product at render time (see resolveMessages):
+ *   {price}  → the product's price, fr-CA formatted with the currency sign ("79,99 $")
+ *   {title}  → the FR product title
+ *
+ * Keep each message under ~72 characters: the renderer uppercases, wraps at 18
+ * characters and caps at 4 lines, so anything longer is silently truncated.
+ */
+const CAMPAIGN_COPY: Record<string, string[]> = {
+  "halloween-2026": [
+    "TES VOISINS VONT CHANGER DE TROTTOIR",
+    "{price} LIVRÉ CHEZ VOUS",
+    "LIVRAISON GRATUITE PARTOUT AU CANADA",
+    "COMMANDE AVANT LE 31 OCTOBRE",
+  ],
+  "noel-2026": [
+    "LE PARFAIT CADEAU DE NOËL",
+    "{price} LIVRÉ CHEZ VOUS",
+    "LIVRAISON GRATUITE AVANT LES FÊTES",
+    "COMMANDE AVANT LE 15 DÉCEMBRE",
+  ],
+};
+
+const priceFr = (n: number): string =>
+  new Intl.NumberFormat("fr-CA", { style: "currency", currency: "CAD", currencyDisplay: "narrowSymbol" })
+    .format(n)
+    .replace(/ /g, " ");
+
+/** The 4 messages for one product: campaign copy if defined, else the default. */
+function resolveMessages(price: number | undefined, title: string): string[] {
+  const tpl = CAMPAIGN_COPY[CAMPAIGN] ?? MESSAGES;
+  return tpl.map((m) =>
+    m
+      // A campaign template that asks for {price} on a product with no price would
+      // render the literal token on screen. Drop the message instead of shipping it.
+      .replace(/\{price\}/g, Number.isFinite(price) ? priceFr(price as number) : "")
+      .replace(/\{title\}/g, title)
+      .replace(/\s{2,}/g, " ")
+      .trim(),
+  );
+}
+
 const BRAND = "ameublo" as const;
 
 // ── dynamic engine imports (circular-graph safe under tsx) ────────────────
@@ -233,11 +301,11 @@ function runFfmpegSpawn(args: string[]): Promise<void> {
 const FPS = 30, PER_SLIDE = 4.0, XFADE = 0.4;
 
 /** Style A: 4 hero messages over up to 4 cdn.shopify photos of one product. */
-async function renderHero(images: string[], outFile: string, lib: Lib): Promise<void> {
+async function renderHero(images: string[], outFile: string, lib: Lib, messages: string[]): Promise<void> {
   const sharp = (await import("sharp")).default;
   const dims = lib.ratioDimensions("9:16");
   const navyHex = lib.VIDEO_BRAND.colors.navy;
-  const n = MESSAGES.length;
+  const n = messages.length;
   const pics = Array.from({ length: n }, (_, i) => images[i % images.length]); // cycle if <4 angles
   const durations = Array.from({ length: n }, () => PER_SLIDE);
   const totalSec = n * PER_SLIDE - (n - 1) * XFADE;
@@ -252,7 +320,7 @@ async function renderHero(images: string[], outFile: string, lib: Lib): Promise<
       } catch {
         await sharp({ create: { width: dims.width, height: dims.height, channels: 3, background: navyHex } }).png().toFile(pp);
       }
-      await sharp(Buffer.from(heroSvg(MESSAGES[i], dims, lib))).png().toFile(tp);
+      await sharp(Buffer.from(heroSvg(messages[i], dims, lib))).png().toFile(tp);
       photos.push(pp); texts.push(tp);
     }
     const { filterComplex, videoLabel, audioLabel } = lib.buildXfadeFilterComplex({
@@ -273,8 +341,8 @@ async function renderHero(images: string[], outFile: string, lib: Lib): Promise<
 }
 
 /** Style B: 4 timed messages over a live-action clip (blurred-fill 9:16). */
-function renderDemandGen(sku: string, outFile: string): void {
-  const W = 1080, H = 1920, effDur = 15, seg = effDur / MESSAGES.length;
+function renderDemandGen(sku: string, outFile: string, messages: string[]): void {
+  const W = 1080, H = 1920, effDur = 15, seg = effDur / messages.length;
   const src = `${CLIP_DIR}/${sku}.mp4`;
   if (!fs.existsSync(src)) throw new Error(`clip missing: ${src}`);
   // drawtext `textfile=` must be a RELATIVE forward-slash path: an absolute Windows
@@ -289,7 +357,7 @@ function renderDemandGen(sku: string, outFile: string): void {
       `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease,setsar=1[fg];` +
       `[bg][fg]overlay=(W-w)/2:(H-h)/2[base]`;
     const draws: string[] = [];
-    MESSAGES.forEach((msg, m) => {
+    messages.forEach((msg, m) => {
       const start = m * seg, end = (m + 1) * seg;
       const lines = wrap(up(msg), 18, 4);
       const fsz = fitFont(lines), spacing = Math.round(fsz * 1.25), bw = Math.max(2, Math.round(fsz * 0.06));
@@ -378,7 +446,17 @@ async function main(): Promise<void> {
   const lvSkus = UGC ? new Set<string>() : await lifestyleVerifiedSkus();
   if (!UGC) console.log(`lifestyle-verified SKUs on Shopify: ${lvSkus.size}`);
   let skus: string[];
-  if (UGC) {
+  if (SKU_FILTER) {
+    // Explicit selection REPLACES discovery. The discovery queries are patio-scoped
+    // (patioByVelocity / patioClipSkus) or video_ugc-scoped, so narrowing them can only
+    // ever return a subset of patio/UGC — a Christmas or Halloween campaign would come
+    // back empty no matter how the SKUs were spelled. When an operator hands over a SKU
+    // list they have already made the selection; discovery has nothing left to decide.
+    // The per-asset checks still run below: demand-gen throws if the clip is missing,
+    // hero skips a product with no cdn.shopify image.
+    skus = [...SKU_FILTER];
+    console.log(`--skus: explicit selection of ${skus.length} SKU(s) — discovery gates bypassed`);
+  } else if (UGC) {
     const clips = await ugcClipSkus();
     skus = clips.slice(0, LIMIT);
     console.log(`UGC clips (products.video_ugc set + present in ${CLIP_DIR}): ${clips.length} → using ${skus.length}`);
@@ -410,6 +488,11 @@ async function main(): Promise<void> {
     for (const sku of skus) {
       const p = bySku.get(sku);
       const title = (p?.title_fr || p?.title_en || sku) as string;
+      const msgs = resolveMessages(p?.price, title);
+      // Dry-run prints the resolved copy: {price} substitution is the whole point of a
+      // themed campaign and it is the one thing you cannot check after the fact without
+      // re-watching the MP4.
+      if (!APPLY) console.log(`  ${sku} copy: ${msgs.map((m) => `"${m}"`).join(" | ")}`);
       try {
         // Render locally first, THEN reserve a slot, THEN upload — so a slotless run
         // never leaves a blob in the store with no queue row pointing at it.
@@ -420,10 +503,10 @@ async function main(): Promise<void> {
           images = imgs.length;
           if (imgs.length === 0) { report.push({ sku, title, images: 0, status: "skip (no cdn.shopify image)" }); continue; }
           if (!APPLY) { report.push({ sku, title, images: imgs.length, status: "dry-run" }); continue; }
-          await renderHero(imgs.slice(0, 4), out, lib);
+          await renderHero(imgs.slice(0, 4), out, lib, msgs);
         } else {
           if (!APPLY) { report.push({ sku, title, status: "dry-run" }); continue; }
-          renderDemandGen(sku, out);
+          renderDemandGen(sku, out, msgs);
         }
         const slot = await pickSlot(lib, sku, occupied);
         if (!slot) {
