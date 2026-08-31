@@ -58,6 +58,9 @@ const CAMPAIGN = flag("--campaign") ?? "patio-ete-2026";
 // --ugc: demand-gen sources the authentic Aosom customer/UGC reels (products.video_ugc,
 // clips in src/ugc/) instead of the patio -WEB-NT clips. Any product_type, no LV/patio gate.
 const UGC = argv.includes("--ugc");
+// --replace: re-render an existing campaign in place. Without it, a second run cancels the
+// old drafts and books new slots, discarding whatever schedule an operator already chose.
+const REPLACE = argv.includes("--replace");
 // --skus a,b,c: restrict the run to these SKUs (applied AFTER the normal selection,
 // so every quality gate the style enforces still applies — this only narrows).
 // Needed for themed campaigns: the UGC selector returns every SKU that has a clip,
@@ -77,7 +80,12 @@ const MUSIC = process.env.SEQ_MUSIC || path.resolve(process.cwd(), "src/audio/si
 // -WEB-NT no-text clips downloaded there). Override with SEQ_CLIP_DIR if elsewhere.
 const CLIP_DIR = process.env.SEQ_CLIP_DIR || (UGC ? "src/ugc" : "src");
 const FONT = process.env.SEQ_FONT || "fonts/DMSans.ttf";
+const LOGO = process.env.SEQ_LOGO || "Logo/officiel-transparent.png";
 const NAVY = "0x1A2340";
+const GOLD = "0xD4A853";
+// Lower-third brand bar — same geometry and colours as scripts/render-ugc-branded-batch.mjs
+// so a sequential ad and a branded UGC clip carry an identical signature in the feed.
+const BAR_H = 170;
 
 /** Default copy — what every campaign used before per-campaign copy existed. */
 const MESSAGES = [
@@ -351,11 +359,24 @@ function renderDemandGen(sku: string, outFile: string, messages: string[]): void
   const lineDir = `tmp_seqdg/${sku.replace(/[^A-Za-z0-9._-]/g, "_")}`;
   fs.mkdirSync(lineDir, { recursive: true });
   try {
+    // Brand bar sits UNDER the message drawtexts. The messages centre on H/2 and a
+    // 4-line block bottoms out around y≈1220, well clear of the bar at y=1750, so the
+    // two never collide.
+    const barY = H - BAR_H;
+    const plateH = 88, plateW = 340, plateY = barY + Math.round((BAR_H - plateH) / 2);
+    const urlY = barY + Math.round((BAR_H - 46) / 2) - 4;
     const base =
       `[0:v]split=2[a][b];` +
       `[a]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=24:4,setsar=1[bg];` +
       `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease,setsar=1[fg];` +
-      `[bg][fg]overlay=(W-w)/2:(H-h)/2[base]`;
+      `[bg][fg]overlay=(W-w)/2:(H-h)/2[bs];` +
+      `[bs]drawbox=x=0:y=${barY}:w=${W}:h=${BAR_H}:color=${NAVY}@0.65:t=fill[bar];` +
+      // Logo is input [2] on purpose: the music is [1] and [1:a] is referenced below,
+      // so appending the logo keeps every existing stream index valid.
+      `[2:v]scale=300:-1[logo_s];color=white@0.92:size=${plateW}x${plateH}:r=30[plate];` +
+      `[plate][logo_s]overlay=(W-w)/2:(H-h)/2:shortest=1[lb];` +
+      `[bar][lb]overlay=44:${plateY}[wl];` +
+      `[wl]drawtext=fontfile=${FONT}:text=ameublodirect.ca:fontcolor=${GOLD}:fontsize=46:borderw=1:bordercolor=black@0.4:x=W-text_w-56:y=${urlY}[base]`;
     const draws: string[] = [];
     messages.forEach((msg, m) => {
       const start = m * seg, end = (m + 1) * seg;
@@ -375,7 +396,7 @@ function renderDemandGen(sku: string, outFile: string, messages: string[]): void
     const audioGraph = `[1:a]volume=0.25,afade=t=in:d=1,afade=t=out:st=${Math.max(0, effDur - 1).toFixed(3)}:d=1[aout]`;
     const args = [
       "-y", "-nostdin", "-loglevel", "error", "-ss", "3", "-i", src,
-      "-stream_loop", "-1", "-i", MUSIC, "-t", String(effDur),
+      "-stream_loop", "-1", "-i", MUSIC, "-i", LOGO, "-t", String(effDur),
       "-filter_complex", `${videoGraph};${audioGraph}`, "-map", "[vout]", "-map", "[aout]",
       "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "high", "-crf", "20", "-preset", "medium",
       "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", outFile,
@@ -419,6 +440,36 @@ async function pickSlot(lib: Lib, sku: string, occupied: number[]): Promise<{ co
   const slot = await lib.getNextAvailableSlot("facebook", {}, { nowSec, occupied, schedule: videoSchedule, contentType: "sequential_ad" });
   if (!slot) return null;
   return { contentId, sqlite: slot.sqlite, at: slot.at };
+}
+
+/** The existing draft for this SKU's content_id, if there is one. */
+async function findExistingDraft(sku: string): Promise<{ id: number; contentId: string; scheduledAt: string; payload: string } | null> {
+  const contentId = `seqad:${STYLE_KEY}:${CAMPAIGN}:${sku}`;
+  const r = await direct().execute({
+    sql: `SELECT id, scheduled_at, payload FROM publication_queue
+          WHERE content_type='sequential_ad' AND content_id=? AND status='draft' LIMIT 1`,
+    args: [contentId],
+  });
+  const row = r.rows[0];
+  if (!row) return null;
+  return { id: Number(row.id), contentId, scheduledAt: String(row.scheduled_at), payload: String(row.payload) };
+}
+
+/**
+ * Re-point an existing draft at a freshly rendered blob, in place.
+ *
+ * The insert path goes through pickSlot, which cancels the old row and books a NEW slot —
+ * correct for a first run, wrong for a re-render: it would leave the campaign as a pile of
+ * cancelled rows plus new ids on new dates, silently discarding an operator's chosen
+ * schedule. Replacing keeps the id, the slot and the status, and changes only the asset.
+ */
+async function replaceDraftVideo(id: number, prevPayload: string, caption: string, blobUrl: string): Promise<string> {
+  const prev = JSON.parse(prevPayload) as { reelsVideoUrl?: string };
+  await direct().execute({
+    sql: `UPDATE publication_queue SET payload=? WHERE id=? AND status='draft'`,
+    args: [JSON.stringify({ caption, brand: BRAND, reelsVideoUrl: blobUrl }), id],
+  });
+  return prev.reelsVideoUrl ?? "";
 }
 
 /** Insert the draft row for an already-reserved slot + uploaded blob. */
@@ -477,6 +528,10 @@ async function main(): Promise<void> {
   const bySku = new Map(products.map((p) => [String(p.sku), p]));
 
   const report: { sku: string; title: string; images?: number; queueId?: number; slot?: string; status: string }[] = [];
+  // Superseded blobs: the uploader mints a new Date.now() name every run, so the previous
+  // asset stays in the store unreferenced. Reported, never auto-deleted — a draft that is
+  // mid-review is safer with its old asset still resolvable.
+  const orphaned: string[] = [];
   const OUT_TMP = fs.mkdtempSync(path.join(process.env.TEMP || ".", "seqout-"));
   // Seed occupancy from already-scheduled sequential-ad slots so new drafts don't
   // pick a tentative slot that collides with a previously-approved pending post.
@@ -508,13 +563,21 @@ async function main(): Promise<void> {
           if (!APPLY) { report.push({ sku, title, status: "dry-run" }); continue; }
           renderDemandGen(sku, out, msgs);
         }
-        const slot = await pickSlot(lib, sku, occupied);
-        if (!slot) {
-          report.push({ sku, title, images, status: "rendered (no slot)" });
-        } else {
+        const existing = REPLACE ? await findExistingDraft(sku) : null;
+        if (existing) {
           const url = await uploadBlob(out, sku);
-          const queueId = await insertDraft(lib, slot, title, url, occupied);
-          report.push({ sku, title, images, queueId, slot: slot.sqlite, status: "draft" });
+          const orphan = await replaceDraftVideo(existing.id, existing.payload, title, url);
+          if (orphan) orphaned.push(orphan);
+          report.push({ sku, title, images, queueId: existing.id, slot: existing.scheduledAt, status: "replaced" });
+        } else {
+          const slot = await pickSlot(lib, sku, occupied);
+          if (!slot) {
+            report.push({ sku, title, images, status: "rendered (no slot)" });
+          } else {
+            const url = await uploadBlob(out, sku);
+            const queueId = await insertDraft(lib, slot, title, url, occupied);
+            report.push({ sku, title, images, queueId, slot: slot.sqlite, status: "draft" });
+          }
         }
         console.log(`  ✓ ${sku.padEnd(14)} ${report[report.length - 1].status.padEnd(20)} ${title}`);
       } catch (err) {
@@ -529,6 +592,10 @@ async function main(): Promise<void> {
 
   console.log(`\n=== RÉCAP (${report.length}) — style=${STYLE} ===`);
   for (const r of report) console.log(`${r.sku.padEnd(14)} q=${String(r.queueId ?? "-").padEnd(5)} ${r.status.padEnd(22)} ${r.title}`);
+  if (orphaned.length) {
+    console.log(`\n${orphaned.length} blob(s) superseded and now unreferenced (delete when the campaign is approved):`);
+    for (const u of orphaned) console.log(`  ${u}`);
+  }
   if (!APPLY) console.log(`\nDry-run. Re-run with --apply to render + upload + enqueue drafts.`);
   else console.log(`\nApprouve les brouillons dans /sequential-ads.`);
 }
