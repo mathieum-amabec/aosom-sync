@@ -10,18 +10,18 @@ const feed = (entries: Array<[string, number]>) => new Map(entries.map(([s, q]) 
 describe("planInventorySweep — feed-aware reconcile", () => {
   it("targets 0 for a tracked variant absent from the feed (inv>0)", () => {
     const plan = planInventorySweep({ variants: [v("A", 7)], feedQty: feed([["B", 50]]), soldOutMax: 10, minCoverage: 0 });
-    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 7, to: 0 }]);
+    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 7, to: 0, enableTracking: false }]);
   });
 
   it("targets 0 when feed_qty <= threshold", () => {
     const plan = planInventorySweep({ variants: [v("A", 19)], feedQty: feed([["A", 8]]), soldOutMax: 10 });
-    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 19, to: 0 }]);
+    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 19, to: 0, enableTracking: false }]);
   });
 
   it("RESTORES a wrongly-zeroed variant that is back in the feed (self-heal)", () => {
     // inv 0 but feed_qty 40 → target stockBufferQty(40)=37 → restore 0→37
     const plan = planInventorySweep({ variants: [v("A", 0)], feedQty: feed([["A", 40]]), soldOutMax: 10 });
-    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 0, to: 37 }]);
+    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 0, to: 37, enableTracking: false }]);
   });
 
   it("no write when Shopify already matches the buffered feed target", () => {
@@ -39,7 +39,7 @@ describe("planInventorySweep — feed-aware reconcile", () => {
   it("CORRECTS an over-count downward (Shopify above the buffered cap → tighten)", () => {
     // Shopify 39 vs feed 16 → buffered target 13. 13 < 39 → write 39→13 (stop the oversell).
     const plan = planInventorySweep({ variants: [v("A", 39)], feedQty: feed([["A", 16]]), soldOutMax: 10 });
-    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 39, to: 13 }]);
+    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 39, to: 13, enableTracking: false }]);
   });
 
   it("no write when absent AND already 0 (idempotent)", () => {
@@ -47,10 +47,95 @@ describe("planInventorySweep — feed-aware reconcile", () => {
     expect(plan.toSet).toEqual([]);
   });
 
-  it("does NOT touch an untracked variant (can't set inventory)", () => {
+  // ── Untracked variants (`inventory_management: null`) ──────────────────────
+  // Shopify ignores their quantity, so they sell forever whatever the number says and
+  // whatever inventory_policy is. Capping one REQUIRES turning tracking on first.
+
+  it("CAPS an untracked variant absent from the feed (enable tracking, then 0)", () => {
     const plan = planInventorySweep({ variants: [v("A", 7, { tracked: false })], feedQty: feed([["B", 50]]), soldOutMax: 10 });
+    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 7, to: 0, enableTracking: true }]);
+  });
+
+  it("CAPS an untracked variant whose feed qty is at/below the sold-out threshold", () => {
+    const plan = planInventorySweep({ variants: [v("A", 42, { tracked: false })], feedQty: feed([["A", 9]]), soldOutMax: 10 });
+    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 42, to: 0, enableTracking: true }]);
+  });
+
+  it("CAPS an untracked variant already showing 0 — the count is meaningless while untracked", () => {
+    // The regression that let A2-0054 sell: Shopify reported 0, and the old plan skipped it
+    // because 0 is not < 0. Untracked means the number is decorative; it still sells.
+    const plan = planInventorySweep({ variants: [v("A", 0, { tracked: false })], feedQty: feed([["B", 50]]), soldOutMax: 10 });
+    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: 0, to: 0, enableTracking: true }]);
+  });
+
+  it("CAPS an untracked variant already oversold to a negative count", () => {
+    const plan = planInventorySweep({ variants: [v("A", -1, { tracked: false })], feedQty: feed([["B", 50]]), soldOutMax: 10 });
+    expect(plan.toSet).toEqual([{ sku: "A", inventoryItemId: "i-A", from: -1, to: 0, enableTracking: true }]);
+  });
+
+  it("LEAVES a healthy untracked variant untracked (never freeze a sellable one on a 06:00 number)", () => {
+    const plan = planInventorySweep({ variants: [v("A", 0, { tracked: false })], feedQty: feed([["A", 40]]), soldOutMax: 10 });
     expect(plan.toSet).toEqual([]);
-    expect(plan.guard.activeTracked).toBe(0); // untracked excluded from coverage denominator
+  });
+
+  it("untracked variants stay out of the coverage denominator", () => {
+    const plan = planInventorySweep({ variants: [v("A", 7, { tracked: false })], feedQty: feed([["B", 50]]), soldOutMax: 10 });
+    expect(plan.guard.activeTracked).toBe(0);
+  });
+
+  it("caps a sold-out variant while its in-stock sibling keeps selling (A2-0054 regression)", () => {
+    // Same Shopify product, two variants. Red vanished from the feed and is untracked;
+    // Black is tracked and healthy. Only Red may be written — no product-level action.
+    const red = v("A2-0054", -1, { tracked: false });
+    const black = v("A2-0051", 110, { tracked: true });
+    const plan = planInventorySweep({ variants: [red, black], feedQty: feed([["A2-0051", 113]]), soldOutMax: 10 });
+    expect(plan.toSet).toEqual([
+      { sku: "A2-0054", inventoryItemId: "i-A2-0054", from: -1, to: 0, enableTracking: true },
+    ]);
+  });
+
+  it("skips a variant with no inventory_item_id even when untracked", () => {
+    const plan = planInventorySweep({ variants: [v("A", 7, { tracked: false, item: "" })], feedQty: feed([["B", 50]]), soldOutMax: 10 });
+    expect(plan.toSet).toEqual([]);
+  });
+
+  it("guard scores a tracked variant already capped at 0 as covered (it is SUPPOSED to be absent)", () => {
+    // 5 sellable tracked, 4 in the feed. 20 dead ones at 0, all absent. Dead stock must not
+    // drag coverage to 4/25 = 0.16 and trip the guard: (4 + 20) / 25 = 0.96.
+    const sellable = ["A", "B", "C", "D", "E"].map((s) => v(s, 20));
+    const dead = Array.from({ length: 20 }, (_, i) => v(`D${i}`, 0));
+    const plan = planInventorySweep({
+      variants: [...sellable, ...dead],
+      feedQty: feed([["A", 40], ["B", 40], ["C", 40], ["D", 40]]),
+      soldOutMax: 10,
+    });
+    expect(plan.guard.activeTracked).toBe(25);
+    expect(plan.guard.coverage).toBeCloseTo(0.96);
+    expect(plan.guard.ok).toBe(true);
+  });
+
+  it("guard still trips when SELLABLE tracked variants go missing from the feed", () => {
+    // The signal that matters: 20 sellable tracked, only 6 in the feed, plus 5 dead at 0.
+    // (6 + 5) / 25 = 0.44 → trip. Dead stock cannot mask a truncated feed.
+    const sellable = Array.from({ length: 20 }, (_, i) => v(`S${i}`, 20));
+    const dead = Array.from({ length: 5 }, (_, i) => v(`D${i}`, 0));
+    const plan = planInventorySweep({
+      variants: [...sellable, ...dead],
+      feedQty: feed(Array.from({ length: 6 }, (_, i) => [`S${i}`, 40] as [string, number])),
+      soldOutMax: 10,
+    });
+    expect(plan.guard.coverage).toBeCloseTo(0.44);
+    expect(plan.guard.ok).toBe(false);
+    expect(plan.toSet).toEqual([]);
+  });
+
+  it("guard sample never collapses when every tracked variant sits at 0", () => {
+    // Degenerate case a sellable-only denominator would break: activeTracked would be 0,
+    // coverage would default to 1, and a truncated feed would sail through the guard while
+    // the untracked population got mass-zeroed. Full denominator keeps the sample alive.
+    const dead = Array.from({ length: 30 }, (_, i) => v(`D${i}`, 0));
+    const plan = planInventorySweep({ variants: dead, feedQty: feed([]), soldOutMax: 10 });
+    expect(plan.guard.activeTracked).toBe(30);
   });
 
   it("skips a variant with no inventory_item_id", () => {
@@ -213,5 +298,48 @@ describe("runInventorySweep — I/O wiring (injected deps)", () => {
     expect(res.zeroed).toBe(0);
     expect(res.restored).toBe(0);
     expect(deps.getLocation).not.toHaveBeenCalled();
+  });
+
+  it("enables tracking BEFORE writing the level on an untracked variant", async () => {
+    // Order matters: setInventoryLevel on an untracked item is a silent no-op, so a write
+    // that lands first would report success while the variant stays sellable.
+    const order: string[] = [];
+    const deps = {
+      ...baseDeps([v("DEAD", 0, { tracked: false }), ...fillers(8)], fillerFeed(8)),
+      enableTracking: vi.fn(async (id: string) => { order.push(`track:${id}`); }),
+    };
+    deps.setInventory.mockImplementation(async (id: string, _loc: string, avail: number) => {
+      order.push(`set:${id}=${avail}`);
+    });
+    const res = await runInventorySweep(deps);
+    expect(deps.enableTracking).toHaveBeenCalledWith("i-DEAD");
+    expect(order).toEqual(["track:i-DEAD", "set:i-DEAD=0"]);
+    expect(res.trackingEnabled).toBe(1);
+    expect(res.zeroed).toBe(1);
+  });
+
+  it("does not enable tracking on variants that are already tracked", async () => {
+    const deps = {
+      ...baseDeps([v("GONE", 12), ...fillers(8)], fillerFeed(8)),
+      enableTracking: vi.fn(async () => {}),
+    };
+    const res = await runInventorySweep(deps);
+    expect(deps.enableTracking).not.toHaveBeenCalled();
+    expect(res.trackingEnabled).toBe(0);
+    expect(res.zeroed).toBe(1);
+  });
+
+  it("a failed enableTracking counts as a failure and never writes the level", async () => {
+    // Fail closed: if tracking can't be turned on, writing 0 would be a no-op reported as
+    // success and the variant would keep selling. Better to count it and alert on the trend.
+    const deps = {
+      ...baseDeps([v("DEAD", 0, { tracked: false }), ...fillers(8)], fillerFeed(8)),
+      enableTracking: vi.fn(async () => { throw new Error("403 write_inventory"); }),
+    };
+    const res = await runInventorySweep(deps);
+    expect(res.failed).toBe(1);
+    expect(res.zeroed).toBe(0);
+    expect(res.trackingEnabled).toBe(0);
+    expect(deps.setInventory).not.toHaveBeenCalledWith("i-DEAD", "loc-1", 0);
   });
 });

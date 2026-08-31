@@ -6,7 +6,13 @@
  * the feed — or dropped low — but didn't "change" is never re-pushed, and its Shopify
  * inventory stays frozen while inventory_policy=deny waits for a 0 that never comes.
  *
- * This sweep is feed-aware and covers EVERY active tracked variant, not just changed ones.
+ * This sweep is feed-aware and covers EVERY active variant, not just changed ones — including
+ * UNTRACKED ones (`inventory_management: null`, the legacy dropship default). Those are the
+ * dangerous case: Shopify ignores their quantity, so they sell forever regardless of the number
+ * on the variant and regardless of `inventory_policy: deny`. When the feed says such a variant
+ * is sold out, the sweep switches tracking on and then writes 0 — the only sequence that
+ * actually stops the sale. Sold-out A2-0054 shipping -1 units while its in-stock sibling
+ * A2-0051 sold normally is the incident this covers.
  * It is a DOWNWARD-SAFE reconcile toward the buffered target stockBufferQty(feed_qty) — the
  * same target the daily push computes:
  *   absent / feed_qty <= STOCK_SOLD_OUT_MAX → 0            (deny blocks the sale)
@@ -31,6 +37,7 @@
 import { STOCK_SOLD_OUT_MAX, stockBufferQty } from "@/lib/diff-engine";
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import {
+  enableVariantTracking,
   fetchActiveVariantInventory,
   getPrimaryLocationId,
   readInventoryLevels,
@@ -64,8 +71,10 @@ export interface SweepVariant {
 
 export interface InventorySweepPlan {
   guard: { activeTracked: number; covered: number; coverage: number; ok: boolean };
-  /** Variants whose Shopify inventory != buffered feed target (to = 0 for sold-out/absent, else buffered). */
-  toSet: Array<{ sku: string; inventoryItemId: string; from: number; to: number }>;
+  /** Variants whose Shopify inventory != buffered feed target (to = 0 for sold-out/absent, else buffered).
+   *  `enableTracking` marks an UNTRACKED variant that must have Shopify tracking turned on before the
+   *  level can be set — without it the write is a no-op and the variant stays permanently sellable. */
+  toSet: Array<{ sku: string; inventoryItemId: string; from: number; to: number; enableTracking: boolean }>;
 }
 
 /** The feed-derived Shopify inventory target for one variant. */
@@ -91,14 +100,27 @@ export function planInventorySweep(input: {
   const minCoverage = input.minCoverage ?? MIN_ACTIVE_COVERAGE;
   const feedHas = (sku: string) => input.feedQty.has(sku.toUpperCase());
 
-  // Feed-completeness guard over active TRACKED variant SKUs (only those a truncated feed
-  // could falsely make "absent"). Below the floor → no writes at all.
+  // Feed-completeness guard over active TRACKED variant SKUs. Below the floor → no writes.
+  //
+  // A variant counts as "covered" when the feed carries it OR when it is already capped at 0.
+  // That second clause is load-bearing, not cosmetic. A variant sitting at 0 is a discontinued
+  // one that is SUPPOSED to be absent from the feed, so scoring it as missing measures catalog
+  // age, not feed health. Without the clause coverage decays as dead stock accumulates — and
+  // this sweep now newly enables tracking on dead untracked variants (see below), which moves
+  // that population into the tracked pool and would drive coverage under the 0.70 floor within
+  // days, tripping the guard and disabling ALL oversell protection.
+  //
+  // Counting them in the NUMERATOR rather than dropping them from the denominator is deliberate:
+  // filtering to sellable-only would shrink the sample, and in the degenerate case where every
+  // tracked variant sits at 0 (the morning after a mass-zero, or early in this migration) the
+  // denominator would hit 0, coverage would default to 1, and a truncated feed would sail
+  // straight through the guard. Keeping the full denominator means the sample never collapses.
   let activeTracked = 0;
   let covered = 0;
   for (const v of input.variants) {
     if (!v.tracked) continue;
     activeTracked++;
-    if (feedHas(v.sku)) covered++;
+    if (feedHas(v.sku) || v.inventoryQuantity <= 0) covered++;
   }
   const coverage = activeTracked === 0 ? 1 : covered / activeTracked;
   const ok = coverage >= minCoverage;
@@ -116,12 +138,31 @@ export function planInventorySweep(input: {
   // upward "restore" is left to the change-gated daily push, which fires on a real feed move.
   const toSet: InventorySweepPlan["toSet"] = [];
   for (const v of input.variants) {
-    if (!v.tracked || !v.inventoryItemId) continue;   // can't set inventory on an untracked/unknown item
+    if (!v.inventoryItemId) continue;                 // can't address the inventory item at all
     const to = targetInventory(v.sku, input.feedQty, soldOutMax);
     if (!Number.isFinite(to)) continue;               // bad CSV qty → NaN target; never write NaN / thrash
+
+    // UNTRACKED variant (`inventory_management: null`, the legacy dropship default from
+    // createShopifyProduct). Shopify ignores its quantity entirely, so it is sellable forever
+    // no matter what number the API reports — `inventory_policy: deny` does nothing either.
+    // The count comparisons below are therefore meaningless here: a variant sitting at 0, or
+    // even at -1 after an oversell, still sells. The ONLY way to cap it is to turn tracking on
+    // and then set the level, which is what `enableTracking` requests.
+    //
+    // We do this exactly when the feed says the variant is NOT sellable (to === 0), never on a
+    // healthy one: enabling tracking on a variant Aosom can still supply would freeze it at one
+    // buffered number and hand intraday oversell protection to a value that only moves once a
+    // day — strictly worse than leaving it untracked until it actually goes sold-out.
+    if (!v.tracked) {
+      if (to === 0) {
+        toSet.push({ sku: v.sku, inventoryItemId: v.inventoryItemId, from: v.inventoryQuantity, to, enableTracking: true });
+      }
+      continue;
+    }
+
     const tightenCap = to < v.inventoryQuantity;                        // down: stop oversell / over-count
     const healZero = v.inventoryQuantity === 0 && to > 0;              // 0→N: self-heal a transient zero
-    if (tightenCap || healZero) toSet.push({ sku: v.sku, inventoryItemId: v.inventoryItemId, from: v.inventoryQuantity, to });
+    if (tightenCap || healZero) toSet.push({ sku: v.sku, inventoryItemId: v.inventoryItemId, from: v.inventoryQuantity, to, enableTracking: false });
   }
   return { guard, toSet };
 }
@@ -135,6 +176,10 @@ export interface InventorySweepResult {
   zeroed: number;
   /** Variants set to a positive buffered qty (self-heal 0→N or drift correction N→M). */
   restored: number;
+  /** Previously-untracked variants for which Shopify tracking was switched on before the write.
+   *  These were sellable-forever until this run; the count should trend to 0 as the legacy
+   *  `inventory_management: null` population drains. */
+  trackingEnabled: number;
   failed: number;
   /** Planned writes beyond the per-run cap, deferred to the next run. */
   deferred: number;
@@ -149,6 +194,8 @@ export interface InventorySweepDeps {
   fetchVariants?: () => Promise<SweepVariant[]>;
   getLocation?: () => Promise<string>;
   setInventory?: (inventoryItemId: string, locationId: string, available: number) => Promise<void>;
+  /** Turn Shopify tracking on for an untracked variant's inventory item (idempotent). */
+  enableTracking?: (inventoryItemId: string) => Promise<void>;
   /** Re-read live inventory for the post-write canary. Returns available qty by inventory_item_id. */
   readInventory?: (inventoryItemIds: string[], locationId: string) => Promise<Map<string, number>>;
   /** Raise a dashboard notification (guard trip, canary mismatch). Defaults to createNotification. */
@@ -180,7 +227,7 @@ export async function runInventorySweep(deps: InventorySweepDeps = {}): Promise<
   const plan = planInventorySweep({ variants, feedQty });
   const empty: InventorySweepResult = {
     ran: true, guardTripped: false, coverage: plan.guard.coverage, scanned: variants.length,
-    zeroed: 0, restored: 0, failed: 0, deferred: 0, verified: 0, verifyMismatch: 0,
+    zeroed: 0, restored: 0, failed: 0, deferred: 0, verified: 0, verifyMismatch: 0, trackingEnabled: 0,
   };
 
   if (!plan.guard.ok) {
@@ -210,14 +257,24 @@ export async function runInventorySweep(deps: InventorySweepDeps = {}): Promise<
 
   const getLocation = deps.getLocation ?? getPrimaryLocationId;
   const setInventory = deps.setInventory ?? setInventoryLevel;
+  const enableTracking = deps.enableTracking ?? enableVariantTracking;
   const readInventory = deps.readInventory ?? readInventoryLevels;
   const rate = deps.rateLimitMs ?? RATE_LIMIT_MS;
   const locationId = await getLocation();
 
-  let zeroed = 0, restored = 0, failed = 0;
+  let zeroed = 0, restored = 0, failed = 0, trackingEnabled = 0;
   const written: Array<{ inventoryItemId: string; sku: string; to: number }> = [];
   for (const t of batch) {
     try {
+      // Untracked → switch tracking on FIRST; setInventoryLevel on an untracked item is a
+      // silent no-op and would leave the variant sellable while reporting success.
+      if (t.enableTracking) {
+        await enableTracking(t.inventoryItemId);
+        trackingEnabled++;
+        // Second Shopify write for this item — space it like any other, or an untracked
+        // variant would burn 2 calls per tick and push the run past the ~2 req/second budget.
+        if (rate > 0) await wait(rate);
+      }
       await setInventory(t.inventoryItemId, locationId, t.to);
       if (t.to === 0) zeroed++; else restored++;
       written.push({ inventoryItemId: t.inventoryItemId, sku: t.sku, to: t.to });
@@ -263,5 +320,5 @@ export async function runInventorySweep(deps: InventorySweepDeps = {}): Promise<
   log(`sweep terminé: ${zeroed} zéros, ${restored} restaurés/ajustés, ${failed} échecs, ${deferred} reportés, verify ${verified}/${sample.length} sur ${variants.length} variantes`, {
     coverage: plan.guard.coverage,
   });
-  return { ran: true, guardTripped: false, coverage: plan.guard.coverage, scanned: variants.length, zeroed, restored, failed, deferred, verified, verifyMismatch };
+  return { ran: true, guardTripped: false, coverage: plan.guard.coverage, scanned: variants.length, zeroed, restored, failed, deferred, verified, verifyMismatch, trackingEnabled };
 }
