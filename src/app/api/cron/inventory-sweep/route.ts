@@ -5,14 +5,17 @@ import { runInventorySweep } from "@/lib/inventory-sweep";
 
 /**
  * GET /api/cron/inventory-sweep — the catalog-wide oversell guard. Feed-aware pass over
- * EVERY active tracked Shopify variant (not just today-changed ones): reconciles each variant
+ * EVERY active Shopify variant, tracked or not (not just today-changed ones): reconciles each variant
  * DOWN toward its buffered feed target — 0 when the SKU is absent from the Aosom feed OR
  * feed_qty <= STOCK_SOLD_OUT_MAX (so inventory_policy=deny blocks the sale), else feed_qty-3.
  * Downward-safe: writes a variant down whenever Shopify sits ABOVE the cap (over-count,
  * threshold change, failed push) and self-heals a fully-zeroed variant (0→N), but never tops a
  * sold-down nonzero variant back up (that would reopen intraday oversell against the 06:00
  * feed; left to the change-gated push). Writes only on a difference → idempotent. Variant-level
- * (live siblings keep selling), no drafting. Aborts before any write if the feed covers < 70% of
+ * (live siblings keep selling), no drafting. An UNTRACKED variant (`inventory_management: null`)
+ * sells forever whatever its count says, so when the feed marks one sold out the sweep switches
+ * Shopify tracking on and then writes 0 — reported as `tracking+=N`, which should trend to zero
+ * as the legacy untracked population drains. Aborts before any write if the feed covers < 70% of
  * active tracked variants (truncated-feed guard) AND raises a dashboard notification so the abort
  * is never silent. After writing, a canary re-reads a sample of the just-written variants to
  * confirm the value stuck (notifies on mismatch). A per-run WRITE_CAP bounds blast radius
@@ -32,7 +35,7 @@ export async function GET(request: Request) {
       () => runInventorySweep(),
       (r) => (r.guardTripped
         ? `GUARD tripped (coverage ${(r.coverage * 100).toFixed(1)}%) — no writes, notified`
-        : `scanned=${r.scanned} zeroed=${r.zeroed} restored=${r.restored} failed=${r.failed}${r.deferred ? ` deferred=${r.deferred}` : ""} verify=${r.verified}/${r.verified + r.verifyMismatch}${r.verifyMismatch ? " MISMATCH" : ""}`),
+        : `scanned=${r.scanned} zeroed=${r.zeroed} restored=${r.restored}${r.trackingEnabled ? ` tracking+=${r.trackingEnabled}` : ""} failed=${r.failed}${r.deferred ? ` deferred=${r.deferred}` : ""} verify=${r.verified}/${r.verified + r.verifyMismatch}${r.verifyMismatch ? " MISMATCH" : ""}`),
     );
     return NextResponse.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {

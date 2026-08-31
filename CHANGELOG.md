@@ -2,6 +2,50 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.72.0] - 2026-08-30
+
+Sold-out variants can no longer be bought when a sibling variant is still in stock.
+
+### Fixed — the oversell guard skipped exactly the variants that needed it
+
+A Shopify variant created with `inventory_management: null` — the legacy dropship default
+still set by `createShopifyProduct` — sells forever. Shopify ignores its quantity entirely,
+and `inventory_policy: deny` does nothing, so `setInventoryLevel(0)` on one is a silent
+no-op that reports success. The daily sweep filtered these out (`if (!v.tracked) continue`)
+on the reasoning that you cannot set inventory on an untracked item. True, and precisely
+backwards: those are the only variants that are always sellable.
+
+The sweep now switches Shopify tracking on and then writes 0 whenever the feed says an
+untracked variant is sold out. Tracking is enabled first because a level written to an
+untracked item never lands. Healthy untracked variants are left alone — turning tracking on
+for one Aosom can still supply would freeze it at a number that moves once a day, which is
+worse than leaving it uncapped until it actually sells out.
+
+Found on **A2-0054** (Red chair variant): absent from the Aosom feed since 2026-07-23,
+`inventory_quantity: -1` on Shopify, still purchasable, while its sibling A2-0051 (Black,
+110 units) sold normally. A dry-run against the live feed plans 63 such writes, all
+enable-tracking-then-zero, with A2-0054 in and A2-0051 correctly out.
+
+None of the five existing protections could catch it: the removed-from-feed draft and the
+stale-catalog pass act on whole products and would have killed the in-stock sibling; the
+`<= 10` threshold and the daily push both live on the `stock` change path, which a vanished
+variant never enters (it emits `removed_variant`, which `job1-sync.ts` logs and nothing
+acts on); and the post-write canary only samples writes that happened.
+
+### Changed — the truncated-feed guard no longer decays as dead stock accumulates
+
+A tracked variant already capped at 0 now counts as covered. It is a discontinued SKU that
+is supposed to be absent from the feed, so scoring it as missing measured catalog age, not
+feed health. Without this the newly-tracked dead variants above would have pushed coverage
+under the 0.70 floor within days and disabled all oversell protection. Counting them in the
+numerator rather than dropping them from the denominator keeps the sample from collapsing
+in the degenerate case where every tracked variant sits at 0. Live coverage: 1351/1351.
+
+The extra tracking call is rate-limited like any other write, so an untracked variant no
+longer burns two Shopify calls per tick against the ~2 req/second budget. The cron detail
+line reports `tracking+=N`; that number should trend to zero as the legacy untracked
+population drains.
+
 ## [0.5.71.0] - 2026-08-28
 
 CSO finding 2, the last open item from the 2026-08-28 audit.
