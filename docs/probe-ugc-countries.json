@@ -1,0 +1,344 @@
+{
+  "byCountry": {
+    "US": [
+      {
+        "sku": "311-070V80GY",
+        "len": 4638756,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/311-070V80GY.mp4"
+      },
+      {
+        "sku": "370-195",
+        "len": 5077575,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/370-195.mp4"
+      },
+      {
+        "sku": "3D0-008",
+        "len": 7540104,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/3D0-008.mp4"
+      },
+      {
+        "sku": "831-181V80BK",
+        "len": 6507231,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/831-181V80BK.mp4"
+      },
+      {
+        "sku": "835-144",
+        "len": 3093695,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/835-144.mp4"
+      },
+      {
+        "sku": "836-317V01",
+        "len": 9592304,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/836-317V01.mp4"
+      },
+      {
+        "sku": "838-082",
+        "len": 1533762,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/838-082.mp4"
+      },
+      {
+        "sku": "83B-041V80WT",
+        "len": 6062258,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/83B-041V80WT.mp4"
+      },
+      {
+        "sku": "845-030GY",
+        "len": 25702621,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/845-030GY.mp4"
+      },
+      {
+        "sku": "921-342V81WT",
+        "len": 8264102,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/921-342V81WT.mp4"
+      },
+      {
+        "sku": "A20-087",
+        "len": 8951764,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/A20-087.mp4"
+      },
+      {
+        "sku": "A91-290V02BK",
+        "len": 4121439,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/A91-290V02BK.mp4"
+      }
+    ],
+    "UK": [
+      {
+        "sku": "01-0871",
+        "len": 23593059,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/01-0871.mp4"
+      },
+      {
+        "sku": "01-0879",
+        "len": 6020981,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/01-0879.mp4"
+      },
+      {
+        "sku": "312-024RD",
+        "len": 1666060,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/312-024RD.mp4"
+      },
+      {
+        "sku": "370-027V00GY",
+        "len": 9622167,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/370-027V00GY.mp4"
+      },
+      {
+        "sku": "370-195",
+        "len": 5077575,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/370-195.mp4"
+      },
+      {
+        "sku": "3D0-006",
+        "len": 2030743,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/3D0-006.mp4"
+      },
+      {
+        "sku": "3D0-008",
+        "len": 4142440,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/3D0-008.mp4"
+      },
+      {
+        "sku": "833-450",
+        "len": 2248375,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/833-450.mp4"
+      },
+      {
+        "sku": "834-044",
+        "len": 5026986,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/834-044.mp4"
+      },
+      {
+        "sku": "844-335",
+        "len": 2002675,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/844-335.mp4"
+      },
+      {
+        "sku": "845-030GY",
+        "len": 8291725,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/845-030GY.mp4"
+      },
+      {
+        "sku": "845-030YL",
+        "len": 42532280,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/845-030YL.mp4"
+      },
+      {
+        "sku": "845-032LG",
+        "len": 2473104,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/845-032LG.mp4"
+      },
+      {
+        "sku": "851-018",
+        "len": 12430178,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/851-018.mp4"
+      }
+    ],
+    "DE": [],
+    "FR": [
+      {
+        "sku": "01-0879",
+        "len": 10706436,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/01-0879.mp4"
+      },
+      {
+        "sku": "344-035",
+        "len": 12869622,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/344-035.mp4"
+      },
+      {
+        "sku": "34D-002V00RD",
+        "len": 18375306,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/34D-002V00RD.mp4"
+      },
+      {
+        "sku": "835-290V00BG",
+        "len": 5145257,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/835-290V00BG.mp4"
+      },
+      {
+        "sku": "835-890V00RB",
+        "len": 16385916,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/835-890V00RB.mp4"
+      },
+      {
+        "sku": "837-164WT",
+        "len": 22372290,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/837-164WT.mp4"
+      },
+      {
+        "sku": "846-112V00DG",
+        "len": 11826182,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/846-112V00DG.mp4"
+      },
+      {
+        "sku": "84B-184V01GY",
+        "len": 18859546,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/84B-184V01GY.mp4"
+      },
+      {
+        "sku": "84D-030V01CW",
+        "len": 12622295,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/84D-030V01CW.mp4"
+      },
+      {
+        "sku": "84D-031V01BU",
+        "len": 16847103,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/84D-031V01BU.mp4"
+      },
+      {
+        "sku": "84D-270V00CG",
+        "len": 25490145,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/84D-270V00CG.mp4"
+      },
+      {
+        "sku": "84G-391V00GG",
+        "len": 21625247,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/84G-391V00GG.mp4"
+      },
+      {
+        "sku": "851-018",
+        "len": 14294799,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/851-018.mp4"
+      },
+      {
+        "sku": "D30-204",
+        "len": 14908879,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/D30-204.mp4"
+      },
+      {
+        "sku": "E2-0007",
+        "len": 25777886,
+        "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/E2-0007.mp4"
+      }
+    ]
+  },
+  "caHits": [
+    "800-185V80BK",
+    "831-740V00GD",
+    "831-740V03BK",
+    "831-930V00CW",
+    "833-804WT",
+    "837-398V80AK",
+    "838-006V80GY",
+    "838-212WT",
+    "838-509V80WT",
+    "838-603V00BK",
+    "839-667V81WT",
+    "83A-058V80WT",
+    "83B-059V02BG",
+    "844-037",
+    "A91-113",
+    "D07-018WT"
+  ],
+  "union": [
+    "01-0871",
+    "01-0879",
+    "311-070V80GY",
+    "312-024RD",
+    "344-035",
+    "34D-002V00RD",
+    "370-027V00GY",
+    "370-195",
+    "3D0-006",
+    "3D0-008",
+    "800-185V80BK",
+    "831-181V80BK",
+    "831-740V00GD",
+    "831-740V03BK",
+    "831-930V00CW",
+    "833-450",
+    "833-804WT",
+    "834-044",
+    "835-144",
+    "835-290V00BG",
+    "835-890V00RB",
+    "836-317V01",
+    "837-164WT",
+    "837-398V80AK",
+    "838-006V80GY",
+    "838-082",
+    "838-212WT",
+    "838-509V80WT",
+    "838-603V00BK",
+    "839-667V81WT",
+    "83A-058V80WT",
+    "83B-041V80WT",
+    "83B-059V02BG",
+    "844-037",
+    "844-335",
+    "845-030GY",
+    "845-030YL",
+    "845-032LG",
+    "846-112V00DG",
+    "84B-184V01GY",
+    "84D-030V01CW",
+    "84D-031V01BU",
+    "84D-270V00CG",
+    "84G-391V00GG",
+    "851-018",
+    "921-342V81WT",
+    "A20-087",
+    "A91-113",
+    "A91-290V02BK",
+    "D07-018WT",
+    "D30-204",
+    "E2-0007"
+  ],
+  "sourceable": [
+    "01-0871",
+    "01-0879",
+    "311-070V80GY",
+    "312-024RD",
+    "370-027V00GY",
+    "370-195",
+    "3D0-006",
+    "3D0-008",
+    "800-185V80BK",
+    "831-181V80BK",
+    "831-740V00GD",
+    "831-740V03BK",
+    "831-930V00CW",
+    "833-450",
+    "833-804WT",
+    "834-044",
+    "835-144",
+    "836-317V01",
+    "837-398V80AK",
+    "838-006V80GY",
+    "838-082",
+    "838-212WT",
+    "838-509V80WT",
+    "838-603V00BK",
+    "839-667V81WT",
+    "83A-058V80WT",
+    "83B-041V80WT",
+    "83B-059V02BG",
+    "844-037",
+    "844-335",
+    "845-030GY",
+    "845-030YL",
+    "845-032LG",
+    "851-018",
+    "921-342V81WT",
+    "A20-087",
+    "A91-113",
+    "A91-290V02BK",
+    "D07-018WT"
+  ],
+  "frOnly": [
+    "344-035",
+    "34D-002V00RD",
+    "835-290V00BG",
+    "835-890V00RB",
+    "837-164WT",
+    "846-112V00DG",
+    "84B-184V01GY",
+    "84D-030V01CW",
+    "84D-031V01BU",
+    "84D-270V00CG",
+    "84G-391V00GG",
+    "D30-204",
+    "E2-0007"
+  ]
+}

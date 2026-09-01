@@ -1,0 +1,658 @@
+[
+  {
+    "sku": "01-0871",
+    "country": "UK",
+    "durationSec": 171,
+    "verdict": "CONFORME",
+    "reasons": [],
+    "texte_lu": [
+      "step3",
+      "step9"
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": false,
+    "description_filigrane": null,
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Frames de montage d'une structure métallique (pergola/tonnelle) avec cartons de texte 'step3' et 'step9' sur fond blanc ; un visage de profil est partiellement visible sur une image."
+  },
+  {
+    "sku": "01-0879",
+    "country": "UK",
+    "durationSec": 43,
+    "verdict": "CONFORME",
+    "reasons": [],
+    "texte_lu": [],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": false,
+    "description_filigrane": null,
+    "marques_maison_vues": [],
+    "visages_identifiables": false,
+    "notes": "Aucun texte incrusté lisible : les frames montrent le déballage et le montage d'une tonnelle de jardin bordeaux avec mobilier en rotin, sans filigrane ni visage."
+  },
+  {
+    "sku": "312-024RD",
+    "country": "UK",
+    "durationSec": 12,
+    "verdict": "CONFORME",
+    "reasons": [],
+    "texte_lu": [
+      "I've been keeping a secret",
+      "So many of you have asked about this table",
+      "It's been our three big kids favorite all summer",
+      "See details 🐞"
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": false,
+    "description_filigrane": null,
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Sous-titres gravés uniquement, sans mention de marque ni filigrane ; le visage d'une jeune enfant est visible."
+  },
+  {
+    "sku": "344-035",
+    "country": "FR",
+    "durationSec": 92,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "filigrane/mention Skeepers",
+      "plateforme tierce: Skeepers"
+    ],
+    "texte_lu": [
+      "Skeepers",
+      "Et aujourd'hui, je vous amène avec moi dans mon jardin,",
+      "En ce qui concerne le montage, je vous recommande de bien ouvrir le carton,",
+      "de rapprocher les numéros par les numéros et",
+      "de bien lire la notice afin de ne pas se tromper.",
+      "Mais honnêtement, elle est très facile à monter dès lors qu'on suit correctement la notice.",
+      "C'est avec plaisir que je vous montre le montage final de ma super balançoire.",
+      "Et vous avez la balançoire double où les enfants peuvent jouer à deux !",
+      "Et comme vous pouvez le voir, les couleurs fondent dans le décor !",
+      "Je suis réellement contente."
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "Skeepers",
+    "filigrane": true,
+    "description_filigrane": "Logo 'Skeepers' avec icône bleue en haut à droite de chaque frame",
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Vidéo UGC en français d'une cliente présentant le montage et le résultat d'une balançoire de jardin, avec filigrane Skeepers et visages visibles (femme et deux enfants)."
+  },
+  {
+    "sku": "34D-002V00RD",
+    "country": "FR",
+    "durationSec": 132,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "filigrane/mention Skeepers",
+      "plateforme tierce: Skeepers"
+    ],
+    "texte_lu": [
+      "Skeepers"
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "Skeepers",
+    "filigrane": true,
+    "description_filigrane": "Logo 'Skeepers' en haut à droite de chaque frame, icône carrée bleue suivie du mot en gris/blanc",
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Vidéo UGC de montage d'un dôme d'escalade rouge et bleu, avec filigrane Skeepers constant et visages d'une femme et d'une enfant clairement identifiables."
+  },
+  {
+    "sku": "370-027V00GY",
+    "country": "UK",
+    "durationSec": 55,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "mention \"Aosom\""
+    ],
+    "texte_lu": [
+      "Aosom",
+      "6 in 1 kids trike",
+      "170-022V00GY",
+      "UK CE",
+      "Lovely"
+    ],
+    "mentionne_aosom": true,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": false,
+    "description_filigrane": null,
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Vidéo d'unboxing/montage d'un tricycle enfant 6 en 1 avec carton de titre « Aosom - 6 in 1 kids trike », étiquette produit 170-022V00GY sur le carton, et visages de la femme et de l'enfant visibles."
+  },
+  {
+    "sku": "3D0-006",
+    "country": "UK",
+    "durationSec": 12,
+    "verdict": "CONFORME",
+    "reasons": [],
+    "texte_lu": [],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": false,
+    "description_filigrane": null,
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Aucun texte incrusté visible ; les images montrent une femme déballant des modules de motricité en mousse et un enfant les utilisant, avec visages partiellement identifiables."
+  },
+  {
+    "sku": "833-450",
+    "country": "UK",
+    "durationSec": 17,
+    "verdict": "CONFORME",
+    "reasons": [],
+    "texte_lu": [
+      "LE JARDIN",
+      "833-450",
+      "QTY: 1 PCS",
+      "N.W.",
+      "G.W."
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": false,
+    "description_filigrane": null,
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Vidéo de déballage et montage d'une étagère en bois; seuls des textes d'affiche murale ('LE JARDIN') et des étiquettes de carton sont lisibles, sans mention de marque Aosom ou Skeepers."
+  },
+  {
+    "sku": "834-044",
+    "country": "UK",
+    "durationSec": 31,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "mention \"Aosom\""
+    ],
+    "texte_lu": [
+      "Aosom",
+      "HOMCOM",
+      "Popular Products for Home",
+      "834-044",
+      "CAUTION",
+      "Heavy object.",
+      "Team lift required.",
+      "11988-02P54",
+      "834-044 20B0545",
+      "Dove",
+      "NIVEA",
+      "Oral-B",
+      "Johnson's"
+    ],
+    "mentionne_aosom": true,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": false,
+    "description_filigrane": null,
+    "marques_maison_vues": [
+      "HOMCOM"
+    ],
+    "visages_identifiables": false,
+    "notes": "Vidéo d'unboxing d'une armoire de salle de bain miroir HOMCOM, ouvrant sur un carton de marque Aosom puis l'installation en salle de bain, sans visage identifiable (personne filmant dans le miroir avec téléphone)."
+  },
+  {
+    "sku": "835-290V00BG",
+    "country": "FR",
+    "durationSec": 30,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "mention \"Aosom\""
+    ],
+    "texte_lu": [
+      "@aosomfrance"
+    ],
+    "mentionne_aosom": true,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": true,
+    "description_filigrane": "Étiquette de mention Instagram '@aosomfrance' en bas au centre, texte blanc souligné sur fond gris arrondi",
+    "marques_maison_vues": [],
+    "visages_identifiables": false,
+    "notes": "Frames montrant le montage et les détails d'un fauteuil blanc, avec uniquement la mention Instagram @aosomfrance incrustée."
+  },
+  {
+    "sku": "835-890V00RB",
+    "country": "FR",
+    "durationSec": 118,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "filigrane/mention Skeepers",
+      "plateforme tierce: Skeepers"
+    ],
+    "texte_lu": [
+      "Skeepers",
+      "J'ai reçu un ensemble table-bar et quatre tabourets avec repose-pieds métal noir et effet bois.",
+      "C'est un ensemble solide et stable avec des structures en métal couleur noire.",
+      "La charge maximale recommandée pour la table est de 50 kg et pour les tabourets 120 kg.",
+      "Ils se rangent ainsi facilement sous la table.",
+      "Ensuite, nous assemblons les pieds de la table.",
+      "L'ensemble est compact, facile à installer,",
+      "Le montage est facile et rapide grâce à la notice d'assemblage illustrée qui est fournie.",
+      "qui peuvent également être utilisées comme repose-pieds afin d'obtenir une meilleure position."
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "Skeepers",
+    "filigrane": true,
+    "description_filigrane": "Logo « Skeepers » avec icône bleue en haut à droite de chaque frame",
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Vidéo UGC de déballage/montage d'un ensemble table-bar et tabourets, filigranée Skeepers, avec des personnes (homme, femme, enfant) reconnaissables."
+  },
+  {
+    "sku": "837-164WT",
+    "country": "FR",
+    "durationSec": 166,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "filigrane/mention Skeepers",
+      "plateforme tierce: SKEEPERS"
+    ],
+    "texte_lu": [
+      "SKEEPERS",
+      "qui est composée de deux tiroirs rabattables, d'un tiroir coulissant,",
+      "HOMCOM",
+      "Concernant la partie visserie, elle est également étiquetée avec des lettres",
+      "ce qui correspond au deuxième trou en partant du haut et au troisième trou en partant du bas.",
+      "On les insère dans les emplacements prévus.",
+      "Il est fabriqué à partir de panneaux de particules et en panneau MDF.",
+      "un tiroir coulissant et un plateau en verre où on peut déposer des objets de décoration.",
+      "sur les deux tiroirs rabattables, comme vous pouvez le voir.",
+      "adidas"
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "SKEEPERS",
+    "filigrane": true,
+    "description_filigrane": "Logo 'SKEEPERS' en blanc en haut à droite de chaque frame",
+    "marques_maison_vues": [
+      "HOMCOM"
+    ],
+    "visages_identifiables": true,
+    "notes": "Vidéo de déballage/montage d'un meuble à chaussures HOMCOM avec sous-titres français gravés et filigrane SKEEPERS, la présentatrice étant identifiable."
+  },
+  {
+    "sku": "844-335",
+    "country": "UK",
+    "durationSec": 15,
+    "verdict": "CONFORME",
+    "reasons": [],
+    "texte_lu": [],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": false,
+    "description_filigrane": null,
+    "marques_maison_vues": [],
+    "visages_identifiables": false,
+    "notes": "Frames d'un intérieur (canapé blanc, chaise jaune, arbre artificiel, tableau) sans aucun texte incrusté ni filigrane visible."
+  },
+  {
+    "sku": "845-030YL",
+    "country": "UK",
+    "durationSec": 276,
+    "verdict": "CONFORME",
+    "reasons": [],
+    "texte_lu": [
+      "4",
+      "I",
+      "II",
+      "III",
+      "IV",
+      "I&II",
+      "III&IV",
+      "Bo-A4",
+      "Bo-A5",
+      "5",
+      "Am-A42",
+      "6",
+      "Bm-6",
+      "Am-A7",
+      "Am-A40",
+      "Am-A41",
+      "Am-A2",
+      "Bm-8",
+      "2",
+      "step4",
+      "34",
+      "35",
+      "Am-A41",
+      "Am-A18",
+      "Am-A20",
+      "TP5A",
+      "x2",
+      "x84",
+      "Am-A44"
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": false,
+    "description_filigrane": null,
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Vidéo de montage d'un abri de jardin métallique alternant pages de notice codifiées (Bo-A4, Am-A42, step4) et séquences filmées où le visage de l'installateur est reconnaissable, sans mention de marque ni filigrane."
+  },
+  {
+    "sku": "845-032LG",
+    "country": "UK",
+    "durationSec": 17,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "mention \"Aosom\""
+    ],
+    "texte_lu": [
+      "Getting ready for the winter with AOSOM",
+      "Outsunny",
+      "BOSCH",
+      "Universal...",
+      "3000",
+      "19"
+    ],
+    "mentionne_aosom": true,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": false,
+    "description_filigrane": null,
+    "marques_maison_vues": [
+      "Outsunny"
+    ],
+    "visages_identifiables": false,
+    "notes": "Vidéo UGC montrant un abri de jardin métallique Outsunny installé dans un jardin, avec le carton d'intro « Getting ready for the winter with AOSOM » et le logo Outsunny visible sur la structure."
+  },
+  {
+    "sku": "846-112V00DG",
+    "country": "FR",
+    "durationSec": 85,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "filigrane/mention Skeepers",
+      "plateforme tierce: Skeepers"
+    ],
+    "texte_lu": [
+      "Skeepers",
+      "sur pied amovible, avec deux grilles portables et deux paniers latéraux.",
+      "Il est également fabriqué avec des matériaux de qualité,",
+      "IMPORTANT SAFEGUARDS",
+      "READ ALL INSTRUCTIONS BEFORE USE",
+      "PROTECTIONS IMPORTANTES",
+      "LISEZ TOUTES LES INSTRUCTIONS AVANT L'UTILISATION",
+      "FR",
+      "Dans un premier temps, on déballe les différentes parties du barbecue.",
+      "Et le reste s'assemble en le posant simplement.",
+      "Il est de très bonne qualité, il se nettoie très facilement.",
+      "Et c'était parfait parce que je cherchais exactement un barbecue mobile,",
+      "Pour le nettoyer, une simple éponge humide et du savon suffisent.",
+      "Nous sommes informés des différentes étapes de la livraison en temps et en heure."
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "Skeepers",
+    "filigrane": true,
+    "description_filigrane": "Logo « Skeepers » avec icône bleue carrée, en haut à droite de chaque frame",
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Vidéo UGC de test d'un barbecue à charbon avec sous-titres français gravés et filigrane Skeepers, sans mention d'Aosom ni de marque maison visible."
+  },
+  {
+    "sku": "84B-184V01GY",
+    "country": "FR",
+    "durationSec": 135,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "filigrane/mention Skeepers",
+      "plateforme tierce: Skeepers"
+    ],
+    "texte_lu": [
+      "Skeepers",
+      "Le bain de soleil est de coloris gris.",
+      "En position assise, le bain de soleil mesure 137 cm par 63,5 cm par 100,5 cm de hauteur.",
+      "Ce transat est d'un grand confort avec son matelas.",
+      "et ses accoudoirs style contemporain mêlant sobriété et élégance.",
+      "Il est facile à ranger et à transporter si besoin pour aller à la plage, au camping ou au parc.",
+      "Le châssis est en tubulaire en métal époxy anti-corrosion robuste pour un usage pérenne.",
+      "Son revêtement est en textilène haute densité.",
+      "J'ai beaucoup aimé son design.",
+      "THE NORTH FACE"
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "Skeepers",
+    "filigrane": true,
+    "description_filigrane": "Logo 'Skeepers' avec petite icône bleue en haut à droite de chaque frame",
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Vidéo UGC de démonstration d'un bain de soleil gris, filigranée Skeepers, avec sous-titres français incrustés et visages partiellement visibles."
+  },
+  {
+    "sku": "84D-030V01CW",
+    "country": "FR",
+    "durationSec": 90,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "mention \"Aosom\"",
+      "filigrane/mention Skeepers",
+      "plateforme tierce: Skeepers"
+    ],
+    "texte_lu": [
+      "SKEEPERS",
+      "Voici le Grand parasol de la marque OUTSUNNY",
+      "en acier polyester d'une longueur totale de 4,6 m",
+      "C'est un grand parasol très stable, idéal pour",
+      "ombrager une grande zone dans votre jardin,",
+      "Il est aussi en tissu polyester haute densité.",
+      "Très facile à monter. On l'a reçu en deux parties.",
+      "il suffit de le visser. On le mettra ensuite sur le",
+      "socle que vous voyez, qui est un socle universel.",
+      "Il y a une manivelle, mais vous allez voir de toute façon",
+      "que c'est très facile, puisque c'est déjà pré-installé.",
+      "On voulait un produit simple à installer. Et surtout la marque AOSOM,",
+      "On va certainement commander d'autres.",
+      "Anti-pluie et anti-UV, pour profiter tranquille !"
+    ],
+    "mentionne_aosom": true,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "Skeepers",
+    "filigrane": true,
+    "description_filigrane": "Logo 'SKEEPERS' en blanc, en haut à droite de chaque frame",
+    "marques_maison_vues": [
+      "Outsunny"
+    ],
+    "visages_identifiables": true,
+    "notes": "Vidéo UGC d'une cliente installant un grand parasol Outsunny, avec filigrane Skeepers et sous-titres français mentionnant Outsunny et AOSOM."
+  },
+  {
+    "sku": "84D-031V01BU",
+    "country": "FR",
+    "durationSec": 121,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "mention \"Aosom\"",
+      "filigrane/mention Skeepers",
+      "plateforme tierce: Skeepers"
+    ],
+    "texte_lu": [
+      "Skeepers",
+      "Je vais donc vous présenter le parasol double rectangulaire OutSunny de chez Aosom.",
+      "À l'ouverture du colis, on retrouve la notice détaillée, le parasol, et le tube.",
+      "Aucun outil n'est nécessaire. Ensuite, on le place dans son pied. Et là, on peut commencer à ouvrir le parasol.",
+      "C'est un rectangle de 4,6 m de long, 2,7 m de large, et 2,4 m de hauteur.",
+      "Toute la structure est en acier gris foncé, ce qui lui donne un très beau design. Vraiment, c'est un très beau parasol.",
+      "J'ai choisi cette forme rectangulaire de parasol pour, d'une part, avoir un espace agréable où l'on peut déjeuner, dîner,",
+      "Mais également, cela permet de protéger nos moments privilégiés de petite sieste dans nos bains de soleil.",
+      "J'adore également sa couleur bleu nuit, ainsi que le côté grisé des tubes."
+    ],
+    "mentionne_aosom": true,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "Skeepers",
+    "filigrane": true,
+    "description_filigrane": "Logo 'Skeepers' bleu en haut à droite de chaque frame",
+    "marques_maison_vues": [
+      "Outsunny"
+    ],
+    "visages_identifiables": true,
+    "notes": "Vidéo UGC en français présentant un parasol double rectangulaire Outsunny/Aosom, avec sous-titres gravés et filigrane Skeepers, une femme au visage identifiable apparaît."
+  },
+  {
+    "sku": "84D-270V00CG",
+    "country": "FR",
+    "durationSec": 184,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "filigrane/mention Skeepers",
+      "plateforme tierce: Skeepers"
+    ],
+    "texte_lu": [
+      "Skeepers",
+      "Il est en acier et la toile est en polyester gris.",
+      "Tout le corps du parasol est en acier thermolaqué et le pied en croix permet une stabilité optimale.",
+      "Puis, je fais coulisser le parasol vers le haut grâce à cette poignée de serrage, solide et facile à manipuler.",
+      "Au lever comme au coucher du soleil, on peut gagner en surface ombragée",
+      "On replie la toile grâce à la manivelle.",
+      "Il est très stable, la toile en polyester est parfaite pour l'extérieur.",
+      "Et il est facile à utiliser au quotidien sur une terrasse, un balcon ou même dans un jardin.",
+      "DOWN",
+      "UP"
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "Skeepers",
+    "filigrane": true,
+    "description_filigrane": "Logo 'Skeepers' avec icône bleue en haut à droite de chaque frame",
+    "marques_maison_vues": [],
+    "visages_identifiables": true,
+    "notes": "Vidéo UGC en français présentant un parasol déporté en acier et polyester gris, avec sous-titres incrustés et filigrane Skeepers, l'homme filmé est identifiable."
+  },
+  {
+    "sku": "84G-391V00GG",
+    "country": "FR",
+    "durationSec": 156,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "mention \"Aosom\"",
+      "filigrane/mention Skeepers",
+      "plateforme tierce: Skeepers"
+    ],
+    "texte_lu": [
+      "Skeepers",
+      "J'ai commandé sur le site Aosom cette superbe chaise pliante.",
+      "C'est la chaise pliante de jardin, donc elle est dans ce gros colis.",
+      "Outsunny",
+      "84G-381V00GG",
+      "Et je n'ai plus qu'à m'installer pour profiter du soleil !",
+      "On a également un petit coussin pour s'allonger et les trous pour les bras.",
+      "L'avantage avec cette chaise, c'est qu'elle est pliante et qu'elle ne prend pas du tout de place dans le garage.",
+      "Et j'aime beaucoup aussi la façon dont il se plie puisqu'il se plie de façon très compacte.",
+      "Forcément, on peut s'allonger complètement et il est vraiment confortable."
+    ],
+    "mentionne_aosom": true,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "Skeepers",
+    "filigrane": true,
+    "description_filigrane": "Logo 'Skeepers' bleu et blanc en haut à droite de chaque frame",
+    "marques_maison_vues": [
+      "Outsunny"
+    ],
+    "visages_identifiables": true,
+    "notes": "UGC d'une cliente déballant et testant une chaise longue pliante Outsunny, avec sous-titres français gravés, mention verbale du site Aosom et filigrane Skeepers permanent."
+  },
+  {
+    "sku": "851-018",
+    "country": "UK",
+    "durationSec": 42,
+    "verdict": "CONFORME",
+    "reasons": [],
+    "texte_lu": [
+      "This bin isn't just a bin; it's a game-changer for cleaner, more hygienic living! Let's dive into why you need this in your life. 🚀",
+      "Infrared Sensor Magic: Wave goodbye to icky lids and messy hands! The infrared sensor on this bin effortlessly opens the lid when you're within 15cm.",
+      "Mega 72-Liter Capacity: With a massive 72-liter capacity, this bin can handle it all. Say goodbye to constant trash bag changes. 🗑️🏢",
+      "Triple Compartment Brilliance: Waste separation made easy! With three compartments, this bin lets you sort your waste effortlessly.",
+      "Wet, dry, recyclables - it can handle it all! No more rummaging through mixed-up trash bags. 🌱🌊♻️",
+      "Durable Elegance: Made from rust-resistant ABS plastic with a sleek stainless steel finish, this bin brings durability and style to your space. It's the ultimate blend of form and function. 🌿✨",
+      "OPEN",
+      "CLOSE"
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": false,
+    "plateforme_avis_tierce": null,
+    "filigrane": false,
+    "description_filigrane": null,
+    "marques_maison_vues": [],
+    "visages_identifiables": false,
+    "notes": "Frames montrant une poubelle automatique inox à capteur infrarouge avec sous-titres descriptifs incrustés, sans marque ni filigrane visible."
+  },
+  {
+    "sku": "D30-204",
+    "country": "FR",
+    "durationSec": 108,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "filigrane/mention Skeepers",
+      "plateforme tierce: Skeepers"
+    ],
+    "texte_lu": [
+      "Skeepers",
+      "Cet arbre à chats est un magnifique arbre à chats design et contemporain.",
+      "PawHut",
+      "D30-204",
+      "et d'un jeu de boules suspendues qui permet aux chats et aux chatons",
+      "Il a une sécurité optimale, des coins biseautés de chaque plateforme.",
+      "C'est en imitation bois de hêtre clair avec veinage.",
+      "Les couleurs sont : beige, bois de hêtre clair, blanc.",
+      "Les dimensions sont 71 x 49 cm et 120 cm de haut.",
+      "Il est très design et vraiment sympa, les couleurs sont sympas."
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "Skeepers",
+    "filigrane": true,
+    "description_filigrane": "Logo Skeepers en haut à droite de chaque frame : petit carré bleu avec symbole blanc, parfois suivi du mot 'Skeepers'",
+    "marques_maison_vues": [
+      "PawHut"
+    ],
+    "visages_identifiables": true,
+    "notes": "Vidéo UGC de déballage/montage d'un arbre à chat PawHut, sous-titres français gravés et filigrane Skeepers, avec le visage de la cliente visible sur les premières images."
+  },
+  {
+    "sku": "E2-0007",
+    "country": "FR",
+    "durationSec": 185,
+    "verdict": "NON CONFORME",
+    "reasons": [
+      "filigrane/mention Skeepers",
+      "plateforme tierce: Skeepers"
+    ],
+    "texte_lu": [
+      "Skeepers",
+      "Et après, je vous ferai une petite présentation.",
+      "HOMCOM",
+      "82-0007",
+      "On a les tapis antidérapants au-dessus, également dans les tiroirs.",
+      "et de tout avoir à distance et avec une partie amovible et une partie sur roulettes.",
+      "ou des boulons de la boulonnerie de vis en haut,",
+      "Je pense qu'un usage quotidien tient la route."
+    ],
+    "mentionne_aosom": false,
+    "mentionne_skeepers": true,
+    "plateforme_avis_tierce": "Skeepers",
+    "filigrane": true,
+    "description_filigrane": "Logo bleu et texte 'Skeepers' en haut à droite de chaque frame",
+    "marques_maison_vues": [
+      "HOMCOM"
+    ],
+    "visages_identifiables": true,
+    "notes": "Vidéo UGC de déballage et présentation d'une servante à outils HOMCOM, filigranée Skeepers, avec sous-titres français incrustés et le visage du testeur visible."
+  }
+]
