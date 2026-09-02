@@ -197,9 +197,27 @@ export const AOSOM = {
 
 export const CLAUDE = {
   /**
-   * The public shopping assistant's model. Sonnet stays here: /api/assistant is the only
-   * customer-facing generation path, it draws on the dedicated `assistant` budget pool,
-   * and it accounts for ~86% of all recorded token volume.
+   * The public shopping assistant's model (`/api/assistant` → runAssistant only).
+   *
+   * Moved off Sonnet 4.6 to Haiku 4.5 on 2026-09-02. The assistant's job is choosing among
+   * catalogue rows the search tool has already narrowed, and it accounts for ~86% of all
+   * recorded token volume. Haiku 4.5 is exactly one third of Sonnet 4.6 on BOTH input
+   * ($1 vs $3 per MTok) and output ($5 vs $15), so this cuts the pool's cost by two thirds
+   * however the input/output mix falls.
+   *
+   * ⚠️ This changes cost per token, NOT tokens consumed. The `assistant` pool caps TOKENS,
+   * so this swap alone does not serve one extra shopper — raising LLM_ASSISTANT_DAILY_BUDGET
+   * is what does that, and at Haiku rates 1.5M tokens/day costs what 500k did on Sonnet.
+   *
+   * Override per-deploy with CLAUDE_ASSISTANT_MODEL — set it to "claude-sonnet-4-6" to put
+   * the assistant back on Sonnet with no code change if answer quality regresses.
+   */
+  MODEL_ASSISTANT: process.env.CLAUDE_ASSISTANT_MODEL?.trim() || "claude-haiku-4-5-20251001",
+  /**
+   * The quality / escalation tier. No longer the assistant's model: its remaining job is
+   * being the model `generateProductContent` re-runs on when MODEL_BATCH output fails
+   * validation (content-generator.ts). It MUST stay stronger than MODEL_BATCH or that
+   * escalation degrades into a same-model retry.
    */
   MODEL: "claude-sonnet-4-6",
   /**

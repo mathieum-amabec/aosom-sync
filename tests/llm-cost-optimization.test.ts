@@ -5,15 +5,17 @@ import path from "node:path";
 /**
  * Guards for the two LLM cost optimizations:
  *
- *   1. The batch pool runs on the cheap model, the customer-facing assistant does not.
- *      Haiku 4.5 is exactly 1/3 of Sonnet 4.6 on both input and output, so this is a
- *      flat two-thirds cut on the batch pool regardless of the input/output mix.
+ *   1. BOTH pools run on the cheap model. The batch pool moved first; the customer-facing
+ *      assistant followed in v0.5.74.0 (`MODEL_ASSISTANT`). Haiku 4.5 is exactly 1/3 of
+ *      Sonnet 4.6 on both input and output, so each is a flat two-thirds cut regardless of
+ *      the input/output mix. Sonnet 4.6 survives as `CLAUDE.MODEL`, the escalation tier only.
  *   2. Product content is generated ONCE per PSIN group: `mergeVariants` already folds a
  *      group's colour/size variants into one merged product, and `generateContent` now
  *      reuses a job's stored content instead of paying for near-identical copy again.
  *
- * The escalation path is what makes (1) safe: a cheap-model response that fails the
- * schema checks is re-run on the assistant-grade model, so cost degrades, not quality.
+ * The escalation path is what makes (1) safe for batch: a cheap-model response that fails
+ * the schema checks is re-run on `CLAUDE.MODEL`, so cost degrades, not quality. That is why
+ * `MODEL` must stay STRONGER than `MODEL_BATCH` — pinned below.
  */
 
 vi.mock("@/lib/config", () => ({
@@ -155,12 +157,39 @@ describe("model routing is enforced across the codebase, not just at the call si
 
   const srcFiles = walk(path.join(process.cwd(), "src"));
 
-  it("uses CLAUDE.MODEL only in the customer-facing assistant", () => {
+  it("never sends a request on CLAUDE.MODEL from src/ — it is the escalation tier, not a call model", () => {
+    // Scoped to src/ deliberately: scripts/force-social-patio.mts is a pre-existing one-off
+    // that still passes CLAUDE.MODEL. It is not a live path, so it is out of scope here
+    // rather than silently making this invariant a lie.
+    // The assistant now runs CLAUDE.MODEL_ASSISTANT (Haiku). CLAUDE.MODEL (Sonnet) survives
+    // ONLY as the model generateProductContent re-runs on when batch output fails
+    // validation, and that goes through attempt(), not a `model:` literal. A
+    // `model: CLAUDE.MODEL,` anywhere means someone put a live path back on Sonnet.
     const offenders = srcFiles.filter((f) => {
-      if (f.endsWith(path.join("lib", "assistant.ts")) || f.endsWith(path.join("lib", "config.ts"))) return false;
+      if (f.endsWith(path.join("lib", "config.ts"))) return false;
       return /model:\s*CLAUDE\.MODEL\s*,/.test(fs.readFileSync(f, "utf8"));
     });
     expect(offenders.map((f) => path.relative(process.cwd(), f))).toEqual([]);
+  });
+
+  it("uses CLAUDE.MODEL_ASSISTANT only in the customer-facing assistant", () => {
+    const offenders = srcFiles.filter((f) => {
+      if (f.endsWith(path.join("lib", "assistant.ts")) || f.endsWith(path.join("lib", "config.ts"))) return false;
+      return /model:\s*CLAUDE\.MODEL_ASSISTANT\s*,/.test(fs.readFileSync(f, "utf8"));
+    });
+    expect(offenders.map((f) => path.relative(process.cwd(), f))).toEqual([]);
+  });
+
+  it("keeps the escalation tier strictly stronger than the batch model", () => {
+    // content-generator escalates MODEL_BATCH → MODEL on a validation failure. If the two
+    // ever converge, that retry re-runs the same model and the escalation is a no-op.
+    const cfg = fs.readFileSync(path.join(process.cwd(), "src", "lib", "config.ts"), "utf8");
+    expect(cfg).toMatch(/MODEL:\s*"claude-sonnet-4-6"/);
+    expect(cfg).toMatch(/MODEL_BATCH:[^\n]*"claude-haiku-4-5"/);
+    // Pin the assistant default in SOURCE TEXT too. Every test that exercises the assistant
+    // mocks @/lib/config, so a silent revert of MODEL_ASSISTANT to Sonnet would otherwise
+    // pass the whole suite green while tripling the storefront's bill.
+    expect(cfg).toMatch(/MODEL_ASSISTANT:[^\n]*"claude-haiku-4-5-20251001"/);
   });
 
   it("routes every Claude call through budgetedCreate so nothing escapes the daily cap", () => {

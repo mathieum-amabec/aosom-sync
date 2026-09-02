@@ -56,11 +56,23 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
 - **Dropship**: `createShopifyProduct` still creates variants with `inventory_management: null` — untracked, stock lives only in the catalog snapshot. ⚠️ An untracked variant is **sellable forever**: Shopify ignores its `inventory_quantity` and `inventory_policy: deny` has no effect, so `setInventoryLevel(0)` on one is a silent no-op. Since v0.5.72.0 `runInventorySweep` (`inventory-sweep.ts`) switches tracking ON and then writes 0 for any untracked variant the feed marks sold out, so the catalog is migrating to tracked one sold-out variant at a time (the cron detail reports `tracking+=N`). Any code that filters variants on `tracked` skips exactly the ones that can oversell.
 - **Active imports**: New products are auto-published as `active` (live) on import — `createShopifyProduct` sets `status: "active"` (see `shopify-client.ts`; switched from draft→active in commit beb00b4, 2026-06-07). No manual-review draft step. Caveat: `status:"active"` only auto-publishes to the Online Store **at creation** — flipping an existing product draft→active does NOT publish it, and legacy pre-beb00b4 draft imports never activated stay hidden. `runPublishReconcile` (`publish-reconcile.ts`, route `GET /api/cron/publish-reconcile`, dry-run unless `?apply=1`) closes that gap: it publishes (`publishShopifyProduct`, REST `published:true`) every imported product sellable in today's Aosom CSV that sits unpublished — excluding `auto-drafted` (intentional aosom-sync drafts) and `exclude-stale`, guarded by the same `assertFeedComplete` (FEED_MIN_COVERAGE 0.70), capped at 67/run. It is the inverse of `stale-catalog` and is NOT on any cron schedule (operator-triggered only).
 - **[BRAND NAME]**: Aosom HTML descriptions contain this placeholder. Replaced with actual brand before Claude processing
-- **Two LLM tiers**: `CLAUDE.MODEL` (`claude-sonnet-4-6`) is **only** for `/api/assistant`, the
-  customer-facing shopping assistant — it is ~86% of token volume and the only path a shopper
-  sees. Every other caller uses `CLAUDE.MODEL_BATCH` (`claude-haiku-4-5`, one third the price on
-  both input and output). New batch callers must use `MODEL_BATCH`. `generateProductContent`
-  re-runs a failed validation on `CLAUDE.MODEL`, so a cheap-model miss costs a retry, not quality
+- **Three LLM tiers** (since v0.5.74.0 — the assistant left Sonnet):
+  - `CLAUDE.MODEL_ASSISTANT` (`claude-haiku-4-5-20251001`) — **only** `/api/assistant`
+    (`runAssistant`, and `runComplementary` through it). ~86% of token volume and the only
+    path a shopper sees. Draws on the dedicated `assistant` budget pool.
+  - `CLAUDE.MODEL_BATCH` (`claude-haiku-4-5`) — every other caller: imports, blog, social,
+    hooks, vision. **New batch callers must use `MODEL_BATCH`.**
+  - `CLAUDE.MODEL` (`claude-sonnet-4-6`) — **escalation tier only, never a `model:` literal.**
+    `generateProductContent` re-runs a failed validation on it, so a cheap-model miss costs a
+    retry, not quality. It must stay stronger than `MODEL_BATCH` or that retry is a no-op.
+    (`scripts/force-social-patio.mts` is a pre-existing exception — a one-off script, not a
+    live path.)
+- **`/api/assistant` never returns a limit as an error.** Every tripped limit answers
+  `success: true` with `data.reply` + `data.products: []` so the widget renders a hand-off
+  card: hourly quota → **429**, rapid-fire → **200**, daily pool exhausted → **200** (was 503
+  before v0.5.74.0). ⚠️ A limit response is therefore indistinguishable from a genuine
+  zero-result answer by `products.length` alone — **anything probing this endpoint must branch
+  on `data.limitReached` / `data.reason`**, never on an empty `products` array or on the status.
 
 ## Meta Pixel (two parts — web dataset `214720653324969`)
 
@@ -275,7 +287,16 @@ zero errors. Verify with
 - `CLAUDE_BATCH_MODEL` — optional. Model for the **batch** LLM pool (product listings, blog,
   social captions, hooks, vision). Defaults to `claude-haiku-4-5`; set it to
   `claude-sonnet-4-6` to move the whole batch pool back to Sonnet without a code change.
-  The customer-facing assistant is **not** affected — it is pinned to `CLAUDE.MODEL`.
+  The customer-facing assistant is **not** affected — it reads `CLAUDE.MODEL_ASSISTANT`.
+- `CLAUDE_ASSISTANT_MODEL` — optional. Model for the **assistant** pool (`/api/assistant`
+  only). Defaults to `claude-haiku-4-5-20251001` since v0.5.74.0 (was `claude-sonnet-4-6`);
+  set it to `claude-sonnet-4-6` to roll the assistant back with no code change.
+  ⚠️ This changes cost per token, **not** tokens consumed — the pool caps TOKENS, so the
+  swap alone does not serve one extra shopper. Raise `LLM_ASSISTANT_DAILY_BUDGET` for that;
+  at Haiku rates 1.5M tokens/day costs what 500k did on Sonnet.
+  `CLAUDE.MODEL` (Sonnet 4.6) is now only the **escalation tier** `generateProductContent`
+  retries on when batch output fails validation — it must stay stronger than
+  `CLAUDE_BATCH_MODEL` or that retry degrades into a same-model no-op.
 - `LLM_DAILY_TOKEN_BUDGET` / `LLM_ASSISTANT_DAILY_BUDGET` — daily token caps for the `batch`
   (default 1.3M) and `assistant` (default 500k) pools
 - `ASSISTANT_CONTACT_EMAIL` — optional. Shopper-facing address in the assistant's

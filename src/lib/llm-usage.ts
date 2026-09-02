@@ -3,9 +3,9 @@
  *
  * ⚠️ The counter is a SINGLE combined number per (day, pool) — `recordLlmUsage` stores
  * `input_tokens + output_tokens` and nothing splits them. Anthropic bills input and output
- * at very different rates ($3 vs $15 per MTok on Sonnet 4.6), so any dollar figure derived
- * from that counter rests on an assumed split. This module makes that assumption explicit,
- * per pool, instead of burying a magic number in a component.
+ * at very different rates ($1 vs $5 per MTok on Haiku 4.5, which both pools now run), so any
+ * dollar figure derived from that counter rests on an assumed split. This module makes that
+ * assumption explicit, per pool, instead of burying a magic number in a component.
  *
  * The splits below come from the actual call shapes:
  *   - `assistant` — system prompt + tool schema + catalogue rows in, `max_tokens: 1024` of
@@ -30,16 +30,25 @@ export const MODEL_PRICING: Record<string, { inputPerMTok: number; outputPerMTok
  *  an unknown model is never estimated as free. */
 const FALLBACK_PRICING = MODEL_PRICING["claude-sonnet-4-6"];
 
+/**
+ * Strip a trailing `-YYYYMMDD` snapshot suffix so a dated model id prices off its family.
+ * Without this, `claude-haiku-4-5-20251001` misses every MODEL_PRICING key and falls back
+ * to Sonnet rates — a 3× over-estimate of the assistant pool's cost, silently.
+ */
+export function pricingKey(model: string): string {
+  return model.replace(/-\d{8}$/, "");
+}
+
 /** Assumed share of the combined counter that is INPUT, per pool. See the file header. */
 export const ASSUMED_INPUT_SHARE: Record<LlmBudgetPool, number> = {
   assistant: 0.9,
   batch: 0.4,
 };
 
-/** The model each pool currently runs. Reads config, so the CLAUDE_BATCH_MODEL override
- *  (batch back to Sonnet) is reflected in the estimate without a code change. */
+/** The model each pool currently runs. Reads config, so the CLAUDE_ASSISTANT_MODEL /
+ *  CLAUDE_BATCH_MODEL overrides are reflected in the estimate without a code change. */
 export function poolModel(pool: LlmBudgetPool): string {
-  return pool === "assistant" ? CLAUDE.MODEL : CLAUDE.MODEL_BATCH;
+  return pool === "assistant" ? CLAUDE.MODEL_ASSISTANT : CLAUDE.MODEL_BATCH;
 }
 
 /**
@@ -47,7 +56,7 @@ export function poolModel(pool: LlmBudgetPool): string {
  * by the assumed split. One number per pool keeps the arithmetic in one place.
  */
 export function blendedRatePerMTok(pool: LlmBudgetPool): number {
-  const pricing = MODEL_PRICING[poolModel(pool)] ?? FALLBACK_PRICING;
+  const pricing = MODEL_PRICING[pricingKey(poolModel(pool))] ?? FALLBACK_PRICING;
   const inShare = ASSUMED_INPUT_SHARE[pool];
   return pricing.inputPerMTok * inShare + pricing.outputPerMTok * (1 - inShare);
 }

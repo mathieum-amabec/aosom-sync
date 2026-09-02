@@ -64,7 +64,19 @@ function minutesLabel(locale: Locale, mins: number): string {
   return mins <= 1 ? "dans une minute environ" : `dans environ ${mins} minutes`;
 }
 
-function messageFor(locale: Locale, reason: LimitReason, retryAfterSecs: number): string {
+/**
+ * Reasons whose copy already NAMES the contact address, so `limitPayload` must not append
+ * the generic "Écrivez-nous : …" tail on top of it. A set rather than an inline check in
+ * two places, so adding another self-contained reason can't half-apply.
+ */
+const SELF_CONTAINED_REASONS: ReadonlySet<LimitReason> = new Set<LimitReason>(["budget_exhausted"]);
+
+function messageFor(
+  locale: Locale,
+  reason: LimitReason,
+  retryAfterSecs: number,
+  email: string,
+): string {
   const mins = Math.max(1, Math.ceil(retryAfterSecs / 60));
   if (reason === "hourly_quota") {
     return locale === "en"
@@ -72,9 +84,11 @@ function messageFor(locale: Locale, reason: LimitReason, retryAfterSecs: number)
       : `Trop de requêtes. Réessayez ${minutesLabel(locale, mins)}.`;
   }
   if (reason === "budget_exhausted") {
+    // Operator-specified copy, verbatim. Self-contained: it names the address itself, so
+    // the shopper reads one clean sentence instead of a sentence plus a bolted-on tail.
     return locale === "en"
-      ? "Our assistant is temporarily unavailable."
-      : "Notre assistant est temporairement indisponible.";
+      ? `Our assistant is temporarily unavailable. Email us at ${email} 😊`
+      : `Notre assistant est temporairement indisponible. Écrivez-nous à ${email} 😊`;
   }
   return locale === "en"
     ? "You've reached the question limit. Our team can help you directly 😊"
@@ -116,9 +130,15 @@ export function limitPayload(locale: Locale, reason: LimitReason, retryAfterSecs
   const { email, whatsappUrl } = contactChannels();
   const subject = locale === "en" ? "Help with my order" : "Aide pour ma commande";
   const channels = whatsappUrl ? `${email} · WhatsApp ${whatsappUrl}` : email;
-  const message = messageFor(locale, reason, retryAfterSecs);
+  const message = messageFor(locale, reason, retryAfterSecs, email);
   return {
-    reply: `${message} ${REACH_US[locale](channels)}`,
+    // Self-contained copy already names the email, so it skips the REACH_US tail — but it must
+    // NOT silently drop WhatsApp when one is configured, or the most common limit path would be
+    // the only one that doesn't offer it. `message` stays verbatim; only `reply` gains the extra
+    // channel.
+    reply: SELF_CONTAINED_REASONS.has(reason)
+      ? (whatsappUrl ? `${message} · WhatsApp ${whatsappUrl}` : message)
+      : `${message} ${REACH_US[locale](channels)}`,
     products: [],
     limitReached: true,
     reason,

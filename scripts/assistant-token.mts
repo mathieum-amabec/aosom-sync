@@ -77,5 +77,6 @@ console.log(`
 `);
 console.log("─".repeat(78));
 console.log("Reminder: the widget ignores the HTTP status and renders j.data.reply whenever");
-console.log("j.success is true — that is why the 429/503 limit responses still carry a reply.");
+console.log("j.success is true — that is why the 429 quota response still carries a reply.");
+console.log("The daily-budget hand-off is a 200 since v0.5.74.0, not a 503.");
 process.exit(0);

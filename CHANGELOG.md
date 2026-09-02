@@ -2,6 +2,53 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.74.0] - 2026-09-02
+
+The storefront assistant stops reporting a 503 when its daily token pool is spent, and runs
+on Haiku instead of Sonnet. Measured before this change: the `assistant` pool hit its
+500,000-token cap on every one of the last 7 days, and `/api/assistant` answered 331 requests
+a day with a 503.
+
+### Fixed — a spent budget is a 200, not a 503
+
+`POST /api/assistant` returned HTTP 503 once `LlmBudgetExceededError` fired. The body was
+already the graceful bilingual hand-off card, so shoppers were not seeing an error (the
+deployed widget ignores the status and renders on `success === true`) — but 331 responses a
+day were filed as server errors in the Vercel runtime logs, burying real faults, and any
+client that checks `res.ok` before reading the body would have thrown the card away.
+
+The exhausted-pool path now returns **200** with `{ limitReached: true, message, reply,
+products: [] }`. The PDP "Complétez la pièce" mode (`runComplementary`) is handled by the same
+catch, so it gets the same 200 card.
+
+Shopper-facing copy is now self-contained — it names the address itself instead of taking the
+generic "Écrivez-nous : …" tail, which would have printed the email twice in one bubble:
+
+- FR: "Notre assistant est temporairement indisponible. Écrivez-nous à info@ameublodirect.ca 😊"
+- EN: "Our assistant is temporarily unavailable. Email us at info@ameublodirect.ca 😊"
+
+### Changed — the assistant runs Haiku 4.5
+
+New `CLAUDE.MODEL_ASSISTANT` (default `claude-haiku-4-5-20251001`, override with
+`CLAUDE_ASSISTANT_MODEL`) is what `runAssistant` sends. Haiku 4.5 is exactly one third of
+Sonnet 4.6 on both input ($1 vs $3 per MTok) and output ($5 vs $15), so a saturated
+500k-token day drops from ~$2.10 to ~$0.70 — about $42/month at current volume.
+
+`CLAUDE.MODEL` stays Sonnet 4.6 and keeps one job: the tier `generateProductContent` re-runs
+on when `MODEL_BATCH` output fails validation. Pointing the assistant at `CLAUDE.MODEL`
+directly would have collapsed that escalation into a same-model retry.
+
+⚠️ This changes cost per token, **not** tokens consumed. The pool caps tokens, so the swap
+alone serves no additional shopper — raising `LLM_ASSISTANT_DAILY_BUDGET` does that, and at
+Haiku rates 1.5M tokens/day costs what 500k did on Sonnet.
+
+### Fixed — dated model ids were priced as Sonnet
+
+`MODEL_PRICING` has no `claude-haiku-4-5-20251001` key, so the dashboard cost estimator would
+have silently fallen back to Sonnet rates and over-reported the assistant pool by 3×.
+`pricingKey()` strips a trailing `-YYYYMMDD` snapshot suffix so a dated id prices off its
+family.
+
 ## [0.5.73.0] - 2026-08-31
 
 Seasonal sequential-ad campaigns are now possible. Two shipped with this change:

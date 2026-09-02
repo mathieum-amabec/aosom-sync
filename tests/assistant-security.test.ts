@@ -113,9 +113,39 @@ describe("limitPayload — shopper-facing copy", () => {
 
   it("gives a graceful message when the daily pool is exhausted, not an error (FR + EN)", () => {
     expect(limitPayload("fr", "budget_exhausted", 0).message)
-      .toBe("Notre assistant est temporairement indisponible.");
+      .toBe("Notre assistant est temporairement indisponible. Écrivez-nous à info@ameublodirect.ca 😊");
     expect(limitPayload("en", "budget_exhausted", 0).message)
-      .toBe("Our assistant is temporarily unavailable.");
+      .toBe("Our assistant is temporarily unavailable. Email us at info@ameublodirect.ca 😊");
+  });
+
+  it("does not append the generic contact tail to the self-contained budget copy", () => {
+    // The budget copy names the address itself; appending REACH_US would print the email
+    // twice in one bubble ("… à info@… 😊 Écrivez-nous : info@…").
+    for (const locale of ["fr", "en"] as const) {
+      const p = limitPayload(locale, "budget_exhausted", 0);
+      expect(p.reply).toBe(p.message);
+      expect(p.reply.match(/info@ameublodirect\.ca/g)).toHaveLength(1);
+    }
+  });
+
+  it("still offers WhatsApp on the budget path when a number is configured", () => {
+    // Skipping REACH_US must not cost this path the WhatsApp channel every other reason
+    // keeps — it is the most common limit path, so losing it there loses it in practice.
+    const prev = process.env.ASSISTANT_CONTACT_WHATSAPP;
+    process.env.ASSISTANT_CONTACT_WHATSAPP = "15145550123";
+    try {
+      const p = limitPayload("fr", "budget_exhausted", 0);
+      expect(p.contact.whatsappUrl).toBe("https://wa.me/15145550123");
+      expect(p.reply).toContain("https://wa.me/15145550123");
+      // `message` stays the operator-specified sentence, verbatim.
+      expect(p.message).toBe(
+        "Notre assistant est temporairement indisponible. Écrivez-nous à info@ameublodirect.ca 😊",
+      );
+      expect(p.reply.match(/info@ameublodirect\.ca/g)).toHaveLength(1);
+    } finally {
+      if (prev === undefined) delete process.env.ASSISTANT_CONTACT_WHATSAPP;
+      else process.env.ASSISTANT_CONTACT_WHATSAPP = prev;
+    }
   });
 
   it("always hands the shopper a way to reach a human", () => {
@@ -269,7 +299,7 @@ describe("POST /api/assistant — quota and budget responses", () => {
     expect(runAssistant).not.toHaveBeenCalled();
   });
 
-  it("serves the hand-off card instead of a 500 when the daily pool is exhausted", async () => {
+  it("serves the hand-off card as a 200 when the daily pool is exhausted", async () => {
     const { LlmBudgetExceededError } = await import("@/lib/llm-budget");
     vi.doMock("@/lib/assistant", () => ({
       runAssistant: vi.fn().mockRejectedValue(new LlmBudgetExceededError("assistant", 500_000, 500_000)),
@@ -282,10 +312,15 @@ describe("POST /api/assistant — quota and budget responses", () => {
     }));
     const { POST } = await import("@/app/api/assistant/route");
     const res = await POST(post());
-    expect(res.status).toBe(503);
+    // 200, never 503: a spent daily pool is our rationing decision, not a service fault,
+    // and the shopper is handed a real next step. A 503 also hid the card from any client
+    // that checks res.ok before reading the body.
+    expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
+    expect(body.data.limitReached).toBe(true);
     expect(body.data.reason).toBe("budget_exhausted");
+    expect(body.data.message).toContain("temporairement indisponible");
     expect(body.data.reply).toContain("temporairement indisponible");
     expect(body.data.reply).toMatch(/@/); // contact route out
   });

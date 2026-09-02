@@ -213,12 +213,12 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
   for (let step = 0; step < MAX_STEPS; step++) {
     // Route through the DEDICATED "assistant" budget pool (llm-budget) — a reservation
     // separate from the "batch" pool that imports/content/social draw from, so a bulk
-    // batch run can never starve this public endpoint. Budget-exhausted throws → the
-    // route returns a 500 (fails closed).
+    // batch run can never starve this public endpoint. Budget-exhausted throws
+    // LlmBudgetExceededError, which the route turns into a 200 hand-off card.
     const res = await budgetedCreate(
       client,
       {
-        model: CLAUDE.MODEL,
+        model: CLAUDE.MODEL_ASSISTANT,
         max_tokens: 1024,
         system: systemPrompt(locale),
         tools: [SEARCH_TOOL],

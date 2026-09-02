@@ -3,7 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // config is read at module load via content-generator; mock it (no real env needed).
 vi.mock("@/lib/config", () => ({
   env: { anthropicApiKey: "test-key" },
-  CLAUDE: { MODEL: "claude-sonnet-4-6", MODEL_BATCH: "claude-haiku-4-5", MAX_TOKENS_CONTENT: 1000, MAX_TOKENS_SOCIAL: 500 },
+  CLAUDE: {
+    MODEL_ASSISTANT: "claude-haiku-4-5-20251001",
+    MODEL: "claude-sonnet-4-6",
+    MODEL_BATCH: "claude-haiku-4-5",
+    MAX_TOKENS_CONTENT: 1000,
+    MAX_TOKENS_SOCIAL: 500,
+  },
 }));
 
 const { create } = vi.hoisted(() => ({ create: vi.fn() }));
@@ -55,6 +61,16 @@ describe("runAssistant", () => {
       url: "https://ameublodirect.ca/products/sofa-sectionnel-gris",
     });
     expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends every turn on the assistant model, never the Sonnet escalation tier", async () => {
+    // The saving is only real if EVERY call in the loop uses MODEL_ASSISTANT — a tool-use
+    // turn left on Sonnet would keep most of the cost, since the loop runs up to MAX_STEPS.
+    create.mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+    await runAssistant({ message: "une table", locale: "fr" });
+    for (const call of create.mock.calls) {
+      expect(call[0].model).toBe("claude-haiku-4-5-20251001");
+    }
   });
 
   it("forwards prior conversation history into the model messages (multi-turn refinement)", async () => {
