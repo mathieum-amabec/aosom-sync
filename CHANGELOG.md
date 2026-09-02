@@ -2,6 +2,90 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.75.0] - 2026-09-02
+
+The four critical findings from the 2026-09-02 codebase audit. Two of them cut what the
+catalog costs to query; one recovers posts that used to vanish; one is groundwork that does
+nothing until the assistant moves back to Sonnet, and says so in the code.
+
+### Fixed — the assistant paid for a `COUNT(*)` it threw away
+
+`getProducts()` always ran `SELECT COUNT(*)` beside the data query. `searchCatalog()` reads
+only `products` — `total` was never touched. With the search predicate being unindexable,
+that count was a second full scan of ~11,900 rows, and the assistant issues up to 4 of these
+per shopper question (2 tool searches × the in-stock fallback): roughly 47,500 rows scanned
+for two values nothing consumed.
+
+New `skipCount` filter skips the count *and* the product-type lookup, and returns `total: -1`
+("not computed") with `productTypes: []`. The assistant passes it. The catalog page, which
+does render both, does not.
+
+### Added — FTS5 index on the catalog search
+
+The search was `name LIKE '%term%' OR sku LIKE '%term%'`. A leading wildcard defeats a
+B-tree, so `idx_products_name` and `idx_products_name_sku` could never serve it and every
+search scanned the table. `EXPLAIN QUERY PLAN` on the old predicate: `SCAN products`.
+
+`products_fts` is an external-content FTS5 table over `(sku, name)` with
+`unicode61 remove_diacritics 2`, kept in step by three triggers on `products`. The new plan
+is `SEARCH products USING INTEGER PRIMARY KEY (rowid=?)`. Diacritic folding is a bonus the
+LIKE never had: "canape" now finds "Canapé".
+
+The audit asked for this on `title_fr` / `title_en`. Those columns do not exist — `products`
+carries `name` (the raw English Aosom title) and `sku`, which are the two columns the search
+predicate actually referenced.
+
+Two safety properties, both exercised against a real SQLite file:
+
+- **Results can only get cheaper, never narrower.** FTS matches whole-token prefixes; LIKE
+  matches inside a word. `getProducts` re-runs the LIKE (count included) when an FTS search
+  returns zero rows, so "ardin" still finds "jardin".
+- **Shopper text can never be an FTS query injection.** `toFtsQuery` splits on
+  non-alphanumerics and re-quotes every token, so `"`, `*`, `^`, `-`, `NEAR` and `OR` are
+  inert. Raw MATCH input is a query language, and this endpoint is public.
+
+⚠️ The one-time backfill is guarded on a `settings` marker, NOT on
+`SELECT COUNT(*) FROM products_fts`. On an external-content FTS5 table that count reads
+through to `products` and reports the full catalog even when the index is empty — the guard
+would have skipped the backfill forever and left search returning nothing. Caught in QA, not
+in review.
+
+### Fixed — posts stranded in `publishing` are now retried
+
+If the publisher was killed between `claimQueueItem` and `markPublished` (Vercel SIGKILL at
+maxDuration, an instance recycle, an uncaught throw), the row stayed `publishing` forever.
+`getNextPending` only selects `pending`, so nothing picked it up again: an approved post
+silently never went out, and the documented recovery was a hand-written UPDATE.
+
+`drainPublisherQueue` now reaps before it selects, so a reclaimed row is drained in the same
+run. New `publication_queue.claimed_at` records when the row was claimed.
+
+⚠️ The stale window is **360s, not the 300s (5 minutes) the audit suggested**, and
+`reclaimStrandedPublishing` throws below 300. That bound is the entire safety argument:
+Vercel kills the publisher at `maxDuration = 300`, so a claim older than that is provably
+dead. A window at or under 300s can flip a row that is *still publishing* back to `pending`,
+the next run claims it, and the same post goes out twice on Facebook. The extra 60s covers
+the claim-to-kill gap and clock skew between instances.
+
+Existing `publishing` rows are stamped `claimed_at = now` by the migration rather than left
+NULL, so they age into eligibility instead of being reaped next to a publish that may still
+be running. Rows with a NULL `claimed_at` are never reaped.
+
+### Added — prompt-cache breakpoint on the assistant's stable prefix (inert today)
+
+`cache_control: {type:"ephemeral"}` now marks the system block, which caches the tool schema
+and the system prompt together — ~1,150 tokens that are byte-identical on every step of the
+tool loop.
+
+⚠️ **This saves nothing on the current model.** The minimum cacheable prefix is
+model-dependent and Haiku 4.5's is 4096 tokens; ours is ~1,150, so the API accepts the marker
+and silently writes nothing. It is in because it is free, correct, and self-activating: set
+`CLAUDE_ASSISTANT_MODEL=claude-sonnet-4-6` (minimum 1024) and the prefix starts caching with
+no code change. Padding the prompt to clear 4096 would spend more than it saves, so it is not
+done. `logCacheUsage()` prints `cache_creation_input_tokens` / `cache_read_input_tokens`
+whenever the API reports cache activity, so whether this is live is checkable in the runtime
+logs rather than assumed.
+
 ## [0.5.74.0] - 2026-09-02
 
 The storefront assistant stops reporting a 503 when its daily token pool is spent, and runs

@@ -3,6 +3,7 @@ import {
   buildCatalogWhere,
   parseBoolParam,
   LOW_STOCK_THRESHOLD,
+  toFtsQuery,
 } from "@/lib/catalog-filters";
 
 describe("buildCatalogWhere", () => {
@@ -67,5 +68,61 @@ describe("parseBoolParam", () => {
     expect(parseBoolParam("false")).toBe(false);
     expect(parseBoolParam("")).toBe(false);
     expect(parseBoolParam(null)).toBe(false);
+  });
+});
+
+describe("toFtsQuery — FTS5 MATCH construction", () => {
+  it("quotes every token and appends the prefix operator outside the quotes", () => {
+    expect(toFtsQuery("canape gris")).toBe('"canape"* "gris"*');
+  });
+
+  it("neutralises FTS5 operators so shopper text can never be a query injection", () => {
+    // Raw MATCH input is a query language. Unquoted, each of these is either a syntax
+    // error (throwing on a PUBLIC endpoint) or a semantic change the shopper never asked
+    // for. Splitting on non-alphanumerics makes every one of them inert.
+    for (const nasty of ['canape" OR name:*', "canape NEAR/2 gris", "canape*", "-canape", "^canape"]) {
+      const q = toFtsQuery(nasty);
+      expect(q).not.toBeNull();
+      // Every surviving token is quoted; no bare operator escapes.
+      expect(q!.split(" ").every((t) => /^"[^"]*"\*$/.test(t))).toBe(true);
+    }
+  });
+
+  it("returns null when there is nothing searchable, so the caller keeps the LIKE path", () => {
+    expect(toFtsQuery("")).toBeNull();
+    expect(toFtsQuery("   ")).toBeNull();
+    expect(toFtsQuery("!!! ??? ***")).toBeNull();
+  });
+
+  it("caps the token count so a pasted paragraph cannot blow up the MATCH", () => {
+    const q = toFtsQuery("un deux trois quatre cinq six sept huit neuf dix onze");
+    expect(q!.split(" ")).toHaveLength(8);
+  });
+});
+
+describe("buildCatalogWhere search routing", () => {
+  it("defaults to the unindexed LIKE so an unaware caller cannot change semantics", () => {
+    const r = buildCatalogWhere({ search: "canape" });
+    expect(r.where).toContain("name LIKE ?");
+    expect(r.args).toEqual(["%canape%", "%canape%"]);
+  });
+
+  it("routes through products_fts on searchMode 'fts'", () => {
+    const r = buildCatalogWhere({ search: "canape gris", searchMode: "fts" });
+    expect(r.where).toContain("products_fts MATCH ?");
+    expect(r.where).not.toContain("LIKE");
+    expect(r.args).toEqual(['"canape"* "gris"*']);
+  });
+
+  it("falls back to LIKE when the term has no searchable token, even in fts mode", () => {
+    // "???" yields no tokens; emitting `MATCH ''` would throw at query time.
+    const r = buildCatalogWhere({ search: "???", searchMode: "fts" });
+    expect(r.where).toContain("name LIKE ?");
+    expect(r.args).toEqual(["%???%", "%???%"]);
+  });
+
+  it("keeps placeholders and args in lockstep when fts is combined with other filters", () => {
+    const r = buildCatalogWhere({ search: "table", searchMode: "fts", minPrice: 100, inStock: true });
+    expect((r.where.match(/\?/g) || []).length).toBe(r.args.length);
   });
 });

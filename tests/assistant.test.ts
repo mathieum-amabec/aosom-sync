@@ -98,10 +98,26 @@ describe("runAssistant", () => {
   it("system prompt distinguishes indoor vs outdoor and instructs multi-turn refinement", async () => {
     create.mockResolvedValueOnce(final({ reply: "ok", products: [] }));
     await runAssistant({ message: "un canapé pour mon salon", locale: "fr" });
-    const system = create.mock.calls[0][0].system as string;
+    // `system` is a block array since the cache breakpoint was added, not a bare string.
+    const blocks = create.mock.calls[0][0].system as { type: string; text: string }[];
+    const system = blocks.map((b) => b.text).join("\n");
     expect(system).toMatch(/INDOOR vs OUTDOOR/);
     expect(system).toMatch(/patio|outdoor/i);
     expect(system).toMatch(/refine|accumulated|maxPrice/i);
+  });
+
+  it("marks the stable prefix as cacheable on every turn of the loop", async () => {
+    // The marker is a no-op on Haiku 4.5 (minimum cacheable prefix is 4096 tokens, ours is
+    // ~1,150) but it must still be present and well-formed: switching the assistant back to
+    // Sonnet 4.6 via CLAUDE_ASSISTANT_MODEL is the supported way to turn caching on, and a
+    // dropped marker would make that switch silently do nothing.
+    create.mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+    await runAssistant({ message: "une table", locale: "fr" });
+    for (const call of create.mock.calls) {
+      const blocks = call[0].system as { type: string; cache_control?: { type: string } }[];
+      expect(Array.isArray(blocks)).toBe(true);
+      expect(blocks[blocks.length - 1].cache_control).toEqual({ type: "ephemeral" });
+    }
   });
 
   // CHANGED in v0.5.59.3: this asserted `furnishdirect.ca`, which is NXDOMAIN — the test was

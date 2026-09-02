@@ -59,6 +59,23 @@ const STORE_URL: Record<Locale, string> = {
  * options rather than being boxed into an artificially narrow band. */
 const BUDGET_TOLERANCE = 1.3;
 
+/**
+ * Report what prompt caching actually did on a turn.
+ *
+ * The cache marker on the system block is silent when it fails: a prefix under the model's
+ * minimum (4096 tokens on Haiku 4.5) writes nothing and raises nothing. Without this line
+ * there is no way to tell "caching is on" from "caching is configured and doing nothing".
+ * Logged only when the API reports cache activity, so a normal uncached turn stays quiet.
+ */
+function logCacheUsage(step: number, usage: Anthropic.Messages.Usage | null | undefined): void {
+  const created = usage?.cache_creation_input_tokens ?? 0;
+  const read = usage?.cache_read_input_tokens ?? 0;
+  if (created === 0 && read === 0) return;
+  console.info(
+    `[assistant] prompt cache step=${step} created=${created} read=${read} uncached_input=${usage?.input_tokens ?? 0}`,
+  );
+}
+
 /** Pull a spending ceiling out of free text. Deliberately narrow: the number must be
  * adjacent to a currency marker ("800$", "500 dollars", "1200 CAD"). That adjacency is what
  * keeps "terrasse 10x10 pieds" and "sofa 3 places" from being read as a price — a false
@@ -117,6 +134,10 @@ async function searchCatalog(input: Record<string, unknown>): Promise<Card[]> {
     maxPrice: typeof input.maxPrice === "number" && isFinite(input.maxPrice) ? input.maxPrice : undefined,
     page: 1,
     limit: 40,
+    // Rows only. This function reads neither `total` nor `productTypes`, and the COUNT(*)
+    // they cost is a second full scan of `products` (the LIKE '%…%' predicate is
+    // unindexable). Dropping it halves the rows Turso bills for every shopper question.
+    skipCount: true,
   };
   // Prefer supplier-in-stock rows (`qty > 0` in the catalog mirror). NOT a hard filter:
   // this is a dropship catalog where stock lives only in the Aosom CSV snapshot and can be
@@ -220,13 +241,28 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
       {
         model: CLAUDE.MODEL_ASSISTANT,
         max_tokens: 1024,
-        system: systemPrompt(locale),
+        // Cache breakpoint on the STABLE prefix. Render order is tools → system → messages,
+        // so a marker on the system block caches the tool schema AND the system prompt:
+        // ~1,150 tokens that are byte-identical on every step of this loop and on every
+        // request for a given locale.
+        //
+        // ⚠️ NO-OP ON THE CURRENT MODEL. The minimum cacheable prefix is model-dependent and
+        // Haiku 4.5's is 4096 tokens; ours is ~1,150. The API accepts the marker and
+        // silently writes nothing (`cache_creation_input_tokens: 0`, no error). It is here
+        // because it is free, correct, and self-activating: set
+        // CLAUDE_ASSISTANT_MODEL=claude-sonnet-4-6 (minimum 1024) and the prefix caches with
+        // no code change. Do NOT pad the prompt to clear 4096 — that spends more than it saves.
+        //
+        // logCacheUsage() below reports what actually happened, so this is checkable in the
+        // runtime logs rather than assumed.
+        system: [{ type: "text", text: systemPrompt(locale), cache_control: { type: "ephemeral" } }],
         tools: [SEARCH_TOOL],
         messages,
       },
       undefined,
       "assistant",
     );
+    logCacheUsage(step, res.usage);
 
     if (res.stop_reason === "tool_use") {
       const toolUses = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");

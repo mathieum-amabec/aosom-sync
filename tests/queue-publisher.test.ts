@@ -16,6 +16,8 @@ vi.mock("@/lib/shopify-blog", () => ({
 vi.mock("@/lib/database", () => ({
   getNextPending: vi.fn(),
   claimQueueItem: vi.fn(),
+  reclaimStrandedPublishing: vi.fn().mockResolvedValue(0),
+  PUBLISHER_MAX_DURATION_SECONDS: 300,
   markPublished: vi.fn().mockResolvedValue(undefined),
   markFailed: vi.fn().mockResolvedValue(undefined),
 }));
@@ -35,7 +37,7 @@ import {
 } from "@/lib/facebook-client";
 import { publishPhoto, publishReel } from "@/lib/instagram-client";
 import { createBlogArticle } from "@/lib/shopify-blog";
-import { getNextPending, claimQueueItem, markPublished, markFailed } from "@/lib/database";
+import { getNextPending, claimQueueItem, markPublished, markFailed, reclaimStrandedPublishing } from "@/lib/database";
 import { getAnthropicClient } from "@/lib/content-generator";
 
 const mockGetClient = getAnthropicClient as unknown as ReturnType<typeof vi.fn>;
@@ -328,5 +330,44 @@ describe("publishQueueItem — Reel clickbait caption (content_type=video)", () 
       item({ platform: "instagram", contentType: "social", payload: social({ imageUrl: "a.jpg" }) }),
     );
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe("stranded-publish reaper", () => {
+  beforeEach(() => {
+    vi.mocked(getNextPending).mockResolvedValue([]);
+    vi.mocked(reclaimStrandedPublishing).mockResolvedValue(0);
+  });
+
+  it("reaps BEFORE selecting pending work, so a reclaimed row is drained in the same run", async () => {
+    const order: string[] = [];
+    vi.mocked(reclaimStrandedPublishing).mockImplementation(async () => { order.push("reap"); return 1; });
+    vi.mocked(getNextPending).mockImplementation(async () => { order.push("select"); return []; });
+    await drainPublisherQueue();
+    expect(order).toEqual(["reap", "select"]);
+  });
+
+  it("uses a stale window LONGER than the route's 300s maxDuration", async () => {
+    // The safety argument for the whole reaper: Vercel kills the publisher at 300s, so a
+    // claim older than that is provably dead. A window at or below 300s could flip a row
+    // that is STILL publishing back to 'pending' — the next run claims it and the same
+    // post goes out twice on Facebook.
+    await drainPublisherQueue();
+    const [seconds] = vi.mocked(reclaimStrandedPublishing).mock.calls[0];
+    expect(seconds).toBeGreaterThan(300);
+  });
+
+  it("reports how many rows it reclaimed", async () => {
+    vi.mocked(reclaimStrandedPublishing).mockResolvedValue(3);
+    const r = await drainPublisherQueue();
+    expect(r.reclaimed).toBe(3);
+  });
+
+  it("still drains when the reaper throws — recovery must not block publishing", async () => {
+    vi.mocked(reclaimStrandedPublishing).mockRejectedValue(new Error("turso down"));
+    vi.mocked(getNextPending).mockResolvedValue([]);
+    const r = await drainPublisherQueue();
+    expect(r.reclaimed).toBe(0);
+    expect(getNextPending).toHaveBeenCalled();
   });
 });
