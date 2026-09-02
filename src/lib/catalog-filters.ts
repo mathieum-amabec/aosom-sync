@@ -40,9 +40,17 @@ export const PRODUCT_HAS_DISCOUNT_SQL = `EXISTS (
  * impossible to inject. Second, RECALL: each token gets a `*` suffix so "canap" still finds
  * "canapé", which mirrors how the LIKE behaved for prefixes.
  *
- * What FTS cannot do that LIKE could: match INSIDE a word ("anape" no longer finds "canapé").
- * That is why getProducts re-runs the LIKE when an FTS search returns nothing — results
- * never narrow, they only get cheaper in the common case.
+ * What FTS cannot do that LIKE could: match INSIDE a word. getProducts re-runs the LIKE when
+ * an FTS search returns NOTHING, so a purely-infix term still finds its rows.
+ *
+ * ⚠️ The fallback fires on zero results only, so a term that matches both as a word and as an
+ * infix DOES return a smaller set than before. Measured on production (11,896 rows):
+ *   sofa 416 = 416 · outdoor 3568 = 3568 · garden 2264 = 2264   (identical)
+ *   chair 1922 vs 1957   (LIKE also caught "armchair", "highchair")
+ *   table 1609 vs 4656   (LIKE also caught "Adjustable", "Portable", "Foldable")
+ * This is a deliberate relevance call: a shopper searching "table" wants tables, not every
+ * adjustable desk. To restore exact pre-FTS behaviour, drop `searchMode: "fts"` at the call
+ * site — the LIKE path is still here and still correct, just unindexed.
  *
  * Capped at 8 tokens; beyond that the query is noise and the MATCH cost grows.
  */
