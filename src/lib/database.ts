@@ -1400,7 +1400,10 @@ export async function getProducts(filters: {
   // Search routing. With a `search` term we prefer the indexed FTS path and keep the LIKE
   // variant ready: FTS matches whole-token prefixes, LIKE matches inside a word, so an FTS
   // search that finds nothing is re-run on LIKE before we tell anyone there are no results.
-  // Results can only get cheaper, never narrower. Without a term the two are identical.
+  // The fallback covers ZERO results only, so a term that matches both as a word and as an
+  // infix returns fewer rows than the old LIKE did (production: "table" 1609 vs 4656 — LIKE
+  // also matched "Adjustable"/"Portable"). That is the intended relevance trade; toFtsQuery
+  // carries the measured numbers and how to opt back out. No term: the two are identical.
   const likeVariant = buildCatalogWhere({ ...filters, searchMode: "like" });
   const ftsVariant = filters.search ? buildCatalogWhere({ ...filters, searchMode: "fts" }) : null;
   const usingFts = !!ftsVariant && ftsVariant.where !== likeVariant.where;

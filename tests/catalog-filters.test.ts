@@ -126,3 +126,14 @@ describe("buildCatalogWhere search routing", () => {
     expect((r.where.match(/\?/g) || []).length).toBe(r.args.length);
   });
 });
+
+describe("FTS vs LIKE: the documented narrowing", () => {
+  it("documents that FTS is token-prefix, not infix — the fallback is zero-result only", () => {
+    // Pins the semantics the CHANGELOG measured on production: "table" under FTS does NOT
+    // match "Adjustable", which the old LIKE did. If someone later makes toFtsQuery emit a
+    // leading wildcard to "fix" this, they lose the index and this test says so.
+    const q = toFtsQuery("table");
+    expect(q).toBe('"table"*');
+    expect(q).not.toContain("*table"); // a leading wildcard would defeat the FTS index
+  });
+});

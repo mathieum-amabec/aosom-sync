@@ -37,9 +37,17 @@ predicate actually referenced.
 
 Two safety properties, both exercised against a real SQLite file:
 
-- **Results can only get cheaper, never narrower.** FTS matches whole-token prefixes; LIKE
-  matches inside a word. `getProducts` re-runs the LIKE (count included) when an FTS search
-  returns zero rows, so "ardin" still finds "jardin".
+- **A term that finds nothing under FTS still finds its rows.** FTS matches whole-token
+  prefixes; LIKE matches inside a word. `getProducts` re-runs the LIKE (count included) when
+  an FTS search returns zero rows, so a purely-infix term like "ardin" still finds "jardin".
+  ⚠️ Corrected after the deploy: this was first written as "results can only get cheaper,
+  never narrower", which is **false**. The fallback fires on zero results only, so a term
+  matching both as a word and as an infix returns a smaller set. Measured on production
+  (11,896 rows): `sofa` 416 = 416, `outdoor` 3568 = 3568, `garden` 2264 = 2264 unchanged;
+  `chair` 1922 vs 1957 (LIKE also caught "armchair"); `table` 1609 vs 4656 (LIKE also caught
+  "Adjustable", "Portable", "Foldable"). Kept as a relevance improvement — a shopper
+  searching "table" wants tables, not every adjustable desk. Drop `searchMode: "fts"` at the
+  call site to restore the old behaviour exactly.
 - **Shopper text can never be an FTS query injection.** `toFtsQuery` splits on
   non-alphanumerics and re-quotes every token, so `"`, `*`, `^`, `-`, `NEAR` and `OR` are
   inert. Raw MATCH input is a query language, and this endpoint is public.
