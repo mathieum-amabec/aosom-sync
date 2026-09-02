@@ -30,9 +30,42 @@ export const PRODUCT_HAS_DISCOUNT_SQL = `EXISTS (
   WHERE lpx.rn = 1 AND lpx.old_price > products.price
 )`;
 
+/**
+ * Turn raw shopper text into a safe FTS5 MATCH expression, or null when it has nothing
+ * searchable in it.
+ *
+ * Two jobs. First, SAFETY: FTS5 MATCH is a query language, and raw input containing `"`,
+ * `*`, `:`, `^`, `-`, `NEAR` or `OR` is a syntax error that would throw at query time on a
+ * public endpoint. Splitting on non-alphanumerics and re-quoting every token makes operators
+ * impossible to inject. Second, RECALL: each token gets a `*` suffix so "canap" still finds
+ * "canapé", which mirrors how the LIKE behaved for prefixes.
+ *
+ * What FTS cannot do that LIKE could: match INSIDE a word ("anape" no longer finds "canapé").
+ * That is why getProducts re-runs the LIKE when an FTS search returns nothing — results
+ * never narrow, they only get cheaper in the common case.
+ *
+ * Capped at 8 tokens; beyond that the query is noise and the MATCH cost grows.
+ */
+export function toFtsQuery(raw: string): string | null {
+  const tokens = String(raw ?? "")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((t) => t.length > 0)
+    .slice(0, 8);
+  if (tokens.length === 0) return null;
+  // Double-quote each token (escaping any embedded quote) so it is a literal string, then
+  // append the prefix operator OUTSIDE the quotes — `"canap"*` is valid FTS5 prefix syntax.
+  return tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(" ");
+}
+
 export interface CatalogFilterInput {
   productType?: string;
   search?: string;
+  /**
+   * `"fts"` routes `search` through the indexed products_fts table; anything else keeps the
+   * unindexed LIKE. Defaults to LIKE so an unaware caller cannot silently change semantics.
+   */
+  searchMode?: "like" | "fts";
   minPrice?: number;
   maxPrice?: number;
   inStock?: boolean;
@@ -67,8 +100,19 @@ export function buildCatalogWhere(f: CatalogFilterInput): CatalogWhere {
     args.push(`${f.productType}%`);
   }
   if (f.search) {
-    conditions.push(`(name LIKE ? OR sku LIKE ?)`);
-    args.push(`%${f.search}%`, `%${f.search}%`);
+    const fts = f.searchMode === "fts" ? toFtsQuery(f.search) : null;
+    if (fts) {
+      // Indexed path. `products_fts` is an external-content FTS5 table over (sku, name),
+      // so its rowid IS the products rowid — no join needed.
+      conditions.push(`rowid IN (SELECT rowid FROM products_fts WHERE products_fts MATCH ?)`);
+      args.push(fts);
+    } else {
+      // Unindexed fallback: a leading wildcard defeats every B-tree, so this scans all of
+      // `products`. Still the default, and still the zero-result fallback in getProducts,
+      // so search results can never narrow versus the pre-FTS behaviour.
+      conditions.push(`(name LIKE ? OR sku LIKE ?)`);
+      args.push(`%${f.search}%`, `%${f.search}%`);
+    }
   }
   if (f.minPrice !== undefined) {
     conditions.push(`price >= ?`);

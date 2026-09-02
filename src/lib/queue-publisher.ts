@@ -26,6 +26,7 @@ import { CLAUDE } from "./config";
 import {
   getNextPending,
   claimQueueItem,
+  reclaimStrandedPublishing,
   markPublished,
   markFailed,
   type PublicationQueueItem,
@@ -283,6 +284,8 @@ export interface DrainResult {
   skipped: number;
   /** Items left 'pending' because the time budget ran out before claiming them. */
   deferred: number;
+  /** Rows the reaper returned from a stranded 'publishing' state to 'pending' this run. */
+  reclaimed: number;
   outcomes: PublishOutcome[];
 }
 
@@ -292,10 +295,21 @@ const DEFAULT_RATE_LIMIT_MS = 2_000;
 // maxDuration (300s) so an in-flight publish (an IG reel transcode can poll ~120s) can
 // finish and the function can return cleanly. A claim we can't finish before Vercel
 // SIGKILLs the function would strand the item in 'publishing' — getNextPending only
-// re-selects 'pending', and there is no reaper today.
-// Deferring instead leaves the item 'pending' for the next hourly run. Recover a stranded
-// row manually with:  UPDATE publication_queue SET status='pending' WHERE status='publishing';
+// re-selects 'pending'. Deferring instead leaves the item 'pending' for the next hourly run.
+// A row stranded despite that is now recovered automatically by the reaper below, so the
+// manual "UPDATE publication_queue SET status='pending'" recovery is no longer needed.
 const DEFAULT_BUDGET_MS = 240_000;
+
+/**
+ * How long a row may sit in 'publishing' before the reaper declares it dead.
+ *
+ * MUST stay above PUBLISHER_MAX_DURATION_SECONDS (300s). Vercel kills the function at 300s,
+ * so a row claimed longer ago than that provably is not being published any more. The extra
+ * 60s covers the gap between the claim and the kill, plus clock skew between instances.
+ * Drop below 300 and the reaper can hand a LIVE publish back to the next run — the same post
+ * twice on Facebook. reclaimStrandedPublishing throws rather than accept a smaller window.
+ */
+const DEFAULT_STALE_CLAIM_SECONDS = 360;
 
 /**
  * Drain up to `limit` due pending items. For each: atomically claim it (skip if another
@@ -309,15 +323,33 @@ export async function drainPublisherQueue(opts: {
   limit?: number;
   rateLimitMs?: number;
   budgetMs?: number;
+  /** Seconds a row may sit in 'publishing' before the reaper retries it. Must be >= 300. */
+  staleClaimSeconds?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 } = {}): Promise<DrainResult> {
   const limit = opts.limit ?? DEFAULT_LIMIT;
   const rateLimitMs = opts.rateLimitMs ?? DEFAULT_RATE_LIMIT_MS;
   const budgetMs = opts.budgetMs ?? DEFAULT_BUDGET_MS;
+  const staleClaimSeconds = opts.staleClaimSeconds ?? DEFAULT_STALE_CLAIM_SECONDS;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const now = opts.now ?? (() => Date.now());
   const start = now();
+
+  // Reap first, so anything stranded by a previous run is 'pending' again before we select.
+  // Best-effort: a reaper failure must not stop the drain — the queue still moves, the
+  // stranded rows just wait for the next hourly run.
+  let reclaimed = 0;
+  try {
+    reclaimed = await reclaimStrandedPublishing(staleClaimSeconds);
+    if (reclaimed > 0) {
+      console.warn(
+        `[publisher] reaped ${reclaimed} row(s) stranded in 'publishing' for more than ${staleClaimSeconds}s — returned to 'pending'`,
+      );
+    }
+  } catch (err) {
+    console.error("[publisher] reaper failed (draining anyway):", err instanceof Error ? err.message : err);
+  }
 
   const pending = await getNextPending(limit);
   const outcomes: PublishOutcome[] = [];
@@ -373,6 +405,7 @@ export async function drainPublisherQueue(opts: {
     failed: outcomes.filter((o) => o.status === "failed").length,
     skipped: outcomes.filter((o) => o.status === "skipped").length,
     deferred,
+    reclaimed,
     outcomes,
   };
 }

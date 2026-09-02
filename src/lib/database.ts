@@ -115,6 +115,35 @@ async function _initSchemaImpl(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_products_qty ON products(qty)`,
     `CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)`,
     `CREATE INDEX IF NOT EXISTS idx_products_name_sku ON products(name, sku)`,
+    // ── Full-text search over the catalog ────────────────────────────────────
+    // The two indexes above CANNOT serve the catalog search: the predicate was
+    // `name LIKE '%term%'`, and a leading wildcard defeats a B-tree, so every search was
+    // a full scan of ~11,900 rows (twice, with the COUNT). FTS5 gives that search a real
+    // index. Verified available on Turso (SQLite 3.47.0).
+    //
+    // External-content table: the rows live in `products`, FTS5 only holds the inverted
+    // index and reaches back by rowid. `products` is a normal rowid table with a TEXT
+    // primary key, and refreshProducts upserts with ON CONFLICT DO UPDATE (never REPLACE),
+    // so rowids are stable and the triggers below stay in lockstep.
+    //
+    // remove_diacritics 2 makes "canape" match "canapé" — the old LIKE could not.
+    `CREATE VIRTUAL TABLE IF NOT EXISTS products_fts USING fts5(
+      sku, name, content='products', content_rowid='rowid',
+      tokenize='unicode61 remove_diacritics 2'
+    )`,
+    // Keep the index in step with the table. Deleting by rowid is O(1); a trigger that
+    // deleted by `sku` would rescan the whole FTS table on every one of the ~1,300 rows
+    // the daily sync touches.
+    `CREATE TRIGGER IF NOT EXISTS products_fts_ai AFTER INSERT ON products BEGIN
+      INSERT INTO products_fts(rowid, sku, name) VALUES (new.rowid, new.sku, new.name);
+    END`,
+    `CREATE TRIGGER IF NOT EXISTS products_fts_ad AFTER DELETE ON products BEGIN
+      INSERT INTO products_fts(products_fts, rowid, sku, name) VALUES('delete', old.rowid, old.sku, old.name);
+    END`,
+    `CREATE TRIGGER IF NOT EXISTS products_fts_au AFTER UPDATE OF sku, name ON products BEGIN
+      INSERT INTO products_fts(products_fts, rowid, sku, name) VALUES('delete', old.rowid, old.sku, old.name);
+      INSERT INTO products_fts(rowid, sku, name) VALUES (new.rowid, new.sku, new.name);
+    END`,
     `CREATE TABLE IF NOT EXISTS price_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, old_price REAL, new_price REAL,
       old_qty INTEGER, new_qty INTEGER, change_type TEXT,
@@ -533,6 +562,26 @@ async function _initSchemaImpl(): Promise<void> {
     ]);
   }
 
+  // `claimed_at`: when claimQueueItem flipped this row to 'publishing' (unix seconds).
+  //
+  // This exists ONLY so the reaper can tell a stranded row from one being published right
+  // now. Without it the only available timestamps are scheduled_at and created_at, and
+  // reaping on either would resurrect an in-flight item — a duplicate post on Facebook or
+  // Instagram, which is far worse than the stranded row we are fixing.
+  //
+  // Existing 'publishing' rows are stamped with "now" rather than left NULL, so they become
+  // eligible one stale-window from this deploy instead of being reaped instantly next to a
+  // publish that might still be running.
+  if (!pqCols.has("claimed_at")) {
+    await runBatch("publication_queue add claimed_at", [
+      { sql: `ALTER TABLE publication_queue ADD COLUMN claimed_at INTEGER`, args: [] },
+      {
+        sql: `UPDATE publication_queue SET claimed_at = strftime('%s','now') WHERE status = 'publishing' AND claimed_at IS NULL`,
+        args: [],
+      },
+    ]);
+  }
+
   // daily_llm_budget: split the single global counter into per-pool counters
   // (assistant vs batch) so a bulk batch run can never exhaust the assistant's
   // reservation. Migrate the legacy (day PRIMARY KEY) table to a composite
@@ -717,6 +766,46 @@ async function _initSchemaImpl(): Promise<void> {
   // schema promise. Refreshed every sync thereafter via recomputeHasDiscount().
   if (!hasDiscountColExisted) {
     await db.execute(`UPDATE products SET has_discount = CASE WHEN ${PRODUCT_HAS_DISCOUNT_SQL} THEN 1 ELSE 0 END`);
+  }
+
+  // One-time backfill of products_fts. The triggers only cover writes from here on, so an
+  // existing catalog (~11,900 rows) sits behind an EMPTY index until this runs, and every
+  // search would silently return nothing. 'rebuild' reads the content table and regenerates
+  // the inverted index.
+  //
+  // ⚠️ Do NOT guard this on `SELECT COUNT(*) FROM products_fts`. On an external-content FTS5
+  // table that count reads THROUGH to `products`, so it reports the full catalog even when
+  // the index holds nothing — the guard would skip the backfill forever and leave search
+  // broken. (Verified: fresh index, 2 products, COUNT(*) = 2, MATCH hits = 0.) The shadow
+  // table `products_fts_data` is no better: its row count varies with content size, so
+  // there is no fixed "empty" threshold.
+  //
+  // A persisted marker is the one signal that is actually deterministic. Bump the version
+  // suffix to force a rebuild on the next boot.
+  //
+  // Non-fatal by design: getProducts falls back to the LIKE predicate when FTS returns
+  // nothing, so a failed rebuild degrades to the old behaviour instead of taking schema
+  // init (and with it the whole app) down.
+  const FTS_BUILD_MARKER = "products_fts_built_v1";
+  try {
+    const built = await db.execute({
+      sql: `SELECT value FROM settings WHERE key = ?`,
+      args: [FTS_BUILD_MARKER],
+    });
+    if (built.rows.length === 0) {
+      await db.execute(`INSERT INTO products_fts(products_fts) VALUES('rebuild')`);
+      await db.execute({
+        sql: `INSERT INTO settings (key, value) VALUES (?, ?)
+              ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        args: [FTS_BUILD_MARKER, new Date().toISOString()],
+      });
+      console.info("[db] products_fts rebuilt from products (one-time backfill)");
+    }
+  } catch (err) {
+    console.warn(
+      "[db] products_fts backfill failed — catalog search falls back to LIKE:",
+      err instanceof Error ? err.message : String(err),
+    );
   }
 
   // Composite indexes for the slideshow content selectors (src/lib/selectors).
@@ -1291,10 +1380,31 @@ export async function getProducts(filters: {
   page?: number;
   limit?: number;
   sort?: string;
+  /**
+   * Skip the `COUNT(*)` and the product-type lookup for callers that only want rows.
+   *
+   * The count is a SECOND full pass over `products` with the same WHERE clause. On a search
+   * the predicate is `name LIKE '%…%'`, which no index can serve, so the count exactly
+   * doubles the rows Turso bills for that call. The storefront assistant runs this up to 4x
+   * per shopper question and reads neither `total` nor `productTypes` — roughly 47,500 rows
+   * scanned per question for two values nothing consumed.
+   *
+   * When true, `total` is **-1** ("not computed") and `productTypes` is `[]`. Never render
+   * either; if you need them, do not pass this flag.
+   */
+  skipCount?: boolean;
 }): Promise<{ products: ProductRow[]; total: number; productTypes: { type: string; count: number }[] }> {
   const db = await ensureSchema();
   // WHERE clause + args are shared with getCatalogStats via buildCatalogWhere.
-  const { where, args } = buildCatalogWhere(filters);
+  //
+  // Search routing. With a `search` term we prefer the indexed FTS path and keep the LIKE
+  // variant ready: FTS matches whole-token prefixes, LIKE matches inside a word, so an FTS
+  // search that finds nothing is re-run on LIKE before we tell anyone there are no results.
+  // Results can only get cheaper, never narrower. Without a term the two are identical.
+  const likeVariant = buildCatalogWhere({ ...filters, searchMode: "like" });
+  const ftsVariant = filters.search ? buildCatalogWhere({ ...filters, searchMode: "fts" }) : null;
+  const usingFts = !!ftsVariant && ftsVariant.where !== likeVariant.where;
+  const { where, args } = usingFts && ftsVariant ? ftsVariant : likeVariant;
   const page = Math.max(1, filters.page || 1);
   const limit = Math.min(Math.max(1, filters.limit || 50), 200);
   const offset = (page - 1) * limit;
@@ -1336,8 +1446,13 @@ export async function getProducts(filters: {
   // result is LEFT JOINed to `last_price` (and, for the velocity/discount sorts, to a 14-day
   // `ph_agg`). COALESCE(…, 0) keeps products without history at the bottom of the list.
   const cutoff14d = Math.floor(Date.now() / 1000) - 14 * 86400;
-  const filteredCte = `filtered AS (SELECT ${catalogColumns} FROM products ${where})`;
   const selectCols = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, f.shopify_handle, lp.prev_price`;
+
+  // Built as a function of (where, args) so the FTS→LIKE fallback can re-issue the exact
+  // same query shape against the other predicate without duplicating three SQL branches.
+  const buildProductsQuery = (w: string, a: (string | number)[]): { sql: string; args: (string | number)[] } => {
+  const filteredCte = `filtered AS (SELECT ${catalogColumns} FROM products ${w})`;
+  const args = a;
   let productsSql: string;
   let productsArgs: (string | number)[];
 
@@ -1379,12 +1494,37 @@ export async function getProducts(filters: {
       ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
     productsArgs = [...args, limit, offset];
   }
+    return { sql: productsSql, args: productsArgs };
+  };
+
+  // `skipCount` callers want rows only — issue ONE query instead of three. See the flag's
+  // doc comment above for why the count is the expensive half on a search.
+  if (filters.skipCount) {
+    let q = buildProductsQuery(where, args);
+    let rows = (await db.execute({ sql: q.sql, args: q.args })).rows;
+    if (rows.length === 0 && usingFts) {
+      q = buildProductsQuery(likeVariant.where, likeVariant.args);
+      rows = (await db.execute({ sql: q.sql, args: q.args })).rows;
+    }
+    return { products: rows.map(rowToProduct), total: -1, productTypes: [] };
+  }
 
   // Run count + data in parallel (2 round trips instead of 3)
-  const [countResult, productsResult] = await Promise.all([
+  const first = buildProductsQuery(where, args);
+  let [countResult, productsResult] = await Promise.all([
     db.execute({ sql: `SELECT COUNT(*) as cnt FROM products ${where}`, args }),
-    db.execute({ sql: productsSql, args: productsArgs }),
+    db.execute({ sql: first.sql, args: first.args }),
   ]);
+
+  // FTS found nothing: re-run on the LIKE predicate before reporting an empty catalog. The
+  // count has to be re-run too or the pager would show 0 above a non-empty page.
+  if (productsResult.rows.length === 0 && usingFts) {
+    const retry = buildProductsQuery(likeVariant.where, likeVariant.args);
+    [countResult, productsResult] = await Promise.all([
+      db.execute({ sql: `SELECT COUNT(*) as cnt FROM products ${likeVariant.where}`, args: likeVariant.args }),
+      db.execute({ sql: retry.sql, args: retry.args }),
+    ]);
+  }
 
   const total = Number(rowToObj(countResult.rows[0]).cnt) || 0;
   const products = productsResult.rows.map(rowToProduct);
@@ -3439,13 +3579,58 @@ export async function getNextPending(limit = 10): Promise<PublicationQueueItem[]
  * took it. The consumer cron MUST claim before publishing so Vercel's overlapping cron
  * instances never double-publish the same item.
  */
+/**
+ * The publisher route's `maxDuration` (src/app/api/cron/publisher/route.ts:52), in seconds.
+ * Vercel SIGKILLs the function at this point, so nothing can still be publishing past it —
+ * which is exactly what makes reclaimStrandedPublishing safe. Keep the two in step.
+ */
+export const PUBLISHER_MAX_DURATION_SECONDS = 300;
+
 export async function claimQueueItem(id: number): Promise<boolean> {
   const db = await ensureSchema();
   const result = await db.execute({
-    sql: `UPDATE publication_queue SET status = 'publishing' WHERE id = ? AND status = 'pending'`,
+    // Stamp claimed_at in the SAME statement as the status flip: the reaper's whole safety
+    // argument is that a row in 'publishing' always carries the moment it was claimed.
+    sql: `UPDATE publication_queue SET status = 'publishing', claimed_at = strftime('%s','now') WHERE id = ? AND status = 'pending'`,
     args: [id],
   });
   return (result.rowsAffected ?? 0) === 1;
+}
+
+/**
+ * Return rows stranded in 'publishing' to 'pending' so the next drain retries them.
+ *
+ * A row is stranded when the function that claimed it died between the claim and
+ * markPublished/markFailed — Vercel SIGKILL at maxDuration, an instance recycle, an
+ * uncaught throw. `getNextPending` only selects 'pending', so nothing ever picked these up
+ * again: an approved post silently never went out, with no error anywhere.
+ *
+ * ⚠️ `staleSeconds` MUST exceed the publisher route's maxDuration (300s). That is the whole
+ * safety argument: a function cannot still be publishing after 300s because Vercel has
+ * killed it, so anything claimed longer ago than that is provably dead. Set it below 300
+ * and the reaper can flip a row that is still being published back to 'pending', the next
+ * run claims it, and the shopper-facing result is the same post twice on Facebook.
+ *
+ * Rows with a NULL claimed_at are left alone — they predate the column, and the migration
+ * stamps them so they age into eligibility instead of being reaped next to a live publish.
+ */
+export async function reclaimStrandedPublishing(staleSeconds: number): Promise<number> {
+  if (!Number.isFinite(staleSeconds) || staleSeconds < PUBLISHER_MAX_DURATION_SECONDS) {
+    throw new Error(
+      `reclaimStrandedPublishing: staleSeconds must be >= ${PUBLISHER_MAX_DURATION_SECONDS} ` +
+        `(the publisher route's maxDuration) or an in-flight publish can be resurrected — got ${staleSeconds}`,
+    );
+  }
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue
+            SET status = 'pending', claimed_at = NULL
+          WHERE status = 'publishing'
+            AND claimed_at IS NOT NULL
+            AND (strftime('%s','now') - claimed_at) > ?`,
+    args: [Math.floor(staleSeconds)],
+  });
+  return Number(result.rowsAffected ?? 0);
 }
 
 export async function markPublished(id: number): Promise<void> {
