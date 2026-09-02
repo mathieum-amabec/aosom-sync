@@ -3,6 +3,13 @@
 Findings from `/cso` (CSO security audit). P0/P1 are fixed inline; P2/P3 tracked here.
 Audit date: 2026-06-05. Mode: daily (8/10 confidence gate). Stack: Next.js / TypeScript / Turso.
 
+> **Note 2026-09-02 (v0.5.76.0).** Five routes named in this audit no longer exist:
+> `slideshow/generate`, `slideshow/preview`, `slideshow/products-preview`,
+> `social/content/generate-weekly-mix` and `sync/health` were deleted as dead code (no
+> caller in the repo, in vercel.json, in 24h of production logs, in any Shopify webhook or
+> ScriptTag, or in the deployed theme). The findings below are kept as the historical record
+> of what was true on the audit date; the controls they describe are moot for those routes.
+
 ## Fixed (P1) — see commit "fix(security): address /cso findings"
 
 - **Unauthenticated mutating API routes.** `POST /api/import/push`, `/api/import/queue`,

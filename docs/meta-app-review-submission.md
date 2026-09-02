@@ -178,7 +178,7 @@ permission. Record it with OBS Studio (macOS/Windows/Linux), QuickTime
 7. ✅ **Session tokens carry the role** (`src/lib/auth.ts`) — old tokens
    from before this change force a re-login
 8. ✅ **App icons generated** at `public/meta-app-icon-1024.png` and
-   `public/meta-app-icon-512.png` (`scripts/generate-app-icon.js`)
+   `public/meta-app-icon-512.png` (`scripts/generate-app-icon.mjs`)
 9. ✅ **Submission documentation** (this file) — permission descriptions,
    test credentials template, screencast script
 10. ✅ **`.env.example` updated** with `META_REVIEW_PASSWORD`
@@ -261,7 +261,7 @@ https://developers.facebook.com.
 | `src/app/api/auth/route.ts` | Seeds `meta-review` user from `META_REVIEW_PASSWORD` |
 | `src/app/(dashboard)/layout.tsx` | Async, reads role, passes to `Sidebar` |
 | `src/components/sidebar.tsx` | Accepts `role` prop, filters nav for reviewer |
-| `scripts/generate-app-icon.js` | Renders the 1024 + 512 PNG icons via sharp |
+| `scripts/generate-app-icon.mjs` | Renders the 1024 + 512 PNG icons via sharp |
 | `public/meta-app-icon-1024.png` | Generated icon |
 | `public/meta-app-icon-512.png` | Generated icon |
 | `.env.example` | `META_REVIEW_PASSWORD` documented |
