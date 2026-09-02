@@ -228,7 +228,17 @@ export async function POST(request: Request): Promise<Response> {
     // instead of a 500. `locale` is parsed before the try precisely so it is readable here.
     if (err instanceof LlmBudgetExceededError) {
       console.warn("[assistant] daily pool exhausted — serving the hand-off card:", err.message);
-      return json({ success: true, data: limitPayload(locale, "budget_exhausted", 0) }, 503);
+      // 200, NOT 503. The pool being spent for the day is a rationing decision of ours, not
+      // a service failure, and the shopper is handed a real next step (our email), so there
+      // is nothing for a client to retry.
+      //
+      // What this does NOT change: the deployed widget already ignores the status code (it
+      // does fetch().then(r => r.json()) with no res.ok check and renders on success===true),
+      // so shoppers saw the hand-off card on the 503 too. What it fixes is everything else —
+      // ~331/day made this the single most common "error" in the Vercel runtime logs, burying
+      // genuine faults, and any future client, monitor, or CDN that does check res.ok would
+      // have discarded a body that was never an error.
+      return json({ success: true, data: limitPayload(locale, "budget_exhausted", 0) }, 200);
     }
     console.error("[API] /api/assistant failed:", err);
     return json({ success: false, error: "assistant_failed" }, 500);
