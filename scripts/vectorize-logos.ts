@@ -1,7 +1,7 @@
-// @ts-nocheck
 // scripts/vectorize-logos.ts
 // webp → sharp (2x, white bg, b/w threshold) → potrace → SVG. Saves to Logo/*.svg.
-// Standalone build-time tool (not part of the app/runtime); `potrace` ships no types.
+// Standalone build-time tool (not part of the app/runtime). `potrace` ships no types —
+// see src/types/potrace.d.ts (replaced a file-wide @ts-nocheck, which hid every other error).
 import sharp from "sharp";
 import potrace from "potrace";
 import fs from "node:fs";

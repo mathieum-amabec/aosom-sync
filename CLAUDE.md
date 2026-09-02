@@ -230,9 +230,11 @@ paths skip the colliding brand (they can't shift the operator's chosen time).
 
 **Cleanup (done):** `/api/cron/social-scheduled` and `processScheduledDrafts()` have been
 removed — nothing writes or drains `facebook_drafts.status='scheduled'` anymore.
-`draft-scheduler.ts` is **kept**: `isSqliteUtc` (validates queue slots in `addToQueue`) and
-`nextFreeSlot` (used by `/api/queue/add`) are live. The `scheduled` status value survives only
-for any historical rows; no code produces new ones.
+`draft-scheduler.ts` is **kept**, but only half of it is live: `isSqliteUtc` still validates
+queue slots in `addToQueue`. `nextFreeSlot` lost its only caller when `/api/queue/add` was
+deleted in v0.5.76.0 (dead route, no caller anywhere) — it is retained and tested but unused,
+because a future queue feature is its obvious consumer. Do not read it as live wiring. The
+`scheduled` status value survives only for any historical rows; no code produces new ones.
 
 ## Blog pipeline — and why crons must NEVER self-fetch
 

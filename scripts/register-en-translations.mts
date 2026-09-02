@@ -23,7 +23,27 @@ const APPLY = process.argv.includes("--apply") && !process.argv.includes("--dry-
 
 // ── throttle + GraphQL ───────────────────────────────────────────────────────
 let lastReq = 0;
-async function gql(query: string, variables?: Record<string, unknown>): Promise<any> {
+/** GraphQL envelope, generic over the `data` shape so each call site declares what it
+ *  expects. The old `Promise<any>` return meant every field access below was unchecked. */
+interface GqlEnvelope<T> {
+  data?: T;
+  errors?: { message: string }[];
+}
+/** A translatable field as returned by `translatableContent` / `translations`. */
+interface TranslatableField {
+  key: string;
+  value?: string;
+  digest?: string;
+}
+interface TranslatableNode {
+  resourceId: string;
+  translatableContent?: TranslatableField[];
+}
+
+async function gql<T = unknown>(
+  query: string,
+  variables?: Record<string, unknown>,
+): Promise<GqlEnvelope<T>> {
   const wait = 520 - (Date.now() - lastReq);
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastReq = Date.now();
@@ -138,11 +158,16 @@ async function collectionTargets(): Promise<Target[]> {
   const out: Target[] = [];
   let after: string | null = null;
   for (let pg = 0; pg < 10; pg++) {
-    const q = `{ collections(first:100${after ? `, after:"${after}"` : ""}){ pageInfo{ hasNextPage endCursor } edges{ node{ id handle title translations(locale:"en"){ key } } } } }`;
-    const d = await gql(q);
+    const q: string = `{ collections(first:100${after ? `, after:"${after}"` : ""}){ pageInfo{ hasNextPage endCursor } edges{ node{ id handle title translations(locale:"en"){ key } } } } }`;
+    const d = await gql<{
+      collections: {
+        pageInfo: { hasNextPage: boolean; endCursor: string };
+        edges: { node: { id: string; handle: string; title: string; translations?: { key: string }[] } }[];
+      };
+    }>(q);
     const edges = d.data?.collections?.edges ?? [];
     for (const e of edges) {
-      const hasEn = (e.node.translations ?? []).some((t: any) => t.key === "title");
+      const hasEn = (e.node.translations ?? []).some((t) => t.key === "title");
       if (hasEn) continue;
       const en = COLLECTION_EN[e.node.handle];
       if (!en) { console.warn(`⚠ no EN mapping for collection handle "${e.node.handle}" (${e.node.title}) — SKIPPED`); continue; }
@@ -162,11 +187,15 @@ async function menuTargets(): Promise<Target[]> {
   const out: Target[] = [];
   let after: string | null = null;
   for (let pg = 0; pg < 5; pg++) {
-    const q = `{ translatableResources(first:250, resourceType: LINK${after ? `, after:"${after}"` : ""}){ pageInfo{ hasNextPage endCursor } nodes{ resourceId translatableContent{ key value digest } } } }`;
-    const d = await gql(q);
+    const q: string = `{ translatableResources(first:250, resourceType: LINK${after ? `, after:"${after}"` : ""}){ pageInfo{ hasNextPage endCursor } nodes{ resourceId translatableContent{ key value digest } } } }`;
+    const d = await gql<{
+      translatableResources: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: TranslatableNode[] };
+    }>(q);
     for (const n of d.data?.translatableResources?.nodes ?? []) {
-      const c = (n.translatableContent ?? []).find((x: any) => x.key === "title");
-      if (!c) continue;
+      const c = (n.translatableContent ?? []).find((x) => x.key === "title");
+      // `value` is optional on a translatable field — a LINK whose title has no value
+      // would have indexed MENU_EN with `undefined` and thrown. The old `any` hid this.
+      if (!c?.value) continue;
       const en = MENU_EN[c.value];
       if (!en) continue; // only taxonomy labels
       out.push({ gid: n.resourceId, label: `menu · ${c.value}`, en, digest: c.digest });
@@ -184,13 +213,13 @@ async function attachDigests(targets: Target[]): Promise<void> {
     const batch = need.slice(i, i + 100);
     const ids = batch.map((t) => `"${t.gid}"`).join(",");
     const q = `{ translatableResourcesByIds(first:100, resourceIds:[${ids}]){ nodes{ resourceId translatableContent{ key digest } } } }`;
-    const d = await gql(q);
+    const d = await gql<{ translatableResourcesByIds: { nodes: TranslatableNode[] } }>(q);
     if (d.errors) console.warn("digest query errors:", JSON.stringify(d.errors));
-    const byId = new Map<string, any>();
+    const byId = new Map<string, TranslatableNode>();
     for (const n of d.data?.translatableResourcesByIds?.nodes ?? []) byId.set(n.resourceId, n);
     for (const t of batch) {
       const node = byId.get(t.gid);
-      const c = (node?.translatableContent ?? []).find((x: any) => x.key === "title");
+      const c = (node?.translatableContent ?? []).find((x) => x.key === "title");
       t.digest = c?.digest;
       if (!t.digest) console.warn(`⚠ no "title" translatable digest for ${t.label}`);
     }
@@ -199,7 +228,12 @@ async function attachDigests(targets: Target[]): Promise<void> {
 
 async function register(t: Target): Promise<{ ok: boolean; err?: string }> {
   const mut = `mutation($id:ID!,$tr:[TranslationInput!]!){ translationsRegister(resourceId:$id, translations:$tr){ userErrors{ field message } translations{ key value locale } } }`;
-  const d = await gql(mut, { id: t.gid, tr: [{ locale: "en", key: "title", value: t.en, translatableContentDigest: t.digest }] });
+  const d = await gql<{
+    translationsRegister: {
+      userErrors: { field: string[] | null; message: string }[];
+      translations: { key: string; value: string; locale: string }[];
+    };
+  }>(mut, { id: t.gid, tr: [{ locale: "en", key: "title", value: t.en, translatableContentDigest: t.digest }] });
   const ue = d.data?.translationsRegister?.userErrors ?? d.errors;
   if (ue && ue.length) return { ok: false, err: JSON.stringify(ue) };
   return { ok: true };

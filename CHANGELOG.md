@@ -2,6 +2,79 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.76.0] - 2026-09-02
+
+Cleanup pass from the 2026-09-02 codebase audit: dead routes deleted, every ESLint error
+fixed with a real type rather than a suppression, and `sharp` moved to where it is actually
+used from.
+
+### Removed — 7 API routes with no caller (685 lines, plus 463 lines of their tests)
+
+Each was confirmed unreachable on six independent signals before deletion: no caller in the
+repo (only comments and their own tests), absent from `vercel.json`, **zero hits in 24 h of
+production runtime logs**, **zero Shopify webhooks registered on the store at all**, Shopify
+ScriptTags pointing only at the two pixel routes, and no reference in the deployed storefront
+theme (home + PDP fetch only `/api/ugc-videos`, `/api/assistant`, `/api/price-alert`).
+
+| Route | Lines |
+|---|---|
+| `/api/slideshow/generate` | 218 |
+| `/api/queue/add` | 143 |
+| `/api/slideshow/products-preview` | 100 |
+| `/api/slideshow/preview` | 83 |
+| `/api/sync/health` | 58 |
+| `/api/social/content/generate-weekly-mix` | 47 |
+| `/api/products/categories` | 36 |
+
+Slideshow generation moved to `scripts/generate-slideshow-batch.mts`, which imports the engine
+directly instead of calling the route — that is what orphaned the three `slideshow/*` routes.
+
+Tests deleted with them: `slideshow/__tests__/generate.test.ts`,
+`slideshow/__tests__/products-preview.test.ts`, `tests/health-route.test.ts`, plus Scenario 6
+(97 lines) of `tests/job1-sync.test.ts`, which covered `/api/sync/health`.
+
+⚠️ `nextFreeSlot` in `draft-scheduler.ts` lost its only caller with `/api/queue/add`. It is
+kept, tested and now unused; CLAUDE.md no longer claims it is live wiring.
+
+⚠️ 24 h is the full runtime-log retention on Vercel Pro, so "no calls" is strong evidence, not
+proof against a weekly external caller. `git revert` restores any route in one command.
+
+### Fixed — 16 ESLint errors, none suppressed
+
+Two of the sixteen lived in test files deleted above. The other fourteen:
+
+- `scripts/register-en-translations.mts` (5): `gql()` returned `Promise<any>`, so every field
+  access in the file was unchecked. It is now generic over the response shape
+  (`gql<T>(): Promise<GqlEnvelope<T>>`), with each of the four call sites naming what it
+  expects. The types immediately surfaced a real latent bug: `c.value` is optional on a
+  translatable field, and `MENU_EN[c.value]` would have thrown on a LINK with no title value.
+  Now guarded.
+- `scripts/apply-strip-h2.mts` (2): two `as any` casts on GraphQL responses replaced with
+  `ProductsPage` / `ProductUpdateResult` interfaces.
+- `scripts/generate-app-icon.js` (3): a CommonJS file in a repo with no `"type": "module"`.
+  Converted to ESM and renamed `generate-app-icon.mjs` (`__dirname` derived from
+  `import.meta.url`), matching the convention of every other script here. The two live
+  references in `docs/meta-app-review-submission.md` were updated; the CHANGELOG entry that
+  names the old path is history and was left alone.
+- `scripts/vectorize-logos.ts` (1): the file carried `// @ts-nocheck` because `potrace` ships
+  no types — which silenced every error in the file, not just the untyped import. Replaced
+  with `src/types/potrace.d.ts`, a minimal ambient declaration of the surface actually used.
+- `tests/job1-sync.test.ts` (3): `as any` casts replaced with `as unknown as SyncRun` and
+  `as Phase1BlobProductRow[]`.
+
+ESLint is now at **0 errors** (39 `@next/next/no-img-element` warnings remain on dashboard
+thumbnails, untouched — internal UI, no shopper impact).
+
+### Fixed — `sharp` was a runtime dependency filed under devDependencies
+
+`sharp` is imported from four modules under `src/lib/` (`variant-merger.ts`, on the daily sync
+path, plus the three slideshow renderers) yet sat in `devDependencies`. The imports are
+dynamic, so nothing failed at build time — it would have failed at runtime, on the sync, the
+first time a production install skipped dev dependencies. Moved to `dependencies`.
+
+`potrace` stays in `devDependencies`: it is only used by `scripts/vectorize-logos.ts`, which
+is correct.
+
 ## [0.5.75.0] - 2026-09-02
 
 The four critical findings from the 2026-09-02 codebase audit. Two of them cut what the

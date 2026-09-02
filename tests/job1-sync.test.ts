@@ -7,9 +7,10 @@
  * 3. runSync with stale "running" run → clearStaleLockIfNeeded called, new run created
  * 4. runShopifyPush with valid today checkpoint → resumes from processedGroupKeys
  * 5. runShopifyPush with expired checkpoint (yesterday) → ignores checkpoint, starts fresh
- * 6. GET /api/sync/health → correct shape for all scenarios
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { SyncRun } from "@/types/sync";
+import type { Phase1BlobProductRow } from "@/lib/sync-blob-storage";
 
 // ─── Stable mock values ───────────────────────────────────────────────
 
@@ -125,7 +126,6 @@ const diffEngine = await import("@/lib/diff-engine");
 const blobStorage = await import("@/lib/sync-blob-storage");
 const syncLock = await import("@/lib/sync-lock");
 const { runSync, runShopifyPush, runSyncInit, runSyncRefreshChunk, runSyncFinalize, runSyncFull } = await import("@/jobs/job1-sync");
-const { GET } = await import("@/app/api/sync/health/route");
 
 // ─── Test utilities ───────────────────────────────────────────────────
 
@@ -253,7 +253,7 @@ describe("runSync — stale running run", () => {
   it("throws if a running run is still present after clearing (concurrent sync)", async () => {
     // Simulate: clearStaleLockIfNeeded ran but run is still "running" (started <30 min ago)
     vi.mocked(db.getLatestSyncRun).mockResolvedValue(
-      makeSyncRun({ id: "run-stuck", status: "running", completedAt: null }) as any
+      makeSyncRun({ id: "run-stuck", status: "running", completedAt: null }) as unknown as SyncRun
     );
 
     await expect(runSync()).rejects.toThrow(/already in progress/i);
@@ -392,102 +392,6 @@ describe("runShopifyPush — expired checkpoint (yesterday) → fresh start", ()
     expect(db.createSyncRun).toHaveBeenCalledOnce();
   });
 });
-
-// ─── Scenario 6: GET /api/sync/health ────────────────────────────────
-
-describe("GET /api/sync/health", () => {
-  beforeEach(resetAllMocks);
-
-  it("returns null phase1 when no runs today", async () => {
-    vi.mocked(db.getSyncRuns).mockResolvedValue([]);
-    vi.mocked(db.getShopifyPushCheckpoint).mockResolvedValue(null);
-
-    const res = await GET();
-    const body = await res.json();
-
-    expect(body.success).toBe(true);
-    expect(body.data.phase1).toBeNull();
-    expect(body.data.zombies).toHaveLength(0);
-  });
-
-  it("returns phase1 from the run that does NOT have the Phase2-only marker", async () => {
-    const phase1Run = makeSyncRun({ id: "run-phase1", errorMessages: [] });
-    const phase2Run = makeSyncRun({
-      id: "run-phase2",
-      errorMessages: ["DB sync only — Shopify push deferred"],
-    });
-    vi.mocked(db.getSyncRuns).mockResolvedValue([phase1Run, phase2Run] as any);
-
-    const res = await GET();
-    const body = await res.json();
-
-    expect(body.data.phase1.id).toBe("run-phase1");
-  });
-
-  it("returns phase2 checkpoint data when checkpoint is from today", async () => {
-    vi.mocked(db.getSyncRuns).mockResolvedValue([]);
-    vi.mocked(db.getShopifyPushCheckpoint).mockResolvedValue({
-      date: TODAY,
-      processedGroupKeys: ["gk-1", "gk-2"],
-      totalDiffs: 5,
-      totalUpdates: 2,
-      totalArchived: 0,
-      totalErrors: 0,
-      done: false,
-    });
-
-    const res = await GET();
-    const body = await res.json();
-
-    expect(body.data.phase2.processedDiffs).toBe(2);
-    expect(body.data.phase2.totalDiffs).toBe(5);
-    expect(body.data.phase2.done).toBe(false);
-  });
-
-  it("returns zeroed phase2 when checkpoint is from yesterday", async () => {
-    vi.mocked(db.getSyncRuns).mockResolvedValue([]);
-    vi.mocked(db.getShopifyPushCheckpoint).mockResolvedValue({
-      date: YESTERDAY,
-      processedGroupKeys: ["gk-1"],
-      totalDiffs: 3,
-      totalUpdates: 1,
-      totalArchived: 0,
-      totalErrors: 0,
-      done: true,
-    });
-
-    const res = await GET();
-    const body = await res.json();
-
-    expect(body.data.phase2.processedDiffs).toBe(0);
-    expect(body.data.phase2.totalDiffs).toBe(0);
-    expect(body.data.phase2.done).toBe(false);
-  });
-
-  it("lists zombie runs (status=running)", async () => {
-    const zombie = makeSyncRun({ id: "run-zombie", status: "running", completedAt: null });
-    vi.mocked(db.getSyncRuns).mockResolvedValue([zombie] as any);
-
-    const res = await GET();
-    const body = await res.json();
-
-    expect(body.data.zombies).toHaveLength(1);
-    expect(body.data.zombies[0].id).toBe("run-zombie");
-  });
-
-  it("returns 500 on DB error", async () => {
-    vi.mocked(db.getSyncRuns).mockRejectedValueOnce(new Error("DB connection lost"));
-
-    const res = await GET();
-    const body = await res.json();
-
-    expect(res.status).toBe(500);
-    expect(body.success).toBe(false);
-  });
-});
-
-// ─── Scenario 7: runSync — dryRun=true ───────────────────────────────
-
 describe("runSync — dryRun=true", () => {
   beforeEach(resetAllMocks);
 
@@ -974,7 +878,7 @@ describe("runSyncRefreshChunk — error path", () => {
       refreshDone: false, finalized: false,
       totalProducts: 50, priceUpdates: 0, stockChanges: 0, newProducts: 0,
     });
-    vi.mocked(blobStorage.readPhase1Blob).mockResolvedValue({ toWriteMapped: Array(50).fill({ sku: "S1" }) as any, priceChangeEntries: [] });
+    vi.mocked(blobStorage.readPhase1Blob).mockResolvedValue({ toWriteMapped: Array(50).fill({ sku: "S1" }) as Phase1BlobProductRow[], priceChangeEntries: [] });
     vi.mocked(db.refreshProducts).mockRejectedValueOnce(new Error("DB timeout"));
 
     await expect(runSyncRefreshChunk()).rejects.toThrow("DB timeout");
@@ -1098,7 +1002,7 @@ describe("runSyncFull — resumes from partial checkpoint (chunks_done=2, totalC
 
     // readPhase1Blob returns data for the remaining chunk
     vi.mocked(blobStorage.readPhase1Blob).mockResolvedValue({
-      toWriteMapped: Array(2500).fill({ sku: "S1" }) as any,
+      toWriteMapped: Array(2500).fill({ sku: "S1" }) as Phase1BlobProductRow[],
       priceChangeEntries: [],
     });
 

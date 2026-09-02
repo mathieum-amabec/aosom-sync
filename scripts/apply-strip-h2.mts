@@ -11,11 +11,26 @@ const Q = `query($c:String){ products(first:250, after:$c){
 const M = `mutation($input: ProductInput!){
   productUpdate(input:$input){ product{ legacyResourceId } userErrors{ field message } } }`;
 
+interface ProductNode {
+  id: string;
+  legacyResourceId: string;
+  handle: string;
+  descriptionHtml: string;
+}
+/** Shapes of the two GraphQL responses above. `gql` is untyped, so the cast has to name
+ *  something — `as any` named nothing and silently allowed any field access downstream. */
+interface ProductsPage {
+  data: { products: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: ProductNode[] } };
+}
+interface ProductUpdateResult {
+  data: { productUpdate: { userErrors: { field: string[] | null; message: string }[] } };
+}
+
 // fetch all
-const products: { id: string; legacyResourceId: string; handle: string; descriptionHtml: string }[] = [];
+const products: ProductNode[] = [];
 let cur: string | null = null;
 while (true) {
-  const { data } = (await gql(Q, { c: cur })) as any;
+  const { data } = (await gql(Q, { c: cur })) as ProductsPage;
   products.push(...data.products.nodes);
   if (!data.products.pageInfo.hasNextPage) break;
   cur = data.products.pageInfo.endCursor;
@@ -30,7 +45,7 @@ for (const p of toFix) {
   const after = stripLeadingHeading(p.descriptionHtml);
   const removed = (p.descriptionHtml.match(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i) || [, ""])[1].replace(/<[^>]+>/g, "");
   try {
-    const { data } = (await gql(M, { input: { id: p.id, descriptionHtml: after } })) as any;
+    const { data } = (await gql(M, { input: { id: p.id, descriptionHtml: after } })) as ProductUpdateResult;
     const e = data.productUpdate.userErrors;
     if (e.length) { console.log(`FAIL #${p.legacyResourceId}: ${JSON.stringify(e)}`); fail++; }
     else { console.log(`OK   #${p.legacyResourceId} ${p.handle}  — retiré: « ${removed.slice(0, 70)} »`); ok++; }

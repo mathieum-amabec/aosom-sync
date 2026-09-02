@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 // Generates the Meta App Review app icon (1024x1024 + 512x512) from an inline
 // SVG. Sharp rasterizes the SVG to PNG so no node-canvas dependency is needed.
-// Run: node scripts/generate-app-icon.js
+// Run: node scripts/generate-app-icon.mjs
 
-const path = require("path");
-const fs = require("fs");
-const sharp = require("sharp");
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
+import sharp from "sharp";
+
+// ESM has no __dirname; derive it from import.meta.url.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const OUT_DIR = path.resolve(__dirname, "..", "public");
 const BG = "#1e40af";
