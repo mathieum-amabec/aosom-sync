@@ -79,8 +79,14 @@ export interface SyncLogEntry {
   timestamp: string;
   shopifyProductId: string | null;
   sku: string;
-  action: "create" | "update" | "archive";
-  field: ChangeType;
+  /**
+   * `price_correction` is written by the price-protection layers (src/lib/price-protection.ts),
+   * not by the catalog diff. Those rows carry the REASON in `field`
+   * ("reconciliation" | "sync_retry" | "hausse_20pct") instead of a ChangeType, which is
+   * why `field` widens to string.
+   */
+  action: "create" | "update" | "archive" | "price_correction";
+  field: ChangeType | string;
   oldValue: string | null;
   newValue: string | null;
 }

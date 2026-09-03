@@ -2,7 +2,7 @@ import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { trackCron } from "@/lib/cron-tracking";
 import { runPriceReconcile } from "@/lib/price-reconcile";
-import { getProductsForPriceAudit, createNotification } from "@/lib/database";
+import { getProductsForPriceAudit, createNotification, recordPriceCorrections } from "@/lib/database";
 import { fetchAllShopifyProducts, updateShopifyVariantPrice, fetchVariant } from "@/lib/shopify-client";
 
 /**
@@ -45,14 +45,21 @@ export async function GET(request: Request) {
           loadShopifyVariants: async () => {
             const products = await fetchAllShopifyProducts();
             return products.flatMap((p) =>
-              p.variants.map((v) => ({ sku: v.sku, price: v.price, variantId: v.variantId })),
+              p.variants.map((v) => ({
+                sku: v.sku,
+                price: v.price,
+                variantId: v.variantId,
+                shopifyProductId: p.shopifyId,
+              })),
             );
           },
           writePrice: (variantId, price, oldPrice) => updateShopifyVariantPrice(variantId, price, oldPrice),
           readVariant: (variantId) => fetchVariant(variantId),
           notify: (type, title, message) => createNotification(type, title, message),
+          // Permanent traceability: one sync_logs row per applied correction.
+          recordCorrections: (runId, entries) => recordPriceCorrections(runId, entries),
         }),
-      (r) => `scanned=${r.scanned} drift=${r.drifted} corrected=${r.corrected} failed=${r.failed} deferred=${r.deferred}`,
+      (r) => `scanned=${r.scanned} drift=${r.drifted} corrected=${r.corrected} failed=${r.failed} deferred=${r.deferred} logged=${r.logged}`,
     );
     return NextResponse.json(
       {
@@ -62,6 +69,10 @@ export async function GET(request: Request) {
         corrected: result.corrected,
         failed: result.failed,
         deferred: result.deferred,
+        runId: result.runId,
+        logged: result.logged,
+        // Every applied correction, so a manual run is auditable from the response alone.
+        corrections: result.corrections,
         // Worst offenders only — the full list can be thousands of rows.
         worst: result.items.slice(0, 20),
       },
