@@ -2,6 +2,92 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.77.0] - 2026-09-02
+
+Five layers of price protection between the Aosom feed and the live storefront, plus the
+concurrency fix that let one variant of a two-variant product silently lose its update.
+
+### Why
+
+Investigating SKU `830-821V80BK` (Aosom 135,99 $ vs storefront 119,99 $) surfaced the real
+problem. `runShopifyPush` applies at most `SHOPIFY_PUSH_CHUNK_SIZE` (10) product groups per
+cron run, three runs a day = **30 per day**, against **1,559 pending diffs** — and its
+checkpoint is keyed on the date, so the 1,529 unprocessed groups were **discarded at
+midnight**, never drained. Price changes reached the store essentially at random: 1.9% per
+day, whichever groups happened to sort first.
+
+The 09:30 floor audit was quietly repairing the damage, which is why nobody noticed. But it
+only ever pushes prices **UP** to the Aosom floor. When Aosom **drops** a price, nothing
+corrected it — we stayed more expensive than the supplier indefinitely. The white variant of
+this very product was 5 $ above Aosom for exactly that reason.
+
+The signature is visible in `price_history`: the `price_increase` rows of 08-26 and 08-28
+both carry `applied_to_shopify = 0`, each followed minutes later by a `floor_correction` with
+`= 1`. The push never applied them; the audit did.
+
+### Added — LAYER 1: every price write is read back and retried
+
+`writePriceVerified()` writes, then **reads the variant back** and confirms the value stuck,
+retrying up to 3 times with backoff. A deleted variant fails immediately rather than burning
+all three attempts.
+
+A 200 from Shopify's PUT means the request was accepted, not that the value persisted — a
+concurrent admin edit, a throttled retry, or another app managing prices can all leave a
+different value stored. `applyToShopify` previously marked the `price_history` row applied on
+the strength of the PUT alone, which is how rows ended up flagged `applied_to_shopify = 1`
+for prices that were never live.
+
+### Added — LAYER 2: hourly reconciliation (`/api/cron/price-reconcile`, `0 * * * *`)
+
+Compares **every** active Shopify variant against Turso and corrects the gap **in both
+directions**. This is the backstop for the 30/day ceiling. Capped at 300 corrections per run
+(≈5 min of API time at 2 req/s, inside the route's `maxDuration = 300`); a larger backlog
+drains over successive hours instead of being SIGKILLed mid-write.
+
+Explicitly not the same thing as `/api/health/price-audit`, which only pushes up to the floor.
+
+### Added — LAYER 3: dashboard alerts
+
+Any unresolved mismatch becomes a notification with SKU, both prices and the signed gap:
+`price_write_failed` (write never confirmed), `price_drift` (deferred over the cap),
+`price_spike_held` (layer 5), `post_sync_sample` (layer 4).
+
+### Added — LAYER 4: post-sync sample verification
+
+After the **last** chunk of the daily push (so the store is settled, not mid-write), 50 random
+products are re-read and compared on **price and inventory**. Layer 2 already covers price;
+what this uniquely catches is inventory drift and a systematic failure of the reconcile itself.
+
+### Added — LAYER 5: supplier spike guard (>20%)
+
+An Aosom increase beyond +20% **drafts the product** and alerts instead of silently repricing
+a page shoppers are browsing. The whole product is held, not just the offending variant: a
+two-variant product half-repriced is worse than one briefly unpublished.
+
+Only increases are held. A drop is never held back — that is the failure mode this release
+exists to fix. For reference, the 119,99 → 135,99 move that started this work is +13,3% and
+goes live normally.
+
+### Fixed — FAILLE C: variant writes are sequential
+
+`applyToShopify` wrote a product's price changes through `Promise.all`. Two variants of the
+**same** Shopify product written concurrently race through Shopify's product-level write lock
+and one update is silently dropped. Now a sequential loop, which also keeps us inside the
+2 req/s Admin API limit.
+
+### Data — 830-821V80 corrected live
+
+Pushed the feed price per variant, sequentially, each read back:
+
+| SKU | avant | après | |
+|---|---|---|---|
+| `830-821V80BK` | 119,99 $ | **135,99 $** | +13,3 %, était 16 $ sous le plancher Aosom |
+| `830-821V80WT` | 109,99 $ | **104,99 $** | −4,5 %, était 5 $ au-dessus |
+
+Not 139,99 $ on both variants as first requested: the feed says 135,99 for black and 104,99
+for white, and `PRICE_MARKUP = 0` means we sell at the Aosom price. Putting white at 139,99
+would have priced it 35 $ over its supplier price.
+
 ## [0.5.76.0] - 2026-09-02
 
 Cleanup pass from the 2026-09-02 codebase audit: dead routes deleted, every ESLint error

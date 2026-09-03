@@ -23,7 +23,17 @@ import {
   setInventoryLevel,
   setProductMetafield,
   deleteProductMetafield,
+  fetchVariant,
 } from "@/lib/shopify-client";
+import {
+  writePriceVerified,
+  isPriceSpike,
+  formatWriteFailureAlert,
+  formatSpikeAlert,
+  PRICE_SPIKE_THRESHOLD,
+  type PriceWriteResult,
+} from "@/lib/price-protection";
+import { runPostSyncSample } from "@/lib/price-reconcile";
 import {
   createSyncRun,
   completeSyncRun,
@@ -214,6 +224,10 @@ async function applyToShopify(
   const errorMessages: string[] = [];
   let archived = 0;
   let errors = 0;
+  /** LAYER 1 — price writes that failed every retry. Surfaced as a notification below. */
+  const writeFailures: PriceWriteResult[] = [];
+  /** LAYER 5 — products drafted because the supplier price jumped >20%. */
+  const spikeHeld: Array<{ sku: string; shopifyId: string; oldPrice: number; newPrice: number }> = [];
 
   for (const diff of diffs) {
     try {
@@ -236,24 +250,66 @@ async function applyToShopify(
 
         const priceChanges = diff.changes.filter((c) => c.field === "price");
         const shopifyProduct = shopifyMap.get(diff.shopifyId);
-        await Promise.all(
-          priceChanges.map(async (change) => {
-            const variant = shopifyProduct?.variants.find((v) => v.sku === change.sku);
-            if (variant && change.newValue !== null) {
-              log(`Prix mis à jour: ${change.sku} ${change.oldValue}$ → ${change.newValue}$`);
-              const oldPrice = change.oldValue !== null ? Number(change.oldValue) : undefined;
-              const newPrice = Number(change.newValue);
-              await updateShopifyVariantPrice(variant.variantId, newPrice, oldPrice);
-              // Push succeeded → flag the matching recorded price_history row as applied.
-              // Non-fatal: a bookkeeping write must never fail an already-successful push.
-              try {
-                await markPriceChangeAppliedBySku(change.sku, newPrice);
-              } catch (markErr) {
-                log(`markPriceChangeAppliedBySku failed for ${change.sku}: ${markErr instanceof Error ? markErr.message : String(markErr)}`);
-              }
-            }
-          })
+        // ── LAYER 5: supplier price spike guard ─────────────────────────────
+        // An Aosom increase beyond PRICE_SPIKE_THRESHOLD (+20%) is usually a supplier data
+        // error or a product being replaced. Draft the product for manual review instead of
+        // silently repricing a page shoppers are browsing. The WHOLE product is held, not
+        // just the offending variant: a two-variant product half-repriced is worse than one
+        // that is briefly unpublished.
+        const spikes = priceChanges.filter(
+          (c) => c.oldValue !== null && c.newValue !== null && isPriceSpike(Number(c.oldValue), Number(c.newValue)),
         );
+        if (spikes.length > 0) {
+          const worst = spikes[0];
+          log(`HAUSSE > ${Math.round(PRICE_SPIKE_THRESHOLD * 100)}%: ${worst.sku} ${worst.oldValue}$ → ${worst.newValue}$ — produit mis en draft, prix NON poussé`);
+          try {
+            await draftShopifyProduct(diff.shopifyId);
+            for (const c of spikes) {
+              spikeHeld.push({ sku: c.sku, shopifyId: diff.shopifyId, oldPrice: Number(c.oldValue), newPrice: Number(c.newValue) });
+            }
+          } catch (draftErr) {
+            log(`draftShopifyProduct failed for ${diff.shopifyId}: ${draftErr instanceof Error ? draftErr.message : String(draftErr)}`);
+          }
+          continue; // skip the price push entirely — holding it IS the point
+        }
+
+        // ── FAILLE C + LAYER 1: sequential writes, each read back ───────────
+        // SEQUENTIAL, not Promise.all. Two variants of the SAME Shopify product written
+        // concurrently race through Shopify's product-level write lock and one update is
+        // silently dropped — exactly the shape of a two-variant product where both prices
+        // moved. Sequential also keeps us inside the 2 req/s Admin API limit.
+        for (const change of priceChanges) {
+          const variant = shopifyProduct?.variants.find((v) => v.sku === change.sku);
+          if (!variant || change.newValue === null) continue;
+          const oldPrice = change.oldValue !== null ? Number(change.oldValue) : undefined;
+          const newPrice = Number(change.newValue);
+          log(`Prix mis à jour: ${change.sku} ${change.oldValue}$ → ${change.newValue}$`);
+
+          // LAYER 1 — write, read back, retry up to 3x. A 200 from the PUT is Shopify
+          // ACCEPTING the request, not proof the value stuck. Before this, price_history
+          // rows were marked applied on the strength of the PUT alone, which is why rows
+          // carried applied_to_shopify=1 for prices that were never actually live.
+          const res = await writePriceVerified(change.sku, variant.variantId, newPrice, oldPrice, {
+            writePrice: updateShopifyVariantPrice,
+            readVariant: fetchVariant,
+          });
+
+          if (!res.ok) {
+            writeFailures.push(res);
+            errors++;
+            errorMessages.push(`price ${change.sku}: ${res.error ?? "unverified"}`);
+            log(`Prix NON confirmé après ${res.attempts} tentatives: ${change.sku} — ${res.error ?? "?"}`);
+            continue; // do NOT mark applied — the price is not live
+          }
+
+          // Verified live → flag the matching price_history row as applied. Non-fatal:
+          // a bookkeeping write must never fail an already-successful push.
+          try {
+            await markPriceChangeAppliedBySku(change.sku, newPrice);
+          } catch (markErr) {
+            log(`markPriceChangeAppliedBySku failed for ${change.sku}: ${markErr instanceof Error ? markErr.message : String(markErr)}`);
+          }
+        }
 
         // Price badge (custom.price_badge) — recompute whenever the price changed
         // today: best_30d / price_drop / delete otherwise. The PDP renders a badge
@@ -315,6 +371,26 @@ async function applyToShopify(
       const msg = err instanceof Error ? err.message : String(err);
       errorMessages.push(`${diff.action} ${diff.groupKey}: ${msg}`);
       log(`ERREUR: ${diff.action} ${diff.groupKey}: ${msg}`);
+    }
+  }
+
+  // ── LAYER 3: surface what this run could not put live ────────────────────
+  // Both are best-effort: a notification write must never fail a sync that otherwise
+  // succeeded, and the data is already in errorMessages / the logs either way.
+  if (writeFailures.length > 0) {
+    try {
+      const a = formatWriteFailureAlert(writeFailures);
+      await createNotification("price_write_failed", a.title, a.message);
+    } catch (nErr) {
+      log(`notification price_write_failed échouée: ${nErr instanceof Error ? nErr.message : String(nErr)}`);
+    }
+  }
+  if (spikeHeld.length > 0) {
+    try {
+      const a = formatSpikeAlert(spikeHeld);
+      await createNotification("price_spike_held", a.title, a.message);
+    } catch (nErr) {
+      log(`notification price_spike_held échouée: ${nErr instanceof Error ? nErr.message : String(nErr)}`);
     }
   }
 
@@ -721,6 +797,42 @@ export async function runShopifyPush(): Promise<{ updates: number; archived: num
     });
 
     log(`Phase 2 chunk terminé: ${shopifyResult.updates} updates, ${shopifyResult.archived} archivés, ${shopifyResult.errors} erreurs — ${isDone ? "COMPLET" : `${remaining.length - chunk.length} diffs restants`}`);
+
+    // ── LAYER 4: post-sync sample verification ───────────────────────────────
+    // Runs only on the LAST chunk of the day, so it verifies a settled store rather than
+    // one mid-push. Re-reads POST_SYNC_SAMPLE_SIZE random products and compares price AND
+    // inventory against Turso. Price drift is layer 2's job; what this uniquely catches is
+    // inventory drift and a systematic failure of the reconcile itself.
+    //
+    // Best-effort: a verification failure must never fail an otherwise successful push.
+    if (isDone) {
+      try {
+        const sample = await runPostSyncSample({
+          // dbProducts is FLAT — one AosomProduct per SKU, not a grouped product with
+          // variants. mergeVariants() does the grouping later, for the diff only.
+          loadExpected: async () => {
+            const m = new Map<string, { price: number; qty: number }>();
+            for (const p of dbProducts) m.set(p.sku, { price: p.price, qty: p.qty });
+            return m;
+          },
+          loadShopifyVariants: async () =>
+            shopifyProducts.flatMap((p) =>
+              p.variants.map((v) => ({
+                sku: v.sku,
+                price: v.price,
+                variantId: v.variantId,
+                inventoryQuantity: v.inventoryQuantity,
+              })),
+            ),
+          notify: (type, title, message) => createNotification(type, title, message),
+        });
+        log(
+          `Vérification post-sync: ${sample.sampled} produits — ${sample.priceDrift.length} écart(s) prix, ${sample.stockDrift.length} écart(s) inventaire${sample.alerted ? " (alerte créée)" : ""}`,
+        );
+      } catch (vErr) {
+        log(`Vérification post-sync échouée: ${vErr instanceof Error ? vErr.message : String(vErr)}`);
+      }
+    }
 
     if (isDone && (newUpdates > 0 || newArchived > 0 || newErrors > 0)) {
       const parts: string[] = [];
