@@ -2,6 +2,58 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.78.0] - 2026-09-03
+
+Permanent traceability for every price the protection layers touch, and an immediate
+full reconciliation rather than waiting for the hourly cron.
+
+### Added — every price correction is now a `sync_logs` row
+
+`recordPriceCorrections()` writes one row per applied correction:
+
+| colonne | valeur |
+|---|---|
+| `action` | `price_correction` (constant `PRICE_CORRECTION_ACTION`) |
+| `sku` | the SKU corrected |
+| `old_value` | the price Shopify was showing |
+| `new_value` | the price Turso says it should be |
+| `field` | the REASON — `reconciliation`, `sync_retry` or `hausse_20pct` |
+| `shopify_product_id` | the parent product |
+| `sync_run_id` | `reconcile-<ISO>`, shared by every correction of one pass |
+
+The three reasons map to the three layers that can move a price: the hourly sweep
+(`reconciliation`), the daily sync's write-then-verify loop (`sync_retry`), and a >20%
+supplier increase that was HELD and drafted rather than pushed (`hausse_20pct` — logged
+so a held change is auditable instead of invisible).
+
+`sync_logs.sync_run_id` is NOT NULL and a reconciliation is not a sync, so these rows
+carry a synthetic `reconcile-<ISO>` id rather than creating a `sync_runs` row. That keeps
+the sync-history page and `/api/health`'s `lastSync` reporting real catalog syncs instead
+of being flooded by 24 reconciles a day, while still grouping one pass under one key.
+
+`getPriceCorrections({ limit, reason, sku })` reads the trail back.
+
+⚠️ Only APPLIED corrections are logged. A write that failed verification produces a
+dashboard notification, not a `sync_logs` row — a row claiming a price is live when it is
+not would be worse than no row.
+
+### Changed — `SyncLogEntry.action` accepts `price_correction`
+
+The union was `"create" | "update" | "archive"`; the column has always been free-form
+TEXT. `field` widens to `ChangeType | string` because these rows carry a reason, not a
+change type.
+
+### Changed — the reconcile route reports its trail
+
+`/api/cron/price-reconcile` now returns `runId`, `logged` and the full `corrections`
+array, so a manual run is auditable from the response alone. The `cron_runs` detail line
+gained `logged=N`.
+
+### Note on naming
+
+The module stays `src/lib/price-reconcile.ts`, matching the route
+`/api/cron/price-reconcile`. There is no `price-reconciliation.ts`.
+
 ## [0.5.77.0] - 2026-09-02
 
 Five layers of price protection between the Aosom feed and the live storefront, plus the

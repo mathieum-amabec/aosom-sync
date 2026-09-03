@@ -2780,6 +2780,101 @@ export async function addSyncLogsBatch(entries: Omit<SyncLogEntry, "id">[]): Pro
   }
 }
 
+/**
+ * Why a price moved. Written to `sync_logs.field` so every correction says which layer
+ * of the price protection produced it (see src/lib/price-protection.ts).
+ *
+ *  - `reconciliation` — the hourly Turso↔Shopify sweep found a gap and closed it.
+ *  - `sync_retry`     — the daily sync's write-then-verify loop had to retry the write.
+ *  - `hausse_20pct`   — an Aosom increase >20%; the price was NOT pushed and the product
+ *                       was drafted for manual approval. Logged so the held change is
+ *                       auditable rather than invisible.
+ */
+export type PriceCorrectionReason = "reconciliation" | "sync_retry" | "hausse_20pct";
+
+/** The stable `sync_logs.action` value for every price-protection entry. */
+export const PRICE_CORRECTION_ACTION = "price_correction";
+
+export interface PriceCorrectionLog {
+  sku: string;
+  shopifyProductId: string | null;
+  /** The price Shopify was showing before the correction. */
+  oldPriceShopify: number;
+  /** The price Turso says it should be (the Aosom feed price under PRICE_MARKUP = 0). */
+  newPriceTurso: number;
+  reason: PriceCorrectionReason;
+}
+
+/**
+ * Persist price corrections to `sync_logs` — permanent, queryable traceability for every
+ * price the protection layers touched.
+ *
+ * `sync_logs.sync_run_id` is NOT NULL, and a reconciliation is not a sync, so these rows
+ * carry a SYNTHETIC id of the form `reconcile-<ISO timestamp>` instead of creating a row
+ * in `sync_runs`. That keeps the sync-history page and `/api/health`'s `lastSync` showing
+ * real catalog syncs rather than being flooded by hourly reconciles, while still grouping
+ * every correction from one run under a single greppable key.
+ *
+ * Batched through addSyncLogsBatch, so a 300-correction run is 3 round trips, not 300.
+ */
+export async function recordPriceCorrections(
+  runId: string,
+  entries: PriceCorrectionLog[],
+): Promise<number> {
+  if (entries.length === 0) return 0;
+  const timestamp = new Date().toISOString();
+  await addSyncLogsBatch(
+    entries.map((e) => ({
+      syncRunId: runId,
+      timestamp,
+      shopifyProductId: e.shopifyProductId,
+      sku: e.sku,
+      action: PRICE_CORRECTION_ACTION,
+      field: e.reason,
+      oldValue: e.oldPriceShopify.toFixed(2),
+      newValue: e.newPriceTurso.toFixed(2),
+    })),
+  );
+  return entries.length;
+}
+
+/** Build the synthetic run id shared by every correction of one reconciliation pass. */
+export function newReconcileRunId(now: Date = new Date()): string {
+  return `reconcile-${now.toISOString()}`;
+}
+
+/**
+ * Read back price corrections, newest first. Powers the verification report and any
+ * future dashboard panel. `reason` narrows to one layer.
+ */
+export async function getPriceCorrections(
+  opts: { limit?: number; reason?: PriceCorrectionReason; sku?: string } = {},
+): Promise<Array<{ runId: string; timestamp: string; sku: string; reason: string; oldPrice: number; newPrice: number; shopifyProductId: string | null }>> {
+  const db = await ensureSchema();
+  const where: string[] = ["action = ?"];
+  const args: InValue[] = [PRICE_CORRECTION_ACTION];
+  if (opts.reason) { where.push("field = ?"); args.push(opts.reason); }
+  if (opts.sku) { where.push("sku = ?"); args.push(opts.sku); }
+  args.push(opts.limit ?? 200);
+  const result = await db.execute({
+    sql: `SELECT sync_run_id, timestamp, sku, field, old_value, new_value, shopify_product_id
+          FROM sync_logs WHERE ${where.join(" AND ")} ORDER BY timestamp DESC, sku ASC LIMIT ?`,
+    args,
+  });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    return {
+      runId: String(o.sync_run_id),
+      timestamp: String(o.timestamp),
+      sku: String(o.sku),
+      reason: String(o.field),
+      oldPrice: Number(o.old_value),
+      newPrice: Number(o.new_value),
+      shopifyProductId: o.shopify_product_id == null ? null : String(o.shopify_product_id),
+    };
+  });
+}
+
 export async function getSyncLogs(syncRunId: string, limit = 500): Promise<SyncLogEntry[]> {
   const db = await ensureSchema();
   const result = await db.execute({ sql: `SELECT * FROM sync_logs WHERE sync_run_id = ? ORDER BY timestamp DESC LIMIT ?`, args: [syncRunId, limit] });

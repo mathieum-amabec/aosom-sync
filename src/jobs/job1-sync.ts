@@ -58,6 +58,9 @@ import {
   getLatestSyncRun,
   clearStaleLockIfNeeded,
   createNotification,
+  recordPriceCorrections,
+  newReconcileRunId,
+  type PriceCorrectionLog,
   getAllProductsAsAosom,
   getShopifyPushCheckpoint,
   saveShopifyPushCheckpoint,
@@ -228,6 +231,8 @@ async function applyToShopify(
   const writeFailures: PriceWriteResult[] = [];
   /** LAYER 5 — products drafted because the supplier price jumped >20%. */
   const spikeHeld: Array<{ sku: string; shopifyId: string; oldPrice: number; newPrice: number }> = [];
+  /** LAYER B — every price this run touched, written to sync_logs for permanent traceability. */
+  const priceCorrections: PriceCorrectionLog[] = [];
 
   for (const diff of diffs) {
     try {
@@ -264,6 +269,17 @@ async function applyToShopify(
           log(`HAUSSE > ${Math.round(PRICE_SPIKE_THRESHOLD * 100)}%: ${worst.sku} ${worst.oldValue}$ → ${worst.newValue}$ — produit mis en draft, prix NON poussé`);
           try {
             await draftShopifyProduct(diff.shopifyId);
+            // Trace the HELD change: old_value is what the store still shows, new_value is
+            // the Aosom price we deliberately did NOT push. Auditable rather than invisible.
+            for (const c of spikes) {
+              priceCorrections.push({
+                sku: c.sku,
+                shopifyProductId: diff.shopifyId,
+                oldPriceShopify: Number(c.oldValue),
+                newPriceTurso: Number(c.newValue),
+                reason: "hausse_20pct",
+              });
+            }
             for (const c of spikes) {
               spikeHeld.push({ sku: c.sku, shopifyId: diff.shopifyId, oldPrice: Number(c.oldValue), newPrice: Number(c.newValue) });
             }
@@ -301,6 +317,17 @@ async function applyToShopify(
             log(`Prix NON confirmé après ${res.attempts} tentatives: ${change.sku} — ${res.error ?? "?"}`);
             continue; // do NOT mark applied — the price is not live
           }
+
+          // Verified live → trace it. `sync_retry` is the reason whenever the daily sync's
+          // write-then-verify loop put this price on the store, whether it took one attempt
+          // or three; res.attempts tells the rest of the story in the run log.
+          priceCorrections.push({
+            sku: change.sku,
+            shopifyProductId: diff.shopifyId,
+            oldPriceShopify: oldPrice ?? res.observed ?? newPrice,
+            newPriceTurso: newPrice,
+            reason: "sync_retry",
+          });
 
           // Verified live → flag the matching price_history row as applied. Non-fatal:
           // a bookkeeping write must never fail an already-successful push.
@@ -371,6 +398,18 @@ async function applyToShopify(
       const msg = err instanceof Error ? err.message : String(err);
       errorMessages.push(`${diff.action} ${diff.groupKey}: ${msg}`);
       log(`ERREUR: ${diff.action} ${diff.groupKey}: ${msg}`);
+    }
+  }
+
+  // ── TRACEABILITY: persist every price this run touched or deliberately held ──
+  // One synthetic run id groups the whole pass. Best-effort: losing a log row must never
+  // undo prices that are already live and verified.
+  if (priceCorrections.length > 0) {
+    try {
+      const n = await recordPriceCorrections(newReconcileRunId(), priceCorrections);
+      log(`sync_logs: ${n} ligne(s) price_correction écrite(s)`);
+    } catch (logErr) {
+      log(`recordPriceCorrections échoué: ${logErr instanceof Error ? logErr.message : String(logErr)}`);
     }
   }
 

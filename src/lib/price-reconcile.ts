@@ -25,15 +25,23 @@ import {
   type DriftItem,
   type PriceWriteResult,
 } from "@/lib/price-protection";
+import { newReconcileRunId, type PriceCorrectionLog } from "@/lib/database";
 
 export interface ReconcileDeps {
   /** SKU → the price we intend to sell at (Turso products.price). */
   loadExpectedPrices: () => Promise<Map<string, number>>;
   /** Every active Shopify variant with its live price. */
-  loadShopifyVariants: () => Promise<Array<{ sku: string; price: number; variantId: string }>>;
+  loadShopifyVariants: () => Promise<Array<{ sku: string; price: number; variantId: string; shopifyProductId?: string | null }>>;
   writePrice: (variantId: string, price: number, oldPrice?: number) => Promise<void>;
   readVariant: (variantId: string) => Promise<{ price: number } | null>;
   notify: (type: string, title: string, message: string) => Promise<unknown>;
+  /**
+   * Persist every APPLIED correction to sync_logs. Optional so the pure-logic tests can
+   * omit it; the production route always supplies it — permanent traceability is the point.
+   */
+  recordCorrections?: (runId: string, entries: PriceCorrectionLog[]) => Promise<number>;
+  /** Shared by every correction of this pass. Defaults to a fresh `reconcile-<ISO>` id. */
+  runId?: string;
   sleep?: (ms: number) => Promise<void>;
   /** Safety valve: never correct more than this in one run. */
   maxCorrections?: number;
@@ -47,6 +55,12 @@ export interface ReconcileResult {
   deferred: number;
   items: DriftItem[];
   failures: PriceWriteResult[];
+  /** The synthetic run id every sync_logs row of this pass carries. */
+  runId: string;
+  /** How many rows were written to sync_logs (0 when no logger was injected). */
+  logged: number;
+  /** Every applied correction, in the order it was written. */
+  corrections: PriceCorrectionLog[];
 }
 
 /**
@@ -59,13 +73,16 @@ export const MAX_CORRECTIONS_PER_RECONCILE = 300;
 
 export async function runPriceReconcile(deps: ReconcileDeps): Promise<ReconcileResult> {
   const maxCorrections = deps.maxCorrections ?? MAX_CORRECTIONS_PER_RECONCILE;
+  const runId = deps.runId ?? newReconcileRunId();
   const [expected, variants] = await Promise.all([deps.loadExpectedPrices(), deps.loadShopifyVariants()]);
 
   const drift = computeDrift(expected, variants);
   const toFix = drift.slice(0, maxCorrections);
   const deferred = drift.length - toFix.length;
+  const productBySku = new Map(variants.map((v) => [v.sku, v.shopifyProductId ?? null]));
 
   const failures: PriceWriteResult[] = [];
+  const corrections: PriceCorrectionLog[] = [];
   let corrected = 0;
 
   // SEQUENTIAL on purpose (faille C). Two variants of the same product written in
@@ -77,8 +94,32 @@ export async function runPriceReconcile(deps: ReconcileDeps): Promise<ReconcileR
       readVariant: deps.readVariant,
       sleep: deps.sleep,
     });
-    if (res.ok) corrected++;
-    else failures.push(res);
+    if (res.ok) {
+      corrected++;
+      // Only APPLIED corrections are logged. A failed write did not change the store, and
+      // a sync_logs row claiming it did would be worse than no row at all — the failure
+      // path already produces a dashboard notification.
+      corrections.push({
+        sku: item.sku,
+        shopifyProductId: productBySku.get(item.sku) ?? null,
+        oldPriceShopify: item.shopifyPrice,
+        newPriceTurso: item.expectedPrice,
+        reason: "reconciliation",
+      });
+    } else {
+      failures.push(res);
+    }
+  }
+
+  // Persist the audit trail. Best-effort: losing a log row must never undo prices that
+  // are already live and verified.
+  let logged = 0;
+  if (deps.recordCorrections && corrections.length > 0) {
+    try {
+      logged = await deps.recordCorrections(runId, corrections);
+    } catch (err) {
+      console.error("[price-reconcile] sync_logs write failed:", err instanceof Error ? err.message : err);
+    }
   }
 
   // Layer 3 — surface what could not be fixed.
@@ -91,7 +132,18 @@ export async function runPriceReconcile(deps: ReconcileDeps): Promise<ReconcileR
     await deps.notify("price_drift", a.title, a.message);
   }
 
-  return { scanned: variants.length, drifted: drift.length, corrected, failed: failures.length, deferred, items: drift, failures };
+  return {
+    scanned: variants.length,
+    drifted: drift.length,
+    corrected,
+    failed: failures.length,
+    deferred,
+    items: drift,
+    failures,
+    runId,
+    logged,
+    corrections,
+  };
 }
 
 // ─── Layer 4: post-sync sample verification ──────────────────────────

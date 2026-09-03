@@ -167,3 +167,88 @@ describe("LAYER 4 — runPostSyncSample", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 });
+
+describe("LOG DÉTAILLÉ — traçabilité sync_logs", () => {
+  function loggingHarness(opts: { expected: Record<string, number>; shopify: Array<{ sku: string; price: number; variantId: string; shopifyProductId?: string }>; failFor?: string[] }) {
+    const store = new Map(opts.shopify.map((v) => [v.variantId, v.price]));
+    const logged: Array<{ runId: string; entries: unknown[] }> = [];
+    return {
+      logged,
+      deps: {
+        loadExpectedPrices: async () => new Map(Object.entries(opts.expected)),
+        loadShopifyVariants: async () => opts.shopify,
+        writePrice: async (variantId: string, price: number) => {
+          if (!opts.failFor?.includes(variantId)) store.set(variantId, price);
+        },
+        readVariant: async (variantId: string) => (store.has(variantId) ? { price: store.get(variantId)! } : null),
+        notify: vi.fn().mockResolvedValue(1),
+        recordCorrections: async (runId: string, entries: unknown[]) => {
+          logged.push({ runId, entries });
+          return entries.length;
+        },
+        sleep: noSleep,
+      },
+    };
+  }
+
+  it("writes one row per APPLIED correction, with SKU, both prices and the reason", async () => {
+    const h = loggingHarness({
+      expected: { A: 135.99, B: 104.99 },
+      shopify: [
+        { sku: "A", price: 119.99, variantId: "vA", shopifyProductId: "p1" },
+        { sku: "B", price: 109.99, variantId: "vB", shopifyProductId: "p1" },
+      ],
+    });
+    const r = await runPriceReconcile(h.deps);
+    expect(r.logged).toBe(2);
+    expect(r.corrections).toEqual([
+      { sku: "A", shopifyProductId: "p1", oldPriceShopify: 119.99, newPriceTurso: 135.99, reason: "reconciliation" },
+      { sku: "B", shopifyProductId: "p1", oldPriceShopify: 109.99, newPriceTurso: 104.99, reason: "reconciliation" },
+    ]);
+  });
+
+  it("groups every correction of a pass under ONE runId", async () => {
+    const h = loggingHarness({
+      expected: { A: 10, B: 20 },
+      shopify: [{ sku: "A", price: 1, variantId: "vA" }, { sku: "B", price: 2, variantId: "vB" }],
+    });
+    const r = await runPriceReconcile(h.deps);
+    expect(h.logged).toHaveLength(1); // one batched write
+    expect(h.logged[0].runId).toBe(r.runId);
+    expect(r.runId).toMatch(/^reconcile-\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("does NOT log a write that failed — a row claiming a price is live would be a lie", async () => {
+    const h = loggingHarness({
+      expected: { A: 135.99, B: 104.99 },
+      shopify: [{ sku: "A", price: 119.99, variantId: "vA" }, { sku: "B", price: 109.99, variantId: "vB" }],
+      failFor: ["vA"],
+    });
+    const r = await runPriceReconcile(h.deps);
+    expect(r.corrected).toBe(1);
+    expect(r.failed).toBe(1);
+    expect(r.corrections.map((c) => c.sku)).toEqual(["B"]);
+    expect(r.logged).toBe(1);
+  });
+
+  it("writes nothing when nothing drifted", async () => {
+    const h = loggingHarness({ expected: { A: 10 }, shopify: [{ sku: "A", price: 10, variantId: "vA" }] });
+    const r = await runPriceReconcile(h.deps);
+    expect(r.logged).toBe(0);
+    expect(h.logged).toHaveLength(0);
+  });
+
+  it("survives a logging failure — prices are already live, the trail is secondary", async () => {
+    const h = loggingHarness({ expected: { A: 135.99 }, shopify: [{ sku: "A", price: 119.99, variantId: "vA" }] });
+    const r = await runPriceReconcile({ ...h.deps, recordCorrections: async () => { throw new Error("turso down"); } });
+    expect(r.corrected).toBe(1); // the price IS live
+    expect(r.logged).toBe(0); // the trail is not
+  });
+
+  it("still reconciles when no logger is injected at all", async () => {
+    const h = loggingHarness({ expected: { A: 135.99 }, shopify: [{ sku: "A", price: 119.99, variantId: "vA" }] });
+    const r = await runPriceReconcile({ ...h.deps, recordCorrections: undefined });
+    expect(r.corrected).toBe(1);
+    expect(r.logged).toBe(0);
+  });
+});
