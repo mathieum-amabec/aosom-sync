@@ -1,5 +1,7 @@
 {
-  "regions": ["yul1"],
+  "regions": [
+    "yul1"
+  ],
   "crons": [
     {
       "path": "/api/cron/sync",
@@ -31,6 +33,10 @@
     },
     {
       "path": "/api/cron/publisher",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/price-reconcile",
       "schedule": "0 * * * *"
     },
     {

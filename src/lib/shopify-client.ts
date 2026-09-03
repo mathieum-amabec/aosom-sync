@@ -514,6 +514,35 @@ export async function updateShopifyVariantPrice(
   }
 }
 
+/**
+ * Read one variant back from Shopify: its live price, compare-at and inventory.
+ *
+ * Exists for the write-then-verify loop in price-protection.ts. A PUT to /variants that
+ * returns 200 is Shopify accepting the request, not proof the value stuck — a concurrent
+ * write, a throttle retry, or a variant that moved product can all leave the stored price
+ * different from what we sent. Verification needs an independent read.
+ *
+ * Returns null when the variant no longer exists (404), which the caller must treat as a
+ * real failure rather than a transient one: retrying a deleted variant never succeeds.
+ */
+export async function fetchVariant(
+  variantId: string,
+): Promise<{ variantId: string; sku: string; price: number; compareAtPrice: number | null; inventoryQuantity: number } | null> {
+  const response = await shopifyFetch(`/variants/${variantId}.json`);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`Shopify variant read failed: ${response.status} — ${await response.text()}`);
+  }
+  const v = (await response.json()).variant as Record<string, unknown>;
+  return {
+    variantId: String(v.id),
+    sku: (v.sku as string) || "",
+    price: Number(v.price),
+    compareAtPrice: v.compare_at_price == null ? null : Number(v.compare_at_price),
+    inventoryQuantity: Number(v.inventory_quantity) || 0,
+  };
+}
+
 export async function draftShopifyProduct(shopifyId: string): Promise<void> {
   await updateShopifyProduct(shopifyId, { status: "draft" });
 }
