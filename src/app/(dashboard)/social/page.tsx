@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { SOCIAL_CATEGORIES, seasonalDefaultCategory, getCategory } from "@/lib/social-categories";
 
 interface ChannelState {
   status: "pending" | "published" | "error" | "skipped";
@@ -107,6 +108,16 @@ export default function SocialPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
   const [generating, setGenerating] = useState(false);
+  // "" = let the server apply the seasonal preference for the current month.
+  const [category, setCategory] = useState("");
+  // What the blank option means right now. Resolved after mount, not during render: the
+  // server renders in UTC and the browser in local time, so on a month boundary the two
+  // would disagree and React would flag a hydration mismatch.
+  const [seasonalLabel, setSeasonalLabel] = useState("Saison automatique");
+  useEffect(() => {
+    const c = getCategory(seasonalDefaultCategory());
+    setSeasonalLabel(c ? `Saison auto — ${c.label}` : "Saison auto — tout le catalogue");
+  }, []);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTextFr, setEditTextFr] = useState("");
   const [editTextEn, setEditTextEn] = useState("");
@@ -183,13 +194,34 @@ export default function SocialPage() {
 
   async function generateHighlight() {
     setGenerating(true);
-    await fetch("/api/social", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "generate", triggerType: "stock_highlight", count: 3 }),
-    });
-    setGenerating(false);
-    fetchDrafts();
+    try {
+      const res = await fetch("/api/social", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "generate",
+          triggerType: "stock_highlight",
+          count: 3,
+          // Omitted when blank so the server picks the season.
+          ...(category ? { category } : {}),
+        }),
+      });
+      const data = await res.json();
+      // The old handler swallowed every failure: a category with no lifestyle-verified
+      // product looked identical to a successful run that produced nothing.
+      if (!data.success) {
+        alert(data.error || "Échec de la génération");
+      } else if (data.fellBackToAll) {
+        alert(
+          `${data.count} brouillon(s) générés — rien de saisonnier en stock, repli sur tout le catalogue.`
+        );
+      }
+    } catch (err) {
+      alert(`Échec de la génération : ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGenerating(false);
+      fetchDrafts();
+    }
   }
 
   function saveEdit(id: number) {
@@ -274,13 +306,33 @@ export default function SocialPage() {
             Multi-channel publishing — {activeChannels.length} channels active
           </p>
         </div>
-        <button
-          onClick={generateHighlight}
-          disabled={generating}
-          className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors"
-        >
-          {generating ? "Generating..." : "Generate Highlights"}
-        </button>
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            disabled={generating}
+            aria-label="Catégorie des produits à mettre en avant"
+            className="w-full sm:w-auto px-3 py-2 bg-gray-900 border border-gray-800 text-white text-sm rounded-lg disabled:opacity-50"
+          >
+            <option value="">{seasonalLabel}</option>
+            {SOCIAL_CATEGORIES.filter((c) => c.key !== "all").map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+                {/* A category with no lifestyle-validated photo can never post. Say so in
+                    the list rather than letting the operator find out by clicking. */}
+                {c.measuredLifestylePool === 0 ? " (aucune photo validée)" : ""}
+              </option>
+            ))}
+            <option value="all">Toutes les catégories</option>
+          </select>
+          <button
+            onClick={generateHighlight}
+            disabled={generating}
+            className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {generating ? "Generating..." : "Generate Highlights"}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 md:grid-cols-5 gap-2 md:gap-3 mb-6">
