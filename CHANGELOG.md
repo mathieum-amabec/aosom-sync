@@ -2,6 +2,82 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.80.0] - 2026-09-04
+
+The 🎃 Halloween category could not produce a single post. Fixed at the source: 24 products
+tagged, 13 gallery images reordered. Halloween goes from 0/34 postable to 34/34.
+
+### The cause
+
+Not the category filter, which worked. `postableLifestyleUrl()` requires
+`life.verified && life.primaryImageUrl`, and `verified` is `tags.includes("lifestyle-verified")`
+— nothing else. All 24 Halloween products had 7-8 clean `cdn.shopify.com` images returning 200,
+and `primaryImageUrl` resolved fine. Every one of them was missing the tag.
+
+They were missing it because the Phase-3 classification campaign covered **759 of 1655
+products** and never reached the Halloween batch: 0 of the 24 appear in
+`lifestyle-classification-first759.detail.json` or `lifestyle-verified-ids.json`. The generator
+samples 15 candidates per draft, all 15 failed the same check, so the run produced nothing and
+reported "aucun produit lifestyle-verified".
+
+### Fixed — 37 Shopify writes, each read back
+
+Classified all 232 images of the 24 products with the campaign's own Claude Vision prompt:
+
+- **11 products** already had a clean `lifestyle_no_people` photo at position 1 → tag only.
+- **13 products** had a detail shot or a text-overlaid image at position 1, with a clean one at
+  position 4-6 → image moved to position 1, then tagged.
+- **0 unusable.**
+
+Applied with the existing `scripts/lifestyle-pos1-fix.mjs` and `scripts/lifestyle-tag-verified.mjs`
+(2 req/s, re-GET verification after every PUT, resumable checkpoint). 13/13 swaps and 24/24 tags
+verified. End-to-end re-check: **24/24 now pass `postableLifestyleUrl()`**.
+
+The 13 swaps change the hero image on those product pages. That is the pos-1 rule working as
+intended (ambiance photo first), but it is visible to shoppers.
+
+### Changed — `lifestyle-tag-verified.mjs` takes `--ids <file.json>`
+
+It read `lifestyle-verified-ids.json` from a hardcoded path. The Halloween batch needed the same
+merge-tag pass over a different list, and this gap will recur on every future seasonal import.
+Defaults to the original file, so existing invocations are unchanged.
+
+### Not done — filtering the seasonal categories by Shopify tag
+
+Requested, then measured against production and dropped. The numbers:
+
+|  | `product_type` | Shopify tag | écart |
+|---|---:|---:|---|
+| Halloween | 24 | 24 | **the same 24** |
+| Noël | 25 | 40 | 15 false positives |
+
+Halloween is a wash — both signals select the identical 24 products, so switching could not have
+been the fix. Noël is worse: `noel` is a **merchandising tag** on this store, not a category. It
+sits on a cat house, a hardtop gazebo, and electric ride-on cars tagged `cadeau Noël`; two more
+match on `bois de sapin` — fir **wood**, a material, not a Christmas tree. Filtering "🎄 Noël" by
+tag would put a sun lounger in the Christmas highlights.
+
+Tag filtering also costs a full Admin API sweep (1655 products, 7 pages, **6.6 s measured**) per
+click, since Turso has no `tags` column. It buys nothing on Halloween, loses precision on Noël,
+and adds latency everywhere. The measurement is now pinned in `social-categories.ts` and in a
+test, so a future edit has to confront it rather than re-derive it.
+
+### Not done — bypassing the lifestyle gate for Halloween/Noël
+
+Also requested, also dropped, for the same reason: of the 24 Halloween pos-1 images, **only 11
+were clean**. A bypass would have published 13 posts carrying a detail shot or a text-overlaid
+image — exactly what the gate exists to prevent. Fixing the images instead gets 24/24 clean and
+needs no code change. (Stock highlights stay drafts pending approval; autopost only ever applies
+to price drops, so the blast radius would have been bounded, but the drafts would still have been
+wrong.)
+
+### Still open
+
+Roughly **870 products remain unclassified** and are silently unpostable by the social generator
+— rangement 110 of 118, salon 95 of 142, exterieur 170 of 326. And nothing classifies a product
+on import, so every new batch arrives invisible to the generator. Halloween is fixed; the
+mechanism that broke it is not.
+
 ## [0.5.79.0] - 2026-09-03
 
 A category selector on the "Generate Highlights" button, so a social post can be aimed at

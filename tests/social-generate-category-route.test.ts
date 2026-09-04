@@ -113,13 +113,23 @@ describe('POST /api/social generate — category', () => {
     expect((await res.json()).error).toContain("🎄 Noël");
   });
 
+  // nouveautes is the remaining zero-validated-photo category (halloween was the other one
+  // until the 2026-09-04 tagging pass took it to 34/34).
   it("says a category with zero validated photos is a dead end, not bad luck", async () => {
+    mockAll({ drafts: [], categoryUsed: "nouveautes", categorySource: "explicit", fellBackToAll: false });
+    const { POST } = await import("@/app/api/social/route");
+    const body = await (await POST(genReq({ category: "nouveautes" }))).json();
+    expect(body.error).toContain("Nouveautés");
+    expect(body.error).toContain("photo lifestyle validée");
+    expect(body.error).toContain("autre catégorie");
+  });
+
+  it("no longer treats halloween as a dead end now that it is tagged", async () => {
     mockAll({ drafts: [], categoryUsed: "halloween", categorySource: "explicit", fellBackToAll: false });
     const { POST } = await import("@/app/api/social/route");
     const body = await (await POST(genReq({ category: "halloween" }))).json();
     expect(body.error).toContain("🎃 Halloween");
-    expect(body.error).toContain("photo lifestyle validée");
-    expect(body.error).toContain("autre catégorie");
+    expect(body.error).not.toContain("autre catégorie");
   });
 
   it("says a thin-but-nonzero category is worth retrying", async () => {

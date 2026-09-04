@@ -59,13 +59,28 @@ describe("social category table", () => {
     }
   });
 
-  // Measured against live Shopify tags on 2026-09-03. These are the two categories the
-  // dashboard must warn about: 34 Halloween products in stock, not one with a validated
-  // lifestyle photo, so picking it can only ever fail.
-  it("knows halloween and nouveautes cannot post, and that exterieur can", () => {
-    expect(getCategory("halloween")!.measuredLifestylePool).toBe(0);
+  // Measured against live Shopify tags. On 2026-09-03 Halloween sat at 0 of 34 — the
+  // Phase-3 classification campaign never reached that batch, so the category could only
+  // ever fail. The 2026-09-04 pass (13 pos-1 swaps + 24 tags) took it to 34/34; this test
+  // is what catches a regression back to the silent-failure state.
+  it("knows halloween can post again, and that nouveautes still cannot", () => {
+    expect(getCategory("halloween")!.measuredLifestylePool).toBe(
+      getCategory("halloween")!.measuredPool,
+    );
     expect(getCategory("nouveautes")!.measuredLifestylePool).toBe(0);
     expect(getCategory("exterieur")!.measuredLifestylePool).toBeGreaterThan(THIN_POOL_THRESHOLD);
+  });
+
+  // The 2026-09-04 tag-vs-product_type measurement, pinned so a future edit that switches
+  // the seasonal categories to Shopify tags has to confront it. Tag matching pulls 15 extra
+  // products into Noël (a cat house, a gazebo, ride-on cars tagged "cadeau Noël", and two
+  // matching on "bois de sapin" — fir wood, not a tree). product_type does not.
+  it("keeps the seasonal categories on product_type, not Shopify tags", () => {
+    for (const key of ["halloween", "noel"]) {
+      const c = getCategory(key)!;
+      expect(c.predicate).toContain("product_type");
+      expect(c.predicate).not.toContain("tag");
+    }
   });
 });
 
