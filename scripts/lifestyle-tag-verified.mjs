@@ -1,7 +1,8 @@
 // PHASE 3 STEP 2 — add the "lifestyle-verified" tag to the 610 clean-pos1 products.
 // MERGES with existing tags (never overwrites). Bulk-fetches all tags first (few GETs),
 // then PUTs only products missing the tag. Shopify 2 req/sec. Resumable. Needs --apply.
-//   node scripts/lifestyle-tag-verified.mjs [--apply]
+//   node scripts/lifestyle-tag-verified.mjs [--ids <file.json>] [--apply]
+//   --ids defaults to lifestyle-verified-ids.json (the original Phase-3 list).
 import { readFileSync, existsSync, appendFileSync } from "node:fs";
 function loadEnv() { const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8"); const env = {}; for (const l of raw.split(/\r?\n/)) { const m = l.match(/^([A-Z0-9_]+)=(.*)$/); if (!m) continue; let v = m[2].trim(); if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1); env[m[1]] = v; } return env; }
 const env = loadEnv();
@@ -16,8 +17,14 @@ async function shop(method, path, body) { for (let a = 0; a < 6; a++) { const w 
 function nextLink(h) { if (!h) return null; for (const p of h.split(",")) { const m = p.match(/<([^>]+)>;\s*rel="next"/); if (m) return m[1]; } return null; }
 const tagList = (s) => (s || "").split(",").map((t) => t.trim()).filter(Boolean);
 
-const verified = new Set(JSON.parse(readFileSync(new URL("../lifestyle-verified-ids.json", import.meta.url), "utf8")).map(String));
-process.stderr.write(`${APPLY ? "*** APPLY" : "--- DRY-RUN"} — tag "${TAG}" on ${verified.size} products ***\n`);
+// Which id list to tag. Defaults to the original Phase-3 file so existing invocations are
+// unchanged; --ids lets a later batch (a season, a category) reuse this script instead of
+// renaming files around it. The 2026-09 Halloween gap was exactly that case: 24 products
+// the Phase-3 campaign never covered, needing the same merge-tag pass.
+const idsIdx = process.argv.indexOf("--ids");
+const IDS_FILE = idsIdx >= 0 ? process.argv[idsIdx + 1] : "lifestyle-verified-ids.json";
+const verified = new Set(JSON.parse(readFileSync(new URL(`../${IDS_FILE}`, import.meta.url), "utf8")).map(String));
+process.stderr.write(`${APPLY ? "*** APPLY" : "--- DRY-RUN"} — tag "${TAG}" on ${verified.size} products from ${IDS_FILE} ***\n`);
 
 // bulk fetch current tags
 const tagsById = new Map();

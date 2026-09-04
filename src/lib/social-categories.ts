@@ -1,12 +1,26 @@
 /**
  * Category filter for the "Generate Highlights" button (dashboard /social).
  *
- * WHY product_type AND NOT SHOPIFY TAGS
- * The brief asked for Halloween/Noël to be selected by Shopify tag. There is no `tags`
- * column in Turso — tags live only on Shopify, so tag filtering would mean paging the whole
- * Admin API (7 pages, ~30 s) on every click. It turns out not to be needed: Aosom's own
- * `product_type` already carries the seasonal branch, verified against production on
- * 2026-09-03:
+ * WHY product_type AND NOT SHOPIFY TAGS — measured, not assumed
+ *
+ * This was re-opened on 2026-09-04 ("the Halloween filter should search by Shopify tag")
+ * and settled by measuring both against production. Do not switch it back without re-running
+ * that comparison; the numbers are the whole argument.
+ *
+ *   Halloween:  product_type 24 products · tag "halloween" 24 · the SAME 24, zero difference.
+ *   Noël:       product_type 25 products · tag matching 40 · 15 false positives.
+ *
+ * The Noël gap settles it. On Shopify, `noel` is a MERCHANDISING tag (a gift guide), not a
+ * category: it sits on a cat house, a hardtop gazebo, and electric ride-on cars tagged
+ * `cadeau Noël`. Two more match on `bois de sapin` — fir WOOD, a material, not a Christmas
+ * tree. Filtering "🎄 Noël" by tag would put a sun lounger in the Christmas highlights.
+ *
+ * Tag filtering also costs a full Admin API sweep (1655 products, 7 pages, 6.6 s measured)
+ * on every click, since there is no `tags` column in Turso. So it buys nothing on Halloween,
+ * loses precision on Noël, and adds latency everywhere.
+ *
+ * Aosom's own `product_type` already carries the seasonal branch, verified in production
+ * on 2026-09-03:
  *
  *     Home Furnishings > Holiday & Seasonal > Halloween Decorations          34
  *     Home Furnishings > Holiday & Seasonal > Christmas Trees > …            52
@@ -39,23 +53,26 @@ export interface SocialCategory {
   /**
    * Of those, how many carry Shopify's `lifestyle-verified` tag — the ONLY ones the
    * generator will post, since a highlight never goes out on a white-background photo.
-   * This, not measuredPool, decides whether a category can produce anything at all:
-   * Halloween has 34 eligible products and 0 verified, so today it cannot post.
-   * Measured 2026-09-03 against live Shopify tags. Operator messaging only, never
-   * filtering — going stale degrades a hint, not the feature.
+   * This, not measuredPool, decides whether a category can produce anything at all. On
+   * 2026-09-03 Halloween had 34 eligible products and 0 verified — it could not post at all,
+   * because the Phase-3 classification campaign covered 759 of 1655 products and never
+   * reached the Halloween batch. Fixed 2026-09-04 (13 pos-1 swaps + 24 tags), so it now
+   * reads 34/34. Roughly 870 products remain unclassified and silently unpostable.
+   * Measured against live Shopify tags. Operator messaging only, never filtering — going
+   * stale degrades a hint, not the feature.
    */
   measuredLifestylePool: number;
 }
 
 /** `all` first; the rest in the order the dropdown shows them. */
 export const SOCIAL_CATEGORIES: SocialCategory[] = [
-  { key: "all", label: "Toutes les catégories", predicate: null, args: [], measuredPool: 2350, measuredLifestylePool: 658 },
+  { key: "all", label: "Toutes les catégories", predicate: null, args: [], measuredPool: 2350, measuredLifestylePool: 683 },
   {
     key: "halloween",
     label: "🎃 Halloween",
     predicate: "product_type LIKE 'Home Furnishings > Holiday & Seasonal > Halloween%'",
     args: [],
-    measuredPool: 34, measuredLifestylePool: 0,
+    measuredPool: 34, measuredLifestylePool: 34,
   },
   {
     key: "noel",
@@ -159,9 +176,9 @@ export function isValidCategory(key: string | null | undefined): boolean {
  * result is normal. Matches HIGHLIGHT_LIFESTYLE_SAMPLE in job4-social.ts, the number of
  * candidates the generator draws per draft.
  *
- * Measured odds that one draft finds a verified product, 2026-09-03: cuisine and animaux
- * 100%, most categories >99%, rangement 50% (10 verified of 227), halloween and nouveautes
- * 0%.
+ * Measured odds that one draft finds a verified product: cuisine and animaux 100%, most
+ * categories >99%, rangement 50% (10 verified of 227), nouveautes 0%. Halloween was 0% on
+ * 2026-09-03 and is 100% since the 2026-09-04 tagging pass.
  */
 export const THIN_POOL_THRESHOLD = 15;
 
