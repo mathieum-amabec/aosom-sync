@@ -29,6 +29,7 @@ import {
 import { selectHook, buildHookedPrompt, buildHookedPromptEn } from "@/lib/hook-selector";
 import { publishDraftToChannels } from "@/lib/social-publisher";
 import { resolveLifestyle } from "@/lib/selectors/shopify-images";
+import { resolveCategory, type SocialCategory } from "@/lib/social-categories";
 
 // How many eligible products to sample when hunting for a lifestyle-verified one
 // for the daily stock highlight. ~80% of the catalog is tagged, so a handful of
@@ -291,13 +292,18 @@ export async function triggerPriceDrop(
 async function generateOneStockHighlight(
   settings: Awaited<ReturnType<typeof getAllSettings>>,
   minDays: number,
+  category: SocialCategory | null = null,
 ): Promise<GenerateDraftResult | null> {
   // Sample a small random batch of eligible products, then post the first that is
   // lifestyle-verified. A non-verified product is skipped (never posted with a
   // white-bg image) — matching the new_product / price_drop gate.
-  const candidates = await getEligibleHighlightCandidates(minDays, HIGHLIGHT_LIFESTYLE_SAMPLE);
+  const candidates = await getEligibleHighlightCandidates(
+    minDays,
+    HIGHLIGHT_LIFESTYLE_SAMPLE,
+    category?.predicate ? { predicate: category.predicate, args: category.args } : null,
+  );
   if (candidates.length === 0) {
-    log("No eligible product for stock highlight");
+    log(`No eligible product for stock highlight${category ? ` in ${category.key}` : ""}`);
     return null;
   }
   let product: Record<string, unknown> | null = null;
@@ -311,7 +317,10 @@ async function generateOneStockHighlight(
     }
   }
   if (!product || !lifestyleUrl) {
-    log(`No lifestyle-verified product among ${candidates.length} eligible candidates`);
+    log(
+      `No lifestyle-verified product among ${candidates.length} eligible candidates` +
+        (category ? ` in ${category.key}` : ""),
+    );
     return null;
   }
 
@@ -345,22 +354,55 @@ async function generateOneStockHighlight(
   return { draftId, postText: fr, postTextEn: en, imagePath: lifestyleUrl, imageUrl: lifestyleUrl, imageUrls };
 }
 
+/** What a stock-highlight run actually did, so the UI can explain an empty result. */
+export interface StockHighlightRun {
+  drafts: GenerateDraftResult[];
+  /** Category key actually filtered on for the LAST attempt; null = whole catalog. */
+  categoryUsed: string | null;
+  /** Where that category came from. */
+  categorySource: "explicit" | "seasonal" | "none";
+  /** True when the seasonal preference found nothing and we widened to the catalog. */
+  fellBackToAll: boolean;
+}
+
 /**
  * Daily stock highlight — generate up to `count` distinct highlights. Each posted
  * product is marked (markProductPosted) so subsequent picks in the same run differ.
  * Stops early if a sample yields no lifestyle-verified product (retrying the same
  * run won't help), and surfaces a warning only when nothing at all was produced.
+ *
+ * `category` is a key from src/lib/social-categories.ts. An EXPLICIT choice is strict:
+ * empty means empty, and the caller says so. With no choice the seasonal default applies
+ * as a PREFERENCE — Halloween is 34 products and Noël 55, so a strict seasonal filter would
+ * produce zero drafts in exactly the months we most want posts. On a miss we widen to the
+ * whole catalog once and report it in `fellBackToAll`.
  */
-export async function triggerStockHighlight(count = 1): Promise<GenerateDraftResult[]> {
-  log(`stock_highlight trigger (count=${count})`);
+export async function runStockHighlight(
+  count = 1,
+  category?: string | null,
+): Promise<StockHighlightRun> {
+  const resolved = resolveCategory(category);
+  log(
+    `stock_highlight trigger (count=${count}, category=${resolved.category?.key ?? "all"}` +
+      `, source=${resolved.source})`,
+  );
   const settings = await getAllSettings();
   const minDays = parseInt(
     settings.social_min_days_between_reposts || SYNC.DEFAULT_MIN_DAYS_BETWEEN_REPOSTS,
     10
   );
   const results: GenerateDraftResult[] = [];
+  let active = resolved.category;
+  let fellBackToAll = false;
   for (let i = 0; i < Math.max(1, count); i++) {
-    const r = await generateOneStockHighlight(settings, minDays);
+    let r = await generateOneStockHighlight(settings, minDays, active);
+    if (!r && active && resolved.canFallBack && !fellBackToAll) {
+      // Seasonal preference came up empty — widen once rather than return nothing.
+      log(`seasonal ${active.key} yielded nothing, widening to the whole catalog`);
+      fellBackToAll = true;
+      active = null;
+      r = await generateOneStockHighlight(settings, minDays, null);
+    }
     if (!r) break;
     results.push(r);
   }
@@ -368,10 +410,25 @@ export async function triggerStockHighlight(count = 1): Promise<GenerateDraftRes
     await createNotification(
       "warning",
       "Stock highlight ignoré",
-      "Aucun produit lifestyle-verified parmi les candidats échantillonnés"
+      resolved.category
+        ? `Aucun produit lifestyle-verified dans « ${resolved.category.label} » parmi les candidats échantillonnés`
+        : "Aucun produit lifestyle-verified parmi les candidats échantillonnés"
     );
   }
-  return results;
+  return {
+    drafts: results,
+    categoryUsed: active?.key ?? null,
+    categorySource: resolved.source,
+    fellBackToAll,
+  };
+}
+
+/** Drafts-only wrapper, for callers that don't care why the run picked what it picked. */
+export async function triggerStockHighlight(
+  count = 1,
+  category?: string | null,
+): Promise<GenerateDraftResult[]> {
+  return (await runStockHighlight(count, category)).drafts;
 }
 
 /**
@@ -424,6 +481,9 @@ export async function generateSocialBatch(count = SOCIAL_DAILY_BATCH): Promise<G
 
   // Fill the rest with random stock highlights. Not caught: a throw here is a
   // systemic failure (e.g. Anthropic outage) that should surface as a cron 500.
+  // No category argument, so the daily cron picks up the seasonal preference too
+  // (Halloween in Sept-Oct, Noël in Nov-Dec, patio in summer), widening to the whole
+  // catalog when the season is thin. That is the point of the seasonal default.
   if (results.length < count && !overBudget()) {
     const fill = await triggerStockHighlight(count - results.length);
     results.push(...fill);

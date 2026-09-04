@@ -14,7 +14,8 @@ import { testConnection as testFacebookConnection, type FacebookBrand } from "@/
 import { testConnection as testInstagramConnection } from "@/lib/instagram-client";
 import { publishDraftToChannel, publishDraftToChannels, draftToQueueItems } from "@/lib/social-publisher";
 import { getNextAvailableSlot } from "@/lib/publication-scheduler";
-import { triggerNewProduct, triggerPriceDrop, triggerStockHighlight } from "@/jobs/job4-social";
+import { triggerNewProduct, triggerPriceDrop, runStockHighlight } from "@/jobs/job4-social";
+import { getCategory, isValidCategory, THIN_POOL_THRESHOLD } from "@/lib/social-categories";
 import { CHANNELS, activeChannels, type ChannelKey } from "@/lib/config";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
@@ -81,14 +82,50 @@ export async function POST(request: Request) {
         // button sends count=3.
         if (triggerType === "stock_highlight") {
           const count = Math.min(Math.max(1, Number(body.count) || 1), 5);
-          const arr = await triggerStockHighlight(count);
-          if (arr.length === 0) {
+          // Optional category from the dropdown. An unknown key is a client bug, not a
+          // silent "generate from the whole catalog" — say so rather than posting something
+          // the operator didn't ask for.
+          const category = typeof body.category === "string" ? body.category : null;
+          if (category && !isValidCategory(category)) {
             return NextResponse.json(
-              { success: false, error: "Aucun produit lifestyle-verified — post ignoré (jamais d'image fond blanc)" },
+              { success: false, error: `Catégorie inconnue : ${category}` },
+              { status: 400 },
+            );
+          }
+          const run = await runStockHighlight(count, category);
+          if (run.drafts.length === 0) {
+            // Name the category — "aucun produit lifestyle-verified" over 2 400 products
+            // and over the 34 Halloween ones mean very different things to the operator.
+            // "all" is an explicit request for the whole catalog, not a category to name.
+            const picked = category && category !== "all" ? getCategory(category) : undefined;
+            return NextResponse.json(
+              {
+                success: false,
+                // The verified-photo pool is the actionable part. A category with none at
+                // all will never work and retrying wastes the operator's time; a thin one
+                // is worth a second click. Say which of the two this is.
+                error: picked
+                  ? `Aucun produit lifestyle-verified dans « ${picked.label} » — ` +
+                    (picked.measuredLifestylePool === 0
+                      ? `aucun de ses ~${picked.measuredPool} produits en stock n'a de photo lifestyle validée. Choisissez une autre catégorie.`
+                      : picked.measuredLifestylePool < THIN_POOL_THRESHOLD
+                        ? `seulement ~${picked.measuredLifestylePool} de ses ~${picked.measuredPool} produits en ont une, un tirage sur deux échoue. Réessayez ou élargissez.`
+                        : "post ignoré (jamais d'image fond blanc)")
+                  : "Aucun produit lifestyle-verified — post ignoré (jamais d'image fond blanc)",
+                category: run.categoryUsed,
+                fellBackToAll: run.fellBackToAll,
+              },
               { status: 422 },
             );
           }
-          return NextResponse.json({ success: true, data: arr, count: arr.length });
+          return NextResponse.json({
+            success: true,
+            data: run.drafts,
+            count: run.drafts.length,
+            category: run.categoryUsed,
+            categorySource: run.categorySource,
+            fellBackToAll: run.fellBackToAll,
+          });
         }
         let result;
         if (triggerType === "new_product") {

@@ -4282,16 +4282,24 @@ export async function getLastPostDate(sku: string): Promise<number | null> {
  */
 export async function getEligibleHighlightCandidates(
   minDaysBetween: number,
-  limit: number
+  limit: number,
+  /**
+   * Optional category filter from the "Generate Highlights" dropdown. Pass the
+   * `predicate`/`args` of a SocialCategory (src/lib/social-categories.ts). The predicate is
+   * a constant string from that module's own table — never operator input, so inlining it is
+   * safe; anything variable still travels as a bound arg.
+   */
+  filter?: { predicate: string; args: (string | number)[] } | null
 ): Promise<Record<string, unknown>[]> {
   const db = await ensureSchema();
   const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
 
+  const extra = filter?.predicate ? ` AND (${filter.predicate})` : "";
   const skusResult = await db.execute({
     sql: `SELECT sku FROM products
           WHERE shopify_product_id IS NOT NULL AND qty > 0
-            AND (last_posted_at IS NULL OR last_posted_at < ?)`,
-    args: [cutoff],
+            AND (last_posted_at IS NULL OR last_posted_at < ?)${extra}`,
+    args: [cutoff, ...(filter?.args ?? [])],
   });
   if (skusResult.rows.length === 0) return [];
 

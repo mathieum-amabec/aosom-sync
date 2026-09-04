@@ -2,6 +2,73 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.79.0] - 2026-09-03
+
+A category selector on the "Generate Highlights" button, so a social post can be aimed at
+Halloween, patio furniture or discounted stock instead of the whole catalog at random.
+
+### Added — 13 categories, filtered in SQL
+
+`src/lib/social-categories.ts` holds the table: key, French label, and the SQL predicate
+that selects it. `getEligibleHighlightCandidates()` takes it as an optional filter and ANDs
+it into the eligibility query it already runs, so a filtered pick costs the same as an
+unfiltered one. `POST /api/social {action:"generate"}` accepts `category`; an unknown key is
+a 400, never a silent catalog-wide run.
+
+Eligible SKUs per category, measured against production 2026-09-03:
+
+| catégorie | éligibles | dont photo lifestyle validée |
+|---|---:|---:|
+| Toutes | 2350 | 658 |
+| 🎃 Halloween | 34 | **0** |
+| 🎄 Noël | 54 | 7 |
+| Salon & Canapés | 291 | 102 |
+| Chambre & Literie | 94 | 30 |
+| Bureau & Télétravail | 217 | 59 |
+| Extérieur & Patio | 525 | 159 |
+| Cuisine & Salle à manger | 253 | 114 |
+| Rangement | 227 | 10 |
+| Enfants & Jouets | 184 | 64 |
+| Animaux | 187 | 100 |
+| En solde | 1404 | 392 |
+| Nouveautés (30 j) | 5 | **0** |
+
+### Added — a seasonal default when nothing is picked
+
+Sept-Oct → Halloween, Nov-Dec → Noël, Jan-Feb → Salon & Canapés, Jun-Aug → Extérieur & Patio,
+Mar-May → no preference. This applies to the daily social cron too, not just the button.
+
+It is a **preference, not a filter**. Halloween is 34 products and Noël 54; a strict seasonal
+filter would produce zero drafts in exactly the months we most want posts. On a miss the run
+widens to the whole catalog once (`fellBackToAll` in the response) and the dashboard says so.
+An explicit choice is never widened this way — pick Halloween and you get Halloween or a
+message saying why not.
+
+### Fixed — the button no longer swallows its own failures
+
+`generateHighlight()` ignored the response entirely. A category with nothing to post, a 422,
+a 500: all looked identical to a successful run that happened to produce nothing. It now
+reads the response and reports.
+
+The empty-run message names the category and the reason, because those are different
+problems: **Halloween has 34 products in stock and not one with a validated lifestyle photo**,
+so it can never post and retrying is wasted time; Rangement has 10 of 227, so roughly every
+second draft misses and a second click is worth it. Categories with zero validated photos are
+labelled `(aucune photo validée)` in the dropdown itself.
+
+### Notes on the spec
+
+Three deviations, each because the data says so:
+
+- **Halloween/Noël come from `product_type`, not Shopify tags.** There is no `tags` column in
+  Turso, so tag filtering would mean paging the whole Admin API on every click. Aosom's own
+  `product_type` already carries `Holiday & Seasonal > Halloween` (34) and `> Christmas` (54).
+- **"En solde" uses `has_discount`, not `compare_at_price > price`.** Turso has no compare_at
+  column; `has_discount` is the repo's canonical discount signal, indexed, and what the
+  catalog's own "Avec rabais" filter uses.
+- **"Nouveautés (30 j)" matches 5 products**, none with a validated photo. Kept at 30 days as
+  specified; 90 days would be 179. The dropdown marks it unusable rather than hiding it.
+
 ## [0.5.78.0] - 2026-09-03
 
 Permanent traceability for every price the protection layers touch, and an immediate
