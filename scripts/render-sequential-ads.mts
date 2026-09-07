@@ -123,6 +123,35 @@ const CAMPAIGN_COPY: Record<string, string[]> = {
     "LIVRAISON GRATUITE AVANT LES FÊTES",
     "COMMANDE AVANT LE 15 DÉCEMBRE",
   ],
+
+  // ── UGC seasonal campaigns (2026-09) ────────────────────────────────
+  // Filmed by real customers, so the hook leads with the room the clip shows, not with
+  // a discount slate. Message 2 carries the price and message 3 the free shipping —
+  // the two objections that actually stop a Quebec shopper on a furniture ad.
+  "automne-2026": [
+    "TON INTÉRIEUR AVANT LES PREMIERS FROIDS",
+    "{price} LIVRÉ CHEZ VOUS",
+    "LIVRAISON GRATUITE PARTOUT AU CANADA",
+    "MAGASINEZ SUR AMEUBLODIRECT.CA",
+  ],
+  "maison-2026": [
+    "LE SALON QUE TU REPOUSSES DEPUIS DES MOIS",
+    "{price} LIVRÉ CHEZ VOUS",
+    "LIVRAISON GRATUITE PARTOUT AU CANADA",
+    "MAGASINEZ SUR AMEUBLODIRECT.CA",
+  ],
+  "enfants-2026": [
+    "CE QU'ILS VONT DEMANDER 100 FOIS",
+    "{price} LIVRÉ CHEZ VOUS",
+    "LIVRAISON GRATUITE PARTOUT AU CANADA",
+    "MAGASINEZ SUR AMEUBLODIRECT.CA",
+  ],
+  "animaux-2026": [
+    "TON CHIEN MÉRITE MIEUX QUE LE PLANCHER",
+    "{price} LIVRÉ CHEZ VOUS",
+    "LIVRAISON GRATUITE PARTOUT AU CANADA",
+    "MAGASINEZ SUR AMEUBLODIRECT.CA",
+  ],
 };
 
 const priceFr = (n: number): string =>
@@ -414,7 +443,11 @@ function renderDemandGen(sku: string, outFile: string, messages: string[]): void
 // ── enqueue ────────────────────────────────────────────────────────────────
 const sqliteToUnixSec = (s: string): number => Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
 
-const STYLE_KEY = STYLE === "hero" ? "hero_slides" : "demand_gen_messages";
+// The creative the /sequential-ads list shows. --ugc is a THIRD creative, not a variant of
+// demand-gen: the footage is a real customer's reel rather than a studio product clip, and
+// an operator reviewing the queue needs to tell those apart before approving. Existing rows
+// keep their stored style — this only labels new ones.
+const STYLE_KEY = STYLE === "hero" ? "hero_slides" : UGC ? "ugc_video" : "demand_gen_messages";
 
 async function uploadBlob(localFile: string, sku: string): Promise<string> {
   const { put } = await import("@vercel/blob");
