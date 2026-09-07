@@ -3891,15 +3891,69 @@ export async function cancelVideoDraft(id: number): Promise<boolean> {
 // publisher; drives the /sequential-ads dashboard. metadata carries {style, campaign}.
 
 /** Sequential-ad queue rows, newest first (excludes cancelled). Drives /sequential-ads. */
-export async function getSequentialAdQueueItems(limit = 50): Promise<PublicationQueueItem[]> {
+/**
+ * Sequential-ad rows for the /sequential-ads approval list, newest first.
+ *
+ * `campaign` filters in SQL rather than in the browser. That distinction is the whole point:
+ * the list was capped at 50 while 134 non-cancelled rows existed, so filtering client-side
+ * over an already-truncated page showed 18 of automne-2026's 29 ads and hid patio-ete-2026,
+ * halloween-2026 and noel-2026 entirely — including 8 Christmas drafts an operator still has
+ * to approve. A filtered request is capped far higher (CAMPAIGN_CAP) so picking a campaign
+ * shows all of it; the cap only exists so one runaway campaign cannot select unbounded rows.
+ */
+const SEQUENTIAL_AD_CAMPAIGN_CAP = 500;
+
+export async function getSequentialAdQueueItems(
+  limit = 200,
+  campaign?: string | null,
+): Promise<PublicationQueueItem[]> {
   const db = await ensureSchema();
+  const filtered = !!campaign && campaign !== "all";
   const result = await db.execute({
     sql: `SELECT * FROM publication_queue
           WHERE content_type = 'sequential_ad' AND status != 'cancelled'
+            AND (? IS NULL OR json_extract(metadata, '$.campaign') = ?)
           ORDER BY created_at DESC, id DESC LIMIT ?`,
-    args: [limit],
+    args: [
+      filtered ? campaign : null,
+      filtered ? campaign : null,
+      filtered ? SEQUENTIAL_AD_CAMPAIGN_CAP : limit,
+    ],
   });
   return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
+ * Every campaign that has at least one non-cancelled sequential ad, newest activity first.
+ *
+ * Deliberately independent of the row page above: the dropdown has to list campaigns the
+ * capped page never returns, otherwise an operator cannot select the very campaigns the cap
+ * is hiding from them.
+ */
+export async function getSequentialAdCampaigns(): Promise<string[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(
+    `SELECT json_extract(metadata, '$.campaign') AS campaign, MAX(created_at) AS last_seen
+     FROM publication_queue
+     WHERE content_type = 'sequential_ad' AND status != 'cancelled'
+       AND json_extract(metadata, '$.campaign') IS NOT NULL
+     GROUP BY campaign
+     ORDER BY last_seen DESC`,
+  );
+  return result.rows.map((r) => String(rowToObj(r).campaign)).filter(Boolean);
+}
+
+/** Total non-cancelled sequential ads, for the "showing N of M" notice. */
+export async function countSequentialAdQueueItems(campaign?: string | null): Promise<number> {
+  const db = await ensureSchema();
+  const filtered = !!campaign && campaign !== "all";
+  const result = await db.execute({
+    sql: `SELECT COUNT(*) AS n FROM publication_queue
+          WHERE content_type = 'sequential_ad' AND status != 'cancelled'
+            AND (? IS NULL OR json_extract(metadata, '$.campaign') = ?)`,
+    args: [filtered ? campaign : null, filtered ? campaign : null],
+  });
+  return Number(rowToObj(result.rows[0]).n ?? 0);
 }
 
 /**

@@ -29,6 +29,7 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 const STYLE_LABEL: Record<string, string> = {
   hero_slides: "🖼️ Hero-slides",
   demand_gen_messages: "🎬 Demand-gen",
+  ugc_video: "📱 UGC client",
 };
 
 /** Format a SQLite UTC datetime ('YYYY-MM-DD HH:MM:SS') for display (fr-CA). */
@@ -89,13 +90,24 @@ export default function SequentialAdsClient() {
   const [error, setError] = useState<string | null>(null);
   const [actingId, setActingId] = useState<number | null>(null);
   const [campaignFilter, setCampaignFilter] = useState<string>("all");
+  // Both come from the server. `campaigns` is computed over EVERY non-cancelled row, not
+  // over the page below — a campaign the cap hides must still be selectable, otherwise the
+  // filter cannot reach exactly the ads that need it.
+  const [campaigns, setCampaigns] = useState<string[]>([]);
+  const [total, setTotal] = useState(0);
 
+  // Filtering happens in SQL, not here. Filtering an already-capped page client-side is what
+  // hid 11 of automne-2026's 29 ads and made three older campaigns unreachable.
   const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await fetch("/api/sequential-ads/queue");
+      const qs = campaignFilter === "all" ? "" : `?campaign=${encodeURIComponent(campaignFilter)}`;
+      const res = await fetch(`/api/sequential-ads/queue${qs}`);
       const d = await res.json();
       if (res.ok && Array.isArray(d.items)) {
         setItems(d.items);
+        if (Array.isArray(d.campaigns)) setCampaigns(d.campaigns);
+        setTotal(typeof d.total === "number" ? d.total : d.items.length);
         setError(null);
       } else {
         setError(d.error || "Échec du chargement.");
@@ -105,7 +117,7 @@ export default function SequentialAdsClient() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [campaignFilter]);
 
   useEffect(() => {
     load();
@@ -156,13 +168,10 @@ export default function SequentialAdsClient() {
     [post],
   );
 
-  const campaigns = Array.from(
-    new Set(items.map((it) => it.campaign).filter((c): c is string => !!c)),
-  );
-  const visible = items.filter(
-    (it) => campaignFilter === "all" || it.campaign === campaignFilter,
-  );
+  // No client-side narrowing left: `items` is exactly what was asked for.
+  const visible = items;
   const draftCount = visible.filter((it) => it.status === "draft").length;
+  const hidden = Math.max(0, total - items.length);
 
   return (
     <div className="p-4 md:p-8">
@@ -178,7 +187,9 @@ export default function SequentialAdsClient() {
           <select
             value={campaignFilter}
             onChange={(e) => setCampaignFilter(e.target.value)}
-            className="px-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+            disabled={loading}
+            aria-label="Filtrer par campagne"
+            className="px-3 py-2 bg-gray-900 border border-gray-800 rounded-lg text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
           >
             <option value="all">Toutes les campagnes</option>
             {campaigns.map((c) => (
@@ -194,8 +205,20 @@ export default function SequentialAdsClient() {
         {draftCount > 0
           ? `${draftCount} pub${draftCount > 1 ? "s" : ""} en attente d’approbation`
           : "Pubs séquentielles"}
-        <span className="text-gray-500 font-normal"> · {visible.length} au total</span>
+        <span className="text-gray-500 font-normal">
+          {" · "}
+          {hidden > 0 ? `${visible.length} affichées sur ${total}` : `${visible.length} au total`}
+        </span>
       </h3>
+
+      {/* Never truncate in silence: before this, the list simply stopped at 50 of 134 and
+          three whole campaigns were unreachable with no hint that they existed. */}
+      {hidden > 0 && (
+        <p className="text-xs text-amber-300/80 mb-3">
+          {hidden} pub{hidden > 1 ? "s" : ""} plus ancienne{hidden > 1 ? "s" : ""} non affichée
+          {hidden > 1 ? "s" : ""} — choisis une campagne ci-dessus pour la voir en entier.
+        </p>
+      )}
 
       {loading ? (
         <p className="text-gray-500 text-sm">Chargement…</p>

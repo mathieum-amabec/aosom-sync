@@ -1,14 +1,24 @@
 import { NextResponse } from "next/server";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
-import { getSequentialAdQueueItems } from "@/lib/database";
+import {
+  getSequentialAdQueueItems,
+  getSequentialAdCampaigns,
+  countSequentialAdQueueItems,
+} from "@/lib/database";
 
 /**
- * GET /api/sequential-ads/queue
+ * GET /api/sequential-ads/queue[?campaign=<name>]
  *
  * Sequential-ad rows in publication_queue (content_type='sequential_ad'), newest
  * first — drives the /sequential-ads approval list. Each item exposes its status
  * and the display essentials from the payload (reelsVideoUrl, caption, brand) plus
  * the {style, campaign} metadata. Admin-only (reviewers are read-only).
+ *
+ * `campaign` filters in SQL and lifts the page cap, so selecting a campaign shows ALL of
+ * it. Without it the list returns the 200 most recent. `campaigns` is computed over every
+ * non-cancelled row, not over the returned page — the dropdown must offer the campaigns the
+ * cap is hiding, or the operator has no way to reach them. `total` lets the UI say plainly
+ * when it is showing a subset instead of silently truncating.
  */
 export interface SequentialAdQueueItem {
   id: number;
@@ -43,7 +53,7 @@ function safePayload(raw: string): SequentialAdQueueItem["payload"] {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!(await isAuthenticated())) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -51,7 +61,13 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const rows = await getSequentialAdQueueItems();
+  const raw = new URL(request.url).searchParams.get("campaign");
+  const campaign = raw && raw !== "all" ? raw : null;
+  const [rows, campaigns, total] = await Promise.all([
+    getSequentialAdQueueItems(undefined, campaign),
+    getSequentialAdCampaigns(),
+    countSequentialAdQueueItems(campaign),
+  ]);
   const items: SequentialAdQueueItem[] = rows.map((r) => ({
     id: r.id,
     content_id: r.contentId,
@@ -63,5 +79,5 @@ export async function GET() {
     style: typeof r.metadata?.style === "string" ? r.metadata.style : null,
     campaign: typeof r.metadata?.campaign === "string" ? r.metadata.campaign : null,
   }));
-  return NextResponse.json({ items });
+  return NextResponse.json({ items, campaigns, total, campaign });
 }
