@@ -4,8 +4,8 @@ All notable changes to Aosom Sync will be documented in this file.
 
 ## [0.5.81.0] - 2026-09-07
 
-Four seasonal ad series built from the authentic customer UGC reels: 57 drafts across
-automne, maison, enfants and animaux.
+Five seasonal ad series built from the authentic customer UGC reels: 61 drafts across
+automne, maison, enfants, animaux and hiver — every in-stock clip that is not patio.
 
 ### Added — campaign copy for the four UGC campaigns
 
@@ -33,15 +33,27 @@ Halloween, already covered.
 | maison-2026 | 11 | salon |
 | enfants-2026 | 12 | jouets + meubles enfants |
 | animaux-2026 | 5 | pet |
+| hiver-2026 | 4 | ficus, congélateur, 2 stations de musculation |
 
 Rendered 1080×1920, 15 s, music verified present (mean −30.1 dB — the worktree silent-audio
 trap needs `SEQ_MUSIC`/`SEQ_CLIP_DIR` pointed at the main clone).
 
-### Not done — a winter series
+What is left after all five campaigns: 21 clips out of stock, 6 not imported to Shopify, and
+9 patio/outdoor excluded by the brief. Nothing in-stock and on-theme remains unrendered.
 
-Only **one** UGC clip is a Christmas product (844-335, artificial tree), below the 3-clip
-threshold. A `noel-2026` campaign already exists with 8 drafts scheduled 1 Oct to 1 Dec, built
-from the `src/` product clips rather than UGC. Left alone.
+### Added — `hiver-2026`, 4 drafts from the leftover clips
+
+**No UGC clip is a Christmas product.** 844-335 sits under `product_type` "Artificial Trees"
+and its real FR title is *Ficus artificiel réaliste en pot* — a houseplant, not a tree. An
+earlier version of this entry called it a Christmas product; it is not, and there were zero.
+
+What the autumn campaigns left unused is a coherent gift set instead: the ficus, a compact
+freezer (800-127V80GY) and two power towers (A91-113, A91-290V02BK). Four clips, over the
+3-clip threshold, none already advertised. The copy sells them as gifts against a 15 December
+deadline rather than as decoration.
+
+The existing `noel-2026` campaign (8 drafts, 1 Oct to 1 Dec, built from the `src/` product
+clips rather than UGC) is untouched and stays the actual Christmas-product series.
 
 `halloween-2026` was likewise left alone: it already holds exactly the 3 Halloween UGC SKUs
 (844-037 and 844-522V00BK pending, 844-692V00GN published). Re-rendering would have duplicated

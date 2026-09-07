@@ -152,6 +152,17 @@ const CAMPAIGN_COPY: Record<string, string[]> = {
     "LIVRAISON GRATUITE PARTOUT AU CANADA",
     "MAGASINEZ SUR AMEUBLODIRECT.CA",
   ],
+  // Distinct from noel-2026, which advertises the src/ product clips. This is the UGC gift
+  // set — the only in-stock clips the autumn campaigns left over: an artificial ficus, a
+  // compact freezer and two power towers. NONE of them is a Christmas product (the ficus
+  // sits under product_type "Artificial Trees", which is what made it look like one), so
+  // the copy sells them as gifts with a delivery deadline rather than as decoration.
+  "hiver-2026": [
+    "LE CADEAU QU'IL VA VRAIMENT GARDER",
+    "{price} LIVRÉ CHEZ VOUS",
+    "LIVRAISON GRATUITE AVANT LES FÊTES",
+    "COMMANDE AVANT LE 15 DÉCEMBRE",
+  ],
 };
 
 const priceFr = (n: number): string =>
