@@ -58,6 +58,14 @@ const CAMPAIGN = flag("--campaign") ?? "patio-ete-2026";
 // --ugc: demand-gen sources the authentic Aosom customer/UGC reels (products.video_ugc,
 // clips in src/ugc/) instead of the patio -WEB-NT clips. Any product_type, no LV/patio gate.
 const UGC = argv.includes("--ugc");
+// The v2 pipeline is ON by default for demand-gen: Claude Vision picks the clip segment
+// and Haiku writes per-SKU copy. Both cost money per clip, so each has an explicit
+// opt-out for a cheap re-render of an already-reviewed ad.
+const NO_ANALYZE = argv.includes("--no-analyze");
+const NO_AI_COPY = argv.includes("--no-ai-copy");
+// --out <dir>: render to disk and stop there — no Blob upload, no queue row. For reviewing
+// a new creative before committing a whole campaign to the store.
+const OUT_DIR = flag("--out");
 // --replace: re-render an existing campaign in place. Without it, a second run cancels the
 // old drafts and books new slots, discarding whatever schedule an operator already chose.
 const REPLACE = argv.includes("--replace");
@@ -189,7 +197,7 @@ const BRAND = "ameublo" as const;
 // ── dynamic engine imports (circular-graph safe under tsx) ────────────────
 type Lib = Awaited<ReturnType<typeof loadLib>>;
 async function loadLib() {
-  const [ren, vbt, ic, val, bsk, rbf, dbM, schedM] = await Promise.all([
+  const [ren, vbt, ic, val, bsk, rbf, dbM, schedM, scene, copyGen] = await Promise.all([
     import("@/lib/slideshow/render"),
     import("@/lib/video-brand-tokens"),
     import("@/lib/image-composer"),
@@ -198,6 +206,8 @@ async function loadLib() {
     import("@/lib/register-brand-fonts"),
     import("@/lib/database"),
     import("@/lib/publication-scheduler"),
+    import("@/lib/video-scene-selector"),
+    import("@/lib/video-copy-generator"),
   ]);
   rbf.registerBrandFonts();
   return {
@@ -212,6 +222,8 @@ async function loadLib() {
     getSetting: dbM.getSetting,
     getNextAvailableSlot: schedM.getNextAvailableSlot,
     parseVideoSchedule: schedM.parseVideoSchedule,
+    analyzeClip: scene.analyzeClip,
+    generateVideoCopy: copyGen.generateVideoCopy,
   };
 }
 
@@ -392,64 +404,205 @@ async function renderHero(images: string[], outFile: string, lib: Lib, messages:
   }
 }
 
-/** Style B: 4 timed messages over a live-action clip (blurred-fill 9:16). */
-function renderDemandGen(sku: string, outFile: string, messages: string[]): void {
-  const W = 1080, H = 1920, effDur = 15, seg = effDur / messages.length;
+/**
+ * Style B: a 0.8 s hook card, then 4 animated messages over the best segment of a live clip.
+ *
+ * TIMELINE
+ *   0.00-0.80  black card, hook in white, fades in over 0.3 s, then a HARD cut (no xfade —
+ *              the cut is what makes the clip land).
+ *   0.80-15.80 the clip segment `analyzeClip` picked, with the four messages timed
+ *              0-3 / 3-8 / 8-12 / 12-15 s relative to the body.
+ *
+ * WHY drawtext AND NOT OVERLAID PNGs
+ * ffmpeg 8's drawtext marks `fontsize`, `alpha`, `x` and `y` timeline-evaluated (the `T` flag
+ * in `-h filter=drawtext`), so every animation the brief asks for — slide, fade, and the
+ * price "pop" — is a per-frame expression on the text itself. Pre-rendering PNGs and sliding
+ * them with `overlay` would cost a filter chain per message and lose crisp subpixel text.
+ *
+ * WHY THE SCRIM IS AN OVERLAY AND NOT A drawbox
+ * `drawbox`'s `color` is timeline-evaluated, but the alpha inside it must be a literal:
+ * `black@'min(1,t)'` is rejected outright with "Invalid alpha value specifier". So the base
+ * 0.2 scrim is a static drawbox and the text-zone scrim is a black band overlaid with
+ * `fade=alpha=1`, which does animate. Compositing 0.5625 over 0.2 lands at
+ * 1-(1-0.2)(1-0.5625) = 0.65, the figure the brief asks for under the text.
+ *
+ * The four messages are contiguous (0-3-8-12-15), so in practice the band sits at 0.65 for
+ * the whole body and the 0.2 state is what you see in the 0.2 s ramps at each end. That is
+ * the specified behaviour, not a shortcut — it just means the dynamic part is the ramp.
+ */
+function renderDemandGen(
+  sku: string,
+  outFile: string,
+  messages: string[],
+  segment?: { startTime: number; endTime: number },
+): void {
+  const W = 1080, H = 1920;
+  const OPEN = 0.8;            // hook card
+  const BODY = 15;             // clip segment
+  const total = OPEN + BODY;
   const src = `${CLIP_DIR}/${sku}.mp4`;
   if (!fs.existsSync(src)) throw new Error(`clip missing: ${src}`);
+
+  // Message windows, in seconds relative to the BODY (the brief fixes these, and they are
+  // not equal quarters: the benefit slide earns the extra second).
+  const WINDOWS: [number, number][] = [[0, 3], [3, 8], [8, 12], [12, 15]];
+  const msgs = messages.slice(0, WINDOWS.length);
+
+  // Where the clip is cut. analyzeClip picked it; without one we keep the historical -ss 3,
+  // which is what every ad before this shipped with.
+  const ss = segment ? Math.max(0, segment.startTime) : 3;
+
   // drawtext `textfile=` must be a RELATIVE forward-slash path: an absolute Windows
   // path (C:\…) makes ffmpeg's filtergraph parser treat ':' and '\' as option
   // separators and fail with "No option name near …". Keep it under cwd.
   const lineDir = `tmp_seqdg/${sku.replace(/[^A-Za-z0-9._-]/g, "_")}`;
   fs.mkdirSync(lineDir, { recursive: true });
   try {
-    // Brand bar sits UNDER the message drawtexts. The messages centre on H/2 and a
-    // 4-line block bottoms out around y≈1220, well clear of the bar at y=1750, so the
-    // two never collide.
     const barY = H - BAR_H;
     const plateH = 88, plateW = 340, plateY = barY + Math.round((BAR_H - plateH) / 2);
     const urlY = barY + Math.round((BAR_H - 46) / 2) - 4;
+
+    // ── the 0.8 s hook card ────────────────────────────────────────────────
+    const hookLines = wrap(up(msgs[0] ?? ""), 22, 3);
+    const HOOK_SIZE = 52;                 // brief: Montserrat Bold 52px; DM Sans is the
+    const hookGap = Math.round(HOOK_SIZE * 1.35); // brand face actually bundled here.
+    const hookDraws = hookLines.map((ln, i) => {
+      const f = `${lineDir}/hook_${i}.txt`;
+      fs.writeFileSync(f, ln, "utf8");
+      const y = Math.round(H / 2 - ((hookLines.length - 1) * hookGap) / 2) + i * hookGap;
+      // Fade in over 0.3 s and hold; the cut to footage does the rest.
+      return `drawtext=fontfile=${FONT}:textfile=${f}:fontcolor=white:fontsize=${HOOK_SIZE}:` +
+        `x=(w-text_w)/2:y=${y}:alpha='min(1\\,max(0\\,t/0.3))'`;
+    });
+    const opener = `[3:v]${hookDraws.join(",")},setsar=1,format=yuv420p[open]`;
+
+    // ── body: blurred 9:16 fill, brand bar, logo ──────────────────────────
     const base =
       `[0:v]split=2[a][b];` +
       `[a]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=24:4,setsar=1[bg];` +
       `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease,setsar=1[fg];` +
       `[bg][fg]overlay=(W-w)/2:(H-h)/2[bs];` +
-      `[bs]drawbox=x=0:y=${barY}:w=${W}:h=${BAR_H}:color=${NAVY}@0.65:t=fill[bar];` +
+      // Base scrim: always on, light enough to keep the product readable underneath.
+      `[bs]drawbox=x=0:y=0:w=${W}:h=${H}:color=black@0.2:t=fill[scrim0];` +
+      `[scrim0]drawbox=x=0:y=${barY}:w=${W}:h=${BAR_H}:color=${NAVY}@0.65:t=fill[bar];` +
       // Logo is input [2] on purpose: the music is [1] and [1:a] is referenced below,
       // so appending the logo keeps every existing stream index valid.
       `[2:v]scale=300:-1[logo_s];color=white@0.92:size=${plateW}x${plateH}:r=30[plate];` +
       `[plate][logo_s]overlay=(W-w)/2:(H-h)/2:shortest=1[lb];` +
       `[bar][lb]overlay=44:${plateY}[wl];` +
-      `[wl]drawtext=fontfile=${FONT}:text=ameublodirect.ca:fontcolor=${GOLD}:fontsize=46:borderw=1:bordercolor=black@0.4:x=W-text_w-56:y=${urlY}[base]`;
+      `[wl]drawtext=fontfile=${FONT}:text=ameublodirect.ca:fontcolor=${GOLD}:fontsize=46:borderw=1:bordercolor=black@0.4:x=W-text_w-56:y=${urlY}[based]`;
+
+    // ── dynamic scrim band under the text zone ────────────────────────────
+    const bandTop = Math.round(H * 0.26), bandH = Math.round(H * 0.46);
+    const firstOn = WINDOWS[0][0], lastOff = WINDOWS[msgs.length - 1][1];
+    const band =
+      `[4:v]format=rgba,colorchannelmixer=aa=0.5625,` +
+      `fade=t=in:st=${firstOn.toFixed(2)}:d=0.2:alpha=1,` +
+      `fade=t=out:st=${(lastOff - 0.2).toFixed(2)}:d=0.2:alpha=1[bandf];` +
+      `[based][bandf]overlay=0:${bandTop}[scrimmed]`;
+
+    // ── animated messages ─────────────────────────────────────────────────
+    // Eased progress for a slide: 1-(1-p)^2, so it decelerates into place.
+    const prog = (s: number, d: number) => `min(1\\,max(0\\,(t-${s.toFixed(2)})/${d.toFixed(2)}))`;
+    const ease = (s: number, d: number) => `(1-pow(1-${prog(s, d)}\\,2))`;
+
     const draws: string[] = [];
-    messages.forEach((msg, m) => {
-      const start = m * seg, end = (m + 1) * seg;
+    msgs.forEach((msg, m) => {
+      const [s0, e0] = WINDOWS[m];
+      const start = s0, end = e0;
       const lines = wrap(up(msg), 18, 4);
       const fsz = fitFont(lines), spacing = Math.round(fsz * 1.25), bw = Math.max(2, Math.round(fsz * 0.06));
       const topY = Math.round(H / 2 - ((lines.length - 1) * spacing) / 2);
+      const enable = `enable='between(t\\,${start.toFixed(2)}\\,${end.toFixed(2)})'`;
+      const common =
+        `fontfile=${FONT}:fontcolor=white:borderw=${bw}:bordercolor=${NAVY}:` +
+        `shadowcolor=black@0.7:shadowx=2:shadowy=2`;
+
       lines.forEach((ln, i) => {
         const file = `${lineDir}/m${m}_l${i}.txt`;
         fs.writeFileSync(file, ln, "utf8");
-        const alpha = `alpha='min(1\\,max(0\\,(t-${start.toFixed(2)})/0.4))'`;
-        const enable = `enable='between(t\\,${start.toFixed(2)}\\,${end.toFixed(2)})'`;
-        draws.push(`drawtext=fontfile=${FONT}:textfile=${file}:fontcolor=white:fontsize=${fsz}:borderw=${bw}:bordercolor=${NAVY}:shadowcolor=black@0.7:shadowx=2:shadowy=2:x=(w-text_w)/2:y=${topY + i * spacing}:${enable}:${alpha}`);
+        const y = topY + i * spacing;
+
+        // ── the price "pop", in fixed-size steps ───────────────────────
+        // An expression fontsize (`fontsize='72*(0.8+0.2*…)'`) is accepted by the parser and
+        // SEGFAULTS ffmpeg 8.1.1 partway through the encode — reproduced at every preset, and
+        // the identical graph with a constant fontsize encodes clean. drawtext reallocates its
+        // glyph cache when the size changes per frame and does not survive it. So the scale is
+        // quantised into 5 constant-size draws over the same 0.3 s: same pop on screen, no
+        // per-frame resize. Do not "simplify" this back into one animated fontsize.
+        if (m === 2) {
+          const STEPS = [0.8, 0.86, 0.92, 0.97, 1];
+          const stepDur = 0.3 / STEPS.length;
+          const off = i - (lines.length - 1) / 2;
+          STEPS.forEach((k, si) => {
+            const s0 = start + si * stepDur;
+            const s1 = si === STEPS.length - 1 ? end : start + (si + 1) * stepDur;
+            const fs2 = Math.max(8, Math.round(fsz * k));
+            const yc = Math.round(H / 2 + off * spacing * k);
+            draws.push(
+              `drawtext=${common}:textfile=${file}:fontsize=${fs2}:x=(w-text_w)/2:` +
+                `y='${yc}-text_h/2':alpha='${prog(start, 0.3)}':` +
+                `enable='between(t\,${s0.toFixed(2)}\,${s1.toFixed(2)})'`,
+            );
+          });
+          return;
+        }
+
+        let motion: string;
+        switch (m) {
+          case 0: // hook — slide up from below, 0.4 s, ease out
+            motion = `fontsize=${fsz}:x=(w-text_w)/2:y='${y}+(1-${ease(start, 0.4)})*220':alpha='${prog(start, 0.4)}'`;
+            break;
+          case 1: // benefit — straight fade in, 0.3 s
+            motion = `fontsize=${fsz}:x=(w-text_w)/2:y=${y}:alpha='${prog(start, 0.3)}'`;
+            break;
+
+          default: // CTA — slide in from the right, 0.3 s
+            motion = `fontsize=${fsz}:x='(w-text_w)/2+(1-${ease(start, 0.3)})*${W}':y=${y}:alpha='${prog(start, 0.3)}'`;
+        }
+        draws.push(`drawtext=${common}:textfile=${file}:${motion}:${enable}`);
       });
     });
-    const fadeOut = Math.max(0, effDur - 0.5).toFixed(3);
-    const videoGraph = `${base};[base]${draws.join(",")},fade=t=in:d=0.5,fade=t=out:st=${fadeOut}:d=0.5[vout]`;
-    const audioGraph = `[1:a]volume=0.25,afade=t=in:d=1,afade=t=out:st=${Math.max(0, effDur - 1).toFixed(3)}:d=1[aout]`;
+
+    // No fade-in on the body: the brief wants a hard cut out of the hook card.
+    const fadeOut = Math.max(0, BODY - 0.5).toFixed(3);
+    const bodyGraph = `${base};${band};[scrimmed]${draws.join(",")},fade=t=out:st=${fadeOut}:d=0.5,setsar=1,format=yuv420p[body]`;
+    const videoGraph = `${opener};${bodyGraph};[open][body]concat=n=2:v=1:a=0[vout]`;
+    const audioGraph = `[1:a]volume=0.25,afade=t=in:d=1,afade=t=out:st=${Math.max(0, total - 1).toFixed(3)}:d=1[aout]`;
+
+    // The graph is ~4 KB of expressions. Passing it as a single argv entry pushes the
+    // command line toward the Windows CreateProcess limit and makes any error unreadable;
+    // -filter_complex_script reads it from a file instead.
+    const graphFile = `${lineDir}/graph.txt`;
+    fs.writeFileSync(graphFile, `${videoGraph};${audioGraph}`, "utf8");
+
     const args = [
-      "-y", "-nostdin", "-loglevel", "error", "-ss", "3", "-i", src,
-      "-stream_loop", "-1", "-i", MUSIC, "-i", LOGO, "-t", String(effDur),
-      "-filter_complex", `${videoGraph};${audioGraph}`, "-map", "[vout]", "-map", "[aout]",
+      "-y", "-nostdin", "-loglevel", "error",
+      "-ss", ss.toFixed(3), "-t", String(BODY), "-i", src,
+      "-stream_loop", "-1", "-i", MUSIC,
+      "-i", LOGO,
+      "-f", "lavfi", "-i", `color=black:s=${W}x${H}:r=30:d=${OPEN}`,
+      "-f", "lavfi", "-i", `color=black:s=${W}x${bandH}:r=30:d=${BODY}`,
+      "-t", String(total),
+      "-filter_complex_script", graphFile, "-map", "[vout]", "-map", "[aout]",
       "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "high", "-crf", "20", "-preset", "medium",
       "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", outFile,
     ];
-    execFileSync(FFMPEG, args, { stdio: ["ignore", "ignore", "pipe"] });
+    try {
+      execFileSync(FFMPEG, args, { stdio: ["ignore", "ignore", "pipe"] });
+    } catch (e) {
+      // execFileSync's message is the whole command line and NOTHING of ffmpeg's stderr,
+      // which is the only part that says what actually broke in a 4 KB filtergraph.
+      const se = (e as { stderr?: Buffer }).stderr?.toString().trim() ?? "";
+      throw new Error(`ffmpeg failed for ${sku}: ${se.slice(-1500) || (e as Error).message.slice(-500)}`);
+    }
   } finally {
-    fs.rmSync(lineDir, { recursive: true, force: true });
+    // SEQ_KEEP_GRAPH=1 leaves the filtergraph and its text files on disk. A 4 KB graph of
+    // time expressions is not debuggable from an exit code alone.
+    if (!process.env.SEQ_KEEP_GRAPH) fs.rmSync(lineDir, { recursive: true, force: true });
   }
 }
+
 
 // ── enqueue ────────────────────────────────────────────────────────────────
 const sqliteToUnixSec = (s: string): number => Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
@@ -588,14 +741,28 @@ async function main(): Promise<void> {
     : [];
 
   try {
+    // Hooks already written this run. generateVideoCopy both instructs the model to avoid
+    // them and rejects a repeat, which is what keeps 29 autumn ads from opening on the same
+    // line the way the CAMPAIGN_COPY template did.
+    const usedHooks: string[] = [];
     for (const sku of skus) {
       const p = bySku.get(sku);
       const title = (p?.title_fr || p?.title_en || sku) as string;
-      const msgs = resolveMessages(p?.price, title);
-      // Dry-run prints the resolved copy: {price} substitution is the whole point of a
-      // themed campaign and it is the one thing you cannot check after the fact without
-      // re-watching the MP4.
-      if (!APPLY) console.log(`  ${sku} copy: ${msgs.map((m) => `"${m}"`).join(" | ")}`);
+
+      // Per-SKU copy from Haiku, falling back to the campaign template.
+      let msgs = resolveMessages(p?.price, title);
+      let copyOrigin = "template";
+      if (!NO_AI_COPY && STYLE === "demand-gen") {
+        const copy = await lib.generateVideoCopy(
+          { sku, title, price: p?.price as number | undefined, productType: (p?.product_type ?? null) as string | null },
+          CAMPAIGN,
+          { usedHooks },
+        );
+        msgs = [...copy.messages];
+        usedHooks.push(copy.hook);
+        copyOrigin = copy.fallback ? "haiku-fallback" : "haiku";
+      }
+      console.log(`  ${sku} copy[${copyOrigin}]: ${msgs.map((m) => `"${m}"`).join(" | ")}`);
       try {
         // Render locally first, THEN reserve a slot, THEN upload — so a slotless run
         // never leaves a blob in the store with no queue row pointing at it.
@@ -608,8 +775,34 @@ async function main(): Promise<void> {
           if (!APPLY) { report.push({ sku, title, images: imgs.length, status: "dry-run" }); continue; }
           await renderHero(imgs.slice(0, 4), out, lib, msgs);
         } else {
+          // Claude Vision scores 12 frames and returns the best 15-20 s window; the render
+          // then cuts there instead of the historical fixed -ss 3.
+          let segment: { startTime: number; endTime: number } | undefined;
+          // APPLY only: 12 Vision calls per clip is real money, and a dry-run exists to
+          // check copy and slots, not to score frames.
+          if (!NO_ANALYZE && APPLY) {
+            try {
+              const a = await lib.analyzeClip(`${CLIP_DIR}/${sku}.mp4`, { ffmpegBin: FFMPEG });
+              segment = { startTime: a.startTime, endTime: a.endTime };
+              console.log(
+                `  ${sku} vision: ${a.startTime}s-${a.endTime}s score=${a.avgScore}/10 ` +
+                  `(${a.frames.length}/12 frames) — ${a.reason}`,
+              );
+            } catch (e) {
+              // A analysis failure must not cost the ad: fall back to the fixed offset.
+              console.log(`  ${sku} vision: échec (${e instanceof Error ? e.message : String(e)}) — offset fixe`);
+            }
+          }
           if (!APPLY) { report.push({ sku, title, status: "dry-run" }); continue; }
-          renderDemandGen(sku, out, msgs);
+          renderDemandGen(sku, out, msgs, segment);
+        }
+        if (OUT_DIR) {
+          fs.mkdirSync(OUT_DIR, { recursive: true });
+          const dest = path.join(OUT_DIR, `${sku.replace(/[^A-Za-z0-9._-]/g, "_")}.mp4`);
+          fs.copyFileSync(out, dest);
+          console.log(`  ↳ ${dest}`);
+          report.push({ sku, title, images, status: `local: ${dest}` });
+          continue;
         }
         const existing = REPLACE ? await findExistingDraft(sku) : null;
         if (existing) {
@@ -635,7 +828,7 @@ async function main(): Promise<void> {
     }
   } finally {
     fs.rmSync(OUT_TMP, { recursive: true, force: true });
-    fs.rmSync("tmp_seqdg", { recursive: true, force: true }); // demand-gen line files
+    if (!process.env.SEQ_KEEP_GRAPH) fs.rmSync("tmp_seqdg", { recursive: true, force: true }); // demand-gen line files
   }
 
   console.log(`\n=== RÉCAP (${report.length}) — style=${STYLE} ===`);
