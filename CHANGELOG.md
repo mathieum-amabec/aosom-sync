@@ -2,6 +2,60 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.82.0] - 2026-09-07
+
+The /sequential-ads list showed 50 of 134 ads and gave no sign of it. Three whole campaigns
+were unreachable, including 8 Christmas drafts waiting for approval.
+
+### Fixed — the campaign filter now runs in SQL
+
+A campaign dropdown already existed, but it filtered in the browser over the page the server
+had already truncated, and it built its own options from that same page. Two consequences,
+both silent:
+
+- **automne-2026 showed 18 of its 29 ads.** Selecting the campaign could not surface the other
+  11, because they were never sent to the browser.
+- **patio-ete-2026, halloween-2026 and noel-2026 were not in the dropdown at all.** Their rows
+  fell outside the 50 newest, so no option existed to select them. `noel-2026` holds 8 drafts
+  scheduled 1 Oct to 1 Dec that an operator has to approve; there was no way to reach them.
+
+`GET /api/sequential-ads/queue` now takes `?campaign=`, filters in SQL and lifts the cap to 500
+for a filtered request, so picking a campaign returns all of it.
+
+### Fixed — unfiltered cap 50 → 200, and the truncation is now visible
+
+200 covers the current 134 rows with room to grow. When a page is still a subset the header
+reads "N affichées sur M" and an amber line says how many are hidden and that choosing a
+campaign shows them. Silent truncation is what let this sit unnoticed.
+
+### Fixed — the dropdown lists every campaign
+
+`getSequentialAdCampaigns()` is a separate `GROUP BY` over every non-cancelled row, ordered by
+most recent activity. It has to be independent of the row page: the dropdown's job is to reach
+campaigns the cap is hiding, so deriving it from the visible page defeats the filter exactly
+when it is needed.
+
+### Fixed — `ugc_video` had no label
+
+The style chip rendered the raw key on all 61 UGC ads shipped in v0.5.81.0. Now "📱 UGC client",
+alongside the existing hero-slides and demand-gen labels.
+
+### Measured against production
+
+| campagne | total | visible avant | visible après |
+|---|---:|---:|---:|
+| hiver-2026 | 4 | 4 | 4 |
+| animaux-2026 | 5 | 5 | 5 |
+| enfants-2026 | 12 | 12 | 12 |
+| maison-2026 | 11 | 11 | 11 |
+| automne-2026 | 29 | **18** | **29** |
+| noel-2026 | 8 | **0** | **8** |
+| halloween-2026 | 3 | **0** | **3** |
+| patio-ete-2026 | 62 | **0** | **62** |
+
+**84 ads became reachable again.** Unfiltered, the list goes from 50 to 134 rows; the dropdown
+from 5 options to 8.
+
 ## [0.5.81.0] - 2026-09-07
 
 Five seasonal ad series built from the authentic customer UGC reels: 61 drafts across

@@ -20,10 +20,20 @@ vi.mock("@/lib/auth", () => ({
   getSessionRole: () => auth.getSessionRole(),
 }));
 
-const db = { getSequentialAdQueueItems: vi.fn() };
+const db = {
+  getSequentialAdQueueItems: vi.fn(),
+  getSequentialAdCampaigns: vi.fn(),
+  countSequentialAdQueueItems: vi.fn(),
+};
 vi.mock("@/lib/database", () => ({
-  getSequentialAdQueueItems: () => db.getSequentialAdQueueItems(),
+  getSequentialAdQueueItems: (limit?: number, campaign?: string | null) =>
+    db.getSequentialAdQueueItems(limit, campaign),
+  getSequentialAdCampaigns: () => db.getSequentialAdCampaigns(),
+  countSequentialAdQueueItems: (campaign?: string | null) => db.countSequentialAdQueueItems(campaign),
 }));
+
+/** The route now reads searchParams, so every call needs a Request. */
+const req = (qs = "") => new Request(`http://localhost/api/sequential-ads/queue${qs}`);
 
 const { GET } = await import("@/app/api/sequential-ads/queue/route");
 
@@ -43,16 +53,18 @@ beforeEach(() => {
   auth.isAuthenticated.mockResolvedValue(true);
   auth.getSessionRole.mockResolvedValue("admin");
   db.getSequentialAdQueueItems.mockResolvedValue([ROW]);
+  db.getSequentialAdCampaigns.mockResolvedValue(["patio"]);
+  db.countSequentialAdQueueItems.mockResolvedValue(1);
 });
 
 describe("GET /api/sequential-ads/queue — published_at", () => {
   it("exposes published_at so the card can show when the ad actually went out", async () => {
-    const body = await (await GET()).json();
+    const body = await (await GET(req())).json();
     expect(body.items[0].published_at).toBe("2026-08-19 01:24:35");
   });
 
   it("keeps published_at DISTINCT from scheduled_at — an early publish leaves a future slot", async () => {
-    const item = (await (await GET()).json()).items[0];
+    const item = (await (await GET(req())).json()).items[0];
     expect(item.scheduled_at).toBe("2026-08-21 13:00:00");
     expect(item.published_at).not.toBe(item.scheduled_at);
     expect(item.published_at < item.scheduled_at).toBe(true);
@@ -62,7 +74,7 @@ describe("GET /api/sequential-ads/queue — published_at", () => {
     db.getSequentialAdQueueItems.mockResolvedValue([
       { ...ROW, id: 465, status: "pending", publishedAt: null },
     ]);
-    const item = (await (await GET()).json()).items[0];
+    const item = (await (await GET(req())).json()).items[0];
     expect(item.published_at).toBeNull();
     expect("published_at" in item).toBe(true);
   });
@@ -71,13 +83,13 @@ describe("GET /api/sequential-ads/queue — published_at", () => {
     const { publishedAt, ...without } = ROW;
     void publishedAt;
     db.getSequentialAdQueueItems.mockResolvedValue([without]);
-    expect((await (await GET()).json()).items[0].published_at).toBeNull();
+    expect((await (await GET(req())).json()).items[0].published_at).toBeNull();
   });
 
   it("stays admin-only", async () => {
     auth.getSessionRole.mockResolvedValue("reviewer");
-    expect((await GET()).status).toBe(403);
+    expect((await GET(req())).status).toBe(403);
     auth.isAuthenticated.mockResolvedValue(false);
-    expect((await GET()).status).toBe(401);
+    expect((await GET(req())).status).toBe(401);
   });
 });
