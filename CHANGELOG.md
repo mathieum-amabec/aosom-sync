@@ -2,6 +2,72 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.81.0] - 2026-09-07
+
+Five seasonal ad series built from the authentic customer UGC reels: 61 drafts across
+automne, maison, enfants, animaux and hiver — every in-stock clip that is not patio.
+
+### Added — campaign copy for the four UGC campaigns
+
+`CAMPAIGN_COPY` had entries for `halloween-2026` and `noel-2026` only; anything else fell
+through to the default patio slate. The dry-run made that concrete: a dog staircase and a cat
+litter enclosure both rendered "GRANDE LIQUIDATION DE MOBILIER D'EXTÉRIEUR". Each new campaign
+now leads with the room its clip actually shows, then price, then free shipping.
+
+### Changed — `--ugc` is its own creative style
+
+`STYLE_KEY` mapped `--ugc` onto `demand_gen_messages`, the patio product-clip style. UGC is a
+third creative: the footage is a real customer's reel, not a studio clip, and an operator
+reviewing `/sequential-ads` has to tell them apart before approving. New rows are labelled
+`ugc_video`; stored rows keep whatever style they were written with.
+
+### Data — 57 drafts enqueued
+
+95 clips in `src/ugc/` (not 87): all 95 resolve in Turso, 90 are imported to Shopify, **69 are
+in stock**. Excluding patio/outdoor per the brief (5) and 3 off-theme leaves 60; 3 of those are
+Halloween, already covered.
+
+| campagne | pubs | composition |
+|---|---:|---|
+| automne-2026 | 29 | bureau 6, rangement 12, chambre 5, cuisine 6 |
+| maison-2026 | 11 | salon |
+| enfants-2026 | 12 | jouets + meubles enfants |
+| animaux-2026 | 5 | pet |
+| hiver-2026 | 4 | ficus, congélateur, 2 stations de musculation |
+
+Rendered 1080×1920, 15 s, music verified present (mean −30.1 dB — the worktree silent-audio
+trap needs `SEQ_MUSIC`/`SEQ_CLIP_DIR` pointed at the main clone).
+
+What is left after all five campaigns: 21 clips out of stock, 6 not imported to Shopify, and
+9 patio/outdoor excluded by the brief. Nothing in-stock and on-theme remains unrendered.
+
+### Added — `hiver-2026`, 4 drafts from the leftover clips
+
+**No UGC clip is a Christmas product.** 844-335 sits under `product_type` "Artificial Trees"
+and its real FR title is *Ficus artificiel réaliste en pot* — a houseplant, not a tree. An
+earlier version of this entry called it a Christmas product; it is not, and there were zero.
+
+What the autumn campaigns left unused is a coherent gift set instead: the ficus, a compact
+freezer (800-127V80GY) and two power towers (A91-113, A91-290V02BK). Four clips, over the
+3-clip threshold, none already advertised. The copy sells them as gifts against a 15 December
+deadline rather than as decoration.
+
+The existing `noel-2026` campaign (8 drafts, 1 Oct to 1 Dec, built from the `src/` product
+clips rather than UGC) is untouched and stays the actual Christmas-product series.
+
+`halloween-2026` was likewise left alone: it already holds exactly the 3 Halloween UGC SKUs
+(844-037 and 844-522V00BK pending, 844-692V00GN published). Re-rendering would have duplicated
+a live campaign.
+
+### Note — draft slots are tentative, and overlap on purpose
+
+The 57 drafts all book from 2026-09-09 and overlap, up to 6 on one timestamp. That is correct:
+`idx_publication_queue_active_slot` is UNIQUE only `WHERE status IN ('pending','publishing',
+'published')`, so drafts are deliberately outside the slot pool, and `getOccupiedQueueSlots`
+excludes them. `/api/sequential-ads/approve` tries the draft's own slot, catches
+`QueueSlotTakenError`, and recomputes the next free one — so the series spreads itself at one
+per day as the drafts are approved, roughly 9 Sept to early November for all 57.
+
 ## [0.5.80.0] - 2026-09-04
 
 The 🎃 Halloween category could not produce a single post. Fixed at the source: 24 products
