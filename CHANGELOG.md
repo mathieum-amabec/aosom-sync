@@ -2,6 +2,48 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.85.0] - 2026-09-08
+
+Two orphan collections joined the menu and the sub-category tiles. A third was left out on
+the evidence, and a `menuUpdate` footgun was found and repaired the hard way.
+
+### Added — Patio Chairs & Tables, Garden Lighting
+
+`chaises-et-tables-de-patio-1` and `jardin-eclairage` had active products but no menu entry
+and no tile. Both now sit under Extérieur & Jardin / Outdoor & Garden, in FR and EN:
+
+- `Chaises & Tables de patio` / `Patio Chairs & Tables`, after Mobilier de patio
+- `Éclairage de jardin` / `Garden Lighting`, after Jardinage & Serres
+
+The `subcategory-banner.liquid` map is rebuilt from the menu, so the tiles followed
+automatically. 10 tiles → 12, both locales, no duplicate handle.
+
+### Not added — jardin-decoration
+
+All 28 of its products are already in `Jardinage & Serres` — a 100% subset. Adding it would
+have put the same catalogue behind two adjacent nav entries. Left out pending a decision on
+where those products belong.
+
+### Overlap measured before touching anything
+
+`chaises-et-tables-de-patio-1` vs `patio-chaises-longues`: **9 products in common, Jaccard
+9.5%** (12.7% of the first, 27.3% of the second). Low, and the shared items are all folding
+loungers that legitimately sit in both. Keep separate; do not merge.
+
+The real duplication is elsewhere: `chaises-et-tables-de-patio-1` shares **51 products with
+`patio-mobilier` — 71.8% of itself**. Worth revisiting, but it keeps 20 exclusive products,
+so it earns its own entry for now.
+
+### Fixed — menuUpdate destroys menu-item translations
+
+`menuUpdate` recreates every item with a new id, which orphans every translation registered
+against the old `gid://shopify/Link/<id>`. Adding two items silently wiped **90 of 92** EN
+menu translations and reverted the live EN nav to French. All 90 were re-registered against
+the new ids and verified at 92/92.
+
+Any future `menuUpdate` on `taxonomie-categories` must re-register the full translation set
+immediately afterwards. Checking the item count is not enough — the tree survives, the
+translations do not.
 ## [0.5.82.0] - 2026-09-07
 
 The /sequential-ads list showed 50 of 134 ads and gave no sign of it. Three whole campaigns

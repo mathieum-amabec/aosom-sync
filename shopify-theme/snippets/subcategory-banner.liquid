@@ -40,20 +40,20 @@
 {%- comment -%} PARENT → SUB handle map (verified against the store, Phase 1). {%- endcomment -%}
 {%- assign sub_handles = '' -%}
 {%- case collection.handle -%}
-  {%- when 'meubles-et-decorations' -%}
-    {%- assign sub_handles = 'meubles-salon,meubles-chambre,meubles-rangement,meubles-cuisine-salle-a-manger,meubles-decoration,bureau-bureaux' -%}
+  {%- when 'meubles-deco', 'meubles-et-decorations' -%}
+    {%- assign sub_handles = 'meubles-salon,meubles-chambre,meubles-cuisine-salle-a-manger,meubles-rangement,meubles-salle-de-bain,meubles-decoration,deco-saisonniere' -%}
   {%- when 'exterieur-et-jardin' -%}
-    {%- assign sub_handles = 'patio-mobilier,chaises-et-tables-de-patio-1,gazebos-et-pergolas,patio-ombrage,jardin-jardinage,jardin-eclairage,jardin-decoration,exterieur-bbq,exterieur-camping' -%}
-  {%- when 'accessoires-pour-animaux' -%}
+    {%- assign sub_handles = 'patio-mobilier,chaises-et-tables-de-patio-1,gazebos-et-pergolas,abris-auto,patio-chaises-longues,patio-ombrage,jardin-jardinage,jardin-eclairage,exterieur-bbq,exterieur-foyers,patio-balancoires-hamacs,exterieur-camping' -%}
+  {%- when 'animaux', 'accessoires-pour-animaux' -%}
     {%- assign sub_handles = 'animaux-chiens,animaux-chats,animaux-petits,animaux-oiseaux' -%}
   {%- when 'enfants' -%}
-    {%- assign sub_handles = 'enfants-jeux-exterieur,enfants-meubles,enfants-vehicules' -%}
+    {%- assign sub_handles = 'enfants-jouets,enfants-jeux-exterieur,enfants-meubles,enfants-vehicules' -%}
+  {%- when 'bureau-et-travail' -%}
+    {%- assign sub_handles = 'bureau-chaises,bureau-bureaux,bureau-rangement' -%}
+  {%- when 'sport-et-loisirs', 'sports-et-loisirs' -%}
+    {%- assign sub_handles = 'sport-exercice,sport-velos-trottinettes,sport-equipe,sport-salle-de-jeux' -%}
   {%- when 'electro-et-tech' -%}
     {%- assign sub_handles = 'electro-climatisation-ventilation,electro-petit-electromenager,electro-chauffage' -%}
-  {%- when 'sports-et-loisirs' -%}
-    {%- assign sub_handles = 'sport-exercice,sport-salle-de-jeux,exterieur-camping' -%}
-  {%- when 'bureau-et-travail' -%}
-    {%- assign sub_handles = 'bureau-bureaux,bureau-chaises,bureau-rangement' -%}
 {%- endcase -%}
 
 {%- comment -%} Handles that HAVE a curated cat-sub-{handle}.jpg theme asset (Phase 4, 25 of 29). {%- endcomment -%}
