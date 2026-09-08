@@ -1,24 +1,25 @@
 import { describe, it, expect, vi } from "vitest";
 import {
-  analyzeClip, bestWindow, parseScoreReply, FALLBACK_REASON,
+  analyzeClip, bestWindow, parseScoreReply, majorityZone, FALLBACK_REASON,
   MIN_SEGMENT, MAX_SEGMENT, type FrameScore,
 } from "@/lib/video-scene-selector";
 
 vi.mock("@/lib/content-generator", () => ({ getAnthropicClient: () => ({}) }));
 vi.mock("@/lib/llm-budget", () => ({ budgetedCreate: vi.fn() }));
 
-const f = (t: number, score: number, reason = "r"): FrameScore => ({ t, score, reason });
+const f = (t: number, score: number, reason = "r", zone: "top" | "middle" | "bottom" = "middle"): FrameScore =>
+  ({ t, score, reason, zone });
 
 describe("parseScoreReply", () => {
   it("reads strict JSON", () => {
-    expect(parseScoreReply('{"score": 8, "reason": "clean"}')).toEqual({ score: 8, reason: "clean" });
+    expect(parseScoreReply('{"score": 8, "reason": "clean"}')).toEqual({ score: 8, reason: "clean", zone: "middle" });
   });
 
   // The prompt literally asks for {score: N, reason: 'brief'} — valid JS, invalid JSON. The
   // model obliges, so the parser has to repair it rather than drop every frame.
   it("repairs the bare-key single-quoted shape the prompt itself asks for", () => {
     expect(parseScoreReply("{score: 7, reason: 'product centred'}")).toEqual({
-      score: 7, reason: "product centred",
+      score: 7, reason: "product centred", zone: "middle",
     });
   });
 
@@ -104,7 +105,7 @@ describe("analyzeClip", () => {
     extractFrame: async () => {},
     scoreFrame: vi.fn(async () => {
       const s = scores.shift();
-      return s === null || s === undefined ? null : { score: s, reason: `s${s}` };
+      return s === null || s === undefined ? null : { score: s, reason: `s${s}`, zone: "middle" as const };
     }),
   });
 
@@ -114,7 +115,7 @@ describe("analyzeClip", () => {
       frameCount: 4,
       probeDuration: async () => 40,
       extractFrame: async (_s, t) => { seen.push(t); },
-      scoreFrame: async () => ({ score: 5, reason: "" }),
+      scoreFrame: async () => ({ score: 5, reason: "", zone: "middle" as const }),
     });
     // Midpoints of four 10 s intervals over a 40 s clip.
     expect(seen).toEqual([5, 15, 25, 35]);
@@ -134,7 +135,7 @@ describe("analyzeClip", () => {
       frameCount: 3,
       probeDuration: async () => 60,
       extractFrame: async () => { if (n++ === 1) throw new Error("seek failed"); },
-      scoreFrame: async () => ({ score: 7, reason: "ok" }),
+      scoreFrame: async () => ({ score: 7, reason: "ok", zone: "middle" as const }),
     });
     expect(r.frames).toHaveLength(2);
     expect(r.avgScore).toBe(7);

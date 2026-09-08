@@ -2,6 +2,76 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.84.0] - 2026-09-08
+
+The ad creative, rebuilt around the three things that were wrong with it: the copy covered the
+product, the animation could not be seen, and every ad used the same eight bars.
+
+### Changed — the copy goes where the product is not
+
+Vision already scores 12 frames per clip; it now also reports which third the PRODUCT occupies,
+and the text band is placed in a different one. The band is capped at 2 lines and under 25% of
+the frame, against v2's 4 lines at 86 px centred on H/2 behind a 0.65 slab covering 46%.
+
+Measured over the three test clips, the centre of the frame — where the product is — came out
+**+105% to +114% brighter**. That number is the product becoming visible again.
+
+### Changed — motion the eye can actually catch
+
+- **Two-stage push-in.** A linear zoom over 15 s measured as nothing in the opening seconds, so
+  it is front-loaded: 0.07 in the first 1.2 s, then 0.06 drifting across the rest. Same end
+  scale, motion moved into the window where a thumb decides.
+- **Word-by-word hook.** The headline assembles itself, one word every 0.1 s.
+- **Gold keyline that wipes its width open** under each message. A solid shape growing reads far
+  better in a feed than text changing opacity.
+- **One-frame white flash** at each message change.
+
+Total inter-frame motion is **+73% to +97%**.
+
+### Removed — the 0.8 s black opening card
+
+On a muted autoplay feed that was 40% of the two-second window spent showing nothing. The ad now
+opens on footage, already pushing in, first word at 0.15 s. Mean luminance over the first two
+seconds went **+72% to +97%**.
+
+An honest note on measurement: v2 scored *higher* on raw inter-frame difference in 0-2 s. That
+was one frame — the cut out of black spikes to 38.0 against v3's 12.5 — not sustained motion.
+Inter-frame difference rewards hard cuts, so the totals above are the meaningful comparison.
+
+### Changed — two music files, many beds
+
+`pickMusic` derives track × start offset (8 entry points) × tempo (0.94-1.08) from the SKU hash.
+Deterministic, so a re-render is identical. The offset does most of the work: the same bed
+starting at 0 s and at 36 s does not sound like the same music. The three test clips came out at
+mean −23.3, −24.9 and −28.5 dB.
+
+### Fixed — every hook word was drawn on top of the others
+
+`drawtext` centres each draw independently, so giving every word `x=(w-text_w)/2` stacked the
+whole headline on one spot. ffmpeg cannot be asked how wide the previous words were, so
+`layoutWords` computes the line breaks and absolute x positions here and hands over fixed pixels.
+There is a test asserting the x values are distinct and left-to-right.
+
+### Fixed — a regex that split on the letter "s"
+
+`split(/s+/)` instead of `split(/\s+/)` made the hook a single 40-character "word". Two composer
+tests caught it before it shipped.
+
+### Verified
+
+| SKU | zone produit | segment | bed | texte |
+|---|---|---|---|---|
+| `836-068WT` | bottom → copy en haut | 7-27 s | joyinsound @6 s ×0.98 | 72/60/72/60 px |
+| `833-804WT` | middle → copy en bas | 0-19.9 s | sigmamusicart @36 s ×1.06 | 72/72/72/60 px |
+| `D04-169` | bottom → copy en haut | 6-26 s | joyinsound @0 s ×1.08 | 72/72/72/66 px |
+
+All 15.00 s, 1080×1920, H.264. In `C:\Users\vente\Downloads\test-videos-v3\`.
+
+### Still true
+
+`D04-169`'s clip shows a MacBook and a corgi, not the dog sofa the SKU sells. Vision keeps
+saying so. The footage is mismatched to the product and no amount of creative fixes that.
+
 ## [0.5.83.0] - 2026-09-07
 
 Sequential ads stop guessing. Claude Vision picks which seconds of the clip to show, Haiku

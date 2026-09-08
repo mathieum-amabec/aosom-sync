@@ -66,6 +66,9 @@ const NO_AI_COPY = argv.includes("--no-ai-copy");
 // --out <dir>: render to disk and stop there — no Blob upload, no queue row. For reviewing
 // a new creative before committing a whole campaign to the store.
 const OUT_DIR = flag("--out");
+// v3 is the default demand-gen creative. --v2 renders the previous one (centred text over
+// a slab, black opening card) for a side-by-side.
+const USE_V2 = argv.includes("--v2");
 // --replace: re-render an existing campaign in place. Without it, a second run cancels the
 // old drafts and books new slots, discarding whatever schedule an operator already chose.
 const REPLACE = argv.includes("--replace");
@@ -604,6 +607,119 @@ function renderDemandGen(
 }
 
 
+/**
+ * Style C (v3): scroll-stopping ad — see src/lib/video-ad-composer.ts for the design and for
+ * what ffmpeg 8.1.1 will and will not do. This function is the I/O half: it writes the text
+ * files and the gradient, picks the bed, and runs ffmpeg. The layout itself is a pure
+ * function over there, which is what makes it testable.
+ */
+async function renderAdV3(
+  sku: string,
+  outFile: string,
+  messages: string[],
+  lib: Lib,
+  segment?: { startTime: number; endTime: number },
+  zone: "top" | "middle" | "bottom" = "middle",
+): Promise<void> {
+  const C = await import("@/lib/video-ad-composer");
+  const sharp = (await import("sharp")).default;
+  const src = `${CLIP_DIR}/${sku}.mp4`;
+  if (!fs.existsSync(src)) throw new Error(`clip missing: ${src}`);
+
+  const safe = sku.replace(/[^A-Za-z0-9._-]/g, "_");
+  // drawtext `textfile=` must be a RELATIVE forward-slash path: an absolute Windows path
+  // makes ffmpeg's parser treat ':' and '\' as option separators.
+  const dir = `tmp_seqdg/${safe}`;
+  fs.mkdirSync(dir, { recursive: true });
+  try {
+    const msgs = messages.slice(0, C.WINDOWS.length);
+
+    // Text: at most 2 lines each, sized to fit. This is the cap that keeps the product visible.
+    const lineFiles: string[][] = [];
+    const sizes: number[] = [];
+    msgs.forEach((m, mi) => {
+      const { lines, size } = C.fitText(up(m));
+      sizes.push(size);
+      lineFiles.push(
+        lines.map((ln, i) => {
+          const f = `${dir}/m${mi}_l${i}.txt`;
+          fs.writeFileSync(f, ln, "utf8");
+          return f;
+        }),
+      );
+    });
+
+    // Hook words get their own files so they can appear one at a time.
+    const hookWordFiles = C.layoutWords(up(msgs[0] ?? ""), sizes[0], C.WINDOWS[0][0] + 0.15).map((w, i) => {
+      const f = `${dir}/hw${i}.txt`;
+      fs.writeFileSync(f, w.word, "utf8");
+      return { file: f, at: w.at, x: w.x, line: w.line };
+    });
+
+    // Soft gradient, generated to the exact band. A slab hides the product; a falloff does not.
+    const g = C.gradientRect(zone);
+    const stops = g.flip
+      ? `<stop offset="0%" stop-color="black" stop-opacity="0.85"/><stop offset="55%" stop-color="black" stop-opacity="0.5"/><stop offset="100%" stop-color="black" stop-opacity="0"/>`
+      : `<stop offset="0%" stop-color="black" stop-opacity="0"/><stop offset="45%" stop-color="black" stop-opacity="0.55"/><stop offset="100%" stop-color="black" stop-opacity="0.85"/>`;
+    const gradFile = `${dir}/grad.png`;
+    await sharp(
+      Buffer.from(
+        `<svg width="${C.W}" height="${g.height}" xmlns="http://www.w3.org/2000/svg">` +
+          `<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">${stops}</linearGradient></defs>` +
+          `<rect width="${C.W}" height="${g.height}" fill="url(#g)"/></svg>`,
+      ),
+    )
+      .png()
+      .toFile(path.resolve(gradFile));
+
+    // Two files on disk, but track x offset x tempo makes neighbouring ads sound different.
+    const tracks = (process.env.SEQ_MUSIC_DIR
+      ? fs.readdirSync(process.env.SEQ_MUSIC_DIR).filter((f) => f.endsWith(".mp3")).map((f) => path.join(process.env.SEQ_MUSIC_DIR as string, f))
+      : [MUSIC]
+    ).sort();
+    const music = C.pickMusic(sku, tracks);
+
+    const videoGraph = C.buildAdGraph({
+      fontFile: FONT,
+      lineFiles,
+      sizes,
+      hookWordFiles,
+      zone,
+      navy: NAVY,
+      gold: GOLD,
+      idx: { clip: 0, music: 1, logo: 2, gradient: 3 },
+    });
+    const audioGraph = C.buildAudioGraph(1, music);
+    const graphFile = `${dir}/graph.txt`;
+    fs.writeFileSync(graphFile, `${videoGraph};${audioGraph}`, "utf8");
+
+    const ss = segment ? Math.max(0, segment.startTime) : 3;
+    const args = [
+      "-y", "-nostdin", "-loglevel", "error",
+      "-ss", ss.toFixed(3), "-t", String(C.DURATION), "-i", src,
+      "-stream_loop", "-1", "-ss", String(music.startOffset), "-i", music.track,
+      "-i", LOGO,
+      "-loop", "1", "-t", String(C.DURATION), "-i", gradFile,
+      "-t", String(C.DURATION),
+      "-filter_complex_script", graphFile, "-map", "[vout]", "-map", "[aout]",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "high", "-crf", "20", "-preset", "medium",
+      "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", outFile,
+    ];
+    console.log(
+      `  ${sku} bed: ${path.basename(music.track)} @${music.startOffset}s tempo=${music.tempo} | zone=${zone} | texte ${sizes.join("/")}px`,
+    );
+    try {
+      execFileSync(FFMPEG, args, { stdio: ["ignore", "ignore", "pipe"] });
+    } catch (e) {
+      const se = (e as { stderr?: Buffer }).stderr?.toString().trim() ?? "";
+      throw new Error(`ffmpeg failed for ${sku}: ${se.slice(-1500) || (e as Error).message.slice(-500)}`);
+    }
+  } finally {
+    if (!process.env.SEQ_KEEP_GRAPH) fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+
 // ── enqueue ────────────────────────────────────────────────────────────────
 const sqliteToUnixSec = (s: string): number => Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
 
@@ -778,15 +894,17 @@ async function main(): Promise<void> {
           // Claude Vision scores 12 frames and returns the best 15-20 s window; the render
           // then cuts there instead of the historical fixed -ss 3.
           let segment: { startTime: number; endTime: number } | undefined;
+          let zone: "top" | "middle" | "bottom" = "middle";
           // APPLY only: 12 Vision calls per clip is real money, and a dry-run exists to
           // check copy and slots, not to score frames.
           if (!NO_ANALYZE && APPLY) {
             try {
               const a = await lib.analyzeClip(`${CLIP_DIR}/${sku}.mp4`, { ffmpegBin: FFMPEG });
               segment = { startTime: a.startTime, endTime: a.endTime };
+              zone = a.productZone;
               console.log(
                 `  ${sku} vision: ${a.startTime}s-${a.endTime}s score=${a.avgScore}/10 ` +
-                  `(${a.frames.length}/12 frames) — ${a.reason}`,
+                  `(${a.frames.length}/12 frames) produit=${a.productZone} — ${a.reason}`,
               );
             } catch (e) {
               // A analysis failure must not cost the ad: fall back to the fixed offset.
@@ -794,7 +912,8 @@ async function main(): Promise<void> {
             }
           }
           if (!APPLY) { report.push({ sku, title, status: "dry-run" }); continue; }
-          renderDemandGen(sku, out, msgs, segment);
+          if (USE_V2) renderDemandGen(sku, out, msgs, segment);
+          else await renderAdV3(sku, out, msgs, lib, segment, zone);
         }
         if (OUT_DIR) {
           fs.mkdirSync(OUT_DIR, { recursive: true });

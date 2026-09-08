@@ -26,6 +26,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { budgetedCreate } from "@/lib/llm-budget";
+import type { ProductZone } from "@/lib/video-ad-composer";
 
 const execFileAsync = promisify(execFile);
 
@@ -33,7 +34,8 @@ const execFileAsync = promisify(execFile);
 export const FRAME_PROMPT =
   "Score this frame 1-10 for a furniture/product ad: 10=product clearly visible, good lighting, " +
   "dynamic scene, no text overlay. 1=blurry, dark, product not visible, text overlay present. " +
-  'Return JSON: {score: N, reason: \'brief\'}';
+  "Also say which horizontal third of the frame the PRODUCT occupies most: top, middle or bottom. " +
+  'Return JSON: {score: N, reason: \'brief\', zone: \'top|middle|bottom\'}';
 
 /** How many frames to sample across the clip. */
 export const FRAME_COUNT = 12;
@@ -48,6 +50,8 @@ export interface FrameScore {
   /** 1-10. */
   score: number;
   reason: string;
+  /** Which third the product sits in, so the copy can be placed away from it. */
+  zone: ProductZone;
 }
 
 export interface ClipAnalysis {
@@ -55,6 +59,12 @@ export interface ClipAnalysis {
   endTime: number;
   avgScore: number;
   reason: string;
+  /**
+   * Where the product sits, by majority vote among the frames INSIDE the chosen window.
+   * Voting over the whole clip would let discarded footage decide the layout of the part
+   * we actually show. Defaults to "middle" when nothing scored.
+   */
+  productZone: ProductZone;
   /** Every frame that scored, for logging. Empty when scoring was skipped entirely. */
   frames: FrameScore[];
 }
@@ -70,7 +80,7 @@ export interface AnalyzeOptions {
   /** Seam: write a JPEG of the frame at `t` and return its path. */
   extractFrame?: (src: string, t: number, outFile: string) => Promise<void>;
   /** Seam: score one JPEG. Return null to drop the frame. */
-  scoreFrame?: (jpegPath: string) => Promise<{ score: number; reason: string } | null>;
+  scoreFrame?: (jpegPath: string) => Promise<{ score: number; reason: string; zone?: ProductZone } | null>;
 }
 
 /** Said when no frame could be scored, so the caller can tell a real pick from a fallback. */
@@ -106,7 +116,7 @@ async function defaultExtractFrame(src: string, t: number, outFile: string, ffmp
 // ── Vision scoring ────────────────────────────────────────────────────────
 
 /** Pull the first JSON object out of a model reply that may carry prose around it. */
-export function parseScoreReply(text: string): { score: number; reason: string } | null {
+export function parseScoreReply(text: string): { score: number; reason: string; zone: ProductZone } | null {
   const m = text.match(/\{[\s\S]*?\}/);
   if (!m) return null;
   let obj: unknown;
@@ -130,11 +140,13 @@ export function parseScoreReply(text: string): { score: number; reason: string }
   const score = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(score)) return null;
   const reason = String((obj as Record<string, unknown>).reason ?? "").slice(0, 200);
+  const z = String((obj as Record<string, unknown>).zone ?? "").toLowerCase();
+  const zone: ProductZone = z === "top" || z === "bottom" ? z : "middle";
   // Clamp rather than reject: a model that answers 0 or 11 still ranked the frame.
-  return { score: Math.min(10, Math.max(1, score)), reason };
+  return { score: Math.min(10, Math.max(1, score)), reason, zone };
 }
 
-async function defaultScoreFrame(jpegPath: string): Promise<{ score: number; reason: string } | null> {
+async function defaultScoreFrame(jpegPath: string): Promise<{ score: number; reason: string; zone: ProductZone } | null> {
   const buf = await fs.promises.readFile(jpegPath);
   const res = await budgetedCreate(getAnthropicClient(), {
     model: "claude-sonnet-4-6",
@@ -238,7 +250,7 @@ export async function analyzeClip(skuPath: string, opts: AnalyzeOptions = {}): P
       try {
         await extract(skuPath, t, jpeg);
         const s = await score(jpeg);
-        if (s) frames.push({ t: Number(t.toFixed(3)), score: s.score, reason: s.reason });
+        if (s) frames.push({ t: Number(t.toFixed(3)), score: s.score, reason: s.reason, zone: s.zone ?? "middle" });
       } catch {
         // One unreadable or unscoreable frame must not sink the clip.
       }
@@ -246,5 +258,18 @@ export async function analyzeClip(skuPath: string, opts: AnalyzeOptions = {}): P
   } finally {
     await fs.promises.rm(workDir, { recursive: true, force: true });
   }
-  return { ...bestWindow(frames, duration), frames };
+  const win = bestWindow(frames, duration);
+  return { ...win, productZone: majorityZone(frames, win.startTime, win.endTime), frames };
+}
+
+/** Majority zone among the frames inside the chosen window; "middle" on a tie or no data. */
+export function majorityZone(frames: FrameScore[], start: number, end: number): ProductZone {
+  const inside = frames.filter((f) => f.t >= start && f.t <= end);
+  const pool = inside.length ? inside : frames;
+  const tally: Record<ProductZone, number> = { top: 0, middle: 0, bottom: 0 };
+  for (const f of pool) tally[f.zone] = (tally[f.zone] ?? 0) + 1;
+  const order = (Object.keys(tally) as ProductZone[]).sort((a, b) => tally[b] - tally[a]);
+  // A tie must not silently move the copy on top of the product: middle is the safe read.
+  if (tally[order[0]] === 0 || tally[order[0]] === tally[order[1]]) return "middle";
+  return order[0];
 }
