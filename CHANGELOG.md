@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.84.0] - 2026-09-08
+
+`VERSION` is back in sync with `package.json`, and a test now fails when they drift apart.
+
+### Fixed — VERSION sat five releases behind
+
+`VERSION` held `0.5.78.0` while `package.json` and the CHANGELOG had moved to `0.5.82`.
+The repo carries the version twice on purpose — `VERSION` is the 4-digit source of truth,
+`package.json` the npm-valid 3-digit translation, because npm rejects a fourth component —
+and `/ship` writes both in one step through `gstack-version-bump`. The releases v0.5.79.0
+through v0.5.83.0 bypassed that path and edited `package.json` by hand, so `VERSION` was
+never written.
+
+Nothing in the repo noticed: no CI job, no script and no test reads `VERSION`, so the two
+files could disagree indefinitely. `/land-and-deploy`'s drift check reads
+`git show HEAD:VERSION`, so it was comparing against a value four releases stale.
+
+### Added — a guard that survives bypassing the release path
+
+`tests/version-file-sync.test.ts` asserts that `package.json` is exactly the first three
+components of `VERSION`, that both match their expected shapes, and that the newest
+CHANGELOG heading equals `VERSION`. The failure message names both values and points at the
+release path rather than just reporting two unequal strings.
+
+This lives in the repo rather than in the bump tool deliberately. The tool is not broken —
+it was never called. A check inside it cannot catch a release that goes around it; a test
+can, because `/ship` gates on a green suite before every PR.
 ## [0.5.82.0] - 2026-09-07
 
 The /sequential-ads list showed 50 of 134 ads and gave no sign of it. Three whole campaigns
