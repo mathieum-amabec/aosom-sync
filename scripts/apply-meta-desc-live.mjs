@@ -4,7 +4,10 @@
 // one Google reads) AND og_description in snippets/meta-tags.liquid (og/twitter), so the
 // home description is consistent everywhere. Backups + verify. Non-index pages unchanged.
 import { writeFileSync } from "node:fs";
-import { rest, getAsset, LIVE_THEME_ID, putAssetToPublishedTheme } from "./_shopify-lib.mjs";
+import { rest, getAsset, putAssetToPublishedTheme, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
 
 const LIVE = LIVE_THEME_ID;
 const META = "Aménagez votre patio et votre jardin pour l'été québécois : mobilier d'extérieur, BBQ, déco et accessoires, livrés gratuitement partout au Canada.";

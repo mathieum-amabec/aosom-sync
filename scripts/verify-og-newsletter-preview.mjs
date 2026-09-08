@@ -1,5 +1,8 @@
 // Read-only verification of the PREVIEW theme render.
-import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 const PREVIEW = DRAFT_THEME_ID;
 
 // Asset present?

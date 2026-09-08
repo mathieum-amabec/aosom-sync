@@ -9,7 +9,10 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { getAsset, LIVE_THEME_ID, putAssetToPublishedTheme } from "./_shopify-lib.mjs";
+import { getAsset, putAssetToPublishedTheme, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LIVE_THEME = LIVE_THEME_ID;

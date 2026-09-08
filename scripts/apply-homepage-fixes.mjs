@@ -1,7 +1,10 @@
 // FIX 1-3 — homepage polish on preview copy theme 160059195497.
 // Reads templates/index.json, mutates sections in node, writes back.
 // Backs up the original to scripts/reports/ for reversibility.
-import { getAsset, putAsset, PREVIEW_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, putAsset, getPreviewThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const PREVIEW_THEME_ID = await getPreviewThemeId();
 import { writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

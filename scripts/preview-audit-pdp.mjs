@@ -1,5 +1,8 @@
 // PDP + cat_tiles second pass — correct Liquid files this time.
-import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 const P = DRAFT_THEME_ID;
 const grab = async (k) => { try { return await getAsset(k, P); } catch { return null; } };
 

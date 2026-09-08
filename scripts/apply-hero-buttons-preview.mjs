@@ -3,7 +3,11 @@
 // semi-transparent white secondary + navy text + gold border, title/subtitle text-shadow,
 // and a bottom gradient overlay so the CTAs stand out. Keeps the corrected copy (badge +
 // subtitle) and the existing lc-hero.jpg. Idempotent.
-import { rest, sleep, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, sleep, getLiveThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
+const DRAFT_THEME_ID = await getDraftThemeId();
 const THEME = DRAFT_THEME_ID;
 if (THEME === LIVE_THEME_ID) throw new Error("refusing to run against the LIVE theme");
 const get = async (k) => (await (await rest(`/themes/${THEME}/assets.json?asset[key]=${encodeURIComponent(k)}`)).json()).asset.value;

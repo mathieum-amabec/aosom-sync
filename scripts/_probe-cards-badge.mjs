@@ -1,7 +1,10 @@
 // READ-ONLY probe: verify theme roles, then dump the product-card + discount-badge
 // relevant assets from the working DRAFT so we can design a "-X%" badge diff.
 // Draft only, no writes. Run under node-x64.
-import { rest, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 import { mkdirSync, writeFileSync } from "node:fs";
 
 const DRAFT = process.argv[2] || DRAFT_THEME_ID;

@@ -12,7 +12,11 @@
  *
  * Run:  node scripts/setup-judgeme-avis-page.mjs
  */
-import { rest, getAsset, PREVIEW_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, getPreviewThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const PREVIEW_THEME_ID = await getPreviewThemeId();
+const DRAFT_THEME_ID = await getDraftThemeId();
 
 const THEME = DRAFT_THEME_ID; // live theme
 const PAGE_HANDLE = "avis-clients";

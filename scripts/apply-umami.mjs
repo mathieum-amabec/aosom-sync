@@ -25,7 +25,10 @@
 // Plausible install strips the old block + tagged classes. All three assets are validated
 // in memory and only written if ALL transforms succeed (no half-applied state). Backs up
 // each asset first.
-import { getAsset, putAsset, loadEnv, PREVIEW_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, putAsset, loadEnv, getPreviewThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const PREVIEW_THEME_ID = await getPreviewThemeId();
 import { writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

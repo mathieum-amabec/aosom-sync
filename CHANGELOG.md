@@ -2,6 +2,39 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.83.0] - 2026-09-08
+
+Theme ids are no longer hardcoded. `getLiveThemeId()`, `getDraftThemeId()` and
+`getBackupThemeId()` read them from `themes.json` on use, so a publish can no longer
+leave a constant pointing at the wrong theme.
+
+### Fixed — the constants went stale on every publish
+
+`LIVE_THEME_ID` / `DRAFT_THEME_ID` / `BACKUP_THEME_ID` had to be re-pointed by hand after
+each publish; PRs #411, #424 and #441 exist only to do that. Between a publish and its
+re-point PR, `LIVE_THEME_ID` names a theme that is no longer live — and a checkout that
+predates the re-point carries those wrong ids indefinitely. The write guard itself has
+asked Shopify since #433, so production was not reachable, but anything reading the
+constants to *choose* a target was working from a value nobody had re-read.
+
+### Added
+
+- `getLiveThemeId()` — the single `role: "main"` theme. Throws, listing every theme, when
+  zero or more than one claims it, rather than handing back a guess.
+- `getDraftThemeId()` / `getBackupThemeId()` — newest and second-newest `unpublished` by
+  `updated_at`. Names are useless here (the live theme is called "DRAFT DE TRAVAIL"), so
+  recency is the only signal; when the top two share a timestamp they throw with the full
+  list and take an explicit `{ themeId }` instead of coin-flipping.
+- `listThemes()` — one cached `themes.json` fetch per process, now shared with
+  `themeRoles()` instead of each doing its own request.
+
+### Changed
+
+- 71 scripts migrated off the constants to the resolvers.
+- `getAsset` / `putAsset` default to the resolved DRAFT instead of the `BACKUP_THEME_ID`
+  constant. The old default meant that a publish promoting the backup theme turned every
+  omitted-argument call into a production edit; that is now structurally impossible.
+- 11 new tests over the resolvers, including the zero-main and multiple-main cases.
 ## [0.5.82.0] - 2026-09-07
 
 The /sequential-ads list showed 50 of 134 ads and gave no sign of it. Three whole campaigns

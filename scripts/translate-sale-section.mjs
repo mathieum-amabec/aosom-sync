@@ -1,4 +1,7 @@
-import { gql, PREVIEW_THEME_ID } from "./_shopify-lib.mjs";
+import { gql, getPreviewThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const PREVIEW_THEME_ID = await getPreviewThemeId();
 
 const gid = `gid://shopify/OnlineStoreTheme/${PREVIEW_THEME_ID}`;
 const FR = "🔥 Meilleures offres du moment";

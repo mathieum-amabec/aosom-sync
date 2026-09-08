@@ -1,4 +1,8 @@
-import { rest, DRAFT_THEME_ID, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getDraftThemeId, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
+const LIVE_THEME_ID = await getLiveThemeId();
 const DRAFT=DRAFT_THEME_ID, LIVE=LIVE_THEME_ID;
 async function get(themeId,key){const r=await rest(`/themes/${themeId}/assets.json?asset[key]=${encodeURIComponent(key)}`);return (await r.json()).asset;}
 // DRAFT state (parse-aware for JSON)

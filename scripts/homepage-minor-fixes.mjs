@@ -4,7 +4,11 @@
 // Dry-run default; --apply PUTs + verifies.
 //   node scripts/homepage-minor-fixes.mjs [--apply]
 import { readFileSync } from "node:fs";
-import { LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { getLiveThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
+const DRAFT_THEME_ID = await getDraftThemeId();
 const env = (() => { const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8"); const e = {}; for (const l of raw.split(/\r?\n/)) { const m = l.match(/^([A-Z0-9_]+)=(.*)$/); if (!m) continue; let v = m[2].trim(); if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1); e[m[1]] = v; } return e; })();
 const STORE = "27u5y2-kp.myshopify.com", API = "2024-01", TOKEN = env.SHOPIFY_ACCESS_TOKEN;
 if (!TOKEN) { console.error("FATAL no token"); process.exit(2); }

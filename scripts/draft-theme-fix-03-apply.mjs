@@ -1,7 +1,11 @@
 // Apply the 3 draft-theme fixes (P1 hero anchor target, P2 rabais filter banner,
 // P3 remove branded PawHut video). Draft theme 160606093417 ONLY.
 // Dry-run by default; pass --apply to PUT. Re-asserts the theme is unpublished before any write.
-import { rest, DRAFT_THEME_ID, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getDraftThemeId, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
+const LIVE_THEME_ID = await getLiveThemeId();
 
 const DRAFT = DRAFT_THEME_ID;
 const LIVE = LIVE_THEME_ID;
