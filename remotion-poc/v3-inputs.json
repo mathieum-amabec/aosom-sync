@@ -1,0 +1,87 @@
+{
+  "_comment": [
+    "Inputs captured VERBATIM from the v3 ffmpeg run (v0.5.84.0, branch feat/video-quality-upgrade).",
+    "Nothing here is recomputed: no Vision call, no Haiku call, no re-hash. The point of the POC is",
+    "to change ONE variable (the animation engine), so every other input is pinned to what the",
+    "ffmpeg run actually used, taken from its own stdout.",
+    "",
+    "The brief listed the SKUs as 36-068WT / 33-804WT / 04-169; the real ones carry a leading",
+    "8/8/D and are used here."
+  ],
+  "design": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30,
+    "durationSec": 15,
+    "barHeight": 170,
+    "navy": "#1A2340",
+    "gold": "#D4A853",
+    "windows": [[0, 3.5], [3.5, 7.5], [7.5, 11], [11, 15]],
+    "pushIn": {
+      "_comment": "v3 curve: fast punch over the first 1.2 s, then a slow drift. Same end scale.",
+      "punchSec": 1.2,
+      "punchAmount": 0.07,
+      "driftAmount": 0.06,
+      "maxZoom": 1.13
+    },
+    "wordRevealGapSec": 0.1,
+    "hookRevealStartSec": 0.15,
+    "keyline": { "width": 460, "height": 6, "growSec": 0.35 },
+    "flash": { "color": "#FFFFFF", "opacity": 0.55, "frames": 1 },
+    "pricePopScale": [0.82, 0.93, 1.0],
+    "pricePopSec": 0.24
+  },
+  "clips": [
+    {
+      "sku": "836-068WT",
+      "campaign": "automne-2026",
+      "sourceClip": "src/ugc/836-068WT.mp4",
+      "visionSegmentStartSec": 7,
+      "visionProductZone": "bottom",
+      "textZone": "top",
+      "visionScore": 5.22,
+      "messages": [
+        "TON LAPTOP TRAÎNE SUR LA TABLE À MANGER",
+        "UN VRAI BUREAU POUR TRAVAILLER SANS DÉRANGER",
+        "164,99 $ LIVRAISON GRATUITE",
+        "COMMANDE MAINTENANT AVANT QUE LE FROID ARRIVE"
+      ],
+      "fontSizes": [72, 60, 72, 60],
+      "music": { "track": "joyinsound-no-copyright-chill-music-403411.mp3", "startOffsetSec": 6, "tempo": 0.98 }
+    },
+    {
+      "sku": "833-804WT",
+      "campaign": "maison-2026",
+      "sourceClip": "src/ugc/833-804WT.mp4",
+      "visionSegmentStartSec": 0,
+      "visionProductZone": "middle",
+      "textZone": "bottom",
+      "visionScore": 6.83,
+      "messages": [
+        "TON SALON ATTEND CETTE TABLE BASSE",
+        "RANGEMENT CACHÉ PLUS ESPACE POUR RESPIRER",
+        "173,99 $ LIVRAISON GRATUITE",
+        "COMMANDE MAINTENANT AVANT QUE TU REMETTES À DEMAIN"
+      ],
+      "fontSizes": [72, 72, 72, 60],
+      "music": { "track": "sigmamusicart-no-copyright-music-514564.mp3", "startOffsetSec": 36, "tempo": 1.06 }
+    },
+    {
+      "sku": "D04-169",
+      "campaign": "animaux-2026",
+      "sourceClip": "src/ugc/D04-169.mp4",
+      "visionSegmentStartSec": 6,
+      "visionProductZone": "bottom",
+      "textZone": "top",
+      "visionScore": 5.0,
+      "messages": [
+        "VOTRE CHIEN DORT SUR LE PLANCHER FROID",
+        "UN SOFA DOUILLET JUSTE POUR LUI",
+        "189,99 $ AVEC LIVRAISON GRATUITE",
+        "COMMANDE MAINTENANT ET OFFRE-LUI LE CONFORT"
+      ],
+      "fontSizes": [72, 72, 72, 66],
+      "music": { "track": "joyinsound-no-copyright-chill-music-403411.mp3", "startOffsetSec": 0, "tempo": 1.08 }
+    }
+  ]
+}
