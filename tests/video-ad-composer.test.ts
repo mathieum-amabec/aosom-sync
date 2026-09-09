@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   W, H, BAR_H, DURATION, WINDOWS,
   textBand, gradientRect, hashSku, pickMusic, fitText, layoutWords, textWidth,
-  buildAdGraph, buildAudioGraph, type ProductZone,
+  buildAdGraph, buildAudioGraph, musicFamilyFor, MUSIC_FAMILIES, DEFAULT_FAMILY, TRACK_GAIN, type ProductZone,
 } from "@/lib/video-ad-composer";
 
 const TRACKS = ["a.mp3", "b.mp3"];
@@ -211,9 +211,126 @@ describe("buildAdGraph", () => {
 
 describe("buildAudioGraph", () => {
   it("applies the picked tempo and fades out before the end", () => {
-    const a = buildAudioGraph(1, { track: "x.mp3", startOffset: 12, tempo: 1.04 });
+    const a = buildAudioGraph(1, { track: "x.mp3", startOffset: 12, tempo: 1.04, gain: 1 });
     expect(a).toContain("atempo=1.04");
     expect(a).toContain(`st=${(DURATION - 1).toFixed(2)}`);
     expect(a).toContain("[aout]");
+  });
+});
+
+describe("music families by product category", () => {
+  const ALL = [
+    "C:/a/joyinsound-no-copyright-chill-music-403411.mp3",
+    "C:/a/sigmamusicart-no-copyright-music-514564.mp3",
+    "C:/a/mixkit-lounge-695.mp3",
+    "C:/a/mixkit-corporate-22.mp3",
+    "C:/a/mixkit-pop-250.mp3",
+    "C:/a/mixkit-funk-1140.mp3",
+  ];
+  // Windows paths on purpose: production builds these with path.join, so they carry
+  // backslashes. An earlier fixture used forward slashes and let through a base() that only
+  // split on "/" — every family then fell back to the whole pool, silently.
+  const BS = String.fromCharCode(92);
+  const WINPATHS = ALL.map((p) => p.split("/").join(BS));
+  const base = (p: string) => {
+    const k = Math.max(p.lastIndexOf("/"), p.lastIndexOf(BS));
+    return k >= 0 ? p.slice(k + 1) : p;
+  };
+
+  it("maps each area of the taxonomy to its family", () => {
+    expect(musicFamilyFor("Patio & Garden > Patio Furniture > Sofas")).toBe("exterieur");
+    expect(musicFamilyFor("Pet Supplies > Dogs > Dog Sofas")).toBe("animaux");
+    expect(musicFamilyFor("Toys & Games > Baby & Toddler Toys")).toBe("enfants");
+    expect(musicFamilyFor("Office Products > Office Furniture > Office Desks")).toBe("bureau");
+    expect(musicFamilyFor("Home Furnishings > Storage & Organization > Shelving")).toBe("bureau");
+    expect(musicFamilyFor("Home Furnishings > Living Room Furniture > Sofas")).toBe("interieur");
+    expect(musicFamilyFor("Home Furnishings > Bedroom Furniture > Beds")).toBe("interieur");
+  });
+
+  // Storage is Home Furnishings too, so order matters: it must not fall through to interieur.
+  it("routes storage to bureau even though it lives under Home Furnishings", () => {
+    expect(musicFamilyFor("Home Furnishings > Storage & Organization > Storage Cabinets")).toBe("bureau");
+  });
+
+  it("falls back rather than guessing on an unknown or empty product type", () => {
+    expect(musicFamilyFor(null)).toBe(DEFAULT_FAMILY);
+    expect(musicFamilyFor("")).toBe(DEFAULT_FAMILY);
+    expect(musicFamilyFor("Sports & Recreation > Exercise Equipment")).toBe(DEFAULT_FAMILY);
+  });
+
+  it("picks a bed from the product's own family", () => {
+    expect(base(pickMusic("X", WINPATHS, "Pet Supplies > Dogs").track)).toBe("mixkit-funk-1140.mp3");
+    expect(base(pickMusic("X", WINPATHS, "Toys & Games > Ride-On").track)).toBe("mixkit-pop-250.mp3");
+    expect(base(pickMusic("X", WINPATHS, "Office Products > Desks").track)).toBe("mixkit-corporate-22.mp3");
+    expect(base(pickMusic("X", WINPATHS, "Home Furnishings > Living Room Furniture").track)).toBe("mixkit-lounge-695.mp3");
+  });
+
+  // The identity that already shipped on every published patio ad must not move.
+  it("keeps outdoor on the two original beds", () => {
+    for (const sku of ["A", "B", "C", "D", "E"]) {
+      const t = base(pickMusic(sku, WINPATHS, "Patio & Garden > Sheds").track);
+      expect(["joyinsound-no-copyright-chill-music-403411.mp3", "sigmamusicart-no-copyright-music-514564.mp3"]).toContain(t);
+    }
+  });
+
+  it("still desynchronises WITHIN a family — same track, different entry points", () => {
+    const picks = ["A", "B", "C", "D", "E", "F", "G", "H"].map((s) =>
+      pickMusic(s, WINPATHS, "Pet Supplies > Dogs"),
+    );
+    expect(new Set(picks.map((p) => base(p.track))).size).toBe(1);
+    expect(new Set(picks.map((p) => `${p.startOffset}-${p.tempo}`)).size).toBeGreaterThanOrEqual(4);
+  });
+
+  it("stays deterministic", () => {
+    const a = pickMusic("836-068WT", WINPATHS, "Office Products > Desks");
+    const b = pickMusic("836-068WT", WINPATHS, "Office Products > Desks");
+    expect(a).toEqual(b);
+  });
+
+  // The mp3s are gitignored: a clone without them must still render, just unthemed.
+  it("degrades to the whole pool when the family's file is missing on disk", () => {
+    const only = ["C:/a/sigmamusicart-no-copyright-music-514564.mp3"];
+    const m = pickMusic("X", only, "Pet Supplies > Dogs");
+    expect(base(m.track)).toBe("sigmamusicart-no-copyright-music-514564.mp3");
+    expect(m.family).toMatch(/repli/);
+  });
+
+  it("reports the family it actually used", () => {
+    expect(pickMusic("X", WINPATHS, "Pet Supplies > Dogs").family).toBe("animaux");
+  });
+
+  it("every family names at least one track, and no track is orphaned", () => {
+    const known = new Set(ALL.map(base));
+    for (const [fam, files] of Object.entries(MUSIC_FAMILIES)) {
+      expect(files.length).toBeGreaterThan(0);
+      for (const f of files) expect(known.has(f), `${fam} -> ${f} absent du pool`).toBe(true);
+    }
+  });
+});
+
+describe("level matching", () => {
+  it("gives every pooled track a gain — an unmeasured track would ship at the wrong level", () => {
+    for (const files of Object.values(MUSIC_FAMILIES)) {
+      for (const f of files) expect(TRACK_GAIN[f], f).toBeGreaterThan(0);
+    }
+  });
+
+  it("raises the quiet beds and leaves the loudest roughly alone", () => {
+    expect(TRACK_GAIN["mixkit-funk-1140.mp3"]).toBeGreaterThan(TRACK_GAIN["mixkit-corporate-22.mp3"]);
+    expect(TRACK_GAIN["joyinsound-no-copyright-chill-music-403411.mp3"]).toBeLessThan(1.2);
+  });
+
+  it("never pushes the mix into clipping", () => {
+    for (const g of Object.values(TRACK_GAIN)) expect(0.22 * g).toBeLessThan(1);
+  });
+
+  it("applies the gain in the audio graph", () => {
+    const a = buildAudioGraph(1, { track: "mixkit-funk-1140.mp3", startOffset: 0, tempo: 1, gain: 2.85 });
+    expect(a).toContain("volume=0.627");
+  });
+
+  it("falls back to unity gain for a track with no measurement", () => {
+    const a = buildAudioGraph(1, { track: "inconnu.mp3", startOffset: 0, tempo: 1, gain: 1 });
+    expect(a).toContain("volume=0.22");
   });
 });

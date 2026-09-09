@@ -99,23 +99,119 @@ export interface MusicChoice {
   startOffset: number;
   /** 0.94-1.08. Small enough to stay musical, large enough to change the feel. */
   tempo: number;
+  /** Which family the bed came from, for the render log. */
+  family?: string;
+  /** Level-matching multiplier applied on top of the base volume. */
+  gain: number;
 }
 
 /**
- * Two files on disk become a large space: track × offset × tempo, all from the SKU.
+ * Music families, keyed to the product taxonomy.
  *
- * The offset does most of the work. Starting one ad at 0 s and another at 33 s of the same
- * bed makes them sound like different music long before the tempo shift is noticed.
+ * WHY BY CATEGORY AND NOT PURE HASH
+ * Hashing across the whole catalog spreads the beds evenly, which is exactly wrong for a
+ * brand: a patio ad and a dog-bed ad want different rooms, and someone who sees five of our
+ * ads should hear a category, not a shuffle. So the family is chosen by what the product IS,
+ * and the hash then desynchronises WITHIN that family — the same trick as before, applied one
+ * level down.
+ *
+ * Filenames only; the caller resolves them against its own audio directory.
  */
-export function pickMusic(sku: string, tracks: string[]): MusicChoice {
-  if (tracks.length === 0) throw new Error("pickMusic: no tracks");
+export const MUSIC_FAMILIES: Record<string, string[]> = {
+  // The two original beds stay on outdoor, which is what they were chosen for and what every
+  // patio ad already published sounds like. Changing them would break a live identity.
+  exterieur: [
+    "joyinsound-no-copyright-chill-music-403411.mp3",
+    "sigmamusicart-no-copyright-music-514564.mp3",
+  ],
+  // Warm lounge for the rooms people relax in.
+  interieur: ["mixkit-lounge-695.mp3"],
+  // Clean corporate for desks, shelving and storage.
+  bureau: ["mixkit-corporate-22.mp3"],
+  // Bright pop for toys and kids furniture.
+  enfants: ["mixkit-pop-250.mp3"],
+  // Playful funk for pet products.
+  animaux: ["mixkit-funk-1140.mp3"],
+};
+
+/**
+ * Per-track gain, because the pool is NOT level-matched.
+ *
+ * Measured mean_volume over the eight entry points: joyinsound sits at -9.3 dB while
+ * mixkit-funk-1140 sits at -19.6 dB. Under the flat volume=0.22 the old code applied, a pet
+ * ad came out roughly half as loud as a patio ad — a category identity must not also be a
+ * volume difference. Each track is nudged toward a -10.5 dB reference (the level the two
+ * original beds already average, so the creative that shipped barely moves).
+ *
+ * Multiplies the base 0.22, so the loudest result is 0.22 x 2.85 = 0.63 — no clipping.
+ * Re-measure with:
+ *   ffmpeg -ss <offset> -t 15 -i <track> -af volumedetect -f null -
+ */
+export const TRACK_GAIN: Record<string, number> = {
+  "joyinsound-no-copyright-chill-music-403411.mp3": 0.87,
+  "sigmamusicart-no-copyright-music-514564.mp3": 1.19,
+  "mixkit-corporate-22.mp3": 1.95,
+  "mixkit-lounge-695.mp3": 2.26,
+  "mixkit-pop-250.mp3": 2.02,
+  "mixkit-funk-1140.mp3": 2.85,
+};
+
+/** Fallback family when the product type is unknown or matches nothing. */
+export const DEFAULT_FAMILY = "exterieur";
+
+/**
+ * Map an Aosom `product_type` to a music family.
+ *
+ * Deliberately coarse. The point is a recognisable sound per area of the catalog, not a bed
+ * per leaf category — 200 families would be the same as no families at all.
+ */
+export function musicFamilyFor(productType: string | null | undefined): string {
+  const t = String(productType ?? "");
+  if (!t) return DEFAULT_FAMILY;
+  if (/^Patio & Garden/.test(t)) return "exterieur";
+  if (/^Pet Supplies/.test(t)) return "animaux";
+  if (/^Toys & Games/.test(t)) return "enfants";
+  if (/^Office Products/.test(t) || /Storage & Organization/.test(t)) return "bureau";
+  if (/^Home Furnishings/.test(t)) return "interieur";
+  return DEFAULT_FAMILY;
+}
+
+/**
+ * Pick the bed: family first, then the same hash-derived desynchronisation as before.
+ *
+ * `available` is what is actually on disk. The mp3s are gitignored, so a clone without them
+ * must degrade rather than crash: when the family has no file present, this falls back to the
+ * whole pool and the ad still renders with music, just not the themed one.
+ *
+ * The offset does most of the perceptual work. Starting one ad at 0 s and another at 36 s of
+ * the same bed makes them sound like different music long before the tempo shift is noticed —
+ * which is what lets one track per family carry a whole campaign.
+ */
+export function pickMusic(sku: string, available: string[], productType?: string | null): MusicChoice {
+  if (available.length === 0) throw new Error("pickMusic: no tracks");
+  const family = musicFamilyFor(productType);
+  const wanted = MUSIC_FAMILIES[family] ?? [];
+  const base = (p: string) => {
+    const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf(String.fromCharCode(92)));
+    return i >= 0 ? p.slice(i + 1) : p;
+  };
+  const inFamily = available.filter((p) => wanted.includes(base(p)));
+  const pool = inFamily.length ? inFamily : [...available].sort();
+
   const h = hashSku(sku);
-  const track = tracks[h % tracks.length];
-  // 8 distinct entry points, 6 s apart, well inside a typical 2-3 minute bed.
+  const track = pool[h % pool.length];
+  // 8 distinct entry points, 6 s apart, well inside a typical 90 s-3 min bed.
   const startOffset = ((h >>> 8) % 8) * 6;
   // 8 tempo steps across 0.94-1.08.
   const tempo = Number((0.94 + ((h >>> 16) % 8) * 0.02).toFixed(2));
-  return { track, startOffset, tempo };
+  return {
+    track,
+    startOffset,
+    tempo,
+    family: inFamily.length ? family : `${family} (repli)`,
+    // An unlisted track keeps 1.0 rather than being silently attenuated.
+    gain: TRACK_GAIN[base(track)] ?? 1,
+  };
 }
 
 // ── expression helpers ────────────────────────────────────────────────────
@@ -368,8 +464,11 @@ export function buildAdGraph(o: ComposeOptions): string {
 
 /** Audio chain: the picked bed, tempo-shifted, ducked and faded. */
 export function buildAudioGraph(idx: number, music: MusicChoice): string {
+  // 0.22 is the level the v3 creative was approved at; the per-track gain only brings the
+  // rest of the pool up to the two original beds rather than re-tuning the mix.
+  const vol = Number((0.22 * (music.gain ?? 1)).toFixed(3));
   return (
-    `[${idx}:a]atempo=${music.tempo},volume=0.22,` +
+    `[${idx}:a]atempo=${music.tempo},volume=${vol},` +
     `afade=t=in:d=0.8,afade=t=out:st=${(DURATION - 1).toFixed(2)}:d=1[aout]`
   );
 }
