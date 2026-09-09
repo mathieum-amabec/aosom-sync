@@ -2,7 +2,10 @@
 // Loads SHOPIFY_ACCESS_TOKEN from .env.local (repo's admin token; NOT $SHOPIFY_ADMIN_TOKEN).
 // Prints the PUT result then the roles of ALL themes. Pass --apply to actually publish.
 import { readFileSync } from "node:fs";
-import { DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 
 function loadEnv() {
   const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8");

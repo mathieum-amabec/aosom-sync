@@ -2,7 +2,10 @@
 // the next working DRAFT. Shopify copies asynchronously; returns the new id immediately.
 // Loads SHOPIFY_ACCESS_TOKEN from .env.local. Pass --apply to actually create.
 import { readFileSync } from "node:fs";
-import { LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
 
 function loadEnv() {
   const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8");

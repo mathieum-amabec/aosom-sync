@@ -35,13 +35,13 @@ export const API_VERSION = "2025-01";
 // inferred from history — re-read themes.json.
 // NOTE: theme NAMES are misleading (every one is named "DRAFT", including the LIVE one) —
 // do NOT eyeball by name; trust the role from themes.json.
-// Re-verify via themes.json after ANY publish — a stale LIVE_THEME_ID makes the apply-*.mjs
-// guard "protect" the wrong theme, and a stale DRAFT_THEME_ID can point writes at production.
-// IMPORTANT: the LIVE_THEME_ID guard in apply-*.mjs ("refusing to run against the LIVE
-// theme") only protects production when this is the REAL published theme. Keep it current.
-export const LIVE_THEME_ID = "161562099817"; // main / published (LIVE) since 2026-08-30 — NEVER write here
-export const DRAFT_THEME_ID = "161529233513"; // live 08-18 → 08-30 — safe write target, closest to LIVE
-export const BACKUP_THEME_ID = "161069989993"; // deeper rollback, one publish older than DRAFT
+// There is nothing left to "keep current" here: every id below is read from themes.json on
+// use. The failure this removes was real — a constant that drifted since the last publish
+// made the apply-*.mjs guard protect a theme that was no longer live.
+// The ids are NO LONGER hardcoded. They are resolved from themes.json at call time by
+// getLiveThemeId() / getDraftThemeId() / getBackupThemeId() below. Three separate PRs
+// (#411, #424, #441) existed only to re-point these constants after a publish; resolving
+// them removes that chore, and with it the window where a stale constant is believed.
 // DRAFT and BACKUP stay DISTINCT themes, giving a real two-step rollback ladder:
 // LIVE 161562099817 → back one publish to DRAFT 161529233513 → back two to BACKUP 161069989993.
 // They were the same id between 2026-08-07 and 2026-08-09, which meant "roll back" and
@@ -59,7 +59,7 @@ export const BACKUP_THEME_ID = "161069989993"; // deeper rollback, one publish o
 // `newTheme`, not `theme` — querying `theme` is a schema error, a separate trap.
 // To get a real dedicated draft: DELETE one obsolete theme to free a slot, then duplicate.
 //
-// ⚠️ DRAFT_THEME_ID is the PREVIOUS LIVE, not a fresh copy of the current one. As of the
+// ⚠️ The DRAFT is typically the PREVIOUS LIVE, not a fresh copy of the current one. As of the
 // 2026-08-30 publish it is 6 assets behind: it lacks sections/lc-seasonal-band.liquid and
 // is older on templates/index.json, locales/en.default.json, locales/fr.json,
 // sections/main-product.liquid and snippets/agentic-faq.liquid. Writing there is safe;
@@ -73,12 +73,10 @@ export const BACKUP_THEME_ID = "161069989993"; // deeper rollback, one publish o
 // live → draft BEFORE publishing, so the publish moved only forwards. It also caught the
 // 2026-08-18 publish: lc-structured-data.liquid was 12 days older than live's and would
 // have reverted priceValidUntil from 30 days back to a year.
-// Deprecated alias kept for older imports. Points at a non-live theme so the default
-// asset-write target can never hit production. New code should use DRAFT_THEME_ID.
-// Aliases DRAFT, not BACKUP: this is a WRITE target, and BACKUP is now a distinct, older
-// theme kept as the deeper rollback point. Pointing writes there would corrupt the very
-// snapshot we roll back to. (It aliased BACKUP while the two ids were identical.)
-export const PREVIEW_THEME_ID = DRAFT_THEME_ID;
+// Deprecated alias kept for older imports. Resolves DRAFT, not BACKUP: this is a WRITE
+// target, and BACKUP is the deeper rollback point — pointing writes there would corrupt the
+// very snapshot we roll back to. New code should call getDraftThemeId directly.
+export const getPreviewThemeId = getDraftThemeId;
 // Resolved on first request, not at import: reading .env.local eagerly makes the module
 // impossible to import anywhere without one (tests included) and turns a missing file into
 // a crash at load time rather than at the call that actually needs a token.
@@ -127,7 +125,8 @@ export async function gql(query, variables = {}) {
   return json;
 }
 
-export async function getAsset(key, themeId = BACKUP_THEME_ID) {
+export async function getAsset(key, themeId) {
+  themeId ??= await getDraftThemeId();
   const res = await rest(`/themes/${themeId}/assets.json?asset[key]=${encodeURIComponent(key)}`);
   if (!res.ok) throw new Error(`getAsset ${key} failed: ${res.status} ${await res.text()}`);
   const data = await res.json();
@@ -145,21 +144,130 @@ export async function getAsset(key, themeId = BACKUP_THEME_ID) {
  * that happens mid-run is not seen by later writes in that same run. Scripts here are short
  * and operator-launched, so that window is acceptable; re-running picks up the new roles.
  */
-let _rolesPromise = null;
 export async function themeRoles() {
-  if (!_rolesPromise) {
-    _rolesPromise = rest("/themes.json?fields=id,name,role")
+  const themes = await listThemes();
+  return new Map(themes.map((t) => [t.id, { role: t.role, name: t.name }]));
+}
+
+/**
+ * Full theme list with updated_at, fetched once per process (same cache discipline as
+ * themeRoles: a publish mid-run is not seen by later calls in that run).
+ */
+let _themesPromise = null;
+export async function listThemes() {
+  if (!_themesPromise) {
+    _themesPromise = rest("/themes.json?fields=id,name,role,updated_at")
       .then(async (res) => {
         if (!res.ok) throw new Error(`themes.json failed: ${res.status} ${await res.text()}`);
         const { themes } = await res.json();
-        return new Map(themes.map((t) => [String(t.id), { role: t.role, name: t.name }]));
+        return themes.map((t) => ({ id: String(t.id), name: t.name, role: t.role, updated_at: t.updated_at }));
       })
       .catch((err) => {
-        _rolesPromise = null; // a transient failure must not poison every later call
+        _themesPromise = null; // a transient failure must not poison every later call
         throw err;
       });
   }
-  return _rolesPromise;
+  return _themesPromise;
+}
+
+/** Render a theme list for an error message — names are misleading, so always show role + date. */
+function formatThemes(themes) {
+  return themes.map((t) => `  ${t.id}  ${String(t.role).padEnd(12)} ${t.updated_at ?? "?"}  ${t.name}`).join("\n");
+}
+
+/**
+ * The id of the PUBLISHED theme, straight from Shopify. Never write here.
+ *
+ * Throws — loudly, with the full list — when the answer is not exactly one theme. Zero means
+ * the token is scoped to the wrong shop or the API shape changed; more than one is impossible
+ * per Shopify's model and means we are reading something we do not understand. Either way,
+ * guessing would hand a write target to a caller that asked "which theme is live?", so the
+ * only safe answer is to stop.
+ */
+export async function getLiveThemeId() {
+  const themes = await listThemes();
+  const main = themes.filter((t) => t.role === "main");
+  if (main.length === 0) {
+    throw new Error(
+      `getLiveThemeId: no theme has role "main" on ${STORE}. ` +
+        `Cannot identify the live theme, so nothing may be treated as safe to write.\n${formatThemes(themes)}`,
+    );
+  }
+  if (main.length > 1) {
+    throw new Error(
+      `getLiveThemeId: ${main.length} themes claim role "main" on ${STORE} (${main.map((t) => t.id).join(", ")}). ` +
+        `Shopify allows exactly one; refusing to pick.\n${formatThemes(themes)}`,
+    );
+  }
+  return main[0].id;
+}
+
+/** Unpublished themes, newest first. The ranking that DRAFT and BACKUP are read off. */
+async function unpublishedByRecency() {
+  const themes = await listThemes();
+  return themes
+    .filter((t) => t.role === "unpublished")
+    .sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")));
+}
+
+/**
+ * The active working DRAFT: the most recently updated unpublished theme.
+ *
+ * Recency is the only signal Shopify gives us — the names are all "DRAFT DE TRAVAIL <date>",
+ * including the live one, so they cannot be trusted. When the top two share an updated_at the
+ * ranking is a coin flip, so this throws with the full list rather than pick: an operator
+ * passing `{ themeId }` after reading that list is the intended escape hatch.
+ */
+export async function getDraftThemeId({ themeId } = {}) {
+  const candidates = await unpublishedByRecency();
+  if (themeId) return assertUnpublishedChoice(themeId, candidates);
+  if (candidates.length === 0) {
+    throw new Error(`getDraftThemeId: no unpublished theme on ${STORE} — there is nowhere safe to write.`);
+  }
+  if (candidates.length > 1 && candidates[0].updated_at === candidates[1].updated_at) {
+    throw new Error(
+      `getDraftThemeId: cannot tell DRAFT apart — the two newest unpublished themes share ` +
+        `updated_at ${candidates[0].updated_at}. Pass { themeId } after checking this list:\n${formatThemes(candidates)}`,
+    );
+  }
+  return candidates[0].id;
+}
+
+/**
+ * The deeper rollback point: the second most recently updated unpublished theme.
+ *
+ * Ambiguity is the norm here, not the exception — old drafts sit untouched for weeks and end
+ * up sharing an updated_at, and at least one theme on this shop is known-poisoned (it predates
+ * the 2026-07-21 live edits and silently reverts the Judge.me embed). So this refuses to guess
+ * whenever the 2nd place is tied, and asks for an explicit `{ themeId }`.
+ */
+export async function getBackupThemeId({ themeId } = {}) {
+  const candidates = await unpublishedByRecency();
+  if (themeId) return assertUnpublishedChoice(themeId, candidates);
+  if (candidates.length < 2) {
+    throw new Error(
+      `getBackupThemeId: need at least 2 unpublished themes for a rollback ladder, found ${candidates.length}.`,
+    );
+  }
+  const tied = candidates.filter((t) => t.updated_at === candidates[1].updated_at);
+  if (tied.length > 1) {
+    throw new Error(
+      `getBackupThemeId: ${tied.length} unpublished themes share updated_at ${candidates[1].updated_at}, ` +
+        `so the rollback point is ambiguous. Pass { themeId } after checking this list:\n${formatThemes(candidates)}`,
+    );
+  }
+  return candidates[1].id;
+}
+
+/** Accept an operator-supplied id only if it is genuinely an unpublished theme on this shop. */
+function assertUnpublishedChoice(themeId, candidates) {
+  const hit = candidates.find((t) => t.id === String(themeId));
+  if (!hit) {
+    throw new Error(
+      `Theme ${themeId} is not an unpublished theme on ${STORE}. Unpublished themes:\n${formatThemes(candidates)}`,
+    );
+  }
+  return hit.id;
 }
 
 /**
@@ -190,7 +298,8 @@ export async function assertWritableTheme(themeId) {
   }
 }
 
-export async function putAsset(key, value, themeId = BACKUP_THEME_ID) {
+export async function putAsset(key, value, themeId) {
+  themeId ??= await getDraftThemeId();
   await assertWritableTheme(themeId);
   return _putAssetUnchecked(key, value, themeId);
 }

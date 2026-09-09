@@ -2,7 +2,10 @@
 // then patch snippets/meta-tags.liquid so the HOME (index) uses our 1200x630 asset as
 // the single og:image source. Product/collection/article pages keep page_image.
 import { readFileSync, writeFileSync } from "node:fs";
-import { getAsset, LIVE_THEME_ID, putAssetToPublishedTheme } from "./_shopify-lib.mjs";
+import { getAsset, putAssetToPublishedTheme, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
 
 const LIVE = LIVE_THEME_ID;
 

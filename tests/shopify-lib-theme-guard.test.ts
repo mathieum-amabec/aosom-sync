@@ -15,11 +15,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-type Theme = { id: string | number; name: string; role: "main" | "unpublished" };
+type Theme = { id: string | number; name: string; role: "main" | "unpublished"; updated_at?: string };
 
-const LIVE: Theme = { id: "161529233513", name: "DRAFT GOOGLE SHOPPING 2026-08-07", role: "main" };
-const DRAFT: Theme = { id: "161562099817", name: "DRAFT DE TRAVAIL 2026-08-08", role: "unpublished" };
-const BACKUP: Theme = { id: "161069989993", name: "DRAFT DE TRAVAIL 2026-07-18 v2", role: "unpublished" };
+const LIVE: Theme = { id: "161529233513", name: "DRAFT GOOGLE SHOPPING 2026-08-07", role: "main", updated_at: "2026-08-30T10:00:00Z" };
+const DRAFT: Theme = { id: "161562099817", name: "DRAFT DE TRAVAIL 2026-08-08", role: "unpublished", updated_at: "2026-08-29T10:00:00Z" };
+const BACKUP: Theme = { id: "161069989993", name: "DRAFT DE TRAVAIL 2026-07-18 v2", role: "unpublished", updated_at: "2026-07-18T10:00:00Z" };
 
 function ok(body: unknown) {
   return { ok: true, status: 200, headers: { get: () => null }, json: async () => body, text: async () => JSON.stringify(body) };
@@ -42,9 +42,10 @@ async function load() {
     putAssetToPublishedTheme: (k: string, v: string, id: string) => Promise<unknown>;
     assertWritableTheme: (id: string) => Promise<void>;
     themeRoles: () => Promise<Map<string, { role: string; name: string }>>;
-    LIVE_THEME_ID: string;
-    DRAFT_THEME_ID: string;
-    BACKUP_THEME_ID: string;
+    getLiveThemeId: () => Promise<string>;
+    getDraftThemeId: (opts?: { themeId?: string }) => Promise<string>;
+    getBackupThemeId: (opts?: { themeId?: string }) => Promise<string>;
+    listThemes: () => Promise<Array<{ id: string; name: string; role: string; updated_at?: string }>>;
   }>;
 }
 
@@ -101,13 +102,24 @@ describe("putAsset refuses the published theme", () => {
     expect(String(writeCalls()[0][0])).toContain(`/themes/${DRAFT.id}/assets.json`);
   });
 
-  it("guards the default target too — 41 of 63 call sites omit the theme", async () => {
+  it("resolves the default target instead of trusting a constant — 41 of 63 call sites omit the theme", async () => {
     const lib = await load();
-    // Default is BACKUP_THEME_ID; if a publish ever made that theme live, the omitted-argument
-    // calls must fail rather than quietly edit production.
-    withThemes([{ ...BACKUP, role: "main" }, DRAFT]);
+    // The default used to be the BACKUP_THEME_ID constant, so a publish that promoted that
+    // theme turned every omitted-argument call into a production edit. The default is now
+    // whatever themes.json calls the newest unpublished theme, so it cannot be the live one.
+    withThemes([{ ...BACKUP, role: "main" }, DRAFT], ok({ asset: { key: "x" } }));
 
-    await expect(lib.putAsset("x", "y")).rejects.toThrow(/Refusing to write/);
+    await expect(lib.putAsset("x", "y")).resolves.toBeTruthy();
+    const [url] = writeCalls()[0] as [string];
+    expect(url).toContain(`/themes/${DRAFT.id}/assets.json`);
+    expect(url).not.toContain(String(BACKUP.id));
+  });
+
+  it("still refuses when the only unpublished candidate is gone — no silent fallback to live", async () => {
+    const lib = await load();
+    withThemes([LIVE]); // nothing but the published theme
+
+    await expect(lib.putAsset("x", "y")).rejects.toThrow(/no unpublished theme/);
     expect(writeCalls()).toHaveLength(0);
   });
 
@@ -163,10 +175,111 @@ describe("themeRoles caching", () => {
   });
 });
 
-describe("the exported constants still match the store", () => {
-  it("LIVE/DRAFT/BACKUP are three distinct ids", async () => {
+describe("getLiveThemeId — the id is resolved, never hardcoded", () => {
+  it("returns the id of the single theme whose role is main", async () => {
     const lib = await load();
+    mockFetch.mockResolvedValueOnce(ok({ themes: [DRAFT, LIVE, BACKUP] }));
 
-    expect(new Set([lib.LIVE_THEME_ID, lib.DRAFT_THEME_ID, lib.BACKUP_THEME_ID]).size).toBe(3);
+    await expect(lib.getLiveThemeId()).resolves.toBe(String(LIVE.id));
+  });
+
+  it("throws when NO theme is main — refusing to call something else live", async () => {
+    const lib = await load();
+    mockFetch.mockResolvedValueOnce(ok({ themes: [DRAFT, BACKUP] }));
+
+    await expect(lib.getLiveThemeId()).rejects.toThrow(/no theme has role "main"/);
+  });
+
+  it("lists every theme when none is main, so the operator can see what came back", async () => {
+    const lib = await load();
+    mockFetch.mockResolvedValueOnce(ok({ themes: [DRAFT, BACKUP] }));
+
+    await expect(lib.getLiveThemeId()).rejects.toThrow(String(DRAFT.id));
+  });
+
+  it("throws when MORE THAN ONE theme claims main, instead of picking one", async () => {
+    const lib = await load();
+    const alsoMain: Theme = { id: "999", name: "impossible", role: "main", updated_at: "2026-09-01T00:00:00Z" };
+    mockFetch.mockResolvedValueOnce(ok({ themes: [LIVE, alsoMain, DRAFT] }));
+
+    await expect(lib.getLiveThemeId()).rejects.toThrow(/2 themes claim role "main"/);
+  });
+
+  it("names both offenders when two claim main", async () => {
+    const lib = await load();
+    const alsoMain: Theme = { id: "999", name: "impossible", role: "main", updated_at: "2026-09-01T00:00:00Z" };
+    mockFetch.mockResolvedValueOnce(ok({ themes: [LIVE, alsoMain] }));
+
+    await expect(lib.getLiveThemeId()).rejects.toThrow(/999/);
+  });
+
+  it("never returns an unpublished id — the whole point of the guard", async () => {
+    const lib = await load();
+    mockFetch.mockResolvedValueOnce(ok({ themes: [DRAFT, LIVE, BACKUP] }));
+
+    const id = await lib.getLiveThemeId();
+    expect(id).not.toBe(String(DRAFT.id));
+    expect(id).not.toBe(String(BACKUP.id));
+  });
+});
+
+describe("getDraftThemeId / getBackupThemeId — recency, and no guessing when tied", () => {
+  it("DRAFT is the most recently updated unpublished theme", async () => {
+    const lib = await load();
+    mockFetch.mockResolvedValueOnce(ok({ themes: [BACKUP, LIVE, DRAFT] }));
+
+    await expect(lib.getDraftThemeId()).resolves.toBe(String(DRAFT.id));
+  });
+
+  it("BACKUP is the second most recent, giving a real two-step rollback ladder", async () => {
+    const lib = await load();
+    mockFetch.mockResolvedValueOnce(ok({ themes: [BACKUP, LIVE, DRAFT] }));
+
+    await expect(lib.getBackupThemeId()).resolves.toBe(String(BACKUP.id));
+  });
+
+  it("never hands back the live theme as a write target", async () => {
+    const lib = await load();
+    mockFetch.mockResolvedValueOnce(ok({ themes: [BACKUP, LIVE, DRAFT] }));
+
+    await expect(lib.getDraftThemeId()).resolves.not.toBe(String(LIVE.id));
+  });
+
+  it("throws rather than coin-flip when the two newest drafts share updated_at", async () => {
+    const lib = await load();
+    const tie: Theme = { ...DRAFT, id: "777", name: "tie", updated_at: DRAFT.updated_at };
+    mockFetch.mockResolvedValueOnce(ok({ themes: [LIVE, DRAFT, tie] }));
+
+    await expect(lib.getDraftThemeId()).rejects.toThrow(/cannot tell DRAFT apart/);
+  });
+
+  it("accepts an explicit themeId once the operator has read the list", async () => {
+    const lib = await load();
+    const tie: Theme = { ...DRAFT, id: "777", name: "tie", updated_at: DRAFT.updated_at };
+    mockFetch.mockResolvedValueOnce(ok({ themes: [LIVE, DRAFT, tie] }));
+
+    await expect(lib.getDraftThemeId({ themeId: "777" })).resolves.toBe("777");
+  });
+
+  it("rejects an explicit themeId that is the live theme", async () => {
+    const lib = await load();
+    mockFetch.mockResolvedValueOnce(ok({ themes: [LIVE, DRAFT, BACKUP] }));
+
+    await expect(lib.getDraftThemeId({ themeId: String(LIVE.id) })).rejects.toThrow(/not an unpublished theme/);
+  });
+
+  it("throws when there is no unpublished theme at all", async () => {
+    const lib = await load();
+    mockFetch.mockResolvedValueOnce(ok({ themes: [LIVE] }));
+
+    await expect(lib.getDraftThemeId()).rejects.toThrow(/no unpublished theme/);
+  });
+
+  it("refuses an ambiguous BACKUP — old drafts routinely share a timestamp", async () => {
+    const lib = await load();
+    const tied: Theme = { ...BACKUP, id: "888", name: "also stale", updated_at: BACKUP.updated_at };
+    mockFetch.mockResolvedValueOnce(ok({ themes: [LIVE, DRAFT, BACKUP, tied] }));
+
+    await expect(lib.getBackupThemeId()).rejects.toThrow(/rollback point is ambiguous/);
   });
 });

@@ -1,6 +1,10 @@
 // ÉTAPE 2+3 — publish the working DRAFT to LIVE (role:main), then confirm the swap.
 // Re-runs the gate first; aborts if the live state no longer matches expectation.
-import { rest, DRAFT_THEME_ID, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getDraftThemeId, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
+const LIVE_THEME_ID = await getLiveThemeId();
 const PREVIEW = DRAFT_THEME_ID, LIVE = LIVE_THEME_ID;
 
 const before = (await (await rest("/themes.json")).json()).themes;

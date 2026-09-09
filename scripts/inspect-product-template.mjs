@@ -1,6 +1,9 @@
 // Inspect the live theme's templates/product.json: list sections/blocks and find
 // the price-alert custom_liquid block. Read-only.
-import { getAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
 
 const LIVE_THEME = LIVE_THEME_ID;
 const raw = await getAsset("templates/product.json", LIVE_THEME);

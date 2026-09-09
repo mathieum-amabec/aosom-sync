@@ -1,5 +1,8 @@
 // Phase 6 C3 — final preview-theme audit. Read-only. Checks every homepage + PDP item.
-import { getAsset, gql, rest, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, gql, rest, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 const T = DRAFT_THEME_ID;
 const A = {};
 for (const k of ["templates/index.json", "sections/header-group.json", "snippets/header-mega-menu.liquid",

@@ -1,5 +1,8 @@
 // Read-only feasibility probe for chantiers 2/3/4.
-import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 const THEME = DRAFT_THEME_ID;
 
 // --- Home page rendered <head>: og:image + meta description ---

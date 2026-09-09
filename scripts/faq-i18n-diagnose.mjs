@@ -1,7 +1,10 @@
 // READ-ONLY diagnostic for the FAQ-renders-in-FR-when-EN bug.
 // Live theme 160606093417 (read only). Writes nothing.
 import { readFileSync } from "node:fs";
-import { LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
 function loadEnv() {
   const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
   const env = {};

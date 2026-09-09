@@ -1,5 +1,8 @@
 // CHANTIER 3 — automated QA across LIVE storefront + PREVIEW theme assets.
-import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 const PREVIEW = DRAFT_THEME_ID;
 const out = [];
 const rec = (status, point, detail) => { out.push({ status, point, detail }); console.log(`${status}  ${point} — ${detail}`); };
