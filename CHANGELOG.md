@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.83.0] - 2026-09-08
+## [0.5.85.0] - 2026-09-08
 
 Theme ids are no longer hardcoded. `getLiveThemeId()`, `getDraftThemeId()` and
 `getBackupThemeId()` read them from `themes.json` on use, so a publish can no longer
@@ -35,6 +35,157 @@ constants to *choose* a target was working from a value nobody had re-read.
   constant. The old default meant that a publish promoting the backup theme turned every
   omitted-argument call into a production edit; that is now structurally impossible.
 - 11 new tests over the resolvers, including the zero-main and multiple-main cases.
+## [0.5.84.0] - 2026-09-08
+
+The ad creative, rebuilt around the three things that were wrong with it: the copy covered the
+product, the animation could not be seen, and every ad used the same eight bars.
+
+### Changed — the copy goes where the product is not
+
+Vision already scores 12 frames per clip; it now also reports which third the PRODUCT occupies,
+and the text band is placed in a different one. The band is capped at 2 lines and under 25% of
+the frame, against v2's 4 lines at 86 px centred on H/2 behind a 0.65 slab covering 46%.
+
+Measured over the three test clips, the centre of the frame — where the product is — came out
+**+105% to +114% brighter**. That number is the product becoming visible again.
+
+### Changed — motion the eye can actually catch
+
+- **Two-stage push-in.** A linear zoom over 15 s measured as nothing in the opening seconds, so
+  it is front-loaded: 0.07 in the first 1.2 s, then 0.06 drifting across the rest. Same end
+  scale, motion moved into the window where a thumb decides.
+- **Word-by-word hook.** The headline assembles itself, one word every 0.1 s.
+- **Gold keyline that wipes its width open** under each message. A solid shape growing reads far
+  better in a feed than text changing opacity.
+- **One-frame white flash** at each message change.
+
+Total inter-frame motion is **+73% to +97%**.
+
+### Removed — the 0.8 s black opening card
+
+On a muted autoplay feed that was 40% of the two-second window spent showing nothing. The ad now
+opens on footage, already pushing in, first word at 0.15 s. Mean luminance over the first two
+seconds went **+72% to +97%**.
+
+An honest note on measurement: v2 scored *higher* on raw inter-frame difference in 0-2 s. That
+was one frame — the cut out of black spikes to 38.0 against v3's 12.5 — not sustained motion.
+Inter-frame difference rewards hard cuts, so the totals above are the meaningful comparison.
+
+### Changed — two music files, many beds
+
+`pickMusic` derives track × start offset (8 entry points) × tempo (0.94-1.08) from the SKU hash.
+Deterministic, so a re-render is identical. The offset does most of the work: the same bed
+starting at 0 s and at 36 s does not sound like the same music. The three test clips came out at
+mean −23.3, −24.9 and −28.5 dB.
+
+### Fixed — every hook word was drawn on top of the others
+
+`drawtext` centres each draw independently, so giving every word `x=(w-text_w)/2` stacked the
+whole headline on one spot. ffmpeg cannot be asked how wide the previous words were, so
+`layoutWords` computes the line breaks and absolute x positions here and hands over fixed pixels.
+There is a test asserting the x values are distinct and left-to-right.
+
+### Fixed — a regex that split on the letter "s"
+
+`split(/s+/)` instead of `split(/\s+/)` made the hook a single 40-character "word". Two composer
+tests caught it before it shipped.
+
+### Verified
+
+| SKU | zone produit | segment | bed | texte |
+|---|---|---|---|---|
+| `836-068WT` | bottom → copy en haut | 7-27 s | joyinsound @6 s ×0.98 | 72/60/72/60 px |
+| `833-804WT` | middle → copy en bas | 0-19.9 s | sigmamusicart @36 s ×1.06 | 72/72/72/60 px |
+| `D04-169` | bottom → copy en haut | 6-26 s | joyinsound @0 s ×1.08 | 72/72/72/66 px |
+
+All 15.00 s, 1080×1920, H.264. In `C:\Users\vente\Downloads\test-videos-v3\`.
+
+### Still true
+
+`D04-169`'s clip shows a MacBook and a corgi, not the dog sofa the SKU sells. Vision keeps
+saying so. The footage is mismatched to the product and no amount of creative fixes that.
+
+## [0.5.83.0] - 2026-09-07
+
+Sequential ads stop guessing. Claude Vision picks which seconds of the clip to show, Haiku
+writes copy for the individual product, and the text moves.
+
+### Added — `analyzeClip` (`src/lib/video-scene-selector.ts`)
+
+Scores 12 frames across the clip with Claude Vision and returns the best 15-20 s window. The
+renderer used to hard-code `-ss 3` and take whatever came next, which on a real customer reel
+is a coin flip: UGC opens on a hand reaching for a box, cuts to a spec card, and shows the
+assembled product somewhere in the middle.
+
+Never throws on a scoring failure — an unreadable frame is dropped, and a clip where every
+frame fails still returns a usable window. `bestWindow` slides a candidate start over a
+0.25 s grid rather than walking frame indices, because frames go missing exactly when the
+clip is patchy and the choice matters most. Ties go to the earliest window: the sooner the
+product is on screen, the better.
+
+### Added — `generateVideoCopy` (`src/lib/video-copy-generator.ts`)
+
+One hook per SKU, written by Haiku from the product's own FR title, price and category, on the
+campaign's angle (autumn = comfort, winter = gift, pets = the animal's own comfort). The old
+`CAMPAIGN_COPY` gave all 29 autumn ads the same four lines.
+
+Duplicate hooks are both discouraged in the prompt and **rejected after the fact**: the
+instruction alone is not enough, since models converge on the same phrasing for similar
+products. A collision retries once, then falls back. The price line is the one message never
+improvised — if the model drops the figure, it is rebuilt from the product.
+
+### Added — 0.8 s hook card, animated text, dynamic scrim
+
+Black card with the hook fading in over 0.3 s, then a **hard cut** to footage. Messages are
+timed 0-3 / 3-8 / 8-12 / 12-15 s and each moves: hook slides up (0.4 s, ease-out), benefit
+fades, price pops from 0.8 to 1.0 scale, CTA slides in from the right.
+
+Scrim is 0.2 over the whole frame, with a band under the text zone that ramps to a composited
+0.65 in 0.2 s. `drawbox`'s alpha cannot be animated (`black@'min(1,t)'` is rejected outright),
+so the band is an overlay faded with `fade=alpha=1`.
+
+### Fixed — an animated `fontsize` SEGFAULTS ffmpeg 8.1.1
+
+The obvious way to write the price pop is `fontsize='72*(0.8+0.2*…)'`. drawtext accepts it —
+`-h filter=drawtext` marks fontsize timeline-evaluated — and then **crashes partway through
+the encode**, exit 139, at every preset, with an empty stderr and a truncated MP4. The
+identical graph with a constant fontsize encodes clean. drawtext reallocates its glyph cache
+on a per-frame size change and does not survive it.
+
+The pop is now 5 constant-size draws over the same 0.3 s. Same effect on screen, no per-frame
+resize. There is a comment in the renderer saying not to "simplify" it back.
+
+Two things made this findable and are kept: ffmpeg's stderr is now surfaced in the thrown
+error instead of the command line, and the 4 KB filtergraph goes through
+`-filter_complex_script` instead of one enormous argv entry.
+
+### Added — `--out <dir>`, `--no-analyze`, `--no-ai-copy`, `SEQ_KEEP_GRAPH`
+
+`--out` renders to disk and stops: no Blob upload, no queue row, for reviewing a creative
+before committing a campaign to the store. The two `--no-*` flags skip the paid steps for a
+cheap re-render. `SEQ_KEEP_GRAPH=1` leaves the filtergraph on disk, which is the only way to
+debug a 4 KB graph of time expressions.
+
+Vision runs on `--apply` only: 12 calls per clip is real money and a dry-run exists to check
+copy and slots.
+
+### Verified on three clips
+
+| SKU | campagne | segment retenu | score | hook généré |
+|---|---|---|---|---|
+| `836-068WT` | automne | 7-27 s | 4.89/10 | TON BUREAU EST TROP PETIT POUR TOUT |
+| `833-804WT` | maison | 0-19.9 s | 6.75/10 | VOTRE SALON ATTEND CETTE TABLE DEPUIS UN AN |
+| `D04-169` | animaux | 6-26 s | 4.89/10 | TON CHIEN DORT PAR TERRE AU LIEU DU SOFA |
+
+All three: 15.80 s (0.8 + 15), 1080×1920, music at −30.0 dB. Hook card measures YAVG ≈ 17
+against YAVG 83-95 for the footage, so the cut is doing what it should.
+
+⚠️ Vision's note on `D04-169` says the frame shows "a MacBook with a corgi", not the dog sofa
+the SKU sells. The clip is mismatched to the product — worth checking before that ad runs.
+
+⚠️ The brief asked for Montserrat Bold 52 px on the hook card. No Montserrat is bundled or
+installed here, so it renders in DM Sans, the brand face already used everywhere else.
+
 ## [0.5.82.0] - 2026-09-07
 
 The /sequential-ads list showed 50 of 134 ads and gave no sign of it. Three whole campaigns
