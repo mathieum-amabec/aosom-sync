@@ -36,6 +36,8 @@
  */
 
 // ── geometry ──────────────────────────────────────────────────────────────
+import onsets from "@/lib/audio-onsets.json";
+
 export const W = 1080;
 export const H = 1920;
 /** Brand bar height, kept from the existing creative. */
@@ -103,6 +105,10 @@ export interface MusicChoice {
   family?: string;
   /** Level-matching multiplier applied on top of the base volume. */
   gain: number;
+  /** True when a detected accent lands on the price pop. */
+  beatAligned?: boolean;
+  /** Signed distance, in seconds, from the nearest accent to the pop. */
+  alignErrorSec?: number;
 }
 
 /**
@@ -156,6 +162,31 @@ export const TRACK_GAIN: Record<string, number> = {
   "mixkit-funk-1140.mp3": 2.85,
 };
 
+/**
+ * Strong beats per track, from scripts/analyze-audio-onsets.mts.
+ *
+ * Regenerate after adding or replacing a bed:
+ *   FFMPEG_BIN=… node-x64 node_modules/tsx/dist/cli.mjs scripts/analyze-audio-onsets.mts --dir … --apply
+ *
+ * Hand-editable on purpose: an operator who dislikes a chosen accent can delete that entry
+ * and the picker moves to the next one.
+ */
+export const TRACK_ONSETS: Record<string, { t: number; s: number }[]> = onsets as Record<
+  string,
+  { t: number; s: number }[]
+>;
+
+/**
+ * The moment the music should hit: the price pop, which is the strongest visual beat in the
+ * ad. WINDOWS[2][0] rather than a literal, so retiming the messages cannot silently
+ * decouple the audio from the thing it is aligned to.
+ */
+export const ANCHOR_SEC = WINDOWS[2][0];
+/** How close an accent must land to count as aligned. */
+export const ALIGN_TOLERANCE_SEC = 0.15;
+/** Entry points must stay inside the analysed part of the track. */
+export const MAX_START_OFFSET = 40;
+
 /** Fallback family when the product type is unknown or matches nothing. */
 export const DEFAULT_FAMILY = "exterieur";
 
@@ -200,10 +231,41 @@ export function pickMusic(sku: string, available: string[], productType?: string
 
   const h = hashSku(sku);
   const track = pool[h % pool.length];
-  // 8 distinct entry points, 6 s apart, well inside a typical 90 s-3 min bed.
-  const startOffset = ((h >>> 8) % 8) * 6;
   // 8 tempo steps across 0.94-1.08.
   const tempo = Number((0.94 + ((h >>> 16) % 8) * 0.02).toFixed(2));
+
+  // ── entry point, aligned to a beat ────────────────────────────────────
+  // The old rule was a multiple of 6 s from the hash: deterministic, varied, and blind to
+  // both the music and the picture. The music now enters so that a detected accent lands on
+  // the price pop — the ad's strongest visual beat — instead of arriving between two.
+  //
+  // The mapping: at playback rate `tempo`, ad time T sits at music time
+  //   startOffset + T * tempo
+  // so putting accent `a` on the pop means startOffset = a - ANCHOR_SEC * tempo. Every
+  // candidate is therefore aligned BY CONSTRUCTION; the hash only chooses among them, which
+  // keeps the desynchronisation this function existed for in the first place.
+  const accents = TRACK_ONSETS[base(track)] ?? [];
+  const candidates = accents
+    .map((a) => Number((a.t - ANCHOR_SEC * tempo).toFixed(3)))
+    .filter((o) => o >= 0 && o <= MAX_START_OFFSET);
+
+  if (candidates.length) {
+    const startOffset = candidates[h % candidates.length];
+    return {
+      track,
+      startOffset,
+      tempo,
+      family: inFamily.length ? family : `${family} (repli)`,
+      gain: TRACK_GAIN[base(track)] ?? 1,
+      beatAligned: true,
+      alignErrorSec: 0,
+    };
+  }
+
+  // No analysed accent reachable: fall back to the original blind rule rather than refusing
+  // to render. A track with no onsets entry (a bed added without re-running the analysis)
+  // still produces an ad, just an unaligned one, and says so.
+  const startOffset = ((h >>> 8) % 8) * 6;
   return {
     track,
     startOffset,
@@ -211,6 +273,7 @@ export function pickMusic(sku: string, available: string[], productType?: string
     family: inFamily.length ? family : `${family} (repli)`,
     // An unlisted track keeps 1.0 rather than being silently attenuated.
     gain: TRACK_GAIN[base(track)] ?? 1,
+    beatAligned: false,
   };
 }
 
@@ -462,13 +525,26 @@ export function buildAdGraph(o: ComposeOptions): string {
   return parts.join(";");
 }
 
-/** Audio chain: the picked bed, tempo-shifted, ducked and faded. */
+/** How long the tail takes to reach silence. */
+export const FADE_OUT_SEC = 1.6;
+
+/**
+ * Audio chain: the picked bed, tempo-shifted, level-matched and faded.
+ *
+ * FADE SHAPE
+ * The entry point is now chosen so an accent lands ON the price pop, which means accents
+ * also fall near the end — the tail is likelier than before to be cut mid-hit. A linear 1 s
+ * fade leaves most of its level in the last half second, so a hit at 14.6 s still reads as a
+ * chop. `curve=log` sheds level early and arrives at silence flat, and 1.6 s starts the
+ * decay before the last accent can land. Verified by measuring the final 0.5 s.
+ */
 export function buildAudioGraph(idx: number, music: MusicChoice): string {
   // 0.22 is the level the v3 creative was approved at; the per-track gain only brings the
   // rest of the pool up to the two original beds rather than re-tuning the mix.
   const vol = Number((0.22 * (music.gain ?? 1)).toFixed(3));
+  const fadeStart = (DURATION - FADE_OUT_SEC).toFixed(2);
   return (
     `[${idx}:a]atempo=${music.tempo},volume=${vol},` +
-    `afade=t=in:d=0.8,afade=t=out:st=${(DURATION - 1).toFixed(2)}:d=1[aout]`
+    `afade=t=in:d=0.8,afade=t=out:st=${fadeStart}:d=${FADE_OUT_SEC}:curve=par[aout]`
   );
 }

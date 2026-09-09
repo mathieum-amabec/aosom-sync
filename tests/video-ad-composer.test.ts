@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   W, H, BAR_H, DURATION, WINDOWS,
   textBand, gradientRect, hashSku, pickMusic, fitText, layoutWords, textWidth,
-  buildAdGraph, buildAudioGraph, musicFamilyFor, MUSIC_FAMILIES, DEFAULT_FAMILY, TRACK_GAIN, type ProductZone,
+  buildAdGraph, buildAudioGraph, musicFamilyFor, MUSIC_FAMILIES, DEFAULT_FAMILY, TRACK_GAIN, TRACK_ONSETS, ANCHOR_SEC, ALIGN_TOLERANCE_SEC, MAX_START_OFFSET, FADE_OUT_SEC, type ProductZone,
 } from "@/lib/video-ad-composer";
 
 const TRACKS = ["a.mp3", "b.mp3"];
@@ -213,7 +213,7 @@ describe("buildAudioGraph", () => {
   it("applies the picked tempo and fades out before the end", () => {
     const a = buildAudioGraph(1, { track: "x.mp3", startOffset: 12, tempo: 1.04, gain: 1 });
     expect(a).toContain("atempo=1.04");
-    expect(a).toContain(`st=${(DURATION - 1).toFixed(2)}`);
+    expect(a).toContain(`st=${(DURATION - FADE_OUT_SEC).toFixed(2)}`);
     expect(a).toContain("[aout]");
   });
 });
@@ -332,5 +332,99 @@ describe("level matching", () => {
   it("falls back to unity gain for a track with no measurement", () => {
     const a = buildAudioGraph(1, { track: "inconnu.mp3", startOffset: 0, tempo: 1, gain: 1 });
     expect(a).toContain("volume=0.22");
+  });
+});
+describe("beat alignment", () => {
+  const BS2 = String.fromCharCode(92);
+  const POOL = Object.keys(TRACK_ONSETS).map((f) => `C:${BS2}audio${BS2}${f}`);
+  const nameOf = (p: string) => {
+    const k = Math.max(p.lastIndexOf("/"), p.lastIndexOf(BS2));
+    return k >= 0 ? p.slice(k + 1) : p;
+  };
+
+  it("every pooled track has analysed onsets", () => {
+    for (const files of Object.values(MUSIC_FAMILIES)) {
+      for (const f of files) {
+        expect(TRACK_ONSETS[f], `${f} absent de audio-onsets.json`).toBeDefined();
+        expect(TRACK_ONSETS[f].length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  // The whole point: an accent has to land on the price pop, not near it.
+  it("puts a detected accent on the price pop, within tolerance", () => {
+    for (const sku of ["A", "B", "C", "836-068WT", "D04-169", "833-804WT", "370-079BK", "Z9"]) {
+      const m = pickMusic(sku, POOL, "Pet Supplies > Dogs");
+      if (!m.beatAligned) continue;
+      const accents = TRACK_ONSETS[nameOf(m.track)];
+      // Music time under the pop = startOffset + ANCHOR * tempo.
+      const target = m.startOffset + ANCHOR_SEC * m.tempo;
+      const nearest = accents.reduce((best, a) =>
+        Math.abs(a.t - target) < Math.abs(best.t - target) ? a : best, accents[0]);
+      expect(Math.abs(nearest.t - target), `${sku}: écart ${(nearest.t - target).toFixed(3)}s`)
+        .toBeLessThanOrEqual(ALIGN_TOLERANCE_SEC);
+    }
+  });
+
+  it("no longer lands on a blind multiple of 6 s", () => {
+    const offsets = ["A", "B", "C", "D", "E", "F"].map(
+      (s) => pickMusic(s, POOL, "Office Products > Desks").startOffset,
+    );
+    // The old rule could only ever produce 0/6/12/…; at least one must now be off-grid.
+    expect(offsets.some((o) => Math.abs(o % 6) > 0.05)).toBe(true);
+  });
+
+  it("keeps the entry point inside the analysed window", () => {
+    for (const sku of ["A", "B", "C", "D", "E", "F", "G", "H"]) {
+      for (const pt of ["Pet Supplies", "Toys & Games", "Office Products", "Home Furnishings", "Patio & Garden"]) {
+        const m = pickMusic(sku, POOL, pt);
+        expect(m.startOffset).toBeGreaterThanOrEqual(0);
+        expect(m.startOffset).toBeLessThanOrEqual(MAX_START_OFFSET);
+      }
+    }
+  });
+
+  it("still varies the entry point across SKUs in one family", () => {
+    const offsets = new Set(
+      ["A", "B", "C", "D", "E", "F", "G", "H"].map((s) => pickMusic(s, POOL, "Toys & Games").startOffset),
+    );
+    expect(offsets.size).toBeGreaterThanOrEqual(4);
+  });
+
+  it("stays deterministic", () => {
+    expect(pickMusic("836-068WT", POOL, "Office Products")).toEqual(
+      pickMusic("836-068WT", POOL, "Office Products"),
+    );
+  });
+
+  // A bed added without re-running the analysis must still render, just unaligned.
+  it("falls back to the blind rule for a track with no onsets, and says so", () => {
+    const m = pickMusic("X", [`C:${BS2}audio${BS2}piste-non-analysee.mp3`], "Pet Supplies");
+    expect(m.beatAligned).toBe(false);
+    expect(m.startOffset % 6).toBe(0);
+  });
+
+  it("anchors on the price-pop window rather than a hard-coded 7.5", () => {
+    expect(ANCHOR_SEC).toBe(WINDOWS[2][0]);
+  });
+});
+
+describe("fade-out", () => {
+  it("uses the measured curve and reaches silence before the cut", () => {
+    const a = buildAudioGraph(1, { track: "mixkit-funk-1140.mp3", startOffset: 0, tempo: 1, gain: 1 });
+    // `log` was the first pick and measured -12 dB at 14.9 s — it barely faded.
+    expect(a).not.toContain("curve=log");
+    expect(a).toContain("curve=par");
+    expect(a).toContain(`st=${(DURATION - FADE_OUT_SEC).toFixed(2)}`);
+  });
+
+  it("starts the fade before the ad ends, with room for a late accent", () => {
+    expect(FADE_OUT_SEC).toBeGreaterThanOrEqual(1.2);
+    expect(DURATION - FADE_OUT_SEC).toBeGreaterThan(WINDOWS[3][0]);
+  });
+
+  it("keeps the level compensation after the fade change", () => {
+    const a = buildAudioGraph(1, { track: "mixkit-funk-1140.mp3", startOffset: 0, tempo: 1, gain: 2.85 });
+    expect(a).toContain("volume=0.627");
   });
 });

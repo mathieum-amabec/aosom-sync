@@ -708,7 +708,7 @@ async function renderAdV3(
       "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", outFile,
     ];
     console.log(
-      `  ${sku} bed: ${path.basename(music.track)} @${music.startOffset}s tempo=${music.tempo} | famille=${music.family} | zone=${zone} | texte ${sizes.join("/")}px`,
+      `  ${sku} bed: ${path.basename(music.track)} @${music.startOffset}s tempo=${music.tempo} | famille=${music.family} | calage=${music.beatAligned ? "beat" : "aveugle"} | zone=${zone} | texte ${sizes.join("/")}px`,
     );
     try {
       execFileSync(FFMPEG, args, { stdio: ["ignore", "ignore", "pipe"] });

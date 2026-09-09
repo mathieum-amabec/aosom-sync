@@ -2,6 +2,62 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.86.0] - 2026-09-08
+
+The music now enters so a detected accent lands on the price pop, instead of at a blind
+multiple of 6 s.
+
+### Added — onset detection, no new dependency
+
+`scripts/analyze-audio-onsets.mts` decodes each bed to mono PCM through the ffmpeg the
+renderer already requires, takes the RMS of every 512-sample hop and keeps the positive first
+difference — energy going up is what an onset is. Peaks above mean + 1.6 sd, 250 ms minimum
+spacing, strongest 28 kept per track. Result goes to `src/lib/audio-onsets.json`.
+
+Chosen over the brief's other option (4-5 hand-picked timestamps per track) because it is
+re-runnable when a bed is added, which hand-annotation is not — and it still produces a plain
+JSON an operator can trim or override, which a library's internal state is not.
+
+Sanity check the script prints: median onset interval as BPM. Measured 81, 108, 117, 123, 136
+and 185 — a musical range. (185 is double-time on a ~92 BPM bed; only onset positions matter.)
+
+### Changed — the entry point is now derived from the beat
+
+At playback rate `tempo`, ad time T sits at music time `startOffset + T * tempo`, so putting
+accent `a` on the pop means `startOffset = a - ANCHOR_SEC * tempo`. Every candidate is
+therefore aligned **by construction**; the hash only chooses among them, which keeps the
+desynchronisation the function existed for. `ANCHOR_SEC` reads `WINDOWS[2][0]` rather than a
+literal 7.5, so retiming the messages cannot silently decouple the audio from its anchor.
+
+A bed with no analysed onsets falls back to the old 6 s rule and reports `calage=aveugle`
+rather than refusing to render.
+
+### Fixed — the fade-out barely faded
+
+The first pick was `curve=log`, which sounds right and is not: measured on a real render it
+was still at −12 dB 0.1 s before the cut. Curves were then measured rather than guessed,
+sampling the tail at 13.5/14.0/14.4/14.7/14.9 s:
+
+| curve | 13.5 | 14.0 | 14.4 | 14.7 | 14.9 |
+|---|---:|---:|---:|---:|---:|
+| log | −9.3 | −9.8 | −10.2 | −14.8 | −12.1 |
+| squ | −9.6 | −11.5 | −14.1 | −20.7 | −22.8 |
+| tri | −10.0 | −13.6 | −18.9 | −28.0 | −36.1 |
+| **par** | **−12.3** | **−17.7** | **−24.1** | **−33.6** | **−42.1** |
+| exp | −18.3 | −47.3 | −76.3 | −90.3 | −91.0 |
+
+`par` over 1.6 s starts shedding before a late accent can land and arrives at silence. This
+matters more than it did: aligning to accents also puts accents near the tail.
+
+On real renders the tail now reads −33.6 / −50.3 dB and −26.5 / −42.2 dB at 14.5 / 14.9 s,
+and the global level stays at −24.0 / −24.2 dB — the −10.5 dB source normalisation holds.
+
+### Note — `atempo` changes stream length
+
+At tempo 1.08, 15 s of source becomes 13.9 s of output. `-stream_loop -1` on the music input
+already covers it, but an isolated test without the loop silently produces a short file. Worth
+knowing before anyone removes the loop.
+
 ## [0.5.85.0] - 2026-09-08
 
 Six music beds instead of two, chosen by what the product is rather than by hash across the
