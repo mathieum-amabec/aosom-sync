@@ -1,5 +1,8 @@
 // CHANTIER 1 — read-only final visual audit of the preview theme.
-import { getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 const P = DRAFT_THEME_ID;
 const targets = [
   "templates/index.json",

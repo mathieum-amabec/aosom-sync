@@ -1,5 +1,9 @@
 // Read-only pre-publish audit: preview 160213696617 vs live 160059195497.
-import { rest, getAsset, DRAFT_THEME_ID, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, getDraftThemeId, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
+const LIVE_THEME_ID = await getLiveThemeId();
 const PREVIEW = DRAFT_THEME_ID, LIVE = LIVE_THEME_ID;
 const get = (k, th) => getAsset(k, th).catch(() => null);
 

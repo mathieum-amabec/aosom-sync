@@ -20,7 +20,11 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { getLiveThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
+const DRAFT_THEME_ID = await getDraftThemeId();
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const THEME_ID = DRAFT_THEME_ID;

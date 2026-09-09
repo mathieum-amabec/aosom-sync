@@ -1,7 +1,11 @@
 // Read-only gate: verify the real theme roles before any write this session.
 // User-stated invariant: draft 160606093417 = ONLY write target; live 160584859753 = NEVER touch.
 // The stale constants in _shopify-lib.mjs (160213696617/160059195497) are NOT trusted here.
-import { rest, DRAFT_THEME_ID, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getDraftThemeId, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
+const LIVE_THEME_ID = await getLiveThemeId();
 
 const DRAFT = DRAFT_THEME_ID;
 const LIVE = LIVE_THEME_ID;

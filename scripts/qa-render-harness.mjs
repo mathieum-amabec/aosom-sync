@@ -2,7 +2,10 @@
 // verbatim, wrap faithful 6-card markup, and emit two standalone HTML files that
 // force each JS branch deterministically (matchMedia stubbed) so headless Chromium
 // can exercise desktop hover-to-play and mobile/tablet autoplay without a live theme.
-import { getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 import { writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

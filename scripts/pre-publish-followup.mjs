@@ -1,4 +1,8 @@
-import { getAsset, DRAFT_THEME_ID, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, getDraftThemeId, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
+const LIVE_THEME_ID = await getLiveThemeId();
 const PREVIEW = DRAFT_THEME_ID, LIVE = LIVE_THEME_ID;
 
 // 1. header-group diff — what menu does each use + announcement

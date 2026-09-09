@@ -1,7 +1,11 @@
 // Apply the gold "-X%" discount badge to snippets/card-product.liquid on the DRAFT.
 // Guards against writing to the live theme; backs up; asserts exact replacement
 // counts; verifies after write. Run under node-x64.
-import { rest, DRAFT_THEME_ID, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getDraftThemeId, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
+const LIVE_THEME_ID = await getLiveThemeId();
 import { mkdirSync, writeFileSync } from "node:fs";
 
 const DRAFT = DRAFT_THEME_ID;

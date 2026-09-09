@@ -1,6 +1,10 @@
 // Set shop-level SEO metafields (description_tag, og_image) and verify the
 // rendered home <head>. Shop metafields are easily reversible (DELETE).
-import { rest, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getLiveThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
+const DRAFT_THEME_ID = await getDraftThemeId();
 
 const META_DESC = "Aménagez votre patio et votre jardin pour l'été québécois : mobilier d'extérieur, BBQ, déco et accessoires, livrés gratuitement partout au Canada.";
 

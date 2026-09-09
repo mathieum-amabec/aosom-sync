@@ -1,6 +1,10 @@
 // feature/video-section-fix — reposition "Voyez-le chez vous" + desktop hover-to-play perf fix.
 // PREVIEW theme only (160213696617). Live (160059195497 / role:main) is guarded and untouched.
-import { rest, getAsset, putAsset, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, putAsset, getLiveThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
+const DRAFT_THEME_ID = await getDraftThemeId();
 const LIVE = LIVE_THEME_ID, PREVIEW = DRAFT_THEME_ID;
 if (PREVIEW === LIVE) throw new Error("ABORT: preview === live");
 

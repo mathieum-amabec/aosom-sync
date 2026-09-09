@@ -1,6 +1,9 @@
 // FIX 1 (hero desktop space), FIX 3 (Sale section), FIX 2+4 (loop injector + hide counter)
 // on preview copy theme 160059195497.
-import { getAsset, putAsset, PREVIEW_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, putAsset, getPreviewThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const PREVIEW_THEME_ID = await getPreviewThemeId();
 import { writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";

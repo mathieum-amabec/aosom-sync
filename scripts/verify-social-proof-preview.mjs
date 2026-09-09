@@ -1,4 +1,7 @@
-import { getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 const PREVIEW = DRAFT_THEME_ID;
 const idx = JSON.parse(await getAsset("templates/index.json", PREVIEW));
 const get = (s) => idx.sections[s].settings.custom_liquid;

@@ -1,6 +1,9 @@
 // Read-only: list draft asset keys + dump the assets relevant to this fix session
 // to a local scratch dir for inspection. Draft theme ONLY.
-import { rest, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 import { mkdirSync, writeFileSync } from "node:fs";
 
 const DRAFT = DRAFT_THEME_ID;

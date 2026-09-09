@@ -3,7 +3,11 @@
 //  C2a: remove the redundant 3rd carousel featured_collection1 (Mobilier extérieur,
 //       93% overlap with Coups de cœur).
 //  C2b: cut "livraison gratuite" repetition (keep lc_hero + lc_trustbar; why_us icon left).
-import { rest, getAsset, putAsset, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, putAsset, getLiveThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
+const DRAFT_THEME_ID = await getDraftThemeId();
 
 const LIVE = LIVE_THEME_ID;
 const PREVIEW = DRAFT_THEME_ID;

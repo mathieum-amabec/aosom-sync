@@ -7,7 +7,11 @@
 // Gated: refuses unless the draft is unpublished and the live theme (LIVE_THEME_ID) is main.
 // Dry-run by default; pass --apply to PUT.
 import { readFileSync } from "node:fs";
-import { LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { getLiveThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
+const DRAFT_THEME_ID = await getDraftThemeId();
 function loadEnv() {
   const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
   const env = {};
