@@ -620,6 +620,7 @@ async function renderAdV3(
   lib: Lib,
   segment?: { startTime: number; endTime: number },
   zone: "top" | "middle" | "bottom" = "middle",
+  productType?: string | null,
 ): Promise<void> {
   const C = await import("@/lib/video-ad-composer");
   const sharp = (await import("sharp")).default;
@@ -677,7 +678,8 @@ async function renderAdV3(
       ? fs.readdirSync(process.env.SEQ_MUSIC_DIR).filter((f) => f.endsWith(".mp3")).map((f) => path.join(process.env.SEQ_MUSIC_DIR as string, f))
       : [MUSIC]
     ).sort();
-    const music = C.pickMusic(sku, tracks);
+    // Family by product taxonomy, then the same hash desynchronisation inside it.
+    const music = C.pickMusic(sku, tracks, productType);
 
     const videoGraph = C.buildAdGraph({
       fontFile: FONT,
@@ -706,7 +708,7 @@ async function renderAdV3(
       "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", outFile,
     ];
     console.log(
-      `  ${sku} bed: ${path.basename(music.track)} @${music.startOffset}s tempo=${music.tempo} | zone=${zone} | texte ${sizes.join("/")}px`,
+      `  ${sku} bed: ${path.basename(music.track)} @${music.startOffset}s tempo=${music.tempo} | famille=${music.family} | zone=${zone} | texte ${sizes.join("/")}px`,
     );
     try {
       execFileSync(FFMPEG, args, { stdio: ["ignore", "ignore", "pipe"] });
@@ -913,7 +915,7 @@ async function main(): Promise<void> {
           }
           if (!APPLY) { report.push({ sku, title, status: "dry-run" }); continue; }
           if (USE_V2) renderDemandGen(sku, out, msgs, segment);
-          else await renderAdV3(sku, out, msgs, lib, segment, zone);
+          else await renderAdV3(sku, out, msgs, lib, segment, zone, (p?.product_type ?? null) as string | null);
         }
         if (OUT_DIR) {
           fs.mkdirSync(OUT_DIR, { recursive: true });
