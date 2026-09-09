@@ -1,6 +1,9 @@
 // B4 read-only scan: real active product count + every "500" occurrence in the
 // PREVIEW theme assets, with context (to find the social-proof numbers).
-import { rest, getAsset, sleep, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, sleep, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 const PREVIEW = DRAFT_THEME_ID;
 
 // 1. Active product count

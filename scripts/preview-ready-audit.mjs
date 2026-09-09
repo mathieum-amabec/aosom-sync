@@ -1,6 +1,9 @@
 // Read-only audit of preview theme 160213696617 for the pre-publish checklist.
 // Pure Shopify Admin API reads — touches no git state.
-import { rest, getAsset, gql, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, gql, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 const P = DRAFT_THEME_ID;
 
 const out = {};

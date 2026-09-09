@@ -5,7 +5,11 @@
 // `main-menu` would change the LIVE storefront. Instead we create a SEPARATE
 // `preview-main-menu` and point ONLY the preview theme's header at it; live keeps
 // using `main-menu`, untouched. Idempotent.
-import { gql, sleep, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { gql, sleep, getLiveThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
+const DRAFT_THEME_ID = await getDraftThemeId();
 import { rest } from "./_shopify-lib.mjs";
 
 const THEME = DRAFT_THEME_ID;

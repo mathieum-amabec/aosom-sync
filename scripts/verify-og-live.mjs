@@ -1,4 +1,7 @@
-import { getAsset, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
 const LIVE = LIVE_THEME_ID;
 
 const s = await getAsset("snippets/meta-tags.liquid", LIVE);

@@ -1,5 +1,8 @@
 // Chantier 4 — verify the catalog-fit uniform menu + hero buttons (read-only).
-import { getAsset, gql, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, gql, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 const T = DRAFT_THEME_ID;
 let ok = 0, bad = 0;
 const check = (l, c, d = "") => { console.log(`${c ? "✅" : "❌"} ${l}${d ? " — " + d : ""}`); c ? ok++ : bad++; };

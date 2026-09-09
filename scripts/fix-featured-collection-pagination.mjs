@@ -1,7 +1,11 @@
 // P0 fix on PREVIEW theme 160213696617: the `where: 'available'` array is not
 // paginateable. Restore pagination over collection.products and move the availability
 // check INSIDE the loop. HARD GUARD: preview-only.
-import { rest, getAsset, putAsset, LIVE_THEME_ID, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, putAsset, getLiveThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const LIVE_THEME_ID = await getLiveThemeId();
+const DRAFT_THEME_ID = await getDraftThemeId();
 
 const LIVE = LIVE_THEME_ID;
 const PREVIEW = DRAFT_THEME_ID;

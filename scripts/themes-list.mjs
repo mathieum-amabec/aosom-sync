@@ -1,5 +1,9 @@
 // ÉTAPE 1 — read-only: list all themes with id/name/role. Does NOT publish anything.
-import { rest, DRAFT_THEME_ID, LIVE_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getDraftThemeId, getLiveThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
+const LIVE_THEME_ID = await getLiveThemeId();
 const themes = (await (await rest("/themes.json")).json()).themes;
 for (const t of themes) console.log(`${t.id}\t[${t.role}]\t${t.name}`);
 console.log("\n--- GATE CHECK ---");

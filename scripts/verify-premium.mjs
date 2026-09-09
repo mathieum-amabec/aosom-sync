@@ -1,4 +1,7 @@
-import { rest, getAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { rest, getAsset, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 const PREVIEW = DRAFT_THEME_ID;
 const handles = ["meubles-et-decorations", "mobiliers-exterieurs-et-jardins", "chaises-et-tables-de-patio-1", "jardinage-et-serres", "accessoires-pour-animaux", "sports-et-loisirs"];
 const rec = (ok, label, detail) => console.log(`${ok ? "✅" : "❌"} ${label} — ${detail}`);

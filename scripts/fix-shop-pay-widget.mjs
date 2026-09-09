@@ -5,7 +5,10 @@
 //  - Enlarge the NATIVE <shopify-payment-terms> widget so the real installment
 //    amounts (rendered by Shopify) are prominent.
 // Target: theme 160059195497 (role: main / published / live).
-import { getAsset, putAsset, DRAFT_THEME_ID } from "./_shopify-lib.mjs";
+import { getAsset, putAsset, getDraftThemeId } from "./_shopify-lib.mjs";
+
+// Theme ids are resolved from themes.json at run time — never hardcoded.
+const DRAFT_THEME_ID = await getDraftThemeId();
 
 const THEME = DRAFT_THEME_ID;
 const KEY = "templates/product.json";

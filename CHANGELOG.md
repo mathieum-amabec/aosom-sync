@@ -2,6 +2,83 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.86.0] - 2026-09-08
+
+Theme ids are no longer hardcoded. `getLiveThemeId()`, `getDraftThemeId()` and
+`getBackupThemeId()` read them from `themes.json` on use, so a publish can no longer
+leave a constant pointing at the wrong theme.
+
+### Fixed — the constants went stale on every publish
+
+`LIVE_THEME_ID` / `DRAFT_THEME_ID` / `BACKUP_THEME_ID` had to be re-pointed by hand after
+each publish; PRs #411, #424 and #441 exist only to do that. Between a publish and its
+re-point PR, `LIVE_THEME_ID` names a theme that is no longer live — and a checkout that
+predates the re-point carries those wrong ids indefinitely. The write guard itself has
+asked Shopify since #433, so production was not reachable, but anything reading the
+constants to *choose* a target was working from a value nobody had re-read.
+
+### Added
+
+- `getLiveThemeId()` — the single `role: "main"` theme. Throws, listing every theme, when
+  zero or more than one claims it, rather than handing back a guess.
+- `getDraftThemeId()` / `getBackupThemeId()` — newest and second-newest `unpublished` by
+  `updated_at`. Names are useless here (the live theme is called "DRAFT DE TRAVAIL"), so
+  recency is the only signal; when the top two share a timestamp they throw with the full
+  list and take an explicit `{ themeId }` instead of coin-flipping.
+- `listThemes()` — one cached `themes.json` fetch per process, now shared with
+  `themeRoles()` instead of each doing its own request.
+
+### Changed
+
+- 71 scripts migrated off the constants to the resolvers.
+- `getAsset` / `putAsset` default to the resolved DRAFT instead of the `BACKUP_THEME_ID`
+  constant. The old default meant that a publish promoting the backup theme turned every
+  omitted-argument call into a production edit; that is now structurally impossible.
+- 11 new tests over the resolvers, including the zero-main and multiple-main cases.
+Six music beds instead of two, chosen by what the product is rather than by hash across the
+whole catalog.
+
+### Added — music families keyed to the product taxonomy
+
+Hashing across the catalog spreads beds evenly, which is exactly wrong for a brand: someone
+who sees five of our ads should hear a category, not a shuffle. The family is picked from
+`product_type`; the hash then desynchronises WITHIN it, the same trick one level down.
+
+| famille | piste | product_type |
+|---|---|---|
+| exterieur | joyinsound + sigmamusicart *(inchangé)* | `Patio & Garden%` |
+| interieur | `mixkit-lounge-695` | `Home Furnishings%` |
+| bureau | `mixkit-corporate-22` | `Office Products%` + `Storage & Organization` |
+| enfants | `mixkit-pop-250` | `Toys & Games%` |
+| animaux | `mixkit-funk-1140` | `Pet Supplies%` |
+
+Outdoor keeps the two original beds: that is what every published patio ad already sounds
+like. Storage lives under `Home Furnishings`, so the `bureau` test runs before `interieur`;
+a test pins that order.
+
+The four new tracks are Mixkit, all carrying the **Free License** (commercial use including
+online ads and social media marketing, no attribution). Verified per track rather than by
+reputation — Mixkit mixes Free and Restricted in one catalog. On each genre page the track
+count equals the "Free License" count and "Restricted License" appears zero times:
+corporate-music 36/36/0, lounge 32/32/0, pop 36/36/0, funk 31/31/0.
+
+### Fixed — the pool was not level-matched
+
+Measured across the eight entry points, joyinsound sits at −9.3 dB and mixkit-funk-1140 at
+−19.6 dB, and the code applied a flat `volume=0.22`. A pet ad came out roughly half as loud as
+a patio ad — a category identity must not also be a volume difference.
+
+`TRACK_GAIN` nudges each track toward a −10.5 dB reference, the level the two original beds
+already average, so the approved creative barely moves. Output spread went **5.3 dB → 3.1 dB**.
+
+### Fixed — the filename helper only split on "/"
+
+It came out of a patch as `split(/[\/]/)`, which misses the backslashes `path.join` produces on
+Windows, so every family silently fell back to the whole pool. The helper is now regex-free,
+and the test fixture uses Windows paths — with forward slashes it passed while broken.
+
+The mp3s are gitignored, so a family whose file is absent falls back to the whole pool and
+says so in the render log rather than crashing a clone that never downloaded them.
 ## [0.5.85.0] - 2026-09-08
 
 Six music beds instead of two, chosen by what the product is rather than by hash across the
