@@ -47,6 +47,8 @@ const CLIPS_FILE = flag("--clips") ?? "pocB-selected.json";
 interface Clip {
   sku: string;
   product_type: string;
+  /** Music family, only to label the output file so a batch is sortable by ear. */
+  family?: string;
   /** Generic category wording. NEVER the product name — that is the whole rule here. */
   caption: string;
   /** Seconds into the source where Vision saw assembly. */
@@ -132,7 +134,7 @@ async function main(): Promise<void> {
       const graphFile = `${dir}/graph.txt`;
       fs.writeFileSync(graphFile, graph, "utf8");
 
-      const out = path.join(OUT_DIR, `ASM-${safe}.mp4`);
+      const out = path.join(OUT_DIR, `ASM-${c.family ?? music.family.split(" ")[0]}-${safe}.mp4`);
       const args = [
         "-y", "-nostdin", "-loglevel", "error",
         "-ss", String(start), "-t", String(length), "-i", src,
