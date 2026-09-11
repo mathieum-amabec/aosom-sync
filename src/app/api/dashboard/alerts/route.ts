@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
 import { env } from "@/lib/config";
 import { getDailyLlmTokensUsed, getDashboardAlerts } from "@/lib/database";
-import { poolBudget, type BudgetPool } from "@/lib/llm-budget";
+import { poolBudget } from "@/lib/llm-budget";
 import { getTokenInfo } from "@/lib/meta-ads-client";
 import { llmPoolStatus, tokenExpiryStatus, type LlmPoolStatus, type TokenExpiryState } from "@/lib/dashboard-metrics";
 
