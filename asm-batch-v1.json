@@ -1,0 +1,72 @@
+[
+ {
+  "sku": "845-030GY",
+  "family": "exterieur",
+  "product_type": "Patio & Garden > Lawn & Garden > Sheds",
+  "at": 45,
+  "caption": "on monte le cabanon 🔨"
+ },
+ {
+  "sku": "01-0893",
+  "family": "exterieur",
+  "product_type": "Patio & Garden > Patio Furniture > Outdoor Gliders",
+  "at": 113,
+  "caption": "la balancelle, étape par étape ☀️"
+ },
+ {
+  "sku": "836-068WT",
+  "family": "bureau",
+  "product_type": "Office Products > Office Furniture > Office Desks & Work Stations",
+  "at": 24,
+  "caption": "on monte le bureau 💪"
+ },
+ {
+  "sku": "837-398V80AK",
+  "family": "bureau",
+  "product_type": "Office Products > Storage & Organization > Shoe Storage Cabinets & Racks",
+  "at": 3,
+  "caption": "prêt pour le meuble à chaussures ? 👟"
+ },
+ {
+  "sku": "838-509V80WT",
+  "family": "bureau",
+  "product_type": "Office Products > Storage & Organization > Storage Cabinets",
+  "at": 3,
+  "caption": "on monte l'armoire de rangement 🧰"
+ },
+ {
+  "sku": "83A-058V80WT",
+  "family": "interieur",
+  "product_type": "Home Furnishings > Kitchen & Dining Furniture > Bar Cabinets",
+  "at": 38,
+  "caption": "on monte le buffet 🔧"
+ },
+ {
+  "sku": "839-281",
+  "family": "interieur",
+  "product_type": "Home Furnishings > Living Room Furniture > TV Stands",
+  "at": 5,
+  "caption": "meuble télé : on s'y met 📺"
+ },
+ {
+  "sku": "839-135WT",
+  "family": "interieur",
+  "product_type": "Home Furnishings > Living Room Furniture > Coffee Tables",
+  "at": 11,
+  "caption": "on monte la table de salon ☕"
+ },
+ {
+  "sku": "D31-078V01RB",
+  "family": "animaux",
+  "product_type": "Pet Supplies > Cats > Cat Litter Box Enclosures",
+  "at": 3,
+  "caption": "on monte l'arbre à chat 🐾"
+ },
+ {
+  "sku": "3D0-008",
+  "family": "enfants",
+  "product_type": "Toys & Games > Baby & Toddler Toys > Kids Gym & Playmats",
+  "at": 14,
+  "caption": "on monte le module de jeu et hop 🧸"
+ }
+]

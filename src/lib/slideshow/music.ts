@@ -12,6 +12,7 @@
  */
 import path from "path";
 import fs from "fs";
+import { isRetiredTrack } from "@/lib/music-retired";
 
 /** The no-copyright track render-demand-gen.mjs settled on (chill / ambient). */
 const PREFERRED_TRACK = "src/audio/joyinsound-no-copyright-chill-music-403411.mp3";
@@ -42,10 +43,12 @@ export function getDefaultMusicTrack(): string | null {
   const preferred = path.resolve(root, PREFERRED_TRACK);
   if (fs.existsSync(preferred)) return preferred;
 
-  const fromAudio = listTracks(path.resolve(root, "src/audio"));
+  // These two are positional ("first file in the directory"), so a retired bed that sorts
+  // early would become the default for every render that does not pin a track.
+  const fromAudio = listTracks(path.resolve(root, "src/audio")).filter((t) => !isRetiredTrack(t));
   if (fromAudio.length > 0) return fromAudio[0];
 
-  const fromPublic = listTracks(path.resolve(root, "public/music"));
+  const fromPublic = listTracks(path.resolve(root, "public/music")).filter((t) => !isRetiredTrack(t));
   if (fromPublic.length > 0) return fromPublic[0];
 
   // TODO: bundle a royalty-free track under src/audio/ or public/music/ —
@@ -56,10 +59,17 @@ export function getDefaultMusicTrack(): string | null {
 /** All bundled royalty-free tracks (src/audio + public/music), absolute paths. */
 export function listAllMusicTracks(): string[] {
   const root = process.cwd();
+  // Retired beds are dropped here, which covers pickMusicTrack() too since it draws from
+  // this list. Without it a bed pulled from a family would still surface on slideshows,
+  // which enumerate the same directory.
+  //
+  // This is a HARD filter, unlike pickMusic's fallback: a slideshow with no track renders
+  // silent by design (pickMusicTrack returns null), so there is no crash to avoid by
+  // keeping a retired bed as the last resort.
   return [
     ...listTracks(path.resolve(root, "src/audio")),
     ...listTracks(path.resolve(root, "public/music")),
-  ];
+  ].filter((t) => !isRetiredTrack(t));
 }
 
 /**

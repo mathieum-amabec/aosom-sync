@@ -34,6 +34,7 @@
  *           CONSTANT-size draws instead. Do not "simplify" that back.
  *   refused: an animated alpha inside a drawbox colour (`black@'min(1,t)'`).
  */
+import { dropRetiredTracks } from "./music-retired";
 
 // ── geometry ──────────────────────────────────────────────────────────────
 export const W = 1080;
@@ -126,8 +127,22 @@ export const MUSIC_FAMILIES: Record<string, string[]> = {
   ],
   // Warm lounge for the rooms people relax in.
   interieur: ["mixkit-lounge-695.mp3"],
-  // Clean corporate for desks, shelving and storage.
-  bureau: ["mixkit-corporate-22.mp3"],
+  // Driving bed for desks, shelving and storage. mixkit-corporate-22 held this slot until
+  // 2026-09-10, when it was rejected on listening as too downbeat for assembly footage —
+  // which is all forward motion. Measured, it was the slowest-moving bed in the pool
+  // (194 onsets/min).
+  //
+  // Golden Storm was picked over the livelier-sounding Motivating Mornings (id 33,
+  // 215 onsets/min) on LEVEL SPREAD, not on energy. Track 33 is a build: it runs 6.6 dB
+  // between its quietest and loudest entry point, so with one averaged gain two ads in the
+  // same family would land 6.6 dB apart — the exact defect TRACK_GAIN exists to prevent.
+  // Golden Storm holds 3.6 dB across the same eight points and still beats the retired bed
+  // on energy (221 onsets/min).
+  // src/audio/ is gitignored, so the file does not travel with the repo. Re-fetch:
+  //   curl -L https://assets.mixkit.co/music/470/470.mp3 -o src/audio/mixkit-golden-storm-470.mp3
+  // "Golden Storm" by Diego Nava, Mixkit Stock Music Free License
+  // (isAccessibleForFree: true, https://mixkit.co/license/#musicFree), verified 2026-09-10.
+  bureau: ["mixkit-golden-storm-470.mp3"],
   // Bright pop for toys and kids furniture.
   enfants: ["mixkit-pop-250.mp3"],
   // Playful funk for pet products.
@@ -151,6 +166,7 @@ export const TRACK_GAIN: Record<string, number> = {
   "joyinsound-no-copyright-chill-music-403411.mp3": 0.87,
   "sigmamusicart-no-copyright-music-514564.mp3": 1.19,
   "mixkit-corporate-22.mp3": 1.95,
+  "mixkit-golden-storm-470.mp3": 1.24,
   "mixkit-lounge-695.mp3": 2.26,
   "mixkit-pop-250.mp3": 2.02,
   "mixkit-funk-1140.mp3": 2.85,
@@ -196,7 +212,9 @@ export function pickMusic(sku: string, available: string[], productType?: string
     return i >= 0 ? p.slice(i + 1) : p;
   };
   const inFamily = available.filter((p) => wanted.includes(base(p)));
-  const pool = inFamily.length ? inFamily : [...available].sort();
+  // The no-family fallback is the one path that can reach ANY file in the audio directory,
+  // retired beds included — so it is filtered here rather than at the family level.
+  const pool = inFamily.length ? inFamily : dropRetiredTracks([...available]).sort();
 
   const h = hashSku(sku);
   const track = pool[h % pool.length];
