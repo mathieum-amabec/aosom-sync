@@ -223,7 +223,10 @@ describe("music families by product category", () => {
     "C:/a/joyinsound-no-copyright-chill-music-403411.mp3",
     "C:/a/sigmamusicart-no-copyright-music-514564.mp3",
     "C:/a/mixkit-lounge-695.mp3",
+    // Retired from automatic selection but still on disk — kept in the fixture precisely
+    // so the retirement tests below have something to exclude.
     "C:/a/mixkit-corporate-22.mp3",
+    "C:/a/mixkit-golden-storm-470.mp3",
     "C:/a/mixkit-pop-250.mp3",
     "C:/a/mixkit-funk-1140.mp3",
   ];
@@ -261,7 +264,7 @@ describe("music families by product category", () => {
   it("picks a bed from the product's own family", () => {
     expect(base(pickMusic("X", WINPATHS, "Pet Supplies > Dogs").track)).toBe("mixkit-funk-1140.mp3");
     expect(base(pickMusic("X", WINPATHS, "Toys & Games > Ride-On").track)).toBe("mixkit-pop-250.mp3");
-    expect(base(pickMusic("X", WINPATHS, "Office Products > Desks").track)).toBe("mixkit-corporate-22.mp3");
+    expect(base(pickMusic("X", WINPATHS, "Office Products > Desks").track)).toBe("mixkit-golden-storm-470.mp3");
     expect(base(pickMusic("X", WINPATHS, "Home Furnishings > Living Room Furniture").track)).toBe("mixkit-lounge-695.mp3");
   });
 
@@ -297,6 +300,44 @@ describe("music families by product category", () => {
 
   it("reports the family it actually used", () => {
     expect(pickMusic("X", WINPATHS, "Pet Supplies > Dogs").family).toBe("animaux");
+  });
+
+  // Retiring a bed by deleting the file only works on the machine that deletes it: src/audio
+  // is gitignored, so every other clone still has it and the fallback enumerates the folder.
+  describe("retired beds", () => {
+    const RETIRED = "mixkit-corporate-22.mp3";
+
+    it("is gone from every family", () => {
+      for (const files of Object.values(MUSIC_FAMILIES)) expect(files).not.toContain(RETIRED);
+    });
+
+    it("never surfaces through the no-family fallback", () => {
+      // Exercise Equipment matches no family, so these all take the fallback path.
+      for (let i = 0; i < 60; i++) {
+        const m = pickMusic("SKU-" + i, WINPATHS, "Sports & Recreation > Exercise Equipment");
+        expect(base(m.track), "retired bed resurfaced via the fallback").not.toBe(RETIRED);
+      }
+    });
+
+    it("still covers the pool — the fallback keeps choosing, it does not collapse to one bed", () => {
+      const picked = new Set(
+        Array.from({ length: 60 }, (_, i) =>
+          base(pickMusic("SKU-" + i, WINPATHS, "Sports & Recreation > Exercise Equipment").track),
+        ),
+      );
+      expect(picked.size).toBeGreaterThan(1);
+      expect(picked.has(RETIRED)).toBe(false);
+    });
+
+    it("yields rather than crashing when the retired bed is the ONLY file on disk", () => {
+      // pickMusic throws on an empty pool, and a thrown render is worse than a dull bed.
+      const only = ["C:/a/" + RETIRED];
+      expect(base(pickMusic("X", only, "Sports & Recreation > Exercise Equipment").track)).toBe(RETIRED);
+    });
+
+    it("keeps its gain, so an explicit use is still level-matched", () => {
+      expect(TRACK_GAIN[RETIRED]).toBeGreaterThan(0);
+    });
   });
 
   it("every family names at least one track, and no track is orphaned", () => {

@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.89.0] - 2026-09-11
+## [0.5.90.0] - 2026-09-11
 
 A catalogue-wide audit of every product's primary image, and the pos-1 guard turned from
 auto-swap into human approval.
@@ -29,6 +29,11 @@ First full run (1,730 live products): **1,412 compliant · 312 fixable · 6 with
 alternative · 0 errors.**
 
 ### Changed — the guard asks before it writes
+
+The pos-1 guard shipped in **PR #386** (v0.5.54.28) is **kept, not replaced** — the classifier,
+the candidate ordering and the `image_checked_at` budget mechanism are all its work. What
+changes is the POLICY: it used to apply the swap itself, and now it asks first. It had reached
+only 137 of 1,730 products in ~7 days at 20 calls/day, applying 19 unreviewed swaps.
 
 `runImageCompliance` gained a mode, read from the `image_compliance_mode` setting (no deploy
 needed to change it):
@@ -63,7 +68,82 @@ shown on the usage dashboard — a silent bypass would have hidden the spend. Ca
   direction — a fix is skipped, never a bad swap proposed.
 - The audit script re-tries a checkpointed `error` (usually a rate-limit burst) on a later
   window, up to `--max-attempts`, instead of freezing it as a permanent verdict.
+- `--queue-only` enqueues a FINISHED audit from its checkpoint. `--queue` only fires on
+  products the run itself audits, so a completed audit could not be enqueued at all.
 
+### Operational state at merge
+
+`image_compliance_mode` is set to **`queue`** in production settings, and the 312 proposals
+from the dry-run are already in `image_review_queue` with status `pending`. Nothing has been
+written to Shopify: six queued products were sampled against the live store and all six still
+carry their non-compliant pos-1 image, with zero `sync_logs` image rows for the session.
+
+## [0.5.89.0] - 2026-09-10
+
+A third organic content format reaches a real batch, and the audio pool gained a bed and
+lost one.
+
+### Added — assembly clips as an organic format
+
+`scripts/poc-assembly.mts` graduated from a 3-clip proof to a 10-video batch: one clean trim
+of a UGC assembly clip, a generic caption naming only the category, the family bed, and
+nothing else. No Ken Burns, no Hormozi sequence, no price, no product name — the format lives
+on looking unproduced, and a sales script over it kills the thing that makes someone watch.
+
+Coverage is 5 families (extérieur 2, bureau 3, intérieur 3, animaux 1, enfants 1). Animaux and
+enfants are thin because the 69 downloadable UGC clips hold exactly one convincing assembly
+clip each.
+
+The selection now lives in `asm-batch-v1.json` — sku, family, the second where assembly
+actually happens, caption. The proto's equivalent was never committed and was lost with a
+terminal, which cost a full re-derivation from contact sheets.
+
+Six clips were rejected on inspection: five carry burned-in English text or a promo code, and
+`835-824V00BK` has "AOSOM / HOMCOM Bar Stools Set" burned into its first frame.
+
+The rendered .mp4s stay out of the repo, as the videos always have. They are published by
+hand so a trending TikTok/Instagram sound can be laid over them — the family bed is a rhythm
+reference, not a final mix, and the cuts are timed to the action rather than to the music.
+
+### Changed — bureau plays Golden Storm
+
+`mixkit-corporate-22` was rejected on listening: too downbeat under assembly footage, which is
+all forward motion. The measurement agreed — 194 onsets/min, the slowest-moving bed in the
+pool. Replaced by "Golden Storm" (Mixkit id 470, Diego Nava, Mixkit Stock Music Free License
+verified per track), 221 onsets/min, gain 1.24.
+
+The livelier "Motivating Mornings" (id 33, 215 onsets/min) was rendered first and dropped: it
+is a build, 6.6 dB between its quietest and loudest entry point against 0.9 dB for the bed it
+would replace. `TRACK_GAIN` applies one averaged gain per track while each ad enters at a
+hash-derived offset, so two bureau ads would have landed up to 6.6 dB apart — the exact defect
+the gain table exists to prevent, and it showed in the first render. Golden Storm holds 3.6 dB.
+
+### Removed — corporate-22 from every automatic pick
+
+Dropping it from the family was not enough. Two paths enumerate `src/audio` directly and kept
+reaching it: `pickMusic`'s no-family fallback (any product type matching no family) and the
+slideshow picker (`listAllMusicTracks`/`pickMusicTrack`, plus `getDefaultMusicTrack`, which
+takes whatever sorts first — and "mixkit-corporate-22" often does).
+
+Retirement is a list in `src/lib/music-retired.ts`, not a deleted file: `src/audio` is
+gitignored, so deleting works only on the machine that deletes while every other clone keeps
+the mp3 and both pickers read the folder.
+
+The two paths differ on an all-retired pool by design. `pickMusic` throws on an empty pool, so
+its filter yields the retired bed rather than crash a render; the slideshow renders silent by
+design, so its filter is hard. The file and its `TRACK_GAIN` entry stay, so an explicit use is
+still level-matched.
+
+### Fixed — a suite that had been red, and a build that would have failed
+
+Two problems from the same cause, pushing after `tsc` without running the tests:
+
+- the family swap left two assertions in `video-ad-composer.test.ts` failing (the fixture pool
+  never gained the new bed; one case still expected corporate-22 for Office Products);
+- the family-in-filename change in `poc-assembly.mts` read `music.family.split(...)` on an
+  optional field, which `tsc` rejects. `scripts/**/*.mts` is inside the tsconfig and the build
+  does not ignore type errors, so it would have failed the Vercel build on merge. `tsx` runs
+  transpile-only and never saw it.
 ## [0.5.88.0] - 2026-09-08
 
 Two orphan collections joined the menu and the sub-category tiles. A third was left out on

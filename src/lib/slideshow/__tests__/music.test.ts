@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import fs from "node:fs";
-import { pickMusicTrack, listAllMusicTracks } from "@/lib/slideshow/music";
+import { pickMusicTrack, listAllMusicTracks, getDefaultMusicTrack } from "@/lib/slideshow/music";
 
 // The royalty-free tracks live under gitignored src/audio (not committed), so these
 // tests mock fs.readdirSync to stay deterministic and repo-independent.
@@ -28,5 +28,39 @@ describe("music track selection (quality v3 rotation)", () => {
     expect(pickMusicTrack()).toBe(all[0]);
     vi.spyOn(Math, "random").mockReturnValue(0.999999);
     expect(pickMusicTrack()).toBe(all[all.length - 1]);
+  });
+
+  // The slideshow picker enumerates the same gitignored src/audio as the ad composer, so a
+  // bed retired from the ad families would otherwise keep turning up on slideshow renders.
+  describe("retired beds", () => {
+    const RETIRED = "mixkit-corporate-22.mp3";
+
+    it("listAllMusicTracks drops it, so pickMusicTrack can never draw it", () => {
+      vi.spyOn(fs, "readdirSync").mockReturnValue(
+        [RETIRED, "keep.mp3"] as unknown as ReturnType<typeof fs.readdirSync>,
+      );
+      const all = listAllMusicTracks();
+      expect(all.some((t) => t.includes(RETIRED))).toBe(false);
+      expect(all.length).toBe(2); // keep.mp3 under each of the two roots
+      for (const r of [0, 0.5, 0.999999]) {
+        vi.spyOn(Math, "random").mockReturnValue(r);
+        expect(pickMusicTrack()).not.toContain(RETIRED);
+      }
+    });
+
+    it("goes silent rather than falling back to a retired bed", () => {
+      vi.spyOn(fs, "readdirSync").mockReturnValue([RETIRED] as unknown as ReturnType<typeof fs.readdirSync>);
+      expect(listAllMusicTracks()).toEqual([]);
+      expect(pickMusicTrack()).toBeNull();
+    });
+
+    it("is never the positional default either", () => {
+      // "mixkit-corporate-22" sorts before "zz" — without the filter it would win by position.
+      vi.spyOn(fs, "existsSync").mockReturnValue(false); // no PREFERRED_TRACK on disk
+      vi.spyOn(fs, "readdirSync").mockReturnValue(
+        [RETIRED, "zz.mp3"] as unknown as ReturnType<typeof fs.readdirSync>,
+      );
+      expect(getDefaultMusicTrack()).toContain("zz.mp3");
+    });
   });
 });
