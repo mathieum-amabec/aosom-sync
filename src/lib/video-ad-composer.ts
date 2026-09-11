@@ -34,6 +34,7 @@
  *           CONSTANT-size draws instead. Do not "simplify" that back.
  *   refused: an animated alpha inside a drawbox colour (`black@'min(1,t)'`).
  */
+import { dropRetiredTracks } from "./music-retired";
 
 // ── geometry ──────────────────────────────────────────────────────────────
 export const W = 1080;
@@ -211,7 +212,9 @@ export function pickMusic(sku: string, available: string[], productType?: string
     return i >= 0 ? p.slice(i + 1) : p;
   };
   const inFamily = available.filter((p) => wanted.includes(base(p)));
-  const pool = inFamily.length ? inFamily : [...available].sort();
+  // The no-family fallback is the one path that can reach ANY file in the audio directory,
+  // retired beds included — so it is filtered here rather than at the family level.
+  const pool = inFamily.length ? inFamily : dropRetiredTracks([...available]).sort();
 
   const h = hashSku(sku);
   const track = pool[h % pool.length];
