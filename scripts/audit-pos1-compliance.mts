@@ -31,6 +31,9 @@
  *   …audit-pos1-compliance.mts --queue
  *   # regenerate the HTML/CSV report from the checkpoint, spending nothing:
  *   …audit-pos1-compliance.mts --report-only
+ *   # after a COMPLETED audit: enqueue every fixable plan from the checkpoint for approval
+ *   # in /images (zero Claude calls, zero Shopify requests):
+ *   …audit-pos1-compliance.mts --queue-only
  *
  * WINDOWING: background shells die at ~5 min, so long runs go in FOREGROUND windows of
  * ≤9.5 min via --max-seconds (default 540). The JSONL checkpoint is append-only and keyed by
@@ -70,6 +73,10 @@ const MAX_ATTEMPTS = Math.max(1, Number(opt("max-attempts", "3")));
 const ONLY_UNCHECKED = flag("only-unchecked");
 const QUEUE = flag("queue");
 const REPORT_ONLY = flag("report-only");
+// Enqueue every "fixable" plan ALREADY in the checkpoint for operator approval, spending zero
+// Claude calls and making zero Shopify requests. This is the step after a completed audit:
+// --queue only fires on products the run itself audits, and a finished run audits none.
+const QUEUE_ONLY = flag("queue-only");
 const NO_FEED = flag("no-feed");
 // Image size drives cost: ~952 tokens/call at 512px vs ~1961 at 1024px. Validated at 97.9%
 // agreement with 1024px over 48 images; the one divergence was a MISSED overlay (small
@@ -244,6 +251,42 @@ async function main(): Promise<void> {
     const plans = [...done.values()];
     const { html, csv } = writeReport(plans);
     console.log(`report-only: ${plans.length} produits → ${html} · ${csv}`);
+    return;
+  }
+
+  if (QUEUE_ONLY) {
+    const fixable = [...done.values()].filter((p) => p.status === "fixable" && p.proposedUrl);
+    console.log(`queue-only: ${fixable.length} proposition(s) corrigeable(s) dans le checkpoint`);
+    console.log("⚠️  écrit UNIQUEMENT dans image_review_queue — aucune requête Shopify.");
+    let queued = 0;
+    let failed = 0;
+    for (const plan of fixable) {
+      try {
+        // upsert, not insert: the partial-unique index keeps ONE open row per product, so a
+        // re-run after a fresh audit updates the proposal instead of stacking duplicates.
+        await db.upsertImageReview({
+          shopifyProductId: plan.shopifyProductId,
+          sku: plan.sku,
+          name: plan.name,
+          currentUrl: plan.currentUrl,
+          currentReason: plan.currentReason,
+          proposedImageId: plan.proposedImageId ?? null,
+          proposedUrl: plan.proposedUrl ?? "",
+          proposedPosition: plan.proposedPosition ?? null,
+          proposedReason: plan.proposedReason ?? "",
+          source: plan.proposedSource ?? "shopify",
+        });
+        queued++;
+        if (queued % 50 === 0) console.log(`  ${queued}/${fixable.length}…`);
+      } catch (err) {
+        failed++;
+        console.warn(`  ⚠ ${plan.sku}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const counts = await db.countImageReviews();
+    console.log("");
+    console.log(`mis en file : ${queued}${failed ? ` · échecs : ${failed}` : ""}`);
+    console.log(`file d'approbation par statut : ${JSON.stringify(counts)}`);
     return;
   }
 
