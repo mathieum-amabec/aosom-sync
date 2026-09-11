@@ -134,7 +134,8 @@ async function main(): Promise<void> {
       const graphFile = `${dir}/graph.txt`;
       fs.writeFileSync(graphFile, graph, "utf8");
 
-      const out = path.join(OUT_DIR, `ASM-${c.family ?? music.family.split(" ")[0]}-${safe}.mp4`);
+      const fam = c.family ?? music.family?.split(" ")[0] ?? "x";
+      const out = path.join(OUT_DIR, `ASM-${fam}-${safe}.mp4`);
       const args = [
         "-y", "-nostdin", "-loglevel", "error",
         "-ss", String(start), "-t", String(length), "-i", src,
