@@ -59,54 +59,86 @@ function mediaTypeFor(src: string): "image/jpeg" | "image/png" | "image/webp" | 
   return "image/jpeg";
 }
 
+/** Default longest edge requested from the CDN. See CLASSIFY_PX below. */
+export const DEFAULT_CLASSIFY_PX = 1024;
+
 /**
- * For a Shopify CDN URL, request the 1024×1024 resized variant to keep the base64
- * payload small. Restricted to Shopify CDN hosts — the `_1024x1024` suffix is a
- * Shopify-specific transform, so rewriting an arbitrary CDN URL would 404. Any
- * non-Shopify URL (or one without a file extension) is returned unchanged.
+ * For a Shopify CDN URL, request a resized variant to keep the base64 payload small.
+ * Restricted to Shopify CDN hosts — the `_WxH` suffix is a Shopify-specific transform, so
+ * rewriting an arbitrary CDN URL would 404. Any non-Shopify URL (or one without a file
+ * extension) is returned unchanged.
+ *
+ * The size is the single biggest cost lever: an image costs ≈ (w×h)/750 input tokens, so
+ * 512px is ~2× cheaper per call than 1024px (measured: 952 vs 1961 tokens end-to-end).
  */
-function resizedUrl(src: string): string {
+function resizedUrl(src: string, px: number): string {
   if (!/(^|\.)shopify(cdn)?\.com\//.test(src) && !src.includes("/s/files/")) return src;
   const [path, query] = src.split("?");
   if (!/\.[a-zA-Z]+$/.test(path)) return src;
-  const resized = path.replace(/(\.[a-zA-Z]+)$/, "_1024x1024$1");
+  const resized = path.replace(/(\.[a-zA-Z]+)$/, `_${px}x${px}$1`);
   return query ? `${resized}?${query}` : resized;
 }
 
-async function downloadBase64(src: string): Promise<string> {
-  const res = await fetch(resizedUrl(src));
+async function downloadBase64(src: string, px: number): Promise<string> {
+  const res = await fetch(resizedUrl(src, px));
   if (!res.ok) throw new Error(`image download ${res.status}`);
   return Buffer.from(await res.arrayBuffer()).toString("base64");
+}
+
+export interface ClassifyOptions {
+  /** Longest edge requested from the CDN. Default DEFAULT_CLASSIFY_PX (1024). */
+  px?: number;
+  /**
+   * Charge the call to the uncapped `maintenance` pool instead of `batch`.
+   *
+   * ⚠️ SCRIPTS ONLY — never pass this from a request path or a cron job. A full pos-1 audit
+   * is ~2,500 vision calls, roughly two days of the entire `batch` cap, so running it there
+   * would starve imports, blog and social generation. `maintenance` is uncapped but still
+   * COUNTED and shown on the usage dashboard — the spend stays visible, it just no longer
+   * competes with production's own budget.
+   */
+  maintenance?: boolean;
 }
 
 /**
  * Classify a single product image for pos-1 compliance.
  *
- * Downloads the image, sends it to claude-sonnet-4-6 with the strict overlay prompt, and
+ * Downloads the image, sends it to CLAUDE.MODEL_BATCH with the strict overlay prompt, and
  * returns whether it is a clean primary image. Throws on download / API / parse failure so
  * the caller can distinguish an error from a real "non-compliant" verdict (a failed
  * classification must never be treated as a licence to swap).
  */
-export async function classifyProductImage(imageUrl: string): Promise<ImageClassification> {
+export async function classifyProductImage(
+  imageUrl: string,
+  options: ClassifyOptions = {},
+): Promise<ImageClassification> {
   if (!imageUrl || !imageUrl.trim()) throw new Error("classifyProductImage: empty imageUrl");
 
-  const b64 = await downloadBase64(imageUrl);
+  const b64 = await downloadBase64(imageUrl, options.px ?? DEFAULT_CLASSIFY_PX);
   const client = getAnthropicClient();
 
-  const message = await budgetedCreate(client, {
+  const request = {
     model: CLAUDE.MODEL_BATCH,
-    max_tokens: 200,
+    // 200 truncated the JSON mid-object on verbose verdicts (the model listed every measured
+    // dimension it found), which threw as "invalid JSON" and cost the product its audit.
+    // Measured on a 1,730-product pass: 2 losses at 200, none at 400.
+    max_tokens: 400,
     system: STRICT_OVERLAY_PROMPT,
     messages: [
       {
-        role: "user",
+        role: "user" as const,
         content: [
-          { type: "image", source: { type: "base64", media_type: mediaTypeFor(imageUrl), data: b64 } },
-          { type: "text", text: "Classifie cette image (position 1)." },
+          { type: "image" as const, source: { type: "base64" as const, media_type: mediaTypeFor(imageUrl), data: b64 } },
+          { type: "text" as const, text: "Classifie cette image (position 1)." },
         ],
       },
     ],
-  });
+  };
+
+  // Always through budgetedCreate — only the POOL changes. Keeping the one API entry point
+  // means a maintenance pass is still metered and visible, and the repo-wide guard that
+  // forbids a bare client.messages.create() keeps protecting every other caller.
+  const message = await budgetedCreate(client, request, undefined, options.maintenance ? "maintenance" : "batch");
 
   const text = message.content
     .map((c) => (c.type === "text" ? c.text : ""))

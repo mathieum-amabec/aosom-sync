@@ -479,6 +479,50 @@ async function _initSchemaImpl(): Promise<void> {
     // in /api/queue/add can't silently double-book a slot under concurrent requests. failed/
     // cancelled rows drop out of the index, freeing their slot for rebooking.
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`,
+
+    // ── Vision image classification cache ────────────────────────────────────
+    // One row per PHOTO (not per URL). The key is the Aosom hash stem, which survives
+    // both Shopify's `_<uuid>` ingest suffix and the `_1024x1024` resize transform, so the
+    // SAME picture reached through the Aosom CDN (products.image1..7) and through
+    // cdn.shopify.com resolves to ONE cached verdict — see imageUrlStem() in
+    // image-compliance-audit.ts. This is what makes a catalog-wide audit affordable and
+    // re-runnable: a second pass over 1,730 products costs ~0 Claude calls.
+    `CREATE TABLE IF NOT EXISTS image_classifications (
+      url_stem TEXT PRIMARY KEY,     -- Aosom hash stem, lowercased (CDN-agnostic photo id)
+      compliant INTEGER NOT NULL,    -- 1 = clean pos-1 candidate (no marketing overlay)
+      reason TEXT,                   -- one-sentence model rationale
+      model TEXT,                    -- model id that produced the verdict
+      sample_url TEXT,               -- one URL this stem was seen at (for the report)
+      created_at INTEGER DEFAULT (strftime('%s','now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_image_classifications_compliant ON image_classifications(compliant)`,
+
+    // ── pos-1 image review queue (operator approval) ─────────────────────────
+    // Populated by the sync's image-compliance pass when it finds a pos-1 image carrying a
+    // marketing/measurement overlay AND a clean alternative in the same image set. NOTHING
+    // is written to Shopify until a human approves the row in /images. Rows with no clean
+    // alternative are NOT queued (nothing better to offer) — they are logged instead.
+    `CREATE TABLE IF NOT EXISTS image_review_queue (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shopify_product_id TEXT NOT NULL,
+      sku TEXT NOT NULL,
+      name TEXT,
+      current_url TEXT NOT NULL,          -- pos-1 image judged non-compliant
+      current_reason TEXT,
+      proposed_image_id TEXT,             -- Shopify image id to promote (NULL = feed-only, needs upload)
+      proposed_url TEXT NOT NULL,
+      proposed_position INTEGER,          -- its position in the gallery at scan time
+      proposed_reason TEXT,
+      source TEXT NOT NULL DEFAULT 'shopify' CHECK (source IN ('shopify', 'feed')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'applied', 'failed')),
+      error TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now')),
+      decided_at INTEGER
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_image_review_queue_status ON image_review_queue(status, created_at)`,
+    // One OPEN review per product: re-running the audit must update the existing row rather
+    // than stack duplicates for the same product. Decided rows drop out and keep the history.
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_image_review_queue_open ON image_review_queue(shopify_product_id) WHERE status IN ('pending', 'approved')`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
@@ -1796,7 +1840,7 @@ function utcDayKey(): string {
  * can never exhaust the 'assistant' pool that the public storefront /api/assistant
  * draws from. Each pool has its own daily counter row and its own budget env var.
  */
-export type LlmBudgetPool = "assistant" | "batch";
+export type LlmBudgetPool = "assistant" | "batch" | "maintenance";
 
 /** Tokens the given pool consumed so far today (UTC). 0 when no row yet. */
 export async function getDailyLlmTokensUsed(pool: LlmBudgetPool): Promise<number> {
@@ -1823,6 +1867,8 @@ export interface LlmUsageDay {
   day: string; // UTC YYYY-MM-DD
   assistant: number;
   batch: number;
+  /** Uncapped operator-launched maintenance passes (catalogue vision audits). */
+  maintenance: number;
 }
 
 /**
@@ -1842,13 +1888,13 @@ export async function getLlmUsageWindow(days: number): Promise<LlmUsageDay[]> {
     args: [keys[0]],
   });
   const byDay = new Map<string, LlmUsageDay>(
-    keys.map((day) => [day, { day, assistant: 0, batch: 0 }]),
+    keys.map((day) => [day, { day, assistant: 0, batch: 0, maintenance: 0 }]),
   );
   for (const row of res.rows) {
     const entry = byDay.get(row.day as string);
     if (!entry) continue; // row older than the window (the >= bound is inclusive of keys[0])
     const pool = row.pool as LlmBudgetPool;
-    if (pool === "assistant" || pool === "batch") entry[pool] = Number(row.tokens_used) || 0;
+    if (pool === "assistant" || pool === "batch" || pool === "maintenance") entry[pool] = Number(row.tokens_used) || 0;
   }
   return keys.map((day) => byDay.get(day)!);
 }
@@ -2950,6 +2996,250 @@ export async function markImageChecked(shopifyProductIds: string[]): Promise<voi
   for (let i = 0; i < stmts.length; i += 100) {
     await db.batch(stmts.slice(i, i + 100), "write");
   }
+}
+
+/**
+ * All live Shopify products, one row per Shopify product, with their Aosom feed image set
+ * (image1..7). Used by the catalog-wide pos-1 audit, which needs the FEED images too — the
+ * Shopify gallery is not always a superset (the feed rotates images after import).
+ * `onlyUnchecked` restricts to products the compliance pass has never classified.
+ */
+export async function getPos1AuditProducts(opts: {
+  onlyUnchecked?: boolean;
+  limit?: number;
+} = {}): Promise<Array<{ sku: string; shopifyProductId: string; name: string; feedImages: string[] }>> {
+  const db = await ensureSchema();
+  const where = ["shopify_product_id IS NOT NULL", "shopify_product_id <> ''"];
+  if (opts.onlyUnchecked) where.push("image_checked_at IS NULL");
+  const limitSql = opts.limit && opts.limit > 0 ? ` LIMIT ${Math.floor(opts.limit)}` : "";
+  const result = await db.execute(
+    `SELECT shopify_product_id, MIN(sku) AS sku, MAX(name) AS name, MAX(created_at) AS created_at,
+            MAX(image1) AS image1, MAX(image2) AS image2, MAX(image3) AS image3, MAX(image4) AS image4,
+            MAX(image5) AS image5, MAX(image6) AS image6, MAX(image7) AS image7
+     FROM products
+     WHERE ${where.join(" AND ")}
+     GROUP BY shopify_product_id
+     ORDER BY created_at DESC${limitSql}`,
+  );
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    return {
+      sku: (o.sku as string) || "",
+      shopifyProductId: String(o.shopify_product_id || ""),
+      name: (o.name as string) || "",
+      feedImages: [o.image1, o.image2, o.image3, o.image4, o.image5, o.image6, o.image7]
+        .map((v) => (typeof v === "string" ? v.trim() : ""))
+        .filter(Boolean),
+    };
+  });
+}
+
+/**
+ * Aosom feed images (image1..7) for a specific set of Shopify products, keyed by Shopify
+ * product id. The daily guard needs the feed for at most ~20 candidates per run, so it asks
+ * for exactly those rather than paying for the whole catalogue.
+ */
+export async function getFeedImagesForProducts(shopifyProductIds: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const unique = [...new Set(shopifyProductIds.filter(Boolean))];
+  if (unique.length === 0) return out;
+  const db = await ensureSchema();
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100);
+    const result = await db.execute({
+      sql: `SELECT shopify_product_id,
+                   MAX(image1) AS image1, MAX(image2) AS image2, MAX(image3) AS image3,
+                   MAX(image4) AS image4, MAX(image5) AS image5, MAX(image6) AS image6,
+                   MAX(image7) AS image7
+            FROM products
+            WHERE shopify_product_id IN (${chunk.map(() => "?").join(",")})
+            GROUP BY shopify_product_id`,
+      args: chunk,
+    });
+    for (const r of result.rows) {
+      const o = rowToObj(r);
+      out.set(
+        String(o.shopify_product_id),
+        [o.image1, o.image2, o.image3, o.image4, o.image5, o.image6, o.image7]
+          .map((v) => (typeof v === "string" ? v.trim() : ""))
+          .filter(Boolean),
+      );
+    }
+  }
+  return out;
+}
+
+// ─── Vision classification cache ─────────────────────────────────────
+
+export interface CachedImageVerdict {
+  compliant: boolean;
+  reason: string;
+}
+
+/** Look up cached verdicts for a batch of photo stems. Missing stems are simply absent. */
+export async function getCachedImageVerdicts(stems: string[]): Promise<Map<string, CachedImageVerdict>> {
+  const out = new Map<string, CachedImageVerdict>();
+  const unique = [...new Set(stems.filter(Boolean))];
+  if (unique.length === 0) return out;
+  const db = await ensureSchema();
+  for (let i = 0; i < unique.length; i += 200) {
+    const chunk = unique.slice(i, i + 200);
+    const result = await db.execute({
+      sql: `SELECT url_stem, compliant, reason FROM image_classifications
+            WHERE url_stem IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) {
+      const o = rowToObj(r);
+      out.set(String(o.url_stem), {
+        compliant: Number(o.compliant) === 1,
+        reason: (o.reason as string) || "",
+      });
+    }
+  }
+  return out;
+}
+
+/** Persist a photo verdict. Idempotent: re-classifying the same stem overwrites it. */
+export async function putCachedImageVerdict(
+  stem: string,
+  verdict: CachedImageVerdict,
+  meta: { model: string; sampleUrl: string },
+): Promise<void> {
+  if (!stem) return;
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO image_classifications (url_stem, compliant, reason, model, sample_url)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(url_stem) DO UPDATE SET
+            compliant=excluded.compliant, reason=excluded.reason,
+            model=excluded.model, sample_url=excluded.sample_url,
+            created_at=strftime('%s','now')`,
+    args: [stem, verdict.compliant ? 1 : 0, verdict.reason.slice(0, 400), meta.model, meta.sampleUrl.slice(0, 500)],
+  });
+}
+
+// ─── pos-1 image review queue ────────────────────────────────────────
+
+export interface ImageReviewRow {
+  id: number;
+  shopifyProductId: string;
+  sku: string;
+  name: string;
+  currentUrl: string;
+  currentReason: string;
+  proposedImageId: string | null;
+  proposedUrl: string;
+  proposedPosition: number | null;
+  proposedReason: string;
+  source: "shopify" | "feed";
+  status: "pending" | "approved" | "rejected" | "applied" | "failed";
+  error: string | null;
+  createdAt: number;
+}
+
+function toImageReviewRow(o: Record<string, unknown>): ImageReviewRow {
+  return {
+    id: Number(o.id),
+    shopifyProductId: String(o.shopify_product_id || ""),
+    sku: (o.sku as string) || "",
+    name: (o.name as string) || "",
+    currentUrl: (o.current_url as string) || "",
+    currentReason: (o.current_reason as string) || "",
+    proposedImageId: o.proposed_image_id ? String(o.proposed_image_id) : null,
+    proposedUrl: (o.proposed_url as string) || "",
+    proposedPosition: o.proposed_position === null || o.proposed_position === undefined ? null : Number(o.proposed_position),
+    proposedReason: (o.proposed_reason as string) || "",
+    source: (o.source as "shopify" | "feed") || "shopify",
+    status: (o.status as ImageReviewRow["status"]) || "pending",
+    error: (o.error as string) || null,
+    createdAt: Number(o.created_at || 0),
+  };
+}
+
+/**
+ * Queue (or refresh) ONE open pos-1 swap proposal for a product. The partial-unique index
+ * keeps a single open row per product, so a re-audit updates the proposal in place instead
+ * of stacking duplicates. Returns the row id.
+ */
+export async function upsertImageReview(input: {
+  shopifyProductId: string;
+  sku: string;
+  name: string;
+  currentUrl: string;
+  currentReason: string;
+  proposedImageId: string | null;
+  proposedUrl: string;
+  proposedPosition: number | null;
+  proposedReason: string;
+  source: "shopify" | "feed";
+}): Promise<number> {
+  const db = await ensureSchema();
+  const existing = await db.execute({
+    sql: `SELECT id FROM image_review_queue WHERE shopify_product_id = ? AND status IN ('pending','approved') LIMIT 1`,
+    args: [input.shopifyProductId],
+  });
+  if (existing.rows.length > 0) {
+    const id = Number(rowToObj(existing.rows[0]).id);
+    await db.execute({
+      sql: `UPDATE image_review_queue SET current_url=?, current_reason=?, proposed_image_id=?,
+              proposed_url=?, proposed_position=?, proposed_reason=?, source=?, status='pending', error=NULL
+            WHERE id = ?`,
+      args: [input.currentUrl, input.currentReason.slice(0, 400), input.proposedImageId,
+        input.proposedUrl, input.proposedPosition, input.proposedReason.slice(0, 400), input.source, id],
+    });
+    return id;
+  }
+  const result = await db.execute({
+    sql: `INSERT INTO image_review_queue
+            (shopify_product_id, sku, name, current_url, current_reason,
+             proposed_image_id, proposed_url, proposed_position, proposed_reason, source)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [input.shopifyProductId, input.sku, input.name, input.currentUrl, input.currentReason.slice(0, 400),
+      input.proposedImageId, input.proposedUrl, input.proposedPosition, input.proposedReason.slice(0, 400), input.source],
+  });
+  return Number(result.lastInsertRowid ?? 0);
+}
+
+/** List review rows, newest first. `status` omitted → pending only. */
+export async function listImageReviews(status: ImageReviewRow["status"] | "all" = "pending", limit = 200): Promise<ImageReviewRow[]> {
+  const db = await ensureSchema();
+  const result = status === "all"
+    ? await db.execute({ sql: `SELECT * FROM image_review_queue ORDER BY created_at DESC LIMIT ?`, args: [limit] })
+    : await db.execute({ sql: `SELECT * FROM image_review_queue WHERE status = ? ORDER BY created_at DESC LIMIT ?`, args: [status, limit] });
+  return result.rows.map((r) => toImageReviewRow(rowToObj(r)));
+}
+
+export async function getImageReview(id: number): Promise<ImageReviewRow | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT * FROM image_review_queue WHERE id = ?`, args: [id] });
+  if (result.rows.length === 0) return null;
+  return toImageReviewRow(rowToObj(result.rows[0]));
+}
+
+/** Move a review row to a decided state. `error` is only meaningful for 'failed'. */
+export async function setImageReviewStatus(
+  id: number,
+  status: ImageReviewRow["status"],
+  error?: string,
+): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE image_review_queue SET status = ?, error = ?, decided_at = strftime('%s','now') WHERE id = ?`,
+    args: [status, error ? error.slice(0, 400) : null, id],
+  });
+}
+
+/** Counts per status, for the dashboard badge. */
+export async function countImageReviews(): Promise<Record<string, number>> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT status, COUNT(*) AS n FROM image_review_queue GROUP BY status`);
+  const out: Record<string, number> = {};
+  for (const r of result.rows) {
+    const o = rowToObj(r);
+    out[String(o.status)] = Number(o.n);
+  }
+  return out;
 }
 
 // ─── Import Jobs ─────────────────────────────────────────────────────

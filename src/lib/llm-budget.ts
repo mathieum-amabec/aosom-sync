@@ -29,8 +29,20 @@ export type BudgetPool = LlmBudgetPool;
 const DEFAULT_BATCH_TOKEN_BUDGET = 1_300_000;
 const DEFAULT_ASSISTANT_TOKEN_BUDGET = 500_000;
 
-/** Resolve a pool's daily token budget from its env var, falling back to the default. */
+/**
+ * Resolve a pool's daily token budget from its env var, falling back to the default.
+ *
+ * `maintenance` is UNCAPPED by default (Infinity). It exists so a deliberate,
+ * operator-launched catalogue pass — a full pos-1 image audit is ~2,500 vision calls, roughly
+ * two days of the whole `batch` cap — can run without starving imports, blog and social
+ * generation, while its tokens are still COUNTED and shown on the usage dashboard. A silent
+ * bypass would have hidden that spend entirely. Set `LLM_MAINTENANCE_DAILY_BUDGET` to cap it.
+ */
 export function poolBudget(pool: BudgetPool): number {
+  if (pool === "maintenance") {
+    const raw = Number(process.env.LLM_MAINTENANCE_DAILY_BUDGET);
+    return Number.isFinite(raw) && raw > 0 ? raw : Infinity;
+  }
   const [envName, fallback] =
     pool === "assistant"
       ? ["LLM_ASSISTANT_DAILY_BUDGET", DEFAULT_ASSISTANT_TOKEN_BUDGET]
@@ -46,7 +58,10 @@ export function dailyTokenBudget(): number {
 
 export class LlmBudgetExceededError extends Error {
   constructor(pool: BudgetPool, used: number, budget: number) {
-    const envName = pool === "assistant" ? "LLM_ASSISTANT_DAILY_BUDGET" : "LLM_DAILY_TOKEN_BUDGET";
+    const envName =
+      pool === "assistant" ? "LLM_ASSISTANT_DAILY_BUDGET"
+      : pool === "maintenance" ? "LLM_MAINTENANCE_DAILY_BUDGET"
+      : "LLM_DAILY_TOKEN_BUDGET";
     super(
       `LLM daily token budget exceeded for pool "${pool}" (${used}/${budget} tokens used today, UTC) — ` +
         `refusing further Claude calls until 00:00 UTC. Raise ${envName} to override.`,

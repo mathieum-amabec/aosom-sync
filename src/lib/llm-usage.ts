@@ -43,6 +43,9 @@ export function pricingKey(model: string): string {
 export const ASSUMED_INPUT_SHARE: Record<LlmBudgetPool, number> = {
   assistant: 0.9,
   batch: 0.4,
+  // Vision maintenance passes are almost pure input: one image in, a two-line JSON verdict
+  // out. Measured on the 1,730-product pos-1 audit: ~870 input / ~85 output tokens per call.
+  maintenance: 0.92,
 };
 
 /** The model each pool currently runs. Reads config, so the CLAUDE_ASSISTANT_MODEL /

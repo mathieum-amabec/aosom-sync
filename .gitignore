@@ -101,3 +101,6 @@ token.json
 # Editor/agent backup copies of theme files
 *.bak
 coverage/
+
+# pos-1 image audit scratch (checkpoint + HTML/CSV report)
+/.tmp-imgaudit/

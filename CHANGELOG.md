@@ -2,6 +2,68 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.89.0] - 2026-09-11
+
+A catalogue-wide audit of every product's primary image, and the pos-1 guard turned from
+auto-swap into human approval.
+
+### Added — pos-1 image audit + approval queue
+
+**`image-compliance-audit.ts`** is now the single verdict engine behind both the mass audit
+and the daily sync guard, so the two cannot drift apart on what "clean" means. It classifies
+the pos-1 image, then walks the rest of the image set for the first clean alternative.
+
+The candidate set is the Shopify gallery **union** the Aosom feed (`products.image1..7`). The
+gallery is not a superset: measured on a random sample, ~3 products in 8 carry feed photos
+absent from Shopify, because the feed rotates images after import. A feed-only candidate is
+reported as `source:"feed"` and never applied automatically — it needs an upload first.
+
+`imageUrlStem()` reduces the Aosom original, the Shopify copy (`_<uuid>` ingest suffix) and
+Shopify's `_WxH` resize to one photo identity, so `image_classifications` caches a verdict per
+PHOTO. A second full pass over the catalogue costs ~0 Claude calls.
+
+**`scripts/audit-pos1-compliance.mts`** — dry-run over the whole catalogue, resumable JSONL
+checkpoint, HTML+CSV report with before/after thumbnails. It has no `--apply`.
+
+First full run (1,730 live products): **1,412 compliant · 312 fixable · 6 with no clean
+alternative · 0 errors.**
+
+### Changed — the guard asks before it writes
+
+`runImageCompliance` gained a mode, read from the `image_compliance_mode` setting (no deploy
+needed to change it):
+
+- **`queue` (new default)** — the proposal lands in `image_review_queue`; **nothing reaches
+  Shopify**. A human decides on `/images`, two thumbnails side by side. `POST
+  /api/images/review` is now the only path that turns a Vision verdict into a Shopify write.
+- **`auto`** — the previous behaviour, kept.
+- **`off`** — no-op.
+
+A product whose whole image set is dirty is still never queued (nothing better to offer); it
+is logged and marked checked, per spec.
+
+### Added — the `maintenance` LLM pool
+
+A full audit is ~2,500 vision calls ≈ 2 days of the entire `batch` cap. Learned the hard way:
+the first audit window drained the day's batch pool and blocked imports, blog and social
+generation until the counter was restored.
+
+`ClassifyOptions.maintenance` charges to a third pool, **uncapped** but still counted and
+shown on the usage dashboard — a silent bypass would have hidden the spend. Cap it with
+`LLM_MAINTENANCE_DAILY_BUDGET`. Scripts only. The repo-wide guard forbidding a bare
+`client.messages.create()` stays intact: only the POOL changes, never the entry point.
+
+### Fixed
+
+- `classifyProductImage` used `max_tokens: 200`, which truncated the JSON mid-object on
+  verbose verdicts and threw as "invalid JSON". Two products lost their audit to it over a
+  1,730-product pass; raised to 400, zero losses.
+- Classification at 512px instead of 1024px halves the cost (952 vs 1,961 tokens/call) at
+  97.9% agreement over 48 images. The single divergence was a MISSED overlay, i.e. the safe
+  direction — a fix is skipped, never a bad swap proposed.
+- The audit script re-tries a checkpointed `error` (usually a rate-limit burst) on a later
+  window, up to `--max-attempts`, instead of freezing it as a permanent verdict.
+
 ## [0.5.88.0] - 2026-09-08
 
 Two orphan collections joined the menu and the sub-category tiles. A third was left out on

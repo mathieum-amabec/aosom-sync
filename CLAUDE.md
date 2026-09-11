@@ -42,6 +42,10 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
 - `sync_logs` — per-field change records (price, images, status)
 - `import_jobs` — import queue with status machine (pending→generating→reviewing→importing→done)
 - `catalog_snapshots` — latest CSV data for fast catalog browsing
+- `image_classifications` — Vision verdict cache, keyed by PHOTO (Aosom hash stem), so the
+  Aosom CDN original and its Shopify copy share one verdict. Makes a catalogue re-audit free.
+- `image_review_queue` — pos-1 swap proposals awaiting human approval (one OPEN row per
+  product, enforced by a partial-unique index). Nothing drains it automatically.
 - `sync_cursor` — chunked sync progress for large stores
 - `assistant_rate_limit` — one row per accepted `/api/assistant` message (`ip`, `ts`), the
   per-IP hourly sliding window. In Turso rather than in-memory because the in-memory windows
@@ -73,6 +77,66 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
   before v0.5.74.0). ⚠️ A limit response is therefore indistinguishable from a genuine
   zero-result answer by `products.length` alone — **anything probing this endpoint must branch
   on `data.limitReached` / `data.reason`**, never on an empty `products` array or on the status.
+
+## Image principale (pos-1) — garde-fou anti-overlay
+
+⚠️ **Une image principale ne doit JAMAIS porter de texte marketing ou de cotes incrustées**
+(mesures, flèches, callouts, slogans, badges). Le texte *diégétique* — imprimé sur le produit
+lui-même ou présent naturellement dans le décor — ne compte pas. C'est la règle que le flux
+Aosom viole le plus souvent : ses infographies de dimensions arrivent tôt dans la galerie et
+finissent en pos-1.
+
+Trois pièces, **un seul moteur de verdict** (`image-compliance-audit.ts`) pour que l'audit de
+masse et le garde-fou quotidien ne puissent pas diverger sur la définition de « propre » :
+
+| Pièce | Rôle |
+|---|---|
+| `vision-classifier.ts` | 1 image → `{compliant, reason}`. Prompt strict (`STRICT_OVERLAY_PROMPT`), `CLAUDE.MODEL_BATCH`. |
+| `image-compliance-audit.ts` | `auditProductPos1()` — classe pos-1, puis cherche la 1ʳᵉ alternative propre. **N'écrit jamais sur Shopify.** |
+| `image-compliance.ts` | `runImageCompliance()` — le passage quotidien, appelé en fin de sync (`job1-sync.ts`). |
+
+### Mode de fonctionnement — réglage `image_compliance_mode` (settings, pas de déploiement)
+
+- **`queue` (défaut)** — la proposition part dans `image_review_queue`, **rien n'est écrit sur
+  Shopify**. Un humain tranche sur `/images` (deux vignettes côte à côte). `POST
+  /api/images/review {id, action:"approve"|"reject"}` est le **seul** chemin qui transforme un
+  verdict Vision en écriture Shopify.
+- **`auto`** — bascule immédiate (comportement historique, celui des 141 swaps manuels).
+- **`off`** — no-op.
+
+### Ce qu'il faut savoir avant d'y toucher
+
+- **Le jeu d'images = galerie Shopify ∪ flux Aosom.** La galerie n'est PAS un sur-ensemble du
+  flux : mesuré, ~3 produits sur 8 ont des photos du flux absentes de Shopify. Une candidate
+  venant du flux (`source:"feed"`, `proposedImageId: null`) **exige un téléversement** — elle
+  n'est jamais appliquée automatiquement, même en mode `auto`.
+- **Cache par « stem ».** `imageUrlStem()` réduit l'URL Aosom, la copie Shopify (suffixe
+  `_<uuid>` à l'ingestion) et le redimensionnement `_WxH` à la même identité de photo. Un
+  re-passage complet sur le catalogue coûte donc ~0 appel (`image_classifications`).
+- **Un échec de classification n'est JAMAIS lu comme « non conforme ».** Un verdict manquant
+  laisse le produit non estampillé (`image_checked_at` reste NULL) pour un nouvel essai. Le
+  sens d'erreur sûr, c'est rater une correction, jamais proposer un mauvais swap.
+- **Pool LLM `maintenance`.** Un audit complet (~2 500 appels Vision) représente ~2 jours du
+  plafond `batch` entier et affamerait imports/blog/social. `ClassifyOptions.maintenance`
+  facture au pool **`maintenance`** : non plafonné (`LLM_MAINTENANCE_DAILY_BUDGET` pour le
+  borner) mais **compté et affiché** au tableau de bord. ⚠️ **Scripts seulement** — jamais
+  depuis une route ni un cron.
+- **512px suffit.** 952 tokens/appel contre 1961 à 1024px, 97,9 % d'accord sur 48 images. La
+  seule divergence mesurée était un overlay *manqué* (petits caractères) — le bon sens d'erreur.
+
+### Audit de masse
+
+`scripts/audit-pos1-compliance.mts` — dry-run sur tout le catalogue, checkpoint JSONL
+reprenable, rapport HTML+CSV avec vignettes avant/après. Il **n'a pas de `--apply`**. Ajouter
+`--queue` pour remplir `image_review_queue` et trancher ensuite sur `/images`.
+
+```
+node-x64 --env-file=.env.local node_modules/tsx/dist/cli.mjs \
+  scripts/audit-pos1-compliance.mts --max-seconds 520 --concurrency 4
+```
+
+État au **2026-09-11** (1730 produits live) : 1412 conformes · **312 corrigeables** ·
+6 sans alternative propre · 0 erreur.
 
 ## Meta Pixel (two parts — web dataset `214720653324969`)
 
@@ -199,6 +263,9 @@ GraphQL `themeDuplicate` of the new live. Verify roles: `GET /admin/api/2025-01/
 - `GET /api/cron/sync` — Vercel Cron: Fluid Compute Phase 1 orchestrator (init+chunks+finalize), fires at 06:00 + 06:30 UTC (Bearer CRON_SECRET, maxDuration 800s)
 - `GET /api/cron/sync-refresh` — Manual fallback only: one refresh chunk (not in cron schedule since v0.4.0.0)
 - `GET /api/cron/sync-finalize` — Manual fallback only: finalize step (not in cron schedule since v0.4.0.0)
+- `GET /api/images/review` — pos-1 swap proposals awaiting approval (`?status=pending|applied|rejected|failed|all`)
+- `POST /api/images/review` — `{id, action:"approve"|"reject"}`; approve is the ONLY path that
+  writes a pos-1 reorder to Shopify. Page: `/images`.
 - `POST /api/import/queue` — queue products by SKU array
 - `POST /api/import/generate` — generate Claude content for one job
 - `POST /api/import/push` — push reviewed job to Shopify
@@ -301,6 +368,11 @@ zero errors. Verify with
   `CLAUDE_BATCH_MODEL` or that retry degrades into a same-model no-op.
 - `LLM_DAILY_TOKEN_BUDGET` / `LLM_ASSISTANT_DAILY_BUDGET` — daily token caps for the `batch`
   (default 1.3M) and `assistant` (default 500k) pools
+- `LLM_MAINTENANCE_DAILY_BUDGET` — optional cap for the third pool, `maintenance`
+  (**uncapped by default**). Only operator-launched catalogue passes charge to it — today
+  that is the pos-1 vision audit, via `ClassifyOptions.maintenance`. Its tokens ARE counted
+  and shown on the usage dashboard; it simply doesn't compete with production's `batch` cap.
+  ⚠️ Scripts only — a route or cron must never charge to it.
 - `ASSISTANT_CONTACT_EMAIL` — optional. Shopper-facing address in the assistant's
   limit-reached hand-off. Defaults to `info@ameublodirect.ca`.
 - `ASSISTANT_CONTACT_WHATSAPP` — optional. Digits only (e.g. `15145550123`). **No WhatsApp
