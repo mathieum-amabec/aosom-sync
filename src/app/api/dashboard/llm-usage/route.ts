@@ -16,7 +16,7 @@ import { estimateCostUsd, poolModel, blendedRatePerMTok, ASSUMED_INPUT_SHARE } f
  */
 export const dynamic = "force-dynamic";
 
-const POOLS: LlmBudgetPool[] = ["assistant", "batch"];
+const POOLS: LlmBudgetPool[] = ["assistant", "batch", "maintenance"];
 const WINDOW_DAYS = 7;
 
 export async function GET() {
@@ -37,7 +37,8 @@ export async function GET() {
         budget,
         // Clamped: the gate runs BEFORE each call, so the request that crosses the cap
         // still completes and the counter can land slightly above 100%.
-        pctOfBudget: budget > 0 ? Math.min(100, Math.round((tokens / budget) * 100)) : 0,
+        // An uncapped pool (maintenance, budget = Infinity) has no percentage to report.
+        pctOfBudget: Number.isFinite(budget) && budget > 0 ? Math.min(100, Math.round((tokens / budget) * 100)) : 0,
         costUsd: estimateCostUsd(pool, tokens),
         blendedRatePerMTok: blendedRatePerMTok(pool),
         assumedInputShare: ASSUMED_INPUT_SHARE[pool],

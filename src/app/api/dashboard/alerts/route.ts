@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
 import { env } from "@/lib/config";
 import { getDailyLlmTokensUsed, getDashboardAlerts } from "@/lib/database";
-import { poolBudget, type BudgetPool } from "@/lib/llm-budget";
+import { poolBudget } from "@/lib/llm-budget";
 import { getTokenInfo } from "@/lib/meta-ads-client";
 import { llmPoolStatus, tokenExpiryStatus, type LlmPoolStatus, type TokenExpiryState } from "@/lib/dashboard-metrics";
 
@@ -41,7 +41,10 @@ async function metaTokenAlert(): Promise<MetaTokenAlert> {
   return value;
 }
 
-const LLM_POOLS: BudgetPool[] = ["assistant", "batch"];
+// CAPPED pools only. The alerts panel warns that a cap is approaching, so the uncapped
+// `maintenance` pool has nothing to report here (and llmPoolStatus reads a non-finite
+// budget as "exhausted", which would be a permanent false alarm).
+const LLM_POOLS: LlmPoolStatus["pool"][] = ["assistant", "batch"];
 
 /**
  * Today's (UTC) budget pressure per pool. Composed here rather than in
