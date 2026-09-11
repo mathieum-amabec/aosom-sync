@@ -14,7 +14,13 @@ const getCachedImageVerdicts = vi.fn();
 const putCachedImageVerdict = vi.fn();
 vi.mock("@/lib/database", () => ({ getCachedImageVerdicts, putCachedImageVerdict }));
 
-const { auditProductPos1, imageUrlStem, buildCandidates } = await import("@/lib/image-compliance-audit");
+// Background detection is a real network+sharp path. Mocked so these tests stay hermetic;
+// the default "unknown" makes every candidate rank equal, i.e. pure gallery order.
+const classifyImageBackground = vi.fn();
+vi.mock("@/lib/variant-merger", () => ({ classifyImageBackground }));
+
+const { auditProductPos1, imageUrlStem, buildCandidates, orderByBackgroundPreference } =
+  await import("@/lib/image-compliance-audit");
 
 type Img = { id: number; position: number; src: string };
 const images = (...list: Img[]) => list;
@@ -25,6 +31,7 @@ beforeEach(() => {
   fetchProductImages.mockReset();
   getCachedImageVerdicts.mockReset().mockResolvedValue(new Map());
   putCachedImageVerdict.mockReset().mockResolvedValue(undefined);
+  classifyImageBackground.mockReset().mockResolvedValue("unknown");
 });
 
 describe("imageUrlStem", () => {
@@ -199,5 +206,190 @@ describe("auditProductPos1", () => {
     expect(plan.status).toBe("error");
     expect(plan.error).toContain("Shopify 500");
     expect(classifyProductImage).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Lifestyle > white background > overlay ────────────────────────────
+// The rule: an image carrying a marketing/measurement overlay must NEVER stay at pos-1 when
+// the set (Shopify gallery ∪ Aosom feed) holds any clean photo — lifestyle OR white studio
+// packshot. Between two clean photos, lifestyle wins.
+describe("orderByBackgroundPreference", () => {
+  const cand = (url: string, position: number | null = position0(url)) => ({
+    url,
+    imageId: url,
+    position,
+    source: "shopify" as const,
+  });
+  function position0(url: string): number {
+    return Number(url.replace(/\D/g, "")) || 1;
+  }
+
+  it("ranks lifestyle first, unknown next, white background last", async () => {
+    classifyImageBackground.mockImplementation(async (url: string) =>
+      url.startsWith("life") ? "lifestyle" : url.startsWith("white") ? "white_bg" : "unknown",
+    );
+
+    const out = await orderByBackgroundPreference(
+      [cand("white1.jpg"), cand("huh2.jpg"), cand("life3.jpg")],
+      classifyImageBackground,
+    );
+
+    expect(out.map((c) => c.url)).toEqual(["life3.jpg", "huh2.jpg", "white1.jpg"]);
+    expect(out.map((c) => c.background)).toEqual(["lifestyle", "unknown", "white_bg"]);
+  });
+
+  it("keeps gallery order between candidates of the same rank (stable sort)", async () => {
+    classifyImageBackground.mockResolvedValue("white_bg");
+
+    const out = await orderByBackgroundPreference(
+      [cand("a1.jpg"), cand("b2.jpg"), cand("c3.jpg")],
+      classifyImageBackground,
+    );
+
+    expect(out.map((c) => c.url)).toEqual(["a1.jpg", "b2.jpg", "c3.jpg"]);
+  });
+
+  it("degrades to gallery order when detection throws for every candidate", async () => {
+    classifyImageBackground.mockRejectedValue(new Error("sharp missing"));
+
+    const out = await orderByBackgroundPreference([cand("a1.jpg"), cand("b2.jpg")], classifyImageBackground);
+
+    expect(out.map((c) => c.url)).toEqual(["a1.jpg", "b2.jpg"]);
+    expect(out.map((c) => c.background)).toEqual(["unknown", "unknown"]);
+  });
+});
+
+describe("auditProductPos1 — replacement priority", () => {
+  /** Verdicts keyed by URL, so a test no longer depends on the ORDER calls are made in. */
+  const verdictsByUrl = (map: Record<string, boolean>) =>
+    classifyProductImage.mockImplementation(async (url: string) => ({
+      compliant: map[url] ?? false,
+      reason: map[url] ? "propre" : "texte incrusté",
+    }));
+
+  it("prefers a clean lifestyle shot over a clean white packshot that comes first in the gallery", async () => {
+    fetchProductImages.mockResolvedValue(images(
+      { id: 1, position: 1, src: "overlay.jpg" },
+      { id: 2, position: 2, src: "white.jpg" },
+      { id: 3, position: 3, src: "life.jpg" },
+    ));
+    verdictsByUrl({ "white.jpg": true, "life.jpg": true });
+    classifyImageBackground.mockImplementation(async (url: string) =>
+      url === "life.jpg" ? "lifestyle" : "white_bg",
+    );
+
+    const plan = await auditProductPos1(product());
+
+    expect(plan.status).toBe("fixable");
+    expect(plan.proposedUrl).toBe("life.jpg");
+    expect(plan.proposedBackground).toBe("lifestyle");
+  });
+
+  it("proposes the white packshot when it is the only clean image in the whole set", async () => {
+    fetchProductImages.mockResolvedValue(images(
+      { id: 1, position: 1, src: "overlay.jpg" },
+      { id: 2, position: 2, src: "alsoOverlay.jpg" },
+      { id: 3, position: 3, src: "white.jpg" },
+    ));
+    verdictsByUrl({ "white.jpg": true });
+    classifyImageBackground.mockImplementation(async (url: string) =>
+      url === "white.jpg" ? "white_bg" : "lifestyle",
+    );
+
+    const plan = await auditProductPos1(product());
+
+    // The overlay must not survive at pos-1 just because the only clean photo is a packshot.
+    expect(plan.status).toBe("fixable");
+    expect(plan.proposedUrl).toBe("white.jpg");
+    expect(plan.proposedBackground).toBe("white_bg");
+  });
+
+  it("prefers a clean lifestyle FEED photo over a clean white packshot already in the gallery", async () => {
+    fetchProductImages.mockResolvedValue(images(
+      { id: 1, position: 1, src: "https://cdn.shopify.com/s/files/1/x/files/OVER.jpg" },
+      { id: 2, position: 2, src: "https://cdn.shopify.com/s/files/1/x/files/WHITE.jpg" },
+    ));
+    const feedLife = "https://img-us.aosomcdn.com/100/product/2025/01/01/LIFE.jpg";
+    verdictsByUrl({
+      "https://cdn.shopify.com/s/files/1/x/files/WHITE.jpg": true,
+      [feedLife]: true,
+    });
+    classifyImageBackground.mockImplementation(async (url: string) =>
+      url === feedLife ? "lifestyle" : "white_bg",
+    );
+
+    const plan = await auditProductPos1({ ...product(), feedImages: [feedLife] });
+
+    expect(plan.status).toBe("fixable");
+    expect(plan.proposedSource).toBe("feed");
+    expect(plan.proposedBackground).toBe("lifestyle");
+    // Feed-only: still needs an upload before it can be promoted.
+    expect(plan.proposedImageId).toBeNull();
+  });
+
+  it("still reports 'no_alternative' when every image in the set carries an overlay", async () => {
+    fetchProductImages.mockResolvedValue(images(
+      { id: 1, position: 1, src: "o1.jpg" },
+      { id: 2, position: 2, src: "o2.jpg" },
+      { id: 3, position: 3, src: "o3.jpg" },
+    ));
+    verdictsByUrl({});
+    classifyImageBackground.mockResolvedValue("lifestyle");
+
+    const plan = await auditProductPos1(product());
+
+    expect(plan.status).toBe("no_alternative");
+    expect(plan.scanned).toBe(3);
+  });
+
+  it("spends no extra vision call to apply the preference", async () => {
+    fetchProductImages.mockResolvedValue(images(
+      { id: 1, position: 1, src: "overlay.jpg" },
+      { id: 2, position: 2, src: "white.jpg" },
+      { id: 3, position: 3, src: "life.jpg" },
+    ));
+    verdictsByUrl({ "white.jpg": true, "life.jpg": true });
+    classifyImageBackground.mockImplementation(async (url: string) =>
+      url === "life.jpg" ? "lifestyle" : "white_bg",
+    );
+
+    const plan = await auditProductPos1(product());
+
+    // pos-1 + the single reordered winner: the packshot is never classified at all.
+    expect(plan.calls).toBe(2);
+    expect(classifyProductImage).toHaveBeenCalledTimes(2);
+  });
+
+  it("restores pure gallery order with preferLifestyle: false", async () => {
+    fetchProductImages.mockResolvedValue(images(
+      { id: 1, position: 1, src: "overlay.jpg" },
+      { id: 2, position: 2, src: "white.jpg" },
+      { id: 3, position: 3, src: "life.jpg" },
+    ));
+    verdictsByUrl({ "white.jpg": true, "life.jpg": true });
+    classifyImageBackground.mockImplementation(async (url: string) =>
+      url === "life.jpg" ? "lifestyle" : "white_bg",
+    );
+
+    const plan = await auditProductPos1(product(), { preferLifestyle: false });
+
+    expect(plan.proposedUrl).toBe("white.jpg");
+    expect(classifyImageBackground).not.toHaveBeenCalled();
+  });
+
+  it("falls back to gallery order — and still proposes — when background detection fails", async () => {
+    fetchProductImages.mockResolvedValue(images(
+      { id: 1, position: 1, src: "overlay.jpg" },
+      { id: 2, position: 2, src: "white.jpg" },
+      { id: 3, position: 3, src: "life.jpg" },
+    ));
+    verdictsByUrl({ "white.jpg": true, "life.jpg": true });
+    classifyImageBackground.mockRejectedValue(new Error("image download timeout"));
+
+    const plan = await auditProductPos1(product());
+
+    expect(plan.status).toBe("fixable");
+    expect(plan.proposedUrl).toBe("white.jpg");
+    expect(plan.proposedBackground).toBe("unknown");
   });
 });

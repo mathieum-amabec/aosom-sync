@@ -31,6 +31,7 @@
 import { classifyProductImage, DEFAULT_CLASSIFY_PX, type ClassifyOptions } from "./vision-classifier";
 import { fetchProductImages, type ShopifyProductImage } from "./shopify-client";
 import { getCachedImageVerdicts, putCachedImageVerdict, type CachedImageVerdict } from "./database";
+import { classifyImageBackground, type ImageBackground } from "./variant-merger";
 import { CLAUDE } from "./config";
 
 /** Shopify appends this to a filename when it ingests an external image. */
@@ -99,6 +100,9 @@ export interface Pos1AuditPlan {
   proposedPosition?: number | null;
   proposedReason?: string;
   proposedSource?: "shopify" | "feed";
+  /** Background of the proposed replacement, when it could be determined. Reported so the
+   *  approval queue can show WHY this photo won over the others in the set. */
+  proposedBackground?: ImageBackground;
   /** How many candidate images were examined, out of how many were available. */
   scanned: number;
   candidates: number;
@@ -126,10 +130,33 @@ export interface AuditOptions {
    *  Passed straight through to classifyProductImage; see ClassifyOptions for the
    *  scripts-only caveat on `maintenance`. */
   classifyOptions?: ClassifyOptions;
+  /**
+   * Among the CLEAN alternatives, prefer a lifestyle shot over a white studio packshot.
+   * Default true. See `orderByBackgroundPreference` for why this is an ordering and not a
+   * filter. Set false to restore pure gallery order (what shipped in v0.5.90.0).
+   */
+  preferLifestyle?: boolean;
   /** Injected for tests. */
   classify?: typeof classifyProductImage;
   fetchImages?: typeof fetchProductImages;
+  /** Injected for tests; defaults to the pixel heuristic in variant-merger (zero tokens). */
+  classifyBackground?: (url: string) => Promise<ImageBackground>;
 }
+
+/** Rank used to order clean candidates: lifestyle first, white studio packshot last.
+ *
+ *  `unknown` sits in the MIDDLE on purpose. It means the heuristic could not decide —
+ *  a download timeout, an oversize file, a decode failure — and demoting an undecidable
+ *  photo below a KNOWN white packshot would let a detection failure silently rewrite the
+ *  house rule (pos-1 = lifestyle when one exists, white background otherwise). With every
+ *  background unknown the ranks are all equal, the sort is stable, and the scan order is
+ *  exactly the gallery order this function replaced — i.e. it degrades to the old behaviour
+ *  rather than to a random one. */
+const BACKGROUND_RANK: Record<ImageBackground, number> = {
+  lifestyle: 0,
+  unknown: 1,
+  white_bg: 2,
+};
 
 /**
  * Classify a batch of images, consulting (and filling) the stem cache first.
@@ -201,6 +228,48 @@ export function buildCandidates(gallery: ShopifyProductImage[], feedImages: stri
 }
 
 /**
+ * Order the alternatives so the first CLEAN one found is a lifestyle shot when the set holds
+ * one, and a white studio packshot otherwise.
+ *
+ * ── Why an ordering and not a filter ────────────────────────────────────────────────────
+ * The house rule is a PREFERENCE ("pos-1 = lifestyle when available, white background
+ * otherwise"), never a veto: a clean white packshot at pos-1 beats an overlay at pos-1 every
+ * time. Expressed as a sort, the existing "stop at the first clean image" scan yields
+ * lifestyle > white_bg > overlay for free, and — this is the point — spends exactly the same
+ * number of Claude calls as before. Collecting every clean candidate to rank them afterwards
+ * would have cost one vision call per extra image on the daily guard's 20-call budget.
+ *
+ * Background detection itself is the pixel heuristic from variant-merger: a 100×100 resize
+ * and a border-whiteness ratio. It downloads images but spends ZERO tokens, and returns
+ * "unknown" on any failure, which the rank above absorbs.
+ */
+export async function orderByBackgroundPreference(
+  alternatives: AuditCandidate[],
+  classifyBg: (url: string) => Promise<ImageBackground> = classifyImageBackground,
+): Promise<Array<AuditCandidate & { background: ImageBackground }>> {
+  const withBg = await Promise.all(
+    alternatives.map(async (c) => {
+      let background: ImageBackground = "unknown";
+      try {
+        background = await classifyBg(c.url);
+      } catch {
+        // classifyImageBackground already swallows its own failures into "unknown"; this
+        // guards an injected implementation that throws. Never let background detection —
+        // a nice-to-have ordering signal — abort a compliance audit.
+        background = "unknown";
+      }
+      return { ...c, background };
+    }),
+  );
+  // Stable sort: candidates of equal rank keep their gallery order (Shopify positions first,
+  // feed-only photos after), exactly as buildCandidates laid them out.
+  return withBg
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => BACKGROUND_RANK[a.c.background] - BACKGROUND_RANK[b.c.background] || a.i - b.i)
+    .map(({ c }) => c);
+}
+
+/**
  * Audit ONE product's pos-1 image and, when it is non-compliant, propose the first clean
  * replacement. Pure analysis: this never writes to Shopify and never mutates the product.
  *
@@ -266,7 +335,15 @@ export async function auditProductPos1(
   if (pos1Verdict.compliant) return { ...base, status: "compliant" };
 
   // ── Step 2: pos-1 carries an overlay — find the first clean alternative. ──
-  const alternatives = candidates.filter((c) => imageUrlStem(c.url) !== imageUrlStem(pos1.url));
+  // Ordered lifestyle-first (zero tokens) so "first clean" means "best clean": a lifestyle
+  // shot when the set holds one, a white studio packshot otherwise. Either beats leaving the
+  // overlay at pos-1 — the scan below stops at the first CLEAN image, whatever its
+  // background, so a set with nothing but packshots still yields a proposal.
+  const rawAlternatives = candidates.filter((c) => imageUrlStem(c.url) !== imageUrlStem(pos1.url));
+  const alternatives =
+    options.preferLifestyle === false
+      ? rawAlternatives.map((c) => ({ ...c, background: "unknown" as ImageBackground }))
+      : await orderByBackgroundPreference(rawAlternatives, options.classifyBackground);
   let truncated = false;
 
   for (const alt of alternatives) {
@@ -293,6 +370,7 @@ export async function auditProductPos1(
       proposedPosition: alt.position,
       proposedReason: v.reason,
       proposedSource: alt.source,
+      proposedBackground: alt.background,
     };
   }
 

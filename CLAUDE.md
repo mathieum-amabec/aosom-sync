@@ -121,8 +121,33 @@ masse et le garde-fou quotidien ne puissent pas diverger sur la définition de �
   facture au pool **`maintenance`** : non plafonné (`LLM_MAINTENANCE_DAILY_BUDGET` pour le
   borner) mais **compté et affiché** au tableau de bord. ⚠️ **Scripts seulement** — jamais
   depuis une route ni un cron.
+
+  📌 **Son compteur a affiché 0 pendant deux jours et ce n'était PAS un bug** (enquête du
+  2026-09-11). L'audit des 1730 produits s'est terminé à 20:43 ; le commit qui crée le pool a
+  atterri à 20:55 — 12 minutes plus tard. Tout l'audit a donc été facturé au pool `batch`, ce
+  qui est exactement pourquoi il a crevé le plafond de 1,3 M, bloqué imports/blog/social, et dû
+  être remis à zéro à la main en pleine course (`.tmp-imgaudit/restore.mjs`). Le pool était le
+  REMÈDE, pas le coupable : il n'avait simplement jamais servi un appel. Vérifié en prod le jour
+  même — un vrai appel Vision facturé `maintenance` incrémente bien `daily_llm_budget`
+  (+929 tokens). Depuis, un compteur cassé ne ressemble plus à un compteur vide :
+  `budgetedCreate` journalise `UNRECORDED SPEND` (pool + nombre de tokens + cause) au lieu
+  d'avaler l'erreur dans un `catch` vide.
 - **512px suffit.** 952 tokens/appel contre 1961 à 1024px, 97,9 % d'accord sur 48 images. La
   seule divergence mesurée était un overlay *manqué* (petits caractères) — le bon sens d'erreur.
+- **Le classificateur Vision est BINAIRE** (`{compliant, reason}`) : overlay marketing ou pas.
+  Il ne sait pas distinguer lifestyle et fond blanc — son prompt le lui interdit explicitement
+  (« Ne juge PAS la qualité, le fond, ni la mise en scène »). Une photo packshot propre est donc
+  **déjà** une remplaçante éligible depuis le premier jour, au même titre qu'un lifestyle : le
+  moteur retient la première image PROPRE, quelle qu'elle soit. Mesuré sur la file actuelle :
+  24 des 312 propositions en attente sont des fonds blancs.
+- **Priorité lifestyle > fond blanc** (v0.5.91.0). Entre deux images propres, `auditProductPos1`
+  préfère un lifestyle. C'est un **tri**, jamais un filtre : un packshot propre bat toujours un
+  overlay en pos-1. Le rang vient de `classifyImageBackground` (heuristique pixel de
+  `variant-merger.ts`, **0 token** — elle télécharge, elle n'appelle pas Claude), `unknown` se
+  classe au MILIEU pour qu'un échec de détection ne rétrograde pas une photo sous un fond blanc
+  connu. Trier au lieu de collecter toutes les candidates propres garde le coût Vision
+  identique : le scan s'arrête toujours à la première image propre. `preferLifestyle: false`
+  restaure l'ordre de galerie pur.
 
 ### Audit de masse
 

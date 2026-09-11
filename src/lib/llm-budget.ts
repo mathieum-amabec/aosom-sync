@@ -103,6 +103,22 @@ export async function recordLlmUsage(
 }
 
 /**
+ * Why the `maintenance` counter read zero for its first two days — for the next person who
+ * finds an empty row and concludes the write path is broken (investigated 2026-09-11):
+ *
+ * It was not broken. The 1,730-product pos-1 audit FINISHED at 20:43 local; the commit that
+ * introduced this pool landed at 20:55. The entire audit therefore billed `batch` — which is
+ * precisely why it blew the 1.3M cap, blocked imports/blog/social, and had to be zeroed by
+ * hand mid-run. The pool was the REMEDY, written after the incident, and had simply never
+ * run a call. Verified against production that same day: both `addDailyLlmTokens` and
+ * `recordLlmUsage` increment `daily_llm_budget` correctly for pool "maintenance".
+ *
+ * An empty counter and a broken counter now look different from outside: a failed write logs
+ * "UNRECORDED SPEND" from `budgetedCreate` below, with the token count, instead of vanishing
+ * into an empty catch block.
+ */
+
+/**
  * Budget-gated `client.messages.create(...)`. Asserts the pool's budget BEFORE the
  * call (fail-closed) and records usage AFTER. Use this in place of every direct
  * `client.messages.create(...)`. `pool` defaults to `"batch"`; ONLY the public
@@ -120,8 +136,20 @@ export async function budgetedCreate(
   const message = await client.messages.create(params, options);
   try {
     await recordLlmUsage(pool, message.usage);
-  } catch {
-    /* budget bookkeeping is best-effort; never fail a successful generation */
+  } catch (err) {
+    // Bookkeeping stays best-effort — a counter write must never fail an already-paid-for
+    // generation — but it is NEVER silent again. A swallowed failure here is real spend that
+    // no counter and no dashboard will ever show, findable only by reconciling the Anthropic
+    // console by hand. This line carries everything needed to reconstruct the lost
+    // increment: the pool, the exact token split, and the cause.
+    const inTok = message.usage?.input_tokens ?? 0;
+    const outTok = message.usage?.output_tokens ?? 0;
+    console.error(
+      `[llm-budget] UNRECORDED SPEND — failed to write ${inTok + outTok} token(s) to pool ` +
+        `"${pool}" (in=${inTok} out=${outTok}). The call SUCCEEDED and Anthropic bills it, ` +
+        `but daily_llm_budget is now short by that amount: ` +
+        `${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`,
+    );
   }
   return message;
 }
