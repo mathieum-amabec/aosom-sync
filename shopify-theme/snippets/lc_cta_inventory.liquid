@@ -1,0 +1,34 @@
+{%- comment -%}
+  lc_cta_inventory — the single "see everything" exit at the end of the
+  discovery block (trust bar → most wanted → categories → subcategories →
+  reviews → THIS). Sends shoppers who didn't find their category to the full
+  catalogue rather than to another curated slice.
+
+  Locale-aware through routes.root_url, so the EN storefront stays on /en.
+{%- endcomment -%}
+{%- assign loc = request.locale.iso_code | downcase -%}
+
+<div class="lcci">
+  <div class="page-width lcci__inner">
+    <a class="lcci__btn" href="{{ routes.all_products_collection_url }}" data-umami-event="CTA see all inventory">
+      {% if loc == 'en' %}See the full inventory{% else %}Voir tout l&rsquo;inventaire{% endif %}
+      <span aria-hidden="true">&rarr;</span>
+    </a>
+  </div>
+</div>
+
+<style>
+  .lcci{background:#FFFFFF;padding:.5rem 0 3rem;}
+  .lcci__inner{display:flex;justify-content:center;}
+  .lcci__btn{
+    display:inline-flex;align-items:center;gap:.6rem;
+    background:#1B2A4A;color:#FAFAF8;text-decoration:none;
+    font-family:'DM Sans',sans-serif;font-size:1rem;font-weight:700;
+    padding:.9rem 2rem;border-radius:999px;
+    transition:background .2s ease, transform .2s ease;
+  }
+  .lcci__btn:hover{background:#D4A853;color:#1A2340;transform:translateY(-2px);}
+  @media (max-width:767px){
+    .lcci__btn{width:100%;justify-content:center;font-size:.95rem;padding:.85rem 1.25rem;}
+  }
+</style>

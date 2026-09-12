@@ -1,0 +1,130 @@
+{%- comment -%}
+  lc_trending_products — homepage "Les plus demandés cette semaine".
+
+  Replaces the old "Nouveaux arrivages" featured-collection section. A product
+  carousel (cards + direct buy CTA, NOT navigation tiles), fed client-side from
+  the aosom-sync app (/api/trending), which ranks products by the composite trend
+  score in src/lib/trend-score.ts: 60% 14-day stock velocity + 40% price-drop
+  magnitude, out-of-stock excluded.
+
+  The compare-at strikethrough is rendered ONLY when the API sends a
+  `discountPct` — the API applies the store's canonical ≥10% rabais rule, so this
+  snippet never has to decide. Bilingual via request.locale; PDP links go through
+  routes.root_url so /en stays on /en. Fails closed: no data, no section.
+{%- endcomment -%}
+{%- assign loc = request.locale.iso_code | downcase -%}
+
+<div class="lctp" id="plus-demandes" data-lctp hidden>
+  <div class="page-width lctp__inner">
+    <h2 class="lctp__h">{% if loc == 'en' %}Most wanted this week{% else %}Les plus demand&eacute;s cette semaine{% endif %}</h2>
+    <p class="lctp__sub">{% if loc == 'en' %}What our customers are buying right now{% else %}Ce que nos clients ach&egrave;tent en ce moment{% endif %}</p>
+    <div class="lctp__viewport">
+      <button class="lctp__arr lctp__arr--l" type="button" aria-label="{% if loc == 'en' %}Previous{% else %}Pr&eacute;c&eacute;dent{% endif %}">&#8249;</button>
+      <ul class="lctp__track" role="list"></ul>
+      <button class="lctp__arr lctp__arr--r" type="button" aria-label="{% if loc == 'en' %}Next{% else %}Suivant{% endif %}">&#8250;</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .lctp{background:#FFFFFF;padding:2.75rem 0 2.25rem;}
+  .lctp__h{font-size:clamp(1.6rem,3vw,2.3rem);font-weight:700;color:#1B2A4A;margin:0 0 .35rem;text-align:center;}
+  .lctp__sub{font-size:1rem;color:#797068;margin:0 0 1.6rem;text-align:center;}
+  .lctp__viewport{position:relative;}
+  .lctp__track{
+    display:flex;gap:1rem;margin:0;padding:0 0 .5rem;list-style:none;
+    overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  .lctp__track::-webkit-scrollbar{display:none;}
+  .lctp__card{
+    flex:0 0 72vw;max-width:280px;scroll-snap-align:start;
+    display:flex;flex-direction:column;
+    border:1px solid #E8E6DF;border-radius:12px;overflow:hidden;background:#fff;
+    transition:box-shadow .25s ease, transform .25s ease;
+  }
+  .lctp__card:hover{transform:translateY(-3px);box-shadow:0 12px 30px rgba(27,42,74,.16);}
+  .lctp__imgwrap{position:relative;display:block;aspect-ratio:1/1;background:#FAFAF8;max-width:100%;}
+  .lctp__img{width:100%;height:100%;object-fit:cover;display:block;}
+  .lctp__badge{
+    position:absolute;top:.6rem;left:.6rem;
+    background:#D4A853;color:#1A2340;font-family:'DM Sans',sans-serif;
+    font-size:.75rem;font-weight:700;letter-spacing:.02em;
+    padding:.22rem .5rem;border-radius:4px;
+  }
+  .lctp__body{display:flex;flex-direction:column;gap:.5rem;padding:.85rem .9rem 1rem;flex:1;}
+  .lctp__t{
+    font-size:.92rem;line-height:1.35;color:#1A1A2E;font-weight:500;margin:0;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  .lctp__prices{display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap;margin-top:auto;}
+  .lctp__p{font-size:1.15rem;font-weight:700;color:#1B2A4A;}
+  .lctp__was{font-size:.85rem;color:#9A928A;text-decoration:line-through;}
+  .lctp__cta{
+    display:block;text-align:center;text-decoration:none;
+    background:#1B2A4A;color:#FAFAF8;font-family:'DM Sans',sans-serif;
+    font-size:.88rem;font-weight:700;padding:.6rem .8rem;border-radius:8px;
+    transition:background .2s ease;
+  }
+  .lctp__cta:hover{background:#D4A853;color:#1A2340;}
+  .lctp__arr{
+    display:none;position:absolute;top:38%;z-index:2;
+    width:40px;height:40px;border-radius:50%;border:1px solid #E8E6DF;
+    background:#fff;color:#1B2A4A;font-size:1.5rem;line-height:1;cursor:pointer;
+    box-shadow:0 4px 14px rgba(27,42,74,.14);
+  }
+  .lctp__arr--l{left:-14px;} .lctp__arr--r{right:-14px;}
+  .lctp__arr:hover{background:#1B2A4A;color:#fff;}
+  @media (min-width:768px){
+    .lctp__card{flex:0 0 240px;}
+    .lctp__arr{display:block;}
+  }
+</style>
+
+<script>
+(function(){
+  var wrap=document.querySelector('[data-lctp]');
+  if(!wrap||wrap.dataset.lctpInit) return;
+  wrap.dataset.lctpInit='1';
+  var LOC={% if loc == 'en' %}'en'{% else %}'fr'{% endif %};
+  var ROOT={{ routes.root_url | json }};
+  var API='https://aosom-sync.vercel.app/api/trending';
+  var CTA=LOC==='en'?'Buy now':'Acheter';
+  var track=wrap.querySelector('.lctp__track');
+  var arrL=wrap.querySelector('.lctp__arr--l'), arrR=wrap.querySelector('.lctp__arr--r');
+  var esc=function(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;};
+  var money=function(n){return (typeof n==='number'&&isFinite(n))?'$'+n.toFixed(2):'';};
+
+  fetch(API,{headers:{'Accept':'application/json'}}).then(function(r){return r.ok?r.json():null;}).then(function(data){
+    var items=(data&&data.products)||[];
+    if(!items.length){return;}
+    items.forEach(function(it){
+      var title=(LOC==='en'?(it.titleEn||it.titleFr):(it.titleFr||it.titleEn))||'';
+      var href=String(ROOT).replace(/\/+$/,'')+'/products/'+it.handle;
+      // `discountPct` is only sent when the rabais clears the store's ≥10% rule,
+      // so the strikethrough and the badge ride on the same server-side gate.
+      var onSale=(typeof it.discountPct==='number'&&it.discountPct>0&&money(it.compareAtPrice));
+      var li=document.createElement('li');
+      li.className='lctp__card';
+      li.innerHTML=
+        '<a class="lctp__imgwrap" href="'+esc(href)+'" tabindex="-1" aria-hidden="true">'+
+          (it.imageUrl?('<img class="lctp__img" src="'+esc(it.imageUrl)+'" alt="" loading="lazy" width="280" height="280">'):'')+
+          (onSale?('<span class="lctp__badge">-'+esc(it.discountPct)+'%</span>'):'')+
+        '</a>'+
+        '<div class="lctp__body">'+
+          '<p class="lctp__t">'+esc(title)+'</p>'+
+          '<div class="lctp__prices"><span class="lctp__p">'+money(it.price)+'</span>'+
+            (onSale?('<span class="lctp__was">'+money(it.compareAtPrice)+'</span>'):'')+
+          '</div>'+
+          '<a class="lctp__cta" href="'+esc(href)+'" data-umami-event="Trending buy '+esc(it.sku)+'">'+esc(CTA)+'</a>'+
+        '</div>';
+      track.appendChild(li);
+    });
+    wrap.hidden=false;
+
+    var step=function(){var c=track.querySelector('.lctp__card');return c?c.offsetWidth+16:280;};
+    arrL.addEventListener('click',function(){track.scrollBy({left:-step()*2,behavior:'smooth'});});
+    arrR.addEventListener('click',function(){track.scrollBy({left:step()*2,behavior:'smooth'});});
+  }).catch(function(){/* fail closed: leave the section hidden */});
+})();
+</script>

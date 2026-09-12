@@ -40,6 +40,8 @@ export interface ProductFields {
   status: string | null;
   /** Live first-variant price as a string (e.g. "73.99"), or null. */
   price: string | null;
+  /** Live first-variant compare-at price as a string, or null when not on sale. */
+  compareAtPrice: string | null;
 }
 
 const TTL_MS = 5 * 60 * 1000;
@@ -107,6 +109,7 @@ const EMPTY_FIELDS = (): ProductFields => ({
   handle: null,
   status: null,
   price: null,
+  compareAtPrice: null,
 });
 
 function computeFields(
@@ -117,7 +120,7 @@ function computeFields(
         tags?: string;
         handle?: string;
         status?: string;
-        variants?: Array<{ price?: string }>;
+        variants?: Array<{ price?: string; compare_at_price?: string | null }>;
       }
     | undefined,
 ): ProductFields {
@@ -136,6 +139,7 @@ function computeFields(
     handle: typeof product?.handle === "string" ? product.handle : null,
     status: typeof product?.status === "string" ? product.status : null,
     price: product?.variants?.[0]?.price ?? null,
+    compareAtPrice: product?.variants?.[0]?.compare_at_price ?? null,
   };
 }
 
@@ -166,7 +170,7 @@ export async function resolveProductFields(shopifyProductId: string): Promise<Pr
           tags?: string;
           handle?: string;
           status?: string;
-          variants?: Array<{ price?: string }>;
+          variants?: Array<{ price?: string; compare_at_price?: string | null }>;
         };
       };
       fields = computeFields(data.product);
