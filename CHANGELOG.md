@@ -2,6 +2,30 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.1] - 2026-09-12
+
+Two defects the first QA pass on the draft theme turned up.
+
+### Fixed — a measurement diagram was serving as a category cover
+
+The subcategory tile cover was the best-scoring product's position-1 photo. For "Foyers
+extérieurs" that photo is a DIMENSIONED SPEC DRAWING (52 cm / 33 cm annotations burned in), and
+several other tiles came back as white-background cut-outs sitting directly under a main category
+grid that is all room photography. `isSpecImageUrl` did not catch it: it matches URL keywords and
+these filenames carry none.
+
+`resolveTileCover` now runs two passes over a wider candidate pool (12 SKUs, up from 5) — first
+the best-scoring product tagged `lifestyle-verified`, whose position-1 photo is an in-room shot by
+definition, and only then any photo at all. Six of the eight tiles changed cover.
+
+### Fixed — 136px of dead space under the trust bar
+
+The four new custom-liquid sections did not set `padding_top`/`padding_bottom`. Dawn's schema
+defaults them to 40px each, and every other custom-liquid section on this page already zeroes
+them, so the trust bar rendered 159px tall for a 23px band. Each snippet owns its own vertical
+rhythm; the wrapper contributes none. `apply-landing-refonte.mjs` is idempotent now too, so it can
+be re-run against an already-converted theme.
+
 ## [0.5.92.0] - 2026-09-12
 
 Landing page refonte: the top of the page is now ranked by what is actually moving, not by a

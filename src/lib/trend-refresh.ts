@@ -71,15 +71,26 @@ async function fetchCollectionTitlesEn(collectionIds: string[]): Promise<Map<str
 }
 
 /**
- * Cover photo for a tile: the Shopify photo of its best-scoring in-stock product.
- * Subcategory collections carry no image of their own (3 of 105 do), so the tile
- * borrows one from what is actually selling inside it. Walks down `topSkus` until
- * a product yields a usable photo.
+ * Cover photo for a tile, borrowed from what is actually selling inside the
+ * collection — subcategory collections carry no image of their own (3 of 105 do).
+ *
+ * TWO PASSES, and the order matters. A category tile is a lifestyle surface: the
+ * main category grid directly above it is all room photos, so a white-background
+ * cut-out looks broken next to it, and a DIMENSIONED SPEC DIAGRAM looks like a
+ * bug. Taking the best-scoring product's position-1 photo produced exactly that
+ * ("Foyers extérieurs" came back as a measurement drawing), because
+ * `isSpecImageUrl` filters on URL keywords and these filenames carry none.
+ *
+ * So: first pass takes the best-scoring product tagged `lifestyle-verified`,
+ * whose position-1 photo is a real in-room shot by definition. Only if no
+ * candidate is tagged does the second pass fall back to any photo at all.
  */
 async function resolveTileCover(
   collection: ScoredCollection,
   skuToProductId: Map<string, string>,
 ): Promise<string | null> {
+  let fallback: string | null = null;
+
   for (const sku of collection.topSkus) {
     const productId = skuToProductId.get(sku);
     if (!productId) continue;
@@ -87,9 +98,11 @@ async function resolveTileCover(
     if (fields.status !== "active") continue;
     // pos-1 is the clean lifestyle shot when one exists; array-order otherwise.
     const url = fields.lifestyle.primaryImageUrl ?? fields.images[0] ?? null;
-    if (url) return url;
+    if (!url) continue;
+    if (fields.lifestyle.verified) return url;
+    if (!fallback) fallback = url;
   }
-  return null;
+  return fallback;
 }
 
 /**
