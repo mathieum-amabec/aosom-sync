@@ -225,6 +225,20 @@ async function _initSchemaImpl(): Promise<void> {
       updated_at INTEGER DEFAULT (strftime('%s','now')),
       PRIMARY KEY (aosom_category, collection_role)
     )`,
+    /* Weekly composite trend score (see lib/trend-score.ts). `entity_type` is
+       'product' (entity_id = sku) or 'collection' (entity_id = Shopify
+       collection id). `metadata` is JSON holding the score components plus the
+       display fields the storefront tiles need (handle, title, cover SKU), so
+       serving a tile is one indexed read with no recomputation. */
+    `CREATE TABLE IF NOT EXISTS trend_scores (
+      entity_type TEXT NOT NULL CHECK(entity_type IN ('product', 'collection')),
+      entity_id TEXT NOT NULL,
+      score REAL NOT NULL,
+      computed_at INTEGER NOT NULL,
+      metadata TEXT,
+      PRIMARY KEY (entity_type, entity_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_trend_scores_rank ON trend_scores(entity_type, score DESC)`,
     `CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY, value TEXT NOT NULL,
       updated_at INTEGER DEFAULT (strftime('%s','now'))
@@ -5116,4 +5130,90 @@ export async function expireStaleNewProductDrafts(maxAgeDays = 7): Promise<numbe
     args: [`Auto-expiré: new_product >${maxAgeDays}j`, maxAgeDays],
   });
   return res.rowsAffected;
+}
+
+// ─── Trend scores (weekly composite — see lib/trend-score.ts) ─────────
+
+export type TrendEntityType = "product" | "collection";
+
+export interface TrendScoreRow {
+  entityType: TrendEntityType;
+  entityId: string;
+  score: number;
+  computedAt: number;
+  /** Parsed `metadata` JSON, or null when absent/corrupt. */
+  metadata: Record<string, unknown> | null;
+}
+
+export interface TrendScoreWrite {
+  entityType: TrendEntityType;
+  entityId: string;
+  score: number;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Replace the stored scores for the given entity types, atomically-ish: rows of
+ * those types are deleted and the new set written in one batch, so a reader
+ * never sees a half-recomputed ranking. Only the types present in `rows` are
+ * touched — passing products alone leaves collection scores intact.
+ */
+export async function replaceTrendScores(
+  rows: TrendScoreWrite[],
+  computedAt: number = Math.floor(Date.now() / 1000),
+): Promise<number> {
+  const db = await ensureSchema();
+  const types = [...new Set(rows.map((r) => r.entityType))];
+  if (types.length === 0) return 0;
+
+  const statements: { sql: string; args: (string | number)[] }[] = types.map((t) => ({
+    sql: `DELETE FROM trend_scores WHERE entity_type = ?`,
+    args: [t],
+  }));
+  for (const r of rows) {
+    statements.push({
+      sql: `INSERT INTO trend_scores (entity_type, entity_id, score, computed_at, metadata)
+            VALUES (?, ?, ?, ?, ?)`,
+      args: [r.entityType, r.entityId, r.score, computedAt, JSON.stringify(r.metadata ?? {})],
+    });
+  }
+  await db.batch(statements, "write");
+  return rows.length;
+}
+
+/** Top `limit` scores of one entity type, best first. Served by idx_trend_scores_rank. */
+export async function getTopTrendScores(
+  entityType: TrendEntityType,
+  limit = 20,
+): Promise<TrendScoreRow[]> {
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT entity_type, entity_id, score, computed_at, metadata
+          FROM trend_scores WHERE entity_type = ? ORDER BY score DESC LIMIT ?`,
+    args: [entityType, limit],
+  });
+  return res.rows.map((row) => {
+    const o = rowToObj(row);
+    let metadata: Record<string, unknown> | null = null;
+    try {
+      metadata = o.metadata ? (JSON.parse(String(o.metadata)) as Record<string, unknown>) : null;
+    } catch {
+      metadata = null;
+    }
+    return {
+      entityType: String(o.entity_type) as TrendEntityType,
+      entityId: String(o.entity_id),
+      score: Number(o.score) || 0,
+      computedAt: Number(o.computed_at) || 0,
+      metadata,
+    };
+  });
+}
+
+/** Unix seconds of the most recent trend-score write, or null when never run. */
+export async function getTrendScoresComputedAt(): Promise<number | null> {
+  const db = await ensureSchema();
+  const res = await db.execute(`SELECT MAX(computed_at) AS at FROM trend_scores`);
+  const at = Number(rowToObj(res.rows[0]).at);
+  return Number.isFinite(at) && at > 0 ? at : null;
 }

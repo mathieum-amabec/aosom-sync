@@ -1,0 +1,101 @@
+{%- comment -%}
+  lc_trending_subcats — homepage grid of the 8 most in-demand SUBCATEGORIES.
+
+  Fed client-side from the aosom-sync app (/api/trending). The eight collections
+  are picked by the weekly composite trend score (src/lib/trend-score.ts) rolled
+  up per collection, then de-overlapped (Shopify's subcategories nest, so "Desks"
+  and "Computer Desks" can't both take a tile) and capped at two tiles per
+  top-level category so the grid spans the store.
+
+  Each tile's cover photo is the hero shot of the best-selling product inside
+  that collection — subcategory collections carry no image of their own (3 of 105
+  do), and no image here is AI-generated.
+
+  LAYOUT CONTRACT: this is a real CSS grid — 2 columns on mobile, 4 on desktop,
+  natural wrap. NO horizontal scroll, no scroll-snap, no swipe. All eight tiles
+  must be reachable without a gesture, at every width.
+{%- endcomment -%}
+{%- assign loc = request.locale.iso_code | downcase -%}
+
+<div class="lcsc" id="sous-categories" data-lcsc hidden>
+  <div class="page-width lcsc__inner">
+    <h2 class="lcsc__h">{% if loc == 'en' %}Popular right now{% else %}Populaires en ce moment{% endif %}</h2>
+    <p class="lcsc__sub">{% if loc == 'en' %}The categories moving fastest this week{% else %}Les cat&eacute;gories qui bougent le plus cette semaine{% endif %}</p>
+    <div class="lcsc__grid"></div>
+  </div>
+</div>
+
+<style>
+  .lcsc{background:#FAFAF8;padding:2.75rem 0 3rem;}
+  .lcsc__h{font-size:clamp(1.6rem,3vw,2.3rem);font-weight:700;color:#1B2A4A;margin:0 0 .35rem;text-align:center;}
+  .lcsc__sub{font-size:1rem;color:#797068;margin:0 0 1.6rem;text-align:center;}
+
+  /* The whole point of this section: a grid, never a carousel. */
+  .lcsc__grid{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:.75rem;
+    overflow:visible;
+  }
+  @media (min-width:768px){
+    .lcsc__grid{grid-template-columns:repeat(4,1fr);gap:1rem;}
+  }
+
+  .lcsc__tile{
+    position:relative;display:block;overflow:hidden;
+    border-radius:10px;text-decoration:none;
+    aspect-ratio:4/3;max-width:100%;
+    background:#E8E6DF;
+    transition:transform .25s ease, box-shadow .25s ease;
+  }
+  @media (min-width:768px){ .lcsc__tile{aspect-ratio:1/1;} }
+  .lcsc__tile:hover{transform:translateY(-3px);box-shadow:0 12px 30px rgba(27,42,74,.24);}
+  .lcsc__img{
+    position:absolute;inset:0;width:100%;height:100%;
+    object-fit:cover;display:block;transition:transform .3s ease;
+  }
+  .lcsc__tile:hover .lcsc__img{transform:scale(1.05);}
+  .lcsc__ov{
+    position:absolute;inset:0;
+    background:linear-gradient(to top, rgba(26,35,64,.86) 0%, rgba(26,35,64,.42) 45%, rgba(26,35,64,.05) 78%, rgba(26,35,64,0) 100%);
+  }
+  .lcsc__lbl{
+    position:absolute;left:0;right:0;bottom:0;
+    padding:.6rem .7rem .75rem;
+    font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:700;
+    line-height:1.25;color:#fff;
+  }
+  @media (max-width:767px){ .lcsc__lbl{font-size:.78rem;padding:.5rem .55rem .6rem;} }
+</style>
+
+<script>
+(function(){
+  var wrap=document.querySelector('[data-lcsc]');
+  if(!wrap||wrap.dataset.lcscInit) return;
+  wrap.dataset.lcscInit='1';
+  var LOC={% if loc == 'en' %}'en'{% else %}'fr'{% endif %};
+  var ROOT={{ routes.root_url | json }};
+  var API='https://aosom-sync.vercel.app/api/trending';
+  var grid=wrap.querySelector('.lcsc__grid');
+  var esc=function(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;};
+
+  fetch(API,{headers:{'Accept':'application/json'}}).then(function(r){return r.ok?r.json():null;}).then(function(data){
+    var tiles=(data&&data.subcategories)||[];
+    if(!tiles.length){return;}
+    tiles.forEach(function(t){
+      var label=(LOC==='en'?(t.titleEn||t.titleFr):(t.titleFr||t.titleEn))||'';
+      var href=String(ROOT).replace(/\/+$/,'')+'/collections/'+t.handle;
+      var a=document.createElement('a');
+      a.className='lcsc__tile';
+      a.href=href;
+      a.setAttribute('data-umami-event','Subcat tile '+t.handle);
+      a.innerHTML=
+        (t.imageUrl?('<img class="lcsc__img" src="'+esc(t.imageUrl)+'" alt="" loading="lazy" width="400" height="400">'):'')+
+        '<span class="lcsc__ov"></span>'+
+        '<span class="lcsc__lbl">'+esc(label)+'</span>';
+      grid.appendChild(a);
+    });
+    wrap.hidden=false;
+  }).catch(function(){/* fail closed: leave the section hidden */});
+})();
+</script>

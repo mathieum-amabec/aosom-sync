@@ -1,0 +1,64 @@
+{%- comment -%}
+  Compact trust bar — replaces the old "POURQUOI NOS PRIX SONT SI BAS" block
+  (lc_valueprop), which was a full-height navy panel with a headline, a paragraph
+  and four benefit cards. This is a thin band: three short claims, nothing else.
+
+  The claims are deliberately supply-chain claims, not price claims. Supplier
+  brand names are forbidden in client-facing copy, so "Import direct fabricant"
+  says how the price works without naming who makes the goods.
+
+  Carries one inherited rule: the mobile padding fix for the featured_sale
+  section further down the page lived in the old lc_valueprop <style> block and
+  has nowhere else to go.
+{%- endcomment -%}
+<style>@media(max-width:749px){[class*="__featured_sale-padding"]{padding-top:8px!important;padding-bottom:24px!important}}</style>
+{%- assign loc = request.locale.iso_code | downcase -%}
+
+<div class="lc-tb">
+  <div class="lc-tb__inner">
+    <div class="lc-tb__item">
+      <span class="lc-tb__ic" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l6 3V9l6 3V9l6 3v9z"/><path d="M9 21v-4h6v4"/></svg>
+      </span>
+      <span class="lc-tb__lbl">{% if loc == 'en' %}Direct from the manufacturer{% else %}Import direct fabricant{% endif %}</span>
+    </div>
+    <div class="lc-tb__item">
+      <span class="lc-tb__ic" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h12"/><path d="m12 7 5 5-5 5"/><path d="M21 4v16"/></svg>
+      </span>
+      <span class="lc-tb__lbl">{% if loc == 'en' %}No middleman{% else %}Sans interm&eacute;diaire{% endif %}</span>
+    </div>
+    <div class="lc-tb__item">
+      <span class="lc-tb__ic" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M1 3h15v13H1z"/><path d="M16 8h4l3 3v5h-7z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+      </span>
+      <span class="lc-tb__lbl">{% if loc == 'en' %}Shipping across Canada{% else %}Livraison partout au Canada{% endif %}</span>
+    </div>
+  </div>
+</div>
+
+<style>
+  .lc-tb{background:#1A2340;color:#FAFAF8;}
+  .lc-tb__inner{
+    max-width:1100px;margin:0 auto;
+    display:grid;grid-template-columns:repeat(3,1fr);
+    align-items:center;gap:.75rem;
+    padding:.85rem 1rem;
+  }
+  .lc-tb__item{
+    display:flex;align-items:center;justify-content:center;
+    gap:.55rem;min-width:0;text-align:left;
+  }
+  .lc-tb__ic{display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+  .lc-tb__ic svg{width:20px;height:20px;color:#D4A853;display:block;}
+  .lc-tb__lbl{
+    font-family:'DM Sans',sans-serif;font-size:.9rem;font-weight:600;
+    line-height:1.25;color:#FAFAF8;
+  }
+  @media (max-width:767px){
+    .lc-tb__inner{gap:.25rem;padding:.7rem .5rem;}
+    .lc-tb__item{flex-direction:column;gap:.3rem;text-align:center;}
+    .lc-tb__ic svg{width:18px;height:18px;}
+    .lc-tb__lbl{font-size:.7rem;font-weight:600;}
+  }
+</style>

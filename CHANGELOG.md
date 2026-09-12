@@ -2,6 +2,91 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.0] - 2026-09-12
+
+Landing page refonte: the top of the page is now ranked by what is actually moving, not by a
+hand-picked collection. Everything below is computed from data the daily sync already writes to
+Turso — there is no new call to Aosom (programmatic requests there 403).
+
+### Added — a composite trend score (`src/lib/trend-score.ts`)
+
+Two signals over a rolling 14 days, each normalised to 0..1 before they are combined, weighted
+**60% velocity / 40% price drop**. Velocity is revealed demand — the only signal that says a real
+customer chose the product — so it leads; the discount is an offer rather than a behaviour, but it
+is what makes a tile worth clicking, so it gets a substantial share rather than a token one.
+Neither component is new logic: velocity reuses the `stock_change` sum from
+`selectors/best-sellers.ts` ("Fastest Selling"), the discount reuses `compareAtSubquery` from
+`selectors/map.ts` through the store's canonical `discountPct()` ≥10% gate
+(`selectors/price-drops.ts`). Out-of-stock products are excluded at every level.
+
+Two normalisation decisions that the live data forced:
+
+- **Velocity is log-scaled against p99, not linear against p95.** Velocity is brutally
+  long-tailed (p50 = 6 units, p95 = 29, max = 604). Linear/p95 pinned 113 products at exactly
+  1.0, so the velocity component was constant across the whole top of the ranking and the
+  ordering was silently decided by the discount alone — 9 of the top 10 sat at vNorm = 1.00.
+  log1p/p99 cuts that to 3 of 10 and lets a deeply-discounted slow mover trade places with a
+  fast mover at list price, which is the entire point of a composite score.
+- **The discount anchor is FIXED at 50%, not max-normalised.** Max-normalising would hand a 2%
+  rabais a perfect score in a week where nothing is on sale.
+
+### Added — subcategory ranking, de-overlapped
+
+Collection score = mean of its top 5 product scores (a sum just ranks collections by size; a full
+mean lets a 4-product collection with one hot item outrank a busy one), with a 3-product floor.
+Candidates come from the **live Shopify smart collections**, not `collection_mappings` — 6 of that
+table's 14 distinct sub-role collection ids 404 on both REST and GraphQL, so tiles built from it
+would have linked to dead collections. The ~90 collections whose rules are all `type contains`
+can be evaluated against `products.product_type` offline, which is a real ranking pool.
+
+Two filters keep the grid useful: Shopify's subcategories nest, so a containment check drops
+near-duplicates (without it the eight tiles collapsed into four ways of saying "office desk"),
+and no top-level category may take more than two tiles.
+
+### Added — `trend_scores` table + weekly cron
+
+`GET /api/cron/trend-scores`, **Mondays 07:50 UTC** (03:50 America/Montreal) — the quietest hour,
+deliberately after the 06:00/06:30 sync so the window is fresh, and off the :00/:30 marks the
+other crons crowd. Turso write only: it reads Shopify (collection rules, cover photos, EN titles)
+but writes nothing there, which is why it needs no approval gate.
+
+`GET /api/trending` serves both sections to the storefront (public, CORS-guarded, edge-cached
+30 min). Tiles are served straight from stored metadata; product cards resolve their price live
+from Shopify, because `products.price` in Turso is the SUPPLIER price, not the retail price — the
+trap `/api/ugc-videos` hit in v0.5.54.24.
+
+### Changed — landing page section order (draft theme only)
+
+Hero → compact trust bar → "Les plus demandés cette semaine" → 8 main category tiles → 8 popular
+subcategory tiles → Judge.me reviews → "Voir tout l'inventaire". The "pourquoi nos prix sont bas"
+panel becomes a thin three-claim band; "Nouveaux arrivages" is removed and replaced by the
+trend-ranked carousel; the reviews section moves up from position 12.
+
+Both tile grids are real CSS grids — 2 columns mobile, 4 desktop, natural wrap. The main category
+grid's mobile **swipe carousel** is gone (tile set and labels untouched), so all 16 tiles are
+reachable without a horizontal gesture.
+
+### Changed — Judge.me section, five improvements
+
+Overall rating badge opening the section; reviews with customer photos sorted first; a carousel
+instead of a stack; a visible "Achat vérifié" badge fed by Judge.me's own `data-verified-buyer`;
+and a "Voir tous les avis" link to `/pages/avis-clients`. The app's native `featured_carousel`
+block returns an empty item wrapper (re-probed 2026-09-11 — no featured reviews are configured),
+so the carousel is built over the app's own rendered review markup rather than on a block that
+renders nothing.
+
+### Changed — the stale "759+ produits" statistic
+
+Replaced in all three places it appeared on the landing page (`lc_hero`, `why_us`, `lc_howit`)
+with "Des centaines de produits en stock, livrés cette semaine".
+
+### Added — 41 EN translations
+
+40 of the 74 rankable subcategory collections had **no EN title at all**, plus the
+`/pages/avis-clients` page. Today's eight tiles happen to be translated, so the gap would only
+have surfaced weeks later as French labels on furnishdirect.ca once the weekly re-rank rotated
+them in. Registered through the Translations API — no theme or product edits.
+
 ## [0.5.91.0] - 2026-09-11
 
 Two things that looked like bugs, investigated. One was real, one was a story.

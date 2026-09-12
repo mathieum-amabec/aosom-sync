@@ -1,0 +1,266 @@
+{%- comment -%}
+  Judge.me ALL-REVIEWS section for the homepage, via the app's PUBLIC widget API.
+
+  WHY THE API AND NOT AN APP BLOCK: Judge.me's theme app extension exposes no
+  all-reviews block (probed 2026-08-18 — `all_reviews_widget` and
+  `all_reviews_page` are both dropped silently by Shopify; only `review_widget`,
+  `review_widget_homepage`, `preview_badge` and `featured_carousel` exist).
+  `review_widget_homepage` is a PRODUCT widget: with no product bound it renders a
+  "write a review" button whose modal can never open. `featured_carousel` IS a
+  real carousel block, but re-probed 2026-09-11 it returns an EMPTY
+  `jdgm-carousel__item-wrapper` — no featured reviews are configured, so it
+  renders nothing at all. Every widget below therefore reads the app's own
+  rendered markup from judge.me/api/v1/widgets/*, the same approach
+  snippets/judgeme_core.liquid uses for product pages. The reviews, the stars,
+  the verified flag and the rating are all Judge.me's own data — only the layout
+  is ours.
+
+  FIVE IMPROVEMENTS over the previous static block:
+    1. Overall rating badge opens the section (stars + score + review count),
+       from `all_reviews_rating` and the header's own data attributes.
+    2. Reviews WITH CUSTOMER PHOTOS are sorted first. Judge.me's "photo reviews
+       first" preference is a widget setting that the public API does not honour
+       (the payload arrives newest-first regardless), so the priority is applied
+       here, over the app's own markup.
+    3. The reviews render as a CAROUSEL (scroll-snap + arrows), not a stack —
+       `featured_carousel`, the app's native carousel, is empty (see above).
+    4. A visible "Achat vérifié / Verified purchase" badge on every review that
+       carries Judge.me's own `data-verified-buyer="true"`. The app ships an
+       EMPTY `jdgm-rev__buyer-badge` span for its own JS to fill; we fill it from
+       the same attribute.
+    5. "Voir tous les avis" links to /pages/avis-clients, the Judge.me-fed
+       all-reviews page, through routes.root_url so /en stays on /en.
+
+  DISPLAY ONLY: the API's markup carries a "Write a review" link. It already
+  ships `style="display:none"`, and this snippet also hides it via CSS, because
+  there is no working review-submission path from the storefront.
+
+  The API answers in English regardless of locale (probed: locale/lang/language
+  params are all ignored), so visible strings are localised here.
+{%- endcomment -%}
+
+{%- assign jm_loc = request.locale.iso_code | downcase -%}
+
+<link rel="stylesheet" href="https://cdn.judge.me/shopify_v2.css" media="all">
+
+<div class="lc-jm page-width" id="lc-jm-reviews" data-loc="{{ jm_loc }}">
+  <h2 class="lc-jm__title">
+    {%- if jm_loc == 'en' -%}What our customers say{%- else -%}Ce que disent nos clients{%- endif -%}
+  </h2>
+
+  <div class="lc-jm__badge" id="lc-jm-badge" hidden>
+    <div class="lc-jm__badge-score"><span id="lc-jm-score">&mdash;</span><span class="lc-jm__badge-out">/5</span></div>
+    <div class="lc-jm__badge-right">
+      <div class="lc-jm__badge-stars" id="lc-jm-stars" role="img"></div>
+      <div class="lc-jm__badge-count" id="lc-jm-count"></div>
+    </div>
+  </div>
+
+  <div class="lc-jm__viewport">
+    <button class="lc-jm__arr lc-jm__arr--l" type="button" hidden aria-label="{% if jm_loc == 'en' %}Previous{% else %}Pr&eacute;c&eacute;dent{% endif %}">&#8249;</button>
+    <div class="lc-jm__track" id="lc-jm-track" aria-live="polite">
+      <div class="lc-jm__empty">
+        {%- if jm_loc == 'en' -%}Loading reviews&hellip;{%- else -%}Chargement des avis&hellip;{%- endif -%}
+      </div>
+    </div>
+    <button class="lc-jm__arr lc-jm__arr--r" type="button" hidden aria-label="{% if jm_loc == 'en' %}Next{% else %}Suivant{% endif %}">&#8250;</button>
+  </div>
+
+  <div class="lc-jm__all">
+    <a class="lc-jm__all-link" href="{{ routes.root_url | append: 'pages/avis-clients' | replace: '//pages', '/pages' }}" data-umami-event="Judgeme see all reviews">
+      {%- if jm_loc == 'en' -%}See all reviews{%- else -%}Voir tous les avis{%- endif -%}
+      <span aria-hidden="true">&nbsp;&rarr;</span>
+    </a>
+  </div>
+</div>
+
+<style>
+  .lc-jm{margin:2.5rem auto 3rem;}
+  .lc-jm__title{font-size:clamp(1.6rem,3vw,2.3rem);font-weight:700;color:#1B2A4A;margin:0 0 1.1rem;text-align:center;}
+
+  /* 1. Overall rating badge */
+  .lc-jm__badge{
+    display:flex;align-items:center;justify-content:center;gap:.9rem;
+    background:#FAFAF8;border:1px solid #E8E6DF;border-radius:12px;
+    padding:.85rem 1.2rem;margin:0 auto 1.5rem;width:fit-content;max-width:100%;
+  }
+  .lc-jm__badge-score{display:flex;align-items:baseline;font-family:'DM Sans',sans-serif;color:#1B2A4A;}
+  .lc-jm__badge-score>span:first-child{font-size:2.1rem;font-weight:800;line-height:1;}
+  .lc-jm__badge-out{font-size:.95rem;font-weight:600;color:#797068;margin-left:.1rem;}
+  .lc-jm__badge-right{display:flex;flex-direction:column;gap:.15rem;min-width:0;}
+  .lc-jm__badge-stars{font-size:1.05rem;letter-spacing:.08em;color:#D4A853;line-height:1;}
+  .lc-jm__badge-count{font-size:.85rem;color:#797068;}
+
+  /* 3. Carousel */
+  .lc-jm__viewport{position:relative;}
+  .lc-jm__track{
+    display:flex;gap:1rem;overflow-x:auto;scroll-snap-type:x mandatory;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:.5rem;
+  }
+  .lc-jm__track::-webkit-scrollbar{display:none;}
+  .lc-jm__track .jdgm-rev{
+    flex:0 0 82vw;max-width:340px;scroll-snap-align:start;
+    border:1px solid #E8E6DF;border-radius:12px;background:#fff;
+    padding:1rem 1.1rem;margin:0;
+  }
+  @media (min-width:768px){ .lc-jm__track .jdgm-rev{flex:0 0 320px;} }
+  .lc-jm__empty{padding:1.6rem 0;color:#5b6172;font-size:1rem;text-align:center;width:100%;}
+  .lc-jm__arr{
+    display:none;position:absolute;top:40%;z-index:2;
+    width:40px;height:40px;border-radius:50%;border:1px solid #E8E6DF;
+    background:#fff;color:#1B2A4A;font-size:1.5rem;line-height:1;cursor:pointer;
+    box-shadow:0 4px 14px rgba(27,42,74,.14);
+  }
+  .lc-jm__arr--l{left:-14px;} .lc-jm__arr--r{right:-14px;}
+  .lc-jm__arr:hover{background:#1B2A4A;color:#fff;}
+  @media (min-width:768px){ .lc-jm__arr:not([hidden]){display:block;} }
+
+  /* 4. Verified-purchase badge (we fill Judge.me's own empty span) */
+  .lc-jm__verified{
+    display:inline-flex;align-items:center;gap:.3rem;
+    background:rgba(45,125,90,.1);color:#2D7D5A;
+    font-family:'DM Sans',sans-serif;font-size:.72rem;font-weight:700;
+    padding:.16rem .45rem;border-radius:4px;margin:.25rem 0;
+    white-space:nowrap;
+  }
+  .lc-jm__verified svg{width:11px;height:11px;}
+
+  /* 2. Photo reviews read first, so give their thumbnails room */
+  .lc-jm__track .jdgm-rev__pics img{
+    max-width:72px;border-radius:6px;margin:.35rem .35rem 0 0;
+  }
+  .lc-jm__date{display:block;font-size:.75rem;color:#9A928A;margin-top:.15rem;}
+
+  /* 5. See-all link */
+  .lc-jm__all{text-align:center;margin-top:1.4rem;}
+  .lc-jm__all-link{
+    font-family:'DM Sans',sans-serif;font-size:.95rem;font-weight:700;
+    color:#1B2A4A;text-decoration:none;border-bottom:2px solid #D4A853;padding-bottom:.15rem;
+  }
+  .lc-jm__all-link:hover{color:#D4A853;}
+
+  /* Display only — no submission path exists from the storefront. */
+  .lc-jm .jdgm-write-rev-link,
+  .lc-jm .jdgm-all-reviews__actions{display:none !important;}
+  /* The API ships markup hidden for the app's own JS to reveal; we own it here. */
+  .lc-jm .jdgm-hidden{display:revert !important;}
+  .lc-jm .jdgm-rev__prod-info-wrapper{display:block;font-size:.8rem;margin-top:.2rem;}
+</style>
+
+<script>
+(function () {
+  var root  = document.getElementById("lc-jm-reviews");
+  if (!root || root.dataset.lcjmInit) return;
+  root.dataset.lcjmInit = "1";
+
+  var SHOP  = {{ shop.permanent_domain | json }};
+  var TOKEN = "NUZrHBQpbht0-nHvK_4MlzovnDI"; /* public widget key, same as judgeme_core */
+  var EN    = root.dataset.loc === "en";
+  var track = document.getElementById("lc-jm-track");
+  var badge = document.getElementById("lc-jm-badge");
+  var arrL  = root.querySelector(".lc-jm__arr--l");
+  var arrR  = root.querySelector(".lc-jm__arr--r");
+
+  var EMPTY = EN ? "Be the first to write a review" : "Soyez le premier à laisser un avis";
+  var FAIL  = EN ? "Reviews are unavailable right now." : "Les avis sont indisponibles pour le moment.";
+  var VERIF = EN ? "Verified purchase" : "Achat vérifié";
+  var BASED = function (n) { return EN ? ("Based on " + n + (n > 1 ? " reviews" : " review"))
+                                       : ("Basé sur " + n + " avis"); };
+  var CHECK = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>';
+
+  function message(text) {
+    track.innerHTML = '<div class="lc-jm__empty">' + text + "</div>";
+  }
+
+  /* 1. Overall rating badge — stars rendered from the numeric average. */
+  function renderBadge(avg, count) {
+    if (!(avg > 0) || !(count > 0)) return;
+    document.getElementById("lc-jm-score").textContent = avg.toFixed(1).replace(".", EN ? "." : ",");
+    var full = Math.round(avg);
+    var stars = "";
+    for (var i = 1; i <= 5; i++) stars += (i <= full ? "★" : "☆");
+    var starsEl = document.getElementById("lc-jm-stars");
+    starsEl.textContent = stars;
+    starsEl.setAttribute("aria-label", (EN ? "Average rating " : "Note moyenne ") + avg.toFixed(2) + "/5");
+    document.getElementById("lc-jm-count").textContent = BASED(count);
+    badge.hidden = false;
+  }
+
+  /* 4. Fill Judge.me's own (empty) buyer-badge span from its own data attribute. */
+  function decorateVerified(rev) {
+    if (rev.getAttribute("data-verified-buyer") !== "true") return;
+    var slot = rev.querySelector(".jdgm-rev__buyer-badge");
+    var el = document.createElement("span");
+    el.className = "lc-jm__verified";
+    el.innerHTML = CHECK + "<span>" + VERIF + "</span>";
+    if (slot && slot.parentNode) slot.parentNode.replaceChild(el, slot);
+    else rev.insertBefore(el, rev.firstChild);
+  }
+
+  /* The app's JS normally turns these spinners into dates; without it they'd be blank. */
+  function decorateDate(rev) {
+    var ts = rev.querySelector(".jdgm-rev__timestamp");
+    if (!ts) return;
+    var raw = ts.getAttribute("data-content");
+    var d = raw ? new Date(raw.replace(" UTC", "Z").replace(" ", "T")) : null;
+    if (!d || isNaN(d.getTime())) { ts.remove(); return; }
+    var out = document.createElement("span");
+    out.className = "lc-jm__date";
+    out.textContent = d.toLocaleDateString(EN ? "en-CA" : "fr-CA", { year: "numeric", month: "long", day: "numeric" });
+    ts.parentNode.replaceChild(out, ts);
+  }
+
+  /* 2. Reviews carrying customer photos come first; order is otherwise preserved. */
+  function photosFirst(revs) {
+    return revs
+      .map(function (rev, i) {
+        var pics = rev.querySelector(".jdgm-rev__pics");
+        var hasPhoto = !!(pics && pics.querySelector("img, a"));
+        return { rev: rev, i: i, hasPhoto: hasPhoto };
+      })
+      .sort(function (a, b) { return (b.hasPhoto - a.hasPhoto) || (a.i - b.i); })
+      .map(function (x) { return x.rev; });
+  }
+
+  fetch("https://judge.me/api/v1/widgets/all_reviews_page?shop_domain=" +
+        encodeURIComponent(SHOP) + "&api_token=" + TOKEN,
+        { headers: { Accept: "application/json" } })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      var headerHtml  = (d && d.all_reviews_header) ? d.all_reviews_header : "";
+      var reviewsHtml = (d && d.all_reviews) ? d.all_reviews : "";
+
+      var doc = new DOMParser().parseFromString(
+        "<div id='h'>" + headerHtml + "</div><div id='r'>" + reviewsHtml + "</div>", "text/html");
+
+      var head = doc.querySelector(".jdgm-all-reviews__header");
+      var avg   = head ? parseFloat(head.getAttribute("data-average-rating")) : NaN;
+      var count = head ? parseInt(head.getAttribute("data-number-of-reviews"), 10) : NaN;
+      renderBadge(avg, count);
+
+      var revs = photosFirst(Array.prototype.slice.call(doc.querySelectorAll(".jdgm-rev")));
+      if (!revs.length) { message(EMPTY); return; }
+
+      track.innerHTML = "";
+      revs.forEach(function (rev) {
+        decorateVerified(rev);
+        decorateDate(rev);
+        track.appendChild(rev);
+      });
+
+      /* Arrows only earn their place once the track actually overflows. */
+      requestAnimationFrame(function () {
+        if (track.scrollWidth > track.clientWidth + 8) {
+          arrL.hidden = false; arrR.hidden = false;
+          var step = function () {
+            var c = track.querySelector(".jdgm-rev");
+            return c ? c.offsetWidth + 16 : 320;
+          };
+          arrL.addEventListener("click", function () { track.scrollBy({ left: -step(), behavior: "smooth" }); });
+          arrR.addEventListener("click", function () { track.scrollBy({ left: step(), behavior: "smooth" }); });
+        }
+      });
+    })
+    .catch(function () { message(FAIL); });
+})();
+</script>
