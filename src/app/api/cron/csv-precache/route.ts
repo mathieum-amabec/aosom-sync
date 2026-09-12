@@ -10,16 +10,43 @@ export const dynamic = "force-dynamic";
 
 const BLOB_KEY = "csv/aosom-feed/current.csv";
 const MIN_CSV_BYTES = 10 * 1024 * 1024; // 10 MB sanity floor
-const MIN_CSV_ROWS = 8_000; // Aosom catalog has ~10k products; HTML error pages have none
+/**
+ * Absolute row floor. Lowered from 8,000 on 2026-09-12.
+ *
+ * 8,000 was set when the catalogue was ~10k rows and read as "obviously not an error
+ * page". Aosom drifted down to ~7,960 and every precache run from 2026-09-10 18:00
+ * onward died on `CSV has only 7962 data rows (min 8000)` — a 0.5% shortfall against a
+ * hardcoded number, rejecting a perfectly good feed. The blob froze, Phase 1 kept
+ * re-reading it, and two days later Phase 2 unpublished 30 live products.
+ *
+ * The lesson: a fixed floor set near the live value becomes a landmine the moment the
+ * live value drifts. This floor is now far below any plausible catalogue and only exists
+ * to catch a truncated download or an error page; real shrinkage is caught by the
+ * relative check below, which moves with the catalogue instead of against it.
+ */
+const MIN_CSV_ROWS_ABSOLUTE = 4_000;
+/** A feed under this fraction of the last good one is a truncation, not a catalogue change. */
+const MIN_CSV_SIZE_RATIO = 0.7;
 
-function validateCsvContent(csvText: string): void {
+function validateCsvContent(csvText: string, previousSizeBytes?: number): void {
   // Reject HTML error pages that pass the size floor (e.g. a 12 MB Nginx error page)
   if (csvText.trimStart().startsWith("<")) {
     throw new Error(`CSV response looks like HTML, not a TSV feed (first chars: ${csvText.slice(0, 60)})`);
   }
   const rowCount = csvText.split("\n").filter((l) => l.trim().length > 0).length - 1; // minus header
-  if (rowCount < MIN_CSV_ROWS) {
-    throw new Error(`CSV has only ${rowCount} data rows (min ${MIN_CSV_ROWS})`);
+  if (rowCount < MIN_CSV_ROWS_ABSOLUTE) {
+    throw new Error(`CSV has only ${rowCount} data rows (min ${MIN_CSV_ROWS_ABSOLUTE})`);
+  }
+  // Relative floor: self-adjusting, so it keeps catching truncated downloads without
+  // going off every time Aosom's catalogue drifts a few hundred products.
+  if (previousSizeBytes && previousSizeBytes > 0) {
+    const floor = Math.floor(previousSizeBytes * MIN_CSV_SIZE_RATIO);
+    if (csvText.length < floor) {
+      throw new Error(
+        `CSV is ${csvText.length} bytes, under ${Math.round(MIN_CSV_SIZE_RATIO * 100)}% of the ` +
+          `last cached ${previousSizeBytes} (floor ${floor}) — looks truncated`,
+      );
+    }
   }
 }
 
@@ -65,7 +92,10 @@ export async function GET(request: Request) {
     if (csv_size_bytes < MIN_CSV_BYTES) {
       throw new Error(`CSV suspiciously small: ${csv_size_bytes} bytes (min ${MIN_CSV_BYTES})`);
     }
-    validateCsvContent(csvText);
+    // The previously cached size is the baseline for the relative floor. Read before the
+    // upload so it is still the OLD entry (step 3 below re-reads it for blob cleanup).
+    const priorCache = await getCachedBlobUrl();
+    validateCsvContent(csvText, priorCache?.csv_size_bytes);
 
     // Step 2: Upload to Vercel Blob (fixed key, overwrite in-place)
     const t_upload = Date.now();

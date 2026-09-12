@@ -8,6 +8,26 @@ const FETCH_TIMEOUT_MS = 240_000;
 // 60s covers full body read: 45MB at ~1.5 MB/s (Vercel fn↔Blob) = ~30s + 2× safety margin.
 // Empirical 02 mai: 10s→fallback, 30s→fallback. Body read alone saturates at ~30s.
 const BLOB_FETCH_TIMEOUT_MS = 60_000;
+/**
+ * Past this age the cached CSV is not used, even when it downloads perfectly.
+ *
+ * csv-precache refreshes the blob at 04:00, 05:30, 12:00 and 18:00 UTC — a gap of at most
+ * 10h — so 26h tolerates a full day of failed precache runs before we stop trusting it.
+ * On 2026-09-12 the cache was 44h old: precache had been rejecting every download since
+ * 2026-09-10 18:00 (its row-count floor sat above the real catalogue size), and because
+ * this function preferred the cache unconditionally, Phase 1 re-synced the same frozen
+ * snapshot for two days without a word. Serving stale data silently is worse than failing:
+ * a stale feed still looks like a complete catalogue to every caller downstream.
+ */
+const MAX_BLOB_AGE_HOURS = 26;
+
+/** Cache age in hours; Infinity when the timestamp is missing or unparseable. */
+function blobAgeHours(fetchedAt: string): number {
+  const normalized = fetchedAt.replace(" ", "T") + (fetchedAt.endsWith("Z") ? "" : "Z");
+  const ts = new Date(normalized).getTime();
+  if (!Number.isFinite(ts)) return Infinity;
+  return (Date.now() - ts) / 3_600_000;
+}
 
 function isAbortError(err: unknown): boolean {
   return typeof err === "object" && err !== null && (err as { name?: string }).name === "AbortError";
@@ -29,21 +49,31 @@ export async function fetchAosomCatalog(): Promise<AosomProduct[]> {
   try {
     const cache = await getCachedBlobUrl();
     if (cache) {
-      const t0 = Date.now();
-      const blobResp = await fetch(cache.blob_url, {
-        signal: AbortSignal.timeout(BLOB_FETCH_TIMEOUT_MS),
-      });
+      // Age is checked BEFORE the download, so a frozen cache costs nothing and cannot be
+      // mistaken for a healthy hit. The live fallback below is the correct source when the
+      // cache has gone stale; if Aosom is also unreachable, the caller gets a throw, which
+      // is the outcome we want — Phase 1 stops rather than syncing a two-day-old catalogue.
+      const age_hours = blobAgeHours(cache.fetched_at);
+      if (age_hours > MAX_BLOB_AGE_HOURS) {
+        log("csv_blob_stale", {
+          csv_source: "blob_cache", csv_age_hours: age_hours.toFixed(1),
+          max_age_hours: MAX_BLOB_AGE_HOURS, fetched_at: cache.fetched_at, fallback: "live",
+        });
+      } else {
+        const t0 = Date.now();
+        const blobResp = await fetch(cache.blob_url, {
+          signal: AbortSignal.timeout(BLOB_FETCH_TIMEOUT_MS),
+        });
 
-      if (blobResp.ok) {
-        const text = await blobResp.text();
-        const duration_ms = Date.now() - t0;
-        const tsNormalized = cache.fetched_at.replace(" ", "T") + (cache.fetched_at.endsWith("Z") ? "" : "Z");
-        const age_hours = (Date.now() - new Date(tsNormalized).getTime()) / 3_600_000;
-        log("csv_blob_hit", { csv_source: "blob_cache", csv_age_hours: age_hours.toFixed(1), csv_resolution_ms: duration_ms });
-        return parseTsv(text);
+        if (blobResp.ok) {
+          const text = await blobResp.text();
+          const duration_ms = Date.now() - t0;
+          log("csv_blob_hit", { csv_source: "blob_cache", csv_age_hours: age_hours.toFixed(1), csv_resolution_ms: duration_ms });
+          return parseTsv(text);
+        }
+
+        log("csv_blob_miss", { csv_source: "blob_cache", reason: `HTTP ${blobResp.status}`, fallback: "live" });
       }
-
-      log("csv_blob_miss", { csv_source: "blob_cache", reason: `HTTP ${blobResp.status}`, fallback: "live" });
     } else {
       log("csv_blob_miss", { csv_source: "blob_cache", reason: "no_cache_entry", fallback: "live" });
     }
