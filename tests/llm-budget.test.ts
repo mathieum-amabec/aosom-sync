@@ -6,12 +6,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Per-pool in-memory counter standing in for the daily_llm_budget (day, pool) table.
 const state = vi.hoisted(() => ({
-  used: { assistant: 0, batch: 0 } as Record<string, number>,
+  used: { assistant: 0, batch: 0, maintenance: 0 } as Record<string, number>,
   added: [] as Array<{ pool: string; n: number }>,
+  /** Set to simulate the counter write failing (a Turso blip), to prove it is LOGGED. */
+  failAdd: null as Error | null,
 }));
 vi.mock("@/lib/database", () => ({
   getDailyLlmTokensUsed: async (pool: string) => state.used[pool] ?? 0,
   addDailyLlmTokens: async (pool: string, n: number) => {
+    if (state.failAdd) throw state.failAdd;
     state.added.push({ pool, n });
     state.used[pool] = (state.used[pool] ?? 0) + n;
   },
@@ -29,7 +32,10 @@ const {
 beforeEach(() => {
   state.used.assistant = 0;
   state.used.batch = 0;
+  state.used.maintenance = 0;
   state.added.length = 0;
+  state.failAdd = null;
+  delete process.env.LLM_MAINTENANCE_DAILY_BUDGET;
   delete process.env.LLM_DAILY_TOKEN_BUDGET;
   delete process.env.LLM_ASSISTANT_DAILY_BUDGET;
 });
@@ -130,5 +136,98 @@ describe("llm-budget pools", () => {
       budgetedCreate(client as never, {} as never, undefined, "assistant"),
     ).rejects.toThrow(/budget exceeded/);
     expect(client.messages.create).not.toHaveBeenCalled();
+  });
+});
+
+// ─── The `maintenance` pool actually increments its counter ───────────────────
+// Context (2026-09-11): the pool read zero for its first two days and was assumed broken. It
+// was not — the 1,730-product audit finished 12 minutes BEFORE the pool existed, so it had
+// simply never run a call. These tests pin the wiring so a real regression can't hide behind
+// that story next time.
+describe("maintenance pool accounting", () => {
+  const clientReturning = (input_tokens: number, output_tokens: number) => ({
+    messages: { create: vi.fn(async () => ({ usage: { input_tokens, output_tokens }, content: [] })) },
+  });
+
+  it("budgetedCreate debits the MAINTENANCE pool when pool='maintenance'", async () => {
+    const client = clientReturning(870, 85);
+
+    await budgetedCreate(client as never, { model: "x", max_tokens: 1, messages: [] } as never, undefined, "maintenance");
+
+    expect(client.messages.create).toHaveBeenCalledTimes(1);
+    expect(state.added).toEqual([{ pool: "maintenance", n: 955 }]);
+    expect(state.used.maintenance).toBe(955);
+  });
+
+  it("keeps maintenance spend OUT of the production pools", async () => {
+    await budgetedCreate(clientReturning(900, 100) as never, {} as never, undefined, "maintenance");
+
+    // The whole point of the third pool: a catalogue pass can never starve imports/blog/social.
+    expect(state.used.batch).toBe(0);
+    expect(state.used.assistant).toBe(0);
+    expect(state.used.maintenance).toBe(1000);
+  });
+
+  it("accumulates across calls, the way a full audit does", async () => {
+    for (let i = 0; i < 3; i++) {
+      await budgetedCreate(clientReturning(870, 85) as never, {} as never, undefined, "maintenance");
+    }
+
+    expect(state.used.maintenance).toBe(2865);
+    expect(state.added).toHaveLength(3);
+  });
+
+  it("recordLlmUsage writes a maintenance usage straight through", async () => {
+    await recordLlmUsage("maintenance", { input_tokens: 12, output_tokens: 3 } as never);
+
+    expect(state.added).toEqual([{ pool: "maintenance", n: 15 }]);
+  });
+
+  it("is UNCAPPED by default but capped when LLM_MAINTENANCE_DAILY_BUDGET is set", async () => {
+    expect(poolBudget("maintenance")).toBe(Infinity);
+    process.env.LLM_MAINTENANCE_DAILY_BUDGET = "500";
+    expect(poolBudget("maintenance")).toBe(500);
+
+    state.used.maintenance = 500;
+    await expect(
+      budgetedCreate(clientReturning(1, 1) as never, {} as never, undefined, "maintenance"),
+    ).rejects.toThrow(/pool "maintenance"/);
+  });
+});
+
+describe("a failed counter write is logged, never swallowed", () => {
+  it("logs UNRECORDED SPEND with the pool and the token count, and still returns the message", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    state.failAdd = new Error("SQLITE_BUSY: database is locked");
+    const client = {
+      messages: { create: vi.fn(async () => ({ usage: { input_tokens: 870, output_tokens: 85 }, content: [] })) },
+    };
+
+    // The generation is already paid for — a bookkeeping failure must not throw it away.
+    const msg = await budgetedCreate(client as never, {} as never, undefined, "maintenance");
+    expect(msg).toBeDefined();
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    const line = spy.mock.calls[0][0] as string;
+    expect(line).toContain("UNRECORDED SPEND");
+    expect(line).toContain("955 token(s)");   // enough to reconstruct the lost increment
+    expect(line).toContain('pool "maintenance"');
+    expect(line).toContain("in=870");
+    expect(line).toContain("out=85");
+    expect(line).toContain("SQLITE_BUSY");    // the cause, not just the symptom
+    spy.mockRestore();
+  });
+
+  it("logs the same way for the production pools", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    state.failAdd = new Error("network down");
+
+    await budgetedCreate(
+      { messages: { create: vi.fn(async () => ({ usage: { input_tokens: 5, output_tokens: 5 }, content: [] })) } } as never,
+      {} as never,
+    );
+
+    expect(spy.mock.calls[0][0]).toContain('pool "batch"');
+    spy.mockRestore();
   });
 });

@@ -2,6 +2,65 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.91.0] - 2026-09-11
+
+Two things that looked like bugs, investigated. One was real, one was a story.
+
+### Fixed — a failed token-counter write is no longer invisible
+
+`budgetedCreate` recorded usage inside `try { … } catch {}` with an empty body. A counter write
+that failed therefore left NO trace anywhere: the call succeeded, Anthropic billed it, and
+`daily_llm_budget` silently under-reported. It now logs `UNRECORDED SPEND` with the pool, the
+input/output split and the cause. Bookkeeping stays best-effort — a counter failure must never
+throw away an already-paid-for generation — it is just never silent.
+
+### Investigated — the `maintenance` pool was not broken
+
+Its counter read zero since creation while ~2M tokens of pos-1 audit had supposedly gone
+through it. The write path turned out to be fine; the timeline was the answer:
+
+- the 1,730-product audit **finished at 20:43** (checkpoint mtime),
+- the commit introducing the pool (`833477f`) **landed at 20:55**.
+
+The whole audit ran on code that billed `batch` — which is exactly why it blew the 1.3M cap,
+blocked imports/blog/social, and had to be zeroed by hand mid-run. The pool was the remedy,
+written after the incident, and had never served a single call. Verified against production the
+same day: a real vision call charged to `maintenance` increments the table (+929 tokens, vs the
+~952 tokens/call measured at 512px). Pinned by tests, including the "counter write fails → it
+gets logged" case.
+
+### Added — replacement priority: lifestyle > white background > overlay
+
+`auditProductPos1` now prefers a lifestyle shot when the image set holds several clean
+candidates. It is an **ordering, not a filter**: a clean white packshot still beats an overlay
+at pos-1 every time, which is what the rule is for.
+
+The rank comes from `classifyImageBackground` (the pixel heuristic already in
+`variant-merger.ts`) — it downloads images but spends **zero Claude tokens**. `unknown` ranks in
+the MIDDLE so a detection failure can never demote a photo below a KNOWN packshot, and an
+all-unknown set degrades to exactly the previous gallery order. Sorting rather than collecting
+every clean candidate keeps the vision cost identical: the scan still stops at the first clean
+image. `preferLifestyle: false` restores the v0.5.90.0 behaviour.
+
+### Measured — what the new rule actually changes today: nothing
+
+A zero-token re-analysis (cache-only classifier, 1,703 cache hits, 0 calls, 0 writes) over all
+318 products whose pos-1 carries an overlay:
+
+- **the 6 "no clean alternative" are confirmed, not an oversight.** Every image in each set was
+  scanned (7/7, 14/14, 15/15, 14/14, 15/15, 7/7) and every one carries an overlay. There is no
+  clean white-background photo sitting unused — the premise that only lifestyle images could
+  trigger a proposal was not the code's behaviour.
+- **the classifier is binary** (`{compliant, reason}`) and its prompt forbids judging the
+  background, so a clean packshot has been an eligible replacement since day one. Proof from the
+  queue itself: **24 of the 312 pending proposals are white backgrounds**, 284 lifestyle, 1
+  undetermined.
+- **0 proposals change.** The single apparent difference (`836-068BK`) is the SAME photo under a
+  new Shopify URL after a re-ingest — identical `imageUrlStem`.
+
+So the ordering is insurance against a future set where it matters, not a fix for a live defect.
+Nothing was written to `image_review_queue` (still 312 pending) and nothing to Shopify.
+
 ## [0.5.90.0] - 2026-09-11
 
 A catalogue-wide audit of every product's primary image, and the pos-1 guard turned from
