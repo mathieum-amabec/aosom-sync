@@ -98,12 +98,50 @@ masse et le garde-fou quotidien ne puissent pas diverger sur la définition de �
 
 ### Mode de fonctionnement — réglage `image_compliance_mode` (settings, pas de déploiement)
 
-- **`queue` (défaut)** — la proposition part dans `image_review_queue`, **rien n'est écrit sur
-  Shopify**. Un humain tranche sur `/images` (deux vignettes côte à côte). `POST
-  /api/images/review {id, action:"approve"|"reject"}` est le **seul** chemin qui transforme un
-  verdict Vision en écriture Shopify.
-- **`auto`** — bascule immédiate (comportement historique, celui des 141 swaps manuels).
+- **`hybrid` (défaut depuis v0.5.92.0, actif en prod)** — un cas **évident** s'applique tout
+  seul sur Shopify ; un cas **ambigu** part dans `image_review_queue` pour décision humaine.
+  C'est ce qui empêche la file de regonfler à 312 sans pour autant laisser la machine trancher
+  un choix éditorial.
+  ⚠️ **Il coûte plus cher en appels Vision que les autres** : distinguer évident d'ambigu
+  oblige à scanner **tout** le jeu d'images (`scanAllAlternatives`) au lieu de s'arrêter à la
+  première image propre.
+- **`queue`** — toute proposition part dans `image_review_queue`, **rien n'est écrit sur
+  Shopify**. Un humain tranche sur `/images`. C'est le mode sous lequel le grand nettoyage du
+  catalogue a tourné.
+- **`auto`** — bascule immédiate (comportement historique, celui des 141 swaps manuels), sans
+  aucune distinction évident/ambigu.
 - **`off`** — no-op.
+
+`POST /api/images/review {id, action:"approve"|"reject"}` reste le seul chemin **humain** vers
+une écriture Shopify. Depuis v0.5.92.0 il sait aussi **téléverser** une image du flux
+(`uploadProductImageToFirstPosition`) au lieu de refuser en 422 ; l'id Shopify obtenu est
+réécrit sur la ligne de file, donc un second passage réordonne au lieu de téléverser un doublon.
+
+#### La règle évident vs ambigu (`classifySwapDecision`)
+
+La question n'est **pas** « n'y a-t-il qu'une seule image propre ? » mais « **le gagnant est-il
+unique dans sa catégorie ?** ». Un jeu avec 1 lifestyle et 4 packshots n'a rien d'un pile ou
+face : la préférence codée lifestyle > fond blanc désigne un gagnant, et aucun humain ne ferait
+mieux. Ce que la préférence ne peut PAS départager, c'est une égalité **à l'intérieur** d'une
+catégorie.
+
+| Jeu d'images propres | Décision |
+|---|---|
+| 1 seule image propre, peu importe le fond | **évident** → appliqué |
+| 1 lifestyle + N fonds blancs | **évident** → le lifestyle est appliqué |
+| 2+ lifestyle | **ambigu** → file |
+| 2+ fonds blancs, aucun lifestyle | **ambigu** → file |
+| confiance du modèle < `MIN_AUTO_CONFIDENCE` (0,75) sur le verdict pos-1 **ou** sur l'image proposée | **ambigu** → file |
+| aucune image propre | rien à faire — laissé tel quel, loggé |
+
+⚠️ **Une confiance `undefined` n'est PAS une confiance faible.** Le prompt demandait déjà un
+`confidence` que le parseur jetait ; il est conservé depuis v0.5.92.0 (colonne
+`image_classifications.confidence`). Les 3 127 verdicts antérieurs valent `NULL` = *inconnu*.
+Les lire comme « faible » enverrait tout le cache historique à la file.
+
+⚠️ **Une candidate du flux n'est JAMAIS appliquée sans humain, dans aucun mode** — la promouvoir
+veut dire *ajouter* une photo à un produit en ligne, bien au-delà de « réordonner ce qui est
+déjà là ». `hybrid` la met en file même quand le jeu est par ailleurs évident.
 
 ### Ce qu'il faut savoir avant d'y toucher
 
@@ -150,6 +188,34 @@ masse et le garde-fou quotidien ne puissent pas diverger sur la définition de �
   identique : le scan s'arrête toujours à la première image propre. `preferLifestyle: false`
   restaure l'ordre de galerie pur.
 
+### Garde à l'import — la récidive bloquée à la source (v0.5.92.0)
+
+`enforceCleanPrimaryImage` s'exécute dans `queueForImport`, **après** `selectProductImagesAsync`
+et **avant** la première écriture du produit. Si la pos-1 candidate porte du texte et qu'une
+image propre existe dans le jeu importé, elle est promue **dès la création** — plus aucune
+correction après coup pour les nouveaux imports. Les 312 produits de la file étaient tous des
+imports partis avec une pos-1 sale, corrigés des semaines plus tard, après que des clients
+l'aient vue.
+
+Il **échoue en sécurité dans tous les sens** : erreur de classification, liste vide, ou jeu
+entièrement sale ⇒ la liste est renvoyée **inchangée**, le produit s'importe normalement et le
+cas est loggé. Un avis sur une image ne bloque jamais un import.
+
+**Coût réel** (mesuré sur le profil de l'audit des 1730, pas estimé) :
+
+| | |
+|---|---|
+| pos-1 déjà propre | 81,6 % des produits → **1 appel** |
+| pos-1 sale, corrigible | 18,0 % → 5,52 appels en moyenne |
+| moyenne pondérée | **1,853 appel/produit** |
+| imports mesurés | 349/mois (30 j) |
+| **coût** | **~616 k tokens/mois ≈ 0,81 $/mois** (0,0023 $/produit) |
+
+⚠️ Facturé au pool **`batch`**, pas `maintenance` : le pool de maintenance est *scripts
+seulement* par conception, et l'import est un chemin de production. 616 k tokens/mois ≈ 20 k/jour
+contre un plafond `batch` de 1,3 M/jour — 1,6 %. C'est un plafond haut : à l'import les images
+sont déjà curées et plafonnées à 8, alors que l'audit scannait jusqu'à 15.
+
 ### Audit de masse
 
 `scripts/audit-pos1-compliance.mts` — dry-run sur tout le catalogue, checkpoint JSONL
@@ -161,8 +227,20 @@ node-x64 --env-file=.env.local node_modules/tsx/dist/cli.mjs \
   scripts/audit-pos1-compliance.mts --max-seconds 520 --concurrency 4
 ```
 
-État au **2026-09-11** (1730 produits live) : 1412 conformes · **312 corrigeables** ·
+Audit du **2026-09-11** (1730 produits live) : 1412 conformes · 312 corrigeables ·
 6 sans alternative propre · 0 erreur.
+
+**État au 2026-09-12 — la file est vidée.** Les 312 propositions ont été appliquées en lot via
+`POST /api/images/review` : 302 réordonnancements + **10 téléversements** depuis le flux. Reste
+les 6 sans alternative, inchangés (rien de propre à proposer). Vérifié contre Shopify sur 30
+produits : 30/30 conformes.
+
+⚠️ **~16 % des propositions étaient périmées au moment de l'application** : Shopify avait
+**ré-ingéré** la photo depuis l'audit, ce qui lui donne un **nouvel `image_id`** — le
+`proposed_image_id` stocké renvoyait donc un 404 alors que la photo était toujours dans la
+galerie. Corrigé sans un seul appel Vision en re-pointant la ligne via `imageUrlStem` (même
+photo ⇒ même verdict). **Toute reprise différée d'une file de propositions doit refaire ce
+re-pointage**, sinon une proposition sur six échoue.
 
 ## Meta Pixel (two parts — web dataset `214720653324969`)
 

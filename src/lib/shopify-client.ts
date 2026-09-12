@@ -106,6 +106,51 @@ export async function fetchProductImages(productId: string | number): Promise<Sh
 }
 
 /**
+ * Upload an external photo onto a product and put it at position 1, then verify.
+ *
+ * This is the missing half of the pos-1 guard: ~3 products in 8 carry Aosom feed photos that
+ * never reached the Shopify gallery, so when the only clean alternative is feed-only there is
+ * no image id to reorder — it has to be ingested first. Shopify fetches `src` server-side, so
+ * the photo is copied into the store's CDN (which also means the id it returns is the one to
+ * store, not the Aosom URL).
+ *
+ * Ingestion is asynchronous: the POST returns immediately with an image whose `src` may still
+ * be the pre-processing URL, so we re-GET the same way `moveImageToFirstPosition` does.
+ * Returns the new image id once it is confirmed at position 1, or null if it never settled —
+ * the caller must treat null as "not applied" rather than assume success.
+ */
+export async function uploadProductImageToFirstPosition(
+  productId: string | number,
+  src: string,
+): Promise<string | null> {
+  const post = await shopifyFetch(`/products/${productId}/images.json`, {
+    method: "POST",
+    body: JSON.stringify({ image: { src, position: 1 } }),
+  });
+  if (!post.ok) {
+    throw new Error(`Shopify image upload failed (${productId}): ${post.status} ${await post.text()}`);
+  }
+  const created = (await post.json())?.image as { id?: number } | undefined;
+  if (!created?.id) throw new Error(`Shopify image upload returned no id (${productId})`);
+  const newId = String(created.id);
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const images = await fetchProductImages(productId);
+    const pos1 = images.find((im) => im.position === 1);
+    if (pos1 && String(pos1.id) === newId) return newId;
+    // Ingestion can land the image at the END despite position:1 — nudge it, then re-check.
+    if (attempt === 1 && images.some((im) => String(im.id) === newId)) {
+      await shopifyFetch(`/products/${productId}/images/${newId}.json`, {
+        method: "PUT",
+        body: JSON.stringify({ image: { id: Number(newId), position: 1 } }),
+      });
+    }
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+  return null;
+}
+
+/**
  * Move a product image to position 1 — the storefront pos-1 / featured image — then verify.
  * Same mechanism as the 141 manual pos-1 swaps: PUT position:1, then re-GET to confirm
  * (Shopify reorders asynchronously). Returns true only once pos-1 is confirmed to be

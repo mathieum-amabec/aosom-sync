@@ -19,6 +19,15 @@ export interface ImageClassification {
   compliant: boolean;
   /** One short sentence explaining the verdict (from the model, trimmed). */
   reason: string;
+  /**
+   * Model self-reported confidence, 0..1, when it returned a usable number.
+   *
+   * The prompt has always asked for this and the parser always threw it away. It is kept now
+   * because hybrid mode needs it: a low-confidence verdict is exactly the case a human should
+   * see rather than have applied automatically. `undefined` means "not reported" — or a row
+   * cached before this existed — and must NEVER be read as low confidence.
+   */
+  confidence?: number;
 }
 
 /**
@@ -147,7 +156,7 @@ export async function classifyProductImage(
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error(`classifyProductImage: no JSON in Claude reply: ${text.slice(0, 120)}`);
 
-  let parsed: { has_marketing_overlay?: unknown; reason?: unknown };
+  let parsed: { has_marketing_overlay?: unknown; reason?: unknown; confidence?: unknown };
   try {
     parsed = JSON.parse(jsonMatch[0]);
   } catch {
@@ -161,5 +170,10 @@ export async function classifyProductImage(
     ? parsed.reason.trim().slice(0, 200)
     : (parsed.has_marketing_overlay ? "texte marketing incrusté détecté" : "image propre");
 
-  return { compliant: !parsed.has_marketing_overlay, reason };
+  const confidence =
+    typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence)
+      ? Math.min(1, Math.max(0, parsed.confidence))
+      : undefined;
+
+  return { compliant: !parsed.has_marketing_overlay, reason, confidence };
 }

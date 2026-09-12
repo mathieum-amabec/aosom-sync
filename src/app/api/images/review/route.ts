@@ -11,11 +11,12 @@
  */
 import { NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/auth";
-import { moveImageToFirstPosition } from "@/lib/shopify-client";
+import { moveImageToFirstPosition, uploadProductImageToFirstPosition } from "@/lib/shopify-client";
 import {
   listImageReviews,
   getImageReview,
   setImageReviewStatus,
+  setImageReviewProposedImageId,
   countImageReviews,
   type ImageReviewRow,
 } from "@/lib/database";
@@ -80,13 +81,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, status: "rejected" });
     }
 
-    // A feed-only proposal has no Shopify image to promote: the photo would have to be
-    // uploaded to the product first. Refuse rather than pretend the swap happened.
+    // A feed-only proposal has no Shopify image to promote: the clean photo exists only in the
+    // Aosom feed, so it has to be ingested onto the product before it can be pos-1. Shopify
+    // fetches the URL server-side; the id it mints is what lands back on the queue row, so a
+    // later re-run reorders instead of uploading the same photo twice.
     if (!row.proposedImageId) {
-      return NextResponse.json({
-        error: "L'image propre n'existe que dans le flux Aosom — elle doit d'abord être téléversée sur le produit Shopify.",
-        row,
-      }, { status: 422 });
+      if (!row.proposedUrl) {
+        return NextResponse.json({ error: "Proposition sans image propre — rien à appliquer.", row }, { status: 422 });
+      }
+      const uploadedId = await uploadProductImageToFirstPosition(row.shopifyProductId, row.proposedUrl);
+      if (!uploadedId) {
+        await setImageReviewStatus(id, "failed", "Shopify n'a pas confirmé le téléversement en position 1");
+        return NextResponse.json({ error: "Shopify n'a pas confirmé le téléversement en position 1" }, { status: 502 });
+      }
+      await setImageReviewProposedImageId(id, uploadedId);
+      await setImageReviewStatus(id, "applied");
+      return NextResponse.json({ ok: true, status: "applied", uploaded: true, imageId: uploadedId });
     }
 
     const verified = await moveImageToFirstPosition(row.shopifyProductId, row.proposedImageId);

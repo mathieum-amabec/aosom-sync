@@ -1,5 +1,6 @@
 import { fetchAosomCatalog } from "./csv-fetcher";
 import { mergeVariants, selectProductImagesAsync } from "./variant-merger";
+import { enforceCleanPrimaryImage } from "./image-compliance-audit";
 import { generateProductContent, backfillSeoFields, type GeneratedContent } from "./content-generator";
 import { createShopifyProduct, addProductToCollection } from "./shopify-client";
 import { findCollectionsForProduct, getProduct, linkProductToShopify } from "./database";
@@ -76,7 +77,26 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
     // OR white-background analysis), CSV order next, white studio shots last; cap
     // at 8. Async because it downloads/analyses images — affordable here (import
     // path only, per curated product) but never run at daily-sync scale.
-    const product = { ...rawProduct, images: await selectProductImagesAsync(rawProduct.images) };
+    const curated = await selectProductImagesAsync(rawProduct.images);
+
+    // Guard the pos-1 image BEFORE the product is ever written (spec C). Curation above orders
+    // lifestyle shots first but is blind to text burned onto the photo — which is exactly what
+    // Aosom's dimension infographics are, and how all 312 of the queue's products got a dirty
+    // primary image in the first place. One vision call per import (charged to the `batch`
+    // pool like the rest of the import path — `maintenance` is scripts-only by design), and
+    // the correction becomes free because nothing is live yet.
+    const guard = await enforceCleanPrimaryImage(curated);
+    if (guard.outcome === "reordered") {
+      console.log(`[IMPORT] pos-1 overlay évité pour ${rawProduct.groupKey} — image #${guard.promotedFrom} promue: ${guard.reason}`);
+    } else if (guard.outcome === "no_alternative") {
+      // Rare, and deliberately NOT a blocker: the product imports as-is and the daily guard
+      // will keep an eye on it, the same as the 6 catalogue products in this situation.
+      console.warn(`[IMPORT] ${rawProduct.groupKey}: pos-1 porte du texte et AUCUNE alternative propre — importé tel quel: ${guard.reason}`);
+    } else if (guard.outcome === "skipped") {
+      console.warn(`[IMPORT] ${rawProduct.groupKey}: vérification pos-1 impossible (importé tel quel): ${guard.reason ?? "aucun verdict"}`);
+    }
+
+    const product = { ...rawProduct, images: guard.images };
 
     // Idempotency: skip any product whose SKU already maps to a Shopify product.
     // Re-importing would create a duplicate (createShopifyProduct always POSTs),

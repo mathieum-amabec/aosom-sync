@@ -6,12 +6,22 @@
  * pos-1 (featured) image carries a marketing/measurement overlay. What happens next depends
  * on the configured MODE:
  *
- *   • "queue"  (default) — a proposed swap goes into `image_review_queue` for a human to
- *     approve in /images. NOTHING is written to Shopify. This is the mode the catalogue
- *     cleanup runs under: a wrong auto-swap is invisible until a customer sees it, so the
- *     cheap safeguard is a person glancing at two thumbnails.
- *   • "auto"   — legacy behaviour: swap immediately (the mechanism of the 141 manual swaps).
+ *   • "hybrid" (default since v0.5.92.0) — an OBVIOUS swap applies itself; an AMBIGUOUS one
+ *     goes to `image_review_queue` for a human. "Obvious" means the winner is unique in its
+ *     background class and the model did not hedge — see `classifySwapDecision`. This is the
+ *     mode that keeps a queue from silently growing to 312 rows again while still refusing to
+ *     make an editorial choice on its own.
+ *     ⚠️ It costs more vision calls than the others: deciding obvious-vs-ambiguous requires
+ *     scanning the WHOLE image set, not stopping at the first clean photo.
+ *   • "queue"  — every proposal goes to `image_review_queue`. NOTHING is written to Shopify.
+ *     This is the mode the catalogue cleanup ran under.
+ *   • "auto"   — legacy behaviour: swap immediately (the mechanism of the 141 manual swaps),
+ *     with no obvious/ambiguous distinction at all.
  *   • "off"    — no-op.
+ *
+ * A feed-only candidate is NEVER applied unattended, in any mode: promoting it means uploading
+ * a new photo onto a live product, which is well past "reorder what is already there". Hybrid
+ * queues those even when the set is otherwise obvious.
  *
  * Set it with the `image_compliance_mode` setting; no deploy needed to change it.
  *
@@ -39,14 +49,14 @@ import type { SyncLogEntry } from "@/types/sync";
 
 export const DEFAULT_MAX_CLASSIFICATIONS = 20;
 
-export type ImageComplianceMode = "queue" | "auto" | "off";
-export const DEFAULT_IMAGE_COMPLIANCE_MODE: ImageComplianceMode = "queue";
+export type ImageComplianceMode = "queue" | "auto" | "hybrid" | "off";
+export const DEFAULT_IMAGE_COMPLIANCE_MODE: ImageComplianceMode = "hybrid";
 
 /** Read the mode from settings, falling back to the default on an unset/unknown value. */
 export async function getImageComplianceMode(): Promise<ImageComplianceMode> {
   try {
     const raw = (await getSetting("image_compliance_mode"))?.trim().toLowerCase();
-    if (raw === "queue" || raw === "auto" || raw === "off") return raw;
+    if (raw === "queue" || raw === "auto" || raw === "hybrid" || raw === "off") return raw;
   } catch {
     // Settings unreachable — fall through to the default rather than skipping the pass.
   }
@@ -160,7 +170,10 @@ export async function runImageCompliance(opts: {
     try {
       plan = await auditProductPos1(
         { sku: c.sku, shopifyProductId: c.shopifyProductId, name: c.name, feedImages: feedByProduct.get(c.shopifyProductId) ?? [] },
-        { budget },
+        // hybrid has to see the WHOLE set: "is this the only clean photo, or one of several
+        // equally good ones" is the entire obvious/ambiguous question, and the default scan
+        // stops at the first clean image. The other modes keep the cheaper partial scan.
+        { budget, scanAllAlternatives: mode === "hybrid" },
       );
     } catch (err) {
       // Unresolved — leave UNSTAMPED so it's retried next run.
@@ -187,7 +200,12 @@ export async function runImageCompliance(opts: {
         result.checked++;
         result.nonCompliant++;
 
-        if (mode === "queue") {
+        // hybrid: an OBVIOUS swap applies itself, an ambiguous one goes to a human. Anything
+        // the audit could not label (no full scan, or a partial one) is treated as ambiguous —
+        // the safe direction is always "ask", never "guess and write to a live product".
+        const queueIt = mode === "queue" || (mode === "hybrid" && plan.decision !== "obvious");
+
+        if (queueIt) {
           // Human-in-the-loop: record the proposal, write NOTHING to Shopify.
           try {
             await upsertImageReview({
@@ -204,7 +222,12 @@ export async function runImageCompliance(opts: {
             });
             result.queued++;
             await markResolved(c.shopifyProductId);
-            log("queued for approval", { sku: c.sku, product_id: c.shopifyProductId, proposed_image_id: plan.proposedImageId, was_position: plan.proposedPosition });
+            log("queued for approval", {
+              sku: c.sku, product_id: c.shopifyProductId, proposed_image_id: plan.proposedImageId,
+              was_position: plan.proposedPosition,
+              // In hybrid this is the interesting half: WHY a human has to look at this one.
+              ...(mode === "hybrid" ? { decision: plan.decision ?? "non classé", why: plan.decisionReason, clean_alternatives: plan.cleanAlternatives } : {}),
+            });
             logEntries.push({
               syncRunId: opts.syncRunId,
               timestamp: now,
@@ -223,7 +246,7 @@ export async function runImageCompliance(opts: {
           break;
         }
 
-        // mode === "auto": apply the swap straight away — but only a photo Shopify already
+        // mode "auto", or "hybrid" on an OBVIOUS case: apply the swap straight away — but only a photo Shopify already
         // holds can be promoted by a reorder. A feed-only candidate would need an upload
         // first, which auto mode deliberately does not do (it adds an image to a live
         // product, well past "reorder what is already there"). Queue it for a human instead.

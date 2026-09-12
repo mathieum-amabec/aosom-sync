@@ -103,6 +103,14 @@ export interface Pos1AuditPlan {
   /** Background of the proposed replacement, when it could be determined. Reported so the
    *  approval queue can show WHY this photo won over the others in the set. */
   proposedBackground?: ImageBackground;
+  /** How many CLEAN alternatives the scan found. Only meaningful with `scanAllAlternatives`;
+   *  without it the scan stops at the first clean photo, so this is 0 or 1 by construction. */
+  cleanAlternatives?: number;
+  /** "obvious" = safe to apply unattended; "ambiguous" = a human should pick. See
+   *  `classifySwapDecision`. Only set when the whole set was scanned. */
+  decision?: SwapDecision;
+  /** Plain-French why, surfaced in the queue and the logs. */
+  decisionReason?: string;
   /** How many candidate images were examined, out of how many were available. */
   scanned: number;
   candidates: number;
@@ -136,6 +144,12 @@ export interface AuditOptions {
    * filter. Set false to restore pure gallery order (what shipped in v0.5.90.0).
    */
   preferLifestyle?: boolean;
+  /**
+   * Keep scanning after the first clean photo so the WHOLE set is known. Required to tell an
+   * obvious swap from an ambiguous one (see `classifySwapDecision`), and therefore required by
+   * hybrid mode. Costs one vision call per extra image; default false.
+   */
+  scanAllAlternatives?: boolean;
   /** Injected for tests. */
   classify?: typeof classifyProductImage;
   fetchImages?: typeof fetchProductImages;
@@ -157,6 +171,76 @@ const BACKGROUND_RANK: Record<ImageBackground, number> = {
   unknown: 1,
   white_bg: 2,
 };
+
+/** Can this swap be applied unattended, or does a human have to pick? */
+export type SwapDecision = "obvious" | "ambiguous";
+
+/**
+ * Below this self-reported confidence, a verdict goes to a human even when the set is
+ * otherwise unambiguous. Deliberately low: the model reports ≥0.9 on almost everything, so a
+ * value under 0.75 is it actually hedging, not routine variance.
+ */
+export const MIN_AUTO_CONFIDENCE = 0.75;
+
+/** One clean candidate found during the scan, with everything the decision needs. */
+export interface CleanCandidate {
+  candidate: AuditCandidate;
+  background: ImageBackground;
+  reason: string;
+  confidence?: number;
+}
+
+/**
+ * Obvious, or ambiguous?
+ *
+ * The rule is "is the winner UNIQUE in its class", not "is there only one clean photo in the
+ * set". A set holding one lifestyle shot and four packshots is not a coin toss: the coded
+ * lifestyle > white_bg preference names a winner, and no human judgement would improve on it.
+ * What the preference CANNOT break is a tie inside a class — two different lifestyle photos,
+ * or (with no lifestyle at all) several packshots. There the choice is editorial, so it goes
+ * to a person.
+ *
+ * A dirty pos-1 with exactly one clean photo anywhere is the same thing by definition: unique
+ * in its class.
+ *
+ * Confidence overrides both ways: if the model hedged on the pos-1 verdict or on the photo we
+ * would promote, a human looks, however clean-cut the set appears. A verdict cached before
+ * confidence was kept reports `undefined`, which is NOT low confidence — it is no information,
+ * and treating it as a red flag would send the whole legacy cache to the queue.
+ */
+export function classifySwapDecision(
+  clean: CleanCandidate[],
+  pos1Confidence?: number,
+): { decision: SwapDecision; reason: string } {
+  if (clean.length === 0) return { decision: "ambiguous", reason: "aucune alternative propre" };
+
+  const winner = clean[0];
+  const lowPos1 = pos1Confidence !== undefined && pos1Confidence < MIN_AUTO_CONFIDENCE;
+  const lowWinner = winner.confidence !== undefined && winner.confidence < MIN_AUTO_CONFIDENCE;
+  if (lowPos1 || lowWinner) {
+    return {
+      decision: "ambiguous",
+      reason: `confiance faible du classificateur (${lowPos1 ? "verdict pos-1" : "image proposée"} < ${MIN_AUTO_CONFIDENCE})`,
+    };
+  }
+
+  const rivals = clean.filter((c) => c.background === winner.background).length;
+  if (rivals > 1) {
+    const label = winner.background === "lifestyle" ? "lifestyle" : winner.background === "white_bg" ? "fond blanc" : "indéterminé";
+    return {
+      decision: "ambiguous",
+      reason: `${rivals} images propres de type « ${label} » — la préférence codée ne tranche pas entre elles`,
+    };
+  }
+
+  return {
+    decision: "obvious",
+    reason:
+      clean.length === 1
+        ? "une seule alternative propre dans tout le jeu d'images"
+        : `une seule alternative propre de type « ${winner.background === "lifestyle" ? "lifestyle" : "fond blanc"} », qui l'emporte par la préférence codée`,
+  };
+}
 
 /**
  * Classify a batch of images, consulting (and filling) the stem cache first.
@@ -186,7 +270,7 @@ async function classifyWithCache(
     counters.calls++;
     try {
       const v = await classify(urls[i], opts.classifyOptions);
-      const verdict: CachedImageVerdict = { compliant: v.compliant, reason: v.reason };
+      const verdict: CachedImageVerdict = { compliant: v.compliant, reason: v.reason, confidence: v.confidence };
       verdicts.set(stem, verdict);
       if (opts.useCache) {
         // Record the model AND the resolution the verdict was produced at: they are the two
@@ -269,6 +353,66 @@ export async function orderByBackgroundPreference(
     .map(({ c }) => c);
 }
 
+export interface PrimaryImageGuardResult {
+  /** The image list to actually create the product with. */
+  images: string[];
+  /** "clean" | "reordered" | "no_alternative" | "skipped" (no images / classification failed). */
+  outcome: "clean" | "reordered" | "no_alternative" | "skipped";
+  /** The pos-1 verdict's rationale, for the import log. */
+  reason?: string;
+  /** Index the promoted photo came from, when `outcome` is "reordered". */
+  promotedFrom?: number;
+  /** Vision calls spent (cache hits cost nothing). */
+  calls: number;
+}
+
+/**
+ * Import-time guard: never let a marketing/measurement overlay become a NEW product's pos-1.
+ *
+ * This is the same verdict engine the daily guard uses, moved to the only moment where fixing
+ * it is free — before the product exists. Every one of the 312 proposals the catalogue audit
+ * produced was a product imported with a dirty pos-1 and corrected weeks later, by which time
+ * customers had already seen it. Checking at creation costs the same single vision call and
+ * removes the correction entirely.
+ *
+ * The list is expected PRE-CURATED (`selectProductImagesAsync` has already dropped small
+ * images and ordered lifestyle shots first), so the first clean photo found is also the
+ * best-looking one.
+ *
+ * Fails SAFE in every direction: a classification error, an empty list, or a set where every
+ * photo carries text all return the list UNCHANGED. The product imports normally and the case
+ * is reported for visibility — an import must never be blocked by an image opinion.
+ */
+export async function enforceCleanPrimaryImage(
+  images: string[],
+  options: Pick<AuditOptions, "classify" | "classifyOptions" | "useCache"> = {},
+): Promise<PrimaryImageGuardResult> {
+  if (images.length === 0) return { images, outcome: "skipped", calls: 0 };
+
+  const counters = { calls: 0, cacheHits: 0, lastError: undefined as string | undefined };
+  const opts = { useCache: options.useCache ?? true, classify: options.classify, classifyOptions: options.classifyOptions };
+
+  const verdictFor = async (url: string) => {
+    const map = await classifyWithCache([url], opts, counters);
+    return map.get(imageUrlStem(url));
+  };
+
+  const first = await verdictFor(images[0]);
+  // No verdict = no evidence. Importing an overlay is a small, correctable harm; refusing to
+  // import, or reordering on a guess, is worse.
+  if (!first) return { images, outcome: "skipped", reason: counters.lastError, calls: counters.calls };
+  if (first.compliant) return { images, outcome: "clean", reason: first.reason, calls: counters.calls };
+
+  for (let i = 1; i < images.length; i++) {
+    const v = await verdictFor(images[i]);
+    if (!v || !v.compliant) continue;
+    const reordered = [images[i], ...images.filter((_, j) => j !== i)];
+    return { images: reordered, outcome: "reordered", reason: v.reason, promotedFrom: i, calls: counters.calls };
+  }
+
+  return { images, outcome: "no_alternative", reason: first.reason, calls: counters.calls };
+}
+
 /**
  * Audit ONE product's pos-1 image and, when it is non-compliant, propose the first clean
  * replacement. Pure analysis: this never writes to Shopify and never mutates the product.
@@ -345,6 +489,12 @@ export async function auditProductPos1(
       ? rawAlternatives.map((c) => ({ ...c, background: "unknown" as ImageBackground }))
       : await orderByBackgroundPreference(rawAlternatives, options.classifyBackground);
   let truncated = false;
+  // With `scanAllAlternatives` the loop keeps going past the first clean photo so the whole
+  // set is known — the only way to tell "one obvious winner" from "several equal candidates".
+  // It costs one vision call per extra image, which is why it is opt-in (hybrid mode) rather
+  // than always on: queue mode never needed it, and the daily guard's call budget is small.
+  const scanAll = options.scanAllAlternatives === true;
+  const clean: CleanCandidate[] = [];
 
   for (const alt of alternatives) {
     if (options.budget && options.budget.left <= 0) {
@@ -362,17 +512,31 @@ export async function auditProductPos1(
     if (!v) continue; // unresolved image — skip it, don't let one failure abort the search
     if (!v.compliant) continue;
 
-    return {
-      ...base,
-      status: "fixable",
-      proposedUrl: alt.url,
-      proposedImageId: alt.imageId,
-      proposedPosition: alt.position,
-      proposedReason: v.reason,
-      proposedSource: alt.source,
-      proposedBackground: alt.background,
-    };
+    clean.push({ candidate: alt, background: alt.background, reason: v.reason, confidence: v.confidence });
+    if (!scanAll) break;
   }
 
-  return { ...base, status: truncated ? "deferred" : "no_alternative" };
+  if (clean.length === 0) {
+    return { ...base, status: truncated ? "deferred" : "no_alternative", cleanAlternatives: 0 };
+  }
+
+  // `alternatives` was already ordered lifestyle-first, and the scan walks it in order, so the
+  // first clean photo found IS the preferred one.
+  const winner = clean[0];
+  const { decision, reason: decisionReason } = classifySwapDecision(clean, pos1Verdict.confidence);
+
+  return {
+    ...base,
+    status: "fixable",
+    proposedUrl: winner.candidate.url,
+    proposedImageId: winner.candidate.imageId,
+    proposedPosition: winner.candidate.position,
+    proposedReason: winner.reason,
+    proposedSource: winner.candidate.source,
+    proposedBackground: winner.background,
+    cleanAlternatives: clean.length,
+    // Without a full scan the count is capped at 1, so a decision would be a guess. Report
+    // none rather than a confident-looking "obvious" derived from a partial view.
+    ...(scanAll ? { decision, decisionReason } : {}),
+  };
 }
