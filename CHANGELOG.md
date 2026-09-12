@@ -8,12 +8,12 @@ All notable changes to Aosom Sync will be documented in this file.
 
 Half the live catalogue was reading in English on a French store. 679 of 1382 active products
 showed the raw Aosom supplier copy instead of the French text written at import, and 518 of them
-printed the supplier's name straight into the product page.
+printed the supplier name straight into the product page.
 
 The daily Shopify push compared the feed's English `description` against the product's curated
 French `body_html`. Two different languages never match, so the check reported "the description
 changed" for every product on every run, and the push wrote the English feed copy over the French
-one. Ten products per cron run, three runs a day, every day since 2026-04-06 — a slow burn nobody
+one. Ten products per cron run, three runs a day, every day since 2026-04-05 — a slow burn nobody
 could see, because each product only flipped once and then went quiet.
 
 The feed is no longer treated as a source for authored text. `body_html` now has a single writer,

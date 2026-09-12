@@ -308,10 +308,13 @@ function diffProduct(
   // is the curated FRENCH text written by content-generator at import time (the store's
   // default locale is fr). Comparing the two compares two different languages, so this
   // check was true for every product on every run, and applyToShopify pushed the English
-  // feed copy over the French one. Between e3d340a (2026-04-06) and this fix it silently
-  // converted ~5-7 curated French descriptions per day into raw English: 679 of 1382
-  // active products (49%) ended up showing English on ameublodirect.ca, 518 of them
-  // leaking the supplier name "Aosom" into customer-facing copy.
+  // feed copy over the French one. Between b497260 (2026-04-05 — the commit that first
+  // wired job1-sync to the cron; e3d340a later only reformatted the check) and this fix,
+  // it silently converted ~5-7 curated French descriptions per day into raw English:
+  // 679 of 1382 active products (49%) ended up showing English on ameublodirect.ca,
+  // 518 of them naming "Aosom" in customer-facing copy (552 counting all
+  // forbidden supplier names).
+  // Those figures come from scripts/audit-description-language.mjs.
   //
   // body_html now has exactly ONE writer: createShopifyProduct, at import. The feed is
   // authoritative for price, stock, images and tags — never for authored content. If

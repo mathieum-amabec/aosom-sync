@@ -164,7 +164,7 @@ describe("computeDiffs", () => {
 
   // ── Architectural boundary: the feed never overwrites the authored description ──
   //
-  // Regression guard for the 2026-04-06 → 2026-09-11 bug (e3d340a): the feed
+  // Regression guard for the 2026-04-05 → 2026-09-11 bug (b497260): the feed
   // description is raw ENGLISH, the Shopify body_html is curated FRENCH, so a
   // description diff was true on every run and the daily push overwrote French with
   // English on ~5-7 products/day (679 of 1382 active products, 49%, ended up English).

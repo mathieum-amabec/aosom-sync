@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SyncRun, FieldChange } from "@/types/sync";
+import type { AosomMergedProduct } from "@/types/aosom";
 import type { Phase1BlobProductRow } from "@/lib/sync-blob-storage";
 
 // ─── Stable mock values ───────────────────────────────────────────────
@@ -104,6 +105,10 @@ vi.mock("@/lib/variant-merger", () => ({
 vi.mock("@/lib/diff-engine", () => ({
   computeDiffs: vi.fn().mockReturnValue([]),
   summarizeDiffs: vi.fn().mockReturnValue({ updates: 0, archives: 0, creates: 0 }),
+  // applyToShopify's tags branch calls these two. Without them the branch throws and is
+  // swallowed by its try/catch, which silently turns any tags-branch assertion vacuous.
+  productInStock: vi.fn().mockReturnValue(true),
+  applyStockTags: vi.fn((tags: string[]) => [...tags.filter((t) => t !== "out-of-stock"), "back-in-stock"]),
 }));
 
 vi.mock("@/lib/config", () => ({
@@ -1105,7 +1110,7 @@ describe("runSyncFull — releases lock in finally block on error", () => {
 
 // ─── Architectural boundary: the Shopify push never writes body_html ──
 //
-// Regression guard for the 2026-04-06 → 2026-09-11 bug (e3d340a). The Aosom feed
+// Regression guard for the 2026-04-05 → 2026-09-11 bug (b497260). The Aosom feed
 // description is raw ENGLISH; the Shopify body_html is the curated FRENCH text
 // written once by createShopifyProduct at import. diff-engine no longer emits a
 // "description" change, and applyToShopify must not write bodyHtml even if one
@@ -1136,7 +1141,7 @@ describe("runShopifyPush — never overwrites the authored description", () => {
         images: ["https://img.com/1.jpg"],
         video: "",
         pdf: "",
-        variants: [],
+        variants: [] as AosomMergedProduct["variants"],
       },
     };
   }
@@ -1171,13 +1176,33 @@ describe("runShopifyPush — never overwrites the authored description", () => {
   it("never passes bodyHtml when a tags change travels in the same payload", async () => {
     const diff = descDiff("G3");
     diff.changes.push({ field: "tags", sku: "G3-BK", oldValue: "out-of-stock", newValue: "back-in-stock" });
+    diff.aosomProduct.variants = [
+      { sku: "G3-BK", price: 99.99, qty: 12, color: "Noir", size: "", gtin: "", weight: 5,
+        dimensions: { length: 1, width: 1, height: 1 }, images: [], estimatedArrival: "",
+        outOfStockExpected: "", packageNum: "", boxSize: "", boxWeight: "" },
+    ];
     vi.mocked(diffEngine.computeDiffs).mockReturnValue([diff] as ReturnType<typeof diffEngine.computeDiffs>);
+    // applyToShopify's tags branch is gated on shopifyMap.get(diff.shopifyId); with the
+    // default empty fetchAllShopifyProducts mock the branch never fires and this test
+    // would pass vacuously. Give it the matching Shopify product so the branch executes.
+    vi.mocked(shopifyClient.fetchAllShopifyProducts).mockResolvedValue([
+      {
+        shopifyId: "shop-G3", title: "Product G3", status: "active",
+        bodyHtml: "<p>Le texte français rédigé à l'import</p>", productType: "Test",
+        images: [], tags: ["out-of-stock"],
+        variants: [{ variantId: "V-G3", sku: "G3-BK", price: 99.99, inventoryQuantity: 9,
+          inventoryItemId: "INV-G3", option1: "Noir", option2: null, weight: 5, gtin: "" }],
+      },
+    ] as Awaited<ReturnType<typeof shopifyClient.fetchAllShopifyProducts>>);
 
     await runShopifyPush();
 
-    for (const [, updates] of vi.mocked(shopifyClient.updateShopifyProduct).mock.calls) {
-      expect(updates).not.toHaveProperty("bodyHtml");
-      expect(JSON.stringify(updates)).not.toContain("Raw English feed copy");
-    }
+    // The branch really ran: tags were pushed.
+    expect(shopifyClient.updateShopifyProduct).toHaveBeenCalledOnce();
+    const [, updates] = vi.mocked(shopifyClient.updateShopifyProduct).mock.calls[0];
+    expect(updates).toHaveProperty("tags");
+    // And the authored description still never travels with it.
+    expect(updates).not.toHaveProperty("bodyHtml");
+    expect(JSON.stringify(updates)).not.toContain("Raw English feed copy");
   });
 });
