@@ -105,6 +105,10 @@ export interface SyncResult {
   archived: number;
   errors: number;
   dryRun: boolean;
+  /** Archive diffs refused by guardMassArchive this run. 0 on any healthy run. */
+  archivesBlocked?: number;
+  /** Diffs left unapplied by the per-run chunk cap; the Phase 2 cron picks them up. */
+  pushDeferred?: number;
 }
 
 export interface PriceChangeEntry {
@@ -561,6 +565,13 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
     });
     await updateSyncRunTiming(syncRun.id, timing);
 
+    // GUARD 1 — same plausibility check the cron path got in v0.5.92.5.
+    // `phase1Cp` was already read above for the F3 concurrency guard, and its
+    // `totalProducts` is exactly the right baseline: "products in the Aosom feed at the
+    // last Phase 1 init". Placed before the diff AND before the dry-run return, so a dry
+    // run also surfaces a bad feed instead of quietly reporting on one.
+    assertFeedPlausible(aosomProducts.length, phase1Cp?.totalProducts);
+
     // Phase 4: Diff CSV vs snapshot — only write rows that actually changed
     const t0Diff = Date.now();
     const diffResult = diffProductsLight(aosomProducts, snapshot);
@@ -609,6 +620,23 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
       log("Aucun produit modifié — refreshProducts ignoré", {
         phase: "refreshProducts", duration_ms: timing.refreshProducts, rows_written: 0,
       });
+    }
+
+    // Record "seen in the feed" for EVERY SKU, not just the changed ones refreshProducts
+    // wrote. Sits deliberately next to refreshProducts and AFTER the dry-run return: this
+    // is a write, and a dry run must not perform it. Without this, a manual sync on a
+    // quiet day leaves the same empty "seen today" set that let the cron path archive the
+    // catalogue on 2026-09-12. Non-fatal — degrades to the archive guard below.
+    const t0Seen = Date.now();
+    try {
+      const seen = await markSkusSeen(aosomProducts.map((p) => p.sku));
+      timing.markSkusSeen = Date.now() - t0Seen;
+      log(`last_seen_at rafraîchi pour ${seen} SKU du flux`, {
+        phase: "markSkusSeen", duration_ms: timing.markSkusSeen,
+        feed_skus: aosomProducts.length, rows_stamped: seen,
+      });
+    } catch (seenErr) {
+      log(`markSkusSeen failed (non-fatal): ${seenErr instanceof Error ? seenErr.message : String(seenErr)}`, { phase: "markSkusSeen" });
     }
     await updateSyncRunTiming(syncRun.id, timing);
 
@@ -664,12 +692,49 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
 
     // Step 4: Apply to Shopify (skip if shopifyPush=false for cron phase 1)
     let shopifyResult = { archived: 0, errors: 0, errorMessages: [] as string[], logEntries: [] as Omit<SyncLogEntry, "id">[], updates: 0 };
+    let archivesBlocked = 0;
+    let pushDeferred = 0;
 
     if (shopifyPush) {
       log("Application des changements sur Shopify...");
       const t0Shopify = Date.now();
       const mergedForPush = mergeVariants(aosomProducts);
-      const diffsForPush = computeDiffs(mergedForPush, shopifyProducts);
+      const computedForPush = computeDiffs(mergedForPush, shopifyProducts);
+
+      // GUARD 2 — same archive circuit breaker as runShopifyPush.
+      // This path was strictly MORE dangerous than the cron it mirrors: it had no guard
+      // and no chunk cap, so a bad feed would have drafted the whole catalogue in one
+      // pass rather than 10 per run. Measured on the full computed set, as in Phase 2.
+      const activeShopifyCount = shopifyProducts.filter((p) => p.status === "active").length;
+      const archiveGuard = guardMassArchive(computedForPush, activeShopifyCount, (d) => d.action === "archive");
+      if (archiveGuard.tripped) {
+        log(`ARCHIVAGE DE MASSE BLOQUÉ (sync manuel): ${archiveGuard.reason}`, {
+          phase: "archiveGuard", blocked: archiveGuard.blocked.length,
+          threshold: archiveGuard.threshold, active_shopify: activeShopifyCount,
+          feed_products: aosomProducts.length,
+          blocked_sample: archiveGuard.blocked.slice(0, 10).map((d) => d.groupKey),
+        });
+        await createNotification(
+          "error",
+          `Archivage de masse bloqué (${archiveGuard.blocked.length} produits)`,
+          (archiveGuard.reason ?? "").slice(0, 200),
+        );
+      }
+      archivesBlocked = archiveGuard.blocked.length;
+
+      // Per-run chunk cap, matching runShopifyPush's SHOPIFY_PUSH_CHUNK_SIZE.
+      // computeDiffs sorts price-affecting diffs first, so a capped run drains the
+      // money-affecting corrections before anything else. The remainder is NOT tracked
+      // here — runSync deliberately does not touch shopify_push_checkpoint, which belongs
+      // to the cron; the leftovers are picked up by the next Phase 2 run at 08:00 UTC.
+      const diffsForPush = archiveGuard.allowed.slice(0, SHOPIFY_PUSH_CHUNK_SIZE);
+      pushDeferred = archiveGuard.allowed.length - diffsForPush.length;
+      if (pushDeferred > 0) {
+        log(`Plafond par run: ${diffsForPush.length}/${archiveGuard.allowed.length} diffs appliqués, ${pushDeferred} différés au prochain cycle Phase 2`, {
+          phase: "chunkCap", applied: diffsForPush.length, deferred: pushDeferred, cap: SHOPIFY_PUSH_CHUNK_SIZE,
+        });
+      }
+
       shopifyResult = await applyToShopify(diffsForPush, shopifyProducts, syncRun.id);
       timing.applyToShopify = Date.now() - t0Shopify;
       log("applyToShopify done", { phase: "applyToShopify", duration_ms: timing.applyToShopify, updates: shopifyResult.updates, archived: shopifyResult.archived });
@@ -728,6 +793,7 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
       priceUpdates: changes.priceUpdates, stockChanges: changes.stockChanges,
       newProducts: changes.newProducts, archived: shopifyResult.archived,
       errors: shopifyResult.errors, dryRun: false,
+      archivesBlocked, pushDeferred,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

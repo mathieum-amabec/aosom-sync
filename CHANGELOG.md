@@ -2,6 +2,57 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.6] - 2026-09-12
+
+v0.5.92.5 guarded the cron path and left the dashboard trigger open. Closing that.
+
+`runSync({shopifyPush:true})` — reached from `POST /api/sync/trigger` — mirrors the cron's
+work but had none of its guards, and was **strictly more dangerous than the cron it
+mirrors**: it called `computeDiffs` → `applyToShopify(diffsForPush, …)` with no
+plausibility check, no `last_seen_at` stamp, no archive breaker, and **no chunk cap**, so
+it applied *every* diff in one pass where `runShopifyPush` does 10. On the 2026-09-12 feed
+it would have drafted the whole catalogue in a single run rather than over 45 days.
+
+### Fixed — the same four guards, same thresholds
+
+- **`assertFeedPlausible`** before the diff *and* before the dry-run return, so a dry run
+  also surfaces a bad feed. Baseline is `phase1Cp.totalProducts`, already in scope from the
+  existing F3 concurrency guard and exactly the right number: "products in the Aosom feed
+  at the last Phase 1 init".
+- **`markSkusSeen`** next to `refreshProducts`, i.e. *after* the dry-run return — it is a
+  write, and a dry run must not perform it. Without it a manual sync on a quiet day left
+  the same empty "seen today" set that let the cron archive the catalogue.
+- **`guardMassArchive`** on the full computed set, with the operator notification.
+- **Per-run chunk cap** at `SHOPIFY_PUSH_CHUNK_SIZE` (10). `computeDiffs` sorts
+  price-affecting diffs first, so a capped run drains the money-affecting corrections
+  first. `runSync` deliberately does **not** touch `shopify_push_checkpoint` — that belongs
+  to the cron — so the remainder is picked up by the next Phase 2 run at 08:00 UTC.
+- `SyncResult` gains `archivesBlocked` and `pushDeferred` so the dashboard sees both.
+
+### Already safe, verified not assumed
+
+`runRemovedFromFeedDraft` (Phase 6b of the same push branch) is the *other* mass-unpublish
+vector here, and it already carries its own coverage guard — `MIN_ACTIVE_COVERAGE = 0.8`
+on active-SKU coverage, which refuses to act on a suspect feed. Left untouched.
+
+### Tests
+
+7 new tests driving the incident through the manual trigger: 1,349 archives against 1,382
+active are blocked while a legitimate tags diff applies in the same run; 40 archives under
+the ceiling are capped to 10 with 30 deferred; 6 real removals still archive; an empty feed
+and a sub-50% feed each throw *before* any DB or Shopify write; `last_seen_at` is stamped on
+a quiet day and never on a dry run.
+
+The tags diff is used as the "surviving legitimate diff" rather than a price diff because
+the price branch runs through `writePriceVerified` → `fetchVariant`, which these mocks do
+not provide — the assertion would have passed vacuously, which is the trap PR #464 already
+walked into once.
+
+⚠️ The suite's **default** feed fixture was an *empty* feed, which `assertFeedPlausible`
+now correctly rejects. It is now a healthy 120-product feed matching the snapshot, so
+`toWrite` stays empty exactly as before while the feed itself is plausible. Seven existing
+`runSync` tests depended on that default; none of their assertions changed.
+
 ## [0.5.92.5] - 2026-09-12
 
 Phase 2 unpublished 30 live, in-stock products this morning. Every component reported
