@@ -157,6 +157,7 @@ const shopifyClient = await import("@/lib/shopify-client");
 const diffEngine = await import("@/lib/diff-engine");
 const blobStorage = await import("@/lib/sync-blob-storage");
 const syncLock = await import("@/lib/sync-lock");
+const csvFetcher = await import("@/lib/csv-fetcher");
 const { runSync, runShopifyPush, runSyncInit, runSyncRefreshChunk, runSyncFinalize, runSyncFull } = await import("@/jobs/job1-sync");
 
 // ─── Test utilities ───────────────────────────────────────────────────
@@ -174,7 +175,14 @@ function resetAllMocks() {
   vi.mocked(db.recordPriceChanges).mockResolvedValue(undefined);
   vi.mocked(db.createNotification).mockResolvedValue(1);
   vi.mocked(db.getAllProductsAsAosom).mockResolvedValue([]);
-  vi.mocked(db.getProductsSnapshot).mockResolvedValue(new Map());
+  // Default feed: a healthy catalogue with nothing changed (feed matches the snapshot), so
+  // toWrite is empty exactly as before while the feed itself stays plausible. The previous
+  // default was an EMPTY feed, which assertFeedPlausible now rejects — correctly: an empty
+  // feed is indistinguishable from "the supplier withdrew everything", which is how 30 live
+  // products got unpublished on 2026-09-12. Tests that want an empty feed now say so.
+  const defaultFeed = makeUnchangedFeed(120);
+  vi.mocked(csvFetcher.fetchAosomCatalog).mockResolvedValue(defaultFeed.products);
+  vi.mocked(db.getProductsSnapshot).mockResolvedValue(defaultFeed.snapshot as Awaited<ReturnType<typeof db.getProductsSnapshot>>);
   vi.mocked(db.getShopifyPushCheckpoint).mockResolvedValue(null);
   vi.mocked(db.saveShopifyPushCheckpoint).mockResolvedValue(undefined);
   vi.mocked(db.getPhase1Checkpoint).mockResolvedValue(null);
@@ -1376,5 +1384,163 @@ describe("runShopifyPush — never overwrites the authored description", () => {
     // And the authored description still never travels with it.
     expect(updates).not.toHaveProperty("bodyHtml");
     expect(JSON.stringify(updates)).not.toContain("Raw English feed copy");
+  });
+});
+
+// ─── Scenario 8: the MANUAL trigger gets the same guards ──────────────
+//
+// v0.5.92.5 guarded the cron path (runSyncFull / runShopifyPush) but left runSync — the
+// dashboard trigger behind POST /api/sync/trigger — wide open, and it was strictly MORE
+// dangerous than the cron it mirrors: no plausibility check, no last_seen_at stamp, no
+// archive breaker, and no chunk cap, so it applied EVERY diff in one pass instead of 10.
+// On the 2026-09-12 feed it would have drafted the entire catalogue in a single run.
+// These tests reproduce that incident through the manual trigger.
+
+describe("runSync — manual trigger carries the same guards as the cron", () => {
+  beforeEach(resetAllMocks);
+
+  const activeStore = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      shopifyId: `P${i}`, title: `Product P${i}`, status: "active" as const,
+      bodyHtml: "<p>fr</p>", productType: "Test", images: [], tags: [],
+      variants: [{ variantId: `V-P${i}`, sku: `P${i}-BK`, price: 10, inventoryQuantity: 5,
+        inventoryItemId: `INV-P${i}`, option1: null, option2: null, weight: 1, gtin: "" }],
+    }));
+
+  const archiveDiff = (id: string) => {
+    const d = makeProductDiff(id, "archive");
+    d.shopifyId = id;
+    d.changes = [{ field: "removed_product", sku: `${id}-BK`, oldValue: "t", newValue: null }] as unknown as typeof d.changes;
+    return d;
+  };
+
+  /**
+   * A tags diff, the one non-archive branch of applyToShopify that is fully exercisable
+   * under these mocks (the price branch goes through writePriceVerified → fetchVariant,
+   * which is not mocked here). Shape copied from the PR #464 tags test, which proved the
+   * branch really fires rather than passing vacuously.
+   */
+  const tagsDiff = (id: string) => {
+    const d = makeProductDiff(id, "update");
+    d.shopifyId = id;
+    d.changes = [{ field: "tags", sku: `${id}-BK`, oldValue: "out-of-stock", newValue: "back-in-stock" }] as unknown as typeof d.changes;
+    d.aosomProduct = {
+      ...makeUnchangedFeed(1).products[0],
+      sku: id,
+      variants: [{ sku: `${id}-BK`, price: 10, qty: 12, color: "", size: "", gtin: "", weight: 1,
+        dimensions: { length: 1, width: 1, height: 1 }, images: [], estimatedArrival: "",
+        outOfStockExpected: "", packageNum: "", boxSize: "", boxWeight: "" }],
+    } as unknown as typeof d.aosomProduct;
+    return d;
+  };
+
+  it("blocks the 2026-09-12 mass archive when driven through the manual trigger", async () => {
+    vi.mocked(shopifyClient.fetchAllShopifyProducts).mockResolvedValue(
+      activeStore(1382).map((p) => ({ ...p, tags: ["out-of-stock"] })) as Awaited<ReturnType<typeof shopifyClient.fetchAllShopifyProducts>>
+    );
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue(
+      [tagsDiff("P0"), ...Array.from({ length: 1349 }, (_, i) => archiveDiff(`P${i + 1}`))] as ReturnType<typeof diffEngine.computeDiffs>
+    );
+
+    const result = await runSync({ shopifyPush: true });
+
+    // Nothing drafted — the assertion that was impossible to satisfy before this change.
+    expect(shopifyClient.draftShopifyProduct).not.toHaveBeenCalled();
+    expect(result.archived).toBe(0);
+    expect(result.archivesBlocked).toBe(1349);
+    expect(db.createNotification).toHaveBeenCalledWith(
+      "error", expect.stringContaining("Archivage de masse bloqué"), expect.any(String)
+    );
+    // The legitimate non-archive diff still applied in the very same run.
+    expect(shopifyClient.updateShopifyProduct).toHaveBeenCalledOnce();
+    expect(vi.mocked(shopifyClient.updateShopifyProduct).mock.calls[0][1]).toHaveProperty("tags");
+  });
+
+  it("caps the push at SHOPIFY_PUSH_CHUNK_SIZE instead of applying every diff at once", async () => {
+    vi.mocked(shopifyClient.fetchAllShopifyProducts).mockResolvedValue(
+      activeStore(1382) as Awaited<ReturnType<typeof shopifyClient.fetchAllShopifyProducts>>
+    );
+    // 40 archives — under the ceiling of 69, so the archive guard stays quiet and the
+    // cap is the only thing limiting the run. Before this change all 40 would have been
+    // drafted in one pass; the cron doing the same work does 10.
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue(
+      Array.from({ length: 40 }, (_, i) => archiveDiff(`P${i}`)) as ReturnType<typeof diffEngine.computeDiffs>
+    );
+
+    const result = await runSync({ shopifyPush: true });
+
+    expect(result.archivesBlocked).toBe(0);
+    expect(result.pushDeferred).toBe(30); // 40 − 10
+    expect(shopifyClient.draftShopifyProduct).toHaveBeenCalledTimes(10);
+    expect(result.archived).toBe(10);
+  });
+
+  it("still archives a normal handful of real removals", async () => {
+    vi.mocked(shopifyClient.fetchAllShopifyProducts).mockResolvedValue(
+      activeStore(1382) as Awaited<ReturnType<typeof shopifyClient.fetchAllShopifyProducts>>
+    );
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue(
+      Array.from({ length: 6 }, (_, i) => archiveDiff(`P${i}`)) as ReturnType<typeof diffEngine.computeDiffs>
+    );
+
+    const result = await runSync({ shopifyPush: true });
+
+    expect(shopifyClient.draftShopifyProduct).toHaveBeenCalledTimes(6);
+    expect(result.archived).toBe(6);
+    expect(result.archivesBlocked).toBe(0);
+    expect(result.pushDeferred).toBe(0);
+    expect(db.createNotification).not.toHaveBeenCalledWith(
+      "error", expect.stringContaining("Archivage de masse bloqué"), expect.any(String)
+    );
+  });
+
+  it("refuses an empty feed before writing anything at all", async () => {
+    vi.mocked(csvFetcher.fetchAosomCatalog).mockResolvedValue([]);
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: YESTERDAY, blobUrl: "", totalChunks: 4, chunksProcessed: 4, refreshDone: true,
+      finalized: true, totalProducts: 8018, priceUpdates: 0, stockChanges: 0, newProducts: 0,
+    } as Awaited<ReturnType<typeof db.getPhase1Checkpoint>>);
+
+    await expect(runSync({ shopifyPush: true })).rejects.toThrow(/came back empty/);
+
+    // No DB write, no Shopify write — the guard sits ahead of all of them.
+    expect(db.refreshProducts).not.toHaveBeenCalled();
+    expect(db.markSkusSeen).not.toHaveBeenCalled();
+    expect(shopifyClient.draftShopifyProduct).not.toHaveBeenCalled();
+    expect(shopifyClient.updateShopifyVariantPrice).not.toHaveBeenCalled();
+    expect(db.completeSyncRun).toHaveBeenCalledWith("run-new", expect.objectContaining({ status: "failed" }));
+  });
+
+  it("refuses a feed under half the last good Phase 1 run", async () => {
+    vi.mocked(csvFetcher.fetchAosomCatalog).mockResolvedValue(makeUnchangedFeed(3000).products);
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: YESTERDAY, blobUrl: "", totalChunks: 4, chunksProcessed: 4, refreshDone: true,
+      finalized: true, totalProducts: 8018, priceUpdates: 0, stockChanges: 0, newProducts: 0,
+    } as Awaited<ReturnType<typeof db.getPhase1Checkpoint>>);
+
+    await expect(runSync({ shopifyPush: true })).rejects.toThrow(/under 50%/);
+    expect(db.refreshProducts).not.toHaveBeenCalled();
+    expect(db.markSkusSeen).not.toHaveBeenCalled();
+  });
+
+  it("stamps last_seen_at for every feed SKU on a quiet day", async () => {
+    // The manual trigger has to record presence too, or it reproduces the exact hole the
+    // cron had: a quiet day leaving an empty "seen today" set for the next Phase 2.
+    const feed = makeUnchangedFeed(500);
+    vi.mocked(csvFetcher.fetchAosomCatalog).mockResolvedValue(feed.products);
+    vi.mocked(db.getProductsSnapshot).mockResolvedValue(feed.snapshot as Awaited<ReturnType<typeof db.getProductsSnapshot>>);
+
+    await runSync({ shopifyPush: false });
+
+    expect(db.refreshProducts).not.toHaveBeenCalled(); // nothing changed
+    expect(db.markSkusSeen).toHaveBeenCalledOnce();     // but everything was seen
+    expect(vi.mocked(db.markSkusSeen).mock.calls[0][0]).toHaveLength(500);
+  });
+
+  it("never stamps last_seen_at on a dry run", async () => {
+    await runSync({ dryRun: true });
+
+    expect(db.markSkusSeen).not.toHaveBeenCalled();
+    expect(db.refreshProducts).not.toHaveBeenCalled();
   });
 });
