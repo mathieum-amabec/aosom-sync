@@ -507,6 +507,7 @@ async function _initSchemaImpl(): Promise<void> {
       reason TEXT,                   -- one-sentence model rationale
       model TEXT,                    -- model id that produced the verdict
       sample_url TEXT,               -- one URL this stem was seen at (for the report)
+      confidence REAL,               -- model self-reported 0..1; NULL = not reported (legacy)
       created_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_image_classifications_compliant ON image_classifications(compliant)`,
@@ -794,6 +795,16 @@ async function _initSchemaImpl(): Promise<void> {
   // resets it to NULL whenever image1 changes so a new pos-1 image is re-classified.
   if (!productCols.has("image_checked_at")) {
     alters.push(`ALTER TABLE products ADD COLUMN image_checked_at INTEGER`);
+  }
+
+  // image_classifications.confidence: the model always reported it, the parser always dropped
+  // it. Hybrid mode routes a low-confidence verdict to a human, so it is persisted now. The
+  // 3,127 rows cached before this stay NULL — "unknown", which the decision logic must not
+  // read as "low", or the entire legacy cache would be treated as suspect.
+  const classifInfo = await db.execute(`PRAGMA table_info(image_classifications)`);
+  const classifCols = new Set(classifInfo.rows.map((r) => String(rowToObj(r).name)));
+  if (!classifCols.has("confidence")) {
+    alters.push(`ALTER TABLE image_classifications ADD COLUMN confidence REAL`);
   }
 
   // price_alerts double opt-in columns (table shipped in #99 without them).
@@ -3088,6 +3099,9 @@ export async function getFeedImagesForProducts(shopifyProductIds: string[]): Pro
 export interface CachedImageVerdict {
   compliant: boolean;
   reason: string;
+  /** Model self-reported confidence 0..1. Undefined for a row cached before this column
+   *  existed — that is "unknown", never "low". */
+  confidence?: number;
 }
 
 /** Look up cached verdicts for a batch of photo stems. Missing stems are simply absent. */
@@ -3099,7 +3113,7 @@ export async function getCachedImageVerdicts(stems: string[]): Promise<Map<strin
   for (let i = 0; i < unique.length; i += 200) {
     const chunk = unique.slice(i, i + 200);
     const result = await db.execute({
-      sql: `SELECT url_stem, compliant, reason FROM image_classifications
+      sql: `SELECT url_stem, compliant, reason, confidence FROM image_classifications
             WHERE url_stem IN (${chunk.map(() => "?").join(",")})`,
       args: chunk,
     });
@@ -3108,6 +3122,7 @@ export async function getCachedImageVerdicts(stems: string[]): Promise<Map<strin
       out.set(String(o.url_stem), {
         compliant: Number(o.compliant) === 1,
         reason: (o.reason as string) || "",
+        confidence: o.confidence === null || o.confidence === undefined ? undefined : Number(o.confidence),
       });
     }
   }
@@ -3123,13 +3138,17 @@ export async function putCachedImageVerdict(
   if (!stem) return;
   const db = await ensureSchema();
   await db.execute({
-    sql: `INSERT INTO image_classifications (url_stem, compliant, reason, model, sample_url)
-          VALUES (?, ?, ?, ?, ?)
+    sql: `INSERT INTO image_classifications (url_stem, compliant, reason, model, sample_url, confidence)
+          VALUES (?, ?, ?, ?, ?, ?)
           ON CONFLICT(url_stem) DO UPDATE SET
             compliant=excluded.compliant, reason=excluded.reason,
             model=excluded.model, sample_url=excluded.sample_url,
+            confidence=excluded.confidence,
             created_at=strftime('%s','now')`,
-    args: [stem, verdict.compliant ? 1 : 0, verdict.reason.slice(0, 400), meta.model, meta.sampleUrl.slice(0, 500)],
+    args: [
+      stem, verdict.compliant ? 1 : 0, verdict.reason.slice(0, 400),
+      meta.model, meta.sampleUrl.slice(0, 500), verdict.confidence ?? null,
+    ],
   });
 }
 
@@ -3241,6 +3260,21 @@ export async function setImageReviewStatus(
   await db.execute({
     sql: `UPDATE image_review_queue SET status = ?, error = ?, decided_at = strftime('%s','now') WHERE id = ?`,
     args: [status, error ? error.slice(0, 400) : null, id],
+  });
+}
+
+/**
+ * Record the Shopify image id a feed-only proposal got once it was ingested.
+ *
+ * Before the upload there is no id to store — the clean photo lived only in the Aosom feed.
+ * Writing it back means the row now describes a plain reorder, so a re-run (or a human
+ * re-opening the row) promotes the existing photo instead of uploading a second copy.
+ */
+export async function setImageReviewProposedImageId(id: number, imageId: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE image_review_queue SET proposed_image_id = ? WHERE id = ?`,
+    args: [imageId, id],
   });
 }
 

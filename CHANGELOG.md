@@ -2,6 +2,81 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.4] - 2026-09-12
+
+The 312-product queue is emptied, and the two reasons it could fill up again are closed: the
+guard now applies the obvious cases itself, and the import pipeline stops creating them.
+
+### Done — the whole backlog applied
+
+All 312 pending proposals went through the real route (`POST /api/images/review`) against prod:
+**302 gallery reorders + 10 feed uploads**, 0 failures. The 6 products with no clean photo
+anywhere are untouched, as established. Verified against Shopify — not our own DB — on 30
+products: 30/30 have the expected image at position 1, and every one of those photos is a
+`compliant` verdict in the cache.
+
+**~16% of the proposals had gone stale.** Shopify RE-INGESTED those photos between the audit and
+now, which mints a new image id, so the stored `proposed_image_id` 404s while the photo is still
+sitting in the gallery. Re-pointing the row by `imageUrlStem` (same photo ⇒ same verdict) fixed
+all of them for zero Vision calls. Any deferred replay of a proposal queue needs that step, or
+one proposal in six fails.
+
+### Added — `hybrid` mode, now the default
+
+A fourth `image_compliance_mode`: an **obvious** swap applies itself, an **ambiguous** one goes
+to `image_review_queue`. Set to `hybrid` in production settings.
+
+The rule is not "is there only one clean photo" but **"is the winner unique in its class"**. One
+lifestyle shot against four packshots is not a coin toss — the coded lifestyle > white_bg
+preference names a winner. What it cannot break is a tie *inside* a class:
+
+| Clean candidates | Decision |
+|---|---|
+| exactly one, any background | **obvious** → applied |
+| 1 lifestyle + N packshots | **obvious** → the lifestyle is applied |
+| 2+ lifestyle, or 2+ packshots with no lifestyle | **ambiguous** → queued |
+| model confidence < 0.75 on the pos-1 verdict or on the proposed photo | **ambiguous** → queued |
+
+Deciding this requires scanning the WHOLE image set (`scanAllAlternatives`) instead of stopping
+at the first clean photo, so hybrid costs more Vision calls than the other modes. The other
+modes keep the cheap partial scan, and a plan without a full scan is never labelled — a
+decision from a partial view would be a guess dressed up as a fact.
+
+A feed-only candidate is still **never** applied unattended in any mode: promoting it means
+uploading a photo to a live product, well past "reorder what is already there".
+
+### Added — confidence is no longer thrown away
+
+`STRICT_OVERLAY_PROMPT` has always asked for a `confidence`, and the parser always discarded it.
+It is now parsed, persisted (`image_classifications.confidence`) and used to route a hedged
+verdict to a human. The 3,127 rows cached before this stay `NULL` — **unknown, never "low"**;
+reading them as low-confidence would send the entire back catalogue to the queue.
+
+### Added — the import guard (no more recurrence)
+
+`enforceCleanPrimaryImage` runs inside `queueForImport`, after image curation and **before the
+product is ever written**. If the candidate pos-1 carries text and a clean photo exists in the
+imported set, the clean one is promoted at creation. Every one of the 312 queued products was an
+import that went live with a dirty primary image and got corrected weeks later, after customers
+had already seen it.
+
+It fails safe in every direction — classification error, empty list, or an all-dirty set returns
+the list UNCHANGED and logs the case. An opinion about an image never blocks an import.
+
+Cost, measured from the 1,730-product audit profile rather than estimated: 81.6% of products
+have a clean pos-1 (1 call), 18.0% need a scan averaging 5.52 calls → **1.853 calls/product**. At
+the measured 349 imports/month that is **~616k tokens ≈ $0.81/month** — above the $0.54 quoted
+earlier, which assumed 1.23 calls/product and ignored how many images a dirty product walks
+through. Charged to `batch`, not `maintenance` (that pool is scripts-only by design and this is a
+production path); 20k tokens/day against a 1.3M/day cap is 1.6% of it.
+
+### Added — `uploadProductImageToFirstPosition`
+
+The missing half of the guard: `POST /api/images/review` used to refuse a feed-only proposal
+with a 422 because there was no image id to reorder. It now ingests the photo, confirms it
+settled at position 1, and writes the new Shopify id back onto the queue row so a re-run
+reorders instead of uploading a duplicate.
+
 ## [0.5.92.3] - 2026-09-12
 
 ### Fixed — the daily sync was replacing French product descriptions with English

@@ -252,21 +252,21 @@ describe("runImageCompliance — queue mode (human approval)", () => {
     expect(classifyProductImage).not.toHaveBeenCalled();
   });
 
-  it("defaults to queue mode when the setting is unset", async () => {
+  it("defaults to HYBRID when the setting is unset (was queue until v0.5.92.0)", async () => {
     getSetting.mockResolvedValue(null);
     getImageComplianceCandidates.mockResolvedValue([candidate("555")]);
     fetchProductImages.mockResolvedValue(images(
       { id: 1, position: 1, src: "overlay.jpg" },
       { id: 2, position: 2, src: "clean.jpg" },
     ));
-    classifyProductImage
-      .mockResolvedValueOnce({ compliant: false, reason: "overlay" })
-      .mockResolvedValueOnce({ compliant: true, reason: "propre" });
+    classifyProductImage.mockImplementation(async (url: string) => ({
+      compliant: url === "clean.jpg",
+      reason: url === "clean.jpg" ? "propre" : "overlay",
+    }));
 
     const res = await runImageCompliance({ syncRunId: "run-1" });
 
-    expect(res.mode).toBe("queue");
-    expect(moveImageToFirstPosition).not.toHaveBeenCalled();
+    expect(res.mode).toBe("hybrid");
   });
 
   it("honours mode=auto from the setting", async () => {
