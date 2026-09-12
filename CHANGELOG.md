@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.2] - 2026-09-12
+
+Two more from the QA pass, both in the Judge.me snippet, both EN-side.
+
+### Fixed — "See all reviews" 404'd on the English storefront
+
+`routes.root_url` is `/` on FR but `/en` with **no trailing slash** on EN, so
+`| append: 'pages/avis-clients'` produced `/enpages/avis-clients`. The separator is now written
+explicitly and the FR double slash collapsed afterwards: `/pages/avis-clients` on FR,
+`/en/pages/avis-clients` on EN. The FR link was correct all along, which is exactly why a
+FR-only check would have missed it.
+
+### Fixed — a lone review card pinned to the left of a 1440px viewport
+
+The shop has 2 reviews, so the carousel track does not overflow on desktop and the single card
+sat hard against the left edge. `justify-content: safe center` centres the cards while they fit
+and falls back to `flex-start` once they overflow — plain `center` would clip the first card's
+left edge on a scrolling track.
+
 ## [0.5.92.1] - 2026-09-12
 
 Two defects the first QA pass on the draft theme turned up.

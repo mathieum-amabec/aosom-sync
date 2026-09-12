@@ -67,7 +67,13 @@
   </div>
 
   <div class="lc-jm__all">
-    <a class="lc-jm__all-link" href="{{ routes.root_url | append: 'pages/avis-clients' | replace: '//pages', '/pages' }}" data-umami-event="Judgeme see all reviews">
+    {%- comment -%}
+      routes.root_url is "/" on FR and "/en" (NO trailing slash) on EN, so the
+      separator has to be written explicitly and the FR double slash collapsed
+      afterwards. Appending a bare "pages/..." produced "/enpages/avis-clients".
+    {%- endcomment -%}
+    {%- assign jm_all_url = routes.root_url | append: '/pages/avis-clients' | replace: '//pages', '/pages' -%}
+    <a class="lc-jm__all-link" href="{{ jm_all_url }}" data-umami-event="Judgeme see all reviews">
       {%- if jm_loc == 'en' -%}See all reviews{%- else -%}Voir tous les avis{%- endif -%}
       <span aria-hidden="true">&nbsp;&rarr;</span>
     </a>
@@ -96,6 +102,11 @@
   .lc-jm__track{
     display:flex;gap:1rem;overflow-x:auto;scroll-snap-type:x mandatory;
     -webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:.5rem;
+    /* "safe" centres the cards while they fit and falls back to flex-start once
+       they overflow — plain "center" would clip the first card's left edge when
+       the track scrolls. The shop has 2 reviews today, so without this a single
+       card sat pinned to the left of a 1440px viewport. */
+    justify-content:safe center;
   }
   .lc-jm__track::-webkit-scrollbar{display:none;}
   .lc-jm__track .jdgm-rev{
