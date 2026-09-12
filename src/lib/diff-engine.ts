@@ -197,7 +197,7 @@ export function computeDiffs(
   }
 
   // Prioritize diffs that include a price change so money-affecting corrections drain
-  // first out of the per-day Phase-2 chunk queue (image/description-only diffs follow).
+  // first out of the per-day Phase-2 chunk queue (image/tag-only diffs follow).
   // Stable sort (V8): preserves original order within each group.
   const hasPrice = (d: ProductDiff) => (d.changes.some((c) => c.field === "price") ? 0 : 1);
   diffs.sort((a, b) => hasPrice(a) - hasPrice(b));
@@ -302,32 +302,23 @@ function diffProduct(
     });
   }
 
-  // Description change — compare normalized HTML
-  const aosomDesc = normalizeHtml(aosom.description);
-  const shopifyDesc = normalizeHtml(shopify.bodyHtml);
-  if (aosomDesc !== shopifyDesc) {
-    changes.push({
-      field: "description",
-      sku: aosom.variants[0].sku,
-      oldValue: truncate(shopify.bodyHtml, 100),
-      newValue: truncate(aosom.description, 100),
-    });
-  }
+  // Description — DELIBERATELY NOT DIFFED. Architectural boundary, do not restore.
+  //
+  // The Aosom CSV `description` is raw ENGLISH supplier copy. The Shopify `body_html`
+  // is the curated FRENCH text written by content-generator at import time (the store's
+  // default locale is fr). Comparing the two compares two different languages, so this
+  // check was true for every product on every run, and applyToShopify pushed the English
+  // feed copy over the French one. Between e3d340a (2026-04-06) and this fix it silently
+  // converted ~5-7 curated French descriptions per day into raw English: 679 of 1382
+  // active products (49%) ended up showing English on ameublodirect.ca, 518 of them
+  // leaking the supplier name "Aosom" into customer-facing copy.
+  //
+  // body_html now has exactly ONE writer: createShopifyProduct, at import. The feed is
+  // authoritative for price, stock, images and tags — never for authored content. If
+  // supplier spec changes ever need to propagate, they must go through a French
+  // regeneration, never a raw copy. Covered by tests/diff-engine.test.ts.
 
   return changes;
-}
-
-function normalizeHtml(html: string): string {
-  return (html || "")
-    .replace(/\s+/g, " ")
-    .replace(/>\s+</g, "><")
-    .trim()
-    .toLowerCase();
-}
-
-function truncate(str: string, max: number): string {
-  if (!str) return "";
-  return str.length > max ? str.slice(0, max) + "…" : str;
 }
 
 /**

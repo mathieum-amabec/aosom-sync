@@ -137,20 +137,20 @@ describe("computeDiffs", () => {
     expect(diffs).toHaveLength(0);
   });
 
-  it("puts price-containing diffs ahead of image/description-only diffs", () => {
+  it("puts price-containing diffs ahead of image-only diffs", () => {
     const priced = makeAosom();
     priced.variants[0].price = 109.99; // price diff
-    const descOnly = makeAosom({
-      groupKey: "G-DESC",
+    const imageOnly = makeAosom({
+      groupKey: "G-IMG",
       variants: [{ ...makeAosom().variants[0], sku: "DESC-001" }],
-      description: "<p>changed</p>",
+      images: ["https://img.com/changed.jpg"],
     });
     const shopifyDesc = makeShopify({
       shopifyId: "SHOP-DESC",
       variants: [{ ...makeShopify().variants[0], sku: "DESC-001" }],
     });
-    // descOnly passed first, priced second — expect priced sorted to the front.
-    const diffs = computeDiffs([descOnly, priced], [makeShopify(), shopifyDesc]);
+    // imageOnly passed first, priced second — expect priced sorted to the front.
+    const diffs = computeDiffs([imageOnly, priced], [makeShopify(), shopifyDesc]);
     expect(diffs.length).toBeGreaterThanOrEqual(2);
     expect(diffs[0].changes.some((c) => c.field === "price")).toBe(true);
   });
@@ -162,11 +162,58 @@ describe("computeDiffs", () => {
     expect(diffs[0].changes.some((c) => c.field === "images")).toBe(true);
   });
 
-  it("detects description change", () => {
-    const aosom = makeAosom({ description: "<p>New description</p>" });
-    const diffs = computeDiffs([aosom], [makeShopify()]);
+  // ── Architectural boundary: the feed never overwrites the authored description ──
+  //
+  // Regression guard for the 2026-04-06 → 2026-09-11 bug (e3d340a): the feed
+  // description is raw ENGLISH, the Shopify body_html is curated FRENCH, so a
+  // description diff was true on every run and the daily push overwrote French with
+  // English on ~5-7 products/day (679 of 1382 active products, 49%, ended up English).
+  it("never emits a description change, even when the feed description differs", () => {
+    const aosom = makeAosom({ description: "<p>New English description from the Aosom feed</p>" });
+    const shopify = makeShopify({ bodyHtml: "<p>Description française rédigée à l'import</p>" });
+    const diffs = computeDiffs([aosom], [shopify]);
+    // A description-only delta is not a change at all → no diff is produced.
+    expect(diffs).toHaveLength(0);
+  });
+
+  it("does not emit a description change alongside a real (price) change", () => {
+    const aosom = makeAosom({ description: "<p>English feed copy</p>" });
+    aosom.variants[0].price = 109.99;
+    const shopify = makeShopify({ bodyHtml: "<p>Texte français rédigé</p>" });
+    const diffs = computeDiffs([aosom], [shopify]);
     expect(diffs).toHaveLength(1);
-    expect(diffs[0].changes.some((c) => c.field === "description")).toBe(true);
+    expect(diffs[0].changes.some((c) => c.field === "price")).toBe(true);
+    expect(diffs[0].changes.some((c) => c.field === "description")).toBe(false);
+  });
+
+  it("drops the description-only product from a batch while keeping the real-change one", () => {
+    // Batch shape: one product whose only delta is the description, one with a real
+    // (stock) delta. Exactly one diff must come out, and it must be the real one.
+    const descOnly = makeAosom({ description: "<p>English feed copy nobody asked for</p>" });
+    const shopifyDescOnly = makeShopify({ bodyHtml: "<p>Le texte français rédigé à l'import</p>" });
+
+    const realChange = makeAosom({
+      groupKey: "G-REAL",
+      description: "<p>Also different English copy</p>",
+      variants: [{ ...makeAosom().variants[0], sku: "REAL-001", qty: 5 }],
+    });
+    const shopifyReal = makeShopify({
+      shopifyId: "SHOP-REAL",
+      bodyHtml: "<p>Texte français</p>",
+      variants: [{ ...makeShopify().variants[0], sku: "REAL-001" }],
+    });
+
+    const diffs = computeDiffs([descOnly, realChange], [shopifyDescOnly, shopifyReal]);
+    expect(diffs).toHaveLength(1);
+    expect(diffs[0].shopifyId).toBe("SHOP-REAL");
+    expect(diffs[0].changes.some((c) => c.field === "description")).toBe(false);
+  });
+
+  it("reports zero descriptionChanges in the summary whatever the feed says", () => {
+    const aosom = makeAosom({ description: "<p>Completely different feed copy</p>" });
+    aosom.variants[0].price = 109.99;
+    const diffs = computeDiffs([aosom], [makeShopify({ bodyHtml: "<p>Le texte FR</p>" })]);
+    expect(summarizeDiffs(diffs).descriptionChanges).toBe(0);
   });
 
   it("identifies new products not in Shopify", () => {

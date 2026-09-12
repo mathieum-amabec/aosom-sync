@@ -239,7 +239,11 @@ async function applyToShopify(
       if (diff.action === "update" && diff.shopifyId && diff.aosomProduct) {
         const productUpdates: Parameters<typeof updateShopifyProduct>[1] = {};
         if (diff.changes.some((c) => c.field === "images")) productUpdates.images = diff.aosomProduct.images;
-        if (diff.changes.some((c) => c.field === "description")) productUpdates.bodyHtml = diff.aosomProduct.description;
+        // body_html is NEVER pushed from the feed. diffProduct() no longer emits a
+        // "description" change (see diff-engine.ts), and nothing here may set
+        // productUpdates.bodyHtml — the curated French description is import-time
+        // content, not feed-mirrored data. Restoring this overwrites French with
+        // raw English supplier copy on every run.
         if (diff.changes.some((c) => c.field === "tags")) {
           const sp = shopifyMap.get(diff.shopifyId);
           if (sp) {
