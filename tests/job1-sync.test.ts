@@ -9,7 +9,8 @@
  * 5. runShopifyPush with expired checkpoint (yesterday) → ignores checkpoint, starts fresh
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { SyncRun } from "@/types/sync";
+import type { SyncRun, FieldChange } from "@/types/sync";
+import type { AosomMergedProduct } from "@/types/aosom";
 import type { Phase1BlobProductRow } from "@/lib/sync-blob-storage";
 
 // ─── Stable mock values ───────────────────────────────────────────────
@@ -104,6 +105,10 @@ vi.mock("@/lib/variant-merger", () => ({
 vi.mock("@/lib/diff-engine", () => ({
   computeDiffs: vi.fn().mockReturnValue([]),
   summarizeDiffs: vi.fn().mockReturnValue({ updates: 0, archives: 0, creates: 0 }),
+  // applyToShopify's tags branch calls these two. Without them the branch throws and is
+  // swallowed by its try/catch, which silently turns any tags-branch assertion vacuous.
+  productInStock: vi.fn().mockReturnValue(true),
+  applyStockTags: vi.fn((tags: string[]) => [...tags.filter((t) => t !== "out-of-stock"), "back-in-stock"]),
 }));
 
 vi.mock("@/lib/config", () => ({
@@ -1100,5 +1105,104 @@ describe("runSyncFull — releases lock in finally block on error", () => {
     await expect(runSyncFull()).rejects.toThrow("DB timeout");
 
     expect(syncLock.releaseSyncLock).toHaveBeenCalledWith("test-holder");
+  });
+});
+
+// ─── Architectural boundary: the Shopify push never writes body_html ──
+//
+// Regression guard for the 2026-04-05 → 2026-09-11 bug (b497260). The Aosom feed
+// description is raw ENGLISH; the Shopify body_html is the curated FRENCH text
+// written once by createShopifyProduct at import. diff-engine no longer emits a
+// "description" change, and applyToShopify must not write bodyHtml even if one
+// somehow reaches it again. At its peak this pushed English over French on
+// 679 of 1382 active products (49%), 518 of them leaking the supplier name.
+describe("runShopifyPush — never overwrites the authored description", () => {
+  beforeEach(resetAllMocks);
+
+  function descDiff(groupKey: string) {
+    return {
+      shopifyId: "shop-" + groupKey,
+      groupKey,
+      productName: "Product " + groupKey,
+      action: "update" as const,
+      // A *feed* description change, exactly as the old diff-engine emitted it.
+      changes: [
+        { field: "description", sku: groupKey + "-BK", oldValue: "<p>Texte français rédigé</p>", newValue: "<p>Raw English feed copy</p>" },
+      ] as FieldChange[],
+      aosomProduct: {
+        groupKey,
+        name: "Product " + groupKey,
+        brand: "Aosom",
+        productType: "Test",
+        category: "Test",
+        description: "<p>Raw English feed copy from Aosom</p>",
+        shortDescription: "Short",
+        material: "Metal",
+        images: ["https://img.com/1.jpg"],
+        video: "",
+        pdf: "",
+        variants: [] as AosomMergedProduct["variants"],
+      },
+    };
+  }
+
+  it("does not call updateShopifyProduct at all for a description-only diff", async () => {
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue([descDiff("G1")] as ReturnType<typeof diffEngine.computeDiffs>);
+
+    await runShopifyPush();
+
+    expect(shopifyClient.updateShopifyProduct).not.toHaveBeenCalled();
+  });
+
+  it("never passes bodyHtml to updateShopifyProduct, even when an image change also fires", async () => {
+    const diff = descDiff("G2");
+    diff.changes.push({ field: "images", sku: "G2-BK", oldValue: "1 images", newValue: "2 images" });
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue([diff] as ReturnType<typeof diffEngine.computeDiffs>);
+
+    await runShopifyPush();
+
+    // The image change is still pushed — that is feed-authoritative data.
+    expect(shopifyClient.updateShopifyProduct).toHaveBeenCalledOnce();
+    const [, updates] = vi.mocked(shopifyClient.updateShopifyProduct).mock.calls[0];
+    expect(updates).toHaveProperty("images");
+    // But the authored description is untouched.
+    expect(updates).not.toHaveProperty("bodyHtml");
+    expect(JSON.stringify(updates)).not.toContain("Raw English feed copy");
+  });
+
+  // productUpdates is assembled field-by-field with independent `if` branches, so
+  // proving the images branch safe does not prove the tags branch safe. Cover the
+  // other field that can legitimately travel in the same payload.
+  it("never passes bodyHtml when a tags change travels in the same payload", async () => {
+    const diff = descDiff("G3");
+    diff.changes.push({ field: "tags", sku: "G3-BK", oldValue: "out-of-stock", newValue: "back-in-stock" });
+    diff.aosomProduct.variants = [
+      { sku: "G3-BK", price: 99.99, qty: 12, color: "Noir", size: "", gtin: "", weight: 5,
+        dimensions: { length: 1, width: 1, height: 1 }, images: [], estimatedArrival: "",
+        outOfStockExpected: "", packageNum: "", boxSize: "", boxWeight: "" },
+    ];
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue([diff] as ReturnType<typeof diffEngine.computeDiffs>);
+    // applyToShopify's tags branch is gated on shopifyMap.get(diff.shopifyId); with the
+    // default empty fetchAllShopifyProducts mock the branch never fires and this test
+    // would pass vacuously. Give it the matching Shopify product so the branch executes.
+    vi.mocked(shopifyClient.fetchAllShopifyProducts).mockResolvedValue([
+      {
+        shopifyId: "shop-G3", title: "Product G3", status: "active",
+        bodyHtml: "<p>Le texte français rédigé à l'import</p>", productType: "Test",
+        images: [], tags: ["out-of-stock"],
+        variants: [{ variantId: "V-G3", sku: "G3-BK", price: 99.99, inventoryQuantity: 9,
+          inventoryItemId: "INV-G3", option1: "Noir", option2: null, weight: 5, gtin: "" }],
+      },
+    ] as Awaited<ReturnType<typeof shopifyClient.fetchAllShopifyProducts>>);
+
+    await runShopifyPush();
+
+    // The branch really ran: tags were pushed.
+    expect(shopifyClient.updateShopifyProduct).toHaveBeenCalledOnce();
+    const [, updates] = vi.mocked(shopifyClient.updateShopifyProduct).mock.calls[0];
+    expect(updates).toHaveProperty("tags");
+    // And the authored description still never travels with it.
+    expect(updates).not.toHaveProperty("bodyHtml");
+    expect(JSON.stringify(updates)).not.toContain("Raw English feed copy");
   });
 });

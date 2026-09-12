@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.3] - 2026-09-12
+
+### Fixed — the daily sync was replacing French product descriptions with English
+
+Half the live catalogue was reading in English on a French store. 679 of 1382 active products
+showed the raw Aosom supplier copy instead of the French text written at import, and 518 of them
+printed the supplier name straight into the product page.
+
+The daily Shopify push compared the feed's English `description` against the product's curated
+French `body_html`. Two different languages never match, so the check reported "the description
+changed" for every product on every run, and the push wrote the English feed copy over the French
+one. Ten products per cron run, three runs a day, every day since 2026-04-05 — a slow burn nobody
+could see, because each product only flipped once and then went quiet.
+
+The feed is no longer treated as a source for authored text. `body_html` now has a single writer,
+`createShopifyProduct`, at import. Price, stock, images and tags still sync from the feed exactly
+as before. Seven regression tests lock the boundary at both layers: the diff can no longer
+manufacture a description change, and the push refuses to write `bodyHtml` even if one reaches it.
+
+This stops the damage. The 679 products already flipped are restored separately.
+
 ## [0.5.92.2] - 2026-09-12
 
 Two more from the QA pass, both in the Judge.me snippet, both EN-side.
