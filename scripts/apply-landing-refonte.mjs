@@ -148,12 +148,20 @@ const NEW_ORDER = [
   "entry_popup",
 ];
 
-/** Sections this refonte creates, each a thin wrapper around its snippet. */
+/**
+ * Sections this refonte creates, each a thin wrapper around its snippet.
+ *
+ * `padding_top`/`padding_bottom` MUST be 0: Dawn's custom-liquid section schema
+ * defaults them to 40px each, and every other custom-liquid section on this page
+ * already zeroes them. Leaving them at the default put ~136px of dead grey space
+ * under the trust bar — each snippet owns its own vertical rhythm.
+ */
+const SECTION_PADDING = { padding_top: 0, padding_bottom: 0 };
 const NEW_SECTIONS = {
-  lc_trustbar: { type: "custom-liquid", settings: { custom_liquid: "{% render 'lc_trustbar' %}" } },
-  lc_trending_products: { type: "custom-liquid", settings: { custom_liquid: "{% render 'lc_trending_products' %}" } },
-  lc_trending_subcats: { type: "custom-liquid", settings: { custom_liquid: "{% render 'lc_trending_subcats' %}" } },
-  lc_cta_inventory: { type: "custom-liquid", settings: { custom_liquid: "{% render 'lc_cta_inventory' %}" } },
+  lc_trustbar: { type: "custom-liquid", settings: { custom_liquid: "{% render 'lc_trustbar' %}", ...SECTION_PADDING } },
+  lc_trending_products: { type: "custom-liquid", settings: { custom_liquid: "{% render 'lc_trending_products' %}", ...SECTION_PADDING } },
+  lc_trending_subcats: { type: "custom-liquid", settings: { custom_liquid: "{% render 'lc_trending_subcats' %}", ...SECTION_PADDING } },
+  lc_cta_inventory: { type: "custom-liquid", settings: { custom_liquid: "{% render 'lc_cta_inventory' %}", ...SECTION_PADDING } },
 };
 
 /** Sections removed from the page entirely. */
@@ -172,19 +180,30 @@ async function main() {
   for (const key of DROPPED) delete index.sections[key];
 
   // 3. the stale statistic
+  // Idempotent: re-running against an already-converted theme is a no-op, not an
+  // abort — but a section where NEITHER the old nor the new wording is present
+  // still aborts, because that means the theme is not what this script expects.
   const statLog = [];
   for (const { section, from, to } of STAT_REPLACEMENTS) {
     const s = index.sections[section];
     const liquid = s?.settings?.custom_liquid ?? "";
-    if (!liquid.includes(from)) throw new Error(`ABORT: stat verbatim not found in "${section}"`);
-    s.settings.custom_liquid = liquid.split(from).join(to);
-    statLog.push(section);
+    if (liquid.includes(from)) {
+      s.settings.custom_liquid = liquid.split(from).join(to);
+      statLog.push(section);
+    } else if (liquid.includes(to)) {
+      statLog.push(`${section} (already)`);
+    } else {
+      throw new Error(`ABORT: stat verbatim not found in "${section}"`);
+    }
   }
 
   // 4. main category grid → mobile CSS grid
   const cat = index.sections.cat_tiles?.settings?.custom_liquid ?? "";
-  if (!cat.includes(CAT_MOBILE_FROM)) throw new Error("ABORT: cat_tiles mobile CSS block not found");
-  index.sections.cat_tiles.settings.custom_liquid = cat.replace(CAT_MOBILE_FROM, CAT_MOBILE_TO);
+  if (cat.includes(CAT_MOBILE_FROM)) {
+    index.sections.cat_tiles.settings.custom_liquid = cat.replace(CAT_MOBILE_FROM, CAT_MOBILE_TO);
+  } else if (!cat.includes(CAT_MOBILE_TO)) {
+    throw new Error("ABORT: cat_tiles mobile CSS block not found");
+  }
 
   // 5. order — every listed section must exist, and nothing may be orphaned
   for (const key of NEW_ORDER) {

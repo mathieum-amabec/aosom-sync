@@ -65,6 +65,15 @@ export const DISCOUNT_ANCHOR_PCT = 50;
 export const COLLECTION_TOP_N = 5;
 
 /**
+ * How many of a collection's best SKUs to carry forward as tile-cover candidates.
+ * Wider than COLLECTION_TOP_N on purpose: the cover resolver prefers a
+ * lifestyle-verified product, and among only 5 candidates there often isn't one —
+ * which is how a dimensioned spec diagram ended up as the "Foyers extérieurs"
+ * category cover.
+ */
+export const COVER_CANDIDATE_COUNT = 12;
+
+/**
  * Two subcategory collections whose membership overlaps by more than this (as
  * containment, |A∩B| / min(|A|,|B|)) are near-duplicates; only the better-scoring
  * one may take a tile. Shopify's subcategories nest — "Bureaux d'ordinateur" is a
@@ -123,7 +132,10 @@ export interface ScoredCollection {
   score: number;
   /** In-stock scored products matched into this collection. */
   productCount: number;
-  /** Best-scoring SKUs, best first — the first is the tile's cover product. */
+  /**
+   * Best-scoring SKUs, best first, capped at COVER_CANDIDATE_COUNT. The tile's
+   * cover is picked from these — not necessarily the first (see resolveTileCover).
+   */
   topSkus: string[];
   /** Top-level Aosom category most of its members sit under ("Patio & Garden"). */
   rootCategory: string;
@@ -392,7 +404,7 @@ export function aggregateCollections(
       title: set.title,
       score,
       productCount: members.length,
-      topSkus: top.map((p) => p.sku),
+      topSkus: members.slice(0, COVER_CANDIDATE_COUNT).map((p) => p.sku),
       rootCategory: modalRootCategory(members),
       tileRank: null,
       memberSkus: new Set(members.map((p) => p.sku)),
