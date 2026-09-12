@@ -10,6 +10,7 @@
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { mergeVariants } from "@/lib/variant-merger";
 import { computeDiffs, summarizeDiffs, applyStockTags, productInStock } from "@/lib/diff-engine";
+import { assertFeedPlausible, guardMassArchive } from "@/lib/sync-guards";
 import { SYNC } from "@/lib/config";
 import type { AosomProduct } from "@/types/aosom";
 import type { SyncLogEntry } from "@/types/sync";
@@ -40,6 +41,7 @@ import {
   updateSyncRunTiming,
   addSyncLogsBatch,
   refreshProducts,
+  markSkusSeen,
   rebuildProductTypeCounts,
   recordPriceChanges,
   getPriceBadge,
@@ -788,8 +790,32 @@ export async function runShopifyPush(): Promise<{ updates: number; archived: num
     log(`${dbProducts.length} produits DB, ${shopifyProducts.length} produits Shopify`);
 
     const merged = mergeVariants(dbProducts);
-    const allDiffs = computeDiffs(merged, shopifyProducts)
+    const computed = computeDiffs(merged, shopifyProducts)
       .filter((d) => d.action !== "create"); // Phase 2 only applies updates + archives
+
+    // GUARD 2 — never archive the catalogue in one pass.
+    // Deliberately measured on the WHOLE computed set, not on the 10-diff chunk about to
+    // run: on 2026-09-12 each chunk was a perfectly ordinary "10 products left the feed",
+    // and only the full set (1,349 archives against 1,382 active products) showed what was
+    // really happening. Per-chunk this is invisible; in aggregate it is unmistakable.
+    // Blocked archives are dropped from the queue rather than deferred — they are an
+    // artefact of a bad diff, so there is nothing to come back to.
+    const activeShopifyCount = shopifyProducts.filter((p) => p.status === "active").length;
+    const archiveGuard = guardMassArchive(computed, activeShopifyCount, (d) => d.action === "archive");
+    if (archiveGuard.tripped) {
+      log(`ARCHIVAGE DE MASSE BLOQUÉ: ${archiveGuard.reason}`, {
+        phase: "archiveGuard", blocked: archiveGuard.blocked.length,
+        threshold: archiveGuard.threshold, active_shopify: activeShopifyCount,
+        db_products: dbProducts.length,
+        blocked_sample: archiveGuard.blocked.slice(0, 10).map((d) => d.groupKey),
+      });
+      await createNotification(
+        "error",
+        `Archivage de masse bloqué (${archiveGuard.blocked.length} produits)`,
+        (archiveGuard.reason ?? "").slice(0, 200),
+      );
+    }
+    const allDiffs = archiveGuard.allowed;
 
     // Skip already-processed groupKeys
     const processedSet = new Set(cp.processedGroupKeys);
@@ -977,6 +1003,32 @@ export async function runSyncInit(): Promise<SyncInitResult> {
       phase: "fetchAll", duration_ms: timing.fetchAll,
       csv_count: aosomProducts.length, snapshot_count: snapshot.size,
     });
+    await updateSyncRunTiming(syncRun.id, timing);
+
+    // GUARD 1 — refuse an implausible feed before anything is written.
+    // `existingCp` is the last good checkpoint (a same-day one returned early above), so
+    // it is the right baseline. Throwing here means no checkpoint write, no refresh, no
+    // last_seen_at stamp: the previous known-good state survives intact, and the operator
+    // gets a failed sync_run + notification instead of a silent success on a feed we
+    // cannot actually see.
+    assertFeedPlausible(aosomProducts.length, existingCp?.totalProducts);
+
+    // Record "seen in the feed" for EVERY SKU, before the diff decides which ones changed.
+    // This is the fix for the 2026-09-12 mass-archive: presence and change are different
+    // facts, and Phase 2 asks about presence. A zero-change day must still say "all 8,018
+    // of these were in the feed today". Non-fatal: a failure here degrades Phase 2 to its
+    // own archive guard rather than failing an otherwise-good sync.
+    const t0Seen = Date.now();
+    try {
+      const seen = await markSkusSeen(aosomProducts.map((p) => p.sku));
+      timing.markSkusSeen = Date.now() - t0Seen;
+      log(`last_seen_at rafraîchi pour ${seen} SKU du flux`, {
+        phase: "markSkusSeen", duration_ms: timing.markSkusSeen,
+        feed_skus: aosomProducts.length, rows_stamped: seen,
+      });
+    } catch (seenErr) {
+      log(`markSkusSeen failed (non-fatal): ${seenErr instanceof Error ? seenErr.message : String(seenErr)}`, { phase: "markSkusSeen" });
+    }
     await updateSyncRunTiming(syncRun.id, timing);
 
     const t0Diff = Date.now();

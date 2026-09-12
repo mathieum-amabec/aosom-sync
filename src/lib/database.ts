@@ -1210,6 +1210,42 @@ export async function refreshProducts(products: Omit<ProductRow, "shopify_produc
   }
 }
 
+/**
+ * Stamp `last_seen_at = now` for every SKU present in today's feed, changed or not.
+ *
+ * `last_seen_at` means "this SKU was in the Aosom feed at this time" — that is what every
+ * reader assumes (getAllProductsAsAosom, stale-catalog, inventory-sweep, stock-reconcile).
+ * But until 2026-09-12 the only writer was refreshProducts, which runs on CHANGED rows
+ * only, so the column actually meant "last time this SKU changed". The two readings agree
+ * on any day with normal churn and diverge completely on a day with none: on 2026-09-12
+ * the feed was byte-identical to the previous run, nothing was written, and Phase 2 read
+ * the resulting empty "seen today" set as "Aosom withdrew all 1,382 products" and began
+ * drafting the live store.
+ *
+ * Called once per Phase 1 init on the full feed SKU list, so presence in the feed is
+ * recorded independently of whether the row had anything to update.
+ */
+export async function markSkusSeen(skus: string[]): Promise<number> {
+  if (skus.length === 0) return 0;
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+
+  // One UPDATE ... WHERE sku IN (...) per slice. 500 placeholders keeps each statement
+  // well under Turso's parameter and request-size caps while holding the whole ~8k-SKU
+  // feed to ~16 round-trips (~2s), which is noise inside Phase 1's 800s budget.
+  const SLICE = 500;
+  let updated = 0;
+  for (let i = 0; i < skus.length; i += SLICE) {
+    const slice = skus.slice(i, i + SLICE);
+    const res = await db.execute({
+      sql: `UPDATE products SET last_seen_at = ? WHERE sku IN (${slice.map(() => "?").join(",")})`,
+      args: [now, ...slice],
+    });
+    updated += Number(res.rowsAffected ?? 0);
+  }
+  return updated;
+}
+
 export async function getProduct(sku: string): Promise<ProductRow | null> {
   const db = await ensureSchema();
   const result = await db.execute({ sql: `SELECT * FROM products WHERE sku = ?`, args: [sku] });

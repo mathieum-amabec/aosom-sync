@@ -2,6 +2,78 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.5] - 2026-09-12
+
+Phase 2 unpublished 30 live, in-stock products this morning. Every component reported
+success while it happened. This closes the chain at all four points.
+
+### What happened
+
+`csv-precache` validates the Aosom download against `MIN_CSV_ROWS = 8_000`. Aosom's
+catalogue drifted down to ~7,960 rows, so from 2026-09-10 18:00 UTC every run died on
+`CSV has only 7962 data rows (min 8000)` — a 0.5% shortfall against a hardcoded number,
+rejecting a perfectly good feed. The blob cache stopped being written.
+
+`fetchAosomCatalog` prefers that cache with no age limit, so Phase 1 re-read the same
+frozen 2026-09-10 snapshot for two days. On 09-11 the DB converged to it (1,345 rows
+written). On 09-12 the feed was byte-identical to the DB, so `diffProductsLight` returned
+zero inserts and zero updates, `totalChunks` was 0, and `refreshProducts` — the only
+writer of `products.last_seen_at` — never ran.
+
+That is the hinge. `last_seen_at` is read as "this SKU was in the feed" by
+`getAllProductsAsAosom`, stale-catalog, inventory-sweep and stock-reconcile, but it was
+only ever written for SKUs that *changed*. The two readings agree on any day with churn
+and diverge completely on a day with none. So `getAllProductsAsAosom()` returned 0 rows,
+`computeDiffs` concluded that all 1,382 active products had left the Aosom catalogue, and
+queued 1,349 archives. Phase 2 drained 30 of them at 10 per run across 08:00/08:15/08:30.
+
+No step was buggy in isolation. What was missing everywhere was a statement of what a
+plausible result looks like.
+
+### Fixed
+
+- **`last_seen_at` now means what every reader thinks it means.** New `markSkusSeen()`
+  stamps every SKU present in the feed during Phase 1 init, changed or not (~16 batched
+  UPDATEs for 8k SKUs, ~2s). Presence and change are different facts; Phase 2 asks about
+  presence. This alone makes the failure mode impossible.
+- **Phase 2 refuses a mass archive** (`guardMassArchive`). Archives above
+  `max(20, 5% of active products)` in one computed pass are dropped and the operator is
+  notified. Measured on the whole diff set, not the 10-diff chunk: per-chunk the incident
+  looked like an ordinary "10 products left the feed", and only the full set (1,349 of
+  1,382) showed what was happening. Price, stock, image and tag diffs in the same run are
+  untouched — a poisoned archive set must not also cost the store a day of stale prices.
+- **Phase 1 refuses an implausible feed** (`assertFeedPlausible`): empty, or under 50% of
+  the last good run. It throws before anything is written, so the previous checkpoint —
+  the last state known to be good — survives, and the run is recorded as `failed` with a
+  notification instead of a silent success.
+- **The stale cache is no longer silent.** `fetchAosomCatalog` skips a blob older than
+  26 hours (precache runs every ≤10h) and falls through to the live CDN. If Aosom is also
+  unreachable it throws, which is the wanted outcome: Phase 1 stops rather than syncing a
+  two-day-old catalogue.
+- **`csv-precache`'s floor no longer fights the catalogue.** The absolute row floor drops
+  8,000 → 4,000 and a self-adjusting check is added (reject under 70% of the last cached
+  size). A fixed floor set near the live value becomes a landmine the moment the live
+  value drifts.
+
+### Honest scope
+
+`assertFeedPlausible` would *not* have caught this incident: the feed was a healthy 8,018
+rows, frozen rather than small. What closes this specific chain is `markSkusSeen` plus the
+archive guard; the feed-plausibility and staleness guards are defence in depth for the
+adjacent failures.
+
+24 tests, 16 of them pure unit tests of the two circuit breakers, all anchored on the real
+numbers from that morning. Two pre-existing fixtures that modelled "no changes" as an
+*empty feed* were corrected to use a populated feed matching the snapshot — that exact
+conflation is the bug.
+
+### Repair applied separately (no code)
+
+The 30 products were restored to `active` + published and verified on the storefront
+(30/30 HTTP 200, 30/30 buyable); the catalogue audit is back to 1382 active / 703 FR /
+679 EN, identical to the pre-incident figures. Today's `shopify_push_checkpoint` was
+marked `done` to neutralise the remaining 1,319 invalid archive diffs.
+
 ## [0.5.92.4] - 2026-09-12
 
 The 312-product queue is emptied, and the two reasons it could fill up again are closed: the

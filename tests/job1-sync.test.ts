@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { SyncRun, FieldChange } from "@/types/sync";
-import type { AosomMergedProduct } from "@/types/aosom";
+import type { AosomMergedProduct, AosomProduct } from "@/types/aosom";
 import type { Phase1BlobProductRow } from "@/lib/sync-blob-storage";
 
 // ─── Stable mock values ───────────────────────────────────────────────
@@ -34,6 +34,32 @@ function makeSyncRun(overrides: Partial<{
   };
 }
 
+/**
+ * A feed of `n` products plus the DB snapshot that exactly matches it, so
+ * diffProductsLight yields zero inserts and zero updates.
+ *
+ * This is what "a quiet day" really looks like, and it is NOT an empty feed — the two
+ * were interchangeable in these tests until 2026-09-12, when the difference turned out
+ * to be 30 unpublished products.
+ */
+function makeUnchangedFeed(n: number) {
+  const products: AosomProduct[] = Array.from({ length: n }, (_, i) => ({
+    sku: `SKU-${i}`, name: `Produit ${i}`, price: 10 + i, qty: 5, color: "", size: "",
+    productType: "Test", images: [], video: "", description: "", shortDescription: "",
+    material: "", gtin: "", weight: 1, estimatedArrival: "", outOfStockExpected: "",
+    packageNum: "", boxSize: "", boxWeight: "",
+    dimensions: { length: 1, width: 1, height: 1 },
+    category: "Test", brand: "TestBrand", psin: "", sin: "", pdf: "",
+  }));
+  const snapshot = new Map(products.map((p) => [p.sku, {
+    sku: p.sku, name: p.name, price: p.price, qty: p.qty, color: "", size: "",
+    product_type: p.productType, image1: "", image2: "", image3: "", image4: "",
+    image5: "", image6: "", image7: "", video: "", description: "", short_description: "",
+    material: "", gtin: "", weight: p.weight, out_of_stock_expected: "", estimated_arrival: "",
+  }]));
+  return { products, snapshot };
+}
+
 function makeProductDiff(groupKey: string, action: "update" | "archive" = "update") {
   return {
     shopifyId: "shop-" + groupKey,
@@ -55,6 +81,7 @@ vi.mock("@/lib/database", () => ({
   updateSyncRunTiming: vi.fn().mockResolvedValue(undefined),
   addSyncLogsBatch: vi.fn().mockResolvedValue(undefined),
   refreshProducts: vi.fn().mockResolvedValue(undefined),
+  markSkusSeen: vi.fn().mockResolvedValue(0),
   rebuildProductTypeCounts: vi.fn().mockResolvedValue(undefined),
   recordPriceChanges: vi.fn().mockResolvedValue(undefined),
   getProduct: vi.fn().mockResolvedValue(null),
@@ -142,6 +169,7 @@ function resetAllMocks() {
   vi.mocked(db.completeSyncRun).mockResolvedValue(undefined);
   vi.mocked(db.addSyncLogsBatch).mockResolvedValue(undefined);
   vi.mocked(db.refreshProducts).mockResolvedValue(undefined);
+  vi.mocked(db.markSkusSeen).mockResolvedValue(0);
   vi.mocked(db.rebuildProductTypeCounts).mockResolvedValue(undefined);
   vi.mocked(db.recordPriceChanges).mockResolvedValue(undefined);
   vi.mocked(db.createNotification).mockResolvedValue(1);
@@ -641,7 +669,12 @@ describe("runSyncInit — normal flow with toWrite > 0", () => {
 
   it("skips blob save and sets refreshDone=true when toWrite is empty", async () => {
     const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
-    vi.mocked(fetchAosomCatalog).mockResolvedValue([]);
+    // "Nothing changed" is modelled as a POPULATED feed matching the snapshot, not as an
+    // empty feed. Conflating the two is the 2026-09-12 bug: an empty feed now throws
+    // (assertFeedPlausible), because it is indistinguishable from a withdrawn catalogue.
+    const feed = makeUnchangedFeed(120);
+    vi.mocked(fetchAosomCatalog).mockResolvedValue(feed.products);
+    vi.mocked(db.getProductsSnapshot).mockResolvedValue(feed.snapshot as Awaited<ReturnType<typeof db.getProductsSnapshot>>);
     const result = await runSyncInit();
 
     expect(result.skipped).toBe(false);
@@ -1054,8 +1087,12 @@ describe("runSyncFull — zero chunks (no catalog changes)", () => {
 
   it("skips refresh loop and goes straight to finalize when totalChunks=0", async () => {
     const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
-    // Empty catalog → toWrite=[] → totalChunks=0, refreshDone=true
-    vi.mocked(fetchAosomCatalog).mockResolvedValue([]);
+    // Unchanged catalog → toWrite=[] → totalChunks=0, refreshDone=true.
+    // Modelled with a real feed matching the snapshot: an EMPTY feed is a different
+    // situation entirely and now throws, which is the whole point of the 2026-09-12 fix.
+    const feed = makeUnchangedFeed(120);
+    vi.mocked(fetchAosomCatalog).mockResolvedValue(feed.products);
+    vi.mocked(db.getProductsSnapshot).mockResolvedValue(feed.snapshot as Awaited<ReturnType<typeof db.getProductsSnapshot>>);
 
     // After init saves checkpoint with refreshDone=true, finalize will see it
     vi.mocked(db.savePhase1Checkpoint).mockImplementation(async (cp) => {
@@ -1091,6 +1128,141 @@ describe("runSyncFull — skips when lock is held (parallel call guard)", () => 
     expect(result.lockAgeSeconds).toBe(30);
     expect(db.createSyncRun).not.toHaveBeenCalled();
     expect(db.rebuildProductTypeCounts).not.toHaveBeenCalled();
+  });
+
+  // ─── The 2026-09-12 mass-archive guards ─────────────────────────────
+  //
+  // Regression cover for the incident where a frozen CSV cache made Phase 1 see zero
+  // changes, left products.last_seen_at un-stamped catalogue-wide, and let Phase 2 read
+  // the empty "seen today" set as "Aosom withdrew everything" — drafting 30 live products
+  // before it was caught. Both halves are locked: Phase 1 must refuse an implausible feed
+  // without touching the good checkpoint, and Phase 2 must refuse a mass archive without
+  // holding up the price and stock work in the same run.
+
+  function makeShopifyProduct(id: string, status: "active" | "draft" = "active") {
+    return {
+      shopifyId: id, title: `Product ${id}`, status, bodyHtml: "<p>fr</p>", productType: "Test",
+      images: [], tags: [],
+      variants: [{ variantId: `V-${id}`, sku: `${id}-BK`, price: 10, inventoryQuantity: 5,
+        inventoryItemId: `INV-${id}`, option1: null, option2: null, weight: 1, gtin: "" }],
+    };
+  }
+
+  function makeAosomProduct(sku: string): AosomProduct {
+    return {
+      sku, name: `Produit ${sku}`, price: 10, qty: 5, color: "", size: "", productType: "Test",
+      images: [], video: "", description: "", shortDescription: "", material: "", gtin: "",
+      weight: 1, estimatedArrival: "", outOfStockExpected: "", packageNum: "", boxSize: "",
+      boxWeight: "", dimensions: { length: 1, width: 1, height: 1 },
+      category: "Test", brand: "TestBrand", psin: "", sin: "", pdf: "",
+    };
+  }
+
+  function makeArchiveDiff(id: string) {
+    const d = makeProductDiff(id, "archive");
+    d.shopifyId = id;
+    d.changes = [{ field: "removed_product", sku: `${id}-BK`, oldValue: "t", newValue: null }] as unknown as typeof d.changes;
+    return d;
+  }
+
+  it("Phase 1 refuses an empty feed and leaves the previous checkpoint untouched", async () => {
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: YESTERDAY, blobUrl: "https://blob/yesterday.json", totalChunks: 4,
+      chunksProcessed: 4, refreshDone: true, finalized: true, totalProducts: 8018,
+      priceUpdates: 12, stockChanges: 30, newProducts: 2,
+    } as Awaited<ReturnType<typeof db.getPhase1Checkpoint>>);
+    vi.mocked(fetchAosomCatalog).mockResolvedValue([]);
+
+    await expect(runSyncInit()).rejects.toThrow(/Refusing to sync/);
+
+    // The single most important assertion here: yesterday's good state survives.
+    expect(db.savePhase1Checkpoint).not.toHaveBeenCalled();
+    // And the failure is visible, not swallowed into a "success".
+    expect(db.completeSyncRun).toHaveBeenCalledWith("run-new", expect.objectContaining({ status: "failed" }));
+    expect(db.createNotification).toHaveBeenCalledWith("error", expect.stringContaining("Sync init"), expect.any(String));
+  });
+
+  it("Phase 1 refuses a feed under half the last good run", async () => {
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    vi.mocked(db.getPhase1Checkpoint).mockResolvedValue({
+      date: YESTERDAY, blobUrl: "", totalChunks: 0, chunksProcessed: 0, refreshDone: true,
+      finalized: true, totalProducts: 8018, priceUpdates: 0, stockChanges: 0, newProducts: 0,
+    } as Awaited<ReturnType<typeof db.getPhase1Checkpoint>>);
+    vi.mocked(fetchAosomCatalog).mockResolvedValue(
+      Array.from({ length: 3000 }, (_, i) => makeAosomProduct(`SKU-${i}`))
+    );
+
+    await expect(runSyncInit()).rejects.toThrow(/under 50%/);
+    expect(db.savePhase1Checkpoint).not.toHaveBeenCalled();
+  });
+
+  it("Phase 1 stamps last_seen_at for EVERY feed SKU, including on a zero-change day", async () => {
+    // The actual defect: on 2026-09-12 the diff was empty, so nothing was written and no
+    // SKU was marked as seen. Presence in the feed and having changed are different facts.
+    const { fetchAosomCatalog } = await import("@/lib/csv-fetcher");
+    const feed = Array.from({ length: 8018 }, (_, i) => makeAosomProduct(`SKU-${i}`));
+    vi.mocked(fetchAosomCatalog).mockResolvedValue(feed);
+    // Snapshot identical to the feed → diffProductsLight yields zero writes.
+    vi.mocked(db.getProductsSnapshot).mockResolvedValue(new Map(
+      feed.map((p) => [p.sku, {
+        sku: p.sku, name: p.name, price: p.price, qty: p.qty, color: "", size: "",
+        product_type: p.productType, image1: "", image2: "", image3: "", image4: "",
+        image5: "", image6: "", image7: "", video: "", description: "", short_description: "",
+        material: "", gtin: "", weight: p.weight, out_of_stock_expected: "", estimated_arrival: "",
+      }])
+    ) as Awaited<ReturnType<typeof db.getProductsSnapshot>>);
+
+    const result = await runSyncInit();
+
+    expect(result.totalChunks).toBe(0); // genuinely nothing to write — that part is fine
+    expect(db.markSkusSeen).toHaveBeenCalledOnce();
+    const [skusMarked] = vi.mocked(db.markSkusSeen).mock.calls[0];
+    expect(skusMarked).toHaveLength(8018); // all of them, not just the changed ones
+  });
+
+  it("Phase 2 blocks 1,349 archives against 1,382 active but still applies the price diff", async () => {
+    vi.mocked(shopifyClient.fetchAllShopifyProducts).mockResolvedValue(
+      Array.from({ length: 1382 }, (_, i) => makeShopifyProduct(`P${i}`)) as Awaited<ReturnType<typeof shopifyClient.fetchAllShopifyProducts>>
+    );
+
+    const priceDiff = makeProductDiff("P0", "update");
+    priceDiff.shopifyId = "P0";
+    priceDiff.changes = [{ field: "price", sku: "P0-BK", oldValue: 10, newValue: 8 }] as unknown as typeof priceDiff.changes;
+    const archiveDiffs = Array.from({ length: 1349 }, (_, i) => makeArchiveDiff(`P${i + 1}`));
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue(
+      [priceDiff, ...archiveDiffs] as ReturnType<typeof diffEngine.computeDiffs>
+    );
+
+    const res = await runShopifyPush();
+
+    // Nothing was drafted.
+    expect(shopifyClient.draftShopifyProduct).not.toHaveBeenCalled();
+    expect(res.archived).toBe(0);
+    // The operator is told, loudly.
+    expect(db.createNotification).toHaveBeenCalledWith(
+      "error", expect.stringContaining("Archivage de masse bloqué"), expect.any(String)
+    );
+    // Only the surviving diff is queued, so the checkpoint cannot "complete" the 1,349.
+    const [saved] = vi.mocked(db.saveShopifyPushCheckpoint).mock.calls.at(-1)!;
+    expect(saved.totalDiffs).toBe(1);
+  });
+
+  it("Phase 2 leaves a normal run alone — a handful of real removals still archive", async () => {
+    vi.mocked(shopifyClient.fetchAllShopifyProducts).mockResolvedValue(
+      Array.from({ length: 1382 }, (_, i) => makeShopifyProduct(`P${i}`)) as Awaited<ReturnType<typeof shopifyClient.fetchAllShopifyProducts>>
+    );
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue(
+      Array.from({ length: 6 }, (_, i) => makeArchiveDiff(`P${i}`)) as ReturnType<typeof diffEngine.computeDiffs>
+    );
+
+    const res = await runShopifyPush();
+
+    expect(shopifyClient.draftShopifyProduct).toHaveBeenCalledTimes(6);
+    expect(res.archived).toBe(6);
+    expect(db.createNotification).not.toHaveBeenCalledWith(
+      "error", expect.stringContaining("Archivage de masse bloqué"), expect.any(String)
+    );
   });
 });
 
