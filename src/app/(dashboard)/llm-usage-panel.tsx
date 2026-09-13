@@ -3,10 +3,13 @@
 import { useState, useEffect } from "react";
 
 interface PoolUsage {
-  pool: "assistant" | "batch";
+  pool: "assistant" | "batch" | "maintenance";
   model: string;
   tokens: number;
-  budget: number;
+  /** null = uncapped (maintenance without LLM_MAINTENANCE_DAILY_BUDGET set). JSON can't
+   *  carry Infinity — JSON.stringify silently turns it into null, so the API sends null
+   *  on purpose rather than let that happen implicitly. */
+  budget: number | null;
   pctOfBudget: number;
   costUsd: number;
   blendedRatePerMTok: number;
@@ -28,6 +31,7 @@ interface Usage {
 const POOL_LABEL: Record<PoolUsage["pool"], string> = {
   assistant: "Assistant (boutique)",
   batch: "Batch (imports, blog, social)",
+  maintenance: "Maintenance (audits catalogue)",
 };
 
 /** Amber at 80% of the daily cap, red at 100% — matches the alert colours used elsewhere. */
@@ -128,7 +132,10 @@ export function LlmUsagePanel() {
               </div>
               <p className="text-xl font-semibold text-white mt-1 tabular-nums">
                 {fmtTokens(p.tokens)}
-                <span className="text-sm font-normal text-gray-500"> / {fmtTokens(p.budget)} tokens</span>
+                <span className="text-sm font-normal text-gray-500">
+                  {" / "}
+                  {p.budget == null ? "illimité" : `${fmtTokens(p.budget)} tokens`}
+                </span>
               </p>
               <div className="h-1.5 bg-gray-800 rounded-full mt-2 overflow-hidden">
                 <div className={`h-full ${tone.bar}`} style={{ width: `${p.pctOfBudget}%` }} />

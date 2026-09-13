@@ -34,7 +34,11 @@ export async function GET() {
         pool,
         model: poolModel(pool),
         tokens,
-        budget,
+        // JSON.stringify silently turns Infinity into null (NextResponse.json would do this
+        // implicitly either way) — made explicit here so the client contract is "number |
+        // null", not "number that is sometimes secretly Infinity on the wire". The client
+        // must treat null as "uncapped", never call .toLocaleString() on it unguarded.
+        budget: Number.isFinite(budget) ? budget : null,
         // Clamped: the gate runs BEFORE each call, so the request that crosses the cap
         // still completes and the counter can land slightly above 100%.
         // An uncapped pool (maintenance, budget = Infinity) has no percentage to report.
