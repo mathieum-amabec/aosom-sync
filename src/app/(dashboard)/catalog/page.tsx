@@ -3,6 +3,8 @@
 import { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { storeLink } from "@/lib/insights";
+import { IMPORT } from "@/lib/config";
+import { describeImportFailure, isOverBatchCap, excessOverBatchCap } from "@/lib/import-error-message";
 
 interface CatalogProduct {
   sku: string;
@@ -119,6 +121,16 @@ function CatalogBrowser() {
   // Selection + bulk-import confirmation.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmingImport, setConfirmingImport] = useState(false);
+  // Import request lifecycle. `importing` is the double-click guard AND the
+  // button's loading state; `importError` is what the user finally gets to read
+  // when the request fails (before this, a 504 or a 400 produced NOTHING on screen).
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  // `selected` is intentionally cumulative: it survives page, filter and search
+  // changes so an operator can assemble a batch across several pages. That makes
+  // it easy to drift past the route's cap without noticing, so the cap is shown
+  // here instead of only being enforced by a 400 at submit time.
+  const overBatchCap = isOverBatchCap(selected.size);
 
   // Build the query params shared by the fetch and the URL (page=1 / falsy omitted).
   const buildParams = useCallback(() => {
@@ -217,20 +229,45 @@ function CatalogBrowser() {
   }
 
   async function sendToImport() {
+    // Double-click guard. The button is also `disabled` while importing, but the
+    // handler refuses too: a disabled attribute is a UI hint, this is the rule.
+    // Repeat clicks used to fire concurrent runs over the SAME skus — three in
+    // two seconds were observed in production on 2026-09-13, each re-paying for
+    // the per-product LLM vision call.
+    if (importing) return;
+
     const skus = Array.from(selected);
+    setImporting(true);
+    setImportError(null);
     try {
       const res = await fetch("/api/import/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ skus }),
       });
+
       if (res.ok) {
         setSelected(new Set());
         setConfirmingImport(false);
         window.location.href = "/import";
+        // Deliberately NOT clearing `importing`: the navigation is async, and
+        // re-enabling the button in the gap would let a last click through.
+        // (Which is why this is not a `finally` — that would run here too.)
+        return;
       }
+
+      // Everything below used to be a no-op: `if (res.ok)` had no else, so any
+      // non-2xx left the screen frozen with no explanation.
+      setImportError(await describeImportFailure(res, skus.length));
+      setImporting(false);
     } catch {
-      alert("Failed to queue products");
+      // Genuine network-level failure only (DNS, offline, connection reset).
+      // fetch() does NOT reject on an HTTP error status, so this never overlaps
+      // with the non-2xx branch above.
+      setImportError(
+        "Connexion impossible. Vérifiez votre réseau, puis réessayez — aucun produit n'a été envoyé.",
+      );
+      setImporting(false);
     }
   }
 
@@ -393,13 +430,22 @@ function CatalogBrowser() {
               <span className="text-sm text-gray-300">Importer {selected.size} produit{selected.size > 1 ? "s" : ""} ?</span>
               <button
                 onClick={sendToImport}
-                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+                disabled={importing || overBatchCap}
+                aria-busy={importing}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 disabled:text-blue-300 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors inline-flex items-center gap-2"
               >
-                Confirmer
+                {importing && (
+                  <span
+                    aria-hidden="true"
+                    className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"
+                  />
+                )}
+                {importing ? "Importation en cours…" : "Confirmer"}
               </button>
               <button
                 onClick={() => setConfirmingImport(false)}
-                className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors"
+                disabled={importing}
+                className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-gray-300 text-sm rounded-lg transition-colors"
               >
                 Annuler
               </button>
@@ -407,11 +453,50 @@ function CatalogBrowser() {
           ) : (
             <button
               onClick={() => setConfirmingImport(true)}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
+              disabled={overBatchCap}
+              title={overBatchCap ? `Maximum ${IMPORT.MAX_SKUS_PER_BATCH} produits par lot` : undefined}
+              className={`px-4 py-2 text-white text-sm font-medium rounded-lg transition-colors ${
+                overBatchCap
+                  ? "bg-red-900 text-red-200 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-500"
+              }`}
             >
               Importer la sélection ({selected.size})
             </button>
           )}
+        </div>
+      )}
+
+      {/* Batch cap warning. The selection deliberately accumulates across pages and
+          filters, so it is easy to sail past the cap without noticing — it used to
+          fail only at submit time, with a 400 the UI never displayed. */}
+      {overBatchCap && (
+        <div className="mb-4 px-4 py-3 rounded-lg border border-red-800 bg-red-950/60 text-red-200 text-sm">
+          <strong className="font-semibold">
+            Maximum {IMPORT.MAX_SKUS_PER_BATCH} produits par lot
+          </strong>{" "}
+          — vous en avez sélectionné {selected.size}. Désélectionnez-en{" "}
+          {excessOverBatchCap(selected.size)} pour continuer.
+          <span className="block text-red-300/80 mt-1">
+            La sélection est cumulative : elle est conservée quand vous changez de page ou de filtre.
+          </span>
+        </div>
+      )}
+
+      {/* Import failure. Before this block a 504 or a 400 produced no UI at all. */}
+      {importError && (
+        <div
+          role="alert"
+          className="mb-4 px-4 py-3 rounded-lg border border-amber-800 bg-amber-950/60 text-amber-100 text-sm flex items-start justify-between gap-4"
+        >
+          <span>{importError}</span>
+          <button
+            onClick={() => setImportError(null)}
+            className="text-amber-300 hover:text-amber-100 shrink-0"
+            aria-label="Fermer"
+          >
+            ✕
+          </button>
         </div>
       )}
 
