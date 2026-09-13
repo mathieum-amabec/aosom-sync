@@ -2,6 +2,34 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.7] - 2026-09-13
+
+Fixed the dashboard crashing on load with an uncaught client exception (React #418
+hydration bailout, then `TypeError: Cannot read properties of null (reading
+'toLocaleString')`) — root cause found and fixed, not just papered over.
+
+`GET /api/dashboard/llm-usage`'s `maintenance` pool is uncapped by design
+(`poolBudget("maintenance")` returns `Infinity` when `LLM_MAINTENANCE_DAILY_BUDGET` is
+unset — see `llm-budget.ts`). `NextResponse.json()` calls `JSON.stringify` under the hood,
+and `JSON.stringify(Infinity)` silently produces `null` on the wire — there is no way to
+send `Infinity` over JSON. `llm-usage-panel.tsx`'s `usage.pools.map(...)` called
+`fmtTokens(p.budget)` = `p.budget.toLocaleString()` with no null guard, so every single
+dashboard load threw the moment it rendered the maintenance pool's card.
+
+This bug shipped in v0.5.89.0 (2026-09-07, `833477f`) when `maintenance` was added to the
+usage panel's `POOLS` list — three full weeks before it was diagnosed here, unrelated to
+any of the v0.5.92.x sync/image-compliance work landed this week.
+
+- `route.ts`: sends `budget: Number.isFinite(budget) ? budget : null` explicitly (same
+  bytes as before — the point is the client contract is now `number | null` on purpose,
+  not `number` that quietly turns into `null` for one specific pool).
+- `llm-usage-panel.tsx`: `PoolUsage.budget` typed `number | null`; the card renders
+  "illimité" instead of crashing when null. `PoolUsage["pool"]` also gained `"maintenance"`
+  (it was already sent by the API, unlabelled, silently rendering a blank pool name).
+- New regression test (`dashboard-llm-usage-route.test.ts`) locks the exact wire shape:
+  round-trips the response through `JSON.stringify`/`JSON.parse` and asserts the
+  maintenance pool's budget is `null`, never `Infinity`/`NaN`.
+
 ## [0.5.92.6] - 2026-09-12
 
 v0.5.92.5 guarded the cron path and left the dashboard trigger open. Closing that.
