@@ -3,6 +3,12 @@
 import { useState, useEffect, useCallback } from "react";
 import PublicationScheduleTab from "./PublicationScheduleTab";
 import SlideshowSettingsTab from "./SlideshowSettingsTab";
+import { ErrorBanner } from "@/components/error-banner";
+import {
+  describeApiFailure,
+  describePayloadFailure,
+  describeNetworkFailure,
+} from "@/lib/api-error-message";
 
 interface Settings {
   [key: string]: string;
@@ -211,6 +217,9 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Save failures used to be invisible: the success branch had no else, so the
+  // page kept showing unsaved changes with no reason given.
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [testResults, setTestResults] = useState<Record<string, string>>({});
   const [testingPrompt, setTestingPrompt] = useState<string | null>(null);
@@ -239,15 +248,35 @@ export default function SettingsPage() {
       }
     }
     if (Object.keys(updates).length > 0) {
-      const res = await fetch("/api/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setSettings(data.data);
-        setDirty(new Set());
+      try {
+        const res = await fetch("/api/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        });
+        if (!res.ok) {
+          // There was no guard here at all: res.json() ran unconditionally, so a
+          // 504 (HTML body) threw out of the function and `saving` stayed true
+          // forever — the Save button froze with nothing said.
+          setSaveError(await describeApiFailure(res, "L'enregistrement"));
+          setSaving(false);
+          return;
+        }
+        const data = await res.json();
+        if (data.success) {
+          setSettings(data.data);
+          setDirty(new Set());
+        } else {
+          // `dirty` is deliberately NOT cleared: nothing was persisted, so the
+          // unsaved-changes state has to keep saying so rather than go quiet.
+          setSaveError(describePayloadFailure(data.error, "L'enregistrement"));
+          setSaving(false);
+          return;
+        }
+      } catch {
+        setSaveError(describeNetworkFailure("L'enregistrement"));
+        setSaving(false);
+        return;
       }
     }
     setSaving(false);
@@ -336,6 +365,13 @@ export default function SettingsPage() {
           <h2 className="text-2xl font-bold text-white">Settings</h2>
           <p className="text-gray-400 text-sm mt-1">Configure sync, social media, and API connections</p>
         </div>
+        {tab === "general" && (
+          <ErrorBanner
+            message={saveError}
+            onDismiss={() => setSaveError(null)}
+            className="mb-3"
+          />
+        )}
         {tab === "general" && dirty.size > 0 && (
           <button
             onClick={saveChanges}

@@ -2,6 +2,34 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.9] - 2026-09-13
+
+Same treatment as the catalogue import fix, applied to the rest of the dashboard:
+a failed mutation now says so, in one shared banner instead of a system modal or
+nothing at all.
+
+- `components/error-banner.tsx` — one banner for the whole dashboard. `role="alert"`
+  for failures, `role="status"` for successes (polite; nothing is wrong to report).
+- `lib/api-error-message.ts` — one place that turns a failure into a sentence:
+  `describeApiFailure` (HTTP status, tolerates a non-JSON body — a platform 504
+  answers with HTML), `describePayloadFailure` (the `{success:false,error}`
+  convention, where `res.ok` is true), `describeNetworkFailure`.
+- **settings save** had no `else` AND no `try/catch`: a 504 threw out of the
+  function mid-flight, so `saving` stayed true and the Save button froze with
+  nothing said. It now reports the failure and deliberately keeps the dirty set,
+  since nothing was persisted.
+- **social** — the page's ten `alert()` modals are gone. Failures use the shared
+  banner; the success notices keep their own tone rather than being painted red.
+- **collections** — save and sync had no failure branch at all; both now report.
+- **videos** — the status PATCH discarded its response entirely, so a rejected
+  change was indistinguishable from an applied one. It now reports and skips the
+  refresh instead of showing the row snapping back with no explanation.
+
+Two of the six audited sites turned out to be false positives of the audit
+heuristic and were left alone: the `settings` test buttons already render their
+errors through `testResults` / `promptPreview`, and `videos` queue-reel already
+renders its own per-language error line. Changing them would have been churn.
+
 ## [0.5.92.8] - 2026-09-13
 
 Fixed the catalogue import button doing nothing on click — a real silent failure,

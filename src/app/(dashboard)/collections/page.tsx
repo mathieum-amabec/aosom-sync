@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { ErrorBanner, type BannerTone } from "@/components/error-banner";
+import { describeApiFailure, describePayloadFailure, describeNetworkFailure } from "@/lib/api-error-message";
 
 interface CollectionMapping {
   aosomCategory: string;
@@ -26,6 +28,8 @@ export default function CollectionsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  // Replaces the two alert()s and fills the missing failure branches.
+  const [notice, setNotice] = useState<{ tone: BannerTone; text: string } | null>(null);
   const [syncResult, setSyncResult] = useState<Record<string, unknown> | null>(null);
   const [filter, setFilter] = useState<"all" | "mapped" | "unmapped">("all");
   const [search, setSearch] = useState("");
@@ -76,10 +80,21 @@ export default function CollectionsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mappings }),
       });
+      if (!res.ok) {
+        setNotice({ tone: "error", text: await describeApiFailure(res, "L'enregistrement des mappings") });
+        setSaving(false);
+        return;
+      }
       const data = await res.json();
-      if (data.success) alert(`${data.saved} mappings saved`);
+      if (data.success) {
+        setNotice({ tone: "success", text: `${data.saved} mapping(s) enregistré(s).` });
+      } else {
+        // There was no else at all: a rejected save left the page silent, with the
+        // mappings still on screen and nothing written.
+        setNotice({ tone: "error", text: describePayloadFailure(data.error, "L'enregistrement des mappings") });
+      }
     } catch {
-      alert("Failed to save");
+      setNotice({ tone: "error", text: describeNetworkFailure("L'enregistrement des mappings") });
     }
     setSaving(false);
   }
@@ -90,10 +105,20 @@ export default function CollectionsPage() {
     setSyncResult(null);
     try {
       const res = await fetch("/api/collections/sync", { method: "POST" });
+      if (!res.ok) {
+        setNotice({ tone: "error", text: await describeApiFailure(res, "La synchronisation des collections") });
+        setSyncing(false);
+        return;
+      }
       const data = await res.json();
+      if (!data.success) {
+        setNotice({ tone: "error", text: describePayloadFailure(data.error, "La synchronisation des collections") });
+        setSyncing(false);
+        return;
+      }
       setSyncResult(data.data);
     } catch {
-      alert("Sync failed");
+      setNotice({ tone: "error", text: describeNetworkFailure("La synchronisation des collections") });
     }
     setSyncing(false);
   }
@@ -109,6 +134,12 @@ export default function CollectionsPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-5xl">
+      <ErrorBanner
+        message={notice?.text ?? null}
+        tone={notice?.tone ?? "error"}
+        onDismiss={() => setNotice(null)}
+        className="mb-4"
+      />
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Collection Mapping</h2>
