@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { ErrorBanner } from "@/components/error-banner";
+import { describeApiFailure, describePayloadFailure, describeNetworkFailure } from "@/lib/api-error-message";
 
 // ─── Shared types (mirror /lib/database VideoJob) ────────────────────
 
@@ -786,12 +788,32 @@ function LibraryTab({
   acting,
   onAct,
 }: { jobs: VideoJob[]; onChange: () => void } & VideoSectionProps) {
+  // A rejected PATCH used to be indistinguishable from a successful one: the
+  // result was discarded, onChange() refreshed, and the row simply came back
+  // with its old status and no explanation.
+  const [statusError, setStatusError] = useState<string | null>(null);
+
   async function setStatus(id: number, status: VideoStatus) {
-    await fetch(`/api/videos/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
+    setStatusError(null);
+    try {
+      const res = await fetch(`/api/videos/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        setStatusError(await describeApiFailure(res, "Le changement de statut"));
+        return;
+      }
+      const data = await res.json().catch(() => ({ success: true }));
+      if (data && data.success === false) {
+        setStatusError(describePayloadFailure(data.error, "Le changement de statut"));
+        return;
+      }
+    } catch {
+      setStatusError(describeNetworkFailure("Le changement de statut"));
+      return;
+    }
     onChange();
   }
 
@@ -803,6 +825,11 @@ function LibraryTab({
       <section>
         <h3 className="text-sm font-semibold text-gray-300 mb-3">Slideshows générés</h3>
         {videoError && <p className="text-xs text-red-400 mb-2">{videoError}</p>}
+        <ErrorBanner
+          message={statusError}
+          onDismiss={() => setStatusError(null)}
+          className="mb-3"
+        />
         {videoLoading ? (
           <p className="text-gray-500 text-sm">Chargement…</p>
         ) : slideshows.length === 0 ? (

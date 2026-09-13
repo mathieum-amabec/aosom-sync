@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { ErrorBanner } from "@/components/error-banner";
+import { describePayloadFailure, describeNetworkFailure } from "@/lib/api-error-message";
 import { SOCIAL_CATEGORIES, seasonalDefaultCategory, getCategory } from "@/lib/social-categories";
 
 interface ChannelState {
@@ -127,6 +129,12 @@ export default function SocialPage() {
   const [publishId, setPublishId] = useState<number | null>(null);
   const [publishChannels, setPublishChannels] = useState<Set<string>>(new Set(DEFAULT_CHANNELS));
   const [publishing, setPublishing] = useState(false);
+  // Replaces the page's ten system alert()s. A modal blocks the page, cannot be
+  // styled, and reads nothing like the rest of the dashboard; this is the same
+  // banner the catalogue import uses.
+  const [notice, setNotice] = useState<{ tone: "error" | "success"; text: string } | null>(null);
+  const showError = (text: string) => setNotice({ tone: "error", text });
+  const showOk = (text: string) => setNotice({ tone: "success", text });
   const [photoEditId, setPhotoEditId] = useState<number | null>(null);
   const [photoEditUrls, setPhotoEditUrls] = useState<string[]>([]);
   const [view, setView] = useState<"list" | "calendar">("list");
@@ -168,7 +176,7 @@ export default function SocialPage() {
       body: JSON.stringify({ action, id, ...extra }),
     });
     const data = await res.json();
-    if (!data.success && data.error) alert(`Error: ${data.error}`);
+    if (!data.success && data.error) showError(describePayloadFailure(data.error, "L'action"));
     fetchDrafts();
     return data;
   }
@@ -181,14 +189,14 @@ export default function SocialPage() {
     });
     const data = await res.json();
     if (!data.success) {
-      alert(`Error: ${data.error || "Échec de l'approbation"}`);
+      showError(describePayloadFailure(data.error, "L'approbation"));
       return;
     }
     fetchDrafts();
     if (typeof data.scheduledAt === "number") {
-      alert(`Schedulé pour ${formatSlot(data.scheduledAt)}`);
+      showOk(`Planifié pour ${formatSlot(data.scheduledAt)}.`);
     } else {
-      alert("Approuvé — aucun créneau libre trouvé, à planifier manuellement.");
+      showOk("Approuvé — aucun créneau libre trouvé, à planifier manuellement.");
     }
   }
 
@@ -210,14 +218,14 @@ export default function SocialPage() {
       // The old handler swallowed every failure: a category with no lifestyle-verified
       // product looked identical to a successful run that produced nothing.
       if (!data.success) {
-        alert(data.error || "Échec de la génération");
+        showError(describePayloadFailure(data.error, "La génération"));
       } else if (data.fellBackToAll) {
-        alert(
+        showOk(
           `${data.count} brouillon(s) générés — rien de saisonnier en stock, repli sur tout le catalogue.`
         );
       }
-    } catch (err) {
-      alert(`Échec de la génération : ${err instanceof Error ? err.message : String(err)}`);
+    } catch {
+      showError(describeNetworkFailure("La génération"));
     } finally {
       setGenerating(false);
       fetchDrafts();
@@ -254,7 +262,7 @@ export default function SocialPage() {
 
   async function doPublishMulti(id: number) {
     if (publishChannels.size === 0) {
-      alert("Pick at least one channel");
+      showError("Sélectionnez au moins un canal de publication.");
       return;
     }
     setPublishing(true);
@@ -276,9 +284,9 @@ export default function SocialPage() {
           .filter((r: { status: string }) => r.status === "error")
           .map((r: { channel: string; error?: string }) => `${r.channel}: ${r.error}`)
           .join("\n");
-        alert(`Published ${ok} / Failed ${fail}\n\n${errMsg}`);
+        showError(`Publié ${ok} · Échec ${fail}\n\n${errMsg}`);
       } else {
-        alert(`Published to all ${ok} channel(s) successfully.`);
+        showOk(`Publié sur les ${ok} canal(aux) sélectionné(s).`);
       }
     }
   }
@@ -299,6 +307,13 @@ export default function SocialPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-6xl">
+      {/* Replaces this page's ten system alert()s — same banner as the catalogue import. */}
+      <ErrorBanner
+        message={notice?.text ?? null}
+        tone={notice?.tone ?? "error"}
+        onDismiss={() => setNotice(null)}
+        className="mb-4"
+      />
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Social Media</h2>
