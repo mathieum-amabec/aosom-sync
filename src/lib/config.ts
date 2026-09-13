@@ -367,6 +367,47 @@ export const API = {
   MAX_INSIGHTS_LIMIT: 200,
 } as const;
 
+// ─── Import batch sizing ────────────────────────────────────────────
+//
+// READ THIS BEFORE ADDING ANY PER-PRODUCT WORK TO queueForImport().
+//
+// queueForImport() (lib/import-pipeline.ts) walks its products SEQUENTIALLY, and
+// every product costs real wall-clock time:
+//
+//   selectProductImagesAsync()    downloads + classifies each image
+//   enforceCleanPrimaryImage()    ONE LLM vision call, per product
+//   getProduct() x N variants     one DB round-trip each
+//   upsertImportJob()             one DB write
+//
+// Measured in production on 2026-09-13: ~5 s/product (11 products in 58 s, from
+// the Vercel runtime logs of the 504s).
+//
+// THE INVARIANT, enforced by a test in tests/import-batch-sizing.test.ts:
+//
+//   MAX_SKUS_PER_BATCH * SECONDS_PER_PRODUCT + FIXED_OVERHEAD_S <= ROUTE_MAX_DURATION_S
+//
+// Break it and the function is killed mid-loop. upsertImportJob() runs INSIDE the
+// loop, so the products already processed stay committed: a timeout leaves a
+// HALF-IMPORTED batch and the client gets a 504 with no usable body.
+//
+// That is exactly the regression shipped in 2f24ff3 (2026-09-11): the pos-1 vision
+// guard raised the per-product cost while maxDuration stayed at 60 s, so every
+// batch over ~11 products died silently. Imports of 13 and 21 products succeeded
+// on 2026-09-07; on 2026-09-13 the same action wrote 1-3 jobs and 504'd.
+//
+// If you add per-product work: re-measure SECONDS_PER_PRODUCT and, in the SAME
+// commit, lower MAX_SKUS_PER_BATCH or raise ROUTE_MAX_DURATION_S.
+export const IMPORT = {
+  /** Mirrored by `export const maxDuration` in api/import/queue/route.ts. */
+  ROUTE_MAX_DURATION_S: 300,
+  /** Measured, not guessed. Re-measure when the per-product work changes. */
+  SECONDS_PER_PRODUCT: 5,
+  /** CSV fetch + merge before the loop starts. */
+  FIXED_OVERHEAD_S: 15,
+  /** Hard cap the route enforces, and the number the catalogue UI shows. */
+  MAX_SKUS_PER_BATCH: 40,
+} as const;
+
 // ─── Session / Auth ─────────────────────────────────────────────────
 
 export const AUTH = {

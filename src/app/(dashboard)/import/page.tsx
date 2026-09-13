@@ -56,10 +56,14 @@ export default function ImportPage() {
         updateJob(data.data);
         setExpandedJob(jobId);
       } else {
-        updateJobStatus(jobId, "error");
+        updateJobStatus(jobId, "error", data.error || `Génération refusée (HTTP ${res.status})`);
       }
-    } catch {
-      updateJobStatus(jobId, "error");
+    } catch (err) {
+      updateJobStatus(
+        jobId,
+        "error",
+        err instanceof Error ? `Réseau : ${err.message}` : "Erreur réseau pendant la génération",
+      );
     }
   }
 
@@ -75,10 +79,19 @@ export default function ImportPage() {
       if (data.success) {
         updateJob(data.data);
       } else {
-        updateJobStatus(jobId, "error");
+        updateJobStatus(jobId, "error", data.error || `Envoi Shopify refusé (HTTP ${res.status})`);
       }
-    } catch {
-      updateJobStatus(jobId, "error");
+    } catch (err) {
+      // Un timeout ici ne veut PAS dire que rien n'a été créé : createShopifyProduct
+      // peut avoir abouti côté Shopify malgré la coupure. Le message le dit, au lieu
+      // d'inviter à un re-push qui créerait un doublon.
+      updateJobStatus(
+        jobId,
+        "error",
+        err instanceof Error
+          ? `Réseau : ${err.message} — vérifiez dans Shopify avant de relancer`
+          : "Erreur réseau — vérifiez dans Shopify avant de relancer",
+      );
     }
   }
 
@@ -207,10 +220,24 @@ export default function ImportPage() {
     setJobs(prev => prev.map(j => (j.id === updated.id ? updated : j)));
   }
 
-  function updateJobStatus(jobId: string, status: string) {
+  /**
+   * The row already renders `job.error` (the red line under a failed job), but
+   * this used to set `status` alone — so a failed Generate/Push showed the word
+   * "error" and nothing else, with the paid LLM call or the Shopify write
+   * already spent. Carry the reason so the operator knows whether to retry.
+   */
+  function updateJobStatus(jobId: string, status: string, error?: string) {
     setJobs(prev =>
       prev.map(j =>
-        j.id === jobId ? { ...j, status: status as ImportJob["status"] } : j
+        j.id === jobId
+          ? {
+              ...j,
+              status: status as ImportJob["status"],
+              ...(status === "error"
+                ? { error: error ?? "Échec sans détail renvoyé par le serveur" }
+                : {}),
+            }
+          : j
       )
     );
   }

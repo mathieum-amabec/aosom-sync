@@ -2,6 +2,50 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.8] - 2026-09-13
+
+Fixed the catalogue import button doing nothing on click — a real silent failure,
+not just missing feedback.
+
+Three faults combined. `queueForImport()` walks products sequentially and commit
+2f24ff3 (2026-09-11) added `enforceCleanPrimaryImage()`, one LLM vision call per
+product, without touching `maxDuration = 60`. Measured ~5 s/product in the Vercel
+runtime logs, so any batch over ~11 products was killed mid-loop: 6 × 504 in 48 h,
+1-3 jobs written out of the batch, against imports of 13 and 21 products that
+succeeded on 2026-09-07. `catalog/page.tsx` then did `if (res.ok)` with no else,
+so the 504 produced nothing on screen at all; and the Confirm button was never
+disabled, so repeat clicks fired concurrent runs over the same SKUs — three within
+two seconds were recorded, each re-paying for the vision call.
+
+- **Timing is now a declared invariant.** `IMPORT` in `lib/config.ts` carries
+  `ROUTE_MAX_DURATION_S` (300), `SECONDS_PER_PRODUCT` (5, measured),
+  `FIXED_OVERHEAD_S` and `MAX_SKUS_PER_BATCH` (40), with the per-product cost
+  spelled out. `tests/import-batch-sizing.test.ts` fails if a batch can no longer
+  finish inside the budget, if the 20 % margin is eaten, or if `maxDuration` drifts
+  from config. It also pins `maxDuration` as a numeric literal: route segment
+  config is read by static analysis, so an imported value would be silently
+  ignored — the same class of failure as the bug itself.
+- **Failures are now visible.** `describeImportFailure()` maps each status to an
+  actionable sentence: a 504 says the batch is partial and to check the Import
+  page, a 400 over the cap names how many to deselect, a 401 says to log back in.
+  It survives a non-JSON body (a platform 504 answers with HTML).
+- **Double-click is blocked.** The Confirm button is `disabled` and `aria-busy`
+  while in flight, shows "Importation en cours…", and the handler refuses re-entry.
+  The in-flight flag is deliberately not cleared on success, so the async
+  navigation to /import cannot leave a re-armed button behind.
+- **The cap is shown before submit.** The selection is cumulative across pages and
+  filters by design; over 40 the button turns red and disables, with a banner
+  naming how many to deselect. Previously this only failed as a 400 the UI never
+  displayed.
+- **Import page failures now say why.** `updateJobStatus()` carries the reason, so
+  a failed Generate/Push no longer shows the bare word "error" after the paid LLM
+  call or the Shopify write has already been spent. A push that fails on a network
+  timeout now tells the operator to check Shopify before retrying, since
+  `createShopifyProduct` may have succeeded anyway.
+
+Audited every other mutation in `src/app/(dashboard)/` for the same anti-pattern;
+findings and the remaining lower-risk cases are in the PR.
+
 ## [0.5.92.7] - 2026-09-13
 
 Fixed the dashboard crashing on load with an uncaught client exception (React #418
