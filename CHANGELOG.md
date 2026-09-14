@@ -2,6 +2,45 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.10] - 2026-09-14
+
+stale-catalog could not see the products it most needed to see.
+
+### The blind spot
+
+`getStaleImportedProducts` required `qty > 0`, framing the job purely as oversell protection.
+That excluded the clearest discontinued case there is — a product BOTH sold out AND gone from
+the Aosom feed — and nothing else caught those either: the removed-from-feed reconcile fires on
+the day a SKU disappears, not retroactively. So they accumulated.
+
+Measured against production: of the 179 feed-absent products still live in the Meta catalog,
+**139 were invisible to this query for that reason alone**, while the cron reported a reassuring
+`stale=44` every morning for weeks.
+
+A sold-out stale product is not an oversell risk, but it is dead weight: `active` and published,
+occupying a slot in the Meta catalog and showing up in on-site search as a permanently
+unavailable result.
+
+### Changed
+
+- `qty > 0` removed from the query. The 30-day candidate list goes from **45 to 406**.
+- **`WRITE_CAP = 250`** added to `computeStaleDrafts`, because unbounded was fine at 45 and is
+  not at 406: 500ms a write is ~3.4min of writes alone inside a 300s cron that must also
+  paginate the whole Shopify catalog first. The cap counts **writes**, not scans, so a run whose
+  candidates are mostly already-drafted still reaches the ones needing work.
+- `StaleCatalogResult.deferred` + the cron detail string now report what the cap held back.
+
+Safe to cap because the pass is convergent and idempotent: candidates are ordered
+`last_seen_at ASC`, an already-drafted product is skipped next run, and the cron is daily.
+
+### Tests
+
+7 new. The cap: stops at the limit and defers the rest, does not burn itself on no-ops, leaves a
+normal under-cap run untouched, and converges across two runs with nothing lost or
+double-drafted. The query: one pre-existing test asserted the *old* behaviour ("ignores a
+product already showing zero stock") and is inverted, with the in-stock case kept explicitly so
+the original oversell path stays covered.
+
 ## [0.5.92.9] - 2026-09-13
 
 Same treatment as the catalogue import fix, applied to the rest of the dashboard:

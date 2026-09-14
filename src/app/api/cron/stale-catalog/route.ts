@@ -23,7 +23,7 @@ export async function GET(request: Request) {
     const result = await trackCron(
       "stale-catalog",
       () => runStaleCatalogDraft(),
-      (r) => `stale=${r.stale} drafted=${r.drafted} skipped=${r.skipped} excluded=${r.excluded} failed=${r.failed}`,
+      (r) => `stale=${r.stale} drafted=${r.drafted} skipped=${r.skipped} excluded=${r.excluded} failed=${r.failed} deferred=${r.deferred}`,
     );
     return NextResponse.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {

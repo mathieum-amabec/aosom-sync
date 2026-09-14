@@ -2542,15 +2542,28 @@ export async function getProductsForPriceAudit(): Promise<{ sku: string; price: 
 
 /**
  * Imported products that have gone stale in the Aosom feed: present on Shopify
- * (`shopify_product_id` not null), still showing stock (`qty > 0`), but not seen in the CSV
- * for `maxAgeDays` days. These are likely discontinued at Aosom yet still sellable on the
- * storefront (oversell risk). Consumed by the stale-catalog cron, which drafts them.
+ * (`shopify_product_id` not null) but not seen in the CSV for `maxAgeDays` days. These are
+ * likely discontinued at Aosom yet still live on the storefront. Consumed by the
+ * stale-catalog cron, which drafts them.
+ *
+ * The `qty > 0` clause this query used to carry was removed on 2026-09-14. It was meant as
+ * "only bother with the ones that can still oversell", but it excluded the single most
+ * clear-cut case of a discontinued product: one that is BOTH sold out AND gone from the feed.
+ * Those matched no other cleanup either — the removed-from-feed reconcile acts on the day a
+ * SKU disappears, not retroactively — so they accumulated indefinitely: on 2026-09-14, 139 of
+ * the 179 feed-absent products in the Meta catalog were invisible to this query for exactly
+ * that reason, while the cron reported a steady, healthy-looking `stale=44`.
+ *
+ * A sold-out stale product is not an oversell risk, but it is still dead weight: it sits
+ * `active` and published, occupies a slot in the Meta catalog, and shows up in on-site search
+ * as a permanently unavailable result. Drafting it is the right outcome, and the caller's own
+ * guards (coverage floor, per-run cap, `auto-drafted` tagging) decide what actually happens.
  */
 export async function getStaleImportedProducts(maxAgeDays = 30): Promise<{ sku: string; shopify_product_id: string }[]> {
   const db = await ensureSchema();
   const result = await db.execute({
     sql: `SELECT sku, shopify_product_id FROM products
-          WHERE shopify_product_id IS NOT NULL AND qty > 0 AND last_seen_at < unixepoch() - 86400 * ?
+          WHERE shopify_product_id IS NOT NULL AND last_seen_at < unixepoch() - 86400 * ?
           ORDER BY last_seen_at ASC`,
     args: [maxAgeDays],
   });
