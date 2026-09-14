@@ -92,11 +92,34 @@ describe("getStaleImportedProducts — feeds the cron that drafts discontinued p
     expect(await getStaleImportedProducts(30)).toEqual([]);
   });
 
-  it("ignores a product already showing zero stock", async () => {
-    // The risk this query exists for is overselling — a sold-out product cannot oversell.
+  it("INCLUDES a product showing zero stock — the clearest discontinued case of all", async () => {
+    // Inverted on 2026-09-14. This test used to assert the opposite, on the reasoning that
+    // "a sold-out product cannot oversell". True, but it framed the job as oversell protection
+    // only, and so excluded exactly the products most likely to be discontinued: sold out AND
+    // gone from the feed. Nothing else caught them either — the removed-from-feed reconcile
+    // fires on the day a SKU disappears, not retroactively — so they accumulated silently.
+    // Measured on production the day this changed: 139 of the 179 feed-absent products still
+    // live in the Meta catalog were invisible to this query for this reason alone, while the
+    // cron reported a reassuring `stale=44`.
     await product({ sku: "SOLD-OUT", qty: 0, daysSinceSeen: 45 });
 
-    expect(await getStaleImportedProducts(30)).toEqual([]);
+    expect(await getStaleImportedProducts(30)).toHaveLength(1);
+  });
+
+  it("still returns in-stock stale products — the original oversell case is untouched", async () => {
+    await product({ sku: "IN-STOCK-STALE", qty: 12, daysSinceSeen: 45 });
+
+    expect(await getStaleImportedProducts(30)).toHaveLength(1);
+  });
+
+  it("returns both stock states together, longest-unseen first", async () => {
+    // The two populations now share one query; ordering must still put the worst offender
+    // first so a WRITE_CAP-limited run drafts the most-certainly-dead products first.
+    await product({ sku: "ZERO-OLD", qty: 0, daysSinceSeen: 120 });
+    await product({ sku: "STOCK-NEW", qty: 7, daysSinceSeen: 40 });
+
+    const r = await getStaleImportedProducts(30);
+    expect(r.map((p) => p.sku)).toEqual(["ZERO-OLD", "STOCK-NEW"]);
   });
 
   it("honours the window argument rather than a fixed 30 days", async () => {
