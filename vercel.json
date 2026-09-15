@@ -76,6 +76,10 @@
       "schedule": "30 9 * * *"
     },
     {
+      "path": "/api/cron/catalog-consistency",
+      "schedule": "15 9 * * *"
+    },
+    {
       "path": "/api/cron/draft-ttl",
       "schedule": "0 10 * * *"
     },

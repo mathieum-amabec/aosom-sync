@@ -148,7 +148,7 @@ function claudeReturns(titleFr: string, titleEn: string) {
         text: JSON.stringify({
           titleFr,
           titleEn,
-          descriptionFr: "<p>fr</p>",
+          descriptionFr: "<p>Cette chaise pour votre jardin est confortable et pratique pour tous les jours.</p>",
           descriptionEn: "<p>en</p>",
           seoDescriptionFr: "desc fr",
           seoDescriptionEn: "desc en",
@@ -187,5 +187,141 @@ describe("generateProductContent — supplier brand stripping", () => {
     const out = await generateProductContent(makeProduct());
     expect(out.titleFr).toBe("Bureau");
     expect(out.titleEn).toBe("Clean Office Desk"); // no brand, unchanged
+  });
+});
+
+// Regression: stripSupplierBrands was only ever applied to titleFr/titleEn and the
+// URL handles — never to descriptionFr/descriptionEn/seoDescription*, so a model
+// that echoed the supplier name into the body (as the raw Aosom feed text often
+// does) reached Shopify body_html untouched. Found during the 2026-09-15 catalog
+// content investigation (532/1347 active products leaking a supplier name).
+describe("generateProductContent — description brand stripping", () => {
+  function claudeReturnsDescription(descriptionFr: string, descriptionEn = "<p>A chair.</p>") {
+    create.mockResolvedValue({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            titleFr: "Chaise longue grise",
+            titleEn: "Grey lounge chair",
+            descriptionFr,
+            descriptionEn,
+            seoDescriptionFr: "Chaise confortable pour votre jardin, avec des accoudoirs.",
+            seoDescriptionEn: "desc en",
+            metaTitleFr: "m fr | Livraison gratuite — Ameublo Direct",
+            metaTitleEn: "m en | Free Shipping — Furnish Direct",
+            metaDescriptionFr: "md fr",
+            metaDescriptionEn: "md en",
+            urlHandleFr: "chaise-fr",
+            urlHandleEn: "chair-en",
+            tags: ["jardin"],
+          }),
+        },
+      ],
+    });
+  }
+
+  it("strips a supplier brand mentioned in the body of descriptionFr", async () => {
+    claudeReturnsDescription(
+      "<p>Cette chaise Outsunny est parfaite pour votre jardin, avec des accoudoirs confortables.</p>",
+    );
+    const out = await generateProductContent(makeProduct());
+    expect(out.descriptionFr).not.toMatch(/outsunny/i);
+    expect(out.descriptionFr).toContain("Cette chaise");
+    expect(out.descriptionFr).toContain("accoudoirs");
+  });
+
+  it("handles a French elision directly attached to the brand without leaving a dangling apostrophe", async () => {
+    claudeReturnsDescription(
+      "<p>Profitez de l'Aosom chaise longue pour votre jardin, avec des accoudoirs confortables.</p>",
+    );
+    const out = await generateProductContent(makeProduct());
+    expect(out.descriptionFr).not.toMatch(/aosom/i);
+    expect(out.descriptionFr).not.toMatch(/\bl['’]\s/); // no orphaned "l' "
+  });
+});
+
+// Write-time guard: descriptionFr must read as French. This is the backstop for
+// the description-language class of bug (679/1382 active products served English
+// body_html via a since-fixed diff-engine defect, CHANGELOG v0.5.92.3) — a bad
+// generation must never reach Shopify silently.
+describe("generateProductContent — French language guard", () => {
+  it("escalates to the top-tier model when the batch model returns English descriptionFr", async () => {
+    const englishResponse = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            titleFr: "Chaise longue grise",
+            titleEn: "Grey lounge chair",
+            descriptionFr: "<p>This chair is great for your garden and easy to clean with a soft cloth.</p>",
+            descriptionEn: "<p>This chair is great for your garden.</p>",
+            seoDescriptionFr: "desc fr",
+            seoDescriptionEn: "desc en",
+            metaTitleFr: "m fr | Livraison gratuite — Ameublo Direct",
+            metaTitleEn: "m en | Free Shipping — Furnish Direct",
+            metaDescriptionFr: "md fr",
+            metaDescriptionEn: "md en",
+            urlHandleFr: "chaise-fr",
+            urlHandleEn: "chair-en",
+            tags: ["jardin"],
+          }),
+        },
+      ],
+    };
+    const frenchResponse = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            titleFr: "Chaise longue grise",
+            titleEn: "Grey lounge chair",
+            descriptionFr: "<p>Cette chaise est parfaite pour votre jardin et facile à nettoyer.</p>",
+            descriptionEn: "<p>This chair is great for your garden.</p>",
+            seoDescriptionFr: "desc fr",
+            seoDescriptionEn: "desc en",
+            metaTitleFr: "m fr | Livraison gratuite — Ameublo Direct",
+            metaTitleEn: "m en | Free Shipping — Furnish Direct",
+            metaDescriptionFr: "md fr",
+            metaDescriptionEn: "md en",
+            urlHandleFr: "chaise-fr",
+            urlHandleEn: "chair-en",
+            tags: ["jardin"],
+          }),
+        },
+      ],
+    };
+    create.mockClear();
+    create.mockResolvedValueOnce(englishResponse).mockResolvedValueOnce(frenchResponse);
+    const out = await generateProductContent(makeProduct());
+    expect(out.descriptionFr).toContain("parfaite pour votre jardin");
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws when even the top-tier model's descriptionFr is not French", async () => {
+    const englishResponse = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            titleFr: "Chaise longue grise",
+            titleEn: "Grey lounge chair",
+            descriptionFr: "<p>This chair is great for your garden and easy to clean with a soft cloth.</p>",
+            descriptionEn: "<p>This chair is great for your garden.</p>",
+            seoDescriptionFr: "desc fr",
+            seoDescriptionEn: "desc en",
+            metaTitleFr: "m fr | Livraison gratuite — Ameublo Direct",
+            metaTitleEn: "m en | Free Shipping — Furnish Direct",
+            metaDescriptionFr: "md fr",
+            metaDescriptionEn: "md en",
+            urlHandleFr: "chaise-fr",
+            urlHandleEn: "chair-en",
+            tags: ["jardin"],
+          }),
+        },
+      ],
+    };
+    create.mockResolvedValue(englishResponse); // both tiers return the same bad content
+    await expect(generateProductContent(makeProduct())).rejects.toThrow();
   });
 });

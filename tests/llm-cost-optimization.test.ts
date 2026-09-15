@@ -43,7 +43,7 @@ function validPayload(titleFr = "Chaise longue") {
   return JSON.stringify({
     titleFr,
     titleEn: "Lounge chair",
-    descriptionFr: "<p>fr</p>",
+    descriptionFr: "<p>Cette chaise est parfaite pour votre jardin, avec des accoudoirs confortables.</p>",
     descriptionEn: "<p>en</p>",
     seoDescriptionFr: "desc fr",
     seoDescriptionEn: "desc en",
