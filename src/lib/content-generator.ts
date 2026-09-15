@@ -3,6 +3,9 @@ import type { AosomMergedProduct } from "@/types/aosom";
 import { stripColorFromTitle } from "./variant-merger";
 import { env, CLAUDE } from "./config";
 import { budgetedCreate } from "@/lib/llm-budget";
+import { stripSupplierBrands, detectDescriptionLanguage } from "./catalog-guard";
+
+export { stripSupplierBrands } from "./catalog-guard";
 
 let anthropicClient: Anthropic | null = null;
 
@@ -61,20 +64,10 @@ export function clampMetaTitle(title: string, max: number): string {
  * Mirrors the forbidden list in SYSTEM_PROMPT (the prompt asks Claude to omit
  * them; this is the deterministic backstop). Case-insensitive, so HOMCOM/HomCom
  * and PawHut/Pawhut collapse to one entry each.
+ *
+ * stripSupplierBrands() itself now lives in ./catalog-guard (shared with the
+ * catalog audit script) and is re-exported above for existing callers/tests.
  */
-const SUPPLIER_BRANDS = [
-  "Outsunny", "HOMCOM", "Aosom", "Vinsetto", "PawHut",
-  "Soozier", "Qaba", "ShopEZ", "Wikinger", "Portland", "Aousthop",
-];
-const SUPPLIER_BRAND_RE = new RegExp(`\\b(?:${SUPPLIER_BRANDS.join("|")})\\b`, "gi");
-
-/**
- * Strip any supplier brand token from a string. Safe to run before slugify():
- * slugify collapses the whitespace gaps left behind into clean kebab-case.
- */
-export function stripSupplierBrands(s: string): string {
-  return s.replace(SUPPLIER_BRAND_RE, " ");
-}
 
 export function slugify(s: string): string {
   return s
@@ -279,10 +272,13 @@ Return JSON with this exact structure:
       parsed.titleEn = parsed.titleEn.slice(0, 200);
       // LLM output trust boundary: sanitize the model's HTML (same allow-list as the
       // input) BEFORE it is persisted to Shopify body_html / custom.body_html_en.
-      parsed.descriptionFr = sanitizeHtml(parsed.descriptionFr).slice(0, 10000);
-      parsed.descriptionEn = sanitizeHtml(parsed.descriptionEn).slice(0, 10000);
-      parsed.seoDescriptionFr = parsed.seoDescriptionFr.slice(0, 200);
-      parsed.seoDescriptionEn = parsed.seoDescriptionEn.slice(0, 200);
+      // stripSupplierBrands() runs on descriptions too, not just titles/handles — the
+      // system prompt asks the model to omit the supplier name, but that is a soft
+      // instruction; this is the deterministic backstop the titles already had.
+      parsed.descriptionFr = stripSupplierBrands(sanitizeHtml(parsed.descriptionFr)).slice(0, 10000);
+      parsed.descriptionEn = stripSupplierBrands(sanitizeHtml(parsed.descriptionEn)).slice(0, 10000);
+      parsed.seoDescriptionFr = stripSupplierBrands(parsed.seoDescriptionFr).slice(0, 200);
+      parsed.seoDescriptionEn = stripSupplierBrands(parsed.seoDescriptionEn).slice(0, 200);
       parsed.metaTitleFr = clampMetaTitle(parsed.metaTitleFr, 65);
       parsed.metaTitleEn = clampMetaTitle(parsed.metaTitleEn, 65);
       parsed.metaDescriptionFr = parsed.metaDescriptionFr.slice(0, 155);
@@ -293,6 +289,20 @@ Return JSON with this exact structure:
       // Supplier brand is echoed from the source (never invented by the model) so it
       // can be the Shopify vendor + stored in custom.brand_fr.
       parsed.brand = product.brand;
+
+      // Language backstop: descriptionFr must actually read as French. This is the
+      // write-time guard against the description-language class of bug (679/1382
+      // active products went English via a since-fixed diff-engine defect) — a model
+      // that returns English (or an empty/unparseable body) for descriptionFr must
+      // never reach Shopify silently. Throwing ContentValidationError here reuses the
+      // existing MODEL_BATCH → MODEL escalation below: a cheap-tier slip retries on
+      // the stronger model before this ever surfaces to the caller.
+      const frLang = detectDescriptionLanguage(parsed.descriptionFr);
+      if (frLang.lang === "EN" || frLang.lang === "empty") {
+        throw new ContentValidationError(
+          `descriptionFr does not read as French (detected: ${frLang.lang}, fr=${frLang.fr} en=${frLang.en})`,
+        );
+      }
 
       return parsed as GeneratedContent;
     } catch (err) {
