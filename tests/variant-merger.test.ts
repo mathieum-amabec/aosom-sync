@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import sharp from "sharp";
 import {
   parseSku,
+  translateColor,
   stripColorFromTitle,
   mergeVariants,
   COLOR_MAP,
@@ -55,6 +56,35 @@ describe("parseSku", () => {
       expect(result.colorCode).toBe(code);
       expect(result.color).toBe(name);
     }
+  });
+});
+
+describe("translateColor", () => {
+  it("translates known English feed colors to French, case-insensitively", () => {
+    expect(translateColor("Red")).toBe("Rouge");
+    expect(translateColor("black")).toBe("Noir");
+    expect(translateColor("DARK GREY")).toBe("Gris foncé");
+  });
+
+  it("covers every COLOR_MAP English equivalent", () => {
+    // Every COLOR_MAP French value must be reachable from its English feed name —
+    // keeps the two dictionaries from silently drifting apart.
+    const frValues = new Set(Object.values(COLOR_MAP));
+    const translated = new Set(
+      ["black", "dark grey", "dark brown", "green", "light grey", "light green",
+        "silver", "cream", "charcoal", "grey", "blue", "brown", "beige", "dark blue",
+        "forest green", "khaki", "walnut", "white", "red", "pink", "orange", "natural",
+        "coffee"].map(translateColor)
+    );
+    expect(translated).toEqual(frValues);
+  });
+
+  it("passes through unmapped/compound values unchanged", () => {
+    expect(translateColor("Black and Red")).toBe("Black and Red");
+  });
+
+  it("passes through empty input safely", () => {
+    expect(translateColor("")).toBe("");
   });
 });
 
@@ -133,14 +163,29 @@ describe("mergeVariants", () => {
     expect(merged[0].groupKey).toBe("842-001");
   });
 
-  it("assigns French color names from COLOR_MAP", () => {
+  it("translates the feed's English color field to French, regardless of SKU shape", () => {
     const products = [
-      makeProduct({ sku: "TEST-001BK", psin: "G1" }),
-      makeProduct({ sku: "TEST-001GY", psin: "G1" }),
+      makeProduct({ sku: "TEST-001BK", psin: "G1", color: "Black" }),
+      makeProduct({ sku: "TEST-001GY", psin: "G1", color: "Grey" }),
     ];
     const merged = mergeVariants(products);
     expect(merged[0].variants[0].color).toBe("Noir");
     expect(merged[0].variants[1].color).toBe("Gris");
+  });
+
+  it("regression: a PSIN base SKU without a color-code suffix still translates correctly (was the Red/Rouge duplicate-option bug)", () => {
+    // Real-world shape: a 2-in-1 bundle's "base" SKU (E2-0007) carries no 2-letter
+    // color suffix, while its sibling (B20-109V00RD) does. Both share the same raw
+    // feed color "Red". The old parseSku-suffix approach translated only the second
+    // one, leaving the base SKU as raw "Red" — two option values for one color.
+    const products = [
+      makeProduct({ sku: "E2-0007", psin: "G1", color: "Red" }),
+      makeProduct({ sku: "B20-109V00RD", psin: "G1", color: "Red" }),
+    ];
+    const merged = mergeVariants(products);
+    expect(merged[0].variants).toHaveLength(2);
+    expect(merged[0].variants[0].color).toBe("Rouge");
+    expect(merged[0].variants[1].color).toBe("Rouge");
   });
 
   it("strips color from merged product name", () => {

@@ -36,7 +36,8 @@ export const COLOR_MAP: Record<string, string> = {
 };
 
 /**
- * Parse a SKU into base and French color.
+ * Parse a SKU into base and color-code suffix. Used for PSIN-fallback grouping
+ * (getGroupKey) only — NOT for color translation, see translateColor() below.
  * Algorithm: check last 2 chars against COLOR_MAP. If match and base >= 3 chars, split.
  */
 export function parseSku(sku: string): { base: string; colorCode: string | null; color: string | null } {
@@ -46,6 +47,56 @@ export function parseSku(sku: string): { base: string; colorCode: string | null;
     return { base: sku.slice(0, -2), colorCode: suffix, color: COLOR_MAP[suffix] };
   }
   return { base: sku, colorCode: null, color: null };
+}
+
+/**
+ * English feed color name → French, derived from COLOR_MAP's own values so the
+ * two never drift apart. Keys are matched case-insensitively.
+ */
+const EN_COLOR_TO_FR: Record<string, string> = {
+  black: "Noir",
+  "dark grey": "Gris foncé",
+  "dark gray": "Gris foncé",
+  "dark brown": "Brun foncé",
+  green: "Vert",
+  "light grey": "Gris pâle",
+  "light gray": "Gris pâle",
+  "light green": "Vert pâle",
+  silver: "Argent",
+  cream: "Crème",
+  charcoal: "Gris charbon",
+  grey: "Gris",
+  gray: "Gris",
+  blue: "Bleu",
+  brown: "Brun",
+  beige: "Beige",
+  "dark blue": "Bleu foncé",
+  "forest green": "Vert forêt",
+  khaki: "Kaki",
+  walnut: "Noyer",
+  white: "Blanc",
+  red: "Rouge",
+  pink: "Rose",
+  orange: "Orange",
+  natural: "Naturel",
+  coffee: "Café",
+};
+
+/**
+ * Translate the Aosom feed's own `color` field to French — NOT derived from the
+ * SKU string. A merged product's PSIN "base" SKU (e.g. a 2-in-1 bundle's parent
+ * item) never carries a 2-letter color-code suffix, so deriving color from the
+ * SKU (the old parseSku-based approach) silently left that one variant in raw
+ * English while its siblings got the COLOR_MAP translation — producing a
+ * duplicate, differently-spelled "Couleur" option on the same Shopify product
+ * (e.g. "Red" + "Rouge"). Reading the feed's own color value for every row,
+ * regardless of SKU shape, gives every variant of a merged product the same
+ * translation path. Unmapped/compound values ("Black and Red") pass through
+ * unchanged — a slightly-untranslated color beats a dropped one.
+ */
+export function translateColor(rawColor: string): string {
+  const key = (rawColor || "").trim().toLowerCase();
+  return EN_COLOR_TO_FR[key] || rawColor;
 }
 
 // Color words for title stripping (FR + EN)
@@ -126,13 +177,11 @@ export function mergeVariants(products: AosomProduct[]): AosomMergedProduct[] {
 }
 
 function toVariant(p: AosomProduct): AosomVariant {
-  // Use French color name from COLOR_MAP if available
-  const { color: frColor } = parseSku(p.sku);
   return {
     sku: p.sku,
     price: p.price,
     qty: p.qty,
-    color: frColor || p.color,
+    color: translateColor(p.color),
     size: p.size,
     gtin: p.gtin,
     weight: p.weight,
