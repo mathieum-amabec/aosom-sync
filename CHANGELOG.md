@@ -2,6 +2,55 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.12] - 2026-09-18
+
+Social post text sometimes didn't match the product in the photo — Mat's report, confirmed
+with draft #938 (a Halloween inflatable black cat) whose EN caption opened "This bedroom
+collection sells out fast every time it goes on sale."
+
+### Root cause
+
+`mapProductTypeToScope` (`hook-selector.ts`) picks which pool of hooks and hashtags a post
+draws from — outdoor, storage/kitchen, pets, bedroom, seasonal, etc. — from the product's
+`product_type`. Several `SCOPE_RULES` entries checked BARE category prefixes ("Holiday",
+"Home Décor", "Appliances") that can never match: the real Aosom/Shopify taxonomy always
+prefixes them with "Home Furnishings > " (e.g. "Home Furnishings > Holiday & Seasonal >
+Halloween Decorations"). Every product under Holiday & Seasonal, Home Décor, Appliances, or
+Bathroom Furniture silently fell through every specific rule to the generic "Home
+Furnishings" catch-all (`mobilier_indoor`) and got served furniture-shopping hooks and
+`#deco #meubles #salon` / `#homedecor #furniture #livingroom` hashtags regardless of what was
+actually in the photo. `social_hashtags_fr/en` compounded this: a single GLOBAL setting
+(patio/garden-themed) applied to every post regardless of scope, so even correctly-scoped
+posts carried `#jardinage #patio #mobilierexterieur`.
+
+### Changed — generation pipeline (prevents future occurrences)
+
+- `SCOPE_RULES` gained the real prefixed paths ABOVE the generic "Home Furnishings" rule
+  (order matters — first match wins), plus a new `seasonal_decor` scope so Halloween/Noël/
+  home-décor items stop being treated as furniture at all.
+- Hashtags are now resolved PER SCOPE via a new `SCOPE_HASHTAGS` map + `hashtagsForScope()`,
+  read at generation time by `generateBilingual` (`job4-social.ts`) instead of the old global
+  setting — the tags now match the category, not a fixed patio default.
+- These two changes are structural, not a data patch: every future `new_product` /
+  `price_drop` / `stock_highlight` draft resolves its scope through the corrected table, so a
+  new Halloween or Appliances product cannot regress into `mobilier_indoor` the way #938 did.
+  (Landed via #480, ahead of this release's version bump.)
+
+### Changed — one-time backfill (this release)
+
+- 40 `facebook_drafts` (status draft/approved) generated BEFORE the fix above still carried
+  the old mismatched hook + hashtags, including 2 with a `publication_queue` row due the same
+  day. `generateBilingual` exported from `job4-social.ts` (no logic change — the exact
+  function `triggerNewProduct`/`triggerPriceDrop`/`runStockHighlight` already call) and driven
+  by a new one-shot script, `scripts/regenerate-scope-mismatched-drafts.mts`, which re-runs it
+  for each affected draft with that draft's original trigger vars, then rewrites
+  `post_text`/`post_text_en` and rebuilds any pending `publication_queue.payload` via the same
+  `draftToQueueItems` the approve/schedule routes use, so what actually publishes matches the
+  regenerated text.
+- Executed against prod: 40/40 regenerated, 0 failures, 4 pending queue rows rebuilt.
+  Verified live: no residual pre-fix hook text in any of the 40 drafts or their queue
+  payloads.
+
 ## [0.5.92.11] - 2026-09-17
 
 Dashboard catalog search buried real matches in noise instead of missing them — Mat's
