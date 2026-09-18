@@ -71,8 +71,13 @@ describe("runImageCompliance", () => {
 
     expect(res).toMatchObject({ checked: 1, compliant: 1, nonCompliant: 0, swapped: 0, classifications: 1 });
     expect(classifyProductImage).toHaveBeenCalledTimes(1); // only pos-1, no gallery scan
+    // Charged to the uncapped `maintenance` pool, never the shared `batch` pool that imports/
+    // blog/social also draw from — see llm-budget.ts and the 2026-09-11 incident it fixed.
+    expect(classifyProductImage).toHaveBeenCalledWith("p1.jpg", { maintenance: true });
     expect(moveImageToFirstPosition).not.toHaveBeenCalled();
-    expect(markImageChecked).toHaveBeenCalledWith(["111"]);
+    // Signature = the verified (compliant) pos-1's stem, so a later Shopify-side change away
+    // from THIS photo is what should trigger a re-check — see image-compliance-drift.ts.
+    expect(markImageChecked).toHaveBeenCalledWith(["111"], new Map([["111", "p1"]]));
     expect(addSyncLogsBatch).not.toHaveBeenCalled();
   });
 
@@ -92,7 +97,10 @@ describe("runImageCompliance", () => {
 
     expect(res).toMatchObject({ checked: 1, nonCompliant: 1, swapped: 1, noAlternative: 0, classifications: 2, errors: 0 });
     expect(moveImageToFirstPosition).toHaveBeenCalledWith("111", "2");
-    expect(markImageChecked).toHaveBeenCalledWith(["111"]);
+    // Signature must be the NEW live image's stem ("clean"), not the overlay photo that was
+    // just replaced — otherwise the drift scan would immediately (and wrongly) flag this
+    // product as drifted on its very next pass.
+    expect(markImageChecked).toHaveBeenCalledWith(["111"], new Map([["111", "clean"]]));
     expect(addSyncLogsBatch).toHaveBeenCalledTimes(1);
     const entry = addSyncLogsBatch.mock.calls[0][0][0];
     expect(entry).toMatchObject({ syncRunId: "run-1", shopifyProductId: "111", sku: "A-BK", action: "update", field: "images" });
@@ -164,7 +172,7 @@ describe("runImageCompliance", () => {
 
     expect(res.classifications).toBe(0);
     expect(classifyProductImage).not.toHaveBeenCalled();
-    expect(markImageChecked).toHaveBeenCalledWith(["555"]);
+    expect(markImageChecked).toHaveBeenCalledWith(["555"], expect.anything());
   });
 
   it("is non-fatal: a per-product error is counted and does not throw", async () => {
@@ -178,7 +186,7 @@ describe("runImageCompliance", () => {
 
     expect(res.errors).toBe(1);
     expect(res.checked).toBe(1); // second product still processed
-    expect(markImageChecked).toHaveBeenCalledWith(["777"]); // failed one not stamped → retried next run
+    expect(markImageChecked).toHaveBeenCalledWith(["777"], expect.anything()); // failed one not stamped → retried next run
   });
 });
 
@@ -203,7 +211,7 @@ describe("runImageCompliance — queue mode (human approval)", () => {
     });
     // Stamped checked: the pending review row now carries the state, so the next sync must
     // not re-burn the budget re-deriving the same proposal.
-    expect(markImageChecked).toHaveBeenCalledWith(["111"]);
+    expect(markImageChecked).toHaveBeenCalledWith(["111"], expect.anything());
     const entry = addSyncLogsBatch.mock.calls[0][0][0];
     expect(entry.newValue).toContain("EN ATTENTE D'APPROBATION");
   });
@@ -221,7 +229,7 @@ describe("runImageCompliance — queue mode (human approval)", () => {
     expect(res).toMatchObject({ noAlternative: 1, queued: 0, swapped: 0 });
     expect(upsertImageReview).not.toHaveBeenCalled();
     expect(moveImageToFirstPosition).not.toHaveBeenCalled();
-    expect(markImageChecked).toHaveBeenCalledWith(["222"]);
+    expect(markImageChecked).toHaveBeenCalledWith(["222"], expect.anything());
   });
 
   it("queues — never auto-applies — a clean image that exists only in the Aosom feed", async () => {
