@@ -22,7 +22,7 @@
  *
  * Run: node-x64 --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/regenerate-scope-mismatched-drafts.mts --dry-run
  */
-import { readFileSync, existsSync, mkdirSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, appendFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 const argv = process.argv.slice(2);
