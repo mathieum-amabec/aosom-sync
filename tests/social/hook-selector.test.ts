@@ -95,6 +95,39 @@ describe("mapProductTypeToScope", () => {
     expect(mapProductTypeToScope("Furniture")).toBe("mobilier_indoor");
   });
 
+  // ── Seasonal decorations — regression: fell through to mobilier_indoor and could
+  // open a Halloween-decoration post with a furniture-shopping hook ("this bedroom
+  // collection..."). See draft #938 (sku 830-098) in the 2026-09-18 investigation.
+  it("maps Home Furnishings > Holiday & Seasonal > Halloween Decorations → seasonal_decor", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Holiday & Seasonal > Halloween Decorations")).toBe(
+      "seasonal_decor",
+    );
+  });
+
+  it("maps Home Furnishings > Holiday & Seasonal > Christmas Trees > Pencil Christmas Trees → seasonal_decor", () => {
+    expect(
+      mapProductTypeToScope("Home Furnishings > Holiday & Seasonal > Christmas Trees > Pencil Christmas Trees"),
+    ).toBe("seasonal_decor");
+  });
+
+  it("maps Home Furnishings > Home Décor > Artificial Trees → seasonal_decor (not bedroom_decor)", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Home Décor > Artificial Trees")).toBe("seasonal_decor");
+  });
+
+  // ── Appliances / Bathroom — real taxonomy prefixes these "Home Furnishings > ...",
+  // so the bare "Appliances" rule never matched and they fell through to mobilier_indoor.
+  it("maps Home Furnishings > Appliances > Small Kitchen Appliances → storage_kitchen", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Appliances > Small Kitchen Appliances")).toBe(
+      "storage_kitchen",
+    );
+  });
+
+  it("maps Home Furnishings > Bathroom Furniture > Bathroom Cabinets → storage_kitchen", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Bathroom Furniture > Bathroom Cabinets")).toBe(
+      "storage_kitchen",
+    );
+  });
+
   // ── Universal fallback
   it("maps null → universal (default)", () => {
     expect(mapProductTypeToScope(null)).toBe("universal");
@@ -229,6 +262,11 @@ describe("selectHook", () => {
   it("maps Toys & Games to kids_toys_sport scope before querying", async () => {
     await selectHook("FR", "Toys & Games", null);
     expect(mockSelectCompatibleHooks.mock.calls[0][0]).toBe("kids_toys_sport");
+  });
+
+  it("maps a Halloween decoration to seasonal_decor, not mobilier_indoor (regression)", async () => {
+    await selectHook("EN", "Home Furnishings > Holiday & Seasonal > Halloween Decorations", null);
+    expect(mockSelectCompatibleHooks.mock.calls[0][0]).toBe("seasonal_decor");
   });
 
   it("passes language correctly to selectCompatibleHooks", async () => {
