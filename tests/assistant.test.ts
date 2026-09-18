@@ -22,7 +22,8 @@ vi.mock("@/lib/llm-budget", () => ({
 }));
 
 const getProducts = vi.fn();
-vi.mock("@/lib/database", () => ({ getProducts }));
+const getComplementaryProducts = vi.fn();
+vi.mock("@/lib/database", () => ({ getProducts, getComplementaryProducts }));
 
 // FR-title resolution calls shopifyFetch(/graphql.json). Mock it; default = no match
 // (so cards fall back to the catalog name unless a test opts into FR titles).
@@ -36,12 +37,13 @@ const prod = (over: Partial<Record<string, unknown>> = {}) => ({
   product_type: "Sofas", image1: "https://img/1.jpg",
   shopify_product_id: "111", shopify_handle: "sofa-sectionnel-gris", ...over,
 });
-const toolUse = (input: unknown) => ({ stop_reason: "tool_use", content: [{ type: "tool_use", id: "t1", name: "search_catalog", input }] });
+const toolUse = (input: unknown, name = "search_catalog") => ({ stop_reason: "tool_use", content: [{ type: "tool_use", id: "t1", name, input }] });
 const final = (obj: unknown) => ({ stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(obj) }] });
 
 beforeEach(() => {
   create.mockReset();
   getProducts.mockReset().mockResolvedValue({ products: [prod()], total: 1, productTypes: [] });
+  getComplementaryProducts.mockReset().mockResolvedValue([]);
   // default: FR-title lookup returns no nodes -> cards fall back to the catalog name
   shopifyFetch.mockReset().mockResolvedValue({ ok: true, json: async () => ({ data: { products: { nodes: [] } } }) });
 });
@@ -215,6 +217,24 @@ describe("runAssistant", () => {
     expect(payload[0]).toHaveProperty("sku");
     expect(payload[0]).not.toHaveProperty("handle");
     expect(payload[0]).not.toHaveProperty("image");
+  });
+
+  it("routes a recommend_complementary_products tool call to getComplementaryProducts, not getProducts", async () => {
+    getComplementaryProducts.mockResolvedValueOnce([
+      { sku: "RUG-1", name: "Tapis gris", price: 89, qty: 3, image1: "https://img/rug.jpg", shopify_handle: "tapis-gris", product_type: "Area Rugs", color: "Gris" },
+    ]);
+    create
+      .mockResolvedValueOnce(toolUse({ baseSku: "A-1", productType: "Area Rugs" }, "recommend_complementary_products"))
+      .mockResolvedValueOnce(final({ reply: "Pour compléter votre salon :", products: [{ sku: "RUG-1", reason: "S'agence avec le gris" }] }));
+
+    const res = await runAssistant({ message: "je prends le canapé A-1", locale: "fr" });
+
+    expect(getComplementaryProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ excludeSku: "A-1", productType: "Area Rugs" }),
+    );
+    expect(getProducts).not.toHaveBeenCalled();
+    expect(res.products).toHaveLength(1);
+    expect(res.products[0]).toMatchObject({ sku: "RUG-1", reason: "S'agence avec le gris" });
   });
 });
 

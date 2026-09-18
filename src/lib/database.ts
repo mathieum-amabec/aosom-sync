@@ -1932,6 +1932,86 @@ export async function findCollectionsForProduct(
   return { main, sub };
 }
 
+export interface ComplementaryProductRow {
+  sku: string;
+  name: string;
+  price: number;
+  qty: number;
+  image1: string | null;
+  shopify_handle: string | null;
+  product_type: string;
+  color: string;
+}
+
+/**
+ * Cross-sell candidates for the storefront assistant's `recommend_complementary_products`
+ * tool. Two guardrails are enforced IN SQL (not filtered after the fact in JS, where a
+ * future edit could silently drop them):
+ *
+ *  1. Never out of stock — `qty > 0`, same predicate `search_catalog` already uses.
+ *  2. Never a product with a known, unresolved image problem — excludes any SKU that
+ *     has been checked (`image_checked_at IS NOT NULL`, so unverified rows don't pass by
+ *     default) AND has no `image_review_queue` row still sitting at a status other than
+ *     `applied` (pending/approved/rejected/failed all mean the live gallery may still show
+ *     the flagged image). No Claude Vision call here — this is a live chat response path,
+ *     so it only reads compliance state the image pipeline already computed and stored.
+ *
+ * `excludeSku` drops the product the shopper is already looking at. `productType`/`query`
+ * are free-text filters the model supplies itself (it is told to pick a DIFFERENT category
+ * than the base product — see the assistant system prompt) — this function does not encode
+ * a fixed complementary-category map, matching how `search_catalog` already lets the model
+ * choose its own category text.
+ */
+export async function getComplementaryProducts(opts: {
+  excludeSku: string;
+  productType?: string;
+  query?: string;
+  limit?: number;
+}): Promise<ComplementaryProductRow[]> {
+  const db = await ensureSchema();
+  const limit = Math.max(1, Math.min(opts.limit ?? 12, 40));
+  const conditions: string[] = [
+    "qty > 0",
+    "shopify_product_id IS NOT NULL",
+    "shopify_handle IS NOT NULL AND TRIM(shopify_handle) <> ''",
+    "image_checked_at IS NOT NULL",
+    "NOT EXISTS (SELECT 1 FROM image_review_queue irq WHERE irq.sku = products.sku AND irq.status != 'applied')",
+    "sku != ?",
+  ];
+  const args: (string | number)[] = [opts.excludeSku];
+  if (opts.productType) {
+    conditions.push("product_type LIKE ?");
+    args.push(`%${opts.productType}%`);
+  }
+  if (opts.query) {
+    conditions.push("(name LIKE ? OR product_type LIKE ?)");
+    args.push(`%${opts.query}%`, `%${opts.query}%`);
+  }
+  args.push(limit);
+
+  const result = await db.execute({
+    sql: `SELECT sku, name, price, qty, image1, shopify_handle, product_type, color
+          FROM products
+          WHERE ${conditions.join(" AND ")}
+          ORDER BY qty DESC
+          LIMIT ?`,
+    args,
+  });
+  return result.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      sku: String(o.sku),
+      name: o.name == null ? "" : String(o.name),
+      price: o.price == null ? 0 : Number(o.price),
+      qty: Number(o.qty ?? 0),
+      image1: o.image1 == null ? null : String(o.image1),
+      shopify_handle: o.shopify_handle == null ? null : String(o.shopify_handle),
+      product_type: o.product_type == null ? "" : String(o.product_type),
+      color: o.color == null ? "" : String(o.color),
+    };
+  });
+}
+
 export async function getProductsWithShopifyId(): Promise<{ sku: string; product_type: string; shopify_product_id: string }[]> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT sku, product_type, shopify_product_id FROM products WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''`);
