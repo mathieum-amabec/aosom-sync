@@ -98,6 +98,10 @@
     {
       "path": "/api/cron/trend-scores",
       "schedule": "50 7 * * 1"
+    },
+    {
+      "path": "/api/cron/meta-audience-sync",
+      "schedule": "0 5 * * 1"
     }
   ]
 }
