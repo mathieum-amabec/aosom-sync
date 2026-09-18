@@ -84,12 +84,21 @@ export function initialSlotValue(sqliteUtc: string, now: Date = new Date()): str
   return !stored || stored < floor ? floor : stored;
 }
 
+/** Result of a bulk-approve call, shown once and cleared on the next selection change. */
+interface BulkResult {
+  approved: Array<{ id: number; scheduledAt: number }>;
+  skipped: Array<{ id: number; reasons: string[] }>;
+}
+
 export default function SequentialAdsClient() {
   const [items, setItems] = useState<SequentialAdItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actingId, setActingId] = useState<number | null>(null);
   const [campaignFilter, setCampaignFilter] = useState<string>("all");
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   // Both come from the server. `campaigns` is computed over EVERY non-cancelled row, not
   // over the page below — a campaign the cap hides must still be selectable, otherwise the
   // filter cannot reach exactly the ads that need it.
@@ -172,6 +181,52 @@ export default function SequentialAdsClient() {
   const visible = items;
   const draftCount = visible.filter((it) => it.status === "draft").length;
   const hidden = Math.max(0, total - items.length);
+  const draftIds = visible.filter((it) => it.status === "draft").map((it) => it.id);
+
+  const toggleSelected = useCallback((id: number) => {
+    setBulkResult(null);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAllDrafts = useCallback(() => {
+    setBulkResult(null);
+    setSelected(new Set(draftIds));
+  }, [draftIds]);
+
+  const clearSelection = useCallback(() => {
+    setBulkResult(null);
+    setSelected(new Set());
+  }, []);
+
+  const bulkApprove = useCallback(async () => {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/sequential-ads/bulk-approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ queueIds: [...selected] }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(d.error || "Approbation groupée échouée.");
+      } else {
+        setBulkResult(d);
+        setSelected(new Set());
+      }
+      await load();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBulkBusy(false);
+    }
+  }, [selected, load]);
 
   return (
     <div className="p-4 md:p-8">
@@ -211,6 +266,63 @@ export default function SequentialAdsClient() {
         </span>
       </h3>
 
+      {/* Bulk approval: the operator picks a batch, one request checks each against the
+          automatic quality gate (sequential-ad-guard.ts) and only approves what passes —
+          built to clear the July-September backlog that no per-row button could reach at
+          scale, without ever auto-publishing anything unselected. */}
+      {draftIds.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 p-3 bg-gray-900/60 border border-gray-800 rounded-lg">
+          <button
+            onClick={selectAllDrafts}
+            disabled={bulkBusy}
+            className="px-2.5 py-1 text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-md transition-colors disabled:opacity-50"
+          >
+            Tout sélectionner ({draftIds.length} brouillon{draftIds.length > 1 ? "s" : ""})
+          </button>
+          {selected.size > 0 && (
+            <>
+              <button
+                onClick={clearSelection}
+                disabled={bulkBusy}
+                className="px-2.5 py-1 text-xs font-medium bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded-md transition-colors disabled:opacity-50"
+              >
+                Désélectionner
+              </button>
+              <button
+                onClick={bulkApprove}
+                disabled={bulkBusy}
+                className="px-2.5 py-1 text-xs font-medium bg-green-900/40 hover:bg-green-900/60 text-green-400 border border-green-800/50 rounded-md transition-colors disabled:opacity-50"
+              >
+                {bulkBusy ? "Vérification + approbation…" : `✅ Approuver la sélection (${selected.size})`}
+              </button>
+            </>
+          )}
+          <span className="text-[11px] text-gray-500">
+            Chaque item sélectionné passe le contrôle qualité automatique (vidéo accessible,
+            produit toujours en stock et importé) avant d’être approuvé — les autres restent en
+            brouillon avec la raison.
+          </span>
+        </div>
+      )}
+
+      {bulkResult && (
+        <div className="mb-4 p-3 bg-gray-900/60 border border-gray-800 rounded-lg text-xs">
+          <p className="text-green-400 mb-1">
+            {bulkResult.approved.length} approuvée{bulkResult.approved.length > 1 ? "s" : ""}
+          </p>
+          {bulkResult.skipped.length > 0 && (
+            <div className="text-amber-300/90">
+              <p className="mb-1">{bulkResult.skipped.length} ignorée{bulkResult.skipped.length > 1 ? "s" : ""} :</p>
+              <ul className="space-y-0.5 text-gray-400">
+                {bulkResult.skipped.map((s) => (
+                  <li key={s.id}>#{s.id} — {s.reasons.join("; ")}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Never truncate in silence: before this, the list simply stopped at 50 of 134 and
           three whole campaigns were unreachable with no hint that they existed. */}
       {hidden > 0 && (
@@ -239,6 +351,8 @@ export default function SequentialAdsClient() {
               onAct={act}
               onPublishNow={publishNow}
               onSchedule={schedule}
+              selected={selected.has(it.id)}
+              onToggleSelected={toggleSelected}
             />
           ))}
         </div>
@@ -253,12 +367,16 @@ function SequentialAdCard({
   onAct,
   onPublishNow,
   onSchedule,
+  selected,
+  onToggleSelected,
 }: {
   item: SequentialAdItem;
   acting: number | null;
   onAct: (id: number, method: "POST" | "DELETE") => void;
   onPublishNow: (id: number) => void;
   onSchedule: (id: number, local: string) => void;
+  selected: boolean;
+  onToggleSelected: (id: number) => void;
 }) {
   const meta = STATUS_META[item.status] ?? {
     label: item.status,
@@ -267,6 +385,7 @@ function SequentialAdCard({
   const url = item.payload.reelsVideoUrl;
   const title = item.payload.caption || item.content_id;
   const busy = acting === item.id;
+  const isDraftForSelection = item.status === "draft";
 
   // Floor is captured once per card rather than recomputed each render, so the `min` the
   // browser validates against cannot shift under the operator mid-edit.
@@ -295,9 +414,20 @@ function SequentialAdCard({
       </div>
       <div className="p-3 flex-1 flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${meta.cls}`}>
-            {meta.label}
-          </span>
+          <div className="flex items-center gap-2">
+            {isDraftForSelection && (
+              <input
+                type="checkbox"
+                checked={selected}
+                onChange={() => onToggleSelected(item.id)}
+                aria-label="Sélectionner pour l’approbation groupée"
+                className="w-3.5 h-3.5 accent-green-500"
+              />
+            )}
+            <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium border ${meta.cls}`}>
+              {meta.label}
+            </span>
+          </div>
           {item.style && (
             <span className="text-xs text-gray-400">{STYLE_LABEL[item.style] ?? item.style}</span>
           )}
