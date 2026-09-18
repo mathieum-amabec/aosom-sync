@@ -342,3 +342,111 @@ export async function pollAdVideoReady(
     await sleep(Math.min(intervalMs, remaining));
   }
 }
+
+// ── custom audiences (pixel-based remarketing) ─────────────────────────────
+//
+// A Meta "Website Custom Audience" (subtype WEBSITE, rule-based on our pixel's own
+// events) is kept up to date by Meta itself the moment it exists — membership is
+// computed continuously from incoming pixel events, there is nothing to "sync" on
+// our side. What actually needs automating is just: (1) the audience exists at all
+// (it could be deleted by accident, or never created in the first place — today
+// `scripts/create-meta-dynamic-ads.mjs` had a literal placeholder string where an id
+// should go), and (2) visibility into its current size. `ensureWebsiteCustomAudience`
+// is idempotent by NAME (Graph has no "get or create" — we list then create-if-absent),
+// so calling it repeatedly (e.g. from a cron) never produces duplicates.
+
+export interface CustomAudience {
+  id: string;
+  name: string;
+  subtype?: string;
+  approximate_count_lower_bound?: number;
+  approximate_count_upper_bound?: number;
+}
+
+/**
+ * Builds the Custom Audience `rule` (Meta's pixel rule-engine JSON) for "visited the
+ * site" (no event filter — any pixel-tracked pageview) when `event` is omitted, or a
+ * specific standard event (e.g. "AddToCart", "ViewContent") when given. `retentionDays`
+ * is how far back a matching visitor stays in the audience (Meta calls this
+ * `retention_seconds` inside the rule, NOT the top-level `retention_days` param, which
+ * is a legacy field ignored for rule-based WEBSITE audiences).
+ */
+function pixelRule(pixelId: string, retentionDays: number, event?: string): string {
+  const filters = event ? [{ field: "event", operator: "eq", value: event }] : [{ field: "url", operator: "i_contains", value: "/" }];
+  return JSON.stringify({
+    inclusions: {
+      operator: "or",
+      rules: [
+        {
+          event_sources: [{ type: "pixel", id: pixelId }],
+          retention_seconds: retentionDays * 86400,
+          filter: { operator: "and", filters },
+        },
+      ],
+    },
+  });
+}
+
+/**
+ * Idempotent by `name`: returns the existing audience's id if one with that exact
+ * name already exists on the ad account, else creates it (subtype WEBSITE, PAUSED
+ * spend is not a concept here — a Custom Audience is a targeting list, not a
+ * campaign, so creating/updating it never spends money or goes live publicly on
+ * its own). `prefill: true` backfills membership from pixel history immediately
+ * instead of only growing from this point forward.
+ */
+export async function ensureWebsiteCustomAudience(
+  adAccountId: string,
+  name: string,
+  opts: { retentionDays: number; event?: string; description?: string },
+): Promise<CustomAudience> {
+  const pixelId = env.metaPixelId;
+  if (!pixelId) throw new Error("NEXT_PUBLIC_META_PIXEL_ID not set — cannot build a pixel-based Custom Audience rule");
+
+  const existing = await graphPaged<CustomAudience>(`${actId(adAccountId)}/customaudiences`, {
+    fields: "id,name,subtype,approximate_count_lower_bound,approximate_count_upper_bound",
+  });
+  const found = existing.find((a) => a.name === name);
+  if (found) return found;
+
+  const body: Record<string, unknown> = {
+    name,
+    subtype: "WEBSITE",
+    rule: pixelRule(pixelId, opts.retentionDays, opts.event),
+    prefill: true,
+  };
+  if (opts.description) body.description = opts.description;
+  const created = await graph<{ id: string }>(`${actId(adAccountId)}/customaudiences`, { method: "POST", body });
+  return { id: created.id, name, subtype: "WEBSITE" };
+}
+
+export interface CoreRemarketingAudiences {
+  visitors30d: CustomAudience;
+  addToCart30d: CustomAudience;
+  viewContent14d: CustomAudience;
+}
+
+/**
+ * Ensures the three standard remarketing tiers exist (creates whichever are
+ * missing, reuses whichever already exist) and returns all three ids + current
+ * approximate sizes. Safe to call on every cron tick — never creates duplicates.
+ */
+export async function ensureCoreRemarketingAudiences(adAccountId: string): Promise<CoreRemarketingAudiences> {
+  const [visitors30d, addToCart30d, viewContent14d] = await Promise.all([
+    ensureWebsiteCustomAudience(adAccountId, "Visiteurs 30 jours (pixel)", {
+      retentionDays: 30,
+      description: "Tout visiteur du site tracké par le pixel, 30 derniers jours.",
+    }),
+    ensureWebsiteCustomAudience(adAccountId, "Ajouts au panier 30 jours (pixel)", {
+      retentionDays: 30,
+      event: "AddToCart",
+      description: "A ajouté un produit au panier, 30 derniers jours.",
+    }),
+    ensureWebsiteCustomAudience(adAccountId, "Vues produit 14 jours (pixel)", {
+      retentionDays: 14,
+      event: "ViewContent",
+      description: "A consulté une fiche produit, 14 derniers jours.",
+    }),
+  ]);
+  return { visitors30d, addToCart30d, viewContent14d };
+}
