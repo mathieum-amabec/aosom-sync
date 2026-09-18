@@ -5,6 +5,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { storeLink } from "@/lib/insights";
 import { IMPORT } from "@/lib/config";
 import { describeImportFailure, isOverBatchCap, excessOverBatchCap } from "@/lib/import-error-message";
+import { deriveSubCategoryOptions } from "@/lib/catalog-filters";
 
 interface CatalogProduct {
   sku: string;
@@ -108,7 +109,18 @@ function CatalogBrowser() {
   // Filters — initialised from the URL so links/refreshes are sticky.
   const [search, setSearch] = useState(() => sp.get("search") ?? "");
   const [searchInput, setSearchInput] = useState(() => sp.get("search") ?? "");
-  const [productType, setProductType] = useState(() => sp.get("productType") ?? "");
+  // The URL's `productType` param can hold either a top-level category ("Home Furnishings")
+  // or a full subcategory path ("Home Furnishings > Bedroom Furniture > Bed Frames") — the
+  // API's `productType` filter accepts both (prefix LIKE). On load, split a subcategory value
+  // back into its two dropdowns so a shared/bookmarked link renders both selects correctly.
+  const [productType, setProductType] = useState(() => {
+    const v = sp.get("productType") ?? "";
+    return v.includes(">") ? v.split(">")[0].trim() : v;
+  });
+  const [subCategory, setSubCategory] = useState(() => {
+    const v = sp.get("productType") ?? "";
+    return v.includes(">") ? v : "";
+  });
   const [minPrice, setMinPrice] = useState(() => sp.get("minPrice") ?? "");
   const [maxPrice, setMaxPrice] = useState(() => sp.get("maxPrice") ?? "");
   const [inStock, setInStock] = useState(() => sp.get("inStock") === "true");
@@ -133,10 +145,13 @@ function CatalogBrowser() {
   const overBatchCap = isOverBatchCap(selected.size);
 
   // Build the query params shared by the fetch and the URL (page=1 / falsy omitted).
+  // subCategory, when set, is strictly more specific than productType (see the two selects
+  // below) and is what the API's `productType` prefix filter actually receives.
   const buildParams = useCallback(() => {
     const p = new URLSearchParams();
     if (search) p.set("search", search);
-    if (productType) p.set("productType", productType);
+    const effectiveProductType = subCategory || productType;
+    if (effectiveProductType) p.set("productType", effectiveProductType);
     if (minPrice) p.set("minPrice", minPrice);
     if (maxPrice) p.set("maxPrice", maxPrice);
     if (inStock) p.set("inStock", "true");
@@ -146,7 +161,7 @@ function CatalogBrowser() {
     if (sort) p.set("sort", sort);
     if (page > 1) p.set("page", String(page));
     return p;
-  }, [search, productType, minPrice, maxPrice, inStock, notImported, withDiscount, lowStock, sort, page]);
+  }, [search, productType, subCategory, minPrice, maxPrice, inStock, notImported, withDiscount, lowStock, sort, page]);
 
   const fetchCatalog = useCallback(async () => {
     setLoading(true);
@@ -320,6 +335,9 @@ function CatalogBrowser() {
             value={productType}
             onChange={(e) => {
               setProductType(e.target.value);
+              // A subcategory only makes sense under its parent — clear it whenever the
+              // top-level category changes (including back to "All categories").
+              setSubCategory("");
               setPage(1);
             }}
             className={INPUT_CLASS}
@@ -332,6 +350,25 @@ function CatalogBrowser() {
                   {t.type} ({t.count})
                 </option>
               ))}
+          </select>
+        </div>
+        <div>
+          <select
+            value={subCategory}
+            onChange={(e) => {
+              setSubCategory(e.target.value);
+              setPage(1);
+            }}
+            disabled={!productType}
+            className={`${INPUT_CLASS} disabled:opacity-50 disabled:cursor-not-allowed`}
+            title={!productType ? "Choisissez d'abord une catégorie" : undefined}
+          >
+            <option value="">All subcategories</option>
+            {deriveSubCategoryOptions(data?.productTypes ?? [], productType).map((t) => (
+              <option key={t.type} value={t.type}>
+                {t.type.slice(productType.length + 3)} ({t.count})
+              </option>
+            ))}
           </select>
         </div>
         <div>

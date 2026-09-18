@@ -127,22 +127,28 @@ async function _initSchemaImpl(): Promise<void> {
     // so rowids are stable and the triggers below stay in lockstep.
     //
     // remove_diacritics 2 makes "canape" match "canapé" — the old LIKE could not.
+    //
+    // `product_type` is indexed alongside sku/name (added 2026-09-17, catalog-search-bedframe-
+    // gap fix) so a search term that only matches the Aosom taxonomy path — not the product's
+    // own title — still finds it, e.g. "Bed Frames" as a category vs. as literal name text.
+    // A pre-existing DB whose products_fts still has only 2 columns is migrated below (FTS5
+    // virtual tables can't ALTER their column list, so it's dropped and rebuilt).
     `CREATE VIRTUAL TABLE IF NOT EXISTS products_fts USING fts5(
-      sku, name, content='products', content_rowid='rowid',
+      sku, name, product_type, content='products', content_rowid='rowid',
       tokenize='unicode61 remove_diacritics 2'
     )`,
     // Keep the index in step with the table. Deleting by rowid is O(1); a trigger that
     // deleted by `sku` would rescan the whole FTS table on every one of the ~1,300 rows
     // the daily sync touches.
     `CREATE TRIGGER IF NOT EXISTS products_fts_ai AFTER INSERT ON products BEGIN
-      INSERT INTO products_fts(rowid, sku, name) VALUES (new.rowid, new.sku, new.name);
+      INSERT INTO products_fts(rowid, sku, name, product_type) VALUES (new.rowid, new.sku, new.name, new.product_type);
     END`,
     `CREATE TRIGGER IF NOT EXISTS products_fts_ad AFTER DELETE ON products BEGIN
-      INSERT INTO products_fts(products_fts, rowid, sku, name) VALUES('delete', old.rowid, old.sku, old.name);
+      INSERT INTO products_fts(products_fts, rowid, sku, name, product_type) VALUES('delete', old.rowid, old.sku, old.name, old.product_type);
     END`,
-    `CREATE TRIGGER IF NOT EXISTS products_fts_au AFTER UPDATE OF sku, name ON products BEGIN
-      INSERT INTO products_fts(products_fts, rowid, sku, name) VALUES('delete', old.rowid, old.sku, old.name);
-      INSERT INTO products_fts(rowid, sku, name) VALUES (new.rowid, new.sku, new.name);
+    `CREATE TRIGGER IF NOT EXISTS products_fts_au AFTER UPDATE OF sku, name, product_type ON products BEGIN
+      INSERT INTO products_fts(products_fts, rowid, sku, name, product_type) VALUES('delete', old.rowid, old.sku, old.name, old.product_type);
+      INSERT INTO products_fts(rowid, sku, name, product_type) VALUES (new.rowid, new.sku, new.name, new.product_type);
     END`,
     `CREATE TABLE IF NOT EXISTS price_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, old_price REAL, new_price REAL,
@@ -852,6 +858,52 @@ async function _initSchemaImpl(): Promise<void> {
     await db.execute(`UPDATE products SET has_discount = CASE WHEN ${PRODUCT_HAS_DISCOUNT_SQL} THEN 1 ELSE 0 END`);
   }
 
+  // products_fts migration: add `product_type` to a pre-existing 2-column (sku, name) index
+  // (catalog-search-bedframe-gap, 2026-09-17). FTS5 virtual tables can't ALTER their column
+  // list, so an old index is dropped — along with its shadow tables — and recreated with the
+  // 3-column schema from schemaStatements above (which only ran as a no-op here, since the
+  // table already existed). The rebuild-marker check below re-populates it from `products`.
+  const ftsSchemaRow = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'products_fts'`
+  );
+  const ftsSql = ftsSchemaRow.rows.length > 0 ? String(rowToObj(ftsSchemaRow.rows[0]).sql || "") : "";
+  const ftsNeedsMigration = ftsSchemaRow.rows.length > 0 && !ftsSql.includes("product_type");
+  if (ftsNeedsMigration) {
+    await runBatch("products_fts category migration", [
+      { sql: `DROP TRIGGER IF EXISTS products_fts_ai`, args: [] },
+      { sql: `DROP TRIGGER IF EXISTS products_fts_ad`, args: [] },
+      { sql: `DROP TRIGGER IF EXISTS products_fts_au`, args: [] },
+      { sql: `DROP TABLE IF EXISTS products_fts`, args: [] },
+      {
+        sql: `CREATE VIRTUAL TABLE products_fts USING fts5(
+          sku, name, product_type, content='products', content_rowid='rowid',
+          tokenize='unicode61 remove_diacritics 2'
+        )`,
+        args: [],
+      },
+      {
+        sql: `CREATE TRIGGER products_fts_ai AFTER INSERT ON products BEGIN
+          INSERT INTO products_fts(rowid, sku, name, product_type) VALUES (new.rowid, new.sku, new.name, new.product_type);
+        END`,
+        args: [],
+      },
+      {
+        sql: `CREATE TRIGGER products_fts_ad AFTER DELETE ON products BEGIN
+          INSERT INTO products_fts(products_fts, rowid, sku, name, product_type) VALUES('delete', old.rowid, old.sku, old.name, old.product_type);
+        END`,
+        args: [],
+      },
+      {
+        sql: `CREATE TRIGGER products_fts_au AFTER UPDATE OF sku, name, product_type ON products BEGIN
+          INSERT INTO products_fts(products_fts, rowid, sku, name, product_type) VALUES('delete', old.rowid, old.sku, old.name, old.product_type);
+          INSERT INTO products_fts(rowid, sku, name, product_type) VALUES (new.rowid, new.sku, new.name, new.product_type);
+        END`,
+        args: [],
+      },
+    ]);
+    console.info("[db] products_fts migrated to (sku, name, product_type) for category search");
+  }
+
   // One-time backfill of products_fts. The triggers only cover writes from here on, so an
   // existing catalog (~11,900 rows) sits behind an EMPTY index until this runs, and every
   // search would silently return nothing. 'rebuild' reads the content table and regenerates
@@ -870,7 +922,12 @@ async function _initSchemaImpl(): Promise<void> {
   // Non-fatal by design: getProducts falls back to the LIKE predicate when FTS returns
   // nothing, so a failed rebuild degrades to the old behaviour instead of taking schema
   // init (and with it the whole app) down.
-  const FTS_BUILD_MARKER = "products_fts_built_v1";
+  //
+  // v2: bumped by the product_type migration above — the DROP+CREATE leaves a structurally
+  // correct but EMPTY index, and the old v1 marker would already be set from the original
+  // 2-column backfill, so reusing it would skip this rebuild forever and leave search on an
+  // empty index (worse than the pre-migration state).
+  const FTS_BUILD_MARKER = "products_fts_built_v2_category";
   try {
     const built = await db.execute({
       sql: `SELECT value FROM settings WHERE key = ?`,
