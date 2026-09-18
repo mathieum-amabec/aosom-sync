@@ -4,6 +4,7 @@ import {
   parseBoolParam,
   LOW_STOCK_THRESHOLD,
   toFtsQuery,
+  deriveSubCategoryOptions,
 } from "@/lib/catalog-filters";
 
 describe("buildCatalogWhere", () => {
@@ -44,8 +45,8 @@ describe("buildCatalogWhere", () => {
       inStock: true,
       lowStock: true,
     });
-    // search contributes TWO args (name + sku), so order matters.
-    expect(r.args).toEqual(["Chairs%", "%sofa%", "%sofa%", 10, 100, LOW_STOCK_THRESHOLD]);
+    // search contributes THREE args (name + sku + product_type), so order matters.
+    expect(r.args).toEqual(["Chairs%", "%sofa%", "%sofa%", "%sofa%", 10, 100, LOW_STOCK_THRESHOLD]);
     expect(r.where.startsWith("WHERE ")).toBe(true);
     expect(r.where).toContain("qty > 0");
     // One `?` per arg.
@@ -72,8 +73,19 @@ describe("parseBoolParam", () => {
 });
 
 describe("toFtsQuery — FTS5 MATCH construction", () => {
-  it("quotes every token and appends the prefix operator outside the quotes", () => {
-    expect(toFtsQuery("canape gris")).toBe('"canape"* "gris"*');
+  it("joins multiple tokens into ONE quoted PHRASE with a trailing prefix operator", () => {
+    // catalog-search-bedframe-gap (2026-09-17): the old implementation quoted each token
+    // SEPARATELY ("canape"* "gris"*), which FTS5 reads as an implicit AND of two independent
+    // prefix terms — matching rows where the words appear anywhere, in any order. Searching
+    // "bed frame" returned 100 rows (12 real bed frames + 88 unrelated products that merely
+    // contained both "bed" and "frame" somewhere, e.g. a raised garden BED with a steel
+    // FRAME). Quoting the whole sequence as a phrase requires adjacency, cutting that same
+    // search to 23 rows in production with no loss of the 12 real matches.
+    expect(toFtsQuery("canape gris")).toBe('"canape gris"*');
+  });
+
+  it("still behaves as a single prefix term for a one-word query (unchanged recall)", () => {
+    expect(toFtsQuery("canape")).toBe('"canape"*');
   });
 
   it("neutralises FTS5 operators so shopper text can never be a query injection", () => {
@@ -83,8 +95,8 @@ describe("toFtsQuery — FTS5 MATCH construction", () => {
     for (const nasty of ['canape" OR name:*', "canape NEAR/2 gris", "canape*", "-canape", "^canape"]) {
       const q = toFtsQuery(nasty);
       expect(q).not.toBeNull();
-      // Every surviving token is quoted; no bare operator escapes.
-      expect(q!.split(" ").every((t) => /^"[^"]*"\*$/.test(t))).toBe(true);
+      // The whole surviving token sequence is one quoted phrase; no bare operator escapes.
+      expect(/^"[^"]*"\*$/.test(q!)).toBe(true);
     }
   });
 
@@ -96,29 +108,30 @@ describe("toFtsQuery — FTS5 MATCH construction", () => {
 
   it("caps the token count so a pasted paragraph cannot blow up the MATCH", () => {
     const q = toFtsQuery("un deux trois quatre cinq six sept huit neuf dix onze");
-    expect(q!.split(" ")).toHaveLength(8);
+    // 8 tokens joined into one phrase, so exactly 7 interior spaces plus the trailing `*`.
+    expect(q!.replace(/^"|"\*$/g, "").split(" ")).toHaveLength(8);
   });
 });
 
 describe("buildCatalogWhere search routing", () => {
-  it("defaults to the unindexed LIKE so an unaware caller cannot change semantics", () => {
+  it("defaults to the unindexed LIKE (name, sku, AND product_type) so an unaware caller cannot change semantics", () => {
     const r = buildCatalogWhere({ search: "canape" });
-    expect(r.where).toContain("name LIKE ?");
-    expect(r.args).toEqual(["%canape%", "%canape%"]);
+    expect(r.where).toBe("WHERE (name LIKE ? OR sku LIKE ? OR product_type LIKE ?)");
+    expect(r.args).toEqual(["%canape%", "%canape%", "%canape%"]);
   });
 
-  it("routes through products_fts on searchMode 'fts'", () => {
+  it("routes through products_fts (sku, name, product_type) on searchMode 'fts'", () => {
     const r = buildCatalogWhere({ search: "canape gris", searchMode: "fts" });
     expect(r.where).toContain("products_fts MATCH ?");
     expect(r.where).not.toContain("LIKE");
-    expect(r.args).toEqual(['"canape"* "gris"*']);
+    expect(r.args).toEqual(['"canape gris"*']);
   });
 
   it("falls back to LIKE when the term has no searchable token, even in fts mode", () => {
     // "???" yields no tokens; emitting `MATCH ''` would throw at query time.
     const r = buildCatalogWhere({ search: "???", searchMode: "fts" });
     expect(r.where).toContain("name LIKE ?");
-    expect(r.args).toEqual(["%???%", "%???%"]);
+    expect(r.args).toEqual(["%???%", "%???%", "%???%"]);
   });
 
   it("keeps placeholders and args in lockstep when fts is combined with other filters", () => {
@@ -135,5 +148,49 @@ describe("FTS vs LIKE: the documented narrowing", () => {
     const q = toFtsQuery("table");
     expect(q).toBe('"table"*');
     expect(q).not.toContain("*table"); // a leading wildcard would defeat the FTS index
+  });
+});
+
+describe("deriveSubCategoryOptions — catalog page subcategory dropdown", () => {
+  // Same shape the API's `productTypes` field returns (product_type_counts, which already
+  // stores every prefix level of the Aosom taxonomy path — see rebuildProductTypeCounts).
+  const productTypes = [
+    { type: "Home Furnishings", count: 3683 },
+    { type: "Home Furnishings > Bedroom Furniture", count: 224 },
+    { type: "Home Furnishings > Bedroom Furniture > Bed Frames", count: 19 },
+    { type: "Home Furnishings > Bedroom Furniture > Mattresses", count: 9 },
+    { type: "Home Furnishings > Living Room Furniture", count: 400 },
+    { type: "Patio & Garden", count: 2000 },
+    { type: "Patio & Garden > Lawn & Garden > Raised Garden Beds", count: 50 },
+  ];
+
+  it("returns nothing when no top-level category is selected", () => {
+    expect(deriveSubCategoryOptions(productTypes, "")).toEqual([]);
+  });
+
+  it("returns only entries exactly one level below the selected category", () => {
+    const subs = deriveSubCategoryOptions(productTypes, "Home Furnishings");
+    expect(subs.map((s) => s.type)).toEqual([
+      "Home Furnishings > Bedroom Furniture",
+      "Home Furnishings > Living Room Furniture",
+    ]);
+  });
+
+  it("goes one level deeper again when the selection is itself a subcategory", () => {
+    const subs = deriveSubCategoryOptions(productTypes, "Home Furnishings > Bedroom Furniture");
+    expect(subs.map((s) => s.type)).toEqual([
+      "Home Furnishings > Bedroom Furniture > Bed Frames",
+      "Home Furnishings > Bedroom Furniture > Mattresses",
+    ]);
+  });
+
+  it("does not surface grandchild-level entries, keeping the dropdown flat", () => {
+    // "Patio & Garden"'s only descendant here is 2 levels down — no 1-level child exists,
+    // so nothing should render rather than skipping a level silently.
+    expect(deriveSubCategoryOptions(productTypes, "Patio & Garden")).toEqual([]);
+  });
+
+  it("returns nothing for a leaf category with no children", () => {
+    expect(deriveSubCategoryOptions(productTypes, "Home Furnishings > Living Room Furniture")).toEqual([]);
   });
 });

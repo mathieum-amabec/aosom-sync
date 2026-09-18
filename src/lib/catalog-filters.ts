@@ -37,20 +37,27 @@ export const PRODUCT_HAS_DISCOUNT_SQL = `EXISTS (
  * Two jobs. First, SAFETY: FTS5 MATCH is a query language, and raw input containing `"`,
  * `*`, `:`, `^`, `-`, `NEAR` or `OR` is a syntax error that would throw at query time on a
  * public endpoint. Splitting on non-alphanumerics and re-quoting every token makes operators
- * impossible to inject. Second, RECALL: each token gets a `*` suffix so "canap" still finds
- * "canapé", which mirrors how the LIKE behaved for prefixes.
+ * impossible to inject. Second, RECALL: the last token gets a `*` suffix so "canap" still
+ * finds "canapé", which mirrors how the LIKE behaved for prefixes.
+ *
+ * PHRASE, not independent AND (dashboard bug, 2026-09-17 — Mat's "bed frame" report). Every
+ * token used to be quoted+`*` SEPARATELY (`"bed"* "frame"*`), which FTS5 reads as an implicit
+ * AND of two unrelated prefix terms — matching ANY row containing both words ANYWHERE, in any
+ * order. Measured on production: searching "bed frame" returned 100 rows for 12 real bed
+ * frames — 88 were noise (raised garden BEDs, mirrors with a metal FRAME, a hammock FRAME with
+ * a day BED), because "Bed" and "Frame" appear separately all over the catalog. The 12 real
+ * matches were never missing from the DB or the result set — they were buried in it, which is
+ * indistinguishable from "missing" to someone scanning a few rows.
+ *
+ * The fix quotes the WHOLE token sequence as one FTS5 phrase with the prefix operator applied
+ * to the phrase (`"bed frame"*`), so a match now requires "bed" immediately followed by a word
+ * starting with "frame" — exactly what "Bed Frame"/"Bed Frames" is, in both the product name
+ * AND the taxonomy path (buildCatalogWhere's FTS index also covers `product_type`, whose
+ * separators tokenize the same way, e.g. "…Bedroom Furniture > Bed Frames" → "Bed" "Frames"
+ * adjacent). A single-token search is unaffected (`"canap"*` behaves exactly as before).
  *
  * What FTS cannot do that LIKE could: match INSIDE a word. getProducts re-runs the LIKE when
  * an FTS search returns NOTHING, so a purely-infix term still finds its rows.
- *
- * ⚠️ The fallback fires on zero results only, so a term that matches both as a word and as an
- * infix DOES return a smaller set than before. Measured on production (11,896 rows):
- *   sofa 416 = 416 · outdoor 3568 = 3568 · garden 2264 = 2264   (identical)
- *   chair 1922 vs 1957   (LIKE also caught "armchair", "highchair")
- *   table 1609 vs 4656   (LIKE also caught "Adjustable", "Portable", "Foldable")
- * This is a deliberate relevance call: a shopper searching "table" wants tables, not every
- * adjustable desk. To restore exact pre-FTS behaviour, drop `searchMode: "fts"` at the call
- * site — the LIKE path is still here and still correct, just unindexed.
  *
  * Capped at 8 tokens; beyond that the query is noise and the MATCH cost grows.
  */
@@ -61,9 +68,11 @@ export function toFtsQuery(raw: string): string | null {
     .filter((t) => t.length > 0)
     .slice(0, 8);
   if (tokens.length === 0) return null;
-  // Double-quote each token (escaping any embedded quote) so it is a literal string, then
-  // append the prefix operator OUTSIDE the quotes — `"canap"*` is valid FTS5 prefix syntax.
-  return tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(" ");
+  // One quoted phrase (escaping any embedded quote), prefix operator OUTSIDE the quotes —
+  // `"bed frame"*` is valid FTS5 phrase-prefix syntax: adjacency for every token, prefix
+  // match on the last one.
+  const phrase = tokens.map((t) => t.replace(/"/g, '""')).join(" ");
+  return `"${phrase}"*`;
 }
 
 export interface CatalogFilterInput {
@@ -110,16 +119,20 @@ export function buildCatalogWhere(f: CatalogFilterInput): CatalogWhere {
   if (f.search) {
     const fts = f.searchMode === "fts" ? toFtsQuery(f.search) : null;
     if (fts) {
-      // Indexed path. `products_fts` is an external-content FTS5 table over (sku, name),
-      // so its rowid IS the products rowid — no join needed.
+      // Indexed path. `products_fts` is an external-content FTS5 table over
+      // (sku, name, product_type), so its rowid IS the products rowid — no join needed.
+      // product_type carries the full Aosom taxonomy path ("Home Furnishings > Bedroom
+      // Furniture > Bed Frames"), so a search term that only matches the category — not
+      // the product's own name — still finds it (2026-09-17 catalog-search-bedframe-gap fix).
       conditions.push(`rowid IN (SELECT rowid FROM products_fts WHERE products_fts MATCH ?)`);
       args.push(fts);
     } else {
       // Unindexed fallback: a leading wildcard defeats every B-tree, so this scans all of
       // `products`. Still the default, and still the zero-result fallback in getProducts,
-      // so search results can never narrow versus the pre-FTS behaviour.
-      conditions.push(`(name LIKE ? OR sku LIKE ?)`);
-      args.push(`%${f.search}%`, `%${f.search}%`);
+      // so search results can never narrow versus the pre-FTS behaviour. Includes
+      // product_type for the same category-search reason as the FTS path above.
+      conditions.push(`(name LIKE ? OR sku LIKE ? OR product_type LIKE ?)`);
+      args.push(`%${f.search}%`, `%${f.search}%`, `%${f.search}%`);
     }
   }
   if (f.minPrice !== undefined) {
@@ -165,4 +178,33 @@ export function buildCatalogWhere(f: CatalogFilterInput): CatalogWhere {
 /** Parse a query-string flag ("true"/"1" → true). Handy for route handlers. */
 export function parseBoolParam(value: string | null): boolean {
   return value === "true" || value === "1";
+}
+
+/**
+ * Derive the "sous-catégorie" dropdown options for the dashboard catalog page, from the
+ * SAME `productTypes` list the top-level "All categories" select already uses (getProducts'
+ * `product_type_counts`-backed field — see database.ts `rebuildProductTypeCounts`, which
+ * already stores every prefix level of the Aosom taxonomy path, e.g. for
+ * "Home Furnishings > Bedroom Furniture > Bed Frames" it stores counts for all three of
+ * "Home Furnishings", "Home Furnishings > Bedroom Furniture", and the full string). No new
+ * data source needed — subcategories were already computed and returned by the API; the
+ * catalog page just filtered them out (`!t.type.includes(">")`) when building the top-level
+ * select. This reuses that same source of truth for the *next* level down.
+ *
+ * `selectedCategory` is the chosen top-level category (empty = no subcategories to offer —
+ * a subcategory is meaningless without a parent). Returns only entries exactly ONE level
+ * deeper than `selectedCategory`, so the dropdown stays a flat, manageable list even where
+ * the Aosom taxonomy nests 3-4 levels deep (e.g. "Patio & Garden > Lawn & Garden > Raised
+ * Garden Beds > Elevated Garden Beds").
+ */
+export function deriveSubCategoryOptions(
+  productTypes: { type: string; count: number }[],
+  selectedCategory: string
+): { type: string; count: number }[] {
+  if (!selectedCategory) return [];
+  const parentDepth = selectedCategory.split(">").length;
+  const prefix = `${selectedCategory} > `;
+  return productTypes.filter(
+    (t) => t.type.startsWith(prefix) && t.type.split(">").length === parentDepth + 1
+  );
 }

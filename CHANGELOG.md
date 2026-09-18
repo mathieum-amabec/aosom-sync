@@ -2,6 +2,52 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.11] - 2026-09-17
+
+Dashboard catalog search buried real matches in noise instead of missing them — Mat's
+report of "bed frame" seeming to be gone from the catalog.
+
+### Root cause
+
+`toFtsQuery` quoted every search token SEPARATELY (`"bed"* "frame"*`), which FTS5 reads as
+an implicit AND of two independent prefix terms — matching any row containing both words
+ANYWHERE, in any order. Measured on production: searching "bed frame" returned **100** rows
+for **12** real bed frames; the other 88 were raised garden BEDs, mirrors with a metal
+FRAME, a hammock stand with a day BED and a metal FRAME — all genuinely in Turso, none
+missing, just buried. All 12 real bed-frame SKUs were confirmed present in `products` before
+any code changed — this was never an Aosom→Turso sync gap.
+
+The search was also blind to the category/taxonomy text: `product_type` carries the full
+Aosom path ("Home Furnishings > Bedroom Furniture > Bed Frames") but was never indexed or
+searched, so a term matching only the category, not a product's own title, found nothing.
+
+### Changed
+
+- `toFtsQuery` (`catalog-filters.ts`) now quotes the whole token sequence as ONE FTS5 phrase
+  with the prefix operator on the outside (`"bed frame"*`), requiring adjacency instead of an
+  unordered AND. Production: "bed frame" 100 → 23 rows (all 12 real matches retained),
+  "patio table" 583 → 99, "dog house" 29 → 15 — same pattern each time.
+- `products_fts` now indexes `product_type` alongside `sku`/`name` (schema migration in
+  `database.ts`: FTS5 can't ALTER a virtual table's columns, so a pre-existing 2-column index
+  is dropped and rebuilt; gated by a bumped rebuild marker, non-fatal — degrades to the LIKE
+  fallback on failure). The LIKE fallback path also gained `product_type LIKE ?`.
+- Dashboard catalog page (`/catalog`): added a "Sous-catégorie" dropdown next to the existing
+  category select. No new data source — `product_type_counts` already stored every prefix
+  level of the taxonomy path (`rebuildProductTypeCounts`); the page just discarded everything
+  but the top level when building the category dropdown. `deriveSubCategoryOptions` (new,
+  DB-free, testable) surfaces the next level down; picking one narrows via the existing
+  `productType` prefix filter, unchanged.
+
+### Known limitation (not fixed here — needs a human decision)
+
+`products.name` is the raw ENGLISH Aosom title (see `catalog-name-is-english-fr-on-shopify`);
+Turso has no French field at all. French search terms ("base de lit", "chaise de bureau")
+return **zero** results even though the matching English product exists — confirmed on 5
+French category terms, all 0. This is not a bug this fix can close: it would need either
+backfilling curated Shopify FR titles into Turso (per-product Admin API calls, rate-limited)
+or a translation layer — both bigger, separate scope. The new subcategory dropdown gives a
+non-text browsing path around it for the dashboard's category-level use case.
+
 ## [0.5.92.10] - 2026-09-14
 
 stale-catalog could not see the products it most needed to see.
