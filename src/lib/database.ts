@@ -1436,6 +1436,47 @@ export async function getUgcVideoCandidates(limit = 9): Promise<UgcVideoCandidat
   }));
 }
 
+export interface UgcSocialCandidate extends UgcVideoCandidate {
+  productType: string | null;
+}
+
+/**
+ * Same CA/US-clean, in-stock, live-on-Shopify UGC pool as `getUgcVideoCandidates`
+ * (homepage reel), but additionally excludes any video already referenced by a
+ * `facebook_drafts.video_url` — the reinjection job (Part B Task 8, 2026-09-18) must
+ * never queue the same customer clip twice. Adds `product_type` (absent from the
+ * homepage-reel shape) so the caller can pick a scope-aware hook/hashtag set. The
+ * homepage reel independently caps its OWN display at 15 videos at a time
+ * (`getUgcVideoReel(15)`) — that limit is unrelated to "already used" here; a video
+ * can be eligible for reinjection into a social post while also being outside the
+ * homepage's current top-15 rotation, or vice versa.
+ */
+export async function getUnusedUgcVideoCandidatesForSocial(limit = 5): Promise<UgcSocialCandidate[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT p.sku, p.name, p.price, p.qty, p.shopify_product_id, p.shopify_handle, p.video_ugc, p.product_type
+          FROM products p
+          WHERE p.video_ugc IS NOT NULL AND TRIM(p.video_ugc) <> ''
+            AND p.qty > 0
+            AND p.shopify_handle IS NOT NULL AND TRIM(p.shopify_handle) <> ''
+            AND (p.video_ugc LIKE '%/customer/CA/%' OR p.video_ugc LIKE '%/customer/US/%')
+            AND NOT EXISTS (SELECT 1 FROM facebook_drafts fd WHERE fd.video_url = p.video_ugc)
+          ORDER BY p.qty DESC
+          LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => ({
+    sku: String(r.sku),
+    name: r.name == null ? "" : String(r.name),
+    price: r.price == null ? null : Number(r.price),
+    qty: Number(r.qty ?? 0),
+    shopifyProductId: r.shopify_product_id == null ? null : String(r.shopify_product_id),
+    shopifyHandle: r.shopify_handle == null ? null : String(r.shopify_handle),
+    videoUgc: String(r.video_ugc),
+    productType: r.product_type == null ? null : String(r.product_type),
+  }));
+}
+
 /** Imported catalog rows (shopify_product_id set), trimmed to what the intraday stock-check
  * needs: sku, baseline qty, Shopify product id, and last_seen_at. */
 export interface StockBaselineRow {

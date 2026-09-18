@@ -25,6 +25,7 @@ import {
   createNotification,
   getAutopostCountToday,
   incrementAutopostCountToday,
+  getUnusedUgcVideoCandidatesForSocial,
 } from "@/lib/database";
 import { selectHook, buildHookedPrompt, buildHookedPromptEn, mapProductTypeToScope, hashtagsForScope } from "@/lib/hook-selector";
 import { publishDraftToChannels } from "@/lib/social-publisher";
@@ -432,6 +433,64 @@ export async function triggerStockHighlight(
   category?: string | null,
 ): Promise<GenerateDraftResult[]> {
   return (await runStockHighlight(count, category)).drafts;
+}
+
+/**
+ * UGC video reinjection (Part B Task 6, 2026-09-18 strategic investigation) — SEMI-
+ * automated: this generates drafts on a cron, it never publishes anything. Customer
+ * unboxing videos (CA/US-clean, `getUnusedUgcVideoCandidatesForSocial`) sit in
+ * `products.video_ugc`, used only by the homepage reel (capped at 15 shown at a
+ * time) and never reused as social content — `facebook_drafts.video_url` was 100%
+ * NULL before this. Each call creates up to `count` new drafts, status `draft` by
+ * construction (facebook_drafts.status defaults to 'draft' — same table, same
+ * `/social` approval queue as every other trigger in this file; nothing here
+ * bypasses it). The DB query already excludes any video already referenced by an
+ * existing draft, so re-running this job never re-queues the same clip.
+ */
+export async function runUgcVideoReinjection(count = 3): Promise<GenerateDraftResult[]> {
+  log(`ugc_video reinjection trigger (count=${count})`);
+  const settings = await getAllSettings();
+  const candidates = await getUnusedUgcVideoCandidatesForSocial(Math.max(1, count));
+  if (candidates.length === 0) {
+    log("No unused UGC video candidates (pool exhausted or already all queued)");
+    return [];
+  }
+
+  const results: GenerateDraftResult[] = [];
+  for (const candidate of candidates) {
+    const productName = candidate.name || candidate.sku;
+    const { fr, en, hookId } = await generateBilingual(
+      settings,
+      "highlight",
+      {
+        product_name: productName,
+        price: String(candidate.price ?? ""),
+        qty: String(candidate.qty),
+        store_name: env.storeName,
+      },
+      candidate.productType,
+    );
+
+    const draftId = await createFacebookDraft({
+      sku: candidate.sku,
+      triggerType: "ugc_video",
+      language: "FR",
+      postText: fr,
+      postTextEn: en,
+      videoUrl: candidate.videoUgc,
+      reelsVideoUrl: candidate.videoUgc,
+      hookId,
+    });
+    log(`Draft #${draftId} created for UGC video reinjection ${candidate.sku}`);
+    results.push({ draftId, postText: fr, postTextEn: en, imagePath: null, imageUrl: null, imageUrls: [] });
+  }
+
+  await createNotification(
+    "info",
+    "Vidéos UGC réinjectées",
+    `${results.length} nouveau(x) draft(s) social à partir de vidéos clients — en attente d'approbation dans /social.`,
+  );
+  return results;
 }
 
 /**
