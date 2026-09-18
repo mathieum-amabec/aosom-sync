@@ -520,7 +520,7 @@ async function runBuckets(db: ReturnType<typeof rawDb>, lib: Awaited<ReturnType<
 // ── Report ───────────────────────────────────────────────────────────────────
 function writeReportFile(): void {
   const all = [...readCheckpoint().values()];
-  let bucketsById: Record<string, string> = {};
+  const bucketsById: Record<string, string> = {};
   if (existsSync(".tmp-imgaudit/pos1-regression-buckets.json")) {
     const b = JSON.parse(readFileSync(".tmp-imgaudit/pos1-regression-buckets.json", "utf8")).buckets;
     for (const [name, ids] of Object.entries(b) as [string, string[]][]) for (const id of ids) bucketsById[id] = name;
