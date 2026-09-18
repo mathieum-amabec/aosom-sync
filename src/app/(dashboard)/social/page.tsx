@@ -12,6 +12,16 @@ interface ChannelState {
   error?: string;
 }
 
+/** What will actually happen to this draft, joined from publication_queue. See queue-state.ts. */
+interface QueueInfo {
+  state: "scheduled" | "publishing" | "published" | "failed" | "none";
+  scheduledAt: number | null;
+  publishedAt: number | null;
+  error: string | null;
+  counts: { pending: number; publishing: number; published: number; failed: number; cancelled: number; draft: number };
+  total: number;
+}
+
 interface Draft {
   id: number;
   sku: string;
@@ -32,6 +42,7 @@ interface Draft {
   createdAt: number;
   productName?: string;
   productImage?: string;
+  queue: QueueInfo;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -104,6 +115,58 @@ function ChannelBadge({ channelKey, state }: { channelKey: string; state: Channe
   );
 }
 
+/**
+ * What will actually happen to this draft next — the persistent counterpart to the
+ * one-time "Planifié pour…" toast shown at approve time. Survives a page refresh because
+ * it's derived from publication_queue on every GET, not from a client-side flash message.
+ */
+function QueueStatusLine({ draft }: { draft: Draft }) {
+  const q = draft.queue;
+  const multi = q.total > 1 ? ` · ${q.total} canaux` : "";
+  switch (q.state) {
+    case "scheduled":
+      return q.scheduledAt !== null ? (
+        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-blue-900/40 text-blue-400 border-blue-800/50">
+          🕑 En file — {formatSlot(q.scheduledAt)}{multi}
+        </span>
+      ) : null;
+    case "publishing":
+      return (
+        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-amber-900/40 text-amber-400 border-amber-800/50">
+          ⏳ Publication en cours…
+        </span>
+      );
+    case "published":
+      return q.publishedAt !== null ? (
+        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-purple-900/40 text-purple-400 border-purple-800/50">
+          ✓ Publié via la file — {formatPublishedAt(q.publishedAt)}
+        </span>
+      ) : null;
+    case "failed":
+      return (
+        <span
+          title={q.error || undefined}
+          className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-red-900/40 text-red-400 border-red-800/50"
+        >
+          ✗ Échec de publication{q.counts.published > 0 ? ` · ${q.counts.published}/${q.total} publié` : ""}
+          {q.error ? ` — ${q.error}` : ""}
+        </span>
+      );
+    case "none":
+      // The one case that matters most: approved but never made it into the queue (no
+      // free slot at approve time). Indistinguishable from a correctly-queued draft
+      // before this fix — now called out explicitly.
+      if (draft.status === "approved") {
+        return (
+          <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-amber-900/40 text-amber-400 border-amber-800/50">
+            ⚠ Approuvé — aucun créneau trouvé, à replanifier manuellement
+          </span>
+        );
+      }
+      return null;
+  }
+}
+
 export default function SocialPage() {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [activeChannels, setActiveChannels] = useState<string[]>(DEFAULT_CHANNELS);
@@ -140,8 +203,13 @@ export default function SocialPage() {
   const [view, setView] = useState<"list" | "calendar">("list");
   const [previewLang, setPreviewLang] = useState<Record<number, "FR" | "EN">>({});
 
+  // "scheduled" is a client-side filter on real queue state (see visibleDrafts below) —
+  // facebook_drafts.status="scheduled" is dead, nothing writes it, so it must NOT be sent
+  // to the server or the fetch always comes back empty.
+  const statusParam = filter !== "all" && filter !== "scheduled" ? filter : undefined;
+
   const fetchDrafts = useCallback(async () => {
-    const params = filter !== "all" ? `?status=${filter}` : "";
+    const params = statusParam ? `?status=${statusParam}` : "";
     const res = await fetch(`/api/social${params}`);
     const data = await res.json();
     if (data.success) {
@@ -149,12 +217,12 @@ export default function SocialPage() {
       if (Array.isArray(data.activeChannels)) setActiveChannels(data.activeChannels);
     }
     setLoading(false);
-  }, [filter]);
+  }, [statusParam]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const params = filter !== "all" ? `?status=${filter}` : "";
+      const params = statusParam ? `?status=${statusParam}` : "";
       const res = await fetch(`/api/social${params}`);
       const data = await res.json();
       if (cancelled) return;
@@ -167,7 +235,7 @@ export default function SocialPage() {
     return () => {
       cancelled = true;
     };
-  }, [filter]);
+  }, [statusParam]);
 
   async function doAction(action: string, id: number, extra?: Record<string, unknown>) {
     const res = await fetch("/api/social", {
@@ -299,11 +367,20 @@ export default function SocialPage() {
     total: drafts.length,
     draft: drafts.filter((d) => d.status === "draft").length,
     approved: drafts.filter((d) => d.status === "approved").length,
-    scheduled: drafts.filter((d) => d.status === "scheduled").length,
-    published: drafts.filter((d) => d.status === "published").length,
+    // Real queue state, not the dead facebook_drafts.status="scheduled" (nothing writes
+    // that anymore — see queue-state.ts).
+    scheduled: drafts.filter((d) => d.queue.state === "scheduled").length,
+    published: drafts.filter((d) => d.status === "published" || d.queue.state === "published").length,
+    failed: drafts.filter((d) => d.queue.state === "failed").length,
   };
 
-  const calendarDrafts = drafts.filter((d) => d.scheduledAt || d.publishedAt);
+  // "En file" is a client-side filter on real queue state (facebook_drafts.status="scheduled"
+  // never gets written, so filtering server-side on it always returns empty).
+  const visibleDrafts = filter === "scheduled" ? drafts.filter((d) => d.queue.state === "scheduled") : drafts;
+
+  const calendarDrafts = drafts.filter(
+    (d) => d.scheduledAt || d.publishedAt || d.queue.scheduledAt || d.queue.publishedAt,
+  );
 
   return (
     <div className="p-4 md:p-8 max-w-6xl">
@@ -350,13 +427,14 @@ export default function SocialPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 md:grid-cols-5 gap-2 md:gap-3 mb-6">
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 mb-6">
         {[
           { label: "Total", value: stats.total, color: "text-white" },
           { label: "Drafts", value: stats.draft, color: "text-gray-400" },
           { label: "Approved", value: stats.approved, color: "text-green-400" },
-          { label: "Scheduled", value: stats.scheduled, color: "text-blue-400" },
+          { label: "En file", value: stats.scheduled, color: "text-blue-400" },
           { label: "Published", value: stats.published, color: "text-purple-400" },
+          { label: "Échecs", value: stats.failed, color: "text-red-400" },
         ].map((s) => (
           <div key={s.label} className="p-2 md:p-3 bg-gray-900 border border-gray-800 rounded-xl text-center">
             <p className={`text-lg md:text-xl font-bold ${s.color}`}>{s.value}</p>
@@ -375,7 +453,7 @@ export default function SocialPage() {
                 filter === f ? "bg-blue-600/20 border-blue-600 text-blue-400" : "border-gray-700 text-gray-400 hover:text-white"
               }`}
             >
-              {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
+              {f === "all" ? "All" : f === "scheduled" ? "En file" : f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
           ))}
         </div>
@@ -392,14 +470,14 @@ export default function SocialPage() {
       {loading ? (
         <div className="p-8 text-center text-gray-500">Loading...</div>
       ) : view === "list" ? (
-        drafts.length === 0 ? (
+        visibleDrafts.length === 0 ? (
           <div className="p-8 bg-gray-900 border border-gray-800 rounded-xl text-center">
             <p className="text-gray-500 text-sm">No drafts yet</p>
             <p className="text-gray-600 text-xs mt-1">Import products or run a sync to trigger draft generation</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {drafts.map((draft) => {
+            {visibleDrafts.map((draft) => {
               const lang = previewLang[draft.id] || "FR";
               const previewText = lang === "FR" ? draft.postText : draft.postTextEn || draft.postText;
               const hasEn = !!draft.postTextEn;
@@ -680,11 +758,7 @@ export default function SocialPage() {
                         </div>
                       )}
 
-                      {draft.scheduledAt && draft.status === "scheduled" && (
-                        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-blue-900/40 text-blue-400 border-blue-800/50">
-                          🕑 Schedulé — {formatSlot(draft.scheduledAt)}
-                        </span>
-                      )}
+                      <QueueStatusLine draft={draft} />
                       {isPublished(draft) && draft.publishedAt !== null && (
                         <p className="text-xs text-purple-400 mt-1">
                           Publié le {formatPublishedAt(draft.publishedAt)}
@@ -711,12 +785,13 @@ export default function SocialPage() {
                           </button>
                         )}
                         {(() => {
-                          // 'scheduled' is a legacy status: scheduling now flows through
-                          // publication_queue and the social-scheduled cron that drained these
-                          // rows is gone, so nothing writes this status anymore. Keep manual
-                          // publish disabled for any historical 'scheduled' rows (no automatic
-                          // publisher) — unschedule first to revert to draft, then publish.
-                          const publishDisabled = isPublished(draft) || draft.status === "scheduled";
+                          // 'scheduled' is a legacy status nothing writes anymore, kept here
+                          // only for any historical row. The real guard is the live queue
+                          // state: a pending/publishing row means the hourly cron will publish
+                          // this draft on its own, so publishing manually on top of that would
+                          // double-post once the cron catches up.
+                          const inFlight = draft.queue.state === "scheduled" || draft.queue.state === "publishing";
+                          const publishDisabled = isPublished(draft) || draft.status === "scheduled" || inFlight;
                           return (
                             <button
                               onClick={() => {
@@ -724,7 +799,13 @@ export default function SocialPage() {
                                 setPublishChannels(new Set(activeChannels));
                               }}
                               disabled={publishDisabled}
-                              title={draft.status === "scheduled" ? "En file — déschedulez pour publier maintenant" : undefined}
+                              title={
+                                inFlight
+                                  ? "En file pour publication automatique — déplanifiez pour publier maintenant"
+                                  : draft.status === "scheduled"
+                                  ? "En file — déschedulez pour publier maintenant"
+                                  : undefined
+                              }
                               className={`px-3 py-1.5 bg-purple-600/20 text-purple-400 text-xs rounded-lg border border-purple-800/50 ${publishDisabled ? "opacity-40 cursor-not-allowed" : "hover:bg-purple-600/30"}`}
                             >
                               Publish
@@ -803,7 +884,7 @@ function CalendarView({ drafts }: { drafts: Draft[] }) {
     const dayStart = Math.floor(date.getTime() / 1000);
     const dayEnd = dayStart + 86400;
     return drafts.filter((d) => {
-      const ts = d.scheduledAt || d.publishedAt || 0;
+      const ts = d.queue.scheduledAt || d.queue.publishedAt || d.scheduledAt || d.publishedAt || 0;
       return ts >= dayStart && ts < dayEnd;
     });
   }
@@ -841,7 +922,9 @@ function CalendarView({ drafts }: { drafts: Draft[] }) {
                     <div
                       key={d.id}
                       className={`mt-0.5 px-1 py-0.5 rounded text-[10px] truncate ${
-                        d.status === "published" ? "bg-purple-900/40 text-purple-400" : "bg-blue-900/40 text-blue-400"
+                        d.status === "published" || d.queue.state === "published"
+                          ? "bg-purple-900/40 text-purple-400"
+                          : "bg-blue-900/40 text-blue-400"
                       }`}
                       title={d.postText.slice(0, 100)}
                     >

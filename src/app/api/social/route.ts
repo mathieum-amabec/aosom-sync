@@ -8,8 +8,11 @@ import {
   getSetting,
   addToQueue,
   getOccupiedQueueSlots,
+  getQueueRowsForContent,
+  cancelPendingQueueItems,
   QueueSlotTakenError,
 } from "@/lib/database";
+import { summarizeQueueRows, emptyQueueSummary, type QueueSummary } from "@/lib/queue-state";
 import { testConnection as testFacebookConnection, type FacebookBrand } from "@/lib/facebook-client";
 import { testConnection as testInstagramConnection } from "@/lib/instagram-client";
 import { publishDraftToChannel, publishDraftToChannels, draftToQueueItems } from "@/lib/social-publisher";
@@ -32,7 +35,36 @@ export async function GET(request: Request) {
     const status = url.searchParams.get("status") || undefined;
     const limit = Math.min(Math.max(1, parseInt(url.searchParams.get("limit") || "100", 10) || 100), 500);
     const drafts = await getFacebookDrafts({ status, limit });
-    return NextResponse.json({ success: true, data: drafts, activeChannels: activeChannels() });
+
+    // Queue state (what will actually happen to this draft) is a best-effort enrichment:
+    // a hiccup here must never blank the draft list, so it degrades to "none" for every
+    // row rather than 500ing the whole page.
+    let queueByContentId = new Map<string, QueueSummary>();
+    try {
+      const rows = await getQueueRowsForContent("social", drafts.map((d) => String(d.id)));
+      queueByContentId = new Map(
+        [...rows.entries()].map(([id, items]) => [id, summarizeQueueRows(items)]),
+      );
+    } catch (err) {
+      console.error(`[API] /api/social GET: queue lookup failed, degrading to "none" for all drafts:`, err);
+    }
+
+    const data = drafts.map((d) => {
+      const q = queueByContentId.get(String(d.id)) ?? emptyQueueSummary();
+      return {
+        ...d,
+        queue: {
+          state: q.state,
+          scheduledAt: q.scheduledAt ? sqliteToUnixSec(q.scheduledAt) : null,
+          publishedAt: q.publishedAt ? sqliteToUnixSec(q.publishedAt) : null,
+          error: q.error,
+          counts: q.counts,
+          total: q.total,
+        },
+      };
+    });
+
+    return NextResponse.json({ success: true, data, activeChannels: activeChannels() });
   } catch (err) {
     console.error(`[API] /api/social GET failed:`, err);
     return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
@@ -266,6 +298,9 @@ export async function POST(request: Request) {
       }
 
       case "publish": {
+        // Manual publish jumps the queue — cancel any pending row first, or the hourly
+        // cron would publish this draft again once its slot comes due.
+        await cancelPendingQueueItems("social", String(body.id));
         // Legacy single-channel publish — defaults to Facebook Ameublo (FR) for backward compat.
         const state = await publishDraftToChannel(body.id, "fb_ameublo");
         await setDraftChannelState(body.id, "fb_ameublo", state);
@@ -283,6 +318,9 @@ export async function POST(request: Request) {
         if (!Array.isArray(body.channels) || body.channels.length === 0) {
           return NextResponse.json({ success: false, error: "channels array required" }, { status: 400 });
         }
+        // Manual publish jumps the queue — cancel any pending row first, or the hourly
+        // cron would publish this draft again once its slot comes due.
+        await cancelPendingQueueItems("social", String(body.id));
         const keys: ChannelKey[] = [];
         for (const k of body.channels) {
           try { assertChannelKey(k); keys.push(k); }

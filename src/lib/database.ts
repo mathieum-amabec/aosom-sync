@@ -493,6 +493,9 @@ async function _initSchemaImpl(): Promise<void> {
     // in /api/queue/add can't silently double-book a slot under concurrent requests. failed/
     // cancelled rows drop out of the index, freeing their slot for rebooking.
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`,
+    // Serves getQueueRowsForContent — the draft-list page's per-item "what will happen to
+    // this post" lookup, batched by content_type + content_id.
+    `CREATE INDEX IF NOT EXISTS idx_publication_queue_content ON publication_queue(content_type, content_id)`,
 
     // ── Vision image classification cache ────────────────────────────────────
     // One row per PHOTO (not per URL). The key is the Aosom hash stem, which survives
@@ -4230,6 +4233,38 @@ export async function getVideoQueueItems(limit = 50): Promise<PublicationQueueIt
     args: [limit],
   });
   return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
+ * Batch-fetch every non-cancelled `publication_queue` row for a set of content ids within
+ * one content_type, keyed by content_id, for the caller to reduce with `summarizeQueueRows`.
+ * One `IN (...)` query per 100 ids — the draft-list page needs up to a few hundred, and this
+ * keeps it at a handful of round-trips instead of one query per draft.
+ */
+export async function getQueueRowsForContent(
+  contentType: QueueContentType,
+  contentIds: string[],
+): Promise<Map<string, PublicationQueueItem[]>> {
+  const out = new Map<string, PublicationQueueItem[]>();
+  const unique = [...new Set(contentIds.filter(Boolean))];
+  if (unique.length === 0) return out;
+  const db = await ensureSchema();
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100);
+    const result = await db.execute({
+      sql: `SELECT * FROM publication_queue
+            WHERE content_type = ? AND status != 'cancelled'
+              AND content_id IN (${chunk.map(() => "?").join(",")})`,
+      args: [contentType, ...chunk],
+    });
+    for (const r of result.rows) {
+      const item = mapQueueItem(rowToObj(r));
+      const list = out.get(item.contentId);
+      if (list) list.push(item);
+      else out.set(item.contentId, [item]);
+    }
+  }
+  return out;
 }
 
 /**
