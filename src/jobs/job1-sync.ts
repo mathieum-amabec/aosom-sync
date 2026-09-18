@@ -78,6 +78,7 @@ import { storeLink } from "@/lib/insights";
 import { diffProductsLight } from "@/lib/product-diff";
 import { runRemovedFromFeedDraft } from "@/lib/removed-catalog";
 import { runImageCompliance } from "@/lib/image-compliance";
+import { checkGalleryDrift } from "@/lib/image-compliance-drift";
 import {
   savePhase1Blob,
   readPhase1Blob,
@@ -664,6 +665,15 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
         log("image-compliance done", { phase: "imageCompliance", ...imgRes });
       } catch (imgErr) {
         log(`image-compliance failed (non-fatal): ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`, { phase: "imageCompliance" });
+      }
+      // Shopify-API-only (no Claude calls) — catches an already-"checked" product whose live
+      // pos-1 changed since, which image_checked_at's own reset (products.image1 only) never
+      // notices. See image-compliance-drift.ts.
+      try {
+        const driftRes = await checkGalleryDrift();
+        log("image-compliance-drift done", { phase: "imageComplianceDrift", ...driftRes });
+      } catch (driftErr) {
+        log(`image-compliance-drift failed (non-fatal): ${driftErr instanceof Error ? driftErr.message : String(driftErr)}`, { phase: "imageComplianceDrift" });
       }
     }
 
@@ -1398,6 +1408,16 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
       log("image-compliance done", { phase: "finalize", duration_ms: Date.now() - t0Img, ...imgRes });
     } catch (imgErr) {
       log(`image-compliance failed (non-fatal): ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`, { phase: "finalize" });
+    }
+
+    // Gallery-drift scan (production path) — Shopify-API-only, no Claude calls, so it never
+    // competes with runImageCompliance's budget. See image-compliance-drift.ts.
+    try {
+      const t0Drift = Date.now();
+      const driftRes = await checkGalleryDrift();
+      log("image-compliance-drift done", { phase: "finalize", duration_ms: Date.now() - t0Drift, ...driftRes });
+    } catch (driftErr) {
+      log(`image-compliance-drift failed (non-fatal): ${driftErr instanceof Error ? driftErr.message : String(driftErr)}`, { phase: "finalize" });
     }
 
     // Retention: drop price_history older than 30 days now that today's changes are

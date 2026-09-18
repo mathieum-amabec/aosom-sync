@@ -799,6 +799,18 @@ async function _initSchemaImpl(): Promise<void> {
   if (!productCols.has("image_checked_at")) {
     alters.push(`ALTER TABLE products ADD COLUMN image_checked_at INTEGER`);
   }
+  // image_gallery_signature: the Shopify gallery's image ids, in position order, joined by
+  // ",", as they were at the moment image_checked_at was last stamped. image_checked_at only
+  // resets on an image1 (Aosom feed) change — it never notices a Shopify-side-only change
+  // (re-ingest minting a new image id, a manual reorder), so a product can sit "checked" while
+  // its live pos-1 has silently drifted (regression found 2026-09-17: 13/32 non-compliant
+  // pos-1 images were in this state). checkGalleryDrift() (image-compliance-drift.ts) refetches
+  // the live gallery for already-checked products and resets image_checked_at (+ this column)
+  // to NULL when the signature no longer matches, so the drifted product falls back into the
+  // normal daily classification queue.
+  if (!productCols.has("image_gallery_signature")) {
+    alters.push(`ALTER TABLE products ADD COLUMN image_gallery_signature TEXT`);
+  }
 
   // image_classifications.confidence: the model always reported it, the parser always dropped
   // it. Hybrid mode routes a low-confidence verdict to a human, so it is persisted now. The
@@ -3061,18 +3073,79 @@ export async function getImageComplianceCandidates(limit: number): Promise<Image
 /**
  * Stamp image_checked_at=now on every SKU row of the given Shopify products so they are
  * not re-classified until image1 changes again. No-op on an empty list.
+ *
+ * `signatures`, when given, also stamps image_gallery_signature — the verified pos-1
+ * image's URL stem (imageUrlStem()) at check time. checkGalleryDrift() (image-compliance-
+ * drift.ts) compares this against the LIVE Shopify pos-1 stem on a later pass and resets
+ * both columns to NULL when they diverge, so a product whose gallery changed after being
+ * checked falls back into the normal classification queue instead of staying silently
+ * "checked" forever. A product without an entry in `signatures` keeps its prior signature
+ * untouched (older callers that never learned this parameter).
  */
-export async function markImageChecked(shopifyProductIds: string[]): Promise<void> {
+export async function markImageChecked(
+  shopifyProductIds: string[],
+  signatures?: Map<string, string>,
+): Promise<void> {
   if (shopifyProductIds.length === 0) return;
   const db = await ensureSchema();
   const now = Math.floor(Date.now() / 1000);
+  const stmts = shopifyProductIds.map((id) => {
+    const sig = signatures?.get(id);
+    return sig !== undefined
+      ? {
+          sql: `UPDATE products SET image_checked_at = ?, image_gallery_signature = ? WHERE shopify_product_id = ?`,
+          args: [now, sig, id],
+        }
+      : { sql: `UPDATE products SET image_checked_at = ? WHERE shopify_product_id = ?`, args: [now, id] };
+  });
+  for (let i = 0; i < stmts.length; i += 100) {
+    await db.batch(stmts.slice(i, i + 100), "write");
+  }
+}
+
+/**
+ * Reset image_checked_at + image_gallery_signature to NULL for the given Shopify products —
+ * the counterpart to markImageChecked, used when checkGalleryDrift() finds the live pos-1
+ * stem no longer matches what was last verified. No-op on an empty list.
+ */
+export async function resetImageChecked(shopifyProductIds: string[]): Promise<void> {
+  if (shopifyProductIds.length === 0) return;
+  const db = await ensureSchema();
   const stmts = shopifyProductIds.map((id) => ({
-    sql: `UPDATE products SET image_checked_at = ? WHERE shopify_product_id = ?`,
-    args: [now, id],
+    sql: `UPDATE products SET image_checked_at = NULL, image_gallery_signature = NULL WHERE shopify_product_id = ?`,
+    args: [id],
   }));
   for (let i = 0; i < stmts.length; i += 100) {
     await db.batch(stmts.slice(i, i + 100), "write");
   }
+}
+
+/**
+ * Products already marked checked (image_checked_at NOT NULL), oldest-checked first — the
+ * candidate pool for checkGalleryDrift(). Oldest first because a stale check is more likely
+ * to have drifted, and it makes eventual coverage of the whole checked set fair over time.
+ */
+export async function getCheckedProductsForDriftScan(
+  limit: number,
+): Promise<Array<{ shopifyProductId: string; sku: string; signature: string | null }>> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT shopify_product_id, MIN(sku) AS sku, MAX(image_gallery_signature) AS image_gallery_signature
+          FROM products
+          WHERE shopify_product_id IS NOT NULL AND shopify_product_id != '' AND image_checked_at IS NOT NULL
+          GROUP BY shopify_product_id
+          ORDER BY MIN(image_checked_at) ASC
+          LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    return {
+      shopifyProductId: String(o.shopify_product_id),
+      sku: String(o.sku || ""),
+      signature: (o.image_gallery_signature as string) || null,
+    };
+  });
 }
 
 /**

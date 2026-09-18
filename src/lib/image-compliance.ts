@@ -30,11 +30,20 @@
  * budget. Everything about this pass is best-effort: any failure is logged and swallowed so
  * it can never fail an otherwise-successful sync.
  *
- * Cost guard: at most `maxClassifications` Claude vision calls per run (default 20), spread
- * across pos-1 checks AND the gallery scan for a replacement. Candidates are ordered
- * newest-import-first (products.created_at DESC), so fresh imports are prioritized.
+ * Cost guard: at most `maxClassifications` Claude vision calls per run (default 300, raised
+ * 2026-09-17 from 20 — see below), spread across pos-1 checks AND the gallery scan for a
+ * replacement. Candidates are ordered newest-import-first (products.created_at DESC), so
+ * fresh imports are prioritized.
+ *
+ * All calls here are charged to the `maintenance` LLM pool, not `batch` — this pass runs
+ * unattended every day from the sync cron and must never compete with imports/blog/social
+ * generation for the shared `batch` budget the way the 2026-09-11 one-off audit script did
+ * before `maintenance` existed (see llm-budget.ts and CHANGELOG "Added — the maintenance LLM
+ * pool"). `maintenance` is uncapped by default; the real ceiling is `maxClassifications`
+ * itself, which hard-bounds Claude CALLS per run regardless of pool. Set
+ * `LLM_MAINTENANCE_DAILY_BUDGET` for an additional token-based ceiling if desired.
  */
-import { auditProductPos1, type Pos1AuditPlan } from "./image-compliance-audit";
+import { auditProductPos1, imageUrlStem, type Pos1AuditPlan } from "./image-compliance-audit";
 import { moveImageToFirstPosition } from "./shopify-client";
 import {
   getImageComplianceCandidates,
@@ -47,7 +56,11 @@ import {
 import { env } from "./config";
 import type { SyncLogEntry } from "@/types/sync";
 
-export const DEFAULT_MAX_CLASSIFICATIONS = 20;
+// Raised 2026-09-17 from 20: at ~20/day the 957-product never-checked backlog would take
+// ~48 days (worst case) to clear. 300/day is a call-count hard cap (see module doc above),
+// isolated on the `maintenance` pool so it can't starve batch — at hybrid mode's observed
+// ~2 calls/product it clears the backlog in roughly a week.
+export const DEFAULT_MAX_CLASSIFICATIONS = 300;
 
 export type ImageComplianceMode = "queue" | "auto" | "hybrid" | "off";
 export const DEFAULT_IMAGE_COMPLIANCE_MODE: ImageComplianceMode = "hybrid";
@@ -155,9 +168,13 @@ export async function runImageCompliance(opts: {
   // timeout can't lose the idempotency flag and re-burn the budget next run. Products left
   // UNSTAMPED on failure/deferral are deliberately retried by a future run — better a couple
   // of wasted calls than silently leaving a marketing overlay live at pos-1.
-  async function markResolved(productId: string): Promise<void> {
+  // `finalPos1Url` is the pos-1 image AFTER this run's resolution (the pre-existing one for
+  // compliant/queued/no_alternative; the newly-swapped one for an applied auto/hybrid-obvious
+  // fix). Its stem is stored as image_gallery_signature so checkGalleryDrift() can later tell
+  // a genuine Shopify-side change apart from "nothing changed since we checked".
+  async function markResolved(productId: string, finalPos1Url: string): Promise<void> {
     try {
-      await markImageChecked([productId]);
+      await markImageChecked([productId], new Map([[productId, imageUrlStem(finalPos1Url)]]));
     } catch (err) {
       log("markImageChecked failed (non-fatal)", { product_id: productId, error: err instanceof Error ? err.message : String(err) });
     }
@@ -170,10 +187,15 @@ export async function runImageCompliance(opts: {
     try {
       plan = await auditProductPos1(
         { sku: c.sku, shopifyProductId: c.shopifyProductId, name: c.name, feedImages: feedByProduct.get(c.shopifyProductId) ?? [] },
-        // hybrid has to see the WHOLE set: "is this the only clean photo, or one of several
-        // equally good ones" is the entire obvious/ambiguous question, and the default scan
-        // stops at the first clean image. The other modes keep the cheaper partial scan.
-        { budget, scanAllAlternatives: mode === "hybrid" },
+        {
+          budget,
+          // hybrid has to see the WHOLE set: "is this the only clean photo, or one of several
+          // equally good ones" is the entire obvious/ambiguous question, and the default scan
+          // stops at the first clean image. The other modes keep the cheaper partial scan.
+          scanAllAlternatives: mode === "hybrid",
+          // maintenance pool, not batch — see module doc header.
+          classifyOptions: { maintenance: true },
+        },
       );
     } catch (err) {
       // Unresolved — leave UNSTAMPED so it's retried next run.
@@ -187,13 +209,13 @@ export async function runImageCompliance(opts: {
     switch (plan.status) {
       case "no_images":
         // Nothing to classify — resolved, don't retry every run.
-        await markResolved(c.shopifyProductId);
+        await markResolved(c.shopifyProductId, "");
         break;
 
       case "compliant":
         result.checked++;
         result.compliant++;
-        await markResolved(c.shopifyProductId);
+        await markResolved(c.shopifyProductId, plan.currentUrl);
         break;
 
       case "fixable": {
@@ -221,7 +243,8 @@ export async function runImageCompliance(opts: {
               source: plan.proposedSource ?? "shopify",
             });
             result.queued++;
-            await markResolved(c.shopifyProductId);
+            // Pos-1 is still the (non-compliant) currentUrl — nothing was written to Shopify.
+            await markResolved(c.shopifyProductId, plan.currentUrl);
             log("queued for approval", {
               sku: c.sku, product_id: c.shopifyProductId, proposed_image_id: plan.proposedImageId,
               was_position: plan.proposedPosition,
@@ -265,7 +288,8 @@ export async function runImageCompliance(opts: {
               source: "feed",
             });
             result.queued++;
-            await markResolved(c.shopifyProductId);
+            // Feed-only candidate — never applied unattended, pos-1 is still currentUrl.
+            await markResolved(c.shopifyProductId, plan.currentUrl);
             log("clean image exists only in the Aosom feed — queued for approval (needs upload)", { sku: c.sku, product_id: c.shopifyProductId });
           } catch (err) {
             result.errors++;
@@ -278,7 +302,9 @@ export async function runImageCompliance(opts: {
           const verified = await moveImageToFirstPosition(c.shopifyProductId, plan.proposedImageId);
           if (verified) {
             result.swapped++;
-            await markResolved(c.shopifyProductId);
+            // Pos-1 is now proposedUrl — the signature must reflect the NEW live image,
+            // not the overlay photo that was just replaced.
+            await markResolved(c.shopifyProductId, plan.proposedUrl ?? "");
             log("swapped pos-1", { sku: c.sku, product_id: c.shopifyProductId, new_image_id: plan.proposedImageId, was_position: plan.proposedPosition });
             logEntries.push({
               syncRunId: opts.syncRunId,
@@ -308,7 +334,7 @@ export async function runImageCompliance(opts: {
         result.checked++;
         result.nonCompliant++;
         result.noAlternative++;
-        await markResolved(c.shopifyProductId);
+        await markResolved(c.shopifyProductId, plan.currentUrl);
         log("non-compliant, no clean alternative — left as is", { sku: c.sku, product_id: c.shopifyProductId, reason: plan.currentReason, scanned: plan.scanned });
         break;
 
