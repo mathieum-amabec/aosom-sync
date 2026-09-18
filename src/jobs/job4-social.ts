@@ -26,7 +26,7 @@ import {
   getAutopostCountToday,
   incrementAutopostCountToday,
 } from "@/lib/database";
-import { selectHook, buildHookedPrompt, buildHookedPromptEn } from "@/lib/hook-selector";
+import { selectHook, buildHookedPrompt, buildHookedPromptEn, mapProductTypeToScope, hashtagsForScope } from "@/lib/hook-selector";
 import { publishDraftToChannels } from "@/lib/social-publisher";
 import { resolveLifestyle } from "@/lib/selectors/shopify-images";
 import { resolveCategory, type SocialCategory } from "@/lib/social-categories";
@@ -127,8 +127,11 @@ async function generateBilingual(
   const frTpl = settings[frKey] || "Rédige un post Facebook pour: {product_name}";
   const enTpl = settings[enKey] || "Write a Facebook post for: {product_name}";
 
-  const frVars = { ...vars, hashtags: settings.social_hashtags_fr || "" };
-  const enVars = { ...vars, hashtags: settings.social_hashtags_en || "" };
+  // Hashtags scoped to the product's category — was a single global settings value
+  // (patio/garden-themed) slapped on every post regardless of what's in the photo.
+  const scope = mapProductTypeToScope(productType);
+  const frVars = { ...vars, hashtags: hashtagsForScope(scope, "FR") };
+  const enVars = { ...vars, hashtags: hashtagsForScope(scope, "EN") };
 
   const basePromptFr = interpolatePrompt(frTpl, frVars);
   const basePromptEn = interpolatePrompt(enTpl, enVars);

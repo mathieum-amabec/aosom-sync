@@ -1028,12 +1028,12 @@ async function _initSchemaImpl(): Promise<void> {
     ['social_include_price', 'true'],
     ['social_include_link', 'true'],
     ['social_tone', 'promotional'],
-    ['prompt_new_product_fr', 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur. Rédige un post Facebook engageant pour ce nouveau produit : {product_name}. Prix : {price}$. Ton : enthousiaste et accessible. Maximum 150 mots. Termine avec les hashtags : {hashtags}'],
-    ['prompt_new_product_en', 'You are a marketing expert for a Canadian outdoor furniture store. Write an engaging Facebook post for this new product: {product_name}. Price: {price}$. Tone: enthusiastic and approachable. Maximum 150 words. End with hashtags: {hashtags}'],
+    ['prompt_new_product_fr', 'Tu es un expert en marketing pour une boutique québécoise de meubles et d’articles pour la maison. Rédige un post Facebook engageant pour ce nouveau produit : {product_name}. Prix : {price}$. Ton : enthousiaste et accessible. Maximum 150 mots. Termine avec les hashtags : {hashtags}'],
+    ['prompt_new_product_en', 'You are a marketing expert for a Canadian home goods and furniture store. Write an engaging Facebook post for this new product: {product_name}. Price: {price}$. Tone: enthusiastic and approachable. Maximum 150 words. End with hashtags: {hashtags}'],
     ['prompt_price_drop_fr', 'Tu es un expert en marketing promotionnel québécois. Rédige un post Facebook pour annoncer une baisse de prix sur : {product_name}. Ancien prix : {old_price}$. Nouveau prix : {new_price}$. Mets en valeur les économies. Maximum 120 mots. Hashtags : {hashtags}'],
     ['prompt_price_drop_en', 'You are a Canadian promotional marketing expert. Write a Facebook post announcing a price drop on: {product_name}. Old price: {old_price}$. New price: {new_price}$. Highlight the savings. Maximum 120 words. Hashtags: {hashtags}'],
-    ['prompt_highlight_fr', 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur. Rédige un post Facebook pour mettre en valeur ce produit populaire de notre catalogue : {product_name}. Prix : {price}$. Stock disponible : {qty} unités. Maximum 130 mots. Hashtags : {hashtags}'],
-    ['prompt_highlight_en', 'You are a marketing expert for a Canadian outdoor furniture store. Write a Facebook post highlighting this popular product from our catalogue: {product_name}. Price: {price}$. Stock: {qty} units available. Maximum 130 words. Hashtags: {hashtags}'],
+    ['prompt_highlight_fr', 'Tu es un expert en marketing pour une boutique québécoise de meubles et d’articles pour la maison. Rédige un post Facebook pour mettre en valeur ce produit populaire de notre catalogue : {product_name}. Prix : {price}$. Stock disponible : {qty} unités. Maximum 130 mots. Hashtags : {hashtags}'],
+    ['prompt_highlight_en', 'You are a marketing expert for a Canadian home goods and furniture store. Write a Facebook post highlighting this popular product from our catalogue: {product_name}. Price: {price}$. Stock: {qty} units available. Maximum 130 words. Hashtags: {hashtags}'],
     ['social_accent_color', '#2563eb'],
     ['social_text_color', '#ffffff'],
     ['social_store_display_name', ''],
@@ -1107,6 +1107,77 @@ async function _initSchemaImpl(): Promise<void> {
   // Seed hook pool on first run (no-op if already seeded)
   await seedHooksIfEmpty();
 
+  // seasonal_decor hook scope — added when mapProductTypeToScope gained a rule for
+  // "Home Furnishings > Holiday & Seasonal" / "> Home Décor" (previously fell through
+  // to the mobilier_indoor catch-all, so a Halloween decoration could open with a
+  // furniture-shopping hook like "this bedroom collection..."). No existing hook was
+  // scoped "seasonal_decor" — without new rows, selectCompatibleHooks("seasonal_decor",
+  // ...) only ever matches the generic "universal" hooks (safe, but never seasonal).
+  // Gated the same way as tutoiement_v1: a settings flag, so this runs exactly once.
+  // Must run AFTER seedHooksIfEmpty() — category_id=5 ("Saisonnier") only exists once
+  // content_hook_categories has been seeded, and these rows FK-reference it.
+  const seasonalHooksDone = await db.execute(
+    `SELECT value FROM settings WHERE key = 'seasonal_decor_hooks_v1_migrated' LIMIT 1`,
+  );
+  if (seasonalHooksDone.rows.length === 0) {
+    const SEASONAL_DECOR_HOOKS: Array<{ language: "FR" | "EN"; text: string; mode: "pool" | "generative_seeded" }> = [
+      { language: "FR", text: "Halloween approche. Ta cour n'est pas encore prête.", mode: "pool" },
+      { language: "FR", text: "Noël arrive vite. La déco qui manque à ta maison est ici.", mode: "pool" },
+      { language: "FR", text: "Une déco saisonnière qui dure, pas du jetable.", mode: "generative_seeded" },
+      { language: "FR", text: "Chaque année, la même décoration. Cette année, change ça.", mode: "pool" },
+      { language: "EN", text: "Halloween's coming. Your yard isn't ready yet.", mode: "pool" },
+      { language: "EN", text: "Christmas comes fast. The decoration your home is missing is here.", mode: "pool" },
+      { language: "EN", text: "Seasonal décor that lasts, not something disposable.", mode: "generative_seeded" },
+      { language: "EN", text: "Same decoration every year. This year, change that.", mode: "pool" },
+    ];
+    await runBatch("seasonal_decor hooks v1", [
+      ...SEASONAL_DECOR_HOOKS.map(({ language, text, mode }) => ({
+        sql: `INSERT OR IGNORE INTO content_hooks (category_id, language, text, product_scopes, mode) VALUES (5, ?, ?, ?, ?)`,
+        args: [language, text, JSON.stringify(["seasonal_decor"]), mode] as import("@libsql/client").InValue[],
+      })),
+    ]);
+    await db.execute(`INSERT OR IGNORE INTO settings (key, value) VALUES ('seasonal_decor_hooks_v1_migrated', '1')`);
+  }
+
+  // Prompt templates framed the store as a "boutique québécoise de mobilier extérieur" /
+  // "Canadian outdoor furniture store" for EVERY category — bleeding "perfect for your
+  // patio" language into posts about bathroom cabinets, Christmas trees, coffee tables,
+  // etc. (same root cause as the hook/hashtag scoping bugs above: a bias baked into a
+  // single global string instead of following the product). Corrects the two already-
+  // persisted templates that carried it, but ONLY if still the exact old default text —
+  // an operator's manual edit is left untouched.
+  const outdoorBiasDone = await db.execute(
+    `SELECT value FROM settings WHERE key = 'outdoor_furniture_bias_v1_migrated' LIMIT 1`,
+  );
+  if (outdoorBiasDone.rows.length === 0) {
+    const OLD_PREFIX_FR = 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur.';
+    const OLD_PREFIX_EN = 'You are a marketing expert for a Canadian outdoor furniture store.';
+    const NEW_PREFIX_FR = 'Tu es un expert en marketing pour une boutique québécoise de meubles et d’articles pour la maison.';
+    const NEW_PREFIX_EN = 'You are a marketing expert for a Canadian home goods and furniture store.';
+    const OLD_NEW_PRODUCT_FR = `${OLD_PREFIX_FR} Rédige un post Facebook engageant pour ce nouveau produit : {product_name}. Prix : {price}$. Ton : enthousiaste et accessible. Maximum 150 mots. Termine avec les hashtags : {hashtags}`;
+    const OLD_NEW_PRODUCT_EN = `${OLD_PREFIX_EN} Write an engaging Facebook post for this new product: {product_name}. Price: {price}$. Tone: enthusiastic and approachable. Maximum 150 words. End with hashtags: {hashtags}`;
+    const OLD_HIGHLIGHT_FR = `${OLD_PREFIX_FR} Rédige un post Facebook pour mettre en valeur ce produit populaire de notre catalogue : {product_name}. Prix : {price}$. Stock disponible : {qty} unités. Maximum 130 mots. Hashtags : {hashtags}`;
+    const OLD_HIGHLIGHT_EN = `${OLD_PREFIX_EN} Write a Facebook post highlighting this popular product from our catalogue: {product_name}. Price: {price}$. Stock: {qty} units available. Maximum 130 words. Hashtags: {hashtags}`;
+    await runBatch("outdoor furniture bias v1", [
+      {
+        sql: `UPDATE settings SET value = ? WHERE key = 'prompt_new_product_fr' AND value = ?`,
+        args: [OLD_NEW_PRODUCT_FR.replace(OLD_PREFIX_FR, NEW_PREFIX_FR), OLD_NEW_PRODUCT_FR],
+      },
+      {
+        sql: `UPDATE settings SET value = ? WHERE key = 'prompt_new_product_en' AND value = ?`,
+        args: [OLD_NEW_PRODUCT_EN.replace(OLD_PREFIX_EN, NEW_PREFIX_EN), OLD_NEW_PRODUCT_EN],
+      },
+      {
+        sql: `UPDATE settings SET value = ? WHERE key = 'prompt_highlight_fr' AND value = ?`,
+        args: [OLD_HIGHLIGHT_FR.replace(OLD_PREFIX_FR, NEW_PREFIX_FR), OLD_HIGHLIGHT_FR],
+      },
+      {
+        sql: `UPDATE settings SET value = ? WHERE key = 'prompt_highlight_en' AND value = ?`,
+        args: [OLD_HIGHLIGHT_EN.replace(OLD_PREFIX_EN, NEW_PREFIX_EN), OLD_HIGHLIGHT_EN],
+      },
+    ]);
+    await db.execute(`INSERT OR IGNORE INTO settings (key, value) VALUES ('outdoor_furniture_bias_v1_migrated', '1')`);
+  }
 }
 
 /** Ensure schema is initialized before any query */

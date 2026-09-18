@@ -225,6 +225,34 @@ describe("triggerStockHighlight — Anthropic timeout handling", () => {
     expect(mockCreate).toHaveBeenCalledTimes(2);
   });
 
+  // Regression: hashtags used to come from a single global setting
+  // (#jardinage #patio #mobilierexterieur, patio-themed) slapped on every post
+  // regardless of category — e.g. a bathroom cabinet post tagged #jardinage.
+  // They're now derived from the product's scope (see hook-selector.ts).
+  it("uses hashtags scoped to the product's category, not the global patio default", async () => {
+    vi.mocked(getAllSettings).mockResolvedValue({
+      ...SETTINGS,
+      prompt_highlight_fr: "Post FR pour {product_name}. Hashtags: {hashtags}",
+      prompt_highlight_en: "Post EN for {product_name}. Hashtags: {hashtags}",
+    });
+    vi.mocked(getEligibleHighlightCandidates).mockResolvedValue([
+      { ...PRODUCT, product_type: "Home Furnishings > Holiday & Seasonal > Halloween Decorations" },
+    ] as never);
+    mockCreate
+      .mockResolvedValueOnce(makeMsg("Texte FR"))
+      .mockResolvedValueOnce(makeMsg("EN text"));
+
+    await triggerStockHighlight();
+
+    const frPrompt = mockCreate.mock.calls[0][0].messages[0].content as string;
+    const enPrompt = mockCreate.mock.calls[1][0].messages[0].content as string;
+    expect(frPrompt).toContain("#halloween");
+    expect(frPrompt).not.toContain("#jardinage");
+    expect(frPrompt).not.toContain("#mobilierexterieur");
+    expect(enPrompt).toContain("#halloween");
+    expect(enPrompt).not.toContain("#patio");
+  });
+
   // ── Scenarios 2 + 3: retry delay is 10ms in test env (NODE_ENV=test) ──
   // No fake timers needed — real timers at 10ms are fast enough for unit tests.
 
