@@ -116,7 +116,7 @@ async function generatePostText(prompt: string): Promise<string> {
 }
 
 /** Generate FR and EN captions in parallel, with one retry on Anthropic timeout. */
-async function generateBilingual(
+export async function generateBilingual(
   settings: Record<string, string>,
   triggerType: "new_product" | "price_drop" | "highlight",
   vars: Record<string, string>,
