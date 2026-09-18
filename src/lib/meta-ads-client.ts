@@ -119,18 +119,6 @@ export interface Campaign {
   created_time?: string;
 }
 
-export interface AdSet {
-  id: string;
-  name: string;
-  status: string;
-  effective_status?: string;
-  daily_budget?: string;
-  lifetime_budget?: string;
-  optimization_goal?: string;
-  billing_event?: string;
-  campaign_id?: string;
-}
-
 export interface CreateCampaignParams {
   name: string;
   /** e.g. OUTCOME_TRAFFIC, OUTCOME_SALES, OUTCOME_AWARENESS. */
@@ -235,13 +223,6 @@ export async function createAdSet(adAccountId: string, params: CreateAdSetParams
   };
   if (params.dailyBudget != null) body.daily_budget = String(params.dailyBudget);
   return graph<{ id: string }>(`${actId(adAccountId)}/adsets`, { method: "POST", body });
-}
-
-/** List the ad sets of a campaign. */
-export async function getAdSets(campaignId: string): Promise<AdSet[]> {
-  return graphPaged<AdSet>(`${campaignId}/adsets`, {
-    fields: "id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,billing_event,campaign_id",
-  });
 }
 
 /** Account-level insights for a date range (spend, reach, clicks, ROAS, …). */
