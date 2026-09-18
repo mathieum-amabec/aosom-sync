@@ -23,6 +23,10 @@ export {
   remixBlobPath,
   estimateRemixDuration,
 } from "./render";
+export { REMIX_THEMES, buildRemixQueueDraft } from "./queue";
+export type { RemixQueueDraft } from "./queue";
+export { generateAndQueueRemix } from "./generate";
+export type { GenerateRemixResult } from "./generate";
 
 import { renderRemix } from "./render";
 import type { RemixConfig, RemixResult } from "./types";
