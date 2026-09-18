@@ -9,7 +9,7 @@ vi.mock("@/lib/content-generator", () => ({
 
 vi.mock("@/lib/database", () => ({
   getAllSettings: vi.fn(),
-  getEligibleHighlightCandidates: vi.fn(),
+  getEligibleHighlightCandidatesTrendAware: vi.fn(),
   getPendingSocialCandidates: vi.fn(),
   createFacebookDraft: vi.fn(),
   markProductPosted: vi.fn(),
@@ -32,7 +32,7 @@ vi.mock("@/lib/social-publisher", () => ({ publishDraftToChannels: vi.fn() }));
 
 import {
   getAllSettings,
-  getEligibleHighlightCandidates,
+  getEligibleHighlightCandidatesTrendAware,
   createFacebookDraft,
   markProductPosted,
   createNotification,
@@ -57,16 +57,16 @@ const PRODUCT = {
   product_type: "Patio & Garden > Patio Furniture",
 };
 
-/** The `filter` argument getEligibleHighlightCandidates received on call #n. */
+/** The `filter` argument getEligibleHighlightCandidatesTrendAware received on call #n. */
 function filterArg(n: number) {
-  return vi.mocked(getEligibleHighlightCandidates).mock.calls[n]?.[2];
+  return vi.mocked(getEligibleHighlightCandidatesTrendAware).mock.calls[n]?.[2];
 }
 
 describe("stock highlight category filtering", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(getAllSettings).mockResolvedValue(SETTINGS as never);
-    vi.mocked(getEligibleHighlightCandidates).mockResolvedValue([PRODUCT] as never);
+    vi.mocked(getEligibleHighlightCandidatesTrendAware).mockResolvedValue([PRODUCT] as never);
     vi.mocked(createFacebookDraft).mockResolvedValue(1);
     vi.mocked(markProductPosted).mockResolvedValue(undefined);
     vi.mocked(createNotification).mockResolvedValue(undefined as never);
@@ -115,7 +115,7 @@ describe("stock highlight category filtering", () => {
   it("widens to the whole catalog when the season yields nothing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-05T12:00:00"));
-    vi.mocked(getEligibleHighlightCandidates)
+    vi.mocked(getEligibleHighlightCandidatesTrendAware)
       .mockResolvedValueOnce([] as never) // no Halloween product in stock
       .mockResolvedValue([PRODUCT] as never);
 
@@ -129,16 +129,16 @@ describe("stock highlight category filtering", () => {
   });
 
   it("an EXPLICIT category never widens — an empty Halloween stays empty", async () => {
-    vi.mocked(getEligibleHighlightCandidates).mockResolvedValue([] as never);
+    vi.mocked(getEligibleHighlightCandidatesTrendAware).mockResolvedValue([] as never);
     const run = await runStockHighlight(1, "halloween");
     expect(run.drafts).toHaveLength(0);
     expect(run.fellBackToAll).toBe(false);
     // Exactly one attempt: no silent retry against the whole catalog.
-    expect(vi.mocked(getEligibleHighlightCandidates)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(getEligibleHighlightCandidatesTrendAware)).toHaveBeenCalledTimes(1);
   });
 
   it("names the category in the empty-run notification", async () => {
-    vi.mocked(getEligibleHighlightCandidates).mockResolvedValue([] as never);
+    vi.mocked(getEligibleHighlightCandidatesTrendAware).mockResolvedValue([] as never);
     await runStockHighlight(1, "noel");
     const [, , body] = vi.mocked(createNotification).mock.calls[0];
     expect(body).toContain("🎄 Noël");
@@ -147,11 +147,11 @@ describe("stock highlight category filtering", () => {
   it("out of season with no choice, it queries the whole catalog once", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T12:00:00"));
-    vi.mocked(getEligibleHighlightCandidates).mockResolvedValue([] as never);
+    vi.mocked(getEligibleHighlightCandidatesTrendAware).mockResolvedValue([] as never);
     const run = await runStockHighlight(1);
     expect(filterArg(0)).toBeNull();
     expect(run.fellBackToAll).toBe(false);
-    expect(vi.mocked(getEligibleHighlightCandidates)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(getEligibleHighlightCandidatesTrendAware)).toHaveBeenCalledTimes(1);
   });
 
   it("triggerStockHighlight still returns a plain draft array", async () => {

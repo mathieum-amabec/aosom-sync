@@ -1196,6 +1196,24 @@ async function _initSchemaImpl(): Promise<void> {
     await db.execute(`INSERT OR IGNORE INTO settings (key, value) VALUES ('seasonal_decor_hooks_v1_migrated', '1')`);
   }
 
+  // trend_selection_trial_until — 3-week trial (2026-09-18 strategic investigation,
+  // Part B Task 8): stock-highlight selection starts favoring trend_scores-ranked SKUs
+  // instead of picking uniformly at random. Fixed target date, not "N days from
+  // whenever this migration runs" — a fixed date is auditable and doesn't silently
+  // shift on a delayed deploy. Fail-safe by construction: once `now` passes this date,
+  // getEligibleHighlightCandidatesTrendAware() falls straight back to the untouched
+  // pre-trial random behavior (getEligibleHighlightCandidates) — nobody has to flip a
+  // switch to turn the trial OFF, only to extend it by moving this date forward.
+  const trendTrialDone = await db.execute(
+    `SELECT value FROM settings WHERE key = 'trend_selection_trial_v1_migrated' LIMIT 1`,
+  );
+  if (trendTrialDone.rows.length === 0) {
+    await runBatch("trend selection trial v1", [
+      { sql: `INSERT OR IGNORE INTO settings (key, value) VALUES ('trend_selection_trial_until', '2026-10-09T00:00:00Z')`, args: [] },
+      { sql: `INSERT OR IGNORE INTO settings (key, value) VALUES ('trend_selection_trial_v1_migrated', '1')`, args: [] },
+    ]);
+  }
+
   // Prompt templates framed the store as a "boutique québécoise de mobilier extérieur" /
   // "Canadian outdoor furniture store" for EVERY category — bleeding "perfect for your
   // patio" language into posts about bathroom cabinets, Christmas trees, coffee tables,
@@ -5089,6 +5107,81 @@ export async function getEligibleHighlightCandidates(
   // Reorder to the shuffled `pick` order: SQLite returns IN() rows in rowid order,
   // so without this the caller (which posts the first verified candidate) would
   // deterministically favor low-rowid products, defeating the random highlight.
+  const bySku = new Map(rowsRes.rows.map((r) => { const o = rowToObj(r); return [o.sku as string, o]; }));
+  return pick
+    .map((s) => bySku.get(s))
+    .filter((o): o is Record<string, unknown> => o !== undefined);
+}
+
+export const TREND_SELECTION_TRIAL_UNTIL_KEY = "trend_selection_trial_until";
+
+/**
+ * Pure decision, exported for direct unit testing (no DB access needed): is the
+ * trend-aware stock-highlight selection trial (2026-09-18, Part B Task 8) still
+ * active? `trialUntilIso` is the raw `trend_selection_trial_until` settings value
+ * (or null when unset). Fail-safe: anything unparseable or absent reads as "trial
+ * not active" — the caller then falls back to the untouched pre-trial random
+ * behavior, never to a trend-dependent one by accident.
+ */
+export function isTrendSelectionTrialActive(trialUntilIso: string | null, nowMs: number = Date.now()): boolean {
+  if (!trialUntilIso) return false;
+  const untilMs = Date.parse(trialUntilIso);
+  return Number.isFinite(untilMs) && nowMs < untilMs;
+}
+
+/**
+ * Trend-aware variant of `getEligibleHighlightCandidates`, gated by the trial window
+ * above. While the trial is active, SKUs the weekly `trend_scores` recompute ranked
+ * highest are placed first (still requiring the same eligibility filters — qty,
+ * imported, cooldown, optional category); the rest of the eligible pool fills out
+ * `limit` in random order exactly as before, so a day with no trending-eligible match
+ * still returns a full candidate list. Once the trial expires (and nobody has pushed
+ * `trend_selection_trial_until` forward), this delegates straight to
+ * `getEligibleHighlightCandidates` — the exact pre-trial code path, unmodified.
+ */
+export async function getEligibleHighlightCandidatesTrendAware(
+  minDaysBetween: number,
+  limit: number,
+  filter?: { predicate: string; args: (string | number)[] } | null,
+): Promise<Record<string, unknown>[]> {
+  const trialUntil = await getSetting(TREND_SELECTION_TRIAL_UNTIL_KEY);
+  if (!isTrendSelectionTrialActive(trialUntil)) {
+    return getEligibleHighlightCandidates(minDaysBetween, limit, filter);
+  }
+
+  const db = await ensureSchema();
+  const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
+  const extra = filter?.predicate ? ` AND (${filter.predicate})` : "";
+  const skusResult = await db.execute({
+    sql: `SELECT sku FROM products
+          WHERE shopify_product_id IS NOT NULL AND qty > 0
+            AND (last_posted_at IS NULL OR last_posted_at < ?)${extra}`,
+    args: [cutoff, ...(filter?.args ?? [])],
+  });
+  if (skusResult.rows.length === 0) return [];
+  const eligibleSkus = new Set(
+    skusResult.rows.map((r) => (r as unknown as Record<string, unknown>).sku as string),
+  );
+
+  const trending = await getTopTrendScores("product", 30);
+  const trendingEligible = trending.map((t) => t.entityId).filter((sku) => eligibleSkus.has(sku));
+
+  const rest = [...eligibleSkus].filter((sku) => !trendingEligible.includes(sku));
+  // Fisher-Yates shuffle the non-trending remainder — same algorithm as the base fn,
+  // so the fallback portion of the list is exactly as random as it always was.
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [rest[i], rest[j]] = [rest[j], rest[i]];
+  }
+
+  const pick = [...trendingEligible, ...rest].slice(0, Math.max(1, limit));
+  if (pick.length === 0) return [];
+
+  const placeholders = pick.map(() => "?").join(", ");
+  const rowsRes = await db.execute({
+    sql: `SELECT * FROM products WHERE sku IN (${placeholders}) AND shopify_product_id IS NOT NULL AND qty > 0`,
+    args: pick,
+  });
   const bySku = new Map(rowsRes.rows.map((r) => { const o = rowToObj(r); return [o.sku as string, o]; }));
   return pick
     .map((s) => bySku.get(s))
