@@ -65,8 +65,12 @@ next-env.d.ts
 .env*.local
 
 # Claude Code — agent worktrees + scratch (e.g. .claude/worktrees/ created by other
-# sessions). Not project config to commit.
-.claude/
+# sessions). Not project config to commit. Exception: .claude/agents/ holds custom
+# subagent definitions (tool-restricted, e.g. read-only-investigator.md) meant to be
+# shared project config, not per-session scratch — tracked deliberately.
+.claude/*
+!.claude/agents/
+!.claude/agents/**
 # build output (root /out/ is covered above; this also catches nested out/ dirs)
 out/
 
