@@ -456,6 +456,23 @@ zero errors. Verify with
   the weekly cap. Any miss leaves the article a draft.
 - Blog IDs: FR `90302349417` (*Actualités*), EN `91161428073` (*Blog*).
 
+## Panier abandonné — un seul canal, pas deux
+
+La récupération de panier abandonné passe **uniquement par le popup du thème** (2 écrans
++ rabais automatique 10%, "LIVE 2026-09-16 — Popup 2 écrans + rabais auto 10%" — voir
+"Shopify theme IDs" plus haut). Un flow Klaviyo `Abandoned Cart (FR/EN)` (`Wcjr3F`,
+déclenché sur `Checkout Started`) existe dans le compte et **a été trouvé `live` le
+2026-09-18** (la doc `KLAVIYO-FLOWS.md` le croyait `draft` — c'était périmé) : il ciblait
+donc le même client au même moment que le popup, sans aucune coordination entre les deux
+— collision active, pas un risque théorique. **Mis en pause (`draft`) le 2026-09-18.**
+
+**Ne jamais réactiver `Wcjr3F`** tant que le popup + rabais automatique reste la stratégie
+retenue pour le panier abandonné. Si le popup est un jour retiré ou remplacé, ré-évaluer
+alors lequel des deux canaux (ou une version coordonnée des deux) doit être le canal
+actif — mais ne jamais laisser les deux `live` simultanément : risque de rabais empilés
+ou de double sollicitation perçue comme du spam. Détail technique : `docs/KLAVIYO-FLOWS.md`
+§"Abandoned cart: one channel, not two".
+
 ## Env Vars
 
 - `SHOPIFY_ACCESS_TOKEN` — Shopify Admin API token
