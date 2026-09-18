@@ -475,6 +475,98 @@ describe("getEligibleHighlightCandidates SQL logic (two-step pattern)", () => {
   });
 });
 
+// ─── Trend-aware stock-highlight selection (Part B Task 8, 2026-09-18) ────────
+describe("isTrendSelectionTrialActive (pure, no DB)", () => {
+  it("is active when now is before the trial-until date", async () => {
+    const { isTrendSelectionTrialActive } = await import("@/lib/database");
+    const nowMs = Date.parse("2026-09-25T00:00:00Z");
+    expect(isTrendSelectionTrialActive("2026-10-09T00:00:00Z", nowMs)).toBe(true);
+  });
+
+  it("is inactive once now is past the trial-until date — falls back, not forward", async () => {
+    const { isTrendSelectionTrialActive } = await import("@/lib/database");
+    const nowMs = Date.parse("2026-10-10T00:00:00Z");
+    expect(isTrendSelectionTrialActive("2026-10-09T00:00:00Z", nowMs)).toBe(false);
+  });
+
+  it("is inactive at the exact expiry instant (strict <, not <=)", async () => {
+    const { isTrendSelectionTrialActive } = await import("@/lib/database");
+    const untilMs = Date.parse("2026-10-09T00:00:00Z");
+    expect(isTrendSelectionTrialActive("2026-10-09T00:00:00Z", untilMs)).toBe(false);
+  });
+
+  it("is inactive when the setting is unset (null) — never trend-dependent by default", async () => {
+    const { isTrendSelectionTrialActive } = await import("@/lib/database");
+    expect(isTrendSelectionTrialActive(null)).toBe(false);
+  });
+
+  it("is inactive on an unparseable date string — fail-safe, not a thrown error", async () => {
+    const { isTrendSelectionTrialActive } = await import("@/lib/database");
+    expect(isTrendSelectionTrialActive("not-a-date")).toBe(false);
+  });
+});
+
+// getEligibleHighlightCandidatesTrendAware itself connects to Turso via ensureSchema()
+// (same limitation as getEligibleHighlightCandidates above), so — matching that
+// function's own test convention — these validate the trending-first merge logic the
+// function applies, not the full function end-to-end.
+describe("getEligibleHighlightCandidatesTrendAware merge logic (SQL + ranking, direct)", () => {
+  let db: ReturnType<typeof setupTestDb>;
+
+  const CREATE_PRODUCTS = `CREATE TABLE IF NOT EXISTS products (
+    sku TEXT PRIMARY KEY, name TEXT, price REAL, qty INTEGER,
+    shopify_product_id TEXT, last_posted_at INTEGER
+  )`;
+
+  beforeEach(async () => {
+    db = setupTestDb();
+    await db.execute(CREATE_PRODUCTS);
+  });
+  afterEach(async () => {
+    db.close();
+    if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
+  });
+
+  /** Mirrors the trending-first merge inside getEligibleHighlightCandidatesTrendAware. */
+  function mergeTrendingFirst(eligibleSkus: string[], trendingSkusRanked: string[], limit: number): string[] {
+    const eligible = new Set(eligibleSkus);
+    const trendingEligible = trendingSkusRanked.filter((s) => eligible.has(s));
+    const rest = eligibleSkus.filter((s) => !trendingEligible.includes(s));
+    return [...trendingEligible, ...rest].slice(0, limit);
+  }
+
+  it("during the trial, trending-and-eligible SKUs are placed before the random rest", async () => {
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-COLD", "Cold", 10, 5, "shop-cold", null] });
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-HOT", "Hot", 20, 3, "shop-hot", null] });
+    const { rows } = await db.execute(`SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND qty > 0`);
+    const eligible = rows.map((r) => (r as Record<string, unknown>).sku as string);
+
+    const picked = mergeTrendingFirst(eligible, ["SKU-HOT"], 2);
+    expect(picked[0]).toBe("SKU-HOT");
+    expect(picked).toEqual(expect.arrayContaining(["SKU-HOT", "SKU-COLD"]));
+  });
+
+  it("a trending SKU that is not eligible (e.g. out of stock) is skipped, not force-included", async () => {
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-INSTOCK", "In stock", 10, 5, "shop-a", null] });
+    // SKU-OOS is trending per trend_scores but has qty=0, so never appears in the eligible-SKU query.
+    const { rows } = await db.execute(`SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND qty > 0`);
+    const eligible = rows.map((r) => (r as Record<string, unknown>).sku as string);
+
+    const picked = mergeTrendingFirst(eligible, ["SKU-OOS", "SKU-INSTOCK"], 5);
+    expect(picked).toEqual(["SKU-INSTOCK"]);
+  });
+
+  it("no trending/eligible overlap at all still returns the full random-fallback pool", async () => {
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-1", "P1", 10, 5, "shop-1", null] });
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-2", "P2", 20, 3, "shop-2", null] });
+    const { rows } = await db.execute(`SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND qty > 0`);
+    const eligible = rows.map((r) => (r as Record<string, unknown>).sku as string);
+
+    const picked = mergeTrendingFirst(eligible, [], 5);
+    expect(picked.sort()).toEqual(["SKU-1", "SKU-2"]);
+  });
+});
+
 // ─── getProducts — sort by best_sellers + price_drop (direct SQL) ────────────
 
 describe("getProducts sort — best_sellers and price_drop (direct SQL)", () => {

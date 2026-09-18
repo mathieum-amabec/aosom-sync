@@ -19,7 +19,7 @@ import {
   getAllSettings,
   getProduct,
   createFacebookDraft,
-  getEligibleHighlightCandidates,
+  getEligibleHighlightCandidatesTrendAware,
   getPendingSocialCandidates,
   markProductPosted,
   createNotification,
@@ -297,10 +297,14 @@ async function generateOneStockHighlight(
   minDays: number,
   category: SocialCategory | null = null,
 ): Promise<GenerateDraftResult | null> {
-  // Sample a small random batch of eligible products, then post the first that is
+  // Sample a small batch of eligible products, then post the first that is
   // lifestyle-verified. A non-verified product is skipped (never posted with a
-  // white-bg image) — matching the new_product / price_drop gate.
-  const candidates = await getEligibleHighlightCandidates(
+  // white-bg image) — matching the new_product / price_drop gate. While the
+  // 2026-09-18 trend-selection trial is active (trend_selection_trial_until in
+  // settings), trending-eligible SKUs are sampled first; past expiry this call
+  // is an exact pass-through to the old uniform-random behavior — see
+  // getEligibleHighlightCandidatesTrendAware in database.ts.
+  const candidates = await getEligibleHighlightCandidatesTrendAware(
     minDays,
     HIGHLIGHT_LIFESTYLE_SAMPLE,
     category?.predicate ? { predicate: category.predicate, args: category.args } : null,
