@@ -1906,18 +1906,6 @@ export async function upsertCollectionMappingsBatch(mappings: CollectionMapping[
   );
 }
 
-export async function deleteCollectionMapping(aosomCategory: string, role?: CollectionRole): Promise<void> {
-  const db = await ensureSchema();
-  if (role) {
-    await db.execute({
-      sql: `DELETE FROM collection_mappings WHERE aosom_category = ? AND collection_role = ?`,
-      args: [aosomCategory, role],
-    });
-  } else {
-    await db.execute({ sql: `DELETE FROM collection_mappings WHERE aosom_category = ?`, args: [aosomCategory] });
-  }
-}
-
 /**
  * Look up BOTH the main and sub collections for a product.
  *
@@ -2039,34 +2027,6 @@ export async function getProductsWithShopifyId(): Promise<{ sku: string; product
   });
 }
 
-export async function getProductCount(): Promise<number> {
-  const db = await ensureSchema();
-  const result = await db.execute(`SELECT COUNT(*) as cnt FROM products`);
-  return Number(rowToObj(result.rows[0]).cnt) || 0;
-}
-
-/**
- * Distinct product_types among IMPORTED products (have a Shopify id), sorted A→Z.
- * Powers the category dropdown in the slideshow generation panel. Served by the
- * idx_products_category composite index.
- */
-export async function getImportedProductTypes(): Promise<string[]> {
-  const db = await ensureSchema();
-  const result = await db.execute(
-    `SELECT DISTINCT product_type FROM products
-     WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''
-       AND product_type IS NOT NULL AND product_type != ''
-     ORDER BY product_type ASC`,
-  );
-  return result.rows.map((row) => String(rowToObj(row).product_type)).filter(Boolean);
-}
-
-export async function getImportedProductCount(): Promise<number> {
-  const db = await ensureSchema();
-  const result = await db.execute(`SELECT COUNT(*) as cnt FROM products WHERE shopify_product_id IS NOT NULL`);
-  return Number(rowToObj(result.rows[0]).cnt) || 0;
-}
-
 export async function updateProductShopifyIds(sku: string, shopifyProductId: string, shopifyVariantId: string): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `UPDATE products SET shopify_product_id = ?, shopify_variant_id = ? WHERE sku = ?`, args: [shopifyProductId, shopifyVariantId, sku] });
@@ -2093,14 +2053,6 @@ export async function linkProductToShopify(skus: string[], shopifyProductId: str
 // ─── Price History (enriched) ────────────────────────────────────────
 
 export type ChangeTypeHistory = "price_drop" | "price_increase" | "stock_change" | "new_product" | "restock" | "floor_correction";
-
-export async function recordPriceChange(entry: {
-  sku: string; oldPrice: number | null; newPrice: number | null;
-  oldQty: number | null; newQty: number | null; changeType: ChangeTypeHistory;
-}): Promise<void> {
-  const db = await ensureSchema();
-  await db.execute({ sql: `INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type) VALUES (?, ?, ?, ?, ?, ?)`, args: [entry.sku, entry.oldPrice, entry.newPrice, entry.oldQty, entry.newQty, entry.changeType] });
-}
 
 export async function recordPriceChanges(entries: {
   sku: string; oldPrice: number | null; newPrice: number | null;
@@ -2983,13 +2935,6 @@ async function cachedMetric<T>(key: string, ttlMs: number, fn: () => Promise<T>)
   return data;
 }
 
-/** Clear the dashboard metrics cache. The cache is intentionally not auto-invalidated on
- * writes — the panels tolerate ≤5 min of staleness, so writers don't call this. Exposed for
- * tests and for any caller that explicitly wants the next dashboard read to recompute. */
-export function clearMetricsCache(): void {
-  _metricsCache.clear();
-}
-
 /** "Résumé du jour" DB metrics (Meta-Ads revenue is merged client-side from /api/ads/insights). */
 export async function getDashboardSummary(): Promise<DashboardSummary> {
   return cachedMetric("dashboard_summary", METRICS_TTL_MS, _loadDashboardSummary);
@@ -3202,38 +3147,6 @@ export async function recordPriceCorrections(
 /** Build the synthetic run id shared by every correction of one reconciliation pass. */
 export function newReconcileRunId(now: Date = new Date()): string {
   return `reconcile-${now.toISOString()}`;
-}
-
-/**
- * Read back price corrections, newest first. Powers the verification report and any
- * future dashboard panel. `reason` narrows to one layer.
- */
-export async function getPriceCorrections(
-  opts: { limit?: number; reason?: PriceCorrectionReason; sku?: string } = {},
-): Promise<Array<{ runId: string; timestamp: string; sku: string; reason: string; oldPrice: number; newPrice: number; shopifyProductId: string | null }>> {
-  const db = await ensureSchema();
-  const where: string[] = ["action = ?"];
-  const args: InValue[] = [PRICE_CORRECTION_ACTION];
-  if (opts.reason) { where.push("field = ?"); args.push(opts.reason); }
-  if (opts.sku) { where.push("sku = ?"); args.push(opts.sku); }
-  args.push(opts.limit ?? 200);
-  const result = await db.execute({
-    sql: `SELECT sync_run_id, timestamp, sku, field, old_value, new_value, shopify_product_id
-          FROM sync_logs WHERE ${where.join(" AND ")} ORDER BY timestamp DESC, sku ASC LIMIT ?`,
-    args,
-  });
-  return result.rows.map((r) => {
-    const o = rowToObj(r);
-    return {
-      runId: String(o.sync_run_id),
-      timestamp: String(o.timestamp),
-      sku: String(o.sku),
-      reason: String(o.field),
-      oldPrice: Number(o.old_value),
-      newPrice: Number(o.new_value),
-      shopifyProductId: o.shopify_product_id == null ? null : String(o.shopify_product_id),
-    };
-  });
 }
 
 export async function getSyncLogs(syncRunId: string, limit = 500): Promise<SyncLogEntry[]> {
@@ -4033,25 +3946,6 @@ export async function recordHookUsage(hookId: number, draftId: number | null): P
   ], "write");
 }
 
-export async function getHookById(id: number): Promise<ContentHook | null> {
-  const db = await ensureSchema();
-  const result = await db.execute({ sql: `SELECT * FROM content_hooks WHERE id = ?`, args: [id] });
-  if (result.rows.length === 0) return null;
-  const o = rowToObj(result.rows[0]);
-  let scopes: string[] = [];
-  try { scopes = JSON.parse(o.product_scopes as string); } catch { scopes = ["universal"]; }
-  return {
-    id: Number(o.id),
-    categoryId: Number(o.category_id),
-    language: o.language as "FR" | "EN",
-    text: o.text as string,
-    productScopes: scopes,
-    mode: (o.mode as "pool" | "generative_seeded") || "pool",
-    usedCount: Number(o.used_count || 0),
-    lastUsedAt: o.last_used_at != null ? Number(o.last_used_at) : null,
-  };
-}
-
 export async function seedHooksIfEmpty(): Promise<void> {
   const db = getDb();
   const countRow = await db.execute(`SELECT COUNT(*) as n FROM content_hooks`);
@@ -4212,25 +4106,6 @@ export async function getFacebookDraft(id: number): Promise<FacebookDraft | null
     args: [id],
   });
   return result.rows.length > 0 ? mapDraft(rowToObj(result.rows[0])) : null;
-}
-
-/**
- * Currently-scheduled drafts reduced to what the auto-scheduler needs: the slot
- * timestamp + which languages each occupies. Used to compute per-slot occupancy.
- */
-export async function getScheduledDraftSlots(): Promise<Array<{ scheduledAt: number | null; fr: boolean; en: boolean }>> {
-  const db = await ensureSchema();
-  const result = await db.execute(
-    `SELECT scheduled_at, post_text, post_text_en FROM facebook_drafts WHERE status = 'scheduled' AND scheduled_at IS NOT NULL`,
-  );
-  return result.rows.map((row) => {
-    const o = rowToObj(row);
-    return {
-      scheduledAt: o.scheduled_at != null ? Number(o.scheduled_at) : null,
-      fr: !!o.post_text && String(o.post_text).trim() !== "",
-      en: !!o.post_text_en && String(o.post_text_en).trim() !== "",
-    };
-  });
 }
 
 export async function updateFacebookDraft(id: number, fields: Record<string, unknown>): Promise<void> {
@@ -4494,25 +4369,6 @@ export async function cancelPendingQueueItems(
   const db = await ensureSchema();
   const result = await db.execute({
     sql: `UPDATE publication_queue SET status = 'cancelled' WHERE content_type = ? AND content_id = ? AND status = 'pending'`,
-    args: [contentType, contentId],
-  });
-  return result.rowsAffected ?? 0;
-}
-
-/**
- * Cancel a content item's still-pending OR still-draft queue rows. Used when a
- * fresh generation replaces a prior take for the same content_id (a not-yet-
- * approved draft or an approved-but-unpublished pending). 'publishing'/'published'
- * rows are left untouched. Returns the number of rows cancelled.
- */
-export async function cancelQueueItemsForContent(
-  contentType: QueueContentType,
-  contentId: string,
-): Promise<number> {
-  const db = await ensureSchema();
-  const result = await db.execute({
-    sql: `UPDATE publication_queue SET status = 'cancelled'
-          WHERE content_type = ? AND content_id = ? AND status IN ('pending', 'draft')`,
     args: [contentType, contentId],
   });
   return result.rowsAffected ?? 0;
