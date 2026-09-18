@@ -27,8 +27,6 @@
  */
 
 export const PINTEREST_API_BASE = "https://api.pinterest.com/v5";
-/** Scopes a token must carry for `createPin` to succeed. */
-export const PINTEREST_SCOPES = ["pins:write", "boards:read"] as const;
 
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 3;

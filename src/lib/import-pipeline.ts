@@ -299,8 +299,3 @@ export async function getImportJobsList(): Promise<ImportJob[]> {
   const rows = await dbGetImportJobs();
   return rows.map(rowToJob);
 }
-
-export async function getImportJobById(jobId: string): Promise<ImportJob | null> {
-  const row = await dbGetImportJob(jobId);
-  return row ? rowToJob(row) : null;
-}
