@@ -4115,6 +4115,18 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
   };
 }
 
+/** True when some facebook_drafts row already carries this exact video URL. Used to
+ * keep UGC-video reinjection (job-ugc-reinject.ts) from drafting the same customer
+ * clip twice across runs. */
+export async function isDraftVideoUrlUsed(videoUrl: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT 1 FROM facebook_drafts WHERE video_url = ? LIMIT 1`,
+    args: [videoUrl],
+  });
+  return res.rows.length > 0;
+}
+
 export async function createFacebookDraft(draft: {
   sku: string; triggerType: string; language: string; postText: string;
   postTextEn?: string | null;
