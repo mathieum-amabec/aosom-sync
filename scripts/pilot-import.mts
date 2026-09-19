@@ -162,11 +162,12 @@ for (const { handle, group } of plan) {
   const skus = group.variants.map((v) => v.sku);
   const label = `${handle} / ${group.groupKey} (${group.name.slice(0, 45)})`;
   try {
-    const jobs = await queueForImport(skus);
+    const { jobs, skipped: skippedSkus } = await queueForImport(skus);
     if (jobs.length === 0) {
       skipped++; done.add(group.groupKey);
-      ckpt({ collection: handle, groupKey: group.groupKey, skus, status: "skipped_already_imported" });
-      console.log(`  ⏭  SKIP ${label} — déjà importé`);
+      const reasons = skippedSkus.map((s) => `${s.sku}:${s.reason}`).join(", ") || "aucune raison rapportée";
+      ckpt({ collection: handle, groupKey: group.groupKey, skus, status: "skipped", reasons });
+      console.log(`  ⏭  SKIP ${label} — ${reasons}`);
       continue;
     }
     for (const job of jobs) {

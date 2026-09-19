@@ -10,7 +10,7 @@ import {
   getImportJob as dbGetImportJob,
   updateImportJob,
 } from "./database";
-import type { AosomMergedProduct } from "@/types/aosom";
+import type { AosomMergedProduct, AosomProduct } from "@/types/aosom";
 
 export type ImportStatus =
   | "pending"
@@ -59,15 +59,63 @@ function rowToJob(row: Record<string, unknown>): ImportJob {
   };
 }
 
+/** Why a requested SKU produced no import job. */
+export type SkippedImportReason = "already_imported" | "not_in_feed";
+
+export interface SkippedImportSku {
+  sku: string;
+  reason: SkippedImportReason;
+}
+
+export interface QueueForImportResult {
+  jobs: ImportJob[];
+  /** Requested SKUs that did NOT get a job, with why — surfaced to the caller instead
+   * of silently vanishing (see the 2026-09-19 investigation: a batch that mixed an
+   * already-imported SKU with a never-imported sibling used to drop BOTH with no
+   * feedback at all, and the API still returned 200). */
+  skipped: SkippedImportSku[];
+}
+
 /**
  * Queue products for import by their SKUs.
  */
-export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
+export async function queueForImport(skus: string[]): Promise<QueueForImportResult> {
   const catalog = await fetchAosomCatalog();
-  const matched = catalog.filter((p) => skus.includes(p.sku));
-  if (matched.length === 0) throw new Error("No matching products found");
+  const catalogSkus = new Set(catalog.map((p) => p.sku));
+  const skipped: SkippedImportSku[] = [];
 
-  const merged = mergeVariants(matched);
+  // A SKU the caller asked for but that no longer exists in the live Aosom feed
+  // (discontinued by the supplier since it was catalogued). Used to vanish from
+  // `matched` below with zero trace — report it instead.
+  for (const sku of skus) {
+    if (!catalogSkus.has(sku)) skipped.push({ sku, reason: "not_in_feed" });
+  }
+
+  const matched = catalog.filter((p) => skus.includes(p.sku));
+
+  // Idempotency, checked PER REQUESTED SKU, before merging — not per merged group,
+  // after. mergeVariants() below combines every matched SKU that shares a group into
+  // ONE AosomMergedProduct; checking idempotency only after that merge (the previous
+  // behaviour) meant one already-imported SKU submitted alongside a never-imported
+  // sibling of the same product took the WHOLE merged group down with it — the
+  // never-imported sibling got no job, no error, nothing (reproduced live 2026-09-19:
+  // 501-004PK + 501-004BK submitted together → 0 jobs, though 501-004PK alone queued
+  // fine). Filtering here, before mergeVariants ever sees the already-imported SKU,
+  // means it's dropped on its own — correctly, silently — without touching its
+  // siblings.
+  const toMerge: AosomProduct[] = [];
+  for (const p of matched) {
+    const existing = await getProduct(p.sku);
+    if (existing?.shopify_product_id) {
+      skipped.push({ sku: p.sku, reason: "already_imported" });
+    } else {
+      toMerge.push(p);
+    }
+  }
+
+  if (toMerge.length === 0) return { jobs: [], skipped };
+
+  const merged = mergeVariants(toMerge);
   const now = new Date().toISOString();
   const jobs: ImportJob[] = [];
 
@@ -98,9 +146,12 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
 
     const product = { ...rawProduct, images: guard.images };
 
-    // Idempotency: skip any product whose SKU already maps to a Shopify product.
-    // Re-importing would create a duplicate (createShopifyProduct always POSTs),
-    // and the new product would not carry the original's manual tags/metafields.
+    // Defensive re-check, not the primary guard anymore (that's the per-SKU filter
+    // above, before merge). Catches only a race: the product got imported by a
+    // concurrent request in the window between the filter above and here. Every
+    // variant still trapped in this merged group is reported skipped — a race is
+    // rare enough that "silently dropped" would be a worse failure mode than
+    // "briefly slower to notice", now that we have the vocabulary to report it.
     let existingShopifyId: string | null = null;
     for (const v of product.variants) {
       const existing = await getProduct(v.sku);
@@ -110,7 +161,8 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
       }
     }
     if (existingShopifyId) {
-      console.log(`[IMPORT] Skipping ${product.groupKey} — already_in_shopify (${existingShopifyId})`);
+      console.log(`[IMPORT] Skipping ${product.groupKey} — already_in_shopify (${existingShopifyId}) [race, post-merge]`);
+      for (const v of product.variants) skipped.push({ sku: v.sku, reason: "already_imported" });
       continue;
     }
 
@@ -138,7 +190,7 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
     });
   }
 
-  return jobs;
+  return { jobs, skipped };
 }
 
 /**

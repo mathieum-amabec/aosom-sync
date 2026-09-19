@@ -104,17 +104,21 @@ describe("importToShopify — duplicate-job guard", () => {
 });
 
 describe("queueForImport — existing-SKU guard", () => {
-  it("skips a SKU already mapped to a Shopify product", async () => {
+  it("skips a SKU already mapped to a Shopify product, and reports why", async () => {
     vi.mocked(fetchAosomCatalog).mockResolvedValue([{ sku: "S1" }] as never);
     vi.mocked(mergeVariants).mockReturnValue([
       { groupKey: "G1", productType: "X", images: [], variants: [{ sku: "S1" }] },
     ] as never);
     vi.mocked(getProduct).mockResolvedValue({ shopify_product_id: "555" } as never);
 
-    const jobs = await queueForImport(["S1"]);
+    const { jobs, skipped } = await queueForImport(["S1"]);
 
     expect(jobs).toHaveLength(0);
+    expect(skipped).toEqual([{ sku: "S1", reason: "already_imported" }]);
     expect(upsertImportJob).not.toHaveBeenCalled();
+    // The already-imported SKU is filtered out BEFORE mergeVariants runs — see the
+    // mixed-batch describe block below for why that ordering is the fix, not a detail.
+    expect(mergeVariants).not.toHaveBeenCalled();
   });
 
   it("queues a SKU that is not yet in Shopify", async () => {
@@ -124,11 +128,88 @@ describe("queueForImport — existing-SKU guard", () => {
     ] as never);
     vi.mocked(getProduct).mockResolvedValue(null);
 
-    const jobs = await queueForImport(["S2"]);
+    const { jobs, skipped } = await queueForImport(["S2"]);
 
     expect(jobs).toHaveLength(1);
     expect(jobs[0].groupKey).toBe("G2");
+    expect(skipped).toEqual([]);
     expect(upsertImportJob).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("queueForImport — mixed batch: already-imported variant + new sibling, same PSIN group", () => {
+  // Regression for the live-confirmed bug (2026-09-19): submitting 501-004PK
+  // (already on Shopify) together with 501-004BK (never imported, same merged
+  // group) used to drop BOTH — the post-merge guard saw one already-imported
+  // variant anywhere in the merged product and discarded the whole group,
+  // silently, with the API still answering 200 and 0 jobs. The fix filters
+  // per-SKU BEFORE mergeVariants ever sees the already-imported SKU.
+  it("queues the never-imported sibling and reports only the already-imported one as skipped (501-004PK + 501-004BK)", async () => {
+    vi.mocked(fetchAosomCatalog).mockResolvedValue([
+      { sku: "501-004PK" },
+      { sku: "501-004BK" },
+    ] as never);
+    // Mirrors real mergeVariants: folds whatever it's handed into one merged
+    // group. Because the fix filters already-imported SKUs out first, this is
+    // called with ONLY 501-004BK — never with 501-004PK included.
+    vi.mocked(mergeVariants).mockImplementation(
+      (products: unknown) =>
+        [
+          {
+            groupKey: "501-004",
+            productType: "X",
+            images: [],
+            variants: products,
+          },
+        ] as never,
+    );
+    vi.mocked(getProduct).mockImplementation(async (sku: unknown) =>
+      sku === "501-004PK" ? ({ shopify_product_id: "555" } as never) : (null as never),
+    );
+
+    const { jobs, skipped } = await queueForImport(["501-004PK", "501-004BK"]);
+
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].groupKey).toBe("501-004");
+    expect(jobs[0].product.variants).toEqual([{ sku: "501-004BK" }]);
+    expect(skipped).toEqual([{ sku: "501-004PK", reason: "already_imported" }]);
+    expect(upsertImportJob).toHaveBeenCalledTimes(1);
+    // mergeVariants must never have seen the already-imported SKU.
+    expect(mergeVariants).toHaveBeenCalledWith([{ sku: "501-004BK" }]);
+  });
+});
+
+describe("queueForImport — SKU vanished from the Aosom feed", () => {
+  // Regression for the live-confirmed bug (2026-09-19): 840-158GN was catalogued
+  // earlier but the supplier had discontinued it by the time the operator clicked
+  // Confirm. Before this fix, a requested SKU absent from fetchAosomCatalog() just
+  // never appeared in `matched` — 0 jobs, 200 OK, no trace of why.
+  it("reports a not-in-feed SKU as skipped instead of silently producing 0 jobs (840-158GN)", async () => {
+    vi.mocked(fetchAosomCatalog).mockResolvedValue([] as never); // feed no longer carries it
+    vi.mocked(mergeVariants).mockReturnValue([] as never);
+    vi.mocked(getProduct).mockResolvedValue(null);
+
+    const { jobs, skipped } = await queueForImport(["840-158GN"]);
+
+    expect(jobs).toHaveLength(0);
+    expect(skipped).toEqual([{ sku: "840-158GN", reason: "not_in_feed" }]);
+    expect(upsertImportJob).not.toHaveBeenCalled();
+    // getProduct is the already-imported check — a feed-gone SKU must never reach it.
+    expect(getProduct).not.toHaveBeenCalled();
+  });
+
+  it("reports only the vanished SKU when submitted alongside a still-live one", async () => {
+    vi.mocked(fetchAosomCatalog).mockResolvedValue([{ sku: "840-158OG" }] as never);
+    vi.mocked(mergeVariants).mockReturnValue([
+      { groupKey: "840-158", productType: "X", images: [], variants: [{ sku: "840-158OG" }] },
+    ] as never);
+    vi.mocked(getProduct).mockResolvedValue(null);
+
+    const { jobs, skipped } = await queueForImport(["840-158GN", "840-158OG"]);
+
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].groupKey).toBe("840-158");
+    expect(skipped).toEqual([{ sku: "840-158GN", reason: "not_in_feed" }]);
   });
 });
 
