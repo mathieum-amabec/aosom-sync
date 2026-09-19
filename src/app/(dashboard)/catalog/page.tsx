@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { storeLink } from "@/lib/insights";
 import { IMPORT } from "@/lib/config";
-import { describeImportFailure, isOverBatchCap, excessOverBatchCap } from "@/lib/import-error-message";
+import { describeImportFailure, describeSkippedImports, isOverBatchCap, excessOverBatchCap } from "@/lib/import-error-message";
 import { deriveSubCategoryOptions } from "@/lib/catalog-filters";
 
 interface CatalogProduct {
@@ -221,11 +221,20 @@ function CatalogBrowser() {
     });
   }
 
+  /** Already on Shopify — checkbox is disabled for these, so "select all" and
+   * the header checkbox's own "all selected" check must skip them too, or
+   * they'd count against a page that can never actually be fully selected. */
+  function isImported(product: CatalogProduct) {
+    return !!product.shopify_product_id;
+  }
+
   function selectAllOnPage() {
     if (!data) return;
     setSelected((prev) => {
       const next = new Set(prev);
-      for (const p of data.products) next.add(p.sku);
+      for (const p of data.products) {
+        if (!isImported(p)) next.add(p.sku);
+      }
       return next;
     });
   }
@@ -234,11 +243,11 @@ function CatalogBrowser() {
     setSelected(new Set());
   }
 
-  /** Header checkbox: toggles every product on the current page. */
+  /** Header checkbox: toggles every SELECTABLE (not-yet-imported) product on the page. */
   function toggleAllOnPage() {
     if (!data) return;
-    const allSkus = data.products.map((p) => p.sku);
-    const allSelected = allSkus.every((s) => selected.has(s));
+    const selectableSkus = data.products.filter((p) => !isImported(p)).map((p) => p.sku);
+    const allSelected = selectableSkus.length > 0 && selectableSkus.every((s) => selected.has(s));
     if (allSelected) deselectAll();
     else selectAllOnPage();
   }
@@ -262,6 +271,36 @@ function CatalogBrowser() {
       });
 
       if (res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          data?: unknown[];
+          skipped?: { sku: string; reason: string }[];
+        } | null;
+        const jobCount = Array.isArray(body?.data) ? body.data.length : 0;
+        const skipped = body?.skipped ?? [];
+
+        if (jobCount === 0) {
+          // Every requested SKU was skipped — e.g. it vanished from the Aosom
+          // feed between being catalogued and Confirm being clicked (840-158GN,
+          // 2026-09), or a race made it already-imported. This used to be a
+          // silent 200 with an empty /import queue and nothing on screen.
+          setImportError(
+            skipped.length > 0
+              ? describeSkippedImports(skipped)
+              : "Aucun produit n'a pu être mis en file. Réessayez.",
+          );
+          setImporting(false);
+          return;
+        }
+
+        if (skipped.length > 0) {
+          // Partial batch — most likely a race (another tab/session imported a
+          // sibling SKU between page load and this click; already-imported rows
+          // are normally disabled client-side, see isImported()). Block on a
+          // visible confirmation before navigating away, since the /import page
+          // has no record of what got silently dropped.
+          window.alert(describeSkippedImports(skipped));
+        }
+
         setSelected(new Set());
         setConfirmingImport(false);
         window.location.href = "/import";
@@ -560,18 +599,21 @@ function CatalogBrowser() {
           <div className="md:hidden space-y-3">
             {data.products.map((product) => {
               const isSelected = selected.has(product.sku);
+              const imported = isImported(product);
               return (
                 <div
                   key={product.sku}
                   className={`bg-gray-900 border rounded-xl p-3 flex gap-3 ${
                     isSelected ? "border-blue-600/50 bg-blue-950/20" : "border-gray-800"
-                  }`}
+                  } ${imported ? "opacity-60" : ""}`}
                 >
                   <input
                     type="checkbox"
                     checked={isSelected}
+                    disabled={imported}
+                    title={imported ? "Déjà importé dans Shopify" : undefined}
                     onChange={() => toggleSelect(product.sku)}
-                    className="mt-1 rounded bg-gray-800 border-gray-700 text-blue-500 shrink-0"
+                    className="mt-1 rounded bg-gray-800 border-gray-700 text-blue-500 shrink-0 disabled:cursor-not-allowed disabled:opacity-40"
                   />
                   {product.image1 ? (
                     <img
@@ -624,10 +666,10 @@ function CatalogBrowser() {
                       <input
                         type="checkbox"
                         onChange={toggleAllOnPage}
-                        checked={
-                          data.products.length > 0 &&
-                          data.products.every((p) => selected.has(p.sku))
-                        }
+                        checked={(() => {
+                          const selectable = data.products.filter((p) => !isImported(p));
+                          return selectable.length > 0 && selectable.every((p) => selected.has(p.sku));
+                        })()}
                         className="rounded bg-gray-800 border-gray-700 text-blue-500"
                       />
                     </th>
@@ -648,19 +690,23 @@ function CatalogBrowser() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.products.map((product) => (
+                  {data.products.map((product) => {
+                    const imported = isImported(product);
+                    return (
                     <tr
                       key={product.sku}
                       className={`border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors ${
                         selected.has(product.sku) ? "bg-blue-950/20" : ""
-                      }`}
+                      } ${imported ? "opacity-60" : ""}`}
                     >
                       <td className="px-4 py-3">
                         <input
                           type="checkbox"
                           checked={selected.has(product.sku)}
+                          disabled={imported}
+                          title={imported ? "Déjà importé dans Shopify" : undefined}
                           onChange={() => toggleSelect(product.sku)}
-                          className="rounded bg-gray-800 border-gray-700 text-blue-500"
+                          className="rounded bg-gray-800 border-gray-700 text-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
                         />
                       </td>
                       <td className="px-4 py-2">
@@ -716,7 +762,8 @@ function CatalogBrowser() {
                         <StoreBadge product={product} />
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

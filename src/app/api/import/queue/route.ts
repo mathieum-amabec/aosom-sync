@@ -40,8 +40,13 @@ export async function POST(request: Request) {
     if (validSkus.length === 0) {
       return NextResponse.json({ success: false, error: "No valid SKUs provided" }, { status: 400 });
     }
-    const jobs = await queueForImport(validSkus);
-    return NextResponse.json({ success: true, data: jobs });
+    const { jobs, skipped } = await queueForImport(validSkus);
+    // `success: true` regardless of `skipped` — the request itself was processed
+    // correctly, some/none/all of the requested SKUs just didn't produce a job.
+    // The client decides how to present that (see catalog page's sendToImport):
+    // 0 jobs + 1+ skipped is the exact case that used to look identical to a full
+    // success (200, no error) with nothing to show for it.
+    return NextResponse.json({ success: true, data: jobs, skipped });
   } catch (err) {
     console.error(`[API] /api/import/queue failed:`, err);
     return NextResponse.json({ success: false, error: "Queue operation failed" }, { status: 500 });

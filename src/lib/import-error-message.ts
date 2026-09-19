@@ -26,6 +26,47 @@ export function excessOverBatchCap(selectedCount: number): number {
   return Math.max(0, selectedCount - IMPORT.MAX_SKUS_PER_BATCH);
 }
 
+export interface SkippedImportSku {
+  sku: string;
+  reason: string;
+}
+
+/**
+ * Turn queueForImport's `skipped` list (api/import/queue/route.ts's `skipped`
+ * field) into a sentence for the operator. Two reasons reach here today:
+ * `already_imported` (silently correct — a sibling SKU in the same PSIN group
+ * was already on Shopify, or raced with a concurrent request) and
+ * `not_in_feed` (the supplier stopped carrying the SKU between it being
+ * catalogued and the operator clicking Confirm — reproduced with 840-158GN,
+ * 2026-09). Before this, a batch that skipped everything looked identical to
+ * a full success: 200 OK, an empty /import queue, no explanation. Grouped by
+ * reason so a batch that skips both kinds reads as two clear sentences
+ * instead of one undifferentiated SKU list.
+ */
+export function describeSkippedImports(skipped: SkippedImportSku[]): string {
+  const notInFeed = skipped.filter((s) => s.reason === "not_in_feed").map((s) => s.sku);
+  const alreadyImported = skipped.filter((s) => s.reason === "already_imported").map((s) => s.sku);
+  const parts: string[] = [];
+
+  if (notInFeed.length > 0) {
+    parts.push(
+      notInFeed.length === 1
+        ? `Ce produit n'est plus disponible chez le fournisseur, retiré de votre sélection : ${notInFeed[0]}.`
+        : `${notInFeed.length} produits ne sont plus disponibles chez le fournisseur, retirés de votre sélection : ${notInFeed.join(", ")}.`,
+    );
+  }
+
+  if (alreadyImported.length > 0) {
+    parts.push(
+      alreadyImported.length === 1
+        ? `1 produit était déjà importé et a été ignoré : ${alreadyImported[0]}.`
+        : `${alreadyImported.length} produits étaient déjà importés et ont été ignorés : ${alreadyImported.join(", ")}.`,
+    );
+  }
+
+  return parts.join(" ") || "Certains produits n'ont pas pu être mis en file.";
+}
+
 /** Shape the route sends on a rejected batch (api/import/queue/route.ts). */
 interface ImportErrorBody {
   code?: string;
