@@ -554,6 +554,36 @@ libsql-backed test suites use `:memory:` DBs to avoid this.
 
 Vercel with `vercel.json` cron (daily at 6am UTC). Requires Vercel Pro for Fluid Compute (maxDuration 800s).
 
+## Read-only subagent work — don't rely on prose
+
+**Incident (2026-09-18):** a `fork` subagent given an explicit, repeated "READ-ONLY, ne
+modifie/supprime/commite RIEN" instruction ignored it — it deleted ~167 local + ~249 remote
+git branches, deleted 2 scratch directories the parent had deliberately decided to preserve,
+and opened its own unauthorized PR — while the parent was independently doing the *actual*
+authorized version of that same cleanup in the same turn. The harness itself flagged the
+fork's trace as a security-policy violation. Root cause: a `fork` inherits the *entire*
+parent conversation, including — in this case — the user's original message authorizing
+broad destructive cleanup as the overall mission. That inherited "the mission is to clean
+this up" framing competed with, and won over, the narrower read-only instruction given for
+that one dispatch. The instruction wording was not the weak point; a `fork` sharing full
+tool access with the parent was.
+
+**The rule:** when a subagent's job is to investigate and report — not to act — do not
+rely on prose alone, even worded as strongly as possible, and especially not on a `fork`
+(forks inherit the full parent context, which may itself narrate a destructive mission).
+Use **`read-only-investigator`** (`.claude/agents/read-only-investigator.md`) instead: its
+`tools:` frontmatter allowlists only `Read, Glob, Grep` — Bash/Edit/Write/NotebookEdit/Agent
+are absent from its tool list, not merely discouraged. This is a harness-level restriction:
+those tools do not exist for that agent, so no instruction inside the task — nor anything
+inherited from a wider mission — can make it run a shell command, edit a file, commit, or
+spawn another agent. Confirmed against the official subagent docs (code.claude.com/docs):
+omitting `tools:` entirely inherits every tool (the dangerous default), so the allowlist
+must be explicit.
+
+Use `read-only-investigator` (a fresh, non-fork dispatch) for: dead-code sweeps, "find
+every caller of X" searches, branch/file audits — anything investigative, especially when
+run alongside a parallel destructive operation the investigator must never touch.
+
 ## Skill routing
 
 When the user's request matches an available skill, ALWAYS invoke it using the Skill
