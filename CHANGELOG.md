@@ -2,6 +2,42 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.13] - 2026-09-19
+
+Two confirmed bugs in the import flow, reproduced live against prod before the fix:
+submitting a mixed batch (one already-imported variant + a never-imported sibling of the
+same PSIN group) silently queued nothing at all, and a SKU discontinued by Aosom between
+being catalogued and clicking Confirm vanished with no error — both looked identical to a
+full success (200 OK, 0 jobs, no explanation).
+
+### Root cause
+
+`queueForImport()` checked idempotency AFTER `mergeVariants()` folded a batch's SKUs into
+one merged product per PSIN group — one already-imported variant anywhere in that merged
+group discarded the WHOLE group, including siblings that had never been imported.
+Reproduced with `501-004PK` (already on Shopify) + `501-004BK` (never imported, same
+group): submitted together, 0 jobs. Separately, a requested SKU no longer present in
+`fetchAosomCatalog()` (`840-158GN`, discontinued by the supplier) just never appeared in
+`matched`, with nothing recording why.
+
+### Changed
+
+- Idempotency is now checked per requested SKU, before `mergeVariants()` runs, not per
+  merged group after. A never-imported sibling now queues normally even when submitted
+  alongside an already-imported one; a defensive post-merge re-check remains for the race
+  window between the two.
+- `queueForImport()` returns `{ jobs, skipped }`, where `skipped` names every requested SKU
+  that produced no job and why (`already_imported` or `not_in_feed`) — propagated through
+  `POST /api/import/queue`'s response and both CLI callers (`pilot-import.mts`,
+  `mass-import-from-batch.ts`).
+- Catalog UI: checkboxes for already-imported variants are now disabled (mobile card and
+  desktop table row), and "select page" / the header checkbox skip them, so the mixed
+  batch this bug depended on can no longer be assembled by hand. `sendToImport()` surfaces
+  `skipped` via the existing error banner when nothing queued ("Ce produit n'est plus
+  disponible chez le fournisseur, retiré de votre sélection."), or a blocking confirmation
+  before navigating away on a partial batch.
+- Verified unaffected: `createShopifyProduct`'s publish-as-active-on-create behavior.
+
 ## [0.5.92.12] - 2026-09-18
 
 Social post text sometimes didn't match the product in the photo — Mat's report, confirmed
