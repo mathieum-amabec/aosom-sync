@@ -68,25 +68,8 @@ export async function runQualityGates(
   return { passed: failures.length === 0, failures };
 }
 
-/**
- * Circuit breaker for a bulk import batch (import/page.tsx's startBulk). Pulled
- * out as a pure function so it's testable without a browser/DOM: the batch loop
- * only calls it, never re-implements the arithmetic.
- *
- * MIN_SAMPLE guards against tripping on noise in a small batch (1 failure in 3
- * items is 33%, way over threshold, but tells you nothing about a systemic
- * problem). THRESHOLD's failure count is errors + needs_review combined — a
- * systemic bug shows up as either, and the point is to stop feeding it more
- * products either way.
- */
-export const CIRCUIT_BREAKER_MIN_SAMPLE = 10;
-export const CIRCUIT_BREAKER_THRESHOLD = 0.15;
-
-export function shouldTripCircuitBreaker(counts: {
-  errors: number;
-  needsReview: number;
-  processed: number;
-}): boolean {
-  if (counts.processed < CIRCUIT_BREAKER_MIN_SAMPLE) return false;
-  return (counts.errors + counts.needsReview) / counts.processed > CIRCUIT_BREAKER_THRESHOLD;
-}
+// The batch-level circuit breaker (shouldTripCircuitBreaker) lives in
+// import-batch-guard.ts, NOT here — this module transitively imports
+// database.ts/shopify-client.ts/vision-classifier.ts (server-only), and the
+// circuit breaker is called from the "use client" import/page.tsx. Keeping it
+// out of this file's module graph is what keeps that import buildable.

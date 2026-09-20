@@ -7,7 +7,7 @@ import {
   shouldTripCircuitBreaker,
   CIRCUIT_BREAKER_MIN_SAMPLE,
   CIRCUIT_BREAKER_THRESHOLD,
-} from "@/lib/import-quality-gates";
+} from "@/lib/import-batch-guard";
 
 const SHOPIFY_ADMIN_URL = "https://admin.shopify.com/store/27u5y2-kp";
 
