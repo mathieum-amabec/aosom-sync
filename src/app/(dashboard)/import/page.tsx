@@ -3,6 +3,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import DOMPurify from "isomorphic-dompurify";
 import type { ImportJob } from "@/lib/import-pipeline";
+import {
+  shouldTripCircuitBreaker,
+  CIRCUIT_BREAKER_MIN_SAMPLE,
+  CIRCUIT_BREAKER_THRESHOLD,
+} from "@/lib/import-quality-gates";
 
 const SHOPIFY_ADMIN_URL = "https://admin.shopify.com/store/27u5y2-kp";
 
@@ -11,10 +16,16 @@ interface BulkProgress {
   done: number;
   success: number;
   errors: number;
+  /** Quality-gate failures (import-quality-gates.ts) — job landed on needs_review,
+   * not published (or auto-unpublished). Counts toward the circuit breaker's failure
+   * rate alongside `errors`, but is tracked separately since it isn't a crash. */
+  needsReview: number;
   skipped: number;
   running: boolean;
   startedAt: number | null;
   errorList: { name: string; error: string }[];
+  /** Set when the circuit breaker stopped the batch early — distinct from a manual Stop. */
+  circuitBreakerTripped: boolean;
 }
 
 export default function ImportPage() {
@@ -23,8 +34,8 @@ export default function ImportPage() {
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<BulkProgress>({
-    total: 0, done: 0, success: 0, errors: 0, skipped: 0,
-    running: false, startedAt: null, errorList: [],
+    total: 0, done: 0, success: 0, errors: 0, needsReview: 0, skipped: 0,
+    running: false, startedAt: null, errorList: [], circuitBreakerTripped: false,
   });
   const stopRef = useRef(false);
 
@@ -105,13 +116,15 @@ export default function ImportPage() {
 
     stopRef.current = false;
     setBulk({
-      total: targets.length, done: 0, success: 0, errors: 0, skipped: 0,
-      running: true, startedAt: Date.now(), errorList: [],
+      total: targets.length, done: 0, success: 0, errors: 0, needsReview: 0, skipped: 0,
+      running: true, startedAt: Date.now(), errorList: [], circuitBreakerTripped: false,
     });
 
     let success = 0;
     let errors = 0;
+    let needsReview = 0;
     const errorList: { name: string; error: string }[] = [];
+    let circuitBreakerTripped = false;
 
     for (let i = 0; i < targets.length; i++) {
       if (stopRef.current) break;
@@ -131,7 +144,11 @@ export default function ImportPage() {
         if (!genData.success) throw new Error(genData.error || "Generate failed");
         updateJob(genData.data);
 
-        // Step 2: Push to Shopify
+        // Step 2: Push to Shopify. importToShopify runs the pre-publish quality
+        // gate (import-quality-gates.ts) before this even reaches Shopify, and a
+        // post-publish safety net right after — a gate failure comes back as
+        // `success: true` with `status: "needs_review"` (not an HTTP error), since
+        // the request itself was handled correctly.
         updateJobStatus(job.id, "importing");
         const pushRes = await fetch("/api/import/push", {
           method: "POST",
@@ -142,7 +159,8 @@ export default function ImportPage() {
         if (!pushData.success) throw new Error(pushData.error || "Push failed");
         updateJob(pushData.data);
 
-        success++;
+        if (pushData.data.status === "needs_review") needsReview++;
+        else success++;
       } catch (err) {
         errors++;
         errorList.push({
@@ -152,13 +170,22 @@ export default function ImportPage() {
         updateJobStatus(job.id, "error");
       }
 
+      const processed = i + 1;
       setBulk(prev => ({
         ...prev,
-        done: i + 1,
+        done: processed,
         success,
         errors,
+        needsReview,
         errorList: [...errorList],
       }));
+
+      // Circuit breaker (import-quality-gates.ts) — see there for why MIN_SAMPLE
+      // and THRESHOLD are what they are.
+      if (shouldTripCircuitBreaker({ errors, needsReview, processed })) {
+        circuitBreakerTripped = true;
+        break;
+      }
 
       // Rate limit pause (500ms between each)
       if (i < targets.length - 1 && !stopRef.current) {
@@ -166,7 +193,7 @@ export default function ImportPage() {
       }
     }
 
-    setBulk(prev => ({ ...prev, running: false }));
+    setBulk(prev => ({ ...prev, running: false, circuitBreakerTripped }));
   }, [jobs]);
 
   function handleBulkAll() {
@@ -248,6 +275,7 @@ export default function ImportPage() {
   const reviewing = jobs.filter(j => j.status === "reviewing").length;
   const done = jobs.filter(j => j.status === "done").length;
   const errored = jobs.filter(j => j.status === "error").length;
+  const needsReviewCount = jobs.filter(j => j.status === "needs_review").length;
   const selectedPending = jobs.filter(j => selected.has(j.id) && j.status === "pending").length;
 
   const etaSeconds = bulk.running && bulk.done > 0 && bulk.startedAt
@@ -300,12 +328,13 @@ export default function ImportPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 md:grid-cols-5 gap-2 md:gap-3 mb-6">
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 mb-6">
         <StatCard label="Total" value={jobs.length} color="text-white" />
         <StatCard label="Pending" value={pending} color="text-yellow-400" />
         <StatCard label="Ready" value={reviewing} color="text-blue-400" />
         <StatCard label="Imported" value={done} color="text-green-400" />
         <StatCard label="Errors" value={errored} color="text-red-400" />
+        <StatCard label="Needs Review" value={needsReviewCount} color="text-amber-400" />
       </div>
 
       {/* Bulk Progress Bar */}
@@ -328,9 +357,25 @@ export default function ImportPage() {
           </div>
           <div className="flex gap-4 text-xs">
             <span className="text-green-400">{bulk.success} success</span>
+            <span className="text-amber-400">{bulk.needsReview} needs review</span>
             <span className="text-red-400">{bulk.errors} errors</span>
             <span className="text-gray-400">{bulk.total - bulk.done} remaining</span>
           </div>
+
+          {/* Circuit breaker — stopped the rest of the batch rather than keep
+              publishing against a likely systemic bug. Distinct from a manual Stop. */}
+          {bulk.circuitBreakerTripped && (
+            <div className="mt-3 p-3 bg-red-950/40 border border-red-800/60 rounded-lg">
+              <p className="text-sm text-red-300 font-medium">
+                ⚠ Lot arrêté automatiquement — taux d&apos;échec anormal
+              </p>
+              <p className="text-xs text-red-400/80 mt-1">
+                Plus de {Math.round(CIRCUIT_BREAKER_THRESHOLD * 100)}% des produits traités ont échoué
+                (erreur ou contrôle qualité) sur au moins {CIRCUIT_BREAKER_MIN_SAMPLE} produits — le reste
+                du lot n&apos;a pas été publié. Vérifiez les erreurs/produits à réviser ci-dessous avant de relancer.
+              </p>
+            </div>
+          )}
 
           {/* Error list */}
           {bulk.errorList.length > 0 && !bulk.running && (
@@ -520,6 +565,7 @@ function ImportStatusBadge({ status }: { status: string }) {
     importing: "bg-blue-900/40 text-blue-400 border-blue-800/50",
     done: "bg-green-900/40 text-green-400 border-green-800/50",
     error: "bg-red-900/40 text-red-400 border-red-800/50",
+    needs_review: "bg-amber-900/40 text-amber-400 border-amber-800/50",
   };
 
   return (

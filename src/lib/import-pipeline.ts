@@ -2,7 +2,14 @@ import { fetchAosomCatalog } from "./csv-fetcher";
 import { mergeVariants, selectProductImagesAsync } from "./variant-merger";
 import { enforceCleanPrimaryImage } from "./image-compliance-audit";
 import { generateProductContent, backfillSeoFields, type GeneratedContent } from "./content-generator";
-import { createShopifyProduct, addProductToCollection } from "./shopify-client";
+import { runQualityGates } from "./import-quality-gates";
+import {
+  createShopifyProduct,
+  addProductToCollection,
+  unpublishShopifyProduct,
+  fetchShopifyProductContent,
+} from "./shopify-client";
+import { EXCLUDE_TAG } from "./stale-catalog";
 import { findCollectionsForProduct, getProduct, linkProductToShopify } from "./database";
 import {
   upsertImportJob,
@@ -19,7 +26,12 @@ export type ImportStatus =
   | "importing"
   | "done"
   | "error"
-  | "already_imported";
+  | "already_imported"
+  // A quality gate (clean image / French copy / no supplier-brand leak) failed —
+  // either before the Shopify push (no shopifyId set) or after, against what
+  // Shopify actually serves (shopifyId set, but auto-unpublished — see
+  // import-quality-gates.ts and importToShopify's post-publish safety net).
+  | "needs_review";
 
 export interface ImportJob {
   id: string;
@@ -269,6 +281,20 @@ export async function importToShopify(
   // defaults so a stale job imports with degraded SEO instead of 422-ing.
   content = backfillSeoFields(content, product.brand);
 
+  // Pre-publish quality gate: same three checks the post-publish safety net runs
+  // below, but here a failure means the product is never created at all — cheaper
+  // to catch than to un-publish, and it can't leave a defective listing live even
+  // for the few seconds between create and the post-publish check.
+  const preGate = await runQualityGates(product.images, content);
+  if (!preGate.passed) {
+    console.warn(`[IMPORT] Pre-publish quality gate FAILED for ${row.group_key} (${preGate.failures.join(",")}) — not pushed`);
+    await updateImportJob(jobId, {
+      status: "needs_review",
+      error: `pre_publish_gate_failed:${preGate.failures.join(",")}`,
+    });
+    return { ...rowToJob(row), status: "needs_review", content };
+  }
+
   await updateImportJob(jobId, { status: "importing" });
 
   try {
@@ -337,6 +363,35 @@ export async function importToShopify(
           console.error(`[IMPORT] Social draft failed for ${primarySku}: ${err}`)
         );
       }).catch(() => {});
+    }
+
+    // Post-publish quality safety net: re-run the SAME gates against what Shopify
+    // actually serves (not what we generated) — catches drift between generation
+    // and what got stored, or anything the pre-publish check missed. Best-effort:
+    // a failure IN the check itself must not fail the (already successful) import,
+    // and must not silently hide that the check didn't run.
+    try {
+      const served = await fetchShopifyProductContent(shopifyId);
+      const postGate = await runQualityGates(served.images, {
+        titleFr: served.title,
+        descriptionFr: served.bodyHtml,
+      });
+      if (!postGate.passed) {
+        console.warn(
+          `[IMPORT] Post-publish quality gate FAILED for ${shopifyId} (${postGate.failures.join(",")}) — unpublishing`,
+        );
+        await unpublishShopifyProduct(shopifyId, {
+          deactivate: true,
+          tags: [...served.tags, EXCLUDE_TAG, "needs-review"],
+        });
+        await updateImportJob(jobId, {
+          status: "needs_review",
+          error: `post_publish_gate_failed:${postGate.failures.join(",")}`,
+        });
+        return { ...rowToJob(row), status: "needs_review", shopifyId, content };
+      }
+    } catch (err) {
+      console.error(`[IMPORT] Post-publish quality check errored for ${shopifyId} (product stays published):`, err);
     }
 
     return { ...rowToJob(row), status: "done", shopifyId, content };

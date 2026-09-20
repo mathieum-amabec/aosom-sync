@@ -26,6 +26,22 @@ vi.mock("@/lib/content-generator", () => ({
 vi.mock("@/lib/shopify-client", () => ({
   createShopifyProduct: vi.fn(),
   addProductToCollection: vi.fn().mockResolvedValue(undefined),
+  unpublishShopifyProduct: vi.fn().mockResolvedValue(undefined),
+  fetchShopifyProductContent: vi.fn().mockResolvedValue({
+    title: "Chaise longue",
+    bodyHtml: "<p>fr</p>",
+    images: ["https://cdn/a.jpg"],
+    tags: [],
+  }),
+}));
+// Default: gates pass. Individual tests override with mockResolvedValueOnce to
+// exercise the pre-publish / post-publish failure paths without re-testing the
+// gates' own internals (see tests/import-quality-gates.test.ts for that).
+vi.mock("@/lib/import-quality-gates", () => ({
+  runQualityGates: vi.fn().mockResolvedValue({ passed: true, failures: [] }),
+}));
+vi.mock("@/lib/stale-catalog", () => ({
+  EXCLUDE_TAG: "exclude-stale",
 }));
 vi.mock("@/lib/database", () => ({
   upsertImportJob: vi.fn().mockResolvedValue(undefined),
@@ -44,7 +60,8 @@ vi.mock("@/jobs/job4-social", () => ({
 
 import { importToShopify, queueForImport, generateContent } from "@/lib/import-pipeline";
 import { generateProductContent } from "@/lib/content-generator";
-import { createShopifyProduct } from "@/lib/shopify-client";
+import { createShopifyProduct, unpublishShopifyProduct, fetchShopifyProductContent } from "@/lib/shopify-client";
+import { runQualityGates } from "@/lib/import-quality-gates";
 import { getImportJob, getProduct, upsertImportJob, updateImportJob } from "@/lib/database";
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { mergeVariants } from "@/lib/variant-merger";
@@ -100,6 +117,110 @@ describe("importToShopify — duplicate-job guard", () => {
     // The draft trigger is fire-and-forget via a dynamic import, so wait for the
     // floating promise to flush before asserting.
     await vi.waitFor(() => expect(triggerNewProduct).toHaveBeenCalledWith("S1"));
+  });
+});
+
+describe("importToShopify — pre-publish quality gate", () => {
+  it("does not push to Shopify when the pre-publish gate fails", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(runQualityGates).mockResolvedValueOnce({
+      passed: false,
+      failures: ["not_french"],
+    } as never);
+
+    const job = await importToShopify("job-1");
+
+    expect(job.status).toBe("needs_review");
+    expect(createShopifyProduct).not.toHaveBeenCalled();
+    expect(updateImportJob).toHaveBeenCalledWith(
+      "job-1",
+      expect.objectContaining({ status: "needs_review", error: "pre_publish_gate_failed:not_french" }),
+    );
+  });
+
+  it("reports every failing gate in the stored error, comma-separated", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(runQualityGates).mockResolvedValueOnce({
+      passed: false,
+      failures: ["image_not_clean", "not_french", "brand_leak"],
+    } as never);
+
+    await importToShopify("job-1");
+
+    expect(updateImportJob).toHaveBeenCalledWith(
+      "job-1",
+      expect.objectContaining({ error: "pre_publish_gate_failed:image_not_clean,not_french,brand_leak" }),
+    );
+  });
+
+  it("pushes normally when the pre-publish gate passes (default mock)", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
+
+    const job = await importToShopify("job-1");
+
+    expect(createShopifyProduct).toHaveBeenCalledTimes(1);
+    expect(job.status).toBe("done");
+  });
+});
+
+describe("importToShopify — post-publish quality safety net", () => {
+  it("unpublishes and marks needs_review when the post-publish check fails", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
+    vi.mocked(fetchShopifyProductContent).mockResolvedValueOnce({
+      title: "Some drifted title",
+      bodyHtml: "<p>drifted</p>",
+      images: ["https://cdn/drifted.jpg"],
+      tags: ["patio"],
+    });
+    // First call (pre-publish) passes, second call (post-publish) fails.
+    vi.mocked(runQualityGates)
+      .mockResolvedValueOnce({ passed: true, failures: [] } as never)
+      .mockResolvedValueOnce({ passed: false, failures: ["brand_leak"] } as never);
+
+    const job = await importToShopify("job-1");
+
+    expect(job.status).toBe("needs_review");
+    expect(job.shopifyId).toBe("123"); // the product WAS created, then pulled back
+    expect(unpublishShopifyProduct).toHaveBeenCalledWith(
+      "123",
+      expect.objectContaining({ deactivate: true, tags: expect.arrayContaining(["patio", "exclude-stale", "needs-review"]) }),
+    );
+    expect(updateImportJob).toHaveBeenCalledWith(
+      "job-1",
+      expect.objectContaining({ status: "needs_review", error: "post_publish_gate_failed:brand_leak" }),
+    );
+  });
+
+  it("checks what Shopify actually serves, not the generated content", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
+
+    await importToShopify("job-1");
+
+    expect(fetchShopifyProductContent).toHaveBeenCalledWith("123");
+  });
+
+  it("leaves the product published when the check itself errors (best-effort, does not fail the import)", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
+    vi.mocked(fetchShopifyProductContent).mockRejectedValueOnce(new Error("Shopify 500"));
+
+    const job = await importToShopify("job-1");
+
+    expect(job.status).toBe("done");
+    expect(unpublishShopifyProduct).not.toHaveBeenCalled();
+  });
+
+  it("stays done when the post-publish check passes (default mock)", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
+
+    const job = await importToShopify("job-1");
+
+    expect(job.status).toBe("done");
+    expect(unpublishShopifyProduct).not.toHaveBeenCalled();
   });
 });
 
