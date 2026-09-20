@@ -2,6 +2,43 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.14] - 2026-09-20
+
+Three safety nets around the import dashboard's automatic bulk push ("Generate All
+Pending"), which until now generated content and pushed to Shopify back-to-back with no
+quality check and no way to stop a bad batch early.
+
+### Added
+
+- **Pre-publish quality gate** — before `createShopifyProduct`, every product is checked
+  for a clean primary image (`enforceCleanPrimaryImage`, already in place — cache hit in
+  the common case since these images were classified once already at queue time), French
+  copy (`detectDescriptionLanguage`, already validated 2026-09-11 against 1382 active
+  products), and no supplier-brand leak (`forbiddenBrandsIn`, same canonical list
+  `stripSupplierBrands` already strips). A failure sets the job to a new `needs_review`
+  status instead of `done` — nothing is published, and the rest of the batch continues.
+- **Post-publish safety net** — right after a successful push, fetches what Shopify
+  *actually* serves and re-runs the same three checks against it, catching drift between
+  generation and storage. A failure automatically unpublishes the product
+  (`unpublishShopifyProduct`, new — mirror of the existing `publishShopifyProduct`), tags
+  it `exclude-stale` so the publish-reconcile cron never silently republishes it, and
+  surfaces in the dashboard's existing "Alertes" panel instead of leaving a defect live
+  unnoticed.
+- **Circuit breaker on the bulk batch** — past a minimum of 10 products processed, if more
+  than 15% failed (hard errors + `needs_review` combined), the rest of the batch stops
+  automatically with a dashboard banner, instead of continuing to publish against a likely
+  systemic bug.
+- Zero additional LLM calls in the common case for all three checks — the image check is
+  a cache hit, French/brand checks are pure regex.
+
+### Fixed (same-day, before the first production build)
+
+- The circuit breaker's constants briefly lived in the same module as the (server-only,
+  DB/API-backed) quality gates; importing them into the dashboard's client component broke
+  `next build` on the PR's own preview deployment. Never reached production — caught before
+  merge, fixed by moving the circuit breaker into its own zero-dependency module
+  (`import-batch-guard.ts`).
+
 ## [0.5.92.13] - 2026-09-19
 
 Two confirmed bugs in the import flow, reproduced live against prod before the fix:
