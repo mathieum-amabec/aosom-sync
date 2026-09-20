@@ -616,6 +616,67 @@ export async function publishShopifyProduct(
 }
 
 /**
+ * Mirror of publishShopifyProduct — take a product OFF the Online Store via REST
+ * `published: false`. Used by the import pipeline's post-publish quality safety net:
+ * a product that fails the quality gates AFTER creation (image/language/brand-leak,
+ * checked against what Shopify actually serves) gets pulled back rather than left
+ * live with a defect. `deactivate` mirrors `activate` on the publish side (also sets
+ * `status: "draft"` — belt and suspenders, since `published: false` alone still
+ * leaves the product `status: "active"`, which is exactly the anomaly
+ * publish-reconcile.ts exists to fix in the other direction).
+ *
+ * `tags`, when passed, REPLACES the product's tag list (same full-replace contract
+ * as updateShopifyProduct) — the caller is expected to include
+ * `stale-catalog.EXCLUDE_TAG` ("exclude-stale") so publish-reconcile never silently
+ * re-publishes a product this safety net just pulled.
+ */
+export async function unpublishShopifyProduct(
+  shopifyId: string,
+  opts: { deactivate?: boolean; tags?: string[] } = {},
+): Promise<void> {
+  const product: Record<string, unknown> = { id: shopifyId, published: false };
+  if (opts.deactivate) product.status = "draft";
+  if (opts.tags) product.tags = opts.tags.join(", ");
+  const response = await shopifyFetch(`/products/${shopifyId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ product }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify unpublish failed: ${response.status} — ${text}`);
+  }
+}
+
+/**
+ * Fetch what a product actually serves right now — title, description, image URLs,
+ * tags — for the import pipeline's post-publish quality safety net. Deliberately a
+ * fresh GET rather than trusting createShopifyProduct's create response: the point
+ * is to catch drift between what we generated and what Shopify actually stored.
+ */
+export async function fetchShopifyProductContent(shopifyId: string): Promise<{
+  title: string;
+  bodyHtml: string;
+  images: string[];
+  tags: string[];
+}> {
+  const response = await shopifyFetch(
+    `/products/${shopifyId}.json?fields=title,body_html,images,tags`,
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify product fetch failed: ${response.status} — ${text}`);
+  }
+  const data = await response.json();
+  const p = data.product || {};
+  return {
+    title: typeof p.title === "string" ? p.title : "",
+    bodyHtml: typeof p.body_html === "string" ? p.body_html : "",
+    images: Array.isArray(p.images) ? p.images.map((img: { src: string }) => img.src) : [],
+    tags: typeof p.tags === "string" && p.tags.trim() ? p.tags.split(",").map((t: string) => t.trim()) : [],
+  };
+}
+
+/**
  * Fetch every product's publication state (id + status + Online-Store published flag + tags)
  * in one paginated pass. Consumed by publish-reconcile to find imported+sellable products
  * that sit unpublished. `published` = `published_at` set AND not in the future. Archived

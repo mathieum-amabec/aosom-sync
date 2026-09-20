@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 
 interface ErroredImportJob { id: string; groupKey: string; sku: string | null; error: string | null; updatedAt: string; }
+interface NeedsReviewImportJob { id: string; groupKey: string; sku: string | null; stage: "pre" | "post" | "unknown"; failures: string[]; shopifyId: string | null; updatedAt: string; }
 interface FeedSync { feedType: string; lastSuccessAt: number | null; itemCount: number | null; lastStatus: string | null; }
 interface MetaToken { configured: boolean; state?: string; daysLeft?: number | null; expiresAt?: number; }
 interface PriceFloorItem { sku: string; shopify_price: number; aosom_price: number; gap: number; corrected_price?: number; status?: "corrected" | "failed"; error?: string; }
@@ -10,6 +11,7 @@ interface PriceFloor { belowFloorCount: number; total: number; corrected: number
 interface LlmPool { pool: "assistant" | "batch"; state: "ok" | "warning" | "exhausted"; used: number; budget: number; pct: number; }
 interface Alerts {
   erroredImportJobs: ErroredImportJob[];
+  needsReviewImportJobs: NeedsReviewImportJob[];
   staleDraftCount: number;
   feeds: FeedSync[];
   metaToken: MetaToken;
@@ -89,7 +91,7 @@ export function AlertsPanel() {
     .filter((p) => p.state !== "ok")
     .sort((a, b) => (a.state === b.state ? 0 : a.state === "exhausted" ? -1 : 1));
   // Failed corrections (or an un-broken-down legacy backlog) are alerts; auto-corrected ones are good news.
-  const hasAlerts = data.erroredImportJobs.length > 0 || data.staleDraftCount > 0 || tokenAlert ||
+  const hasAlerts = data.erroredImportJobs.length > 0 || data.needsReviewImportJobs.length > 0 || data.staleDraftCount > 0 || tokenAlert ||
     floorFailed > 0 || floorLegacy || data.feeds.some((f) => f.lastStatus === "error") ||
     pressuredPools.length > 0;
   const floorAuditedAt = data.priceFloor?.auditedAt;
@@ -134,6 +136,28 @@ export function AlertsPanel() {
                 <li key={j.id} className="px-4 py-2 text-xs text-gray-400">
                   <span className="text-gray-300">{j.sku || j.groupKey}</span>
                   {j.error ? <span className="text-red-400/80"> — {j.error}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Import jobs a quality gate flagged (clean image / French / no brand leak) —
+            amber, not red: these are automatically pulled back or never pushed, not a
+            hard failure needing urgent attention, but worth a look. */}
+        {data.needsReviewImportJobs.length > 0 && (
+          <div className="bg-amber-950/20 border border-amber-800/40 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 text-sm font-medium text-amber-300">
+              {data.needsReviewImportJobs.length} produit{data.needsReviewImportJobs.length > 1 ? "s" : ""} à réviser (contrôle qualité)
+            </div>
+            <ul className="divide-y divide-amber-900/30">
+              {data.needsReviewImportJobs.slice(0, 8).map((j) => (
+                <li key={j.id} className="px-4 py-2 text-xs text-gray-400">
+                  <span className="text-gray-300">{j.sku || j.groupKey}</span>
+                  <span className="text-amber-400/80">
+                    {" "}— {j.stage === "post" ? "dépublié après coup" : "non publié"}
+                    {j.failures.length > 0 ? ` (${j.failures.join(", ")})` : ""}
+                  </span>
                 </li>
               ))}
             </ul>

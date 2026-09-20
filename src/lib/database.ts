@@ -2910,6 +2910,23 @@ export interface FeedSyncSummary {
 }
 export interface ErroredImportJob { id: string; groupKey: string; sku: string | null; error: string | null; updatedAt: string; }
 
+/**
+ * An import job a quality gate flagged (import-quality-gates.ts). `stage` and
+ * `failures` are parsed from the job's `error` column, written as
+ * `<pre|post>_publish_gate_failed:<comma-separated failure codes>`. `shopifyId` is
+ * set only for `stage: "post"` — the product was created, then auto-unpublished by
+ * the safety net; `stage: "pre"` jobs never reached Shopify at all.
+ */
+export interface NeedsReviewImportJob {
+  id: string;
+  groupKey: string;
+  sku: string | null;
+  stage: "pre" | "post" | "unknown";
+  failures: string[];
+  shopifyId: string | null;
+  updatedAt: string;
+}
+
 export interface DashboardSummary {
   newProductsToday: number;
   draftsThisWeek: number;
@@ -2987,6 +3004,8 @@ export interface PriceFloorAlert {
 
 export interface DashboardAlerts {
   erroredImportJobs: ErroredImportJob[];
+  /** Import jobs a quality gate (import-quality-gates.ts) flagged — pre or post publish. */
+  needsReviewImportJobs: NeedsReviewImportJob[];
   staleDraftCount: number;
   feeds: FeedSyncSummary[];
   /** Last price-floor audit summary (from settings.price_audit_result). null if never run. */
@@ -3001,8 +3020,9 @@ export async function getDashboardAlerts(): Promise<DashboardAlerts> {
 async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
   const db = await ensureSchema();
   const weekAgo = epochDaysAgo(new Date(), 7);
-  const [errs, stale, feeds, priceAudit] = await Promise.all([
+  const [errs, needsReview, stale, feeds, priceAudit] = await Promise.all([
     db.execute({ sql: `SELECT id, group_key, product_data, error, updated_at FROM import_jobs WHERE status = 'error' ORDER BY updated_at DESC LIMIT 20` }),
+    db.execute({ sql: `SELECT id, group_key, product_data, error, shopify_id, updated_at FROM import_jobs WHERE status = 'needs_review' ORDER BY updated_at DESC LIMIT 20` }),
     db.execute({ sql: `SELECT COUNT(*) AS c FROM facebook_drafts WHERE status IN ('draft', 'pending') AND created_at < ?`, args: [weekAgo] }),
     // Per feed: time + count of the last SUCCESS, plus the status of the most recent
     // attempt (so a feed whose latest fetch errored is flagged even if an older success exists).
@@ -3025,6 +3045,29 @@ async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
     } catch { /* product_data not JSON — fall back to group_key */ }
     return { id: o.id as string, groupKey: o.group_key as string, sku, error: (o.error as string) ?? null, updatedAt: (o.updated_at as string) ?? "" };
   });
+  const needsReviewImportJobs: NeedsReviewImportJob[] = needsReview.rows.map((r) => {
+    const o = rowToObj(r);
+    let sku: string | null = null;
+    try {
+      const pd = JSON.parse((o.product_data as string) || "{}") as Record<string, unknown>;
+      const variants = pd.variants as Array<{ sku?: string }> | undefined;
+      sku = (pd.sku as string) || (pd.SKU as string) || (variants && variants[0]?.sku) || null;
+    } catch { /* product_data not JSON — fall back to group_key */ }
+    // Format written by importToShopify: "<pre|post>_publish_gate_failed:code1,code2".
+    const raw = (o.error as string) ?? "";
+    const m = /^(pre|post)_publish_gate_failed:(.*)$/.exec(raw);
+    const stage: NeedsReviewImportJob["stage"] = m ? (m[1] as "pre" | "post") : "unknown";
+    const failures = m && m[2] ? m[2].split(",").filter(Boolean) : [];
+    return {
+      id: o.id as string,
+      groupKey: o.group_key as string,
+      sku,
+      stage,
+      failures,
+      shopifyId: (o.shopify_id as string) || null,
+      updatedAt: (o.updated_at as string) ?? "",
+    };
+  });
   let priceFloor: PriceFloorAlert | null = null;
   if (priceAudit.rows.length > 0) {
     try {
@@ -3042,6 +3085,7 @@ async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
   }
   return {
     erroredImportJobs,
+    needsReviewImportJobs,
     staleDraftCount: Number(rowToObj(stale.rows[0]).c) || 0,
     feeds: feeds.rows.map((r) => {
       const o = rowToObj(r);
