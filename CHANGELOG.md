@@ -2,6 +2,54 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.17] - 2026-09-21
+
+Content-scale chantier merged: 3 new organic-video ad formats (`demand_gen_ext`,
+`before_after`, `assembly`) driven by a trend+season priority selector, plus the
+approval dashboard to review them — and a round-2 correction pass that replaces
+one-off patches with generalized quality gates after Mat found real defects in the
+first batch.
+
+### Added
+
+- **Trend+season priority selector** (`src/lib/selectors/content-priority.ts`) —
+  combines 14-day sales velocity, active discount and a seasonal multiplier into one
+  score, used by all 3 batch scripts to pick which SKUs get videoed first.
+- **`demand_gen_ext`** (`scripts/batch-demand-gen-extend.mts`) — extends the
+  hand-audited demand-gen pipeline to any priority SKU with source video.
+  `src/lib/demand-gen-clean-window.ts` (new): dense ~1/sec Vision sampling, a strict
+  dual-gate prompt (product fully visible AND no foreign text/logo, checked
+  independently), and a genuine sub-window search at the real render duration —
+  replacing a coarser analyzer that missed a flickering supplier logo (837-164WT,
+  now permanently excluded) and a too-tight crop (830-243, Christmas tree never
+  shown whole).
+- **`before_after`** (`scripts/batch-before-after.mts`) — `classifyGalleryForBeforeAfter`
+  scores up to 10 gallery images per SKU at once (not just the first/last) and can
+  legitimately return "no qualifying pair" instead of forcing a bad match — fixed a
+  case (830-323) where the only genuine neutral "before" shot was mid-gallery and
+  never considered.
+- **`assembly`** (`scripts/batch-assembly.mts`) — animated build-sequence clips;
+  fixed a centering bug where ffmpeg's multi-line `drawtext` centers the widest
+  line's bounding box only, leaving shorter lines visibly off-center (now one
+  `drawtext` call per line, each independently centered).
+- **Post-render verification** (`verifyRenderedClip`) — every `demand_gen_ext` clip
+  is re-scored by Vision *after* compositing, with a prompt that explicitly ignores
+  the pipeline's own intentional overlay (title band, delivery pill, logo) so it only
+  flags genuine defects. A clip that still fails is never queued as a draft.
+- Licensed Christmas/seasonal music track (Mixkit Free License) added to the
+  category-based music pool, routed for `Home Furnishings > Holiday & Seasonal`.
+- **`/content-formats` dashboard page** (3 tabs) + `QueueContentType` extended with
+  the 3 new types (CHECK-constraint migration, mirrors the existing `sequential_ad`
+  pattern) — review, approve and schedule generated clips from one screen.
+
+### Known limitation (documented, not silently dropped)
+
+`findCleanWindow` scores a candidate window by its *average* per-frame score, so a
+window can still contain a bad moment if the camera pans within it (confirmed on
+830-243 and 924-067V00WT). The post-render check catches the resulting bad clips and
+withholds them rather than shipping the defect, but a real fix needs a sliding
+*minimum*-score sub-window — left as a follow-up.
+
 ## [0.5.92.16] - 2026-09-20
 
 Closes the catalog-freshness gap the 2026-09-20 investigation found: the existing

@@ -706,6 +706,44 @@ async function _initSchemaImpl(): Promise<void> {
     ]);
   }
 
+  // publication_queue.content_type CHECK migration: +'demand_gen_ext','before_after','assembly'
+  // (content-scale chantier, Étape 3-5). Same guarded table-rebuild pattern as +sequential_ad
+  // above. The active-slot unique index stays (platform, scheduled_at) — UNCHANGED, matching
+  // every prior content_type addition: slot uniqueness is platform-wide across ALL content
+  // types, not per-type. getOccupiedQueueSlots(platform, contentType) only scopes the QUERY
+  // that searches for a free slot to offer; it does not partition the DB constraint itself, so
+  // two different content types can still collide on the exact same slot — same as sequential_ad
+  // vs. video today — and callers handle that via QueueSlotTakenError + retry (see the approve
+  // routes), not via a wider index.
+  const pqDef4 = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='publication_queue'`,
+  );
+  const pqSql4 = pqDef4.rows[0] ? String((pqDef4.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (pqSql4 && !pqSql4.includes("'demand_gen_ext'")) {
+    await runBatch("publication_queue content_type CHECK +demand_gen_ext,before_after,assembly", [
+      { sql: `DROP TABLE IF EXISTS publication_queue_new`, args: [] },
+      { sql: `CREATE TABLE publication_queue_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video', 'sequential_ad', 'demand_gen_ext', 'before_after', 'assembly')),
+        content_id TEXT NOT NULL,
+        platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
+        payload TEXT NOT NULL,
+        scheduled_at TEXT NOT NULL,
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled', 'draft')),
+        error TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        published_at TEXT,
+        metadata TEXT
+      )`, args: [] },
+      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata)
+              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata FROM publication_queue`, args: [] },
+      { sql: `DROP TABLE publication_queue`, args: [] },
+      { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
+      { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
+    ]);
+  }
+
   // blog_posts: add approved_at / published_at, then widen the status CHECK with 'approved'
   // (the /blog dashboard's draft → approved → published flow). The ALTERs run FIRST so the
   // CHECK rebuild's INSERT…SELECT can carry both columns through — same ordering rule as
@@ -4218,7 +4256,12 @@ export async function deleteFacebookDraft(id: number): Promise<void> {
 // getNextPending compares lexicographically against datetime('now'). Producers
 // MUST store slots in that exact format (see toSqliteUtc in draft-scheduler).
 
-export type QueueContentType = "social" | "draft" | "blog" | "video" | "sequential_ad";
+export type QueueContentType =
+  | "social" | "draft" | "blog" | "video" | "sequential_ad"
+  // Content-scale chantier (Étape 3-5): extended demand-gen, avant/après and assembly
+  // batches reuse the exact sequential_ad approve/schedule/list pattern below, generalized
+  // to any content_type instead of duplicated per type.
+  | "demand_gen_ext" | "before_after" | "assembly";
 export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog";
 export type QueueStatus = "pending" | "publishing" | "published" | "failed" | "cancelled" | "draft";
 
@@ -4692,6 +4735,107 @@ export async function rescheduleSequentialAd(id: number, scheduledAt: string): P
   } catch (err) {
     if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
       throw new QueueSlotTakenError("sequential_ad", scheduledAt);
+    }
+    throw err;
+  }
+}
+
+// ─── Generic content-batch queue (demand_gen_ext / before_after / assembly) ──────────
+//
+// Same shape as the sequential_ad functions just above (approve/cancel/reschedule/list/
+// count), generalized over `contentType` instead of duplicated 3x. Content-scale chantier
+// (Étape 3-5): the three new batch formats reuse this instead of a bespoke mechanism.
+
+/** Content-batch queue rows (any of the 3 new content types), newest first. */
+export async function getContentBatchQueueItems(
+  contentType: QueueContentType,
+  limit = 200,
+): Promise<PublicationQueueItem[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM publication_queue
+          WHERE content_type = ? AND status != 'cancelled'
+          ORDER BY created_at DESC, id DESC LIMIT ?`,
+    args: [contentType, limit],
+  });
+  return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/** Total non-cancelled rows for one content-batch type, for a "N items" count in the UI. */
+export async function countContentBatchQueueItems(contentType: QueueContentType): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT COUNT(*) AS n FROM publication_queue WHERE content_type = ? AND status != 'cancelled'`,
+    args: [contentType],
+  });
+  return Number(rowToObj(result.rows[0]).n ?? 0);
+}
+
+/**
+ * Approve a content-batch draft: flip draft → pending at `scheduledAt` (reserves the
+ * slot). Only acts on a 'draft' row of the given content_type (idempotent). Surfaces a
+ * slot collision as QueueSlotTakenError. Mirrors approveSequentialAdDraft.
+ */
+export async function approveContentBatchDraft(
+  id: number,
+  contentType: QueueContentType,
+  scheduledAt: string,
+): Promise<boolean> {
+  if (!isSqliteUtc(scheduledAt)) {
+    throw new Error(`approveContentBatchDraft: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${scheduledAt}')`);
+  }
+  const db = await ensureSchema();
+  try {
+    const result = await db.execute({
+      sql: `UPDATE publication_queue SET status = 'pending', scheduled_at = ?
+            WHERE id = ? AND status = 'draft' AND content_type = ?`,
+      args: [scheduledAt, id, contentType],
+    });
+    return (result.rowsAffected ?? 0) === 1;
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+      throw new QueueSlotTakenError(contentType, scheduledAt);
+    }
+    throw err;
+  }
+}
+
+/** Cancel a content-batch draft (draft → cancelled). Mirrors cancelSequentialAdDraft. */
+export async function cancelContentBatchDraft(id: number, contentType: QueueContentType): Promise<boolean> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue SET status = 'cancelled'
+          WHERE id = ? AND status = 'draft' AND content_type = ?`,
+    args: [id, contentType],
+  });
+  return (result.rowsAffected ?? 0) === 1;
+}
+
+/**
+ * Set a content-batch item's publication slot from the dashboard's date picker. Accepts
+ * 'draft' or already-'pending' and lands it 'pending' at `scheduledAt` either way — serves
+ * both "approve at a time I choose" and "move an already-scheduled item". Mirrors
+ * rescheduleSequentialAd; refuses publishing/published/failed/cancelled for the same reason.
+ */
+export async function rescheduleContentBatchDraft(
+  id: number,
+  contentType: QueueContentType,
+  scheduledAt: string,
+): Promise<boolean> {
+  if (!isSqliteUtc(scheduledAt)) {
+    throw new Error(`rescheduleContentBatchDraft: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${scheduledAt}')`);
+  }
+  const db = await ensureSchema();
+  try {
+    const result = await db.execute({
+      sql: `UPDATE publication_queue SET status = 'pending', scheduled_at = ?
+            WHERE id = ? AND content_type = ? AND status IN ('draft', 'pending')`,
+      args: [scheduledAt, id, contentType],
+    });
+    return (result.rowsAffected ?? 0) === 1;
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+      throw new QueueSlotTakenError(contentType, scheduledAt);
     }
     throw err;
   }
