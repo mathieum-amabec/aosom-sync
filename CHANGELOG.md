@@ -2,7 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.92.14] - 2026-09-20
+## [0.5.92.15] - 2026-09-20
+
+### Added
+
+- **Catalog sort: "Nouveaux produits Aosom"** — new sort option in the Catalogue browser
+  (`sort=newest`) ordering by `created_at` DESC, the product row's first-ever `INSERT`
+  into `products` (a DB-level default, never touched by the daily upsert's
+  `ON CONFLICT DO UPDATE`), which is the best available proxy for "first seen in the
+  Aosom feed" — no dedicated `first_seen_at` column existed, and `created_at` already
+  captures exactly that for any SKU discovered since the table's 2026-04-11 bulk seed.
+  Known limitation, documented in code: the 85% of rows (10,269/12,013) created that
+  single seed day all share one timestamp and sort as a same-date tail — correct,
+  conservative behavior (never falsely promoted as "new"), but the sort is only fully
+  meaningful for SKUs first seen after that date. `sku ASC` tiebreaks same-timestamp rows
+  for a deterministic, pagination-stable order. Verified against production data: the
+  top results are genuinely the most recently added SKUs (dated 2026-09-16 through
+  2026-09-20), not an artifact of another field.
 
 Three safety nets around the import dashboard's automatic bulk push ("Generate All
 Pending"), which until now generated content and pushed to Shopify back-to-back with no

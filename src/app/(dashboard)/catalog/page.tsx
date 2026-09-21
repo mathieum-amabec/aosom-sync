@@ -427,6 +427,7 @@ function CatalogBrowser() {
             <option value="qty_asc">Stock: low first</option>
             <option value="qty_desc">Stock: high first</option>
             <option value="low_stock">Low stock (in stock)</option>
+            <option value="newest">Nouveaux produits Aosom</option>
           </select>
         </div>
         <div className="flex gap-2">
