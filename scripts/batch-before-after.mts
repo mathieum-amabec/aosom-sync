@@ -7,16 +7,17 @@
  * product visible), 0.9s dissolve, ~6.1s total, kinetic label pop, cinematic grade — copied
  * rather than imported for the same reason as the assembly batch (script, not a module).
  *
- * ⚠️ STUDIO/LIFE PAIR SELECTION IS A HEURISTIC, NOT VISION-VERIFIED: takes Shopify media[0]
- * as the studio shot and the LAST media entry as the lifestyle shot. This matches the pattern
- * observed by hand on 3 real SKUs earlier this session (index 0 = white-bg, the lifestyle
- * shot showed up at index 6 of 7 for all three) — but it is 3 data points, not a rule, and
- * `lifestyle-verified` products with very few images or a different photographer's ordering
- * could pair wrong (e.g. two studio shots). Candidates with fewer than 5 media entries are
- * skipped outright to reduce that risk, not eliminated. Mat should spot-check this batch's
- * output before scaling past a validation run — building a real Claude Vision classifier
- * (as poc-before-after-v3's own header says SHOULD drive this pick) was out of scope for
- * this pass; flagged, not silently done.
+ * CORRECTION (Problem 2, this session): the position heuristic (media[0]=studio,
+ * media[last]=life) DID pair wrong — confirmed on 2 of the 8 shipped clips (both Christmas
+ * trees: 830-323, 830-862V01GN), where media[0] is already a decorated/lifestyle scene, not
+ * a plain studio shot. Root cause: the "index 0 = white-bg" pattern held for the 3 furniture
+ * SKUs it was checked against, but Christmas trees are commonly PHOTOGRAPHED decorated even
+ * in their first/lead image — a category where the heuristic's assumption is simply false.
+ * Replaced with `classifyStudioLife` (Vision, one call per SKU, both candidate images sent
+ * together so the model picks/swaps rather than judging each in isolation) — still takes
+ * media[0]/media[last] as the two CANDIDATES (cheap, avoids scoring every image), but Vision
+ * now decides which of the two is actually the clean/neutral one vs. the styled one, and
+ * swaps if media[0] turns out to be the styled one.
  *
  * DRAFT ONLY — content_type='before_after', status='draft'.
  * Usage: node_modules/tsx/dist/cli.mjs scripts/batch-before-after.mts --limit 15 --apply
@@ -120,11 +121,55 @@ async function fetchShopifyMedia(sku: string): Promise<ShopifyMedia | null> {
   return { title: node.title ?? sku, images };
 }
 
+/**
+ * Which of two candidate images is the clean studio/neutral-background shot (AVANT) vs. the
+ * styled/lifestyle one (APRÈS) — one Vision call, both images together so the model compares
+ * rather than judging each in isolation. Reuses the exact base64/budgetedCreate pattern
+ * vision-classifier.ts already established for pos-1 compliance classification.
+ */
+async function classifyStudioLife(imgA: string, imgB: string): Promise<{ studio: string; life: string }> {
+  const { getAnthropicClient } = await import("@/lib/content-generator");
+  const { budgetedCreate } = await import("@/lib/llm-budget");
+  const { CLAUDE } = await import("@/lib/config");
+
+  const [bufA, bufB] = await Promise.all([
+    fetch(imgA).then((r) => r.arrayBuffer()).then(Buffer.from),
+    fetch(imgB).then((r) => r.arrayBuffer()).then(Buffer.from),
+  ]);
+  const client = getAnthropicClient();
+  const message = await budgetedCreate(client, {
+    model: CLAUDE.MODEL_BATCH,
+    max_tokens: 200,
+    system:
+      "Tu compares deux photos du MÊME produit. L'une est une photo STUDIO (fond neutre/blanc, " +
+      "aucune mise en scène). L'autre est une photo LIFESTYLE (mise en scène dans une pièce meublée/décorée, " +
+      "même si le produit est décoré ou entouré d'accessoires). Réponds UNIQUEMENT en JSON: " +
+      '{"studio": "A"|"B", "reason": "<une phrase courte>"} — quelle lettre est la photo STUDIO.',
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: bufA.toString("base64") } },
+          { type: "text", text: "Photo A ⬆" },
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: bufB.toString("base64") } },
+          { type: "text", text: "Photo B ⬆" },
+        ],
+      },
+    ],
+  });
+  const text = message.content.map((c) => ("text" in c ? c.text : "")).join("");
+  const m = text.match(/\{[\s\S]*?\}/);
+  const studioIsA = !m || JSON.parse(m[0]).studio !== "B"; // default to A on any parse failure
+  return studioIsA ? { studio: imgA, life: imgB } : { studio: imgB, life: imgA };
+}
+
 const argv = process.argv.slice(2);
 const APPLY = argv.includes("--apply");
 const flag = (n: string) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : null; };
 const LIMIT = Number(flag("--limit") ?? "15");
 const OUT_DIR = flag("--out") ?? "out_before_after";
+/** Targeted re-render (e.g. fixing specific SKUs) instead of a fresh priority scan. */
+const ONLY = flag("--only")?.split(",").map((s) => s.trim()).filter(Boolean) ?? null;
 
 async function main(): Promise<void> {
   const { topPriorityCandidates } = await import("@/lib/selectors/content-priority");
@@ -134,7 +179,10 @@ async function main(): Promise<void> {
 
   // lifestyle-verified is a Shopify TAG, not a Turso column — join via a tag check per
   // candidate below rather than in SQL (Turso has no tag table for this feed).
-  const pool = await topPriorityCandidates(`1=1`, [], LIMIT * 4); // over-fetch; many will lack the tag
+  // Over-fetch when scanning fresh (many candidates will lack the tag); when targeting
+  // specific SKUs, fetch effectively everything so a priority drift since the last run can't
+  // hide the SKU we're trying to fix.
+  const pool = await topPriorityCandidates(`1=1`, [], ONLY ? 5000 : LIMIT * 4);
   console.log(`\n🖼️  avant/après batch — scanning ${pool.length} priority candidates for 'lifestyle-verified' — ${APPLY ? "APPLY" : "DRY-RUN"}\n`);
 
   const tracks = readdirSync(MUSIC_DIR).filter((f) => f.endsWith(".mp3")).map((f) => path.join(MUSIC_DIR, f));
@@ -142,7 +190,8 @@ async function main(): Promise<void> {
 
   let ok = 0, fail = 0, scanned = 0;
   for (const c of pool) {
-    if (ok >= LIMIT) break;
+    if (ONLY && !ONLY.includes(c.sku)) continue;
+    if (!ONLY && ok >= LIMIT) break;
     scanned++;
     const media = await fetchShopifyMedia(c.sku);
     if (!media || media.images.length < MIN_MEDIA) continue;
@@ -152,8 +201,7 @@ async function main(): Promise<void> {
     console.log(`  ${c.sku.padEnd(14)} priority=${c.priority.toFixed(3)} media=${media.images.length} "${media.title.slice(0, 40)}"`);
     if (!APPLY) continue;
 
-    const studio = media.images[0];
-    const life = media.images[media.images.length - 1];
+    const { studio, life } = await classifyStudioLife(media.images[0], media.images[media.images.length - 1]);
     const dir = `tmp_ba_batch/${c.sku}`;
     mkdirSync(dir, { recursive: true });
     try {

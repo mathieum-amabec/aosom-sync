@@ -10,13 +10,21 @@
  * by a DB-selected SKU list rather than a hardcoded array. Kept in sync by eye; if the
  * original's visual design changes, mirror it here too.
  *
- * ⚠️ SCOPE LIMITATION vs. the 32 original sources: those each had a manually audited clean
- * window (`ss`/`cleanDur`) and per-SKU delogo crop, done by watching the footage. This batch
- * has NO per-video audit — it applies a generic safe trim (skip the first 1s, stop 2s before
- * the end, capped at 6s) and never delogos. That means a supplier watermark or a bad opening
- * frame on any of these SKUs will ship uninspected. Mat should spot-check this batch's output
- * before a larger run — this is exactly the kind of quality gap the avant/après and assembly
- * corrections this session were about.
+ * CORRECTION (Problem 1, this session): the original generic 1s trim shipped 3 of 7 videos
+ * with a supplier-branded INTRO CARD burned in (e.g. "HOMCOM Shoe Cabinet — Create a tidy and
+ * welcoming entrance", ~2.5s of full-frame logo+English title text at the START of the raw
+ * Aosom clip). This was misdiagnosed at first as a spatial corner-watermark problem (the kind
+ * render-demand-gen.mjs's per-SKU `delogo` crop already solves) — it is not: confirmed by
+ * contact-sheet review of the raw source that the "logo" is actually a multi-second branded
+ * title CARD occupying most of the frame, not a small persistent corner mark. Cropping or
+ * blurring a fixed region would either miss it (it's not always the same size/position) or
+ * blur out most of the product for the ~2.5s it's on screen. The real fix is temporal: don't
+ * render inside the intro at all.
+ *
+ * Now reuses `analyzeClip` from `@/lib/video-scene-selector` (already built and tested for
+ * exactly this: it Vision-scores sampled frames across the whole clip and explicitly
+ * penalizes "text overlay present", scoring 1). Its window is 15-20s; this SKU only needs
+ * 6s, so `ss`/`effDur` are derived from its `startTime` instead of the old naive 1s offset.
  *
  * DRAFT ONLY: every rendered clip lands in publication_queue as content_type='demand_gen_ext',
  * status='draft' — nothing here publishes or even reserves a schedule slot (draft rows aren't
@@ -117,10 +125,11 @@ function overlayChain(titleLines: string[], lineDir: string): string {
   return parts.join(",");
 }
 
-function buildFilter(drawChain: string, effDur: number): string {
+function buildFilter(drawChain: string, effDur: number, delogo: string | null): string {
   const { W, H } = RATIO;
+  const pre = delogo ? `${delogo},` : "";
   const base =
-    `[0:v]split=2[a][b];` +
+    `[0:v]${pre}split=2[a][b];` +
     `[a]scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},boxblur=24:4,setsar=1[bg];` +
     `[b]scale=${W}:${H}:force_original_aspect_ratio=decrease,setsar=1[fg];` +
     `[bg][fg]overlay=(W-w)/2:(H-h)/2[base]`;
@@ -143,6 +152,8 @@ const APPLY = argv.includes("--apply");
 const flag = (n: string) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : null; };
 const LIMIT = Number(flag("--limit") ?? "20");
 const OUT_DIR = flag("--out") ?? "out_demandgen_ext";
+/** Targeted re-render (e.g. fixing specific SKUs) instead of a fresh priority scan. */
+const ONLY = flag("--only")?.split(",").map((s) => s.trim()).filter(Boolean) ?? null;
 
 /**
  * `products.name` is the raw ENGLISH Aosom feed title — the curated FR title lives only on
@@ -164,23 +175,18 @@ async function fetchShopifyTitle(sku: string): Promise<string | null> {
   return json.data?.products?.edges?.[0]?.node?.title ?? null;
 }
 
-async function ffprobeDuration(file: string): Promise<number> {
-  const FFPROBE = FFMPEG.replace(/ffmpeg(\.exe)?$/i, (m) => (m.toLowerCase().endsWith(".exe") ? "ffprobe.exe" : "ffprobe"));
-  const out = execFileSync(FFPROBE, ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", file]);
-  return Number(String(out).trim());
-}
-
 async function main(): Promise<void> {
   const { topPriorityCandidates } = await import("@/lib/selectors/content-priority");
   const { addToQueue, ensureSchema } = await import("@/lib/database");
   const { put } = await import("@vercel/blob");
   const dbClient = await ensureSchema();
 
-  const candidates = await topPriorityCandidates(
+  const allCandidates = await topPriorityCandidates(
     `p.video IS NOT NULL AND p.video != ''`,
     [],
-    LIMIT,
+    ONLY ? 5000 : LIMIT,
   );
+  const candidates = ONLY ? allCandidates.filter((c) => ONLY.includes(c.sku)) : allCandidates;
   console.log(`\n🎬 demand-gen extension — ${candidates.length} SKU(s) — ${APPLY ? "APPLY" : "DRY-RUN"}\n`);
   for (const c of candidates) {
     console.log(`  ${c.sku.padEnd(14)} priority=${c.priority.toFixed(3)} (velocity=${c.velocity14d} discount=${c.hasDiscount} season=${c.seasonalMultiplier})`);
@@ -203,14 +209,28 @@ async function main(): Promise<void> {
       const src = `src/${c.sku}.mp4`;
       const buf = Buffer.from(await (await fetch(r.video)).arrayBuffer());
       writeFileSync(src, buf);
-      const dur = await ffprobeDuration(src);
-      const ss = Math.min(1.0, Math.max(0, dur - DURATION_SEC - 0.5));
-      const effDur = Math.min(DURATION_SEC, Math.max(1, dur - ss - 1.5));
+      const { analyzeClip } = await import("@/lib/video-scene-selector");
+      const analysis = await analyzeClip(src);
+      const ss = analysis.startTime;
+      const effDur = Math.min(DURATION_SEC, Math.max(1, analysis.endTime - analysis.startTime));
+      console.log(`    scene: [${analysis.startTime.toFixed(1)}-${analysis.endTime.toFixed(1)}] avg=${analysis.avgScore} (${analysis.reason})`);
+
+      // Distinct from the intro-card problem the scene selector already solves temporally:
+      // some sources ALSO carry a small persistent top-left HOMCOM icon throughout the whole
+      // clip (not just an intro), which no choice of window can avoid. The scene selector's
+      // own scoring reason already names it when present ("logo overlay", "watermark") — reuse
+      // that signal rather than a second Vision call, and apply the same top-left crop size
+      // render-demand-gen.mjs's manually-audited SOURCES already use for this exact HOMCOM icon
+      // (e.g. 823-002V80, 831-790V01WT). A generic box, not per-SKU measured — good enough to
+      // clear a ~130x90px corner icon without eating meaningful product area.
+      const hasLogoMention = /logo|watermark/i.test(analysis.reason);
+      const delogo = hasLogoMention ? "delogo=x=6:y=6:w=140:h=90" : null;
+      if (delogo) console.log(`    delogo applied (scene reason mentioned a logo/watermark)`);
 
       const lineDir = `tmp_dg_ext/${c.sku}`;
       mkdirSync(lineDir, { recursive: true });
       const titleLines = wrap(formatVideoTitle(frTitle), RATIO.wrap).slice(0, 2);
-      const filter = `${buildFilter(overlayChain(titleLines, lineDir), effDur)};${buildAudioChain(effDur)}`;
+      const filter = `${buildFilter(overlayChain(titleLines, lineDir), effDur, delogo)};${buildAudioChain(effDur)}`;
       const outFile = path.join(OUT_DIR, `${c.sku}_9x16_6s.mp4`);
       const args = [
         "-y", "-nostdin", "-loglevel", "error",
@@ -229,6 +249,13 @@ async function main(): Promise<void> {
       const fileBuf = readFileSync(outFile);
       const { url } = await put(`content-batches/demand-gen-ext/${c.sku}_9x16_6s.mp4`, fileBuf, {
         access: "public", contentType: "video/mp4", addRandomSuffix: false, allowOverwrite: true,
+      });
+
+      // Re-rendering the same SKU (e.g. this session's title-language and scene-selection
+      // fixes) must not leave the old, wrong draft sitting next to the corrected one.
+      await dbClient.execute({
+        sql: `UPDATE publication_queue SET status='cancelled' WHERE content_type='demand_gen_ext' AND content_id=? AND status='draft'`,
+        args: [c.sku],
       });
 
       await addToQueue({
