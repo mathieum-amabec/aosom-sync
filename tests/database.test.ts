@@ -278,6 +278,38 @@ describe("getProductsSnapshot — SQL shape (direct SQL)", () => {
   });
 });
 
+describe("getCatalogFreshnessCandidates — SQL shape (direct SQL)", () => {
+  let db: Client;
+
+  beforeEach(async () => {
+    db = setupTestDb();
+    await db.execute(`CREATE TABLE IF NOT EXISTS products (
+      sku TEXT PRIMARY KEY, qty INTEGER, last_seen_at INTEGER, shopify_product_id TEXT
+    )`);
+  });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  // Mirror of getCatalogFreshnessCandidates' query.
+  const CANDIDATES_SQL = `SELECT sku, qty, last_seen_at FROM products WHERE qty != 0`;
+
+  it("returns only qty != 0 rows, imported or not, with last_seen_at intact", async () => {
+    await db.batch([
+      { sql: `INSERT INTO products (sku, qty, last_seen_at, shopify_product_id) VALUES (?, ?, ?, ?)`, args: ["IN-STOCK-IMPORTED", 5, 1700000000, "shop-1"] },
+      { sql: `INSERT INTO products (sku, qty, last_seen_at, shopify_product_id) VALUES (?, ?, ?, ?)`, args: ["IN-STOCK-NEVER-IMPORTED", 3, 1700000500, null] },
+      { sql: `INSERT INTO products (sku, qty, last_seen_at, shopify_product_id) VALUES (?, ?, ?, ?)`, args: ["ALREADY-ZERO", 0, 1600000000, null] },
+    ]);
+
+    const result = await db.execute(CANDIDATES_SQL);
+    const skus = result.rows.map((r) => r.sku as string).sort();
+
+    // ALREADY-ZERO is excluded (nothing to do); both qty!=0 rows come back regardless
+    // of shopify_product_id — the population is deliberately import-status-agnostic.
+    expect(skus).toEqual(["IN-STOCK-IMPORTED", "IN-STOCK-NEVER-IMPORTED"]);
+    const bySku = Object.fromEntries(result.rows.map((r) => [r.sku as string, r]));
+    expect(Number(bySku["IN-STOCK-NEVER-IMPORTED"].last_seen_at)).toBe(1700000500);
+  });
+});
+
 describe("clearStaleLockIfNeeded (direct SQL)", () => {
   let db: Client;
 
@@ -705,6 +737,81 @@ describe("getProducts sort — best_sellers and price_drop (direct SQL)", () => 
     const dropB = Number((rows[1] as unknown as Record<string, unknown>).drop_pct);
     expect(dropA).toBe(50.0);
     expect(dropB).toBe(10.0);
+  });
+});
+
+// ─── getProducts — sort by "newest" (direct SQL) ──────────────────────────────
+// Mirror of getProducts' default branch with sort=newest: ORDER BY created_at DESC,
+// sku ASC. created_at is the products row's first-ever INSERT timestamp (DB default,
+// never touched by the upsert's ON CONFLICT DO UPDATE) — the best available proxy for
+// "first seen in the Aosom feed" (see catalog-freshness investigation, 2026-09-20).
+
+describe("getProducts sort — newest (direct SQL)", () => {
+  let db: ReturnType<typeof setupTestDb>;
+
+  beforeEach(async () => {
+    db = setupTestDb();
+    await db.batch([
+      `CREATE TABLE IF NOT EXISTS products (
+        sku TEXT PRIMARY KEY, name TEXT, price REAL, qty INTEGER,
+        color TEXT, product_type TEXT, image1 TEXT, shopify_product_id TEXT,
+        created_at INTEGER DEFAULT (strftime('%s','now'))
+      )`,
+    ]);
+  });
+
+  afterEach(async () => {
+    db.close();
+    if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
+  });
+
+  const NEWEST_SQL = `
+    WITH filtered AS (SELECT sku, name, price, qty, color, product_type, image1, shopify_product_id, created_at FROM products)
+    SELECT sku, created_at FROM filtered
+    ORDER BY created_at DESC, sku ASC`;
+
+  it("orders genuinely new arrivals ahead of older ones, most recent first", async () => {
+    const day = 86400;
+    const now = Math.floor(Date.now() / 1000);
+    await db.batch([
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-OLDEST", "Old", 10, 1, now - 30 * day] },
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-NEWEST", "Newest", 10, 1, now] },
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-MIDDLE", "Middle", 10, 1, now - 5 * day] },
+    ]);
+
+    const rows = (await db.execute(NEWEST_SQL)).rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
+    expect(rows).toEqual(["SKU-NEWEST", "SKU-MIDDLE", "SKU-OLDEST"]);
+  });
+
+  it("tiebreaks same-timestamp rows (e.g. a bulk-seed day) deterministically by sku ASC", async () => {
+    // Reproduces prod: 85% of rows share one bulk-seed created_at. The sort must still
+    // be stable/deterministic across pages, not DB-insertion-order-dependent.
+    const seedDay = 1775894400;
+    await db.batch([
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-C", "C", 10, 1, seedDay] },
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-A", "A", 10, 1, seedDay] },
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-B", "B", 10, 1, seedDay] },
+    ]);
+
+    const rows = (await db.execute(NEWEST_SQL)).rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
+    expect(rows).toEqual(["SKU-A", "SKU-B", "SKU-C"]); // same created_at → sku ASC
+  });
+
+  it("a genuinely new SKU always outranks the entire bulk-seed cohort, regardless of cohort size", async () => {
+    const seedDay = 1775894400;
+    // Zero-padded so string sku ASC matches numeric order — SEED-10 < SEED-2
+    // lexicographically otherwise, which would make this assertion wrong, not the code.
+    const seedSku = (i: number) => `SEED-${String(i).padStart(2, "0")}`;
+    const inserts = [];
+    for (let i = 0; i < 20; i++) {
+      inserts.push({ sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: [seedSku(i), `Seed ${i}`, 10, 1, seedDay] });
+    }
+    inserts.push({ sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-FRESH", "Fresh arrival", 10, 1, seedDay + 86400] });
+    await db.batch(inserts);
+
+    const rows = (await db.execute(NEWEST_SQL)).rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
+    expect(rows[0]).toBe("SKU-FRESH");
+    expect(rows.slice(1)).toEqual(Array.from({ length: 20 }, (_, i) => seedSku(i))); // sku ASC among the tied cohort
   });
 });
 

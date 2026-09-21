@@ -1557,6 +1557,33 @@ export async function zeroQtyForRemovedSkus(skus: string[]): Promise<number> {
   return affected;
 }
 
+export interface CatalogFreshnessCandidate {
+  sku: string;
+  qty: number;
+  lastSeenAt: number;
+}
+
+/**
+ * Every product row with a nonzero qty — the candidate pool for the catalog-freshness
+ * zero-out (removed-catalog.ts's runCatalogFreshnessZero). Unlike zeroQtyForRemovedSkus
+ * above (which only reaches SKUs already linked to a live Shopify product), this covers
+ * EVERY row regardless of shopify_product_id, closing the gap the 2026-09-20
+ * investigation found: ~8,953 never-imported catalog rows had no reconciliation at all.
+ * Only 3 columns — this can be ~10k rows, kept minimal on purpose.
+ */
+export async function getCatalogFreshnessCandidates(): Promise<CatalogFreshnessCandidate[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT sku, qty, last_seen_at FROM products WHERE qty != 0`);
+  return result.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      sku: (o.sku as string) || "",
+      qty: Number(o.qty) || 0,
+      lastSeenAt: Number(o.last_seen_at) || 0,
+    };
+  });
+}
+
 export interface ProductSnapshot {
   sku: string;
   name: string;
@@ -1728,10 +1755,21 @@ export async function getProducts(filters: {
     case "low_stock": orderBy = "CASE WHEN qty > 0 THEN 0 ELSE 1 END, qty ASC"; break;
     case "best_sellers": joinSort = "best_sellers"; break;
     case "price_drop": joinSort = "price_drop"; break;
+    // "Nouveaux produits Aosom" — newest first, by created_at (the row's first-ever
+    // INSERT into `products`, a DB-level default never touched by the upsert's ON
+    // CONFLICT DO UPDATE — see refreshProducts). KNOWN LIMITATION: 85% of current rows
+    // (10,269/12,013 as of 2026-09-20) share the exact same created_at, the day this
+    // table was bulk-seeded — for those, created_at reflects the seed date, not the
+    // SKU's true Aosom debut. The sort is fully meaningful only for SKUs first seen
+    // after that seed date; older rows sort as a same-timestamp tail, which is the
+    // conservative/correct behavior for a "new arrivals" sort (never falsely promoted
+    // to the top). sku ASC tiebreaks for a deterministic, pagination-safe order among
+    // same-timestamp rows.
+    case "newest": orderBy = "created_at DESC, sku ASC"; break;
   }
 
   // Select only columns the catalog UI needs
-  const catalogColumns = "sku, name, price, qty, color, product_type, image1, shopify_product_id, shopify_handle";
+  const catalogColumns = "sku, name, price, qty, color, product_type, image1, shopify_product_id, shopify_handle, created_at";
 
   // `last_price` exposes the old_price of each SKU's most recent price change so the catalog
   // table can render the ▼/▲ movement badge (current price vs. previous price). ROW_NUMBER
@@ -1753,7 +1791,7 @@ export async function getProducts(filters: {
   // result is LEFT JOINed to `last_price` (and, for the velocity/discount sorts, to a 14-day
   // `ph_agg`). COALESCE(…, 0) keeps products without history at the bottom of the list.
   const cutoff14d = Math.floor(Date.now() / 1000) - 14 * 86400;
-  const selectCols = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, f.shopify_handle, lp.prev_price`;
+  const selectCols = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, f.shopify_handle, f.created_at, lp.prev_price`;
 
   // Built as a function of (where, args) so the FTS→LIKE fallback can re-issue the exact
   // same query shape against the other predicate without duplicating three SQL branches.
