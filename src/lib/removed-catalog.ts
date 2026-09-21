@@ -25,7 +25,7 @@
  */
 import type { ShopifyExistingProduct } from "@/types/sync";
 import { fetchAllShopifyProducts, draftShopifyProduct } from "@/lib/shopify-client";
-import { zeroQtyForRemovedSkus } from "@/lib/database";
+import { zeroQtyForRemovedSkus, getCatalogFreshnessCandidates, type CatalogFreshnessCandidate } from "@/lib/database";
 import { EXCLUDE_TAG } from "@/lib/stale-catalog";
 
 /** Minimum fraction of ACTIVE products' variant SKUs the feed must cover before we
@@ -235,4 +235,84 @@ export async function runRemovedFromFeedDraft(
     ran: true, guardTripped: false, coverage: plan.guard.coverage,
     qtyZeroed, drafted, failed, skipped: plan.skipped, planned: plan.drafts.length,
   };
+}
+
+/**
+ * Catalog-freshness zero-out — closes the gap `runRemovedFromFeedDraft` above
+ * deliberately leaves open. That function only reaches SKUs already linked to a live
+ * Shopify product (it needs a `shopifyId` to draft or a matched variant to zero); the
+ * ~8,953 catalog rows that were NEVER imported have no such link, so a product Aosom
+ * quietly discontinued long ago can sit in the Catalogue browser forever with its last
+ * known qty still showing (2026-09-20 investigation: rows up to 163 days stale, ~3,477
+ * not reconfirmed in 7+ days). This rule is simpler and SKU-population-agnostic: ANY
+ * product row — imported or not — whose last confirmed presence in the Aosom feed
+ * (`last_seen_at`) is older than CATALOG_FRESHNESS_ZERO_DAYS gets qty→0.
+ *
+ * Not the same thing as stale-catalog.ts's STALE_DAYS=30 net: that one runs on its own
+ * weekly cron and DRAFTS already-imported, still-live Shopify products. This one runs
+ * daily inside job1-sync's runSyncInit (same cadence as runRemovedFromFeedDraft above)
+ * and only ever touches the local `qty` column — it never calls Shopify, because a
+ * never-imported row has nothing on Shopify to touch.
+ *
+ * No feed-completeness guard (unlike the function above): a single truncated CSV day
+ * can't falsely trip this rule, because the 21-day window means a genuinely available
+ * product will have a recent last_seen_at from any of the last ~21 successful runs, not
+ * just today's. And if the cron itself stops running, this code stops running with it
+ * (last_seen_at simply stops advancing) — there's no scenario where an outage causes
+ * new false positives.
+ *
+ * Idempotent: a SKU that reappears in tomorrow's feed is upserted with its real qty by
+ * the normal refreshProducts() path regardless of having been zeroed — there is no
+ * separate "excluded forever" flag to clear, see the 2026-09-20 investigation.
+ */
+export const CATALOG_FRESHNESS_ZERO_DAYS = 21;
+
+/** Pure decision core — no I/O. SKUs already at qty=0 are excluded (nothing to do). */
+export function planCatalogFreshnessZero(
+  candidates: CatalogFreshnessCandidate[],
+  nowSeconds: number,
+  thresholdDays: number = CATALOG_FRESHNESS_ZERO_DAYS,
+): string[] {
+  const cutoff = nowSeconds - thresholdDays * 86400;
+  return candidates
+    .filter((c) => c.qty !== 0 && c.lastSeenAt < cutoff)
+    .map((c) => c.sku);
+}
+
+export interface CatalogFreshnessZeroResult {
+  /** Rows examined (qty != 0, any SKU). */
+  candidates: number;
+  /** Rows whose last_seen_at was past the threshold. */
+  planned: number;
+  /** Rows actually written qty=0 (matches `planned` in practice; kept separate for
+   * consistency with the write result, same shape as zeroQtyForRemovedSkus's return). */
+  zeroed: number;
+}
+
+export interface CatalogFreshnessZeroDeps {
+  getCandidates?: () => Promise<CatalogFreshnessCandidate[]>;
+  zeroQty?: (skus: string[]) => Promise<number>;
+  log?: (msg: string, extra?: Record<string, unknown>) => void;
+  now?: number;
+  thresholdDays?: number;
+}
+
+export async function runCatalogFreshnessZero(
+  deps: CatalogFreshnessZeroDeps = {},
+): Promise<CatalogFreshnessZeroResult> {
+  const log = deps.log ?? defaultLog;
+  const getCandidates = deps.getCandidates ?? getCatalogFreshnessCandidates;
+  const zeroQty = deps.zeroQty ?? zeroQtyForRemovedSkus;
+  const now = deps.now ?? Math.floor(Date.now() / 1000);
+  const thresholdDays = deps.thresholdDays ?? CATALOG_FRESHNESS_ZERO_DAYS;
+
+  const candidates = await getCandidates();
+  const skus = planCatalogFreshnessZero(candidates, now, thresholdDays);
+  const zeroed = skus.length > 0 ? await zeroQty(skus) : 0;
+
+  log(`catalog-freshness-zero: ${zeroed} SKU(s) mis à qty=0 (non revus depuis ≥${thresholdDays}j)`, {
+    candidates: candidates.length, planned: skus.length, zeroed,
+  });
+
+  return { candidates: candidates.length, planned: skus.length, zeroed };
 }

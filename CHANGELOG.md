@@ -2,6 +2,45 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.16] - 2026-09-20
+
+Closes the catalog-freshness gap the 2026-09-20 investigation found: the existing
+removed-from-feed reconcile (`removed-catalog.ts`) only zeroes qty for SKUs already
+linked to a live Shopify product, leaving ~8,953 never-imported catalog rows with NO
+reconciliation at all — some stale 160+ days while still showing a positive qty in the
+Catalogue browser, which is why so many import attempts hit the (correctly working)
+"no longer available at the supplier" warning added in the mixed-batch/feed-gone fix
+(v0.5.92.13).
+
+### Added
+
+- **Catalog-freshness zero-out** (`runCatalogFreshnessZero`, `removed-catalog.ts`) — any
+  product row, imported or not, whose `last_seen_at` is 21+ days old gets `qty` set to 0.
+  Runs inside `runSyncInit`, the same daily cron path (`/api/cron/sync` → `runSyncFull`,
+  06:00 UTC) as the existing removed-from-feed reconcile, right after it — not a new
+  process. Non-fatal, independent of today's diff. Covers **both** never-imported
+  catalog rows (the gap this closes) **and** already-imported ones — a single uniform
+  rule, not two separate paths.
+- Idempotent and self-healing: a SKU that reappears in a later Aosom feed is upserted
+  with its real qty by the normal daily sync regardless of having been zeroed — no
+  separate "excluded forever" flag exists to get stuck.
+- No feed-completeness guard on this rule specifically (unlike the existing same-day
+  reconcile): the 21-day window already absorbs a single truncated CSV day, and the rule
+  only ever runs as part of a sync that itself executed, so a cron outage cannot create a
+  false positive.
+- `getCatalogFreshnessCandidates` (`database.ts`) — new minimal read (`sku, qty,
+  last_seen_at` for every `qty != 0` row) backing the above.
+
+### Dry-run (production, 2026-09-20, threshold=21 days) — confirmed, applied
+
+- **3,218 products** zeroed on first run: 3,168 never imported + 50 already imported
+  (persistent stragglers the same-day reconcile's rename-suspect guard leaves live —
+  this rule is a slightly earlier catch of what the existing 30-day stale-catalog net
+  would eventually draft anyway).
+- Age breakdown of the affected set: 1,519 rows >90 days stale, 1,016 rows 60-90 days,
+  683 rows 21-60 days.
+- Numbers confirmed by the operator before merge; the next 06:00 UTC sync applies them.
+
 ## [0.5.92.15] - 2026-09-20
 
 ### Added
@@ -19,6 +58,8 @@ All notable changes to Aosom Sync will be documented in this file.
   for a deterministic, pagination-stable order. Verified against production data: the
   top results are genuinely the most recently added SKUs (dated 2026-09-16 through
   2026-09-20), not an artifact of another field.
+
+## [0.5.92.14] - 2026-09-20
 
 Three safety nets around the import dashboard's automatic bulk push ("Generate All
 Pending"), which until now generated content and pushed to Shopify back-to-back with no
