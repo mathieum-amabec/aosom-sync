@@ -269,6 +269,17 @@ async function main(): Promise<void> {
       });
       const priceRow = await dbClient.execute({ sql: `SELECT price FROM products WHERE sku = ?`, args: [c.sku] });
       const price = Number((priceRow.rows[0] as unknown as { price?: number } | undefined)?.price ?? 0);
+
+      // Re-rendering the same SKU (a later batch run re-scanning the same priority
+      // pool, or a re-render after a fix) must not leave the old draft sitting next
+      // to the new one — mirrors the same guard in batch-demand-gen-extend.mts and
+      // batch-assembly.mts, missing here until this was caught reviewing the live
+      // dashboard (830-323/830-182/830-182BK/830-862V01GN each had 2 draft rows).
+      await dbClient.execute({
+        sql: `UPDATE publication_queue SET status='cancelled' WHERE content_type='before_after' AND content_id=? AND status='draft'`,
+        args: [c.sku],
+      });
+
       await addToQueue({
         contentType: "before_after",
         contentId: c.sku,
