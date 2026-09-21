@@ -25,6 +25,14 @@
  * "none" if nothing in the gallery qualifies. A SKU where either role comes back null is
  * SKIPPED — Mat gets a clean pair or nothing, never a forced bad one.
  *
+ * DOUBLE CONTROL (added confirming this before the expanded batch — round 1 only had the
+ * selection control below, no post-render check, unlike demand_gen_ext): the selection
+ * classifier above picks good source images, but this alone doesn't guarantee the FINAL
+ * composited clip stayed clean. `verifyBeforeAfterClip` (demand-gen-clean-window.ts) re-checks
+ * one frame in the AVANT window and one in the APRÈS window against a before/after-specific
+ * prompt (STRICT_BEFORE_AFTER_RENDERED_PROMPT — ignores our own AVANT/APRÈS label and
+ * ameublodirect.ca watermark, unlike demand_gen_ext's overlay). A failure is never queued.
+ *
  * DRAFT ONLY — content_type='before_after', status='draft'.
  * Usage: node_modules/tsx/dist/cli.mjs scripts/batch-before-after.mts --limit 15 --apply
  */
@@ -41,6 +49,10 @@ const NAVY = "0x1A2340", GOLD = "0xD4A853";
 const BAR_H = 170;
 const HOOK_SEC = 1.0, STILL_SEC = 3.0, XFADE_SEC = 0.9;
 const TOTAL = HOOK_SEC + STILL_SEC * 2 - XFADE_SEC; // 6.1s
+// Midpoints of the AVANT/APRÈS windows in build() below — used to sample the post-render
+// verification at a moment when each label is actually on screen, not mid-crossfade.
+const AVANT_SAMPLE_AT = (HOOK_SEC + 0.15 + (HOOK_SEC + STILL_SEC - XFADE_SEC)) / 2;
+const APRES_SAMPLE_AT = (HOOK_SEC + STILL_SEC + TOTAL) / 2;
 const GRADE = "curves=preset=medium_contrast,eq=saturation=1.12:contrast=1.03";
 const MIN_MEDIA = 5;
 
@@ -215,8 +227,9 @@ async function main(): Promise<void> {
 
   const tracks = readdirSync(MUSIC_DIR).filter((f) => f.endsWith(".mp3")).map((f) => path.join(MUSIC_DIR, f));
   const { pickMusic } = await import("@/lib/video-ad-composer");
+  const { verifyBeforeAfterClip } = await import("@/lib/demand-gen-clean-window");
 
-  let ok = 0, fail = 0, scanned = 0;
+  let ok = 0, fail = 0, scanned = 0, needsRegen = 0;
   for (const c of pool) {
     if (ONLY && !ONLY.includes(c.sku)) continue;
     if (!ONLY && ok >= LIMIT) break;
@@ -263,6 +276,20 @@ async function main(): Promise<void> {
         "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", outFile,
       ];
       execFileSync(FFMPEG, args, { stdio: ["ignore", "ignore", "pipe"] });
+
+      // Post-render check (mirrors demand_gen_ext's verifyRenderedClip): the classifier
+      // picked good source images, but this confirms the FINAL composited clip — after
+      // crop/scale/pad — still shows a genuinely neutral AVANT and a genuine lifestyle
+      // APRÈS. A failure here is never queued, matching the "never ship with a visible
+      // defect" rule.
+      const verify = await verifyBeforeAfterClip(outFile, AVANT_SAMPLE_AT, APRES_SAMPLE_AT);
+      console.log(`    verify: ok=${verify.ok} (${verify.reason})`);
+      if (!verify.ok) {
+        console.log(`    ⚠ NEEDS REGEN: rendered clip failed post-render verification — not queued`);
+        needsRegen++;
+        continue;
+      }
+
       const fileBuf = readFileSync(outFile);
       const { url } = await put(`content-batches/before-after/AB-${c.sku}.mp4`, fileBuf, {
         access: "public", contentType: "video/mp4", addRandomSuffix: false, allowOverwrite: true,
@@ -298,7 +325,7 @@ async function main(): Promise<void> {
       rmSync(dir, { recursive: true, force: true });
     }
   }
-  console.log(`\n=== scanned=${scanned} ok=${ok} fail=${fail} ===`);
+  console.log(`\n=== scanned=${scanned} ok=${ok} fail=${fail} needsRegen=${needsRegen} ===`);
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error("FATAL:", e); process.exit(1); });
