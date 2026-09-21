@@ -75,21 +75,35 @@ function buildGraph(dir: string, segs: Seg[], caption: string): { graph: string;
 
   parts.push(`[${chain}]${GRADE}[graded]`);
 
-  // CORRECTION: both the pill and the text now center horizontally (was x=40/x=80, left-anchored).
+  // CORRECTION ROUND 2: round 1 centered the PILL correctly (pillX math below is right — a
+  // fresh render was measured against a drawn true-center line at iw/2 to confirm), but the
+  // multi-line TEXT still drifted off-center. Root cause: a single drawtext call given a
+  // multi-line textfile centers the BOUNDING BOX OF THE WIDEST LINE via x=(w-text_w)/2 — every
+  // OTHER (shorter) line is left-justified inside that box, not independently centered, so a
+  // 2-line caption with lines of different lengths shows its shorter line visibly off-center.
+  // Fixed by emitting one drawtext call PER LINE, each with its own x=(w-text_w)/2 — text_w is
+  // then that line's own width, so every line centers independently on the true 1080px frame.
   const lines = caption.split("\n");
   const maxLineLen = Math.max(...lines.map((l) => l.length));
   const pillW = Math.min(1000, 70 + maxLineLen * 25);
   const pillH = lines.length > 1 ? 150 : 76;
   const capY = Math.round(H * 0.12);
   const pillX = Math.round((W - pillW) / 2);
-  const f = `${dir}/cap.txt`;
-  writeFileSync(f, caption, "utf8");
+  const fontSize = 44;
+  const lineGap = Math.round(fontSize * 1.25);
+  const textStartY = capY + (lines.length > 1 ? 24 : 16);
 
   const draws: string[] = [
     `drawbox=x=${pillX}:y=${capY}:w=${pillW}:h=${pillH}:color=${NAVY}@0.6:t=fill`,
-    `drawtext=fontfile=${FONT}:textfile=${f}:fontcolor=${GOLD}:fontsize=44:line_spacing=12:` +
-      `borderw=2:bordercolor=black@0.35:x=(w-text_w)/2:y=${capY + (lines.length > 1 ? 24 : 16)}`,
   ];
+  lines.forEach((line, i) => {
+    const f = `${dir}/cap${i}.txt`;
+    writeFileSync(f, line, "utf8");
+    draws.push(
+      `drawtext=fontfile=${FONT}:textfile=${f}:fontcolor=${GOLD}:fontsize=${fontSize}:` +
+        `borderw=2:bordercolor=black@0.35:x=(w-text_w)/2:y=${textStartY + i * lineGap}`,
+    );
+  });
 
   const urlY = H - 92;
   parts.push(

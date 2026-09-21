@@ -10,21 +10,40 @@
  * by a DB-selected SKU list rather than a hardcoded array. Kept in sync by eye; if the
  * original's visual design changes, mirror it here too.
  *
- * CORRECTION (Problem 1, this session): the original generic 1s trim shipped 3 of 7 videos
- * with a supplier-branded INTRO CARD burned in (e.g. "HOMCOM Shoe Cabinet — Create a tidy and
- * welcoming entrance", ~2.5s of full-frame logo+English title text at the START of the raw
- * Aosom clip). This was misdiagnosed at first as a spatial corner-watermark problem (the kind
- * render-demand-gen.mjs's per-SKU `delogo` crop already solves) — it is not: confirmed by
- * contact-sheet review of the raw source that the "logo" is actually a multi-second branded
- * title CARD occupying most of the frame, not a small persistent corner mark. Cropping or
- * blurring a fixed region would either miss it (it's not always the same size/position) or
- * blur out most of the product for the ~2.5s it's on screen. The real fix is temporal: don't
- * render inside the intro at all.
+ * CORRECTION ROUND 2 (this session — round 1's `analyzeClip` reuse still shipped defects on
+ * 3 more videos, root-caused by frame-by-frame review of the raw sources, not patched blind):
  *
- * Now reuses `analyzeClip` from `@/lib/video-scene-selector` (already built and tested for
- * exactly this: it Vision-scores sampled frames across the whole clip and explicitly
- * penalizes "text overlay present", scoring 1). Its window is 15-20s; this SKU only needs
- * 6s, so `ss`/`effDur` are derived from its `startTime` instead of the old naive 1s offset.
+ *   1. 837-164WT still showed the HOMCOM icon: a full 1fps contact-sheet of the RAW source
+ *      revealed the logo isn't just an opening card — it flickers on/off through almost the
+ *      WHOLE clip (a recurring brand bumper animation). `analyzeClip`'s 12-frame sample
+ *      (~1/3.2s) has real gaps wide enough to miss a ~1s flicker.
+ *   2. 830-243 (Christmas tree) was never zoomed out enough to show the whole tree: Vision's
+ *      OLD rubric (`FRAME_PROMPT` in video-scene-selector.ts, built for sequential-ad B-roll)
+ *      scores "dynamic, well-lit, no text" — it does not penalize a shot too TIGHT to show the
+ *      full product, so a hands-decorating close-up scored well despite never showing the tree.
+ *   3. 831-425 kept a 2s English caption card at the very start: for a clip under ~20s,
+ *      `bestWindow`'s target collapses to the WHOLE clip (`min(maxSeg, duration)`), forcing
+ *      `startTime=0` regardless of a bad opening, because the clip's average score across 16s
+ *      of good footage + 2s of bad still came out high enough — the window's start was never
+ *      actually searched at the render's real 6s duration.
+ *
+ * Fixed by a new dedicated module, `@/lib/demand-gen-clean-window.ts` (see its header for the
+ * full mechanism): denser (~1/sec) sampling, a stricter dual-gate prompt (full-product-visible
+ * AND text/logo-free, independently), and a genuine 6s sub-window search over the real
+ * per-frame scores instead of trusting the analyzer's 15-20s window's start time. A POST-RENDER
+ * check (`verifyRenderedClip`) re-scores the actual output before it's allowed into the queue —
+ * a clip that fails is logged and SKIPPED, never shipped with the defect (see the main loop).
+ *
+ * KNOWN LIMITATION found by this same round-2 pass, left open by design rather than patched
+ * blind: `findCleanWindow` scores a candidate window by its AVERAGE per-frame score, so a
+ * window can pass even when the camera pans/zooms WITHIN it — average-good but not every
+ * frame good. Confirmed by hand for two `needsRegen` SKUs: 830-243's chosen window opens on
+ * a tight decorating close-up and only reveals the whole tree by its end (avg score cleared
+ * the bar, but the first ~2s alone would not have); 924-067V00WT similarly. A real fix needs
+ * a sliding MINIMUM-score sub-window (every sampled frame in the final window individually
+ * clears the bar), not an average — left for a follow-up since `verifyRenderedClip` already
+ * catches the resulting bad clips and correctly withholds them (see `needsRegen` below)
+ * rather than shipping the defect; nothing broken ships today, it's a missed-yield gap only.
  *
  * DRAFT ONLY: every rendered clip lands in publication_queue as content_type='demand_gen_ext',
  * status='draft' — nothing here publishes or even reserves a schedule slot (draft rows aren't
@@ -156,6 +175,17 @@ const OUT_DIR = flag("--out") ?? "out_demandgen_ext";
 const ONLY = flag("--only")?.split(",").map((s) => s.trim()).filter(Boolean) ?? null;
 
 /**
+ * Permanent exclusions — mirrors EXCLUDED_SKUS in render-demand-gen.mjs (supplier-logo
+ * footage that no crop can fix). 837-164WT: round-2 investigation (1fps contact sheet of
+ * the raw source) showed the HOMCOM logo + an English caption card ("Shoe Cabinet / Create
+ * a tidy and welcoming entrance") isn't an opening bumper — it's a recurring on/off overlay
+ * that persists through nearly the entire clip (best 6s window still averaged 2.0/9 on the
+ * strict full-video scan). A larger delogo box can't help: the graphic is large and
+ * roughly frame-centered, not a small corner icon. Always dropped, even via --only.
+ */
+const EXCLUDED_SKUS = ["837-164WT"];
+
+/**
  * `products.name` is the raw ENGLISH Aosom feed title — the curated FR title lives only on
  * the live Shopify product, never backfilled into Turso (a known, previously-documented
  * gap). Fetched here per-SKU rather than trusting products.name, or every demand-gen-ext
@@ -186,7 +216,8 @@ async function main(): Promise<void> {
     [],
     ONLY ? 5000 : LIMIT,
   );
-  const candidates = ONLY ? allCandidates.filter((c) => ONLY.includes(c.sku)) : allCandidates;
+  const candidates = (ONLY ? allCandidates.filter((c) => ONLY.includes(c.sku)) : allCandidates)
+    .filter((c) => !EXCLUDED_SKUS.includes(c.sku));
   console.log(`\n🎬 demand-gen extension — ${candidates.length} SKU(s) — ${APPLY ? "APPLY" : "DRY-RUN"}\n`);
   for (const c of candidates) {
     console.log(`  ${c.sku.padEnd(14)} priority=${c.priority.toFixed(3)} (velocity=${c.velocity14d} discount=${c.hasDiscount} season=${c.seasonalMultiplier})`);
@@ -195,56 +226,75 @@ async function main(): Promise<void> {
 
   mkdirSync(OUT_DIR, { recursive: true });
   mkdirSync("src", { recursive: true });
-  const tracks = readdirSync(MUSIC_DIR).filter((f: string) => f.endsWith(".mp3"));
-  const music = path.join(MUSIC_DIR, tracks[0]);
+  const tracks = readdirSync(MUSIC_DIR).filter((f: string) => f.endsWith(".mp3")).map((f) => path.join(MUSIC_DIR, f));
+  const { pickMusic } = await import("@/lib/video-ad-composer");
+  const { findCleanWindow, verifyRenderedClip } = await import("@/lib/demand-gen-clean-window");
 
-  let ok = 0, fail = 0;
+  let ok = 0, fail = 0, needsRegen = 0;
   for (const c of candidates) {
     try {
-      const row = await dbClient.execute({ sql: `SELECT name, video, price FROM products WHERE sku = ?`, args: [c.sku] });
-      const r = row.rows[0] as unknown as { name: string; video: string; price: number } | undefined;
+      const row = await dbClient.execute({ sql: `SELECT name, video, price, product_type FROM products WHERE sku = ?`, args: [c.sku] });
+      const r = row.rows[0] as unknown as { name: string; video: string; price: number; product_type: string | null } | undefined;
       if (!r?.video) { console.log(`  ${c.sku} no video, skip`); continue; }
       const frTitle = (await fetchShopifyTitle(c.sku)) ?? r.name; // fallback: EN, better than nothing
+      // Category-aware bed, same as every other pipeline — this script previously hardcoded
+      // tracks[0] for every SKU regardless of category, a separate bug fixed alongside this.
+      const music = pickMusic(c.sku, tracks, r.product_type);
 
       const src = `src/${c.sku}.mp4`;
       const buf = Buffer.from(await (await fetch(r.video)).arrayBuffer());
       writeFileSync(src, buf);
-      const { analyzeClip } = await import("@/lib/video-scene-selector");
-      const analysis = await analyzeClip(src);
-      const ss = analysis.startTime;
-      const effDur = Math.min(DURATION_SEC, Math.max(1, analysis.endTime - analysis.startTime));
-      console.log(`    scene: [${analysis.startTime.toFixed(1)}-${analysis.endTime.toFixed(1)}] avg=${analysis.avgScore} (${analysis.reason})`);
-
-      // Distinct from the intro-card problem the scene selector already solves temporally:
-      // some sources ALSO carry a small persistent top-left HOMCOM icon throughout the whole
-      // clip (not just an intro), which no choice of window can avoid. The scene selector's
-      // own scoring reason already names it when present ("logo overlay", "watermark") — reuse
-      // that signal rather than a second Vision call, and apply the same top-left crop size
-      // render-demand-gen.mjs's manually-audited SOURCES already use for this exact HOMCOM icon
-      // (e.g. 823-002V80, 831-790V01WT). A generic box, not per-SKU measured — good enough to
-      // clear a ~130x90px corner icon without eating meaningful product area.
-      const hasLogoMention = /logo|watermark/i.test(analysis.reason);
-      const delogo = hasLogoMention ? "delogo=x=6:y=6:w=140:h=90" : null;
-      if (delogo) console.log(`    delogo applied (scene reason mentioned a logo/watermark)`);
+      const win = await findCleanWindow(src, DURATION_SEC);
+      console.log(`    window: [${win.startTime.toFixed(1)}-${win.endTime.toFixed(1)}] ok=${win.ok} (${win.reason})`);
+      // win.ok=false means no window cleared the strict source-level bar anywhere in the clip
+      // — confirmed on 2 SKUs to mean a small corner icon flickering through almost the WHOLE
+      // video (not just an intro), which no window CHOICE can dodge. Rather than skip outright,
+      // fall through and try the best-available window with delogo applied from the start —
+      // the post-render check (correctly scoped now, see scoreFrameRendered) is the real
+      // gatekeeper either way; a bad source-level score does not have to mean a bad final clip.
+      const startWithDelogo = !win.ok;
 
       const lineDir = `tmp_dg_ext/${c.sku}`;
       mkdirSync(lineDir, { recursive: true });
       const titleLines = wrap(formatVideoTitle(frTitle), RATIO.wrap).slice(0, 2);
-      const filter = `${buildFilter(overlayChain(titleLines, lineDir), effDur, delogo)};${buildAudioChain(effDur)}`;
       const outFile = path.join(OUT_DIR, `${c.sku}_9x16_6s.mp4`);
-      const args = [
-        "-y", "-nostdin", "-loglevel", "error",
-        "-ss", String(ss), "-i", src,
-        "-stream_loop", "-1", "-i", music,
-        "-loop", "1", "-i", LOGO,
-        "-t", String(effDur),
-        "-filter_complex", filter, "-map", "[vout]", "-map", "[aout]",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "high", "-crf", "20", "-preset", "medium",
-        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", outFile,
-      ];
-      execFileSync(FFMPEG, args, { stdio: ["ignore", "ignore", "pipe"] });
+
+      // Render, then verify the ACTUAL OUTPUT — a clean source window is necessary but not
+      // sufficient (the crop/blur-pad itself could still leave something visible). On a first
+      // failure, retry ONCE with a top-left delogo crop (covers a small persistent corner icon
+      // that a window choice alone cannot dodge, e.g. a bumper that flickers through the whole
+      // clip) before giving up and skipping the SKU entirely.
+      const renderOnce = (delogo: string | null) => {
+        const filter = `${buildFilter(overlayChain(titleLines, lineDir), DURATION_SEC, delogo)};${buildAudioChain(DURATION_SEC)}`;
+        const args = [
+          "-y", "-nostdin", "-loglevel", "error",
+          "-ss", String(win.startTime), "-i", src,
+          "-stream_loop", "-1", "-ss", String(music.startOffset), "-i", music.track,
+          "-loop", "1", "-i", LOGO,
+          "-t", String(DURATION_SEC),
+          "-filter_complex", filter, "-map", "[vout]", "-map", "[aout]",
+          "-c:v", "libx264", "-pix_fmt", "yuv420p", "-profile:v", "high", "-crf", "20", "-preset", "medium",
+          "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", outFile,
+        ];
+        execFileSync(FFMPEG, args, { stdio: ["ignore", "ignore", "pipe"] });
+      };
+
+      renderOnce(startWithDelogo ? "delogo=x=6:y=6:w=140:h=90" : null);
+      let verify = await verifyRenderedClip(outFile);
+      console.log(`    verify: ok=${verify.ok} (${verify.reason})`);
+      if (!verify.ok && !startWithDelogo) {
+        console.log(`    retrying with a top-left delogo crop…`);
+        renderOnce("delogo=x=6:y=6:w=140:h=90");
+        verify = await verifyRenderedClip(outFile);
+        console.log(`    verify (retry): ok=${verify.ok} (${verify.reason})`);
+      }
       rmSync(lineDir, { recursive: true, force: true });
       rmSync(src, { force: true });
+      if (!verify.ok) {
+        console.log(`    ⚠ NEEDS REGEN: rendered clip still failed verification after retry — not queued`);
+        needsRegen++;
+        continue;
+      }
 
       const fileBuf = readFileSync(outFile);
       const { url } = await put(`content-batches/demand-gen-ext/${c.sku}_9x16_6s.mp4`, fileBuf, {
@@ -262,7 +312,7 @@ async function main(): Promise<void> {
         contentType: "demand_gen_ext",
         contentId: c.sku,
         platform: "facebook",
-        payload: JSON.stringify({ sku: c.sku, productName: frTitle, blobUrl: url, ratio: "9:16", durationSec: effDur }),
+        payload: JSON.stringify({ sku: c.sku, productName: frTitle, blobUrl: url, ratio: "9:16", durationSec: DURATION_SEC }),
         scheduledAt: `${SEQUENTIAL_SLOT.slice(0, 10)} ${String(Math.floor(Math.random() * 23)).padStart(2, "0")}:00:00`,
         status: "draft",
         metadata: { priority: c.priority, velocity14d: c.velocity14d, hasDiscount: c.hasDiscount, seasonalMultiplier: c.seasonalMultiplier },
@@ -275,7 +325,7 @@ async function main(): Promise<void> {
     }
   }
   rmSync("tmp_dg_ext", { recursive: true, force: true });
-  console.log(`\n=== ok=${ok} fail=${fail} ===`);
+  console.log(`\n=== ok=${ok} fail=${fail} needsRegen=${needsRegen} ===`);
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error("FATAL:", e); process.exit(1); });

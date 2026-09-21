@@ -7,17 +7,23 @@
  * product visible), 0.9s dissolve, ~6.1s total, kinetic label pop, cinematic grade — copied
  * rather than imported for the same reason as the assembly batch (script, not a module).
  *
- * CORRECTION (Problem 2, this session): the position heuristic (media[0]=studio,
- * media[last]=life) DID pair wrong — confirmed on 2 of the 8 shipped clips (both Christmas
- * trees: 830-323, 830-862V01GN), where media[0] is already a decorated/lifestyle scene, not
- * a plain studio shot. Root cause: the "index 0 = white-bg" pattern held for the 3 furniture
- * SKUs it was checked against, but Christmas trees are commonly PHOTOGRAPHED decorated even
- * in their first/lead image — a category where the heuristic's assumption is simply false.
- * Replaced with `classifyStudioLife` (Vision, one call per SKU, both candidate images sent
- * together so the model picks/swaps rather than judging each in isolation) — still takes
- * media[0]/media[last] as the two CANDIDATES (cheap, avoids scoring every image), but Vision
- * now decides which of the two is actually the clean/neutral one vs. the styled one, and
- * swaps if media[0] turns out to be the styled one.
+ * CORRECTION ROUND 2 (this session — round 1's 2-candidate classifier still shipped a bad
+ * pair): AB-830-323's "AVANT" was a dimension-chart image (a Santa figure for scale + printed
+ * measurement lines/text) — not a real neutral shot. Root cause, confirmed by downloading and
+ * reviewing ALL 7 of that SKU's Shopify images, not just the 2 offered: media[0] was a
+ * decorated lifestyle scene and media[6] (the other candidate) was the dimension chart —
+ * NEITHER of the two candidates round 1 offered the classifier was a genuinely clean product
+ * shot. The real clean shot existed at media[5], which was never in the running because the
+ * candidate pool was hard-limited to {first, last}. This was a candidate-SCOPE bug, not a
+ * classification bug — Vision correctly picked the "more neutral of the two" it was shown, but
+ * the two it was shown were both bad.
+ *
+ * Fixed by `classifyGalleryForBeforeAfter`: sends the WHOLE gallery (capped at 10 images) in
+ * one call, asks Vision to pick the single best true-neutral studio shot (explicitly
+ * rejecting dimension charts, assembly diagrams, and lifestyle scenes — not just "the more
+ * neutral of two") and the single best genuine lifestyle shot, each answer allowed to be
+ * "none" if nothing in the gallery qualifies. A SKU where either role comes back null is
+ * SKIPPED — Mat gets a clean pair or nothing, never a forced bad one.
  *
  * DRAFT ONLY — content_type='before_after', status='draft'.
  * Usage: node_modules/tsx/dist/cli.mjs scripts/batch-before-after.mts --limit 15 --apply
@@ -109,7 +115,7 @@ async function fetchShopifyMedia(sku: string): Promise<ShopifyMedia | null> {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
     body: JSON.stringify({
-      query: `{ products(first: 1, query: "sku:${sku}") { edges { node { title images(first: 12) { edges { node { url } } } } } } }`,
+      query: `{ products(first: 1, query: "sku:${sku}") { edges { node { title images(first: 20) { edges { node { url } } } } } } }`,
     }),
   });
   const json = (await res.json()) as {
@@ -121,46 +127,68 @@ async function fetchShopifyMedia(sku: string): Promise<ShopifyMedia | null> {
   return { title: node.title ?? sku, images };
 }
 
+const GALLERY_CAP = 10;
+const LETTERS = "ABCDEFGHIJ";
+
 /**
- * Which of two candidate images is the clean studio/neutral-background shot (AVANT) vs. the
- * styled/lifestyle one (APRÈS) — one Vision call, both images together so the model compares
- * rather than judging each in isolation. Reuses the exact base64/budgetedCreate pattern
- * vision-classifier.ts already established for pos-1 compliance classification.
+ * Pick the single best true-neutral STUDIO shot and the single best genuine LIFESTYLE shot
+ * from the WHOLE gallery (capped, one call) — not just {first, last}. Either role can come
+ * back null when nothing in the gallery qualifies (a dimension chart, an assembly diagram, and
+ * a decorated lifestyle photo are all disqualified from "studio", explicitly, in the prompt —
+ * this is exactly what round 1's 2-candidate version got wrong on 830-323: neither candidate
+ * it was shown was genuinely clean, and it had no way to say so).
  */
-async function classifyStudioLife(imgA: string, imgB: string): Promise<{ studio: string; life: string }> {
+async function classifyGalleryForBeforeAfter(images: string[]): Promise<{ studio: string | null; life: string | null; reason: string }> {
   const { getAnthropicClient } = await import("@/lib/content-generator");
   const { budgetedCreate } = await import("@/lib/llm-budget");
   const { CLAUDE } = await import("@/lib/config");
 
-  const [bufA, bufB] = await Promise.all([
-    fetch(imgA).then((r) => r.arrayBuffer()).then(Buffer.from),
-    fetch(imgB).then((r) => r.arrayBuffer()).then(Buffer.from),
-  ]);
+  const pool = images.slice(0, GALLERY_CAP);
+  const bufs = await Promise.all(pool.map((u) => fetch(u).then((r) => r.arrayBuffer()).then(Buffer.from)));
   const client = getAnthropicClient();
+  const content: Array<
+    | { type: "image"; source: { type: "base64"; media_type: "image/jpeg"; data: string } }
+    | { type: "text"; text: string }
+  > = [];
+  bufs.forEach((buf, i) => {
+    content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: buf.toString("base64") } });
+    content.push({ type: "text", text: `Photo ${LETTERS[i]} ⬆` });
+  });
+
   const message = await budgetedCreate(client, {
     model: CLAUDE.MODEL_BATCH,
-    max_tokens: 200,
+    max_tokens: 300,
     system:
-      "Tu compares deux photos du MÊME produit. L'une est une photo STUDIO (fond neutre/blanc, " +
-      "aucune mise en scène). L'autre est une photo LIFESTYLE (mise en scène dans une pièce meublée/décorée, " +
-      "même si le produit est décoré ou entouré d'accessoires). Réponds UNIQUEMENT en JSON: " +
-      '{"studio": "A"|"B", "reason": "<une phrase courte>"} — quelle lettre est la photo STUDIO.',
-    messages: [
-      {
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: bufA.toString("base64") } },
-          { type: "text", text: "Photo A ⬆" },
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: bufB.toString("base64") } },
-          { type: "text", text: "Photo B ⬆" },
-        ],
-      },
-    ],
+      `Tu vois ${pool.length} photos du MÊME produit, étiquetées ${LETTERS.slice(0, pool.length).split("").join(", ")}. ` +
+      "Identifie DEUX rôles parmi elles :\n" +
+      "STUDIO = une vraie photo produit neutre : fond blanc/uni, PAS de mise en scène, PAS de texte, " +
+      "PAS de lignes ou chiffres de dimension/mesure, PAS de diagramme de montage, PAS de décoration " +
+      "ajoutée sur le produit (ex: un sapin de Noël nu compte, un sapin décoré ou avec un personnage " +
+      "de scène ne compte PAS, un schéma avec des mesures ne compte PAS).\n" +
+      "LIFESTYLE = une vraie photo mise en scène dans une pièce meublée/décorée (le produit peut être décoré).\n" +
+      "Si AUCUNE photo ne qualifie pour un rôle, réponds null pour ce rôle plutôt que de forcer un choix. " +
+      'Réponds UNIQUEMENT en JSON: {"studio": "<lettre>"|null, "life": "<lettre>"|null, "reason": "<une phrase courte>"}',
+    messages: [{ role: "user", content }],
   });
   const text = message.content.map((c) => ("text" in c ? c.text : "")).join("");
   const m = text.match(/\{[\s\S]*?\}/);
-  const studioIsA = !m || JSON.parse(m[0]).studio !== "B"; // default to A on any parse failure
-  return studioIsA ? { studio: imgA, life: imgB } : { studio: imgB, life: imgA };
+  if (!m) return { studio: null, life: null, reason: "réponse Vision illisible" };
+  let parsed: { studio?: unknown; life?: unknown; reason?: unknown };
+  try {
+    parsed = JSON.parse(m[0]);
+  } catch {
+    return { studio: null, life: null, reason: "JSON invalide" };
+  }
+  const letterToUrl = (v: unknown): string | null => {
+    if (typeof v !== "string") return null;
+    const idx = LETTERS.indexOf(v.trim().toUpperCase());
+    return idx >= 0 && idx < pool.length ? pool[idx] : null;
+  };
+  return {
+    studio: letterToUrl(parsed.studio),
+    life: letterToUrl(parsed.life),
+    reason: typeof parsed.reason === "string" ? parsed.reason.slice(0, 200) : "",
+  };
 }
 
 const argv = process.argv.slice(2);
@@ -201,7 +229,12 @@ async function main(): Promise<void> {
     console.log(`  ${c.sku.padEnd(14)} priority=${c.priority.toFixed(3)} media=${media.images.length} "${media.title.slice(0, 40)}"`);
     if (!APPLY) continue;
 
-    const { studio, life } = await classifyStudioLife(media.images[0], media.images[media.images.length - 1]);
+    const pick = await classifyGalleryForBeforeAfter(media.images);
+    if (!pick.studio || !pick.life) {
+      console.log(`    ⚠ SKIPPED: no qualifying studio/life pair in the gallery (${pick.reason})`);
+      continue;
+    }
+    const { studio, life } = pick as { studio: string; life: string };
     const dir = `tmp_ba_batch/${c.sku}`;
     mkdirSync(dir, { recursive: true });
     try {
