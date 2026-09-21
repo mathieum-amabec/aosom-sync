@@ -76,7 +76,7 @@ import type { ChangeTypeHistory } from "@/lib/database";
 import { isKlaviyoConfigured, trackEvent } from "@/lib/klaviyo-client";
 import { storeLink } from "@/lib/insights";
 import { diffProductsLight } from "@/lib/product-diff";
-import { runRemovedFromFeedDraft } from "@/lib/removed-catalog";
+import { runRemovedFromFeedDraft, runCatalogFreshnessZero } from "@/lib/removed-catalog";
 import { runImageCompliance } from "@/lib/image-compliance";
 import { checkGalleryDrift } from "@/lib/image-compliance-drift";
 import {
@@ -1146,6 +1146,18 @@ export async function runSyncInit(): Promise<SyncInitResult> {
       } catch (removedErr) {
         log(`removed-from-feed reconcile failed (non-fatal): ${removedErr instanceof Error ? removedErr.message : String(removedErr)}`, { phase: "removedFromFeed" });
       }
+    }
+
+    // Catalog-freshness zero-out — same cadence as the removed-from-feed reconcile above,
+    // but covers every product row (imported or not), not just ones linked to a live
+    // Shopify product. Closes the gap for never-imported catalog rows: see
+    // runCatalogFreshnessZero's docstring (removed-catalog.ts) and the 2026-09-20
+    // investigation. Non-fatal, independent of today's diff.
+    try {
+      const freshnessRes = await runCatalogFreshnessZero();
+      log("catalog-freshness-zero reconcile", { phase: "catalogFreshnessZero", ...freshnessRes });
+    } catch (freshnessErr) {
+      log(`catalog-freshness-zero reconcile failed (non-fatal): ${freshnessErr instanceof Error ? freshnessErr.message : String(freshnessErr)}`, { phase: "catalogFreshnessZero" });
     }
 
     const totalChunks = toWrite.length > 0 ? Math.ceil(toWrite.length / REFRESH_CHUNK_SIZE) : 0;

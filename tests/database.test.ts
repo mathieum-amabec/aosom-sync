@@ -278,6 +278,38 @@ describe("getProductsSnapshot — SQL shape (direct SQL)", () => {
   });
 });
 
+describe("getCatalogFreshnessCandidates — SQL shape (direct SQL)", () => {
+  let db: Client;
+
+  beforeEach(async () => {
+    db = setupTestDb();
+    await db.execute(`CREATE TABLE IF NOT EXISTS products (
+      sku TEXT PRIMARY KEY, qty INTEGER, last_seen_at INTEGER, shopify_product_id TEXT
+    )`);
+  });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  // Mirror of getCatalogFreshnessCandidates' query.
+  const CANDIDATES_SQL = `SELECT sku, qty, last_seen_at FROM products WHERE qty != 0`;
+
+  it("returns only qty != 0 rows, imported or not, with last_seen_at intact", async () => {
+    await db.batch([
+      { sql: `INSERT INTO products (sku, qty, last_seen_at, shopify_product_id) VALUES (?, ?, ?, ?)`, args: ["IN-STOCK-IMPORTED", 5, 1700000000, "shop-1"] },
+      { sql: `INSERT INTO products (sku, qty, last_seen_at, shopify_product_id) VALUES (?, ?, ?, ?)`, args: ["IN-STOCK-NEVER-IMPORTED", 3, 1700000500, null] },
+      { sql: `INSERT INTO products (sku, qty, last_seen_at, shopify_product_id) VALUES (?, ?, ?, ?)`, args: ["ALREADY-ZERO", 0, 1600000000, null] },
+    ]);
+
+    const result = await db.execute(CANDIDATES_SQL);
+    const skus = result.rows.map((r) => r.sku as string).sort();
+
+    // ALREADY-ZERO is excluded (nothing to do); both qty!=0 rows come back regardless
+    // of shopify_product_id — the population is deliberately import-status-agnostic.
+    expect(skus).toEqual(["IN-STOCK-IMPORTED", "IN-STOCK-NEVER-IMPORTED"]);
+    const bySku = Object.fromEntries(result.rows.map((r) => [r.sku as string, r]));
+    expect(Number(bySku["IN-STOCK-NEVER-IMPORTED"].last_seen_at)).toBe(1700000500);
+  });
+});
+
 describe("clearStaleLockIfNeeded (direct SQL)", () => {
   let db: Client;
 

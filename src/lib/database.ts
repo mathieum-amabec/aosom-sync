@@ -1519,6 +1519,33 @@ export async function zeroQtyForRemovedSkus(skus: string[]): Promise<number> {
   return affected;
 }
 
+export interface CatalogFreshnessCandidate {
+  sku: string;
+  qty: number;
+  lastSeenAt: number;
+}
+
+/**
+ * Every product row with a nonzero qty — the candidate pool for the catalog-freshness
+ * zero-out (removed-catalog.ts's runCatalogFreshnessZero). Unlike zeroQtyForRemovedSkus
+ * above (which only reaches SKUs already linked to a live Shopify product), this covers
+ * EVERY row regardless of shopify_product_id, closing the gap the 2026-09-20
+ * investigation found: ~8,953 never-imported catalog rows had no reconciliation at all.
+ * Only 3 columns — this can be ~10k rows, kept minimal on purpose.
+ */
+export async function getCatalogFreshnessCandidates(): Promise<CatalogFreshnessCandidate[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT sku, qty, last_seen_at FROM products WHERE qty != 0`);
+  return result.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      sku: (o.sku as string) || "",
+      qty: Number(o.qty) || 0,
+      lastSeenAt: Number(o.last_seen_at) || 0,
+    };
+  });
+}
+
 export interface ProductSnapshot {
   sku: string;
   name: string;
