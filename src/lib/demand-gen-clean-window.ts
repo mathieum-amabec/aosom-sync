@@ -88,6 +88,29 @@ export const STRICT_RENDERED_CLIP_PROMPT =
   "ni notre pastille de livraison ni notre logo Ameublo Direct. Le titre du produit lui-même (en français, dans " +
   "le bandeau navy du haut) NE COMPTE PAS comme défaut.";
 
+/**
+ * Rendered-clip check for `before_after`: different visual design from demand_gen_ext (no
+ * title band, no gold delivery pill — instead an animated "AVANT"/"APRÈS" label and an
+ * `ameublodirect.ca` watermark in a bottom bar), so it needs its own "ignore our own overlay"
+ * description rather than reusing STRICT_RENDERED_CLIP_PROMPT verbatim (which would flag the
+ * AVANT/APRÈS labels themselves as foreign text).
+ */
+export const STRICT_BEFORE_AFTER_RENDERED_PROMPT =
+  "Tu évalues une frame d'une pub produit e-commerce déjà montée (avant/après), PAS une frame brute. " +
+  "Cette pub a un habillage INTENTIONNEL et ATTENDU que tu dois IGNORER complètement, ce n'est JAMAIS " +
+  'un défaut : le mot "AVANT" ou "APRÈS" affiché en grand en bas du produit, une barre de bas de page ' +
+  'navy avec le logo Ameublo Direct et le texte "ameublodirect.ca". ' +
+  "Réponds UNIQUEMENT en JSON: " +
+  '{"full_product_visible": <true|false>, "has_text_or_logo": <true|false>, "reason": "<une phrase courte>"}\n\n' +
+  "full_product_visible = true si le produit est raisonnablement visible dans son ensemble (ignore le fait " +
+  "que la barre du bas puisse chevaucher légèrement le bas de l'image — c'est normal et voulu). false " +
+  "SEULEMENT si le produit est vraiment tronqué ou si l'image est manifestement corrompue/mal recadrée.\n" +
+  "has_text_or_logo = true UNIQUEMENT si tu vois un texte ou logo qui N'EST PAS notre habillage attendu : " +
+  "un logo fournisseur (HOMCOM, Aosom, Outsunny, PawHut, Qaba, Vinsetto), du texte anglais, un diagramme de " +
+  "montage, des lignes de dimension/mesure ou de décoration saisonnière ajoutée (ex: Père Noël, guirlandes) " +
+  "qui suggère que ce n'est PAS une photo neutre/produit-seul, ou tout autre texte incrusté qui n'est ni " +
+  'le mot "AVANT"/"APRÈS" ni notre barre ameublodirect.ca.';
+
 function resolveFfprobe(ffmpegBin: string): string {
   if (process.env.FFPROBE_BIN) return process.env.FFPROBE_BIN;
   const guess = path.join(path.dirname(ffmpegBin), process.platform === "win32" ? "ffprobe.exe" : "ffprobe");
@@ -223,21 +246,27 @@ export interface VerifyResult {
  */
 export async function verifyRenderedClip(
   outPath: string,
-  opts: { ffmpegBin?: string; count?: number } = {},
+  opts: { ffmpegBin?: string; count?: number; sampleTimes?: number[]; prompt?: string } = {},
 ): Promise<VerifyResult> {
   const ffmpegBin = opts.ffmpegBin ?? process.env.FFMPEG_BIN ?? "ffmpeg";
   const ffprobeBin = resolveFfprobe(ffmpegBin);
-  const duration = await probeDuration(outPath, ffprobeBin);
-  const count = opts.count ?? 3;
+  const prompt = opts.prompt ?? STRICT_RENDERED_CLIP_PROMPT;
+
+  let times = opts.sampleTimes;
+  if (!times) {
+    const duration = await probeDuration(outPath, ffprobeBin);
+    const count = opts.count ?? 3;
+    times = Array.from({ length: count }, (_, i) => (duration * (i + 0.5)) / count);
+  }
 
   const workDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "dgverify-"));
   const sampled: { t: number; verdict: StrictFrameVerdict }[] = [];
   try {
-    for (let i = 0; i < count; i++) {
-      const t = (duration * (i + 0.5)) / count;
+    for (let i = 0; i < times.length; i++) {
+      const t = times[i];
       const jpeg = path.join(workDir, `v${i}.jpg`);
       await extractFrame(outPath, t, jpeg, ffmpegBin);
-      const s = await scoreFrameRendered(jpeg);
+      const s = await scoreFrameWithPrompt(jpeg, prompt);
       if (s) sampled.push({ t: Number(t.toFixed(3)), verdict: s.verdict });
     }
   } finally {
@@ -250,4 +279,20 @@ export async function verifyRenderedClip(
     reason: failing.length > 0 ? failing[0].verdict.reason : "clip final vérifié propre",
     sampled,
   };
+}
+
+/** Rendered-clip check for `before_after`: samples one frame in the AVANT window and one in
+ * the APRÈS window (the render's fixed timing — see batch-before-after.mts's `build()`),
+ * scored against STRICT_BEFORE_AFTER_RENDERED_PROMPT. */
+export async function verifyBeforeAfterClip(
+  outPath: string,
+  avantAt: number,
+  apresAt: number,
+  opts: { ffmpegBin?: string } = {},
+): Promise<VerifyResult> {
+  return verifyRenderedClip(outPath, {
+    ffmpegBin: opts.ffmpegBin,
+    sampleTimes: [avantAt, apresAt],
+    prompt: STRICT_BEFORE_AFTER_RENDERED_PROMPT,
+  });
 }
