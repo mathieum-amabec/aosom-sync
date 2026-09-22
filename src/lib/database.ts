@@ -166,6 +166,21 @@ async function _initSchemaImpl(): Promise<void> {
     // Composite (change_type, detected_at): serves the dashboard new_product count and the
     // best_sellers/price_drop aggregates, which filter change_type AND a detected_at window.
     `CREATE INDEX IF NOT EXISTS idx_price_history_changetype_detected ON price_history(change_type, detected_at)`,
+    // price_floor_incidents: a single, durable log of every time a Shopify price was found
+    // BELOW the Aosom floor and corrected, across all 5 correction paths (import,
+    // price-audit, price-reconcile, the daily sync push, and the manual force-push script).
+    // Exists because 842-375V00CG's below-floor window could only be reconstructed by
+    // cross-referencing price_history (90-day retention) and sync_logs (7-day retention),
+    // each with a different shape and neither recording *why* the write happened. This
+    // table is intentionally NOT purged — it's the answer to "how often does this happen,
+    // since when", and at a few rows a day it will never be a storage concern.
+    `CREATE TABLE IF NOT EXISTS price_floor_incidents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL,
+      old_price REAL NOT NULL, new_price REAL NOT NULL, source TEXT NOT NULL,
+      detected_at INTEGER DEFAULT (strftime('%s','now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_price_floor_incidents_sku ON price_floor_incidents(sku)`,
+    `CREATE INDEX IF NOT EXISTS idx_price_floor_incidents_detected_at ON price_floor_incidents(detected_at)`,
     `CREATE TABLE IF NOT EXISTS facebook_drafts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, trigger_type TEXT NOT NULL,
       language TEXT NOT NULL, post_text TEXT NOT NULL, image_path TEXT, image_url TEXT,
@@ -2377,6 +2392,77 @@ export async function recordFloorCorrection(entry: {
   });
 }
 
+// ─── Price floor incident history ────────────────────────────────────────────
+//
+// One durable, unified record per below-floor correction, regardless of which of the
+// 5 write paths caught it. `source` names the path so "how often, since when, from
+// where" can be answered without cross-referencing price_history and sync_logs (each
+// with a different retention window and neither recording *why*). See TASK 3 / the
+// 842-375V00CG investigation.
+
+export type PriceFloorIncidentSource =
+  | "import" // createShopifyProduct — the create response's price didn't match what was sent
+  | "price_audit" // /api/health/price-audit (daily, upward-only)
+  | "price_reconcile" // /api/cron/price-reconcile (hourly, bidirectional)
+  | "sync_push" // job1-sync.ts Phase 2 daily push
+  | "force_push_script"; // scripts/force-push-shopify.ts (manual ops)
+
+export interface PriceFloorIncident {
+  id: number;
+  sku: string;
+  oldPrice: number;
+  newPrice: number;
+  source: PriceFloorIncidentSource;
+  detectedAt: number; // epoch seconds
+}
+
+/**
+ * Log one below-floor detection+correction. Callers should wrap this in a try/catch
+ * (like `safeRecord` elsewhere in this file) — a logging failure must never undo or
+ * mask an already-successful Shopify price correction.
+ */
+export async function recordPriceFloorIncident(entry: {
+  sku: string; oldPrice: number; newPrice: number; source: PriceFloorIncidentSource;
+}): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO price_floor_incidents (sku, old_price, new_price, source) VALUES (?, ?, ?, ?)`,
+    args: [entry.sku, entry.oldPrice, entry.newPrice, entry.source],
+  });
+}
+
+/** Most recent incidents first, for the dashboard list. */
+export async function getPriceFloorIncidents(limit = 100): Promise<PriceFloorIncident[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT id, sku, old_price, new_price, source, detected_at
+          FROM price_floor_incidents ORDER BY detected_at DESC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    return {
+      id: Number(o.id),
+      sku: String(o.sku),
+      oldPrice: Number(o.old_price),
+      newPrice: Number(o.new_price),
+      source: o.source as PriceFloorIncidentSource,
+      detectedAt: Number(o.detected_at),
+    };
+  });
+}
+
+/** Total incident count, optionally since a given epoch-seconds cutoff. */
+export async function countPriceFloorIncidents(sinceEpoch?: number): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute(
+    sinceEpoch != null
+      ? { sql: `SELECT COUNT(*) as c FROM price_floor_incidents WHERE detected_at >= ?`, args: [sinceEpoch] }
+      : { sql: `SELECT COUNT(*) as c FROM price_floor_incidents`, args: [] },
+  );
+  return Number(rowToObj(result.rows[0]).c) || 0;
+}
+
 /**
  * Mark the price_history row matching a just-pushed price as applied to Shopify
  * (`applied_to_shopify = 1`). Called after a successful `updateShopifyVariantPrice`
@@ -3232,6 +3318,20 @@ export interface PriceCorrectionLog {
 }
 
 /**
+ * Which of these correction entries represent a genuine below-floor FIX — the price
+ * moved UP because Shopify was under the Aosom floor. `hausse_20pct` is the opposite
+ * shape (a supplier increase deliberately held back, LAYER 5), never an incident. Pure
+ * so the filter is unit-testable without touching sync_logs or price_floor_incidents.
+ */
+export function filterFloorIncidents(entries: PriceCorrectionLog[]): PriceCorrectionLog[] {
+  return entries.filter((e) => e.reason !== "hausse_20pct" && e.oldPriceShopify < e.newPriceTurso);
+}
+
+function sourceForCorrectionReason(reason: PriceCorrectionReason): PriceFloorIncidentSource {
+  return reason === "reconciliation" ? "price_reconcile" : "sync_push";
+}
+
+/**
  * Persist price corrections to `sync_logs` — permanent, queryable traceability for every
  * price the protection layers touched.
  *
@@ -3242,6 +3342,11 @@ export interface PriceCorrectionLog {
  * every correction from one run under a single greppable key.
  *
  * Batched through addSyncLogsBatch, so a 300-correction run is 3 round trips, not 300.
+ *
+ * TASK 3: shared by both job1-sync.ts (Phase 2 push, reasons sync_retry/hausse_20pct)
+ * and price-reconcile.ts (reason reconciliation) — the single choke point for both, so
+ * the below-floor subset (filterFloorIncidents) only needs logging to
+ * price_floor_incidents here, once, instead of at each caller.
  */
 export async function recordPriceCorrections(
   runId: string,
@@ -3261,6 +3366,18 @@ export async function recordPriceCorrections(
       newValue: e.newPriceTurso.toFixed(2),
     })),
   );
+
+  for (const e of filterFloorIncidents(entries)) {
+    try {
+      await recordPriceFloorIncident({
+        sku: e.sku, oldPrice: e.oldPriceShopify, newPrice: e.newPriceTurso,
+        source: sourceForCorrectionReason(e.reason),
+      });
+    } catch (err) {
+      console.error(`[recordPriceCorrections] failed to record price_floor_incident for ${e.sku}:`, err);
+    }
+  }
+
   return entries.length;
 }
 
@@ -5531,6 +5648,63 @@ export function isCacheStale(fetched_at: string, max_age_hours = 12): boolean {
 
 export async function saveShopifyPushCheckpoint(cp: ShopifyPushCheckpoint): Promise<void> {
   await setSetting("shopify_push_checkpoint", JSON.stringify(cp));
+}
+
+// ─── Price reconcile rotation checkpoint (LAYER 2) ──────────────────────────────
+//
+// The hourly /api/cron/price-reconcile used to fetch the ENTIRE Shopify catalog in
+// one paginated loop every run — reliable at ~3000 variants, but a single Shopify
+// rate-limit mid-fetch throws away the WHOLE run's coverage for that hour (observed
+// 2026-09-22 01:00 UTC), and it only gets more fragile as the catalog grows. This
+// checkpoint lets the route process one page (250 variants) per invocation instead,
+// resuming from where the last run left off via Shopify's page_info cursor, and
+// wrapping to a fresh sweep when it reaches the end. See price-reconcile/route.ts.
+
+export interface PriceReconcileCheckpoint {
+  /** Shopify page_info cursor for the NEXT page to fetch; null = start of a sweep. */
+  pageInfo: string | null;
+  /** Increments each time a sweep completes (page_info exhausts back to null). */
+  sweepNumber: number;
+  sweepStartedAt: number; // epoch seconds
+  pagesThisSweep: number;
+  variantsScannedThisSweep: number;
+  driftThisSweep: number;
+  correctedThisSweep: number;
+  lastSweepCompletedAt: number | null; // epoch seconds, null until the first sweep finishes
+}
+
+export function isValidPriceReconcileCheckpoint(v: unknown): v is PriceReconcileCheckpoint {
+  if (!v || typeof v !== "object") return false;
+  const c = v as Record<string, unknown>;
+  return (
+    (c.pageInfo === null || typeof c.pageInfo === "string") &&
+    typeof c.sweepNumber === "number" &&
+    typeof c.sweepStartedAt === "number" &&
+    typeof c.pagesThisSweep === "number" &&
+    typeof c.variantsScannedThisSweep === "number" &&
+    typeof c.driftThisSweep === "number" &&
+    typeof c.correctedThisSweep === "number" &&
+    (c.lastSweepCompletedAt === null || typeof c.lastSweepCompletedAt === "number")
+  );
+}
+
+export async function getPriceReconcileCheckpoint(): Promise<PriceReconcileCheckpoint | null> {
+  const raw = await getSetting("price_reconcile_checkpoint");
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isValidPriceReconcileCheckpoint(parsed)) {
+      console.warn("[DB] price_reconcile_checkpoint corrupted, discarding:", raw.slice(0, 100));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export async function savePriceReconcileCheckpoint(cp: PriceReconcileCheckpoint): Promise<void> {
+  await setSetting("price_reconcile_checkpoint", JSON.stringify(cp));
 }
 
 // ─── Phase 1 chunked checkpoint ────────────────────────────────────────────────

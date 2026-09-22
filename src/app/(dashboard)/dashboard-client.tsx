@@ -5,6 +5,7 @@ import type { SyncRun } from "@/types/sync";
 import { MetaAdsPanel } from "./meta-ads-panel";
 import { DaySummaryPanel } from "./day-summary-panel";
 import { AlertsPanel } from "./alerts-panel";
+import { PriceFloorIncidentsPanel } from "./price-floor-incidents-panel";
 import { PublicationQueuePanel } from "./publication-queue-panel";
 import { LlmUsagePanel } from "./llm-usage-panel";
 
@@ -73,6 +74,8 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
           import/blog failures the alerts panel reports directly underneath. */}
       <LlmUsagePanel />
       <AlertsPanel />
+      {/* AlertsPanel shows today's live status; this is the durable trail behind it. */}
+      <PriceFloorIncidentsPanel />
       <PublicationQueuePanel />
 
       {/* Last Sync Banner */}

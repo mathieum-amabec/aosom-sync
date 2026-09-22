@@ -4,6 +4,8 @@ import { slugify, type GeneratedContent } from "./content-generator";
 import { stripLeadingHeading } from "./html-utils";
 import { env, SHOPIFY, SYNC } from "./config";
 import { targetSellPrice } from "./pricing";
+import { writePriceVerified, PRICE_EPSILON } from "./price-protection";
+import { recordPriceFloorIncident } from "./database";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -82,6 +84,50 @@ export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[
   } while (pageInfo);
 
   return products;
+}
+
+export interface ShopifyVariantPageItem {
+  sku: string;
+  price: number;
+  variantId: string;
+  shopifyProductId: string;
+}
+
+export interface ShopifyVariantPage {
+  variants: ShopifyVariantPageItem[];
+  /** Cursor for the next page, or null when this was the last one. */
+  nextPageInfo: string | null;
+}
+
+/**
+ * Fetch ONE page (up to 250 products' worth of variants) instead of the whole
+ * paginated catalog. Used by price-reconcile's rotation so an hourly run's Shopify
+ * API footprint stays small and predictable instead of an all-or-nothing fetch of
+ * every product — a single rate-limit mid-fetch used to throw away that entire
+ * run's coverage (see price-reconcile.ts / PriceReconcileCheckpoint).
+ */
+export async function fetchShopifyVariantsPage(pageInfo: string | null): Promise<ShopifyVariantPage> {
+  if (!env.hasShopifyToken) return { variants: [], nextPageInfo: null };
+
+  const params = new URLSearchParams({ limit: "250", fields: "id,variants" });
+  if (pageInfo) params.set("page_info", pageInfo);
+
+  const response = await shopifyFetch(`/products.json?${params}`);
+  if (!response.ok) throw new Error(`Shopify fetch failed: ${response.status}`);
+
+  const data = await response.json();
+  const variants: ShopifyVariantPageItem[] = (
+    data.products as Array<{ id: number; variants: Array<{ id: number; sku: string; price: string }> }>
+  ).flatMap((p) =>
+    p.variants.map((v) => ({
+      sku: v.sku,
+      price: Number(v.price),
+      variantId: String(v.id),
+      shopifyProductId: String(p.id),
+    })),
+  );
+
+  return { variants, nextPageInfo: parseLinkHeader(response.headers.get("Link")) };
 }
 
 export interface ShopifyProductImage {
@@ -445,6 +491,47 @@ export async function createShopifyProduct(
   }
 
   const data = await response.json();
+
+  // LAYER 1 for the import path. Every other price write (Phase 2 push, price-reconcile)
+  // is written-then-verified; this create was the one path that sent a floor price and
+  // never confirmed Shopify actually stored it — a 201 here means the request was
+  // accepted, not that the value on file matches. Shopify already returns the created
+  // variants in this same response, so the check costs nothing when prices match (the
+  // normal case) and only spends network calls on the rare mismatch, via the same
+  // write-then-verify + retry machinery every other write path uses.
+  const createdVariants = Array.isArray(data.product?.variants) ? data.product.variants : [];
+  const expectedBySku = new Map(builtVariants.map((v) => [v.sku, Number(v.price)]));
+  for (const created of createdVariants) {
+    const sku = typeof created?.sku === "string" ? created.sku : "";
+    const expected = expectedBySku.get(sku);
+    if (expected == null || !Number.isFinite(expected)) continue;
+    const stored = Number(created.price);
+    if (Number.isFinite(stored) && Math.abs(stored - expected) <= PRICE_EPSILON) continue;
+
+    const variantId = String(created.id);
+    const result = await writePriceVerified(sku, variantId, expected, stored, {
+      writePrice: (id, price) => updateShopifyVariantPrice(id, price),
+      readVariant: (id) => fetchVariant(id),
+    });
+    if (!result.ok) {
+      console.error(
+        `[IMPORT] price floor NOT confirmed on create for ${sku} (variant ${variantId}): wanted ${expected}, Shopify holds ${result.observed ?? "?"} — ${result.error ?? "unknown"}`,
+      );
+    } else {
+      console.warn(`[IMPORT] price floor corrected on create for ${sku}: Shopify returned ${stored}, forced to ${expected}`);
+      // TASK 3: only the below-floor direction is a real incident — Shopify returning a
+      // price ABOVE the floor on create is a different (less severe) drift, not the
+      // "vente à perte" shape this log is for.
+      if (Number.isFinite(stored) && stored < expected) {
+        try {
+          await recordPriceFloorIncident({ sku, oldPrice: stored, newPrice: expected, source: "import" });
+        } catch (err) {
+          console.error(`[IMPORT] failed to record price_floor_incident for ${sku}:`, err);
+        }
+      }
+    }
+  }
+
   return {
     id: String(data.product.id),
     handle: typeof data.product.handle === "string" ? data.product.handle : "",

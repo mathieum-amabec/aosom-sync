@@ -2,6 +2,36 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.19] - 2026-09-22
+
+Closes the 3 remaining gaps behind the `842-375V00CG` incident (imported 2026-08-20,
+sold below the Aosom floor for 32 days): a write path that skipped verification, an
+all-or-nothing hourly catalog fetch, and no durable record of when this happens.
+
+### Fixed
+
+- **3 unverified price-write paths** — `createShopifyProduct` (import), `price-audit.ts`
+  (`/api/health/price-audit`, still on the daily cron), and `scripts/force-push-shopify.ts`
+  (manual ops script) all trusted a 200 from Shopify's PUT/POST as proof the price actually
+  persisted. All 3 now read back what Shopify stored and correct any mismatch via
+  `writePriceVerified` — the same write-then-verify machinery `job1-sync.ts`'s daily push and
+  `/api/cron/price-reconcile`'s hourly sweep have used since v0.5.77.0.
+
+### Added
+
+- **`price-reconcile` rotation** (`PriceReconcileCheckpoint`) — the hourly cron used to
+  re-fetch the entire Shopify catalog every run; a single rate-limit mid-fetch threw away
+  that whole hour's coverage. It now processes one Shopify page (250 variants) per run,
+  resuming from a persisted `page_info` cursor, same checkpoint pattern as
+  `shopify_push_checkpoint`/`phase1_checkpoint`. A full sweep of the current catalog
+  completes in roughly 12-32 hours (one page/hour) — well inside "at least once a week" —
+  and posts a dashboard notification when a sweep completes.
+- **`price_floor_incidents` table** — a single, durable log (not purged) of every below-floor
+  price detected and corrected, across all 5 write paths, with SKU, old/new price, source,
+  and detection time. Surfaced via `GET /api/price-floor-incidents` and a new dashboard panel
+  directly under "Alertes", so "how often does this happen, since when" has a real answer
+  instead of a manual cross-reference of `price_history` and `sync_logs`.
+
 ## [0.5.92.18] - 2026-09-22
 
 Dedicated recurring publish schedules for the 3 content-scale-chantier video formats

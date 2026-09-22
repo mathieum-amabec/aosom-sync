@@ -11,8 +11,13 @@ vi.mock("@/lib/config", () => ({
   SYNC: { MIN_DISCOUNT_DISPLAY_PERCENT: 10 },
 }));
 
+// createShopifyProduct's LAYER 1 correction logs a price_floor_incident on a genuine
+// below-floor mismatch — avoid hitting a real DB from this API-client test file.
+const mockRecordPriceFloorIncident = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("@/lib/database", () => ({ recordPriceFloorIncident: mockRecordPriceFloorIncident }));
+
 // Import after mocks
-const { updateShopifyVariantPrice, createShopifyProduct } = await import("@/lib/shopify-client");
+const { updateShopifyVariantPrice, createShopifyProduct, fetchShopifyVariantsPage } = await import("@/lib/shopify-client");
 
 import type { AosomMergedProduct } from "@/types/aosom";
 import type { GeneratedContent } from "@/lib/content-generator";
@@ -126,6 +131,155 @@ describe("createShopifyProduct — metafield + handle safety", () => {
 
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.product.status).toBe("active");
+  });
+});
+
+// LAYER 1 for the import path: 842-375V00CG was created with a price nothing ever read
+// back and confirmed. These tests exercise the fix — verify-on-create.
+describe("createShopifyProduct — LAYER 1 write-then-verify on create", () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockRecordPriceFloorIncident.mockClear();
+  });
+
+  it("does nothing extra when Shopify's create response already matches the floor price", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        product: { id: 555, handle: "chaise", variants: [{ id: 9001, sku: "SKU1", price: "99.00" }] },
+      }),
+    });
+
+    await createShopifyProduct(mergedFixture(), contentFixture({}));
+
+    // Only the single create POST — no follow-up write or read-back needed.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("corrects a variant whose create response price does not match the floor, and confirms it", async () => {
+    // mergedFixture()'s SKU1 has an Aosom price of 99 (0% markup → floor 99), but
+    // Shopify's create response reports 89.99 for it — a silent mismatch nothing
+    // previously checked.
+    // Vitest's own runner occasionally probes the stubbed global fetch with no
+    // arguments during test cleanup (unrelated to createShopifyProduct) — the
+    // undefined-url guard keeps that a harmless no-op instead of an unhandled
+    // rejection attributed to this test.
+    mockFetch.mockImplementation(async (url?: string, opts?: RequestInit) => {
+      if (url === undefined) return { ok: true, json: async () => ({}) };
+      if (url.endsWith("/products.json")) {
+        return {
+          ok: true,
+          json: async () => ({
+            product: { id: 555, handle: "chaise", variants: [{ id: 9001, sku: "SKU1", price: "89.99" }] },
+          }),
+        };
+      }
+      if (url.includes("/variants/9001.json") && opts?.method === "PUT") {
+        return { ok: true, json: async () => ({ variant: { id: 9001, sku: "SKU1", price: "99.00" } }) };
+      }
+      if (url.includes("/variants/9001.json")) {
+        // The verifying read-back after the PUT.
+        return { ok: true, json: async () => ({ variant: { id: 9001, sku: "SKU1", price: "99.00" } }) };
+      }
+      throw new Error(`unexpected fetch: ${opts?.method ?? "GET"} ${url}`);
+    });
+
+    await createShopifyProduct(mergedFixture(), contentFixture({}));
+
+    // create POST + corrective PUT + verifying GET.
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    const putCall = mockFetch.mock.calls.find((c) => c[1]?.method === "PUT");
+    expect(putCall?.[0]).toContain("/variants/9001.json");
+    expect(JSON.parse(putCall![1].body).variant.price).toBe("99");
+    // TASK 3: a confirmed below-floor fix is logged as a unified incident.
+    expect(mockRecordPriceFloorIncident).toHaveBeenCalledWith({
+      sku: "SKU1", oldPrice: 89.99, newPrice: 99, source: "import",
+    });
+  });
+
+  it("logs but does not throw when the corrective write never confirms (deleted variant)", async () => {
+    mockFetch.mockImplementation(async (url?: string, opts?: RequestInit) => {
+      if (url === undefined) return { ok: true, json: async () => ({}) };
+      if (url.endsWith("/products.json")) {
+        return {
+          ok: true,
+          json: async () => ({
+            product: { id: 555, handle: "chaise", variants: [{ id: 9001, sku: "SKU1", price: "89.99" }] },
+          }),
+        };
+      }
+      if (url.includes("/variants/9001.json") && opts?.method === "PUT") {
+        return { ok: true, json: async () => ({ variant: { id: 9001, sku: "SKU1", price: "89.99" } }) };
+      }
+      // Read-back reports the variant gone.
+      return { ok: false, status: 404 };
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(createShopifyProduct(mergedFixture(), contentFixture({}))).resolves.toMatchObject({ id: "555" });
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("price floor NOT confirmed"));
+    // An unconfirmed write is not a resolved incident — nothing to log yet.
+    expect(mockRecordPriceFloorIncident).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+  });
+});
+
+// TASK 2: price-reconcile rotation fetches one page at a time instead of the whole
+// catalog every run — this is the primitive it rotates on.
+describe("fetchShopifyVariantsPage — one-page fetch for the reconcile rotation", () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  it("requests without a page_info param when called with null (start of a sweep)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({ products: [{ id: 1, variants: [{ id: 10, sku: "A", price: "9.99" }] }] }),
+    });
+
+    const page = await fetchShopifyVariantsPage(null);
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).not.toContain("page_info");
+    expect(page.variants).toEqual([{ sku: "A", price: 9.99, variantId: "10", shopifyProductId: "1" }]);
+    expect(page.nextPageInfo).toBeNull();
+  });
+
+  it("forwards the cursor and reads the next one off the Link header", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: { get: (name: string) => (name === "Link" ? '<https://x/products.json?page_info=NEXT>; rel="next"' : null) },
+      json: async () => ({ products: [{ id: 2, variants: [{ id: 20, sku: "B", price: "19.99" }] }] }),
+    });
+
+    const page = await fetchShopifyVariantsPage("CURSOR1");
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("page_info=CURSOR1");
+    expect(page.nextPageInfo).toBe("NEXT");
+  });
+
+  it("flattens multiple products' variants into one flat list", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({
+        products: [
+          { id: 1, variants: [{ id: 10, sku: "A", price: "9.99" }, { id: 11, sku: "A-BK", price: "9.99" }] },
+          { id: 2, variants: [{ id: 20, sku: "B", price: "19.99" }] },
+        ],
+      }),
+    });
+
+    const page = await fetchShopifyVariantsPage(null);
+
+    expect(page.variants).toHaveLength(3);
+    expect(page.variants.map((v) => v.sku)).toEqual(["A", "A-BK", "B"]);
+  });
+
+  it("throws on a non-ok response instead of returning a silently empty page", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 500 });
+    await expect(fetchShopifyVariantsPage(null)).rejects.toThrow(/Shopify fetch failed: 500/);
   });
 });
 

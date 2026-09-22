@@ -10,9 +10,10 @@
  * unit-testable without network/DB; `runPriceAuditAndCorrect()` wires it to the real Shopify
  * variant-price update and `price_history`.
  */
-import { setSetting, getProductsForPriceAudit, recordFloorCorrection } from "@/lib/database";
-import { fetchAllShopifyProducts, updateShopifyVariantPrice } from "@/lib/shopify-client";
+import { setSetting, getProductsForPriceAudit, recordFloorCorrection, recordPriceFloorIncident } from "@/lib/database";
+import { fetchAllShopifyProducts, updateShopifyVariantPrice, fetchVariant } from "@/lib/shopify-client";
 import { targetSellPrice } from "@/lib/pricing";
+import { writePriceVerified } from "@/lib/price-protection";
 
 /** settings key holding the last audit summary the dashboard reads. */
 export const PRICE_AUDIT_SETTING = "price_audit_result";
@@ -220,8 +221,31 @@ export async function runPriceAuditAndCorrect(
     );
   }
   const corrections = await correctViolations(toCorrect, {
-    pushPrice: (variantId, price, oldPrice) => updateShopifyVariantPrice(variantId, price, oldPrice),
-    recordCorrection: (entry) => recordFloorCorrection(entry),
+    // LAYER 1: write, read back, retry — same machinery as the daily push and the hourly
+    // reconcile. A 200 on this PUT means Shopify accepted the request, not that the floor
+    // price stuck; correctViolations must only record "corrected" once that's confirmed.
+    pushPrice: async (variantId, price, oldPrice) => {
+      const result = await writePriceVerified(variantId, variantId, price, oldPrice, {
+        writePrice: updateShopifyVariantPrice,
+        readVariant: fetchVariant,
+      });
+      if (!result.ok) {
+        throw new Error(result.error ?? `price write not verified for variant ${variantId}`);
+      }
+    },
+    recordCorrection: async (entry) => {
+      await recordFloorCorrection(entry);
+      // TASK 3: every item audited here is below-floor by construction
+      // (computePriceFloorViolations only emits gap < 0) — log the applied ones as
+      // incidents. Best-effort: a logging failure must never undo an already-live fix.
+      if (entry.applied) {
+        try {
+          await recordPriceFloorIncident({ sku: entry.sku, oldPrice: entry.oldPrice, newPrice: entry.newPrice, source: "price_audit" });
+        } catch (err) {
+          console.error(`[price-audit] failed to record price_floor_incident for ${entry.sku}:`, err);
+        }
+      }
+    },
   });
   const corrected = corrections.filter((c) => c.status === "corrected").length;
   const failed = corrections.length - corrected;
