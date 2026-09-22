@@ -2,19 +2,21 @@ import { NextResponse } from "next/server";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
 import {
   getQueueItemById,
-  approveContentBatchDraft,
   cancelContentBatchDraft,
   rescheduleContentBatchDraft,
   QueueSlotTakenError,
-  type QueueContentType,
 } from "@/lib/database";
+import { approveOneContentBatchDraft } from "@/lib/content-batch-approval";
+import type { ContentBatchFormat } from "@/lib/publication-scheduler";
 
 /**
  * Approve / schedule / cancel a demand_gen_ext | before_after | assembly draft sitting in
  * publication_queue. Generalizes /api/sequential-ads/approve + /schedule into one route
  * (Étape 5 of the content-scale chantier) rather than three near-identical files.
  *
- * POST { queueId, contentType }                 → approve NOW, at 24h from now (default slot).
+ * POST { queueId, contentType }                 → approve, auto-assigned to the next free slot
+ *                                                   on this format's own recurring grid (see
+ *                                                   content-batch-approval.ts).
  * POST { queueId, contentType, scheduledAt }     → approve/reschedule at an operator-chosen
  *                                                   ISO-8601 instant (ambiguity-free, same
  *                                                   contract as /api/sequential-ads/schedule).
@@ -25,7 +27,7 @@ import {
  * arrived, and behind THIS approval step existing at all: nothing here bypasses Mat approving
  * first. Admin-only; reviewers are read-only.
  */
-const VALID_TYPES: QueueContentType[] = ["demand_gen_ext", "before_after", "assembly"];
+const VALID_TYPES: ContentBatchFormat[] = ["demand_gen_ext", "before_after", "assembly"];
 
 function toSqliteUtc(d: Date): string {
   return d.toISOString().slice(0, 19).replace("T", " ");
@@ -37,7 +39,7 @@ async function requireAdmin(): Promise<NextResponse | null> {
   return null;
 }
 
-async function parseBody(request: Request): Promise<{ queueId: number; contentType: QueueContentType; scheduledAt?: string } | NextResponse> {
+async function parseBody(request: Request): Promise<{ queueId: number; contentType: ContentBatchFormat; scheduledAt?: string } | NextResponse> {
   let body: Record<string, unknown>;
   try {
     body = (await request.json()) as Record<string, unknown>;
@@ -49,7 +51,7 @@ async function parseBody(request: Request): Promise<{ queueId: number; contentTy
   if (!Number.isInteger(queueId) || queueId <= 0) {
     return NextResponse.json({ error: "`queueId` (positive integer) is required" }, { status: 400 });
   }
-  const contentType = body?.contentType as QueueContentType;
+  const contentType = body?.contentType as ContentBatchFormat;
   if (!VALID_TYPES.includes(contentType)) {
     return NextResponse.json({ error: `\`contentType\` must be one of: ${VALID_TYPES.join(", ")}` }, { status: 400 });
   }
@@ -73,9 +75,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No matching draft with that id/contentType" }, { status: 404 });
   }
 
-  let when: Date;
   if (rawAt) {
-    when = new Date(rawAt);
+    const when = new Date(rawAt);
     if (Number.isNaN(when.getTime())) {
       return NextResponse.json({ error: `\`scheduledAt\` is not a valid datetime: ${rawAt}` }, { status: 400 });
     }
@@ -102,28 +103,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ success: true, queueId, scheduledAt: slot });
   }
 
-  // No explicit time: approve at a simple default (24h from now) — matches the picker's own
-  // floor in the client, so "Approuver" without touching the date field lands somewhere sane.
-  if (item.status !== "draft") {
-    return NextResponse.json({ error: `Item ${queueId} is not an approvable draft (status: ${item.status})` }, { status: 400 });
+  // No explicit time: auto-assign the next free slot on this format's own recurring grid
+  // (demand_gen_ext / before_after / assembly each have a dedicated schedule — see
+  // publication-scheduler.ts's CONTENT_BATCH_SCHEDULE_DEFAULTS) — same mechanism as approving
+  // a sequential ad or a social post, rather than an ad-hoc "24h from now" default.
+  const result = await approveOneContentBatchDraft(queueId, contentType);
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
-  when = new Date(Date.now() + 24 * 60 * 60 * 1000);
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const slot = toSqliteUtc(when);
-    try {
-      if (await approveContentBatchDraft(queueId, contentType, slot)) {
-        return NextResponse.json({ success: true, queueId, scheduledAt: slot });
-      }
-      return NextResponse.json({ error: "Draft was already approved or cancelled" }, { status: 409 });
-    } catch (err) {
-      if (err instanceof QueueSlotTakenError) {
-        when = new Date(when.getTime() + 60 * 60 * 1000); // try an hour later
-        continue;
-      }
-      throw err;
-    }
-  }
-  return NextResponse.json({ error: "Could not secure a free slot after retries" }, { status: 409 });
+  return NextResponse.json({ success: true, queueId: result.queueId, scheduledAt: result.sqlite });
 }
 
 export async function DELETE(request: Request) {

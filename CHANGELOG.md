@@ -2,6 +2,36 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.18] - 2026-09-22
+
+Dedicated recurring publish schedules for the 3 content-scale-chantier video formats
+(`demand_gen_ext`, `before_after`, `assembly`), replacing the previous "approve → now+24h,
+retry an hour later on collision" default with the same real-grid mechanism already used for
+social posts, Reels and sequential ads.
+
+### Added
+
+- **3 new recurring grids** (`PublicationSchedule` shape, `src/lib/config.ts`): Demand-Gen
+  élargi Mon/Wed/Fri 09:15 (1/day), Avant-Après Tue/Thu 13:00+13:30 + Sat 11:00 (2/day),
+  Assembly daily 17:00 (1/day). Times deliberately distinct from `publication_schedule` and
+  `video_schedule`'s existing anchors (09:00/10:00/12:00/18:00) so a real collision on the
+  shared `(platform, scheduled_at)` slot stays rare rather than designed-in. Cadence sized to
+  each format's backlog at launch (demand_gen_ext 4, before_after 10, assembly 9). Stored as
+  settings (`demand_gen_ext_schedule` / `before_after_schedule` / `assembly_schedule`,
+  `PublicationSchedule`-shaped, editable via the generic `/api/settings` route) — each falls
+  back to its own default independently (`parseContentBatchSchedule`, not a shared default).
+- **`approveOneContentBatchDraft`** (`content-batch-approval.ts`) — approving a draft with no
+  explicit time now auto-assigns the next free slot on ITS format's grid (`getNextAvailableSlot`
+  scoped by `contentType`), retrying up to 6 times past a slot lost to `QueueSlotTakenError` —
+  mirrors `approveOneSequentialAd`. Manual replanning (an operator-chosen date/time) is
+  untouched — approval never publishes anything itself, it only reserves when it WILL publish
+  once the hourly `/api/cron/publisher` reaches that slot.
+- **"Prochains créneaux" calendar strip on `/content-formats`** — a simple day-grouped,
+  color-badged chronological list of every upcoming *scheduled* (`status='pending'`) item
+  across the 3 formats (`GET /api/content-batches/calendar`, `getUpcomingContentBatchItems`).
+  Draft rows are excluded on purpose: their `scheduled_at` is a generation-time placeholder,
+  not a real reserved slot, so showing them would be misleading.
+
 ## [0.5.92.17] - 2026-09-21
 
 Content-scale chantier merged: 3 new organic-video ad formats (`demand_gen_ext`,

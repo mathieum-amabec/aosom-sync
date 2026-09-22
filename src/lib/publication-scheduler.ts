@@ -28,6 +28,9 @@ import {
   DEFAULT_VIDEO_SCHEDULE,
   DEFAULT_BLOG_SCHEDULE,
   DEFAULT_SLIDESHOW_SETTINGS,
+  DEFAULT_DEMAND_GEN_EXT_SCHEDULE,
+  DEFAULT_BEFORE_AFTER_SCHEDULE,
+  DEFAULT_ASSEMBLY_SCHEDULE,
 } from "@/lib/config";
 import { getOccupiedQueueSlots, type QueueContentType } from "@/lib/database";
 
@@ -178,6 +181,42 @@ export function parseVideoSchedule(rawJson: string | null | undefined): VideoSch
     return normalizeVideoSchedule(JSON.parse(rawJson));
   } catch {
     return clone(DEFAULT_VIDEO_SCHEDULE);
+  }
+}
+
+// ─── Content-batch (demand_gen_ext / before_after / assembly) schedules ────
+
+/** The 3 content-scale-chantier batch video formats — each gets its own recurring grid. */
+export type ContentBatchFormat = "demand_gen_ext" | "before_after" | "assembly";
+
+export const CONTENT_BATCH_SCHEDULE_DEFAULTS: Record<ContentBatchFormat, PublicationSchedule> = {
+  demand_gen_ext: DEFAULT_DEMAND_GEN_EXT_SCHEDULE,
+  before_after: DEFAULT_BEFORE_AFTER_SCHEDULE,
+  assembly: DEFAULT_ASSEMBLY_SCHEDULE,
+};
+
+/** The `settings` row each format's grid is stored under (see config.ts's ALLOWED_SETTINGS_KEYS). */
+export const CONTENT_BATCH_SCHEDULE_SETTING_KEY: Record<ContentBatchFormat, string> = {
+  demand_gen_ext: "demand_gen_ext_schedule",
+  before_after: "before_after_schedule",
+  assembly: "assembly_schedule",
+};
+
+/**
+ * Parse a stored per-format schedule JSON (or null) into a PublicationSchedule, falling back
+ * per-field to that format's own default (mirrors parseVideoSchedule, generalized over the 3
+ * formats instead of one fixed default).
+ */
+export function parseContentBatchSchedule(
+  format: ContentBatchFormat,
+  rawJson: string | null | undefined,
+): PublicationSchedule {
+  const d = CONTENT_BATCH_SCHEDULE_DEFAULTS[format];
+  if (!rawJson) return clone(d);
+  try {
+    return normalizeScheduleWith(JSON.parse(rawJson), d);
+  } catch {
+    return clone(d);
   }
 }
 

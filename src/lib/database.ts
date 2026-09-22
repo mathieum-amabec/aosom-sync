@@ -4772,6 +4772,24 @@ export async function countContentBatchQueueItems(contentType: QueueContentType)
 }
 
 /**
+ * The nearest-`limit` upcoming scheduled (status='pending') rows across all 3 content-batch
+ * video formats, soonest first — drives /content-formats' "prochains créneaux" calendar
+ * strip. Draft rows are deliberately excluded: their `scheduled_at` is a placeholder from
+ * generation time, not a real reserved slot, so showing them on a calendar would be
+ * misleading (see content-batch-approval.ts's header for why).
+ */
+export async function getUpcomingContentBatchItems(limit = 30): Promise<PublicationQueueItem[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM publication_queue
+          WHERE content_type IN ('demand_gen_ext', 'before_after', 'assembly') AND status = 'pending'
+          ORDER BY scheduled_at ASC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
  * Approve a content-batch draft: flip draft → pending at `scheduledAt` (reserves the
  * slot). Only acts on a 'draft' row of the given content_type (idempotent). Surfaces a
  * slot collision as QueueSlotTakenError. Mirrors approveSequentialAdDraft.

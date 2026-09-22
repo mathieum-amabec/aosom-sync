@@ -18,6 +18,21 @@ const TABS: { type: ContentType; label: string }[] = [
   { type: "assembly", label: "Assembly" },
 ];
 
+/** Short label + badge color per format, shared by the tabs' implicit order and the calendar strip. */
+const FORMAT_META: Record<ContentType, { short: string; cls: string }> = {
+  demand_gen_ext: { short: "Demand-Gen", cls: "bg-indigo-900/40 text-indigo-300 border-indigo-800/50" },
+  before_after: { short: "Avant-Après", cls: "bg-amber-900/40 text-amber-300 border-amber-800/50" },
+  assembly: { short: "Assembly", cls: "bg-teal-900/40 text-teal-300 border-teal-800/50" },
+};
+
+interface CalendarItem {
+  id: number;
+  contentType: ContentType;
+  sku: string;
+  scheduledAt: string;
+  productName?: string;
+}
+
 interface Item {
   id: number;
   contentType: ContentType;
@@ -43,6 +58,29 @@ function formatSlot(sqliteUtc: string): string {
   return Number.isNaN(d.getTime()) ? sqliteUtc : d.toLocaleString("fr-CA", { dateStyle: "medium", timeStyle: "short" });
 }
 
+function formatDayHeading(sqliteUtc: string): string {
+  const d = new Date(`${sqliteUtc.replace(" ", "T")}Z`);
+  if (Number.isNaN(d.getTime())) return sqliteUtc;
+  return d.toLocaleDateString("fr-CA", { weekday: "long", day: "numeric", month: "long" });
+}
+
+function formatTime(sqliteUtc: string): string {
+  const d = new Date(`${sqliteUtc.replace(" ", "T")}Z`);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString("fr-CA", { timeStyle: "short" });
+}
+
+/** Group already-sorted (soonest first) items by their local calendar day, in order. */
+function groupByDay(items: CalendarItem[]): { heading: string; items: CalendarItem[] }[] {
+  const groups: { heading: string; items: CalendarItem[] }[] = [];
+  for (const item of items) {
+    const heading = formatDayHeading(item.scheduledAt);
+    const last = groups[groups.length - 1];
+    if (last && last.heading === heading) last.items.push(item);
+    else groups.push({ heading, items: [item] });
+  }
+  return groups;
+}
+
 /** 24h-from-now floor, as the 'YYYY-MM-DDTHH:MM' <input type="datetime-local"> needs. */
 function earliestSlotValue(now: Date = new Date()): string {
   const d = new Date(now.getTime() + 24 * 60 * 60 * 1000);
@@ -58,6 +96,8 @@ export default function ContentFormatsClient() {
   const [picker, setPicker] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [msg, setMsg] = useState<Record<number, string>>({});
+  const [calendar, setCalendar] = useState<CalendarItem[]>([]);
+  const [calendarLoading, setCalendarLoading] = useState(true);
 
   const load = useCallback(async (type: ContentType) => {
     setLoading(true);
@@ -74,9 +114,24 @@ export default function ContentFormatsClient() {
     }
   }, []);
 
+  const loadCalendar = useCallback(async () => {
+    setCalendarLoading(true);
+    try {
+      const res = await fetch("/api/content-batches/calendar");
+      const json = await res.json();
+      if (res.ok) setCalendar(json.items ?? []);
+    } finally {
+      setCalendarLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     load(tab);
   }, [tab, load]);
+
+  useEffect(() => {
+    loadCalendar();
+  }, [loadCalendar]);
 
   async function approve(item: Item, scheduledAt?: string) {
     setBusy((s) => ({ ...s, [item.id]: true }));
@@ -94,6 +149,7 @@ export default function ContentFormatsClient() {
       }
       setMsg((s) => ({ ...s, [item.id]: `Planifié ${formatSlot(json.scheduledAt)}` }));
       load(tab);
+      loadCalendar();
     } catch {
       setMsg((s) => ({ ...s, [item.id]: "Erreur réseau" }));
     } finally {
@@ -112,6 +168,7 @@ export default function ContentFormatsClient() {
       const json = await res.json();
       if (!res.ok) { setMsg((s) => ({ ...s, [item.id]: json.error || `Erreur ${res.status}` })); return; }
       load(tab);
+      loadCalendar();
     } finally {
       setBusy((s) => ({ ...s, [item.id]: false }));
     }
@@ -122,7 +179,40 @@ export default function ContentFormatsClient() {
       <h1 className="text-2xl font-semibold text-white mb-1">Contenus vidéo — nouveaux formats</h1>
       <p className="text-sm text-gray-400 mb-6">
         Demand-Gen élargi, Avant-Après et Assembly — tout reste en brouillon tant que ce n&apos;est pas approuvé ici.
+        Approuver sans choisir d&apos;heure assigne automatiquement le prochain créneau libre du format.
       </p>
+
+      <div className="mb-6 rounded-lg border border-gray-800 bg-gray-900/40 p-4">
+        <h2 className="text-sm font-semibold text-white mb-3">Prochains créneaux</h2>
+        {calendarLoading && <p className="text-xs text-gray-500">Chargement…</p>}
+        {!calendarLoading && calendar.length === 0 && (
+          <p className="text-xs text-gray-500">Rien de planifié pour l&apos;instant — approuve un brouillon pour lui réserver un créneau.</p>
+        )}
+        {!calendarLoading && calendar.length > 0 && (
+          <div className="space-y-3">
+            {groupByDay(calendar).map((group) => (
+              <div key={group.heading}>
+                <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">{group.heading}</p>
+                <div className="flex flex-wrap gap-2">
+                  {group.items.map((it) => (
+                    <span
+                      key={it.id}
+                      title={it.productName ?? it.sku}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${FORMAT_META[it.contentType].cls}`}
+                    >
+                      <span className="font-medium">{formatTime(it.scheduledAt)}</span>
+                      <span className="opacity-70">·</span>
+                      <span>{FORMAT_META[it.contentType].short}</span>
+                      <span className="opacity-70">·</span>
+                      <span className="font-mono">{it.sku}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="flex gap-2 mb-5 border-b border-gray-800">
         {TABS.map((t) => (
@@ -187,7 +277,8 @@ export default function ContentFormatsClient() {
                           <input
                             type="datetime-local"
                             min={earliestSlotValue()}
-                            value={picker[item.id] ?? earliestSlotValue()}
+                            value={picker[item.id] ?? ""}
+                            title="Laisse vide pour utiliser le prochain créneau du format"
                             onChange={(e) => setPicker((s) => ({ ...s, [item.id]: e.target.value }))}
                             className="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200"
                           />
