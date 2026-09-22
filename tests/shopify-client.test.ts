@@ -12,7 +12,7 @@ vi.mock("@/lib/config", () => ({
 }));
 
 // Import after mocks
-const { updateShopifyVariantPrice, createShopifyProduct } = await import("@/lib/shopify-client");
+const { updateShopifyVariantPrice, createShopifyProduct, fetchShopifyVariantsPage } = await import("@/lib/shopify-client");
 
 import type { AosomMergedProduct } from "@/types/aosom";
 import type { GeneratedContent } from "@/lib/content-generator";
@@ -208,6 +208,64 @@ describe("createShopifyProduct — LAYER 1 write-then-verify on create", () => {
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("price floor NOT confirmed"));
 
     errorSpy.mockRestore();
+  });
+});
+
+// TASK 2: price-reconcile rotation fetches one page at a time instead of the whole
+// catalog every run — this is the primitive it rotates on.
+describe("fetchShopifyVariantsPage — one-page fetch for the reconcile rotation", () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  it("requests without a page_info param when called with null (start of a sweep)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({ products: [{ id: 1, variants: [{ id: 10, sku: "A", price: "9.99" }] }] }),
+    });
+
+    const page = await fetchShopifyVariantsPage(null);
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).not.toContain("page_info");
+    expect(page.variants).toEqual([{ sku: "A", price: 9.99, variantId: "10", shopifyProductId: "1" }]);
+    expect(page.nextPageInfo).toBeNull();
+  });
+
+  it("forwards the cursor and reads the next one off the Link header", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: { get: (name: string) => (name === "Link" ? '<https://x/products.json?page_info=NEXT>; rel="next"' : null) },
+      json: async () => ({ products: [{ id: 2, variants: [{ id: 20, sku: "B", price: "19.99" }] }] }),
+    });
+
+    const page = await fetchShopifyVariantsPage("CURSOR1");
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("page_info=CURSOR1");
+    expect(page.nextPageInfo).toBe("NEXT");
+  });
+
+  it("flattens multiple products' variants into one flat list", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({
+        products: [
+          { id: 1, variants: [{ id: 10, sku: "A", price: "9.99" }, { id: 11, sku: "A-BK", price: "9.99" }] },
+          { id: 2, variants: [{ id: 20, sku: "B", price: "19.99" }] },
+        ],
+      }),
+    });
+
+    const page = await fetchShopifyVariantsPage(null);
+
+    expect(page.variants).toHaveLength(3);
+    expect(page.variants.map((v) => v.sku)).toEqual(["A", "A-BK", "B"]);
+  });
+
+  it("throws on a non-ok response instead of returning a silently empty page", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 500 });
+    await expect(fetchShopifyVariantsPage(null)).rejects.toThrow(/Shopify fetch failed: 500/);
   });
 });
 

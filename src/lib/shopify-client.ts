@@ -85,6 +85,50 @@ export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[
   return products;
 }
 
+export interface ShopifyVariantPageItem {
+  sku: string;
+  price: number;
+  variantId: string;
+  shopifyProductId: string;
+}
+
+export interface ShopifyVariantPage {
+  variants: ShopifyVariantPageItem[];
+  /** Cursor for the next page, or null when this was the last one. */
+  nextPageInfo: string | null;
+}
+
+/**
+ * Fetch ONE page (up to 250 products' worth of variants) instead of the whole
+ * paginated catalog. Used by price-reconcile's rotation so an hourly run's Shopify
+ * API footprint stays small and predictable instead of an all-or-nothing fetch of
+ * every product — a single rate-limit mid-fetch used to throw away that entire
+ * run's coverage (see price-reconcile.ts / PriceReconcileCheckpoint).
+ */
+export async function fetchShopifyVariantsPage(pageInfo: string | null): Promise<ShopifyVariantPage> {
+  if (!env.hasShopifyToken) return { variants: [], nextPageInfo: null };
+
+  const params = new URLSearchParams({ limit: "250", fields: "id,variants" });
+  if (pageInfo) params.set("page_info", pageInfo);
+
+  const response = await shopifyFetch(`/products.json?${params}`);
+  if (!response.ok) throw new Error(`Shopify fetch failed: ${response.status}`);
+
+  const data = await response.json();
+  const variants: ShopifyVariantPageItem[] = (
+    data.products as Array<{ id: number; variants: Array<{ id: number; sku: string; price: string }> }>
+  ).flatMap((p) =>
+    p.variants.map((v) => ({
+      sku: v.sku,
+      price: Number(v.price),
+      variantId: String(v.id),
+      shopifyProductId: String(p.id),
+    })),
+  );
+
+  return { variants, nextPageInfo: parseLinkHeader(response.headers.get("Link")) };
+}
+
 export interface ShopifyProductImage {
   id: number;
   position: number;

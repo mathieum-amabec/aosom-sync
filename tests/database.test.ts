@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 import path from "path";
 import fs from "fs";
-import { isValidCheckpoint } from "@/lib/database";
+import { isValidCheckpoint, isValidPriceReconcileCheckpoint } from "@/lib/database";
 import { PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
 import { storeLink, STOREFRONT_BASE_URL } from "@/lib/insights";
 
@@ -145,6 +145,43 @@ describe("isValidCheckpoint (GAP 1 — type guard)", () => {
     expect(isValidCheckpoint(null)).toBe(false);
     expect(isValidCheckpoint("string")).toBe(false);
     expect(isValidCheckpoint({})).toBe(false);
+  });
+});
+
+describe("isValidPriceReconcileCheckpoint (LAYER 2 rotation checkpoint)", () => {
+  const valid = {
+    pageInfo: "abc123",
+    sweepNumber: 3,
+    sweepStartedAt: 1_700_000_000,
+    pagesThisSweep: 4,
+    variantsScannedThisSweep: 1000,
+    driftThisSweep: 2,
+    correctedThisSweep: 2,
+    lastSweepCompletedAt: 1_699_990_000,
+  };
+
+  it("returns true for a well-formed checkpoint mid-sweep", () => {
+    expect(isValidPriceReconcileCheckpoint(valid)).toBe(true);
+  });
+
+  it("accepts null for pageInfo (start of a sweep) and lastSweepCompletedAt (before the first sweep ever finishes)", () => {
+    expect(isValidPriceReconcileCheckpoint({ ...valid, pageInfo: null, lastSweepCompletedAt: null })).toBe(true);
+  });
+
+  it("returns false when a numeric field is missing", () => {
+    const rest: Record<string, unknown> = { ...valid };
+    delete rest.pagesThisSweep;
+    expect(isValidPriceReconcileCheckpoint(rest)).toBe(false);
+  });
+
+  it("returns false when pageInfo is neither a string nor null", () => {
+    expect(isValidPriceReconcileCheckpoint({ ...valid, pageInfo: 123 })).toBe(false);
+  });
+
+  it("returns false for null, primitives, and empty object", () => {
+    expect(isValidPriceReconcileCheckpoint(null)).toBe(false);
+    expect(isValidPriceReconcileCheckpoint("string")).toBe(false);
+    expect(isValidPriceReconcileCheckpoint({})).toBe(false);
   });
 });
 

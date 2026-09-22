@@ -5533,6 +5533,63 @@ export async function saveShopifyPushCheckpoint(cp: ShopifyPushCheckpoint): Prom
   await setSetting("shopify_push_checkpoint", JSON.stringify(cp));
 }
 
+// ─── Price reconcile rotation checkpoint (LAYER 2) ──────────────────────────────
+//
+// The hourly /api/cron/price-reconcile used to fetch the ENTIRE Shopify catalog in
+// one paginated loop every run — reliable at ~3000 variants, but a single Shopify
+// rate-limit mid-fetch throws away the WHOLE run's coverage for that hour (observed
+// 2026-09-22 01:00 UTC), and it only gets more fragile as the catalog grows. This
+// checkpoint lets the route process one page (250 variants) per invocation instead,
+// resuming from where the last run left off via Shopify's page_info cursor, and
+// wrapping to a fresh sweep when it reaches the end. See price-reconcile/route.ts.
+
+export interface PriceReconcileCheckpoint {
+  /** Shopify page_info cursor for the NEXT page to fetch; null = start of a sweep. */
+  pageInfo: string | null;
+  /** Increments each time a sweep completes (page_info exhausts back to null). */
+  sweepNumber: number;
+  sweepStartedAt: number; // epoch seconds
+  pagesThisSweep: number;
+  variantsScannedThisSweep: number;
+  driftThisSweep: number;
+  correctedThisSweep: number;
+  lastSweepCompletedAt: number | null; // epoch seconds, null until the first sweep finishes
+}
+
+export function isValidPriceReconcileCheckpoint(v: unknown): v is PriceReconcileCheckpoint {
+  if (!v || typeof v !== "object") return false;
+  const c = v as Record<string, unknown>;
+  return (
+    (c.pageInfo === null || typeof c.pageInfo === "string") &&
+    typeof c.sweepNumber === "number" &&
+    typeof c.sweepStartedAt === "number" &&
+    typeof c.pagesThisSweep === "number" &&
+    typeof c.variantsScannedThisSweep === "number" &&
+    typeof c.driftThisSweep === "number" &&
+    typeof c.correctedThisSweep === "number" &&
+    (c.lastSweepCompletedAt === null || typeof c.lastSweepCompletedAt === "number")
+  );
+}
+
+export async function getPriceReconcileCheckpoint(): Promise<PriceReconcileCheckpoint | null> {
+  const raw = await getSetting("price_reconcile_checkpoint");
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isValidPriceReconcileCheckpoint(parsed)) {
+      console.warn("[DB] price_reconcile_checkpoint corrupted, discarding:", raw.slice(0, 100));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export async function savePriceReconcileCheckpoint(cp: PriceReconcileCheckpoint): Promise<void> {
+  await setSetting("price_reconcile_checkpoint", JSON.stringify(cp));
+}
+
 // ─── Phase 1 chunked checkpoint ────────────────────────────────────────────────
 
 export interface Phase1Checkpoint {
