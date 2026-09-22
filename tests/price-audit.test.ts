@@ -159,6 +159,12 @@ describe("runPriceAuditAndCorrect", () => {
       ] },
     ] as unknown as Awaited<ReturnType<typeof shopify.fetchAllShopifyProducts>>);
     const push = vi.spyOn(shopify, "updateShopifyVariantPrice").mockResolvedValue(undefined);
+    // LAYER 1: the production wiring now reads the price back before calling a
+    // correction "applied" — matches what the write just sent, so both corrections
+    // confirm on the first attempt (no retries) and `push` is still called once each.
+    vi.spyOn(shopify, "fetchVariant").mockResolvedValue({
+      variantId: "v", sku: "s", price: 100, compareAtPrice: null, inventoryQuantity: 0,
+    });
     vi.spyOn(db, "recordFloorCorrection").mockResolvedValue(undefined);
 
     const res = await runPriceAuditAndCorrect(2); // cap = 2
@@ -168,6 +174,29 @@ describe("runPriceAuditAndCorrect", () => {
     expect(res.deferred).toBe(1);
     expect(push).toHaveBeenCalledTimes(2);
     expect(push.mock.calls.map((c) => c[0])).toEqual(["vB", "vC"]); // worst two, worst first
+    vi.restoreAllMocks();
+  });
+
+  it("does NOT count a correction as applied when Shopify accepts the write but the read-back still shows the old price", async () => {
+    // Reproduces the exact shape of the 842-375V00CG incident: a write that gets a 200
+    // from Shopify but never actually persists. Before LAYER 1 wired writePriceVerified
+    // into this path, correctViolations trusted the PUT alone and recorded "corrected".
+    vi.spyOn(db, "getProductsForPriceAudit").mockResolvedValue([{ sku: "A", price: 100 }]);
+    vi.spyOn(shopify, "fetchAllShopifyProducts").mockResolvedValue([
+      { variants: [{ sku: "A", price: 90, variantId: "vA" }] },
+    ] as unknown as Awaited<ReturnType<typeof shopify.fetchAllShopifyProducts>>);
+    vi.spyOn(shopify, "updateShopifyVariantPrice").mockResolvedValue(undefined); // "200 OK"
+    // Read-back always reports the stale price — the write never actually stuck.
+    vi.spyOn(shopify, "fetchVariant").mockResolvedValue({
+      variantId: "vA", sku: "A", price: 90, compareAtPrice: null, inventoryQuantity: 0,
+    });
+    vi.spyOn(db, "recordFloorCorrection").mockResolvedValue(undefined);
+
+    const res = await runPriceAuditAndCorrect();
+
+    expect(res.corrected).toBe(0);
+    expect(res.failed).toBe(1);
+    expect(res.corrections[0]).toMatchObject({ sku: "A", status: "failed" });
     vi.restoreAllMocks();
   });
 });

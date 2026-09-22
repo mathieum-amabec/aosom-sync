@@ -11,8 +11,9 @@
  * variant-price update and `price_history`.
  */
 import { setSetting, getProductsForPriceAudit, recordFloorCorrection } from "@/lib/database";
-import { fetchAllShopifyProducts, updateShopifyVariantPrice } from "@/lib/shopify-client";
+import { fetchAllShopifyProducts, updateShopifyVariantPrice, fetchVariant } from "@/lib/shopify-client";
 import { targetSellPrice } from "@/lib/pricing";
+import { writePriceVerified } from "@/lib/price-protection";
 
 /** settings key holding the last audit summary the dashboard reads. */
 export const PRICE_AUDIT_SETTING = "price_audit_result";
@@ -220,7 +221,18 @@ export async function runPriceAuditAndCorrect(
     );
   }
   const corrections = await correctViolations(toCorrect, {
-    pushPrice: (variantId, price, oldPrice) => updateShopifyVariantPrice(variantId, price, oldPrice),
+    // LAYER 1: write, read back, retry — same machinery as the daily push and the hourly
+    // reconcile. A 200 on this PUT means Shopify accepted the request, not that the floor
+    // price stuck; correctViolations must only record "corrected" once that's confirmed.
+    pushPrice: async (variantId, price, oldPrice) => {
+      const result = await writePriceVerified(variantId, variantId, price, oldPrice, {
+        writePrice: updateShopifyVariantPrice,
+        readVariant: fetchVariant,
+      });
+      if (!result.ok) {
+        throw new Error(result.error ?? `price write not verified for variant ${variantId}`);
+      }
+    },
     recordCorrection: (entry) => recordFloorCorrection(entry),
   });
   const corrected = corrections.filter((c) => c.status === "corrected").length;

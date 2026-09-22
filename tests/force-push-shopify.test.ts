@@ -11,10 +11,14 @@ import {
 
 const mockUpdateVariantPrice = vi.hoisted(() => vi.fn());
 const mockUpdateProduct = vi.hoisted(() => vi.fn());
+const mockFetchVariant = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/shopify-client", () => ({
   fetchAllShopifyProducts: vi.fn(),
   updateShopifyVariantPrice: mockUpdateVariantPrice,
+  // LAYER 1: applyPriceDiffs now writes through writePriceVerified, which reads the
+  // variant back to confirm the price actually stuck before counting it as applied.
+  fetchVariant: mockFetchVariant,
   // Intentionally exposed — Test 3 asserts it is NEVER called.
   updateShopifyProduct: mockUpdateProduct,
 }));
@@ -91,9 +95,14 @@ function makePriceDiff(overrides: Partial<PriceDiff> = {}): PriceDiff {
 
 // ─── Tests ─────────────────────────────────────────────────────────────────────
 
+const noSleep = async () => {};
+
 describe("force-push-shopify", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    // Default read-back matches the standard fixture's db_price (214.99) so a write
+    // confirms on the first attempt unless a test overrides it.
+    mockFetchVariant.mockResolvedValue({ price: 214.99 });
   });
 
   // ── Test 1 ────────────────────────────────────────────────────────────────
@@ -235,30 +244,51 @@ describe("force-push-shopify", () => {
   });
 
   // ── Test 8 ────────────────────────────────────────────────────────────────
-  it("apply mode: error path — records failure, increments failed count, continues", async () => {
-    mockUpdateVariantPrice.mockRejectedValueOnce(new Error("429 Too Many Requests"));
+  it("apply mode: error path — records failure after exhausting retries, continues", async () => {
+    // Persistent (not "Once"): writePriceVerified retries up to 3x, so a single
+    // rejection would now succeed on attempt 2. Reject every attempt to prove the
+    // failure path still fires once retries are genuinely exhausted.
+    mockUpdateVariantPrice.mockRejectedValue(new Error("429 Too Many Requests"));
 
     const diff = makePriceDiff({ sku: "FAIL-SKU", variant_id: "v-fail" });
-    const result = await applyPriceDiffs([diff], { delayMs: 0 });
+    const result = await applyPriceDiffs([diff], { delayMs: 0, sleep: noSleep });
 
     expect(result.applied).toBe(0);
     expect(result.failed).toBe(1);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0].sku).toBe("FAIL-SKU");
     expect(result.errors[0].error).toContain("429 Too Many Requests");
+    expect(mockUpdateVariantPrice).toHaveBeenCalledTimes(3); // all 3 attempts spent
+  });
+
+  // ── Test 8b ───────────────────────────────────────────────────────────────
+  it("apply mode: a write that fails once then succeeds on retry counts as applied", async () => {
+    // The behavior test 8 used to (incorrectly) assert: one transient failure is no
+    // longer a hard failure — LAYER 1 retries and this is exactly the case it exists
+    // to recover from.
+    mockUpdateVariantPrice
+      .mockRejectedValueOnce(new Error("429 Too Many Requests"))
+      .mockResolvedValueOnce(undefined);
+
+    const diff = makePriceDiff({ sku: "RETRY-OK", variant_id: "v-retry" });
+    const result = await applyPriceDiffs([diff], { delayMs: 0, sleep: noSleep });
+
+    expect(result.applied).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(mockUpdateVariantPrice).toHaveBeenCalledTimes(2);
   });
 
   // ── Test 9 ────────────────────────────────────────────────────────────────
   it("partial failure: first succeeds, second fails, both counts correct", async () => {
     mockUpdateVariantPrice
-      .mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error("Shopify timeout"));
+      .mockResolvedValueOnce(undefined) // SKU-OK's single write
+      .mockRejectedValue(new Error("Shopify timeout")); // SKU-FAIL: every attempt
 
     const diffs: PriceDiff[] = [
       makePriceDiff({ sku: "SKU-OK",   variant_id: "v-ok" }),
       makePriceDiff({ sku: "SKU-FAIL", variant_id: "v-fail" }),
     ];
-    const result = await applyPriceDiffs(diffs, { delayMs: 0 });
+    const result = await applyPriceDiffs(diffs, { delayMs: 0, sleep: noSleep });
 
     expect(result.applied).toBe(1);
     expect(result.failed).toBe(1);
@@ -268,13 +298,30 @@ describe("force-push-shopify", () => {
   // ── Test 10 ────────────────────────────────────────────────────────────────
   it("non-Error throw: string error serialized via String(err) into errors array", async () => {
     // Coverage for the `String(err)` branch when a non-Error value is rejected.
-    mockUpdateVariantPrice.mockRejectedValueOnce("network gone");
+    mockUpdateVariantPrice.mockRejectedValue("network gone"); // every attempt
 
     const diff = makePriceDiff({ sku: "STRING-ERR", variant_id: "v-str" });
-    const result = await applyPriceDiffs([diff], { delayMs: 0 });
+    const result = await applyPriceDiffs([diff], { delayMs: 0, sleep: noSleep });
 
     expect(result.failed).toBe(1);
     expect(result.errors[0].error).toBe("network gone");
+  });
+
+  // ── Test 11 ───────────────────────────────────────────────────────────────
+  it("LAYER 1 regression: a write Shopify accepts (200) but never persists is NOT counted as applied", async () => {
+    // Reproduces the exact shape of the 842-375V00CG incident: the PUT resolves, but a
+    // read-back shows the old price is still live. Before this fix, applyPriceDiffs
+    // trusted the PUT alone and would have counted this as "applied".
+    mockUpdateVariantPrice.mockResolvedValue(undefined); // every attempt "succeeds"
+    mockFetchVariant.mockResolvedValue({ price: 179.99 }); // but Shopify never actually moved
+
+    const diff = makePriceDiff({ sku: "GHOST-WRITE", variant_id: "v-ghost", db_price: 214.99 });
+    const result = await applyPriceDiffs([diff], { delayMs: 0, sleep: noSleep });
+
+    expect(result.applied).toBe(0);
+    expect(result.failed).toBe(1);
+    expect(result.errors[0].sku).toBe("GHOST-WRITE");
+    expect(result.errors[0].error).toContain("read-back mismatch");
   });
 
   // ── Test 11 ────────────────────────────────────────────────────────────────

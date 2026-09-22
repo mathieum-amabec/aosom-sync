@@ -4,6 +4,7 @@ import { slugify, type GeneratedContent } from "./content-generator";
 import { stripLeadingHeading } from "./html-utils";
 import { env, SHOPIFY, SYNC } from "./config";
 import { targetSellPrice } from "./pricing";
+import { writePriceVerified, PRICE_EPSILON } from "./price-protection";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -445,6 +446,37 @@ export async function createShopifyProduct(
   }
 
   const data = await response.json();
+
+  // LAYER 1 for the import path. Every other price write (Phase 2 push, price-reconcile)
+  // is written-then-verified; this create was the one path that sent a floor price and
+  // never confirmed Shopify actually stored it — a 201 here means the request was
+  // accepted, not that the value on file matches. Shopify already returns the created
+  // variants in this same response, so the check costs nothing when prices match (the
+  // normal case) and only spends network calls on the rare mismatch, via the same
+  // write-then-verify + retry machinery every other write path uses.
+  const createdVariants = Array.isArray(data.product?.variants) ? data.product.variants : [];
+  const expectedBySku = new Map(builtVariants.map((v) => [v.sku, Number(v.price)]));
+  for (const created of createdVariants) {
+    const sku = typeof created?.sku === "string" ? created.sku : "";
+    const expected = expectedBySku.get(sku);
+    if (expected == null || !Number.isFinite(expected)) continue;
+    const stored = Number(created.price);
+    if (Number.isFinite(stored) && Math.abs(stored - expected) <= PRICE_EPSILON) continue;
+
+    const variantId = String(created.id);
+    const result = await writePriceVerified(sku, variantId, expected, stored, {
+      writePrice: (id, price) => updateShopifyVariantPrice(id, price),
+      readVariant: (id) => fetchVariant(id),
+    });
+    if (!result.ok) {
+      console.error(
+        `[IMPORT] price floor NOT confirmed on create for ${sku} (variant ${variantId}): wanted ${expected}, Shopify holds ${result.observed ?? "?"} — ${result.error ?? "unknown"}`,
+      );
+    } else {
+      console.warn(`[IMPORT] price floor corrected on create for ${sku}: Shopify returned ${stored}, forced to ${expected}`);
+    }
+  }
+
   return {
     id: String(data.product.id),
     handle: typeof data.product.handle === "string" ? data.product.handle : "",

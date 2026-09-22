@@ -129,6 +129,88 @@ describe("createShopifyProduct — metafield + handle safety", () => {
   });
 });
 
+// LAYER 1 for the import path: 842-375V00CG was created with a price nothing ever read
+// back and confirmed. These tests exercise the fix — verify-on-create.
+describe("createShopifyProduct — LAYER 1 write-then-verify on create", () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  it("does nothing extra when Shopify's create response already matches the floor price", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        product: { id: 555, handle: "chaise", variants: [{ id: 9001, sku: "SKU1", price: "99.00" }] },
+      }),
+    });
+
+    await createShopifyProduct(mergedFixture(), contentFixture({}));
+
+    // Only the single create POST — no follow-up write or read-back needed.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("corrects a variant whose create response price does not match the floor, and confirms it", async () => {
+    // mergedFixture()'s SKU1 has an Aosom price of 99 (0% markup → floor 99), but
+    // Shopify's create response reports 89.99 for it — a silent mismatch nothing
+    // previously checked.
+    // Vitest's own runner occasionally probes the stubbed global fetch with no
+    // arguments during test cleanup (unrelated to createShopifyProduct) — the
+    // undefined-url guard keeps that a harmless no-op instead of an unhandled
+    // rejection attributed to this test.
+    mockFetch.mockImplementation(async (url?: string, opts?: RequestInit) => {
+      if (url === undefined) return { ok: true, json: async () => ({}) };
+      if (url.endsWith("/products.json")) {
+        return {
+          ok: true,
+          json: async () => ({
+            product: { id: 555, handle: "chaise", variants: [{ id: 9001, sku: "SKU1", price: "89.99" }] },
+          }),
+        };
+      }
+      if (url.includes("/variants/9001.json") && opts?.method === "PUT") {
+        return { ok: true, json: async () => ({ variant: { id: 9001, sku: "SKU1", price: "99.00" } }) };
+      }
+      if (url.includes("/variants/9001.json")) {
+        // The verifying read-back after the PUT.
+        return { ok: true, json: async () => ({ variant: { id: 9001, sku: "SKU1", price: "99.00" } }) };
+      }
+      throw new Error(`unexpected fetch: ${opts?.method ?? "GET"} ${url}`);
+    });
+
+    await createShopifyProduct(mergedFixture(), contentFixture({}));
+
+    // create POST + corrective PUT + verifying GET.
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    const putCall = mockFetch.mock.calls.find((c) => c[1]?.method === "PUT");
+    expect(putCall?.[0]).toContain("/variants/9001.json");
+    expect(JSON.parse(putCall![1].body).variant.price).toBe("99");
+  });
+
+  it("logs but does not throw when the corrective write never confirms (deleted variant)", async () => {
+    mockFetch.mockImplementation(async (url?: string, opts?: RequestInit) => {
+      if (url === undefined) return { ok: true, json: async () => ({}) };
+      if (url.endsWith("/products.json")) {
+        return {
+          ok: true,
+          json: async () => ({
+            product: { id: 555, handle: "chaise", variants: [{ id: 9001, sku: "SKU1", price: "89.99" }] },
+          }),
+        };
+      }
+      if (url.includes("/variants/9001.json") && opts?.method === "PUT") {
+        return { ok: true, json: async () => ({ variant: { id: 9001, sku: "SKU1", price: "89.99" } }) };
+      }
+      // Read-back reports the variant gone.
+      return { ok: false, status: 404 };
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(createShopifyProduct(mergedFixture(), contentFixture({}))).resolves.toMatchObject({ id: "555" });
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("price floor NOT confirmed"));
+
+    errorSpy.mockRestore();
+  });
+});
+
 describe("shopifyFetch — AbortError / timeout", () => {
   beforeEach(() => mockFetch.mockReset());
 
