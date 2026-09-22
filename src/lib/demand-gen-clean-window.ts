@@ -44,6 +44,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { getAnthropicClient } from "@/lib/content-generator";
 import { budgetedCreate } from "@/lib/llm-budget";
+import { CLAUDE } from "@/lib/config";
 import { bestWindow, type FrameScore } from "@/lib/video-scene-selector";
 
 const execFileAsync = promisify(execFile);
@@ -138,19 +139,24 @@ async function scoreFrameWithPrompt(
   prompt: string,
 ): Promise<{ score: number; reason: string; verdict: StrictFrameVerdict } | null> {
   const buf = await fs.promises.readFile(jpegPath);
-  const message = await budgetedCreate(getAnthropicClient(), {
-    model: "claude-sonnet-4-6",
-    max_tokens: 200,
-    messages: [
-      {
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: buf.toString("base64") } },
-          { type: "text", text: prompt },
-        ],
-      },
-    ],
-  });
+  const message = await budgetedCreate(
+    getAnthropicClient(),
+    {
+      model: CLAUDE.MODEL_VIDEO_QC,
+      max_tokens: 200,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: buf.toString("base64") } },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    },
+    undefined,
+    "video",
+  );
   const text = message.content.map((c) => ("text" in c ? c.text : "")).join("");
   const m = text.match(/\{[\s\S]*?\}/);
   if (!m) return null;

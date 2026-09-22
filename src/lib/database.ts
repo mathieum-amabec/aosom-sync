@@ -449,9 +449,11 @@ async function _initSchemaImpl(): Promise<void> {
     )`,
     // daily_llm_budget: Anthropic spend guardrail, split into independent pools so a
     // bulk batch run can never starve the public storefront assistant. One row per
-    // (UTC day, pool) — pools are 'assistant' (only /api/assistant) and 'batch'
-    // (imports, content generation, social — everything else). Resets at 00:00 UTC by
-    // keying on the date string. Every Claude call asserts its pool's tokens_used <
+    // (UTC day, pool) — pools are 'assistant' (only /api/assistant), 'batch' (imports,
+    // content generation, social), 'maintenance' (operator-launched catalogue vision
+    // audits) and 'video' (demand-gen-ext / before_after / assembly video QC — isolated
+    // from 'batch' for the same reason 'maintenance' was split out). Resets at 00:00 UTC
+    // by keying on the date string. Every Claude call asserts its pool's tokens_used <
     // that pool's budget (fail-closed) then adds its usage. (Legacy single-key tables
     // are migrated to this composite key in the migration block below.)
     `CREATE TABLE IF NOT EXISTS daily_llm_budget (
@@ -2185,7 +2187,7 @@ function utcDayKey(): string {
  * can never exhaust the 'assistant' pool that the public storefront /api/assistant
  * draws from. Each pool has its own daily counter row and its own budget env var.
  */
-export type LlmBudgetPool = "assistant" | "batch" | "maintenance";
+export type LlmBudgetPool = "assistant" | "batch" | "maintenance" | "video";
 
 /** Tokens the given pool consumed so far today (UTC). 0 when no row yet. */
 export async function getDailyLlmTokensUsed(pool: LlmBudgetPool): Promise<number> {
@@ -2214,6 +2216,9 @@ export interface LlmUsageDay {
   batch: number;
   /** Uncapped operator-launched maintenance passes (catalogue vision audits). */
   maintenance: number;
+  /** Video-batch QC (demand-gen-ext, before_after, assembly) — isolated from `batch` so a
+   *  production run can never starve imports/blog/social. See llm-budget.ts. */
+  video: number;
 }
 
 /**
@@ -2233,13 +2238,15 @@ export async function getLlmUsageWindow(days: number): Promise<LlmUsageDay[]> {
     args: [keys[0]],
   });
   const byDay = new Map<string, LlmUsageDay>(
-    keys.map((day) => [day, { day, assistant: 0, batch: 0, maintenance: 0 }]),
+    keys.map((day) => [day, { day, assistant: 0, batch: 0, maintenance: 0, video: 0 }]),
   );
   for (const row of res.rows) {
     const entry = byDay.get(row.day as string);
     if (!entry) continue; // row older than the window (the >= bound is inclusive of keys[0])
     const pool = row.pool as LlmBudgetPool;
-    if (pool === "assistant" || pool === "batch" || pool === "maintenance") entry[pool] = Number(row.tokens_used) || 0;
+    if (pool === "assistant" || pool === "batch" || pool === "maintenance" || pool === "video") {
+      entry[pool] = Number(row.tokens_used) || 0;
+    }
   }
   return keys.map((day) => byDay.get(day)!);
 }

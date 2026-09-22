@@ -9,6 +9,7 @@ vi.mock("@/lib/config", () => ({
     MODEL_ASSISTANT: "claude-haiku-4-5-20251001",
     MODEL: "claude-sonnet-4-6",
     MODEL_BATCH: "claude-haiku-4-5",
+    MODEL_VIDEO_QC: "claude-sonnet-4-6",
   },
 }));
 
@@ -26,6 +27,10 @@ describe("pool → model routing", () => {
   it("prices the assistant pool with the assistant model and batch with the batch model", () => {
     expect(poolModel("assistant")).toBe("claude-haiku-4-5-20251001");
     expect(poolModel("batch")).toBe("claude-haiku-4-5");
+  });
+
+  it("prices the video pool with the video-QC model, not the batch model", () => {
+    expect(poolModel("video")).toBe("claude-sonnet-4-6");
   });
 });
 
@@ -64,6 +69,14 @@ describe("blended rate", () => {
   it("uses a documented input share for every pool (no silent 50/50 default)", () => {
     expect(ASSUMED_INPUT_SHARE.assistant).toBeGreaterThan(0.5); // input-heavy
     expect(ASSUMED_INPUT_SHARE.batch).toBeLessThan(0.5); // output-heavy
+    expect(ASSUMED_INPUT_SHARE.video).toBeGreaterThan(0.5); // vision calls: heavily input-heavy
+  });
+
+  it("video pool: measured 94% input share on Sonnet 4.6 (one image in, short JSON verdict out)", () => {
+    const sonnet = MODEL_PRICING["claude-sonnet-4-6"];
+    // 0.94*3 + 0.06*15 = 3.72
+    expect(blendedRatePerMTok("video")).toBeCloseTo(sonnet.inputPerMTok * 0.94 + sonnet.outputPerMTok * 0.06, 10);
+    expect(blendedRatePerMTok("video")).toBeCloseTo(3.72, 10);
   });
 });
 
@@ -85,6 +98,16 @@ describe("estimateCostUsd", () => {
     expect(estimateCostUsd("batch", 0)).toBe(0);
     expect(estimateCostUsd("batch", -5)).toBe(0);
     expect(estimateCostUsd("batch", Number.NaN)).toBe(0);
+  });
+
+  it("reproduces the measured 2026-09-22 demand-gen-ext run within a cent", () => {
+    // Real counter delta that day: 697,528 tokens for 19 SKU attempts (8 delivered, 9 QC
+    // rejects, 2 technical fails at ~0 cost). Anchors the video pool's estimate to an
+    // actual measured day, the same way the assistant/batch test above does.
+    const cost = estimateCostUsd("video", 697_528);
+    expect(cost).toBeCloseTo(697_528 / 1e6 * 3.72, 6);
+    expect(cost).toBeGreaterThan(2.55);
+    expect(cost).toBeLessThan(2.65);
   });
 
   it("reproduces the measured 2026-08-18 day within a cent", () => {

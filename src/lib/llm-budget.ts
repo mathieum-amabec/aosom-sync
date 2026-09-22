@@ -6,14 +6,23 @@
  *      FAIL-CLOSED (throws) when the pool is exhausted, and
  *   2. records the call's actual input+output tokens against that pool's counter.
  *
- * Two pools, so a bulk run can never starve the public storefront:
+ * Four pools, so no one bulk workload can starve another:
  *   - `assistant` — ONLY `/api/assistant` (the public shopping assistant). Budget:
  *     `LLM_ASSISTANT_DAILY_BUDGET` (default 500k).
- *   - `batch` — everything else (imports, product/blog content, social captions,
- *     slideshow/video hooks, vision). Budget: `LLM_DAILY_TOKEN_BUDGET` (default 1.3M).
- * A bulk import drains only the `batch` pool, so the `assistant` pool — and shoppers —
- * are unaffected. `budgetedCreate` defaults to `batch`; only the assistant passes
- * `"assistant"`, so a new caller can never accidentally spend against the assistant pool.
+ *   - `batch` — imports, product/blog content, social captions. Budget:
+ *     `LLM_DAILY_TOKEN_BUDGET` (default 1.3M).
+ *   - `maintenance` — operator-launched catalogue vision audits (e.g. the pos-1 photo
+ *     audit). Budget: `LLM_MAINTENANCE_DAILY_BUDGET` (default uncapped).
+ *   - `video` — demand-gen-ext / before_after / assembly video-batch vision QC. Budget:
+ *     `LLM_VIDEO_DAILY_BUDGET` (default 400k). Split out 2026-09-22 for the same reason
+ *     `maintenance` was: a video production run is vision-call-heavy (dense per-frame
+ *     scoring) and was draining the shared `batch` pool fast enough to risk starving
+ *     same-day imports/social — see llm-usage.ts's `video` entry in ASSUMED_INPUT_SHARE
+ *     for the measured call shape.
+ * A bulk import drains only the `batch` pool and a video run drains only `video`, so
+ * neither can starve the `assistant` pool (or each other). `budgetedCreate` defaults to
+ * `batch`; every other caller passes its pool explicitly, so a new caller can never
+ * accidentally spend against a pool it doesn't own.
  *
  * Counters live in Turso (`daily_llm_budget`, keyed by (UTC date, pool)), so the caps
  * hold ACROSS Vercel Fluid Compute instances — unlike the per-process in-memory
@@ -28,6 +37,24 @@ export type BudgetPool = LlmBudgetPool;
 
 const DEFAULT_BATCH_TOKEN_BUDGET = 1_300_000;
 const DEFAULT_ASSISTANT_TOKEN_BUDGET = 500_000;
+/**
+ * 400,000 tokens/day for the `video` pool — sized 2026-09-22 from the ACTUAL publication
+ * schedule, not an arbitrary round number:
+ *   - Demand-Gen (3 slots/week, Mon/Wed/Fri) × 1.25 margin (QC rejects + operator choice
+ *     before approval) → 4 delivered/week → ÷ 42% measured QC yield (8/19 real SKUs that
+ *     day, 2026-09-22) → ~10 attempts/week × 36,712 measured tokens/attempt ≈ 367,120
+ *     tokens/week.
+ *   - Assembly (7 slots/week) × 1.25 margin → 9 attempts/week, but costs 0 tokens (pure
+ *     ffmpeg, no vision QC by design) — contributes nothing to this figure.
+ *   - Before/After (5 slots/week when active) is PAUSED — not counted here. Reactivating
+ *     it will need this budget revisited (it shares the same vision-QC call shape, so
+ *     assume a similar per-attempt cost until measured for real).
+ * 400,000/day covers the full week's ~367,120-token need in a single production session
+ * (the realistic usage pattern — see scripts/batch-demand-gen-extend.mts) with ~9% slack
+ * for variance (longer clips sample more frames), while staying ~3.25× smaller than the
+ * shared `batch` cap it used to draw from.
+ */
+const DEFAULT_VIDEO_TOKEN_BUDGET = 400_000;
 
 /**
  * Resolve a pool's daily token budget from its env var, falling back to the default.
@@ -37,11 +64,20 @@ const DEFAULT_ASSISTANT_TOKEN_BUDGET = 500_000;
  * two days of the whole `batch` cap — can run without starving imports, blog and social
  * generation, while its tokens are still COUNTED and shown on the usage dashboard. A silent
  * bypass would have hidden that spend entirely. Set `LLM_MAINTENANCE_DAILY_BUDGET` to cap it.
+ *
+ * `video` — unlike `maintenance` — IS capped by default (see DEFAULT_VIDEO_TOKEN_BUDGET):
+ * video-batch runs are a recurring weekly cadence, not an occasional operator-launched pass,
+ * so an explicit ceiling (not Infinity) is the right default. Set `LLM_VIDEO_DAILY_BUDGET`
+ * to override.
  */
 export function poolBudget(pool: BudgetPool): number {
   if (pool === "maintenance") {
     const raw = Number(process.env.LLM_MAINTENANCE_DAILY_BUDGET);
     return Number.isFinite(raw) && raw > 0 ? raw : Infinity;
+  }
+  if (pool === "video") {
+    const raw = Number(process.env.LLM_VIDEO_DAILY_BUDGET);
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_VIDEO_TOKEN_BUDGET;
   }
   const [envName, fallback] =
     pool === "assistant"
@@ -61,6 +97,7 @@ export class LlmBudgetExceededError extends Error {
     const envName =
       pool === "assistant" ? "LLM_ASSISTANT_DAILY_BUDGET"
       : pool === "maintenance" ? "LLM_MAINTENANCE_DAILY_BUDGET"
+      : pool === "video" ? "LLM_VIDEO_DAILY_BUDGET"
       : "LLM_DAILY_TOKEN_BUDGET";
     super(
       `LLM daily token budget exceeded for pool "${pool}" (${used}/${budget} tokens used today, UTC) — ` +
