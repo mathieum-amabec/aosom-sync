@@ -166,6 +166,7 @@ describe("runPriceAuditAndCorrect", () => {
       variantId: "v", sku: "s", price: 100, compareAtPrice: null, inventoryQuantity: 0,
     });
     vi.spyOn(db, "recordFloorCorrection").mockResolvedValue(undefined);
+    const incident = vi.spyOn(db, "recordPriceFloorIncident").mockResolvedValue(undefined);
 
     const res = await runPriceAuditAndCorrect(2); // cap = 2
 
@@ -174,6 +175,10 @@ describe("runPriceAuditAndCorrect", () => {
     expect(res.deferred).toBe(1);
     expect(push).toHaveBeenCalledTimes(2);
     expect(push.mock.calls.map((c) => c[0])).toEqual(["vB", "vC"]); // worst two, worst first
+    // TASK 3: every applied floor-audit correction is logged as an incident.
+    expect(incident).toHaveBeenCalledTimes(2);
+    expect(incident).toHaveBeenCalledWith({ sku: "B", oldPrice: 50, newPrice: 100, source: "price_audit" });
+    expect(incident).toHaveBeenCalledWith({ sku: "C", oldPrice: 70, newPrice: 100, source: "price_audit" });
     vi.restoreAllMocks();
   });
 
@@ -191,12 +196,15 @@ describe("runPriceAuditAndCorrect", () => {
       variantId: "vA", sku: "A", price: 90, compareAtPrice: null, inventoryQuantity: 0,
     });
     vi.spyOn(db, "recordFloorCorrection").mockResolvedValue(undefined);
+    const incident = vi.spyOn(db, "recordPriceFloorIncident").mockResolvedValue(undefined);
 
     const res = await runPriceAuditAndCorrect();
 
     expect(res.corrected).toBe(0);
     expect(res.failed).toBe(1);
     expect(res.corrections[0]).toMatchObject({ sku: "A", status: "failed" });
+    // A write that never actually confirmed must NOT be logged as a resolved incident.
+    expect(incident).not.toHaveBeenCalled();
     vi.restoreAllMocks();
   });
 });

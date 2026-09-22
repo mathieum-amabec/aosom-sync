@@ -28,6 +28,10 @@ vi.mock("node:fs", () => ({
   writeFileSync: vi.fn(),
 }));
 
+// TASK 3: a confirmed below-floor fix now also logs to price_floor_incidents.
+const mockRecordPriceFloorIncident = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("@/lib/database", () => ({ recordPriceFloorIncident: mockRecordPriceFloorIncident }));
+
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 function makeDbProduct(overrides: Partial<{
@@ -103,6 +107,7 @@ describe("force-push-shopify", () => {
     // Default read-back matches the standard fixture's db_price (214.99) so a write
     // confirms on the first attempt unless a test overrides it.
     mockFetchVariant.mockResolvedValue({ price: 214.99 });
+    mockRecordPriceFloorIncident.mockResolvedValue(undefined);
   });
 
   // ── Test 1 ────────────────────────────────────────────────────────────────
@@ -138,6 +143,10 @@ describe("force-push-shopify", () => {
     expect(mockUpdateVariantPrice).toHaveBeenCalledWith("variant-001", 214.99);
     expect(result.applied).toBe(1);
     expect(result.failed).toBe(0);
+    // TASK 3: fixture's shopify_price (179.99) < db_price (214.99) — a below-floor fix.
+    expect(mockRecordPriceFloorIncident).toHaveBeenCalledWith({
+      sku: "84G-720V00GY", oldPrice: 179.99, newPrice: 214.99, source: "force_push_script",
+    });
   });
 
   // ── Test 3 ────────────────────────────────────────────────────────────────
@@ -322,9 +331,23 @@ describe("force-push-shopify", () => {
     expect(result.failed).toBe(1);
     expect(result.errors[0].sku).toBe("GHOST-WRITE");
     expect(result.errors[0].error).toContain("read-back mismatch");
+    // Never confirmed live — must not be logged as a resolved incident.
+    expect(mockRecordPriceFloorIncident).not.toHaveBeenCalled();
   });
 
-  // ── Test 11 ────────────────────────────────────────────────────────────────
+  // ── Test 12 ───────────────────────────────────────────────────────────────
+  it("TASK 3: a correction that moves the price DOWN (was above floor) is not logged as an incident", async () => {
+    mockUpdateVariantPrice.mockResolvedValue(undefined);
+    mockFetchVariant.mockResolvedValue({ price: 100 }); // matches the lower db_price below
+
+    const diff = makePriceDiff({ sku: "WAS-OVERPRICED", variant_id: "v-over", shopify_price: 120, db_price: 100 });
+    const result = await applyPriceDiffs([diff], { delayMs: 0, sleep: noSleep });
+
+    expect(result.applied).toBe(1); // the price write itself still succeeds and is applied
+    expect(mockRecordPriceFloorIncident).not.toHaveBeenCalled(); // but it was never below floor
+  });
+
+  // ── Test 13 ───────────────────────────────────────────────────────────────
   it("PRICE_TOLERANCE boundary: small diff (< 0.01) produces no diff, large diff (> 0.01) does", () => {
     // 0.005 difference — clearly within tolerance, no diff expected.
     const withinTolerance = [makeDbProduct({ price: 100.005 })];

@@ -10,7 +10,7 @@
  * unit-testable without network/DB; `runPriceAuditAndCorrect()` wires it to the real Shopify
  * variant-price update and `price_history`.
  */
-import { setSetting, getProductsForPriceAudit, recordFloorCorrection } from "@/lib/database";
+import { setSetting, getProductsForPriceAudit, recordFloorCorrection, recordPriceFloorIncident } from "@/lib/database";
 import { fetchAllShopifyProducts, updateShopifyVariantPrice, fetchVariant } from "@/lib/shopify-client";
 import { targetSellPrice } from "@/lib/pricing";
 import { writePriceVerified } from "@/lib/price-protection";
@@ -233,7 +233,19 @@ export async function runPriceAuditAndCorrect(
         throw new Error(result.error ?? `price write not verified for variant ${variantId}`);
       }
     },
-    recordCorrection: (entry) => recordFloorCorrection(entry),
+    recordCorrection: async (entry) => {
+      await recordFloorCorrection(entry);
+      // TASK 3: every item audited here is below-floor by construction
+      // (computePriceFloorViolations only emits gap < 0) — log the applied ones as
+      // incidents. Best-effort: a logging failure must never undo an already-live fix.
+      if (entry.applied) {
+        try {
+          await recordPriceFloorIncident({ sku: entry.sku, oldPrice: entry.oldPrice, newPrice: entry.newPrice, source: "price_audit" });
+        } catch (err) {
+          console.error(`[price-audit] failed to record price_floor_incident for ${entry.sku}:`, err);
+        }
+      }
+    },
   });
   const corrected = corrections.filter((c) => c.status === "corrected").length;
   const failed = corrections.length - corrected;

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 import path from "path";
 import fs from "fs";
-import { isValidCheckpoint, isValidPriceReconcileCheckpoint } from "@/lib/database";
+import { isValidCheckpoint, isValidPriceReconcileCheckpoint, filterFloorIncidents, type PriceCorrectionLog } from "@/lib/database";
 import { PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
 import { storeLink, STOREFRONT_BASE_URL } from "@/lib/insights";
 
@@ -182,6 +182,47 @@ describe("isValidPriceReconcileCheckpoint (LAYER 2 rotation checkpoint)", () => 
     expect(isValidPriceReconcileCheckpoint(null)).toBe(false);
     expect(isValidPriceReconcileCheckpoint("string")).toBe(false);
     expect(isValidPriceReconcileCheckpoint({})).toBe(false);
+  });
+});
+
+describe("filterFloorIncidents (TASK 3 — unified price floor incident log)", () => {
+  const entry = (over: Partial<PriceCorrectionLog> = {}): PriceCorrectionLog => ({
+    sku: "A", shopifyProductId: "p1", oldPriceShopify: 100, newPriceTurso: 120, reason: "reconciliation",
+    ...over,
+  });
+
+  it("keeps a reconciliation correction that moved the price UP (was below floor)", () => {
+    expect(filterFloorIncidents([entry({ oldPriceShopify: 90, newPriceTurso: 100 })])).toHaveLength(1);
+  });
+
+  it("keeps a sync_retry correction that moved the price UP", () => {
+    expect(filterFloorIncidents([entry({ reason: "sync_retry", oldPriceShopify: 90, newPriceTurso: 100 })])).toHaveLength(1);
+  });
+
+  it("drops a correction that moved the price DOWN (was above floor, not a loss)", () => {
+    expect(filterFloorIncidents([entry({ oldPriceShopify: 120, newPriceTurso: 100 })])).toHaveLength(0);
+  });
+
+  it("drops an exact no-op (old === new)", () => {
+    expect(filterFloorIncidents([entry({ oldPriceShopify: 100, newPriceTurso: 100 })])).toHaveLength(0);
+  });
+
+  it("drops hausse_20pct even though it structurally looks like old < new — it's a HELD increase, not a fix", () => {
+    expect(filterFloorIncidents([entry({ reason: "hausse_20pct", oldPriceShopify: 90, newPriceTurso: 120 })])).toHaveLength(0);
+  });
+
+  it("filters a mixed batch, keeping only the genuine below-floor fixes", () => {
+    const entries = [
+      entry({ sku: "UP", oldPriceShopify: 80, newPriceTurso: 100 }), // keep
+      entry({ sku: "DOWN", oldPriceShopify: 130, newPriceTurso: 100 }), // drop
+      entry({ sku: "SPIKE", reason: "hausse_20pct", oldPriceShopify: 80, newPriceTurso: 130 }), // drop
+      entry({ sku: "SYNC_UP", reason: "sync_retry", oldPriceShopify: 40, newPriceTurso: 45 }), // keep
+    ];
+    expect(filterFloorIncidents(entries).map((e) => e.sku)).toEqual(["UP", "SYNC_UP"]);
+  });
+
+  it("is empty for an empty input", () => {
+    expect(filterFloorIncidents([])).toEqual([]);
   });
 });
 

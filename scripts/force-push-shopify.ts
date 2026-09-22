@@ -31,6 +31,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fetchAllShopifyProducts, updateShopifyVariantPrice, fetchVariant } from "@/lib/shopify-client";
 import { writePriceVerified } from "@/lib/price-protection";
+import { recordPriceFloorIncident } from "@/lib/database";
 import type { ShopifyExistingProduct } from "@/types/sync";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -248,6 +249,16 @@ export async function applyPriceDiffs(
         { sku: diff.sku, from: diff.shopify_price, to: diff.db_price, attempts: result.attempts },
         "Price updated (verified)"
       );
+      // TASK 3: only the below-floor direction is a real incident.
+      if (diff.shopify_price < diff.db_price) {
+        try {
+          await recordPriceFloorIncident({
+            sku: diff.sku, oldPrice: diff.shopify_price, newPrice: diff.db_price, source: "force_push_script",
+          });
+        } catch (logErr) {
+          log.error({ sku: diff.sku, err: logErr instanceof Error ? logErr.message : String(logErr) }, "Failed to record price_floor_incident");
+        }
+      }
     } catch (err) {
       failed++;
       const message = err instanceof Error ? err.message : String(err);

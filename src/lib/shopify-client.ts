@@ -5,6 +5,7 @@ import { stripLeadingHeading } from "./html-utils";
 import { env, SHOPIFY, SYNC } from "./config";
 import { targetSellPrice } from "./pricing";
 import { writePriceVerified, PRICE_EPSILON } from "./price-protection";
+import { recordPriceFloorIncident } from "./database";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -518,6 +519,16 @@ export async function createShopifyProduct(
       );
     } else {
       console.warn(`[IMPORT] price floor corrected on create for ${sku}: Shopify returned ${stored}, forced to ${expected}`);
+      // TASK 3: only the below-floor direction is a real incident — Shopify returning a
+      // price ABOVE the floor on create is a different (less severe) drift, not the
+      // "vente à perte" shape this log is for.
+      if (Number.isFinite(stored) && stored < expected) {
+        try {
+          await recordPriceFloorIncident({ sku, oldPrice: stored, newPrice: expected, source: "import" });
+        } catch (err) {
+          console.error(`[IMPORT] failed to record price_floor_incident for ${sku}:`, err);
+        }
+      }
     }
   }
 

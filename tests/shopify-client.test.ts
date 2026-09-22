@@ -11,6 +11,11 @@ vi.mock("@/lib/config", () => ({
   SYNC: { MIN_DISCOUNT_DISPLAY_PERCENT: 10 },
 }));
 
+// createShopifyProduct's LAYER 1 correction logs a price_floor_incident on a genuine
+// below-floor mismatch — avoid hitting a real DB from this API-client test file.
+const mockRecordPriceFloorIncident = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("@/lib/database", () => ({ recordPriceFloorIncident: mockRecordPriceFloorIncident }));
+
 // Import after mocks
 const { updateShopifyVariantPrice, createShopifyProduct, fetchShopifyVariantsPage } = await import("@/lib/shopify-client");
 
@@ -132,7 +137,10 @@ describe("createShopifyProduct — metafield + handle safety", () => {
 // LAYER 1 for the import path: 842-375V00CG was created with a price nothing ever read
 // back and confirmed. These tests exercise the fix — verify-on-create.
 describe("createShopifyProduct — LAYER 1 write-then-verify on create", () => {
-  beforeEach(() => mockFetch.mockReset());
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockRecordPriceFloorIncident.mockClear();
+  });
 
   it("does nothing extra when Shopify's create response already matches the floor price", async () => {
     mockFetch.mockResolvedValue({
@@ -183,6 +191,10 @@ describe("createShopifyProduct — LAYER 1 write-then-verify on create", () => {
     const putCall = mockFetch.mock.calls.find((c) => c[1]?.method === "PUT");
     expect(putCall?.[0]).toContain("/variants/9001.json");
     expect(JSON.parse(putCall![1].body).variant.price).toBe("99");
+    // TASK 3: a confirmed below-floor fix is logged as a unified incident.
+    expect(mockRecordPriceFloorIncident).toHaveBeenCalledWith({
+      sku: "SKU1", oldPrice: 89.99, newPrice: 99, source: "import",
+    });
   });
 
   it("logs but does not throw when the corrective write never confirms (deleted variant)", async () => {
@@ -206,6 +218,8 @@ describe("createShopifyProduct — LAYER 1 write-then-verify on create", () => {
 
     await expect(createShopifyProduct(mergedFixture(), contentFixture({}))).resolves.toMatchObject({ id: "555" });
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("price floor NOT confirmed"));
+    // An unconfirmed write is not a resolved incident — nothing to log yet.
+    expect(mockRecordPriceFloorIncident).not.toHaveBeenCalled();
 
     errorSpy.mockRestore();
   });
