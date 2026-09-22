@@ -517,6 +517,52 @@ export const DEFAULT_VIDEO_SCHEDULE: VideoSchedule = {
   platform: "both",
 };
 
+// Content-scale chantier's 3 batch video formats each get their OWN dedicated recurring
+// grid (plain PublicationSchedule shape — no ratio/platform knob, unlike video_schedule:
+// these are always 9:16 vertical, published to 'facebook' only, per the batch scripts).
+// Distinct weekday/time from publication_schedule and video_schedule on purpose — real
+// collisions on the shared (platform, scheduled_at) slot are then rare rather than
+// designed-in, though getNextAvailableSlot's retry-on-collision still covers the rare case.
+// Cadence is sized to the backlog each format had at launch (2026-09-21): demand_gen_ext 4,
+// before_after 10 (biggest, so 2/day), assembly 9 (daily — its UGC-clip pool is small, ~90
+// SKUs total, so it won't refill fast).
+export const DEFAULT_DEMAND_GEN_EXT_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: [
+    { day: "mon", times: ["09:15"] },
+    { day: "wed", times: ["09:15"] },
+    { day: "fri", times: ["09:15"] },
+  ],
+  timezone: "America/Toronto",
+  max_per_day: 1,
+};
+
+export const DEFAULT_BEFORE_AFTER_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: [
+    { day: "tue", times: ["13:00", "13:30"] },
+    { day: "thu", times: ["13:00", "13:30"] },
+    { day: "sat", times: ["11:00"] },
+  ],
+  timezone: "America/Toronto",
+  max_per_day: 2,
+};
+
+export const DEFAULT_ASSEMBLY_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: [
+    { day: "mon", times: ["17:00"] },
+    { day: "tue", times: ["17:00"] },
+    { day: "wed", times: ["17:00"] },
+    { day: "thu", times: ["17:00"] },
+    { day: "fri", times: ["17:00"] },
+    { day: "sat", times: ["17:00"] },
+    { day: "sun", times: ["17:00"] },
+  ],
+  timezone: "America/Toronto",
+  max_per_day: 1,
+};
+
 // ─── Slideshow content settings ─────────────────────────────────────
 // Operator controls for the slideshow/montage content engine (Module G). The
 // template keys mirror SlideshowTemplate in src/lib/slideshow/types.ts but are
@@ -620,4 +666,10 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   "blog_schedule",
   // video_schedule (PublicationSchedule shape) — independent reel/video cadence.
   "video_schedule",
+  // Per-format recurring grids for the content-scale chantier's 3 batch video formats
+  // (PublicationSchedule shape each, edited via the generic /api/settings route — no
+  // dedicated schedule-tab UI for these yet).
+  "demand_gen_ext_schedule",
+  "before_after_schedule",
+  "assembly_schedule",
 ]);
