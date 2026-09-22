@@ -2,6 +2,30 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.20] - 2026-09-22
+
+A dedicated `video` token-budget pool, isolated from the shared `batch` pool that imports,
+blog and social captions also draw from — same split that solved this for catalogue vision
+audits (`maintenance` pool, 2026-09-11), now applied to video-batch production, which had
+been draining `batch` fast enough in one session to risk starving same-day content generation.
+
+### Added
+
+- **`video` pool** (`daily_llm_budget`) covering demand-gen-ext, before_after and assembly
+  video QC — capped at **400,000 tokens/day** by default (`LLM_VIDEO_DAILY_BUDGET`), sized
+  from the actual publication schedule (Demand-Gen 3x/week, Assembly daily, Avant/Après
+  paused) with a 25% production margin and the measured 42% QC yield / 36,712 tokens-per-
+  attempt real cost. Real spend at that production rate: **~5.94 $/mois** (~1.37 $/semaine),
+  measured at 94% input share on Sonnet 4.6 — about 3.25× smaller a ceiling than the shared
+  `batch` cap it used to draw from.
+- Wired into all 3 video-batch scripts (`demand-gen-clean-window.ts` — covers demand-gen-ext
+  and before_after's post-render verify — plus `batch-before-after.mts`'s gallery
+  classification; `batch-assembly.mts` makes no LLM calls today, left with a routing comment
+  for if that changes).
+- **Full dashboard visibility from day one** — pool card AND the 7-day trend chart. The
+  `maintenance` pool shipped without trend-chart visibility and that gap went unnoticed for a
+  while; `video` does not repeat it.
+
 ## [0.5.92.19] - 2026-09-22
 
 Closes the 3 remaining gaps behind the `842-375V00CG` incident (imported 2026-08-20,
