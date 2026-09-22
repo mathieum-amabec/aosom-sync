@@ -170,6 +170,8 @@ async function classifyGalleryForBeforeAfter(images: string[]): Promise<{ studio
   const message = await budgetedCreate(client, {
     model: CLAUDE.MODEL_BATCH,
     max_tokens: 300,
+    // pool="video": isolated from the shared batch pool along with every other video-batch
+    // vision call (see src/lib/demand-gen-clean-window.ts and src/lib/llm-budget.ts).
     system:
       `Tu vois ${pool.length} photos du MÊME produit, étiquetées ${LETTERS.slice(0, pool.length).split("").join(", ")}. ` +
       "Identifie DEUX rôles parmi elles :\n" +
@@ -181,7 +183,7 @@ async function classifyGalleryForBeforeAfter(images: string[]): Promise<{ studio
       "Si AUCUNE photo ne qualifie pour un rôle, réponds null pour ce rôle plutôt que de forcer un choix. " +
       'Réponds UNIQUEMENT en JSON: {"studio": "<lettre>"|null, "life": "<lettre>"|null, "reason": "<une phrase courte>"}',
     messages: [{ role: "user", content }],
-  });
+  }, undefined, "video");
   const text = message.content.map((c) => ("text" in c ? c.text : "")).join("");
   const m = text.match(/\{[\s\S]*?\}/);
   if (!m) return { studio: null, life: null, reason: "réponse Vision illisible" };

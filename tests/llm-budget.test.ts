@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Per-pool in-memory counter standing in for the daily_llm_budget (day, pool) table.
 const state = vi.hoisted(() => ({
-  used: { assistant: 0, batch: 0, maintenance: 0 } as Record<string, number>,
+  used: { assistant: 0, batch: 0, maintenance: 0, video: 0 } as Record<string, number>,
   added: [] as Array<{ pool: string; n: number }>,
   /** Set to simulate the counter write failing (a Turso blip), to prove it is LOGGED. */
   failAdd: null as Error | null,
@@ -33,11 +33,13 @@ beforeEach(() => {
   state.used.assistant = 0;
   state.used.batch = 0;
   state.used.maintenance = 0;
+  state.used.video = 0;
   state.added.length = 0;
   state.failAdd = null;
   delete process.env.LLM_MAINTENANCE_DAILY_BUDGET;
   delete process.env.LLM_DAILY_TOKEN_BUDGET;
   delete process.env.LLM_ASSISTANT_DAILY_BUDGET;
+  delete process.env.LLM_VIDEO_DAILY_BUDGET;
 });
 
 describe("llm-budget pools", () => {
@@ -192,6 +194,81 @@ describe("maintenance pool accounting", () => {
     await expect(
       budgetedCreate(clientReturning(1, 1) as never, {} as never, undefined, "maintenance"),
     ).rejects.toThrow(/pool "maintenance"/);
+  });
+});
+
+// ─── The `video` pool — isolates demand-gen-ext / before_after / assembly QC from `batch` ──
+// Split out 2026-09-22 for the same reason `maintenance` was (2026-09-11): a video production
+// run is vision-call-heavy enough to blow through the shared `batch` cap in one session and
+// starve same-day imports/social. Unlike `maintenance`, `video` IS capped by default (a
+// recurring weekly cadence, not an occasional operator-launched pass) — see llm-budget.ts.
+describe("video pool accounting", () => {
+  const clientReturning = (input_tokens: number, output_tokens: number) => ({
+    messages: { create: vi.fn(async () => ({ usage: { input_tokens, output_tokens }, content: [] })) },
+  });
+
+  it("default is 400k (LLM_VIDEO_DAILY_BUDGET); env overrides; invalid falls back", () => {
+    expect(poolBudget("video")).toBe(400_000);
+    process.env.LLM_VIDEO_DAILY_BUDGET = "1000";
+    expect(poolBudget("video")).toBe(1000);
+    process.env.LLM_VIDEO_DAILY_BUDGET = "not-a-number";
+    expect(poolBudget("video")).toBe(400_000);
+  });
+
+  it("is CAPPED by default, unlike maintenance (Infinity)", () => {
+    expect(poolBudget("video")).toBe(400_000);
+    expect(Number.isFinite(poolBudget("video"))).toBe(true);
+    expect(poolBudget("maintenance")).toBe(Infinity);
+  });
+
+  it("budgetedCreate debits the VIDEO pool when pool='video'", async () => {
+    const client = clientReturning(1036, 66); // real measured shape, 2026-09-22
+
+    await budgetedCreate(client as never, { model: "x", max_tokens: 1, messages: [] } as never, undefined, "video");
+
+    expect(client.messages.create).toHaveBeenCalledTimes(1);
+    expect(state.added).toEqual([{ pool: "video", n: 1102 }]);
+    expect(state.used.video).toBe(1102);
+  });
+
+  it("POOL ISOLATION: a video production run does NOT touch batch, assistant, or maintenance", async () => {
+    for (let i = 0; i < 5; i++) {
+      await budgetedCreate(clientReturning(1036, 66) as never, {} as never, undefined, "video");
+    }
+
+    expect(state.used.video).toBe(5510);
+    expect(state.used.batch).toBe(0);
+    expect(state.used.assistant).toBe(0);
+    expect(state.used.maintenance).toBe(0);
+  });
+
+  it("POOL ISOLATION: an exhausted video pool does NOT block batch, and vice versa", async () => {
+    process.env.LLM_VIDEO_DAILY_BUDGET = "100";
+    process.env.LLM_DAILY_TOKEN_BUDGET = "100";
+    state.used.video = 100;
+    await expect(assertLlmBudget("video")).rejects.toBeInstanceOf(LlmBudgetExceededError);
+    await expect(assertLlmBudget("batch")).resolves.toBeUndefined();
+
+    state.used.video = 0;
+    state.used.batch = 100;
+    await expect(assertLlmBudget("batch")).rejects.toBeInstanceOf(LlmBudgetExceededError);
+    await expect(assertLlmBudget("video")).resolves.toBeUndefined();
+  });
+
+  it("fails closed WITHOUT calling the API when the video pool is over budget", async () => {
+    process.env.LLM_VIDEO_DAILY_BUDGET = "100";
+    state.used.video = 100;
+    const client = { messages: { create: vi.fn() } };
+    await expect(
+      budgetedCreate(client as never, {} as never, undefined, "video"),
+    ).rejects.toThrow(/pool "video".*budget exceeded|budget exceeded.*"video"/);
+    expect(client.messages.create).not.toHaveBeenCalled();
+  });
+
+  it("the exceeded-budget error names LLM_VIDEO_DAILY_BUDGET as the override", async () => {
+    process.env.LLM_VIDEO_DAILY_BUDGET = "100";
+    state.used.video = 100;
+    await expect(assertLlmBudget("video")).rejects.toThrow(/LLM_VIDEO_DAILY_BUDGET/);
   });
 });
 

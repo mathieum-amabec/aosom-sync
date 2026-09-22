@@ -12,6 +12,13 @@
  *
  * Renders the same jump-cut / wipeleft / grade design as v3 — see poc-assembly-v3.mts's
  * header for that history. DRAFT ONLY.
+ *
+ * No LLM calls today (deterministic ffmpeg render from a pre-built assemblyBatch.json —
+ * captions and clip timing are supplied, not generated) — so nothing here draws from any
+ * token budget pool. If this script ever grows an LLM step (auto-generated captions,
+ * clip selection), route it through `budgetedCreate(client, params, undefined, "video")`
+ * — the same isolated pool the other two video-batch scripts use (see
+ * src/lib/llm-budget.ts) — not the default `"batch"` pool.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync, readFileSync } from "node:fs";

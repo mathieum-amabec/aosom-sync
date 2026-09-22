@@ -46,12 +46,21 @@ export const ASSUMED_INPUT_SHARE: Record<LlmBudgetPool, number> = {
   // Vision maintenance passes are almost pure input: one image in, a two-line JSON verdict
   // out. Measured on the 1,730-product pos-1 audit: ~870 input / ~85 output tokens per call.
   maintenance: 0.92,
+  // Video-batch QC is the same call shape as `maintenance` (one frame in, a short JSON
+  // verdict out) — MEASURED directly, not assumed: 4 real calls against
+  // STRICT_DEMAND_GEN_PROMPT on 2026-09-22 gave 785-1,787 input / 60-68 output tokens
+  // depending on source resolution (avg in=1,036 out=66 -> 94.0% input). Re-measure if the
+  // prompt or the frame-extraction resolution changes materially.
+  video: 0.94,
 };
 
 /** The model each pool currently runs. Reads config, so the CLAUDE_ASSISTANT_MODEL /
- *  CLAUDE_BATCH_MODEL overrides are reflected in the estimate without a code change. */
+ *  CLAUDE_BATCH_MODEL / CLAUDE_VIDEO_QC_MODEL overrides are reflected in the estimate
+ *  without a code change. */
 export function poolModel(pool: LlmBudgetPool): string {
-  return pool === "assistant" ? CLAUDE.MODEL_ASSISTANT : CLAUDE.MODEL_BATCH;
+  if (pool === "assistant") return CLAUDE.MODEL_ASSISTANT;
+  if (pool === "video") return CLAUDE.MODEL_VIDEO_QC;
+  return CLAUDE.MODEL_BATCH;
 }
 
 /**

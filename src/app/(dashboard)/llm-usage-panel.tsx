@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 
 interface PoolUsage {
-  pool: "assistant" | "batch" | "maintenance";
+  pool: "assistant" | "batch" | "maintenance" | "video";
   model: string;
   tokens: number;
   /** null = uncapped (maintenance without LLM_MAINTENANCE_DAILY_BUDGET set). JSON can't
@@ -19,6 +19,7 @@ interface DayUsage {
   day: string;
   assistant: number;
   batch: number;
+  video: number;
   costUsd: number;
 }
 interface Usage {
@@ -32,6 +33,7 @@ const POOL_LABEL: Record<PoolUsage["pool"], string> = {
   assistant: "Assistant (boutique)",
   batch: "Batch (imports, blog, social)",
   maintenance: "Maintenance (audits catalogue)",
+  video: "Vidéo (demand-gen, assembly, avant/après)",
 };
 
 /** Amber at 80% of the daily cap, red at 100% — matches the alert colours used elsewhere. */
@@ -91,7 +93,7 @@ export function LlmUsagePanel() {
     );
   }
 
-  const maxDayTokens = Math.max(1, ...usage.days.map((d) => d.assistant + d.batch));
+  const maxDayTokens = Math.max(1, ...usage.days.map((d) => d.assistant + d.batch + d.video));
   const atRisk = usage.pools.filter((p) => p.pctOfBudget >= 80);
 
   return (
@@ -158,7 +160,7 @@ export function LlmUsagePanel() {
             their own row so the bar row keeps a fixed height. */}
         <div className="flex items-end gap-2" style={{ height: CHART_HEIGHT_PX }}>
           {usage.days.map((d) => {
-            const total = d.assistant + d.batch;
+            const total = d.assistant + d.batch + d.video;
             // Floor a non-zero value at 2px so a small day is visible rather than rounded away.
             const px = (n: number) =>
               n <= 0 ? 0 : Math.max(2, Math.round((n / maxDayTokens) * CHART_HEIGHT_PX));
@@ -166,10 +168,11 @@ export function LlmUsagePanel() {
               <div
                 key={d.day}
                 className="flex-1 flex flex-col justify-end min-w-0"
-                title={`${d.day} — assistant ${fmtTokens(d.assistant)}, batch ${fmtTokens(d.batch)} · ${fmtUsd(d.costUsd)} estimé`}
+                title={`${d.day} — assistant ${fmtTokens(d.assistant)}, batch ${fmtTokens(d.batch)}, vidéo ${fmtTokens(d.video)} · ${fmtUsd(d.costUsd)} estimé`}
               >
                 <div className="w-full bg-blue-500/80 rounded-t-sm" style={{ height: px(d.assistant) }} />
                 <div className="w-full bg-amber-500/80" style={{ height: px(d.batch) }} />
+                <div className="w-full bg-purple-500/80" style={{ height: px(d.video) }} />
                 {total === 0 && <div className="w-full h-px bg-gray-700" />}
               </div>
             );
@@ -188,6 +191,9 @@ export function LlmUsagePanel() {
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-sm bg-amber-500/80" /> Batch
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-sm bg-purple-500/80" /> Vidéo
           </span>
         </div>
         {/* Two caveats an operator needs before trusting a dollar figure or an empty bar. */}

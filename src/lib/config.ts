@@ -234,6 +234,16 @@ export const CLAUDE = {
    * generateProductContent), so a Haiku miss costs a retry, never output quality.
    */
   MODEL_BATCH: process.env.CLAUDE_BATCH_MODEL?.trim() || "claude-haiku-4-5",
+  /**
+   * Video-batch vision QC only (demand-gen-ext / before_after frame scoring — see
+   * src/lib/demand-gen-clean-window.ts). Draws from the `video` pool, not `batch`.
+   *
+   * Sonnet, not Haiku: this is a strict dual-gate visual judgment call (full product
+   * visible AND text/logo-free) that gates whether a rendered clip ships at all — the
+   * same quality bar MODEL_BATCH's escalation tier (MODEL, above) exists for. Override
+   * per-deploy with CLAUDE_VIDEO_QC_MODEL.
+   */
+  MODEL_VIDEO_QC: process.env.CLAUDE_VIDEO_QC_MODEL?.trim() || "claude-sonnet-4-6",
   MAX_TOKENS_CONTENT: 4000,
   MAX_TOKENS_SOCIAL: 500,
 } as const;
