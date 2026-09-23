@@ -29,6 +29,11 @@ export interface CreateBlogArticleInput {
   author?: string;
   /** SEO meta description (used as `metafields_global_description_tag`). */
   metaDescription?: string;
+  /** Override the lang-derived blog id — used by the pSEO guide generator to target the
+   * dedicated BLOG.GUIDES_FR_ID blog instead of the editorial Actualités/Blog. */
+  blogIdOverride?: number;
+  /** Explicit URL handle. Omit to let Shopify auto-derive one from the title. */
+  handle?: string;
 }
 
 export interface CreatedBlogArticle {
@@ -52,7 +57,7 @@ export async function createBlogArticle(
   if (!input.title.trim()) throw new Error("createBlogArticle: title required");
   if (!input.bodyHtml.trim()) throw new Error("createBlogArticle: bodyHtml required");
 
-  const blogId = blogIdFor(input.lang);
+  const blogId = input.blogIdOverride ?? blogIdFor(input.lang);
 
   const tags =
     Array.isArray(input.tags) ? input.tags.join(", ") : input.tags ?? "";
@@ -64,6 +69,9 @@ export async function createBlogArticle(
     tags,
     published: false,
   };
+  if (input.handle) {
+    article.handle = input.handle;
+  }
 
   if (input.summaryHtml) {
     article.summary_html = input.summaryHtml;

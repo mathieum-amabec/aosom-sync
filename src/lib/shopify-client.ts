@@ -819,6 +819,34 @@ export async function getShopifyStockState(
   };
 }
 
+/** Real (curated, FR) Shopify title for a product — `products.name` in Turso is Aosom's raw
+ * English feed title, never the storefront title (see CLAUDE.md "Catalog name is English, FR
+ * on Shopify"). Falls back to the given fallback string on any failure so a single API hiccup
+ * never hard-blocks a generation job. */
+export async function getShopifyProductTitle(shopifyProductId: string, fallback: string): Promise<string> {
+  try {
+    const res = await shopifyFetch(`/products/${shopifyProductId}.json?fields=title`);
+    if (!res.ok) return fallback;
+    const data = (await res.json()) as { product?: { title?: string } };
+    return data.product?.title || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Real Shopify collection handle (URL slug) — never guessed/slugified from the title, which
+ * is exactly what produced dead links in the first SEO-articles lot (docs/seo-articles/). */
+export async function getShopifyCollectionHandle(collectionId: string): Promise<string | null> {
+  try {
+    const res = await shopifyFetch(`/collections/${collectionId}.json?fields=handle`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { collection?: { handle?: string } };
+    return data.collection?.handle || null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Inventory tracking ─────────────────────────────────────────────
 // Dropship products historically shipped with `inventory_management: null`
 // (untracked — see createShopifyProduct). To push a safety-buffered quantity we
