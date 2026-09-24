@@ -2,6 +2,32 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.22] - 2026-09-24
+
+Quality safety net for the pSEO guide pipeline, plus a data-hygiene fix that unblocks 9
+subcategories from ever getting a guide.
+
+### Added
+
+- **Automatic targeted retry for low-quality guides** — any guide whose `quality_score` lands
+  below `RETRY_QUALITY_THRESHOLD` (70) now triggers one automatic regeneration pass before
+  being shown to the reviewer: Claude gets the original structured copy plus the judge's exact
+  complaints and is told to fix only what's flagged, not rewrite from scratch. Both the
+  before/after quality and fact-check scores are stored (`guide_pages.quality_score_before_retry`
+  / `fact_check_score_before_retry`) and surfaced in the `/guides` review UI when the retry
+  still doesn't clear the bar, so a reviewer can tell "tried and failed" apart from "never
+  tried." Also applied retroactively to every already-pending low-score guide — "Patio Shade"
+  went 62 → 92 quality (92 → 95 fact-check).
+
+### Fixed
+
+- **9 stale `collection_mappings` rows** pointed at deleted Shopify collection ids (404s),
+  permanently blocking guide generation for Patio Furniture, Patio Swings & Hammocks, Sun
+  Loungers, Home Décor, Wedding & Events Tents, Bathroom Furniture, Raised Garden Beds, Exercise
+  Equipment, and Bikes & Scooters. Re-resolved each against a live collection (7/9 via an exact
+  `type`-rule match on the `aosom_category` path) and cleared the stale `skipped_empty`
+  `guide_pages` rows blocking re-generation.
+
 ## [0.5.92.21] - 2026-09-24
 
 Weekly automation for the Phase 1 pSEO subcategory guide pipeline (generation → fact-check →
