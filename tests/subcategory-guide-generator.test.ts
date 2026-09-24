@@ -25,6 +25,8 @@ vi.mock("@/lib/database", () => ({
   createGuidePage: vi.fn(async () => 1),
   getAllCollectionMappings: vi.fn(),
   getGuidePages: vi.fn(),
+  getGuidePageById: vi.fn(),
+  updateGuidePageRetryResult: vi.fn(),
 }));
 
 vi.mock("@/lib/shopify-client", () => ({
@@ -43,15 +45,20 @@ vi.mock("@/lib/shopify-blog", () => ({
     handle: "guide-achat-test",
     adminUrl: "https://admin/articles/111",
   })),
+  updateBlogArticleBody: vi.fn(async () => undefined),
 }));
 
-vi.mock("@/lib/guide-quality-pipeline", () => ({
-  runGuideQualityPipeline: vi.fn(async () => ({
+const mockRunGuideQualityPipeline = vi.hoisted(() =>
+  vi.fn(async () => ({
     factCheck: { score: 90, reasons: "ok" },
     qualityCheck: { score: 88, reasons: "ok" },
     overallScore: 88,
     overallStatus: "ready",
   })),
+);
+vi.mock("@/lib/guide-quality-pipeline", () => ({
+  runGuideQualityPipeline: mockRunGuideQualityPipeline,
+  RETRY_QUALITY_THRESHOLD: 70,
 }));
 
 import {
@@ -59,11 +66,16 @@ import {
   generateAndPushGuide,
   generatePilotGuides,
   getGuideCoverageStatus,
+  extractCopyFromBodyHtml,
+  retryExistingGuideQuality,
 } from "@/lib/subcategory-guide-generator";
-import { getSubcategoryTrendStats, createGuidePage, getAllCollectionMappings, getGuidePages } from "@/lib/database";
+import {
+  getSubcategoryTrendStats, createGuidePage, getAllCollectionMappings, getGuidePages,
+  getGuidePageById, updateGuidePageRetryResult,
+} from "@/lib/database";
 import type { CollectionMapping, GuidePageRow } from "@/lib/database";
 import { getShopifyCollectionHandle } from "@/lib/shopify-client";
-import { createBlogArticle } from "@/lib/shopify-blog";
+import { createBlogArticle, updateBlogArticleBody } from "@/lib/shopify-blog";
 import type { SubcategoryTrendStats } from "@/lib/database";
 
 function stats(overrides: Partial<SubcategoryTrendStats>): SubcategoryTrendStats {
@@ -110,6 +122,12 @@ beforeEach(() => {
   vi.mocked(getShopifyCollectionHandle).mockClear();
   vi.mocked(createBlogArticle).mockClear();
   mockCreate.mockReset();
+  mockRunGuideQualityPipeline.mockReset().mockResolvedValue({
+    factCheck: { score: 90, reasons: "ok" },
+    qualityCheck: { score: 88, reasons: "ok" },
+    overallScore: 88,
+    overallStatus: "ready",
+  });
 });
 
 describe("selectPilotSubcategories", () => {
@@ -208,6 +226,94 @@ describe("generateAndPushGuide", () => {
         qualityScore: 88,
         overallStatus: "ready",
       }),
+    );
+  });
+
+  it("automatically retries once, targeted on the judge's feedback, when quality_score is below the retry threshold", async () => {
+    mockCreate.mockResolvedValueOnce(goodCopyResponse).mockResolvedValueOnce(goodCopyResponse);
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({})]);
+    const { candidates } = await selectPilotSubcategories(1);
+
+    mockRunGuideQualityPipeline
+      .mockResolvedValueOnce({
+        factCheck: { score: 90, reasons: "ok" },
+        qualityCheck: { score: 55, reasons: "ton trop vendeur" },
+        overallScore: 55,
+        overallStatus: "attention",
+      })
+      .mockResolvedValueOnce({
+        factCheck: { score: 90, reasons: "ok" },
+        qualityCheck: { score: 85, reasons: "corrigé" },
+        overallScore: 85,
+        overallStatus: "ready",
+      });
+
+    await generateAndPushGuide(candidates[0]);
+
+    // 1st Claude call = original generation, 2nd = the revision pass
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(mockRunGuideQualityPipeline).toHaveBeenCalledTimes(2);
+    expect(createGuidePage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        qualityScore: 85,
+        qualityScoreBeforeRetry: 55,
+        factCheckScoreBeforeRetry: 90,
+        overallStatus: "ready",
+      }),
+    );
+  });
+
+  it("never retries more than once, even if the revision is still below threshold", async () => {
+    mockCreate.mockResolvedValueOnce(goodCopyResponse).mockResolvedValueOnce(goodCopyResponse);
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({})]);
+    const { candidates } = await selectPilotSubcategories(1);
+
+    mockRunGuideQualityPipeline.mockResolvedValue({
+      factCheck: { score: 90, reasons: "ok" },
+      qualityCheck: { score: 50, reasons: "toujours faible" },
+      overallScore: 50,
+      overallStatus: "attention",
+    });
+
+    await generateAndPushGuide(candidates[0]);
+
+    expect(mockCreate).toHaveBeenCalledTimes(2); // generation + exactly 1 revision, never a 2nd revision
+    expect(mockRunGuideQualityPipeline).toHaveBeenCalledTimes(2);
+    expect(createGuidePage).toHaveBeenCalledWith(
+      expect.objectContaining({ qualityScore: 50, qualityScoreBeforeRetry: 50 }),
+    );
+  });
+
+  it("does not retry when quality_score already clears the threshold", async () => {
+    mockCreate.mockResolvedValueOnce(goodCopyResponse);
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({})]);
+    const { candidates } = await selectPilotSubcategories(1);
+
+    await generateAndPushGuide(candidates[0]); // default mock verdict: quality 88
+
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockRunGuideQualityPipeline).toHaveBeenCalledTimes(1);
+    expect(createGuidePage).toHaveBeenCalledWith(
+      expect.objectContaining({ qualityScoreBeforeRetry: undefined, factCheckScoreBeforeRetry: undefined }),
+    );
+  });
+
+  it("keeps the original draft and still records the attempted-retry scores if the revision call itself throws", async () => {
+    mockCreate.mockResolvedValueOnce(goodCopyResponse).mockRejectedValueOnce(new Error("Claude down mid-retry"));
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({})]);
+    const { candidates } = await selectPilotSubcategories(1);
+
+    mockRunGuideQualityPipeline.mockResolvedValueOnce({
+      factCheck: { score: 90, reasons: "ok" },
+      qualityCheck: { score: 55, reasons: "faible" },
+      overallScore: 55,
+      overallStatus: "attention",
+    });
+
+    const result = await generateAndPushGuide(candidates[0]);
+    expect(result).toBeTruthy(); // never throws — falls back to the original draft
+    expect(createGuidePage).toHaveBeenCalledWith(
+      expect.objectContaining({ qualityScore: 55, qualityScoreBeforeRetry: 55 }),
     );
   });
 
@@ -316,6 +422,8 @@ function guideRow(overrides: Partial<GuidePageRow>): GuidePageRow {
     quality_score: null,
     quality_reasons: null,
     overall_status: null,
+    quality_score_before_retry: null,
+    fact_check_score_before_retry: null,
     created_at: 0,
     ...overrides,
   };
@@ -353,5 +461,127 @@ describe("getGuideCoverageStatus", () => {
 
     const status = await getGuideCoverageStatus();
     expect(status.remainingCount).toBe(0);
+  });
+});
+
+describe("extractCopyFromBodyHtml — round-trips the real bodyHtml generateAndPushGuide produces", () => {
+  it("recovers an equivalent structured copy from a real captured bodyHtml", async () => {
+    mockCreate.mockResolvedValueOnce(goodCopyResponse);
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({})]);
+    const { candidates } = await selectPilotSubcategories(1);
+
+    await generateAndPushGuide(candidates[0]);
+    const realBodyHtml = vi.mocked(createBlogArticle).mock.calls[0][0].bodyHtml;
+
+    const extracted = extractCopyFromBodyHtml(realBodyHtml);
+    const originalCopy = JSON.parse(goodCopyResponse.content[0].text);
+
+    expect(extracted.introHtml).toBe(originalCopy.introHtml);
+    expect(extracted.comparisonIntroHtml).toBe(originalCopy.comparisonIntroHtml);
+    expect(extracted.chooseHtml).toBe(originalCopy.chooseHtml);
+    expect(extracted.conclusionHtml).toBe(originalCopy.conclusionHtml);
+    expect(extracted.faq).toEqual(originalCopy.faq);
+  });
+
+  it("throws a clear error rather than silently mangling content when the markers aren't found", () => {
+    expect(() => extractCopyFromBodyHtml("<p>not a guide body at all</p>")).toThrow(/template markers not found/);
+  });
+});
+
+describe("retryExistingGuideQuality", () => {
+  const existingRow = {
+    id: 27,
+    aosom_category: "Patio & Garden > Patio Shade",
+    shopify_collection_id: "1",
+    shopify_collection_title: "Mobiliers extérieurs et jardins",
+    status: "pending_review",
+    skip_reason: null,
+    shopify_article_id: "555",
+    shopify_blog_id: 999,
+    shopify_handle: "guide-achat-mobiliers-exterieurs-et-jardins-patio-shade",
+    title: "Comment choisir : Mobiliers extérieurs et jardins (Patio Shade) — guide d'achat",
+    min_price: 33.99,
+    max_price: 421.99,
+    in_stock_count: 46,
+    body_html: null as string | null,
+    fact_check_score: 92,
+    fact_check_issues: "ok",
+    quality_score: 62,
+    quality_reasons: "introduction répète les chiffres, ton un peu générique",
+    overall_status: "attention",
+    quality_score_before_retry: null,
+    fact_check_score_before_retry: null,
+    created_at: 0,
+  };
+
+  it("regenerates with the stored judge feedback, updates the live Shopify draft in place, and records both scores", async () => {
+    // First produce a real bodyHtml to use as the "existing" stored one.
+    mockCreate.mockResolvedValueOnce(goodCopyResponse);
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({})]);
+    const { candidates } = await selectPilotSubcategories(1);
+    await generateAndPushGuide(candidates[0]);
+    const realBodyHtml = vi.mocked(createBlogArticle).mock.calls[0][0].bodyHtml;
+
+    vi.mocked(getGuidePageById).mockResolvedValue({ ...existingRow, body_html: realBodyHtml } as unknown as GuidePageRow);
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({ aosomCategory: "Patio & Garden > Patio Shade" })]);
+    vi.mocked(getShopifyCollectionHandle).mockResolvedValue("mobiliers-exterieurs-et-jardins");
+
+    mockCreate.mockResolvedValueOnce(goodCopyResponse); // the revision call
+    mockRunGuideQualityPipeline.mockResolvedValueOnce({
+      factCheck: { score: 92, reasons: "ok" },
+      qualityCheck: { score: 84, reasons: "corrigé" },
+      overallScore: 84,
+      overallStatus: "ready",
+    });
+
+    const result = await retryExistingGuideQuality(27);
+
+    expect(result).toEqual({
+      guideId: 27,
+      qualityScoreBefore: 62,
+      qualityScoreAfter: 84,
+      factCheckScoreBefore: 92,
+      factCheckScoreAfter: 92,
+      improved: true,
+    });
+    expect(updateBlogArticleBody).toHaveBeenCalledWith(999, "555", expect.stringContaining("BROUILLON"));
+    expect(updateGuidePageRetryResult).toHaveBeenCalledWith(
+      27,
+      expect.objectContaining({ qualityScore: 84, qualityScoreBeforeRetry: 62, factCheckScoreBeforeRetry: 92 }),
+    );
+  });
+
+  it("marks improved:false when the retry doesn't actually raise the score", async () => {
+    mockCreate.mockResolvedValueOnce(goodCopyResponse);
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({})]);
+    const { candidates } = await selectPilotSubcategories(1);
+    await generateAndPushGuide(candidates[0]);
+    const realBodyHtml = vi.mocked(createBlogArticle).mock.calls[0][0].bodyHtml;
+
+    vi.mocked(getGuidePageById).mockResolvedValue({ ...existingRow, body_html: realBodyHtml } as unknown as GuidePageRow);
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({ aosomCategory: "Patio & Garden > Patio Shade" })]);
+    vi.mocked(getShopifyCollectionHandle).mockResolvedValue("mobiliers-exterieurs-et-jardins");
+
+    mockCreate.mockResolvedValueOnce(goodCopyResponse);
+    mockRunGuideQualityPipeline.mockResolvedValueOnce({
+      factCheck: { score: 92, reasons: "ok" },
+      qualityCheck: { score: 60, reasons: "toujours faible" },
+      overallScore: 60,
+      overallStatus: "attention",
+    });
+
+    const result = await retryExistingGuideQuality(27);
+    expect(result.improved).toBe(false);
+    expect(result.qualityScoreAfter).toBe(60);
+  });
+
+  it("refuses a guide that isn't pending_review", async () => {
+    vi.mocked(getGuidePageById).mockResolvedValue({ ...existingRow, status: "published" } as unknown as GuidePageRow);
+    await expect(retryExistingGuideQuality(27)).rejects.toThrow(/not pending_review/);
+  });
+
+  it("refuses a guide with no stored quality_score", async () => {
+    vi.mocked(getGuidePageById).mockResolvedValue({ ...existingRow, body_html: "<p>x</p>", quality_score: null } as unknown as GuidePageRow);
+    await expect(retryExistingGuideQuality(27)).rejects.toThrow(/no quality_score/);
   });
 });

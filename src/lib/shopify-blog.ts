@@ -133,3 +133,20 @@ export async function publishBlogArticle(blogId: number, articleId: string): Pro
     throw new Error(`Shopify blog article publish failed: ${response.status} — ${text}`);
   }
 }
+
+/**
+ * Overwrite an existing article's body_html in place — does NOT touch `published`. Used by
+ * the guide-quality retry pass to push a revised draft over the original without creating a
+ * duplicate article or accidentally publishing it.
+ */
+export async function updateBlogArticleBody(blogId: number, articleId: string, bodyHtml: string): Promise<void> {
+  const response = await shopifyFetch(`/blogs/${blogId}/articles/${articleId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ article: { id: Number(articleId), body_html: bodyHtml } }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify blog article body update failed: ${response.status} — ${text}`);
+  }
+}

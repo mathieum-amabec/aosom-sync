@@ -24,6 +24,8 @@ interface GuideRow {
   quality_score: number | null;
   quality_reasons: string | null;
   overall_status: "ready" | "attention" | null;
+  quality_score_before_retry: number | null;
+  fact_check_score_before_retry: number | null;
   created_at: number;
 }
 
@@ -220,6 +222,17 @@ function GuideCard({
               <span className="text-xs text-amber-400">⚠️ à relire attentivement avant publication</span>
             )}
           </div>
+        )}
+        {guide.quality_score_before_retry !== null && (
+          <p className="text-xs text-blue-300">
+            🔄 Retenté automatiquement — qualité {guide.quality_score_before_retry} → {guide.quality_score}
+            {guide.fact_check_score_before_retry !== null && guide.fact_check_score_before_retry !== guide.fact_check_score
+              ? `, cohérence ${guide.fact_check_score_before_retry} → ${guide.fact_check_score}`
+              : ""}
+            {(guide.quality_score ?? 0) <= guide.quality_score_before_retry
+              ? " — aucune amélioration, la 1re version aurait été aussi bonne"
+              : " — amélioration"}
+          </p>
         )}
         {(guide.fact_check_issues || guide.quality_reasons) && (
           <div className="text-xs text-gray-500 space-y-0.5">

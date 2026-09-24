@@ -1006,6 +1006,18 @@ async function _initSchemaImpl(): Promise<void> {
   if (!guidePagesCols.has("overall_status")) {
     alters.push(`ALTER TABLE guide_pages ADD COLUMN overall_status TEXT`);
   }
+  // quality_score/fact_check_score_before_retry: the PRE-retry snapshot for a guide that
+  // triggered the automatic revision pass (quality_score < RETRY_QUALITY_THRESHOLD). NULL
+  // means no retry was attempted; non-NULL means one was, even if it didn't help — the
+  // dashboard shows both numbers rather than making a retried-but-still-weak guide look
+  // untouched. The main quality_score/fact_check_score columns always hold the FINAL
+  // (post-retry, if any) verdict.
+  if (!guidePagesCols.has("quality_score_before_retry")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN quality_score_before_retry INTEGER`);
+  }
+  if (!guidePagesCols.has("fact_check_score_before_retry")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN fact_check_score_before_retry INTEGER`);
+  }
 
   if (alters.length > 0) {
     await runBatch("column ALTERs", alters.map(sql => ({ sql, args: [] })));
@@ -3412,6 +3424,10 @@ export interface GuidePageInput {
   qualityScore?: number;
   qualityReasons?: string;
   overallStatus?: string;
+  /** Pre-retry snapshot — set only when the automatic revision pass ran (quality_score was
+   * initially below RETRY_QUALITY_THRESHOLD). See guide-quality-pipeline.ts. */
+  qualityScoreBeforeRetry?: number;
+  factCheckScoreBeforeRetry?: number;
 }
 
 export async function createGuidePage(input: GuidePageInput): Promise<number> {
@@ -3420,8 +3436,9 @@ export async function createGuidePage(input: GuidePageInput): Promise<number> {
     sql: `INSERT INTO guide_pages
       (aosom_category, shopify_collection_id, shopify_collection_title, status, skip_reason,
        shopify_article_id, shopify_blog_id, shopify_handle, title, min_price, max_price, in_stock_count,
-       body_html, fact_check_score, fact_check_issues, quality_score, quality_reasons, overall_status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       body_html, fact_check_score, fact_check_issues, quality_score, quality_reasons, overall_status,
+       quality_score_before_retry, fact_check_score_before_retry)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       input.aosomCategory, input.shopifyCollectionId, input.shopifyCollectionTitle,
       input.status, input.skipReason || null, input.shopifyArticleId || null,
@@ -3429,6 +3446,7 @@ export async function createGuidePage(input: GuidePageInput): Promise<number> {
       input.minPrice ?? null, input.maxPrice ?? null, input.inStockCount ?? null,
       input.bodyHtml || null, input.factCheckScore ?? null, input.factCheckIssues || null,
       input.qualityScore ?? null, input.qualityReasons || null, input.overallStatus || null,
+      input.qualityScoreBeforeRetry ?? null, input.factCheckScoreBeforeRetry ?? null,
     ],
   });
   return Number(result.lastInsertRowid);
@@ -3441,6 +3459,7 @@ export interface GuidePageRow {
   min_price: number | null; max_price: number | null; in_stock_count: number | null;
   body_html: string | null; fact_check_score: number | null; fact_check_issues: string | null;
   quality_score: number | null; quality_reasons: string | null; overall_status: string | null;
+  quality_score_before_retry: number | null; fact_check_score_before_retry: number | null;
   created_at: number;
 }
 
@@ -3490,6 +3509,34 @@ export async function updateGuidePageVerdictAndBody(
     sql: `UPDATE guide_pages SET body_html = ?, fact_check_score = ?, fact_check_issues = ?,
       quality_score = ?, quality_reasons = ?, overall_status = ? WHERE id = ?`,
     args: [data.bodyHtml, data.factCheckScore, data.factCheckIssues, data.qualityScore, data.qualityReasons, data.overallStatus, id],
+  });
+}
+
+/** Retroactive-retry helper: same shape as updateGuidePageVerdictAndBody plus the pre-retry
+ * scores, for applying the automatic revision pass to a guide that was already pending_review
+ * before RETRY_QUALITY_THRESHOLD existed. */
+export async function updateGuidePageRetryResult(
+  id: number,
+  data: {
+    bodyHtml: string;
+    factCheckScore: number;
+    factCheckIssues: string;
+    qualityScore: number;
+    qualityReasons: string;
+    overallStatus: string;
+    qualityScoreBeforeRetry: number;
+    factCheckScoreBeforeRetry: number;
+  },
+): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE guide_pages SET body_html = ?, fact_check_score = ?, fact_check_issues = ?,
+      quality_score = ?, quality_reasons = ?, overall_status = ?,
+      quality_score_before_retry = ?, fact_check_score_before_retry = ? WHERE id = ?`,
+    args: [
+      data.bodyHtml, data.factCheckScore, data.factCheckIssues, data.qualityScore, data.qualityReasons,
+      data.overallStatus, data.qualityScoreBeforeRetry, data.factCheckScoreBeforeRetry, id,
+    ],
   });
 }
 
