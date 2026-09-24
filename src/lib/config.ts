@@ -225,6 +225,11 @@ export const BLOG = {
   // cap + on/off switch live in the `blog_schedule` setting (BlogSchedule.posts_per_week /
   // .enabled), edited via /api/settings/schedule.
   AUTO_PUBLISH_SCORE_THRESHOLD: 80,
+  // Collection metafield the queue publisher sets on a guide's shopify_collection_id once
+  // the guide is actually live (never before — see Task C's "only a real published guide
+  // links" requirement). The collection.liquid template reads this to render the "Guide
+  // d'achat" link — see docs/collection-guide-link.liquid for the theme snippet source.
+  GUIDE_URL_METAFIELD: { namespace: "custom", key: "guide_url", type: "single_line_text_field" },
 } as const;
 
 // ─── Aosom Feed ─────────────────────────────────────────────────────
@@ -600,6 +605,20 @@ export const DEFAULT_BEFORE_AFTER_SCHEDULE: PublicationSchedule = {
   max_per_day: 2,
 };
 
+// pSEO guide deferred publish — operator approval no longer publishes immediately (see
+// guide-scheduler.ts); it books the next free slot on THIS grid instead. Default cadence is
+// Mat's explicit "1-2 guides/week, spaced" ask: Tuesday + Friday, one per day, so guides never
+// all land on the same day.
+export const DEFAULT_GUIDE_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: [
+    { day: "tue", times: ["10:00"] },
+    { day: "fri", times: ["10:00"] },
+  ],
+  timezone: "America/Toronto",
+  max_per_day: 1,
+};
+
 export const DEFAULT_ASSEMBLY_SCHEDULE: PublicationSchedule = {
   enabled: true,
   slots: [
@@ -724,4 +743,6 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   "demand_gen_ext_schedule",
   "before_after_schedule",
   "assembly_schedule",
+  // guide_schedule (PublicationSchedule shape) — pSEO guide deferred-publish cadence.
+  "guide_schedule",
 ]);

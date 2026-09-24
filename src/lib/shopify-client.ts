@@ -592,6 +592,59 @@ export async function setProductMetafield(
 }
 
 /**
+ * Upsert a single COLLECTION metafield via the GraphQL `metafieldsSet` mutation. Unlike
+ * products, collection writes have no unified REST endpoint (custom_collections vs
+ * smart_collections are separate resources) — metafieldsSet on the GraphQL `Collection` type
+ * works for both subtypes without needing to know which one this id is, so it's the correct
+ * write path rather than a REST PUT.
+ */
+export async function setCollectionMetafield(
+  collectionId: string,
+  namespace: string,
+  key: string,
+  type: string,
+  value: string,
+): Promise<void> {
+  const response = await shopifyFetch("/graphql.json", {
+    method: "POST",
+    body: JSON.stringify({
+      query: `mutation($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields { id }
+          userErrors { field message }
+        }
+      }`,
+      variables: {
+        metafields: [
+          {
+            ownerId: `gid://shopify/Collection/${collectionId}`,
+            namespace,
+            key,
+            type,
+            value,
+          },
+        ],
+      },
+    }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify set collection metafield failed: ${response.status} — ${text}`);
+  }
+  const body = (await response.json()) as {
+    data?: { metafieldsSet?: { userErrors?: { field: string[]; message: string }[] } };
+    errors?: unknown;
+  };
+  const userErrors = body.data?.metafieldsSet?.userErrors ?? [];
+  if (userErrors.length > 0) {
+    throw new Error(`Shopify set collection metafield failed: ${JSON.stringify(userErrors)}`);
+  }
+  if (body.errors) {
+    throw new Error(`Shopify set collection metafield failed: ${JSON.stringify(body.errors)}`);
+  }
+}
+
+/**
  * Delete a product metafield by (namespace, key). No-op when it is absent.
  */
 export async function deleteProductMetafield(
