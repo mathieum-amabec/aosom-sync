@@ -31,12 +31,14 @@ import {
   createGuidePage,
   getAllCollectionMappings,
   getGuidePages,
+  getGuidePageById,
+  updateGuidePageRetryResult,
   type SubcategoryTrendStats,
 } from "./database";
 import { getShopifyProductTitle, getShopifyCollectionHandle } from "./shopify-client";
 import { resolveLifestyle } from "./selectors/shopify-images";
-import { createBlogArticle } from "./shopify-blog";
-import { runGuideQualityPipeline } from "./guide-quality-pipeline";
+import { createBlogArticle, updateBlogArticleBody } from "./shopify-blog";
+import { runGuideQualityPipeline, RETRY_QUALITY_THRESHOLD } from "./guide-quality-pipeline";
 
 const STORE_ORIGIN = "https://ameublodirect.ca";
 
@@ -186,25 +188,15 @@ ${productLines}
 Écris le contenu du guide d'achat pour cette sous-catégorie, en te basant uniquement sur ces faits réels.`;
 }
 
-async function generateGuideCopy(stats: SubcategoryTrendStats, titles: string[]): Promise<GuideCopy> {
-  const client = getAnthropicClient();
-  const message = await budgetedCreate(client, {
-    model: CLAUDE.MODEL_BATCH,
-    max_tokens: 1500,
-    system: COPY_SYSTEM_PROMPT,
-    messages: [{ role: "user", content: buildCopyUserPrompt(stats, titles) }],
-  });
-  if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
-    throw new Error("[guide] copy generation returned empty content");
-  }
-  console.log(`[guide] generation usage: input=${message.usage.input_tokens} output=${message.usage.output_tokens}`);
-  const text = message.content[0].text;
+/** Shared by generateGuideCopy and regenerateGuideCopyWithFeedback — same response shape,
+ * same brand-scrub backstop, same defensive JSON parsing. */
+function parseGuideCopyResponse(text: string, label: string): GuideCopy {
   const jsonStr = text.replace(/^```json?\s*\n?/m, "").replace(/\n?```\s*$/m, "").trim();
   let parsed: unknown;
   try {
     parsed = JSON.parse(jsonStr);
   } catch {
-    throw new Error(`[guide] copy generation returned invalid JSON: ${text.slice(0, 150)}`);
+    throw new Error(`[guide] ${label} returned invalid JSON: ${text.slice(0, 150)}`);
   }
   const p = parsed as Record<string, unknown>;
   const scrub = (s: unknown) => stripSupplierBrands(typeof s === "string" ? s : "");
@@ -221,6 +213,73 @@ async function generateGuideCopy(stats: SubcategoryTrendStats, titles: string[])
       .filter((f) => f.question && f.answer)
       .slice(0, 4),
   };
+}
+
+async function generateGuideCopy(stats: SubcategoryTrendStats, titles: string[]): Promise<GuideCopy> {
+  const client = getAnthropicClient();
+  const message = await budgetedCreate(client, {
+    model: CLAUDE.MODEL_BATCH,
+    max_tokens: 2200,
+    system: COPY_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: buildCopyUserPrompt(stats, titles) }],
+  });
+  if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
+    throw new Error("[guide] copy generation returned empty content");
+  }
+  console.log(`[guide] generation usage: input=${message.usage.input_tokens} output=${message.usage.output_tokens}`);
+  return parseGuideCopyResponse(message.content[0].text, "copy generation");
+}
+
+const REVISION_SYSTEM_PROMPT = `${COPY_SYSTEM_PROMPT}
+
+Tu reçois maintenant un premier jet du guide, PLUS un avis de révision d'un réviseur strict expliquant précisément ce qui pose problème. Ta tâche : produire une NOUVELLE version complète (même structure JSON, mêmes 5 clés) qui corrige SPÉCIFIQUEMENT les points soulevés par le réviseur — pas une réécriture générale. Garde tout ce qui n'est pas mentionné dans l'avis tel quel (même angle, mêmes exemples, même structure) ; ne change que ce que le réviseur signale comme un problème réel.`;
+
+function buildRevisionUserPrompt(
+  stats: SubcategoryTrendStats,
+  titles: string[],
+  original: GuideCopy,
+  qualityReasons: string,
+  factCheckReasons: string | undefined,
+): string {
+  const originalJson = JSON.stringify(original, null, 2);
+  const factLine = factCheckReasons ? `\nAvis du vérificateur factuel : ${factCheckReasons}` : "";
+  return `${buildCopyUserPrompt(stats, titles)}
+
+PREMIER JET À CORRIGER :
+${originalJson}
+
+AVIS DU RÉVISEUR ÉDITORIAL (ce qu'il faut corriger précisément) : ${qualityReasons}${factLine}
+
+Produis la version corrigée (même structure JSON complète).`;
+}
+
+/**
+ * ONE targeted revision pass, conditioned on the judge's specific complaint rather than a
+ * blind full rewrite from the original brief — the model sees its own first draft plus the
+ * exact reasons it scored low, and is instructed to fix only what's flagged. Reuses the same
+ * response parser/brand-scrub as the original generation. Never called more than once per
+ * guide (see RETRY_QUALITY_THRESHOLD in guide-quality-pipeline.ts) — a guide that's still weak
+ * after this goes to Mat with both scores rather than looping.
+ */
+async function regenerateGuideCopyWithFeedback(
+  stats: SubcategoryTrendStats,
+  titles: string[],
+  original: GuideCopy,
+  qualityReasons: string,
+  factCheckReasons: string | undefined,
+): Promise<GuideCopy> {
+  const client = getAnthropicClient();
+  const message = await budgetedCreate(client, {
+    model: CLAUDE.MODEL_BATCH,
+    max_tokens: 2200,
+    system: REVISION_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: buildRevisionUserPrompt(stats, titles, original, qualityReasons, factCheckReasons) }],
+  });
+  if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
+    throw new Error("[guide] revision returned empty content");
+  }
+  console.log(`[guide] revision usage: input=${message.usage.input_tokens} output=${message.usage.output_tokens}`);
+  return parseGuideCopyResponse(message.content[0].text, "revision");
 }
 
 const DRAFT_BANNER_HTML = `<div style="border:2px solid #D4A853;background:#FFF8E7;color:#1A2340;padding:16px;margin-bottom:24px;border-radius:8px;font-family:sans-serif">
@@ -340,7 +399,7 @@ export async function generateAndPushGuide(candidate: GuideCandidate): Promise<G
   const { stats, titles, collectionHandle } = candidate;
   if (!collectionHandle) throw new Error(`[guide] no collection handle for ${stats.aosomCategory}`);
 
-  const copy = await generateGuideCopy(stats, titles);
+  let copy = await generateGuideCopy(stats, titles);
 
   // Real Shopify-CDN product photos (never the raw Aosom-CDN urls, which 403 outside Shopify) —
   // same resolveLifestyle() already used for social posts (job4-social.ts). Doesn't require the
@@ -365,6 +424,33 @@ export async function generateAndPushGuide(candidate: GuideCandidate): Promise<G
     verdict = await runGuideQualityPipeline(stats, titles, copy);
   } catch (err) {
     console.error(`[guide] quality pipeline failed for ${stats.aosomCategory}:`, err);
+  }
+
+  // One targeted retry when the tone/structure/brand judge scores low — conditioned on its
+  // exact complaint (see regenerateGuideCopyWithFeedback), never a second blind full rewrite.
+  // Tracks both scores so a guide that's STILL weak after retrying reaches Mat honestly
+  // labeled "tentative faite, pas d'amélioration" instead of looking untouched.
+  let qualityScoreBeforeRetry: number | null = null;
+  let factCheckScoreBeforeRetry: number | null = null;
+  if (verdict && verdict.qualityCheck.score < RETRY_QUALITY_THRESHOLD) {
+    qualityScoreBeforeRetry = verdict.qualityCheck.score;
+    factCheckScoreBeforeRetry = verdict.factCheck.score;
+    try {
+      const revisedCopy = await regenerateGuideCopyWithFeedback(
+        stats,
+        titles,
+        copy,
+        verdict.qualityCheck.reasons,
+        verdict.factCheck.score < RETRY_QUALITY_THRESHOLD ? verdict.factCheck.reasons : undefined,
+      );
+      const revisedVerdict = await runGuideQualityPipeline(stats, titles, revisedCopy);
+      copy = revisedCopy;
+      verdict = revisedVerdict;
+    } catch (err) {
+      console.error(`[guide] retry-with-feedback failed for ${stats.aosomCategory} — keeping the original draft:`, err);
+      // qualityScoreBeforeRetry/factCheckScoreBeforeRetry stay set so the DB row still records
+      // that an attempt was made, even though it didn't produce a usable revision.
+    }
   }
 
   // Several DISTINCT aosom_category rows can share the same shopify_collection_id/title (the
@@ -452,6 +538,8 @@ export async function generateAndPushGuide(candidate: GuideCandidate): Promise<G
     qualityScore: verdict?.qualityCheck.score,
     qualityReasons: verdict?.qualityCheck.reasons,
     overallStatus: verdict?.overallStatus,
+    qualityScoreBeforeRetry: qualityScoreBeforeRetry ?? undefined,
+    factCheckScoreBeforeRetry: factCheckScoreBeforeRetry ?? undefined,
     minPrice: stats.minPrice,
     maxPrice: stats.maxPrice,
     inStockCount: stats.inStockCount,
@@ -512,4 +600,155 @@ export async function generatePilotGuides(
   }
 
   return { generated, skipped, failed };
+}
+
+// ─── Retroactive retry (guides created before RETRY_QUALITY_THRESHOLD existed) ────────────
+
+/**
+ * Recovers the structured {introHtml, comparisonIntroHtml, chooseHtml, conclusionHtml, faq}
+ * shape from a body_html this module itself built (see generateAndPushGuide's bodyHtml
+ * assembly) — needed because pre-retry-mechanism guide_pages rows only ever stored the
+ * composed HTML, not the structured copy. Relies entirely on markers THIS module controls
+ * (DRAFT_BANNER_HTML's closing tag, the data-block's opening style attribute, the literal
+ * "<h2>Comment choisir</h2>"/"<h2>Questions fréquentes</h2>" headings) — throws clearly if any
+ * expected marker is missing rather than silently returning a mangled/partial copy.
+ */
+export function extractCopyFromBodyHtml(bodyHtml: string): GuideCopy {
+  const bannerEnd = bodyHtml.indexOf("</div>", bodyHtml.indexOf(DRAFT_BANNER_HTML.slice(0, 40)));
+  const dataBlockStart = bodyHtml.indexOf('<div style="background:#F5F3EE');
+  const dataBlockEnd = bodyHtml.indexOf("</div>", dataBlockStart) + "</div>".length;
+  const tableStart = bodyHtml.indexOf('<table style="width:100%');
+  const chooseHeading = "<h2>Comment choisir</h2>";
+  const chooseStart = bodyHtml.indexOf(chooseHeading);
+  const faqHeading = "<h2>Questions fréquentes</h2>";
+  const faqStart = bodyHtml.indexOf(faqHeading);
+  const seeCollectionMarker = '<p>Voir toute la sélection';
+  const seeCollectionStart = bodyHtml.indexOf(seeCollectionMarker);
+
+  if (bannerEnd === -1 || dataBlockStart === -1 || tableStart === -1 || chooseStart === -1 || seeCollectionStart === -1) {
+    throw new Error("[guide] extractCopyFromBodyHtml: expected template markers not found — body_html wasn't built by this module's current template");
+  }
+
+  const introHtml = bodyHtml.slice(bannerEnd + "</div>".length, dataBlockStart).trim();
+  const comparisonIntroHtml = bodyHtml.slice(dataBlockEnd, tableStart).trim();
+
+  const hasFaq = faqStart !== -1 && faqStart > chooseStart;
+  const chooseEnd = hasFaq ? faqStart : seeCollectionStart;
+  const chooseHtml = bodyHtml.slice(chooseStart + chooseHeading.length, chooseEnd).trim();
+
+  let faq: GuideCopy["faq"] = [];
+  let conclusionHtml: string;
+  if (hasFaq) {
+    const faqSection = bodyHtml.slice(faqStart + faqHeading.length, seeCollectionStart);
+    const pairs = [...faqSection.matchAll(/<h3>([^]*?)<\/h3>\s*<p>([^]*?)<\/p>/g)];
+    faq = pairs.map((m) => ({ question: m[1].trim(), answer: m[2].trim() }));
+    // conclusionHtml is whatever trails the last FAQ <p> up to the "Voir toute la sélection" marker.
+    const lastPairEnd = pairs.length > 0 ? (pairs[pairs.length - 1].index ?? 0) + pairs[pairs.length - 1][0].length : 0;
+    conclusionHtml = faqSection.slice(lastPairEnd).trim();
+  } else {
+    conclusionHtml = bodyHtml.slice(chooseEnd, seeCollectionStart).trim();
+  }
+
+  return { introHtml, comparisonIntroHtml, chooseHtml, conclusionHtml, faq };
+}
+
+export interface RetroactiveRetryResult {
+  guideId: number;
+  qualityScoreBefore: number;
+  qualityScoreAfter: number;
+  factCheckScoreBefore: number;
+  factCheckScoreAfter: number;
+  improved: boolean;
+}
+
+/**
+ * Applies the same targeted-retry mechanism generateAndPushGuide uses at generation time to
+ * an EXISTING pending_review guide (for guides created before RETRY_QUALITY_THRESHOLD
+ * existed). Re-extracts the structured copy from the stored body_html, regenerates with the
+ * ALREADY-STORED judge feedback, rebuilds the body with the same images/data, updates the
+ * live Shopify draft in place (never creates a duplicate article, never publishes), and
+ * records both scores regardless of outcome.
+ */
+export async function retryExistingGuideQuality(guideId: number): Promise<RetroactiveRetryResult> {
+  const row = await getGuidePageById(guideId);
+  if (!row) throw new Error(`[guide] retryExistingGuideQuality: guide ${guideId} not found`);
+  if (row.status !== "pending_review") throw new Error(`[guide] retryExistingGuideQuality: guide ${guideId} is not pending_review (${row.status})`);
+  if (!row.body_html) throw new Error(`[guide] retryExistingGuideQuality: guide ${guideId} has no stored body_html`);
+  if (row.quality_score === null) throw new Error(`[guide] retryExistingGuideQuality: guide ${guideId} has no quality_score to retry against`);
+  if (!row.shopify_blog_id || !row.shopify_article_id) throw new Error(`[guide] retryExistingGuideQuality: guide ${guideId} has no linked Shopify article`);
+
+  const allStats = await getSubcategoryTrendStats();
+  const stats = allStats.find((s) => s.aosomCategory === row.aosom_category);
+  if (!stats) throw new Error(`[guide] retryExistingGuideQuality: no current trend stats for ${row.aosom_category} (subcategory may have gone empty since generation)`);
+
+  const titles = await Promise.all(stats.topProducts.map((p) => getShopifyProductTitle(p.shopify_product_id, p.name)));
+  const collectionHandle = await getShopifyCollectionHandle(stats.shopifyCollectionId);
+  if (!collectionHandle) throw new Error(`[guide] retryExistingGuideQuality: collection handle unresolved for ${row.aosom_category}`);
+
+  const originalCopy = extractCopyFromBodyHtml(row.body_html);
+
+  const revisedCopy = await regenerateGuideCopyWithFeedback(
+    stats,
+    titles,
+    originalCopy,
+    row.quality_reasons || "",
+    row.fact_check_score !== null && row.fact_check_score < RETRY_QUALITY_THRESHOLD ? row.fact_check_issues || undefined : undefined,
+  );
+  const revisedVerdict = await runGuideQualityPipeline(stats, titles, revisedCopy);
+
+  const images = await Promise.all(
+    stats.topProducts.map(async (p) => {
+      try {
+        const life = await resolveLifestyle(p.shopify_product_id);
+        return life.primaryImageUrl || null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const collectionUrl = `${STORE_ORIGIN}/collections/${collectionHandle}`;
+  const pillarLinkHtml = PILLAR_GUIDE_URL
+    ? `<p>Pour une vue d'ensemble, consultez aussi notre <a href="${PILLAR_GUIDE_URL}">guide complet</a>.</p>`
+    : `<!-- Aucun guide pilier n'existe encore pour ce sujet — maillage vers le guide pilier à ajouter une fois qu'il existera (voir plan Phase 1, règle 4). -->`;
+  const guideTitle = row.title || `Comment choisir : ${stats.shopifyCollectionTitle} — guide d'achat`;
+
+  const newBodyHtml = [
+    DRAFT_BANNER_HTML,
+    revisedCopy.introHtml,
+    buildDataBlockHtml(stats),
+    revisedCopy.comparisonIntroHtml,
+    buildComparisonHtml(stats, titles, images),
+    `<h2>Comment choisir</h2>`,
+    revisedCopy.chooseHtml,
+    buildFaqHtml(revisedCopy.faq),
+    revisedCopy.conclusionHtml,
+    `<p>Voir toute la sélection : <a href="${collectionUrl}">${stats.shopifyCollectionTitle}</a>.</p>`,
+    pillarLinkHtml,
+    buildJsonLd(stats, titles, images, collectionHandle, revisedCopy.faq, guideTitle),
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  await updateBlogArticleBody(row.shopify_blog_id, row.shopify_article_id, newBodyHtml);
+
+  await updateGuidePageRetryResult(guideId, {
+    bodyHtml: newBodyHtml,
+    factCheckScore: revisedVerdict.factCheck.score,
+    factCheckIssues: revisedVerdict.factCheck.reasons,
+    qualityScore: revisedVerdict.qualityCheck.score,
+    qualityReasons: revisedVerdict.qualityCheck.reasons,
+    overallStatus: revisedVerdict.overallStatus,
+    qualityScoreBeforeRetry: row.quality_score,
+    factCheckScoreBeforeRetry: row.fact_check_score ?? revisedVerdict.factCheck.score,
+  });
+
+  return {
+    guideId,
+    qualityScoreBefore: row.quality_score,
+    qualityScoreAfter: revisedVerdict.qualityCheck.score,
+    factCheckScoreBefore: row.fact_check_score ?? revisedVerdict.factCheck.score,
+    factCheckScoreAfter: revisedVerdict.factCheck.score,
+    improved: revisedVerdict.qualityCheck.score > row.quality_score,
+  };
 }

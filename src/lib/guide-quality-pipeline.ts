@@ -18,7 +18,7 @@ import { budgetedCreate } from "@/lib/llm-budget";
 import { CLAUDE } from "./config";
 import type { SubcategoryTrendStats } from "./database";
 
-interface GuideCopyForReview {
+export interface GuideCopyForReview {
   introHtml: string;
   comparisonIntroHtml: string;
   chooseHtml: string;
@@ -186,6 +186,16 @@ export interface QualityPipelineResult {
 }
 
 const READY_THRESHOLD = 80;
+
+/** A quality_score (tone/structure/brand judge) below this triggers ONE automatic
+ * regeneration attempt (see subcategory-guide-generator.ts's generateAndPushGuide) before the
+ * guide ever reaches the review dashboard. Deliberately scoped to quality_score only, not
+ * fact_check_score — a low fact-check score means the TEXT claims something the DATA doesn't
+ * support, which a "try writing it again" pass can't reliably fix (the model would need to be
+ * told exactly what to stop claiming, which is exactly what the feedback prompt does — but a
+ * factual miss is rarer and typically needs a human's eyes regardless of a retry). Exported so
+ * the retroactive backfill script and any future caller use the exact same cutoff. */
+export const RETRY_QUALITY_THRESHOLD = 70;
 
 export async function runGuideQualityPipeline(
   stats: SubcategoryTrendStats,
