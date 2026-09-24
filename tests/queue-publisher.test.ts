@@ -12,6 +12,10 @@ vi.mock("@/lib/instagram-client", () => ({
 }));
 vi.mock("@/lib/shopify-blog", () => ({
   createBlogArticle: vi.fn().mockResolvedValue({ articleId: "blog-1", blogId: 7, handle: "h", adminUrl: "u" }),
+  publishBlogArticle: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("@/lib/shopify-client", () => ({
+  setCollectionMetafield: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/database", () => ({
   getNextPending: vi.fn(),
@@ -20,6 +24,7 @@ vi.mock("@/lib/database", () => ({
   PUBLISHER_MAX_DURATION_SECONDS: 300,
   markPublished: vi.fn().mockResolvedValue(undefined),
   markFailed: vi.fn().mockResolvedValue(undefined),
+  markGuidePagePublished: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/content-generator", () => ({ getAnthropicClient: vi.fn() }));
 
@@ -28,6 +33,7 @@ import {
   drainPublisherQueue,
   parseSocialPayload,
   parseBlogPayload,
+  parseGuidePayload,
 } from "@/lib/queue-publisher";
 import {
   publishText,
@@ -36,8 +42,16 @@ import {
   publishVideo,
 } from "@/lib/facebook-client";
 import { publishPhoto, publishReel } from "@/lib/instagram-client";
-import { createBlogArticle } from "@/lib/shopify-blog";
-import { getNextPending, claimQueueItem, markPublished, markFailed, reclaimStrandedPublishing } from "@/lib/database";
+import { createBlogArticle, publishBlogArticle } from "@/lib/shopify-blog";
+import { setCollectionMetafield } from "@/lib/shopify-client";
+import {
+  getNextPending,
+  claimQueueItem,
+  markPublished,
+  markFailed,
+  reclaimStrandedPublishing,
+  markGuidePagePublished,
+} from "@/lib/database";
 import { getAnthropicClient } from "@/lib/content-generator";
 
 const mockGetClient = getAnthropicClient as unknown as ReturnType<typeof vi.fn>;
@@ -169,6 +183,62 @@ describe("publishQueueItem — shopify_blog + validation", () => {
   it("rejects a content_type/platform mismatch (social content on shopify_blog)", async () => {
     await expect(
       publishQueueItem(item({ platform: "shopify_blog", contentType: "social", payload: { title: "T", bodyHtml: "x", lang: "fr" } })),
+    ).rejects.toThrow(/does not match platform/i);
+  });
+});
+
+const guidePayload = (extra: Record<string, unknown> = {}) => ({
+  guidePageId: 42,
+  blogId: 7,
+  articleId: "art-1",
+  shopifyCollectionId: "999",
+  shopifyHandle: "guide-a",
+  ...extra,
+});
+
+describe("publishQueueItem — shopify_guide (pSEO guide deferred publish)", () => {
+  it("publishes the existing Shopify draft, marks the guide_pages row published, and sets the collection guide-link metafield", async () => {
+    const r = await publishQueueItem(item({
+      platform: "shopify_guide",
+      contentType: "guide",
+      payload: guidePayload(),
+    }));
+    expect(publishBlogArticle).toHaveBeenCalledWith(7, "art-1");
+    expect(markGuidePagePublished).toHaveBeenCalledWith(42);
+    expect(setCollectionMetafield).toHaveBeenCalledWith("999", "custom", "guide_url", "single_line_text_field", "/blogs/guides/guide-a");
+    expect(r.postId).toBe("art-1");
+    // Unlike shopify_blog, this must NEVER create a new article.
+    expect(createBlogArticle).not.toHaveBeenCalled();
+  });
+
+  it("still succeeds and still marks the guide published when the metafield write fails (best-effort, non-blocking)", async () => {
+    vi.mocked(setCollectionMetafield).mockRejectedValueOnce(new Error("Shopify down"));
+    const r = await publishQueueItem(item({
+      platform: "shopify_guide",
+      contentType: "guide",
+      payload: guidePayload(),
+    }));
+    expect(markGuidePagePublished).toHaveBeenCalledWith(42);
+    expect(r.postId).toBe("art-1");
+  });
+
+  it("rejects a missing guidePageId/blogId/articleId/shopifyCollectionId/shopifyHandle", () => {
+    expect(() => parseGuidePayload(guidePayload({ guidePageId: undefined }))).toThrow(/guidePageId/i);
+    expect(() => parseGuidePayload(guidePayload({ blogId: undefined }))).toThrow(/blogId/i);
+    expect(() => parseGuidePayload(guidePayload({ articleId: undefined }))).toThrow(/articleId/i);
+    expect(() => parseGuidePayload(guidePayload({ shopifyCollectionId: undefined }))).toThrow(/shopifyCollectionId/i);
+    expect(() => parseGuidePayload(guidePayload({ shopifyHandle: undefined }))).toThrow(/shopifyHandle/i);
+  });
+
+  it("rejects a content_type/platform mismatch (guide content on a social platform)", async () => {
+    await expect(
+      publishQueueItem(item({ platform: "facebook", contentType: "guide", payload: guidePayload() })),
+    ).rejects.toThrow(/does not match platform/i);
+  });
+
+  it("rejects a content_type/platform mismatch (social content on shopify_guide)", async () => {
+    await expect(
+      publishQueueItem(item({ platform: "shopify_guide", contentType: "social", payload: social() })),
     ).rejects.toThrow(/does not match platform/i);
   });
 });

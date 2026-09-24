@@ -26,6 +26,9 @@ interface GuideRow {
   overall_status: "ready" | "attention" | null;
   quality_score_before_retry: number | null;
   fact_check_score_before_retry: number | null;
+  /** SQLite datetime TEXT ('YYYY-MM-DD HH:MM:SS' UTC), set once approved — the guide stays
+   * pending_review, queued for the hourly publisher, until this slot is actually drained. */
+  scheduled_publish_at: string | null;
   created_at: number;
 }
 
@@ -42,6 +45,22 @@ function money(n: number | null): string {
 
 function formatDate(unixSec: number): string {
   return new Date(unixSec * 1000).toLocaleString("fr-CA", { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** SQLite datetime TEXT ('YYYY-MM-DD HH:MM:SS' UTC) → unix seconds. */
+function sqliteUtcToUnixSec(s: string): number {
+  return Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
+}
+
+function formatSqliteUtc(s: string): string {
+  return formatDate(sqliteUtcToUnixSec(s));
+}
+
+/** unix seconds → value for <input type="datetime-local"> (local wall-clock, no timezone). */
+function toDatetimeLocalValue(unixSec: number): string {
+  const d = new Date(unixSec * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function VerdictBadge({ label, score }: { label: string; score: number | null }) {
@@ -92,13 +111,54 @@ export default function GuidesClient() {
 
   const approve = useCallback(
     async (id: number) => {
-      if (!confirm("Publier ce guide sur ameublodirect.ca maintenant ? Cette action est réelle et immédiate.")) return;
+      if (!confirm("Approuver ce guide ? Il sera planifié pour publication automatique au prochain créneau libre (pas publié à l'instant).")) return;
       setActingId(id);
       setError(null);
       try {
         const res = await fetch(`/api/guides/${id}/approve`, { method: "POST" });
         const d = await res.json();
-        if (!res.ok) setError(d.error || "Publication échouée.");
+        if (!res.ok) setError(d.error || "Planification échouée.");
+        await load();
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setActingId(null);
+      }
+    },
+    [load],
+  );
+
+  const reschedule = useCallback(
+    async (id: number, unixSec: number) => {
+      setActingId(id);
+      setError(null);
+      try {
+        const res = await fetch(`/api/guides/${id}/schedule`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scheduled_at: unixSec }),
+        });
+        const d = await res.json();
+        if (!res.ok) setError(d.error || "Changement de date échoué.");
+        await load();
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setActingId(null);
+      }
+    },
+    [load],
+  );
+
+  const cancelSchedule = useCallback(
+    async (id: number) => {
+      if (!confirm("Annuler la planification de ce guide ? Il redeviendra en attente d'approbation.")) return;
+      setActingId(id);
+      setError(null);
+      try {
+        const res = await fetch(`/api/guides/${id}/schedule`, { method: "DELETE" });
+        const d = await res.json();
+        if (!res.ok) setError(d.error || "Annulation échouée.");
         await load();
       } catch (err) {
         setError(String(err));
@@ -120,7 +180,9 @@ export default function GuidesClient() {
           <h2 className="text-2xl font-bold text-white">Guides d&apos;achat (pSEO)</h2>
           <p className="text-gray-400 text-sm mt-0.5">
             Guides de sous-catégorie générés depuis le trend score réel. Relis le texte complet
-            ici, puis approuve pour publier réellement sur Shopify (aucune publication automatique).
+            ici, puis approuve pour planifier une publication réelle sur Shopify à un créneau à
+            venir (1-2 guides/semaine, espacés) — rien ne publie à l&apos;instant du clic, et
+            rien ne publie sans cette approbation.
           </p>
         </div>
         <select
@@ -164,6 +226,8 @@ export default function GuidesClient() {
               expanded={expandedId === g.id}
               onToggleExpand={() => setExpandedId(expandedId === g.id ? null : g.id)}
               onApprove={approve}
+              onReschedule={reschedule}
+              onCancelSchedule={cancelSchedule}
             />
           ))}
         </div>
@@ -178,12 +242,16 @@ function GuideCard({
   expanded,
   onToggleExpand,
   onApprove,
+  onReschedule,
+  onCancelSchedule,
 }: {
   guide: GuideRow;
   acting: number | null;
   expanded: boolean;
   onToggleExpand: () => void;
   onApprove: (id: number) => void;
+  onReschedule: (id: number, unixSec: number) => void;
+  onCancelSchedule: (id: number) => void;
 }) {
   const meta = STATUS_META[guide.status] ?? { label: guide.status, cls: "bg-gray-800 text-gray-400 border-gray-700" };
   const busy = acting === guide.id;
@@ -241,6 +309,16 @@ function GuideCard({
           </div>
         )}
 
+        {guide.status === "pending_review" && guide.scheduled_publish_at && (
+          <ScheduleBanner
+            guideId={guide.id}
+            scheduledAt={guide.scheduled_publish_at}
+            busy={busy}
+            onReschedule={onReschedule}
+            onCancelSchedule={onCancelSchedule}
+          />
+        )}
+
         <div className="flex flex-wrap gap-2">
           {guide.body_html && (
             <button
@@ -270,13 +348,13 @@ function GuideCard({
               Voir la page en ligne
             </a>
           )}
-          {guide.status === "pending_review" && (
+          {guide.status === "pending_review" && !guide.scheduled_publish_at && (
             <button
               onClick={() => onApprove(guide.id)}
               disabled={busy}
               className="px-2.5 py-1 text-xs font-medium bg-green-900/40 hover:bg-green-900/60 text-green-400 border border-green-800/50 rounded-md transition-colors disabled:opacity-50"
             >
-              {busy ? "Publication…" : "✅ Approuver et publier"}
+              {busy ? "Planification…" : "📅 Approuver et planifier"}
             </button>
           )}
         </div>
@@ -288,6 +366,79 @@ function GuideCard({
           />
         )}
       </div>
+    </div>
+  );
+}
+
+function ScheduleBanner({
+  guideId,
+  scheduledAt,
+  busy,
+  onReschedule,
+  onCancelSchedule,
+}: {
+  guideId: number;
+  scheduledAt: string;
+  busy: boolean;
+  onReschedule: (id: number, unixSec: number) => void;
+  onCancelSchedule: (id: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(() => toDatetimeLocalValue(sqliteUtcToUnixSec(scheduledAt)));
+
+  const save = () => {
+    const unixSec = Math.floor(new Date(value).getTime() / 1000);
+    if (!Number.isFinite(unixSec)) return;
+    onReschedule(guideId, unixSec);
+    setEditing(false);
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs bg-blue-950/40 border border-blue-900/50 rounded-md px-3 py-2">
+      <span className="text-blue-300">
+        📅 Planifié pour le <strong>{formatSqliteUtc(scheduledAt)}</strong> — publication
+        automatique par le prochain passage du cron (aucune action manuelle requise).
+      </span>
+      {editing ? (
+        <span className="flex items-center gap-1.5">
+          <input
+            type="datetime-local"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="px-1.5 py-0.5 bg-gray-900 border border-gray-700 rounded text-gray-200"
+          />
+          <button
+            onClick={save}
+            disabled={busy}
+            className="px-2 py-0.5 bg-blue-900/50 hover:bg-blue-900/70 text-blue-300 border border-blue-800/50 rounded transition-colors disabled:opacity-50"
+          >
+            Enregistrer
+          </button>
+          <button
+            onClick={() => setEditing(false)}
+            className="px-2 py-0.5 text-gray-400 hover:text-gray-200"
+          >
+            Annuler
+          </button>
+        </span>
+      ) : (
+        <span className="flex items-center gap-1.5">
+          <button
+            onClick={() => setEditing(true)}
+            disabled={busy}
+            className="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 rounded transition-colors disabled:opacity-50"
+          >
+            Modifier la date
+          </button>
+          <button
+            onClick={() => onCancelSchedule(guideId)}
+            disabled={busy}
+            className="px-2 py-0.5 bg-gray-800 hover:bg-gray-700 text-red-400 border border-gray-700 rounded transition-colors disabled:opacity-50"
+          >
+            Annuler la planification
+          </button>
+        </span>
+      )}
     </div>
   );
 }

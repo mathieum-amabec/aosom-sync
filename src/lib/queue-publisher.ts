@@ -14,21 +14,32 @@
  *     { title, bodyHtml, lang: "fr"|"en", featuredImage?, summaryHtml?, tags?,
  *       author?, metaDescription? }
  *
+ *   shopify_guide                →  GuideQueuePayload
+ *     { guidePageId, blogId, articleId, shopifyCollectionId, shopifyHandle } — the article
+ *     already exists as a Shopify draft (created at generation time); this just flips it
+ *     live via publishBlogArticle, records the guide_pages row as published, and (best-
+ *     effort) sets the collection's `custom.guide_url` metafield so the storefront can show
+ *     a "Guide d'achat" link. See guide-scheduler.ts (the producer).
+ *
  * A malformed payload throws (→ markFailed), so a bad producer never silently no-ops.
  */
 import { type FacebookBrand } from "./facebook-client";
 import { publishSocialPayload, type SocialPayload } from "./social-publisher";
-import { createBlogArticle } from "./shopify-blog";
+import { createBlogArticle, publishBlogArticle } from "./shopify-blog";
+import { setCollectionMetafield } from "./shopify-client";
 import { getAnthropicClient } from "./content-generator";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "./strip-markdown";
-import { CLAUDE } from "./config";
+import { CLAUDE, BLOG } from "./config";
+
+const { GUIDE_URL_METAFIELD } = BLOG;
 import {
   getNextPending,
   claimQueueItem,
   reclaimStrandedPublishing,
   markPublished,
   markFailed,
+  markGuidePagePublished,
   type PublicationQueueItem,
 } from "./database";
 
@@ -113,6 +124,44 @@ export function parseBlogPayload(raw: unknown): BlogQueuePayload {
     tags,
     author: optString(o.author),
     metaDescription: optString(o.metaDescription),
+  };
+}
+
+export interface GuideQueuePayload {
+  guidePageId: number;
+  blogId: number;
+  articleId: string;
+  shopifyCollectionId: string;
+  shopifyHandle: string;
+}
+
+/** Validate + narrow a raw payload for a pSEO guide deferred publish. */
+export function parseGuidePayload(raw: unknown): GuideQueuePayload {
+  if (!raw || typeof raw !== "object") throw new Error("payload must be a JSON object");
+  const o = raw as Record<string, unknown>;
+  const guidePageId = Number(o.guidePageId);
+  if (!Number.isInteger(guidePageId) || guidePageId <= 0) {
+    throw new Error("payload.guidePageId must be a positive integer");
+  }
+  const blogId = Number(o.blogId);
+  if (!Number.isInteger(blogId) || blogId <= 0) {
+    throw new Error("payload.blogId must be a positive integer");
+  }
+  if (typeof o.articleId !== "string" || o.articleId.trim() === "") {
+    throw new Error("payload.articleId is required");
+  }
+  if (typeof o.shopifyCollectionId !== "string" || o.shopifyCollectionId.trim() === "") {
+    throw new Error("payload.shopifyCollectionId is required");
+  }
+  if (typeof o.shopifyHandle !== "string" || o.shopifyHandle.trim() === "") {
+    throw new Error("payload.shopifyHandle is required");
+  }
+  return {
+    guidePageId,
+    blogId,
+    articleId: o.articleId,
+    shopifyCollectionId: o.shopifyCollectionId,
+    shopifyHandle: o.shopifyHandle,
   };
 }
 
@@ -206,15 +255,24 @@ export async function generateReelCaption(
  * Guard that content_type agrees with platform before dispatch. The DB CHECK constraints
  * allow any combination, and dispatch keys only on platform — so a row with
  * content_type='blog' but platform='facebook' (or vice versa) would run the wrong parser
- * on the payload and post garbage. Fail loud → markFailed instead.
+ * on the payload and post garbage. Fail loud → markFailed instead. Each dedicated
+ * (platform, content_type) pair below is checked both ways (a platform-specific row must
+ * carry its matching content_type, and vice versa).
  */
+const DEDICATED_PLATFORM_CONTENT_TYPE = {
+  shopify_blog: "blog",
+  shopify_guide: "guide",
+} as const;
+
 function assertContentPlatformPairing(item: PublicationQueueItem): void {
-  const isBlogPlatform = item.platform === "shopify_blog";
-  const isBlogContent = item.contentType === "blog";
-  if (isBlogPlatform !== isBlogContent) {
-    throw new Error(
-      `content_type '${item.contentType}' does not match platform '${item.platform}'`,
-    );
+  for (const [platform, contentType] of Object.entries(DEDICATED_PLATFORM_CONTENT_TYPE)) {
+    const isThisPlatform = item.platform === platform;
+    const isThisContentType = item.contentType === contentType;
+    if (isThisPlatform !== isThisContentType) {
+      throw new Error(
+        `content_type '${item.contentType}' does not match platform '${item.platform}'`,
+      );
+    }
   }
 }
 
@@ -263,6 +321,30 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
       return publishToBoth(parseSocialPayload(raw));
     case "shopify_blog":
       return { postId: (await createBlogArticle(parseBlogPayload(raw))).articleId };
+    case "shopify_guide": {
+      const payload = parseGuidePayload(raw);
+      await publishBlogArticle(payload.blogId, payload.articleId);
+      await markGuidePagePublished(payload.guidePageId);
+      // Best-effort: the "Guide d'achat" collection link (Task C) is a discoverability
+      // nicety, not the primary effect. The article is already live at this point — a
+      // metafield write failure must never make this publish look failed (→ markFailed
+      // would leave guide_pages inconsistent with the real, already-live Shopify article).
+      try {
+        await setCollectionMetafield(
+          payload.shopifyCollectionId,
+          GUIDE_URL_METAFIELD.namespace,
+          GUIDE_URL_METAFIELD.key,
+          GUIDE_URL_METAFIELD.type,
+          `/blogs/guides/${payload.shopifyHandle}`,
+        );
+      } catch (err) {
+        console.error(
+          `[publisher] guide ${payload.guidePageId} published, but setting the collection "Guide d'achat" link failed:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+      return { postId: payload.articleId };
+    }
     default:
       throw new Error(`Unsupported platform: ${item.platform}`);
   }

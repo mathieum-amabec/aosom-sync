@@ -743,7 +743,11 @@ async function _initSchemaImpl(): Promise<void> {
   }
 
   // publication_queue.content_type CHECK migration: (…,'video') → +'sequential_ad'. Same guarded
-  // table-rebuild pattern as +video / +draft above. Carries the metadata column through the copy.
+  // table-rebuild pattern as +video / +draft above. Carries metadata AND claimed_at through the
+  // copy — claimed_at is added by the guarded ALTER above, which runs earlier in ensureSchema,
+  // so on a truly fresh DB it already exists by the time this migration fires and must survive
+  // the rebuild (a `:memory:` test DB replays every migration in order on first use, unlike
+  // prod where this migration ran once, historically, before claimed_at existed).
   const pqDef3 = await db.execute(
     `SELECT sql FROM sqlite_master WHERE type='table' AND name='publication_queue'`,
   );
@@ -762,10 +766,11 @@ async function _initSchemaImpl(): Promise<void> {
         error TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         published_at TEXT,
-        metadata TEXT
+        metadata TEXT,
+        claimed_at INTEGER
       )`, args: [] },
-      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata)
-              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata FROM publication_queue`, args: [] },
+      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at)
+              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at FROM publication_queue`, args: [] },
       { sql: `DROP TABLE publication_queue`, args: [] },
       { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
       { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
@@ -775,13 +780,14 @@ async function _initSchemaImpl(): Promise<void> {
 
   // publication_queue.content_type CHECK migration: +'demand_gen_ext','before_after','assembly'
   // (content-scale chantier, Étape 3-5). Same guarded table-rebuild pattern as +sequential_ad
-  // above. The active-slot unique index stays (platform, scheduled_at) — UNCHANGED, matching
-  // every prior content_type addition: slot uniqueness is platform-wide across ALL content
-  // types, not per-type. getOccupiedQueueSlots(platform, contentType) only scopes the QUERY
-  // that searches for a free slot to offer; it does not partition the DB constraint itself, so
-  // two different content types can still collide on the exact same slot — same as sequential_ad
-  // vs. video today — and callers handle that via QueueSlotTakenError + retry (see the approve
-  // routes), not via a wider index.
+  // above (including carrying claimed_at through — see that migration's comment). The active-
+  // slot unique index stays (platform, scheduled_at) — UNCHANGED, matching every prior
+  // content_type addition: slot uniqueness is platform-wide across ALL content types, not per-
+  // type. getOccupiedQueueSlots(platform, contentType) only scopes the QUERY that searches for
+  // a free slot to offer; it does not partition the DB constraint itself, so two different
+  // content types can still collide on the exact same slot — same as sequential_ad vs. video
+  // today — and callers handle that via QueueSlotTakenError + retry (see the approve routes),
+  // not via a wider index.
   const pqDef4 = await db.execute(
     `SELECT sql FROM sqlite_master WHERE type='table' AND name='publication_queue'`,
   );
@@ -800,14 +806,53 @@ async function _initSchemaImpl(): Promise<void> {
         error TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         published_at TEXT,
-        metadata TEXT
+        metadata TEXT,
+        claimed_at INTEGER
       )`, args: [] },
-      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata)
-              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata FROM publication_queue`, args: [] },
+      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at)
+              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at FROM publication_queue`, args: [] },
       { sql: `DROP TABLE publication_queue`, args: [] },
       { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
       { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
       { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
+    ]);
+  }
+
+  // publication_queue: +content_type 'guide' / +platform 'shopify_guide' — the pSEO guide
+  // review dashboard's "Approuver" now enqueues a real scheduled slot (deferred publish)
+  // instead of calling publishBlogArticle immediately (see /api/guides/[id]/approve). Same
+  // guarded rebuild pattern as every prior CHECK addition. MUST carry `claimed_at` (added by
+  // the guarded ALTER above, which runs earlier in ensureSchema) through the copy — omitting
+  // it here would silently wipe the reaper's stranded-claim timestamps on a DB that still
+  // needed this migration.
+  const pqDef5 = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='publication_queue'`,
+  );
+  const pqSql5 = pqDef5.rows[0] ? String((pqDef5.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (pqSql5 && !pqSql5.includes("'guide'")) {
+    await runBatch("publication_queue content_type CHECK +guide, platform CHECK +shopify_guide", [
+      { sql: `DROP TABLE IF EXISTS publication_queue_new`, args: [] },
+      { sql: `CREATE TABLE publication_queue_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video', 'sequential_ad', 'demand_gen_ext', 'before_after', 'assembly', 'guide')),
+        content_id TEXT NOT NULL,
+        platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog', 'shopify_guide')),
+        payload TEXT NOT NULL,
+        scheduled_at TEXT NOT NULL,
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled', 'draft')),
+        error TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        published_at TEXT,
+        metadata TEXT,
+        claimed_at INTEGER
+      )`, args: [] },
+      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at)
+              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at FROM publication_queue`, args: [] },
+      { sql: `DROP TABLE publication_queue`, args: [] },
+      { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
+      { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_content ON publication_queue(content_type, content_id)`, args: [] },
     ]);
   }
 
@@ -1017,6 +1062,16 @@ async function _initSchemaImpl(): Promise<void> {
   }
   if (!guidePagesCols.has("fact_check_score_before_retry")) {
     alters.push(`ALTER TABLE guide_pages ADD COLUMN fact_check_score_before_retry INTEGER`);
+  }
+  // scheduled_publish_at: SQLite datetime TEXT ('YYYY-MM-DD HH:MM:SS' UTC), set when an
+  // operator approves a guide — mirrors publication_queue.scheduled_at for the linked
+  // content_type='guide' row. NULL means not yet approved/scheduled. Deliberately does NOT
+  // require a guide_pages.status CHECK change ("scheduled" isn't a new status value): the
+  // row stays 'pending_review' with this column populated until the queue publisher actually
+  // flips it to 'published', so a CHECK-rebuild (which risks silently dropping a column the
+  // rebuild's copy-over forgets) is never needed for this feature.
+  if (!guidePagesCols.has("scheduled_publish_at")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN scheduled_publish_at TEXT`);
   }
 
   if (alters.length > 0) {
@@ -3460,6 +3515,10 @@ export interface GuidePageRow {
   body_html: string | null; fact_check_score: number | null; fact_check_issues: string | null;
   quality_score: number | null; quality_reasons: string | null; overall_status: string | null;
   quality_score_before_retry: number | null; fact_check_score_before_retry: number | null;
+  /** SQLite datetime TEXT ('YYYY-MM-DD HH:MM:SS' UTC) of the guide's queued publish slot, or
+   * null if not yet approved/scheduled. Mirrors the linked publication_queue row's
+   * scheduled_at — see guide-scheduler.ts. */
+  scheduled_publish_at: string | null;
   created_at: number;
 }
 
@@ -3488,7 +3547,30 @@ export async function getGuidePageById(id: number): Promise<GuidePageRow | null>
 
 export async function markGuidePagePublished(id: number): Promise<void> {
   const db = await ensureSchema();
-  await db.execute({ sql: `UPDATE guide_pages SET status = 'published' WHERE id = ?`, args: [id] });
+  await db.execute({
+    sql: `UPDATE guide_pages SET status = 'published', scheduled_publish_at = NULL WHERE id = ?`,
+    args: [id],
+  });
+}
+
+/** Records the queued publish slot on the guide row (does NOT change `status` — the guide
+ * stays 'pending_review' until the queue publisher actually flips it to 'published'). Called
+ * right after the matching publication_queue row is enqueued/rescheduled. */
+export async function scheduleGuidePagePublish(id: number, scheduledAt: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE guide_pages SET scheduled_publish_at = ? WHERE id = ?`,
+    args: [scheduledAt, id],
+  });
+}
+
+/** Clears a guide's scheduled slot (used when the operator cancels a pending schedule). */
+export async function clearGuidePageSchedule(id: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE guide_pages SET scheduled_publish_at = NULL WHERE id = ?`,
+    args: [id],
+  });
 }
 
 /** Backfill helper: sets body_html + the quality-pipeline verdict on an existing row (used to
@@ -4944,8 +5026,10 @@ export type QueueContentType =
   // Content-scale chantier (Étape 3-5): extended demand-gen, avant/après and assembly
   // batches reuse the exact sequential_ad approve/schedule/list pattern below, generalized
   // to any content_type instead of duplicated per type.
-  | "demand_gen_ext" | "before_after" | "assembly";
-export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog";
+  | "demand_gen_ext" | "before_after" | "assembly"
+  // pSEO guide deferred publish — see guide-scheduler.ts.
+  | "guide";
+export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog" | "shopify_guide";
 export type QueueStatus = "pending" | "publishing" | "published" | "failed" | "cancelled" | "draft";
 
 export interface PublicationQueueItem {

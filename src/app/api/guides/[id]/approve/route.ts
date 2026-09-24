@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
-import { getGuidePageById, markGuidePagePublished } from "@/lib/database";
-import { publishBlogArticle } from "@/lib/shopify-blog";
+import { scheduleGuidePublication } from "@/lib/guide-scheduler";
 
 /**
- * POST /api/guides/:id/approve — the ONLY code path that can make a guide page go live.
- * Flips the Shopify draft article to published:true (publishBlogArticle, same function the
- * blog auto-publisher uses) and records it locally. Requires the guide to still be
- * 'pending_review' — already-published or skipped rows are rejected.
+ * POST /api/guides/:id/approve — the ONLY code path that can schedule a guide page to go
+ * live. Books the guide onto the next free slot of `guide_schedule` (same deferred-queue
+ * mechanism as video/social — see guide-scheduler.ts) instead of publishing immediately: the
+ * guide stays 'pending_review' with `scheduled_publish_at` set until the hourly
+ * /api/cron/publisher drains the slot. Requires the guide to still be 'pending_review' and
+ * not already scheduled — already-published, skipped, or already-scheduled rows are rejected.
  */
 export async function POST(
   request: Request,
@@ -26,25 +27,13 @@ export async function POST(
     return NextResponse.json({ error: "Invalid guide id" }, { status: 400 });
   }
 
-  const guide = await getGuidePageById(id);
-  if (!guide) {
-    return NextResponse.json({ error: "Guide not found" }, { status: 404 });
-  }
-  if (guide.status !== "pending_review") {
-    return NextResponse.json({ error: `Wrong status: ${guide.status}` }, { status: 409 });
-  }
-  if (!guide.shopify_article_id || !guide.shopify_blog_id) {
-    return NextResponse.json({ error: "Guide has no linked Shopify article" }, { status: 409 });
+  const result = await scheduleGuidePublication(id);
+  if (!result.success) {
+    if (result.status >= 500) {
+      console.error(`[API] POST /api/guides/${id}/approve — scheduling failed:`, result.error);
+    }
+    return NextResponse.json({ success: false, error: result.error }, { status: result.status });
   }
 
-  try {
-    await publishBlogArticle(guide.shopify_blog_id, guide.shopify_article_id);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[API] POST /api/guides/${id}/approve — Shopify publish failed:`, message);
-    return NextResponse.json({ success: false, error: message }, { status: 502 });
-  }
-
-  await markGuidePagePublished(id);
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, scheduledAt: result.scheduledAt, sqlite: result.sqlite });
 }

@@ -22,6 +22,7 @@ import {
   DEFAULT_DEMAND_GEN_EXT_SCHEDULE,
   DEFAULT_BEFORE_AFTER_SCHEDULE,
   DEFAULT_ASSEMBLY_SCHEDULE,
+  DEFAULT_GUIDE_SCHEDULE,
   type PublicationSchedule,
 } from "@/lib/config";
 
@@ -247,11 +248,13 @@ describe("content-batch schedules (demand_gen_ext / before_after / assembly)", (
     expect(CONTENT_BATCH_SCHEDULE_DEFAULTS.demand_gen_ext).toEqual(DEFAULT_DEMAND_GEN_EXT_SCHEDULE);
     expect(CONTENT_BATCH_SCHEDULE_DEFAULTS.before_after).toEqual(DEFAULT_BEFORE_AFTER_SCHEDULE);
     expect(CONTENT_BATCH_SCHEDULE_DEFAULTS.assembly).toEqual(DEFAULT_ASSEMBLY_SCHEDULE);
-    // The 3 are genuinely distinct from each other and from the social/video defaults —
+    expect(CONTENT_BATCH_SCHEDULE_DEFAULTS.guide).toEqual(DEFAULT_GUIDE_SCHEDULE);
+    // These are genuinely distinct from each other and from the social/video defaults —
     // this is the whole point (dedicated grids, not a shared one).
     const all = [
       DEFAULT_PUBLICATION_SCHEDULE, DEFAULT_VIDEO_SCHEDULE,
       DEFAULT_DEMAND_GEN_EXT_SCHEDULE, DEFAULT_BEFORE_AFTER_SCHEDULE, DEFAULT_ASSEMBLY_SCHEDULE,
+      DEFAULT_GUIDE_SCHEDULE,
     ];
     const serialized = all.map((s) => JSON.stringify(s));
     expect(new Set(serialized).size).toBe(all.length);
@@ -262,6 +265,7 @@ describe("content-batch schedules (demand_gen_ext / before_after / assembly)", (
       demand_gen_ext: "demand_gen_ext_schedule",
       before_after: "before_after_schedule",
       assembly: "assembly_schedule",
+      guide: "guide_schedule",
     });
   });
 

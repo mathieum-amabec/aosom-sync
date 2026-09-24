@@ -424,6 +424,7 @@ function guideRow(overrides: Partial<GuidePageRow>): GuidePageRow {
     overall_status: null,
     quality_score_before_retry: null,
     fact_check_score_before_retry: null,
+    scheduled_publish_at: null,
     created_at: 0,
     ...overrides,
   };
