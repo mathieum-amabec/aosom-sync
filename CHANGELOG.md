@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.23] - 2026-09-24
+
+Guide approval no longer publishes instantly, and a published guide is now discoverable from
+the storefront instead of only by direct URL.
+
+### Added
+
+- **Deferred-publish scheduling for pSEO guides** — "Approuver" on `/guides` now books the
+  guide onto the next free slot of a dedicated `guide_schedule` grid (default: Tuesday +
+  Friday 10:00 America/Toronto, 1/day) instead of calling `publishBlogArticle` immediately.
+  The guide stays `pending_review` with `scheduled_publish_at` set until the existing hourly
+  `/api/cron/publisher` drains the slot for real — reuses the same `publication_queue`
+  mechanism already used for video/social (`content_type='guide'`, `platform='shopify_guide'`),
+  so no new cron was needed.
+- **`PATCH`/`DELETE /api/guides/:id/schedule`** — lets an operator move a scheduled guide to a
+  different time, or cancel its schedule entirely (reverts to unscheduled `pending_review`).
+- **Collection "Guide d'achat" link** — once a guide is genuinely published (never before),
+  its Shopify collection gets a `custom.guide_url` metafield, and the collection page shows a
+  "Guide d'achat" link pointing to it. Gated to non-EN locales (guides are an FR-only pilot).
+
+### Fixed
+
+- **`publication_queue` migration data-loss bug** — two earlier CHECK-rebuild migrations
+  (`+sequential_ad`, `+demand_gen_ext/before_after/assembly`) didn't carry the `claimed_at`
+  column through their copy, silently dropping it on a brand-new database. No effect on prod
+  (those migrations are long-since no-ops there), but now fixed at the source.
+
 ## [0.5.92.22] - 2026-09-24
 
 Quality safety net for the pSEO guide pipeline, plus a data-hygiene fix that unblocks 9
