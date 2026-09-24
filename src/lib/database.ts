@@ -405,6 +405,56 @@ async function _initSchemaImpl(): Promise<void> {
     // Covering index for the remix selector (Module F): filters by ratio +
     // non-null blob_url, joins/returns sku + duration_sec.
     `CREATE INDEX IF NOT EXISTS idx_vdg_ratio_blob ON video_demand_gen(ratio, blob_url, sku, duration_sec)`,
+    // gbp_posts: weekly Google Business Profile local-post pipeline. status starts at
+    // 'pending_review' always (the first real publish needs explicit human confirmation
+    // regardless of GBP_AUTO_PUBLISH — see gbp-post-generator.ts), then moves to
+    // 'published' | 'rejected' | 'failed'. judge_score/reasons are the Claude quality-gate
+    // verdict (mirrors blog-auto-publish.ts's scoreArticle), kept even for rejected posts
+    // so a rejection can be audited without re-running the judge.
+    `CREATE TABLE IF NOT EXISTS gbp_posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sku TEXT NOT NULL,
+      product_type TEXT,
+      signal_type TEXT NOT NULL,
+      summary_fr TEXT NOT NULL,
+      cta_url TEXT NOT NULL,
+      image_url TEXT,
+      velocity_score REAL NOT NULL DEFAULT 0,
+      price_drop_score REAL NOT NULL DEFAULT 0,
+      judge_score INTEGER,
+      judge_reasons TEXT,
+      status TEXT NOT NULL DEFAULT 'pending_review' CHECK (status IN ('pending_review','approved','published','rejected','failed')),
+      gbp_post_name TEXT,
+      error_message TEXT,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+      published_at INTEGER,
+      FOREIGN KEY (sku) REFERENCES products(sku)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_gbp_posts_status_created ON gbp_posts(status, created_at)`,
+    // guide_pages: tracks pSEO subcategory guide pages generated against
+    // collection_mappings(role='sub'). Every row is either a real Shopify blog article
+    // created as a draft (published:false, via createBlogArticle — see
+    // subcategory-guide-generator.ts) or a 'skipped_empty' record for a subcategory that
+    // failed the data-sufficiency check (no in-stock products / can't form a comparison) —
+    // logged instead of ever creating a hollow page. One row per (aosom_category) generation
+    // attempt; a subcategory can be regenerated later (new row), the old one stays for history.
+    `CREATE TABLE IF NOT EXISTS guide_pages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      aosom_category TEXT NOT NULL,
+      shopify_collection_id TEXT NOT NULL,
+      shopify_collection_title TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending_review','skipped_empty')),
+      skip_reason TEXT,
+      shopify_article_id TEXT,
+      shopify_blog_id INTEGER,
+      shopify_handle TEXT,
+      title TEXT,
+      min_price REAL,
+      max_price REAL,
+      in_stock_count INTEGER,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_guide_pages_category ON guide_pages(aosom_category)`,
     `CREATE TABLE IF NOT EXISTS price_alerts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL,
@@ -894,6 +944,67 @@ async function _initSchemaImpl(): Promise<void> {
   }
   if (!priceAlertCols.has("token_expires_at")) {
     alters.push(`ALTER TABLE price_alerts ADD COLUMN token_expires_at INTEGER`);
+  }
+
+  // guide_pages.status CHECK migration: add 'published' — the review dashboard (guides page)
+  // flips a Shopify draft live via publishBlogArticle and needs to record that locally too.
+  // Same rebuild-then-guard pattern as publication_queue's CHECK migrations above.
+  const gpDef = await db.execute(`SELECT sql FROM sqlite_master WHERE type='table' AND name='guide_pages'`);
+  const gpSql = gpDef.rows[0] ? String((gpDef.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (gpSql && !gpSql.includes("'published'")) {
+    await runBatch("guide_pages status CHECK +published", [
+      { sql: `DROP TABLE IF EXISTS guide_pages_new`, args: [] },
+      { sql: `CREATE TABLE guide_pages_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        aosom_category TEXT NOT NULL,
+        shopify_collection_id TEXT NOT NULL,
+        shopify_collection_title TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending_review','skipped_empty','published')),
+        skip_reason TEXT,
+        shopify_article_id TEXT,
+        shopify_blog_id INTEGER,
+        shopify_handle TEXT,
+        title TEXT,
+        min_price REAL,
+        max_price REAL,
+        in_stock_count INTEGER,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      )`, args: [] },
+      { sql: `INSERT INTO guide_pages_new (id, aosom_category, shopify_collection_id, shopify_collection_title,
+                status, skip_reason, shopify_article_id, shopify_blog_id, shopify_handle, title,
+                min_price, max_price, in_stock_count, created_at)
+              SELECT id, aosom_category, shopify_collection_id, shopify_collection_title,
+                status, skip_reason, shopify_article_id, shopify_blog_id, shopify_handle, title,
+                min_price, max_price, in_stock_count, created_at FROM guide_pages`, args: [] },
+      { sql: `DROP TABLE guide_pages`, args: [] },
+      { sql: `ALTER TABLE guide_pages_new RENAME TO guide_pages`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_guide_pages_category ON guide_pages(aosom_category)`, args: [] },
+    ]);
+  }
+
+  // guide_pages: body_html (so the review dashboard can render the full text without a
+  // Shopify round-trip) + the 3-pass quality pipeline's verdicts (fact-check + tone/brand
+  // judge, mirroring blog-auto-publish.ts's scoreArticle). Added after the table already
+  // shipped once (2026-09-22 pilot), hence a migration rather than just the CREATE TABLE.
+  const guidePagesInfo = await db.execute(`PRAGMA table_info(guide_pages)`);
+  const guidePagesCols = new Set(guidePagesInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!guidePagesCols.has("body_html")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN body_html TEXT`);
+  }
+  if (!guidePagesCols.has("fact_check_score")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN fact_check_score INTEGER`);
+  }
+  if (!guidePagesCols.has("fact_check_issues")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN fact_check_issues TEXT`);
+  }
+  if (!guidePagesCols.has("quality_score")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN quality_score INTEGER`);
+  }
+  if (!guidePagesCols.has("quality_reasons")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN quality_reasons TEXT`);
+  }
+  if (!guidePagesCols.has("overall_status")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN overall_status TEXT`);
   }
 
   if (alters.length > 0) {
@@ -2978,6 +3089,407 @@ export async function getTrendingProducts(limit = 10): Promise<TrendingProduct[]
       units_moved: Number(o.units_moved) || 0,
       current_qty: Number(o.current_qty) || 0,
     };
+  });
+}
+
+// ─── GBP (Google Business Profile) trend candidates + posts ─────────
+
+export interface GbpTrendCandidate {
+  sku: string; name: string; price: number; image1: string; product_type: string;
+  shopify_product_id: string | null; shopify_handle: string | null;
+  velocity_score: number; price_drop_score: number; blended_score: number;
+  /** 'stock' when velocity dominates, 'price' when the price drop dominates — informs which
+   * angle (nouveauté/popularité vs rabais) the post generator should lead with. */
+  signal_type: "stock" | "price";
+}
+
+/**
+ * Candidates for the weekly GBP post, ranked by a blended trend score.
+ *
+ * Mirrors getTrendingProducts' velocity signal (SUM(old_qty-new_qty) over 14 days) and adds
+ * the price_drop signal already used elsewhere (see the price_drop badge query) — the plan's
+ * "vélocité + baisses de prix" trend score didn't actually combine the two before this; each
+ * lived in its own separate query. Both are normalized to their own max (0-1) before blending
+ * 50/50, so a handful-of-units velocity outlier can't drown out a real double-digit % price
+ * drop, or vice versa.
+ */
+export async function getGbpTrendCandidates(limit = 15): Promise<GbpTrendCandidate[]> {
+  const db = await ensureSchema();
+  const windowStart = "cast(strftime('%s','now','-14 days') as integer)";
+
+  const velocityResult = await db.execute({
+    sql: `SELECT ph.sku, SUM(ph.old_qty - ph.new_qty) as units_moved
+      FROM price_history ph
+      WHERE ph.change_type = 'stock_change' AND ph.detected_at > ${windowStart} AND ph.old_qty > ph.new_qty
+      GROUP BY ph.sku`,
+    args: [],
+  });
+  const priceDropResult = await db.execute({
+    sql: `SELECT ph.sku, MAX((ph.old_price - ph.new_price) / ph.old_price) as drop_pct
+      FROM price_history ph
+      WHERE ph.change_type = 'price_drop' AND ph.detected_at > ${windowStart}
+        AND ph.old_price > 0 AND ph.new_price < ph.old_price
+      GROUP BY ph.sku`,
+    args: [],
+  });
+
+  const velocityBySku = new Map<string, number>();
+  for (const row of velocityResult.rows) {
+    const o = rowToObj(row);
+    velocityBySku.set(o.sku as string, Number(o.units_moved) || 0);
+  }
+  const dropBySku = new Map<string, number>();
+  for (const row of priceDropResult.rows) {
+    const o = rowToObj(row);
+    dropBySku.set(o.sku as string, Number(o.drop_pct) || 0);
+  }
+
+  const allSkus = new Set([...velocityBySku.keys(), ...dropBySku.keys()]);
+  if (allSkus.size === 0) return [];
+
+  const maxVelocity = Math.max(1, ...velocityBySku.values());
+  const maxDrop = Math.max(0.0001, ...dropBySku.values());
+
+  const skuList = [...allSkus];
+  const placeholders = skuList.map(() => "?").join(",");
+  const productsResult = await db.execute({
+    sql: `SELECT sku, name, price, image1, product_type, shopify_product_id, shopify_handle
+      FROM products WHERE sku IN (${placeholders}) AND shopify_product_id IS NOT NULL`,
+    args: skuList,
+  });
+
+  const candidates: GbpTrendCandidate[] = [];
+  for (const row of productsResult.rows) {
+    const o = rowToObj(row);
+    const sku = o.sku as string;
+    const velocity = velocityBySku.get(sku) || 0;
+    const drop = dropBySku.get(sku) || 0;
+    const velocityNorm = velocity / maxVelocity;
+    const dropNorm = drop / maxDrop;
+    candidates.push({
+      sku,
+      name: (o.name as string) || "",
+      price: Number(o.price) || 0,
+      image1: (o.image1 as string) || "",
+      product_type: (o.product_type as string) || "",
+      shopify_product_id: (o.shopify_product_id as string) || null,
+      shopify_handle: (o.shopify_handle as string) || null,
+      velocity_score: velocity,
+      price_drop_score: drop,
+      blended_score: velocityNorm * 0.5 + dropNorm * 0.5,
+      signal_type: dropNorm >= velocityNorm ? "price" : "stock",
+    });
+  }
+
+  return candidates.sort((a, b) => b.blended_score - a.blended_score).slice(0, limit);
+}
+
+/** product_type of the last N published/approved GBP posts, most recent first — used to
+ * steer weekly product selection away from repeating the same category back-to-back. */
+export async function getRecentGbpCategories(limit = 2): Promise<string[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT product_type FROM gbp_posts
+      WHERE status IN ('published','approved') AND product_type IS NOT NULL AND product_type != ''
+      ORDER BY created_at DESC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((row) => rowToObj(row).product_type as string);
+}
+
+export interface GbpPostInput {
+  sku: string;
+  productType: string;
+  signalType: string;
+  summaryFr: string;
+  ctaUrl: string;
+  imageUrl?: string;
+  velocityScore: number;
+  priceDropScore: number;
+  judgeScore: number | null;
+  judgeReasons: string | null;
+  status: "pending_review" | "rejected" | "failed";
+  errorMessage?: string;
+}
+
+export async function createGbpPost(input: GbpPostInput): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `INSERT INTO gbp_posts
+      (sku, product_type, signal_type, summary_fr, cta_url, image_url, velocity_score,
+       price_drop_score, judge_score, judge_reasons, status, error_message)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      input.sku, input.productType, input.signalType, input.summaryFr, input.ctaUrl,
+      input.imageUrl || null, input.velocityScore, input.priceDropScore,
+      input.judgeScore, input.judgeReasons, input.status, input.errorMessage || null,
+    ],
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export interface GbpPostRow {
+  id: number; sku: string; product_type: string; signal_type: string; summary_fr: string;
+  cta_url: string; image_url: string | null; velocity_score: number; price_drop_score: number;
+  judge_score: number | null; judge_reasons: string | null; status: string;
+  gbp_post_name: string | null; error_message: string | null; created_at: number; published_at: number | null;
+}
+
+export async function getGbpPosts(status?: string, limit = 50): Promise<GbpPostRow[]> {
+  const db = await ensureSchema();
+  const result = status
+    ? await db.execute({ sql: `SELECT * FROM gbp_posts WHERE status = ? ORDER BY created_at DESC LIMIT ?`, args: [status, limit] })
+    : await db.execute({ sql: `SELECT * FROM gbp_posts ORDER BY created_at DESC LIMIT ?`, args: [limit] });
+  return result.rows.map((row) => rowToObj(row) as unknown as GbpPostRow);
+}
+
+export async function getGbpPostById(id: number): Promise<GbpPostRow | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT * FROM gbp_posts WHERE id = ?`, args: [id] });
+  if (result.rows.length === 0) return null;
+  return rowToObj(result.rows[0]) as unknown as GbpPostRow;
+}
+
+export async function updateGbpPostStatus(
+  id: number,
+  status: "approved" | "published" | "rejected" | "failed",
+  extra?: { gbpPostName?: string; errorMessage?: string },
+): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE gbp_posts SET status = ?, gbp_post_name = COALESCE(?, gbp_post_name),
+      error_message = COALESCE(?, error_message),
+      published_at = CASE WHEN ? = 'published' THEN strftime('%s','now') ELSE published_at END
+      WHERE id = ?`,
+    args: [status, extra?.gbpPostName || null, extra?.errorMessage || null, status, id],
+  });
+}
+
+// ─── pSEO Subcategory Guides ──────────────────────────────────────────
+
+export interface SubcategoryTrendStats {
+  aosomCategory: string;
+  shopifyCollectionId: string;
+  shopifyCollectionTitle: string;
+  inStockCount: number;
+  minPrice: number;
+  maxPrice: number;
+  velocityScore: number;
+  priceDropScore: number;
+  blendedScore: number;
+  topProducts: {
+    sku: string; name: string; price: number; image1: string;
+    shopify_product_id: string; shopify_handle: string; units_moved: number;
+  }[];
+}
+
+/**
+ * Trend stats aggregated per REAL, curated subcategory (collection_mappings rows with
+ * collection_role='sub' — 28 as of 2026-09, each already verified against a real Shopify
+ * collection, unlike the earlier SEO-articles lot which had to hand-fix guessed handles).
+ * product_type is matched by PREFIX against aosom_category, since product_type carries
+ * deeper leaf levels (e.g. "Patio & Garden > Lawn & Garden > Sheds" under the "Patio &
+ * Garden > Lawn & Garden" sub mapping).
+ *
+ * Same blended velocity+price_drop scoring as getGbpTrendCandidates, just grouped at the
+ * subcategory level instead of per-product, plus the real price range and in-stock count a
+ * guide page needs. topProducts returns up to 3 real in-stock products for the comparison
+ * section, ranked by units_moved (falls back to price desc when nothing moved recently —
+ * still real products, never placeholders).
+ */
+export async function getSubcategoryTrendStats(): Promise<SubcategoryTrendStats[]> {
+  const db = await ensureSchema();
+  const subMappings = await db.execute(
+    `SELECT aosom_category, shopify_collection_id, shopify_collection_title FROM collection_mappings WHERE collection_role = 'sub' ORDER BY aosom_category`,
+  );
+
+  const windowStart = "cast(strftime('%s','now','-14 days') as integer)";
+  const stats: SubcategoryTrendStats[] = [];
+
+  for (const mappingRow of subMappings.rows) {
+    const m = rowToObj(mappingRow);
+    const aosomCategory = m.aosom_category as string;
+    const prefix = `${aosomCategory}%`;
+
+    const productsResult = await db.execute({
+      sql: `SELECT sku, name, price, image1, shopify_product_id, shopify_handle, qty
+        FROM products WHERE product_type LIKE ? AND shopify_product_id IS NOT NULL AND qty > 0`,
+      args: [prefix],
+    });
+    if (productsResult.rows.length === 0) continue; // no in-stock products → not a candidate at all
+
+    const skus = productsResult.rows.map((r) => rowToObj(r).sku as string);
+    const skuPlaceholders = skus.map(() => "?").join(",");
+
+    const velocityResult = await db.execute({
+      sql: `SELECT sku, SUM(old_qty - new_qty) as units_moved FROM price_history
+        WHERE sku IN (${skuPlaceholders}) AND change_type = 'stock_change'
+          AND detected_at > ${windowStart} AND old_qty > new_qty GROUP BY sku`,
+      args: skus,
+    });
+    const priceDropResult = await db.execute({
+      sql: `SELECT sku, MAX((old_price - new_price) / old_price) as drop_pct FROM price_history
+        WHERE sku IN (${skuPlaceholders}) AND change_type = 'price_drop' AND detected_at > ${windowStart}
+          AND old_price > 0 AND new_price < old_price GROUP BY sku`,
+      args: skus,
+    });
+
+    const velocityBySku = new Map<string, number>();
+    for (const row of velocityResult.rows) {
+      const o = rowToObj(row);
+      velocityBySku.set(o.sku as string, Number(o.units_moved) || 0);
+    }
+    const dropBySku = new Map<string, number>();
+    for (const row of priceDropResult.rows) {
+      const o = rowToObj(row);
+      dropBySku.set(o.sku as string, Number(o.drop_pct) || 0);
+    }
+
+    let totalVelocity = 0;
+    let maxDrop = 0;
+    let minPrice = Infinity;
+    let maxPrice = -Infinity;
+    const products: SubcategoryTrendStats["topProducts"] = [];
+
+    for (const row of productsResult.rows) {
+      const o = rowToObj(row);
+      const sku = o.sku as string;
+      const price = Number(o.price) || 0;
+      if (price > 0) {
+        minPrice = Math.min(minPrice, price);
+        maxPrice = Math.max(maxPrice, price);
+      }
+      const velocity = velocityBySku.get(sku) || 0;
+      totalVelocity += velocity;
+      maxDrop = Math.max(maxDrop, dropBySku.get(sku) || 0);
+      products.push({
+        sku, name: (o.name as string) || "", price,
+        image1: (o.image1 as string) || "",
+        shopify_product_id: (o.shopify_product_id as string) || "",
+        shopify_handle: (o.shopify_handle as string) || "",
+        units_moved: velocity,
+      });
+    }
+
+    products.sort((a, b) => b.units_moved - a.units_moved || b.price - a.price);
+
+    stats.push({
+      aosomCategory,
+      shopifyCollectionId: m.shopify_collection_id as string,
+      shopifyCollectionTitle: m.shopify_collection_title as string,
+      inStockCount: productsResult.rows.length,
+      minPrice: minPrice === Infinity ? 0 : minPrice,
+      maxPrice: maxPrice === -Infinity ? 0 : maxPrice,
+      velocityScore: totalVelocity,
+      priceDropScore: maxDrop,
+      // Normalized against this subcategory's own scale isn't meaningful across only 28 rows
+      // with wildly different volumes, so rank by a simple weighted sum instead — good enough
+      // to pick a top-5 pilot, revisit if this graduates past the pilot stage.
+      blendedScore: totalVelocity * 0.6 + maxDrop * 100 * 0.4,
+      topProducts: products.slice(0, 3),
+    });
+  }
+
+  return stats.sort((a, b) => b.blendedScore - a.blendedScore);
+}
+
+export interface GuidePageInput {
+  aosomCategory: string;
+  shopifyCollectionId: string;
+  shopifyCollectionTitle: string;
+  status: "pending_review" | "skipped_empty";
+  skipReason?: string;
+  shopifyArticleId?: string;
+  shopifyBlogId?: number;
+  shopifyHandle?: string;
+  title?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  inStockCount?: number;
+  bodyHtml?: string;
+  factCheckScore?: number;
+  factCheckIssues?: string;
+  qualityScore?: number;
+  qualityReasons?: string;
+  overallStatus?: string;
+}
+
+export async function createGuidePage(input: GuidePageInput): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `INSERT INTO guide_pages
+      (aosom_category, shopify_collection_id, shopify_collection_title, status, skip_reason,
+       shopify_article_id, shopify_blog_id, shopify_handle, title, min_price, max_price, in_stock_count,
+       body_html, fact_check_score, fact_check_issues, quality_score, quality_reasons, overall_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      input.aosomCategory, input.shopifyCollectionId, input.shopifyCollectionTitle,
+      input.status, input.skipReason || null, input.shopifyArticleId || null,
+      input.shopifyBlogId || null, input.shopifyHandle || null, input.title || null,
+      input.minPrice ?? null, input.maxPrice ?? null, input.inStockCount ?? null,
+      input.bodyHtml || null, input.factCheckScore ?? null, input.factCheckIssues || null,
+      input.qualityScore ?? null, input.qualityReasons || null, input.overallStatus || null,
+    ],
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export interface GuidePageRow {
+  id: number; aosom_category: string; shopify_collection_id: string; shopify_collection_title: string;
+  status: string; skip_reason: string | null; shopify_article_id: string | null;
+  shopify_blog_id: number | null; shopify_handle: string | null; title: string | null;
+  min_price: number | null; max_price: number | null; in_stock_count: number | null;
+  body_html: string | null; fact_check_score: number | null; fact_check_issues: string | null;
+  quality_score: number | null; quality_reasons: string | null; overall_status: string | null;
+  created_at: number;
+}
+
+export async function getGuidePages(): Promise<GuidePageRow[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT * FROM guide_pages ORDER BY created_at DESC`);
+  return result.rows.map((row) => rowToObj(row) as unknown as GuidePageRow);
+}
+
+export async function getGuidePageByCategory(aosomCategory: string): Promise<GuidePageRow | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM guide_pages WHERE aosom_category = ? ORDER BY created_at DESC LIMIT 1`,
+    args: [aosomCategory],
+  });
+  if (result.rows.length === 0) return null;
+  return rowToObj(result.rows[0]) as unknown as GuidePageRow;
+}
+
+export async function getGuidePageById(id: number): Promise<GuidePageRow | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT * FROM guide_pages WHERE id = ?`, args: [id] });
+  if (result.rows.length === 0) return null;
+  return rowToObj(result.rows[0]) as unknown as GuidePageRow;
+}
+
+export async function markGuidePagePublished(id: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE guide_pages SET status = 'published' WHERE id = ?`, args: [id] });
+}
+
+/** Backfill helper: sets body_html + the quality-pipeline verdict on an existing row (used to
+ * retroactively populate guides created before these columns existed). */
+export async function updateGuidePageVerdictAndBody(
+  id: number,
+  data: {
+    bodyHtml: string;
+    factCheckScore: number;
+    factCheckIssues: string;
+    qualityScore: number;
+    qualityReasons: string;
+    overallStatus: string;
+  },
+): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE guide_pages SET body_html = ?, fact_check_score = ?, fact_check_issues = ?,
+      quality_score = ?, quality_reasons = ?, overall_status = ? WHERE id = ?`,
+    args: [data.bodyHtml, data.factCheckScore, data.factCheckIssues, data.qualityScore, data.qualityReasons, data.overallStatus, id],
   });
 }
 

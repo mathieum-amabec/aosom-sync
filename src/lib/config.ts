@@ -153,6 +153,43 @@ export const env = {
   get klingApiKey(): string | undefined {
     return process.env.KLING_API_KEY || undefined;
   },
+  // ─── Google Business Profile (GBP) ───
+  // OAuth client can be a dedicated one OR the same installed-app client already used for
+  // Google Ads (GOOGLE_ADS_CLIENT_ID/_SECRET) — the Business Profile API just needs to be
+  // enabled on that same Cloud project. The refresh token is separate because the SCOPE
+  // differs (business.manage vs adwords). See docs/GBP-SETUP.md.
+  get gbpClientId(): string | undefined {
+    return process.env.GOOGLE_GBP_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID || undefined;
+  },
+  get gbpClientSecret(): string | undefined {
+    return process.env.GOOGLE_GBP_CLIENT_SECRET || process.env.GOOGLE_ADS_CLIENT_SECRET || undefined;
+  },
+  get gbpRefreshToken(): string | undefined {
+    return process.env.GOOGLE_GBP_REFRESH_TOKEN || undefined;
+  },
+  /** "accounts/{id}" — the GBP account resource. */
+  get gbpAccountId(): string | undefined {
+    return process.env.GOOGLE_GBP_ACCOUNT_ID || undefined;
+  },
+  /** "locations/{id}" — the specific business location to post to. */
+  get gbpLocationId(): string | undefined {
+    return process.env.GOOGLE_GBP_LOCATION_ID || undefined;
+  },
+  get hasGbp(): boolean {
+    return !!(
+      process.env.GOOGLE_GBP_REFRESH_TOKEN &&
+      (process.env.GOOGLE_GBP_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID) &&
+      (process.env.GOOGLE_GBP_CLIENT_SECRET || process.env.GOOGLE_ADS_CLIENT_SECRET) &&
+      process.env.GOOGLE_GBP_ACCOUNT_ID &&
+      process.env.GOOGLE_GBP_LOCATION_ID
+    );
+  },
+  /** Off by default — first post always waits for explicit human approval regardless of
+   * this flag (see gbp-post-generator.ts). Once Mat has seen a few real posts, flipping this
+   * to "true" lets the weekly cron publish straight through the quality gate unattended. */
+  get gbpAutoPublish(): boolean {
+    return process.env.GBP_AUTO_PUBLISH === "true";
+  },
   get isProduction(): boolean {
     return process.env.NODE_ENV === "production";
   },
@@ -176,6 +213,11 @@ export const SHOPIFY = {
 export const BLOG = {
   FR_ID: 90302349417,
   EN_ID: 91161428073,
+  // Dedicated blog for pSEO subcategory guide pages — kept separate from the editorial
+  // "Actualités" blog so the guides form their own clean topical cluster (URL:
+  // /blogs/guides/{article-handle}), rather than diluting into seasonal/editorial content.
+  // Created 2026-09-22 (handle "guides"). EN counterpart not created yet — FR-only pilot.
+  GUIDES_FR_ID: 101889212521,
   ADMIN_ARTICLE_URL: (id: string | number) =>
     `${SHOPIFY.ADMIN_URL}/articles/${id}`,
   // Auto-publish: an article goes live only if Claude's quality judge scores it at/above
