@@ -2,6 +2,46 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.21] - 2026-09-24
+
+Weekly automation for the Phase 1 pSEO subcategory guide pipeline (generation → fact-check →
+quality/tone judge → real product images → JSON-LD), plus the Google Business Profile weekly-
+post pipeline built alongside it — both gated behind manual approval in the new `/guides`
+review dashboard, nothing publishes automatically.
+
+### Added
+
+- **`/api/cron/guide-batch`** — weekly cron (Wed 17:30 UTC) generating up to 4 new pSEO guides
+  among the subcategories not yet covered by `guide_pages`, through the full validated
+  pipeline. **Stops doing work automatically** once every real subcategory
+  (`collection_mappings`, role='sub') has a `guide_pages` row — becomes a single cheap DB read
+  with zero Claude/Shopify calls, and fires a one-time "coverage complete" dashboard
+  notification (guarded so it never repeats weekly after).
+- **`/guides` dashboard page** — full review interface for every generated guide: read the
+  complete text in-app (not just a Shopify link), real fact-check/quality verdict badges, and
+  "Approuver et publier" (the only code path that can make a guide go live).
+- Google Business Profile weekly-post pipeline (`gbp-post-generator.ts`, `gbp-client.ts`,
+  `gbp-publish.ts`, `/api/cron/gbp-post`) — same generation → judge → manual-approval pattern,
+  with an explicit `confirmFirstPost` gate on the very first real GBP post regardless of the
+  `GBP_AUTO_PUBLISH` flag.
+
+### Fixed
+
+- **Cron slot collision** — `gbp-post` was scheduled at Monday 16:00 UTC, the same slot as the
+  daily `stock-check` cron. Moved to 17:00.
+- **Shopify article handle collisions** — several distinct subcategories in
+  `collection_mappings` share one real Shopify collection (e.g. "Fire Pits", "Lawn & Garden"
+  and "Patio Shade" all roll up to "Mobiliers extérieurs et jardins"), which collided on the
+  same generated handle. Now retries once with the subcategory's own leaf segment appended,
+  deterministic and never guessed.
+
+### Changed
+
+- Every Claude call in the new guide/GBP pipelines now routes through `budgetedCreate`
+  (`CLAUDE.MODEL_BATCH`, `batch` pool) instead of a raw `client.messages.create` on
+  `CLAUDE.MODEL` — integrating with the LLM cost-optimization guardrails added since this work
+  started, enforced repo-wide by `tests/llm-cost-optimization.test.ts`.
+
 ## [0.5.92.20] - 2026-09-22
 
 A dedicated `video` token-budget pool, isolated from the shared `batch` pool that imports,
