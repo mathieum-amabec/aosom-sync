@@ -1,0 +1,527 @@
+[
+  {
+    "sku": "01-0871",
+    "country": "UK",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/01-0871.mp4",
+    "bytes": 23593059,
+    "available": [
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "01-0879",
+    "country": "UK",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/01-0879.mp4",
+    "bytes": 6020981,
+    "available": [
+      "UK",
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "311-070V80GY",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/311-070V80GY.mp4",
+    "bytes": 4638756,
+    "available": [
+      "US"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "312-024RD",
+    "country": "UK",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/312-024RD.mp4",
+    "bytes": 1666060,
+    "available": [
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "344-035",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/344-035.mp4",
+    "bytes": 12869622,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "34D-002V00RD",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/34D-002V00RD.mp4",
+    "bytes": 18375306,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "370-027V00GY",
+    "country": "UK",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/370-027V00GY.mp4",
+    "bytes": 9622167,
+    "available": [
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "370-195",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/370-195.mp4",
+    "bytes": 5077575,
+    "available": [
+      "US",
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "3D0-006",
+    "country": "UK",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/3D0-006.mp4",
+    "bytes": 2030743,
+    "available": [
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "3D0-008",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/3D0-008.mp4",
+    "bytes": 7540104,
+    "available": [
+      "US",
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "800-185V80BK",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/800-185V80BK.mp4",
+    "bytes": 4085354,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "831-181V80BK",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/831-181V80BK.mp4",
+    "bytes": 6507231,
+    "available": [
+      "US"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "831-740V00GD",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/831-740V00GD.mp4",
+    "bytes": 5172610,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "831-740V03BK",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/831-740V03BK.mp4",
+    "bytes": 3743258,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "831-930V00CW",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/831-930V00CW.mp4",
+    "bytes": 4016239,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "833-450",
+    "country": "UK",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/833-450.mp4",
+    "bytes": 2248375,
+    "available": [
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "833-804WT",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/833-804WT.mp4",
+    "bytes": 2671106,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "834-044",
+    "country": "UK",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/834-044.mp4",
+    "bytes": 5026986,
+    "available": [
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "835-144",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/835-144.mp4",
+    "bytes": 3093695,
+    "available": [
+      "US"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "835-290V00BG",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/835-290V00BG.mp4",
+    "bytes": 5145257,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "835-890V00RB",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/835-890V00RB.mp4",
+    "bytes": 16385916,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "836-317V01",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/836-317V01.mp4",
+    "bytes": 9592304,
+    "available": [
+      "US"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "837-164WT",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/837-164WT.mp4",
+    "bytes": 22372290,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "837-398V80AK",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/837-398V80AK.mp4",
+    "bytes": 7764998,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "838-006V80GY",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/838-006V80GY.mp4",
+    "bytes": 6878886,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "838-082",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/838-082.mp4",
+    "bytes": 1533762,
+    "available": [
+      "US"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "838-212WT",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/838-212WT.mp4",
+    "bytes": 4160265,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "838-509V80WT",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/838-509V80WT.mp4",
+    "bytes": 4608987,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "838-603V00BK",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/838-603V00BK.mp4",
+    "bytes": 4412035,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "839-667V81WT",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/839-667V81WT.mp4",
+    "bytes": 15240912,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "83A-058V80WT",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/83A-058V80WT.mp4",
+    "bytes": 14965147,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "83B-041V80WT",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/83B-041V80WT.mp4",
+    "bytes": 6062258,
+    "available": [
+      "US"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "83B-059V02BG",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/83B-059V02BG.mp4",
+    "bytes": 5146909,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "844-037",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/844-037.mp4",
+    "bytes": 6282176,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "844-335",
+    "country": "UK",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/844-335.mp4",
+    "bytes": 2002675,
+    "available": [
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "845-030GY",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/845-030GY.mp4",
+    "bytes": 25702621,
+    "available": [
+      "US",
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "845-030YL",
+    "country": "UK",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/845-030YL.mp4",
+    "bytes": 42532280,
+    "available": [
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "845-032LG",
+    "country": "UK",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/845-032LG.mp4",
+    "bytes": 2473104,
+    "available": [
+      "UK"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "846-112V00DG",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/846-112V00DG.mp4",
+    "bytes": 11826182,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "84B-184V01GY",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/84B-184V01GY.mp4",
+    "bytes": 18859546,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "84D-030V01CW",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/84D-030V01CW.mp4",
+    "bytes": 12622295,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "84D-031V01BU",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/84D-031V01BU.mp4",
+    "bytes": 16847103,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "84D-270V00CG",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/84D-270V00CG.mp4",
+    "bytes": 25490145,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "84G-391V00GG",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/84G-391V00GG.mp4",
+    "bytes": 21625247,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "851-018",
+    "country": "UK",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/UK/851-018.mp4",
+    "bytes": 12430178,
+    "available": [
+      "UK",
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "921-342V81WT",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/921-342V81WT.mp4",
+    "bytes": 8264102,
+    "available": [
+      "US"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "A20-087",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/A20-087.mp4",
+    "bytes": 8951764,
+    "available": [
+      "US"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "A91-113",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/A91-113.mp4",
+    "bytes": 5658868,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "A91-290V02BK",
+    "country": "US",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/US/A91-290V02BK.mp4",
+    "bytes": 4121439,
+    "available": [
+      "US"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "D07-018WT",
+    "country": "CA",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/CA/D07-018WT.mp4",
+    "bytes": 1713741,
+    "available": [
+      "CA"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "D30-204",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/D30-204.mp4",
+    "bytes": 14908879,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  },
+  {
+    "sku": "E2-0007",
+    "country": "FR",
+    "url": "https://uspm.aosomcdn.com/aosomweb/customer/FR/E2-0007.mp4",
+    "bytes": 25777886,
+    "available": [
+      "FR"
+    ],
+    "skipped": false
+  }
+]
