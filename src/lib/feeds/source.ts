@@ -7,6 +7,10 @@ import { type FeedItem, mapToGoogleCategory, stripHtml, truncate } from "./feed"
 import { parseSku } from "../variant-merger";
 
 export interface ShopifyFeedVariant {
+  /** Shopify variant id — drives the `?variant=` deep link on multi-variant products. */
+  id?: number | string | null;
+  /** The variant's own image (products.json `images[].id`), null when none is assigned. */
+  image_id?: number | string | null;
   sku: string | null;
   price: string | null;
   compare_at_price?: string | null;
@@ -33,7 +37,7 @@ export interface ShopifyFeedProduct {
    * NOT published to the storefront. Such a product's /products/{handle} page 404s, so it
    * must be excluded from the feed (Google Merchant: "Product page unavailable"). */
   published_at?: string | null;
-  images?: Array<{ src: string }>;
+  images?: Array<{ id?: number | string | null; src: string }>;
   variants?: ShopifyFeedVariant[];
   /** English product title from the custom.title_en metafield. Only populated for the
    * EN feed; absent/empty falls back to the FR `title`. */
@@ -267,7 +271,8 @@ export function shopifyToFeedItems(
     // exclude it rather than ship a dead link.
     if (!p.published_at || new Date(p.published_at).getTime() > Date.now()) { unpublishedCount++; continue; }
     if (!p.handle) continue;
-    const images = (p.images ?? []).map((i) => i.src).filter(Boolean);
+    const productImages = (p.images ?? []).filter((i) => Boolean(i.src));
+    const images = productImages.map((i) => i.src);
     if (images.length === 0) continue;            // Google/Pinterest/Meta require an image
     const link = `${STOREFRONT_BASE_URL}${pathPrefix}/products/${encodeURIComponent(p.handle)}`;
     const description = truncate(stripPromoText(scrubSupplier(stripHtml(p.body_html ?? ""), houseBrand)), DESCRIPTION_MAX);
@@ -293,14 +298,26 @@ export function shopifyToFeedItems(
         tracked && (v.inventory_quantity ?? 0) <= 0 ? "out of stock" : "in stock";
       // Differentiate variant titles when the product has real variants.
       const variantTitle = multi && v.title && v.title !== "Default Title" ? ` - ${v.title}` : "";
+      // Each variant is its own offer (g:id = SKU), so its image must show THAT variant — an
+      // "Argent" item carrying the product's black hero photo is an image/variant mismatch.
+      // Use the variant's assigned image; fall back to the product's first image only when it
+      // has none (unchanged behaviour for every unassigned variant and single-variant product).
+      const ownImage = v.image_id != null
+        ? productImages.find((i) => i.id != null && String(i.id) === String(v.image_id))
+        : undefined;
+      // Deep-link multi-variant offers to their own variant so the landing page shows the
+      // advertised colour/size, not the default one. Single-variant links stay bare.
+      const variantLink = multi && v.id != null && String(v.id) !== ""
+        ? `${link}?variant=${encodeURIComponent(String(v.id))}`
+        : link;
       items.push({
         id,
         itemGroupId: multi ? String(p.id) : null,
         title: truncate(stripPromoText(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`, houseBrand))), 150),
         description,
-        link,
-        imageLink: images[0],
-        additionalImageLinks: images.slice(1),
+        link: variantLink,
+        imageLink: ownImage ? ownImage.src : images[0],
+        additionalImageLinks: ownImage ? images.filter((src) => src !== ownImage.src) : images.slice(1),
         price,
         compareAtPrice,
         availability,
