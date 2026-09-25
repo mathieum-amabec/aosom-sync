@@ -1,0 +1,45 @@
+name: CI
+
+# Required check on main (branch protection): a PR cannot be merged unless this job is green.
+# Vercel still deploys on its own (native Git integration + vercel-deploy.yml hook); this job
+# gates what can REACH main, not the deploy mechanism itself.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # npm, not bun: package-lock.json is the lockfile production is built from. bun ignores
+      # the scoped `overrides` (the undici security pins), so bun.lock deliberately diverges and
+      # can never pass a frozen install — see the v0.5.69.0 security fix (#438).
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npx eslint src tests
+
+      # `npm test` = `vitest run` (package.json). Never `bun test`: bun's own runner lacks
+      # vi.stubGlobal and silently skips whole files (see CLAUDE.md > Testing).
+      - name: Test
+        run: npm test

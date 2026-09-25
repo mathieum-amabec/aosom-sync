@@ -30,7 +30,8 @@ import {
 export const maxDuration = 300;
 
 // Spacing between the two Anthropic-backed generate calls.
-const RATE_LIMIT_DELAY_MS = 2_000;
+// 0 under test: a real 2 s wait inside a 5 s test timeout made the suite timing-sensitive on CI.
+const RATE_LIMIT_DELAY_MS = process.env.NODE_ENV === "test" ? 0 : 2_000;
 
 type LangOutcome =
   | { language: ContentLanguage; success: true; draftId: number; hookId: number | null }
