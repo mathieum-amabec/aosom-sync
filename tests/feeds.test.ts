@@ -296,6 +296,110 @@ describe("shopifyToFeedItems", () => {
   });
 });
 
+describe("shopifyToFeedItems — per-variant image and ?variant= deep link", () => {
+  // Shaped like the live mini fridge (mini-refrigerateur-congelateur-91l-double-zone): the
+  // black variant owns a gallery photo, the silver one owns an image uploaded at the END of
+  // the gallery, the red one has no image of its own.
+  const fridge: ShopifyFeedProduct = {
+    id: 9397106933865, title: "Mini réfrigérateur", handle: "mini-frigo", status: "active", published_at: PUBLISHED,
+    images: [
+      { id: 1, src: "https://img/hero-black.jpg" },
+      { id: 2, src: "https://img/black-kitchen.jpg" },
+      { id: 3, src: "https://img/dims.jpg" },
+      { id: 99, src: "https://img/silver-kitchen.jpg" },
+    ],
+    variants: [
+      { id: 47816248983657, sku: "800-128BK", price: "303.99", inventory_management: null, title: "Noir / 18\" x 19.75\" x 34\"", image_id: 2 },
+      { id: 47816249016425, sku: "800-128V81BK", price: "299.99", inventory_management: null, title: "Argent / 18\" x 19.75\" x 34\"", image_id: 99 },
+      { id: 47816249049193, sku: "800-128V80RD", price: "281.99", inventory_management: null, title: "Rouge / 18\" x 19.75\" x 34\"", image_id: null },
+    ],
+  };
+  const items = shopifyToFeedItems([fridge]);
+  const byId = (sku: string) => items.find((i) => i.id === sku)!;
+
+  it("uses the variant's own image when one is assigned", () => {
+    expect(byId("800-128V81BK").imageLink).toBe("https://img/silver-kitchen.jpg");
+    expect(byId("800-128BK").imageLink).toBe("https://img/black-kitchen.jpg");
+  });
+  it("keeps the rest of the gallery as additional images, without repeating the main one", () => {
+    expect(byId("800-128V81BK").additionalImageLinks).toEqual([
+      "https://img/hero-black.jpg", "https://img/black-kitchen.jpg", "https://img/dims.jpg",
+    ]);
+  });
+  it("falls back to the product's first image for a variant with no image of its own (unchanged)", () => {
+    expect(byId("800-128V80RD").imageLink).toBe("https://img/hero-black.jpg");
+    expect(byId("800-128V80RD").additionalImageLinks).toEqual([
+      "https://img/black-kitchen.jpg", "https://img/dims.jpg", "https://img/silver-kitchen.jpg",
+    ]);
+  });
+  it("falls back when image_id points at an image no longer in the gallery", () => {
+    const stale = shopifyToFeedItems([{ ...fridge, id: 2, handle: "stale", variants: [
+      { id: 5, sku: "ST-1BK", price: "10", inventory_management: null, title: "Noir", image_id: 12345 },
+      { id: 6, sku: "ST-1WT", price: "10", inventory_management: null, title: "Blanc" },
+    ] }]);
+    expect(stale.find((i) => i.id === "ST-1BK")!.imageLink).toBe("https://img/hero-black.jpg");
+  });
+  it("a variant pointing at the hero image yields exactly the pre-fix output", () => {
+    const hero = shopifyToFeedItems([{ ...fridge, id: 3, handle: "hero", variants: [
+      { sku: "HR-1BK", price: "10", inventory_management: null, title: "Noir", image_id: 1 },
+      { sku: "HR-1WT", price: "10", inventory_management: null, title: "Blanc" },
+    ] }]);
+    const [withHero, without] = hero;
+    expect(withHero.imageLink).toBe(without.imageLink);
+    expect(withHero.additionalImageLinks).toEqual(without.additionalImageLinks);
+  });
+  it("deep-links each multi-variant offer to its own variant", () => {
+    expect(byId("800-128V81BK").link).toBe("https://ameublodirect.ca/products/mini-frigo?variant=47816249016425");
+    expect(byId("800-128BK").link).toBe("https://ameublodirect.ca/products/mini-frigo?variant=47816248983657");
+    expect(byId("800-128V80RD").link).toBe("https://ameublodirect.ca/products/mini-frigo?variant=47816249049193");
+  });
+  it("deep-links the EN feed under /en as well", () => {
+    const en = shopifyToFeedItems([fridge], { preferEnglishTitle: true });
+    expect(en.find((i) => i.id === "800-128V81BK")!.link)
+      .toBe("https://ameublodirect.ca/en/products/mini-frigo?variant=47816249016425");
+  });
+  it("leaves the link bare when the variant id is unknown", () => {
+    const noIds = shopifyToFeedItems([{ ...fridge, id: 4, handle: "no-ids", variants: fridge.variants!.map((v) => ({ ...v, id: null })) }]);
+    for (const i of noIds) expect(i.link).toBe("https://ameublodirect.ca/products/no-ids");
+  });
+  it("single-variant products are byte-for-byte unchanged (no ?variant=, first image)", () => {
+    const single: ShopifyFeedProduct = {
+      id: 7, title: "Tabouret", handle: "tabouret", status: "active", published_at: PUBLISHED,
+      images: [{ id: 70, src: "https://img/s1.jpg" }, { id: 71, src: "https://img/s2.jpg" }],
+      variants: [{ id: 700, sku: "TAB-1", price: "49.99", inventory_management: null, title: "Default Title", image_id: 70 }],
+    };
+    // Same product as the pre-fix code saw it: no variant id, no image_id, no image ids.
+    const legacy: ShopifyFeedProduct = {
+      ...single, images: single.images!.map(({ src }) => ({ src })),
+      variants: [{ sku: "TAB-1", price: "49.99", inventory_management: null, title: "Default Title" }],
+    };
+    const [now] = shopifyToFeedItems([single]);
+    expect(now).toEqual(shopifyToFeedItems([legacy])[0]);
+    expect(now.link).toBe("https://ameublodirect.ca/products/tabouret");
+    expect(now.imageLink).toBe("https://img/s1.jpg");
+  });
+  it("a single-variant product whose variant owns a non-hero image still keeps its bare link", () => {
+    const [it1] = shopifyToFeedItems([{
+      id: 8, title: "Lampe", handle: "lampe", status: "active", published_at: PUBLISHED,
+      images: [{ id: 80, src: "https://img/l1.jpg" }, { id: 81, src: "https://img/l2.jpg" }],
+      variants: [{ id: 800, sku: "LMP-1", price: "20", inventory_management: null, title: "Default Title", image_id: 81 }],
+    }]);
+    expect(it1.link).toBe("https://ameublodirect.ca/products/lampe");
+    expect(it1.imageLink).toBe("https://img/l2.jpg");
+  });
+  it("flows into every channel's output (Google, Bing, Pinterest, Meta CSV + XML, Reddit)", () => {
+    const silver = [byId("800-128V81BK")];
+    const meta = { title: "t", link: "https://x", description: "d" };
+    for (const out of [
+      buildGoogleFeed(silver, meta), buildBingFeed(silver, meta), buildPinterestFeed(silver, meta),
+      buildRedditFeed(silver, meta), JSON.stringify(buildMetaFeed(silver)), buildMetaXmlFeed(silver, meta),
+    ]) {
+      expect(out).toContain("https://img/silver-kitchen.jpg");
+      expect(out).toContain("mini-frigo?variant=47816249016425");
+    }
+  });
+});
+
 describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => {
   const enProducts: ShopifyFeedProduct[] = [
     {
