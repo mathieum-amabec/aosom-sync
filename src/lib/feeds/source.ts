@@ -316,7 +316,7 @@ export function shopifyToFeedItems(
         title: truncate(stripPromoText(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`, houseBrand))), 150),
         description,
         link: variantLink,
-        imageLink: ownImage ? ownImage.src : images[0],
+        imageLink: images[0], // DELIBERATE REGRESSION — CI gate test, never merge
         additionalImageLinks: ownImage ? images.filter((src) => src !== ownImage.src) : images.slice(1),
         price,
         compareAtPrice,
