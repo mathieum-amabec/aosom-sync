@@ -80,6 +80,10 @@
       "schedule": "15 9 * * *"
     },
     {
+      "path": "/api/cron/feed-integrity",
+      "schedule": "45 9 * * *"
+    },
+    {
       "path": "/api/cron/draft-ttl",
       "schedule": "0 10 * * *"
     },

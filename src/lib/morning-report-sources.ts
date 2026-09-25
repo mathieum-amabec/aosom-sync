@@ -11,6 +11,7 @@ import {
 } from "./database";
 import { getActiveCampaignDaySummaries, getAdAccounts } from "./meta-ads-client";
 import { pickAdAccount } from "./ads-insights";
+import { loadGuardStatuses } from "./guard-status";
 import type { MorningReportSources } from "./morning-report";
 
 export const VIDEO_HORIZON_DAYS = 3;
@@ -36,6 +37,7 @@ export const morningReportSources: MorningReportSources = {
       { label: "Notifications non lues", count: a.unreadNotifications },
     ];
   },
+  guards: () => loadGuardStatuses(),
   blocked: async () => {
     const b = await countAwaitingOperator();
     return [
