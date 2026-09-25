@@ -5870,6 +5870,125 @@ export async function countBlogPostsByStatus(): Promise<Record<BlogPostStatus, n
   return counts;
 }
 
+// ─── Morning report (read-only counts) ───────────────────────────────
+// One function per report section so a failing query only blanks its own section.
+
+/** /guides awaiting approval = pending_review and not yet scheduled (same rule as the UI). */
+export async function countGuidesAwaitingApproval(attentionLimit = 5): Promise<{
+  pending: number;
+  ready: number;
+  attention: number;
+  attentionTitles: string[];
+}> {
+  const db = await ensureSchema();
+  const [counts, titles] = await Promise.all([
+    db.execute(
+      `SELECT COUNT(*) AS pending,
+              SUM(CASE WHEN overall_status = 'ready' THEN 1 ELSE 0 END) AS ready,
+              SUM(CASE WHEN overall_status = 'attention' THEN 1 ELSE 0 END) AS attention
+         FROM guide_pages WHERE status = 'pending_review' AND scheduled_publish_at IS NULL`,
+    ),
+    db.execute({
+      sql: `SELECT title FROM guide_pages
+             WHERE status = 'pending_review' AND scheduled_publish_at IS NULL AND overall_status = 'attention'
+             ORDER BY created_at DESC LIMIT ?`,
+      args: [attentionLimit],
+    }),
+  ]);
+  const o = rowToObj(counts.rows[0]);
+  return {
+    pending: Number(o.pending) || 0,
+    ready: Number(o.ready) || 0,
+    attention: Number(o.attention) || 0,
+    attentionTitles: titles.rows.map((r) => String(rowToObj(r).title)),
+  };
+}
+
+/** /content-formats videos: drafts awaiting approval + approved ones due within `horizonDays`. */
+export async function countContentFormatVideos(horizonDays: number): Promise<{ pendingApproval: number; scheduledSoon: number }> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS drafts,
+                 SUM(CASE WHEN status = 'pending' AND scheduled_at >= datetime('now')
+                           AND scheduled_at < datetime('now', ?) THEN 1 ELSE 0 END) AS soon
+            FROM publication_queue
+           WHERE content_type IN ('demand_gen_ext', 'before_after', 'assembly')`,
+    args: [`+${horizonDays} days`],
+  });
+  const o = rowToObj(r.rows[0]);
+  return { pendingApproval: Number(o.drafts) || 0, scheduledSoon: Number(o.soon) || 0 };
+}
+
+/** Counts behind the dashboard's alert panels (price floor, images, imports, catalog, bell). */
+export async function countMorningReportAlerts(): Promise<{
+  priceBelowFloor: number;
+  priceFloorIncidents24h: number;
+  imagesPendingReview: number;
+  importErrors: number;
+  catalogIssues: number;
+  unreadNotifications: number;
+}> {
+  const db = await ensureSchema();
+  const dayAgo = Math.floor(Date.now() / 1000) - 86400;
+  const [audit, incidents, images, imports, catalog, notif] = await Promise.all([
+    db.execute(`SELECT value FROM settings WHERE key = 'price_audit_result'`),
+    db.execute({ sql: `SELECT COUNT(*) AS c FROM price_floor_incidents WHERE detected_at >= ?`, args: [dayAgo] }),
+    db.execute(`SELECT COUNT(*) AS c FROM image_review_queue WHERE status = 'pending'`),
+    db.execute(`SELECT COUNT(*) AS c FROM import_jobs WHERE status = 'error'`),
+    db.execute(`SELECT value FROM settings WHERE key = 'catalog_consistency_audit'`),
+    db.execute(`SELECT COUNT(*) AS c FROM notifications WHERE read = 0`),
+  ]);
+  const c = (res: { rows: Row[] }) => Number(rowToObj(res.rows[0]).c) || 0;
+  const json = (res: { rows: Row[] }): Record<string, unknown> | null => {
+    const raw = res.rows[0] ? rowToObj(res.rows[0]).value : null;
+    try {
+      return raw ? (JSON.parse(String(raw)) as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  };
+  const issues = json(catalog)?.issues;
+  return {
+    priceBelowFloor: Number(json(audit)?.belowFloorCount) || 0,
+    priceFloorIncidents24h: c(incidents),
+    imagesPendingReview: c(images),
+    importErrors: c(imports),
+    catalogIssues: Array.isArray(issues) ? issues.length : 0,
+    unreadNotifications: c(notif),
+  };
+}
+
+/** Items that only move once Mat acts (approve / push / review). Counts only. A 'reviewing'
+ *  import that already has a shopify_id is live (push returns already_imported) — not counted. */
+export async function countAwaitingOperator(): Promise<{
+  sequentialAds: number;
+  importsToPush: number;
+  importsNeedsReview: number;
+  socialDrafts: number;
+  blogDrafts: number;
+}> {
+  const db = await ensureSchema();
+  const [seq, imports, social, blog] = await Promise.all([
+    db.execute(`SELECT COUNT(*) AS c FROM publication_queue WHERE content_type = 'sequential_ad' AND status = 'draft'`),
+    db.execute(
+      `SELECT SUM(CASE WHEN status = 'reviewing' AND (shopify_id IS NULL OR shopify_id = '') THEN 1 ELSE 0 END) AS push,
+              SUM(CASE WHEN status = 'needs_review' THEN 1 ELSE 0 END) AS review
+         FROM import_jobs`,
+    ),
+    db.execute(`SELECT COUNT(*) AS c FROM facebook_drafts WHERE status = 'draft'`),
+    db.execute(`SELECT COUNT(*) AS c FROM blog_posts WHERE status = 'draft'`),
+  ]);
+  const c = (res: { rows: Row[] }) => Number(rowToObj(res.rows[0]).c) || 0;
+  const im = rowToObj(imports.rows[0]);
+  return {
+    sequentialAds: c(seq),
+    importsToPush: Number(im.push) || 0,
+    importsNeedsReview: Number(im.review) || 0,
+    socialDrafts: c(social),
+    blogDrafts: c(blog),
+  };
+}
+
 export async function getBlogPost(id: number): Promise<BlogPostRow | null> {
   const db = await ensureSchema();
   const r = await db.execute({

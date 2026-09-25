@@ -23,6 +23,11 @@ export const env = {
   get klaviyoApiKey(): string | undefined {
     return process.env.KLAVIYO_API_KEY || undefined;
   },
+  /** Optional: recipient of the 06:00 morning report (sent via a Klaviyo metric-triggered
+   *  flow). When unset, the morning-report cron records an error instead of sending. */
+  get morningReportEmail(): string | undefined {
+    return process.env.MORNING_REPORT_EMAIL?.trim() || undefined;
+  },
   get cronSecret(): string {
     const v = process.env.CRON_SECRET;
     if (!v) throw new Error("CRON_SECRET not set in .env.local");

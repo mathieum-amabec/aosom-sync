@@ -233,6 +233,69 @@ export async function getInsights(adAccountId: string, dateRange: DateRange): Pr
   });
 }
 
+/** One active campaign's results for a single day, plus its ad sets' learning phase. */
+export interface CampaignDaySummary {
+  id: string;
+  name: string;
+  /** Sum of the ad sets' daily budgets, in the account's minor unit (cents); null if none set. */
+  dailyBudget: number | null;
+  spend: number;
+  impressions: number;
+  linkClicks: number;
+  purchases: number;
+  purchaseValue: number;
+  /** Distinct ad-set learning statuses (e.g. ["LEARNING"], ["SUCCESS"], ["FAIL"]); [] when Meta reports none. */
+  learning: string[];
+}
+
+const PURCHASE_ACTION = "offsite_conversion.fb_pixel_purchase";
+
+function actionValue(list: Array<{ action_type: string; value: string }> | undefined, type: string): number {
+  return Number(list?.find((a) => a.action_type === type)?.value ?? 0);
+}
+
+/**
+ * Per-campaign results for ONE day (YYYY-MM-DD, the ad account's own day) for every ACTIVE
+ * campaign. Read-only: 1 call for campaigns + 2 per campaign (insights, ad sets).
+ */
+export async function getActiveCampaignDaySummaries(adAccountId: string, day: string): Promise<CampaignDaySummary[]> {
+  const campaigns = await getCampaigns(adAccountId);
+  const out: CampaignDaySummary[] = [];
+  for (const c of campaigns) {
+    const [insights, adSets] = await Promise.all([
+      graphPaged<{
+        spend?: string;
+        impressions?: string;
+        inline_link_clicks?: string;
+        actions?: Array<{ action_type: string; value: string }>;
+        action_values?: Array<{ action_type: string; value: string }>;
+      }>(`${c.id}/insights`, {
+        fields: "spend,impressions,inline_link_clicks,actions,action_values",
+        time_range: JSON.stringify({ since: day, until: day }),
+      }),
+      graphPaged<{ effective_status?: string; daily_budget?: string; learning_stage_info?: { status?: string } }>(
+        `${c.id}/adsets`,
+        { fields: "effective_status,daily_budget,learning_stage_info" },
+      ),
+    ]);
+    const row = insights[0];
+    const live = adSets.filter((a) => a.effective_status === "ACTIVE");
+    const budget = live.reduce((s, a) => s + Number(a.daily_budget ?? 0), 0) || Number(c.daily_budget ?? 0);
+    out.push({
+      id: c.id,
+      name: c.name,
+      dailyBudget: budget > 0 ? budget : null,
+      spend: Number(row?.spend ?? 0),
+      impressions: Number(row?.impressions ?? 0),
+      linkClicks: Number(row?.inline_link_clicks ?? 0),
+      purchases: actionValue(row?.actions, PURCHASE_ACTION),
+      purchaseValue: actionValue(row?.action_values, PURCHASE_ACTION),
+      learning: [...new Set(live.map((a) => a.learning_stage_info?.status).filter((s): s is string => !!s))],
+    });
+  }
+  return out;
+}
+
 export interface TokenDebugInfo {
   isValid: boolean;
   /** Epoch seconds the token expires; 0 means "never" (system-user / long-lived token). */
