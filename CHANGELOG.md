@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.24] - 2026-09-25
+
+Paid Google Shopping and Meta catalog ads now show and open the exact variant they advertise.
+
+### Fixed
+
+- **Product feeds: per-variant photo and `?variant=` deep link** — every feed item is one
+  variant (`g:id` = SKU), but each carried the product's first image and a bare
+  `/products/{handle}` link, so a variant offer such as the silver mini fridge
+  (`800-128V81BK`, "Argent") advertised the black hero photo and landed on the default
+  variant. `shopifyToFeedItems` now uses the variant's own assigned photo
+  (`variant.image_id`) as `image_link`, falling back to the product's main photo only when
+  the variant has none, and appends `?variant={id}` to the link of multi-variant products.
+  One shared mapper, so the fix covers every channel feed: Google, Meta (CSV + XML),
+  Pinterest (FR + EN), Bing and Reddit. Single-variant items are unchanged — verified
+  byte-identical (838/838) against the live catalog; the 1,681 multi-variant items differ
+  only in link and image.
+
 ## [0.5.92.23] - 2026-09-24
 
 Guide approval no longer publishes instantly, and a published guide is now discoverable from
