@@ -376,6 +376,7 @@ GraphQL `themeDuplicate` of the new live. Verify roles: `GET /admin/api/2025-01/
 - `POST /api/import/queue` — queue products by SKU array
 - `POST /api/import/generate` — generate Claude content for one job
 - `POST /api/import/push` — push reviewed job to Shopify
+- `GET /api/cron/morning-report` — Mat's daily 06:00 America/Montreal digest (read-only), sent as the Klaviyo event `Rapport matinal` to `MORNING_REPORT_EMAIL`. Registered at 10:00 AND 11:00 UTC; only the run where Montreal reads 06:xx sends (DST-proof), at most once per day. `?dryRun=1` previews, `?force=1` resends. Setup: `docs/MORNING-REPORT.md`
 
 ## Publication scheduling — `publication_queue` (unified)
 
