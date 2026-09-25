@@ -25,19 +25,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
-      - uses: oven-sh/setup-bun@v2
-
+      # npm, not bun: package-lock.json is the lockfile production is built from. bun ignores
+      # the scoped `overrides` (the undici security pins), so bun.lock deliberately diverges and
+      # can never pass a frozen install — see the v0.5.69.0 security fix (#438).
       - name: Install
-        run: bun install --frozen-lockfile
+        run: npm ci
 
       - name: Typecheck
-        run: bunx tsc --noEmit
+        run: npx tsc --noEmit
 
       - name: Lint
-        run: bunx eslint src tests
+        run: npx eslint src tests
 
-      # `bun run test` = `vitest run` (package.json). Never `bun test`: bun's own runner lacks
+      # `npm test` = `vitest run` (package.json). Never `bun test`: bun's own runner lacks
       # vi.stubGlobal and silently skips whole files (see CLAUDE.md > Testing).
       - name: Test
-        run: bun run test
+        run: npm test
