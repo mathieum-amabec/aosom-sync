@@ -29,7 +29,8 @@ import { trackCron } from "@/lib/cron-tracking";
 export const maxDuration = 300;
 
 // Spacing between FR and EN generations — gives Claude a beat between two large calls.
-const BETWEEN_LANGS_DELAY_MS = 3_000;
+// 0 under test: a real 3 s wait inside a 5 s test timeout made the suite timing-sensitive on CI.
+const BETWEEN_LANGS_DELAY_MS = process.env.NODE_ENV === "test" ? 0 : 3_000;
 
 // Images shared across the FR + EN pair so the two articles are visually identical. One photo
 // set per run keeps Unsplash usage and download pings low.
