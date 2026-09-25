@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.25] - 2026-09-25
+
+Mat now gets an automatic morning report by email, every day at 06:00 Montreal time.
+
+### Added
+
+- **Automatic morning report by email** — new read-only cron `GET /api/cron/morning-report`
+  sends a short digest every day at **06:00 Montreal time, all year** (registered at 10:00 and
+  11:00 UTC; only the run where Montreal reads 06:xx sends, at most once a day). Sections:
+  yesterday's active **Meta campaigns** (spend vs budget, impressions, clicks, attributed
+  purchases, learning status), **pSEO guides** awaiting approval (ready vs attention),
+  **/content-formats videos** (awaiting approval, scheduled in the next 3 days), dashboard
+  **alerts**, and counts of **actions waiting on Mat** (sequential ads, imports, social drafts,
+  blog drafts). Sent as the Klaviyo event `Rapport matinal` to `MORNING_REPORT_EMAIL`; a
+  Klaviyo flow renders it. A failing source (e.g. Meta down) is marked "Section indisponible"
+  and the email still goes out. It never approves or publishes anything. `?dryRun=1`
+  previews, `?force=1` resends. Setup: `docs/MORNING-REPORT.md`.
+
 ## [0.5.92.24] - 2026-09-25
 
 Paid Google Shopping and Meta catalog ads now show and open the exact variant they advertise.
