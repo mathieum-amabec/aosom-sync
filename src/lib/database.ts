@@ -5949,12 +5949,64 @@ export async function countMorningReportAlerts(): Promise<{
   };
   const issues = json(catalog)?.issues;
   return {
-    priceBelowFloor: Number(json(audit)?.belowFloorCount) || 0,
+    // price-audit persists `belowFloor` (see persistPriceAudit / _loadDashboardAlerts);
+    // `belowFloorCount` is only the dashboard's mapped field name and never exists in the row.
+    priceBelowFloor: Number(json(audit)?.belowFloor) || 0,
     priceFloorIncidents24h: c(incidents),
     imagesPendingReview: c(images),
     importErrors: c(imports),
     catalogIssues: Array.isArray(issues) ? issues.length : 0,
     unreadNotifications: c(notif),
+  };
+}
+
+/** Raw inputs for the guard verdicts (guard-status.ts): each daily guard's persisted result
+ *  (settings JSON, parsed; null when never run or malformed), the latest cron_runs row per guard
+ *  cron, and the image review queue. One cheap read — the guards themselves never run here. */
+export interface GuardInputs {
+  priceAudit: Record<string, unknown> | null;
+  catalogAudit: Record<string, unknown> | null;
+  feedAudit: Record<string, unknown> | null;
+  lastRuns: Record<string, { status: string; ranAt: number; detail: string | null }>;
+  imagesPending: number;
+  imagesOldestPendingAt: number | null;
+}
+
+export const GUARD_CRON_NAMES = ["price-audit", "catalog-consistency", "feed-integrity"] as const;
+
+export async function loadGuardInputs(): Promise<GuardInputs> {
+  const db = await ensureSchema();
+  const [settings, runs, images] = await Promise.all([
+    db.execute(
+      `SELECT key, value FROM settings WHERE key IN ('price_audit_result', 'catalog_consistency_audit', 'feed_integrity_audit')`,
+    ),
+    db.execute({
+      sql: `SELECT r.name, r.status, r.ran_at, r.detail FROM cron_runs r
+            JOIN (SELECT name, MAX(id) AS id FROM cron_runs WHERE name IN (${GUARD_CRON_NAMES.map(() => "?").join(", ")}) GROUP BY name) last
+              ON last.id = r.id`,
+      args: [...GUARD_CRON_NAMES],
+    }),
+    db.execute(`SELECT COUNT(*) AS c, MIN(created_at) AS oldest FROM image_review_queue WHERE status = 'pending'`),
+  ]);
+  const byKey = new Map(settings.rows.map((r) => { const o = rowToObj(r); return [o.key as string, o.value as string]; }));
+  const parse = (key: string): Record<string, unknown> | null => {
+    const raw = byKey.get(key);
+    if (!raw) return null;
+    try { const v = JSON.parse(raw); return v && typeof v === "object" ? (v as Record<string, unknown>) : null; } catch { return null; }
+  };
+  const lastRuns: GuardInputs["lastRuns"] = {};
+  for (const r of runs.rows) {
+    const o = rowToObj(r);
+    lastRuns[o.name as string] = { status: o.status as string, ranAt: Number(o.ran_at) || 0, detail: (o.detail as string) ?? null };
+  }
+  const img = rowToObj(images.rows[0]);
+  return {
+    priceAudit: parse("price_audit_result"),
+    catalogAudit: parse("catalog_consistency_audit"),
+    feedAudit: parse("feed_integrity_audit"),
+    lastRuns,
+    imagesPending: Number(img.c) || 0,
+    imagesOldestPendingAt: img.oldest != null ? Number(img.oldest) : null,
   };
 }
 

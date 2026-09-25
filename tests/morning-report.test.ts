@@ -6,6 +6,7 @@ import {
   renderMorningReport,
   type MorningReportSources,
 } from "@/lib/morning-report";
+import type { GuardStatus } from "@/lib/guard-status";
 
 const campaign = {
   id: "1",
@@ -32,9 +33,20 @@ function sources(over: Partial<MorningReportSources> = {}): MorningReportSources
       { label: "Publicités séquentielles à approuver", count: 16 },
       { label: "Imports en attente", count: 0 },
     ]),
+    guards: vi.fn(async () => GREEN_GUARDS),
     ...over,
   };
 }
+
+const guard = (key: GuardStatus["key"], label: string, over: Partial<GuardStatus> = {}): GuardStatus => ({
+  key, label, state: "green", summary: "ok", reasons: [], checkedAt: 1, ...over,
+});
+const GREEN_GUARDS: GuardStatus[] = [
+  guard("price", "Prix plancher"),
+  guard("catalog", "Cohérence du catalogue"),
+  guard("images", "Conformité des images"),
+  guard("feed", "Flux publicitaires"),
+];
 
 describe("localClock / previousDay", () => {
   it("maps 10:00 UTC to 06:00 in Montreal during daylight time (EDT, UTC-4)", () => {
@@ -134,5 +146,58 @@ describe("renderMorningReport", () => {
     );
     expect(r.html).not.toContain("<script>");
     expect(r.html).toContain("&lt;script&gt;");
+  });
+});
+
+describe("renderMorningReport — guards section", () => {
+  const at = new Date("2026-09-25T10:00:00Z");
+
+  it("all green: one reassuring line, subject unchanged", async () => {
+    const r = renderMorningReport(await collectMorningReport(sources(), at));
+    expect(r.subject).toBe("Rapport du matin — vendredi 25 septembre");
+    expect(r.text).toContain(
+      "✅ Tous les garde-fous sont au vert (prix plancher, cohérence du catalogue, conformité des images, flux publicitaires).",
+    );
+    expect(r.text).not.toContain("🔴");
+  });
+
+  it("red guards: listed first with their reasons, counted in the subject, heading in red", async () => {
+    const guards = [
+      guard("price", "Prix plancher"),
+      guard("catalog", "Cohérence du catalogue", { state: "red", reasons: ["5 fiches avec couleur en double"] }),
+      guard("images", "Conformité des images"),
+      guard("feed", "Flux publicitaires", { state: "red", reasons: ["le flux Google publié n'a plus aucun lien ?variant="] }),
+    ];
+    const r = renderMorningReport(await collectMorningReport(sources({ guards: vi.fn(async () => guards) }), at));
+    expect(r.subject).toBe("🔴 2 garde-fous en alerte — Rapport du matin — vendredi 25 septembre");
+    // The guards section comes before every other section.
+    expect(r.text.indexOf("GARDE-FOUS — 2 ALERTES")).toBeGreaterThan(-1);
+    expect(r.text.indexOf("GARDE-FOUS")).toBeLessThan(r.text.indexOf("PUBLICITÉS META"));
+    expect(r.text).toContain("🔴 Cohérence du catalogue : 5 fiches avec couleur en double");
+    expect(r.text).toContain("🔴 Flux publicitaires : le flux Google publié n'a plus aucun lien ?variant=");
+    expect(r.text).toContain("Au vert : prix plancher, conformité des images.");
+    expect(r.html).toContain("color:#b91c1c");
+  });
+
+  it("a single red guard uses the singular in the subject", async () => {
+    const guards = [guard("images", "Conformité des images", { state: "red", reasons: ["1 image attend ta décision"] })];
+    const r = renderMorningReport(await collectMorningReport(sources({ guards: vi.fn(async () => guards) }), at));
+    expect(r.subject.startsWith("🔴 1 garde-fou en alerte — ")).toBe(true);
+  });
+
+  it("a guard that never ran is reported as 'pas encore de résultat', not as an alert", async () => {
+    const guards = [...GREEN_GUARDS.slice(0, 3), guard("feed", "Flux publicitaires", { state: "unknown", checkedAt: null })];
+    const r = renderMorningReport(await collectMorningReport(sources({ guards: vi.fn(async () => guards) }), at));
+    expect(r.subject).not.toContain("🔴");
+    expect(r.text).toContain("Pas encore de résultat : flux publicitaires.");
+  });
+
+  it("a guard-status read failure is an unavailable section, and the email still goes out", async () => {
+    const r = renderMorningReport(
+      await collectMorningReport(sources({ guards: vi.fn(async () => { throw new Error("Turso down"); }) }), at),
+    );
+    expect(r.missingSections).toContain("Garde-fous");
+    expect(r.text).toContain("⚠ Section indisponible (Turso down)");
+    expect(r.text).toContain("5 guides en attente");
   });
 });

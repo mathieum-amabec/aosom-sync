@@ -11,6 +11,7 @@
  * a DB or network (sources are injected).
  */
 import type { CampaignDaySummary } from "./meta-ads-client";
+import type { GuardStatus } from "./guard-status";
 
 export const REPORT_TIME_ZONE = "America/Montreal";
 /** Local hour the report must go out at. The cron fires at 10:00 and 11:00 UTC (06:00 EDT /
@@ -56,6 +57,8 @@ export interface MorningReportData {
   videos: Section<VideosSummary>;
   alerts: Section<AlertItem[]>;
   blocked: Section<BlockedItem[]>;
+  /** Red/green verdict per daily guard (guard-status.ts) — the same one the dashboard shows. */
+  guards: Section<GuardStatus[]>;
 }
 
 export interface MorningReportSources {
@@ -64,6 +67,7 @@ export interface MorningReportSources {
   videos: () => Promise<VideosSummary>;
   alerts: () => Promise<AlertItem[]>;
   blocked: () => Promise<BlockedItem[]>;
+  guards: () => Promise<GuardStatus[]>;
 }
 
 // ── time helpers ──────────────────────────────────────────────────────────────
@@ -103,14 +107,15 @@ async function settle<T>(fn: () => Promise<T>): Promise<Section<T>> {
 export async function collectMorningReport(sources: MorningReportSources, now: Date): Promise<MorningReportData> {
   const reportDate = localClock(now).date;
   const metaDay = previousDay(reportDate);
-  const [meta, guides, videos, alerts, blocked] = await Promise.all([
+  const [meta, guides, videos, alerts, blocked, guards] = await Promise.all([
     settle(() => sources.meta(metaDay)),
     settle(sources.guides),
     settle(sources.videos),
     settle(sources.alerts),
     settle(sources.blocked),
+    settle(sources.guards),
   ]);
-  return { reportDate, metaDay, meta, guides, videos, alerts, blocked };
+  return { reportDate, metaDay, meta, guides, videos, alerts, blocked, guards };
 }
 
 // ── render ────────────────────────────────────────────────────────────────────
@@ -143,9 +148,33 @@ function dayLabel(date: string): string {
   );
 }
 
+type ReportSection = { title: string; lines: string[]; missing?: string; alert?: boolean };
+
+/** Guards that need attention today (red). */
+export function redGuards(data: MorningReportData): GuardStatus[] {
+  return data.guards.ok ? data.guards.data.filter((g) => g.state === "red") : [];
+}
+
 /** Lines (plain text) for each section; the HTML is built from the same lines. */
-function sectionLines(data: MorningReportData): Array<{ title: string; lines: string[]; missing?: string }> {
-  const out: Array<{ title: string; lines: string[]; missing?: string }> = [];
+function sectionLines(data: MorningReportData): ReportSection[] {
+  const out: ReportSection[] = [];
+
+  // 0. Guards — first, so a red guard is the first thing Mat reads. One section groups every
+  //    guard (price floor, catalog, images, ad feeds); when all are green it is a single line.
+  {
+    const title = "Garde-fous";
+    if (!data.guards.ok) out.push({ title, lines: [], missing: data.guards.error });
+    else {
+      const red = redGuards(data);
+      const green = data.guards.data.filter((g) => g.state === "green").map((g) => g.label.toLowerCase());
+      const unknown = data.guards.data.filter((g) => g.state === "unknown").map((g) => g.label.toLowerCase());
+      const lines = red.map((g) => `🔴 ${g.label} : ${g.reasons.join(" · ")}`);
+      if (red.length === 0) lines.push(`✅ Tous les garde-fous sont au vert (${green.join(", ")}).`);
+      else if (green.length) lines.push(`Au vert : ${green.join(", ")}.`);
+      if (unknown.length) lines.push(`Pas encore de résultat : ${unknown.join(", ")}.`);
+      out.push({ title: red.length ? `Garde-fous — ${plural(red.length, "alerte", "alertes")}` : title, lines, alert: red.length > 0 });
+    }
+  }
 
   // 1. Meta
   {
@@ -236,9 +265,12 @@ export function renderMorningReport(data: MorningReportData): RenderedReport {
   const sections = sectionLines(data);
   const missingSections = sections.filter((s) => s.missing !== undefined).map((s) => s.title);
   const heading = `Rapport du matin — ${dayLabel(data.reportDate)}`;
-  const subject = missingSections.length
+  const base = missingSections.length
     ? `${heading} (${plural(missingSections.length, "section indisponible", "sections indisponibles")})`
     : heading;
+  // A red guard leads the subject so it shows in the inbox list, not only once opened.
+  const red = redGuards(data).length;
+  const subject = red ? `🔴 ${plural(red, "garde-fou en alerte", "garde-fous en alerte")} — ${base}` : base;
 
   const text = [
     heading,
@@ -259,7 +291,7 @@ export function renderMorningReport(data: MorningReportData): RenderedReport {
             .map((l) => `<li style="margin:2px 0">${escapeHtml(l)}</li>`)
             .join("")}</ul>`;
     return (
-      `<h2 style="font-size:15px;margin:18px 0 6px;color:#111">${escapeHtml(s.title)}</h2>` + body
+      `<h2 style="font-size:15px;margin:18px 0 6px;color:${s.alert ? "#b91c1c" : "#111"}">${escapeHtml(s.title)}</h2>` + body
     );
   };
   const html =

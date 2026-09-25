@@ -52,11 +52,41 @@ beforeAll(async () => {
 beforeEach(async () => {
   for (const t of [
     "guide_pages", "publication_queue", "image_review_queue", "import_jobs", "notifications",
-    "price_floor_incidents", "facebook_drafts", "blog_posts",
+    "price_floor_incidents", "facebook_drafts", "blog_posts", "cron_runs",
   ]) {
     await db.execute(`DELETE FROM ${t}`);
   }
-  await db.execute(`DELETE FROM settings WHERE key IN ('price_audit_result', 'catalog_consistency_audit')`);
+  await db.execute(`DELETE FROM settings WHERE key IN ('price_audit_result', 'catalog_consistency_audit', 'feed_integrity_audit')`);
+});
+
+describe("loadGuardInputs", () => {
+  it("reads each guard's stored result, its LATEST cron run and the pending image queue", async () => {
+    await mod.setSetting("price_audit_result", JSON.stringify({ belowFloor: 2, failed: 1, auditedAt: 100 }));
+    await mod.setSetting("catalog_consistency_audit", JSON.stringify({ duplicateColorOptions: 5, auditedAt: 200 }));
+    await mod.setSetting("feed_integrity_audit", "not json"); // corrupt → null, never a throw
+    // Older error then newer success for price-audit: only the latest counts.
+    await db.execute(`INSERT INTO cron_runs (name, status, detail, ran_at) VALUES
+      ('price-audit', 'error', 'boom', 10), ('price-audit', 'success', 'ok', 20),
+      ('catalog-consistency', 'error', 'rate limit', 30), ('sync', 'error', 'not a guard', 40)`);
+    await db.execute(`INSERT INTO image_review_queue (shopify_product_id, sku, current_url, proposed_url, status, created_at) VALUES
+      ('1', 'a', 'u', 'v', 'pending', 500), ('2', 'b', 'u', 'v', 'pending', 400), ('3', 'c', 'u', 'v', 'applied', 1)`);
+
+    const g = await mod.loadGuardInputs();
+    expect(g.priceAudit).toEqual({ belowFloor: 2, failed: 1, auditedAt: 100 });
+    expect(g.catalogAudit).toEqual({ duplicateColorOptions: 5, auditedAt: 200 });
+    expect(g.feedAudit).toBeNull();
+    expect(g.lastRuns).toEqual({
+      "price-audit": { status: "success", ranAt: 20, detail: "ok" },
+      "catalog-consistency": { status: "error", ranAt: 30, detail: "rate limit" },
+    });
+    expect(g.imagesPending).toBe(2);
+    expect(g.imagesOldestPendingAt).toBe(400);
+  });
+
+  it("returns empty inputs on a fresh database", async () => {
+    const g = await mod.loadGuardInputs();
+    expect(g).toEqual({ priceAudit: null, catalogAudit: null, feedAudit: null, lastRuns: {}, imagesPending: 0, imagesOldestPendingAt: null });
+  });
 });
 
 describe("countGuidesAwaitingApproval", () => {
@@ -132,7 +162,8 @@ describe("countAwaitingOperator", () => {
 
 describe("countMorningReportAlerts", () => {
   it("reads the stored audits and counts open items", async () => {
-    await mod.setSetting("price_audit_result", JSON.stringify({ belowFloorCount: 3, total: 100 }));
+    // Same shape persistPriceAudit writes (`belowFloor`, not the dashboard's `belowFloorCount`).
+    await mod.setSetting("price_audit_result", JSON.stringify({ belowFloor: 3, total: 100 }));
     await mod.setSetting("catalog_consistency_audit", JSON.stringify({ issues: [{}, {}] }));
     const now = Math.floor(Date.now() / 1000);
     await db.execute({

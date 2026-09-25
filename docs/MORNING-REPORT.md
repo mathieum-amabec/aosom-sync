@@ -49,6 +49,26 @@ The other run returns `{ skipped: "not-06h" }`. `settings.morning_report_last_se
 Montreal date) turns a duplicated or retried invocation into a no-op, so Mat never gets two
 reports the same day.
 
+## Guards section (first in the email)
+
+The report opens with **Garde-fous**: one verdict per daily guard, from `lib/guard-status.ts`
+(the same verdicts the dashboard "Alertes" panel shows):
+
+| Guard | Red when |
+|---|---|
+| Prix plancher (`/api/health/price-audit`, 09:30 UTC) | a below-floor correction FAILED (auto-corrected ones are green) |
+| Cohérence du catalogue (`/api/cron/catalog-consistency`, 09:15 UTC) | any English description, supplier-brand leak or duplicate colour |
+| Conformité des images (daily sync) | an image review is waiting on Mat's decision |
+| Flux publicitaires (`/api/cron/feed-integrity`, 09:45 UTC) | a `?variant=` link or photo is wrong, the served feed drifted > 5 %, a storefront page doesn't open the advertised variant, or volume dropped day-over-day |
+
+Any guard is also red when its last run failed or it has produced no result for 36 h (it
+stopped running). All guards run before 06:00 Montreal in both EDT and EST.
+
+When something is red, each red guard is listed with its reasons and the subject becomes
+`🔴 N garde-fou(s) en alerte — Rapport du matin — …`. When all are green it is one line
+(`✅ Tous les garde-fous sont au vert`). There is no separate alert email: this report is the
+single daily channel, so a clean day never produces an extra, empty message.
+
 ## Failure behaviour
 
 - **A source fails** (Meta API down, a query error): that section renders

@@ -16,6 +16,7 @@ vi.mock("@/lib/database", () => ({
   countContentFormatVideos: vi.fn(),
   countMorningReportAlerts: vi.fn(),
   countAwaitingOperator: vi.fn(),
+  loadGuardInputs: vi.fn(),
 }));
 vi.mock("@/lib/klaviyo-client", () => ({ trackEvent: vi.fn() }));
 vi.mock("@/lib/meta-ads-client", () => ({
@@ -50,6 +51,10 @@ beforeEach(() => {
   });
   vi.mocked(db.countAwaitingOperator).mockResolvedValue({
     sequentialAds: 16, importsToPush: 0, importsNeedsReview: 1, socialDrafts: 0, blogDrafts: 0,
+  });
+  // No guard has produced a result yet → all "unknown": no red line, no subject prefix.
+  vi.mocked(db.loadGuardInputs).mockResolvedValue({
+    priceAudit: null, catalogAudit: null, feedAudit: null, lastRuns: {}, imagesPending: 0, imagesOldestPendingAt: null,
   });
   vi.mocked(getActiveCampaignDaySummaries).mockResolvedValue([
     { id: "1", name: "Advantage+ Sales", dailyBudget: 14000, spend: 120, impressions: 8000, linkClicks: 400, purchases: 1, purchaseValue: 150, learning: ["LEARNING"] },

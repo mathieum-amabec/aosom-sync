@@ -376,7 +376,14 @@ GraphQL `themeDuplicate` of the new live. Verify roles: `GET /admin/api/2025-01/
 - `POST /api/import/queue` — queue products by SKU array
 - `POST /api/import/generate` — generate Claude content for one job
 - `POST /api/import/push` — push reviewed job to Shopify
-- `GET /api/cron/morning-report` — Mat's daily 06:00 America/Montreal digest (read-only), sent as the Klaviyo event `Rapport matinal` to `MORNING_REPORT_EMAIL`. Registered at 10:00 AND 11:00 UTC; only the run where Montreal reads 06:xx sends (DST-proof), at most once per day. `?dryRun=1` previews, `?force=1` resends. Setup: `docs/MORNING-REPORT.md`
+- `GET /api/cron/morning-report` — Mat's daily 06:00 America/Montreal digest (read-only), sent as the Klaviyo event `Rapport matinal` to `MORNING_REPORT_EMAIL`. Registered at 10:00 AND 11:00 UTC; only the run where Montreal reads 06:xx sends (DST-proof), at most once per day. `?dryRun=1` previews, `?force=1` resends. Setup: `docs/MORNING-REPORT.md`. Its first section is the **guard verdicts** (`lib/guard-status.ts`), and the subject is prefixed `🔴 N garde-fou(s) en alerte` when any is red — the ONE alert email; don't add a second.
+- `GET /api/cron/feed-integrity` — 09:45 UTC read-only guard on the ad feeds: every item's `?variant=` link + photo vs a fresh Shopify read, the served Google feed vs that (≤5 % cache drift tolerated), 5 real storefront loads (theme preselects the variant), day-over-day volume. Persists `settings.feed_integrity_audit`.
+
+**Guards → one verdict.** `lib/guard-status.ts` turns the persisted results of price-audit,
+catalog-consistency, the image review queue and feed-integrity into red/green/unknown (red also
+when a guard's last run failed or it has no result for 36 h). The dashboard "Alertes" panel and
+the morning report both read it. **CI** (`.github/workflows/ci.yml`: `npm ci`, tsc, eslint, vitest)
+is a required check on `main` (branch protection, admins included) — nothing merges red.
 
 ## Publication scheduling — `publication_queue` (unified)
 
