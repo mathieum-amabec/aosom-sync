@@ -5008,11 +5008,24 @@ export async function updateFacebookDraft(id: number, fields: Record<string, unk
   if (sets.length === 0) return;
   args.push(id);
   await db.execute({ sql: `UPDATE facebook_drafts SET ${sets.join(", ")} WHERE id = ?`, args });
+  // A rejected draft no longer holds its fiche's repost cooldown (/api/social "reject").
+  if (fields.status === "rejected") {
+    const sku = await draftSku(id);
+    if (sku) await recomputeProductCooldown([sku]);
+  }
+}
+
+async function draftSku(id: number): Promise<string | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT sku FROM facebook_drafts WHERE id = ?`, args: [id] });
+  return r.rows.length ? String(rowToObj(r.rows[0]).sku) : null;
 }
 
 export async function deleteFacebookDraft(id: number): Promise<void> {
   const db = await ensureSchema();
+  const sku = await draftSku(id);
   await db.execute({ sql: `DELETE FROM facebook_drafts WHERE id = ?`, args: [id] });
+  if (sku) await recomputeProductCooldown([sku]); // a deleted draft releases its cooldown too
 }
 
 // ─── Publication Queue ───────────────────────────────────────────────
@@ -6232,6 +6245,61 @@ export async function getEligibleHighlightCandidatesTrendAware(
  *  (highlights, new-product/price-drop sweep, UGC reinject) filters on last_posted_at per SKU,
  *  so marking only the chosen colour let the same fiche come back via its other colours —
  *  up to 4 posts in 30 days on 4-colour fiches. A SKU with no Shopify product marks itself. */
+// The cooldown of a fiche = its most recent LIVE product draft (anything not rejected:
+// draft, approved, queued, published). Shared by the targeted and the global recompute.
+const LIVE_POST_AT = `(SELECT MAX(fd.created_at) FROM facebook_drafts fd JOIN products p2 ON p2.sku = fd.sku
+    WHERE fd.status != 'rejected' AND fd.trigger_type != 'content_template'
+      AND (p2.sku = products.sku
+           OR (products.shopify_product_id IS NOT NULL AND p2.shopify_product_id = products.shopify_product_id)))`;
+
+/** Release the repost cooldown a rejected / expired / deleted draft was holding. The cooldown
+ *  starts when a draft is CREATED (so pending drafts block re-picks), but a draft that never
+ *  goes out must not keep its fiche locked for 30 days — the 12 rejected Halloween highlights
+ *  froze the whole Halloween pool in the middle of the season (2026-09-25). Recomputes
+ *  last_posted_at for every SKU of the given SKUs' fiches from their remaining live drafts
+ *  (NULL when none is left). */
+export async function recomputeProductCooldown(skus: string[]): Promise<void> {
+  const list = [...new Set(skus.filter(Boolean))];
+  if (list.length === 0) return;
+  const db = await ensureSchema();
+  const ph = list.map(() => "?").join(",");
+  await db.execute({
+    sql: `UPDATE products SET last_posted_at = ${LIVE_POST_AT}
+          WHERE sku IN (${ph})
+             OR shopify_product_id IN (SELECT shopify_product_id FROM products WHERE sku IN (${ph}) AND shopify_product_id IS NOT NULL)`,
+    args: [...list, ...list],
+  });
+}
+
+/** One-shot catch-up: recompute every cooldown from live drafts (run once after deploying the
+ *  release-on-reject rule, so drafts rejected before it stop blocking). Returns rows changed. */
+export async function recomputeAllProductCooldowns(): Promise<number> {
+  const db = await ensureSchema();
+  const res = await db.execute(
+    `UPDATE products SET last_posted_at = ${LIVE_POST_AT}
+     WHERE last_posted_at IS NOT NULL AND last_posted_at IS NOT ${LIVE_POST_AT}`,
+  );
+  return res.rowsAffected;
+}
+
+/** Earliest epoch-seconds at which a product of this pool leaves the cooldown, or null when
+ *  none is cooling (the pool is empty for another reason, e.g. nothing imported / in stock). */
+export async function nextHighlightAvailableAt(
+  minDaysBetween: number,
+  filter?: { predicate: string; args: (string | number)[] } | null,
+): Promise<number | null> {
+  const db = await ensureSchema();
+  const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
+  const extra = filter?.predicate ? ` AND (${filter.predicate})` : "";
+  const r = await db.execute({
+    sql: `SELECT MIN(last_posted_at) AS t FROM products
+          WHERE shopify_product_id IS NOT NULL AND qty > 0 AND last_posted_at >= ?${extra}`,
+    args: [cutoff, ...(filter?.args ?? [])],
+  });
+  const t = rowToObj(r.rows[0]).t;
+  return t == null ? null : Number(t) + minDaysBetween * 86400;
+}
+
 export async function markProductPosted(sku: string): Promise<void> {
   const db = await ensureSchema();
   await db.execute({
@@ -6723,6 +6791,8 @@ export async function rejectDraftDb(id: number, notes: string, reviewedBy = "adm
     sql: `UPDATE facebook_drafts SET status = 'rejected', approved_at = strftime('%s','now'), reviewed_by = ?, review_notes = ? WHERE id = ?`,
     args: [reviewedBy, notes, id],
   });
+  const sku = await draftSku(id);
+  if (sku) await recomputeProductCooldown([sku]); // rejected → releases the fiche's cooldown
 }
 
 /**
@@ -6742,7 +6812,13 @@ export async function expireStaleNewProductDrafts(maxAgeDays = 7): Promise<numbe
 export async function expireStaleDrafts(ttlDaysByTrigger: Record<string, number>): Promise<number> {
   const db = await ensureSchema();
   let total = 0;
+  const released: string[] = [];
   for (const [trigger, days] of Object.entries(ttlDaysByTrigger)) {
+    const doomed = await db.execute({
+      sql: `SELECT sku FROM facebook_drafts WHERE status = 'draft' AND trigger_type = ? AND created_at < unixepoch() - 86400 * ?`,
+      args: [trigger, days],
+    });
+    released.push(...doomed.rows.map((r) => String(rowToObj(r).sku)));
     const res = await db.execute({
       sql: `UPDATE facebook_drafts
             SET status = 'rejected', approved_at = strftime('%s','now'), reviewed_by = 'auto-ttl', review_notes = ?
@@ -6752,6 +6828,8 @@ export async function expireStaleDrafts(ttlDaysByTrigger: Record<string, number>
     });
     total += res.rowsAffected;
   }
+  // Expired drafts never went out: release the cooldown they were holding.
+  await recomputeProductCooldown(released);
   return total;
 }
 
