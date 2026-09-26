@@ -62,7 +62,16 @@ export interface SocialCategory {
    * stale degrades a hint, not the feature.
    */
   measuredLifestylePool: number;
+  /**
+   * Repost cooldown (days) for this category, overriding social_min_days_between_reposts
+   * (30) when SHORTER. Seasonal pools are small and their window is a few weeks: with 30 days
+   * the 33 Halloween products were all locked from Sep 19 into October (2026-09-25).
+   */
+  cooldownDays?: number;
 }
+
+/** Cooldown used for seasonal categories (Halloween, Noël). */
+export const SEASONAL_COOLDOWN_DAYS = 7;
 
 /** `all` first; the rest in the order the dropdown shows them. */
 export const SOCIAL_CATEGORIES: SocialCategory[] = [
@@ -73,6 +82,7 @@ export const SOCIAL_CATEGORIES: SocialCategory[] = [
     predicate: "product_type LIKE 'Home Furnishings > Holiday & Seasonal > Halloween%'",
     args: [],
     measuredPool: 34, measuredLifestylePool: 34,
+    cooldownDays: SEASONAL_COOLDOWN_DAYS,
   },
   {
     key: "noel",
@@ -80,6 +90,7 @@ export const SOCIAL_CATEGORIES: SocialCategory[] = [
     predicate: "product_type LIKE 'Home Furnishings > Holiday & Seasonal > Christmas%'",
     args: [],
     measuredPool: 54, measuredLifestylePool: 7,
+    cooldownDays: SEASONAL_COOLDOWN_DAYS,
   },
   {
     key: "salon",

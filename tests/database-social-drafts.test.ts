@@ -119,3 +119,86 @@ describe("markProductPosted — cooldown for the whole fiche", () => {
     expect(skus).toEqual(["900-001"]);
   });
 });
+
+describe("cooldown release — only LIVE drafts hold a fiche's cooldown", () => {
+  const postedAt = async (sku: string) =>
+    (await db.execute({ sql: `SELECT last_posted_at FROM products WHERE sku = ?`, args: [sku] })).rows[0].last_posted_at;
+  // A highlight on the black glider: draft created + whole fiche P1 marked (as job4 does).
+  const highlight = async (sku = "84A-148BK") => {
+    const id = await draft(sku, "stock_highlight");
+    await mod.markProductPosted(sku);
+    return id;
+  };
+
+  it("rejecting (/drafts page) frees every colour of the fiche", async () => {
+    const id = await highlight();
+    expect(await postedAt("84A-148BU")).not.toBeNull();
+    await mod.rejectDraftDb(id, "pas bon");
+    expect(await postedAt("84A-148BK")).toBeNull();
+    expect(await postedAt("84A-148BU")).toBeNull();
+  });
+
+  it("rejecting via /api/social (updateFacebookDraft status=rejected) frees it too", async () => {
+    const id = await highlight();
+    await mod.updateFacebookDraft(id, { status: "rejected" });
+    expect(await postedAt("84A-148LG")).toBeNull();
+  });
+
+  it("a non-reject update never touches the cooldown", async () => {
+    const id = await highlight();
+    await mod.updateFacebookDraft(id, { post_text: "edited" });
+    expect(await postedAt("84A-148BK")).not.toBeNull();
+  });
+
+  it("deleting a draft frees it", async () => {
+    const id = await highlight();
+    await mod.deleteFacebookDraft(id);
+    expect(await postedAt("84A-148BK")).toBeNull();
+  });
+
+  it("another LIVE draft on the same fiche keeps it locked, at that draft's date", async () => {
+    const rejected = await highlight("84A-148BK");
+    const live = await draft("84A-148BU", "stock_highlight");
+    await db.execute({ sql: `UPDATE facebook_drafts SET created_at = 1700000000 WHERE id = ?`, args: [live] });
+    await mod.rejectDraftDb(rejected, "x");
+    expect(Number(await postedAt("84A-148BK"))).toBe(1700000000);
+    expect(Number(await postedAt("84A-148LG"))).toBe(1700000000);
+  });
+
+  it("an editorial draft on the placeholder sku never holds a product cooldown", async () => {
+    const id = await draft("01-0016", "content_template");
+    await mod.recomputeProductCooldown(["01-0016"]);
+    expect(await postedAt("01-0016")).toBeNull();
+    await mod.rejectDraftDb(id, "x");
+    expect(await postedAt("01-0016")).toBeNull();
+  });
+
+  it("TTL expiry frees the products of the drafts it expires", async () => {
+    const id = await highlight();
+    await db.execute({ sql: `UPDATE facebook_drafts SET created_at = unixepoch() - 86400 * 20 WHERE id = ?`, args: [id] });
+    expect(await mod.expireStaleDrafts({ stock_highlight: 14 })).toBe(1);
+    expect(await postedAt("84A-148BU")).toBeNull();
+  });
+
+  it("recomputeAllProductCooldowns releases fiches whose drafts were rejected before this rule", async () => {
+    const id = await highlight();
+    // Rejected the OLD way (raw status write, no release) — the state production is in today.
+    await db.execute({ sql: `UPDATE facebook_drafts SET status = 'rejected' WHERE id = ?`, args: [id] });
+    const keep = await highlight("900-001");
+    expect(keep).toBeGreaterThan(0);
+    expect(await mod.recomputeAllProductCooldowns()).toBeGreaterThanOrEqual(3);
+    expect(await postedAt("84A-148BK")).toBeNull();
+    expect(await postedAt("84A-148LG")).toBeNull();
+    expect(await postedAt("900-001")).not.toBeNull(); // its draft is still live
+  });
+
+  it("nextHighlightAvailableAt = oldest cooling product of the pool + cooldown", async () => {
+    await db.execute(`UPDATE products SET last_posted_at = unixepoch() - 86400 * 5 WHERE sku = '84A-148BK'`);
+    await db.execute(`UPDATE products SET last_posted_at = unixepoch() - 86400 * 2 WHERE sku = '900-001'`);
+    const t = await mod.nextHighlightAvailableAt(7);
+    const now = Math.floor(Date.now() / 1000);
+    expect(t! - now).toBeGreaterThan(86400 * 2 - 5);
+    expect(t! - now).toBeLessThan(86400 * 2 + 5); // 5 days ago + 7 days = in 2 days
+    expect(await mod.nextHighlightAvailableAt(7, { predicate: "sku = ?", args: ["ORPHAN"] })).toBeNull();
+  });
+});

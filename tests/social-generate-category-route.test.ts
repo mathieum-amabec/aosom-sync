@@ -140,6 +140,29 @@ describe('POST /api/social generate — category', () => {
     expect(body.error).toContain("Réessayez");
   });
 
+  it("an empty pool because of the cooldown says so, with the next date — not a photo problem", async () => {
+    mockAll({
+      drafts: [], categoryUsed: "halloween", categorySource: "explicit", fellBackToAll: false,
+      emptyReason: "cooldown", nextAvailableAt: Date.UTC(2026, 9, 2, 16) / 1000, cooldownDays: 7,
+    });
+    const { POST } = await import("@/app/api/social/route");
+    const res = await POST(genReq({ category: "halloween" }));
+    expect(res.status).toBe(422);
+    const body = await res.json();
+    expect(body.reason).toBe("cooldown");
+    expect(body.error).toBe(
+      "Tous les produits « 🎃 Halloween » ont déjà un post de moins de 7 jours — prochain disponible le 2 octobre. Les posts rejetés libèrent leur produit.",
+    );
+    expect(body.error).not.toContain("lifestyle-verified");
+  });
+
+  it("the photo message is kept for a genuine no-photo miss", async () => {
+    mockAll({ drafts: [], categoryUsed: "rangement", categorySource: "explicit", fellBackToAll: false, emptyReason: "no_lifestyle", nextAvailableAt: null, cooldownDays: 30 });
+    const { POST } = await import("@/app/api/social/route");
+    const body = await (await POST(genReq({ category: "rangement" }))).json();
+    expect(body.error).toContain("lifestyle-verified");
+  });
+
   it("does not name 'all' as a category in the empty message", async () => {
     mockAll({ drafts: [], categoryUsed: null, categorySource: "none", fellBackToAll: false });
     const { POST } = await import("@/app/api/social/route");

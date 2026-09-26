@@ -130,6 +130,26 @@ export async function POST(request: Request) {
             // and over the 34 Halloween ones mean very different things to the operator.
             // "all" is an explicit request for the whole catalog, not a category to name.
             const picked = category && category !== "all" ? getCategory(category) : undefined;
+            // Cooldown, not photos: every product of the pool already has a recent post. Saying
+            // "aucun produit lifestyle-verified" here sent Mat looking for a photo problem that
+            // did not exist (Halloween, 2026-09-25).
+            if (run.emptyReason === "cooldown") {
+              const scope = picked ? `« ${picked.label} »` : "du catalogue";
+              const next = run.nextAvailableAt
+                ? ` — prochain disponible le ${new Date(run.nextAvailableAt * 1000).toLocaleDateString("fr-CA", { day: "numeric", month: "long", timeZone: "America/Montreal" })}`
+                : "";
+              return NextResponse.json(
+                {
+                  success: false,
+                  error: `Tous les produits ${scope} ont déjà un post de moins de ${run.cooldownDays} jours${next}. Les posts rejetés libèrent leur produit.`,
+                  reason: "cooldown",
+                  nextAvailableAt: run.nextAvailableAt,
+                  category: run.categoryUsed,
+                  fellBackToAll: run.fellBackToAll,
+                },
+                { status: 422 },
+              );
+            }
             return NextResponse.json(
               {
                 success: false,

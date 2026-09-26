@@ -20,6 +20,7 @@ import {
   getProduct,
   createFacebookDraft,
   getEligibleHighlightCandidatesTrendAware,
+  nextHighlightAvailableAt,
   getPendingSocialCandidates,
   markProductPosted,
   createNotification,
@@ -296,7 +297,7 @@ async function generateOneStockHighlight(
   settings: Awaited<ReturnType<typeof getAllSettings>>,
   minDays: number,
   category: SocialCategory | null = null,
-): Promise<GenerateDraftResult | null> {
+): Promise<GenerateDraftResult | HighlightMiss> {
   // Sample a small batch of eligible products, then post the first that is
   // lifestyle-verified. A non-verified product is skipped (never posted with a
   // white-bg image) — matching the new_product / price_drop gate. While the
@@ -311,7 +312,7 @@ async function generateOneStockHighlight(
   );
   if (candidates.length === 0) {
     log(`No eligible product for stock highlight${category ? ` in ${category.key}` : ""}`);
-    return null;
+    return { miss: "cooldown" };
   }
   let product: Record<string, unknown> | null = null;
   let lifestyleUrl: string | null = null;
@@ -328,7 +329,7 @@ async function generateOneStockHighlight(
       `No lifestyle-verified product among ${candidates.length} eligible candidates` +
         (category ? ` in ${category.key}` : ""),
     );
-    return null;
+    return { miss: "no_lifestyle" };
   }
 
   const sku = product.sku as string;
@@ -362,8 +363,23 @@ async function generateOneStockHighlight(
 }
 
 /** What a stock-highlight run actually did, so the UI can explain an empty result. */
+/** Why a highlight attempt produced nothing: every product of the pool is in its repost
+ *  cooldown, or none of the sampled ones has a verified lifestyle photo. */
+export interface HighlightMiss { miss: "cooldown" | "no_lifestyle" }
+
+/** Seasonal categories carry a shorter cooldown (social-categories.ts); never a longer one. */
+export function effectiveCooldownDays(defaultDays: number, category: SocialCategory | null): number {
+  return category?.cooldownDays ? Math.min(defaultDays, category.cooldownDays) : defaultDays;
+}
+
 export interface StockHighlightRun {
   drafts: GenerateDraftResult[];
+  /** Set when nothing was produced: why the LAST attempted pool came up empty. */
+  emptyReason: HighlightMiss["miss"] | null;
+  /** When emptyReason is "cooldown": epoch seconds the first product of that pool frees up. */
+  nextAvailableAt: number | null;
+  /** Cooldown (days) applied to the last attempted pool. */
+  cooldownDays: number;
   /** Category key actually filtered on for the LAST attempt; null = whole catalog. */
   categoryUsed: string | null;
   /** Where that category came from. */
@@ -401,29 +417,41 @@ export async function runStockHighlight(
   const results: GenerateDraftResult[] = [];
   let active = resolved.category;
   let fellBackToAll = false;
+  let lastMiss: HighlightMiss["miss"] | null = null;
+  const isMiss = (x: GenerateDraftResult | HighlightMiss): x is HighlightMiss => "miss" in x;
   for (let i = 0; i < Math.max(1, count); i++) {
-    let r = await generateOneStockHighlight(settings, minDays, active);
-    if (!r && active && resolved.canFallBack && !fellBackToAll) {
+    let r = await generateOneStockHighlight(settings, effectiveCooldownDays(minDays, active), active);
+    if (isMiss(r) && active && resolved.canFallBack && !fellBackToAll) {
       // Seasonal preference came up empty — widen once rather than return nothing.
       log(`seasonal ${active.key} yielded nothing, widening to the whole catalog`);
       fellBackToAll = true;
       active = null;
       r = await generateOneStockHighlight(settings, minDays, null);
     }
-    if (!r) break;
+    if (isMiss(r)) { lastMiss = r.miss; break; }
     results.push(r);
   }
+  const cooldownDays = effectiveCooldownDays(minDays, active);
+  const nextAvailableAt =
+    results.length === 0 && lastMiss === "cooldown"
+      ? await nextHighlightAvailableAt(cooldownDays, active?.predicate ? { predicate: active.predicate, args: active.args } : null)
+      : null;
   if (results.length === 0) {
     await createNotification(
       "warning",
       "Stock highlight ignoré",
       resolved.category
-        ? `Aucun produit lifestyle-verified dans « ${resolved.category.label} » parmi les candidats échantillonnés`
+        ? lastMiss === "cooldown"
+          ? `Tous les produits « ${resolved.category.label} » ont déjà un post de moins de ${cooldownDays} jours`
+          : `Aucun produit lifestyle-verified dans « ${resolved.category.label} » parmi les candidats échantillonnés`
         : "Aucun produit lifestyle-verified parmi les candidats échantillonnés"
     );
   }
   return {
     drafts: results,
+    emptyReason: results.length === 0 ? lastMiss : null,
+    nextAvailableAt,
+    cooldownDays,
     categoryUsed: active?.key ?? null,
     categorySource: resolved.source,
     fellBackToAll,
