@@ -4975,7 +4975,9 @@ export async function setDraftChannelState(id: number, channelKey: string, state
 
 export async function getFacebookDrafts(filters?: { status?: string; limit?: number }): Promise<FacebookDraft[]> {
   const db = await ensureSchema();
-  let sql = `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku`;
+  // Editorial posts (content_template) carry a placeholder sku (the FK needs a products row) —
+  // never join it: it labelled every editorial card "Classic Adirondack Chair" with its photo.
+  let sql = `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template'`;
   const args: InValue[] = [];
   if (filters?.status) { sql += ` WHERE fd.status = ?`; args.push(filters.status); }
   sql += ` ORDER BY fd.created_at DESC`;
@@ -4987,7 +4989,7 @@ export async function getFacebookDrafts(filters?: { status?: string; limit?: num
 export async function getFacebookDraft(id: number): Promise<FacebookDraft | null> {
   const db = await ensureSchema();
   const result = await db.execute({
-    sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku WHERE fd.id = ?`,
+    sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template' WHERE fd.id = ?`,
     args: [id],
   });
   return result.rows.length > 0 ? mapDraft(rowToObj(result.rows[0])) : null;
@@ -6226,9 +6228,18 @@ export async function getEligibleHighlightCandidatesTrendAware(
     .filter((o): o is Record<string, unknown> => o !== undefined);
 }
 
+/** Start the repost cooldown for the whole Shopify fiche, not just this SKU. Every selector
+ *  (highlights, new-product/price-drop sweep, UGC reinject) filters on last_posted_at per SKU,
+ *  so marking only the chosen colour let the same fiche come back via its other colours —
+ *  up to 4 posts in 30 days on 4-colour fiches. A SKU with no Shopify product marks itself. */
 export async function markProductPosted(sku: string): Promise<void> {
   const db = await ensureSchema();
-  await db.execute({ sql: `UPDATE products SET last_posted_at = strftime('%s','now') WHERE sku = ?`, args: [sku] });
+  await db.execute({
+    sql: `UPDATE products SET last_posted_at = strftime('%s','now')
+          WHERE sku = ?
+             OR shopify_product_id = (SELECT shopify_product_id FROM products WHERE sku = ? AND shopify_product_id IS NOT NULL)`,
+    args: [sku, sku],
+  });
 }
 
 export interface PendingSocialCandidate {
@@ -6579,7 +6590,9 @@ export async function savePhase1Checkpoint(cp: Phase1Checkpoint): Promise<void> 
   await setSetting("phase1_checkpoint", JSON.stringify(cp));
 }
 
-/** Returns the first available product SKU, used as a fallback for non-product drafts. */
+/** Placeholder sku for editorial (content_template) drafts, which have no product but must
+ *  satisfy facebook_drafts.sku NOT NULL + FK. It is meaningless: every draft read joins
+ *  products only for non-editorial drafts, and the publisher never uses its image. */
 export async function getAnyProductSku(): Promise<string | null> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT sku FROM products LIMIT 1`);
@@ -6682,7 +6695,7 @@ export async function getDraftsForReview(filters: DraftFilters = {}): Promise<Dr
     db.execute({ sql: `SELECT COUNT(*) as n FROM facebook_drafts fd ${whereClause}`, args }),
     db.execute({
       sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd
-            LEFT JOIN products p ON fd.sku = p.sku
+            LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template'
             ${whereClause}
             ORDER BY fd.created_at DESC
             LIMIT ? OFFSET ?`,
@@ -6720,15 +6733,26 @@ export async function rejectDraftDb(id: number, notes: string, reviewedBy = "adm
  * status='draft' rows, so an approved/queued draft is never affected. Returns rows expired.
  */
 export async function expireStaleNewProductDrafts(maxAgeDays = 7): Promise<number> {
+  return expireStaleDrafts({ new_product: maxAgeDays });
+}
+
+/** Auto-reject unapproved drafts older than their trigger's TTL (days). Only status='draft'
+ *  is touched — an approved/queued draft is never affected. Before 2026-09-25 only new_product
+ *  expired, so editorial and stock-highlight drafts piled up forever on /social. */
+export async function expireStaleDrafts(ttlDaysByTrigger: Record<string, number>): Promise<number> {
   const db = await ensureSchema();
-  const res = await db.execute({
-    sql: `UPDATE facebook_drafts
-          SET status = 'rejected', approved_at = strftime('%s','now'), reviewed_by = 'auto-ttl', review_notes = ?
-          WHERE status = 'draft' AND trigger_type = 'new_product'
-            AND created_at < unixepoch() - 86400 * ?`,
-    args: [`Auto-expiré: new_product >${maxAgeDays}j`, maxAgeDays],
-  });
-  return res.rowsAffected;
+  let total = 0;
+  for (const [trigger, days] of Object.entries(ttlDaysByTrigger)) {
+    const res = await db.execute({
+      sql: `UPDATE facebook_drafts
+            SET status = 'rejected', approved_at = strftime('%s','now'), reviewed_by = 'auto-ttl', review_notes = ?
+            WHERE status = 'draft' AND trigger_type = ?
+              AND created_at < unixepoch() - 86400 * ?`,
+      args: [`Auto-expiré: ${trigger} >${days}j`, trigger, days],
+    });
+    total += res.rowsAffected;
+  }
+  return total;
 }
 
 // ─── Trend scores (weekly composite — see lib/trend-score.ts) ─────────

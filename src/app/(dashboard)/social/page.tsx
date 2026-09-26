@@ -42,6 +42,7 @@ interface Draft {
   createdAt: number;
   productName?: string;
   productImage?: string;
+  unsplashImageUrl?: string | null;
   queue: QueueInfo;
 }
 
@@ -376,7 +377,14 @@ export default function SocialPage() {
 
   // "En file" is a client-side filter on real queue state (facebook_drafts.status="scheduled"
   // never gets written, so filtering server-side on it always returns empty).
-  const visibleDrafts = filter === "scheduled" ? drafts.filter((d) => d.queue.state === "scheduled") : drafts;
+  // "all" = everything still in play: rejected (incl. TTL-expired) drafts only show under their
+  // own tab — mixed into "all" they read as endless duplicates of the same post.
+  const visibleDrafts =
+    filter === "scheduled"
+      ? drafts.filter((d) => d.queue.state === "scheduled")
+      : filter === "all"
+        ? drafts.filter((d) => d.status !== "rejected")
+        : drafts;
 
   const calendarDrafts = drafts.filter(
     (d) => d.scheduledAt || d.publishedAt || d.queue.scheduledAt || d.queue.publishedAt,
@@ -478,8 +486,10 @@ export default function SocialPage() {
         ) : (
           <div className="space-y-3">
             {visibleDrafts.map((draft) => {
-              const lang = previewLang[draft.id] || "FR";
-              const previewText = lang === "FR" ? draft.postText : draft.postTextEn || draft.postText;
+              const lang = previewLang[draft.id] || (draft.postText ? "FR" : "EN");
+              const previewText = lang === "FR" ? draft.postText || draft.postTextEn || "" : draft.postTextEn || draft.postText;
+              // Editorial posts carry a placeholder sku — never show it or a product for them.
+              const isEditorial = draft.triggerType === "content_template";
               const hasEn = !!draft.postTextEn;
               const failedChannels = Object.entries(draft.channels || {}).filter(([, s]) => s.status === "error");
               // Pick browser-loadable thumbnails. draft.imagePath on Vercel is an absolute serverless filesystem
@@ -490,7 +500,9 @@ export default function SocialPage() {
                   ? draft.imageUrls
                   : draft.imageUrl
                   ? [draft.imageUrl]
-                  : draft.productImage
+                  : draft.unsplashImageUrl
+                  ? [draft.unsplashImageUrl]
+                  : draft.productImage && !isEditorial
                   ? [draft.productImage]
                   : [];
               const composedThumb =
@@ -538,7 +550,7 @@ export default function SocialPage() {
                         <span className="px-2 py-0.5 bg-gray-800 text-gray-400 rounded-md text-xs">
                           {TRIGGER_LABELS[draft.triggerType] || draft.triggerType}
                         </span>
-                        <span className="text-xs text-gray-600">{draft.sku}</span>
+                        {!isEditorial && <span className="text-xs text-gray-600">{draft.sku}</span>}
                         {isPublished(draft) && draft.publishedAt !== null && (
                           <span className="text-xs text-purple-300">
                             · Publié le {formatPublishedAt(draft.publishedAt)}
@@ -563,9 +575,11 @@ export default function SocialPage() {
                         )}
                       </div>
 
-                      {draft.productName && (
+                      {isEditorial ? (
+                        <p className="text-sm text-gray-400 italic truncate mb-1">Contenu éditorial — aucun produit associé</p>
+                      ) : draft.productName ? (
                         <p className="text-sm text-gray-300 font-medium truncate mb-1">{draft.productName}</p>
-                      )}
+                      ) : null}
 
                       {editingId === draft.id ? (
                         <div className="mt-2">

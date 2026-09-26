@@ -43,6 +43,31 @@ export function localizeBrandedImageUrls(urls: string[], language: "FR" | "EN"):
   });
 }
 
+/** Editorial post (content template) — not about any product; its sku is only a placeholder. */
+export function isContentTemplate(draft: Pick<FacebookDraft, "triggerType">): boolean {
+  return draft.triggerType === "content_template";
+}
+
+/**
+ * The photos a draft publishes with — ONE rule for both publish paths (direct "Publier" and
+ * the publication queue), which used to disagree: the queue ignored the Unsplash photo, so
+ * approved editorial posts went out text-only.
+ * Priority: imageUrls (multi-photo) → imageUrl (snapshot) → unsplashImageUrl (editorial
+ * posts' themed photo) → productImage (legacy product drafts only, and only where the caller
+ * allows the JOIN fallback). An editorial post NEVER gets productImage: its sku is a
+ * placeholder, and that fallback published an unrelated Adirondack chair on live posts.
+ */
+export function draftImageUrls(
+  draft: Pick<FacebookDraft, "triggerType" | "imageUrls" | "imageUrl" | "unsplashImageUrl" | "productImage">,
+  opts: { allowProductImage?: boolean } = {},
+): string[] {
+  if (draft.imageUrls && draft.imageUrls.length > 0) return draft.imageUrls;
+  if (draft.imageUrl) return [draft.imageUrl];
+  if (draft.unsplashImageUrl) return [draft.unsplashImageUrl];
+  if (opts.allowProductImage && !isContentTemplate(draft) && draft.productImage) return [draft.productImage];
+  return [];
+}
+
 /**
  * Normalized social-post payload — the single source of truth for "which media → which
  * Graph API call". Both the draft publisher (publishDraftToChannel) and the queue consumer
@@ -166,25 +191,12 @@ export async function publishDraftToChannel(draftId: number, channelKey: Channel
   }
   const caption = meta.language === "FR" ? draft.postText : draft.postTextEn!;
 
-  // Pick public image URLs. Both platforms require at least one (Facebook via Graph API
-  // `url` or `attached_media`, Instagram via media container).
-  // Priority: draft.imageUrls (v0.1.8.0+ multi-photo) → [draft.imageUrl] (v0.1.5.0 snapshot)
-  //   → [draft.unsplashImageUrl] (content_template drafts: themed stock photo)
-  //   → [draft.productImage] (JOIN fallback for legacy product drafts).
-  // Unsplash beats productImage: content_template drafts carry an incidental real
-  // SKU only to satisfy the FK, so that product's image is irrelevant to the post —
-  // the themed Unsplash photo is the intended image. unsplashImageUrl is only set
-  // for content_template drafts, so product drafts still fall through to productImage.
-  const imageUrls =
-    draft.imageUrls && draft.imageUrls.length > 0
-      ? draft.imageUrls
-      : draft.imageUrl
-      ? [draft.imageUrl]
-      : draft.unsplashImageUrl
-      ? [draft.unsplashImageUrl]
-      : draft.productImage
-      ? [draft.productImage]
-      : [];
+  const imageUrls = draftImageUrls(draft, { allowProductImage: true });
+  if (imageUrls.length === 0 && isContentTemplate(draft) && !draft.videoUrl && !draft.reelsVideoUrl) {
+    // Never fall back to a product photo for an editorial post: its sku is a placeholder, and
+    // publishing it put an unrelated (unsold) Adirondack chair on 3 live posts (deleted 2026-09-25).
+    return { status: "error", error: "Contenu éditorial sans photo — ajoutez une photo avant de publier" };
+  }
   // Per-channel logo: EN channels get the EN-branded hero image.
   const localizedImageUrls = localizeBrandedImageUrls(imageUrls, meta.language);
   if (meta.platform !== "facebook" && meta.platform !== "instagram") {
@@ -283,12 +295,9 @@ export function draftToQueueItems(
     if (!caption || caption.trim() === "") continue; // no caption for this brand → can't post it
     const platform: QueuePlatform = present.fb && present.ig ? "both" : present.fb ? "facebook" : "instagram";
 
-    const localizedUrls =
-      draft.imageUrls && draft.imageUrls.length > 0
-        ? localizeBrandedImageUrls(draft.imageUrls, language)
-        : draft.imageUrl
-          ? localizeBrandedImageUrls([draft.imageUrl], language)
-          : [];
+    // Same rule as the direct path (draftImageUrls) — now includes the editorial Unsplash
+    // photo, which this path used to drop. Never the product-JOIN fallback here.
+    const localizedUrls = localizeBrandedImageUrls(draftImageUrls(draft), language);
 
     const payload: SocialQueuePayload = {
       caption,
