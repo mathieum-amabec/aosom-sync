@@ -3,12 +3,12 @@ import { createClient, type Client } from "@libsql/client";
 
 // ─── Route: GET /api/cron/draft-ttl (auth + cron_runs tracking) ───────────────
 vi.mock("@/lib/config", () => ({ env: { cronSecret: "test-secret-123" } }));
-vi.mock("@/lib/database", () => ({ expireStaleNewProductDrafts: vi.fn(), recordCronRun: vi.fn() }));
+vi.mock("@/lib/database", () => ({ expireStaleDrafts: vi.fn(), recordCronRun: vi.fn() }));
 
 import { GET } from "@/app/api/cron/draft-ttl/route";
-import { expireStaleNewProductDrafts, recordCronRun } from "@/lib/database";
+import { expireStaleDrafts, recordCronRun } from "@/lib/database";
 
-const expireMock = vi.mocked(expireStaleNewProductDrafts);
+const expireMock = vi.mocked(expireStaleDrafts);
 const recMock = vi.mocked(recordCronRun);
 const auth = (s = "test-secret-123") =>
   new Request("https://app.test/api/cron/draft-ttl", { headers: { Authorization: `Bearer ${s}` } });
@@ -29,7 +29,8 @@ describe("GET /api/cron/draft-ttl", () => {
   it("expires stale drafts and records cron_runs 'expired=N' on success", async () => {
     const res = await GET(auth());
     expect(res.status).toBe(200);
-    expect(expireMock).toHaveBeenCalledWith(7); // TTL_DAYS
+    // new_product keeps its week; editorial + stock-highlight drafts now expire too (they piled up).
+    expect(expireMock).toHaveBeenCalledWith({ new_product: 7, content_template: 14, stock_highlight: 14 });
     expect(recMock).toHaveBeenCalledWith("draft-ttl", "success", "expired=85");
     expect(await res.json()).toEqual({ success: true, expired: 85 });
   });
