@@ -245,6 +245,18 @@ export const AOSOM = {
   FETCH_BACKOFF_MS: 5000,
 } as const;
 
+// ─── Costway (second supplier — catalogue only, NOT imported to Shopify yet) ──
+
+export const COSTWAY = {
+  CSV_URL: process.env.COSTWAY_FEED_URL || "https://cdn.costway.com/media/feed/CA-Costway-Shopify.csv",
+  /** The feed is ~100 MB; give the download most of the 300s function budget. */
+  FETCH_TIMEOUT_MS: 240_000,
+  /** Truncation guard: far below the live ~22.5k rows, only catches an error page / cut download. */
+  MIN_ROWS_ABSOLUTE: 5_000,
+  /** A feed under this fraction of the last good row count is a truncation, not a catalogue change. */
+  MIN_ROWS_RATIO: 0.7,
+} as const;
+
 // ─── Claude API ─────────────────────────────────────────────────────
 
 export const CLAUDE = {
