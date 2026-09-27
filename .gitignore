@@ -108,3 +108,6 @@ coverage/
 
 # pos-1 image audit scratch (checkpoint + HTML/CSV report)
 /.tmp-imgaudit/
+# One-off agent scripts / investigation dirs dropped at the repo root (.tmp-*.mjs, .tmp-invest/).
+# 45 had piled up in the main clone by 2026-09-27; they were archived outside the repo.
+/.tmp-*
