@@ -385,6 +385,23 @@ when a guard's last run failed or it has no result for 36 h). The dashboard "Ale
 the morning report both read it. **CI** (`.github/workflows/ci.yml`: `npm ci`, tsc, eslint, vitest)
 is a required check on `main` (branch protection, admins included) — nothing merges red.
 
+## Costway — second supplier (catalogue only)
+
+Costway lives in its **own table `costway_products`**, fully separate from the Aosom `products`
+table. It is fed daily by `/api/cron/costway-sync` (16:00 UTC) from `COSTWAY_FEED_URL` and browsed
+at `/costway`. Code: `src/lib/costway/` (`feed.ts` parser, `sync.ts` diff + writes, `db.ts` queries).
+
+- **The feed is not RFC CSV.** Values are never quoted and commas are stripped from them, so it is
+  parsed by splitting each line on `,`. Never parse it with `csv-parse`: its quote handling merges
+  rows at inch marks (`73"`).
+- **Nothing from Costway is on Shopify yet.** Before the first import, the Aosom jobs must be scoped
+  to Aosom products: `fetchAllShopifyProducts`, the `computeDiffs` archive diffs, removed-from-feed,
+  stale-catalog, stock-check and the `assertFeedComplete` baseline. Otherwise they will draft every
+  Costway product as "missing from the Aosom CSV".
+- **Costway pricing rules:** `Variant Price` is the retail price, and the dropship discount applies
+  to it. Never advertise below `Price Drop`. For ~3.2k in-stock variants, a 10% promo would go under
+  that floor, so exclude them from the `rabais-2e-article` collection and from BIENVENUE10 on import.
+
 ## Publication scheduling — `publication_queue` (unified)
 
 All publishing now flows through the **publication queue**. The legacy

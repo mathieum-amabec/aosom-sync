@@ -614,6 +614,39 @@ async function _initSchemaImpl(): Promise<void> {
     // One OPEN review per product: re-running the audit must update the existing row rather
     // than stack duplicates for the same product. Decided rows drop out and keep the history.
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_image_review_queue_open ON image_review_queue(shopify_product_id) WHERE status IN ('pending', 'approved')`,
+    // Costway supplier catalogue — deliberately a SEPARATE table from `products` (Aosom):
+    // the two feeds never mix, and nothing in the Aosom sync/stock/stale jobs reads it.
+    // One row per variant (Variant SKU); item_no groups a product's variants. Written only
+    // by src/lib/costway/sync.ts. content_hash covers the heavy text/image fields so the
+    // daily sync rewrites a full row only when its content changed; stock/price changes go
+    // through a light UPDATE. removed_at is set when a SKU leaves the feed (never deleted).
+    `CREATE TABLE IF NOT EXISTS costway_products (
+      sku TEXT PRIMARY KEY,
+      item_no TEXT NOT NULL,
+      handle TEXT,
+      title TEXT NOT NULL,
+      body_html TEXT,
+      category TEXT,
+      top_category TEXT,
+      product_type TEXT,
+      color TEXT,
+      product_url TEXT,
+      images TEXT NOT NULL DEFAULT '[]',
+      in_stock INTEGER NOT NULL DEFAULT 0,
+      qty INTEGER NOT NULL DEFAULT 0,
+      us_qty INTEGER,
+      ca_qty INTEGER,
+      price REAL,
+      price_drop REAL,
+      compare_at_price REAL,
+      promo_tag TEXT,
+      content_hash TEXT NOT NULL,
+      first_seen_at INTEGER DEFAULT (strftime('%s','now')),
+      updated_at INTEGER,
+      removed_at INTEGER
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_costway_products_item_no ON costway_products(item_no)`,
+    `CREATE INDEX IF NOT EXISTS idx_costway_products_top_category ON costway_products(top_category)`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];

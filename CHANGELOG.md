@@ -2,6 +2,33 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.92.26] - 2026-09-27
+
+The Costway catalogue (second supplier) now lives in aosom-sync, fully separate from Aosom, and is not sent to Shopify.
+
+### Added
+
+- **Costway catalogue, separate from Aosom** — new table `costway_products` (one row per variant;
+  `item_no` groups a product's colours), filled from the Costway dropship feed (`COSTWAY_FEED_URL`,
+  default `cdn.costway.com/media/feed/CA-Costway-Shopify.csv`, ~100 MB, ~22.5k variants and ~12k
+  products). Nothing in the Aosom sync, stock, stale or publish jobs reads it, and nothing here
+  writes to Shopify. Importing Costway products, and their pricing rules, is a later step.
+- **Tolerant feed parser** (`src/lib/costway/feed.ts`) — Costway never quotes fields and strips
+  commas from values, so raw `"` characters (inch marks, HTML attributes) break standard CSV parsers
+  ("illegal quoting", merged rows). The parser splits each line on commas and skips, and counts, any
+  line with the wrong field count. Stock comes from Costway's `1=In Stock|0=OOS` flag, as their
+  dropship instructions require. The `Price Drop` column (the advertised-price floor) and Costway's
+  tags are stored for later.
+- **Daily sync** — cron `GET /api/cron/costway-sync` at **16:00 UTC (12:00 Montreal)**, after the
+  feed's ~14:50 UTC refresh. A full row is rewritten only when its text or images changed; stock and
+  price changes use a light update. SKUs that leave the feed are flagged `removed_at`, never
+  deleted. A feed under 5,000 rows, or under 70% of the last good sync, is rejected as truncated.
+  `?dryRun=1` computes the diff without writing.
+- **"Catalogue Costway" dashboard page** (`/costway`) — browse by product, with search, category,
+  Costway tag, stock and price filters. It shows the Costway price, the compare-at price and the
+  `Price Drop` floor. A "Synchroniser maintenant" button (`POST /api/costway/sync`) runs the first
+  load.
+
 ## [0.5.92.25] - 2026-09-25
 
 Mat now gets an automatic morning report by email, every day at 06:00 Montreal time.
