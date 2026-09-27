@@ -332,12 +332,16 @@ Ad account `act_20658834`, catalog `384890002574549`, pixel `214720653324969`. B
 ## Shopify theme IDs (live vs draft)
 
 ⚠️ **Roles MOVE on every publish; names are misleading — trust `themes.json` roles, never the name.**
-Source of truth for the tooling: `scripts/_shopify-lib.mjs` (`LIVE_THEME_ID` / `DRAFT_THEME_ID` /
-`BACKUP_THEME_ID`) — re-point it after EVERY publish or the `apply-*.mjs` guard protects the wrong theme.
+The tooling no longer hardcodes theme IDs. `scripts/_shopify-lib.mjs` resolves them from
+`themes.json` at call time (`getLiveThemeId()` / `getDraftThemeId()` / `getBackupThemeId()`), so
+nothing needs re-pointing after a publish. A clone on an old branch may still export the legacy
+`LIVE_THEME_ID` constants. Check before trusting them.
 
-As of **2026-08-08** (publish of the `priceValidUntil` fix):
-- **LIVE / `main` (NEVER write):** `161562099817` "DRAFT DE TRAVAIL 2026-08-08"
-- **Rollback backup + safe write base:** `161529233513` "DRAFT GOOGLE SHOPPING 2026-08-07" (previous live)
+As of **2026-09-27** (examples only, IDs rotate; re-read `themes.json`):
+- **LIVE / `main` (NEVER write):** `162827305065` "DRAFT — Rabais 2e article 2026-09-26"
+- **Pending draft (cart + shipping-copy fixes, not yet published):** `162851749993` "DRAFT — Panier & livraison 2026-09-27"
+- **Rollback (previous live):** `162684600425` "DRAFT — Bouton Achat 2026-09-22"
+- "Trade v1" and "Trade v2" were deleted on 2026-09-26/27 to free slots.
 
 ⚠️ **Theme slots: 20/20 — Shopify's hard cap.** At the cap `themeDuplicate` fails by returning
 `newTheme: null` with **no `userErrors`**: a completely silent failure. If duplication appears
