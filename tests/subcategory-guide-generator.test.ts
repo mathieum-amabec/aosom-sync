@@ -58,7 +58,9 @@ const mockRunGuideQualityPipeline = vi.hoisted(() =>
 );
 vi.mock("@/lib/guide-quality-pipeline", () => ({
   runGuideQualityPipeline: mockRunGuideQualityPipeline,
+  describeTrendFact: () => "Rabais réel détecté : jusqu'à 10 %.",
   RETRY_QUALITY_THRESHOLD: 70,
+  READY_THRESHOLD: 80,
 }));
 
 import {
@@ -68,6 +70,7 @@ import {
   getGuideCoverageStatus,
   extractCopyFromBodyHtml,
   retryExistingGuideQuality,
+  reviseExistingGuideUntilReady,
 } from "@/lib/subcategory-guide-generator";
 import {
   getSubcategoryTrendStats, createGuidePage, getAllCollectionMappings, getGuidePages,
@@ -584,5 +587,163 @@ describe("retryExistingGuideQuality", () => {
   it("refuses a guide with no stored quality_score", async () => {
     vi.mocked(getGuidePageById).mockResolvedValue({ ...existingRow, body_html: "<p>x</p>", quality_score: null } as unknown as GuidePageRow);
     await expect(retryExistingGuideQuality(27)).rejects.toThrow(/no quality_score/);
+  });
+});
+
+describe("reviseExistingGuideUntilReady", () => {
+  const verdict = (fact: number, quality: number) => ({
+    factCheck: { score: fact, reasons: `fact ${fact}` },
+    qualityCheck: { score: quality, reasons: `quality ${quality}` },
+    overallScore: Math.min(fact, quality),
+    overallStatus: Math.min(fact, quality) >= 80 ? "ready" : "attention",
+  });
+
+  async function storedRow(extra: Record<string, unknown> = {}) {
+    mockCreate.mockResolvedValueOnce(goodCopyResponse);
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({})]);
+    const { candidates } = await selectPilotSubcategories(1);
+    await generateAndPushGuide(candidates[0]);
+    const body = vi.mocked(createBlogArticle).mock.calls[0][0].bodyHtml;
+    vi.mocked(getGuidePageById).mockResolvedValue({
+      id: 36, aosom_category: "Patio & Garden > Patio Furniture", status: "pending_review",
+      shopify_article_id: "555", shopify_blog_id: 999, title: "Guide", body_html: body,
+      scheduled_publish_at: null, ...extra,
+    } as unknown as GuidePageRow);
+    vi.mocked(updateBlogArticleBody).mockClear();
+    vi.mocked(updateGuidePageRetryResult).mockClear();
+    mockCreate.mockReset();
+    mockRunGuideQualityPipeline.mockReset();
+  }
+
+  it("revises until both passes clear 80, with the strong model and both judges' reasons, then writes", async () => {
+    await storedRow();
+    mockRunGuideQualityPipeline
+      .mockResolvedValueOnce(verdict(72, 70)) // re-score of the stored text
+      .mockResolvedValueOnce(verdict(78, 85)) // revision 1
+      .mockResolvedValueOnce(verdict(92, 88)) // revision 2 → ready, loop stops
+      .mockResolvedValueOnce(verdict(95, 86)); // confirmation re-score → lower per pass kept
+    mockCreate.mockResolvedValue(goodCopyResponse);
+
+    const r = await reviseExistingGuideUntilReady(36, { apply: true });
+
+    expect(r).toMatchObject({ before: { factCheck: 72, quality: 70 }, after: { factCheck: 92, quality: 86 }, attempts: 2, status: "ready", written: true });
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+    const firstRevision = mockCreate.mock.calls[0][0] as { model: string; messages: { content: string }[] };
+    expect(firstRevision.model).toBe("claude-test");
+    expect(firstRevision.messages[0].content).toContain("quality 70");
+    expect(firstRevision.messages[0].content).toContain("fact 72");
+    expect(updateBlogArticleBody).toHaveBeenCalledWith(999, "555", expect.stringContaining("BROUILLON"));
+    expect(updateGuidePageRetryResult).toHaveBeenCalledWith(
+      36,
+      expect.objectContaining({ factCheckScore: 92, qualityScore: 86, overallStatus: "ready", qualityScoreBeforeRetry: 70, factCheckScoreBeforeRetry: 72 }),
+    );
+  });
+
+  it("stops after maxRevisions and keeps the best version, never a worse one", async () => {
+    await storedRow();
+    mockRunGuideQualityPipeline
+      .mockResolvedValueOnce(verdict(75, 70))
+      .mockResolvedValueOnce(verdict(76, 78)) // best (min 76)
+      .mockResolvedValueOnce(verdict(90, 60))
+      .mockResolvedValueOnce(verdict(74, 90))
+      .mockResolvedValueOnce(verdict(80, 80)); // confirmation: higher than best, best kept
+    mockCreate.mockResolvedValue(goodCopyResponse);
+
+    const r = await reviseExistingGuideUntilReady(36, { apply: true });
+    expect(r.attempts).toBe(3);
+    expect(r.after).toEqual({ factCheck: 76, quality: 78 });
+    expect(r.status).toBe("attention");
+  });
+
+  it("writes nothing at all without --apply", async () => {
+    await storedRow();
+    mockRunGuideQualityPipeline.mockResolvedValueOnce(verdict(70, 70)).mockResolvedValueOnce(verdict(90, 90)).mockResolvedValueOnce(verdict(90, 90));
+    mockCreate.mockResolvedValue(goodCopyResponse);
+    expect((await reviseExistingGuideUntilReady(36, { maxRevisions: 1 })).written).toBe(false);
+    expect(updateBlogArticleBody).not.toHaveBeenCalled();
+    expect(updateGuidePageRetryResult).not.toHaveBeenCalled();
+  });
+
+  it("keeps the stored text when no revision beats it — only its stale verdict is refreshed, Shopify untouched", async () => {
+    await storedRow();
+    mockRunGuideQualityPipeline.mockResolvedValueOnce(verdict(75, 75)).mockResolvedValueOnce(verdict(60, 90)).mockResolvedValueOnce(verdict(77, 74));
+    mockCreate.mockResolvedValue(goodCopyResponse);
+    const r = await reviseExistingGuideUntilReady(36, { maxRevisions: 1, apply: true });
+    expect(r.written).toBe(false);
+    expect(updateBlogArticleBody).not.toHaveBeenCalled();
+    expect(updateGuidePageRetryResult).toHaveBeenCalledWith(36, expect.objectContaining({ factCheckScore: 75, qualityScore: 74, overallStatus: "attention" }));
+  });
+
+  it("downgrades to attention when the confirmation re-score falls below 80 (a lucky single pass is not ready)", async () => {
+    await storedRow();
+    mockRunGuideQualityPipeline.mockResolvedValueOnce(verdict(70, 70)).mockResolvedValueOnce(verdict(90, 85)).mockResolvedValueOnce(verdict(90, 76));
+    mockCreate.mockResolvedValue(goodCopyResponse);
+    const r = await reviseExistingGuideUntilReady(36, { maxRevisions: 1, apply: true });
+    expect(r).toMatchObject({ after: { factCheck: 90, quality: 76 }, status: "attention", written: true });
+  });
+
+  it("never touches a guide Mat already approved (scheduled for publication)", async () => {
+    await storedRow({ scheduled_publish_at: "2026-10-02 14:00:00" });
+    await expect(reviseExistingGuideUntilReady(36, { apply: true })).rejects.toThrow(/already approved/);
+    expect(mockRunGuideQualityPipeline).not.toHaveBeenCalled();
+  });
+});
+
+describe("reviseExistingGuideUntilReady — failed confirmation", () => {
+  it("goes back to revising when a lucky ≥80 sample isn't confirmed", async () => {
+    mockCreate.mockResolvedValueOnce(goodCopyResponse);
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({})]);
+    const { candidates } = await selectPilotSubcategories(1);
+    await generateAndPushGuide(candidates[0]);
+    vi.mocked(getGuidePageById).mockResolvedValue({
+      id: 1, aosom_category: "Patio & Garden > Patio Furniture", status: "pending_review",
+      shopify_article_id: "555", shopify_blog_id: 999, title: "Guide", scheduled_publish_at: null,
+      body_html: vi.mocked(createBlogArticle).mock.calls[0][0].bodyHtml,
+    } as unknown as GuidePageRow);
+    mockCreate.mockReset().mockResolvedValue(goodCopyResponse);
+    const v = (f: number, q: number) => ({ factCheck: { score: f, reasons: "f" }, qualityCheck: { score: q, reasons: "q" }, overallScore: Math.min(f, q), overallStatus: "x" });
+    mockRunGuideQualityPipeline.mockReset()
+      .mockResolvedValueOnce(v(82, 92)) // stored text, first sample passes
+      .mockResolvedValueOnce(v(78, 92)) // confirmation fails → revise
+      .mockResolvedValueOnce(v(90, 90)) // revision 1
+      .mockResolvedValueOnce(v(88, 91)); // its confirmation holds
+
+    const r = await reviseExistingGuideUntilReady(1, { apply: true });
+    expect(r).toMatchObject({ attempts: 1, after: { factCheck: 88, quality: 90 }, status: "ready", written: true });
+  });
+});
+
+describe("reviseExistingGuideUntilReady — stale product selection", () => {
+  it("starts from a fresh draft of the CURRENT products when the stored text compares products no longer selected", async () => {
+    mockCreate.mockResolvedValueOnce(goodCopyResponse);
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({})]);
+    const { candidates } = await selectPilotSubcategories(1);
+    await generateAndPushGuide(candidates[0]);
+    vi.mocked(getGuidePageById).mockResolvedValue({
+      id: 5, aosom_category: "Patio & Garden > Patio Furniture", status: "pending_review",
+      shopify_article_id: "555", shopify_blog_id: 999, title: "Guide", scheduled_publish_at: null,
+      body_html: vi.mocked(createBlogArticle).mock.calls[0][0].bodyHtml,
+    } as unknown as GuidePageRow);
+    // The selection has changed since generation: chair-b is gone, chair-c is in.
+    vi.mocked(getSubcategoryTrendStats).mockResolvedValue([stats({
+      topProducts: [
+        { sku: "A", name: "Chair A", price: 199.99, image1: "", shopify_product_id: "1", shopify_handle: "chair-a", units_moved: 3 },
+        { sku: "C", name: "Chair C", price: 149.99, image1: "", shopify_product_id: "3", shopify_handle: "chair-c", units_moved: 2 },
+      ],
+    })]);
+    mockCreate.mockReset().mockResolvedValue(goodCopyResponse);
+    const v = (f: number, q: number) => ({ factCheck: { score: f, reasons: "f" }, qualityCheck: { score: q, reasons: "q" }, overallScore: Math.min(f, q), overallStatus: "x" });
+    mockRunGuideQualityPipeline.mockReset()
+      .mockResolvedValueOnce(v(85, 90)) // stale text can still score well — must NOT be kept
+      .mockResolvedValueOnce(v(84, 88)) // fresh draft
+      .mockResolvedValueOnce(v(90, 86)); // its confirmation
+
+    const r = await reviseExistingGuideUntilReady(5, { apply: true });
+    const firstCall = mockCreate.mock.calls[0][0] as { model: string; system: string; messages: { content: string }[] };
+    expect(firstCall.model).toBe("claude-test");
+    expect(firstCall.messages[0].content).not.toContain("PREMIER JET");
+    expect(firstCall.messages[0].content).toContain("Chair C");
+    expect(r).toMatchObject({ attempts: 1, status: "ready", written: true });
+    expect(updateBlogArticleBody).toHaveBeenCalledWith(999, "555", expect.stringContaining("/products/chair-c"));
   });
 });
