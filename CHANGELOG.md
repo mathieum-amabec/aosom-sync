@@ -28,8 +28,14 @@ product, the two images, the music and the transition, with optional AI retouchi
     (approved in /content-formats like the batch drafts) or downloads the MP4 for Meta ads.
   - **Design** — reuses the validated before_after v3 look: Ken Burns, grade, navy brand bar with
     the logo.
-- **AI retouch** (`POST /api/studio/retouch`) through Vercel AI Gateway. The default model is
-  `google/gemini-3.1-flash-image`, configurable with `STUDIO_AI_IMAGE_MODEL`.
+- **AI retouch** (`POST /api/studio/retouch`) through Vercel AI Gateway, with a **Qualité /
+  Économique** selector per retouch:
+  - **Qualité:** `google/gemini-3.1-flash-image`, ~0.07 $ per image, #1 on the blind Image Editing
+    Arena (Sept. 2026). Override with `STUDIO_AI_IMAGE_MODEL`.
+  - **Économique:** `google/gemini-3.1-flash-lite-image`, ~0.03 $ per image. Override with
+    `STUDIO_AI_IMAGE_MODEL_ECONOMY`.
+  - DeepSeek was evaluated and rejected. Its hosted API is text-only, and its image model (Janus-Pro)
+    is self-hosted open weights without real photo editing.
   - **Presets:** nettoyer (remove logos and text), mettre en scène (place the product in a room),
     pièce vide (remove the product to create the "before" of style C), améliorer, ambiance
     saisonnière, and a free French instruction.

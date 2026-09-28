@@ -6,6 +6,7 @@ import {
   buildRetouchPrompt,
   retouchImage,
   RetouchError,
+  isRetouchTier,
   PRESETS,
   STAGE_SCENES,
   SEASONS,
@@ -21,7 +22,7 @@ export const maxDuration = 180;
 
 /**
  * POST /api/studio/retouch — AI-edit one product photo for the Studio.
- * Body: { sku, imageUrl, preset, scene?, season?, instruction?, productTitle? }
+ * Body: { sku, imageUrl, preset, scene?, season?, instruction?, productTitle?, tier?: "quality" | "economy" }
  * The result is saved to Blob (studio/ai/…) and to studio_images (source 'ai'), so it appears
  * in the product's Studio gallery tagged "IA". It never touches the Shopify product.
  */
@@ -60,7 +61,8 @@ export async function POST(request: Request) {
   try {
     const src = await fetch(imageUrl, { signal: AbortSignal.timeout(30_000) });
     if (!src.ok) throw new RetouchError(`Image source inaccessible (${src.status})`);
-    const edited = await retouchImage(Buffer.from(await src.arrayBuffer()), prompt);
+    const tier = isRetouchTier(b.tier) ? b.tier : "quality";
+    const edited = await retouchImage(Buffer.from(await src.arrayBuffer()), prompt, tier);
     const blob = await put(`studio/ai/${sku}/${preset}-${Date.now()}.jpg`, edited, {
       access: "public",
       contentType: "image/jpeg",
@@ -68,7 +70,14 @@ export async function POST(request: Request) {
     });
     const label = PRESETS.find((p) => p.id === preset)!.label;
     const detail = [b.scene, b.season, typeof b.instruction === "string" ? b.instruction.slice(0, 200) : null].filter(Boolean).join(" · ");
-    const image = await addStudioImage({ sku, url: blob.url, source: "ai", parentUrl: imageUrl, prompt: detail ? `${label} — ${detail}` : label });
+    const tierLabel = STUDIO_AI.IMAGE_MODELS[tier].label;
+    const image = await addStudioImage({
+      sku,
+      url: blob.url,
+      source: "ai",
+      parentUrl: imageUrl,
+      prompt: `${label}${detail ? ` — ${detail}` : ""} (${tierLabel})`,
+    });
     return NextResponse.json({ success: true, data: image });
   } catch (err) {
     const status = err instanceof RetouchError ? err.status : 500;

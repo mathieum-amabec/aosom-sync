@@ -27,7 +27,7 @@ export async function GET() {
         tracks,
         ai: {
           configured: isAiRetouchConfigured(),
-          model: STUDIO_AI.IMAGE_MODEL,
+          tiers: Object.entries(STUDIO_AI.IMAGE_MODELS).map(([id, m]) => ({ id, label: m.label, price: m.price, model: m.id })),
           dailyCap: STUDIO_AI.DAILY_CAP,
           usedToday: aiUsedToday,
           presets: PRESETS,

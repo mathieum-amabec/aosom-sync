@@ -94,7 +94,10 @@ export class RetouchError extends Error {
  * `source` must be a JPEG/PNG buffer; it is sent inline (data URI) so the model never has
  * to fetch a URL itself.
  */
-export async function retouchImage(source: Buffer, prompt: string): Promise<Buffer> {
+export type RetouchTier = keyof typeof STUDIO_AI.IMAGE_MODELS;
+export const isRetouchTier = (v: unknown): v is RetouchTier => typeof v === "string" && v in STUDIO_AI.IMAGE_MODELS;
+
+export async function retouchImage(source: Buffer, prompt: string, tier: RetouchTier = "quality"): Promise<Buffer> {
   const apiKey = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
   if (!apiKey) throw new RetouchError("Retouche IA non configurée : ajoute AI_GATEWAY_API_KEY dans Vercel.", 503);
   const sharp = (await import("sharp")).default;
@@ -105,7 +108,7 @@ export async function retouchImage(source: Buffer, prompt: string): Promise<Buff
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: STUDIO_AI.IMAGE_MODEL,
+      model: STUDIO_AI.IMAGE_MODELS[tier].id,
       modalities: ["image", "text"],
       stream: false,
       messages: [

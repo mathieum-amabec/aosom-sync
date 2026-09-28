@@ -50,6 +50,15 @@ describe("retouchImage", () => {
     expect(init.headers.Authorization).toBe("Bearer test-key");
   });
 
+  it("sends the quality model by default and the economy model when asked", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response("no", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await retouchImage(jpeg, "p").catch(() => {});
+    await retouchImage(jpeg, "p", "economy").catch(() => {});
+    const models = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body).model);
+    expect(models).toEqual(["google/gemini-3.1-flash-image", "google/gemini-3.1-flash-lite-image"]);
+  });
+
   it("explains an exhausted credit balance", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("no credits", { status: 402 })));
     await expect(retouchImage(jpeg, "p")).rejects.toThrow(/crédit AI Gateway épuisé/);

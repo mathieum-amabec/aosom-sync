@@ -43,7 +43,7 @@ interface Options {
   tracks: { url: string; name: string; size: number }[];
   ai: {
     configured: boolean;
-    model: string;
+    tiers: { id: string; label: string; price: string; model: string }[];
     dailyCap: number;
     usedToday: number;
     presets: { id: string; label: string; description: string }[];
@@ -96,6 +96,7 @@ export default function StudioPage() {
   const [aiScene, setAiScene] = useState("salon");
   const [aiSeason, setAiSeason] = useState("halloween");
   const [aiInstruction, setAiInstruction] = useState("");
+  const [aiTier, setAiTier] = useState("quality");
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
@@ -237,6 +238,7 @@ export default function StudioPage() {
           season: aiSeason,
           instruction: aiInstruction,
           productTitle: product.title,
+          tier: aiTier,
         }),
       });
       setExtra((x) => [img, ...x]);
@@ -555,6 +557,20 @@ export default function StudioPage() {
                             className={INPUT}
                           />
                         )}
+                        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Modèle IA">
+                          {options.ai.tiers.map((t) => (
+                            <button
+                              key={t.id}
+                              role="radio"
+                              aria-checked={aiTier === t.id}
+                              onClick={() => setAiTier(t.id)}
+                              title={t.model}
+                              className={`px-3 py-1.5 rounded-lg text-sm border ${aiTier === t.id ? "border-purple-500 bg-purple-600/20 text-purple-200" : "border-gray-700 text-gray-400"}`}
+                            >
+                              {t.label} <span className="text-[11px] text-gray-500">{t.price}</span>
+                            </button>
+                          ))}
+                        </div>
                         <p className="text-[11px] text-gray-500">
                           Le produit doit rester identique — seul le décor change. Compare toujours avec l&apos;original avant d&apos;utiliser l&apos;image.
                           Retouches restantes aujourd&apos;hui : {aiLeft}/{options.ai.dailyCap}.

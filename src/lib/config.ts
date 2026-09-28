@@ -249,8 +249,24 @@ export const AOSOM = {
 
 export const STUDIO_AI = {
   GATEWAY_URL: "https://ai-gateway.vercel.sh/v1",
-  /** Image-editing model (Chat Completions + image output). Any ID from ai-gateway.vercel.sh/v1/models. */
-  IMAGE_MODEL: process.env.STUDIO_AI_IMAGE_MODEL?.trim() || "google/gemini-3.1-flash-image",
+  /**
+   * Image-editing models Mat picks between on the Studio page. Both must accept Chat
+   * Completions with image output (Gateway type "language" + tag image-generation) — an
+   * "image"-type model (Seedream, FLUX) needs the images endpoint instead, a different code path.
+   * Prices: Gateway list, 2026-09-27. "quality" was #1 on the blind Image Editing Arena then.
+   */
+  IMAGE_MODELS: {
+    quality: {
+      id: process.env.STUDIO_AI_IMAGE_MODEL?.trim() || "google/gemini-3.1-flash-image",
+      label: "Qualité",
+      price: "~0,07 $ / image",
+    },
+    economy: {
+      id: process.env.STUDIO_AI_IMAGE_MODEL_ECONOMY?.trim() || "google/gemini-3.1-flash-lite-image",
+      label: "Économique",
+      price: "~0,03 $ / image",
+    },
+  },
   /** Max AI retouches per UTC day (~0.05-0.10 $ each). */
   DAILY_CAP: Number(process.env.STUDIO_AI_DAILY_CAP) || 40,
   TIMEOUT_MS: 120_000,
