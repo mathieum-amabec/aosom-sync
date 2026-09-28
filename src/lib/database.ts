@@ -3403,94 +3403,146 @@ export async function getSubcategoryTrendStats(): Promise<SubcategoryTrendStats[
     `SELECT aosom_category, shopify_collection_id, shopify_collection_title FROM collection_mappings WHERE collection_role = 'sub' ORDER BY aosom_category`,
   );
 
-  const windowStart = "cast(strftime('%s','now','-14 days') as integer)";
   const stats: SubcategoryTrendStats[] = [];
-
   for (const mappingRow of subMappings.rows) {
     const m = rowToObj(mappingRow);
     const aosomCategory = m.aosom_category as string;
-    const prefix = `${aosomCategory}%`;
-
     const productsResult = await db.execute({
       sql: `SELECT sku, name, price, image1, shopify_product_id, shopify_handle, qty
         FROM products WHERE product_type LIKE ? AND shopify_product_id IS NOT NULL AND qty > 0`,
-      args: [prefix],
+      args: [`${aosomCategory}%`],
     });
-    if (productsResult.rows.length === 0) continue; // no in-stock products → not a candidate at all
-
-    const skus = productsResult.rows.map((r) => rowToObj(r).sku as string);
-    const skuPlaceholders = skus.map(() => "?").join(",");
-
-    const velocityResult = await db.execute({
-      sql: `SELECT sku, SUM(old_qty - new_qty) as units_moved FROM price_history
-        WHERE sku IN (${skuPlaceholders}) AND change_type = 'stock_change'
-          AND detected_at > ${windowStart} AND old_qty > new_qty GROUP BY sku`,
-      args: skus,
-    });
-    const priceDropResult = await db.execute({
-      sql: `SELECT sku, MAX((old_price - new_price) / old_price) as drop_pct FROM price_history
-        WHERE sku IN (${skuPlaceholders}) AND change_type = 'price_drop' AND detected_at > ${windowStart}
-          AND old_price > 0 AND new_price < old_price GROUP BY sku`,
-      args: skus,
-    });
-
-    const velocityBySku = new Map<string, number>();
-    for (const row of velocityResult.rows) {
-      const o = rowToObj(row);
-      velocityBySku.set(o.sku as string, Number(o.units_moved) || 0);
-    }
-    const dropBySku = new Map<string, number>();
-    for (const row of priceDropResult.rows) {
-      const o = rowToObj(row);
-      dropBySku.set(o.sku as string, Number(o.drop_pct) || 0);
-    }
-
-    let totalVelocity = 0;
-    let maxDrop = 0;
-    let minPrice = Infinity;
-    let maxPrice = -Infinity;
-    const products: SubcategoryTrendStats["topProducts"] = [];
-
-    for (const row of productsResult.rows) {
-      const o = rowToObj(row);
-      const sku = o.sku as string;
-      const price = Number(o.price) || 0;
-      if (price > 0) {
-        minPrice = Math.min(minPrice, price);
-        maxPrice = Math.max(maxPrice, price);
-      }
-      const velocity = velocityBySku.get(sku) || 0;
-      totalVelocity += velocity;
-      maxDrop = Math.max(maxDrop, dropBySku.get(sku) || 0);
-      products.push({
-        sku, name: (o.name as string) || "", price,
-        image1: (o.image1 as string) || "",
-        shopify_product_id: (o.shopify_product_id as string) || "",
-        shopify_handle: (o.shopify_handle as string) || "",
-        units_moved: velocity,
-      });
-    }
-
-    products.sort((a, b) => b.units_moved - a.units_moved || b.price - a.price);
-
-    stats.push({
-      aosomCategory,
-      shopifyCollectionId: m.shopify_collection_id as string,
-      shopifyCollectionTitle: m.shopify_collection_title as string,
-      inStockCount: productsResult.rows.length,
-      minPrice: minPrice === Infinity ? 0 : minPrice,
-      maxPrice: maxPrice === -Infinity ? 0 : maxPrice,
-      velocityScore: totalVelocity,
-      priceDropScore: maxDrop,
-      // Normalized against this subcategory's own scale isn't meaningful across only 28 rows
-      // with wildly different volumes, so rank by a simple weighted sum instead — good enough
-      // to pick a top-5 pilot, revisit if this graduates past the pilot stage.
-      blendedScore: totalVelocity * 0.6 + maxDrop * 100 * 0.4,
-      topProducts: products.slice(0, 3),
-    });
+    const s = await buildTrendStats(
+      { aosomCategory, shopifyCollectionId: m.shopify_collection_id as string, shopifyCollectionTitle: m.shopify_collection_title as string },
+      productsResult.rows.map((r) => rowToObj(r)),
+    );
+    if (s) stats.push(s);
   }
 
   return stats.sort((a, b) => b.blendedScore - a.blendedScore);
+}
+
+/**
+ * Same trend stats, for an explicit set of Shopify product ids — the REAL membership of a
+ * Shopify collection (see guide-collection-topics.ts). Only in-stock products that exist in
+ * the catalog count. Returns null when none are in stock; inStockIds = the in-stock subset.
+ */
+export async function getTrendStatsForShopifyProductIds(
+  meta: { aosomCategory: string; shopifyCollectionId: string; shopifyCollectionTitle: string },
+  shopifyProductIds: string[],
+): Promise<{ stats: SubcategoryTrendStats; inStockIds: string[] } | null> {
+  const db = await ensureSchema();
+  const rows: Record<string, unknown>[] = [];
+  // Chunked: SQLite caps bound parameters per statement.
+  for (let i = 0; i < shopifyProductIds.length; i += 400) {
+    const chunk = shopifyProductIds.slice(i, i + 400);
+    const res = await db.execute({
+      sql: `SELECT sku, name, price, image1, shopify_product_id, shopify_handle, qty
+        FROM products WHERE shopify_product_id IN (${chunk.map(() => "?").join(",")}) AND qty > 0`,
+      args: chunk,
+    });
+    rows.push(...res.rows.map((r) => rowToObj(r)));
+  }
+  const stats = await buildTrendStats(meta, rows);
+  return stats ? { stats, inStockIds: rows.map((o) => String(o.shopify_product_id)) } : null;
+}
+
+/** Shopify product ids of the in-stock catalog products whose product_type starts with a
+ * category — used to measure overlap between a candidate collection and an existing guide. */
+export async function getInStockShopifyIdsForCategory(aosomCategory: string): Promise<string[]> {
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT shopify_product_id FROM products WHERE product_type LIKE ? AND shopify_product_id IS NOT NULL AND qty > 0`,
+    args: [`${aosomCategory}%`],
+  });
+  return res.rows.map((r) => String(rowToObj(r).shopify_product_id));
+}
+
+/** Top-level product_type segments ("Home Furnishings", "Patio & Garden"…) — a collection
+ * built on one of these is a whole store department, too broad for a buying guide. */
+export async function getProductDepartments(): Promise<Set<string>> {
+  const db = await ensureSchema();
+  const res = await db.execute(`SELECT DISTINCT product_type FROM products WHERE product_type IS NOT NULL AND product_type != ''`);
+  return new Set(res.rows.map((r) => String(rowToObj(r).product_type).split(" > ")[0].trim()));
+}
+
+async function buildTrendStats(
+  meta: { aosomCategory: string; shopifyCollectionId: string; shopifyCollectionTitle: string },
+  productRows: Record<string, unknown>[],
+): Promise<SubcategoryTrendStats | null> {
+  if (productRows.length === 0) return null; // no in-stock products → not a candidate at all
+  const db = await ensureSchema();
+  const windowStart = "cast(strftime('%s','now','-14 days') as integer)";
+
+  const skus = productRows.map((o) => o.sku as string);
+  const skuPlaceholders = skus.map(() => "?").join(",");
+
+  const velocityResult = await db.execute({
+    sql: `SELECT sku, SUM(old_qty - new_qty) as units_moved FROM price_history
+      WHERE sku IN (${skuPlaceholders}) AND change_type = 'stock_change'
+        AND detected_at > ${windowStart} AND old_qty > new_qty GROUP BY sku`,
+    args: skus,
+  });
+  const priceDropResult = await db.execute({
+    sql: `SELECT sku, MAX((old_price - new_price) / old_price) as drop_pct FROM price_history
+      WHERE sku IN (${skuPlaceholders}) AND change_type = 'price_drop' AND detected_at > ${windowStart}
+        AND old_price > 0 AND new_price < old_price GROUP BY sku`,
+    args: skus,
+  });
+
+  const velocityBySku = new Map<string, number>();
+  for (const row of velocityResult.rows) {
+    const o = rowToObj(row);
+    velocityBySku.set(o.sku as string, Number(o.units_moved) || 0);
+  }
+  const dropBySku = new Map<string, number>();
+  for (const row of priceDropResult.rows) {
+    const o = rowToObj(row);
+    dropBySku.set(o.sku as string, Number(o.drop_pct) || 0);
+  }
+
+  let totalVelocity = 0;
+  let maxDrop = 0;
+  let minPrice = Infinity;
+  let maxPrice = -Infinity;
+  const products: SubcategoryTrendStats["topProducts"] = [];
+
+  for (const o of productRows) {
+    const sku = o.sku as string;
+    const price = Number(o.price) || 0;
+    if (price > 0) {
+      minPrice = Math.min(minPrice, price);
+      maxPrice = Math.max(maxPrice, price);
+    }
+    const velocity = velocityBySku.get(sku) || 0;
+    totalVelocity += velocity;
+    maxDrop = Math.max(maxDrop, dropBySku.get(sku) || 0);
+    products.push({
+      sku, name: (o.name as string) || "", price,
+      image1: (o.image1 as string) || "",
+      shopify_product_id: (o.shopify_product_id as string) || "",
+      shopify_handle: (o.shopify_handle as string) || "",
+      units_moved: velocity,
+    });
+  }
+
+  products.sort((a, b) => b.units_moved - a.units_moved || b.price - a.price);
+
+  return {
+    aosomCategory: meta.aosomCategory,
+    shopifyCollectionId: meta.shopifyCollectionId,
+    shopifyCollectionTitle: meta.shopifyCollectionTitle,
+    inStockCount: productRows.length,
+    minPrice: minPrice === Infinity ? 0 : minPrice,
+    maxPrice: maxPrice === -Infinity ? 0 : maxPrice,
+    velocityScore: totalVelocity,
+    priceDropScore: maxDrop,
+    // Normalized against this subcategory's own scale isn't meaningful across only 28 rows
+    // with wildly different volumes, so rank by a simple weighted sum instead — good enough
+    // to pick a top-5 pilot, revisit if this graduates past the pilot stage.
+    blendedScore: totalVelocity * 0.6 + maxDrop * 100 * 0.4,
+    topProducts: products.slice(0, 3),
+  };
 }
 
 export interface GuidePageInput {

@@ -46,6 +46,12 @@ import {
   type QualityPipelineResult,
 } from "./guide-quality-pipeline";
 import { DRAFT_BANNER_HTML } from "./guide-draft-banner";
+import {
+  isCollectionTopicKey,
+  getCollectionTopicStats,
+  selectCollectionCandidates,
+  COLLECTION_TOPIC_PREFIX,
+} from "./guide-collection-topics";
 
 const STORE_ORIGIN = "https://ameublodirect.ca";
 
@@ -424,6 +430,7 @@ function buildJsonLd(
 }
 
 export interface GeneratedGuideResult {
+  guidePageId: number;
   aosomCategory: string;
   title: string;
   shopifyArticleId: string;
@@ -503,7 +510,9 @@ export async function generateAndPushGuide(candidate: GuideCandidate): Promise<G
   // (aosom_category is collection_mappings' own primary key), never a guess.
   const baseTitle = `Comment choisir : ${stats.shopifyCollectionTitle} — guide d'achat`;
   const baseHandle = `guide-achat-${slugify(stats.shopifyCollectionTitle)}`;
-  const leafSegment = stats.aosomCategory.split(" > ").pop() || "";
+  const leafSegment = isCollectionTopicKey(stats.aosomCategory)
+    ? stats.aosomCategory.slice(COLLECTION_TOPIC_PREFIX.length)
+    : stats.aosomCategory.split(" > ").pop() || "";
   const collectionUrl = `${STORE_ORIGIN}/collections/${collectionHandle}`;
 
   const pillarLinkHtml = PILLAR_GUIDE_URL
@@ -563,7 +572,7 @@ export async function generateAndPushGuide(candidate: GuideCandidate): Promise<G
   }
   const title = created.handle === baseHandle ? baseTitle : `Comment choisir : ${stats.shopifyCollectionTitle} (${leafSegment}) — guide d'achat`;
 
-  await createGuidePage({
+  const guidePageId = await createGuidePage({
     aosomCategory: stats.aosomCategory,
     shopifyCollectionId: stats.shopifyCollectionId,
     shopifyCollectionTitle: stats.shopifyCollectionTitle,
@@ -586,6 +595,7 @@ export async function generateAndPushGuide(candidate: GuideCandidate): Promise<G
   });
 
   return {
+    guidePageId,
     aosomCategory: stats.aosomCategory,
     title,
     shopifyArticleId: created.articleId,
@@ -593,6 +603,17 @@ export async function generateAndPushGuide(candidate: GuideCandidate): Promise<G
     adminUrl: created.adminUrl,
     pillarGuideMissing: !PILLAR_GUIDE_URL,
   };
+}
+
+/** Current stats + collection handle of a guide topic, whichever source it came from. */
+export async function resolveGuideTopic(
+  aosomCategory: string,
+): Promise<{ stats: SubcategoryTrendStats; collectionHandle: string } | null> {
+  if (isCollectionTopicKey(aosomCategory)) return getCollectionTopicStats(aosomCategory);
+  const stats = (await getSubcategoryTrendStats()).find((s) => s.aosomCategory === aosomCategory);
+  if (!stats) return null;
+  const collectionHandle = await getShopifyCollectionHandle(stats.shopifyCollectionId);
+  return collectionHandle ? { stats, collectionHandle } : null;
 }
 
 export interface PilotBatchResult {
@@ -640,6 +661,46 @@ export async function generatePilotGuides(
   }
 
   return { generated, skipped, failed };
+}
+
+export interface CollectionBatchResult {
+  generated: (GeneratedGuideResult & { status: "ready" | "attention" | "unrevised" })[];
+  failed: { aosomCategory: string; error: string }[];
+  /** Eligible collection topics still without a guide BEFORE this batch. */
+  remainingEligible: number;
+}
+
+/**
+ * Collection-topic batch (see guide-collection-topics.ts): picks up to `count` new topics,
+ * generates each as a Shopify DRAFT, then immediately runs the multi-pass revision
+ * (reviseExistingGuideUntilReady) so it reaches /guides already rescued. Never publishes.
+ */
+export async function generateCollectionGuides(
+  count: number,
+  coveredKeys: Set<string>,
+  now: Date = new Date(),
+): Promise<CollectionBatchResult> {
+  const { candidates, remainingEligible } = await selectCollectionCandidates(count, coveredKeys, now);
+  const generated: CollectionBatchResult["generated"] = [];
+  const failed: CollectionBatchResult["failed"] = [];
+
+  for (const c of candidates) {
+    try {
+      const titles = await Promise.all(c.stats.topProducts.map((p) => getShopifyProductTitle(p.shopify_product_id, p.name)));
+      const result = await generateAndPushGuide({ stats: c.stats, titles, collectionHandle: c.collectionHandle });
+      let status: "ready" | "attention" | "unrevised" = "unrevised";
+      try {
+        status = (await reviseExistingGuideUntilReady(result.guidePageId, { apply: true })).status;
+      } catch (err) {
+        console.error(`[guide] revision of new collection guide ${result.guidePageId} failed:`, err instanceof Error ? err.message : err);
+      }
+      generated.push({ ...result, status });
+    } catch (err) {
+      failed.push({ aosomCategory: c.stats.aosomCategory, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return { generated, failed, remainingEligible };
 }
 
 // ─── Retroactive retry (guides created before RETRY_QUALITY_THRESHOLD existed) ────────────
@@ -835,12 +896,10 @@ export async function reviseExistingGuideUntilReady(
   if (!row.body_html) throw new Error(`[guide] guide ${guideId} has no stored body_html`);
   if (!row.shopify_blog_id || !row.shopify_article_id) throw new Error(`[guide] guide ${guideId} has no linked Shopify article`);
 
-  const allStats = await getSubcategoryTrendStats();
-  const stats = allStats.find((s) => s.aosomCategory === row.aosom_category);
-  if (!stats) throw new Error(`[guide] no current trend stats for ${row.aosom_category} (subcategory may have gone empty)`);
+  const topic = await resolveGuideTopic(row.aosom_category);
+  if (!topic) throw new Error(`[guide] no current trend stats / collection for ${row.aosom_category} (topic may have gone empty)`);
+  const { stats, collectionHandle } = topic;
   const titles = await Promise.all(stats.topProducts.map((p) => getShopifyProductTitle(p.shopify_product_id, p.name)));
-  const collectionHandle = await getShopifyCollectionHandle(stats.shopifyCollectionId);
-  if (!collectionHandle) throw new Error(`[guide] collection handle unresolved for ${row.aosom_category}`);
 
   const original = extractCopyFromBodyHtml(row.body_html);
   const originalVerdict = await runGuideQualityPipeline(stats, titles, original);
