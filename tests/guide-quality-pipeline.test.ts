@@ -86,6 +86,16 @@ describe("qualityCheckGuideCopy", () => {
     expect(verdict).toEqual({ score: 82, reasons: "bon" });
   });
 
+  it("shows the judge the page's auto-inserted table/headings in order, so it never docks a 'missing' comparison table", async () => {
+    mockCreate.mockResolvedValueOnce(resp('{"score": 85, "reasons": "ok"}'));
+    await qualityCheckGuideCopy(copy);
+    const prompt = (mockCreate.mock.calls[0][0] as { messages: { content: string }[] }).messages[0].content;
+    const order = ["Intro.", "encadré « En bref »", "Comparons.", "tableau comparatif", "Choisissez.", "Q : Q1?", "Conclusion."];
+    const positions = order.map((s) => prompt.indexOf(s));
+    expect(positions.every((p) => p >= 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+
   it("clamps an out-of-range score", async () => {
     mockCreate.mockResolvedValueOnce(resp('{"score": -10, "reasons": "trop sévère"}'));
     const verdict = await qualityCheckGuideCopy(copy);

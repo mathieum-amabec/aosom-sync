@@ -13,6 +13,7 @@ vi.mock("@/lib/instagram-client", () => ({
 vi.mock("@/lib/shopify-blog", () => ({
   createBlogArticle: vi.fn().mockResolvedValue({ articleId: "blog-1", blogId: 7, handle: "h", adminUrl: "u" }),
   publishBlogArticle: vi.fn().mockResolvedValue(undefined),
+  getBlogArticleBody: vi.fn().mockResolvedValue("<p>Intro</p>"),
 }));
 vi.mock("@/lib/shopify-client", () => ({
   setCollectionMetafield: vi.fn().mockResolvedValue(undefined),
@@ -42,7 +43,8 @@ import {
   publishVideo,
 } from "@/lib/facebook-client";
 import { publishPhoto, publishReel } from "@/lib/instagram-client";
-import { createBlogArticle, publishBlogArticle } from "@/lib/shopify-blog";
+import { createBlogArticle, publishBlogArticle, getBlogArticleBody } from "@/lib/shopify-blog";
+import { DRAFT_BANNER_HTML } from "@/lib/guide-draft-banner";
 import { setCollectionMetafield } from "@/lib/shopify-client";
 import {
   getNextPending,
@@ -203,12 +205,37 @@ describe("publishQueueItem — shopify_guide (pSEO guide deferred publish)", () 
       contentType: "guide",
       payload: guidePayload(),
     }));
-    expect(publishBlogArticle).toHaveBeenCalledWith(7, "art-1");
+    expect(publishBlogArticle).toHaveBeenCalledWith(7, "art-1", "<p>Intro</p>");
     expect(markGuidePagePublished).toHaveBeenCalledWith(42);
     expect(setCollectionMetafield).toHaveBeenCalledWith("999", "custom", "guide_url", "single_line_text_field", "/blogs/guides/guide-a");
     expect(r.postId).toBe("art-1");
     // Unlike shopify_blog, this must NEVER create a new article.
     expect(createBlogArticle).not.toHaveBeenCalled();
+  });
+
+  it("strips the BROUILLON draft banner from the live body in the same PUT as the publish", async () => {
+    vi.mocked(getBlogArticleBody).mockResolvedValueOnce(`${DRAFT_BANNER_HTML}\n\n<p>Intro</p>\n<table></table>`);
+    await publishQueueItem(item({ platform: "shopify_guide", contentType: "guide", payload: guidePayload() }));
+    const body = vi.mocked(publishBlogArticle).mock.calls.at(-1)?.[2] ?? "";
+    expect(body).not.toContain("BROUILLON");
+    expect(body).toContain("<p>Intro</p>");
+    expect(body).toContain("<table></table>");
+  });
+
+  it("strips a banner Shopify re-serialized (attribute/br formatting changed)", async () => {
+    const reserialized = `<div style="border: 2px solid #D4A853; padding: 16px;"><strong>⚠️ BROUILLON — Ne pas publier sans relecture</strong><br />Texte.</div><p>Intro</p>`;
+    vi.mocked(getBlogArticleBody).mockResolvedValueOnce(reserialized);
+    await publishQueueItem(item({ platform: "shopify_guide", contentType: "guide", payload: guidePayload() }));
+    expect(vi.mocked(publishBlogArticle).mock.calls.at(-1)?.[2]).toBe("<p>Intro</p>");
+  });
+
+  it("fails closed (never publishes) when a banner survives stripping", async () => {
+    vi.mocked(publishBlogArticle).mockClear();
+    vi.mocked(getBlogArticleBody).mockResolvedValueOnce(`<p>⚠️ BROUILLON — Ne pas publier sans relecture</p><p>Intro</p>`);
+    await expect(
+      publishQueueItem(item({ platform: "shopify_guide", contentType: "guide", payload: guidePayload() })),
+    ).rejects.toThrow(/banner/i);
+    expect(publishBlogArticle).not.toHaveBeenCalled();
   });
 
   it("still succeeds and still marks the guide published when the metafield write fails (best-effort, non-blocking)", async () => {

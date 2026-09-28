@@ -121,17 +121,34 @@ export async function createBlogArticle(
  * `published_at` to now. Idempotent on Shopify's side — re-publishing an already-live
  * article is a no-op. Used by the blog auto-publisher once an article clears the quality
  * + season + weekly-cap gates.
+ *
+ * `bodyHtml`, when given, is written in the SAME PUT as the publish flip, so there is no
+ * window where the article is live with the old body (used by the guide publisher to drop the
+ * draft banner).
  */
-export async function publishBlogArticle(blogId: number, articleId: string): Promise<void> {
+export async function publishBlogArticle(blogId: number, articleId: string, bodyHtml?: string): Promise<void> {
+  const article: Record<string, unknown> = { id: Number(articleId), published: true };
+  if (bodyHtml !== undefined) article.body_html = bodyHtml;
   const response = await shopifyFetch(`/blogs/${blogId}/articles/${articleId}.json`, {
     method: "PUT",
-    body: JSON.stringify({ article: { id: Number(articleId), published: true } }),
+    body: JSON.stringify({ article }),
   });
 
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Shopify blog article publish failed: ${response.status} — ${text}`);
   }
+}
+
+/** Current body_html of an article as stored in Shopify (includes any edit made in admin). */
+export async function getBlogArticleBody(blogId: number, articleId: string): Promise<string> {
+  const response = await shopifyFetch(`/blogs/${blogId}/articles/${articleId}.json?fields=id,body_html`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify blog article fetch failed: ${response.status} — ${text}`);
+  }
+  const data = (await response.json()) as { article?: { body_html?: string | null } };
+  return data.article?.body_html ?? "";
 }
 
 /**

@@ -25,7 +25,8 @@
  */
 import { type FacebookBrand } from "./facebook-client";
 import { publishSocialPayload, type SocialPayload } from "./social-publisher";
-import { createBlogArticle, publishBlogArticle } from "./shopify-blog";
+import { createBlogArticle, publishBlogArticle, getBlogArticleBody } from "./shopify-blog";
+import { stripGuideDraftBanner, hasGuideDraftBanner } from "./guide-draft-banner";
 import { setCollectionMetafield } from "./shopify-client";
 import { getAnthropicClient } from "./content-generator";
 import { budgetedCreate } from "@/lib/llm-budget";
@@ -323,7 +324,18 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
       return { postId: (await createBlogArticle(parseBlogPayload(raw))).articleId };
     case "shopify_guide": {
       const payload = parseGuidePayload(raw);
-      await publishBlogArticle(payload.blogId, payload.articleId);
+      // The draft carries a "BROUILLON — Ne pas publier" review banner. Read the CURRENT
+      // Shopify body (it may have been edited in admin since generation), drop the banner, and
+      // write it in the same PUT as the publish flip. Fail closed: if a banner is still there
+      // after stripping (Shopify re-serialized it into a shape we don't recognize), throw
+      // (→ markFailed) rather than put "Ne pas publier" on the live storefront.
+      const currentBody = await getBlogArticleBody(payload.blogId, payload.articleId);
+      const publicBody = stripGuideDraftBanner(currentBody);
+      if (!publicBody.trim()) throw new Error(`guide ${payload.guidePageId}: Shopify article body is empty`);
+      if (hasGuideDraftBanner(publicBody)) {
+        throw new Error(`guide ${payload.guidePageId}: draft banner could not be removed — not publishing`);
+      }
+      await publishBlogArticle(payload.blogId, payload.articleId, publicBody);
       await markGuidePagePublished(payload.guidePageId);
       // Best-effort: the "Guide d'achat" collection link (Task C) is a discoverability
       // nicety, not the primary effect. The article is already live at this point — a
