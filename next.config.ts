@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
     "/api/cron/publisher": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
     "/api/cron/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
     "/api/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
+    // Studio Avant/Après render reads the brand font + logo from disk (ffmpeg drawtext / overlay input).
+    "/api/studio/render": ["./src/fonts/DMSans-Bold.ttf", "./Logo/officiel-transparent.png"],
   },
   async headers() {
     return [
@@ -31,6 +33,9 @@ const nextConfig: NextConfig = {
             // sequential-ad renders are served from the public Vercel Blob store, and the
             // client also plays freshly rendered clips from blob: URLs. This directive is
             // what makes those previews play at all.
+            //
+            // connect-src https://vercel.com: the /studio page uploads Mat's photos and music
+            // straight to Vercel Blob (@vercel/blob/client PUTs to vercel.com/api/blob).
             value:
               "default-src 'self'; " +
               "script-src 'self' 'unsafe-inline'; " +
@@ -38,7 +43,7 @@ const nextConfig: NextConfig = {
               "img-src 'self' https: data:; " +
               "media-src 'self' blob: https://jcskqp8orcub9i0l.public.blob.vercel-storage.com; " +
               "font-src 'self'; " +
-              "connect-src 'self' https://api.anthropic.com https://graph.facebook.com; " +
+              "connect-src 'self' https://api.anthropic.com https://graph.facebook.com https://vercel.com; " +
               "frame-ancestors 'none';",
           },
         ],

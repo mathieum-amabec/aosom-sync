@@ -2,6 +2,45 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.93.0] - 2026-09-27
+
+Mat now builds before/after videos himself on a new "Studio Avant/Après" page: he picks the
+product, the two images, the music and the transition, with optional AI retouching of photos.
+
+### Added
+
+- **Studio Avant/Après** (`/studio`, admin only) — a semi-automatic before/after video builder:
+  1. **Top 50** Aosom best sellers (units that left Aosom's stock over 7/14/30 days, one row per
+     product, colour variants summed), with category, search and "already has a video" filters.
+     This is Aosom's market, not our own Shopify sales (`read_orders` isn't granted).
+  2. **Image picker** — the full Shopify gallery (`cdn.shopify.com`) plus Mat's own uploads (style
+     D: a real "before" photo) and AI retouches. Mat clicks an AVANT image and an APRÈS image; each
+     is framed whole over a blurred copy or full-bleed cropped.
+  3. **Music** from a Blob library (`studio/music/`, seeded from `src/audio` by
+     `scripts/studio-seed-music.mjs`; Mat can upload tracks), with preview and a start offset.
+  4. **8 transitions**, led by the **curseur comparatif** (a wipe with a moving divider line),
+     plus fondu, balayage, glissement, rideau, cercle, zoom and pixelisation.
+  5. **Formats 9:16 and 4:5**, 6/10/15 s, FR or EN, optional title, price, gold CTA pill and
+     AVANT/APRÈS labels.
+  - **Rendering** — rendered on Vercel (`POST /api/studio/render`, ffmpeg-static, run in `after()`,
+    status polled at `/api/studio/render/:id`). Output goes to the public Blob store.
+  - **After rendering** — Mat either sends the video to the queue as a `before_after` **draft**
+    (approved in /content-formats like the batch drafts) or downloads the MP4 for Meta ads.
+  - **Design** — reuses the validated before_after v3 look: Ken Burns, grade, navy brand bar with
+    the logo.
+- **AI retouch** (`POST /api/studio/retouch`) through Vercel AI Gateway. The default model is
+  `google/gemini-3.1-flash-image`, configurable with `STUDIO_AI_IMAGE_MODEL`.
+  - **Presets:** nettoyer (remove logos and text), mettre en scène (place the product in a room),
+    pièce vide (remove the product to create the "before" of style C), améliorer, ambiance
+    saisonnière, and a free French instruction.
+  - **Guardrail:** every prompt requires the product itself to stay identical.
+  - **Where results go:** they land in the product's Studio gallery tagged "IA" and never touch the
+    Shopify product.
+  - **Daily cap:** `STUDIO_AI_DAILY_CAP` (default 40).
+  - **Requires** `AI_GATEWAY_API_KEY` in Vercel. Without it the page says the feature is off.
+- Tables `studio_images` and `studio_renders`. CSP `connect-src` now allows `https://vercel.com`,
+  so the page can upload photos and music straight to Blob.
+
 ## [0.5.92.26] - 2026-09-27
 
 The Costway catalogue (second supplier) now lives in aosom-sync, fully separate from Aosom, and is not sent to Shopify.

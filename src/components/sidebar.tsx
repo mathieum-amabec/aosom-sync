@@ -78,6 +78,15 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    href: "/studio",
+    label: "Studio Avant/Après",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v18M3.75 5.25h16.5a1.5 1.5 0 011.5 1.5v10.5a1.5 1.5 0 01-1.5 1.5H3.75a1.5 1.5 0 01-1.5-1.5V6.75a1.5 1.5 0 011.5-1.5zM7 9.5l-2 2.5 2 2.5M17 9.5l2 2.5-2 2.5" />
+      </svg>
+    ),
+  },
+  {
     href: "/content-formats",
     label: "Nouveaux formats",
     icon: (

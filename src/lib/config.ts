@@ -245,6 +245,17 @@ export const AOSOM = {
   FETCH_BACKOFF_MS: 5000,
 } as const;
 
+// ─── Studio Avant/Après (/studio) ───────────────────────────────────
+
+export const STUDIO_AI = {
+  GATEWAY_URL: "https://ai-gateway.vercel.sh/v1",
+  /** Image-editing model (Chat Completions + image output). Any ID from ai-gateway.vercel.sh/v1/models. */
+  IMAGE_MODEL: process.env.STUDIO_AI_IMAGE_MODEL?.trim() || "google/gemini-3.1-flash-image",
+  /** Max AI retouches per UTC day (~0.05-0.10 $ each). */
+  DAILY_CAP: Number(process.env.STUDIO_AI_DAILY_CAP) || 40,
+  TIMEOUT_MS: 120_000,
+} as const;
+
 // ─── Costway (second supplier — catalogue only, NOT imported to Shopify yet) ──
 
 export const COSTWAY = {

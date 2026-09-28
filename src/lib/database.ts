@@ -647,6 +647,33 @@ async function _initSchemaImpl(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_item_no ON costway_products(item_no)`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_top_category ON costway_products(top_category)`,
+    // Studio Avant/Après (src/lib/studio/). studio_images = extra images Mat added to a
+    // product's gallery for videos only (his own uploads, AI retouches) — never pushed to the
+    // Shopify product. studio_renders = one row per render job, polled by the /studio page;
+    // queue_id links a render Mat sent to publication_queue as a before_after draft.
+    `CREATE TABLE IF NOT EXISTS studio_images (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sku TEXT NOT NULL,
+      url TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('upload', 'ai')),
+      parent_url TEXT,
+      prompt TEXT,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_studio_images_sku ON studio_images(sku)`,
+    `CREATE TABLE IF NOT EXISTS studio_renders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sku TEXT NOT NULL,
+      product_title TEXT,
+      params TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('rendering', 'ready', 'error')),
+      video_url TEXT,
+      error TEXT,
+      queue_id INTEGER,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+      updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_studio_renders_sku ON studio_renders(sku)`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
