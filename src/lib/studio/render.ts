@@ -249,8 +249,11 @@ export async function renderStudioVideo(req: StudioRenderRequest, workDir: strin
     try {
       await execFileAsync(ffmpeg, args, { maxBuffer: 16 * 1024 * 1024, timeout: 240_000 });
     } catch (err) {
-      const stderr = (err as { stderr?: string }).stderr?.trim();
-      throw new Error(`Rendu ffmpeg échoué${stderr ? ` : ${stderr.slice(-400)}` : ""}`);
+      // A spawn failure (binary missing → ENOENT) has an EMPTY stderr: the cause is only in
+      // err.code/err.message. Surface it, or the page shows a useless "Rendu ffmpeg échoué".
+      const e = err as { stderr?: string; code?: string | number; message?: string };
+      const detail = e.stderr?.trim() || [e.code, e.message].filter(Boolean).join(" — ");
+      throw new Error(`Rendu ffmpeg échoué (${ffmpeg})${detail ? ` : ${String(detail).slice(-400)}` : ""}`);
     }
   } finally {
     await rm(workDir, { recursive: true, force: true }).catch(() => {});
