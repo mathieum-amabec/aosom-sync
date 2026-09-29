@@ -54,7 +54,63 @@ Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s
 
 ## Key Patterns
 
-- **French primary**: Shopify title/body in FR, English stored in metafields (`custom.title_en`, `custom.body_html_en`). Store default locale is `fr` (primary), `en` published secondary.
+- **French primary**: Shopify title/body in FR, English stored in metafields (`custom.title_en`, `custom.body_html_en`). Store default locale is `fr` (primary), `en` published secondary. The metafields alone are NOT enough: the EN page `<title>` and anything reading Shopify translations serve FR unless the English copy is also registered as a Shopify EN translation. `createShopifyProduct` registers it at creation (`registerProductEnTranslations`, guards in `en-translations.ts`: no supplier name, no `@AGENTS.md
+
+# Aosom Sync
+
+Catalogue management tool for a Shopify dropshipping store (27u5y2-kp.myshopify.com) sourcing from Aosom. Quebec market, French primary.
+
+## Permissions
+
+Claude Code has full autonomous permission to read, edit, create, and delete any file without confirmation prompts.
+
+## Comportement Claude Code
+
+**AUTORISATION PERMANENTE :** Claude a l'autorisation complète pour toute session de lire, ouvrir,
+inspecter, créer des dossiers/fichiers temporaires, lancer des commandes read-only (grep, find, cat,
+ls, tsc --noEmit, git status/log/diff, GET API calls, health checks) sans jamais demander
+confirmation. Ne jamais interrompre avec un choix 1/2 pour une action read-only. Seules les écritures
+irréversibles (Shopify live, Turso prod, publications sociales, merges PR) nécessitent confirmation
+explicite.
+
+## Architecture
+
+Next.js App Router on Vercel. Engine in `src/lib/`, UI in `src/app/(dashboard)/`, API in `src/app/api/`.
+
+```
+CSV Feed (Aosom) → csv-fetcher → variant-merger → diff-engine → Vercel Blob (Phase1Checkpoint)
+                                       ↓                                  ↓
+                                  catalog_snapshots (SQLite)      refreshProducts ×N (2500 rows/chunk)
+                                       ↓                                  ↓
+                                  Catalog Browser UI              rebuildCounts + notify
+                                       ↓
+                               Import Pipeline → Claude API → Shopify (as active/live)
+```
+
+Phase 1 runs as a single Fluid Compute function (`runSyncFull`, maxDuration=800s, Vercel Pro):
+- `runSyncFull()` at 06:00 UTC — init + sequential refresh chunks + finalize in one call
+- `runSyncFull()` retry at 06:30 UTC — idempotent retry (skips if already finalized)
+- `runSyncRefreshChunk()` / `runSyncFinalize()` — manual fallback routes only (not in cron schedule)
+
+## Data Model (SQLite/better-sqlite3)
+
+- `sync_runs` — audit log of daily sync executions
+- `sync_logs` — per-field change records (price, images, status)
+- `import_jobs` — import queue with status machine (pending→generating→reviewing→importing→done)
+- `catalog_snapshots` — latest CSV data for fast catalog browsing
+- `image_classifications` — Vision verdict cache, keyed by PHOTO (Aosom hash stem), so the
+  Aosom CDN original and its Shopify copy share one verdict. Makes a catalogue re-audit free.
+- `image_review_queue` — pos-1 swap proposals awaiting human approval (one OPEN row per
+  product, enforced by a partial-unique index). Nothing drains it automatically.
+- `sync_cursor` — chunked sync progress for large stores
+- `assistant_rate_limit` — one row per accepted `/api/assistant` message (`ip`, `ts`), the
+  per-IP hourly sliding window. In Turso rather than in-memory because the in-memory windows
+  are per Fluid Compute instance and reset on cold start. Pruned on every check.
+- `settings` — key-value store; `checkpoint_data` holds both `ShopifyPushCheckpoint` (Phase 2) and `Phase1Checkpoint` (Phase 1 chunked pipeline state)
+
+## Key Patterns
+
+- **French primary**: Shopify title/body in FR,  price, no French). Backfill: `scripts/register-en-product-translations.mts` (dry-run default, `--apply`; run 2026-09-28 on 1445 products).
 - **`body_html` has ONE writer**: `createShopifyProduct`, at import (`content.descriptionFr`). ⚠️ The daily sync must **never** push the feed's `description` — that field is raw ENGLISH supplier copy, while `body_html` is curated FRENCH. Comparing them is comparing two languages, so the check is true on every run and the push overwrites French with English. That is exactly what happened from b497260 (2026-04-05) to v0.5.92.3: ~5-7 products/day silently flipped to English, reaching 679 of 1382 active products (49%) with 518 naming "Aosom" in customer copy (552 counting every forbidden supplier name). Re-measure with `scripts/audit-description-language.mjs`. `diff-engine.ts` no longer emits a `description` change and `applyToShopify` no longer sets `productUpdates.bodyHtml`; both are locked by regression tests. The feed stays authoritative for price, stock, images and tags only.
 - **`last_seen_at` = "seen in the feed", never "changed"**: `markSkusSeen()` stamps **every** SKU in the Aosom feed during Phase 1 init, changed or not. Before v0.5.92.5 the only writer was `refreshProducts`, which runs on changed rows only — so on a day with zero changes nothing was stamped, `getAllProductsAsAosom()` (`WHERE last_seen_at >= today`) returned 0, and `computeDiffs` read that as "Aosom withdrew all 1,382 active products" and queued 1,349 archives. Phase 2 unpublished 30 live products on 2026-09-12 before it was caught. Anything that writes or reads this column must keep presence and change as separate facts.
 - **Two sync circuit breakers** (`sync-guards.ts`): `assertFeedPlausible` makes Phase 1 throw *before any write* on an empty feed or one under 50% of the last good run, so the previous checkpoint survives and the run is recorded `failed` rather than silently succeeding. `guardMassArchive` makes Phase 2 drop archive diffs above `max(20, 5% of active)` in one computed pass (measured on the whole diff set, not the 10-diff chunk — per-chunk the incident looked normal) while letting price/stock/image/tag diffs through untouched. Since v0.5.92.6 **both paths** carry them: the cron (`runSyncInit` / `runShopifyPush`) *and* the manual dashboard trigger (`runSync`, via `POST /api/sync/trigger`), which also gained the same 10-diff per-run cap — it previously pushed every diff in one pass. `runSync` does not touch `shopify_push_checkpoint` (that belongs to the cron), so its deferred diffs drain at the next 08:00 UTC Phase 2. ⚠️ Any new Shopify write path must be routed through these two guards; presence of the import alone is not protection, the call has to sit *before* the first write.

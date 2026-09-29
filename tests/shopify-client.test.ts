@@ -136,6 +136,8 @@ describe("createShopifyProduct — metafield + handle safety", () => {
 
 // LAYER 1 for the import path: 842-375V00CG was created with a price nothing ever read
 // back and confirmed. These tests exercise the fix — verify-on-create.
+const restCalls = () => mockFetch.mock.calls.filter((c) => typeof c[0] === "string" && !c[0].endsWith("/graphql.json"));
+
 describe("createShopifyProduct — LAYER 1 write-then-verify on create", () => {
   beforeEach(() => {
     mockFetch.mockReset();
@@ -152,8 +154,9 @@ describe("createShopifyProduct — LAYER 1 write-then-verify on create", () => {
 
     await createShopifyProduct(mergedFixture(), contentFixture({}));
 
-    // Only the single create POST — no follow-up write or read-back needed.
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    // Only the single create POST — no follow-up price write or read-back needed (the
+    // GraphQL calls are the best-effort EN-translation registration, not price traffic).
+    expect(restCalls()).toHaveLength(1);
   });
 
   it("corrects a variant whose create response price does not match the floor, and confirms it", async () => {
@@ -187,7 +190,7 @@ describe("createShopifyProduct — LAYER 1 write-then-verify on create", () => {
     await createShopifyProduct(mergedFixture(), contentFixture({}));
 
     // create POST + corrective PUT + verifying GET.
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(restCalls()).toHaveLength(3);
     const putCall = mockFetch.mock.calls.find((c) => c[1]?.method === "PUT");
     expect(putCall?.[0]).toContain("/variants/9001.json");
     expect(JSON.parse(putCall![1].body).variant.price).toBe("99");
@@ -395,5 +398,58 @@ describe("updateShopifyVariantPrice", () => {
     const body = JSON.parse(call[1].body);
     expect(body.variant.price).toBe("29.99");
     expect(body.variant).not.toHaveProperty("compare_at_price");
+  });
+});
+
+describe("createShopifyProduct — EN translations registered at creation", () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  function route(registerErrors: { message: string }[] = []) {
+    const registered: { key: string; value: string; locale: string }[][] = [];
+    mockFetch.mockImplementation(async (url?: string, opts?: RequestInit) => {
+      if (url === undefined) return { ok: true, json: async () => ({}) };
+      if (url.endsWith("/products.json")) {
+        return { ok: true, json: async () => ({ product: { id: 555, handle: "chaise", variants: [{ id: 9001, sku: "SKU1", price: "99.00" }] } }) };
+      }
+      if (url.endsWith("/graphql.json")) {
+        const body = JSON.parse(String(opts?.body));
+        if (body.query.includes("translatableResource")) {
+          return { ok: true, json: async () => ({ data: { translatableResource: { translatableContent: [
+            { key: "title", digest: "d-title" }, { key: "body_html", digest: "d-body" },
+            { key: "meta_title", digest: "d-mt" }, { key: "meta_description", digest: "d-md" },
+          ] } } }) };
+        }
+        registered.push(body.variables.t);
+        return { ok: true, json: async () => ({ data: { translationsRegister: { userErrors: registerErrors } } }) };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    return registered;
+  }
+
+  it("registers the English copy as Shopify EN translations with the FR digests", async () => {
+    const registered = route();
+    await createShopifyProduct(mergedFixture(), contentFixture({ titleEn: "Office Chair", descriptionEn: "<p>A comfortable chair for your desk and the office.</p>", metaTitleEn: "Office Chair | Furnish Direct", metaDescriptionEn: "Comfortable office chair with free shipping in Canada." }));
+    expect(registered).toHaveLength(1);
+    expect(registered[0]).toEqual(expect.arrayContaining([
+      { key: "title", value: "Office Chair", locale: "en", translatableContentDigest: "d-title" },
+      expect.objectContaining({ key: "body_html", translatableContentDigest: "d-body" }),
+      expect.objectContaining({ key: "meta_title" }),
+      expect.objectContaining({ key: "meta_description" }),
+    ]));
+  });
+
+  it("never registers an unsafe EN value (price, supplier name)", async () => {
+    const registered = route();
+    await createShopifyProduct(mergedFixture(), contentFixture({ titleEn: "Office Chair", descriptionEn: "<p>Great Aosom chair for the office and the home.</p>", metaTitleEn: "Office Chair", metaDescriptionEn: "Office chair, now only $89.99 with free shipping." }));
+    const keys = registered[0].map((t) => t.key);
+    expect(keys).toContain("title");
+    expect(keys).not.toContain("body_html");
+    expect(keys).not.toContain("meta_description");
+  });
+
+  it("still returns the created product when translation registration fails (best-effort)", async () => {
+    route([{ message: "boom" }]);
+    await expect(createShopifyProduct(mergedFixture(), contentFixture({ titleEn: "Office Chair" }))).resolves.toEqual({ id: "555", handle: "chaise" });
   });
 });
