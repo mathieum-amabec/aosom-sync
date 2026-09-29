@@ -6,6 +6,7 @@ import { env, SHOPIFY, SYNC } from "./config";
 import { targetSellPrice } from "./pricing";
 import { writePriceVerified, PRICE_EPSILON } from "./price-protection";
 import { recordPriceFloorIncident } from "./database";
+import { EN_FIELD_MAP, rejectEnValue, type EnTranslatableKey } from "./en-translations";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -532,10 +533,72 @@ export async function createShopifyProduct(
     }
   }
 
+  // Best-effort: the product exists and is live either way; a failure here only means the
+  // EN page falls back to FR for Shopify-level fields until the backfill script runs.
+  try {
+    await registerProductEnTranslations(String(data.product.id), {
+      title: content.titleEn,
+      body_html: content.descriptionEn,
+      meta_title: content.metaTitleEn,
+      meta_description: content.metaDescriptionEn,
+    });
+  } catch (err) {
+    console.error(`[IMPORT] EN translations not registered for product ${data.product.id}:`, err instanceof Error ? err.message : err);
+  }
+
   return {
     id: String(data.product.id),
     handle: typeof data.product.handle === "string" ? data.product.handle : "",
   };
+}
+
+/**
+ * Register the English copy as real Shopify EN translations (see en-translations.ts for why
+ * the custom.* metafields alone aren't enough). Only fills keys Shopify can translate (it
+ * needs the FR source's digest) and skips unsafe values (supplier name, price, French text).
+ * Returns the keys registered.
+ */
+export async function registerProductEnTranslations(
+  productId: string,
+  en: Partial<Record<EnTranslatableKey, string | undefined>>,
+): Promise<EnTranslatableKey[]> {
+  const resourceId = `gid://shopify/Product/${productId}`;
+  const digestRes = await shopifyFetch("/graphql.json", {
+    method: "POST",
+    body: JSON.stringify({
+      query: `query($id: ID!) { translatableResource(resourceId: $id) { translatableContent { key digest } } }`,
+      variables: { id: resourceId },
+    }),
+  });
+  if (!digestRes.ok) throw new Error(`translatableResource failed: ${digestRes.status}`);
+  const digestJson = (await digestRes.json()) as {
+    data?: { translatableResource?: { translatableContent?: { key: string; digest: string }[] } };
+  };
+  const digests = new Map((digestJson.data?.translatableResource?.translatableContent ?? []).map((c) => [c.key, c.digest]));
+
+  const translations: { key: string; value: string; locale: string; translatableContentDigest: string }[] = [];
+  for (const key of Object.keys(EN_FIELD_MAP) as EnTranslatableKey[]) {
+    const value = en[key]?.trim() ?? "";
+    const digest = digests.get(key);
+    if (!digest || rejectEnValue(value)) continue;
+    translations.push({ key, value, locale: "en", translatableContentDigest: digest });
+  }
+  if (translations.length === 0) return [];
+
+  const res = await shopifyFetch("/graphql.json", {
+    method: "POST",
+    body: JSON.stringify({
+      query: `mutation($id: ID!, $t: [TranslationInput!]!) {
+        translationsRegister(resourceId: $id, translations: $t) { userErrors { field message } }
+      }`,
+      variables: { id: resourceId, t: translations },
+    }),
+  });
+  if (!res.ok) throw new Error(`translationsRegister failed: ${res.status}`);
+  const json = (await res.json()) as { data?: { translationsRegister?: { userErrors: { message: string }[] } } };
+  const errors = json.data?.translationsRegister?.userErrors ?? [];
+  if (errors.length) throw new Error(`translationsRegister userErrors: ${errors.map((e) => e.message).join("; ")}`);
+  return translations.map((t) => t.key as EnTranslatableKey);
 }
 
 export async function updateShopifyProduct(
