@@ -17,10 +17,13 @@ const nextConfig: NextConfig = {
     "/api/cron/publisher": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
     "/api/cron/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
     "/api/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
-    // Studio Avant/Après render reads the brand font + logo from disk (ffmpeg drawtext / overlay
-    // input) and spawns the ffmpeg-static binary (see serverExternalPackages above).
+    // Studio Avant/Après render: its text layers are SVG rendered through fontconfig
+    // (registerBrandFonts → src/fonts), the logo is an ffmpeg overlay input, and it spawns the
+    // ffmpeg-static binary (see serverExternalPackages above).
     "/api/studio/render": [
+      "./src/fonts/DMSans-Regular.ttf",
       "./src/fonts/DMSans-Bold.ttf",
+      "./src/fonts/NotoEmoji.ttf",
       "./Logo/officiel-transparent.png",
       "./node_modules/ffmpeg-static/ffmpeg",
     ],

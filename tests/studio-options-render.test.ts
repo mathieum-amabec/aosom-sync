@@ -76,8 +76,6 @@ describe("buildStudioGraph", () => {
     w: 1080,
     h: 1920,
     durationSec: 6,
-    textFiles: { domain: "/tmp/d.txt", before: "/tmp/b.txt", after: "/tmp/a.txt", title: "/tmp/t.txt", price: "/tmp/p.txt", cta: "/tmp/c.txt" },
-    font: "src/fonts/DMSans-Bold.ttf",
     hasMusic: true,
   };
   it("uses the chosen xfade transition at the computed offset", () => {
@@ -92,12 +90,22 @@ describe("buildStudioGraph", () => {
     expect(g).toContain("xfade=transition=wiperight");
     expect(g).toMatch(/\[line\]overlay=x='if\(between\(t\\,/);
   });
-  it("omits optional texts and uses silent audio without music", () => {
-    const g = buildStudioGraph({ ...base, transition: getTransition("dissolve")!, hasMusic: false, textFiles: { domain: "/tmp/d.txt" } });
-    expect(g).not.toContain("t.txt");
-    expect(g).not.toContain("b.txt");
+  it("uses silent audio without music", () => {
+    const g = buildStudioGraph({ ...base, transition: getTransition("dissolve")!, hasMusic: false });
     expect(g).toContain("[3:a]anull[aout]");
     expect(g).toContain("[vout]");
+  });
+  it("never uses drawtext (the Vercel ffmpeg-static build has no drawtext filter)", () => {
+    for (const tr of TRANSITIONS) expect(buildStudioGraph({ ...base, transition: tr })).not.toContain("drawtext");
+  });
+  it("overlays the base layer always and fades the AVANT / APRÈS layers in their windows", () => {
+    const tr = getTransition("dissolve")!;
+    const t = studioTimeline(6, tr.duration);
+    const g = buildStudioGraph({ ...base, transition: tr });
+    expect(g).toContain("[wl][4:v]overlay=0:0[t1]");
+    expect(g).toContain(`[5:v]format=rgba,fade=t=in:st=0.25:d=0.3:alpha=1[lay_a]`);
+    expect(g).toContain(`enable='between(t\\,0.25\\,${t.transitionStart.toFixed(2)})'`);
+    expect(g).toContain(`[6:v]format=rgba,fade=t=in:st=${t.transitionEnd.toFixed(2)}:d=0.3:alpha=1[lay_b]`);
   });
   it("every transition in the menu builds a graph", () => {
     for (const tr of TRANSITIONS) expect(buildStudioGraph({ ...base, transition: tr })).toContain(`transition=${tr.xfade}`);

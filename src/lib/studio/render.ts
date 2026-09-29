@@ -11,16 +11,19 @@ import { execFile } from "node:child_process";
 import { mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
+import { registerBrandFonts } from "@/lib/register-brand-fonts";
 import { FORMATS, getTransition, studioTimeline, type StudioRenderRequest, type ImageFit } from "./options";
+import { baseLayerSvg, labelLayerSvg, writeLayerPng, type LayerGeometry } from "./text-layers";
+
+// Text layers are SVG rendered by librsvg/fontconfig: make "DM Sans" resolve to the bundled TTFs.
+registerBrandFonts();
 
 const execFileAsync = promisify(execFile);
 
 export const STUDIO_FPS = 30;
 const NAVY = "0x1A2340";
-const GOLD = "0xD4A853";
 const GRADE = "curves=preset=medium_contrast,eq=saturation=1.12:contrast=1.03";
 /** Relative to process.cwd(): traced into the /api/studio/render function by next.config.ts. */
-export const STUDIO_FONT = "src/fonts/DMSans-Bold.ttf";
 export const STUDIO_LOGO = "Logo/officiel-transparent.png";
 
 /** Escape a filesystem path for use as a filtergraph option value (Windows drive colons, backslashes). */
@@ -28,16 +31,23 @@ export function filterPath(p: string): string {
   return p.replace(/\\/g, "/").replace(/:/g, "\\:");
 }
 
+/** Navy brand bar at the bottom of the frame (drawn by ffmpeg; the domain text sits on it in the base layer). */
+export function studioGeometry(W: number, H: number): LayerGeometry {
+  const barH = Math.round(H * 0.0885);
+  return { w: W, h: H, barH, barY: H - barH };
+}
+
+/**
+ * Inputs: 0 before still, 1 after still, 2 logo, 3 audio (music or anullsrc),
+ * 4 base text layer, 5 AVANT layer, 6 APRÈS layer (transparent PNGs, looped for the clip).
+ * NO drawtext anywhere: the Vercel ffmpeg-static build doesn't have it.
+ */
 export interface GraphInput {
   w: number;
   h: number;
   durationSec: number;
   transition: { kind: "slider" | "xfade"; xfade: string; duration: number };
-  /** Absolute/relative paths of text files already written (drawtext textfile=). */
-  textFiles: { before?: string; after?: string; title?: string; price?: string; cta?: string; domain: string };
-  font: string;
   hasMusic: boolean;
-  /** Input indexes: 0 before still, 1 after still, 2 logo, 3 audio (music or anullsrc). */
 }
 
 /**
@@ -48,8 +58,6 @@ export function buildStudioGraph(g: GraphInput): string {
   const { w: W, h: H, durationSec: D } = g;
   const T = g.transition.duration;
   const tl = studioTimeline(D, T);
-  const font = filterPath(g.font);
-  const tf = (p: string) => filterPath(p);
   const fA = Math.round(tl.beforeSec * STUDIO_FPS);
   const fB = Math.round(tl.afterSec * STUDIO_FPS);
   const zoomOut = (frames: number) =>
@@ -72,9 +80,8 @@ export function buildStudioGraph(g: GraphInput): string {
   }
   parts.push(`[${cur}]${GRADE}[graded]`);
 
-  // Brand bar + logo plate + domain.
-  const BAR_H = Math.round(H * 0.0885);
-  const barY = H - BAR_H;
+  // Brand bar + logo plate (the domain text is in the base text layer).
+  const { barY, barH: BAR_H } = studioGeometry(W, H);
   const plateH = Math.round(BAR_H * 0.52), plateW = Math.round(plateH * 3.86);
   const plateY = barY + Math.round((BAR_H - plateH) / 2);
   parts.push(`[graded]drawbox=x=0:y=${barY}:w=${W}:h=${BAR_H}:color=${NAVY}@0.78:t=fill[bar]`);
@@ -82,57 +89,18 @@ export function buildStudioGraph(g: GraphInput): string {
   parts.push(`color=white@0.92:size=${plateW}x${plateH}:r=${STUDIO_FPS}[plate]`);
   parts.push(`[plate][logo_s]overlay=(W-w)/2:(H-h)/2:shortest=1[lb]`);
   parts.push(`[bar][lb]overlay=44:${plateY}[wl]`);
-  const domainFs = Math.round(BAR_H * 0.27);
-  parts.push(`[wl]drawtext=fontfile=${font}:textfile=${tf(g.textFiles.domain)}:fontcolor=${GOLD}:fontsize=${domainFs}:x=W-text_w-52:y=${barY}+(${BAR_H}-text_h)/2[branded]`);
 
-  const draws: string[] = [];
+  // Text layers: base (title, CTA, domain) always on; AVANT / APRÈS fade in during their window.
   const between = (a: number, b: number) => `between(t\\,${a.toFixed(2)}\\,${b.toFixed(2)})`;
-
-  // Title (top), on a navy backing box.
-  if (g.textFiles.title) {
-    const fs = Math.round(W * 0.052);
-    draws.push(
-      `drawtext=fontfile=${font}:textfile=${tf(g.textFiles.title)}:fontcolor=white:fontsize=${fs}:box=1:boxcolor=${NAVY}@0.72:boxborderw=22:x=(w-text_w)/2:y=${Math.round(H * 0.07)}`,
-    );
-  }
-
-  // AVANT / APRÈS labels with a gold underline that grows in.
-  if (g.textFiles.before && g.textFiles.after) {
-    const labelFs = Math.round(W * 0.092);
-    const labelY = Math.round(H * 0.6);
-    const windows: [string, number, number][] = [
-      [g.textFiles.before, 0.25, tl.transitionStart],
-      [g.textFiles.after, tl.transitionEnd, D - 0.35],
-    ];
-    for (const [file, s0, e0] of windows) {
-      if (e0 - s0 < 0.3) continue;
-      const alpha = `min(1\\,max(0\\,(t-${s0.toFixed(2)})/0.3))`;
-      draws.push(
-        `drawtext=fontfile=${font}:textfile=${tf(file)}:fontcolor=white:fontsize=${labelFs}:borderw=3:bordercolor=black@0.5:shadowcolor=black@0.6:shadowx=2:shadowy=2:x=(w-text_w)/2:y=${labelY}:alpha='${alpha}':enable='${between(s0, e0)}'`,
-      );
-      draws.push(
-        `drawbox=x=${Math.round((W - 380) / 2)}:y=${labelY + Math.round(labelFs * 1.2)}:w=380:h=6:color=${GOLD}:t=fill:enable='${between(s0 + 0.15, e0)}'`,
-      );
-    }
-  }
-
-  // Price (white, large) and CTA (gold pill) just above the brand bar, shown on the AFTER.
+  const beforeFrom = 0.25, beforeTo = tl.transitionStart;
   const afterFrom = tl.transitionEnd;
-  if (g.textFiles.price) {
-    const fs = Math.round(W * 0.068);
-    draws.push(
-      `drawtext=fontfile=${font}:textfile=${tf(g.textFiles.price)}:fontcolor=white:fontsize=${fs}:borderw=3:bordercolor=black@0.55:x=(w-text_w)/2:y=${barY - Math.round(H * 0.155)}:enable='${between(afterFrom, D)}'`,
-    );
-  }
-  if (g.textFiles.cta) {
-    const fs = Math.round(W * 0.036);
-    draws.push(
-      `drawtext=fontfile=${font}:textfile=${tf(g.textFiles.cta)}:fontcolor=${NAVY}:fontsize=${fs}:box=1:boxcolor=${GOLD}@1:boxborderw=18:x=(w-text_w)/2:y=${barY - Math.round(H * 0.065)}`,
-    );
-  }
+  parts.push(`[wl][4:v]overlay=0:0[t1]`);
+  parts.push(`[5:v]format=rgba,fade=t=in:st=${beforeFrom.toFixed(2)}:d=0.3:alpha=1[lay_a]`);
+  parts.push(`[t1][lay_a]overlay=0:0:enable='${between(beforeFrom, beforeTo)}'[t2]`);
+  parts.push(`[6:v]format=rgba,fade=t=in:st=${afterFrom.toFixed(2)}:d=0.3:alpha=1[lay_b]`);
+  parts.push(`[t2][lay_b]overlay=0:0:enable='${between(afterFrom, D)}'[t3]`);
 
-  const chain = [...draws, `fade=t=out:st=${(D - 0.4).toFixed(2)}:d=0.4`, "setsar=1", "format=yuv420p"].join(",");
-  parts.push(`[branded]${chain}[vout]`);
+  parts.push(`[t3]fade=t=out:st=${(D - 0.4).toFixed(2)}:d=0.4,setsar=1,format=yuv420p[vout]`);
 
   const audio = g.hasMusic
     ? `[3:a]volume=0.25,afade=t=in:d=0.6,afade=t=out:st=${Math.max(0, D - 1.2).toFixed(2)}:d=1.2[aout]`
@@ -177,9 +145,6 @@ export async function prepareStill(buf: Buffer, fit: ImageFit, W: number, H: num
   await sharp(bg).composite([{ input: fg, gravity: "center" }]).png().toFile(out);
 }
 
-const LABELS = { fr: ["AVANT", "APRÈS"], en: ["BEFORE", "AFTER"] } as const;
-const DOMAIN = { fr: "ameublodirect.ca", en: "furnishdirect.ca" } as const;
-
 /**
  * Render a Studio request to `outFile`. `workDir` must be writable (use /tmp on Vercel).
  * Throws with a readable message on any failure; cleans its temp files either way.
@@ -195,20 +160,16 @@ export async function renderStudioVideo(req: StudioRenderRequest, workDir: strin
     const afterPng = path.join(workDir, "after.png");
     await Promise.all([prepareStill(beforeBuf, req.before.fit, W, H, beforePng), prepareStill(afterBuf, req.after.fit, W, H, afterPng)]);
 
-    const write = async (name: string, text: string) => {
-      const p = path.join(workDir, name);
-      await writeFile(p, text, "utf8");
-      return p;
-    };
-    const [labelBefore, labelAfter] = LABELS[req.locale];
-    const textFiles = {
-      domain: await write("domain.txt", DOMAIN[req.locale]),
-      before: req.texts.labels ? await write("before.txt", labelBefore) : undefined,
-      after: req.texts.labels ? await write("after.txt", labelAfter) : undefined,
-      title: req.texts.title ? await write("title.txt", req.texts.title) : undefined,
-      price: req.texts.price ? await write("price.txt", req.texts.price) : undefined,
-      cta: req.texts.cta ? await write("cta.txt", req.texts.cta) : undefined,
-    };
+    const geo = studioGeometry(W, H);
+    const texts = { locale: req.locale, ...req.texts };
+    const baseLayer = path.join(workDir, "layer-base.png");
+    const beforeLayer = path.join(workDir, "layer-before.png");
+    const afterLayer = path.join(workDir, "layer-after.png");
+    await Promise.all([
+      writeLayerPng(baseLayerSvg(geo, texts), baseLayer),
+      writeLayerPng(labelLayerSvg(geo, texts, 0), beforeLayer),
+      writeLayerPng(labelLayerSvg(geo, texts, 1), afterLayer),
+    ]);
 
     let musicFile: string | null = null;
     if (req.musicUrl) {
@@ -222,8 +183,6 @@ export async function renderStudioVideo(req: StudioRenderRequest, workDir: strin
       h: H,
       durationSec: req.durationSec,
       transition,
-      textFiles,
-      font: STUDIO_FONT,
       hasMusic: !!musicFile,
     });
     const graphFile = path.join(workDir, "graph.txt");
@@ -238,6 +197,9 @@ export async function renderStudioVideo(req: StudioRenderRequest, workDir: strin
       "-loop", "1", "-t", tl.afterSec.toFixed(2), "-i", afterPng,
       "-i", STUDIO_LOGO,
       ...audioInput,
+      "-loop", "1", "-t", String(req.durationSec), "-i", baseLayer,
+      "-loop", "1", "-t", String(req.durationSec), "-i", beforeLayer,
+      "-loop", "1", "-t", String(req.durationSec), "-i", afterLayer,
       "-t", String(req.durationSec),
       "-filter_complex_script", graphFile,
       "-map", "[vout]", "-map", "[aout]",
