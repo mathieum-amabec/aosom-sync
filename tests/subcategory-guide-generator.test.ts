@@ -56,6 +56,14 @@ const mockRunGuideQualityPipeline = vi.hoisted(() =>
     overallStatus: "ready",
   })),
 );
+const mockSelectCollectionCandidates = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/guide-collection-topics", () => ({
+  COLLECTION_TOPIC_PREFIX: "collection:",
+  isCollectionTopicKey: (k: string) => k.startsWith("collection:"),
+  getCollectionTopicStats: vi.fn(),
+  selectCollectionCandidates: mockSelectCollectionCandidates,
+}));
+
 vi.mock("@/lib/guide-quality-pipeline", () => ({
   runGuideQualityPipeline: mockRunGuideQualityPipeline,
   describeTrendFact: () => "Rabais réel détecté : jusqu'à 10 %.",
@@ -71,7 +79,9 @@ import {
   extractCopyFromBodyHtml,
   retryExistingGuideQuality,
   reviseExistingGuideUntilReady,
+  generateCollectionGuides,
 } from "@/lib/subcategory-guide-generator";
+import { getCollectionTopicStats } from "@/lib/guide-collection-topics";
 import {
   getSubcategoryTrendStats, createGuidePage, getAllCollectionMappings, getGuidePages,
   getGuidePageById, updateGuidePageRetryResult,
@@ -745,5 +755,30 @@ describe("reviseExistingGuideUntilReady — stale product selection", () => {
     expect(firstCall.messages[0].content).toContain("Chair C");
     expect(r).toMatchObject({ attempts: 1, status: "ready", written: true });
     expect(updateBlogArticleBody).toHaveBeenCalledWith(999, "555", expect.stringContaining("/products/chair-c"));
+  });
+});
+
+describe("generateCollectionGuides", () => {
+  it("generates each selected collection topic as a draft linked to ITS collection, then runs the revision loop", async () => {
+    const topicStats = stats({ aosomCategory: "collection:bureau-chaises", shopifyCollectionId: "475651801193", shopifyCollectionTitle: "Chaises de bureau" });
+    mockSelectCollectionCandidates.mockResolvedValue({ candidates: [{ stats: topicStats, collectionHandle: "bureau-chaises" }], remainingEligible: 40, skipped: [] });
+    vi.mocked(createGuidePage).mockResolvedValueOnce(77);
+    mockCreate.mockReset().mockResolvedValue(goodCopyResponse);
+    vi.mocked(createBlogArticle).mockClear();
+    vi.mocked(getGuidePageById).mockImplementation(async () => ({
+      id: 77, aosom_category: "collection:bureau-chaises", status: "pending_review", shopify_article_id: "111",
+      shopify_blog_id: 999, title: "t", scheduled_publish_at: null,
+      body_html: vi.mocked(createBlogArticle).mock.calls[0][0].bodyHtml,
+    }) as unknown as GuidePageRow);
+    vi.mocked(getCollectionTopicStats).mockResolvedValue({ stats: topicStats, collectionHandle: "bureau-chaises" });
+
+    const r = await generateCollectionGuides(2, new Set(["X"]));
+
+    expect(mockSelectCollectionCandidates).toHaveBeenCalledWith(2, new Set(["X"]), expect.any(Date));
+    const article = vi.mocked(createBlogArticle).mock.calls[0][0];
+    expect(article.title).toBe("Comment choisir : Chaises de bureau — guide d'achat");
+    expect(article.bodyHtml).toContain("/collections/bureau-chaises");
+    expect(vi.mocked(createGuidePage)).toHaveBeenCalledWith(expect.objectContaining({ aosomCategory: "collection:bureau-chaises", status: "pending_review" }));
+    expect(r).toMatchObject({ remainingEligible: 40, failed: [], generated: [expect.objectContaining({ guidePageId: 77, status: "ready" })] });
   });
 });

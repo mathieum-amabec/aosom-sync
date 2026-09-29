@@ -1052,7 +1052,7 @@ export async function fetchAllCollections(): Promise<{ id: string; title: string
   }));
 }
 
-function parseLinkHeader(header: string | null): string | null {
+export function parseLinkHeader(header: string | null): string | null {
   if (!header) return null;
   const match = header.match(/<[^>]*page_info=([^&>]+)[^>]*>;\s*rel="next"/);
   return match ? match[1] : null;
