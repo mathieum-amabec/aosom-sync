@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.93.1] - 2026-09-30
+
+The catalog "Nouveaux produits Aosom" sort works again. It returned a server error instead of the list.
+
+### Fixed
+
+- **Catalog sort "Nouveaux produits Aosom"** — every request failed with `ambiguous column name: sku`.
+  The ORDER BY used a bare `sku` while the query LEFT JOINs `last_price`, which also has a
+  `sku`. Columns are now qualified (`f.created_at DESC, f.sku ASC`). New test
+  `tests/database-catalog-sorts.test.ts` runs every sort option against the real `getProducts`
+  query; the old test copied the SQL without the join and could not catch this.
+
 ## [0.5.93.0] - 2026-09-27
 
 Mat now builds before/after videos himself on a new "Studio Avant/Après" page: he picks the
