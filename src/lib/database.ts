@@ -674,6 +674,15 @@ async function _initSchemaImpl(): Promise<void> {
       updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_studio_renders_sku ON studio_renders(sku)`,
+    // PDP "Complétez la pièce" suggestions (assistant mode=complementary), cached per product
+    // so the LLM runs once per product per TTL instead of on every product-page view
+    // (~1,100 calls/day burned the whole assistant pool by ~20:30 Montréal). See
+    // src/lib/assistant-complementary-cache.ts.
+    `CREATE TABLE IF NOT EXISTS assistant_complementary_cache (
+      cache_key TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    )`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];

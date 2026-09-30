@@ -13,6 +13,12 @@ import {
 } from "@/lib/assistant-limits";
 import { ASSISTANT_TOKEN_HEADER, verifyAssistantToken } from "@/lib/assistant-auth";
 import { LlmBudgetExceededError } from "@/lib/llm-budget";
+import {
+  isBotUserAgent,
+  complementaryCacheKey,
+  getCachedComplementary,
+  putCachedComplementary,
+} from "@/lib/assistant-complementary-cache";
 
 /**
  * POST /api/assistant — PUBLIC storefront shopping assistant. No auth (called from the
@@ -150,7 +156,19 @@ export async function POST(request: Request): Promise<Response> {
       const name = typeof body.name === "string" ? body.name : "";
       const productType = typeof body.productType === "string" ? body.productType : "";
       if (!name || !productType) return json({ success: false, error: "name_and_productType_required" }, 400);
+      // Crawlers render PDPs too: never spend LLM tokens on them. The block self-hides on an
+      // empty product list, so this is invisible to shoppers.
+      if (isBotUserAgent(request.headers.get("user-agent"))) {
+        return json({ success: true, data: { reply: "", products: [] } });
+      }
+      // One LLM call per product per day instead of one per page view (see the cache module).
+      const cacheKey = complementaryCacheKey(name, productType, locale);
+      const cached = await getCachedComplementary(cacheKey).catch(() => null);
+      if (cached) return json({ success: true, data: cached });
       const result = await runComplementary({ name, productType, locale });
+      await putCachedComplementary(cacheKey, result).catch((e) =>
+        console.warn("[assistant] complementary cache write failed:", e instanceof Error ? e.message : e),
+      );
       return json({ success: true, data: result });
     }
 
