@@ -2028,8 +2028,10 @@ export async function getProducts(filters: {
     // after that seed date; older rows sort as a same-timestamp tail, which is the
     // conservative/correct behavior for a "new arrivals" sort (never falsely promoted
     // to the top). sku ASC tiebreaks for a deterministic, pagination-safe order among
-    // same-timestamp rows.
-    case "newest": orderBy = "created_at DESC, sku ASC"; break;
+    // same-timestamp rows. Columns are qualified with `f.`: the final SELECT LEFT JOINs
+    // `last_price`, which also has a `sku`, so a bare `sku` is ambiguous and SQLite
+    // rejects the whole query (the sort 500'd in prod until this was qualified).
+    case "newest": orderBy = "f.created_at DESC, f.sku ASC"; break;
   }
 
   // Select only columns the catalog UI needs
