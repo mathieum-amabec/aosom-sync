@@ -202,6 +202,17 @@ export const env = {
   get hasShopifyToken(): boolean {
     return !!process.env.SHOPIFY_ACCESS_TOKEN;
   },
+  /** Vercel AI Gateway — routes to non-Anthropic models (Gemini, etc.) by model-id string,
+   *  no per-provider SDK. NOT set as of 2026-10-01 (same gap noted for Studio's AI retouch);
+   *  an operator must create a key in the Vercel dashboard and add Gateway credit. Every
+   *  caller must check `hasAiGatewayKey` first and degrade gracefully — never throw from a
+   *  background job just because this optional key is absent. */
+  get aiGatewayApiKey(): string | undefined {
+    return process.env.AI_GATEWAY_API_KEY || undefined;
+  },
+  get hasAiGatewayKey(): boolean {
+    return !!process.env.AI_GATEWAY_API_KEY;
+  },
 } as const;
 
 // ─── Shopify ────────────────────────────────────────────────────────

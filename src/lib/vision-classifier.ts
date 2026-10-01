@@ -12,7 +12,7 @@
  */
 import { getAnthropicClient } from "./content-generator";
 import { budgetedCreate } from "@/lib/llm-budget";
-import { CLAUDE } from "./config";
+import { CLAUDE, env } from "./config";
 
 export interface ImageClassification {
   /** true = clean primary image (no marketing text overlay). */
@@ -170,6 +170,93 @@ export async function classifyProductImage(
     ? parsed.reason.trim().slice(0, 200)
     : (parsed.has_marketing_overlay ? "texte marketing incrusté détecté" : "image propre");
 
+  const confidence =
+    typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence)
+      ? Math.min(1, Math.max(0, parsed.confidence))
+      : undefined;
+
+  return { compliant: !parsed.has_marketing_overlay, reason, confidence };
+}
+
+/**
+ * Longest edge for the gallery-wide Gemini classifier — keeps every image inside Gemini's
+ * flat 258-token tile (≤384px both dimensions, see ai.google.dev/gemini-api image-token
+ * docs), the single biggest cost lever. Separate from DEFAULT_CLASSIFY_PX (1024): this exact
+ * judgment call (marketing-overlay yes/no) doesn't need more resolution than that — the
+ * pos-1 guard above already proves it at 512px.
+ */
+export const GEMINI_CLASSIFY_PX = 384;
+
+const AI_GATEWAY_CHAT_URL = "https://ai-gateway.vercel.sh/v1/chat/completions";
+
+/**
+ * Classify a single gallery image — ANY position, not just pos-1 — using Gemini via Vercel
+ * AI Gateway instead of Claude. Same validated STRICT_OVERLAY_PROMPT, same
+ * `ImageClassification` contract, so a verdict from either model slots into the shared
+ * `image_classifications` cache (`putCachedImageVerdict`) with no caller-side branching —
+ * the feed layer (feeds/source.ts) doesn't care which model produced a given row.
+ *
+ * Why this exists (2026-10-01 investigation): the daily pos-1 guard (`image-compliance.ts`)
+ * only ever classifies position 1 and whatever alternatives it scans while hunting for a
+ * pos-1 replacement. Measured against the live catalog: position 1 is 96.5% covered,
+ * positions 2+ (everything an ad feed's `additional_image_link` actually serves) only
+ * 15.9%. Classifying that ~10,500-image backlog on Claude (this file's `maintenance` pool)
+ * would cost roughly 18 $; Gemini 2.5 Flash-Lite at 384px costs roughly 0.40 $ for the same
+ * set — see scripts/classify-gallery-images.mts, which runs this in bulk with the dry-run
+ * default every write path in this repo uses for a bulk operation.
+ *
+ * Requires `AI_GATEWAY_API_KEY` (`env.hasAiGatewayKey`) — throws if absent, deliberately: a
+ * caller must check the flag ONCE before a whole batch and skip entirely, never call this
+ * per-image and swallow 10,000 identical errors.
+ */
+export async function classifyProductImageGemini(
+  imageUrl: string,
+  options: { px?: number } = {},
+): Promise<ImageClassification> {
+  if (!imageUrl || !imageUrl.trim()) throw new Error("classifyProductImageGemini: empty imageUrl");
+  const apiKey = env.aiGatewayApiKey;
+  if (!apiKey) throw new Error("classifyProductImageGemini: AI_GATEWAY_API_KEY not set");
+
+  const url = resizedUrl(imageUrl, options.px ?? GEMINI_CLASSIFY_PX);
+  const res = await fetch(AI_GATEWAY_CHAT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-flash-lite",
+      max_tokens: 400,
+      messages: [
+        { role: "system", content: STRICT_OVERLAY_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url } },
+            { type: "text", text: "Classifie cette image." },
+          ],
+        },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`classifyProductImageGemini: Gateway ${res.status} — ${(await res.text()).slice(0, 200)}`);
+  }
+  const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  const text = (body.choices?.[0]?.message?.content ?? "").trim();
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error(`classifyProductImageGemini: no JSON in reply: ${text.slice(0, 120)}`);
+
+  let parsed: { has_marketing_overlay?: unknown; reason?: unknown; confidence?: unknown };
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    throw new Error(`classifyProductImageGemini: invalid JSON: ${jsonMatch[0].slice(0, 120)}`);
+  }
+  if (typeof parsed.has_marketing_overlay !== "boolean") {
+    throw new Error("classifyProductImageGemini: missing has_marketing_overlay boolean");
+  }
+
+  const reason = typeof parsed.reason === "string" && parsed.reason.trim()
+    ? parsed.reason.trim().slice(0, 200)
+    : (parsed.has_marketing_overlay ? "texte marketing incrusté détecté" : "image propre");
   const confidence =
     typeof parsed.confidence === "number" && Number.isFinite(parsed.confidence)
       ? Math.min(1, Math.max(0, parsed.confidence))

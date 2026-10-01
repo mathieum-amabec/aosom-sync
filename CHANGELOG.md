@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.94.3] - 2026-10-01
+
+Found that a vision classifier already runs daily and already knows which product photos carry a marketing/measurement overlay — it just never protected the ad feeds, only the storefront's featured photo. Wired it in for free, and added a cheaper model for the part it never reaches.
+
+### Added
+
+- **Gemini-based gallery classifier** (`classifyProductImageGemini`, `vision-classifier.ts`) — the same validated marketing-overlay prompt already used for the daily pos-1 guard, routed through Vercel AI Gateway to Gemini 2.5 Flash-Lite instead of Claude. Writes into the SAME `image_classifications` cache, so a Gemini verdict and a Claude verdict are interchangeable to every reader.
+- `scripts/classify-gallery-images.mts` — dry-run by default, `--apply --limit=N` to classify N photos for real. Measured live: of the catalog's 14,029 distinct photos, only 24.5% are classified at all — position 1 is 96.5% covered by the existing daily guard, but positions 2+ (everything an ad feed's `additional_image_link` serves) are only 15.9% covered. ~10,600 photos still need a verdict; at Gemini pricing that's roughly 0.40 $, versus ~18 $ on Claude's existing pool for the same backlog.
+- Needs `AI_GATEWAY_API_KEY` (same gap already noted for Studio's AI retouch) — not set yet; the script aborts with a clear message under `--apply` until an operator adds a key + Gateway credit in Vercel.
+
+### Fixed
+
+- **Ad feeds (Google/Meta/Bing/Reddit/Pinterest) now consult the existing vision-classification cache** — `shopifyToFeedItems` excludes any image the classifier already flagged as carrying a marketing/measurement overlay (`image_classifications`, matched by Aosom hash stem so a resized/re-ingested copy of the same photo still matches). This is immediate and free: 1,897 already-known-bad photos currently reachable by the feed are excluded the moment this ships, no new classification needed.
+
 ## [0.5.94.2] - 2026-10-01
 
 Found a real gap in the Google/Meta/Bing/Reddit/Pinterest ad feed's images, and fixed the part that is actually fixable by filename. Full fix needs a visual check — see the limitation noted below, not yet built.
