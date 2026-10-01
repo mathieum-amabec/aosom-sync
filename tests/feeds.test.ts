@@ -400,6 +400,71 @@ describe("shopifyToFeedItems — per-variant image and ?variant= deep link", () 
   });
 });
 
+describe("shopifyToFeedItems — spec/infographic images never reach an ad feed (2026-10-01)", () => {
+  // Confirmed live: a parasol's additional_image_link on the Meta catalog carried an assembly
+  // diagram ("Detachable pole with spiral connection..."), because this mapper mirrored
+  // Shopify's gallery with zero content filtering — isSpecImageUrl already existed for
+  // social/slideshow content but was never wired in here.
+  const withSpecShot: ShopifyFeedProduct = {
+    id: 1, title: "Parasol", handle: "parasol", status: "active", published_at: PUBLISHED,
+    images: [
+      { src: "https://img/lifestyle.jpg" },
+      { src: "https://img/assembly-diagram.jpg" }, // "diagram" keyword
+      { src: "https://img/white-bg.jpg" },
+    ],
+    variants: [{ sku: "PARA-1", price: "99.99", inventory_management: null }],
+  };
+
+  it("drops a spec/diagram image from both the primary and the additional images", () => {
+    const [item] = shopifyToFeedItems([withSpecShot]);
+    expect(item.imageLink).toBe("https://img/lifestyle.jpg");
+    expect(item.additionalImageLinks).toEqual(["https://img/white-bg.jpg"]);
+  });
+
+  it("drops it even when it is the ONLY image at gallery position 1", () => {
+    const specFirst: ShopifyFeedProduct = {
+      ...withSpecShot, id: 2, handle: "parasol-2",
+      images: [{ src: "https://img/size-chart.jpg" }, { src: "https://img/lifestyle.jpg" }],
+    };
+    const [item] = shopifyToFeedItems([specFirst]);
+    expect(item.imageLink).toBe("https://img/lifestyle.jpg"); // not the size chart
+    expect(item.additionalImageLinks).toEqual([]);
+  });
+
+  it("matches the Aosom -B0.. -F0 gallery-shot suffixes, case-insensitively", () => {
+    const suffixed: ShopifyFeedProduct = {
+      ...withSpecShot, id: 3, handle: "parasol-3",
+      images: [{ src: "https://img/lifestyle.jpg" }, { src: "https://img/0sg8D1-C0.jpg" }],
+    };
+    const [item] = shopifyToFeedItems([suffixed]);
+    expect(item.additionalImageLinks).toEqual([]);
+  });
+
+  it("falls back to the unfiltered gallery when EVERY image looks like a spec shot (never ships zero images)", () => {
+    const allSpec: ShopifyFeedProduct = {
+      ...withSpecShot, id: 4, handle: "parasol-4",
+      images: [{ src: "https://img/diagram-1.jpg" }, { src: "https://img/size-chart.jpg" }],
+    };
+    const [item] = shopifyToFeedItems([allSpec]);
+    expect(item.imageLink).toBe("https://img/diagram-1.jpg");
+    expect(item.additionalImageLinks).toEqual(["https://img/size-chart.jpg"]);
+  });
+
+  it("a variant's own image_id is ignored when that exact image is a spec shot — falls back like an unassigned variant", () => {
+    const variantPointsAtSpec: ShopifyFeedProduct = {
+      id: 5, title: "Chaise", handle: "chaise", status: "active", published_at: PUBLISHED,
+      images: [
+        { id: 1, src: "https://img/hero.jpg" },
+        { id: 2, src: "https://img/dimension-diagram.jpg" },
+      ],
+      variants: [{ sku: "CH-1", price: "10", inventory_management: null, image_id: 2 }],
+    };
+    const [item] = shopifyToFeedItems([variantPointsAtSpec]);
+    expect(item.imageLink).toBe("https://img/hero.jpg");
+    expect(item.additionalImageLinks).toEqual([]);
+  });
+});
+
 describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => {
   const enProducts: ShopifyFeedProduct[] = [
     {

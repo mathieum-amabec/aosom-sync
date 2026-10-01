@@ -5,6 +5,7 @@ import { SHOPIFY } from "@/lib/config";
 import { STOREFRONT_BASE_URL } from "@/lib/insights";
 import { type FeedItem, mapToGoogleCategory, stripHtml, truncate } from "./feed";
 import { parseSku } from "../variant-merger";
+import { isSpecImageUrl } from "../selectors/shopify-product";
 
 export interface ShopifyFeedVariant {
   /** Shopify variant id — drives the `?variant=` deep link on multi-variant products. */
@@ -271,9 +272,20 @@ export function shopifyToFeedItems(
     // exclude it rather than ship a dead link.
     if (!p.published_at || new Date(p.published_at).getTime() > Date.now()) { unpublishedCount++; continue; }
     if (!p.handle) continue;
-    const productImages = (p.images ?? []).filter((i) => Boolean(i.src));
+    const rawImages = (p.images ?? []).filter((i) => Boolean(i.src));
+    if (rawImages.length === 0) continue;         // Google/Pinterest/Meta require an image
+    // Drop spec/infographic/dimension-chart shots (measurements, assembly diagrams, size
+    // charts) before this product's images ever reach an ad feed — see isSpecImageUrl's
+    // doc comment. Confirmed live 2026-10-01: a parasol's additional_image_link on the Meta
+    // catalog carried an assembly diagram ("Detachable pole with spiral connection..."),
+    // because this mapper mirrored Shopify's gallery with zero content filtering while an
+    // identical keyword filter already existed for social/slideshow content
+    // (selectors/shopify-product.ts) but was never wired in here. Falls back to the
+    // unfiltered list on the (expected to be non-existent) case of a product whose ENTIRE
+    // gallery looks like spec shots, so a feed item is never shipped with no image at all.
+    const cleanImages = rawImages.filter((i) => !isSpecImageUrl(i.src));
+    const productImages = cleanImages.length > 0 ? cleanImages : rawImages;
     const images = productImages.map((i) => i.src);
-    if (images.length === 0) continue;            // Google/Pinterest/Meta require an image
     const link = `${STOREFRONT_BASE_URL}${pathPrefix}/products/${encodeURIComponent(p.handle)}`;
     const description = truncate(stripPromoText(scrubSupplier(stripHtml(p.body_html ?? ""), houseBrand)), DESCRIPTION_MAX);
     const brand = resolveBrand(p.vendor, houseBrand);
