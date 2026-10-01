@@ -79,8 +79,15 @@ describe("translateColor", () => {
     expect(translated).toEqual(frValues);
   });
 
-  it("passes through unmapped/compound values unchanged", () => {
-    expect(translateColor("Black and Red")).toBe("Black and Red");
+  it("translates compounds part by part, and passes through anything not fully translatable", () => {
+    expect(translateColor("Black and Red")).toBe("Noir et rouge");
+    expect(translateColor("Natural Wood, White")).toBe("Bois naturel et blanc");
+    expect(translateColor("Black and Plaid")).toBe("Black and Plaid");
+  });
+
+  it("translates the colours the old 25-entry map left in English", () => {
+    expect(["Yellow", "Oak", "Rustic Brown", "Multi Colour", "Cream White", "Clear"].map(translateColor))
+      .toEqual(["Jaune", "Chêne", "Brun rustique", "Multicolore", "Blanc crème", "Transparent"]);
   });
 
   it("passes through empty input safely", () => {

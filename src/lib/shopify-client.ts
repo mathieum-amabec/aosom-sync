@@ -7,6 +7,8 @@ import { targetSellPrice } from "./pricing";
 import { writePriceVerified, PRICE_EPSILON } from "./price-protection";
 import { recordPriceFloorIncident } from "./database";
 import { EN_FIELD_MAP, rejectEnValue, type EnTranslatableKey } from "./en-translations";
+import { variantImageIndexes } from "./variant-merger";
+import { toEnglishColour } from "./colour-names";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -546,11 +548,97 @@ export async function createShopifyProduct(
     console.error(`[IMPORT] EN translations not registered for product ${data.product.id}:`, err instanceof Error ? err.message : err);
   }
 
+  // Best-effort, like the translations: attach each colour's own photo to its variants so
+  // clicking a colour shows it, and register EN option names / colour labels.
+  try {
+    await attachVariantImages(data.product, merged);
+  } catch (err) {
+    console.error(`[IMPORT] variant photos not attached for product ${data.product.id}:`, err instanceof Error ? err.message : err);
+  }
+  try {
+    await registerOptionEnTranslations(String(data.product.id));
+  } catch (err) {
+    console.error(`[IMPORT] EN option translations not registered for product ${data.product.id}:`, err instanceof Error ? err.message : err);
+  }
+
   return {
     id: String(data.product.id),
     handle: typeof data.product.handle === "string" ? data.product.handle : "",
   };
 }
+
+/**
+ * Attach a photo to every variant of a multi-colour product (Dawn switches the main photo on
+ * the selected variant's image). Each variant gets its own photo when the gallery has one;
+ * the rest get the position-1 photo — never only SOME variants, or the theme keeps showing
+ * the previously selected colour's photo. Single-colour products are left alone.
+ * `created` is the REST create response's product (images come back in payload order).
+ */
+export async function attachVariantImages(
+  created: { variants?: { id: number | string; sku?: string }[]; images?: { id: number | string }[] },
+  merged: AosomMergedProduct,
+): Promise<number> {
+  const colours = new Set(merged.variants.map((v) => (v.color || "").toLowerCase()).filter(Boolean));
+  const images = created.images ?? [];
+  if (colours.size < 2 || images.length === 0) return 0;
+  const indexBySku = new Map(merged.variants.map((v, i) => [v.sku, variantImageIndexes(merged.images, merged.variants)[i]]));
+  let attached = 0;
+  for (const variant of created.variants ?? []) {
+    const idx = indexBySku.get(String(variant.sku ?? "")) ?? -1;
+    const image = images[idx >= 0 && idx < images.length ? idx : 0];
+    const res = await shopifyFetch(`/variants/${variant.id}.json`, {
+      method: "PUT",
+      body: JSON.stringify({ variant: { id: Number(variant.id), image_id: Number(image.id) } }),
+    });
+    if (!res.ok) throw new Error(`variant ${variant.id} image: ${res.status} ${await res.text()}`);
+    attached++;
+  }
+  return attached;
+}
+
+/**
+ * EN translations for a product's option NAMES (Couleur → Color, Taille → Size) and colour
+ * VALUES (Noir → Black), so the EN locale doesn't show French option labels. Skips anything
+ * already translated or that toEnglishColour can't translate. Returns the count registered.
+ */
+export async function registerOptionEnTranslations(productId: string): Promise<number> {
+  const gql = async (query: string, variables: Record<string, unknown>) => {
+    const res = await shopifyFetch("/graphql.json", { method: "POST", body: JSON.stringify({ query, variables }) });
+    if (!res.ok) throw new Error(`GraphQL ${res.status}`);
+    return res.json();
+  };
+  const p = await gql(`query($id: ID!) { product(id: $id) { options { id name optionValues { id name } } } }`, {
+    id: `gid://shopify/Product/${productId}`,
+  });
+  const wanted = new Map<string, string>();
+  for (const o of p.data?.product?.options ?? []) {
+    const en = OPTION_NAME_EN[o.name];
+    if (en) wanted.set(o.id, en);
+    if (o.name === "Couleur") for (const v of o.optionValues) {
+      const ev = toEnglishColour(v.name);
+      if (ev && ev !== v.name) wanted.set(v.id, ev);
+    }
+  }
+  if (wanted.size === 0) return 0;
+  const d = await gql(
+    `query($ids: [ID!]!) { translatableResourcesByIds(first: 250, resourceIds: $ids) { nodes { resourceId translatableContent { key digest } translations(locale: "en") { key } } } }`,
+    { ids: [...wanted.keys()] },
+  );
+  let count = 0;
+  for (const n of d.data?.translatableResourcesByIds?.nodes ?? []) {
+    if (n.translations.some((t: { key: string }) => t.key === "name")) continue;
+    const digest = n.translatableContent.find((c: { key: string }) => c.key === "name")?.digest;
+    if (!digest) continue;
+    const r = await gql(
+      `mutation($id: ID!, $t: [TranslationInput!]!) { translationsRegister(resourceId: $id, translations: $t) { userErrors { message } } }`,
+      { id: n.resourceId, t: [{ key: "name", value: wanted.get(n.resourceId), locale: "en", translatableContentDigest: digest }] },
+    );
+    if ((r.data?.translationsRegister?.userErrors ?? []).length === 0) count++;
+  }
+  return count;
+}
+
+const OPTION_NAME_EN: Record<string, string> = { Couleur: "Color", Taille: "Size", Titre: "Title" };
 
 /**
  * Register the English copy as real Shopify EN translations (see en-translations.ts for why

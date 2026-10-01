@@ -1,3 +1,4 @@
+import { toFrenchColour } from "./colour-names";
 import type {
   AosomProduct,
   AosomMergedProduct,
@@ -49,54 +50,10 @@ export function parseSku(sku: string): { base: string; colorCode: string | null;
   return { base: sku, colorCode: null, color: null };
 }
 
-/**
- * English feed color name → French, derived from COLOR_MAP's own values so the
- * two never drift apart. Keys are matched case-insensitively.
- */
-const EN_COLOR_TO_FR: Record<string, string> = {
-  black: "Noir",
-  "dark grey": "Gris foncé",
-  "dark gray": "Gris foncé",
-  "dark brown": "Brun foncé",
-  green: "Vert",
-  "light grey": "Gris pâle",
-  "light gray": "Gris pâle",
-  "light green": "Vert pâle",
-  silver: "Argent",
-  cream: "Crème",
-  charcoal: "Gris charbon",
-  grey: "Gris",
-  gray: "Gris",
-  blue: "Bleu",
-  brown: "Brun",
-  beige: "Beige",
-  "dark blue": "Bleu foncé",
-  "forest green": "Vert forêt",
-  khaki: "Kaki",
-  walnut: "Noyer",
-  white: "Blanc",
-  red: "Rouge",
-  pink: "Rose",
-  orange: "Orange",
-  natural: "Naturel",
-  coffee: "Café",
-};
-
-/**
- * Translate the Aosom feed's own `color` field to French — NOT derived from the
- * SKU string. A merged product's PSIN "base" SKU (e.g. a 2-in-1 bundle's parent
- * item) never carries a 2-letter color-code suffix, so deriving color from the
- * SKU (the old parseSku-based approach) silently left that one variant in raw
- * English while its siblings got the COLOR_MAP translation — producing a
- * duplicate, differently-spelled "Couleur" option on the same Shopify product
- * (e.g. "Red" + "Rouge"). Reading the feed's own color value for every row,
- * regardless of SKU shape, gives every variant of a merged product the same
- * translation path. Unmapped/compound values ("Black and Red") pass through
- * unchanged — a slightly-untranslated color beats a dropped one.
- */
 export function translateColor(rawColor: string): string {
-  const key = (rawColor || "").trim().toLowerCase();
-  return EN_COLOR_TO_FR[key] || rawColor;
+  // Phrase + compound translation lives in colour-names.ts (2026-09-30: the 25-entry map
+  // left 300+ variants in English on the FR store — "Yellow", "Oak", "Rustic Brown"…).
+  return toFrenchColour(rawColor);
 }
 
 // Color words for title stripping (FR + EN)
@@ -401,4 +358,46 @@ export async function selectProductImagesAsync(
     .sort((a, b) => KIND_RANK[a.c.kind] - KIND_RANK[b.c.kind] || a.i - b.i)
     .map(({ c }) => c.url);
   return ordered.slice(0, MAX_IMAGES_PER_PRODUCT);
+}
+
+/** Ceiling once every colour's own photo is guaranteed (Shopify allows 250; keep pages light). */
+export const MAX_IMAGES_WITH_VARIANT_PHOTOS = 16;
+
+/**
+ * The curated gallery is capped at MAX_IMAGES_PER_PRODUCT across ALL variants, so a product in
+ * 4 colours kept only the first colour's photos and the others had none on the page (audit
+ * 2026-09-30: ~716 colours on 419 products). Append each variant's own primary photo when the
+ * curation dropped it, so every colour can have its photo attached at creation. One photo per
+ * distinct colour is enough (sizes of the same colour share it).
+ */
+export function ensureVariantPrimaryImages(curated: string[], variants: AosomVariant[]): string[] {
+  const out = [...curated];
+  const seenColours = new Set<string>();
+  for (const v of variants) {
+    const colourKey = (v.color || v.sku).toLowerCase();
+    if (seenColours.has(colourKey)) continue;
+    seenColours.add(colourKey);
+    const own = v.images.filter((url) => {
+      const dim = smallestUrlDimension(url);
+      return dim === null || dim >= MIN_IMAGE_PX;
+    });
+    if (own.length === 0 || own.some((u) => out.includes(u))) continue;
+    if (out.length >= MAX_IMAGES_WITH_VARIANT_PHOTOS) break;
+    out.push(own[0]);
+  }
+  return out;
+}
+
+/**
+ * For each variant, the index in `gallery` of its own photo (first of its images present in
+ * the gallery), or -1. Used to attach a photo to every colour at product creation.
+ */
+export function variantImageIndexes(gallery: string[], variants: AosomVariant[]): number[] {
+  return variants.map((v) => {
+    for (const url of v.images) {
+      const i = gallery.indexOf(url);
+      if (i >= 0) return i;
+    }
+    return -1;
+  });
 }
