@@ -10,12 +10,20 @@
  * cache (by Aosom hash stem — see imageUrlStem), so the feed layer (feeds/source.ts) treats
  * a verdict from here exactly like one from the daily guard; no caller-side branching.
  *
- * Uses Gemini 2.5 Flash-Lite via Vercel AI Gateway (classifyProductImageGemini), not Claude:
- * ~0.40 $ for the ~10,500-image backlog vs ~18 $ on Claude's `maintenance` pool, for the
- * same validated STRICT_OVERLAY_PROMPT. See tests/vision-classifier-gemini.test.ts.
+ * Uses Gemini (classifyProductImageGemini) direct to Google — NOT Claude, and NOT Vercel AI
+ * Gateway: Google's own API gives this a genuine free tier at our volume, so the operator
+ * added Google Cloud billing (prepay) instead of a second Vercel billing relationship.
+ * Rough cost either way: ~1-2 $ for the whole ~10,500-image backlog vs ~18 $ on Claude's
+ * `maintenance` pool, for the same validated STRICT_OVERLAY_PROMPT. See
+ * tests/vision-classifier-gemini.test.ts.
  *
- * Requires AI_GATEWAY_API_KEY (not set as of 2026-10-01 — same gap as Studio's AI retouch).
- * Add a key + Gateway credit in the Vercel dashboard, or locally in .env.local to test.
+ * Requires GEMINI_API_KEY (direct Google API key — generativelanguage.googleapis.com, from
+ * https://aistudio.google.com/apikey, NOT a Vercel AI Gateway key). Add it to .env.local for
+ * a local run, or to the Vercel project's env vars for a deployed one.
+ *
+ * Rate-limited and capped deliberately: this is this project's first-ever real call to this
+ * API, so REQUESTS_PER_SECOND stays conservative and --limit defaults to a small pilot-sized
+ * batch rather than the whole backlog, until a run has actually been reviewed.
  *
  * DRY RUN by default: fetches every active+published product's gallery, reports how many
  * distinct photos are already cached vs still need a verdict, and classifies NOTHING.
@@ -27,10 +35,10 @@
  *
  *   # see the plan, classify nothing:
  *   node-x64 --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/classify-gallery-images.mts
- *   # pilot: classify the first 100 uncached photos:
- *   …classify-gallery-images.mts --apply --limit 100
- *   # the rest, run again (and again — it only ever touches what's still uncached):
- *   …classify-gallery-images.mts --apply --limit 2000
+ *   # pilot: classify the first 50 uncached photos (the default --limit if omitted):
+ *   …classify-gallery-images.mts --apply
+ *   # a bigger batch once the pilot looks right:
+ *   …classify-gallery-images.mts --apply --limit=2000
  */
 // tsx may surface a CommonJS module's named exports under `default` — every import below
 // goes through this fallback so the script works whether tsx resolves ESM or CJS.
@@ -49,14 +57,20 @@ const { getCachedImageVerdicts, putCachedImageVerdict } = (dbNs as unknown as { 
 
 const SHOPIFY_STORE = "27u5y2-kp.myshopify.com";
 const SHOPIFY_API_VERSION = "2025-01";
-const MODEL = "google/gemini-2.5-flash-lite";
-/** How many classifications run at once. Gemini/Gateway rate limits for this account are
- *  unverified, so this stays conservative rather than guessed higher. */
-const CONCURRENCY = 5;
+const MODEL = "gemini-3.5-flash-lite"; // label stored in image_classifications.model
+
+/** Requests per second. Deliberately conservative: this project has never made a single
+ *  successful call against this Google Cloud project's real (billed) quota — tune up once a
+ *  real run confirms Google isn't throttling at this rate. */
+const REQUESTS_PER_SECOND = 2;
+/** Default --limit when none is given. A first-ever run against a brand-new integration
+ *  gets a small, reviewable batch, not the whole backlog — raise it explicitly once a pilot
+ *  has been checked (see scripts/classify-gallery-images.mts's module doc). */
+const DEFAULT_LIMIT = 50;
 
 const APPLY = process.argv.includes("--apply");
 const limitArg = process.argv.find((a) => a.startsWith("--limit="));
-const LIMIT = limitArg ? parseInt(limitArg.slice("--limit=".length), 10) : Infinity;
+const LIMIT = limitArg ? parseInt(limitArg.slice("--limit=".length), 10) : DEFAULT_LIMIT;
 
 interface ShopifyImage { id?: number | string | null; src: string }
 interface ShopifyProduct { id: number | string; status: string; published_at: string | null; images?: ShopifyImage[] }
@@ -92,15 +106,17 @@ async function fetchAllActiveImages(): Promise<{ sku: string; stem: string; url:
   return out;
 }
 
-async function pool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
-  let i = 0;
-  async function worker() {
-    while (i < items.length) {
-      const item = items[i++];
-      await fn(item);
-    }
+/** Runs `fn` over `items` in windows of at most `perSecond` concurrent calls, pacing each
+ *  window to take at least one second — a real requests-per-second cap, not just a bounded
+ *  concurrency pool (which could burst far above perSecond/s if each call completes fast). */
+async function rateLimited<T>(items: T[], perSecond: number, fn: (item: T) => Promise<void>): Promise<void> {
+  for (let i = 0; i < items.length; i += perSecond) {
+    const chunk = items.slice(i, i + perSecond);
+    const startedAt = Date.now();
+    await Promise.all(chunk.map(fn));
+    const remaining = 1000 - (Date.now() - startedAt);
+    if (remaining > 0 && i + perSecond < items.length) await new Promise((r) => setTimeout(r, remaining));
   }
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
 }
 
 async function main() {
@@ -123,14 +139,14 @@ async function main() {
     console.log("\nDRY RUN — nothing classified, nothing written. --apply to run for real.");
     process.exit(0);
   }
-  if (!env.hasAiGatewayKey) {
-    console.log("\nABORT: AI_GATEWAY_API_KEY is not set. Add a key + Gateway credit in the Vercel");
-    console.log("dashboard (or .env.local for a local run) before using --apply.");
+  if (!env.hasGeminiKey) {
+    console.log("\nABORT: GEMINI_API_KEY is not set. Get one at https://aistudio.google.com/apikey");
+    console.log("and add it to .env.local (or the Vercel project's env vars) before using --apply.");
     process.exit(1);
   }
 
   let done = 0, flagged = 0, errors = 0;
-  await pool(toRun, CONCURRENCY, async (stem) => {
+  await rateLimited(toRun, REQUESTS_PER_SECOND, async (stem) => {
     const url = byStem.get(stem)!;
     try {
       const verdict = await classifyProductImageGemini(url);

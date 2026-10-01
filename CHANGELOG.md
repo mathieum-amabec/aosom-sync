@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.94.4] - 2026-10-01
+
+Switched the gallery classifier (v0.5.94.3) from Vercel AI Gateway to Google's Gemini API directly — cheaper at our volume (Google's own free tier applies; the Gateway doesn't offer one for this model) and one less billing relationship for a ~1-2 $ one-off job.
+
+### Changed
+
+- `classifyProductImageGemini` (`vision-classifier.ts`) now calls `generativelanguage.googleapis.com` directly (the Interactions API, `GEMINI_API_KEY`) instead of Vercel AI Gateway. Same validated `STRICT_OVERLAY_PROMPT`, same `ImageClassification` contract, same `image_classifications` cache — nothing downstream changes.
+- Model is `gemini-3.5-flash-lite`, not `gemini-2.5-flash-lite`: confirmed live that the 2.5 model is retired for any key created on a Google Cloud project ("no longer available to new users").
+- `scripts/classify-gallery-images.mts`: real requests-per-second pacing (not just a concurrency pool), and `--limit` now defaults to a 50-photo pilot instead of the whole backlog — this is the project's first-ever call to this API, so the first run is capped and reviewable by default; raise `--limit` explicitly once it looks right.
+
+### Known blocker (not resolved here)
+
+The Google Cloud project behind the operator's new key returns `402 — Your prepayment credits are depleted` on every call, confirmed 3 times live against production (including through the real script's `--apply` path, which failed safely: 0 cached, 3 clean error logs, nothing corrupted). The $5 prepay the operator believed they'd added has not taken effect as of this release — needs to be re-checked at https://ai.studio/projects for the project tied to this key (205730193449) before any real classification can run.
+
 ## [0.5.94.3] - 2026-10-01
 
 Found that a vision classifier already runs daily and already knows which product photos carry a marketing/measurement overlay — it just never protected the ad feeds, only the storefront's featured photo. Wired it in for free, and added a cheaper model for the part it never reaches.

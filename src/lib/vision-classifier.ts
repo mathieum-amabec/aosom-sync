@@ -187,60 +187,80 @@ export async function classifyProductImage(
  */
 export const GEMINI_CLASSIFY_PX = 384;
 
-const AI_GATEWAY_CHAT_URL = "https://ai-gateway.vercel.sh/v1/chat/completions";
+/**
+ * `gemini-2.5-flash-lite` is retired for any key created on a Google Cloud project (as
+ * opposed to a bare, no-project AI Studio key) — confirmed live 2026-10-01: a real call
+ * returned 404 "This model … is no longer available to new users … use
+ * models/gemini-3.5-flash-lite". That is what this points at.
+ */
+const GEMINI_MODEL = "gemini-3.5-flash-lite";
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
 
 /**
- * Classify a single gallery image — ANY position, not just pos-1 — using Gemini via Vercel
- * AI Gateway instead of Claude. Same validated STRICT_OVERLAY_PROMPT, same
- * `ImageClassification` contract, so a verdict from either model slots into the shared
- * `image_classifications` cache (`putCachedImageVerdict`) with no caller-side branching —
- * the feed layer (feeds/source.ts) doesn't care which model produced a given row.
+ * Classify a single gallery image — ANY position, not just pos-1 — using Gemini (direct
+ * Google API, not Claude). Same validated STRICT_OVERLAY_PROMPT, same `ImageClassification`
+ * contract, so a verdict from either model slots into the shared `image_classifications`
+ * cache (`putCachedImageVerdict`) with no caller-side branching — the feed layer
+ * (feeds/source.ts) doesn't care which model produced a given row.
  *
  * Why this exists (2026-10-01 investigation): the daily pos-1 guard (`image-compliance.ts`)
  * only ever classifies position 1 and whatever alternatives it scans while hunting for a
  * pos-1 replacement. Measured against the live catalog: position 1 is 96.5% covered,
  * positions 2+ (everything an ad feed's `additional_image_link` actually serves) only
  * 15.9%. Classifying that ~10,500-image backlog on Claude (this file's `maintenance` pool)
- * would cost roughly 18 $; Gemini 2.5 Flash-Lite at 384px costs roughly 0.40 $ for the same
- * set — see scripts/classify-gallery-images.mts, which runs this in bulk with the dry-run
- * default every write path in this repo uses for a bulk operation.
+ * would cost roughly 18 $; Gemini at 384px costs roughly 1-2 $ for the same set — see
+ * scripts/classify-gallery-images.mts, which runs this in bulk with the dry-run default
+ * every write path in this repo uses for a bulk operation.
  *
- * Requires `AI_GATEWAY_API_KEY` (`env.hasAiGatewayKey`) — throws if absent, deliberately: a
- * caller must check the flag ONCE before a whole batch and skip entirely, never call this
- * per-image and swallow 10,000 identical errors.
+ * Direct to Google, not through Vercel AI Gateway: Vercel charges no markup either way, but
+ * Google's own API has a genuine free tier at this volume (~1,000 req/day) that the Gateway
+ * doesn't offer for this model, and the operator preferred not to add a second billing
+ * relationship for a ~1-2 $ one-off job. Uses the Interactions API
+ * (POST .../v1beta/interactions, header `x-goog-api-key`), which Google's own 404 message
+ * above pointed at as the current path — NOT the older `models/{id}:generateContent`, which
+ * still exists but is being steered away from for new projects.
+ *
+ * Requires `GEMINI_API_KEY` (`env.hasGeminiKey`) — throws if absent, deliberately: a caller
+ * must check the flag ONCE before a whole batch and skip entirely, never call this per-image
+ * and swallow 10,000 identical errors.
  */
 export async function classifyProductImageGemini(
   imageUrl: string,
   options: { px?: number } = {},
 ): Promise<ImageClassification> {
   if (!imageUrl || !imageUrl.trim()) throw new Error("classifyProductImageGemini: empty imageUrl");
-  const apiKey = env.aiGatewayApiKey;
-  if (!apiKey) throw new Error("classifyProductImageGemini: AI_GATEWAY_API_KEY not set");
+  const apiKey = env.geminiApiKey;
+  if (!apiKey) throw new Error("classifyProductImageGemini: GEMINI_API_KEY not set");
 
-  const url = resizedUrl(imageUrl, options.px ?? GEMINI_CLASSIFY_PX);
-  const res = await fetch(AI_GATEWAY_CHAT_URL, {
+  const b64 = await downloadBase64(imageUrl, options.px ?? GEMINI_CLASSIFY_PX);
+  const res = await fetch(GEMINI_API_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    headers: { "x-goog-api-key": apiKey, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash-lite",
-      max_tokens: 400,
-      messages: [
-        { role: "system", content: STRICT_OVERLAY_PROMPT },
-        {
-          role: "user",
-          content: [
-            { type: "image_url", image_url: { url } },
-            { type: "text", text: "Classifie cette image." },
-          ],
-        },
+      model: GEMINI_MODEL,
+      input: [
+        { type: "text", text: STRICT_OVERLAY_PROMPT },
+        { type: "image", data: b64, mime_type: mediaTypeFor(imageUrl) },
+        { type: "text", text: "Classifie cette image." },
       ],
     }),
   });
   if (!res.ok) {
-    throw new Error(`classifyProductImageGemini: Gateway ${res.status} — ${(await res.text()).slice(0, 200)}`);
+    throw new Error(`classifyProductImageGemini: Gemini ${res.status} — ${(await res.text()).slice(0, 300)}`);
   }
-  const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  const text = (body.choices?.[0]?.message?.content ?? "").trim();
+  const body = (await res.json()) as {
+    steps?: { type?: string; content?: { type?: string; text?: string }[] }[];
+  };
+  // Response is a step sequence (thought steps interleaved with the model's own output) —
+  // only "model_output" steps carry the answer. See ai.google.dev/gemini-api/docs
+  // (Interactions API response shape).
+  const text = (body.steps ?? [])
+    .filter((s) => s.type === "model_output")
+    .flatMap((s) => s.content ?? [])
+    .filter((c) => c.type === "text")
+    .map((c) => c.text ?? "")
+    .join("")
+    .trim();
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error(`classifyProductImageGemini: no JSON in reply: ${text.slice(0, 120)}`);
 
