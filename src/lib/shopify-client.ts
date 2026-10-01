@@ -916,6 +916,56 @@ export async function fetchProductPublishStates(): Promise<
   return out;
 }
 
+/**
+ * Every product's status / Online-Store publication / tags, keyed by numeric id, via the GraphQL
+ * `products` connection — which, unlike the REST list above, includes ARCHIVED products, so an
+ * id missing from the map really means "deleted". ~8 pages of 250 for the current catalogue.
+ * Drives the import page's real-state view (import-job-state.ts).
+ */
+export async function fetchAllProductStates(): Promise<
+  Map<string, { status: "active" | "draft" | "archived"; published: boolean; tags: string[] }>
+> {
+  const out = new Map<string, { status: "active" | "draft" | "archived"; published: boolean; tags: string[] }>();
+  if (!env.hasShopifyToken) return out;
+
+  let after: string | null = null;
+  do {
+    const response = await shopifyFetch("/graphql.json", {
+      method: "POST",
+      body: JSON.stringify({
+        query: `query($after: String) {
+          products(first: 250, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            nodes { legacyResourceId status publishedAt tags }
+          }
+        }`,
+        variables: { after },
+      }),
+    });
+    if (!response.ok) throw new Error(`Shopify product-state fetch failed: ${response.status}`);
+    const body = (await response.json()) as {
+      data?: {
+        products: {
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+          nodes: { legacyResourceId: string; status: string; publishedAt: string | null; tags: string[] }[];
+        };
+      };
+      errors?: unknown;
+    };
+    if (!body.data) throw new Error(`Shopify product-state fetch failed: ${JSON.stringify(body.errors)}`);
+    for (const p of body.data.products.nodes) {
+      out.set(String(p.legacyResourceId), {
+        status: p.status.toLowerCase() as "active" | "draft" | "archived",
+        published: !!p.publishedAt && new Date(p.publishedAt).getTime() <= Date.now(),
+        tags: p.tags,
+      });
+    }
+    after = body.data.products.pageInfo.hasNextPage ? body.data.products.pageInfo.endCursor : null;
+  } while (after);
+
+  return out;
+}
+
 /** Current status + tags for a single product — what the intraday stock-check needs to flip
  * the stock-state tags (preserving the rest) without paging the whole catalog. Returns null
  * if the product no longer exists (404). Tags come back comma-separated; normalized to a list. */

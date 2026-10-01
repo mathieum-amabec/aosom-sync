@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.94.0] - 2026-09-30
+
+The import page now shows where each product really is: live or hidden on Shopify, still in stock at Aosom or not, and why. The queue status alone said "pending" for 91 products that were all already on Shopify.
+
+### Added
+
+- **Real state on the import page** — every line shows two badges (Shopify: en ligne / masqué / archivé / supprimé / pas créé; Aosom: en stock / rupture / retiré du flux) and a one-line reason. The stat cards became filter tabs: À importer, En ligne, Masqués mais en stock, Masqués (normal), Problèmes. The list renders 100 rows at a time.
+- `GET /api/import/state` — classifies every job from import_jobs + the `products` feed rows + one GraphQL pass over Shopify products (which includes archived ones, so a missing id really means deleted). Rules in `src/lib/import-job-state.ts`.
+- `scripts/cleanup-import-jobs.mts` — one-off, dry-run by default: moves unfinished jobs whose product already exists on Shopify to `done`, relinks jobs whose product was deleted and re-created, and sends jobs with nothing left on Shopify back to `pending`. Never touches Shopify or `needs_review` jobs.
+
+### Fixed
+
+- **Generate / Push buttons no longer target products already on Shopify** — a "pending" or "reviewing" job whose product exists is skipped by the bulk run and shows no Generate/Push button, so it cannot burn an LLM call or risk a duplicate.
+
 ## [0.5.93.1] - 2026-09-30
 
 The catalog "Nouveaux produits Aosom" sort works again. It returned a server error instead of the list.

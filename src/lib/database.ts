@@ -4594,6 +4594,35 @@ export async function getImportJobs(): Promise<Record<string, unknown>[]> {
   return result.rows.map(rowToObj);
 }
 
+/**
+ * Feed/stock/Shopify-link columns for a set of SKUs — what the import page needs to tell
+ * "still sellable" from "gone from the Aosom feed". Chunked IN lists keep each statement
+ * well under SQLite's bound-parameter limit and read only the requested rows.
+ */
+export async function getFeedRowsForSkus(
+  skus: string[],
+): Promise<{ sku: string; qty: number; lastSeenAt: number | null; shopifyProductId: string | null }[]> {
+  const db = await ensureSchema();
+  const unique = [...new Set(skus)];
+  const out: { sku: string; qty: number; lastSeenAt: number | null; shopifyProductId: string | null }[] = [];
+  for (let i = 0; i < unique.length; i += 500) {
+    const chunk = unique.slice(i, i + 500);
+    const result = await db.execute({
+      sql: `SELECT sku, qty, last_seen_at, shopify_product_id FROM products WHERE sku IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) {
+      out.push({
+        sku: r.sku as string,
+        qty: Number(r.qty) || 0,
+        lastSeenAt: r.last_seen_at == null ? null : Number(r.last_seen_at),
+        shopifyProductId: r.shopify_product_id ? String(r.shopify_product_id) : null,
+      });
+    }
+  }
+  return out;
+}
+
 export async function getImportJob(jobId: string): Promise<Record<string, unknown> | null> {
   const db = await ensureSchema();
   const result = await db.execute({ sql: `SELECT * FROM import_jobs WHERE id = ?`, args: [jobId] });
