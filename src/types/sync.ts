@@ -7,6 +7,11 @@ import type { AosomMergedProduct } from "./aosom";
 export interface ShopifyExistingProduct {
   shopifyId: string;
   title: string;
+  /** Storefront handle (free on the same REST call) — used to backfill products.shopify_handle
+   *  when reconciling a missing/stale link (see reconcileProductShopifyLinks). Optional so
+   *  every existing fixture/mock of this type doesn't need updating; mapShopifyProduct always
+   *  sets it. */
+  handle?: string;
   status: "active" | "draft" | "archived";
   variants: ShopifyExistingVariant[];
   images: string[];

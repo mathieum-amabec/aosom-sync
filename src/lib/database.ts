@@ -3170,18 +3170,79 @@ export async function getProductsForPriceAudit(): Promise<{ sku: string; price: 
  * as a permanently unavailable result. Drafting it is the right outcome, and the caller's own
  * guards (coverage floor, per-run cap, `auto-drafted` tagging) decide what actually happens.
  */
-export async function getStaleImportedProducts(maxAgeDays = 30): Promise<{ sku: string; shopify_product_id: string }[]> {
+export interface StaleImportedProduct {
+  shopify_product_id: string;
+  /** Every variant SKU of this Shopify product that we have a `products` row for. */
+  skus: string[];
+}
+
+/**
+ * Grouped by Shopify product, not by SKU row: a product is a candidate only when its
+ * FRESHEST sibling SKU (`MAX(last_seen_at)`) is still older than the window. Until
+ * 2026-09-30 this returned one row per SKU, so a single stale variant drafted the WHOLE
+ * product even when a sibling was still fresh and in stock — the same multi-variant bug the
+ * other feed-absence nets (removed-catalog, stock-reconcile) already guard against by
+ * requiring every SKU to be gone. See stale-catalog.ts's `computeStaleDrafts`, which now
+ * consumes one row per product.
+ */
+export async function getStaleImportedProducts(maxAgeDays = 30): Promise<StaleImportedProduct[]> {
   const db = await ensureSchema();
   const result = await db.execute({
-    sql: `SELECT sku, shopify_product_id FROM products
-          WHERE shopify_product_id IS NOT NULL AND last_seen_at < unixepoch() - 86400 * ?
-          ORDER BY last_seen_at ASC`,
+    sql: `SELECT shopify_product_id, GROUP_CONCAT(sku, '|') AS skus, MAX(last_seen_at) AS freshest
+          FROM products
+          WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''
+          GROUP BY shopify_product_id
+          HAVING MAX(last_seen_at) < unixepoch() - 86400 * ?
+          ORDER BY freshest ASC`,
     args: [maxAgeDays],
   });
   return result.rows.map((r) => {
     const o = rowToObj(r);
-    return { sku: o.sku as string, shopify_product_id: String(o.shopify_product_id) };
+    return { shopify_product_id: String(o.shopify_product_id), skus: String(o.skus).split("|") };
   });
+}
+
+/**
+ * Reconcile `products.shopify_product_id`/`shopify_handle` against Shopify's OWN current
+ * variant list — the authoritative source, since a SKU normally lives on exactly one Shopify
+ * product at a time. Fixes the gap left by `linkProductToShopify`'s best-effort, fire-and-forget
+ * write right after import (`import-pipeline.ts`): a swallowed failure there left a product
+ * permanently invisible to `getStaleImportedProducts` and the stock-check baseline, both of
+ * which require this column (2026-09-30 investigation: 193 products affected, spread from
+ * April through September, never self-healing). Called once at the start of every
+ * stale-catalog run, which has ALREADY paginated every Shopify product — so this costs zero
+ * extra Shopify API calls, only chunked Turso reads plus the targeted writes.
+ *
+ * Only writes SKUs whose row disagrees with Shopify (NULL, or linked to a different id —
+ * e.g. the product was deleted and re-created since). Returns how many SKUs it corrected.
+ */
+export async function reconcileProductShopifyLinks(
+  liveProducts: { shopifyId: string; handle: string | null; skus: string[] }[],
+): Promise<number> {
+  const db = await ensureSchema();
+  const allSkus = liveProducts.flatMap((p) => p.skus.map((sku) => ({ sku, shopifyId: p.shopifyId, handle: p.handle })));
+  if (allSkus.length === 0) return 0;
+
+  const current = new Map<string, string | null>();
+  for (let i = 0; i < allSkus.length; i += 500) {
+    const chunk = allSkus.slice(i, i + 500).map((s) => s.sku);
+    const result = await db.execute({
+      sql: `SELECT sku, shopify_product_id FROM products WHERE sku IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) current.set(r.sku as string, (r.shopify_product_id as string | null) || null);
+  }
+
+  const fixes = allSkus.filter((s) => current.has(s.sku) && current.get(s.sku) !== s.shopifyId);
+  if (fixes.length === 0) return 0;
+  await db.batch(
+    fixes.map((f) => ({
+      sql: `UPDATE products SET shopify_product_id = ?, shopify_handle = ? WHERE sku = ?`,
+      args: [f.shopifyId, f.handle, f.sku],
+    })),
+    "write",
+  );
+  return fixes.length;
 }
 
 export async function getAllSettings(): Promise<Record<string, string>> {
@@ -4592,6 +4653,71 @@ export async function getImportJobs(): Promise<Record<string, unknown>[]> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT * FROM import_jobs ORDER BY created_at DESC`);
   return result.rows.map(rowToObj);
+}
+
+/**
+ * Feed/stock/Shopify-link columns for a set of SKUs — what the import page needs to tell
+ * "still sellable" from "gone from the Aosom feed". Chunked IN lists keep each statement
+ * well under SQLite's bound-parameter limit and read only the requested rows.
+ */
+export async function getFeedRowsForSkus(
+  skus: string[],
+): Promise<{ sku: string; qty: number; lastSeenAt: number | null; shopifyProductId: string | null }[]> {
+  const db = await ensureSchema();
+  const unique = [...new Set(skus)];
+  const out: { sku: string; qty: number; lastSeenAt: number | null; shopifyProductId: string | null }[] = [];
+  for (let i = 0; i < unique.length; i += 500) {
+    const chunk = unique.slice(i, i + 500);
+    const result = await db.execute({
+      sql: `SELECT sku, qty, last_seen_at, shopify_product_id FROM products WHERE sku IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) {
+      out.push({
+        sku: r.sku as string,
+        qty: Number(r.qty) || 0,
+        lastSeenAt: r.last_seen_at == null ? null : Number(r.last_seen_at),
+        shopifyProductId: r.shopify_product_id ? String(r.shopify_product_id) : null,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Feed/stock rows for a set of Shopify product ids, by CURRENT link
+ * (`products.shopify_product_id`) rather than by a frozen SKU snapshot.
+ *
+ * Why this exists (2026-09-30 investigation): `getFeedRowsForSkus` looks up the exact SKU
+ * string an import_jobs row recorded at import time. When Aosom later corrects that SKU's
+ * colour/variant suffix (confirmed happening routinely — e.g. `84B-206BU` became
+ * `84B-206BK`), the daily sync starts seeing the product under the NEW string while the OLD
+ * one goes stale. The import page's classifier, reading only the frozen SKU, concluded the
+ * product was "gone from the feed" for 10 products that were in fact selling normally under
+ * their corrected SKU the whole time — a false positive, not a real discontinuation. Grouping
+ * by the Shopify id instead picks up whatever SKU currently carries the link, renamed or not.
+ * Returns one row per (shopifyProductId, sku) pair, bucketed by id.
+ */
+export async function getFeedRowsByShopifyIds(
+  shopifyIds: string[],
+): Promise<Map<string, { sku: string; qty: number; lastSeenAt: number | null }[]>> {
+  const db = await ensureSchema();
+  const unique = [...new Set(shopifyIds)].filter(Boolean);
+  const out = new Map<string, { sku: string; qty: number; lastSeenAt: number | null }[]>();
+  for (let i = 0; i < unique.length; i += 500) {
+    const chunk = unique.slice(i, i + 500);
+    const result = await db.execute({
+      sql: `SELECT sku, qty, last_seen_at, shopify_product_id FROM products WHERE shopify_product_id IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) {
+      const id = String(r.shopify_product_id);
+      const arr = out.get(id) ?? [];
+      arr.push({ sku: r.sku as string, qty: Number(r.qty) || 0, lastSeenAt: r.last_seen_at == null ? null : Number(r.last_seen_at) });
+      out.set(id, arr);
+    }
+  }
+  return out;
 }
 
 export async function getImportJob(jobId: string): Promise<Record<string, unknown> | null> {

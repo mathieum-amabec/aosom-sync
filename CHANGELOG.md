@@ -2,6 +2,31 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.94.1] - 2026-09-30
+
+Investigated the 10 products the "Problèmes" tab (0.5.94.0) flagged as live on Shopify but gone from the Aosom feed. All 10 turned out to be a false positive in that same new tab, not real discontinuations: Aosom had corrected each SKU's colour/variant suffix after we imported it (e.g. `84B-206BU` became `84B-206BK`), and the classifier compared against the SKU frozen at import time instead of whichever SKU currently carries the Shopify link. Separately, found and fixed a real (smaller) gap in the 30-day stale-catalog cron.
+
+### Fixed
+
+- **Import page "Problèmes" tab — renamed-SKU false positive** — `classifyAllImportJobs` now looks up feed freshness by the job's resolved Shopify product id (`getFeedRowsByShopifyIds`, new), not by the SKU frozen in `import_jobs.product_data` at import time. Confirmed on production: the "problem" bucket drops from 14 to 4, the 4 remaining being genuine deleted-product cases already handled by the existing cleanup script.
+- **`stale-catalog` judged staleness per SKU, not per product** — a single stale sibling variant could draft the whole product even while another sibling was still fresh and in stock, and briefly reactivate/re-draft it daily once stock-check saw the live sibling. `getStaleImportedProducts` now groups by `shopify_product_id` and requires every sibling SKU to be past the window.
+- **`stale-catalog` now self-heals `products.shopify_product_id`** — a new `reconcileProductShopifyLinks` runs at the start of every daily run (zero extra Shopify calls — it reuses the same paginated fetch), using Shopify's own current variant list as the source of truth. Production dry run: 13 SKUs whose link pointed at a deleted/recreated product, now self-correcting daily instead of staying wrong indefinitely.
+- `scripts/repair-orphaned-shopify-links.mts` — one-off, dry-run by default, for the same reconciliation against the current production backlog.
+
+## [0.5.94.0] - 2026-09-30
+
+The import page now shows where each product really is: live or hidden on Shopify, still in stock at Aosom or not, and why. The queue status alone said "pending" for 91 products that were all already on Shopify.
+
+### Added
+
+- **Real state on the import page** — every line shows two badges (Shopify: en ligne / masqué / archivé / supprimé / pas créé; Aosom: en stock / rupture / retiré du flux) and a one-line reason. The stat cards became filter tabs: À importer, En ligne, Masqués mais en stock, Masqués (normal), Problèmes. The list renders 100 rows at a time.
+- `GET /api/import/state` — classifies every job from import_jobs + the `products` feed rows + one GraphQL pass over Shopify products (which includes archived ones, so a missing id really means deleted). Rules in `src/lib/import-job-state.ts`.
+- `scripts/cleanup-import-jobs.mts` — one-off, dry-run by default: moves unfinished jobs whose product already exists on Shopify to `done`, relinks jobs whose product was deleted and re-created, and sends jobs with nothing left on Shopify back to `pending`. Never touches Shopify or `needs_review` jobs.
+
+### Fixed
+
+- **Generate / Push buttons no longer target products already on Shopify** — a "pending" or "reviewing" job whose product exists is skipped by the bulk run and shows no Generate/Push button, so it cannot burn an LLM call or risk a duplicate.
+
 ## [0.5.93.1] - 2026-09-30
 
 The catalog "Nouveaux produits Aosom" sort works again. It returned a server error instead of the list.

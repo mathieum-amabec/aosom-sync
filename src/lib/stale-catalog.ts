@@ -14,9 +14,10 @@
  * Mirrors the one-shot scripts/fix-stale-products.mjs, made idempotent: a product already
  * draft/archived on Shopify is skipped, and one that's gone (deleted) counts as failed.
  */
-import { getStaleImportedProducts } from "@/lib/database";
+import { getStaleImportedProducts, reconcileProductShopifyLinks, type StaleImportedProduct } from "@/lib/database";
 import { fetchAllShopifyProducts, updateShopifyProduct } from "@/lib/shopify-client";
 import { addAutoDraftedTag } from "@/lib/diff-engine";
+import type { ShopifyExistingProduct } from "@/types/sync";
 
 export const STALE_DAYS = 30;
 /** Spacing between Shopify draft writes → 2 requests/second. */
@@ -55,12 +56,16 @@ export interface StaleCatalogResult {
   failed: number;
   /** Candidates left untouched because the per-run WRITE_CAP was reached; next run drains them. */
   deferred: number;
+  /** SKUs whose products.shopify_product_id was missing or stale and got corrected this run
+   *  (see reconcileProductShopifyLinks) — how this cron closes its own blind spot daily. */
+  relinked: number;
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Pure orchestration. For each stale product, decide what to do:
+ * Pure orchestration. For each stale PRODUCT (every sibling SKU past the window — see
+ * getStaleImportedProducts), decide what to do:
  * - in `excludedIds` (carries the `exclude-stale` tag) → leave live (operator opt-out)
  * - active   → draft it (rate-limited via `sleepMs`)
  * - draft/archived → skip
@@ -72,13 +77,13 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * work instead of burning the cap on no-ops.
  */
 export async function computeStaleDrafts(
-  stale: Array<{ sku: string; shopify_product_id: string }>,
+  stale: StaleImportedProduct[],
   statusById: Map<string, string>,
   draftFn: (shopifyId: string) => Promise<void>,
   sleepMs: number = RATE_LIMIT_MS,
   excludedIds: Set<string> = new Set(),
   writeCap: number = WRITE_CAP,
-): Promise<StaleCatalogResult> {
+): Promise<Omit<StaleCatalogResult, "relinked">> {
   let drafted = 0, skipped = 0, excluded = 0, failed = 0, deferred = 0;
   for (const p of stale) {
     if (excludedIds.has(p.shopify_product_id)) { excluded++; continue; } // operator opt-out
@@ -91,22 +96,38 @@ export async function computeStaleDrafts(
       drafted++;
     } catch (err) {
       failed++;
-      console.error(`[stale-catalog] draft failed for ${p.sku}:`, err);
+      console.error(`[stale-catalog] draft failed for ${p.skus.join(",")}:`, err);
     }
     if (sleepMs > 0) await wait(sleepMs); // 2 req/sec
   }
   return { stale: stale.length, drafted, skipped, excluded, failed, deferred };
 }
 
+/**
+ * Reconciliation input for reconcileProductShopifyLinks, built from the SAME paginated
+ * Shopify fetch runStaleCatalogDraft already makes — zero extra API calls.
+ */
+function toReconcileInput(live: ShopifyExistingProduct[]): { shopifyId: string; handle: string | null; skus: string[] }[] {
+  return live.map((p) => ({ shopifyId: p.shopifyId, handle: p.handle || null, skus: p.variants.map((v) => v.sku).filter(Boolean) }));
+}
+
 /** Run the stale-catalog draft against Turso + the live Shopify catalog. */
 export async function runStaleCatalogDraft(maxAgeDays = STALE_DAYS): Promise<StaleCatalogResult> {
-  const stale = await getStaleImportedProducts(maxAgeDays);
-  if (stale.length === 0) return { stale: 0, drafted: 0, skipped: 0, excluded: 0, failed: 0, deferred: 0 };
-
   // One paginated fetch for every product's current status — cheaper and gentler on the API
   // than a GET per stale product, and lets us skip ones already drafted (idempotent re-runs).
   // The same fetch already carries tags, so the `exclude-stale` opt-out is free.
   const live = await fetchAllShopifyProducts();
+
+  // Close the stale-catalog/stock-check blind spot BEFORE computing candidates: a product
+  // whose products.shopify_product_id was never set (or points at a deleted/recreated
+  // product) is invisible to getStaleImportedProducts no matter how long it's been gone —
+  // see reconcileProductShopifyLinks's doc comment for the 2026-09-30 investigation. Running
+  // this first means a newly-orphaned link can never go unseen for more than one day.
+  const relinked = await reconcileProductShopifyLinks(toReconcileInput(live));
+
+  const stale = await getStaleImportedProducts(maxAgeDays);
+  if (stale.length === 0) return { stale: 0, drafted: 0, skipped: 0, excluded: 0, failed: 0, deferred: 0, relinked };
+
   const statusById = new Map(live.map((p) => [p.shopifyId, p.status]));
   const tagsById = new Map(live.map((p) => [p.shopifyId, p.tags]));
   const excludedIds = new Set(
@@ -121,5 +142,6 @@ export async function runStaleCatalogDraft(maxAgeDays = STALE_DAYS): Promise<Sta
   const draftAndTag = (shopifyId: string) =>
     updateShopifyProduct(shopifyId, { status: "draft", tags: addAutoDraftedTag(tagsById.get(shopifyId) ?? []) });
 
-  return computeStaleDrafts(stale, statusById, draftAndTag, RATE_LIMIT_MS, excludedIds);
+  const result = await computeStaleDrafts(stale, statusById, draftAndTag, RATE_LIMIT_MS, excludedIds);
+  return { ...result, relinked };
 }

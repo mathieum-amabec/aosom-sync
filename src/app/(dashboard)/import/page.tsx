@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import DOMPurify from "isomorphic-dompurify";
 import type { ImportJob } from "@/lib/import-pipeline";
+import type { ImportBucket, ImportJobState } from "@/lib/import-job-state";
 import {
   shouldTripCircuitBreaker,
   CIRCUIT_BREAKER_MIN_SAMPLE,
@@ -10,6 +11,18 @@ import {
 } from "@/lib/import-batch-guard";
 
 const SHOPIFY_ADMIN_URL = "https://admin.shopify.com/store/27u5y2-kp";
+
+/** Tabs = the real state of each job (import-job-state.ts), not the queue status. */
+type Tab = "all" | ImportBucket;
+const TABS: { key: Tab; label: string; color: string }[] = [
+  { key: "all", label: "Tous", color: "text-white" },
+  { key: "to_import", label: "À importer", color: "text-yellow-400" },
+  { key: "live", label: "En ligne", color: "text-green-400" },
+  { key: "hidden_in_stock", label: "Masqués mais en stock", color: "text-orange-400" },
+  { key: "hidden_intentional", label: "Masqués (normal)", color: "text-gray-400" },
+  { key: "problem", label: "Problèmes", color: "text-red-400" },
+];
+const PAGE_SIZE = 100;
 
 interface BulkProgress {
   total: number;
@@ -38,6 +51,12 @@ export default function ImportPage() {
     running: false, startedAt: null, errorList: [], circuitBreakerTripped: false,
   });
   const stopRef = useRef(false);
+  // Real state per job (Shopify + Aosom feed). Loaded after the list — it needs a full
+  // Shopify pass, so the list renders first and the badges/tabs fill in a few seconds later.
+  const [states, setStates] = useState<Record<string, ImportJobState> | null>(null);
+  const [stateError, setStateError] = useState<string | null>(null);
+  const [tab, setTab] = useState<Tab>("all");
+  const [shown, setShown] = useState(PAGE_SIZE);
 
   async function fetchJobs() {
     try {
@@ -50,8 +69,21 @@ export default function ImportPage() {
     setLoading(false);
   }
 
+  async function fetchStates() {
+    setStateError(null);
+    try {
+      const res = await fetch("/api/import/state");
+      const data = await res.json();
+      if (data.success) setStates(data.data);
+      else setStateError(data.error || `HTTP ${res.status}`);
+    } catch (err) {
+      setStateError(err instanceof Error ? err.message : "Erreur réseau");
+    }
+  }
+
   useEffect(() => {
     fetchJobs();
+    fetchStates();
   }, []);
 
   async function handleGenerate(jobId: string) {
@@ -109,7 +141,11 @@ export default function ImportPage() {
   // ─── Bulk Generate ───────────────────────────────────────────
 
   const startBulk = useCallback(async (jobIds: string[]) => {
-    const targets = jobs.filter(j => jobIds.includes(j.id) && j.status === "pending");
+    // Never regenerate/push a "pending" job whose product already exists on Shopify (the
+    // queue status drifts — see import-job-state.ts); it would only burn an LLM call.
+    const targets = jobs.filter(
+      j => jobIds.includes(j.id) && j.status === "pending" && !(states?.[j.id]?.shopifyId),
+    );
     if (targets.length === 0) return;
 
     if (!confirm(`You are about to generate and push ${targets.length} products to Shopify. Continue?`)) return;
@@ -194,7 +230,7 @@ export default function ImportPage() {
     }
 
     setBulk(prev => ({ ...prev, running: false, circuitBreakerTripped }));
-  }, [jobs]);
+  }, [jobs, states]);
 
   function handleBulkAll() {
     const pendingIds = jobs.filter(j => j.status === "pending").map(j => j.id);
@@ -272,11 +308,14 @@ export default function ImportPage() {
   // ─── Computed values ─────────────────────────────────────────
 
   const pending = jobs.filter(j => j.status === "pending").length;
-  const reviewing = jobs.filter(j => j.status === "reviewing").length;
-  const done = jobs.filter(j => j.status === "done").length;
   const errored = jobs.filter(j => j.status === "error").length;
-  const needsReviewCount = jobs.filter(j => j.status === "needs_review").length;
   const selectedPending = jobs.filter(j => selected.has(j.id) && j.status === "pending").length;
+
+  const tabCounts: Record<Tab, number> = {
+    all: jobs.length, to_import: 0, live: 0, hidden_in_stock: 0, hidden_intentional: 0, problem: 0,
+  };
+  if (states) for (const j of jobs) { const b = states[j.id]?.bucket; if (b) tabCounts[b]++; }
+  const visibleJobs = tab === "all" || !states ? jobs : jobs.filter(j => states[j.id]?.bucket === tab);
 
   const etaSeconds = bulk.running && bulk.done > 0 && bulk.startedAt
     ? Math.round(((Date.now() - bulk.startedAt) / bulk.done) * (bulk.total - bulk.done) / 1000)
@@ -327,15 +366,31 @@ export default function ImportPage() {
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 mb-6">
-        <StatCard label="Total" value={jobs.length} color="text-white" />
-        <StatCard label="Pending" value={pending} color="text-yellow-400" />
-        <StatCard label="Ready" value={reviewing} color="text-blue-400" />
-        <StatCard label="Imported" value={done} color="text-green-400" />
-        <StatCard label="Errors" value={errored} color="text-red-400" />
-        <StatCard label="Needs Review" value={needsReviewCount} color="text-amber-400" />
+      {/* Real-state tabs (Shopify + Aosom feed) — click to filter */}
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 mb-2">
+        {TABS.map((t) => (
+          <StatCard
+            key={t.key}
+            label={t.label}
+            value={t.key === "all" || states ? tabCounts[t.key] : null}
+            color={t.color}
+            active={tab === t.key}
+            onClick={() => { setTab(t.key); setShown(PAGE_SIZE); }}
+          />
+        ))}
       </div>
+      <p className="text-xs text-gray-500 mb-6">
+        {stateError ? (
+          <span className="text-red-400">
+            Vérification Shopify impossible : {stateError}{" "}
+            <button onClick={fetchStates} className="underline">Réessayer</button>
+          </span>
+        ) : states ? (
+          "État réel vérifié sur Shopify et dans le flux Aosom."
+        ) : (
+          "Vérification de l’état réel sur Shopify…"
+        )}
+      </p>
 
       {/* Bulk Progress Bar */}
       {(bulk.running || bulk.done > 0) && (
@@ -420,14 +475,19 @@ export default function ImportPage() {
             </div>
           )}
 
-          {jobs.map((job) => (
+          {visibleJobs.length === 0 && (
+            <div className="p-8 bg-gray-900 border border-gray-800 rounded-xl text-center text-sm text-gray-500">
+              Rien dans cet onglet.
+            </div>
+          )}
+          {visibleJobs.slice(0, shown).map((job) => (
             <div
               key={job.id}
               className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden"
             >
               {/* Header */}
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4">
-                {job.status === "pending" && !bulk.running && (
+                {job.status === "pending" && !bulk.running && !states?.[job.id]?.shopifyId && (
                   <input
                     type="checkbox"
                     checked={selected.has(job.id)}
@@ -442,6 +502,7 @@ export default function ImportPage() {
                     </h4>
                     <ImportStatusBadge status={job.status} />
                   </div>
+                  {states?.[job.id] && <RealStateLine state={states[job.id]} />}
                   <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
                     <span>{job.product.brand}</span>
                     <span>{job.product.variants.length} variant(s)</span>
@@ -453,7 +514,7 @@ export default function ImportPage() {
                   </div>
                 </div>
                 <div className="flex gap-2 shrink-0 w-full sm:w-auto [&>*]:flex-1 sm:[&>*]:flex-none">
-                  {job.status === "pending" && !bulk.running && (
+                  {job.status === "pending" && !bulk.running && !states?.[job.id]?.shopifyId && (
                     <button
                       onClick={() => handleGenerate(job.id)}
                       className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors"
@@ -461,7 +522,7 @@ export default function ImportPage() {
                       Generate
                     </button>
                   )}
-                  {job.status === "reviewing" && (
+                  {job.status === "reviewing" && !states?.[job.id]?.shopifyId && (
                     <>
                       <button
                         onClick={() =>
@@ -481,9 +542,9 @@ export default function ImportPage() {
                       </button>
                     </>
                   )}
-                  {job.status === "done" && job.shopifyId && (
+                  {(states?.[job.id]?.shopifyId ?? (job.status === "done" ? job.shopifyId : null)) && (
                     <a
-                      href={`${SHOPIFY_ADMIN_URL}/products/${job.shopifyId}`}
+                      href={`${SHOPIFY_ADMIN_URL}/products/${states?.[job.id]?.shopifyId ?? job.shopifyId}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-xs font-medium rounded-lg transition-colors"
@@ -534,6 +595,14 @@ export default function ImportPage() {
               )}
             </div>
           ))}
+          {visibleJobs.length > shown && (
+            <button
+              onClick={() => setShown((n) => n + PAGE_SIZE)}
+              className="w-full py-2 bg-gray-900 border border-gray-800 hover:bg-gray-800 rounded-xl text-sm text-gray-300"
+            >
+              Afficher {Math.min(PAGE_SIZE, visibleJobs.length - shown)} de plus ({visibleJobs.length - shown} restants)
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -544,15 +613,54 @@ function StatCard({
   label,
   value,
   color,
+  active,
+  onClick,
 }: {
   label: string;
-  value: number;
+  /** null = still loading. */
+  value: number | null;
   color: string;
+  active: boolean;
+  onClick: () => void;
 }) {
   return (
-    <div className="p-3 md:p-4 bg-gray-900 border border-gray-800 rounded-xl">
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`p-3 md:p-4 text-left bg-gray-900 border rounded-xl transition-colors hover:bg-gray-800 ${
+        active ? "border-blue-500" : "border-gray-800"
+      }`}
+    >
       <p className="text-[10px] md:text-xs text-gray-500">{label}</p>
-      <p className={`text-xl md:text-2xl font-bold mt-1 ${color}`}>{value}</p>
+      <p className={`text-xl md:text-2xl font-bold mt-1 ${color}`}>{value ?? "…"}</p>
+    </button>
+  );
+}
+
+const SHOPIFY_LABEL: Record<ImportJobState["shopify"], { text: string; cls: string }> = {
+  live: { text: "Shopify : en ligne", cls: "text-green-400 border-green-800/50 bg-green-900/30" },
+  hidden: { text: "Shopify : masqué", cls: "text-orange-400 border-orange-800/50 bg-orange-900/30" },
+  archived: { text: "Shopify : archivé", cls: "text-gray-400 border-gray-700 bg-gray-800" },
+  deleted: { text: "Shopify : supprimé", cls: "text-red-400 border-red-800/50 bg-red-900/30" },
+  not_created: { text: "Shopify : pas créé", cls: "text-gray-400 border-gray-700 bg-gray-800" },
+};
+const FEED_LABEL: Record<ImportJobState["feed"], { text: string; cls: string }> = {
+  in_stock: { text: "Aosom : en stock", cls: "text-green-400 border-green-800/50 bg-green-900/30" },
+  out_of_stock: { text: "Aosom : rupture", cls: "text-amber-400 border-amber-800/50 bg-amber-900/30" },
+  gone: { text: "Aosom : retiré du flux", cls: "text-red-400 border-red-800/50 bg-red-900/30" },
+  unknown: { text: "Aosom : inconnu", cls: "text-gray-400 border-gray-700 bg-gray-800" },
+};
+
+/** Where the product really is (Shopify), whether Aosom still sells it, and why it's in its tab. */
+function RealStateLine({ state }: { state: ImportJobState }) {
+  const s = SHOPIFY_LABEL[state.shopify];
+  const f = FEED_LABEL[state.feed];
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+      <span className={`px-1.5 py-0.5 rounded border text-[11px] ${s.cls}`}>{s.text}</span>
+      <span className={`px-1.5 py-0.5 rounded border text-[11px] ${f.cls}`}>{f.text}</span>
+      <span className="text-[11px] text-gray-400">{state.reason}</span>
     </div>
   );
 }
