@@ -17,7 +17,7 @@ const mockRecordPriceFloorIncident = vi.hoisted(() => vi.fn().mockResolvedValue(
 vi.mock("@/lib/database", () => ({ recordPriceFloorIncident: mockRecordPriceFloorIncident }));
 
 // Import after mocks
-const { updateShopifyVariantPrice, createShopifyProduct, fetchShopifyVariantsPage } = await import("@/lib/shopify-client");
+const { updateShopifyVariantPrice, createShopifyProduct, fetchShopifyVariantsPage, attachVariantImages, registerOptionEnTranslations } = await import("@/lib/shopify-client");
 
 import type { AosomMergedProduct } from "@/types/aosom";
 import type { GeneratedContent } from "@/lib/content-generator";
@@ -413,6 +413,8 @@ describe("createShopifyProduct — EN translations registered at creation", () =
       }
       if (url.endsWith("/graphql.json")) {
         const body = JSON.parse(String(opts?.body));
+        // Option-translation lookup (registerOptionEnTranslations): no options → nothing to do.
+        if (body.query.includes("product(id")) return { ok: true, json: async () => ({ data: { product: { options: [] } } }) };
         if (body.query.includes("translatableResource")) {
           return { ok: true, json: async () => ({ data: { translatableResource: { translatableContent: [
             { key: "title", digest: "d-title" }, { key: "body_html", digest: "d-body" },
@@ -451,5 +453,58 @@ describe("createShopifyProduct — EN translations registered at creation", () =
   it("still returns the created product when translation registration fails (best-effort)", async () => {
     route([{ message: "boom" }]);
     await expect(createShopifyProduct(mergedFixture(), contentFixture({ titleEn: "Office Chair" }))).resolves.toEqual({ id: "555", handle: "chaise" });
+  });
+});
+
+describe("attachVariantImages", () => {
+  beforeEach(() => mockFetch.mockReset());
+  const merged = (variants: { sku: string; color: string; images: string[] }[], images: string[]) =>
+    ({ ...mergedFixture(), images, variants: variants.map((v) => ({ ...mergedFixture().variants[0], ...v })) }) as AosomMergedProduct;
+  const puts = () => mockFetch.mock.calls.filter((c) => c[1]?.method === "PUT").map((c) => JSON.parse(c[1].body).variant);
+
+  it("gives each colour its own photo, and the pos-1 photo to a colour without one (never only some variants)", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    const n = await attachVariantImages(
+      { variants: [{ id: 1, sku: "BK" }, { id: 2, sku: "WT" }, { id: 3, sku: "GY" }], images: [{ id: 101 }, { id: 102 }, { id: 103 }] },
+      merged([{ sku: "BK", color: "Noir", images: ["b"] }, { sku: "WT", color: "Blanc", images: ["w"] }, { sku: "GY", color: "Gris", images: ["missing"] }], ["b", "x", "w"]),
+    );
+    expect(n).toBe(3);
+    expect(puts()).toEqual([{ id: 1, image_id: 101 }, { id: 2, image_id: 103 }, { id: 3, image_id: 101 }]);
+  });
+
+  it("leaves single-colour products alone", async () => {
+    const n = await attachVariantImages(
+      { variants: [{ id: 1, sku: "A" }, { id: 2, sku: "B" }], images: [{ id: 101 }] },
+      merged([{ sku: "A", color: "Noir", images: ["a"] }, { sku: "B", color: "Noir", images: ["a"] }], ["a"]),
+    );
+    expect(n).toBe(0);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("registerOptionEnTranslations", () => {
+  beforeEach(() => mockFetch.mockReset());
+  it("translates option names and French colour values, skipping already-translated ones", async () => {
+    const registered: { id: string; value: string }[] = [];
+    mockFetch.mockImplementation(async (_url?: string, opts?: RequestInit) => {
+      if (!opts?.body) return { ok: true, json: async () => ({}) };
+      const body = JSON.parse(String(opts.body));
+      if (body.query.includes("product(id")) {
+        return { ok: true, json: async () => ({ data: { product: { options: [
+          { id: "opt-c", name: "Couleur", optionValues: [{ id: "v-noir", name: "Noir" }, { id: "v-plaid", name: "Plaid" }] },
+          { id: "opt-t", name: "Taille", optionValues: [{ id: "v-s", name: "120 cm" }] },
+        ] } } }) };
+      }
+      if (body.query.includes("translatableResourcesByIds")) {
+        return { ok: true, json: async () => ({ data: { translatableResourcesByIds: { nodes: body.variables.ids.map((id: string) => ({
+          resourceId: id, translatableContent: [{ key: "name", digest: `d-${id}` }], translations: id === "opt-t" ? [{ key: "name" }] : [],
+        })) } } }) };
+      }
+      registered.push({ id: body.variables.id, value: body.variables.t[0].value });
+      return { ok: true, json: async () => ({ data: { translationsRegister: { userErrors: [] } } }) };
+    });
+    const n = await registerOptionEnTranslations("555");
+    expect(n).toBe(2);
+    expect(registered).toEqual([{ id: "opt-c", value: "Color" }, { id: "v-noir", value: "Black" }]);
   });
 });

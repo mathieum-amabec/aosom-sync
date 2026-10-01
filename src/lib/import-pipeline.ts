@@ -1,5 +1,5 @@
 import { fetchAosomCatalog } from "./csv-fetcher";
-import { mergeVariants, selectProductImagesAsync } from "./variant-merger";
+import { mergeVariants, selectProductImagesAsync, ensureVariantPrimaryImages } from "./variant-merger";
 import { enforceCleanPrimaryImage } from "./image-compliance-audit";
 import { generateProductContent, backfillSeoFields, type GeneratedContent } from "./content-generator";
 import { runQualityGates } from "./import-quality-gates";
@@ -156,7 +156,9 @@ export async function queueForImport(skus: string[]): Promise<QueueForImportResu
       console.warn(`[IMPORT] ${rawProduct.groupKey}: vérification pos-1 impossible (importé tel quel): ${guard.reason ?? "aucun verdict"}`);
     }
 
-    const product = { ...rawProduct, images: guard.images };
+    // Every colour keeps its own primary photo, even past the 8-photo cap (see
+    // ensureVariantPrimaryImages) — createShopifyProduct then attaches it to its variants.
+    const product = { ...rawProduct, images: ensureVariantPrimaryImages(guard.images, rawProduct.variants) };
 
     // Defensive re-check, not the primary guard anymore (that's the per-SKU filter
     // above, before merge). Catches only a race: the product got imported by a
