@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.94.1] - 2026-09-30
+
+Investigated the 10 products the "Problèmes" tab (0.5.94.0) flagged as live on Shopify but gone from the Aosom feed. All 10 turned out to be a false positive in that same new tab, not real discontinuations: Aosom had corrected each SKU's colour/variant suffix after we imported it (e.g. `84B-206BU` became `84B-206BK`), and the classifier compared against the SKU frozen at import time instead of whichever SKU currently carries the Shopify link. Separately, found and fixed a real (smaller) gap in the 30-day stale-catalog cron.
+
+### Fixed
+
+- **Import page "Problèmes" tab — renamed-SKU false positive** — `classifyAllImportJobs` now looks up feed freshness by the job's resolved Shopify product id (`getFeedRowsByShopifyIds`, new), not by the SKU frozen in `import_jobs.product_data` at import time. Confirmed on production: the "problem" bucket drops from 14 to 4, the 4 remaining being genuine deleted-product cases already handled by the existing cleanup script.
+- **`stale-catalog` judged staleness per SKU, not per product** — a single stale sibling variant could draft the whole product even while another sibling was still fresh and in stock, and briefly reactivate/re-draft it daily once stock-check saw the live sibling. `getStaleImportedProducts` now groups by `shopify_product_id` and requires every sibling SKU to be past the window.
+- **`stale-catalog` now self-heals `products.shopify_product_id`** — a new `reconcileProductShopifyLinks` runs at the start of every daily run (zero extra Shopify calls — it reuses the same paginated fetch), using Shopify's own current variant list as the source of truth. Production dry run: 13 SKUs whose link pointed at a deleted/recreated product, now self-correcting daily instead of staying wrong indefinitely.
+- `scripts/repair-orphaned-shopify-links.mts` — one-off, dry-run by default, for the same reconciliation against the current production backlog.
+
 ## [0.5.94.0] - 2026-09-30
 
 The import page now shows where each product really is: live or hidden on Shopify, still in stock at Aosom or not, and why. The queue status alone said "pending" for 91 products that were all already on Shopify.

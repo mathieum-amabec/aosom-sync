@@ -1,13 +1,15 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { computeStaleDrafts } from "@/lib/stale-catalog";
 
 describe("computeStaleDrafts", () => {
+  // One row per PRODUCT now (every sibling SKU past the window), not per SKU — see
+  // getStaleImportedProducts and the 2026-09-30 multi-variant over-draft fix.
   const stale = [
-    { sku: "A", shopify_product_id: "1" }, // active → draft
-    { sku: "B", shopify_product_id: "2" }, // already draft → skip
-    { sku: "C", shopify_product_id: "3" }, // archived → skip
-    { sku: "D", shopify_product_id: "4" }, // not on Shopify (deleted) → failed
-    { sku: "E", shopify_product_id: "5" }, // active but draft write throws → failed
+    { shopify_product_id: "1", skus: ["A"] }, // active → draft
+    { shopify_product_id: "2", skus: ["B"] }, // already draft → skip
+    { shopify_product_id: "3", skus: ["C"] }, // archived → skip
+    { shopify_product_id: "4", skus: ["D"] }, // not on Shopify (deleted) → failed
+    { shopify_product_id: "5", skus: ["E1", "E2"] }, // active but draft write throws → failed
   ];
   const statusById = new Map([["1", "active"], ["2", "draft"], ["3", "archived"], ["5", "active"]]);
 
@@ -42,6 +44,20 @@ describe("computeStaleDrafts", () => {
     expect(drafted).toEqual([]); // "1" excluded; "5" attempted but throws
     expect(draftFn).not.toHaveBeenCalledWith("1"); // excluded → never drafted
   });
+
+  it("drafts the whole product once, even with several stale siblings — never once per SKU", async () => {
+    // Regression for the pre-2026-09-30 bug: one row per SKU meant a product with N stale
+    // variants issued N draft writes and over-counted `drafted` against the cap.
+    const drafted: string[] = [];
+    const r = await computeStaleDrafts(
+      [{ shopify_product_id: "9", skus: ["X1", "X2", "X3"] }],
+      new Map([["9", "active"]]),
+      async (id) => { drafted.push(id); },
+      0,
+    );
+    expect(drafted).toEqual(["9"]); // one write, not three
+    expect(r).toEqual({ stale: 1, drafted: 1, skipped: 0, excluded: 0, failed: 0, deferred: 0 });
+  });
 });
 
 // ─── WRITE_CAP — introduced with the `qty > 0` removal (2026-09-14) ───
@@ -53,7 +69,7 @@ describe("computeStaleDrafts", () => {
 
 describe("computeStaleDrafts — per-run write cap", () => {
   const many = (n: number) =>
-    Array.from({ length: n }, (_, i) => ({ sku: `S${i}`, shopify_product_id: String(i) }));
+    Array.from({ length: n }, (_, i) => ({ shopify_product_id: String(i), skus: [`S${i}`] }));
   const allActive = (n: number) =>
     new Map(Array.from({ length: n }, (_, i) => [String(i), "active"]));
 
@@ -100,5 +116,72 @@ describe("computeStaleDrafts — per-run write cap", () => {
     expect(r2.drafted).toBe(150);
     expect(r2.deferred).toBe(0);
     expect(r1.drafted + r2.drafted).toBe(400); // nothing lost, nothing drafted twice
+  });
+});
+
+// ─── runStaleCatalogDraft — reconciliation wiring (2026-09-30) ───
+//
+// The 30-day sweep only ever sees a product through products.shopify_product_id. A past
+// import that left that link unset (or pointing at a deleted/recreated product) was invisible
+// to it forever — 193 products affected in production, accumulating since April. These lock
+// that the daily run now repairs the link FIRST, using the same Shopify fetch it already pages,
+// before it ever computes stale candidates — see reconcileProductShopifyLinks in database.ts.
+
+vi.mock("@/lib/database", () => ({
+  getStaleImportedProducts: vi.fn(),
+  reconcileProductShopifyLinks: vi.fn(),
+}));
+vi.mock("@/lib/shopify-client", () => ({
+  fetchAllShopifyProducts: vi.fn(),
+  updateShopifyProduct: vi.fn(),
+}));
+
+describe("runStaleCatalogDraft — reconciliation wiring", () => {
+  const product = (over: Partial<{ shopifyId: string; handle: string; status: string; tags: string[]; skus: string[] }> = {}) => ({
+    shopifyId: over.shopifyId ?? "1",
+    handle: over.handle ?? "my-product",
+    status: over.status ?? "active",
+    tags: over.tags ?? [],
+    variants: (over.skus ?? ["SKU-1"]).map((sku) => ({ sku })),
+  });
+
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("reconciles links before computing stale candidates, and surfaces the count", async () => {
+    const dbMod = await import("@/lib/database");
+    const shopifyMod = await import("@/lib/shopify-client");
+    const live = [product({ shopifyId: "1", skus: ["SKU-1", "SKU-2"] })];
+    vi.mocked(shopifyMod.fetchAllShopifyProducts).mockResolvedValue(live as never);
+    vi.mocked(dbMod.reconcileProductShopifyLinks).mockResolvedValue(2);
+    vi.mocked(dbMod.getStaleImportedProducts).mockResolvedValue([]);
+
+    const { runStaleCatalogDraft } = await import("@/lib/stale-catalog");
+    const result = await runStaleCatalogDraft();
+
+    expect(dbMod.reconcileProductShopifyLinks).toHaveBeenCalledWith([
+      { shopifyId: "1", handle: "my-product", skus: ["SKU-1", "SKU-2"] },
+    ]);
+    // reconcile must run (and its input built) BEFORE the stale query, so a link it just
+    // fixed is visible to getStaleImportedProducts in the very same run.
+    const reconcileOrder = vi.mocked(dbMod.reconcileProductShopifyLinks).mock.invocationCallOrder[0];
+    const staleOrder = vi.mocked(dbMod.getStaleImportedProducts).mock.invocationCallOrder[0];
+    expect(reconcileOrder).toBeLessThan(staleOrder);
+    expect(result).toEqual({ stale: 0, drafted: 0, skipped: 0, excluded: 0, failed: 0, deferred: 0, relinked: 2 });
+  });
+
+  it("passes the relinked count through even when there are stale candidates to draft", async () => {
+    const dbMod = await import("@/lib/database");
+    const shopifyMod = await import("@/lib/shopify-client");
+    vi.mocked(shopifyMod.fetchAllShopifyProducts).mockResolvedValue([product({ shopifyId: "1" })] as never);
+    vi.mocked(shopifyMod.updateShopifyProduct).mockResolvedValue(undefined as never);
+    vi.mocked(dbMod.reconcileProductShopifyLinks).mockResolvedValue(7);
+    vi.mocked(dbMod.getStaleImportedProducts).mockResolvedValue([{ shopify_product_id: "1", skus: ["SKU-1"] }]);
+
+    const { runStaleCatalogDraft } = await import("@/lib/stale-catalog");
+    const result = await runStaleCatalogDraft();
+
+    expect(result).toEqual({ stale: 1, drafted: 1, skipped: 0, excluded: 0, failed: 0, deferred: 0, relinked: 7 });
   });
 });

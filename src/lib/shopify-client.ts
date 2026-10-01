@@ -69,7 +69,7 @@ export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[
   do {
     const params = new URLSearchParams({
       limit: "250",
-      fields: "id,title,status,variants,images,body_html,product_type,tags",
+      fields: "id,title,handle,status,variants,images,body_html,product_type,tags",
     });
     if (pageInfo) params.set("page_info", pageInfo);
 
@@ -302,6 +302,7 @@ function mapShopifyProduct(raw: Record<string, unknown>): ShopifyExistingProduct
   return {
     shopifyId: String(raw.id),
     title: (raw.title as string) || "",
+    handle: (raw.handle as string) || "",
     status: (raw.status as "active" | "draft" | "archived") || "active",
     bodyHtml: (raw.body_html as string) || "",
     productType: (raw.product_type as string) || "",

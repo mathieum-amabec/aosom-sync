@@ -4,13 +4,16 @@ import { trackCron } from "@/lib/cron-tracking";
 import { runStaleCatalogDraft } from "@/lib/stale-catalog";
 
 /**
- * GET /api/cron/stale-catalog — daily catalog hygiene. Drafts Shopify products that are
- * imported + still in stock (qty>0) but haven't appeared in the Aosom CSV for >30 days
- * (likely discontinued at Aosom → oversell risk). Already draft/archived products are skipped,
- * and products tagged `exclude-stale` are left live (operator opt-out).
+ * GET /api/cron/stale-catalog — daily catalog hygiene. First reconciles any
+ * products.shopify_product_id left unset or stale by a past import (see
+ * reconcileProductShopifyLinks), then drafts every imported Shopify product whose every
+ * variant SKU hasn't appeared in the Aosom CSV for >30 days (likely discontinued at Aosom).
+ * Already draft/archived products are skipped, and products tagged `exclude-stale` are left
+ * live (operator opt-out).
  *
  * Protected by CRON_SECRET (Bearer). Shopify writes are rate-limited to 2 req/sec. Records the
- * run in cron_runs with detail "stale=N drafted=X skipped=Y excluded=W failed=Z". Daily 07:30 UTC.
+ * run in cron_runs with detail "stale=N drafted=X skipped=Y excluded=W failed=Z deferred=V
+ * relinked=U". Daily 07:30 UTC.
  */
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -23,7 +26,7 @@ export async function GET(request: Request) {
     const result = await trackCron(
       "stale-catalog",
       () => runStaleCatalogDraft(),
-      (r) => `stale=${r.stale} drafted=${r.drafted} skipped=${r.skipped} excluded=${r.excluded} failed=${r.failed} deferred=${r.deferred}`,
+      (r) => `stale=${r.stale} drafted=${r.drafted} skipped=${r.skipped} excluded=${r.excluded} failed=${r.failed} deferred=${r.deferred} relinked=${r.relinked}`,
     );
     return NextResponse.json({ success: true, ...result }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {

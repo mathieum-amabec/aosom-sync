@@ -76,7 +76,7 @@ describe("getStaleImportedProducts — feeds the cron that drafts discontinued p
 
     const stale = await getStaleImportedProducts(30);
 
-    expect(stale).toEqual([{ sku: "OLD", shopify_product_id: "900" }]);
+    expect(stale).toEqual([{ shopify_product_id: "900", skus: ["OLD"] }]);
   });
 
   it("leaves a product still present in the feed alone", async () => {
@@ -115,11 +115,11 @@ describe("getStaleImportedProducts — feeds the cron that drafts discontinued p
   it("returns both stock states together, longest-unseen first", async () => {
     // The two populations now share one query; ordering must still put the worst offender
     // first so a WRITE_CAP-limited run drafts the most-certainly-dead products first.
-    await product({ sku: "ZERO-OLD", qty: 0, daysSinceSeen: 120 });
-    await product({ sku: "STOCK-NEW", qty: 7, daysSinceSeen: 40 });
+    await product({ sku: "ZERO-OLD", shopifyId: "1", qty: 0, daysSinceSeen: 120 });
+    await product({ sku: "STOCK-NEW", shopifyId: "2", qty: 7, daysSinceSeen: 40 });
 
     const r = await getStaleImportedProducts(30);
-    expect(r.map((p) => p.sku)).toEqual(["ZERO-OLD", "STOCK-NEW"]);
+    expect(r.map((p) => p.shopify_product_id)).toEqual(["1", "2"]);
   });
 
   it("honours the window argument rather than a fixed 30 days", async () => {
@@ -130,11 +130,11 @@ describe("getStaleImportedProducts — feeds the cron that drafts discontinued p
   });
 
   it("puts the longest-unseen product first, so a capped run drafts the worst offenders", async () => {
-    await product({ sku: "P35", daysSinceSeen: 35 });
-    await product({ sku: "P90", daysSinceSeen: 90 });
-    await product({ sku: "P60", daysSinceSeen: 60 });
+    await product({ sku: "P35", shopifyId: "35", daysSinceSeen: 35 });
+    await product({ sku: "P90", shopifyId: "90", daysSinceSeen: 90 });
+    await product({ sku: "P60", shopifyId: "60", daysSinceSeen: 60 });
 
-    expect((await getStaleImportedProducts(30)).map((p) => p.sku)).toEqual(["P90", "P60", "P35"]);
+    expect((await getStaleImportedProducts(30)).map((p) => p.shopify_product_id)).toEqual(["90", "60", "35"]);
   });
 
   it("round-trips a text-stored Shopify id unchanged", async () => {
@@ -153,6 +153,25 @@ describe("getStaleImportedProducts — feeds the cron that drafts discontinued p
     });
 
     expect((await getStaleImportedProducts(30))[0].shopify_product_id).toBe("123456789.0");
+  });
+
+  it("groups by PRODUCT: one stale sibling does not out-vote a sibling still in the feed", async () => {
+    // The pre-2026-09-30 per-SKU query returned both rows separately, and stale-catalog drafted
+    // the whole product on the stale one alone — killing the still-fresh sibling along with it.
+    await product({ sku: "TWIN-STALE", shopifyId: "77", daysSinceSeen: 45 });
+    await product({ sku: "TWIN-FRESH", shopifyId: "77", daysSinceSeen: 1 });
+
+    expect(await getStaleImportedProducts(30)).toEqual([]); // freshest sibling wins — not a candidate
+  });
+
+  it("groups by PRODUCT: only a candidate once EVERY sibling is past the window", async () => {
+    await product({ sku: "BOTH-A", shopifyId: "88", daysSinceSeen: 40 });
+    await product({ sku: "BOTH-B", shopifyId: "88", daysSinceSeen: 35 });
+
+    const r = await getStaleImportedProducts(30);
+    expect(r).toHaveLength(1);
+    expect(r[0].shopify_product_id).toBe("88");
+    expect(r[0].skus.sort()).toEqual(["BOTH-A", "BOTH-B"]);
   });
 });
 
