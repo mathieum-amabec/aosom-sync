@@ -18,6 +18,10 @@ vi.mock("@/lib/config", () => ({
   SHOPIFY: { STORE: "test.myshopify.com", API_VERSION: "2025-01" },
   env: { shopifyAccessToken: "test-token", hasShopifyToken: true },
 }));
+// getFeedItems now also consults the vision-classification cache (image_classifications) —
+// stub it to "nothing classified yet" so these tests exercise the Shopify-fetch half only;
+// the filtering behaviour itself is covered in feeds.test.ts.
+vi.mock("@/lib/database", () => ({ getCachedImageVerdicts: vi.fn().mockResolvedValue(new Map()) }));
 
 import {
   getFeedItems,

@@ -202,6 +202,20 @@ export const env = {
   get hasShopifyToken(): boolean {
     return !!process.env.SHOPIFY_ACCESS_TOKEN;
   },
+  /** Direct Google Gemini API key (generativelanguage.googleapis.com), used by
+   *  classifyProductImageGemini for the gallery-wide image classifier
+   *  (scripts/classify-gallery-images.mts) — NOT Vercel AI Gateway: Gateway charges no
+   *  markup either, but Google's own API has a genuine free tier at this volume that the
+   *  Gateway doesn't offer for this model, and the operator preferred one less billing
+   *  relationship for a ~1-2 $ one-off job (2026-10-01). Every caller must check
+   *  `hasGeminiKey` first and degrade gracefully — never throw from a background job just
+   *  because this optional key is absent. */
+  get geminiApiKey(): string | undefined {
+    return process.env.GEMINI_API_KEY || undefined;
+  },
+  get hasGeminiKey(): boolean {
+    return !!process.env.GEMINI_API_KEY;
+  },
 } as const;
 
 // ─── Shopify ────────────────────────────────────────────────────────

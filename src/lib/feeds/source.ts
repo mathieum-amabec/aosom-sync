@@ -6,6 +6,8 @@ import { STOREFRONT_BASE_URL } from "@/lib/insights";
 import { type FeedItem, mapToGoogleCategory, stripHtml, truncate } from "./feed";
 import { parseSku } from "../variant-merger";
 import { isSpecImageUrl } from "../selectors/shopify-product";
+import { imageUrlStem } from "../image-compliance-audit";
+import { getCachedImageVerdicts } from "../database";
 
 export interface ShopifyFeedVariant {
   /** Shopify variant id — drives the `?variant=` deep link on multi-variant products. */
@@ -254,7 +256,20 @@ function resolveBrand(
  * is exactly the mismatch Pinterest/Google flag. Used by the Pinterest EN feed. */
 export function shopifyToFeedItems(
   products: ShopifyFeedProduct[],
-  opts: { preferEnglishTitle?: boolean } = {},
+  opts: {
+    preferEnglishTitle?: boolean;
+    /**
+     * Photo stems (imageUrlStem — Aosom hash, CDN/resize-agnostic) the vision classifier
+     * verified carry a marketing/measurement overlay (image_compliance's
+     * image_classifications cache, verdicts from Claude at pos-1 and/or Gemini for the rest
+     * of the gallery — see vision-classifier.ts's classifyProductImageGemini). Checked
+     * ALONGSIDE the free isSpecImageUrl keyword filter below, never instead of it: the
+     * keyword filter catches an obvious case for $0, this catches everything the keyword
+     * filter cannot (opaque Shopify-renamed filenames — confirmed 2026-10-01 that 0/2612
+     * current catalog images carry a matching keyword).
+     */
+    nonCompliantStems?: ReadonlySet<string>;
+  } = {},
 ): FeedItem[] {
   const english = opts.preferEnglishTitle === true;
   const houseBrand = english ? HOUSE_BRAND_EN : HOUSE_BRAND;
@@ -274,16 +289,21 @@ export function shopifyToFeedItems(
     if (!p.handle) continue;
     const rawImages = (p.images ?? []).filter((i) => Boolean(i.src));
     if (rawImages.length === 0) continue;         // Google/Pinterest/Meta require an image
-    // Drop spec/infographic/dimension-chart shots (measurements, assembly diagrams, size
-    // charts) before this product's images ever reach an ad feed — see isSpecImageUrl's
-    // doc comment. Confirmed live 2026-10-01: a parasol's additional_image_link on the Meta
-    // catalog carried an assembly diagram ("Detachable pole with spiral connection..."),
-    // because this mapper mirrored Shopify's gallery with zero content filtering while an
-    // identical keyword filter already existed for social/slideshow content
-    // (selectors/shopify-product.ts) but was never wired in here. Falls back to the
-    // unfiltered list on the (expected to be non-existent) case of a product whose ENTIRE
-    // gallery looks like spec shots, so a feed item is never shipped with no image at all.
-    const cleanImages = rawImages.filter((i) => !isSpecImageUrl(i.src));
+    // Drop spec/infographic/dimension-chart/marketing-overlay shots before this product's
+    // images ever reach an ad feed. Two independent filters, both applied:
+    //  1. isSpecImageUrl — free keyword match. Confirmed 2026-10-01 it matches 0/2612 current
+    //     catalog images (Shopify renames every upload to an opaque hash), so it only guards
+    //     a future/un-renamed URL.
+    //  2. nonCompliantStems — the vision classifier's verdict (image_classifications), the
+    //     ONE signal that actually works against today's data. A parasol's
+    //     additional_image_link carried an assembly diagram ("Detachable pole with spiral
+    //     connection...") confirmed live; neither filter existed here until this pass.
+    // Falls back to the unfiltered list on the (expected to be non-existent) case of a
+    // product whose ENTIRE gallery is flagged, so a feed item never ships with no image.
+    const nonCompliantStems = opts.nonCompliantStems;
+    const cleanImages = rawImages.filter(
+      (i) => !isSpecImageUrl(i.src) && !(nonCompliantStems?.has(imageUrlStem(i.src))),
+    );
     const productImages = cleanImages.length > 0 ? cleanImages : rawImages;
     const images = productImages.map((i) => i.src);
     const link = `${STOREFRONT_BASE_URL}${pathPrefix}/products/${encodeURIComponent(p.handle)}`;
@@ -564,8 +584,28 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
       const en = titleEnMap.get(String(p.id));
       if (en) p.titleEn = en;
     }
-    return shopifyToFeedItems(products, { preferEnglishTitle: true });
+    const nonCompliantStems = await fetchNonCompliantStems(products);
+    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems });
   }
 
-  return shopifyToFeedItems(products);
+  const nonCompliantStems = await fetchNonCompliantStems(products);
+  return shopifyToFeedItems(products, { nonCompliantStems });
+}
+
+/** Bulk-load the vision classifier's verdicts (image_classifications) for every image in
+ *  this fetch, keyed by stem, and return just the stems flagged non-compliant (marketing/
+ *  measurement overlay). One extra Turso round trip for the whole feed, not per product —
+ *  never lets a DB hiccup take the feed down (falls back to an empty set, same as "nothing
+ *  classified yet"). See shopifyToFeedItems's nonCompliantStems doc comment. */
+async function fetchNonCompliantStems(products: ShopifyFeedProduct[]): Promise<Set<string>> {
+  try {
+    const stems = products.flatMap((p) => (p.images ?? []).map((i) => imageUrlStem(i.src)).filter(Boolean));
+    const verdicts = await getCachedImageVerdicts(stems);
+    const nonCompliant = new Set<string>();
+    for (const [stem, v] of verdicts) if (!v.compliant) nonCompliant.add(stem);
+    return nonCompliant;
+  } catch (err) {
+    console.warn(`[FEED] vision-classification lookup failed (non-fatal, serving unfiltered by this signal):`, err);
+    return new Set();
+  }
 }

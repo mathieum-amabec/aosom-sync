@@ -10,6 +10,7 @@ import {
   buildBingFeed, buildRedditFeed, saleSplit, salePriceEffectiveDate, availabilityValue, type FeedItem,
 } from "@/lib/feeds/feed";
 import { shopifyToFeedItems, stripImperialDimensions, stripPromoText, frenchifyColor, optionValue, materialFromMetafields, MATERIAL_METAFIELD_KEYS, type ShopifyFeedProduct } from "@/lib/feeds/source";
+import { imageUrlStem } from "@/lib/image-compliance-audit";
 
 describe("mapToGoogleCategory", () => {
   const cases: Array<[string, number]> = [
@@ -462,6 +463,52 @@ describe("shopifyToFeedItems — spec/infographic images never reach an ad feed 
     const [item] = shopifyToFeedItems([variantPointsAtSpec]);
     expect(item.imageLink).toBe("https://img/hero.jpg");
     expect(item.additionalImageLinks).toEqual([]);
+  });
+});
+
+describe("shopifyToFeedItems — nonCompliantStems (the vision-classifier cache, 2026-10-01)", () => {
+  // Real-world shape: Shopify renames every upload to an opaque hash, so isSpecImageUrl (the
+  // keyword filter) cannot catch it — confirmed live, 0/2612 catalog images matched a
+  // keyword. The vision classifier (image_classifications, by Aosom hash STEM — see
+  // imageUrlStem) is the signal that actually works against today's data.
+  const product: ShopifyFeedProduct = {
+    id: 1, title: "Parasol", handle: "parasol", status: "active", published_at: PUBLISHED,
+    images: [
+      { src: "https://cdn.shopify.com/s/files/1/0/0/files/TWA47c19cec1e44e9.jpg" },
+      { src: "https://cdn.shopify.com/s/files/1/0/0/files/aJ8dc419f1f2cee58_0ac0d3af-e908-4019-9772-fe48a29c7c8b.jpg" },
+      { src: "https://cdn.shopify.com/s/files/1/0/0/files/oDw0d719f1f2cee58_1024x1024.jpg" },
+    ],
+    variants: [{ sku: "PARA-1", price: "99.99", inventory_management: null }],
+  };
+
+  it("drops an image whose STEM (not its exact URL) is flagged non-compliant", () => {
+    // Flag the middle image by its stem — a DIFFERENT URL (no ingest suffix) than the one in
+    // the gallery, exactly how a verdict cached from the Shopify REST `images[].src` or the
+    // Aosom feed URL still matches the resized/_uuid'd copy the feed actually serves.
+    const nonCompliantStems = new Set([imageUrlStem("https://aosomcdn.com/x/aJ8dc419f1f2cee58.jpg")]);
+    const [item] = shopifyToFeedItems([product], { nonCompliantStems });
+    expect(item.imageLink).toBe("https://cdn.shopify.com/s/files/1/0/0/files/TWA47c19cec1e44e9.jpg");
+    expect(item.additionalImageLinks).toEqual([
+      "https://cdn.shopify.com/s/files/1/0/0/files/oDw0d719f1f2cee58_1024x1024.jpg",
+    ]);
+  });
+
+  it("drops it even at position 1 — promotes a compliant image instead", () => {
+    const nonCompliantStems = new Set([imageUrlStem(product.images![0].src)]);
+    const [item] = shopifyToFeedItems([product], { nonCompliantStems });
+    expect(item.imageLink).not.toBe(product.images![0].src);
+  });
+
+  it("with no verdicts supplied (undefined), behaves exactly as before — no regression", () => {
+    const withUndefined = shopifyToFeedItems([product]);
+    const withEmptySet = shopifyToFeedItems([product], { nonCompliantStems: new Set() });
+    expect(withUndefined).toEqual(withEmptySet);
+  });
+
+  it("falls back to the unfiltered gallery when every image is flagged (never ships zero images)", () => {
+    const nonCompliantStems = new Set(product.images!.map((i) => imageUrlStem(i.src)));
+    const [item] = shopifyToFeedItems([product], { nonCompliantStems });
+    expect(item.imageLink).toBe(product.images![0].src);
   });
 });
 
