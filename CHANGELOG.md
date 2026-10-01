@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.94.2] - 2026-10-01
+
+Found a real gap in the Google/Meta/Bing/Reddit/Pinterest ad feed's images, and fixed the part that is actually fixable by filename. Full fix needs a visual check — see the limitation noted below, not yet built.
+
+### Fixed
+
+- **Ad feeds could serve a spec/infographic/assembly-diagram image** — `shopifyToFeedItems` mirrored a product's ENTIRE Shopify gallery into `image_link`/`additional_image_link` with no content filtering, while an identical keyword filter (`isSpecImageUrl`, `selectors/shopify-product.ts`) already existed for social/slideshow content but was never wired into the feed. Confirmed live on the Meta catalog: a parasol's carousel card could show an assembly-instruction diagram. Now filtered the same way the social pipeline already is, with a safe fallback to the unfiltered gallery if an entire product's images were ever all flagged.
+- **Known limitation, not fixed here**: this keyword filter matches almost nothing in the CURRENT catalog, because Shopify renames every uploaded file to an opaque hash on ingest and sets no alt text — there is no filename/alt/dimension signal left to tell a diagram from a real photo. Confirmed empirically against the live feed (0/2612 items flagged). Catching this for real needs a visual (vision-model) classification pass over each product's full gallery, the same technique already used at import time for the position-1 photo only (`enforceCleanPrimaryImage`) — not yet built; would need to run across ~2600 products' galleries.
+
 ## [0.5.94.1] - 2026-09-30
 
 Investigated the 10 products the "Problèmes" tab (0.5.94.0) flagged as live on Shopify but gone from the Aosom feed. All 10 turned out to be a false positive in that same new tab, not real discontinuations: Aosom had corrected each SKU's colour/variant suffix after we imported it (e.g. `84B-206BU` became `84B-206BK`), and the classifier compared against the SKU frozen at import time instead of whichever SKU currently carries the Shopify link. Separately, found and fixed a real (smaller) gap in the 30-day stale-catalog cron.
