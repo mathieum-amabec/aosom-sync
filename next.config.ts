@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   // ffmpeg-static resolves its binary with `path.join(__dirname, "ffmpeg")` at RUNTIME. When
   // bundled, __dirname is frozen at build time to "/ROOT/node_modules/ffmpeg-static", so on
   // Vercel every render died with `spawn /ROOT/node_modules/ffmpeg-static/ffmpeg ENOENT`
-  // (video_jobs since 2026-06-26, the Studio Avant/Après on 2026-09-28). Keep it external
+  // (video_jobs since 2026-06-26). Keep it external
   // (native require → real __dirname) AND trace the binary into each route that spawns it.
   serverExternalPackages: ["ffmpeg-static"],
   // The FFmpeg slideshow render (reached via the publish/cron routes) reads the DM Sans
@@ -17,16 +17,6 @@ const nextConfig: NextConfig = {
     "/api/cron/publisher": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
     "/api/cron/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
     "/api/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
-    // Studio Avant/Après render: its text layers are SVG rendered through fontconfig
-    // (registerBrandFonts → src/fonts), the logo is an ffmpeg overlay input, and it spawns the
-    // ffmpeg-static binary (see serverExternalPackages above).
-    "/api/studio/render": [
-      "./src/fonts/DMSans-Regular.ttf",
-      "./src/fonts/DMSans-Bold.ttf",
-      "./src/fonts/NotoEmoji.ttf",
-      "./Logo/officiel-transparent.png",
-      "./node_modules/ffmpeg-static/ffmpeg",
-    ],
     "/api/videos/generate": ["./node_modules/ffmpeg-static/ffmpeg"],
   },
   async headers() {
@@ -48,9 +38,6 @@ const nextConfig: NextConfig = {
             // sequential-ad renders are served from the public Vercel Blob store, and the
             // client also plays freshly rendered clips from blob: URLs. This directive is
             // what makes those previews play at all.
-            //
-            // connect-src https://vercel.com: the /studio page uploads Mat's photos and music
-            // straight to Vercel Blob (@vercel/blob/client PUTs to vercel.com/api/blob).
             value:
               "default-src 'self'; " +
               "script-src 'self' 'unsafe-inline'; " +
@@ -58,7 +45,7 @@ const nextConfig: NextConfig = {
               "img-src 'self' https: data:; " +
               "media-src 'self' blob: https://jcskqp8orcub9i0l.public.blob.vercel-storage.com; " +
               "font-src 'self'; " +
-              "connect-src 'self' https://api.anthropic.com https://graph.facebook.com https://vercel.com; " +
+              "connect-src 'self' https://api.anthropic.com https://graph.facebook.com; " +
               "frame-ancestors 'none';",
           },
         ],

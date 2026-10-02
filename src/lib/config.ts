@@ -259,33 +259,6 @@ export const AOSOM = {
   FETCH_BACKOFF_MS: 5000,
 } as const;
 
-// ─── Studio Avant/Après (/studio) ───────────────────────────────────
-
-export const STUDIO_AI = {
-  GATEWAY_URL: "https://ai-gateway.vercel.sh/v1",
-  /**
-   * Image-editing models Mat picks between on the Studio page. Both must accept Chat
-   * Completions with image output (Gateway type "language" + tag image-generation) — an
-   * "image"-type model (Seedream, FLUX) needs the images endpoint instead, a different code path.
-   * Prices: Gateway list, 2026-09-27. "quality" was #1 on the blind Image Editing Arena then.
-   */
-  IMAGE_MODELS: {
-    quality: {
-      id: process.env.STUDIO_AI_IMAGE_MODEL?.trim() || "google/gemini-3.1-flash-image",
-      label: "Qualité",
-      price: "~0,07 $ / image",
-    },
-    economy: {
-      id: process.env.STUDIO_AI_IMAGE_MODEL_ECONOMY?.trim() || "google/gemini-3.1-flash-lite-image",
-      label: "Économique",
-      price: "~0,03 $ / image",
-    },
-  },
-  /** Max AI retouches per UTC day (~0.05-0.10 $ each). */
-  DAILY_CAP: Number(process.env.STUDIO_AI_DAILY_CAP) || 40,
-  TIMEOUT_MS: 120_000,
-} as const;
-
 // ─── Costway (second supplier — catalogue only, NOT imported to Shopify yet) ──
 
 export const COSTWAY = {
@@ -340,7 +313,7 @@ export const CLAUDE = {
    */
   MODEL_BATCH: process.env.CLAUDE_BATCH_MODEL?.trim() || "claude-haiku-4-5",
   /**
-   * Video-batch vision QC only (demand-gen-ext / before_after frame scoring — see
+   * Video-batch vision QC only (demand-gen-ext / assembly frame scoring — see
    * src/lib/demand-gen-clean-window.ts). Draws from the `video` pool, not `batch`.
    *
    * Sonnet, not Haiku: this is a strict dual-gate visual judgment call (full product
@@ -639,7 +612,7 @@ export const DEFAULT_VIDEO_SCHEDULE: VideoSchedule = {
 // collisions on the shared (platform, scheduled_at) slot are then rare rather than
 // designed-in, though getNextAvailableSlot's retry-on-collision still covers the rare case.
 // Cadence is sized to the backlog each format had at launch (2026-09-21): demand_gen_ext 4,
-// before_after 10 (biggest, so 2/day), assembly 9 (daily — its UGC-clip pool is small, ~90
+// assembly 9 (daily — its UGC-clip pool is small, ~90
 // SKUs total, so it won't refill fast).
 export const DEFAULT_DEMAND_GEN_EXT_SCHEDULE: PublicationSchedule = {
   enabled: true,
@@ -652,16 +625,6 @@ export const DEFAULT_DEMAND_GEN_EXT_SCHEDULE: PublicationSchedule = {
   max_per_day: 1,
 };
 
-export const DEFAULT_BEFORE_AFTER_SCHEDULE: PublicationSchedule = {
-  enabled: true,
-  slots: [
-    { day: "tue", times: ["13:00", "13:30"] },
-    { day: "thu", times: ["13:00", "13:30"] },
-    { day: "sat", times: ["11:00"] },
-  ],
-  timezone: "America/Toronto",
-  max_per_day: 2,
-};
 
 // pSEO guide deferred publish — operator approval no longer publishes immediately (see
 // guide-scheduler.ts); it books the next free slot on THIS grid instead. Default cadence is
@@ -799,7 +762,6 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   // (PublicationSchedule shape each, edited via the generic /api/settings route — no
   // dedicated schedule-tab UI for these yet).
   "demand_gen_ext_schedule",
-  "before_after_schedule",
   "assembly_schedule",
   // guide_schedule (PublicationSchedule shape) — pSEO guide deferred-publish cadence.
   "guide_schedule",

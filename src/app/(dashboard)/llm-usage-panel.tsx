@@ -33,7 +33,7 @@ const POOL_LABEL: Record<PoolUsage["pool"], string> = {
   assistant: "Assistant (boutique)",
   batch: "Batch (imports, blog, social)",
   maintenance: "Maintenance (audits catalogue)",
-  video: "Vidéo (demand-gen, assembly, avant/après)",
+  video: "Vidéo (demand-gen, assembly)",
 };
 
 /** Amber at 80% of the daily cap, red at 100% — matches the alert colours used elsewhere. */

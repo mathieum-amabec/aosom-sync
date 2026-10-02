@@ -7,14 +7,14 @@ import {
 } from "@/lib/database";
 
 /**
- * GET /api/content-batches/queue?type=demand_gen_ext|before_after|assembly
+ * GET /api/content-batches/queue?type=demand_gen_ext|assembly
  *
  * Rows in publication_queue for one of the 3 content-scale-chantier batch formats, newest
  * first — drives the /content-formats dashboard tabs. Mirrors /api/sequential-ads/queue,
  * generalized over `type` instead of one hardcoded content_type. Admin-only (reviewers
  * are read-only, same as sequential-ads and videos).
  */
-const VALID_TYPES: QueueContentType[] = ["demand_gen_ext", "before_after", "assembly"];
+const VALID_TYPES: QueueContentType[] = ["demand_gen_ext", "assembly"];
 
 export interface ContentBatchItem {
   id: number;

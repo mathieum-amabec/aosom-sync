@@ -197,7 +197,7 @@ describe("maintenance pool accounting", () => {
   });
 });
 
-// ─── The `video` pool — isolates demand-gen-ext / before_after / assembly QC from `batch` ──
+// ─── The `video` pool — isolates demand-gen-ext / assembly QC from `batch` ──
 // Split out 2026-09-22 for the same reason `maintenance` was (2026-09-11): a video production
 // run is vision-call-heavy enough to blow through the shared `batch` cap in one session and
 // starve same-day imports/social. Unlike `maintenance`, `video` IS capped by default (a

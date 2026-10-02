@@ -1,6 +1,6 @@
 /**
  * Shared slot-safe "approve one content-batch draft" logic for the 3 content-scale-chantier
- * video formats (demand_gen_ext / before_after / assembly), factored out of
+ * video formats (demand_gen_ext / assembly), factored out of
  * /api/content-batches/approve for testability — mirrors sequential-ad-approval.ts's
  * approveOneSequentialAd, generalized over `ContentBatchFormat` instead of one fixed type
  * and using each format's OWN recurring grid (parseContentBatchSchedule) instead of a single

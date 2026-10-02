@@ -13,7 +13,7 @@
  *     `LLM_DAILY_TOKEN_BUDGET` (default 1.3M).
  *   - `maintenance` — operator-launched catalogue vision audits (e.g. the pos-1 photo
  *     audit). Budget: `LLM_MAINTENANCE_DAILY_BUDGET` (default uncapped).
- *   - `video` — demand-gen-ext / before_after / assembly video-batch vision QC. Budget:
+ *   - `video` — demand-gen-ext / assembly video-batch vision QC. Budget:
  *     `LLM_VIDEO_DAILY_BUDGET` (default 400k). Split out 2026-09-22 for the same reason
  *     `maintenance` was: a video production run is vision-call-heavy (dense per-frame
  *     scoring) and was draining the shared `batch` pool fast enough to risk starving

@@ -445,22 +445,9 @@ when a guard's last run failed or it has no result for 36 h). The dashboard "Ale
 the morning report both read it. **CI** (`.github/workflows/ci.yml`: `npm ci`, tsc, eslint, vitest)
 is a required check on `main` (branch protection, admins included) — nothing merges red.
 
-## Studio Avant/Après (`/studio`)
+## Avant/Après — removed (2026-10-01)
 
-Mat builds before/after videos by hand. Code is in `src/lib/studio/` and `src/app/api/studio/`.
-
-- **Rendering:** on Vercel (`/api/studio/render`, ffmpeg-static in `after()`, maxDuration 300). The
-  font and logo are traced in `next.config.ts`.
-- **Music:** read from the public Blob store under `studio/music/`, never from `src/audio`
-  (gitignored, not deployed). Seed it with `scripts/studio-seed-music.mjs` and the PUBLIC store token.
-- **Handoff to the queue:** a finished render goes to `publication_queue` as a `before_after` **draft**
-  (payload `source: "studio"`). Mat approves or rejects it in /content-formats. Never auto-approve,
-  never cancel it for him.
-- **AI retouch:** calls Vercel AI Gateway Chat Completions with `modalities: ["image","text"]`.
-  - It needs `AI_GATEWAY_API_KEY` (or OIDC).
-  - AI images live only in `studio_images`, for videos. Never write them to the Shopify product
-    gallery.
-  - The prompt guardrail "product must stay identical" is load-bearing: don't remove it.
+The before/after video format and its `/studio` page were removed entirely at Mat's request (poor results, never used): renderer, Studio APIs, `before_after_schedule`, its queue rows and Blob files. Don't rebuild it. `publication_queue`'s CHECK still lists `before_after` only so the historical migration stays a no-op; nothing writes it.
 
 ## Costway — second supplier (catalogue only)
 

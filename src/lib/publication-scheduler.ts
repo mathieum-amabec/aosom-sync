@@ -29,7 +29,6 @@ import {
   DEFAULT_BLOG_SCHEDULE,
   DEFAULT_SLIDESHOW_SETTINGS,
   DEFAULT_DEMAND_GEN_EXT_SCHEDULE,
-  DEFAULT_BEFORE_AFTER_SCHEDULE,
   DEFAULT_ASSEMBLY_SCHEDULE,
   DEFAULT_GUIDE_SCHEDULE,
 } from "@/lib/config";
@@ -186,16 +185,16 @@ export function parseVideoSchedule(rawJson: string | null | undefined): VideoSch
   }
 }
 
-// ─── Content-batch (demand_gen_ext / before_after / assembly) schedules ────
+// ─── Content-batch (demand_gen_ext / assembly) schedules ────
 
-/** The 3 content-scale-chantier batch video formats, plus the pSEO guide deferred-publish
+/** The content-scale-chantier batch video formats (the avant/après format was removed on
+ * 2026-10-01 — Mat: poor results, never used), plus the pSEO guide deferred-publish
  * queue (same recurring-grid shape, reused rather than reimplemented) — each gets its own
  * independent slot pool. */
-export type ContentBatchFormat = "demand_gen_ext" | "before_after" | "assembly" | "guide";
+export type ContentBatchFormat = "demand_gen_ext" | "assembly" | "guide";
 
 export const CONTENT_BATCH_SCHEDULE_DEFAULTS: Record<ContentBatchFormat, PublicationSchedule> = {
   demand_gen_ext: DEFAULT_DEMAND_GEN_EXT_SCHEDULE,
-  before_after: DEFAULT_BEFORE_AFTER_SCHEDULE,
   assembly: DEFAULT_ASSEMBLY_SCHEDULE,
   guide: DEFAULT_GUIDE_SCHEDULE,
 };
@@ -203,7 +202,6 @@ export const CONTENT_BATCH_SCHEDULE_DEFAULTS: Record<ContentBatchFormat, Publica
 /** The `settings` row each format's grid is stored under (see config.ts's ALLOWED_SETTINGS_KEYS). */
 export const CONTENT_BATCH_SCHEDULE_SETTING_KEY: Record<ContentBatchFormat, string> = {
   demand_gen_ext: "demand_gen_ext_schedule",
-  before_after: "before_after_schedule",
   assembly: "assembly_schedule",
   guide: "guide_schedule",
 };

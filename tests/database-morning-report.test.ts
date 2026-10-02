@@ -114,7 +114,7 @@ describe("countGuidesAwaitingApproval", () => {
 describe("countContentFormatVideos", () => {
   it("counts drafts, and approved videos due within the horizon (not past, not later, not other types)", async () => {
     await queued("assembly", "draft", at(100));
-    await queued("before_after", "draft", at(1));
+    await queued("demand_gen_ext", "draft", at(1));
     await queued("demand_gen_ext", "pending", at(5)); // due soon
     await queued("assembly", "pending", at(48)); // due soon
     await queued("assembly", "pending", at(24 * 10)); // beyond 3 days

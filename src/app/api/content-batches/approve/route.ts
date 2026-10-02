@@ -10,7 +10,7 @@ import { approveOneContentBatchDraft } from "@/lib/content-batch-approval";
 import type { ContentBatchFormat } from "@/lib/publication-scheduler";
 
 /**
- * Approve / schedule / cancel a demand_gen_ext | before_after | assembly draft sitting in
+ * Approve / schedule / cancel a demand_gen_ext | assembly draft sitting in
  * publication_queue. Generalizes /api/sequential-ads/approve + /schedule into one route
  * (Étape 5 of the content-scale chantier) rather than three near-identical files.
  *
@@ -27,7 +27,7 @@ import type { ContentBatchFormat } from "@/lib/publication-scheduler";
  * arrived, and behind THIS approval step existing at all: nothing here bypasses Mat approving
  * first. Admin-only; reviewers are read-only.
  */
-const VALID_TYPES: ContentBatchFormat[] = ["demand_gen_ext", "before_after", "assembly"];
+const VALID_TYPES: ContentBatchFormat[] = ["demand_gen_ext", "assembly"];
 
 function toSqliteUtc(d: Date): string {
   return d.toISOString().slice(0, 19).replace("T", " ");
@@ -104,7 +104,7 @@ export async function POST(request: Request) {
   }
 
   // No explicit time: auto-assign the next free slot on this format's own recurring grid
-  // (demand_gen_ext / before_after / assembly each have a dedicated schedule — see
+  // (demand_gen_ext / assembly each have a dedicated schedule — see
   // publication-scheduler.ts's CONTENT_BATCH_SCHEDULE_DEFAULTS) — same mechanism as approving
   // a sequential ad or a social post, rather than an ad-hoc "24h from now" default.
   const result = await approveOneContentBatchDraft(queueId, contentType);

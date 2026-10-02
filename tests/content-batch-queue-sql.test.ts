@@ -9,7 +9,7 @@ import { createClient, type Client } from "@libsql/client";
  * `content_type`-parametrized versions of the sequential_ad functions, and the thing
  * actually worth verifying is that the `content_type = ?` guard genuinely scopes each
  * content type's rows independently (a demand_gen_ext approve must never touch a
- * before_after row with the same id, etc).
+ * demand_gen_ext row with the same id, etc).
  */
 
 const CREATE = `CREATE TABLE publication_queue (
@@ -96,10 +96,10 @@ describe("content-batch queue SQL — content_type isolation", () => {
   });
 
   it("a wrong content_type never approves another format's row with the same id", async () => {
-    await insert(db, { id: 1, content_type: "before_after", scheduled_at: "2026-10-01 13:00:00", status: "draft" });
+    await insert(db, { id: 1, content_type: "demand_gen_ext", scheduled_at: "2026-10-01 13:00:00", status: "draft" });
     const ok = await approve(db, 1, "assembly", "2026-10-02 13:00:00");
     expect(ok).toBe(false);
-    const rows = await getByType(db, "before_after");
+    const rows = await getByType(db, "demand_gen_ext");
     expect((rows[0] as unknown as Record<string, unknown>).status).toBe("draft"); // untouched
   });
 
@@ -124,8 +124,8 @@ describe("content-batch queue SQL — content_type isolation", () => {
     // content_type exists, so two types can still collide here and rely on QueueSlotTakenError
     // + retry (exactly what the sequential-ads approve route's retry loop is for).
     await insert(db, { id: 1, content_type: "demand_gen_ext", scheduled_at: "2026-10-01 13:00:00", status: "pending" });
-    await insert(db, { id: 2, content_type: "before_after", scheduled_at: "2026-10-05 13:00:00", status: "draft" });
-    await expect(approve(db, 2, "before_after", "2026-10-01 13:00:00")).rejects.toThrow();
+    await insert(db, { id: 2, content_type: "assembly", scheduled_at: "2026-10-05 13:00:00", status: "draft" });
+    await expect(approve(db, 2, "assembly", "2026-10-01 13:00:00")).rejects.toThrow();
   });
 
   it("cancel only acts on a draft row, never an already-pending or published one", async () => {
@@ -138,10 +138,10 @@ describe("content-batch queue SQL — content_type isolation", () => {
   });
 
   it("reschedule accepts a draft OR an already-pending row (move an already-scheduled item)", async () => {
-    await insert(db, { id: 1, content_type: "before_after", scheduled_at: "2026-10-01 13:00:00", status: "draft" });
-    await insert(db, { id: 2, content_type: "before_after", scheduled_at: "2026-10-02 13:00:00", status: "pending" });
-    expect(await reschedule(db, 1, "before_after", "2026-11-01 13:00:00")).toBe(true);
-    expect(await reschedule(db, 2, "before_after", "2026-11-02 13:00:00")).toBe(true);
+    await insert(db, { id: 1, content_type: "demand_gen_ext", scheduled_at: "2026-10-01 13:00:00", status: "draft" });
+    await insert(db, { id: 2, content_type: "demand_gen_ext", scheduled_at: "2026-10-02 13:00:00", status: "pending" });
+    expect(await reschedule(db, 1, "demand_gen_ext", "2026-11-01 13:00:00")).toBe(true);
+    expect(await reschedule(db, 2, "demand_gen_ext", "2026-11-02 13:00:00")).toBe(true);
   });
 
   it("reschedule refuses a published/failed/cancelled row", async () => {
@@ -152,7 +152,7 @@ describe("content-batch queue SQL — content_type isolation", () => {
   it("countContentBatchQueueItems excludes cancelled rows, per content_type", async () => {
     await insert(db, { id: 1, content_type: "demand_gen_ext", scheduled_at: "2026-10-01 13:00:00", status: "draft" });
     await insert(db, { id: 2, content_type: "demand_gen_ext", scheduled_at: "2026-10-02 13:00:00", status: "cancelled" });
-    await insert(db, { id: 3, content_type: "before_after", scheduled_at: "2026-10-03 13:00:00", status: "draft" });
+    await insert(db, { id: 3, content_type: "assembly", scheduled_at: "2026-10-03 13:00:00", status: "draft" });
     const { rows } = await db.execute({
       sql: `SELECT COUNT(*) n FROM publication_queue WHERE content_type = ? AND status != 'cancelled'`,
       args: ["demand_gen_ext"],
