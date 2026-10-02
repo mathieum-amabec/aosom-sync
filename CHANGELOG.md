@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.95.0] - 2026-10-02
+
+The storefront assistant becomes **Ameublo** (FR) / **Furni** (EN): a store advisor that answers policy questions from the live site, with per-visitor limits and automatic abuse blocking.
+
+### Added
+
+- **Persona** (`assistantName`, env `ASSISTANT_NAME_FR` / `ASSISTANT_NAME_EN`) and a rewritten system prompt with hard rules: products only from the catalog, policies only from `get_store_info`, no invented discounts/delays/refunds, no order access (hand-off to info@), no supplier names, plain text, decline off-topic, no guessing for cases the policy doesn't name.
+- **`get_store_info` tool** (`store-knowledge.ts`): delivery, returns, warranty, financing, terms, FAQ and contact read live from the Shopify pages + policies (cached 1 h), split into sections and ranked per question; answers cite the page URL. `MAX_STEPS` 3 → 4.
+- **Abuse guard** (`assistant-guard.ts`): per-visitor daily token cap (30k ≈ 10 conversations), abuse score (jailbreak phrasings, oversized/pasted payloads, verbatim repeats, the model's own `flag`), automatic block 24 h → 7 days on repeat. IPs stored as salted hashes only (Law 25). New tables `assistant_ip_daily`, `assistant_blocklist`; new shopper copy `daily_quota` / `blocked`.
+- **Dashboard** `/assistant-guard` ("Assistant (Ameublo)"): active blocks with Unblock, today's heaviest visitors, block history.
+- **Theme widget** (`shopify-theme/snippets/lc-assistant-widget.liquid`, uploaded to draft theme 162992816233, not published): avatar + name, greeting, quick-question chips, bare https URLs rendered as links (text nodes only, never innerHTML).
+
+### Fixed
+
+- A pure information answer (no product picks) is no longer replaced by the "no products found" line.
+- Markdown in replies is stripped server-side (the widget renders textContent).
+
 ## [0.5.94.9] - 2026-10-02
 
 "Complétez la pièce" (product page block) no longer uses the LLM.

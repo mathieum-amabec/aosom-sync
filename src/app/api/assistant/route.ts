@@ -4,6 +4,10 @@ import {
   countAssistantRequests,
   recordAssistantRequest,
   secondsUntilAssistantSlot,
+  getAssistantBlock,
+  getAssistantIpDay,
+  addAssistantIpUsage,
+  blockAssistantIp,
 } from "@/lib/database";
 import {
   MAX_MESSAGES_PER_HOUR,
@@ -13,6 +17,14 @@ import {
 } from "@/lib/assistant-limits";
 import { ASSISTANT_TOKEN_HEADER, verifyAssistantToken } from "@/lib/assistant-auth";
 import { LlmBudgetExceededError } from "@/lib/llm-budget";
+import {
+  hashIp,
+  scoreMessage,
+  scoreModelFlag,
+  blockDurationSecs,
+  DAILY_TOKENS_PER_IP,
+  ABUSE_BLOCK_SCORE,
+} from "@/lib/assistant-guard";
 import {
   isBotUserAgent,
   complementaryCacheKey,
@@ -225,7 +237,54 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const result = await runAssistant({ message, history, locale });
+    // ── Abuse guard (assistant-guard.ts) ─────────────────────────────────────────────
+    // Every check fails OPEN on a DB error, like the hourly quota above: the storefront
+    // assistant must not go dark because a counter is unreachable, and the daily pool still
+    // bounds the worst case.
+    const ipHash = hashIp(ip);
+    const now = Math.floor(Date.now() / 1000);
+    const secsToUtcMidnight = 86400 - (now % 86400);
+    try {
+      const block = await getAssistantBlock(ipHash);
+      if (block && block.blockedUntil > now) {
+        return json({ success: true, data: limitPayload(locale, "blocked", block.blockedUntil - now) }, 403);
+      }
+      const day = await getAssistantIpDay(ipHash);
+      if (day.tokens >= DAILY_TOKENS_PER_IP) {
+        return json({ success: true, data: limitPayload(locale, "daily_quota", secsToUtcMidnight) }, 429);
+      }
+      const signals = scoreMessage(message, history);
+      if (signals.score > 0) {
+        const after = await addAssistantIpUsage(ipHash, { abuse: signals.score, reasons: signals.reasons });
+        if (after.abuseScore >= ABUSE_BLOCK_SCORE) {
+          await blockAssistantIp(ipHash, now + blockDurationSecs(block?.strikes ?? 0), signals.reasons.join(","), message);
+          console.warn(`[assistant] auto-blocked ${ipHash} (score ${after.abuseScore}: ${signals.reasons.join(",")})`);
+          return json({ success: true, data: limitPayload(locale, "blocked", blockDurationSecs(block?.strikes ?? 0)) }, 403);
+        }
+      }
+    } catch (err) {
+      console.warn("[assistant] guard check failed — allowing:", err instanceof Error ? err.message : err);
+    }
+
+    const { meta, ...result } = await runAssistant({ message, history, locale });
+
+    // Charge the answer to the visitor: tokens (daily cap) + the model's own verdict.
+    try {
+      const flagged = scoreModelFlag(meta?.flag);
+      const after = await addAssistantIpUsage(ipHash, {
+        tokens: meta?.tokens ?? 0,
+        messages: 1,
+        abuse: flagged.score,
+        reasons: flagged.reasons,
+      });
+      if (flagged.score > 0 && after.abuseScore >= ABUSE_BLOCK_SCORE) {
+        const prior = await getAssistantBlock(ipHash);
+        await blockAssistantIp(ipHash, now + blockDurationSecs(prior?.strikes ?? 0), flagged.reasons.join(","), message);
+        console.warn(`[assistant] auto-blocked ${ipHash} after model flag (score ${after.abuseScore})`);
+      }
+    } catch (err) {
+      console.warn("[assistant] guard bookkeeping failed:", err instanceof Error ? err.message : err);
+    }
 
     // Recorded only after a SUCCESSFUL answer, so a failed generation doesn't consume the
     // shopper's allowance. Best-effort: a bookkeeping failure must not fail the reply.
