@@ -13,14 +13,15 @@ vi.mock("@/lib/gemini-client", () => ({ geminiGenerate: (params: unknown) => cre
 
 const getProducts = vi.fn();
 const getComplementaryProducts = vi.fn();
-vi.mock("@/lib/database", () => ({ getProducts, getComplementaryProducts }));
+const getComplementaryCandidates = vi.fn();
+vi.mock("@/lib/database", () => ({ getProducts, getComplementaryProducts, getComplementaryCandidates }));
 
 // FR-title resolution calls shopifyFetch(/graphql.json). Mock it; default = no match
 // (so cards fall back to the catalog name unless a test opts into FR titles).
 const shopifyFetch = vi.fn();
 vi.mock("@/lib/shopify-client", () => ({ shopifyFetch }));
 
-const { runAssistant, runComplementary } = await import("@/lib/assistant");
+const { runAssistant, runComplementary, pickComplementary } = await import("@/lib/assistant");
 
 const prod = (over: Partial<Record<string, unknown>> = {}) => ({
   sku: "A-1", name: "Sofa sectionnel", price: 499, qty: 5, color: "Gris",
@@ -38,6 +39,7 @@ type Turn = { role: string; parts: Array<{ text?: string; functionResponse?: { r
 
 beforeEach(() => {
   create.mockReset();
+  getComplementaryCandidates.mockReset().mockResolvedValue([]);
   getProducts.mockReset().mockResolvedValue({ products: [prod()], total: 1, productTypes: [] });
   getComplementaryProducts.mockReset().mockResolvedValue([]);
   // default: FR-title lookup returns no nodes -> cards fall back to the catalog name
@@ -292,18 +294,53 @@ describe("runAssistant", () => {
   });
 });
 
-describe("runComplementary", () => {
-  it("seeds a complementary-products request and returns cards", async () => {
-    create
-      .mockResolvedValueOnce(toolUse({ query: "coffee table" }))
-      .mockResolvedValueOnce(final({ reply: "Pour compléter :", products: [{ sku: "A-1", reason: "S'agence bien" }] }));
-    const res = await runComplementary({ name: "Canapé gris", productType: "Sofas", locale: "fr" });
-    expect(res.products).toHaveLength(1);
-    // The seed (first user message, index 0 since there's no history) should mention
-    // complementary intent. NB: the messages array is mutated in place during the tool
-    // loop, so only index 0 is stable — the tail holds later tool-result blocks.
-    const firstContents = create.mock.calls[0][0].contents as Turn[];
-    expect(firstContents[0].parts[0].text).toMatch(/complémentaires/i);
+describe("runComplementary (no LLM since 2026-10-02)", () => {
+  const row = (sku: string, type: string) => ({
+    sku, name: sku, price: 50, qty: 3, image1: "https://img/x.jpg", shopify_handle: `h-${sku}`, product_type: type, color: "",
+  });
+  const L = "Home Furnishings > Living Room Furniture";
+
+  it("never calls the model and fills 3 cards from different categories of the same room", async () => {
+    getComplementaryCandidates.mockResolvedValue([
+      row("CT-1", `${L} > Coffee Tables`), row("CT-2", `${L} > Coffee Tables`),
+      row("RUG-1", `${L} > Area Rugs`), row("TV-1", `${L} > TV Stands`), row("LMP-1", `${L} > Floor Lamps`),
+    ]);
+    const res = await runComplementary({ name: "Canapé gris", productType: `${L} > Sofas`, locale: "fr" });
+    expect(create).not.toHaveBeenCalled();
+    expect(res.products).toHaveLength(3);
+    const types = res.products.map((p) => p.sku.split("-")[0]);
+    expect(new Set(types).size).toBe(3);
+    expect(res.reply).toBe("");
+    expect(getComplementaryCandidates).toHaveBeenCalledWith({ scope: L, exclude: `${L} > Sofas`, limit: 80 });
+  });
+
+  it("drops candidates of the same kind even under a differently named leaf", async () => {
+    getComplementaryCandidates.mockResolvedValue([
+      row("S-1", `${L} > Sofas & Reclining Chairs`), row("S-2", `${L} > 2-Seater Sofas`),
+      row("CT-1", `${L} > Coffee Tables`),
+    ]);
+    const res = await runComplementary({ name: "Canapé", productType: `${L} > Sofas`, locale: "fr" });
+    expect(res.products.map((p) => p.sku)).toEqual(["CT-1"]);
+  });
+
+  it("widens from the room to the top-level branch when the room is thin", async () => {
+    getComplementaryCandidates.mockResolvedValueOnce([row("CT-1", `${L} > Coffee Tables`)]).mockResolvedValueOnce([]);
+    await runComplementary({ name: "Canapé", productType: `${L} > Sofas`, locale: "fr" });
+    expect(getComplementaryCandidates.mock.calls.map((c) => c[0].scope)).toEqual([L, "Home Furnishings"]);
+  });
+
+  it("returns nothing for an empty product type", async () => {
+    const res = await runComplementary({ name: "x", productType: "  ", locale: "fr" });
+    expect(res.products).toEqual([]);
+    expect(getComplementaryCandidates).not.toHaveBeenCalled();
+  });
+
+  it("pickComplementary is stable per product and varies across products", () => {
+    const rows = ["A", "B", "C", "D", "E", "F"].map((t) => row(t, `${L} > ${t}`));
+    const a1 = pickComplementary(rows, "produit-1").map((r) => r.sku);
+    expect(pickComplementary(rows, "produit-1").map((r) => r.sku)).toEqual(a1);
+    const others = ["produit-2", "produit-3", "produit-4", "produit-5"].map((s) => pickComplementary(rows, s).map((r) => r.sku).join());
+    expect(others.some((o) => o !== a1.join())).toBe(true);
   });
 });
 

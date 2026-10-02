@@ -161,7 +161,8 @@ export async function POST(request: Request): Promise<Response> {
       if (isBotUserAgent(request.headers.get("user-agent"))) {
         return json({ success: true, data: { reply: "", products: [] } });
       }
-      // One LLM call per product per day instead of one per page view (see the cache module).
+      // No LLM since 2026-10-02 (runComplementary is plain catalogue logic); the 24h cache still
+      // saves the Shopify live-check round-trip per page view.
       const cacheKey = complementaryCacheKey(name, productType, locale);
       const cached = await getCachedComplementary(cacheKey).catch(() => null);
       if (cached) return json({ success: true, data: cached });

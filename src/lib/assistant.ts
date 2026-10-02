@@ -16,7 +16,7 @@
  *    pool of products the tool actually returned (the model cannot invent a product).
  */
 import { geminiGenerate, type GeminiContent, type GeminiFunctionDeclaration, type GeminiPart } from "./gemini-client";
-import { getProducts, getComplementaryProducts } from "./database";
+import { getProducts, getComplementaryProducts, getComplementaryCandidates, type ComplementaryProductRow } from "./database";
 import { toEnglishColour } from "./colour-names";
 import { GEMINI } from "./config";
 import { shopifyFetch } from "./shopify-client";
@@ -402,21 +402,113 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
   };
 }
 
+const COMPLEMENTARY_CARDS = 3;
+
+/** Singular lower-case words (4+ letters) of a taxonomy leaf: "2-Seater Sofas" → {seater, sofa}. */
+function leafNouns(leaf: string): Set<string> {
+  return new Set(
+    leaf
+      .toLowerCase()
+      .split(/[^a-z]+/)
+      .filter((w) => w.length >= 4 && !["with", "and", "accessories", "supplies", "furniture", "outdoor", "indoor"].includes(w))
+      .map((w) => w.replace(/(es|s)$/, "")),
+  );
+}
+
+/** Small stable hash, so each product gets its own (but repeatable) suggestion rotation. */
+function stableHash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
+  return h;
+}
+
 /**
- * "Complétez la pièce" — given the product a shopper is viewing, suggest 3 complementary
- * pieces from OTHER categories. Reuses the same secured catalog loop. `name`/`productType`
- * are caller-supplied (the route reads them from the request body), so treat them as
- * UNTRUSTED: they are length-capped here and only steer the model's own reply — they never
- * reach a query or another user's session.
+ * Pick one product from each of up to 3 DIFFERENT categories, rotating by a hash of the
+ * viewed product so two neighbouring products don't show the same three cards. Pure; exported
+ * for tests.
+ */
+export function pickComplementary(rows: ComplementaryProductRow[], seed: string, count = COMPLEMENTARY_CARDS): ComplementaryProductRow[] {
+  const byType = new Map<string, ComplementaryProductRow[]>();
+  for (const r of rows) {
+    const list = byType.get(r.product_type) ?? [];
+    list.push(r);
+    byType.set(r.product_type, list);
+  }
+  const types = [...byType.keys()].sort();
+  if (types.length === 0) return [];
+  const h = stableHash(seed);
+  const picks: ComplementaryProductRow[] = [];
+  for (let i = 0; i < types.length && picks.length < count; i++) {
+    const list = byType.get(types[(h + i) % types.length])!;
+    picks.push(list[(h >>> 8) % list.length]);
+  }
+  // Fewer distinct categories than cards: fill from what's left rather than show fewer.
+  for (const r of rows) {
+    if (picks.length >= count) break;
+    if (!picks.includes(r)) picks.push(r);
+  }
+  return picks;
+}
+
+/**
+ * "Complétez la pièce" (product page block) — 3 complementary pieces from OTHER categories.
+ *
+ * NO LLM (2026-10-02). It used to run the full assistant tool loop on every product-page
+ * view of an uncached product: ~5k tokens a time, fired automatically on page load, so
+ * crawlers rendering the catalogue drained the shared `assistant` pool (~50 distinct product
+ * pages/hour measured) and the shopper chat went "temporarily unavailable" for most of every
+ * day. The pick is now plain catalogue logic over the viewed product's Aosom taxonomy path:
+ *
+ *   - same room first (the path's first two levels, e.g. "Home Furnishings > Living Room
+ *     Furniture"), widening to the top level ("Patio & Garden") when the room is thin;
+ *   - never the viewed product's own category (its path up to 3 levels, so a soft-top gazebo
+ *     doesn't suggest a hard-top one);
+ *   - the same safety filters as the chat's cross-sell tool (in stock, imported, photo
+ *     checked with no open image issue), then the live/FR-title check of resolveCards.
+ *
+ * `name`/`productType` come from the request body: UNTRUSTED, length-capped, and only ever
+ * used as bound LIKE prefixes (wildcards escaped in getComplementaryCandidates).
  */
 export async function runComplementary(opts: { name: string; productType: string; locale?: Locale }): Promise<AssistantResult> {
   const locale: Locale = opts.locale === "en" ? "en" : "fr";
   const name = opts.name.slice(0, 200);
-  const type = opts.productType.slice(0, 120);
-  const seed = locale === "en"
-    ? `A shopper is viewing this product: "${name}" (category: ${type}). Suggest exactly 3 COMPLEMENTARY products from OTHER categories that complete the room or pair well with it. Do NOT suggest another item of the same category (${type}).`
-    : `Un client regarde ce produit : « ${name} » (catégorie : ${type}). Suggère exactement 3 produits COMPLÉMENTAIRES d'AUTRES catégories qui complètent la pièce ou s'agencent bien. Ne propose PAS un autre article de la même catégorie (${type}).`;
-  return runAssistant({ message: seed, locale });
+  const segs = opts.productType.slice(0, 200).split(">").map((s) => s.trim()).filter(Boolean);
+  if (segs.length === 0) return { reply: "", products: [] };
+
+  const exclude = segs.slice(0, Math.min(segs.length, 3)).join(" > ");
+  const scopes = [...new Set([segs.slice(0, 2).join(" > "), segs[0]])];
+  // Leaf categories are named inconsistently ("Sofas", "2-Seater Sofas", "Sofas & Reclining
+  // Chairs"), so the path exclusion alone let a sofa suggest sofas. Also drop any candidate
+  // whose leaf contains the viewed leaf's HEAD noun (its last word): "Dining Chairs" → chair,
+  // so dining tables stay in, while "Sofas" → sofa drops "Sofas & Reclining Chairs".
+  const head = [...leafNouns(segs[segs.length - 1])].pop();
+  const sameKind = (r: ComplementaryProductRow) => !!head && leafNouns(r.product_type.split(">").pop() ?? "").has(head);
+  // Pick a few spares: resolveCards drops drafts / unpublished products.
+  const spare = COMPLEMENTARY_CARDS + 2;
+  let picks: ComplementaryProductRow[] = [];
+  for (const scope of scopes) {
+    const rows = (await getComplementaryCandidates({ scope, exclude, limit: 80 })).filter((r) => !sameKind(r));
+    picks = pickComplementary(rows, name || exclude, spare);
+    if (picks.length >= spare) break;
+  }
+
+  const pool = new Map<string, Card>();
+  for (const p of picks) {
+    pool.set(p.sku, {
+      sku: p.sku,
+      name: p.name,
+      price: p.price,
+      image: p.image1 || null,
+      handle: String(p.shopify_handle),
+      type: p.product_type,
+      color: p.color || "",
+      inStock: p.qty > 0,
+    });
+  }
+  // No per-card sentence: it was the only thing the model wrote, and a templated one
+  // repeated on three cards reads worse than none (the block hides an empty reason).
+  const products = await resolveCards(picks.map((p) => ({ sku: p.sku, reason: "" })), pool, locale);
+  return { reply: "", products: products.slice(0, COMPLEMENTARY_CARDS) };
 }
 
 /** Resolve picked SKUs to full cards from the pool, dropping unknowns / handle-less entries. */
