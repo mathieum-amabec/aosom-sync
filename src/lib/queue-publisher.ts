@@ -27,7 +27,8 @@ import { type FacebookBrand } from "./facebook-client";
 import { publishSocialPayload, type SocialPayload } from "./social-publisher";
 import { createBlogArticle, publishBlogArticle, getBlogArticleBody } from "./shopify-blog";
 import { stripGuideDraftBanner, hasGuideDraftBanner } from "./guide-draft-banner";
-import { setCollectionMetafield } from "./shopify-client";
+import { setCollectionMetafield, getShopifyProductTitle } from "./shopify-client";
+import { stripSupplierBrands } from "./catalog-guard";
 import { getAnthropicClient } from "./content-generator";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "./strip-markdown";
@@ -41,6 +42,7 @@ import {
   markPublished,
   markFailed,
   markGuidePagePublished,
+  getProduct,
   type PublicationQueueItem,
 } from "./database";
 
@@ -217,6 +219,42 @@ async function publishToBoth(p: SocialQueuePayload): Promise<PublishItemResult> 
 
 const LANG_LABEL = { fr: "français", en: "anglais" } as const;
 
+/** What each batch video shows — the caption writer's angle. */
+export const BATCH_VIDEO_ANGLE: Record<string, string> = {
+  assembly: "vidéo qui montre le montage du produit, étape par étape, fait soi-même à la maison",
+  demand_gen_ext: "courte vidéo qui montre le produit en situation réelle",
+};
+
+/**
+ * Turn a content-batches queue payload ({sku, productName, blobUrl}) into a publishable Reel:
+ * the REAL French product title from Shopify (productName is sometimes a label like "on monte
+ * le meuble à chat"), a link to the product page, and a direct-response caption. Never throws
+ * over the caption — it falls back to the title — only over a payload with no video.
+ */
+export async function batchVideoToSocialPayload(contentType: string, raw: unknown): Promise<SocialQueuePayload> {
+  if (!raw || typeof raw !== "object") throw new Error("payload must be a JSON object");
+  const o = raw as Record<string, unknown>;
+  const blobUrl = optString(o.blobUrl) ?? optString(o.reelsVideoUrl);
+  if (!blobUrl) throw new Error("payload.blobUrl is required");
+  const sku = optString(o.sku);
+  const fallbackName = optString(o.productName) ?? "";
+  let title = fallbackName;
+  let link: string | undefined;
+  if (sku) {
+    try {
+      const product = await getProduct(sku);
+      if (product?.shopify_product_id) title = await getShopifyProductTitle(product.shopify_product_id, fallbackName);
+      if (product?.shopify_handle) link = `https://ameublodirect.ca/products/${product.shopify_handle}`;
+    } catch (err) {
+      console.warn(`[publisher] ${contentType} ${sku}: product lookup failed, using the stored name: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  const angle = BATCH_VIDEO_ANGLE[contentType] ?? "vidéo du produit";
+  const generated = optString(o.caption) ? null : await generateReelCaption(`${title} — ${angle}`, "fr");
+  const caption = optString(o.caption) ?? generated ?? `${title} — livraison gratuite au Canada.${link ? ` 👉 ${link}` : ""}`;
+  return { caption: stripSupplierBrands(caption), brand: "ameublo", reelsVideoUrl: blobUrl, link };
+}
+
 /**
  * Generate a short clickbait caption for a Reel at publish time, so the posted copy is
  * punchier than the stored product title. Returns the generated text, or `null` on any
@@ -227,10 +265,24 @@ export async function generateReelCaption(
   productText: string,
   language: "fr" | "en",
 ): Promise<string | null> {
+  // Direct-response style "à la Alex Hormozi" (Mat, 2026-10-01): a scroll-stopping first line
+  // built on a concrete benefit or the problem it solves, then value, then a clear call to
+  // action. Truthful only: no price (it changes), no fake urgency/scarcity, no supplier name.
   const prompt =
-    `Génère un texte Facebook/Instagram clickbait de 2-3 phrases en ${LANG_LABEL[language]} ` +
-    `pour ce produit : ${productText}. Accrocheur, émoji, appel à l'action. Max 150 caractères. ` +
-    `Pas de hashtags — ils seront ajoutés séparément. Réponds uniquement avec le texte, sans guillemets.`;
+    `Écris le texte d'une vidéo Facebook/Instagram en ${LANG_LABEL[language]}, style direct-response à la Alex Hormozi, ` +
+    `pour ce produit : ${productText}.\n` +
+    `Structure : 1) une accroche-choc en première ligne (le problème réglé ou le bénéfice concret, jamais vague) ; ` +
+    `2) une phrase de valeur concrète ; 3) un appel à l'action clair (voir le produit, magasiner). ` +
+    `1 ou 2 émojis maximum. Max 220 caractères. ${language === "fr" ? "Vouvoiement." : ""}\n` +
+    `Vérité absolue : n'affirme AUCUNE caractéristique, durée, quantité ou résultat qui n'est pas écrit dans le nom du produit ` +
+    `(jamais "en 30 minutes", "sans outil", "pendant des heures", "absorbe les odeurs", "montage garanti"). ` +
+    `L'accroche peut nommer un besoin courant, sans exagérer. ` +
+    `Ton direct mais poli et chaleureux : jamais vulgaire, jamais dégoûtant, jamais culpabilisant. ` +
+    `Pas de "lien en bio" (le lien est sous la vidéo).\n` +
+    `Interdit : tout prix ou pourcentage, fausse urgence ou fausse rareté ("dernière chance", "stock limité"), ` +
+    `superlatifs invérifiables ("le meilleur"), nom de fournisseur ou de marque fabricante, hashtags. ` +
+    `La livraison gratuite au Canada est vraie : tu peux la mentionner. ` +
+    `Réponds uniquement avec le texte, sans guillemets.`;
   try {
     const message = await budgetedCreate(getAnthropicClient(), {
       model: CLAUDE.MODEL_BATCH,
@@ -242,7 +294,7 @@ export async function generateReelCaption(
     // Same cleanup as the draft paths: strip surrounding quotes, Markdown, and a
     // leading platform-label line ("Post Facebook 🌿") — this reel caption is
     // published unreviewed, so it must not ship a label prefix.
-    const text = cleanSocialCaption(block.text.trim().replace(/^["']+|["']+$/g, ""));
+    const text = stripSupplierBrands(cleanSocialCaption(block.text.trim().replace(/^["']+|["']+$/g, "")));
     return text || null;
   } catch (err) {
     console.warn(
@@ -289,6 +341,24 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
     raw = JSON.parse(item.payload);
   } catch {
     throw new Error("payload is not valid JSON");
+  }
+
+  // Batch video formats (content-batches pipeline) are queued as {sku, productName, blobUrl}
+  // — no caption, no brand — so they used to hit parseSocialPayload below and fail with
+  // "payload.caption is required": 0 ever published, every scheduled one failed (found
+  // 2026-10-01). Build a real Reel payload from the product instead.
+  if (item.contentType in BATCH_VIDEO_ANGLE) {
+    const social = await batchVideoToSocialPayload(item.contentType, raw);
+    switch (item.platform) {
+      case "facebook":
+        return { postId: (await publishSocialPayload("facebook", toSocialPayload(social))).postId };
+      case "instagram":
+        return { postId: (await publishSocialPayload("instagram", toSocialPayload(social))).postId };
+      case "both":
+        return publishToBoth(social);
+      default:
+        throw new Error(`Unsupported platform for ${item.contentType}: ${item.platform}`);
+    }
   }
 
   // Reels (content_type='video' or 'sequential_ad' with a reelsVideoUrl): regenerate the

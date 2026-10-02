@@ -5,6 +5,8 @@ vi.mock("@/lib/facebook-client", () => ({
   publishWithImage: vi.fn().mockResolvedValue({ id: "fb-img", postId: "fb-img" }),
   publishWithImages: vi.fn().mockResolvedValue({ id: "fb-alb", postId: "fb-alb" }),
   publishVideo: vi.fn().mockResolvedValue({ id: "fb-vid", postId: "fb-vid" }),
+  publishFacebookReel: vi.fn().mockResolvedValue({ postId: "fb-reel" }),
+  facebookBrandCreds: vi.fn(() => ({ pageId: "p1", token: "t1", label: "Ameublo" })),
 }));
 vi.mock("@/lib/instagram-client", () => ({
   publishPhoto: vi.fn().mockResolvedValue({ id: "ig-photo", creationId: "c1" }),
@@ -17,6 +19,7 @@ vi.mock("@/lib/shopify-blog", () => ({
 }));
 vi.mock("@/lib/shopify-client", () => ({
   setCollectionMetafield: vi.fn().mockResolvedValue(undefined),
+  getShopifyProductTitle: vi.fn(async () => "Meuble à chat 3 niveaux en bois"),
 }));
 vi.mock("@/lib/database", () => ({
   getNextPending: vi.fn(),
@@ -26,6 +29,7 @@ vi.mock("@/lib/database", () => ({
   markPublished: vi.fn().mockResolvedValue(undefined),
   markFailed: vi.fn().mockResolvedValue(undefined),
   markGuidePagePublished: vi.fn().mockResolvedValue(undefined),
+  getProduct: vi.fn(async () => ({ shopify_product_id: "123", shopify_handle: "meuble-chat-3-niveaux" })),
 }));
 vi.mock("@/lib/content-generator", () => ({ getAnthropicClient: vi.fn() }));
 
@@ -41,6 +45,7 @@ import {
   publishWithImage,
   publishWithImages,
   publishVideo,
+  publishFacebookReel,
 } from "@/lib/facebook-client";
 import { publishPhoto, publishReel } from "@/lib/instagram-client";
 import { createBlogArticle, publishBlogArticle, getBlogArticleBody } from "@/lib/shopify-blog";
@@ -466,5 +471,34 @@ describe("stranded-publish reaper", () => {
     const r = await drainPublisherQueue();
     expect(r.reclaimed).toBe(0);
     expect(getNextPending).toHaveBeenCalled();
+  });
+});
+
+describe("publishQueueItem — batch video formats (assembly / demand_gen_ext)", () => {
+  const batch = { sku: "D31-078V01RB", productName: "on monte le meuble à chat", blobUrl: "https://blob.example/ASM-D31.mp4" };
+
+  it("publishes a {sku, productName, blobUrl} payload as a Reel with a generated caption and the product link (used to fail: caption is required)", async () => {
+    const create = stubClaude("Votre chat mérite son château 🐱 Montage simple, fait à la maison. Voyez-le 👉");
+    const r = await publishQueueItem(item({ platform: "facebook", contentType: "assembly", payload: batch }));
+    expect(r.postId).toBeTruthy();
+    const prompt = create.mock.calls[0][0].messages[0].content as string;
+    expect(prompt).toContain("Meuble à chat 3 niveaux en bois"); // real Shopify title, not the label
+    expect(prompt).toContain("montage");
+    expect(prompt).toMatch(/Hormozi/);
+    const opts = vi.mocked(publishFacebookReel).mock.calls.at(-1)![0];
+    expect(opts.videoUrl).toBe(batch.blobUrl);
+    expect(opts.caption).toContain("château");
+  });
+
+  it("falls back to the product title + link when caption generation fails — never blocks the publish", async () => {
+    stubClaude(null);
+    await publishQueueItem(item({ platform: "facebook", contentType: "demand_gen_ext", payload: { ...batch, sku: "844-874V00BN" } }));
+    const caption = vi.mocked(publishFacebookReel).mock.calls.at(-1)![0].caption;
+    expect(caption).toContain("Meuble à chat 3 niveaux en bois");
+    expect(caption).toContain("https://ameublodirect.ca/products/meuble-chat-3-niveaux");
+  });
+
+  it("still fails loudly when the payload has no video", async () => {
+    await expect(publishQueueItem(item({ platform: "facebook", contentType: "assembly", payload: { sku: "X" } }))).rejects.toThrow(/blobUrl/);
   });
 });
