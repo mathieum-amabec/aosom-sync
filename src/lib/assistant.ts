@@ -183,9 +183,14 @@ async function searchCatalog(input: Record<string, unknown>): Promise<Card[]> {
     return products.filter((p) => p.shopify_handle && String(p.shopify_handle).trim() && p.shopify_product_id);
   };
 
-  // Relaxation ladder: the whole phrase, then each word (longest first), then without price.
+  // Relaxation ladder: the whole phrase, then the phrase minus one word (so "outdoor fire
+  // pit" falls back to "fire pit", not to "outdoor" — which matched kayaks and planters in
+  // production, 2026-10-02), then each word longest first, then without price.
   let rows: Row[] = [];
   const attempts: Array<[string | undefined, boolean]> = [[phrase || undefined, true]];
+  if (words.length > 2 && words.length <= 5) {
+    for (let drop = 0; drop < words.length; drop++) attempts.push([words.filter((_, i) => i !== drop).join(" "), true]);
+  }
   if (words.length > 1) for (const w of [...words].sort((a, b) => b.length - a.length)) attempts.push([w, true]);
   if (price.minPrice !== undefined || price.maxPrice !== undefined) attempts.push([words[0] ?? (phrase || undefined), false]);
   for (const [search, withPrice] of attempts) {
@@ -326,6 +331,10 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
   const budget = extractBudget([...(opts.history || []).map((t) => t.content), opts.message].join(" "));
 
   for (let step = 0; step < MAX_STEPS; step++) {
+    // The LAST step gets no tools, so the model must answer with the final JSON. Without
+    // this, Gemini kept searching through all 3 steps and the shopper got the salvage reply
+    // (first pool rows, no reasons) — a kayak for "foyer extérieur" (2026-10-02).
+    const lastStep = step === MAX_STEPS - 1;
     // Route through the DEDICATED "assistant" budget pool (llm-budget) — a reservation
     // separate from the "batch" pool that imports/content/social draw from, so a bulk
     // batch run can never starve this public endpoint. Budget-exhausted throws
@@ -334,8 +343,10 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
       {
         model: GEMINI.MODEL_ASSISTANT,
         maxOutputTokens: 1024,
-        systemInstruction: systemPrompt(locale),
-        tools: [SEARCH_TOOL, RECOMMEND_TOOL],
+        systemInstruction: lastStep
+          ? `${systemPrompt(locale)}\n\nNO MORE SEARCHES ARE AVAILABLE. Give the FINAL ANSWER JSON now, choosing only among the products already returned.`
+          : systemPrompt(locale),
+        tools: lastStep ? undefined : [SEARCH_TOOL, RECOMMEND_TOOL],
         contents,
       },
       "assistant",
