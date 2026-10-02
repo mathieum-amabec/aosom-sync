@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.94.5] - 2026-10-02
+
+Social highlights: the "Bureau & Télétravail can't generate" bug is fixed, and the operator can now target precise sub-categories (e.g. autumn outdoor: fire pits, sheds, gazebos) and save them as themes.
+
+### Fixed
+
+- **Highlights drew blind.** The generator sampled 15 random eligible SKUs and only then checked which had a validated lifestyle photo. Bureau had 17 verified fiches out of 108, and the trend trial pinned 4 unverified trending SKUs at the head of every sample, so a draft missed ~5% of the time and more with every post. The draw is now restricted up front to lifestyle-verified products (`lifestyle-verified-set.ts`: one paged GraphQL search, cached 10 min; falls back to the old draw if Shopify can't answer). Verified live: 0 misses over 20 draws for Bureau, Rangement and Halloween.
+- An empty result now distinguishes "the products with a photo all have a recent post" from "every product is in the cooldown", and the messages no longer tell the operator to retry a draw that is no longer random.
+
+### Added
+
+- **Ciblage précis** panel on /social: the real Aosom `product_type` tree (275 branches) with, per branch, in-stock fiches and how many are postable now (verified photo + outside the repost window). Tick branches → "Générer 3 brouillons".
+- **Saved themes** (`settings.social_themes`): name a selection, regenerate it in one click, edit or delete it. One theme can be the daily cron's preference (`settings.social_auto_theme`) instead of the seasonal default, with the same soft fallback to the whole catalog.
+- `GET/POST /api/social/targets`. Targets only choose WHICH products drafts are generated for — nothing approves, schedules or publishes.
+
 ## [0.5.94.4] - 2026-10-01
 
 Switched the gallery classifier (v0.5.94.3) from Vercel AI Gateway to Google's Gemini API directly — cheaper at our volume (Google's own free tier applies; the Gateway doesn't offer one for this model) and one less billing relationship for a ~1-2 $ one-off job.

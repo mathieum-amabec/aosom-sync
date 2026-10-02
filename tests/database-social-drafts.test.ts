@@ -118,6 +118,13 @@ describe("markProductPosted — cooldown for the whole fiche", () => {
     const skus = cands.map((c) => String(c.sku));
     expect(skus).toEqual(["900-001"]);
   });
+
+  it("restricts the draw to postable (lifestyle-verified) Shopify products when given", async () => {
+    const cands = await mod.getEligibleHighlightCandidates(30, 50, null, new Set(["P2"]));
+    expect(cands.map((c) => String(c.sku))).toEqual(["900-001"]);
+    const none = await mod.getEligibleHighlightCandidates(30, 50, null, new Set());
+    expect(none).toEqual([]);
+  });
 });
 
 describe("cooldown release — only LIVE drafts hold a fiche's cooldown", () => {

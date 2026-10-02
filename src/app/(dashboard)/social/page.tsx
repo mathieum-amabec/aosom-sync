@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { describePayloadFailure, describeNetworkFailure } from "@/lib/api-error-message";
 import { SOCIAL_CATEGORIES, seasonalDefaultCategory, getCategory } from "@/lib/social-categories";
+import { TargetingPanel, type TargetSelection } from "./targeting-panel";
 
 interface ChannelState {
   status: "pending" | "published" | "error" | "skipped";
@@ -269,7 +270,9 @@ export default function SocialPage() {
     }
   }
 
-  async function generateHighlight() {
+  // `selection` comes from the "Ciblage précis" panel (theme or sub-categories) and
+  // replaces the dropdown category for that click.
+  async function generateHighlight(selection?: TargetSelection) {
     setGenerating(true);
     try {
       const res = await fetch("/api/social", {
@@ -280,7 +283,7 @@ export default function SocialPage() {
           triggerType: "stock_highlight",
           count: 3,
           // Omitted when blank so the server picks the season.
-          ...(category ? { category } : {}),
+          ...(selection ?? (category ? { category } : {})),
         }),
       });
       const data = await res.json();
@@ -292,6 +295,8 @@ export default function SocialPage() {
         showOk(
           `${data.count} brouillon(s) générés — rien de saisonnier en stock, repli sur tout le catalogue.`
         );
+      } else if (selection) {
+        showOk(`${data.count} brouillon(s) générés — à revoir dans la liste ci-dessous.`);
       }
     } catch {
       showError(describeNetworkFailure("La génération"));
@@ -426,7 +431,7 @@ export default function SocialPage() {
             <option value="all">Toutes les catégories</option>
           </select>
           <button
-            onClick={generateHighlight}
+            onClick={() => generateHighlight()}
             disabled={generating}
             className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors whitespace-nowrap"
           >
@@ -434,6 +439,13 @@ export default function SocialPage() {
           </button>
         </div>
       </div>
+
+      <TargetingPanel
+        generating={generating}
+        onGenerate={generateHighlight}
+        onError={showError}
+        onOk={showOk}
+      />
 
       <div className="grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 mb-6">
         {[

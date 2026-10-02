@@ -6353,21 +6353,18 @@ export async function getEligibleHighlightCandidates(
    * a constant string from that module's own table — never operator input, so inlining it is
    * safe; anything variable still travels as a bound arg.
    */
-  filter?: { predicate: string; args: (string | number)[] } | null
+  filter?: { predicate: string; args: (string | number)[] } | null,
+  /**
+   * Shopify product ids that can actually be posted (lifestyle-verified). When given, the
+   * draw happens among those only, so a thin category no longer loses its few postable
+   * products in a blind random sample. null/undefined = no restriction (the old behavior).
+   */
+  allowedProductIds?: Set<string> | null,
 ): Promise<Record<string, unknown>[]> {
+  const skus = await eligibleHighlightSkus(minDaysBetween, filter, allowedProductIds);
+  if (skus.length === 0) return [];
   const db = await ensureSchema();
-  const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
 
-  const extra = filter?.predicate ? ` AND (${filter.predicate})` : "";
-  const skusResult = await db.execute({
-    sql: `SELECT sku FROM products
-          WHERE shopify_product_id IS NOT NULL AND qty > 0
-            AND (last_posted_at IS NULL OR last_posted_at < ?)${extra}`,
-    args: [cutoff, ...(filter?.args ?? [])],
-  });
-  if (skusResult.rows.length === 0) return [];
-
-  const skus = skusResult.rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
   // Fisher-Yates shuffle, then take the first `limit`.
   for (let i = skus.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -6388,6 +6385,28 @@ export async function getEligibleHighlightCandidates(
   return pick
     .map((s) => bySku.get(s))
     .filter((o): o is Record<string, unknown> => o !== undefined);
+}
+
+/** SKUs eligible for a stock highlight (imported, in stock, outside the repost window,
+ *  matching the category filter), optionally restricted to postable Shopify products. */
+async function eligibleHighlightSkus(
+  minDaysBetween: number,
+  filter?: { predicate: string; args: (string | number)[] } | null,
+  allowedProductIds?: Set<string> | null,
+): Promise<string[]> {
+  const db = await ensureSchema();
+  const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
+  const extra = filter?.predicate ? ` AND (${filter.predicate})` : "";
+  const res = await db.execute({
+    sql: `SELECT sku, shopify_product_id FROM products
+          WHERE shopify_product_id IS NOT NULL AND qty > 0
+            AND (last_posted_at IS NULL OR last_posted_at < ?)${extra}`,
+    args: [cutoff, ...(filter?.args ?? [])],
+  });
+  const rows = res.rows.map((r) => r as unknown as Record<string, unknown>);
+  return rows
+    .filter((r) => !allowedProductIds || allowedProductIds.has(String(r.shopify_product_id)))
+    .map((r) => r.sku as string);
 }
 
 export const TREND_SELECTION_TRIAL_UNTIL_KEY = "trend_selection_trial_until";
@@ -6420,25 +6439,18 @@ export async function getEligibleHighlightCandidatesTrendAware(
   minDaysBetween: number,
   limit: number,
   filter?: { predicate: string; args: (string | number)[] } | null,
+  allowedProductIds?: Set<string> | null,
 ): Promise<Record<string, unknown>[]> {
   const trialUntil = await getSetting(TREND_SELECTION_TRIAL_UNTIL_KEY);
   if (!isTrendSelectionTrialActive(trialUntil)) {
-    return getEligibleHighlightCandidates(minDaysBetween, limit, filter);
+    return getEligibleHighlightCandidates(minDaysBetween, limit, filter, allowedProductIds);
   }
 
   const db = await ensureSchema();
-  const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
-  const extra = filter?.predicate ? ` AND (${filter.predicate})` : "";
-  const skusResult = await db.execute({
-    sql: `SELECT sku FROM products
-          WHERE shopify_product_id IS NOT NULL AND qty > 0
-            AND (last_posted_at IS NULL OR last_posted_at < ?)${extra}`,
-    args: [cutoff, ...(filter?.args ?? [])],
-  });
-  if (skusResult.rows.length === 0) return [];
-  const eligibleSkus = new Set(
-    skusResult.rows.map((r) => (r as unknown as Record<string, unknown>).sku as string),
-  );
+  // Restricting to postable products here also stops unverified trending SKUs from
+  // taking the head of every sample (4 of Bureau's 15 slots, 2026-10-01).
+  const eligibleSkus = new Set(await eligibleHighlightSkus(minDaysBetween, filter, allowedProductIds));
+  if (eligibleSkus.size === 0) return [];
 
   const trending = await getTopTrendScores("product", 30);
   const trendingEligible = trending.map((t) => t.entityId).filter((sku) => eligibleSkus.has(sku));
@@ -6522,6 +6534,27 @@ export async function nextHighlightAvailableAt(
   });
   const t = rowToObj(r.rows[0]).t;
   return t == null ? null : Number(t) + minDaysBetween * 86400;
+}
+
+/** In-stock imported products with their product_type and repost state. The social
+ *  sub-category picker (/api/social/targets) aggregates these into a tree of postable counts. */
+export async function getSocialTargetRows(): Promise<
+  { productType: string; shopifyProductId: string; lastPostedAt: number | null }[]
+> {
+  const db = await ensureSchema();
+  const res = await db.execute(
+    `SELECT product_type, shopify_product_id, last_posted_at FROM products
+     WHERE shopify_product_id IS NOT NULL AND qty > 0
+       AND product_type IS NOT NULL AND TRIM(product_type) != ''`,
+  );
+  return res.rows.map((r) => {
+    const o = rowToObj(r);
+    return {
+      productType: String(o.product_type).trim(),
+      shopifyProductId: String(o.shopify_product_id),
+      lastPostedAt: o.last_posted_at == null ? null : Number(o.last_posted_at),
+    };
+  });
 }
 
 export async function markProductPosted(sku: string): Promise<void> {
