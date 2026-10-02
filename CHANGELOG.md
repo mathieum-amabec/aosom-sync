@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.94.6] - 2026-10-02
+
+Manual review of the first real Gemini classification pilot (50 photos) found the one gap the
+strict overlay prompt missed: zoom-medallion/callout-circle graphics added in post-production
+(e.g. a circled close-up of a hinge with a line pointing to it) were passing as compliant
+whenever they carried no literal text, even though a textless callout is the same kind of
+post-production graphic as the arrows/bubbles the prompt already caught.
+
+### Changed
+
+- `STRICT_OVERLAY_PROMPT` (`vision-classifier.ts`, shared by both the daily pos-1 guard and
+  the gallery gap-filler) now explicitly flags zoom circles/detail medallions/connecting
+  lines as non-compliant even without text — not just text-bearing overlays. A plain close-up
+  with no added graphic is still compliant; only the added montage element trips it.
+- Re-ran the full gallery backlog (10,590 Gemini-side verdicts total, including the ~770
+  already cached under the narrower prompt, which were explicitly re-classified rather than
+  bulk-deleted) — catalog is now 100% classified (14,020/14,020 photos). 7,377 of the
+  Gemini-classified photos are flagged non-compliant under the widened rule.
+
 ## [0.5.94.5] - 2026-10-02
 
 Social highlights: the "Bureau & Télétravail can't generate" bug is fixed, and the operator can now target precise sub-categories (e.g. autumn outdoor: fire pits, sheds, gazebos) and save them as themes.

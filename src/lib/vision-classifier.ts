@@ -2,13 +2,16 @@
  * Vision-based pos-1 image compliance classifier.
  *
  * A compliant primary (pos-1) product image is a clean photo with NO marketing text
- * overlay burned onto it (slogans, prices, badges, callouts, added logos). Text that is
- * DIEGETIC — physically part of the photographed scene or product (a brand engraved on
- * the item, a book title on a shelf, third-party packaging in the room) — does NOT make
- * an image non-compliant.
+ * overlay burned onto it (slogans, prices, badges, callouts, added logos) and no zoom
+ * medallion/callout circle added in post (even a textless one highlighting a hinge or
+ * handle). Text that is DIEGETIC — physically part of the photographed scene or product
+ * (a brand engraved on the item, a book title on a shelf, third-party packaging in the
+ * room) — does NOT make an image non-compliant, and neither does a plain close-up with no
+ * added graphic.
  *
  * This is the automated equivalent of the 141 manual pos-1 swaps: the strict prompt below
- * is the same validated one used for that pass (marketing overlay only, diegetic excluded).
+ * is the same validated one used for that pass (marketing overlay only, diegetic excluded),
+ * widened 2026-10-01 to also catch textless zoom-medallion overlays (see CHANGELOG).
  */
 import { getAnthropicClient } from "./content-generator";
 import { budgetedCreate } from "@/lib/llm-budget";
@@ -49,15 +52,21 @@ EST du texte marketing incrusté (has_marketing_overlay = true) :
 - Logos ou filigranes de marque AJOUTÉS par-dessus la photo en post-production
 - Flèches, bulles, callouts, listes de caractéristiques superposées à l'image
 - Bandeaux ou cartouches de texte ajoutés en montage
+- Cercles ou médaillons de zoom ajoutés en montage pour agrandir un détail du produit (charnière,
+  poignée, texture, mécanisme), avec ou sans ligne/flèche de rappel reliant le médaillon à la photo
+  — MÊME SI le médaillon ne contient aucun texte. C'est un graphisme de montage ajouté par-dessus
+  la photo, au même titre qu'une flèche ou un callout.
 
 N'EST PAS du texte marketing incrusté (has_marketing_overlay = false — texte DIÉGÉTIQUE, qui fait naturellement partie de la scène réelle) :
 - Texte imprimé sur le produit lui-même (marque gravée, étiquette, cadran d'horloge, touches de clavier)
 - Texte présent naturellement dans le décor (titre d'un livre sur une étagère, enseigne dans la pièce, emballage d'un produit tiers)
 - Aucune présence de texte
+- Une photo simple, même en gros plan ou prise d'un angle serré, SANS aucun cercle/médaillon/ligne
+  de montage ajouté par-dessus (un gros plan naturel n'est pas un montage)
 
 Règles :
 - En cas de doute entre overlay marketing et texte diégétique, considère-le DIÉGÉTIQUE (has_marketing_overlay = false).
-- Ne juge PAS la qualité, le fond, ni la mise en scène — UNIQUEMENT la présence de texte marketing incrusté.`;
+- Ne juge PAS la qualité, le fond, ni la mise en scène — UNIQUEMENT la présence de texte marketing incrusté OU d'un médaillon/cercle de zoom ajouté en montage.`;
 
 /** Pick the Anthropic image media_type from a URL's extension. Defaults to JPEG. */
 function mediaTypeFor(src: string): "image/jpeg" | "image/png" | "image/webp" | "image/gif" {
