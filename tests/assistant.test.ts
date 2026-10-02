@@ -219,6 +219,28 @@ describe("runAssistant", () => {
     expect(res.products).toHaveLength(0);
   });
 
+  it("withholds the tools on the last step so the model has to answer", async () => {
+    // Gemini kept searching through all 3 steps and shoppers got the salvage reply (2026-10-02).
+    create.mockResolvedValue(toolUse({ query: "sofa" }));
+    await runAssistant({ message: "canapé", locale: "fr" });
+    expect(create).toHaveBeenCalledTimes(3);
+    expect(create.mock.calls[0][0].tools).toHaveLength(2);
+    expect(create.mock.calls[2][0].tools).toBeUndefined();
+    expect(create.mock.calls[2][0].systemInstruction).toMatch(/NO MORE SEARCHES/);
+  });
+
+  it("falls back from a 3-word phrase to 2-word sub-phrases before single words", async () => {
+    getProducts.mockImplementation(async (f: { search?: string }) =>
+      f.search === "fire pit" ? { products: [prod()], total: 1, productTypes: [] } : { products: [], total: 0, productTypes: [] },
+    );
+    create
+      .mockResolvedValueOnce(toolUse({ query: "outdoor fire pit" }))
+      .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
+    await runAssistant({ message: "foyer extérieur", locale: "fr" });
+    const searches = [...new Set(getProducts.mock.calls.map((c) => c[0].search))];
+    expect(searches).toEqual(["outdoor fire pit", "fire pit"]);
+  });
+
   it("falls back gracefully when the model never emits final JSON", async () => {
     // Every step returns tool_use → loop exhausts MAX_STEPS without a final answer.
     create.mockResolvedValue(toolUse({ query: "sofa" }));

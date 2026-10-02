@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.94.8] - 2026-10-02
+
+Hotfix for the Gemini assistant (v0.5.94.7), seen live in production right after deploy: "foyer extérieur" returned a kayak and a planter with no reasons.
+
+### Fixed
+
+- The last of the 3 model steps is sent WITHOUT tools (and told to answer now), so Gemini must give the final JSON instead of searching until the loop ends on the salvage reply.
+- Catalog search relaxation tries the phrase minus one word before single words: "outdoor fire pit" now falls back to "fire pit", not to "outdoor".
+
 ## [0.5.94.7] - 2026-10-02
 
 The storefront assistant and the video-batch frame QC now run on Gemini 3.5 Flash-Lite (operator decision after a cost review, no Claude fallback).
