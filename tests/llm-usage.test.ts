@@ -5,11 +5,13 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("@/lib/config", () => ({
   env: { anthropicApiKey: "test-key" },
   CLAUDE: {
-    // Dated snapshot id on purpose: the assistant runs one, and pricing must resolve it.
-    MODEL_ASSISTANT: "claude-haiku-4-5-20251001",
     MODEL: "claude-sonnet-4-6",
     MODEL_BATCH: "claude-haiku-4-5",
-    MODEL_VIDEO_QC: "claude-sonnet-4-6",
+  },
+  // assistant + video QC moved to Gemini 3.5 Flash-Lite on 2026-10-02.
+  GEMINI: {
+    MODEL_ASSISTANT: "gemini-3.5-flash-lite",
+    MODEL_VIDEO_QC: "gemini-3.5-flash-lite",
   },
 }));
 
@@ -25,12 +27,12 @@ const {
 
 describe("pool → model routing", () => {
   it("prices the assistant pool with the assistant model and batch with the batch model", () => {
-    expect(poolModel("assistant")).toBe("claude-haiku-4-5-20251001");
+    expect(poolModel("assistant")).toBe("gemini-3.5-flash-lite");
     expect(poolModel("batch")).toBe("claude-haiku-4-5");
   });
 
   it("prices the video pool with the video-QC model, not the batch model", () => {
-    expect(poolModel("video")).toBe("claude-sonnet-4-6");
+    expect(poolModel("video")).toBe("gemini-3.5-flash-lite");
   });
 });
 
@@ -40,12 +42,13 @@ describe("dated snapshot ids", () => {
     expect(pricingKey("claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
   });
 
-  it("does not silently fall back to Sonnet rates for a dated assistant model", () => {
-    // The bug this guards: MODEL_PRICING has no "claude-haiku-4-5-20251001" key, so without
-    // pricingKey the assistant pool would be estimated at Sonnet rates — 3× too high.
-    const haiku = MODEL_PRICING["claude-haiku-4-5"];
+  it("prices the Gemini assistant model off its own row, never the Sonnet fallback", () => {
+    // An unknown model falls back to Sonnet rates (never "free"); the Gemini row must exist
+    // or the assistant pool would read ~8× too expensive on the usage dashboard.
+    const flashLite = MODEL_PRICING["gemini-3.5-flash-lite"];
+    expect(flashLite).toEqual({ inputPerMTok: 0.3, outputPerMTok: 2.5 });
     expect(blendedRatePerMTok("assistant")).toBeCloseTo(
-      haiku.inputPerMTok * 0.9 + haiku.outputPerMTok * 0.1,
+      flashLite.inputPerMTok * 0.9 + flashLite.outputPerMTok * 0.1,
       10,
     );
   });
@@ -53,8 +56,8 @@ describe("dated snapshot ids", () => {
 
 describe("blended rate", () => {
   it("weights each model's input and output price by the pool's assumed split", () => {
-    // assistant on Haiku: 90% in → 0.9*1 + 0.1*5 = 1.40
-    expect(blendedRatePerMTok("assistant")).toBeCloseTo(1.4, 10);
+    // assistant on Gemini 3.5 Flash-Lite: 90% in → 0.9*0.3 + 0.1*2.5 = 0.52
+    expect(blendedRatePerMTok("assistant")).toBeCloseTo(0.52, 10);
     // batch: 40% in → 0.4*1 + 0.6*5 = 3.40
     expect(blendedRatePerMTok("batch")).toBeCloseTo(3.4, 10);
   });
@@ -72,26 +75,24 @@ describe("blended rate", () => {
     expect(ASSUMED_INPUT_SHARE.video).toBeGreaterThan(0.5); // vision calls: heavily input-heavy
   });
 
-  it("video pool: measured 94% input share on Sonnet 4.6 (one image in, short JSON verdict out)", () => {
-    const sonnet = MODEL_PRICING["claude-sonnet-4-6"];
-    // 0.94*3 + 0.06*15 = 3.72
-    expect(blendedRatePerMTok("video")).toBeCloseTo(sonnet.inputPerMTok * 0.94 + sonnet.outputPerMTok * 0.06, 10);
-    expect(blendedRatePerMTok("video")).toBeCloseTo(3.72, 10);
+  it("video pool: measured 94% input share, now on Gemini 3.5 Flash-Lite", () => {
+    // 0.94*0.3 + 0.06*2.5 = 0.432 (was 3.72 on Sonnet 4.6).
+    expect(blendedRatePerMTok("video")).toBeCloseTo(0.432, 10);
   });
 });
 
 describe("estimateCostUsd", () => {
   it("scales linearly with tokens", () => {
-    // 1.40/MTok since the assistant moved to Haiku (was 4.20 on Sonnet 4.6).
-    expect(estimateCostUsd("assistant", 1_000_000)).toBeCloseTo(1.4, 10);
-    expect(estimateCostUsd("assistant", 500_000)).toBeCloseTo(0.7, 10);
+    // 0.52/MTok on Gemini 3.5 Flash-Lite (1.40 on Haiku, 4.20 on Sonnet 4.6).
+    expect(estimateCostUsd("assistant", 1_000_000)).toBeCloseTo(0.52, 10);
+    expect(estimateCostUsd("assistant", 500_000)).toBeCloseTo(0.26, 10);
   });
 
-  it("prices a full assistant pool day at one third of the Sonnet-era cost", () => {
-    // The whole point of the model swap. A saturated 500k-token day cost $2.10 on Sonnet
-    // 4.6 (0.9*3 + 0.1*15 = 4.20/MTok); on Haiku it is $0.70 (0.9*1 + 0.1*5 = 1.40/MTok).
-    const sonnetEraDay = 500_000 / 1e6 * 4.2;
-    expect(estimateCostUsd("assistant", 500_000)).toBeCloseTo(sonnetEraDay / 3, 10);
+  it("prices a full assistant pool day well under the Haiku-era cost", () => {
+    // A saturated 500k-token day: $0.70 on Haiku (1.40/MTok), $0.26 on Flash-Lite (0.52/MTok).
+    const haikuEraDay = (500_000 / 1e6) * 1.4;
+    expect(estimateCostUsd("assistant", 500_000)).toBeCloseTo(0.26, 10);
+    expect(estimateCostUsd("assistant", 500_000)).toBeLessThan(haikuEraDay / 2.5);
   });
 
   it("returns 0 for zero, negative, and non-finite input rather than NaN", () => {
@@ -104,19 +105,20 @@ describe("estimateCostUsd", () => {
     // Real counter delta that day: 697,528 tokens for 19 SKU attempts (8 delivered, 9 QC
     // rejects, 2 technical fails at ~0 cost). Anchors the video pool's estimate to an
     // actual measured day, the same way the assistant/batch test above does.
+    // Re-priced on Gemini: $2.59 on Sonnet → ~$0.30.
     const cost = estimateCostUsd("video", 697_528);
-    expect(cost).toBeCloseTo(697_528 / 1e6 * 3.72, 6);
-    expect(cost).toBeGreaterThan(2.55);
-    expect(cost).toBeLessThan(2.65);
+    expect(cost).toBeCloseTo(697_528 / 1e6 * 0.432, 6);
+    expect(cost).toBeGreaterThan(0.29);
+    expect(cost).toBeLessThan(0.31);
   });
 
   it("reproduces the measured 2026-08-18 day within a cent", () => {
-    // Real counters: assistant 500,458 + batch 432,112. Same day re-priced on Haiku for the
-    // assistant pool: $3.57 before the swap, $2.17 after — the batch half is unchanged.
+    // Real counters: assistant 500,458 + batch 432,112. Re-priced with the assistant on
+    // Gemini Flash-Lite: $3.57 (Sonnet) → $2.17 (Haiku) → $1.73 — the batch half is unchanged.
     const total = estimateCostUsd("assistant", 500_458) + estimateCostUsd("batch", 432_112);
-    expect(total).toBeCloseTo(500_458 / 1e6 * 1.4 + 432_112 / 1e6 * 3.4, 6);
-    expect(total).toBeGreaterThan(2.1);
-    expect(total).toBeLessThan(2.2);
+    expect(total).toBeCloseTo(500_458 / 1e6 * 0.52 + 432_112 / 1e6 * 3.4, 6);
+    expect(total).toBeGreaterThan(1.7);
+    expect(total).toBeLessThan(1.76);
   });
 });
 

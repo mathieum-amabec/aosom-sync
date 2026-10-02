@@ -275,24 +275,7 @@ export const COSTWAY = {
 
 export const CLAUDE = {
   /**
-   * The public shopping assistant's model (`/api/assistant` → runAssistant only).
-   *
-   * Moved off Sonnet 4.6 to Haiku 4.5 on 2026-09-02. The assistant's job is choosing among
-   * catalogue rows the search tool has already narrowed, and it accounts for ~86% of all
-   * recorded token volume. Haiku 4.5 is exactly one third of Sonnet 4.6 on BOTH input
-   * ($1 vs $3 per MTok) and output ($5 vs $15), so this cuts the pool's cost by two thirds
-   * however the input/output mix falls.
-   *
-   * ⚠️ This changes cost per token, NOT tokens consumed. The `assistant` pool caps TOKENS,
-   * so this swap alone does not serve one extra shopper — raising LLM_ASSISTANT_DAILY_BUDGET
-   * is what does that, and at Haiku rates 1.5M tokens/day costs what 500k did on Sonnet.
-   *
-   * Override per-deploy with CLAUDE_ASSISTANT_MODEL — set it to "claude-sonnet-4-6" to put
-   * the assistant back on Sonnet with no code change if answer quality regresses.
-   */
-  MODEL_ASSISTANT: process.env.CLAUDE_ASSISTANT_MODEL?.trim() || "claude-haiku-4-5-20251001",
-  /**
-   * The quality / escalation tier. No longer the assistant's model: its remaining job is
+   * The quality / escalation tier. Its remaining job is
    * being the model `generateProductContent` re-runs on when MODEL_BATCH output fails
    * validation (content-generator.ts). It MUST stay stronger than MODEL_BATCH or that
    * escalation degrades into a same-model retry.
@@ -312,18 +295,28 @@ export const CLAUDE = {
    * generateProductContent), so a Haiku miss costs a retry, never output quality.
    */
   MODEL_BATCH: process.env.CLAUDE_BATCH_MODEL?.trim() || "claude-haiku-4-5",
-  /**
-   * Video-batch vision QC only (demand-gen-ext / assembly frame scoring — see
-   * src/lib/demand-gen-clean-window.ts). Draws from the `video` pool, not `batch`.
-   *
-   * Sonnet, not Haiku: this is a strict dual-gate visual judgment call (full product
-   * visible AND text/logo-free) that gates whether a rendered clip ships at all — the
-   * same quality bar MODEL_BATCH's escalation tier (MODEL, above) exists for. Override
-   * per-deploy with CLAUDE_VIDEO_QC_MODEL.
-   */
-  MODEL_VIDEO_QC: process.env.CLAUDE_VIDEO_QC_MODEL?.trim() || "claude-sonnet-4-6",
   MAX_TOKENS_CONTENT: 4000,
   MAX_TOKENS_SOCIAL: 500,
+} as const;
+
+// ─── Gemini API ─────────────────────────────────────────────────────
+
+/**
+ * Gemini models (src/lib/gemini-client.ts). Both moved here on 2026-10-02 after a cost
+ * review, by the operator's decision, with no Claude fallback:
+ *
+ *   - MODEL_ASSISTANT — the public shopping assistant (/api/assistant → runAssistant), the
+ *     biggest LLM line (~15.5M tokens / 30 days). Was Haiku 4.5 ($1 / $5 per MTok);
+ *     Gemini 3.5 Flash-Lite is $0.30 / $2.50.
+ *   - MODEL_VIDEO_QC — video-batch frame QC (demand-gen-clean-window.ts, the sequential-ad
+ *     scene scorer in video-scene-selector.ts). Was Sonnet 4.6 ($3 / $15). On the strict
+ *     lifestyle-photo prompt Gemini matched Sonnet 91/91 (2026-10-02).
+ *
+ * Override per-deploy with GEMINI_ASSISTANT_MODEL / GEMINI_VIDEO_QC_MODEL.
+ */
+export const GEMINI = {
+  MODEL_ASSISTANT: process.env.GEMINI_ASSISTANT_MODEL?.trim() || "gemini-3.5-flash-lite",
+  MODEL_VIDEO_QC: process.env.GEMINI_VIDEO_QC_MODEL?.trim() || "gemini-3.5-flash-lite",
 } as const;
 
 // ─── Meta Graph API ─────────────────────────────────────────────────

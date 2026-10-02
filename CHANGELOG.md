@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.94.7] - 2026-10-02
+
+The storefront assistant and the video-batch frame QC now run on Gemini 3.5 Flash-Lite (operator decision after a cost review, no Claude fallback).
+
+### Changed
+
+- **Assistant** (`/api/assistant` → `runAssistant`): Haiku 4.5 → Gemini 3.5 Flash-Lite via the new budget-gated `gemini-client.ts` (function calling, thought signatures round-tripped verbatim). Same response contract (`data.reply` + `data.products`), same `assistant` budget pool. ~0.52 $/MTok blended vs 1.40 on Haiku — the biggest LLM line (~15.5M tokens / 30 days).
+- **Video QC** (`demand-gen-clean-window.ts`, `video-scene-selector.ts`): Sonnet 4.6 → Gemini 3.5 Flash-Lite, ~0.43 $/MTok vs 3.72. The sequential-ad scene scorer now also bills the `video` pool (it was on `batch`).
+- Config: `CLAUDE.MODEL_ASSISTANT` / `MODEL_VIDEO_QC` replaced by `GEMINI.MODEL_ASSISTANT` / `MODEL_VIDEO_QC` (env overrides `GEMINI_ASSISTANT_MODEL` / `GEMINI_VIDEO_QC_MODEL`). Usage dashboard prices them at Google list price.
+
+### Fixed
+
+- **Assistant catalog search returned nothing for natural queries.** `productType` is a prefix of the full taxonomy path ("Sofas" never matched), `color` is an exact ENGLISH match ("Gris" matched nothing) and a multi-word search needed every word in the name ("grey sofa" → 0, "sofa" → 29). The tool now ranks by category/colour instead of filtering, translates FR colours, and relaxes a phrase to its words. The prompt also tells the model the catalog is indexed in English (Gemini searched "foyer" verbatim).
+
 ## [0.5.94.6] - 2026-10-02
 
 Manual review of the first real Gemini classification pilot (50 photos) found the one gap the

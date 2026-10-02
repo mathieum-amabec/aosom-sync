@@ -16,7 +16,7 @@
  * Every figure this module produces is an ESTIMATE and must be labelled as such in the UI.
  * The Anthropic console is the only source that knows the real split.
  */
-import { CLAUDE } from "./config";
+import { CLAUDE, GEMINI } from "./config";
 import type { LlmBudgetPool } from "./database";
 
 /** USD per million tokens, per model. Mirrors Anthropic's public list price. */
@@ -24,6 +24,8 @@ export const MODEL_PRICING: Record<string, { inputPerMTok: number; outputPerMTok
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
   "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5 },
   "claude-opus-4-8": { inputPerMTok: 5, outputPerMTok: 25 },
+  // Google list price, ai.google.dev/gemini-api/docs/pricing (checked 2026-10-02).
+  "gemini-3.5-flash-lite": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
 };
 
 /** Fallback when a pool runs a model absent from MODEL_PRICING — priced as Sonnet 4.6 so
@@ -58,8 +60,8 @@ export const ASSUMED_INPUT_SHARE: Record<LlmBudgetPool, number> = {
  *  CLAUDE_BATCH_MODEL / CLAUDE_VIDEO_QC_MODEL overrides are reflected in the estimate
  *  without a code change. */
 export function poolModel(pool: LlmBudgetPool): string {
-  if (pool === "assistant") return CLAUDE.MODEL_ASSISTANT;
-  if (pool === "video") return CLAUDE.MODEL_VIDEO_QC;
+  if (pool === "assistant") return GEMINI.MODEL_ASSISTANT;
+  if (pool === "video") return GEMINI.MODEL_VIDEO_QC;
   return CLAUDE.MODEL_BATCH;
 }
 
