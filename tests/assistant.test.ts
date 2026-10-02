@@ -14,7 +14,8 @@ vi.mock("@/lib/gemini-client", () => ({ geminiGenerate: (params: unknown) => cre
 const getProducts = vi.fn();
 const getComplementaryProducts = vi.fn();
 const getComplementaryCandidates = vi.fn();
-vi.mock("@/lib/database", () => ({ getProducts, getComplementaryProducts, getComplementaryCandidates }));
+const getProduct = vi.fn();
+vi.mock("@/lib/database", () => ({ getProducts, getProduct, getComplementaryProducts, getComplementaryCandidates }));
 
 // FR-title resolution calls shopifyFetch(/graphql.json). Mock it; default = no match
 // (so cards fall back to the catalog name unless a test opts into FR titles).
@@ -108,7 +109,7 @@ describe("runAssistant", () => {
     create.mockResolvedValueOnce(toolUse({ query: "table" })).mockResolvedValueOnce(final({ reply: "ok", products: [] }));
     await runAssistant({ message: "une table", locale: "fr" });
     for (const call of create.mock.calls) {
-      expect((call[0].tools as Array<{ name: string }>).map((t) => t.name)).toEqual(["search_catalog", "recommend_complementary_products", "get_store_info"]);
+      expect((call[0].tools as Array<{ name: string }>).map((t) => t.name)).toEqual(["search_catalog", "recommend_complementary_products", "get_store_info", "get_product_details"]);
     }
     // Gemini searched "sofa gris" verbatim and found nothing (2026-10-02).
     expect(create.mock.calls[0][0].systemInstruction).toMatch(/indexed in ENGLISH/);
@@ -191,7 +192,9 @@ describe("runAssistant", () => {
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
       .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
     const res = await runAssistant({ message: "I need a sofa", locale: "en" });
-    expect(shopifyFetch).toHaveBeenCalledTimes(1);
+    // Twice since 2026-10-02: search results are live-checked before the model sees them,
+    // and the final cards once more (FR title + a product unpublished in between).
+    expect(shopifyFetch).toHaveBeenCalledTimes(2);
     expect(res.products[0].name).toBe("Sofa sectionnel"); // NOT the FR title
   });
 
@@ -225,10 +228,42 @@ describe("runAssistant", () => {
     // Gemini kept searching through all 3 steps and shoppers got the salvage reply (2026-10-02).
     create.mockResolvedValue(toolUse({ query: "sofa" }));
     await runAssistant({ message: "canapé", locale: "fr" });
-    expect(create).toHaveBeenCalledTimes(4);
-    expect(create.mock.calls[0][0].tools).toHaveLength(3);
-    expect(create.mock.calls[3][0].tools).toBeUndefined();
-    expect(create.mock.calls[3][0].systemInstruction).toMatch(/NO MORE SEARCHES/);
+    expect(create).toHaveBeenCalledTimes(5);
+    expect(create.mock.calls[0][0].tools).toHaveLength(4);
+    expect(create.mock.calls[4][0].tools).toBeUndefined();
+    expect(create.mock.calls[4][0].systemInstruction).toMatch(/NO MORE SEARCHES/);
+  });
+
+  it("get_product_details reads the live page of a product from the pool, never an unknown sku", async () => {
+    shopifyFetch.mockImplementation(async (url: string) =>
+      url.startsWith("/products.json")
+        ? { ok: true, json: async () => ({ products: [{ id: 9, title: "Sofa gris", body_html: "<p>Largeur : 84 po</p>", options: [{ name: "Couleur", values: ["Gris"] }], variants: [{ title: "Gris", price: "499.00" }] }] }) }
+        : { ok: true, json: async () => ({ data: { products: { nodes: [] } } }) },
+    );
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(toolUse({ sku: "A-1" }, "get_product_details"))
+      .mockResolvedValueOnce(final({ reply: "Il fait 84 po.", products: [{ sku: "A-1", reason: "x" }] }));
+    await runAssistant({ message: "un sofa pour un mur de 9 pi", locale: "fr" });
+    const third = create.mock.calls[2][0].contents as Turn[];
+    const details = third[4].parts[0].functionResponse!.response.result as { description: string; options: string[] };
+    expect(details.description).toContain("84 po");
+    expect(details.options).toEqual(["Couleur: Gris"]);
+    expect(shopifyFetch.mock.calls.some((c) => String(c[0]).includes("handle=sofa-sectionnel-gris"))).toBe(true);
+  });
+
+  it("adds the server-computed total under a room-in-a-budget answer", async () => {
+    getProducts.mockResolvedValue({
+      products: [prod({ sku: "S-1", price: 400 }), prod({ sku: "T-1", price: 99.5, shopify_handle: "table" })],
+      total: 2,
+      productTypes: [],
+    });
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(final({ reply: "Voici votre salon.", products: [{ sku: "S-1", reason: "" }, { sku: "T-1", reason: "" }] }));
+    const res = await runAssistant({ message: "un salon complet pour 1200$", locale: "fr" });
+    // fr-CA formatting uses (narrow) no-break spaces, which \s matches.
+    expect(res.reply).toMatch(/\nTotal : 499,50\s\$ \(budget : 1\s200,00\s\$\)$/);
   });
 
   it("answers a policy question from get_store_info and keeps the reply even with no products", async () => {

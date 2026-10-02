@@ -2,6 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.96.0] - 2026-10-02
+
+Ameublo becomes a real in-store advisor: product facts, room-in-a-budget, decor and seasonal advice, with a personality — and still nothing outside the home and the store.
+
+### Added
+
+- **`get_product_details` tool** (`product-details.ts`): reads the live Shopify page of a product the shopper was shown (FR description, or the `custom.body_html_en` metafield on the EN site; options, variants and prices), cached 30 min. Ameublo now answers "will it fit on my 9 ft wall?", assembly, materials, capacity, and compares two products — never stating a spec the page doesn't give.
+- **Room in a total budget**: all pieces searched in parallel in one turn, one product per piece, and the exact total of the cards shown appended server-side (`roomTotalLine`). The model's own sums were wrong on 2 of 3 live tests.
+- **Advice**: general decor / layout know-how (rug sizes, table clearance, stool heights, small condos) and Québec seasonal care (wintering patio furniture, car shelters for snow, materials care). Product pages always win over general advice.
+- **Personality**: warm Québec salesperson, "vous", light humour, ≤ 1 emoji, remembers what the shopper said, brief small talk then back to the home, honest "I'm the store's virtual assistant", one next-step suggestion.
+- **Limits**: no opinions on competitors / politics / religion / news, never asks for personal data, never discusses its own workings, never invents; unknown → info@ameublodirect.ca or the store phone (`ASSISTANT_CONTACT_PHONE`, default 514-292-7788).
+- Widget (draft theme 162992816233, unpublished): greeting mentions fit checks and decor tips; chip "Meubler un salon pour 1 500 $".
+
+### Changed
+
+- Search results are live-checked (ACTIVE + published) BEFORE the model sees them, over-fetching ×2: picked-then-dropped drafts had left "table basse avec rangement" with 0 cards and room totals that no longer matched the cards.
+- `MAX_STEPS` 4 → 5; `SEARCH_LIMIT` 12 → 8 (rows are re-sent on every later step).
+- Per-visitor daily cap 30k → 60k tokens: advisor answers measured 6–29k tokens (simple policy question ~6k, "will it fit" ~11–17k, room in a budget ~13–29k).
+
 ## [0.5.95.0] - 2026-10-02
 
 The storefront assistant becomes **Ameublo** (FR) / **Furni** (EN): a store advisor that answers policy questions from the live site, with per-visitor limits and automatic abuse blocking.

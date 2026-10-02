@@ -15,8 +15,9 @@
  */
 import { createHash } from "crypto";
 
-/** ~10 ordinary conversations at the ~2.7k tokens each measured on Gemini (2026-10-02). */
-export const DAILY_TOKENS_PER_IP = Number(process.env.ASSISTANT_DAILY_TOKENS_PER_IP) || 30_000;
+/** ~60k: a "room in a budget" or "will it fit?" answer measured 13-29k tokens once the advisor tools
+ *  landed (2026-10-02), so 30k let a real shopper ask only one or two of those. */
+export const DAILY_TOKENS_PER_IP = Number(process.env.ASSISTANT_DAILY_TOKENS_PER_IP) || 60_000;
 /** Points in one UTC day that trigger an automatic block. */
 export const ABUSE_BLOCK_SCORE = 6;
 export const FIRST_BLOCK_SECS = 24 * 3600;

@@ -93,7 +93,7 @@ export default function AssistantGuardPage() {
       <h2 className="text-2xl font-bold text-white">Assistant — protection</h2>
       <p className="text-gray-400 text-sm mt-1 mb-6">
         Ameublo (FR) / Furni (EN). Chaque visiteur peut dépenser{" "}
-        {data?.limits.dailyTokensPerVisitor.toLocaleString("fr-CA") ?? "…"} tokens par jour (~10 conversations). Un score
+        {data?.limits.dailyTokensPerVisitor.toLocaleString("fr-CA") ?? "…"} tokens par jour (une dizaine de conversations, ~20 questions simples). Un score
         d&apos;abus de {data?.limits.abuseBlockScore ?? "…"} points dans la journée bloque l&apos;adresse 24 h, puis 7 jours en
         cas de récidive. Les adresses sont anonymisées (hachées).
       </p>
