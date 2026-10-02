@@ -39,14 +39,20 @@ export async function approveOneSequentialAd(queueId: number): Promise<ApproveOn
     };
   }
 
-  try {
-    if (await approveSequentialAdDraft(queueId, row.scheduledAt)) {
-      return { success: true, queueId, scheduledAt: sqliteToUnixSec(row.scheduledAt) };
+  // Keep the slot picked at generation only while it is still in the FUTURE. A draft generated
+  // weeks ago and approved today carried a past slot, and the hourly publisher then sent every
+  // such item at once (found 2026-10-01: 6 ads from September landed in the past).
+  const presetInFuture = sqliteToUnixSec(row.scheduledAt) > Math.floor(Date.now() / 1000);
+  if (presetInFuture) {
+    try {
+      if (await approveSequentialAdDraft(queueId, row.scheduledAt)) {
+        return { success: true, queueId, scheduledAt: sqliteToUnixSec(row.scheduledAt) };
+      }
+      return { success: false, queueId, error: "Draft was already approved or cancelled", status: 409 };
+    } catch (err) {
+      if (!(err instanceof QueueSlotTakenError)) throw err;
+      // Slot taken since generation — fall through to recompute a free one.
     }
-    return { success: false, queueId, error: "Draft was already approved or cancelled", status: 409 };
-  } catch (err) {
-    if (!(err instanceof QueueSlotTakenError)) throw err;
-    // Slot taken since generation — fall through to recompute a free one.
   }
 
   const videoSchedule = parseVideoSchedule(await getSetting("video_schedule"));
