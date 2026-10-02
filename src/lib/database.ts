@@ -523,6 +523,28 @@ async function _initSchemaImpl(): Promise<void> {
       ts INTEGER NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_assistant_rl_ip_ts ON assistant_rate_limit(ip, ts)`,
+    // Assistant abuse protection (assistant-guard.ts, 2026-10-02). Keyed by a SALTED HASH of
+    // the IP, never the raw address. assistant_ip_daily: per visitor per UTC day — tokens
+    // spent (daily cap), messages, accumulated abuse score. assistant_blocklist: active and
+    // past automatic blocks, liftable from the dashboard (/assistant-guard).
+    `CREATE TABLE IF NOT EXISTS assistant_ip_daily (
+      day TEXT NOT NULL,
+      ip_hash TEXT NOT NULL,
+      tokens INTEGER NOT NULL DEFAULT 0,
+      messages INTEGER NOT NULL DEFAULT 0,
+      abuse_score INTEGER NOT NULL DEFAULT 0,
+      last_reasons TEXT,
+      PRIMARY KEY (day, ip_hash)
+    )`,
+    `CREATE TABLE IF NOT EXISTS assistant_blocklist (
+      ip_hash TEXT PRIMARY KEY,
+      blocked_until INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      strikes INTEGER NOT NULL DEFAULT 1,
+      sample TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_run ON sync_logs(sync_run_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_sku ON sync_logs(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_runs_date ON sync_runs(started_at)`,
@@ -2564,6 +2586,126 @@ export async function recordAssistantRequest(ip: string): Promise<void> {
   await db.execute({
     sql: `INSERT INTO assistant_rate_limit (ip, ts) VALUES (?, ?)`,
     args: [ip, Math.floor(Date.now() / 1000)],
+  });
+}
+
+// ─── Assistant abuse protection (assistant-guard.ts) ─────────────────
+
+const utcDay = () => new Date().toISOString().slice(0, 10);
+
+export interface AssistantIpDay {
+  tokens: number;
+  messages: number;
+  abuseScore: number;
+}
+
+/** Today's usage for one hashed visitor (zeros when none). */
+export async function getAssistantIpDay(ipHash: string): Promise<AssistantIpDay> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT tokens, messages, abuse_score FROM assistant_ip_daily WHERE day = ? AND ip_hash = ?`,
+    args: [utcDay(), ipHash],
+  });
+  const o = r.rows[0] ? rowToObj(r.rows[0]) : null;
+  return { tokens: Number(o?.tokens ?? 0), messages: Number(o?.messages ?? 0), abuseScore: Number(o?.abuse_score ?? 0) };
+}
+
+/** Add to today's counters for one hashed visitor; returns the updated totals. */
+export async function addAssistantIpUsage(
+  ipHash: string,
+  delta: { tokens?: number; messages?: number; abuse?: number; reasons?: string[] },
+): Promise<AssistantIpDay> {
+  const db = await ensureSchema();
+  const reasons = delta.reasons?.length ? delta.reasons.join(",").slice(0, 200) : null;
+  await db.execute({
+    sql: `INSERT INTO assistant_ip_daily (day, ip_hash, tokens, messages, abuse_score, last_reasons)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(day, ip_hash) DO UPDATE SET
+            tokens = tokens + excluded.tokens,
+            messages = messages + excluded.messages,
+            abuse_score = abuse_score + excluded.abuse_score,
+            last_reasons = COALESCE(excluded.last_reasons, last_reasons)`,
+    args: [utcDay(), ipHash, delta.tokens ?? 0, delta.messages ?? 0, delta.abuse ?? 0, reasons],
+  });
+  return getAssistantIpDay(ipHash);
+}
+
+export interface AssistantBlock {
+  ipHash: string;
+  blockedUntil: number;
+  reason: string;
+  strikes: number;
+  sample: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function toBlock(o: Record<string, unknown>): AssistantBlock {
+  return {
+    ipHash: String(o.ip_hash),
+    blockedUntil: Number(o.blocked_until),
+    reason: String(o.reason),
+    strikes: Number(o.strikes ?? 1),
+    sample: o.sample == null ? null : String(o.sample),
+    createdAt: Number(o.created_at),
+    updatedAt: Number(o.updated_at),
+  };
+}
+
+/** The block row for a hashed visitor (active or expired), or null. */
+export async function getAssistantBlock(ipHash: string): Promise<AssistantBlock | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT * FROM assistant_blocklist WHERE ip_hash = ?`, args: [ipHash] });
+  return r.rows[0] ? toBlock(rowToObj(r.rows[0])) : null;
+}
+
+/** Block (or re-block, incrementing strikes) a hashed visitor until `until` (epoch secs). */
+export async function blockAssistantIp(ipHash: string, until: number, reason: string, sample: string): Promise<void> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  await db.execute({
+    sql: `INSERT INTO assistant_blocklist (ip_hash, blocked_until, reason, strikes, sample, created_at, updated_at)
+          VALUES (?, ?, ?, 1, ?, ?, ?)
+          ON CONFLICT(ip_hash) DO UPDATE SET
+            blocked_until = excluded.blocked_until, reason = excluded.reason,
+            strikes = strikes + 1, sample = excluded.sample, updated_at = excluded.updated_at`,
+    args: [ipHash, until, reason.slice(0, 200), sample.slice(0, 300), now, now],
+  });
+}
+
+/** Lift a block now (keeps the row and its strike count, so a repeat still escalates). */
+export async function unblockAssistantIp(ipHash: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE assistant_blocklist SET blocked_until = 0, updated_at = ? WHERE ip_hash = ?`,
+    args: [Math.floor(Date.now() / 1000), ipHash],
+  });
+}
+
+/** Every block row, most recent first (dashboard). */
+export async function listAssistantBlocks(limit = 100): Promise<AssistantBlock[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT * FROM assistant_blocklist ORDER BY updated_at DESC LIMIT ?`, args: [limit] });
+  return r.rows.map((row) => toBlock(rowToObj(row)));
+}
+
+/** Today's heaviest visitors (dashboard). */
+export async function listAssistantTopVisitors(limit = 20): Promise<Array<AssistantIpDay & { ipHash: string; lastReasons: string | null }>> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT ip_hash, tokens, messages, abuse_score, last_reasons FROM assistant_ip_daily
+          WHERE day = ? ORDER BY tokens DESC LIMIT ?`,
+    args: [utcDay(), limit],
+  });
+  return r.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      ipHash: String(o.ip_hash),
+      tokens: Number(o.tokens),
+      messages: Number(o.messages),
+      abuseScore: Number(o.abuse_score),
+      lastReasons: o.last_reasons == null ? null : String(o.last_reasons),
+    };
   });
 }
 

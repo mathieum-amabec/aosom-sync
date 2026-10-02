@@ -1,0 +1,168 @@
+{%- comment -%}
+  Ameublo (FR) / Furni (EN) — floating AI shopping assistant (persona since 2026-10-02).
+  Bottom-right button opens a bilingual chat modal that calls the public /api/assistant
+  endpoint and renders recommended products (image + price + PDP link). Self-contained.
+{%- endcomment -%}
+{%- assign lc_loc = request.locale.iso_code | downcase -%}
+{%- if lc_loc == 'en' -%}{%- assign lc_name = 'Furni' -%}{%- else -%}{%- assign lc_name = 'Ameublo' -%}{%- endif -%}
+<div id="lc-asst" data-loc="{{ lc_loc }}" data-api="https://aosom-sync.vercel.app/api/assistant">
+  <button type="button" class="lc-asst__fab" aria-expanded="false" aria-controls="lc-asst-panel">
+    <span class="lc-asst__avatar" aria-hidden="true">{{ lc_name | slice: 0 }}</span>
+    <span class="lc-asst__fab-label">{% if lc_loc == 'en' %}Ask {{ lc_name }}{% else %}Demandez à {{ lc_name }}{% endif %}</span>
+  </button>
+
+  <div id="lc-asst-panel" class="lc-asst__panel" role="dialog" aria-modal="false" aria-label="{% if lc_loc == 'en' %}Shopping assistant{% else %}Assistant magasinage{% endif %}" hidden>
+    <div class="lc-asst__head">
+      <div class="lc-asst__who">
+        <span class="lc-asst__avatar" aria-hidden="true">{{ lc_name | slice: 0 }}</span>
+        <div>
+          <div class="lc-asst__title">{{ lc_name }}</div>
+          <div class="lc-asst__subtitle">{% if lc_loc == 'en' %}Your Furnish Direct advisor{% else %}Votre conseiller Ameublo Direct{% endif %}</div>
+        </div>
+      </div>
+      <button type="button" class="lc-asst__close" aria-label="{% if lc_loc == 'en' %}Close{% else %}Fermer{% endif %}">&times;</button>
+    </div>
+    <div class="lc-asst__body" data-lc-asst-body>
+      <div class="lc-asst__msg lc-asst__msg--bot">{% if lc_loc == 'en' %}Hi, I'm {{ lc_name }}! I can help you find the right piece and answer your questions about delivery, returns, warranty or payment.{% else %}Bonjour, je suis {{ lc_name }}&nbsp;! Je peux vous aider à trouver le bon meuble et répondre à vos questions sur la livraison, les retours, la garantie ou le paiement.{% endif %}</div>
+      <div class="lc-asst__chips" data-lc-asst-chips>
+        {%- if lc_loc == 'en' -%}
+          <button type="button" class="lc-asst__chip">Delivery times and cost</button>
+          <button type="button" class="lc-asst__chip">How do returns work?</button>
+          <button type="button" class="lc-asst__chip">Can I pay in instalments?</button>
+          <button type="button" class="lc-asst__chip">Help me find a sofa</button>
+        {%- else -%}
+          <button type="button" class="lc-asst__chip">Délais et frais de livraison</button>
+          <button type="button" class="lc-asst__chip">Comment fonctionnent les retours?</button>
+          <button type="button" class="lc-asst__chip">Puis-je payer en versements?</button>
+          <button type="button" class="lc-asst__chip">Aidez-moi à trouver un sofa</button>
+        {%- endif -%}
+      </div>
+    </div>
+    <form class="lc-asst__form" data-lc-asst-form>
+      <input type="text" class="lc-asst__input" data-lc-asst-input maxlength="500" autocomplete="off"
+             placeholder="{% if lc_loc == 'en' %}Ask {{ lc_name }} anything…{% else %}Posez votre question à {{ lc_name }}…{% endif %}" />
+      <button type="submit" class="lc-asst__send" aria-label="{% if lc_loc == 'en' %}Send{% else %}Envoyer{% endif %}">&#10148;</button>
+    </form>
+  </div>
+</div>
+<style>
+  #lc-asst{--navy:#1B2A4A;--gold:#C17F3E;--gold2:#D4A853;font-family:'DM Sans',sans-serif}
+  .lc-asst__fab{position:fixed;right:20px;bottom:20px;z-index:9998;display:flex;align-items:center;gap:.5rem;
+    background:var(--navy);color:#fff;border:2px solid var(--gold2);border-radius:999px;padding:.7rem 1.15rem;
+    font-size:1.25rem;font-weight:700;cursor:pointer;box-shadow:0 6px 22px rgba(0,0,0,.28)}
+  .lc-asst__fab span[aria-hidden]{font-size:1.5rem;line-height:1}
+  .lc-asst__fab:hover{background:#22345b}
+  /* Mobile: keep the "Aide au choix" label (an unlabeled 35px icon went unnoticed — 2026-09-29)
+     and sit bottom-LEFT, clear of the Messenger bubble (bottom-right). */
+  @media(max-width:749px){.lc-asst__fab{left:14px;right:auto;bottom:calc(14px + env(safe-area-inset-bottom,0px));padding:.55rem .95rem;font-size:1.2rem}}
+  /* While the sticky "Acheter maintenant" bar is up, lift both floating buttons above it — they
+     sat ON the buy button (mobile icon over "Acheter maintenant"). */
+  body:has(.sticky-atc.is-visible) .lc-asst__fab{bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+  body:has(.sticky-atc.is-visible) .lc-msgr{bottom:calc(90px + env(safe-area-inset-bottom,0px))}
+  @media(max-width:749px){body:has(.sticky-atc.is-visible) .lc-msgr{bottom:calc(140px + env(safe-area-inset-bottom,0px))}}
+  /* Desktop: both buttons are bottom-right — stack Messenger ABOVE the assistant pill instead of on it. */
+  @media(min-width:750px){.lc-msgr{bottom:78px} body:has(.sticky-atc.is-visible) .lc-msgr{bottom:142px}}
+  .lc-asst__panel{position:fixed;right:20px;bottom:20px;z-index:9999;width:370px;max-width:calc(100vw - 32px);height:70vh;max-height:560px;
+    display:flex;flex-direction:column;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.34)}
+  .lc-asst__panel[hidden]{display:none}
+  .lc-asst__head{display:flex;align-items:center;justify-content:space-between;background:var(--navy);color:#fff;padding:.85rem 1rem}
+  .lc-asst__title{font-size:1.35rem;font-weight:800}
+  .lc-asst__who{display:flex;align-items:center;gap:.6rem}
+  .lc-asst__subtitle{font-size:1.1rem;opacity:.8;font-weight:500}
+  .lc-asst__avatar{display:inline-flex;align-items:center;justify-content:center;width:2.4rem;height:2.4rem;border-radius:50%;background:#D4A853;color:#1b2a47;font-weight:800;font-size:1.3rem;line-height:1;flex:0 0 auto}
+  .lc-asst__chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:.2rem 0 .4rem}
+  .lc-asst__chip{border:1px solid #D4A853;background:#fff;color:#1b2a47;border-radius:999px;padding:.35rem .75rem;font-size:1.15rem;cursor:pointer}
+  .lc-asst__chip:hover{background:#fbf3e2}
+  .lc-asst__msg a{color:inherit;text-decoration:underline;word-break:break-all}
+  .lc-asst__close{background:none;border:none;color:#fff;font-size:1.8rem;line-height:1;cursor:pointer}
+  .lc-asst__body{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.7rem;background:#F7F6F4}
+  .lc-asst__msg{max-width:85%;padding:.6rem .85rem;border-radius:12px;font-size:1.25rem;line-height:1.4}
+  .lc-asst__msg--bot{background:#fff;color:#1B2A4A;align-self:flex-start;border:1px solid #e7e3dc}
+  .lc-asst__msg--user{background:var(--navy);color:#fff;align-self:flex-end}
+  .lc-asst__msg--typing{color:#797068;font-style:italic}
+  .lc-asst__cards{display:flex;flex-direction:column;gap:.55rem;align-self:stretch}
+  .lc-asst__card{display:flex;gap:.6rem;background:#fff;border:1px solid #e7e3dc;border-radius:12px;padding:.5rem;text-decoration:none;color:#1B2A4A}
+  .lc-asst__card:hover{border-color:var(--gold2);box-shadow:0 3px 12px rgba(0,0,0,.1)}
+  .lc-asst__card img{width:72px;height:72px;object-fit:cover;border-radius:8px;flex:0 0 auto;background:#eee}
+  .lc-asst__card-b{display:flex;flex-direction:column;gap:.15rem;min-width:0}
+  .lc-asst__card-name{font-size:1.15rem;font-weight:700;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .lc-asst__card-price{font-size:1.2rem;font-weight:800;color:var(--gold)}
+  .lc-asst__card-reason{font-size:1.05rem;color:#797068;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .lc-asst__form{display:flex;gap:.5rem;padding:.7rem;border-top:1px solid #e7e3dc;background:#fff}
+  .lc-asst__input{flex:1;border:1px solid #d9dee8;border-radius:999px;padding:.6rem .9rem;font-size:1.2rem;outline:none}
+  .lc-asst__input:focus{border-color:var(--gold2)}
+  .lc-asst__send{background:var(--gold);color:#fff;border:none;border-radius:999px;width:42px;height:42px;font-size:1.4rem;cursor:pointer;flex:0 0 auto}
+  .lc-asst__send:disabled{opacity:.5;cursor:default}
+</style>
+<script>
+(function(){
+  var root=document.getElementById('lc-asst'); if(!root) return;
+  var LOC=root.getAttribute('data-loc')==='en'?'en':'fr';
+  var API=root.getAttribute('data-api');
+  var fab=root.querySelector('.lc-asst__fab');
+  var panel=root.querySelector('#lc-asst-panel');
+  var closeBtn=root.querySelector('.lc-asst__close');
+  var body=root.querySelector('[data-lc-asst-body]');
+  var form=root.querySelector('[data-lc-asst-form]');
+  var input=root.querySelector('[data-lc-asst-input]');
+  var send=root.querySelector('.lc-asst__send');
+  var history=[]; var busy=false;
+  var T=LOC==='en'
+    ?{err:"Sorry, something went wrong. Please try again.",typing:"Furni is thinking…"}
+    :{err:"Désolé, une erreur est survenue. Réessayez.",typing:"Ameublo réfléchit…"};
+  function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+  function money(n){try{return new Intl.NumberFormat(LOC==='en'?'en-CA':'fr-CA',{style:'currency',currency:'CAD'}).format(n);}catch(e){return '$'+Number(n).toFixed(2);}}
+  function open(){panel.hidden=false;fab.setAttribute('aria-expanded','true');fab.style.display='none';setTimeout(function(){input.focus();},50);}
+  function close(){panel.hidden=true;fab.setAttribute('aria-expanded','false');fab.style.display='';}
+  fab.addEventListener('click',open); closeBtn.addEventListener('click',close);
+  // Text is still inserted as text nodes (never innerHTML); only bare https URLs become links.
+  function addMsg(text,who){
+    var d=document.createElement('div');d.className='lc-asst__msg lc-asst__msg--'+who;
+    var parts=String(text==null?'':text).split(/(https:\/\/[^\s<>"')]+)/);
+    parts.forEach(function(p,i){
+      if(i%2===1){var url=p.replace(/[.,;:!?]+$/,'');var a=document.createElement('a');a.href=url;a.textContent=url;a.target='_blank';a.rel='noopener';d.appendChild(a);if(url.length<p.length)d.appendChild(document.createTextNode(p.slice(url.length)));}
+      else if(p){d.appendChild(document.createTextNode(p));}
+    });
+    body.appendChild(d);body.scrollTop=body.scrollHeight;return d;
+  }
+  function addCards(products){
+    if(!products||!products.length)return;
+    var wrap=document.createElement('div');wrap.className='lc-asst__cards';
+    products.forEach(function(p){
+      var a=document.createElement('a');a.className='lc-asst__card';a.href=p.url;a.target='_blank';a.rel='noopener';
+      a.innerHTML='<img loading="lazy" src="'+esc(p.image||'')+'" alt="">'
+        +'<div class="lc-asst__card-b"><div class="lc-asst__card-name">'+esc(p.name)+'</div>'
+        +'<div class="lc-asst__card-price">'+esc(money(p.price))+'</div>'
+        +(p.reason?'<div class="lc-asst__card-reason">'+esc(p.reason)+'</div>':'')+'</div>';
+      wrap.appendChild(a);
+    });
+    body.appendChild(wrap);body.scrollTop=body.scrollHeight;
+  }
+  var chips=root.querySelector('[data-lc-asst-chips]');
+  if(chips){chips.addEventListener('click',function(e){
+    var b=e.target.closest('.lc-asst__chip'); if(!b||busy)return;
+    input.value=b.textContent.trim(); chips.remove();
+    if(form.requestSubmit){form.requestSubmit();}else{form.dispatchEvent(new Event('submit',{cancelable:true}));}
+  });}
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    var msg=(input.value||'').trim(); if(!msg||busy)return;
+    if(chips&&chips.parentNode)chips.remove();
+    busy=true;send.disabled=true;
+    addMsg(msg,'user'); input.value='';
+    history.push({role:'user',content:msg});
+    var typing=addMsg(T.typing,'bot');typing.classList.add('lc-asst__msg--typing');
+    fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,history:history.slice(-8),locale:LOC})})
+      .then(function(r){return r.json();})
+      .then(function(j){
+        typing.remove();
+        if(j&&j.success&&j.data){
+          var reply=j.data.reply||''; if(reply){addMsg(reply,'bot');history.push({role:'assistant',content:reply});}
+          addCards(j.data.products);
+        } else { addMsg(T.err,'bot'); }
+      })
+      .catch(function(){typing.remove();addMsg(T.err,'bot');})
+      .finally(function(){busy=false;send.disabled=false;input.focus();});
+  });
+})();
+</script>

@@ -37,7 +37,7 @@ export const RATE_WINDOW_SECS = 3600;
 /** Consecutive shopper turns (no assistant turn between) before we hand off to a human. */
 export const MAX_CONSECUTIVE_USER_TURNS = 3;
 
-export type LimitReason = "hourly_quota" | "consecutive_messages" | "budget_exhausted";
+export type LimitReason = "hourly_quota" | "consecutive_messages" | "budget_exhausted" | "daily_quota" | "blocked";
 
 /**
  * Store contact details for the hand-off. Env-overridable because they are business data,
@@ -82,6 +82,19 @@ function messageFor(
     return locale === "en"
       ? `Too many requests. Please try again ${minutesLabel(locale, mins)}.`
       : `Trop de requêtes. Réessayez ${minutesLabel(locale, mins)}.`;
+  }
+  if (reason === "daily_quota") {
+    // Per-visitor daily token cap (assistant-guard.ts). Resets at 00:00 UTC.
+    return locale === "en"
+      ? "You've reached today's limit for the assistant. Our team can help you directly 😊"
+      : "Vous avez atteint la limite quotidienne de l'assistant. Notre équipe peut vous aider directement 😊";
+  }
+  if (reason === "blocked") {
+    // Automatic abuse block (assistant-guard.ts). Neutral wording: a false positive must not
+    // read as an accusation, and it still offers a human.
+    return locale === "en"
+      ? "The assistant is not available from your connection right now. Our team can help you directly 😊"
+      : "L'assistant n'est pas disponible depuis votre connexion pour le moment. Notre équipe peut vous aider directement 😊";
   }
   if (reason === "budget_exhausted") {
     // Operator-specified copy, verbatim. Self-contained: it names the address itself, so

@@ -21,7 +21,7 @@ vi.mock("@/lib/database", () => ({ getProducts, getComplementaryProducts, getCom
 const shopifyFetch = vi.fn();
 vi.mock("@/lib/shopify-client", () => ({ shopifyFetch }));
 
-const { runAssistant, runComplementary, pickComplementary } = await import("@/lib/assistant");
+const { runAssistant, runComplementary, pickComplementary, stripMarkdown } = await import("@/lib/assistant");
 
 const prod = (over: Partial<Record<string, unknown>> = {}) => ({
   sku: "A-1", name: "Sofa sectionnel", price: 499, qty: 5, color: "Gris",
@@ -104,11 +104,11 @@ describe("runAssistant", () => {
     expect(system).toMatch(/refine|accumulated|maxPrice/i);
   });
 
-  it("declares both tools on every turn and tells the model the catalog is in English", async () => {
+  it("declares the three tools on every non-final turn and tells the model the catalog is in English", async () => {
     create.mockResolvedValueOnce(toolUse({ query: "table" })).mockResolvedValueOnce(final({ reply: "ok", products: [] }));
     await runAssistant({ message: "une table", locale: "fr" });
     for (const call of create.mock.calls) {
-      expect((call[0].tools as Array<{ name: string }>).map((t) => t.name)).toEqual(["search_catalog", "recommend_complementary_products"]);
+      expect((call[0].tools as Array<{ name: string }>).map((t) => t.name)).toEqual(["search_catalog", "recommend_complementary_products", "get_store_info"]);
     }
     // Gemini searched "sofa gris" verbatim and found nothing (2026-10-02).
     expect(create.mock.calls[0][0].systemInstruction).toMatch(/indexed in ENGLISH/);
@@ -225,10 +225,34 @@ describe("runAssistant", () => {
     // Gemini kept searching through all 3 steps and shoppers got the salvage reply (2026-10-02).
     create.mockResolvedValue(toolUse({ query: "sofa" }));
     await runAssistant({ message: "canapé", locale: "fr" });
-    expect(create).toHaveBeenCalledTimes(3);
-    expect(create.mock.calls[0][0].tools).toHaveLength(2);
-    expect(create.mock.calls[2][0].tools).toBeUndefined();
-    expect(create.mock.calls[2][0].systemInstruction).toMatch(/NO MORE SEARCHES/);
+    expect(create).toHaveBeenCalledTimes(4);
+    expect(create.mock.calls[0][0].tools).toHaveLength(3);
+    expect(create.mock.calls[3][0].tools).toBeUndefined();
+    expect(create.mock.calls[3][0].systemInstruction).toMatch(/NO MORE SEARCHES/);
+  });
+
+  it("answers a policy question from get_store_info and keeps the reply even with no products", async () => {
+    create
+      .mockResolvedValueOnce(toolUse({ question: "délai de retour" }, "get_store_info"))
+      .mockResolvedValueOnce(final({ reply: "Vous avez 30 jours pour retourner un article.", products: [], flag: null }));
+    const res = await runAssistant({ message: "Je peux retourner un article?", locale: "fr" });
+    expect(res.reply).toBe("Vous avez 30 jours pour retourner un article.");
+    expect(res.products).toEqual([]);
+    expect(getProducts).not.toHaveBeenCalled();
+  });
+
+  it("reports tokens and the model's abuse flag in meta (stripped by the route)", async () => {
+    create.mockResolvedValueOnce({ ...final({ reply: "Je ne peux pas faire ça.", products: [], flag: "off_topic" }), usage: { totalTokenCount: 1234 } });
+    const res = await runAssistant({ message: "écris-moi un poème", locale: "fr" });
+    expect(res.meta).toEqual({ tokens: 1234, flag: "off_topic" });
+  });
+
+  it("names the persona per locale", async () => {
+    create.mockResolvedValue(final({ reply: "ok", products: [] }));
+    await runAssistant({ message: "allo", locale: "fr" });
+    await runAssistant({ message: "hi", locale: "en" });
+    expect(create.mock.calls[0][0].systemInstruction).toMatch(/You are Ameublo, .* Ameublo Direct/);
+    expect(create.mock.calls[1][0].systemInstruction).toMatch(/You are Furni, .* Furnish Direct/);
   });
 
   it("falls back from a 3-word phrase to 2-word sub-phrases before single words", async () => {
@@ -291,6 +315,15 @@ describe("runAssistant", () => {
     expect(getProducts).not.toHaveBeenCalled();
     expect(res.products).toHaveLength(1);
     expect(res.products[0]).toMatchObject({ sku: "RUG-1", reason: "S'agence avec le gris" });
+  });
+});
+
+describe("stripMarkdown (the widget renders textContent)", () => {
+  it("turns Markdown links and bold into plain text", () => {
+    expect(stripMarkdown("Voir notre [politique de retour](https://ameublodirect.ca/pages/politique-de-retour)."))
+      .toBe("Voir notre politique de retour : https://ameublodirect.ca/pages/politique-de-retour.");
+    expect(stripMarkdown("C'est **gratuit**.")).toBe("C'est gratuit.");
+    expect(stripMarkdown("Rien à changer : https://x.ca")).toBe("Rien à changer : https://x.ca");
   });
 });
 
