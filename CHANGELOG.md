@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.94.9] - 2026-10-02
+
+"Complétez la pièce" (product page block) no longer uses the LLM.
+
+### Fixed
+
+- **The block drained the assistant pool.** It ran the full assistant tool loop (~5k tokens) on every product-page view of an uncached product, fired automatically on page load — measured ~50 distinct product pages/hour (crawler-like), which emptied the shared `assistant` pool every day and left the shopper chat "temporarily unavailable" most of the day for at least two weeks.
+- `runComplementary` is now plain catalogue logic (`getComplementaryCandidates`): same room first (taxonomy path, 2 levels), widening to the top level; never the viewed category (3 levels) nor a leaf containing its head noun; same safety filters as the chat cross-sell tool + the live/FR-title check; one card per category, rotated per product. 0 tokens, ~250 ms instead of 3–7 s. The cards no longer carry a sentence (it was the only thing the model wrote).
+
 ## [0.5.94.8] - 2026-10-02
 
 Hotfix for the Gemini assistant (v0.5.94.7), seen live in production right after deploy: "foyer extérieur" returned a kayak and a planter with no reasons.

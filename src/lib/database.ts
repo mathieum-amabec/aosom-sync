@@ -2335,6 +2335,50 @@ export async function getComplementaryProducts(opts: {
   });
 }
 
+/**
+ * Candidates for the product page's "Complétez la pièce" block (no LLM since 2026-10-02 —
+ * see runComplementary). Products under the `scope` taxonomy branch, excluding the viewed
+ * product's own `exclude` branch, with the same in-SQL safety guardrails as
+ * getComplementaryProducts. Both strings come from the storefront request, so they are bound
+ * args with LIKE wildcards escaped — a caller can only narrow, never widen, the selection.
+ */
+export async function getComplementaryCandidates(opts: {
+  scope: string;
+  exclude: string;
+  limit?: number;
+}): Promise<ComplementaryProductRow[]> {
+  const db = await ensureSchema();
+  const esc = (s: string) => s.replace(/[!%_]/g, (c) => `!${c}`);
+  const limit = Math.max(1, Math.min(opts.limit ?? 60, 200));
+  const result = await db.execute({
+    sql: `SELECT sku, name, price, qty, image1, shopify_handle, product_type, color
+          FROM products
+          WHERE qty > 0
+            AND shopify_product_id IS NOT NULL
+            AND shopify_handle IS NOT NULL AND TRIM(shopify_handle) <> ''
+            AND image_checked_at IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM image_review_queue irq WHERE irq.sku = products.sku AND irq.status != 'applied')
+            AND (product_type = ? OR product_type LIKE ? ESCAPE '!')
+            AND NOT (product_type = ? OR product_type LIKE ? ESCAPE '!')
+          ORDER BY qty DESC
+          LIMIT ?`,
+    args: [opts.scope, `${esc(opts.scope)} > %`, opts.exclude, `${esc(opts.exclude)} > %`, limit],
+  });
+  return result.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      sku: String(o.sku),
+      name: o.name == null ? "" : String(o.name),
+      price: o.price == null ? 0 : Number(o.price),
+      qty: Number(o.qty ?? 0),
+      image1: o.image1 == null ? null : String(o.image1),
+      shopify_handle: o.shopify_handle == null ? null : String(o.shopify_handle),
+      product_type: o.product_type == null ? "" : String(o.product_type),
+      color: o.color == null ? "" : String(o.color),
+    };
+  });
+}
+
 export async function getProductsWithShopifyId(): Promise<{ sku: string; product_type: string; shopify_product_id: string }[]> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT sku, product_type, shopify_product_id FROM products WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''`);
