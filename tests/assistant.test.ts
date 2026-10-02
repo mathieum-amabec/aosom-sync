@@ -1,25 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// config is read at module load via content-generator; mock it (no real env needed).
+// The assistant runs on Gemini since 2026-10-02 (gemini-client.ts). Mock config (no env).
 vi.mock("@/lib/config", () => ({
-  env: { anthropicApiKey: "test-key" },
-  CLAUDE: {
-    MODEL_ASSISTANT: "claude-haiku-4-5-20251001",
-    MODEL: "claude-sonnet-4-6",
-    MODEL_BATCH: "claude-haiku-4-5",
-    MAX_TOKENS_CONTENT: 1000,
-    MAX_TOKENS_SOCIAL: 500,
-  },
+  env: { geminiApiKey: "test-key" },
+  GEMINI: { MODEL_ASSISTANT: "gemini-3.5-flash-lite", MODEL_VIDEO_QC: "gemini-3.5-flash-lite" },
 }));
 
+// geminiGenerate wraps the HTTP call with the daily-budget guard; delegate to `create` so these
+// tests exercise the tool loop, not the budget bookkeeping. create.mock.calls[n][0] = params.
 const { create } = vi.hoisted(() => ({ create: vi.fn() }));
-vi.mock("@anthropic-ai/sdk", () => ({ default: class { messages = { create }; } }));
-
-// budgetedCreate wraps client.messages.create with the daily-budget guard; delegate to the
-// mocked create so these tests exercise the tool loop, not the budget bookkeeping.
-vi.mock("@/lib/llm-budget", () => ({
-  budgetedCreate: (client: { messages: { create: typeof create } }, params: unknown) => client.messages.create(params),
-}));
+vi.mock("@/lib/gemini-client", () => ({ geminiGenerate: (params: unknown) => create(params) }));
 
 const getProducts = vi.fn();
 const getComplementaryProducts = vi.fn();
@@ -37,8 +27,14 @@ const prod = (over: Partial<Record<string, unknown>> = {}) => ({
   product_type: "Sofas", image1: "https://img/1.jpg",
   shopify_product_id: "111", shopify_handle: "sofa-sectionnel-gris", ...over,
 });
-const toolUse = (input: unknown, name = "search_catalog") => ({ stop_reason: "tool_use", content: [{ type: "tool_use", id: "t1", name, input }] });
-const final = (obj: unknown) => ({ stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(obj) }] });
+const toolUse = (input: unknown, name = "search_catalog") => ({
+  functionCalls: [{ name, args: input, id: "t1" }],
+  content: { role: "model", parts: [{ functionCall: { name, args: input, id: "t1" }, thoughtSignature: "sig" }] },
+  text: "",
+});
+const textReply = (text: string) => ({ functionCalls: [], content: { role: "model", parts: [{ text }] }, text });
+const final = (obj: unknown) => textReply(JSON.stringify(obj));
+type Turn = { role: string; parts: Array<{ text?: string; functionResponse?: { response: { result: unknown } } }> };
 
 beforeEach(() => {
   create.mockReset();
@@ -65,13 +61,13 @@ describe("runAssistant", () => {
     expect(create).toHaveBeenCalledTimes(2);
   });
 
-  it("sends every turn on the assistant model, never the Sonnet escalation tier", async () => {
-    // The saving is only real if EVERY call in the loop uses MODEL_ASSISTANT — a tool-use
-    // turn left on Sonnet would keep most of the cost, since the loop runs up to MAX_STEPS.
-    create.mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+  it("sends every turn on the Gemini assistant model", async () => {
+    // The saving is only real if EVERY call in the loop uses GEMINI.MODEL_ASSISTANT.
+    create.mockResolvedValueOnce(toolUse({ query: "table" })).mockResolvedValueOnce(final({ reply: "ok", products: [] }));
     await runAssistant({ message: "une table", locale: "fr" });
+    expect(create).toHaveBeenCalledTimes(2);
     for (const call of create.mock.calls) {
-      expect(call[0].model).toBe("claude-haiku-4-5-20251001");
+      expect(call[0].model).toBe("gemini-3.5-flash-lite");
     }
   });
 
@@ -86,10 +82,10 @@ describe("runAssistant", () => {
         { role: "user", content: "j'ai un budget de 500$" },
       ],
     });
-    const sentMessages = create.mock.calls[0][0].messages as Array<{ role: string; content: unknown }>;
-    // history turns must precede the latest user message, in order.
-    const textOf = (m: { content: unknown }) => (typeof m.content === "string" ? m.content : "");
-    expect(sentMessages.map(textOf)).toEqual([
+    const sent = create.mock.calls[0][0].contents as Turn[];
+    // history turns must precede the latest user message, in order; assistant turns are "model".
+    expect(sent.map((m) => m.role)).toEqual(["user", "model", "user", "user"]);
+    expect(sent.map((m) => m.parts[0].text)).toEqual([
       "je cherche un canapé pour un petit salon",
       "Voici quelques options.",
       "j'ai un budget de 500$",
@@ -100,26 +96,62 @@ describe("runAssistant", () => {
   it("system prompt distinguishes indoor vs outdoor and instructs multi-turn refinement", async () => {
     create.mockResolvedValueOnce(final({ reply: "ok", products: [] }));
     await runAssistant({ message: "un canapé pour mon salon", locale: "fr" });
-    // `system` is a block array since the cache breakpoint was added, not a bare string.
-    const blocks = create.mock.calls[0][0].system as { type: string; text: string }[];
-    const system = blocks.map((b) => b.text).join("\n");
+    const system = create.mock.calls[0][0].systemInstruction as string;
     expect(system).toMatch(/INDOOR vs OUTDOOR/);
     expect(system).toMatch(/patio|outdoor/i);
     expect(system).toMatch(/refine|accumulated|maxPrice/i);
   });
 
-  it("marks the stable prefix as cacheable on every turn of the loop", async () => {
-    // The marker is a no-op on Haiku 4.5 (minimum cacheable prefix is 4096 tokens, ours is
-    // ~1,150) but it must still be present and well-formed: switching the assistant back to
-    // Sonnet 4.6 via CLAUDE_ASSISTANT_MODEL is the supported way to turn caching on, and a
-    // dropped marker would make that switch silently do nothing.
-    create.mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+  it("declares both tools on every turn and tells the model the catalog is in English", async () => {
+    create.mockResolvedValueOnce(toolUse({ query: "table" })).mockResolvedValueOnce(final({ reply: "ok", products: [] }));
     await runAssistant({ message: "une table", locale: "fr" });
     for (const call of create.mock.calls) {
-      const blocks = call[0].system as { type: string; cache_control?: { type: string } }[];
-      expect(Array.isArray(blocks)).toBe(true);
-      expect(blocks[blocks.length - 1].cache_control).toEqual({ type: "ephemeral" });
+      expect((call[0].tools as Array<{ name: string }>).map((t) => t.name)).toEqual(["search_catalog", "recommend_complementary_products"]);
     }
+    // Gemini searched "sofa gris" verbatim and found nothing (2026-10-02).
+    expect(create.mock.calls[0][0].systemInstruction).toMatch(/indexed in ENGLISH/);
+  });
+
+  it("pushes the model's function-call turn back verbatim (Gemini 3 thought signatures)", async () => {
+    create.mockResolvedValueOnce(toolUse({ query: "sofa" })).mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+    await runAssistant({ message: "canapé", locale: "fr" });
+    const second = create.mock.calls[1][0].contents as Array<{ role: string; parts: Array<Record<string, unknown>> }>;
+    expect(second[1]).toEqual({ role: "model", parts: [{ functionCall: { name: "search_catalog", args: { query: "sofa" }, id: "t1" }, thoughtSignature: "sig" }] });
+    expect(second[2].parts[0].functionResponse).toMatchObject({ name: "search_catalog", id: "t1" });
+  });
+
+  it("relaxes a multi-word search that finds nothing to its single words", async () => {
+    // "grey sofa" → 0 rows in production (the colour is its own column); "sofa" → many.
+    getProducts.mockImplementation(async (f: { search?: string }) =>
+      f.search === "sofa" ? { products: [prod()], total: 1, productTypes: [] } : { products: [], total: 0, productTypes: [] },
+    );
+    create
+      .mockResolvedValueOnce(toolUse({ query: "grey velvet sofa" }))
+      .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
+    const res = await runAssistant({ message: "canapé gris", locale: "fr" });
+    expect(res.products.map((p) => p.sku)).toEqual(["A-1"]);
+    // Colour words are stripped from the text search; the category/colour never hit SQL.
+    const searches = getProducts.mock.calls.map((c) => c[0].search);
+    expect(searches[0]).toBe("velvet sofa");
+    for (const c of getProducts.mock.calls) {
+      expect(c[0].productType).toBeUndefined();
+      expect(c[0].color).toBeUndefined();
+    }
+  });
+
+  it("ranks the asked colour first, translating it FR→EN", async () => {
+    getProducts.mockResolvedValue({
+      products: [prod({ sku: "B-1", color: "Black" }), prod({ sku: "G-1", color: "Grey" })],
+      total: 2,
+      productTypes: [],
+    });
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa", color: "Gris" }))
+      .mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+    await runAssistant({ message: "canapé gris", locale: "fr" });
+    const second = create.mock.calls[1][0].contents as Turn[];
+    const result = second[2].parts[0].functionResponse!.response.result as Array<{ sku: string }>;
+    expect(result.map((r) => r.sku)).toEqual(["G-1", "B-1"]);
   });
 
   // CHANGED in v0.5.59.3: this asserted `furnishdirect.ca`, which is NXDOMAIN — the test was
@@ -199,7 +231,7 @@ describe("runAssistant", () => {
   it("handles a non-JSON final answer without throwing", async () => {
     create
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
-      .mockResolvedValueOnce({ stop_reason: "end_turn", content: [{ type: "text", text: "désolé, je ne peux pas" }] });
+      .mockResolvedValueOnce(textReply("désolé, je ne peux pas"));
     const res = await runAssistant({ message: "canapé", locale: "fr" });
     expect(res.products).toHaveLength(0);
     expect(typeof res.reply).toBe("string");
@@ -210,10 +242,10 @@ describe("runAssistant", () => {
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
       .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
     await runAssistant({ message: "canapé", locale: "fr" });
-    // The tool_result handed back to the model must NOT leak internal fields (handle/image).
-    const secondCallMessages = create.mock.calls[1][0].messages as Array<{ role: string; content: unknown }>;
-    const toolResultMsg = secondCallMessages.find((m) => m.role === "user" && Array.isArray(m.content));
-    const payload = JSON.parse(((toolResultMsg!.content as Array<{ content: string }>)[0]).content);
+    // The function response handed back to the model must NOT leak internal fields (handle/image).
+    const second = create.mock.calls[1][0].contents as Turn[];
+    const toolTurn = second.find((m) => m.role === "user" && m.parts[0].functionResponse);
+    const payload = toolTurn!.parts[0].functionResponse!.response.result as Array<Record<string, unknown>>;
     expect(payload[0]).toHaveProperty("sku");
     expect(payload[0]).not.toHaveProperty("handle");
     expect(payload[0]).not.toHaveProperty("image");
@@ -248,8 +280,8 @@ describe("runComplementary", () => {
     // The seed (first user message, index 0 since there's no history) should mention
     // complementary intent. NB: the messages array is mutated in place during the tool
     // loop, so only index 0 is stable — the tail holds later tool-result blocks.
-    const firstMessages = create.mock.calls[0][0].messages;
-    expect(firstMessages[0].content).toMatch(/complémentaires/i);
+    const firstContents = create.mock.calls[0][0].contents as Turn[];
+    expect(firstContents[0].parts[0].text).toMatch(/complémentaires/i);
   });
 });
 

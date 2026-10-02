@@ -186,10 +186,11 @@ describe("model routing is enforced across the codebase, not just at the call si
     const cfg = fs.readFileSync(path.join(process.cwd(), "src", "lib", "config.ts"), "utf8");
     expect(cfg).toMatch(/MODEL:\s*"claude-sonnet-4-6"/);
     expect(cfg).toMatch(/MODEL_BATCH:[^\n]*"claude-haiku-4-5"/);
-    // Pin the assistant default in SOURCE TEXT too. Every test that exercises the assistant
-    // mocks @/lib/config, so a silent revert of MODEL_ASSISTANT to Sonnet would otherwise
-    // pass the whole suite green while tripling the storefront's bill.
-    expect(cfg).toMatch(/MODEL_ASSISTANT:[^\n]*"claude-haiku-4-5-20251001"/);
+    // Pin the assistant + video-QC defaults in SOURCE TEXT too. Every test that exercises
+    // them mocks @/lib/config, so a silent revert to a Claude model would otherwise pass the
+    // whole suite green while multiplying the bill. Gemini 3.5 Flash-Lite since 2026-10-02.
+    expect(cfg).toMatch(/MODEL_ASSISTANT:[^\n]*"gemini-3\.5-flash-lite"/);
+    expect(cfg).toMatch(/MODEL_VIDEO_QC:[^\n]*"gemini-3\.5-flash-lite"/);
   });
 
   it("routes every Claude call through budgetedCreate so nothing escapes the daily cap", () => {
