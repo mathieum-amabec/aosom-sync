@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// approveOneContentBatchDraft (content-batch-approval.ts) — the demand_gen_ext / before_after /
+// approveOneContentBatchDraft (content-batch-approval.ts) — the demand_gen_ext /
 // assembly equivalent of approveOneSequentialAd: auto-assigns a draft to the next free slot on
 // its OWN format's recurring grid (not a shared video_schedule), retrying past a slot lost to
 // QueueSlotTakenError. Mirrors approve-draft-queue.test.ts's mocking convention.
@@ -48,7 +48,6 @@ function mockScheduler(over: Record<string, unknown> = {}) {
     parseContentBatchSchedule: vi.fn().mockReturnValue({ enabled: true, slots: [], timezone: "America/Toronto", max_per_day: 1 }),
     CONTENT_BATCH_SCHEDULE_SETTING_KEY: {
       demand_gen_ext: "demand_gen_ext_schedule",
-      before_after: "before_after_schedule",
       assembly: "assembly_schedule",
     },
     ...over,
@@ -73,15 +72,14 @@ describe("approveOneContentBatchDraft", () => {
   });
 
   it("reads the FORMAT'S OWN schedule setting, not another format's", async () => {
-    const db = mockDatabase({ getQueueItemById: vi.fn().mockResolvedValue({ ...ROW, contentType: "before_after" }) });
+    const db = mockDatabase({ getQueueItemById: vi.fn().mockResolvedValue({ ...ROW, contentType: "assembly" }) });
     mockScheduler();
 
     const { approveOneContentBatchDraft } = await import("@/lib/content-batch-approval");
-    await approveOneContentBatchDraft(5, "before_after");
+    await approveOneContentBatchDraft(5, "assembly");
 
-    expect(db.getSetting).toHaveBeenCalledWith("before_after_schedule");
+    expect(db.getSetting).toHaveBeenCalledWith("assembly_schedule");
     expect(db.getSetting).not.toHaveBeenCalledWith("demand_gen_ext_schedule");
-    expect(db.getSetting).not.toHaveBeenCalledWith("assembly_schedule");
   });
 
   it("scopes occupancy to its own content_type's queue", async () => {
@@ -105,7 +103,7 @@ describe("approveOneContentBatchDraft", () => {
   });
 
   it("404s when the id belongs to a DIFFERENT content_type", async () => {
-    mockDatabase({ getQueueItemById: vi.fn().mockResolvedValue({ ...ROW, contentType: "before_after" }) });
+    mockDatabase({ getQueueItemById: vi.fn().mockResolvedValue({ ...ROW, contentType: "assembly" }) });
     mockScheduler();
 
     const { approveOneContentBatchDraft } = await import("@/lib/content-batch-approval");

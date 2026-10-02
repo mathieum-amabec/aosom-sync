@@ -4,24 +4,22 @@ import { useState, useEffect, useCallback } from "react";
 
 /**
  * /content-formats — Étape 4 of the content-scale chantier: one page, one tab per new
- * batch format (Demand-Gen élargi / Avant-Après / Assembly), so these don't get mixed into
+ * batch format (Demand-Gen élargi / Assembly), so these don't get mixed into
  * /videos or /demand-gen-videos (which cover the pre-existing, already-shipped formats).
  * Deliberately plain — a table per tab, same visual language as demand-gen-videos-client.tsx
  * (dark cards, small status pills), no new visual system.
  */
 
-type ContentType = "demand_gen_ext" | "before_after" | "assembly";
+type ContentType = "demand_gen_ext" | "assembly";
 
 const TABS: { type: ContentType; label: string }[] = [
   { type: "demand_gen_ext", label: "Demand-Gen élargi" },
-  { type: "before_after", label: "Avant-Après" },
   { type: "assembly", label: "Assembly" },
 ];
 
 /** Short label + badge color per format, shared by the tabs' implicit order and the calendar strip. */
 const FORMAT_META: Record<ContentType, { short: string; cls: string }> = {
   demand_gen_ext: { short: "Demand-Gen", cls: "bg-indigo-900/40 text-indigo-300 border-indigo-800/50" },
-  before_after: { short: "Avant-Après", cls: "bg-amber-900/40 text-amber-300 border-amber-800/50" },
   assembly: { short: "Assembly", cls: "bg-teal-900/40 text-teal-300 border-teal-800/50" },
 };
 
@@ -178,7 +176,7 @@ export default function ContentFormatsClient() {
     <div className="p-6 max-w-6xl mx-auto">
       <h1 className="text-2xl font-semibold text-white mb-1">Contenus vidéo — nouveaux formats</h1>
       <p className="text-sm text-gray-400 mb-6">
-        Demand-Gen élargi, Avant-Après et Assembly — tout reste en brouillon tant que ce n&apos;est pas approuvé ici.
+        Demand-Gen élargi et Assembly — tout reste en brouillon tant que ce n&apos;est pas approuvé ici.
         Approuver sans choisir d&apos;heure assigne automatiquement le prochain créneau libre du format.
       </p>
 

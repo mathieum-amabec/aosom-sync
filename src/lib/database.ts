@@ -501,7 +501,7 @@ async function _initSchemaImpl(): Promise<void> {
     // bulk batch run can never starve the public storefront assistant. One row per
     // (UTC day, pool) — pools are 'assistant' (only /api/assistant), 'batch' (imports,
     // content generation, social), 'maintenance' (operator-launched catalogue vision
-    // audits) and 'video' (demand-gen-ext / before_after / assembly video QC — isolated
+    // audits) and 'video' (demand-gen-ext / assembly video QC — isolated
     // from 'batch' for the same reason 'maintenance' was split out). Resets at 00:00 UTC
     // by keying on the date string. Every Claude call asserts its pool's tokens_used <
     // that pool's budget (fail-closed) then adds its usage. (Legacy single-key tables
@@ -647,33 +647,6 @@ async function _initSchemaImpl(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_item_no ON costway_products(item_no)`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_top_category ON costway_products(top_category)`,
-    // Studio Avant/Après (src/lib/studio/). studio_images = extra images Mat added to a
-    // product's gallery for videos only (his own uploads, AI retouches) — never pushed to the
-    // Shopify product. studio_renders = one row per render job, polled by the /studio page;
-    // queue_id links a render Mat sent to publication_queue as a before_after draft.
-    `CREATE TABLE IF NOT EXISTS studio_images (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sku TEXT NOT NULL,
-      url TEXT NOT NULL,
-      source TEXT NOT NULL CHECK (source IN ('upload', 'ai')),
-      parent_url TEXT,
-      prompt TEXT,
-      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_studio_images_sku ON studio_images(sku)`,
-    `CREATE TABLE IF NOT EXISTS studio_renders (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sku TEXT NOT NULL,
-      product_title TEXT,
-      params TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('rendering', 'ready', 'error')),
-      video_url TEXT,
-      error TEXT,
-      queue_id INTEGER,
-      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-      updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
-    )`,
-    `CREATE INDEX IF NOT EXISTS idx_studio_renders_sku ON studio_renders(sku)`,
     // PDP "Complétez la pièce" suggestions (assistant mode=complementary), cached per product
     // so the LLM runs once per product per TTL instead of on every product-page view
     // (~1,100 calls/day burned the whole assistant pool by ~20:30 Montréal). See
@@ -848,6 +821,8 @@ async function _initSchemaImpl(): Promise<void> {
   }
 
   // publication_queue.content_type CHECK migration: +'demand_gen_ext','before_after','assembly'
+  // ('before_after' stays allowed by the CHECK only so this historical migration is a no-op on
+  // existing DBs — the format itself was removed 2026-10-01, nothing writes it any more.)
   // (content-scale chantier, Étape 3-5). Same guarded table-rebuild pattern as +sequential_ad
   // above (including carrying claimed_at through — see that migration's comment). The active-
   // slot unique index stays (platform, scheduled_at) — UNCHANGED, matching every prior
@@ -2465,7 +2440,7 @@ export interface LlmUsageDay {
   batch: number;
   /** Uncapped operator-launched maintenance passes (catalogue vision audits). */
   maintenance: number;
-  /** Video-batch QC (demand-gen-ext, before_after, assembly) — isolated from `batch` so a
+  /** Video-batch QC (demand-gen-ext, assembly) — isolated from `batch` so a
    *  production run can never starve imports/blog/social. See llm-budget.ts. */
   video: number;
 }
@@ -5287,10 +5262,10 @@ export async function deleteFacebookDraft(id: number): Promise<void> {
 
 export type QueueContentType =
   | "social" | "draft" | "blog" | "video" | "sequential_ad"
-  // Content-scale chantier (Étape 3-5): extended demand-gen, avant/après and assembly
+  // Content-scale chantier (Étape 3-5): extended demand-gen and assembly
   // batches reuse the exact sequential_ad approve/schedule/list pattern below, generalized
   // to any content_type instead of duplicated per type.
-  | "demand_gen_ext" | "before_after" | "assembly"
+  | "demand_gen_ext" | "assembly"
   // pSEO guide deferred publish — see guide-scheduler.ts.
   | "guide";
 export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog" | "shopify_guide";
@@ -5771,7 +5746,7 @@ export async function rescheduleSequentialAd(id: number, scheduledAt: string): P
   }
 }
 
-// ─── Generic content-batch queue (demand_gen_ext / before_after / assembly) ──────────
+// ─── Generic content-batch queue (demand_gen_ext / assembly) ──────────
 //
 // Same shape as the sequential_ad functions just above (approve/cancel/reschedule/list/
 // count), generalized over `contentType` instead of duplicated 3x. Content-scale chantier
@@ -5813,7 +5788,7 @@ export async function getUpcomingContentBatchItems(limit = 30): Promise<Publicat
   const db = await ensureSchema();
   const result = await db.execute({
     sql: `SELECT * FROM publication_queue
-          WHERE content_type IN ('demand_gen_ext', 'before_after', 'assembly') AND status = 'pending'
+          WHERE content_type IN ('demand_gen_ext', 'assembly') AND status = 'pending'
           ORDER BY scheduled_at ASC LIMIT ?`,
     args: [limit],
   });
@@ -6176,7 +6151,7 @@ export async function countContentFormatVideos(horizonDays: number): Promise<{ p
                  SUM(CASE WHEN status = 'pending' AND scheduled_at >= datetime('now')
                            AND scheduled_at < datetime('now', ?) THEN 1 ELSE 0 END) AS soon
             FROM publication_queue
-           WHERE content_type IN ('demand_gen_ext', 'before_after', 'assembly')`,
+           WHERE content_type IN ('demand_gen_ext', 'assembly')`,
     args: [`+${horizonDays} days`],
   });
   const o = rowToObj(r.rows[0]);

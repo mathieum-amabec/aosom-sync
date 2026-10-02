@@ -20,7 +20,6 @@ import {
   DEFAULT_VIDEO_SCHEDULE,
   DEFAULT_BLOG_SCHEDULE,
   DEFAULT_DEMAND_GEN_EXT_SCHEDULE,
-  DEFAULT_BEFORE_AFTER_SCHEDULE,
   DEFAULT_ASSEMBLY_SCHEDULE,
   DEFAULT_GUIDE_SCHEDULE,
   type PublicationSchedule,
@@ -243,17 +242,16 @@ describe("video schedule", () => {
   });
 });
 
-describe("content-batch schedules (demand_gen_ext / before_after / assembly)", () => {
+describe("content-batch schedules (demand_gen_ext / assembly)", () => {
   it("each format has its own distinct default, mapped by CONTENT_BATCH_SCHEDULE_DEFAULTS", () => {
     expect(CONTENT_BATCH_SCHEDULE_DEFAULTS.demand_gen_ext).toEqual(DEFAULT_DEMAND_GEN_EXT_SCHEDULE);
-    expect(CONTENT_BATCH_SCHEDULE_DEFAULTS.before_after).toEqual(DEFAULT_BEFORE_AFTER_SCHEDULE);
     expect(CONTENT_BATCH_SCHEDULE_DEFAULTS.assembly).toEqual(DEFAULT_ASSEMBLY_SCHEDULE);
     expect(CONTENT_BATCH_SCHEDULE_DEFAULTS.guide).toEqual(DEFAULT_GUIDE_SCHEDULE);
     // These are genuinely distinct from each other and from the social/video defaults —
     // this is the whole point (dedicated grids, not a shared one).
     const all = [
       DEFAULT_PUBLICATION_SCHEDULE, DEFAULT_VIDEO_SCHEDULE,
-      DEFAULT_DEMAND_GEN_EXT_SCHEDULE, DEFAULT_BEFORE_AFTER_SCHEDULE, DEFAULT_ASSEMBLY_SCHEDULE,
+      DEFAULT_DEMAND_GEN_EXT_SCHEDULE, DEFAULT_ASSEMBLY_SCHEDULE,
       DEFAULT_GUIDE_SCHEDULE,
     ];
     const serialized = all.map((s) => JSON.stringify(s));
@@ -263,7 +261,6 @@ describe("content-batch schedules (demand_gen_ext / before_after / assembly)", (
   it("maps each format to its own settings key", () => {
     expect(CONTENT_BATCH_SCHEDULE_SETTING_KEY).toEqual({
       demand_gen_ext: "demand_gen_ext_schedule",
-      before_after: "before_after_schedule",
       assembly: "assembly_schedule",
       guide: "guide_schedule",
     });
@@ -271,7 +268,7 @@ describe("content-batch schedules (demand_gen_ext / before_after / assembly)", (
 
   it("parseContentBatchSchedule falls back to that format's OWN default on null/invalid JSON", () => {
     expect(parseContentBatchSchedule("demand_gen_ext", null)).toEqual(DEFAULT_DEMAND_GEN_EXT_SCHEDULE);
-    expect(parseContentBatchSchedule("before_after", "not json")).toEqual(DEFAULT_BEFORE_AFTER_SCHEDULE);
+    expect(parseContentBatchSchedule("assembly", "not json")).toEqual(DEFAULT_ASSEMBLY_SCHEDULE);
     expect(parseContentBatchSchedule("assembly", undefined)).toEqual(DEFAULT_ASSEMBLY_SCHEDULE);
     // Never silently falls back to a DIFFERENT format's default.
     expect(parseContentBatchSchedule("demand_gen_ext", null)).not.toEqual(DEFAULT_ASSEMBLY_SCHEDULE);
@@ -289,9 +286,6 @@ describe("content-batch schedules (demand_gen_ext / before_after / assembly)", (
   it("getNextAvailableSlot resolves each format's grid to its own real weekday/time", async () => {
     const demandGen = await getNextAvailableSlot("facebook", {}, { nowSec: NOW, occupied: [], schedule: DEFAULT_DEMAND_GEN_EXT_SCHEDULE, contentType: "demand_gen_ext" });
     expect(local(demandGen!.at, TZ).time).toBe("09:15");
-
-    const beforeAfter = await getNextAvailableSlot("facebook", {}, { nowSec: NOW, occupied: [], schedule: DEFAULT_BEFORE_AFTER_SCHEDULE, contentType: "before_after" });
-    expect(["13:00", "13:30", "11:00"]).toContain(local(beforeAfter!.at, TZ).time);
 
     const assembly = await getNextAvailableSlot("facebook", {}, { nowSec: NOW, occupied: [], schedule: DEFAULT_ASSEMBLY_SCHEDULE, contentType: "assembly" });
     expect(local(assembly!.at, TZ).time).toBe("17:00");

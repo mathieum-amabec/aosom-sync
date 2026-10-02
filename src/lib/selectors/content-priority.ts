@@ -1,5 +1,5 @@
 /**
- * Content priority — trend + season scoring for the demand-gen/avant-après/assembly
+ * Content priority — trend + season scoring for the demand-gen/assembly
  * batch pipelines (Étape 2 of the content-scale chantier).
  *
  * THIS IS NEW CODE, not a reuse of a pre-existing "trend score". Two things the task

@@ -7,12 +7,12 @@
  * on Vercel skips install scripts that aren't in package.json "allowScripts" (npm 11.10+ /
  * npm 12 default). Vercel also restores node_modules from its build cache ("up to date"), so
  * even an allowScripts entry wouldn't re-run a script for an already-installed package. Result
- * on 2026-09-28: no binary in the bundle, every Studio / Vidéos render died with ENOENT.
+ * on 2026-09-28: no binary in the bundle, every Vidéos render died with ENOENT.
  *
  * Linux only (the Vercel build host) — dev boxes set FFMPEG_BIN or use a system ffmpeg, and
  * ffmpeg-static has no win32-arm64 build. install.js is idempotent: it exits at once when the
  * binary is already there. A download failure is loud but doesn't fail the build: the render
- * error names the missing binary (src/lib/studio/render.ts), and blocking every deploy on a
+ * error names the missing binary, and blocking every deploy on a
  * GitHub outage would be worse.
  */
 import { spawnSync } from "node:child_process";
