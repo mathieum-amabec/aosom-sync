@@ -23,18 +23,18 @@
       <button type="button" class="lc-asst__close" aria-label="{% if lc_loc == 'en' %}Close{% else %}Fermer{% endif %}">&times;</button>
     </div>
     <div class="lc-asst__body" data-lc-asst-body>
-      <div class="lc-asst__msg lc-asst__msg--bot">{% if lc_loc == 'en' %}Hi, I'm {{ lc_name }}! I can help you find the right piece and answer your questions about delivery, returns, warranty or payment.{% else %}Bonjour, je suis {{ lc_name }}&nbsp;! Je peux vous aider à trouver le bon meuble et répondre à vos questions sur la livraison, les retours, la garantie ou le paiement.{% endif %}</div>
+      <div class="lc-asst__msg lc-asst__msg--bot">{% if lc_loc == 'en' %}Hi, I'm {{ lc_name }}! I can help you find the right piece, check if it fits, share decor tips, and answer your questions about delivery, returns or payment.{% else %}Bonjour, je suis {{ lc_name }}&nbsp;! Je peux vous aider à trouver le bon meuble, vérifier s'il entre chez vous, vous donner des idées déco et répondre à vos questions sur la livraison, les retours ou le paiement.{% endif %}</div>
       <div class="lc-asst__chips" data-lc-asst-chips>
         {%- if lc_loc == 'en' -%}
           <button type="button" class="lc-asst__chip">Delivery times and cost</button>
           <button type="button" class="lc-asst__chip">How do returns work?</button>
           <button type="button" class="lc-asst__chip">Can I pay in instalments?</button>
-          <button type="button" class="lc-asst__chip">Help me find a sofa</button>
+          <button type="button" class="lc-asst__chip">Furnish a living room for $1,500</button>
         {%- else -%}
           <button type="button" class="lc-asst__chip">Délais et frais de livraison</button>
           <button type="button" class="lc-asst__chip">Comment fonctionnent les retours?</button>
           <button type="button" class="lc-asst__chip">Puis-je payer en versements?</button>
-          <button type="button" class="lc-asst__chip">Aidez-moi à trouver un sofa</button>
+          <button type="button" class="lc-asst__chip">Meubler un salon pour 1 500 $</button>
         {%- endif -%}
       </div>
     </div>
