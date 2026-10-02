@@ -30,7 +30,15 @@ import {
 import { selectHook, buildHookedPrompt, buildHookedPromptEn, mapProductTypeToScope, hashtagsForScope } from "@/lib/hook-selector";
 import { publishDraftToChannels } from "@/lib/social-publisher";
 import { resolveLifestyle } from "@/lib/selectors/shopify-images";
-import { resolveCategory, type SocialCategory } from "@/lib/social-categories";
+import { getLifestyleVerifiedProductIds } from "@/lib/selectors/lifestyle-verified-set";
+import {
+  resolveCategory,
+  buildTargetCategory,
+  parseThemes,
+  SOCIAL_THEMES_KEY,
+  SOCIAL_AUTO_THEME_KEY,
+  type SocialCategory,
+} from "@/lib/social-categories";
 
 // How many eligible products to sample when hunting for a lifestyle-verified one
 // for the daily stock highlight. ~80% of the catalog is tagged, so a handful of
@@ -305,12 +313,26 @@ async function generateOneStockHighlight(
   // settings), trending-eligible SKUs are sampled first; past expiry this call
   // is an exact pass-through to the old uniform-random behavior — see
   // getEligibleHighlightCandidatesTrendAware in database.ts.
+  //
+  // The draw is restricted to lifestyle-verified products up front when Shopify can say
+  // which those are (lifestyle-verified-set.ts). Without it, a category with few verified
+  // fiches lost them in a blind 15-SKU sample — "Bureau & Télétravail" failed with 17
+  // verified fiches out of 108 (2026-10-01). null = Shopify unreachable: old blind draw.
+  const filter = category?.predicate ? { predicate: category.predicate, args: category.args } : null;
+  const verified = await getLifestyleVerifiedProductIds();
   const candidates = await getEligibleHighlightCandidatesTrendAware(
     minDays,
     HIGHLIGHT_LIFESTYLE_SAMPLE,
-    category?.predicate ? { predicate: category.predicate, args: category.args } : null,
+    filter,
+    verified,
   );
   if (candidates.length === 0) {
+    // With the verified restriction, "nothing" can mean two things: every product is in
+    // its repost cooldown, or the free ones have no validated photo. Tell them apart.
+    if (verified && (await getEligibleHighlightCandidatesTrendAware(minDays, 1, filter)).length > 0) {
+      log(`No lifestyle-verified product outside the repost window${category ? ` in ${category.key}` : ""}`);
+      return { miss: "no_lifestyle" };
+    }
     log(`No eligible product for stock highlight${category ? ` in ${category.key}` : ""}`);
     return { miss: "cooldown" };
   }
@@ -382,8 +404,8 @@ export interface StockHighlightRun {
   cooldownDays: number;
   /** Category key actually filtered on for the LAST attempt; null = whole catalog. */
   categoryUsed: string | null;
-  /** Where that category came from. */
-  categorySource: "explicit" | "seasonal" | "none";
+  /** Where that category came from. "theme" = the daily cron's saved-theme preference. */
+  categorySource: "explicit" | "seasonal" | "theme" | "none";
   /** True when the seasonal preference found nothing and we widened to the catalog. */
   fellBackToAll: boolean;
 }
@@ -402,9 +424,22 @@ export interface StockHighlightRun {
  */
 export async function runStockHighlight(
   count = 1,
-  category?: string | null,
+  /**
+   * A category key (dropdown), or a runtime target built from product_type branches
+   * (sub-category picker / saved theme). `soft: true` makes the target a preference that
+   * widens to the whole catalog on a miss, like the seasonal default — used by the daily
+   * cron's saved theme; an operator's explicit pick is always strict.
+   */
+  category?: string | null | { target: SocialCategory; soft?: boolean },
 ): Promise<StockHighlightRun> {
-  const resolved = resolveCategory(category);
+  const resolved: {
+    category: SocialCategory | null;
+    source: StockHighlightRun["categorySource"];
+    canFallBack: boolean;
+  } =
+    category && typeof category === "object"
+      ? { category: category.target, source: category.soft ? "theme" : "explicit", canFallBack: !!category.soft }
+      : resolveCategory(category);
   log(
     `stock_highlight trigger (count=${count}, category=${resolved.category?.key ?? "all"}` +
       `, source=${resolved.source})`,
@@ -519,8 +554,21 @@ export async function generateSocialBatch(count = SOCIAL_DAILY_BATCH): Promise<G
   // No category argument, so the daily cron picks up the seasonal preference too
   // (Halloween in Sept-Oct, Noël in Nov-Dec, patio in summer), widening to the whole
   // catalog when the season is thin. That is the point of the seasonal default.
+  //
+  // A saved theme picked as the daily preference (settings social_auto_theme) replaces the
+  // seasonal default, with the same soft fallback to the whole catalog.
   if (results.length < count && !overBudget()) {
-    const fill = await triggerStockHighlight(count - results.length);
+    const autoTheme = parseThemes(settings[SOCIAL_THEMES_KEY]).find(
+      (t) => t.id === settings[SOCIAL_AUTO_THEME_KEY],
+    );
+    const fill = autoTheme
+      ? (
+          await runStockHighlight(count - results.length, {
+            target: buildTargetCategory(autoTheme.label, autoTheme.productTypes),
+            soft: true,
+          })
+        ).drafts
+      : await triggerStockHighlight(count - results.length);
     results.push(...fill);
   }
 

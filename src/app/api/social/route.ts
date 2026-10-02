@@ -18,7 +18,16 @@ import { testConnection as testInstagramConnection } from "@/lib/instagram-clien
 import { publishDraftToChannel, publishDraftToChannels, draftToQueueItems } from "@/lib/social-publisher";
 import { getNextAvailableSlot } from "@/lib/publication-scheduler";
 import { triggerNewProduct, triggerPriceDrop, runStockHighlight } from "@/jobs/job4-social";
-import { getCategory, isValidCategory, THIN_POOL_THRESHOLD } from "@/lib/social-categories";
+import {
+  getCategory,
+  isValidCategory,
+  THIN_POOL_THRESHOLD,
+  buildTargetCategory,
+  parseThemes,
+  validateProductTypes,
+  SOCIAL_THEMES_KEY,
+  type SocialCategory,
+} from "@/lib/social-categories";
 import { CHANNELS, activeChannels, type ChannelKey } from "@/lib/config";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
@@ -124,12 +133,33 @@ export async function POST(request: Request) {
               { status: 400 },
             );
           }
-          const run = await runStockHighlight(count, category);
+          // Fine targeting (2026-10-02): a saved theme, or product_type branches ticked in
+          // the sub-category picker. Both win over the dropdown and are strict.
+          let target: SocialCategory | null = null;
+          if (typeof body.themeId === "string" && body.themeId) {
+            const theme = parseThemes(await getSetting(SOCIAL_THEMES_KEY)).find((t) => t.id === body.themeId);
+            if (!theme) {
+              return NextResponse.json({ success: false, error: "Thème introuvable" }, { status: 400 });
+            }
+            target = buildTargetCategory(theme.label, theme.productTypes);
+          } else if (body.productTypes !== undefined) {
+            const types = validateProductTypes(body.productTypes);
+            if (!types) {
+              return NextResponse.json(
+                { success: false, error: "Sélection de sous-catégories invalide" },
+                { status: 400 },
+              );
+            }
+            const label =
+              types.length === 1 ? types[0].split(" > ").pop()! : `${types.length} sous-catégories`;
+            target = buildTargetCategory(label, types);
+          }
+          const run = await runStockHighlight(count, target ? { target } : category);
           if (run.drafts.length === 0) {
             // Name the category — "aucun produit lifestyle-verified" over 2 400 products
             // and over the 34 Halloween ones mean very different things to the operator.
             // "all" is an explicit request for the whole catalog, not a category to name.
-            const picked = category && category !== "all" ? getCategory(category) : undefined;
+            const picked = target ?? (category && category !== "all" ? getCategory(category) : undefined);
             // Cooldown, not photos: every product of the pool already has a recent post. Saying
             // "aucun produit lifestyle-verified" here sent Mat looking for a photo problem that
             // did not exist (Halloween, 2026-09-25).
@@ -156,13 +186,17 @@ export async function POST(request: Request) {
                 // The verified-photo pool is the actionable part. A category with none at
                 // all will never work and retrying wastes the operator's time; a thin one
                 // is worth a second click. Say which of the two this is.
+                // Since 2026-10-02 the draw is restricted to verified products, so a miss
+                // is no longer bad luck: the verified ones are all in their repost window.
                 error: picked
                   ? `Aucun produit lifestyle-verified dans « ${picked.label} » — ` +
-                    (picked.measuredLifestylePool === 0
+                    (picked.key === "custom"
+                      ? `aucun de ses produits avec photo validée n'est disponible (en stock, sans post depuis ${run.cooldownDays} jours). Ajoutez des sous-catégories ou validez des photos.`
+                      : picked.measuredLifestylePool === 0
                       ? `aucun de ses ~${picked.measuredPool} produits en stock n'a de photo lifestyle validée. Choisissez une autre catégorie.`
                       : picked.measuredLifestylePool < THIN_POOL_THRESHOLD
-                        ? `seulement ~${picked.measuredLifestylePool} de ses ~${picked.measuredPool} produits en ont une, un tirage sur deux échoue. Réessayez ou élargissez.`
-                        : "post ignoré (jamais d'image fond blanc)")
+                        ? `seulement ~${picked.measuredLifestylePool} de ses ~${picked.measuredPool} produits en ont une, et elles ont toutes un post récent. Réessayez plus tard ou élargissez.`
+                        : `ceux qui ont une photo validée ont tous un post de moins de ${run.cooldownDays} jours.`)
                   : "Aucun produit lifestyle-verified — post ignoré (jamais d'image fond blanc)",
                 category: run.categoryUsed,
                 fellBackToAll: run.fellBackToAll,
