@@ -9,7 +9,9 @@ import {
   getOccupiedQueueSlots,
   getSetting,
   QueueSlotTakenError,
+  flagSequentialAdForRerender,
 } from "@/lib/database";
+import { checkSequentialAdPrice } from "@/lib/sequential-ad-price";
 import { getNextAvailableSlot, parseVideoSchedule } from "@/lib/publication-scheduler";
 
 /** SQLite datetime() text ('YYYY-MM-DD HH:MM:SS' UTC) → unix seconds. */
@@ -37,6 +39,14 @@ export async function approveOneSequentialAd(queueId: number): Promise<ApproveOn
       error: `Item ${queueId} is not an approvable draft (status: ${row.status})`,
       status: 400,
     };
+  }
+
+  // Never approve an ad whose burned price is no longer the price of the day: flag it for a
+  // re-render instead (2026-10-02 — 43 of 61 seasonal drafts had a stale price).
+  const price = await checkSequentialAdPrice(row);
+  if (!price.ok) {
+    await flagSequentialAdForRerender(queueId, price.reason!);
+    return { success: false, queueId, error: price.reason!, status: 409 };
   }
 
   // Keep the slot picked at generation only while it is still in the FUTURE. A draft generated

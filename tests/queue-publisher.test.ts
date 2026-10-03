@@ -30,6 +30,8 @@ vi.mock("@/lib/database", () => ({
   markFailed: vi.fn().mockResolvedValue(undefined),
   markGuidePagePublished: vi.fn().mockResolvedValue(undefined),
   getProduct: vi.fn(async () => ({ shopify_product_id: "123", shopify_handle: "meuble-chat-3-niveaux" })),
+  flagSequentialAdForRerender: vi.fn().mockResolvedValue(true),
+  createNotification: vi.fn().mockResolvedValue(1),
 }));
 vi.mock("@/lib/content-generator", () => ({ getAnthropicClient: vi.fn() }));
 
@@ -71,12 +73,12 @@ function stubClaude(text: string | null) {
   return create;
 }
 
-function item(overrides: Partial<{ id: number; platform: string; payload: unknown; contentType: string }>) {
+function item(overrides: Partial<{ id: number; platform: string; payload: unknown; contentType: string; contentId: string; metadata: Record<string, unknown> | null }>) {
   const payload = overrides.payload;
   return {
     id: overrides.id ?? 1,
     contentType: (overrides.contentType ?? "social") as never,
-    contentId: "src-1",
+    contentId: overrides.contentId ?? "src-1",
     platform: (overrides.platform ?? "facebook") as never,
     payload: typeof payload === "string" ? payload : JSON.stringify(payload ?? {}),
     scheduledAt: "2026-06-15 15:00:00",
@@ -84,7 +86,7 @@ function item(overrides: Partial<{ id: number; platform: string; payload: unknow
     error: null,
     createdAt: "2026-06-15 14:00:00",
     publishedAt: null,
-    metadata: null,
+    metadata: overrides.metadata ?? null,
   };
 }
 
@@ -291,6 +293,29 @@ describe("parse helpers", () => {
 
 describe("drainPublisherQueue", () => {
   const noSleep = vi.fn().mockResolvedValue(undefined);
+
+  it("holds a sequential ad whose burned price changed: back to draft for a re-render, not failed", async () => {
+    const { getProduct, flagSequentialAdForRerender } = await import("@/lib/database");
+    vi.mocked(getProduct).mockResolvedValueOnce({ price: 84.99 } as never);
+    vi.mocked(getNextPending).mockResolvedValue([
+      item({
+        id: 5,
+        contentType: "sequential_ad",
+        contentId: "seqad:ugc_video:automne-2026:831-194WT",
+        platform: "facebook",
+        payload: social({ reelsVideoUrl: "https://x/v.mp4" }),
+        metadata: { style: "ugc_video", renderedPrice: 79.99 },
+      }),
+    ] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+
+    const res = await drainPublisherQueue({ sleep: noSleep });
+
+    expect(flagSequentialAdForRerender).toHaveBeenCalledWith(5, expect.stringContaining("Prix changé"));
+    expect(markPublished).not.toHaveBeenCalled();
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ published: 0, failed: 0, skipped: 1 });
+  });
 
   it("claims, publishes, and marks each pending item; rate-limits between (not before first)", async () => {
     vi.mocked(getNextPending).mockResolvedValue([

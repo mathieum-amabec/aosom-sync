@@ -43,8 +43,11 @@ import {
   markFailed,
   markGuidePagePublished,
   getProduct,
+  flagSequentialAdForRerender,
+  createNotification,
   type PublicationQueueItem,
 } from "./database";
+import { checkSequentialAdPrice } from "./sequential-ad-price";
 
 export interface SocialQueuePayload {
   caption: string;
@@ -333,8 +336,23 @@ function assertContentPlatformPairing(item: PublicationQueueItem): void {
  * Publish one queue item according to its platform. Returns the published post id.
  * Throws on an invalid payload or a publish failure — the caller maps that to markFailed.
  */
+/** A sequential ad whose burned price changed since the render — never publish it. */
+export class SequentialAdPriceChangedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SequentialAdPriceChangedError";
+  }
+}
+
 export async function publishQueueItem(item: PublicationQueueItem): Promise<PublishItemResult> {
   assertContentPlatformPairing(item);
+
+  // Last line of the price guard (sequential-ad-price.ts): the price may have moved between
+  // approval and the slot. A wrong price in the frame is worse than a late post.
+  if (item.contentType === "sequential_ad") {
+    const price = await checkSequentialAdPrice(item);
+    if (!price.ok) throw new SequentialAdPriceChangedError(price.reason!);
+  }
 
   let raw: unknown;
   try {
@@ -557,6 +575,14 @@ export async function drainPublisherQueue(opts: {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      if (err instanceof SequentialAdPriceChangedError) {
+        // Back to draft, flagged for a re-render — not a failure, and its slot is freed.
+        await flagSequentialAdForRerender(item.id, msg);
+        await createNotification("warning", "Pub séquentielle remise en brouillon", `#${item.id} : ${msg}`).catch(() => undefined);
+        console.warn(`[publisher] item ${item.id} held for re-render: ${msg}`);
+        outcomes.push({ id: item.id, platform: item.platform, status: "skipped", error: msg });
+        continue;
+      }
       await markFailed(item.id, msg);
       console.error(`[publisher] item ${item.id} (${item.platform}) failed: ${msg}`);
       outcomes.push({ id: item.id, platform: item.platform, status: "failed", error: msg });

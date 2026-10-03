@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.99.0] - 2026-10-02
+
+**Sequential ads never go out with a stale price** (Mat: "Vérif + re-rendu"). The renderer runs on the operator's PC (ffmpeg, music, source clips), so the site can't re-render at approval time on its own. It guards instead.
+
+### Added
+
+- `sequential-ad-price.ts`: the renderer records the price burned into the frame (`metadata.renderedPrice`, written by `render-sequential-ads.mts` on insert and on `--replace`).
+  - **Approval** refuses an ad whose price changed since the render: "Prix changé depuis le rendu : 79,99 $ → 84,99 $" (HTTP 409). It flags the ad `needsRerender`.
+  - **Publisher** re-checks right before posting. On a change, the ad goes back to `draft`, flagged, with a dashboard notification, instead of being published or marked failed (`SequentialAdPriceChangedError`, `flagSequentialAdForRerender`).
+- `scripts/rerender-stale-sequential-ads.mts`: lists every flagged or price-drifted draft, grouped by creative and campaign, and re-renders each group in place with today's price (`--skus … --replace`, same id, slot and status; clears the flag). Dry-run by default. `SEQ_ASSETS_ROOT` points at the main clone's music and clips.
+- `/sequential-ads` shows "💲 Prix à re-rendre — <reason>" on flagged ads.
+
+### Data
+
+- The 61 seasonal drafts were backfilled with the price that had been burned in at render time, reconstructed from `price_history`. 43 were stale.
+
 ## [0.5.98.0] - 2026-10-02
 
 Catalogue clean-up approved by Mat (points 3, 6a–6d) and the guardrails that keep it clean.
