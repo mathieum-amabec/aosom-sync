@@ -104,9 +104,14 @@ function userPrompt(p: CopyProduct): string {
   return lines.join("\n");
 }
 
-/** Uppercase, strip markdown/quotes/emoji, collapse spaces, drop trailing punctuation. */
+/**
+ * Uppercase, strip markdown/quotes/emoji, collapse spaces, drop trailing punctuation.
+ * An apostrophe BETWEEN letters is French elision, not a quote: keep it as a typographic ’
+ * ("L'ENTRAÎNEMENT" was being burned into videos as "LENTRAÎNEMENT", 2026-10-02).
+ */
 export function normalizeLine(s: string): string {
   return cleanSocialCaption(String(s ?? ""))
+    .replace(/(\p{L})['’](?=\p{L})/gu, "$1’")
     .replace(/["'“”«»]/g, "")
     .replace(/[\p{Extended_Pictographic}]/gu, "")
     .replace(/\s+/g, " ")

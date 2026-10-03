@@ -39,7 +39,7 @@
 import path from "path";
 import fs from "fs";
 import { spawn, execFileSync } from "child_process";
-import { createClient } from "@libsql/client";
+import { createClient, type InStatement } from "@libsql/client";
 
 // ── CLI ──────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -231,11 +231,31 @@ async function loadLib() {
 }
 
 // ── prod Turso (velocity + lifestyle-verified) ───────────────────────────
+/**
+ * Network blips worth one more try. The ffmpeg renders run synchronously for minutes, and the
+ * keep-alive sockets idle in the HTTP pool meanwhile get closed by Turso; the first statement
+ * after a render then fails with "socket hang up" (every write of the 2026-10-02 re-render).
+ */
+const TRANSIENT = /socket hang up|ECONNRESET|ETIMEDOUT|EPIPE|fetch failed|other side closed/i;
+export async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i >= tries || !TRANSIENT.test(e instanceof Error ? `${e.message} ${(e as { cause?: Error }).cause?.message ?? ""}` : String(e))) throw e;
+      await new Promise((r) => setTimeout(r, 1500 * i));
+    }
+  }
+}
+
 function direct() {
   const url = process.env.TURSO_DATABASE_URL;
   const authToken = process.env.TURSO_AUTH_TOKEN;
   if (!url || !authToken) throw new Error("TURSO_DATABASE_URL / TURSO_AUTH_TOKEN missing (run with --env-file=…/.env.local)");
-  return createClient({ url, authToken });
+  const client = createClient({ url, authToken });
+  return {
+    execute: (stmt: InStatement) => withRetry(() => client.execute(stmt)),
+  };
 }
 const PATIO = `(products.product_type LIKE '%Patio%' OR products.product_type LIKE '%Outdoor%' OR products.product_type LIKE '%Garden%' OR products.product_type LIKE '%Pool%')`;
 
@@ -737,7 +757,7 @@ async function uploadBlob(localFile: string, sku: string): Promise<string> {
   const safeSku = sku.replace(/[^A-Za-z0-9._-]/g, "_");
   const key = `slideshows/sequential-ads/${STYLE}/${CAMPAIGN}/${Date.now()}-${safeSku}.mp4`;
   const buf = await fs.promises.readFile(localFile);
-  const blob = await put(key, buf, { access: "public", contentType: "video/mp4", addRandomSuffix: false, allowOverwrite: true });
+  const blob = await withRetry(() => put(key, buf, { access: "public", contentType: "video/mp4", addRandomSuffix: false, allowOverwrite: true }));
   return blob.url;
 }
 
@@ -798,7 +818,7 @@ async function replaceDraftVideo(id: number, prevPayload: string, caption: strin
 
 /** Insert the draft row for an already-reserved slot + uploaded blob. */
 async function insertDraft(lib: Lib, slot: { contentId: string; sqlite: string; at: number }, caption: string, blobUrl: string, occupied: number[], renderedPrice: number | null): Promise<number> {
-  const queueId = await lib.addToQueue({
+  const queueId = await withRetry(() => lib.addToQueue({
     contentType: "sequential_ad",
     contentId: slot.contentId,
     platform: "both",
@@ -807,7 +827,7 @@ async function insertDraft(lib: Lib, slot: { contentId: string; sqlite: string; 
     status: "draft",
     // renderedPrice: the price burned into the frame, checked at approval and publish time.
     metadata: { style: STYLE_KEY, campaign: CAMPAIGN, renderedPrice },
-  });
+  }));
   occupied.push(slot.at); // so the next draft picks a distinct slot
   return queueId;
 }
