@@ -5906,6 +5906,24 @@ export async function approveSequentialAdDraft(id: number, scheduledAt: string):
   }
 }
 
+/**
+ * Price guard (sequential-ad-price.ts): flag a sequential ad whose burned price is stale.
+ * Puts it back to 'draft' (from 'draft', 'pending' or a claimed 'publishing') so it can never
+ * go out with the wrong price, records the reason in `error`, and sets
+ * metadata.needsRerender so scripts/rerender-stale-sequential-ads.mts picks it up.
+ */
+export async function flagSequentialAdForRerender(id: number, reason: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue
+          SET status = 'draft', claimed_at = NULL, error = ?,
+              metadata = json_set(COALESCE(metadata, '{}'), '$.needsRerender', json('true'))
+          WHERE id = ? AND content_type = 'sequential_ad' AND status IN ('draft', 'pending', 'publishing')`,
+    args: [reason, id],
+  });
+  return (result.rowsAffected ?? 0) === 1;
+}
+
 /** Cancel a sequential-ad draft (draft → cancelled). Only acts on a 'draft' sequential_ad row. */
 export async function cancelSequentialAdDraft(id: number): Promise<boolean> {
   const db = await ensureSchema();

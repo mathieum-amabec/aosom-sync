@@ -15,6 +15,8 @@ interface SequentialAdItem {
   payload: { reelsVideoUrl?: string; caption?: string; brand?: string };
   style: string | null;
   campaign: string | null;
+  needs_rerender?: boolean;
+  error?: string | null;
 }
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -441,6 +443,11 @@ function SequentialAdCard({
           {item.payload.brand && <span className="text-[10px] text-gray-500">{item.payload.brand}</span>}
         </div>
         <p className="text-xs text-gray-400 line-clamp-2" title={title}>{title}</p>
+        {item.needs_rerender && (
+          <p className="text-xs text-amber-300" title={item.error ?? undefined}>
+            💲 Prix à re-rendre{item.error ? ` — ${item.error.replace(/ À re-rendre.*$/, "")}` : ""}
+          </p>
+        )}
         {isPending && (
           <p className="text-xs text-blue-300">Planifié le {formatSlot(item.scheduled_at)}</p>
         )}

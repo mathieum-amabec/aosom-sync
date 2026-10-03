@@ -782,17 +782,22 @@ async function findExistingDraft(sku: string): Promise<{ id: number; contentId: 
  * cancelled rows plus new ids on new dates, silently discarding an operator's chosen
  * schedule. Replacing keeps the id, the slot and the status, and changes only the asset.
  */
-async function replaceDraftVideo(id: number, prevPayload: string, caption: string, blobUrl: string): Promise<string> {
+async function replaceDraftVideo(id: number, prevPayload: string, caption: string, blobUrl: string, renderedPrice: number | null): Promise<string> {
   const prev = JSON.parse(prevPayload) as { reelsVideoUrl?: string };
+  // Re-render = fresh price: record it and clear the price guard's flag + error
+  // (src/lib/sequential-ad-price.ts).
   await direct().execute({
-    sql: `UPDATE publication_queue SET payload=? WHERE id=? AND status='draft'`,
-    args: [JSON.stringify({ caption, brand: BRAND, reelsVideoUrl: blobUrl }), id],
+    sql: `UPDATE publication_queue
+          SET payload=?, error=NULL,
+              metadata=json_set(json_remove(COALESCE(metadata,'{}'),'$.needsRerender'),'$.renderedPrice',?)
+          WHERE id=? AND status='draft'`,
+    args: [JSON.stringify({ caption, brand: BRAND, reelsVideoUrl: blobUrl }), renderedPrice, id],
   });
   return prev.reelsVideoUrl ?? "";
 }
 
 /** Insert the draft row for an already-reserved slot + uploaded blob. */
-async function insertDraft(lib: Lib, slot: { contentId: string; sqlite: string; at: number }, caption: string, blobUrl: string, occupied: number[]): Promise<number> {
+async function insertDraft(lib: Lib, slot: { contentId: string; sqlite: string; at: number }, caption: string, blobUrl: string, occupied: number[], renderedPrice: number | null): Promise<number> {
   const queueId = await lib.addToQueue({
     contentType: "sequential_ad",
     contentId: slot.contentId,
@@ -800,7 +805,8 @@ async function insertDraft(lib: Lib, slot: { contentId: string; sqlite: string; 
     payload: JSON.stringify({ caption, brand: BRAND, reelsVideoUrl: blobUrl }),
     scheduledAt: slot.sqlite,
     status: "draft",
-    metadata: { style: STYLE_KEY, campaign: CAMPAIGN },
+    // renderedPrice: the price burned into the frame, checked at approval and publish time.
+    metadata: { style: STYLE_KEY, campaign: CAMPAIGN, renderedPrice },
   });
   occupied.push(slot.at); // so the next draft picks a distinct slot
   return queueId;
@@ -881,6 +887,10 @@ async function main(): Promise<void> {
         copyOrigin = copy.fallback ? "haiku-fallback" : "haiku";
       }
       console.log(`  ${sku} copy[${copyOrigin}]: ${msgs.map((m) => `"${m}"`).join(" | ")}`);
+      // The price burned into the frame, if any message shows one (templates use {price};
+      // the AI copy is given the price too). Recorded for the price guard.
+      const renderedPrice =
+        Number.isFinite(Number(p?.price)) && /\d[\d\s]*[,.]\d{2}\s?\$/.test(msgs.join(" ")) ? Number(p?.price) : null;
       try {
         // Render locally first, THEN reserve a slot, THEN upload — so a slotless run
         // never leaves a blob in the store with no queue row pointing at it.
@@ -928,7 +938,7 @@ async function main(): Promise<void> {
         const existing = REPLACE ? await findExistingDraft(sku) : null;
         if (existing) {
           const url = await uploadBlob(out, sku);
-          const orphan = await replaceDraftVideo(existing.id, existing.payload, title, url);
+          const orphan = await replaceDraftVideo(existing.id, existing.payload, title, url, renderedPrice);
           if (orphan) orphaned.push(orphan);
           report.push({ sku, title, images, queueId: existing.id, slot: existing.scheduledAt, status: "replaced" });
         } else {
@@ -937,7 +947,7 @@ async function main(): Promise<void> {
             report.push({ sku, title, images, status: "rendered (no slot)" });
           } else {
             const url = await uploadBlob(out, sku);
-            const queueId = await insertDraft(lib, slot, title, url, occupied);
+            const queueId = await insertDraft(lib, slot, title, url, occupied, renderedPrice);
             report.push({ sku, title, images, queueId, slot: slot.sqlite, status: "draft" });
           }
         }
