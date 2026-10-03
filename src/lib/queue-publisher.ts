@@ -30,6 +30,7 @@ import { stripGuideDraftBanner, hasGuideDraftBanner } from "./guide-draft-banner
 import { setCollectionMetafield, getShopifyProductTitle } from "./shopify-client";
 import { stripSupplierBrands } from "./catalog-guard";
 import { getAnthropicClient } from "./content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "./strip-markdown";
 import { CLAUDE, BLOG } from "./config";
@@ -288,7 +289,7 @@ export async function generateReelCaption(
     `Réponds uniquement avec le texte, sans guillemets.`;
   try {
     const message = await budgetedCreate(getAnthropicClient(), {
-      model: CLAUDE.MODEL_BATCH,
+      model: llmModel("strong"),
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       messages: [{ role: "user", content: prompt }],
     });

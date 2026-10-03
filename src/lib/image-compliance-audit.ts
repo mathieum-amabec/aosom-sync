@@ -29,10 +29,10 @@
  * catalog and across re-runs (image_classifications table).
  */
 import { classifyProductImage, DEFAULT_CLASSIFY_PX, type ClassifyOptions } from "./vision-classifier";
+import { llmModel } from "@/lib/llm-models";
 import { fetchProductImages, type ShopifyProductImage } from "./shopify-client";
 import { getCachedImageVerdicts, putCachedImageVerdict, type CachedImageVerdict } from "./database";
 import { classifyImageBackground, type ImageBackground } from "./variant-merger";
-import { CLAUDE } from "./config";
 
 /** Shopify appends this to a filename when it ingests an external image. */
 const SHOPIFY_INGEST_UUID = /_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -276,7 +276,7 @@ async function classifyWithCache(
         // Record the model AND the resolution the verdict was produced at: they are the two
         // inputs that decide it, and a cache row is worthless for auditing without them.
         const px = opts.classifyOptions?.px ?? DEFAULT_CLASSIFY_PX;
-        await putCachedImageVerdict(stem, verdict, { model: `${CLAUDE.MODEL_BATCH}@${px}`, sampleUrl: urls[i] });
+        await putCachedImageVerdict(stem, verdict, { model: `${llmModel("lite")}@${px}`, sampleUrl: urls[i] });
       }
     } catch (err) {
       // Leave the stem unresolved — the caller skips it rather than assuming a verdict.

@@ -23,6 +23,7 @@
  * it instead of Mat re-reading every word.
  */
 import { getAnthropicClient, slugify } from "./content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { stripSupplierBrands } from "@/lib/catalog-guard";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { CLAUDE, BLOG } from "./config";
@@ -208,7 +209,7 @@ STYLE :
   }
 Chaque champ HTML doit être du HTML simple valide (p, ul, li, strong) — pas de classes, pas de style inline, pas de markdown.`;
 
-function buildCopyUserPrompt(stats: SubcategoryTrendStats, titles: string[]): string {
+export function buildCopyUserPrompt(stats: SubcategoryTrendStats, titles: string[]): string {
   const productLines = stats.topProducts
     .map((p, i) => `- ${titles[i]} — ${p.price.toFixed(2)} $ CAD`)
     .join("\n");
@@ -251,10 +252,10 @@ function parseGuideCopyResponse(text: string, label: string): GuideCopy {
   };
 }
 
-async function generateGuideCopy(
+export async function generateGuideCopy(
   stats: SubcategoryTrendStats,
   titles: string[],
-  model: string = CLAUDE.MODEL_BATCH,
+  model: string = llmModel("strong"),
 ): Promise<GuideCopy> {
   const client = getAnthropicClient();
   const message = await budgetedCreate(client, {
@@ -303,13 +304,13 @@ Produis la version corrigée (même structure JSON complète).`;
  * guide (see RETRY_QUALITY_THRESHOLD in guide-quality-pipeline.ts) — a guide that's still weak
  * after this goes to Mat with both scores rather than looping.
  */
-async function regenerateGuideCopyWithFeedback(
+export async function regenerateGuideCopyWithFeedback(
   stats: SubcategoryTrendStats,
   titles: string[],
   original: GuideCopy,
   qualityReasons: string,
   factCheckReasons: string | undefined,
-  model: string = CLAUDE.MODEL_BATCH,
+  model: string = llmModel("strong"),
 ): Promise<GuideCopy> {
   const client = getAnthropicClient();
   const message = await budgetedCreate(client, {

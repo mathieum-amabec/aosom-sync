@@ -17,6 +17,7 @@
  * the failure this module exists to prevent.
  */
 import { getAnthropicClient } from "@/lib/content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "@/lib/strip-markdown";
 
@@ -202,7 +203,7 @@ export async function generateVideoCopy(
 ): Promise<VideoCopy> {
   const angle = CAMPAIGN_ANGLE[campaign] ?? NEUTRAL_ANGLE;
   const used = (opts.usedHooks ?? []).map((h) => normalizeLine(h));
-  const model = opts.model ?? "claude-haiku-4-5";
+  const model = opts.model ?? llmModel("strong");
   const complete = opts.complete ?? ((s: string, u: string) => defaultComplete(s, u, model));
 
   for (let attempt = 0; attempt < 2; attempt++) {

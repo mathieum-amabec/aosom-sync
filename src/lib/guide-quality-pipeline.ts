@@ -14,8 +14,8 @@
  * there's no reason to pay the latency of running them sequentially.
  */
 import { getAnthropicClient } from "./content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
-import { CLAUDE } from "./config";
 import type { SubcategoryTrendStats } from "./database";
 
 export interface GuideCopyForReview {
@@ -136,7 +136,7 @@ export async function factCheckGuideCopy(
 ): Promise<PassVerdict> {
   const client = getAnthropicClient();
   const message = await budgetedCreate(client, {
-    model: CLAUDE.MODEL_BATCH,
+    model: llmModel("strong"),
     max_tokens: 600,
     system: FACT_CHECK_SYSTEM_PROMPT,
     messages: [{ role: "user", content: buildFactCheckPrompt(stats, titles, copy) }],
@@ -188,7 +188,7 @@ ${pageText}
 export async function qualityCheckGuideCopy(copy: GuideCopyForReview): Promise<PassVerdict> {
   const client = getAnthropicClient();
   const message = await budgetedCreate(client, {
-    model: CLAUDE.MODEL_BATCH,
+    model: llmModel("strong"),
     max_tokens: 600,
     system: QUALITY_CHECK_SYSTEM_PROMPT,
     messages: [{ role: "user", content: buildQualityCheckPrompt(copy) }],
