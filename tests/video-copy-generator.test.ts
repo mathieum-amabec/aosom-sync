@@ -22,6 +22,10 @@ describe("normalizeLine", () => {
     expect(normalizeLine('  "ton bureau déborde" 🎃 ')).toBe("TON BUREAU DÉBORDE");
     expect(normalizeLine("plus de place !")).toBe("PLUS DE PLACE");
   });
+  it("keeps French elision apostrophes (as ’) while stripping quote marks", () => {
+    expect(normalizeLine("commencez l'entraînement demain")).toBe("COMMENCEZ L’ENTRAÎNEMENT DEMAIN");
+    expect(normalizeLine("'c'est parti'")).toBe("C’EST PARTI");
+  });
   it("keeps accents — this is French copy", () => {
     expect(normalizeLine("étagères réversibles")).toBe("ÉTAGÈRES RÉVERSIBLES");
   });

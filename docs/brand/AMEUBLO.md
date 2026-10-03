@@ -20,3 +20,13 @@ right armrest is the waving arm); `am-think` (thought dots).
 For videos: render frames of `ameublo-poses.html` in a headless browser with a transparent
 background (e.g. Playwright `omitBackground: true`), or hand the SVG to an illustrator as the
 brief for a richer v2 (turnaround + more expressions) so every appearance stays on-model.
+
+## In videos — "Ameublo présente" (free, automated)
+
+- `src/lib/ameublo-sprite.ts` draws any frame from parameters (eyes, mouth, gaze, both arms, hop,
+  seasonal accessory), using this same drawing, so he is identical in every video.
+  `ameubloPoseAt` is the choreography: pop in, wave, point at a speech bubble, wave goodbye.
+- `src/lib/video-engines/ameublo-overlay.ts` lays him over any vertical clip with ffmpeg (0 $ per
+  video). In the sequential ads: `scripts/render-sequential-ads.mts … --ameublo`.
+- AI-generated reference sheets (multi-angle, expressions, costumes) exist as a v2 exploration,
+  outside the repo. Any paid generation (Gemini Image, Veo, Kling…) needs Mat's OK first.
