@@ -1,20 +1,65 @@
 {%- comment -%}
   Ameublo (FR) / Furni (EN) — floating AI shopping assistant (persona since 2026-10-02).
+  Since 2026-10-02 the floating button IS the mascot: a little gold armchair (inline SVG, CSS
+  animations: idle breathing + blink, wave, thinking, happy). Same drawing in the panel header.
   Bottom-right button opens a bilingual chat modal that calls the public /api/assistant
   endpoint and renders recommended products (image + price + PDP link). Self-contained.
 {%- endcomment -%}
 {%- assign lc_loc = request.locale.iso_code | downcase -%}
 {%- if lc_loc == 'en' -%}{%- assign lc_name = 'Furni' -%}{%- else -%}{%- assign lc_name = 'Ameublo' -%}{%- endif -%}
+{%- capture lc_ameublo_svg -%}
+<svg class="lc-ameublo" viewBox="0 0 120 120" aria-hidden="true">
+  <ellipse cx="60" cy="112" rx="34" ry="4.5" fill="#1b2a47" opacity=".12"/>
+  <g class="am-all">
+  <g class="am-body">
+    <!-- legs -->
+    <rect x="31" y="96" width="7" height="14" rx="3" fill="#8a5a2b"/>
+    <rect x="82" y="96" width="7" height="14" rx="3" fill="#8a5a2b"/>
+    <!-- backrest -->
+    <path d="M24 70 C22 34 38 18 60 18 C82 18 98 34 96 70 Z" fill="#D4A853"/>
+    <path d="M30 66 C30 38 42 26 60 26 C78 26 90 38 90 66 Z" fill="#E2BC6E"/>
+    <!-- tufting buttons -->
+    <circle cx="46" cy="36" r="1.6" fill="#C17F3E"/><circle cx="74" cy="36" r="1.6" fill="#C17F3E"/>
+    <!-- face -->
+    <g class="am-face">
+      <g class="am-eye"><ellipse cx="50" cy="48" rx="5" ry="6.4" fill="#1b2a47"/><circle class="am-pupil" cx="51.6" cy="45.8" r="1.8" fill="#fff"/></g>
+      <g class="am-eye"><ellipse cx="70" cy="48" rx="5" ry="6.4" fill="#1b2a47"/><circle class="am-pupil" cx="71.6" cy="45.8" r="1.8" fill="#fff"/></g>
+      <g class="am-eye-happy" fill="none" stroke="#1b2a47" stroke-width="3" stroke-linecap="round">
+        <path d="M45 49 Q50 43 55 49"/><path d="M65 49 Q70 43 75 49"/>
+      </g>
+      <ellipse cx="42" cy="57" rx="4.2" ry="2.6" fill="#E9897E" opacity=".55"/>
+      <ellipse cx="78" cy="57" rx="4.2" ry="2.6" fill="#E9897E" opacity=".55"/>
+      <path class="am-mouth-smile" d="M53 57 Q60 64 67 57" fill="none" stroke="#1b2a47" stroke-width="2.6" stroke-linecap="round"/>
+      <ellipse class="am-mouth-o" cx="60" cy="59" rx="2.6" ry="3" fill="#1b2a47"/>
+    </g>
+    <!-- seat -->
+    <rect x="22" y="70" width="76" height="28" rx="10" fill="#C99A43"/>
+    <rect x="30" y="66" width="60" height="16" rx="8" fill="#FBF3E2"/>
+    <path d="M36 74 H84" stroke="#EADCC0" stroke-width="2" stroke-linecap="round"/>
+    <!-- left armrest -->
+    <rect x="12" y="58" width="20" height="36" rx="10" fill="#D4A853"/>
+    <rect x="12" y="58" width="20" height="10" rx="5" fill="#E2BC6E"/>
+  </g>
+  <!-- right armrest = the waving arm (outside the breathing group so it pivots cleanly) -->
+  <g class="am-arm-r">
+    <rect x="88" y="58" width="20" height="36" rx="10" fill="#D4A853"/>
+    <rect x="88" y="58" width="20" height="10" rx="5" fill="#E2BC6E"/>
+  </g>
+  </g>
+  <!-- thinking dots -->
+  <g class="am-think" fill="#1b2a47"><circle cx="98" cy="22" r="2.4"/><circle cx="106" cy="16" r="2.4"/><circle cx="114" cy="10" r="2.4"/></g>
+</svg>
+{%- endcapture -%}
 <div id="lc-asst" data-loc="{{ lc_loc }}" data-api="https://aosom-sync.vercel.app/api/assistant">
   <button type="button" class="lc-asst__fab" aria-expanded="false" aria-controls="lc-asst-panel">
-    <span class="lc-asst__avatar" aria-hidden="true">{{ lc_name | slice: 0 }}</span>
+    {{ lc_ameublo_svg }}
     <span class="lc-asst__fab-label">{% if lc_loc == 'en' %}Ask {{ lc_name }}{% else %}Demandez à {{ lc_name }}{% endif %}</span>
   </button>
 
   <div id="lc-asst-panel" class="lc-asst__panel" role="dialog" aria-modal="false" aria-label="{% if lc_loc == 'en' %}Shopping assistant{% else %}Assistant magasinage{% endif %}" hidden>
     <div class="lc-asst__head">
       <div class="lc-asst__who">
-        <span class="lc-asst__avatar" aria-hidden="true">{{ lc_name | slice: 0 }}</span>
+        <span class="lc-asst__head-mascot">{{ lc_ameublo_svg }}</span>
         <div>
           <div class="lc-asst__title">{{ lc_name }}</div>
           <div class="lc-asst__subtitle">{% if lc_loc == 'en' %}Your Furnish Direct advisor{% else %}Votre conseiller Ameublo Direct{% endif %}</div>
@@ -47,21 +92,51 @@
 </div>
 <style>
   #lc-asst{--navy:#1B2A4A;--gold:#C17F3E;--gold2:#D4A853;font-family:'DM Sans',sans-serif}
-  .lc-asst__fab{position:fixed;right:20px;bottom:20px;z-index:9998;display:flex;align-items:center;gap:.5rem;
-    background:var(--navy);color:#fff;border:2px solid var(--gold2);border-radius:999px;padding:.7rem 1.15rem;
-    font-size:1.25rem;font-weight:700;cursor:pointer;box-shadow:0 6px 22px rgba(0,0,0,.28)}
-  .lc-asst__fab span[aria-hidden]{font-size:1.5rem;line-height:1}
-  .lc-asst__fab:hover{background:#22345b}
+  /* Mascot button: the armchair itself, with its name pill beside it (kept: an unlabeled icon
+     went unnoticed on mobile, 2026-09-29). Desktop bottom-right → pill on the left. */
+  .lc-asst__fab{position:fixed;right:14px;bottom:10px;z-index:9998;display:flex;flex-direction:row-reverse;align-items:flex-end;gap:.15rem;
+    background:none;border:0;padding:0;cursor:pointer;color:#fff;font-size:1.25rem;font-weight:700}
+  .lc-asst__fab .lc-ameublo{width:76px;height:76px;filter:drop-shadow(0 4px 8px rgba(0,0,0,.18));transition:transform .2s}
+  .lc-asst__fab:hover .lc-ameublo{transform:scale(1.06) rotate(-3deg)}
+  .lc-asst__fab-label{background:var(--navy);border:2px solid var(--gold2);border-radius:999px;padding:.45rem .9rem;margin-bottom:22px;
+    box-shadow:0 4px 14px rgba(0,0,0,.22);white-space:nowrap}
+  .lc-asst__head-mascot .lc-ameublo{width:46px;height:46px;flex:0 0 auto;margin:-6px 0 -4px}
+  .lc-ameublo .am-body{transform-origin:60px 104px;animation:am-breathe 3.6s ease-in-out infinite}
+  .lc-ameublo .am-eye{transform-box:fill-box;transform-origin:center;animation:am-blink 4.8s infinite}
+  .lc-ameublo .am-arm-r{transform-box:fill-box;transform-origin:50% 100%}
+  .lc-ameublo .am-all{transform-origin:60px 110px}
+  .lc-ameublo .am-think,.lc-ameublo .am-mouth-o,.lc-ameublo .am-eye-happy{opacity:0}
+  @keyframes am-breathe{0%,100%{transform:scale(1,1)}50%{transform:scale(1.015,.985)}}
+  @keyframes am-blink{0%,94%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+  /* wave */
+  .lc-ameublo.is-wave .am-arm-r{animation:am-wave 1.2s ease-in-out 2}
+  @keyframes am-wave{0%,100%{transform:translateY(0) rotate(0)}20%{transform:translateY(-16px) rotate(22deg)}40%{transform:translateY(-16px) rotate(-6deg)}60%{transform:translateY(-16px) rotate(22deg)}80%{transform:translateY(-16px) rotate(-6deg)}}
+  /* thinking */
+  .lc-ameublo.is-thinking .am-pupil{transform:translate(1.6px,-1.8px)}
+  .lc-ameublo.is-thinking .am-mouth-smile{opacity:0}
+  .lc-ameublo.is-thinking .am-mouth-o{opacity:1}
+  .lc-ameublo.is-thinking .am-think{opacity:1}
+  .lc-ameublo.is-thinking .am-think circle{animation:am-dots 1.2s ease-in-out infinite}
+  .lc-ameublo.is-thinking .am-think circle:nth-child(2){animation-delay:.2s}
+  .lc-ameublo.is-thinking .am-think circle:nth-child(3){animation-delay:.4s}
+  @keyframes am-dots{0%,100%{transform:translateY(0);opacity:.5}50%{transform:translateY(-3px);opacity:1}}
+  /* happy */
+  .lc-ameublo.is-happy .am-all{animation:am-hop .5s ease-out 2}
+  .lc-ameublo.is-happy .am-eye{opacity:0}
+  .lc-ameublo.is-happy .am-eye-happy{opacity:1}
+  @keyframes am-hop{0%,100%{transform:translateY(0) scale(1,1)}30%{transform:translateY(0) scale(1.06,.92)}60%{transform:translateY(-7px) scale(.97,1.04)}}
+  @media (prefers-reduced-motion:reduce){.lc-ameublo *{animation:none!important}}
   /* Mobile: keep the "Aide au choix" label (an unlabeled 35px icon went unnoticed — 2026-09-29)
      and sit bottom-LEFT, clear of the Messenger bubble (bottom-right). */
-  @media(max-width:749px){.lc-asst__fab{left:14px;right:auto;bottom:calc(14px + env(safe-area-inset-bottom,0px));padding:.55rem .95rem;font-size:1.2rem}}
+  @media(max-width:749px){.lc-asst__fab{left:8px;right:auto;flex-direction:row;bottom:calc(6px + env(safe-area-inset-bottom,0px));font-size:1.15rem}
+    .lc-asst__fab .lc-ameublo{width:60px;height:60px} .lc-asst__fab-label{padding:.35rem .75rem;margin-bottom:16px}}
   /* While the sticky "Acheter maintenant" bar is up, lift both floating buttons above it — they
      sat ON the buy button (mobile icon over "Acheter maintenant"). */
-  body:has(.sticky-atc.is-visible) .lc-asst__fab{bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+  body:has(.sticky-atc.is-visible) .lc-asst__fab{bottom:calc(78px + env(safe-area-inset-bottom,0px))}
   body:has(.sticky-atc.is-visible) .lc-msgr{bottom:calc(90px + env(safe-area-inset-bottom,0px))}
   @media(max-width:749px){body:has(.sticky-atc.is-visible) .lc-msgr{bottom:calc(140px + env(safe-area-inset-bottom,0px))}}
   /* Desktop: both buttons are bottom-right — stack Messenger ABOVE the assistant pill instead of on it. */
-  @media(min-width:750px){.lc-msgr{bottom:78px} body:has(.sticky-atc.is-visible) .lc-msgr{bottom:142px}}
+  @media(min-width:750px){.lc-msgr{bottom:100px} body:has(.sticky-atc.is-visible) .lc-msgr{bottom:168px}}
   .lc-asst__panel{position:fixed;right:20px;bottom:20px;z-index:9999;width:370px;max-width:calc(100vw - 32px);height:70vh;max-height:560px;
     display:flex;flex-direction:column;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.34)}
   .lc-asst__panel[hidden]{display:none}
@@ -112,7 +187,13 @@
     :{err:"Désolé, une erreur est survenue. Réessayez.",typing:"Ameublo réfléchit…"};
   function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
   function money(n){try{return new Intl.NumberFormat(LOC==='en'?'en-CA':'fr-CA',{style:'currency',currency:'CAD'}).format(n);}catch(e){return '$'+Number(n).toFixed(2);}}
-  function open(){panel.hidden=false;fab.setAttribute('aria-expanded','true');fab.style.display='none';setTimeout(function(){input.focus();},50);}
+  var fabMascot=fab.querySelector('.lc-ameublo');
+  var headMascot=root.querySelector('.lc-asst__head-mascot .lc-ameublo');
+  function pose(el,cls,ms){if(!el)return;el.classList.remove('is-wave','is-thinking','is-happy');void el.getBoundingClientRect();el.classList.add(cls);if(ms)setTimeout(function(){el.classList.remove(cls);},ms);}
+  function rest(el){if(el)el.classList.remove('is-wave','is-thinking','is-happy');}
+  // A friendly wave a few seconds into the first page of the visit (once per session).
+  try{if(!sessionStorage.getItem('lc_ameublo_waved')){setTimeout(function(){if(panel.hidden)pose(fabMascot,'is-wave',2600);},4000);sessionStorage.setItem('lc_ameublo_waved','1');}}catch(e){}
+  function open(){panel.hidden=false;fab.setAttribute('aria-expanded','true');fab.style.display='none';pose(headMascot,'is-wave',2600);setTimeout(function(){input.focus();},50);}
   function close(){panel.hidden=true;fab.setAttribute('aria-expanded','false');fab.style.display='';}
   fab.addEventListener('click',open); closeBtn.addEventListener('click',close);
   // Text is still inserted as text nodes (never innerHTML); only bare https URLs become links.
@@ -152,16 +233,19 @@
     addMsg(msg,'user'); input.value='';
     history.push({role:'user',content:msg});
     var typing=addMsg(T.typing,'bot');typing.classList.add('lc-asst__msg--typing');
+    pose(headMascot,'is-thinking');
     fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,history:history.slice(-8),locale:LOC})})
       .then(function(r){return r.json();})
       .then(function(j){
         typing.remove();
+        rest(headMascot);
         if(j&&j.success&&j.data){
+          if(!j.data.limitReached)pose(headMascot,'is-happy',1100);
           var reply=j.data.reply||''; if(reply){addMsg(reply,'bot');history.push({role:'assistant',content:reply});}
           addCards(j.data.products);
         } else { addMsg(T.err,'bot'); }
       })
-      .catch(function(){typing.remove();addMsg(T.err,'bot');})
+      .catch(function(){typing.remove();rest(headMascot);addMsg(T.err,'bot');})
       .finally(function(){busy=false;send.disabled=false;input.focus();});
   });
 })();
