@@ -49,6 +49,17 @@ catalog page, no error anywhere" — a real bug, distinct from the already-fixed
 - `docs/brand/` — `ameublo-mascot.svg` (standalone, for posts / videos), `ameublo-poses.html` (the four animated poses with the site CSS), `AMEUBLO.md` (palette, SVG rig, how to render frames for videos).
 - Uploaded to draft theme 162992816233 "DRAFT — Assistant Ameublo 2026-10-02"; verified on desktop and mobile previews. Live theme untouched.
 
+## [0.5.96.1] - 2026-10-02
+
+**Ameublo the mascot** replaces the chat bubble (theme draft only, not published).
+
+### Added
+
+- A little gold armchair character drawn as inline SVG with CSS animations — idle breathing + blinking, a wave (once per visit after 4 s, and when the chat opens), a thinking pose while the assistant answers, a happy hop when the answer lands. Animations are off for `prefers-reduced-motion`.
+- The floating button is the mascot itself with its "Demandez à Ameublo" pill (desktop bottom-right, Messenger moved up above it; mobile bottom-left); the same drawing sits in the chat header.
+- `docs/brand/` — `ameublo-mascot.svg` (standalone, for posts / videos), `ameublo-poses.html` (the four animated poses with the site CSS), `AMEUBLO.md` (palette, SVG rig, how to render frames for videos).
+- Uploaded to draft theme 162992816233 "DRAFT — Assistant Ameublo 2026-10-02"; verified on desktop and mobile previews. Live theme untouched.
+
 ## [0.5.96.0] - 2026-10-02
 
 Ameublo becomes a real in-store advisor: product facts, room-in-a-budget, decor and seasonal advice, with a personality — and still nothing outside the home and the store.
