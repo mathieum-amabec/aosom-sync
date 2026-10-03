@@ -2,6 +2,31 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.103.0] - 2026-10-03
+
+**Ameublo styles, round 2** (Mat's review: Réaction loved but needs varied Hormozi-style copy, Vitrine too slow and the desk wasn't visible, Intro/Outro dropped, find more formats).
+
+### Added
+
+- `ameublo-copy.ts`: hand-written Hormozi-style lines, picked deterministically per SKU and varied across a series. Each video gets a hook ("ATTENDS DE VOIR LE PRIX", "ARRÊTE DE SCROLLER"…), a value line for its product family, a price teaser and a call to action.
+  - Honest clickbait only: no "le moins cher", no fake scarcity, no invented discount.
+- Three new formats, picked from research on 2024–2026 short-form formats:
+  - **Devine le prix**: two prices on screen and a 3-2-1 countdown over quick cuts, then the real price is revealed. The decoy is presented as a guess, never as a former price.
+  - **Tu prends lequel ?**: A versus B side by side, a spotlight alternating between them while Ameublo points, then "ÉCRIS A OU B EN COMMENTAIRE".
+  - **Top 3**: "3 TROUVAILLES SOUS 120 $", counting down #3, #2, #1. The cap is the next $10 above the dearest product, so it is always true.
+- `popWords` kinetic text, a white flash on hard cuts, a price slam, and a punch-in on every photo cut.
+
+### Changed
+
+- **Réaction**: five beats (hook → value → teaser → price slam → CTA) instead of two fixed lines.
+- **Vitrine**: 8.5 s instead of 12 s, a cut every 0.9 s, kinetic hook text, price at 4.8 s.
+- **Astuce**: 9 s instead of 13 s; the tip arrives line by line.
+- Photos: the white-background shot (`image1`, the whole piece) comes first. Other gallery photos are kept only when the vision audit marked them clean (`image_classifications.compliant = 1`); Aosom galleries mix in English marketing text and dimension diagrams.
+
+### Removed
+
+- The Intro / Outro style (Mat: "on l'enlève complètement"), with its samples in Studio Ameublo.
+
 ## [0.5.102.0] - 2026-10-03
 
 **Four more free Ameublo video styles, for Mat to approve or reject** (Mat: "peux-tu me créer d'autres style de vidéos gratuit? J'approuverai ou désapprouverai"). No AI call; review only.

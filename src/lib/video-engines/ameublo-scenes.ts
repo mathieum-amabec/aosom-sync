@@ -6,7 +6,6 @@
  *   reaction — a customer clip in a card, Ameublo reacting under it (wow → laugh → points).
  *   vitrine  — product photos on a card, Ameublo presenting them, price tag drops in.
  *   astuce   — "L'astuce d'Ameublo": he thinks, shares a practical tip, then suggests a product.
- *   bumper   — wraps an existing ad: 1.6 s intro card + the ad + 2.4 s outro card.
  *
  * Review only for now (Studio Ameublo, scripts/ameublo-style-samples.mts).
  */
@@ -15,6 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { OverlayOptions } from "sharp";
 import { ameubloSvg, NEUTRAL_POSE, type AmeubloPose, type AmeubloAccessory } from "@/lib/ameublo-sprite";
+import type { AmeubloLines } from "@/lib/ameublo-copy";
 
 export const W = 1080;
 export const H = 1920;
@@ -281,22 +281,6 @@ export async function renderScene(spec: SceneSpec, out: string, ffmpegBin: strin
   }
 }
 
-/** Concatenate MP4s of identical size/fps (re-encoded, audio included). */
-export async function concatClips(files: string[], out: string, ffmpegBin: string): Promise<void> {
-  const inputs = files.flatMap((f) => ["-i", f]);
-  const streams = files.map((_, i) => `[${i}:v]fps=${FPS},scale=${W}:${H},setsar=1[v${i}];[${i}:a]aresample=44100,aformat=channel_layouts=stereo[a${i}]`).join(";");
-  const cat = files.map((_, i) => `[v${i}][a${i}]`).join("") + `concat=n=${files.length}:v=1:a=1[v][a]`;
-  await new Promise<void>((resolve, reject) => {
-    const p = spawn(ffmpegBin, ["-y", "-hide_banner", "-loglevel", "error", ...inputs, "-filter_complex", `${streams};${cat}`,
-      "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p",
-      "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", out], { stdio: ["ignore", "ignore", "pipe"] });
-    let err = "";
-    p.stderr.on("data", (d) => (err += String(d)));
-    p.on("error", reject);
-    p.on("close", (c) => (c === 0 ? resolve() : reject(new Error(`concat ${c}: ${err.slice(-400)}`))));
-  });
-}
-
 // ── choreography helpers ─────────────────────────────────────────────────────
 
 const pose = (p: Partial<AmeubloPose>, accessory: AmeubloAccessory, t: number): AmeubloPose => ({
@@ -317,9 +301,63 @@ export interface StyleProduct {
   price: number | null;
 }
 
+/**
+ * Kinetic text: the words of `text` appear one after another from `at`, `perWord` seconds
+ * apart, each fading in while rising a little. Lines wrap at `maxW`, centred on the frame.
+ */
+export async function popWords(text: string, top: number, at: number, t: number, o: { size: number; color: string; perWord?: number; maxW?: number }): Promise<OverlayOptions[]> {
+  if (t < at) return [];
+  const per = o.perWord ?? 0.12;
+  const maxW = o.maxW ?? W - 120;
+  // Split on plain spaces only, so a no-break space ("170 $") keeps a number with its unit.
+  const words = text.split(/ +/).filter(Boolean);
+  const imgs = await Promise.all(words.map((w) => textImg(w, o.size, o.color)));
+  const space = Math.round(o.size * 0.3);
+  // Lay out lines first, at full opacity, then draw each word with its own fade.
+  const lines: { idx: number[]; w: number }[] = [{ idx: [], w: 0 }];
+  imgs.forEach((im, i) => {
+    const cur = lines[lines.length - 1];
+    const add = (cur.idx.length ? space : 0) + im.w;
+    if (cur.w + add > maxW && cur.idx.length) lines.push({ idx: [i], w: im.w });
+    else { cur.idx.push(i); cur.w += add; }
+  });
+  const gap = Math.round(o.size * 1.18);
+  const out: OverlayOptions[] = [];
+  for (let li = 0; li < lines.length; li++) {
+    let x = Math.round((W - lines[li].w) / 2);
+    for (const i of lines[li].idx) {
+      const k = prog(t, at + i * per, 0.14);
+      if (k > 0) {
+        const im = k >= 1 ? imgs[i] : await textImg(words[i], o.size, o.color, 700, k);
+        out.push({ input: im.buf, left: x, top: Math.round(top + li * gap + (1 - easeOut(k)) * 18) });
+      }
+      x += imgs[i].w + space;
+    }
+  }
+  return out;
+}
+
+/** A white flash for hard cuts (opacity 0–1), full frame. */
+function flash(opacity: number): OverlayOptions[] {
+  if (opacity <= 0.01) return [];
+  return [{ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff" opacity="${opacity.toFixed(2)}"/></svg>`), left: 0, top: 0 }];
+}
+
+/** Price that slams in: starts 35 % bigger and settles, with the free-shipping line under it. */
+async function priceSlam(price: number, cx: number, top: number, t: number, at: number, subColor: string): Promise<OverlayOptions[]> {
+  if (t < at) return [];
+  const k = easeOutBack(prog(t, at, 0.35));
+  const scale = 1 + 0.35 * (1 - Math.min(1, k));
+  return priceTagLayer(priceFr(price), cx, top - (scale - 1) * 60, "LIVRAISON GRATUITE", Math.round(scale * 20) / 20, subColor);
+}
+
 // ── style: reaction ─────────────────────────────────────────────────────────
 
-export async function reactionScene(clipFile: string, p: StyleProduct, accessory: AmeubloAccessory, music?: string): Promise<SceneSpec> {
+/**
+ * A customer clip in a framed card, Ameublo reacting under it.
+ * Beats: hook (curiosity) → value line → price teaser → price slam → call to action.
+ */
+export async function reactionScene(clipFile: string, p: StyleProduct, lines: AmeubloLines, accessory: AmeubloAccessory, music?: string): Promise<SceneSpec> {
   const duration = 12;
   const card = { x: 70, y: 130, w: 940, h: 1160 };
   // A thick navy rounded frame over the clip box rounds its corners and frames it.
@@ -335,8 +373,9 @@ export async function reactionScene(clipFile: string, p: StyleProduct, accessory
   };
   const url = await textLayer(["AMEUBLODIRECT.CA"], 1790, { size: 40, color: GOLD, cx: 790 });
   const size = 660;
-  const ax = -40;
-  const ay = 1250;
+  const bx = 500;
+  const bubble = (text: string, at: number, end: number, t: number, y = 1340) =>
+    t >= at && t < end ? bubbleLayer(wrap(text, 14, 2), bx, y, 540, 60, bx + 40, prog(t, at, 0.12) * (1 - prog(t, end - 0.12, 0.12))) : Promise.resolve([]);
   return {
     duration,
     background: await backgroundPng(NAVY, "#24365C"),
@@ -345,84 +384,83 @@ export async function reactionScene(clipFile: string, p: StyleProduct, accessory
     layersAt: async (t) => {
       const L: OverlayOptions[] = [frame, ...url];
       let ps: AmeubloPose;
-      if (t < 0.6) ps = pose({ bodyY: entrance(t), eyes: "happy" }, accessory, t);
-      else if (t < 3.2) ps = pose({ eyes: "wide", mouth: "o", tilt: 5 * Math.sin(prog(t, 0.6, 0.3) * Math.PI / 2), look: { dx: 1.5, dy: -2 } }, accessory, t);
-      else if (t < 6.2) ps = pose({ eyes: "happy", mouth: "laugh", bodyY: hop(t - 3.2, 3, 7), tilt: 3 * Math.sin(t * 9) }, accessory, t);
-      else if (t < 10) {
-        const k = prog(t, 6.2, 0.2);
-        ps = pose({ armLift: k, armAngle: 30 * k, look: { dx: 2, dy: -2 }, mouth: "smile", eyes: blink(t) ? "closed" : "open" }, accessory, t);
-      } else ps = pose({ ...waving(t - 10), eyes: "happy", mouth: "laugh", bodyY: hop(t - 10, 2.5, 6) }, accessory, t);
-      L.push(ameubloLayer(ps, size, ax, ay));
-      // Bubbles: wow → love → (price takes over).
-      const bx = 500;
-      if (t >= 0.8 && t < 3.2) L.push(...(await bubbleLayer(["OH !", "REGARDEZ ÇA"], bx, 1360, 520, 62, bx + 40, prog(t, 0.8, 0.15))));
-      if (t >= 3.4 && t < 6.2) L.push(...(await bubbleLayer(["J’ADORE !"], bx + 40, 1400, 440, 72, bx + 80, prog(t, 3.4, 0.15))));
-      if (t >= 6.4 && p.price != null) {
-        const k = easeOutBack(prog(t, 6.4, 0.45));
-        L.push(...(await priceTagLayer(priceFr(p.price), 790, 1440 - (1 - k) * 60, "LIVRAISON GRATUITE", 0.95, "#ffffff")));
-      }
+      if (t < 0.5) ps = pose({ bodyY: entrance(t, 0, 0.45), eyes: "happy" }, accessory, t);
+      else if (t < 2.8) ps = pose({ eyes: "wide", mouth: "o", tilt: 5, look: { dx: 1.5, dy: -2 } }, accessory, t);
+      else if (t < 5.4) ps = pose({ eyes: "happy", mouth: "laugh", bodyY: hop(t - 2.8, 3, 7), tilt: 3 * Math.sin(t * 9) }, accessory, t);
+      else if (t < 7.0) ps = pose({ think: true, look: { dx: 1.6, dy: -2.2 }, mouth: "o", tilt: -3 }, accessory, t);
+      else if (t < 7.6) ps = pose({ eyes: "wide", mouth: "laugh", bodyY: hop(t - 7, 3.3, 10) }, accessory, t);
+      else if (t < 9.6) {
+        const k = prog(t, 7.6, 0.2);
+        ps = pose({ armLift: k, armAngle: 30 * k, look: { dx: 2, dy: -1 }, mouth: "smile", eyes: blink(t) ? "closed" : "open" }, accessory, t);
+      } else ps = pose({ ...waving(t - 9.6), eyes: "happy", mouth: "laugh", bodyY: hop(t - 9.6, 2.5, 6) }, accessory, t);
+      L.push(ameubloLayer(ps, size, -40, 1250));
+      L.push(...(await bubble(lines.hook, 0.55, 2.8, t)));
+      L.push(...(await bubble(lines.value, 2.95, 5.4, t)));
+      L.push(...(await bubble(lines.teaser, 5.55, 7.0, t)));
+      if (p.price != null) L.push(...(await priceSlam(p.price, 790, 1450, t, 7.0, "#ffffff")));
+      L.push(...(await bubble(lines.cta, 9.6, 12, t, 1262)));
       return L;
     },
   };
 }
 
-// ── style: vitrine ──────────────────────────────────────────────────────────
+// ── style: vitrine (fast) ───────────────────────────────────────────────────
 
-export async function vitrineScene(photos: Buffer[], p: StyleProduct, accessory: AmeubloAccessory, music?: string): Promise<SceneSpec> {
-  const duration = 12;
-  const cardW = 860;
-  const cardH = 860;
+/**
+ * Fast product showcase: a hard cut with a punch-in every 0.9 s, kinetic hook text,
+ * price slam at 4.8 s. Mat (2026-10-03): the first version was too slow.
+ * Photos: the white-background shot first (the whole piece, always readable), then the rest.
+ */
+export async function vitrineScene(photos: Buffer[], p: StyleProduct, lines: AmeubloLines, accessory: AmeubloAccessory, music?: string): Promise<SceneSpec> {
+  const duration = 8.5;
+  const cardW = 920;
+  const cardH = 920;
   const cx = (W - cardW) / 2;
-  const cy = 300;
-  const cards = await Promise.all(photos.slice(0, 3).map((ph) => photoCard(ph, cardW, cardH, 44)));
+  const cy = 360;
+  const cards = await Promise.all(photos.slice(0, 4).map((ph) => photoCard(ph, cardW, cardH, 44)));
   const sharp = (await import("sharp")).default;
-  const shadow = await sharp(Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${cardW + 80}" height="${cardH + 80}"><defs><filter id="b"><feGaussianBlur stdDeviation="18"/></filter></defs>` +
-      `<rect x="40" y="52" width="${cardW}" height="${cardH}" rx="44" fill="#1B2A47" opacity=".28" filter="url(#b)"/></svg>`,
-  )).png().toBuffer();
-  const header = await textLayer(["LA VITRINE D’AMEUBLO"], 120, { size: 62, color: NAVY });
-  const title = await textLayer(wrap(p.title.toUpperCase(), 26, 2), 1195, { size: 50, color: NAVY });
+  const CUT = 0.9;
   const url = await textLayer(["AMEUBLODIRECT.CA"], 1800, { size: 44, color: NAVY });
-  const per = 3;
   return {
     duration,
     background: await backgroundPng(CREAM, "#F1E2C2"),
     music,
     layersAt: async (t) => {
-      const L: OverlayOptions[] = [...header];
-      // Photos: each slides in from the right and settles, with a slow push-in.
-      const i = Math.min(cards.length - 1, Math.floor(Math.max(0, t - 0.4) / per));
-      const local = t - 0.4 - i * per;
-      const slide = (1 - easeOut(prog(local, 0, 0.35))) * 160;
-      const zoom = 1 + 0.04 * clamp01(local / per);
+      const L: OverlayOptions[] = [];
+      // Photos: a cut every CUT seconds, each one punching in from 110 % and settling.
+      const shot = Math.floor(t / CUT);
+      const local = t - shot * CUT;
+      const img = cards[shot % cards.length];
+      const zoom = 1 + 0.1 * (1 - easeOut(prog(local, 0, 0.25)));
       const zw = Math.round(cardW * zoom);
       const zh = Math.round(cardH * zoom);
-      const zoomed = await sharp(cards[i]).resize(zw, zh).extract({ left: Math.round((zw - cardW) / 2), top: Math.round((zh - cardH) / 2), width: cardW, height: cardH }).png().toBuffer();
-      if (t >= 0.4) {
-        const left = Math.round(cx + Math.min(slide, W - cx - cardW));
-        L.push({ input: shadow, left: left - 40, top: cy - 40 }, { input: zoomed, left, top: cy });
-      }
-      L.push(...title);
-      // Ameublo bottom-right presenting the card with his left arm; waves at the end.
+      const zoomed = zoom > 1.001
+        ? await sharp(img).resize(zw, zh).extract({ left: Math.round((zw - cardW) / 2), top: Math.round((zh - cardH) / 2), width: cardW, height: cardH }).png().toBuffer()
+        : img;
+      L.push({ input: zoomed, left: cx, top: cy });
+      // Kinetic copy in the top band: hook → value → teaser, then the price takes over.
+      if (t < 1.9) L.push(...(await popWords(lines.hook, 130, 0.05, t, { size: 76, color: NAVY, perWord: 0.1 })));
+      else if (t < 3.6) L.push(...(await popWords(lines.value, 130, 1.9, t, { size: 76, color: NAVY, perWord: 0.1 })));
+      else if (t < 4.8) L.push(...(await popWords(lines.teaser, 130, 3.6, t, { size: 76, color: GOLD, perWord: 0.12 })));
+      else L.push(...(await popWords(lines.cta, 130, 6.4, t, { size: 76, color: NAVY, perWord: 0.1 })));
+      if (p.price != null) L.push(...(await priceSlam(p.price, 330, 1330, t, 4.8, NAVY)));
+      // Ameublo bottom-right: points at the card, jumps at the price, waves at the end.
       let ps: AmeubloPose;
-      if (t < 0.5) ps = pose({ bodyY: entrance(t), eyes: "happy" }, accessory, t);
-      else if (t < 9.6) {
-        const k = prog(t, 0.6, 0.25);
-        const nudge = local < 0.3 ? -0.6 : 0; // little lift each time a photo changes
-        ps = pose({ leftArmLift: k, leftArmAngle: -38 * k + nudge * 10, look: { dx: -2, dy: -2 }, mouth: local < 0.4 ? "o" : "smile", eyes: blink(t) ? "closed" : "open" }, accessory, t);
-      } else ps = pose({ ...waving(t - 9.6), eyes: "happy", mouth: "laugh", bodyY: hop(t - 9.6, 2.5, 6) }, accessory, t);
-      L.push(ameubloLayer(ps, 540, 560, 1270));
-      if (p.price != null && t >= 9.0) {
-        const k = easeOutBack(prog(t, 9.0, 0.5));
-        L.push(...(await priceTagLayer(priceFr(p.price), 300, 1480 - (1 - k) * 220, "LIVRAISON GRATUITE")));
-      }
-      if (t >= 10.2) L.push(...url);
+      if (t < 0.4) ps = pose({ bodyY: entrance(t, 0, 0.4), eyes: "happy" }, accessory, t);
+      else if (t < 4.8) {
+        const k = prog(t, 0.4, 0.2);
+        ps = pose({ leftArmLift: k, leftArmAngle: -38 * k + (local < 0.15 ? -8 : 0), look: { dx: -2, dy: -2 }, mouth: local < 0.3 ? "o" : "smile", bodyY: local < 0.2 ? -4 : 0 }, accessory, t);
+      } else if (t < 5.5) ps = pose({ eyes: "wide", mouth: "laugh", bodyY: hop(t - 4.8, 3.3, 10) }, accessory, t);
+      else ps = pose({ ...waving(t - 5.5), eyes: "happy", mouth: "laugh" }, accessory, t);
+      L.push(ameubloLayer(ps, 500, 580, 1300));
+      if (t >= 6.2) L.push(...url);
+      L.push(...flash(local < 0.07 && shot > 0 ? 0.35 * (1 - local / 0.07) : 0));
       return L;
     },
   };
 }
 
-// ── style: astuce ───────────────────────────────────────────────────────────
+// ── style: astuce (fast) ────────────────────────────────────────────────────
 
 /** Practical tips by product family. Plain advice, no product claims. */
 export const TIPS: { match: RegExp; tip: string }[] = [
@@ -441,14 +479,19 @@ export function tipFor(text: string): string {
   return TIPS.find((t) => t.match.test(text))?.tip ?? DEFAULT_TIP;
 }
 
-export async function astuceScene(photo: Buffer, p: StyleProduct & { productType?: string | null }, accessory: AmeubloAccessory, music?: string): Promise<SceneSpec> {
-  const duration = 13;
+/**
+ * "L'astuce d'Ameublo", faster: think (0.7 s), the tip line by line, then the product
+ * punches in with its price. The photo is the white-background shot, so the piece is
+ * always fully visible (a close-up lifestyle crop hid the desk in v1).
+ */
+export async function astuceScene(photo: Buffer, p: StyleProduct & { productType?: string | null }, lines: AmeubloLines, accessory: AmeubloAccessory, music?: string): Promise<SceneSpec> {
+  const duration = 9;
   const tip = tipFor(`${p.productType ?? ""} ${p.title}`);
   const tipLines = wrap(tip.toUpperCase(), 22, 5);
-  const card = await photoCard(photo, 760, 760, 40);
+  const card = await photoCard(photo, 820, 820, 40);
   const header = await textLayer(["L’ASTUCE D’AMEUBLO"], 110, { size: 64, color: GOLD });
   const sugg = await textLayer(["NOTRE SUGGESTION"], 250, { size: 40, color: GOLD });
-  const title = await textLayer(wrap(p.title.toUpperCase(), 30, 3), 1070, { size: 44, color: "#ffffff" });
+  const title = await textLayer(wrap(p.title.toUpperCase(), 30, 2), 1130, { size: 42, color: "#ffffff" });
   const url = await textLayer(["AMEUBLODIRECT.CA"], 1810, { size: 44, color: GOLD });
   return {
     duration,
@@ -456,32 +499,35 @@ export async function astuceScene(photo: Buffer, p: StyleProduct & { productType
     music,
     layersAt: async (t) => {
       const L: OverlayOptions[] = [...header];
-      // Act 1 (0-6 s): big Ameublo thinks, then shares the tip.
-      // Act 2 (6-13 s): he shrinks to the corner, the suggested product takes the stage.
-      const shrink = easeOut(prog(t, 6, 0.6));
-      const size = lerp(720, 500, shrink);
+      const shrink = easeOut(prog(t, 4.5, 0.35));
+      const size = lerp(720, 480, shrink);
       const x = lerp((W - 720) / 2, 0, shrink);
-      const y = lerp(1150, 1330, shrink);
+      const y = lerp(1150, 1360, shrink);
       let ps: AmeubloPose;
-      if (t < 0.5) ps = pose({ bodyY: entrance(t), eyes: "happy" }, accessory, t);
-      else if (t < 2.0) ps = pose({ think: true, look: { dx: 1.6, dy: -2.2 }, mouth: "o", tilt: -3 }, accessory, t);
-      else if (t < 6) ps = pose({ armLift: prog(t, 2, 0.2), armAngle: 20 * prog(t, 2, 0.2), eyes: t < 2.4 ? "wide" : blink(t) ? "closed" : "open", mouth: "smile" }, accessory, t);
-      else if (t < 11.2) {
-        const k = prog(t, 6.6, 0.25);
+      if (t < 0.35) ps = pose({ bodyY: entrance(t, 0, 0.35), eyes: "happy" }, accessory, t);
+      else if (t < 1.0) ps = pose({ think: true, look: { dx: 1.6, dy: -2.2 }, mouth: "o", tilt: -3 }, accessory, t);
+      else if (t < 4.5) ps = pose({ armLift: prog(t, 1, 0.15), armAngle: 20 * prog(t, 1, 0.15), eyes: t < 1.3 ? "wide" : blink(t) ? "closed" : "open", mouth: "smile" }, accessory, t);
+      else if (t < 5.4) ps = pose({ eyes: "wide", mouth: "laugh", bodyY: hop(t - 4.5, 3, 7) }, accessory, t);
+      else if (t < 7.4) {
+        const k = prog(t, 5.4, 0.2);
         ps = pose({ armLift: k, armAngle: 34 * k, look: { dx: 2, dy: -2 }, eyes: blink(t) ? "closed" : "open" }, accessory, t);
-      } else ps = pose({ ...waving(t - 11.2), eyes: "happy", mouth: "laugh", bodyY: hop(t - 11.2, 2.5, 6) }, accessory, t);
-      if (t >= 2.1 && t < 6) {
-        const a = prog(t, 2.1, 0.2) * (1 - prog(t, 5.8, 0.2));
-        L.push(...(await bubbleLayer(tipLines, 90, 300, 900, 64, 560, a)));
+      } else ps = pose({ ...waving(t - 7.4), eyes: "happy", mouth: "laugh", bodyY: hop(t - 7.4, 2.5, 6) }, accessory, t);
+      if (t >= 1.0 && t < 4.5) {
+        // The bubble opens, then the tip arrives line by line (0.22 s apart).
+        const a = prog(t, 1.0, 0.12) * (1 - prog(t, 4.35, 0.15));
+        const shown = tipLines.map((l, i) => (t >= 1.05 + i * 0.22 ? l : " "));
+        L.push(...(await bubbleLayer(shown, 90, 300, 900, 64, 560, a)));
       }
-      if (t >= 6.2) {
-        const k = easeOut(prog(t, 6.2, 0.5));
-        L.push(...sugg, { input: card, left: Math.round((W - 760) / 2), top: Math.round(310 + (1 - k) * 80) }, ...title);
-        if (p.price != null && t >= 7.4) {
-          const kk = easeOutBack(prog(t, 7.4, 0.45));
-          L.push(...(await priceTagLayer(priceFr(p.price), 720, 1420 - (1 - kk) * 60, "LIVRAISON GRATUITE", 1, "#ffffff")));
-        }
-        if (t >= 10) L.push(...url);
+      if (t >= 4.5) {
+        const k = easeOut(prog(t, 4.5, 0.3));
+        const zoom = 1 + 0.12 * (1 - k);
+        const cw = Math.round(820 * zoom);
+        const sharp = (await import("sharp")).default;
+        const img = zoom > 1.001 ? await sharp(card).resize(cw, cw).extract({ left: Math.round((cw - 820) / 2), top: Math.round((cw - 820) / 2), width: 820, height: 820 }).png().toBuffer() : card;
+        L.push(...sugg, { input: img, left: Math.round((W - 820) / 2), top: 300 }, ...title);
+        if (p.price != null) L.push(...(await priceSlam(p.price, 720, 1440, t, 5.3, "#ffffff")));
+        if (t >= 6.8) L.push(...url);
+        L.push(...flash(t < 4.57 ? 0.4 * (1 - (t - 4.5) / 0.07) : 0));
       }
       L.push(ameubloLayer(ps, size, x, y));
       return L;
@@ -489,30 +535,208 @@ export async function astuceScene(photo: Buffer, p: StyleProduct & { productType
   };
 }
 
-// ── style: bumper (intro / outro around an existing ad) ─────────────────────
+// ── shared: a photo card that punches in on a cut ───────────────────────────
 
-export async function bumperIntro(accessory: AmeubloAccessory): Promise<SceneSpec> {
-  const duration = 1.6;
+async function punchCard(card: Buffer, size: number, local: number): Promise<Buffer> {
+  const zoom = 1 + 0.1 * (1 - easeOut(prog(local, 0, 0.25)));
+  if (zoom <= 1.001) return card;
+  const sharp = (await import("sharp")).default;
+  const z = Math.round(size * zoom);
+  return sharp(card).resize(z, z).extract({ left: Math.round((z - size) / 2), top: Math.round((z - size) / 2), width: size, height: size }).png().toBuffer();
+}
+
+/** Round gold badge with a label (A, B, #1, 3…). */
+async function badge(label: string, cx: number, cy: number, d: number, fill = GOLD, color = NAVY): Promise<OverlayOptions[]> {
+  const im = await textImg(label, Math.round(d * 0.5), color);
+  return [
+    { input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${d / 2}" cy="${d / 2}" r="${d / 2 - 3}" fill="${fill}" stroke="${NAVY}" stroke-width="5"/></svg>`), left: Math.round(cx - d / 2), top: Math.round(cy - d / 2) },
+    { input: im.buf, left: Math.round(cx - im.w / 2), top: Math.round(cy - im.h / 2) },
+  ];
+}
+
+// ── style: devine le prix ───────────────────────────────────────────────────
+
+/**
+ * A believable decoy for "Devine le prix": the real price scaled down or up, ending in .99.
+ * It is shown as one of two guesses, never as a former price.
+ */
+export function decoyPrice(real: number, sku: string): number {
+  let h = 0;
+  for (const ch of sku) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const k = h % 2 === 0 ? 0.45 : 2.2;
+  return Math.max(9.99, Math.round(real * k) - 0.01);
+}
+
+/**
+ * "Devine le prix": two prices on screen, a 3-2-1 countdown over quick product cuts, then
+ * the real price is revealed. Curiosity loop + one-letter comments ("A !").
+ */
+export async function devinePrixScene(photos: Buffer[], p: StyleProduct, accessory: AmeubloAccessory, music?: string): Promise<SceneSpec> {
+  if (p.price == null) throw new Error("devine-le-prix needs a price");
+  const duration = 10;
+  const S = 820;
+  const cards = await Promise.all(photos.slice(0, 4).map((ph) => photoCard(ph, S, S, 40)));
+  const real = p.price;
+  const decoy = decoyPrice(real, p.sku);
+  const realIsA = (real < decoy) === (p.sku.length % 2 === 0);
+  const opts: [string, number][] = realIsA ? [["A", real], ["B", decoy]] : [["A", decoy], ["B", real]];
+  const header = await textLayer(["DEVINE LE PRIX"], 110, { size: 80, color: GOLD });
+  const url = await textLayer(["AMEUBLODIRECT.CA"], 1800, { size: 44, color: GOLD });
+  const REVEAL = 6.2;
   return {
     duration,
     background: await backgroundPng(NAVY, "#24365C"),
-    layersAt: async (t) => [
-      ameubloLayer(pose({ bodyY: entrance(t, 0, 0.45), eyes: "happy", mouth: "laugh", ...(t > 0.5 ? waving(t - 0.5) : {}) }, accessory, t), 640, (W - 640) / 2, 560),
-      ...(await textLayer(["AMEUBLO", "VOUS PRÉSENTE…"], 1320, { size: 78, color: "#ffffff", opacity: prog(t, 0.45, 0.3) })),
-    ],
+    music,
+    layersAt: async (t) => {
+      const L: OverlayOptions[] = [...header];
+      const CUT = 1.2;
+      const shot = Math.floor(Math.min(t, REVEAL - 0.01) / CUT);
+      const local = t >= REVEAL ? t - REVEAL : t - shot * CUT;
+      const img = t >= REVEAL ? cards[0] : cards[shot % cards.length];
+      L.push({ input: await punchCard(img, S, local), left: (W - S) / 2, top: 250 });
+      // The two guesses; at the reveal the real one turns into a gold tag, the other is struck out.
+      if (t >= 0.5) {
+        for (let i = 0; i < 2; i++) {
+          const [letter, v] = opts[i];
+          const label = `${letter} : ${priceFr(v)}`;
+          const cx = i === 0 ? 290 : 790;
+          const isReal = v === real;
+          if (t >= REVEAL && isReal) {
+            const grow = 1 + 0.15 * easeOutBack(prog(t, REVEAL, 0.3));
+            L.push(...(await priceTagLayer(label, cx, 1090, undefined, Math.round(0.6 * grow * 20) / 20)));
+          } else if (t >= REVEAL) {
+            const im = await textImg(label, 54, "#8A94A8");
+            L.push(...(await textLayer([label], 1110, { size: 54, color: "#8A94A8", cx })));
+            L.push({ input: Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${im.w + 20}" height="8"><rect width="${im.w + 20}" height="8" rx="4" fill="#E9897E"/></svg>`), left: Math.round(cx - im.w / 2 - 10), top: 1146 });
+          } else {
+            L.push(...(await textLayer([label], 1110, { size: 54, color: "#ffffff", cx, opacity: prog(t, 0.5 + i * 0.15, 0.2) })));
+          }
+        }
+      }
+      // Countdown 3-2-1 in a badge on the card.
+      if (t >= 4.4 && t < REVEAL) {
+        const n = 3 - Math.floor((t - 4.4) / 0.6);
+        L.push(...(await badge(String(n), 900, 300, 140)));
+      }
+      if (t >= REVEAL) L.push(...(await popWords("LE VRAI PRIX !", 1250, REVEAL + 0.1, t, { size: 64, color: "#ffffff", perWord: 0.1 })));
+      if (t >= 8.0) L.push(...(await popWords("TU AVAIS DEVINÉ ? DIS-LE EN COMMENTAIRE", 1380, 8.0, t, { size: 46, color: GOLD, perWord: 0.07, maxW: 620 })), ...url);
+      // Ameublo: curious, thinks through the countdown, jumps at the reveal.
+      let ps: AmeubloPose;
+      if (t < 0.4) ps = pose({ bodyY: entrance(t, 0, 0.4), eyes: "happy" }, accessory, t);
+      else if (t < 4.4) ps = pose({ look: { dx: 2 * Math.sin(t * 2.5), dy: -1.5 }, mouth: "smile", eyes: blink(t) ? "closed" : "open" }, accessory, t);
+      else if (t < REVEAL) ps = pose({ think: true, look: { dx: 1.6, dy: -2.2 }, mouth: "o", tilt: -3 + 2 * Math.sin(t * 12) }, accessory, t);
+      else if (t < REVEAL + 0.9) ps = pose({ eyes: "wide", mouth: "laugh", bodyY: hop(t - REVEAL, 3.3, 12) }, accessory, t);
+      else ps = pose({ ...waving(t - REVEAL - 0.9), eyes: "happy", mouth: "laugh" }, accessory, t);
+      L.push(ameubloLayer(ps, 460, 640, 1360));
+      L.push(...flash(t >= REVEAL && t < REVEAL + 0.08 ? 0.5 * (1 - (t - REVEAL) / 0.08) : 0));
+      return L;
+    },
   };
 }
 
-export async function bumperOutro(accessory: AmeubloAccessory): Promise<SceneSpec> {
-  const duration = 2.4;
+// ── style: tu prends lequel ? (A ou B) ──────────────────────────────────────
+
+/**
+ * Two products side by side; the spotlight alternates A / B every 1.3 s while Ameublo
+ * points at each, then "ÉCRIS A OU B". A one-letter comment costs nothing to leave.
+ */
+export async function ceciOuCaScene(photoA: Buffer, photoB: Buffer, a: StyleProduct, b: StyleProduct, accessory: AmeubloAccessory, music?: string): Promise<SceneSpec> {
+  const duration = 10;
+  const CW = 500;
+  const CH = 640;
+  const cards = [await photoCard(photoA, CW, CH, 36), await photoCard(photoB, CW, CH, 36)];
+  const prods = [a, b];
+  const header = await textLayer(["TU PRENDS LEQUEL ?"], 110, { size: 78, color: NAVY });
+  const url = await textLayer(["AMEUBLODIRECT.CA"], 1800, { size: 44, color: NAVY });
+  const sharp = (await import("sharp")).default;
+  const dimmer = await sharp(Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${CW}" height="${CH}"><rect width="${CW}" height="${CH}" rx="36" fill="#FBF3E2" opacity=".55"/></svg>`)).png().toBuffer();
+  const ring = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${CW + 24}" height="${CH + 24}"><rect x="5" y="5" width="${CW + 14}" height="${CH + 14}" rx="44" fill="none" stroke="${GOLD}" stroke-width="10"/></svg>`);
+  const xs = [30, 550];
+  const top = 290;
+  return {
+    duration,
+    background: await backgroundPng(CREAM, "#F1E2C2"),
+    music,
+    layersAt: async (t) => {
+      const L: OverlayOptions[] = [...header];
+      // Spotlight: A, B, A, B between 1.0 and 6.2 s (-1 = both).
+      const phase = t >= 1.0 && t < 6.2 ? Math.floor((t - 1.0) / 1.3) % 2 : -1;
+      for (const i of [0, 1]) {
+        const k = easeOut(prog(t, 0.15 + i * 0.12, 0.3));
+        const x = Math.round(xs[i] + (i === 0 ? -1 : 1) * (1 - k) * 300);
+        if (phase === i) L.push({ input: ring, left: Math.max(0, x - 12), top: top - 12 });
+        L.push({ input: cards[i], left: Math.max(0, Math.min(W - CW, x)), top });
+        if (phase === 1 - i) L.push({ input: dimmer, left: x, top });
+        L.push(...(await badge(i === 0 ? "A" : "B", x + 70, top + 70, 100)));
+        const pr = prods[i];
+        if (pr.price != null) L.push(...(await priceTagLayer(priceFr(pr.price), xs[i] + CW / 2, top + CH + 30, undefined, 0.62)));
+        L.push(...(await textLayer(wrap(pr.title.toUpperCase(), 22, 2), top + CH + 150, { size: 32, color: NAVY, cx: xs[i] + CW / 2 })));
+      }
+      if (t >= 6.3) L.push(...(await popWords("ÉCRIS A OU B EN COMMENTAIRE", 1300, 6.3, t, { size: 58, color: NAVY, perWord: 0.09, maxW: 560 })));
+      if (t >= 7.5) L.push(...url);
+      let ps: AmeubloPose;
+      if (t < 0.4) ps = pose({ bodyY: entrance(t, 0, 0.4), eyes: "happy" }, accessory, t);
+      else if (phase === 0) ps = pose({ leftArmLift: 1, leftArmAngle: -38, look: { dx: -2, dy: -2 }, mouth: "o" }, accessory, t);
+      else if (phase === 1) ps = pose({ armLift: 1, armAngle: 38, look: { dx: 2, dy: -2 }, mouth: "o" }, accessory, t);
+      else if (t < 6.2) ps = pose({ look: { dx: 0, dy: -2 }, mouth: "smile" }, accessory, t);
+      else ps = pose({ think: true, look: { dx: 1.6, dy: -2.2 }, mouth: "smile", tilt: 3 * Math.sin(t * 3) }, accessory, t);
+      L.push(ameubloLayer(ps, 440, 640, 1380));
+      return L;
+    },
+  };
+}
+
+// ── style: top 3 ────────────────────────────────────────────────────────────
+
+/** "3 TROUVAILLES SOUS 120 $": the cap is the next $10 above the dearest of the three, so it is true. */
+export function top3Cap(prices: number[]): number {
+  return Math.ceil(Math.max(...prices) / 10) * 10;
+}
+
+/** Top 3 countdown: a teaser of all three, then #3, #2, #1 (~2.4 s each) with cut, rank, photo and price. */
+export async function top3Scene(items: { photo: Buffer; p: StyleProduct }[], accessory: AmeubloAccessory, music?: string): Promise<SceneSpec> {
+  if (items.length !== 3 || items.some((i) => i.p.price == null)) throw new Error("top3 needs 3 priced products");
+  const duration = 10;
+  const S = 840;
+  const cards = await Promise.all(items.map((i) => photoCard(i.photo, S, S, 40)));
+  const sharp = (await import("sharp")).default;
+  const minis = await Promise.all(cards.map((c) => sharp(c).resize(300, 300).png().toBuffer()));
+  const cap = top3Cap(items.map((i) => i.p.price as number));
+  const hook = `3 TROUVAILLES SOUS ${cap} $`;
+  const url = await textLayer(["AMEUBLODIRECT.CA"], 1800, { size: 44, color: GOLD });
+  const START = 1.2;
+  const EACH = 2.4;
   return {
     duration,
     background: await backgroundPng(NAVY, "#24365C"),
-    layersAt: async (t) => [
-      ameubloLayer(pose({ ...waving(t), eyes: "happy", mouth: "laugh", bodyY: hop(t, 2.2, 8) }, accessory, t), 600, (W - 600) / 2, 480),
-      ...(await textLayer(["À BIENTÔT !"], 1180, { size: 86, color: "#ffffff", opacity: prog(t, 0.1, 0.3) })),
-      ...(await textLayer(["AMEUBLODIRECT.CA"], 1340, { size: 60, color: GOLD, opacity: prog(t, 0.3, 0.3) })),
-      ...(await textLayer(["LIVRAISON GRATUITE PARTOUT AU CANADA"], 1460, { size: 40, color: "#ffffff", opacity: prog(t, 0.5, 0.3) })),
-    ],
+    music,
+    layersAt: async (t) => {
+      const L: OverlayOptions[] = [];
+      L.push(...(await popWords(hook, 110, 0.05, t, { size: 72, color: GOLD, perWord: 0.1 })));
+      const slot = t < START ? -1 : Math.min(2, Math.floor((t - START) / EACH));
+      const local = slot >= 0 ? t - START - slot * EACH : t;
+      if (slot >= 0) {
+        const idx = 2 - slot; // #3 first, #1 last
+        const item = items[idx];
+        L.push({ input: await punchCard(cards[idx], S, local), left: (W - S) / 2, top: 290 });
+        L.push(...(await badge(`#${idx + 1}`, 190, 340, 150)));
+        L.push(...(await textLayer(wrap(item.p.title.toUpperCase(), 28, 2), 1160, { size: 44, color: "#ffffff" })));
+        L.push(...(await priceSlam(item.p.price as number, W / 2, 1300, t, START + slot * EACH + 0.3, "#ffffff")));
+        L.push(...flash(local < 0.07 ? 0.4 * (1 - local / 0.07) : 0));
+      } else {
+        // Before #3: a quick teaser of all three.
+        const k = easeOut(prog(t, 0.2, 0.4));
+        minis.forEach((c, i) => L.push({ input: c, left: Math.max(0, Math.round(45 + i * 340 - (1 - k) * 40)), top: 620 }));
+      }
+      if (t >= 8.9) L.push(...(await popWords("TON PRÉFÉRÉ ?", 1520, 8.9, t, { size: 56, color: GOLD, perWord: 0.1 })), ...url);
+      let ps: AmeubloPose;
+      if (t < 0.4) ps = pose({ bodyY: entrance(t, 0, 0.4), eyes: "happy" }, accessory, t);
+      else if (slot === 2 && local < 0.8) ps = pose({ eyes: "wide", mouth: "laugh", bodyY: hop(local, 3.3, 12) }, accessory, t);
+      else if (slot >= 0 && local < 0.5) ps = pose({ eyes: "wide", mouth: "o", bodyY: hop(local, 2, 6) }, accessory, t);
+      else if (t >= 8.9) ps = pose({ ...waving(t - 8.9), eyes: "happy", mouth: "laugh" }, accessory, t);
+      else ps = pose({ armLift: 1, armAngle: 30, look: { dx: 2, dy: -2 }, mouth: "smile", eyes: blink(t) ? "closed" : "open" }, accessory, t);
+      L.push(ameubloLayer(ps, 420, 660, 1380));
+      return L;
+    },
   };
 }
