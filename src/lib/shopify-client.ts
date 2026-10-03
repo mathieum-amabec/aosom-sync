@@ -9,6 +9,7 @@ import { recordPriceFloorIncident } from "./database";
 import { EN_FIELD_MAP, rejectEnValue, type EnTranslatableKey } from "./en-translations";
 import { variantImageIndexes } from "./variant-merger";
 import { toEnglishColour } from "./colour-names";
+import { toFrenchSize } from "./size-names";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -385,6 +386,15 @@ export async function createShopifyProduct(
     .replace(/--+/g, "-")
     .replace(/^-|-$/g, "");
 
+  // Sizes go to Shopify in French ("Set of 4" → "Lot de 4"); the Aosom wording becomes the EN
+  // translation registered below (size-names.ts, 2026-10-02).
+  const sizeEn = new Map<string, string>();
+  const frSize = (raw: string) => {
+    const fr = toFrenchSize(raw);
+    if (fr && fr !== raw) sizeEn.set(fr, raw);
+    return fr;
+  };
+
   // Build variants, then de-collide duplicate (option1, option2) pairs so a group
   // with two SKUs that map to the same Couleur/Taille imports instead of 422-ing.
   const builtVariants = dedupeVariantOptionLabels(
@@ -402,9 +412,9 @@ export async function createShopifyProduct(
       option1: hasColor
         ? v.color || "Défaut"
         : hasSize
-          ? v.size || "Défaut"
+          ? frSize(v.size) || "Défaut"
           : "Titre par défaut",
-      option2: hasColor && hasSize ? v.size || "Défaut" : undefined as string | undefined,
+      option2: hasColor && hasSize ? frSize(v.size) || "Défaut" : undefined as string | undefined,
     })),
   );
 
@@ -557,7 +567,7 @@ export async function createShopifyProduct(
     console.error(`[IMPORT] variant photos not attached for product ${data.product.id}:`, err instanceof Error ? err.message : err);
   }
   try {
-    await registerOptionEnTranslations(String(data.product.id));
+    await registerOptionEnTranslations(String(data.product.id), sizeEn);
   } catch (err) {
     console.error(`[IMPORT] EN option translations not registered for product ${data.product.id}:`, err instanceof Error ? err.message : err);
   }
@@ -599,10 +609,15 @@ export async function attachVariantImages(
 
 /**
  * EN translations for a product's option NAMES (Couleur → Color, Taille → Size) and colour
- * VALUES (Noir → Black), so the EN locale doesn't show French option labels. Skips anything
+ * VALUES (Noir → Black) and translated SIZE values (Lot de 4 → Set of 4), so the EN locale
+ * doesn't show French option labels. Skips anything
  * already translated or that toEnglishColour can't translate. Returns the count registered.
  */
-export async function registerOptionEnTranslations(productId: string): Promise<number> {
+export async function registerOptionEnTranslations(
+  productId: string,
+  /** FR size label → original Aosom (English) wording, from createShopifyProduct. */
+  sizeEn: Map<string, string> = new Map(),
+): Promise<number> {
   const gql = async (query: string, variables: Record<string, unknown>) => {
     const res = await shopifyFetch("/graphql.json", { method: "POST", body: JSON.stringify({ query, variables }) });
     if (!res.ok) throw new Error(`GraphQL ${res.status}`);
@@ -618,6 +633,10 @@ export async function registerOptionEnTranslations(productId: string): Promise<n
     if (o.name === "Couleur") for (const v of o.optionValues) {
       const ev = toEnglishColour(v.name);
       if (ev && ev !== v.name) wanted.set(v.id, ev);
+    }
+    if (o.name === "Taille") for (const v of o.optionValues) {
+      const ev = sizeEn.get(v.name);
+      if (ev) wanted.set(v.id, ev);
     }
   }
   if (wanted.size === 0) return 0;
