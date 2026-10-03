@@ -325,3 +325,26 @@ describe("generateProductContent — French language guard", () => {
     await expect(generateProductContent(makeProduct())).rejects.toThrow();
   });
 });
+
+describe("generateProductContent — tags never carry a supplier name", () => {
+  it("strips a brand out of a tag and drops a tag that was only the brand", async () => {
+    create.mockResolvedValue({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          titleFr: "Chaise longue", titleEn: "Lounge chair",
+          descriptionFr: "<p>Cette chaise pour votre jardin est confortable et pratique pour tous les jours.</p>",
+          descriptionEn: "<p>en</p>", seoDescriptionFr: "d", seoDescriptionEn: "d",
+          metaTitleFr: "m | Livraison gratuite — Ameublo Direct", metaTitleEn: "m | Free Shipping — Furnish Direct",
+          metaDescriptionFr: "md", metaDescriptionEn: "md", urlHandleFr: "chaise", urlHandleEn: "chair",
+          tags: ["costway chaise", "outsunny", "bureau", "a", "b", "c", "d", "e"],
+        }),
+      }],
+    });
+    const out = await generateProductContent(makeProduct());
+    expect(out.tags).toContain("chaise");
+    expect(out.tags).toContain("bureau");
+    expect(out.tags).not.toContain("outsunny");
+    expect(out.tags.join(" ").toLowerCase()).not.toMatch(/costway|outsunny/);
+  });
+});

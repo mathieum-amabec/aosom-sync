@@ -105,15 +105,15 @@ function userPrompt(p: CopyProduct): string {
   return lines.join("\n");
 }
 
-/** Uppercase, strip markdown/quotes/emoji, collapse spaces, drop trailing punctuation. */
+/**
+ * Uppercase, strip markdown/quotes/emoji, collapse spaces, drop trailing punctuation.
+ * An apostrophe BETWEEN letters is French elision, not a quote: keep it as a typographic ’
+ * ("L'ENTRAÎNEMENT" was being burned into videos as "LENTRAÎNEMENT", 2026-10-02).
+ */
 export function normalizeLine(s: string): string {
   return cleanSocialCaption(String(s ?? ""))
-    .replace(/["“”«»]/g, "")
-    // Keep an apostrophe INSIDE a word ("s'ennuie", "aujourd'hui"): the old blanket strip printed
-    // "SENNUIE" / "AUJOURDHUI" on screen. Only quote marks around a word are removed. The renderer
-    // passes lines through drawtext `textfile=`, so a bare apostrophe is safe there.
-    .replace(/[‘’]/g, "'")
-    .replace(/(^|\s)'+|'+(?=\s|$)/g, "$1")
+    .replace(/(\p{L})['’](?=\p{L})/gu, "$1’")
+    .replace(/["'“”«»]/g, "")
     .replace(/[\p{Extended_Pictographic}]/gu, "")
     .replace(/\s+/g, " ")
     .replace(/[.!?;:,]+$/, "")

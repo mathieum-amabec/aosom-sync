@@ -5,7 +5,7 @@ import { stripLeadingHeading } from "./html-utils";
 import { env, SHOPIFY, SYNC } from "./config";
 import { targetSellPrice } from "./pricing";
 import { writePriceVerified, PRICE_EPSILON } from "./price-protection";
-import { recordPriceFloorIncident } from "./database";
+import { recordPriceFloorIncident, getCostwayShopifyProductIds } from "./database";
 import { EN_FIELD_MAP, rejectEnValue, type EnTranslatableKey } from "./en-translations";
 import { variantImageIndexes } from "./variant-merger";
 import { toEnglishColour } from "./colour-names";
@@ -61,11 +61,16 @@ export async function shopifyFetch(
 }
 
 /**
- * Fetch all products from Shopify (paginated).
+ * Fetch all AOSOM products from Shopify (paginated). Costway products (a separate supplier,
+ * tracked in `costway_products`) are excluded: they are absent from the Aosom feed by definition,
+ * so every caller — the diff archive, removed-catalog, stale-catalog, price-audit — would treat
+ * them as "gone from the supplier" and draft them. Same exclusion in fetchShopifyVariantsPage and
+ * fetchActiveVariantInventory, the other two whole-catalogue sweeps feeding Aosom-only jobs.
  */
 export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[]> {
   if (!env.hasShopifyToken) return [];
 
+  const costwayIds = await getCostwayShopifyProductIds();
   const products: ShopifyExistingProduct[] = [];
   let pageInfo: string | null = null;
 
@@ -81,6 +86,7 @@ export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[
 
     const data = await response.json();
     for (const p of data.products) {
+      if (costwayIds.has(String(p.id))) continue;
       products.push(mapShopifyProduct(p));
     }
 
@@ -113,6 +119,7 @@ export interface ShopifyVariantPage {
 export async function fetchShopifyVariantsPage(pageInfo: string | null): Promise<ShopifyVariantPage> {
   if (!env.hasShopifyToken) return { variants: [], nextPageInfo: null };
 
+  const costwayIds = await getCostwayShopifyProductIds();
   const params = new URLSearchParams({ limit: "250", fields: "id,variants" });
   if (pageInfo) params.set("page_info", pageInfo);
 
@@ -122,7 +129,9 @@ export async function fetchShopifyVariantsPage(pageInfo: string | null): Promise
   const data = await response.json();
   const variants: ShopifyVariantPageItem[] = (
     data.products as Array<{ id: number; variants: Array<{ id: number; sku: string; price: string }> }>
-  ).flatMap((p) =>
+  )
+    .filter((p) => !costwayIds.has(String(p.id)))
+    .flatMap((p) =>
     p.variants.map((v) => ({
       sku: v.sku,
       price: Number(v.price),
@@ -268,6 +277,9 @@ export async function fetchActiveVariantInventory(): Promise<
 > {
   if (!env.hasShopifyToken) return [];
 
+  // Costway variants are absent from the Aosom feed, so the sweep would read them as "not sellable",
+  // switch tracking on and zero them — the one way these jobs could make a Costway product unsellable.
+  const costwayIds = await getCostwayShopifyProductIds();
   const out: Array<{ sku: string; inventoryQuantity: number; inventoryItemId: string; tracked: boolean }> = [];
   let pageInfo: string | null = null;
 
@@ -282,6 +294,7 @@ export async function fetchActiveVariantInventory(): Promise<
 
     const data = await response.json();
     for (const p of data.products) {
+      if (costwayIds.has(String(p.id))) continue;
       for (const v of (p.variants as Record<string, unknown>[]) || []) {
         const sku = (v.sku as string) || "";
         if (!sku) continue;
@@ -361,9 +374,19 @@ function dedupeVariantOptionLabels<T extends { option1?: string | null; option2?
  * Create a Shopify product with FR primary + EN metafields.
  * Published live ('active') on import. No inventory tracking (dropship).
  */
+export interface CreateProductOptions {
+  /** Default "active" (Aosom imports go live). The Costway pilot creates "draft". */
+  status?: "active" | "draft";
+  /** Replaces the default `merged.images` URL ingest. [] = create without images (uploaded afterwards). */
+  images?: Array<{ src?: string; attachment?: string; filename?: string; alt?: string }>;
+  /** Tags appended to the generated ones (e.g. the neutral supplier-lot tag). */
+  extraTags?: string[];
+}
+
 export async function createShopifyProduct(
   merged: AosomMergedProduct,
-  content: GeneratedContent
+  content: GeneratedContent,
+  opts: CreateProductOptions = {},
 ): Promise<{ id: string; handle: string }> {
   const hasColor = merged.variants.some((v) => v.color);
   const hasSize = merged.variants.some((v) => v.size);
@@ -436,11 +459,11 @@ export async function createShopifyProduct(
       // Once taxonomy tags are tracked (import job / products table), merge them in:
       // tags: [...new Set([...content.tags, ...taxonomyTags])].join(", ").
       // See docs/taxonomy-changelog.md. Non-blocking for the idempotency fix.
-      tags: content.tags.join(", "),
-      status: "active",
+      tags: [...content.tags, ...(opts.extraTags ?? [])].join(", "),
+      status: opts.status ?? "active",
       options,
       variants: builtVariants,
-      images: merged.images.map((src) => ({ src })),
+      images: opts.images ?? merged.images.map((src) => ({ src })),
       metafields: [
         // Native Shopify SEO (store default locale = FR). EN equivalents kept in
         // custom.* for later translation (Translate & Adapt / GraphQL).

@@ -129,7 +129,7 @@ GLOBAL RULES
 PRODUCT TITLE (titleFr / titleEn) — strict pattern:
   [Product type] [distinctive feature] [size/capacity if relevant] — [color if relevant]
   - NEVER include a supplier brand name ANYWHERE in your response: Outsunny, HOMCOM, HomCom, Aosom, Vinsetto, Pawhut,
-    PawHut, Soozier, Qaba, ShopEZ, Wikinger, Portland, Aousthop.
+    PawHut, Soozier, Qaba, ShopEZ, Wikinger, Portland, Aousthop, Costway.
   - Maximum 10 words, strict — truncate if necessary. Product type FIRST (SEO). No brand, no model number.
   - Color, only if relevant, after an em dash "—".
 
@@ -287,7 +287,13 @@ ${correction}` : prompt;
         if (typeof parsed[field] !== "string") throw new Error(`Missing or invalid field: ${field}`);
       }
       if (!Array.isArray(parsed.tags)) throw new Error("Missing or invalid field: tags");
-      parsed.tags = parsed.tags.filter((t: unknown) => typeof t === "string").slice(0, 20);
+      parsed.tags = parsed.tags
+        .filter((t: unknown): t is string => typeof t === "string")
+        // Tags were the one field the brand strip never reached: a "costway" / "outsunny" tag would be
+        // public on the storefront. A tag that IS a brand collapses to "" and is dropped.
+        .map((t: string) => stripSupplierBrands(t).replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .slice(0, 20);
 
       // Programmatic safety net: strip supplier brand names the model may still echo
       // into titles. Runs before length/meta/handle derivation so those stay clean too.

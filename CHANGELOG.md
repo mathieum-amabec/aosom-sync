@@ -2,6 +2,43 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.101.0] - 2026-10-03
+
+**Studio Ameublo: a dashboard section to review mascot test videos** (Mat: "fait une série de vidéo test pour voir la constance… une section dans Aosom-Sync pour voir"). Review only: nothing here is ever published.
+
+### Added
+
+- `/ameublo` (sidebar "Studio Ameublo"): the test videos grouped by series, each one playable. 👍 "Constant" / 👎 "À revoir" per video, an optional comment, and a running count per series. Reviewers are read-only.
+- `GET`/`PATCH /api/ameublo/videos`, and the table `ameublo_test_videos`. Nothing reads this table into `publication_queue`.
+- `scripts/ameublo-test-series.mts`: takes a spread of sequential-ad drafts across campaigns and lays the free "Ameublo présente" overlay on them.
+  - It reads where the ad's copy sits (the darker gradient band) and puts Ameublo in the other half.
+  - It uploads each result to Blob and records it for review. The source drafts are untouched.
+  - Dry-run by default.
+
+### Data
+
+- "Série 1 — constance": 10 test videos across Noël, animaux, automne, enfants and maison. Cost: 0 $ (no AI call).
+
+## [0.5.100.0] - 2026-10-03
+
+**"Ameublo présente": the mascot in our videos, for free** (Mat: "Allons-y avec A"). Opt-in, off by default; no video was rendered or published.
+
+### Added
+
+- `ameublo-sprite.ts`: Ameublo as a parametric SVG. A pose is a few numbers (eyes, mouth, gaze, both arms, hop, squash), so every frame comes from the same vector drawing and he stays on-model with no AI call.
+  - The `ameubloPoseAt` choreography: pops up from below, waves hello, points at a speech bubble with the arm on the bubble's side, then waves goodbye with two hops. He breathes and blinks throughout.
+  - Seasonal accessories by campaign: Quebec tuque (hiver), Santa hat (noël), maple leaf (automne), witch hat (halloween).
+  - Five in-character bubble lines, picked per SKU.
+- `video-engines/ameublo-overlay.ts`: rasterises the frames with sharp and lays them over a clip with ffmpeg, together with the bubble (DM Sans `drawtext`). Placement goes in the half of the frame the ad copy is not in: top corner by default, bottom corner above the brand bar when the copy moved up. Cost per video: 0 $.
+- `render-sequential-ads.mts --ameublo` applies the overlay after the normal render.
+
+## [0.5.99.1] - 2026-10-02
+
+### Fixed
+
+- `render-sequential-ads.mts`: Turso writes and Blob uploads retry on transient network errors (`withRetry`). Every write of the first stale-price re-render failed with "socket hang up": the minutes-long synchronous ffmpeg renders leave the pooled keep-alive sockets to be closed by Turso.
+- Video copy kept dropping French elision apostrophes (`normalizeLine` stripped every `'`), so "L'ENTRAÎNEMENT" was burned in as "LENTRAÎNEMENT". An apostrophe between letters is now kept as a typographic ’ (DM Sans renders it).
+
 ## [0.5.99.0] - 2026-10-02
 
 **Sequential ads never go out with a stale price** (Mat: "Vérif + re-rendu"). The renderer runs on the operator's PC (ffmpeg, music, source clips), so the site can't re-render at approval time on its own. It guards instead.

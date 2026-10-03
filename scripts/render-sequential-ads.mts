@@ -39,7 +39,7 @@
 import path from "path";
 import fs from "fs";
 import { spawn, execFileSync } from "child_process";
-import { createClient } from "@libsql/client";
+import { createClient, type InStatement } from "@libsql/client";
 
 // ── CLI ──────────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -72,6 +72,9 @@ const USE_V2 = argv.includes("--v2");
 // --replace: re-render an existing campaign in place. Without it, a second run cancels the
 // old drafts and books new slots, discarding whatever schedule an operator already chose.
 const REPLACE = argv.includes("--replace");
+// --ameublo: overlay the mascot ("Ameublo présente": pops up, waves, points at a bubble, waves
+// goodbye). Free — drawn from our own SVG, no AI call. Off by default.
+const AMEUBLO = argv.includes("--ameublo");
 // --skus a,b,c: restrict the run to these SKUs (applied AFTER the normal selection,
 // so every quality gate the style enforces still applies — this only narrows).
 // Needed for themed campaigns: the UGC selector returns every SKU that has a clip,
@@ -200,7 +203,7 @@ const BRAND = "ameublo" as const;
 // ── dynamic engine imports (circular-graph safe under tsx) ────────────────
 type Lib = Awaited<ReturnType<typeof loadLib>>;
 async function loadLib() {
-  const [ren, vbt, ic, val, bsk, rbf, dbM, schedM, scene, copyGen] = await Promise.all([
+  const [ren, vbt, ic, val, bsk, rbf, dbM, schedM, scene, copyGen, amO, amS] = await Promise.all([
     import("@/lib/slideshow/render"),
     import("@/lib/video-brand-tokens"),
     import("@/lib/image-composer"),
@@ -211,6 +214,8 @@ async function loadLib() {
     import("@/lib/publication-scheduler"),
     import("@/lib/video-scene-selector"),
     import("@/lib/video-copy-generator"),
+    import("@/lib/video-engines/ameublo-overlay"),
+    import("@/lib/ameublo-sprite"),
   ]);
   rbf.registerBrandFonts();
   return {
@@ -227,15 +232,38 @@ async function loadLib() {
     parseVideoSchedule: schedM.parseVideoSchedule,
     analyzeClip: scene.analyzeClip,
     generateVideoCopy: copyGen.generateVideoCopy,
+    applyAmeubloOverlay: amO.applyAmeubloOverlay,
+    accessoryForCampaign: amS.accessoryForCampaign,
+    bubbleLineFor: amS.bubbleLineFor,
   };
 }
 
 // ── prod Turso (velocity + lifestyle-verified) ───────────────────────────
+/**
+ * Network blips worth one more try. The ffmpeg renders run synchronously for minutes, and the
+ * keep-alive sockets idle in the HTTP pool meanwhile get closed by Turso; the first statement
+ * after a render then fails with "socket hang up" (every write of the 2026-10-02 re-render).
+ */
+const TRANSIENT = /socket hang up|ECONNRESET|ETIMEDOUT|EPIPE|fetch failed|other side closed/i;
+export async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (i >= tries || !TRANSIENT.test(e instanceof Error ? `${e.message} ${(e as { cause?: Error }).cause?.message ?? ""}` : String(e))) throw e;
+      await new Promise((r) => setTimeout(r, 1500 * i));
+    }
+  }
+}
+
 function direct() {
   const url = process.env.TURSO_DATABASE_URL;
   const authToken = process.env.TURSO_AUTH_TOKEN;
   if (!url || !authToken) throw new Error("TURSO_DATABASE_URL / TURSO_AUTH_TOKEN missing (run with --env-file=…/.env.local)");
-  return createClient({ url, authToken });
+  const client = createClient({ url, authToken });
+  return {
+    execute: (stmt: InStatement) => withRetry(() => client.execute(stmt)),
+  };
 }
 const PATIO = `(products.product_type LIKE '%Patio%' OR products.product_type LIKE '%Outdoor%' OR products.product_type LIKE '%Garden%' OR products.product_type LIKE '%Pool%')`;
 
@@ -737,7 +765,7 @@ async function uploadBlob(localFile: string, sku: string): Promise<string> {
   const safeSku = sku.replace(/[^A-Za-z0-9._-]/g, "_");
   const key = `slideshows/sequential-ads/${STYLE}/${CAMPAIGN}/${Date.now()}-${safeSku}.mp4`;
   const buf = await fs.promises.readFile(localFile);
-  const blob = await put(key, buf, { access: "public", contentType: "video/mp4", addRandomSuffix: false, allowOverwrite: true });
+  const blob = await withRetry(() => put(key, buf, { access: "public", contentType: "video/mp4", addRandomSuffix: false, allowOverwrite: true }));
   return blob.url;
 }
 
@@ -798,7 +826,7 @@ async function replaceDraftVideo(id: number, prevPayload: string, caption: strin
 
 /** Insert the draft row for an already-reserved slot + uploaded blob. */
 async function insertDraft(lib: Lib, slot: { contentId: string; sqlite: string; at: number }, caption: string, blobUrl: string, occupied: number[], renderedPrice: number | null): Promise<number> {
-  const queueId = await lib.addToQueue({
+  const queueId = await withRetry(() => lib.addToQueue({
     contentType: "sequential_ad",
     contentId: slot.contentId,
     platform: "both",
@@ -807,7 +835,7 @@ async function insertDraft(lib: Lib, slot: { contentId: string; sqlite: string; 
     status: "draft",
     // renderedPrice: the price burned into the frame, checked at approval and publish time.
     metadata: { style: STYLE_KEY, campaign: CAMPAIGN, renderedPrice },
-  });
+  }));
   occupied.push(slot.at); // so the next draft picks a distinct slot
   return queueId;
 }
@@ -896,6 +924,8 @@ async function main(): Promise<void> {
         // never leaves a blob in the store with no queue row pointing at it.
         const out = path.join(OUT_TMP, `${sku.replace(/[^A-Za-z0-9._-]/g, "_")}.mp4`);
         let images: number | undefined;
+        // Where the copy sits, so Ameublo can take the other half of the frame.
+        let copyZone: "top" | "middle" | "bottom" = "middle";
         if (STYLE === "hero" && !UGC) {
           const imgs = (p?.images || []).filter(lib.isShopifyCdnUrl);
           images = imgs.length;
@@ -924,8 +954,23 @@ async function main(): Promise<void> {
             }
           }
           if (!APPLY) { report.push({ sku, title, status: "dry-run" }); continue; }
+          copyZone = zone;
           if (USE_V2) renderDemandGen(sku, out, msgs, segment);
           else await renderAdV3(sku, out, msgs, lib, segment, zone, (p?.product_type ?? null) as string | null);
+        }
+        if (AMEUBLO) {
+          // The copy band is at the bottom unless the product sits low (then it moves to the
+          // top): Ameublo stands in the half the copy is not in.
+          const withMascot = out.replace(/.mp4$/, ".ameublo.mp4");
+          await lib.applyAmeubloOverlay(out, withMascot, {
+            ffmpegBin: FFMPEG,
+            fontFile: FONT,
+            bubbleText: lib.bubbleLineFor(sku),
+            accessory: lib.accessoryForCampaign(CAMPAIGN),
+            vertical: copyZone === "bottom" ? "bottom" : "top",
+            bottomMargin: BAR_H,
+          });
+          fs.renameSync(withMascot, out);
         }
         if (OUT_DIR) {
           fs.mkdirSync(OUT_DIR, { recursive: true });
