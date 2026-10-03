@@ -678,6 +678,13 @@ async function _initSchemaImpl(): Promise<void> {
       payload TEXT NOT NULL,
       created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
     )`,
+    // Storefront assistant first-question answers (chips + identical opening questions), 1 h TTL.
+    // See src/lib/assistant-answer-cache.ts.
+    `CREATE TABLE IF NOT EXISTS assistant_answer_cache (
+      cache_key TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    )`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];

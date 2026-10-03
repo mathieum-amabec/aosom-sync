@@ -31,6 +31,7 @@ import {
   getCachedComplementary,
   putCachedComplementary,
 } from "@/lib/assistant-complementary-cache";
+import { answerCacheKey, getCachedAnswer, putCachedAnswer } from "@/lib/assistant-answer-cache";
 
 /**
  * POST /api/assistant — PUBLIC storefront shopping assistant. No auth (called from the
@@ -266,7 +267,28 @@ export async function POST(request: Request): Promise<Response> {
       console.warn("[assistant] guard check failed — allowing:", err instanceof Error ? err.message : err);
     }
 
-    const { meta, ...result } = await runAssistant({ message, history, locale });
+    // First question of a conversation (quick-question chips, identical openers): serve the
+    // answer computed in the last hour instead of re-running the tool loop. 0 tokens, instant.
+    // Still counts as a message for the hourly quota and the visitor's daily usage.
+    const answerKey = history.length === 0 ? answerCacheKey(message, locale) : null;
+    if (answerKey) {
+      const cached = await getCachedAnswer(answerKey).catch(() => null);
+      if (cached) {
+        try { await addAssistantIpUsage(ipHash, { messages: 1 }); } catch { /* best-effort */ }
+        if (used >= 0) {
+          try { await recordAssistantRequest(ip); } catch { /* best-effort */ }
+        }
+        return json({ success: true, data: cached });
+      }
+    }
+
+    const full = await runAssistant({ message, history, locale });
+    const { meta, ...result } = full;
+    if (answerKey) {
+      await putCachedAnswer(answerKey, full).catch((e) =>
+        console.warn("[assistant] answer cache write failed:", e instanceof Error ? e.message : e),
+      );
+    }
 
     // Charge the answer to the visitor: tokens (daily cap) + the model's own verdict.
     try {

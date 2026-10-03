@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.97.0] - 2026-10-02
+
+Ameublo spends fewer tokens for the same answers, and its limit messages speak in its own voice.
+
+### Changed
+
+- **First-question answer cache** (`assistant-answer-cache.ts`, table `assistant_answer_cache`, 1 h TTL): the quick-question chips and any identical opening question (no history) are served from the answer computed in the last hour, at 0 tokens and instantly. It still counts as a message for the hourly quota and the visitor's day. Flagged, empty or "no match" answers are never replayed.
+- **Leaner context re-sent on every step**:
+  - system prompt condensed from 9.1k to 4.9k characters, same rules;
+  - search rows carry the leaf category, a capped name, and colour/stock only when informative (`compactRow`);
+  - product descriptions are cut to 900 chars, spec lines first (`specFirst`).
+- Measured on the same questions as earlier that day:
+  - delivery 6.2k → 4.3k tokens;
+  - coffee table 16k → 11k;
+  - living room in a budget 13–29k → 10.9k;
+  - returns ~4.7k → 4.4k.
+- **Limit messages in Ameublo's voice**: light, a little funny, still professional ("Ouf, ça fait beaucoup de questions d'affilée ! Laissez-moi regonfler mes coussins…", "Je fais une petite sieste dans mon coin 💤…"). The abuse block stays neutral. Every hand-off now also gives the store phone (`contactPhone`, `ASSISTANT_CONTACT_PHONE`, default 514-292-7788).
+
 ## [0.5.96.2] - 2026-10-02
 
 Investigated "I queued a never-imported product but it's still showing Not imported on the
