@@ -9,9 +9,9 @@
  * approve route, so a bad generation can never reach the public profile unattended.
  */
 import { getAnthropicClient } from "./content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { stripSupplierBrands } from "@/lib/catalog-guard";
 import { budgetedCreate } from "@/lib/llm-budget";
-import { CLAUDE } from "./config";
 import {
   getGbpTrendCandidates,
   getRecentGbpCategories,
@@ -95,7 +95,7 @@ export async function judgeGbpPost(
 ): Promise<GbpJudgeVerdict> {
   const client = getAnthropicClient();
   const message = await budgetedCreate(client, {
-    model: CLAUDE.MODEL_BATCH,
+    model: llmModel("lite"),
     max_tokens: 300,
     system: JUDGE_SYSTEM_PROMPT,
     messages: [{ role: "user", content: buildJudgeUserPrompt(postText, product, title) }],
@@ -153,7 +153,7 @@ export async function generateWeeklyGbpPost(): Promise<GeneratedGbpPost | null> 
 
   const client = getAnthropicClient();
   const message = await budgetedCreate(client, {
-    model: CLAUDE.MODEL_BATCH,
+    model: llmModel("lite"),
     max_tokens: 500,
     system: POST_SYSTEM_PROMPT,
     messages: [{ role: "user", content: buildPostUserPrompt(product, title) }],
@@ -189,7 +189,12 @@ export async function generateWeeklyGbpPost(): Promise<GeneratedGbpPost | null> 
     throw err;
   }
 
-  const status = verdict.score < 60 ? "rejected" : "pending_review";
+  // Deterministic claims the judge cannot be trusted to catch (all three models scored such posts
+  // inconsistently in the 2026-10 test): Ameublo Direct is an ONLINE store — a post inviting people
+  // to a "boutique" / "magasin" or fabricating urgency is wrong whatever the judge says.
+  const falseClaim = findGbpFalseClaim(summary);
+  const status = verdict.score < 60 || falseClaim ? "rejected" : "pending_review";
+  if (falseClaim) verdict = { ...verdict, reasons: `${verdict.reasons} [auto-rejeté : ${falseClaim}]`.trim() };
   const postId = await createGbpPost({
     sku: product.sku,
     productType: product.product_type,
@@ -205,4 +210,13 @@ export async function generateWeeklyGbpPost(): Promise<GeneratedGbpPost | null> 
   });
 
   return { postId, sku: product.sku, summary, judgeScore: verdict.score, ctaUrl, imageUrl: product.image1 || undefined };
+}
+
+/** Online-only store: no physical-shop wording, and no invented urgency or scarcity. */
+const GBP_FALSE_CLAIM_RE =
+  /(?<!\p{L})(?:boutique|magasin|venez nous (?:voir|visiter|rendre visite)|visitez[- ]nous|dernière chance|stock limité|quantités? limitées?|avant qu['’]il (?:ne )?(?:soit|n['’]en reste))(?!\p{L})/iu;
+
+/** The offending phrase, or null when the post makes no false store/urgency claim. */
+export function findGbpFalseClaim(text: string): string | null {
+  return text.match(GBP_FALSE_CLAIM_RE)?.[0] ?? null;
 }

@@ -249,6 +249,7 @@ async function geminiCreate(
 ): Promise<Anthropic.Messages.Message> {
   // Dynamic import: gemini-client imports assertLlmBudget from this module (static cycle otherwise).
   const { geminiGenerate } = await import("@/lib/gemini-client");
+  const thinkingLevel = geminiThinkingLevel(params.model);
   const result = await geminiGenerate(
     {
       model: params.model,
@@ -257,8 +258,13 @@ async function geminiCreate(
         role: m.role === "assistant" ? ("model" as const) : ("user" as const),
         parts: toGeminiParts(m.content),
       })),
-      maxOutputTokens: params.max_tokens,
-      thinkingLevel: geminiThinkingLevel(params.model),
+      // Gemini's thought tokens are drawn from the SAME budget as the visible answer. A caller that
+      // sized max_tokens for the answer alone (200-500 for a caption, a verdict, a classification)
+      // would get it cut mid-sentence once the model thinks — seen live on gemini-3.8-flash with
+      // thinking "low" (a Reel caption ending "…ce camion à péd", a vision JSON cut mid-object).
+      // So headroom is added on top; the answer's own length is still bounded by the prompt.
+      maxOutputTokens: params.max_tokens + geminiThoughtHeadroom(thinkingLevel),
+      thinkingLevel,
     },
     pool,
   );
@@ -275,4 +281,9 @@ async function geminiCreate(
       output_tokens: (result.usage?.candidatesTokenCount ?? 0) + (result.usage?.thoughtsTokenCount ?? 0),
     },
   } as Anthropic.Messages.Message;
+}
+
+/** Extra output tokens to reserve for Gemini's thinking (0 when thinking is "minimal"). */
+export function geminiThoughtHeadroom(level: "minimal" | "low" | "medium" | "high"): number {
+  return { minimal: 0, low: 2500, medium: 6000, high: 12000 }[level];
 }

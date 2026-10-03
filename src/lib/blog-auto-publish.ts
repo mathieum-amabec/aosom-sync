@@ -4,8 +4,9 @@
  * Kept out of the route handler so the decision logic is unit-testable in isolation.
  */
 import { getAnthropicClient } from "./content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
-import { CLAUDE, BLOG } from "./config";
+import { BLOG } from "./config";
 import { isSeasonActive, isoWeekKey, type Season } from "./blog-topics";
 import {
   getSetting,
@@ -54,7 +55,7 @@ ${article.bodyHtml}
 export async function scoreArticle(article: ScorableArticle, lang: BlogLang): Promise<ArticleScore> {
   const client = getAnthropicClient();
   const message = await budgetedCreate(client, {
-    model: CLAUDE.MODEL_BATCH,
+    model: llmModel("strong"),
     max_tokens: 300,
     system: JUDGE_SYSTEM_PROMPT,
     messages: [{ role: "user", content: buildJudgePrompt(article, lang) }],

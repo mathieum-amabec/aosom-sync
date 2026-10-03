@@ -17,6 +17,7 @@
  * the failure this module exists to prevent.
  */
 import { getAnthropicClient } from "@/lib/content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "@/lib/strip-markdown";
 
@@ -107,7 +108,12 @@ function userPrompt(p: CopyProduct): string {
 /** Uppercase, strip markdown/quotes/emoji, collapse spaces, drop trailing punctuation. */
 export function normalizeLine(s: string): string {
   return cleanSocialCaption(String(s ?? ""))
-    .replace(/["'“”«»]/g, "")
+    .replace(/["“”«»]/g, "")
+    // Keep an apostrophe INSIDE a word ("s'ennuie", "aujourd'hui"): the old blanket strip printed
+    // "SENNUIE" / "AUJOURDHUI" on screen. Only quote marks around a word are removed. The renderer
+    // passes lines through drawtext `textfile=`, so a bare apostrophe is safe there.
+    .replace(/[‘’]/g, "'")
+    .replace(/(^|\s)'+|'+(?=\s|$)/g, "$1")
     .replace(/[\p{Extended_Pictographic}]/gu, "")
     .replace(/\s+/g, " ")
     .replace(/[.!?;:,]+$/, "")
@@ -197,7 +203,7 @@ export async function generateVideoCopy(
 ): Promise<VideoCopy> {
   const angle = CAMPAIGN_ANGLE[campaign] ?? NEUTRAL_ANGLE;
   const used = (opts.usedHooks ?? []).map((h) => normalizeLine(h));
-  const model = opts.model ?? "claude-haiku-4-5";
+  const model = opts.model ?? llmModel("strong");
   const complete = opts.complete ?? ((s: string, u: string) => defaultComplete(s, u, model));
 
   for (let attempt = 0; attempt < 2; attempt++) {

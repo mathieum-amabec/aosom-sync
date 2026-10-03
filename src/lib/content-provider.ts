@@ -16,20 +16,22 @@
  * apply. Basis: the 2026-10 A/B (30 products) — Gemini ~3x cheaper and ~3x faster with
  * equal-or-better copy on a blind read.
  */
+import { isGeminiEnabled, GEMINI_LITE_MODEL, GEMINI_STRONG_MODEL } from "./llm-models";
+
 export type ContentProvider = "anthropic" | "gemini";
 
 export function getContentProvider(): ContentProvider {
   const explicit = process.env.CONTENT_PROVIDER?.trim().toLowerCase();
   if (explicit === "anthropic" || explicit === "gemini") return explicit;
-  return process.env.GEMINI_API_KEY ? "gemini" : "anthropic";
+  return isGeminiEnabled() ? "gemini" : "anthropic";
 }
 
 /** Gemini model used for the first draft when the provider is gemini (override: GEMINI_CONTENT_MODEL). */
 export function getContentGeminiModel(): string {
-  return process.env.GEMINI_CONTENT_MODEL?.trim() || "gemini-3.5-flash-lite";
+  return process.env.GEMINI_CONTENT_MODEL?.trim() || GEMINI_LITE_MODEL;
 }
 
 /** Stronger Gemini behind the first tier, used only when its output fails validation (override: GEMINI_CONTENT_STRONG_MODEL). */
 export function getContentGeminiStrongModel(): string {
-  return process.env.GEMINI_CONTENT_STRONG_MODEL?.trim() || "gemini-3.8-flash";
+  return process.env.GEMINI_CONTENT_STRONG_MODEL?.trim() || GEMINI_STRONG_MODEL;
 }

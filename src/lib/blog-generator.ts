@@ -16,6 +16,7 @@
  */
 
 import { getAnthropicClient } from "./content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { CLAUDE } from "./config";
 import { searchImages, triggerDownload, type UnsplashImage } from "./unsplash";
@@ -66,7 +67,7 @@ interface ClaudeArticleJson {
  * is stated correctly first and the prohibition repeated as a rule — the model cannot avoid
  * a name it has been handed as its own employer.
  */
-const SYSTEM_PROMPT_BASE = `You are a bilingual e-commerce blog writer for Ameublo Direct (French) / Furnish Direct (English), a Quebec-based retailer of outdoor furniture, gazebos, garden beds, greenhouses, and home goods.
+const SYSTEM_PROMPT_BASE = `You are a bilingual e-commerce blog writer for Ameublo Direct (French) / Furnish Direct (English), a Quebec-based retailer of furniture and home goods, indoor AND outdoor: living room, bedroom, office, kids, pets, patio and garden. Write about the topic you are given and stay on it — never steer an indoor or lifestyle topic toward patio or garden furniture.
 
 Rules:
 - Output ONE JSON object — no markdown fences, no commentary.
@@ -109,17 +110,62 @@ Return JSON with this exact shape:
 }`;
 }
 
+/** Anything outside Latin script (Cyrillic, CJK, Arabic, Hebrew, Indic, Thai…) is a model glitch in a FR/EN article. */
+const FOREIGN_SCRIPT_RE = /[Ѐ-ԯ֐-ۿऀ-෿฀-๿぀-ヿ㐀-鿿가-힯]/;
+/** Below this the article is "thin" (Flash-Lite averaged ~477 words against a 700-900 target). */
+export const MIN_ARTICLE_WORDS = 550;
+
+function wordCount(html: string): number {
+  return html.replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * Deterministic quality gate for a generated article. `hard` problems (a foreign-script character
+ * such as "гарonie" inside a French word) must never be published; `soft` ones (too short) are
+ * worth one corrective retry but not a refusal.
+ */
+export function articleProblems(a: { title: string; bodyHtml: string }): { hard: string[]; soft: string[] } {
+  const hard: string[] = [];
+  const soft: string[] = [];
+  if (FOREIGN_SCRIPT_RE.test(a.title + " " + a.bodyHtml)) hard.push("contains characters outside the Latin alphabet (garbled text)");
+  const words = wordCount(a.bodyHtml);
+  if (words < MIN_ARTICLE_WORDS) soft.push(`only ${words} words in bodyHtml (the brief is 700-900)`);
+  return { hard, soft };
+}
+
 export async function generateArticleJson(input: GenerateBlogInput): Promise<ClaudeArticleJson> {
+  // One corrective retry, same model: a garbled or thin first draft is cheap to redo, and the
+  // retry names exactly what was wrong. A hard problem that survives the retry is thrown (the
+  // cron leaves the article unpublished); a still-short article is kept and logged.
+  let correction: string | undefined;
+  for (let attempt = 0; ; attempt++) {
+    const article = await requestArticleJson(input, correction);
+    const { hard, soft } = articleProblems(article);
+    if (!hard.length && !soft.length) return article;
+    if (attempt >= 1) {
+      if (hard.length) throw new Error(`Generated article rejected: ${hard.join("; ")}`);
+      console.warn(`[blog] article still short after the corrective retry: ${soft.join("; ")}`);
+      return article;
+    }
+    console.warn(`[blog] article needs a fix (${[...hard, ...soft].join("; ")}) — one corrective retry`);
+    correction =
+      `Your previous answer had these problems: ${[...hard, ...soft].join("; ")}. ` +
+      `Write the article again from scratch as ONE JSON object: 700-900 words in bodyHtml, ` +
+      `only Latin-alphabet text, every word spelled correctly.`;
+  }
+}
+
+async function requestArticleJson(input: GenerateBlogInput, correction?: string): Promise<ClaudeArticleJson> {
   const client = getAnthropicClient();
   // Blog generation used to call client.messages.create() directly, which meant it was
   // neither gated by the daily spend cap nor recorded in daily_llm_budget — a hole in the
   // CSO guardrail that also made every consumption report undercount. Route it through
   // budgetedCreate like every other caller (default pool: "batch").
   const message = await budgetedCreate(client, {
-    model: CLAUDE.MODEL_BATCH,
+    model: llmModel("strong"),
     max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
     system: SYSTEM_PROMPT_BASE,
-    messages: [{ role: "user", content: buildUserPrompt(input) }],
+    messages: [{ role: "user", content: correction ? `${buildUserPrompt(input)}\n\n${correction}` : buildUserPrompt(input) }],
   });
 
   if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {

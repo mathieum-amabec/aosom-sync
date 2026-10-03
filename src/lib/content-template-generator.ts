@@ -30,6 +30,7 @@ import {
 } from "@/lib/database";
 import { mapProductTypeToScope } from "@/lib/hook-selector";
 import { getAnthropicClient } from "@/lib/content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "@/lib/strip-markdown";
 import { searchImages, triggerDownload } from "@/lib/unsplash";
@@ -180,7 +181,7 @@ async function generatePostText(prompt: string, isEn: boolean): Promise<string> 
   const client = getAnthropicClient();
   const message = await budgetedCreate(client,
     {
-      model: CLAUDE.MODEL_BATCH,
+      model: llmModel("lite"),
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       system: isEn ? SYSTEM_STYLE_EN : SYSTEM_STYLE_FR,
       messages: [{ role: "user", content: prompt }],

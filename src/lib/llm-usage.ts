@@ -16,7 +16,8 @@
  * Every figure this module produces is an ESTIMATE and must be labelled as such in the UI.
  * The Anthropic console is the only source that knows the real split.
  */
-import { CLAUDE, GEMINI } from "./config";
+import { GEMINI } from "./config";
+import { llmModel } from "./llm-models";
 import type { LlmBudgetPool } from "./database";
 
 /** USD per million tokens, per model. Mirrors Anthropic's public list price. */
@@ -26,6 +27,8 @@ export const MODEL_PRICING: Record<string, { inputPerMTok: number; outputPerMTok
   "claude-opus-4-8": { inputPerMTok: 5, outputPerMTok: 25 },
   // Google list price, ai.google.dev/gemini-api/docs/pricing (checked 2026-10-02).
   "gemini-3.5-flash-lite": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
+  // gemini-3.8-flash: $0.75/$3.75 through 2026-12-31, then $1.50/$7.50 — bump this on 2027-01-01.
+  "gemini-3.8-flash": { inputPerMTok: 0.75, outputPerMTok: 3.75 },
 };
 
 /** Fallback when a pool runs a model absent from MODEL_PRICING — priced as Sonnet 4.6 so
@@ -62,7 +65,9 @@ export const ASSUMED_INPUT_SHARE: Record<LlmBudgetPool, number> = {
 export function poolModel(pool: LlmBudgetPool): string {
   if (pool === "assistant") return GEMINI.MODEL_ASSISTANT;
   if (pool === "video") return GEMINI.MODEL_VIDEO_QC;
-  return CLAUDE.MODEL_BATCH;
+  // batch / maintenance: Gemini Flash-Lite carries most of the volume (captions, vision, product
+  // copy first tier); the long-form tier (3.8 Flash) is a minority, so this slightly under-prices.
+  return llmModel("lite");
 }
 
 /**

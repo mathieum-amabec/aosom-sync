@@ -22,6 +22,11 @@ describe("normalizeLine", () => {
     expect(normalizeLine('  "ton bureau déborde" 🎃 ')).toBe("TON BUREAU DÉBORDE");
     expect(normalizeLine("plus de place !")).toBe("PLUS DE PLACE");
   });
+  it("keeps an apostrophe inside a word but drops quote marks around words", () => {
+    expect(normalizeLine("ton bureau s'ennuie")).toBe("TON BUREAU S'ENNUIE");
+    expect(normalizeLine("c’est aujourd’hui")).toBe("C'EST AUJOURD'HUI");
+    expect(normalizeLine("'bonjour' l'ami")).toBe("BONJOUR L'AMI");
+  });
   it("keeps accents — this is French copy", () => {
     expect(normalizeLine("étagères réversibles")).toBe("ÉTAGÈRES RÉVERSIBLES");
   });

@@ -23,6 +23,7 @@
  * it instead of Mat re-reading every word.
  */
 import { getAnthropicClient, slugify } from "./content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { stripSupplierBrands } from "@/lib/catalog-guard";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { CLAUDE, BLOG } from "./config";
@@ -254,7 +255,7 @@ function parseGuideCopyResponse(text: string, label: string): GuideCopy {
 export async function generateGuideCopy(
   stats: SubcategoryTrendStats,
   titles: string[],
-  model: string = CLAUDE.MODEL_BATCH,
+  model: string = llmModel("strong"),
 ): Promise<GuideCopy> {
   const client = getAnthropicClient();
   const message = await budgetedCreate(client, {
@@ -309,7 +310,7 @@ export async function regenerateGuideCopyWithFeedback(
   original: GuideCopy,
   qualityReasons: string,
   factCheckReasons: string | undefined,
-  model: string = CLAUDE.MODEL_BATCH,
+  model: string = llmModel("strong"),
 ): Promise<GuideCopy> {
   const client = getAnthropicClient();
   const message = await budgetedCreate(client, {

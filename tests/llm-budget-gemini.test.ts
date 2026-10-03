@@ -60,7 +60,7 @@ describe("budgetedCreate with a gemini model", () => {
     expect(anthropicCreate).not.toHaveBeenCalled();
     const [params, pool] = geminiGenerate.mock.calls[0];
     expect(pool).toBe("maintenance");
-    expect(params).toMatchObject({ model: "gemini-3.5-flash-lite", systemInstruction: "SYS", maxOutputTokens: 400, thinkingLevel: "minimal" });
+    expect(params).toMatchObject({ model: "gemini-3.5-flash-lite", systemInstruction: "SYS", maxOutputTokens: 400, thinkingLevel: "minimal" }); // minimal thinking: no headroom
     expect(params.contents).toEqual([
       { role: "user", parts: [{ inlineData: { mimeType: "image/jpeg", data: "QUJD" } }, { text: "Classifie." }] },
       { role: "model", parts: [{ text: "ok" }] },
@@ -130,5 +130,15 @@ describe("Gemini thinking level is chosen per model", () => {
     expect(await level("gemini-3.8-flash")).toBe("high");
     process.env.GEMINI_THINKING_LEVEL = "minimal";
     expect(await level("gemini-3.8-flash")).toBe("low");
+  });
+});
+
+describe("thought-token headroom", () => {
+  it("adds headroom on top of max_tokens when the model thinks, none for minimal", async () => {
+    geminiGenerate.mockResolvedValue({ text: "x", finishReason: "STOP", content: null, functionCalls: [], usage: null });
+    await budgetedCreate(client, { model: "gemini-3.8-flash", max_tokens: 400, messages: [{ role: "user", content: "hi" }] });
+    expect(geminiGenerate.mock.calls.at(-1)![0].maxOutputTokens).toBe(2900); // 400 + 2500 (thinking low)
+    await budgetedCreate(client, { model: "gemini-3.5-flash-lite", max_tokens: 400, messages: [{ role: "user", content: "hi" }] });
+    expect(geminiGenerate.mock.calls.at(-1)![0].maxOutputTokens).toBe(400);
   });
 });

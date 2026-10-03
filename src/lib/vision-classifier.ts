@@ -14,8 +14,9 @@
  * widened 2026-10-01 to also catch textless zoom-medallion overlays (see CHANGELOG).
  */
 import { getAnthropicClient } from "./content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
-import { CLAUDE, env } from "./config";
+import { env } from "./config";
 
 export interface ImageClassification {
   /** true = clean primary image (no marketing text overlay). */
@@ -136,7 +137,7 @@ export async function classifyProductImage(
   const client = getAnthropicClient();
 
   const request = {
-    model: CLAUDE.MODEL_BATCH,
+    model: llmModel("lite"),
     // 200 truncated the JSON mid-object on verbose verdicts (the model listed every measured
     // dimension it found), which threw as "invalid JSON" and cost the product its audit.
     // Measured on a 1,730-product pass: 2 losses at 200, none at 400.
