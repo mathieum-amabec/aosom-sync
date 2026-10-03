@@ -667,7 +667,12 @@ async function _initSchemaImpl(): Promise<void> {
       updated_at INTEGER,
       removed_at INTEGER,
       shopify_product_id TEXT,
-      internal_sku TEXT
+      internal_sku TEXT,
+      imported_at INTEGER,
+      shopify_handle TEXT,
+      import_batch TEXT,
+      sell_price REAL,
+      import_status TEXT
     )`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_item_no ON costway_products(item_no)`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_top_category ON costway_products(top_category)`,
@@ -802,6 +807,25 @@ async function _initSchemaImpl(): Promise<void> {
       sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_costway_products_internal_sku ON costway_products(internal_sku) WHERE internal_sku IS NOT NULL`,
       args: [],
     },
+  ]);
+
+  // Import tracking (Mat, 2026-10-03: "une façon de bien les différencier dans aosom-sync pour faire
+  // un suivi"). Written by src/lib/costway/importer.ts when a variant is imported to Shopify:
+  //   imported_at     unix seconds of the Shopify product creation
+  //   shopify_handle  our public handle for it (never the supplier's)
+  //   import_batch    the batch label ("pilot-1"…) so a lot can be reviewed / rolled back together
+  //   sell_price      the price we put on Shopify (CSV price, minus the Drop-Price adjustment)
+  //   import_status   'draft' | 'active' | 'archived' — mirrors the Shopify product status
+  // All NULL until imported; nothing in the Aosom pipeline reads them.
+  for (const col of [["imported_at", "INTEGER"], ["shopify_handle", "TEXT"], ["import_batch", "TEXT"], ["sell_price", "REAL"], ["import_status", "TEXT"]] as const) {
+    if (!cwCols.has(col[0])) {
+      await runBatch(`costway_products add ${col[0]}`, [
+        { sql: `ALTER TABLE costway_products ADD COLUMN ${col[0]} ${col[1]}`, args: [] },
+      ]);
+    }
+  }
+  await runBatch("costway_products import_batch index", [
+    { sql: `CREATE INDEX IF NOT EXISTS idx_costway_products_import_batch ON costway_products(import_batch)`, args: [] },
   ]);
 
   // `claimed_at`: when claimQueueItem flipped this row to 'publishing' (unix seconds).
