@@ -29,6 +29,7 @@ export const SUPPLIER_BRANDS = [
   "Portland",
   "Aousthop",
   "DuraHand",
+  "Costway",
 ];
 
 const SUPPLIER_BRAND_ALT = SUPPLIER_BRANDS.join("|");

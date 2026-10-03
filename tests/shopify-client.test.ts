@@ -14,10 +14,15 @@ vi.mock("@/lib/config", () => ({
 // createShopifyProduct's LAYER 1 correction logs a price_floor_incident on a genuine
 // below-floor mismatch — avoid hitting a real DB from this API-client test file.
 const mockRecordPriceFloorIncident = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-vi.mock("@/lib/database", () => ({ recordPriceFloorIncident: mockRecordPriceFloorIncident }));
+// Costway product ids that the whole-catalogue sweeps must skip (see getCostwayShopifyProductIds).
+const mockCostwayIds = vi.hoisted(() => vi.fn().mockResolvedValue(new Set<string>()));
+vi.mock("@/lib/database", () => ({
+  recordPriceFloorIncident: mockRecordPriceFloorIncident,
+  getCostwayShopifyProductIds: mockCostwayIds,
+}));
 
 // Import after mocks
-const { updateShopifyVariantPrice, createShopifyProduct, fetchShopifyVariantsPage, attachVariantImages, registerOptionEnTranslations } = await import("@/lib/shopify-client");
+const { updateShopifyVariantPrice, createShopifyProduct, fetchShopifyVariantsPage, fetchAllShopifyProducts, attachVariantImages, registerOptionEnTranslations } = await import("@/lib/shopify-client");
 
 import type { AosomMergedProduct } from "@/types/aosom";
 import type { GeneratedContent } from "@/lib/content-generator";
@@ -283,6 +288,40 @@ describe("fetchShopifyVariantsPage — one-page fetch for the reconcile rotation
   it("throws on a non-ok response instead of returning a silently empty page", async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500 });
     await expect(fetchShopifyVariantsPage(null)).rejects.toThrow(/Shopify fetch failed: 500/);
+  });
+});
+
+describe("Costway isolation — whole-catalogue sweeps skip Costway products", () => {
+  beforeEach(() => { mockFetch.mockReset(); mockCostwayIds.mockReset(); });
+
+  const page = (products: unknown[]) => ({ ok: true, headers: { get: () => null }, json: async () => ({ products }) });
+
+  it("fetchAllShopifyProducts drops products whose id is a Costway product", async () => {
+    mockCostwayIds.mockResolvedValue(new Set(["2"]));
+    mockFetch.mockResolvedValue(page([
+      { id: 1, title: "Aosom A", variants: [], images: [] },
+      { id: 2, title: "Costway B", variants: [], images: [] },
+    ]));
+    const out = await fetchAllShopifyProducts();
+    expect(out.map((p) => p.shopifyId)).toEqual(["1"]);
+  });
+
+  it("fetchShopifyVariantsPage drops the variants of a Costway product", async () => {
+    mockCostwayIds.mockResolvedValue(new Set(["2"]));
+    mockFetch.mockResolvedValue(page([
+      { id: 1, variants: [{ id: 10, sku: "A", price: "9.99" }] },
+      { id: 2, variants: [{ id: 20, sku: "CW_1", price: "5.00" }] },
+    ]));
+    const res = await fetchShopifyVariantsPage(null);
+    expect(res.variants.map((v) => v.sku)).toEqual(["A"]);
+  });
+
+  it("fails CLOSED: a lookup error aborts the sweep instead of returning Costway products", async () => {
+    mockCostwayIds.mockRejectedValue(new Error("turso down"));
+    mockFetch.mockResolvedValue(page([{ id: 2, title: "x", variants: [], images: [] }]));
+    await expect(fetchAllShopifyProducts()).rejects.toThrow("turso down");
+    await expect(fetchShopifyVariantsPage(null)).rejects.toThrow("turso down");
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
 

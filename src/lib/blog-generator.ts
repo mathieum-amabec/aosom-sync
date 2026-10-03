@@ -78,7 +78,7 @@ Rules:
 - tags is an array of 4-8 short topic tags (lowercase, no leading #).
 - Do NOT mention pricing, shipping, or product SKUs (those change).
 - Do NOT invent specific product names, model numbers, or claims you cannot back up.
-- NEVER mention Aosom, HOMCOM, Outsunny, PawHut, Vinsetto, Qaba, Soozier, or any other supplier or manufacturer name. These are our suppliers, not our brand, and must never appear in customer-facing text.
+- NEVER mention Aosom, HOMCOM, Outsunny, PawHut, Vinsetto, Qaba, Soozier, Costway, or any other supplier or manufacturer name. These are our suppliers, not our brand, and must never appear in customer-facing text.
 - NEVER mention aosom-sync, or any internal tool, repository, or system name, anywhere — including URLs, UTM parameters, tags, and metadata.
 - When you need to name the store, write "Ameublo Direct" in French and "Furnish Direct" in English. Never any other name.`;
 

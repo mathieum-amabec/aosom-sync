@@ -665,7 +665,14 @@ async function _initSchemaImpl(): Promise<void> {
       content_hash TEXT NOT NULL,
       first_seen_at INTEGER DEFAULT (strftime('%s','now')),
       updated_at INTEGER,
-      removed_at INTEGER
+      removed_at INTEGER,
+      shopify_product_id TEXT,
+      internal_sku TEXT,
+      imported_at INTEGER,
+      shopify_handle TEXT,
+      import_batch TEXT,
+      sell_price REAL,
+      import_status TEXT
     )`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_item_no ON costway_products(item_no)`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_top_category ON costway_products(top_category)`,
@@ -781,6 +788,59 @@ async function _initSchemaImpl(): Promise<void> {
       { sql: `ALTER TABLE publication_queue ADD COLUMN metadata TEXT`, args: [] },
     ]);
   }
+
+  // costway_products.shopify_product_id: the Shopify product a Costway variant was imported as.
+  // NULL everywhere today (nothing is imported yet). The Aosom jobs that sweep every Shopify
+  // product (fetchAllShopifyProducts, fetchActiveVariantInventory, fetchShopifyVariantsPage) use
+  // it to skip Costway products — see getCostwayShopifyProductIds. The index is created HERE,
+  // after the guarded ALTER, because on an existing DB the column does not exist yet when the
+  // CREATE TABLE batch above runs.
+  const cwInfo = await db.execute(`PRAGMA table_info(costway_products)`);
+  const cwCols = new Set(cwInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!cwCols.has("shopify_product_id")) {
+    await runBatch("costway_products add shopify_product_id", [
+      { sql: `ALTER TABLE costway_products ADD COLUMN shopify_product_id TEXT`, args: [] },
+    ]);
+  }
+  await runBatch("costway_products shopify_product_id index", [
+    { sql: `CREATE INDEX IF NOT EXISTS idx_costway_products_shopify_id ON costway_products(shopify_product_id)`, args: [] },
+  ]);
+
+  // costway_products.internal_sku: the opaque Ameublo SKU a Costway variant is sold under. The
+  // supplier SKU ("02956471_CB10061BK") and its numeric item number must never reach Shopify, a
+  // feed or an ad — see src/lib/costway/identity.ts. Assigned lazily at import time (not for all
+  // ~22k rows), so it is NULL until a variant is imported. UNIQUE (partial: NULLs allowed) so two
+  // variants can never share one, whatever race produced them.
+  if (!cwCols.has("internal_sku")) {
+    await runBatch("costway_products add internal_sku", [
+      { sql: `ALTER TABLE costway_products ADD COLUMN internal_sku TEXT`, args: [] },
+    ]);
+  }
+  await runBatch("costway_products internal_sku unique index", [
+    {
+      sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_costway_products_internal_sku ON costway_products(internal_sku) WHERE internal_sku IS NOT NULL`,
+      args: [],
+    },
+  ]);
+
+  // Import tracking (Mat, 2026-10-03: "une façon de bien les différencier dans aosom-sync pour faire
+  // un suivi"). Written by src/lib/costway/importer.ts when a variant is imported to Shopify:
+  //   imported_at     unix seconds of the Shopify product creation
+  //   shopify_handle  our public handle for it (never the supplier's)
+  //   import_batch    the batch label ("pilot-1"…) so a lot can be reviewed / rolled back together
+  //   sell_price      the price we put on Shopify (CSV price, minus the Drop-Price adjustment)
+  //   import_status   'draft' | 'active' | 'archived' — mirrors the Shopify product status
+  // All NULL until imported; nothing in the Aosom pipeline reads them.
+  for (const col of [["imported_at", "INTEGER"], ["shopify_handle", "TEXT"], ["import_batch", "TEXT"], ["sell_price", "REAL"], ["import_status", "TEXT"]] as const) {
+    if (!cwCols.has(col[0])) {
+      await runBatch(`costway_products add ${col[0]}`, [
+        { sql: `ALTER TABLE costway_products ADD COLUMN ${col[0]} ${col[1]}`, args: [] },
+      ]);
+    }
+  }
+  await runBatch("costway_products import_batch index", [
+    { sql: `CREATE INDEX IF NOT EXISTS idx_costway_products_import_batch ON costway_products(import_batch)`, args: [] },
+  ]);
 
   // `claimed_at`: when claimQueueItem flipped this row to 'publishing' (unix seconds).
   //
@@ -7411,6 +7471,26 @@ export async function getTrendScoresComputedAt(): Promise<number | null> {
   const res = await db.execute(`SELECT MAX(computed_at) AS at FROM trend_scores`);
   const at = Number(rowToObj(res.rows[0]).at);
   return Number.isFinite(at) && at > 0 ? at : null;
+}
+
+/**
+ * Shopify product ids that belong to the Costway supplier catalogue (imported Costway products).
+ *
+ * Every Aosom job that sweeps the WHOLE Shopify catalogue compares it against the Aosom feed, and
+ * a Costway product is by definition not in that feed. Unscoped it would be drafted (diff archive,
+ * removed-catalog, stale-catalog), have its price rewritten (price-reconcile / price-audit), or
+ * have inventory tracking switched on and zeroed (inventory-sweep). Those jobs filter these ids out.
+ *
+ * Fail-CLOSED on purpose: a DB error throws instead of returning an empty set, because an empty
+ * set would silently put Costway products back inside the Aosom jobs' blast radius.
+ */
+export async function getCostwayShopifyProductIds(): Promise<Set<string>> {
+  const db = await ensureSchema();
+  const res = await db.execute(
+    `SELECT DISTINCT shopify_product_id AS id FROM costway_products
+      WHERE shopify_product_id IS NOT NULL AND TRIM(shopify_product_id) != ''`,
+  );
+  return new Set(res.rows.map((r) => String((r as unknown as Record<string, unknown>).id)));
 }
 
 // ─── Studio Ameublo (mascot test videos, review only) ────────────────────────
