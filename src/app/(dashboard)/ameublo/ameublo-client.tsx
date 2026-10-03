@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
 
 // Mirrors AmeubloTestVideo in src/lib/database.ts.
 interface TestVideo {
@@ -69,7 +70,9 @@ export default function AmeubloStudioClient() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="p-4 md:p-8 space-y-6">
+      <SectionTabs tabs={VIDEO_SECTION_TABS} />
+
       <div>
         <h1 className="text-2xl font-bold text-white">Studio Ameublo</h1>
         <p className="text-sm text-gray-400 mt-1">

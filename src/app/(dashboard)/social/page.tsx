@@ -5,6 +5,7 @@ import { ErrorBanner } from "@/components/error-banner";
 import { describePayloadFailure, describeNetworkFailure } from "@/lib/api-error-message";
 import { SOCIAL_CATEGORIES, seasonalDefaultCategory, getCategory } from "@/lib/social-categories";
 import { TargetingPanel, type TargetSelection } from "./targeting-panel";
+import { SectionTabs, SOCIAL_SECTION_TABS } from "@/components/section-tabs";
 
 interface ChannelState {
   status: "pending" | "published" | "error" | "skipped";
@@ -397,6 +398,8 @@ export default function SocialPage() {
 
   return (
     <div className="p-4 md:p-8 max-w-6xl">
+      <SectionTabs tabs={SOCIAL_SECTION_TABS} />
+
       {/* Replaces this page's ten system alert()s — same banner as the catalogue import. */}
       <ErrorBanner
         message={notice?.text ?? null}

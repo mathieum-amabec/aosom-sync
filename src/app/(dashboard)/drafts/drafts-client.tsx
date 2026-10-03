@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import type { FacebookDraft, DraftsPage } from "@/lib/database";
 import { approveDraft, rejectDraft, publishDraft } from "./actions";
 import type { PublishLanguage } from "./actions";
+import { SectionTabs, SOCIAL_SECTION_TABS } from "@/components/section-tabs";
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "En attente",
@@ -188,6 +189,13 @@ export default function DraftsClient() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
+      {/* Note: this page predates the dashboard's dark theme (bg-gray-50/white here vs
+          bg-gray-900 everywhere else) — SectionTabs below is dark-styled like the rest of
+          the app, so it reads as a deliberate dark header bar, not a mismatch to fix here;
+          un-theming this whole page is a separate chantier. */}
+      <div className="bg-gray-900 px-6 pt-4">
+        <SectionTabs tabs={SOCIAL_SECTION_TABS} />
+      </div>
       {/* Header */}
       <div className="bg-white border-b px-6 py-4 flex items-center justify-between">
         <div>

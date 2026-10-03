@@ -2,7 +2,37 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.104.0] - 2026-10-03
+## [0.5.104.1] - 2026-10-03
+
+Dashboard sidebar was a single flat list of 19 links with no grouping — regrouped into 4
+labeled sections, and 7 of those links collapsed into 2 (video pages) without losing any
+page.
+
+### Changed
+
+- **Sidebar grouped into Catalogue / Vidéo / Contenu / Admin** (`components/sidebar.tsx`),
+  each with a small uppercase section label. 19 flat links → ~13 visible rows.
+- **5 video-producing pages share one sidebar row** ("Vidéos"): /videos,
+  /demand-gen-videos, /sequential-ads, /content-formats, /ameublo. Each page still has its
+  own route (own layout, own logic — nothing merged) but now renders a shared
+  `SectionTabs` bar (`components/section-tabs.tsx`) at the top linking to the other 4, so
+  they read as one section with tabs instead of 5 separate sidebar entries. The "Vidéos"
+  sidebar row stays highlighted on any of the 5 routes.
+- **Social Media + Drafts share one row** the same way (`Générer` / `Réviser` tabs) — two
+  steps of one workflow. Drafts deliberately stayed its own route: it's outside the
+  reviewer role's allowlist (`AUTH.REVIEWER_ALLOWED_PREFIXES`), and merging the URL would
+  have silently exposed it to the Meta-review seeded account.
+- **Collections moved under Settings** as a 4th tab (`settings/CollectionsTab.tsx`) — it's
+  an occasional config task (Aosom category → Shopify collection mapping), not a daily
+  workflow page, so it no longer needs its own sidebar entry. `/collections` now redirects
+  to `/settings`.
+
+### Fixed
+
+- Sidebar's own "active row" check used a bare `pathname.startsWith(item.href)`, which
+  could in principle also light up an unrelated route sharing the same prefix (e.g. a
+  future `/social-x` would have highlighted "Social Media"). Now requires an exact match
+  or a `/`-bounded prefix.
 
 ### Added
 

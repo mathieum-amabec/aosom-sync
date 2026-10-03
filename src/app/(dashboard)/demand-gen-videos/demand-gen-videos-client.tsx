@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
 
 // Mirrors the DTO from /api/demand-gen-videos.
 interface DemandGenAssetDTO {
@@ -158,6 +159,8 @@ export default function DemandGenVideosClient() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      <SectionTabs tabs={VIDEO_SECTION_TABS} />
+
       <h1 className="text-xl font-semibold text-gray-100">Vidéos Demand Gen</h1>
       <p className="text-sm text-gray-500 mt-1">
         Assets vidéo rendus + uploadés ({"video_demand_gen"}). Une ligne par SKU / ratio / durée.

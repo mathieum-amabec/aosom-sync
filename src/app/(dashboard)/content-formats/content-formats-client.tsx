@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
 
 /**
  * /content-formats — Étape 4 of the content-scale chantier: one page, one tab per new
@@ -174,6 +175,8 @@ export default function ContentFormatsClient() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
+      <SectionTabs tabs={VIDEO_SECTION_TABS} />
+
       <h1 className="text-2xl font-semibold text-white mb-1">Contenus vidéo — nouveaux formats</h1>
       <p className="text-sm text-gray-400 mb-6">
         Demand-Gen élargi et Assembly — tout reste en brouillon tant que ce n&apos;est pas approuvé ici.
