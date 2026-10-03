@@ -210,9 +210,19 @@ function useIsDesktop() {
 export const BLOG_DRAFTS_CHANGED = "blog-drafts-changed";
 
 /**
+ * Badge polling cadence. Each tick is a Turso read on every open dashboard tab (billed per row),
+ * so it is slow (5 min) and skipped while the tab is hidden; mutations still refresh the blog
+ * count immediately through BLOG_DRAFTS_CHANGED.
+ */
+const BADGE_POLL_MS = 300_000;
+function pollIfVisible(fn: () => void): void {
+  if (typeof document === "undefined" || document.visibilityState === "visible") fn();
+}
+
+/**
  * Poll the count of blog articles still awaiting approval (status='draft'). Disabled for
  * roles that can't see /blog at all, so a reviewer session never hits the endpoint.
- * Refreshes on the same 30s cadence as the notification bell.
+ * Refreshes on the same cadence as the notification bell (BADGE_POLL_MS).
  */
 function useBlogDraftCount(enabled: boolean): number {
   const [count, setCount] = useState(0);
@@ -230,7 +240,7 @@ function useBlogDraftCount(enabled: boolean): number {
         .catch(() => {});
     };
     fetchCount();
-    const interval = setInterval(fetchCount, 30000);
+    const interval = setInterval(() => pollIfVisible(fetchCount), BADGE_POLL_MS);
     window.addEventListener(BLOG_DRAFTS_CHANGED, fetchCount);
     return () => {
       cancelled = true;
@@ -408,7 +418,7 @@ function NotificationBell() {
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 30000);
+    const interval = setInterval(() => pollIfVisible(fetchNotifications), BADGE_POLL_MS);
     return () => clearInterval(interval);
   }, [fetchNotifications]);
 
