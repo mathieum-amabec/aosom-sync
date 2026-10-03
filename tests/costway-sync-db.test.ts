@@ -107,3 +107,21 @@ describe("getCostwayCatalog / getCostwaySummary", () => {
     expect(s.promoTags).toEqual([{ tag: "Clearance", variants: 1 }]);
   });
 });
+
+describe("getCostwayShopifyProductIds — the id set the Aosom sweeps exclude", () => {
+  it("is empty while nothing is imported, then returns only linked, non-blank ids (deduped across variants)", async () => {
+    const { getCostwayShopifyProductIds } = await import("@/lib/database");
+    await runCostwaySync({ text: feedV1 });
+    expect((await getCostwayShopifyProductIds()).size).toBe(0);
+
+    await db.execute(`UPDATE costway_products SET shopify_product_id = '9001' WHERE item_no = '111'`);
+    await db.execute(`UPDATE costway_products SET shopify_product_id = '  ' WHERE sku = '222_GY'`);
+    expect([...(await getCostwayShopifyProductIds())]).toEqual(["9001"]);
+  });
+
+  it("never reads the Aosom products table", async () => {
+    const { getCostwayShopifyProductIds } = await import("@/lib/database");
+    await db.execute(`INSERT INTO products (sku, name, shopify_product_id) VALUES ('AOS-1', 'x', '777')`);
+    expect((await getCostwayShopifyProductIds()).has("777")).toBe(false);
+  });
+});

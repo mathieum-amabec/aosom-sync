@@ -458,10 +458,19 @@ at `/costway`. Code: `src/lib/costway/` (`feed.ts` parser, `sync.ts` diff + writ
 - **The feed is not RFC CSV.** Values are never quoted and commas are stripped from them, so it is
   parsed by splitting each line on `,`. Never parse it with `csv-parse`: its quote handling merges
   rows at inch marks (`73"`).
-- **Nothing from Costway is on Shopify yet.** Before the first import, the Aosom jobs must be scoped
-  to Aosom products: `fetchAllShopifyProducts`, the `computeDiffs` archive diffs, removed-from-feed,
-  stale-catalog, stock-check and the `assertFeedComplete` baseline. Otherwise they will draft every
-  Costway product as "missing from the Aosom CSV".
+- **Nothing from Costway is on Shopify yet.** The Aosom jobs are already scoped away from Costway
+  products (isolation phase 1): the three whole-catalogue Shopify sweeps — `fetchAllShopifyProducts`
+  (feeds the `computeDiffs` archive diff, removed-catalog, stale-catalog, price-audit),
+  `fetchActiveVariantInventory` (inventory-sweep) and `fetchShopifyVariantsPage` (price-reconcile) —
+  skip every Shopify product id listed in `costway_products.shopify_product_id`
+  (`getCostwayShopifyProductIds`, **fail-closed**: a DB error aborts the sweep). The id set is read by
+  Shopify product id, NOT by tag, because tags are public and would expose the supplier name.
+  **The Costway import MUST write `costway_products.shopify_product_id` in the same step that creates
+  the Shopify product**, before any Aosom sweep can run — otherwise inventory-sweep would enable
+  tracking on the new variants and zero them (absent from the Aosom feed). Stock-check, the
+  `assertFeedComplete` baseline and publish-reconcile read the Aosom `products` table, so they were
+  already scoped. `fetchDraftProductStates` / `fetchProductPublishStates` are tag- or baseline-scoped
+  and left alone; a future Costway stock job must not reuse the `auto-drafted` tag unscoped.
 - **Costway pricing rules:** `Variant Price` is the retail price, and the dropship discount applies
   to it. Never advertise below `Price Drop`. For ~3.2k in-stock variants, a 10% promo would go under
   that floor, so exclude them from the `rabais-2e-article` collection and from BIENVENUE10 on import.
