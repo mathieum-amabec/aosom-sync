@@ -11,7 +11,7 @@
  * (rasterising frames, ffmpeg overlay) lives in video-engines/ameublo-overlay.ts.
  */
 
-export type AmeubloEyes = "open" | "happy" | "closed";
+export type AmeubloEyes = "open" | "happy" | "closed" | "wide";
 export type AmeubloMouth = "smile" | "o" | "laugh";
 export type AmeubloAccessory = "none" | "tuque" | "santa" | "leaf" | "witch";
 
@@ -31,6 +31,10 @@ export interface AmeubloPose {
   bodyY: number;
   /** Breathing / landing squash: 1 = neutral, < 1 = squashed. */
   squash: number;
+  /** Whole-body tilt in degrees (lean in, wobble). */
+  tilt?: number;
+  /** Thought dots above his head. */
+  think?: boolean;
   accessory: AmeubloAccessory;
 }
 
@@ -78,8 +82,9 @@ function eyesSvg(pose: AmeubloPose): string {
   }
   const dx = r(pose.look.dx);
   const dy = r(pose.look.dy);
+  const wide = pose.eyes === "wide" ? 1.25 : 1;
   const eye = (cx: number) =>
-    `<ellipse cx="${cx}" cy="48" rx="5" ry="6.4" fill="${C.navy}"/>` +
+    `<ellipse cx="${cx}" cy="48" rx="${r(5 * wide)}" ry="${r(6.4 * wide)}" fill="${C.navy}"/>` +
     `<circle cx="${r(cx + 1.6 + dx)}" cy="${r(45.8 + dy)}" r="1.8" fill="#fff"/>`;
   return eye(50) + eye(70);
 }
@@ -124,7 +129,7 @@ export function ameubloSvg(pose: AmeubloPose, size = 360, opts: { shadow?: boole
   // Squash keeps the feet planted: scale around the floor line (y = 110).
   const sq = r(pose.squash);
   const stretch = r(1 + (1 - pose.squash) * 0.6);
-  const body = `translate(0 ${r(pose.bodyY)}) translate(60 110) scale(${stretch} ${sq}) translate(-60 -110)`;
+  const body = `translate(0 ${r(pose.bodyY)}) rotate(${r(pose.tilt ?? 0)} 60 110) translate(60 110) scale(${stretch} ${sq}) translate(-60 -110)`;
   // Arm pivots on its base (98, 94), like the CSS rig's transform-origin 50% 100%.
   const arm = `translate(0 ${r(-16 * pose.armLift)}) rotate(${r(pose.armAngle)} 98 94)`;
   const leftArm = `translate(0 ${r(-16 * pose.leftArmLift)}) rotate(${r(pose.leftArmAngle)} 22 94)`;
@@ -155,7 +160,9 @@ export function ameubloSvg(pose: AmeubloPose, size = 360, opts: { shadow?: boole
         `<rect x="88" y="58" width="20" height="10" rx="5" fill="${C.goldLight}"/>` +
       `</g>` +
       accessorySvg(pose.accessory) +
-    `</g></svg>`;
+    `</g>` +
+    (pose.think ? `<g fill="${C.navy}"><circle cx="98" cy="10" r="2.6"/><circle cx="106" cy="2" r="3.2"/><circle cx="116" cy="-8" r="4"/></g>` : "") +
+    `</svg>`;
 }
 
 // ── "Ameublo présente" choreography ─────────────────────────────────────────

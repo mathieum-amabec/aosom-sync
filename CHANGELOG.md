@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.102.0] - 2026-10-03
+
+**Four more free Ameublo video styles, for Mat to approve or reject** (Mat: "peux-tu me créer d'autres style de vidéos gratuit? J'approuverai ou désapprouverai"). No AI call; review only.
+
+### Added
+
+- `video-engines/ameublo-scenes.ts`: full-frame scenes starring Ameublo. Each style describes what is on screen at time t; `renderScene` composites the layers with sharp and pipes raw RGBA frames into ffmpeg over a background and an optional clip.
+  - **Réaction**: a customer clip in a framed card, Ameublo reacting under it ("OH ! REGARDEZ ÇA" → "J'ADORE !"), then the price tag.
+  - **Vitrine**: three product photos slide in on a card, Ameublo presents them, the price tag drops in.
+  - **Astuce d'Ameublo**: he thinks, shares a practical tip for the product family (hand-written list, no claims), then suggests the product.
+  - **Intro / Outro**: wraps an existing ad with a 1.6 s "Ameublo vous présente…" card and a 2.4 s "À bientôt !" card.
+- `ameublo-sprite.ts`: wide eyes, body tilt and thought dots.
+- `scripts/ameublo-style-samples.mts`: two samples per style into Studio Ameublo (series "Style : …"). `--stills DIR` for a layout check without rendering.
+
+### Fixed
+
+- Scene text goes through sharp's Pango renderer with the bundled DM Sans file. librsvg's SVG `<text>` fell back to a serif font on Windows.
+
 ## [0.5.101.0] - 2026-10-03
 
 **Studio Ameublo: a dashboard section to review mascot test videos** (Mat: "fait une série de vidéo test pour voir la constance… une section dans Aosom-Sync pour voir"). Review only: nothing here is ever published.
