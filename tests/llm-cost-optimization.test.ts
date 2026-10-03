@@ -53,7 +53,7 @@ function validPayload(titleFr = "Chaise longue") {
     metaDescriptionEn: "md en",
     urlHandleFr: "chaise-longue",
     urlHandleEn: "lounge-chair",
-    tags: ["chaise"],
+    tags: ["chaise","salle à manger","dining chair","chaise rembourrée","upholstered chair","meuble","furniture","décor"],
   });
 }
 

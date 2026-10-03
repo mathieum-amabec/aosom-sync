@@ -3,6 +3,16 @@ import type { AosomMergedProduct } from "@/types/aosom";
 import { stripColorFromTitle } from "./variant-merger";
 import { env, CLAUDE } from "./config";
 import { budgetedCreate } from "@/lib/llm-budget";
+import { geminiGenerate } from "./gemini-client";
+import { getContentProvider, getContentGeminiModel } from "./content-provider";
+import {
+  capTitleWords,
+  convertImperialInTitle,
+  findImperialOnly,
+  findUnaccentedFrench,
+  stripColourFromTitle,
+  MIN_TAGS,
+} from "./content-guards";
 import { stripSupplierBrands, detectDescriptionLanguage } from "./catalog-guard";
 
 export { stripSupplierBrands } from "./catalog-guard";
@@ -108,7 +118,9 @@ You write product listings in Canadian French and English.
 
 GLOBAL RULES
 - French must sound natural for Quebec shoppers (not Parisian French).
-- Use metric units (cm, kg) — convert if needed.
+- Use metric units (cm, kg) — convert if needed. Never leave an inch, foot or pound value without its
+  metric equivalent; titles are metric only.
+- Spell every French word with its accents (bébé, sécurité, résistant, étanche).
 - Include relevant Canadian keywords for SEO.
 - HTML body: clean, mobile-friendly, no inline styles, 5-8 bullet-point features.
 - Replace any "[BRAND NAME]" with the actual brand name provided.
@@ -134,6 +146,8 @@ META DESCRIPTION (metaDescriptionFr / metaDescriptionEn) — max 155 characters:
 URL HANDLE (urlHandleFr / urlHandleEn):
   - Short kebab-case slug: lowercase, no accents, no supplier brand, words joined by "-".
   - Example: "chaise-longue-reglable-grise".
+
+TAGS: 8 to 12 short SEO tags, mixing French and English search terms.
 
 Return valid JSON only, no markdown fences.`;
 
@@ -230,21 +244,48 @@ Return JSON with this exact structure:
   // cannot silently degrade a listing — it either returns a well-formed listing or it
   // triggers the escalation. Only ContentValidationError escalates: a budget-exceeded
   // or network failure must not buy a second paid call.
-  const attempt = async (model: string): Promise<GeneratedContent> => {
-    const message = await budgetedCreate(client, {
-      model,
-      max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: prompt }],
-    });
+  //
+  // Provider switch (CONTENT_PROVIDER, see content-provider.ts): the FIRST tier is Claude Haiku
+  // (default) or Gemini Flash-Lite. The escalation tier is always Claude Sonnet, and the same
+  // prompt, validation and guardrails apply whichever model wrote the draft.
+  //
+  // `correction` is set on the single same-tier retry that fixes soft problems (inch values left
+  // in the body, missing accents, too few tags) — see collectCopyIssues below.
+  const firstTierIsGemini = getContentProvider() === "gemini";
+  const attempt = async (tier: "first" | "escalation", correction?: string): Promise<GeneratedContent> => {
+    const viaGemini = tier === "first" && firstTierIsGemini;
+    const model = tier === "escalation" ? CLAUDE.MODEL : viaGemini ? getContentGeminiModel() : CLAUDE.MODEL_BATCH;
+    const userPrompt = correction ? `${prompt}\n\n${correction}` : prompt;
 
-    if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
-      throw new ContentValidationError("empty or non-text content (possible refusal)");
+    let text: string;
+    if (viaGemini) {
+      const result = await geminiGenerate(
+        {
+          model,
+          systemInstruction: SYSTEM_PROMPT,
+          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+          maxOutputTokens: CLAUDE.MAX_TOKENS_CONTENT,
+        },
+        "batch",
+      );
+      if (!result.text.trim()) throw new ContentValidationError("empty content from Gemini (possible refusal)");
+      text = result.text;
+    } else {
+      const message = await budgetedCreate(client, {
+        model,
+        max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userPrompt }],
+      });
+
+      if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
+        throw new ContentValidationError("empty or non-text content (possible refusal)");
+      }
+      text = message.content[0].text;
     }
-
-    const text = message.content[0].text;
     const jsonStr = text.replace(/^```json?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
 
+    let content: GeneratedContent;
     try {
       const parsed = JSON.parse(jsonStr);
       // Validate required string fields (LLM output trust boundary)
@@ -266,6 +307,16 @@ Return JSON with this exact structure:
       // collapse the whitespace gaps it leaves behind so titles don't keep double spaces.
       parsed.titleFr = stripSupplierBrands(parsed.titleFr).replace(/\s+/g, " ").trim();
       parsed.titleEn = stripSupplierBrands(parsed.titleEn).replace(/\s+/g, " ").trim();
+
+      // Title guardrails (content-guards.ts): the prompt's own rules, enforced in code because
+      // every model slips on them some of the time. Order matters: convert inch/foot values
+      // first (so a dimension reads as one unit), then drop the colour, then cap the length.
+      const multiColour = new Set(product.variants.map((v) => v.color).filter(Boolean)).size > 1;
+      for (const [key, locale] of [["titleFr", "fr"], ["titleEn", "en"]] as const) {
+        parsed[key] = capTitleWords(
+          stripColourFromTitle(convertImperialInTitle(parsed[key], locale), multiColour),
+        );
+      }
 
       // Enforce length / format limits
       parsed.titleFr = parsed.titleFr.slice(0, 200);
@@ -304,7 +355,7 @@ Return JSON with this exact structure:
         );
       }
 
-      return parsed as GeneratedContent;
+      content = parsed as GeneratedContent;
     } catch (err) {
       // Name the model: with two tiers in play, "invalid content" is only actionable if
       // the log says which model produced it.
@@ -312,16 +363,65 @@ Return JSON with this exact structure:
       console.error(`[content-generator] ${model} returned invalid content (${reason}):`, text.slice(0, 500));
       throw new ContentValidationError(`invalid or incomplete JSON payload from ${model}`);
     }
+
+    // Soft problems (inch values left in the body, missing accents, too few tags). These are
+    // fixable by the SAME model in one cheap extra call, so they never escalate to the paid tier
+    // and are handled OUTSIDE the try above — a budget/network failure on the retry must
+    // propagate as itself, not be relabelled a validation error (which would buy an escalation).
+    const issues = collectCopyIssues(content);
+    if (issues.length && !correction) {
+      console.warn(`[content-generator] ${model} copy needs a fix (${issues.join("; ")}) — one corrective retry`);
+      return attempt(tier, buildCorrection(issues));
+    }
+    if (issues.length) {
+      console.warn(`[content-generator] ${model} still has issues after the corrective retry — keeping the draft: ${issues.join("; ")}`);
+    }
+    return content;
   };
 
   try {
-    return await attempt(CLAUDE.MODEL_BATCH);
+    return await attempt("first");
   } catch (err) {
-    if (!(err instanceof ContentValidationError) || CLAUDE.MODEL_BATCH === CLAUDE.MODEL) throw err;
+    // A Haiku-only deployment whose escalation model is the same model has nowhere to escalate.
+    const cannotEscalate = !firstTierIsGemini && CLAUDE.MODEL_BATCH === CLAUDE.MODEL;
+    if (!(err instanceof ContentValidationError) || cannotEscalate) throw err;
+    const firstModel = firstTierIsGemini ? getContentGeminiModel() : CLAUDE.MODEL_BATCH;
     console.warn(
-      `[content-generator] ${CLAUDE.MODEL_BATCH} output rejected (${err.message}) — ` +
+      `[content-generator] ${firstModel} output rejected (${err.message}) — ` +
         `re-running "${cleanName}" on ${CLAUDE.MODEL}`,
     );
-    return await attempt(CLAUDE.MODEL);
+    return await attempt("escalation");
   }
+}
+
+const stripTags = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+/**
+ * Soft problems in an otherwise valid listing, as short human-readable lines (empty = clean).
+ * Titles are NOT checked here — they are repaired deterministically before this runs.
+ */
+export function collectCopyIssues(c: GeneratedContent): string[] {
+  const issues: string[] = [];
+  const imperial = findImperialOnly(
+    [c.descriptionFr, c.descriptionEn, c.seoDescriptionFr, c.seoDescriptionEn].map(stripTags).join(" . "),
+  );
+  if (imperial.length) {
+    issues.push(`imperial values without a metric equivalent: ${imperial.slice(0, 6).join(", ")}`);
+  }
+  const accents = findUnaccentedFrench(
+    [c.titleFr, stripTags(c.descriptionFr), c.metaTitleFr, c.metaDescriptionFr, c.seoDescriptionFr].join(" . "),
+  );
+  if (accents.length) issues.push(`French words missing accents: ${accents.slice(0, 6).join(", ")}`);
+  if (c.tags.length < MIN_TAGS) issues.push(`only ${c.tags.length} tags (need 8 to 12)`);
+  return issues;
+}
+
+/** The follow-up message for the one same-tier corrective retry. */
+function buildCorrection(issues: string[]): string {
+  return (
+    "Your previous answer was valid JSON but had these problems:\n" +
+    issues.map((i) => `- ${i}`).join("\n") +
+    "\nReturn the COMPLETE JSON again, fixing exactly these. Give metric values (cm, m, kg) — you may keep " +
+    "the original imperial value in parentheses after the metric one. Keep everything else unchanged."
+  );
 }
