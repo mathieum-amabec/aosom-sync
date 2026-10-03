@@ -208,6 +208,19 @@ const QUERY_STOPWORDS = new Set([
  * → 29). So here category and colour are SOFT ranking signals applied to the rows, the colour
  * is translated FR→EN, and a phrase with no hit falls back to its individual words.
  */
+/** Max relaxation attempts per search (each can cost two catalog queries). */
+const MAX_SEARCH_ATTEMPTS = 3;
+const SEARCH_CACHE_TTL_MS = 10 * 60_000;
+const SEARCH_CACHE_MAX = 200;
+// Per-instance cache of catalog rows by (attempt ladder, price): repeated shopper questions
+// ("table basse", "chaise bureau") hit the same rows.
+const searchCache = new Map<string, { rows: unknown[]; expires: number }>();
+
+/** Test hook: forget cached search results. */
+export function resetSearchCache(): void {
+  searchCache.clear();
+}
+
 async function searchCatalog(input: Record<string, unknown>): Promise<Card[]> {
   const rawQuery = typeof input.query === "string" ? input.query.slice(0, 120) : "";
   const productType = typeof input.productType === "string" ? input.productType.slice(0, 80).trim().toLowerCase() : "";
@@ -226,7 +239,7 @@ async function searchCatalog(input: Record<string, unknown>): Promise<Card[]> {
   const phrase = words.join(" ");
 
   type Row = Awaited<ReturnType<typeof getProducts>>["products"][number];
-  const fetchRows = async (search: string | undefined, withPrice: boolean): Promise<Row[]> => {
+  const fetchRows = async (search: string | undefined, withPrice: boolean, likeFallback: boolean): Promise<Row[]> => {
     const base = {
       search,
       ...(withPrice ? price : {}),
@@ -236,6 +249,8 @@ async function searchCatalog(input: Record<string, unknown>): Promise<Card[]> {
       // they cost is a second full scan of `products` (the LIKE '%…%' predicate is
       // unindexable). Dropping it halves the rows Turso bills for every shopper question.
       skipCount: true,
+      // The unindexable LIKE re-scan only on the last attempt: earlier ones are expected to miss.
+      likeFallback,
     };
     // Prefer supplier-in-stock rows (`qty > 0` in the catalog mirror). NOT a hard filter:
     // this is a dropship catalog where stock lives only in the Aosom CSV snapshot and can be
@@ -257,9 +272,20 @@ async function searchCatalog(input: Record<string, unknown>): Promise<Card[]> {
   }
   if (words.length > 1) for (const w of [...words].sort((a, b) => b.length - a.length)) attempts.push([w, true]);
   if (price.minPrice !== undefined || price.maxPrice !== undefined) attempts.push([words[0] ?? (phrase || undefined), false]);
-  for (const [search, withPrice] of attempts) {
-    rows = await fetchRows(search, withPrice);
-    if (rows.length > 0) break;
+  // Each attempt costs up to two catalog queries, each billed per row read. Cap the ladder.
+  const ladder = attempts.slice(0, MAX_SEARCH_ATTEMPTS);
+  const cacheKey = JSON.stringify([ladder, price]);
+  const cached = searchCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) {
+    rows = cached.rows as Row[];
+  } else {
+    for (let i = 0; i < ladder.length; i++) {
+      const [search, withPrice] = ladder[i];
+      rows = await fetchRows(search, withPrice, i === ladder.length - 1);
+      if (rows.length > 0) break;
+    }
+    if (searchCache.size >= SEARCH_CACHE_MAX) searchCache.delete(searchCache.keys().next().value as string);
+    searchCache.set(cacheKey, { rows, expires: Date.now() + SEARCH_CACHE_TTL_MS });
   }
 
   // Rank: more query words in the name/category, then the asked colour, then the category.

@@ -9,6 +9,7 @@ import type { AosomProduct } from "@/types/aosom";
 import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
 import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
 import { isSqliteUtc } from "@/lib/draft-scheduler";
+import { usageLoggingEnabled, withUsageLogging } from "@/lib/turso-usage";
 
 let client: Client | null = null;
 
@@ -19,7 +20,12 @@ function getDb(): Client {
 
     if (tursoUrl && tursoToken) {
       // Production: remote Turso
-      client = createClient({ url: tursoUrl, authToken: tursoToken });
+      client = createClient({
+        url: tursoUrl,
+        authToken: tursoToken,
+        // Opt-in rows_read logging (TURSO_USAGE_LOG=1) — see turso-usage.ts.
+        ...(usageLoggingEnabled() ? { fetch: withUsageLogging(globalThis.fetch.bind(globalThis)) } : {}),
+      });
     } else if (tursoUrl || tursoToken) {
       // Partial config — one set without the other. Fail loud.
       throw new Error("Both TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set (or neither for local SQLite)");
@@ -2066,6 +2072,12 @@ export async function getProducts(filters: {
    * either; if you need them, do not pass this flag.
    */
   skipCount?: boolean;
+  /**
+   * With `skipCount`, also re-run an empty FTS result on the unindexable `LIKE '%…%'` predicate
+   * (a full scan of `products`). Default true; the assistant passes false on all but its last
+   * relaxation attempt, since most of its attempts are expected to miss.
+   */
+  likeFallback?: boolean;
 }): Promise<{ products: ProductRow[]; total: number; productTypes: { type: string; count: number }[] }> {
   const db = await ensureSchema();
   // WHERE clause + args are shared with getCatalogStats via buildCatalogWhere.
@@ -2135,7 +2147,10 @@ export async function getProducts(filters: {
   // result is LEFT JOINed to `last_price` (and, for the velocity/discount sorts, to a 14-day
   // `ph_agg`). COALESCE(…, 0) keeps products without history at the bottom of the list.
   const cutoff14d = Math.floor(Date.now() / 1000) - 14 * 86400;
-  const selectCols = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, f.shopify_handle, f.created_at, lp.prev_price`;
+  // Rows-only callers never render the ▼/▲ badge: skip the `last_price` window over the whole
+  // price_history table (billed on every call) and return prev_price as NULL.
+  const withPrev = !filters.skipCount;
+  const selectCols = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, f.shopify_handle, f.created_at, ${withPrev ? "lp.prev_price" : "NULL AS prev_price"}`;
 
   // Built as a function of (where, args) so the FTS→LIKE fallback can re-issue the exact
   // same query shape against the other predicate without duplicating three SQL branches.
@@ -2175,11 +2190,17 @@ export async function getProducts(filters: {
       ORDER BY COALESCE(ph_agg.drop_pct, 0) DESC LIMIT ? OFFSET ?`;
     productsArgs = [...args, cutoff14d, limit, offset];
   } else {
-    productsSql = `
+    productsSql = withPrev
+      ? `
       WITH ${filteredCte}, ${lastPriceCte}
       SELECT ${selectCols}
       FROM filtered f
       LEFT JOIN last_price lp ON lp.sku = f.sku
+      ORDER BY ${orderBy} LIMIT ? OFFSET ?`
+      : `
+      WITH ${filteredCte}
+      SELECT ${selectCols}
+      FROM filtered f
       ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
     productsArgs = [...args, limit, offset];
   }
@@ -2191,7 +2212,7 @@ export async function getProducts(filters: {
   if (filters.skipCount) {
     let q = buildProductsQuery(where, args);
     let rows = (await db.execute({ sql: q.sql, args: q.args })).rows;
-    if (rows.length === 0 && usingFts) {
+    if (rows.length === 0 && usingFts && filters.likeFallback !== false) {
       q = buildProductsQuery(likeVariant.where, likeVariant.args);
       rows = (await db.execute({ sql: q.sql, args: q.args })).rows;
     }

@@ -22,7 +22,7 @@ vi.mock("@/lib/database", () => ({ getProducts, getProduct, getComplementaryProd
 const shopifyFetch = vi.fn();
 vi.mock("@/lib/shopify-client", () => ({ shopifyFetch }));
 
-const { runAssistant, runComplementary, pickComplementary, stripMarkdown } = await import("@/lib/assistant");
+const { runAssistant, runComplementary, pickComplementary, stripMarkdown, resetSearchCache } = await import("@/lib/assistant");
 
 const prod = (over: Partial<Record<string, unknown>> = {}) => ({
   sku: "A-1", name: "Sofa sectionnel", price: 499, qty: 5, color: "Gris",
@@ -39,6 +39,7 @@ const final = (obj: unknown) => textReply(JSON.stringify(obj));
 type Turn = { role: string; parts: Array<{ text?: string; functionResponse?: { response: { result: unknown } } }> };
 
 beforeEach(() => {
+  resetSearchCache();
   create.mockReset();
   getComplementaryCandidates.mockReset().mockResolvedValue([]);
   getProducts.mockReset().mockResolvedValue({ products: [prod()], total: 1, productTypes: [] });
@@ -535,5 +536,30 @@ describe("compactRow (re-sent on every step)", () => {
       .toEqual({ sku: "A", name: `${"x".repeat(87)}...`, price: 10, type: "Sofas" });
     expect(compactRow({ sku: "B", name: "n", price: 1, type: "Rugs", color: "Grey", inStock: false }))
       .toEqual({ sku: "B", name: "n", price: 1, type: "Rugs", color: "Grey", in_stock: false });
+  });
+});
+
+describe("search read budget", () => {
+  const search = (query: string) => ({ ...toolUse({ query }) });
+  const done = final({ reply: "Voici.", products: [{ sku: "A-1", reason: "ok" }] });
+
+  it("caps the relaxation ladder at 3 attempts and enables the LIKE fallback only on the last", async () => {
+    getProducts.mockReset().mockResolvedValue({ products: [], total: -1, productTypes: [] });
+    create.mockResolvedValueOnce(search("grand canape sectionnel gris angle")).mockResolvedValueOnce(done);
+    await runAssistant({ message: "grand canape sectionnel gris angle" });
+    const likeFlags = getProducts.mock.calls.map((c) => c[0].likeFallback);
+    // 3 attempts x (inStock then unfiltered) = 6 calls max
+    expect(getProducts.mock.calls.length).toBeLessThanOrEqual(6);
+    expect(likeFlags.slice(0, 4).every((v) => v === false)).toBe(true);
+    expect(likeFlags.slice(-1)[0]).toBe(true);
+  });
+
+  it("serves a repeated search from the cache without touching the catalog", async () => {
+    create.mockResolvedValueOnce(search("table basse")).mockResolvedValueOnce(done);
+    await runAssistant({ message: "table basse" });
+    const first = getProducts.mock.calls.length;
+    create.mockResolvedValueOnce(search("table basse")).mockResolvedValueOnce(done);
+    await runAssistant({ message: "table basse" });
+    expect(getProducts.mock.calls.length).toBe(first);
   });
 });
