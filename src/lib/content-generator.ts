@@ -3,8 +3,7 @@ import type { AosomMergedProduct } from "@/types/aosom";
 import { stripColorFromTitle } from "./variant-merger";
 import { env, CLAUDE } from "./config";
 import { budgetedCreate } from "@/lib/llm-budget";
-import { geminiGenerate } from "./gemini-client";
-import { getContentProvider, getContentGeminiModel } from "./content-provider";
+import { getContentProvider, getContentGeminiModel, getContentGeminiStrongModel } from "./content-provider";
 import {
   capTitleWords,
   convertImperialInTitle,
@@ -238,58 +237,40 @@ Return JSON with this exact structure:
   "tags": ["tag1", "tag2"]
 }`;
 
-  // Two-tier model strategy. The batch model (Haiku by default, see CLAUDE.MODEL_BATCH)
-  // runs first; if its output fails ANY of the schema checks below, the same prompt is
-  // re-run on the assistant-grade model. Every field is validated, so a cheaper model
-  // cannot silently degrade a listing — it either returns a well-formed listing or it
-  // triggers the escalation. Only ContentValidationError escalates: a budget-exceeded
-  // or network failure must not buy a second paid call.
-  //
-  // Provider switch (CONTENT_PROVIDER, see content-provider.ts). The chain is
-  //   gemini mode:    Gemini Flash-Lite → Claude Haiku → Claude Sonnet
-  //   anthropic mode:                     Claude Haiku → Claude Sonnet   (the historical chain)
-  // Haiku is the fallback behind Gemini because it is the model this pipeline has always run on,
-  // and it is 3x cheaper than Sonnet; Sonnet stays the last resort exactly as before, so it is
-  // only reached when BOTH cheaper models fail validation. The same prompt, validation and
-  // guardrails apply whichever model wrote the draft.
+  // Model chain (CONTENT_PROVIDER, see content-provider.ts). Only a ContentValidationError moves
+  // down the chain: a budget-exceeded or network failure must not buy a second paid call.
+  //   gemini mode (default): Gemini Flash-Lite -> Gemini 3.8 Flash  (no Claude in the path)
+  //   anthropic mode:        Claude Haiku      -> Claude Sonnet     (the historical chain)
+  // budgetedCreate serves a gemini-* model with Google and returns the same Message shape, so one
+  // code path handles both. The same prompt, validation and guardrails apply whichever model
+  // wrote the draft.
   //
   // `correction` is set on the single same-tier retry that fixes soft problems (inch values left
   // in the body, missing accents, too few tags) — see collectCopyIssues below.
-  type Tier = "gemini" | "batch" | "escalation";
-  const tiers: Tier[] = getContentProvider() === "gemini" ? ["gemini", "batch", "escalation"] : ["batch", "escalation"];
+  type Tier = "first" | "second";
+  const tiers: Tier[] = ["first", "second"];
+  const gemini = getContentProvider() === "gemini";
   const modelFor = (t: Tier) =>
-    t === "gemini" ? getContentGeminiModel() : t === "batch" ? CLAUDE.MODEL_BATCH : CLAUDE.MODEL;
+    gemini
+      ? t === "first" ? getContentGeminiModel() : getContentGeminiStrongModel()
+      : t === "first" ? CLAUDE.MODEL_BATCH : CLAUDE.MODEL;
   const attempt = async (tier: Tier, correction?: string): Promise<GeneratedContent> => {
-    const viaGemini = tier === "gemini";
     const model = modelFor(tier);
-    const userPrompt = correction ? `${prompt}\n\n${correction}` : prompt;
+    const userPrompt = correction ? `${prompt}
 
-    let text: string;
-    if (viaGemini) {
-      const result = await geminiGenerate(
-        {
-          model,
-          systemInstruction: SYSTEM_PROMPT,
-          contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-          maxOutputTokens: CLAUDE.MAX_TOKENS_CONTENT,
-        },
-        "batch",
-      );
-      if (!result.text.trim()) throw new ContentValidationError("empty content from Gemini (possible refusal)");
-      text = result.text;
-    } else {
-      const message = await budgetedCreate(client, {
-        model,
-        max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userPrompt }],
-      });
+${correction}` : prompt;
 
-      if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
-        throw new ContentValidationError("empty or non-text content (possible refusal)");
-      }
-      text = message.content[0].text;
+    const message = await budgetedCreate(client, {
+      model,
+      max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userPrompt }],
+    });
+
+    if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
+      throw new ContentValidationError("empty or non-text content (possible refusal)");
     }
+    const text = message.content[0].text;
     const jsonStr = text.replace(/^```json?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
 
     let content: GeneratedContent;

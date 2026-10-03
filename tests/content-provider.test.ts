@@ -131,54 +131,66 @@ describe("provider routing", () => {
   });
 });
 
-describe("fallback chain with a Gemini first tier: Gemini → Haiku → Sonnet", () => {
+describe("fallback chain with a Gemini first tier: Flash-Lite → Gemini 3.8 Flash (no Claude)", () => {
   beforeEach(() => { process.env.CONTENT_PROVIDER = "gemini"; });
 
-  it("falls back to HAIKU (the model this pipeline has always used) when Gemini returns unparseable JSON", async () => {
-    geminiGenerate.mockResolvedValue(gemText("not json at all"));
-    create.mockResolvedValue(claudeMsg(listing({ titleFr: "Chaise haiku" })));
+  it("falls back to the stronger GEMINI model when Flash-Lite returns unparseable JSON", async () => {
+    geminiGenerate
+      .mockResolvedValueOnce(gemText("not json at all"))
+      .mockResolvedValueOnce(gemText(listing({ titleFr: "Chaise gemini forte" })));
     const out = await generateProductContent(product());
-    expect(out.titleFr).toBe("Chaise haiku");
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(create.mock.calls[0][0].model).toBe("claude-cheap"); // Haiku, NOT Sonnet
+    expect(out.titleFr).toBe("Chaise gemini forte");
+    expect(geminiGenerate.mock.calls.map((c) => c[0].model)).toEqual(["gemini-3.5-flash-lite", "gemini-3.8-flash"]);
+    expect(create).not.toHaveBeenCalled(); // no Claude anywhere in the path
   });
 
-  it("falls back to Haiku when Gemini's descriptionFr is English", async () => {
-    geminiGenerate.mockResolvedValue(gemText(listing({ descriptionFr: "<p>The quick brown fox jumps over the lazy dog and runs away with the garden chair.</p>" })));
-    create.mockResolvedValue(claudeMsg(listing()));
+  it("falls back when Flash-Lite's descriptionFr is English", async () => {
+    geminiGenerate
+      .mockResolvedValueOnce(gemText(listing({ descriptionFr: "<p>The quick brown fox jumps over the lazy dog and runs away with the garden chair.</p>" })))
+      .mockResolvedValueOnce(gemText(listing()));
     await generateProductContent(product());
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(create.mock.calls[0][0].model).toBe("claude-cheap");
+    expect(geminiGenerate).toHaveBeenCalledTimes(2);
+    expect(create).not.toHaveBeenCalled();
   });
 
-  it("reaches Sonnet only when BOTH Gemini and Haiku fail validation", async () => {
+  it("honours GEMINI_CONTENT_STRONG_MODEL", async () => {
+    process.env.GEMINI_CONTENT_STRONG_MODEL = "gemini-strong-x";
+    geminiGenerate.mockResolvedValueOnce(gemText("nope")).mockResolvedValueOnce(gemText(listing()));
+    await generateProductContent(product());
+    expect(geminiGenerate.mock.calls[1][0].model).toBe("gemini-strong-x");
+    delete process.env.GEMINI_CONTENT_STRONG_MODEL;
+  });
+
+  it("throws when both Gemini tiers fail validation (it does not fall through to Claude)", async () => {
     geminiGenerate.mockResolvedValue(gemText("not json"));
+    await expect(generateProductContent(product())).rejects.toThrow(/invalid or incomplete JSON/);
+    expect(geminiGenerate).toHaveBeenCalledTimes(2);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("an API failure on the fallback propagates as itself", async () => {
+    geminiGenerate.mockResolvedValueOnce(gemText("not json")).mockRejectedValueOnce(new Error("Gemini API 503"));
+    await expect(generateProductContent(product())).rejects.toThrow("Gemini API 503");
+  });
+
+  it("does NOT buy a second call when Gemini itself fails (API/budget error propagates)", async () => {
+    geminiGenerate.mockRejectedValue(new Error("Gemini API 503"));
+    await expect(generateProductContent(product())).rejects.toThrow("Gemini API 503");
+    expect(geminiGenerate).toHaveBeenCalledTimes(1);
+    expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe("anthropic mode keeps the historical chain: Haiku → Sonnet", () => {
+  it("escalates Haiku → Sonnet on a validation failure and never touches Gemini", async () => {
+    process.env.CONTENT_PROVIDER = "anthropic";
     create
-      .mockResolvedValueOnce({ content: [{ type: "text", text: "also not json" }] })
+      .mockResolvedValueOnce({ content: [{ type: "text", text: "not json" }] })
       .mockResolvedValueOnce(claudeMsg(listing({ titleFr: "Chaise sonnet" })));
     const out = await generateProductContent(product());
     expect(out.titleFr).toBe("Chaise sonnet");
     expect(create.mock.calls.map((c) => c[0].model)).toEqual(["claude-cheap", "claude-strong"]);
-  });
-
-  it("throws when every tier fails validation", async () => {
-    geminiGenerate.mockResolvedValue(gemText("not json"));
-    create.mockResolvedValue({ content: [{ type: "text", text: "nope" }] });
-    await expect(generateProductContent(product())).rejects.toThrow(/invalid or incomplete JSON/);
-    expect(create).toHaveBeenCalledTimes(2);
-  });
-
-  it("a Haiku API failure during the fallback propagates (no silent Sonnet call)", async () => {
-    geminiGenerate.mockResolvedValue(gemText("not json"));
-    create.mockRejectedValue(new Error("Anthropic 529"));
-    await expect(generateProductContent(product())).rejects.toThrow("Anthropic 529");
-    expect(create).toHaveBeenCalledTimes(1);
-  });
-
-  it("does NOT buy a Claude call when Gemini itself fails (API/budget error propagates)", async () => {
-    geminiGenerate.mockRejectedValue(new Error("Gemini API 503"));
-    await expect(generateProductContent(product())).rejects.toThrow("Gemini API 503");
-    expect(create).not.toHaveBeenCalled();
+    expect(geminiGenerate).not.toHaveBeenCalled();
   });
 });
 

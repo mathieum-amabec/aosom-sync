@@ -169,6 +169,11 @@ export async function budgetedCreate(
   options?: Anthropic.RequestOptions,
   pool: BudgetPool = "batch",
 ): Promise<Anthropic.Messages.Message> {
+  // Provider routing by model id: a `gemini-*` model is served by Google instead of Anthropic,
+  // returned in the SAME Message shape so every caller keeps parsing `message.content[0].text`
+  // and `message.usage` unchanged — switching a call site to Gemini is one model constant.
+  if (isGeminiModel(params.model)) return geminiCreate(params, pool);
+
   await assertLlmBudget(pool);
   const message = await client.messages.create(params, options);
   try {
@@ -189,4 +194,76 @@ export async function budgetedCreate(
     );
   }
   return message;
+}
+
+// ── Gemini routing ───────────────────────────────────────────────────────────────────────────
+
+/** True for a Google model id (`gemini-3.5-flash-lite`, …) — routed to Gemini by budgetedCreate. */
+export function isGeminiModel(model: string): boolean {
+  return typeof model === "string" && model.startsWith("gemini-");
+}
+
+type GeminiPartLite = { text?: string; inlineData?: { mimeType: string; data: string } };
+
+/** Anthropic content (string | blocks) → Gemini parts. Only text and base64 images are supported. */
+function toGeminiParts(content: Anthropic.Messages.MessageParam["content"]): GeminiPartLite[] {
+  if (typeof content === "string") return [{ text: content }];
+  return content.map((block): GeminiPartLite => {
+    if (block.type === "text") return { text: block.text };
+    if (block.type === "image" && block.source.type === "base64") {
+      return { inlineData: { mimeType: block.source.media_type, data: block.source.data } };
+    }
+    throw new Error(`budgetedCreate(gemini): unsupported content block "${block.type}" (text and base64 images only)`);
+  });
+}
+
+function toGeminiSystem(system: Anthropic.Messages.MessageCreateParams["system"]): string | undefined {
+  if (!system) return undefined;
+  if (typeof system === "string") return system;
+  return system.map((b) => b.text).join("\n");
+}
+
+/** Gemini thinking depth for text calls; "minimal" keeps latency and billed thought tokens near zero. */
+function geminiThinkingLevel(): "minimal" | "low" | "medium" | "high" {
+  const v = process.env.GEMINI_THINKING_LEVEL?.trim().toLowerCase();
+  return v === "low" || v === "medium" || v === "high" ? v : "minimal";
+}
+
+/**
+ * Serve an Anthropic-shaped request with Gemini and return an Anthropic-shaped Message.
+ * Budget gating and usage recording happen inside geminiGenerate (same pool counters), so this
+ * does NOT call assertLlmBudget/recordLlmUsage again — that would double-count every call.
+ */
+async function geminiCreate(
+  params: Anthropic.Messages.MessageCreateParamsNonStreaming,
+  pool: BudgetPool,
+): Promise<Anthropic.Messages.Message> {
+  // Dynamic import: gemini-client imports assertLlmBudget from this module (static cycle otherwise).
+  const { geminiGenerate } = await import("@/lib/gemini-client");
+  const result = await geminiGenerate(
+    {
+      model: params.model,
+      systemInstruction: toGeminiSystem(params.system),
+      contents: params.messages.map((m) => ({
+        role: m.role === "assistant" ? ("model" as const) : ("user" as const),
+        parts: toGeminiParts(m.content),
+      })),
+      maxOutputTokens: params.max_tokens,
+      thinkingLevel: geminiThinkingLevel(),
+    },
+    pool,
+  );
+  return {
+    id: `gemini-${Date.now()}`,
+    type: "message",
+    role: "assistant",
+    model: params.model,
+    content: result.text ? [{ type: "text", text: result.text, citations: null }] : [],
+    stop_reason: result.finishReason === "MAX_TOKENS" ? "max_tokens" : "end_turn",
+    stop_sequence: null,
+    usage: {
+      input_tokens: result.usage?.promptTokenCount ?? 0,
+      output_tokens: (result.usage?.candidatesTokenCount ?? 0) + (result.usage?.thoughtsTokenCount ?? 0),
+    },
+  } as Anthropic.Messages.Message;
 }

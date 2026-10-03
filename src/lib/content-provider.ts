@@ -4,7 +4,7 @@
  * Read from process.env directly (not via config.ts) so the choice can be flipped per deploy
  * with no code change, and so tests that mock config.ts keep working.
  *
- *   CONTENT_PROVIDER=gemini     — Gemini Flash-Lite first, then Claude Haiku, then Claude Sonnet.
+ *   CONTENT_PROVIDER=gemini     — Gemini Flash-Lite first, then Gemini 3.8 Flash. No Claude in the path.
  *   CONTENT_PROVIDER=anthropic  — Claude Haiku first, then Claude Sonnet (the historical chain).
  *   unset / anything else       — gemini WHEN GEMINI_API_KEY is configured, otherwise anthropic.
  *
@@ -27,4 +27,9 @@ export function getContentProvider(): ContentProvider {
 /** Gemini model used for the first draft when the provider is gemini (override: GEMINI_CONTENT_MODEL). */
 export function getContentGeminiModel(): string {
   return process.env.GEMINI_CONTENT_MODEL?.trim() || "gemini-3.5-flash-lite";
+}
+
+/** Stronger Gemini behind the first tier, used only when its output fails validation (override: GEMINI_CONTENT_STRONG_MODEL). */
+export function getContentGeminiStrongModel(): string {
+  return process.env.GEMINI_CONTENT_STRONG_MODEL?.trim() || "gemini-3.8-flash";
 }
