@@ -2,6 +2,13 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.99.1] - 2026-10-02
+
+### Fixed
+
+- `render-sequential-ads.mts`: Turso writes and Blob uploads retry on transient network errors (`withRetry`). Every write of the first stale-price re-render failed with "socket hang up": the minutes-long synchronous ffmpeg renders leave the pooled keep-alive sockets to be closed by Turso.
+- Video copy kept dropping French elision apostrophes (`normalizeLine` stripped every `'`), so "L'ENTRAÎNEMENT" was burned in as "LENTRAÎNEMENT". An apostrophe between letters is now kept as a typographic ’ (DM Sans renders it).
+
 ## [0.5.99.0] - 2026-10-02
 
 **Sequential ads never go out with a stale price** (Mat: "Vérif + re-rendu"). The renderer runs on the operator's PC (ffmpeg, music, source clips), so the site can't re-render at approval time on its own. It guards instead.
