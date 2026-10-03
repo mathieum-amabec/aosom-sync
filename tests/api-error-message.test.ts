@@ -117,7 +117,9 @@ describe("call sites are wired (structural)", () => {
   });
 
   it("collections surfaces both save and sync failures", () => {
-    const src = codeOnly(read("collections", "page.tsx"));
+    // Moved under Settings as a tab (2026-10 nav cleanup) — /collections/page.tsx is now
+    // just a redirect to /settings; the actual UI lives in settings/CollectionsTab.tsx.
+    const src = codeOnly(read("settings", "CollectionsTab.tsx"));
     expect(src).not.toMatch(/\balert\(/);
     expect(src).toContain("L'enregistrement des mappings");
     expect(src).toContain("La synchronisation des collections");

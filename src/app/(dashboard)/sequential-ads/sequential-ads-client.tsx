@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
 
 // ─── Types (mirror /api/sequential-ads/queue SequentialAdQueueItem) ──────────
 
@@ -232,6 +233,8 @@ export default function SequentialAdsClient() {
 
   return (
     <div className="p-4 md:p-8">
+      <SectionTabs tabs={VIDEO_SECTION_TABS} />
+
       <div className="mb-6 flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-2xl font-bold text-white">Pubs séquentielles</h2>
