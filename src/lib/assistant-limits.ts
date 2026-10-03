@@ -45,6 +45,11 @@ export type LimitReason = "hourly_quota" | "consecutive_messages" | "budget_exha
  * 15145550123). No WhatsApp number exists anywhere in this repo, so the link is omitted
  * entirely unless the env var is set — an invented number is worse than no button.
  */
+/** Store phone for the hand-offs (the one in the site header). Env-overridable. */
+export function contactPhone(): string {
+  return process.env.ASSISTANT_CONTACT_PHONE?.trim() || "514-292-7788";
+}
+
 export function contactChannels(): { email: string; whatsappUrl: string | null } {
   const email = process.env.ASSISTANT_CONTACT_EMAIL?.trim() || "info@ameublodirect.ca";
   const raw = process.env.ASSISTANT_CONTACT_WHATSAPP?.trim().replace(/[^\d]/g, "") || "";
@@ -78,34 +83,36 @@ function messageFor(
   email: string,
 ): string {
   const mins = Math.max(1, Math.ceil(retryAfterSecs / 60));
+  // In Ameublo's voice since 2026-10-02 (Mat: lighter, a bit funny, still professional, in
+  // character — the mascot is a little armchair). Every one still ends with a human contact.
   if (reason === "hourly_quota") {
     return locale === "en"
-      ? `Too many requests. Please try again ${minutesLabel(locale, mins)}.`
-      : `Trop de requêtes. Réessayez ${minutesLabel(locale, mins)}.`;
+      ? `Phew, that was a lot of questions in a row! Let me fluff my cushions and come back ${minutesLabel(locale, mins)} 🛋️`
+      : `Ouf, ça fait beaucoup de questions d'affilée ! Laissez-moi regonfler mes coussins et revenez me voir ${minutesLabel(locale, mins)} 🛋️`;
   }
   if (reason === "daily_quota") {
     // Per-visitor daily token cap (assistant-guard.ts). Resets at 00:00 UTC.
     return locale === "en"
-      ? "You've reached today's limit for the assistant. Our team can help you directly 😊"
-      : "Vous avez atteint la limite quotidienne de l'assistant. Notre équipe peut vous aider directement 😊";
+      ? "We've looked at a lot of furniture together today! I need a little rest until tomorrow, but our team is happy to take over 😊"
+      : "On a fait le tour de bien des meubles ensemble aujourd'hui ! J'ai besoin d'un petit repos jusqu'à demain, mais notre équipe prend le relais avec plaisir 😊";
   }
   if (reason === "blocked") {
-    // Automatic abuse block (assistant-guard.ts). Neutral wording: a false positive must not
-    // read as an accusation, and it still offers a human.
+    // Automatic abuse block (assistant-guard.ts). Neutral wording on purpose: a false positive
+    // must not read as an accusation, and it still offers a human.
     return locale === "en"
-      ? "The assistant is not available from your connection right now. Our team can help you directly 😊"
-      : "L'assistant n'est pas disponible depuis votre connexion pour le moment. Notre équipe peut vous aider directement 😊";
+      ? "I can't continue the conversation from your connection for now. Our team can help you directly."
+      : "Je ne peux pas poursuivre la conversation depuis votre connexion pour le moment. Notre équipe peut vous aider directement.";
   }
   if (reason === "budget_exhausted") {
-    // Operator-specified copy, verbatim. Self-contained: it names the address itself, so
-    // the shopper reads one clean sentence instead of a sentence plus a bolted-on tail.
+    // Self-contained: it names the contacts itself, so no bolted-on tail.
     return locale === "en"
-      ? `Our assistant is temporarily unavailable. Email us at ${email} 😊`
-      : `Notre assistant est temporairement indisponible. Écrivez-nous à ${email} 😊`;
+      ? `I'm taking a little nap in my corner 💤 Email us at ${email} or call ${contactPhone()}, we'll gladly help!`
+      : `Je fais une petite sieste dans mon coin 💤 Écrivez-nous à ${email} ou appelez le ${contactPhone()}, on vous répond avec plaisir !`;
   }
+  // consecutive_messages: several messages fired without waiting for the answers.
   return locale === "en"
-    ? "You've reached the question limit. Our team can help you directly 😊"
-    : "Vous avez atteint la limite de questions. Notre équipe peut vous aider directement 😊";
+    ? "One question at a time and I'll keep up, promise 😄 If it's easier, our team can answer you directly."
+    : "Une question à la fois et je vous suis, promis 😄 Si c'est plus simple, notre équipe peut vous répondre directement.";
 }
 
 const CTA: Record<Locale, string> = {
@@ -125,8 +132,8 @@ export interface LimitPayload {
 }
 
 const REACH_US: Record<Locale, (channels: string) => string> = {
-  fr: (c) => `Écrivez-nous : ${c}`,
-  en: (c) => `Reach us at: ${c}`,
+  fr: (c) => `Écrivez-nous : ${c} · ou appelez le ${contactPhone()}`,
+  en: (c) => `Reach us at: ${c} · or call ${contactPhone()}`,
 };
 
 /**

@@ -19,7 +19,22 @@ export interface ProductDetails {
   variants: Array<{ label: string; price: string }>;
 }
 
-const DESCRIPTION_MAX = 1500;
+const DESCRIPTION_MAX = 900;
+
+/** Lines that carry the facts shoppers ask about (FR + EN). */
+const SPEC_LINE = /dimension|largeur|hauteur|profondeur|longueur|diam[eè]tre|poids|charge|capacit|mat[ée]ri|assembl|montage|outil|entretien|nettoy|width|height|depth|length|weight|capacity|material|assembly|tools|care|\d\s?(po|cm|mm|pi|lb|kg|in|ft)\b|\d\s?"/i;
+
+/**
+ * The description trimmed to `max` chars with spec lines (dimensions, materials, assembly,
+ * capacity, care) first, then the rest in order — the facts survive the cut, the marketing
+ * copy goes. Cut from 1 500 to 900 chars on 2026-10-02: the details are re-sent on every later
+ * step of the tool loop. Exported for tests.
+ */
+export function specFirst(text: string, max: number): string {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const ordered = [...lines.filter((l) => SPEC_LINE.test(l)), ...lines.filter((l) => !SPEC_LINE.test(l))];
+  return ordered.join("\n").slice(0, max);
+}
 const TTL_MS = 30 * 60 * 1000;
 const cache = new Map<string, { value: ProductDetails | null; expiry: number }>();
 
@@ -75,7 +90,7 @@ export async function getProductDetails(handle: string, locale: "fr" | "en"): Pr
         }
         value = {
           title: p.title,
-          description: htmlToText(body).slice(0, DESCRIPTION_MAX),
+          description: specFirst(htmlToText(body), DESCRIPTION_MAX),
           options: (p.options ?? [])
             .filter((o) => o.name && o.name !== "Title")
             .map((o) => `${o.name}: ${o.values.join(", ")}`),

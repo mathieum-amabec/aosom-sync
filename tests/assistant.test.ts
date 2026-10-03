@@ -527,3 +527,13 @@ describe("sanitizeShopperText", () => {
     expect(sanitizeShopperText("  terrasse 10x10   pieds  ")).toBe("terrasse 10x10 pieds");
   });
 });
+
+describe("compactRow (re-sent on every step)", () => {
+  it("sends the leaf category, a capped name, and colour / stock only when informative", async () => {
+    const { compactRow } = await import("@/lib/assistant");
+    expect(compactRow({ sku: "A", name: "x".repeat(120), price: 10, type: "Home Furnishings > Living Room Furniture > Sofas", color: "", inStock: true }))
+      .toEqual({ sku: "A", name: `${"x".repeat(87)}...`, price: 10, type: "Sofas" });
+    expect(compactRow({ sku: "B", name: "n", price: 1, type: "Rugs", color: "Grey", inStock: false }))
+      .toEqual({ sku: "B", name: "n", price: 1, type: "Rugs", color: "Grey", in_stock: false });
+  });
+});

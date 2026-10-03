@@ -96,7 +96,7 @@ describe("POST /api/assistant — guard", () => {
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.data.reason).toBe("blocked");
-    expect(body.data.reply).toMatch(/pas disponible depuis votre connexion/);
+    expect(body.data.reply).toMatch(/poursuivre la conversation depuis votre connexion/);
     expect(runAssistant).not.toHaveBeenCalled();
   });
 
