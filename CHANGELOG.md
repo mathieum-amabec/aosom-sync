@@ -2,7 +2,25 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.96.1] - 2026-10-02
+## [0.5.96.2] - 2026-10-02
+
+Investigated "I queued a never-imported product but it's still showing Not imported on the
+catalog page, no error anywhere" — a real bug, distinct from the already-fixed 2026-09-18 one.
+
+### Fixed
+
+- **`upsertImportJob`'s ON CONFLICT(group_key) branch left a stale `shopify_id` on the row.**
+  Aosom's PSIN groups every BTU/capacity + colour combination of a model under ONE group_key
+  (confirmed live: 823-058V81BK/WT [8,000 BTU] and 823-058V83BK/WT [10,000 BTU] share PSIN
+  `256L5LETCAO00`), but these combinations have historically been imported to Shopify as
+  SEPARATE products. Queuing a never-imported combination whose group_key was previously used
+  by an already-imported sibling reset `status` to `'pending'` but left the sibling's
+  `shopify_id` in place. `importToShopify`'s idempotency guard (`if (row.shopify_id) return
+  already_imported`) then silently refused to ever call `createShopifyProduct` for the new
+  combination — no error, no Shopify product, forever "Not imported" on the catalog page.
+  The conflict branch now also clears `shopify_id`/`content`/`error` (`database.ts`,
+  `upsertImportJob`). `tests/database-import-job-upsert.test.ts` reproduces it against the
+  real schema in an in-memory libsql DB and fails without the fix.
 
 **Ameublo the mascot** replaces the chat bubble (theme draft only, not published).
 
