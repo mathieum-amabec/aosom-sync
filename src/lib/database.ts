@@ -666,7 +666,8 @@ async function _initSchemaImpl(): Promise<void> {
       first_seen_at INTEGER DEFAULT (strftime('%s','now')),
       updated_at INTEGER,
       removed_at INTEGER,
-      shopify_product_id TEXT
+      shopify_product_id TEXT,
+      internal_sku TEXT
     )`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_item_no ON costway_products(item_no)`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_top_category ON costway_products(top_category)`,
@@ -784,6 +785,23 @@ async function _initSchemaImpl(): Promise<void> {
   }
   await runBatch("costway_products shopify_product_id index", [
     { sql: `CREATE INDEX IF NOT EXISTS idx_costway_products_shopify_id ON costway_products(shopify_product_id)`, args: [] },
+  ]);
+
+  // costway_products.internal_sku: the opaque Ameublo SKU a Costway variant is sold under. The
+  // supplier SKU ("02956471_CB10061BK") and its numeric item number must never reach Shopify, a
+  // feed or an ad — see src/lib/costway/identity.ts. Assigned lazily at import time (not for all
+  // ~22k rows), so it is NULL until a variant is imported. UNIQUE (partial: NULLs allowed) so two
+  // variants can never share one, whatever race produced them.
+  if (!cwCols.has("internal_sku")) {
+    await runBatch("costway_products add internal_sku", [
+      { sql: `ALTER TABLE costway_products ADD COLUMN internal_sku TEXT`, args: [] },
+    ]);
+  }
+  await runBatch("costway_products internal_sku unique index", [
+    {
+      sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_costway_products_internal_sku ON costway_products(internal_sku) WHERE internal_sku IS NOT NULL`,
+      args: [],
+    },
   ]);
 
   // `claimed_at`: when claimQueueItem flipped this row to 'publishing' (unix seconds).
