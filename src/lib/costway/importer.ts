@@ -18,6 +18,7 @@ import { classifyCostway, KIND_PRODUCT_TYPE, SOURCE_TAG, type CostwayKind } from
 import { costwaySellPrice, marginOf, sellableQty } from "./pricing";
 import { assignInternalSkus, findCostwayLeaks, isInternalSku, neutralImageFilename } from "./identity";
 import { stripSupplierBrands } from "@/lib/catalog-guard";
+import { translateColor } from "@/lib/variant-merger";
 
 const MAX_IMAGES = 8;
 const MIN_IMAGES = 5;
@@ -138,6 +139,24 @@ export function unionImages(variants: CandidateVariant[]): string[] {
   return out.slice(0, MAX_IMAGES);
 }
 
+/**
+ * The gallery actually uploaded. The primary view stays first, but EVERY colour's own first photo is
+ * guaranteed a place: with a plain cap, the first colour's nine photos used all eight slots and the
+ * other colours had no photo of their own (the canary showed both variants sharing one picture).
+ */
+export function galleryFor(variants: Array<{ images: string[] }>, primary?: string, cap = MAX_IMAGES): string[] {
+  const out: string[] = [];
+  const add = (u: string | undefined) => { if (u && !out.includes(u) && out.length < cap) out.push(u); };
+  const first = variants[0]?.images ?? [];
+  const others = [...new Set(variants.slice(1).map((v) => v.images[0]).filter(Boolean))].filter((u) => u !== (primary ?? first[0]));
+  const reserve = Math.min(others.length, Math.max(0, cap - 3));
+  add(primary ?? first[0]);
+  for (const u of first) { if (out.length >= cap - reserve) break; add(u); }
+  for (const u of others) add(u);
+  for (const v of variants) for (const u of v.images) add(u);
+  return out;
+}
+
 // ── Prepare ─────────────────────────────────────────────────────────────────────────────────────
 
 export interface PreparedVariant {
@@ -182,7 +201,7 @@ function toMerged(c: Candidate, cleanDescription: string, skus: string[], imageU
     sku: skus[i],
     price: costwaySellPrice({ price: v.feedPrice, priceDrop: v.priceDrop, promoTag: v.promoTag }),
     qty: v.qty,
-    color: v.color,
+    color: translateColor(v.color),
     size: "",
     gtin: "",
     weight: 0,
@@ -308,12 +327,12 @@ function sqlIn(n: number): string {
 }
 
 /** Build the merged product with the REAL (internal) SKUs, from the prepared plan. */
-export function mergedFromPrepared(p: PreparedItem, internalSkus: string[]): AosomMergedProduct {
+export function mergedFromPrepared(p: PreparedItem, internalSkus: string[], gallery: string[] = p.imageUrls): AosomMergedProduct {
   const variants: AosomVariant[] = p.variants.map((v, i) => ({
     sku: internalSkus[i],
     price: v.sellPrice,
     qty: v.sellQty,
-    color: v.color,
+    color: translateColor(v.color),
     size: "",
     gtin: "",
     weight: 0,
@@ -334,7 +353,7 @@ export function mergedFromPrepared(p: PreparedItem, internalSkus: string[]): Aos
     description: "",
     shortDescription: "",
     material: "",
-    images: p.imageUrls,
+    images: gallery,
     video: "",
     pdf: "",
     variants,
@@ -358,7 +377,8 @@ export async function applyPrepared(p: PreparedItem, batch: string, deps: ApplyD
     const internalSkus = supplierSkus.map((s) => skuMap.get(s) ?? "");
     if (internalSkus.some((s) => !isInternalSku(s))) throw new Error("internal SKU assignment failed");
 
-    const merged = mergedFromPrepared(p, internalSkus);
+    const gallery = galleryFor(p.variants, p.imageUrls[0]);
+    const merged = mergedFromPrepared(p, internalSkus, gallery);
     // Create WITHOUT images (fast, no 25s false-timeout): they are uploaded afterwards under neutral names.
     const created = await deps.createProduct(merged, p.content);
 
@@ -374,12 +394,12 @@ export async function applyPrepared(p: PreparedItem, batch: string, deps: ApplyD
 
     // Images, neutral filenames, in order.
     let uploaded = 0;
-    for (let i = 0; i < p.imageUrls.length; i++) {
+    for (let i = 0; i < gallery.length; i++) {
       try {
-        const attachment = await deps.downloadImage(p.imageUrls[i]);
+        const attachment = await deps.downloadImage(gallery[i]);
         await deps.uploadImage(created.id, {
           attachment,
-          filename: neutralImageFilename(internalSkus[0], i, p.imageUrls[i]),
+          filename: neutralImageFilename(internalSkus[0], i, gallery[i]),
           alt: p.content.titleFr,
           position: i + 1,
         });
@@ -421,10 +441,57 @@ export async function applyPrepared(p: PreparedItem, batch: string, deps: ApplyD
     if (!final.tags.includes(SOURCE_TAG)) warnings.push(`missing tag ${SOURCE_TAG}`);
     if (final.vendor !== "Ameublo Direct") warnings.push(`vendor is ${final.vendor}`);
     if (final.variants.some((v) => !isInternalSku(v.sku))) warnings.push("a variant SKU is not an internal SKU");
-    if (final.images.length !== p.imageUrls.length) warnings.push(`images: ${final.images.length}/${p.imageUrls.length}`);
+    if (final.images.length !== gallery.length) warnings.push(`images: ${final.images.length}/${gallery.length}`);
 
     return { itemNo: p.itemNo, ok: true, productId: created.id, handle: created.handle, internalSkus, imagesUploaded: uploaded, warnings };
   } catch (err) {
     return { itemNo: p.itemNo, ok: false, warnings, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+// ── Repair ──────────────────────────────────────────────────────────────────────────────────────
+
+export interface RepairResult { itemNo: string; ok: boolean; added: number; missingBefore: number; stillMissing: number; warnings: string[]; error?: string }
+
+/**
+ * Upload the images a product is missing (a download that failed during apply leaves a hole), under
+ * the same neutral names and positions, then re-attach the colour photos. Idempotent: an image whose
+ * neutral filename is already on the product is left alone.
+ */
+export async function repairImages(p: PreparedItem, deps: Pick<ApplyDeps, "db" | "sleep" | "downloadImage" | "uploadImage" | "getProduct" | "attachVariantImages">): Promise<RepairResult> {
+  const warnings: string[] = [];
+  try {
+    const supplierSkus = p.variants.map((v) => v.supplierSku);
+    const rows = (await deps.db.execute({
+      sql: `SELECT sku, internal_sku, shopify_product_id FROM costway_products WHERE sku IN (${sqlIn(supplierSkus.length)})`,
+      args: supplierSkus,
+    })).rows as unknown as Array<{ sku: string; internal_sku: string | null; shopify_product_id: string | null }>;
+    const productId = rows.find((r) => r.shopify_product_id)?.shopify_product_id;
+    if (!productId) return { itemNo: p.itemNo, ok: false, added: 0, missingBefore: 0, stillMissing: 0, warnings, error: "not imported" };
+    const internalSkus = supplierSkus.map((s) => rows.find((r) => r.sku === s)?.internal_sku ?? "");
+    if (internalSkus.some((s) => !isInternalSku(s))) throw new Error("internal SKUs missing");
+
+    const gallery = galleryFor(p.variants, p.imageUrls[0]);
+    const have = (await deps.getProduct(productId)).images.map((i) => i.src.split("?")[0].split("/").pop()?.toLowerCase() ?? "");
+    const wanted = gallery.map((u, i) => ({ u, i, name: neutralImageFilename(internalSkus[0], i, u) }));
+    const missing = wanted.filter((w) => !have.includes(w.name));
+    let added = 0;
+    for (const m of missing) {
+      try {
+        const attachment = await deps.downloadImage(m.u);
+        await deps.uploadImage(productId, { attachment, filename: m.name, alt: p.content.titleFr, position: m.i + 1 });
+        added++;
+      } catch (err) {
+        warnings.push(`image ${m.i + 1}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      await deps.sleep(550);
+    }
+    if (added > 0) {
+      const full = await deps.getProduct(productId);
+      try { await deps.attachVariantImages(full, mergedFromPrepared(p, internalSkus, gallery)); } catch (err) { warnings.push(`variant photos: ${err instanceof Error ? err.message : String(err)}`); }
+    }
+    return { itemNo: p.itemNo, ok: true, added, missingBefore: missing.length, stillMissing: missing.length - added, warnings };
+  } catch (err) {
+    return { itemNo: p.itemNo, ok: false, added: 0, missingBefore: 0, stillMissing: 0, warnings, error: err instanceof Error ? err.message : String(err) };
   }
 }

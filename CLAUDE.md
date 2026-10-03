@@ -486,9 +486,39 @@ at `/costway`. Code: `src/lib/costway/` (`feed.ts` parser, `sync.ts` diff + writ
     numbers (`cb10061bk.jpg`) — upload under `neutralImageFilename()` (`m7h3k9q2-1.jpg`), don't ingest by URL.
   - **Gate:** `findCostwayLeaks(text, costwaySkus)` (brand, domain, supplier SKU, item number) must return
     `[]` for every text field before a Costway product is created.
-- **Costway pricing rules:** `Variant Price` is the retail price, and the dropship discount applies
-  to it. Never advertise below `Price Drop`. For ~3.2k in-stock variants, a 10% promo would go under
-  that floor, so exclude them from the `rabais-2e-article` collection and from BIENVENUE10 on import.
+- **Costway pilot import (2026-10-03, batch `pilot-1`: 50 appliances — dehumidifiers, washers, dryers).**
+  Fulfilment is MANUAL: Mat orders each item on costway.ca by hand and sends tracking by hand, so there is
+  no order/tracking sync. Everything is created as **DRAFT** — nothing is live until Mat publishes it.
+  - **Run it:** `scripts/costway-import.mts prepare` (picks by margin, writes the copy, runs the image /
+    language / supplier-leak gates → a reviewable plan file) → `apply --apply` (drafts, linked in
+    `costway_products` immediately, neutral-named images, tracked stock) → `repair --apply` (re-uploads any
+    image whose download failed; `assets.costway.ca` drops ~40% of burst downloads, the script retries).
+    Resumable and idempotent. Under node-x64 with `--env-file=<main clone>/.env.local`.
+  - **Tracking in aosom-sync:** `costway_products.shopify_product_id / internal_sku / import_batch /
+    import_status / sell_price / imported_at` + the `/costway` page (status column, filters, summary) +
+    a Shopify tag `src-c` (neutral, public) and the internal unpublished collection `suivi-source-c`.
+  - **Manual ordering:** the Shopify SKU is opaque (`M…`); paste it in the "Recherche de commande" box on
+    `/costway` (or `GET /api/costway/lookup?q=`) to get the supplier SKU, link, colour, cost and stock.
+  - **Categories:** product_types `Home Furnishings > Appliances > {Dehumidifiers, Washing Machines, Clothes
+    Dryers, Washer Dryer Combos}` land in Électro & Tech and Climatisation & Ventilation through the existing
+    smart collections; new collections `electro-deshumidificateurs` and `electro-buanderie` were created by
+    `scripts/costway-setup-shopify.mts`. **Not yet in the storefront menu** — run it with `--apply --menu` at
+    go-live, or the daily category guard will flag the published products as unreachable.
+  - **BXGY exclusion:** `rabais-2e-article` (every product with a price > 0) is the audience of the automatic
+    "10% sur le 2e article"; the setup script added `TAG NOT_EQUALS src-c` to its rules (verified: 0 of the 50
+    are members). BIENVENUE10 expired on 2026-10-02 and is no longer a concern.
+  - **Go-live checklist (do NOT publish before this):** the Aosom-job isolation (PR "isolate Aosom jobs") must
+    be MERGED AND DEPLOYED first — drafts are safe because the archive / stale / removed jobs only touch
+    `status:"active"`, but a published Costway product would be drafted or zeroed by the next sync without it.
+  - **Gotchas learned:** Costway's category is unreliable (towel warmers filed as dryers) so products are
+    classified from the title; "Washer and Dryer" in a Costway title does not always mean a combo unit;
+    colours are translated to French (`Gray` → `Gris`); each colour's own first photo must be in the gallery
+    (the 8-photo cap used to leave the second colour with none — `galleryFor`).
+- **Costway pricing rules:** `Variant Price` is Costway's real selling price (verified on 36 live pages: equal
+  on 83%, never lower than the site, the site up to 3% lower only on "Drop Price" items). Our cost is that
+  price less the 16% dropship discount. We sell at the feed price, ×0.97 on "Drop Price" items, never below
+  `Price Drop`, and never reuse Costway's crossed-out price (`src/lib/costway/pricing.ts`). Stock: sold out
+  below 3 units at Costway, Shopify quantity capped at 50. No promotion may take a variant under `Price Drop`.
 
 ## Publication scheduling — `publication_queue` (unified)
 

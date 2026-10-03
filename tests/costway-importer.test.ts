@@ -11,7 +11,7 @@ process.env.TURSO_DATABASE_URL = ":memory:";
 process.env.TURSO_AUTH_TOKEN = "test";
 
 import {
-  selectCandidates, prepareCandidate, applyPrepared, candidateMargin, unionImages,
+  selectCandidates, prepareCandidate, applyPrepared, candidateMargin, unionImages, galleryFor,
   type Candidate, type PrepareDeps, type ApplyDeps, type CreatedProduct, type PreparedItem,
 } from "@/lib/costway/importer";
 import { isInternalSku } from "@/lib/costway/identity";
@@ -257,5 +257,35 @@ describe("applyPrepared", () => {
     expect(r.ok).toBe(true);
     expect(r.imagesUploaded).toBe(p.imageUrls.length - 1);
     expect(r.warnings.join(" | ")).toMatch(/image 2: download 404/);
+  });
+});
+
+describe("galleryFor — every colour keeps a photo of its own", () => {
+  const imgs = (tag: string, n: number) => Array.from({ length: n }, (_, i) => `https://x/${tag}${i}.jpg`);
+  it("keeps the primary first and reserves a slot for each other colour's first photo", () => {
+    const g = galleryFor([{ images: imgs("g", 9) }, { images: imgs("w", 9) }], "https://x/g0.jpg");
+    expect(g).toHaveLength(8);
+    expect(g[0]).toBe("https://x/g0.jpg");
+    expect(g).toContain("https://x/w0.jpg"); // the white variant's own photo survives the cap
+  });
+  it("handles many colours and the cap", () => {
+    const g = galleryFor([0, 1, 2, 3, 4].map((i) => ({ images: imgs("c" + i + "_", 9) })), undefined, 8);
+    expect(g).toHaveLength(8);
+    for (let i = 1; i < 5; i++) expect(g).toContain(`https://x/c${i}_0.jpg`);
+  });
+  it("does not duplicate a photo shared by every colour", () => {
+    const shared = imgs("s", 6);
+    expect(galleryFor([{ images: shared }, { images: shared }])).toEqual(shared);
+  });
+});
+
+describe("colours are translated to French before they reach Shopify", () => {
+  it("gives the Shopify option values in French (Gray → Gris), like every Aosom import", async () => {
+    await insert({ sku: "9_GY", item: "9", title: "Portable Washing Machine 18 lbs", category: WASH, price: 200, color: "Gray" });
+    await insert({ sku: "9_WH", item: "9", title: "Portable Washing Machine 18 lbs", category: WASH, price: 200, color: "White" });
+    const p = await prepareCandidate((await selectCandidates(db, { limit: 1 }))[0], prepDeps());
+    const trace: Trace = { events: [], uploads: [], stock: [] };
+    await applyPrepared(p, "pilot-1", applyDeps(trace));
+    expect(trace.created!.variants.map((v) => v.color)).toEqual(["Gris", "Blanc"]);
   });
 });
