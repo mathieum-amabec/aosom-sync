@@ -112,3 +112,23 @@ describe("budgetedCreate with a gemini model", () => {
     expect(geminiGenerate).not.toHaveBeenCalled();
   });
 });
+
+describe("Gemini thinking level is chosen per model", () => {
+  const level = async (model: string) => {
+    geminiGenerate.mockResolvedValue({ text: "x", finishReason: "STOP", content: null, functionCalls: [], usage: null });
+    await budgetedCreate(client, { model, max_tokens: 10, messages: [{ role: "user", content: "hi" }] });
+    return geminiGenerate.mock.calls.at(-1)![0].thinkingLevel;
+  };
+  it("Flash-Lite uses minimal; any other Gemini (e.g. 3.8 Flash) uses low because it rejects minimal", async () => {
+    expect(await level("gemini-3.5-flash-lite")).toBe("minimal");
+    expect(await level("gemini-3.1-flash-lite")).toBe("minimal");
+    expect(await level("gemini-3.8-flash")).toBe("low");
+  });
+  it("GEMINI_THINKING_LEVEL overrides both defaults but is never forced to minimal", async () => {
+    process.env.GEMINI_THINKING_LEVEL = "high";
+    expect(await level("gemini-3.5-flash-lite")).toBe("high");
+    expect(await level("gemini-3.8-flash")).toBe("high");
+    process.env.GEMINI_THINKING_LEVEL = "minimal";
+    expect(await level("gemini-3.8-flash")).toBe("low");
+  });
+});

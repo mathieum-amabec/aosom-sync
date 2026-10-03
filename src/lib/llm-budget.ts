@@ -223,10 +223,19 @@ function toGeminiSystem(system: Anthropic.Messages.MessageCreateParams["system"]
   return system.map((b) => b.text).join("\n");
 }
 
-/** Gemini thinking depth for text calls; "minimal" keeps latency and billed thought tokens near zero. */
-function geminiThinkingLevel(): "minimal" | "low" | "medium" | "high" {
+/**
+ * Gemini thinking depth for a text call.
+ *   - Flash-Lite models accept "minimal" (near-zero billed thought tokens, lowest latency) — the default.
+ *   - Every other Gemini model REJECTS "minimal" with 400 INVALID_ARGUMENT ("Thinking level MINIMAL is not
+ *     supported for this model", seen live on gemini-3.8-flash 2026-10-03), so they default to "low".
+ * GEMINI_THINKING_LEVEL (low|medium|high) overrides either default; "minimal" is never forced onto a
+ * model that does not support it.
+ */
+export function geminiThinkingLevel(model: string): "minimal" | "low" | "medium" | "high" {
+  const supportsMinimal = model.includes("flash-lite");
   const v = process.env.GEMINI_THINKING_LEVEL?.trim().toLowerCase();
-  return v === "low" || v === "medium" || v === "high" ? v : "minimal";
+  if (v === "low" || v === "medium" || v === "high") return v;
+  return supportsMinimal ? "minimal" : "low";
 }
 
 /**
@@ -249,7 +258,7 @@ async function geminiCreate(
         parts: toGeminiParts(m.content),
       })),
       maxOutputTokens: params.max_tokens,
-      thinkingLevel: geminiThinkingLevel(),
+      thinkingLevel: geminiThinkingLevel(params.model),
     },
     pool,
   );
