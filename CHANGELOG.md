@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.104.0] - 2026-10-03
+
+### Added
+
+- **La pièce en 4 articles** (Mat: "il fait aussi la pièce en quatre articles"). "TON SALON COMPLET EN 4 ARTICLES": each product lands big with its "+ price", then drops into a 2×2 grid while a running subtotal counts up. The exact total slams in at the end with free shipping.
+  - `roomTotal` keeps the total equal to the sum of the real prices, to the cent.
+  - Samples in Studio Ameublo: a salon at 594,96 $ (#35) and a bureau (#36).
+
 ## [0.5.103.0] - 2026-10-03
 
 **Ameublo styles, round 2** (Mat's review: Réaction loved but needs varied Hormozi-style copy, Vitrine too slow and the desk wasn't visible, Intro/Outro dropped, find more formats).

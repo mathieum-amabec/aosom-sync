@@ -740,3 +740,100 @@ export async function top3Scene(items: { photo: Buffer; p: StyleProduct }[], acc
     },
   };
 }
+
+// ── style: la pièce en 4 articles ───────────────────────────────────────────
+
+/** Exact total of the prices shown — the hook's number must be the real sum, to the cent. */
+export function roomTotal(prices: number[]): number {
+  return Math.round(prices.reduce((s, p) => s + p, 0) * 100) / 100;
+}
+
+/**
+ * "Ton salon complet en 4 articles": each product lands big, then drops into a 2×2 grid
+ * while a running total counts up; the exact total slams in at the end.
+ */
+export async function pieceScene(items: { photo: Buffer; p: StyleProduct }[], room: string, accessory: AmeubloAccessory, music?: string): Promise<SceneSpec> {
+  if (items.length !== 4 || items.some((i) => i.p.price == null)) throw new Error("piece needs 4 priced products");
+  const duration = 11;
+  const BIG = 760;
+  const SLOT = 420;
+  const slots = [[100, 300], [560, 300], [100, 760], [560, 760]];
+  const sharp = (await import("sharp")).default;
+  const cards = await Promise.all(items.map((i) => photoCard(i.photo, BIG, BIG, 40)));
+  const prices = items.map((i) => i.p.price as number);
+  const total = roomTotal(prices);
+  const hook = `TON ${room.toUpperCase()} COMPLET EN 4 ARTICLES`;
+  const url = await textLayer(["AMEUBLODIRECT.CA"], 1800, { size: 44, color: GOLD });
+  const START = 1.3;
+  const EACH = 1.9;
+  const SETTLE = 0.45; // big → slot
+  const END = START + 4 * EACH; // 8.9 s
+  const small = new Map<string, Buffer>();
+  const scaled = async (i: number, size: number) => {
+    const key = `${i}|${size}`;
+    let b = small.get(key);
+    if (!b) {
+      b = await sharp(cards[i]).resize(size, size).png().toBuffer();
+      small.set(key, b);
+    }
+    return b;
+  };
+  return {
+    duration,
+    background: await backgroundPng(NAVY, "#24365C"),
+    music,
+    layersAt: async (t) => {
+      const L: OverlayOptions[] = [];
+      L.push(...(await popWords(hook, 100, 0.05, t, { size: 66, color: GOLD, perWord: 0.09, maxW: 940 })));
+      // Running total: counts up over SETTLE after each item lands.
+      let shown = 0;
+      for (let i = 0; i < 4; i++) {
+        const at = START + i * EACH + 0.9;
+        shown += prices[i] * easeOut(prog(t, at, SETTLE));
+      }
+      for (let i = 0; i < 4; i++) {
+        const at = START + i * EACH;
+        if (t < at) break;
+        const local = t - at;
+        const [sx, sy] = slots[i];
+        if (local < 0.9) {
+          // Big entrance with a punch-in, name + price under it.
+          const k = easeOutBack(prog(local, 0, 0.3));
+          const size = Math.round(BIG * Math.min(1, 0.85 + 0.15 * k));
+          L.push({ input: await scaled(i, size), left: Math.round((W - size) / 2), top: 300 + Math.round((BIG - size) / 2) });
+          L.push(...(await textLayer(wrap(items[i].p.title.toUpperCase(), 28, 2), 1090, { size: 42, color: "#ffffff" })));
+          L.push(...(await priceTagLayer(`+ ${priceFr(prices[i])}`, W / 2, 1210, undefined, 0.8)));
+        } else {
+          // Settle into its grid slot.
+          const k = easeOut(prog(local, 0.9, SETTLE));
+          const size = Math.round(BIG + (SLOT - BIG) * k);
+          const x = Math.round((W - BIG) / 2 + (sx - (W - BIG) / 2) * k);
+          const y = Math.round(300 + (sy - 300) * k);
+          L.push({ input: await scaled(i, Math.max(SLOT, size)), left: x, top: y });
+        }
+      }
+      if (t >= START + 0.9) {
+        const label = t >= END + 0.2 ? "TOTAL" : "SOUS-TOTAL";
+        // Left of Ameublo, under the grid.
+        L.push(...(await textLayer([label], 1440, { size: 40, color: "#ffffff", cx: 330 })));
+        if (t >= END + 0.2) {
+          const k = easeOutBack(prog(t, END + 0.2, 0.35));
+          L.push(...(await priceTagLayer(priceFr(total), 330, 1500 - (1 - Math.min(1, k)) * 40, "LIVRAISON GRATUITE", Math.round((1.15 + 0.3 * (1 - Math.min(1, k))) * 20) / 20, "#ffffff")));
+        } else {
+          L.push(...(await textLayer([priceFr(Math.round(shown * 100) / 100)], 1500, { size: 80, color: GOLD, cx: 330 })));
+        }
+      }
+      if (t >= END + 1.0) L.push(...url);
+      // Ameublo: hops each time an item lands, jumps at the total, waves at the end.
+      const sinceAdd = t >= START ? (t - START) % EACH : 99;
+      let ps: AmeubloPose;
+      if (t < 0.4) ps = pose({ bodyY: entrance(t, 0, 0.4), eyes: "happy" }, accessory, t);
+      else if (t >= END + 0.2 && t < END + 1.1) ps = pose({ eyes: "wide", mouth: "laugh", bodyY: hop(t - END - 0.2, 3.3, 12) }, accessory, t);
+      else if (t >= END + 1.1) ps = pose({ ...waving(t - END - 1.1), eyes: "happy", mouth: "laugh" }, accessory, t);
+      else if (t >= START && sinceAdd < 0.45) ps = pose({ eyes: "wide", mouth: "o", bodyY: hop(sinceAdd, 2.2, 7) }, accessory, t);
+      else ps = pose({ armLift: 1, armAngle: 30, look: { dx: 1, dy: -2 }, mouth: "smile", eyes: blink(t) ? "closed" : "open" }, accessory, t);
+      L.push(ameubloLayer(ps, 420, 670, 1400));
+      return L;
+    },
+  };
+}
