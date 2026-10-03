@@ -22,7 +22,7 @@ const flag = (n: string) => {
 };
 const APPLY = argv.includes("--apply");
 const STILLS = flag("--stills");
-const ALL = ["reaction", "vitrine", "astuce", "devine", "ab", "top3"] as const;
+const ALL = ["reaction", "vitrine", "astuce", "devine", "ab", "top3", "piece"] as const;
 type Style = (typeof ALL)[number];
 const STYLES = (flag("--styles")?.split(",") ?? [...ALL]) as Style[];
 const SERIES_SUFFIX = flag("--suffix") ?? "";
@@ -37,6 +37,7 @@ const MUSIC: Record<Style, string> = {
   devine: audio("mixkit-golden-storm-470.mp3"),
   ab: audio("mixkit-pop-250.mp3"),
   top3: audio("mixkit-funk-1140.mp3"),
+  piece: audio("mixkit-lounge-695.mp3"),
 };
 const LABEL: Record<Style, string> = {
   reaction: "Réaction",
@@ -45,10 +46,11 @@ const LABEL: Record<Style, string> = {
   devine: "Devine le prix",
   ab: "Tu prends lequel ?",
   top3: "Top 3",
+  piece: "La pièce en 4 articles",
 };
 
 /** Samples per style: varied categories, campaigns and (for Réaction) copy variants. */
-const SAMPLES: Record<Style, { skus: string[]; campaign: string }[]> = {
+const SAMPLES: Record<Style, { skus: string[]; campaign: string; room?: string }[]> = {
   reaction: [
     { skus: ["838-212WT"], campaign: "automne-2026" },
     { skus: ["370-082WT"], campaign: "enfants-2026" },
@@ -74,6 +76,10 @@ const SAMPLES: Record<Style, { skus: string[]; campaign: string }[]> = {
   top3: [
     { skus: ["838-006V80GY", "839-281", "833-894V80WT"], campaign: "maison-2026" },
     { skus: ["311-053V00PK", "311-048GY", "3D0-008"], campaign: "enfants-2026" },
+  ],
+  piece: [
+    { skus: ["839-622V00CW", "833-894V80WT", "839-281", "838-006V80GY"], campaign: "maison-2026", room: "salon" },
+    { skus: ["836-317V01", "921-481GN", "833-450", "831-740V00GD"], campaign: "automne-2026", room: "bureau" },
   ],
 };
 
@@ -162,6 +168,9 @@ async function main() {
           } else if (st === "ab") {
             const [pa, pb] = await Promise.all(ps.map(async (p) => (await photosOf(p.sku, 1))[0]));
             spec = await scenes.ceciOuCaScene(pa, pb, ps[0], ps[1], accessory, MUSIC[st]);
+          } else if (st === "piece") {
+            const photos = await Promise.all(ps.map(async (p) => (await photosOf(p.sku, 1))[0]));
+            spec = await scenes.pieceScene(ps.map((p, i) => ({ photo: photos[i], p })), s.room ?? "salon", accessory, MUSIC[st]);
           } else {
             const photos = await Promise.all(ps.map(async (p) => (await photosOf(p.sku, 1))[0]));
             spec = await scenes.top3Scene(ps.map((p, i) => ({ photo: photos[i], p })), accessory, MUSIC[st]);

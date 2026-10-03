@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ameubloLines, productFamily, HOOKS, VALUE } from "@/lib/ameublo-copy";
-import { decoyPrice, top3Cap } from "@/lib/video-engines/ameublo-scenes";
+import { decoyPrice, top3Cap, roomTotal } from "@/lib/video-engines/ameublo-scenes";
 
 describe("ameublo-copy", () => {
   it("maps product types to families", () => {
@@ -37,5 +37,10 @@ describe("honest numbers in the new styles", () => {
     expect(top3Cap([102.99, 107.99, 114.99])).toBe(120);
     expect(top3Cap([164.99, 116.99, 114.99])).toBe(170);
     expect(top3Cap([120])).toBe(120);
+  });
+
+  it("room total is the exact sum of the prices, to the cent", () => {
+    expect(roomTotal([268.99, 114.99, 107.99, 102.99])).toBe(594.96);
+    expect(roomTotal([0.1, 0.2])).toBe(0.3);
   });
 });
