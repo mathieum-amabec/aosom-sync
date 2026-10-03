@@ -5,6 +5,7 @@
  */
 import type { InStatement } from "@libsql/client";
 import { ensureSchema } from "@/lib/database";
+import { costOf, marginOf } from "@/lib/costway/pricing";
 
 /** Per-SKU state the sync needs to decide what to write. */
 export interface CostwayIndexRow {
@@ -141,6 +142,10 @@ export interface CostwayCatalogFilters {
   minPrice?: number;
   maxPrice?: number;
   promoTag?: string;
+  /** 'only' = products already imported to Shopify, 'exclude' = not yet imported, 'all'/undefined = both. */
+  imported?: "only" | "exclude" | "all";
+  /** Import batch label ("pilot-1"…). */
+  batch?: string;
   sort?: string;
   page: number;
   limit: number;
@@ -163,7 +168,21 @@ export interface CostwayCatalogProduct {
   colors: string | null;
   promo_tags: string | null;
   first_seen_at: number;
+  /** True once at least one variant carries a Shopify product id (see importer.ts). */
+  imported: boolean;
+  shopify_product_id: string | null;
+  shopify_handle: string | null;
+  import_batch: string | null;
+  import_status: string | null;
+  /** Average price we put on Shopify across the imported variants. */
+  sell_price: number | null;
+  /** Gross margin on the imported variants (before payment fees / returns), % of the sell price. */
+  margin_pct: number | null;
+  margin_dollars: number | null;
+  imported_at: number | null;
 }
+
+const IMPORTED_SQL = "(shopify_product_id IS NOT NULL AND TRIM(shopify_product_id) <> '')";
 
 const SORTS: Record<string, string> = {
   price_asc: "min_price ASC",
@@ -194,6 +213,12 @@ export async function getCostwayCatalog(
     where.push(`promo_tag = ?`);
     args.push(f.promoTag);
   }
+  if (f.imported === "only") where.push(IMPORTED_SQL);
+  else if (f.imported === "exclude") where.push(`NOT ${IMPORTED_SQL}`);
+  if (f.batch) {
+    where.push(`import_batch = ?`);
+    args.push(f.batch);
+  }
   if (f.inStock) having.push(`SUM(in_stock) > 0`);
   if (f.minPrice !== undefined && Number.isFinite(f.minPrice)) {
     having.push(`MIN(price) >= ?`);
@@ -220,7 +245,14 @@ export async function getCostwayCatalog(
            MAX(compare_at_price) AS compare_at_price,
            GROUP_CONCAT(DISTINCT NULLIF(color, '')) AS colors,
            GROUP_CONCAT(DISTINCT NULLIF(promo_tag, '')) AS promo_tags,
-           MIN(first_seen_at) AS first_seen_at
+           MIN(first_seen_at) AS first_seen_at,
+           MAX(CASE WHEN ${IMPORTED_SQL} THEN shopify_product_id END) AS shopify_product_id,
+           MAX(shopify_handle) AS shopify_handle,
+           MAX(import_batch) AS import_batch,
+           MAX(import_status) AS import_status,
+           MAX(imported_at) AS imported_at,
+           AVG(sell_price) AS sell_avg,
+           AVG(CASE WHEN sell_price IS NOT NULL THEN price END) AS feed_avg
       FROM costway_products
      WHERE ${where.join(" AND ")}
      GROUP BY item_no
@@ -253,8 +285,164 @@ export async function getCostwayCatalog(
     colors: r.colors === null ? null : String(r.colors),
     promo_tags: r.promo_tags === null ? null : String(r.promo_tags),
     first_seen_at: Number(r.first_seen_at ?? 0),
+    ...importedFields(r),
   }));
   return { products, total: Number(count.rows[0]?.n ?? 0) };
+}
+
+type Row = Record<string, unknown>;
+
+/** The import-tracking part of a grouped catalogue row. */
+function importedFields(
+  r: Row,
+): Pick<
+  CostwayCatalogProduct,
+  | "imported" | "shopify_product_id" | "shopify_handle" | "import_batch" | "import_status"
+  | "sell_price" | "margin_pct" | "margin_dollars" | "imported_at"
+> {
+  const productId = r.shopify_product_id === null || r.shopify_product_id === undefined ? null : String(r.shopify_product_id);
+  const sell = r.sell_avg === null || r.sell_avg === undefined ? null : Number(r.sell_avg);
+  const feed = r.feed_avg === null || r.feed_avg === undefined ? null : Number(r.feed_avg);
+  const margin = sell !== null && feed !== null && feed > 0 ? marginOf(sell, feed) : null;
+  return {
+    imported: productId !== null,
+    shopify_product_id: productId,
+    shopify_handle: r.shopify_handle ? String(r.shopify_handle) : null,
+    import_batch: r.import_batch ? String(r.import_batch) : null,
+    import_status: r.import_status ? String(r.import_status) : null,
+    sell_price: sell === null ? null : Math.round(sell * 100) / 100,
+    margin_pct: margin ? margin.pct : null,
+    margin_dollars: margin ? margin.dollars : null,
+    imported_at: r.imported_at === null || r.imported_at === undefined ? null : Number(r.imported_at),
+  };
+}
+
+// ─── Order lookup (internal SKU from a Shopify order → what to order at costway.ca) ─────────
+
+export interface CostwayLookupHit {
+  internal_sku: string | null;
+  /** The supplier variant SKU — what Mat searches on costway.ca. Internal use only. */
+  supplier_sku: string;
+  item_no: string;
+  title: string;
+  color: string;
+  /** The stored dropship URL, UTM parameters included. */
+  product_url: string;
+  feed_price: number | null;
+  /** Our cost: feed price less the dropship discount. */
+  cost: number | null;
+  sell_price: number | null;
+  margin_dollars: number | null;
+  margin_pct: number | null;
+  in_stock: boolean;
+  qty: number;
+  ca_qty: number | null;
+  us_qty: number | null;
+  removed: boolean;
+  imported: boolean;
+  shopify_product_id: string | null;
+  shopify_handle: string | null;
+  import_status: string | null;
+  import_batch: string | null;
+}
+
+/**
+ * Resolve an internal SKU (`M…`, as printed on a Shopify order), a Costway variant SKU or an item
+ * number to the variant(s) to order. Exact matches only — a partial SKU must never pick a
+ * different product by accident. Returns [] for an empty or unknown query.
+ */
+export async function lookupVariant(query: string): Promise<CostwayLookupHit[]> {
+  const q = (query ?? "").trim();
+  if (!q) return [];
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT internal_sku, sku, item_no, title, color, product_url, price, sell_price, in_stock, qty, ca_qty, us_qty,
+                 removed_at, shopify_product_id, shopify_handle, import_status, import_batch
+            FROM costway_products
+           WHERE internal_sku = ? OR sku = ? OR item_no = ?
+           ORDER BY item_no, sku LIMIT 50`,
+    args: [q.toUpperCase(), q, q],
+  });
+  return res.rows.map((r) => {
+    const feed = r.price === null ? null : Number(r.price);
+    const sell = r.sell_price === null ? null : Number(r.sell_price);
+    const margin = sell !== null && feed !== null && feed > 0 ? marginOf(sell, feed) : null;
+    const productId = r.shopify_product_id ? String(r.shopify_product_id) : null;
+    return {
+      internal_sku: r.internal_sku ? String(r.internal_sku) : null,
+      supplier_sku: String(r.sku),
+      item_no: String(r.item_no),
+      title: String(r.title),
+      color: String(r.color ?? ""),
+      product_url: String(r.product_url ?? ""),
+      feed_price: feed,
+      cost: feed !== null && feed > 0 ? costOf(feed) : null,
+      sell_price: sell,
+      margin_dollars: margin ? margin.dollars : null,
+      margin_pct: margin ? margin.pct : null,
+      in_stock: Number(r.in_stock) === 1,
+      qty: Number(r.qty ?? 0),
+      ca_qty: r.ca_qty === null ? null : Number(r.ca_qty),
+      us_qty: r.us_qty === null ? null : Number(r.us_qty),
+      removed: r.removed_at !== null,
+      imported: productId !== null,
+      shopify_product_id: productId,
+      shopify_handle: r.shopify_handle ? String(r.shopify_handle) : null,
+      import_status: r.import_status ? String(r.import_status) : null,
+      import_batch: r.import_batch ? String(r.import_batch) : null,
+    };
+  });
+}
+
+// ─── Import tracking summary ────────────────────────────────────────────────
+
+export interface CostwayImportSummary {
+  importedProducts: number;
+  importedVariants: number;
+  byStatus: { status: string; products: number; variants: number }[];
+  byBatch: { batch: string; products: number; variants: number; importedAt: number | null }[];
+  /** Σ (sell price − cost) over imported variants, as if each sold once — a sizing figure, not revenue. */
+  estimatedMarginPerSale: number;
+}
+
+export async function getImportSummary(): Promise<CostwayImportSummary> {
+  const db = await ensureSchema();
+  const res = await db.execute(
+    `SELECT item_no, price, sell_price, import_status, import_batch, imported_at
+       FROM costway_products WHERE ${IMPORTED_SQL}`,
+  );
+  const products = new Set<string>();
+  const status = new Map<string, { products: Set<string>; variants: number }>();
+  const batch = new Map<string, { products: Set<string>; variants: number; at: number | null }>();
+  let margin = 0;
+  for (const r of res.rows) {
+    const item = String(r.item_no);
+    products.add(item);
+    const st = String(r.import_status ?? "inconnu");
+    const sb = status.get(st) ?? { products: new Set<string>(), variants: 0 };
+    sb.products.add(item);
+    sb.variants++;
+    status.set(st, sb);
+    const bt = String(r.import_batch ?? "sans lot");
+    const bb = batch.get(bt) ?? { products: new Set<string>(), variants: 0, at: null };
+    bb.products.add(item);
+    bb.variants++;
+    const at = r.imported_at === null ? null : Number(r.imported_at);
+    if (at !== null && (bb.at === null || at > bb.at)) bb.at = at;
+    batch.set(bt, bb);
+    if (r.sell_price !== null && r.price !== null && Number(r.price) > 0) {
+      margin += marginOf(Number(r.sell_price), Number(r.price)).dollars;
+    }
+  }
+  return {
+    importedProducts: products.size,
+    importedVariants: res.rows.length,
+    byStatus: [...status.entries()].map(([s, v]) => ({ status: s, products: v.products.size, variants: v.variants })),
+    byBatch: [...batch.entries()]
+      .map(([b, v]) => ({ batch: b, products: v.products.size, variants: v.variants, importedAt: v.at }))
+      .sort((a, b) => (b.importedAt ?? 0) - (a.importedAt ?? 0)),
+    estimatedMarginPerSale: Math.round(margin * 100) / 100,
+  };
 }
 
 export interface CostwaySummary {

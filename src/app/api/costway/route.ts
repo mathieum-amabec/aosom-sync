@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { API } from "@/lib/config";
 import { parseBoolParam } from "@/lib/catalog-filters";
-import { getCostwayCatalog, getCostwaySummary } from "@/lib/costway/db";
+import { getCostwayCatalog, getCostwaySummary, getImportSummary } from "@/lib/costway/db";
 import { getCostwayLastSync } from "@/lib/costway/sync";
 
 /**
  * GET /api/costway — browse the Costway catalogue, one row per product (Item No).
- * Filters: search, category, inStock, minPrice, maxPrice, promoTag, sort, page, limit.
+ * Filters: search, category, inStock, minPrice, maxPrice, promoTag, imported (only|exclude|all),
+ * batch, sort, page, limit.
  * Session-protected by src/proxy.ts like every non-public route.
  */
 export async function GET(request: Request) {
@@ -23,7 +24,10 @@ export async function GET(request: Request) {
       return v ? parseFloat(v) : undefined;
     };
 
-    const [{ products, total }, summary, lastSync] = await Promise.all([
+    const importedParam = params.get("imported");
+    const imported = importedParam === "only" || importedParam === "exclude" ? importedParam : "all";
+
+    const [{ products, total }, summary, lastSync, importSummary] = await Promise.all([
       getCostwayCatalog({
         search: params.get("search")?.trim() || undefined,
         topCategory: params.get("category") || undefined,
@@ -31,12 +35,15 @@ export async function GET(request: Request) {
         minPrice: priceParam("minPrice"),
         maxPrice: priceParam("maxPrice"),
         promoTag: params.get("promoTag") || undefined,
+        imported,
+        batch: params.get("batch")?.trim() || undefined,
         sort: params.get("sort") || undefined,
         page,
         limit,
       }),
       getCostwaySummary(),
       getCostwayLastSync(),
+      getImportSummary(),
     ]);
 
     return NextResponse.json({
@@ -46,6 +53,7 @@ export async function GET(request: Request) {
         pagination: { page, limit, total, pages: Math.ceil(total / limit) },
         summary,
         lastSync,
+        importSummary,
       },
       _timing: { ms: Math.round(performance.now() - start) },
     });

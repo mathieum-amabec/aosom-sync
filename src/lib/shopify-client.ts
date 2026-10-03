@@ -374,9 +374,19 @@ function dedupeVariantOptionLabels<T extends { option1?: string | null; option2?
  * Create a Shopify product with FR primary + EN metafields.
  * Published live ('active') on import. No inventory tracking (dropship).
  */
+export interface CreateProductOptions {
+  /** Default "active" (Aosom imports go live). The Costway pilot creates "draft". */
+  status?: "active" | "draft";
+  /** Replaces the default `merged.images` URL ingest. [] = create without images (uploaded afterwards). */
+  images?: Array<{ src?: string; attachment?: string; filename?: string; alt?: string }>;
+  /** Tags appended to the generated ones (e.g. the neutral supplier-lot tag). */
+  extraTags?: string[];
+}
+
 export async function createShopifyProduct(
   merged: AosomMergedProduct,
-  content: GeneratedContent
+  content: GeneratedContent,
+  opts: CreateProductOptions = {},
 ): Promise<{ id: string; handle: string }> {
   const hasColor = merged.variants.some((v) => v.color);
   const hasSize = merged.variants.some((v) => v.size);
@@ -449,11 +459,11 @@ export async function createShopifyProduct(
       // Once taxonomy tags are tracked (import job / products table), merge them in:
       // tags: [...new Set([...content.tags, ...taxonomyTags])].join(", ").
       // See docs/taxonomy-changelog.md. Non-blocking for the idempotency fix.
-      tags: content.tags.join(", "),
-      status: "active",
+      tags: [...content.tags, ...(opts.extraTags ?? [])].join(", "),
+      status: opts.status ?? "active",
       options,
       variants: builtVariants,
-      images: merged.images.map((src) => ({ src })),
+      images: opts.images ?? merged.images.map((src) => ({ src })),
       metafields: [
         // Native Shopify SEO (store default locale = FR). EN equivalents kept in
         // custom.* for later translation (Translate & Adapt / GraphQL).
