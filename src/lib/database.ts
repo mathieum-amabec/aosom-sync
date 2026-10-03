@@ -2127,83 +2127,59 @@ export async function getProducts(filters: {
   // Select only columns the catalog UI needs
   const catalogColumns = "sku, name, price, qty, color, product_type, image1, shopify_product_id, shopify_handle, created_at";
 
-  // `last_price` exposes the old_price of each SKU's most recent price change so the catalog
-  // table can render the ▼/▲ movement badge (current price vs. previous price). ROW_NUMBER
-  // picks exactly one row per SKU, ordered detected_at DESC then id DESC — the id tiebreak
-  // makes selection deterministic when a SKU has two price changes in the same detected_at
-  // second (detected_at is second-granularity, so batch syncs can collide). Restocks/
-  // stock-only events are excluded (change_type filter), so the badge always reflects the
-  // last *price* move, not an incidental stock update.
-  const lastPriceCte = `last_price AS (
-        SELECT sku, prev_price FROM (
-          SELECT sku, old_price AS prev_price,
-            ROW_NUMBER() OVER (PARTITION BY sku ORDER BY detected_at DESC, id DESC) AS rn
-          FROM price_history
-          WHERE change_type IN ('price_drop', 'price_increase') AND old_price IS NOT NULL
-        ) WHERE rn = 1
-      )`;
-
-  // All three branches share the same shape: a `filtered` CTE applies the WHERE clause, the
-  // result is LEFT JOINed to `last_price` (and, for the velocity/discount sorts, to a 14-day
-  // `ph_agg`). COALESCE(…, 0) keeps products without history at the bottom of the list.
+  // `prev_price` is the old_price of each SKU's most recent price change (restocks/stock-only
+  // events excluded), so the catalog table's ▼/▲ badge reflects the last *price* move. Ordered
+  // detected_at DESC then id DESC: detected_at is second-granularity, so the id tiebreak keeps
+  // the pick deterministic when a batch sync records two changes in the same second.
+  // The velocity / discount sorts use a 14-day window.
   const cutoff14d = Math.floor(Date.now() / 1000) - 14 * 86400;
-  // Rows-only callers never render the ▼/▲ badge: skip the `last_price` window over the whole
-  // price_history table (billed on every call) and return prev_price as NULL.
+  // Rows-only callers (skipCount) never render the ▼/▲ badge: prev_price is returned as NULL.
   const withPrev = !filters.skipCount;
-  const selectCols = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, f.shopify_handle, f.created_at, ${withPrev ? "lp.prev_price" : "NULL AS prev_price"}`;
 
   // Built as a function of (where, args) so the FTS→LIKE fallback can re-issue the exact
-  // same query shape against the other predicate without duplicating three SQL branches.
+  // same query shape against the other predicate.
   const buildProductsQuery = (w: string, a: (string | number)[]): { sql: string; args: (string | number)[] } => {
   const filteredCte = `filtered AS (SELECT ${catalogColumns} FROM products ${w})`;
-  const args = a;
-  let productsSql: string;
-  let productsArgs: (string | number)[];
+  const colList = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, f.shopify_handle, f.created_at`;
 
+  // PERF (2026-10-03): this used to LEFT JOIN `last_price` / `ph_agg` — CTEs over the whole
+  // price_history table — onto every filtered row. SQLite has no index on those derived tables,
+  // so the join was ~quadratic: ONE catalog page sorted by best_sellers read 124M rows and one
+  // sorted by price_drop 173M (measured on prod; Turso's "Top Queries" showed the same 79–115M
+  // statements). Now: (1) the sort key is a per-row scalar subquery that hits
+  // idx_price_history_sku_detected / idx_ph_velocity, (2) the page is cut FIRST (inner query,
+  // LIMIT/OFFSET) and only those <=200 rows pay for the prev_price lookup (outer query).
+  let innerExtra = "";
+  let innerOrder = orderBy;
+  let outerOrder = orderBy;
+  let sortArgs: number[] = [];
   if (joinSort === "best_sellers") {
-    productsSql = `
-      WITH ${filteredCte}, ${lastPriceCte},
-      ph_agg AS (
-        SELECT sku, SUM(old_qty - new_qty) AS units_moved
-        FROM price_history WHERE detected_at > ? AND change_type = 'stock_change' AND old_qty > new_qty GROUP BY sku
-      )
-      SELECT ${selectCols}
-      FROM filtered f
-      LEFT JOIN last_price lp ON lp.sku = f.sku
-      LEFT JOIN ph_agg ON ph_agg.sku = f.sku
-      ORDER BY COALESCE(ph_agg.units_moved, 0) DESC LIMIT ? OFFSET ?`;
-    productsArgs = [...args, cutoff14d, limit, offset];
+    innerExtra = `, COALESCE((SELECT SUM(ph.old_qty - ph.new_qty) FROM price_history ph
+        WHERE ph.sku = f.sku AND ph.detected_at > ? AND ph.change_type = 'stock_change' AND ph.old_qty > ph.new_qty), 0) AS sortkey`;
+    innerOrder = "sortkey DESC, f.sku ASC";
+    outerOrder = "f.sortkey DESC, f.sku ASC";
+    sortArgs = [cutoff14d];
   } else if (joinSort === "price_drop") {
-    productsSql = `
-      WITH ${filteredCte}, ${lastPriceCte},
-      ph_agg AS (
-        SELECT ph.sku,
-          ROUND(((MAX(ph.old_price) - MIN(p2.price)) / MAX(ph.old_price)) * 100.0, 1) AS drop_pct
-        FROM price_history ph JOIN products p2 ON p2.sku = ph.sku
-        WHERE ph.detected_at > ? AND ph.change_type = 'price_drop' AND ph.old_price > p2.price AND ph.old_price > 0
-        GROUP BY ph.sku
-      )
-      SELECT ${selectCols}
-      FROM filtered f
-      LEFT JOIN last_price lp ON lp.sku = f.sku
-      LEFT JOIN ph_agg ON ph_agg.sku = f.sku
-      ORDER BY COALESCE(ph_agg.drop_pct, 0) DESC LIMIT ? OFFSET ?`;
-    productsArgs = [...args, cutoff14d, limit, offset];
-  } else {
-    productsSql = withPrev
-      ? `
-      WITH ${filteredCte}, ${lastPriceCte}
-      SELECT ${selectCols}
-      FROM filtered f
-      LEFT JOIN last_price lp ON lp.sku = f.sku
-      ORDER BY ${orderBy} LIMIT ? OFFSET ?`
-      : `
-      WITH ${filteredCte}
-      SELECT ${selectCols}
-      FROM filtered f
-      ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
-    productsArgs = [...args, limit, offset];
+    innerExtra = `, COALESCE((SELECT ROUND(((MAX(ph.old_price) - f.price) / MAX(ph.old_price)) * 100.0, 1) FROM price_history ph
+        WHERE ph.sku = f.sku AND ph.detected_at > ? AND ph.change_type = 'price_drop' AND ph.old_price > f.price AND ph.old_price > 0), 0) AS sortkey`;
+    innerOrder = "sortkey DESC, f.sku ASC";
+    outerOrder = "f.sortkey DESC, f.sku ASC";
+    sortArgs = [cutoff14d];
   }
+  // Rows-only callers (skipCount) never render the ▼/▲ badge: no lookup at all.
+  const prevCol = withPrev
+    ? `(SELECT ph.old_price FROM price_history ph
+        WHERE ph.sku = f.sku AND ph.change_type IN ('price_drop', 'price_increase') AND ph.old_price IS NOT NULL
+        ORDER BY ph.detected_at DESC, ph.id DESC LIMIT 1)`
+    : `NULL`;
+  const productsSql = `
+      WITH ${filteredCte}
+      SELECT ${colList}, ${prevCol} AS prev_price
+      FROM (
+        SELECT ${colList}${innerExtra} FROM filtered f ORDER BY ${innerOrder} LIMIT ? OFFSET ?
+      ) f
+      ORDER BY ${outerOrder}`;
+  const productsArgs: (string | number)[] = [...a, ...sortArgs, limit, offset];
     return { sql: productsSql, args: productsArgs };
   };
 
