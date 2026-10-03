@@ -4798,12 +4798,24 @@ const IMPORT_JOB_COLUMNS = new Set([
  * attempt keeps its old id and the passed-in id is discarded. Returning the real id
  * (via RETURNING) lets the caller address the row it actually owns; trusting the
  * passed-in id caused "Job <uuid> not found" on re-imports of a previously-failed group.
+ *
+ * The conflict branch ALSO clears shopify_id/content/error, not just status. Aosom's
+ * PSIN groups every BTU/capacity + colour combination of a model under ONE group_key
+ * (confirmed live 2026-10-02: 823-058V81BK/WT [8,000 BTU] and 823-058V83BK/WT [10,000
+ * BTU] all share PSIN 256L5LETCAO00), but these combinations have historically been
+ * imported to Shopify as SEPARATE products. Queuing a never-imported combination (83)
+ * whose group_key was previously used by an already-imported sibling (81) used to
+ * leave that sibling's shopify_id sitting on the row — status reset to 'pending', but
+ * shopify_id still set. importToShopify's idempotency guard (`if (row.shopify_id)
+ * return already_imported`) then short-circuited on that leftover value and never
+ * called createShopifyProduct, so the new combination silently never got created —
+ * forever "Not imported" on the catalog page with zero error anywhere.
  */
 export async function upsertImportJob(job: { id: string; groupKey: string; productData: string; status: string; createdAt: string; updatedAt: string }): Promise<string> {
   const db = await ensureSchema();
   const result = await db.execute({
     sql: `INSERT INTO import_jobs (id, group_key, product_data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(group_key) DO UPDATE SET product_data=excluded.product_data, status='pending', updated_at=excluded.updated_at
+     ON CONFLICT(group_key) DO UPDATE SET product_data=excluded.product_data, status='pending', updated_at=excluded.updated_at, shopify_id=NULL, content=NULL, error=NULL
      RETURNING id`,
     args: [job.id, job.groupKey, job.productData, job.status, job.createdAt, job.updatedAt],
   });
