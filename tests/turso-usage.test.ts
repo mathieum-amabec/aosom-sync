@@ -47,3 +47,22 @@ describe("withUsageLogging", () => {
     await expect(f("https://x")).resolves.toBeInstanceOf(Response);
   });
 });
+
+describe("withUsageLogging with a foreign Request (cross-fetch in hrana-client)", () => {
+  it("hands the base fetch a url + init, never the Request object itself", async () => {
+    resetTursoUsageTotals();
+    const seen: unknown[][] = [];
+    const base = vi.fn(async (...a: unknown[]) => { seen.push(a); return new Response(JSON.stringify(resBody), { status: 200 }); });
+    const log = vi.fn();
+    const foreign = {
+      url: "https://x/v2/pipeline", method: "POST", signal: undefined,
+      headers: new Headers({ authorization: "Bearer t" }),
+      clone() { return this; },
+      text: async () => JSON.stringify(reqBody),
+    };
+    await withUsageLogging(base as unknown as typeof fetch, log)(foreign as unknown as Request);
+    expect(seen[0][0]).toBe("https://x/v2/pipeline");
+    expect((seen[0][1] as RequestInit).body).toBe(JSON.stringify(reqBody));
+    expect(log).toHaveBeenCalledTimes(1);
+  });
+});

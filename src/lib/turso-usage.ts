@@ -67,14 +67,23 @@ function record(entries: UsageEntry[], log: (line: string) => void): void {
 export function withUsageLogging(base: FetchFn, log: (line: string) => void = console.warn): FetchFn {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     let reqBody: unknown = null;
+    let call: [RequestInfo | URL, RequestInit | undefined] = [input, init];
     try {
-      if (typeof input !== "string" && !(input instanceof URL) && typeof (input as Request).clone === "function") {
-        reqBody = JSON.parse(await (input as Request).clone().text());
+      if (typeof input !== "string" && !(input instanceof URL)) {
+        // hrana-client (cross-fetch) passes a Request that may not be this runtime's Request
+        // class, which native fetch rejects ("Failed to parse URL from [object Request]").
+        // Flatten it to (url, init) with the body read once.
+        const req = input as Request;
+        const text = await req.clone().text();
+        const headers: Record<string, string> = {};
+        req.headers.forEach((v, k) => { headers[k] = v; });
+        call = [req.url, { method: req.method, headers, body: text, signal: req.signal }];
+        reqBody = JSON.parse(text);
       } else if (typeof init?.body === "string") {
         reqBody = JSON.parse(init.body);
       }
-    } catch { /* not JSON / unreadable: log without SQL */ }
-    const res = await base(input as RequestInfo, init);
+    } catch { /* unreadable / not JSON: pass the original through, log without SQL */ }
+    const res = await base(call[0] as RequestInfo, call[1]);
     try {
       if (res.ok) record(extractUsage(reqBody, await res.clone().json()), log);
     } catch { /* never break a query over logging */ }
