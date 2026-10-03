@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.100.0] - 2026-10-03
+
+**"Ameublo présente": the mascot in our videos, for free** (Mat: "Allons-y avec A"). Opt-in, off by default; no video was rendered or published.
+
+### Added
+
+- `ameublo-sprite.ts`: Ameublo as a parametric SVG. A pose is a few numbers (eyes, mouth, gaze, both arms, hop, squash), so every frame comes from the same vector drawing and he stays on-model with no AI call.
+  - The `ameubloPoseAt` choreography: pops up from below, waves hello, points at a speech bubble with the arm on the bubble's side, then waves goodbye with two hops. He breathes and blinks throughout.
+  - Seasonal accessories by campaign: Quebec tuque (hiver), Santa hat (noël), maple leaf (automne), witch hat (halloween).
+  - Five in-character bubble lines, picked per SKU.
+- `video-engines/ameublo-overlay.ts`: rasterises the frames with sharp and lays them over a clip with ffmpeg, together with the bubble (DM Sans `drawtext`). Placement goes in the half of the frame the ad copy is not in: top corner by default, bottom corner above the brand bar when the copy moved up. Cost per video: 0 $.
+- `render-sequential-ads.mts --ameublo` applies the overlay after the normal render.
+
 ## [0.5.99.1] - 2026-10-02
 
 ### Fixed
