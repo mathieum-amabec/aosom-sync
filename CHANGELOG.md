@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.101.0] - 2026-10-03
+
+**Studio Ameublo: a dashboard section to review mascot test videos** (Mat: "fait une série de vidéo test pour voir la constance… une section dans Aosom-Sync pour voir"). Review only: nothing here is ever published.
+
+### Added
+
+- `/ameublo` (sidebar "Studio Ameublo"): the test videos grouped by series, each one playable. 👍 "Constant" / 👎 "À revoir" per video, an optional comment, and a running count per series. Reviewers are read-only.
+- `GET`/`PATCH /api/ameublo/videos`, and the table `ameublo_test_videos`. Nothing reads this table into `publication_queue`.
+- `scripts/ameublo-test-series.mts`: takes a spread of sequential-ad drafts across campaigns and lays the free "Ameublo présente" overlay on them.
+  - It reads where the ad's copy sits (the darker gradient band) and puts Ameublo in the other half.
+  - It uploads each result to Blob and records it for review. The source drafts are untouched.
+  - Dry-run by default.
+
+### Data
+
+- "Série 1 — constance": 10 test videos across Noël, animaux, automne, enfants and maison. Cost: 0 $ (no AI call).
+
 ## [0.5.100.0] - 2026-10-03
 
 **"Ameublo présente": the mascot in our videos, for free** (Mat: "Allons-y avec A"). Opt-in, off by default; no video was rendered or published.

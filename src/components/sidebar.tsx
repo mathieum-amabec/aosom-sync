@@ -106,6 +106,15 @@ const NAV_ITEMS: NavItem[] = [
     ),
   },
   {
+    href: "/ameublo",
+    label: "Studio Ameublo",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 11V8a6 6 0 0 1 12 0v3M4 11h3v5h10v-5h3v6H4v-6Zm3 6v3m10-3v3" />
+      </svg>
+    ),
+  },
+  {
     href: "/blog",
     label: "Blog",
     // Shows how many generated articles are still sitting in 'draft' (awaiting approval).

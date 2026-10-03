@@ -685,6 +685,20 @@ async function _initSchemaImpl(): Promise<void> {
       payload TEXT NOT NULL,
       created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
     )`,
+    // "Studio Ameublo": mascot test videos for review only. Never published — nothing reads
+    // this table into publication_queue. See scripts/ameublo-test-series.mts.
+    `CREATE TABLE IF NOT EXISTS ameublo_test_videos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      series TEXT NOT NULL,
+      sku TEXT,
+      campaign TEXT,
+      label TEXT,
+      video_url TEXT NOT NULL,
+      source_queue_id INTEGER,
+      verdict TEXT CHECK (verdict IN ('ok','bad')),
+      note TEXT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
@@ -7397,4 +7411,66 @@ export async function getTrendScoresComputedAt(): Promise<number | null> {
   const res = await db.execute(`SELECT MAX(computed_at) AS at FROM trend_scores`);
   const at = Number(rowToObj(res.rows[0]).at);
   return Number.isFinite(at) && at > 0 ? at : null;
+}
+
+// ─── Studio Ameublo (mascot test videos, review only) ────────────────────────
+
+export interface AmeubloTestVideo {
+  id: number;
+  series: string;
+  sku: string | null;
+  campaign: string | null;
+  label: string | null;
+  video_url: string;
+  source_queue_id: number | null;
+  verdict: "ok" | "bad" | null;
+  note: string | null;
+  created_at: string;
+}
+
+export async function insertAmeubloTestVideo(v: {
+  series: string;
+  sku?: string | null;
+  campaign?: string | null;
+  label?: string | null;
+  videoUrl: string;
+  sourceQueueId?: number | null;
+}): Promise<number> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO ameublo_test_videos (series, sku, campaign, label, video_url, source_queue_id)
+          VALUES (?, ?, ?, ?, ?, ?)`,
+    args: [v.series, v.sku ?? null, v.campaign ?? null, v.label ?? null, v.videoUrl, v.sourceQueueId ?? null],
+  });
+  return Number(r.lastInsertRowid);
+}
+
+export async function listAmeubloTestVideos(): Promise<AmeubloTestVideo[]> {
+  const db = await ensureSchema();
+  const r = await db.execute(`SELECT * FROM ameublo_test_videos ORDER BY created_at DESC, id ASC`);
+  return r.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      id: Number(o.id),
+      series: String(o.series),
+      sku: o.sku == null ? null : String(o.sku),
+      campaign: o.campaign == null ? null : String(o.campaign),
+      label: o.label == null ? null : String(o.label),
+      video_url: String(o.video_url),
+      source_queue_id: o.source_queue_id == null ? null : Number(o.source_queue_id),
+      verdict: o.verdict === "ok" || o.verdict === "bad" ? o.verdict : null,
+      note: o.note == null ? null : String(o.note),
+      created_at: String(o.created_at),
+    };
+  });
+}
+
+/** Operator's verdict on a test video. `verdict: null` clears it. Returns false when the id is unknown. */
+export async function setAmeubloTestVerdict(id: number, verdict: "ok" | "bad" | null, note?: string | null): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE ameublo_test_videos SET verdict = ?, note = COALESCE(?, note) WHERE id = ?`,
+    args: [verdict, note === undefined ? null : note, id],
+  });
+  return r.rowsAffected > 0;
 }
