@@ -4,6 +4,10 @@
   ],
   "crons": [
     {
+      "path": "/api/cron/category-guard",
+      "schedule": "0 10 * * *"
+    },
+    {
       "path": "/api/cron/sync",
       "schedule": "0 6 * * *"
     },

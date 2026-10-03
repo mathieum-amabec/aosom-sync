@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.98.0] - 2026-10-02
+
+Catalogue clean-up approved by Mat (points 3, 6a–6d) and the guardrails that keep it clean.
+
+### Added
+
+- **Sizes arrive in French at import** (`size-names.ts`, `toFrenchSize`): "Large" → "Grand", "Set of 4" → "Lot de 4", "3-Drawer" → "3 tiroirs", "6FT" → "6 pi"… The Aosom wording is registered as the EN translation (`registerOptionEnTranslations(productId, sizeEn)`). Words only — inch marks, metric units and decimals are left as Aosom wrote them.
+- **Daily category guard** (`category-guard.ts`, `GET /api/cron/category-guard`, 10:00 UTC): read-only, it raises a dashboard notification when an active product sits in no storefront-menu collection, or an import mapping points at a deleted collection.
+
+### Fixed (data, applied to production the same day)
+
+- 332 English size values on 264 products translated to French, with EN translations registered. The Christmas tree "6ft" / "6 pi" duplicate was merged.
+- The 9 "duplicate colour" products got correct, distinct French colours: Noir / Noir et blanc, Blanc / Blanc marbre, Vert / Vert pâle, Vert / Vert — lot de 2, plus EN translations. 65 ghost option values (used by no variant) were deleted across 30 products.
+- Swatches added for Camouflage, Couleurs pâles, Couleurs foncées and Carbonisé (theme `main-product.liquid`).
+- "Meubles & Déco › Salle de bain" grew from 25 to 48 products: Aosom had moved bathroom cabinets from "Bedding & Bath" to "Bathroom Furniture", and the smart rule only knew the old branch.
+- 2 import mappings to the deleted "Autres" collection were removed. Those products remain reachable through "Bricolage & Outils" and their other menu sections.
+- 56 summer patio sequential-ad drafts cancelled.
+
 ## [0.5.97.0] - 2026-10-02
 
 Ameublo spends fewer tokens for the same answers, and its limit messages speak in its own voice.
