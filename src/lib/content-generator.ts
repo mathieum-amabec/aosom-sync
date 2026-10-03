@@ -245,16 +245,23 @@ Return JSON with this exact structure:
   // triggers the escalation. Only ContentValidationError escalates: a budget-exceeded
   // or network failure must not buy a second paid call.
   //
-  // Provider switch (CONTENT_PROVIDER, see content-provider.ts): the FIRST tier is Claude Haiku
-  // (default) or Gemini Flash-Lite. The escalation tier is always Claude Sonnet, and the same
-  // prompt, validation and guardrails apply whichever model wrote the draft.
+  // Provider switch (CONTENT_PROVIDER, see content-provider.ts). The chain is
+  //   gemini mode:    Gemini Flash-Lite → Claude Haiku → Claude Sonnet
+  //   anthropic mode:                     Claude Haiku → Claude Sonnet   (the historical chain)
+  // Haiku is the fallback behind Gemini because it is the model this pipeline has always run on,
+  // and it is 3x cheaper than Sonnet; Sonnet stays the last resort exactly as before, so it is
+  // only reached when BOTH cheaper models fail validation. The same prompt, validation and
+  // guardrails apply whichever model wrote the draft.
   //
   // `correction` is set on the single same-tier retry that fixes soft problems (inch values left
   // in the body, missing accents, too few tags) — see collectCopyIssues below.
-  const firstTierIsGemini = getContentProvider() === "gemini";
-  const attempt = async (tier: "first" | "escalation", correction?: string): Promise<GeneratedContent> => {
-    const viaGemini = tier === "first" && firstTierIsGemini;
-    const model = tier === "escalation" ? CLAUDE.MODEL : viaGemini ? getContentGeminiModel() : CLAUDE.MODEL_BATCH;
+  type Tier = "gemini" | "batch" | "escalation";
+  const tiers: Tier[] = getContentProvider() === "gemini" ? ["gemini", "batch", "escalation"] : ["batch", "escalation"];
+  const modelFor = (t: Tier) =>
+    t === "gemini" ? getContentGeminiModel() : t === "batch" ? CLAUDE.MODEL_BATCH : CLAUDE.MODEL;
+  const attempt = async (tier: Tier, correction?: string): Promise<GeneratedContent> => {
+    const viaGemini = tier === "gemini";
+    const model = modelFor(tier);
     const userPrompt = correction ? `${prompt}\n\n${correction}` : prompt;
 
     let text: string;
@@ -379,18 +386,23 @@ Return JSON with this exact structure:
     return content;
   };
 
-  try {
-    return await attempt("first");
-  } catch (err) {
-    // A Haiku-only deployment whose escalation model is the same model has nowhere to escalate.
-    const cannotEscalate = !firstTierIsGemini && CLAUDE.MODEL_BATCH === CLAUDE.MODEL;
-    if (!(err instanceof ContentValidationError) || cannotEscalate) throw err;
-    const firstModel = firstTierIsGemini ? getContentGeminiModel() : CLAUDE.MODEL_BATCH;
-    console.warn(
-      `[content-generator] ${firstModel} output rejected (${err.message}) — ` +
-        `re-running "${cleanName}" on ${CLAUDE.MODEL}`,
-    );
-    return await attempt("escalation");
+  for (let i = 0; ; i++) {
+    try {
+      return await attempt(tiers[i]);
+    } catch (err) {
+      // Only a validation failure moves down the chain; an API/budget/network error propagates.
+      if (!(err instanceof ContentValidationError)) throw err;
+      // Skip any tier configured to the SAME model (e.g. CLAUDE_BATCH_MODEL set to Sonnet):
+      // re-running the same model on the same prompt is a paid no-op.
+      let next = i + 1;
+      while (next < tiers.length && modelFor(tiers[next]) === modelFor(tiers[i])) next++;
+      if (next >= tiers.length) throw err;
+      console.warn(
+        `[content-generator] ${modelFor(tiers[i])} output rejected (${err.message}) — ` +
+          `re-running "${cleanName}" on ${modelFor(tiers[next])}`,
+      );
+      i = next - 1;
+    }
   }
 }
 
