@@ -72,6 +72,9 @@ const USE_V2 = argv.includes("--v2");
 // --replace: re-render an existing campaign in place. Without it, a second run cancels the
 // old drafts and books new slots, discarding whatever schedule an operator already chose.
 const REPLACE = argv.includes("--replace");
+// --ameublo: overlay the mascot ("Ameublo présente": pops up, waves, points at a bubble, waves
+// goodbye). Free — drawn from our own SVG, no AI call. Off by default.
+const AMEUBLO = argv.includes("--ameublo");
 // --skus a,b,c: restrict the run to these SKUs (applied AFTER the normal selection,
 // so every quality gate the style enforces still applies — this only narrows).
 // Needed for themed campaigns: the UGC selector returns every SKU that has a clip,
@@ -200,7 +203,7 @@ const BRAND = "ameublo" as const;
 // ── dynamic engine imports (circular-graph safe under tsx) ────────────────
 type Lib = Awaited<ReturnType<typeof loadLib>>;
 async function loadLib() {
-  const [ren, vbt, ic, val, bsk, rbf, dbM, schedM, scene, copyGen] = await Promise.all([
+  const [ren, vbt, ic, val, bsk, rbf, dbM, schedM, scene, copyGen, amO, amS] = await Promise.all([
     import("@/lib/slideshow/render"),
     import("@/lib/video-brand-tokens"),
     import("@/lib/image-composer"),
@@ -211,6 +214,8 @@ async function loadLib() {
     import("@/lib/publication-scheduler"),
     import("@/lib/video-scene-selector"),
     import("@/lib/video-copy-generator"),
+    import("@/lib/video-engines/ameublo-overlay"),
+    import("@/lib/ameublo-sprite"),
   ]);
   rbf.registerBrandFonts();
   return {
@@ -227,6 +232,9 @@ async function loadLib() {
     parseVideoSchedule: schedM.parseVideoSchedule,
     analyzeClip: scene.analyzeClip,
     generateVideoCopy: copyGen.generateVideoCopy,
+    applyAmeubloOverlay: amO.applyAmeubloOverlay,
+    accessoryForCampaign: amS.accessoryForCampaign,
+    bubbleLineFor: amS.bubbleLineFor,
   };
 }
 
@@ -916,6 +924,8 @@ async function main(): Promise<void> {
         // never leaves a blob in the store with no queue row pointing at it.
         const out = path.join(OUT_TMP, `${sku.replace(/[^A-Za-z0-9._-]/g, "_")}.mp4`);
         let images: number | undefined;
+        // Where the copy sits, so Ameublo can take the other half of the frame.
+        let copyZone: "top" | "middle" | "bottom" = "middle";
         if (STYLE === "hero" && !UGC) {
           const imgs = (p?.images || []).filter(lib.isShopifyCdnUrl);
           images = imgs.length;
@@ -944,8 +954,23 @@ async function main(): Promise<void> {
             }
           }
           if (!APPLY) { report.push({ sku, title, status: "dry-run" }); continue; }
+          copyZone = zone;
           if (USE_V2) renderDemandGen(sku, out, msgs, segment);
           else await renderAdV3(sku, out, msgs, lib, segment, zone, (p?.product_type ?? null) as string | null);
+        }
+        if (AMEUBLO) {
+          // The copy band is at the bottom unless the product sits low (then it moves to the
+          // top): Ameublo stands in the half the copy is not in.
+          const withMascot = out.replace(/.mp4$/, ".ameublo.mp4");
+          await lib.applyAmeubloOverlay(out, withMascot, {
+            ffmpegBin: FFMPEG,
+            fontFile: FONT,
+            bubbleText: lib.bubbleLineFor(sku),
+            accessory: lib.accessoryForCampaign(CAMPAIGN),
+            vertical: copyZone === "bottom" ? "bottom" : "top",
+            bottomMargin: BAR_H,
+          });
+          fs.renameSync(withMascot, out);
         }
         if (OUT_DIR) {
           fs.mkdirSync(OUT_DIR, { recursive: true });
