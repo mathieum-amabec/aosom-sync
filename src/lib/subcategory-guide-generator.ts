@@ -208,7 +208,7 @@ STYLE :
   }
 Chaque champ HTML doit être du HTML simple valide (p, ul, li, strong) — pas de classes, pas de style inline, pas de markdown.`;
 
-function buildCopyUserPrompt(stats: SubcategoryTrendStats, titles: string[]): string {
+export function buildCopyUserPrompt(stats: SubcategoryTrendStats, titles: string[]): string {
   const productLines = stats.topProducts
     .map((p, i) => `- ${titles[i]} — ${p.price.toFixed(2)} $ CAD`)
     .join("\n");
@@ -251,7 +251,7 @@ function parseGuideCopyResponse(text: string, label: string): GuideCopy {
   };
 }
 
-async function generateGuideCopy(
+export async function generateGuideCopy(
   stats: SubcategoryTrendStats,
   titles: string[],
   model: string = CLAUDE.MODEL_BATCH,
@@ -303,7 +303,7 @@ Produis la version corrigée (même structure JSON complète).`;
  * guide (see RETRY_QUALITY_THRESHOLD in guide-quality-pipeline.ts) — a guide that's still weak
  * after this goes to Mat with both scores rather than looping.
  */
-async function regenerateGuideCopyWithFeedback(
+export async function regenerateGuideCopyWithFeedback(
   stats: SubcategoryTrendStats,
   titles: string[],
   original: GuideCopy,
