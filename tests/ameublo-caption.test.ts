@@ -25,4 +25,11 @@ describe("ameubloCaption", () => {
     const b = ameubloCaption({ ...base, style: "vitrine", lang: "fr", variant: 1 });
     expect(a).not.toBe(b);
   });
+  it("promo Réaction never claims anyone reacted, and never says « meuble »", () => {
+    for (const lang of ["fr", "en"] as const) for (let variant = 0; variant < 3; variant++) {
+      const c = ameubloCaption({ ...base, style: "reaction", lang, variant, promo: true });
+      expect(c).not.toMatch(/adoré|loved|leur réaction|that reaction|meuble/i);
+      expect(ameubloCaption({ ...base, style: "reaction", lang, variant })).not.toMatch(/meuble/i);
+    }
+  });
 });

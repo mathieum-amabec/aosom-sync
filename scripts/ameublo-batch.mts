@@ -40,6 +40,7 @@ const CAMPAIGN = flag("--campaign") ?? "maison-2026";
 const SERIES = flag("--series") ?? "Série d’octobre 2026";
 /** --pool halloween: seasonal decor pool (inflatables, animatronics) instead of the furniture pool. */
 const HALLOWEEN = (flag("--pool") ?? "furniture") === "halloween";
+const CLIPS_DIR = flag("--clips") ? path.resolve(flag("--clips")!) : null;
 const ROOT = process.env.SEQ_ASSETS_ROOT || path.resolve("../aosom-sync");
 const FFMPEG =
   process.env.FFMPEG_BIN ||
@@ -368,7 +369,10 @@ async function plan() {
       for (const m of manifest) if ((m.country === "CA" || m.country === "US") && !REACTION_EXCLUDE.has(m.sku)) ok.add(m.sku);
       // --allow: customer clips with no scan/manifest entry that were checked by eye (no brand, no watermark).
       for (const sku of (flag("--allow") ?? "").split(",").filter(Boolean)) ok.add(sku);
-      const clips = fs.readdirSync(path.join(ROOT, "src/ugc")).map((f) => f.replace(/\.mp4$/, "")).filter((s) => ok.has(s));
+      // --clips DIR: pre-cut promo footage (checked frame by frame) replaces the UGC folder and its compliance scan.
+      const clips = CLIPS_DIR
+        ? fs.readdirSync(CLIPS_DIR).filter((f) => f.endsWith(".mp4")).map((f) => f.replace(/\.mp4$/, ""))
+        : fs.readdirSync(path.join(ROOT, "src/ugc")).map((f) => f.replace(/\.mp4$/, "")).filter((s) => ok.has(s));
       const rows = (
         await turso.execute({
           sql: `SELECT sku, name, price, product_type, shopify_handle, shopify_product_id FROM products
@@ -536,7 +540,7 @@ async function render() {
       try {
         let spec;
         if (j.style === "reaction") {
-          const clip = path.join(ROOT, "src/ugc", `${lead.sku}.mp4`);
+          const clip = path.join(CLIPS_DIR ?? path.join(ROOT, "src/ugc"), `${lead.sku}.mp4`);
           if (!fs.existsSync(clip)) throw new Error(`clip missing: ${clip}`);
           spec = await scenes.reactionScene(clip, lead, lines, accessory, track, lang);
         } else if (j.style === "vitrine") spec = await scenes.vitrineScene(await photosOf(lead.sku, 2, j.products[0].lifeUrl), lead, lines, accessory, track, lang);
@@ -558,7 +562,7 @@ async function render() {
 
         const prices = Object.fromEntries(j.products.map((p) => [p.sku, p.price]));
         const caption = cap.ameubloCaption({
-          style: j.style, lang, titles: ps.map((p) => p.title), prices: ps.map((p) => p.price), handles: j.products.map((p) => p.handle),
+          style: j.style, lang, titles: ps.map((p) => p.title), prices: ps.map((p) => p.price), handles: j.products.map((p) => p.handle), promo: !!CLIPS_DIR,
           room: j.room ? i18n.ROOM_LABEL[j.room]?.[lang] : undefined,
           cap: j.style === "top3" ? scenes.top3Cap(ps.map((p) => p.price)) : undefined, variant: j.n,
         });
