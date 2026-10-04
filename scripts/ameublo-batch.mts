@@ -366,11 +366,13 @@ async function plan() {
       // CA/US clips are established-clean unboxings (never scanned); every video is still eyeballed before release.
       const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/new-ugc-manifest.json"), "utf8")) as { sku: string; country: string }[];
       for (const m of manifest) if ((m.country === "CA" || m.country === "US") && !REACTION_EXCLUDE.has(m.sku)) ok.add(m.sku);
+      // --allow: customer clips with no scan/manifest entry that were checked by eye (no brand, no watermark).
+      for (const sku of (flag("--allow") ?? "").split(",").filter(Boolean)) ok.add(sku);
       const clips = fs.readdirSync(path.join(ROOT, "src/ugc")).map((f) => f.replace(/\.mp4$/, "")).filter((s) => ok.has(s));
       const rows = (
         await turso.execute({
           sql: `SELECT sku, name, price, product_type, shopify_handle, shopify_product_id FROM products
-                WHERE sku IN (${clips.map(() => "?").join(",")}) AND shopify_product_id != '' AND qty >= 3 AND price > 0`, args: clips,
+                WHERE sku IN (${clips.map(() => "?").join(",")}) AND shopify_product_id != '' AND qty >= 3 AND price > 0${HALLOWEEN ? " AND product_type LIKE '%Halloween Decorations%'" : ""}`, args: clips,
         })
       ).rows.map((r) => ({
         sku: String(r.sku), name: String(r.name), price: Number(r.price), type: String(r.product_type),
