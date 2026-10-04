@@ -492,6 +492,12 @@ async function _initSchemaImpl(): Promise<void> {
       UNIQUE(email, sku)
     )`,
     // cron_runs: one row per cron invocation (last-run status surfaced on the dashboard).
+    // mcp_keys: access keys for the remote MCP endpoint (/api/mcp). Only the SHA-256 hash is stored.
+    `CREATE TABLE IF NOT EXISTS mcp_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, key_hint TEXT NOT NULL,
+      created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER
+    )`,
     `CREATE TABLE IF NOT EXISTS cron_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL, status TEXT NOT NULL, detail TEXT,
@@ -7550,4 +7556,52 @@ export async function setAmeubloTestVerdict(id: number, verdict: "ok" | "bad" | 
     args: [verdict, note === undefined ? null : note, id],
   });
   return r.rowsAffected > 0;
+}
+
+// ─── MCP access keys ────────────────────────────────────────────────
+
+export interface McpKeyRow { id: number; name: string; key_hint: string; created_at: number; last_used_at: number | null; revoked_at: number | null }
+
+export async function createMcpKey(name: string, keyHash: string, keyHint: string): Promise<number> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO mcp_keys (name, key_hash, key_hint, created_at) VALUES (?, ?, ?, ?)`,
+    args: [name, keyHash, keyHint, Math.floor(Date.now() / 1000)],
+  });
+  return Number(r.lastInsertRowid);
+}
+
+export async function listMcpKeys(): Promise<McpKeyRow[]> {
+  const db = await ensureSchema();
+  const r = await db.execute(`SELECT id, name, key_hint, created_at, last_used_at, revoked_at FROM mcp_keys ORDER BY id DESC LIMIT 100`);
+  return r.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      id: Number(o.id), name: String(o.name), key_hint: String(o.key_hint), created_at: Number(o.created_at),
+      last_used_at: o.last_used_at == null ? null : Number(o.last_used_at),
+      revoked_at: o.revoked_at == null ? null : Number(o.revoked_at),
+    };
+  });
+}
+
+export async function revokeMcpKey(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `UPDATE mcp_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, args: [Math.floor(Date.now() / 1000), id] });
+  return r.rowsAffected > 0;
+}
+
+/**
+ * True when `keyHash` belongs to a non-revoked key. Stamps last_used_at at most once every
+ * 10 minutes per key so a chatty client does not turn every tool call into a write.
+ */
+export async function verifyMcpKey(keyHash: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT id, last_used_at FROM mcp_keys WHERE key_hash = ? AND revoked_at IS NULL`, args: [keyHash] });
+  if (!r.rows[0]) return false;
+  const o = rowToObj(r.rows[0]);
+  const now = Math.floor(Date.now() / 1000);
+  if (o.last_used_at == null || now - Number(o.last_used_at) > 600) {
+    await db.execute({ sql: `UPDATE mcp_keys SET last_used_at = ? WHERE id = ?`, args: [now, Number(o.id)] });
+  }
+  return true;
 }
