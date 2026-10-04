@@ -126,6 +126,18 @@ GLOBAL RULES
 - Do NOT mention shipping or delivery in the product title or HTML body.
 - Do NOT put color or size in the product title or body (those are variant-level).
 
+DIMENSIONS — the shopper cannot measure a photo; this is how they judge whether it fits:
+  - If "Dimensions:" is given in the input data below, descriptionFr AND descriptionEn MUST
+    each include ONE bullet point stating them, in cm, using exactly this pattern:
+    FR: "Dimensions : L x l x H cm (L x l x H po)" — EN: "Dimensions: L x W x H cm (L x W x H in)".
+    Use the cm figures given verbatim; compute the inch figures in parentheses yourself.
+  - If "Dimensions:" is NOT given (not provided by the supplier), do not invent, estimate or
+    guess them — simply omit the dimensions bullet.
+
+CAPACITY (storage boxes, bins, coolers, tanks, planters, …) — when the source names a volume:
+  - State it in litres ONLY. NEVER write "gallon(s)" or "gal" anywhere in your output, not even
+    in parentheses alongside litres. Convert: 1 US gallon = 3.785 litres, rounded to a whole number.
+
 PRODUCT TITLE (titleFr / titleEn) — strict pattern:
   [Product type] [distinctive feature] [size/capacity if relevant] — [color if relevant]
   - NEVER include a supplier brand name ANYWHERE in your response: Outsunny, HOMCOM, HomCom, Aosom, Vinsetto, Pawhut,
@@ -191,6 +203,31 @@ export class ContentValidationError extends Error {
 }
 
 /**
+ * Aosom's Length/Width/Height feed columns are NOT unit-consistent: some rows report inches,
+ * others centimetres, with no unit column to disambiguate. Confirmed by cross-referencing
+ * against supplier titles that spell out a dimension (2026-10-04):
+ *   - D2-0014 "62'' L 2-Story Rabbit Hutch" → {length:62.3,...} — that IS 62.3, i.e. inches.
+ *   - 845-209V01BN "30" x 21" x 71" Garden Storage Shed" → {77,54.2,179} — 77cm≈30in,
+ *     54.2cm≈21in, 179cm≈71in, i.e. that row is ALREADY cm.
+ * Heuristic (calibrated against 5 real rows spanning both cases, incl. 3 cross-checked against
+ * the row's own stated gallon capacity): a real inch value over 120 (10 ft) is implausible for
+ * these categories, so treat the whole triple as already-cm above that; below it, as inches
+ * needing ×2.54. Not provably correct for every edge case (a genuine small cm-native item
+ * could be misread as inches) — this is a deliberate, documented trade-off against the
+ * alternative of omitting dimensions entirely, which is the bug being fixed here.
+ */
+export function inferDimensionsCm(
+  dims: { length: number; width: number; height: number } | undefined,
+): { length: number; width: number; height: number } | null {
+  if (!dims) return null;
+  const { length, width, height } = dims;
+  if (length <= 0 || width <= 0 || height <= 0) return null;
+  const alreadyCm = Math.max(length, width, height) > 120;
+  const toCm = (v: number) => Math.round((alreadyCm ? v : v * 2.54) * 10) / 10;
+  return { length: toCm(length), width: toCm(width), height: toCm(height) };
+}
+
+/**
  * Generate bilingual FR/EN product content using Claude API.
  */
 export async function generateProductContent(
@@ -206,6 +243,11 @@ export async function generateProductContent(
     .map((v) => `- SKU: ${v.sku}, Price: $${v.price}`)
     .join("\n");
 
+  const dimsCm = inferDimensionsCm(product.variants[0]?.dimensions);
+  const dimensionsLine = dimsCm
+    ? `Dimensions: ${dimsCm.length} x ${dimsCm.width} x ${dimsCm.height} cm`
+    : "Dimensions: not provided by the supplier — do not invent or estimate them.";
+
   const prompt = `Create a Shopify product listing from this data:
 
 Name: ${cleanName}
@@ -213,6 +255,7 @@ Brand (supplier — internal only, NEVER put it in the title): ${product.brand}
 Category: ${product.productType}
 Material: ${product.material}
 Price: $${product.variants[0]?.price || 0} CAD
+${dimensionsLine}
 Description: ${cleanDesc.slice(0, 1500)}
 Short Description: ${cleanShort.slice(0, 500)}
 Variants:
@@ -362,7 +405,7 @@ ${correction}` : prompt;
     // fixable by the SAME model in one cheap extra call, so they never escalate to the paid tier
     // and are handled OUTSIDE the try above — a budget/network failure on the retry must
     // propagate as itself, not be relabelled a validation error (which would buy an escalation).
-    const issues = collectCopyIssues(content);
+    const issues = collectCopyIssues(content, dimsCm);
     if (issues.length && !correction) {
       console.warn(`[content-generator] ${model} copy needs a fix (${issues.join("; ")}) — one corrective retry`);
       return attempt(tier, buildCorrection(issues));
@@ -398,14 +441,39 @@ const stripTags = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g
 /**
  * Soft problems in an otherwise valid listing, as short human-readable lines (empty = clean).
  * Titles are NOT checked here — they are repaired deterministically before this runs.
+ *
+ * `expectedDimsCm` is the dimensions line actually sent to the model (see
+ * `inferDimensionsCm`/`dimensionsLine` in generateProductContent) — when it was given real
+ * numbers, BOTH descriptions must mention them, or a shopper has no way to judge the size from
+ * text alone (the prompt also forbids a dimensions-overlay photo from standing in for this —
+ * see vision-classifier.ts's STRICT_OVERLAY_PROMPT).
  */
-export function collectCopyIssues(c: GeneratedContent): string[] {
+export function collectCopyIssues(
+  c: GeneratedContent,
+  expectedDimsCm?: { length: number; width: number; height: number } | null,
+): string[] {
   const issues: string[] = [];
-  const imperial = findImperialOnly(
-    [c.descriptionFr, c.descriptionEn, c.seoDescriptionFr, c.seoDescriptionEn].map(stripTags).join(" . "),
-  );
+  const bodyText = [c.descriptionFr, c.descriptionEn, c.seoDescriptionFr, c.seoDescriptionEn].map(stripTags).join(" . ");
+  const imperial = findImperialOnly(bodyText);
   if (imperial.length) {
     issues.push(`imperial values without a metric equivalent: ${imperial.slice(0, 6).join(", ")}`);
+  }
+  if (/\bgal(?:lons?)?\b/i.test(bodyText)) {
+    issues.push('capacity given in gallons — state it in litres only, remove every "gallon"/"gal"');
+  }
+  if (expectedDimsCm) {
+    // Loose match: at least two of the three figures must appear somewhere in either
+    // description, as EITHER the exact value we gave the model ("55.9", since the prompt
+    // says to use it verbatim) OR its rounded whole number ("56", in case the model rounds
+    // for a cleaner-sounding bullet) — tolerates either style, but still catches the
+    // dimensions being dropped entirely.
+    const axes = [expectedDimsCm.length, expectedDimsCm.width, expectedDimsCm.height];
+    const hits = axes.filter((v) => bodyText.includes(String(v)) || bodyText.includes(String(Math.round(v)))).length;
+    if (hits < 2) {
+      issues.push(
+        `dimensions (${axes.join(" x ")} cm) were provided but are missing from the description — add a "Dimensions" bullet in both languages`,
+      );
+    }
   }
   const accents = findUnaccentedFrench(
     [c.titleFr, stripTags(c.descriptionFr), c.metaTitleFr, c.metaDescriptionFr, c.seoDescriptionFr].join(" . "),
