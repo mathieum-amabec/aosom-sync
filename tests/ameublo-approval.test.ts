@@ -40,8 +40,8 @@ describe("approveAmeubloVideo", () => {
     expect(arg).toMatchObject({ contentType: "sequential_ad", contentId: "ameublo:1", platform: "both", status: "pending" });
     expect(JSON.parse(arg.payload)).toMatchObject({ brand: "ameublo", reelsVideoUrl: "https://blob/x.mp4" });
     expect(arg.metadata).toMatchObject({ source: "ameublo_studio", keepCaption: true, lang: "fr", renderedPrices: { A1: 99.99 } });
-    // FR keeps the 1st/3rd time of the day: 07:45 or 18:30 Toronto (EDT = UTC-4) -> 11:45 / 22:30 UTC
-    expect(["11:45:00", "22:30:00"]).toContain(arg.scheduledAt.slice(11));
+    // FR keeps the 1st/3rd/5th/7th time of the day: 07:45, 12:15, 16:15 or 20:15 Toronto (EDT = UTC-4) -> 11:45 / 16:15 / 20:15 / 00:15 UTC
+    expect(["11:45:00", "16:15:00", "20:15:00", "00:15:00"]).toContain(arg.scheduledAt.slice(11));
     expect(db.setAmeubloQueueId).toHaveBeenCalledWith(1, 55);
   });
 
@@ -50,7 +50,7 @@ describe("approveAmeubloVideo", () => {
     await approveAmeubloVideo(1);
     const arg = db.addToQueue.mock.calls[0][0];
     expect(JSON.parse(arg.payload).brand).toBe("furnish");
-    expect(["16:15:00", "00:45:00"]).toContain(arg.scheduledAt.slice(11));
+    expect(["13:45:00", "18:30:00", "22:30:00", "01:45:00"]).toContain(arg.scheduledAt.slice(11));
   });
 
   it("retries the next slot when one is taken", async () => {
