@@ -125,6 +125,7 @@ function CatalogBrowser() {
   const [maxPrice, setMaxPrice] = useState(() => sp.get("maxPrice") ?? "");
   const [inStock, setInStock] = useState(() => sp.get("inStock") === "true");
   const [notImported, setNotImported] = useState(() => sp.get("notImported") === "true");
+  const [imported, setImported] = useState(() => sp.get("imported") === "true");
   const [withDiscount, setWithDiscount] = useState(() => sp.get("withDiscount") === "true");
   const [lowStock, setLowStock] = useState(() => sp.get("lowStock") === "true");
   const [sort, setSort] = useState(() => sp.get("sort") ?? "");
@@ -156,12 +157,13 @@ function CatalogBrowser() {
     if (maxPrice) p.set("maxPrice", maxPrice);
     if (inStock) p.set("inStock", "true");
     if (notImported) p.set("notImported", "true");
+    if (imported) p.set("imported", "true");
     if (withDiscount) p.set("withDiscount", "true");
     if (lowStock) p.set("lowStock", "true");
     if (sort) p.set("sort", sort);
     if (page > 1) p.set("page", String(page));
     return p;
-  }, [search, productType, subCategory, minPrice, maxPrice, inStock, notImported, withDiscount, lowStock, sort, page]);
+  }, [search, productType, subCategory, minPrice, maxPrice, inStock, notImported, imported, withDiscount, lowStock, sort, page]);
 
   const fetchCatalog = useCallback(async () => {
     setLoading(true);
@@ -465,10 +467,20 @@ function CatalogBrowser() {
           }}
         />
         <FilterToggle
+          label="Importés"
+          active={imported}
+          onChange={(v) => {
+            setImported(v);
+            if (v) setNotImported(false);
+            setPage(1);
+          }}
+        />
+        <FilterToggle
           label="Non importés"
           active={notImported}
           onChange={(v) => {
             setNotImported(v);
+            if (v) setImported(false);
             setPage(1);
           }}
         />

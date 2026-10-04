@@ -5,7 +5,8 @@ import { API } from "@/lib/config";
 
 /**
  * GET /api/catalog — Browse catalog from SQLite products table.
- * Filters: productType, search, minPrice, maxPrice, inStock, color, size, sort, page, limit
+ * Filters: productType, search, minPrice, maxPrice, inStock, color, size, notImported,
+ * imported, withDiscount, lowStock, sort, page, limit
  */
 export async function GET(request: Request) {
   try {
@@ -25,6 +26,7 @@ export async function GET(request: Request) {
       color: params.get("color") || undefined,
       size: params.get("size") || undefined,
       notImported: parseBoolParam(params.get("notImported")),
+      imported: parseBoolParam(params.get("imported")),
       withDiscount: parseBoolParam(params.get("withDiscount")),
       lowStock: parseBoolParam(params.get("lowStock")),
       sort: params.get("sort") || undefined,

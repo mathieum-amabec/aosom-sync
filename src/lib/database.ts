@@ -2101,6 +2101,7 @@ export async function getProducts(filters: {
   color?: string;
   size?: string;
   notImported?: boolean;
+  imported?: boolean;
   withDiscount?: boolean;
   lowStock?: boolean;
   page?: number;
