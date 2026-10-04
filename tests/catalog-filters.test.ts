@@ -22,6 +22,13 @@ describe("buildCatalogWhere", () => {
     expect(r.args).toEqual([]);
   });
 
+  it("imported filters on a non-empty shopify_product_id (no args)", () => {
+    const r = buildCatalogWhere({ imported: true });
+    expect(r.where).toContain("shopify_product_id IS NOT NULL");
+    expect(r.where).toContain("shopify_product_id != ''");
+    expect(r.args).toEqual([]);
+  });
+
   it("lowStock uses qty < threshold and binds the threshold", () => {
     const r = buildCatalogWhere({ lowStock: true });
     expect(r.conditions).toContain("qty < ?");

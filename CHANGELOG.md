@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.6] - 2026-10-04
+
+### Added
+
+- **Catalog page: "Importés" filter.** Mirrors the existing "Non importés" toggle — filters
+  to products that already have a `shopify_product_id` (`imported` param on
+  `GET /api/catalog`, `buildCatalogWhere`'s new `imported` condition). The two toggles are
+  mutually exclusive in the UI (selecting one clears the other) so they can't silently
+  cancel each other into zero results.
+
 ## [0.5.107.5] - 2026-10-04
 
 **Studio Ameublo: Halloween series + category / sub-category filters.** 59 Halloween videos (FR + EN, QA-passed, none approved) are in the Studio as "Nouveau", series "Halloween 2026". The Studio can now be filtered by what is on screen.

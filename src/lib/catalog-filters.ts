@@ -90,6 +90,8 @@ export interface CatalogFilterInput {
   size?: string;
   /** Only products not yet imported into Shopify (shopify_product_id empty). */
   notImported?: boolean;
+  /** Only products already imported into Shopify (shopify_product_id set). */
+  imported?: boolean;
   /** Only products whose current price is below their last price (active rabais). */
   withDiscount?: boolean;
   /** Only products with qty < LOW_STOCK_THRESHOLD. */
@@ -156,6 +158,9 @@ export function buildCatalogWhere(f: CatalogFilterInput): CatalogWhere {
   }
   if (f.notImported) {
     conditions.push(`(shopify_product_id IS NULL OR shopify_product_id = '')`);
+  }
+  if (f.imported) {
+    conditions.push(`(shopify_product_id IS NOT NULL AND shopify_product_id != '')`);
   }
   if (f.lowStock) {
     conditions.push(`qty < ?`);
