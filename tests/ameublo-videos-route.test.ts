@@ -7,6 +7,7 @@ const db = vi.hoisted(() => ({
   setAmeubloTestVerdict: vi.fn(),
   setAmeubloCaption: vi.fn(),
   getAmeubloTestVideo: vi.fn(),
+  productTypesBySku: vi.fn(),
 }));
 vi.mock("@/lib/database", () => db);
 const approval = vi.hoisted(() => ({ approveAmeubloVideo: vi.fn(), bulkApproveAmeubloVideos: vi.fn(), cancelAmeubloVideo: vi.fn() }));
@@ -22,6 +23,7 @@ beforeEach(() => {
   auth.isAuthenticated.mockReset().mockResolvedValue(true);
   auth.getSessionRole.mockReset().mockResolvedValue("admin");
   db.listAmeubloTestVideos.mockReset().mockResolvedValue([]);
+  db.productTypesBySku.mockReset().mockResolvedValue(new Map());
   db.setAmeubloTestVerdict.mockReset().mockResolvedValue(true);
 });
 
@@ -35,7 +37,28 @@ describe("/api/ameublo/videos (Studio Ameublo)", () => {
   it("lists the test videos in the { success, data } shape", async () => {
     db.listAmeubloTestVideos.mockResolvedValue([{ id: 1 }]);
     const j = await (await GET()).json();
-    expect(j).toEqual({ success: true, data: { videos: [{ id: 1 }] } });
+    expect(j.success).toBe(true);
+    expect(j.data.videos).toHaveLength(1);
+    expect(j.data.videos[0]).toMatchObject({ id: 1, category: "autres", category_label: "Autres", sub_category: "Autres" });
+  });
+
+  it("tags each video with the category of what is on screen, falling back to the comma-separated sku", async () => {
+    db.productTypesBySku.mockResolvedValue(
+      new Map([
+        ["A1", "Pet Supplies > Cat Supplies > Cat Trees"],
+        ["H1", "Home Furnishings > Holiday & Seasonal > Halloween Decorations"],
+      ]),
+    );
+    db.listAmeubloTestVideos.mockResolvedValue([
+      { id: 1, skus: ["A1"], sku: "A1", label: "Arbre à chat", campaign: "maison-2026" },
+      { id: 2, skus: [], sku: "H1", label: "Fantôme gonflable 6 pi", campaign: "maison-2026" },
+    ]);
+    const j = await (await GET()).json();
+    expect(db.productTypesBySku).toHaveBeenCalledWith(["A1", "H1"]);
+    expect(j.data.videos.map((v: { category: string; sub_category: string }) => [v.category, v.sub_category])).toEqual([
+      ["animaux", "Chats"],
+      ["halloween", "Gonflables"],
+    ]);
   });
 
   it("records a verdict and a note", async () => {

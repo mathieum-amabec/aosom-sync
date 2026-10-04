@@ -2,6 +2,20 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.5] - 2026-10-04
+
+**Studio Ameublo: Halloween series + category / sub-category filters.** 59 Halloween videos (FR + EN, QA-passed, none approved) are in the Studio as "Nouveau", series "Halloween 2026". The Studio can now be filtered by what is on screen.
+
+### Added
+
+- `--pool halloween` in `scripts/ameublo-batch.mts`: curated FR/EN on-screen titles, FR/EN subject-match guard, no-break-space glue so "PI"/"FT"/"CM" never wraps alone. Halloween tips, product family and VALUE copy (inflatables, animated, hanging) in the scenes/copy/i18n modules.
+- Category chips (Halloween, Animaux, Salon, Cuisine, Chambre, Bureau, Rangement, ...) with counts, and a sub-category row (Gonflables / Animés / Suspendus, Chats / Chiens, Tabourets de bar, ...). Derived from the catalogue `product_type` of the SKUs on screen (`src/lib/ameublo-categories.ts`), never from the `campaign` tag (417 of 493 videos carry "maison-2026" whatever they show). Multi-product videos take the most common category.
+- `GET /api/ameublo/videos` annotates each video with `category`, `category_label`, `sub_category`; `productTypesBySku` in `database.ts`.
+
+### Changed
+
+- Picking a category clears the series filter (the auto "latest series" filter would otherwise hide the other themes); category counts ignore the series filter.
+
 ## [0.5.107.4] - 2026-10-04
 
 **Studio Ameublo: clear feedback after "Approuver et planifier".** Nothing showed that the click had worked and the button stayed clickable. The success banner sat at the top of the page (out of view while scrolling the grid), the busy lock was released before the list reload finished (so the card stayed a clickable "Nouveau" during the reload), and the card then simply disappeared from the default "Nouveau" filter.

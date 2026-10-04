@@ -38,6 +38,8 @@ const STYLES = (flag("--styles")?.split(",") ?? [...ALL]) as Style[];
 const COUNT = Number(flag("--count") ?? 15);
 const CAMPAIGN = flag("--campaign") ?? "maison-2026";
 const SERIES = flag("--series") ?? "Série d’octobre 2026";
+/** --pool halloween: seasonal decor pool (inflatables, animatronics) instead of the furniture pool. */
+const HALLOWEEN = (flag("--pool") ?? "furniture") === "halloween";
 const ROOT = process.env.SEQ_ASSETS_ROOT || path.resolve("../aosom-sync");
 const FFMPEG =
   process.env.FFMPEG_BIN ||
@@ -113,7 +115,7 @@ function shuffled<T>(xs: T[], seed: number): T[] {
 }
 const seedOf = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 
-const GROUPS: [string, RegExp][] = [
+const GROUPS: [string, RegExp][] = HALLOWEEN ? [["halloween", /Halloween Decorations/]] : [
   ["living", /^Home Furnishings > Living Room Furniture/],
   ["bedroom", /^Home Furnishings > Bedroom Furniture/],
   ["dining", /^Home Furnishings > Kitchen & Dining Furniture/],
@@ -133,6 +135,58 @@ const SAME_TYPES = [
   "Kitchen Pantry Cabinets", "Office Cabinets & Cupboards", "Writing Desks",
 ];
 const lastSeg = (t: string) => t.split(">").pop()!.trim();
+/** Halloween "same kind" groups (A/B, Top 3) and the four roles of a Halloween display, matched on the English name. */
+const HALLOWEEN_KINDS = ["inflatable|airblown|blow[- ]?up", "grim reaper", "witch", "clown", "skeleton|zombie|mummy|ghost"];
+const HALLOWEEN_ROLES = [/inflatable|airblown|blow[- ]?up/i, /reaper|zombie|skeleton|mummy/i, /witch|clown|angel|girl/i, /ghost|pumpkin|tree|stake|swing/i];
+const kindKey = (r: { type: string; name: string }) => (HALLOWEEN ? r.name : lastSeg(r.type));
+/**
+ * Halloween listings carry 60-80 character titles ("Décoration gonflable Halloween fantôme citrouille 9 pi",
+ * "6FT Life Size Halloween Animatronics, Animated Grim Reaper Groom with…") that no clean cut fits on screen, so the
+ * on-screen name is written by hand from the live listing: [FR, EN], 30 characters at most, no colour, no brand.
+ * A SKU missing here is not planned. 830-097 is left out on purpose: Shopify says "Chat noir", Aosom says "Spider".
+ */
+const HALLOWEEN_TITLES: Record<string, [string, string]> = {
+  "844-901V80BK": ["Fantôme citrouille gonflable 8 pi", "8 ft Inflatable Pumpkin Ghost"],
+  "84J-084V00GY": ["Squelette suspendu en cage", "Hanging Skeleton in a Cage"],
+  "830-095": ["Citrouille et fantômes gonflables", "Inflatable Pumpkin and Ghosts"],
+  "844-184": ["Faucheur citrouille gonflable 7 pi", "7 ft Inflatable Pumpkin Reaper"],
+  "844-173": ["Fantôme gonflable 6 pi", "6 ft Inflatable Ghost"],
+  "844-037": ["Arbre hanté gonflable", "Inflatable Haunted Tree"],
+  "844-385V80": ["Squelette fantôme gonflable 10 pi", "10 ft Inflatable Skeleton Ghost"],
+  "844-384V80": ["Fantôme citrouille gonflable 9 pi", "9 ft Inflatable Pumpkin Ghost"],
+  "844-492V80MX": ["Fantôme gonflable 7 pi", "7 ft Inflatable Ghost"],
+  "84J-303V00BK": ["Faucheur animé grandeur nature", "Life-Size Animated Reaper"],
+  "84J-283V00BK": ["Trio de sorcières lumineuses", "Glowing Witch Trio Yard Stakes"],
+  "84J-285V00MX": ["Faucheur animé 5,6 pi", "5.6 ft Animated Grim Reaper"],
+  "830-105": ["Faucheuse en moto gonflable", "Inflatable Reaper on Motorcycle"],
+  "844-522V00BK": ["Squelette animé 6 pieds", "6 ft Animated Grim Reaper"],
+  "844-511V00MX": ["Clown animé lumineux 170 cm", "5.6 ft Animated Clown"],
+  "844-683V80BK": ["Citrouille fantôme gonflable 9 pi", "9 ft Inflatable Ghost with Pumpkins"],
+  "844-692V00GN": ["Sorcière animée 180 cm", "6 ft Animated Witch"],
+  "844-843V00BK": ["Clown animé grandeur nature", "5.7 ft Life-Size Animated Clown"],
+  "844-848V00GY": ["Sorcière animée avec sons", "Animated Witch with Sound"],
+  "84J-080V00KK": ["Squelette animé yeux LED", "Animated Skeleton, LED Eyes"],
+  "84J-078V00BK": ["Zombie rampant animé 6 pi", "6 ft Animated Crawling Zombie"],
+  "84J-082V00RD": ["Clown animé grandeur nature", "Life-Size Animated Clown"],
+  "84J-109V80BK": ["Faucheur gonflable géant 12 pi", "12 ft Inflatable Grim Reaper"],
+  "84J-284V00YG": ["Momie suspendue 6 pieds", "6 ft Hanging Mummy"],
+  "84J-288V00CG": ["Ange pleureur animé", "Animated Crying Angel"],
+  "84J-316V00MX": ["Fille animée sur balançoire", "Animated Girl on a Swing"],
+  "844-693V00BK": ["Sorcière grandeur nature 183 cm", "6 ft Life-Size Witch"],
+  "844-855V00GY": ["Faucheur ailé grandeur nature", "6.4 ft Winged Grim Reaper"],
+  "844-873V00VT": ["Sorcière animée grandeur nature", "5.9 ft Animated Old Witch"],
+  "844-874V00BN": ["Sorcière animée avec balai", "6.2 ft Witch with Broomstick"],
+  "844-872V00GY": ["Clown animé 183 cm", "6 ft Classic Animated Clown"],
+  "844-690V00GY": ["Momie suspendue animée", "4.7 ft Hanging Mummy"],
+  "844-696V00GY": ["Zombie rampant animé 5 pi", "5.2 ft Crawling Zombie"],
+};
+/** What a Halloween item IS, FR and EN words per subject. A FR title and an EN name that share no subject describe different products. */
+const SUBJECTS: RegExp[] = [
+  /skeleton|reaper|squelette|faucheu/i, /ghost|fantôme|fantome/i, /pumpkin|jack-o|citrouille/i, /witch|sorci/i, /clown/i, /zombie/i,
+  /mummy|momie/i, /spider|araignée|araignee/i, /\bcat\b|chat\b/i, /angel|\bange\b/i, /\bgirl\b|fille/i, /\btree\b|arbre/i,
+];
+const subjectsOf = (t: string) => new Set(SUBJECTS.map((re, i) => (re.test(t) ? i : -1)).filter((i) => i >= 0));
+const hasSubject = (t: string) => subjectsOf(t).size > 0;
 /** A room is four DIFFERENT roles that belong together (no benches in a bedroom or an office). */
 const ROOMS: Record<string, RegExp[]> = {
   salon: [/Accent Chairs|Sofas|Couchs|Sofa Bed/, /Coffee Tables/, /TV Stands|Room Dividers/, /Side Tables|Console Tables|Display Bookshelves/],
@@ -149,7 +203,7 @@ const ROOM_BAN: Record<string, RegExp> = {
   cuisine: /island|îlot|cart|chariot|pantry|garde-manger|kids?|enfants?|children|toy|jouet|office|desk|bureau|gaming|trash|poubelle/i,
 };
 /** Never worth a video: ambiguous items. */
-const GLOBAL_BAN = /trash|poubelle|garbage|ordures|waste bin|litter/i;
+const GLOBAL_BAN = /trash|poubelle|garbage|ordures|waste bin|litter|dead body|cadavre/i;
 /** Product classes: A/B and Top 3 only compare items of the same class (no trash cabinet among storage cabinets). */
 const CLASSES: [string, RegExp][] = [
   ["shoe", /shoe|chaussure/i], ["bench", /ottoman|pouf|bench|banc/i], ["drawing", /drawing|drafting|dessin|art table/i],
@@ -194,10 +248,14 @@ async function plan() {
       FROM products
       WHERE shopify_product_id IS NOT NULL AND shopify_product_id != '' AND shopify_handle != ''
         AND qty >= 3 AND price BETWEEN 30 AND 1500 AND image1 IS NOT NULL AND image1 != ''
-        AND (product_type LIKE 'Home Furnishings > %' OR product_type LIKE 'Office Products > Office Furniture%'
+        AND ${
+          HALLOWEEN
+            ? "product_type LIKE '%Halloween Decorations%'"
+            : `(product_type LIKE 'Home Furnishings > %' OR product_type LIKE 'Office Products > Office Furniture%'
              OR product_type LIKE 'Pet Supplies > Cats > Cat Trees%' OR product_type LIKE 'Pet Supplies > Dogs%')
         AND product_type NOT LIKE '%Holiday & Seasonal%' AND product_type NOT LIKE '%Artificial Trees%'
-        AND product_type NOT LIKE '%Appliances%' AND product_type NOT LIKE '%Fireplaces%'
+        AND product_type NOT LIKE '%Appliances%' AND product_type NOT LIKE '%Fireplaces%'`
+        }
       GROUP BY shopify_product_id`)
   ).rows.map((r) => ({
     sku: String(r.sku), name: String(r.name), price: Number(r.price), type: String(r.product_type),
@@ -221,10 +279,24 @@ async function plan() {
         const maxT = TITLE_MAX[style] ?? 48;
         const fit = TITLE_FIT[style];
         const extra = fit ? (t: string) => { const u = t.toUpperCase(); return wrap(u, fit[0], fit[1]).join(" ") === u; } : undefined;
-        const shortFr = cleanTitle(f.titleFr, "fr", maxT, extra);
-        const shortEn = cleanTitle(titleEn, "en", maxT, extra);
+        let shortFr: string | null, shortEn: string | null;
+        if (HALLOWEEN) {
+          const t = HALLOWEEN_TITLES[r.sku];
+          if (!t) return rej("no curated Halloween title"), null;
+          const glue = (s: string) => s.replace(/(\d) (pi|ft|pieds|cm)\b/g, "$1 $2");
+          [shortFr, shortEn] = [glue(t[0]), glue(t[1])];
+          if (extra && !(extra(shortFr) && extra(shortEn))) return rej("curated title does not fit the scene"), null;
+        } else {
+          shortFr = cleanTitle(f.titleFr, "fr", maxT, extra);
+          shortEn = cleanTitle(titleEn, "en", maxT, extra);
+        }
         if (!shortFr || !shortEn) return rej("title cannot be cut cleanly"), null;
         if (COLOUR.test(shortFr) || COLOUR.test(shortEn)) return rej("colour in title"), null;
+        if (HALLOWEEN) {
+          const fr = subjectsOf(f.titleFr), en = subjectsOf(r.name);
+          if (fr.size && en.size && ![...fr].some((i) => en.has(i))) return rej("FR/EN subject mismatch"), null;
+          if (!hasSubject(shortEn) || !hasSubject(shortFr)) return rej("title does not say what the item is"), null;
+        }
         let lifeUrl: string | undefined;
         if (minPhotos > 1) {
           // The only second photo we trust is the human-validated pos-1 lifestyle shot (no people, no text, no collage).
@@ -332,7 +404,11 @@ async function plan() {
       // Per category, keep a small candidate pool and choose a comparable combination (same class, same unit,
       // honest price spread) instead of burning products on failed tries.
       const POOL_MAX = 10;
-      const cats = SAME_TYPES.map((t) => ({ next: puller(base.filter((r) => lastSeg(r.type) === t), used, 1, style), cands: [] as PlanProduct[], dry: false }));
+      const cats = (HALLOWEEN ? HALLOWEEN_KINDS : SAME_TYPES).map((t) => ({
+        next: puller(base.filter((r) => (HALLOWEEN ? new RegExp(t, "i").test(r.name) : lastSeg(r.type) === t)), used, 1, style),
+        cands: [] as PlanProduct[],
+        dry: false,
+      }));
       const combos = (arr: PlanProduct[], k: number): PlanProduct[][] => {
         if (k === 0) return [[]];
         const out: PlanProduct[][] = [];
@@ -366,9 +442,10 @@ async function plan() {
 
     // piece: four complementary articles for one room, total kept reasonable.
     const lists: Record<string, ReturnType<typeof puller>[]> = {};
-    for (const room of ROOM_ORDER) lists[room] = ROOMS[room].map((re) => puller(base.filter((r) => re.test(lastSeg(r.type))), used, 1, style, ROOM_BAN[room]));
+    const rooms = HALLOWEEN ? ["halloween"] : ROOM_ORDER;
+    for (const room of rooms) lists[room] = (HALLOWEEN ? HALLOWEEN_ROLES : ROOMS[room]).map((re) => puller(base.filter((r) => re.test(kindKey(r))), used, 1, style, ROOM_BAN[room]));
     for (const s of sl) {
-      const room = ROOM_ORDER[(s.k + (s.lang === "en" ? 1 : 0)) % ROOM_ORDER.length];
+      const room = rooms[(s.k + (s.lang === "en" ? 1 : 0)) % rooms.length];
       const ps: PlanProduct[] = [];
       for (const [ri, next] of lists[room].entries()) { const p = await next(); if (p) ps.push(p); else console.warn(`    role ${ri} of ${room} empty`); }
       if (ps.length < 4 || ps.reduce((a, p) => a + p.price, 0) > 3000) { console.warn(`  piece(${room}): incomplete, skipped (${ps.length} found, total ${ps.reduce((a, p) => a + p.price, 0)})`); continue; }
@@ -532,7 +609,7 @@ async function release() {
       series: SERIES, sku: meta.skus.join(","), campaign: j.campaign, label: meta.titles.join(" vs "), videoUrl: blob.url,
       style: j.style, lang: j.lang, caption: meta.caption, skus: meta.skus, prices: meta.prices, music: meta.music,
     });
-    await db.setAmeubloQa(vid, "pass", "Regénérée et validée à la revue visuelle (2026-10-04)");
+    await db.setAmeubloQa(vid, "pass", "Validée à la revue visuelle (2026-10-04)");
     fs.appendFileSync(doneFile, JSON.stringify({ id, videoId: vid, url: blob.url, vol: meta.vol }) + String.fromCharCode(10));
     console.log(`  ✓ ${id} #${vid} released`);
   }
