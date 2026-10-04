@@ -837,6 +837,10 @@ async function _initSchemaImpl(): Promise<void> {
   // after the guarded ALTER, because on an existing DB the column does not exist yet when the
   // CREATE TABLE batch above runs.
   // MCP permissions (read / analytics / import): scope column on keys and OAuth grants. Existing rows = read only.
+  const grantInfo = await db.execute(`PRAGMA table_info(oauth_grants)`);
+  if (!grantInfo.rows.some((r) => String((r as unknown as Record<string, unknown>).name) === "key_id")) {
+    await runBatch("oauth_grants add key_id", [{ sql: `ALTER TABLE oauth_grants ADD COLUMN key_id INTEGER`, args: [] }]);
+  }
   for (const t of ["mcp_keys", "oauth_grants"]) {
     const info = await db.execute(`PRAGMA table_info(${t})`);
     if (!info.rows.some((r) => String((r as unknown as Record<string, unknown>).name) === "scope")) {
@@ -7714,6 +7718,15 @@ export async function createMcpKey(name: string, keyHash: string, keyHint: strin
   return Number(r.lastInsertRowid);
 }
 
+/** Id + scope of a live key (no last_used stamp) — used by the OAuth consent page to check the pasted key. */
+export async function findActiveMcpKey(keyHash: string): Promise<{ id: number; scope: string } | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT id, scope FROM mcp_keys WHERE key_hash = ? AND revoked_at IS NULL`, args: [keyHash] });
+  if (!r.rows[0]) return null;
+  const o = rowToObj(r.rows[0]);
+  return { id: Number(o.id), scope: String(o.scope ?? "read") };
+}
+
 export async function listMcpKeys(): Promise<McpKeyRow[]> {
   const db = await ensureSchema();
   const r = await db.execute(`SELECT id, name, key_hint, scope, created_at, last_used_at, revoked_at FROM mcp_keys ORDER BY id DESC LIMIT 100`);
@@ -7729,8 +7742,13 @@ export async function listMcpKeys(): Promise<McpKeyRow[]> {
 
 export async function revokeMcpKey(id: number): Promise<boolean> {
   const db = await ensureSchema();
-  const r = await db.execute({ sql: `UPDATE mcp_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, args: [Math.floor(Date.now() / 1000), id] });
-  return r.rowsAffected > 0;
+  const now = Math.floor(Date.now() / 1000);
+  const r = await db.execute({ sql: `UPDATE mcp_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, args: [now, id] });
+  if (r.rowsAffected === 0) return false;
+  // The connections this key authorized (OAuth) die with it.
+  await db.execute({ sql: `DELETE FROM oauth_tokens WHERE grant_id IN (SELECT id FROM oauth_grants WHERE key_id = ?)`, args: [id] });
+  await db.execute({ sql: `UPDATE oauth_grants SET revoked_at = ? WHERE key_id = ? AND revoked_at IS NULL`, args: [now, id] });
+  return true;
 }
 
 /**
@@ -7773,12 +7791,12 @@ export async function getOAuthClient(clientId: string): Promise<OAuthClientRow |
 
 /** One approved connection (grant) + its single-use authorization code. */
 export async function createOAuthGrantWithCode(a: {
-  clientId: string; clientName: string; redirectUri: string; codeChallenge: string; codeHash: string; ttlSec: number; scope: string;
+  clientId: string; clientName: string; redirectUri: string; codeChallenge: string; codeHash: string; ttlSec: number; scope: string; keyId?: number | null;
 }): Promise<number> {
   const db = await ensureSchema();
   const g = await db.execute({
-    sql: `INSERT INTO oauth_grants (client_id, client_name, scope, created_at) VALUES (?, ?, ?, ?)`,
-    args: [a.clientId, a.clientName, a.scope, nowSec()],
+    sql: `INSERT INTO oauth_grants (client_id, client_name, scope, key_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+    args: [a.clientId, a.clientName, a.scope, a.keyId ?? null, nowSec()],
   });
   const grantId = Number(g.lastInsertRowid);
   await db.execute({

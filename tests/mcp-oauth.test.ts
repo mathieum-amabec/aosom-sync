@@ -3,12 +3,10 @@ import { pkceChallenge, pkceMatches, isAllowedRedirectUri, escapeHtml, hashToken
 
 const db = vi.hoisted(() => ({
   registerOAuthClient: vi.fn(), getOAuthClient: vi.fn(), createOAuthGrantWithCode: vi.fn(), consumeOAuthCode: vi.fn(),
-  consumeOAuthRefresh: vi.fn(), storeOAuthTokens: vi.fn(), verifyOAuthAccess: vi.fn(), verifyMcpKey: vi.fn(),
+  consumeOAuthRefresh: vi.fn(), storeOAuthTokens: vi.fn(), verifyOAuthAccess: vi.fn(), verifyMcpKey: vi.fn(), findActiveMcpKey: vi.fn(),
   ensureSchema: vi.fn(async () => ({ execute: vi.fn(async () => ({ rows: [] })) })),
 }));
 vi.mock("@/lib/database", () => db);
-const session = vi.hoisted(() => ({ current: null as null | { username: string; role: string } }));
-vi.mock("@/lib/auth", () => ({ getSession: async () => session.current }));
 
 const { POST: register } = await import("@/app/oauth/register/route");
 const { POST: token } = await import("@/app/oauth/token/route");
@@ -78,12 +76,15 @@ describe("registration + token", () => {
   });
 });
 
-describe("authorize (consent page)", () => {
+describe("authorize (paste the access key)", () => {
   const q = new URLSearchParams({ client_id: "cl_1", redirect_uri: CB, response_type: "code", code_challenge: CHALLENGE, code_challenge_method: "S256", state: "st" });
   const url = `http://x/oauth/authorize?${q}`;
+  const KEY = "amcp_" + "k".repeat(43);
+  const form = (extra: Record<string, string>, headers: Record<string, string> = {}) =>
+    new Request("http://x/oauth/authorize", { method: "POST", headers, body: new URLSearchParams({ ...Object.fromEntries(q), ...extra }) });
   beforeEach(() => {
     resetDb();
-    session.current = null;
+    db.findActiveMcpKey.mockReset();
     db.getOAuthClient.mockResolvedValue({ client_id: "cl_1", client_name: "Claude <b>", redirect_uris: [CB] });
   });
 
@@ -93,39 +94,43 @@ describe("authorize (consent page)", () => {
     expect(r.status).toBe(400);
     expect(r.headers.get("location")).toBeNull();
   });
-  it("sends a signed-out visitor to /login with a return path", async () => {
-    const r = await authGet(new Request(url));
-    expect(r.status).toBe(302);
-    expect(r.headers.get("location")).toContain("/login?redirect=%2Foauth%2Fauthorize");
-  });
-  it("non-admin gets 403; admin sees an escaped consent page", async () => {
-    session.current = { username: "rev", role: "reviewer" };
-    expect((await authGet(new Request(url))).status).toBe(403);
-    session.current = { username: "admin", role: "admin" };
+  it("shows a key field and escapes the client name", async () => {
     const r = await authGet(new Request(url));
     expect(r.status).toBe(200);
     const html = await r.text();
+    expect(html).toContain('name="access_key"');
     expect(html).toContain("Claude &lt;b&gt;");
     expect(html).not.toContain("<b>Claude");
   });
-  it("approve issues a code to the registered URI; deny returns access_denied; no session is 403", async () => {
-    const form = (decision: string) => new Request("http://x/oauth/authorize", { method: "POST", body: new URLSearchParams({ ...Object.fromEntries(q), decision }) });
-    expect((await authPost(form("approve"))).status).toBe(403);
-    session.current = { username: "admin", role: "admin" };
-    const ok = await authPost(form("approve"));
+  it("a wrong or revoked key re-shows the page with an error and never issues a code", async () => {
+    db.findActiveMcpKey.mockResolvedValue(null);
+    const r = await authPost(form({ decision: "approve", access_key: KEY }));
+    expect(r.status).toBe(401);
+    expect(r.headers.get("location")).toBeNull();
+    expect(await r.text()).toContain("Clé invalide");
+    expect((await authPost(form({ decision: "approve", access_key: "garbage" }))).status).toBe(401);
+    expect(db.createOAuthGrantWithCode).not.toHaveBeenCalled();
+  });
+  it("the right key issues a code to the registered URI, with that key's permissions and id", async () => {
+    db.findActiveMcpKey.mockResolvedValue({ id: 5, scope: "read analytics import" });
+    const ok = await authPost(form({ decision: "approve", access_key: KEY }));
     expect(ok.status).toBe(302);
     const loc = new URL(ok.headers.get("location")!);
     expect(loc.origin + loc.pathname).toBe(CB);
     expect(loc.searchParams.get("code")).toMatch(/^ac_/);
     expect(loc.searchParams.get("state")).toBe("st");
-    expect(db.createOAuthGrantWithCode.mock.calls[0][0].codeHash).toBe(hashToken(loc.searchParams.get("code")!));
-    expect(db.createOAuthGrantWithCode.mock.calls[0][0].scope).toBe("read"); // nothing ticked = read only
-    const no = await authPost(form("deny"));
+    const call = db.createOAuthGrantWithCode.mock.calls[0][0];
+    expect(call.codeHash).toBe(hashToken(loc.searchParams.get("code")!));
+    expect(call.scope).toBe("read analytics import");
+    expect(call.keyId).toBe(5);
+  });
+  it("deny returns access_denied without needing a key", async () => {
+    const no = await authPost(form({ decision: "deny" }));
     expect(new URL(no.headers.get("location")!).searchParams.get("error")).toBe("access_denied");
+    expect(db.createOAuthGrantWithCode).not.toHaveBeenCalled();
   });
   it("rejects a cross-origin form post", async () => {
-    session.current = { username: "admin", role: "admin" };
-    const r = await authPost(new Request("http://x/oauth/authorize", { method: "POST", headers: { origin: "https://evil.example" }, body: new URLSearchParams({ decision: "approve" }) }));
+    const r = await authPost(form({ decision: "approve", access_key: KEY }, { origin: "https://evil.example" }));
     expect(r.status).toBe(403);
   });
 });
