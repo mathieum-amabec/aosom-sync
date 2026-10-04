@@ -38,12 +38,14 @@ const nextConfig: NextConfig = {
             // sequential-ad renders are served from the public Vercel Blob store, and the
             // client also plays freshly rendered clips from blob: URLs. This directive is
             // what makes those previews play at all.
+            // cdn.pixabay.com + assets.mixkit.co: the Studio Ameublo music picker plays the
+            // candidate tracks inline from their own CDNs (previews only, nothing is stored).
             value:
               "default-src 'self'; " +
               "script-src 'self' 'unsafe-inline'; " +
               "style-src 'self' 'unsafe-inline'; " +
               "img-src 'self' https: data:; " +
-              "media-src 'self' blob: https://jcskqp8orcub9i0l.public.blob.vercel-storage.com; " +
+              "media-src 'self' blob: https://jcskqp8orcub9i0l.public.blob.vercel-storage.com https://cdn.pixabay.com https://assets.mixkit.co; " +
               "font-src 'self'; " +
               "connect-src 'self' https://api.anthropic.com https://graph.facebook.com; " +
               "frame-ancestors 'none';",

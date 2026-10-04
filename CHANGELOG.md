@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.105.0] - 2026-10-03
+
+**Studio Ameublo: pick the background music** (Mat: the stock tracks sound "trop commercial BS"; "mets ça dans Aosom-sync… une façon simple et rapide pour moi de te dire ceux que j'aime").
+
+### Added
+
+- "🎵 Choisis tes musiques" at the top of `/ameublo`: 54 royalty-free tracks in 7 mood groups (lo-fi, jazz/bossa, funk 70s, nu-disco, playful pizzicato/marimba, acoustic/autumn, Noël).
+  - Each track plays inline.
+  - ❤️ saves a pick at once, and a free-text comment saves when the field loses focus.
+  - ⭐ marks Claude's ten favourites; ⚠ flags over-used tracks or AI-heavy artists.
+- `ameublo-music-catalog.ts` holds the candidates; `GET`/`PATCH /api/ameublo/music` reads and writes the picks in the `ameublo_music_picks` setting.
+- Licensing: Pixabay Content License or Mixkit Free License only. Both are free for paid ads with no attribution. Tracks badged "Content ID Registered" or "AI generated" are excluded.
+
+### Changed
+
+- CSP `media-src` now allows `cdn.pixabay.com` and `assets.mixkit.co`, so the previews can play.
+
 ## [0.5.104.1] - 2026-10-03
 
 Dashboard sidebar was a single flat list of 19 links with no grouping — regrouped into 4

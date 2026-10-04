@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import MusicPicker from "./music-picker";
 import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
 
 // Mirrors AmeubloTestVideo in src/lib/database.ts.
@@ -81,6 +82,8 @@ export default function AmeubloStudioClient() {
           publication. Note chaque vidéo 👍 / 👎 et laisse un commentaire si quelque chose cloche.
         </p>
       </div>
+
+      <MusicPicker />
 
       {error && <div className="rounded border border-red-800 bg-red-950/40 p-3 text-sm text-red-300">{error}</div>}
       {loading && <div className="text-gray-400 text-sm">Chargement…</div>}
