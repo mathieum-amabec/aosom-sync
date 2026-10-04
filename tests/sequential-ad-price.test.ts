@@ -80,3 +80,24 @@ describe("approval refuses a stale-price ad", () => {
     expect(db.flagSequentialAdForRerender).not.toHaveBeenCalled();
   });
 });
+
+describe("checkSequentialAdPrice — Studio Ameublo renderedPrices map", () => {
+  const studio = (renderedPrices: Record<string, number>) => ({
+    contentId: "ameublo:12",
+    metadata: { source: "ameublo_studio", renderedPrices },
+  });
+  it("passes when every burned price still matches", async () => {
+    db.getProduct.mockImplementation(async (sku: string) => ({ price: sku === "A" ? 10 : 20 }));
+    expect((await checkSequentialAdPrice(studio({ A: 10, B: 20 }))).ok).toBe(true);
+  });
+  it("blocks on the first SKU whose price moved and names it", async () => {
+    db.getProduct.mockImplementation(async (sku: string) => ({ price: sku === "A" ? 10 : 25 }));
+    const r = await checkSequentialAdPrice(studio({ A: 10, B: 20 }));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("B");
+  });
+  it("never blocks on a product that is gone", async () => {
+    db.getProduct.mockResolvedValue(null);
+    expect((await checkSequentialAdPrice(studio({ A: 10 }))).ok).toBe(true);
+  });
+});

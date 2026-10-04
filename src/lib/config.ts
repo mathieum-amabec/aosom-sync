@@ -633,6 +633,17 @@ export const DEFAULT_GUIDE_SCHEDULE: PublicationSchedule = {
   max_per_day: 1,
 };
 
+// Studio Ameublo mascot Reels (FR = Ameublo Direct, EN = Furnish Direct): 4 a day, every day.
+// Times are sorted: the 1st and 3rd belong to French videos, the 2nd and 4th to English ones
+// (see ameublo-approval.ts), so each page gets 2 a day at fixed, spread-out hours that avoid
+// the assembly grid (17:00), the slideshow grid (10:00) and the social posts (~20:00 / 21:25).
+export const DEFAULT_AMEUBLO_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: [{ day: "mon", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "tue", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "wed", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "thu", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "fri", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "sat", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "sun", times: ["07:45", "12:15", "18:30", "20:45"] }],
+  timezone: "America/Toronto",
+  max_per_day: 4,
+};
+
 export const DEFAULT_ASSEMBLY_SCHEDULE: PublicationSchedule = {
   enabled: true,
   slots: [
@@ -756,6 +767,8 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   // dedicated schedule-tab UI for these yet).
   "demand_gen_ext_schedule",
   "assembly_schedule",
+  // ameublo_schedule (PublicationSchedule shape) — Studio Ameublo mascot Reels, FR/EN interleaved.
+  "ameublo_schedule",
   // guide_schedule (PublicationSchedule shape) — pSEO guide deferred-publish cadence.
   "guide_schedule",
 ]);

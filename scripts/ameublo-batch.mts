@@ -1,0 +1,438 @@
+/**
+ * Studio Ameublo — batch generator: ~15 videos per style and per language (FR = Ameublo, EN = Furni).
+ *
+ * Free: our own SVG + sharp + ffmpeg, no AI call. Each video goes to Blob and into
+ * `ameublo_test_videos` (style, lang, caption, skus, prices, music), where the operator approves it
+ * from /ameublo. NOTHING here touches publication_queue.
+ *
+ *   node-x64 --env-file=../aosom-sync/.env.local node_modules/tsx/dist/cli.mjs \
+ *     scripts/ameublo-batch.mts --state DIR --plan [--count 15] [--styles a,b] [--campaign maison-2026]
+ *   node-x64 --env-file=../aosom-sync/.env.local node_modules/tsx/dist/cli.mjs \
+ *     scripts/ameublo-batch.mts --state DIR --render [--only style] [--max N] [--budget-ms 540000]
+ *
+ * --plan   builds DIR/plan.json (read-only: Turso + Shopify). Products are live (active), priced
+ *          like Shopify, FR-titled, with clean photos; no supplier name in any title.
+ * --render renders the planned jobs not yet in DIR/done.jsonl (resumable) and writes a contact
+ *          sheet per video in DIR/sheets for the reviewer. Stops starting new jobs after the budget.
+ * --preview with --render: no Blob upload, no DB row, no done.jsonl; mp4 + sheet stay in DIR.
+ * SEQ_ASSETS_ROOT = the main clone (music + UGC clips are gitignored); default ../aosom-sync.
+ */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createClient } from "@libsql/client";
+
+const argv = process.argv.slice(2);
+const flag = (n: string) => {
+  const i = argv.indexOf(n);
+  return i >= 0 ? argv[i + 1] : undefined;
+};
+const has = (n: string) => argv.includes(n);
+
+const STATE = flag("--state");
+const ALL = ["reaction", "vitrine", "astuce", "devine", "ab", "top3", "piece"] as const;
+type Style = (typeof ALL)[number];
+type Lang = "fr" | "en";
+const STYLES = (flag("--styles")?.split(",") ?? [...ALL]) as Style[];
+const COUNT = Number(flag("--count") ?? 15);
+const CAMPAIGN = flag("--campaign") ?? "maison-2026";
+const SERIES = flag("--series") ?? "Série d’octobre 2026";
+const ROOT = process.env.SEQ_ASSETS_ROOT || path.resolve("../aosom-sync");
+const FFMPEG =
+  process.env.FFMPEG_BIN ||
+  "C:\\Users\\vente\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1.1-full_build\\bin\\ffmpeg.exe";
+const audio = (f: string) => path.join(ROOT, "src/audio", f);
+
+/** Mat's six picks (settings ameublo_music_picks). pick49 is Christmas-only. */
+const PICK = {
+  5: "pick05-chillhop-jazz-coffee-shop.mp3",
+  30: "pick30-chill-reel.mp3",
+  49: "pick49-that-christmas.mp3",
+  59: "pick59-sunny-beat.mp3",
+  60: "pick60-happy-energetic-lofi.mp3",
+  75: "pick75-soul-chill-house.mp3",
+} as const;
+const TRACKS: Record<Style, number[]> = {
+  reaction: [60, 59, 75],
+  vitrine: [30, 5, 75],
+  astuce: [5, 75, 30],
+  devine: [59, 60, 30],
+  ab: [59, 75, 60],
+  top3: [60, 75, 59],
+  piece: [75, 30, 5],
+};
+const NOEL_TRACK = 49;
+
+const FORBIDDEN = /aosom|homcom|outsunny|qaba|pawhut|vinsetto|kleankin|costway|soozier|aiyaplay/i;
+
+interface PlanProduct {
+  sku: string;
+  titleFr: string;
+  titleEn: string;
+  price: number;
+  handle: string;
+  productType: string;
+}
+interface Job {
+  id: string;
+  style: Style;
+  lang: Lang;
+  n: number;
+  campaign: string;
+  room?: string;
+  music: number;
+  products: PlanProduct[];
+}
+
+// ───────────────────────── planning ─────────────────────────
+
+function rng(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function shuffled<T>(xs: T[], seed: number): T[] {
+  const r = rng(seed);
+  const a = [...xs];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+const seedOf = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+
+const GROUPS: [string, RegExp][] = [
+  ["living", /^Home Furnishings > Living Room Furniture/],
+  ["bedroom", /^Home Furnishings > Bedroom Furniture/],
+  ["dining", /^Home Furnishings > Kitchen & Dining Furniture/],
+  ["storage", /^Home Furnishings > Storage & Organization/],
+  ["decor", /^Home Furnishings > Home Décor/],
+  ["bath", /^Home Furnishings > Bathroom Furniture/],
+  ["office", /^Office Products > Office Furniture/],
+  ["pets", /^Pet Supplies > (Cats > Cat Trees|Dogs)/],
+];
+const groupOf = (t: string) => GROUPS.find(([, re]) => re.test(t))?.[0] ?? null;
+
+/** Last product_type segment, matched exactly for "same category" styles (top 3, A/B). */
+const SAME_TYPES = [
+  "Accent Chairs", "Coffee Tables", "TV Stands", "Dining Chairs", "Bar Stools", "Bedside Tables",
+  "Storage Cabinets", "Storage Ottomans & Benches", "Shoe Storage Cabinets & Racks", "Computer Desks", "Task Chairs",
+  "Display Bookshelves", "Dressing & Vanity Tables", "Room Dividers", "Dining Tables", "Bar Cabinets", "Side Tables",
+  "Kitchen Pantry Cabinets", "Office Cabinets & Cupboards", "Writing Desks",
+];
+const lastSeg = (t: string) => t.split(">").pop()!.trim();
+/** A room is four DIFFERENT roles that belong together (no benches in a bedroom or an office). */
+const ROOMS: Record<string, RegExp[]> = {
+  salon: [/Accent Chairs|Sofas|Couchs|Sofa Bed/, /Coffee Tables/, /TV Stands|Room Dividers/, /Side Tables|Console Tables|Display Bookshelves/],
+  bureau: [/Computer Desks|Writing Desks|Gaming Desks/, /Task Chairs|Executive & Manager Chairs/, /Office Cabinets/, /Display Bookshelves|Small Bookshelves|^Storage Cabinets$/],
+  chambre: [/Bedside Tables/, /Dressing & Vanity/, /Clothing Storage|^Storage Cabinets$/, /Full Length Mirrors|Wall Mirrors|Bed Frames/],
+  cuisine: [/^Dining Tables$/, /Dining Chairs/, /Bar Cabinets|Kitchen Islands/, /Kitchen Pantry Cabinets/],
+};
+const ROOM_ORDER = ["salon", "bureau", "chambre", "cuisine"];
+
+async function plan() {
+  const { cleanEnglishTitle } = (await import("@/lib/ameublo-i18n")) as typeof import("@/lib/ameublo-i18n");
+  const sp = (await import("@/lib/selectors/shopify-product")) as typeof import("@/lib/selectors/shopify-product");
+  const audit = (await import("@/lib/image-compliance-audit")) as unknown as { imageUrlStem: (u: string) => string };
+  const turso = createClient({ url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN! });
+  const rejects: Record<string, number> = {};
+  const rej = (why: string) => (rejects[why] = (rejects[why] ?? 0) + 1);
+
+  type Row = { sku: string; name: string; price: number; type: string; handle: string; pid: string };
+  const pool = (
+    await turso.execute(`
+      SELECT MIN(sku) AS sku, name, price, product_type, shopify_handle, shopify_product_id
+      FROM products
+      WHERE shopify_product_id IS NOT NULL AND shopify_product_id != '' AND shopify_handle != ''
+        AND qty >= 3 AND price BETWEEN 30 AND 1500 AND image1 IS NOT NULL AND image1 != ''
+        AND (product_type LIKE 'Home Furnishings > %' OR product_type LIKE 'Office Products > Office Furniture%'
+             OR product_type LIKE 'Pet Supplies > Cats > Cat Trees%' OR product_type LIKE 'Pet Supplies > Dogs%')
+        AND product_type NOT LIKE '%Holiday & Seasonal%' AND product_type NOT LIKE '%Artificial Trees%'
+        AND product_type NOT LIKE '%Appliances%' AND product_type NOT LIKE '%Fireplaces%'
+      GROUP BY shopify_product_id`)
+  ).rows.map((r) => ({
+    sku: String(r.sku), name: String(r.name), price: Number(r.price), type: String(r.product_type),
+    handle: String(r.shopify_handle), pid: String(r.shopify_product_id),
+  })) as Row[];
+  console.log(`pool: ${pool.length} candidate products`);
+
+  const memo = new Map<string, Promise<PlanProduct | null>>();
+  /** Live (active), priced like Shopify, French title, clean name, enough clean photos. */
+  const valid = (r: Row, minPhotos: number): Promise<PlanProduct | null> => {
+    const k = `${r.sku}|${minPhotos}`;
+    if (!memo.has(k)) {
+      memo.set(k, (async () => {
+        const f = await sp.resolveProductFields(r.pid);
+        if (f.status !== "active") return rej("not active"), null;
+        if (f.price == null || Math.abs(Number(f.price) - r.price) > 0.011) return rej("price differs from Shopify"), null;
+        if (!f.titleFr) return rej("no FR title"), null;
+        const titleEn = cleanEnglishTitle(r.name);
+        if (FORBIDDEN.test(f.titleFr) || FORBIDDEN.test(titleEn)) return rej("supplier name in title"), null;
+        if (minPhotos > 1) {
+          const row = (await turso.execute({ sql: "SELECT image1,image2,image3,image4,image5,image6,image7 FROM products WHERE sku = ?", args: [r.sku] })).rows[0];
+          const urls = [1, 2, 3, 4, 5, 6, 7].map((i) => (row?.[`image${i}`] == null ? "" : String(row[`image${i}`]))).filter(Boolean);
+          const stems = [...new Set(urls.slice(1).map((u) => audit.imageUrlStem(u)))];
+          let clean = 0;
+          if (stems.length) {
+            const c = await turso.execute({
+              sql: `SELECT COUNT(*) AS n FROM image_classifications WHERE compliant = 1 AND url_stem IN (${stems.map(() => "?").join(",")})`, args: stems,
+            });
+            clean = Number(c.rows[0].n);
+          }
+          if (1 + clean < minPhotos) return rej("not enough clean photos"), null;
+        }
+        return { sku: r.sku, titleFr: f.titleFr, titleEn, price: r.price, handle: f.handle || r.handle, productType: r.type };
+      })());
+    }
+    return memo.get(k)!;
+  };
+
+  const jobs: Job[] = [];
+  const slots = () =>
+    Array.from({ length: COUNT * 2 }, (_, i) => ({ lang: (i % 2 === 0 ? "fr" : "en") as Lang, k: i >> 1, i }));
+  const music = (style: Style, lang: Lang, k: number) => TRACKS[style][(k + (lang === "en" ? 1 : 0)) % TRACKS[style].length];
+
+  // Next valid, not-yet-used product of a list (advances the cursor; stops when exhausted).
+  const puller = (rows: Row[], used: Set<string>, minPhotos: number) => {
+    let c = 0;
+    return async (): Promise<PlanProduct | null> => {
+      while (c < rows.length) {
+        const r = rows[c++];
+        if (used.has(r.pid)) continue;
+        const p = await valid(r, minPhotos);
+        if (p) { used.add(r.pid); return p; }
+      }
+      return null;
+    };
+  };
+  const SINGLE_MIN: Partial<Record<Style, number>> = { vitrine: 3, devine: 3 };
+
+  for (const style of STYLES) {
+    const used = new Set<string>();
+    const sl = slots();
+    const base = shuffled(pool, seedOf(style));
+
+    if (style === "reaction") {
+      const scan = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/ugc-compliance-scan.json"), "utf8")) as { sku: string; verdict: string; mentionne_aosom?: boolean; filigrane?: boolean }[];
+      // 851-018: third-party English text on the sensor bin.
+      const REACTION_EXCLUDE = new Set(["851-018"]);
+      const ok = new Set(scan.filter((s) => s.verdict === "CONFORME" && !s.mentionne_aosom && !s.filigrane && !REACTION_EXCLUDE.has(s.sku)).map((s) => s.sku));
+      const clips = fs.readdirSync(path.join(ROOT, "src/ugc")).map((f) => f.replace(/\.mp4$/, "")).filter((s) => ok.has(s));
+      const rows = (
+        await turso.execute({
+          sql: `SELECT sku, name, price, product_type, shopify_handle, shopify_product_id FROM products
+                WHERE sku IN (${clips.map(() => "?").join(",")}) AND shopify_product_id != '' AND qty >= 3 AND price > 0`, args: clips,
+        })
+      ).rows.map((r) => ({
+        sku: String(r.sku), name: String(r.name), price: Number(r.price), type: String(r.product_type),
+        handle: String(r.shopify_handle), pid: String(r.shopify_product_id),
+      })) as Row[];
+      // Off-season patio last: the feed is autumn.
+      const sorted = shuffled(rows, 11).sort((a, b) => Number(/^Patio/.test(a.type)) - Number(/^Patio/.test(b.type)));
+      // The same UGC clip serves both languages (different overlay text), so one product = one FR + one EN video.
+      const next = puller(sorted, used, 1);
+      for (let k = 0; k < COUNT; k++) {
+        const p = await next();
+        if (!p) { console.warn(`  reaction: only ${k} UGC-compliant products available`); break; }
+        for (const lang of ["fr", "en"] as const)
+          jobs.push({ id: `reaction-${lang}-${k}`, style, lang, n: k, campaign: CAMPAIGN, music: music(style, lang, k), products: [p] });
+      }
+      continue;
+    }
+
+    if (style === "vitrine" || style === "astuce" || style === "devine") {
+      // Round-robin over the room families so the series is varied.
+      const buckets = GROUPS.map(([g]) => puller(base.filter((r) => groupOf(r.type) === g), used, SINGLE_MIN[style] ?? 1));
+      let b = 0;
+      for (const s of sl) {
+        let p: PlanProduct | null = null;
+        for (let tries = 0; tries < buckets.length && !p; tries++) p = await buckets[b++ % buckets.length]();
+        if (!p) { console.warn(`  ${style}: pool exhausted at ${jobs.filter((j) => j.style === style).length}`); break; }
+        jobs.push({ id: `${style}-${s.lang}-${s.k}`, style, lang: s.lang, n: s.k, campaign: CAMPAIGN, music: music(style, s.lang, s.k), products: [p] });
+      }
+      continue;
+    }
+
+    if (style === "ab" || style === "top3") {
+      const need = style === "ab" ? 2 : 3;
+      const byType = SAME_TYPES.map((t) => puller(base.filter((r) => lastSeg(r.type) === t), used, 1));
+      let b = 0;
+      for (const s of sl) {
+        let ps: PlanProduct[] = [];
+        for (let tries = 0; tries < byType.length * 2 && ps.length < need; tries++) {
+          const next = byType[b++ % byType.length];
+          const got: PlanProduct[] = [];
+          for (let k = 0; k < need; k++) { const p = await next(); if (p) got.push(p); else break; }
+          const hi = Math.max(...got.map((g) => g.price));
+          const lo = Math.min(...got.map((g) => g.price));
+          const distinct = new Set(got.map((g) => g.titleFr.toLowerCase().split(" ").slice(0, 3).join(" "))).size === got.length;
+          const spreadOk = style === "top3" ? hi / lo <= 3 : (hi - lo) / hi >= 0.12 && hi / lo <= 2.5;
+          if (got.length === need && distinct && spreadOk) ps = got;
+        }
+        if (ps.length < need) { console.warn(`  ${style}: pool exhausted at ${jobs.filter((j) => j.style === style).length}`); break; }
+        jobs.push({ id: `${style}-${s.lang}-${s.k}`, style, lang: s.lang, n: s.k, campaign: CAMPAIGN, music: music(style, s.lang, s.k), products: ps });
+      }
+      continue;
+    }
+
+    // piece: four complementary articles for one room, total kept reasonable.
+    const lists: Record<string, ReturnType<typeof puller>[]> = {};
+    for (const room of ROOM_ORDER) lists[room] = ROOMS[room].map((re) => puller(base.filter((r) => re.test(lastSeg(r.type))), used, 1));
+    for (const s of sl) {
+      const room = ROOM_ORDER[(s.k + (s.lang === "en" ? 1 : 0)) % ROOM_ORDER.length];
+      const ps: PlanProduct[] = [];
+      for (const [ri, next] of lists[room].entries()) { const p = await next(); if (p) ps.push(p); else console.warn(`    role ${ri} of ${room} empty`); }
+      if (ps.length < 4 || ps.reduce((a, p) => a + p.price, 0) > 3000) { console.warn(`  piece(${room}): incomplete, skipped (${ps.length} found, total ${ps.reduce((a, p) => a + p.price, 0)})`); continue; }
+      jobs.push({ id: `piece-${s.lang}-${s.k}`, style, lang: s.lang, n: s.k, campaign: CAMPAIGN, room, music: music(style, s.lang, s.k), products: ps });
+    }
+  }
+
+  fs.mkdirSync(STATE!, { recursive: true });
+  fs.writeFileSync(path.join(STATE!, "plan.json"), JSON.stringify(jobs, null, 1));
+  const tally = new Map<string, number>();
+  for (const j of jobs) tally.set(`${j.style}/${j.lang}`, (tally.get(`${j.style}/${j.lang}`) ?? 0) + 1);
+  console.log(`\nplan: ${jobs.length} videos`);
+  for (const style of STYLES) console.log(`  ${style.padEnd(9)} fr ${tally.get(`${style}/fr`) ?? 0}  en ${tally.get(`${style}/en`) ?? 0}`);
+  console.log("rejected candidates:", rejects);
+}
+
+// ───────────────────────── rendering ─────────────────────────
+
+async function render() {
+  const planFile = path.join(STATE!, "plan.json");
+  const doneFile = path.join(STATE!, "done.jsonl");
+  const jobs = JSON.parse(fs.readFileSync(planFile, "utf8")) as Job[];
+  const done = new Set(fs.existsSync(doneFile) ? fs.readFileSync(doneFile, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l).id as string) : []);
+  const only = flag("--only");
+  const max = Number(flag("--max") ?? 1e9);
+  const budget = Number(flag("--budget-ms") ?? 540000);
+  const started = Date.now();
+  const todo = jobs.filter((j) => !done.has(j.id) && (!only || only.split(",").includes(j.style))).slice(0, max);
+  console.log(`render: ${todo.length} to do (${done.size} done, ${jobs.length} planned)`);
+
+  const interop = <T,>(m: T): T => ((m as { default?: T }).default ?? m);
+  const scenes = interop(await import("@/lib/video-engines/ameublo-scenes"));
+  const sprite = interop(await import("@/lib/ameublo-sprite"));
+  const copy = interop(await import("@/lib/ameublo-copy"));
+  const cap = interop(await import("@/lib/ameublo-caption"));
+  const i18n = interop(await import("@/lib/ameublo-i18n"));
+  const audit = interop(await import("@/lib/image-compliance-audit"));
+  const db = interop(await import("@/lib/database"));
+  const { put } = await import("@vercel/blob");
+  const turso = createClient({ url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN! });
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "ameublo-batch-"));
+  fs.mkdirSync(path.join(STATE!, "sheets"), { recursive: true });
+
+  const download = async (url: string) => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`download ${r.status} ${url}`);
+    return Buffer.from(await r.arrayBuffer());
+  };
+  /** White-background shot first (always shows the whole piece), then audit-clean photos only. */
+  const photosOf = async (sku: string, n: number): Promise<Buffer[]> => {
+    const row = (await turso.execute({ sql: "SELECT image1,image2,image3,image4,image5,image6,image7 FROM products WHERE sku = ?", args: [sku] })).rows[0];
+    const urls = [1, 2, 3, 4, 5, 6, 7].map((i) => (row?.[`image${i}`] == null ? "" : String(row[`image${i}`]))).filter(Boolean);
+    const stems = [...new Set(urls.slice(1).map((u) => audit.imageUrlStem(u)))];
+    const clean = new Set<string>();
+    if (stems.length) {
+      const r = await turso.execute({ sql: `SELECT url_stem FROM image_classifications WHERE compliant = 1 AND url_stem IN (${stems.map(() => "?").join(",")})`, args: stems });
+      for (const x of r.rows) clean.add(String(x.url_stem));
+    }
+    const seen = new Set<string>();
+    const pick = [urls[0], ...urls.slice(1).filter((u) => clean.has(audit.imageUrlStem(u)))]
+      .filter((u) => u && !seen.has(audit.imageUrlStem(u)) && seen.add(audit.imageUrlStem(u))).slice(0, n);
+    if (!pick.length) throw new Error(`no images for ${sku}`);
+    return Promise.all(pick.map(download));
+  };
+  const volumeOf = (file: string): number => {
+    const r = spawnSync(FFMPEG, ["-hide_banner", "-i", file, "-af", "volumedetect", "-vn", "-f", "null", "-"], { encoding: "utf8" });
+    const m = /mean_volume:\s*(-?[\d.]+) dB/.exec(String(r.stderr));
+    return m ? Number(m[1]) : NaN;
+  };
+  const sheet = (file: string, duration: number, out: string) =>
+    execFileSync(FFMPEG, ["-y", "-hide_banner", "-loglevel", "error", "-i", file, "-vf", `fps=${(6 / duration).toFixed(4)},scale=270:480,tile=6x1`, "-frames:v", "1", "-q:v", "4", out]);
+
+  try {
+    for (const j of todo) {
+      if (Date.now() - started > budget) { console.log("budget reached — resume with the same command"); break; }
+      const lang = j.lang;
+      const maxT = j.style === "ab" ? 44 : 48;
+      const title = (p: PlanProduct) => i18n.tidyTitle(lang === "en" ? p.titleEn : p.titleFr, maxT);
+      const ps = j.products.map((p) => ({ sku: p.sku, title: title(p), price: p.price, productType: p.productType }));
+      const lead = ps[0];
+      const accessory = sprite.accessoryForCampaign(j.campaign);
+      const lines = copy.ameubloLines(lead.sku, `${lead.productType} ${j.products[0].titleEn}`, j.n, lang);
+      const track = audio(PICK[(/^noel/.test(j.campaign) ? NOEL_TRACK : j.music) as keyof typeof PICK]);
+      if (!fs.existsSync(track)) throw new Error(`music missing: ${track}`);
+      const out = path.join(work, `${j.id}.mp4`);
+      try {
+        let spec;
+        if (j.style === "reaction") {
+          const clip = path.join(ROOT, "src/ugc", `${lead.sku}.mp4`);
+          if (!fs.existsSync(clip)) throw new Error(`clip missing: ${clip}`);
+          spec = await scenes.reactionScene(clip, lead, lines, accessory, track, lang);
+        } else if (j.style === "vitrine") spec = await scenes.vitrineScene(await photosOf(lead.sku, 3), lead, lines, accessory, track, lang);
+        else if (j.style === "astuce") spec = await scenes.astuceScene((await photosOf(lead.sku, 1))[0], lead, lines, accessory, track, lang);
+        else if (j.style === "devine") spec = await scenes.devinePrixScene(await photosOf(lead.sku, 3), lead, accessory, track, lang);
+        else if (j.style === "ab") {
+          const [pa, pb] = await Promise.all(ps.map(async (p) => (await photosOf(p.sku, 1))[0]));
+          spec = await scenes.ceciOuCaScene(pa, pb, ps[0], ps[1], accessory, track, lang);
+        } else {
+          const photos = await Promise.all(ps.map(async (p) => (await photosOf(p.sku, 1))[0]));
+          const items = ps.map((p, i) => ({ photo: photos[i], p }));
+          spec = j.style === "piece" ? await scenes.pieceScene(items, j.room ?? "salon", accessory, track, lang) : await scenes.top3Scene(items, accessory, track, lang);
+        }
+        await scenes.renderScene(spec, out, FFMPEG);
+
+        const vol = volumeOf(out);
+        if (!Number.isFinite(vol) || vol < -45) throw new Error(`audio silent or missing (mean ${vol} dB)`);
+        sheet(out, spec.duration, path.join(STATE!, "sheets", `${j.id}.jpg`));
+
+        const prices = Object.fromEntries(j.products.map((p) => [p.sku, p.price]));
+        const caption = cap.ameubloCaption({
+          style: j.style, lang, titles: ps.map((p) => p.title), prices: ps.map((p) => p.price), handles: j.products.map((p) => p.handle),
+          room: j.room ? i18n.ROOM_LABEL[j.room]?.[lang] : undefined,
+          cap: j.style === "top3" ? scenes.top3Cap(ps.map((p) => p.price)) : undefined, variant: j.n,
+        });
+        if (has("--preview")) {
+          fs.mkdirSync(path.join(STATE!, "preview"), { recursive: true });
+          fs.copyFileSync(out, path.join(STATE!, "preview", `${j.id}.mp4`));
+          console.log(`  ◦ preview ${j.id}  ${vol.toFixed(1)} dB  ${caption.slice(0, 80).replace(/\n/g, " ")}`);
+          continue;
+        }
+        const blob = await put(`ameublo-studio/${j.style}/${lang}/${Date.now()}-${j.id}.mp4`, fs.readFileSync(out), {
+          access: "public", contentType: "video/mp4", addRandomSuffix: false, allowOverwrite: true,
+        });
+        const id = await db.insertAmeubloTestVideo({
+          series: SERIES, sku: j.products.map((p) => p.sku).join(","), campaign: j.campaign,
+          label: ps.map((p) => p.title).join(lang === "en" ? " vs " : " vs "), videoUrl: blob.url,
+          style: j.style, lang, caption, skus: j.products.map((p) => p.sku), prices, music: path.basename(track),
+        });
+        fs.appendFileSync(doneFile, JSON.stringify({ id: j.id, videoId: id, url: blob.url, vol }) + "\n");
+        console.log(`  ✓ ${j.id.padEnd(14)} #${id}  ${vol.toFixed(1)} dB  ${ps.map((p) => p.sku).join("+")}`);
+      } catch (e) {
+        console.error(`  ✗ ${j.id}: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        fs.rmSync(out, { force: true });
+      }
+    }
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true });
+  }
+}
+
+if (!STATE) {
+  console.error("usage: --state DIR (--plan | --render) [options]; see the header of this file");
+  process.exit(1);
+}
+(has("--plan") ? plan() : has("--render") ? render() : Promise.reject(new Error("pass --plan or --render"))).catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

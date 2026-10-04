@@ -1,0 +1,113 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+const db = vi.hoisted(() => ({
+  getAmeubloTestVideo: vi.fn(),
+  getOccupiedAmeubloSlots: vi.fn(),
+  getSetting: vi.fn(),
+  addToQueue: vi.fn(),
+  cancelPendingQueueItems: vi.fn(),
+  setAmeubloQueueId: vi.fn(),
+  getProduct: vi.fn(),
+}));
+const { SlotTaken } = vi.hoisted(() => ({ SlotTaken: class SlotTaken extends Error {} }));
+vi.mock("@/lib/database", () => ({ ...db, QueueSlotTakenError: SlotTaken }));
+
+import { approveAmeubloVideo, bulkApproveAmeubloVideos, cancelAmeubloVideo, approvalBlocker } from "@/lib/ameublo-approval";
+
+const NOW = Date.parse("2026-10-05T12:00:00Z"); // Monday 08:00 Toronto
+const video = (o: Record<string, unknown> = {}) => ({
+  id: 1, lang: "fr", style: "vitrine", caption: "Belle trouvaille", video_url: "https://blob/x.mp4",
+  verdict: null, qa_verdict: "pass", queue_id: null, queue_status: null, series: "Série A", campaign: "maison-2026",
+  skus: ["A1"], prices: { A1: 99.99 }, ...o,
+});
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
+  Object.values(db).forEach((f) => f.mockReset());
+  db.getSetting.mockResolvedValue(null);
+  db.getOccupiedAmeubloSlots.mockResolvedValue([]);
+  db.addToQueue.mockResolvedValue(55);
+  db.getProduct.mockResolvedValue({ price: 99.99 });
+});
+
+describe("approveAmeubloVideo", () => {
+  it("queues a pending sequential_ad on the FR share of the grid and links the video", async () => {
+    db.getAmeubloTestVideo.mockResolvedValue(video());
+    const r = await approveAmeubloVideo(1);
+    expect(r).toMatchObject({ success: true, queueId: 55 });
+    const arg = db.addToQueue.mock.calls[0][0];
+    expect(arg).toMatchObject({ contentType: "sequential_ad", contentId: "ameublo:1", platform: "both", status: "pending" });
+    expect(JSON.parse(arg.payload)).toMatchObject({ brand: "ameublo", reelsVideoUrl: "https://blob/x.mp4" });
+    expect(arg.metadata).toMatchObject({ source: "ameublo_studio", keepCaption: true, lang: "fr", renderedPrices: { A1: 99.99 } });
+    // FR keeps the 1st/3rd time of the day: 07:45 or 18:30 Toronto (EDT = UTC-4) -> 11:45 / 22:30 UTC
+    expect(["11:45:00", "22:30:00"]).toContain(arg.scheduledAt.slice(11));
+    expect(db.setAmeubloQueueId).toHaveBeenCalledWith(1, 55);
+  });
+
+  it("books English videos on the other hours with the furnish brand", async () => {
+    db.getAmeubloTestVideo.mockResolvedValue(video({ lang: "en" }));
+    await approveAmeubloVideo(1);
+    const arg = db.addToQueue.mock.calls[0][0];
+    expect(JSON.parse(arg.payload).brand).toBe("furnish");
+    expect(["16:15:00", "00:45:00"]).toContain(arg.scheduledAt.slice(11));
+  });
+
+  it("retries the next slot when one is taken", async () => {
+    db.getAmeubloTestVideo.mockResolvedValue(video());
+    db.addToQueue.mockRejectedValueOnce(new SlotTaken()).mockResolvedValueOnce(56);
+    const r = await approveAmeubloVideo(1);
+    expect(r).toMatchObject({ success: true, queueId: 56 });
+    expect(db.addToQueue).toHaveBeenCalledTimes(2);
+    expect(db.addToQueue.mock.calls[1][0].scheduledAt).not.toBe(db.addToQueue.mock.calls[0][0].scheduledAt);
+  });
+
+  it("refuses a stale price without queuing anything", async () => {
+    db.getAmeubloTestVideo.mockResolvedValue(video());
+    db.getProduct.mockResolvedValue({ price: 89.99 });
+    const r = await approveAmeubloVideo(1);
+    expect(r).toMatchObject({ success: false, status: 409 });
+    expect(db.addToQueue).not.toHaveBeenCalled();
+  });
+
+  it("refuses bad / QA-failed / old-series / already scheduled videos", async () => {
+    const cases: [Record<string, unknown>, boolean][] = [
+      [{ verdict: "bad" }, false],
+      [{ qa_verdict: "fail" }, false],
+      [{ lang: null, style: null }, false],
+      [{ queue_id: 9, queue_status: "pending" }, false],
+      [{ queue_id: 9, queue_status: "cancelled" }, true],
+    ];
+    for (const [o, ok] of cases) {
+      db.getAmeubloTestVideo.mockResolvedValue(video(o));
+      db.addToQueue.mockClear();
+      const r = await approveAmeubloVideo(1);
+      expect(r.success).toBe(ok);
+    }
+  });
+
+  it("lets the operator force past a QA fail, but not past a 'bad' verdict", async () => {
+    expect(approvalBlocker(video({ qa_verdict: "fail" }) as never, true)).toBeNull();
+    expect(approvalBlocker(video({ verdict: "bad" }) as never, true)).not.toBeNull();
+  });
+});
+
+describe("bulkApproveAmeubloVideos / cancel", () => {
+  it("interleaves FR and EN", async () => {
+    const vs: Record<number, ReturnType<typeof video>> = {
+      1: video({ id: 1 }), 2: video({ id: 2 }), 3: video({ id: 3, lang: "en" }), 4: video({ id: 4, lang: "en" }),
+    };
+    db.getAmeubloTestVideo.mockImplementation(async (id: number) => vs[id]);
+    const out = await bulkApproveAmeubloVideos([1, 2, 3, 4]);
+    expect(out.map((o) => o.id)).toEqual([1, 3, 2, 4]);
+  });
+
+  it("cancels pending queue rows and unlinks, but never a published one", async () => {
+    db.getAmeubloTestVideo.mockResolvedValue(video({ queue_id: 5, queue_status: "pending" }));
+    expect((await cancelAmeubloVideo(1)).success).toBe(true);
+    expect(db.cancelPendingQueueItems).toHaveBeenCalledWith("sequential_ad", "ameublo:1");
+    expect(db.setAmeubloQueueId).toHaveBeenCalledWith(1, null);
+    db.getAmeubloTestVideo.mockResolvedValue(video({ queue_id: 5, queue_status: "published" }));
+    expect((await cancelAmeubloVideo(1)).success).toBe(false);
+  });
+});

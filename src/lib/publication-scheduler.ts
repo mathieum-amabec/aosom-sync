@@ -31,6 +31,7 @@ import {
   DEFAULT_DEMAND_GEN_EXT_SCHEDULE,
   DEFAULT_ASSEMBLY_SCHEDULE,
   DEFAULT_GUIDE_SCHEDULE,
+  DEFAULT_AMEUBLO_SCHEDULE,
 } from "@/lib/config";
 import { getOccupiedQueueSlots, type QueueContentType } from "@/lib/database";
 
@@ -222,6 +223,33 @@ export function parseContentBatchSchedule(
   } catch {
     return clone(d);
   }
+}
+
+/** Parse the stored ameublo_schedule JSON (Studio Ameublo Reels); defaults on any error. */
+export function parseAmeubloSchedule(rawJson: string | null | undefined): PublicationSchedule {
+  if (!rawJson) return clone(DEFAULT_AMEUBLO_SCHEDULE);
+  try {
+    return normalizeScheduleWith(JSON.parse(rawJson), DEFAULT_AMEUBLO_SCHEDULE);
+  } catch {
+    return clone(DEFAULT_AMEUBLO_SCHEDULE);
+  }
+}
+
+/**
+ * The part of the Studio grid that belongs to one language: per day, the 1st and 3rd time are
+ * French, the 2nd and 4th English (a day with a single time serves both). The per-day cap
+ * halves too, so FR and EN Reels each get their own fixed hours and never crowd each other.
+ */
+export function ameubloScheduleForLang(schedule: PublicationSchedule, lang: "fr" | "en"): PublicationSchedule {
+  const want = lang === "fr" ? 0 : 1;
+  const slots = schedule.slots
+    .map((s) => {
+      const times = [...s.times].sort();
+      const mine = times.length === 1 ? times : times.filter((_, i) => i % 2 === want);
+      return { day: s.day, times: mine };
+    })
+    .filter((s) => s.times.length > 0);
+  return { ...schedule, slots, max_per_day: Math.max(1, Math.ceil(schedule.max_per_day / 2)) };
 }
 
 /**

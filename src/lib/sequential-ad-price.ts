@@ -51,6 +51,24 @@ export async function checkSequentialAdPrice(item: {
   contentId: string;
   metadata: Record<string, unknown> | null;
 }): Promise<PriceCheck> {
+  // Studio Ameublo videos can burn several prices (Top 3, A/B, pièce en 4): metadata.renderedPrices.
+  const map = item.metadata?.renderedPrices;
+  if (map && typeof map === "object") {
+    for (const [sku, burned] of Object.entries(map as Record<string, unknown>)) {
+      if (typeof burned !== "number" || !Number.isFinite(burned)) continue;
+      const p = await getProduct(sku);
+      const now = p && Number.isFinite(p.price) ? Number(p.price) : null;
+      if (now != null && !samePrice(burned, now)) {
+        return {
+          ok: false,
+          rendered: burned,
+          current: now,
+          reason: `Prix changé depuis le rendu (${sku}) : ${priceFr(burned)} → ${priceFr(now)}. À re-rendre avec le prix du jour.`,
+        };
+      }
+    }
+    return { ok: true, rendered: null, current: null };
+  }
   const rendered = renderedPriceOf(item.metadata);
   if (rendered == null) return { ok: true, rendered, current: null };
   const sku = skuFromContentId(item.contentId ?? "");

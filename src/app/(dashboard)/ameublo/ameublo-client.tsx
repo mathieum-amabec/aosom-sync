@@ -1,38 +1,122 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import MusicPicker from "./music-picker";
 import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
+import { STYLE_LABEL, type AmeubloStyle } from "@/lib/ameublo-caption";
 
 // Mirrors AmeubloTestVideo in src/lib/database.ts.
-interface TestVideo {
+interface StudioVideo {
   id: number;
   series: string;
   sku: string | null;
   campaign: string | null;
   label: string | null;
   video_url: string;
-  source_queue_id: number | null;
   verdict: "ok" | "bad" | null;
   note: string | null;
   created_at: string;
+  style: string | null;
+  lang: "fr" | "en" | null;
+  caption: string | null;
+  skus: string[];
+  music: string | null;
+  queue_id: number | null;
+  queue_status: string | null;
+  queue_scheduled_at: string | null;
+  qa_verdict: "pass" | "fail" | "review" | null;
+  qa_notes: string | null;
 }
 
-/** Keep the series order of the API (newest first) and the video order inside each series. */
-function groupBySeries(videos: TestVideo[]): [string, TestVideo[]][] {
-  const map = new Map<string, TestVideo[]>();
-  for (const v of videos) {
-    const list = map.get(v.series) ?? [];
-    list.push(v);
-    map.set(v.series, list);
-  }
-  return [...map.entries()];
+type Status = "new" | "scheduled" | "published" | "rejected" | "rerender";
+
+function statusOf(v: StudioVideo): Status {
+  if (v.queue_status === "published") return "published";
+  if (v.queue_id != null && (v.queue_status === "pending" || v.queue_status === "publishing")) return "scheduled";
+  if (v.verdict === "bad") return "rejected";
+  if (v.queue_id != null && v.queue_status === "draft") return "rerender";
+  return "new";
+}
+
+const STATUS_LABEL: Record<Status, string> = {
+  new: "Nouveau",
+  scheduled: "Planifié",
+  published: "Publié",
+  rejected: "Rejeté",
+  rerender: "À re-rendre",
+};
+const STATUS_CLASS: Record<Status, string> = {
+  new: "bg-blue-950/60 border-blue-800 text-blue-200",
+  scheduled: "bg-green-950/60 border-green-800 text-green-200",
+  published: "bg-gray-800 border-gray-600 text-gray-200",
+  rejected: "bg-red-950/60 border-red-800 text-red-200",
+  rerender: "bg-amber-950/60 border-amber-800 text-amber-200",
+};
+const QA_CLASS = {
+  pass: "bg-green-950/60 border-green-800 text-green-200",
+  review: "bg-amber-950/60 border-amber-800 text-amber-200",
+  fail: "bg-red-950/60 border-red-800 text-red-200",
+} as const;
+const QA_LABEL = { pass: "Réviseur : OK", review: "Réviseur : à voir", fail: "Réviseur : refusé" } as const;
+
+const styleLabel = (s: string | null) => (s && s in STYLE_LABEL ? STYLE_LABEL[s as AmeubloStyle].fr : (s ?? "—"));
+
+function fmtWhen(sqlite: string | null): string {
+  if (!sqlite) return "";
+  const d = new Date(`${sqlite.replace(" ", "T")}Z`);
+  return d.toLocaleString("fr-CA", {
+    timeZone: "America/Toronto",
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function Select({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: [string, string][];
+}) {
+  return (
+    <label className="text-xs text-gray-400 flex flex-col gap-1">
+      {label}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded border border-gray-700 bg-gray-950 px-2 py-1 text-sm text-gray-200"
+      >
+        <option value="">Tous</option>
+        {options.map(([k, l]) => (
+          <option key={k} value={k}>
+            {l}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 export default function AmeubloStudioClient() {
-  const [videos, setVideos] = useState<TestVideo[]>([]);
+  const [videos, setVideos] = useState<StudioVideo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [busy, setBusy] = useState<number | "bulk" | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [fStyle, setFStyle] = useState("");
+  const [fLang, setFLang] = useState("");
+  const [fSeries, setFSeries] = useState("");
+  const [fCampaign, setFCampaign] = useState("");
+  const [fStatus, setFStatus] = useState("new");
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,21 +137,119 @@ export default function AmeubloStudioClient() {
     load();
   }, [load]);
 
-  const save = async (id: number, patch: { verdict?: "ok" | "bad" | null; note?: string }) => {
+  const post = async (body: Record<string, unknown>) => {
+    const res = await fetch("/api/ameublo/videos", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = await res.json().catch(() => ({}));
+    return { ok: res.ok && j.success !== false, j, status: res.status };
+  };
+
+  const saveVerdict = async (id: number, verdict: "ok" | "bad" | null) => {
     const current = videos.find((v) => v.id === id);
     if (!current) return;
-    const next = { ...current, ...patch };
-    setVideos((vs) => vs.map((v) => (v.id === id ? next : v)));
+    setVideos((vs) => vs.map((v) => (v.id === id ? { ...v, verdict } : v)));
     const res = await fetch("/api/ameublo/videos", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id, verdict: next.verdict, note: patch.note }),
+      body: JSON.stringify({ id, verdict }),
     });
     if (!res.ok) {
       setVideos((vs) => vs.map((v) => (v.id === id ? current : v)));
       const j = await res.json().catch(() => ({}));
       setError(j.error || `Échec de l'enregistrement (HTTP ${res.status})`);
     }
+  };
+
+  const approve = async (v: StudioVideo, force = false): Promise<void> => {
+    setBusy(v.id);
+    setError(null);
+    setInfo(null);
+    const r = await post({ action: "approve", id: v.id, force });
+    if (r.ok) setInfo(`Vidéo ${v.id} planifiée : ${fmtWhen(r.j.scheduledAt)}.`);
+    else if (v.qa_verdict === "fail" && !force && window.confirm(`${r.j.error}\n\nForcer l'approbation ?`)) {
+      setBusy(null);
+      return approve(v, true);
+    } else setError(r.j.error || `Échec (HTTP ${r.status})`);
+    setBusy(null);
+    await load();
+  };
+
+  const cancel = async (v: StudioVideo) => {
+    setBusy(v.id);
+    setError(null);
+    setInfo(null);
+    const r = await post({ action: "cancel", id: v.id });
+    if (r.ok) setInfo(`Vidéo ${v.id} retirée de l'horaire.`);
+    else setError(r.j.error || `Échec (HTTP ${r.status})`);
+    setBusy(null);
+    await load();
+  };
+
+  const saveCaption = async (v: StudioVideo) => {
+    const caption = drafts[v.id];
+    if (caption == null || caption === (v.caption ?? "")) return;
+    const r = await post({ action: "caption", id: v.id, caption });
+    if (r.ok) {
+      setVideos((vs) => vs.map((x) => (x.id === v.id ? { ...x, caption } : x)));
+    } else setError(r.j.error || `Échec (HTTP ${r.status})`);
+  };
+
+  const options = useMemo(() => {
+    const uniq = (xs: (string | null)[]) => [...new Set(xs.filter((x): x is string => !!x))];
+    return {
+      styles: uniq(videos.map((v) => v.style)),
+      series: uniq(videos.map((v) => v.series)),
+      campaigns: uniq(videos.map((v) => v.campaign)),
+    };
+  }, [videos]);
+
+  const shown = useMemo(
+    () =>
+      videos.filter(
+        (v) =>
+          (!fStyle || v.style === fStyle) &&
+          (!fLang || v.lang === fLang) &&
+          (!fSeries || v.series === fSeries) &&
+          (!fCampaign || v.campaign === fCampaign) &&
+          (!fStatus || statusOf(v) === fStatus),
+      ),
+    [videos, fStyle, fLang, fSeries, fCampaign, fStatus],
+  );
+
+  const counts = useMemo(() => {
+    const c: Record<Status, number> = { new: 0, scheduled: 0, published: 0, rejected: 0, rerender: 0 };
+    for (const v of videos) c[statusOf(v)]++;
+    return c;
+  }, [videos]);
+
+  const approvable = shown.filter((v) => statusOf(v) === "new" && v.lang && v.style && v.qa_verdict !== "fail");
+  const selectedApprovable = approvable.filter((v) => selected.has(v.id));
+
+  const toggle = (id: number) =>
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+
+  const bulkApprove = async () => {
+    const ids = selectedApprovable.map((v) => v.id).slice(0, 100);
+    if (!ids.length) return;
+    if (!window.confirm(`Planifier ${ids.length} vidéo(s) sur les prochains créneaux libres ?`)) return;
+    setBusy("bulk");
+    setError(null);
+    setInfo(null);
+    const r = await post({ action: "bulk_approve", ids });
+    if (r.ok) {
+      setInfo(`${r.j.data.approved} planifiée(s), ${r.j.data.refused} refusée(s).`);
+      setSelected(new Set());
+    } else setError(r.j.error || `Échec (HTTP ${r.status})`);
+    setBusy(null);
+    await load();
   };
 
   return (
@@ -77,84 +259,164 @@ export default function AmeubloStudioClient() {
       <div>
         <h1 className="text-2xl font-bold text-white">Studio Ameublo</h1>
         <p className="text-sm text-gray-400 mt-1">
-          Vidéos test de la mascotte, pour juger la constance du personnage. Elles ne sont{" "}
-          <strong className="text-gray-200">jamais publiées</strong> : rien ici n&apos;entre dans la file de
-          publication. Note chaque vidéo 👍 / 👎 et laisse un commentaire si quelque chose cloche.
+          Vidéos de la mascotte (Ameublo en français, Furni en anglais pour Furnish Direct). Rien ne part sans ton
+          approbation : « Approuver et planifier » place la vidéo sur le prochain créneau libre de sa langue, et la
+          publication se fait ensuite automatiquement (FB + IG).
+        </p>
+        <p className="text-xs text-gray-500 mt-1">
+          Horaire : 4 Reels par jour (heure de Montréal) : 07 h 45 FR · 12 h 15 EN · 18 h 30 FR · 20 h 45 EN.
         </p>
       </div>
 
       <MusicPicker />
 
+      <div className="flex flex-wrap gap-2 text-xs">
+        {(Object.keys(STATUS_LABEL) as Status[]).map((s) => (
+          <button
+            key={s}
+            onClick={() => setFStatus(fStatus === s ? "" : s)}
+            className={`rounded border px-2 py-1 ${STATUS_CLASS[s]} ${fStatus === s ? "ring-1 ring-white/60" : "opacity-80"}`}
+          >
+            {STATUS_LABEL[s]} · {counts[s]}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <Select label="Style" value={fStyle} onChange={setFStyle} options={options.styles.map((s) => [s, styleLabel(s)])} />
+        <Select
+          label="Langue"
+          value={fLang}
+          onChange={setFLang}
+          options={[
+            ["fr", "Français"],
+            ["en", "English"],
+          ]}
+        />
+        <Select label="Série" value={fSeries} onChange={setFSeries} options={options.series.map((s) => [s, s])} />
+        <Select label="Campagne" value={fCampaign} onChange={setFCampaign} options={options.campaigns.map((s) => [s, s])} />
+        <Select
+          label="Statut"
+          value={fStatus}
+          onChange={setFStatus}
+          options={(Object.keys(STATUS_LABEL) as Status[]).map((s) => [s, STATUS_LABEL[s]])}
+        />
+        <div className="flex gap-2 ml-auto">
+          <button
+            onClick={() => setSelected(new Set(approvable.slice(0, 100).map((v) => v.id)))}
+            className="rounded border border-gray-700 px-3 py-1 text-sm text-gray-300 hover:bg-gray-800"
+          >
+            Tout sélectionner ({Math.min(approvable.length, 100)})
+          </button>
+          <button
+            onClick={bulkApprove}
+            disabled={!selectedApprovable.length || busy !== null}
+            className="rounded bg-green-800 px-3 py-1 text-sm text-white disabled:opacity-40"
+          >
+            Approuver la sélection ({selectedApprovable.length})
+          </button>
+        </div>
+      </div>
+
       {error && <div className="rounded border border-red-800 bg-red-950/40 p-3 text-sm text-red-300">{error}</div>}
+      {info && <div className="rounded border border-green-800 bg-green-950/40 p-3 text-sm text-green-300">{info}</div>}
       {loading && <div className="text-gray-400 text-sm">Chargement…</div>}
-      {!loading && videos.length === 0 && !error && (
+      {!loading && shown.length === 0 && !error && (
         <div className="rounded border border-gray-800 bg-gray-900 p-6 text-gray-400 text-sm">
-          Aucune vidéo test pour l&apos;instant.
+          Aucune vidéo pour ces filtres.
         </div>
       )}
 
-      {groupBySeries(videos).map(([series, list]) => {
-        const ok = list.filter((v) => v.verdict === "ok").length;
-        const bad = list.filter((v) => v.verdict === "bad").length;
-        return (
-          <section key={series} className="space-y-3">
-            <div className="flex items-baseline gap-3 flex-wrap">
-              <h2 className="text-lg font-semibold text-white">{series}</h2>
-              <span className="text-xs text-gray-400">
-                {list.length} vidéo{list.length > 1 ? "s" : ""} · 👍 {ok} · 👎 {bad} · à noter {list.length - ok - bad}
-              </span>
-            </div>
-            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {list.map((v) => (
-                <div key={v.id} className="rounded-lg border border-gray-800 bg-gray-900 p-3 space-y-2">
-                  <video
-                    src={v.video_url}
-                    controls
-                    preload="metadata"
-                    playsInline
-                    className="w-full aspect-[9/16] rounded bg-black object-contain"
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {shown.map((v) => {
+          const st = statusOf(v);
+          const caption = drafts[v.id] ?? v.caption ?? "";
+          const locked = st === "scheduled" || st === "published";
+          return (
+            <div key={v.id} className="rounded-lg border border-gray-800 bg-gray-900 p-3 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`rounded border px-1.5 py-0.5 text-[11px] ${STATUS_CLASS[st]}`}>
+                  {STATUS_LABEL[st]}
+                  {st === "scheduled" && v.queue_scheduled_at ? ` · ${fmtWhen(v.queue_scheduled_at)}` : ""}
+                </span>
+                {v.qa_verdict && (
+                  <span className={`rounded border px-1.5 py-0.5 text-[11px] ${QA_CLASS[v.qa_verdict]}`}>
+                    {QA_LABEL[v.qa_verdict]}
+                  </span>
+                )}
+                {v.lang && <span className="text-[11px] text-gray-400 uppercase">{v.lang}</span>}
+                {st === "new" && v.lang && v.style && (
+                  <input
+                    type="checkbox"
+                    checked={selected.has(v.id)}
+                    onChange={() => toggle(v.id)}
+                    className="ml-auto"
+                    aria-label="Sélectionner"
                   />
-                  <div className="text-sm text-gray-200">{v.label || v.sku || `Vidéo ${v.id}`}</div>
-                  <div className="text-xs text-gray-500">
-                    {[v.sku, v.campaign].filter(Boolean).join(" · ")}
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => save(v.id, { verdict: v.verdict === "ok" ? null : "ok" })}
-                      className={`flex-1 rounded px-2 py-1 text-sm border ${
-                        v.verdict === "ok"
-                          ? "bg-green-900/50 border-green-700 text-green-200"
-                          : "border-gray-700 text-gray-300 hover:bg-gray-800"
-                      }`}
-                    >
-                      👍 Constant
-                    </button>
-                    <button
-                      onClick={() => save(v.id, { verdict: v.verdict === "bad" ? null : "bad" })}
-                      className={`flex-1 rounded px-2 py-1 text-sm border ${
-                        v.verdict === "bad"
-                          ? "bg-red-950/60 border-red-800 text-red-200"
-                          : "border-gray-700 text-gray-300 hover:bg-gray-800"
-                      }`}
-                    >
-                      👎 À revoir
-                    </button>
-                  </div>
-                  <textarea
-                    defaultValue={v.note ?? ""}
-                    placeholder="Commentaire (optionnel)"
-                    rows={2}
-                    onBlur={(e) => {
-                      if (e.target.value !== (v.note ?? "")) save(v.id, { note: e.target.value });
-                    }}
-                    className="w-full rounded border border-gray-700 bg-gray-950 p-2 text-xs text-gray-200"
-                  />
-                </div>
-              ))}
+                )}
+              </div>
+              <video
+                src={v.video_url}
+                controls
+                preload="metadata"
+                playsInline
+                className="w-full aspect-[9/16] rounded bg-black object-contain"
+              />
+              <div className="text-sm text-gray-200">
+                {styleLabel(v.style)}
+                {v.label ? ` — ${v.label}` : v.sku ? ` — ${v.sku}` : ""}
+              </div>
+              <div className="text-xs text-gray-500">
+                {[v.series, v.campaign, v.skus.length ? v.skus.join(", ") : null].filter(Boolean).join(" · ")}
+              </div>
+              {v.qa_notes && <div className="text-xs text-gray-400 whitespace-pre-line">{v.qa_notes}</div>}
+
+              <textarea
+                value={caption}
+                onChange={(e) => setDrafts((d) => ({ ...d, [v.id]: e.target.value }))}
+                onBlur={() => saveCaption(v)}
+                disabled={locked || !v.lang}
+                rows={5}
+                placeholder="Légende"
+                className="w-full rounded border border-gray-700 bg-gray-950 p-2 text-xs text-gray-200 disabled:opacity-60"
+              />
+
+              <div className="flex gap-2">
+                {st === "new" || st === "rerender" || st === "rejected" ? (
+                  <button
+                    onClick={() => approve(v)}
+                    disabled={busy !== null || !v.lang || !v.style || v.verdict === "bad"}
+                    className="flex-1 rounded bg-green-800 px-2 py-1 text-sm text-white disabled:opacity-40"
+                  >
+                    {busy === v.id ? "…" : "Approuver et planifier"}
+                  </button>
+                ) : st === "scheduled" ? (
+                  <button
+                    onClick={() => cancel(v)}
+                    disabled={busy !== null}
+                    className="flex-1 rounded border border-gray-600 px-2 py-1 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-40"
+                  >
+                    {busy === v.id ? "…" : "Retirer de l’horaire"}
+                  </button>
+                ) : null}
+                {!locked && (
+                  <button
+                    onClick={() => saveVerdict(v.id, v.verdict === "bad" ? null : "bad")}
+                    className={`rounded px-2 py-1 text-sm border ${
+                      v.verdict === "bad"
+                        ? "bg-red-950/60 border-red-800 text-red-200"
+                        : "border-gray-700 text-gray-300 hover:bg-gray-800"
+                    }`}
+                    title="Rejeter (n'est jamais publiée)"
+                  >
+                    👎
+                  </button>
+                )}
+              </div>
             </div>
-          </section>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }

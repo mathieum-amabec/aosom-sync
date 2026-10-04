@@ -29,7 +29,7 @@ const STYLE_ARGS: Record<string, string[]> = {
 
 const rows = (
   await db.execute(
-    `SELECT id, content_id, metadata FROM publication_queue WHERE content_type = 'sequential_ad' AND status = 'draft'`,
+    `SELECT id, content_id, metadata FROM publication_queue WHERE content_type = 'sequential_ad' AND status = 'draft' AND COALESCE(json_extract(metadata, '$.source'), '') != 'ameublo_studio'`,
   )
 ).rows;
 // content_id is "seqad:<style>:<campaign>:<sku>"
