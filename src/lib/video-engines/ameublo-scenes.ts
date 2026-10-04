@@ -484,6 +484,8 @@ export async function vitrineScene(photos: Buffer[], p: StyleProduct, lines: Ame
 
 /** Practical tips by product family. Plain advice, no product claims. */
 export const TIPS: { match: RegExp; tip: string }[] = [
+  { match: /inflatable|gonflable|blow[- ]?up|airblown/i, tip: "Ancrez bien un gonflable : le vent peut le faire basculer" },
+  { match: /halloween|animatronic|reaper|zombie|witch|clown|mummy|skeleton|sorci|squelette|citrouille/i, tip: "Éclairez par en dessous : l’effet est bien plus effrayant" },
   { match: /(dog|cat|pet|chien|chat).*(bed|house|kennel|condo|tree|lit|niche|panier)|(bed|house|kennel|lit|niche).*(dog|cat|pet)/i, tip: "Installez le coin de votre animal loin des courants d’air" },
   { match: /(pet|dog|cat|chien|chat).*(sofa|couch|canap)/i, tip: "Installez le coin de votre animal loin des courants d’air" },
   { match: /armchair|accent chair|recliner|glider|rocking chair|fauteuil|chaise d.appoint|chaise berçante|inclinable/i, tip: "Prévoyez environ 60 cm de dégagement devant un fauteuil" },
@@ -500,6 +502,8 @@ export const TIPS: { match: RegExp; tip: string }[] = [
 export const DEFAULT_TIP = "Mesurez deux fois, commandez une fois";
 
 export const TIPS_EN: { match: RegExp; tip: string }[] = [
+  { match: /inflatable|gonflable|blow[- ]?up|airblown/i, tip: "Anchor an inflatable well: wind can tip it over" },
+  { match: /halloween|animatronic|reaper|zombie|witch|clown|mummy|skeleton|sorci|squelette|citrouille/i, tip: "Light it from below: it looks far scarier" },
   { match: /(dog|cat|pet|chien|chat).*(bed|house|kennel|condo|tree|lit|niche|panier)|(bed|house|kennel|lit|niche).*(dog|cat|pet)/i, tip: "Set up your pet’s spot away from drafts" },
   { match: /(pet|dog|cat|chien|chat).*(sofa|couch|canap)/i, tip: "Set up your pet’s spot away from drafts" },
   { match: /armchair|accent chair|recliner|glider|rocking chair|fauteuil|chaise d.appoint|chaise berçante|inclinable/i, tip: "Leave about 2 feet of clearance in front of an armchair" },

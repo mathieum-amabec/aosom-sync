@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
-import { listAmeubloTestVideos, setAmeubloTestVerdict, setAmeubloCaption, getAmeubloTestVideo } from "@/lib/database";
+import { listAmeubloTestVideos, setAmeubloTestVerdict, setAmeubloCaption, getAmeubloTestVideo, productTypesBySku } from "@/lib/database";
+import { categorize, CATEGORY_LABEL } from "@/lib/ameublo-categories";
 import { approveAmeubloVideo, bulkApproveAmeubloVideos, cancelAmeubloVideo } from "@/lib/ameublo-approval";
 
 /**
@@ -16,7 +17,18 @@ import { approveAmeubloVideo, bulkApproveAmeubloVideos, cancelAmeubloVideo } fro
  */
 export async function GET() {
   if (!(await isAuthenticated())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const videos = await listAmeubloTestVideos();
+  const rows = await listAmeubloTestVideos();
+  const skusOf = (v: { skus?: string[]; sku?: string | null }) =>
+    v.skus?.length ? v.skus : (v.sku ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  const types = await productTypesBySku(rows.flatMap(skusOf));
+  const videos = rows.map((v) => {
+    const { category, sub } = categorize({
+      productTypes: skusOf(v).map((s) => types.get(s)).filter((t): t is string => !!t),
+      label: v.label,
+      campaign: v.campaign,
+    });
+    return { ...v, category, category_label: CATEGORY_LABEL[category], sub_category: sub };
+  });
   return NextResponse.json({ success: true, data: { videos } });
 }
 

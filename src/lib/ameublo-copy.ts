@@ -13,9 +13,10 @@
 import type { Lang } from "@/lib/ameublo-i18n";
 
 export type ProductFamily =
-  | "rangement" | "salon" | "bureau" | "enfants" | "animaux" | "chambre" | "noel" | "cuisine" | "bain" | "general";
+  | "rangement" | "salon" | "bureau" | "enfants" | "animaux" | "chambre" | "noel" | "halloween" | "cuisine" | "bain" | "general";
 
 const FAMILY_RULES: [ProductFamily, RegExp][] = [
+  ["halloween", /halloween|animatronic|grim reaper|zombie|witch|sorci|citrouille|pumpkin/i],
   ["noel", /christmas|sapin|noël|xmas/i],
   ["animaux", /\b(dog|cat|pet)s?\b|chien|chat|animal/i],
   ["enfants", /kids|enfant|toddler|toy|jouet|ride-on/i],
@@ -57,6 +58,7 @@ export const VALUE: Record<ProductFamily, string[]> = {
   animaux: ["TON ANIMAL VA T’ADORER", "IL MÉRITE ÇA", "SON COIN À LUI"],
   chambre: ["TA CHAMBRE, VERSION HÔTEL", "LE MATIN VA CHANGER", "UN COIN JUSTE POUR TOI"],
   noel: ["NOËL COMMENCE ICI", "LE SALON DES FÊTES", "LA MAGIE, SANS EFFORT"],
+  halloween: ["LA MAISON LA PLUS HANTÉE", "LES VOISINS VONT FLIPPER", "HALLOWEEN FRISSONNANT"],
   cuisine: ["TA CUISINE, VERSION CAFÉ", "LES SOUPERS VONT CHANGER", "TOUT LE MONDE À TABLE"],
   general: ["ÇA CHANGE TOUT", "J’EN VEUX UN", "SIMPLE ET BEAU"],
 };
@@ -90,6 +92,7 @@ export const VALUE_EN: Record<ProductFamily, string[]> = {
   animaux: ["YOUR PET WILL ADORE YOU", "THEY DESERVE THIS", "THEIR VERY OWN SPOT"],
   chambre: ["YOUR BEDROOM, HOTEL STYLE", "MORNINGS WILL CHANGE", "A CORNER JUST FOR YOU"],
   noel: ["CHRISTMAS STARTS HERE", "THE HOLIDAY LIVING ROOM", "MAGIC, NO EFFORT"],
+  halloween: ["THE SPOOKIEST HOUSE", "THE NEIGHBOURS WILL FREAK", "HALLOWEEN, MADE CREEPY"],
   cuisine: ["YOUR KITCHEN, CAFÉ STYLE", "DINNER, REINVENTED", "EVERYONE TO THE TABLE"],
   general: ["IT CHANGES EVERYTHING", "I WANT ONE", "SIMPLE AND BEAUTIFUL"],
 };

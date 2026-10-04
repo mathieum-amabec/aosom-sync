@@ -7643,6 +7643,25 @@ export async function listAmeubloTestVideos(): Promise<AmeubloTestVideo[]> {
   return r.rows.map((row) => mapAmeubloVideo(rowToObj(row)));
 }
 
+/** Catalogue product_type per SKU (Studio category filter). SKUs unknown to the catalogue are absent from the map. */
+export async function productTypesBySku(skus: string[]): Promise<Map<string, string>> {
+  const db = await ensureSchema();
+  const out = new Map<string, string>();
+  const list = [...new Set(skus.filter(Boolean))];
+  for (let i = 0; i < list.length; i += 200) {
+    const part = list.slice(i, i + 200);
+    const r = await db.execute({
+      sql: `SELECT sku, product_type FROM products WHERE sku IN (${part.map(() => "?").join(",")})`,
+      args: part,
+    });
+    for (const row of r.rows) {
+      const o = rowToObj(row);
+      if (o.product_type != null) out.set(String(o.sku), String(o.product_type));
+    }
+  }
+  return out;
+}
+
 export async function getAmeubloTestVideo(id: number): Promise<AmeubloTestVideo | null> {
   const db = await ensureSchema();
   const r = await db.execute({ sql: `${AMEUBLO_SELECT} WHERE v.id = ?`, args: [id] });

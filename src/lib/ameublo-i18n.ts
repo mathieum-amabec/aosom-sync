@@ -50,6 +50,7 @@ export const ROOM_LABEL: Record<string, Record<Lang, string>> = {
   chambre: { fr: "chambre", en: "bedroom" },
   cuisine: { fr: "coin repas", en: "dining nook" },
   terrasse: { fr: "terrasse", en: "patio" },
+  halloween: { fr: "décor d’Halloween", en: "Halloween display" },
 };
 
 /** CAD the way each audience reads it: "84,99 $" vs "$84.99". */

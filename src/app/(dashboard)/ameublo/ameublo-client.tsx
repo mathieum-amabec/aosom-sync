@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
 import { STYLE_LABEL, type AmeubloStyle } from "@/lib/ameublo-caption";
 import { markScheduled, markUnscheduled } from "@/lib/ameublo-studio-state";
+import { CATEGORY_LABEL, CATEGORY_ORDER, type CategoryKey } from "@/lib/ameublo-categories";
 
 // Mirrors AmeubloTestVideo in src/lib/database.ts.
 interface StudioVideo {
@@ -26,6 +27,10 @@ interface StudioVideo {
   queue_scheduled_at: string | null;
   qa_verdict: "pass" | "fail" | "review" | null;
   qa_notes: string | null;
+  // Added by GET /api/ameublo/videos from the catalogue product types.
+  category: CategoryKey;
+  category_label: string;
+  sub_category: string;
 }
 
 type Status = "new" | "scheduled" | "published" | "rejected" | "rerender" | "flagged";
@@ -122,6 +127,8 @@ export default function AmeubloStudioClient() {
   const [fSeries, setFSeries] = useState("");
   const [fCampaign, setFCampaign] = useState("");
   const [fStatus, setFStatus] = useState("new");
+  const [fCategory, setFCategory] = useState("");
+  const [fSub, setFSub] = useState("");
   const [drafts, setDrafts] = useState<Record<number, string>>({});
   const seriesInit = useRef(false);
 
@@ -238,18 +245,46 @@ export default function AmeubloStudioClient() {
     };
   }, [videos]);
 
-  const shown = useMemo(
+  // Everything except series and category, so each category chip shows what clicking it would return
+  // (a click clears the series filter, see pickCategory).
+  const baseMatches = useMemo(
     () =>
       videos.filter(
         (v) =>
           (!fStyle || v.style === fStyle) &&
           (!fLang || v.lang === fLang) &&
-          (!fSeries || v.series === fSeries) &&
           (!fCampaign || v.campaign === fCampaign) &&
           (!fStatus || statusOf(v) === fStatus || recent.has(v.id)),
       ),
-    [videos, fStyle, fLang, fSeries, fCampaign, fStatus, recent],
+    [videos, fStyle, fLang, fCampaign, fStatus, recent],
   );
+
+  const shown = useMemo(
+    () =>
+      baseMatches.filter(
+        (v) => (!fSeries || v.series === fSeries) && (!fCategory || v.category === fCategory) && (!fSub || v.sub_category === fSub),
+      ),
+    [baseMatches, fSeries, fCategory, fSub],
+  );
+
+  const categoryCounts = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const v of baseMatches) c.set(v.category, (c.get(v.category) ?? 0) + 1);
+    return c;
+  }, [baseMatches]);
+
+  const subCounts = useMemo(() => {
+    const c = new Map<string, number>();
+    if (fCategory) for (const v of baseMatches) if (v.category === fCategory) c.set(v.sub_category, (c.get(v.sub_category) ?? 0) + 1);
+    return [...c.entries()].sort((a, b) => b[1] - a[1]);
+  }, [baseMatches, fCategory]);
+
+  // Picking a category looks across every series: the auto "latest series" filter would otherwise hide the other themes.
+  const pickCategory = (key: string) => {
+    setFCategory(fCategory === key ? "" : key);
+    setFSub("");
+    if (fCategory !== key) setFSeries("");
+  };
 
   const counts = useMemo(() => {
     const c: Record<Status, number> = { new: 0, scheduled: 0, published: 0, rejected: 0, rerender: 0, flagged: 0 };
@@ -310,6 +345,50 @@ export default function AmeubloStudioClient() {
             {STATUS_LABEL[s]} · {counts[s]}
           </button>
         ))}
+      </div>
+
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-gray-400">Catégorie</span>
+          <button
+            onClick={() => {
+              setFCategory("");
+              setFSub("");
+            }}
+            className={`rounded border border-gray-700 px-2 py-1 text-gray-200 ${fCategory === "" ? "ring-1 ring-white/60" : "opacity-80"}`}
+          >
+            Toutes · {baseMatches.length}
+          </button>
+          {CATEGORY_ORDER.filter((k) => categoryCounts.has(k)).map((k) => (
+            <button
+              key={k}
+              onClick={() => pickCategory(k)}
+              className={`rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-200 ${fCategory === k ? "ring-1 ring-white/60" : "opacity-80"}`}
+            >
+              {CATEGORY_LABEL[k]} · {categoryCounts.get(k)}
+            </button>
+          ))}
+        </div>
+        {fCategory && subCounts.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-gray-400">Sous-catégorie</span>
+            <button
+              onClick={() => setFSub("")}
+              className={`rounded border border-gray-700 px-2 py-1 text-gray-200 ${fSub === "" ? "ring-1 ring-white/60" : "opacity-80"}`}
+            >
+              Toutes
+            </button>
+            {subCounts.map(([sub, n]) => (
+              <button
+                key={sub}
+                onClick={() => setFSub(fSub === sub ? "" : sub)}
+                className={`rounded border border-gray-700 bg-gray-900 px-2 py-1 text-gray-200 ${fSub === sub ? "ring-1 ring-white/60" : "opacity-80"}`}
+              >
+                {sub} · {n}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex flex-wrap items-end gap-3">
