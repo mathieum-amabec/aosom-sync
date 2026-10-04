@@ -7,7 +7,7 @@ import { handleMcpHttp, methodNotAllowed } from "@/lib/mcp/http";
  * Public to the session proxy (see PUBLIC_PATHS) because it authenticates itself with an MCP key
  * (`Authorization: Bearer amcp_…`, managed in Réglages → MCP). Read-only tools only — the same set
  * as the local stdio server (src/lib/mcp/tools.ts). Claude Desktop reaches it through
- * scripts/mcp-remote.mjs; claude.ai / the mobile app use /api/mcp/<key> (they cannot set headers).
+ * scripts/mcp-remote.mjs; claude.ai / the mobile app authorize through OAuth (src/app/oauth/*) and send an access token here.
  */
 export const dynamic = "force-dynamic";
 
