@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.106.0] - 2026-10-04
+
+**Studio Ameublo: Série 2 of music** (Mat picked #5, #30 and #49 and asked for more of the same family, but upbeat and joyful, plus some electro or soft hip-hop).
+
+### Added
+
+- 65 more royalty-free tracks in `/ameublo` (numbers 55–119) in five new "Série 2" groups: chillhop / jazz enjoué, house / nu-disco joyeux, Noël enjoué, électro joyeux, hip-hop doux.
+  - Same licences as Série 1 (Pixabay Content License, Mixkit Free License). Pixabay tracks badged "Content ID Registered" or "AI generated" are excluded (checked 2026-10-03).
+  - ⭐ marks eight new favourites. Each description ends with the track's duration.
+  - Moods come from the sites' titles and tags, not from listening, so a listen is still needed.
+- Mat's earlier ❤️ picks (5, 30, 49) are kept.
+
 ## [0.5.105.1] - 2026-10-04
 
 A batch of newly-imported outdoor storage boxes came out with no physical dimensions in the
