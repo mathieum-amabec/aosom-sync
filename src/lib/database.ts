@@ -498,6 +498,21 @@ async function _initSchemaImpl(): Promise<void> {
       name TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, key_hint TEXT NOT NULL,
       created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER
     )`,
+    // OAuth 2.1 (authorization code + PKCE) for the remote MCP endpoint — see src/lib/mcp/oauth.ts.
+    `CREATE TABLE IF NOT EXISTS oauth_clients (
+      client_id TEXT PRIMARY KEY, client_name TEXT NOT NULL, redirect_uris TEXT NOT NULL, created_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS oauth_grants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
+      created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER
+    )`,
+    `CREATE TABLE IF NOT EXISTS oauth_codes (
+      code_hash TEXT PRIMARY KEY, grant_id INTEGER NOT NULL, client_id TEXT NOT NULL, redirect_uri TEXT NOT NULL,
+      code_challenge TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER
+    )`,
+    `CREATE TABLE IF NOT EXISTS oauth_tokens (
+      token_hash TEXT PRIMARY KEY, grant_id INTEGER NOT NULL, kind TEXT NOT NULL, expires_at INTEGER NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS cron_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL, status TEXT NOT NULL, detail TEXT,
@@ -7723,5 +7738,122 @@ export async function verifyMcpKey(keyHash: string): Promise<boolean> {
   if (o.last_used_at == null || now - Number(o.last_used_at) > 600) {
     await db.execute({ sql: `UPDATE mcp_keys SET last_used_at = ? WHERE id = ?`, args: [now, Number(o.id)] });
   }
+  return true;
+}
+
+// ─── OAuth (MCP) ────────────────────────────────────────────────────
+
+const nowSec = () => Math.floor(Date.now() / 1000);
+
+export interface OAuthClientRow { client_id: string; client_name: string; redirect_uris: string[] }
+
+export async function registerOAuthClient(clientId: string, name: string, redirectUris: string[]): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO oauth_clients (client_id, client_name, redirect_uris, created_at) VALUES (?, ?, ?, ?)`,
+    args: [clientId, name, JSON.stringify(redirectUris), nowSec()],
+  });
+}
+
+export async function getOAuthClient(clientId: string): Promise<OAuthClientRow | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT client_id, client_name, redirect_uris FROM oauth_clients WHERE client_id = ?`, args: [clientId] });
+  if (!r.rows[0]) return null;
+  const o = rowToObj(r.rows[0]);
+  return { client_id: String(o.client_id), client_name: String(o.client_name), redirect_uris: JSON.parse(String(o.redirect_uris)) as string[] };
+}
+
+/** One approved connection (grant) + its single-use authorization code. */
+export async function createOAuthGrantWithCode(a: {
+  clientId: string; clientName: string; redirectUri: string; codeChallenge: string; codeHash: string; ttlSec: number;
+}): Promise<number> {
+  const db = await ensureSchema();
+  const g = await db.execute({
+    sql: `INSERT INTO oauth_grants (client_id, client_name, created_at) VALUES (?, ?, ?)`,
+    args: [a.clientId, a.clientName, nowSec()],
+  });
+  const grantId = Number(g.lastInsertRowid);
+  await db.execute({
+    sql: `INSERT INTO oauth_codes (code_hash, grant_id, client_id, redirect_uri, code_challenge, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    args: [a.codeHash, grantId, a.clientId, a.redirectUri, a.codeChallenge, nowSec() + a.ttlSec],
+  });
+  return grantId;
+}
+
+export interface OAuthCodeRow { grant_id: number; client_id: string; redirect_uri: string; code_challenge: string }
+
+/** Atomically consume a code: returns it once, only while unexpired and its grant is not revoked. */
+export async function consumeOAuthCode(codeHash: string): Promise<OAuthCodeRow | null> {
+  const db = await ensureSchema();
+  const upd = await db.execute({
+    sql: `UPDATE oauth_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?`,
+    args: [nowSec(), codeHash, nowSec()],
+  });
+  if (upd.rowsAffected === 0) return null;
+  const r = await db.execute({
+    sql: `SELECT c.grant_id, c.client_id, c.redirect_uri, c.code_challenge FROM oauth_codes c
+           JOIN oauth_grants g ON g.id = c.grant_id WHERE c.code_hash = ? AND g.revoked_at IS NULL`,
+    args: [codeHash],
+  });
+  if (!r.rows[0]) return null;
+  const o = rowToObj(r.rows[0]);
+  return { grant_id: Number(o.grant_id), client_id: String(o.client_id), redirect_uri: String(o.redirect_uri), code_challenge: String(o.code_challenge) };
+}
+
+export async function storeOAuthTokens(grantId: number, access: { hash: string; ttlSec: number }, refresh: { hash: string; ttlSec: number }): Promise<void> {
+  const db = await ensureSchema();
+  await db.batch([
+    { sql: `INSERT INTO oauth_tokens (token_hash, grant_id, kind, expires_at) VALUES (?, ?, 'access', ?)`, args: [access.hash, grantId, nowSec() + access.ttlSec] },
+    { sql: `INSERT INTO oauth_tokens (token_hash, grant_id, kind, expires_at) VALUES (?, ?, 'refresh', ?)`, args: [refresh.hash, grantId, nowSec() + refresh.ttlSec] },
+  ], "write");
+}
+
+/** Single-use refresh token (rotated on every refresh). Returns the grant id when valid. */
+export async function consumeOAuthRefresh(tokenHash: string): Promise<{ grant_id: number; client_id: string } | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT t.grant_id, g.client_id FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id
+           WHERE t.token_hash = ? AND t.kind = 'refresh' AND t.expires_at > ? AND g.revoked_at IS NULL`,
+    args: [tokenHash, nowSec()],
+  });
+  if (!r.rows[0]) return null;
+  const del = await db.execute({ sql: `DELETE FROM oauth_tokens WHERE token_hash = ?`, args: [tokenHash] });
+  if (del.rowsAffected === 0) return null; // lost a race with a parallel refresh
+  const o = rowToObj(r.rows[0]);
+  return { grant_id: Number(o.grant_id), client_id: String(o.client_id) };
+}
+
+/** True when `tokenHash` is a live access token of a non-revoked grant (last_used_at stamped ≤ every 10 min). */
+export async function verifyOAuthAccess(tokenHash: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT g.id, g.last_used_at FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id
+           WHERE t.token_hash = ? AND t.kind = 'access' AND t.expires_at > ? AND g.revoked_at IS NULL`,
+    args: [tokenHash, nowSec()],
+  });
+  if (!r.rows[0]) return false;
+  const o = rowToObj(r.rows[0]);
+  if (o.last_used_at == null || nowSec() - Number(o.last_used_at) > 600) {
+    await db.execute({ sql: `UPDATE oauth_grants SET last_used_at = ? WHERE id = ?`, args: [nowSec(), Number(o.id)] });
+  }
+  return true;
+}
+
+export interface OAuthGrantRow { id: number; client_name: string; created_at: number; last_used_at: number | null }
+
+export async function listOAuthGrants(): Promise<OAuthGrantRow[]> {
+  const db = await ensureSchema();
+  const r = await db.execute(`SELECT id, client_name, created_at, last_used_at FROM oauth_grants WHERE revoked_at IS NULL ORDER BY id DESC LIMIT 100`);
+  return r.rows.map((row) => {
+    const o = rowToObj(row);
+    return { id: Number(o.id), client_name: String(o.client_name), created_at: Number(o.created_at), last_used_at: o.last_used_at == null ? null : Number(o.last_used_at) };
+  });
+}
+
+export async function revokeOAuthGrant(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `UPDATE oauth_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, args: [nowSec(), id] });
+  if (r.rowsAffected === 0) return false;
+  await db.execute({ sql: `DELETE FROM oauth_tokens WHERE grant_id = ?`, args: [id] });
   return true;
 }

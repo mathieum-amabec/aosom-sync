@@ -1,17 +1,32 @@
 import { NextResponse } from "next/server";
-import { ensureSchema, verifyMcpKey } from "@/lib/database";
+import { ensureSchema, verifyMcpKey, verifyOAuthAccess } from "@/lib/database";
 import { hashMcpKey, MCP_KEY_RE } from "@/lib/mcp/keys";
+import { ACCESS_PREFIX, originOf } from "@/lib/mcp/oauth";
 import { handleMessage } from "@/lib/mcp/protocol";
 
 const MAX_BODY_BYTES = 100_000;
 
-const unauthorized = () => NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: { "WWW-Authenticate": "Bearer" } });
+// The resource_metadata hint is what makes claude.ai start the OAuth flow (RFC 9728).
+const unauthorized = (request: Request) =>
+  NextResponse.json({ error: "Unauthorized" }, {
+    status: 401,
+    headers: { "WWW-Authenticate": `Bearer resource_metadata="${originOf(request)}/.well-known/oauth-protected-resource/api/mcp"` },
+  });
 
-/** Shared by POST /api/mcp (Bearer header) and POST /api/mcp/<key> (key in the URL, for claude.ai connectors). */
-export async function handleMcpHttp(request: Request, key: string | null): Promise<Response> {
-  if (!key || !MCP_KEY_RE.test(key)) return unauthorized();
+const ACCESS_TOKEN_RE = new RegExp(`^${ACCESS_PREFIX}[A-Za-z0-9_-]{20,}$`);
+
+/** Bearer credential → is it a live dashboard key (amcp_) or OAuth access token (amcpa_)? */
+async function authenticate(token: string | null): Promise<boolean> {
+  if (!token) return false;
+  if (ACCESS_TOKEN_RE.test(token)) return verifyOAuthAccess(hashMcpKey(token));
+  if (MCP_KEY_RE.test(token)) return verifyMcpKey(hashMcpKey(token));
+  return false;
+}
+
+/** POST /api/mcp: Bearer header = OAuth access token (claude.ai / mobile) or dashboard key (Desktop bridge). */
+export async function handleMcpHttp(request: Request, token: string | null): Promise<Response> {
   try {
-    if (!(await verifyMcpKey(hashMcpKey(key)))) return unauthorized();
+    if (!(await authenticate(token))) return unauthorized(request);
     const text = await request.text();
     if (text.length > MAX_BODY_BYTES) return NextResponse.json({ error: "Payload too large" }, { status: 413 });
     let msg: unknown;

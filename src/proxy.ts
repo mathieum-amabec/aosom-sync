@@ -30,9 +30,10 @@ import { AUTH } from "@/lib/config";
 // pièce" can POST from ameublodirect.ca / furnishdirect.ca (unauthenticated visitors). The
 // route self-guards: server-side Origin allowlist, per-IP + global rate limits, and the
 // daily LLM token budget. Without this it 307-redirects to /login and the widget breaks.
-// "/api/mcp" is public to the SESSION check because it authenticates with its own Bearer key
+// "/oauth" + "/.well-known" are the OAuth endpoints for the MCP connector (the consent page checks the
+// admin session itself and redirects to /login). "/api/mcp" is public to the SESSION check because it authenticates with its own Bearer key
 // (hashed in the mcp_keys table, managed under Réglages → MCP). Read-only tools.
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/pixel/pinterest-script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/ugc-videos", "/api/video-serve", "/api/assistant", "/api/trending", "/api/mcp"];
+const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/pixel/pinterest-script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/ugc-videos", "/api/video-serve", "/api/assistant", "/api/trending", "/api/mcp", "/oauth", "/.well-known"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(

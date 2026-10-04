@@ -34,6 +34,11 @@ function LoginForm() {
       const redirect = searchParams.get("redirect") || "/";
       // Prevent open redirect — only allow relative paths
       const safeRedirect = redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/";
+      if (safeRedirect.startsWith("/oauth/")) {
+        // OAuth consent is a route handler (plain HTML), not an app page: needs a full navigation.
+        window.location.assign(safeRedirect);
+        return;
+      }
       router.push(safeRedirect);
       router.refresh();
     } else {

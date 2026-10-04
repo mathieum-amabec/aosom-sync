@@ -25,6 +25,6 @@ export function mcpKeyHint(key: string): string {
 
 /** `Authorization: Bearer amcp_…` → the key, or null. */
 export function bearerKey(header: string | null): string | null {
-  const m = header?.match(/^Bearer\s+(amcp_[A-Za-z0-9_-]{20,})$/);
+  const m = header?.match(/^Bearer\s+(\S{20,300})$/);
   return m ? m[1] : null;
 }
