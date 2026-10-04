@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import MusicPicker from "./music-picker";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
 import { STYLE_LABEL, type AmeubloStyle } from "@/lib/ameublo-caption";
 
@@ -117,6 +116,7 @@ export default function AmeubloStudioClient() {
   const [fCampaign, setFCampaign] = useState("");
   const [fStatus, setFStatus] = useState("new");
   const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const seriesInit = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -124,7 +124,13 @@ export default function AmeubloStudioClient() {
       const res = await fetch("/api/ameublo/videos");
       const j = await res.json();
       if (!res.ok || !j.success) throw new Error(j.error || `HTTP ${res.status}`);
-      setVideos(j.data.videos);
+      const list: StudioVideo[] = j.data.videos;
+      setVideos(list);
+      if (!seriesInit.current && list.length) {
+        seriesInit.current = true;
+        const latest = list.reduce((a, b) => (b.created_at > a.created_at ? b : a));
+        if (latest.series) setFSeries(latest.series);
+      }
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -267,8 +273,6 @@ export default function AmeubloStudioClient() {
           Horaire : 4 Reels par jour (heure de Montréal) : 07 h 45 FR · 12 h 15 EN · 18 h 30 FR · 20 h 45 EN.
         </p>
       </div>
-
-      <MusicPicker />
 
       <div className="flex flex-wrap gap-2 text-xs">
         {(Object.keys(STATUS_LABEL) as Status[]).map((s) => (

@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.1] - 2026-10-04
+
+**Studio Ameublo: remove the music picker and open on the latest series.** The music is chosen and used, so the "Choisis tes musiques" list is dead weight.
+
+### Removed
+
+- The "🎵 Choisis tes musiques" section of `/ameublo`, its `GET`/`PATCH /api/ameublo/music` route, `ameublo-music-catalog.ts` and its test. The six picks stay hard-coded in `scripts/ameublo-batch.mts`; the `ameublo_music_picks` setting is no longer read.
+
+### Changed
+
+- `/ameublo` opens filtered on the most recent series, so the 217 older renders (Série 1 and the previous batch, old music) no longer crowd the page. They stay reachable through the "Série" filter.
+
 ## [0.5.107.0] - 2026-10-04
 
 **Studio Ameublo: bilingual video series (FR Ameublo / EN Furni), approval and auto-scheduling.** Mat disliked the "constance" series and asked for a fresh set in every style, in both languages, built from his music picks, that he can approve in one click and that schedules itself.
