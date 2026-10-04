@@ -402,6 +402,20 @@ describe("publishQueueItem — Reel clickbait caption (content_type=video)", () 
     );
   });
 
+  it("keeps the stored caption as-is when metadata.keepCaption is set (Studio Ameublo videos)", async () => {
+    const create = stubClaude("SHOULD NOT BE USED");
+    await publishQueueItem(
+      item({
+        platform: "instagram",
+        contentType: "sequential_ad",
+        payload: social({ reelsVideoUrl: "https://blob/r.mp4", caption: "Ma légende approuvée" }),
+        metadata: { source: "ameublo_studio", keepCaption: true },
+      }),
+    );
+    expect(create).not.toHaveBeenCalled();
+    expect(publishReel).toHaveBeenCalledWith(expect.objectContaining({ caption: "Ma légende approuvée" }));
+  });
+
   it("uses the EN prompt for the furnish brand", async () => {
     const create = stubClaude("🔥 This fan is a game-changer! Grab yours now 👉");
     await publishQueueItem(

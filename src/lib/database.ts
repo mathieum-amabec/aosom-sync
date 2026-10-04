@@ -801,6 +801,20 @@ async function _initSchemaImpl(): Promise<void> {
     ]);
   }
 
+  // ameublo_test_videos: classification + publication link (v0.5.107). A video is a candidate
+  // for the Reels queue only once the operator approves it from /ameublo (queue_id then points
+  // at its publication_queue row). Older rows (Série 1, old-music renders) keep these NULL.
+  const avInfo = await db.execute(`PRAGMA table_info(ameublo_test_videos)`);
+  const avCols = new Set(avInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  for (const [col, ddl] of [
+    ["style", "TEXT"], ["lang", "TEXT"], ["caption", "TEXT"], ["skus", "TEXT"], ["prices", "TEXT"],
+    ["music", "TEXT"], ["queue_id", "INTEGER"], ["qa_verdict", "TEXT"], ["qa_notes", "TEXT"],
+  ] as const) {
+    if (!avCols.has(col)) {
+      await runBatch(`ameublo_test_videos add ${col}`, [{ sql: `ALTER TABLE ameublo_test_videos ADD COLUMN ${col} ${ddl}`, args: [] }]);
+    }
+  }
+
   // costway_products.shopify_product_id: the Shopify product a Costway variant was imported as.
   // NULL everywhere today (nothing is imported yet). The Aosom jobs that sweep every Shopify
   // product (fetchAllShopifyProducts, fetchActiveVariantInventory, fetchShopifyVariantsPage) use
@@ -5914,6 +5928,7 @@ export async function getSequentialAdQueueItems(
   const result = await db.execute({
     sql: `SELECT * FROM publication_queue
           WHERE content_type = 'sequential_ad' AND status != 'cancelled'
+            AND COALESCE(json_extract(metadata, '$.source'), '') != 'ameublo_studio'
             AND (? IS NULL OR json_extract(metadata, '$.campaign') = ?)
           ORDER BY created_at DESC, id DESC LIMIT ?`,
     args: [
@@ -5938,6 +5953,7 @@ export async function getSequentialAdCampaigns(): Promise<string[]> {
     `SELECT json_extract(metadata, '$.campaign') AS campaign, MAX(created_at) AS last_seen
      FROM publication_queue
      WHERE content_type = 'sequential_ad' AND status != 'cancelled'
+            AND COALESCE(json_extract(metadata, '$.source'), '') != 'ameublo_studio'
        AND json_extract(metadata, '$.campaign') IS NOT NULL
      GROUP BY campaign
      ORDER BY last_seen DESC`,
@@ -5952,6 +5968,7 @@ export async function countSequentialAdQueueItems(campaign?: string | null): Pro
   const result = await db.execute({
     sql: `SELECT COUNT(*) AS n FROM publication_queue
           WHERE content_type = 'sequential_ad' AND status != 'cancelled'
+            AND COALESCE(json_extract(metadata, '$.source'), '') != 'ameublo_studio'
             AND (? IS NULL OR json_extract(metadata, '$.campaign') = ?)`,
     args: [filtered ? campaign : null, filtered ? campaign : null],
   });
@@ -7498,6 +7515,9 @@ export async function getCostwayShopifyProductIds(): Promise<Set<string>> {
 
 // ─── Studio Ameublo (mascot test videos, review only) ────────────────────────
 
+export type AmeubloLang = "fr" | "en";
+export type AmeubloQa = "pass" | "fail" | "review";
+
 export interface AmeubloTestVideo {
   id: number;
   series: string;
@@ -7509,6 +7529,19 @@ export interface AmeubloTestVideo {
   verdict: "ok" | "bad" | null;
   note: string | null;
   created_at: string;
+  style: string | null;
+  lang: AmeubloLang | null;
+  caption: string | null;
+  skus: string[];
+  /** sku → price burned into the frame (for the price guard at approval/publish). */
+  prices: Record<string, number>;
+  music: string | null;
+  queue_id: number | null;
+  /** Live state of the linked publication_queue row (null while not approved). */
+  queue_status: string | null;
+  queue_scheduled_at: string | null;
+  qa_verdict: AmeubloQa | null;
+  qa_notes: string | null;
 }
 
 export async function insertAmeubloTestVideo(v: {
@@ -7518,34 +7551,75 @@ export async function insertAmeubloTestVideo(v: {
   label?: string | null;
   videoUrl: string;
   sourceQueueId?: number | null;
+  style?: string | null;
+  lang?: AmeubloLang | null;
+  caption?: string | null;
+  skus?: string[];
+  prices?: Record<string, number>;
+  music?: string | null;
 }): Promise<number> {
   const db = await ensureSchema();
   const r = await db.execute({
-    sql: `INSERT INTO ameublo_test_videos (series, sku, campaign, label, video_url, source_queue_id)
-          VALUES (?, ?, ?, ?, ?, ?)`,
-    args: [v.series, v.sku ?? null, v.campaign ?? null, v.label ?? null, v.videoUrl, v.sourceQueueId ?? null],
+    sql: `INSERT INTO ameublo_test_videos
+            (series, sku, campaign, label, video_url, source_queue_id, style, lang, caption, skus, prices, music)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      v.series, v.sku ?? null, v.campaign ?? null, v.label ?? null, v.videoUrl, v.sourceQueueId ?? null,
+      v.style ?? null, v.lang ?? null, v.caption ?? null,
+      v.skus ? JSON.stringify(v.skus) : null, v.prices ? JSON.stringify(v.prices) : null, v.music ?? null,
+    ],
   });
   return Number(r.lastInsertRowid);
 }
 
+function parseJson<T>(raw: unknown, fallback: T): T {
+  if (typeof raw !== "string" || !raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function mapAmeubloVideo(o: Record<string, unknown>): AmeubloTestVideo {
+  return {
+    id: Number(o.id),
+    series: String(o.series),
+    sku: o.sku == null ? null : String(o.sku),
+    campaign: o.campaign == null ? null : String(o.campaign),
+    label: o.label == null ? null : String(o.label),
+    video_url: String(o.video_url),
+    source_queue_id: o.source_queue_id == null ? null : Number(o.source_queue_id),
+    verdict: o.verdict === "ok" || o.verdict === "bad" ? o.verdict : null,
+    note: o.note == null ? null : String(o.note),
+    created_at: String(o.created_at),
+    style: o.style == null ? null : String(o.style),
+    lang: o.lang === "fr" || o.lang === "en" ? o.lang : null,
+    caption: o.caption == null ? null : String(o.caption),
+    skus: parseJson<string[]>(o.skus, []),
+    prices: parseJson<Record<string, number>>(o.prices, {}),
+    music: o.music == null ? null : String(o.music),
+    queue_id: o.queue_id == null ? null : Number(o.queue_id),
+    queue_status: o.q_status == null ? null : String(o.q_status),
+    queue_scheduled_at: o.q_scheduled_at == null ? null : String(o.q_scheduled_at),
+    qa_verdict: o.qa_verdict === "pass" || o.qa_verdict === "fail" || o.qa_verdict === "review" ? o.qa_verdict : null,
+    qa_notes: o.qa_notes == null ? null : String(o.qa_notes),
+  };
+}
+
+const AMEUBLO_SELECT = `SELECT v.*, q.status AS q_status, q.scheduled_at AS q_scheduled_at
+  FROM ameublo_test_videos v LEFT JOIN publication_queue q ON q.id = v.queue_id`;
+
 export async function listAmeubloTestVideos(): Promise<AmeubloTestVideo[]> {
   const db = await ensureSchema();
-  const r = await db.execute(`SELECT * FROM ameublo_test_videos ORDER BY created_at DESC, id ASC`);
-  return r.rows.map((row) => {
-    const o = rowToObj(row);
-    return {
-      id: Number(o.id),
-      series: String(o.series),
-      sku: o.sku == null ? null : String(o.sku),
-      campaign: o.campaign == null ? null : String(o.campaign),
-      label: o.label == null ? null : String(o.label),
-      video_url: String(o.video_url),
-      source_queue_id: o.source_queue_id == null ? null : Number(o.source_queue_id),
-      verdict: o.verdict === "ok" || o.verdict === "bad" ? o.verdict : null,
-      note: o.note == null ? null : String(o.note),
-      created_at: String(o.created_at),
-    };
-  });
+  const r = await db.execute(`${AMEUBLO_SELECT} ORDER BY v.created_at DESC, v.id ASC`);
+  return r.rows.map((row) => mapAmeubloVideo(rowToObj(row)));
+}
+
+export async function getAmeubloTestVideo(id: number): Promise<AmeubloTestVideo | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `${AMEUBLO_SELECT} WHERE v.id = ?`, args: [id] });
+  return r.rows.length ? mapAmeubloVideo(rowToObj(r.rows[0])) : null;
 }
 
 /** Operator's verdict on a test video. `verdict: null` clears it. Returns false when the id is unknown. */
@@ -7556,6 +7630,52 @@ export async function setAmeubloTestVerdict(id: number, verdict: "ok" | "bad" | 
     args: [verdict, note === undefined ? null : note, id],
   });
   return r.rowsAffected > 0;
+}
+
+/** Record the reviewer agent's verdict (pass / fail / review = needs a human look). */
+export async function setAmeubloQa(id: number, verdict: AmeubloQa | null, notes: string | null): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE ameublo_test_videos SET qa_verdict = ?, qa_notes = ? WHERE id = ?`,
+    args: [verdict, notes, id],
+  });
+  return r.rowsAffected > 0;
+}
+
+/** Edit the caption of a video that is not yet on the schedule. */
+export async function setAmeubloCaption(id: number, caption: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE ameublo_test_videos SET caption = ? WHERE id = ?`,
+    args: [caption, id],
+  });
+  return r.rowsAffected > 0;
+}
+
+/** Link (or unlink with null) a video to its publication_queue row. */
+export async function setAmeubloQueueId(id: number, queueId: number | null): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE ameublo_test_videos SET queue_id = ? WHERE id = ?`,
+    args: [queueId, id],
+  });
+  return r.rowsAffected > 0;
+}
+
+/**
+ * Slots already taken by Studio Ameublo Reels (sequential_ad rows tagged source='ameublo_studio').
+ * Scoped by source so the per-day cap of the mascot grid is independent of the sequential ads.
+ */
+export async function getOccupiedAmeubloSlots(lang?: AmeubloLang): Promise<string[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT scheduled_at FROM publication_queue
+          WHERE content_type = 'sequential_ad' AND status IN ('pending', 'publishing', 'published')
+            AND json_extract(metadata, '$.source') = 'ameublo_studio'
+            AND (? IS NULL OR json_extract(metadata, '$.lang') = ?)`,
+    args: [lang ?? null, lang ?? null],
+  });
+  return r.rows.map((row) => String(rowToObj(row).scheduled_at));
 }
 
 // ─── MCP access keys ────────────────────────────────────────────────

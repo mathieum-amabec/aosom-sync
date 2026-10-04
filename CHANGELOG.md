@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.0] - 2026-10-04
+
+**Studio Ameublo: bilingual video series (FR Ameublo / EN Furni), approval and auto-scheduling.** Mat disliked the "constance" series and asked for a fresh set in every style, in both languages, built from his music picks, that he can approve in one click and that schedules itself.
+
+### Added
+
+- **Seven free (sharp + ffmpeg, no AI) styles**, each generated in French for Ameublo Direct and in English for Furnish Direct (mascot "Furni"): vitrine, astuce, devine le prix, tu prends lequel, top 3, la pièce en 4 articles, réaction (UGC clip).
+  - `scripts/ameublo-batch.mts` plans and renders a resumable series (`--plan`, then `--render`), one contact sheet per video for review.
+  - Music comes only from Mat's picks (5, 30, 59, 60, 75; 49 is reserved for Noël).
+  - Essential text, prices and CTA stay out of the bottom third (Meta Reels safe zone); titles are cut at a word boundary with no dangling connector (`tidyTitle`).
+- **One-click approval** (`src/lib/ameublo-approval.ts`): approving a Studio video enqueues it in `publication_queue` on the next free slot of its language's share of the mascot grid (FR 07:45 and 18:30, EN 12:15 and 20:45, America/Toronto, max 4 per day). The hourly publisher does the rest. The price guard runs at approval and at publish time. Approval is only ever an operator action.
+- **Captions** per language (`ameublo-caption.ts`) and **language layer** (`ameublo-i18n.ts`): CAD formats (`84,99 $` vs `$84.99`), English titles stripped of supplier names.
+- **Reviewer verdicts** (`qa_verdict` / `qa_notes` columns) shown in `/ameublo`, recorded with `scripts/ameublo-qa-apply.mts` (dry-run unless `--apply`). The page groups videos by style and language.
+
+### Fixed
+
+- `rerender-stale-sequential-ads.mts` no longer touches Studio videos.
+
 ## [0.5.106.0] - 2026-10-04
 
 **Studio Ameublo: Série 2 of music** (Mat picked #5, #30 and #49 and asked for more of the same family, but upbeat and joyful, plus some electro or soft hip-hop).

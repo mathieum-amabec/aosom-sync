@@ -10,6 +10,8 @@
  * cher", no fake stock or countdown, no invented discount).
  */
 
+import type { Lang } from "@/lib/ameublo-i18n";
+
 export type ProductFamily =
   | "rangement" | "salon" | "bureau" | "enfants" | "animaux" | "chambre" | "noel" | "cuisine" | "general";
 
@@ -61,6 +63,35 @@ export const TEASERS = ["ET LE PRIX ?", "DEVINE LE PRIX…", "T’ES PRÊT ?", "
 /** Closing calls to action. */
 export const CTAS = ["COURS VOIR ÇA", "VA VOIR ÇA", "CLIQUE, TU VAS VOIR", "MAGASINE-LE ICI"] as const;
 
+/** English counterparts (Furnish Direct). Same honesty rules; every line must wrap in 2 lines of 14 characters. */
+export const HOOKS_EN = [
+  "WAIT FOR THE PRICE",
+  "STOP SCROLLING",
+  "WATCH TILL THE END",
+  "NOBODY TOLD ME THIS",
+  "YOU’RE GONNA WANT THIS",
+  "OK… I’M JEALOUS",
+  "I DIDN’T BELIEVE IT",
+  "IS IT ME OR IS IT GREAT?",
+  "MY NEW FAVOURITE",
+  "LOOKING FOR THIS?",
+] as const;
+
+export const VALUE_EN: Record<ProductFamily, string[]> = {
+  rangement: ["GOODBYE CLUTTER", "A PLACE FOR EVERYTHING", "NO MORE MESS"],
+  salon: ["DESIGNER LIVING ROOM", "YOUR DREAM LIVING ROOM", "YOUR GUESTS WILL FREAK"],
+  bureau: ["GOODBYE KITCHEN TABLE", "YOUR DESK, PRO VERSION", "WORK, BUT MAKE IT PRETTY"],
+  enfants: ["THEY’LL LOVE IT", "THEIR NEW FAVOURITE", "SURPRISE OF THE YEAR"],
+  animaux: ["YOUR PET WILL ADORE YOU", "THEY DESERVE THIS", "THEIR VERY OWN SPOT"],
+  chambre: ["YOUR BEDROOM, HOTEL STYLE", "MORNINGS WILL CHANGE", "A CORNER JUST FOR YOU"],
+  noel: ["CHRISTMAS STARTS HERE", "THE HOLIDAY LIVING ROOM", "MAGIC, NO EFFORT"],
+  cuisine: ["YOUR KITCHEN, CAFÉ STYLE", "DINNER, REINVENTED", "EVERYONE TO THE TABLE"],
+  general: ["IT CHANGES EVERYTHING", "I WANT ONE", "SIMPLE AND BEAUTIFUL"],
+};
+
+export const TEASERS_EN = ["AND THE PRICE?", "GUESS THE PRICE…", "READY?", "HOLD ON…"] as const;
+export const CTAS_EN = ["GO TAKE A LOOK", "CHECK IT OUT", "CLICK, YOU’LL SEE", "SHOP IT HERE"] as const;
+
 function hash(s: string): number {
   let h = 2166136261;
   for (const ch of s) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
@@ -79,9 +110,17 @@ export interface AmeubloLines {
  * The four lines for one video. `variant` shifts every pick, so the n-th video of a series
  * never reuses the (n-1)-th one's hook.
  */
-export function ameubloLines(sku: string, familyText: string, variant = 0): AmeubloLines {
+export function ameubloLines(sku: string, familyText: string, variant = 0, lang: Lang = "fr"): AmeubloLines {
   const h = hash(sku);
   const fam = productFamily(familyText);
+  if (lang === "en") {
+    return {
+      hook: pick(HOOKS_EN, h + variant),
+      value: pick(VALUE_EN[fam], (h >>> 3) + variant),
+      teaser: pick(TEASERS_EN, (h >>> 6) + variant),
+      cta: pick(CTAS_EN, (h >>> 9) + variant),
+    };
+  }
   return {
     hook: pick(HOOKS, h + variant),
     value: pick(VALUE[fam], (h >>> 3) + variant),

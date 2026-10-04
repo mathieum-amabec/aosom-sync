@@ -387,7 +387,8 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
     const social = parseSocialPayload(raw);
     if (social.reelsVideoUrl) {
       const language: "fr" | "en" = social.brand === "furnish" ? "en" : "fr";
-      const clickbait = await generateReelCaption(social.caption, language);
+      // Studio Ameublo videos carry a deterministic, operator-editable caption: keep it as-is.
+      const clickbait = item.metadata?.keepCaption === true ? null : await generateReelCaption(social.caption, language);
       const finalPayload: SocialQueuePayload = clickbait ? { ...social, caption: clickbait } : social;
       switch (item.platform) {
         case "facebook":
