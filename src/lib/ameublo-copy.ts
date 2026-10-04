@@ -13,12 +13,15 @@
 import type { Lang } from "@/lib/ameublo-i18n";
 
 export type ProductFamily =
-  | "rangement" | "salon" | "bureau" | "enfants" | "animaux" | "chambre" | "noel" | "cuisine" | "general";
+  | "rangement" | "salon" | "bureau" | "enfants" | "animaux" | "chambre" | "noel" | "cuisine" | "bain" | "general";
 
 const FAMILY_RULES: [ProductFamily, RegExp][] = [
   ["noel", /christmas|sapin|noël|xmas/i],
   ["animaux", /\b(dog|cat|pet)s?\b|chien|chat|animal/i],
   ["enfants", /kids|enfant|toddler|toy|jouet|ride-on/i],
+  ["bain", /bathroom|salle de bain|medicine cabinet|pharmacie/i],
+  // A makeup table is a bedroom piece even when its title says "desk"/"bureau".
+  ["chambre", /dressing & vanity|vanity (table|desk)|makeup|coiffeuse|maquillage/i],
   ["bureau", /office|desk|bureau/i],
   ["salon", /sofa|loveseat|canap|couch|coffee table|table basse|table à café|tv stand|accent chair|fauteuil/i],
   ["chambre", /bedroom|nightstand|vanity|coiffeuse|mirror|miroir|chevet/i],
@@ -48,7 +51,8 @@ export const HOOKS = [
 export const VALUE: Record<ProductFamily, string[]> = {
   rangement: ["FINI LE DÉSORDRE", "TOUT A ENFIN SA PLACE", "ADIEU LE FOUILLIS"],
   salon: ["TON SALON, VERSION DESIGN", "LE SALON QUE TU MÉRITES", "TES INVITÉS VONT CAPOTER"],
-  bureau: ["ADIEU LA TABLE DE CUISINE", "TON BUREAU, VERSION PRO", "TRAVAILLER, MAIS EN BEAU"],
+  bureau: ["ENFIN UN VRAI BUREAU", "TON BUREAU, VERSION PRO", "TRAVAILLER, MAIS EN BEAU"],
+  bain: ["SALLE DE BAIN, STYLE SPA", "LE COIN DÉTENTE", "FINI LE FOUILLIS"],
   enfants: ["ILS VONT CAPOTER", "LEUR NOUVEAU PRÉFÉRÉ", "LA SURPRISE DE L’ANNÉE"],
   animaux: ["TON ANIMAL VA T’ADORER", "IL MÉRITE ÇA", "SON COIN À LUI"],
   chambre: ["TA CHAMBRE, VERSION HÔTEL", "LE MATIN VA CHANGER", "UN COIN JUSTE POUR TOI"],
@@ -80,7 +84,8 @@ export const HOOKS_EN = [
 export const VALUE_EN: Record<ProductFamily, string[]> = {
   rangement: ["GOODBYE CLUTTER", "A PLACE FOR EVERYTHING", "NO MORE MESS"],
   salon: ["DESIGNER LIVING ROOM", "YOUR DREAM LIVING ROOM", "YOUR GUESTS WILL FREAK"],
-  bureau: ["GOODBYE KITCHEN TABLE", "YOUR DESK, PRO VERSION", "WORK, BUT MAKE IT PRETTY"],
+  bureau: ["A REAL DESK AT LAST", "YOUR DESK, PRO VERSION", "WORK, BUT MAKE IT PRETTY"],
+  bain: ["BATHROOM, SPA STYLE", "A SPA-LIKE CORNER", "CLUTTER-FREE BATH"],
   enfants: ["THEY’LL LOVE IT", "THEIR NEW FAVOURITE", "SURPRISE OF THE YEAR"],
   animaux: ["YOUR PET WILL ADORE YOU", "THEY DESERVE THIS", "THEIR VERY OWN SPOT"],
   chambre: ["YOUR BEDROOM, HOTEL STYLE", "MORNINGS WILL CHANGE", "A CORNER JUST FOR YOU"],

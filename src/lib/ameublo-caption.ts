@@ -73,8 +73,8 @@ export function ameubloCaption(i: CaptionInput): string {
     case "vitrine":
       lines.push(
         lang === "fr"
-          ? pick(["Une belle trouvaille pour ta maison.", "Du style sans te ruiner.", "Elle va bien dans ton salon, non ?"], v)
-          : pick(["A great find for your home.", "Style without the splurge.", "Looks good in your living room, right?"], v),
+          ? pick(["Une belle trouvaille pour ta maison.", "Du style sans te ruiner.", "Un petit coup de cœur à ajouter chez toi."], v)
+          : pick(["A great find for your home.", "Style without the splurge.", "A little something to love at home."], v),
         `${t0} — ${priceFmt(p0, lang)}`,
         ship,
         url,

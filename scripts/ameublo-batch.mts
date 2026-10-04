@@ -70,6 +70,11 @@ interface PlanProduct {
   sku: string;
   titleFr: string;
   titleEn: string;
+  /** Screen/caption titles: clean cuts that fit the scene (no ellipsis, no dangling word). */
+  shortFr: string;
+  shortEn: string;
+  /** Aosom-CDN URL of the validated clean lifestyle photo (Shopify tag lifestyle-verified), when the style needs a second photo. */
+  lifeUrl?: string;
   price: number;
   handle: string;
   productType: string;
@@ -131,14 +136,51 @@ const lastSeg = (t: string) => t.split(">").pop()!.trim();
 /** A room is four DIFFERENT roles that belong together (no benches in a bedroom or an office). */
 const ROOMS: Record<string, RegExp[]> = {
   salon: [/Accent Chairs|Sofas|Couchs|Sofa Bed/, /Coffee Tables/, /TV Stands|Room Dividers/, /Side Tables|Console Tables|Display Bookshelves/],
-  bureau: [/Computer Desks|Writing Desks|Gaming Desks/, /Task Chairs|Executive & Manager Chairs/, /Office Cabinets/, /Display Bookshelves|Small Bookshelves|^Storage Cabinets$/],
-  chambre: [/Bedside Tables/, /Dressing & Vanity/, /Clothing Storage|^Storage Cabinets$/, /Full Length Mirrors|Wall Mirrors|Bed Frames/],
-  cuisine: [/^Dining Tables$/, /Dining Chairs/, /Bar Cabinets|Kitchen Islands/, /Kitchen Pantry Cabinets/],
+  bureau: [/Computer Desks|Writing Desks|Gaming Desks/, /Task Chairs|Executive & Manager Chairs/, /Office Cabinets/, /Display Bookshelves|Small Bookshelves/],
+  chambre: [/Bedside Tables/, /Dressing & Vanity/, /Clothing Storage/, /Full Length Mirrors|Wall Mirrors|Bed Frames/],
+  cuisine: [/^Dining Tables$/, /Dining Chairs/, /Bar Cabinets/, /Wall Mirrors|Console Tables/],
 };
 const ROOM_ORDER = ["salon", "bureau", "chambre", "cuisine"];
+/** Items that do not belong in a given room, whatever their category says (QA 2026-10-04). */
+const ROOM_BAN: Record<string, RegExp> = {
+  salon: /kids?|enfants?|children|toy|jouet|bar stool|pantry|garde-manger|kitchen|cuisine|office|desk|bureau|trash|poubelle/i,
+  bureau: /reading|lecture|nook|pantry|garde-manger|buffet|sideboard|kitchen|cuisine|kids?|enfants?|children|toy|jouet|bench|banc|ottoman|pouf|shoe|chaussure|vanity|coiffeuse|makeup|maquillage|stool|tabouret|mirror|miroir|bar cabinet|wine/i,
+  chambre: /bench|banc|coat|manteau|entryway|entrée|hall|filing|classeur|trash|poubelle|pantry|garde-manger|buffet|sideboard|kitchen|cuisine|kids?|enfants?|children|toy|jouet|shoe|chaussure|bar cabinet|wine|office|bureau/i,
+  cuisine: /island|îlot|cart|chariot|pantry|garde-manger|kids?|enfants?|children|toy|jouet|office|desk|bureau|gaming|trash|poubelle/i,
+};
+/** Never worth a video: ambiguous items. */
+const GLOBAL_BAN = /trash|poubelle|garbage|ordures|waste bin|litter/i;
+/** Product classes: A/B and Top 3 only compare items of the same class (no trash cabinet among storage cabinets). */
+const CLASSES: [string, RegExp][] = [
+  ["shoe", /shoe|chaussure/i], ["bench", /ottoman|pouf|bench|banc/i], ["drawing", /drawing|drafting|dessin|art table/i],
+  ["folding", /folding|pliant|pliable/i], ["resin", /resin|résine|plastic|plastique/i], ["kids", /kids?|enfants?|children|toddler/i],
+  ["pantry", /pantry|garde-manger/i], ["buffet", /buffet|sideboard|credenza|vaisselier/i], ["vanity", /vanity|coiffeuse|makeup|maquillage/i],
+  ["recliner", /recliner|inclinable/i], ["rocking", /rocking|berçante|bascule/i], ["gaming", /gaming|gamer/i],
+  ["wall", /wall[- ]?mount|mural|floating|flottant|suspendu/i], ["filing", /filing|classeur/i], ["corner", /corner|d.angle/i], ["lshape", /l[- ]shaped|en l\b/i], ["rolling", /rolling|roulettes|mobile/i],
+  ["standing", /standing desk|sit[- ]stand|debout/i], ["bar", /bar stool|tabouret de bar/i], ["bedframe", /bed frame|lit |sommier/i],
+];
+const classOf = (p: { titleEn: string; titleFr: string }) => CLASSES.find(([, re]) => re.test(`${p.titleEn} ${p.titleFr}`))?.[0] ?? "plain";
+/** Photos whose classifier note mentions a person, a body part or a multi-image collage are never used. */
+/** A colour in the title is a claim the (group-level) photo may contradict. */
+const COLOUR = /\b(noir|noire|blanc|blanche|gris|grise|brun|brune|beige|bleu|bleue|vert|verte|rouge|rose|crème|doré|dorée|argenté|marine|noyer|chêne|black|white|gr[ae]y|brown|blue|green|red|pink|cream|gold|golden|silver|navy|walnut|oak|charcoal|ivory|taupe|champagne)\b/i;
+/** Quantity marker: A/B and Top 3 only compare items sold in the same unit. */
+const unitOf = (t: string) => /(?:lot de|ensemble de|set of|pack of)\s*(\d+)|(\d+)[- ]?(?:pack|pcs?|pièces?|pieces?)/i.exec(t)?.slice(1).find(Boolean) ?? "1";
+const PEOPLE = /(personnes?|femmes?|hommes?|visages?|mannequins?|bébés?|people|person|woman|women|man|men|hands?|mains?|legs?|jambes?|utilisat(?:eur|rice)s?|famille|couple|girl|boy|lady|collage|mosaïque|côte à côte|split[- ]screen|multi-?vues?|quatre images|plusieurs (?:images|vues|photos))/i;
+/** Where a title is drawn on screen: [chars per line, lines]. */
+const TITLE_FIT: Partial<Record<Style, [number, number]>> = { astuce: [30, 2], ab: [24, 2], top3: [28, 2] };
+const TITLE_MAX: Partial<Record<Style, number>> = { ab: 44, astuce: 56, top3: 52 };
+
+async function cleanStemSet(turso: ReturnType<typeof createClient>, stems: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!stems.length) return out;
+  const r = await turso.execute({ sql: `SELECT url_stem, reason FROM image_classifications WHERE compliant = 1 AND url_stem IN (${stems.map(() => "?").join(",")})`, args: stems });
+  for (const x of r.rows) if (!PEOPLE.test(String(x.reason ?? ""))) out.add(String(x.url_stem));
+  return out;
+}
 
 async function plan() {
-  const { cleanEnglishTitle } = (await import("@/lib/ameublo-i18n")) as typeof import("@/lib/ameublo-i18n");
+  const { cleanEnglishTitle, cleanTitle } = (await import("@/lib/ameublo-i18n")) as typeof import("@/lib/ameublo-i18n");
+  const { wrap } = (await import("@/lib/video-engines/ameublo-scenes")) as typeof import("@/lib/video-engines/ameublo-scenes");
   const sp = (await import("@/lib/selectors/shopify-product")) as typeof import("@/lib/selectors/shopify-product");
   const audit = (await import("@/lib/image-compliance-audit")) as unknown as { imageUrlStem: (u: string) => string };
   const turso = createClient({ url: process.env.TURSO_DATABASE_URL!, authToken: process.env.TURSO_AUTH_TOKEN! });
@@ -165,8 +207,8 @@ async function plan() {
 
   const memo = new Map<string, Promise<PlanProduct | null>>();
   /** Live (active), priced like Shopify, French title, clean name, enough clean photos. */
-  const valid = (r: Row, minPhotos: number): Promise<PlanProduct | null> => {
-    const k = `${r.sku}|${minPhotos}`;
+  const valid = (r: Row, minPhotos: number, style: Style): Promise<PlanProduct | null> => {
+    const k = `${r.sku}|${minPhotos}|${style}`;
     if (!memo.has(k)) {
       memo.set(k, (async () => {
         const f = await sp.resolveProductFields(r.pid);
@@ -175,48 +217,73 @@ async function plan() {
         if (!f.titleFr) return rej("no FR title"), null;
         const titleEn = cleanEnglishTitle(r.name);
         if (FORBIDDEN.test(f.titleFr) || FORBIDDEN.test(titleEn)) return rej("supplier name in title"), null;
+        if (GLOBAL_BAN.test(f.titleFr) || GLOBAL_BAN.test(titleEn)) return rej("banned item"), null;
+        const maxT = TITLE_MAX[style] ?? 48;
+        const fit = TITLE_FIT[style];
+        const extra = fit ? (t: string) => { const u = t.toUpperCase(); return wrap(u, fit[0], fit[1]).join(" ") === u; } : undefined;
+        const shortFr = cleanTitle(f.titleFr, "fr", maxT, extra);
+        const shortEn = cleanTitle(titleEn, "en", maxT, extra);
+        if (!shortFr || !shortEn) return rej("title cannot be cut cleanly"), null;
+        if (COLOUR.test(shortFr) || COLOUR.test(shortEn)) return rej("colour in title"), null;
+        let lifeUrl: string | undefined;
         if (minPhotos > 1) {
+          // The only second photo we trust is the human-validated pos-1 lifestyle shot (no people, no text, no collage).
+          const life = f.lifestyle.primaryImageUrl;
+          if (!f.lifestyle.verified || !life) return rej("no verified lifestyle photo"), null;
           const row = (await turso.execute({ sql: "SELECT image1,image2,image3,image4,image5,image6,image7 FROM products WHERE sku = ?", args: [r.sku] })).rows[0];
           const urls = [1, 2, 3, 4, 5, 6, 7].map((i) => (row?.[`image${i}`] == null ? "" : String(row[`image${i}`]))).filter(Boolean);
-          const stems = [...new Set(urls.slice(1).map((u) => audit.imageUrlStem(u)))];
-          let clean = 0;
-          if (stems.length) {
-            const c = await turso.execute({
-              sql: `SELECT COUNT(*) AS n FROM image_classifications WHERE compliant = 1 AND url_stem IN (${stems.map(() => "?").join(",")})`, args: stems,
-            });
-            clean = Number(c.rows[0].n);
-          }
-          if (1 + clean < minPhotos) return rej("not enough clean photos"), null;
+          const ls = audit.imageUrlStem(life);
+          lifeUrl = urls.find((u) => audit.imageUrlStem(u) === ls);
+          if (!lifeUrl) return rej("lifestyle photo not in feed"), null;
+          if (audit.imageUrlStem(urls[0]) === ls) return rej("lifestyle photo is image1"), null;
         }
-        return { sku: r.sku, titleFr: f.titleFr, titleEn, price: r.price, handle: f.handle || r.handle, productType: r.type };
+        return { sku: r.sku, lifeUrl, titleFr: f.titleFr, titleEn, shortFr, shortEn, price: r.price, handle: f.handle || r.handle, productType: r.type };
       })());
     }
     return memo.get(k)!;
   };
 
   const jobs: Job[] = [];
-  const slots = () =>
-    Array.from({ length: COUNT * 2 }, (_, i) => ({ lang: (i % 2 === 0 ? "fr" : "en") as Lang, k: i >> 1, i }));
+  // --need "ab/fr=3,ab/en=2": plan only these replacements (variant numbers start at 30 so the copy differs from the first pass).
+  const need = new Map<string, number>((flag("--need") ?? "").split(",").filter(Boolean).map((x) => { const [k, v] = x.split("="); return [k, Number(v)] as [string, number]; }));
+  const skipSeries = flag("--skip-series");
+  const skipPids = new Set<string>();
+  if (skipSeries) {
+    const usedRows = await turso.execute({ sql: "SELECT sku FROM ameublo_test_videos WHERE series LIKE ? AND qa_verdict = 'pass'", args: [skipSeries] });
+    const skus = [...new Set(usedRows.rows.flatMap((r) => String(r.sku).split(",")))];
+    for (let i = 0; i < skus.length; i += 200) {
+      const part = skus.slice(i, i + 200);
+      const pr = await turso.execute({ sql: `SELECT shopify_product_id AS pid FROM products WHERE sku IN (${part.map(() => "?").join(",")})`, args: part });
+      for (const x of pr.rows) if (x.pid) skipPids.add(String(x.pid));
+    }
+    console.log(`skip-series: ${skipPids.size} products already used in "${skipSeries}"`);
+  }
+  const slotsFor = (style: Style) =>
+    need.size
+      ? (["fr", "en"] as const).flatMap((lang) => Array.from({ length: need.get(`${style}/${lang}`) ?? 0 }, (_, k) => ({ lang: lang as Lang, k: 30 + k, i: 0 })))
+      : Array.from({ length: COUNT * 2 }, (_, i) => ({ lang: (i % 2 === 0 ? "fr" : "en") as Lang, k: i >> 1, i }));
   const music = (style: Style, lang: Lang, k: number) => TRACKS[style][(k + (lang === "en" ? 1 : 0)) % TRACKS[style].length];
 
   // Next valid, not-yet-used product of a list (advances the cursor; stops when exhausted).
-  const puller = (rows: Row[], used: Set<string>, minPhotos: number) => {
+  const puller = (rows: Row[], used: Set<string>, minPhotos: number, style: Style, ban?: RegExp) => {
     let c = 0;
     return async (): Promise<PlanProduct | null> => {
       while (c < rows.length) {
         const r = rows[c++];
-        if (used.has(r.pid)) continue;
-        const p = await valid(r, minPhotos);
+        if (used.has(r.pid) || skipPids.has(r.pid)) continue;
+        const p = await valid(r, minPhotos, style);
+        if (p && ban && (ban.test(p.titleEn) || ban.test(p.titleFr) || ban.test(p.productType))) { rej("wrong room"); continue; }
         if (p) { used.add(r.pid); return p; }
       }
       return null;
     };
   };
-  const SINGLE_MIN: Partial<Record<Style, number>> = { vitrine: 3, devine: 3 };
+  const SINGLE_MIN: Partial<Record<Style, number>> = { vitrine: 2, devine: 2 };
 
   for (const style of STYLES) {
     const used = new Set<string>();
-    const sl = slots();
+    const sl = slotsFor(style);
+    if (!sl.length) continue;
     const base = shuffled(pool, seedOf(style));
 
     if (style === "reaction") {
@@ -237,7 +304,7 @@ async function plan() {
       // Off-season patio last: the feed is autumn.
       const sorted = shuffled(rows, 11).sort((a, b) => Number(/^Patio/.test(a.type)) - Number(/^Patio/.test(b.type)));
       // The same UGC clip serves both languages (different overlay text), so one product = one FR + one EN video.
-      const next = puller(sorted, used, 1);
+      const next = puller(sorted, used, 1, style);
       for (let k = 0; k < COUNT; k++) {
         const p = await next();
         if (!p) { console.warn(`  reaction: only ${k} UGC-compliant products available`); break; }
@@ -249,7 +316,7 @@ async function plan() {
 
     if (style === "vitrine" || style === "astuce" || style === "devine") {
       // Round-robin over the room families so the series is varied.
-      const buckets = GROUPS.map(([g]) => puller(base.filter((r) => groupOf(r.type) === g), used, SINGLE_MIN[style] ?? 1));
+      const buckets = GROUPS.map(([g]) => puller(base.filter((r) => groupOf(r.type) === g), used, SINGLE_MIN[style] ?? 1, style));
       let b = 0;
       for (const s of sl) {
         let p: PlanProduct | null = null;
@@ -262,19 +329,34 @@ async function plan() {
 
     if (style === "ab" || style === "top3") {
       const need = style === "ab" ? 2 : 3;
-      const byType = SAME_TYPES.map((t) => puller(base.filter((r) => lastSeg(r.type) === t), used, 1));
+      // Per category, keep a small candidate pool and choose a comparable combination (same class, same unit,
+      // honest price spread) instead of burning products on failed tries.
+      const POOL_MAX = 10;
+      const cats = SAME_TYPES.map((t) => ({ next: puller(base.filter((r) => lastSeg(r.type) === t), used, 1, style), cands: [] as PlanProduct[], dry: false }));
+      const combos = (arr: PlanProduct[], k: number): PlanProduct[][] => {
+        if (k === 0) return [[]];
+        const out: PlanProduct[][] = [];
+        for (let i = 0; i <= arr.length - k; i++) for (const rest of combos(arr.slice(i + 1), k - 1)) out.push([arr[i], ...rest]);
+        return out;
+      };
+      const comparable = (got: PlanProduct[]) => {
+        const hi = Math.max(...got.map((g) => g.price));
+        const lo = Math.min(...got.map((g) => g.price));
+        const distinct = new Set(got.map((g) => g.titleFr.toLowerCase().split(" ").slice(0, 3).join(" "))).size === got.length;
+        const sameClass = new Set(got.map(classOf)).size === 1;
+        const sameUnit = new Set(got.map((g) => unitOf(g.titleEn) + "|" + unitOf(g.titleFr))).size === 1;
+        const spreadOk = style === "top3" ? hi / lo <= 3 : (hi - lo) / hi >= 0.12 && hi / lo <= 2.5;
+        return distinct && sameClass && sameUnit && spreadOk;
+      };
       let b = 0;
       for (const s of sl) {
         let ps: PlanProduct[] = [];
-        for (let tries = 0; tries < byType.length * 2 && ps.length < need; tries++) {
-          const next = byType[b++ % byType.length];
-          const got: PlanProduct[] = [];
-          for (let k = 0; k < need; k++) { const p = await next(); if (p) got.push(p); else break; }
-          const hi = Math.max(...got.map((g) => g.price));
-          const lo = Math.min(...got.map((g) => g.price));
-          const distinct = new Set(got.map((g) => g.titleFr.toLowerCase().split(" ").slice(0, 3).join(" "))).size === got.length;
-          const spreadOk = style === "top3" ? hi / lo <= 3 : (hi - lo) / hi >= 0.12 && hi / lo <= 2.5;
-          if (got.length === need && distinct && spreadOk) ps = got;
+        for (let tries = 0; tries < cats.length * 3 && !ps.length; tries++) {
+          const c = cats[b++ % cats.length];
+          while (!c.dry && c.cands.length < POOL_MAX) { const p = await c.next(); if (p) c.cands.push(p); else c.dry = true; }
+          if (c.cands.length < need) continue;
+          const hit = combos(c.cands, need).find(comparable);
+          if (hit) { ps = hit; c.cands = c.cands.filter((x) => !hit.includes(x)); }
         }
         if (ps.length < need) { console.warn(`  ${style}: pool exhausted at ${jobs.filter((j) => j.style === style).length}`); break; }
         jobs.push({ id: `${style}-${s.lang}-${s.k}`, style, lang: s.lang, n: s.k, campaign: CAMPAIGN, music: music(style, s.lang, s.k), products: ps });
@@ -284,7 +366,7 @@ async function plan() {
 
     // piece: four complementary articles for one room, total kept reasonable.
     const lists: Record<string, ReturnType<typeof puller>[]> = {};
-    for (const room of ROOM_ORDER) lists[room] = ROOMS[room].map((re) => puller(base.filter((r) => re.test(lastSeg(r.type))), used, 1));
+    for (const room of ROOM_ORDER) lists[room] = ROOMS[room].map((re) => puller(base.filter((r) => re.test(lastSeg(r.type))), used, 1, style, ROOM_BAN[room]));
     for (const s of sl) {
       const room = ROOM_ORDER[(s.k + (s.lang === "en" ? 1 : 0)) % ROOM_ORDER.length];
       const ps: PlanProduct[] = [];
@@ -314,7 +396,8 @@ async function render() {
   const max = Number(flag("--max") ?? 1e9);
   const budget = Number(flag("--budget-ms") ?? 540000);
   const started = Date.now();
-  const todo = jobs.filter((j) => !done.has(j.id) && (!only || only.split(",").includes(j.style))).slice(0, max);
+  const staged = (id: string) => fs.existsSync(path.join(STATE!, "preview", `${id}.json`));
+  const todo = jobs.filter((j) => !done.has(j.id) && !(has("--preview") && staged(j.id)) && (!only || only.split(",").includes(j.style))).slice(0, max);
   console.log(`render: ${todo.length} to do (${done.size} done, ${jobs.length} planned)`);
 
   const interop = <T,>(m: T): T => ((m as { default?: T }).default ?? m);
@@ -336,15 +419,12 @@ async function render() {
     return Buffer.from(await r.arrayBuffer());
   };
   /** White-background shot first (always shows the whole piece), then audit-clean photos only. */
-  const photosOf = async (sku: string, n: number): Promise<Buffer[]> => {
+  const photosOf = async (sku: string, n: number, lifeUrl?: string): Promise<Buffer[]> => {
     const row = (await turso.execute({ sql: "SELECT image1,image2,image3,image4,image5,image6,image7 FROM products WHERE sku = ?", args: [sku] })).rows[0];
     const urls = [1, 2, 3, 4, 5, 6, 7].map((i) => (row?.[`image${i}`] == null ? "" : String(row[`image${i}`]))).filter(Boolean);
+    if (lifeUrl) return Promise.all([urls[0], lifeUrl].map(download));
     const stems = [...new Set(urls.slice(1).map((u) => audit.imageUrlStem(u)))];
-    const clean = new Set<string>();
-    if (stems.length) {
-      const r = await turso.execute({ sql: `SELECT url_stem FROM image_classifications WHERE compliant = 1 AND url_stem IN (${stems.map(() => "?").join(",")})`, args: stems });
-      for (const x of r.rows) clean.add(String(x.url_stem));
-    }
+    const clean = await cleanStemSet(turso, stems);
     const seen = new Set<string>();
     const pick = [urls[0], ...urls.slice(1).filter((u) => clean.has(audit.imageUrlStem(u)))]
       .filter((u) => u && !seen.has(audit.imageUrlStem(u)) && seen.add(audit.imageUrlStem(u))).slice(0, n);
@@ -363,8 +443,7 @@ async function render() {
     for (const j of todo) {
       if (Date.now() - started > budget) { console.log("budget reached — resume with the same command"); break; }
       const lang = j.lang;
-      const maxT = j.style === "ab" ? 44 : 48;
-      const title = (p: PlanProduct) => i18n.tidyTitle(lang === "en" ? p.titleEn : p.titleFr, maxT);
+      const title = (p: PlanProduct) => (lang === "en" ? p.shortEn : p.shortFr);
       const ps = j.products.map((p) => ({ sku: p.sku, title: title(p), price: p.price, productType: p.productType }));
       const lead = ps[0];
       const accessory = sprite.accessoryForCampaign(j.campaign);
@@ -378,9 +457,9 @@ async function render() {
           const clip = path.join(ROOT, "src/ugc", `${lead.sku}.mp4`);
           if (!fs.existsSync(clip)) throw new Error(`clip missing: ${clip}`);
           spec = await scenes.reactionScene(clip, lead, lines, accessory, track, lang);
-        } else if (j.style === "vitrine") spec = await scenes.vitrineScene(await photosOf(lead.sku, 3), lead, lines, accessory, track, lang);
+        } else if (j.style === "vitrine") spec = await scenes.vitrineScene(await photosOf(lead.sku, 2, j.products[0].lifeUrl), lead, lines, accessory, track, lang);
         else if (j.style === "astuce") spec = await scenes.astuceScene((await photosOf(lead.sku, 1))[0], lead, lines, accessory, track, lang);
-        else if (j.style === "devine") spec = await scenes.devinePrixScene(await photosOf(lead.sku, 3), lead, accessory, track, lang);
+        else if (j.style === "devine") spec = await scenes.devinePrixScene(await photosOf(lead.sku, 2, j.products[0].lifeUrl), lead, accessory, track, lang);
         else if (j.style === "ab") {
           const [pa, pb] = await Promise.all(ps.map(async (p) => (await photosOf(p.sku, 1))[0]));
           spec = await scenes.ceciOuCaScene(pa, pb, ps[0], ps[1], accessory, track, lang);
@@ -404,6 +483,10 @@ async function render() {
         if (has("--preview")) {
           fs.mkdirSync(path.join(STATE!, "preview"), { recursive: true });
           fs.copyFileSync(out, path.join(STATE!, "preview", `${j.id}.mp4`));
+          fs.writeFileSync(path.join(STATE!, "preview", `${j.id}.json`), JSON.stringify({
+            id: j.id, style: j.style, lang, caption, titles: ps.map((p) => p.title), prices, vol, music: path.basename(track),
+            lines: j.style === "reaction" ? undefined : lines, skus: j.products.map((p) => p.sku),
+          }, null, 1));
           console.log(`  ◦ preview ${j.id}  ${vol.toFixed(1)} dB  ${caption.slice(0, 80).replace(/\n/g, " ")}`);
           continue;
         }
@@ -428,11 +511,38 @@ async function render() {
   }
 }
 
+/** Uploads staged videos that passed QA (ids in --ids) to Blob + DB, marked qa_verdict=pass. */
+async function release() {
+  const jobs = JSON.parse(fs.readFileSync(path.join(STATE!, "plan.json"), "utf8")) as Job[];
+  const doneFile = path.join(STATE!, "done.jsonl");
+  const done = new Set(fs.existsSync(doneFile) ? fs.readFileSync(doneFile, "utf8").split(String.fromCharCode(10)).filter(Boolean).map((l) => JSON.parse(l).id as string) : []);
+  const ids = (flag("--ids") ?? "").split(",").filter(Boolean);
+  const interop = <T,>(m: T): T => ((m as { default?: T }).default ?? m);
+  const db = interop(await import("@/lib/database"));
+  const { put } = await import("@vercel/blob");
+  for (const id of ids) {
+    if (done.has(id)) { console.log(`  = ${id} already released`); continue; }
+    const j = jobs.find((x) => x.id === id);
+    const meta = JSON.parse(fs.readFileSync(path.join(STATE!, "preview", `${id}.json`), "utf8"));
+    if (!j) { console.error(`  ✗ ${id}: not in plan`); continue; }
+    const blob = await put(`ameublo-studio/${j.style}/${j.lang}/${Date.now()}-${id}.mp4`, fs.readFileSync(path.join(STATE!, "preview", `${id}.mp4`)), {
+      access: "public", contentType: "video/mp4", addRandomSuffix: false, allowOverwrite: true,
+    });
+    const vid = await db.insertAmeubloTestVideo({
+      series: SERIES, sku: meta.skus.join(","), campaign: j.campaign, label: meta.titles.join(" vs "), videoUrl: blob.url,
+      style: j.style, lang: j.lang, caption: meta.caption, skus: meta.skus, prices: meta.prices, music: meta.music,
+    });
+    await db.setAmeubloQa(vid, "pass", "Regénérée et validée à la revue visuelle (2026-10-04)");
+    fs.appendFileSync(doneFile, JSON.stringify({ id, videoId: vid, url: blob.url, vol: meta.vol }) + String.fromCharCode(10));
+    console.log(`  ✓ ${id} #${vid} released`);
+  }
+}
+
 if (!STATE) {
   console.error("usage: --state DIR (--plan | --render) [options]; see the header of this file");
   process.exit(1);
 }
-(has("--plan") ? plan() : has("--render") ? render() : Promise.reject(new Error("pass --plan or --render"))).catch((e) => {
+(has("--plan") ? plan() : has("--render") ? render() : has("--release") ? release() : Promise.reject(new Error("pass --plan or --render"))).catch((e) => {
   console.error(e);
   process.exit(1);
 });
