@@ -199,7 +199,11 @@ export default function AmeubloStudioClient() {
           n.delete(v.id);
           return n;
         });
-        setInfo(`✓ Vidéo ${v.id} approuvée et planifiée : ${fmtWhen(r.j.scheduledAt)}.`);
+        const tw = r.j.twin as { success: boolean; id: number; scheduledAt?: string; error?: string } | undefined;
+        setInfo(
+          `✓ Vidéo ${v.id} approuvée et planifiée : ${fmtWhen(r.j.scheduledAt)}.` +
+            (tw ? (tw.success ? ` Version jumelle #${tw.id} planifiée : ${fmtWhen(String(tw.scheduledAt))}.` : ` Version jumelle #${tw.id} NON planifiée : ${tw.error}`) : ""),
+        );
       } else if (v.qa_verdict === "fail" && !force && window.confirm(`${r.j.error}\n\nForcer l'approbation ?`)) {
         busyRef.current = false;
         return await approve(v, true);
@@ -312,7 +316,7 @@ export default function AmeubloStudioClient() {
     setInfo(null);
     const r = await post({ action: "bulk_approve", ids });
     if (r.ok) {
-      setInfo(`${r.j.data.approved} planifiée(s), ${r.j.data.refused} refusée(s).`);
+      setInfo(`${r.j.data.approved} planifiée(s), ${r.j.data.refused} refusée(s) (chaque vidéo entraîne sa version dans l’autre langue).`);
       setSelected(new Set());
     } else setError(r.j.error || `Échec (HTTP ${r.status})`);
     setBusy(null);

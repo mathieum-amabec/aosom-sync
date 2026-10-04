@@ -2,12 +2,14 @@
  * Approve / cancel a Studio Ameublo video: the one place that turns an `ameublo_test_videos`
  * row into a `publication_queue` row on the mascot grid (settings `ameublo_schedule`).
  *
+ * Approving one language also schedules its other-language twin (same series, style and SKUs).
  * Approval is the OPERATOR's action only — nothing here is called by a cron or a generator.
  * A video lands on the next free slot of ITS language's share of the grid (FR and EN alternate
  * through the day) and the hourly publisher (/api/cron/publisher) does the rest.
  */
 import {
   getAmeubloTestVideo,
+  findAmeubloTwin,
   getOccupiedAmeubloSlots,
   getSetting,
   addToQueue,
@@ -17,14 +19,14 @@ import {
   type AmeubloLang,
   type AmeubloTestVideo,
 } from "@/lib/database";
-import { ameubloScheduleForLang, getNextAvailableSlot, parseAmeubloSchedule } from "@/lib/publication-scheduler";
+import { ameubloScheduleForLang, getNextAvailableSlot, parseAmeubloSchedule, parseReactionSchedule } from "@/lib/publication-scheduler";
 import { checkSequentialAdPrice } from "@/lib/sequential-ad-price";
 import { stripSupplierBrands } from "@/lib/catalog-guard";
 
 const sqliteToUnixSec = (s: string): number => Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
 
 export type AmeubloApproveResult =
-  | { success: true; id: number; queueId: number; scheduledAt: string }
+  | { success: true; id: number; queueId: number; scheduledAt: string; twin?: AmeubloApproveResult }
   | { success: false; id: number; error: string; status: number };
 
 /** Why a video may not be approved right now, or null when it can be. */
@@ -39,7 +41,21 @@ export function approvalBlocker(v: AmeubloTestVideo, force: boolean): string | n
   return null;
 }
 
+/**
+ * Approve a video AND its other-language version in the same action: FR and EN go on the
+ * schedule together, each on its own language's next free slot. The twin never blocks the
+ * video asked for: if it can't be scheduled (QA fail, stale price...), the reason is in `twin`.
+ */
 export async function approveAmeubloVideo(id: number, opts: { force?: boolean } = {}): Promise<AmeubloApproveResult> {
+  const res = await approveOne(id, opts);
+  if (!res.success) return res;
+  const v = await getAmeubloTestVideo(id);
+  const twin = v ? await findAmeubloTwin(v) : null;
+  if (twin) res.twin = await approveOne(twin.id, opts);
+  return res;
+}
+
+async function approveOne(id: number, opts: { force?: boolean }): Promise<AmeubloApproveResult> {
   const v = await getAmeubloTestVideo(id);
   if (!v) return { success: false, id, error: "Vidéo introuvable.", status: 404 };
   const blocked = approvalBlocker(v, opts.force === true);
@@ -61,9 +77,17 @@ export async function approveAmeubloVideo(id: number, opts: { force?: boolean } 
   const price = await checkSequentialAdPrice({ contentId: `ameublo:${v.id}`, metadata });
   if (!price.ok) return { success: false, id, error: price.reason!, status: 409 };
 
-  const schedule = ameubloScheduleForLang(parseAmeubloSchedule(await getSetting("ameublo_schedule")), lang);
+  // "Réaction" videos have their own grid (reaction_schedule, 1/day/page) and their own
+  // occupancy, so they neither take slots from nor count against the other styles' grid.
+  const grid = v.style === "reaction" ? "reaction" : "main";
+  const schedule = ameubloScheduleForLang(
+    grid === "reaction"
+      ? parseReactionSchedule(await getSetting("reaction_schedule"))
+      : parseAmeubloSchedule(await getSetting("ameublo_schedule")),
+    lang,
+  );
   const nowSec = Math.floor(Date.now() / 1000);
-  const occupied = (await getOccupiedAmeubloSlots(lang)).map(sqliteToUnixSec);
+  const occupied = (await getOccupiedAmeubloSlots(lang, grid)).map(sqliteToUnixSec);
   const contentId = `ameublo:${v.id}`;
   const payload = JSON.stringify({
     caption: stripSupplierBrands(v.caption!),
@@ -110,7 +134,14 @@ export async function bulkApproveAmeubloVideos(ids: number[], opts: { force?: bo
   }
   order.push(...rest);
   const out: AmeubloApproveResult[] = [];
-  for (const id of order) out.push(await approveAmeubloVideo(id, opts));
+  const doneAsTwin = new Map<number, AmeubloApproveResult>();
+  for (const id of order) {
+    const already = doneAsTwin.get(id);
+    if (already) { out.push(already); continue; }
+    const res = await approveAmeubloVideo(id, opts);
+    out.push(res);
+    if (res.success && res.twin) doneAsTwin.set(res.twin.id, res.twin);
+  }
   return out;
 }
 

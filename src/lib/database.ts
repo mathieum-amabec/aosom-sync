@@ -7668,6 +7668,26 @@ export async function getAmeubloTestVideo(id: number): Promise<AmeubloTestVideo 
   return r.rows.length ? mapAmeubloVideo(rowToObj(r.rows[0])) : null;
 }
 
+/**
+ * The other-language version of a video: same series, style and SKU set, opposite language.
+ * Twins are rendered together, so the closest id wins; already scheduled/published or "bad" ones are skipped.
+ */
+export async function findAmeubloTwin(v: AmeubloTestVideo): Promise<AmeubloTestVideo | null> {
+  if (!v.lang || !v.style) return null;
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `${AMEUBLO_SELECT} WHERE v.series = ? AND v.style = ? AND v.lang = ? AND v.id <> ?`,
+    args: [v.series, v.style, v.lang === "fr" ? "en" : "fr", v.id],
+  });
+  const key = [...v.skus].sort().join(",");
+  const candidates = r.rows
+    .map((row) => mapAmeubloVideo(rowToObj(row)))
+    .filter((c) => [...c.skus].sort().join(",") === key && c.verdict !== "bad")
+    .filter((c) => !(c.queue_id != null && c.queue_status && ["pending", "publishing", "published"].includes(c.queue_status)))
+    .sort((a, b) => Math.abs(a.id - v.id) - Math.abs(b.id - v.id));
+  return candidates[0] ?? null;
+}
+
 /** Operator's verdict on a test video. `verdict: null` clears it. Returns false when the id is unknown. */
 export async function setAmeubloTestVerdict(id: number, verdict: "ok" | "bad" | null, note?: string | null): Promise<boolean> {
   const db = await ensureSchema();
@@ -7712,14 +7732,17 @@ export async function setAmeubloQueueId(id: number, queueId: number | null): Pro
  * Slots already taken by Studio Ameublo Reels (sequential_ad rows tagged source='ameublo_studio').
  * Scoped by source so the per-day cap of the mascot grid is independent of the sequential ads.
  */
-export async function getOccupiedAmeubloSlots(lang?: AmeubloLang): Promise<string[]> {
+export async function getOccupiedAmeubloSlots(lang?: AmeubloLang, grid?: "reaction" | "main"): Promise<string[]> {
   const db = await ensureSchema();
   const r = await db.execute({
     sql: `SELECT scheduled_at FROM publication_queue
           WHERE content_type = 'sequential_ad' AND status IN ('pending', 'publishing', 'published')
             AND json_extract(metadata, '$.source') = 'ameublo_studio'
-            AND (? IS NULL OR json_extract(metadata, '$.lang') = ?)`,
-    args: [lang ?? null, lang ?? null],
+            AND (? IS NULL OR json_extract(metadata, '$.lang') = ?)
+            AND (? IS NULL
+                 OR (? = 'reaction' AND json_extract(metadata, '$.style') = 'reaction')
+                 OR (? = 'main' AND COALESCE(json_extract(metadata, '$.style'), '') <> 'reaction'))`,
+    args: [lang ?? null, lang ?? null, grid ?? null, grid ?? null, grid ?? null],
   });
   return r.rows.map((row) => String(rowToObj(row).scheduled_at));
 }

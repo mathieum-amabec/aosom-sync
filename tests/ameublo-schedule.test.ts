@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseAmeubloSchedule, ameubloScheduleForLang } from "@/lib/publication-scheduler";
+import { parseAmeubloSchedule, parseReactionSchedule, ameubloScheduleForLang } from "@/lib/publication-scheduler";
 
 describe("Studio Ameublo grid", () => {
   it("defaults to 8 Reels a day at fixed hours, every day", () => {
@@ -22,6 +22,16 @@ describe("Studio Ameublo grid", () => {
     const s = parseAmeubloSchedule(JSON.stringify({ enabled: true, timezone: "America/Toronto", max_per_day: 1, slots: [{ day: "mon", times: ["10:00"] }] }));
     expect(ameubloScheduleForLang(s, "fr").slots[0].times).toEqual(["10:00"]);
     expect(ameubloScheduleForLang(s, "en").slots[0].times).toEqual(["10:00"]);
+  });
+  it("Réaction grid: one a day per page, hours disjoint from the main grid", () => {
+    const r = parseReactionSchedule(null);
+    expect(r.slots).toHaveLength(7);
+    expect(ameubloScheduleForLang(r, "fr").slots[0].times).toEqual(["11:00"]);
+    expect(ameubloScheduleForLang(r, "en").slots[0].times).toEqual(["19:00"]);
+    expect(ameubloScheduleForLang(r, "fr").max_per_day).toBe(1);
+    const main = new Set(parseAmeubloSchedule(null).slots.flatMap((s) => s.times));
+    for (const t of r.slots.flatMap((s) => s.times)) expect(main.has(t)).toBe(false);
+    expect(parseReactionSchedule("not json").max_per_day).toBe(2);
   });
   it("keeps a stored cap above the social limit of 5", () => {
     const s = parseAmeubloSchedule(JSON.stringify({ enabled: true, timezone: "America/Toronto", max_per_day: 8, slots: [{ day: "mon", times: ["07:45", "09:45"] }] }));
