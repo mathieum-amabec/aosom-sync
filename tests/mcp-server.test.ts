@@ -15,11 +15,22 @@ describe("MCP protocol", () => {
   it("notifications get no reply", async () => {
     expect(await handleMessage(fakeDb(), { method: "notifications/initialized" })).toBeNull();
   });
-  it("tools/list exposes only the read-only tools", async () => {
-    const r = await handleMessage(fakeDb(), { id: 2, method: "tools/list" });
-    const names = (r?.result as { tools: { name: string }[] }).tools.map((t) => t.name);
-    expect(names).toEqual(TOOLS.map((t) => t.name));
+  it("tools/list only shows the tools the permissions allow", async () => {
+    const list = async (scopes: string[]) => ((await handleMessage(fakeDb(), { id: 2, method: "tools/list" }, { scopes: new Set(scopes) as never }))?.result as { tools: { name: string }[] }).tools.map((t) => t.name);
+    const readOnly = await list(["read"]);
+    expect(readOnly).toEqual(TOOLS.filter((t) => t.scope === "read").map((t) => t.name));
+    expect(readOnly).not.toContain("best_sellers");
+    expect(await list(["read", "analytics"])).toEqual(TOOLS.map((t) => t.name));
+    const names = readOnly;
     expect(names.some((n) => /import$|publish|delete|update|write/.test(n.replace("import_queue", "")))).toBe(false);
+  });
+  it("calling a tool outside the granted permissions is refused", async () => {
+    const db = fakeDb();
+    const denied = await handleMessage(db, { id: 5, method: "tools/call", params: { name: "best_sellers", arguments: {} } }, { scopes: new Set(["read"]) as never });
+    expect(denied?.error?.code).toBe(-32602);
+    expect(db.execute).not.toHaveBeenCalled();
+    const allowed = await handleMessage(db, { id: 6, method: "tools/call", params: { name: "best_sellers", arguments: {} } }, { scopes: new Set(["read", "analytics"]) as never });
+    expect(allowed?.error).toBeUndefined();
   });
   it("unknown method / tool → JSON-RPC error", async () => {
     expect((await handleMessage(fakeDb(), { id: 3, method: "nope" }))?.error?.code).toBe(-32601);

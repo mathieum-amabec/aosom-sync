@@ -10,12 +10,16 @@
  * explicit confirmation step.
  */
 import { toFtsQuery } from "@/lib/catalog-filters";
+import type { Scope } from "@/lib/mcp/scopes";
+import { ANALYTICS_TOOLS } from "@/lib/mcp/analytics-tools";
 
 export interface Db {
   execute(stmt: { sql: string; args?: (string | number)[] }): Promise<{ rows: unknown[] }>;
 }
 
 export interface ToolDef {
+  /** Permission required to list and call this tool. */
+  scope: Scope;
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
@@ -100,8 +104,9 @@ async function searchCostway(db: Db, a: Record<string, unknown>) {
   }));
 }
 
-export const TOOLS: ToolDef[] = [
+export const READ_TOOLS: ToolDef[] = [
   {
+    scope: "read",
     name: "search_products",
     description:
       "Search the catalogue of Aosom and/or Costway products (English supplier titles). `listing`: 'listed' = already on the Shopify store " +
@@ -129,6 +134,7 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    scope: "read",
     name: "get_product",
     description: "Full catalogue record of one Aosom SKU, or one Costway item_no / SKU, including its Shopify link and import status.",
     inputSchema: { type: "object", properties: { id: { type: "string", description: "Aosom SKU, Costway item_no or Costway SKU" } }, required: ["id"] },
@@ -148,6 +154,7 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    scope: "read",
     name: "catalog_overview",
     description: "Counts: Aosom and Costway products, how many are listed on Shopify, how many in stock.",
     inputSchema: { type: "object", properties: {} },
@@ -158,6 +165,7 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    scope: "read",
     name: "import_queue",
     description: "Aosom import jobs by status (pending / generating / reviewing / importing / done / failed) plus the 10 most recently updated.",
     inputSchema: { type: "object", properties: {} },
@@ -167,6 +175,7 @@ export const TOOLS: ToolDef[] = [
     }),
   },
   {
+    scope: "read",
     name: "llm_budget",
     description: "LLM tokens used per budget pool (assistant / batch / video / maintenance) for the last 3 days.",
     inputSchema: { type: "object", properties: {} },
@@ -175,6 +184,7 @@ export const TOOLS: ToolDef[] = [
     }),
   },
   {
+    scope: "read",
     name: "recent_cron_runs",
     description: "Most recent scheduled-job runs (name, status, detail, time) to check that sync / publisher / price jobs are healthy. Optional `name` filter.",
     inputSchema: { type: "object", properties: { name: { type: "string" }, limit: { type: "number", description: "1-25, default 10" } } },
@@ -188,3 +198,6 @@ export const TOOLS: ToolDef[] = [
     },
   },
 ];
+
+/** Everything the database-only server can offer (read + analytics). Import tools live in import-tools.ts. */
+export const TOOLS: ToolDef[] = [...READ_TOOLS, ...ANALYTICS_TOOLS];

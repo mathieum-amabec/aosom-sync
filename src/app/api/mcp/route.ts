@@ -10,6 +10,8 @@ import { handleMcpHttp, methodNotAllowed } from "@/lib/mcp/http";
  * scripts/mcp-remote.mjs; claude.ai / the mobile app authorize through OAuth (src/app/oauth/*) and send an access token here.
  */
 export const dynamic = "force-dynamic";
+// import_confirm generates copy and pushes to Shopify (the tool keeps its own 230 s time budget).
+export const maxDuration = 300;
 
 export const POST = (request: Request) => handleMcpHttp(request, bearerKey(request.headers.get("authorization")));
 export const GET = methodNotAllowed;

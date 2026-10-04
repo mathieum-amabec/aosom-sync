@@ -836,6 +836,14 @@ async function _initSchemaImpl(): Promise<void> {
   // it to skip Costway products — see getCostwayShopifyProductIds. The index is created HERE,
   // after the guarded ALTER, because on an existing DB the column does not exist yet when the
   // CREATE TABLE batch above runs.
+  // MCP permissions (read / analytics / import): scope column on keys and OAuth grants. Existing rows = read only.
+  for (const t of ["mcp_keys", "oauth_grants"]) {
+    const info = await db.execute(`PRAGMA table_info(${t})`);
+    if (!info.rows.some((r) => String((r as unknown as Record<string, unknown>).name) === "scope")) {
+      await runBatch(`${t} add scope`, [{ sql: `ALTER TABLE ${t} ADD COLUMN scope TEXT NOT NULL DEFAULT 'read'`, args: [] }]);
+    }
+  }
+
   const cwInfo = await db.execute(`PRAGMA table_info(costway_products)`);
   const cwCols = new Set(cwInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
   if (!cwCols.has("shopify_product_id")) {
@@ -7695,24 +7703,24 @@ export async function getOccupiedAmeubloSlots(lang?: AmeubloLang): Promise<strin
 
 // ─── MCP access keys ────────────────────────────────────────────────
 
-export interface McpKeyRow { id: number; name: string; key_hint: string; created_at: number; last_used_at: number | null; revoked_at: number | null }
+export interface McpKeyRow { id: number; name: string; key_hint: string; scope: string; created_at: number; last_used_at: number | null; revoked_at: number | null }
 
-export async function createMcpKey(name: string, keyHash: string, keyHint: string): Promise<number> {
+export async function createMcpKey(name: string, keyHash: string, keyHint: string, scope = "read"): Promise<number> {
   const db = await ensureSchema();
   const r = await db.execute({
-    sql: `INSERT INTO mcp_keys (name, key_hash, key_hint, created_at) VALUES (?, ?, ?, ?)`,
-    args: [name, keyHash, keyHint, Math.floor(Date.now() / 1000)],
+    sql: `INSERT INTO mcp_keys (name, key_hash, key_hint, scope, created_at) VALUES (?, ?, ?, ?, ?)`,
+    args: [name, keyHash, keyHint, scope, Math.floor(Date.now() / 1000)],
   });
   return Number(r.lastInsertRowid);
 }
 
 export async function listMcpKeys(): Promise<McpKeyRow[]> {
   const db = await ensureSchema();
-  const r = await db.execute(`SELECT id, name, key_hint, created_at, last_used_at, revoked_at FROM mcp_keys ORDER BY id DESC LIMIT 100`);
+  const r = await db.execute(`SELECT id, name, key_hint, scope, created_at, last_used_at, revoked_at FROM mcp_keys ORDER BY id DESC LIMIT 100`);
   return r.rows.map((row) => {
     const o = rowToObj(row);
     return {
-      id: Number(o.id), name: String(o.name), key_hint: String(o.key_hint), created_at: Number(o.created_at),
+      id: Number(o.id), name: String(o.name), key_hint: String(o.key_hint), scope: String(o.scope ?? "read"), created_at: Number(o.created_at),
       last_used_at: o.last_used_at == null ? null : Number(o.last_used_at),
       revoked_at: o.revoked_at == null ? null : Number(o.revoked_at),
     };
@@ -7726,19 +7734,19 @@ export async function revokeMcpKey(id: number): Promise<boolean> {
 }
 
 /**
- * True when `keyHash` belongs to a non-revoked key. Stamps last_used_at at most once every
+ * The scope string of a non-revoked key, or null when `keyHash` is unknown/revoked. Stamps last_used_at at most once every
  * 10 minutes per key so a chatty client does not turn every tool call into a write.
  */
-export async function verifyMcpKey(keyHash: string): Promise<boolean> {
+export async function verifyMcpKey(keyHash: string): Promise<string | null> {
   const db = await ensureSchema();
-  const r = await db.execute({ sql: `SELECT id, last_used_at FROM mcp_keys WHERE key_hash = ? AND revoked_at IS NULL`, args: [keyHash] });
-  if (!r.rows[0]) return false;
+  const r = await db.execute({ sql: `SELECT id, scope, last_used_at FROM mcp_keys WHERE key_hash = ? AND revoked_at IS NULL`, args: [keyHash] });
+  if (!r.rows[0]) return null;
   const o = rowToObj(r.rows[0]);
   const now = Math.floor(Date.now() / 1000);
   if (o.last_used_at == null || now - Number(o.last_used_at) > 600) {
     await db.execute({ sql: `UPDATE mcp_keys SET last_used_at = ? WHERE id = ?`, args: [now, Number(o.id)] });
   }
-  return true;
+  return String(o.scope ?? "read");
 }
 
 // ─── OAuth (MCP) ────────────────────────────────────────────────────
@@ -7765,12 +7773,12 @@ export async function getOAuthClient(clientId: string): Promise<OAuthClientRow |
 
 /** One approved connection (grant) + its single-use authorization code. */
 export async function createOAuthGrantWithCode(a: {
-  clientId: string; clientName: string; redirectUri: string; codeChallenge: string; codeHash: string; ttlSec: number;
+  clientId: string; clientName: string; redirectUri: string; codeChallenge: string; codeHash: string; ttlSec: number; scope: string;
 }): Promise<number> {
   const db = await ensureSchema();
   const g = await db.execute({
-    sql: `INSERT INTO oauth_grants (client_id, client_name, created_at) VALUES (?, ?, ?)`,
-    args: [a.clientId, a.clientName, nowSec()],
+    sql: `INSERT INTO oauth_grants (client_id, client_name, scope, created_at) VALUES (?, ?, ?, ?)`,
+    args: [a.clientId, a.clientName, a.scope, nowSec()],
   });
   const grantId = Number(g.lastInsertRowid);
   await db.execute({
@@ -7823,30 +7831,30 @@ export async function consumeOAuthRefresh(tokenHash: string): Promise<{ grant_id
   return { grant_id: Number(o.grant_id), client_id: String(o.client_id) };
 }
 
-/** True when `tokenHash` is a live access token of a non-revoked grant (last_used_at stamped ≤ every 10 min). */
-export async function verifyOAuthAccess(tokenHash: string): Promise<boolean> {
+/** Scope string of a live access token of a non-revoked grant, else null (last_used_at stamped ≤ every 10 min). */
+export async function verifyOAuthAccess(tokenHash: string): Promise<string | null> {
   const db = await ensureSchema();
   const r = await db.execute({
-    sql: `SELECT g.id, g.last_used_at FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id
+    sql: `SELECT g.id, g.scope, g.last_used_at FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id
            WHERE t.token_hash = ? AND t.kind = 'access' AND t.expires_at > ? AND g.revoked_at IS NULL`,
     args: [tokenHash, nowSec()],
   });
-  if (!r.rows[0]) return false;
+  if (!r.rows[0]) return null;
   const o = rowToObj(r.rows[0]);
   if (o.last_used_at == null || nowSec() - Number(o.last_used_at) > 600) {
     await db.execute({ sql: `UPDATE oauth_grants SET last_used_at = ? WHERE id = ?`, args: [nowSec(), Number(o.id)] });
   }
-  return true;
+  return String(o.scope ?? "read");
 }
 
-export interface OAuthGrantRow { id: number; client_name: string; created_at: number; last_used_at: number | null }
+export interface OAuthGrantRow { id: number; client_name: string; scope: string; created_at: number; last_used_at: number | null }
 
 export async function listOAuthGrants(): Promise<OAuthGrantRow[]> {
   const db = await ensureSchema();
-  const r = await db.execute(`SELECT id, client_name, created_at, last_used_at FROM oauth_grants WHERE revoked_at IS NULL ORDER BY id DESC LIMIT 100`);
+  const r = await db.execute(`SELECT id, client_name, scope, created_at, last_used_at FROM oauth_grants WHERE revoked_at IS NULL ORDER BY id DESC LIMIT 100`);
   return r.rows.map((row) => {
     const o = rowToObj(row);
-    return { id: Number(o.id), client_name: String(o.client_name), created_at: Number(o.created_at), last_used_at: o.last_used_at == null ? null : Number(o.last_used_at) };
+    return { id: Number(o.id), client_name: String(o.client_name), scope: String(o.scope ?? "read"), created_at: Number(o.created_at), last_used_at: o.last_used_at == null ? null : Number(o.last_used_at) };
   });
 }
 

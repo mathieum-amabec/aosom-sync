@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth";
 import { createOAuthGrantWithCode, getOAuthClient, type OAuthClientRow } from "@/lib/database";
 import { CODE_TTL_SEC, escapeHtml, hashToken, newAuthCode, originOf } from "@/lib/mcp/oauth";
+import { formatScopes } from "@/lib/mcp/scopes";
 
 /**
  * OAuth authorization endpoint = the consent page. The connection is only granted after the owner,
@@ -19,7 +20,7 @@ body{font-family:system-ui,sans-serif;background:#0b0d12;color:#e5e7eb;margin:0;
 .card{background:#12151c;border:1px solid #232733;border-radius:14px;padding:28px;max-width:420px;margin:16px}
 h1{font-size:20px;margin:0 0 12px}p{color:#9ca3af;font-size:14px;line-height:1.5}b{color:#e5e7eb}
 .row{display:flex;gap:10px;margin-top:20px}button{flex:1;padding:11px;border-radius:9px;border:0;font-size:15px;cursor:pointer}
-.ok{background:#2563eb;color:#fff}.no{background:#232733;color:#e5e7eb}
+.perm{display:block;font-size:13px;color:#9ca3af;margin:10px 0;line-height:1.4}.ok{background:#2563eb;color:#fff}.no{background:#232733;color:#e5e7eb}
 </style></head><body><div class="card">${body}</div></body></html>`;
   return new NextResponse(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
@@ -60,9 +61,12 @@ export async function GET(request: Request) {
   const hidden = ["client_id", "redirect_uri", "response_type", "code_challenge", "code_challenge_method", "state"]
     .map((k) => `<input type="hidden" name="${k}" value="${escapeHtml(url.searchParams.get(k) || "")}">`).join("");
   return page(200, `<h1>Autoriser « ${escapeHtml(v.client.client_name)} » ?</h1>
-<p>Cette application demande un accès <b>en lecture seule</b> au catalogue (recherche de produits Aosom et Costway, file d'import, budget LLM, état des tâches). Elle ne pourra rien modifier.</p>
-<p>Connecté en tant que <b>${escapeHtml(session.username)}</b> · retour vers <b>${escapeHtml(host)}</b></p>
+<p>Choisis ce que cette application pourra faire :</p>
 <form method="post" action="/oauth/authorize">${hidden}
+<label class="perm"><input type="checkbox" checked disabled> <b>Lecture</b> — rechercher le catalogue (Aosom et Costway, importé ou non), inventaire, file d'import, état des tâches.</label>
+<label class="perm"><input type="checkbox" name="scope_analytics" value="1" checked> <b>Analytics</b> — meilleurs vendeurs, baisses de prix, stock faible, historique des imports.</label>
+<label class="perm"><input type="checkbox" name="scope_import" value="1"> <b>Import</b> — créer des produits sur la boutique (mis en ligne tout de suite), 5 à la fois, avec aperçu puis confirmation.</label>
+<p>Connecté en tant que <b>${escapeHtml(session.username)}</b> · retour vers <b>${escapeHtml(host)}</b></p>
 <div class="row"><button class="no" name="decision" value="deny">Refuser</button><button class="ok" name="decision" value="approve">Autoriser</button></div></form>
 <p style="font-size:12px;margin-top:16px">Tu pourras révoquer cet accès à tout moment dans Réglages → MCP.</p>`);
 }
@@ -84,6 +88,7 @@ export async function POST(request: Request) {
   await createOAuthGrantWithCode({
     clientId: v.p.clientId, clientName: v.client.client_name, redirectUri: v.p.redirectUri,
     codeChallenge: v.p.challenge, codeHash: hashToken(code), ttlSec: CODE_TTL_SEC,
+    scope: formatScopes(["read", ...(get("scope_analytics") ? ["analytics"] : []), ...(get("scope_import") ? ["import"] : [])]),
   });
   return back(v.p.redirectUri, { code, state: v.p.state });
 }

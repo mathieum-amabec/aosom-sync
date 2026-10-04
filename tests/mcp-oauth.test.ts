@@ -119,6 +119,7 @@ describe("authorize (consent page)", () => {
     expect(loc.searchParams.get("code")).toMatch(/^ac_/);
     expect(loc.searchParams.get("state")).toBe("st");
     expect(db.createOAuthGrantWithCode.mock.calls[0][0].codeHash).toBe(hashToken(loc.searchParams.get("code")!));
+    expect(db.createOAuthGrantWithCode.mock.calls[0][0].scope).toBe("read"); // nothing ticked = read only
     const no = await authPost(form("deny"));
     expect(new URL(no.headers.get("location")!).searchParams.get("error")).toBe("access_denied");
   });
@@ -132,7 +133,7 @@ describe("authorize (consent page)", () => {
 describe("/api/mcp with OAuth", () => {
   it("accepts a live access token; a 401 carries the resource_metadata hint", async () => {
     resetDb();
-    db.verifyOAuthAccess.mockResolvedValue(true);
+    db.verifyOAuthAccess.mockResolvedValue("read analytics");
     const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
     const tokenStr = "amcpa_" + "a".repeat(43);
     const ok = await mcp(new Request("https://h/api/mcp", { method: "POST", headers: { authorization: `Bearer ${tokenStr}` }, body }));
