@@ -2,6 +2,23 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.3] - 2026-10-04
+
+**Studio Ameublo: generator quality pass.** A QA review of the v2 series flagged 63 of 119 videos (ambiguous title, wrong room, people in a photo, non-comparable pairs). The generator now refuses those cases at planning time, and the flagged rows get their own "Écartée (QA)" status instead of sitting in the default view.
+
+### Changed
+
+- Titles: `cleanTitle` cuts only at a clause boundary, keeps "lot de N", capitalises, refuses leftover English/French words, and returns nothing rather than a half-sentence. Titles that name a colour are skipped (the group photo may show another one).
+- Photos: vitrine and "devine le prix" use the white-background shot plus the human-validated lifestyle photo (Shopify tag `lifestyle-verified`); the unreliable per-photo classifier note is no longer trusted for extra photos.
+- A/B and Top 3 choose a comparable combination (same class, same unit, honest price spread) from a per-category pool instead of burning products on failed tries; more classes (wall, filing, corner, L-shaped, rolling).
+- "La pièce en 4 articles": room-specific bans and four distinct roles per room (no islands or pantries in a dining nook, no second storage unit in an office or bedroom).
+- Tips: armchairs, recliners and pet sofas get their own advice instead of the sofa one. New `bain` family. Vitrine caption no longer says "Elle va bien dans ton salon".
+- `ameublo-batch.mts`: `--need`, `--skip-series`, `--preview` staging and `--release` (uploads only videos that passed the visual review, marked `qa_verdict='pass'`).
+
+### Added
+
+- Studio status "Écartée (QA)" for rows with a `fail` / `review` verdict. `tests/ameublo-title.test.ts`.
+
 ## [0.5.107.2] - 2026-10-04
 
 **Studio Ameublo: 4 Reels a day per page (was 2).** The mascot content is free to render, so the grid is widened. Nothing is published until the operator approves videos.

@@ -485,6 +485,8 @@ export async function vitrineScene(photos: Buffer[], p: StyleProduct, lines: Ame
 /** Practical tips by product family. Plain advice, no product claims. */
 export const TIPS: { match: RegExp; tip: string }[] = [
   { match: /(dog|cat|pet|chien|chat).*(bed|house|kennel|condo|tree|lit|niche|panier)|(bed|house|kennel|lit|niche).*(dog|cat|pet)/i, tip: "Installez le coin de votre animal loin des courants d’air" },
+  { match: /(pet|dog|cat|chien|chat).*(sofa|couch|canap)/i, tip: "Installez le coin de votre animal loin des courants d’air" },
+  { match: /armchair|accent chair|recliner|glider|rocking chair|fauteuil|chaise d.appoint|chaise berçante|inclinable/i, tip: "Prévoyez environ 60 cm de dégagement devant un fauteuil" },
   { match: /sofa|loveseat|canap|couch|causeuse|sectional/i, tip: "Mesurez vos portes et votre escalier avant de choisir un sofa" },
   { match: /coffee table|table basse|table à café/i, tip: "Une table basse fait idéalement les deux tiers de la longueur du sofa" },
   { match: /mirror|miroir|vanity|coiffeuse/i, tip: "Un miroir face à une fenêtre renvoie la lumière dans la pièce" },
@@ -499,6 +501,8 @@ export const DEFAULT_TIP = "Mesurez deux fois, commandez une fois";
 
 export const TIPS_EN: { match: RegExp; tip: string }[] = [
   { match: /(dog|cat|pet|chien|chat).*(bed|house|kennel|condo|tree|lit|niche|panier)|(bed|house|kennel|lit|niche).*(dog|cat|pet)/i, tip: "Set up your pet’s spot away from drafts" },
+  { match: /(pet|dog|cat|chien|chat).*(sofa|couch|canap)/i, tip: "Set up your pet’s spot away from drafts" },
+  { match: /armchair|accent chair|recliner|glider|rocking chair|fauteuil|chaise d.appoint|chaise berçante|inclinable/i, tip: "Leave about 2 feet of clearance in front of an armchair" },
   { match: /sofa|loveseat|canap|couch|causeuse|sectional/i, tip: "Measure your doors and stairs before choosing a sofa" },
   { match: /coffee table|table basse|table à café/i, tip: "A coffee table is ideally two-thirds the length of the sofa" },
   { match: /mirror|miroir|vanity|coiffeuse/i, tip: "A mirror facing a window bounces light around the room" },

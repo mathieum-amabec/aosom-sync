@@ -27,13 +27,14 @@ interface StudioVideo {
   qa_notes: string | null;
 }
 
-type Status = "new" | "scheduled" | "published" | "rejected" | "rerender";
+type Status = "new" | "scheduled" | "published" | "rejected" | "rerender" | "flagged";
 
 function statusOf(v: StudioVideo): Status {
   if (v.queue_status === "published") return "published";
   if (v.queue_id != null && (v.queue_status === "pending" || v.queue_status === "publishing")) return "scheduled";
   if (v.verdict === "bad") return "rejected";
   if (v.queue_id != null && v.queue_status === "draft") return "rerender";
+  if (v.qa_verdict === "fail" || v.qa_verdict === "review") return "flagged";
   return "new";
 }
 
@@ -43,6 +44,7 @@ const STATUS_LABEL: Record<Status, string> = {
   published: "Publié",
   rejected: "Rejeté",
   rerender: "À re-rendre",
+  flagged: "Écartée (QA)",
 };
 const STATUS_CLASS: Record<Status, string> = {
   new: "bg-blue-950/60 border-blue-800 text-blue-200",
@@ -50,6 +52,7 @@ const STATUS_CLASS: Record<Status, string> = {
   published: "bg-gray-800 border-gray-600 text-gray-200",
   rejected: "bg-red-950/60 border-red-800 text-red-200",
   rerender: "bg-amber-950/60 border-amber-800 text-amber-200",
+  flagged: "bg-gray-900 border-gray-700 text-gray-400",
 };
 const QA_CLASS = {
   pass: "bg-green-950/60 border-green-800 text-green-200",
@@ -226,7 +229,7 @@ export default function AmeubloStudioClient() {
   );
 
   const counts = useMemo(() => {
-    const c: Record<Status, number> = { new: 0, scheduled: 0, published: 0, rejected: 0, rerender: 0 };
+    const c: Record<Status, number> = { new: 0, scheduled: 0, published: 0, rejected: 0, rerender: 0, flagged: 0 };
     for (const v of videos) c[statusOf(v)]++;
     return c;
   }, [videos]);
