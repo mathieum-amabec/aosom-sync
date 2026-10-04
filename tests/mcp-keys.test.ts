@@ -55,3 +55,19 @@ describe("POST /api/mcp", () => {
     expect((await GET()).status).toBe(405);
   });
 });
+
+describe("POST /api/mcp/<key> (claude.ai / mobile connector)", () => {
+  it("authenticates by the key in the URL, rejects a malformed or unknown one", async () => {
+    const { POST: POSTkey } = await import("@/app/api/mcp/[key]/route");
+    const key = generateMcpKey();
+    const call = (k: string) => POSTkey(new Request(`http://x/api/mcp/${k}`, { method: "POST", body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }) }), { params: Promise.resolve({ key: k }) });
+    verify.mockReset().mockResolvedValue(true);
+    expect((await call(key)).status).toBe(200);
+    expect(verify).toHaveBeenCalledWith(hashMcpKey(key));
+    verify.mockClear();
+    expect((await call("nope")).status).toBe(401);
+    expect(verify).not.toHaveBeenCalled();
+    verify.mockResolvedValue(false);
+    expect((await call(key)).status).toBe(401);
+  });
+});

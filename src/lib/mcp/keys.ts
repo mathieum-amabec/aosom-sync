@@ -7,6 +7,9 @@ import crypto from "node:crypto";
 
 export const MCP_KEY_PREFIX = "amcp_";
 
+/** Shape of a well-formed key (also what a URL path segment must match). */
+export const MCP_KEY_RE = /^amcp_[A-Za-z0-9_-]{20,}$/;
+
 export function generateMcpKey(): string {
   return MCP_KEY_PREFIX + crypto.randomBytes(32).toString("base64url");
 }
