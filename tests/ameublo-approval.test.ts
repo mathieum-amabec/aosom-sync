@@ -8,6 +8,7 @@ const db = vi.hoisted(() => ({
   cancelPendingQueueItems: vi.fn(),
   setAmeubloQueueId: vi.fn(),
   getProduct: vi.fn(),
+  findAmeubloTwin: vi.fn(),
 }));
 const { SlotTaken } = vi.hoisted(() => ({ SlotTaken: class SlotTaken extends Error {} }));
 vi.mock("@/lib/database", () => ({ ...db, QueueSlotTakenError: SlotTaken }));
@@ -89,6 +90,67 @@ describe("approveAmeubloVideo", () => {
   it("lets the operator force past a QA fail, but not past a 'bad' verdict", async () => {
     expect(approvalBlocker(video({ qa_verdict: "fail" }) as never, true)).toBeNull();
     expect(approvalBlocker(video({ verdict: "bad" }) as never, true)).not.toBeNull();
+  });
+});
+
+describe("langue jumelle", () => {
+  it("approuver une version planifie aussi l’autre, chacune sur la grille de sa langue", async () => {
+    const vs: Record<number, ReturnType<typeof video>> = { 1: video({ id: 1 }), 2: video({ id: 2, lang: "en" }) };
+    db.getAmeubloTestVideo.mockImplementation(async (id: number) => vs[id]);
+    db.findAmeubloTwin.mockResolvedValue(vs[2]);
+    db.addToQueue.mockResolvedValueOnce(55).mockResolvedValueOnce(56);
+    const r = await approveAmeubloVideo(1);
+    expect(r).toMatchObject({ success: true, queueId: 55, twin: { success: true, id: 2, queueId: 56 } });
+    expect(db.addToQueue).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(db.addToQueue.mock.calls[0][0].payload).brand).toBe("ameublo");
+    expect(JSON.parse(db.addToQueue.mock.calls[1][0].payload).brand).toBe("furnish");
+    expect(db.setAmeubloQueueId).toHaveBeenCalledWith(2, 56);
+  });
+
+  it("un jumeau refusé ne bloque pas la vidéo demandée et la raison est rapportée", async () => {
+    const vs: Record<number, ReturnType<typeof video>> = { 1: video({ id: 1 }), 2: video({ id: 2, lang: "en", qa_verdict: "fail" }) };
+    db.getAmeubloTestVideo.mockImplementation(async (id: number) => vs[id]);
+    db.findAmeubloTwin.mockResolvedValue(vs[2]);
+    const r = await approveAmeubloVideo(1);
+    expect(r).toMatchObject({ success: true, id: 1, twin: { success: false, id: 2, status: 409 } });
+    expect(db.addToQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("en lot, un jumeau déjà planifié par son partenaire n’est pas refusé une 2e fois", async () => {
+    const vs: Record<number, ReturnType<typeof video>> = { 1: video({ id: 1 }), 2: video({ id: 2, lang: "en" }) };
+    db.getAmeubloTestVideo.mockImplementation(async (id: number) => vs[id]);
+    db.findAmeubloTwin.mockImplementation(async (v: { id: number }) => (v.id === 1 ? vs[2] : null));
+    const out = await bulkApproveAmeubloVideos([1, 2]);
+    expect(out.map((o) => o.success)).toEqual([true, true]);
+    expect(db.addToQueue).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Réaction grid", () => {
+  it("books a Réaction video on its own grid (11:00 FR / 19:00 EN Toronto) and reads only Réaction occupancy", async () => {
+    db.getAmeubloTestVideo.mockResolvedValue(video({ style: "reaction" }));
+    await approveAmeubloVideo(1);
+    expect(db.getOccupiedAmeubloSlots).toHaveBeenCalledWith("fr", "reaction");
+    expect(db.addToQueue.mock.calls[0][0].scheduledAt).toBe("2026-10-05 15:00:00");
+
+    db.addToQueue.mockClear();
+    db.getAmeubloTestVideo.mockResolvedValue(video({ style: "reaction", lang: "en" }));
+    await approveAmeubloVideo(1);
+    expect(db.addToQueue.mock.calls[0][0].scheduledAt).toBe("2026-10-05 23:00:00");
+  });
+
+  it("takes the next day when today's Réaction slot is taken (1 a day per page)", async () => {
+    db.getOccupiedAmeubloSlots.mockResolvedValue(["2026-10-05 15:00:00"]);
+    db.getAmeubloTestVideo.mockResolvedValue(video({ style: "reaction" }));
+    await approveAmeubloVideo(1);
+    expect(db.addToQueue.mock.calls[0][0].scheduledAt).toBe("2026-10-06 15:00:00");
+  });
+
+  it("leaves the other styles on the main grid and its own occupancy", async () => {
+    db.getAmeubloTestVideo.mockResolvedValue(video({ style: "vitrine" }));
+    await approveAmeubloVideo(1);
+    expect(db.getOccupiedAmeubloSlots).toHaveBeenCalledWith("fr", "main");
+    expect(["11:45:00", "16:15:00", "20:15:00", "00:15:00"]).toContain(db.addToQueue.mock.calls[0][0].scheduledAt.slice(11));
   });
 });
 

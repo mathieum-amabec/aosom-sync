@@ -32,6 +32,7 @@ import {
   DEFAULT_ASSEMBLY_SCHEDULE,
   DEFAULT_GUIDE_SCHEDULE,
   DEFAULT_AMEUBLO_SCHEDULE,
+  DEFAULT_REACTION_SCHEDULE,
 } from "@/lib/config";
 import { getOccupiedQueueSlots, type QueueContentType } from "@/lib/database";
 
@@ -235,6 +236,16 @@ export function parseAmeubloSchedule(rawJson: string | null | undefined): Public
     return normalizeScheduleWith(JSON.parse(rawJson), DEFAULT_AMEUBLO_SCHEDULE, AMEUBLO_MAX_PER_DAY);
   } catch {
     return clone(DEFAULT_AMEUBLO_SCHEDULE);
+  }
+}
+
+/** Parse the stored reaction_schedule JSON (Studio Ameublo "Réaction" videos); defaults on any error. */
+export function parseReactionSchedule(rawJson: string | null | undefined): PublicationSchedule {
+  if (!rawJson) return clone(DEFAULT_REACTION_SCHEDULE);
+  try {
+    return normalizeScheduleWith(JSON.parse(rawJson), DEFAULT_REACTION_SCHEDULE, AMEUBLO_MAX_PER_DAY);
+  } catch {
+    return clone(DEFAULT_REACTION_SCHEDULE);
   }
 }
 

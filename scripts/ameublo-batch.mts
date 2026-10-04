@@ -363,6 +363,9 @@ async function plan() {
       // 851-018: third-party English text on the sensor bin.
       const REACTION_EXCLUDE = new Set(["851-018"]);
       const ok = new Set(scan.filter((s) => s.verdict === "CONFORME" && !s.mentionne_aosom && !s.filigrane && !REACTION_EXCLUDE.has(s.sku)).map((s) => s.sku));
+      // CA/US clips are established-clean unboxings (never scanned); every video is still eyeballed before release.
+      const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/new-ugc-manifest.json"), "utf8")) as { sku: string; country: string }[];
+      for (const m of manifest) if ((m.country === "CA" || m.country === "US") && !REACTION_EXCLUDE.has(m.sku)) ok.add(m.sku);
       const clips = fs.readdirSync(path.join(ROOT, "src/ugc")).map((f) => f.replace(/\.mp4$/, "")).filter((s) => ok.has(s));
       const rows = (
         await turso.execute({

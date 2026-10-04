@@ -633,6 +633,17 @@ export const DEFAULT_GUIDE_SCHEDULE: PublicationSchedule = {
   max_per_day: 1,
 };
 
+// Studio Ameublo "Réaction" videos run on their OWN grid, apart from the 8-a-day mascot grid
+// below: one a day per page. Sorted times split by language like ameublo_schedule (1st = FR
+// Ameublo Direct, 2nd = EN Furnish Direct). Its hours must never equal an ameublo_schedule
+// hour: the queue's unique slot index is global per platform.
+export const DEFAULT_REACTION_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: (["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const).map((day) => ({ day, times: ["11:00", "19:00"] })),
+  timezone: "America/Toronto",
+  max_per_day: 2,
+};
+
 // Studio Ameublo mascot Reels (FR = Ameublo Direct, EN = Furnish Direct): 8 a day, every day.
 // Times are sorted: the 1st, 3rd, 5th and 7th belong to French videos, the 2nd, 4th, 6th and 8th
 // to English ones (see ameublo-approval.ts), so each page gets 4 a day at fixed, spread-out
@@ -769,6 +780,8 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   "assembly_schedule",
   // ameublo_schedule (PublicationSchedule shape) — Studio Ameublo mascot Reels, FR/EN interleaved.
   "ameublo_schedule",
+  // reaction_schedule (PublicationSchedule shape) — Studio Ameublo "Réaction" videos, 1/day/page, apart from ameublo_schedule.
+  "reaction_schedule",
   // guide_schedule (PublicationSchedule shape) — pSEO guide deferred-publish cadence.
   "guide_schedule",
 ]);
