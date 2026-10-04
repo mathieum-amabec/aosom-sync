@@ -2,7 +2,7 @@
  * "Ameublo se présente" — one informative intro video (who he is, what he does, where to find him)
  * for the pinned post of the Facebook page. Free: sharp + ffmpeg, no AI call.
  *
- *   node-x64 --env-file=../aosom-sync/.env.local tsx scripts/ameublo-intro.mts --out DIR [--lang fr|en] [--short] [--stills] [--upload]
+ *   node-x64 --env-file=../aosom-sync/.env.local tsx scripts/ameublo-intro.mts --out DIR [--lang fr|en] [--short|--tiny] [--stills] [--upload]
  *
  * --stills = layout check only (contact sheet, no video). SEQ_ASSETS_ROOT = the main clone (music).
  */
@@ -75,9 +75,13 @@ const T = {
   },
 }[LANG];
 
-const SHORT = flag("--short");
-// Full cut = 29 s; --short = punchy 14 s cut (same scenes, tighter beats).
-const TM = SHORT
+const TINY = flag("--tiny");
+const SHORT = flag("--short") || TINY;
+const SUF = TINY ? "-10s" : flag("--short") ? "-short" : "";
+// Full cut = 29 s; --short = punchy 14 s; --tiny = 10 s (same scenes, tighter beats).
+const TM = TINY
+  ? { dur: 10, b: 2.4, c: 6.4, cards: [2.6, 3.4, 4.2, 5.0], cardAnim: 0.25, hi: [0.2, 1.3], role: [1.3, 2.4], waveEnd: 1.3, lookFor: 0.5, btn: 0.8, bye: 8.8 }
+  : SHORT
   ? { dur: 14, b: 3.6, c: 9.6, cards: [3.9, 5.2, 6.5, 7.8], cardAnim: 0.3, hi: [0.3, 1.9], role: [2.0, 3.5], waveEnd: 2.0, lookFor: 0.8, btn: 1.3, bye: 12.6 }
   : { dur: 29, b: 7.5, c: 21.5, cards: [8.1, 11.3, 14.5, 17.7], cardAnim: 0.45, hi: [0.5, 3.5], role: [3.7, 7.2], waveEnd: 3.6, lookFor: 1.6, btn: 2.2, bye: 26.0 };
 const DURATION = TM.dur;
@@ -219,7 +223,7 @@ async function main() {
   const spec = { duration: DURATION, background: await background(), music: MUSIC, musicVolume: 0.5, layersAt };
   if (flag("--stills")) {
     const sharp = (await import("sharp")).default;
-    const times = SHORT ? [0.3, 1.2, 2.8, 4.6, 5.8, 7.0, 8.8, 10.8, 12.0, 13.5] : [0.3, 2.0, 5.0, 9.5, 12.5, 15.5, 20.0, 23.0, 25.0, 27.5];
+    const times = TINY ? [0.3, 0.9, 1.8, 2.9, 3.7, 4.5, 5.6, 7.0, 8.2, 9.5] : SHORT ? [0.3, 1.2, 2.8, 4.6, 5.8, 7.0, 8.8, 10.8, 12.0, 13.5] : [0.3, 2.0, 5.0, 9.5, 12.5, 15.5, 20.0, 23.0, 25.0, 27.5];
     const tiles: OverlayOptions[] = [];
     for (let i = 0; i < times.length; i++) {
       const bgFull = sharp(spec.background);
@@ -228,17 +232,17 @@ async function main() {
       const frame = await sharp(full).resize(324, 576).png().toBuffer();
       tiles.push({ input: frame, left: (i % 5) * 324, top: Math.floor(i / 5) * 576 });
     }
-    const sheet = path.join(OUT, `intro${SHORT ? "-short" : ""}-${LANG}-stills.jpg`);
+    const sheet = path.join(OUT, `intro${SUF}-${LANG}-stills.jpg`);
     await sharp({ create: { width: 324 * 5, height: 576 * 2, channels: 3, background: "#000" } }).composite(tiles).jpeg({ quality: 82 }).toFile(sheet);
     console.log("stills:", sheet);
     return;
   }
-  const out = path.join(OUT, `ameublo-presentation${SHORT ? "-short" : ""}-${LANG}.mp4`);
+  const out = path.join(OUT, `ameublo-presentation${SUF}-${LANG}.mp4`);
   await renderScene(spec, out, FFMPEG);
   console.log("video:", out, (fs.statSync(out).size / 1e6).toFixed(1), "MB");
   if (flag("--upload")) {
     const { put } = await import("@vercel/blob");
-    const blob = await put(`ameublo-intro/ameublo-presentation${SHORT ? "-short" : ""}-${LANG}.mp4`, fs.readFileSync(out), {
+    const blob = await put(`ameublo-intro/ameublo-presentation${SUF}-${LANG}.mp4`, fs.readFileSync(out), {
       access: "public", contentType: "video/mp4", addRandomSuffix: false, allowOverwrite: true,
     });
     console.log("url:", blob.url);
