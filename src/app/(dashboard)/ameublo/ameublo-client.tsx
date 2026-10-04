@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
 import { STYLE_LABEL, type AmeubloStyle } from "@/lib/ameublo-caption";
+import { markScheduled, markUnscheduled } from "@/lib/ameublo-studio-state";
 
 // Mirrors AmeubloTestVideo in src/lib/database.ts.
 interface StudioVideo {
@@ -113,6 +114,9 @@ export default function AmeubloStudioClient() {
   const [info, setInfo] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | "bulk" | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // Cards just approved/cancelled stay on screen under the current filter so the change is visible.
+  const [recent, setRecent] = useState<Set<number>>(new Set());
+  const busyRef = useRef(false);
   const [fStyle, setFStyle] = useState("");
   const [fLang, setFLang] = useState("");
   const [fSeries, setFSeries] = useState("");
@@ -173,16 +177,32 @@ export default function AmeubloStudioClient() {
   };
 
   const approve = async (v: StudioVideo, force = false): Promise<void> => {
+    if (busyRef.current && !force) return;
+    busyRef.current = true;
     setBusy(v.id);
     setError(null);
     setInfo(null);
-    const r = await post({ action: "approve", id: v.id, force });
-    if (r.ok) setInfo(`Vidéo ${v.id} planifiée : ${fmtWhen(r.j.scheduledAt)}.`);
-    else if (v.qa_verdict === "fail" && !force && window.confirm(`${r.j.error}\n\nForcer l'approbation ?`)) {
+    try {
+      const r = await post({ action: "approve", id: v.id, force });
+      if (r.ok) {
+        setVideos((vs) => markScheduled(vs, v.id, Number(r.j.queueId), String(r.j.scheduledAt)));
+        setRecent((s) => new Set(s).add(v.id));
+        setSelected((s) => {
+          const n = new Set(s);
+          n.delete(v.id);
+          return n;
+        });
+        setInfo(`✓ Vidéo ${v.id} approuvée et planifiée : ${fmtWhen(r.j.scheduledAt)}.`);
+      } else if (v.qa_verdict === "fail" && !force && window.confirm(`${r.j.error}\n\nForcer l'approbation ?`)) {
+        busyRef.current = false;
+        return await approve(v, true);
+      } else setError(r.j.error || `Échec (HTTP ${r.status})`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      busyRef.current = false;
       setBusy(null);
-      return approve(v, true);
-    } else setError(r.j.error || `Échec (HTTP ${r.status})`);
-    setBusy(null);
+    }
     await load();
   };
 
@@ -191,8 +211,11 @@ export default function AmeubloStudioClient() {
     setError(null);
     setInfo(null);
     const r = await post({ action: "cancel", id: v.id });
-    if (r.ok) setInfo(`Vidéo ${v.id} retirée de l'horaire.`);
-    else setError(r.j.error || `Échec (HTTP ${r.status})`);
+    if (r.ok) {
+      setVideos((vs) => markUnscheduled(vs, v.id));
+      setRecent((s) => new Set(s).add(v.id));
+      setInfo(`✓ Vidéo ${v.id} retirée de l'horaire.`);
+    } else setError(r.j.error || `Échec (HTTP ${r.status})`);
     setBusy(null);
     await load();
   };
@@ -223,9 +246,9 @@ export default function AmeubloStudioClient() {
           (!fLang || v.lang === fLang) &&
           (!fSeries || v.series === fSeries) &&
           (!fCampaign || v.campaign === fCampaign) &&
-          (!fStatus || statusOf(v) === fStatus),
+          (!fStatus || statusOf(v) === fStatus || recent.has(v.id)),
       ),
-    [videos, fStyle, fLang, fSeries, fCampaign, fStatus],
+    [videos, fStyle, fLang, fSeries, fCampaign, fStatus, recent],
   );
 
   const counts = useMemo(() => {
@@ -325,8 +348,12 @@ export default function AmeubloStudioClient() {
         </div>
       </div>
 
-      {error && <div className="rounded border border-red-800 bg-red-950/40 p-3 text-sm text-red-300">{error}</div>}
-      {info && <div className="rounded border border-green-800 bg-green-950/40 p-3 text-sm text-green-300">{info}</div>}
+      {(error || info) && (
+        <div className="sticky top-2 z-20 space-y-2" role="status" aria-live="polite">
+          {error && <div className="rounded border border-red-800 bg-red-950 p-3 text-sm text-red-300 shadow-lg">{error}</div>}
+          {info && <div className="rounded border border-green-800 bg-green-950 p-3 text-sm text-green-300 shadow-lg">{info}</div>}
+        </div>
+      )}
       {loading && <div className="text-gray-400 text-sm">Chargement…</div>}
       {!loading && shown.length === 0 && !error && (
         <div className="rounded border border-gray-800 bg-gray-900 p-6 text-gray-400 text-sm">
@@ -395,7 +422,7 @@ export default function AmeubloStudioClient() {
                     disabled={busy !== null || !v.lang || !v.style || v.verdict === "bad"}
                     className="flex-1 rounded bg-green-800 px-2 py-1 text-sm text-white disabled:opacity-40"
                   >
-                    {busy === v.id ? "…" : "Approuver et planifier"}
+                    {busy === v.id ? "Planification…" : "Approuver et planifier"}
                   </button>
                 ) : st === "scheduled" ? (
                   <button
@@ -403,7 +430,7 @@ export default function AmeubloStudioClient() {
                     disabled={busy !== null}
                     className="flex-1 rounded border border-gray-600 px-2 py-1 text-sm text-gray-200 hover:bg-gray-800 disabled:opacity-40"
                   >
-                    {busy === v.id ? "…" : "Retirer de l’horaire"}
+                    {busy === v.id ? "Retrait…" : "Retirer de l’horaire"}
                   </button>
                 ) : null}
                 {!locked && (

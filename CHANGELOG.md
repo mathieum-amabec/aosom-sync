@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.4] - 2026-10-04
+
+**Studio Ameublo: clear feedback after "Approuver et planifier".** Nothing showed that the click had worked and the button stayed clickable. The success banner sat at the top of the page (out of view while scrolling the grid), the busy lock was released before the list reload finished (so the card stayed a clickable "Nouveau" during the reload), and the card then simply disappeared from the default "Nouveau" filter.
+
+### Fixed
+
+- The card switches immediately to "Planifié · date" with the "Retirer de l'horaire" button, and stays visible under the current filter until the filters change.
+- The confirmation/error banner is sticky at the top of the viewport.
+- Button reads "Planification…" while busy; a second click is ignored (ref guard) instead of racing the first.
+- Same treatment for "Retirer de l'horaire".
+
 ## [0.5.107.3] - 2026-10-04
 
 **Studio Ameublo: generator quality pass.** A QA review of the v2 series flagged 63 of 119 videos (ambiguous title, wrong room, people in a photo, non-comparable pairs). The generator now refuses those cases at planning time, and the flagged rows get their own "Écartée (QA)" status instead of sitting in the default view.
