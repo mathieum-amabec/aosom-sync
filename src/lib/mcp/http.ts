@@ -3,6 +3,10 @@ import { ensureSchema, verifyMcpKey, verifyOAuthAccess } from "@/lib/database";
 import { hashMcpKey, MCP_KEY_RE } from "@/lib/mcp/keys";
 import { ACCESS_PREFIX, originOf } from "@/lib/mcp/oauth";
 import { handleMessage } from "@/lib/mcp/protocol";
+import { parseScopes, type Scope } from "@/lib/mcp/scopes";
+import { TOOLS } from "@/lib/mcp/tools";
+import { IMPORT_TOOLS } from "@/lib/mcp/import-tools";
+import { SOCIAL_TOOLS } from "@/lib/mcp/social-tools";
 
 const MAX_BODY_BYTES = 100_000;
 
@@ -15,18 +19,20 @@ const unauthorized = (request: Request) =>
 
 const ACCESS_TOKEN_RE = new RegExp(`^${ACCESS_PREFIX}[A-Za-z0-9_-]{20,}$`);
 
-/** Bearer credential → is it a live dashboard key (amcp_) or OAuth access token (amcpa_)? */
-async function authenticate(token: string | null): Promise<boolean> {
-  if (!token) return false;
-  if (ACCESS_TOKEN_RE.test(token)) return verifyOAuthAccess(hashMcpKey(token));
-  if (MCP_KEY_RE.test(token)) return verifyMcpKey(hashMcpKey(token));
-  return false;
+/** Bearer credential (dashboard key amcp_ or OAuth access token amcpa_) → its permissions, or null. */
+async function authenticate(token: string | null): Promise<Set<Scope> | null> {
+  if (!token) return null;
+  let scope: string | null = null;
+  if (ACCESS_TOKEN_RE.test(token)) scope = await verifyOAuthAccess(hashMcpKey(token));
+  else if (MCP_KEY_RE.test(token)) scope = await verifyMcpKey(hashMcpKey(token));
+  return scope === null ? null : parseScopes(scope);
 }
 
 /** POST /api/mcp: Bearer header = OAuth access token (claude.ai / mobile) or dashboard key (Desktop bridge). */
 export async function handleMcpHttp(request: Request, token: string | null): Promise<Response> {
   try {
-    if (!(await authenticate(token))) return unauthorized(request);
+    const scopes = await authenticate(token);
+    if (!scopes) return unauthorized(request);
     const text = await request.text();
     if (text.length > MAX_BODY_BYTES) return NextResponse.json({ error: "Payload too large" }, { status: 413 });
     let msg: unknown;
@@ -36,7 +42,7 @@ export async function handleMcpHttp(request: Request, token: string | null): Pro
     if (!msg || typeof msg !== "object" || Array.isArray(msg)) {
       return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } }, { status: 400 });
     }
-    const res = await handleMessage(await ensureSchema(), msg as never);
+    const res = await handleMessage(await ensureSchema(), msg as never, { scopes }, [...TOOLS, ...IMPORT_TOOLS, ...SOCIAL_TOOLS]);
     return res ? NextResponse.json(res) : new NextResponse(null, { status: 202 });
   } catch (err) {
     console.error("[API] /api/mcp failed:", err instanceof Error ? err.message : "error");

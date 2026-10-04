@@ -41,7 +41,7 @@ async function main() {
       return;
     }
     pending++;
-    handleMessage(db as never, msg)
+    handleMessage(db as never, msg, { scopes: new Set(["read", "analytics"] as const) })
       .then((res) => { if (res) send(res); })
       .catch((e) => send({ jsonrpc: "2.0", id: msg?.id ?? null, error: { code: -32603, message: String(e?.message ?? e) } }))
       .finally(() => { pending--; maybeExit(); });

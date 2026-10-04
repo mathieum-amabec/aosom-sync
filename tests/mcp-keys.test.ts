@@ -35,19 +35,19 @@ describe("POST /api/mcp", () => {
     expect(verify).not.toHaveBeenCalled();
   });
   it("401 for an unknown / revoked key", async () => {
-    verify.mockResolvedValue(false);
+    verify.mockResolvedValue(null);
     expect((await POST(req({ id: 1, method: "ping" }))).status).toBe(401);
     expect(verify).toHaveBeenCalledWith(hashMcpKey(key));
   });
   it("answers JSON-RPC for a valid key and 202 for notifications", async () => {
-    verify.mockResolvedValue(true);
+    verify.mockResolvedValue("read");
     const r = await POST(req({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
     expect(r.status).toBe(200);
     expect((await r.json()).result.tools.length).toBeGreaterThan(0);
     expect((await POST(req({ jsonrpc: "2.0", method: "notifications/initialized" }))).status).toBe(202);
   });
   it("400 on garbage and 413 on an oversized body", async () => {
-    verify.mockResolvedValue(true);
+    verify.mockResolvedValue("read");
     expect((await POST(req("not json"))).status).toBe(400);
     expect((await POST(req("x".repeat(100_001)))).status).toBe(413);
   });
