@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 interface McpKey { id: number; name: string; key_hint: string; scope: string; created_at: number; last_used_at: number | null; revoked_at: number | null }
 interface McpGrant { id: number; client_name: string; scope: string; created_at: number; last_used_at: number | null }
 
-const SCOPE_FR: Record<string, string> = { read: "Lecture", analytics: "Analytics", import: "Import" };
+const SCOPE_FR: Record<string, string> = { read: "Lecture", analytics: "Analytics", import: "Import", social: "Publications" };
 const scopeLabel = (scope: string) => scope.split(" ").map((x) => SCOPE_FR[x] ?? x).join(" · ");
 const fmt = (t: number | null) => (t ? new Date(t * 1000).toLocaleString("fr-CA") : "jamais");
 
@@ -21,6 +21,7 @@ export default function McpKeysTab() {
   const [name, setName] = useState("");
   const [withAnalytics, setWithAnalytics] = useState(true);
   const [withImport, setWithImport] = useState(false);
+  const [withSocial, setWithSocial] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fresh, setFresh] = useState<{ name: string; key: string } | null>(null);
@@ -48,7 +49,7 @@ export default function McpKeysTab() {
     try {
       const r = await fetch("/api/settings/mcp-keys", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, scopes: ["read", ...(withAnalytics ? ["analytics"] : []), ...(withImport ? ["import"] : [])] }),
+        body: JSON.stringify({ name, scopes: ["read", ...(withAnalytics ? ["analytics"] : []), ...(withImport ? ["import"] : []), ...(withSocial ? ["social"] : [])] }),
       });
       const j = await r.json();
       if (j.success) { setFresh({ name: j.data.name, key: j.data.key }); setName(""); await load(); }
@@ -98,6 +99,7 @@ export default function McpKeysTab() {
         <div className="mt-3 space-y-2 text-sm text-gray-300">
           <label className="block"><input type="checkbox" checked disabled /> <b>Lecture</b> <span className="text-gray-500">— chercher des produits (importés ou non), voir l&apos;inventaire</span></label>
           <label className="block"><input type="checkbox" checked={withAnalytics} onChange={(e) => setWithAnalytics(e.target.checked)} /> <b>Analytics</b> <span className="text-gray-500">— meilleurs vendeurs, baisses de prix, stock faible</span></label>
+          <label className="block"><input type="checkbox" checked={withSocial} onChange={(e) => setWithSocial(e.target.checked)} /> <b>Publications</b> <span className="text-gray-500">— créer des brouillons de posts (tu les approuves toi-même ici)</span></label>
           <label className="block"><input type="checkbox" checked={withImport} onChange={(e) => setWithImport(e.target.checked)} /> <b>Import</b> <span className="text-gray-500">— créer des produits (en ligne tout de suite, 5 à la fois, avec confirmation)</span></label>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 mt-4">

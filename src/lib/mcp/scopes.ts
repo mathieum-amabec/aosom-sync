@@ -3,9 +3,9 @@
  * ticked by the admin on the OAuth consent page (claude.ai / mobile) or when creating a Desktop key.
  * Stored as a space-separated string on the grant / key.
  */
-export type Scope = "read" | "analytics" | "import";
+export type Scope = "read" | "analytics" | "import" | "social";
 
-export const ALL_SCOPES: readonly Scope[] = ["read", "analytics", "import"];
+export const ALL_SCOPES: readonly Scope[] = ["read", "analytics", "import", "social"];
 
 export function parseScopes(raw: string | null | undefined): Set<Scope> {
   const out = new Set<Scope>(["read"]);
@@ -22,4 +22,5 @@ export const SCOPE_LABEL: Record<Scope, string> = {
   read: "Lecture",
   analytics: "Analytics",
   import: "Import",
+  social: "Publications",
 };

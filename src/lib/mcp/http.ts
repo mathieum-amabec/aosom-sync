@@ -6,6 +6,7 @@ import { handleMessage } from "@/lib/mcp/protocol";
 import { parseScopes, type Scope } from "@/lib/mcp/scopes";
 import { TOOLS } from "@/lib/mcp/tools";
 import { IMPORT_TOOLS } from "@/lib/mcp/import-tools";
+import { SOCIAL_TOOLS } from "@/lib/mcp/social-tools";
 
 const MAX_BODY_BYTES = 100_000;
 
@@ -41,7 +42,7 @@ export async function handleMcpHttp(request: Request, token: string | null): Pro
     if (!msg || typeof msg !== "object" || Array.isArray(msg)) {
       return NextResponse.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Invalid request" } }, { status: 400 });
     }
-    const res = await handleMessage(await ensureSchema(), msg as never, { scopes }, [...TOOLS, ...IMPORT_TOOLS]);
+    const res = await handleMessage(await ensureSchema(), msg as never, { scopes }, [...TOOLS, ...IMPORT_TOOLS, ...SOCIAL_TOOLS]);
     return res ? NextResponse.json(res) : new NextResponse(null, { status: 202 });
   } catch (err) {
     console.error("[API] /api/mcp failed:", err instanceof Error ? err.message : "error");
