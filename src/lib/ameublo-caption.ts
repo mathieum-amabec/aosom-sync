@@ -39,6 +39,8 @@ export interface CaptionInput {
   room?: string;
   /** Top 3 price ceiling. */
   cap?: number;
+  /** Reaction made from product-promo footage: nobody reacts on screen, so the hook can't claim they did. */
+  promo?: boolean;
   /** Rotates the wording so a series doesn't read identically. */
   variant?: number;
 }
@@ -63,8 +65,12 @@ export function ameubloCaption(i: CaptionInput): string {
     case "reaction":
       lines.push(
         lang === "fr"
-          ? pick(["Ils l’ont adoré. Et toi ?", "Regarde leur réaction.", "Le genre de meuble qui fait dire « wow »."], v)
-          : pick(["They loved it. Will you?", "Look at that reaction.", "The kind of piece that makes you say “wow”."], v),
+          ? i.promo
+            ? pick(["Regarde-moi ça. Tu oserais ?", "Elle va faire jaser sur ton perron.", "Le genre de pièce qui fait dire « wow »."], v)
+            : pick(["Ils l’ont adoré. Et toi ?", "Regarde leur réaction.", "Le genre de pièce qui fait dire « wow »."], v)
+          : i.promo
+            ? pick(["Look at this. Would you dare?", "This one will get the porch talking.", "The kind of piece that makes you say “wow”."], v)
+            : pick(["They loved it. Will you?", "Look at that reaction.", "The kind of piece that makes you say “wow”."], v),
         `${t0} — ${priceFmt(p0, lang)}`,
         ship,
         url,
