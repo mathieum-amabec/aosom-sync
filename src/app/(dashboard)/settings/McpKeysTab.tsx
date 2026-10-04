@@ -14,6 +14,7 @@ export default function McpKeysTab() {
   const [error, setError] = useState<string | null>(null);
   const [fresh, setFresh] = useState<{ name: string; key: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -32,7 +33,7 @@ export default function McpKeysTab() {
   }, []);
 
   const create = async () => {
-    setBusy(true); setError(null); setCopied(false);
+    setBusy(true); setError(null); setCopied(false); setCopiedUrl(false);
     try {
       const r = await fetch("/api/settings/mcp-keys", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) });
       const j = await r.json();
@@ -78,6 +79,10 @@ export default function McpKeysTab() {
           <code className="block break-all bg-gray-950 border border-gray-700 rounded-lg p-3 text-sm">{fresh.key}</code>
           <button onClick={async () => { await navigator.clipboard.writeText(fresh.key); setCopied(true); }}
             className="px-3 py-1.5 bg-gray-800 text-sm rounded-lg hover:bg-gray-700">{copied ? "Copiée ✓" : "Copier la clé"}</button>
+          <p className="text-xs text-gray-400">Pour <strong>claude.ai et l&apos;app mobile</strong> : Réglages → Connecteurs → Ajouter un connecteur personnalisé, puis colle cette adresse (elle contient la clé : traite-la comme un mot de passe, révoque-la si elle fuite).</p>
+          <code className="block break-all bg-gray-950 border border-gray-700 rounded-lg p-3 text-xs">{`${origin}/api/mcp/${fresh.key}`}</code>
+          <button onClick={async () => { await navigator.clipboard.writeText(`${origin}/api/mcp/${fresh.key}`); setCopiedUrl(true); }}
+            className="px-3 py-1.5 bg-gray-800 text-sm rounded-lg hover:bg-gray-700">{copiedUrl ? "Adresse copiée ✓" : "Copier l'adresse"}</button>
           <p className="text-xs text-gray-400">Configuration Claude Desktop (fichier <code>claude_desktop_config.json</code>, section <code>mcpServers</code>) :</p>
           <pre className="bg-gray-950 border border-gray-700 rounded-lg p-3 text-xs overflow-x-auto">{snippet}</pre>
           <p className="text-xs text-gray-500">Le fichier <code>scripts/mcp-remote.mjs</code> du dépôt est le pont : copie-le où tu veux et mets son chemin dans <code>args</code>.</p>
