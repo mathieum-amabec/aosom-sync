@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import PublicationScheduleTab from "./PublicationScheduleTab";
 import SlideshowSettingsTab from "./SlideshowSettingsTab";
 import CollectionsTab from "./CollectionsTab";
+import McpKeysTab from "./McpKeysTab";
 import { ErrorBanner } from "@/components/error-banner";
 import {
   describeApiFailure,
@@ -225,7 +226,7 @@ export default function SettingsPage() {
   const [testResults, setTestResults] = useState<Record<string, string>>({});
   const [testingPrompt, setTestingPrompt] = useState<string | null>(null);
   const [promptPreview, setPromptPreview] = useState<Record<string, string>>({});
-  const [tab, setTab] = useState<"general" | "publication" | "video" | "collections">("general");
+  const [tab, setTab] = useState<"general" | "publication" | "video" | "collections" | "mcp">("general");
 
   useEffect(() => {
     fetch("/api/settings")
@@ -390,6 +391,7 @@ export default function SettingsPage() {
           { key: "publication", label: "Publication" },
           { key: "video", label: "Contenu vidéo" },
           { key: "collections", label: "Collections" },
+          { key: "mcp", label: "MCP" },
         ] as const).map((t) => (
           <button
             key={t.key}
@@ -410,6 +412,8 @@ export default function SettingsPage() {
       {tab === "video" && <SlideshowSettingsTab />}
 
       {tab === "collections" && <CollectionsTab />}
+
+      {tab === "mcp" && <McpKeysTab />}
 
       <div className={`space-y-6 ${tab === "general" ? "" : "hidden"}`}>
         {SECTIONS.map((section) => (
