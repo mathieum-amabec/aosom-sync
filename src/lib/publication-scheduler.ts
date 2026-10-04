@@ -97,7 +97,7 @@ function normalizeSlot(raw: unknown): PublicationSlot | null {
 }
 
 /** Coerce arbitrary JSON into a valid PublicationSchedule, falling back per-field to `d`. */
-function normalizeScheduleWith(raw: unknown, d: PublicationSchedule): PublicationSchedule {
+function normalizeScheduleWith(raw: unknown, d: PublicationSchedule, maxPerDayCap = 5): PublicationSchedule {
   if (!raw || typeof raw !== "object") return clone(d);
   const r = raw as Record<string, unknown>;
   const slots = Array.isArray(r.slots)
@@ -107,7 +107,7 @@ function normalizeScheduleWith(raw: unknown, d: PublicationSchedule): Publicatio
     enabled: typeof r.enabled === "boolean" ? r.enabled : d.enabled,
     slots,
     timezone: isValidTimeZone(r.timezone) ? r.timezone : d.timezone,
-    max_per_day: clampInt(r.max_per_day, 1, 5, d.max_per_day),
+    max_per_day: clampInt(r.max_per_day, 1, maxPerDayCap, d.max_per_day),
   };
 }
 
@@ -225,11 +225,14 @@ export function parseContentBatchSchedule(
   }
 }
 
+/** Studio Reels run up to 6 a day per page (FR + EN share the cap), well above the social-post limit of 5. */
+const AMEUBLO_MAX_PER_DAY = 12;
+
 /** Parse the stored ameublo_schedule JSON (Studio Ameublo Reels); defaults on any error. */
 export function parseAmeubloSchedule(rawJson: string | null | undefined): PublicationSchedule {
   if (!rawJson) return clone(DEFAULT_AMEUBLO_SCHEDULE);
   try {
-    return normalizeScheduleWith(JSON.parse(rawJson), DEFAULT_AMEUBLO_SCHEDULE);
+    return normalizeScheduleWith(JSON.parse(rawJson), DEFAULT_AMEUBLO_SCHEDULE, AMEUBLO_MAX_PER_DAY);
   } catch {
     return clone(DEFAULT_AMEUBLO_SCHEDULE);
   }

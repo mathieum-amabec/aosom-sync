@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.2] - 2026-10-04
+
+**Studio Ameublo: 4 Reels a day per page (was 2).** The mascot content is free to render, so the grid is widened. Nothing is published until the operator approves videos.
+
+### Changed
+
+- `DEFAULT_AMEUBLO_SCHEDULE`: 8 slots a day (07:45, 09:45, 12:15, 14:30, 16:15, 18:30, 20:15, 21:45), cap 8. French (Ameublo Direct) takes the 1st/3rd/5th/7th, English (Furnish Direct) the 2nd/4th/6th/8th, so each page gets 4 a day on distinct hourly publisher runs. No `ameublo_schedule` setting is stored in prod, so the default applies on deploy.
+- `parseAmeubloSchedule` accepts a `max_per_day` up to 12 (the shared normalizer capped every grid at 5).
+
 ## [0.5.107.1] - 2026-10-04
 
 **Studio Ameublo: remove the music picker and open on the latest series.** The music is chosen and used, so the "Choisis tes musiques" list is dead weight.

@@ -633,15 +633,15 @@ export const DEFAULT_GUIDE_SCHEDULE: PublicationSchedule = {
   max_per_day: 1,
 };
 
-// Studio Ameublo mascot Reels (FR = Ameublo Direct, EN = Furnish Direct): 4 a day, every day.
-// Times are sorted: the 1st and 3rd belong to French videos, the 2nd and 4th to English ones
-// (see ameublo-approval.ts), so each page gets 2 a day at fixed, spread-out hours that avoid
-// the assembly grid (17:00), the slideshow grid (10:00) and the social posts (~20:00 / 21:25).
+// Studio Ameublo mascot Reels (FR = Ameublo Direct, EN = Furnish Direct): 8 a day, every day.
+// Times are sorted: the 1st, 3rd, 5th and 7th belong to French videos, the 2nd, 4th, 6th and 8th
+// to English ones (see ameublo-approval.ts), so each page gets 4 a day at fixed, spread-out
+// hours, each on its own hourly publisher run (:00 cron).
 export const DEFAULT_AMEUBLO_SCHEDULE: PublicationSchedule = {
   enabled: true,
-  slots: [{ day: "mon", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "tue", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "wed", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "thu", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "fri", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "sat", times: ["07:45", "12:15", "18:30", "20:45"] }, { day: "sun", times: ["07:45", "12:15", "18:30", "20:45"] }],
+  slots: [{ day: "mon", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "tue", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "wed", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "thu", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "fri", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "sat", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "sun", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }],
   timezone: "America/Toronto",
-  max_per_day: 4,
+  max_per_day: 8,
 };
 
 export const DEFAULT_ASSEMBLY_SCHEDULE: PublicationSchedule = {
