@@ -37,7 +37,7 @@
     },
     {
       "path": "/api/cron/publisher",
-      "schedule": "0 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/price-reconcile",

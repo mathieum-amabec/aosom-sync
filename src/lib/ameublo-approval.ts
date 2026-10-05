@@ -55,6 +55,46 @@ export async function approveAmeubloVideo(id: number, opts: { force?: boolean } 
   return res;
 }
 
+/**
+ * Approve ONE video on an explicit slot (the "Plan de la semaine" path). No twin, no slot search:
+ * the caller already chose `scheduledAt` (SQLite UTC) from the grid. Same guards as `approveOne`
+ * (blockers, price check); a taken slot is reported, never silently shifted.
+ */
+export async function approveAmeubloVideoAt(id: number, scheduledAt: string, opts: { force?: boolean } = {}): Promise<AmeubloApproveResult> {
+  const v = await getAmeubloTestVideo(id);
+  if (!v) return { success: false, id, error: "Vidéo introuvable.", status: 404 };
+  const blocked = approvalBlocker(v, opts.force === true);
+  if (blocked) return { success: false, id, error: blocked, status: 409 };
+  const lang = v.lang as AmeubloLang;
+  const metadata: Record<string, unknown> = {
+    source: "ameublo_studio",
+    keepCaption: true,
+    ameubloVideoId: v.id,
+    style: v.style,
+    lang,
+    series: v.series,
+    campaign: v.campaign,
+    skus: v.skus,
+    renderedPrices: v.prices,
+  };
+  const contentId = `ameublo:${v.id}`;
+  const price = await checkSequentialAdPrice({ contentId, metadata });
+  if (!price.ok) return { success: false, id, error: price.reason!, status: 409 };
+  const payload = JSON.stringify({
+    caption: stripSupplierBrands(v.caption!),
+    brand: lang === "en" ? "furnish" : "ameublo",
+    reelsVideoUrl: v.video_url,
+  });
+  try {
+    const queueId = await addToQueue({ contentType: "sequential_ad", contentId, platform: "both", payload, scheduledAt, status: "pending", metadata });
+    await setAmeubloQueueId(v.id, queueId);
+    return { success: true, id, queueId, scheduledAt };
+  } catch (err) {
+    if (err instanceof QueueSlotTakenError) return { success: false, id, error: "Créneau déjà pris.", status: 409 };
+    throw err;
+  }
+}
+
 async function approveOne(id: number, opts: { force?: boolean }): Promise<AmeubloApproveResult> {
   const v = await getAmeubloTestVideo(id);
   if (!v) return { success: false, id, error: "Vidéo introuvable.", status: 404 };

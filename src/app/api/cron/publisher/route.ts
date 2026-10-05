@@ -7,7 +7,8 @@ import { drainPublisherQueue } from "@/lib/queue-publisher";
 /**
  * GET /api/cron/publisher
  *
- * Vercel cron (hourly) — Bearer CRON_SECRET required. Drains up to 5 due items from
+ * Vercel cron (every 5 minutes, so a slot goes out within 5 min of its time) — Bearer CRON_SECRET
+ * required. Drains up to 5 due items from
  * publication_queue, publishing each to its platform (facebook / instagram / both /
  * shopify_blog) with an atomic claim guarding against double-publish across overlapping
  * cron instances. Records the run in `cron_runs` via trackCron.

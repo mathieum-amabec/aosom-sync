@@ -5,6 +5,7 @@ import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
 import { STYLE_LABEL, type AmeubloStyle } from "@/lib/ameublo-caption";
 import { markScheduled, markUnscheduled } from "@/lib/ameublo-studio-state";
 import { CATEGORY_LABEL, CATEGORY_ORDER, type CategoryKey } from "@/lib/ameublo-categories";
+import WeekPlanPanel from "./week-plan-panel";
 
 // Mirrors AmeubloTestVideo in src/lib/database.ts.
 interface StudioVideo {
@@ -126,6 +127,7 @@ export default function AmeubloStudioClient() {
   const [fLang, setFLang] = useState("");
   const [fSeries, setFSeries] = useState("");
   const [fCampaign, setFCampaign] = useState("");
+  const [view, setView] = useState<"videos" | "plan">("videos");
   const [fStatus, setFStatus] = useState("new");
   const [fCategory, setFCategory] = useState("");
   const [fSub, setFSub] = useState("");
@@ -335,10 +337,26 @@ export default function AmeubloStudioClient() {
           publication se fait ensuite automatiquement (FB + IG).
         </p>
         <p className="text-xs text-gray-500 mt-1">
-          Horaire : 4 Reels par jour (heure de Montréal) : 07 h 45 FR · 12 h 15 EN · 18 h 30 FR · 20 h 45 EN.
+          Horaire (heure de Toronto) : 3 Reels par page et par jour — 07 h 45 · 12 h 15 · 19 h 45 en FR (EN : +5 min), plus 06 h 00 réservé au saisonnier.
         </p>
       </div>
 
+      <div className="flex gap-2 text-sm">
+        {([["videos", "Vidéos"], ["plan", "Plan de la semaine"]] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setView(key)}
+            className={`rounded border border-gray-700 px-3 py-1.5 ${view === key ? "bg-gray-800 text-white ring-1 ring-white/40" : "text-gray-300 hover:bg-gray-800"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === "plan" ? (
+        <WeekPlanPanel onApproved={load} />
+      ) : (
+      <>
       <div className="flex flex-wrap gap-2 text-xs">
         {(Object.keys(STATUS_LABEL) as Status[]).map((s) => (
           <button
@@ -534,6 +552,8 @@ export default function AmeubloStudioClient() {
           );
         })}
       </div>
+      </>
+      )}
     </div>
   );
 }
