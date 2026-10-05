@@ -4,6 +4,7 @@ import {
   localClock,
   previousDay,
   renderMorningReport,
+  reelsRunwayDays,
   type MorningReportSources,
 } from "@/lib/morning-report";
 import type { GuardStatus } from "@/lib/guard-status";
@@ -25,6 +26,10 @@ function sources(over: Partial<MorningReportSources> = {}): MorningReportSources
     meta: vi.fn(async () => [campaign]),
     guides: vi.fn(async () => ({ pending: 5, ready: 3, attention: 2, attentionTitles: ["Guide A", "Guide B"] })),
     videos: vi.fn(async () => ({ pendingApproval: 4, scheduledSoon: 6, horizonDays: 3 })),
+    reelsStock: vi.fn(async () => ({
+      fr: { scheduled: 24, lastScheduledAt: "2026-10-05 23:45:00", ready: 30 },
+      en: { scheduled: 24, lastScheduledAt: "2026-10-05 23:50:00", ready: 28 },
+    })),
     alerts: vi.fn(async () => [
       { label: "Prix sous le plancher", count: 1 },
       { label: "Images à revoir", count: 0 },
@@ -199,5 +204,57 @@ describe("renderMorningReport — guards section", () => {
     expect(r.missingSections).toContain("Garde-fous");
     expect(r.text).toContain("⚠ Section indisponible (Turso down)");
     expect(r.text).toContain("5 guides en attente");
+  });
+});
+
+describe("reelsRunwayDays", () => {
+  it("counts the days of approved Reels from today to the last scheduled day, inclusive (Montreal dates)", () => {
+    expect(reelsRunwayDays("2026-10-16 23:45:00", "2026-10-05")).toBe(12); // Oct 5 → Oct 16
+    expect(reelsRunwayDays("2026-10-05 23:45:00", "2026-10-05")).toBe(1); // only today left
+    expect(reelsRunwayDays("2026-10-06 02:00:00", "2026-10-05")).toBe(1); // 22:00 Montreal on the 5th, not the 6th
+  });
+  it("is 0 when nothing is scheduled or everything is already past", () => {
+    expect(reelsRunwayDays(null, "2026-10-05")).toBe(0);
+    expect(reelsRunwayDays("2026-10-01 12:00:00", "2026-10-05")).toBe(0);
+  });
+});
+
+describe("Studio Reels reserve section", () => {
+  const NOW = new Date("2026-10-05T10:00:00Z"); // 06:00 Montreal, Oct 5
+
+  it("raises the alert and flags the subject when a page has under 7 days of approved Reels", async () => {
+    const r = renderMorningReport(await collectMorningReport(sources(), NOW)); // both pages: only today left
+    expect(r.text).toContain("RÉSERVE DE REELS (STUDIO) — BASSE");
+    expect(r.text).toContain("🔴 Ameublo (FR) : 1 jour de vidéos planifiées (24 vidéos) · 30 prêtes à approuver.");
+    expect(r.text).toContain("Plan de la semaine");
+    expect(r.subject).toContain("🟠 réserve de Reels basse");
+    expect(r.html).toContain("color:#b91c1c");
+  });
+
+  it("stays quiet when both pages have a week or more ahead", async () => {
+    const r = renderMorningReport(
+      await collectMorningReport(
+        sources({ reelsStock: vi.fn(async () => ({ fr: { scheduled: 21, lastScheduledAt: "2026-10-14 23:45:00", ready: 5 }, en: { scheduled: 21, lastScheduledAt: "2026-10-14 23:50:00", ready: 5 } })) }),
+        NOW,
+      ),
+    );
+    expect(r.text).toContain("RÉSERVE DE REELS (STUDIO)");
+    expect(r.text).not.toContain("BASSE");
+    expect(r.text).toContain("Ameublo (FR) : 10 jours de vidéos planifiées (21 vidéos)");
+    expect(r.subject).not.toContain("réserve");
+  });
+
+  it("says so when a page has nothing scheduled at all", async () => {
+    const r = renderMorningReport(
+      await collectMorningReport(sources({ reelsStock: vi.fn(async () => ({ fr: { scheduled: 0, lastScheduledAt: null, ready: 0 }, en: { scheduled: 3, lastScheduledAt: "2026-10-05 23:50:00", ready: 2 } })) }), NOW),
+    );
+    expect(r.text).toContain("🔴 Ameublo (FR) : plus aucune vidéo planifiée · 0 prête à approuver.");
+  });
+
+  it("a failing source only marks this section unavailable", async () => {
+    const data = await collectMorningReport(sources({ reelsStock: vi.fn(async () => { throw new Error("db down"); }) }), NOW);
+    expect(data.reelsStock).toEqual({ ok: false, error: "db down" });
+    expect(data.videos.ok).toBe(true);
+    expect(renderMorningReport(data).missingSections).toEqual(["Réserve de Reels (Studio)"]);
   });
 });

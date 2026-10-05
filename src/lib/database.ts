@@ -6594,6 +6594,43 @@ export async function loadGuardInputs(): Promise<GuardInputs> {
   };
 }
 
+/**
+ * Studio Reels reserve per language, for the morning report: approved Reels still waiting to publish
+ * (and when the last one goes out), plus the videos ready to approve. "Ready" mirrors the Studio's
+ * "Nouveau": nothing queued (a cancelled/failed row doesn't count), not rejected, QA not flagged.
+ */
+export async function countReelsStock(): Promise<{
+  fr: { scheduled: number; lastScheduledAt: string | null; ready: number };
+  en: { scheduled: number; lastScheduledAt: string | null; ready: number };
+}> {
+  const db = await ensureSchema();
+  const [queued, ready] = await Promise.all([
+    db.execute(
+      `SELECT json_extract(metadata, '$.lang') AS lang, COUNT(*) AS n, MAX(scheduled_at) AS last
+         FROM publication_queue
+        WHERE content_type = 'sequential_ad' AND status IN ('pending', 'publishing')
+          AND json_extract(metadata, '$.source') = 'ameublo_studio'
+        GROUP BY 1`,
+    ),
+    db.execute(
+      `SELECT v.lang AS lang, COUNT(*) AS n
+         FROM ameublo_test_videos v LEFT JOIN publication_queue q ON q.id = v.queue_id
+        WHERE v.lang IN ('fr', 'en') AND v.style IS NOT NULL AND TRIM(COALESCE(v.caption, '')) <> ''
+          AND (v.verdict IS NULL OR v.verdict <> 'bad')
+          AND (v.qa_verdict IS NULL OR v.qa_verdict NOT IN ('fail', 'review'))
+          AND (q.id IS NULL OR q.status NOT IN ('pending', 'publishing', 'published', 'draft'))
+        GROUP BY 1`,
+    ),
+  ]);
+  const pick = (res: { rows: Row[] }, lang: string) => res.rows.map(rowToObj).find((r) => r.lang === lang);
+  const one = (lang: "fr" | "en") => {
+    const q = pick(queued, lang);
+    const r = pick(ready, lang);
+    return { scheduled: Number(q?.n) || 0, lastScheduledAt: q?.last ? String(q.last) : null, ready: Number(r?.n) || 0 };
+  };
+  return { fr: one("fr"), en: one("en") };
+}
+
 /** Items that only move once Mat acts (approve / push / review). Counts only. A 'reviewing'
  *  import that already has a shopify_id is live (push returns already_imported) — not counted. */
 export async function countAwaitingOperator(): Promise<{

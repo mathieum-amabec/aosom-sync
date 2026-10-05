@@ -16,6 +16,7 @@ vi.mock("@/lib/database", () => ({
   countContentFormatVideos: vi.fn(),
   countMorningReportAlerts: vi.fn(),
   countAwaitingOperator: vi.fn(),
+  countReelsStock: vi.fn(),
   loadGuardInputs: vi.fn(),
 }));
 vi.mock("@/lib/klaviyo-client", () => ({ trackEvent: vi.fn() }));
@@ -51,6 +52,10 @@ beforeEach(() => {
   });
   vi.mocked(db.countAwaitingOperator).mockResolvedValue({
     sequentialAds: 16, importsToPush: 0, importsNeedsReview: 1, socialDrafts: 0, blogDrafts: 0,
+  });
+  vi.mocked(db.countReelsStock).mockResolvedValue({
+    fr: { scheduled: 30, lastScheduledAt: "2099-01-01 11:45:00", ready: 4 },
+    en: { scheduled: 30, lastScheduledAt: "2099-01-01 11:50:00", ready: 4 },
   });
   // No guard has produced a result yet → all "unknown": no red line, no subject prefix.
   vi.mocked(db.loadGuardInputs).mockResolvedValue({

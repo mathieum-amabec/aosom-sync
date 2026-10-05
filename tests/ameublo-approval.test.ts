@@ -173,3 +173,36 @@ describe("bulkApproveAmeubloVideos / cancel", () => {
     expect((await cancelAmeubloVideo(1)).success).toBe(false);
   });
 });
+
+describe("approveAmeubloVideoAt", () => {
+  it("books the video on the exact slot it is given, with the same payload and guards", async () => {
+    const { approveAmeubloVideoAt } = await import("@/lib/ameublo-approval");
+    db.getAmeubloTestVideo.mockResolvedValue(video({ lang: "en" }));
+    const r = await approveAmeubloVideoAt(1, "2026-10-07 11:50:00");
+    expect(r).toMatchObject({ success: true, queueId: 55, scheduledAt: "2026-10-07 11:50:00" });
+    const arg = db.addToQueue.mock.calls[0][0];
+    expect(arg).toMatchObject({ contentType: "sequential_ad", contentId: "ameublo:1", platform: "both", status: "pending", scheduledAt: "2026-10-07 11:50:00" });
+    expect(JSON.parse(arg.payload).brand).toBe("furnish");
+    expect(db.setAmeubloQueueId).toHaveBeenCalledWith(1, 55);
+    expect(db.findAmeubloTwin).not.toHaveBeenCalled(); // no twin on this path
+  });
+
+  it("reports a taken slot instead of shifting to another one", async () => {
+    const { approveAmeubloVideoAt } = await import("@/lib/ameublo-approval");
+    db.getAmeubloTestVideo.mockResolvedValue(video());
+    db.addToQueue.mockRejectedValueOnce(new SlotTaken());
+    const r = await approveAmeubloVideoAt(1, "2026-10-07 11:45:00");
+    expect(r).toMatchObject({ success: false, status: 409 });
+    expect(db.addToQueue).toHaveBeenCalledTimes(1);
+    expect(db.setAmeubloQueueId).not.toHaveBeenCalled();
+  });
+
+  it("refuses what the normal path refuses (rejected video, already scheduled)", async () => {
+    const { approveAmeubloVideoAt } = await import("@/lib/ameublo-approval");
+    db.getAmeubloTestVideo.mockResolvedValue(video({ verdict: "bad" }));
+    expect(await approveAmeubloVideoAt(1, "2026-10-07 11:45:00")).toMatchObject({ success: false, status: 409 });
+    db.getAmeubloTestVideo.mockResolvedValue(video({ queue_id: 9, queue_status: "pending" }));
+    expect(await approveAmeubloVideoAt(1, "2026-10-07 11:45:00")).toMatchObject({ success: false, status: 409 });
+    expect(db.addToQueue).not.toHaveBeenCalled();
+  });
+});

@@ -2,6 +2,30 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.7] - 2026-10-05
+
+### Added
+
+- **Studio Ameublo: "Plan de la semaine".** New tab that proposes the next 7 days of Reels from the
+  videos nobody approved yet (3 per page per day: 07:45 / 12:15 / 19:45 FR, EN +5 min, plus a 06:00
+  slot reserved for the seasonal campaign while it runs). Remove what you do not want (it is replaced
+  by the next video in stock), then "Approuver la semaine" books every entry on its exact slot.
+  `GET/POST /api/ameublo/week-plan` (admin-only; the POST only accepts grid slots) and
+  `approveAmeubloVideoAt` (same blockers and price guard as the normal approval; a taken slot is
+  reported, never shifted). Planner: `src/lib/ameublo-week-plan.ts` (pure, unit-tested).
+
+- **Morning report: "Réserve de Reels (Studio)".** Per page (Ameublo FR / Furnish EN): days of approved Reels still
+  ahead, how many are scheduled and how many are ready to approve. Under 7 days it turns red, flags the subject
+  ("🟠 réserve de Reels basse") and points to "Plan de la semaine" — approval is manual, so the queue used to run
+  dry silently. `countReelsStock()` (read-only) + `reelsRunwayDays()`.
+
+### Changed
+
+- **Publisher cron: hourly → every 5 minutes** (`vercel.json`). Slots went out at the next full hour
+  (07:45 → 08:00, an EN 06:05 → 07:00); they now go out within 5 minutes of their time. Overlapping
+  runs stay safe (atomic claim + the stranded-row reaper); `cron_runs` gets ~288 rows/day (pruned at 30 days).
+- Studio Ameublo header text now states the real grid.
+
 ## [0.5.107.6] - 2026-10-04
 
 ### Added
