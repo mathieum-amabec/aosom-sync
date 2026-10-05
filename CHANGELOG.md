@@ -14,6 +14,11 @@ All notable changes to Aosom Sync will be documented in this file.
   `approveAmeubloVideoAt` (same blockers and price guard as the normal approval; a taken slot is
   reported, never shifted). Planner: `src/lib/ameublo-week-plan.ts` (pure, unit-tested).
 
+- **Morning report: "Réserve de Reels (Studio)".** Per page (Ameublo FR / Furnish EN): days of approved Reels still
+  ahead, how many are scheduled and how many are ready to approve. Under 7 days it turns red, flags the subject
+  ("🟠 réserve de Reels basse") and points to "Plan de la semaine" — approval is manual, so the queue used to run
+  dry silently. `countReelsStock()` (read-only) + `reelsRunwayDays()`.
+
 ### Changed
 
 - **Publisher cron: hourly → every 5 minutes** (`vercel.json`). Slots went out at the next full hour

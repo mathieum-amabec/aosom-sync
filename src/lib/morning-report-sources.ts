@@ -8,6 +8,7 @@ import {
   countContentFormatVideos,
   countGuidesAwaitingApproval,
   countMorningReportAlerts,
+  countReelsStock,
 } from "./database";
 import { getActiveCampaignDaySummaries, getAdAccounts } from "./meta-ads-client";
 import { pickAdAccount } from "./ads-insights";
@@ -26,6 +27,7 @@ export const morningReportSources: MorningReportSources = {
   },
   guides: () => countGuidesAwaitingApproval(),
   videos: async () => ({ ...(await countContentFormatVideos(VIDEO_HORIZON_DAYS)), horizonDays: VIDEO_HORIZON_DAYS }),
+  reelsStock: () => countReelsStock(),
   alerts: async () => {
     const a = await countMorningReportAlerts();
     return [

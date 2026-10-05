@@ -47,6 +47,30 @@ export interface BlockedItem {
   count: number;
 }
 
+/** Raw Studio Reels stock for one language (what the DB knows; the report derives the runway). */
+export interface ReelsStockRaw {
+  /** Approved Reels still waiting to publish (pending/publishing). */
+  scheduled: number;
+  /** `scheduled_at` (SQLite UTC) of the latest of them, or null when none. */
+  lastScheduledAt: string | null;
+  /** Videos ready to approve in the Studio ("Nouveau": nothing queued, not rejected, QA not flagged). */
+  ready: number;
+}
+export interface ReelsStockSummary {
+  fr: ReelsStockRaw;
+  en: ReelsStockRaw;
+}
+/** Below this many days of approved Reels per page, the report raises the alert. */
+export const REELS_RUNWAY_ALERT_DAYS = 7;
+
+/** Days of approved Reels still ahead of `today` (Montreal date, inclusive of the last day); 0 when none. */
+export function reelsRunwayDays(lastScheduledAt: string | null, today: string): number {
+  if (!lastScheduledAt) return 0;
+  const last = localClock(new Date(`${lastScheduledAt.replace(" ", "T")}Z`)).date;
+  const diff = Math.round((Date.parse(`${last}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000);
+  return Math.max(0, diff + 1);
+}
+
 export interface MorningReportData {
   /** Montreal calendar date the report is for (YYYY-MM-DD). */
   reportDate: string;
@@ -55,6 +79,8 @@ export interface MorningReportData {
   meta: Section<CampaignDaySummary[]>;
   guides: Section<GuidesSummary>;
   videos: Section<VideosSummary>;
+  /** Studio Reels reserve: how many days of approved videos are left per page. */
+  reelsStock: Section<ReelsStockSummary>;
   alerts: Section<AlertItem[]>;
   blocked: Section<BlockedItem[]>;
   /** Red/green verdict per daily guard (guard-status.ts) — the same one the dashboard shows. */
@@ -65,6 +91,7 @@ export interface MorningReportSources {
   meta: (day: string) => Promise<CampaignDaySummary[]>;
   guides: () => Promise<GuidesSummary>;
   videos: () => Promise<VideosSummary>;
+  reelsStock: () => Promise<ReelsStockSummary>;
   alerts: () => Promise<AlertItem[]>;
   blocked: () => Promise<BlockedItem[]>;
   guards: () => Promise<GuardStatus[]>;
@@ -107,15 +134,16 @@ async function settle<T>(fn: () => Promise<T>): Promise<Section<T>> {
 export async function collectMorningReport(sources: MorningReportSources, now: Date): Promise<MorningReportData> {
   const reportDate = localClock(now).date;
   const metaDay = previousDay(reportDate);
-  const [meta, guides, videos, alerts, blocked, guards] = await Promise.all([
+  const [meta, guides, videos, reelsStock, alerts, blocked, guards] = await Promise.all([
     settle(() => sources.meta(metaDay)),
     settle(sources.guides),
     settle(sources.videos),
+    settle(sources.reelsStock),
     settle(sources.alerts),
     settle(sources.blocked),
     settle(sources.guards),
   ]);
-  return { reportDate, metaDay, meta, guides, videos, alerts, blocked, guards };
+  return { reportDate, metaDay, meta, guides, videos, reelsStock, alerts, blocked, guards };
 }
 
 // ── render ────────────────────────────────────────────────────────────────────
@@ -231,6 +259,26 @@ function sectionLines(data: MorningReportData): ReportSection[] {
     }
   }
 
+  // 3b. Studio Reels reserve — warns BEFORE the queue runs dry (approval is manual, so it empties silently).
+  {
+    const title = "Réserve de Reels (Studio)";
+    if (!data.reelsStock.ok) out.push({ title, lines: [], missing: data.reelsStock.error });
+    else {
+      const rows = (["fr", "en"] as const).map((lang) => {
+        const s = data.reelsStock.ok ? data.reelsStock.data[lang] : { scheduled: 0, lastScheduledAt: null, ready: 0 };
+        return { lang, ...s, days: reelsRunwayDays(s.lastScheduledAt, data.reportDate) };
+      });
+      const low = rows.filter((r) => r.days < REELS_RUNWAY_ALERT_DAYS);
+      const lines = rows.map((r) => {
+        const name = r.lang === "fr" ? "Ameublo (FR)" : "Furnish (EN)";
+        const cover = r.days === 0 ? "plus aucune vidéo planifiée" : `${plural(r.days, "jour", "jours")} de vidéos planifiées (${plural(r.scheduled, "vidéo", "vidéos")})`;
+        return `${r.days < REELS_RUNWAY_ALERT_DAYS ? "🔴 " : ""}${name} : ${cover} · ${plural(r.ready, "prête", "prêtes")} à approuver.`;
+      });
+      if (low.length) lines.push("Ouvre le Studio Ameublo → « Plan de la semaine » pour approuver la suite en un clic.");
+      out.push({ title: low.length ? `${title} — basse` : title, lines, alert: low.length > 0 });
+    }
+  }
+
   // 4. Alerts
   {
     const title = "Alertes";
@@ -270,7 +318,12 @@ export function renderMorningReport(data: MorningReportData): RenderedReport {
     : heading;
   // A red guard leads the subject so it shows in the inbox list, not only once opened.
   const red = redGuards(data).length;
-  const subject = red ? `🔴 ${plural(red, "garde-fou en alerte", "garde-fous en alerte")} — ${base}` : base;
+  const lowReserve = sections.some((s) => s.alert && s.title.startsWith("Réserve de Reels"));
+  const flags = [
+    red ? `🔴 ${plural(red, "garde-fou en alerte", "garde-fous en alerte")}` : "",
+    lowReserve ? "🟠 réserve de Reels basse" : "",
+  ].filter(Boolean);
+  const subject = flags.length ? `${flags.join(" · ")} — ${base}` : base;
 
   const text = [
     heading,

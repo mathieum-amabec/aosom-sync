@@ -51,7 +51,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   for (const t of [
-    "guide_pages", "publication_queue", "image_review_queue", "import_jobs", "notifications",
+    "guide_pages", "ameublo_test_videos", "publication_queue", "image_review_queue", "import_jobs", "notifications",
     "price_floor_incidents", "facebook_drafts", "blog_posts", "cron_runs",
   ]) {
     await db.execute(`DELETE FROM ${t}`);
@@ -196,5 +196,48 @@ describe("countMorningReportAlerts", () => {
     const a = await mod.countMorningReportAlerts();
     expect(a.priceBelowFloor).toBe(0);
     expect(a.catalogIssues).toBe(0);
+  });
+});
+
+describe("countReelsStock", () => {
+  const studioRow = async (lang: string, status: string, scheduledAt: string) => {
+    queueSeq++;
+    const r = await db.execute({
+      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at, status, metadata)
+            VALUES ('sequential_ad', ?, 'both', '{}', ?, ?, ?)`,
+      args: [`ameublo:${queueSeq}`, scheduledAt, status, JSON.stringify({ source: "ameublo_studio", lang })],
+    });
+    return Number(r.lastInsertRowid);
+  };
+  const video = async (lang: string, o: { queueId?: number; verdict?: string; qa?: string; caption?: string } = {}) => {
+    await db.execute({
+      sql: `INSERT INTO ameublo_test_videos (series, video_url, style, lang, caption, queue_id, verdict, qa_verdict)
+            VALUES ('S', 'https://blob/x.mp4', 'vitrine', ?, ?, ?, ?, ?)`,
+      args: [lang, o.caption ?? "Légende", o.queueId ?? null, o.verdict ?? null, o.qa ?? null],
+    });
+  };
+
+  it("counts what is still to publish per language, with the last slot, and the videos ready to approve", async () => {
+    await studioRow("fr", "pending", "2026-10-10 11:45:00");
+    const last = await studioRow("fr", "pending", "2026-10-12 23:45:00");
+    await studioRow("fr", "published", "2026-10-20 11:45:00"); // already out: not "still to publish"
+    await studioRow("en", "pending", "2026-10-11 11:50:00");
+    await video("fr", { queueId: last }); // approved → not "ready"
+    await video("fr"); // ready
+    await video("fr", { qa: "pass" }); // ready
+    await video("fr", { verdict: "bad" }); // rejected
+    await video("fr", { qa: "fail" }); // flagged
+    await video("fr", { caption: "  " }); // no caption
+    await video("en"); // ready
+    const s = await mod.countReelsStock();
+    expect(s.fr).toEqual({ scheduled: 2, lastScheduledAt: "2026-10-12 23:45:00", ready: 2 });
+    expect(s.en).toEqual({ scheduled: 1, lastScheduledAt: "2026-10-11 11:50:00", ready: 1 });
+  });
+
+  it("returns zeros and a null last slot on an empty Studio", async () => {
+    expect(await mod.countReelsStock()).toEqual({
+      fr: { scheduled: 0, lastScheduledAt: null, ready: 0 },
+      en: { scheduled: 0, lastScheduledAt: null, ready: 0 },
+    });
   });
 });
