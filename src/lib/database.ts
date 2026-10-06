@@ -583,6 +583,21 @@ async function _initSchemaImpl(): Promise<void> {
     // (sku, notified_at): serves getPendingWaitlist — seek by sku, filter notified_at IS NULL.
     `CREATE INDEX IF NOT EXISTS idx_waitlist_sku_pending ON back_in_stock_waitlist(sku, notified_at)`,
     `CREATE INDEX IF NOT EXISTS idx_cron_runs_name_at ON cron_runs(name, ran_at DESC)`,
+    // Reel measurement. publication_queue never stored WHICH post a published row became, so there was nothing to
+    // read insights from. queue_post_ids is written by the publisher right after a successful publish (best-effort);
+    // reel_insights holds one snapshot per (queue row, platform, UTC day), upserted by /api/cron/reel-insights.
+    // Separate tables on purpose: publication_queue is rebuilt by table migrations (CHECK constraints) and must stay untouched.
+    `CREATE TABLE IF NOT EXISTS queue_post_ids (
+      queue_id INTEGER PRIMARY KEY,
+      fb_post_id TEXT, ig_post_id TEXT,
+      recorded_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS reel_insights (
+      queue_id INTEGER NOT NULL, platform TEXT NOT NULL, post_id TEXT NOT NULL, day TEXT NOT NULL,
+      plays INTEGER, initial_plays INTEGER, avg_watch_ms INTEGER, total_watch_ms INTEGER, social_actions INTEGER,
+      collected_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (queue_id, platform, day)
+    )`,
     // Serves listBlogPosts — the /blog dashboard reads newest-first, nothing else.
     `CREATE INDEX IF NOT EXISTS idx_blog_posts_created ON blog_posts(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_feed_syncs_type_at ON feed_syncs(feed_type, fetched_at DESC)`,
@@ -6511,16 +6526,19 @@ export async function countMorningReportAlerts(): Promise<{
   importErrors: number;
   catalogIssues: number;
   unreadNotifications: number;
+  /** Queue rows in 'failed' that were due in the last 3 days OR are still ahead — the ones nobody has looked at (found 2026-10-06: 16 batch Reels sat 'failed' for weeks, re-slotted but never reset). */
+  failedPublications: number;
 }> {
   const db = await ensureSchema();
   const dayAgo = Math.floor(Date.now() / 1000) - 86400;
-  const [audit, incidents, images, imports, catalog, notif] = await Promise.all([
+  const [audit, incidents, images, imports, catalog, notif, failedQueue] = await Promise.all([
     db.execute(`SELECT value FROM settings WHERE key = 'price_audit_result'`),
     db.execute({ sql: `SELECT COUNT(*) AS c FROM price_floor_incidents WHERE detected_at >= ?`, args: [dayAgo] }),
     db.execute(`SELECT COUNT(*) AS c FROM image_review_queue WHERE status = 'pending'`),
     db.execute(`SELECT COUNT(*) AS c FROM import_jobs WHERE status = 'error'`),
     db.execute(`SELECT value FROM settings WHERE key = 'catalog_consistency_audit'`),
     db.execute(`SELECT COUNT(*) AS c FROM notifications WHERE read = 0`),
+    db.execute(`SELECT COUNT(*) AS c FROM publication_queue WHERE status = 'failed' AND scheduled_at >= datetime('now', '-3 days')`),
   ]);
   const c = (res: { rows: Row[] }) => Number(rowToObj(res.rows[0]).c) || 0;
   const json = (res: { rows: Row[] }): Record<string, unknown> | null => {
@@ -6541,7 +6559,150 @@ export async function countMorningReportAlerts(): Promise<{
     importErrors: c(imports),
     catalogIssues: Array.isArray(issues) ? issues.length : 0,
     unreadNotifications: c(notif),
+    failedPublications: c(failedQueue),
   };
+}
+
+// ─── Reel measurement ───────────────────────────────────────────────
+
+/** Remember which Facebook / Instagram posts a published queue row became (best-effort, written by the publisher). */
+export async function recordQueuePostIds(queueId: number, ids: { fb?: string; ig?: string }): Promise<void> {
+  if (!ids.fb && !ids.ig) return;
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO queue_post_ids (queue_id, fb_post_id, ig_post_id) VALUES (?, ?, ?)
+          ON CONFLICT(queue_id) DO UPDATE SET
+            fb_post_id = COALESCE(excluded.fb_post_id, fb_post_id),
+            ig_post_id = COALESCE(excluded.ig_post_id, ig_post_id),
+            recorded_at = datetime('now')`,
+    args: [queueId, ids.fb ?? null, ids.ig ?? null],
+  });
+}
+
+export interface ReelToMeasure {
+  queueId: number;
+  fbPostId: string;
+  brand: "ameublo" | "furnish";
+  publishedAt: string | null;
+}
+
+/** Published Reels with a known Facebook id, published within the last `days` days — what the insights cron measures. */
+export async function listReelsToMeasure(days: number): Promise<ReelToMeasure[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT q.id, q.payload, q.published_at, p.fb_post_id
+            FROM publication_queue q JOIN queue_post_ids p ON p.queue_id = q.id
+           WHERE q.status = 'published' AND p.fb_post_id IS NOT NULL
+             AND q.published_at >= datetime('now', ?)
+           ORDER BY q.published_at DESC`,
+    args: [`-${Math.max(1, Math.floor(days))} days`],
+  });
+  const out: ReelToMeasure[] = [];
+  for (const row of r.rows) {
+    const o = rowToObj(row);
+    let brand: string | undefined;
+    try {
+      brand = (JSON.parse(String(o.payload)) as { brand?: string }).brand;
+    } catch {
+      /* unreadable payload: skip below */
+    }
+    if (brand !== "ameublo" && brand !== "furnish") continue;
+    out.push({ queueId: Number(o.id), fbPostId: String(o.fb_post_id), brand, publishedAt: o.published_at ? String(o.published_at) : null });
+  }
+  return out;
+}
+
+export interface ReelMetrics {
+  plays: number | null;
+  initialPlays: number | null;
+  avgWatchMs: number | null;
+  totalWatchMs: number | null;
+  socialActions: number | null;
+}
+
+/** One snapshot per (queue row, platform, UTC day): re-running the same day overwrites it. */
+export async function saveReelInsight(queueId: number, platform: "facebook" | "instagram", postId: string, m: ReelMetrics): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO reel_insights (queue_id, platform, post_id, day, plays, initial_plays, avg_watch_ms, total_watch_ms, social_actions)
+          VALUES (?, ?, ?, date('now'), ?, ?, ?, ?, ?)
+          ON CONFLICT(queue_id, platform, day) DO UPDATE SET
+            post_id = excluded.post_id, plays = excluded.plays, initial_plays = excluded.initial_plays,
+            avg_watch_ms = excluded.avg_watch_ms, total_watch_ms = excluded.total_watch_ms,
+            social_actions = excluded.social_actions, collected_at = datetime('now')`,
+    args: [queueId, platform, postId, m.plays, m.initialPlays, m.avgWatchMs, m.totalWatchMs, m.socialActions],
+  });
+}
+
+export interface ReelResultRow {
+  queueId: number;
+  contentType: string;
+  /** Studio style (vitrine, vote, …) for Studio videos, else the batch content type. */
+  style: string;
+  lang: "fr" | "en";
+  label: string | null;
+  studioVideoId: number | null;
+  scheduledAt: string;
+  publishedAt: string | null;
+  plays: number | null;
+  avgWatchMs: number | null;
+  totalWatchMs: number | null;
+  socialActions: number | null;
+  /** UTC date of the snapshot these numbers come from. */
+  measuredOn: string;
+  /** Hours between publication and the snapshot: a Reel measured at 3 h has not had time to collect what one measured at 3 weeks has. */
+  ageHours: number;
+}
+
+/** The latest Facebook snapshot of every Reel published in the last `days` days, with what kind of video it was. */
+export async function getReelResultRows(days: number): Promise<ReelResultRow[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT q.id, q.content_type, q.payload, q.metadata, q.scheduled_at, q.published_at,
+                 i.plays, i.avg_watch_ms, i.total_watch_ms, i.social_actions, i.day, i.collected_at,
+                 v.id AS video_id, v.label AS video_label
+            FROM publication_queue q
+            JOIN reel_insights i ON i.queue_id = q.id AND i.platform = 'facebook'
+             AND i.day = (SELECT MAX(day) FROM reel_insights WHERE queue_id = q.id AND platform = 'facebook')
+            LEFT JOIN ameublo_test_videos v ON v.queue_id = q.id
+           WHERE q.status = 'published' AND q.published_at >= datetime('now', ?)
+           ORDER BY q.published_at DESC`,
+    args: [`-${Math.max(1, Math.floor(days))} days`],
+  });
+  const out: ReelResultRow[] = [];
+  for (const row of r.rows) {
+    const o = rowToObj(row);
+    let brand: string | undefined;
+    let meta: Record<string, unknown> = {};
+    try {
+      brand = (JSON.parse(String(o.payload)) as { brand?: string }).brand;
+    } catch {
+      /* fall through */
+    }
+    try {
+      meta = o.metadata ? (JSON.parse(String(o.metadata)) as Record<string, unknown>) : {};
+    } catch {
+      /* fall through */
+    }
+    const num = (v: unknown) => (v == null ? null : Number(v));
+    out.push({
+      queueId: Number(o.id),
+      contentType: String(o.content_type),
+      style: typeof meta.style === "string" && meta.style ? meta.style : String(o.content_type),
+      lang: brand === "furnish" ? "en" : "fr",
+      label: o.video_label ? String(o.video_label) : null,
+      studioVideoId: o.video_id != null ? Number(o.video_id) : null,
+      scheduledAt: String(o.scheduled_at),
+      publishedAt: o.published_at ? String(o.published_at) : null,
+      plays: num(o.plays),
+      avgWatchMs: num(o.avg_watch_ms),
+      totalWatchMs: num(o.total_watch_ms),
+      socialActions: num(o.social_actions),
+      measuredOn: String(o.day),
+      ageHours: Math.max(0, (Date.parse(`${String(o.collected_at).replace(" ", "T")}Z`) - Date.parse(`${String(o.published_at).replace(" ", "T")}Z`)) / 3_600_000) || 0,
+    });
+  }
+  return out;
 }
 
 /** Raw inputs for the guard verdicts (guard-status.ts): each daily guard's persisted result

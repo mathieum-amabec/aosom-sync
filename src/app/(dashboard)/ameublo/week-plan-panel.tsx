@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { STYLE_LABEL, type AmeubloStyle } from "@/lib/ameublo-caption";
+import { styleLabelOf } from "@/lib/ameublo-style-label";
 
 interface PlanEntry {
   id: number;
@@ -18,7 +18,7 @@ interface PlanEntry {
 interface SlotDef { key: "S0" | "S1" | "S2" | "S3"; fr: string; en: string; label: string }
 interface PlanData { entries: PlanEntry[]; slots: SlotDef[]; seasonalActive: boolean; stock: { fr: number; en: number }; unplaced: number }
 
-const styleLabel = (s: string | null) => (s && s in STYLE_LABEL ? STYLE_LABEL[s as AmeubloStyle].fr : (s ?? "—"));
+const styleLabel = (s: string | null) => styleLabelOf(s, "fr");
 const dayLabel = (day: string) =>
   new Intl.DateTimeFormat("fr-CA", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(new Date(`${day}T12:00:00Z`));
 

@@ -46,9 +46,11 @@ import {
   getProduct,
   flagSequentialAdForRerender,
   createNotification,
+  recordQueuePostIds,
   type PublicationQueueItem,
 } from "./database";
 import { checkSequentialAdPrice } from "./sequential-ad-price";
+import { addUtm, tagCaptionLinks } from "./utm";
 
 export interface SocialQueuePayload {
   caption: string;
@@ -189,8 +191,36 @@ function toSocialPayload(p: SocialQueuePayload): SocialPayload {
 
 export interface PublishItemResult {
   postId: string;
+  /** The Facebook post (a Reel's video id) when one was created — what its insights are read from. */
+  fbPostId?: string;
+  /** The Instagram media id when one was created. */
+  igPostId?: string;
   /** Set when one channel of a 'both' post failed while the other succeeded. */
   partialError?: string;
+}
+
+/** Per-platform last touch on a payload just before it goes out (UTM tagging of a Reel's links). */
+type Decorate = (p: SocialQueuePayload, platform: "facebook" | "instagram") => SocialQueuePayload;
+
+/**
+ * UTM tags for a Reel's storefront links: which platform sent the click, what kind of video it was, which video. Applied at
+ * publish time so videos approved long ago are tagged too and the stored caption stays clean. `ameubloVideoId` (Studio videos)
+ * names the video; batch videos fall back to their queue row.
+ */
+function reelUtm(item: PublicationQueueItem): Decorate {
+  const meta = item.metadata ?? {};
+  const campaign = typeof meta.style === "string" && meta.style ? meta.style : item.contentType;
+  const content = typeof meta.ameubloVideoId === "number" ? `v${meta.ameubloVideoId}` : `q${item.id}`;
+  return (p, platform) => {
+    const utm = { source: platform, medium: "reel", campaign, content };
+    return { ...p, caption: tagCaptionLinks(p.caption, utm), link: p.link ? addUtm(p.link, utm) : p.link };
+  };
+}
+
+/** Publish on ONE platform, recording which post it became. */
+async function publishOn(platform: "facebook" | "instagram", p: SocialQueuePayload, decorate?: Decorate): Promise<PublishItemResult> {
+  const { postId } = await publishSocialPayload(platform, toSocialPayload(decorate ? decorate(p, platform) : p));
+  return platform === "facebook" ? { postId, fbPostId: postId } : { postId, igPostId: postId };
 }
 
 /**
@@ -199,24 +229,25 @@ export interface PublishItemResult {
  * already went out. Throws only when BOTH fail. A partial failure is surfaced via
  * `partialError` (logged by the caller) — the item is still marked published.
  */
-async function publishToBoth(p: SocialQueuePayload): Promise<PublishItemResult> {
-  const sp = toSocialPayload(p);
+async function publishToBoth(p: SocialQueuePayload, decorate?: Decorate): Promise<PublishItemResult> {
   let fbId: string | undefined;
   let igId: string | undefined;
   const errors: string[] = [];
   try {
-    fbId = (await publishSocialPayload("facebook", sp)).postId;
+    fbId = (await publishSocialPayload("facebook", toSocialPayload(decorate ? decorate(p, "facebook") : p))).postId;
   } catch (err) {
     errors.push(`facebook: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
-    igId = (await publishSocialPayload("instagram", sp)).postId;
+    igId = (await publishSocialPayload("instagram", toSocialPayload(decorate ? decorate(p, "instagram") : p))).postId;
   } catch (err) {
     errors.push(`instagram: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (!fbId && !igId) throw new Error(errors.join(" | "));
   return {
     postId: (fbId ?? igId)!,
+    fbPostId: fbId,
+    igPostId: igId,
     partialError: errors.length > 0 ? errors.join(" | ") : undefined,
   };
 }
@@ -256,7 +287,10 @@ export async function batchVideoToSocialPayload(contentType: string, raw: unknow
   const angle = BATCH_VIDEO_ANGLE[contentType] ?? "vidéo du produit";
   const generated = optString(o.caption) ? null : await generateReelCaption(`${title} — ${angle}`, "fr");
   const caption = optString(o.caption) ?? generated ?? `${title} — livraison gratuite au Canada.${link ? ` 👉 ${link}` : ""}`;
-  return { caption: stripSupplierBrands(caption), brand: "ameublo", reelsVideoUrl: blobUrl, link };
+  // The generated caption tells people "le lien est sous la vidéo", but a Reel has no link field: `link` is only used for
+  // text-only Facebook posts, so these Reels went out with NO link at all (found 2026-10-06). Put it in the caption itself.
+  const withLink = link && !caption.includes(link) ? `${caption}\n\n👉 ${link}` : caption;
+  return { caption: stripSupplierBrands(withLink), brand: "ameublo", reelsVideoUrl: blobUrl, link };
 }
 
 /**
@@ -368,13 +402,14 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
   // 2026-10-01). Build a real Reel payload from the product instead.
   if (item.contentType in BATCH_VIDEO_ANGLE) {
     const social = await batchVideoToSocialPayload(item.contentType, raw);
+    const decorate = reelUtm(item);
     switch (item.platform) {
       case "facebook":
-        return { postId: (await publishSocialPayload("facebook", toSocialPayload(social))).postId };
+        return publishOn("facebook", social, decorate);
       case "instagram":
-        return { postId: (await publishSocialPayload("instagram", toSocialPayload(social))).postId };
+        return publishOn("instagram", social, decorate);
       case "both":
-        return publishToBoth(social);
+        return publishToBoth(social, decorate);
       default:
         throw new Error(`Unsupported platform for ${item.contentType}: ${item.platform}`);
     }
@@ -390,13 +425,14 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
       // Studio Ameublo videos carry a deterministic, operator-editable caption: keep it as-is.
       const clickbait = item.metadata?.keepCaption === true ? null : await generateReelCaption(social.caption, language);
       const finalPayload: SocialQueuePayload = clickbait ? { ...social, caption: clickbait } : social;
+      const decorate = reelUtm(item);
       switch (item.platform) {
         case "facebook":
-          return { postId: (await publishSocialPayload("facebook", toSocialPayload(finalPayload))).postId };
+          return publishOn("facebook", finalPayload, decorate);
         case "instagram":
-          return { postId: (await publishSocialPayload("instagram", toSocialPayload(finalPayload))).postId };
+          return publishOn("instagram", finalPayload, decorate);
         case "both":
-          return publishToBoth(finalPayload);
+          return publishToBoth(finalPayload, decorate);
         default:
           throw new Error(`Unsupported platform for video content_type: ${item.platform}`);
       }
@@ -565,6 +601,13 @@ export async function drainPublisherQueue(opts: {
     try {
       const result = await publishQueueItem(item);
       await markPublished(item.id);
+      // Remember which posts this became, so their insights can be read later. Best-effort: the post is already live and
+      // marked published — a failure here must never turn that into a failed item (a retry would double-post).
+      try {
+        await recordQueuePostIds(item.id, { fb: result.fbPostId, ig: result.igPostId });
+      } catch (err) {
+        console.warn(`[publisher] item ${item.id}: could not record the post ids: ${err instanceof Error ? err.message : err}`);
+      }
       if (result.partialError) {
         console.warn(`[publisher] item ${item.id} (${item.platform}) published with partial failure: ${result.partialError}`);
       }

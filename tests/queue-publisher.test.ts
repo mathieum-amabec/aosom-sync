@@ -32,6 +32,7 @@ vi.mock("@/lib/database", () => ({
   getProduct: vi.fn(async () => ({ shopify_product_id: "123", shopify_handle: "meuble-chat-3-niveaux" })),
   flagSequentialAdForRerender: vi.fn().mockResolvedValue(true),
   createNotification: vi.fn().mockResolvedValue(1),
+  recordQueuePostIds: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("@/lib/content-generator", () => ({ getAnthropicClient: vi.fn() }));
 
@@ -60,6 +61,7 @@ import {
   markFailed,
   reclaimStrandedPublishing,
   markGuidePagePublished,
+  recordQueuePostIds,
 } from "@/lib/database";
 import { getAnthropicClient } from "@/lib/content-generator";
 
@@ -527,6 +529,8 @@ describe("publishQueueItem — batch video formats (assembly / demand_gen_ext)",
     const opts = vi.mocked(publishFacebookReel).mock.calls.at(-1)![0];
     expect(opts.videoUrl).toBe(batch.blobUrl);
     expect(opts.caption).toContain("château");
+    // A Reel has no link field, so the product page must be IN the caption (it used to be missing: "le lien est sous la vidéo" was false).
+    expect(opts.caption).toContain("👉 https://ameublodirect.ca/products/meuble-chat-3-niveaux");
   });
 
   it("falls back to the product title + link when caption generation fails — never blocks the publish", async () => {
@@ -539,5 +543,63 @@ describe("publishQueueItem — batch video formats (assembly / demand_gen_ext)",
 
   it("still fails loudly when the payload has no video", async () => {
     await expect(publishQueueItem(item({ platform: "facebook", contentType: "assembly", payload: { sku: "X" } }))).rejects.toThrow(/blobUrl/);
+  });
+});
+
+describe("Reel UTM tagging + post id recording", () => {
+  const LINK = "https://ameublodirect.ca/products/canape";
+  const studio = (extra: Record<string, unknown> = {}, meta: Record<string, unknown> = {}) =>
+    item({
+      id: 77,
+      platform: "both",
+      contentType: "sequential_ad",
+      payload: social({ reelsVideoUrl: "https://blob/r.mp4", caption: `Canapé — 244,99 $ : ${LINK}\n#maison`, ...extra }),
+      metadata: { source: "ameublo_studio", keepCaption: true, style: "vitrine", ameubloVideoId: 546, ...meta },
+    });
+  const fbCaption = () => vi.mocked(publishFacebookReel).mock.calls.at(-1)![0].caption;
+  const igCaption = () => vi.mocked(publishReel).mock.calls.at(-1)![0].caption;
+
+  it("tags the storefront link per platform: facebook gets utm_source=facebook, instagram gets utm_source=instagram", async () => {
+    const r = await publishQueueItem(studio());
+    expect(fbCaption()).toContain(`${LINK}?utm_source=facebook&utm_medium=reel&utm_campaign=vitrine&utm_content=v546`);
+    expect(igCaption()).toContain(`${LINK}?utm_source=instagram&utm_medium=reel&utm_campaign=vitrine&utm_content=v546`);
+    expect(fbCaption()).toContain("Canapé — 244,99 $ : "); // the words around the link are untouched
+    expect(r.fbPostId).toBe("fb-reel");
+    expect(r.igPostId).toBeTruthy();
+  });
+
+  it("falls back to the queue row for batch videos, and names the campaign after the content type", async () => {
+    stubClaude("Voyez-le 👉");
+    await publishQueueItem(item({ id: 9, platform: "facebook", contentType: "assembly", payload: { sku: "D31", productName: "x", blobUrl: "https://blob.example/a.mp4" } }));
+    expect(fbCaption()).toContain("utm_campaign=assembly&utm_content=q9");
+  });
+
+  it("never touches a third-party link or a caption with no link", async () => {
+    await publishQueueItem(studio({ caption: "Voir https://www.facebook.com/ameublodirect merci" }));
+    expect(fbCaption()).toBe("Voir https://www.facebook.com/ameublodirect merci");
+    await publishQueueItem(studio({ caption: "Un salon qui se monte tout seul." }));
+    expect(fbCaption()).toBe("Un salon qui se monte tout seul.");
+  });
+
+  it("leaves a normal (non-Reel) social post alone", async () => {
+    await publishQueueItem(item({ platform: "facebook", payload: social({ imageUrl: "a.jpg", caption: `Voir ${LINK}` }) }));
+    expect(vi.mocked(publishWithImage).mock.calls.at(-1)![0].caption).toBe(`Voir ${LINK}`);
+  });
+
+  it("records the Facebook and Instagram post ids after publishing", async () => {
+    vi.mocked(getNextPending).mockResolvedValue([studio()] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+    await drainPublisherQueue({ sleep: vi.fn().mockResolvedValue(undefined) });
+    expect(recordQueuePostIds).toHaveBeenCalledWith(77, { fb: "fb-reel", ig: expect.any(String) });
+  });
+
+  it("never lets a failure to record the ids turn a live post into a failed item", async () => {
+    vi.mocked(recordQueuePostIds).mockRejectedValueOnce(new Error("db hiccup"));
+    vi.mocked(getNextPending).mockResolvedValue([studio()] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+    const res = await drainPublisherQueue({ sleep: vi.fn().mockResolvedValue(undefined) });
+    expect(markPublished).toHaveBeenCalledWith(77);
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ published: 1, failed: 0 });
   });
 });

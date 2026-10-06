@@ -40,6 +40,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/reel-insights",
+      "schedule": "30 9 * * *"
+    },
+    {
       "path": "/api/cron/price-reconcile",
       "schedule": "0 * * * *"
     },
