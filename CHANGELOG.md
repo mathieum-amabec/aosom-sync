@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.108.0] - 2026-10-05
+## [0.5.107.8] - 2026-10-05
 
 ### Added
 
