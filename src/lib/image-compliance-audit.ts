@@ -446,6 +446,41 @@ export async function enforceCleanPrimaryImage(
 }
 
 /**
+ * Give every variant a CLEAN primary photo.
+ *
+ * Why (2026-10-05, chairs 15393267974249 and 14 other products imported that day): the pos-1
+ * guard was fine, but each colour's variant is attached to its OWN Aosom photo, and Aosom's
+ * first photo for a SKU is often an infographic ("Comfortable PU Leather" + zoom inset). The
+ * theme shows the selected variant's image on the card and the product page, so the shopper saw
+ * the infographic for Noir while pos-1 was clean.
+ *
+ * Runs the same guard on each variant's own photos and keeps ONLY the winner (so the later
+ * "first of v.images that is in the gallery" lookup cannot fall back to an overlay). A variant
+ * with no clean photo gets none and falls back to the product's pos-1. Verdicts are cached by
+ * stem, so siblings sharing a photo cost nothing. Fails safe: no verdict = untouched.
+ */
+export async function cleanVariantImages<V extends { images: string[] }>(
+  variants: V[],
+  options: Pick<AuditOptions, "classify" | "classifyOptions" | "useCache"> = {},
+  maxCandidates = 6,
+): Promise<V[]> {
+  const memo = new Map<string, string[]>();
+  const out: V[] = [];
+  for (const v of variants) {
+    if (!v.images?.length) { out.push(v); continue; }
+    const key = v.images.slice(0, maxCandidates).join("|");
+    let images = memo.get(key);
+    if (!images) {
+      const r = await enforceCleanPrimaryImage(v.images.slice(0, maxCandidates), options);
+      images = r.outcome === "no_alternative" ? [] : r.outcome === "skipped" ? v.images : [r.images[0]];
+      memo.set(key, images);
+    }
+    out.push({ ...v, images });
+  }
+  return out;
+}
+
+/**
  * Audit ONE product's pos-1 image and, when it is non-compliant, propose the first clean
  * replacement. Pure analysis: this never writes to Shopify and never mutates the product.
  *

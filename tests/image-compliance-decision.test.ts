@@ -18,6 +18,7 @@ const {
   auditProductPos1,
   classifySwapDecision,
   enforceCleanPrimaryImage,
+  cleanVariantImages,
   MIN_AUTO_CONFIDENCE,
 } = await import("@/lib/image-compliance-audit");
 
@@ -279,5 +280,33 @@ describe("enforceCleanPrimaryImage — the import-time guard", () => {
     // 5 of 6 imports have a clean pos-1 already; a 6-image set must not cost 6 calls. One lite
     // verdict + one strong second opinion on the photo about to be published.
     expect(out.calls).toBe(2);
+  });
+});
+
+describe("cleanVariantImages — the variant photo is what cards and the PDP show (chairs 2026-10-05)", () => {
+  const classify = vi.fn();
+  const run = (v: Array<{ sku: string; images: string[] }>) => cleanVariantImages(v, { classify, useCache: false });
+  beforeEach(() => classify.mockReset());
+
+  it("replaces an infographic first photo with the variant's first clean one, and keeps ONLY it", async () => {
+    classify.mockImplementation(async (url: string) => ({ compliant: url !== "info.jpg", reason: "x" }));
+    const out = await run([{ sku: "BK", images: ["info.jpg", "room.jpg", "other.jpg"] }]);
+    expect(out[0].images).toEqual(["room.jpg"]);
+  });
+  it("gives a variant with no clean photo none, so it falls back to the product's pos-1", async () => {
+    classify.mockResolvedValue({ compliant: false, reason: "overlay" });
+    const out = await run([{ sku: "BK", images: ["a.jpg", "b.jpg"] }]);
+    expect(out[0].images).toEqual([]);
+  });
+  it("leaves a variant untouched when classification fails — never blocks an import", async () => {
+    // Plain function, not the vi.fn: see the note on the import-guard failure test above.
+    const throwing = async () => { throw new Error("429"); };
+    const out = await cleanVariantImages([{ sku: "BK", images: ["a.jpg"] }], { classify: throwing, useCache: false });
+    expect(out[0].images).toEqual(["a.jpg"]);
+  });
+  it("classifies siblings that share the same photo set once", async () => {
+    classify.mockResolvedValue({ compliant: true, reason: "ok" });
+    await run([{ sku: "A", images: ["a.jpg"] }, { sku: "B", images: ["a.jpg"] }]);
+    expect(classify).toHaveBeenCalledTimes(2); // lite + strong, for ONE photo
   });
 });
