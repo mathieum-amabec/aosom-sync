@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.108.0] - 2026-10-05
+
+### Added
+
+- **Pinterest: OAuth with automatic token refresh** (`src/lib/pinterest-auth.ts`). Authorize URL, code exchange, refresh
+  (continuous refresh: 30-day access token, 60-day refresh token renewed on every use), a token store in the `settings`
+  table (sandbox and production under separate keys) and `resolvePinterestCredentials()`. Concurrent callers share one
+  refresh. Errors never echo the app secret, the code or a token.
+- **Pinterest: video Pins** (`PinterestClient.createVideoPin`): register media, upload the MP4 to the pre-signed URL, wait for
+  Pinterest to process it, create the Pin (cover image required, 100 MB cap, bounded polling). `studioVideoToPin()` turns a
+  Studio Ameublo video into a Pin that links to the product page (FR `ameublodirect.ca`, EN `furnishdirect.ca`) and refuses,
+  with a reason, a video that has no product page or cover.
+- **Pinterest sandbox**: `PINTEREST_ENV=sandbox` / `credentials.sandbox` points the client at `api-sandbox.pinterest.com`
+  (what an app on Trial access can use).
+- Scripts: `scripts/pinterest-oauth.mts` (url / exchange / whoami / refresh) and `scripts/pinterest-video-pin.mts` (dry run by
+  default; `--apply [--sandbox]`). `docs/PINTEREST-SETUP.md` rewritten: access tiers, env vars, the Trial → Standard
+  screen-recording checklist and the remaining gaps.
+
+Ships **dormant**: nothing in `src/app` imports it and the publisher queue is untouched (adding a `pinterest` platform needs a
+`publication_queue` table rebuild, deferred until the app is approved).
+
 ## [0.5.107.7] - 2026-10-05
 
 ### Added
