@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.9] - 2026-10-06
+
+### Added
+
+- **TikTok: send Studio videos to the brand account as inbox DRAFTS** (dormant). `src/lib/tiktok-auth.ts`: Login Kit OAuth with
+  automatic refresh (24 h access token, 365 d refresh token, one token set per brand: `tiktok_oauth_fr` / `tiktok_oauth_en` in
+  `settings`; concurrent callers share one refresh; errors never echo secrets). `src/lib/tiktok-client.ts`: `uploadDraft`
+  (`/v2/post/publish/inbox/video/init/` → chunked PUT to the upload URL → status poll), `userInfo`, `planChunks`, and
+  `tiktokCaptionToPaste` (a draft carries no caption: the Studio caption minus links, supplier brands stripped).
+- Scripts `scripts/tiktok-oauth.mts` (url / exchange / whoami / refresh, `--brand fr|en`, https redirect required) and
+  `scripts/tiktok-draft.mts` (dry run by default, `--apply`). `docs/TIKTOK-SETUP.md` (in French): brand accounts, developer app,
+  sandbox, env vars, limits.
+
+Needs `video.upload` only — no TikTok audit; public direct posting (`video.publish`) is NOT used. Nothing in `src/app` imports it
+and the publisher queue is untouched.
+
 ## [0.5.107.8] - 2026-10-05
 
 ### Added
