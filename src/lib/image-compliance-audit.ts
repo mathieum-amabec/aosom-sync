@@ -397,20 +397,87 @@ export async function enforceCleanPrimaryImage(
     return map.get(imageUrlStem(url));
   };
 
+  // Second opinion on any photo about to become pos-1. The cheap "lite" model said "no text" with
+  // confidence 1.0 on an Aosom infographic ("Comfortable PU Leather" + zoom inset) and it shipped
+  // as pos-1 (2026-10-05, chairs 15393267974249). A false "clean" is the costly error — the shopper
+  // sees it — so the one photo we are about to publish is re-checked by the strong tier, and its
+  // verdict replaces the cached one (so the daily guard agrees). A failed second call keeps the
+  // first opinion: no evidence must never block an import.
+  const confirmClean = async (url: string): Promise<{ ok: boolean; reason?: string }> => {
+    try {
+      const px = opts.classifyOptions?.px ?? DEFAULT_CLASSIFY_PX;
+      const classify = opts.classify ?? classifyProductImage;
+      counters.calls++;
+      const v = await classify(url, { ...opts.classifyOptions, tier: "strong" });
+      if (opts.useCache) {
+        await putCachedImageVerdict(
+          imageUrlStem(url),
+          { compliant: v.compliant, reason: v.reason, confidence: v.confidence },
+          { model: `${llmModel("strong")}@${px}`, sampleUrl: url },
+        );
+      }
+      return { ok: v.compliant, reason: v.reason };
+    } catch (err) {
+      counters.lastError = err instanceof Error ? err.message : String(err);
+      return { ok: true };
+    }
+  };
+
   const first = await verdictFor(images[0]);
   // No verdict = no evidence. Importing an overlay is a small, correctable harm; refusing to
   // import, or reordering on a guess, is worse.
   if (!first) return { images, outcome: "skipped", reason: counters.lastError, calls: counters.calls };
-  if (first.compliant) return { images, outcome: "clean", reason: first.reason, calls: counters.calls };
+  let firstReason = first.reason;
+  if (first.compliant) {
+    const second = await confirmClean(images[0]);
+    if (second.ok) return { images, outcome: "clean", reason: first.reason, calls: counters.calls };
+    firstReason = second.reason ?? first.reason;
+  }
 
   for (let i = 1; i < images.length; i++) {
     const v = await verdictFor(images[i]);
     if (!v || !v.compliant) continue;
+    if (!(await confirmClean(images[i])).ok) continue;
     const reordered = [images[i], ...images.filter((_, j) => j !== i)];
     return { images: reordered, outcome: "reordered", reason: v.reason, promotedFrom: i, calls: counters.calls };
   }
 
-  return { images, outcome: "no_alternative", reason: first.reason, calls: counters.calls };
+  return { images, outcome: "no_alternative", reason: firstReason, calls: counters.calls };
+}
+
+/**
+ * Give every variant a CLEAN primary photo.
+ *
+ * Why (2026-10-05, chairs 15393267974249 and 14 other products imported that day): the pos-1
+ * guard was fine, but each colour's variant is attached to its OWN Aosom photo, and Aosom's
+ * first photo for a SKU is often an infographic ("Comfortable PU Leather" + zoom inset). The
+ * theme shows the selected variant's image on the card and the product page, so the shopper saw
+ * the infographic for Noir while pos-1 was clean.
+ *
+ * Runs the same guard on each variant's own photos and keeps ONLY the winner (so the later
+ * "first of v.images that is in the gallery" lookup cannot fall back to an overlay). A variant
+ * with no clean photo gets none and falls back to the product's pos-1. Verdicts are cached by
+ * stem, so siblings sharing a photo cost nothing. Fails safe: no verdict = untouched.
+ */
+export async function cleanVariantImages<V extends { images: string[] }>(
+  variants: V[],
+  options: Pick<AuditOptions, "classify" | "classifyOptions" | "useCache"> = {},
+  maxCandidates = 6,
+): Promise<V[]> {
+  const memo = new Map<string, string[]>();
+  const out: V[] = [];
+  for (const v of variants) {
+    if (!v.images?.length) { out.push(v); continue; }
+    const key = v.images.slice(0, maxCandidates).join("|");
+    let images = memo.get(key);
+    if (!images) {
+      const r = await enforceCleanPrimaryImage(v.images.slice(0, maxCandidates), options);
+      images = r.outcome === "no_alternative" ? [] : r.outcome === "skipped" ? v.images : [r.images[0]];
+      memo.set(key, images);
+    }
+    out.push({ ...v, images });
+  }
+  return out;
 }
 
 /**

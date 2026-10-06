@@ -133,6 +133,47 @@ export function mergeVariants(products: AosomProduct[]): AosomMergedProduct[] {
   return merged;
 }
 
+/**
+ * Import-path guard: keep ONE row per (group, colour, size).
+ *
+ * Aosom sometimes lists the same chair twice under one PSIN with different SKUs (835-483BK and
+ * 835-483V03BK: both "Noir / Set of 4", different photos and price). Merged as-is they collide on
+ * the Couleur/Taille pair, and shopify-client's last-resort label de-collision invents a fake size
+ * ("Lot de 4 2") — a variant no shopper can tell apart from "Lot de 4". The duplicates are not
+ * variants, they are alternate listings of one, so the extras are dropped BEFORE merging and
+ * reported to the caller. Preferred survivor: in stock, then cheapest, then feed order.
+ * Import only — never run inside mergeVariants, which the daily sync also uses for products that
+ * already exist on Shopify with their duplicate SKUs attached.
+ */
+export function dropDuplicateOptionListings(products: AosomProduct[]): {
+  kept: AosomProduct[];
+  dropped: Array<{ sku: string; keptSku: string }>;
+} {
+  const best = new Map<string, AosomProduct>();
+  const order: string[] = [];
+  const dropped: Array<{ sku: string; keptSku: string }> = [];
+  const rank = (p: AosomProduct) => [p.qty > 0 ? 0 : 1, p.price] as const;
+
+  for (const p of products) {
+    const sig = `${getGroupKey(p)}|${translateColor(p.color).toLowerCase().trim()}|${(p.size ?? "").toLowerCase().trim()}`;
+    const cur = best.get(sig);
+    if (!cur) {
+      best.set(sig, p);
+      order.push(sig);
+      continue;
+    }
+    const [a0, a1] = rank(p);
+    const [b0, b1] = rank(cur);
+    if (a0 < b0 || (a0 === b0 && a1 < b1)) {
+      dropped.push({ sku: cur.sku, keptSku: p.sku });
+      best.set(sig, p);
+    } else {
+      dropped.push({ sku: p.sku, keptSku: cur.sku });
+    }
+  }
+  return { kept: order.map((s) => best.get(s)!), dropped };
+}
+
 function toVariant(p: AosomProduct): AosomVariant {
   return {
     sku: p.sku,

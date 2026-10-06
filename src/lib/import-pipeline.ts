@@ -1,6 +1,11 @@
 import { fetchAosomCatalog } from "./csv-fetcher";
-import { mergeVariants, selectProductImagesAsync, ensureVariantPrimaryImages } from "./variant-merger";
-import { enforceCleanPrimaryImage } from "./image-compliance-audit";
+import {
+  mergeVariants,
+  dropDuplicateOptionListings,
+  selectProductImagesAsync,
+  ensureVariantPrimaryImages,
+} from "./variant-merger";
+import { enforceCleanPrimaryImage, cleanVariantImages } from "./image-compliance-audit";
 import { generateProductContent, backfillSeoFields, type GeneratedContent } from "./content-generator";
 import { runQualityGates } from "./import-quality-gates";
 import {
@@ -72,7 +77,7 @@ function rowToJob(row: Record<string, unknown>): ImportJob {
 }
 
 /** Why a requested SKU produced no import job. */
-export type SkippedImportReason = "already_imported" | "not_in_feed";
+export type SkippedImportReason = "already_imported" | "not_in_feed" | "duplicate_listing";
 
 export interface SkippedImportSku {
   sku: string;
@@ -127,7 +132,15 @@ export async function queueForImport(skus: string[]): Promise<QueueForImportResu
 
   if (toMerge.length === 0) return { jobs: [], skipped };
 
-  const merged = mergeVariants(toMerge);
+  // Two Aosom SKUs with the same colour AND size under one PSIN are one variant listed twice,
+  // not two variants (see dropDuplicateOptionListings). Keep one, say so for the other.
+  const { kept, dropped } = dropDuplicateOptionListings(toMerge);
+  for (const d of dropped) {
+    console.warn(`[IMPORT] ${d.sku} ignoré — même couleur/taille que ${d.keptSku} (annonce en double)`);
+    skipped.push({ sku: d.sku, reason: "duplicate_listing" });
+  }
+
+  const merged = mergeVariants(kept);
   const now = new Date().toISOString();
   const jobs: ImportJob[] = [];
 
@@ -158,7 +171,10 @@ export async function queueForImport(skus: string[]): Promise<QueueForImportResu
 
     // Every colour keeps its own primary photo, even past the 8-photo cap (see
     // ensureVariantPrimaryImages) — createShopifyProduct then attaches it to its variants.
-    const product = { ...rawProduct, images: ensureVariantPrimaryImages(guard.images, rawProduct.variants) };
+    // The variant's photo is what the card and the PDP show for that colour, so it gets the same
+    // clean-photo guard as pos-1 (see cleanVariantImages).
+    const variants = await cleanVariantImages(rawProduct.variants);
+    const product = { ...rawProduct, variants, images: ensureVariantPrimaryImages(guard.images, variants) };
 
     // Defensive re-check, not the primary guard anymore (that's the per-SKU filter
     // above, before merge). Catches only a race: the product got imported by a

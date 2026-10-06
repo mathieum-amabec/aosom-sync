@@ -46,7 +46,14 @@ export interface SkippedImportSku {
 export function describeSkippedImports(skipped: SkippedImportSku[]): string {
   const notInFeed = skipped.filter((s) => s.reason === "not_in_feed").map((s) => s.sku);
   const alreadyImported = skipped.filter((s) => s.reason === "already_imported").map((s) => s.sku);
+  const duplicates = skipped.filter((s) => s.reason === "duplicate_listing").map((s) => s.sku);
   const parts: string[] = [];
+
+  if (duplicates.length > 0) {
+    parts.push(
+      `${duplicates.length === 1 ? "1 annonce" : `${duplicates.length} annonces`} en double (même couleur et même format qu'un autre SKU du produit) ${duplicates.length === 1 ? "a été ignorée" : "ont été ignorées"} : ${duplicates.join(", ")}.`,
+    );
+  }
 
   if (notInFeed.length > 0) {
     parts.push(

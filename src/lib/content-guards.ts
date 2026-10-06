@@ -30,9 +30,15 @@ const DANGLING = new Set([
 
 const PLACEHOLDER = (i: number) => `\u0001${i}\u0001`;
 
+// "Lot de 4", "Ensemble de 6", "Set of 2": the piece count is the one fact a shopper must not lose
+// from the title. Protected as ONE word, ahead of DIMENSION_RE (which would swallow the bare "4").
+const QUANTITY_SRC = String.raw`(?:lot|ensemble|paquet|jeu|s[ée]rie|set|pack)\s+(?:de|d'|of)\s*\d+(?![\d.,]*\s*(?:cm|mm|m|kg|po|pi|in|ft))`;
+const QUANTITY_ONLY_RE = new RegExp(`^${QUANTITY_SRC}$`, "iu");
+const PROTECT_RE = new RegExp(`${QUANTITY_SRC}|${DIMENSION_RE.source}`, "giu");
+
 function protectDimensions(s: string): { text: string; dims: string[] } {
   const dims: string[] = [];
-  const text = s.replace(DIMENSION_RE, (m) => {
+  const text = s.replace(PROTECT_RE, (m) => {
     dims.push(m);
     return PLACEHOLDER(dims.length - 1);
   });
@@ -60,19 +66,50 @@ export function capTitleWords(title: string, max: number = MAX_TITLE_WORDS): str
   if (countTitleWords(title) <= max) return title.trim();
   const { text, dims } = protectDimensions(title);
   const words = text.split(/\s+/).filter(Boolean);
-  const kept: string[] = [];
-  let n = 0;
-  for (const w of words) {
-    if (isSeparator(w)) { kept.push(w); continue; }
-    if (n >= max) break;
-    kept.push(w);
-    n++;
+
+  const take = (list: string[], budget: number) => {
+    const out: string[] = [];
+    let n = 0;
+    for (const w of list) {
+      if (isSeparator(w)) { out.push(w); continue; }
+      if (n >= budget) break;
+      out.push(w);
+      n++;
+    }
+    return { out, n, cut: out.length < list.length };
+  };
+  const trimTail = (list: string[]) => {
+    while (list.length) {
+      const last = list[list.length - 1].toLowerCase().replace(/[.,;:]+$/, "");
+      if (isSeparator(last) || DANGLING.has(last)) list.pop();
+      else break;
+    }
+    return list;
+  };
+  const isQuantity = (w: string) => {
+    const m = /^\u0001(\d+)\u0001$/.exec(w);
+    return !!m && QUANTITY_ONLY_RE.test(dims[Number(m[1])] ?? "");
+  };
+
+  // A cut must never remove the piece count: "…similicuir — Lot de 4 chaises" used to become
+  // "…similicuir — Lot" (the "4" fell past word 10, then the dangling "de" was dropped), leaving a
+  // listing that no longer said how many chairs come in the set. Reserve one word for it and
+  // shorten the words around it instead.
+  const qtyIdx = words.findIndex(isQuantity);
+  if (qtyIdx >= 0) {
+    const before = words.slice(0, qtyIdx);
+    const after = words.slice(qtyIdx + 1);
+    const b = take(before, max - 1);
+    const a = take(after, max - 1 - b.n);
+    const hadSepBefore = before.length > 0 && isSeparator(before[before.length - 1]);
+    const head = trimTail(b.out);
+    if (hadSepBefore && head.length) head.push("—");
+    const tail = trimTail(a.out);
+    return restoreDimensions([...head, words[qtyIdx], ...tail].join(" "), dims).trim();
   }
-  while (kept.length) {
-    const last = kept[kept.length - 1].toLowerCase().replace(/[.,;:]+$/, "");
-    if (isSeparator(last) || DANGLING.has(last)) kept.pop();
-    else break;
-  }
+
+  const { out: kept } = take(words, max);
+  trimTail(kept);
   return restoreDimensions(kept.join(" "), dims).trim();
 }
 
@@ -186,3 +223,39 @@ export function findUnaccentedFrench(text: string): string[] {
 
 // ── Tags ────────────────────────────────────────────────────────────────────────────────────
 export const MIN_TAGS = 6;
+
+// ── Piece count ("Set of 4") ────────────────────────────────────────────────────────────────
+// A set's size is what the shopper is buying. The chairs imported 2026-10-05 had a title ending
+// "— Lot" and an intro that never said how many chairs come in the box.
+
+/** Number of pieces a supplier title / size label announces ("Set of 4", "6 Pack", "4 Pieces"), else null. */
+export function inferPieceCount(...texts: Array<string | null | undefined>): number | null {
+  for (const t of texts) {
+    if (!t) continue;
+    const m =
+      /\b(?:set|pack|lot|bundle)\s+of\s+(\d{1,2})\b/i.exec(t) ||
+      /\b(\d{1,2})[\s-]*(?:pcs?|pieces?|pack)\b/i.exec(t);
+    const n = m ? Number(m[1]) : NaN;
+    if (n >= 2 && n <= 24) return n;
+  }
+  return null;
+}
+
+const NUMBER_WORDS: Record<number, string[]> = {
+  2: ["deux", "two", "pair", "paire"], 3: ["trois", "three"], 4: ["quatre", "four"], 5: ["cinq", "five"],
+  6: ["six"], 7: ["sept", "seven"], 8: ["huit", "eight"], 9: ["neuf", "nine"], 10: ["dix", "ten"],
+  11: ["onze", "eleven"], 12: ["douze", "twelve", "dozen"],
+};
+
+/** True when `text` states the piece count, as digits or as a word. */
+export function mentionsPieceCount(text: string, n: number): boolean {
+  if (new RegExp(String.raw`(?<![\d.,])${n}(?![\d.,]*\s*(?:cm|mm|kg|po|pi|in|ft|lb))`, "i").test(text)) return true;
+  return (NUMBER_WORDS[n] ?? []).some((w) => new RegExp(String.raw`\b${w}\b`, "i").test(text));
+}
+
+/** Append "— Lot de N" / "— Set of N" when a generated title does not carry the piece count. */
+export function ensureTitlePieceCount(title: string, n: number | null, locale: "fr" | "en"): string {
+  if (!n || mentionsPieceCount(title, n)) return title;
+  const tail = locale === "fr" ? `Lot de ${n}` : `Set of ${n}`;
+  return capTitleWords(`${title.replace(/[\s—–-]+$/, "")} — ${tail}`);
+}

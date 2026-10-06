@@ -10,6 +10,9 @@ import {
   findImperialOnly,
   findUnaccentedFrench,
   stripColourFromTitle,
+  ensureTitlePieceCount,
+  inferPieceCount,
+  mentionsPieceCount,
   MIN_TAGS,
 } from "./content-guards";
 import { stripSupplierBrands, detectDescriptionLanguage } from "./catalog-guard";
@@ -134,6 +137,13 @@ DIMENSIONS — the shopper cannot measure a photo; this is how they judge whethe
   - If "Dimensions:" is NOT given (not provided by the supplier), do not invent, estimate or
     guess them — simply omit the dimensions bullet.
 
+PIECE COUNT — when the input data gives a "Piece count: N":
+  - The shopper must know how many pieces come in the purchase. The FIRST sentence of descriptionFr
+    AND descriptionEn must state it in digits ("Ce lot de 4 chaises …" / "This set of 4 chairs …").
+  - The title keeps it as a short trailing segment ("… — Lot de 4" / "… — Set of 4"). Never drop it,
+    never leave a dangling "Lot" without its number.
+  - Describe the SET, never one piece alone ("la chaise") when N > 1.
+
 CAPACITY (storage boxes, bins, coolers, tanks, planters, …) — when the source names a volume:
   - State it in litres ONLY. NEVER write "gallon(s)" or "gal" anywhere in your output, not even
     in parentheses alongside litres. Convert: 1 US gallon = 3.785 litres, rounded to a whole number.
@@ -248,9 +258,16 @@ export async function generateProductContent(
     ? `Dimensions: ${dimsCm.length} x ${dimsCm.width} x ${dimsCm.height} cm`
     : "Dimensions: not provided by the supplier — do not invent or estimate them.";
 
+  // A set is sold as N pieces; the listing must say so (title + first sentence of the body).
+  const pieceCount = inferPieceCount(product.name, ...product.variants.map((v) => v.size), cleanShort);
+  const pieceCountLine = pieceCount
+    ? `Piece count: ${pieceCount} — sold as ONE set of ${pieceCount} pieces (see PIECE COUNT rule).\n`
+    : "";
+
   const prompt = `Create a Shopify product listing from this data:
 
 Name: ${cleanName}
+${pieceCountLine}
 Brand (supplier — internal only, NEVER put it in the title): ${product.brand}
 Category: ${product.productType}
 Material: ${product.material}
@@ -350,8 +367,10 @@ ${correction}` : prompt;
       // first (so a dimension reads as one unit), then drop the colour, then cap the length.
       const multiColour = new Set(product.variants.map((v) => v.color).filter(Boolean)).size > 1;
       for (const [key, locale] of [["titleFr", "fr"], ["titleEn", "en"]] as const) {
-        parsed[key] = capTitleWords(
-          stripColourFromTitle(convertImperialInTitle(parsed[key], locale), multiColour),
+        parsed[key] = ensureTitlePieceCount(
+          capTitleWords(stripColourFromTitle(convertImperialInTitle(parsed[key], locale), multiColour)),
+          pieceCount,
+          locale,
         );
       }
 
@@ -405,7 +424,7 @@ ${correction}` : prompt;
     // fixable by the SAME model in one cheap extra call, so they never escalate to the paid tier
     // and are handled OUTSIDE the try above — a budget/network failure on the retry must
     // propagate as itself, not be relabelled a validation error (which would buy an escalation).
-    const issues = collectCopyIssues(content, dimsCm);
+    const issues = collectCopyIssues(content, dimsCm, pieceCount);
     if (issues.length && !correction) {
       console.warn(`[content-generator] ${model} copy needs a fix (${issues.join("; ")}) — one corrective retry`);
       return attempt(tier, buildCorrection(issues));
@@ -451,8 +470,20 @@ const stripTags = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g
 export function collectCopyIssues(
   c: GeneratedContent,
   expectedDimsCm?: { length: number; width: number; height: number } | null,
+  expectedPieceCount?: number | null,
 ): string[] {
   const issues: string[] = [];
+  if (expectedPieceCount) {
+    // The count must be readable in the FIRST sentence/paragraph, not only buried in a bullet.
+    for (const [lang, html] of [["French", c.descriptionFr], ["English", c.descriptionEn]] as const) {
+      const lead = stripTags(html).slice(0, 320);
+      if (!mentionsPieceCount(lead, expectedPieceCount)) {
+        issues.push(
+          `the ${lang} description does not state in its opening sentence that this is a set of ${expectedPieceCount} pieces — say it up front ("Lot de ${expectedPieceCount} …" / "Set of ${expectedPieceCount} …")`,
+        );
+      }
+    }
+  }
   const bodyText = [c.descriptionFr, c.descriptionEn, c.seoDescriptionFr, c.seoDescriptionEn].map(stripTags).join(" . ");
   const imperial = findImperialOnly(bodyText);
   if (imperial.length) {
