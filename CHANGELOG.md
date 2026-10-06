@@ -2,6 +2,35 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.10] - 2026-10-06
+
+### Added
+
+- **Reel measurement.** The publisher now records which Facebook / Instagram post each published row became
+  (`queue_post_ids`, best-effort: a failure to record never fails a live post). A daily cron, `/api/cron/reel-insights` (09:30 UTC,
+  before the morning report), reads each Reel's plays, watch time and social actions from the Graph API (page token we already
+  hold, no new permission) into `reel_insights`, one snapshot per Reel per day. A Meta metric that gets retired never costs the
+  whole snapshot. Studio Ameublo has a new **Résultats** tab (`GET /api/ameublo/insights`): by kind of video, page and time slot,
+  with the sample size beside every number; **only Reels older than 48 h are compared** (a young Reel has not collected what an old
+  one has) and groups under 5 Reels are flagged. The morning report gets a "Résultats des Reels" section.
+- **UTM tags on every storefront link in a Reel caption**, applied at publish time (so videos approved long ago are tagged and the
+  stored caption stays clean): `utm_source=facebook|instagram&utm_medium=reel&utm_campaign=<style>&utm_content=v<studio id>|q<queue id>`.
+  Only ameublodirect.ca / furnishdirect.ca links; an already-tagged link is left alone. Umami can now tell which video brought a visit.
+- Morning report: **"Publications en échec"** alert — failed queue rows due in the last 3 days or still ahead (16 batch Reels sat
+  `failed` for weeks without anyone knowing).
+- Studio: the Hormozi styles (aventure, budget, vote, mesure) and batch types (assembly, demand_gen_ext…) show their names instead of the raw key.
+- Scripts: `backfill-reel-post-ids.mts` (attach Facebook ids to Reels published before this change, by publication time — dry run by
+  default) and `requeue-failed-batch-reels.mts` (see below).
+
+### Fixed
+
+- **Batch Reels (assembly / demand_gen_ext) went out with NO link.** Their caption prompt says "le lien est sous la vidéo", but a Reel
+  has no link field (`link` is only used for text-only Facebook posts). The product page is now appended to the caption.
+- **16 batch Reels were stuck `failed`** ("payload.caption is required", the bug fixed on 2026-10-01): they had failed on their original
+  slots and were later re-timed without being reset to `pending`. `requeue-failed-batch-reels.mts` puts back the ones that are safe
+  (video reachable, Shopify product active, no stale seasonal content, no price burned in the title); 13 were re-queued, 3 Halloween ones
+  scheduled after Halloween are left for a human decision.
+
 ## [0.5.107.8] - 2026-10-05
 
 ### Added

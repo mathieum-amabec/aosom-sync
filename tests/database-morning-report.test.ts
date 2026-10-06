@@ -52,7 +52,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   for (const t of [
     "guide_pages", "ameublo_test_videos", "publication_queue", "image_review_queue", "import_jobs", "notifications",
-    "price_floor_incidents", "facebook_drafts", "blog_posts", "cron_runs",
+    "price_floor_incidents", "facebook_drafts", "blog_posts", "cron_runs", "queue_post_ids", "reel_insights",
   ]) {
     await db.execute(`DELETE FROM ${t}`);
   }
@@ -188,7 +188,16 @@ describe("countMorningReportAlerts", () => {
       importErrors: 1,
       catalogIssues: 2,
       unreadNotifications: 1,
+      failedPublications: 0,
     });
+  });
+
+  it("counts failed publications that were due in the last 3 days or are still ahead — not old history", async () => {
+    await queued("assembly", "failed", at(-24 * 10)); // 10 days ago: history, ignored
+    await queued("sequential_ad", "failed", at(-24)); // yesterday
+    await queued("assembly", "failed", at(24 * 5)); // re-slotted ahead but still 'failed' (the 2026-10 incident)
+    await queued("sequential_ad", "pending", at(24)); // healthy
+    expect((await mod.countMorningReportAlerts()).failedPublications).toBe(2);
   });
 
   it("treats a missing or corrupt audit setting as zero instead of throwing", async () => {
@@ -239,5 +248,61 @@ describe("countReelsStock", () => {
       fr: { scheduled: 0, lastScheduledAt: null, ready: 0 },
       en: { scheduled: 0, lastScheduledAt: null, ready: 0 },
     });
+  });
+});
+
+describe("Reel measurement storage", () => {
+  const publishedReel = async (opts: { style?: string; lang?: "fr" | "en"; videoId?: number; hoursAgo?: number; scheduledAt?: string } = {}) => {
+    queueSeq++;
+    const brand = opts.lang === "en" ? "furnish" : "ameublo";
+    const r = await db.execute({
+      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at, status, published_at, metadata)
+            VALUES ('sequential_ad', ?, 'both', ?, ?, 'published', datetime('now', ?), ?)`,
+      args: [`ameublo:${queueSeq}`, JSON.stringify({ brand, caption: "x" }), opts.scheduledAt ?? `2026-10-06 11:${String(queueSeq % 60).padStart(2, "0")}:00`,`-${opts.hoursAgo ?? 5} hours`, JSON.stringify({ source: "ameublo_studio", style: opts.style ?? "vitrine", ameubloVideoId: opts.videoId ?? null })],
+    });
+    return Number(r.lastInsertRowid);
+  };
+  const M = { plays: 12, initialPlays: 10, avgWatchMs: 4200, totalWatchMs: 50000, socialActions: 3 };
+
+  it("recordQueuePostIds keeps what is already known when a later call only brings one platform", async () => {
+    const id = await publishedReel();
+    await mod.recordQueuePostIds(id, { fb: "FB1" });
+    await mod.recordQueuePostIds(id, { ig: "IG1" });
+    const row = (await db.execute({ sql: `SELECT fb_post_id, ig_post_id FROM queue_post_ids WHERE queue_id = ?`, args: [id] })).rows[0] as unknown as { fb_post_id: string; ig_post_id: string };
+    expect(row).toMatchObject({ fb_post_id: "FB1", ig_post_id: "IG1" });
+    await mod.recordQueuePostIds(id, {}); // nothing to record: a no-op
+  });
+
+  it("listReelsToMeasure returns published Reels with a Facebook id inside the window, with their brand", async () => {
+    const recent = await publishedReel({ hoursAgo: 5 });
+    const old = await publishedReel({ hoursAgo: 24 * 30 });
+    const igOnly = await publishedReel({ hoursAgo: 5 });
+    await mod.recordQueuePostIds(recent, { fb: "FB-recent" });
+    await mod.recordQueuePostIds(old, { fb: "FB-old" });
+    await mod.recordQueuePostIds(igOnly, { ig: "IG-only" });
+    const got = await mod.listReelsToMeasure(14);
+    expect(got.map((r) => r.fbPostId)).toEqual(["FB-recent"]);
+    expect(got[0]).toMatchObject({ queueId: recent, brand: "ameublo" });
+  });
+
+  it("saveReelInsight is one snapshot per day: the second run of a day overwrites it", async () => {
+    const id = await publishedReel();
+    await mod.saveReelInsight(id, "facebook", "FB1", M);
+    await mod.saveReelInsight(id, "facebook", "FB1", { ...M, plays: 20 });
+    const rows = (await db.execute({ sql: `SELECT plays FROM reel_insights WHERE queue_id = ?`, args: [id] })).rows;
+    expect(rows).toHaveLength(1);
+    expect(Number((rows[0] as unknown as { plays: number }).plays)).toBe(20);
+  });
+
+  it("getReelResultRows gives the latest snapshot of each Reel with its style, language and Studio video", async () => {
+    const vid = await db.execute({ sql: `INSERT INTO ameublo_test_videos (series, video_url, style, lang, label) VALUES ('S', 'u', 'vote', 'en', 'Sofa vs chair')` });
+    const q = await publishedReel({ style: "vote", lang: "en", videoId: Number(vid.lastInsertRowid) });
+    await db.execute({ sql: `UPDATE ameublo_test_videos SET queue_id = ? WHERE id = ?`, args: [q, Number(vid.lastInsertRowid)] });
+    await db.execute({ sql: `INSERT INTO reel_insights (queue_id, platform, post_id, day, plays) VALUES (?, 'facebook', 'F', '2026-10-01', 1), (?, 'facebook', 'F', '2026-10-02', 7)`, args: [q, q] });
+    const other = await publishedReel({ style: "vitrine" }); // never measured: absent
+    void other;
+    const rows = await mod.getReelResultRows(14);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ queueId: q, style: "vote", lang: "en", label: "Sofa vs chair", plays: 7, measuredOn: "2026-10-02" });
   });
 });

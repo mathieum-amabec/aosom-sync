@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
-import { STYLE_LABEL, type AmeubloStyle } from "@/lib/ameublo-caption";
+import { styleLabelOf } from "@/lib/ameublo-style-label";
 import { markScheduled, markUnscheduled } from "@/lib/ameublo-studio-state";
 import { CATEGORY_LABEL, CATEGORY_ORDER, type CategoryKey } from "@/lib/ameublo-categories";
 import WeekPlanPanel from "./week-plan-panel";
+import ResultsPanel from "./results-panel";
 
 // Mirrors AmeubloTestVideo in src/lib/database.ts.
 interface StudioVideo {
@@ -68,7 +69,7 @@ const QA_CLASS = {
 } as const;
 const QA_LABEL = { pass: "Réviseur : OK", review: "Réviseur : à voir", fail: "Réviseur : refusé" } as const;
 
-const styleLabel = (s: string | null) => (s && s in STYLE_LABEL ? STYLE_LABEL[s as AmeubloStyle].fr : (s ?? "—"));
+const styleLabel = (s: string | null) => styleLabelOf(s, "fr");
 
 function fmtWhen(sqlite: string | null): string {
   if (!sqlite) return "";
@@ -127,7 +128,7 @@ export default function AmeubloStudioClient() {
   const [fLang, setFLang] = useState("");
   const [fSeries, setFSeries] = useState("");
   const [fCampaign, setFCampaign] = useState("");
-  const [view, setView] = useState<"videos" | "plan">("videos");
+  const [view, setView] = useState<"videos" | "plan" | "results">("videos");
   const [fStatus, setFStatus] = useState("new");
   const [fCategory, setFCategory] = useState("");
   const [fSub, setFSub] = useState("");
@@ -342,7 +343,7 @@ export default function AmeubloStudioClient() {
       </div>
 
       <div className="flex gap-2 text-sm">
-        {([["videos", "Vidéos"], ["plan", "Plan de la semaine"]] as const).map(([key, label]) => (
+        {([["videos", "Vidéos"], ["plan", "Plan de la semaine"], ["results", "Résultats"]] as const).map(([key, label]) => (
           <button
             key={key}
             onClick={() => setView(key)}
@@ -355,6 +356,8 @@ export default function AmeubloStudioClient() {
 
       {view === "plan" ? (
         <WeekPlanPanel onApproved={load} />
+      ) : view === "results" ? (
+        <ResultsPanel />
       ) : (
       <>
       <div className="flex flex-wrap gap-2 text-xs">

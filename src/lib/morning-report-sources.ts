@@ -9,13 +9,16 @@ import {
   countGuidesAwaitingApproval,
   countMorningReportAlerts,
   countReelsStock,
+  getReelResultRows,
 } from "./database";
 import { getActiveCampaignDaySummaries, getAdAccounts } from "./meta-ads-client";
 import { pickAdAccount } from "./ads-insights";
 import { loadGuardStatuses } from "./guard-status";
+import { summarizeReels } from "./reel-insights";
 import type { MorningReportSources } from "./morning-report";
 
 export const VIDEO_HORIZON_DAYS = 3;
+export const REEL_RESULTS_DAYS = 7;
 
 export const morningReportSources: MorningReportSources = {
   meta: async (day) => {
@@ -28,6 +31,21 @@ export const morningReportSources: MorningReportSources = {
   guides: () => countGuidesAwaitingApproval(),
   videos: async () => ({ ...(await countContentFormatVideos(VIDEO_HORIZON_DAYS)), horizonDays: VIDEO_HORIZON_DAYS }),
   reelsStock: () => countReelsStock(),
+  reelResults: async () => {
+    const days = REEL_RESULTS_DAYS;
+    const rows = await getReelResultRows(days);
+    const sum = summarizeReels(rows);
+    const watch = rows.map((r) => r.avgWatchMs).filter((x): x is number => x != null && x > 0);
+    const best = sum.byStyle.find((g) => !g.lowSample);
+    return {
+      days,
+      measured: sum.measured,
+      totalPlays: sum.totalPlays,
+      avgWatchS: watch.length ? watch.reduce((a, b) => a + b, 0) / watch.length / 1000 : null,
+      bestStyle: best ? { key: best.key, avgPlays: best.avgPlays, n: best.n } : null,
+      lastMeasuredOn: sum.lastMeasuredOn,
+    };
+  },
   alerts: async () => {
     const a = await countMorningReportAlerts();
     return [
@@ -36,6 +54,7 @@ export const morningReportSources: MorningReportSources = {
       { label: "Images en attente de révision", count: a.imagesPendingReview },
       { label: "Imports en erreur", count: a.importErrors },
       { label: "Problèmes de cohérence du catalogue", count: a.catalogIssues },
+      { label: "Publications en échec (récentes ou à venir)", count: a.failedPublications },
       { label: "Notifications non lues", count: a.unreadNotifications },
     ];
   },

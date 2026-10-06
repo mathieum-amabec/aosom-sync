@@ -11,6 +11,7 @@
  * a DB or network (sources are injected).
  */
 import type { CampaignDaySummary } from "./meta-ads-client";
+import { styleLabelOf } from "./ameublo-style-label";
 import type { GuardStatus } from "./guard-status";
 
 export const REPORT_TIME_ZONE = "America/Montreal";
@@ -71,6 +72,18 @@ export function reelsRunwayDays(lastScheduledAt: string | null, today: string): 
   return Math.max(0, diff + 1);
 }
 
+/** How the Reels of the last `days` days performed on Facebook (from the daily reel-insights snapshot). */
+export interface ReelResultsSummary {
+  days: number;
+  measured: number;
+  totalPlays: number;
+  /** Mean of the Reels' own average watch time, in seconds; null when none reported one. */
+  avgWatchS: number | null;
+  /** Best-performing kind of video among groups with enough Reels to compare; null while the samples are too small. */
+  bestStyle: { key: string; avgPlays: number; n: number } | null;
+  lastMeasuredOn: string | null;
+}
+
 export interface MorningReportData {
   /** Montreal calendar date the report is for (YYYY-MM-DD). */
   reportDate: string;
@@ -81,6 +94,8 @@ export interface MorningReportData {
   videos: Section<VideosSummary>;
   /** Studio Reels reserve: how many days of approved videos are left per page. */
   reelsStock: Section<ReelsStockSummary>;
+  /** What the published Reels got (plays, watch time), so the grid and the video types can be judged on numbers. */
+  reelResults: Section<ReelResultsSummary>;
   alerts: Section<AlertItem[]>;
   blocked: Section<BlockedItem[]>;
   /** Red/green verdict per daily guard (guard-status.ts) — the same one the dashboard shows. */
@@ -92,6 +107,7 @@ export interface MorningReportSources {
   guides: () => Promise<GuidesSummary>;
   videos: () => Promise<VideosSummary>;
   reelsStock: () => Promise<ReelsStockSummary>;
+  reelResults: () => Promise<ReelResultsSummary>;
   alerts: () => Promise<AlertItem[]>;
   blocked: () => Promise<BlockedItem[]>;
   guards: () => Promise<GuardStatus[]>;
@@ -134,16 +150,17 @@ async function settle<T>(fn: () => Promise<T>): Promise<Section<T>> {
 export async function collectMorningReport(sources: MorningReportSources, now: Date): Promise<MorningReportData> {
   const reportDate = localClock(now).date;
   const metaDay = previousDay(reportDate);
-  const [meta, guides, videos, reelsStock, alerts, blocked, guards] = await Promise.all([
+  const [meta, guides, videos, reelsStock, reelResults, alerts, blocked, guards] = await Promise.all([
     settle(() => sources.meta(metaDay)),
     settle(sources.guides),
     settle(sources.videos),
     settle(sources.reelsStock),
+    settle(sources.reelResults),
     settle(sources.alerts),
     settle(sources.blocked),
     settle(sources.guards),
   ]);
-  return { reportDate, metaDay, meta, guides, videos, reelsStock, alerts, blocked, guards };
+  return { reportDate, metaDay, meta, guides, videos, reelsStock, reelResults, alerts, blocked, guards };
 }
 
 // ── render ────────────────────────────────────────────────────────────────────
@@ -276,6 +293,29 @@ function sectionLines(data: MorningReportData): ReportSection[] {
       });
       if (low.length) lines.push("Ouvre le Studio Ameublo → « Plan de la semaine » pour approuver la suite en un clic.");
       out.push({ title: low.length ? `${title} — basse` : title, lines, alert: low.length > 0 });
+    }
+  }
+
+  // 3c. Reel results — what the published Reels got, so types / time slots can be judged on numbers rather than hunches.
+  {
+    const title = "Résultats des Reels (Facebook)";
+    if (!data.reelResults.ok) out.push({ title, lines: [], missing: data.reelResults.error });
+    else {
+      const r = data.reelResults.data;
+      if (r.measured === 0) {
+        out.push({ title, lines: ["Aucun Reel mesuré pour l'instant (la collecte quotidienne vient de démarrer)."] });
+      } else {
+        const lines = [
+          `${plural(r.measured, "Reel mesuré", "Reels mesurés")} sur ${r.days} jours · ${plural(r.totalPlays, "lecture", "lectures")} au total` +
+            (r.avgWatchS != null ? ` · ${new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 1 }).format(r.avgWatchS)} s regardées en moyenne.` : "."),
+        ];
+        lines.push(
+          r.bestStyle
+            ? `Type le plus regardé : ${styleLabelOf(r.bestStyle.key, "fr")} (${new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 1 }).format(r.bestStyle.avgPlays)} lectures en moyenne, ${plural(r.bestStyle.n, "Reel", "Reels")}).`
+            : "Trop tôt pour comparer les types de vidéos (il faut au moins 5 Reels par type).",
+        );
+        out.push({ title: `${title} — ${r.days} j`, lines });
+      }
     }
   }
 

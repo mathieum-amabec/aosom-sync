@@ -17,6 +17,7 @@ vi.mock("@/lib/database", () => ({
   countMorningReportAlerts: vi.fn(),
   countAwaitingOperator: vi.fn(),
   countReelsStock: vi.fn(),
+  getReelResultRows: vi.fn(),
   loadGuardInputs: vi.fn(),
 }));
 vi.mock("@/lib/klaviyo-client", () => ({ trackEvent: vi.fn() }));
@@ -48,8 +49,9 @@ beforeEach(() => {
   vi.mocked(db.countGuidesAwaitingApproval).mockResolvedValue({ pending: 2, ready: 1, attention: 1, attentionTitles: ["X"] });
   vi.mocked(db.countContentFormatVideos).mockResolvedValue({ pendingApproval: 3, scheduledSoon: 5 });
   vi.mocked(db.countMorningReportAlerts).mockResolvedValue({
-    priceBelowFloor: 0, priceFloorIncidents24h: 0, imagesPendingReview: 4, importErrors: 0, catalogIssues: 0, unreadNotifications: 0,
+    priceBelowFloor: 0, priceFloorIncidents24h: 0, imagesPendingReview: 4, importErrors: 0, catalogIssues: 0, unreadNotifications: 0, failedPublications: 0,
   });
+  vi.mocked(db.getReelResultRows).mockResolvedValue([]);
   vi.mocked(db.countAwaitingOperator).mockResolvedValue({
     sequentialAds: 16, importsToPush: 0, importsNeedsReview: 1, socialDrafts: 0, blogDrafts: 0,
   });

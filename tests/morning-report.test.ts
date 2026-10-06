@@ -30,6 +30,7 @@ function sources(over: Partial<MorningReportSources> = {}): MorningReportSources
       fr: { scheduled: 24, lastScheduledAt: "2026-10-05 23:45:00", ready: 30 },
       en: { scheduled: 24, lastScheduledAt: "2026-10-05 23:50:00", ready: 28 },
     })),
+    reelResults: vi.fn(async () => ({ days: 7, measured: 40, totalPlays: 812, avgWatchS: 4.2, bestStyle: { key: "vitrine", avgPlays: 31.5, n: 9 }, lastMeasuredOn: "2026-10-12" })),
     alerts: vi.fn(async () => [
       { label: "Prix sous le plancher", count: 1 },
       { label: "Images à revoir", count: 0 },
@@ -256,5 +257,36 @@ describe("Studio Reels reserve section", () => {
     expect(data.reelsStock).toEqual({ ok: false, error: "db down" });
     expect(data.videos.ok).toBe(true);
     expect(renderMorningReport(data).missingSections).toEqual(["Réserve de Reels (Studio)"]);
+  });
+});
+
+describe("Reel results section", () => {
+  const NOW = new Date("2026-10-12T10:00:00Z");
+  const results = (over: object) =>
+    sources({ reelResults: vi.fn(async () => ({ days: 7, measured: 12, totalPlays: 240, avgWatchS: 4.2, bestStyle: null, lastMeasuredOn: "2026-10-12", ...over })) });
+
+  it("shows the totals and the best kind of video by its French name", async () => {
+    const r = renderMorningReport(await collectMorningReport(sources(), NOW));
+    expect(r.text).toContain("RÉSULTATS DES REELS (FACEBOOK) — 7 J");
+    expect(r.text).toMatch(/40 Reels mesurés sur 7 jours · 812 lectures au total · 4,2 s regardées en moyenne\./);
+    expect(r.text).toContain("Type le plus regardé : Vitrine (31,5 lectures en moyenne, 9 Reels).");
+  });
+  it("says it is too early to compare when no kind of video has enough Reels", async () => {
+    const r = renderMorningReport(await collectMorningReport(results({ bestStyle: null }), NOW));
+    expect(r.text).toContain("Trop tôt pour comparer les types de vidéos (il faut au moins 5 Reels par type).");
+    expect(r.text).not.toContain("Type le plus regardé");
+  });
+  it("says collection has just started when nothing was measured", async () => {
+    const r = renderMorningReport(await collectMorningReport(results({ measured: 0, totalPlays: 0, avgWatchS: null }), NOW));
+    expect(r.text).toContain("Aucun Reel mesuré pour l'instant");
+  });
+  it("names the new Hormozi styles properly instead of their raw key", async () => {
+    const r = renderMorningReport(await collectMorningReport(results({ bestStyle: { key: "aventure", avgPlays: 10, n: 6 } }), NOW));
+    expect(r.text).toContain("Les aventures d’Ameublo");
+  });
+  it("a failing source only marks this section unavailable", async () => {
+    const data = await collectMorningReport(sources({ reelResults: vi.fn(async () => { throw new Error("graph down"); }) }), NOW);
+    expect(data.reelResults).toEqual({ ok: false, error: "graph down" });
+    expect(renderMorningReport(data).missingSections).toEqual(["Résultats des Reels (Facebook)"]);
   });
 });
