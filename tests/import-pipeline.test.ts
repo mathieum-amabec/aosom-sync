@@ -15,6 +15,7 @@ vi.mock("@/lib/csv-fetcher", () => ({
 }));
 vi.mock("@/lib/variant-merger", () => ({
   mergeVariants: vi.fn(),
+  dropDuplicateOptionListings: vi.fn((p: unknown[]) => ({ kept: p, dropped: [] })),
   buildSkuIndex: vi.fn(),
   selectProductImages: vi.fn((imgs: string[]) => imgs),
   selectProductImagesAsync: vi.fn(async (imgs: string[]) => imgs),

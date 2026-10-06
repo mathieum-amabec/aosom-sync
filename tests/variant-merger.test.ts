@@ -341,3 +341,33 @@ describe("selectProductImagesAsync", () => {
     expect(out).toEqual([W]);
   });
 });
+
+import { dropDuplicateOptionListings } from "../src/lib/variant-merger";
+
+describe("dropDuplicateOptionListings (chairs 2026-10-05: 'Lot de 4 2')", () => {
+  const row = (sku: string, color: string, size: string, price: number, qty = 10) =>
+    ({ sku, psin: "P1", color, size, price, qty, name: "n", images: [] }) as never;
+
+  it("keeps ONE row per colour+size under a PSIN — in stock first, then cheapest", () => {
+    const { kept, dropped } = dropDuplicateOptionListings([
+      row("835-483BK", "Black", "Set of 4", 143.99),
+      row("835-483V03GY", "Grey", "Set of 4", 128.99),
+      row("835-483V03BK", "Black", "Set of 4", 144.99),
+    ]);
+    expect(kept.map((p) => p.sku)).toEqual(["835-483BK", "835-483V03GY"]);
+    expect(dropped).toEqual([{ sku: "835-483V03BK", keptSku: "835-483BK" }]);
+  });
+  it("prefers the in-stock duplicate over a cheaper sold-out one", () => {
+    const { kept } = dropDuplicateOptionListings([row("A-BK", "Black", "Set of 4", 100, 0), row("B-BK", "Black", "Set of 4", 120, 5)]);
+    expect(kept.map((p) => p.sku)).toEqual(["B-BK"]);
+  });
+  it("never merges genuinely different sizes or colours", () => {
+    const { kept, dropped } = dropDuplicateOptionListings([
+      row("A-BK", "Black", "Set of 4", 1),
+      row("B-BK", "Black", "Set of 6", 2),
+      row("C-GY", "Grey", "Set of 4", 3),
+    ]);
+    expect(kept).toHaveLength(3);
+    expect(dropped).toHaveLength(0);
+  });
+});

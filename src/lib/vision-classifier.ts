@@ -107,6 +107,8 @@ async function downloadBase64(src: string, px: number): Promise<string> {
 export interface ClassifyOptions {
   /** Longest edge requested from the CDN. Default DEFAULT_CLASSIFY_PX (1024). */
   px?: number;
+  /** Model tier. Default "lite" (cheap, but it can miss a text overlay); "strong" is the second opinion. */
+  tier?: "lite" | "strong";
   /**
    * Charge the call to the uncapped `maintenance` pool instead of `batch`.
    *
@@ -137,7 +139,7 @@ export async function classifyProductImage(
   const client = getAnthropicClient();
 
   const request = {
-    model: llmModel("lite"),
+    model: llmModel(options.tier ?? "lite"),
     // 200 truncated the JSON mid-object on verbose verdicts (the model listed every measured
     // dimension it found), which threw as "invalid JSON" and cost the product its audit.
     // Measured on a 1,730-product pass: 2 losses at 200, none at 400.

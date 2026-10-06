@@ -397,20 +397,52 @@ export async function enforceCleanPrimaryImage(
     return map.get(imageUrlStem(url));
   };
 
+  // Second opinion on any photo about to become pos-1. The cheap "lite" model said "no text" with
+  // confidence 1.0 on an Aosom infographic ("Comfortable PU Leather" + zoom inset) and it shipped
+  // as pos-1 (2026-10-05, chairs 15393267974249). A false "clean" is the costly error — the shopper
+  // sees it — so the one photo we are about to publish is re-checked by the strong tier, and its
+  // verdict replaces the cached one (so the daily guard agrees). A failed second call keeps the
+  // first opinion: no evidence must never block an import.
+  const confirmClean = async (url: string): Promise<{ ok: boolean; reason?: string }> => {
+    try {
+      const px = opts.classifyOptions?.px ?? DEFAULT_CLASSIFY_PX;
+      const classify = opts.classify ?? classifyProductImage;
+      counters.calls++;
+      const v = await classify(url, { ...opts.classifyOptions, tier: "strong" });
+      if (opts.useCache) {
+        await putCachedImageVerdict(
+          imageUrlStem(url),
+          { compliant: v.compliant, reason: v.reason, confidence: v.confidence },
+          { model: `${llmModel("strong")}@${px}`, sampleUrl: url },
+        );
+      }
+      return { ok: v.compliant, reason: v.reason };
+    } catch (err) {
+      counters.lastError = err instanceof Error ? err.message : String(err);
+      return { ok: true };
+    }
+  };
+
   const first = await verdictFor(images[0]);
   // No verdict = no evidence. Importing an overlay is a small, correctable harm; refusing to
   // import, or reordering on a guess, is worse.
   if (!first) return { images, outcome: "skipped", reason: counters.lastError, calls: counters.calls };
-  if (first.compliant) return { images, outcome: "clean", reason: first.reason, calls: counters.calls };
+  let firstReason = first.reason;
+  if (first.compliant) {
+    const second = await confirmClean(images[0]);
+    if (second.ok) return { images, outcome: "clean", reason: first.reason, calls: counters.calls };
+    firstReason = second.reason ?? first.reason;
+  }
 
   for (let i = 1; i < images.length; i++) {
     const v = await verdictFor(images[i]);
     if (!v || !v.compliant) continue;
+    if (!(await confirmClean(images[i])).ok) continue;
     const reordered = [images[i], ...images.filter((_, j) => j !== i)];
     return { images: reordered, outcome: "reordered", reason: v.reason, promotedFrom: i, calls: counters.calls };
   }
 
-  return { images, outcome: "no_alternative", reason: first.reason, calls: counters.calls };
+  return { images, outcome: "no_alternative", reason: firstReason, calls: counters.calls };
 }
 
 /**

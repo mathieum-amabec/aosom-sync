@@ -183,14 +183,40 @@ describe("enforceCleanPrimaryImage — the import-time guard", () => {
 
   beforeEach(() => classify.mockReset());
 
-  it("leaves a clean pos-1 alone after ONE call", async () => {
+  it("leaves a clean pos-1 alone after two calls (lite verdict + strong second opinion)", async () => {
     classify.mockResolvedValue({ compliant: true, reason: "propre" });
 
     const out = await run(["a.jpg", "b.jpg", "c.jpg"]);
 
     expect(out.outcome).toBe("clean");
     expect(out.images).toEqual(["a.jpg", "b.jpg", "c.jpg"]);
-    expect(out.calls).toBe(1);
+    expect(out.calls).toBe(2);
+    expect(classify.mock.calls[1][1]).toMatchObject({ tier: "strong" });
+  });
+
+  it("rejects a pos-1 the lite model called clean when the strong model sees text (chairs 2026-10-05)", async () => {
+    classify.mockImplementation(async (url: string, o?: { tier?: string }) =>
+      url === "a.jpg" && o?.tier === "strong"
+        ? { compliant: false, reason: "texte « Comfortable PU Leather »" }
+        : { compliant: true, reason: "propre" },
+    );
+
+    const out = await run(["a.jpg", "b.jpg"]);
+
+    expect(out.outcome).toBe("reordered");
+    expect(out.images).toEqual(["b.jpg", "a.jpg"]);
+  });
+
+  it("keeps the lite verdict when the second opinion itself fails — never blocks an import", async () => {
+    classify.mockImplementation(async (_u: string, o?: { tier?: string }) => {
+      if (o?.tier === "strong") throw new Error("503");
+      return { compliant: true, reason: "propre" };
+    });
+
+    const out = await run(["a.jpg", "b.jpg"]);
+
+    expect(out.outcome).toBe("clean");
+    expect(out.images).toEqual(["a.jpg", "b.jpg"]);
   });
 
   it("promotes the first clean photo when pos-1 carries text", async () => {
@@ -245,12 +271,13 @@ describe("enforceCleanPrimaryImage — the import-time guard", () => {
     expect(out.images[0]).toBe("c.jpg");
   });
 
-  it("costs exactly one call on the common case — the cost claim for the import guard", async () => {
+  it("costs two calls on the common case — the cost claim for the import guard", async () => {
     classify.mockResolvedValue({ compliant: true, reason: "propre" });
 
     const out = await run(["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg"]);
 
-    // 5 of 6 imports have a clean pos-1 already; a 6-image set must not cost 6 calls.
-    expect(out.calls).toBe(1);
+    // 5 of 6 imports have a clean pos-1 already; a 6-image set must not cost 6 calls. One lite
+    // verdict + one strong second opinion on the photo about to be published.
+    expect(out.calls).toBe(2);
   });
 });

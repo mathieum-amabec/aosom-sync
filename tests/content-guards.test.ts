@@ -37,6 +37,24 @@ describe("capTitleWords", () => {
     const out = capTitleWords("Abri de jardin en acier galvanisé résistant aux intempéries avec porte 6 x 4 m", 9);
     expect(out).not.toMatch(/\b6 x$/);
   });
+  it("never drops the piece count (chairs bug 2026-10-05: '— Lot de 4 chaises' became '— Lot')", () => {
+    const out = capTitleWords("Chaises de salle à manger modernes en similicuir — Lot de 4 chaises");
+    expect(out).toBe("Chaises de salle à manger modernes en similicuir — Lot de 4 chaises");
+  });
+  it("shortens the words around the piece count instead of cutting it", () => {
+    const out = capTitleWords("Chaises de salle à manger modernes rembourrées en similicuir noir avec pieds en acier — Lot de 4");
+    expect(out).toMatch(/Lot de 4$/);
+    expect(countTitleWords(out)).toBeLessThanOrEqual(10);
+    expect(out).not.toMatch(/\b(de|avec|en)\s+—/);
+  });
+  it("keeps a leading piece count in place", () => {
+    const out = capTitleWords("Ensemble de 6 chaises de salle à manger modernes rembourrées en tissu avec pieds en bois");
+    expect(out.startsWith("Ensemble de 6 chaises")).toBe(true);
+    expect(countTitleWords(out)).toBeLessThanOrEqual(10);
+  });
+  it("does not mistake a measurement for a piece count", () => {
+    expect(countTitleWords("Table d'appoint ensemble de 40 cm")).toBe(5);
+  });
 });
 
 describe("stripColourFromTitle", () => {
@@ -99,5 +117,30 @@ describe("findUnaccentedFrench", () => {
   });
   it("passes correctly accented French", () => {
     expect(findUnaccentedFrench("Tapis de jeu pour bébé, sécurité et résistance")).toEqual([]);
+  });
+});
+
+import { inferPieceCount, mentionsPieceCount, ensureTitlePieceCount } from "../src/lib/content-guards";
+
+describe("piece count", () => {
+  it("reads the set size from a supplier title or size label", () => {
+    expect(inferPieceCount("High Back Dining Chairs, Set of 4, Black")).toBe(4);
+    expect(inferPieceCount("x", "Set of 6")).toBe(6);
+    expect(inferPieceCount("Folding Chairs 6 Pack")).toBe(6);
+    expect(inferPieceCount("Single Chair")).toBeNull();
+    expect(inferPieceCount("Set of 1")).toBeNull();
+  });
+  it("detects the count as digits or words, but not a measurement", () => {
+    expect(mentionsPieceCount("Ce lot de 4 chaises", 4)).toBe(true);
+    expect(mentionsPieceCount("Ces quatre chaises", 4)).toBe(true);
+    expect(mentionsPieceCount("Améliorez votre espace repas avec ces chaises modernes", 4)).toBe(false);
+    expect(mentionsPieceCount("Hauteur 4 cm", 4)).toBe(false);
+  });
+  it("appends the count to a title that lost it, and leaves a complete title alone", () => {
+    expect(ensureTitlePieceCount("Chaises de salle à manger modernes en similicuir", 4, "fr")).toBe(
+      "Chaises de salle à manger modernes en similicuir — Lot de 4",
+    );
+    expect(ensureTitlePieceCount("Chaises modernes — Lot de 4", 4, "fr")).toBe("Chaises modernes — Lot de 4");
+    expect(ensureTitlePieceCount("Chaise", null, "fr")).toBe("Chaise");
   });
 });
