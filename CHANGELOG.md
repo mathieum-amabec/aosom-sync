@@ -2,6 +2,26 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.12] - 2026-10-07
+
+### Added
+
+- **Photo posts are now measured and tagged.** Every storefront link in a photo / album post (`content_type=social`) is UTM-tagged at publish
+  time, like the Reels: `utm_source=facebook|instagram&utm_medium=photo&utm_campaign=<La semaine Ameublo format, else "social">&utm_content=q<queue id>`
+  (only ameublodirect.ca / furnishdirect.ca links; an already-tagged link is left alone), so Umami can tell which post brought a visit.
+- A daily cron, `/api/cron/photo-insights` (09:35 UTC, after reel-insights and before the 06:00 Montreal report), reads each photo post's
+  views, reach, reactions, comments and shares (Facebook) and views / reach / likes / saves (Instagram) for the last 14 days into
+  `photo_insights` (created lazily; one snapshot per post per platform per day). A retired Meta metric never costs the snapshot; the post's own
+  counters carry the engagement. Instagram insights need the `instagram_manage_insights` permission: a refusal is noted once per run, not
+  counted as a failure on every post.
+- Morning report: new **"Résultats des photos (Facebook)"** section — totals, Instagram views when readable, and the best La semaine Ameublo
+  format (only photos older than 48 h are compared, at least 5 per format).
+
+### Fixed
+
+- A single-platform photo post (every Furnish Direct one) never returned its Facebook post id to the publisher, so nothing could be measured for it;
+  it now goes through the same path as a Reel and the id is recorded.
+
 ## [0.5.107.11] - 2026-10-07
 
 ### Added

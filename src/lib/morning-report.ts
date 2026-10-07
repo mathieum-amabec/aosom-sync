@@ -12,6 +12,7 @@
  */
 import type { CampaignDaySummary } from "./meta-ads-client";
 import { styleLabelOf } from "./ameublo-style-label";
+import { formatLabelOf } from "./photo-insights";
 import type { GuardStatus } from "./guard-status";
 
 export const REPORT_TIME_ZONE = "America/Montreal";
@@ -84,6 +85,21 @@ export interface ReelResultsSummary {
   lastMeasuredOn: string | null;
 }
 
+/** How the photo posts (La semaine Ameublo) of the last `days` days performed on Facebook, from the daily photo-insights snapshot. */
+export interface PhotoResultsSummary {
+  days: number;
+  measured: number;
+  totalViews: number;
+  totalReactions: number;
+  totalComments: number;
+  totalShares: number;
+  /** Instagram views of the same window; null when none were measured. */
+  instagramViews: number | null;
+  /** Best format among those with enough photos to compare; null while the samples are too small. */
+  bestFormat: { key: string; avgViews: number; n: number } | null;
+  lastMeasuredOn: string | null;
+}
+
 export interface MorningReportData {
   /** Montreal calendar date the report is for (YYYY-MM-DD). */
   reportDate: string;
@@ -96,6 +112,8 @@ export interface MorningReportData {
   reelsStock: Section<ReelsStockSummary>;
   /** What the published Reels got (plays, watch time), so the grid and the video types can be judged on numbers. */
   reelResults: Section<ReelResultsSummary>;
+  /** What the photo posts got (views, reactions…), so the weekly formats can be judged on numbers. */
+  photoResults: Section<PhotoResultsSummary>;
   alerts: Section<AlertItem[]>;
   blocked: Section<BlockedItem[]>;
   /** Red/green verdict per daily guard (guard-status.ts) — the same one the dashboard shows. */
@@ -108,6 +126,7 @@ export interface MorningReportSources {
   videos: () => Promise<VideosSummary>;
   reelsStock: () => Promise<ReelsStockSummary>;
   reelResults: () => Promise<ReelResultsSummary>;
+  photoResults: () => Promise<PhotoResultsSummary>;
   alerts: () => Promise<AlertItem[]>;
   blocked: () => Promise<BlockedItem[]>;
   guards: () => Promise<GuardStatus[]>;
@@ -150,17 +169,18 @@ async function settle<T>(fn: () => Promise<T>): Promise<Section<T>> {
 export async function collectMorningReport(sources: MorningReportSources, now: Date): Promise<MorningReportData> {
   const reportDate = localClock(now).date;
   const metaDay = previousDay(reportDate);
-  const [meta, guides, videos, reelsStock, reelResults, alerts, blocked, guards] = await Promise.all([
+  const [meta, guides, videos, reelsStock, reelResults, photoResults, alerts, blocked, guards] = await Promise.all([
     settle(() => sources.meta(metaDay)),
     settle(sources.guides),
     settle(sources.videos),
     settle(sources.reelsStock),
     settle(sources.reelResults),
+    settle(sources.photoResults),
     settle(sources.alerts),
     settle(sources.blocked),
     settle(sources.guards),
   ]);
-  return { reportDate, metaDay, meta, guides, videos, reelsStock, reelResults, alerts, blocked, guards };
+  return { reportDate, metaDay, meta, guides, videos, reelsStock, reelResults, photoResults, alerts, blocked, guards };
 }
 
 // ── render ────────────────────────────────────────────────────────────────────
@@ -314,6 +334,29 @@ function sectionLines(data: MorningReportData): ReportSection[] {
             ? `Type le plus regardé : ${styleLabelOf(r.bestStyle.key, "fr")} (${new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 1 }).format(r.bestStyle.avgPlays)} lectures en moyenne, ${plural(r.bestStyle.n, "Reel", "Reels")}).`
             : "Trop tôt pour comparer les types de vidéos (il faut au moins 5 Reels par type).",
         );
+        out.push({ title: `${title} — ${r.days} j`, lines });
+      }
+    }
+  }
+
+  // 3d. Photo results — what the daily photo posts got, so the weekly formats can be judged on numbers rather than hunches.
+  {
+    const title = "Résultats des photos (Facebook)";
+    if (!data.photoResults.ok) out.push({ title, lines: [], missing: data.photoResults.error });
+    else {
+      const r = data.photoResults.data;
+      if (r.measured === 0) {
+        out.push({ title, lines: ["Aucune photo mesurée pour l'instant (la collecte quotidienne vient de démarrer)."] });
+      } else {
+        const fmt = (n: number) => new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 1 }).format(n);
+        const lines = [
+          `${plural(r.measured, "photo mesurée", "photos mesurées")} sur ${r.days} jours · ${plural(r.totalViews, "vue", "vues")} · ${plural(r.totalReactions, "réaction", "réactions")}, ` +
+            `${plural(r.totalComments, "commentaire", "commentaires")}, ${plural(r.totalShares, "partage", "partages")}` +
+            (r.instagramViews != null ? ` · Instagram : ${plural(r.instagramViews, "vue", "vues")}.` : "."),
+          r.bestFormat
+            ? `Format le plus vu : ${formatLabelOf(r.bestFormat.key)} (${fmt(r.bestFormat.avgViews)} vues en moyenne, ${plural(r.bestFormat.n, "photo", "photos")}).`
+            : "Trop tôt pour comparer les formats (il faut au moins 5 photos par format, vieilles de 48 h).",
+        ];
         out.push({ title: `${title} — ${r.days} j`, lines });
       }
     }

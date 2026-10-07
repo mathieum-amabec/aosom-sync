@@ -581,9 +581,24 @@ describe("Reel UTM tagging + post id recording", () => {
     expect(fbCaption()).toBe("Un salon qui se monte tout seul.");
   });
 
-  it("leaves a normal (non-Reel) social post alone", async () => {
-    await publishQueueItem(item({ platform: "facebook", payload: social({ imageUrl: "a.jpg", caption: `Voir ${LINK}` }) }));
-    expect(vi.mocked(publishWithImage).mock.calls.at(-1)![0].caption).toBe(`Voir ${LINK}`);
+  it("tags a photo post's storefront links with medium=photo, named after its La semaine Ameublo format", async () => {
+    await publishQueueItem(item({ id: 7, platform: "facebook", metadata: { source: "semaine", format: "baisses" }, payload: social({ imageUrl: "a.jpg", caption: `Voir ${LINK}` }) }));
+    expect(vi.mocked(publishWithImage).mock.calls.at(-1)![0].caption).toBe(`Voir ${LINK}?utm_source=facebook&utm_medium=photo&utm_campaign=baisses&utm_content=q7`);
+  });
+
+  it("names the campaign 'social' for a photo post that is not from La semaine Ameublo", async () => {
+    await publishQueueItem(item({ id: 8, platform: "facebook", payload: social({ imageUrl: "a.jpg", caption: `Voir ${LINK}` }) }));
+    expect(vi.mocked(publishWithImage).mock.calls.at(-1)![0].caption).toContain("utm_medium=photo&utm_campaign=social&utm_content=q8");
+  });
+
+  it("never touches a third-party link in a photo post", async () => {
+    await publishQueueItem(item({ platform: "facebook", payload: social({ imageUrl: "a.jpg", caption: "Voir https://www.facebook.com/ameublodirect" }) }));
+    expect(vi.mocked(publishWithImage).mock.calls.at(-1)![0].caption).toBe("Voir https://www.facebook.com/ameublodirect");
+  });
+
+  it("returns the post id of a single-platform photo post so it can be measured", async () => {
+    const r = await publishQueueItem(item({ platform: "facebook", payload: social({ imageUrl: "a.jpg", caption: "x" }) }));
+    expect(r.fbPostId).toBeTruthy();
   });
 
   it("records the Facebook and Instagram post ids after publishing", async () => {

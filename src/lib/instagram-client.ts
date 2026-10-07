@@ -47,6 +47,11 @@ function brandCreds(brand: InstagramBrand): BrandCreds {
   throw new Error(`Unknown Instagram brand: ${brand}`);
 }
 
+/** Public accessor for a brand's IG user id + token (used by the photo-insights reader). */
+export function instagramBrandCreds(brand: InstagramBrand): BrandCreds {
+  return brandCreds(brand);
+}
+
 /**
  * Test the Instagram connection by fetching account info.
  */
