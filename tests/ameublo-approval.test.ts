@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const mascot = vi.hoisted(() => ({ enforce: false }));
+vi.mock("@/lib/mascot-guard", async (orig) => {
+  const actual = await orig<typeof import("@/lib/mascot-guard")>();
+  return {
+    ...actual,
+    // Off by default so the existing Studio fixtures (vitrine/reaction…) keep exercising the paths they test.
+    assertNoMascot: (m: never) => { if (mascot.enforce) actual.assertNoMascot(m); },
+    mascotBlockReason: (m: never) => (mascot.enforce ? actual.mascotBlockReason(m) : null),
+  };
+});
+
 const db = vi.hoisted(() => ({
   getAmeubloTestVideo: vi.fn(),
   getOccupiedAmeubloSlots: vi.fn(),

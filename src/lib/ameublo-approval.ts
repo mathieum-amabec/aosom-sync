@@ -22,6 +22,7 @@ import {
 import { ameubloScheduleForLang, getNextAvailableSlot, parseAmeubloSchedule, parseReactionSchedule } from "@/lib/publication-scheduler";
 import { checkSequentialAdPrice } from "@/lib/sequential-ad-price";
 import { stripSupplierBrands } from "@/lib/catalog-guard";
+import { mascotBlockReason } from "@/lib/mascot-guard";
 
 const sqliteToUnixSec = (s: string): number => Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
 
@@ -31,6 +32,9 @@ export type AmeubloApproveResult =
 
 /** Why a video may not be approved right now, or null when it can be. */
 export function approvalBlocker(v: AmeubloTestVideo, force: boolean): string | null {
+  // The mascot is off the air: not overridable by `force`.
+  const mascot = v.style ? mascotBlockReason({ source: "ameublo_studio", style: v.style }) : null;
+  if (mascot) return mascot.charAt(0).toUpperCase() + mascot.slice(1);
   if (!v.lang || !v.style) return "Vidéo d’une ancienne série (sans langue ni style) : non publiable.";
   if (!v.caption?.trim()) return "Légende manquante.";
   if (v.verdict === "bad") return "Marquée « À revoir » : retire d’abord ce verdict.";

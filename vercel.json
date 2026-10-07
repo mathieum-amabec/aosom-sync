@@ -148,6 +148,14 @@
       "schedule": "0 11 * * *"
     },
     {
+      "path": "/api/cron/publish-check",
+      "schedule": "15 10 * * *"
+    },
+    {
+      "path": "/api/cron/publish-check",
+      "schedule": "15 11 * * *"
+    },
+    {
       "path": "/api/cron/costway-sync",
       "schedule": "0 16 * * *"
     }
