@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.13] - 2026-10-07
+
+### Fixed
+
+- **Instagram photo / carousel posts were published without waiting for Instagram to say the image was ready**, and the Facebook+Instagram
+  publish only logged an Instagram failure to the console (the item stayed "published"). Over the last 9 days 22 of 40 photo posts never appeared
+  on the Ameublo Instagram account (all images are square 2000x2000, so the format is not the cause) and nobody could see why. Now: the photo,
+  each carousel child and the carousel itself are polled until FINISHED (an ERROR status is reported with Instagram's own reason; 30 s limit),
+  `media_publish` is retried up to 3 times when Meta says the media is not ready yet (never on a permission or policy refusal), and a post that went
+  out on one channel only keeps its reason in `publication_queue.error` and raises a "Publication partielle" notification
+  (`queue-partial-error.ts`). The real cause, if it is not readiness, will now be readable from the next failures.
+
 ## [0.5.107.12] - 2026-10-07
 
 ### Added

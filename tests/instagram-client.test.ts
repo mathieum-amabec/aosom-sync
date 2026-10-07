@@ -43,6 +43,105 @@ describe("publishPhoto (Instagram photo, raw URL)", () => {
       publishPhoto({ caption: "x", imageUrl: "https://cdn/a.jpg", brand: "ameublo" }),
     ).rejects.toThrow(/publish blew up/);
   });
+
+  describe("readiness and retry", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+    const publishCalls = () => fetchMock.mock.calls.filter((c) => c[0].includes("media_publish"));
+
+    it("waits until the container is FINISHED before publishing", async () => {
+      let polls = 0;
+      fetchMock.mockImplementation((url: string) => {
+        if (url.includes("media_publish")) return Promise.resolve(json({ id: "media1" }));
+        if (url.includes("fields=status_code")) return Promise.resolve(json({ status_code: ++polls < 3 ? "IN_PROGRESS" : "FINISHED" }));
+        return Promise.resolve(json({ id: "creation1" }));
+      });
+      const p = publishPhoto({ caption: "x", imageUrl: "https://cdn/a.jpg", brand: "ameublo" });
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(p).resolves.toEqual({ id: "media1", creationId: "creation1" });
+      expect(polls).toBe(3);
+    });
+
+    it("does not publish a container Instagram marked ERROR, and says why", async () => {
+      fetchMock.mockImplementation((url: string) => {
+        if (url.includes("fields=status_code")) return Promise.resolve(json({ status_code: "ERROR", status: "Error: Image could not be fetched" }));
+        return Promise.resolve(json({ id: "creation1" }));
+      });
+      const p = publishPhoto({ caption: "x", imageUrl: "https://cdn/a.jpg", brand: "ameublo" });
+      const assertion = expect(p).rejects.toThrow(/photo container ERROR — Error: Image could not be fetched/);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await assertion;
+      expect(publishCalls()).toHaveLength(0);
+    });
+
+    it("gives up after 30 s when the container never gets ready", async () => {
+      fetchMock.mockImplementation((url: string) => {
+        if (url.includes("fields=status_code")) return Promise.resolve(json({ status_code: "IN_PROGRESS" }));
+        return Promise.resolve(json({ id: "creation1" }));
+      });
+      const p = publishPhoto({ caption: "x", imageUrl: "https://cdn/a.jpg", brand: "ameublo" });
+      const assertion = expect(p).rejects.toThrow(/photo container not ready after 30s/);
+      await vi.advanceTimersByTimeAsync(35_000);
+      await assertion;
+      expect(publishCalls()).toHaveLength(0);
+    });
+
+    it("retries the publish step when Meta says the media is not ready yet", async () => {
+      let attempts = 0;
+      fetchMock.mockImplementation((url: string) => {
+        if (url.includes("media_publish")) {
+          return Promise.resolve(++attempts === 1 ? json({ error: { message: "Media ID is not available", code: 9007 } }, 400) : json({ id: "media1" }));
+        }
+        if (url.includes("fields=status_code")) return Promise.resolve(json({ status_code: "FINISHED" }));
+        return Promise.resolve(json({ id: "creation1" }));
+      });
+      const p = publishPhoto({ caption: "x", imageUrl: "https://cdn/a.jpg", brand: "ameublo" });
+      await vi.advanceTimersByTimeAsync(6_000);
+      await expect(p).resolves.toMatchObject({ id: "media1" });
+      expect(publishCalls()).toHaveLength(2);
+    });
+
+    it("stops after 3 attempts and reports how many it made", async () => {
+      fetchMock.mockImplementation((url: string) => {
+        if (url.includes("media_publish")) return Promise.resolve(json({ error: { message: "The media is not ready for publishing", code: 9007 } }, 400));
+        if (url.includes("fields=status_code")) return Promise.resolve(json({ status_code: "FINISHED" }));
+        return Promise.resolve(json({ id: "creation1" }));
+      });
+      const p = publishPhoto({ caption: "x", imageUrl: "https://cdn/a.jpg", brand: "ameublo" });
+      const assertion = expect(p).rejects.toThrow(/not ready for publishing.*\[after 3 attempts\]/);
+      await vi.advanceTimersByTimeAsync(20_000);
+      await assertion;
+      expect(publishCalls()).toHaveLength(3);
+    });
+
+    it("never retries a refusal (permission, policy)", async () => {
+      fetchMock.mockImplementation((url: string) => {
+        if (url.includes("media_publish")) return Promise.resolve(json({ error: { message: "Application does not have permission for this action", code: 10 } }, 400));
+        if (url.includes("fields=status_code")) return Promise.resolve(json({ status_code: "FINISHED" }));
+        return Promise.resolve(json({ id: "creation1" }));
+      });
+      await expect(publishPhoto({ caption: "x", imageUrl: "https://cdn/a.jpg", brand: "ameublo" })).rejects.toThrow(/does not have permission/);
+      expect(publishCalls()).toHaveLength(1);
+    });
+
+    it("a carousel waits for every child and for the parent before publishing", async () => {
+      const polled: string[] = [];
+      let n = 0;
+      fetchMock.mockImplementation((url: string, opts: { body?: string } = {}) => {
+        if (url.includes("media_publish")) return Promise.resolve(json({ id: "media1" }));
+        if (url.includes("fields=status_code")) {
+          polled.push(url.split("?")[0].split("/").pop()!);
+          return Promise.resolve(json({ status_code: "FINISHED" }));
+        }
+        const body = JSON.parse(opts.body!);
+        return Promise.resolve(json({ id: body.media_type === "CAROUSEL" ? "parent" : `child${++n}` }));
+      });
+      const p = publishCarousel({ caption: "x", imageUrls: ["https://cdn/a.jpg", "https://cdn/b.jpg"], brand: "ameublo" });
+      await vi.advanceTimersByTimeAsync(3_000);
+      await expect(p).resolves.toMatchObject({ id: "media1" });
+      expect(polled).toEqual(["child1", "child2", "parent"]);
+    });
+  });
 });
 
 describe("publishReel (Instagram Reels)", () => {
