@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.11] - 2026-10-07
+
+### Added
+
+- **"La semaine Ameublo": fully automated photo posts, 2 a day per brand (Facebook + Instagram), off by default.** Two crons,
+  `/api/cron/semaine?slot=morning` (13:00 UTC, for the 10:00 Toronto slot) and `?slot=afternoon` (18:00 UTC, for 15:00), build one
+  post each and put it in `publication_queue` (the existing publisher posts it, with its retries and failed-item alert). Morning =
+  a format per weekday: new arrivals (Mon), price drops (Tue), a complete room (Wed), A or B (Thu), most popular (Fri), a measuring
+  tip (Sat), a favourite (Sun); afternoon = one featured product with its link. Multi-product posts go out as a Facebook album /
+  Instagram carousel of the raw Shopify photos (no renderer; the shelved carousel module stays shelved).
+- **Every number a customer sees is written by code from live data, never by the model.** Each product must pass a live gate
+  (Shopify active, in stock, real storefront price, a verified lifestyle photo; new arrivals and price drops may use the clean
+  primary photo, since fresh imports are never verified yet). The model writes only the hook: price, rabais (only a real Shopify
+  compare-at of 10 % or more), link, free shipping and hashtags are appended by code. The text is validated (no price, link or
+  hashtag, no invented number, no delivery talk, no fake urgency, no supplier name, right language, ends with a question) and
+  re-read by a judge call; two rejected tries re-pick other products, then fall back to another format, then the slot is skipped
+  with a notification. Out-of-season products (patio, sandbox, pool…) are excluded from October to April; SKUs rest for 21 days.
+- **Kill switch:** the setting `semaine_enabled` must be `"1"` (anything else queues nothing). `?dryRun=1` previews a post without
+  queueing or writing anything (also `scripts/semaine-preview.mts`). One row per day and slot in `semaine_posts` (created lazily)
+  makes the cron idempotent and holds the history used for the cooldown and, later, for measurement.
+
 ## [0.5.107.10] - 2026-10-06
 
 ### Added
