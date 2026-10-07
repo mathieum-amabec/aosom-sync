@@ -51,6 +51,7 @@ import {
 } from "./database";
 import { checkSequentialAdPrice } from "./sequential-ad-price";
 import { addUtm, tagCaptionLinks } from "./utm";
+import { assertNoMascot } from "./mascot-guard";
 import { recordPartialFailure } from "./queue-partial-error";
 
 export interface SocialQueuePayload {
@@ -409,6 +410,9 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
   } catch {
     throw new Error("payload is not valid JSON");
   }
+
+  // No mascot on the air (2026-10-07): refuse loudly rather than post a Studio render that burns it in.
+  assertNoMascot(item.metadata);
 
   // Batch video formats (content-batches pipeline) are queued as {sku, productName, blobUrl}
   // — no caption, no brand — so they used to hit parseSocialPayload below and fail with

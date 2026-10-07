@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const mascot = vi.hoisted(() => ({ enforce: false }));
+vi.mock("@/lib/mascot-guard", async (orig) => {
+  const actual = await orig<typeof import("@/lib/mascot-guard")>();
+  return {
+    ...actual,
+    // Off by default so the existing Studio fixtures (vitrine/reaction…) keep exercising the paths they test.
+    assertNoMascot: (m: never) => { if (mascot.enforce) actual.assertNoMascot(m); },
+    mascotBlockReason: (m: never) => (mascot.enforce ? actual.mascotBlockReason(m) : null),
+  };
+});
+
 vi.mock("@/lib/facebook-client", () => ({
   publishText: vi.fn().mockResolvedValue({ id: "fb-txt", postId: "fb-txt" }),
   publishWithImage: vi.fn().mockResolvedValue({ id: "fb-img", postId: "fb-img" }),
@@ -645,5 +656,36 @@ describe("Reel UTM tagging + post id recording", () => {
     expect(markPublished).toHaveBeenCalledWith(77);
     expect(markFailed).not.toHaveBeenCalled();
     expect(res).toMatchObject({ published: 1, failed: 0 });
+  });
+});
+
+describe("publishQueueItem — mascot guard", () => {
+  const studioItem = (style: string) =>
+    item({
+      platform: "instagram",
+      contentType: "sequential_ad",
+      payload: social({ reelsVideoUrl: "https://blob/r.mp4", caption: "Légende" }),
+      metadata: { source: "ameublo_studio", keepCaption: true, style },
+    });
+
+  it("refuses a Studio render that burns the mascot in, without publishing", async () => {
+    mascot.enforce = true;
+    try {
+      vi.mocked(publishReel).mockClear();
+      await expect(publishQueueItem(studioItem("piece"))).rejects.toThrow(/mascot_blocked/);
+      expect(publishReel).not.toHaveBeenCalled();
+    } finally {
+      mascot.enforce = false;
+    }
+  });
+
+  it("still publishes the faceless real-footage style", async () => {
+    mascot.enforce = true;
+    try {
+      await publishQueueItem(studioItem("emotion"));
+      expect(publishReel).toHaveBeenCalled();
+    } finally {
+      mascot.enforce = false;
+    }
   });
 });
