@@ -34,6 +34,7 @@ vi.mock("@/lib/database", () => ({
   createNotification: vi.fn().mockResolvedValue(1),
   recordQueuePostIds: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/queue-partial-error", () => ({ recordPartialFailure: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@/lib/content-generator", () => ({ getAnthropicClient: vi.fn() }));
 
 import {
@@ -64,6 +65,7 @@ import {
   recordQueuePostIds,
 } from "@/lib/database";
 import { getAnthropicClient } from "@/lib/content-generator";
+import { recordPartialFailure } from "@/lib/queue-partial-error";
 
 const mockGetClient = getAnthropicClient as unknown as ReturnType<typeof vi.fn>;
 /** Stub the Anthropic client so messages.create returns `text` (or throws if `text` is null). */
@@ -606,6 +608,33 @@ describe("Reel UTM tagging + post id recording", () => {
     vi.mocked(claimQueueItem).mockResolvedValue(true);
     await drainPublisherQueue({ sleep: vi.fn().mockResolvedValue(undefined) });
     expect(recordQueuePostIds).toHaveBeenCalledWith(77, { fb: "fb-reel", ig: expect.any(String) });
+  });
+
+  it("keeps the reason when only one channel published (Facebook ok, Instagram refused)", async () => {
+    vi.mocked(publishPhoto).mockRejectedValueOnce(new Error("Instagram Ameublo Direct (publish): media not ready"));
+    vi.mocked(getNextPending).mockResolvedValue([item({ id: 91, platform: "both", payload: social({ imageUrl: "a.jpg", caption: "x" }) })] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+    const res = await drainPublisherQueue({ sleep: vi.fn().mockResolvedValue(undefined) });
+    expect(res).toMatchObject({ published: 1, failed: 0 });
+    expect(recordPartialFailure).toHaveBeenCalledWith(91, "both", expect.stringMatching(/instagram: .*media not ready/));
+  });
+
+  it("does not record anything when both channels publish", async () => {
+    vi.mocked(recordPartialFailure).mockClear();
+    vi.mocked(getNextPending).mockResolvedValue([item({ id: 92, platform: "both", payload: social({ imageUrl: "a.jpg", caption: "x" }) })] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+    await drainPublisherQueue({ sleep: vi.fn().mockResolvedValue(undefined) });
+    expect(recordPartialFailure).not.toHaveBeenCalled();
+  });
+
+  it("never lets a failure to record the partial failure turn a live post into a failed item", async () => {
+    vi.mocked(recordPartialFailure).mockRejectedValueOnce(new Error("db hiccup"));
+    vi.mocked(publishPhoto).mockRejectedValueOnce(new Error("IG down"));
+    vi.mocked(getNextPending).mockResolvedValue([item({ id: 93, platform: "both", payload: social({ imageUrl: "a.jpg", caption: "x" }) })] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+    const res = await drainPublisherQueue({ sleep: vi.fn().mockResolvedValue(undefined) });
+    expect(markFailed).not.toHaveBeenCalledWith(93, expect.anything());
+    expect(res).toMatchObject({ failed: 0 });
   });
 
   it("never lets a failure to record the ids turn a live post into a failed item", async () => {

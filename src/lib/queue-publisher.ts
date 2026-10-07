@@ -51,6 +51,7 @@ import {
 } from "./database";
 import { checkSequentialAdPrice } from "./sequential-ad-price";
 import { addUtm, tagCaptionLinks } from "./utm";
+import { recordPartialFailure } from "./queue-partial-error";
 
 export interface SocialQueuePayload {
   caption: string;
@@ -628,6 +629,13 @@ export async function drainPublisherQueue(opts: {
       }
       if (result.partialError) {
         console.warn(`[publisher] item ${item.id} (${item.platform}) published with partial failure: ${result.partialError}`);
+        // Keep the reason where it can be read (it only lived in this log line, so a failing channel went unnoticed for weeks).
+        // Best-effort: the post is live, a bookkeeping failure must not turn it into a failed item.
+        try {
+          await recordPartialFailure(item.id, item.platform, result.partialError);
+        } catch (err) {
+          console.warn(`[publisher] item ${item.id}: could not record the partial failure: ${err instanceof Error ? err.message : err}`);
+        }
       }
       outcomes.push({
         id: item.id,
