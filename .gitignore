@@ -112,3 +112,8 @@ coverage/
 # 45 had piled up in the main clone by 2026-09-27; they were archived outside the repo.
 /.tmp-*
 /.ameublo-scene-*
+
+# ── Halloween ad tooling (scripts/halloween-ads): source clips, renders and scratch live outside git ──
+/scripts/halloween-ads/src/
+/scripts/halloween-ads/work/
+/scripts/halloween-ads/out/
