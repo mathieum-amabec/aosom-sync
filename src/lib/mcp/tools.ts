@@ -12,6 +12,7 @@
 import { toFtsQuery } from "@/lib/catalog-filters";
 import type { Scope } from "@/lib/mcp/scopes";
 import { ANALYTICS_TOOLS } from "@/lib/mcp/analytics-tools";
+import { MORNING_REPORT_LAST_KEY, parseStoredReport } from "@/lib/morning-report-store";
 
 export interface Db {
   execute(stmt: { sql: string; args?: (string | number)[] }): Promise<{ rows: unknown[] }>;
@@ -199,5 +200,33 @@ export const READ_TOOLS: ToolDef[] = [
   },
 ];
 
+/**
+ * The daily morning report, READ from where the 06:00 cron stored it (one SELECT on `settings`): no Meta call, no email provider.
+ * This is how the report is reached when the email never arrives, and what a scheduled agent fetches to deliver it elsewhere.
+ */
+const REPORT_TOOL: ToolDef = {
+  scope: "read",
+  name: "morning_report",
+  description:
+    "The latest morning report (the daily 06:00 Montréal digest: Meta ads, guides, videos, Reels and photo results, alerts, guards), as plain text. " +
+    "Returns the date it is for, how old it is, and any section that was unavailable. Built once a day by the 06:00 job.",
+  inputSchema: { type: "object", properties: {} },
+  handler: async (db) => {
+    const [row] = await run(db, `SELECT value FROM settings WHERE key = ?`, [MORNING_REPORT_LAST_KEY]);
+    const report = parseStoredReport(row?.value);
+    if (!report) return { available: false, message: "Aucun rapport du matin n'a encore été enregistré (le premier est construit à 06:00, heure de Montréal)." };
+    const ageHours = report.generatedAt ? Math.round((Date.now() - Date.parse(report.generatedAt)) / 3_600_000) : null;
+    return {
+      available: true,
+      date: report.date,
+      subject: report.subject,
+      generated_at: report.generatedAt,
+      age_hours: ageHours,
+      missing_sections: report.missingSections,
+      text: report.text,
+    };
+  },
+};
+
 /** Everything the database-only server can offer (read + analytics). Import tools live in import-tools.ts. */
-export const TOOLS: ToolDef[] = [...READ_TOOLS, ...ANALYTICS_TOOLS];
+export const TOOLS: ToolDef[] = [...READ_TOOLS, REPORT_TOOL, ...ANALYTICS_TOOLS];

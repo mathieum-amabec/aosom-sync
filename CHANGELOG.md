@@ -2,6 +2,18 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.14] - 2026-10-07
+
+### Added
+
+- **The morning report no longer depends on Klaviyo to be reachable.** The 06:00 job now stores the finished report in `settings.morning_report_last`
+  (date, subject, plain text, unavailable sections, build time) BEFORE it tries the email, so a silent or failing email never makes the report vanish.
+  Klaviyo had accepted the event every day since Sep 26 while no email ever reached the inbox (flow live, 0 recipients, profile never subscribed), so
+  "sent" proved nothing.
+- **New MCP tool `morning_report`** (scope `read`, one SELECT on that settings key, no Meta call): returns the latest report as plain text with its date,
+  age in hours and any unavailable section. Ask Claude for "le rapport du matin" from claude.ai / desktop / mobile, or let a scheduled agent fetch it and
+  deliver it anywhere. Reconnect the AMEUBLO connector once for the new tool to appear.
+
 ## [0.5.107.13] - 2026-10-07
 
 ### Fixed

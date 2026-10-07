@@ -137,8 +137,23 @@ describe("GET /api/cron/morning-report", () => {
     vi.mocked(trackEvent).mockResolvedValue({ ok: false, status: 400, error: "Klaviyo 400" });
     const res = await GET(req());
     expect(res.status).toBe(500);
-    expect(db.setSetting).not.toHaveBeenCalled();
+    expect(db.setSetting).not.toHaveBeenCalledWith("morning_report_last_sent", expect.anything());
     expect(db.recordCronRun).toHaveBeenCalledWith("morning-report", "error", expect.stringContaining("Klaviyo 400"));
+  });
+
+  it("keeps the report itself even when the email fails, so it can still be read (MCP tool)", async () => {
+    vi.mocked(trackEvent).mockResolvedValue({ ok: false, status: 400, error: "Klaviyo 400" });
+    await GET(req());
+    const stored = vi.mocked(db.setSetting).mock.calls.find((c) => c[0] === "morning_report_last");
+    expect(stored).toBeTruthy();
+    expect(JSON.parse(String(stored![1]))).toMatchObject({ date: "2026-09-25", subject: expect.stringContaining("Rapport du matin") });
+    expect(JSON.parse(String(stored![1])).text).toContain("2 guides en attente");
+  });
+
+  it("keeps the report even when no recipient is configured", async () => {
+    envMock.morningReportEmail = undefined;
+    await GET(req());
+    expect(vi.mocked(db.setSetting).mock.calls.some((c) => c[0] === "morning_report_last")).toBe(true);
   });
 
   it("returns 500 (visible in cron_runs) when no recipient is configured", async () => {

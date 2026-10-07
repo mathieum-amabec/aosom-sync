@@ -36,6 +36,32 @@ describe("MCP protocol", () => {
     expect((await handleMessage(fakeDb(), { id: 3, method: "nope" }))?.error?.code).toBe(-32601);
     expect((await call(fakeDb(), "drop_everything"))?.error?.code).toBe(-32602);
   });
+
+  describe("morning_report tool", () => {
+    const stored = JSON.stringify({ date: "2026-10-07", subject: "Rapport du matin — mercredi 7 octobre", text: "Résultats des photos : 12 vues", missingSections: ["Publicités Meta"], generatedAt: new Date(Date.now() - 3 * 3_600_000).toISOString() });
+    const out = (r: Awaited<ReturnType<typeof call>>) => JSON.parse((r?.result as { content: { text: string }[] }).content[0].text);
+
+    it("is a read-only tool, available with the basic permission", () => {
+      expect(TOOLS.find((t) => t.name === "morning_report")?.scope).toBe("read");
+    });
+    it("returns the stored report with its age and missing sections", async () => {
+      const o = out(await call(fakeDb([{ value: stored }]), "morning_report"));
+      expect(o).toMatchObject({ available: true, date: "2026-10-07", age_hours: 3, missing_sections: ["Publicités Meta"] });
+      expect(o.text).toContain("12 vues");
+    });
+    it("runs a single read-only SELECT on the settings key", async () => {
+      const db = fakeDb([{ value: stored }]);
+      await call(db, "morning_report");
+      expect(db.execute).toHaveBeenCalledTimes(1);
+      const stmt = (db.execute.mock.calls[0] as unknown as [{ sql: string; args: string[] }])[0];
+      expect(stmt.sql).toMatch(/^\s*select/i);
+      expect(stmt.args).toEqual(["morning_report_last"]);
+    });
+    it("says so plainly when no report is stored yet, or the value is unreadable", async () => {
+      expect(out(await call(fakeDb([]), "morning_report")).available).toBe(false);
+      expect(out(await call(fakeDb([{ value: "not json" }]), "morning_report")).available).toBe(false);
+    });
+  });
 });
 
 describe("MCP tools", () => {

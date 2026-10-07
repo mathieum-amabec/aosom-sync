@@ -11,6 +11,7 @@ import {
   renderMorningReport,
 } from "@/lib/morning-report";
 import { morningReportSources as sources } from "@/lib/morning-report-sources";
+import { MORNING_REPORT_LAST_KEY, serializeReport } from "@/lib/morning-report-store";
 
 /**
  * GET /api/cron/morning-report — Mat's daily 06:00 America/Montreal email digest.
@@ -65,10 +66,16 @@ export async function GET(request: Request) {
         if (!force && (await getSetting(LAST_SENT_KEY)) === clock.date) {
           return { skipped: "already-sent" as const, date: clock.date };
         }
+        const report = renderMorningReport(await collectMorningReport(sources, now));
+        // Keep the report itself BEFORE trying any email: Klaviyo accepted the event every day while no email ever arrived,
+        // so "sent" proved nothing. The stored copy is what the MCP tool `morning_report` reads.
+        await setSetting(
+          MORNING_REPORT_LAST_KEY,
+          serializeReport({ date: clock.date, subject: report.subject, text: report.text, missingSections: report.missingSections, generatedAt: now.toISOString() }),
+        );
+
         const recipient = env.morningReportEmail;
         if (!recipient) throw new Error("MORNING_REPORT_EMAIL non configuré — rapport non envoyé");
-
-        const report = renderMorningReport(await collectMorningReport(sources, now));
         const sent = await trackEvent(KLAVIYO_METRIC, recipient, {
           subject: report.subject,
           body_html: report.html,
