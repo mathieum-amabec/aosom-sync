@@ -15,6 +15,8 @@ import { getActiveCampaignDaySummaries, getAdAccounts } from "./meta-ads-client"
 import { pickAdAccount } from "./ads-insights";
 import { loadGuardStatuses } from "./guard-status";
 import { summarizeReels } from "./reel-insights";
+import { summarizePhotos } from "./photo-insights";
+import { getInstagramViews, getPhotoResultRows } from "./photo-insights-store";
 import type { MorningReportSources } from "./morning-report";
 
 export const VIDEO_HORIZON_DAYS = 3;
@@ -43,6 +45,22 @@ export const morningReportSources: MorningReportSources = {
       totalPlays: sum.totalPlays,
       avgWatchS: watch.length ? watch.reduce((a, b) => a + b, 0) / watch.length / 1000 : null,
       bestStyle: best ? { key: best.key, avgPlays: best.avgPlays, n: best.n } : null,
+      lastMeasuredOn: sum.lastMeasuredOn,
+    };
+  },
+  photoResults: async () => {
+    const days = REEL_RESULTS_DAYS;
+    const sum = summarizePhotos(await getPhotoResultRows(days));
+    const best = sum.byFormat.find((g) => !g.lowSample);
+    return {
+      days,
+      measured: sum.measured,
+      totalViews: sum.totalViews,
+      totalReactions: sum.totalReactions,
+      totalComments: sum.totalComments,
+      totalShares: sum.totalShares,
+      instagramViews: await getInstagramViews(days),
+      bestFormat: best ? { key: best.key, avgViews: best.avgViews, n: best.n } : null,
       lastMeasuredOn: sum.lastMeasuredOn,
     };
   },

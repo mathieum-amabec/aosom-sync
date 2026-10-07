@@ -20,6 +20,7 @@ vi.mock("@/lib/database", () => ({
   getReelResultRows: vi.fn(),
   loadGuardInputs: vi.fn(),
 }));
+vi.mock("@/lib/photo-insights-store", () => ({ getPhotoResultRows: vi.fn(async () => []), getInstagramViews: vi.fn(async () => null) }));
 vi.mock("@/lib/klaviyo-client", () => ({ trackEvent: vi.fn() }));
 vi.mock("@/lib/meta-ads-client", () => ({
   getActiveCampaignDaySummaries: vi.fn(),

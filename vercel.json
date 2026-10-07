@@ -56,6 +56,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/cron/photo-insights",
+      "schedule": "35 9 * * *"
+    },
+    {
       "path": "/api/cron/stock-check",
       "schedule": "0 10 * * *"
     },

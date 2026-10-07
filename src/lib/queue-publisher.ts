@@ -217,6 +217,19 @@ function reelUtm(item: PublicationQueueItem): Decorate {
   };
 }
 
+/**
+ * UTM tags for a photo post's storefront links: which platform sent the click, what kind of post it was (the La semaine Ameublo
+ * format, else "social"), which post (its queue row). Same publish-time tagging as the Reels, with medium=photo.
+ */
+function socialUtm(item: PublicationQueueItem): Decorate {
+  const meta = item.metadata ?? {};
+  const campaign = typeof meta.format === "string" && meta.format ? meta.format : "social";
+  return (p, platform) => {
+    const utm = { source: platform, medium: "photo", campaign, content: `q${item.id}` };
+    return { ...p, caption: tagCaptionLinks(p.caption, utm), link: p.link ? addUtm(p.link, utm) : p.link };
+  };
+}
+
 /** Publish on ONE platform, recording which post it became. */
 async function publishOn(platform: "facebook" | "instagram", p: SocialQueuePayload, decorate?: Decorate): Promise<PublishItemResult> {
   const { postId } = await publishSocialPayload(platform, toSocialPayload(decorate ? decorate(p, platform) : p));
@@ -439,13 +452,18 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
     }
   }
 
+  // Photo / album posts ('social'): tag the storefront links so Umami can tell which post brought a visit, and use publishOn so
+  // the post id is recorded even for a single-platform post (the bare call below returns no id to measure). Other content types
+  // (blog, guide…) keep their own handling.
+  const photoDecorate = item.contentType === "social" ? socialUtm(item) : undefined;
+
   switch (item.platform) {
     case "facebook":
-      return { postId: (await publishSocialPayload("facebook", toSocialPayload(parseSocialPayload(raw)))).postId };
+      return photoDecorate ? publishOn("facebook", parseSocialPayload(raw), photoDecorate) : { postId: (await publishSocialPayload("facebook", toSocialPayload(parseSocialPayload(raw)))).postId };
     case "instagram":
-      return { postId: (await publishSocialPayload("instagram", toSocialPayload(parseSocialPayload(raw)))).postId };
+      return photoDecorate ? publishOn("instagram", parseSocialPayload(raw), photoDecorate) : { postId: (await publishSocialPayload("instagram", toSocialPayload(parseSocialPayload(raw)))).postId };
     case "both":
-      return publishToBoth(parseSocialPayload(raw));
+      return publishToBoth(parseSocialPayload(raw), photoDecorate);
     case "shopify_blog":
       return { postId: (await createBlogArticle(parseBlogPayload(raw))).articleId };
     case "shopify_guide": {

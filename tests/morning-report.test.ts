@@ -31,6 +31,7 @@ function sources(over: Partial<MorningReportSources> = {}): MorningReportSources
       en: { scheduled: 24, lastScheduledAt: "2026-10-05 23:50:00", ready: 28 },
     })),
     reelResults: vi.fn(async () => ({ days: 7, measured: 40, totalPlays: 812, avgWatchS: 4.2, bestStyle: { key: "vitrine", avgPlays: 31.5, n: 9 }, lastMeasuredOn: "2026-10-12" })),
+    photoResults: vi.fn(async () => ({ days: 7, measured: 14, totalViews: 5230, totalReactions: 88, totalComments: 12, totalShares: 3, instagramViews: 1900, bestFormat: { key: "baisses", avgViews: 612.5, n: 6 }, lastMeasuredOn: "2026-10-12" })),
     alerts: vi.fn(async () => [
       { label: "Prix sous le plancher", count: 1 },
       { label: "Images à revoir", count: 0 },
@@ -257,6 +258,37 @@ describe("Studio Reels reserve section", () => {
     expect(data.reelsStock).toEqual({ ok: false, error: "db down" });
     expect(data.videos.ok).toBe(true);
     expect(renderMorningReport(data).missingSections).toEqual(["Réserve de Reels (Studio)"]);
+  });
+});
+
+describe("Photo results section", () => {
+  const NOW = new Date("2026-10-12T10:00:00Z");
+  const results = (over: object) =>
+    sources({ photoResults: vi.fn(async () => ({ days: 7, measured: 14, totalViews: 5230, totalReactions: 88, totalComments: 12, totalShares: 3, instagramViews: null, bestFormat: null, lastMeasuredOn: "2026-10-12", ...over })) });
+
+  it("shows the totals, Instagram and the best format by its French name", async () => {
+    const r = renderMorningReport(await collectMorningReport(sources(), NOW));
+    expect(r.text).toContain("RÉSULTATS DES PHOTOS (FACEBOOK) — 7 J");
+    expect(r.text).toMatch(/14 photos mesurées sur 7 jours · 5\s?230 vues · 88 réactions, 12 commentaires, 3 partages · Instagram : 1\s?900 vues\./);
+    expect(r.text).toContain("Format le plus vu : Prix en baisse (612,5 vues en moyenne, 6 photos).");
+  });
+  it("says it is too early to compare when no format has enough photos", async () => {
+    const r = renderMorningReport(await collectMorningReport(results({ bestFormat: null }), NOW));
+    expect(r.text).toContain("Trop tôt pour comparer les formats");
+    expect(r.text).not.toContain("Format le plus vu");
+  });
+  it("omits Instagram when none was measured", async () => {
+    const r = renderMorningReport(await collectMorningReport(results({}), NOW));
+    expect(r.text).not.toContain("Instagram :");
+  });
+  it("says collection has just started when nothing was measured", async () => {
+    const r = renderMorningReport(await collectMorningReport(results({ measured: 0, totalViews: 0 }), NOW));
+    expect(r.text).toContain("Aucune photo mesurée pour l'instant");
+  });
+  it("a failing source only marks this section unavailable", async () => {
+    const data = await collectMorningReport(sources({ photoResults: vi.fn(async () => { throw new Error("graph down"); }) }), NOW);
+    expect(data.photoResults).toEqual({ ok: false, error: "graph down" });
+    expect(renderMorningReport(data).missingSections).toEqual(["Résultats des photos (Facebook)"]);
   });
 });
 
