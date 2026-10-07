@@ -2,6 +2,19 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.15] - 2026-10-07
+
+### Added
+
+- **Mascot guard.** The Ameublo mascot (sofa with a witch hat) is off the air: every Ameublo Studio render burns it into the frame except the
+  faceless real-footage `emotion` style. `approvalBlocker` now refuses those videos even with `force`, and `publishQueueItem` throws
+  `mascot_blocked` instead of posting one that got into the queue anyway (a mascot Reel went out on the 06:00 slot the morning after the decision).
+  `MASCOT_VIDEOS_ALLOWED` in `mascot-guard.ts` is the single switch, changed only through a reviewed PR; a row can opt out with `metadata.mascotFree`.
+- **06:15 publish check** (`/api/cron/publish-check`, registered at 10:15 and 11:15 UTC like the morning report, only the run where Montréal reads 06:xx executes).
+  Read-only: flags every slot due in the last 3 hours that is still `pending` / `publishing` / `failed`, and any scheduled mascot row. A problem is
+  recorded as an `error` run in `cron_runs` (dashboard "Résumé du jour", MCP `recent_cron_runs`), kept in `settings.publish_check_last`, and sent as a
+  best-effort Klaviyo "Alerte publication" event. Klaviyo delivery to the owner is not reliable (see 0.5.107.14), so `cron_runs` is the source of truth.
+
 ## [0.5.107.14] - 2026-10-07
 
 ### Added
