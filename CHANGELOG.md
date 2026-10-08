@@ -2,6 +2,13 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.22] - 2026-10-08
+
+### Changed
+
+- **Auto-import judge: tolerance for rounding.** The layer 2 judge prompt now ignores unit-conversion differences caused only by rounding (under 1 cm, 0.5 kg or 2 %), plain
+  rephrasings and filler adjectives, and only reports what changes what the customer believes they are buying. Real inventions, wrong titles and wrong products are still held.
+
 ## [0.5.107.21] - 2026-10-08
 
 ### Fixed

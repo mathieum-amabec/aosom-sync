@@ -196,6 +196,7 @@ export function buildJudgePrompt(product: AosomMergedProduct, c: GeneratedConten
   return [
     "Tu es un relecteur strict de fiches produit e-commerce. Compare le TEXTE GÉNÉRÉ aux DONNÉES FOURNISSEUR.",
     "Règles: (1) toute affirmation factuelle du texte (dimensions, matériaux, capacité, puissance, nombre de pièces, certifications, garantie, compatibilité) doit figurer dans les données fournisseur; (2) le titre doit décrire le produit des données; (3) aucun nom de fournisseur ni de marque tierce; (4) français correct, sans anglais résiduel; (5) aucune promesse de prix, de livraison ou de garantie; (6) le TITRE FR a du sens pour un client québécois: il nomme clairement le type de produit (pas seulement des mots-clés), se lit naturellement en français, ne contient aucun nom d'entreprise ou de marque et ne répète pas de mots.",
+    "Tolérances (NE PAS signaler): une conversion d'unités (pouces↔cm, lb↔kg) dont l'écart vient seulement de l'arrondi (moins de 1 cm, 0,5 kg ou 2 %); le même fait reformulé ou résumé; un mot courant de mise en valeur sans fait nouveau. Signale seulement ce qui change réellement ce que le client croit acheter.",
     'Réponds UNIQUEMENT en JSON: {"ok":true|false,"title_ok":true|false,"issues":[{"type":"invented_fact|wrong_product|brand|language|unsupported_promise|title","detail":"..."}]}. ok=false dès qu\'une règle est violée; title_ok=false si la règle (6) est violée.',
     "",
     "DONNÉES FOURNISSEUR:",

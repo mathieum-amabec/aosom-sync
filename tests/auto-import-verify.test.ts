@@ -121,6 +121,13 @@ describe("layer 2 — judge", () => {
     expect(p).toContain("71 inches");
     expect(p).toContain(good.titleFr);
   });
+
+  it("tells the judge to ignore rounding in unit conversions but keep real inventions", () => {
+    const p = buildJudgePrompt(product, good);
+    expect(p).toContain("NE PAS signaler");
+    expect(p).toContain("moins de 1 cm");
+    expect(p).toContain("change réellement ce que le client croit acheter");
+  });
 });
 
 describe("layer 2 — gallery analysis, cleaning and the lifestyle first photo", () => {
