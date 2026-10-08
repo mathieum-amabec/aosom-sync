@@ -2,6 +2,27 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.16] - 2026-10-08
+
+### Added
+
+- **Automatic daily catalogue import** (`src/lib/auto-import/`, cron `/api/cron/auto-import`, every 10 min 07:00–20:50 UTC). **Ships OFF**:
+  `settings.auto_import_mode` = `off` (default) | `dry` (records the plan, writes nothing) | `pilot` (≤10 DRAFTS tagged `auto-import-pilot`, for review)
+  | `live`. `settings.auto_import_daily_cap` (default 100). Imports are paced across the window (a tick takes ≤3 groups), counters live in
+  `settings.auto_import_state` (Montréal day), a lock prevents overlapping ticks, and a feed with < 6,000 SKUs is refused.
+  Selection (`policy.ts`): every new arrival first, then toys up to 60/day, then Maison 35 / Animaux 28 / Sports 18 / Bureau 10 / autres 9 %;
+  only groups with a variant ≥ 10 in stock, ≥ 3 photos, price ≥ 30 $; patio only if a winter/Christmas item; Christmas and winter items first in season;
+  licensed third-party names (Mercedes-Benz, Disney, LEGO…) are left for a human.
+- **Three verification layers** (`verify.ts`), all passed before a product is visible: (1) deterministic rules on the copy — required fields, template leftovers,
+  English units, prices, unsafe/unbalanced HTML, supplier brands, and every measurement in the copy must be explainable by the supplier data (unit-converted);
+  (2) an independent judge model re-reads the copy against the supplier data (fail-closed) and a vision model checks the first 4 gallery photos for supplier logos,
+  watermarks and non-product images; (3) the product is created as a DRAFT, what Shopify stored is compared with what was meant (variants, price ≥ supplier, inventory
+  not tracked, images), it is activated, and the public page is fetched (title, price, image, no supplier name). Any failure parks the job as `needs_review` with the reasons
+  and, after creation, unpublishes + tags the product.
+- **Dedicated `import` LLM pool** (`LLM_IMPORT_DAILY_BUDGET`, default 3,000,000 tokens/day) with `withBudgetPool()`, so the automatic import can no longer exhaust the shared
+  `batch` pool (the 2026-10-07 incident: every manual import failed with an opaque "Content generation failed") and vice versa. Shown on the usage dashboard.
+- `importToShopify(jobId, overrides, { status })` can create a product as a draft; `fetchShopifyProductSummary()` reads back what Shopify stored.
+
 ## [0.5.107.15] - 2026-10-07
 
 ### Added

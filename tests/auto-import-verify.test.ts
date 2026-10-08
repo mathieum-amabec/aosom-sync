@@ -1,0 +1,156 @@
+import { describe, it, expect, vi } from "vitest";
+
+vi.mock("@/lib/content-generator", () => ({ getAnthropicClient: vi.fn(() => ({})) }));
+vi.mock("@/lib/llm-budget", () => ({ budgetedCreate: vi.fn() }));
+
+import {
+  buildJudgePrompt,
+  checkContentStructure,
+  checkGallery,
+  checkShopifySummary,
+  checkStorefrontHtml,
+  judgeContent,
+  unsupportedClaims,
+  type LlmText,
+} from "@/lib/auto-import/verify";
+import type { AosomMergedProduct } from "@/types/aosom";
+import type { GeneratedContent } from "@/lib/content-generator";
+
+const product: AosomMergedProduct = {
+  groupKey: "g1", name: "Cat Tree 71 inch Multi-Level with Scratching Posts", brand: "PawHut", productType: "Pet Supplies > Cats",
+  category: "", description: "<p>Height 71 inches (180 cm). Weight capacity 22 lbs. Includes 3 platforms and 2 posts. Four levels.</p>",
+  shortDescription: "", material: "Particle board, sisal", images: ["a", "b", "c", "d"], video: "", pdf: "",
+  variants: [{
+    sku: "D30-1", price: 78.99, qty: 50, color: "Gris", size: "", gtin: "", weight: 12, dimensions: { length: 50, width: 40, height: 180 },
+    images: [], estimatedArrival: "", outOfStockExpected: "", packageNum: "", boxSize: "", boxWeight: "",
+  }],
+};
+
+const FR_DESC =
+  "<p>Cet arbre à chat de 180 cm offre un espace de jeu et de repos pour votre compagnon. Il comprend plusieurs plateformes et des poteaux à griffer recouverts de sisal.</p>" +
+  "<ul><li>Hauteur de 180 cm pour grimper en toute sécurité</li><li>3 plateformes et 2 poteaux à griffer</li><li>Structure stable, facile à assembler à la maison</li></ul>" +
+  "<p>Un meuble pratique et solide, conçu pour durer dans votre salon et pour le plaisir de votre chat tous les jours.</p>";
+
+const good: GeneratedContent = {
+  titleFr: "Arbre à chat multiniveau de 180 cm avec poteaux à griffer",
+  titleEn: "Multi-level cat tree 180 cm with scratching posts",
+  descriptionFr: FR_DESC,
+  descriptionEn: "<p>This 180 cm cat tree offers a play and rest space for your pet. It includes 3 platforms and 2 scratching posts covered in sisal for hours of fun.</p><ul><li>180 cm tall</li><li>Stable and easy to assemble</li></ul>",
+  seoDescriptionFr: "x", seoDescriptionEn: "x",
+  metaTitleFr: "Arbre à chat 180 cm | Ameublo Direct", metaTitleEn: "Cat tree 180 cm | Furnish Direct",
+  metaDescriptionFr: "Arbre à chat multiniveau de 180 cm avec poteaux à griffer. Livraison gratuite au Canada.", metaDescriptionEn: "x",
+  urlHandleFr: "arbre-a-chat-multiniveau-180-cm", urlHandleEn: "cat-tree-180", tags: ["chat", "arbre-a-chat"], brand: "PawHut",
+};
+
+describe("layer 1 — structure and facts", () => {
+  it("passes clean copy", () => {
+    expect(checkContentStructure(product, good)).toEqual({ ok: true, reasons: [] });
+  });
+
+  it("accepts a measurement converted from the supplier's inches", () => {
+    expect(unsupportedClaims("Hauteur 180 cm, capacité 10 kg", product)).toEqual([]);
+  });
+
+  it("rejects a measurement the supplier data cannot explain", () => {
+    expect(unsupportedClaims("Hauteur 250 cm", product)).toEqual(["250 cm"]);
+    const bad = { ...good, descriptionFr: good.descriptionFr.replace("180 cm pour", "250 cm pour") };
+    expect(checkContentStructure(product, bad).reasons.join()).toContain("unsupported_numbers");
+  });
+
+  it("flags template leftovers, English units, prices, unsafe or broken HTML, supplier brands", () => {
+    const cases: Array<[Partial<GeneratedContent>, string]> = [
+      [{ descriptionFr: good.descriptionFr + "<p>[BRAND NAME]</p>" }, "template_leftover"],
+      [{ descriptionFr: good.descriptionFr + "<p>Hauteur 71 inches.</p>" }, "english_units_in_french_copy"],
+      [{ descriptionFr: good.descriptionFr + "<p>Seulement 49,99 $</p>" }, "price_in_copy"],
+      [{ descriptionFr: good.descriptionFr + "<script>x</script>" }, "unsafe_html"],
+      [{ descriptionFr: good.descriptionFr + "<ul><li>oups</ul>" }, "unbalanced_html"],
+      [{ descriptionFr: good.descriptionFr + "<p>Une qualité PawHut garantie pour votre chat.</p>" }, "supplier_brand"],
+    ];
+    for (const [patch, expected] of cases) {
+      const v = checkContentStructure(product, { ...good, ...patch });
+      expect(v.ok, expected).toBe(false);
+      expect(v.reasons.join(), expected).toContain(expected);
+    }
+  });
+
+  it("flags missing fields, short copy and English passed off as French", () => {
+    expect(checkContentStructure(product, { ...good, titleFr: "" }).reasons.join()).toContain("missing_or_short:titleFr");
+    expect(checkContentStructure(product, { ...good, descriptionFr: "<p>Court.</p>" }).reasons).toContain("description_fr_too_short");
+    const english =
+      "<p>This cat tree is the perfect place for your pet to play and rest with its platforms and the scratching posts that are made for you and your home.</p>".repeat(3);
+    expect(checkContentStructure(product, { ...good, descriptionFr: english }).reasons).toContain("description_not_french");
+  });
+});
+
+describe("layer 2 — judge", () => {
+  it("passes when the judge approves", async () => {
+    const llm: LlmText = vi.fn().mockResolvedValue('{"ok":true,"issues":[]}');
+    expect(await judgeContent(product, good, llm)).toEqual({ ok: true, reasons: [] });
+    expect((llm as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual({ tier: "strong" });
+  });
+
+  it("fails with the judge's issues, tolerating a fenced reply", async () => {
+    const llm: LlmText = async () => '```json\n{"ok":false,"issues":[{"type":"invented_fact","detail":"garantie 5 ans"}]}\n```';
+    const v = await judgeContent(product, good, llm);
+    expect(v.ok).toBe(false);
+    expect(v.reasons[0]).toContain("invented_fact");
+  });
+
+  it("is fail-closed on unreadable or unavailable judges", async () => {
+    expect((await judgeContent(product, good, async () => "no json here")).reasons).toEqual(["judge_unparseable"]);
+    const v = await judgeContent(product, good, async () => { throw new Error("budget exhausted"); });
+    expect(v.ok).toBe(false);
+    expect(v.reasons[0]).toContain("judge_unavailable");
+  });
+
+  it("puts the supplier data and the generated copy in the prompt", () => {
+    const p = buildJudgePrompt(product, good);
+    expect(p).toContain("DONNÉES FOURNISSEUR");
+    expect(p).toContain("71 inches");
+    expect(p).toContain(good.titleFr);
+  });
+});
+
+describe("layer 2 — gallery", () => {
+  const img = { mediaType: "image/jpeg", data: "AAAA" };
+  it("passes clean photos", async () => {
+    const llm: LlmText = async () => '{"images":[{"index":1},{"index":2},{"index":3},{"index":4}]}';
+    expect(await checkGallery(["a", "b", "c", "d"], llm, async () => img)).toEqual({ ok: true, reasons: [] });
+  });
+  it("fails on a supplier logo or watermark", async () => {
+    const llm: LlmText = async () => '{"images":[{"index":1},{"index":2,"supplier_logo":true},{"index":3,"watermark":true}]}';
+    const v = await checkGallery(["a", "b", "c"], llm, async () => img);
+    expect(v.reasons).toEqual(["gallery_supplier_logo:2", "gallery_watermark:3"]);
+  });
+  it("fails when an image cannot be downloaded, without calling the model", async () => {
+    const llm = vi.fn();
+    const v = await checkGallery(["a", "b", "c"], llm as unknown as LlmText, async (u) => (u === "b" ? null : img));
+    expect(v.reasons).toEqual(["image_unreachable:2"]);
+    expect(llm).not.toHaveBeenCalled();
+  });
+});
+
+describe("layer 3 — Shopify and storefront", () => {
+  const ok = { handle: "arbre-a-chat", status: "draft", published: false, tags: [], imageCount: 4, variants: [{ sku: "D30-1", price: 89.99, inventoryManagement: null }] };
+  it("accepts what we meant to create", () => {
+    expect(checkShopifySummary(ok, product)).toEqual({ ok: true, reasons: [] });
+  });
+  it("flags tracked inventory, a price below the supplier's, missing images and wrong variants", () => {
+    const v = checkShopifySummary(
+      { ...ok, imageCount: 1, handle: "aosom-tree", variants: [{ sku: "D30-1", price: 10, inventoryManagement: "shopify" }, { sku: "X", price: 5, inventoryManagement: null }] },
+      product,
+    );
+    expect(v.reasons.join()).toMatch(/variant_count/);
+    expect(v.reasons.join()).toMatch(/price_below_supplier:D30-1/);
+    expect(v.reasons.join()).toMatch(/inventory_tracked:D30-1/);
+    expect(v.reasons.join()).toMatch(/unknown_sku:X/);
+    expect(v.reasons.join()).toMatch(/images:1\/3/);
+    expect(v.reasons.join()).toMatch(/supplier_in_handle/);
+  });
+  it("checks the public page", () => {
+    const page = '<html><head><meta property="og:image" content="x"><meta property="og:price:amount" content="89.99"></head><body><h1>Arbre à chat</h1></body></html>';
+    expect(checkStorefrontHtml(page)).toEqual({ ok: true, reasons: [] });
+    expect(checkStorefrontHtml("<html><body><p>404</p></body></html>").reasons).toEqual(["page_no_h1", "page_no_image", "page_no_price"]);
+    expect(checkStorefrontHtml(page.replace("Arbre à chat", "Arbre PawHut")).reasons).toEqual(["page_supplier_brand:pawhut"]);
+  });
+});

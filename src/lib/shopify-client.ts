@@ -1011,6 +1011,45 @@ export async function fetchShopifyProductContent(shopifyId: string): Promise<{
 }
 
 /**
+ * What Shopify actually stored for a product — handle, state, per-variant price/inventory tracking and
+ * image count. Read-only; used by the automatic import's layer-3 check, which compares it with what the
+ * import meant to create before the product is activated.
+ */
+export async function fetchShopifyProductSummary(shopifyId: string): Promise<{
+  handle: string;
+  status: string;
+  published: boolean;
+  tags: string[];
+  imageCount: number;
+  variants: Array<{ sku: string; price: number; inventoryManagement: string | null }>;
+}> {
+  const response = await shopifyFetch(
+    `/products/${shopifyId}.json?fields=id,handle,status,published_at,tags,images,variants`,
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify product summary failed: ${response.status} — ${text}`);
+  }
+  const data = await response.json();
+  const p = data.product || {};
+  const publishedAt = typeof p.published_at === "string" ? Date.parse(p.published_at) : NaN;
+  return {
+    handle: typeof p.handle === "string" ? p.handle : "",
+    status: typeof p.status === "string" ? p.status : "",
+    published: Number.isFinite(publishedAt) && publishedAt <= Date.now(),
+    tags: typeof p.tags === "string" && p.tags.trim() ? p.tags.split(",").map((t: string) => t.trim()) : [],
+    imageCount: Array.isArray(p.images) ? p.images.length : 0,
+    variants: Array.isArray(p.variants)
+      ? p.variants.map((v: { sku?: string; price?: string; inventory_management?: string | null }) => ({
+          sku: String(v.sku ?? ""),
+          price: Number(v.price),
+          inventoryManagement: v.inventory_management ?? null,
+        }))
+      : [],
+  };
+}
+
+/**
  * Fetch every product's publication state (id + status + Online-Store published flag + tags)
  * in one paginated pass. Consumed by publish-reconcile to find imported+sellable products
  * that sit unpublished. `published` = `published_at` set AND not in the future. Archived

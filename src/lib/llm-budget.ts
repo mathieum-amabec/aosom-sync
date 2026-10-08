@@ -30,12 +30,34 @@
  * is a financial backstop against a leaked credential or a runaway loop, not a per-user
  * rate limit.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getDailyLlmTokensUsed, addDailyLlmTokens, type LlmBudgetPool } from "@/lib/database";
 
 export type BudgetPool = LlmBudgetPool;
 
+/**
+ * Pool override for a whole call tree. `withBudgetPool("import", fn)` makes every
+ * `budgetedCreate` that would have charged the shared `batch` pool (the default, and the
+ * explicit "batch" the vision classifier passes) charge `import` instead — without threading a
+ * pool argument through content-generator, vision-classifier and the quality gates. Pools a
+ * caller names on purpose (assistant, video, maintenance) are never overridden.
+ */
+const poolOverride = new AsyncLocalStorage<BudgetPool>();
+export function withBudgetPool<T>(pool: BudgetPool, fn: () => Promise<T>): Promise<T> {
+  return poolOverride.run(pool, fn);
+}
+
 const DEFAULT_BATCH_TOKEN_BUDGET = 1_300_000;
+/**
+ * The automatic daily import (src/lib/auto-import) runs on its own pool so a bulk catalogue
+ * run can never lock the operator out of manual imports, blog or social generation (the
+ * 2026-10-07 incident: the shared `batch` cap ran out mid-afternoon and every manual import
+ * failed with an opaque "Content generation failed"), and the reverse. Sized for the target
+ * of 100 imports/day at ~25k tokens each once the three verification layers run (content +
+ * main-image check + judge + gallery check) = ~2.5M, plus margin for retries.
+ */
+const DEFAULT_IMPORT_TOKEN_BUDGET = 3_000_000;
 const DEFAULT_ASSISTANT_TOKEN_BUDGET = 500_000;
 /**
  * 400,000 tokens/day for the `video` pool — sized 2026-09-22 from the ACTUAL publication
@@ -79,6 +101,10 @@ export function poolBudget(pool: BudgetPool): number {
     const raw = Number(process.env.LLM_VIDEO_DAILY_BUDGET);
     return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_VIDEO_TOKEN_BUDGET;
   }
+  if (pool === "import") {
+    const raw = Number(process.env.LLM_IMPORT_DAILY_BUDGET);
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_IMPORT_TOKEN_BUDGET;
+  }
   const [envName, fallback] =
     pool === "assistant"
       ? ["LLM_ASSISTANT_DAILY_BUDGET", DEFAULT_ASSISTANT_TOKEN_BUDGET]
@@ -98,6 +124,7 @@ export class LlmBudgetExceededError extends Error {
       pool === "assistant" ? "LLM_ASSISTANT_DAILY_BUDGET"
       : pool === "maintenance" ? "LLM_MAINTENANCE_DAILY_BUDGET"
       : pool === "video" ? "LLM_VIDEO_DAILY_BUDGET"
+      : pool === "import" ? "LLM_IMPORT_DAILY_BUDGET"
       : "LLM_DAILY_TOKEN_BUDGET";
     super(
       `LLM daily token budget exceeded for pool "${pool}" (${used}/${budget} tokens used today, UTC) — ` +
@@ -167,8 +194,10 @@ export async function budgetedCreate(
   client: Anthropic,
   params: Anthropic.Messages.MessageCreateParamsNonStreaming,
   options?: Anthropic.RequestOptions,
-  pool: BudgetPool = "batch",
+  requestedPool: BudgetPool = "batch",
 ): Promise<Anthropic.Messages.Message> {
+  // A call tree wrapped in withBudgetPool() redirects ONLY the shared "batch" pool.
+  const pool: BudgetPool = requestedPool === "batch" ? (poolOverride.getStore() ?? "batch") : requestedPool;
   // Provider routing by model id: a `gemini-*` model is served by Google instead of Anthropic,
   // returned in the SAME Message shape so every caller keeps parsing `message.content[0].text`
   // and `message.usage` unchanged — switching a call site to Gemini is one model constant.

@@ -277,7 +277,9 @@ export async function generateContent(jobId: string, opts?: { force?: boolean })
  */
 export async function importToShopify(
   jobId: string,
-  contentOverrides?: Partial<GeneratedContent>
+  contentOverrides?: Partial<GeneratedContent>,
+  /** `status: "draft"` creates the product unpublished (automatic import: verify first, activate after). */
+  opts: { status?: "active" | "draft" } = {},
 ): Promise<ImportJob> {
   const row = await dbGetImportJob(jobId);
   if (!row) throw new Error(`Job ${jobId} not found`);
@@ -316,7 +318,11 @@ export async function importToShopify(
   await updateImportJob(jobId, { status: "importing" });
 
   try {
-    const { id: shopifyId, handle: shopifyHandle } = await createShopifyProduct(product, content);
+    const { id: shopifyId, handle: shopifyHandle } = await createShopifyProduct(
+      product,
+      content,
+      opts.status ? { status: opts.status } : {},
+    );
     await updateImportJob(jobId, { status: "done", shopify_id: shopifyId });
 
     // Persist the Shopify mapping (id + storefront handle) onto the catalog rows so the
@@ -375,7 +381,8 @@ export async function importToShopify(
     // product's clean Shopify position-1 lifestyle photo raw, and self-skips when the
     // product isn't lifestyle-verified yet (typical for a brand-new import).
     const primarySku = product.variants[0]?.sku;
-    if (primarySku) {
+    // A draft is not on the storefront yet: the caller triggers the social draft after activation.
+    if (primarySku && opts.status !== "draft") {
       import("@/jobs/job4-social").then(({ triggerNewProduct }) => {
         triggerNewProduct(primarySku).catch((err) =>
           console.error(`[IMPORT] Social draft failed for ${primarySku}: ${err}`)
