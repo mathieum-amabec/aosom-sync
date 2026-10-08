@@ -47,6 +47,11 @@ const CHRISTMAS_RE = /\b(christmas|no[eë]l|xmas)\b/i;
 const LICENSED_RE =
   /\b(mercedes(-benz)?|bmw|audi|ferrari|lamborghini|porsche|maserati|bentley|rolls[- ]royce|tesla|jeep|land rover|ford|chevrolet|toyota|honda|harley|ducati|disney|marvel|barbie|hot wheels|peppa|paw patrol|bluey|spider-?man|frozen|minnie|mickey|lego|nike|adidas|pokemon|pok[eé]mon|hello kitty|star wars|batman|hulk|avengers|minecraft)\b/i;
 
+/** True when the text names a licensed / third-party brand (never auto-published). */
+export function isLicensedName(text: string): boolean {
+  return LICENSED_RE.test(text);
+}
+
 export interface Candidate {
   groupKey: string;
   skus: string[];

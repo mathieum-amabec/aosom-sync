@@ -6,7 +6,10 @@ vi.mock("@/lib/llm-budget", () => ({ budgetedCreate: vi.fn() }));
 import {
   buildJudgePrompt,
   checkContentStructure,
-  checkGallery,
+  analyzeGallery,
+  cleanGallery,
+  checkTitle,
+  checkColorPhotos,
   checkShopifySummary,
   checkStorefrontHtml,
   judgeContent,
@@ -111,22 +114,131 @@ describe("layer 2 — judge", () => {
   });
 });
 
-describe("layer 2 — gallery", () => {
+describe("layer 2 — gallery analysis, cleaning and the lifestyle first photo", () => {
   const img = { mediaType: "image/jpeg", data: "AAAA" };
-  it("passes clean photos", async () => {
-    const llm: LlmText = async () => '{"images":[{"index":1},{"index":2},{"index":3},{"index":4}]}';
-    expect(await checkGallery(["a", "b", "c", "d"], llm, async () => img)).toEqual({ ok: true, reasons: [] });
+  const flagsJson = (rows: Array<Record<string, unknown>>) => JSON.stringify({ images: rows.map((r, i) => ({ index: i + 1, ...r })) });
+  const urls = ["u1", "u2", "u3", "u4", "u5", "u6"];
+
+  it("analyses up to six photos in one call and maps the answers back to URLs", async () => {
+    const llm = vi.fn(async () => flagsJson([{ lifestyle: false }, { lifestyle: true }, {}, {}, {}, {}]));
+    const a = await analyzeGallery(urls, llm as unknown as LlmText, async () => img);
+    expect(a.ok).toBe(true);
+    expect(a.flags).toHaveLength(6);
+    expect(a.flags[1]).toMatchObject({ url: "u2", lifestyle: true });
+    expect(llm).toHaveBeenCalledTimes(1);
   });
-  it("fails on a supplier logo or watermark", async () => {
-    const llm: LlmText = async () => '{"images":[{"index":1},{"index":2,"supplier_logo":true},{"index":3,"watermark":true}]}';
-    const v = await checkGallery(["a", "b", "c"], llm, async () => img);
-    expect(v.reasons).toEqual(["gallery_supplier_logo:2", "gallery_watermark:3"]);
-  });
-  it("fails when an image cannot be downloaded, without calling the model", async () => {
+
+  it("fails when too few photos download, without calling the model", async () => {
     const llm = vi.fn();
-    const v = await checkGallery(["a", "b", "c"], llm as unknown as LlmText, async (u) => (u === "b" ? null : img));
-    expect(v.reasons).toEqual(["image_unreachable:2"]);
+    const a = await analyzeGallery(["a", "b", "c", "d"], llm as unknown as LlmText, async (u) => (u === "a" ? img : null));
+    expect(a.ok).toBe(false);
+    expect(a.reasons[0]).toContain("gallery_too_few_reachable");
     expect(llm).not.toHaveBeenCalled();
+  });
+
+  it("is fail-closed on an unreadable or unavailable vision answer", async () => {
+    expect((await analyzeGallery(urls, async () => "nope", async () => img)).reasons).toEqual(["gallery_unparseable"]);
+    const a = await analyzeGallery(urls, async () => { throw new Error("quota"); }, async () => img);
+    expect(a.reasons[0]).toContain("gallery_judge_unavailable");
+  });
+
+  it("drops logo / watermark / non-product photos and unreachable ones", async () => {
+    const a = await analyzeGallery(urls, async () => flagsJson([{}, { supplier_logo: true }, { watermark: true }, { not_product: true }, {}, {}]), async () => img);
+    const c = cleanGallery(urls, a);
+    expect(c.dropped.sort()).toEqual(["u2", "u3", "u4"]);
+    expect(c.images).toEqual(["u1", "u5", "u6"]);
+  });
+
+  it("puts a clean lifestyle scene first, leaving the rest in order", async () => {
+    const a = await analyzeGallery(urls, async () => flagsJson([{ lifestyle: false }, { lifestyle: true, text_overlay: true }, { lifestyle: true }, {}, {}, {}]), async () => img);
+    const c = cleanGallery(urls, a);
+    expect(c.promoted).toBe(true);
+    expect(c.hasLifestyle).toBe(true);
+    expect(c.images).toEqual(["u3", "u1", "u2", "u4", "u5", "u6"]); // u2 is lifestyle but carries text: skipped
+  });
+
+  it("keeps a clean studio photo first when no lifestyle photo exists, and avoids a first photo with text", async () => {
+    const plain = cleanGallery(urls, await analyzeGallery(urls, async () => flagsJson([{}, {}, {}, {}, {}, {}]), async () => img));
+    expect(plain.images[0]).toBe("u1");
+    expect(plain.hasLifestyle).toBe(false);
+    expect(plain.promoted).toBe(false);
+    const texty = cleanGallery(urls, await analyzeGallery(urls, async () => flagsJson([{ text_overlay: true }, {}, {}, {}, {}, {}]), async () => img));
+    expect(texty.images[0]).toBe("u2");
+    expect(texty.promoted).toBe(true);
+  });
+
+  it("fails when fewer than three clean photos remain", async () => {
+    const a = await analyzeGallery(urls, async () => flagsJson([{}, { supplier_logo: true }, { watermark: true }, { not_product: true }, { unreadable: true }, {}]), async () => img);
+    expect(cleanGallery(urls, a).reasons).toEqual(["gallery_too_few_clean_photos:2"]);
+  });
+});
+
+describe("titles", () => {
+  const withTitle = (titleFr: string, titleEn = "Multi-level cat tree with scratching posts") => ({ ...good, titleFr, titleEn });
+  it("accepts a clear French title", () => {
+    expect(checkTitle(product, good)).toEqual({ ok: true, reasons: [] });
+  });
+  it("rejects company, store, supplier-brand and third-party names", () => {
+    const cases: Array<[string, string]> = [
+      ["Arbre à chat PawHut multiniveau avec poteaux", "title_fr_supplier_brand"],
+      ["Arbre à chat Ameublo Direct multiniveau 180 cm", "title_fr_store_or_supplier_name"],
+      ["Voiture électrique Mercedes-Benz pour enfants 12 V", "title_fr_third_party_brand"],
+      ["Arbre à chat Zorbo multiniveau de luxe", "title_fr_has_product_brand"],
+      ["Arbre à chat GlobeTrot multiniveau avec poteaux", "title_fr_company_like_token"],
+      ["Arbre à chat ZORBOX multiniveau avec poteaux", "title_fr_company_like_token"],
+    ];
+    for (const [t, expected] of cases) {
+      const brandProduct = { ...product, brand: expected.endsWith("has_product_brand") ? "Zorbo" : product.brand };
+      const v = checkTitle(brandProduct, withTitle(t));
+      expect(v.ok, t).toBe(false);
+      expect(v.reasons.join(), t).toContain(expected);
+    }
+  });
+  it("lets product vocabulary in capitals through (LED, USB…)", () => {
+    expect(checkTitle(product, withTitle("Lampe de chevet LED rechargeable USB avec variateur")).ok).toBe(true);
+  });
+  it("rejects titles that are truncated, too short, repeated or malformed", () => {
+    const cases: Array<[string, string]> = [
+      ["Arbre à chat multiniveau avec poteaux à griffer et", "title_fr_ok_baseline"],
+      ["Arbre à chat multiniveau avec poteaux -", "truncated"],
+      ["Arbre chat", "length"],
+      ["arbre à chat multiniveau avec poteaux", "starts_lowercase"],
+      ["Arbre à chat arbre à chat arbre chat multiniveau", "repeated_word"],
+      ["Arbre à chat | multiniveau avec poteaux", "markup"],
+    ];
+    for (const [t, expected] of cases.slice(1)) {
+      expect(checkTitle(product, withTitle(t)).reasons.join(), t).toContain(expected);
+    }
+  });
+  it("makes the judge able to fail a title that makes no sense", async () => {
+    const v = await judgeContent(product, good, async () => '{"ok":true,"title_ok":false,"issues":[]}');
+    expect(v).toEqual({ ok: false, reasons: ["judge:title_not_sensible"] });
+  });
+});
+
+describe("colour swatches change the photo", () => {
+  const colourProduct = (images: string[], map: Record<string, string[]>): AosomMergedProduct => ({
+    ...product,
+    images,
+    variants: Object.entries(map).map(([color, imgs], i) => ({ ...product.variants[0], sku: `V-${i}`, color, images: imgs })),
+  });
+  it("is fine with a single colour, or colours that each own a photo", () => {
+    expect(checkColorPhotos(product).ok).toBe(true);
+    expect(checkColorPhotos(colourProduct(["a", "b", "c"], { Noir: ["a"], Gris: ["b"] })).ok).toBe(true);
+  });
+  it("flags a colour without a photo in the gallery, and colours that share one picture", () => {
+    expect(checkColorPhotos(colourProduct(["a", "b", "c"], { Noir: ["a"], Gris: ["zzz"] })).reasons).toEqual(["color_without_photo:gris", "colors_share_one_photo"]);
+    expect(checkColorPhotos(colourProduct(["a", "b", "c"], { Noir: ["a"], Gris: ["a"] })).reasons).toEqual(["colors_share_one_photo"]);
+  });
+  it("checks on Shopify that each colour variant carries its own image id", () => {
+    const p = colourProduct(["a", "b", "c"], { Noir: ["a"], Gris: ["b"] });
+    const base = { handle: "x", status: "draft", published: false, tags: [], imageCount: 3 };
+    const good2 = { ...base, variants: [{ sku: "V-0", price: 90, inventoryManagement: null, imageId: 11 }, { sku: "V-1", price: 90, inventoryManagement: null, imageId: 12 }] };
+    expect(checkShopifySummary(good2, p)).toEqual({ ok: true, reasons: [] });
+    const none = { ...base, variants: [{ sku: "V-0", price: 90, inventoryManagement: null, imageId: null }, { sku: "V-1", price: 90, inventoryManagement: null, imageId: null }] };
+    expect(checkShopifySummary(none, p).reasons).toEqual(["variant_without_photo:V-0", "variant_without_photo:V-1", "swatches_do_not_change_photo"]);
+    const same = { ...base, variants: [{ sku: "V-0", price: 90, inventoryManagement: null, imageId: 11 }, { sku: "V-1", price: 90, inventoryManagement: null, imageId: 11 }] };
+    expect(checkShopifySummary(same, p).reasons).toEqual(["swatches_do_not_change_photo"]);
   });
 });
 

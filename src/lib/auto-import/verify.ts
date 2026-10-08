@@ -16,6 +16,7 @@ import { forbiddenBrandsIn, detectDescriptionLanguage } from "@/lib/catalog-guar
 import { budgetedCreate } from "@/lib/llm-budget";
 import { llmModel } from "@/lib/llm-models";
 import { getAnthropicClient, type GeneratedContent } from "@/lib/content-generator";
+import { isLicensedName } from "./policy";
 import type { AosomMergedProduct } from "@/types/aosom";
 
 export interface Verdict {
@@ -179,6 +180,7 @@ function parseJson<T>(raw: string): T | null {
 
 interface JudgeOut {
   ok?: boolean;
+  title_ok?: boolean;
   issues?: Array<{ type?: string; detail?: string }>;
 }
 
@@ -189,8 +191,8 @@ export function buildJudgePrompt(product: AosomMergedProduct, c: GeneratedConten
     .join("; ");
   return [
     "Tu es un relecteur strict de fiches produit e-commerce. Compare le TEXTE GÉNÉRÉ aux DONNÉES FOURNISSEUR.",
-    "Règles: (1) toute affirmation factuelle du texte (dimensions, matériaux, capacité, puissance, nombre de pièces, certifications, garantie, compatibilité) doit figurer dans les données fournisseur; (2) le titre doit décrire le produit des données; (3) aucun nom de fournisseur ni de marque tierce; (4) français correct, sans anglais résiduel; (5) aucune promesse de prix, de livraison ou de garantie.",
-    'Réponds UNIQUEMENT en JSON: {"ok":true|false,"issues":[{"type":"invented_fact|wrong_product|brand|language|unsupported_promise","detail":"..."}]}. ok=false dès qu\'une règle est violée.',
+    "Règles: (1) toute affirmation factuelle du texte (dimensions, matériaux, capacité, puissance, nombre de pièces, certifications, garantie, compatibilité) doit figurer dans les données fournisseur; (2) le titre doit décrire le produit des données; (3) aucun nom de fournisseur ni de marque tierce; (4) français correct, sans anglais résiduel; (5) aucune promesse de prix, de livraison ou de garantie; (6) le TITRE FR a du sens pour un client québécois: il nomme clairement le type de produit (pas seulement des mots-clés), se lit naturellement en français, ne contient aucun nom d'entreprise ou de marque et ne répète pas de mots.",
+    'Réponds UNIQUEMENT en JSON: {"ok":true|false,"title_ok":true|false,"issues":[{"type":"invented_fact|wrong_product|brand|language|unsupported_promise|title","detail":"..."}]}. ok=false dès qu\'une règle est violée; title_ok=false si la règle (6) est violée.',
     "",
     "DONNÉES FOURNISSEUR:",
     `Nom: ${product.name}`,
@@ -218,8 +220,10 @@ export async function judgeContent(product: AosomMergedProduct, c: GeneratedCont
   const out = parseJson<JudgeOut>(raw);
   if (!out || typeof out.ok !== "boolean") return { ok: false, reasons: ["judge_unparseable"] };
   const issues = (out.issues ?? []).map((i) => `${i.type ?? "issue"}:${(i.detail ?? "").slice(0, 100)}`);
-  if (!out.ok || issues.length > 0) return { ok: false, reasons: issues.length ? issues.map((s) => `judge:${s}`) : ["judge:rejected"] };
-  return { ok: true, reasons: [] };
+  const reasons = issues.map((s) => `judge:${s}`);
+  if (out.title_ok === false && !reasons.some((r) => r.startsWith("judge:title"))) reasons.push("judge:title_not_sensible");
+  if (!out.ok && reasons.length === 0) reasons.push("judge:rejected");
+  return { ok: reasons.length === 0, reasons };
 }
 
 export interface FetchedImage {
@@ -227,7 +231,8 @@ export interface FetchedImage {
   data: string;
 }
 
-const GALLERY_CHECK_COUNT = 4;
+/** Photos examined per product: the first six cover everything a shopper sees before scrolling. */
+const GALLERY_ANALYZE_COUNT = 6;
 const MAX_IMAGE_BYTES = 4_000_000;
 
 /** Download one gallery image as base64; null when unreachable, empty, not an image, or too large. */
@@ -246,48 +251,196 @@ export async function fetchImageBase64(url: string, fetchImpl: typeof fetch = fe
 }
 
 interface GalleryOut {
-  images?: Array<{ index?: number; supplier_logo?: boolean; watermark?: boolean; not_product?: boolean; unreadable?: boolean }>;
+  images?: Array<{
+    index?: number;
+    supplier_logo?: boolean;
+    watermark?: boolean;
+    not_product?: boolean;
+    unreadable?: boolean;
+    lifestyle?: boolean;
+    text_overlay?: boolean;
+  }>;
+}
+
+export interface GalleryFlag {
+  /** 1-based position in the analysed list. */
+  index: number;
+  url: string;
+  supplierLogo: boolean;
+  watermark: boolean;
+  notProduct: boolean;
+  unreadable: boolean;
+  /** An in-use scene (room, garden, pet at home…) rather than the product alone on a plain background. */
+  lifestyle: boolean;
+  /** Marketing text / dimension callouts burned onto the photo. */
+  textOverlay: boolean;
+}
+
+export interface GalleryAnalysis {
+  ok: boolean;
+  reasons: string[];
+  flags: GalleryFlag[];
+  /** Photos that could not be downloaded as real images. */
+  unreachable: string[];
 }
 
 /**
- * Gallery photos: reachable (the first GALLERY_CHECK_COUNT must download as real images) and free of
- * supplier logos, watermarks and non-product pictures. The pos-1 "clean photo" rule is enforced elsewhere
- * (import-quality-gates); this looks at the rest of what a shopper scrolls through.
+ * One vision call over the first photos: which show a supplier logo / watermark / no product, which are
+ * lifestyle scenes, which carry burned-in text. Fail-closed when the model cannot answer; does NOT decide
+ * what to do with the answers — see cleanGallery.
  */
-export async function checkGallery(
+export async function analyzeGallery(
   images: string[],
   llm: LlmText = defaultLlmText,
   fetchImage: (url: string) => Promise<FetchedImage | null> = fetchImageBase64,
-): Promise<Verdict> {
-  const urls = [...new Set(images)].slice(0, GALLERY_CHECK_COUNT);
-  const fetched: FetchedImage[] = [];
-  const reasons: string[] = [];
-  for (const [i, u] of urls.entries()) {
-    const f = await fetchImage(u);
-    if (!f) reasons.push(`image_unreachable:${i + 1}`);
-    else fetched.push(f);
+): Promise<GalleryAnalysis> {
+  const urls = [...new Set(images)].slice(0, GALLERY_ANALYZE_COUNT);
+  const reachable: Array<{ url: string; img: FetchedImage }> = [];
+  const unreachable: string[] = [];
+  for (const u of urls) {
+    const img = await fetchImage(u);
+    if (img) reachable.push({ url: u, img });
+    else unreachable.push(u);
   }
-  if (reasons.length) return { ok: false, reasons };
-  if (fetched.length < Math.min(3, urls.length)) return { ok: false, reasons: ["gallery_too_small"] };
+  if (reachable.length < Math.min(3, urls.length)) {
+    return { ok: false, reasons: [`gallery_too_few_reachable:${reachable.length}/${urls.length}`], flags: [], unreachable };
+  }
 
   let raw: string;
   try {
     raw = await llm(
-      'Examine ces photos produit dans l\'ordre (index 1..N). Pour chacune indique: supplier_logo (logo ou nom de marque du fournisseur visible), watermark (filigrane), not_product (ne montre pas un produit de maison/jardin/animal/jouet, ex. page de texte, QR code, emballage vide), unreadable (illisible ou trop floue). Réponds UNIQUEMENT en JSON: {"images":[{"index":1,"supplier_logo":false,"watermark":false,"not_product":false,"unreadable":false}]}',
-      { images: fetched, tier: "lite" },
+      `Examine ces ${reachable.length} photos produit dans l'ordre (index 1..${reachable.length}). Pour chacune indique: supplier_logo (logo ou nom de marque du fournisseur visible), watermark (filigrane), not_product (ne montre pas le produit: page de texte, QR code, emballage vide), unreadable (illisible ou trop floue), lifestyle (le produit est montré en situation réelle: pièce meublée, jardin, animal, enfant qui l'utilise; false si le produit est seul sur fond uni ou blanc), text_overlay (texte marketing, flèches ou cotes de dimensions incrustés sur la photo). Réponds UNIQUEMENT en JSON: {"images":[{"index":1,"supplier_logo":false,"watermark":false,"not_product":false,"unreadable":false,"lifestyle":true,"text_overlay":false}]}`,
+      { images: reachable.map((r) => r.img), tier: "lite" },
     );
   } catch (err) {
-    return { ok: false, reasons: [`gallery_judge_unavailable:${err instanceof Error ? err.message.slice(0, 100) : "error"}`] };
+    return { ok: false, reasons: [`gallery_judge_unavailable:${err instanceof Error ? err.message.slice(0, 100) : "error"}`], flags: [], unreachable };
   }
   const out = parseJson<GalleryOut>(raw);
-  if (!out || !Array.isArray(out.images)) return { ok: false, reasons: ["gallery_unparseable"] };
-  for (const im of out.images) {
-    const n = im.index ?? "?";
-    if (im.supplier_logo) reasons.push(`gallery_supplier_logo:${n}`);
-    if (im.watermark) reasons.push(`gallery_watermark:${n}`);
-    if (im.not_product) reasons.push(`gallery_not_product:${n}`);
-    if (im.unreadable) reasons.push(`gallery_unreadable:${n}`);
+  if (!out || !Array.isArray(out.images)) return { ok: false, reasons: ["gallery_unparseable"], flags: [], unreachable };
+  const flags: GalleryFlag[] = reachable.map((r, i) => {
+    const o = out.images!.find((x) => x.index === i + 1) ?? {};
+    return {
+      index: i + 1,
+      url: r.url,
+      supplierLogo: !!o.supplier_logo,
+      watermark: !!o.watermark,
+      notProduct: !!o.not_product,
+      unreadable: !!o.unreadable,
+      lifestyle: !!o.lifestyle,
+      textOverlay: !!o.text_overlay,
+    };
+  });
+  return { ok: true, reasons: [], flags, unreachable };
+}
+
+export interface CleanedGallery {
+  images: string[];
+  dropped: string[];
+  /** The photo now in position 1 came from further down the gallery. */
+  promoted: boolean;
+  /** A clean lifestyle scene exists among the analysed photos (and leads the gallery when promoted). */
+  hasLifestyle: boolean;
+  reasons: string[];
+}
+
+const isBad = (f: GalleryFlag) => f.supplierLogo || f.watermark || f.notProduct || f.unreadable;
+
+/**
+ * Turn the analysis into the gallery we actually publish: photos with a supplier logo, a watermark or no
+ * product are dropped (and unreachable ones), then the position-1 photo is chosen — a CLEAN lifestyle scene
+ * when one exists (shoppers see the product in use first), otherwise the first photo without burned-in text
+ * (the studio shot). Fails only when fewer than `minKeep` usable photos remain.
+ */
+export function cleanGallery(images: string[], a: GalleryAnalysis, minKeep = 3): CleanedGallery {
+  const byUrl = new Map(a.flags.map((f) => [f.url, f]));
+  const dropped = [...a.unreachable, ...a.flags.filter(isBad).map((f) => f.url)];
+  let kept = images.filter((u) => !dropped.includes(u));
+  if (kept.length < minKeep) {
+    return { images: kept, dropped, promoted: false, hasLifestyle: false, reasons: [`gallery_too_few_clean_photos:${kept.length}`] };
   }
+  const clean = (u: string) => {
+    const f = byUrl.get(u);
+    return !!f && !f.textOverlay;
+  };
+  const lifestyle = kept.find((u) => byUrl.get(u)?.lifestyle && clean(u));
+  let pick: string | undefined = lifestyle;
+  if (!pick && !clean(kept[0])) pick = kept.find(clean);
+  let promoted = false;
+  if (pick && pick !== kept[0]) {
+    kept = [pick, ...kept.filter((u) => u !== pick)];
+    promoted = true;
+  }
+  const reasons: string[] = [];
+  if (!lifestyle && !clean(kept[0])) reasons.push("no_clean_primary_photo");
+  return { images: kept, dropped, promoted, hasLifestyle: !!lifestyle, reasons };
+}
+
+// ── Titles and colour photos ───────────────────────────────────────────────────────────────────
+
+/** Short uppercase words that are product vocabulary, not company names. */
+const TITLE_ALLOWED_CAPS = new Set([
+  "LED", "DEL", "USB", "HDMI", "PVC", "TV", "WIFI", "RGB", "UV", "LCD", "BBQ", "PRO", "XXL", "XL", "SPA", "GPS", "DIY", "ABS", "MDF", "PET", "ECO", "HD", "AC", "DC", "OK",
+  "CSA", "UL", "FSC", "BPA", "HEPA", "NFC", "BT", "DVD", "CD", "RV", "ATV", "UTV", "SUV",
+]);
+
+/** Company-looking tokens: CamelCase with an inner capital (PawHut, HomCom) or long all-caps words. */
+export function companyLikeTokens(title: string): string[] {
+  const out: string[] = [];
+  for (const raw of title.split(/[\s/,;:()+]+/)) {
+    const t = raw.replace(/^[^\p{L}\d]+|[^\p{L}\d]+$/gu, "");
+    if (t.length < 4) continue;
+    if (/^[A-Z][a-z]+[A-Z][A-Za-z]*$/.test(t)) out.push(t);
+    else if (/^[A-ZÀ-Ý]{4,}$/.test(t) && !TITLE_ALLOWED_CAPS.has(t)) out.push(t);
+  }
+  return out;
+}
+
+export function checkTitle(product: AosomMergedProduct, c: GeneratedContent): Verdict {
+  const reasons: string[] = [];
+  for (const [lang, title] of [["fr", c.titleFr], ["en", c.titleEn]] as const) {
+    const t = (title || "").trim();
+    if (t.length < (lang === "fr" ? 25 : 15) || t.length > 110) reasons.push(`title_${lang}_length:${t.length}`);
+    if (t.split(/\s+/).length < 3) reasons.push(`title_${lang}_too_few_words`);
+    if (/[-–—,:|(&]$|\.{3}$|…$/.test(t)) reasons.push(`title_${lang}_truncated`);
+    if (/^[a-zà-ÿ]/.test(t)) reasons.push(`title_${lang}_starts_lowercase`);
+    if (/&amp;|&nbsp;|<|>|\|/.test(t)) reasons.push(`title_${lang}_markup`);
+    if (/ameublo|furnish direct|aosom/i.test(t)) reasons.push(`title_${lang}_store_or_supplier_name`);
+    const brands = forbiddenBrandsIn(t);
+    if (brands.length) reasons.push(`title_${lang}_supplier_brand:${brands.join(",")}`);
+    if (isLicensedName(t)) reasons.push(`title_${lang}_third_party_brand`);
+    const brand = (product.brand || "").trim();
+    if (brand.length >= 3 && new RegExp(`\\b${brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t)) {
+      reasons.push(`title_${lang}_has_product_brand:${brand}`);
+    }
+    const tokens = companyLikeTokens(t);
+    if (tokens.length) reasons.push(`title_${lang}_company_like_token:${tokens.slice(0, 3).join("|")}`);
+    const words = t.toLowerCase().match(/[a-zà-ÿ]{4,}/g) ?? [];
+    const counts = new Map<string, number>();
+    for (const w of words) counts.set(w, (counts.get(w) ?? 0) + 1);
+    if ([...counts.values()].some((n) => n >= 3)) reasons.push(`title_${lang}_repeated_word`);
+  }
+  return { ok: reasons.length === 0, reasons };
+}
+
+/**
+ * Colour swatches change the photo only when each colour owns a photo in the gallery (that is what gets
+ * attached to its variants at creation). Every colour must have one, and a product in several colours
+ * must not point them all at the same picture.
+ */
+export function checkColorPhotos(product: AosomMergedProduct): Verdict {
+  const colours = new Map<string, number>();
+  for (const v of product.variants) {
+    const key = (v.color || "").trim().toLowerCase();
+    if (!key) continue;
+    const idx = v.images.map((u) => product.images.indexOf(u)).find((i) => i >= 0);
+    const prev = colours.get(key);
+    if (prev === undefined || (prev < 0 && idx !== undefined && idx >= 0)) colours.set(key, idx ?? -1);
+  }
+  if (colours.size < 2) return { ok: true, reasons: [] };
+  const reasons: string[] = [];
+  for (const [colour, idx] of colours) if (idx < 0) reasons.push(`color_without_photo:${colour}`);
+  const distinct = new Set([...colours.values()].filter((i) => i >= 0));
+  if (distinct.size < 2) reasons.push("colors_share_one_photo");
   return { ok: reasons.length === 0, reasons };
 }
 
@@ -301,13 +454,23 @@ export interface ShopifyProductSummary {
   published: boolean;
   tags: string[];
   imageCount: number;
-  variants: Array<{ sku: string; price: number; inventoryManagement: string | null }>;
+  variants: Array<{ sku: string; price: number; inventoryManagement: string | null; imageId?: number | null }>;
 }
 
 /** What Shopify stores for the freshly created product, compared with what we meant to create. */
 export function checkShopifySummary(s: ShopifyProductSummary, product: AosomMergedProduct): Verdict {
   const reasons: string[] = [];
   const expected = new Map(product.variants.map((v) => [v.sku, v.price]));
+  // Colour swatches: when the product has several colours with their own photos, each colour variant must
+  // carry an image id on Shopify (that is what makes the swatch change the photo), and not all the same one.
+  const colourOf = new Map(product.variants.map((v) => [v.sku, (v.color || "").trim().toLowerCase()]));
+  const colours = new Set([...colourOf.values()].filter(Boolean));
+  if (colours.size >= 2 && checkColorPhotos(product).ok) {
+    const coloured = s.variants.filter((v) => colourOf.get(v.sku));
+    for (const v of coloured) if (!v.imageId) reasons.push(`variant_without_photo:${v.sku}`);
+    const distinct = new Set(coloured.map((v) => v.imageId).filter(Boolean));
+    if (distinct.size < 2) reasons.push("swatches_do_not_change_photo");
+  }
   if (s.variants.length !== expected.size) reasons.push(`variant_count:${s.variants.length}/${expected.size}`);
   for (const v of s.variants) {
     const floor = expected.get(v.sku);

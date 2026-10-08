@@ -26,7 +26,10 @@ import { withBudgetPool } from "@/lib/llm-budget";
 import { STOREFRONT_BASE_URL } from "@/lib/insights";
 import {
   checkContentStructure,
-  checkGallery,
+  analyzeGallery,
+  cleanGallery,
+  checkTitle,
+  checkColorPhotos,
   judgeContent,
   checkShopifySummary,
   checkStorefrontHtml,
@@ -95,17 +98,43 @@ export async function processCandidate(c: Candidate, mode: Exclude<AutoImportMod
         return { ...base, outcome: "needs_review", layer: "generate", reasons: ["no_content"] };
       }
 
+      // Layer 1: copy rules + title rules (no company name, makes sense, not truncated).
       const l1 = checkContentStructure(job.product, content);
-      if (!l1.ok) {
-        await park(job.id, "layer1", l1.reasons);
-        return { ...base, outcome: "needs_review", layer: "layer1", reasons: l1.reasons };
+      const title = checkTitle(job.product, content);
+      if (!l1.ok || !title.ok) {
+        const reasons = [...l1.reasons, ...title.reasons];
+        await park(job.id, "layer1", reasons);
+        return { ...base, outcome: "needs_review", layer: "layer1", reasons };
       }
-      const gallery = await checkGallery(job.product.images);
-      if (!gallery.ok) {
-        await park(job.id, "gallery", gallery.reasons);
-        return { ...base, outcome: "needs_review", layer: "gallery", reasons: gallery.reasons };
+
+      // Layer 2a: photos. Look at the first six, drop logos/watermarks/non-product shots, then put a CLEAN
+      // lifestyle scene first (studio shot only when there is none). The corrected order is saved on the job
+      // BEFORE creation so Shopify gets exactly this gallery.
+      const analysis = await analyzeGallery(job.product.images);
+      if (!analysis.ok) {
+        await park(job.id, "gallery", analysis.reasons);
+        return { ...base, outcome: "needs_review", layer: "gallery", reasons: analysis.reasons };
       }
-      const judge = await judgeContent(job.product, content);
+      const cleaned = cleanGallery(job.product.images, analysis);
+      if (cleaned.reasons.length) {
+        await park(job.id, "gallery", cleaned.reasons);
+        return { ...base, outcome: "needs_review", layer: "gallery", reasons: cleaned.reasons };
+      }
+      let product = job.product;
+      if (cleaned.dropped.length || cleaned.promoted) {
+        product = { ...product, images: cleaned.images };
+        await updateImportJob(job.id, { product_data: JSON.stringify(product) });
+      }
+
+      // Layer 2b: colour swatches must be able to change the photo (each colour owns a photo in the gallery).
+      const colours = checkColorPhotos(product);
+      if (!colours.ok) {
+        await park(job.id, "colors", colours.reasons);
+        return { ...base, outcome: "needs_review", layer: "colors", reasons: colours.reasons };
+      }
+
+      // Layer 2c: independent judge (facts, title sense, brands, language).
+      const judge = await judgeContent(product, content);
       if (!judge.ok) {
         await park(job.id, "judge", judge.reasons);
         return { ...base, outcome: "needs_review", layer: "judge", reasons: judge.reasons };
@@ -119,7 +148,7 @@ export async function processCandidate(c: Candidate, mode: Exclude<AutoImportMod
       const shopifyId = pushed.shopifyId;
 
       const summary = await fetchShopifyProductSummary(shopifyId);
-      const l3 = checkShopifySummary(summary, job.product);
+      const l3 = checkShopifySummary(summary, product);
       if (!l3.ok) {
         await quarantine(shopifyId, summary.tags, job.id, "layer3_admin", l3.reasons);
         return { ...base, outcome: "needs_review", layer: "layer3_admin", shopifyId, reasons: l3.reasons };

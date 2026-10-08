@@ -1021,7 +1021,7 @@ export async function fetchShopifyProductSummary(shopifyId: string): Promise<{
   published: boolean;
   tags: string[];
   imageCount: number;
-  variants: Array<{ sku: string; price: number; inventoryManagement: string | null }>;
+  variants: Array<{ sku: string; price: number; inventoryManagement: string | null; imageId: number | null }>;
 }> {
   const response = await shopifyFetch(
     `/products/${shopifyId}.json?fields=id,handle,status,published_at,tags,images,variants`,
@@ -1040,10 +1040,11 @@ export async function fetchShopifyProductSummary(shopifyId: string): Promise<{
     tags: typeof p.tags === "string" && p.tags.trim() ? p.tags.split(",").map((t: string) => t.trim()) : [],
     imageCount: Array.isArray(p.images) ? p.images.length : 0,
     variants: Array.isArray(p.variants)
-      ? p.variants.map((v: { sku?: string; price?: string; inventory_management?: string | null }) => ({
+      ? p.variants.map((v: { sku?: string; price?: string; inventory_management?: string | null; image_id?: number | null }) => ({
           sku: String(v.sku ?? ""),
           price: Number(v.price),
           inventoryManagement: v.inventory_management ?? null,
+          imageId: v.image_id ?? null,
         }))
       : [],
   };
