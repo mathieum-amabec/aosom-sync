@@ -6,6 +6,7 @@ import { setSetting } from "@/lib/database";
 import { trackEvent } from "@/lib/klaviyo-client";
 import { REPORT_LOCAL_HOUR, localClock } from "@/lib/morning-report";
 import { runPublishCheck, type PublishCheckResult } from "@/lib/publish-check";
+import { isPublisherPaused } from "@/lib/automation-controls";
 
 /**
  * GET /api/cron/publish-check — 06:15 America/Montreal check that the morning slot(s) really went out.
@@ -41,6 +42,12 @@ export async function GET(request: Request) {
     await trackCron(
       "publish-check",
       async () => {
+        if (await isPublisherPaused()) {
+          const pausedResult: PublishCheckResult = { ok: true, problems: [], dueCount: 0, publishedCount: 0, checkedAt: now.toISOString(), paused: true };
+          result = pausedResult;
+          await setSetting(LAST_KEY, JSON.stringify({ date: clock.date, ...pausedResult }));
+          return pausedResult;
+        }
         result = await runPublishCheck(now);
         await setSetting(LAST_KEY, JSON.stringify({ date: clock.date, ...result }));
         if (!result.ok) {
@@ -55,7 +62,7 @@ export async function GET(request: Request) {
         }
         return result;
       },
-      (r) => `${r.publishedCount}/${r.dueCount} publiés, aucun problème`,
+      (r) => (r.paused ? "publications en pause (voulu) — rien à vérifier" : `${r.publishedCount}/${r.dueCount} publiés, aucun problème`),
     );
     return NextResponse.json({ success: true, data: result });
   } catch {

@@ -20,6 +20,8 @@ export interface PublishCheckResult {
   dueCount: number;
   publishedCount: number;
   checkedAt: string;
+  /** The operator paused automatic publications on purpose: nothing was checked, nothing is wrong. */
+  paused?: boolean;
 }
 
 /** Statuses that, for a slot already due, mean "did not go out". Drafts/cancelled never publish. */
