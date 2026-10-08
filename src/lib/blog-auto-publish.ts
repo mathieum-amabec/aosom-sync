@@ -15,6 +15,7 @@ import {
 } from "./database";
 import { parseBlogSchedule } from "./publication-scheduler";
 import { publishBlogArticle, type BlogLang } from "./shopify-blog";
+import { evaluateBlogArticle, type BlogArticleInput } from "./blog-quality";
 
 /** Minimal article shape the judge needs (structurally satisfied by the generated article). */
 export interface ScorableArticle {
@@ -29,7 +30,7 @@ export interface ArticleScore {
   reasons: string;
 }
 
-const JUDGE_SYSTEM_PROMPT = `You are a strict editorial quality reviewer for Aosom Canada's bilingual home & garden blog. Rate a draft article 0-100 on: clarity/readability, SEO quality (title, meta description, natural keyword use), structure (short intro, 3-5 H2 sections, conclusion), on-brand tone (helpful, no pricing/SKUs/unverifiable claims), and value to a Canadian home-decor reader. Be critical: 80+ means genuinely publishable as-is; 60-79 needs light editing; below 60 has real problems. Output ONE JSON object, no markdown fences: {"score": <integer 0-100>, "reasons": "<one or two sentences>"}.`;
+const JUDGE_SYSTEM_PROMPT = `You are a strict editorial quality reviewer for the Ameublo Direct / Furnish Direct bilingual home & garden blog. Rate a draft article 0-100 on: clarity/readability, SEO quality (title, meta description, natural keyword use), structure (short intro, 3-5 H2 sections, conclusion), on-brand tone (helpful, no pricing/SKUs/unverifiable claims), and value to a Canadian home-decor reader. Be critical: 80+ means genuinely publishable as-is; 60-79 needs light editing; below 60 has real problems. Output ONE JSON object, no markdown fences: {"score": <integer 0-100>, "reasons": "<one or two sentences>"}.`;
 
 function buildJudgePrompt(article: ScorableArticle, lang: BlogLang): string {
   // The article is itself model-generated; delimit it and tell the judge to treat the
@@ -95,7 +96,11 @@ export interface AutoPublishParams {
   articleId: string;
   /** Reference time (injectable for tests). */
   now?: Date;
+  /** Fact/quality review (injectable for tests). Default: blog-quality.ts evaluateBlogArticle. */
+  qualityGate?: (a: BlogArticleInput) => Promise<{ ok: boolean; reasons: string[] }>;
 }
+
+const defaultQualityGate = (a: BlogArticleInput) => evaluateBlogArticle(a);
 
 export interface AutoPublishOutcome {
   published: boolean;
@@ -132,6 +137,21 @@ export async function maybeAutoPublish(p: AutoPublishParams): Promise<AutoPublis
   }
   if (score < BLOG.AUTO_PUBLISH_SCORE_THRESHOLD) {
     return { published: false, score, publishReason: `score ${score} < ${BLOG.AUTO_PUBLISH_SCORE_THRESHOLD}` };
+  }
+
+  // 1b. Fact/quality review (blog-quality.ts): rules (no supplier names, prices, unsourced stats, structure, links…)
+  // then a claims check. The score above is a generic readability grade; this is the review guides get. A failure
+  // keeps the article as a Shopify draft with the reasons, and never throws.
+  const gate = p.qualityGate ?? defaultQualityGate;
+  let review: { ok: boolean; reasons: string[] };
+  try {
+    review = await gate({ ...p.article, lang: p.lang });
+  } catch (err) {
+    console.error("[blog-auto-publish] quality review errored:", err);
+    return { published: false, score, publishReason: "quality review errored (kept as draft)" };
+  }
+  if (!review.ok) {
+    return { published: false, score, publishReason: `quality review: ${review.reasons.slice(0, 4).join("; ")}`.slice(0, 400) };
   }
 
   // 2. Season gate.

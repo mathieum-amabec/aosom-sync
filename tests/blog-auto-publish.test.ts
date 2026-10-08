@@ -39,6 +39,8 @@ const baseParams = {
   blogId: 90302349417,
   articleId: "555",
   now: new Date("2026-07-15T12:00:00Z"), // summer
+  // The fact/quality review (blog-quality.ts) has its own tests; the gate tests here cover score/season/cap.
+  qualityGate: async () => ({ ok: true, reasons: [] as string[] }),
 };
 
 beforeEach(() => vi.clearAllMocks());
@@ -136,5 +138,41 @@ describe("maybeAutoPublish — gate", () => {
     expect(r).toEqual({ published: false, score: null, publishReason: "auto-publish disabled (blog_schedule)" });
     expect(createMessage).not.toHaveBeenCalled(); // gated before the judge call
     expect(reserveBlogPublishSlot).not.toHaveBeenCalled();
+  });
+});
+
+describe("maybeAutoPublish — fact/quality review gate", () => {
+  it("keeps a high-scoring article as a draft when the review fails, and never reaches the season/cap/publish steps", async () => {
+    judgeReturns(95);
+    const r = await maybeAutoPublish({
+      ...baseParams,
+      qualityGate: async () => ({ ok: false, reasons: ["supplier_name:aosom", "price_in_article"] }),
+    });
+    expect(r.published).toBe(false);
+    expect(r.score).toBe(95);
+    expect(r.publishReason).toContain("quality review");
+    expect(r.publishReason).toContain("supplier_name:aosom");
+    expect(reserveBlogPublishSlot).not.toHaveBeenCalled();
+    expect(publishBlogArticle).not.toHaveBeenCalled();
+  });
+
+  it("hands the gate the article plus its language", async () => {
+    judgeReturns(90);
+    const gate = vi.fn(async () => ({ ok: true, reasons: [] as string[] }));
+    await maybeAutoPublish({ ...baseParams, lang: "en", qualityGate: gate });
+    expect(gate).toHaveBeenCalledWith(expect.objectContaining({ title: "T", lang: "en", bodyHtml: "<p>x</p>" }));
+  });
+
+  it("treats a crashing review as not publishable, never as a pass", async () => {
+    judgeReturns(90);
+    const r = await maybeAutoPublish({
+      ...baseParams,
+      qualityGate: async () => {
+        throw new Error("boom");
+      },
+    });
+    expect(r.published).toBe(false);
+    expect(r.publishReason).toContain("quality review errored");
+    expect(publishBlogArticle).not.toHaveBeenCalled();
   });
 });

@@ -2,6 +2,22 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.18] - 2026-10-08
+
+### Added
+
+- **Blog quality control** (`src/lib/blog-quality.ts`), the review blogs never had — guides get a fact check and a human, blogs only got one generic 0-100 score that
+  let "Chez Aosom Canada", price ranges and invented statistics ("selon Statistique Canada, près d'un travailleur sur trois…") onto the live site.
+  The auto-publish gate now runs, after the score and before the season/cap checks: (1) deterministic rules — supplier/internal names (incl. "Aosom"), prices and SKUs,
+  bare percentages and unsourced "studies show" claims, 3–10 H2, 550–2,500 words, no H1 in the body, no inline scripts (FAQ JSON-LD allowed), links only to our domains
+  and Unsplash photo credits, language, title and meta length, near-duplicate title; then (2) a claims check by the strong model that lists every contestable statement
+  and fails on statistics, studies, health/safety, legal, price and guarantee claims (fail-closed). A failing article stays a Shopify draft with the reasons in
+  `publishReason`; it is never auto-published. The generator prompt now forbids price ranges, statistics/studies and external links, and its one corrective retry
+  names any forbidden content it finds. The judge prompt no longer calls the store "Aosom Canada".
+- `scripts/blog-quality-audit.mts` — audit (default, read-only) and repair (`--apply`) of the editorial blogs already online: store-name swap, H1 demotion and a minimal
+  model rewrite for prices/percentages/study claims, accepted only if it re-passes the rules and keeps ≥ 90 % of the words; structurally poor articles are
+  unpublished (never deleted). Full article bodies are saved to `scripts/blog-reports/` (git-ignored) before any write.
+
 ## [0.5.107.17] - 2026-10-08
 
 ### Added
