@@ -140,6 +140,10 @@
       "schedule": "0 17 * * 1"
     },
     {
+      "path": "/api/cron/gsc-sync",
+      "schedule": "30 12 * * *"
+    },
+    {
       "path": "/api/cron/guide-batch",
       "schedule": "30 17 * * 3"
     },
