@@ -36,6 +36,10 @@
       "schedule": "0 14 * * 1,3,5"
     },
     {
+      "path": "/api/cron/auto-import",
+      "schedule": "*/10 7-20 * * *"
+    },
+    {
       "path": "/api/cron/blog",
       "schedule": "0 8 * * 1"
     },

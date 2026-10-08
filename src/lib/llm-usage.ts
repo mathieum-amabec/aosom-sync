@@ -57,6 +57,9 @@ export const ASSUMED_INPUT_SHARE: Record<LlmBudgetPool, number> = {
   // depending on source resolution (avg in=1,036 out=66 -> 94.0% input). Re-measure if the
   // prompt or the frame-extraction resolution changes materially.
   video: 0.94,
+  // Auto-import: product copy (output-weighted like `batch`) plus several image/judge calls
+  // (input-weighted). Estimated, not measured — re-measure after the first live week.
+  import: 0.55,
 };
 
 /** The model each pool currently runs. Reads config, so the CLAUDE_ASSISTANT_MODEL /

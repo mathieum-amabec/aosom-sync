@@ -2618,7 +2618,7 @@ function utcDayKey(): string {
  * can never exhaust the 'assistant' pool that the public storefront /api/assistant
  * draws from. Each pool has its own daily counter row and its own budget env var.
  */
-export type LlmBudgetPool = "assistant" | "batch" | "maintenance" | "video";
+export type LlmBudgetPool = "assistant" | "batch" | "maintenance" | "video" | "import";
 
 /** Tokens the given pool consumed so far today (UTC). 0 when no row yet. */
 export async function getDailyLlmTokensUsed(pool: LlmBudgetPool): Promise<number> {
@@ -2650,6 +2650,8 @@ export interface LlmUsageDay {
   /** Video-batch QC (demand-gen-ext, assembly) — isolated from `batch` so a
    *  production run can never starve imports/blog/social. See llm-budget.ts. */
   video: number;
+  /** Automatic daily catalogue import (src/lib/auto-import) — isolated so it can never starve `batch`. */
+  import: number;
 }
 
 /**
@@ -2669,13 +2671,13 @@ export async function getLlmUsageWindow(days: number): Promise<LlmUsageDay[]> {
     args: [keys[0]],
   });
   const byDay = new Map<string, LlmUsageDay>(
-    keys.map((day) => [day, { day, assistant: 0, batch: 0, maintenance: 0, video: 0 }]),
+    keys.map((day) => [day, { day, assistant: 0, batch: 0, maintenance: 0, video: 0, import: 0 }]),
   );
   for (const row of res.rows) {
     const entry = byDay.get(row.day as string);
     if (!entry) continue; // row older than the window (the >= bound is inclusive of keys[0])
     const pool = row.pool as LlmBudgetPool;
-    if (pool === "assistant" || pool === "batch" || pool === "maintenance" || pool === "video") {
+    if (pool === "assistant" || pool === "batch" || pool === "maintenance" || pool === "video" || pool === "import") {
       entry[pool] = Number(row.tokens_used) || 0;
     }
   }

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 
 interface PoolUsage {
-  pool: "assistant" | "batch" | "maintenance" | "video";
+  pool: "assistant" | "batch" | "maintenance" | "video" | "import";
   model: string;
   tokens: number;
   /** null = uncapped (maintenance without LLM_MAINTENANCE_DAILY_BUDGET set). JSON can't
@@ -34,6 +34,7 @@ const POOL_LABEL: Record<PoolUsage["pool"], string> = {
   batch: "Batch (imports, blog, social)",
   maintenance: "Maintenance (audits catalogue)",
   video: "Vidéo (demand-gen, assembly)",
+  import: "Import automatique (100/jour)",
 };
 
 /** Amber at 80% of the daily cap, red at 100% — matches the alert colours used elsewhere. */
