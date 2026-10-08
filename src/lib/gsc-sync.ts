@@ -3,7 +3,7 @@
  * summary the /seo page reads. Search Console data lags about two days and is revised, so each run re-imports the last
  * `days` days (delete + insert for the range: idempotent).
  */
-import { ensureSchema } from "@/lib/database";
+import { ensureSchema, getSetting, setSetting } from "@/lib/database";
 import { queryAll, readGscConfig, type GscConfig, type SearchRow } from "@/lib/gsc-client";
 
 let tablesReady = false;
@@ -196,4 +196,55 @@ export async function getSeoSummary(days = 28, now = new Date()): Promise<SeoSum
       .slice(0, 8)
       .map((p) => ({ page: p.key, impressions: p.impressions, position: p.position })),
   };
+}
+
+// ── health check ─────────────────────────────────────────────────────────────────────────────
+
+/** Days after the first successful connection during which "no data yet" is expected (Search Console starts collecting only once the property is verified). */
+export const GSC_GRACE_DAYS = 4;
+/** Newest imported day may trail the final-data day by at most this many days before the import is called stale. */
+export const GSC_STALE_DAYS = 4;
+const CONNECTED_KEY = "gsc_connected_since";
+
+export interface GscHealth {
+  ok: boolean;
+  /** Connected but still inside the grace window with no rows: expected, not a problem. */
+  pending: boolean;
+  problems: string[];
+  connectedSince: string | null;
+  lastDay: string | null;
+  pageRows: number;
+}
+
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86_400_000);
+
+/**
+ * Called right after a successful sync (so the connection itself works). Flags what a 200 from Google cannot:
+ * the property stays empty well past the grace window (wrong property, no traffic data, access revoked), or the newest
+ * imported day stops advancing. The first call stamps `gsc_connected_since`.
+ */
+export async function checkGscHealth(now = new Date()): Promise<GscHealth> {
+  const today = iso(now);
+  let since = await getSetting(CONNECTED_KEY);
+  if (!since) {
+    since = today;
+    await setSetting(CONNECTED_KEY, since);
+  }
+  const client = await db();
+  const r = await client.execute(`SELECT COUNT(*) AS n, MAX(day) AS d FROM gsc_page_daily`);
+  const pageRows = Number(r.rows[0]?.n ?? 0);
+  const lastDay = (r.rows[0]?.d as string | null) ?? null;
+  const connectedDays = daysBetween(since, today);
+  const problems: string[] = [];
+  let pending = false;
+  if (pageRows === 0) {
+    if (connectedDays >= GSC_GRACE_DAYS) {
+      problems.push(`Search Console est connecté depuis ${connectedDays} jours mais n'a envoyé aucune donnée (mauvaise propriété, accès retiré ou site sans affichages).`);
+    } else {
+      pending = true;
+    }
+  } else if (lastDay && daysBetween(lastDay, latestFinalDay(now)) > GSC_STALE_DAYS) {
+    problems.push(`Les données Search Console n'avancent plus: dernier jour importé ${lastDay}.`);
+  }
+  return { ok: problems.length === 0, pending, problems, connectedSince: since, lastDay, pageRows };
 }

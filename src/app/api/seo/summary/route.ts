@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isAuthenticated, isAdmin } from "@/lib/auth";
 import { readGscConfig } from "@/lib/gsc-client";
 import { getSeoSummary } from "@/lib/gsc-sync";
+import { getSetting } from "@/lib/database";
 
 /**
  * GET /api/seo/summary?days=28 — Google Search Console performance (clicks, impressions, CTR, position, by section,
@@ -17,8 +18,10 @@ export async function GET(request: Request) {
   const days = Math.min(Math.max(Number(new URL(request.url).searchParams.get("days")) || 28, 7), 90);
   try {
     const summary = await getSeoSummary(days);
+    const rawHealth = cfg.configured ? await getSetting("gsc_health_last") : null;
+    const health = rawHealth ? (JSON.parse(rawHealth) as unknown) : null;
     return NextResponse.json(
-      { success: true, data: { configured: cfg.configured, missing: cfg.configured ? [] : cfg.missing, summary } },
+      { success: true, data: { configured: cfg.configured, missing: cfg.configured ? [] : cfg.missing, health, summary } },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {
