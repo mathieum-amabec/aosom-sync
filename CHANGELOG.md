@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.23] - 2026-10-08
+
+### Added
+
+- **Bing URL submission.** Bing knew ~50 of 3,000+ pages and ChatGPT / Copilot search lean on its index. New daily cron `/api/cron/bing-submit` (11:00 UTC) reads the storefront
+  sitemaps and sends the URLs Bing has not seen, or that changed since (sitemap `lastmod`), through the Webmaster URL Submission API, newest first, within the daily
+  quota Bing reports (100/day on a new site, so the backlog drains over a few weeks). Sent URLs are tracked in `bing_submitted`. Needs `BING_WEBMASTER_API_KEY`; without it the run is a no-op.
+
 ## [0.5.107.22] - 2026-10-08
 
 ### Changed
