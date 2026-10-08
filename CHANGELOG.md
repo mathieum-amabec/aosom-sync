@@ -2,6 +2,14 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.21] - 2026-10-08
+
+### Fixed
+
+- **Auto-import: false positive on "30 kg (66 lb)".** Layer 1's `english_units_in_french_copy` rule rejected the house style (metric value followed by its imperial
+  equivalent in parentheses), so 4 of the first 5 live products went to review and the failure-rate pause stopped the day. Imperial equivalents right after a metric
+  value are now ignored by that rule; a bare "71 inches" or "66 lb" is still flagged.
+
 ## [0.5.107.20] - 2026-10-08
 
 ### Added

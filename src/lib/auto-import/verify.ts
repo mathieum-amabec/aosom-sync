@@ -37,7 +37,11 @@ const textOf = (html: string) =>
 const PLACEHOLDER_RE =
   /\[BRAND[ _]?NAME\]|\{\{|\}\}|lorem ipsum|\bundefined\b|\bNaN\b|\[object |\bTODO\b|as an ai\b|en tant qu['’]ia|je ne peux pas|i cannot|```/i;
 const ENGLISH_UNIT_RE = /\b\d+(?:[.,]\d+)?\s?(?:inches|inch|lbs?|pounds|ounces|oz|feet|ft|gallons?|gal)\b/i;
-const PRICE_IN_COPY_RE = /\b\d{1,5}(?:[.,]\d{2})\s?\$|\$\s?\d{1,5}(?:[.,]\d{2})?\b/;
+/** An imperial equivalent right after a metric value, e.g. "30 kg (66 lb)": the house style, not an untranslated unit. */
+const IMPERIAL_EQUIVALENT_RE =
+  /\d(?:[.,]\d+)?\s?(?:kg|g|cm|mm|m|l|ml)\s?\(\s*\d+(?:[.,]\d+)?\s?(?:inches|inch|lbs?|pounds|ounces|oz|feet|ft|gallons?|gal|po|pi)\s?\)/gi;
+export const stripImperialEquivalents = (s: string): string => s.replace(IMPERIAL_EQUIVALENT_RE, (m) => m.slice(0, m.indexOf("(")));
+const PRICE_IN_COPY_RE =/\b\d{1,5}(?:[.,]\d{2})\s?\$|\$\s?\d{1,5}(?:[.,]\d{2})?\b/;
 const UNSAFE_HTML_RE = /<script|<iframe|<style|\bon\w+\s*=|javascript:/i;
 const WORD_NUMBERS: Record<string, number> = {
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
@@ -123,7 +127,7 @@ export function checkContentStructure(product: AosomMergedProduct, c: GeneratedC
 
   const all = [c.titleFr, c.titleEn, c.descriptionFr, c.descriptionEn, c.metaTitleFr, c.metaDescriptionFr].join("\n");
   if (PLACEHOLDER_RE.test(all)) reasons.push("template_leftover");
-  if (ENGLISH_UNIT_RE.test(`${c.titleFr} ${c.descriptionFr}`)) reasons.push("english_units_in_french_copy");
+  if (ENGLISH_UNIT_RE.test(stripImperialEquivalents(`${c.titleFr} ${c.descriptionFr}`))) reasons.push("english_units_in_french_copy");
   if (PRICE_IN_COPY_RE.test(`${c.titleFr} ${c.descriptionFr}`)) reasons.push("price_in_copy");
   if (UNSAFE_HTML_RE.test(`${c.descriptionFr} ${c.descriptionEn}`)) reasons.push("unsafe_html");
   for (const tag of ["p", "ul", "li", "h2", "h3", "strong"]) {
