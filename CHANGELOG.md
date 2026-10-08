@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.19] - 2026-10-08
+
+### Added
+
+- **Google Search Console connection.** Service-account auth (RS256 JWT via node:crypto, read-only scope, no OAuth refresh token to expire) in `src/lib/gsc-client.ts`;
+  daily import into `gsc_page_daily` / `gsc_query_daily` (`src/lib/gsc-sync.ts`, cron `/api/cron/gsc-sync` 12:30 UTC, `?backfill=N` up to 480 days); new **SEO (Google)** page
+  with clicks, impressions, CTR and position vs the previous period, by section (guides, blog, products, collections), top pages and queries, and blog/guide pages seen but never clicked.
+  Needs `GSC_SERVICE_ACCOUNT_JSON` + `GSC_SITE_URL`; until set, the cron is a no-op and the page shows setup steps.
+
 ## [0.5.107.18] - 2026-10-08
 
 ### Added
