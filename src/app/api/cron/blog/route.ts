@@ -20,6 +20,7 @@ import {
 import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
 import { generateBlogArticle } from "@/lib/blog-generator";
 import { trackCron } from "@/lib/cron-tracking";
+import { isPublisherPaused } from "@/lib/automation-controls";
 
 // Everything now runs inside THIS function: 2 article generations (~25-45s each) + 2 judge
 // calls + the shared Unsplash fetch + 2 Shopify creates + the inter-language pause. That is
@@ -86,12 +87,15 @@ async function generateOne(
 ): Promise<LangOutcome> {
   const tag = lang.toUpperCase();
   try {
+    // Operator switch ("Automatisations"): while paused, the article is still generated as a Shopify draft
+    // but is not flipped live automatically.
+    const autoPublish = !(await isPublisherPaused().catch(() => false));
     const result = await generateBlogArticle({
       topic,
       lang,
       keywords,
       season,
-      autoPublish: true,
+      autoPublish,
       ...(images ? { images } : {}),
     });
     console.log(

@@ -595,6 +595,10 @@ export async function maybeAutopostPriceDrop(
     if (settings.social_autopost_enabled !== "true") {
       return { published: false, reason: "autopost disabled" };
     }
+    // Operator switch ("Automatisations" page): no automatic publication while paused.
+    if (settings.publisher_paused === "1") {
+      return { published: false, reason: "automatic publications paused" };
+    }
 
     const pctDrop = oldPrice > 0 ? ((oldPrice - newPrice) / oldPrice) * 100 : 0;
     const minPct = parseFloat(settings.social_autopost_min_drop_percent || "15");

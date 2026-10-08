@@ -2,6 +2,21 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.17] - 2026-10-08
+
+### Added
+
+- **"Automatisations" page** (`/automations`, admin only, sidebar → Admin): one place to stop — and watch — everything that runs by itself, with a per-job switch and
+  a "Tout arrêter / Tout reprendre" button. Every switch is a `settings` row read on the next cron tick, so a pause is immediate and nothing queued is deleted.
+  - **Importation automatique**: mode selector (Arrêté / Simulation / Pilote / En direct) + stop/resume (resume restores the previous mode), today's imports vs cap,
+    toys, products "à revoir" and errors over 24 h with the reasons, tokens used on the `import` pool, last cron run.
+  - **Publications automatiques** (`publisher_paused`): while paused the publisher cron drains nothing (rows stay `pending`, logged as "EN PAUSE" in `cron_runs`), the
+    price-drop autopost (`maybeAutopostPriceDrop`) does not publish and the blog cron still generates its articles but does not flip them live. Shows pending, overdue,
+    failed (3 d), next slot and last publication. The 06:15 publish check skips (and reports "en pause (voulu)") instead of raising a false alarm.
+  - **La semaine Ameublo**: the existing `semaine_enabled` kill switch, with the number of queued photos and its last run.
+- `GET /api/automations` (status) and `POST /api/automations` `{ key: auto_import|publisher|semaine|all, enabled, mode? }` — session + admin required, last change recorded
+  in `settings.automation_last_change`. The manual `POST /api/cron/publisher` trigger is unchanged (an operator action).
+
 ## [0.5.107.16] - 2026-10-08
 
 ### Added
