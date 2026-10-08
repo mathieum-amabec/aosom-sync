@@ -12,6 +12,7 @@ import type { SeoSummary } from "@/lib/gsc-sync";
 interface Payload {
   configured: boolean;
   missing: string[];
+  health: { ok: boolean; pending: boolean; problems: string[]; connectedSince: string | null } | null;
   summary: SeoSummary;
 }
 
@@ -131,6 +132,9 @@ export default function SeoPage() {
       </div>
 
       {!data.configured && <Setup missing={data.missing} />}
+      {data.health && !data.health.ok && (
+        <div className="p-4 bg-red-950/30 border border-red-800/50 rounded-xl text-sm text-red-300">{data.health.problems.join(" ")}</div>
+      )}
       {data.configured && !s.lastDay && (
         <div className="p-4 bg-gray-900 border border-gray-800 rounded-xl text-sm text-gray-300">
           Connecté, en attente de la première importation (elle roule chaque jour). Pour importer l&apos;historique tout de suite, dites-moi « importe 90 jours » ou appelez <code>/api/cron/gsc-sync?backfill=90</code>.

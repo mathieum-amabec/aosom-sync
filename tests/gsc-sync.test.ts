@@ -6,9 +6,16 @@ const state = vi.hoisted(() => ({
   queryRows: [] as Array<Record<string, unknown>>,
   prevRows: [] as Array<Record<string, unknown>>,
   last: "2026-10-06" as string | null,
+  settings: {} as Record<string, string>,
+  count: 0,
+  maxDay: null as string | null,
 }));
 
 vi.mock("@/lib/database", () => ({
+  getSetting: vi.fn(async (k: string) => state.settings[k] ?? null),
+  setSetting: vi.fn(async (k: string, v: string) => {
+    state.settings[k] = v;
+  }),
   ensureSchema: vi.fn(async () => ({
     batch: async (stmts: Array<string | { sql: string; args?: unknown[] }>) => {
       for (const s of stmts) state.sql.push(typeof s === "string" ? { sql: s } : s);
@@ -17,6 +24,7 @@ vi.mock("@/lib/database", () => ({
     execute: async (q: string | { sql: string; args?: unknown[] }) => {
       const sql = typeof q === "string" ? q : q.sql;
       const args = typeof q === "string" ? [] : (q.args ?? []);
+      if (sql.includes("COUNT(*)")) return { rows: [{ n: state.count, d: state.maxDay }] };
       if (sql.includes("MAX(day)")) return { rows: [{ d: state.last }] };
       if (sql.includes("FROM gsc_query_daily")) return { rows: state.queryRows };
       if (sql.includes("FROM gsc_page_daily")) return { rows: args[1] === "2026-10-06" ? state.pageRows : state.prevRows };
@@ -25,7 +33,7 @@ vi.mock("@/lib/database", () => ({
   })),
 }));
 
-import { classifyPage, getSeoSummary, latestFinalDay, syncGsc, totalsOf } from "@/lib/gsc-sync";
+import { checkGscHealth, classifyPage, getSeoSummary, latestFinalDay, syncGsc, totalsOf } from "@/lib/gsc-sync";
 import type { GscConfig } from "@/lib/gsc-client";
 
 const cfg: GscConfig = { clientEmail: "x@y", privateKey: "k", siteUrl: "sc-domain:ameublodirect.ca" };
@@ -36,6 +44,9 @@ beforeEach(() => {
   state.queryRows = [];
   state.prevRows = [];
   state.last = "2026-10-06";
+  state.settings = {};
+  state.count = 0;
+  state.maxDay = null;
 });
 
 describe("classifyPage", () => {
@@ -123,5 +134,34 @@ describe("getSeoSummary", () => {
     expect(s.topPages[0].page).toContain("/blogs/guides/sofa");
     expect(s.topQueries[0]).toMatchObject({ query: "sofa sectionnel", clicks: 5 });
     expect(s.contentOpportunities).toEqual([{ page: "https://ameublodirect.ca/blogs/actualites/petit-salon", impressions: 120, position: 14 }]);
+  });
+});
+
+describe("checkGscHealth", () => {
+  const at = (d: string) => new Date(d + "T12:00:00Z");
+
+  it("stamps the connection date and treats an empty table inside the grace window as pending, not a problem", async () => {
+    const h = await checkGscHealth(at("2026-10-08"));
+    expect(state.settings.gsc_connected_since).toBe("2026-10-08");
+    expect(h).toMatchObject({ ok: true, pending: true, problems: [], pageRows: 0 });
+    expect(await checkGscHealth(at("2026-10-10"))).toMatchObject({ ok: true, pending: true });
+  });
+
+  it("flags a property that is still empty after the grace window", async () => {
+    state.settings.gsc_connected_since = "2026-10-08";
+    const h = await checkGscHealth(at("2026-10-12"));
+    expect(h.ok).toBe(false);
+    expect(h.problems[0]).toContain("aucune donnée");
+  });
+
+  it("is healthy when rows are flowing and flags an import that stopped advancing", async () => {
+    state.settings.gsc_connected_since = "2026-10-01";
+    state.count = 120;
+    state.maxDay = "2026-10-10";
+    expect(await checkGscHealth(at("2026-10-12"))).toMatchObject({ ok: true, pending: false, lastDay: "2026-10-10" });
+    state.maxDay = "2026-10-01";
+    const stale = await checkGscHealth(at("2026-10-12"));
+    expect(stale.ok).toBe(false);
+    expect(stale.problems[0]).toContain("n'avancent plus");
   });
 });

@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.20] - 2026-10-08
+
+### Added
+
+- **Search Console health check.** After each good `/api/cron/gsc-sync`, `checkGscHealth` flags what a 200 from Google cannot: the property still has no data
+  4 days after the first successful connection, or the newest imported day is more than 4 days behind. The run is then recorded as an `error` in `cron_runs`
+  (dashboard "Résumé du jour"); "no data yet" inside the 4-day grace window is reported as pending, not an error. The result is stored in `gsc_health_last`
+  and shown as a banner on the SEO page.
+
 ## [0.5.107.19] - 2026-10-08
 
 ### Added
