@@ -6,6 +6,7 @@ vi.mock("@/lib/llm-budget", () => ({ budgetedCreate: vi.fn() }));
 import {
   buildJudgePrompt,
   checkContentStructure,
+  stripImperialEquivalents,
   analyzeGallery,
   cleanGallery,
   checkTitle,
@@ -64,6 +65,7 @@ describe("layer 1 — structure and facts", () => {
     const cases: Array<[Partial<GeneratedContent>, string]> = [
       [{ descriptionFr: good.descriptionFr + "<p>[BRAND NAME]</p>" }, "template_leftover"],
       [{ descriptionFr: good.descriptionFr + "<p>Hauteur 71 inches.</p>" }, "english_units_in_french_copy"],
+      [{ descriptionFr: good.descriptionFr + "<p>Capacité de 30 kg et 66 lb.</p>" }, "english_units_in_french_copy"],
       [{ descriptionFr: good.descriptionFr + "<p>Seulement 49,99 $</p>" }, "price_in_copy"],
       [{ descriptionFr: good.descriptionFr + "<script>x</script>" }, "unsafe_html"],
       [{ descriptionFr: good.descriptionFr + "<ul><li>oups</ul>" }, "unbalanced_html"],
@@ -74,6 +76,13 @@ describe("layer 1 — structure and facts", () => {
       expect(v.ok, expected).toBe(false);
       expect(v.reasons.join(), expected).toContain(expected);
     }
+  });
+
+  it("accepts the imperial equivalent in parentheses after a metric value, rejects a bare imperial unit", () => {
+    const ok = checkContentStructure(product, { ...good, descriptionFr: good.descriptionFr + "<p>Supporte jusqu'à 30 kg (66 lb) et 120 kg (264 lb).</p>" });
+    expect(ok.reasons.join()).not.toContain("english_units_in_french_copy");
+    expect(stripImperialEquivalents("Jusqu'à 30 kg (66 lb)")).toBe("Jusqu'à 30 kg ");
+    expect(stripImperialEquivalents("Hauteur 71 inches")).toBe("Hauteur 71 inches");
   });
 
   it("flags missing fields, short copy and English passed off as French", () => {
