@@ -201,4 +201,101 @@ async function main() {
   writeFileSync(new URL(`../scripts/blog-reports/blog-audit-${DATE}${APPLY ? "-applied" : ""}.json`, import.meta.url), JSON.stringify(rows, null, 1));
 }
 
-await main();
+// ── --rewrite-no-numbers: bring back articles that were pulled because of unsourced figures ──────────────
+//   ... --only=<ids> --rewrite-no-numbers [--republish] [--apply]
+// Rewrites each article with NO numbers at all (percentages, prices, durations, dimensions, frequencies) and no study/law/
+// health-figure claims; accepted only when it also passes the rules, keeps >= 60 % of the words (and the 550-word floor of the rules) and passes the FULL claims
+// check (every strict kind). `--republish` then puts a passing article back online; a failing one stays a draft.
+const YEAR_RE = /\b20[2-3]\d\b/g;
+const NUM_RE = /\d+(?:[.,]\d+)?/g;
+
+/** Digits left in an article (years allowed). JSON-LD FAQ blocks are inspected by value, not by their @context URLs. */
+export function digitsLeft(html: string): string[] {
+  const ld: string[] = [];
+  const withoutLd = html.replace(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi, (_m, j: string) => {
+    ld.push(j);
+    return " ";
+  });
+  const found = new Set<string>((withoutLd.replace(/<[^>]+>/g, " ").replace(YEAR_RE, " ").match(NUM_RE)) ?? []);
+  const walk = (v: unknown): void => {
+    if (typeof v === "string") for (const m of v.replace(YEAR_RE, " ").match(NUM_RE) ?? []) found.add(m);
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v as Record<string, unknown>)) if (!k.startsWith("@")) walk(x);
+  };
+  for (const j of ld) {
+    try {
+      walk(JSON.parse(j));
+    } catch {
+      found.add("invalid_json_ld");
+    }
+  }
+  return [...found];
+}
+
+async function rewriteNoNumbers(a: Article, llm: LlmText, feedback?: string): Promise<string | null> {
+  const prompt = [
+    `Réécris cet article de blogue (${a.lang === "fr" ? "français québécois" : "anglais canadien"}) pour la boutique ${STORE[a.lang]}.`,
+    "Garde le sujet, le plan (balises h2/h3/p/ul/li), le ton, les liens existants (crédits photo) et une longueur à peu près identique.",
+    "CONTRAINTES STRICTES:",
+    "- AUCUN chiffre ni nombre: pas de pourcentage, prix, durée, fréquence, dimension, âge, ni quantité écrite en lettres (« trois fois », « deux heures »). Exprime-le en mots (« souvent », « un espace généreux », « régulièrement »). Seule une année comme 2026 est permise.",
+    "- Aucune statistique, étude, « les experts disent », loi, norme, règlement, ni donnée de santé ou de sécurité: uniquement des conseils pratiques et de bon sens.",
+    "- Aucun nom de fournisseur ni de marque; la boutique s'appelle uniquement " + STORE[a.lang] + ".",
+    "- S'il y a un bloc JSON-LD (FAQ), réécris-le avec les mêmes contraintes et garde un JSON valide.",
+    feedback ? `Ta tentative précédente a échoué pour: ${feedback}. Corrige exactement cela.` : "",
+    'Réponds UNIQUEMENT avec un objet JSON: {"bodyHtml":"<p>...</p>"}',
+    "",
+    "<ARTICLE_HTML>",
+    a.bodyHtml,
+    "</ARTICLE_HTML>",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const raw = await llm(prompt, { tier: "strong", maxTokens: 8000 });
+  const s = raw.indexOf("{");
+  const e = raw.lastIndexOf("}");
+  if (s < 0 || e <= s) return null;
+  try {
+    const out = JSON.parse(raw.slice(s, e + 1)) as { bodyHtml?: string };
+    return typeof out.bodyHtml === "string" ? out.bodyHtml : null;
+  } catch {
+    return null;
+  }
+}
+
+async function runRewrite() {
+  if (ONLY.length === 0) throw new Error("--rewrite-no-numbers needs --only=<articleId>[,<id>]");
+  const REPUBLISH = process.argv.includes("--republish");
+  const articles = (await loadArticles()).filter((a) => ONLY.includes(String(a.id)));
+  mkdirSync(new URL("../scripts/blog-reports/", import.meta.url), { recursive: true });
+  if (APPLY) writeFileSync(new URL(`../scripts/blog-reports/blog-backup-${DATE}-rewrite.json`, import.meta.url), JSON.stringify(articles, null, 1));
+  const llm: LlmText = (p, o) => withBudgetPool("maintenance", () => defaultLlmText(p, o));
+  for (const a of articles) {
+    let feedback: string | undefined;
+    let accepted: string | null = null;
+    let lastReasons: string[] = [];
+    for (let attempt = 0; attempt < 3 && !accepted; attempt++) {
+      const candidate = await rewriteNoNumbers({ ...a, bodyHtml: demoteH1(swapSupplierName(a.bodyHtml, a.lang)) }, llm, feedback);
+      if (!candidate) { feedback = "réponse invalide (JSON attendu)"; lastReasons = [feedback]; continue; }
+      const reasons: string[] = [];
+      const digits = digitsLeft(candidate);
+      if (digits.length) reasons.push(`des chiffres restent: ${digits.slice(0, 8).join(", ")}`);
+      const input = { title: a.title, bodyHtml: candidate, metaDescription: "m".repeat(100), tags: a.tags, lang: a.lang };
+      reasons.push(...blogRuleProblems(input).filter((p) => !IGNORED(p)));
+      if (wordCount(candidate) < wordCount(a.bodyHtml) * 0.6) reasons.push(`trop court après réécriture (${wordCount(candidate)} mots; l original en avait ${wordCount(a.bodyHtml)})`);
+      if (reasons.length === 0 && !NO_LLM) {
+        const c = await checkBlogClaims(input, llm);
+        if (!c.ok) reasons.push(...c.reasons.slice(0, 4));
+      }
+      if (reasons.length === 0) accepted = candidate;
+      else { feedback = reasons.join(" | "); lastReasons = reasons; }
+    }
+    if (accepted && APPLY) {
+      await updateBlogArticleBody(a.blogId, String(a.id), accepted);
+      if (REPUBLISH) await shopify(`/blogs/${a.blogId}/articles/${a.id}.json`, { method: "PUT", body: JSON.stringify({ article: { id: a.id, published: true } }) });
+    }
+    console.log(`${accepted ? (APPLY ? (REPUBLISH ? "REPUBLISHED" : "REWRITTEN") : "WOULD_PASS") : "STILL_DRAFT"} #${a.id} [${a.blog}] ${a.title.slice(0, 60)}${accepted ? "" : `\n    ${lastReasons.join(" | ").slice(0, 300)}`}`);
+  }
+}
+
+if (process.argv.includes("--rewrite-no-numbers")) await runRewrite();
+else await main();
