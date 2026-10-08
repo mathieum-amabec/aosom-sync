@@ -39,8 +39,11 @@ export const LOCK_KEY = "auto_import_lock";
 /** A feed with fewer merged SKUs than this is treated as truncated (today's feed carries ~7,990). */
 export const MIN_FEED_SKUS = 6000;
 const LOCK_TTL_SECONDS = 280;
-/** Stop starting new products once this much of the function's time budget is used. */
-const TICK_BUDGET_MS = 200_000;
+/**
+ * Stop starting new products once this much of the function's 300 s is used: one product (copy, 3 checks, Shopify
+ * create with images, storefront fetch) takes up to ~150 s, so starting one at 130 s still fits.
+ */
+const TICK_BUDGET_MS = 130_000;
 /** Pause for the rest of the day when this share of the day's processed products failed verification/errored. */
 const PAUSE_FAILURE_RATE = 0.4;
 const PAUSE_MIN_SAMPLE = 10;
