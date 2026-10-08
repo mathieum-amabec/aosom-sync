@@ -117,3 +117,6 @@ coverage/
 /scripts/halloween-ads/src/
 /scripts/halloween-ads/work/
 /scripts/halloween-ads/out/
+
+# Blog audit reports + article backups (contain full article bodies)
+/scripts/blog-reports/

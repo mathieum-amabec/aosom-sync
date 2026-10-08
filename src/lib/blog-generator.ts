@@ -24,6 +24,7 @@ import { createBlogArticle, type BlogLang } from "./shopify-blog";
 import { maybeAutoPublish } from "./blog-auto-publish";
 import { recordBlogPost } from "./database";
 import { type Season } from "./blog-topics";
+import { contentRuleProblems } from "./blog-quality";
 
 export interface GenerateBlogInput {
   topic: string;
@@ -77,7 +78,9 @@ Rules:
 - excerpt is 1-2 sentences (under 200 chars) used as the article summary.
 - metaDescription is under 160 chars, SEO-friendly.
 - tags is an array of 4-8 short topic tags (lowercase, no leading #).
-- Do NOT mention pricing, shipping, or product SKUs (those change).
+- Do NOT mention pricing, price ranges, budgets in dollars, shipping, or product SKUs (those change).
+- Do NOT cite statistics, percentages, studies, surveys, "experts say" or any figure you cannot source: write practical, general advice only. Describe ideas in words ("a moderate humidity level"), not in invented numbers.
+- Link only to our own store with relative URLs (for example /collections/...). Never link to another website.
 - Do NOT invent specific product names, model numbers, or claims you cannot back up.
 - NEVER mention Aosom, HOMCOM, Outsunny, PawHut, Vinsetto, Qaba, Soozier, Costway, or any other supplier or manufacturer name. These are our suppliers, not our brand, and must never appear in customer-facing text.
 - NEVER mention aosom-sync, or any internal tool, repository, or system name, anywhere — including URLs, UTM parameters, tags, and metadata.
@@ -130,6 +133,9 @@ export function articleProblems(a: { title: string; bodyHtml: string }): { hard:
   if (FOREIGN_SCRIPT_RE.test(a.title + " " + a.bodyHtml)) hard.push("contains characters outside the Latin alphabet (garbled text)");
   const words = wordCount(a.bodyHtml);
   if (words < MIN_ARTICLE_WORDS) soft.push(`only ${words} words in bodyHtml (the brief is 700-900)`);
+  // Content the publish gate (blog-quality.ts) would refuse anyway: say so now so the corrective retry removes it.
+  const content = contentRuleProblems(a);
+  if (content.length) soft.push(`contains forbidden content (${content.join(", ")}): no supplier names, no prices, no percentages, no "studies show" claims`);
   return { hard, soft };
 }
 

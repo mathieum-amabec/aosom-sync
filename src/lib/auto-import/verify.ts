@@ -145,7 +145,7 @@ export function checkContentStructure(product: AosomMergedProduct, c: GeneratedC
 
 // ── Layer 2 ────────────────────────────────────────────────────────────────────────────────────
 
-export type LlmText = (prompt: string, opts?: { images?: Array<{ mediaType: string; data: string }>; tier?: "lite" | "strong" }) => Promise<string>;
+export type LlmText = (prompt: string, opts?: { images?: Array<{ mediaType: string; data: string }>; tier?: "lite" | "strong"; maxTokens?: number }) => Promise<string>;
 
 /** Default LLM transport: budgetedCreate (so the call is counted on the active pool). */
 export const defaultLlmText: LlmText = async (prompt, opts = {}) => {
@@ -159,7 +159,7 @@ export const defaultLlmText: LlmText = async (prompt, opts = {}) => {
   content.push({ type: "text", text: prompt });
   const message = await budgetedCreate(getAnthropicClient(), {
     model: llmModel(opts.tier ?? "strong"),
-    max_tokens: 900,
+    max_tokens: opts.maxTokens ?? 900,
     messages: [{ role: "user", content }],
   });
   const block = message.content[0];
