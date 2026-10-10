@@ -10,6 +10,9 @@ All notable changes to Aosom Sync will be documented in this file.
   additional image: 2,048 secondary images were live, and a 300-image check found 67 % of them carried text, dimension drawings or marketing overlays (the already-classified ones: 0 %).
   Additional images (`additional_image_link`, i.e. what the Meta dynamic-ads carousel cycles through, plus Google/Pinterest extras) now require a positive "compliant" verdict (fail-closed).
   If the hero image was never verified and a verified one exists, that one becomes the hero. A classifier lookup failure withholds extras and still ships the hero.
+- **Daily gallery classification.** New `gallery-classification.ts`, run in the daily sync after the pos-1 guard: judges (Gemini, same strict no-text/no-dimensions prompt) every never-classified
+  photo of every active, published product, capped at 600 calls and 150 s per run, so a new product's secondary photos either reach the carousel or are flagged and dropped.
+  Backlog of ~2,200 photos classified by hand with `scripts/classify-gallery-images.mts` (catalogue now 100 % judged).
 
 ## [0.5.107.23] - 2026-10-08
 
