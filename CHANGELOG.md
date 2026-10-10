@@ -2,6 +2,15 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.24] - 2026-10-10
+
+### Fixed
+
+- **Meta carousel / extra images no longer ship unverified photos.** The feed guard only removed images the classifier had flagged bad, so every never-classified photo went out as an
+  additional image: 2,048 secondary images were live, and a 300-image check found 67 % of them carried text, dimension drawings or marketing overlays (the already-classified ones: 0 %).
+  Additional images (`additional_image_link`, i.e. what the Meta dynamic-ads carousel cycles through, plus Google/Pinterest extras) now require a positive "compliant" verdict (fail-closed).
+  If the hero image was never verified and a verified one exists, that one becomes the hero. A classifier lookup failure withholds extras and still ships the hero.
+
 ## [0.5.107.23] - 2026-10-08
 
 ### Added

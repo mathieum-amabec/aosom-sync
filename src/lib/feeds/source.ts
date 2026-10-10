@@ -269,6 +269,15 @@ export function shopifyToFeedItems(
      * current catalog images carry a matching keyword).
      */
     nonCompliantStems?: ReadonlySet<string>;
+    /**
+     * Stems the classifier POSITIVELY verified as clean (compliant=1). When provided, an image
+     * may appear as an ADDITIONAL image (the Meta carousel / Pinterest extras) only if it is in
+     * this set — fail-closed. Before 2026-10-10 only known-bad stems were removed, so every
+     * never-classified photo shipped: 2 048 secondary images, 67 % of them carrying text or
+     * dimension drawings, reached the Meta carousel. The hero image keeps a fallback (see below).
+     * Omit to keep the legacy fail-open behaviour (unit tests, ad-hoc callers).
+     */
+    verifiedStems?: ReadonlySet<string>;
   } = {},
 ): FeedItem[] {
   const english = opts.preferEnglishTitle === true;
@@ -306,6 +315,10 @@ export function shopifyToFeedItems(
     );
     const productImages = cleanImages.length > 0 ? cleanImages : rawImages;
     const images = productImages.map((i) => i.src);
+    const verified = opts.verifiedStems;
+    const isVerified = (src: string) => !verified || verified.has(imageUrlStem(src));
+    // Hero: the first photo as before, unless it was never verified and a verified one exists.
+    const heroSrc = isVerified(images[0]) ? images[0] : (images.find(isVerified) ?? images[0]);
     const link = `${STOREFRONT_BASE_URL}${pathPrefix}/products/${encodeURIComponent(p.handle)}`;
     const description = truncate(stripPromoText(scrubSupplier(stripHtml(p.body_html ?? ""), houseBrand)), DESCRIPTION_MAX);
     const brand = resolveBrand(p.vendor, houseBrand);
@@ -348,8 +361,9 @@ export function shopifyToFeedItems(
         title: truncate(stripPromoText(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`, houseBrand))), 150),
         description,
         link: variantLink,
-        imageLink: ownImage ? ownImage.src : images[0],
-        additionalImageLinks: ownImage ? images.filter((src) => src !== ownImage.src) : images.slice(1),
+        imageLink: ownImage ? ownImage.src : heroSrc,
+        // Secondary images are what the Meta carousel cycles through: only verified-clean ones.
+        additionalImageLinks: images.filter((src) => src !== (ownImage ? ownImage.src : heroSrc) && isVerified(src)),
         price,
         compareAtPrice,
         availability,
@@ -584,12 +598,12 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
       const en = titleEnMap.get(String(p.id));
       if (en) p.titleEn = en;
     }
-    const nonCompliantStems = await fetchNonCompliantStems(products);
-    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems });
+    const { nonCompliant, verified } = await fetchImageVerdictStems(products);
+    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems: nonCompliant, verifiedStems: verified });
   }
 
-  const nonCompliantStems = await fetchNonCompliantStems(products);
-  return shopifyToFeedItems(products, { nonCompliantStems });
+  const { nonCompliant, verified } = await fetchImageVerdictStems(products);
+  return shopifyToFeedItems(products, { nonCompliantStems: nonCompliant, verifiedStems: verified });
 }
 
 /** Bulk-load the vision classifier's verdicts (image_classifications) for every image in
@@ -597,15 +611,19 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
  *  measurement overlay). One extra Turso round trip for the whole feed, not per product —
  *  never lets a DB hiccup take the feed down (falls back to an empty set, same as "nothing
  *  classified yet"). See shopifyToFeedItems's nonCompliantStems doc comment. */
-async function fetchNonCompliantStems(products: ShopifyFeedProduct[]): Promise<Set<string>> {
+async function fetchImageVerdictStems(
+  products: ShopifyFeedProduct[],
+): Promise<{ nonCompliant: Set<string>; verified: Set<string> }> {
+  const nonCompliant = new Set<string>();
+  const verified = new Set<string>();
   try {
     const stems = products.flatMap((p) => (p.images ?? []).map((i) => imageUrlStem(i.src)).filter(Boolean));
     const verdicts = await getCachedImageVerdicts(stems);
-    const nonCompliant = new Set<string>();
-    for (const [stem, v] of verdicts) if (!v.compliant) nonCompliant.add(stem);
-    return nonCompliant;
+    for (const [stem, v] of verdicts) (v.compliant ? verified : nonCompliant).add(stem);
   } catch (err) {
-    console.warn(`[FEED] vision-classification lookup failed (non-fatal, serving unfiltered by this signal):`, err);
-    return new Set();
+    // Fail-closed for secondary images: an empty `verified` set means no additional images,
+    // the hero image still ships. Better a plain feed for 10 minutes than text-laden carousels.
+    console.warn(`[FEED] vision-classification lookup failed (non-fatal, additional images withheld):`, err);
   }
+  return { nonCompliant, verified };
 }
