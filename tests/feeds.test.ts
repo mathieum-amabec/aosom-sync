@@ -512,6 +512,45 @@ describe("shopifyToFeedItems — nonCompliantStems (the vision-classifier cache,
   });
 });
 
+describe("shopifyToFeedItems — verifiedStems (fail-closed carousel images, 2026-10-10)", () => {
+  // 2 048 never-classified secondary images (67 % with text/dimensions) reached the Meta
+  // carousel because only KNOWN-bad stems were removed. With verifiedStems, an unclassified
+  // photo can no longer be an additional image.
+  const A = "https://cdn.shopify.com/s/files/1/0/0/files/aAAA0000000000001.jpg";
+  const B = "https://cdn.shopify.com/s/files/1/0/0/files/bBBB0000000000002.jpg";
+  const C = "https://cdn.shopify.com/s/files/1/0/0/files/cCCC0000000000003.jpg";
+  const product: ShopifyFeedProduct = {
+    id: 9, title: "Banc", handle: "banc", status: "active", published_at: PUBLISHED,
+    images: [{ src: A }, { src: B }, { src: C }],
+    variants: [{ sku: "BANC-1", price: "89.99", inventory_management: null }],
+  };
+
+  it("keeps only verified-clean images as additional images", () => {
+    const verifiedStems = new Set([imageUrlStem(A), imageUrlStem(C)]);
+    const [item] = shopifyToFeedItems([product], { verifiedStems });
+    expect(item.imageLink).toBe(A);
+    expect(item.additionalImageLinks).toEqual([C]); // B was never classified -> withheld
+  });
+
+  it("promotes a verified image to hero when the first photo was never verified", () => {
+    const verifiedStems = new Set([imageUrlStem(B)]);
+    const [item] = shopifyToFeedItems([product], { verifiedStems });
+    expect(item.imageLink).toBe(B);
+    expect(item.additionalImageLinks).toEqual([]);
+  });
+
+  it("an empty verified set (DB hiccup) withholds extras but still ships the hero", () => {
+    const [item] = shopifyToFeedItems([product], { verifiedStems: new Set() });
+    expect(item.imageLink).toBe(A);
+    expect(item.additionalImageLinks).toEqual([]);
+  });
+
+  it("without verifiedStems the legacy behaviour is unchanged", () => {
+    const [item] = shopifyToFeedItems([product]);
+    expect(item.additionalImageLinks).toEqual([B, C]);
+  });
+});
+
 describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => {
   const enProducts: ShopifyFeedProduct[] = [
     {

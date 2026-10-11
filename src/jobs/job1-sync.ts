@@ -79,6 +79,7 @@ import { diffProductsLight } from "@/lib/product-diff";
 import { runRemovedFromFeedDraft, runCatalogFreshnessZero } from "@/lib/removed-catalog";
 import { runImageCompliance } from "@/lib/image-compliance";
 import { checkGalleryDrift } from "@/lib/image-compliance-drift";
+import { runGalleryClassification } from "@/lib/gallery-classification";
 import {
   savePhase1Blob,
   readPhase1Blob,
@@ -674,6 +675,14 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
         log("image-compliance-drift done", { phase: "imageComplianceDrift", ...driftRes });
       } catch (driftErr) {
         log(`image-compliance-drift failed (non-fatal): ${driftErr instanceof Error ? driftErr.message : String(driftErr)}`, { phase: "imageComplianceDrift" });
+      }
+      // Judge every never-classified gallery photo (cap + time budget) so a new product's
+      // secondary photos can reach the ad carousels — see gallery-classification.ts.
+      try {
+        const galRes = await runGalleryClassification();
+        log("gallery-classification done", { phase: "galleryClassification", ...galRes });
+      } catch (galErr) {
+        log(`gallery-classification failed (non-fatal): ${galErr instanceof Error ? galErr.message : String(galErr)}`, { phase: "galleryClassification" });
       }
     }
 
@@ -1430,6 +1439,16 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
       log("image-compliance-drift done", { phase: "finalize", duration_ms: Date.now() - t0Drift, ...driftRes });
     } catch (driftErr) {
       log(`image-compliance-drift failed (non-fatal): ${driftErr instanceof Error ? driftErr.message : String(driftErr)}`, { phase: "finalize" });
+    }
+
+    // Judge every never-classified gallery photo (cap + time budget) so a new product's
+    // secondary photos can reach the ad carousels — see gallery-classification.ts.
+    try {
+      const t0Gal = Date.now();
+      const galRes = await runGalleryClassification();
+      log("gallery-classification done", { phase: "finalize", duration_ms: Date.now() - t0Gal, ...galRes });
+    } catch (galErr) {
+      log(`gallery-classification failed (non-fatal): ${galErr instanceof Error ? galErr.message : String(galErr)}`, { phase: "finalize" });
     }
 
     // Retention: drop price_history older than 30 days now that today's changes are
