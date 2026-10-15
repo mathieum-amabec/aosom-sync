@@ -162,6 +162,15 @@ async function _initSchemaImpl(): Promise<void> {
       detected_at INTEGER DEFAULT (strftime('%s','now')), applied_to_shopify INTEGER DEFAULT 0,
       FOREIGN KEY (sku) REFERENCES products(sku)
     )`,
+    // Competitor price snapshot (competitor-prices.ts) and OUR sell-price history (sell-price-sync.ts).
+    `CREATE TABLE IF NOT EXISTS competitor_prices (
+      sku TEXT PRIMARY KEY, price REAL NOT NULL, fetched_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS sell_price_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, old_price REAL, new_price REAL NOT NULL,
+      aosom_price REAL, reason TEXT, detected_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_sell_price_history_sku ON sell_price_history(sku, detected_at)`,
     `CREATE INDEX IF NOT EXISTS idx_price_history_sku ON price_history(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_price_history_change_type ON price_history(change_type)`,
     `CREATE INDEX IF NOT EXISTS idx_price_history_detected_at ON price_history(detected_at)`,
@@ -1151,6 +1160,11 @@ async function _initSchemaImpl(): Promise<void> {
   const productCols = new Set(productsInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
   if (!productCols.has("shopify_handle")) {
     alters.push(`ALTER TABLE products ADD COLUMN shopify_handle TEXT`);
+  }
+  // sell_price: our computed selling price (sell-price-sync.ts). NULL = not computed; readers fall back to the
+  // Aosom price via effectiveSellPrice().
+  if (!productCols.has("sell_price")) {
+    alters.push(`ALTER TABLE products ADD COLUMN sell_price REAL`);
   }
   // has_discount: precomputed rabais flag (see recomputeHasDiscount). Backfilled once
   // below when the column is first added; refreshed every sync thereafter.

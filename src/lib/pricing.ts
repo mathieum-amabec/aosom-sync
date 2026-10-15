@@ -34,6 +34,24 @@ export function targetSellPrice(aosomPrice: number): number {
   return Math.max(desired, aosomPrice);
 }
 
+/** A stored sell price above this multiple of the Aosom price is treated as corrupt and ignored. */
+const STORED_SELL_PRICE_MAX_RATIO = 1.5;
+
+/**
+ * The price a product should sell at right now: the stored sell price (see sell-price-sync.ts) when it is sane, else
+ * the Aosom floor. Sane = at or above the floor (Aosom may have raised its price since the sell price was stored) and
+ * at most 1.5x the Aosom price (guards against a corrupt value). With the pricing mode off nothing is stored, so this
+ * returns `targetSellPrice(aosomPrice)` — today's behaviour. `NaN` for an invalid Aosom price.
+ */
+export function effectiveSellPrice(aosomPrice: number, stored?: number | null): number {
+  const floor = targetSellPrice(aosomPrice);
+  if (!Number.isFinite(floor)) return NaN;
+  if (typeof stored === "number" && Number.isFinite(stored) && stored >= floor - 0.005 && stored <= floor * STORED_SELL_PRICE_MAX_RATIO) {
+    return Math.round(Math.max(stored, floor) * 100) / 100;
+  }
+  return floor;
+}
+
 /** True when `shopifyPrice` is below the Aosom floor (beyond a 1-cent tolerance). */
 export function isBelowFloor(shopifyPrice: number, aosomPrice: number): boolean {
   return shopifyPrice < aosomPrice - 0.01;

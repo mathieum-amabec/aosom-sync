@@ -2,6 +2,16 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.28] - 2026-10-15
+
+### Added
+
+- **Sell-price rule wired in (off by default).** `products.sell_price` (new column) holds our computed selling price per SKU; new daily cron `/api/cron/sell-price-sync` (08:15 UTC) fills it from `sell-price-rule.ts` (never below Aosom, a dollar under the competitor, tiers 7/7/6/5/3 % otherwise). Controlled by `settings.pricing_mode` = off | dry | live (default off) and `pricing_max_changes_per_run` (default 500, rolls a large change out over several days). `pricing.ts#effectiveSellPrice` is the single reader: the stored price when sane (>= the Aosom price, <= 1.5x), else the Aosom price, so with the mode off every path behaves exactly as before. Read by the Phase 1 and Phase 2 diff (`computeDiffs` takes the map), the post-sync sample, the hourly `price-reconcile` (it used to expect the plain Aosom price and would have reverted any markup) and product creation. Stability: a lower price is followed at once, a higher one only for a gain of at least max(2 $, 2 %). New tables `competitor_prices` (cached snapshot, refetched after 20 h, a stale one is kept up to 7 days) and `sell_price_history` (our own price history, for the compare-at sync once the markup is live).
+
+### Changed
+
+- **`updateShopifyVariantPrice` no longer clears the crossed price on a price increase or a small step.** It only sets it for a drop of 10 % or more and otherwise leaves it alone, so the markup rollout cannot wipe a real discount. Invalid crossed prices are cleared by the compare-at sync. Two tests updated accordingly.
+
 ## [0.5.107.26] - 2026-10-14
 
 ### Added

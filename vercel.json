@@ -60,6 +60,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/cron/sell-price-sync",
+      "schedule": "15 8 * * *"
+    },
+    {
       "path": "/api/cron/photo-insights",
       "schedule": "35 9 * * *"
     },
