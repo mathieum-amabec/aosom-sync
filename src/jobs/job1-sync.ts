@@ -35,6 +35,8 @@ import {
   type PriceWriteResult,
 } from "@/lib/price-protection";
 import { runPostSyncSample } from "@/lib/price-reconcile";
+import { getSellPriceMap } from "@/lib/sell-price-db";
+import { effectiveSellPrice } from "@/lib/pricing";
 import {
   createSyncRun,
   completeSyncRun,
@@ -718,7 +720,8 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
       log("Application des changements sur Shopify...");
       const t0Shopify = Date.now();
       const mergedForPush = mergeVariants(aosomProducts);
-      const computedForPush = computeDiffs(mergedForPush, shopifyProducts);
+      const sellPricesForPush = await getSellPriceMap();
+      const computedForPush = computeDiffs(mergedForPush, shopifyProducts, sellPricesForPush);
 
       // GUARD 2 — same archive circuit breaker as runShopifyPush.
       // This path was strictly MORE dangerous than the cron it mirrors: it had no guard
@@ -875,7 +878,8 @@ export async function runShopifyPush(): Promise<{ updates: number; archived: num
     log(`${dbProducts.length} produits DB, ${shopifyProducts.length} produits Shopify`);
 
     const merged = mergeVariants(dbProducts);
-    const computed = computeDiffs(merged, shopifyProducts)
+    const sellPrices = await getSellPriceMap();
+    const computed = computeDiffs(merged, shopifyProducts, sellPrices)
       .filter((d) => d.action !== "create"); // Phase 2 only applies updates + archives
 
     // GUARD 2 — never archive the catalogue in one pass.
@@ -966,7 +970,11 @@ export async function runShopifyPush(): Promise<{ updates: number; archived: num
           // variants. mergeVariants() does the grouping later, for the diff only.
           loadExpected: async () => {
             const m = new Map<string, { price: number; qty: number }>();
-            for (const p of dbProducts) m.set(p.sku, { price: p.price, qty: p.qty });
+            const sellPricesForSample = await getSellPriceMap();
+            for (const p of dbProducts) {
+              const expectedPrice = effectiveSellPrice(p.price, sellPricesForSample.get(p.sku));
+              m.set(p.sku, { price: Number.isFinite(expectedPrice) ? expectedPrice : p.price, qty: p.qty });
+            }
             return m;
           },
           loadShopifyVariants: async () =>

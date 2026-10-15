@@ -3,7 +3,8 @@ import type { AosomMergedProduct } from "@/types/aosom";
 import { slugify, type GeneratedContent } from "./content-generator";
 import { stripLeadingHeading } from "./html-utils";
 import { env, SHOPIFY, SYNC } from "./config";
-import { targetSellPrice } from "./pricing";
+import { effectiveSellPrice } from "./pricing";
+import { getSellPricesForSkus } from "./sell-price-db";
 import { writePriceVerified, PRICE_EPSILON } from "./price-protection";
 import { recordPriceFloorIncident, getCostwayShopifyProductIds } from "./database";
 import { EN_FIELD_MAP, rejectEnValue, type EnTranslatableKey } from "./en-translations";
@@ -423,13 +424,16 @@ export async function createShopifyProduct(
 
   // Build variants, then de-collide duplicate (option1, option2) pairs so a group
   // with two SKUs that map to the same Couleur/Taille imports instead of 422-ing.
+  // Our computed sell price when one is stored for the SKU (sell-price-sync.ts), else the Aosom price. A product
+  // created before its first sell-price run starts at the Aosom price; the next run and the reconcile raise it.
+  const sellPriceBySku = await getSellPricesForSkus(merged.variants.map((v) => v.sku));
   const builtVariants = dedupeVariantOptionLabels(
     merged.variants.map((v) => ({
       sku: v.sku,
       // Floor at the Aosom price (0% markup, never below) — same rule as the sync. See pricing.ts.
-      // Fall back to the raw price if the Aosom price is invalid (targetSellPrice → NaN),
+      // Fall back to the raw price if the Aosom price is invalid (effectiveSellPrice → NaN),
       // so we never emit the string "NaN" to Shopify (bad CSV data is a separate concern).
-      price: String(targetSellPrice(v.price) || v.price),
+      price: String(effectiveSellPrice(v.price, sellPriceBySku.get(v.sku)) || v.price),
       inventory_management: null as null, // dropship — no inventory tracking
       requires_shipping: true,
       weight: v.weight,
@@ -876,14 +880,15 @@ export async function updateShopifyVariantPrice(
   const variant: Record<string, unknown> = { id: variantId, price: String(price) };
 
   if (oldPrice !== undefined) {
-    // Only show a struck-through "was" price for a real discount >= the configured
-    // threshold (default 10%). A 1% dip no longer renders a fake sale. oldPrice > 0
-    // guards against divide-by-zero; a price increase clears compare_at_price.
+    // Only show a struck-through "was" price for a real drop >= the configured threshold (default 10%); a 1% dip
+    // never renders a fake sale. oldPrice > 0 guards against divide-by-zero. Any other write (an increase, a small
+    // step, a re-write of the same price) leaves the field ALONE: it used to be cleared, which wiped a valid crossed
+    // price on the next write and would wipe every real discount when the sell-price markup rolls out. Invalid ones
+    // (crossed price at or below the price, or under the threshold) are cleared by the compare-at sync.
     const discountPct = oldPrice > 0 ? (oldPrice - price) / oldPrice : 0;
-    variant.compare_at_price =
-      price < oldPrice && discountPct >= SYNC.MIN_DISCOUNT_DISPLAY_PERCENT / 100
-        ? String(oldPrice)
-        : null;
+    if (price < oldPrice && discountPct >= SYNC.MIN_DISCOUNT_DISPLAY_PERCENT / 100) {
+      variant.compare_at_price = String(oldPrice);
+    }
   }
 
   const response = await shopifyFetch(`/variants/${variantId}.json`, {

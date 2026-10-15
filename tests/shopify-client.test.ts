@@ -16,6 +16,12 @@ vi.mock("@/lib/config", () => ({
 const mockRecordPriceFloorIncident = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 // Costway product ids that the whole-catalogue sweeps must skip (see getCostwayShopifyProductIds).
 const mockCostwayIds = vi.hoisted(() => vi.fn().mockResolvedValue(new Set<string>()));
+// No stored sell prices in this file: created products start at the Aosom price (sell-price-sync.ts).
+vi.mock("@/lib/sell-price-db", () => ({
+  getSellPriceMap: vi.fn(async () => new Map<string, number>()),
+  getExpectedSellPrices: vi.fn(async () => []),
+  getSellPricesForSkus: vi.fn(async () => new Map<string, number>()),
+}));
 vi.mock("@/lib/database", () => ({
   recordPriceFloorIncident: mockRecordPriceFloorIncident,
   getCostwayShopifyProductIds: mockCostwayIds,
@@ -421,23 +427,23 @@ describe("updateShopifyVariantPrice", () => {
     expect(body.variant.compare_at_price).toBe("39.99");
   });
 
-  it("clears compare_at_price on a sub-threshold drop (< MIN_DISCOUNT_DISPLAY_PERCENT)", async () => {
-    // 100 -> 99 is a 1% drop, below the 10% threshold: no fake "sale".
+  it("does not set compare_at_price on a sub-threshold drop (< MIN_DISCOUNT_DISPLAY_PERCENT), and leaves an existing one alone", async () => {
+    // 100 -> 99 is a 1% drop, below the 10% threshold: no fake "sale", and no wiping of a valid crossed price.
     await updateShopifyVariantPrice("variant-1", 99, 100);
 
     const call = mockFetch.mock.calls[0];
     const body = JSON.parse(call[1].body);
     expect(body.variant.price).toBe("99");
-    expect(body.variant.compare_at_price).toBeNull();
+    expect(body.variant).not.toHaveProperty("compare_at_price");
   });
 
-  it("clears compare_at_price on price increase", async () => {
+  it("leaves compare_at_price alone on a price increase (a markup must not wipe a real discount)", async () => {
     await updateShopifyVariantPrice("variant-1", 49.99, 39.99);
 
     const call = mockFetch.mock.calls[0];
     const body = JSON.parse(call[1].body);
     expect(body.variant.price).toBe("49.99");
-    expect(body.variant.compare_at_price).toBeNull();
+    expect(body.variant).not.toHaveProperty("compare_at_price");
   });
 
   it("omits compare_at_price when oldPrice not provided", async () => {

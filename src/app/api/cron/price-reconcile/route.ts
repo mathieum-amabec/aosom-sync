@@ -3,13 +3,13 @@ import { NextResponse } from "next/server";
 import { trackCron } from "@/lib/cron-tracking";
 import { runPriceReconcile, advanceReconcileCheckpoint, formatSweepCompleteAlert } from "@/lib/price-reconcile";
 import {
-  getProductsForPriceAudit,
   createNotification,
   recordPriceCorrections,
   getPriceReconcileCheckpoint,
   savePriceReconcileCheckpoint,
 } from "@/lib/database";
 import { updateShopifyVariantPrice, fetchVariant, fetchShopifyVariantsPage } from "@/lib/shopify-client";
+import { getExpectedSellPrices } from "@/lib/sell-price-db";
 
 /**
  * GET /api/cron/price-reconcile — LAYER 2. Hourly Turso↔Shopify price reconciliation,
@@ -61,7 +61,7 @@ export async function GET(request: Request) {
       () =>
         runPriceReconcile({
           loadExpectedPrices: async () => {
-            const rows = await getProductsForPriceAudit();
+            const rows = await getExpectedSellPrices();
             const m = new Map<string, number>();
             for (const r of rows) m.set(r.sku, r.price);
             return m;

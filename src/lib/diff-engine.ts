@@ -4,7 +4,7 @@ import type {
   ProductDiff,
   FieldChange,
 } from "@/types/sync";
-import { targetSellPrice } from "@/lib/pricing";
+import { effectiveSellPrice } from "@/lib/pricing";
 
 /**
  * Low-supplier-stock danger threshold: at or below this Aosom qty, the variant is treated
@@ -88,7 +88,8 @@ function tagsEqual(a: string[], b: string[]): boolean {
  */
 export function computeDiffs(
   aosomProducts: AosomMergedProduct[],
-  shopifyProducts: ShopifyExistingProduct[]
+  shopifyProducts: ShopifyExistingProduct[],
+  sellPrices?: ReadonlyMap<string, number>
 ): ProductDiff[] {
   const diffs: ProductDiff[] = [];
 
@@ -150,7 +151,7 @@ export function computeDiffs(
     // Match found — check for changes against each matched Shopify product
     for (const [shopifyId, shopifyProduct] of matchedShopifyProducts) {
       seenShopifyIds.add(shopifyId);
-      const changes = diffProduct(aosom, shopifyProduct);
+      const changes = diffProduct(aosom, shopifyProduct, sellPrices);
 
       if (changes.length > 0) {
         diffs.push({
@@ -210,7 +211,8 @@ export function computeDiffs(
  */
 function diffProduct(
   aosom: AosomMergedProduct,
-  shopify: ShopifyExistingProduct
+  shopify: ShopifyExistingProduct,
+  sellPrices?: ReadonlyMap<string, number>
 ): FieldChange[] {
   const changes: FieldChange[] = [];
 
@@ -230,11 +232,11 @@ function diffProduct(
       continue;
     }
 
-    // Price change — sell at the Aosom CSV price (0% markup) and NEVER below it.
-    // targetSellPrice() floors the result at the Aosom price, so a Shopify price that
-    // sits below the floor (e.g. a manual under-price) is force-corrected upward, and
-    // we never emit a price under the Aosom floor. See src/lib/pricing.ts.
-    const targetPrice = targetSellPrice(aosomVariant.price);
+    // Price change — sell at our computed sell price (sell-price-sync.ts) and NEVER below the Aosom CSV
+    // price. effectiveSellPrice() floors the result at the Aosom price, so a Shopify price that sits below
+    // the floor (e.g. a manual under-price) is force-corrected upward, and we never emit a price under the
+    // Aosom floor. With no stored sell price (pricing mode off) it is exactly the Aosom price. See pricing.ts.
+    const targetPrice = effectiveSellPrice(aosomVariant.price, sellPrices?.get(aosomVariant.sku));
     // Skip when the Aosom price is missing/invalid — never push a $0/NaN price live.
     if (Number.isFinite(targetPrice) && targetPrice > 0 && Math.abs(shopifyVariant.price - targetPrice) > 0.01) {
       changes.push({
