@@ -23,10 +23,11 @@ export const COMPETITOR_PLAUSIBLE_HIGH = 1.6;
 
 /** Tiered markup used when no competitor price is available. Upper bound exclusive. */
 export const TIERS: ReadonlyArray<{ below: number; markup: number }> = [
-  { below: 200, markup: 0.06 },
-  { below: 400, markup: 0.05 },
-  { below: 800, markup: 0.04 },
-  { below: Infinity, markup: 0 },
+  { below: 100, markup: 0.07 },
+  { below: 200, markup: 0.07 },
+  { below: 400, markup: 0.06 },
+  { below: 800, markup: 0.05 },
+  { below: Infinity, markup: 0.03 },
 ];
 
 /** Patio / outdoor carry no markup (seasonal and compared the most). Matches Aosom product_type text. */
