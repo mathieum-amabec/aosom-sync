@@ -44,9 +44,23 @@ const LOCK_TTL_SECONDS = 280;
  * create with images, storefront fetch) takes up to ~150 s, so starting one at 130 s still fits.
  */
 const TICK_BUDGET_MS = 130_000;
-/** Pause for the rest of the day when this share of the day's processed products failed verification/errored. */
+/**
+ * Pause for the rest of the day when this share of the day's processed products failed verification/errored.
+ * Judged over a sample of 30: with ~10 products the rate swings too easily (6 published + 4 held = 40% paused the
+ * run every day from 2026-10-09 to 2026-10-14).
+ */
 const PAUSE_FAILURE_RATE = 0.4;
-const PAUSE_MIN_SAMPLE = 10;
+const PAUSE_MIN_SAMPLE = 30;
+
+/**
+ * A product parked only because its supplier photos are unusable says nothing about the pipeline's health: it is
+ * product-specific. It stays parked for review (counted in `photoHeld`) but does not feed the pause rule.
+ * Infra failures (vision model down, unparseable answer, unreachable photos) are NOT matched here: they still pause.
+ */
+const PRODUCT_PHOTO_REASON = /^(gallery_too_few_clean_photos|no_clean_primary_photo)\b/;
+export function isProductPhotoHold(r: Pick<ProcessResult, "outcome" | "layer" | "reasons">): boolean {
+  return r.outcome === "needs_review" && r.layer === "gallery" && r.reasons.length > 0 && r.reasons.every((x) => PRODUCT_PHOTO_REASON.test(x));
+}
 
 export interface TickDeps {
   now(): Date;
@@ -185,7 +199,8 @@ export async function runAutoImportTick(opts: { force?: boolean; deps?: TickDeps
         state.byCat[c.top] = (state.byCat[c.top] ?? 0) + 1;
         if (c.top === "Toys & Games") state.toys++;
         if (c.isNew) state.newCount++;
-      } else if (result.outcome === "needs_review") state.needsReview++;
+      } else if (isProductPhotoHold(result)) state.photoHeld = (state.photoHeld ?? 0) + 1;
+      else if (result.outcome === "needs_review") state.needsReview++;
       else if (result.outcome === "error") state.failed++;
       await d.setSetting(STATE_KEY, JSON.stringify(state));
       if (shouldPause(state)) {
