@@ -87,17 +87,24 @@ describe("planSellPrices", () => {
     expect(p.changes).toHaveLength(0);
   });
 
-  it("caps the changes per run, doing under-floor and unset first, then decreases, then the largest raises", () => {
+  it("caps the changes per run: under-floor fixes first, then decreases, then products with no price, then the largest raises", () => {
     const rows = [
       row("RAISE_SMALL", 100, 100.99), // would go to ~106.99 (raise of 6)
       row("RAISE_BIG", 300, 300.99), // tier 6 % -> ~317.99 (raise of 17)
       row("DROP", 100, 120.99), // competitor lower -> a decrease
       row("UNSET", 100, null),
+      row("UNDER", 100, 90), // stored price under the Aosom floor
     ];
     const comp = new Map([["DROP", 111.99]]);
-    const p = planSellPrices(rows, comp, 3);
-    expect(p.changes.map((c) => c.sku)).toEqual(["UNSET", "DROP", "RAISE_BIG"]);
+    const p = planSellPrices(rows, comp, 4);
+    expect(p.changes.map((c) => c.sku)).toEqual(["UNDER", "DROP", "UNSET", "RAISE_BIG"]);
     expect(p.deferred).toBe(1);
+  });
+
+  it("never lets a fix queue behind new work: with a cap of 1 a decrease beats any number of unset products", () => {
+    const rows = [row("U1", 100, null), row("U2", 200, null), row("FIX", 100, 120.99)];
+    const p = planSellPrices(rows, new Map([["FIX", 111.99]]), 1);
+    expect(p.changes.map((c) => c.sku)).toEqual(["FIX"]);
   });
 });
 
