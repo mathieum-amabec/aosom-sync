@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.30] - 2026-10-15
+
+### Fixed
+
+- **The markup cap also protects the crossed price actually shown on the storefront.** The cap added in 0.5.107.29 only saw discounts that satisfy the compare-at reference rule (held 14+ days in the last 90). Older crossed prices set by the previous writer do not always, so on the first live run the number of variants showing a crossed price went from 126 to 109. The sell-price sync now also reads the live crossed price of every variant and keeps the price at least 10 % under it (`discountCap`); a price already above the cap is lowered at once. An incomplete Shopify listing aborts the run (no change). The live listing is imported lazily to avoid an import cycle with the Shopify client.
+
 ## [0.5.107.29] - 2026-10-15
 
 ### Fixed

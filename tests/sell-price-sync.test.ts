@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   shouldUpdateSellPrice,
   planSellPrices,
+  discountCap,
   runSellPriceSync,
   parsePricingMode,
   PRICING_PLAN_KEY,
@@ -218,5 +219,24 @@ describe("planSellPrices keeps an existing discount (maxPrice)", () => {
   it("does not touch a product with no cap", () => {
     const rows: SellPriceRow[] = [{ sku: "D", aosomPrice: 94.99, productType: "Home Furnishings", sellPrice: null, maxPrice: null }];
     expect(planSellPrices(rows, new Map()).changes[0].to).toBe(100.99); // 94.99 x 1.07 = 101.64, rounded down to .99
+  });
+});
+
+describe("discountCap", () => {
+  const keep = 0.9;
+  it("caps at 90 % of a reference the Aosom price is already 10 % under", () => {
+    expect(discountCap(94.99, [109.99], keep)).toBeCloseTo(98.991, 3);
+  });
+  it("ignores a reference with no real discount to protect (Aosom price is within 10 % of it)", () => {
+    expect(discountCap(100, [105], keep)).toBeNull();
+  });
+  it("takes the tightest of several references and skips missing ones", () => {
+    expect(discountCap(80, [null, 120, 100, undefined], keep)).toBeCloseTo(90, 5);
+  });
+  it("protects a displayed crossed price even with no price history", () => {
+    expect(discountCap(94.99, [null, 109.99], keep)).toBeCloseTo(98.991, 3);
+  });
+  it("returns null when nothing needs protecting", () => {
+    expect(discountCap(94.99, [null, undefined], keep)).toBeNull();
   });
 });

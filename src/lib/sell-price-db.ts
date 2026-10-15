@@ -7,7 +7,7 @@ import { effectiveSellPrice } from "@/lib/pricing";
 import { referencePrice } from "@/lib/compare-at";
 import { loadCompareAtSources } from "@/lib/price-history-db";
 import { SYNC } from "@/lib/config";
-import type { SellPriceChange, SellPriceDeps, SellPriceRow, CompetitorSnapshot } from "@/lib/sell-price-sync";
+import { discountCap, type SellPriceChange, type SellPriceDeps, type SellPriceRow, type CompetitorSnapshot } from "@/lib/sell-price-sync";
 
 /** A cached competitor snapshot younger than this is reused instead of refetching (their catalogue is ~8k SKUs). */
 const COMPETITOR_FRESH_SECONDS = 20 * 3600;
@@ -75,12 +75,27 @@ async function loadCompetitor(): Promise<CompetitorSnapshot> {
   return { prices: null, source: "none" };
 }
 
+/**
+ * The crossed price currently shown on the storefront, per SKU. Imported lazily: compare-at-db pulls in the Shopify
+ * client, which itself imports this module. An incomplete listing aborts the run (no change is safer than a cap that
+ * silently misses the displayed discounts).
+ */
+async function loadLiveCompareAt(): Promise<Map<string, number>> {
+  const { loadAllLiveVariants } = await import("@/lib/compare-at-db");
+  const live = await loadAllLiveVariants();
+  if (live.length < 500) throw new Error(`live variant listing incomplete (${live.length}): sell-price run aborted`);
+  const m = new Map<string, number>();
+  for (const v of live) if (v.compareAtPrice != null && v.compareAtPrice > 0) m.set(v.sku, v.compareAtPrice);
+  return m;
+}
+
 async function loadRows(): Promise<SellPriceRow[]> {
   const db = await ensureSchema();
   const r = await db.execute(`SELECT sku, price, product_type, sell_price FROM products WHERE price > 0 AND shopify_product_id IS NOT NULL AND shopify_product_id != ''`);
-  // A product with a real reference price (a 10 %+ drop it really made) keeps its discount: its sell price is capped
-  // so that it stays at least MIN_DISCOUNT below that reference (see compare-at.ts).
+  // A product with a real discount keeps it: its sell price is capped so that it stays at least MIN_DISCOUNT below its
+  // reference price (see compare-at.ts) and below the crossed price already shown on the storefront.
   const sources = await loadCompareAtSources();
+  const liveCompareAt = await loadLiveCompareAt();
   const nowS = Math.floor(Date.now() / 1000);
   const keep = 1 - SYNC.MIN_DISCOUNT_DISPLAY_PERCENT / 100;
   return r.rows.map((x) => {
@@ -93,7 +108,7 @@ async function loadRows(): Promise<SellPriceRow[]> {
       aosomPrice,
       productType: String(x.product_type ?? ""),
       sellPrice: x.sell_price == null ? null : Number(x.sell_price),
-      maxPrice: ref === null ? null : ref * keep,
+      maxPrice: discountCap(aosomPrice, [ref, liveCompareAt.get(sku)], keep),
     };
   });
 }

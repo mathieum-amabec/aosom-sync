@@ -38,6 +38,23 @@ export function shouldUpdateSellPrice(current: number | null, next: number, floo
   return next - current >= Math.max(RAISE_MIN_DOLLARS, current * RAISE_MIN_FRACTION);
 }
 
+/**
+ * Highest sell price that keeps every discount worth protecting: for each reference price (a real previous price,
+ * or the crossed price currently shown on the storefront), the price must stay at least (1 - keep) below it. A
+ * reference only counts when the Aosom price itself was already that far below it (else there is no discount to lose
+ * to our markup). Null when nothing needs protecting.
+ */
+export function discountCap(aosomPrice: number, refs: ReadonlyArray<number | null | undefined>, keep: number): number | null {
+  let cap: number | null = null;
+  for (const ref of refs) {
+    if (ref == null || !Number.isFinite(ref) || ref <= 0) continue;
+    if (aosomPrice > ref * keep + 0.005) continue;
+    const c = ref * keep;
+    cap = cap === null ? c : Math.min(cap, c);
+  }
+  return cap;
+}
+
 export interface SellPriceRow {
   sku: string;
   /** The Aosom price (products.price). */
