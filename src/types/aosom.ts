@@ -7,6 +7,10 @@ export interface AosomRawRow {
   Image: string;
   Name: string;
   Price: string;
+  /** Wholesale (B2B) price, our cost. Replaced `Price` in the feed on 2026-10-15. */
+  "2B Product Price"?: string;
+  /** Delivery fee Aosom charges us, in a separate column since 2026-10-15. */
+  shiping_fee?: string;
   custom_tagid: string;
   Category: string;
   Qty: string;
@@ -47,6 +51,8 @@ export interface AosomProduct {
   sku: string;
   name: string;
   price: number;
+  /** What a unit costs us: wholesale price + delivery fee, when the feed gives it (never a display price). */
+  cost?: number;
   qty: number;
   color: string;
   size: string;

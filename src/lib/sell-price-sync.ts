@@ -62,6 +62,8 @@ export interface SellPriceRow {
   productType: string;
   /** The stored sell price, if any. */
   sellPrice: number | null;
+  /** Our unit cost (wholesale + delivery) from the feed, when known. */
+  cost?: number | null;
   /**
    * Highest price that still keeps a real discount of 10 % against the product's reference price (compare-at.ts), when it
    * has one. A markup is never allowed above it, so a product on "Liquidation" does not lose its discount to our own price rise.
@@ -97,7 +99,7 @@ export function planSellPrices(
   for (const r of rows) {
     const floor = targetSellPrice(r.aosomPrice);
     if (!Number.isFinite(floor)) { plan.invalid++; continue; }
-    const res = computeSellPrice({ aosomPrice: r.aosomPrice, productType: r.productType, competitorPrice: competitor?.get(r.sku.toUpperCase()) ?? null });
+    const res = computeSellPrice({ aosomPrice: r.aosomPrice, productType: r.productType, cost: r.cost ?? null, competitorPrice: competitor?.get(r.sku.toUpperCase()) ?? null });
     if (!Number.isFinite(res.price)) { plan.invalid++; continue; }
     if (r.maxPrice != null && Number.isFinite(r.maxPrice) && res.price > r.maxPrice) {
       // Keep the discount: never above maxPrice, never below the Aosom floor.
