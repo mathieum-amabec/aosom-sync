@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.26] - 2026-10-14
+
+### Added
+
+- **Sell-price rule (not wired yet, no price changes).** `sell-price-rule.ts`: never below Aosom, a dollar under the competitor's public price (capped at +15 % over Aosom), tiered markup (6/6/5/4/0 %, none on patio/outdoor) when no competitor price exists, prices end .99. `competitor-prices.ts` reads their public catalogue and returns nothing rather than a partial map. `scripts/pricing-dry-run.mts` simulates the rule over every Shopify-linked product (read-only). Dry run on 2026-10-14: 3,975 products, 76 % repriced, median +5.7 %, weighted +4.9 %, strictly cheaper than the competitor on 1,944 of 2,391 comparable products, margin 14.4 % to 19.2 % (cost = feed B2B price + shipping).
+
 ## [0.5.107.24] - 2026-10-10
 
 ### Fixed
