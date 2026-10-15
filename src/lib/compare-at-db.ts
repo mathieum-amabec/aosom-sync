@@ -3,7 +3,7 @@
  * Kept apart from the pure module so the rule stays testable without a database or a network.
  */
 import { getSetting, setSetting } from "@/lib/database";
-import { loadCompareAtSources } from "@/lib/price-history-db";
+import { loadDisplayedPriceSources } from "@/lib/price-history-db";
 import { fetchShopifyVariantsPage, setVariantCompareAt } from "@/lib/shopify-client";
 import type { CompareAtDeps, LiveVariant } from "@/lib/compare-at";
 
@@ -37,7 +37,7 @@ export function defaultCompareAtDeps(): CompareAtDeps {
     getSetting,
     setSetting,
     loadLiveVariants: loadAllLiveVariants,
-    loadSources: loadCompareAtSources,
+    loadSources: loadDisplayedPriceSources,
     async writeCompareAt(variantId, value) {
       await setVariantCompareAt(variantId, value);
       await sleep(WRITE_DELAY_MS);

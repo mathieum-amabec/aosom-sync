@@ -2,6 +2,13 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.32] - 2026-10-15
+
+### Fixed
+
+- **The Aosom feed lost its public price column.** On 2026-10-15 the feed replaced `Price` by `2B Product Price` (the wholesale price, 25-40 % lower than the price Aosom publishes, written like "41.36 CAD"). The 06:00 sync read every price as 0, wrote 0 over every stored price and logged 8,017 fake price drops. Effects: the daily auto-import found no product with a price (0 candidates, it had 1,890 on 10-08), and the compare-at sync skipped variants as "drift". Rows with no feed price now keep the last known price (never the wholesale price: we must not display below what Aosom publishes), the feed price is parsed even when written with a currency, and the sync logs an alert when the feed has no public price. One-off repair: `scripts/repair-feed-zero-prices.mjs` (dry run by default) restores the 8,017 prices from the history rows.
+- **Compare-at follows our own price.** The "Ancien prix" sync expected Shopify to show the Aosom price, so every marked-up variant looked like a drift and was skipped. It now expects the sell price and takes the reference from our own sell-price history (Aosom steps up to our first sell price, then ours), so a markup is never shown as a price the customer once paid.
+
 ## [0.5.107.31] - 2026-10-15
 
 ### Fixed
