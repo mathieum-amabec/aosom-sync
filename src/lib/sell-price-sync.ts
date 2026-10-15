@@ -13,7 +13,7 @@
  * A per-run cap (`pricing_max_changes_per_run`, default 500) rolls a large change out over several days; floor fixes
  * come first, then decreases, then the biggest increases.
  */
-import { computeSellPrice, type SellPriceReason } from "@/lib/sell-price-rule";
+import { computeSellPrice, roundDownTo99, type SellPriceReason } from "@/lib/sell-price-rule";
 import { targetSellPrice } from "@/lib/pricing";
 
 export const PRICING_MODE_KEY = "pricing_mode";
@@ -45,6 +45,11 @@ export interface SellPriceRow {
   productType: string;
   /** The stored sell price, if any. */
   sellPrice: number | null;
+  /**
+   * Highest price that still keeps a real discount of 10 % against the product's reference price (compare-at.ts), when it
+   * has one. A markup is never allowed above it, so a product on "Liquidation" does not lose its discount to our own price rise.
+   */
+  maxPrice?: number | null;
 }
 
 export interface SellPriceChange {
@@ -77,6 +82,11 @@ export function planSellPrices(
     if (!Number.isFinite(floor)) { plan.invalid++; continue; }
     const res = computeSellPrice({ aosomPrice: r.aosomPrice, productType: r.productType, competitorPrice: competitor?.get(r.sku.toUpperCase()) ?? null });
     if (!Number.isFinite(res.price)) { plan.invalid++; continue; }
+    if (r.maxPrice != null && Number.isFinite(r.maxPrice) && res.price > r.maxPrice) {
+      // Keep the discount: never above maxPrice, never below the Aosom floor.
+      res.price = Math.max(floor, roundDownTo99(r.maxPrice));
+      res.reason = res.price <= floor ? "floor" : res.reason;
+    }
     if (res.competitorIgnored) plan.competitorIgnored++;
     // Without any competitor data, keep what we have: only unset or under-floor products get a (tier) price.
     if (competitor === null && r.sellPrice !== null && r.sellPrice >= floor - 0.005) { plan.unchanged++; continue; }

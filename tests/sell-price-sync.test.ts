@@ -192,3 +192,31 @@ describe("computeDiffs with a stored sell price", () => {
     expect(priceChange(new Map([["TEST-001", 999]]))).toBeUndefined();
   });
 });
+
+describe("planSellPrices keeps an existing discount (maxPrice)", () => {
+  it("caps the sell price so the product stays at least 10 % under its reference price", () => {
+    // Aosom 94.99 with a real reference of 109.99 -> max 98.99; the rule alone would go to 100.99 (tier 7 %)
+    const rows: SellPriceRow[] = [{ sku: "D", aosomPrice: 94.99, productType: "Home Furnishings", sellPrice: null, maxPrice: 109.99 * 0.9 }];
+    const p = planSellPrices(rows, new Map());
+    expect(p.changes[0].to).toBe(98.99);
+    expect(p.changes[0].to).toBeLessThanOrEqual(109.99 * 0.9);
+  });
+
+  it("never goes below the Aosom floor, whatever the cap", () => {
+    const rows: SellPriceRow[] = [{ sku: "D", aosomPrice: 100, productType: "Home Furnishings", sellPrice: null, maxPrice: 90 }];
+    const p = planSellPrices(rows, new Map());
+    expect(p.changes[0].to).toBe(100);
+    expect(p.changes[0].reason).toBe("floor");
+  });
+
+  it("lowers a price that was already raised above the cap", () => {
+    const rows: SellPriceRow[] = [{ sku: "D", aosomPrice: 94.99, productType: "Home Furnishings", sellPrice: 105.99, maxPrice: 98.99 }];
+    const p = planSellPrices(rows, new Map());
+    expect(p.changes[0]).toMatchObject({ from: 105.99, to: 98.99 });
+  });
+
+  it("does not touch a product with no cap", () => {
+    const rows: SellPriceRow[] = [{ sku: "D", aosomPrice: 94.99, productType: "Home Furnishings", sellPrice: null, maxPrice: null }];
+    expect(planSellPrices(rows, new Map()).changes[0].to).toBe(100.99); // 94.99 x 1.07 = 101.64, rounded down to .99
+  });
+});

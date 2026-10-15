@@ -4,6 +4,9 @@
 import { ensureSchema, getSetting, setSetting } from "@/lib/database";
 import { fetchCompetitorPrices } from "@/lib/competitor-prices";
 import { effectiveSellPrice } from "@/lib/pricing";
+import { referencePrice } from "@/lib/compare-at";
+import { loadCompareAtSources } from "@/lib/price-history-db";
+import { SYNC } from "@/lib/config";
 import type { SellPriceChange, SellPriceDeps, SellPriceRow, CompetitorSnapshot } from "@/lib/sell-price-sync";
 
 /** A cached competitor snapshot younger than this is reused instead of refetching (their catalogue is ~8k SKUs). */
@@ -75,12 +78,24 @@ async function loadCompetitor(): Promise<CompetitorSnapshot> {
 async function loadRows(): Promise<SellPriceRow[]> {
   const db = await ensureSchema();
   const r = await db.execute(`SELECT sku, price, product_type, sell_price FROM products WHERE price > 0 AND shopify_product_id IS NOT NULL AND shopify_product_id != ''`);
-  return r.rows.map((x) => ({
-    sku: String(x.sku),
-    aosomPrice: Number(x.price),
-    productType: String(x.product_type ?? ""),
-    sellPrice: x.sell_price == null ? null : Number(x.sell_price),
-  }));
+  // A product with a real reference price (a 10 %+ drop it really made) keeps its discount: its sell price is capped
+  // so that it stays at least MIN_DISCOUNT below that reference (see compare-at.ts).
+  const sources = await loadCompareAtSources();
+  const nowS = Math.floor(Date.now() / 1000);
+  const keep = 1 - SYNC.MIN_DISCOUNT_DISPLAY_PERCENT / 100;
+  return r.rows.map((x) => {
+    const sku = String(x.sku);
+    const aosomPrice = Number(x.price);
+    const src = sources.get(sku);
+    const ref = src ? referencePrice(aosomPrice, src.steps, src.firstSeenAt, nowS) : null;
+    return {
+      sku,
+      aosomPrice,
+      productType: String(x.product_type ?? ""),
+      sellPrice: x.sell_price == null ? null : Number(x.sell_price),
+      maxPrice: ref === null ? null : ref * keep,
+    };
+  });
 }
 
 async function saveChanges(changes: SellPriceChange[], at: Date): Promise<void> {

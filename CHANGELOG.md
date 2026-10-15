@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.29] - 2026-10-15
+
+### Fixed
+
+- **The markup no longer eats a real discount.** A product with a real reference price (a 10 %+ drop it really made, see compare-at.ts) now has its sell price capped so it stays at least 10 % under that reference. Seen on the first live run: the 2 first products raised by the rule fell under 10 % and left the Liquidation collection. A price already raised above the cap is lowered at once; the Aosom floor still wins. `loadCompareAtSources` moved to `price-history-db.ts` (shared by the compare-at and sell-price syncs, and it avoids an import cycle with the Shopify client).
+
 ## [0.5.107.28] - 2026-10-15
 
 ### Added
