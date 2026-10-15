@@ -255,8 +255,18 @@ describe("fetchShopifyVariantsPage — one-page fetch for the reconcile rotation
 
     const url = mockFetch.mock.calls[0][0] as string;
     expect(url).not.toContain("page_info");
-    expect(page.variants).toEqual([{ sku: "A", price: 9.99, variantId: "10", shopifyProductId: "1" }]);
+    expect(page.variants).toEqual([{ sku: "A", price: 9.99, variantId: "10", shopifyProductId: "1", compareAtPrice: null }]);
     expect(page.nextPageInfo).toBeNull();
+  });
+
+  it("returns the struck-through price when the variant has one", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({ products: [{ id: 1, variants: [{ id: 10, sku: "A", price: "9.99", compare_at_price: "14.99" }, { id: 11, sku: "B", price: "5.00", compare_at_price: "" }] }] }),
+    });
+    const page = await fetchShopifyVariantsPage(null);
+    expect(page.variants.map((v) => v.compareAtPrice)).toEqual([14.99, null]);
   });
 
   it("forwards the cursor and reads the next one off the Link header", async () => {

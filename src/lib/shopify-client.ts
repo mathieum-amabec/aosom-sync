@@ -102,6 +102,8 @@ export interface ShopifyVariantPageItem {
   price: number;
   variantId: string;
   shopifyProductId: string;
+  /** The struck-through price, or null when none is set. */
+  compareAtPrice?: number | null;
 }
 
 export interface ShopifyVariantPage {
@@ -129,7 +131,7 @@ export async function fetchShopifyVariantsPage(pageInfo: string | null): Promise
 
   const data = await response.json();
   const variants: ShopifyVariantPageItem[] = (
-    data.products as Array<{ id: number; variants: Array<{ id: number; sku: string; price: string }> }>
+    data.products as Array<{ id: number; variants: Array<{ id: number; sku: string; price: string; compare_at_price?: string | null }> }>
   )
     .filter((p) => !costwayIds.has(String(p.id)))
     .flatMap((p) =>
@@ -138,6 +140,7 @@ export async function fetchShopifyVariantsPage(pageInfo: string | null): Promise
       price: Number(v.price),
       variantId: String(v.id),
       shopifyProductId: String(p.id),
+      compareAtPrice: v.compare_at_price == null || v.compare_at_price === "" ? null : Number(v.compare_at_price),
     })),
   );
 
@@ -895,6 +898,21 @@ export async function updateShopifyVariantPrice(
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Shopify variant update failed: ${response.status} — ${text}`);
+  }
+}
+
+/**
+ * Set or clear ONLY the struck-through price of a variant ("Ancien prix"); the selling price is never touched.
+ * Used by the compare-at sync (compare-at.ts). Throws on a non-OK response.
+ */
+export async function setVariantCompareAt(variantId: string, compareAt: number | null): Promise<void> {
+  const response = await shopifyFetch(`/variants/${variantId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ variant: { id: variantId, compare_at_price: compareAt === null ? null : String(compareAt) } }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify compare-at update failed: ${response.status} — ${text}`);
   }
 }
 
