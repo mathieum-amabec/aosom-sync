@@ -2040,6 +2040,13 @@ const SNAPSHOT_COLS =
   "video, description, short_description, material, gtin, weight, " +
   "out_of_stock_expected, estimated_arrival, shopify_product_id";
 
+/** Last known Aosom price per SKU (rows with a price only) — used when the feed gives no usable price. */
+export async function getKnownPrices(): Promise<Map<string, { price: number }>> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT sku, price FROM products WHERE price > 0`);
+  return new Map(result.rows.map((r) => [String(r.sku), { price: Number(r.price) }]));
+}
+
 export async function getProductsSnapshot(): Promise<Map<string, ProductSnapshot>> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT ${SNAPSHOT_COLS} FROM products`);

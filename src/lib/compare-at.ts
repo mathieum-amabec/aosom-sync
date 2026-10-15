@@ -19,6 +19,7 @@
  * rule goes live this must read our own sell-price history instead.
  */
 import { SYNC } from "@/lib/config";
+import { effectiveSellPrice } from "@/lib/pricing";
 
 export const COMPARE_AT_MODE_KEY = "compare_at_mode";
 export const COMPARE_AT_PLAN_KEY = "compare_at_last_plan";
@@ -97,9 +98,37 @@ export interface LiveVariant {
   compareAtPrice: number | null;
 }
 export interface PriceSource {
+  /** The price Shopify is expected to show (our sell price once set, the Aosom price before). */
   dbPrice: number;
   steps: PriceStep[];
   firstSeenAt: number | null;
+}
+
+/** One change of OUR sell price (`sell_price_history`). `oldPrice` is null for the first one. */
+export interface SellStep {
+  oldPrice: number | null;
+  newPrice: number;
+  aosomPrice: number | null;
+  at: number;
+}
+
+/**
+ * Turns an Aosom-price source into a source for the price WE display. Once the sell-price rule is live our price is no
+ * longer the Aosom price: the expected Shopify price is the sell price (otherwise every marked-up variant looks like a
+ * "drift" and is skipped), and the history the reference is taken from is ours — the Aosom steps up to our first sell
+ * price, then our own sell-price steps. A markup is therefore never mistaken for a price the customer once paid.
+ */
+export function displayedPriceSource(aosom: PriceSource, sellPrice: number | null, sellSteps: SellStep[]): PriceSource {
+  const expected = effectiveSellPrice(aosom.dbPrice, sellPrice);
+  const dbPrice = Number.isFinite(expected) ? expected : aosom.dbPrice;
+  const own = sellSteps.filter((s) => Number.isFinite(s.newPrice) && s.newPrice > 0).sort((a, b) => a.at - b.at);
+  if (own.length === 0) return { ...aosom, dbPrice };
+  const steps: PriceStep[] = aosom.steps.filter((s) => s.at < own[0].at);
+  for (const s of own) {
+    const before = s.oldPrice ?? s.aosomPrice;
+    if (before !== null && Number.isFinite(before) && before > 0) steps.push({ oldPrice: before, newPrice: s.newPrice, at: s.at });
+  }
+  return { ...aosom, dbPrice, steps };
 }
 export type CompareAtAction = "set" | "clear";
 export interface CompareAtChange {
