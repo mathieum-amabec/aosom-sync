@@ -124,13 +124,41 @@ describe("runAutoImportTick", () => {
   });
 
   it("counts verification failures and errors, and pauses when too many fail", async () => {
-    const state = { day: "2026-10-08", total: 6, toys: 6, byCat: {}, newCount: 0, needsReview: 3, failed: 0 };
+    // 29 processed so far (18 published + 11 held): one more held makes 12/30 = 40% over the 30-product sample.
+    const state = { day: "2026-10-08", total: 18, toys: 6, byCat: {}, newCount: 0, needsReview: 11, failed: 0 };
     const { deps, store } = makeDeps({ settings: { [MODE_KEY]: "live", [STATE_KEY]: JSON.stringify(state) } });
     deps.process = vi.fn(async (c): Promise<ProcessResult> => ({ outcome: "needs_review", groupKey: c.groupKey, layer: "judge", reasons: ["x"] }));
     const r = await runAutoImportTick({ deps });
     expect(r.skipped).toBe("paused-high-failure-rate");
-    expect(JSON.parse(store[STATE_KEY]).needsReview).toBeGreaterThan(3);
+    expect(JSON.parse(store[STATE_KEY]).needsReview).toBeGreaterThan(11);
     // and the next tick of the same day stays paused
+    expect((await runAutoImportTick({ deps })).skipped).toBe("paused-high-failure-rate");
+  });
+
+  it("does not pause on a small sample, even at 40% held (10 products is not enough to judge)", async () => {
+    const state = { day: "2026-10-08", total: 6, toys: 6, byCat: {}, newCount: 0, needsReview: 4, failed: 0 };
+    const { deps } = makeDeps({ settings: { [MODE_KEY]: "live", [STATE_KEY]: JSON.stringify(state) } });
+    const r = await runAutoImportTick({ deps });
+    expect(r.skipped).toBeUndefined();
+    expect(deps.process).toHaveBeenCalled();
+  });
+
+  it("does not count product-specific photo holds toward the pause rule, but keeps them counted apart", async () => {
+    // 20 published + 12 held only for unusable supplier photos: 12/32 would pause if they counted.
+    const state = { day: "2026-10-08", total: 20, toys: 6, byCat: {}, newCount: 0, needsReview: 0, failed: 0, photoHeld: 12 };
+    const { deps, store } = makeDeps({ settings: { [MODE_KEY]: "live", [STATE_KEY]: JSON.stringify(state) } });
+    deps.process = vi.fn(async (c): Promise<ProcessResult> => ({ outcome: "needs_review", groupKey: c.groupKey, layer: "gallery", reasons: ["gallery_too_few_clean_photos:1"] }));
+    const r = await runAutoImportTick({ deps });
+    expect(r.skipped).toBeUndefined();
+    const saved = JSON.parse(store[STATE_KEY]);
+    expect(saved.needsReview).toBe(0);
+    expect(saved.photoHeld).toBe(15);
+  });
+
+  it("still pauses when the photo check itself is failing (vision model down), which is infra, not the product", async () => {
+    const state = { day: "2026-10-08", total: 18, toys: 6, byCat: {}, newCount: 0, needsReview: 11, failed: 0 };
+    const { deps } = makeDeps({ settings: { [MODE_KEY]: "live", [STATE_KEY]: JSON.stringify(state) } });
+    deps.process = vi.fn(async (c): Promise<ProcessResult> => ({ outcome: "needs_review", groupKey: c.groupKey, layer: "gallery", reasons: ["gallery_judge_unavailable:timeout"] }));
     expect((await runAutoImportTick({ deps })).skipped).toBe("paused-high-failure-rate");
   });
 

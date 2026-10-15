@@ -164,10 +164,12 @@ export interface DayState {
   newCount: number;
   needsReview: number;
   failed: number;
+  /** Held only because the supplier photos were unusable (product-specific; not counted by the pause rule). */
+  photoHeld?: number;
 }
 
 export function emptyState(day: string): DayState {
-  return { day, total: 0, toys: 0, byCat: {}, newCount: 0, needsReview: 0, failed: 0 };
+  return { day, total: 0, toys: 0, byCat: {}, newCount: 0, needsReview: 0, failed: 0, photoHeld: 0 };
 }
 
 /** Category bucket used for the share rule: a listed category, or "other". */
