@@ -110,11 +110,13 @@ export function planSellPrices(
     if (!shouldUpdateSellPrice(r.sellPrice, res.price, floor)) { plan.unchanged++; continue; }
     all.push({ sku: r.sku, from: r.sellPrice, to: res.price, aosomPrice: r.aosomPrice, reason: res.reason });
   }
-  // Priority: under-floor / unset first, then decreases, then the largest increases.
+  // Priority: under-floor first, then decreases (they undo damage: a price above its discount cap, or above the
+  // competitor), then products with no price yet, then the largest increases. Fixes must never queue behind new work.
   const rank = (c: SellPriceChange): number => {
     const floor = targetSellPrice(c.aosomPrice);
-    if (c.from === null || c.from < floor - 0.005) return 0;
-    return c.to < c.from ? 1 : 2;
+    if (c.from !== null && c.from < floor - 0.005) return 0;
+    if (c.from === null) return 2;
+    return c.to < c.from ? 1 : 3;
   };
   all.sort((a, b) => rank(a) - rank(b) || (b.to - (b.from ?? b.aosomPrice)) - (a.to - (a.from ?? a.aosomPrice)));
   plan.changes = all.slice(0, Math.max(0, maxChanges));

@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.31] - 2026-10-15
+
+### Fixed
+
+- **Sell-price fixes no longer queue behind new work.** The per-run cap (500) was filled by products with no sell price yet, so the corrections that restore a discount (a price above its discount cap) waited behind about 2,500 of them: the number of crossed prices stayed at 109 instead of coming back to 126. Plan order is now: under the Aosom floor, then decreases, then products with no price, then the largest raises.
+
 ## [0.5.107.30] - 2026-10-15
 
 ### Fixed
