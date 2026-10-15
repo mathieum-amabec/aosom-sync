@@ -8,6 +8,12 @@ All notable changes to Aosom Sync will be documented in this file.
 
 - **Sell-price rule (not wired yet, no price changes).** `sell-price-rule.ts`: never below Aosom, a dollar under the competitor's public price (capped at +15 % over Aosom), tiered markup (7/7/6/5/3 % under 100 / 200 / 400 / 800 / above, none on patio/outdoor) when no competitor price exists, prices end .99. `competitor-prices.ts` reads their public catalogue and returns nothing rather than a partial map. `scripts/pricing-dry-run.mts` simulates the rule over every Shopify-linked product (read-only). Dry run on 2026-10-14: 3,975 products, 76 % repriced, median +5.7 %, weighted +4.9 %, strictly cheaper than the competitor on 1,944 of 2,391 comparable products, margin 14.4 % to 19.2 % (cost = feed B2B price + shipping).
 
+## [0.5.107.25] - 2026-10-14
+
+### Fixed
+
+- **Auto-import no longer paused itself every day after ~10 products.** The safety pause (40% held) was judged over only 10 products, so 6 published + 4 held tripped it on 2026-10-09..14 and the cron imported ~6/day instead of 100. Three changes: the pause now needs a sample of 30; products held only because their supplier photos are unusable (`gallery_too_few_clean_photos`, `no_clean_primary_photo`) stay parked for review but no longer feed the pause rule (counted apart in `photoHeld`; vision-model failures still pause); and the photo check no longer treats a brand printed on the product itself (PawHut, Soozier, HOMCOM…) as a supplier logo. Only a logo or name added over the photo, or "Aosom" anywhere, drops a photo. Checked on the 3 products held on 2026-10-14: before, 1 to 4 photos kept; after, 7 of 7.
+
 ## [0.5.107.24] - 2026-10-10
 
 ### Fixed

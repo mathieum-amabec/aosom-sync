@@ -144,6 +144,14 @@ describe("layer 2 — gallery analysis, cleaning and the lifestyle first photo",
     expect(llm).toHaveBeenCalledTimes(1);
   });
 
+  it("tells the vision model that a brand printed on the product itself is not a supplier logo, but Aosom always is", async () => {
+    const llm = vi.fn(async () => flagsJson([{}, {}, {}, {}, {}, {}]));
+    await analyzeGallery(urls, llm as unknown as LlmText, async () => img);
+    const prompt = String((llm.mock.calls[0] as unknown[])[0]);
+    expect(prompt).toContain("imprimée ou gravée sur le produit lui-même ne compte PAS");
+    expect(prompt).toContain("« Aosom »");
+  });
+
   it("fails when too few photos download, without calling the model", async () => {
     const llm = vi.fn();
     const a = await analyzeGallery(["a", "b", "c", "d"], llm as unknown as LlmText, async (u) => (u === "a" ? img : null));
