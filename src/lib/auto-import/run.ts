@@ -66,7 +66,9 @@ export interface TickDeps {
   now(): Date;
   getSetting(key: string): Promise<string | null>;
   setSetting(key: string, value: string): Promise<void>;
-  loadCatalog(): Promise<{ groups: AosomMergedProduct[]; skuCount: number }>;
+  loadCatalog(): Promise<{ groups: AosomMergedProduct[]; skuCount: number; costs?: Map<string, number> }>;
+  /** Cached competitor prices (SKU upper case), for the price the rule will give. Optional. */
+  loadCompetitor?(): Promise<Map<string, number>>;
   loadImportedSkus(): Promise<Set<string>>;
   loadFirstSeen(): Promise<Map<string, number>>;
   loadJobs(): Promise<Map<string, { status: string; updatedAt: string }>>;
@@ -83,12 +85,16 @@ export interface TickResult {
   results: ProcessResult[];
   flaggedLicensed: number;
   candidates: number;
+  /** Candidates left out by the import pricing rules (see policy.ts). */
+  rejected?: { noCost: number; lowMargin: number };
   state: DayState;
 }
 
 async function defaultLoadCatalog() {
   const raw = await fetchAosomCatalog();
-  return { groups: mergeVariants(raw), skuCount: raw.length };
+  const costs = new Map<string, number>();
+  for (const p of raw) if (typeof p.cost === "number" && p.cost > 0) costs.set(p.sku, p.cost);
+  return { groups: mergeVariants(raw), skuCount: raw.length, costs };
 }
 
 export function defaultDeps(): TickDeps {
@@ -97,6 +103,11 @@ export function defaultDeps(): TickDeps {
     getSetting,
     setSetting,
     loadCatalog: defaultLoadCatalog,
+    async loadCompetitor() {
+      const db = await ensureSchema();
+      const r = await db.execute(`SELECT sku, price FROM competitor_prices`);
+      return new Map(r.rows.map((x) => [String(x.sku).toUpperCase(), Number(x.price)]));
+    },
     async loadImportedSkus() {
       const db = await ensureSchema();
       const r = await db.execute(`SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''`);
@@ -167,14 +178,15 @@ export async function runAutoImportTick(opts: { force?: boolean; deps?: TickDeps
   if (!(await d.acquireLock(LOCK_TTL_SECONDS))) return { ...base, skipped: "locked" };
   const started = Date.now();
   try {
-    const { groups, skuCount } = await d.loadCatalog();
+    const { groups, skuCount, costs } = await d.loadCatalog();
     if (skuCount < MIN_FEED_SKUS) return { ...base, skipped: `feed-incomplete:${skuCount}` };
 
     const [importedSkus, firstSeen, jobs] = await Promise.all([d.loadImportedSkus(), d.loadFirstSeen(), d.loadJobs()]);
-    const { candidates, flaggedLicensed } = buildCandidates(groups, { importedSkus, firstSeen, jobs, now });
+    const competitor = d.loadCompetitor ? await d.loadCompetitor().catch(() => undefined) : undefined;
+    const { candidates, flaggedLicensed, rejected } = buildCandidates(groups, { importedSkus, firstSeen, jobs, now, costs, competitor });
     const picked = pickBatch(candidates, state, n, dailyCap);
     const summary = picked.map((c) => ({ groupKey: c.groupKey, name: c.name.slice(0, 80), top: c.top, isNew: c.isNew }));
-    const out: TickResult = { ...base, picked: summary, flaggedLicensed: flaggedLicensed.length, candidates: candidates.length };
+    const out: TickResult = { ...base, picked: summary, flaggedLicensed: flaggedLicensed.length, candidates: candidates.length, rejected };
 
     if (mode === "dry") {
       await d.setSetting(PLAN_KEY, JSON.stringify({ at: now.toISOString(), eligible: candidates.length, flaggedLicensed: flaggedLicensed.length, next: summary }));

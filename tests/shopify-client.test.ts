@@ -18,6 +18,7 @@ const mockRecordPriceFloorIncident = vi.hoisted(() => vi.fn().mockResolvedValue(
 const mockCostwayIds = vi.hoisted(() => vi.fn().mockResolvedValue(new Set<string>()));
 // No stored sell prices in this file: created products start at the Aosom price (sell-price-sync.ts).
 vi.mock("@/lib/sell-price-db", () => ({
+  priceNewVariants: vi.fn(async () => new Map()),
   getSellPriceMap: vi.fn(async () => new Map<string, number>()),
   getExpectedSellPrices: vi.fn(async () => []),
   getSellPricesForSkus: vi.fn(async () => new Map<string, number>()),

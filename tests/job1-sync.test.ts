@@ -75,6 +75,7 @@ function makeProductDiff(groupKey: string, action: "update" | "archive" = "updat
 
 // Stored sell prices (sell-price-sync.ts): none in these tests, so every price target is the Aosom price.
 vi.mock("@/lib/sell-price-db", () => ({
+  priceNewVariants: vi.fn(async () => new Map()),
   getSellPriceMap: vi.fn(async () => new Map<string, number>()),
   getExpectedSellPrices: vi.fn(async () => []),
   getSellPricesForSkus: vi.fn(async () => new Map<string, number>()),

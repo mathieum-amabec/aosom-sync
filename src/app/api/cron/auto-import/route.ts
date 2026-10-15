@@ -28,7 +28,8 @@ export async function GET(request: Request) {
         const live = r.results.filter((x) => x.outcome === "live" || x.outcome === "pilot_draft").length;
         const review = r.results.filter((x) => x.outcome === "needs_review").length;
         const err = r.results.filter((x) => x.outcome === "error").length;
-        return `${r.mode}: ${r.results.length} traités (${live} ok, ${review} à revoir, ${err} erreurs) · jour ${r.state.total} importés`;
+        const rules = r.rejected && (r.rejected.noCost || r.rejected.lowMargin) ? ` · règles prix: ${r.rejected.noCost} sans coût, ${r.rejected.lowMargin} marge < 12 %` : "";
+        return `${r.mode}: ${r.results.length} traités (${live} ok, ${review} à revoir, ${err} erreurs) · jour ${r.state.total} importés · ${r.candidates} admissibles${rules}`;
       },
     );
     return NextResponse.json({ success: true, data });

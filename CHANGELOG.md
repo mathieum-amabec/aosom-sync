@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.34] - 2026-10-15
+
+### Changed
+
+- **Clear pricing rules for new imports.** A product is now imported only when its Aosom price is known (>= 30 $), our cost is known (wholesale + delivery from the feed), and at the price the sell-price rule will give it (about 20 % margin, a dollar under the competitor) the margin on cost is at least 12 %; thinner products would not survive payment fees and the return cost. Among eligible products the more profitable ones come first. The product is created AT its rule price, not at the Aosom price to be raised a day later (pricing mode live). A feed that carries fewer than 1,000 costs does not block imports (the margin rules switch off). The auto-import cron detail now shows how many products were eligible and how many the rules left out.
+
 ## [0.5.107.33] - 2026-10-15
 
 ### Changed

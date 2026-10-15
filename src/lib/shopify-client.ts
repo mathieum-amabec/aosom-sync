@@ -4,7 +4,7 @@ import { slugify, type GeneratedContent } from "./content-generator";
 import { stripLeadingHeading } from "./html-utils";
 import { env, SHOPIFY, SYNC } from "./config";
 import { effectiveSellPrice } from "./pricing";
-import { getSellPricesForSkus } from "./sell-price-db";
+import { getSellPricesForSkus, priceNewVariants } from "./sell-price-db";
 import { writePriceVerified, PRICE_EPSILON } from "./price-protection";
 import { recordPriceFloorIncident, getCostwayShopifyProductIds } from "./database";
 import { EN_FIELD_MAP, rejectEnValue, type EnTranslatableKey } from "./en-translations";
@@ -427,6 +427,9 @@ export async function createShopifyProduct(
   // Our computed sell price when one is stored for the SKU (sell-price-sync.ts), else the Aosom price. A product
   // created before its first sell-price run starts at the Aosom price; the next run and the reconcile raise it.
   const sellPriceBySku = await getSellPricesForSkus(merged.variants.map((v) => v.sku));
+  // No stored price yet (a brand-new SKU): price it with the rule now, so the product is born at its real price.
+  const unpriced = merged.variants.filter((v) => !sellPriceBySku.has(v.sku)).map((v) => ({ sku: v.sku, price: v.price }));
+  if (unpriced.length > 0) for (const [sku, price] of await priceNewVariants(unpriced, merged.productType ?? "")) sellPriceBySku.set(sku, price);
   const builtVariants = dedupeVariantOptionLabels(
     merged.variants.map((v) => ({
       sku: v.sku,
