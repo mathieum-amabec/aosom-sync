@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.27] - 2026-10-14
+
+### Added
+
+- **Compare-at ("Ancien prix") sync.** New daily cron `/api/cron/compare-at-sync` (10:30 UTC) derives the struck-through price from `price_history` instead of from the last price write: shown when the current price is 10 % or more below the highest price the product held for 14+ days within the last 90 days, cleared when it stops being true, never overwriting an already-valid one. Fixes the two ways a real drop went unshown: a slide in small steps (each step under 10 %, 35 of 67 missing cases) and a price re-written later or a path that never set it (32 of 67). Controlled by `settings.compare_at_mode` = off | dry | live (default off). Dry run on 2026-10-14: 3,994 variants read, 68 to add (median 12 %, p90 19 %), 1 invalid to clear (8 % discount), 83 already valid kept. `fetchShopifyVariantsPage` now also returns `compareAtPrice`; new `setVariantCompareAt` writes only that field. Limit: `price_history` is the Aosom price history, which equals ours while the sell-price markup is off.
+
 ## [0.5.107.26] - 2026-10-14
 
 ### Added

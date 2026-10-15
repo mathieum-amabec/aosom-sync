@@ -60,6 +60,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/cron/compare-at-sync",
+      "schedule": "30 10 * * *"
+    },
+    {
       "path": "/api/cron/photo-insights",
       "schedule": "35 9 * * *"
     },
