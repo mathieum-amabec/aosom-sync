@@ -13,6 +13,7 @@
  * import pipeline turns into one Shopify product.
  */
 import type { AosomMergedProduct } from "@/types/aosom";
+import { computeSellPrice } from "@/lib/sell-price-rule";
 
 export type AutoImportMode = "off" | "dry" | "pilot" | "live";
 
@@ -22,6 +23,16 @@ export const PILOT_DAILY_CAP = 10;
 export const MIN_STOCK = 10;
 export const MIN_IMAGES = 3;
 export const MIN_PRICE = 30;
+/**
+ * Import pricing rules (Mat, 2026-10-15). A product is imported only when:
+ *   1. it has a known Aosom price (>= MIN_PRICE) and our cost is known (feed: wholesale + delivery);
+ *   2. at the price the sell-price rule will give it (about 20 % margin, a dollar under the competitor), the margin on cost is at
+ *      least MIN_IMPORT_MARGIN. Below that, payment fees (~3 %) and the return cost (delivery + 10 %) leave nothing.
+ * It is then created AT that price (shopify-client + sell-price-db#priceNewVariants), never at the Aosom price to be raised later.
+ * The rules apply only when the feed gave us at least MARGIN_RULES_MIN_COSTS costs; a feed without costs must not block every import.
+ */
+export const MIN_IMPORT_MARGIN = 0.12;
+export const MARGIN_RULES_MIN_COSTS = 1000;
 export const TOYS_DAILY_CAP = 60;
 /** Imports are paced across this UTC window (07:00 = right after the 06:00/06:30 feed sync). */
 export const WINDOW_START_UTC_HOUR = 7;
@@ -63,6 +74,9 @@ export interface Candidate {
   imageCount: number;
   isNew: boolean;
   seasonal: boolean;
+  /** Margin on cost at the price the rule will give (0..1) and in dollars; set when the margin rules applied. */
+  margin?: number;
+  marginDollars?: number;
 }
 
 export interface CandidateContext {
@@ -75,12 +89,18 @@ export interface CandidateContext {
   now: Date;
   /** A SKU first seen less than this many days ago counts as a new arrival. */
   newDays?: number;
+  /** SKU -> our unit cost (wholesale + delivery). Margin rules apply when it holds >= MARGIN_RULES_MIN_COSTS entries. */
+  costs?: ReadonlyMap<string, number>;
+  /** SKU (upper case) -> competitor price, for the price the rule will give. */
+  competitor?: ReadonlyMap<string, number>;
 }
 
 export interface CandidateBuild {
   candidates: Candidate[];
   /** Left out on purpose and worth a human look. */
   flaggedLicensed: string[];
+  /** Left out by the import pricing rules. */
+  rejected: { noCost: number; lowMargin: number };
 }
 
 export function topCategory(productType: string): string {
@@ -107,6 +127,8 @@ export function buildCandidates(catalog: AosomMergedProduct[], ctx: CandidateCon
   const newCutoff = Math.floor(ctx.now.getTime() / 1000) - newDays * 86400;
   const flaggedLicensed: string[] = [];
   const candidates: Candidate[] = [];
+  const rejected = { noCost: 0, lowMargin: 0 };
+  const rulesOn = ctx.costs !== undefined && ctx.costs.size >= MARGIN_RULES_MIN_COSTS;
 
   for (const g of catalog) {
     const skus = g.variants.map((v) => v.sku);
@@ -136,6 +158,18 @@ export function buildCandidates(catalog: AosomMergedProduct[], ctx: CandidateCon
       continue;
     }
 
+    let marginInfo: { margin: number; dollars: number } | null = null;
+    if (rulesOn) {
+      const cheapest = [...stocked].sort((a, b) => a.price - b.price)[0];
+      const cost = ctx.costs!.get(cheapest.sku);
+      if (!(typeof cost === "number" && cost > 0)) { rejected.noCost++; continue; }
+      const rule = computeSellPrice({ aosomPrice: cheapest.price, productType: g.productType, cost, competitorPrice: ctx.competitor?.get(cheapest.sku.toUpperCase()) ?? null });
+      const price = Number.isFinite(rule.price) ? rule.price : cheapest.price;
+      const margin = (price - cost) / price;
+      if (margin < MIN_IMPORT_MARGIN) { rejected.lowMargin++; continue; }
+      marginInfo = { margin, dollars: price - cost };
+    }
+
     const seen = skus.map((s) => ctx.firstSeen.get(s)).filter((t): t is number => typeof t === "number");
     const isNew = seen.length > 0 && Math.min(...seen) >= newCutoff;
 
@@ -150,9 +184,10 @@ export function buildCandidates(catalog: AosomMergedProduct[], ctx: CandidateCon
       imageCount: g.images.length,
       isNew,
       seasonal,
+      ...(marginInfo ? { margin: marginInfo.margin, marginDollars: marginInfo.dollars } : {}),
     });
   }
-  return { candidates, flaggedLicensed };
+  return { candidates, flaggedLicensed, rejected };
 }
 
 export interface DayState {
@@ -180,7 +215,8 @@ export function shareBucket(top: string): string {
 function score(c: Candidate): number {
   // Seasonal first, then supplier depth (a proxy for a product that is staying), then a mid price band.
   const priceBand = c.minPrice >= 50 && c.minPrice <= 400 ? 1 : 0;
-  return (c.seasonal ? 100_000 : 0) + Math.min(c.totalQty, 2_000) + priceBand * 500;
+  // Profitable products first within each group: up to +2,000 for 100 $ of margin per unit.
+  return (c.seasonal ? 100_000 : 0) + Math.min(c.totalQty, 2_000) + priceBand * 500 + Math.min(c.marginDollars ?? 0, 100) * 20;
 }
 
 /**

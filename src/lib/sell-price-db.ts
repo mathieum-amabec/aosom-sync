@@ -5,10 +5,11 @@ import { ensureSchema, getSetting, setSetting } from "@/lib/database";
 import { fetchCompetitorPrices } from "@/lib/competitor-prices";
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { effectiveSellPrice } from "@/lib/pricing";
+import { computeSellPrice } from "@/lib/sell-price-rule";
 import { referencePrice } from "@/lib/compare-at";
 import { loadCompareAtSources } from "@/lib/price-history-db";
 import { SYNC } from "@/lib/config";
-import { discountCap, type SellPriceChange, type SellPriceDeps, type SellPriceRow, type CompetitorSnapshot } from "@/lib/sell-price-sync";
+import { discountCap, parsePricingMode, PRICING_MODE_KEY, type SellPriceChange, type SellPriceDeps, type SellPriceRow, type CompetitorSnapshot } from "@/lib/sell-price-sync";
 
 /** A cached competitor snapshot younger than this is reused instead of refetching (their catalogue is ~8k SKUs). */
 const COMPETITOR_FRESH_SECONDS = 20 * 3600;
@@ -144,6 +145,35 @@ async function saveChanges(changes: SellPriceChange[], at: Date): Promise<void> 
       "write",
     );
   }
+}
+
+/**
+ * Import rule: a product is created at the price the sell-price rule gives it, not at the Aosom price to be raised a day
+ * later. Cost comes from today's feed, the competitor price from the cached snapshot. Only while `pricing_mode` is live;
+ * any failure returns nothing and the caller falls back to the Aosom price (an import is never blocked by pricing).
+ */
+export async function priceNewVariants(variants: ReadonlyArray<{ sku: string; price: number }>, productType: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (variants.length === 0) return out;
+  try {
+    if (parsePricingMode(await getSetting(PRICING_MODE_KEY)) !== "live") return out;
+    const costs = await loadFeedCosts();
+    const db = await ensureSchema();
+    const upper = variants.map((v) => v.sku.toUpperCase());
+    const comp = await db.execute({ sql: `SELECT sku, price FROM competitor_prices WHERE UPPER(sku) IN (${upper.map(() => "?").join(",")})`, args: upper });
+    const competitor = new Map(comp.rows.map((r) => [String(r.sku).toUpperCase(), Number(r.price)]));
+    const changes: SellPriceChange[] = [];
+    for (const v of variants) {
+      const res = computeSellPrice({ aosomPrice: v.price, productType, cost: costs.get(v.sku) ?? null, competitorPrice: competitor.get(v.sku.toUpperCase()) ?? null });
+      if (!Number.isFinite(res.price) || res.price <= v.price + 0.004) continue;
+      out.set(v.sku, res.price);
+      changes.push({ sku: v.sku, from: null, to: res.price, aosomPrice: v.price, reason: res.reason });
+    }
+    if (changes.length > 0) await saveChanges(changes, new Date());
+  } catch {
+    out.clear();
+  }
+  return out;
 }
 
 export function defaultSellPriceDeps(): SellPriceDeps {
