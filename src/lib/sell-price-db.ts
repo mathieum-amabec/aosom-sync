@@ -3,6 +3,7 @@
  */
 import { ensureSchema, getSetting, setSetting } from "@/lib/database";
 import { fetchCompetitorPrices } from "@/lib/competitor-prices";
+import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { effectiveSellPrice } from "@/lib/pricing";
 import { referencePrice } from "@/lib/compare-at";
 import { loadCompareAtSources } from "@/lib/price-history-db";
@@ -98,6 +99,7 @@ async function loadRows(): Promise<SellPriceRow[]> {
   const liveCompareAt = await loadLiveCompareAt();
   const nowS = Math.floor(Date.now() / 1000);
   const keep = 1 - SYNC.MIN_DISCOUNT_DISPLAY_PERCENT / 100;
+  const costs = await loadFeedCosts();
   return r.rows.map((x) => {
     const sku = String(x.sku);
     const aosomPrice = Number(x.price);
@@ -108,9 +110,25 @@ async function loadRows(): Promise<SellPriceRow[]> {
       aosomPrice,
       productType: String(x.product_type ?? ""),
       sellPrice: x.sell_price == null ? null : Number(x.sell_price),
+      cost: costs.get(sku) ?? null,
       maxPrice: discountCap(aosomPrice, [ref, liveCompareAt.get(sku)], keep),
     };
   });
+}
+
+/**
+ * SKU -> our unit cost (wholesale price + delivery fee) from today's feed. An unreachable feed gives an empty map: the
+ * rule then falls back to the tiered markup instead of failing the run.
+ */
+async function loadFeedCosts(): Promise<Map<string, number>> {
+  try {
+    const feed = await fetchAosomCatalog();
+    const m = new Map<string, number>();
+    for (const p of feed) if (typeof p.cost === "number" && p.cost > 0) m.set(p.sku, p.cost);
+    return m;
+  } catch {
+    return new Map();
+  }
 }
 
 async function saveChanges(changes: SellPriceChange[], at: Date): Promise<void> {

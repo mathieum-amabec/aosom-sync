@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.33] - 2026-10-15
+
+### Changed
+
+- **Sell prices now aim for about 20 % margin on our cost.** The feed carries our cost since 2026-10-15 (wholesale price + delivery). Without a competitor price, a product is priced so that it earns 20 % on that cost (never below the last known Aosom price, at most +15 %, outdoor +7 %); with a competitor price the rule is unchanged (a dollar under them, they always win over the margin target). Simulation on 3,333 products: average margin 18.0 % -> 20.2 %, products under 10 % margin 128 -> 33, none above the competitor. Costs come from the feed at run time; if the feed is unreachable the tiered markup applies. Rollout is the usual 500 changes a day.
+
 ## [0.5.107.32] - 2026-10-15
 
 ### Fixed

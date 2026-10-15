@@ -155,6 +155,13 @@ export function parseTsv(text: string): AosomProduct[] {
     .map(normalizeRow);
 }
 
+/** Our cost per unit: wholesale price + delivery fee. Absent when the feed has no wholesale price. */
+function feedCost(row: AosomRawRow): { cost?: number } {
+  const wholesale = parseFeedPrice(row["2B Product Price"]);
+  if (!(wholesale > 0)) return {};
+  return { cost: Math.round((wholesale + parseFeedPrice(row.shiping_fee)) * 100) / 100 };
+}
+
 function normalizeRow(row: AosomRawRow): AosomProduct {
   const images = collectImages(row);
   const brand = extractBrand(row.Name);
@@ -169,6 +176,7 @@ function normalizeRow(row: AosomRawRow): AosomProduct {
     sku: row.SKU.trim(),
     name: row.Name?.trim() || "",
     price: parseFeedPrice(row.Price),
+    ...feedCost(row),
     qty: parseInt(row.Qty, 10) || 0,
     color: row.color?.trim() || "",
     size: row.size?.trim() || "",
