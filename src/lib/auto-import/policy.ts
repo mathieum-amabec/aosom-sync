@@ -65,6 +65,11 @@ export function isLicensedName(text: string): boolean {
 }
 
 const LICENSED_GLOBAL_RE = new RegExp(LICENSED_RE.source + "(?:[ -]+[A-Za-z]{1,3}\\d{1,3}[A-Za-z]{0,2}\\b)?", "gi");
+/** "inspiré de la Mercedes", "inspired by Jeep", "réplique du …": the lead-in goes with the brand so no stub is left. */
+const INSPIRED_BY_RE = new RegExp(
+  "(?:inspir[ée]e?s?|r[ée]plique|mod[èe]le)\\s+(?:de\\s+la|de\\s+l['’]|du|des|de|d['’])\\s*(?:" + LICENSED_RE.source.replace(/^\\b\(/, "(").replace(/\)\\b$/, ")") + ")(?:[ -]+[A-Za-z]{1,3}\\d{1,3}[A-Za-z]{0,2}\\b)?|(?:inspired by|based on|replica of|modeled on)\\s+" + LICENSED_RE.source + "(?:[ -]+[A-Za-z]{1,3}\\d{1,3}[A-Za-z]{0,2}\\b)?",
+  "gi",
+);
 const LICENSE_PHRASE_RE =
   /\b(?:officially\s+licensed|official\s+licensed|licensed|sous\s+licence(?:\s+officielle)?|licence\s+officielle)\b[\s:,-]*/gi;
 
@@ -76,7 +81,9 @@ export function stripLicensedNames(text: string): string {
   if (!text) return text;
   const out = text
     .replace(LICENSE_PHRASE_RE, "")
+    .replace(INSPIRED_BY_RE, "")
     .replace(LICENSED_GLOBAL_RE, "")
+    .replace(/\b(?:de la|de l['’]|du|des)\s+(?=(?:avec|pour|et|en|à|sur|qui)\b)/gi, "")
     .replace(/\(\s*\)/g, "")
     .replace(/\s+([,.;:!?])/g, "$1")
     .replace(/(^|[>\s])(?:de|du|d'|d’|of|for|pour|with|avec|and|et|-|–|—)\s*(?=[,.;:<]|$)/gi, "$1")
