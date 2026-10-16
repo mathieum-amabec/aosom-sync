@@ -8,7 +8,7 @@
  *  - only products with a variant holding >= MIN_STOCK units, >= MIN_IMAGES photos and a price >= MIN_PRICE;
  *  - no patio unless it is a winter item;
  *  - licensed / third-party brand names (Mercedes-Benz, Disney…) are imported WITHOUT the name: it is stripped from the
- *    copy (`stripLicensedFromContent`) and the product is tagged so the owner can eyeball the photos (decided 2026-10-15).
+ *    copy (`stripLicensedFromContent`) only (a brand visible on a photo is fine; decided 2026-10-15).
  *
  * A "group" is one AosomMergedProduct (all colours/sizes of a PSIN), which is exactly what the
  * import pipeline turns into one Shopify product.

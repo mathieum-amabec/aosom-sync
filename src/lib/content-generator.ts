@@ -237,6 +237,38 @@ export function inferDimensionsCm(
   return { length: toCm(length), width: toCm(width), height: toCm(height) };
 }
 
+const NUM = "(\\d+(?:\\.\\d+)?)";
+const TRIPLE_SEP = "\\s*[x×]\\s*";
+/** "(112.5 x 30 x 100 cm)" right after an "Overall Dimensions" label. */
+const OVERALL_CM_RE = new RegExp(
+  `overall\\s+dimensions?\\s*:[^()]{0,120}\\(\\s*${NUM}[^x×\\d]{0,4}${TRIPLE_SEP}${NUM}[^x×\\d]{0,4}${TRIPLE_SEP}${NUM}\\s*cm\\s*\\)`,
+  "i",
+);
+/** A size label that spells its own unit: 44.3" L x 11.8" W x 39.4" H, or 342 cm L x 255 cm l x 209 cm H. */
+const SIZE_INCH_RE = new RegExp(`${NUM}\\s*(?:"|”|″|in\\b|inch(?:es)?)\\s*[a-z]?\\s*${TRIPLE_SEP}${NUM}\\s*(?:"|”|″|in\\b|inch(?:es)?)\\s*[a-z]?\\s*${TRIPLE_SEP}${NUM}\\s*(?:"|”|″|in\\b|inch(?:es)?)`, "i");
+const SIZE_CM_RE = new RegExp(`${NUM}\\s*cm\\s*[a-z]?\\s*${TRIPLE_SEP}${NUM}\\s*cm\\s*[a-z]?\\s*${TRIPLE_SEP}${NUM}\\s*cm`, "i");
+
+/**
+ * Overall dimensions in cm read from what the supplier WROTE (description or size label), which names its own unit.
+ * The raw feed numbers cannot be trusted: the inch/cm guess in `inferDimensionsCm` is wrong for a 112.5 cm shelf (read as
+ * inches → 285.8 cm) and a 134.6 in bouncy castle (read as cm). Returns null when the text has no unambiguous triple.
+ */
+export function dimensionsCmFromSupplierText(
+  description: string | undefined,
+  size?: string,
+): { length: number; width: number; height: number } | null {
+  const round = (v: number) => Math.round(v * 10) / 10;
+  const text = (description || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
+  const o = OVERALL_CM_RE.exec(text);
+  if (o) return { length: round(+o[1]), width: round(+o[2]), height: round(+o[3]) };
+  const s = size || "";
+  const cm = SIZE_CM_RE.exec(s);
+  if (cm) return { length: round(+cm[1]), width: round(+cm[2]), height: round(+cm[3]) };
+  const inch = SIZE_INCH_RE.exec(s);
+  if (inch) return { length: round(+inch[1] * 2.54), width: round(+inch[2] * 2.54), height: round(+inch[3] * 2.54) };
+  return null;
+}
+
 /**
  * Generate bilingual FR/EN product content using Claude API.
  */
@@ -253,7 +285,9 @@ export async function generateProductContent(
     .map((v) => `- SKU: ${v.sku}, Price: $${v.price}`)
     .join("\n");
 
-  const dimsCm = inferDimensionsCm(product.variants[0]?.dimensions);
+  const dimsCm =
+    dimensionsCmFromSupplierText(product.description, product.variants[0]?.size) ??
+    inferDimensionsCm(product.variants[0]?.dimensions);
   const dimensionsLine = dimsCm
     ? `Dimensions: ${dimsCm.length} x ${dimsCm.width} x ${dimsCm.height} cm`
     : "Dimensions: not provided by the supplier — do not invent or estimate them.";
