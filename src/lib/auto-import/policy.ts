@@ -57,14 +57,14 @@ const WINTER_RE = /\b(snow|winter|sled|sleigh|toboggan|luge|neige|hiver|heater|c
 const CHRISTMAS_RE = /\b(christmas|no[eë]l|xmas)\b/i;
 /** Third-party / licensed names that must never go out unreviewed. Word-boundary matched. */
 const LICENSED_RE =
-  /\b(mercedes(-benz)?|bmw|audi|ferrari|lamborghini|porsche|maserati|bentley|rolls[- ]royce|tesla|jeep|land rover|ford|chevrolet|toyota|honda|harley|ducati|disney|marvel|barbie|hot wheels|peppa|paw patrol|bluey|spider-?man|frozen|minnie|mickey|lego|nike|adidas|pokemon|pok[eé]mon|hello kitty|star wars|batman|hulk|avengers|minecraft)\b/i;
+  /\b(mercedes([- ]benz)?|benz|bmw|audi|ferrari|lamborghini|porsche|maserati|bentley|rolls[- ]royce|tesla|jeep|land rover|range rover|ford|chevrolet|chevy|tahoe|silverado|gmc|dodge|toyota|honda|nissan|mazda|subaru|kia|hyundai|volvo|volkswagen|vw|mclaren|bugatti|aston martin|mini cooper|harley|ducati|aprilia|kawasaki|yamaha|suzuki|ktm|polaris|can-am|john deere|caterpillar|bobcat|disney|marvel|barbie|hot wheels|peppa|paw patrol|bluey|spider-?man|frozen|minnie|mickey|lego|nike|adidas|pokemon|pok[eé]mon|hello kitty|star wars|batman|hulk|avengers|minecraft|fisher[- ]price|little tikes|nerf|hasbro|mattel|playmobil|cocomelon|baby shark|sonic the hedgehog|super mario|nintendo)\b/i;
 
 /** True when the text names a licensed / third-party brand (never auto-published). */
 export function isLicensedName(text: string): boolean {
   return LICENSED_RE.test(text);
 }
 
-const LICENSED_GLOBAL_RE = new RegExp(LICENSED_RE.source + "(?:[ -]+[A-Za-z]{0,3}\\d[\\w-]*)?", "gi");
+const LICENSED_GLOBAL_RE = new RegExp(LICENSED_RE.source + "(?:[ -]+[A-Za-z]{1,3}\\d{1,3}[A-Za-z]{0,2}\\b)?", "gi");
 const LICENSE_PHRASE_RE =
   /\b(?:officially\s+licensed|official\s+licensed|licensed|sous\s+licence(?:\s+officielle)?|licence\s+officielle)\b[\s:,-]*/gi;
 

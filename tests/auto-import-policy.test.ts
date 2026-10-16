@@ -81,6 +81,14 @@ describe("buildCandidates", () => {
     expect(stripLicensedNames("Camion jouet sans marque")).toBe("Camion jouet sans marque");
   });
 
+  it("stripLicensedNames covers more brands and never eats the voltage that follows", () => {
+    expect(stripLicensedNames("Voiture Jeep 12 V pour enfants")).toBe("Voiture 12 V pour enfants");
+    expect(stripLicensedNames("Moto Aprilia 6V pour enfants")).toBe("Moto 6V pour enfants");
+    expect(stripLicensedNames("SUV Chevrolet Tahoe 24V avec télécommande")).toBe("SUV 24V avec télécommande");
+    expect(stripLicensedNames("Auto Mercedes Benz pour enfants")).toBe("Auto pour enfants");
+    expect(stripLicensedNames("Kart Volkswagen VW Beetle")).not.toMatch(/volkswagen|\bvw\b/i);
+  });
+
   it("stripLicensedFromContent cleans titles, descriptions, handles and tags and reports what changed", () => {
     const content = {
       titleFr: "Voiture Mercedes-Benz pour enfants 12 V",
