@@ -34,6 +34,7 @@ import {
   checkShopifySummary,
   checkStorefrontHtml,
 } from "./verify";
+import { stripLicensedFromContent, isLicensedName } from "./policy";
 import type { Candidate, AutoImportMode } from "./policy";
 
 export type ProcessOutcome = "live" | "pilot_draft" | "needs_review" | "skipped" | "error";
@@ -50,6 +51,8 @@ export interface ProcessResult {
 
 export const PILOT_TAG = "auto-import-pilot";
 export const REVIEW_TAG = "needs-review";
+/** Third-party brand name removed from the copy: the owner eyeballs the photos for a visible logo. */
+export const BRAND_STRIPPED_TAG = "marque-retiree";
 
 async function park(jobId: string, layer: string, reasons: string[]): Promise<void> {
   await updateImportJob(jobId, { status: "needs_review", error: `auto_${layer}_failed:${reasons.join(";")}`.slice(0, 900) });
@@ -92,10 +95,20 @@ export async function processCandidate(c: Candidate, mode: Exclude<AutoImportMod
 
     try {
       const generated = await generateContent(job.id);
-      const content = generated.content;
+      let content = generated.content;
       if (!content) {
         await park(job.id, "generate", ["no_content"]);
         return { ...base, outcome: "needs_review", layer: "generate", reasons: ["no_content"] };
+      }
+
+      // Licensed / third-party brand names (Mercedes-Benz, Disney…) never go out: strip them from the copy and keep going.
+      // The cleaned copy is saved on the job BEFORE creation so Shopify gets exactly this text.
+      let brandStripped = false;
+      const stripped = stripLicensedFromContent(content as unknown as Record<string, unknown>);
+      if (stripped.changed.length) {
+        content = stripped.content as unknown as typeof content;
+        brandStripped = true;
+        await updateImportJob(job.id, { content: JSON.stringify(content) });
       }
 
       // Layer 1: copy rules + title rules (no company name, makes sense, not truncated).
@@ -152,6 +165,14 @@ export async function processCandidate(c: Candidate, mode: Exclude<AutoImportMod
       if (!l3.ok) {
         await quarantine(shopifyId, summary.tags, job.id, "layer3_admin", l3.reasons);
         return { ...base, outcome: "needs_review", layer: "layer3_admin", shopifyId, reasons: l3.reasons };
+      }
+
+      const extraTags = brandStripped || isLicensedName(job.product.name) ? [BRAND_STRIPPED_TAG] : [];
+      if (extraTags.length) {
+        await updateShopifyProduct(shopifyId, { tags: [...new Set([...summary.tags, ...extraTags])] }).catch((e) =>
+          console.error(`[auto-import] could not tag ${shopifyId} ${BRAND_STRIPPED_TAG}:`, e),
+        );
+        summary.tags = [...new Set([...summary.tags, ...extraTags])];
       }
 
       if (mode === "pilot") {
