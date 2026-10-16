@@ -7,7 +7,8 @@
  *    up to TOYS_DAILY_CAP), then the other categories by share;
  *  - only products with a variant holding >= MIN_STOCK units, >= MIN_IMAGES photos and a price >= MIN_PRICE;
  *  - no patio unless it is a winter item;
- *  - licensed / third-party brand names (Mercedes-Benz, Disney…) are never auto-imported: a human decides.
+ *  - licensed / third-party brand names (Mercedes-Benz, Disney…) are imported WITHOUT the name: it is stripped from the
+ *    copy (`stripLicensedFromContent`) and the product is tagged so the owner can eyeball the photos (decided 2026-10-15).
  *
  * A "group" is one AosomMergedProduct (all colours/sizes of a PSIN), which is exactly what the
  * import pipeline turns into one Shopify product.
@@ -61,6 +62,65 @@ const LICENSED_RE =
 /** True when the text names a licensed / third-party brand (never auto-published). */
 export function isLicensedName(text: string): boolean {
   return LICENSED_RE.test(text);
+}
+
+const LICENSED_GLOBAL_RE = new RegExp(LICENSED_RE.source + "(?:[ -]+[A-Za-z]{0,3}\\d[\\w-]*)?", "gi");
+const LICENSE_PHRASE_RE =
+  /\b(?:officially\s+licensed|official\s+licensed|licensed|sous\s+licence(?:\s+officielle)?|licence\s+officielle)\b[\s:,-]*/gi;
+
+/**
+ * Remove third-party / licensed brand names (and a trailing model code such as "G63") from one text, then tidy what is left:
+ * "licence" wording, doubled spaces, dangling "de/d'/pour/-" and empty "()". Safe on HTML (only text runs are touched).
+ */
+export function stripLicensedNames(text: string): string {
+  if (!text) return text;
+  const out = text
+    .replace(LICENSE_PHRASE_RE, "")
+    .replace(LICENSED_GLOBAL_RE, "")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/(^|[>\s])(?:de|du|d'|d’|of|for|pour|with|avec|and|et|-|–|—)\s*(?=[,.;:<]|$)/gi, "$1")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/(^|>)\s+/g, "$1")
+    .trim();
+  return out.replace(/^[a-zà-ÿ]/, (c) => c.toUpperCase());
+}
+
+/** The text fields of a generated listing that may carry a brand name. */
+const BRAND_TEXT_FIELDS = [
+  "titleFr", "titleEn", "descriptionFr", "descriptionEn", "seoDescriptionFr", "seoDescriptionEn",
+  "metaTitleFr", "metaTitleEn", "metaDescriptionFr", "metaDescriptionEn",
+] as const;
+
+/**
+ * Strip licensed names from every customer-facing field (copy, meta, handle, tags). Returns the cleaned content and
+ * the list of fields that changed (empty = nothing to strip, content returned untouched).
+ */
+export function stripLicensedFromContent<T extends Record<string, unknown>>(content: T): { content: T; changed: string[] } {
+  const next: Record<string, unknown> = { ...content };
+  const changed: string[] = [];
+  for (const f of BRAND_TEXT_FIELDS) {
+    const v = next[f];
+    if (typeof v === "string" && LICENSED_RE.test(v)) {
+      next[f] = stripLicensedNames(v);
+      changed.push(f);
+    }
+  }
+  for (const f of ["urlHandleFr", "urlHandleEn"] as const) {
+    const v = next[f];
+    if (typeof v === "string" && LICENSED_RE.test(v.replace(/-/g, " "))) {
+      next[f] = v.split("-").filter((w, i, a) => !LICENSED_RE.test(w) && !(i > 0 && LICENSED_RE.test(a[i - 1]) && /\d/.test(w))).join("-");
+      changed.push(f);
+    }
+  }
+  if (Array.isArray(next.tags)) {
+    const tags = (next.tags as unknown[]).filter((t) => !(typeof t === "string" && LICENSED_RE.test(t)));
+    if (tags.length !== (next.tags as unknown[]).length) {
+      next.tags = tags;
+      changed.push("tags");
+    }
+  }
+  return { content: changed.length ? (next as T) : content, changed };
 }
 
 export interface Candidate {
@@ -153,10 +213,8 @@ export function buildCandidates(catalog: AosomMergedProduct[], ctx: CandidateCon
     const seasonal = isSeasonal(g.name, g.productType, ctx.now);
     if (top === PATIO && !WINTER_RE.test(`${g.name} ${g.productType}`) && !CHRISTMAS_RE.test(`${g.name} ${g.productType}`)) continue;
 
-    if (LICENSED_RE.test(g.name)) {
-      flaggedLicensed.push(g.groupKey);
-      continue;
-    }
+    // Licensed names are no longer a reason to skip: the copy is generated, then the name is stripped.
+    if (LICENSED_RE.test(g.name)) flaggedLicensed.push(g.groupKey);
 
     let marginInfo: { margin: number; dollars: number } | null = null;
     if (rulesOn) {

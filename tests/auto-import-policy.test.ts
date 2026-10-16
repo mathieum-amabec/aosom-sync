@@ -8,6 +8,8 @@ import {
   pickBatch,
   TOYS_DAILY_CAP,
   type Candidate,
+  stripLicensedNames,
+  stripLicensedFromContent,
 } from "@/lib/auto-import/policy";
 import type { AosomMergedProduct, AosomVariant } from "@/types/aosom";
 
@@ -72,13 +74,37 @@ describe("buildCandidates", () => {
     expect(out.candidates.map((c) => c.groupKey)).toEqual(["heater"]);
   });
 
-  it("flags licensed brand names for a human instead of importing them", () => {
+  it("stripLicensedNames removes the brand, its model code and the licence wording", () => {
+    expect(stripLicensedNames("Voiture électrique Mercedes-Benz G63 pour enfants 12 V")).toBe("Voiture électrique pour enfants 12 V");
+    expect(stripLicensedNames("Auto Kawasaki sous licence officielle, noir")).toContain("noir");
+    expect(stripLicensedNames("<p>Moto Harley pour enfants.</p>")).toBe("<p>Moto pour enfants.</p>");
+    expect(stripLicensedNames("Camion jouet sans marque")).toBe("Camion jouet sans marque");
+  });
+
+  it("stripLicensedFromContent cleans titles, descriptions, handles and tags and reports what changed", () => {
+    const content = {
+      titleFr: "Voiture Mercedes-Benz pour enfants 12 V",
+      titleEn: "Kids 12V Mercedes-Benz ride-on car",
+      descriptionFr: "<p>Auto Mercedes-Benz fiable.</p>",
+      descriptionEn: "<p>Reliable Mercedes-Benz car.</p>",
+      urlHandleFr: "voiture-mercedes-benz-enfants",
+      urlHandleEn: "kids-ride-on-car",
+      tags: ["mercedes-benz", "jouets"],
+    };
+    const { content: out, changed } = stripLicensedFromContent(content);
+    expect(JSON.stringify(out)).not.toMatch(/mercedes/i);
+    expect(changed).toEqual(expect.arrayContaining(["titleFr", "titleEn", "descriptionFr", "descriptionEn", "urlHandleFr", "tags"]));
+    expect(out.tags).toEqual(["jouets"]);
+    expect(stripLicensedFromContent({ titleFr: "Table basse", tags: [] }).changed).toEqual([]);
+  });
+
+  it("keeps licensed brand groups as candidates (the name is stripped from the copy later) and still counts them", () => {
     const out = buildCandidates(
       [group("merc", { name: "4 in 1 Toddler Push Car Licensed Mercedes-Benz", productType: "Toys & Games" }), group("plain", { productType: "Toys & Games" })],
       ctx(),
     );
     expect(out.flaggedLicensed).toEqual(["merc"]);
-    expect(out.candidates.map((c) => c.groupKey)).toEqual(["plain"]);
+    expect(out.candidates.map((c) => c.groupKey).sort()).toEqual(["merc", "plain"]);
   });
 
   it("marks a group first seen in the last 14 days as a new arrival", () => {
