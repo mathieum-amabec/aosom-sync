@@ -18,7 +18,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
 
 const {
   slugify, clampMetaTitle, backfillSeoFields, stripSupplierBrands, generateProductContent,
-  inferDimensionsCm, collectCopyIssues,
+  inferDimensionsCm, dimensionsCmFromSupplierText, collectCopyIssues,
 } = await import("@/lib/content-generator");
 import type { GeneratedContent } from "@/lib/content-generator";
 
@@ -491,5 +491,23 @@ describe("generateProductContent — dimensions reach the prompt and the final c
     expect(out.descriptionFr).toContain("127 x 55.9 x 59.9 cm");
     // The retry call is still on the SAME (first) tier, not an escalation to the stronger model.
     expect(create.mock.calls[1][0].model).toBe(create.mock.calls[0][0].model);
+  });
+});
+
+describe("dimensionsCmFromSupplierText", () => {
+  it("reads the cm triple the supplier wrote even when the feed numbers are already cm (shelf 112.5 x 30 x 100)", () => {
+    const d = '<p>Overall Dimensions: 44.3" L x 11.8" W x 39.4" H (112.5 x 30 x 100 cm) • Top Shelf: 11.2" W (28.5 cm)</p>';
+    expect(dimensionsCmFromSupplierText(d, '44.3" L x 11.8" W x 39.4" H')).toEqual({ length: 112.5, width: 30, height: 100 });
+  });
+
+  it("reads the cm triple when the feed numbers are inches above 120 (bouncy castle 342 x 255 x 209)", () => {
+    const d = 'Overall Dimensions: 134.6" L x 100.4" W x 82.3" H (342 x 255 x 209 cm) • Pool Dimensions: 66.9" L (170 cm)';
+    expect(dimensionsCmFromSupplierText(d, "342 cm L x 255 cm l x 209 cm H")).toEqual({ length: 342, width: 255, height: 209 });
+  });
+
+  it("falls back to the size label (inches converted, cm kept) and returns null when nothing is spelled out", () => {
+    expect(dimensionsCmFromSupplierText("no dims here", '30" L x 20" W x 10" H')).toEqual({ length: 76.2, width: 50.8, height: 25.4 });
+    expect(dimensionsCmFromSupplierText("", "77 cm L x 54 cm W x 179 cm H")).toEqual({ length: 77, width: 54, height: 179 });
+    expect(dimensionsCmFromSupplierText("Overall size is big", "Large")).toBeNull();
   });
 });
