@@ -177,6 +177,8 @@ describe("aggregateCollections — tile selection", () => {
       velocity: 1,
       discountPct: 0,
       velocityNorm: 0,
+      ownUnits: 0,
+      ownNorm: 0,
       discountNorm: 0,
       score: base - i * 0.001,
     }));

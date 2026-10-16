@@ -101,6 +101,76 @@ export const MIN_COLLECTION_PRODUCTS = 3;
 export interface TrendWeights {
   velocity: number;
   discount: number;
+  /**
+   * Share of the score given to OUR store's own sales (0..1). The remaining
+   * share keeps the velocity/discount split. Omitted = derived from order volume
+   * by `ownSalesWeight()`.
+   */
+  own?: number;
+}
+
+/**
+ * OWN SALES (2026-10-16). Velocity is supplier-wide stock depletion — every
+ * reseller's sales, not ours. Once our store has real order volume, what OUR
+ * customers buy is the most honest "most wanted" signal, so it is blended in with
+ * a weight that ramps with data: none below OWN_MIN_ORDERS paid orders in the
+ * window (a handful of orders is noise and would pin one product to the top for
+ * weeks), rising linearly to OWN_MAX_WEIGHT at OWN_FULL_ORDERS. Read from the
+ * Shopify orders API; if the token lacks read_orders (or the call fails) the
+ * weight is 0 and the ranking is exactly the velocity/discount one.
+ */
+export const OWN_WINDOW_DAYS = 30;
+export const OWN_MIN_ORDERS = 5;
+export const OWN_FULL_ORDERS = 40;
+export const OWN_MAX_WEIGHT = 0.35;
+
+export function ownSalesWeight(orderCount: number): number {
+  if (!(orderCount >= OWN_MIN_ORDERS)) return 0;
+  if (orderCount >= OWN_FULL_ORDERS) return OWN_MAX_WEIGHT;
+  return (OWN_MAX_WEIGHT * (orderCount - OWN_MIN_ORDERS)) / (OWN_FULL_ORDERS - OWN_MIN_ORDERS);
+}
+
+export interface OwnSales {
+  /** Paid orders in the window (0 when unavailable). */
+  orders: number;
+  /** Units sold per Shopify product id (numeric id as a string). */
+  units: Map<string, number>;
+  /** False when the orders API could not be read (missing scope, error). */
+  available: boolean;
+}
+
+const NEXT_PAGE_RE = /<[^>]*\/admin\/api\/[^/]+(\/orders\.json[^>]*)>;\s*rel="next"/;
+
+/** Our store's units sold per product over the last `days` days. Never throws. */
+export async function fetchOwnSales(days = OWN_WINDOW_DAYS): Promise<OwnSales> {
+  const none: OwnSales = { orders: 0, units: new Map(), available: false };
+  const units = new Map<string, number>();
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  let orders = 0;
+  let endpoint: string | null =
+    `/orders.json?status=any&financial_status=paid&created_at_min=${encodeURIComponent(since)}&fields=id,line_items&limit=250`;
+  try {
+    for (let page = 0; endpoint && page < 20; page++) {
+      const res = await shopifyFetch(endpoint);
+      if (!res.ok) return none;
+      const data = (await res.json()) as {
+        orders?: Array<{ line_items?: Array<{ product_id?: number | null; quantity?: number }> }>;
+      };
+      for (const o of data.orders ?? []) {
+        orders++;
+        for (const li of o.line_items ?? []) {
+          if (!li.product_id) continue;
+          const k = String(li.product_id);
+          units.set(k, (units.get(k) ?? 0) + (li.quantity ?? 1));
+        }
+      }
+      const next = (res.headers.get("link") ?? "").match(NEXT_PAGE_RE);
+      endpoint = next ? next[1] : null;
+    }
+    return { orders, units, available: true };
+  } catch {
+    return none;
+  }
 }
 
 export interface ScoredProduct {
@@ -117,6 +187,10 @@ export interface ScoredProduct {
   discountPct: number;
   /** Velocity component, 0..1. */
   velocityNorm: number;
+  /** Units sold on OUR store in the own-sales window. */
+  ownUnits: number;
+  /** Own-sales component, 0..1. */
+  ownNorm: number;
   /** Price-drop component, 0..1. */
   discountNorm: number;
   /** Composite score, 0..1. */
@@ -268,7 +342,10 @@ export function scoreProducts(
     compare_at_price: unknown;
   }>,
   weights: TrendWeights = DEFAULT_TREND_WEIGHTS,
+  ownUnits: Map<string, number> = new Map(),
 ): ScoredProduct[] {
+  const wOwn = Math.min(Math.max(weights.own ?? 0, 0), 1);
+  const ownMax = Math.max(0, ...ownUnits.values());
   const velocities = rows.map((r) => num(r.velocity)).filter((v) => v > 0).sort((a, b) => a - b);
   const anchor = percentile(velocities, VELOCITY_PERCENTILE);
 
@@ -284,7 +361,10 @@ export function scoreProducts(
       const velocityNorm =
         anchor > 0 ? Math.min(Math.log1p(velocity) / Math.log1p(anchor), 1) : 0;
       const discountNorm = Math.min(pct / DISCOUNT_ANCHOR_PCT, 1);
-      const score = weights.velocity * velocityNorm + weights.discount * discountNorm;
+      const ownUnitsHere = ownUnits.get(String(r.shopify_product_id ?? "")) ?? 0;
+      const ownNorm = ownMax > 0 ? Math.log1p(ownUnitsHere) / Math.log1p(ownMax) : 0;
+      const score =
+        (1 - wOwn) * (weights.velocity * velocityNorm + weights.discount * discountNorm) + wOwn * ownNorm;
 
       return {
         sku: r.sku,
@@ -297,6 +377,8 @@ export function scoreProducts(
         velocity,
         discountPct: pct,
         velocityNorm,
+        ownUnits: ownUnitsHere,
+        ownNorm,
         discountNorm,
         score,
       };
@@ -472,10 +554,14 @@ export async function computeTrendScores(
   opts: { windowDays?: number; weights?: TrendWeights } = {},
 ): Promise<TrendScoreResult> {
   const windowDays = opts.windowDays ?? TREND_WINDOW_DAYS;
-  const weights = opts.weights ?? { ...DEFAULT_TREND_WEIGHTS };
-
-  const rows = await fetchCandidates(windowDays);
-  const products = scoreProducts(rows as unknown as Parameters<typeof scoreProducts>[0], weights);
+  const [rows, own] = await Promise.all([fetchCandidates(windowDays), fetchOwnSales()]);
+  const base = opts.weights ?? { ...DEFAULT_TREND_WEIGHTS };
+  const weights: TrendWeights = { ...base, own: base.own ?? ownSalesWeight(own.orders) };
+  const products = scoreProducts(
+    rows as unknown as Parameters<typeof scoreProducts>[0],
+    weights,
+    own.units,
+  );
   const sets = await fetchSubcategoryRuleSets();
   const collections = aggregateCollections(products, sets);
 
