@@ -17,7 +17,10 @@ import {
 } from "./content-guards";
 import { stripSupplierBrands, detectDescriptionLanguage } from "./catalog-guard";
 
+import { buildMetaTitle, normalizeMetaTitle } from "./meta-title";
+
 export { stripSupplierBrands } from "./catalog-guard";
+export { clampMetaTitle, buildMetaTitle, normalizeMetaTitle, META_TITLE_SUFFIX } from "./meta-title";
 
 let anthropicClient: Anthropic | null = null;
 
@@ -54,24 +57,6 @@ export interface GeneratedContent {
  * Defensive — guarantees a clean handle regardless of what the model returns.
  */
 /**
- * Clamp a "Name | suffix — Brand" meta title to `max` chars WITHOUT cutting the
- * brand suffix. If too long, trim the name part (at a word boundary) and keep the
- * full "| … — Brand" tail. Falls back to a plain tail-slice if there is no " | ".
- */
-export function clampMetaTitle(title: string, max: number): string {
-  if (title.length <= max) return title;
-  const sepIdx = title.indexOf(" | ");
-  if (sepIdx === -1) return title.slice(0, max);
-  const suffix = title.slice(sepIdx); // " | Livraison gratuite — Ameublo Direct"
-  const room = max - suffix.length;
-  if (room <= 3) return title.slice(0, max); // suffix alone ~fills the budget
-  let name = title.slice(0, room);
-  const lastSpace = name.lastIndexOf(" ");
-  if (lastSpace > 0) name = name.slice(0, lastSpace);
-  return name.trimEnd() + suffix;
-}
-
-/**
  * Supplier brand names that must never surface in customer-facing output.
  * Mirrors the forbidden list in SYSTEM_PROMPT (the prompt asks Claude to omit
  * them; this is the deterministic backstop). Case-insensitive, so HOMCOM/HomCom
@@ -103,8 +88,8 @@ export function backfillSeoFields(content: GeneratedContent, brand: string): Gen
   const empty = (v: unknown): boolean => typeof v !== "string" || v.trim() === "";
 
   if (empty(c.brand)) c.brand = brand;
-  if (empty(c.metaTitleFr)) c.metaTitleFr = clampMetaTitle(`${c.titleFr} | Livraison gratuite — Ameublo Direct`, 65);
-  if (empty(c.metaTitleEn)) c.metaTitleEn = clampMetaTitle(`${c.titleEn} | Free Shipping — Furnish Direct`, 65);
+  if (empty(c.metaTitleFr)) c.metaTitleFr = buildMetaTitle(c.titleFr, "fr");
+  if (empty(c.metaTitleEn)) c.metaTitleEn = buildMetaTitle(c.titleEn, "en");
   if (empty(c.metaDescriptionFr)) c.metaDescriptionFr = (c.seoDescriptionFr || c.titleFr).slice(0, 155);
   if (empty(c.metaDescriptionEn)) c.metaDescriptionEn = (c.seoDescriptionEn || c.titleEn).slice(0, 155);
   if (empty(c.urlHandleFr)) c.urlHandleFr = slugify(c.titleFr);
@@ -156,13 +141,15 @@ PRODUCT TITLE (titleFr / titleEn) — strict pattern:
   - Color, only if relevant, after an em dash "—".
 
 META TITLE (metaTitleFr / metaTitleEn) — max 65 characters total:
-  - FR pattern: "<product name FR> | Livraison gratuite — Ameublo Direct"
-  - EN pattern: "<product name EN> | Free Shipping — Furnish Direct"
-  - Keep the product-name part short so the whole string stays within 65 characters.
+  - FR pattern: "<product name FR> | Ameublo Direct"
+  - EN pattern: "<product name EN> | Furnish Direct"
+  - Keep the product-name part short (48 characters max) so the whole string stays within 65.
+  - The name part must read as a complete phrase: never end it on "de", "avec", "pour", "et",
+    "à", "with", "for", "and", a bare number or a dash — shorten to the last complete idea instead.
 
 META DESCRIPTION (metaDescriptionFr / metaDescriptionEn) — max 155 characters:
   - Lead with the main benefit, mention free shipping in Canada, end with a short CTA.
-  - (Meta title/description are the ONLY place shipping may be mentioned.)
+  - (The meta description is the ONLY place shipping may be mentioned.)
 
 URL HANDLE (urlHandleFr / urlHandleEn):
   - Short kebab-case slug: lowercase, no accents, no supplier brand, words joined by "-".
@@ -322,8 +309,8 @@ Return JSON with this exact structure:
   "descriptionEn": "<HTML product description in English>",
   "seoDescriptionFr": "...",
   "seoDescriptionEn": "...",
-  "metaTitleFr": "<= 65 chars, pattern: name FR | Livraison gratuite — Ameublo Direct",
-  "metaTitleEn": "<= 65 chars, pattern: name EN | Free Shipping — Furnish Direct",
+  "metaTitleFr": "<= 65 chars, pattern: name FR | Ameublo Direct",
+  "metaTitleEn": "<= 65 chars, pattern: name EN | Furnish Direct",
   "metaDescriptionFr": "<= 155 chars, benefit + livraison gratuite + CTA",
   "metaDescriptionEn": "<= 155 chars, benefit + free shipping + CTA",
   "urlHandleFr": "kebab-case-fr-no-accents-no-brand",
@@ -420,8 +407,10 @@ ${correction}` : prompt;
       parsed.descriptionEn = stripSupplierBrands(sanitizeHtml(parsed.descriptionEn)).slice(0, 10000);
       parsed.seoDescriptionFr = stripSupplierBrands(parsed.seoDescriptionFr).slice(0, 200);
       parsed.seoDescriptionEn = stripSupplierBrands(parsed.seoDescriptionEn).slice(0, 200);
-      parsed.metaTitleFr = clampMetaTitle(parsed.metaTitleFr, 65);
-      parsed.metaTitleEn = clampMetaTitle(parsed.metaTitleEn, 65);
+      // Meta-title safety net: re-apply the store suffix, clamp at a clean word boundary, and
+      // rebuild from the (already guarded) product title when the model's name part dangles.
+      parsed.metaTitleFr = normalizeMetaTitle(stripSupplierBrands(parsed.metaTitleFr), parsed.titleFr, "fr");
+      parsed.metaTitleEn = normalizeMetaTitle(stripSupplierBrands(parsed.metaTitleEn), parsed.titleEn, "en");
       parsed.metaDescriptionFr = parsed.metaDescriptionFr.slice(0, 155);
       parsed.metaDescriptionEn = parsed.metaDescriptionEn.slice(0, 155);
       parsed.urlHandleFr = slugify(stripSupplierBrands(parsed.urlHandleFr));
