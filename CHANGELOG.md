@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.38] - 2026-10-16
+
+### Changed
+
+- **"Les plus demandés cette semaine" will include what our own customers buy.** The homepage list ranked products by how fast the supplier's stock drops (all resellers combined) and by price drops. It now also counts units sold on our store over the last 30 days, with a weight that grows with order volume: nothing below 5 paid orders, then up to 35 % of the score at 40 orders. It needs the Shopify read_orders permission on the app token; until that is granted the list ranks exactly as before.
+
 ## [0.5.107.35] - 2026-10-15
 
 ### Fixed
