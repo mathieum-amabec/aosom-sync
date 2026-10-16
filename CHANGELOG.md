@@ -2,6 +2,11 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.37] - 2026-10-16
+
+### Changed
+
+- **Homepage customer videos are served from our own storage.** The "Déballé chez nos clients" reel used to play each video straight from the supplier's servers, which put the supplier's name in the page's network requests and would have left the reel blank if the supplier moved the files. The videos are now copied to our public Vercel Blob store (script `scripts/mirror-ugc-videos.mjs`, 55 copied on 2026-10-16) and the reel picks copied videos first; a video not copied yet still plays from its original address.
 ## [0.5.107.36] - 2026-10-16
 
 ### Fixed
