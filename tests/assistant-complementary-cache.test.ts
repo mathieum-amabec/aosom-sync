@@ -55,6 +55,12 @@ describe("cache module", () => {
     await cache.putCachedComplementary("k2", { reply: "", products: [] }, now);
     expect(await cache.getCachedComplementary("k2", now)).toBeNull();
   });
+  it("treats a cached card at 0 $ as a miss (rows written during the 2026-10-15 feed outage)", async () => {
+    const now = 1_800_000_000;
+    const zero = { reply: "", products: [{ ...RESULT.products[0], price: 0 }] };
+    await cache.putCachedComplementary("k3", zero, now);
+    expect(await cache.getCachedComplementary("k3", now + 60)).toBeNull();
+  });
   it("recognises crawlers but not real browsers", () => {
     expect(cache.isBotUserAgent(UA_GOOGLEBOT)).toBe(true);
     expect(cache.isBotUserAgent("facebookexternalhit/1.1")).toBe(true);

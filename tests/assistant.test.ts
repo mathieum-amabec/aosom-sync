@@ -483,6 +483,32 @@ describe("draft / unpublished products never reach the shopper", () => {
   });
 });
 
+describe("card price = the live Shopify price (regression: 0,00 $ cards on 2026-10-15)", () => {
+  const live = (amount: string) => ({
+    handle: "sofa-sectionnel-gris", title: "Canapé", status: "ACTIVE", onlineStoreUrl: "https://x",
+    priceRangeV2: { minVariantPrice: { amount } },
+  });
+
+  it("shows the price the product page shows, not the Aosom catalogue price", async () => {
+    shopifyFetch.mockResolvedValue(liveNodes([live("1049.99")]));
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(final({ reply: "Voici une option.", products: [{ sku: "A-1", reason: "x" }] }));
+    const res = await runAssistant({ message: "canapé", locale: "fr" });
+    expect(res.products[0].price).toBe(1049.99);
+  });
+
+  it("drops a card that has neither a live nor a catalogue price", async () => {
+    getProducts.mockResolvedValue({ products: [prod({ price: 0 })], total: 1, productTypes: [] });
+    shopifyFetch.mockResolvedValue(liveNodes([live("0.00")]));
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(final({ reply: "Voici une option.", products: [{ sku: "A-1", reason: "x" }] }));
+    const res = await runAssistant({ message: "canapé", locale: "fr" });
+    expect(res.products).toHaveLength(0);
+  });
+});
+
 describe("budget ceiling", () => {
   it("drops cards above budget x1.2", async () => {
     getProducts.mockResolvedValue({ products: [prod({ sku: "CHEAP", price: 700, shopify_handle: "cheap" }), prod({ sku: "RICH", price: 2000, shopify_handle: "rich" })], total: 2, productTypes: [] });
