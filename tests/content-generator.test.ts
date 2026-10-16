@@ -192,6 +192,39 @@ describe("generateProductContent — supplier brand stripping", () => {
   });
 });
 
+// Regression: 350 live SEO titles ended mid-phrase ("Tables de chevet avec | Livraison gratuite —
+// Ameublo Direct"). Model-written meta titles now get the short store suffix, and a name part that
+// ends on a stopword is rebuilt from the guarded product title. Found 2026-10-16.
+describe("generateProductContent — meta title safety net", () => {
+  it("swaps the old long suffix for the store name", async () => {
+    claudeReturns("Chaise longue grise", "Grey lounge chair");
+    const out = await generateProductContent(makeProduct());
+    expect(out.metaTitleFr).toBe("m fr | Ameublo Direct");
+    // "m en" ends on "en" (a French stopword — the list is shared), so it is rebuilt from titleEn.
+    expect(out.metaTitleEn).toBe("Grey lounge chair | Furnish Direct");
+  });
+
+  it("rebuilds a dangling model meta title from the product title", async () => {
+    create.mockResolvedValueOnce({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          titleFr: "Tables de chevet avec tiroir", titleEn: "Nightstands with drawer",
+          descriptionFr: "<p>Cette chaise pour votre jardin est confortable et pratique pour tous les jours.</p>",
+          descriptionEn: "<p>en</p>", seoDescriptionFr: "d", seoDescriptionEn: "d",
+          metaTitleFr: "Tables de chevet avec | Livraison gratuite — Ameublo Direct",
+          metaTitleEn: "Nightstands with | Free Shipping — Furnish Direct",
+          metaDescriptionFr: "md", metaDescriptionEn: "md", urlHandleFr: "a", urlHandleEn: "b",
+          tags: ["jardin","abri de jardin","garden shed","rangement outils","tool storage","outdoor storage","patio","remise"],
+        }),
+      }],
+    });
+    const out = await generateProductContent(makeProduct());
+    expect(out.metaTitleFr).toBe("Tables de chevet avec tiroir | Ameublo Direct");
+    expect(out.metaTitleEn).toBe("Nightstands with drawer | Furnish Direct");
+  });
+});
+
 // Regression: stripSupplierBrands was only ever applied to titleFr/titleEn and the
 // URL handles — never to descriptionFr/descriptionEn/seoDescription*, so a model
 // that echoed the supplier name into the body (as the raw Aosom feed text often

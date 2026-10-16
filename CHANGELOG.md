@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.36] - 2026-10-16
+
+### Fixed
+
+- **Product SEO titles no longer stop mid-phrase.** The Google title of a product was "<name> | Livraison gratuite — Ameublo Direct"; the long suffix left about 28 characters for the name inside the 65-character budget, so 350 of 2,269 active products showed titles like "Tables de chevet avec | …" or "Bureau d'ordinateur 3 | …". New titles end with just the store name ("| Ameublo Direct", "| Furnish Direct" in English), which leaves 48 characters for the name, and a shortened name never ends on a word like "de", "avec", "pour", "with", a bare number or a dash ("2-en-1" stays whole). Titles written by the AI get the same treatment, and one whose name part dangles is rebuilt from the product title. Live products are repaired with `scripts/fix-seo-titles.mts` (dry run by default; `--apply` writes): the dry run of 2026-10-16 finds 912 titles to rewrite (306 cut mid-phrase, 654 shared word-for-word with another product, 3 under 12 characters).
+
 ## [0.5.107.35] - 2026-10-15
 
 ### Fixed
