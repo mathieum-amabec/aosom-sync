@@ -706,7 +706,7 @@ async function onlyLive(cards: Card[]): Promise<Card[]> {
  * only on the live Shopify product. One GraphQL round-trip for the 3-4 final cards.
  * Non-fatal: any failure falls back to the catalog name (never breaks a reply).
  */
-type LiveProduct = { title: string; live: boolean };
+type LiveProduct = { title: string; live: boolean; price: number | null };
 
 async function liveByHandle(handles: string[]): Promise<Map<string, LiveProduct>> {
   const map = new Map<string, LiveProduct>();
@@ -714,16 +714,20 @@ async function liveByHandle(handles: string[]): Promise<Map<string, LiveProduct>
   const search = handles.map((h) => `handle:${h}`).join(" OR ");
   // `onlineStoreUrl` is null for anything not published to the Online Store, and `status`
   // catches drafts — together they are the exact "does this PDP render?" signal.
-  const query = `query { products(first: ${handles.length}, query: ${JSON.stringify(search)}) { nodes { handle title status onlineStoreUrl } } }`;
+  const query = `query { products(first: ${handles.length}, query: ${JSON.stringify(search)}) { nodes { handle title status onlineStoreUrl priceRangeV2 { minVariantPrice { amount } } } } }`;
   try {
     const res = await shopifyFetch("/graphql.json", { method: "POST", body: JSON.stringify({ query }) });
     if (!res.ok) return map;
     const data = await res.json();
     for (const n of data?.data?.products?.nodes ?? []) {
       if (!n?.handle) continue;
+      // The live Shopify price is what the PDP shows; Turso `price` is the Aosom price, which
+      // differs once the sell-price markup is on (and read 0 during the 2026-10-15 feed outage).
+      const amount = Number(n.priceRangeV2?.minVariantPrice?.amount);
       map.set(String(n.handle), {
         title: n.title ? String(n.title) : "",
         live: String(n.status).toUpperCase() === "ACTIVE" && !!n.onlineStoreUrl,
+        price: Number.isFinite(amount) && amount > 0 ? amount : null,
       });
     }
   } catch {
@@ -775,12 +779,15 @@ async function resolveCards(
   const dropped = cards.length - servable.length;
   if (dropped > 0) console.warn(`[assistant] dropped ${dropped} card(s): draft or not published to the Online Store`);
 
-  return servable.map(({ c, reason }) => ({
-    sku: c.sku,
-    name: (locale === "fr" ? live.get(c.handle)?.title : "") || c.name,
-    price: c.price,
-    image: c.image,
-    url: `${STORE_URL[locale]}/products/${c.handle}`,
-    reason,
-  }));
+  // Never show a card at 0 $: no live price and no catalogue price means we can't price it.
+  return servable
+    .map(({ c, reason }) => ({
+      sku: c.sku,
+      name: (locale === "fr" ? live.get(c.handle)?.title : "") || c.name,
+      price: live.get(c.handle)?.price ?? c.price,
+      image: c.image,
+      url: `${STORE_URL[locale]}/products/${c.handle}`,
+      reason,
+    }))
+    .filter((p) => p.price > 0);
 }

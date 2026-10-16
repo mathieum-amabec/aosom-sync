@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.35] - 2026-10-15
+
+### Fixed
+
+- **Product-page "Complétez la pièce" cards no longer show 0,00 $.** During the 2026-10-15 feed outage the block cached 145 suggestions with a price of 0, and every card used the Aosom catalogue price rather than the price shown on the product page. Cards (on product pages and in the shopping assistant) now carry the live Shopify price, a card with no real price is dropped, and the cache key is versioned so every old suggestion is recomputed and a cached card at 0 $ counts as a miss.
+
 ## [0.5.107.34] - 2026-10-15
 
 ### Changed
