@@ -34,7 +34,7 @@ describe("import pricing rules", () => {
     expect(out.candidates.map((c) => c.groupKey)).toEqual(["ok"]);
     expect(out.candidates[0].margin).toBeGreaterThan(0.19);
     expect(out.candidates[0].marginDollars).toBeGreaterThan(20);
-    expect(out.rejected).toEqual({ noCost: 0, lowMargin: 0 });
+    expect(out.rejected).toEqual({ noCost: 0, lowMargin: 0, lowDemand: 0 });
   });
 
   it("rejects a product with no known cost", () => {

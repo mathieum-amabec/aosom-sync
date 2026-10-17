@@ -9,6 +9,8 @@
  *    never sold one while kitchen, storage, living room and bathroom sell; toys are now a small share capped at
  *    TOYS_DAILY_CAP;
  *  - only products with a variant holding >= MIN_STOCK units, >= MIN_IMAGES photos and a price >= MIN_PRICE;
+ *  - only big sellers (2026-10-17): >= MIN_DEMAND units sold at the supplier in DEMAND_DAYS, or a product type that
+ *    already sells on our store;
  *  - no patio unless it is a winter item;
  *  - licensed / third-party brand names (Mercedes-Benz, Disney…) are imported WITHOUT the name: it is stripped from the
  *    copy (`stripLicensedFromContent`) only (a brand visible on a photo is fine; decided 2026-10-15).
@@ -40,6 +42,13 @@ export const MARGIN_RULES_MIN_COSTS = 1000;
 export const TOYS_DAILY_CAP = 10;
 /** Supplier sales window used for `demand` (days of stock movements in price_history). */
 export const DEMAND_DAYS = 30;
+/**
+ * Big sellers only (Mat, 2026-10-17): a group is imported when it sold at least MIN_DEMAND units at the supplier over
+ * DEMAND_DAYS, or when its exact product type already sold MIN_STORE_TYPE_SALES units on our own store. Applies only
+ * when the demand history is loaded (an empty or missing map must not stop every import).
+ */
+export const MIN_DEMAND = 10;
+export const MIN_STORE_TYPE_SALES = 2;
 /** Imports are paced across this UTC window (07:00 = right after the 06:00/06:30 feed sync). */
 export const WINDOW_START_UTC_HOUR = 7;
 export const WINDOW_END_UTC_HOUR = 21;
@@ -149,6 +158,8 @@ export interface Candidate {
   marginDollars?: number;
   /** Units that left the supplier's stock over DEMAND_DAYS, summed over the group's SKUs (0 when unknown). */
   demand?: number;
+  /** Units our store sold of products with the same product type. */
+  storeTypeSales?: number;
 }
 
 export interface CandidateContext {
@@ -167,14 +178,16 @@ export interface CandidateContext {
   competitor?: ReadonlyMap<string, number>;
   /** SKU -> units that left the supplier's stock over DEMAND_DAYS (see run.ts#loadDemand). */
   demand?: ReadonlyMap<string, number>;
+  /** Supplier product type -> units our store sold of that type (see run.ts#loadStoreTypeSales). */
+  storeTypeSales?: ReadonlyMap<string, number>;
 }
 
 export interface CandidateBuild {
   candidates: Candidate[];
   /** Left out on purpose and worth a human look. */
   flaggedLicensed: string[];
-  /** Left out by the import pricing rules. */
-  rejected: { noCost: number; lowMargin: number };
+  /** Left out by the import pricing rules, and (lowDemand) by the big-sellers rule. */
+  rejected: { noCost: number; lowMargin: number; lowDemand?: number };
 }
 
 export function topCategory(productType: string): string {
@@ -201,8 +214,9 @@ export function buildCandidates(catalog: AosomMergedProduct[], ctx: CandidateCon
   const newCutoff = Math.floor(ctx.now.getTime() / 1000) - newDays * 86400;
   const flaggedLicensed: string[] = [];
   const candidates: Candidate[] = [];
-  const rejected = { noCost: 0, lowMargin: 0 };
+  const rejected = { noCost: 0, lowMargin: 0, lowDemand: 0 };
   const rulesOn = ctx.costs !== undefined && ctx.costs.size >= MARGIN_RULES_MIN_COSTS;
+  const bigSellersOnly = ctx.demand !== undefined && ctx.demand.size > 0;
 
   for (const g of catalog) {
     const skus = g.variants.map((v) => v.sku);
@@ -226,6 +240,10 @@ export function buildCandidates(catalog: AosomMergedProduct[], ctx: CandidateCon
     const top = topCategory(g.productType);
     const seasonal = isSeasonal(g.name, g.productType, ctx.now);
     if (top === PATIO && !WINTER_RE.test(`${g.name} ${g.productType}`) && !CHRISTMAS_RE.test(`${g.name} ${g.productType}`)) continue;
+
+    const demand = skus.reduce((s, sku) => s + (ctx.demand?.get(sku) ?? 0), 0);
+    const storeTypeSales = ctx.storeTypeSales?.get(g.productType) ?? 0;
+    if (bigSellersOnly && demand < MIN_DEMAND && storeTypeSales < MIN_STORE_TYPE_SALES) { rejected.lowDemand++; continue; }
 
     // Licensed names are no longer a reason to skip: the copy is generated, then the name is stripped.
     if (LICENSED_RE.test(g.name)) flaggedLicensed.push(g.groupKey);
@@ -256,7 +274,8 @@ export function buildCandidates(catalog: AosomMergedProduct[], ctx: CandidateCon
       imageCount: g.images.length,
       isNew,
       seasonal,
-      demand: skus.reduce((s, sku) => s + (ctx.demand?.get(sku) ?? 0), 0),
+      demand,
+      storeTypeSales,
       ...(marginInfo ? { margin: marginInfo.margin, marginDollars: marginInfo.dollars } : {}),
     });
   }
@@ -292,6 +311,8 @@ export function score(c: Candidate): number {
   return (
     (c.seasonal ? 100_000 : 0) +
     Math.min(c.demand ?? 0, 300) * 20 +
+    // Proven on our own store: up to +7,500 for 5 units sold of the same product type.
+    Math.min(c.storeTypeSales ?? 0, 5) * 1_500 +
     Math.min(c.totalQty, 2_000) +
     priceBand * 500 +
     Math.min(c.marginDollars ?? 0, 100) * 20
