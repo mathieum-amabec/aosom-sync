@@ -15,6 +15,7 @@ import { mergeVariants } from "@/lib/variant-merger";
 import { ensureSchema, getSetting, setSetting } from "@/lib/database";
 import { localClock } from "@/lib/morning-report";
 import { LlmBudgetExceededError } from "@/lib/llm-budget";
+import { fetchOrderedProductUnits } from "@/lib/klaviyo-client";
 import type { AosomMergedProduct } from "@/types/aosom";
 import {
   DEFAULT_DAILY_CAP,
@@ -41,6 +42,10 @@ export const LOCK_KEY = "auto_import_lock";
 export const DEMAND_KEY = "auto_import_demand";
 /** Largest stock drop between two syncs still counted as sales (bigger = feed glitch or stock correction). */
 const DEMAND_MAX_STEP = 60;
+/** Daily cache of our own store's units sold per supplier product type ({ day, types: { type: n } }). */
+export const STORE_SALES_KEY = "auto_import_store_sales";
+/** Our order volume is still small: a year of orders gives the type signal something to stand on. */
+const STORE_SALES_DAYS = 365;
 /** A feed with fewer merged SKUs than this is treated as truncated (today's feed carries ~7,990). */
 export const MIN_FEED_SKUS = 6000;
 const LOCK_TTL_SECONDS = 280;
@@ -76,6 +81,8 @@ export interface TickDeps {
   loadCompetitor?(): Promise<Map<string, number>>;
   /** SKU -> units that left the supplier's stock over DEMAND_DAYS. Optional; without it every demand is 0. */
   loadDemand?(day: string): Promise<Map<string, number>>;
+  /** Supplier product type -> units our store sold of that type. Optional. */
+  loadStoreTypeSales?(day: string): Promise<Map<string, number>>;
   loadImportedSkus(): Promise<Set<string>>;
   loadFirstSeen(): Promise<Map<string, number>>;
   loadJobs(): Promise<Map<string, { status: string; updatedAt: string }>>;
@@ -93,7 +100,7 @@ export interface TickResult {
   flaggedLicensed: number;
   candidates: number;
   /** Candidates left out by the import pricing rules (see policy.ts). */
-  rejected?: { noCost: number; lowMargin: number };
+  rejected?: { noCost: number; lowMargin: number; lowDemand?: number };
   state: DayState;
 }
 
@@ -138,6 +145,34 @@ export function defaultDeps(): TickDeps {
       for (const x of r.rows) if (Number(x.units) > 0) units[String(x.sku)] = Number(x.units);
       await setSetting(DEMAND_KEY, JSON.stringify({ day, units }));
       return new Map(Object.entries(units));
+    },
+    async loadStoreTypeSales(day) {
+      // Our own sales come from Klaviyo "Ordered Product" events (the Shopify token has no read_orders), mapped to the
+      // supplier product type through products.shopify_product_id. Once per local day, cached like the demand map.
+      const cached = await getSetting(STORE_SALES_KEY);
+      if (cached) {
+        try {
+          const c = JSON.parse(cached) as { day: string; types: Record<string, number> };
+          if (c.day === day) return new Map(Object.entries(c.types));
+        } catch {
+          /* recompute */
+        }
+      }
+      const byProduct = await fetchOrderedProductUnits(STORE_SALES_DAYS);
+      const types: Record<string, number> = {};
+      if (byProduct.size > 0) {
+        const db = await ensureSchema();
+        const r = await db.execute(
+          `SELECT DISTINCT shopify_product_id, product_type FROM products WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''`,
+        );
+        const typeOf = new Map(r.rows.map((x) => [String(x.shopify_product_id), String(x.product_type ?? "")]));
+        for (const [id, n] of byProduct) {
+          const t = typeOf.get(id);
+          if (t) types[t] = (types[t] ?? 0) + n;
+        }
+      }
+      await setSetting(STORE_SALES_KEY, JSON.stringify({ day, types }));
+      return new Map(Object.entries(types));
     },
     async loadImportedSkus() {
       const db = await ensureSchema();
@@ -215,7 +250,10 @@ export async function runAutoImportTick(opts: { force?: boolean; deps?: TickDeps
     const [importedSkus, firstSeen, jobs] = await Promise.all([d.loadImportedSkus(), d.loadFirstSeen(), d.loadJobs()]);
     const competitor = d.loadCompetitor ? await d.loadCompetitor().catch(() => undefined) : undefined;
     const demand = d.loadDemand ? await d.loadDemand(day).catch(() => undefined) : undefined;
-    const { candidates, flaggedLicensed, rejected } = buildCandidates(groups, { importedSkus, firstSeen, jobs, now, costs, competitor, demand });
+    const storeTypeSales = d.loadStoreTypeSales ? await d.loadStoreTypeSales(day).catch(() => undefined) : undefined;
+    const { candidates, flaggedLicensed, rejected } = buildCandidates(groups, {
+      importedSkus, firstSeen, jobs, now, costs, competitor, demand, storeTypeSales,
+    });
     const picked = pickBatch(candidates, state, n, dailyCap);
     const summary = picked.map((c) => ({ groupKey: c.groupKey, name: c.name.slice(0, 80), top: c.top, isNew: c.isNew }));
     const out: TickResult = { ...base, picked: summary, flaggedLicensed: flaggedLicensed.length, candidates: candidates.length, rejected };

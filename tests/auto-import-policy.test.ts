@@ -122,6 +122,24 @@ describe("buildCandidates", () => {
     expect(c.demand).toBe(42);
   });
 
+  it("keeps only big sellers: supplier demand >= 10, or a product type that already sells on our store", () => {
+    const types = { "Home Furnishings > Living Room": "Home Furnishings > Living Room", kitchen: "Home Furnishings > Kitchen" };
+    const out = buildCandidates(
+      [group("hot"), group("cold"), group("proven", { productType: types.kitchen })],
+      ctx({
+        demand: new Map([["hot-A", 12], ["cold-A", 3], ["proven-A", 1]]),
+        storeTypeSales: new Map([[types.kitchen, 4]]),
+      }),
+    );
+    expect(out.candidates.map((c) => c.groupKey).sort()).toEqual(["hot", "proven"]);
+    expect(out.rejected.lowDemand).toBe(1);
+  });
+
+  it("does not filter on demand when the history is missing (never stops every import)", () => {
+    expect(buildCandidates([group("a")], ctx()).candidates).toHaveLength(1);
+    expect(buildCandidates([group("a")], ctx({ demand: new Map() })).candidates).toHaveLength(1);
+  });
+
   it("marks a group first seen in the last 14 days as a new arrival", () => {
     const out = buildCandidates(
       [group("fresh"), group("old")],
