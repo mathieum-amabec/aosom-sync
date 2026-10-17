@@ -124,6 +124,42 @@ export async function updateCostwayVolatile(rows: CostwayVolatile[], now: number
   await runInBatches(stmts, LIGHT_BATCH);
 }
 
+export interface CostwayStockMove {
+  sku: string;
+  itemNo: string;
+  oldQty: number;
+  newQty: number;
+  oldCaQty: number | null;
+  newCaQty: number | null;
+}
+
+/** Append the day's stock movements (see sync.ts#stockMovements) to costway_stock_history. */
+export async function insertCostwayStockMoves(rows: CostwayStockMove[], now: number): Promise<void> {
+  const stmts: InStatement[] = rows.map((r) => ({
+    sql: `INSERT INTO costway_stock_history (sku, item_no, old_qty, new_qty, old_ca_qty, new_ca_qty, detected_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [r.sku, r.itemNo, r.oldQty, r.newQty, r.oldCaQty, r.newCaQty, now],
+  }));
+  await runInBatches(stmts, LIGHT_BATCH);
+}
+
+/**
+ * Units that left Costway's stock per product (Item No) over the last `days` days: the sum of the daily drops.
+ * A drop larger than `maxStep` in one day is a stock correction or a feed glitch, not sales, and is ignored.
+ */
+export async function getCostwayDemand(days = 30, maxStep = 60): Promise<Map<string, number>> {
+  const db = await ensureSchema();
+  const since = Math.floor(Date.now() / 1000) - days * 86400;
+  const r = await db.execute({
+    sql: `SELECT item_no, SUM(CASE WHEN old_qty > new_qty AND old_qty - new_qty <= ? THEN old_qty - new_qty ELSE 0 END) AS units
+            FROM costway_stock_history WHERE detected_at >= ? GROUP BY item_no`,
+    args: [maxStep, since],
+  });
+  const out = new Map<string, number>();
+  for (const x of r.rows) if (Number(x.units) > 0) out.set(String(x.item_no), Number(x.units));
+  return out;
+}
+
 /** SKUs that left the feed: flag removed + out of stock, keep the row for history. */
 export async function markCostwayRemoved(skus: string[], now: number): Promise<void> {
   const stmts: InStatement[] = skus.map((sku) => ({

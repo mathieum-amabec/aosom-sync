@@ -10,11 +10,13 @@ import { getSetting, setSetting } from "@/lib/database";
 import { fetchCostwayCsvText, parseCostwayCsv, validateCostwayFeed, type CostwayVariant, type ParseResult } from "./feed";
 import {
   getCostwayIndex,
+  insertCostwayStockMoves,
   markCostwayRemoved,
   updateCostwayVolatile,
   upsertCostwayFull,
   type CostwayFullRow,
   type CostwayIndexRow,
+  type CostwayStockMove,
   type CostwayVolatile,
 } from "./db";
 
@@ -36,6 +38,8 @@ export interface CostwaySyncStats {
   volatileUpdated: number;
   unchanged: number;
   removed: number;
+  /** SKUs whose stock moved since the last sync (rows added to costway_stock_history). */
+  stockMoves?: number;
 }
 
 /** Hash of the heavy, rarely-changing fields — a full-row rewrite happens only when it moves. */
@@ -108,6 +112,21 @@ export function planCostwaySync(variants: CostwayVariant[], index: Map<string, C
   return plan;
 }
 
+/**
+ * Stock movements of SKUs we already knew (new SKUs and SKUs coming back from removal are not movements): one row per
+ * SKU whose total or Canadian quantity changed since the last sync.
+ */
+export function stockMovements(variants: CostwayVariant[], index: Map<string, CostwayIndexRow>): CostwayStockMove[] {
+  const out: CostwayStockMove[] = [];
+  for (const v of variants) {
+    const prev = index.get(v.sku);
+    if (!prev || prev.removed) continue;
+    if (prev.qty === v.qty && prev.caQty === v.caQty) continue;
+    out.push({ sku: v.sku, itemNo: v.itemNo, oldQty: prev.qty, newQty: v.qty, oldCaQty: prev.caQty, newCaQty: v.caQty });
+  }
+  return out;
+}
+
 function lastRowCount(raw: string | null): number | null {
   if (!raw) return null;
   try {
@@ -133,12 +152,14 @@ export async function runCostwaySync(opts: { dryRun?: boolean; text?: string } =
 
   const index = await getCostwayIndex();
   const plan = planCostwaySync(parsed.variants, index);
+  const moves = stockMovements(parsed.variants, index);
 
   const now = Math.floor(Date.now() / 1000);
   if (!dryRun) {
     await upsertCostwayFull(plan.full, now);
     await updateCostwayVolatile(plan.volatile, now);
     await markCostwayRemoved(plan.removed, now);
+    await insertCostwayStockMoves(moves, now);
   }
 
   const stats: CostwaySyncStats = {
@@ -157,6 +178,7 @@ export async function runCostwaySync(opts: { dryRun?: boolean; text?: string } =
     volatileUpdated: plan.volatile.length,
     unchanged: plan.unchanged,
     removed: plan.removed.length,
+    stockMoves: moves.length,
   };
   if (!dryRun) await setSetting(COSTWAY_LAST_SYNC_KEY, JSON.stringify(stats));
   return stats;

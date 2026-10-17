@@ -727,6 +727,18 @@ async function _initSchemaImpl(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_item_no ON costway_products(item_no)`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_top_category ON costway_products(top_category)`,
+    // One row per Costway SKU whose stock moved between two daily syncs (2026-10-17). A drop is a
+    // proxy for what sells at Costway, the same way price_history stock_change is for Aosom.
+    `CREATE TABLE IF NOT EXISTS costway_stock_history (
+      sku TEXT NOT NULL,
+      item_no TEXT,
+      old_qty INTEGER,
+      new_qty INTEGER,
+      old_ca_qty INTEGER,
+      new_ca_qty INTEGER,
+      detected_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_costway_stock_history_at ON costway_stock_history(detected_at)`,
     // PDP "Complétez la pièce" suggestions (assistant mode=complementary), cached per product
     // so the LLM runs once per product per TTL instead of on every product-page view
     // (~1,100 calls/day burned the whole assistant pool by ~20:30 Montréal). See
