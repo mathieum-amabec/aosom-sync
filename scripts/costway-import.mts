@@ -107,7 +107,7 @@ async function main() {
     db,
     now: () => Math.floor(Date.now() / 1000),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-    createProduct: (merged, content) => sc.createShopifyProduct(merged, content, { status: "draft", images: [], extraTags: [SOURCE_TAG] }),
+    createProduct: (merged, content) => sc.createShopifyProduct(merged, content, { status: "draft", images: [], extraTags: [SOURCE_TAG], finalPrices: true }),
     // assets.costway.ca drops connections under a burst ("fetch failed", seen on ~40% of the first
     // batch's images): retry with a growing pause instead of leaving a hole in the gallery.
     downloadImage: async (url) => {

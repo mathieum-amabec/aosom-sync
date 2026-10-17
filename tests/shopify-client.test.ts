@@ -144,6 +144,15 @@ describe("createShopifyProduct — metafield + handle safety", () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.product.status).toBe("active");
   });
+
+  it("keeps final prices as given (Costway's own 23 % rule): the Aosom sell-price rule is not applied on top", async () => {
+    const db = await import("@/lib/sell-price-db");
+    vi.mocked(db.priceNewVariants).mockClear();
+    await createShopifyProduct(mergedFixture(), contentFixture({}), { status: "draft", finalPrices: true });
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.product.variants[0].price).toBe("99");
+    expect(db.priceNewVariants).not.toHaveBeenCalled();
+  });
 });
 
 // LAYER 1 for the import path: 842-375V00CG was created with a price nothing ever read

@@ -385,6 +385,11 @@ export interface CreateProductOptions {
   images?: Array<{ src?: string; attachment?: string; filename?: string; alt?: string }>;
   /** Tags appended to the generated ones (e.g. the neutral supplier-lot tag). */
   extraTags?: string[];
+  /**
+   * The variant prices are final (another supplier's own rule already set them, e.g. Costway's 23 % in
+   * costway/pricing.ts): skip the Aosom sell-price rule, which would add its markup on top (seen 2026-10-17: +5 %).
+   */
+  finalPrices?: boolean;
 }
 
 export async function createShopifyProduct(
@@ -426,9 +431,9 @@ export async function createShopifyProduct(
   // with two SKUs that map to the same Couleur/Taille imports instead of 422-ing.
   // Our computed sell price when one is stored for the SKU (sell-price-sync.ts), else the Aosom price. A product
   // created before its first sell-price run starts at the Aosom price; the next run and the reconcile raise it.
-  const sellPriceBySku = await getSellPricesForSkus(merged.variants.map((v) => v.sku));
+  const sellPriceBySku = opts.finalPrices ? new Map<string, number>() : await getSellPricesForSkus(merged.variants.map((v) => v.sku));
   // No stored price yet (a brand-new SKU): price it with the rule now, so the product is born at its real price.
-  const unpriced = merged.variants.filter((v) => !sellPriceBySku.has(v.sku)).map((v) => ({ sku: v.sku, price: v.price }));
+  const unpriced = opts.finalPrices ? [] : merged.variants.filter((v) => !sellPriceBySku.has(v.sku)).map((v) => ({ sku: v.sku, price: v.price }));
   if (unpriced.length > 0) for (const [sku, price] of await priceNewVariants(unpriced, merged.productType ?? "")) sellPriceBySku.set(sku, price);
   const builtVariants = dedupeVariantOptionLabels(
     merged.variants.map((v) => ({
