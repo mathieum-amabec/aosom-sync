@@ -1,7 +1,7 @@
 /**
  * Automatic daily import — one cron tick.
  *
- * Runs every 10 minutes inside the UTC window (see vercel.json). Each tick takes the next few
+ * Runs every 5 minutes inside the UTC window (see vercel.json; 3 per tick = up to ~500/day, so a 300 cap fits). Each tick takes the next few
  * candidates the day's pace allows, so ~100 imports/day are spread across the window and a tick
  * always fits in its time budget. Everything is idempotent: the day's counters live in
  * `settings.auto_import_state`, a group with a job is never re-picked, and a lock keeps two ticks
@@ -35,6 +35,24 @@ import { processCandidate, type ProcessResult } from "./process-one";
 
 export const MODE_KEY = "auto_import_mode";
 export const CAP_KEY = "auto_import_daily_cap";
+/**
+ * Temporary higher cap: { "cap": 300, "until": "2026-10-20" } (Montréal date, inclusive). Past `until` the normal
+ * CAP_KEY applies again by itself — nothing to undo by hand (Mat, 2026-10-17: a 3-day boost, then back to 100).
+ */
+export const BOOST_KEY = "auto_import_cap_boost";
+
+/** The day's cap: the boost while it lasts, else the normal cap. A malformed boost is ignored. */
+export function boostedCap(baseCap: number, boostRaw: string | null, day: string): number {
+  if (!boostRaw) return baseCap;
+  try {
+    const b = JSON.parse(boostRaw) as { cap?: unknown; until?: unknown };
+    const cap = Number(b.cap);
+    if (Number.isFinite(cap) && cap > 0 && typeof b.until === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.until) && day <= b.until) return cap;
+  } catch {
+    /* ignored */
+  }
+  return baseCap;
+}
 export const STATE_KEY = "auto_import_state";
 export const PLAN_KEY = "auto_import_last_plan";
 export const LOCK_KEY = "auto_import_lock";
@@ -233,7 +251,8 @@ export async function runAutoImportTick(opts: { force?: boolean; deps?: TickDeps
   if (mode === "off") return { ...base, skipped: "off" };
 
   const capSetting = Number(await d.getSetting(CAP_KEY));
-  const dailyCap = mode === "pilot" ? PILOT_DAILY_CAP : Number.isFinite(capSetting) && capSetting > 0 ? capSetting : DEFAULT_DAILY_CAP;
+  const baseCap = Number.isFinite(capSetting) && capSetting > 0 ? capSetting : DEFAULT_DAILY_CAP;
+  const dailyCap = mode === "pilot" ? PILOT_DAILY_CAP : boostedCap(baseCap, await d.getSetting(BOOST_KEY), day);
   if (state.total >= dailyCap) return { ...base, skipped: "cap-reached" };
   if (shouldPause(state)) return { ...base, skipped: "paused-high-failure-rate" };
 
