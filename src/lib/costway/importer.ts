@@ -19,6 +19,7 @@ import { costwaySellPrice, marginOf, sellableQty } from "./pricing";
 import { assignInternalSkus, findCostwayLeaks, isInternalSku, neutralImageFilename } from "./identity";
 import { stripSupplierBrands } from "@/lib/catalog-guard";
 import { translateColor } from "@/lib/variant-merger";
+import { matchAosomType, type AosomTypeDemand } from "./demand";
 
 const MAX_IMAGES = 8;
 const MIN_IMAGES = 5;
@@ -47,8 +48,18 @@ export interface Candidate {
   title: string;
   bodyHtml: string;
   category: string;
-  kind: CostwayKind;
+  /** An appliance of the pilot, or "general": any category matched to an Aosom product type (selectDemandCandidates). */
+  kind: CostwayKind | "general";
+  /** Shopify product type when it is not the appliance kind's (the matched Aosom type, so the smart collections apply). */
+  productType?: string;
+  /** Expected units per 30 days: Costway's own history when it has some, else the matched Aosom type's sales per SKU. */
+  expectedDemand?: number;
   variants: CandidateVariant[];
+}
+
+/** The product type a candidate goes to Shopify with. */
+export function productTypeOf(c: Pick<Candidate, "kind" | "productType">): string {
+  return c.productType ?? (c.kind === "general" ? "" : KIND_PRODUCT_TYPE[c.kind]);
 }
 
 export interface SelectOptions {
@@ -122,6 +133,98 @@ export async function selectCandidates(db: Client, opts: SelectOptions): Promise
   return out.slice(0, opts.limit);
 }
 
+export interface DemandSelectOptions {
+  limit: number;
+  /** A product needs at least one variant with this much Canadian stock (hand-ordered: no thin stock). */
+  minQty?: number;
+  /** Big sellers only: expected units per 30 days at least this (seasonal items in season are exempt). */
+  minDemand?: number;
+  /** Aosom's sales per product type (demand.ts#loadAosomTypeDemand). */
+  aosomTypes: AosomTypeDemand[];
+  /** Costway's own units sold per Item No (db.ts#getCostwayDemand); wins over the Aosom estimate when present. */
+  costwayDemand?: ReadonlyMap<string, number>;
+  excludeItemNos?: string[];
+  /** At most this many products of one product type per selection, so one hot type cannot fill a whole batch. */
+  maxPerType?: number;
+  now?: Date;
+}
+
+/** Types we never import from Costway: toys never sold on our store, and we hold 370+ of them already. */
+const EXCLUDED_TOP = /^Toys & Games\b/;
+const PATIO_TOP = /^Patio & Garden\b/;
+const IN_SEASON_RE = /\b(christmas|xmas|snow|winter|heater|fireplace)\b/i;
+
+/**
+ * Any Costway category, ranked by what is expected to SELL (Mat, 2026-10-17): each product is matched to the closest
+ * Aosom product type (demand.ts) and inherits its sales per SKU; Costway's own stock history replaces the estimate once
+ * it has data. Keeps big sellers only, then ranks by expected margin dollars (demand x margin per sale). Patio stays out
+ * of season like the Aosom import; Christmas and winter items count as in season from October to February.
+ */
+export async function selectDemandCandidates(db: Client, opts: DemandSelectOptions): Promise<Candidate[]> {
+  const minQty = opts.minQty ?? 10;
+  const minDemand = opts.minDemand ?? 10;
+  const month = (opts.now ?? new Date()).getUTCMonth() + 1;
+  const winter = month >= 10 || month <= 2;
+  const rows = (
+    await db.execute({
+      sql: `SELECT sku, item_no, title, body_html, category, color, price, price_drop, promo_tag, in_stock, qty, ca_qty, us_qty, images, shopify_product_id
+            FROM costway_products
+            WHERE removed_at IS NULL AND item_no IN (
+              SELECT item_no FROM costway_products
+              WHERE removed_at IS NULL AND in_stock = 1 AND ca_qty >= ? AND price >= 30)`,
+      args: [minQty],
+    })
+  ).rows as unknown as Row[];
+
+  const byItem = new Map<string, Row[]>();
+  for (const r of rows) byItem.set(r.item_no, [...(byItem.get(r.item_no) ?? []), r]);
+
+  const scored: Array<{ c: Candidate; value: number }> = [];
+  for (const [itemNo, group] of byItem) {
+    if (opts.excludeItemNos?.includes(itemNo)) continue;
+    if (group.some((r) => r.shopify_product_id)) continue;
+    const first = group[0];
+    const type = matchAosomType(first.category ?? "", opts.aosomTypes);
+    if (!type || EXCLUDED_TOP.test(type.type)) continue;
+    const seasonal = winter && IN_SEASON_RE.test(`${first.title} ${first.category ?? ""}`);
+    if (PATIO_TOP.test(type.type) && !seasonal) continue;
+    const own = opts.costwayDemand?.get(itemNo);
+    const expected = own !== undefined ? own : type.perSku;
+    if (expected < minDemand && !seasonal) continue;
+
+    const variants: CandidateVariant[] = group.map((r) => ({
+      sku: r.sku,
+      color: r.color ?? "",
+      feedPrice: Number(r.price ?? 0),
+      priceDrop: r.price_drop == null ? null : Number(r.price_drop),
+      promoTag: r.promo_tag ?? "",
+      qty: Number(r.qty ?? 0),
+      caQty: Number(r.ca_qty ?? 0),
+      usQty: Number(r.us_qty ?? 0),
+      images: parseImages(r.images),
+    }));
+    if (variants.some((v) => !(v.feedPrice > 0))) continue;
+    if (unionImages(variants).length < MIN_IMAGES) continue;
+    const c: Candidate = {
+      itemNo, title: first.title, bodyHtml: first.body_html ?? "", category: first.category ?? "",
+      kind: "general", productType: type.type, expectedDemand: expected, variants,
+    };
+    scored.push({ c, value: Math.max(expected, 1) * candidateMargin(c, minQty).dollars });
+  }
+  scored.sort((a, b) => b.value - a.value);
+  const maxPerType = opts.maxPerType ?? Infinity;
+  const perType = new Map<string, number>();
+  const out: Candidate[] = [];
+  for (const { c } of scored) {
+    if (out.length >= opts.limit) break;
+    const t = c.productType ?? "";
+    if ((perType.get(t) ?? 0) >= maxPerType) continue;
+    perType.set(t, (perType.get(t) ?? 0) + 1);
+    out.push(c);
+  }
+  return out;
+}
+
 function parseImages(raw: string): string[] {
   try {
     const v = JSON.parse(raw);
@@ -175,7 +278,7 @@ export interface PreparedVariant {
 
 export interface PreparedItem {
   itemNo: string;
-  kind: CostwayKind;
+  kind: CostwayKind | "general";
   productType: string;
   originalTitle: string;
   content: GeneratedContent;
@@ -219,8 +322,8 @@ function toMerged(c: Candidate, cleanDescription: string, skus: string[], imageU
     name: stripSupplierBrands(c.title).replace(/s+/g, " ").trim(),
     // The store brand: this lands in the `custom.brand_fr` metafield, and the supplier must not.
     brand: "Ameublo Direct",
-    productType: KIND_PRODUCT_TYPE[c.kind],
-    category: KIND_PRODUCT_TYPE[c.kind],
+    productType: productTypeOf(c),
+    category: productTypeOf(c),
     description: cleanDescription,
     shortDescription: "",
     material: "",
@@ -273,7 +376,7 @@ export async function prepareCandidate(c: Candidate, deps: PrepareDeps): Promise
   return {
     itemNo: c.itemNo,
     kind: c.kind,
-    productType: KIND_PRODUCT_TYPE[c.kind],
+    productType: productTypeOf(c),
     originalTitle: c.title,
     content,
     imageUrls,
