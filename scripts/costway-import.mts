@@ -180,4 +180,9 @@ async function main() {
   console.log(`\n=== ok=${ok} fail=${fail} already-imported=${skipped} ===`);
 }
 
-main().then(() => process.exit(0)).catch((e) => { console.error("FATAL:", e); process.exit(1); });
+// Costway imports are imports: charge them to the dedicated "import" pool, never the shared "batch" one (a
+// 170-product prepare drained batch on 2026-10-17 and starved the social/blog jobs for the rest of the day).
+import("@/lib/llm-budget")
+  .then(({ withBudgetPool }) => withBudgetPool("import", main))
+  .then(() => process.exit(0))
+  .catch((e) => { console.error("FATAL:", e); process.exit(1); });
