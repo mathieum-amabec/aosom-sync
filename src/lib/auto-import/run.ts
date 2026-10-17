@@ -18,6 +18,7 @@ import { LlmBudgetExceededError } from "@/lib/llm-budget";
 import type { AosomMergedProduct } from "@/types/aosom";
 import {
   DEFAULT_DAILY_CAP,
+  DEMAND_DAYS,
   PILOT_DAILY_CAP,
   MAX_PER_TICK,
   allowedSoFar,
@@ -36,6 +37,10 @@ export const CAP_KEY = "auto_import_daily_cap";
 export const STATE_KEY = "auto_import_state";
 export const PLAN_KEY = "auto_import_last_plan";
 export const LOCK_KEY = "auto_import_lock";
+/** Daily cache of the supplier demand map ({ day, units: { sku: n } }). */
+export const DEMAND_KEY = "auto_import_demand";
+/** Largest stock drop between two syncs still counted as sales (bigger = feed glitch or stock correction). */
+const DEMAND_MAX_STEP = 60;
 /** A feed with fewer merged SKUs than this is treated as truncated (today's feed carries ~7,990). */
 export const MIN_FEED_SKUS = 6000;
 const LOCK_TTL_SECONDS = 280;
@@ -69,6 +74,8 @@ export interface TickDeps {
   loadCatalog(): Promise<{ groups: AosomMergedProduct[]; skuCount: number; costs?: Map<string, number> }>;
   /** Cached competitor prices (SKU upper case), for the price the rule will give. Optional. */
   loadCompetitor?(): Promise<Map<string, number>>;
+  /** SKU -> units that left the supplier's stock over DEMAND_DAYS. Optional; without it every demand is 0. */
+  loadDemand?(day: string): Promise<Map<string, number>>;
   loadImportedSkus(): Promise<Set<string>>;
   loadFirstSeen(): Promise<Map<string, number>>;
   loadJobs(): Promise<Map<string, { status: string; updatedAt: string }>>;
@@ -107,6 +114,30 @@ export function defaultDeps(): TickDeps {
       const db = await ensureSchema();
       const r = await db.execute(`SELECT sku, price FROM competitor_prices`);
       return new Map(r.rows.map((x) => [String(x.sku).toUpperCase(), Number(x.price)]));
+    },
+    async loadDemand(day) {
+      // Computed once per local day and cached in settings: the stock history is ~60k rows, the cron ticks every 10 min.
+      const cached = await getSetting(DEMAND_KEY);
+      if (cached) {
+        try {
+          const c = JSON.parse(cached) as { day: string; units: Record<string, number> };
+          if (c.day === day) return new Map(Object.entries(c.units));
+        } catch {
+          /* recompute */
+        }
+      }
+      const db = await ensureSchema();
+      const since = Math.floor(Date.now() / 1000) - DEMAND_DAYS * 86400;
+      // A drop larger than DEMAND_MAX_STEP in one sync is a feed glitch or a stock correction, not sales.
+      const r = await db.execute({
+        sql: `SELECT sku, SUM(CASE WHEN old_qty > new_qty AND old_qty - new_qty <= ? THEN old_qty - new_qty ELSE 0 END) AS units
+              FROM price_history WHERE change_type = 'stock_change' AND detected_at >= ? GROUP BY sku`,
+        args: [DEMAND_MAX_STEP, since],
+      });
+      const units: Record<string, number> = {};
+      for (const x of r.rows) if (Number(x.units) > 0) units[String(x.sku)] = Number(x.units);
+      await setSetting(DEMAND_KEY, JSON.stringify({ day, units }));
+      return new Map(Object.entries(units));
     },
     async loadImportedSkus() {
       const db = await ensureSchema();
@@ -183,7 +214,8 @@ export async function runAutoImportTick(opts: { force?: boolean; deps?: TickDeps
 
     const [importedSkus, firstSeen, jobs] = await Promise.all([d.loadImportedSkus(), d.loadFirstSeen(), d.loadJobs()]);
     const competitor = d.loadCompetitor ? await d.loadCompetitor().catch(() => undefined) : undefined;
-    const { candidates, flaggedLicensed, rejected } = buildCandidates(groups, { importedSkus, firstSeen, jobs, now, costs, competitor });
+    const demand = d.loadDemand ? await d.loadDemand(day).catch(() => undefined) : undefined;
+    const { candidates, flaggedLicensed, rejected } = buildCandidates(groups, { importedSkus, firstSeen, jobs, now, costs, competitor, demand });
     const picked = pickBatch(candidates, state, n, dailyCap);
     const summary = picked.map((c) => ({ groupKey: c.groupKey, name: c.name.slice(0, 80), top: c.top, isNew: c.isNew }));
     const out: TickResult = { ...base, picked: summary, flaggedLicensed: flaggedLicensed.length, candidates: candidates.length, rejected };
