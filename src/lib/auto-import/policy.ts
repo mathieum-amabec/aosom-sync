@@ -3,8 +3,11 @@
  *
  * Decided with the owner on 2026-10-07:
  *  - 100 groups/day, spread over the day (never one burst that starves other jobs);
- *  - every NEW arrival first (as soon as it shows up in the feed), then toys (as many as possible,
- *    up to TOYS_DAILY_CAP), then the other categories by share;
+ *  - every NEW arrival first (as soon as it shows up in the feed), then every category by share, and inside a
+ *    category the products that sell most at the supplier first (`demand`: units that left Aosom's stock in the
+ *    last DEMAND_DAYS days, all channels). Changed 2026-10-17: toys used to go first (up to 60/day) but our store
+ *    never sold one while kitchen, storage, living room and bathroom sell; toys are now a small share capped at
+ *    TOYS_DAILY_CAP;
  *  - only products with a variant holding >= MIN_STOCK units, >= MIN_IMAGES photos and a price >= MIN_PRICE;
  *  - no patio unless it is a winter item;
  *  - licensed / third-party brand names (Mercedes-Benz, Disney…) are imported WITHOUT the name: it is stripped from the
@@ -34,7 +37,9 @@ export const MIN_PRICE = 30;
  */
 export const MIN_IMPORT_MARGIN = 0.12;
 export const MARGIN_RULES_MIN_COSTS = 1000;
-export const TOYS_DAILY_CAP = 60;
+export const TOYS_DAILY_CAP = 10;
+/** Supplier sales window used for `demand` (days of stock movements in price_history). */
+export const DEMAND_DAYS = 30;
 /** Imports are paced across this UTC window (07:00 = right after the 06:00/06:30 feed sync). */
 export const WINDOW_START_UTC_HOUR = 7;
 export const WINDOW_END_UTC_HOUR = 21;
@@ -44,13 +49,18 @@ export const MAX_PER_TICK = 3;
 export const TOYS = "Toys & Games";
 export const PATIO = "Patio & Garden";
 
-/** Share of the NON-toy quota per top-level category; "other" covers everything not listed. */
+/**
+ * Share of the daily quota per top-level category; "other" covers everything not listed (holiday, home improvement…).
+ * Set 2026-10-17 from what sells: Home Furnishings (kitchen, storage, living room, bathroom) is ~60 % of the supplier's
+ * sales outside patio and most of ours; toys 0 sales on our store.
+ */
 export const CATEGORY_SHARES: Record<string, number> = {
-  "Home Furnishings": 0.35,
-  "Pet Supplies": 0.28,
-  "Sports & Recreation": 0.18,
-  "Office Products": 0.1,
-  other: 0.09,
+  "Home Furnishings": 0.55,
+  "Office Products": 0.12,
+  "Pet Supplies": 0.12,
+  "Sports & Recreation": 0.06,
+  "Toys & Games": 0.05,
+  other: 0.1,
 };
 
 const WINTER_RE = /\b(snow|winter|sled|sleigh|toboggan|luge|neige|hiver|heater|chauffage|ice\s?fishing)\b/i;
@@ -137,6 +147,8 @@ export interface Candidate {
   /** Margin on cost at the price the rule will give (0..1) and in dollars; set when the margin rules applied. */
   margin?: number;
   marginDollars?: number;
+  /** Units that left the supplier's stock over DEMAND_DAYS, summed over the group's SKUs (0 when unknown). */
+  demand?: number;
 }
 
 export interface CandidateContext {
@@ -153,6 +165,8 @@ export interface CandidateContext {
   costs?: ReadonlyMap<string, number>;
   /** SKU (upper case) -> competitor price, for the price the rule will give. */
   competitor?: ReadonlyMap<string, number>;
+  /** SKU -> units that left the supplier's stock over DEMAND_DAYS (see run.ts#loadDemand). */
+  demand?: ReadonlyMap<string, number>;
 }
 
 export interface CandidateBuild {
@@ -242,6 +256,7 @@ export function buildCandidates(catalog: AosomMergedProduct[], ctx: CandidateCon
       imageCount: g.images.length,
       isNew,
       seasonal,
+      demand: skus.reduce((s, sku) => s + (ctx.demand?.get(sku) ?? 0), 0),
       ...(marginInfo ? { margin: marginInfo.margin, marginDollars: marginInfo.dollars } : {}),
     });
   }
@@ -270,16 +285,22 @@ export function shareBucket(top: string): string {
   return top in CATEGORY_SHARES && top !== "other" ? top : "other";
 }
 
-function score(c: Candidate): number {
-  // Seasonal first, then supplier depth (a proxy for a product that is staying), then a mid price band.
+export function score(c: Candidate): number {
+  // Seasonal first, then what sells at the supplier (up to +6,000 for 300 units in DEMAND_DAYS), then supplier depth
+  // (a proxy for a product that is staying), a mid price band and the margin (up to +2,000 for 100 $ per unit).
   const priceBand = c.minPrice >= 50 && c.minPrice <= 400 ? 1 : 0;
-  // Profitable products first within each group: up to +2,000 for 100 $ of margin per unit.
-  return (c.seasonal ? 100_000 : 0) + Math.min(c.totalQty, 2_000) + priceBand * 500 + Math.min(c.marginDollars ?? 0, 100) * 20;
+  return (
+    (c.seasonal ? 100_000 : 0) +
+    Math.min(c.demand ?? 0, 300) * 20 +
+    Math.min(c.totalQty, 2_000) +
+    priceBand * 500 +
+    Math.min(c.marginDollars ?? 0, 100) * 20
+  );
 }
 
 /**
- * Pick up to `n` candidates for one tick, honouring: new arrivals first, then toys up to the
- * toy cap, then the other categories by their share (largest deficit first).
+ * Pick up to `n` candidates for one tick, honouring: new arrivals first, then every category by its share (largest
+ * deficit first, best score first inside it), toys never above TOYS_DAILY_CAP.
  */
 export function pickBatch(candidates: Candidate[], state: DayState, n: number, dailyCap: number): Candidate[] {
   const left = Math.max(0, Math.min(n, dailyCap - state.total));
@@ -300,16 +321,8 @@ export function pickBatch(candidates: Candidate[], state: DayState, n: number, d
     take(c);
   }
 
-  // 2) Toys, as many as the cap allows.
-  const toys = candidates.filter((c) => c.top === TOYS && !taken.has(c.groupKey)).sort((a, b) => score(b) - score(a));
-  for (const c of toys) {
-    if (out.length >= left) break;
-    if (toysSoFar() >= TOYS_DAILY_CAP) break;
-    take(c);
-  }
-
-  // 3) Everything else by share deficit.
-  const rest = candidates.filter((c) => c.top !== TOYS && !taken.has(c.groupKey));
+  // 2) Every category by share deficit; toys stop at their cap.
+  const rest = candidates.filter((c) => !taken.has(c.groupKey));
   const byBucket = new Map<string, Candidate[]>();
   for (const c of rest) {
     const b = shareBucket(c.top);
@@ -318,14 +331,15 @@ export function pickBatch(candidates: Candidate[], state: DayState, n: number, d
   for (const list of byBucket.values()) list.sort((a, b) => score(b) - score(a));
   const countIn = (bucket: string) =>
     Object.entries(state.byCat).filter(([k]) => shareBucket(k) === bucket).reduce((s, [, v]) => s + v, 0) +
-    out.filter((c) => c.top !== TOYS && shareBucket(c.top) === bucket).length;
-  const nonToyDone = () => state.total - state.toys + out.filter((c) => c.top !== TOYS).length;
+    out.filter((c) => shareBucket(c.top) === bucket).length;
+  const done = () => state.total + out.length;
   while (out.length < left) {
     let best: string | null = null;
     let bestDeficit = -Infinity;
     for (const [bucket, list] of byBucket) {
       if (list.length === 0) continue;
-      const deficit = CATEGORY_SHARES[bucket] * (nonToyDone() + 1) - countIn(bucket);
+      if (bucket === TOYS && toysSoFar() >= TOYS_DAILY_CAP) continue;
+      const deficit = CATEGORY_SHARES[bucket] * (done() + 1) - countIn(bucket);
       if (deficit > bestDeficit) {
         bestDeficit = deficit;
         best = bucket;

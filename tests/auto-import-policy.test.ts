@@ -115,6 +115,13 @@ describe("buildCandidates", () => {
     expect(out.candidates.map((c) => c.groupKey).sort()).toEqual(["merc", "plain"]);
   });
 
+  it("sums the supplier demand over the group's SKUs", () => {
+    const g = group("dem");
+    g.variants = [variant("d-1", { qty: 20 }), variant("d-2", { qty: 15 })];
+    const [c] = buildCandidates([g], ctx({ demand: new Map([["d-1", 30], ["d-2", 12]]) })).candidates;
+    expect(c.demand).toBe(42);
+  });
+
   it("marks a group first seen in the last 14 days as a new arrival", () => {
     const out = buildCandidates(
       [group("fresh"), group("old")],
@@ -135,13 +142,21 @@ describe("pickBatch", () => {
     expect(picked.map((c) => c.groupKey)).toEqual(["new1"]);
   });
 
-  it("fills with toys first, up to the daily toy cap", () => {
-    const toys = Array.from({ length: 10 }, (_, i) => cand(`t${i}`, "Toys & Games"));
-    const home = [cand("h1", "Home Furnishings")];
-    const state = { ...emptyState("d"), toys: TOYS_DAILY_CAP - 1, total: TOYS_DAILY_CAP - 1 };
-    const picked = pickBatch([...toys, ...home], state, 3, 100);
-    expect(picked.filter((c) => c.top === "Toys & Games")).toHaveLength(1);
-    expect(picked.map((c) => c.groupKey)).toContain("h1");
+  it("no longer puts toys first: they are a small share and stop at the toy cap", () => {
+    const toys = Array.from({ length: 30 }, (_, i) => cand(`t${i}`, "Toys & Games"));
+    const home = Array.from({ length: 30 }, (_, i) => cand(`h${i}`, "Home Furnishings"));
+    const picked = pickBatch([...toys, ...home], emptyState("d"), 20, 100);
+    expect(picked.filter((c) => c.top === "Home Furnishings").length).toBeGreaterThan(picked.filter((c) => c.top === "Toys & Games").length);
+    const atCap = { ...emptyState("d"), toys: TOYS_DAILY_CAP, total: 40, byCat: { "Toys & Games": TOYS_DAILY_CAP, "Home Furnishings": 30 } };
+    expect(pickBatch(toys, atCap, 3, 100)).toHaveLength(0);
+  });
+
+  it("takes the products that sell most at the supplier first inside a category", () => {
+    const picked = pickBatch(
+      [cand("slow", "Home Furnishings", { totalQty: 2000 }), cand("fast", "Home Furnishings", { totalQty: 50, demand: 120 })],
+      emptyState("d"), 1, 100,
+    );
+    expect(picked[0].groupKey).toBe("fast");
   });
 
   it("splits the non-toy slots by share, largest deficit first", () => {
