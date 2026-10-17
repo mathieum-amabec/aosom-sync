@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.39] - 2026-10-16
+
+### Added
+
+- **Daily site health check ("Santé du site" in the dashboard Alertes panel).** `/api/cron/site-health` runs at 10:30 UTC and never writes to Shopify or Klaviyo. It opens every collection and page in both languages, 20 products a day in rotation and every internal link of the two homepages (about 270 pages, 30 s), and turns red on a broken page or link, a Liquid error, a page without a Google description or without exactly one H1. It also reads every live Klaviyo flow email and checks that each promo code in it is an active Shopify discount: on 2026-10-16 it caught the Welcome email still giving BIENVENUE10, expired since 2026-10-02. The summary lists the shoppers' real searches of the last 7 days that return no product (replayed against the store search) and a 7-day funnel from Klaviyo (checkouts started → orders, 25 → 12 on the first run); store visitors and add-to-cart clicks join it once `UMAMI_API_KEY` is set.
+
 ## [0.5.107.38] - 2026-10-16
 
 ### Changed

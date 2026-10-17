@@ -650,6 +650,7 @@ ou de double sollicitation perçue comme du spam. Détail technique : `docs/KLAV
 - `CRON_SECRET` — Vercel Cron auth
 - `AUTH_PASSWORD` — simple password auth for 2 users
 - `BLOB_READ_WRITE_TOKEN` — Vercel Blob (Phase1Checkpoint + demand-gen video assets)
+- `UMAMI_API_KEY` (optional) — Umami Cloud API key; adds visitors + add-to-cart clicks to the daily site-health funnel (`src/lib/site-health.ts`)
 - `CONTENT_PROVIDER` — optional. `gemini` | `anthropic` forces who writes the first draft of product copy; unset = Gemini when `GEMINI_API_KEY` is set, else Claude (see Key Patterns).
 
 ⚠️ **Demand-gen uploads need a PUBLIC Blob store.** `scripts/upload-demand-gen.mjs` calls
