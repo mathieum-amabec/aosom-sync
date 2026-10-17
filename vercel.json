@@ -37,7 +37,7 @@
     },
     {
       "path": "/api/cron/auto-import",
-      "schedule": "*/10 7-20 * * *"
+      "schedule": "*/5 7-20 * * *"
     },
     {
       "path": "/api/cron/blog",

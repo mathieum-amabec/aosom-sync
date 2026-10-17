@@ -1,7 +1,7 @@
 /**
  * Automatic daily import — one cron tick.
  *
- * Runs every 10 minutes inside the UTC window (see vercel.json). Each tick takes the next few
+ * Runs every 5 minutes inside the UTC window (see vercel.json; 3 per tick = up to ~500/day, so a 300 cap fits). Each tick takes the next few
  * candidates the day's pace allows, so ~100 imports/day are spread across the window and a tick
  * always fits in its time budget. Everything is idempotent: the day's counters live in
  * `settings.auto_import_state`, a group with a job is never re-picked, and a lock keeps two ticks
