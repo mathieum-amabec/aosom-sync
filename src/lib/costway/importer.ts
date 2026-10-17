@@ -20,6 +20,7 @@ import { assignInternalSkus, findCostwayLeaks, isInternalSku, neutralImageFilena
 import { stripSupplierBrands } from "@/lib/catalog-guard";
 import { translateColor } from "@/lib/variant-merger";
 import { matchAosomType, type AosomTypeDemand } from "./demand";
+import { sizeRank, stripVariantSize, variantSizes } from "./variant-size";
 
 const MAX_IMAGES = 8;
 const MIN_IMAGES = 5;
@@ -33,6 +34,8 @@ function opaqueGroupKey(itemNo: string): string {
 
 export interface CandidateVariant {
   sku: string;
+  /** The supplier's own title for this SKU: the only place a size variant names its size ("…Tree-7.5 ft"). */
+  title?: string;
   color: string;
   feedPrice: number;
   priceDrop: number | null;
@@ -116,6 +119,7 @@ export async function selectCandidates(db: Client, opts: SelectOptions): Promise
     if (!kind) continue;
     const variants: CandidateVariant[] = group.map((r) => ({
       sku: r.sku,
+      title: r.title,
       color: r.color ?? "",
       feedPrice: Number(r.price ?? 0),
       priceDrop: r.price_drop == null ? null : Number(r.price_drop),
@@ -194,6 +198,7 @@ export async function selectDemandCandidates(db: Client, opts: DemandSelectOptio
 
     const variants: CandidateVariant[] = group.map((r) => ({
       sku: r.sku,
+      title: r.title,
       color: r.color ?? "",
       feedPrice: Number(r.price ?? 0),
       priceDrop: r.price_drop == null ? null : Number(r.price_drop),
@@ -265,6 +270,8 @@ export function galleryFor(variants: Array<{ images: string[] }>, primary?: stri
 export interface PreparedVariant {
   supplierSku: string;
   color: string;
+  /** Size option in the supplier's English wording ("7.5 ft (229 cm)"), "" when the colour alone tells variants apart. */
+  size?: string;
   feedPrice: number;
   sellPrice: number;
   priceDropFloor: number | null;
@@ -298,14 +305,20 @@ export interface PrepareDeps {
   cleanHtml(html: string): string;
 }
 
+/** One colour across every variant and a size on each: the shopper picks a size only (no lone "Couleur: Vert"). */
+function onlySizeDiffers(colors: string[], sizes: string[]): boolean {
+  return sizes.length > 1 && sizes.every(Boolean) && new Set(colors.map((c) => c.trim().toLowerCase())).size === 1;
+}
+
 /** Text the LLM sees about the variants must not carry supplier SKUs: stand-ins V1, V2… */
-function toMerged(c: Candidate, cleanDescription: string, skus: string[], imageUrls: string[]): AosomMergedProduct {
+function toMerged(c: Candidate, cleanDescription: string, skus: string[], imageUrls: string[], sizes: string[]): AosomMergedProduct {
+  const sizeOnly = onlySizeDiffers(c.variants.map((v) => v.color), sizes);
   const variants: AosomVariant[] = c.variants.map((v, i) => ({
     sku: skus[i],
     price: costwaySellPrice({ price: v.feedPrice, priceDrop: v.priceDrop, promoTag: v.promoTag }),
     qty: v.qty,
-    color: translateColor(v.color),
-    size: "",
+    color: sizeOnly ? "" : translateColor(v.color),
+    size: sizes[i] ?? "",
     gtin: "",
     weight: 0,
     dimensions: { length: 0, width: 0, height: 0 },
@@ -342,16 +355,32 @@ export function contentTexts(c: GeneratedContent): string[] {
   ];
 }
 
-export async function prepareCandidate(c: Candidate, deps: PrepareDeps): Promise<PreparedItem> {
+export async function prepareCandidate(input: Candidate, deps: PrepareDeps): Promise<PreparedItem> {
   const problems: string[] = [];
+  // Size variants: name each size, smallest first. Unnamed duplicates would show as "Vert", "Vert 2" (2026-10-17).
+  const found = variantSizes(input.variants.map((v) => ({ title: v.title ?? input.title, sku: v.sku, color: v.color })));
+  if (!found) problems.push("variants: two variants share a colour and no size tells them apart");
+  const order = input.variants.map((_, i) => i);
+  if (found?.some(Boolean)) order.sort((a, b) => sizeRank(found[a]) - sizeRank(found[b]));
+  const c: Candidate = { ...input, variants: order.map((i) => input.variants[i]) };
+  const sizes = order.map((i) => found?.[i] ?? "");
   const supplierSkus = c.variants.map((v) => v.sku);
 
   const guard = await deps.guardImages(unionImages(c.variants));
   if (guard.outcome === "no_alternative") problems.push("image_not_clean: every candidate photo carries an overlay");
   const imageUrls = guard.images;
 
-  const merged = toMerged(c, deps.cleanHtml(c.bodyHtml), c.variants.map((_, i) => `V${i + 1}`), imageUrls);
-  const content = await deps.generate(merged);
+  const merged = toMerged(c, deps.cleanHtml(c.bodyHtml), c.variants.map((_, i) => `V${i + 1}`), imageUrls, sizes);
+  const generated = await deps.generate(merged);
+  // The title must fit every size, and must not promise a set the supplier never sells.
+  const strip = (t: string) => stripVariantSize(t, { sizes, supplierTexts: [c.title, c.bodyHtml, ...c.variants.map((v) => v.title ?? "")] });
+  const content: GeneratedContent = {
+    ...generated,
+    titleFr: strip(generated.titleFr),
+    titleEn: strip(generated.titleEn),
+    metaTitleFr: strip(generated.metaTitleFr),
+    metaTitleEn: strip(generated.metaTitleEn),
+  };
 
   const gates = await deps.qualityGates(imageUrls, content);
   for (const f of gates.failures) if (f !== "image_not_clean") problems.push(`gate:${f}`);
@@ -359,9 +388,11 @@ export async function prepareCandidate(c: Candidate, deps: PrepareDeps): Promise
     for (const leak of findCostwayLeaks(text, supplierSkus)) problems.push(`leak:${leak}`);
   }
 
-  const variants: PreparedVariant[] = c.variants.map((v) => ({
+  const sizeOnly = onlySizeDiffers(c.variants.map((v) => v.color), sizes);
+  const variants: PreparedVariant[] = c.variants.map((v, i) => ({
     supplierSku: v.sku,
-    color: v.color,
+    color: sizeOnly ? "" : v.color,
+    size: sizes[i],
     feedPrice: v.feedPrice,
     sellPrice: costwaySellPrice({ price: v.feedPrice, priceDrop: v.priceDrop, promoTag: v.promoTag }),
     priceDropFloor: v.priceDrop,
@@ -435,8 +466,8 @@ export function mergedFromPrepared(p: PreparedItem, internalSkus: string[], gall
     sku: internalSkus[i],
     price: v.sellPrice,
     qty: v.sellQty,
-    color: translateColor(v.color),
-    size: "",
+    color: v.color ? translateColor(v.color) : "",
+    size: v.size ?? "",
     gtin: "",
     weight: 0,
     dimensions: { length: 0, width: 0, height: 0 },
