@@ -6735,18 +6735,19 @@ export interface GuardInputs {
   priceAudit: Record<string, unknown> | null;
   catalogAudit: Record<string, unknown> | null;
   feedAudit: Record<string, unknown> | null;
+  siteHealth: Record<string, unknown> | null;
   lastRuns: Record<string, { status: string; ranAt: number; detail: string | null }>;
   imagesPending: number;
   imagesOldestPendingAt: number | null;
 }
 
-export const GUARD_CRON_NAMES = ["price-audit", "catalog-consistency", "feed-integrity"] as const;
+export const GUARD_CRON_NAMES = ["price-audit", "catalog-consistency", "feed-integrity", "site-health"] as const;
 
 export async function loadGuardInputs(): Promise<GuardInputs> {
   const db = await ensureSchema();
   const [settings, runs, images] = await Promise.all([
     db.execute(
-      `SELECT key, value FROM settings WHERE key IN ('price_audit_result', 'catalog_consistency_audit', 'feed_integrity_audit')`,
+      `SELECT key, value FROM settings WHERE key IN ('price_audit_result', 'catalog_consistency_audit', 'feed_integrity_audit', 'site_health_audit')`,
     ),
     db.execute({
       sql: `SELECT r.name, r.status, r.ran_at, r.detail FROM cron_runs r
@@ -6772,6 +6773,7 @@ export async function loadGuardInputs(): Promise<GuardInputs> {
     priceAudit: parse("price_audit_result"),
     catalogAudit: parse("catalog_consistency_audit"),
     feedAudit: parse("feed_integrity_audit"),
+    siteHealth: parse("site_health_audit"),
     lastRuns,
     imagesPending: Number(img.c) || 0,
     imagesOldestPendingAt: img.oldest != null ? Number(img.oldest) : null,

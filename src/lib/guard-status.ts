@@ -12,7 +12,7 @@
  */
 import { loadGuardInputs, type GuardInputs } from "./database";
 
-export type GuardKey = "price" | "catalog" | "images" | "feed";
+export type GuardKey = "price" | "catalog" | "images" | "feed" | "site";
 /** "unknown" = never produced a result yet (e.g. a guard deployed today). Not an alert. */
 export type GuardState = "red" | "green" | "unknown";
 
@@ -123,6 +123,26 @@ export function evaluateGuards(inputs: GuardInputs, nowSecs: number): GuardStatu
     const logic = (a?.logic ?? {}) as Record<string, unknown>;
     const summary = a ? `${num(logic.items)} items vérifiés (${num(logic.multiItems)} multi-variantes)` : "";
     out.push(verdict("feed", "Flux publicitaires", checkedAt, reasons, summary, !a && reasons.length === 0));
+  }
+
+  // Storefront + email health — see site-health.ts; like the feed audit it persists its own red reasons.
+  // Zero-result searches and the 7-day funnel are information, never red on their own.
+  {
+    const a = inputs.siteHealth;
+    const checkedAt = a?.auditedAt != null ? num(a.auditedAt) : null;
+    const reasons: string[] = Array.isArray(a?.reasons) ? (a!.reasons as unknown[]).map(String) : [];
+    reasons.push(...runHealth(inputs, "site-health", checkedAt, nowSecs));
+    let summary = "";
+    if (a) {
+      const pages = (a.pages ?? {}) as Record<string, unknown>;
+      const codes = (a.promoCodes as { checked?: unknown[] } | null)?.checked?.length ?? 0;
+      const zero = ((a.searches as { zeroResults?: Array<{ q: string }> } | null)?.zeroResults ?? []).map((z) => `« ${z.q} »`);
+      summary = `${num(pages.checked)} pages vérifiées · ${plural(codes, "code promo", "codes promo")} des courriels vérifiés`;
+      if (zero.length) summary += ` · recherches sans résultat : ${zero.slice(0, 5).join(", ")}`;
+      const f = a.funnel as { checkoutStarted?: number; placedOrder?: number } | null;
+      if (f) summary += ` · 7 j : ${num(f.checkoutStarted)} caisses → ${num(f.placedOrder)} commandes`;
+    }
+    out.push(verdict("site", "Santé du site", checkedAt, reasons, summary, !a && reasons.length === 0));
   }
 
   return out;

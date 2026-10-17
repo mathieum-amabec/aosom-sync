@@ -56,7 +56,7 @@ beforeEach(async () => {
   ]) {
     await db.execute(`DELETE FROM ${t}`);
   }
-  await db.execute(`DELETE FROM settings WHERE key IN ('price_audit_result', 'catalog_consistency_audit', 'feed_integrity_audit')`);
+  await db.execute(`DELETE FROM settings WHERE key IN ('price_audit_result', 'catalog_consistency_audit', 'feed_integrity_audit', 'site_health_audit')`);
 });
 
 describe("loadGuardInputs", () => {
@@ -64,6 +64,7 @@ describe("loadGuardInputs", () => {
     await mod.setSetting("price_audit_result", JSON.stringify({ belowFloor: 2, failed: 1, auditedAt: 100 }));
     await mod.setSetting("catalog_consistency_audit", JSON.stringify({ duplicateColorOptions: 5, auditedAt: 200 }));
     await mod.setSetting("feed_integrity_audit", "not json"); // corrupt → null, never a throw
+    await mod.setSetting("site_health_audit", JSON.stringify({ ok: true, reasons: [], auditedAt: 300 }));
     // Older error then newer success for price-audit: only the latest counts.
     await db.execute(`INSERT INTO cron_runs (name, status, detail, ran_at) VALUES
       ('price-audit', 'error', 'boom', 10), ('price-audit', 'success', 'ok', 20),
@@ -75,6 +76,7 @@ describe("loadGuardInputs", () => {
     expect(g.priceAudit).toEqual({ belowFloor: 2, failed: 1, auditedAt: 100 });
     expect(g.catalogAudit).toEqual({ duplicateColorOptions: 5, auditedAt: 200 });
     expect(g.feedAudit).toBeNull();
+    expect(g.siteHealth).toEqual({ ok: true, reasons: [], auditedAt: 300 });
     expect(g.lastRuns).toEqual({
       "price-audit": { status: "success", ranAt: 20, detail: "ok" },
       "catalog-consistency": { status: "error", ranAt: 30, detail: "rate limit" },
@@ -85,7 +87,7 @@ describe("loadGuardInputs", () => {
 
   it("returns empty inputs on a fresh database", async () => {
     const g = await mod.loadGuardInputs();
-    expect(g).toEqual({ priceAudit: null, catalogAudit: null, feedAudit: null, lastRuns: {}, imagesPending: 0, imagesOldestPendingAt: null });
+    expect(g).toEqual({ priceAudit: null, catalogAudit: null, feedAudit: null, siteHealth: null, lastRuns: {}, imagesPending: 0, imagesOldestPendingAt: null });
   });
 });
 
