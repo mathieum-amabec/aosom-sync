@@ -8,7 +8,7 @@ vi.mock("@/lib/csv-fetcher", () => ({ fetchAosomCatalog: vi.fn() }));
 vi.mock("@/lib/variant-merger", () => ({ mergeVariants: vi.fn() }));
 vi.mock("@/lib/auto-import/process-one", () => ({ processCandidate: vi.fn() }));
 
-import { runAutoImportTick, MODE_KEY, STATE_KEY, PLAN_KEY, CAP_KEY, type TickDeps } from "@/lib/auto-import/run";
+import { runAutoImportTick, boostedCap, MODE_KEY, STATE_KEY, PLAN_KEY, CAP_KEY, BOOST_KEY, type TickDeps } from "@/lib/auto-import/run";
 import { LlmBudgetExceededError } from "@/lib/llm-budget";
 import type { AosomMergedProduct, AosomVariant } from "@/types/aosom";
 import type { ProcessResult } from "@/lib/auto-import/process-one";
@@ -91,6 +91,18 @@ describe("runAutoImportTick", () => {
     const capped = makeDeps({ settings: { [MODE_KEY]: "live", [CAP_KEY]: "2" } });
     await runAutoImportTick({ deps: capped.deps });
     expect(capped.process).toHaveBeenCalledTimes(2);
+  });
+
+  it("a temporary boost raises the cap until its last day, then the normal cap is back by itself", async () => {
+    const atCap = JSON.stringify({ day: "2026-10-08", total: 100, toys: 0, byCat: {}, newCount: 0, needsReview: 0, failed: 0 });
+    const boosted = makeDeps({ settings: { [MODE_KEY]: "live", [CAP_KEY]: "100", [STATE_KEY]: atCap, [BOOST_KEY]: JSON.stringify({ cap: 300, until: "2026-10-08" }) } });
+    await runAutoImportTick({ deps: boosted.deps, force: true });
+    expect(boosted.process).toHaveBeenCalled();
+    const expired = makeDeps({ settings: { [MODE_KEY]: "live", [CAP_KEY]: "100", [STATE_KEY]: atCap, [BOOST_KEY]: JSON.stringify({ cap: 300, until: "2026-10-07" }) } });
+    expect((await runAutoImportTick({ deps: expired.deps, force: true })).skipped).toBe("cap-reached");
+    expect(boostedCap(100, "not json", "2026-10-08")).toBe(100);
+    expect(boostedCap(100, JSON.stringify({ cap: 300, until: "2026-10-20" }), "2026-10-20")).toBe(300);
+    expect(boostedCap(100, JSON.stringify({ cap: 300, until: "2026-10-20" }), "2026-10-21")).toBe(100);
   });
 
   it("starts a fresh count on a new Montréal day", async () => {
