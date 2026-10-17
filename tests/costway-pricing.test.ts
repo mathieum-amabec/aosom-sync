@@ -1,19 +1,27 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { costOf, costwaySellPrice, marginOf, sellableQty, dropshipDiscount } from "@/lib/costway/pricing";
+import { charm99, costOf, costwaySellPrice, marginOf, sellableQty, dropshipDiscount, targetMargin } from "@/lib/costway/pricing";
 
-afterEach(() => { delete process.env.COSTWAY_DROPSHIP_DISCOUNT; });
+afterEach(() => { delete process.env.COSTWAY_DROPSHIP_DISCOUNT; delete process.env.COSTWAY_TARGET_MARGIN; });
 
 describe("costwaySellPrice", () => {
-  it("sells at the feed price (0% markup) by default", () => {
-    expect(costwaySellPrice({ price: 239.99, priceDrop: null, promoTag: "" })).toBe(239.99);
-    expect(costwaySellPrice({ price: 69, priceDrop: null, promoTag: "Clearance" })).toBe(69);
+  it("aims at 23 % margin on our price, rounded up to x.99", () => {
+    expect(targetMargin()).toBe(0.23);
+    expect(costwaySellPrice({ price: 239.99, priceDrop: null, promoTag: "" })).toBe(261.99);
+    expect(costwaySellPrice({ price: 69, priceDrop: null, promoTag: "Clearance" })).toBe(75.99);
+    expect(marginOf(261.99, 239.99).pct).toBeGreaterThanOrEqual(23);
   });
-  it("undercuts the feed lag by 3% on a Drop Price item", () => {
-    expect(costwaySellPrice({ price: 479.99, priceDrop: null, promoTag: "Drop Price" })).toBe(465.59);
+  it("uses the same rule on a Drop Price item (uniform prices)", () => {
+    expect(costwaySellPrice({ price: 479.99, priceDrop: null, promoTag: "Drop Price" })).toBe(523.99);
   });
-  it("never goes below Costway's Price Drop floor", () => {
-    expect(costwaySellPrice({ price: 239.99, priceDrop: 239, promoTag: "Drop Price" })).toBe(239);
-    expect(costwaySellPrice({ price: 100, priceDrop: 100, promoTag: "Drop Price" })).toBe(100);
+  it("never goes below Costway's price nor its Price Drop floor", () => {
+    expect(costwaySellPrice({ price: 100, priceDrop: 130, promoTag: "Drop Price" })).toBe(130.99);
+    process.env.COSTWAY_TARGET_MARGIN = "0.01";
+    expect(costwaySellPrice({ price: 100, priceDrop: null, promoTag: "" })).toBe(100.99);
+  });
+  it("charm99 gives the smallest x.99 at or above the price", () => {
+    expect(charm99(109.09)).toBe(109.99);
+    expect(charm99(109.99)).toBe(109.99);
+    expect(charm99(110)).toBe(110.99);
   });
   it("returns NaN for an unusable price instead of $0", () => {
     expect(costwaySellPrice({ price: 0, priceDrop: null, promoTag: "" })).toBeNaN();
@@ -26,7 +34,7 @@ describe("cost and margin", () => {
     expect(dropshipDiscount()).toBe(0.16);
     expect(costOf(100)).toBe(84);
   });
-  it("margin at the feed price is 16%; on a Drop Price item it is ~13.4%", () => {
+  it("margin at Costway's own price would be 16%; 3 % under it, ~13.4%", () => {
     expect(marginOf(100, 100)).toEqual({ dollars: 16, pct: 16 });
     expect(marginOf(97, 100)).toEqual({ dollars: 13, pct: 13.4 });
   });
