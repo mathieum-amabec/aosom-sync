@@ -120,7 +120,7 @@ export function kenBurnsExpr(index: number): { z: string; x: string; y: string }
 /** Per-brand store identity for the cards (colors/font come from VIDEO_BRAND). */
 const BRAND_STORE_URL: Record<SlideshowBrand, string> = {
   ameublo: "ameublodirect.ca",
-  furnish: "furnishdirect.ca",
+  furnish: "ameublodirect.ca/en", // furnishdirect.ca is NXDOMAIN — never burn it into a video
 };
 
 // ─── Pure helpers (unit-tested without ffmpeg) ───────────────────────────

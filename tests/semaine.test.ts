@@ -56,7 +56,7 @@ describe("facts are written by code", () => {
   it("formats single product with price and link in each language", () => {
     expect(factsBlock(plan(), "fr")).toBe("Bureau mural rabattable 150 cm — 147,99 $\nVoir le produit: https://ameublodirect.ca/products/bureau-mural");
     expect(factsBlock(plan(), "en")).toContain("$147.99");
-    expect(factsBlock(plan(), "en")).toContain("https://furnishdirect.ca/products/bureau-mural");
+    expect(factsBlock(plan(), "en")).toContain("https://ameublodirect.ca/en/products/bureau-mural");
   });
   it("shows the rabais only when the product carries one", () => {
     const p = plan({ products: [product({ price: 75, compareAt: 100 })] });

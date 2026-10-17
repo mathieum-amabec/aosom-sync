@@ -38,7 +38,7 @@ const RENDER_TIMEOUT_MS = 8 * 60_000;
 /** Per-brand store identity for the bookend cards. */
 const BRAND_STORE_URL: Record<SlideshowBrand, string> = {
   ameublo: "ameublodirect.ca",
-  furnish: "furnishdirect.ca",
+  furnish: "ameublodirect.ca/en", // furnishdirect.ca is NXDOMAIN — never burn it into a video
 };
 
 /** French intro headlines per theme; `n` is the clip count ("8 idées …"). */

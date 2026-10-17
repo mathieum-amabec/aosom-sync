@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.40] - 2026-10-17
+
+### Fixed
+
+- **English links and video overlays no longer use furnishdirect.ca.** That domain is not registered (NXDOMAIN at the .ca registry), so every English link to it led nowhere: 56 Furnish posts published in the last 30 days carried one. The Ameublo caption generator, the "La semaine Ameublo" captions and the three video renderers (slideshow, remix, Top 5 countdown) now use `ameublodirect.ca/en`, the English locale of the same store. The 37 Furnish posts already in the publication queue were rewritten the same way in the database. The CORS allow-lists keep furnishdirect.ca for the day the domain is connected.
+
 ## [0.5.107.39] - 2026-10-16
 
 ### Added

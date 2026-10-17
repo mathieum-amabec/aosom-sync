@@ -10,12 +10,13 @@ describe("ameubloCaption", () => {
       const c = ameubloCaption({ ...base, style, lang, cap: 120, room: "salon" });
       expect(c).not.toMatch(/aosom|homcom|outsunny/i);
       expect(c).toMatch(lang === "fr" ? /Livraison gratuite/ : /Free shipping/);
-      expect(c).toMatch(lang === "fr" ? /ameublodirect\.ca/ : /furnishdirect\.ca/);
+      expect(c).toMatch(lang === "fr" ? /ameublodirect\.ca/ : /ameublodirect\.ca\/en/);
+      expect(c).not.toMatch(/furnishdirect\.ca/); // NXDOMAIN — never link it
     }
   });
   it("links single-product styles to the product", () => {
     expect(ameubloCaption({ ...base, style: "vitrine", lang: "fr" })).toContain("https://ameublodirect.ca/products/sofa-3");
-    expect(productUrl(null, "en")).toBe("https://furnishdirect.ca");
+    expect(productUrl(null, "en")).toBe("https://ameublodirect.ca/en");
   });
   it("sums the room total and uses CAD formatting per language", () => {
     expect(ameubloCaption({ ...base, style: "piece", lang: "en" })).toContain("$255.50 total");

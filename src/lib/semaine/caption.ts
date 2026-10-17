@@ -14,7 +14,7 @@ import type { BuiltCaptions, FormatId, LiveProduct, PlannedPost } from "./types"
 export type TextGen = (prompt: string) => Promise<string>;
 
 const CALL_TIMEOUT_MS = 40_000;
-export const SHOP = { fr: "https://ameublodirect.ca", en: "https://furnishdirect.ca" } as const;
+export const SHOP = { fr: "https://ameublodirect.ca", en: "https://ameublodirect.ca/en" } as const; // furnishdirect.ca is NXDOMAIN — EN = /en locale
 
 export const defaultTextGen: TextGen = async (prompt) => {
   const message = await budgetedCreate(
