@@ -32,7 +32,7 @@ async function main() {
     const limit = Number(flag("--limit") ?? "50");
     const minQty = Number(flag("--min-qty") ?? "10");
     const { generateProductContent, sanitizeHtml, stripSupplierBrands } = await import("@/lib/content-generator");
-    const { enforceCleanPrimaryImage } = await import("@/lib/image-compliance-audit");
+    const { lifestyleFirst } = await import("@/lib/costway/gallery");
     const { runQualityGates } = await import("@/lib/import-quality-gates");
 
     // Over-select: some candidates will be rejected by a gate, and we still want `limit` ready ones.
@@ -60,7 +60,8 @@ async function main() {
 
     const deps: import("@/lib/costway/importer").PrepareDeps = {
       generate: generateProductContent,
-      guardImages: async (urls) => { const g = await enforceCleanPrimaryImage(urls); return { images: g.images, outcome: g.outcome }; },
+      // Store rule: a clean LIFESTYLE photo first, the studio shot only when none exists (same check as the Aosom import).
+      guardImages: async (urls) => { const g = await lifestyleFirst(urls); return { images: g.images, outcome: g.outcome }; },
       qualityGates: async (images, content) => { const r = await runQualityGates(images, content); return { failures: r.failures }; },
       cleanHtml: (h) => sanitizeHtml(stripSupplierBrands(h)),
     };
