@@ -204,6 +204,34 @@ describe("prepareCandidate", () => {
     const floored = await prepareCandidate(await oneCandidate({ tag: "Drop Price", price: 479.99, priceDrop: 600 }), prepDeps());
     expect(floored.variants[0].sellPrice).toBe(600.99);
   });
+
+  it("names each size of a same-colour family, smallest first, and drops the lone size from the title", async () => {
+    const c: Candidate = {
+      itemNo: "1", title: "PVC Slim Pencil Christmas Tree-7 Feet", bodyHtml: "", category: "", kind: "general",
+      variants: [7, 5, 6].map((ft) => ({
+        sku: `S${ft}`, title: `PVC Slim Pencil Christmas Tree-${ft} Feet`, color: "Green", feedPrice: 50 + ft, priceDrop: null,
+        promoTag: "", qty: 100, caQty: 100, usQty: 0, images: [],
+      })),
+    };
+    const seen: AosomMergedProduct[] = [];
+    const generate = async (m: AosomMergedProduct) => { seen.push(m); return goodContent({ titleFr: "Arbre de Noël mince 213 cm" }); };
+    const p = await prepareCandidate(c, prepDeps({ generate }));
+    expect(p.problems).toEqual([]);
+    expect(p.variants.map((v) => [v.supplierSku, v.size, v.color])).toEqual([
+      ["S5", "5 ft (152 cm)", ""], ["S6", "6 ft (183 cm)", ""], ["S7", "7 ft (213 cm)", ""],
+    ]);
+    expect(seen[0].variants.map((v) => v.color)).toEqual(["", "", ""]);
+    expect(p.content.titleFr).toBe("Arbre de Noël mince");
+  });
+
+  it("blocks a same-colour family whose variants nothing tells apart", async () => {
+    const c: Candidate = {
+      itemNo: "2", title: "Tree", bodyHtml: "", category: "", kind: "general",
+      variants: ["A", "B"].map((s) => ({ sku: s, title: `Tree with lights ${s}`, color: "Green", feedPrice: 60, priceDrop: null, promoTag: "", qty: 100, caQty: 100, usQty: 0, images: [] })),
+    };
+    const p = await prepareCandidate(c, prepDeps());
+    expect(p.problems.some((x) => x.startsWith("variants:"))).toBe(true);
+  });
 });
 
 // ── apply ──
