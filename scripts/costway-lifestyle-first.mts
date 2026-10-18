@@ -62,4 +62,7 @@ async function main() {
   console.log(`\n${JSON.stringify(tally)}`);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+// Charged to the dedicated "import" pool, never the shared "batch" one.
+import("@/lib/llm-budget")
+  .then(({ withBudgetPool }) => withBudgetPool("import", main))
+  .catch((e) => { console.error(e); process.exit(1); });
