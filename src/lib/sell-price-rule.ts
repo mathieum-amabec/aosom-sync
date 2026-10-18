@@ -14,6 +14,10 @@
  *      cost, at least the tiered markup, capped at Aosom × (1 + MAX_MARKUP) (outdoor: OUTDOOR_MAX_MARKUP).
  *   4. Cost unknown: a tiered markup (small items carry more, big tickets and patio carry none).
  *   5. Prices end in .99 (rounded DOWN, so the result never exceeds the candidate), and are floored at Aosom again.
+ *   6. PROFIT FLOOR (Mat, 2026-10-18) — with our cost known, the price never goes under `profitFloor(cost)`: even with
+ *      the biggest discount a customer can get (MAX_DISCOUNT) and the card fees, we still clear our cost by
+ *      MIN_PROFIT_ON_COST. It beats the competitor, the +15 % / +7 % caps and the Aosom floor: we never sell at a loss.
+ *      The margin guard (margin-guard.ts) checks daily that no active discount goes beyond MAX_DISCOUNT.
  *
  * A competitor SKU match is only trusted when their price is within a plausible band of Aosom's: a far-off price is a
  * different pack size or a bad scrape, and following it would put us far above (or below) a sane price.
@@ -29,6 +33,41 @@ export const OUTDOOR_MAX_MARKUP = 0.07;
 export const COMPETITOR_PLAUSIBLE_LOW = 0.5;
 export const COMPETITOR_PLAUSIBLE_HIGH = 1.6;
 
+/**
+ * Biggest discount one item can get at checkout. On 2026-10-18 the store runs three discounts and none combines with
+ * another: 10 % on the 2nd item, BIENVENUE20 (20 $ from 200 $, so at most 10 %), a 10 % one-customer discount. A new
+ * discount above this, or discounts that combine, would break the profit floor: margin-guard.ts flags them.
+ */
+export const MAX_DISCOUNT = 0.1;
+/** Shopify Payments (Canada) card fee on what the customer pays: rate + fixed part. */
+export const CARD_FEE_RATE = 0.029;
+export const CARD_FEE_FIXED = 0.3;
+/** What we must still earn over our cost in the worst case (biggest discount + card fees). */
+export const MIN_PROFIT_ON_COST = 0.02;
+
+/** Smallest price ending in .99 that is >= `p`. */
+export function roundUpTo99(p: number): number {
+  if (!Number.isFinite(p)) return p;
+  let r = Math.floor(p) + 0.99;
+  if (r < p - 1e-9) r += 1;
+  return round2(r);
+}
+
+/**
+ * Lowest price that stays profitable for a unit costing `cost`: after MAX_DISCOUNT and the card fees we still keep
+ * cost × (1 + MIN_PROFIT_ON_COST). About cost × 1.17 + 0.34 $, ending in .99. NaN when the cost is unknown.
+ */
+export function profitFloor(cost: number | null | undefined): number {
+  if (typeof cost !== "number" || !Number.isFinite(cost) || cost <= 0) return NaN;
+  return roundUpTo99((cost * (1 + MIN_PROFIT_ON_COST) + CARD_FEE_FIXED) / ((1 - MAX_DISCOUNT) * (1 - CARD_FEE_RATE)));
+}
+
+/** What we keep on one unit sold at `price` with `discount` off and the card fees paid. */
+export function netProfit(price: number, cost: number, discount = MAX_DISCOUNT): number {
+  const paid = price * (1 - discount);
+  return round2(paid - paid * CARD_FEE_RATE - CARD_FEE_FIXED - cost);
+}
+
 /** Tiered markup used when no competitor price is available. Upper bound exclusive. */
 export const TIERS: ReadonlyArray<{ below: number; markup: number }> = [
   { below: 100, markup: 0.07 },
@@ -41,7 +80,7 @@ export const TIERS: ReadonlyArray<{ below: number; markup: number }> = [
 /** Patio / outdoor carry no markup (seasonal and compared the most). Matches Aosom product_type text. */
 const NO_MARKUP_TYPE = /outdoor|patio|garden/i;
 
-export type SellPriceReason = "competitor" | "cap" | "tier" | "margin" | "floor";
+export type SellPriceReason = "competitor" | "cap" | "tier" | "margin" | "floor" | "profit";
 
 export interface SellPriceInput {
   aosomPrice: number;
@@ -107,6 +146,13 @@ export function computeSellPrice(input: SellPriceInput): SellPriceResult {
   }
 
   const rounded = roundDownTo99(candidate);
-  if (rounded <= floor) return { price: floor, reason: "floor", competitorIgnored };
-  return { price: rounded, reason, competitorIgnored };
+  const res: SellPriceResult = rounded <= floor ? { price: floor, reason: "floor", competitorIgnored } : { price: rounded, reason, competitorIgnored };
+  return withProfitFloor(res, cost);
+}
+
+/** Raises a price to `profitFloor(cost)` when it sits below it (reason "profit"). Unknown cost: unchanged. */
+export function withProfitFloor(res: SellPriceResult, cost: number | null | undefined): SellPriceResult {
+  const min = profitFloor(cost);
+  if (!Number.isFinite(res.price) || !Number.isFinite(min) || res.price >= min - 0.005) return res;
+  return { ...res, price: min, reason: "profit" };
 }
