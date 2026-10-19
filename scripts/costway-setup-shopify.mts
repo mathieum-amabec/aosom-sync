@@ -3,7 +3,7 @@
  * scripts/costway-setup-shopify.mts — Shopify setup the Costway pilot import needs (see
  * src/lib/costway/shopify-setup.ts for the why).
  *
- *   a) rabais-2e-article  → add the rule `tag != src-c` (Costway excluded from the 2nd-item rebate)
+ *   a) rabais-2e-article  → make sure the old rule `tag != src-c` is GONE (Costway is in every discount since 2026-10-18)
  *   b) collections        → Déshumidificateurs, Buanderie (published), Suivi — source C (internal, UNpublished)
  *                           + their EN titles
  *   c) menu               → put the two category collections under « Électro & Tech » (explicit flag)
@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   console.log(`collection ${rabais.id.split("/").pop()} "${rabais.title}" [${rabais.handle}] — ${rabais.count} products`);
   console.log(`  current  (${rabais.current.appliedDisjunctively ? "OR" : "AND"}): ${rabais.current.rules.map(fmtRule).join("  AND  ")}`);
   console.log(`  desired  (${rabais.desired.appliedDisjunctively ? "OR" : "AND"}): ${rabais.desired.rules.map(fmtRule).join("  AND  ")}`);
-  console.log(rabais.changed ? `  → CHANGE: add  TAG NOT_EQUALS "${COSTWAY_TAG}"  (product count must stay ${rabais.count})` : "  → already excludes Costway — nothing to do");
+  console.log(rabais.changed ? `  → CHANGE: remove  TAG NOT_EQUALS "${COSTWAY_TAG}"  (Costway joins the rebate; count may only grow from ${rabais.count})` : "  → Costway already included — nothing to do");
 
   // ── b) collections ────────────────────────────────────────────────────────────────────
   hr("b) collections");
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
   // ── APPLY ─────────────────────────────────────────────────────────────────────────────
   hr("APPLY a) rabais");
   const r = await applyRabais(client, rabais);
-  console.log(`  ✓ rabais-2e-article excludes ${COSTWAY_TAG}; product count unchanged (${r.count})`);
+  console.log(`  ✓ rabais-2e-article includes Costway (no ${COSTWAY_TAG} exclusion); ${r.count} products`);
 
   hr("APPLY b) collections");
   const created = await applyCollections(client, colPlan);

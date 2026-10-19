@@ -518,17 +518,20 @@ at `/costway`. Code: `src/lib/costway/` (`feed.ts` parser, `sync.ts` diff + writ
     smart collections; new collections `electro-deshumidificateurs` and `electro-buanderie` were created by
     `scripts/costway-setup-shopify.mts`. **Not yet in the storefront menu** — run it with `--apply --menu` at
     go-live, or the daily category guard will flag the published products as unreachable.
-  - **BXGY exclusion:** `rabais-2e-article` (every product with a price > 0) is the audience of the automatic
-    "10% sur le 2e article"; the setup script added `TAG NOT_EQUALS src-c` to its rules (verified: 0 of the 50
-    are members). BIENVENUE10 expired on 2026-10-02 and is no longer a concern.
+  - **Discounts — Costway INCLUDED since 2026-10-18 (Mat: "les produits Costway peuvent faire partie du rabais
+    ou de n'importe quel rabais"):** `rabais-2e-article` (every product with a price > 0) is the audience of the
+    automatic "10% sur le 2e article". From 2026-10-03 to 2026-10-18 it carried `TAG NOT_EQUALS src-c`; that rule
+    was removed and `costway-setup-shopify.mts` step a) now removes it if it ever comes back. Every other discount
+    (BIENVENUE20, automatic ones) targets all items. The listed price rule is unchanged (never below Costway's
+    price / Price Drop); only checkout discounts may now go under it.
   - **Go-live (done 2026-10-03: all 50 of `pilot-1` are live):** the Aosom-job isolation must be MERGED AND
     DEPLOYED first — drafts are safe because the archive / stale / removed jobs only touch `status:"active"`,
     but a published Costway product would be drafted or zeroed by the next sync without it.
     `scripts/costway-publish.mts` (dry run by default, `--apply`, `--only <item>`) re-reads each product and
     refuses to publish one that is not a clean draft with the `src-c` tag, internal SKUs, neutral images, sellable
     stock and an entry in the isolation set; it then sets `import_status='active'`. Publish ONE first, check the
-    public page and a 2-unit cart (`/cart/add.js` then `/cart.js`: `total_discount` must be 0 — the BXGY must not
-    apply; an Aosom product as a control shows ~10% on the second unit), then the rest, then
+    public page and a 2-unit cart (`/cart/add.js` then `/cart.js`: since 2026-10-18 the BXGY applies, ~10% on the
+    second unit, same as an Aosom product), then the rest, then
     `costway-setup-shopify.mts --apply --menu`. Rollback: `unpublishShopifyProduct(id, { deactivate: true })`.
   - **Gotchas learned:** Costway's category is unreliable (towel warmers filed as dryers) so products are
     classified from the title; "Washer and Dryer" in a Costway title does not always mean a combo unit;
