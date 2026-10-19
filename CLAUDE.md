@@ -459,6 +459,39 @@ Mat: « aucun de nos produits ne devrait passer sous notre coût, malgré les ra
 **Creating a discount:** keep it ≤ 10 % per item and non-combinable (a fixed amount needs a minimum ≥ 10× the amount).
 A bigger one needs `MAX_DISCOUNT` raised first (which raises every floor).
 
+## Roue de bienvenue (2026-10-19, plan approved by Mat — not live yet)
+
+One spin wheel replaces the homepage newsletter popup (`entry_popup`, BIENVENUE20). Mat's goal: « le plus de
+conversions possible ». Plan: 1) build it on a DRAFT theme; 2) publish only on Mat's « publie », then measure for 4
+weeks (email-capture rate vs the old popup, code-use rate, AOV with code, margin after discount); 3) if capture is at
+least 2× the old popup, add the Club Ameublo v3 page (retention, linked from Klaviyo) and use the truck game on social.
+
+- **Server:** `POST /api/roue` (`src/app/api/roue/route.ts`, lib `src/lib/welcome-wheel.ts`, table `wheel_spins`).
+  The server draws the prize (crypto), one spin per normalized email (gmail dots/+tags collapse), ≤ 4 spins/IP/24 h,
+  honeypot, Origin allowlist. Kill switch: `settings.roue_enabled = "0"` → 503 and the snippet hides itself.
+- **Prizes = slice sizes = real odds:** 15 $ dès 150 $ 45 %, 25/250 30 %, 40/400 17 %, 60/600 7 %, 100/1000 1 %.
+  Each is exactly 10 % of its minimum, so it passes the margin guard. Keep `WHEEL_PRIZES` and the snippet's `P` array
+  in the same order, because the server returns the index.
+- **Code:** unique `ROUE-XXXXXX`, a DiscountCodeBasic with usageLimit 1, valid 72 h, combining with shipping only.
+  The snippet auto-applies it through `/discount/CODE`.
+- **Klaviyo:**
+  - the visitor ticks the consent box, which subscribes them to the list « Roue de bienvenue (site) », NOT the
+    newsletter list, so the Welcome Series and its BIENVENUE20 don't fire as well;
+  - the list id is in `settings.roue_klaviyo_list_id`;
+  - the event « Roue gagnée » triggers the flow « Roue de bienvenue — code 72 h (FR/EN) », with 3 emails at
+    +10 min (lets the async consent land), +24 h and +60 h, skipped once the person orders;
+  - setup script: `.context/roue/setup-klaviyo-roue.mjs` (main clone, untracked; `--apply`, then `--live <flowId>` at publish).
+- **Theme:** `snippets/lc-roue.liquid` (source of truth `.context/roue/work/`), rendered from `layout/theme.liquid`.
+  - The snippet GETs `/api/roue` first; with the kill switch on, nothing appears (re-checked after 24 h).
+  - Desktop: it opens by itself once, after 20 s, 50 % scroll or exit intent. Phone: 25 s or 60 % scroll.
+  - Phone: it opens by itself only on the home and collection pages, never over a product page. Elsewhere it is a
+    left-edge tab, because the bottom corners belong to the assistant and Messenger.
+  - After a win, the tab shows the prize and a 72 h countdown.
+- **Repeat spins never return the code** (anyone can type someone else's email): the dialog says it is in their inbox.
+- **Margin guard paginates** active discounts: every spin adds one single-use code for 72 h.
+- **Legal:** no purchase is needed, the odds and rules are in the dialog, and consent is never pre-checked (CASL).
+  Ask Mat about RACJ obligations before going live.
+
 ## Pastilles de couleur = photo de la couleur (2026-10-18)
 
 Mat: « la pastille de couleur n'avait aucun rapport avec l'image ». Audit of the 1,023 multi-colour products (3 vision

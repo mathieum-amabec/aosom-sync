@@ -769,6 +769,21 @@ async function _initSchemaImpl(): Promise<void> {
       note TEXT,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    // Roue de bienvenue: one spin per normalized email. The row is reserved BEFORE the Shopify code exists
+    // (code NULL), so two concurrent spins for one email cannot both create a code. See welcome-wheel.ts.
+    `CREATE TABLE IF NOT EXISTS wheel_spins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email_key TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL,
+      prize_key TEXT NOT NULL,
+      code TEXT,
+      discount_id TEXT,
+      expires_at INTEGER,
+      ip_hash TEXT,
+      locale TEXT,
+      created_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_wheel_spins_ip ON wheel_spins(ip_hash, created_at)`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
@@ -3457,6 +3472,53 @@ export async function updateUserLastLogin(id: number): Promise<void> {
 export async function updateUserPassword(id: number, passwordHash: string): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `UPDATE users SET password_hash = ? WHERE id = ?`, args: [passwordHash, id] });
+}
+
+// ─── Roue de bienvenue ───────────────────────────────────────────────
+
+export interface WheelSpinRow {
+  id: number;
+  email_key: string;
+  email: string;
+  prize_key: string;
+  code: string | null;
+  discount_id: string | null;
+  expires_at: number | null;
+  locale: string | null;
+  created_at: number;
+}
+
+export async function getWheelSpin(emailKey: string): Promise<WheelSpinRow | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT * FROM wheel_spins WHERE email_key = ?`, args: [emailKey] });
+  return r.rows[0] ? (rowToObj(r.rows[0]) as unknown as WheelSpinRow) : null;
+}
+
+export async function countWheelSpinsForIp(ipHash: string, sinceSec: number): Promise<number> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT COUNT(*) AS n FROM wheel_spins WHERE ip_hash = ? AND created_at >= ?`, args: [ipHash, sinceSec] });
+  return Number(rowToObj(r.rows[0]).n ?? 0);
+}
+
+/** Reserve the email's only spin. False when the email already has one (the caller then reads it back). */
+export async function reserveWheelSpin(s: { emailKey: string; email: string; prizeKey: string; ipHash: string; locale: string }): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO wheel_spins (email_key, email, prize_key, ip_hash, locale, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(email_key) DO NOTHING`,
+    args: [s.emailKey, s.email, s.prizeKey, s.ipHash, s.locale, Math.floor(Date.now() / 1000)],
+  });
+  return r.rowsAffected === 1;
+}
+
+export async function setWheelSpinCode(emailKey: string, code: string, discountId: string, expiresAt: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE wheel_spins SET code = ?, discount_id = ?, expires_at = ? WHERE email_key = ?`, args: [code, discountId, expiresAt, emailKey] });
+}
+
+/** Undo a reservation whose Shopify code could not be created, so the visitor can retry. */
+export async function releaseWheelSpin(emailKey: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `DELETE FROM wheel_spins WHERE email_key = ? AND code IS NULL`, args: [emailKey] });
 }
 
 // ─── Settings ────────────────────────────────────────────────────────

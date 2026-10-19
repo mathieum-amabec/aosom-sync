@@ -145,8 +145,23 @@ export function toDiscountInfo(x: RawDiscount): DiscountInfo {
   };
 }
 
+// Paginated: every Roue de bienvenue spin creates its own single-use code (live 72 h), so the active list can pass 100
+// and a risky manual discount must not fall off the first page.
 async function loadActiveDiscounts(): Promise<DiscountInfo[]> {
-  const d = await gql<{ discountNodes: { nodes: Array<{ discount: RawDiscount }> } }>(`{ discountNodes(first: 100, query: "status:active") { nodes { discount { __typename
+  const out: DiscountInfo[] = [];
+  let after: string | null = null;
+  for (let page = 0; page < 50; page++) {
+    const d: { discountNodes: { nodes: Array<{ discount: RawDiscount }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } =
+      await gql(discountsQuery(after));
+    out.push(...d.discountNodes.nodes.map((n) => n.discount).filter((x) => x.status === "ACTIVE").map(toDiscountInfo));
+    if (!d.discountNodes.pageInfo.hasNextPage || !d.discountNodes.pageInfo.endCursor) break;
+    after = d.discountNodes.pageInfo.endCursor;
+  }
+  return out;
+}
+
+function discountsQuery(after: string | null): string {
+  return `{ discountNodes(first: 100, query: "status:active"${after ? `, after: ${JSON.stringify(after)}` : ""}) { pageInfo { hasNextPage endCursor } nodes { discount { __typename
     ... on DiscountAutomaticBasic { title status ${CW} ${MIN} customerGets { value { ${VALUE} } } }
     ... on DiscountAutomaticBxgy { title status ${CW} customerGets { value { ${VALUE} } } }
     ... on DiscountAutomaticFreeShipping { title status ${CW} }
@@ -155,8 +170,7 @@ async function loadActiveDiscounts(): Promise<DiscountInfo[]> {
     ... on DiscountCodeBxgy { title status ${CW} customerGets { value { ${VALUE} } } }
     ... on DiscountCodeFreeShipping { title status ${CW} }
     ... on DiscountCodeApp { title status ${CW} }
-  } } } }`);
-  return d.discountNodes.nodes.map((n) => n.discount).filter((x) => x.status === "ACTIVE").map(toDiscountInfo);
+  } } } }`;
 }
 
 async function loadActiveVariants(): Promise<PricedVariant[]> {
