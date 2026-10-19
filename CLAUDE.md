@@ -474,6 +474,7 @@ passes, 9 agents) found these causes; each now has a guard:
 | Card hover on a colour without photo kept the previous colour's photo | hover restores the card photo |
 | Renaming an option value keeps its old EN translation | `registerOptionEnTranslations` replaces a stale translation |
 | Costway feed files a different product under one item (snow thrower + ride-on car) | `sameProductRows`: a variant of another category is dropped at import |
+| Daily sync REPLACED whole galleries (~20/day): it compared Shopify CDN URLs to feed URLs, which never match, and a new gallery drops every variant's image link (found 2026-10-19) | the gallery is import-time content like body_html: `diff-engine` only repairs an EMPTY gallery; any gallery push re-attaches colours via `attachVariantImages` |
 
 The guard also notifies « Couleurs à vérifier »: labels contradicting the supplier colour (never auto-renamed — the
 photo decides, a human confirms) and colours with no own photo in the feed. Limit: a variant photo whose file Aosom has
