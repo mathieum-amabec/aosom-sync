@@ -142,7 +142,7 @@ async function main() {
         images: (p.images ?? []).map((i: Record<string, unknown>) => ({ id: String(i.id), src: String(i.src), alt: (i.alt as string) ?? null })),
       };
     },
-    attachVariantImages: (created, merged) => sc.attachVariantImages(created, merged),
+    attachVariantImages: (created, merged, sourceOf) => sc.attachVariantImages(created, merged, sourceOf),
     trackInventory: async (inventoryItemId, qty) => {
       await sc.enableVariantTracking(inventoryItemId);
       await sc.setInventoryLevel(inventoryItemId, await sc.getPrimaryLocationId(), qty);

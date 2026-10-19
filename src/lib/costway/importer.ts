@@ -19,6 +19,7 @@ import { costwaySellPrice, marginOf, sellableQty } from "./pricing";
 import { assignInternalSkus, findCostwayLeaks, isInternalSku, neutralImageFilename } from "./identity";
 import { stripSupplierBrands } from "@/lib/catalog-guard";
 import { translateColor } from "@/lib/variant-merger";
+import { imageKey } from "@/lib/variant-photos";
 import { matchAosomType, type AosomTypeDemand } from "./demand";
 import { sizeRank, stripVariantSize, variantSizes } from "./variant-size";
 
@@ -93,6 +94,19 @@ interface Row {
   ca_qty: number | null; us_qty: number | null; images: string; shopify_product_id: string | null;
 }
 
+/**
+ * Costway's feed sometimes files a DIFFERENT product under an item number (2026-10-18: item 97612453 = two snow
+ * throwers + a kids' ride-on car, imported as a "Bleu marine" snow thrower). A variant whose category differs from the
+ * item's majority category is not a variant of this product: it is dropped.
+ */
+export function sameProductRows<T extends { category?: string | null }>(rows: T[]): T[] {
+  const count = new Map<string, number>();
+  for (const r of rows) count.set(r.category ?? "", (count.get(r.category ?? "") ?? 0) + 1);
+  if (count.size < 2) return rows;
+  const main = [...count.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  return rows.filter((r) => (r.category ?? "") === main);
+}
+
 export async function selectCandidates(db: Client, opts: SelectOptions): Promise<Candidate[]> {
   const minQty = opts.minQty ?? 10;
   const rows = (
@@ -111,7 +125,8 @@ export async function selectCandidates(db: Client, opts: SelectOptions): Promise
   for (const r of rows) byItem.set(r.item_no, [...(byItem.get(r.item_no) ?? []), r]);
 
   const out: Candidate[] = [];
-  for (const [itemNo, group] of byItem) {
+  for (const [itemNo, allRows] of byItem) {
+    const group = sameProductRows(allRows);
     if (opts.excludeItemNos?.includes(itemNo)) continue;
     if (group.some((r) => r.shopify_product_id)) continue; // already imported
     const first = group[0];
@@ -184,7 +199,8 @@ export async function selectDemandCandidates(db: Client, opts: DemandSelectOptio
   for (const r of rows) byItem.set(r.item_no, [...(byItem.get(r.item_no) ?? []), r]);
 
   const scored: Array<{ c: Candidate; value: number }> = [];
-  for (const [itemNo, group] of byItem) {
+  for (const [itemNo, allRows] of byItem) {
+    const group = sameProductRows(allRows);
     if (opts.excludeItemNos?.includes(itemNo)) continue;
     if (group.some((r) => r.shopify_product_id)) continue;
     const first = group[0];
@@ -441,7 +457,7 @@ export interface ApplyDeps {
   downloadImage(url: string): Promise<string>; // base64
   uploadImage(productId: string, img: { attachment: string; filename: string; alt: string; position: number }): Promise<void>;
   getProduct(id: string): Promise<CreatedProduct>;
-  attachVariantImages(created: CreatedProduct, merged: AosomMergedProduct): Promise<number>;
+  attachVariantImages(created: CreatedProduct, merged: AosomMergedProduct, sourceOf?: (src: string) => string | undefined): Promise<number>;
   trackInventory(inventoryItemId: string, qty: number): Promise<void>;
 }
 
@@ -546,7 +562,7 @@ export async function applyPrepared(p: PreparedItem, batch: string, deps: ApplyD
 
     const full = await deps.getProduct(created.id);
     try {
-      await deps.attachVariantImages(full, merged);
+      await deps.attachVariantImages(full, merged, neutralSourceOf(internalSkus[0], gallery));
     } catch (err) {
       warnings.push(`variant photos: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -592,6 +608,19 @@ export interface RepairResult { itemNo: string; ok: boolean; added: number; miss
  * the same neutral names and positions, then re-attach the colour photos. Idempotent: an image whose
  * neutral filename is already on the product is left alone.
  */
+/**
+ * Uploaded images carry neutral names (`m1234567-3.jpg` = gallery[2]), so the colour-photo matcher cannot recognise
+ * them by file: map each created image back to the gallery URL it was uploaded from. Matching by position instead
+ * shifted colours onto their neighbour's photo whenever one download failed (2026-10-18).
+ */
+export function neutralSourceOf(internalSku: string, gallery: string[]): (src: string) => string | undefined {
+  const keys = gallery.map((u, i) => imageKey(neutralImageFilename(internalSku, i, u)));
+  return (src) => {
+    const i = keys.indexOf(imageKey(src));
+    return i >= 0 ? gallery[i] : undefined;
+  };
+}
+
 export async function repairImages(p: PreparedItem, deps: Pick<ApplyDeps, "db" | "sleep" | "downloadImage" | "uploadImage" | "getProduct" | "attachVariantImages">): Promise<RepairResult> {
   const warnings: string[] = [];
   try {
@@ -622,7 +651,7 @@ export async function repairImages(p: PreparedItem, deps: Pick<ApplyDeps, "db" |
     }
     if (added > 0) {
       const full = await deps.getProduct(productId);
-      try { await deps.attachVariantImages(full, mergedFromPrepared(p, internalSkus, gallery)); } catch (err) { warnings.push(`variant photos: ${err instanceof Error ? err.message : String(err)}`); }
+      try { await deps.attachVariantImages(full, mergedFromPrepared(p, internalSkus, gallery), neutralSourceOf(internalSkus[0], gallery)); } catch (err) { warnings.push(`variant photos: ${err instanceof Error ? err.message : String(err)}`); }
     }
     return { itemNo: p.itemNo, ok: true, added, missingBefore: missing.length, stillMissing: missing.length - added, warnings };
   } catch (err) {

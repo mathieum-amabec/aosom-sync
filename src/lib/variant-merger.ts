@@ -5,6 +5,7 @@ import type {
   AosomVariant,
 } from "@/types/aosom";
 import { assertPublicHttpsUrl } from "./url-safety";
+import { exclusiveImages, imageKey, type ColourSource } from "./variant-photos";
 
 /**
  * French color map ported from reference aosom-shopify/merger.js.
@@ -413,16 +414,24 @@ export const MAX_IMAGES_WITH_VARIANT_PHOTOS = 16;
  */
 export function ensureVariantPrimaryImages(curated: string[], variants: AosomVariant[]): string[] {
   const out = [...curated];
-  const seenColours = new Set<string>();
+  // A colour's own photo must be EXCLUSIVE to it: a photo Aosom lists under several colours (lifestyle shot,
+  // infographic) used to count as "already in the gallery" and the colour ended up showing another colour (2026-10-18).
+  const colourKey = (v: AosomVariant) => (v.color || v.sku).trim().toLowerCase();
+  const sources: ColourSource[] = [];
   for (const v of variants) {
-    const colourKey = (v.color || v.sku).toLowerCase();
-    if (seenColours.has(colourKey)) continue;
-    seenColours.add(colourKey);
-    const own = v.images.filter((url) => {
+    const k = colourKey(v);
+    const s = sources.find((x) => x.colour === k);
+    if (s) s.images.push(...v.images);
+    else sources.push({ colour: k, images: [...v.images] });
+  }
+  const excl = exclusiveImages(sources);
+  const outKeys = () => new Set(out.map(imageKey));
+  for (const s of sources) {
+    const own = (excl.get(s.colour) ?? []).filter((url) => {
       const dim = smallestUrlDimension(url);
       return dim === null || dim >= MIN_IMAGE_PX;
     });
-    if (own.length === 0 || own.some((u) => out.includes(u))) continue;
+    if (own.length === 0 || own.some((u) => outKeys().has(imageKey(u)))) continue;
     if (out.length >= MAX_IMAGES_WITH_VARIANT_PHOTOS) break;
     out.push(own[0]);
   }

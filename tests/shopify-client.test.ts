@@ -530,11 +530,41 @@ describe("attachVariantImages", () => {
   it("gives each colour its own photo, and the pos-1 photo to a colour without one (never only some variants)", async () => {
     mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
     const n = await attachVariantImages(
-      { variants: [{ id: 1, sku: "BK" }, { id: 2, sku: "WT" }, { id: 3, sku: "GY" }], images: [{ id: 101 }, { id: 102 }, { id: 103 }] },
-      merged([{ sku: "BK", color: "Noir", images: ["b"] }, { sku: "WT", color: "Blanc", images: ["w"] }, { sku: "GY", color: "Gris", images: ["missing"] }], ["b", "x", "w"]),
+      { variants: [{ id: 1, sku: "BK" }, { id: 2, sku: "WT" }, { id: 3, sku: "GY" }], images: [{ id: 101, src: "https://cdn/b_0f0f0f0f-1111-2222-3333-444444444444.jpg" }, { id: 102, src: "https://cdn/x.jpg" }, { id: 103, src: "https://cdn/w.jpg?v=1" }] },
+      merged([{ sku: "BK", color: "Noir", images: ["https://a/b.jpg"] }, { sku: "WT", color: "Blanc", images: ["https://a/w.jpg"] }, { sku: "GY", color: "Gris", images: ["https://a/missing.jpg"] }], ["https://a/b.jpg", "https://a/x.jpg", "https://a/w.jpg"]),
     );
     expect(n).toBe(3);
     expect(puts()).toEqual([{ id: 1, image_id: 101 }, { id: 2, image_id: 103 }, { id: 3, image_id: 101 }]);
+  });
+
+  it("matches by FILE, not position: a refused upload does not shift colours onto a neighbour's photo (2026-10-18)", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    // Payload was [b, x, w, g]; Shopify refused "x", so the created gallery is one shorter.
+    await attachVariantImages(
+      { variants: [{ id: 1, sku: "BK" }, { id: 2, sku: "WT" }, { id: 3, sku: "GY" }], images: [{ id: 101, src: "https://cdn/b.jpg" }, { id: 103, src: "https://cdn/w.jpg" }, { id: 104, src: "https://cdn/g.jpg" }] },
+      merged([{ sku: "BK", color: "Noir", images: ["https://a/b.jpg"] }, { sku: "WT", color: "Blanc", images: ["https://a/w.jpg"] }, { sku: "GY", color: "Gris", images: ["https://a/g.jpg"] }], ["https://a/b.jpg", "https://a/x.jpg", "https://a/w.jpg", "https://a/g.jpg"]),
+    );
+    expect(puts()).toEqual([{ id: 1, image_id: 101 }, { id: 2, image_id: 103 }, { id: 3, image_id: 104 }]);
+  });
+
+  it("never gives a colour a photo another colour also lists (shared lifestyle shot)", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    await attachVariantImages(
+      { variants: [{ id: 1, sku: "BK" }, { id: 2, sku: "WT" }], images: [{ id: 201, src: "https://cdn/life.jpg" }, { id: 202, src: "https://cdn/b.jpg" }, { id: 203, src: "https://cdn/w.jpg" }] },
+      merged([{ sku: "BK", color: "Noir", images: ["https://a/life.jpg", "https://a/b.jpg"] }, { sku: "WT", color: "Blanc", images: ["https://a/life.jpg", "https://a/w.jpg"] }], ["https://a/life.jpg", "https://a/b.jpg", "https://a/w.jpg"]),
+    );
+    expect(puts()).toEqual([{ id: 1, image_id: 202 }, { id: 2, image_id: 203 }]);
+  });
+
+  it("maps renamed uploads back to their source (Costway neutral names)", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    const names: Record<string, string> = { "https://cdn/m1-1.jpg": "https://a/b.jpg", "https://cdn/m1-2.jpg": "https://a/w.jpg" };
+    await attachVariantImages(
+      { variants: [{ id: 1, sku: "BK" }, { id: 2, sku: "WT" }], images: [{ id: 301, src: "https://cdn/m1-1.jpg" }, { id: 302, src: "https://cdn/m1-2.jpg" }] },
+      merged([{ sku: "BK", color: "Noir", images: ["https://a/b.jpg"] }, { sku: "WT", color: "Blanc", images: ["https://a/w.jpg"] }], ["https://a/b.jpg", "https://a/w.jpg"]),
+      (src) => names[src],
+    );
+    expect(puts()).toEqual([{ id: 1, image_id: 301 }, { id: 2, image_id: 302 }]);
   });
 
   it("leaves single-colour products alone", async () => {
@@ -549,7 +579,7 @@ describe("attachVariantImages", () => {
 
 describe("registerOptionEnTranslations", () => {
   beforeEach(() => mockFetch.mockReset());
-  it("translates option names and French colour values, skipping already-translated ones", async () => {
+  it("translates option names and colour values, skipping correct translations and replacing a stale one (renamed value)", async () => {
     const registered: { id: string; value: string }[] = [];
     mockFetch.mockImplementation(async (_url?: string, opts?: RequestInit) => {
       if (!opts?.body) return { ok: true, json: async () => ({}) };
@@ -562,7 +592,7 @@ describe("registerOptionEnTranslations", () => {
       }
       if (body.query.includes("translatableResourcesByIds")) {
         return { ok: true, json: async () => ({ data: { translatableResourcesByIds: { nodes: body.variables.ids.map((id: string) => ({
-          resourceId: id, translatableContent: [{ key: "name", digest: `d-${id}` }], translations: id === "opt-t" ? [{ key: "name" }] : [],
+          resourceId: id, translatableContent: [{ key: "name", digest: `d-${id}` }], translations: id === "opt-t" ? [{ key: "name", value: "Size" }] : id === "v-noir" ? [{ key: "name", value: "Grey" }] : [],
         })) } } }) };
       }
       registered.push({ id: body.variables.id, value: body.variables.t[0].value });
