@@ -13,7 +13,7 @@
  * A per-run cap (`pricing_max_changes_per_run`, default 500) rolls a large change out over several days; floor fixes
  * come first, then decreases, then the biggest increases.
  */
-import { computeSellPrice, roundDownTo99, type SellPriceReason } from "@/lib/sell-price-rule";
+import { computeSellPrice, profitFloor, roundDownTo99, withProfitFloor, type SellPriceReason } from "@/lib/sell-price-rule";
 import { targetSellPrice } from "@/lib/pricing";
 
 export const PRICING_MODE_KEY = "pricing_mode";
@@ -105,11 +105,15 @@ export function planSellPrices(
       // Keep the discount: never above maxPrice, never below the Aosom floor.
       res.price = Math.max(floor, roundDownTo99(r.maxPrice));
       res.reason = res.price <= floor ? "floor" : res.reason;
+      // ...but never at a loss either: profitability beats keeping a crossed price.
+      Object.assign(res, withProfitFloor(res, r.cost));
     }
     if (res.competitorIgnored) plan.competitorIgnored++;
-    // Without any competitor data, keep what we have: only unset or under-floor products get a (tier) price.
-    if (competitor === null && r.sellPrice !== null && r.sellPrice >= floor - 0.005) { plan.unchanged++; continue; }
-    if (!shouldUpdateSellPrice(r.sellPrice, res.price, floor)) { plan.unchanged++; continue; }
+    // The lowest acceptable price: the Aosom floor, and the profit floor when our cost is known.
+    const min = Math.max(floor, profitFloor(r.cost) || 0);
+    // Without any competitor data, keep what we have: only unset, under-floor or unprofitable products get a price.
+    if (competitor === null && r.sellPrice !== null && r.sellPrice >= min - 0.005) { plan.unchanged++; continue; }
+    if (!shouldUpdateSellPrice(r.sellPrice, res.price, min)) { plan.unchanged++; continue; }
     all.push({ sku: r.sku, from: r.sellPrice, to: res.price, aosomPrice: r.aosomPrice, reason: res.reason });
   }
   // Priority: under-floor first, then decreases (they undo damage: a price above its discount cap, or above the
@@ -117,6 +121,7 @@ export function planSellPrices(
   const rank = (c: SellPriceChange): number => {
     const floor = targetSellPrice(c.aosomPrice);
     if (c.from !== null && c.from < floor - 0.005) return 0;
+    if (c.reason === "profit" && (c.from === null || c.to > c.from)) return 0;
     if (c.from === null) return 2;
     return c.to < c.from ? 1 : 3;
   };

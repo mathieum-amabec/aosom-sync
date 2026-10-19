@@ -256,7 +256,8 @@ export function buildCandidates(catalog: AosomMergedProduct[], ctx: CandidateCon
       const rule = computeSellPrice({ aosomPrice: cheapest.price, productType: g.productType, cost, competitorPrice: ctx.competitor?.get(cheapest.sku.toUpperCase()) ?? null });
       const price = Number.isFinite(rule.price) ? rule.price : cheapest.price;
       const margin = (price - cost) / price;
-      if (margin < MIN_IMPORT_MARGIN) { rejected.lowMargin++; continue; }
+      // A price the profit floor had to push up (above the competitor or the cap) is not a competitive price: too thin.
+      if (margin < MIN_IMPORT_MARGIN || rule.reason === "profit") { rejected.lowMargin++; continue; }
       marginInfo = { margin, dollars: price - cost };
     }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeSellPrice, TARGET_MARGIN, MAX_MARKUP, OUTDOOR_MAX_MARKUP } from "@/lib/sell-price-rule";
+import { computeSellPrice, profitFloor, TARGET_MARGIN, MAX_MARKUP, OUTDOOR_MAX_MARKUP } from "@/lib/sell-price-rule";
 import { planSellPrices, type SellPriceRow } from "@/lib/sell-price-sync";
 
 const margin = (price: number, cost: number) => (price - cost) / price;
@@ -14,9 +14,16 @@ describe("computeSellPrice with our cost (no competitor)", () => {
   });
 
   it("never exceeds the +15 % cap, even if the margin target would", () => {
-    const r = computeSellPrice({ aosomPrice: 100, cost: 99, productType: "Home Furnishings" });
+    const r = computeSellPrice({ aosomPrice: 100, cost: 95, productType: "Home Furnishings" });
     expect(r.price).toBeLessThanOrEqual(100 * (1 + MAX_MARKUP));
     expect(r.price).toBe(114.99);
+  });
+
+  it("...unless the cap would sell at a loss: the profit floor wins (2026-10-18)", () => {
+    const r = computeSellPrice({ aosomPrice: 100, cost: 99, productType: "Home Furnishings" });
+    expect(r.reason).toBe("profit");
+    expect(r.price).toBe(profitFloor(99));
+    expect(r.price).toBeGreaterThan(100 * (1 + MAX_MARKUP));
   });
 
   it("keeps the tiered markup when it is already above the margin price", () => {
@@ -46,10 +53,16 @@ describe("computeSellPrice with our cost (no competitor)", () => {
 
 describe("computeSellPrice with a competitor", () => {
   it("stays below the competitor even when that leaves under the target margin", () => {
-    // cost 90, competitor 103 -> price 102.99 (margin 12.6 %): the competitor wins
-    const r = computeSellPrice({ aosomPrice: 100, cost: 90, competitorPrice: 103 });
+    // cost 85, competitor 103 -> price 101.99 (margin 16.7 %, still profitable with 10 % off): the competitor wins
+    const r = computeSellPrice({ aosomPrice: 100, cost: 85, competitorPrice: 103 });
     expect(r.price).toBe(101.99);
     expect(r.price).toBeLessThan(103);
+  });
+
+  it("...but not below the profit floor (2026-10-18)", () => {
+    // cost 90: 101.99 loses money with 10 % off + card fees, so the price goes up to the profit floor
+    const r = computeSellPrice({ aosomPrice: 100, cost: 90, competitorPrice: 103 });
+    expect(r).toMatchObject({ price: profitFloor(90), reason: "profit" });
   });
 
   it("the cost does not change the competitor-based price", () => {

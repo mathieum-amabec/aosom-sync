@@ -442,6 +442,23 @@ when a guard's last run failed or it has no result for 36 h). The dashboard "Ale
 the morning report both read it. **CI** (`.github/workflows/ci.yml`: `npm ci`, tsc, eslint, vitest)
 is a required check on `main` (branch protection, admins included) — nothing merges red.
 
+## Prix — jamais à perte, même avec un rabais (2026-10-18)
+
+Mat: « aucun de nos produits ne devrait passer sous notre coût, malgré les rabais ». Two halves:
+
+- **Profit floor** (`sell-price-rule.ts`, `profitFloor` / `withProfitFloor`): with our cost known (Aosom: `2B Product
+  Price` + `shiping_fee`), a sell price is never under `(cost × 1.02 + 0.30) / (0.9 × 0.971)` rounded up to .99, i.e.
+  still +2 % over cost after the biggest discount (`MAX_DISCOUNT` = 10 %) and card fees (2.9 % + 0.30 $). It beats the
+  competitor, the +15 %/+7 % caps, the Aosom floor and the liquidation discount cap (reason `profit`, ranked first in
+  the sell-price plan). Auto-import rejects a product whose price needed the floor (not competitive).
+- **Margin guard** (`margin-guard.ts`, cron `/api/cron/margin-guard` 11:00 UTC, read-only): flags any ACTIVE discount
+  that can take more than `MAX_DISCOUNT` off one item, discounts that combine, discounts that cannot be bounded (fixed
+  amount without a minimum, per item, app), and every active variant (Aosom AND Costway) that loses money with the worst
+  active discount + fees → notification « Marge à vérifier ».
+
+**Creating a discount:** keep it ≤ 10 % per item and non-combinable (a fixed amount needs a minimum ≥ 10× the amount).
+A bigger one needs `MAX_DISCOUNT` raised first (which raises every floor).
+
 ## Avant/Après — removed (2026-10-01)
 
 The before/after video format and its `/studio` page were removed entirely at Mat's request (poor results, never used): renderer, Studio APIs, `before_after_schedule`, its queue rows and Blob files. Don't rebuild it. `publication_queue`'s CHECK still lists `before_after` only so the historical migration stays a no-op; nothing writes it.
