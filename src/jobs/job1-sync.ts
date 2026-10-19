@@ -25,6 +25,7 @@ import {
   setProductMetafield,
   deleteProductMetafield,
   fetchVariant,
+  attachVariantImages,
 } from "@/lib/shopify-client";
 import {
   writePriceVerified,
@@ -264,7 +265,16 @@ async function applyToShopify(
         }
 
         if (Object.keys(productUpdates).length > 0) {
-          await updateShopifyProduct(diff.shopifyId, productUpdates);
+          const updated = await updateShopifyProduct(diff.shopifyId, productUpdates);
+          // A new gallery drops every variant's image link: re-attach each colour's own photo, or the swatches
+          // freeze on / show another colour's photo until the variant-photo guard runs (2026-10-19).
+          if (productUpdates.images && updated) {
+            try {
+              await attachVariantImages(updated, diff.aosomProduct);
+            } catch (err) {
+              log(`variant photos not re-attached for ${diff.productName}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
         }
 
         const priceChanges = diff.changes.filter((c) => c.field === "price");

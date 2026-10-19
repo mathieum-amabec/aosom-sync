@@ -147,6 +147,7 @@ describe("computeDiffs", () => {
     });
     const shopifyDesc = makeShopify({
       shopifyId: "SHOP-DESC",
+      images: [],
       variants: [{ ...makeShopify().variants[0], sku: "DESC-001" }],
     });
     // imageOnly passed first, priced second — expect priced sorted to the front.
@@ -155,11 +156,19 @@ describe("computeDiffs", () => {
     expect(diffs[0].changes.some((c) => c.field === "price")).toBe(true);
   });
 
-  it("detects image change", () => {
+  it("repairs an empty Shopify gallery from the feed", () => {
     const aosom = makeAosom({ images: ["https://img.com/new.jpg"] });
-    const diffs = computeDiffs([aosom], [makeShopify()]);
+    const diffs = computeDiffs([aosom], [makeShopify({ images: [] })]);
     expect(diffs).toHaveLength(1);
     expect(diffs[0].changes.some((c) => c.field === "images")).toBe(true);
+  });
+
+  // Regression guard for 2026-10-19: Shopify serves its own CDN copy of every photo, so a URL comparison differed
+  // on every product every day and the push replaced whole galleries, wiping each colour's photo link.
+  it("never replaces an existing gallery, even when the feed's photos differ", () => {
+    const aosom = makeAosom({ images: ["https://img-us.aosomcdn.com/100/product/2026/10/01/renamed.jpg"] });
+    const shopify = makeShopify({ images: ["https://cdn.shopify.com/s/files/1/0678/1327/7801/files/old_1b2c.jpg?v=1"] });
+    expect(computeDiffs([aosom], [shopify])).toHaveLength(0);
   });
 
   // ── Architectural boundary: the feed never overwrites the authored description ──
