@@ -8,7 +8,7 @@ import { getSellPricesForSkus, priceNewVariants } from "./sell-price-db";
 import { writePriceVerified, PRICE_EPSILON } from "./price-protection";
 import { recordPriceFloorIncident, getCostwayShopifyProductIds } from "./database";
 import { EN_FIELD_MAP, rejectEnValue, type EnTranslatableKey } from "./en-translations";
-import { variantImageIndexes } from "./variant-merger";
+import { colourPhotoIndex, type ColourSource } from "./variant-photos";
 import { toEnglishColour } from "./colour-names";
 import { toFrenchSize } from "./size-names";
 
@@ -618,19 +618,30 @@ export async function createShopifyProduct(
 
 /**
  * Attach a photo to every variant of a multi-colour product (Dawn switches the main photo on
- * the selected variant's image). Each variant gets its own photo when the gallery has one;
- * the rest get the position-1 photo — never only SOME variants, or the theme keeps showing
- * the previously selected colour's photo. Single-colour products are left alone.
- * `created` is the REST create response's product (images come back in payload order).
+ * the selected variant's image). Each colour gets its OWN photo — one of its exclusive feed
+ * images, found in the created gallery by FILE, never by position (a refused upload used to
+ * shift every later colour onto its neighbour's photo, 2026-10-18). A colour with no own photo
+ * gets the position-1 photo — never only SOME variants, or the theme keeps showing the
+ * previously selected colour's photo; the daily variant-photo guard reports it.
+ * Single-colour products are left alone. `sourceOf` maps a created image's src to the URL it
+ * was uploaded from, when the upload renamed it (Costway neutral file names).
  */
 export async function attachVariantImages(
-  created: { variants?: { id: number | string; sku?: string }[]; images?: { id: number | string }[] },
+  created: { variants?: { id: number | string; sku?: string }[]; images?: { id: number | string; src?: string }[] },
   merged: AosomMergedProduct,
+  sourceOf?: (src: string) => string | undefined,
 ): Promise<number> {
-  const colours = new Set(merged.variants.map((v) => (v.color || "").toLowerCase()).filter(Boolean));
+  const colourOf = (v: { color?: string }) => (v.color || "").trim().toLowerCase();
+  const colours = new Set(merged.variants.map(colourOf).filter(Boolean));
   const images = created.images ?? [];
   if (colours.size < 2 || images.length === 0) return 0;
-  const indexBySku = new Map(merged.variants.map((v, i) => [v.sku, variantImageIndexes(merged.images, merged.variants)[i]]));
+  const sources: ColourSource[] = [...colours].map((c) => ({
+    colour: c,
+    images: merged.variants.filter((v) => colourOf(v) === c).flatMap((v) => v.images),
+  }));
+  const galleryUrls = images.map((im) => (im.src ? (sourceOf?.(im.src) ?? im.src) : ""));
+  const indexByColour = new Map([...colours].map((c) => [c, colourPhotoIndex(c, sources, galleryUrls)]));
+  const indexBySku = new Map(merged.variants.map((v) => [v.sku, indexByColour.get(colourOf(v)) ?? -1]));
   let attached = 0;
   for (const variant of created.variants ?? []) {
     const idx = indexBySku.get(String(variant.sku ?? "")) ?? -1;
@@ -679,12 +690,14 @@ export async function registerOptionEnTranslations(
   }
   if (wanted.size === 0) return 0;
   const d = await gql(
-    `query($ids: [ID!]!) { translatableResourcesByIds(first: 250, resourceIds: $ids) { nodes { resourceId translatableContent { key digest } translations(locale: "en") { key } } } }`,
+    `query($ids: [ID!]!) { translatableResourcesByIds(first: 250, resourceIds: $ids) { nodes { resourceId translatableContent { key digest } translations(locale: "en") { key value } } } }`,
     { ids: [...wanted.keys()] },
   );
   let count = 0;
   for (const n of d.data?.translatableResourcesByIds?.nodes ?? []) {
-    if (n.translations.some((t: { key: string }) => t.key === "name")) continue;
+    // Skip only a translation that is already right. Renaming a value keeps its id AND its old English translation
+    // (2026-10-18: "Gris pâle" renamed "Brun pâle vieilli" still read "Light grey" on the EN store), so a stale one is replaced.
+    if (n.translations.some((t: { key: string; value?: string }) => t.key === "name" && t.value === wanted.get(n.resourceId))) continue;
     const digest = n.translatableContent.find((c: { key: string }) => c.key === "name")?.digest;
     if (!digest) continue;
     const r = await gql(

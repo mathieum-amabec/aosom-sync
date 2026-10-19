@@ -459,6 +459,26 @@ Mat: « aucun de nos produits ne devrait passer sous notre coût, malgré les ra
 **Creating a discount:** keep it ≤ 10 % per item and non-combinable (a fixed amount needs a minimum ≥ 10× the amount).
 A bigger one needs `MAX_DISCOUNT` raised first (which raises every floor).
 
+## Pastilles de couleur = photo de la couleur (2026-10-18)
+
+Mat: « la pastille de couleur n'avait aucun rapport avec l'image ». Audit of the 1,023 multi-colour products (3 vision
+passes, 9 agents) found these causes; each now has a guard:
+
+| Cause | Guard |
+|---|---|
+| Import attached colour photos by POSITION (a refused upload shifted every later colour) | `attachVariantImages` matches by FILE (`variant-photos.ts#imageKey`); Costway maps neutral names back via `neutralSourceOf` |
+| A colour took a photo Aosom lists under several colours (lifestyle shot) | only EXCLUSIVE feed photos count (`exclusiveImages`), also in `ensureVariantPrimaryImages` |
+| Products drafted on 2026-09-30 missed the one-off backfill; deleted/replaced images leave variants without photo | daily cron `/api/cron/variant-photo-guard` (11:30 UTC, `settings.variant_photo_guard_mode` off/dry/live, default live, cap 150/run) re-attaches/uploads each colour's own photo |
+| Aosom renamed a SKU suffix → colour has no feed photo | guard looks up the PSIN twin with the same colour |
+| Card and product page used two different colour maps; substring matching ("floral" → or) | ONE theme snippet `lc-colour-css` (whole words, split dot for "Noir et blanc"), used by `card-product` and `main-product` |
+| Card hover on a colour without photo kept the previous colour's photo | hover restores the card photo |
+| Renaming an option value keeps its old EN translation | `registerOptionEnTranslations` replaces a stale translation |
+| Costway feed files a different product under one item (snow thrower + ride-on car) | `sameProductRows`: a variant of another category is dropped at import |
+
+The guard also notifies « Couleurs à vérifier »: labels contradicting the supplier colour (never auto-renamed — the
+photo decides, a human confirms) and colours with no own photo in the feed. Limit: a variant photo whose file Aosom has
+since renamed cannot be judged by file; only a vision audit (`.context/swatch/` scripts in the main clone) catches those.
+
 ## Avant/Après — removed (2026-10-01)
 
 The before/after video format and its `/studio` page were removed entirely at Mat's request (poor results, never used): renderer, Studio APIs, `before_after_schedule`, its queue rows and Blob files. Don't rebuild it. `publication_queue`'s CHECK still lists `before_after` only so the historical migration stays a no-op; nothing writes it.
