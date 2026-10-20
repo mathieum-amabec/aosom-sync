@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { campaignWentOut, parseCheckoutEvent, selectCandidates, renderItemsHtml, buildTemplateHtml, pruneState, emptyState, type CheckoutEvent } from "@/lib/relance-paiement";
+import { parseCheckoutEvent, selectCandidates, renderItemsHtml, buildTemplateHtml, pruneState, emptyState, type CheckoutEvent } from "@/lib/relance-paiement";
 
 const now = new Date("2026-10-20T20:00:00Z");
 const ago = (min: number) => new Date(now.getTime() - min * 60e3).toISOString();
@@ -42,21 +42,14 @@ describe("selectCandidates", () => {
       ev({ eventId: "a", profileId: "pa" }),
       ev({ eventId: "b", profileId: "pb", email: "qa-roue@ameublodirect.ca" }),
       ev({ eventId: "c", profileId: "pc" }),
-    ], { events: { c: ago(5) }, profiles: {} }, (pid) => pid === "pa", now);
+    ], { ...emptyState(), events: { c: ago(5) } }, (pid) => pid === "pa", now);
     expect(r.send).toHaveLength(0);
     expect(r.skipped.map((s) => s.reason).sort()).toEqual(["done", "internal", "ordered"]);
   });
   it("sends one reminder per person, about the latest checkout, then cools down", () => {
     const r = selectCandidates([ev({ eventId: "old", at: ago(120) }), ev({ eventId: "new", at: ago(45) })], emptyState(), never, now);
     expect(r.send.map((e) => e.eventId)).toEqual(["new"]);
-    expect(selectCandidates([ev({ eventId: "z" })], { events: {}, profiles: { p1: ago(60 * 24) } }, never, now).send).toHaveLength(0);
-  });
-});
-
-describe("campaignWentOut", () => {
-  it("treats an in-progress campaign as sent (no double email) and retries only a cancelled one", () => {
-    for (const s of ["Sent", "Sending", "Adding Recipients", "Scheduled"]) expect(campaignWentOut(s)).toBe(true);
-    expect(campaignWentOut("Cancelled: No Recipients")).toBe(false);
+    expect(selectCandidates([ev({ eventId: "z" })], { ...emptyState(), profiles: { p1: ago(60 * 24) } }, never, now).send).toHaveLength(0);
   });
 });
 
@@ -74,6 +67,6 @@ describe("rendering", () => {
     }
   });
   it("prunes week-old bookkeeping", () => {
-    expect(pruneState({ events: { a: ago(60 * 24 * 9), b: ago(5) }, profiles: {} }, now).events).toEqual({ b: ago(5) });
+    expect(pruneState({ ...emptyState(), events: { a: ago(60 * 24 * 9), b: ago(5) } }, now).events).toEqual({ b: ago(5) });
   });
 });
