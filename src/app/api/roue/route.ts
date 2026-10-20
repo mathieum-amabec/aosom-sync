@@ -1,7 +1,8 @@
 /**
  * POST /api/roue — Roue de bienvenue spin (storefront, cross-origin).
  *
- * Body: { email, consent: true, locale: "fr"|"en", website?: "" (honeypot) }.
+ * Body: { email, consent: true, locale: "fr"|"en", website?: "" (honeypot), skill: { a, b, c, answer } }
+ * (skill-testing question a + b × c, required by law before a prize drawn by chance).
  * The server draws the prize, creates a unique single-use Shopify code valid 72 h, subscribes the visitor to email
  * marketing (they ticked the consent box: playing IS the newsletter signup, said on the form) and fires the Klaviyo
  * event that sends the code + 2 reminders. One spin per normalized email: a repeat returns the same prize and code.
@@ -22,6 +23,7 @@ import {
   SPINS_PER_IP_PER_DAY,
   drawPrizeIndex,
   isValidEmail,
+  isSkillAnswerCorrect,
   normalizeEmailKey,
   hashIp,
   createWheelDiscount,
@@ -97,7 +99,7 @@ export async function POST(request: Request) {
 
   if ((await getSetting("roue_enabled")) === "0") return json(503, { success: false, error: "off" });
 
-  let body: { email?: unknown; consent?: unknown; locale?: unknown; website?: unknown };
+  let body: { email?: unknown; consent?: unknown; locale?: unknown; website?: unknown; skill?: unknown };
   try {
     body = await request.json();
   } catch {
@@ -107,6 +109,7 @@ export async function POST(request: Request) {
   if (typeof body.website === "string" && body.website.trim() !== "") return json(400, { success: false, error: "email" });
   if (!isValidEmail(body.email)) return json(400, { success: false, error: "email" });
   if (body.consent !== true) return json(400, { success: false, error: "consent" });
+  if (!isSkillAnswerCorrect(body.skill)) return json(400, { success: false, error: "skill" });
 
   const email = body.email.trim().toLowerCase();
   const emailKey = normalizeEmailKey(email);

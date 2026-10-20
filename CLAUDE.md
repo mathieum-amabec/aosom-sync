@@ -490,7 +490,11 @@ least 2× the old popup, add the Club Ameublo v3 page (retention, linked from Kl
 - **Repeat spins never return the code** (anyone can type someone else's email): the dialog says it is in their inbox.
 - **Margin guard paginates** active discounts: every spin adds one single-use code for 72 h.
 - **Legal:** no purchase is needed, the odds and rules are in the dialog, and consent is never pre-checked (CASL).
-  Ask Mat about RACJ obligations before going live.
+  - **Skill-testing question** (Criminal Code s.206, approved by Mat 2026-10-19): the form asks « a + b × c = ? »
+    (random small operands). The snippet checks it and draws a new one on a wrong answer; the server re-checks it
+    with `isSkillAnswerCorrect` and answers 400 `skill` otherwise.
+  - CASL mailing address: Mat will get a PO box (case postale); add it to the form and the 3 emails once he sends it.
+  - RACJ: Mat's position is that it is only a discount (everyone always wins), so not a declared contest.
 
 ## Pastilles de couleur = photo de la couleur (2026-10-18)
 

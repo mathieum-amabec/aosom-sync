@@ -33,7 +33,7 @@ function post(body: unknown, origin = "https://ameublodirect.ca") {
   });
 }
 
-const OK = { email: "Jean@Exemple.ca", consent: true, locale: "fr" };
+const OK = { email: "Jean@Exemple.ca", consent: true, locale: "fr", skill: { a: 4, b: 3, c: 2, answer: "10" } };
 
 describe("POST /api/roue", () => {
   beforeEach(() => {
@@ -70,6 +70,16 @@ describe("POST /api/roue", () => {
     const res = await POST(post({ ...OK, consent: false }));
     expect(res.status).toBe(400);
     expect(createWheelDiscount).not.toHaveBeenCalled();
+  });
+
+  it("requires the right answer to the skill-testing question", async () => {
+    for (const skill of [undefined, { a: 4, b: 3, c: 2, answer: "14" }, { a: 4, b: 3, c: 2, answer: "" }, { a: 40, b: 3, c: 2, answer: "46" }]) {
+      const res = await POST(post({ ...OK, skill }));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("skill");
+    }
+    expect(createWheelDiscount).not.toHaveBeenCalled();
+    expect((await POST(post({ ...OK, skill: { a: 4, b: 3, c: 2, answer: 10 } }))).status).toBe(200);
   });
 
   it("refuses foreign origins", async () => {

@@ -60,6 +60,20 @@ export function isValidEmail(email: unknown): email is string {
   return typeof email === "string" && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 }
 
+/**
+ * Skill-testing question (Criminal Code s.206: a prize won by chance alone is a lottery). The storefront asks
+ * "a + b × c = ?" with small random operands and sends them back with the answer; the server re-checks it.
+ * It is a legal requirement, not an anti-bot measure.
+ */
+export function isSkillAnswerCorrect(skill: unknown): boolean {
+  if (!skill || typeof skill !== "object") return false;
+  const { a, b, c, answer } = skill as Record<string, unknown>;
+  if (![a, b, c].every((n) => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 20)) return false;
+  const expected = (a as number) + (b as number) * (c as number);
+  const given = typeof answer === "string" && answer.trim() !== "" ? Number(answer.trim()) : answer;
+  return given === expected;
+}
+
 /** Lowercase; for gmail/googlemail also drop dots and +tags, so one person cannot spin twice with aliases. */
 export function normalizeEmailKey(email: string): string {
   const e = email.trim().toLowerCase();
