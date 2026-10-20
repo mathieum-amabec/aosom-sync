@@ -12,10 +12,7 @@
  * One reminder per checkout, at most one per profile per PROFILE_COOLDOWN_H. Nothing goes to a
  * profile that placed an order after the checkout, has no recover URL, or is an internal test.
  */
-import { env } from "./config";
-
-const BASE = "https://a.klaviyo.com/api";
-const REVISION = "2024-10-15";
+import { kv, metricEvents } from "./klaviyo-campaigns";
 
 export const CHECKOUT_STARTED_METRIC = "Checkout Started";
 export const PLACED_ORDER_METRIC = "Placed Order";
@@ -44,17 +41,21 @@ export interface CheckoutEvent {
 export interface RelanceState {
   /** checkout event id → ISO time it was handled (sent, or skipped for good) */
   events: Record<string, string>;
+  /** checkout event id → ISO time reminder #1 really went out (flow-relay's reminder #2 reads this) */
+  sent: Record<string, string>;
   /** profile id → ISO time of the last reminder sent */
   profiles: Record<string, string>;
+  /** campaigns whose final status is checked on the next run ("No Recipients" → retried) */
+  pending: Array<{ campaignId: string; eventIds: string[]; profileIds: string[]; at: string }>;
 }
 
-export const emptyState = (): RelanceState => ({ events: {}, profiles: {} });
+export const emptyState = (): RelanceState => ({ events: {}, sent: {}, profiles: {}, pending: [] });
 
 /** Drop bookkeeping older than 8 days so the settings row stays small. */
 export function pruneState(s: RelanceState, now: Date): RelanceState {
   const min = now.getTime() - 8 * 24 * 3600e3;
-  const keep = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).filter(([, t]) => Date.parse(t) >= min));
-  return { events: keep(s.events), profiles: keep(s.profiles) };
+  const keep = (o: Record<string, string> | undefined) => Object.fromEntries(Object.entries(o ?? {}).filter(([, t]) => Date.parse(t) >= min));
+  return { events: keep(s.events), sent: keep(s.sent), profiles: keep(s.profiles), pending: (s.pending ?? []).filter((p) => Date.parse(p.at) >= now.getTime() - 2 * 24 * 3600e3) };
 }
 
 /** Map a raw Klaviyo "Checkout Started" event (Shopify integration) to what we need. */
@@ -168,24 +169,7 @@ export function buildTemplateHtml(locale: "fr" | "en"): string {
 }
 
 // ─── Klaviyo IO ─────────────────────────────────────────────────────────
-type Json = Record<string, unknown>;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-export async function kv<T = Json>(method: string, path: string, body?: unknown): Promise<T> {
-  const key = env.klaviyoApiKey;
-  if (!key) throw new Error("KLAVIYO_API_KEY manquant");
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(BASE + path, {
-      method,
-      headers: { Authorization: `Klaviyo-API-Key ${key}`, revision: REVISION, accept: "application/vnd.api+json", "content-type": "application/vnd.api+json" },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (res.status === 429 && attempt < 5) { await sleep(1500 * (attempt + 1)); continue; }
-    const text = await res.text();
-    if (!res.ok) throw new Error(`Klaviyo ${method} ${path} → ${res.status}: ${text.slice(0, 400)}`);
-    return (text ? JSON.parse(text) : {}) as T;
-  }
-}
+export { kv } from "./klaviyo-campaigns";
 
 export async function metricId(name: string): Promise<string> {
   let path: string | null = "/metrics/?fields[metric]=name,integration";
@@ -193,61 +177,10 @@ export async function metricId(name: string): Promise<string> {
     const j: { data: Array<{ id: string; attributes: { name: string; integration?: { name?: string } } }>; links?: { next?: string } } = await kv("GET", path);
     const m = j.data.find((x) => x.attributes.name === name && /shopify/i.test(x.attributes.integration?.name ?? ""));
     if (m) return m.id;
-    path = j.links?.next ? j.links.next.replace(BASE, "") : null;
+    path = j.links?.next ? j.links.next.replace("https://a.klaviyo.com/api", "") : null;
   }
   throw new Error(`Métrique Klaviyo introuvable: ${name}`);
 }
 
-type RawEvent = { id: string; attributes: { datetime: string; event_properties: Record<string, unknown> }; relationships?: { profile?: { data?: { id: string } } } };
-
-export async function recentEvents(metric: string, sinceIso: string): Promise<{ events: RawEvent[]; emails: Map<string, string> }> {
-  const events: RawEvent[] = [];
-  const emails = new Map<string, string>();
-  let path: string | null = `/events/?filter=${encodeURIComponent(`and(equals(metric_id,"${metric}"),greater-than(datetime,${sinceIso}))`)}&sort=-datetime&include=profile&fields[profile]=email&page[size]=100`;
-  while (path) {
-    const j: { data: RawEvent[]; included?: Array<{ id: string; attributes: { email?: string } }>; links?: { next?: string } } = await kv("GET", path);
-    events.push(...j.data);
-    for (const p of j.included ?? []) if (p.attributes.email) emails.set(p.id, p.attributes.email);
-    path = j.links?.next ? j.links.next.replace(BASE, "") : null;
-  }
-  return { events, emails };
-}
-
-/** Send one campaign to exactly the given profiles (already carrying their relance_* properties). */
-export async function sendRelanceCampaign(locale: "fr" | "en", templateId: string, profileIds: string[], label: string): Promise<{ campaignId: string; listId: string; status: string }> {
-  const list = await kv<{ data: { id: string } }>("POST", "/lists/", { data: { type: "list", attributes: { name: `Relance paiement auto ${label} ${locale}` } } });
-  const listId = list.data.id;
-  await kv("POST", `/lists/${listId}/relationships/profiles/`, { data: profileIds.map((id) => ({ type: "profile", id })) });
-  // A campaign sent the instant after the list is filled is cancelled "No Recipients" (seen 2026-10-20):
-  // wait until the list reports every member, then a little more for Klaviyo's audience index.
-  for (let i = 0; i < 12; i++) {
-    const m = await kv<{ data: unknown[] }>("GET", `/lists/${listId}/profiles/?page[size]=100`);
-    if (m.data.length >= profileIds.length) break;
-    await sleep(5000);
-  }
-  await sleep(45_000);
-  const { subject, preview } = relanceSubject(locale);
-  const camp = await kv<{ data: { id: string; relationships: { "campaign-messages": { data: Array<{ id: string }> } } } }>("POST", "/campaigns/", { data: { type: "campaign", attributes: {
-    name: `Relance paiement auto ${label} ${locale}`,
-    audiences: { included: [listId], excluded: [] },
-    send_strategy: { method: "immediate" },
-    tracking_options: { is_tracking_clicks: true, is_tracking_opens: true, add_tracking_params: true },
-    "campaign-messages": { data: [{ type: "campaign-message", attributes: { channel: "email", label: "relance", content: { subject, preview_text: preview, from_email: "info@ameublodirect.ca", from_label: "Ameublo Direct" } } }] },
-  } } });
-  const campaignId = camp.data.id;
-  await kv("POST", "/campaign-message-assign-template/", { data: { type: "campaign-message", id: camp.data.relationships["campaign-messages"].data[0].id, relationships: { template: { data: { type: "template", id: templateId } } } } });
-  await kv("POST", "/campaign-send-jobs/", { data: { type: "campaign-send-job", id: campaignId } });
-  let status = "queued";
-  for (let i = 0; i < 12; i++) {
-    await sleep(10_000);
-    const c = await kv<{ data: { attributes: { status: string } } }>("GET", `/campaigns/${campaignId}/`);
-    status = c.data.attributes.status;
-    if (!IN_PROGRESS.test(status)) break;
-  }
-  return { campaignId, listId, status };
-}
-
-const IN_PROGRESS = /queued|scheduled|sending|adding|preparing/i;
-/** Klaviyo keeps a campaign "Adding Recipients"/"Scheduled" for minutes: that is on its way, and
- * resending it would email the person twice. Only a cancelled/failed campaign is retried. */
-export const campaignWentOut = (status: string) => !/cancel|fail|draft/i.test(status);
+/** Back-compat name used by the one-off scripts. */
+export const recentEvents = metricEvents;

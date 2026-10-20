@@ -3537,6 +3537,25 @@ export async function setSetting(key: string, value: string): Promise<void> {
 }
 
 /**
+ * Take the named lease (a settings row) when it is free or older than `ttlSec`. The UPDATE is a
+ * single conditional statement, so two concurrent cron invocations can't both get it. Returns the
+ * holder token, or null when someone else holds it.
+ */
+export async function acquireLease(key: string, ttlSec: number): Promise<string | null> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const token = `${now}-${Math.random().toString(36).slice(2)}`;
+  await db.execute({ sql: `INSERT INTO settings (key, value, updated_at) VALUES (?, '', 0) ON CONFLICT(key) DO NOTHING`, args: [key] });
+  const r = await db.execute({ sql: `UPDATE settings SET value = ?, updated_at = ? WHERE key = ? AND (value = '' OR updated_at < ?)`, args: [token, now, key, now - ttlSec] });
+  return r.rowsAffected === 1 ? token : null;
+}
+
+export async function releaseLease(key: string, token: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE settings SET value = '' WHERE key = ? AND value = ?`, args: [key, token] });
+}
+
+/**
  * Minimal sku→price projection for the price-floor audit (price-audit.ts). Only priced rows;
  * `price` is the Aosom feed price used as the floor. Kept tiny (2 cols, ~11k rows) so the audit
  * doesn't pull heavy catalog columns.
