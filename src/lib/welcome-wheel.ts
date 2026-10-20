@@ -33,6 +33,11 @@ export const WHEEL_PRIZES: readonly WheelPrize[] = [
 ];
 
 export const CODE_TTL_HOURS = 72;
+/**
+ * Closing date printed in the rules (Competition Act s.74.06 wants one). After it the server refuses spins (503),
+ * so the wheel hides itself. To extend: move this date AND the date in snippets/lc-roue.liquid together.
+ */
+export const ROUE_ENDS_AT = Date.parse("2027-01-31T23:59:59-05:00");
 /** Spins allowed per IP per 24 h (households share an IP; bots get stopped). */
 export const SPINS_PER_IP_PER_DAY = 4;
 

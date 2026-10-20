@@ -475,26 +475,41 @@ least 2× the old popup, add the Club Ameublo v3 page (retention, linked from Kl
 - **Code:** unique `ROUE-XXXXXX`, a DiscountCodeBasic with usageLimit 1, valid 72 h, combining with shipping only.
   The snippet auto-applies it through `/discount/CODE`.
 - **Klaviyo:**
-  - the visitor ticks the consent box, which subscribes them to the list « Roue de bienvenue (site) », NOT the
-    newsletter list, so the Welcome Series and its BIENVENUE20 don't fire as well;
+  - the consent box is OPTIONAL (CASL: consent cannot be a condition of playing). Ticked → the visitor is subscribed
+    to the list « Roue de bienvenue (site) », NOT the newsletter list, so the Welcome Series and its BIENVENUE20 don't
+    fire as well. Unticked → nothing goes to Klaviyo (no subscribe, no event, no `klaviyo.identify`); the visitor
+    keeps the code on screen (« Note ton code ») and in the cart;
   - the list id is in `settings.roue_klaviyo_list_id`;
   - the event « Roue gagnée » triggers the flow « Roue de bienvenue — code 72 h (FR/EN) », with 3 emails at
     +10 min (lets the async consent land), +24 h and +60 h, skipped once the person orders;
   - setup script: `.context/roue/setup-klaviyo-roue.mjs` (main clone, untracked; `--apply`, then `--live <flowId>` at publish).
 - **Theme:** `snippets/lc-roue.liquid` (source of truth `.context/roue/work/`), rendered from `layout/theme.liquid`.
+  - v2 (Mat: « on se perd, pas assez d'emphase sur la roue »): gold kicker « Roue de fortune · chaque tour gagne »,
+    gold rim with twinkling bulbs, slow idle turn while open, « TOURNE » hub, tab with a mini wheel icon. One task per
+    step: 1) email + button (+ optional box), 2) skill question, 3) prize + code + countdown.
+  - Pin and overlay are `<span>`s: the theme hides every empty `div` (`div:empty{display:none}`).
+  - EN copy says « Furnish Direct » (the EN brand), FR « Ameublo Direct ».
   - The snippet GETs `/api/roue` first; with the kill switch on, nothing appears (re-checked after 24 h).
   - Desktop: it opens by itself once, after 20 s, 50 % scroll or exit intent. Phone: 25 s or 60 % scroll.
+  - It opens by itself only for NEW visitors. It stays quiet (tab only, marked seen) for:
+    - a logged-in customer (Liquid `customer`, via `data-customer`);
+    - an email click (`_kx`, `utm_medium=email`, `utm_source=klaviyo`);
+    - a visitor Klaviyo already identifies: the `__kla_id` cookie is base64 JSON and holds `$exchange_id` / `$email` once known.
+    - `klaviyo.isIdentified` is NOT callable on this store (checked 2026-10-19), so don't rely on it.
   - Phone: it opens by itself only on the home and collection pages, never over a product page. Elsewhere it is a
     left-edge tab, because the bottom corners belong to the assistant and Messenger.
   - After a win, the tab shows the prize and a 72 h countdown.
-- **Repeat spins never return the code** (anyone can type someone else's email): the dialog says it is in their inbox.
+- **Repeat spins never return the code** (anyone can type someone else's email): the dialog says « Un tour par personne ».
 - **Margin guard paginates** active discounts: every spin adds one single-use code for 72 h.
 - **Legal:** no purchase is needed, the odds and rules are in the dialog, and consent is never pre-checked (CASL).
+  - Short rules under the form (Competition Act s.74.06): no purchase · Canada 18+ · skill question · closing date
+    31 janvier 2027 (`ROUE_ENDS_AT`; the server closes after it — move it together with the snippet text to extend).
+  - Privacy-policy link at the point of collection (Québec Loi 25).
+  - RACJ: Québec stopped regulating publicity contests on 2023-10-27 (Bill 17), so there is nothing to declare.
   - **Skill-testing question** (Criminal Code s.206, approved by Mat 2026-10-19): the form asks « a + b × c = ? »
     (random small operands). The snippet checks it and draws a new one on a wrong answer; the server re-checks it
     with `isSkillAnswerCorrect` and answers 400 `skill` otherwise.
   - CASL mailing address: Mat will get a PO box (case postale); add it to the form and the 3 emails once he sends it.
-  - RACJ: Mat's position is that it is only a discount (everyone always wins), so not a declared contest.
 
 ## Pastilles de couleur = photo de la couleur (2026-10-18)
 

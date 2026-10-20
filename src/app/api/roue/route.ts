@@ -1,12 +1,13 @@
 /**
  * POST /api/roue — Roue de bienvenue spin (storefront, cross-origin).
  *
- * Body: { email, consent: true, locale: "fr"|"en", website?: "" (honeypot), skill: { a, b, c, answer } }
+ * Body: { email, consent: boolean, locale: "fr"|"en", website?: "" (honeypot), skill: { a, b, c, answer } }
  * (skill-testing question a + b × c, required by law before a prize drawn by chance).
- * The server draws the prize, creates a unique single-use Shopify code valid 72 h, subscribes the visitor to email
- * marketing (they ticked the consent box: playing IS the newsletter signup, said on the form) and fires the Klaviyo
- * event that sends the code + 2 reminders. One spin per normalized email: a repeat returns the same prize and code.
- * Kill switch: settings `roue_enabled` = "0" → 503. See src/lib/welcome-wheel.ts.
+ * The server draws the prize, creates a unique single-use Shopify code valid 72 h and fires the Klaviyo event that
+ * sends the code + 2 reminders. Marketing consent is OPTIONAL (CASL: consent may not be a condition of playing):
+ * only a ticked box subscribes the visitor, and Klaviyo sends the flow emails to subscribed profiles only — without
+ * it the visitor keeps the code shown on screen (also auto-applied to the cart). One spin per normalized email.
+ * Kill switch: settings `roue_enabled` = "0" → 503; also 503 after ROUE_ENDS_AT. See src/lib/welcome-wheel.ts.
  */
 import { NextResponse } from "next/server";
 import {
@@ -21,6 +22,7 @@ import { checkRateLimit } from "@/lib/rate-limiter";
 import {
   WHEEL_PRIZES,
   SPINS_PER_IP_PER_DAY,
+  ROUE_ENDS_AT,
   drawPrizeIndex,
   isValidEmail,
   isSkillAnswerCorrect,
@@ -54,8 +56,12 @@ export async function OPTIONS(request: Request) {
 }
 
 /** GET /api/roue — is the wheel on? Read by the snippet before it shows anything (edge-cached 2 min). */
+async function isOpen(): Promise<boolean> {
+  return Date.now() <= ROUE_ENDS_AT && (await getSetting("roue_enabled")) !== "0";
+}
+
 export async function GET(request: Request) {
-  const enabled = (await getSetting("roue_enabled")) !== "0";
+  const enabled = await isOpen();
   return NextResponse.json({ enabled }, { headers: { ...corsHeaders(request.headers.get("origin")), "Cache-Control": "public, s-maxage=120, stale-while-revalidate=600" } });
 }
 
@@ -97,7 +103,7 @@ export async function POST(request: Request) {
   const ip = clientIp(request);
   if (!checkRateLimit(`roue:${ip}`, 6, 60_000).allowed) return json(429, { success: false, error: "rate" });
 
-  if ((await getSetting("roue_enabled")) === "0") return json(503, { success: false, error: "off" });
+  if (!(await isOpen())) return json(503, { success: false, error: "off" });
 
   let body: { email?: unknown; consent?: unknown; locale?: unknown; website?: unknown; skill?: unknown };
   try {
@@ -108,7 +114,7 @@ export async function POST(request: Request) {
   // Honeypot: a hidden field real visitors never fill. Answer like a failure, create nothing.
   if (typeof body.website === "string" && body.website.trim() !== "") return json(400, { success: false, error: "email" });
   if (!isValidEmail(body.email)) return json(400, { success: false, error: "email" });
-  if (body.consent !== true) return json(400, { success: false, error: "consent" });
+  const consent = body.consent === true;
   if (!isSkillAnswerCorrect(body.skill)) return json(400, { success: false, error: "skill" });
 
   const email = body.email.trim().toLowerCase();
@@ -118,7 +124,8 @@ export async function POST(request: Request) {
   const existing = await getWheelSpin(emailKey);
   if (existing) {
     const idx = WHEEL_PRIZES.findIndex((p) => p.key === existing.prize_key);
-    // Already played: never hand the code back (anyone could type someone else's email). The code is in their email.
+    // Already played: never hand the code back (anyone could type someone else's email). It is on their first
+    // device and, if they ticked the box, in their inbox.
     if (idx >= 0 && existing.code) return json(200, result(idx, null, existing.expires_at, true));
     // Reserved but no code: a concurrent request is still creating it — or one crashed long ago: free it, draw again.
     if (Date.now() / 1000 - existing.created_at < STALE_RESERVATION_S) return json(409, { success: false, error: "busy" });
@@ -155,7 +162,8 @@ export async function POST(request: Request) {
   }
 
   // Best effort: the visitor already sees the code on screen, so a Klaviyo hiccup must not fail the spin.
-  try {
+  // No consent → nothing goes to Klaviyo: the event drives the 3 reminder emails, which need consent.
+  if (consent) try {
     const listId = await getSetting("roue_klaviyo_list_id");
     const sub = await subscribeWheelProfile(email, listId);
     if (!sub.ok) console.warn(`[roue] Klaviyo subscribe failed: ${sub.status} ${sub.error}`);
