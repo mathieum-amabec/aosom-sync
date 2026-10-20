@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.42] - 2026-10-19
+
+### Changed
+
+- **Roue de bienvenue — legal and clarity pass.** Email-marketing consent is now optional to play (CASL forbids making it a condition): without it nothing is sent to Klaviyo and the visitor keeps the code on screen and in the cart. The wheel closes on its printed end date, 31 janvier 2027 (`ROUE_ENDS_AT`, GET and POST answer as switched off afterwards). The theme snippet is redesigned so the wheel reads as a wheel of fortune at a glance, with one task per step and the short contest rules under the form.
+
 ## [0.5.107.41] - 2026-10-19
 
 ### Added

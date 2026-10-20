@@ -66,10 +66,22 @@ describe("POST /api/roue", () => {
     expect(trackWheelWin).not.toHaveBeenCalled();
   });
 
-  it("requires the consent box", async () => {
+  it("plays without the consent box (CASL: no bundled consent) but sends nothing to Klaviyo", async () => {
     const res = await POST(post({ ...OK, consent: false }));
-    expect(res.status).toBe(400);
-    expect(createWheelDiscount).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect((await res.json()).code).toBe("ROUE-ABCDEF");
+    expect(subscribeWheelProfile).not.toHaveBeenCalled();
+    expect(trackWheelWin).not.toHaveBeenCalled();
+  });
+
+  it("closes after the end date printed in the rules", async () => {
+    vi.useFakeTimers({ now: new Date("2027-02-01T12:00:00Z"), toFake: ["Date"] });
+    try {
+      expect((await POST(post(OK))).status).toBe(503);
+      expect(await (await GET(new Request("https://x/api/roue"))).json()).toEqual({ enabled: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("requires the right answer to the skill-testing question", async () => {
