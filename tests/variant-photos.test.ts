@@ -58,6 +58,22 @@ describe("planColourPhotos", () => {
     const [a] = planColourPhotos([{ colour: "Vert", currentImageId: null }], sources, gallery);
     expect(a.action).toBe("no-source");
   });
+  it("keeps a colour with a photo of its own per size", () => {
+    const g = [...gallery, { id: 4, src: "https://cdn/b2.jpg" }];
+    const s = [{ ...sources[0], images: [...sources[0].images, "https://a/b2.jpg"] }, sources[1]];
+    const [a] = planColourPhotos([{ colour: "Noir", currentImageId: null, variantImageIds: [2, 4] }], s, g);
+    expect(a.action).toBe("ok");
+  });
+  it("still fixes a colour when one of its sizes shows another colour, a shared shot or nothing", () => {
+    for (const ids of [[2, 3], [2, 1], [2, null]]) {
+      const [a] = planColourPhotos([{ colour: "Noir", currentImageId: null, variantImageIds: ids }], sources, gallery);
+      expect(a).toMatchObject({ action: "attach", imageId: 2 });
+    }
+  });
+  it("sees a photo used by one size of a colour as shared with another colour", () => {
+    const r = planColourPhotos([{ colour: "Noir", currentImageId: null, variantImageIds: [2, 9] }, { colour: "Blanc", currentImageId: 9 }], sources, gallery);
+    expect(r.map((a) => a.action)).toEqual(["attach", "attach"]);
+  });
   it("finds a colour's index by file", () => {
     expect(colourPhotoIndex("Blanc", sources, ["https://cdn/life.jpg", "https://cdn/w_0f0f0f0f-1111-2222-3333-444444444444.jpg"])).toBe(1);
     expect(colourPhotoIndex("Gris", sources, ["https://cdn/life.jpg"])).toBe(-1);
@@ -110,6 +126,22 @@ describe("planProduct", () => {
     const idx = new Map([["P1", [{ sku: "T-BK", color: "Black", images: ["https://a/tb.jpg"] }, { sku: "T-NEWWT", color: "White", images: ["https://a/tw.jpg"] }]]]);
     expect(planProduct(q, f, idx)!.actions.find((a) => a.colour === "Blanc")).toMatchObject({ action: "upload", url: "https://a/tw.jpg" });
     expect(planProduct(q, f)!.actions.find((a) => a.colour === "Blanc")!.action).toBe("no-source");
+  });
+  it("keeps one photo per size of the same colour (2026-10-20: 64 L and 127 L bird cages)", () => {
+    const c: ShopProduct = {
+      id: 9, handle: "cage", tags: "",
+      options: [{ name: "Couleur", position: 1, values: ["Gris foncé", "Blanc"] }, { name: "Taille", position: 2, values: ["64L", "127L"] }],
+      variants: [
+        { id: 91, sku: "C-S", option1: "Gris foncé", option2: "64L", image_id: 1 },
+        { id: 92, sku: "C-L", option1: "Gris foncé", option2: "127L", image_id: 2 },
+        { id: 93, sku: "C-W", option1: "Blanc", option2: "64L", image_id: 3 },
+      ],
+      images: [{ id: 1, src: "https://cdn/small.jpg" }, { id: 2, src: "https://cdn/large.jpg" }, { id: 3, src: "https://cdn/white.jpg" }],
+    };
+    const f = new Map([["C-S", { color: "Black", images: ["https://a/small.jpg"] }], ["C-L", { color: "Black", images: ["https://a/large.jpg"] }], ["C-W", { color: "White", images: ["https://a/white.jpg"] }]]);
+    expect(planProduct(c, f)!.actions.map((a) => a.action)).toEqual(["ok", "ok"]);
+    const wrong = { ...c, variants: c.variants.map((v) => (v.id === 92 ? { ...v, image_id: 3 } : v)) };
+    expect(planProduct(wrong, f)!.actions.find((a) => a.colour === "Gris foncé")).toMatchObject({ action: "attach", imageId: 1, variantIds: [91, 92] });
   });
   it("ignores single-colour products", () => {
     expect(planProduct({ ...p, options: [{ name: "Couleur", position: 1, values: ["Noir"] }] }, feed)).toBeNull();

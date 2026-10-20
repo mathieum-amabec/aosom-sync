@@ -108,8 +108,9 @@ export function planProduct(
   }
   const colours = [...byColour.entries()].map(([colour, vs]) => {
     const ids = new Set(vs.map((v) => v.image_id));
-    // Variants of one colour that disagree count as "no photo": they all get the colour's own.
-    return { colour, currentImageId: ids.size === 1 ? vs[0].image_id : null };
+    // Variants of one colour that disagree (a photo per size) are judged one by one; if any is wrong, they all get
+    // the colour's own photo.
+    return ids.size === 1 ? { colour, currentImageId: vs[0].image_id } : { colour, currentImageId: null, variantImageIds: vs.map((v) => v.image_id) };
   });
   // A colour whose SKUs all left the feed is usually still sold by Aosom under a renamed SKU (suffix corrected, see
   // memory "Aosom renames SKU suffixes"). Its photo is then found in the same Aosom product group (PSIN): the
