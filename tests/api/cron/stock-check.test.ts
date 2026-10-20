@@ -378,7 +378,7 @@ describe("degradation", () => {
 describe("baseline persistence", () => {
   it("writes the flipped product's baseline right after its own write, not batched at the end", async () => {
     const order: string[] = [];
-    vi.mocked(updateShopifyProduct).mockImplementation(async (id: string) => { order.push(`shopify:${id}`); });
+    vi.mocked(updateShopifyProduct).mockImplementation(async (id: string) => { order.push(`shopify:${id}`); return undefined; });
     vi.mocked(updateStockBaselineQty).mockImplementation(async (u) => {
       order.push(`baseline:${(u as Array<{ sku: string }>)[0].sku}`);
     });

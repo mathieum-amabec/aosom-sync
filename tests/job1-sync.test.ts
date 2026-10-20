@@ -130,6 +130,7 @@ vi.mock("@/lib/shopify-client", () => ({
   createShopifyProduct: vi.fn().mockResolvedValue("new-shopify-id"),
   addProductToCollection: vi.fn().mockResolvedValue(undefined),
   getProductCollections: vi.fn().mockResolvedValue([]),
+  attachVariantImages: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock("@/lib/variant-merger", () => ({
@@ -1356,6 +1357,19 @@ describe("runShopifyPush — never overwrites the authored description", () => {
     // But the authored description is untouched.
     expect(updates).not.toHaveProperty("bodyHtml");
     expect(JSON.stringify(updates)).not.toContain("Raw English feed copy");
+  });
+
+  // 2026-10-19: replacing a gallery drops every variant's image link, so each colour's photo is re-attached at once.
+  it("re-attaches each colour's photo after pushing a new gallery", async () => {
+    const diff = descDiff("G4");
+    diff.changes.push({ field: "images", sku: "G4-BK", oldValue: "0 images", newValue: "2 images" });
+    vi.mocked(diffEngine.computeDiffs).mockReturnValue([diff] as ReturnType<typeof diffEngine.computeDiffs>);
+    const updated = { variants: [{ id: 1, sku: "G4-BK" }], images: [{ id: 9, src: "https://cdn.shopify.com/a.jpg" }] };
+    vi.mocked(shopifyClient.updateShopifyProduct).mockResolvedValueOnce(updated);
+
+    await runShopifyPush();
+
+    expect(shopifyClient.attachVariantImages).toHaveBeenCalledWith(updated, diff.aosomProduct);
   });
 
   // productUpdates is assembled field-by-field with independent `if` branches, so

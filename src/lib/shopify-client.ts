@@ -769,7 +769,7 @@ export async function updateShopifyProduct(
     status?: "active" | "draft" | "archived";
     tags?: string[];
   }
-): Promise<void> {
+): Promise<{ variants?: { id: number; sku?: string }[]; images?: { id: number; src?: string }[] } | undefined> {
   const payload: Record<string, unknown> = { id: shopifyId };
   if (updates.title !== undefined) payload.title = updates.title;
   if (updates.bodyHtml !== undefined) payload.body_html = updates.bodyHtml;
@@ -788,6 +788,10 @@ export async function updateShopifyProduct(
     const text = await response.text();
     throw new Error(`Shopify update failed: ${response.status} — ${text}`);
   }
+  // The updated product (variants + new image ids), so a caller that replaced the gallery can re-attach each
+  // colour's photo — replacing images drops every variant's image link.
+  const data = await response.json().catch(() => null);
+  return data?.product;
 }
 
 /**
