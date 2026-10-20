@@ -33,7 +33,9 @@ import { AUTH } from "@/lib/config";
 // "/oauth" + "/.well-known" are the OAuth endpoints for the MCP connector (the consent page checks the
 // admin session itself and redirects to /login). "/api/mcp" is public to the SESSION check because it authenticates with its own Bearer key
 // (hashed in the mcp_keys table, managed under Réglages → MCP). Read-only tools.
-const PUBLIC_PATHS = ["/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/pixel/pinterest-script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/ugc-videos", "/api/video-serve", "/api/assistant", "/api/trending", "/api/mcp", "/oauth", "/.well-known"];
+// "/api/roue" is public so the storefront "Roue de bienvenue" can POST a spin (cross-origin, Origin allowlist,
+// per-IP limits, one spin per email, kill switch settings.roue_enabled).
+const PUBLIC_PATHS = ["/api/roue", "/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/pixel/pinterest-script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/ugc-videos", "/api/video-serve", "/api/assistant", "/api/trending", "/api/mcp", "/oauth", "/.well-known"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(

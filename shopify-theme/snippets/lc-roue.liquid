@@ -1,0 +1,234 @@
+{%- comment -%}
+  Roue de bienvenue (2026-10-19). One spin per person, prize drawn by the SERVER (aosom-sync /api/roue), unique code
+  valid 72 h, auto-applied through /discount/CODE. Slice sizes = the real odds (45/30/17/7/1 %).
+  Desktop: opens itself once after 20 s, 50 % scroll or exit intent. Phone: opens itself once only on the home and
+  collection pages (never over a product page); everywhere else a small "🎁" tab bottom-left. Never on cart/account.
+  Kill switch: settings.roue_enabled = "0" on the server. The snippet GETs /api/roue first and shows nothing when off.
+  Phone auto-open: 25 s or 60 % scroll (desktop 20 s / 50 % / exit intent).
+{%- endcomment -%}
+{%- assign loc = request.locale.iso_code | downcase -%}
+{%- liquid
+  assign roue_show = true
+  if request.page_type == 'cart' or request.page_type == 'captcha' or request.page_type == 'password'
+    assign roue_show = false
+  endif
+  if request.page_type contains 'customers'
+    assign roue_show = false
+  endif
+-%}
+{%- if roue_show -%}
+<div id="lc-roue" class="lc-roue" data-loc="{{ loc }}" data-page="{{ request.page_type }}" hidden>
+  <button type="button" class="lc-roue__tab" data-roue-open aria-haspopup="dialog">
+    <span class="lc-roue__tab-ico" aria-hidden="true">🎁</span><span class="lc-roue__tab-txt">{% if loc == 'en' %}Spin &amp; win{% else %}Tourne la roue{% endif %}</span>
+  </button>
+  <div class="lc-roue__dlg" role="dialog" aria-modal="true" aria-labelledby="lc-roue-title" hidden>
+    <div class="lc-roue__ov" data-roue-close></div>
+    <div class="lc-roue__card">
+      <button type="button" class="lc-roue__x" data-roue-close aria-label="{% if loc == 'en' %}Close{% else %}Fermer{% endif %}">&times;</button>
+      <div class="lc-roue__wheelbox">
+        <div class="lc-roue__pin" aria-hidden="true"></div>
+        <svg class="lc-roue__wheel" viewBox="-110 -110 220 220" aria-hidden="true"></svg>
+        <div class="lc-roue__hub" aria-hidden="true">A</div>
+      </div>
+      <div class="lc-roue__body">
+        <div class="lc-roue__s1">
+          <h2 id="lc-roue-title" class="lc-roue__title">{% if loc == 'en' %}Spin for your welcome discount{% else %}Tourne la roue pour ton rabais de bienvenue{% endif %}</h2>
+          <p class="lc-roue__lead">{% if loc == 'en' %}Every spin wins: up to $100 off. One spin per person.{% else %}Chaque tour gagne&nbsp;: jusqu'à 100&nbsp;$ de rabais. Un tour par personne.{% endif %}</p>
+          <form class="lc-roue__form" novalidate>
+            <input class="lc-roue__email" type="email" name="email" required autocomplete="email" inputmode="email" placeholder="{% if loc == 'en' %}your@email.com{% else %}ton@courriel.com{% endif %}" aria-label="{% if loc == 'en' %}Email{% else %}Courriel{% endif %}">
+            <input class="lc-roue__hp" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+            <label class="lc-roue__consent"><input type="checkbox" name="consent" required> <span>{% if loc == 'en' %}I agree to receive emails from Ameublo Direct (discounts, new arrivals). Unsubscribe in one click. Contact: info@ameublodirect.ca{% else %}J'accepte de recevoir les courriels d'Ameublo Direct (rabais, nouveautés). Désabonnement en un clic. Contact&nbsp;: info@ameublodirect.ca{% endif %}</span></label>
+            <label class="lc-roue__skill"><span>{% if loc == 'en' %}Skill-testing question:{% else %}Question d'habileté&nbsp;:{% endif %} <b class="lc-roue__q"></b> =</span><input type="text" name="skill" inputmode="numeric" autocomplete="off" maxlength="4" required aria-label="{% if loc == 'en' %}Answer{% else %}Réponse{% endif %}"></label>
+            <button class="lc-roue__btn" type="submit">{% if loc == 'en' %}Spin the wheel{% else %}Tourner la roue{% endif %}</button>
+            <p class="lc-roue__msg" role="alert" hidden></p>
+          </form>
+        </div>
+        <div class="lc-roue__s2" hidden>
+          <p class="lc-roue__won">{% if loc == 'en' %}You won{% else %}Tu as gagné{% endif %}</p>
+          <p class="lc-roue__prize"></p>
+          <button type="button" class="lc-roue__code" data-roue-copy title="{% if loc == 'en' %}Copy{% else %}Copier{% endif %}"></button>
+          <p class="lc-roue__applied">{% if loc == 'en' %}✓ Applied automatically at checkout · also sent by email{% else %}✓ Appliqué automatiquement à la caisse · aussi envoyé par courriel{% endif %}</p>
+          <p class="lc-roue__timer" aria-live="off"></p>
+          <a class="lc-roue__btn lc-roue__shop" href="{% if loc == 'en' %}/en/collections/all{% else %}/collections/all{% endif %}">{% if loc == 'en' %}Shop now{% else %}Magasiner maintenant{% endif %}</a>
+        </div>
+        <details class="lc-roue__rules">
+          <summary>{% if loc == 'en' %}Odds and rules{% else %}Chances et règlement{% endif %}</summary>
+          <ul class="lc-roue__odds"></ul>
+          <p>{% if loc == 'en' %}Open to residents of Canada aged 18 or older, until further notice on this page. Every spin wins one of the prizes above; the number of prizes is unlimited. No purchase needed to play. To play, you must first correctly answer a mathematical skill-testing question. One spin per person (one email). Single-use code, valid 72 h, on the subtotal before taxes and shipping, once the minimum is reached; not combinable with other discounts (the 2nd-item discount included). No cash value. Organizer: Ameublo Direct, Saint-Hubert, QC — info@ameublodirect.ca.{% else %}Ouvert aux résidents du Canada de 18 ans et plus, jusqu'à avis contraire sur cette page. Chaque tour gagne un des prix ci-dessus; le nombre de prix est illimité. Aucun achat requis pour participer. Pour jouer, il faut d'abord répondre correctement à une question d'habileté mathématique. Un tour par personne (un courriel). Code à usage unique, valide 72&nbsp;h, sur le sous-total avant taxes et livraison, une fois le minimum atteint; non cumulable avec les autres rabais (dont le rabais du 2e article). Aucune valeur monétaire. Organisateur&nbsp;: Ameublo Direct, Saint-Hubert, QC — info@ameublodirect.ca.{% endif %}</p>
+        </details>
+      </div>
+    </div>
+  </div>
+</div>
+<style>
+.lc-roue{font-family:var(--lc-font-text,Arial,sans-serif);color:var(--lc-navy,#1B2A4A)}
+.lc-roue__tab{position:fixed;left:max(14px,env(safe-area-inset-left,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:9990;display:flex;align-items:center;gap:8px;padding:10px 16px 10px 12px;border:0;border-radius:999px;background:var(--lc-navy,#1B2A4A);color:#fff;font:700 14px/1.1 var(--lc-font-text,Arial,sans-serif);box-shadow:0 6px 18px rgba(27,42,74,.3);cursor:pointer}
+.lc-roue__tab-ico{font-size:20px;line-height:1}
+.lc-roue__tab-txt{white-space:pre-line}
+.lc-roue__tab:hover{background:var(--lc-terra,#B8553C)}
+.lc-roue.is-won .lc-roue__tab{background:var(--lc-terra-btn,#B8553C)}
+body:has(.sticky-atc.is-visible) .lc-roue__tab{bottom:calc(78px + env(safe-area-inset-bottom,0px))}
+/* Phone: the bottom corners belong to the assistant (left) and Messenger (right), so the wheel is a small tab on the
+   left edge instead. */
+@media(max-width:749px){
+  .lc-roue__tab,body:has(.sticky-atc.is-visible) .lc-roue__tab{left:0;bottom:auto;top:56%;flex-direction:column;gap:3px;width:58px;padding:9px 4px 8px;border-radius:0 14px 14px 0;font-size:11px;line-height:1.15;text-align:center}
+  .lc-roue__tab-ico{font-size:22px}
+}
+.lc-roue__dlg{position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px}
+.lc-roue__dlg[hidden]{display:none}
+.lc-roue__ov{position:absolute;inset:0;background:rgba(26,26,46,.6)}
+.lc-roue__card{position:relative;width:100%;max-width:420px;max-height:calc(100dvh - 32px);overflow:auto;background:#fff;border-radius:24px;box-shadow:0 20px 60px rgba(0,0,0,.35);animation:lc-roue-in .3s ease both}
+@keyframes lc-roue-in{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
+.lc-roue__x{position:absolute;top:6px;right:10px;z-index:3;width:40px;height:40px;border:0;background:none;font-size:30px;line-height:1;color:#fff;cursor:pointer}
+.lc-roue__wheelbox{position:relative;background:var(--lc-navy,#1B2A4A);padding:22px 0 18px;display:flex;justify-content:center}
+.lc-roue__wheel{width:min(230px,58vw);height:auto;display:block;border-radius:50%;box-shadow:0 0 0 6px var(--lc-sun,#F2C14E),0 8px 24px rgba(0,0,0,.35);will-change:transform}
+.lc-roue__pin{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:2;width:0;height:0;border-left:14px solid transparent;border-right:14px solid transparent;border-top:26px solid #fff;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4))}
+.lc-roue__hub{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);margin-top:2px;width:44px;height:44px;border-radius:50%;background:#fff;color:var(--lc-navy,#1B2A4A);font:800 20px/44px var(--lc-font-display,Georgia,serif);text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+.lc-roue__body{padding:18px 22px 20px;text-align:center}
+.lc-roue__title{margin:0 0 6px;font:600 22px/1.25 var(--lc-font-display,Georgia,serif);color:var(--lc-navy,#1B2A4A);text-wrap:balance}
+.lc-roue__lead{margin:0 0 14px;font-size:14px;line-height:1.45;color:#4a4f5c}
+.lc-roue__form{display:flex;flex-direction:column;gap:10px;text-align:left}
+.lc-roue__email{padding:12px 14px;border:1px solid #d9d2c7;border-radius:999px;font:16px var(--lc-font-text,Arial,sans-serif)}
+.lc-roue__email:focus{outline:2px solid var(--lc-terra,#B8553C);border-color:var(--lc-terra,#B8553C)}
+.lc-roue__hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.lc-roue__consent{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;line-height:1.4;color:#4a4f5c;cursor:pointer}
+.lc-roue__consent input{margin:2px 0 0;width:18px;height:18px;flex:none;accent-color:var(--lc-navy,#1B2A4A)}
+.lc-roue__skill{display:flex;align-items:center;gap:8px;font-size:13.5px;color:#4a4f5c}
+.lc-roue__skill b{color:var(--lc-navy,#1B2A4A);white-space:nowrap}
+.lc-roue__skill input{width:72px;flex:none;padding:9px 10px;border:1px solid #d9d2c7;border-radius:10px;font:16px var(--lc-font-text,Arial,sans-serif);text-align:center}
+.lc-roue__skill input:focus{outline:2px solid var(--lc-terra,#B8553C);border-color:var(--lc-terra,#B8553C)}
+.lc-roue__btn{display:block;width:100%;padding:14px;border:0;border-radius:999px;background:var(--lc-terra-btn,#B8553C);color:#fff;font:700 16px var(--lc-font-text,Arial,sans-serif);text-align:center;text-decoration:none;cursor:pointer}
+.lc-roue__btn:hover{background:var(--lc-navy,#1B2A4A);color:#fff}
+.lc-roue__btn:disabled{opacity:.7;cursor:default}
+.lc-roue__msg{margin:0;font-size:13px;color:#b3261e;text-align:center}
+.lc-roue__won{margin:0;font-size:14px;color:#4a4f5c}
+.lc-roue__prize{margin:2px 0 10px;font:700 28px/1.15 var(--lc-font-display,Georgia,serif);color:var(--lc-navy,#1B2A4A)}
+.lc-roue__code{display:inline-block;padding:10px 20px;border:2px dashed var(--lc-terra-btn,#B8553C);border-radius:12px;background:#fff;font:800 22px var(--lc-font-text,Arial,sans-serif);letter-spacing:.08em;color:var(--lc-navy,#1B2A4A);cursor:copy;user-select:all}
+.lc-roue__applied{margin:10px 0 2px;font-size:13px;color:#2e7d4f;font-weight:600}
+.lc-roue__timer{margin:0 0 14px;font-size:13px;color:#4a4f5c;font-variant-numeric:tabular-nums}
+.lc-roue__rules{margin-top:14px;text-align:left;font-size:11.5px;line-height:1.45;color:#5b6172}
+.lc-roue__rules summary{cursor:pointer;text-align:center;text-decoration:underline}
+.lc-roue__odds{margin:8px 0;padding-left:18px}
+@media(prefers-reduced-motion:reduce){.lc-roue__card{animation:none}}
+</style>
+<script>
+(function(){
+  var root=document.getElementById('lc-roue'); if(!root) return;
+  var EN=root.getAttribute('data-loc')==='en', PAGE=root.getAttribute('data-page')||'';
+  var API='https://aosom-sync.vercel.app/api/roue', KEY='lc_roue_v1';
+  // Same order and weights as WHEEL_PRIZES in aosom-sync src/lib/welcome-wheel.ts — the server sends back the index.
+  var P=[{a:15,m:150,w:45,c:'#1B2A4A'},{a:25,m:250,w:30,c:'#B8553C'},{a:40,m:400,w:17,c:'#2F6B5E'},{a:60,m:600,w:7,c:'#F2C14E',t:'#1B2A4A'},{a:100,m:1000,w:1,c:'#FBF7F1',t:'#1B2A4A'}];
+  function money(n){return EN?('$'+n.toLocaleString('en-CA')):(n.toLocaleString('fr-CA')+' $');}
+  function label(p){return EN?(money(p.a)+' off '+money(p.m)+'+'):(money(p.a)+' dès '+money(p.m));}
+  var st={}; try{st=JSON.parse(localStorage.getItem(KEY)||'{}')||{};}catch(e){}
+  function save(){try{localStorage.setItem(KEY,JSON.stringify(st));}catch(e){}}
+  if(st.off && Date.now()-st.off<864e5) return; // kill switch seen less than 24 h ago
+  if(st.played) return; // played on another device: the code is in their email
+  if(st.code && st.exp && Date.parse(st.exp)<Date.now()) return; // expired: nothing more to show
+  // Ask the server first (edge-cached GET): with the kill switch on, nothing appears at all.
+  fetch(API,{method:'GET'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.enabled) start(); else { st.off=Date.now(); save(); } }).catch(function(){});
+  function start(){
+  root.hidden=false;
+  var dlg=root.querySelector('.lc-roue__dlg'), tab=root.querySelector('.lc-roue__tab'), tabTxt=root.querySelector('.lc-roue__tab-txt');
+  var svg=root.querySelector('.lc-roue__wheel'), s1=root.querySelector('.lc-roue__s1'), s2=root.querySelector('.lc-roue__s2');
+  var form=root.querySelector('.lc-roue__form'), msg=root.querySelector('.lc-roue__msg'), btn=form.querySelector('.lc-roue__btn');
+
+  // Wheel: slice i spans its weight in degrees, clockwise from 12 o'clock.
+  var NS='http://www.w3.org/2000/svg', total=0, spans=[]; P.forEach(function(p){total+=p.w;});
+  var acc=0; P.forEach(function(p){var a0=acc/total*360; acc+=p.w; spans.push([a0,acc/total*360]);});
+  function pt(r,deg){var t=(deg-90)*Math.PI/180;return [r*Math.cos(t),r*Math.sin(t)];}
+  P.forEach(function(p,i){
+    var a0=spans[i][0],a1=spans[i][1],s=pt(100,a0),e=pt(100,a1),large=(a1-a0)>180?1:0;
+    var path=document.createElementNS(NS,'path');
+    path.setAttribute('d','M0 0 L'+s[0].toFixed(2)+' '+s[1].toFixed(2)+' A100 100 0 '+large+' 1 '+e[0].toFixed(2)+' '+e[1].toFixed(2)+' Z');
+    path.setAttribute('fill',p.c); path.setAttribute('stroke','#fff'); path.setAttribute('stroke-width','1.2'); svg.appendChild(path);
+    var span=a1-a0; if(span<14) return; // a 1 % slice is too thin to label; the odds list below names it
+    var mid=(a0+a1)/2, g=document.createElementNS(NS,'g'); g.setAttribute('transform','rotate('+mid+')');
+    var t1=document.createElementNS(NS,'text'); t1.setAttribute('x','0'); t1.setAttribute('y','-66'); t1.setAttribute('text-anchor','middle');
+    t1.setAttribute('fill',p.t||'#fff'); t1.setAttribute('font-size',span>40?'17':'12'); t1.setAttribute('font-weight','800'); t1.setAttribute('font-family','Arial,sans-serif'); t1.textContent=money(p.a); g.appendChild(t1);
+    if(span>40){var t2=document.createElementNS(NS,'text'); t2.setAttribute('x','0'); t2.setAttribute('y','-50'); t2.setAttribute('text-anchor','middle'); t2.setAttribute('fill',p.t||'#fff'); t2.setAttribute('font-size','9.5'); t2.setAttribute('font-family','Arial,sans-serif'); t2.textContent=(EN?'on ':'dès ')+money(p.m); g.appendChild(t2);}
+    svg.appendChild(g);
+  });
+  var odds=root.querySelector('.lc-roue__odds');
+  P.forEach(function(p){var li=document.createElement('li'); li.textContent=label(p)+' — '+p.w+' %'; odds.appendChild(li);});
+
+  var lastFocus=null;
+  function open(){ if(!dlg.hidden) return; lastFocus=document.activeElement; dlg.hidden=false; st.seen=1; save(); document.documentElement.style.overflow='hidden';
+    var f=st.code?root.querySelector('.lc-roue__shop'):form.querySelector('.lc-roue__email'); setTimeout(function(){try{f.focus({preventScroll:true});}catch(e){}},50); }
+  function close(){ dlg.hidden=true; document.documentElement.style.overflow=''; if(lastFocus&&lastFocus.focus) try{lastFocus.focus();}catch(e){} }
+  root.addEventListener('click',function(e){ if(e.target.closest('[data-roue-open]')) open(); else if(e.target.closest('[data-roue-close]')) close(); });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&!dlg.hidden) close(); });
+
+  // Countdown on the tab and in the dialog once a code exists.
+  function left(){var ms=Date.parse(st.exp)-Date.now(); if(!(ms>0)) return null; var h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000), s=Math.floor(ms%60000/1000);
+    return {h:h,m:m,s:s,txt:h+' h '+(m<10?'0':'')+m+(h<1?' min '+(s<10?'0':'')+s+' s':'')};}
+  function showWon(){ root.classList.add('is-won'); s1.hidden=true; s2.hidden=false;
+    var p=P[st.i]; root.querySelector('.lc-roue__prize').textContent=label(p); root.querySelector('.lc-roue__code').textContent=st.code; tick(); }
+  function tick(){ if(!st.code) return; var l=left();
+    if(!l){ root.hidden=true; return; }
+    tabTxt.textContent=money(P[st.i].a)+(window.matchMedia('(max-width:749px)').matches?'\n':' · ')+l.txt;
+    root.querySelector('.lc-roue__timer').textContent=(EN?'Expires in ':'Expire dans ')+l.txt; }
+  if(st.code){ showWon(); setInterval(tick,1000); }
+
+  root.querySelector('[data-roue-copy]').addEventListener('click',function(){ var c=st.code; if(!c) return;
+    if(navigator.clipboard) navigator.clipboard.writeText(c).then(function(){ var b=root.querySelector('.lc-roue__code'); b.textContent=EN?'Copied!':'Copié!'; setTimeout(function(){b.textContent=c;},1200); }).catch(function(){}); });
+
+  // Spin: free-wheel while the server draws, then ease onto the slice it returns.
+  var angle=0, raf=0, spinning=false;
+  function setRot(a){ svg.style.transform='rotate('+a+'deg)'; }
+  function freeSpin(){ var last=performance.now(); spinning=true; (function f(t){ angle+=(t-last)*0.6; last=t; setRot(angle); if(spinning) raf=requestAnimationFrame(f); })(last); }
+  function landOn(i,done){ spinning=false; cancelAnimationFrame(raf);
+    var a0=spans[i][0],a1=spans[i][1],w=a1-a0, target=(a0+a1)/2+(Math.random()-.5)*w*.6; // a random point inside the slice
+    var end=angle+(360*5)+((360-((target+angle)%360))%360), start=angle, t0=performance.now(), D=4200;
+    (function f(t){ var k=Math.min(1,(t-t0)/D), e=1-Math.pow(1-k,4); angle=start+(end-start)*e; setRot(angle); if(k<1) requestAnimationFrame(f); else done(); })(t0); }
+  function fail(text){ spinning=false; cancelAnimationFrame(raf); btn.disabled=false; msg.hidden=false; msg.textContent=text; }
+  // Skill-testing question (required by law for a prize drawn by chance): a + b × c, re-checked by the server.
+  var Q={}; function rnd(lo,hi){return lo+Math.floor(Math.random()*(hi-lo+1));}
+  function newQ(){ Q={a:rnd(2,9),b:rnd(2,6),c:rnd(2,5)}; root.querySelector('.lc-roue__q').textContent=Q.a+' + '+Q.b+' × '+Q.c; form.skill.value=''; }
+  newQ();
+  var BAD_Q=EN?'Wrong answer to the question (multiplication first). Try this one.':'Mauvaise réponse à la question (la multiplication d’abord). Essaie celle-ci.';
+  form.addEventListener('submit',function(e){ e.preventDefault(); msg.hidden=true;
+    var email=(form.email.value||'').trim();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fail(EN?'Please enter a valid email.':'Entre un courriel valide.');
+    if(!form.consent.checked) return fail(EN?'Tick the box to receive your code by email.':'Coche la case pour recevoir ton code par courriel.');
+    var ans=(form.skill.value||'').trim();
+    if(!ans) return fail(EN?'Answer the skill-testing question.':'Réponds à la question d’habileté.');
+    if(Number(ans)!==Q.a+Q.b*Q.c){ newQ(); return fail(BAD_Q); }
+    btn.disabled=true; freeSpin();
+    fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,consent:true,locale:EN?'en':'fr',website:form.website.value,skill:{a:Q.a,b:Q.b,c:Q.c,answer:ans}})})
+      .then(function(r){return r.json().then(function(j){return {s:r.status,j:j};});})
+      .then(function(x){ var j=x.j||{};
+        if(j.success&&j.already&&j.prize&&!j.code){ // this email already played: the server never re-sends the code
+          spinning=false; cancelAnimationFrame(raf); st={played:1,seen:1}; save();
+          return fail(EN?('This email already played and won '+label(P[j.prize.index])+'. Your code is in your inbox.'):('Ce courriel a déjà joué et gagné '+label(P[j.prize.index])+'. Ton code est dans ta boîte courriel.'));
+        }
+        if(x.s===400&&j.error==='skill'){ newQ(); return fail(BAD_Q); }
+        if(!j.success||!j.code||!j.prize) {
+          if(x.s===503){ st.off=Date.now(); save(); setTimeout(function(){ close(); root.hidden=true; },2500); }
+          return fail(x.s===429?(EN?'Too many tries, please come back later.':'Trop d’essais, reviens un peu plus tard.'):(x.s===409?(EN?'One moment, try again.':'Un instant, réessaie.'):(EN?'Oops, the wheel is stuck. Try again in a moment.':'Oups, la roue est coincée. Réessaie dans un instant.')));
+        }
+        st={i:j.prize.index,code:j.code,exp:j.expiresAt,seen:1}; save();
+        try{ fetch('/discount/'+encodeURIComponent(j.code),{credentials:'same-origin'}); }catch(e){}
+        try{ if(window.klaviyo) window.klaviyo.push(['identify',{'$email':email}]); }catch(e){}
+        try{ if(window.fbq) window.fbq('track','Lead',{content_name:'Roue de bienvenue'}); }catch(e){}
+        var go=function(){ showWon(); setInterval(tick,1000); };
+        if(j.already){ spinning=false; cancelAnimationFrame(raf); go(); } else landOn(j.prize.index,go);
+      })
+      .catch(function(){ fail(EN?'Connection problem. Try again.':'Problème de connexion. Réessaie.'); });
+  });
+
+  // When it opens by itself: once per visitor, never over a product page on a phone.
+  if(st.seen||st.code) return;
+  var phone=window.matchMedia('(max-width:749px)').matches;
+  if(phone && PAGE!=='index' && PAGE!=='collection' && PAGE!=='list-collections') return;
+  var t0=Date.now(), fired=false;
+  function auto(){ if(fired||st.seen||st.code) return; fired=true; window.removeEventListener('scroll',onScroll); document.removeEventListener('mouseout',onOut); open(); }
+  function onScroll(){ var h=document.documentElement.scrollHeight-innerHeight; if(h>0&&(scrollY/h)>=(phone?.6:.5)&&Date.now()-t0>=8000) auto(); }
+  function onOut(e){ if(!e.relatedTarget&&e.clientY<=0&&Date.now()-t0>=5000) auto(); }
+  setTimeout(auto,phone?25000:20000);
+  window.addEventListener('scroll',onScroll,{passive:true});
+  if(!phone) document.addEventListener('mouseout',onOut);
+  }
+})();
+</script>
+{%- endif -%}

@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.41] - 2026-10-19
+
+### Added
+
+- **Roue de bienvenue — server side.** `POST /api/roue` (public, Origin allowlist, per-IP limits, kill switch `settings.roue_enabled="0"`) draws the prize on the server, keeps one spin per normalized email (table `wheel_spins`), creates a unique single-use Shopify code valid 72 h (fixed $ off a minimum subtotal, never more than 10 % of that minimum so the profit floor and the margin guard hold; combines with shipping only), records the email-marketing consent the visitor ticked in Klaviyo and fires the event "Roue gagnée" that drives the 3-email code flow. Prizes: 15 $ dès 150 $ (45 %), 25/250 (30 %), 40/400 (17 %), 60/600 (7 %), 100/1000 (1 %). Nothing on the storefront calls it until the theme snippet `lc-roue` is published.
+
 ## [0.5.107.40] - 2026-10-17
 
 ### Fixed
