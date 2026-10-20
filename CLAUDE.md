@@ -491,6 +491,11 @@ least 2× the old popup, add the Club Ameublo v3 page (retention, linked from Kl
   - EN copy says « Furnish Direct » (the EN brand), FR « Ameublo Direct ».
   - The snippet GETs `/api/roue` first; with the kill switch on, nothing appears (re-checked after 24 h).
   - Desktop: it opens by itself once, after 20 s, 50 % scroll or exit intent. Phone: 25 s or 60 % scroll.
+  - It opens by itself only for NEW visitors. It stays quiet (tab only, marked seen) for:
+    - a logged-in customer (Liquid `customer`, via `data-customer`);
+    - an email click (`_kx`, `utm_medium=email`, `utm_source=klaviyo`);
+    - a visitor Klaviyo already identifies: the `__kla_id` cookie is base64 JSON and holds `$exchange_id` / `$email` once known.
+    - `klaviyo.isIdentified` is NOT callable on this store (checked 2026-10-19), so don't rely on it.
   - Phone: it opens by itself only on the home and collection pages, never over a product page. Elsewhere it is a
     left-edge tab, because the bottom corners belong to the assistant and Messenger.
   - After a win, the tab shows the prize and a 72 h countdown.

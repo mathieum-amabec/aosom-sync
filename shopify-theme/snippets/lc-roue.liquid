@@ -6,7 +6,8 @@
   2) skill-testing question (Criminal Code s.206), re-checked by the server; 3) spin, prize, code, countdown.
   Desktop: opens itself once after 20 s, 50 % scroll or exit intent. Phone: opens itself once only on the home and
   collection pages (never over a product page), after 25 s or 60 % scroll; everywhere else a small tab on the left edge.
-  Never on cart/account. Kill switch: settings.roue_enabled = "0" on the server (also closed after ROUE_ENDS_AT).
+  Never on cart/account. It opens by itself only for NEW visitors: never for a logged-in customer, an email click
+  (_kx / utm_medium=email / utm_source=klaviyo) or a visitor Klaviyo already identifies; they keep the tab. Kill switch: settings.roue_enabled = "0" on the server (also closed after ROUE_ENDS_AT).
   CLOSING DATE: 31 janvier 2027 — keep it equal to ROUE_ENDS_AT in aosom-sync src/lib/welcome-wheel.ts.
 {%- endcomment -%}
 {%- assign loc = request.locale.iso_code | downcase -%}
@@ -20,7 +21,7 @@
   endif
 -%}
 {%- if roue_show -%}
-<div id="lc-roue" class="lc-roue" data-loc="{{ loc }}" data-page="{{ request.page_type }}" hidden>
+<div id="lc-roue" class="lc-roue" data-loc="{{ loc }}" data-page="{{ request.page_type }}"{% if customer %} data-customer="1"{% endif %} hidden>
   <button type="button" class="lc-roue__tab" data-roue-open aria-haspopup="dialog">
     <svg class="lc-roue__tab-ico" viewBox="-12 -12 24 24" aria-hidden="true"><circle r="11.5" fill="#F2C14E"/><path d="M0 0L0-10A10 10 0 0 1 9.5-3.1Z" fill="#1B2A4A"/><path d="M0 0L9.5-3.1A10 10 0 0 1 5.9 8.1Z" fill="#B8553C"/><path d="M0 0L5.9 8.1A10 10 0 0 1-5.9 8.1Z" fill="#2F6B5E"/><path d="M0 0L-5.9 8.1A10 10 0 0 1-9.5-3.1Z" fill="#1B2A4A"/><path d="M0 0L-9.5-3.1A10 10 0 0 1 0-10Z" fill="#B8553C"/><circle r="3" fill="#fff"/></svg>
     <span class="lc-roue__tab-txt">{% if loc == 'en' %}Spin &amp; win{% else %}Roue de fortune{% endif %}</span>
@@ -277,10 +278,20 @@ body:has(.sticky-atc.is-visible) .lc-roue__tab{bottom:calc(78px + env(safe-area-
 
   // When it opens by itself: once per visitor, never over a product page on a phone.
   if(st.seen||st.code) return;
+  // Known people never get the popup by itself (the tab stays): a logged-in customer, or a click from one of our
+  // emails (Klaviyo adds _kx / utm_medium=email). Mark them seen so it stays quiet on their next pages too.
+  // Klaviyo's __kla_id cookie is base64 JSON: {"cid":…} for a stranger, plus $exchange_id / $email once Klaviyo
+  // knows who it is (an earlier email click or signup), even on a later visit.
+  function klaKnown(){ try{ var c=document.cookie.match(/(?:^|; )__kla_id=([^;]+)/); if(!c) return false;
+    var o=JSON.parse(atob(decodeURIComponent(c[1]))); return !!(o&&(o.$exchange_id||o.$email||o.$phone_number)); }catch(e){ return false; } }
+  var qs=location.search;
+  if(root.getAttribute('data-customer')==='1'||/[?&]_kx=|[?&]utm_medium=email\b|[?&]utm_source=klaviyo\b/i.test(qs)||klaKnown()){ st.seen=1; save(); return; }
   var phone=window.matchMedia('(max-width:749px)').matches;
   if(phone && PAGE!=='index' && PAGE!=='collection' && PAGE!=='list-collections') return;
   var t0=Date.now(), fired=false;
-  function auto(){ if(fired||st.seen||st.code) return; fired=true; window.removeEventListener('scroll',onScroll); document.removeEventListener('mouseout',onOut); open(); }
+  function auto(){ if(fired||st.seen||st.code) return; fired=true; window.removeEventListener('scroll',onScroll); document.removeEventListener('mouseout',onOut);
+    if(klaKnown()){ st.seen=1; save(); return; } // Klaviyo may have identified them since the page loaded
+    open(); }
   function onScroll(){ var h=document.documentElement.scrollHeight-innerHeight; if(h>0&&(scrollY/h)>=(phone?.6:.5)&&Date.now()-t0>=8000) auto(); }
   function onOut(e){ if(!e.relatedTarget&&e.clientY<=0&&Date.now()-t0>=5000) auto(); }
   setTimeout(auto,phone?25000:20000);
