@@ -2,6 +2,11 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.43] - 2026-10-20
+
+### Added
+
+- **"Est-ce que ça va entrer chez moi ?" fit checker (product pages).** Every Aosom product can now carry its real assembled size and shipping-box sizes per variant, in cm, in the `custom.lc_dims` metafield (`src/lib/fit-dims.ts`). The feed's Length/Width/Height now name their unit ("47.80 in", "10.00 ft", "120.00 cm"); the raw strings are kept (`dimensionsRaw`) because the parsed numbers dropped it. New imports get the metafield at creation; `scripts/backfill-fit-dims.mts` fills existing products (dry-run by default). A product whose page states a different size gets nothing, so the checker never contradicts the page (audit: 1405 of 1459 pages agree). The theme snippet `lc-fit` (inside the first PDP question) compares the shopper's space and narrowest doorway with the product and its boxes, in inches or cm, with a top view to scale.
 ## [0.5.107.42] - 2026-10-19
 
 ### Changed

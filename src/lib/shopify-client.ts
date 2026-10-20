@@ -11,6 +11,7 @@ import { EN_FIELD_MAP, rejectEnValue, type EnTranslatableKey } from "./en-transl
 import { colourPhotoIndex, type ColourSource } from "./variant-photos";
 import { toEnglishColour } from "./colour-names";
 import { toFrenchSize } from "./size-names";
+import { buildFitDims, checkAgainstPage, serializeFitDims, FIT_DIMS_KEY, FIT_DIMS_NAMESPACE } from "./fit-dims";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -456,6 +457,13 @@ export async function createShopifyProduct(
     })),
   );
 
+  // Only rows that carry the feed's unit strings: the bare numbers in `dimensions` lost their unit (inch/ft/cm).
+  // Dropped when the generated description states a size no variant matches (fit-dims.ts checkAgainstPage).
+  const fitDims = checkAgainstPage(
+    buildFitDims(merged.variants.flatMap((v) => (v.dimensionsRaw ? [{ sku: v.sku, ...v.dimensionsRaw, boxSize: v.boxSize }] : []))),
+    content.descriptionFr,
+  );
+
   const payload = {
     product: {
       title: content.titleFr,
@@ -525,6 +533,8 @@ export async function createShopifyProduct(
           value: merged.brand || "Aosom",
           type: "single_line_text_field",
         },
+        // Per-SKU assembled + box sizes for the PDP "Est-ce que ça va entrer ?" checker (fit-dims.ts).
+        ...(fitDims ? [{ namespace: FIT_DIMS_NAMESPACE, key: FIT_DIMS_KEY, value: serializeFitDims(fitDims), type: "json" }] : []),
         // Shopify 422s the entire product create on a blank single_line_text_field
         // value, so drop any metafield whose value is empty/undefined (e.g. an LLM
         // that returned "" for a meta field).
