@@ -76,6 +76,12 @@ export interface ColourPhotoInput {
   colour: string;
   /** The image currently attached to the colour's variants (null = none, or they disagree). */
   currentImageId: number | string | null;
+  /**
+   * When the colour's variants disagree: the image of each variant. A colour sold in several sizes may rightly show a
+   * different photo per size (2026-10-20: the 127 L bird cage showed the 64 L cage because one photo per colour was
+   * forced). Such a colour is "ok" when every variant has a photo and each one passes the same test as a single photo.
+   */
+  variantImageIds?: Array<number | string | null>;
 }
 
 /**
@@ -96,24 +102,33 @@ export function planColourPhotos(colours: ColourPhotoInput[], sources: ColourSou
   const galleryByKey = new Map<string, GalleryImage>();
   for (const g of gallery) { const k = imageKey(g.src); if (k && !galleryByKey.has(k)) galleryByKey.set(k, g); }
   const srcById = new Map(gallery.map((g) => [String(g.id), g.src]));
-  const usage = new Map<string, number>();
-  for (const c of colours) if (c.currentImageId != null) usage.set(String(c.currentImageId), (usage.get(String(c.currentImageId)) ?? 0) + 1);
+  const shown = (c: ColourPhotoInput) => (c.currentImageId != null ? [c.currentImageId] : (c.variantImageIds ?? []).filter((id) => id != null));
+  const usage = new Map<string, Set<string>>(); // image id → colours showing it
+  for (const c of colours) for (const id of shown(c)) {
+    if (!usage.has(String(id))) usage.set(String(id), new Set());
+    usage.get(String(id))!.add(c.colour);
+  }
+  /** Why `imageId` is not a right photo for `colour`, or null when it is. */
+  const judge = (colour: string, imageId: number | string | null): string | null => {
+    const curSrc = imageId != null ? srcById.get(String(imageId)) : undefined;
+    if (imageId == null || !curSrc) return "aucune photo";
+    const curKey = imageKey(curSrc);
+    const curOwner = curKey ? owner.get(curKey) : undefined;
+    // Its own exclusive photo is right even when a colour without a source borrows it: that one is reported, not this.
+    if (curOwner === colour) return null;
+    if (curOwner) return `photo de « ${curOwner} »`;
+    if ((usage.get(String(imageId))?.size ?? 0) > 1) return "photo partagée avec une autre couleur";
+    if (allFeedKeys.has(curKey)) return "photo commune à plusieurs couleurs";
+    return null; // unknown to the feed: not judged here
+  };
 
   return colours.map((c): ColourPhotoAction => {
     const mine = excl.get(c.colour) ?? [];
-    const curSrc = c.currentImageId != null ? srcById.get(String(c.currentImageId)) : undefined;
-    const curKey = imageKey(curSrc);
-    const shared = c.currentImageId != null && (usage.get(String(c.currentImageId)) ?? 0) > 1;
-    const curOwner = curKey ? owner.get(curKey) : undefined;
-
-    let problem: string | null = null;
-    if (c.currentImageId == null || !curSrc) problem = "aucune photo";
-    // Its own exclusive photo is right even when a colour without a source borrows it: that one is reported, not this.
-    else if (curOwner === c.colour) return { colour: c.colour, action: "ok", imageId: c.currentImageId };
-    else if (curOwner) problem = `photo de « ${curOwner} »`;
-    else if (shared) problem = "photo partagée avec une autre couleur";
-    else if (allFeedKeys.has(curKey)) problem = "photo commune à plusieurs couleurs";
-    else return { colour: c.colour, action: "ok", imageId: c.currentImageId }; // unknown to the feed: not judged here
+    const perVariant = c.currentImageId == null && (c.variantImageIds?.length ?? 0) > 1 ? c.variantImageIds! : null;
+    const problem = perVariant
+      ? (perVariant.some((id) => id == null) ? "aucune photo" : perVariant.map((id) => judge(c.colour, id)).find((p) => p) ?? null)
+      : judge(c.colour, c.currentImageId);
+    if (!problem) return { colour: c.colour, action: "ok", imageId: (c.currentImageId ?? perVariant![0])! };
 
     if (mine.length === 0) return { colour: c.colour, action: "no-source", reason: problem };
     for (const u of mine) {
