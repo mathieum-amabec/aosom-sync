@@ -194,6 +194,10 @@
     {
       "path": "/api/cron/relance-paiement",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/flow-relay",
+      "schedule": "7,22,37,52 * * * *"
     }
   ]
 }

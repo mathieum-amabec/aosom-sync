@@ -7,6 +7,9 @@ import {
   buildTemplateHtml, campaignWentOut, emptyState, kv, metricId, parseCheckoutEvent, pruneState, recentEvents, renderItemsHtml,
   selectCandidates, sendRelanceCampaign, type CheckoutEvent, type RelanceState,
 } from "@/lib/relance-paiement";
+import { flowsSendingAgain } from "@/lib/flow-relay";
+
+const ABANDONED_CHECKOUT_FLOW = "Xw6R8f";
 
 /**
  * GET /api/cron/relance-paiement — every 15 min. Emails people who started a Shopify checkout
@@ -37,6 +40,10 @@ export async function GET(request: Request) {
 async function run(dryRun: boolean) {
   return trackCron("relance-paiement", async () => {
     const now = new Date();
+    // If Klaviyo's own Abandoned Checkout flow delivers again, stop: the customer would get both.
+    if ((await flowsSendingAgain(new Date(now.getTime() - 3 * 24 * 3600e3).toISOString().slice(0, 19))).has(ABANDONED_CHECKOUT_FLOW)) {
+      return NextResponse.json({ success: true, skipped: "klaviyo-flow-sending-again" });
+    }
     const since = new Date(now.getTime() - (RELANCE_MAX_AGE_H + 1) * 3600e3).toISOString().slice(0, 19);
     const [checkoutMetric, orderMetric] = await Promise.all([metricId(CHECKOUT_STARTED_METRIC), metricId(PLACED_ORDER_METRIC)]);
     const [checkouts, orders] = await Promise.all([recentEvents(checkoutMetric, since), recentEvents(orderMetric, since)]);
