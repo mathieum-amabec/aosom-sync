@@ -145,7 +145,7 @@ export async function campaignStatus(id: string): Promise<string> {
 }
 
 /** Only Klaviyo's own "No Recipients" cancellation is retried — never a campaign an operator cancelled. */
-export const shouldRetry = (status: string) => /(no|without) recipients/i.test(status);
+export const shouldRetry = (status: string) => /cancelled: no recipients/i.test(status);
 export const stillInFlight = (status: string) => /queued|scheduled|sending|adding|preparing|draft/i.test(status);
 
 /** Delete the one-shot lists of both relays once their campaign is old. */

@@ -29,12 +29,13 @@ describe("template rewriting", () => {
     expect(out).not.toContain("endunsubscribe");
   });
   it("fixes the returns, price-drop, review and 2nd-item wording", () => {
-    const out = rewriteBody(`<p>✓ Retours acceptés pendant 30 jours</p><p>Retours 30 jours · 30-day returns</p><p>en promotion. Les quantités sont limitées — profites-en avant que le prix ne remonte.</p><p>Ta commande est en route depuis quelques jours — on espère qu'elle te plaît !</p><p>Astuce : ajoute un 2<sup>e</sup> article et il passe à 10 % de rabais</p><a href="{{ event.url|default:'https://x' }}">`, "k");
+    const out = rewriteBody(`<p>✓ Retours acceptés pendant 30 jours</p><p>Retours 30 jours · 30-day returns</p><p>en promotion. Les quantités sont limitées — profites-en avant que le prix ne remonte.</p><p>Ta commande est en route depuis quelques jours — on espère qu'elle te plaît !</p><p>Astuce : ajoute un 2<sup>e</sup> article et il passe à <b>10 % de rabais</b></p><a href="{{ event.url|default:'https://x' }}">`, "k");
     expect(out).toContain("Retours sous 30 jours (frais de 10 % + étiquette de retour)");
     expect(out).toContain("30-day returns (10% fee + return label)");
     expect(out).not.toContain("quantités sont limitées");
     expect(out).toContain("Ta commande est arrivée ? On espère qu'elle te plaît !");
-    expect(out).toContain("le moins cher des deux est à 10 % de rabais");
+    expect(out).toContain("le moins cher des deux est à <b>10 % de rabais</b>");
+    expect(out).not.toContain("il passe à");
     expect(out).toContain("ev.product_url|default");
   });
   it("leaves static templates static", () => {
@@ -121,7 +122,7 @@ describe("state", () => {
   it("retries only Klaviyo's own No Recipients cancellation; in-flight is never resent", () => {
     expect(shouldRetry("Cancelled: No Recipients")).toBe(true);
     expect(shouldRetry("Cancelled")).toBe(false);
-    expect(shouldRetry("Queued without Recipients")).toBe(true);
+    expect(shouldRetry("Queued without Recipients")).toBe(false);
     for (const s of ["Adding Recipients", "Scheduled", "Sending", "Draft"]) { expect(stillInFlight(s)).toBe(true); expect(shouldRetry(s)).toBe(false); }
   });
 });

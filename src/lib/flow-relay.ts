@@ -89,7 +89,7 @@ const TEXT_FIXES: Array<[RegExp, string]> = [
   [/\s*Quantities are limited — grab it before the price goes back up\./g, ""],
   [/Ta commande est en route depuis quelques jours — on espère qu'elle te plaît !/g, "Ta commande est arrivée ? On espère qu'elle te plaît !"],
   [/Your order has been on its way for a few days — we hope you love it!/g, "Has your order arrived? We hope you love it!"],
-  [/ajoute un 2<sup>e<\/sup> article et il passe à\s*10 % de rabais/g, "ajoute un 2<sup>e</sup> article : le moins cher des deux est à 10 % de rabais"],
+  [/ajoute un 2<sup>e<\/sup> article et il passe à\s*(?:<b>)?10\s%\sde rabais(?:<\/b>)?/g, "ajoute un 2<sup>e</sup> article : le moins cher des deux est à <b>10 % de rabais</b>"],
   [/\bevent\.url\|/g, "event.product_url|"],
 ];
 

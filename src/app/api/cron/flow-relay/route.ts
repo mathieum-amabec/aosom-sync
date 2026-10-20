@@ -28,8 +28,9 @@ export const maxDuration = 300;
 const STATE_KEY = "flow_relay_state";
 const ENABLED_KEY = "flow_relay_enabled";
 const TEMPLATES_KEY = "flow_relay_templates";
-const BUDGET_MS = 170_000;
-const MAX_PER_STEP = 150;
+// worst case: last step starts at 110 s + 60 PATCHes (~30 s) + list wait (≤ 85 s) + sends → well under 300 s
+const BUDGET_MS = 110_000;
+const MAX_PER_STEP = 60;
 
 export async function GET(request: Request) {
   if (!verifyCronSecret(request.headers.get("authorization"))) {
@@ -88,7 +89,7 @@ async function run(dryRun: boolean) {
   const orders = await triggerEvents(PLACED_ORDER, iso(maxLookback));
   const orderTimes = new Map<string, number[]>();
   for (const o of orders) orderTimes.set(o.profileId, [...(orderTimes.get(o.profileId) ?? []), Date.parse(o.at)]);
-  const wheel = byMetric.get(WHEEL_WON) ?? [];
+  const wheel = await triggerEvents(WHEEL_WON, iso(7 * 24 * 60));
   const sendingAgain = await flowsSendingAgain(now);
   let relance: { sent?: Record<string, string> } = {};
   try { relance = JSON.parse((await getSetting(RELANCE_STATE_KEY)) ?? "{}"); } catch { /* none */ }
