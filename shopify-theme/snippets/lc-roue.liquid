@@ -40,6 +40,7 @@
       <div class="lc-roue__body">
         <div class="lc-roue__s1">
           <h2 id="lc-roue-title" class="lc-roue__title">{% if loc == 'en' %}Spin the wheel, win up to <span>$100 off</span>{% else %}Tourne la roue, gagne jusqu'à <span>100&nbsp;$ de rabais</span>{% endif %}</h2>
+          <p class="lc-roue__oddsline"></p>
           <form class="lc-roue__form" novalidate>
             <div class="lc-roue__step" data-step="1">
               <input class="lc-roue__email" type="email" name="email" required autocomplete="email" inputmode="email" placeholder="{% if loc == 'en' %}Your email to play{% else %}Ton courriel pour jouer{% endif %}" aria-label="{% if loc == 'en' %}Email{% else %}Courriel{% endif %}">
@@ -48,9 +49,10 @@
               <label class="lc-roue__consent"><input type="checkbox" name="consent"> <span>{% if loc == 'en' %}Also email me my code, a reminder and Furnish Direct deals (optional). Unsubscribe anytime. <a href="/en/policies/privacy-policy" target="_blank" rel="noopener">Privacy</a>{% else %}Envoyez-moi aussi mon code, un rappel et les rabais d'Ameublo Direct par courriel (facultatif). Désabonnement en tout temps. <a href="/policies/privacy-policy" target="_blank" rel="noopener">Confidentialité</a>{% endif %}</span></label>
             </div>
             <div class="lc-roue__step" data-step="2" hidden>
-              <p class="lc-roue__qlead">{% if loc == 'en' %}Last step! The law requires a skill-testing question:{% else %}Dernière étape&nbsp;! La loi exige une question d'habileté&nbsp;:{% endif %}</p>
-              <label class="lc-roue__skill"><b class="lc-roue__q"></b> =<input type="text" name="skill" inputmode="numeric" autocomplete="off" maxlength="4" aria-label="{% if loc == 'en' %}Answer{% else %}Réponse{% endif %}"></label>
+              <p class="lc-roue__qlead" id="lc-roue-qlead">{% if loc == 'en' %}Last step! The law requires a skill-testing question:{% else %}Dernière étape&nbsp;! La loi exige une question d'habileté&nbsp;:{% endif %}</p>
+              <label class="lc-roue__skill"><b class="lc-roue__q" id="lc-roue-q"></b> =<input type="text" name="skill" inputmode="numeric" autocomplete="off" maxlength="4" aria-labelledby="lc-roue-qlead lc-roue-q"></label>
               <button class="lc-roue__btn" type="submit">{% if loc == 'en' %}Spin!{% else %}Lancer la roue&nbsp;!{% endif %}</button>
+              <button type="button" class="lc-roue__back">{% if loc == 'en' %}← Change email{% else %}← Changer de courriel{% endif %}</button>
             </div>
             <p class="lc-roue__msg" role="alert" hidden></p>
           </form>
@@ -103,6 +105,8 @@ body:has(.sticky-atc.is-visible) .lc-roue__tab{bottom:calc(78px + env(safe-area-
 .lc-roue__pin{display:block;position:absolute;top:-8px;left:50%;transform:translateX(-50%);z-index:2;width:0;height:0;border-left:15px solid transparent;border-right:15px solid transparent;border-top:30px solid var(--lc-sun,#F2C14E);filter:drop-shadow(0 3px 3px rgba(0,0,0,.5))}
 .lc-roue__hub{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:58px;height:58px;border-radius:50%;background:#fff;border:3px solid var(--lc-sun,#F2C14E);color:var(--lc-navy,#1B2A4A);font:900 11px/52px var(--lc-font-text,Arial,sans-serif);letter-spacing:.04em;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.35)}
 .lc-roue__body{padding:16px 22px 18px;text-align:center}
+.lc-roue__oddsline{margin:-6px 0 12px;font-size:11.5px;line-height:1.4;color:#6b7080}
+.lc-roue__back{align-self:center;padding:4px 8px;border:0;background:none;font-size:12.5px;color:#5b6172;text-decoration:underline;cursor:pointer}
 .lc-roue__title{margin:0 0 12px;font:600 21px/1.25 var(--lc-font-display,Georgia,serif);color:var(--lc-navy,#1B2A4A);text-wrap:balance}
 .lc-roue__title span{color:var(--lc-terra-btn,#B8553C);white-space:nowrap}
 .lc-roue__form{text-align:left}
@@ -180,6 +184,8 @@ body:has(.sticky-atc.is-visible) .lc-roue__tab{bottom:calc(78px + env(safe-area-
   var bulbs=[]; for(var b=0;b<18;b++){ var q=pt(106,b*20); var c=el('circle',{cx:q[0].toFixed(2),cy:q[1].toFixed(2),r:3.2,fill:b%2?'#fff':'#fff6d6'}); bulbs.push(c); svg.appendChild(c); }
   var odds=root.querySelector('.lc-roue__odds');
   P.forEach(function(p){var li=document.createElement('li'); li.textContent=label(p)+' — '+(EN?'odds ':'chances ')+p.w+' %'; odds.appendChild(li);});
+  // Odds in plain sight under the "up to $100" headline (Competition Act: the 1 % prize must not mislead).
+  root.querySelector('.lc-roue__oddsline').textContent=(EN?'Odds: ':'Chances : ')+P.map(function(p){return (money(p.a)+' '+p.w+' %').replace(/\s/g,' ');}).join(' · ')+(EN?' — minimum order 10× the discount':' — achat minimum 10× le rabais');
 
   // Bulbs twinkle while the dialog is open (marquee look); off with reduced motion.
   var blink=0, blinkT=0;
@@ -190,7 +196,13 @@ body:has(.sticky-atc.is-visible) .lc-roue__tab{bottom:calc(78px + env(safe-area-
     var f=st.code?root.querySelector('.lc-roue__shop'):form.querySelector('.lc-roue__email'); setTimeout(function(){try{f.focus({preventScroll:true});}catch(e){}},50); }
   function close(){ dlg.hidden=true; document.documentElement.style.overflow=''; twinkle(false); idle(false); if(lastFocus&&lastFocus.focus) try{lastFocus.focus();}catch(e){} }
   root.addEventListener('click',function(e){ if(e.target.closest('[data-roue-open]')) open(); else if(e.target.closest('[data-roue-close]')) close(); });
-  document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&!dlg.hidden) close(); });
+  document.addEventListener('keydown',function(e){
+    if(dlg.hidden) return;
+    if(e.key==='Escape') return close();
+    if(e.key!=='Tab') return; // keep focus inside the dialog
+    var f=[].filter.call(dlg.querySelectorAll('button,input,a[href],summary'),function(x){return x.offsetParent!==null&&!x.disabled;});
+    if(!f.length) return; var first=f[0], last=f[f.length-1];
+    if(e.shiftKey&&document.activeElement===first){ e.preventDefault(); last.focus(); } else if(!e.shiftKey&&document.activeElement===last){ e.preventDefault(); first.focus(); } });
 
   // Countdown on the tab and in the dialog once a code exists.
   function left(){var ms=Date.parse(st.exp)-Date.now(); if(!(ms>0)) return null; var h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000), s=Math.floor(ms%60000/1000);
@@ -213,13 +225,14 @@ body:has(.sticky-atc.is-visible) .lc-roue__tab{bottom:calc(78px + env(safe-area-
   function setRot(a){ svg.style.transform='rotate('+a+'deg)'; }
   function loop(){ var last=performance.now(); cancelAnimationFrame(raf); (function f(t){ angle+=(t-last)*speed; last=t; setRot(angle); if(mode) raf=requestAnimationFrame(f); })(last); }
   function idle(on){ if(st.code||mode==='fast') return; if(on&&!reduce){ mode='idle'; speed=0.012; loop(); } else { mode=''; cancelAnimationFrame(raf); } }
-  function freeSpin(){ mode='fast'; speed=0.6; loop(); }
+  function freeSpin(){ if(reduce) return; mode='fast'; speed=0.6; loop(); }
   function landOn(i,done){ mode=''; cancelAnimationFrame(raf);
     var a0=spans[i][0],a1=spans[i][1],w=a1-a0, target=(a0+a1)/2+(Math.random()-.5)*w*.6; // a random point inside the slice
-    var end=angle+(360*5)+((360-((target+angle)%360))%360), start=angle, t0=performance.now(), D=4200;
+    var end=angle+(reduce?0:360*5)+((360-((target+angle)%360))%360), start=angle, t0=performance.now(), D=reduce?400:4200;
     (function f(t){ var k=Math.min(1,(t-t0)/D), e=1-Math.pow(1-k,4); angle=start+(end-start)*e; setRot(angle); if(k<1) requestAnimationFrame(f); else done(); })(t0); }
   function stopFast(){ if(mode==='fast'){ mode=''; cancelAnimationFrame(raf); if(!dlg.hidden) idle(true); } }
-  function fail(text){ stopFast(); btn1.disabled=false; btn2.disabled=false; msg.hidden=false; msg.textContent=text; }
+  var busy=false; // one request at a time: Enter in step 2 can submit again during the 4 s landing
+  function fail(text){ busy=false; stopFast(); btn1.disabled=false; btn2.disabled=false; msg.hidden=false; msg.textContent=text; }
 
   // Skill-testing question (required by law for a prize drawn by chance): a + b × c, re-checked by the server.
   var Q={}; function rnd(lo,hi){return lo+Math.floor(Math.random()*(hi-lo+1));}
@@ -228,8 +241,9 @@ body:has(.sticky-atc.is-visible) .lc-roue__tab{bottom:calc(78px + env(safe-area-
   var BAD_Q=EN?'Not quite (multiplication first). Try this one.':'Pas tout à fait (la multiplication d’abord). Essaie celle-ci.';
   function toStep2(){ step1.hidden=true; step2.hidden=false; setTimeout(function(){try{form.skill.focus({preventScroll:true});}catch(e){}},30); }
   function toStep1(){ step2.hidden=true; step1.hidden=false; }
+  root.querySelector('.lc-roue__back').addEventListener('click',function(){ if(busy) return; msg.hidden=true; toStep1(); try{form.email.focus();}catch(e){} });
 
-  form.addEventListener('submit',function(e){ e.preventDefault(); msg.hidden=true;
+  form.addEventListener('submit',function(e){ e.preventDefault(); if(busy) return; msg.hidden=true;
     var email=(form.email.value||'').trim();
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)){ toStep1(); return fail(EN?'Please enter a valid email.':'Entre un courriel valide.'); }
     if(step2.hidden) return toStep2();
@@ -237,7 +251,7 @@ body:has(.sticky-atc.is-visible) .lc-roue__tab{bottom:calc(78px + env(safe-area-
     if(!ans) return fail(EN?'Answer the question to spin.':'Réponds à la question pour tourner.');
     if(Number(ans)!==Q.a+Q.b*Q.c){ newQ(); return fail(BAD_Q); }
     var consent=!!form.consent.checked;
-    btn2.disabled=true; freeSpin();
+    busy=true; btn1.disabled=true; btn2.disabled=true; freeSpin();
     fetch(API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email,consent:consent,locale:EN?'en':'fr',website:form.website.value,skill:{a:Q.a,b:Q.b,c:Q.c,answer:ans}})})
       .then(function(r){return r.json().then(function(j){return {s:r.status,j:j};});})
       .then(function(x){ var j=x.j||{};
@@ -255,7 +269,7 @@ body:has(.sticky-atc.is-visible) .lc-roue__tab{bottom:calc(78px + env(safe-area-
         // Klaviyo only with consent: identifying a visitor who said no could pull them into other flows.
         try{ if(consent&&window.klaviyo) window.klaviyo.push(['identify',{'$email':email}]); }catch(e){}
         try{ if(window.fbq) window.fbq('track','Lead',{content_name:'Roue de bienvenue'}); }catch(e){}
-        var go=function(){ twinkle(true); showWon(); setInterval(tick,1000); };
+        var go=function(){ twinkle(true); showWon(); setInterval(tick,1000); try{root.querySelector('.lc-roue__code').focus({preventScroll:true});}catch(e){} };
         if(j.already){ stopFast(); go(); } else landOn(j.prize.index,go);
       })
       .catch(function(){ fail(EN?'Connection problem. Try again.':'Problème de connexion. Réessaie.'); });

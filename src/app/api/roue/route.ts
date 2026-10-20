@@ -124,7 +124,8 @@ export async function POST(request: Request) {
   const existing = await getWheelSpin(emailKey);
   if (existing) {
     const idx = WHEEL_PRIZES.findIndex((p) => p.key === existing.prize_key);
-    // Already played: never hand the code back (anyone could type someone else's email). The code is in their email.
+    // Already played: never hand the code back (anyone could type someone else's email). It is on their first
+    // device and, if they ticked the box, in their inbox.
     if (idx >= 0 && existing.code) return json(200, result(idx, null, existing.expires_at, true));
     // Reserved but no code: a concurrent request is still creating it — or one crashed long ago: free it, draw again.
     if (Date.now() / 1000 - existing.created_at < STALE_RESERVATION_S) return json(409, { success: false, error: "busy" });
