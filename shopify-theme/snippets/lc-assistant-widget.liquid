@@ -51,9 +51,9 @@
 </svg>
 {%- endcapture -%}
 <div id="lc-asst" data-loc="{{ lc_loc }}" data-api="https://aosom-sync.vercel.app/api/assistant">
-  <button type="button" class="lc-asst__fab" aria-expanded="false" aria-controls="lc-asst-panel">
+  <button type="button" class="lc-asst__fab" aria-label="{% if lc_loc == 'en' %}A question? Ask {{ lc_name }}{% else %}Une question ? Demandez à {{ lc_name }}{% endif %}" aria-expanded="false" aria-controls="lc-asst-panel">
     {{ lc_ameublo_svg }}
-    <span class="lc-asst__fab-label">{% if lc_loc == 'en' %}Ask {{ lc_name }}{% else %}Demandez à {{ lc_name }}{% endif %}</span>
+    <span class="lc-asst__fab-label"><span class="lc-asst__fab-q">{% if lc_loc == 'en' %}A question?{% else %}Une question ?{% endif %}</span><span class="lc-asst__fab-a">{% if lc_loc == 'en' %}Ask {{ lc_name }}{% else %}Demandez à {{ lc_name }}{% endif %}</span></span>
   </button>
 
   <div id="lc-asst-panel" class="lc-asst__panel" role="dialog" aria-modal="false" aria-label="{% if lc_loc == 'en' %}Shopping assistant{% else %}Assistant magasinage{% endif %}" hidden>
@@ -91,7 +91,7 @@
   </div>
 </div>
 <style>
-  #lc-asst{--navy:#1B2A4A;--gold:#C17F3E;--gold2:#D4A853;font-family:'DM Sans',sans-serif}
+  #lc-asst{--navy:#1B2A4A;--gold:#C17F3E;--gold2:#D4A853;font-family:var(--lc-font-text),sans-serif}
   /* Mascot button: the armchair itself, with its name pill beside it (kept: an unlabeled icon
      went unnoticed on mobile, 2026-09-29). Desktop bottom-right → pill on the left. */
   .lc-asst__fab{position:fixed;right:14px;bottom:10px;z-index:9998;display:flex;flex-direction:row-reverse;align-items:flex-end;gap:.15rem;
@@ -100,6 +100,10 @@
   .lc-asst__fab:hover .lc-ameublo{transform:scale(1.06) rotate(-3deg)}
   .lc-asst__fab-label{background:var(--navy);border:2px solid var(--gold2);border-radius:999px;padding:.45rem .9rem;margin-bottom:22px;
     box-shadow:0 4px 14px rgba(0,0,0,.22);white-space:nowrap}
+  /* Two-line pill: small hook ("Une question ?") + bold action, so the button's purpose is obvious. */
+  .lc-asst__fab-label{display:flex;flex-direction:column;align-items:flex-start;gap:1px;border-radius:16px;padding:.4rem .9rem;text-align:left;line-height:1.15}
+  .lc-asst__fab-q{font-size:1.05rem;font-weight:500;color:var(--gold2);letter-spacing:.02em}
+  .lc-asst__fab-a{font-size:1.25rem;font-weight:700;color:#fff}
   .lc-asst__head-mascot .lc-ameublo{width:46px;height:46px;flex:0 0 auto;margin:-6px 0 -4px}
   .lc-ameublo .am-body{transform-origin:60px 104px;animation:am-breathe 3.6s ease-in-out infinite}
   .lc-ameublo .am-eye{transform-box:fill-box;transform-origin:center;animation:am-blink 4.8s infinite}
@@ -137,6 +141,13 @@
   @media(max-width:749px){body:has(.sticky-atc.is-visible) .lc-msgr{bottom:calc(140px + env(safe-area-inset-bottom,0px))}}
   /* Desktop: both buttons are bottom-right — stack Messenger ABOVE the assistant pill instead of on it. */
   @media(min-width:750px){.lc-msgr{bottom:100px} body:has(.sticky-atc.is-visible) .lc-msgr{bottom:168px}}
+  /* 2026-10-14 conversion pass: one overlay at a time. Hide the floating buttons while the entry popup is open,
+     and on mobile product pages shrink the assistant to icon-only so it no longer covers price/stars. */
+  body:has(#lc-pop.is-open) .lc-asst__fab,body:has(#lc-pop.is-open) .lc-msgr{display:none!important}
+{% if template contains 'product' %}  @media(max-width:749px){.lc-asst__fab-label{display:none!important}.lc-asst__fab .lc-ameublo{width:48px;height:48px}}
+{% endif %}  /* 2026-10-20: on phones, once the visitor scrolls into the page, the label folds away and only the mascot stays
+     (the label comes back near the top), so the assistant, the wheel tab and Messenger don't crowd the products. */
+  @media(max-width:749px){#lc-asst.is-mini .lc-asst__fab-label{display:none}#lc-asst.is-mini .lc-asst__fab .lc-ameublo{width:48px;height:48px}}
   .lc-asst__panel{position:fixed;right:20px;bottom:20px;z-index:9999;width:370px;max-width:calc(100vw - 32px);height:70vh;max-height:560px;
     display:flex;flex-direction:column;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.34)}
   .lc-asst__panel[hidden]{display:none}
@@ -196,6 +207,7 @@
   function open(){panel.hidden=false;fab.setAttribute('aria-expanded','true');fab.style.display='none';pose(headMascot,'is-wave',2600);setTimeout(function(){input.focus();},50);}
   function close(){panel.hidden=true;fab.setAttribute('aria-expanded','false');fab.style.display='';}
   fab.addEventListener('click',open); closeBtn.addEventListener('click',close);
+  if(window.matchMedia('(max-width:749px)').matches){var mini=function(){var y=window.scrollY;if(y>300)root.classList.add('is-mini');else if(y<150)root.classList.remove('is-mini');};window.addEventListener('scroll',mini,{passive:true});mini();}
   // Text is still inserted as text nodes (never innerHTML); only bare https URLs become links.
   function addMsg(text,who){
     var d=document.createElement('div');d.className='lc-asst__msg lc-asst__msg--'+who;

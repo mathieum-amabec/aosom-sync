@@ -91,6 +91,10 @@ body:has(.sticky-atc.is-visible) .lc-roue__tab{bottom:calc(78px + env(safe-area-
 @media(max-width:749px){
   .lc-roue__tab,body:has(.sticky-atc.is-visible) .lc-roue__tab{left:0;bottom:auto;top:56%;flex-direction:column;gap:4px;width:62px;padding:9px 4px 8px;border-radius:0 14px 14px 0;font-size:11px;line-height:1.15;text-align:center}
   .lc-roue__tab-ico{width:30px;height:30px}
+  /* Once the visitor scrolls into the page, shrink to the spinning wheel icon alone so the floating buttons don't
+     crowd the products. The countdown tab of a winner stays full: it is the reminder that turns the prize into a sale. */
+  .lc-roue.is-mini:not(.is-won) .lc-roue__tab{width:44px;padding:8px 4px 8px 2px}
+  .lc-roue.is-mini:not(.is-won) .lc-roue__tab-txt{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 }
 .lc-roue__dlg{position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px}
 .lc-roue__dlg[hidden]{display:none}
@@ -216,6 +220,8 @@ body:has(.sticky-atc.is-visible) .lc-roue__tab{bottom:calc(78px + env(safe-area-
     tabTxt.textContent=money(P[st.i].a)+(window.matchMedia('(max-width:749px)').matches?'\n':' · ')+l.txt;
     root.querySelector('.lc-roue__timer').textContent=(EN?'Expires in ':'Expire dans ')+l.txt; }
   if(st.code){ showWon(); setInterval(tick,1000); }
+  if(window.matchMedia('(max-width:749px)').matches){ var mini=function(){ var y=window.scrollY; if(y>300) root.classList.add('is-mini'); else if(y<150) root.classList.remove('is-mini'); };
+    window.addEventListener('scroll',mini,{passive:true}); mini(); }
 
   root.querySelector('[data-roue-copy]').addEventListener('click',function(){ var c=st.code; if(!c) return;
     if(navigator.clipboard) navigator.clipboard.writeText(c).then(function(){ var b=root.querySelector('.lc-roue__code'); b.textContent=EN?'Copied!':'Copié!'; setTimeout(function(){b.textContent=c;},1200); }).catch(function(){}); });
