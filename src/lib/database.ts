@@ -784,6 +784,45 @@ async function _initSchemaImpl(): Promise<void> {
       created_at INTEGER NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_wheel_spins_ip ON wheel_spins(ip_hash, created_at)`,
+    // "Bientôt" teasers (Vois-le chez toi, Ameublo décorateur): anonymous interest events, no PII. visitor_hash is
+    // a hash of a random id the browser keeps, so unique visitors can be counted. See src/lib/teaser.ts.
+    // source = where the shopper met the teaser ("pdp" photo pill, "sheet" link inside it, "chat" assistant button),
+    // so two entry points never blend into one funnel. One row per (feature, event, source, visitor).
+    `CREATE TABLE IF NOT EXISTS teaser_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      feature TEXT NOT NULL,
+      event TEXT NOT NULL,
+      source TEXT NOT NULL,
+      visitor_hash TEXT NOT NULL,
+      handle TEXT,
+      locale TEXT,
+      created_at INTEGER NOT NULL,
+      UNIQUE (feature, event, source, visitor_hash)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_teaser_events_feature ON teaser_events(feature, event, created_at)`,
+    // "M'avertir au lancement": one row per (feature, email), used for ONE launch notice, never for newsletters, and
+    // to be deleted once that notice is sent. consent_text keeps the exact wording the shopper agreed to (CASL proof).
+    `CREATE TABLE IF NOT EXISTS teaser_signups (
+      feature TEXT NOT NULL,
+      email_key TEXT NOT NULL,
+      email TEXT NOT NULL,
+      source TEXT NOT NULL,
+      consent_text TEXT NOT NULL,
+      locale TEXT,
+      handle TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (feature, email_key)
+    )`,
+    // AI room visualiser / decorator calls once switched on: per-IP daily cap (ip_hash), never the photo itself.
+    `CREATE TABLE IF NOT EXISTS visualiser_uses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      ip_hash TEXT NOT NULL,
+      handle TEXT,
+      ok INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_visualiser_uses_ip ON visualiser_uses(ip_hash, created_at)`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
@@ -2666,7 +2705,7 @@ function utcDayKey(): string {
  * can never exhaust the 'assistant' pool that the public storefront /api/assistant
  * draws from. Each pool has its own daily counter row and its own budget env var.
  */
-export type LlmBudgetPool = "assistant" | "batch" | "maintenance" | "video" | "import";
+export type LlmBudgetPool = "assistant" | "batch" | "maintenance" | "video" | "import" | "visualiser" | "decorateur";
 
 /** Tokens the given pool consumed so far today (UTC). 0 when no row yet. */
 export async function getDailyLlmTokensUsed(pool: LlmBudgetPool): Promise<number> {
@@ -2700,6 +2739,10 @@ export interface LlmUsageDay {
   video: number;
   /** Automatic daily catalogue import (src/lib/auto-import) — isolated so it can never starve `batch`. */
   import: number;
+  /** Storefront "Voyez-le chez vous" image placement (room-visualizer.ts), off until `visualiser_enabled` = "1". */
+  visualiser: number;
+  /** Storefront "Ameublo décorateur" (room reading + assistant picks), off until `decorateur_enabled` = "1". */
+  decorateur: number;
 }
 
 /**
@@ -2719,13 +2762,13 @@ export async function getLlmUsageWindow(days: number): Promise<LlmUsageDay[]> {
     args: [keys[0]],
   });
   const byDay = new Map<string, LlmUsageDay>(
-    keys.map((day) => [day, { day, assistant: 0, batch: 0, maintenance: 0, video: 0, import: 0 }]),
+    keys.map((day) => [day, { day, assistant: 0, batch: 0, maintenance: 0, video: 0, import: 0, visualiser: 0, decorateur: 0 }]),
   );
   for (const row of res.rows) {
     const entry = byDay.get(row.day as string);
     if (!entry) continue; // row older than the window (the >= bound is inclusive of keys[0])
     const pool = row.pool as LlmBudgetPool;
-    if (pool === "assistant" || pool === "batch" || pool === "maintenance" || pool === "video" || pool === "import") {
+    if (pool === "assistant" || pool === "batch" || pool === "maintenance" || pool === "video" || pool === "import" || pool === "visualiser" || pool === "decorateur") {
       entry[pool] = Number(row.tokens_used) || 0;
     }
   }
@@ -3519,6 +3562,61 @@ export async function setWheelSpinCode(emailKey: string, code: string, discountI
 export async function releaseWheelSpin(emailKey: string): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `DELETE FROM wheel_spins WHERE email_key = ? AND code IS NULL`, args: [emailKey] });
+}
+
+// ─── Teasers ("bientôt") + AI visualiser usage ─────────────────────
+
+/** Log one funnel event; a repeat of the same (feature, event, source, visitor) is ignored by the UNIQUE key. */
+export async function insertTeaserEvent(e: { feature: string; event: string; source: string; visitorHash: string; handle: string | null; locale: string }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT OR IGNORE INTO teaser_events (feature, event, source, visitor_hash, handle, locale, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [e.feature, e.event, e.source, e.visitorHash, e.handle, e.locale, Math.floor(Date.now() / 1000)],
+  });
+}
+
+export async function upsertTeaserSignup(s: { feature: string; emailKey: string; email: string; source: string; consentText: string; locale: string; handle: string | null }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO teaser_signups (feature, email_key, email, source, consent_text, locale, handle, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(feature, email_key) DO NOTHING`,
+    args: [s.feature, s.emailKey, s.email, s.source, s.consentText, s.locale, s.handle, Math.floor(Date.now() / 1000)],
+  });
+}
+
+export interface TeaserStatsRow { feature: string; source: string; event: string; visitors: number }
+
+/** Unique visitors per (feature, source, event) since `sinceSec`, plus launch signups per (feature, source). */
+export async function getTeaserStats(sinceSec: number): Promise<{ events: TeaserStatsRow[]; signups: { feature: string; source: string; n: number }[] }> {
+  const db = await ensureSchema();
+  const ev = await db.execute({
+    sql: `SELECT feature, source, event, COUNT(DISTINCT visitor_hash) AS visitors FROM teaser_events WHERE created_at >= ? GROUP BY feature, source, event ORDER BY feature, source, event`,
+    args: [sinceSec],
+  });
+  const su = await db.execute({ sql: `SELECT feature, source, COUNT(*) AS n FROM teaser_signups WHERE created_at >= ? GROUP BY feature, source`, args: [sinceSec] });
+  return {
+    events: ev.rows.map((r) => { const o = rowToObj(r); return { feature: String(o.feature), source: String(o.source), event: String(o.event), visitors: Number(o.visitors) }; }),
+    signups: su.rows.map((r) => { const o = rowToObj(r); return { feature: String(o.feature), source: String(o.source), n: Number(o.n) }; }),
+  };
+}
+
+/**
+ * Atomically take one of this visitor's daily AI uses: the row is inserted only while fewer than `cap` exist for
+ * (kind, ip) since `sinceSec`, so parallel requests cannot all pass a count-then-call check. Returns the row id to
+ * finish, or null when the cap is reached. The attempt counts whatever its outcome.
+ */
+export async function reserveVisualiserUse(u: { kind: string; ipHash: string; handle: string | null; cap: number; sinceSec: number }): Promise<number | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO visualiser_uses (kind, ip_hash, handle, ok, created_at)
+          SELECT ?, ?, ?, 0, ? WHERE (SELECT COUNT(*) FROM visualiser_uses WHERE kind = ? AND ip_hash = ? AND created_at >= ?) < ?`,
+    args: [u.kind, u.ipHash, u.handle, Math.floor(Date.now() / 1000), u.kind, u.ipHash, u.sinceSec, u.cap],
+  });
+  return r.rowsAffected === 1 && r.lastInsertRowid != null ? Number(r.lastInsertRowid) : null;
+}
+
+export async function finishVisualiserUse(id: number, ok: boolean): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE visualiser_uses SET ok = ? WHERE id = ?`, args: [ok ? 1 : 0, id] });
 }
 
 // ─── Settings ────────────────────────────────────────────────────────

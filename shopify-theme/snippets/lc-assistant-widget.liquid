@@ -50,7 +50,8 @@
   <g class="am-think" fill="#1b2a47"><circle cx="98" cy="22" r="2.4"/><circle cx="106" cy="16" r="2.4"/><circle cx="114" cy="10" r="2.4"/></g>
 </svg>
 {%- endcapture -%}
-<div id="lc-asst" data-loc="{{ lc_loc }}" data-api="https://aosom-sync.vercel.app/api/assistant">
+{%- render 'lc-teaser-core' -%}
+<div id="lc-asst" data-loc="{{ lc_loc }}" data-privacy="{{ routes.root_url | append: '/policies/privacy-policy' | replace: '//policies', '/policies' }}" data-api="https://aosom-sync.vercel.app/api/assistant">
   <button type="button" class="lc-asst__fab" aria-label="{% if lc_loc == 'en' %}A question? Ask {{ lc_name }}{% else %}Une question ? Demandez à {{ lc_name }}{% endif %}" aria-expanded="false" aria-controls="lc-asst-panel">
     {{ lc_ameublo_svg }}
     <span class="lc-asst__fab-label"><span class="lc-asst__fab-q">{% if lc_loc == 'en' %}A question?{% else %}Une question ?{% endif %}</span><span class="lc-asst__fab-a">{% if lc_loc == 'en' %}Ask {{ lc_name }}{% else %}Demandez à {{ lc_name }}{% endif %}</span></span>
@@ -82,6 +83,13 @@
           <button type="button" class="lc-asst__chip">Meubler un salon pour 1 500 $</button>
         {%- endif -%}
       </div>
+      {%- comment -%} "Ameublo décorateur" — a "bientôt" teaser until settings.decorateur_enabled = "1", then the real
+        photo → matching products flow (/api/decorateur). Kept outside the chips so it stays after a first question. {%- endcomment -%}
+      <button type="button" class="lc-asst__deco" data-lc-deco>
+        <svg class="lc-asst__deco-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 8h3l1.6-2.2h6.8L17 8h3v11H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13.3" r="3.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.5 1.5l.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6z" fill="#D4A853"/></svg>
+        <span class="lc-asst__deco-t" data-lc-deco-label>{% if lc_loc == 'en' %}Decorate my room from a photo{% else %}Décorer ma pièce à partir d'une photo{% endif %}</span>
+        <span class="lc-asst__deco-soon" data-lc-deco-soon>{% if lc_loc == 'en' %}Soon{% else %}Bientôt{% endif %}</span>
+      </button>
     </div>
     <form class="lc-asst__form" data-lc-asst-form>
       <input type="text" class="lc-asst__input" data-lc-asst-input maxlength="500" autocomplete="off"
@@ -159,6 +167,23 @@
   .lc-asst__chips{display:flex;flex-wrap:wrap;gap:.4rem;margin:.2rem 0 .4rem}
   .lc-asst__chip{border:1px solid #D4A853;background:#fff;color:#1b2a47;border-radius:999px;padding:.35rem .75rem;font-size:1.15rem;cursor:pointer}
   .lc-asst__chip:hover{background:#fbf3e2}
+  .lc-asst__deco{display:flex;align-items:center;gap:.6rem;width:100%;margin:.1rem 0 .4rem;padding:.7rem .9rem;border:1.5px dashed #D4A853;border-radius:12px;background:#FFFBF2;color:#1b2a47;font:inherit;font-size:1.2rem;font-weight:700;text-align:left;cursor:pointer}
+  .lc-asst__deco:hover{background:#fbf3e2}
+  .lc-asst__deco:focus-visible,.lc-asst__inline:focus-visible{outline:2px solid #B8553C;outline-offset:2px}
+  .lc-asst__deco-ico{width:20px;height:20px;flex:none}
+  .lc-asst__deco-t{flex:1;min-width:0}
+  .lc-asst__deco-soon{flex:none;padding:.15rem .5rem;border-radius:999px;background:#FBF1DC;color:#8A5A12;font-size:.95rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+  .lc-asst__deco[hidden],.lc-asst__deco-soon[hidden]{display:none}
+  .lc-asst__row{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.6rem}
+  .lc-asst__inline{position:relative;border:0;border-radius:999px;padding:.45rem .9rem;background:var(--navy);color:#fff;font:inherit;font-size:1.15rem;font-weight:700;cursor:pointer;overflow:hidden}
+  .lc-asst__inline--ghost{background:#fff;color:#1b2a47;box-shadow:inset 0 0 0 1px #cfd4de}
+  .lc-asst__inline input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
+  .lc-asst__mini-email{flex:1 1 140px;min-width:0;border:1px solid #d9dee8;border-radius:999px;padding:.45rem .8rem;font:inherit;font-size:16px}
+  .lc-asst__mini-email[aria-invalid="true"]{border-color:#B8553C}
+  .lc-asst__fine{display:block;margin-top:.4rem;font-size:1rem;color:#797068}
+  .lc-asst__fine a{color:inherit}
+  .lc-asst__fine[role="alert"]:empty{display:none}
+  .lc-asst__fine[role="alert"]{color:#8A2E1C;font-weight:700}
   .lc-asst__msg a{color:inherit;text-decoration:underline;word-break:break-all}
   .lc-asst__close{background:none;border:none;color:#fff;font-size:1.8rem;line-height:1;cursor:pointer}
   .lc-asst__body{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:.7rem;background:#F7F6F4}
@@ -196,7 +221,7 @@
   var T=LOC==='en'
     ?{err:"Sorry, something went wrong. Please try again.",typing:"Furni is thinking…"}
     :{err:"Désolé, une erreur est survenue. Réessayez.",typing:"Ameublo réfléchit…"};
-  function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+  function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML.replace(/"/g,'&quot;');}
   function money(n){try{return new Intl.NumberFormat(LOC==='en'?'en-CA':'fr-CA',{style:'currency',currency:'CAD'}).format(n);}catch(e){return '$'+Number(n).toFixed(2);}}
   var fabMascot=fab.querySelector('.lc-ameublo');
   var headMascot=root.querySelector('.lc-asst__head-mascot .lc-ameublo');
@@ -230,6 +255,60 @@
       wrap.appendChild(a);
     });
     body.appendChild(wrap);body.scrollTop=body.scrollHeight;
+  }
+  // ── "Ameublo décorateur": teaser (events to /api/teaser) until /api/visualiser reports decorateur:true ──
+  var deco=root.querySelector('[data-lc-deco]');
+  if(deco&&window.lcTeaser){
+    var LT=window.lcTeaser, decoOn=false, decoSeen=false;
+    LT.status().then(function(s){ decoOn=!!s.decorateur; if(decoOn) root.querySelector('[data-lc-deco-soon]').hidden=true; });
+    fab.addEventListener('click',function(){ if(!decoSeen){ decoSeen=true; LT.log('decorateur','view','chat'); } });
+    var bubble=function(text){ var d=addMsg(text,'bot'); return d; };
+    var mk=function(tag,cls,txt){ var e=document.createElement(tag); if(cls)e.className=cls; if(txt!=null)e.textContent=txt; return e; };
+    var D=LOC==='en'
+      ?{ask:"Soon you'll be able to send me a photo of your room: I'll suggest pieces that match its style, and you'll even see them in your space. Would that interest you?",yes:'Yes, I would',no:'Not really',thanks:"Great! Want one email when it's ready?",mail:'Your email',ok:'Notify me',fine:'One email, at launch. No newsletter. You can unsubscribe at any time.',privacy:'Privacy',net:'That didn\'t go through. Please try again.',photoNote:'Your photo is processed by our AI provider (Google) to read the room; we don\'t keep it.',done:"Perfect, I'll write to you once, at launch.",noted:'Thanks, noted!',badMail:'Please check the email address.',live:'Send me a photo of your room (from the front, with good light) and I\'ll suggest pieces that suit it.',pick:'Choose a photo',reading:'Looking at your room…',notRoom:"That photo doesn't look like a room. Try a wider shot.",daily:"You've reached today's limit. Come back tomorrow!",busy:'I\'m very busy right now, please try again later.'}
+      :{ask:"Bientôt, vous pourrez m'envoyer une photo de votre pièce : je vous suggérerai des meubles qui vont avec son style, et vous pourrez même les voir chez vous. Ça vous intéresserait ?",yes:"Oui, j'aimerais ça",no:'Pas vraiment',thanks:'Super ! Voulez-vous un courriel quand ce sera prêt ?',mail:'Votre courriel',ok:"M'avertir",fine:"Un seul courriel, au lancement. Pas d'infolettre. Vous pourrez vous désinscrire en tout temps.",privacy:'Confidentialité',net:"L'envoi n'a pas fonctionné. Réessayez.",photoNote:"Votre photo est traitée par notre fournisseur d'IA (Google) pour analyser la pièce ; nous ne la conservons pas.",done:"Parfait, je vous écrirai une seule fois, au lancement.",noted:"Merci, c'est noté !",badMail:"Vérifiez l'adresse courriel.",live:"Envoyez-moi une photo de votre pièce (de face, avec une bonne lumière) et je vous suggère des meubles qui vont avec.",pick:'Choisir une photo',reading:'Je regarde votre pièce…',notRoom:'Cette photo ne ressemble pas à une pièce. Essayez une vue plus large.',daily:'Vous avez atteint la limite pour aujourd\'hui. Revenez demain !',busy:'Je suis très occupé en ce moment, réessayez un peu plus tard.'};
+    var askEmail=function(){
+      var d=bubble(D.thanks), f=mk('form','lc-asst__row'), i=mk('input','lc-asst__mini-email'), b=mk('button','lc-asst__inline',D.ok);
+      i.type='email'; i.autocomplete='email'; i.placeholder=D.mail; i.setAttribute('aria-label',D.mail); b.type='submit';
+      // Same consent wording as CONSENT_TEXT (src/lib/teaser.ts), stored with the signup.
+      var fine=mk('small','lc-asst__fine',D.fine+' '), pl=mk('a',null,D.privacy), say=mk('small','lc-asst__fine');
+      pl.href=root.getAttribute('data-privacy')||'/policies/privacy-policy'; pl.target='_blank'; pl.rel='noopener'; fine.appendChild(pl);
+      say.setAttribute('role','alert');
+      f.appendChild(i); f.appendChild(b); d.appendChild(f); d.appendChild(fine); d.appendChild(say);
+      f.addEventListener('submit',function(e){ e.preventDefault(); var v=i.value.trim();
+        if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)){ i.setAttribute('aria-invalid','true'); say.textContent=D.badMail; i.focus(); return; }
+        i.removeAttribute('aria-invalid'); say.textContent=''; b.disabled=true;
+        LT.log('decorateur','email','chat',{email:v}).then(function(r){ if(!r||!r.ok) throw (r&&r.status===400?'bad':'net'); f.remove(); fine.remove(); say.remove(); bubble(D.done); })
+          .catch(function(k){ b.disabled=false; i.setAttribute('aria-invalid','true'); say.textContent=k==='bad'?D.badMail:D.net; });
+      });
+      setTimeout(function(){ try{ i.focus({preventScroll:true}); }catch(e){} },30);
+    };
+    var liveDeco=function(){
+      var d=bubble(D.live), row=mk('div','lc-asst__row'), lab=mk('label','lc-asst__inline',D.pick), inp=mk('input');
+      inp.type='file'; inp.accept='image/*'; lab.appendChild(inp); row.appendChild(lab); d.appendChild(row);
+      var note=mk('small','lc-asst__fine',D.photoNote+' '), nl=mk('a',null,D.privacy);
+      nl.href=root.getAttribute('data-privacy')||'/policies/privacy-policy'; nl.target='_blank'; nl.rel='noopener'; note.appendChild(nl); d.appendChild(note);
+      inp.addEventListener('change',function(){ var file=inp.files&&inp.files[0]; if(!file||busy) return; busy=true; send.disabled=true;
+        var typing=addMsg(D.reading,'bot'); typing.classList.add('lc-asst__msg--typing'); pose(headMascot,'is-thinking');
+        LT.shrink(file).then(function(p){ return fetch(LT.base+'/api/decorateur',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({photo:p.data,type:p.type,locale:LOC})}).then(function(r){ return r.json(); }); })
+          .then(function(j){ typing.remove(); rest(headMascot);
+            if(j&&j.success){ pose(headMascot,'is-happy',1100); if(j.reply){ addMsg(j.reply,'bot'); history.push({role:'assistant',content:j.reply}); } addCards(j.products); }
+            else addMsg(j&&j.error==='not_room'?D.notRoom:j&&j.error==='daily'?D.daily:j&&j.error==='busy'?D.busy:T.err,'bot'); })
+          .catch(function(){ typing.remove(); rest(headMascot); addMsg(T.err,'bot'); })
+          .then(function(){ busy=false; send.disabled=false; inp.value=''; });
+      });
+    };
+    deco.addEventListener('click',function(){
+      if(busy) return;
+      LT.log('decorateur','click','chat');
+      addMsg(root.querySelector('[data-lc-deco-label]').textContent.trim(),'user');
+      deco.hidden=true;
+      if(decoOn) return liveDeco();
+      var d=bubble(D.ask), row=mk('div','lc-asst__row'), y=mk('button','lc-asst__inline',D.yes), n=mk('button','lc-asst__inline lc-asst__inline--ghost',D.no);
+      y.type=n.type='button'; row.appendChild(y); row.appendChild(n); d.appendChild(row);
+      y.addEventListener('click',function(){ LT.log('decorateur','yes','chat'); row.remove(); askEmail(); });
+      n.addEventListener('click',function(){ LT.log('decorateur','no','chat'); row.remove(); bubble(D.noted); });
+    });
   }
   var chips=root.querySelector('[data-lc-asst-chips]');
   if(chips){chips.addEventListener('click',function(e){

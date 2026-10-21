@@ -19,6 +19,7 @@ import {
   releaseWheelSpin,
 } from "@/lib/database";
 import { checkRateLimit } from "@/lib/rate-limiter";
+import { clientIp } from "@/lib/client-ip";
 import {
   WHEEL_PRIZES,
   SPINS_PER_IP_PER_DAY,
@@ -65,19 +66,8 @@ export async function GET(request: Request) {
   return NextResponse.json({ enabled }, { headers: { ...corsHeaders(request.headers.get("origin")), "Cache-Control": "public, s-maxage=120, stale-while-revalidate=600" } });
 }
 
-/**
- * Client IP for the limits: `x-real-ip` (set by Vercel), else the LAST x-forwarded-for hop — the first hop is
- * attacker-supplied (same rule as /api/assistant). IPv6 is bucketed by /64, the block one household gets.
- */
-export function clientIp(request: Request): string {
-  let ip = request.headers.get("x-real-ip")?.trim() || "";
-  if (!ip) {
-    const hops = (request.headers.get("x-forwarded-for") || "").split(",").map((s) => s.trim()).filter(Boolean);
-    ip = hops[hops.length - 1] || "unknown";
-  }
-  if (ip.includes(":")) ip = ip.split(":").slice(0, 4).join(":") + "::/64";
-  return ip;
-}
+// Moved to src/lib/client-ip.ts (shared with the visualiser and teaser routes); re-exported for the existing tests.
+export { clientIp };
 
 // A reservation older than this without a code is a crashed request. Longer than the worst Shopify call
 // (25 s timeout, 3 × 30 s rate-limit waits, 2 attempts).

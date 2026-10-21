@@ -317,6 +317,10 @@ export const CLAUDE = {
 export const GEMINI = {
   MODEL_ASSISTANT: process.env.GEMINI_ASSISTANT_MODEL?.trim() || "gemini-3.5-flash-lite",
   MODEL_VIDEO_QC: process.env.GEMINI_VIDEO_QC_MODEL?.trim() || "gemini-3.5-flash-lite",
+  /** Storefront "Vois-le chez toi" placement (image in → image out). Listed on this key 2026-10-20 ("Nano Banana 2"). */
+  MODEL_VISUALISER: process.env.GEMINI_VISUALISER_MODEL?.trim() || "gemini-3.1-flash-image",
+  /** "Ameublo décorateur" room reading (image in → JSON out); same cheap tier as the assistant. */
+  MODEL_DECORATOR: process.env.GEMINI_DECORATOR_MODEL?.trim() || "gemini-3.5-flash-lite",
 } as const;
 
 // ─── Meta Graph API ─────────────────────────────────────────────────

@@ -99,6 +99,7 @@
     <div class="product product--{{ section.settings.media_size }} product--{{ section.settings.media_position }} product--{{ section.settings.gallery_layout }} product--mobile-{{ section.settings.mobile_thumbnails }} grid grid--1-col {% if product.media.size > 0 %}grid--2-col-tablet{% else %}product--no-media{% endif %}">
       <div class="grid__item product__media-wrapper">
         {% render 'product-media-gallery', variant_images: variant_images %}
+        {%- if product.featured_image -%}{% render 'lc-visualiser', product: product %}{%- endif -%}
       </div>
       <div class="product__info-wrapper grid__item{% if settings.page_width > 1400 and section.settings.media_size == "small" %} product__info-wrapper--extra-padding{% endif %}{% if settings.animations_reveal_on_scroll %} scroll-trigger animate--slide-in{% endif %}">
         <section
@@ -129,6 +130,7 @@
                     </div>
                   {%- endif -%}
                   <a href="#judgeme_product_reviews" class="jdgm-prev-badge-link" style="display:inline-block;margin-top:.5rem;text-decoration:none"><div class="jdgm-widget jdgm-preview-badge" data-id="{{ product.id }}">{{ product.metafields.judgeme.badge }}</div></a>
+                  <style>.jdgm-prev-badge-link:has([data-number-of-reviews="0"]){display:none !important}</style>
                 </div>
               {%- when 'price' -%}
                 <div id="price-{{ section.id }}" role="status" {{ block.shopify_attributes }}>
@@ -148,20 +150,26 @@
                 {%- endif -%}
                 {%- if lc_price_badge == 'best_30d' or lc_price_badge == 'price_drop' -%}
                   {%- style -%}
-                    .lc-price-badge{display:inline-block;margin:.55rem 0 .15rem;padding:.32rem .72rem;border-radius:999px;font-size:.86rem;font-weight:700;line-height:1.2}
+                    .lc-price-badge{display:inline-block;margin:.55rem 0 .15rem;padding:.4rem .9rem;border-radius:999px;font-size:1.3rem;font-weight:700;line-height:1.2}
                     .lc-price-badge--best{background:rgba(45,122,58,.12);color:#2D7A3A;border:1px solid rgba(45,122,58,.35)}
                     .lc-price-badge--drop{background:rgba(198,40,40,.10);color:#C62828;border:1px solid rgba(198,40,40,.30)}
                   {%- endstyle -%}
                 {%- endif -%}
-                <div class="lc-price-why">
-                  {%- if lc_loc == 'en' -%}
-                    &#128161; Low price because we&rsquo;re 100% online &mdash; no showroom rent to pass on to you.
-                  {%- else -%}
-                    &#128161; Prix bas parce qu&rsquo;on est 100&nbsp;% en ligne &mdash; aucun loyer de salle de montre &agrave; payer.
-                  {%- endif -%}
-                </div>
+                {%- comment -%}
+                  Reassurance checklist right under the price (competitor pattern, 2026-09-30). Replaces
+                  the trust-badges box that sat below the delivery estimate. Only claims we honour —
+                  no warranty / "shipped from Canada" line until those are confirmed.
+                {%- endcomment -%}
+                <ul class="lc-checklist" role="list">
+                  <li>{%- if lc_loc == 'en' -%}Free shipping across Canada{%- else -%}Livraison gratuite partout au Canada{%- endif -%}</li>
+                  <li>{%- if lc_loc == 'en' -%}30-day returns{%- else -%}Retours 30 jours{%- endif -%}</li>
+                  <li><a href="{% if request.locale.iso_code contains 'en' %}/en/pages/garantie-de-securite-des-paiements{% else %}/pages/garantie-de-securite-des-paiements{% endif %}" style="color:inherit;text-decoration:underline;text-underline-offset:2px">{%- if lc_loc == 'en' -%}100% secure payment{%- else -%}Paiement 100&nbsp;% sécurisé{%- endif -%}</a></li>
+                  <li>{%- if lc_loc == 'en' -%}1-year manufacturer warranty{%- else -%}Garantie fabricant 1 an{%- endif -%}</li>
+                </ul>
                 {%- style -%}
-                  .lc-price-why{margin:.55rem 0 .25rem;padding:.6rem .85rem;background:rgba(212,168,83,.12);border-left:3px solid #D4A853;border-radius:6px;font-size:.9rem;line-height:1.4;color:#1A2340;}
+                  .lc-checklist{list-style:none;margin:1.2rem 0 .4rem;padding:0;display:grid;gap:.5rem}
+                  .lc-checklist li{display:flex;align-items:center;gap:.7rem;font-size:1.4rem;font-weight:600;color:#1A2340;line-height:1.3}
+                  .lc-checklist li::before{content:"✔";color:#2D7A3A;font-weight:800;flex:0 0 auto}
                 {%- endstyle -%}
                 {%- if product.quantity_price_breaks_configured? -%}
                   <div class="volume-pricing-note" id="Volume-Note-{{ section.id }}">
@@ -539,34 +547,62 @@
                   .lc-swatch-set input:focus-visible + label.lc-swatch{outline:2px solid #D4A853;outline-offset:2px}
                 </style>
                 <script>
+                  {%- comment -%}
+                    Colour swatches + invalid-combination recovery (2026-10-01).
+                    1. Dawn re-renders <variant-selects> after every option click, which wiped the
+                       swatch decoration (it ran once on load) → swatches turned back into text.
+                       Now re-applied on every re-render (MutationObserver), idempotent.
+                    2. Colour read from the input VALUE, not the label text (which carries the hidden
+                       "Variante épuisée ou indisponible" — "Gris foncé" used to match "gris").
+                    3. Aosom SKUs often have their own size per colour (191 products): clicking a
+                       colour that doesn't exist in the selected size left "no variant" (photo frozen,
+                       buy button disabled). We now switch the other options to the closest existing
+                       variant of that colour (available first).
+                  {%- endcomment -%}
+                  window.lcProductVariants = [{%- for v in product.variants -%}{"o":{{ v.options | json }},"a":{{ v.available | json }}}{%- unless forloop.last -%},{%- endunless -%}{%- endfor -%}];
                   (function(){
-                    var C={'noir':'#1a1a1a','blanc':'#FFFFFF','gris':'#808080','gris clair':'#D3D3D3','gris foncé':'#404040','beige':'#F5F5DC','brun':'#8B4513','marron':'#6B3A2A','taupe':'#8B7355','crème':'#FFFDD0','ivoire':'#FFFFF0','bleu':'#4169E1','bleu marine':'#1B2A4A','bleu ciel':'#87CEEB','vert':'#228B22','vert olive':'#808000','sauge':'#8FBC8F','rouge':'#DC143C','bordeaux':'#800020','rose':'#FFB6C1','orange':'#FFA500','jaune':'#FFD700','doré':'#D4A853','violet':'#8B008B','lavande':'#E6E6FA','turquoise':'#40E0D0','naturel':'#D2B48C','chêne':'#8B6914','noyer':'#5C4033','acajou':'#C0392B','bambou':'#DAA520','rotin':'#C19A6B','acier':'#708090','argent':'#C0C0C0','bronze':'#CD7F32','cuivre':'#B87333','anthracite':'#383E42','charbon':'#36454F','sable':'#C2B280','terre':'#8B6914','lin':'#FAF0E6','black':'#1a1a1a','white':'#FFFFFF','gray':'#808080','grey':'#808080','light gray':'#D3D3D3','dark gray':'#404040','brown':'#8B4513','cream':'#FFFDD0','blue':'#4169E1','navy':'#1B2A4A','green':'#228B22','red':'#DC143C','pink':'#FFB6C1','yellow':'#FFD700','gold':'#D4A853','purple':'#8B008B','natural':'#D2B48C','oak':'#8B6914','walnut':'#5C4033','steel':'#708090','silver':'#C0C0C0','charcoal':'#36454F','sand':'#C2B280','linen':'#FAF0E6','khaki':'#F0E68C','kaki':'#C3B091','mixed':'linear-gradient(#808080,#D3D3D3)','mixte':'linear-gradient(#808080,#D3D3D3)'};
-                    function hex(t){var k=(t||'').trim().toLowerCase();if(C[k])return C[k];for(var key in C){if(k.indexOf(key)>=0)return C[key];}return null;}
+                    {%- comment -%} Colours come from snippets/lc-colour-css — the SAME source as the collection-card dots (2026-10-18). The old in-page map disagreed with the cards and matched substrings ("Motif floral" → gold). {%- endcomment -%}
+                    var C={ {%- for lc_o in product.options_with_values -%}{%- assign lc_on = lc_o.name | downcase | strip -%}{%- if lc_on == 'couleur' or lc_on == 'color' or lc_on == 'colour' or lc_on == 'coloris' -%}{%- for lc_val in lc_o.values -%}{%- capture lc_h -%}{%- if lc_val.swatch.color -%}{{ lc_val.swatch.color }}{%- else -%}{%- render 'lc-colour-css', value: lc_val -%}{%- endif -%}{%- endcapture -%}{%- assign lc_h = lc_h | strip -%}{%- if lc_h != '' -%}{{ lc_val | json }}:{{ lc_h | json }},{%- endif -%}{%- endfor -%}{%- endif -%}{%- endfor -%} };
+                    function hex(v){return C[(v||'').trim()]||null;}
                     function isColor(t){t=(t||'').trim().toLowerCase();return t==='couleur'||t==='color'||t==='colour'||t==='coloris';}
-                    document.querySelectorAll('fieldset').forEach(function(fs){
-                      var leg=fs.querySelector('legend');if(!leg||!isColor(leg.textContent))return;
-                      var any=false;
-                      fs.querySelectorAll('label').forEach(function(lab){
-                        var h=hex(lab.textContent);if(!h)return;
-                        lab.classList.add('lc-swatch');lab.style.setProperty('--sw',h);lab.setAttribute('title',(lab.textContent||'').trim());any=true;
+                    function colourFieldsets(root){return [].filter.call((root||document).querySelectorAll('variant-selects fieldset, variant-radios fieldset'),function(fs){var l=fs.querySelector('legend');return l&&isColor(l.textContent);});}
+                    function decorate(){
+                      colourFieldsets().forEach(function(fs){
+                        var any=false;
+                        fs.querySelectorAll('input[type=radio]').forEach(function(inp){
+                          var lab=fs.querySelector('label[for="'+inp.id+'"]');if(!lab)return;
+                          var h=hex(inp.value);if(!h)return;
+                          lab.classList.add('lc-swatch');lab.style.setProperty('--sw',h);lab.setAttribute('title',inp.value);any=true;
+                        });
+                        if(any)fs.classList.add('lc-swatch-set');
                       });
-                      if(any)fs.classList.add('lc-swatch-set');
-                    });
+                    }
+                    // Invalid colour/size combination → move the other options to an existing variant of the clicked colour.
+                    var pendingColour=null;
+                    function fixCombination(){
+                      var vs=window.lcProductVariants||[];var root=document.querySelector('variant-selects, variant-radios');if(!root||!vs.length||pendingColour===null)return;
+                      var sets=[].slice.call(root.querySelectorAll('fieldset'));
+                      var chosen=sets.map(function(fs){var c=fs.querySelector('input:checked');return c?c.value:null;});
+                      var ci=-1;sets.forEach(function(fs,i){var l=fs.querySelector('legend');if(l&&isColor(l.textContent))ci=i;});
+                      var colour=pendingColour;pendingColour=null;if(ci<0)return;
+                      var exists=vs.some(function(v){return v.o.every(function(x,i){return x===chosen[i];});});if(exists)return;
+                      var same=vs.filter(function(v){return v.o[ci]===colour;});if(!same.length)return;
+                      var best=same.filter(function(v){return v.a;})[0]||same[0];
+                      for(var i=0;i<sets.length;i++){if(i===ci||best.o[i]===chosen[i])continue;
+                        var target=[].filter.call(sets[i].querySelectorAll('input[type=radio]'),function(x){return x.value===best.o[i];})[0];
+                        if(target){target.click();return;}
+                      }
+                    }
+                    document.addEventListener('change',function(e){var t=e.target;if(!t||t.type!=='radio')return;var fs=t.closest('fieldset');var l=fs&&fs.querySelector('legend');if(l&&isColor(l.textContent))pendingColour=t.value;},true);
+                    var timer=null;
+                    var mo=new MutationObserver(function(){clearTimeout(timer);timer=setTimeout(function(){decorate();fixCombination();},60);});
+                    function start(){decorate();var host=document.querySelector('product-info')||document.body;mo.observe(host,{childList:true,subtree:true});}
+                    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
                   })();
                 </script>
               {%- when 'buy_buttons' -%}
                 <style>.product-form__submit{background:#1B2A4A!important;color:#fff!important;border:1px solid #1B2A4A!important;border-radius:4px!important;font-weight:700}.product-form__submit:hover{background:#2a3f6b!important;border-color:#2a3f6b!important}.product-form__submit>*{color:#fff!important}@media(max-width:749px){.product-form__submit{width:100%!important}}</style>
-                {%- comment -%} In-stock indicator (draft only) — bilingual; uses .available (untracked dropship → inventory_quantity is 0) {%- endcomment -%}
-                {%- if product.selected_or_first_available_variant.available -%}
-                  <div class="lc-instock">
-                    <span class="lc-instock__ic">✔</span>
-                    <span class="lc-instock__tx">{%- if lc_loc == 'en' -%}In stock — ships within 24-48h{%- else -%}En stock — expédition sous 24-48h{%- endif -%}</span>
-                  </div>
-                  <style>
-                    .lc-instock{display:flex;align-items:center;gap:0.45rem;margin:0.5rem 0 0.9rem;font-size:0.95rem;font-weight:700;color:#2D7A3A}
-                    .lc-instock__ic{display:inline-flex;align-items:center;justify-content:center;width:1.15rem;height:1.15rem;border-radius:50%;background:#2D7A3A;color:#fff;font-size:0.72rem;line-height:1;flex:0 0 auto}
-                  </style>
-                {%- endif -%}
+                {%- comment -%} The in-stock line moved to the buy_now_button block (above both buttons) on 2026-10-15: here it sat between "Acheter maintenant" and "Ajouter au panier". {%- endcomment -%}
                 {%- comment -%} Out of stock → replace the ATC button with a back-in-stock waitlist form (bilingual). In stock → normal buy buttons. {%- endcomment -%}
                 {%- if product.available -%}
                   {%- render 'buy-buttons',
@@ -576,6 +612,24 @@
                     section_id: section.id,
                     show_pickup_availability: true
                   -%}
+                  {%- comment -%}
+                    Accepted payment methods, right under the buy buttons (seen on a competitor's
+                    PDP, 2026-09-30). Driven by shop.enabled_payment_types, so it follows whatever
+                    is enabled in Shopify Payments — no hardcoded list.
+                  {%- endcomment -%}
+                  {%- if shop.enabled_payment_types.size > 0 -%}
+                    <ul class="lc-payicons list-payment" role="list" aria-label="{%- if lc_loc == 'en' -%}Accepted payment methods{%- else -%}Modes de paiement acceptés{%- endif -%}">
+                      {%- for type in shop.enabled_payment_types -%}
+                        <li class="list-payment__item">{{ type | payment_type_svg_tag: class: 'icon icon--full-color' }}</li>
+                      {%- endfor -%}
+                    </ul>
+                    <style>
+                      .lc-payicons{display:flex !important;flex-wrap:wrap;gap:.4rem;margin:.9rem 0 .2rem !important;padding:0 !important;list-style:none;justify-content:flex-start !important}
+                      .lc-payicons .list-payment__item{display:flex;margin:0 !important;padding:0}
+                      .lc-payicons .icon{width:3.8rem;height:2.4rem}
+                      @media(max-width:749px){.lc-payicons{gap:.28rem;flex-wrap:nowrap}.lc-payicons .icon{width:3.15rem;height:2rem}}
+                    </style>
+                  {%- endif -%}
                 {%- else -%}
                   {%- assign lc_wl_sku = product.selected_or_first_available_variant.sku | default: product.variants.first.sku -%}
                   <div class="lc-waitlist" style="margin:.4rem 0 .2rem;">
@@ -626,21 +680,10 @@
                   </script>
                 {%- endif -%}
 
-                {%- render 'lc-delivery-estimate' -%}
+                {%- comment -%} delivery estimate moved up under the price (price_reassurance block), 2026-10-14 {%- endcomment -%}
                 {%- comment -%} Trust badges (draft only) — bilingual via lc_loc {%- endcomment -%}
-                <div class="lc-trust-badges">
-                  <style>
-                    .lc-trust-badges{margin-top:1rem;padding:0.85rem 0.7rem;background:rgba(212,168,83,0.09);border:1px solid rgba(212,168,83,0.35);border-radius:10px;display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:0.55rem 0.5rem}
-                    .lc-trust-badge{display:flex;align-items:center;gap:0.5rem}
-                    .lc-trust-badge .lc-tb-ic{font-size:1.2rem;line-height:1;flex:0 0 auto}
-                    .lc-trust-badge .lc-tb-tx{font-size:0.78rem;font-weight:600;color:#1A2340;line-height:1.2}
-                  </style>
-                  <div class="lc-trust-badge" style="grid-column:1/-1"><span class="lc-tb-ic">🚚</span><span class="lc-tb-tx">{%- if lc_loc == 'en' -%}Free shipping (QC/ON){%- else -%}Livraison gratuite (Qc/Ont){%- endif -%}</span></div>
-                  <div class="lc-trust-badge"><span class="lc-tb-ic">↩️</span><span class="lc-tb-tx">{%- if lc_loc == 'en' -%}Easy 30-day returns{%- else -%}Retours faciles 30 jours{%- endif -%}</span></div>
-                  <div class="lc-trust-badge"><span class="lc-tb-ic">🔒</span><span class="lc-tb-tx">{%- if lc_loc == 'en' -%}Secure payment{%- else -%}Paiement sécurisé{%- endif -%}</span></div>
-                  <div class="lc-trust-badge"><span class="lc-tb-ic">🇨🇦</span><span class="lc-tb-tx">{%- if lc_loc == 'en' -%}French support{%- else -%}Support en français{%- endif -%}</span></div>
-                  <div class="lc-trust-badge"><span class="lc-tb-ic">✅</span><span class="lc-tb-tx">{%- if lc_loc == 'en' -%}Unbeatable price guaranteed{%- else -%}Prix imbattables garanti{%- endif -%}</span></div>
-                </div>
+                {%- comment -%} Trust badges box removed 2026-09-30 — replaced by .lc-checklist under the price. {%- endcomment -%}
+                {%- comment -%} Retours, garantie, livraison, paiement et aide : voir le bloc pdp_info (accordeons sous la description). {%- endcomment -%}
               {%- when 'rating' -%}
                 {%- if product.metafields.reviews.rating.value != blank -%}
                   <div class="rating-wrapper">

@@ -1,0 +1,296 @@
+{%- comment -%}
+  lc-visualiser — "Voyez-le chez vous" (AI room visualiser) on the product page, rendered once after the media
+  gallery in main-product. A pill sits on the main photo (bottom-left); it opens a sheet.
+  Two modes, decided by GET /api/visualiser (lcTeaser.status()):
+  - TEASER (default, while settings.visualiser_enabled != "1"): explains the coming feature and asks
+    "ça vous aiderait ?" — events view / click / yes / no / email go to /api/teaser (source "pdp") to measure
+    demand. Its last line teases "Ameublo, votre décorateur" (feature "decorateur", source "sheet").
+  - LIVE: the shopper picks a photo, the browser shrinks it, POST /api/visualiser returns the room with this
+    product placed in it. The photo goes to our AI provider for that one answer; we never store it.
+  Data: product handle, per-variant photo, and per-SKU cm sizes from custom.lc_dims when present (fit checker).
+  The consent wording must match CONSENT_TEXT in src/lib/teaser.ts (stored with each signup).
+{%- endcomment -%}
+{%- assign loc = request.locale.iso_code | downcase -%}
+{%- assign privacy_url = routes.root_url | append: '/policies/privacy-policy' | replace: '//policies', '/policies' -%}
+{%- render 'lc-teaser-core' -%}
+<div class="lc-vis" data-handle="{{ product.handle }}" data-loc="{{ loc }}" hidden>
+  <script type="application/json" data-lc-vis-data>{"img":{{ product.featured_image | image_url: width: 1024 | prepend: 'https:' | json }},"v":{ {%- for vr in product.variants -%}"{{ vr.id }}":[{{ vr.sku | json }},{% if vr.featured_image %}{{ vr.featured_image | image_url: width: 1024 | prepend: 'https:' | json }}{% else %}null{% endif %}]{%- unless forloop.last -%},{%- endunless -%}{%- endfor -%} },"dims":{{ product.metafields.custom.lc_dims.value | json }}}</script>
+  <button type="button" class="lc-vis__pill" data-lc-vis-open aria-haspopup="dialog">
+    <svg class="lc-vis__ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 9.5 12 4l8 5.5V20H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.5 20v-4.5a3.5 3.5 0 0 1 7 0V20" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19 1.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" fill="#D4A853"/></svg>
+    <span>{% if loc == 'en' %}See it in your room{% else %}Voyez-le chez vous{% endif %}</span>
+    <span class="lc-vis__soon" data-lc-vis-soon>{% if loc == 'en' %}Soon{% else %}Bientôt{% endif %}</span>
+  </button>
+
+  <div class="lc-vis__dlg" role="dialog" aria-modal="true" aria-labelledby="lc-vis-title" hidden>
+    <span class="lc-vis__ov" data-lc-vis-close></span>
+    <div class="lc-vis__card" tabindex="-1">
+      <button type="button" class="lc-vis__x" data-lc-vis-close aria-label="{% if loc == 'en' %}Close{% else %}Fermer{% endif %}">&times;</button>
+
+      <section class="lc-vis__mode" data-mode="teaser">
+        <p class="lc-vis__kicker">{% if loc == 'en' %}Coming soon to Furnish Direct{% else %}Bientôt chez Ameublo Direct{% endif %}</p>
+        <h2 class="lc-vis__h" id="lc-vis-title">{% if loc == 'en' %}See this product in your home before you buy{% else %}Voyez ce produit chez vous, avant d'acheter{% endif %}</h2>
+        <div class="lc-vis__demo" aria-hidden="true">
+          <div class="lc-vis__frame">
+            <svg viewBox="0 0 120 90"><rect width="120" height="90" fill="#EFE9DF"/><rect y="62" width="120" height="28" fill="#D9CDBB"/><rect x="14" y="14" width="30" height="34" rx="2" fill="#fff" stroke="#C9BFAF"/><path d="M29 14v34M14 31h30" stroke="#C9BFAF"/><rect x="86" y="34" width="4" height="28" fill="#8A7B66"/><ellipse cx="88" cy="32" rx="9" ry="6" fill="#7E9A84"/></svg>
+            <span>{% if loc == 'en' %}Your photo{% else %}Votre photo{% endif %}</span>
+          </div>
+          <span class="lc-vis__plus">+</span>
+          <div class="lc-vis__frame lc-vis__frame--prod">
+            <img src="{{ product.featured_image | image_url: width: 240 }}" alt="" width="120" height="90" loading="lazy">
+            <span>{% if loc == 'en' %}This item{% else %}Ce produit{% endif %}</span>
+          </div>
+          <span class="lc-vis__plus">=</span>
+          <div class="lc-vis__frame">
+            <svg viewBox="0 0 120 90"><rect width="120" height="90" fill="#EFE9DF"/><rect y="62" width="120" height="28" fill="#D9CDBB"/><rect x="14" y="14" width="30" height="34" rx="2" fill="#fff" stroke="#C9BFAF"/><path d="M29 14v34M14 31h30" stroke="#C9BFAF"/><rect x="86" y="34" width="4" height="28" fill="#8A7B66"/><ellipse cx="88" cy="32" rx="9" ry="6" fill="#7E9A84"/><g fill="#1B2A4A"><rect x="44" y="44" width="38" height="12" rx="4"/><rect x="40" y="40" width="7" height="20" rx="3"/><rect x="79" y="40" width="7" height="20" rx="3"/><rect x="46" y="34" width="34" height="11" rx="4" fill="#B8553C"/><rect x="45" y="60" width="2" height="5"/><rect x="79" y="60" width="2" height="5"/></g><path d="M100 10l1.5 3.5 3.5 1.5-3.5 1.5-1.5 3.5-1.5-3.5-3.5-1.5 3.5-1.5z" fill="#D4A853" class="lc-vis__spark"/></svg>
+            <span>{% if loc == 'en' %}At home{% else %}Chez vous{% endif %}</span>
+          </div>
+        </div>
+        <ol class="lc-vis__steps">
+          <li>{% if loc == 'en' %}Snap the spot you have in mind.{% else %}Prenez en photo l'endroit prévu.{% endif %}</li>
+          <li>{% if loc == 'en' %}We place this item in it, scaled to its dimensions.{% else %}On y place ce produit, à l'échelle de ses dimensions.{% endif %}</li>
+          <li>{% if loc == 'en' %}Keep the image or share it.{% else %}Gardez l'image ou partagez-la.{% endif %}</li>
+        </ol>
+        <div class="lc-vis__ask" data-lc-vis-ask>
+          <p class="lc-vis__q">{% if loc == 'en' %}Would this help you choose?{% else %}Est-ce que ça vous aiderait à choisir ?{% endif %}</p>
+          <div class="lc-vis__row">
+            <button type="button" class="lc-vis__btn" data-lc-vis-yes>{% if loc == 'en' %}Yes, I'd try it{% else %}Oui, j'aimerais l'essayer{% endif %}</button>
+            <button type="button" class="lc-vis__btn lc-vis__btn--ghost" data-lc-vis-no>{% if loc == 'en' %}Not really{% else %}Pas vraiment{% endif %}</button>
+          </div>
+        </div>
+        <form class="lc-vis__notify" data-lc-vis-notify hidden novalidate>
+          <p class="lc-vis__thanks">{% if loc == 'en' %}Thanks! Want an email when it's ready?{% else %}Merci ! Voulez-vous un courriel quand ce sera prêt ?{% endif %}</p>
+          <div class="lc-vis__row">
+            <label class="lc-vis__sr" for="lc-vis-email">{% if loc == 'en' %}Email{% else %}Courriel{% endif %}</label>
+            <input id="lc-vis-email" class="lc-vis__email" type="email" name="email" autocomplete="email" inputmode="email" placeholder="{% if loc == 'en' %}Your email{% else %}Votre courriel{% endif %}" aria-describedby="lc-vis-fine" required>
+            <button type="submit" class="lc-vis__btn">{% if loc == 'en' %}Notify me{% else %}M'avertir{% endif %}</button>
+          </div>
+          <p class="lc-vis__fine" id="lc-vis-fine">{% if loc == 'en' %}One email, at launch. No newsletter. You can unsubscribe at any time.{% else %}Un seul courriel, au lancement. Pas d'infolettre. Vous pourrez vous désinscrire en tout temps.{% endif %} <a href="{{ privacy_url }}">{% if loc == 'en' %}Privacy{% else %}Confidentialité{% endif %}</a></p>
+          <p class="lc-vis__err" data-lc-vis-mailerr role="alert" hidden></p>
+        </form>
+        <p class="lc-vis__done" data-lc-vis-done role="status" hidden></p>
+        <div class="lc-vis__also">
+          <p><strong>{% if loc == 'en' %}Also in the works: Furni, your decorator.{% else %}Aussi en préparation : Ameublo, votre décorateur.{% endif %}</strong> {% if loc == 'en' %}Send a photo of your room and get pieces that match its style.{% else %}Envoyez une photo de votre pièce : il vous suggère des meubles qui vont avec son style.{% endif %}</p>
+          <button type="button" class="lc-vis__link" data-lc-vis-deco>{% if loc == 'en' %}That interests me too{% else %}Ça m'intéresse aussi{% endif %}</button>
+        </div>
+      </section>
+
+      <section class="lc-vis__mode" data-mode="live" hidden>
+        <h2 class="lc-vis__h" id="lc-vis-title-live">{% if loc == 'en' %}See it in your room{% else %}Voyez-le chez vous{% endif %}</h2>
+        <div data-step="pick">
+          <p class="lc-vis__p">{% if loc == 'en' %}Take a photo of the spot you have in mind, from the front with a little distance and good light.{% else %}Photographiez l'endroit prévu, de face, avec un peu de recul et une bonne lumière.{% endif %}</p>
+          <label class="lc-vis__btn lc-vis__btn--file">
+            <input type="file" accept="image/*" data-lc-vis-file>
+            {% if loc == 'en' %}Take or choose a photo{% else %}Prendre ou choisir une photo{% endif %}
+          </label>
+          <input class="lc-vis__hp" type="text" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+          <p class="lc-vis__fine">{% if loc == 'en' %}Your photo is processed by our AI provider (Google) to create the preview; we don't keep it.{% else %}Votre photo est traitée par notre fournisseur d'IA (Google) pour créer l'aperçu ; nous ne la conservons pas.{% endif %} <a href="{{ privacy_url }}">{% if loc == 'en' %}Privacy{% else %}Confidentialité{% endif %}</a></p>
+        </div>
+        <div data-step="work" hidden>
+          <div class="lc-vis__shot lc-vis__shot--busy"><img data-lc-vis-mine alt="" width="1600" height="1200"></div>
+          <p class="lc-vis__p" role="status">{% if loc == 'en' %}Placing the item in your room… about 15 seconds.{% else %}On place le produit dans votre pièce… environ 15 secondes.{% endif %}</p>
+        </div>
+        <div data-step="done" hidden>
+          <div class="lc-vis__shot"><img data-lc-vis-out width="1600" height="1200" alt="{% if loc == 'en' %}Your room with this item placed in it{% else %}Votre pièce avec ce produit{% endif %}"></div>
+          <p class="lc-vis__fine">{% if loc == 'en' %}AI-made preview: size and details are approximate. Check the dimensions before you buy.{% else %}Aperçu créé par IA : la taille et les détails sont approximatifs. Vérifiez les dimensions avant d'acheter.{% endif %}</p>
+          <div class="lc-vis__row">
+            <a class="lc-vis__btn" data-lc-vis-save download="ameublo-apercu.jpg">{% if loc == 'en' %}Save the image{% else %}Enregistrer l'image{% endif %}</a>
+            <button type="button" class="lc-vis__btn lc-vis__btn--ghost" data-lc-vis-share hidden>{% if loc == 'en' %}Share{% else %}Partager{% endif %}</button>
+            <button type="button" class="lc-vis__link" data-lc-vis-again>{% if loc == 'en' %}Try another photo{% else %}Essayer une autre photo{% endif %}</button>
+          </div>
+        </div>
+        <p class="lc-vis__err" data-lc-vis-err role="alert" hidden></p>
+      </section>
+    </div>
+  </div>
+</div>
+<style>
+  .lc-vis{font-family:var(--lc-font-text,inherit);color:var(--lc-ink,#17213A)}
+  .lc-vis__pill{position:absolute;left:12px;z-index:3;display:inline-flex;align-items:center;gap:.5rem;min-height:40px;padding:.5rem 1rem .5rem .8rem;border:1px solid rgba(27,42,74,.12);border-radius:999px;background:rgba(255,255,255,.94);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);box-shadow:0 4px 14px rgba(27,42,74,.18);color:var(--lc-navy,#1B2A4A);font:700 1.35rem/1.1 var(--lc-font-text,inherit);cursor:pointer;transition:transform .15s ease,box-shadow .15s ease}
+  .lc-vis__pill:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(27,42,74,.24)}
+  .lc-vis__pill:focus-visible{outline:2px solid var(--lc-terra-btn,#B8553C);outline-offset:2px}
+  .lc-vis__pill--flow{position:static;margin:.8rem 0 0}
+  .lc-vis__ico{width:22px;height:22px;flex:none}
+  .lc-vis__soon{font-size:1.05rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:.2rem .5rem;border-radius:999px;background:#FBF1DC;color:#8A5A12}
+  .lc-vis__soon[hidden]{display:none}
+  .lc-vis__dlg{position:fixed;inset:0;z-index:100001;display:flex;align-items:center;justify-content:center;padding:16px}
+  .lc-vis__dlg[hidden]{display:none}
+  .lc-vis__ov{position:absolute;inset:0;background:rgba(17,24,39,.55)}
+  .lc-vis__card{position:relative;width:min(520px,100%);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow:auto;overscroll-behavior:contain;background:#fff;border-radius:20px;padding:2.4rem 2.2rem 2rem;box-shadow:0 20px 60px rgba(0,0,0,.3);outline:0}
+  .lc-vis__x{position:absolute;top:6px;right:8px;width:44px;height:44px;border:0;background:none;font-size:2.8rem;line-height:1;color:var(--lc-muted,#6B6B7A);cursor:pointer}
+  .lc-vis__kicker{margin:0 0 .4rem;font-size:1.1rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--lc-terra-btn,#B8553C)}
+  .lc-vis__h{margin:0 3rem 1.2rem 0;font:600 2.4rem/1.2 var(--lc-font-display,Georgia,serif);text-wrap:balance;color:var(--lc-navy,#1B2A4A)}
+  .lc-vis__demo{display:flex;align-items:center;gap:.5rem;margin:0 0 1.2rem}
+  .lc-vis__frame{position:relative;flex:1 1 0;min-width:0;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background:#F4F1EA;box-shadow:inset 0 0 0 1px #E7E1D8}
+  .lc-vis__frame svg,.lc-vis__frame img{display:block;width:100%;height:100%;object-fit:cover}
+  .lc-vis__frame>span{position:absolute;left:0;right:0;bottom:0;padding:.2rem .4rem;background:rgba(255,255,255,.88);font-size:1.05rem;font-weight:700;text-align:center;color:var(--lc-ink,#17213A)}
+  @media(prefers-reduced-motion:no-preference){.lc-vis__spark{transform-origin:100px 15px;animation:lc-vis-tw 1.8s ease-in-out infinite}}
+  @keyframes lc-vis-tw{50%{opacity:.25;transform:scale(.8)}}
+  .lc-vis__plus{flex:none;font-weight:800;color:var(--lc-muted,#6B6B7A)}
+  .lc-vis__steps{margin:0 0 1.4rem;padding-left:2rem;font-size:1.45rem;line-height:1.5}
+  .lc-vis__steps li{margin:.2rem 0}
+  .lc-vis__q,.lc-vis__thanks{margin:0 0 .7rem;font-weight:700;font-size:1.5rem}
+  .lc-vis__row{display:flex;flex-wrap:wrap;gap:.6rem;align-items:center}
+  .lc-vis__btn{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:.6rem 1.6rem;border:0;border-radius:999px;background:var(--lc-navy,#1B2A4A);color:#fff;font:700 1.45rem/1.1 var(--lc-font-text,inherit);text-decoration:none;cursor:pointer}
+  .lc-vis__btn:hover{background:var(--lc-terra-btn,#B8553C)}
+  .lc-vis__btn[disabled]{opacity:.6;cursor:default}
+  .lc-vis__btn:focus-visible,.lc-vis__link:focus-visible,.lc-vis__x:focus-visible,.lc-vis__btn--file:focus-within{outline:2px solid var(--lc-terra-btn,#B8553C);outline-offset:2px}
+  .lc-vis__btn--ghost{background:#fff;color:var(--lc-navy,#1B2A4A);box-shadow:inset 0 0 0 1.5px #cfd4de}
+  .lc-vis__btn--ghost:hover{background:#F4F1EA}
+  .lc-vis__btn--file{position:relative;overflow:hidden}
+  .lc-vis__btn--file input{position:absolute;inset:0;opacity:0;cursor:pointer}
+  .lc-vis__email{flex:1 1 200px;min-width:0;min-height:46px;box-sizing:border-box;border:1px solid #cfd4de;border-radius:999px;padding:.6rem 1.2rem;font:inherit;font-size:16px}
+  .lc-vis__email:focus{outline:2px solid var(--lc-terra-btn,#B8553C);outline-offset:1px;border-color:transparent}
+  .lc-vis__email[aria-invalid="true"]{border-color:#B8553C}
+  .lc-vis__fine{margin:.8rem 0 0;font-size:1.2rem;color:var(--lc-muted,#6B6B7A)}
+  .lc-vis__fine a{color:inherit}
+  .lc-vis__done{margin:.4rem 0 0;padding:.8rem 1rem;border-radius:10px;background:#E9F4EE;color:#1E5B3E;font-weight:700}
+  .lc-vis__also{margin:1.6rem 0 0;padding:1.2rem 0 0;border-top:1px solid var(--lc-line,#E7E1D8);font-size:1.35rem;line-height:1.5}
+  .lc-vis__also p{margin:0 0 .2rem}
+  .lc-vis__link{min-height:40px;border:0;background:none;padding:.4rem 0;font:inherit;font-weight:700;color:var(--lc-navy,#1B2A4A);text-decoration:underline;text-decoration-color:var(--lc-terra-btn,#B8553C);text-underline-offset:3px;cursor:pointer}
+  .lc-vis__link[disabled]{color:#1E5B3E;text-decoration:none;cursor:default}
+  .lc-vis__p{margin:0 0 1rem;font-size:1.45rem;line-height:1.5}
+  .lc-vis__shot{border-radius:12px;overflow:hidden;background:#F4F1EA;margin:0 0 .8rem}
+  .lc-vis__shot img{display:block;width:100%;height:auto}
+  .lc-vis__shot--busy{position:relative}
+  .lc-vis__shot--busy::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(255,255,255,.55) 50%,transparent 70%);background-size:200% 100%}
+  @media(prefers-reduced-motion:no-preference){.lc-vis__shot--busy::after{animation:lc-vis-sh 1.4s linear infinite}}
+  @keyframes lc-vis-sh{from{background-position:150% 0}to{background-position:-50% 0}}
+  .lc-vis__err{margin:.8rem 0 0;padding:.8rem 1rem;border-radius:10px;background:#FBEAE6;color:#8A2E1C}
+  .lc-vis__err[hidden],.lc-vis__mode[hidden],[data-lc-vis-notify][hidden],.lc-vis__done[hidden],.lc-vis [data-step][hidden],.lc-vis__ask[hidden]{display:none}
+  .lc-vis__hp{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+  .lc-vis__sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  @media(max-width:749px){
+    .lc-vis__pill{font-size:1.3rem;min-height:38px;padding:.45rem .9rem .45rem .7rem}
+    .lc-vis__dlg{align-items:flex-end;padding:0}
+    .lc-vis__card{width:100%;max-height:92vh;max-height:92dvh;border-radius:20px 20px 0 0;padding:2.2rem max(16px,env(safe-area-inset-right,0px)) calc(1.8rem + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+    .lc-vis__h{font-size:2.1rem}
+  }
+  body:has(.lc-vis__dlg:not([hidden])) .lc-asst__fab,body:has(.lc-vis__dlg:not([hidden])) .lc-msgr,body:has(.lc-vis__dlg:not([hidden])) .lc-roue__tab{display:none!important}
+</style>
+<script>
+(function(){
+  var root=document.currentScript&&document.currentScript.previousElementSibling&&document.currentScript.previousElementSibling.previousElementSibling;
+  if(!root||root.dataset.lcVis||!window.lcTeaser) return; root.dataset.lcVis='1';
+  var T=window.lcTeaser, EN=root.dataset.loc==='en', handle=root.dataset.handle, data={};
+  try{ data=JSON.parse(root.querySelector('[data-lc-vis-data]').textContent)||{}; }catch(e){}
+  var pill=root.querySelector('[data-lc-vis-open]'), dlg=root.querySelector('.lc-vis__dlg'), card=root.querySelector('.lc-vis__card');
+  var teaser=root.querySelector('[data-mode="teaser"]'), live=root.querySelector('[data-mode="live"]');
+  var lastFocus=null, prevOverflow='';
+  function lg(e,extra){ return T.log('visualiser',e,'pdp',extra?Object.assign({h:handle},extra):{h:handle}); }
+
+  // Sit on the main photo, bottom-left. Offsets only (no getBoundingClientRect): after a swipe the slider's
+  // scroll position must not move the pill, and iOS fires resize while its toolbar collapses.
+  function place(){
+    var viewer=document.querySelector('[id^="GalleryViewer-"]'), list=viewer&&viewer.querySelector('.product__media-list');
+    var item=list&&list.querySelector('.product__media-item');
+    if(!viewer||!list||!item){ var w=document.querySelector('.product__media-wrapper'); if(w&&pill.parentNode!==w){ pill.classList.add('lc-vis__pill--flow'); w.appendChild(pill); } return; }
+    if(pill.parentNode!==viewer){ if(getComputedStyle(viewer).position==='static') viewer.style.position='relative'; viewer.appendChild(pill); }
+    // offsetLeft/Top ignore the slider's own scroll, so the first photo's resting position is what we get.
+    var base=item.offsetParent===viewer?{x:0,y:0}:{x:list.offsetLeft,y:list.offsetTop};
+    pill.style.left=Math.round(base.x+item.offsetLeft+12)+'px';
+    pill.style.top=Math.max(8,Math.round(base.y+item.offsetTop+item.offsetHeight-pill.offsetHeight-12))+'px';
+  }
+  function show(){
+    root.hidden=false; place();
+    var l=document.querySelector('[id^="GalleryViewer-"] .product__media-item');
+    if(window.ResizeObserver&&l) new ResizeObserver(place).observe(l);
+    window.addEventListener('resize',place);
+    if(window.IntersectionObserver){
+      var io=new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ lg('view'); io.disconnect(); } }); },{threshold:.6});
+      io.observe(pill);
+    }
+  }
+
+  function open(){
+    lastFocus=document.activeElement; dlg.hidden=false;
+    prevOverflow=document.documentElement.style.overflow; document.documentElement.style.overflow='hidden';
+    lg('click');
+    if(!teaser.hidden) T.log('decorateur','view','sheet',{h:handle});
+    setTimeout(function(){ try{ card.focus({preventScroll:true}); }catch(e){} },30);
+  }
+  function close(){ dlg.hidden=true; document.documentElement.style.overflow=prevOverflow; if(lastFocus&&lastFocus.focus) try{ lastFocus.focus(); }catch(e){} }
+  pill.addEventListener('click',open);
+  root.addEventListener('click',function(e){ if(e.target.closest('[data-lc-vis-close]')) close(); });
+  document.addEventListener('keydown',function(e){
+    if(dlg.hidden) return;
+    if(e.key==='Escape') return close();
+    if(e.key!=='Tab') return;
+    var f=[].filter.call(card.querySelectorAll('button,input:not(.lc-vis__hp),a[href]'),function(x){ return x.offsetParent!==null&&!x.disabled; });
+    if(!f.length) return; var a=f[0], z=f[f.length-1];
+    if(e.shiftKey&&(document.activeElement===a||document.activeElement===card)){ e.preventDefault(); z.focus(); } else if(!e.shiftKey&&document.activeElement===z){ e.preventDefault(); a.focus(); }
+  });
+
+  // ── Teaser ──
+  var ask=root.querySelector('[data-lc-vis-ask]'), notify=root.querySelector('[data-lc-vis-notify]'), done=root.querySelector('[data-lc-vis-done]'), mailErr=root.querySelector('[data-lc-vis-mailerr]');
+  var KEY='lc_vis_answer'; function answered(){ try{ return localStorage.getItem(KEY); }catch(e){ return null; } }
+  function remember(v){ try{ localStorage.setItem(KEY,v); }catch(e){} }
+  function say(text){ ask.hidden=true; notify.hidden=true; done.textContent=text; done.hidden=false; }
+  var MSG={
+    no:EN?'Thanks, noted! Your answer helps us decide.':'Merci, c\'est noté ! Votre réponse nous aide à décider.',
+    listed:EN?'Perfect, we\'ll write to you once, at launch.':'Parfait, on vous écrira une seule fois, au lancement.',
+    onList:EN?'You\'re on the list: we\'ll write once, at launch.':'Vous êtes sur la liste : on vous écrira une seule fois, au lancement.',
+    bad:EN?'Please check the email address.':'Vérifiez l\'adresse courriel.',
+    net:EN?'That didn\'t go through. Please try again.':'L\'envoi n\'a pas fonctionné. Réessayez.'
+  };
+  root.querySelector('[data-lc-vis-yes]').addEventListener('click',function(){
+    lg('yes'); remember('yes');
+    ask.hidden=true; notify.hidden=false; setTimeout(function(){ try{ notify.querySelector('input').focus({preventScroll:true}); }catch(e){} },30);
+  });
+  root.querySelector('[data-lc-vis-no]').addEventListener('click',function(){ lg('no'); remember('no'); say(MSG.no); });
+  notify.addEventListener('submit',function(e){
+    e.preventDefault();
+    var inp=notify.querySelector('input'), v=inp.value.trim(), btn=notify.querySelector('button');
+    function err(t){ inp.setAttribute('aria-invalid','true'); mailErr.textContent=t; mailErr.hidden=false; }
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v)){ err(MSG.bad); inp.focus(); return; }
+    inp.removeAttribute('aria-invalid'); mailErr.hidden=true; btn.disabled=true;
+    T.log('visualiser','email','pdp',{h:handle,email:v}).then(function(r){
+      if(!r||!r.ok) throw r&&r.status===400?'bad':'net';
+      remember('email'); say(MSG.listed);
+    }).catch(function(k){ btn.disabled=false; err(k==='bad'?MSG.bad:MSG.net); });
+  });
+  var prior=answered();
+  if(prior==='email') say(MSG.onList); else if(prior==='no') say(MSG.no); else if(prior==='yes'){ ask.hidden=true; notify.hidden=false; }
+  var deco=root.querySelector('[data-lc-vis-deco]');
+  deco.addEventListener('click',function(){
+    T.log('decorateur','click','sheet',{h:handle}); T.log('decorateur','yes','sheet',{h:handle});
+    deco.disabled=true; deco.textContent=EN?'✓ Noted, thanks!':'✓ C\'est noté, merci !';
+  });
+
+  // ── Live ──
+  var file=root.querySelector('[data-lc-vis-file]'), errBox=root.querySelector('[data-lc-vis-err]');
+  var steps={pick:live.querySelector('[data-step="pick"]'),work:live.querySelector('[data-step="work"]'),done:live.querySelector('[data-step="done"]')};
+  function step(n){ for(var k in steps) steps[k].hidden=k!==n; }
+  function fail(code){
+    var M=EN?{not_room:'That photo doesn\'t look like a room. Try a wider shot of the spot.',daily:'You\'ve reached today\'s limit of 3 previews. Come back tomorrow!',busy:'The tool is very busy right now. Please try again later.',photo:'We couldn\'t read that photo. Try another one (JPEG or PNG).'}:{not_room:'Cette photo ne ressemble pas à une pièce. Essayez une vue plus large de l\'endroit.',daily:'Vous avez atteint la limite de 3 aperçus aujourd\'hui. Revenez demain !',busy:'L\'outil est très demandé en ce moment. Réessayez un peu plus tard.',photo:'Impossible de lire cette photo. Essayez-en une autre (JPEG ou PNG).'};
+    errBox.textContent=M[code]||(EN?'Something went wrong. Please try again.':'Un problème est survenu. Réessayez.'); errBox.hidden=false; step('pick');
+  }
+  function current(){
+    var id=new URLSearchParams(location.search).get('variant'), f=document.querySelector('form[action*="/cart/add"] [name="id"]');
+    if(!id&&f) id=f.value; return (data.v&&data.v[id])||null;
+  }
+  file.addEventListener('change',function(){
+    var f=file.files&&file.files[0]; if(!f) return; errBox.hidden=true;
+    T.shrink(f).catch(function(){ throw 'photo'; }).then(function(p){
+      live.querySelector('[data-lc-vis-mine]').src='data:image/jpeg;base64,'+p.data; step('work');
+      var cv=current(), sku=cv&&cv[0], dims=data.dims&&data.dims.s&&sku&&data.dims.s[sku]?data.dims.s[sku].p:null;
+      return fetch(T.base+'/api/visualiser',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({photo:p.data,type:p.type,w:p.w,h:p.h,handle:handle,image:(cv&&cv[1])||data.img,dims:dims,locale:EN?'en':'fr',website:live.querySelector('.lc-vis__hp').value})})
+        .then(function(r){ return r.json().catch(function(){ return {success:false,error:'server'}; }); });
+    }).then(function(j){
+      if(!j||!j.success) return fail(j&&j.error);
+      var out=live.querySelector('[data-lc-vis-out]'), save=live.querySelector('[data-lc-vis-save]');
+      out.src=j.image; save.href=j.image; save.setAttribute('download','ameublo-apercu.'+(/^data:image\/png/.test(j.image)?'png':'jpg')); step('done');
+      var share=live.querySelector('[data-lc-vis-share]');
+      fetch(j.image).then(function(r){ return r.blob(); }).then(function(b){
+        var fl=new File([b],'ameublo-apercu.'+(b.type==='image/png'?'png':'jpg'),{type:b.type});
+        if(navigator.canShare&&navigator.canShare({files:[fl]})){ share.hidden=false; share.onclick=function(){ navigator.share({files:[fl],title:document.title}).catch(function(){}); }; }
+      }).catch(function(){});
+    }).catch(function(k){ fail(k==='photo'?'photo':'server'); }).then(function(){ file.value=''; });
+  });
+  live.querySelector('[data-lc-vis-again]').addEventListener('click',function(){ errBox.hidden=true; step('pick'); });
+
+  T.status().then(function(s){
+    if(s.visualiser){ teaser.hidden=true; live.hidden=false; dlg.setAttribute('aria-labelledby','lc-vis-title-live'); root.querySelector('[data-lc-vis-soon]').hidden=true; step('pick'); }
+    show();
+  });
+})();
+</script>

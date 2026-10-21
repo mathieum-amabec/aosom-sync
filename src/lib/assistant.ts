@@ -28,6 +28,7 @@ import { searchStoreInfo } from "./store-knowledge";
 import { getProductDetails } from "./product-details";
 import { GEMINI } from "./config";
 import { shopifyFetch } from "./shopify-client";
+import type { BudgetPool } from "./llm-budget";
 
 export type Locale = "fr" | "en";
 
@@ -421,7 +422,9 @@ function parseFinal(text: string): { reply: string; picks: Array<{ sku: string; 
  * prior conversation (already length-capped by the caller). Never throws for a normal
  * model reply; throws only on a hard API failure.
  */
-export async function runAssistant(opts: { message: string; history?: AssistantTurn[]; locale?: Locale }): Promise<AssistantResult> {
+export async function runAssistant(opts: { message: string; history?: AssistantTurn[]; locale?: Locale; pool?: BudgetPool }): Promise<AssistantResult> {
+  // The storefront chat pays from "assistant"; the photo décorateur (room-visualizer.ts) passes its own pool.
+  const budgetPool: BudgetPool = opts.pool ?? "assistant";
   const locale: Locale = opts.locale === "en" ? "en" : "fr";
   // Gemini roles: the widget's "assistant" turns are "model" turns.
   const contents: GeminiContent[] = [];
@@ -460,7 +463,7 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
         tools: lastStep ? undefined : [SEARCH_TOOL, RECOMMEND_TOOL, STORE_INFO_TOOL, PRODUCT_DETAILS_TOOL],
         contents,
       },
-      "assistant",
+      budgetPool,
     );
     tokens += res.usage?.totalTokenCount ?? 0;
 
