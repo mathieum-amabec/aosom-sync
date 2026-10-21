@@ -1,3 +1,8 @@
+// OBSOLETE (2026-10-20): every swatch now comes from ONE theme snippet, snippets/lc-colour-css.liquid (copy in
+// shopify-theme/snippets/). This script would re-inject an old map where « crème »/« cream » = #FFFDD0 beats « blanc »
+// (pale-yellow dot on white products) — see the white rule in CLAUDE.md « Pastilles de couleur ».
+throw new Error("apply-swatches is obsolete: edit snippets/lc-colour-css.liquid instead (white rule, CLAUDE.md)");
+
 // CHANTIER 2 — color swatches on the PDP variant picker (PREVIEW only).
 import { rest, getAsset, putAsset, getLiveThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
 
