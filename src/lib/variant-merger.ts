@@ -185,6 +185,7 @@ function toVariant(p: AosomProduct): AosomVariant {
     gtin: p.gtin,
     weight: p.weight,
     dimensions: p.dimensions,
+    ...(p.dimensionsRaw ? { dimensionsRaw: p.dimensionsRaw } : {}),
     images: p.images,
     estimatedArrival: p.estimatedArrival,
     outOfStockExpected: p.outOfStockExpected,
