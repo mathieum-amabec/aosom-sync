@@ -441,6 +441,17 @@ describe("shopifyToFeedItems — spec/infographic images never reach an ad feed 
     expect(item.additionalImageLinks).toEqual([]);
   });
 
+  it("keeps a variant's own photo whose Shopify _<uuid> suffix happens to contain -c0 (2026-10-21)", () => {
+    const own = "https://cdn.shopify.com/s/files/1/0/0/files/aJ8dc419f1f2cee58_6baf086d-3cf8-46ad-a384-c01aff82e81c.jpg";
+    const colour: ShopifyFeedProduct = {
+      id: 6, title: "Cabanon", handle: "cabanon", status: "active", published_at: PUBLISHED,
+      images: [{ id: 1, src: "https://img/hero.jpg" }, { id: 2, src: own }],
+      variants: [{ sku: "CAB-WT", price: "10", inventory_management: null, image_id: 2 }],
+    };
+    const [item] = shopifyToFeedItems([colour]);
+    expect(item.imageLink).toBe(own);
+  });
+
   it("falls back to the unfiltered gallery when EVERY image looks like a spec shot (never ships zero images)", () => {
     const allSpec: ShopifyFeedProduct = {
       ...withSpecShot, id: 4, handle: "parasol-4",

@@ -39,14 +39,19 @@ describe("isSpecImageUrl", () => {
     expect(isSpecImageUrl(`${CDN}/patio-glider.jpg`)).toBe(false);
   });
 
-  it("ignores -b0..-f0 that only appear inside Shopify's _<uuid> re-upload suffix (2026-10-21)", () => {
+  it("ignoreShopifyUuid: -b0..-f0 inside Shopify's _<uuid> re-upload suffix don't count (2026-10-21)", () => {
     // live cases from feed_integrity_audit: good colour photos dropped from the ad feeds
-    expect(isSpecImageUrl(`${CDN}/aJ8dc419f1f2cee58_6baf086d-3cf8-46ad-a384-c01aff82e81c.jpg?v=1782460907`)).toBe(false);
-    expect(isSpecImageUrl(`${CDN}/gzI80c19c21c69a37_a473c699-5b72-419a-b07f-a7e8e20cee9d.jpg`)).toBe(false);
-    expect(isSpecImageUrl(`${CDN}/NxS5f11949567c48a_076bd27b-b0a0-4cf3-8a33-632fba6aafb1.jpg`)).toBe(false);
+    const o = { ignoreShopifyUuid: true };
+    expect(isSpecImageUrl(`${CDN}/aJ8dc419f1f2cee58_6baf086d-3cf8-46ad-a384-c01aff82e81c.jpg?v=1782460907`, o)).toBe(false);
+    expect(isSpecImageUrl(`${CDN}/gzI80c19c21c69a37_a473c699-5b72-419a-b07f-a7e8e20cee9d.jpg`, o)).toBe(false);
+    expect(isSpecImageUrl(`${CDN}/NxS5f11949567c48a_076bd27b-b0a0-4cf3-8a33-632fba6aafb1.jpg`, o)).toBe(false);
     // a real suffix or keyword still counts, uuid or not
-    expect(isSpecImageUrl(`${CDN}/824-051-B0_6baf086d-3cf8-46ad-a384-c01aff82e81c.jpg`)).toBe(true);
-    expect(isSpecImageUrl(`${CDN}/size-chart_076bd27b-b0a0-4cf3-8a33-632fba6aafb1.jpg`)).toBe(true);
+    expect(isSpecImageUrl(`${CDN}/824-051-B0_6baf086d-3cf8-46ad-a384-c01aff82e81c.jpg`, o)).toBe(true);
+    expect(isSpecImageUrl(`${CDN}/size-chart_076bd27b-b0a0-4cf3-8a33-632fba6aafb1.jpg`, o)).toBe(true);
+  });
+
+  it("without the option (selectors, no vision filter) the uuid still counts, as before", () => {
+    expect(isSpecImageUrl(`${CDN}/aJ8dc419f1f2cee58_6baf086d-3cf8-46ad-a384-c01aff82e81c.jpg`)).toBe(true);
   });
 });
 
