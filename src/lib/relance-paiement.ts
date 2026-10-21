@@ -25,7 +25,9 @@ const INTERNAL_EMAIL = /^qa-|@ameublodirect\.ca$/i;
 
 export const STATE_KEY = "relance_paiement_state";
 export const ENABLED_KEY = "relance_paiement_enabled";
-export const TEMPLATES_KEY = "relance_paiement_templates_v1";
+// v2: localized unsubscribe link (v1 printed "Unsubscribe" in the French email). A new key makes
+// the next run create fresh Klaviyo templates instead of reusing the cached v1 ids.
+export const TEMPLATES_KEY = "relance_paiement_templates_v2";
 
 export interface CheckoutEvent {
   eventId: string;
@@ -133,6 +135,7 @@ const COPY = {
     cta: "Reprendre ma commande",
     perks: "✔ Livraison gratuite partout au Canada<br>✔ 10 % de rabais sur le moins cher de 2 articles, automatiquement au panier",
     help: "Une question avant de commander? Réponds simplement à ce courriel.",
+    unsubscribe: "Se désabonner",
   },
   en: {
     subject: "Your cart is waiting 🛒",
@@ -142,6 +145,7 @@ const COPY = {
     cta: "Complete my order",
     perks: "✔ Free shipping anywhere in Canada<br>✔ 10% off the cheaper of 2 items, applied automatically in the cart",
     help: "A question before ordering? Just reply to this email.",
+    unsubscribe: "Unsubscribe",
   },
 } as const;
 
@@ -164,7 +168,7 @@ export function buildTemplateHtml(locale: "fr" | "en"): string {
 <tr><td style="padding:0 24px 16px;font:14px/1.6 Arial,sans-serif;color:#444">${c.perks}</td></tr>
 <tr><td style="padding:0 24px 24px;font:14px/1.5 Arial,sans-serif;color:#666">${c.help}</td></tr>
 </table>
-<p style="font:12px/1.5 Arial,sans-serif;color:#888;max-width:560px">{{ organization.name }} · {{ organization.full_address }}<br>{% unsubscribe %}</p>
+<p style="font:12px/1.5 Arial,sans-serif;color:#888;max-width:560px">{{ organization.name }} · {{ organization.full_address }}<br>{% unsubscribe '${c.unsubscribe}' %}</p>
 </td></tr></table></body></html>`;
 }
 

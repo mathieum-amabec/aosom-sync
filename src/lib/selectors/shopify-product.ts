@@ -87,9 +87,16 @@ const SPEC_IMAGE_KEYWORDS = [
   "instruction", "manual", "-b0", "-c0", "-d0", "-e0", "-f0",
 ];
 
+/**
+ * The `_<uuid>` Shopify appends to a re-uploaded file name. Its hex groups produce `-b0`..`-f0`
+ * by chance (`…-c01aff82e81c.jpg`), which dropped good photos from the ad feeds
+ * (feed_integrity_audit, 2026-10-21) — so it is removed before the keyword match.
+ */
+const SHOPIFY_UUID_SUFFIX = /_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+
 /** True when the image URL looks like a spec/infographic shot, not a product photo. */
 export function isSpecImageUrl(url: string): boolean {
-  const u = url.toLowerCase();
+  const u = url.toLowerCase().replace(SHOPIFY_UUID_SUFFIX, "");
   return SPEC_IMAGE_KEYWORDS.some((kw) => u.includes(kw));
 }
 
