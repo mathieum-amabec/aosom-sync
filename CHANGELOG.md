@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.44] - 2026-10-20
+
+### Added
+
+- **"Bientôt" teasers that measure demand before paying for AI (Mat: "fais le code, ne l'active pas").** A "Voyez-le chez vous · Bientôt" pill sits on the main product photo and opens a sheet explaining the coming feature and asking "Est-ce que ça vous aiderait à choisir ?"; the Ameublo assistant gets a persistent "Décorer ma pièce à partir d'une photo · Bientôt" button. Unique-visitor funnel (view → click → yes/no → launch-notice email) per feature and entry point in `teaser_events` / `teaser_signups` (consent wording stored, one launch notice only), shown on the dashboard ("Fonctions « bientôt »"). Bots, headless renderers, the theme editor and visitors who refused analytics are not counted.
+- **The two AI tools themselves, built but OFF.** `POST /api/visualiser` places the product in the shopper's room photo (Gemini 3.1 Flash Image) and `POST /api/decorateur` reads the room and lets the assistant pick live products; both answer 503 until settings `visualiser_enabled` / `decorateur_enabled` = "1". Own token pools (`visualiser`, `decorateur`, on the usage dashboard), atomic per-IP daily caps (3 / 5), product photos restricted to the product's own images, photos never stored.
 ## [0.5.107.43] - 2026-10-20
 
 ### Added

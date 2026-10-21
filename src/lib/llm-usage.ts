@@ -29,6 +29,9 @@ export const MODEL_PRICING: Record<string, { inputPerMTok: number; outputPerMTok
   "gemini-3.5-flash-lite": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
   // gemini-3.8-flash: $0.75/$3.75 through 2026-12-31, then $1.50/$7.50 — bump this on 2027-01-01.
   "gemini-3.8-flash": { inputPerMTok: 0.75, outputPerMTok: 3.75 },
+  // Image output is billed at $60/MTok (≈ $0.067 per 1K image); text/image input at $0.50. Third-party listings,
+  // 2026-10-20 — confirm on ai.google.dev before relying on the dashboard figure.
+  "gemini-3.1-flash-image": { inputPerMTok: 0.5, outputPerMTok: 60 },
 };
 
 /** Fallback when a pool runs a model absent from MODEL_PRICING — priced as Sonnet 4.6 so
@@ -60,6 +63,11 @@ export const ASSUMED_INPUT_SHARE: Record<LlmBudgetPool, number> = {
   // Auto-import: product copy (output-weighted like `batch`) plus several image/judge calls
   // (input-weighted). Estimated, not measured — re-measure after the first live week.
   import: 0.55,
+  // Room visualiser: two images + prompt in (~2,700), one 1K image out (~1,300). Estimated from the published
+  // per-image token counts, not measured — re-measure after the first live week.
+  visualiser: 0.67,
+  // Décorateur: a photo reading + the assistant's tool loop — the assistant's input-heavy shape.
+  decorateur: 0.9,
 };
 
 /** The model each pool currently runs. Reads config, so the CLAUDE_ASSISTANT_MODEL /
@@ -68,6 +76,8 @@ export const ASSUMED_INPUT_SHARE: Record<LlmBudgetPool, number> = {
 export function poolModel(pool: LlmBudgetPool): string {
   if (pool === "assistant") return GEMINI.MODEL_ASSISTANT;
   if (pool === "video") return GEMINI.MODEL_VIDEO_QC;
+  if (pool === "visualiser") return GEMINI.MODEL_VISUALISER;
+  if (pool === "decorateur") return GEMINI.MODEL_DECORATOR;
   // batch / maintenance: Gemini Flash-Lite carries most of the volume (captions, vision, product
   // copy first tier); the long-form tier (3.8 Flash) is a minority, so this slightly under-prices.
   return llmModel("lite");
