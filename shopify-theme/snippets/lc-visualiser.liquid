@@ -185,10 +185,12 @@
     var item=list&&list.querySelector('.product__media-item');
     if(!viewer||!list||!item){ var w=document.querySelector('.product__media-wrapper'); if(w&&pill.parentNode!==w){ pill.classList.add('lc-vis__pill--flow'); w.appendChild(pill); } return; }
     if(pill.parentNode!==viewer){ if(getComputedStyle(viewer).position==='static') viewer.style.position='relative'; viewer.appendChild(pill); }
-    // offsetLeft/Top ignore the slider's own scroll, so the first photo's resting position is what we get.
-    var base=item.offsetParent===viewer?{x:0,y:0}:{x:list.offsetLeft,y:list.offsetTop};
-    pill.style.left=Math.round(base.x+item.offsetLeft+12)+'px';
-    pill.style.top=Math.max(8,Math.round(base.y+item.offsetTop+item.offsetHeight-pill.offsetHeight-12))+'px';
+    // Sum offsets from the photo up to the gallery: they ignore the slider's own scroll, so this is the first
+    // photo's resting position whatever wrappers the theme nests in between.
+    var x=0, y=0, n=item;
+    while(n&&n!==viewer){ x+=n.offsetLeft; y+=n.offsetTop; n=n.offsetParent; if(n&&!viewer.contains(n)&&n!==viewer){ x=item.offsetLeft; y=item.offsetTop; break; } }
+    pill.style.left=Math.round(x+12)+'px';
+    pill.style.top=Math.max(8,Math.round(y+item.offsetHeight-pill.offsetHeight-12))+'px';
   }
   function show(){
     root.hidden=false; place();

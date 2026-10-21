@@ -175,7 +175,7 @@
   .lc-asst__deco-soon{flex:none;padding:.15rem .5rem;border-radius:999px;background:#FBF1DC;color:#8A5A12;font-size:.95rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
   .lc-asst__deco[hidden],.lc-asst__deco-soon[hidden]{display:none}
   .lc-asst__row{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.6rem}
-  .lc-asst__inline{position:relative;border:0;border-radius:999px;padding:.45rem .9rem;background:var(--navy);color:#fff;font:inherit;font-size:1.15rem;font-weight:700;cursor:pointer;overflow:hidden}
+  .lc-asst__inline{position:relative;display:inline-flex;align-items:center;min-height:40px;border:0;border-radius:999px;padding:.45rem .9rem;background:var(--navy);color:#fff;font:inherit;font-size:1.15rem;font-weight:700;cursor:pointer;overflow:hidden}
   .lc-asst__inline--ghost{background:#fff;color:#1b2a47;box-shadow:inset 0 0 0 1px #cfd4de}
   .lc-asst__inline input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer}
   .lc-asst__mini-email{flex:1 1 140px;min-width:0;border:1px solid #d9dee8;border-radius:999px;padding:.45rem .8rem;font:inherit;font-size:16px}
@@ -304,10 +304,13 @@
       addMsg(root.querySelector('[data-lc-deco-label]').textContent.trim(),'user');
       deco.hidden=true;
       if(decoOn) return liveDeco();
+      // One answer per visitor, across pages: a returning visitor is thanked instead of asked again.
+      var KEY='lc_deco_answer', mem=function(v){ try{ if(v) localStorage.setItem(KEY,v); return localStorage.getItem(KEY); }catch(e){ return null; } };
+      if(mem()) return bubble(D.ask.split(/[.:] /)[0]+'. '+D.noted);
       var d=bubble(D.ask), row=mk('div','lc-asst__row'), y=mk('button','lc-asst__inline',D.yes), n=mk('button','lc-asst__inline lc-asst__inline--ghost',D.no);
       y.type=n.type='button'; row.appendChild(y); row.appendChild(n); d.appendChild(row);
-      y.addEventListener('click',function(){ LT.log('decorateur','yes','chat'); row.remove(); askEmail(); });
-      n.addEventListener('click',function(){ LT.log('decorateur','no','chat'); row.remove(); bubble(D.noted); });
+      y.addEventListener('click',function(){ LT.log('decorateur','yes','chat'); mem('yes'); row.remove(); askEmail(); });
+      n.addEventListener('click',function(){ LT.log('decorateur','no','chat'); mem('no'); row.remove(); bubble(D.noted); });
     });
   }
   var chips=root.querySelector('[data-lc-asst-chips]');

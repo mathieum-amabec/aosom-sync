@@ -195,7 +195,9 @@ describe("pure helpers", () => {
   });
   it("trustedVariantImage keeps only this product's own photos, whatever the size suffix or query", () => {
     expect(imageStem("https://ameublodirect.ca/cdn/shop/files/Sofa_600x.jpg?v=2&width=1024")).toBe("sofa.jpg");
-    expect(trustedVariantImage("https://ameublodirect.ca/cdn/shop/files/sofa.jpg?width=1024", [OUR_PHOTO])).not.toBeNull();
+    expect(trustedVariantImage("https://ameublodirect.ca/cdn/shop/files/sofa.jpg?width=1024", [OUR_PHOTO])).toBe(OUR_PHOTO);
+    // Same file name hosted by another store: resolves to OUR photo, never theirs.
+    expect(trustedVariantImage("https://cdn.shopify.com/s/files/1/9999/files/sofa.jpg", [OUR_PHOTO])).toBe(OUR_PHOTO);
     expect(trustedVariantImage("https://cdn.shopify.com/s/files/1/2/other.jpg", [OUR_PHOTO])).toBeNull();
     expect(trustedVariantImage(null, [OUR_PHOTO])).toBeNull();
   });

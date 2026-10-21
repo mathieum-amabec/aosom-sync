@@ -156,7 +156,8 @@ export function imageStem(src: string): string {
 export function trustedVariantImage(variantImage: string | null | undefined, productImages: string[]): string | null {
   if (!variantImage) return null;
   const stem = imageStem(variantImage);
-  return stem && productImages.some((p) => imageStem(p) === stem) ? variantImage : null;
+  // Return OUR URL, never the client's: another store can host a file with the same name on cdn.shopify.com.
+  return (stem && productImages.find((p) => imageStem(p) === stem)) || null;
 }
 
 /**

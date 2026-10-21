@@ -54,7 +54,7 @@ export interface FunnelRow {
   yes: number;
   no: number;
   emails: number;
-  /** clicks / views, % (one decimal); null without views (the "sheet" source has none: it lives inside another sheet). */
+  /** clicks / views, % (one decimal); null without views. For "sheet", a view = the visualiser sheet was opened. */
   clickRate: number | null;
   /** yes / (yes + no), % — among those who answered; null without answers. */
   yesRate: number | null;
