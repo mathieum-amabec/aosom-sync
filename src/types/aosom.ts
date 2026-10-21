@@ -62,6 +62,8 @@ export interface AosomProduct {
   gtin: string;
   weight: number;
   dimensions: { length: number; width: number; height: number };
+  /** The feed's own strings, unit included ("47.80 in", "10.00 ft", "120.00 cm") — see fit-dims.ts lengthToCm. */
+  dimensionsRaw?: { length: string; width: string; height: string };
   productType: string; // hierarchical e.g. "Patio & Garden > Gazebos"
   category: string;
   brand: string; // extracted from Name or Category
@@ -107,6 +109,7 @@ export interface AosomVariant {
   gtin: string;
   weight: number;
   dimensions: { length: number; width: number; height: number };
+  dimensionsRaw?: { length: string; width: string; height: string };
   images: string[];
   estimatedArrival: string;
   outOfStockExpected: string;
