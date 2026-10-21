@@ -4,6 +4,10 @@
   ],
   "crons": [
     {
+      "path": "/api/cron/fit-dims",
+      "schedule": "15 21 * * *"
+    },
+    {
       "path": "/api/cron/category-guard",
       "schedule": "0 10 * * *"
     },

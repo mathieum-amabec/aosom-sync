@@ -2,6 +2,11 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.45] - 2026-10-20
+
+### Added
+
+- **Daily fit-checker sizes sync (`/api/cron/fit-dims`, 21:15 UTC).** Mat: "Assure-toi que les produits futurs vont avoir les dimensions." New imports already get `custom.lc_dims` at creation; this pass writes it for every product whose Aosom sizes are missing or changed (jobs queued before the feed carried units, other creation paths, feed corrections), only changed values, ≤ 500 per run, same page-size guard. Logic moved to `src/lib/fit-dims-sync.ts`; `scripts/backfill-fit-dims.mts` is now a thin operator wrapper. The one-time backfill ran on 2026-10-20: 3106 products written, 0 failed; a re-run finds 0 to write.
 ## [0.5.107.44] - 2026-10-20
 
 ### Added
