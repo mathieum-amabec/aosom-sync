@@ -532,6 +532,20 @@ The guard also notifies « Couleurs à vérifier »: labels contradicting the su
 photo decides, a human confirms) and colours with no own photo in the feed. Limit: a variant photo whose file Aosom has
 since renamed cannot be judged by file; only a vision audit (`.context/swatch/` scripts in the main clone) catches those.
 
+**Rule — « blanc » in the colour ⇒ white swatch** (Mat, 2026-10-20). If a colour name contains the WORD
+`blanc` / `white` (« Blanc crème », « Blanc cassé », « Cream white », « Blanc ivoire »…), its swatch is pure white
+`#FFFFFF`, and the other words (crème, ivoire, cassé) do not change that. Two-colour names (« Noir et blanc »,
+« Gris et blanc ») keep the split dot. Why: the old map drew `crème`/`cream` as `#FFFDD0`, which is pale yellow.
+A customer saw a pale yellow dot next to a photo with a white seat (83A-654V00CW « Blanc crème ») and asked if it was
+the same product. Any swatch map (`lc-colour-css`, the theme, a script) must check for `blanc`/`white` BEFORE
+`crème`/`ivoire`/`cream`.
+
+How `lc-colour-css` applies it (copy in `shopify-theme/snippets/`): per part, the word `blanc`/`white` wins unless
+the same part also names another colour (`noir`, `gris`, `bleu`, `black`… — so « black white » keeps its divided dot);
+materials (« wood grain », « vieilli ») don't count. `/` also splits a value (« Orange/Green »). On 2026-10-20 this
+changed 4 values: Blanc crème (57 products), Blanc vieilli (7), Cream White (3), Cream White Wood Grain (1). Shopify's
+native option-value swatches are NOT used (0 set). `scripts/apply-swatches*.mjs` are obsolete and throw.
+
 ## Avant/Après — removed (2026-10-01)
 
 The before/after video format and its `/studio` page were removed entirely at Mat's request (poor results, never used): renderer, Studio APIs, `before_after_schedule`, its queue rows and Blob files. Don't rebuild it. `publication_queue`'s CHECK still lists `before_after` only so the historical migration stays a no-op; nothing writes it.

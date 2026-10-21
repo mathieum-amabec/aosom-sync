@@ -1,3 +1,8 @@
+// OBSOLETE (2026-10-20): every swatch now comes from ONE theme snippet, snippets/lc-colour-css.liquid (copy in
+// shopify-theme/snippets/). This script would re-inject an old map where « crème »/« cream » = #FFFDD0 beats « blanc »
+// (pale-yellow dot on white products) — see the white rule in CLAUDE.md « Pastilles de couleur ».
+throw new Error("apply-swatches is obsolete: edit snippets/lc-colour-css.liquid instead (white rule, CLAUDE.md)");
+
 // C1 — replace the PDP swatch color map with the full FR+EN map. PREVIEW only (160213696617).
 // Idempotent (skips if the new map is already in place). PUT main-product.liquid.
 import { rest, sleep, getLiveThemeId, getDraftThemeId } from "./_shopify-lib.mjs";
