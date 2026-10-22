@@ -93,6 +93,13 @@ async function syncSuppressionsToKlaviyo(): Promise<number> {
       await markSuppressionInKlaviyo(email);
       n++;
     } catch (err) {
+      // Klaviyo refuses this one address (4xx other than 429): set it aside so it never blocks the others
+      const status = Number(/→ (\d{3})/.exec(String(err))?.[1] ?? 0);
+      if (status >= 400 && status < 500 && status !== 429) {
+        console.error(`[email-flows] Klaviyo refused suppression of one address (${status}), not retried: ${err}`);
+        await markSuppressionInKlaviyo(email, 2);
+        continue;
+      }
       console.warn(`[email-flows] Klaviyo suppression failed, retried next run: ${err}`);
       break;
     }

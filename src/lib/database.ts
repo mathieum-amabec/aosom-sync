@@ -947,6 +947,13 @@ async function _initSchemaImpl(): Promise<void> {
     }
   }
 
+  // email_suppressions.in_klaviyo (0 = to push, 1 = in Klaviyo, 2 = Klaviyo refused it for good): added after the
+  // table's first version, so a DB created by an early preview gets it here.
+  const esInfo = await db.execute(`PRAGMA table_info(email_suppressions)`);
+  if (!esInfo.rows.some((r) => String((r as unknown as Record<string, unknown>).name) === "in_klaviyo")) {
+    await runBatch("email_suppressions add in_klaviyo", [{ sql: `ALTER TABLE email_suppressions ADD COLUMN in_klaviyo INTEGER NOT NULL DEFAULT 0`, args: [] }]);
+  }
+
   // costway_products.shopify_product_id: the Shopify product a Costway variant was imported as.
   // NULL everywhere today (nothing is imported yet). The Aosom jobs that sweep every Shopify
   // product (fetchAllShopifyProducts, fetchActiveVariantInventory, fetchShopifyVariantsPage) use
@@ -3669,9 +3676,10 @@ export async function listSuppressionsNotInKlaviyo(limit: number): Promise<strin
   return r.rows.map((x) => String(rowToObj(x).email));
 }
 
-export async function markSuppressionInKlaviyo(email: string): Promise<void> {
+/** 1 = now in Klaviyo; 2 = Klaviyo refused this address for good (4xx), stop retrying it. */
+export async function markSuppressionInKlaviyo(email: string, state: 1 | 2 = 1): Promise<void> {
   const db = await ensureSchema();
-  await db.execute({ sql: `UPDATE email_suppressions SET in_klaviyo = 1 WHERE email = ?`, args: [email.trim().toLowerCase()] });
+  await db.execute({ sql: `UPDATE email_suppressions SET in_klaviyo = ? WHERE email = ?`, args: [state, email.trim().toLowerCase()] });
 }
 
 /** A 'sending' row older than this was cut off mid-send (crash, timeout): it may be claimed again. */
