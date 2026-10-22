@@ -2,6 +2,13 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.46] - 2026-10-21
+
+### Fixed
+
+- **Ad feeds showed the wrong photo on 22 offers (morning report « Flux publicitaires »).** `isSpecImageUrl` matched the Aosom spec-shot suffixes `-b0`..`-f0` anywhere in the URL, and the `_<uuid>` Shopify adds to a re-uploaded file produces them by chance (`…-c01aff82e81c.jpg`). Good photos were dropped as « spec images »: 12 offers showed another colour, 10 showed photo 2 instead of photo 1. The ad feeds now remove the uuid suffix before the keyword match (`isSpecImageUrl(url, { ignoreShopifyUuid: true })`); they also apply the vision classifier's verdict, which keeps out the ~150 overlay shots the keyword filter had hidden by chance. The social/slideshow selectors have no vision filter, so they keep the old behaviour. Live re-check against all 3925 products: 0 image mismatches (was 22).
+- **French checkout reminder said « Unsubscribe ».** The link now reads « Se désabonner » (EN keeps « Unsubscribe »); templates key bumped to `relance_paiement_templates_v2` so the next run creates the new templates.
+
 ## [0.5.107.45] - 2026-10-20
 
 ### Added

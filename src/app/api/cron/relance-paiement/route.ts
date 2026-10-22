@@ -109,7 +109,7 @@ async function run(dryRun: boolean) {
       if (!batch.length) continue;
       try {
         if (!templates[locale]) {
-          const t = await kv<{ data: { id: string } }>("POST", "/templates/", { data: { type: "template", attributes: { name: `Relance paiement auto (${locale}) v1`, editor_type: "CODE", html: buildTemplateHtml(locale) } } });
+          const t = await kv<{ data: { id: string } }>("POST", "/templates/", { data: { type: "template", attributes: { name: `Relance paiement auto (${locale}) v2`, editor_type: "CODE", html: buildTemplateHtml(locale) } } });
           templates[locale] = t.data.id;
           await setSetting(TEMPLATES_KEY, JSON.stringify(templates));
         }
