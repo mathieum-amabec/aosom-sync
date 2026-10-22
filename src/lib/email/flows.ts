@@ -63,10 +63,11 @@ function relayStep(key: string, over: Partial<RelayStep> = {}): RelayStep | null
 const def = (f: Omit<EngineFlow, "step"> & { step: RelayStep | null }): EngineFlow[] => (f.step ? [f as EngineFlow] : []);
 
 export const FLOWS: EngineFlow[] = [
-  // relance-paiement.ts: 30 min after the checkout, up to 36 h, one per profile per 72 h
-  ...def({ key: "relance-1", group: "relance", relayKey: RELANCE_PAIEMENT_RELAY, consent: "express", render: relance1,
+  // Mat 2026-10-21: abandoned-checkout reminders go to everyone who started a checkout (like the relays),
+  // except the unsubscribed/suppressed. relance-paiement.ts: 30 min after the checkout, up to 36 h, one per profile per 72 h
+  ...def({ key: "relance-1", group: "relance", relayKey: RELANCE_PAIEMENT_RELAY, consent: "own", render: relance1,
     step: { key: "relance-1", flowId: "Xw6R8f", metricId: CHECKOUT_STARTED, offsetMin: 30, graceMin: 36 * 60 - 30, templateId: "", subject: "", preview: "", noOrderSinceTrigger: true, cooldownH: 72 } }),
-  ...def({ key: "relance-2", group: "relance", relayKey: "checkout-2", consent: "express", render: relance2, step: relayStep("checkout-2", { key: "relance-2" }) }),
+  ...def({ key: "relance-2", group: "relance", relayKey: "checkout-2", consent: "own", render: relance2, step: relayStep("checkout-2", { key: "relance-2" }) }),
   ...def({ key: "bienvenue-1", group: "bienvenue", relayKey: "welcome-1", consent: "express", render: bienvenue1, step: relayStep("welcome-1", { key: "bienvenue-1" }) }),
   ...def({ key: "bienvenue-2", group: "bienvenue", relayKey: "welcome-2", consent: "express", render: bienvenue2, step: relayStep("welcome-2", { key: "bienvenue-2" }) }),
   ...def({ key: "roue-1", group: "roue", relayKey: "roue-1", consent: "own", render: roue1, step: relayStep("roue-1") }),

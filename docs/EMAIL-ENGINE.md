@@ -27,15 +27,14 @@ the relays behave exactly as before.
 
 | Group | Emails | Timing (same as the relays) | Consent |
 |---|---|---|---|
-| relance | relance-1, relance-2 | 30 min, 24 h after checkout | express (Klaviyo SUBSCRIBED) |
+| relance | relance-1, relance-2 | 30 min, 24 h after checkout | own: everyone who started a checkout (Mat, 2026-10-21) |
 | bienvenue | bienvenue-1, bienvenue-2 | 10 min, 3 days after signup | express |
 | roue | roue-1/2/3 | 10 min, 24 h, 60 h after the spin | own (wheel needs consent) |
 | avis | avis | 10 days after fulfilment | own (purchase) |
 | baisse-prix | baisse-prix | at the alert | own (request) |
 
-Unsubscribed or Klaviyo-suppressed profiles never get anything. NOTE: the relays send the
-abandoned-checkout reminders without checking consent; the engine requires express consent, so
-fewer reminders will go out once `relance` moves. Change `consent` in `FLOWS` if Mat decides otherwise.
+Unsubscribed or Klaviyo-suppressed profiles never get anything. Abandoned-checkout reminders go to
+everyone who started a checkout, like the relays (Mat's decision, 2026-10-21).
 
 ## Hand-over (no double sends)
 

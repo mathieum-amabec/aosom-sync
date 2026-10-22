@@ -198,14 +198,14 @@ describe("runEmailFlows", () => {
     expect(consentOf).toHaveBeenCalledTimes(1);
   });
 
-  it("abandoned checkout: needs express consent, and reminder #2 only after #1", async () => {
+  it("abandoned checkout: everyone but the unsubscribed, and reminder #2 only after #1", async () => {
     const checkout = (id: string, min: number): TriggerEvent => ({ id, profileId: `p-${id}`, email: `${id}@c.ca`, at: ago(min), props: sampleProps("relance-1", "fr") });
-    const events = { Rycc4h: [checkout("c1", 45), checkout("c2", 24 * 60 + 15)] };
-    const consentOf = async (pid: string) => ({ consent: pid === "p-c1" ? "NEVER_SUBSCRIBED" : "SUBSCRIBED", suppressed: false });
+    const events = { Rycc4h: [checkout("c1", 45), checkout("c2", 24 * 60 + 15), checkout("c3", 50)] };
+    const consentOf = async (pid: string) => ({ consent: pid === "p-c1" ? "UNSUBSCRIBED" : "NEVER_SUBSCRIBED", suppressed: false });
     const { d, sent } = deps({ takeover: { relance: ago(3 * 24 * 60) }, consentOf, relance1Sent: async (id) => id === "c2" }, events);
     const r = await runEmailFlows(d);
     expect(r.skipped["relance-1:sans-consentement"]).toBe(1);
-    expect(sent.map((m) => m.idemKey)).toEqual(["relance-2:c2"]);
+    expect(sent.map((m) => m.idemKey)).toEqual(["relance-1:c3", "relance-2:c2"]);
   });
 
   it("honours the relays' cooldowns and stops when Klaviyo's own flow sends again", async () => {
