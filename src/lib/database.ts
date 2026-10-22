@@ -823,6 +823,32 @@ async function _initSchemaImpl(): Promise<void> {
       created_at INTEGER NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_visualiser_uses_ip ON visualiser_uses(ip_hash, created_at)`,
+    // Own email engine (Resend, src/lib/email/): addresses never to mail again (unsubscribe, hard bounce, spam
+    // complaint). email = trimmed lower-case address. The first reason recorded is kept.
+    `CREATE TABLE IF NOT EXISTS email_suppressions (
+      email TEXT PRIMARY KEY,
+      reason TEXT NOT NULL,
+      source TEXT NOT NULL,
+      detail TEXT,
+      created_at INTEGER NOT NULL
+    )`,
+    // One row per email the engine tried to send. idem_key (flow + step + trigger) makes a second send of the same
+    // email impossible, even from two overlapping cron runs. status: sending → sent | failed | skipped, then the
+    // Resend webhook moves sent → delivered → opened → clicked (or bounced / complained).
+    `CREATE TABLE IF NOT EXISTS email_sends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      idem_key TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL,
+      flow TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      resend_id TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_email_sends_resend ON email_sends(resend_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_email_sends_flow ON email_sends(flow, created_at)`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
@@ -3617,6 +3643,68 @@ export async function reserveVisualiserUse(u: { kind: string; ipHash: string; ha
 export async function finishVisualiserUse(id: number, ok: boolean): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `UPDATE visualiser_uses SET ok = ? WHERE id = ?`, args: [ok ? 1 : 0, id] });
+}
+
+// ─── Own email engine (Resend) ───────────────────────────────────────
+
+export async function isEmailSuppressed(email: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT 1 FROM email_suppressions WHERE email = ?`, args: [email.trim().toLowerCase()] });
+  return r.rows.length > 0;
+}
+
+export async function suppressEmail(s: { email: string; reason: string; source: string; detail?: string | null }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT OR IGNORE INTO email_suppressions (email, reason, source, detail, created_at) VALUES (?, ?, ?, ?, ?)`,
+    args: [s.email.trim().toLowerCase(), s.reason, s.source, s.detail ?? null, Math.floor(Date.now() / 1000)],
+  });
+}
+
+/**
+ * Claim the right to send the email `idemKey`. Returns the row id, or null when it was already sent or is being
+ * sent by another run. A previous FAILED attempt can be claimed again; the conditional upsert is one statement, so
+ * two overlapping runs cannot both win.
+ */
+export async function reserveEmailSend(s: { idemKey: string; email: string; flow: string; kind: string }): Promise<number | null> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const r = await db.execute({
+    sql: `INSERT INTO email_sends (idem_key, email, flow, kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'sending', ?, ?)
+          ON CONFLICT(idem_key) DO UPDATE SET status = 'sending', error = NULL, updated_at = excluded.updated_at WHERE email_sends.status = 'failed'`,
+    args: [s.idemKey, s.email.trim().toLowerCase(), s.flow, s.kind, now, now],
+  });
+  if (r.rowsAffected !== 1) return null;
+  const row = await db.execute({ sql: `SELECT id FROM email_sends WHERE idem_key = ?`, args: [s.idemKey] });
+  return row.rows.length ? Number(rowToObj(row.rows[0]).id) : null;
+}
+
+export async function finishEmailSend(id: number, r: { status: "sent" | "failed" | "skipped"; resendId?: string | null; error?: string | null }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE email_sends SET status = ?, resend_id = COALESCE(?, resend_id), error = ?, updated_at = ? WHERE id = ?`,
+    args: [r.status, r.resendId ?? null, r.error ?? null, Math.floor(Date.now() / 1000), id],
+  });
+}
+
+/** Webhooks arrive out of order (opened before delivered…): a status only ever moves forward. */
+const EMAIL_STATUS_RANK: Record<string, number> = { sent: 1, delivery_delayed: 1, delivered: 2, opened: 3, clicked: 4, failed: 5, bounced: 5, complained: 6 };
+
+export async function updateEmailSendStatus(resendId: string, status: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const cur = await db.execute({ sql: `SELECT id, status FROM email_sends WHERE resend_id = ?`, args: [resendId] });
+  if (!cur.rows.length) return false;
+  const o = rowToObj(cur.rows[0]);
+  if ((EMAIL_STATUS_RANK[status] ?? 0) <= (EMAIL_STATUS_RANK[String(o.status)] ?? 0)) return false;
+  await db.execute({ sql: `UPDATE email_sends SET status = ?, updated_at = ? WHERE id = ?`, args: [status, Math.floor(Date.now() / 1000), Number(o.id)] });
+  return true;
+}
+
+/** Sends per (flow, status) since `sinceSec`, for the dashboard. */
+export async function getEmailSendStats(sinceSec: number): Promise<{ flow: string; status: string; n: number }[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT flow, status, COUNT(*) AS n FROM email_sends WHERE created_at >= ? GROUP BY flow, status ORDER BY flow, status`, args: [sinceSec] });
+  return r.rows.map((x) => { const o = rowToObj(x); return { flow: String(o.flow), status: String(o.status), n: Number(o.n) }; });
 }
 
 // ─── Settings ────────────────────────────────────────────────────────
