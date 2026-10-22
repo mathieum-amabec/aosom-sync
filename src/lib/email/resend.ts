@@ -56,6 +56,7 @@ export async function sendViaResend(
       await sleep(Math.min(Number(res.headers.get("retry-after")) || 1, 10) * 1000);
       continue;
     }
+    // 409 = this Idempotency-Key was already used (the email most likely went out): final, never resent.
     const json = (await res.json().catch(() => ({}))) as { id?: string; message?: string; name?: string };
     if (res.ok && json.id) return { ok: true, id: json.id };
     return { ok: false, status: res.status, error: `${json.name ?? "error"}: ${json.message ?? res.statusText}`.slice(0, 500), retryable: res.status === 429 || res.status >= 500 };

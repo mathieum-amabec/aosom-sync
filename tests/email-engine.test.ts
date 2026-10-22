@@ -192,6 +192,7 @@ describe("Resend webhook", () => {
     });
     expect(webhookAction({ type: "email.bounced", data: { email_id: "re_2", to: ["a@b.ca"], bounce: { type: "Permanent", subType: "General" } } }).suppress?.reason).toBe("bounce");
     expect(webhookAction({ type: "email.bounced", data: { to: ["a@b.ca"], bounce: { type: "Transient" } } }).suppress).toBeNull();
+    expect(webhookAction({ type: "email.bounced", data: { to: ["a@b.ca"], bounce: { type: "Undetermined" } } }).suppress).toBeNull();
     expect(webhookAction({ type: "email.sent", data: { email_id: "re_3" } })).toEqual({ suppress: null, status: null });
   });
 });
@@ -237,6 +238,22 @@ describe("email tables (real schema)", () => {
     expect(await db.isEmailSuppressed("route@test.ca")).toBe(true);
     const forged = await route.POST(new Request(url.replace(/t=[^&]+/, "t=AAAA"), { method: "POST" }));
     expect(forged.status).toBe(400);
+  });
+
+  it("a send cut off mid-way ('sending' for 10+ min) can be claimed again; a fresh one cannot", async () => {
+    const s = { idemKey: "roue-1:stuck", email: "s@b.ca", flow: "roue-1", kind: "marketing" };
+    const id = await db.reserveEmailSend(s);
+    expect(await db.reserveEmailSend(s)).toBeNull();
+    const c = await db.ensureSchema();
+    await c.execute({ sql: "UPDATE email_sends SET updated_at = updated_at - 700 WHERE id = ?", args: [id!] });
+    expect(await db.reserveEmailSend(s)).toBe(id);
+  });
+
+  it("tracks which suppressions still have to reach Klaviyo", async () => {
+    await db.suppressEmail({ email: "k@y.ca", reason: "bounce", source: "resend-webhook" });
+    expect(await db.listSuppressionsNotInKlaviyo(100)).toContain("k@y.ca");
+    await db.markSuppressionInKlaviyo("K@y.ca");
+    expect(await db.listSuppressionsNotInKlaviyo(100)).not.toContain("k@y.ca");
   });
 
   it("webhook statuses only move forward", async () => {

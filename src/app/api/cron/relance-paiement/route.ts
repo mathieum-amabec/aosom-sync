@@ -1,4 +1,5 @@
 import { verifyCronSecret } from "@/lib/cron-auth";
+import { RELANCE_PAIEMENT_RELAY, loadEngineStateForRelays, loadRelayKeysOwnedByEngine, mergeEngineIntoRelance } from "@/lib/email/flows";
 import { NextResponse } from "next/server";
 import { trackCron } from "@/lib/cron-tracking";
 import { acquireLease, getSetting, releaseLease, setSetting } from "@/lib/database";
@@ -54,12 +55,17 @@ async function loadState(now: Date): Promise<RelanceState> {
 
 async function run(dryRun: boolean) {
   const now = new Date();
+  // Our own email engine (src/lib/email/flows.ts) took this reminder over: it sends it now.
+  if ((await loadRelayKeysOwnedByEngine(getSetting)).has(RELANCE_PAIEMENT_RELAY)) {
+    return NextResponse.json({ success: true, skipped: "taken-over-by-email-engine" });
+  }
   // If Klaviyo's own Abandoned Checkout flow delivers again, stop: the customer would get both.
   const sendingAgain = await flowsSendingAgain(now);
   if (sendingAgain.has(ABANDONED_CHECKOUT_FLOW) || sendingAgain.has("*")) {
     return NextResponse.json({ success: true, skipped: "klaviyo-flow-sending-again" });
   }
-  let state = await loadState(now);
+  // our own email engine's reminders count as done here too (src/lib/email/flows.ts): never the same email twice
+  let state = mergeEngineIntoRelance(await loadState(now), await loadEngineStateForRelays(getSetting));
 
   // Campaigns of earlier runs: Klaviyo's "No Recipients" cancellation → forget them so they retry.
   if (!dryRun && state.pending.length) {

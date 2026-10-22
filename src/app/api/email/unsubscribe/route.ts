@@ -7,11 +7,12 @@
  * "Unsubscribe" button. CASL: the request is honoured at once (the law allows up to 10 business days).
  */
 import { NextResponse } from "next/server";
-import { suppressEmail } from "@/lib/database";
+import { markSuppressionInKlaviyo, suppressEmail } from "@/lib/database";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { clientIp } from "@/lib/client-ip";
 import { esc } from "@/lib/email/layout";
-import { tokenSecret, verifyUnsubscribe } from "@/lib/email/unsubscribe";
+import { suppressInKlaviyo } from "@/lib/email/consent";
+import { acceptedSecrets, verifyUnsubscribe } from "@/lib/email/unsubscribe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,10 +45,12 @@ function page(status: number, title: string, inner: string): NextResponse {
 }
 
 function verify(request: Request): string | null {
-  const secret = tokenSecret();
-  if (!secret) return null;
   const u = new URL(request.url);
-  return verifyUnsubscribe(u.searchParams.get("e"), u.searchParams.get("t"), secret);
+  for (const secret of acceptedSecrets()) {
+    const email = verifyUnsubscribe(u.searchParams.get("e"), u.searchParams.get("t"), secret);
+    if (email) return email;
+  }
+  return null;
 }
 
 const invalid = () => page(400, COPY.invalid.title, `<p>${COPY.invalid.fr}</p><p style="color:#666">${COPY.invalid.en}</p>`);
@@ -67,6 +70,11 @@ export async function POST(request: Request) {
   if (!email) return invalid();
   const oneClick = /List-Unsubscribe=One-Click/i.test(await request.text().catch(() => ""));
   await suppressEmail({ email, reason: "unsubscribe", source: oneClick ? "one-click" : "link" });
+  // Klaviyo still sends the relay emails during the hand-over: unsubscribe there too. On failure the
+  // /api/cron/email-flows run retries it (email_suppressions.in_klaviyo stays 0).
+  if (process.env.KLAVIYO_API_KEY) {
+    await suppressInKlaviyo(email).then(() => markSuppressionInKlaviyo(email)).catch((err) => console.warn(`[unsubscribe] Klaviyo suppression failed, retried by cron: ${err}`));
+  }
   if (oneClick) return new NextResponse(null, { status: 200 });
   return page(200, COPY.done.title, `<p>${COPY.done.fr}</p><p style="color:#666">${COPY.done.en}</p>`);
 }

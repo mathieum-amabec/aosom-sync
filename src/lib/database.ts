@@ -830,7 +830,8 @@ async function _initSchemaImpl(): Promise<void> {
       reason TEXT NOT NULL,
       source TEXT NOT NULL,
       detail TEXT,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      in_klaviyo INTEGER NOT NULL DEFAULT 0
     )`,
     // One row per email the engine tried to send. idem_key (flow + step + trigger) makes a second send of the same
     // email impossible, even from two overlapping cron runs. status: sending → sent | failed | skipped, then the
@@ -3661,9 +3662,25 @@ export async function suppressEmail(s: { email: string; reason: string; source: 
   });
 }
 
+/** Suppressed addresses not yet pushed to Klaviyo (its call failed, or they came from the Resend webhook). */
+export async function listSuppressionsNotInKlaviyo(limit: number): Promise<string[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT email FROM email_suppressions WHERE in_klaviyo = 0 ORDER BY created_at LIMIT ?`, args: [limit] });
+  return r.rows.map((x) => String(rowToObj(x).email));
+}
+
+export async function markSuppressionInKlaviyo(email: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE email_suppressions SET in_klaviyo = 1 WHERE email = ?`, args: [email.trim().toLowerCase()] });
+}
+
+/** A 'sending' row older than this was cut off mid-send (crash, timeout): it may be claimed again. */
+export const EMAIL_SEND_STALE_S = 10 * 60;
+
 /**
  * Claim the right to send the email `idemKey`. Returns the row id, or null when it was already sent or is being
- * sent by another run. A previous FAILED attempt can be claimed again; the conditional upsert is one statement, so
+ * sent by another run. A previous FAILED attempt, or one stuck in 'sending' for EMAIL_SEND_STALE_S, can be claimed
+ * again (Resend's Idempotency-Key, kept 24 h, stops a real duplicate). The conditional upsert is one statement, so
  * two overlapping runs cannot both win.
  */
 export async function reserveEmailSend(s: { idemKey: string; email: string; flow: string; kind: string }): Promise<number | null> {
@@ -3671,8 +3688,9 @@ export async function reserveEmailSend(s: { idemKey: string; email: string; flow
   const now = Math.floor(Date.now() / 1000);
   const r = await db.execute({
     sql: `INSERT INTO email_sends (idem_key, email, flow, kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'sending', ?, ?)
-          ON CONFLICT(idem_key) DO UPDATE SET status = 'sending', error = NULL, updated_at = excluded.updated_at WHERE email_sends.status = 'failed'`,
-    args: [s.idemKey, s.email.trim().toLowerCase(), s.flow, s.kind, now, now],
+          ON CONFLICT(idem_key) DO UPDATE SET status = 'sending', error = NULL, updated_at = excluded.updated_at
+          WHERE email_sends.status = 'failed' OR (email_sends.status = 'sending' AND email_sends.updated_at < ?)`,
+    args: [s.idemKey, s.email.trim().toLowerCase(), s.flow, s.kind, now, now, now - EMAIL_SEND_STALE_S],
   });
   if (r.rowsAffected !== 1) return null;
   const row = await db.execute({ sql: `SELECT id FROM email_sends WHERE idem_key = ?`, args: [s.idemKey] });
@@ -3685,6 +3703,20 @@ export async function finishEmailSend(id: number, r: { status: "sent" | "failed"
     sql: `UPDATE email_sends SET status = ?, resend_id = COALESCE(?, resend_id), error = ?, updated_at = ? WHERE id = ?`,
     args: [r.status, r.resendId ?? null, r.error ?? null, Math.floor(Date.now() / 1000), id],
   });
+}
+
+/** Suppressed addresses per reason (unsubscribe, bounce, complaint). */
+export async function countEmailSuppressions(): Promise<Record<string, number>> {
+  const db = await ensureSchema();
+  const r = await db.execute(`SELECT reason, COUNT(*) AS n FROM email_suppressions GROUP BY reason`);
+  return Object.fromEntries(r.rows.map((x) => { const o = rowToObj(x); return [String(o.reason), Number(o.n)]; }));
+}
+
+/** Status of the email `idemKey` (null = never tried). */
+export async function getEmailSendStatus(idemKey: string): Promise<string | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT status FROM email_sends WHERE idem_key = ?`, args: [idemKey] });
+  return r.rows.length ? String(rowToObj(r.rows[0]).status) : null;
 }
 
 /** Webhooks arrive out of order (opened before delivered…): a status only ever moves forward. */

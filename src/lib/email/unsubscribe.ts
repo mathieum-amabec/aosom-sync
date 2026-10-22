@@ -18,6 +18,14 @@ export function tokenSecret(env: Record<string, string | undefined> = process.en
   return s && s.length >= 32 ? s : null;
 }
 
+/**
+ * Secrets an incoming link may be signed with: the current one, plus EMAIL_TOKEN_SECRET_PREVIOUS
+ * after a rotation (CASL: an unsubscribe link must keep working at least 60 days after sending).
+ */
+export function acceptedSecrets(env: Record<string, string | undefined> = process.env): string[] {
+  return [env.EMAIL_TOKEN_SECRET, env.EMAIL_TOKEN_SECRET_PREVIOUS].filter((s): s is string => !!s && s.length >= 32);
+}
+
 function sign(email: string, secret: string): string {
   return b64url(crypto.createHmac("sha256", secret).update(`unsub:v1:${emailKey(email)}`).digest());
 }

@@ -42,7 +42,7 @@ export interface WebhookAction {
   status: { resendId: string; status: string } | null;
 }
 
-/** What a webhook event means for us. Temporary bounces (mailbox full…) do not suppress. */
+/** What a webhook event means for us. Only PERMANENT bounces suppress (not Transient/Undetermined: mailbox full, greylisting…). */
 export function webhookAction(ev: WebhookEvent): WebhookAction {
   const to = ev.data?.to;
   const emails = (Array.isArray(to) ? to : to ? [to] : []).filter((x) => typeof x === "string");
@@ -50,7 +50,7 @@ export function webhookAction(ev: WebhookEvent): WebhookAction {
   if (ev.type === "email.complained" && emails.length) suppress = { emails, reason: "complaint", detail: "spam complaint" };
   if (ev.type === "email.bounced" && emails.length) {
     const b = ev.data?.bounce;
-    if (!/transient|temporary/i.test(b?.type ?? "")) suppress = { emails, reason: "bounce", detail: `${b?.type ?? "?"}/${b?.subType ?? "?"}`.slice(0, 200) };
+    if (/^permanent$/i.test(b?.type ?? "")) suppress = { emails, reason: "bounce", detail: `${b?.type ?? "?"}/${b?.subType ?? "?"}`.slice(0, 200) };
   }
   const s = ev.type.startsWith("email.") ? ev.type.slice(6) : "";
   const status = ev.data?.email_id && (TRACKED_STATUSES as readonly string[]).includes(s) ? { resendId: ev.data.email_id, status: s } : null;
