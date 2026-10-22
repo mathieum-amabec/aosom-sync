@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.46] - 2026-10-21
+
+### Added
+
+- **Own email engine on Resend — foundation, OFF.** Mat finds Klaviyo too expensive and wants full control of the text through an API. `src/lib/email/` adds the Resend transport, a single `sendEmail` exit door (master switch `email_engine_mode` off/test/live, test allow-list, suppression list, never the same email twice via `email_sends` + Resend Idempotency-Key), the CASL footer (sender, mailing address from `email_mailing_address`, signed unsubscribe link) and Gmail/Yahoo one-click `List-Unsubscribe` headers. New public routes `/api/email/unsubscribe` (GET asks, POST unsubscribes) and `/api/email/webhook` (Svix-signed; hard bounces and spam complaints are suppressed). No flow uses it yet. See `docs/EMAIL-ENGINE.md`.
+
 ## [0.5.107.45] - 2026-10-20
 
 ### Added
