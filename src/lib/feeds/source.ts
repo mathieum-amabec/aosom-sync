@@ -302,7 +302,8 @@ export function shopifyToFeedItems(
     // images ever reach an ad feed. Two independent filters, both applied:
     //  1. isSpecImageUrl — free keyword match. Confirmed 2026-10-01 it matches 0/2612 current
     //     catalog images (Shopify renames every upload to an opaque hash), so it only guards
-    //     a future/un-renamed URL.
+    //     a future/un-renamed URL. It ignores Shopify's `_<uuid>` re-upload suffix, whose hex
+    //     produced "-c0" etc. by chance and dropped good colour photos (2026-10-21).
     //  2. nonCompliantStems — the vision classifier's verdict (image_classifications), the
     //     ONE signal that actually works against today's data. A parasol's
     //     additional_image_link carried an assembly diagram ("Detachable pole with spiral
@@ -311,7 +312,7 @@ export function shopifyToFeedItems(
     // product whose ENTIRE gallery is flagged, so a feed item never ships with no image.
     const nonCompliantStems = opts.nonCompliantStems;
     const cleanImages = rawImages.filter(
-      (i) => !isSpecImageUrl(i.src) && !(nonCompliantStems?.has(imageUrlStem(i.src))),
+      (i) => !isSpecImageUrl(i.src, { ignoreShopifyUuid: true }) && !(nonCompliantStems?.has(imageUrlStem(i.src))),
     );
     const productImages = cleanImages.length > 0 ? cleanImages : rawImages;
     const images = productImages.map((i) => i.src);

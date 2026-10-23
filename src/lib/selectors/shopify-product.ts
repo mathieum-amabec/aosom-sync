@@ -87,9 +87,23 @@ const SPEC_IMAGE_KEYWORDS = [
   "instruction", "manual", "-b0", "-c0", "-d0", "-e0", "-f0",
 ];
 
-/** True when the image URL looks like a spec/infographic shot, not a product photo. */
-export function isSpecImageUrl(url: string): boolean {
-  const u = url.toLowerCase();
+/**
+ * The `_<uuid>` Shopify appends to a re-uploaded file name. Its hex groups produce `-b0`..`-f0`
+ * by chance (`…-c01aff82e81c.jpg`), which dropped good photos from the ad feeds
+ * (feed_integrity_audit, 2026-10-21).
+ */
+const SHOPIFY_UUID_SUFFIX = /_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+
+/**
+ * True when the image URL looks like a spec/infographic shot, not a product photo.
+ * `ignoreShopifyUuid` removes the uuid suffix first. Only callers that ALSO apply the vision
+ * classifier's verdict (the ad feeds' nonCompliantStems) should pass it: the false matches it
+ * clears include ~150 photos with marketing overlays that the keyword filter hid by chance from
+ * the social/slideshow selectors, which have no vision filter.
+ */
+export function isSpecImageUrl(url: string, opts: { ignoreShopifyUuid?: boolean } = {}): boolean {
+  let u = url.toLowerCase();
+  if (opts.ignoreShopifyUuid) u = u.replace(SHOPIFY_UUID_SUFFIX, "");
   return SPEC_IMAGE_KEYWORDS.some((kw) => u.includes(kw));
 }
 

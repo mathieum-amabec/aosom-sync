@@ -2,7 +2,7 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.107.46] - 2026-10-21
+## [0.5.107.47] - 2026-10-22
 
 ### Added
 
@@ -10,6 +10,13 @@ All notable changes to Aosom Sync will be documented in this file.
 - **The 9 flow emails as code, FR + EN** (`src/lib/email/templates.ts`: abandoned checkout 1–2, welcome 1–2, wheel 1–3, review request, price drop), copy ported from the Klaviyo templates; links only to our domains, event text escaped.
 - **Hand-over from the Klaviyo relays, group by group** (`src/lib/email/flows.ts`, cron `/api/cron/email-flows` at 4/19/34/49): same timing and guards as the relays, Klaviyo consent checked, `email_engine_takeover` tells the relays which groups to skip once the engine is live; switching back copies what the engine sent into the relays' state. With the default settings (off) the relays behave exactly as before.
 - **Dashboard panel "Courriels automatiques (Resend)"**: switch off/test/live (live asks for confirmation and is refused while setup is missing), mailing address, test list, FR/EN preview of every email, per-group hand-over, 30-day results. See `docs/EMAIL-ENGINE.md`.
+
+## [0.5.107.46] - 2026-10-21
+
+### Fixed
+
+- **Ad feeds showed the wrong photo on 22 offers (morning report « Flux publicitaires »).** `isSpecImageUrl` matched the Aosom spec-shot suffixes `-b0`..`-f0` anywhere in the URL, and the `_<uuid>` Shopify adds to a re-uploaded file produces them by chance (`…-c01aff82e81c.jpg`). Good photos were dropped as « spec images »: 12 offers showed another colour, 10 showed photo 2 instead of photo 1. The ad feeds now remove the uuid suffix before the keyword match (`isSpecImageUrl(url, { ignoreShopifyUuid: true })`); they also apply the vision classifier's verdict, which keeps out the ~150 overlay shots the keyword filter had hidden by chance. The social/slideshow selectors have no vision filter, so they keep the old behaviour. Live re-check against all 3925 products: 0 image mismatches (was 22).
+- **French checkout reminder said « Unsubscribe ».** The link now reads « Se désabonner » (EN keeps « Unsubscribe »); templates key bumped to `relance_paiement_templates_v2` so the next run creates the new templates.
 
 ## [0.5.107.45] - 2026-10-20
 

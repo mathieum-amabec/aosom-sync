@@ -62,7 +62,7 @@ describe("rendering", () => {
       const h = buildTemplateHtml(l);
       expect(h).toContain("relance_items_html");
       expect(h).toContain("relance_url");
-      expect(h).toContain("{% unsubscribe %}");
+      expect(h).toContain(l === "fr" ? "{% unsubscribe 'Se désabonner' %}" : "{% unsubscribe 'Unsubscribe' %}");
       expect(h).not.toMatch(/aosom/i);
     }
   });
