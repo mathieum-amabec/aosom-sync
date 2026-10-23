@@ -17,6 +17,7 @@ import { loadGuardStatuses } from "./guard-status";
 import { summarizeReels } from "./reel-insights";
 import { summarizePhotos } from "./photo-insights";
 import { getInstagramViews, getPhotoResultRows } from "./photo-insights-store";
+import { collectShopSummary } from "./shop-analytics";
 import type { MorningReportSources } from "./morning-report";
 
 export const VIDEO_HORIZON_DAYS = 3;
@@ -29,6 +30,16 @@ export const morningReportSources: MorningReportSources = {
       env.metaAdAccountId ?? pickAdAccount(await getAdAccounts(), null)?.id;
     if (!accountId) throw new Error("aucun compte publicitaire Meta accessible");
     return getActiveCampaignDaySummaries(accountId, day);
+  },
+  shop: async (day) => {
+    // Meta spend is optional: without a token the Shopify numbers still go out ("indisponible" on that line only).
+    let accountId: string | null = null;
+    try {
+      if (env.hasMetaAccessToken) accountId = env.metaAdAccountId ?? pickAdAccount(await getAdAccounts(), null)?.id ?? null;
+    } catch {
+      accountId = null;
+    }
+    return collectShopSummary(day, accountId);
   },
   guides: () => countGuidesAwaitingApproval(),
   videos: async () => ({ ...(await countContentFormatVideos(VIDEO_HORIZON_DAYS)), horizonDays: VIDEO_HORIZON_DAYS }),
