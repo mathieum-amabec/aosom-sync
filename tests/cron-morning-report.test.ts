@@ -27,6 +27,23 @@ vi.mock("@/lib/meta-ads-client", () => ({
   getAdAccounts: vi.fn(),
 }));
 
+// Shopify analytics (ShopifyQL + orders) are covered by tests/shop-analytics.test.ts; here the cron only needs a stable summary.
+vi.mock("@/lib/shop-analytics", () => ({
+  collectShopSummary: vi.fn(async (day: string) => ({
+    day,
+    weekStart: day,
+    dayFunnel: { sessions: 100, carts: 5, checkouts: 2, bought: 1, conversion: 0.01 },
+    daySales: { orders: 1, total: 100, aov: 100 },
+    weekFunnel: { sessions: 700, carts: 30, checkouts: 14, bought: 4, conversion: 4 / 700 },
+    weekSales: { orders: 4, total: 400, aov: 100 },
+    prevWeekFunnel: { sessions: 0, carts: 0, checkouts: 0, bought: 0, conversion: 0 },
+    prevWeekSales: { orders: 0, total: 0, aov: null },
+    sources: [],
+    dayOrderSources: [],
+    meta: { error: "test" },
+  })),
+}));
+
 import * as db from "@/lib/database";
 import { trackEvent } from "@/lib/klaviyo-client";
 import { getActiveCampaignDaySummaries } from "@/lib/meta-ads-client";

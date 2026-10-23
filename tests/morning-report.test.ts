@@ -8,6 +8,27 @@ import {
   type MorningReportSources,
 } from "@/lib/morning-report";
 import type { GuardStatus } from "@/lib/guard-status";
+import type { ShopSummary } from "@/lib/shop-analytics";
+
+const SHOP: ShopSummary = {
+  day: "2026-10-04",
+  weekStart: "2026-09-28",
+  dayFunnel: { sessions: 668, carts: 20, checkouts: 10, bought: 3, conversion: 3 / 668 },
+  daySales: { orders: 3, total: 592.09, aov: 592.09 / 3 },
+  weekFunnel: { sessions: 4300, carts: 150, checkouts: 90, bought: 13, conversion: 13 / 4300 },
+  weekSales: { orders: 13, total: 2400, aov: 2400 / 13 },
+  prevWeekFunnel: { sessions: 3800, carts: 120, checkouts: 70, bought: 15, conversion: 15 / 3800 },
+  prevWeekSales: { orders: 15, total: 2900, aov: 2900 / 15 },
+  sources: [
+    { name: "réseaux sociaux", sessions: 3200, bought: 7, conversion: 7 / 3200 },
+    { name: "recherche", sessions: 300, bought: 3, conversion: 0.01 },
+  ],
+  dayOrderSources: [
+    { label: "Meta (pub)", orders: 1, total: 202.35 },
+    { label: "Recherche (Google, Bing…)", orders: 1, total: 229.94 },
+  ],
+  meta: { spend: 600, orders: 5, costPerOrder: 120 },
+};
 
 const campaign = {
   id: "1",
@@ -24,6 +45,7 @@ const campaign = {
 function sources(over: Partial<MorningReportSources> = {}): MorningReportSources {
   return {
     meta: vi.fn(async () => [campaign]),
+    shop: vi.fn(async () => SHOP),
     guides: vi.fn(async () => ({ pending: 5, ready: 3, attention: 2, attentionTitles: ["Guide A", "Guide B"] })),
     videos: vi.fn(async () => ({ pendingApproval: 4, scheduledSoon: 6, horizonDays: 3 })),
     reelsStock: vi.fn(async () => ({
@@ -320,5 +342,67 @@ describe("Reel results section", () => {
     const data = await collectMorningReport(sources({ reelResults: vi.fn(async () => { throw new Error("graph down"); }) }), NOW);
     expect(data.reelResults).toEqual({ ok: false, error: "graph down" });
     expect(renderMorningReport(data).missingSections).toEqual(["Résultats des Reels (Facebook)"]);
+  });
+});
+
+describe("Boutique (Shopify) section", () => {
+  const NOW = new Date("2026-10-05T10:00:00Z");
+  const text = async (shop?: MorningReportSources["shop"]) =>
+    renderMorningReport(await collectMorningReport(sources(shop ? { shop } : {}), NOW)).text;
+
+  it("asks the shop source for the same day as the Meta figures", async () => {
+    const shop = vi.fn(async () => SHOP);
+    await collectMorningReport(sources({ shop }), NOW);
+    expect((shop.mock.calls as unknown[][])[0]).toEqual(["2026-10-04"]);
+  });
+
+  it("shows yesterday's sales, where the orders came from, the funnel, the week vs the previous one and the sources", async () => {
+    const t = await text();
+    expect(t).toContain("BOUTIQUE (SHOPIFY)");
+    expect(t).toMatch(/Hier : 3 commandes/);
+    expect(t).toContain("Meta (pub) 1");
+    expect(t).toContain("Recherche (Google, Bing…) 1");
+    expect(t).toMatch(/Visites hier : 668/);
+    expect(t).toMatch(/4\s?300 visites \(\+13 %\)/); // 4300 vs 3800
+    expect(t).toMatch(/13 commandes \(−13 %\)/); // 13 vs 15
+    expect(t).toMatch(/90 arrivent au paiement → 13 achètent/);
+    expect(t).toMatch(/réseaux sociaux 3\s?200/);
+    expect(t).toMatch(/environ .*120,00.* par commande/);
+  });
+
+  it("comes before the Meta section", async () => {
+    const t = await text();
+    expect(t.indexOf("BOUTIQUE (SHOPIFY)")).toBeGreaterThan(-1);
+    expect(t.indexOf("BOUTIQUE (SHOPIFY)")).toBeLessThan(t.indexOf("PUBLICITÉS META"));
+  });
+
+  it("says 0 commande on a day without orders and omits the origin line", async () => {
+    const t = await text(vi.fn(async () => ({ ...SHOP, daySales: { orders: 0, total: 0, aov: null }, dayOrderSources: [] })));
+    expect(t).toContain("Hier : 0 commande.");
+    expect(t).not.toContain("Provenance des commandes");
+  });
+
+  it("does not claim a % change when the previous week has no base", async () => {
+    const t = await text(vi.fn(async () => ({ ...SHOP, prevWeekFunnel: { ...SHOP.prevWeekFunnel, sessions: 0 }, prevWeekSales: { orders: 0, total: 0, aov: null } })));
+    expect(t).not.toMatch(/visites \([+−±]/);
+  });
+
+  it("reports the Meta line as unavailable without hiding the rest", async () => {
+    const t = await text(vi.fn(async () => ({ ...SHOP, meta: { error: "graph down" } })));
+    expect(t).toContain("Pub Meta vs ventes : indisponible (graph down)");
+    expect(t).toMatch(/Hier : 3 commandes/);
+  });
+
+  it("says no order is attributed to an ad when Meta spent but Shopify attributes none", async () => {
+    const t = await text(vi.fn(async () => ({ ...SHOP, meta: { spend: 80, orders: 0, costPerOrder: null } })));
+    expect(t).toContain("aucune commande attribuée à une pub");
+  });
+
+  it("marks the section unavailable when Shopify analytics fails, still sending the rest", async () => {
+    const data = await collectMorningReport(sources({ shop: vi.fn(async () => { throw new Error("ACCESS_DENIED"); }) }), NOW);
+    expect(data.shop).toEqual({ ok: false, error: "ACCESS_DENIED" });
+    const r = renderMorningReport(data);
+    expect(r.missingSections.some((s) => s.startsWith("Boutique (Shopify)"))).toBe(true);
+    expect(r.text).toContain("PUBLICITÉS META");
   });
 });

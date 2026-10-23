@@ -14,6 +14,7 @@ import type { CampaignDaySummary } from "./meta-ads-client";
 import { styleLabelOf } from "./ameublo-style-label";
 import { formatLabelOf } from "./photo-insights";
 import type { GuardStatus } from "./guard-status";
+import type { ShopSummary } from "./shop-analytics";
 
 export const REPORT_TIME_ZONE = "America/Montreal";
 /** Local hour the report must go out at. The cron fires at 10:00 and 11:00 UTC (06:00 EDT /
@@ -106,6 +107,8 @@ export interface MorningReportData {
   /** The day the Meta figures cover (the ad account's "yesterday"). */
   metaDay: string;
   meta: Section<CampaignDaySummary[]>;
+  /** Store numbers from Shopify itself: sales, visits, funnel, traffic sources, where the orders came from. */
+  shop: Section<ShopSummary>;
   guides: Section<GuidesSummary>;
   videos: Section<VideosSummary>;
   /** Studio Reels reserve: how many days of approved videos are left per page. */
@@ -122,6 +125,7 @@ export interface MorningReportData {
 
 export interface MorningReportSources {
   meta: (day: string) => Promise<CampaignDaySummary[]>;
+  shop: (day: string) => Promise<ShopSummary>;
   guides: () => Promise<GuidesSummary>;
   videos: () => Promise<VideosSummary>;
   reelsStock: () => Promise<ReelsStockSummary>;
@@ -169,8 +173,9 @@ async function settle<T>(fn: () => Promise<T>): Promise<Section<T>> {
 export async function collectMorningReport(sources: MorningReportSources, now: Date): Promise<MorningReportData> {
   const reportDate = localClock(now).date;
   const metaDay = previousDay(reportDate);
-  const [meta, guides, videos, reelsStock, reelResults, photoResults, alerts, blocked, guards] = await Promise.all([
+  const [meta, shop, guides, videos, reelsStock, reelResults, photoResults, alerts, blocked, guards] = await Promise.all([
     settle(() => sources.meta(metaDay)),
+    settle(() => sources.shop(metaDay)),
     settle(sources.guides),
     settle(sources.videos),
     settle(sources.reelsStock),
@@ -180,7 +185,7 @@ export async function collectMorningReport(sources: MorningReportSources, now: D
     settle(sources.blocked),
     settle(sources.guards),
   ]);
-  return { reportDate, metaDay, meta, guides, videos, reelsStock, reelResults, photoResults, alerts, blocked, guards };
+  return { reportDate, metaDay, meta, shop, guides, videos, reelsStock, reelResults, photoResults, alerts, blocked, guards };
 }
 
 // ── render ────────────────────────────────────────────────────────────────────
@@ -220,6 +225,57 @@ export function redGuards(data: MorningReportData): GuardStatus[] {
   return data.guards.ok ? data.guards.data.filter((g) => g.state === "red") : [];
 }
 
+const pct = (x: number, digits = 1) => `${new Intl.NumberFormat("fr-CA", { maximumFractionDigits: digits }).format(x * 100)} %`;
+/** "+12 %" / "−8 %" vs the previous period; null when there is no base to compare to. */
+function delta(now: number, before: number): string | null {
+  if (before <= 0) return null;
+  const d = Math.round(((now - before) / before) * 100);
+  return `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)} %`;
+}
+
+/** The "Boutique" section: Shopify's own numbers for yesterday and the last 7 days. */
+function shopSection(data: MorningReportData): ReportSection {
+  const title = `Boutique (Shopify) — ${dayLabel(data.metaDay)}`;
+  if (!data.shop.ok) return { title, lines: [], missing: data.shop.error };
+  const s = data.shop.data;
+  const lines: string[] = [];
+  lines.push(
+    s.daySales.orders === 0
+      ? "Hier : 0 commande."
+      : `Hier : ${plural(s.daySales.orders, "commande", "commandes")} · ${money(s.daySales.total)}${s.daySales.aov != null ? ` · panier moyen ${money(s.daySales.aov)}` : ""}.`,
+  );
+  if (s.dayOrderSources.length) {
+    lines.push(`Provenance des commandes d'hier : ${s.dayOrderSources.map((o) => `${o.label} ${int(o.orders)} (${money(o.total)})`).join(" · ")}.`);
+  }
+  const f = s.dayFunnel;
+  lines.push(
+    `Visites hier : ${int(f.sessions)} · ${plural(f.carts, "panier", "paniers")} · ${plural(f.checkouts, "paiement commencé", "paiements commencés")} · ${plural(f.bought, "achat", "achats")} · conversion ${pct(f.conversion, 2)}.`,
+  );
+  const w = s.weekFunnel, pw = s.prevWeekFunnel;
+  const dv = delta(w.sessions, pw.sessions), dord = delta(s.weekSales.orders, s.prevWeekSales.orders), dtot = delta(s.weekSales.total, s.prevWeekSales.total);
+  lines.push(
+    `7 derniers jours : ${int(w.sessions)} visites${dv ? ` (${dv})` : ""} · ${plural(s.weekSales.orders, "commande", "commandes")}${dord ? ` (${dord})` : ""} · ${money(s.weekSales.total)}${dtot ? ` (${dtot})` : ""} · conversion ${pct(w.conversion, 2)}.`,
+  );
+  if (w.checkouts > 0) {
+    lines.push(
+      `Entonnoir 7 jours : ${pct(w.carts / Math.max(w.sessions, 1))} ajoutent au panier → ${int(w.checkouts)} arrivent au paiement → ${int(w.bought)} achètent (${pct(w.bought / w.checkouts, 0)} de ceux qui arrivent au paiement).`,
+    );
+  }
+  if (s.sources.length) {
+    lines.push(`Sources des visites (7 jours) : ${s.sources.map((x) => `${x.name} ${int(x.sessions)} (conv. ${pct(x.conversion, 2)})`).join(" · ")}.`);
+  }
+  if ("error" in s.meta) lines.push(`Pub Meta vs ventes : indisponible (${s.meta.error}).`);
+  else {
+    const m = s.meta;
+    lines.push(
+      m.costPerOrder != null
+        ? `Pub Meta (7 jours) : ${money(m.spend)} dépensés · ${plural(m.orders, "commande confirmée", "commandes confirmées")} par Shopify · environ ${money(m.costPerOrder)} par commande.`
+        : `Pub Meta (7 jours) : ${money(m.spend)} dépensés · aucune commande attribuée à une pub par Shopify.`,
+    );
+  }
+  return { title, lines };
+}
+
 /** Lines (plain text) for each section; the HTML is built from the same lines. */
 function sectionLines(data: MorningReportData): ReportSection[] {
   const out: ReportSection[] = [];
@@ -240,6 +296,9 @@ function sectionLines(data: MorningReportData): ReportSection[] {
       out.push({ title: red.length ? `Garde-fous — ${plural(red.length, "alerte", "alertes")}` : title, lines, alert: red.length > 0 });
     }
   }
+
+  // 0b. Shopify store numbers — what really happened on the site (sales, visits, funnel, sources).
+  out.push(shopSection(data));
 
   // 1. Meta
   {

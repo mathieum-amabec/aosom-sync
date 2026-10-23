@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.49] - 2026-10-23
+
+### Added
+
+- **Morning report: new « Boutique (Shopify) » section** (`src/lib/shop-analytics.ts`), right after the guards and before Meta. Mat, after granting the token the reports/orders scopes: « intégrer au rapport du matin ». Shows yesterday's orders and sales with the origin of each order (Meta ad / search / direct / email / AI assistant, read from the order's customer journey), yesterday's visits and funnel (cart → checkout → purchase), the last 7 days vs the previous 7 (visits, orders, sales, conversion), the checkout→purchase rate, the traffic sources with their conversion, and the Meta spend of the 7 days against the orders Shopify itself attributes to a Meta ad (cost per order). Visits/sales come from ShopifyQL (`shopifyqlQuery`), orders from the Admin GraphQL API; read-only. A failure in this section (e.g. a missing scope) marks only that section « indisponible » and the rest of the report still goes out; a Meta failure only blanks the Meta line. The order window is enforced in code because Shopify's order search was seen to ignore the upper `created_at` bound.
+
 ## [0.5.107.48] - 2026-10-22
 
 ### Added
