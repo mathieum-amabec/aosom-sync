@@ -3,12 +3,13 @@ import { NextResponse } from "next/server";
 import { trackCron } from "@/lib/cron-tracking";
 import { acquireLease, getSetting, releaseLease, setSetting } from "@/lib/database";
 import { STATE_KEY as RELANCE_STATE_KEY } from "@/lib/relance-paiement";
+import { loadEngineStateForRelays, loadRelayKeysOwnedByEngine, mergeEngineIntoRelance, mergeEngineIntoRelay } from "@/lib/email/flows";
 import {
   RELAY_LEASE_KEY, RELAY_LEASE_TTL_S, assertRenders, campaignStatus, cleanupLists, createList, flowsSendingAgain, kv,
   sendCampaign, shouldRetry, skippedFor, stillInFlight, waitForLists,
 } from "@/lib/klaviyo-campaigns";
 import {
-  PLACED_ORDER, STEPS, WHEEL_WON, emptyRelayState, eventContext, propKey, pruneRelayState, rewriteBody, rewriteLine,
+  PLACED_ORDER, STEPS as ALL_STEPS, WHEEL_WON, emptyRelayState, eventContext, propKey, pruneRelayState, rewriteBody, rewriteLine,
   selectDue, triggerEvents, usesEvent, type RelayState, type RelayStep, type TriggerEvent,
 } from "@/lib/flow-relay";
 
@@ -56,6 +57,9 @@ async function run(dryRun: boolean) {
   let state: RelayState = emptyRelayState();
   try { const raw = await getSetting(STATE_KEY); if (raw) state = { ...emptyRelayState(), ...(JSON.parse(raw) as RelayState) }; } catch { /* corrupt → fresh */ }
   state = pruneRelayState(state, now);
+  // our own email engine's sends count as done here too (src/lib/email/flows.ts): never the same email twice
+  const engine = await loadEngineStateForRelays(getSetting);
+  state = mergeEngineIntoRelay(state, engine);
   const save = () => setSetting(STATE_KEY, JSON.stringify(state));
 
   // 1. campaigns of earlier runs: "No Recipients" → retry; recipients skipped (template error…) → record, no retry
@@ -78,7 +82,10 @@ async function run(dryRun: boolean) {
     await save();
   }
 
-  // 2. inputs
+  // 2. inputs — steps our own email engine took over (src/lib/email/flows.ts) are no longer relayed
+  const owned = await loadRelayKeysOwnedByEngine(getSetting);
+  const STEPS = ALL_STEPS.filter((s) => !owned.has(s.key));
+  if (!STEPS.length) return NextResponse.json({ success: true, skipped: "taken-over-by-email-engine" });
   const metrics = [...new Set(STEPS.map((s) => s.metricId))];
   const byMetric = new Map<string, TriggerEvent[]>();
   for (const m of metrics) {
@@ -93,6 +100,7 @@ async function run(dryRun: boolean) {
   const sendingAgain = await flowsSendingAgain(now);
   let relance: { sent?: Record<string, string> } = {};
   try { relance = JSON.parse((await getSetting(RELANCE_STATE_KEY)) ?? "{}"); } catch { /* none */ }
+  relance = mergeEngineIntoRelance(relance, engine);
 
   const ctx = {
     now, state,

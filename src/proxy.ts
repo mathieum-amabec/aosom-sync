@@ -37,7 +37,9 @@ import { AUTH } from "@/lib/config";
 // per-IP limits, one spin per email, kill switch settings.roue_enabled).
 // "/api/teaser", "/api/visualiser", "/api/decorateur": storefront "bientôt" teaser events and the AI room
 // visualiser/decorator (Origin allowlist, per-IP limits; the AI routes answer 503 until their setting is "1").
-const PUBLIC_PATHS = ["/api/roue", "/api/teaser", "/api/visualiser", "/api/decorateur","/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/pixel/pinterest-script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/ugc-videos", "/api/video-serve", "/api/assistant", "/api/trending", "/api/mcp", "/oauth", "/.well-known"];
+// "/api/email/unsubscribe" (signed link in every email footer) and "/api/email/webhook" (Svix-signed Resend events)
+// are public; the rest of /api/email stays behind login.
+const PUBLIC_PATHS = ["/api/email/unsubscribe", "/api/email/webhook", "/api/roue","/api/teaser", "/api/visualiser", "/api/decorateur","/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/pixel/pinterest-script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/ugc-videos", "/api/video-serve", "/api/assistant", "/api/trending", "/api/mcp", "/oauth", "/.well-known"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(
