@@ -115,8 +115,8 @@ export function selectCandidates(
   return { send, skipped };
 }
 
-const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-const money = (n: number, locale: "fr" | "en") => (locale === "fr" ? `${n.toFixed(2).replace(".", ",")} $` : `$${n.toFixed(2)}`);
+export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+export const money = (n: number, locale: "fr" | "en") => (locale === "fr" ? `${n.toFixed(2).replace(".", ",")} $` : `$${n.toFixed(2)}`);
 
 /** The per-person block (items) stored on the profile and injected with `|safe`. */
 export function renderItemsHtml(e: CheckoutEvent): string {

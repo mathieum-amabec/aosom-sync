@@ -204,6 +204,10 @@
       "schedule": "7,22,37,52 * * * *"
     },
     {
+      "path": "/api/cron/cart-relay",
+      "schedule": "12,42 * * * *"
+    },
+    {
       "path": "/api/cron/email-flows",
       "schedule": "4,19,34,49 * * * *"
     }
