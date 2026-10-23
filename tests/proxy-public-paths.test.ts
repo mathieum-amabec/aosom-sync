@@ -28,4 +28,11 @@ describe("proxy PUBLIC_PATHS", () => {
       expect(res.headers.get("location"), `${p} should be public`).toBeNull();
     }
   });
+
+  it("opens only the email unsubscribe link and the Resend webhook, not the rest of /api/email", async () => {
+    for (const p of ["/api/email/unsubscribe", "/api/email/webhook"]) {
+      expect((await proxy(req(p))).headers.get("location"), `${p} should be public`).toBeNull();
+    }
+    expect((await proxy(req("/api/email/stats"))).status).toBe(307);
+  });
 });
