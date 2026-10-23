@@ -27,7 +27,7 @@ const SHOP: ShopSummary = {
     { label: "Meta (pub)", orders: 1, total: 202.35 },
     { label: "Recherche (Google, Bing…)", orders: 1, total: 229.94 },
   ],
-  meta: { spend: 600, orders: 5, costPerOrder: 120 },
+  meta: { spend: 600, orders: 5, maybeOrders: 1, costPerOrder: 120, costPerOrderLow: 100 },
 };
 
 const campaign = {
@@ -367,7 +367,9 @@ describe("Boutique (Shopify) section", () => {
     expect(t).toMatch(/13 commandes \(−13 %\)/); // 13 vs 15
     expect(t).toMatch(/90 arrivent au paiement → 13 achètent/);
     expect(t).toMatch(/réseaux sociaux 3\s?200/);
-    expect(t).toMatch(/environ .*120,00.* par commande/);
+    expect(t).toMatch(/dernier clic, indicatif/);
+    expect(t).toMatch(/120,00.* par commande/);
+    expect(t).toMatch(/100,00.* si on compte aussi les 1 venues de Facebook/); // range, not a single exact figure
   });
 
   it("comes before the Meta section", async () => {
@@ -393,9 +395,15 @@ describe("Boutique (Shopify) section", () => {
     expect(t).toMatch(/Hier : 3 commandes/);
   });
 
-  it("says no order is attributed to an ad when Meta spent but Shopify attributes none", async () => {
-    const t = await text(vi.fn(async () => ({ ...SHOP, meta: { spend: 80, orders: 0, costPerOrder: null } })));
-    expect(t).toContain("aucune commande attribuée à une pub");
+  it("does not read as « ads do not work » when the only Facebook orders carry no ad tag", async () => {
+    const t = await text(vi.fn(async () => ({ ...SHOP, meta: { spend: 80, orders: 0, maybeOrders: 2, costPerOrder: null, costPerOrderLow: 40 } })));
+    expect(t).toContain("aucune commande avec une pub identifiée");
+    expect(t).toMatch(/2 commandes venues de Facebook\/Instagram sans pub identifiée/);
+  });
+
+  it("says no order is linked to Facebook/Instagram when there is none at all", async () => {
+    const t = await text(vi.fn(async () => ({ ...SHOP, meta: { spend: 80, orders: 0, maybeOrders: 0, costPerOrder: null, costPerOrderLow: null } })));
+    expect(t).toContain("aucune commande reliée à Facebook/Instagram");
   });
 
   it("marks the section unavailable when Shopify analytics fails, still sending the rest", async () => {

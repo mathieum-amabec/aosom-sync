@@ -57,7 +57,7 @@ describe("collectShopSummary", () => {
     expect(s.daySales).toEqual({ orders: 2, total: 300, aov: 150 });
     expect(s.sources).toEqual([{ name: "réseaux sociaux", sessions: 90, bought: 1, conversion: 1 / 90 }]);
     expect(s.weekStart).toBe("2026-10-15");
-    expect(s.meta).toEqual({ spend: 200, orders: 3, costPerOrder: 200 / 3 });
+    expect(s.meta).toEqual({ spend: 200, orders: 3, maybeOrders: 0, costPerOrder: 200 / 3, costPerOrderLow: 200 / 3 });
     expect(getInsights).toHaveBeenCalledWith("act_1", { since: "2026-10-15", until: "2026-10-21" });
   });
 

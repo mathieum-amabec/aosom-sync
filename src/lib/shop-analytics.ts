@@ -56,12 +56,27 @@ export interface ShopSummary {
   sources: SourceStat[];
   /** Yesterday's orders grouped by where the buyer came from. */
   dayOrderSources: OrderSourceStat[];
-  /** Meta ads over the 7 days vs the orders Shopify itself attributes to a Meta ad. */
-  meta: { spend: number; orders: number; costPerOrder: number | null } | { error: string };
+  /**
+   * Meta ads over the 7 days vs the orders whose LAST click came from a tagged Meta ad (indicative: last click,
+   * and the spend window follows the ad account's day, the orders the Montreal day).
+   */
+  meta:
+    | {
+        spend: number;
+        /** Orders whose last click is a tagged Meta ad. */
+        orders: number;
+        /** Orders whose last click is Facebook/Instagram without an ad tag (organic post, link, or an untagged ad). */
+        maybeOrders: number;
+        costPerOrder: number | null;
+        /** Spend / (tagged + untagged Facebook orders): the optimistic end of the range. */
+        costPerOrderLow: number | null;
+      }
+    | { error: string };
 }
 
 // ── pure helpers ──────────────────────────────────────────────────────────────
 export const META_AD_LABEL = "Meta (pub)";
+export const META_UNLABELED = "Facebook / Instagram (sans pub identifiée)";
 
 export interface JourneyVisit {
   source?: string | null;
@@ -70,15 +85,19 @@ export interface JourneyVisit {
   utmParameters?: { source?: string | null; medium?: string | null; campaign?: string | null } | null;
 }
 
-/** Where an order came from, from its last visit (or the first one when the last carries nothing). */
+/**
+ * Where an order came from: LAST click (the visit that ended in the order). The first visit is only a
+ * fallback when Shopify gives no last visit at all, so a buyer who comes back by typing the address after
+ * an old Meta click counts as « Direct », not as a Meta ad (that would flatter the ads' cost per order).
+ */
 export function classifyOrderSource(journey: { lastVisit?: JourneyVisit | null; firstVisit?: JourneyVisit | null } | null | undefined): string {
-  const visits = [journey?.lastVisit, journey?.firstVisit].filter((v): v is JourneyVisit => !!v);
+  const visits = journey?.lastVisit ? [journey.lastVisit] : journey?.firstVisit ? [journey.firstVisit] : [];
   for (const v of visits) {
     const utm = v.utmParameters ?? {};
     const text = `${v.source ?? ""} ${utm.source ?? ""} ${v.referrerUrl ?? ""}`.toLowerCase();
     const campaign = (utm.campaign ?? "").toLowerCase();
     const medium = (utm.medium ?? "").toLowerCase();
-    const meta = /facebook|instagram|(^|[^a-z])fb([^a-z]|$)|meta/.test(text);
+    const meta = /facebook|instagram|(^|[^a-z])fb([^a-z]|$)|(^|[^a-z])meta([^a-z]|$)/.test(text);
     // Meta ads: a numeric campaign id or one of our campaign tags, or any paid tag on a Meta source.
     if (meta && (/^\d{10,}$/.test(campaign) || /advantage|liquidation|retargeting|halloween|collection|prix_bas|meta_catalog/.test(campaign) || medium === "paid" || medium === "cpc")) {
       return META_AD_LABEL;
@@ -86,7 +105,7 @@ export function classifyOrderSource(journey: { lastVisit?: JourneyVisit | null; 
     if (/chatgpt|openai|perplexity|claude\.ai|gemini/.test(text)) return "ChatGPT / IA";
     if (/klaviyo|resend/.test(text) || medium === "email" || /(^|[^a-z])mail\./.test(text) || /gmail|outlook|hotmail|android-app:\/\/com\.google\.android\.gm/.test(text)) return "Courriel";
     if (/google|bing|duckduckgo|yahoo|ecosia/.test(text) || (v.sourceType ?? "").toLowerCase() === "seo") return "Recherche (Google, Bing…)";
-    if (meta) return "Facebook / Instagram (sans pub identifiée)";
+    if (meta) return META_UNLABELED;
     if (text.trim() && !/direct/.test(text)) return "Autre";
   }
   return "Direct";
@@ -263,9 +282,18 @@ export async function collectShopSummary(day: string, metaAccountId: string | nu
   try {
     if (!metaAccountId) throw new Error("compte Meta indisponible");
     const weekOrders = await ordersBetween(montrealDayRangeUtc(weekStart).startIso, dayRange.endIso);
-    const metaOrders = groupOrderSources(weekOrders).find((o) => o.label === META_AD_LABEL)?.orders ?? 0;
+    const grouped = groupOrderSources(weekOrders);
+    const metaOrders = grouped.find((o) => o.label === META_AD_LABEL)?.orders ?? 0;
+    const maybeOrders = grouped.find((o) => o.label === META_UNLABELED)?.orders ?? 0;
     const spend = num((await getInsights(metaAccountId, { since: weekStart, until: day }))[0]?.spend);
-    meta = { spend, orders: metaOrders, costPerOrder: metaOrders > 0 ? spend / metaOrders : null };
+    meta = {
+      spend,
+      orders: metaOrders,
+      maybeOrders,
+      costPerOrder: metaOrders > 0 ? spend / metaOrders : null,
+      // Lower bound: every order that came from Facebook/Instagram, ad tag or not.
+      costPerOrderLow: metaOrders + maybeOrders > 0 ? spend / (metaOrders + maybeOrders) : null,
+    };
   } catch (err) {
     meta = { error: err instanceof Error ? err.message : String(err) };
   }

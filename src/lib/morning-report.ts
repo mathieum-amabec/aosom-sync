@@ -267,11 +267,22 @@ function shopSection(data: MorningReportData): ReportSection {
   if ("error" in s.meta) lines.push(`Pub Meta vs ventes : indisponible (${s.meta.error}).`);
   else {
     const m = s.meta;
-    lines.push(
-      m.costPerOrder != null
-        ? `Pub Meta (7 jours) : ${money(m.spend)} dépensés · ${plural(m.orders, "commande confirmée", "commandes confirmées")} par Shopify · environ ${money(m.costPerOrder)} par commande.`
-        : `Pub Meta (7 jours) : ${money(m.spend)} dépensés · aucune commande attribuée à une pub par Shopify.`,
-    );
+    // Indicative: last click only, and Meta's own spend window vs Montreal days. Shown as a range when untagged
+    // Facebook orders exist, so « cost per order » never reads as exact.
+    const head = `Pub Meta (7 jours, dernier clic, indicatif) : ${money(m.spend)} dépensés`;
+    if (m.costPerOrder == null) {
+      lines.push(
+        m.maybeOrders > 0
+          ? `${head} · aucune commande avec une pub identifiée, ${plural(m.maybeOrders, "commande venue", "commandes venues")} de Facebook/Instagram sans pub identifiée.`
+          : `${head} · aucune commande reliée à Facebook/Instagram.`,
+      );
+    } else if (m.maybeOrders > 0 && m.costPerOrderLow != null) {
+      lines.push(
+        `${head} · ${plural(m.orders, "commande", "commandes")} avec pub identifiée (${money(m.costPerOrder)} par commande), ${money(m.costPerOrderLow)} si on compte aussi les ${int(m.maybeOrders)} venues de Facebook sans pub identifiée.`,
+      );
+    } else {
+      lines.push(`${head} · ${plural(m.orders, "commande", "commandes")} avec pub identifiée · environ ${money(m.costPerOrder)} par commande.`);
+    }
   }
   return { title, lines };
 }

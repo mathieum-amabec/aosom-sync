@@ -21,6 +21,10 @@ describe("classifyOrderSource", () => {
     expect(classifyOrderSource(visit("facebook", "advantage_prix_bas_2026_10"))).toBe(META_AD_LABEL);
     expect(classifyOrderSource(visit("facebook", "retargeting_chaud_2026_10"))).toBe(META_AD_LABEL);
   });
+  it("does not match the word « meta » inside another domain", () => {
+    expect(classifyOrderSource({ lastVisit: { source: "metacafe.com", referrerUrl: "https://metacafe.com/", utmParameters: { medium: "paid" } } })).toBe("Autre");
+    expect(classifyOrderSource({ lastVisit: { source: "meta", utmParameters: { medium: "paid" } } })).toBe(META_AD_LABEL);
+  });
   it("does not call a plain facebook.com click an ad", () => {
     expect(classifyOrderSource({ lastVisit: { source: "https://facebook.com", referrerUrl: "https://facebook.com/" } })).toBe("Facebook / Instagram (sans pub identifiée)");
   });
@@ -29,8 +33,12 @@ describe("classifyOrderSource", () => {
     expect(classifyOrderSource({ lastVisit: { source: "chatgpt.com" } })).toBe("ChatGPT / IA");
     expect(classifyOrderSource({ lastVisit: { source: "android-app://com.google.android.gm/" } })).toBe("Courriel");
   });
-  it("falls back to the first visit when the last one carries nothing, then to Direct", () => {
-    expect(classifyOrderSource({ lastVisit: { source: "direct" }, firstVisit: { source: "facebook", utmParameters: { campaign: "52598252103605" } } })).toBe(META_AD_LABEL);
+  it("is LAST click: a direct return after an old Meta click is Direct, not a Meta ad", () => {
+    expect(classifyOrderSource({ lastVisit: { source: "direct" }, firstVisit: { source: "facebook", utmParameters: { campaign: "52598252103605" } } })).toBe("Direct");
+    expect(classifyOrderSource({ lastVisit: { source: "Google", sourceType: "SEO" }, firstVisit: { source: "facebook", utmParameters: { campaign: "52598252103605" } } })).toBe("Recherche (Google, Bing…)");
+  });
+  it("uses the first visit only when Shopify gives no last visit, then falls back to Direct", () => {
+    expect(classifyOrderSource({ firstVisit: { source: "facebook", utmParameters: { campaign: "52598252103605" } } })).toBe(META_AD_LABEL);
     expect(classifyOrderSource({ lastVisit: { source: "direct" } })).toBe("Direct");
     expect(classifyOrderSource(null)).toBe("Direct");
     expect(classifyOrderSource({})).toBe("Direct");
