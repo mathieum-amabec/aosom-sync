@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.47] - 2026-10-22
+
+### Added
+
+- **Abandoned-cart email relay (`/api/cron/cart-relay`), OFF by default.** Mat: « Prépare … le relais pour le courriel de panier abandonné ». Shoppers who added to cart with an identified email, never started a checkout nor ordered, and whose last add is 3 h to 48 h old get one one-recipient Klaviyo campaign with their items (title, image, price from the event, product link), FR or EN, free shipping across Canada, no discount or code, localized unsubscribe link. Consent is checked per profile (can receive marketing, not unsubscribed, no suppression); 7-day cooldown per profile shared with `relance-paiement` (checkout abandoners are never double-mailed); 25 per run and 60 per 24 h. Gate: settings `cart_relay_enabled` = `"1"` (the other relays run unless `"0"`; this one is the reverse), `?dryRun=1` always available. Reuses the relays' campaign plumbing and lease; `Wcjr3F` stays a draft. `esc` / `money` of `relance-paiement.ts` are now exported for reuse.
+
 ## [0.5.107.46] - 2026-10-21
 
 ### Fixed
