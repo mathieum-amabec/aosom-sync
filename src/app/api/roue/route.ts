@@ -39,6 +39,8 @@ export const runtime = "nodejs";
 const ALLOWED_ORIGINS = new Set([
   "https://ameublodirect.ca",
   "https://www.ameublodirect.ca",
+  "https://furnishdirect.ca",
+  "https://www.furnishdirect.ca",
   "https://27u5y2-kp.myshopify.com",
 ]);
 
