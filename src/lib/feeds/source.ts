@@ -2,7 +2,7 @@
 // handle + images live there, and only Shopify knows which products are 'active').
 // The pure mapper `shopifyToFeedItems` is unit-tested; `getFeedItems` does the fetch.
 import { SHOPIFY } from "@/lib/config";
-import { STOREFRONT_BASE_URL } from "@/lib/insights";
+import { STOREFRONT_BASE_URL, EN_STOREFRONT_BASE_URL } from "@/lib/insights";
 import { type FeedItem, mapToGoogleCategory, stripHtml, truncate } from "./feed";
 import { parseSku } from "../variant-merger";
 import { isSpecImageUrl } from "../selectors/shopify-product";
@@ -63,16 +63,11 @@ const SUPPLIER_WORD = /\baosom\b/i; // single match (no /g — safe with .test()
 const SUPPLIER_GLOBAL = /\baosom\b/gi; // replace-all
 
 // English feeds carry the store's EN identity, "Furnish Direct". That is NOT a separate shop:
-// it is the same 27u5y2-kp store rendered at the `/en` locale path, which is why the EN link
-// is the FR domain + EN_PATH_PREFIX and not a domain of its own.
-//
-// ⚠️ `furnishdirect.ca` is NOT a live domain — it is NXDOMAIN at the .ca registry (verified
-// 2026-08-12 against CIRA; Shopify reports exactly one domain, `ameublodirect.ca`). Pointing
-// feed links there would ship a dead link for every offer. If that domain is ever registered
-// and attached to Shopify as an EN market/alias, swap EN_PATH_PREFIX for the domain here —
-// nothing else in this file needs to change.
+// it is the same 27u5y2-kp store, served in English at the root of furnishdirect.ca (attached to
+// the Canada market next to ameublodirect.ca on 2026-10-25). EN offers link to
+// EN_STOREFRONT_BASE_URL/products/{handle}. The old ameublodirect.ca/en/... URLs now 301 there,
+// and a redirecting landing page is a Merchant Center disapproval — never link them.
 const HOUSE_BRAND_EN = "Furnish Direct";
-const EN_PATH_PREFIX = "/en";
 
 /** Replace any "Aosom" occurrence with the house brand and tidy whitespace.
  * `houseBrand` selects the locale's identity so an EN description never reads
@@ -250,7 +245,7 @@ function resolveBrand(
  *
  * When `opts.preferEnglishTitle` is set the feed switches to the EN locale wholesale, not
  * just the title: the base title comes from `p.titleEn` (custom.title_en metafield, falling
- * back to the FR `p.title` when missing or blank), links point at the `/en` storefront, and
+ * back to the FR `p.title` when missing or blank), links point at furnishdirect.ca, and
  * the house brand becomes "Furnish Direct". Those three move together on purpose — an EN
  * title linking to a FR page, or a "Furnish Direct" brand on a page headed "Ameublo Direct",
  * is exactly the mismatch Pinterest/Google flag. Used by the Pinterest EN feed. */
@@ -282,7 +277,7 @@ export function shopifyToFeedItems(
 ): FeedItem[] {
   const english = opts.preferEnglishTitle === true;
   const houseBrand = english ? HOUSE_BRAND_EN : HOUSE_BRAND;
-  const pathPrefix = english ? EN_PATH_PREFIX : "";
+  const storefrontBase = english ? EN_STOREFRONT_BASE_URL : STOREFRONT_BASE_URL;
   const items: FeedItem[] = [];
   const seenIds = new Set<string>();
   let dupCount = 0;
@@ -320,7 +315,7 @@ export function shopifyToFeedItems(
     const isVerified = (src: string) => !verified || verified.has(imageUrlStem(src));
     // Hero: the first photo as before, unless it was never verified and a verified one exists.
     const heroSrc = isVerified(images[0]) ? images[0] : (images.find(isVerified) ?? images[0]);
-    const link = `${STOREFRONT_BASE_URL}${pathPrefix}/products/${encodeURIComponent(p.handle)}`;
+    const link = `${storefrontBase}/products/${encodeURIComponent(p.handle)}`;
     const description = truncate(stripPromoText(scrubSupplier(stripHtml(p.body_html ?? ""), houseBrand)), DESCRIPTION_MAX);
     const brand = resolveBrand(p.vendor, houseBrand);
     const cat = mapToGoogleCategory(p.product_type);

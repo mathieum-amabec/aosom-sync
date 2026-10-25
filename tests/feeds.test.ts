@@ -354,10 +354,10 @@ describe("shopifyToFeedItems — per-variant image and ?variant= deep link", () 
     expect(byId("800-128BK").link).toBe("https://ameublodirect.ca/products/mini-frigo?variant=47816248983657");
     expect(byId("800-128V80RD").link).toBe("https://ameublodirect.ca/products/mini-frigo?variant=47816249049193");
   });
-  it("deep-links the EN feed under /en as well", () => {
+  it("deep-links the EN feed on furnishdirect.ca as well", () => {
     const en = shopifyToFeedItems([fridge], { preferEnglishTitle: true });
     expect(en.find((i) => i.id === "800-128V81BK")!.link)
-      .toBe("https://ameublodirect.ca/en/products/mini-frigo?variant=47816249016425");
+      .toBe("https://furnishdirect.ca/products/mini-frigo?variant=47816249016425");
   });
   it("leaves the link bare when the variant id is unknown", () => {
     const noIds = shopifyToFeedItems([{ ...fridge, id: 4, handle: "no-ids", variants: fridge.variants!.map((v) => ({ ...v, id: null })) }]);
@@ -597,16 +597,16 @@ describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => 
     expect(items.find((i) => i.id === "EN-001")!.title).toBe("Chaise de patio");
   });
 
-  // The EN feed is the `/en` locale of the SAME storefront, branded "Furnish Direct".
+  // The EN feed is the SAME storefront served in English on furnishdirect.ca, branded "Furnish Direct".
   // Link, brand and scrubbed copy must move together — an EN offer linking to the FR page,
   // or branded "Furnish Direct" while the page says "Ameublo Direct", is the brand/landing
   // -page mismatch Pinterest and Google flag.
-  it("links to the /en storefront, never a bare /products path", () => {
+  it("links to the furnishdirect.ca storefront, never the FR domain or /en", () => {
     const items = shopifyToFeedItems(enProducts, { preferEnglishTitle: true });
     expect(items.find((i) => i.id === "EN-001")!.link).toBe(
-      "https://ameublodirect.ca/en/products/chaise-de-patio",
+      "https://furnishdirect.ca/products/chaise-de-patio",
     );
-    for (const i of items) expect(i.link).toContain("/en/products/");
+    for (const i of items) expect(i.link).not.toContain("/en/products/");
   });
 
   it("keeps FR links free of the /en prefix", () => {
@@ -617,14 +617,14 @@ describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => 
     for (const i of items) expect(i.link).not.toContain("/en/products/");
   });
 
-  // furnishdirect.ca is NXDOMAIN (verified against the .ca registry 2026-08-12). If it ever
-  // creeps into the feed every offer becomes a dead link, so lock it out explicitly.
-  it("never emits a furnishdirect.ca link", () => {
-    for (const opts of [{ preferEnglishTitle: true }, {}]) {
-      for (const i of shopifyToFeedItems(enProducts, opts)) {
-        expect(i.link).not.toContain("furnishdirect");
-        expect(i.link.startsWith("https://ameublodirect.ca/")).toBe(true);
-      }
+  // furnishdirect.ca is the EN domain since 2026-10-25: EN offers must use it, FR offers never.
+  it("EN offers link to furnishdirect.ca, FR offers to ameublodirect.ca", () => {
+    for (const i of shopifyToFeedItems(enProducts, { preferEnglishTitle: true })) {
+      expect(i.link.startsWith("https://furnishdirect.ca/")).toBe(true);
+    }
+    for (const i of shopifyToFeedItems(enProducts, {})) {
+      expect(i.link).not.toContain("furnishdirect");
+      expect(i.link.startsWith("https://ameublodirect.ca/")).toBe(true);
     }
   });
 

@@ -1,3 +1,5 @@
+> **DONE 2026-10-25 — read this first.** furnishdirect.ca (bought through Shopify, domain id `gid://shopify/Domain/136491958377`) is live as the EN domain. The `bind-furnishdirect-domain.mjs` flow below is OBSOLETE and harmful (it makes ameublodirect.ca redirect to furnishdirect.ca). Working setup: `webPresenceCreate {domainId, defaultLocale:"en"}` then `marketUpdate(Canada, webPresencesToAdd:[ameublodirect.ca presence 36954800233, furnishdirect.ca presence])`; ameublodirect.ca presence has `alternateLocales: []` (no /en) and 4,238 `/en/*` URL redirects 301 to furnishdirect.ca. When es/pa are published add them as `alternateLocales` of the furnishdirect.ca presence. Ads: docs/FURNISHDIRECT-ADS-SETUP.md.
+
 # furnishdirect.ca — EN domain setup
 
 Goal: serve the **English** storefront on **furnishdirect.ca**, keeping the French
