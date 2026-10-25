@@ -17,6 +17,12 @@
 //
 // Safe to run before the domain is connected: it preflights and exits with
 // instructions instead of mutating anything.
+// ⛔ OBSOLETE — DO NOT RUN. On 2026-10-25 this script (marketWebPresenceCreate on the Canada market alone) made
+// ameublodirect.ca 302-redirect to furnishdirect.ca, because Canada had no web presence of its own. The correct,
+// verified setup attaches BOTH presences (ameublodirect.ca fr + furnishdirect.ca en) via webPresenceCreate +
+// marketUpdate(webPresencesToAdd). See docs/FURNISHDIRECT-DOMAIN-SETUP.md.
+console.error("bind-furnishdirect-domain.mjs is obsolete (it breaks ameublodirect.ca). Aborting.");
+process.exit(1);
 import { gql, rest } from "./_shopify-lib.mjs";
 
 const APPLY = process.argv.includes("--apply");
