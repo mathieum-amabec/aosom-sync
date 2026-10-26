@@ -15,7 +15,7 @@ const EMPTY_SCRIPT = "/* Meta Pixel not configured (NEXT_PUBLIC_META_PIXEL_ID un
  * available. Every access to a storefront global is guarded so the script is
  * inert on pages/themes where those globals are absent.
  */
-function buildPixelScript(pixelId: string): string {
+function buildPixelScript(pixelId: string, capiUrl: string): string {
   // pixelId is validated to be digits-only before interpolation (no injection).
   return `/* Meta Pixel — injected by aosom-sync ScriptTag */
 !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
@@ -38,6 +38,35 @@ fbq('track', 'PageView');
     var rate = parseFloat(cur.rate || '1') || 1;
     function toMoney(cents) { return typeof cents === 'number' ? (cents / 100) * rate : undefined; }
 
+    // Conversions API: each browser event gets an id, passed to fbq as eventID and relayed
+    // server-side to /api/capi/event with the same event_id so Meta de-duplicates the pair.
+    // The relay is a no-op server-side until settings.capi_enabled = 1.
+    function uid() {
+      return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+    }
+    function cookie(n) {
+      var m = document.cookie.match(new RegExp('(?:^|; )' + n + '=([^;]*)'));
+      return m ? decodeURIComponent(m[1]) : null;
+    }
+    function track(name, data) {
+      var id = uid();
+      fbq('track', name, data, { eventID: id });
+      try {
+        var fbc = cookie('_fbc');
+        if (!fbc) {
+          var q = /[?&]fbclid=([^&#]+)/.exec(window.location.search);
+          if (q) fbc = 'fb.1.' + Date.now() + '.' + q[1];
+        }
+        var body = JSON.stringify({
+          event_name: name, event_id: id, event_source_url: window.location.href,
+          fbp: cookie('_fbp'), fbc: fbc, custom_data: data
+        });
+        var url = '${capiUrl}';
+        if (navigator.sendBeacon) navigator.sendBeacon(url, body);
+        else fetch(url, { method: 'POST', body: body, keepalive: true, mode: 'cors' }).catch(function () {});
+      } catch (e) {}
+    }
+
     // content_ids everywhere = variant SKU, to match the Meta catalog whose
     // retailer_id is the SKU (e.g. "01-0901") — NOT the numeric variant.id.
     // ShopifyAnalytics.meta.product.variants[] carries { id, price, sku }.
@@ -59,7 +88,7 @@ fbq('track', 'PageView');
     if (page.pageType === 'product' && meta.product) {
       var p = meta.product;
       var variant = pickVariant(p);
-      fbq('track', 'ViewContent', {
+      track('ViewContent', {
         content_type: 'product',
         content_ids: variant.sku ? [String(variant.sku)] : [],
         content_name: p.type || '',
@@ -97,7 +126,7 @@ fbq('track', 'PageView');
         var val = toMoney(v.price);
         if (val !== undefined) payload.value = val;
       }
-      fbq('track', 'AddToCart', payload);
+      track('AddToCart', payload);
     }
 
     document.addEventListener('submit', function (ev) {
@@ -137,11 +166,15 @@ fbq('track', 'PageView');
 `;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const pixelId = env.metaPixelId;
+  // The relay URL is derived from this script's own origin (not user input beyond the Host header,
+  // restricted to a hostname charset) so it works on any deployment alias.
+  const host = new URL(request.url).host;
+  const capiUrl = /^[a-z0-9.-]+(:\d+)?$/i.test(host) ? `https://${host}/api/capi/event` : "https://aosom-sync.vercel.app/api/capi/event";
   // Only digits are valid Meta Pixel IDs; reject anything else to keep the
   // interpolation injection-proof even though the value is operator-controlled.
-  const body = pixelId && /^[0-9]+$/.test(pixelId) ? buildPixelScript(pixelId) : EMPTY_SCRIPT;
+  const body = pixelId && /^[0-9]+$/.test(pixelId) ? buildPixelScript(pixelId, capiUrl) : EMPTY_SCRIPT;
   return new NextResponse(body, {
     status: 200,
     headers: {
