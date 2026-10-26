@@ -583,6 +583,40 @@ describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => 
     },
   ];
 
+  // EN feed must be English end to end: description, variant label, colour.
+  describe("English description and option values", () => {
+    const p: ShopifyFeedProduct = {
+      id: 710, title: "Tabouret ergonomique", titleEn: "Ergonomic Stool", body_html: "<p>Ce tabouret est idéal pour le bureau.</p>",
+      bodyEn: "<p>This stool is ideal for the office.</p>", handle: "tabouret", status: "active", published_at: PUBLISHED,
+      images: [{ src: "https://img/9.jpg" }],
+      options: [{ name: "Couleur", position: 1 }],
+      variants: [
+        { sku: "EN-010A", price: "49.99", title: "Blanc crème / 61 × 52 cm", option1: "Blanc crème", inventory_management: null },
+        { sku: "EN-010B", price: "49.99", title: "Gris / 61 × 52 cm", option1: "Gris", inventory_management: null },
+      ],
+    } as ShopifyFeedProduct;
+    const optionValueEn = new Map([["Blanc crème", "Cream white"], ["Gris", "Grey"]]);
+
+    it("uses the English description and English variant labels", () => {
+      const items = shopifyToFeedItems([p], { preferEnglishTitle: true, optionValueEn });
+      expect(items[0].description).toBe("This stool is ideal for the office.");
+      expect(items[0].title).toBe("Ergonomic Stool - Cream white / 61 × 52 cm");
+      expect(items[1].title).toBe("Ergonomic Stool - Grey / 61 × 52 cm");
+    });
+
+    it("keeps French untouched on the FR feed", () => {
+      const items = shopifyToFeedItems([p], { optionValueEn });
+      expect(items[0].description).toContain("idéal");
+      expect(items[0].title).toBe("Tabouret ergonomique - Blanc crème / 61 × 52 cm");
+    });
+
+    it("falls back to the source text when no English exists", () => {
+      const items = shopifyToFeedItems([{ ...p, bodyEn: null }], { preferEnglishTitle: true });
+      expect(items[0].description).toContain("idéal");
+      expect(items[0].title).toContain("Blanc crème");
+    });
+  });
+
   it("uses custom.title_en when present", () => {
     const items = shopifyToFeedItems(enProducts, { preferEnglishTitle: true });
     expect(items.find((i) => i.id === "EN-001")!.title).toBe("Patio Chair");
