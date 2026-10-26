@@ -482,7 +482,10 @@ export async function createShopifyProduct(
       // Once taxonomy tags are tracked (import job / products table), merge them in:
       // tags: [...new Set([...content.tags, ...taxonomyTags])].join(", ").
       // See docs/taxonomy-changelog.md. Non-blocking for the idempotency fix.
-      tags: [...content.tags, ...(opts.extraTags ?? [])].join(", "),
+      // Supplier names never go in tags (tag filter URLs and /products/x.json expose them).
+      tags: [...content.tags, ...(opts.extraTags ?? [])]
+        .filter((t) => !/\b(aosom|homcom|outsunny|pawhut|soozier|costway|vinsetto|durhand|aiyaplay|kleankin|qaba)\b/i.test(t))
+        .join(", "),
       status: opts.status ?? "active",
       options,
       variants: builtVariants,
@@ -526,11 +529,12 @@ export async function createShopifyProduct(
           value: content.metaDescriptionEn,
           type: "single_line_text_field",
         },
-        // Supplier brand — internal only, never shown to the customer.
+        // Always the store brand: a supplier name in this metafield would leak the moment any
+        // theme, feed or app reads it (existing products were rewritten 2026-10-23).
         {
           namespace: "custom",
           key: "brand_fr",
-          value: merged.brand || "Aosom",
+          value: "Ameublo Direct",
           type: "single_line_text_field",
         },
         // Per-SKU assembled + box sizes for the PDP "Est-ce que ça va entrer ?" checker (fit-dims.ts).

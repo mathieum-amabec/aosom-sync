@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.50] - 2026-10-23
+
+### Fixed
+
+- **Importer no longer writes supplier names.** `custom.brand_fr` is now always "Ameublo Direct" (it fell back to the supplier brand, e.g. "Aosom"), and supplier names are filtered out of product tags (tag filter URLs and `/products/x.json` expose them). Existing products were cleaned the same day (248 tags, 3,135 brand_fr values; backups kept).
+
 ## [0.5.107.49] - 2026-10-23
 
 ### Added
