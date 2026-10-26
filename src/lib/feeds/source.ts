@@ -45,6 +45,8 @@ export interface ShopifyFeedProduct {
   /** English product title from the custom.title_en metafield. Only populated for the
    * EN feed; absent/empty falls back to the FR `title`. */
   titleEn?: string | null;
+  /** English description (custom.body_html_en metafield, HTML). EN feed only; absent/empty falls back to the FR body_html. */
+  bodyEn?: string | null;
   /** Selected product metafields keyed "namespace.key". Only the keys the feed actually
    * reads are populated (see MATERIAL_METAFIELD_KEYS); absent when none are defined. */
   metafields?: Record<string, string | null | undefined> | null;
@@ -273,6 +275,8 @@ export function shopifyToFeedItems(
      * Omit to keep the legacy fail-open behaviour (unit tests, ad-hoc callers).
      */
     verifiedStems?: ReadonlySet<string>;
+    /** FR option value -> EN option value (Shopify EN translations of product option values, e.g. "Blanc crème" -> "Cream white"). EN feed only: variant titles, colour and size come out in English. */
+    optionValueEn?: ReadonlyMap<string, string>;
   } = {},
 ): FeedItem[] {
   const english = opts.preferEnglishTitle === true;
@@ -316,7 +320,11 @@ export function shopifyToFeedItems(
     // Hero: the first photo as before, unless it was never verified and a verified one exists.
     const heroSrc = isVerified(images[0]) ? images[0] : (images.find(isVerified) ?? images[0]);
     const link = `${storefrontBase}/products/${encodeURIComponent(p.handle)}`;
-    const description = truncate(stripPromoText(scrubSupplier(stripHtml(p.body_html ?? ""), houseBrand)), DESCRIPTION_MAX);
+    const rawBody = english && p.bodyEn && p.bodyEn.trim() !== "" ? p.bodyEn : (p.body_html ?? "");
+    const description = truncate(stripPromoText(scrubSupplier(stripHtml(rawBody), houseBrand)), DESCRIPTION_MAX);
+    const enMap = english ? opts.optionValueEn : undefined;
+    const toEn = <T extends string | null | undefined>(s: T): T | string =>
+      !enMap || !s ? s : String(s).split(" / ").map((part) => enMap.get(part.trim()) ?? part).join(" / ");
     const brand = resolveBrand(p.vendor, houseBrand);
     const cat = mapToGoogleCategory(p.product_type);
     const variants = (p.variants ?? []).filter((v) => v.sku && String(v.sku).trim() !== "");
@@ -338,7 +346,7 @@ export function shopifyToFeedItems(
       const availability: FeedItem["availability"] =
         tracked && (v.inventory_quantity ?? 0) <= 0 ? "out of stock" : "in stock";
       // Differentiate variant titles when the product has real variants.
-      const variantTitle = multi && v.title && v.title !== "Default Title" ? ` - ${v.title}` : "";
+      const variantTitle = multi && v.title && v.title !== "Default Title" ? ` - ${toEn(v.title)}` : "";
       // Each variant is its own offer (g:id = SKU), so its image must show THAT variant — an
       // "Argent" item carrying the product's black hero photo is an image/variant mismatch.
       // Use the variant's assigned image; fall back to the product's first image only when it
@@ -369,11 +377,11 @@ export function shopifyToFeedItems(
         // distinguishes "Gris foncé" from "Gris", which the 2-letter SKU suffix cannot), so
         // prefer it and fall back to the SKU suffix (COLOR_MAP) when the product has no
         // colour option. English option values are mapped to French for the FR market.
-        color: frenchifyColor(optionValue(p, v, COLOUR_OPTION)) ?? parseSku(id).color,
+        color: toEn(frenchifyColor(optionValue(p, v, COLOUR_OPTION)) ?? parseSku(id).color) as string | null | undefined,
         // <g:size> from the Shopify "Taille" option. Values are Aosom's imperial dimension
         // strings; Google accepts free-form size text, and having it lets Shopping tell
         // same-product variants apart in the same item_group.
-        size: optionValue(p, v, SIZE_OPTION),
+        size: toEn(optionValue(p, v, SIZE_OPTION)) as string | null | undefined,
         // <g:material> from a Shopify metafield only — never inferred. Product-level, so
         // every variant of a product shares it. Null today: no material metafield exists.
         material: materialFromMetafields(p.metafields),
@@ -496,6 +504,69 @@ export async function fetchTitleEnMap(): Promise<Map<string, string>> {
   return map;
 }
 
+/** Fetch product-id -> English description HTML (custom.body_html_en). Same pass shape as fetchTitleEnMap. */
+export async function fetchBodyEnMap(): Promise<Map<string, string>> {
+  const token = process.env.SHOPIFY_ACCESS_TOKEN;
+  if (!token) throw new Error("SHOPIFY_ACCESS_TOKEN not configured");
+  const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}/graphql.json`;
+  const query = `query BodyEn($cursor: String) {
+    products(first: 100, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { legacyResourceId metafield(namespace: "custom", key: "body_html_en") { value } }
+    }
+  }`;
+  const map = new Map<string, string>();
+  let cursor: string | null = null;
+  let pages = 0;
+  do {
+    const body = await graphqlWithRetry(url, token, query, { cursor });
+    if (body.errors?.length) throw new Error(`Shopify GraphQL errors: ${body.errors.map((e) => e.message).join("; ")}`);
+    const conn = (body.data as { products?: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<{ legacyResourceId: string; metafield: { value: string } | null }> } })?.products;
+    if (!conn) throw new Error("Shopify GraphQL returned no products connection");
+    for (const node of conn.nodes) {
+      const value = node.metafield?.value?.trim();
+      if (value) map.set(String(node.legacyResourceId), value);
+    }
+    cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+    pages++;
+  } while (cursor && pages < MAX_PAGES * 3);
+  return map;
+}
+
+/** FR option value -> EN option value, from Shopify EN translations of product option values. Never throws: a failure degrades to French option text, not a dead feed. */
+export async function fetchOptionValueEnMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  try {
+    const token = process.env.SHOPIFY_ACCESS_TOKEN;
+    if (!token) return map;
+    const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}/graphql.json`;
+    const query = `query OptEn($cursor: String) {
+      translatableResources(first: 250, after: $cursor, resourceType: PRODUCT_OPTION_VALUE) {
+        pageInfo { hasNextPage endCursor }
+        nodes { translatableContent { key value } translations(locale: "en") { key value } }
+      }
+    }`;
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const body = await graphqlWithRetry(url, token, query, { cursor });
+      if (body.errors?.length) return map;
+      const conn = (body.data as { translatableResources?: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<{ translatableContent: Array<{ key: string; value: string }>; translations: Array<{ key: string; value: string }> }> } })?.translatableResources;
+      if (!conn) return map;
+      for (const n of conn.nodes) {
+        const fr = n.translatableContent.find((c) => c.key === "name")?.value?.trim();
+        const en = n.translations.find((t) => t.key === "name")?.value?.trim();
+        if (fr && en && !map.has(fr)) map.set(fr, en);
+      }
+      cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+      pages++;
+    } while (cursor && pages < 100);
+  } catch (err) {
+    console.warn("[FEED] option-value EN translations unavailable (non-fatal):", err);
+  }
+  return map;
+}
+
 /** Fetch product-id → material for whichever of MATERIAL_METAFIELD_KEYS is defined.
  *
  * Gated on a definition existing, so on a store with no material metafield (which is the
@@ -589,13 +660,15 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
   }
 
   if (opts.english) {
-    const titleEnMap = await fetchTitleEnMap();
+    const [titleEnMap, bodyEnMap, optionValueEn] = await Promise.all([fetchTitleEnMap(), fetchBodyEnMap().catch(() => new Map<string, string>()), fetchOptionValueEnMap()]);
     for (const p of products) {
       const en = titleEnMap.get(String(p.id));
       if (en) p.titleEn = en;
+      const bodyEn = bodyEnMap.get(String(p.id));
+      if (bodyEn) p.bodyEn = bodyEn;
     }
     const { nonCompliant, verified } = await fetchImageVerdictStems(products);
-    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems: nonCompliant, verifiedStems: verified });
+    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems: nonCompliant, verifiedStems: verified, optionValueEn });
   }
 
   const { nonCompliant, verified } = await fetchImageVerdictStems(products);
