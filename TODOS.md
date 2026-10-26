@@ -1,5 +1,22 @@
 # TODOS
 
+## Décidé — ne pas poursuivre
+
+### `src/lib/slideshow/carousel/` (Module E — carrousels d'images brandées)
+
+**Décision (2026-09-18) : laissé tel quel, délibérément non branché.** Construit et mergé
+le 2026-06-25 (PR #296, "feature/slideshow-remotion") en même temps que le moteur de
+remix (Module F) — même statut qu'avait Module F avant d'être branché cette session
+(complet, testé, zéro appelant depuis sa création). Vérifié par `git log --all -p
+-S"renderCarousel("` : seulement 2 commits touchent la fonction dans toute l'histoire du
+repo, les deux du jour de création ; aucun appel réel, aucun test en conditions réelles,
+jamais. À ne pas confondre avec `poc/carousel-content/` (supprimé), un spike Satori/texte
+totalement différent du 2026-09-08 — les deux systèmes partagent juste le mot "carrousel".
+
+Pas de code mort au sens strict (feature complète, pas un fragment orphelin), mais pas
+retenu comme prochain chantier non plus. Ne pas re-proposer de le brancher sans une
+raison produit précise — sinon laisser dormir.
+
 ## Import Pipeline
 
 ### Bulk Generate — Pousser tous les produits vers Shopify en batch
