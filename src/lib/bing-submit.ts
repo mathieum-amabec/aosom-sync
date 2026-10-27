@@ -11,6 +11,8 @@ const BATCH = 500;
 const MAX_PER_RUN = 500;
 
 export const SITE_URL = "https://ameublodirect.ca/";
+/** Second storefront (EN default + /es + /pa). It must also be added and verified in Bing Webmaster; until then its pass is reported as an error, never thrown. */
+export const EXTRA_SITE_URLS = ["https://furnishdirect.ca/"];
 
 let tableReady = false;
 async function db() {
@@ -99,36 +101,38 @@ async function bingJson(path: string, key: string, f: typeof fetch, body?: unkno
 }
 
 /** URLs Bing still accepts today. */
-export async function getDailyQuota(key: string, f: typeof fetch = fetch): Promise<number> {
-  const j = (await bingJson(`GetUrlSubmissionQuota?siteUrl=${encodeURIComponent(SITE_URL)}`, key, f)) as { d?: { DailyQuota?: number } } | null;
+export async function getDailyQuota(key: string, f: typeof fetch = fetch, site = SITE_URL): Promise<number> {
+  const j = (await bingJson(`GetUrlSubmissionQuota?siteUrl=${encodeURIComponent(site)}`, key, f)) as { d?: { DailyQuota?: number } } | null;
   const q = Number(j?.d?.DailyQuota);
   return Number.isFinite(q) ? q : 0;
 }
 
-export interface BingResult {
-  configured: boolean;
-  quota?: number;
-  candidates?: number;
-  submitted?: number;
-  remaining?: number;
+export interface SiteResult {
+  quota: number;
+  candidates: number;
+  submitted: number;
+  remaining: number;
 }
 
-export async function submitToBing(opts: { fetchImpl?: typeof fetch; now?: Date; env?: Record<string, string | undefined> } = {}): Promise<BingResult> {
-  const key = readBingKey(opts.env);
-  if (!key) return { configured: false };
-  const f = opts.fetchImpl ?? fetch;
-  const quota = await getDailyQuota(key, f);
-  const entries = await collectSitemapUrls(f);
+export interface BingResult extends Partial<SiteResult> {
+  configured: boolean;
+  /** Per extra site: its result, or the error (typically "site not verified in Bing Webmaster yet"). */
+  others?: Record<string, SiteResult | { error: string }>;
+}
+
+async function submitSite(site: string, key: string, f: typeof fetch, now: Date): Promise<SiteResult> {
+  const quota = await getDailyQuota(key, f, site);
+  const entries = await collectSitemapUrls(f, site);
   const client = await db();
   const rows = (await client.execute(`SELECT url, submitted_at, lastmod FROM bing_submitted`)).rows;
   const sent = new Map(rows.map((r) => [String(r.url), { submittedAt: String(r.submitted_at), lastmod: (r.lastmod as string | null) ?? null }]));
   const limit = Math.min(quota, MAX_PER_RUN);
   const due = pickToSubmit(entries, sent, limit);
-  const stamp = (opts.now ?? new Date()).toISOString();
+  const stamp = now.toISOString();
   let submitted = 0;
   for (let i = 0; i < due.length; i += BATCH) {
     const chunk = due.slice(i, i + BATCH);
-    await bingJson("SubmitUrlbatch", key, f, { siteUrl: SITE_URL.replace(/\/$/, ""), urlList: chunk.map((c) => c.url) });
+    await bingJson("SubmitUrlbatch", key, f, { siteUrl: site.replace(/\/$/, ""), urlList: chunk.map((c) => c.url) });
     await client.batch(
       chunk.map((c) => ({ sql: `INSERT OR REPLACE INTO bing_submitted (url, submitted_at, lastmod) VALUES (?, ?, ?)`, args: [c.url, stamp, c.lastmod] })),
       "write",
@@ -136,5 +140,22 @@ export async function submitToBing(opts: { fetchImpl?: typeof fetch; now?: Date;
     submitted += chunk.length;
   }
   const remaining = pickToSubmit(entries, new Map([...sent, ...due.map((d) => [d.url, { submittedAt: stamp, lastmod: d.lastmod }] as const)]), Infinity).length;
-  return { configured: true, quota, candidates: entries.length, submitted, remaining };
+  return { quota, candidates: entries.length, submitted, remaining };
+}
+
+export async function submitToBing(opts: { fetchImpl?: typeof fetch; now?: Date; env?: Record<string, string | undefined> } = {}): Promise<BingResult> {
+  const key = readBingKey(opts.env);
+  if (!key) return { configured: false };
+  const f = opts.fetchImpl ?? fetch;
+  const now = opts.now ?? new Date();
+  const primary = await submitSite(SITE_URL, key, f, now);
+  const others: NonNullable<BingResult["others"]> = {};
+  for (const site of EXTRA_SITE_URLS) {
+    try {
+      others[site] = await submitSite(site, key, f, now);
+    } catch (err) {
+      others[site] = { error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  return { configured: true, ...primary, others };
 }

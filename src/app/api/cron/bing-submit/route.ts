@@ -18,7 +18,13 @@ export async function GET(request: Request) {
     const data = await trackCron(
       "bing-submit",
       () => submitToBing(),
-      (r) => (r.configured ? `${r.submitted} envoyées à Bing (quota ${r.quota}), ${r.remaining} en attente sur ${r.candidates} pages` : "non configuré (BING_WEBMASTER_API_KEY)"),
+      (r) => {
+        if (!r.configured) return "non configuré (BING_WEBMASTER_API_KEY)";
+        const others = Object.entries(r.others ?? {})
+          .map(([site, o]) => `${site.replace(/^https:\/\/|\/$/g, "")}: ${"error" in o ? `erreur (${o.error})` : `${o.submitted} envoyées, ${o.remaining} en attente`}`)
+          .join("; ");
+        return `${r.submitted} envoyées à Bing (quota ${r.quota}), ${r.remaining} en attente sur ${r.candidates} pages${others ? ` · ${others}` : ""}`;
+      },
     );
     return NextResponse.json({ success: true, data });
   } catch (err) {
