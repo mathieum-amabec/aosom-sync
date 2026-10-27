@@ -30,7 +30,9 @@ import { GEMINI } from "./config";
 import { shopifyFetch } from "./shopify-client";
 import type { BudgetPool } from "./llm-budget";
 
-export type Locale = "fr" | "en";
+import { byLang, localeOf, parseLang, type Lang, type Locale } from "./assistant-lang";
+export type { Lang, Locale };
+export { parseLang, localeOf, byLang };
 
 export interface AssistantProduct {
   sku: string;
@@ -82,9 +84,12 @@ const MAX_CARDS = 4;
 // `furnishdirect.ca` was used here and is NXDOMAIN at the .ca registry (verified against
 // CIRA 2026-08-12; Shopify reports exactly one domain, `ameublodirect.ca`), so every EN
 // recommendation was a dead link. Same fix already shipped for the feeds in v0.5.59.1.
-const STORE_URL: Record<Locale, string> = {
+// Since 2026-10-25 the English store is its own domain (furnishdirect.ca); ameublodirect.ca/en now 301s there.
+const STORE_URL: Record<Lang, string> = {
   fr: "https://ameublodirect.ca",
-  en: "https://ameublodirect.ca/en",
+  en: "https://furnishdirect.ca",
+  es: "https://furnishdirect.ca/es",
+  pa: "https://furnishdirect.ca/pa",
 };
 
 /** Budget ceiling tolerance — 30% headroom so a shopper saying "800$" still sees 1040$
@@ -347,8 +352,8 @@ async function recommendComplementary(input: Record<string, unknown>): Promise<C
     })));
 }
 
-function systemPrompt(locale: Locale): string {
-  const lang = locale === "en" ? "English" : "Québec French";
+function systemPrompt(locale: Locale, shopperLang: Lang = locale): string {
+  const lang = byLang(shopperLang, { fr: "Québec French", en: "English", es: "Spanish (Canadian Spanish, informal-polite 'usted')", pa: "Punjabi in Gurmukhi script (ਪੰਜਾਬੀ)" });
   const name = assistantName(locale);
   const store = locale === "en" ? "Furnish Direct" : "Ameublo Direct";
   const phone = assistantPhone();
@@ -422,10 +427,11 @@ function parseFinal(text: string): { reply: string; picks: Array<{ sku: string; 
  * prior conversation (already length-capped by the caller). Never throws for a normal
  * model reply; throws only on a hard API failure.
  */
-export async function runAssistant(opts: { message: string; history?: AssistantTurn[]; locale?: Locale; pool?: BudgetPool }): Promise<AssistantResult> {
+export async function runAssistant(opts: { message: string; history?: AssistantTurn[]; locale?: Locale; lang?: Lang; pool?: BudgetPool }): Promise<AssistantResult> {
   // The storefront chat pays from "assistant"; the photo décorateur (room-visualizer.ts) passes its own pool.
   const budgetPool: BudgetPool = opts.pool ?? "assistant";
-  const locale: Locale = opts.locale === "en" ? "en" : "fr";
+  const lang: Lang = parseLang(opts.lang ?? opts.locale);
+  const locale: Locale = localeOf(lang);
   // Gemini roles: the widget's "assistant" turns are "model" turns.
   const contents: GeminiContent[] = [];
   for (const t of (opts.history || []).slice(-8)) {
@@ -458,8 +464,8 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
         model: GEMINI.MODEL_ASSISTANT,
         maxOutputTokens: 1024,
         systemInstruction: lastStep
-          ? `${systemPrompt(locale)}\n\nNO MORE SEARCHES ARE AVAILABLE. Give the FINAL ANSWER JSON now, choosing only among the products already returned.`
-          : systemPrompt(locale),
+          ? `${systemPrompt(locale, lang)}\n\nNO MORE SEARCHES ARE AVAILABLE. Give the FINAL ANSWER JSON now, choosing only among the products already returned.`
+          : systemPrompt(locale, lang),
         tools: lastStep ? undefined : [SEARCH_TOOL, RECOMMEND_TOOL, STORE_INFO_TOOL, PRODUCT_DETAILS_TOOL],
         contents,
       },
@@ -497,7 +503,7 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
               source: sec.source,
               heading: sec.heading,
               text: sec.text,
-              url: `${STORE_URL[locale]}${sec.path}`,
+              url: `${STORE_URL[lang]}${sec.path}`,
             }));
           } catch (err) {
             console.error("[assistant] get_store_info failed:", err);
@@ -531,15 +537,20 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
     const parsed = parseFinal(res.text);
     const { picks, flag } = parsed;
     const reply = stripMarkdown(parsed.reply);
-    const products = await resolveCards(picks, pool, locale, budget);
-    const fallback = locale === "en" ? "Here are a few options I found for you." : "Voici quelques options que j'ai trouvées pour vous.";
+    const products = await resolveCards(picks, pool, lang, budget);
+    const fallback = byLang(lang, {
+      fr: "Voici quelques options que j'ai trouvées pour vous.",
+      en: "Here are a few options I found for you.",
+      es: "Aquí tiene algunas opciones que encontré para usted.",
+      pa: "ਇਹ ਕੁਝ ਵਿਕਲਪ ਹਨ ਜੋ ਮੈਨੂੰ ਤੁਹਾਡੇ ਲਈ ਮਿਲੇ।",
+    });
     // A pure information answer (policies, a clarifying question, a polite refusal) has no
     // product picks on purpose and must reach the shopper as written. Only a reply that
     // promised products we then couldn't show gets the honest no-match line.
-    let text = picks.length === 0 && reply ? reply : emptyAwareReply(reply || fallback, products.length, locale);
+    let text = picks.length === 0 && reply ? reply : emptyAwareReply(reply || fallback, products.length, locale, lang);
     // A stated budget + several cards = a room in a budget: the model's own arithmetic was
     // wrong on 2 of 3 live tests (2026-10-02), so the total is computed here from the cards.
-    if (budget != null && products.length >= 2) text += `\n${roomTotalLine(products, budget, locale)}`;
+    if (budget != null && products.length >= 2) text += `\n${roomTotalLine(products, budget, locale, lang)}`;
     return { reply: text, products, meta: { tokens, flag } };
   }
 
@@ -547,14 +558,20 @@ export async function runAssistant(opts: { message: string; history?: AssistantT
   const salvaged = await resolveCards(
     [...pool.values()].slice(0, MAX_CARDS).map((p) => ({ sku: p.sku, reason: "" })),
     pool,
-    locale,
+    lang,
     budget,
   );
   return {
     reply: emptyAwareReply(
-      locale === "en" ? "Here are a few options that might fit." : "Voici quelques options qui pourraient convenir.",
+      byLang(lang, {
+        fr: "Voici quelques options qui pourraient convenir.",
+        en: "Here are a few options that might fit.",
+        es: "Aquí tiene algunas opciones que podrían convenir.",
+        pa: "ਇਹ ਕੁਝ ਵਿਕਲਪ ਹਨ ਜੋ ਸ਼ਾਇਦ ਠੀਕ ਬੈਠਣ।",
+      }),
       salvaged.length,
       locale,
+      lang,
     ),
     products: salvaged,
     meta: { tokens, flag: null },
@@ -628,8 +645,8 @@ export function pickComplementary(rows: ComplementaryProductRow[], seed: string,
  * `name`/`productType` come from the request body: UNTRUSTED, length-capped, and only ever
  * used as bound LIKE prefixes (wildcards escaped in getComplementaryCandidates).
  */
-export async function runComplementary(opts: { name: string; productType: string; locale?: Locale }): Promise<AssistantResult> {
-  const locale: Locale = opts.locale === "en" ? "en" : "fr";
+export async function runComplementary(opts: { name: string; productType: string; locale?: Locale; lang?: Lang }): Promise<AssistantResult> {
+  const lang: Lang = parseLang(opts.lang ?? opts.locale);
   const name = opts.name.slice(0, 200);
   const segs = opts.productType.slice(0, 200).split(">").map((s) => s.trim()).filter(Boolean);
   if (segs.length === 0) return { reply: "", products: [] };
@@ -666,16 +683,17 @@ export async function runComplementary(opts: { name: string; productType: string
   }
   // No per-card sentence: it was the only thing the model wrote, and a templated one
   // repeated on three cards reads worse than none (the block hides an empty reason).
-  const products = await resolveCards(picks.map((p) => ({ sku: p.sku, reason: "" })), pool, locale);
+  const products = await resolveCards(picks.map((p) => ({ sku: p.sku, reason: "" })), pool, lang);
   return { reply: "", products: products.slice(0, COMPLEMENTARY_CARDS) };
 }
 
 /** "Total : 519,96 $ (budget : 1 200,00 $)" — the sum of the cards actually shown. Exported for tests. */
-export function roomTotalLine(products: Array<{ price: number }>, budget: number, locale: Locale): string {
+export function roomTotalLine(products: Array<{ price: number }>, budget: number, locale: Locale, lang: Lang = locale): string {
   const fmt = (n: number) =>
-    new Intl.NumberFormat(locale === "en" ? "en-CA" : "fr-CA", { style: "currency", currency: "CAD" }).format(n);
+    new Intl.NumberFormat(byLang(lang, { fr: "fr-CA", en: "en-CA", es: "es-CA", pa: "pa-IN" }), { style: "currency", currency: "CAD" }).format(n);
   const total = products.reduce((sum, p) => sum + (Number(p.price) || 0), 0);
-  return locale === "en" ? `Total: ${fmt(total)} (budget: ${fmt(budget)})` : `Total : ${fmt(total)} (budget : ${fmt(budget)})`;
+  const [t, b] = byLang(lang, { fr: ["Total :", "budget :"], en: ["Total:", "budget:"], es: ["Total:", "presupuesto:"], pa: ["ਕੁੱਲ:", "ਬਜਟ:"] });
+  return `${t} ${fmt(total)} (${b} ${fmt(budget)})`;
 }
 
 /**
@@ -709,15 +727,16 @@ async function onlyLive(cards: Card[]): Promise<Card[]> {
  * only on the live Shopify product. One GraphQL round-trip for the 3-4 final cards.
  * Non-fatal: any failure falls back to the catalog name (never breaks a reply).
  */
-type LiveProduct = { title: string; live: boolean; price: number | null };
+type LiveProduct = { title: string; titleTr: string; live: boolean; price: number | null };
 
-async function liveByHandle(handles: string[]): Promise<Map<string, LiveProduct>> {
+async function liveByHandle(handles: string[], lang: Lang = "fr"): Promise<Map<string, LiveProduct>> {
   const map = new Map<string, LiveProduct>();
   if (handles.length === 0) return map;
   const search = handles.map((h) => `handle:${h}`).join(" OR ");
   // `onlineStoreUrl` is null for anything not published to the Online Store, and `status`
   // catches drafts — together they are the exact "does this PDP render?" signal.
-  const query = `query { products(first: ${handles.length}, query: ${JSON.stringify(search)}) { nodes { handle title status onlineStoreUrl priceRangeV2 { minVariantPrice { amount } } } } }`;
+  const tr = lang === "es" || lang === "pa" ? ` tr: translations(locale: "${lang}") { key value }` : "";
+  const query = `query { products(first: ${handles.length}, query: ${JSON.stringify(search)}) { nodes { handle title status onlineStoreUrl priceRangeV2 { minVariantPrice { amount } }${tr} } } }`;
   try {
     const res = await shopifyFetch("/graphql.json", { method: "POST", body: JSON.stringify({ query }) });
     if (!res.ok) return map;
@@ -729,6 +748,7 @@ async function liveByHandle(handles: string[]): Promise<Map<string, LiveProduct>
       const amount = Number(n.priceRangeV2?.minVariantPrice?.amount);
       map.set(String(n.handle), {
         title: n.title ? String(n.title) : "",
+        titleTr: String((n.tr as Array<{ key: string; value: string }> | undefined)?.find((t) => t.key === "title")?.value ?? ""),
         live: String(n.status).toUpperCase() === "ACTIVE" && !!n.onlineStoreUrl,
         price: Number.isFinite(amount) && amount > 0 ? amount : null,
       });
@@ -743,17 +763,20 @@ async function liveByHandle(handles: string[]): Promise<Map<string, LiveProduct>
  * lead-in ("Here are a few options…") is a lie the shopper can see — swap it for an honest
  * no-match line. Measured before this existed: 12 of 18 realistic queries returned
  * "Voici quelques options qui pourraient convenir." with zero products underneath. */
-export function emptyAwareReply(reply: string, productCount: number, locale: Locale): string {
+export function emptyAwareReply(reply: string, productCount: number, locale: Locale, lang: Lang = locale): string {
   if (productCount > 0) return reply;
-  return locale === "en"
-    ? "I couldn't find products in that range. Tell me a bit more — room, style, or budget — and I'll look again."
-    : "Je n'ai pas trouvé de produits dans cette gamme. Dites-m'en un peu plus (pièce, style ou budget) et je cherche à nouveau.";
+  return byLang(lang, {
+    fr: "Je n'ai pas trouvé de produits dans cette gamme. Dites-m'en un peu plus (pièce, style ou budget) et je cherche à nouveau.",
+    en: "I couldn't find products in that range. Tell me a bit more — room, style, or budget — and I'll look again.",
+    es: "No encontré productos en ese rango. Cuénteme un poco más (habitación, estilo o presupuesto) y vuelvo a buscar.",
+    pa: "ਮੈਨੂੰ ਇਸ ਰੇਂਜ ਵਿੱਚ ਕੋਈ ਉਤਪਾਦ ਨਹੀਂ ਮਿਲਿਆ। ਮੈਨੂੰ ਥੋੜ੍ਹਾ ਹੋਰ ਦੱਸੋ (ਕਮਰਾ, ਸ਼ੈਲੀ ਜਾਂ ਬਜਟ) ਅਤੇ ਮੈਂ ਦੁਬਾਰਾ ਲੱਭਾਂਗਾ।",
+  });
 }
 
 async function resolveCards(
   picks: Array<{ sku: string; reason: string }>,
   pool: Map<string, Card>,
-  locale: Locale,
+  lang: Lang,
   budget: number | null = null,
 ): Promise<AssistantProduct[]> {
   const cards: Array<{ c: Card; reason: string }> = [];
@@ -777,7 +800,7 @@ async function resolveCards(
   //  2. the live check — Turso has no publish-status column, so draft / not-published
   //     imports reach this point and their PDP 404s. Measured 3 of 5 live recommendations
   //     were draft before this filter existed. Drop them rather than ship a dead link.
-  const live = await liveByHandle(cards.map((x) => x.c.handle));
+  const live = await liveByHandle(cards.map((x) => x.c.handle), lang);
   const servable = cards.filter(({ c }) => live.get(c.handle)?.live !== false);
   const dropped = cards.length - servable.length;
   if (dropped > 0) console.warn(`[assistant] dropped ${dropped} card(s): draft or not published to the Online Store`);
@@ -786,10 +809,11 @@ async function resolveCards(
   return servable
     .map(({ c, reason }) => ({
       sku: c.sku,
-      name: (locale === "fr" ? live.get(c.handle)?.title : "") || c.name,
+      // fr: the curated Shopify title; es/pa: Shopify's translated title (falls back to the English catalogue name).
+      name: (lang === "en" ? "" : lang === "fr" ? live.get(c.handle)?.title : live.get(c.handle)?.titleTr) || c.name,
       price: live.get(c.handle)?.price ?? c.price,
       image: c.image,
-      url: `${STORE_URL[locale]}/products/${c.handle}`,
+      url: `${STORE_URL[lang]}/products/${c.handle}`,
       reason,
     }))
     .filter((p) => p.price > 0);

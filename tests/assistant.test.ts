@@ -158,14 +158,32 @@ describe("runAssistant", () => {
     expect(result.map((r) => r.sku)).toEqual(["G-1", "B-1"]);
   });
 
-  // CHANGED in v0.5.59.3: this asserted `furnishdirect.ca`, which is NXDOMAIN — the test was
-  // locking in a dead link for every EN shopper. EN is the /en locale of the same storefront.
-  it("uses the /en locale path for locale=en", async () => {
+  // v0.5.59.3 pinned EN links to ameublodirect.ca/en because furnishdirect.ca was NXDOMAIN. Since 2026-10-25 the
+  // English store IS furnishdirect.ca (ameublodirect.ca/en 301s there), with Spanish and Punjabi at /es and /pa.
+  it("links locale=en cards to furnishdirect.ca", async () => {
     create
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
       .mockResolvedValueOnce(final({ reply: "Here you go.", products: [{ sku: "A-1", reason: "Comfy" }] }));
     const res = await runAssistant({ message: "I need a sofa", locale: "en" });
-    expect(res.products[0].url).toBe("https://ameublodirect.ca/en/products/sofa-sectionnel-gris");
+    expect(res.products[0].url).toBe("https://furnishdirect.ca/products/sofa-sectionnel-gris");
+  });
+
+  it.each([
+    ["es", "https://furnishdirect.ca/es/products/sofa-sectionnel-gris", "Sofá seccional gris", "Spanish"],
+    ["pa", "https://furnishdirect.ca/pa/products/sofa-sectionnel-gris", "ਸਲੇਟੀ ਸੈਕਸ਼ਨਲ ਸੋਫਾ", "Punjabi"],
+  ] as const)("lang=%s: own store path, Shopify-translated title, replies in %s", async (lang, url, title, langName) => {
+    shopifyFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { products: { nodes: [{ handle: "sofa-sectionnel-gris", title: "Canapé sectionnel gris", status: "ACTIVE", onlineStoreUrl: "https://x", tr: [{ key: "title", value: title }] }] } } }),
+    });
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
+    const res = await runAssistant({ message: "sofa", lang });
+    expect(res.products[0].url).toBe(url);
+    expect(res.products[0].name).toBe(title);
+    expect(String(create.mock.calls[0][0].systemInstruction)).toContain(langName);
+    expect(String(shopifyFetch.mock.calls.at(-1)?.[1]?.body)).toContain(`translations(locale: \\"${lang}\\")`);
   });
 
   it("swaps the raw EN catalog name for the curated Shopify FR title on locale=fr", async () => {
@@ -436,14 +454,14 @@ describe("extractBudget", () => {
   });
 });
 
-describe("EN locale links (regression: furnishdirect.ca is NXDOMAIN)", () => {
-  it("links EN cards to the /en locale path, never furnishdirect.ca", async () => {
+describe("EN locale links", () => {
+  it("links EN cards to furnishdirect.ca, never the retired ameublodirect.ca/en path", async () => {
     create
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
       .mockResolvedValueOnce(final({ reply: "Here you go.", products: [{ sku: "A-1", reason: "Comfy" }] }));
     const res = await runAssistant({ message: "I need a sofa", locale: "en" });
-    expect(res.products[0].url).toBe("https://ameublodirect.ca/en/products/sofa-sectionnel-gris");
-    expect(res.products[0].url).not.toContain("furnishdirect");
+    expect(res.products[0].url).toBe("https://furnishdirect.ca/products/sofa-sectionnel-gris");
+    expect(res.products[0].url).not.toContain("ameublodirect.ca/en");
   });
 });
 
