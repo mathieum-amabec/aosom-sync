@@ -116,7 +116,7 @@ fbq('track', 'PageView');
     // twice. The form (submit) path runs first and carries the SKU, so it wins.
     var lastAtcTs = 0;
     var nativeFetch = window.fetch;
-    function fireAddToCart(variantId) {
+    function fireAddToCart(variantId, navigating) {
       var now = Date.now();
       if (now - lastAtcTs < 1000) return;
       lastAtcTs = now;
@@ -132,7 +132,8 @@ fbq('track', 'PageView');
       // Variant not on this page (collection quick-add, upsell rail, cart drawer):
       // read the SKU back from /cart.js once the add has landed. Items are listed
       // most recent first, so with no variant id the first item is the one added.
-      if (!nativeFetch) { track('AddToCart', payload); return; }
+      // A plain form post leaves the page: no time to wait for /cart.js.
+      if (!nativeFetch || navigating) { track('AddToCart', payload); return; }
       setTimeout(function () {
         nativeFetch.call(window, '/cart.js', { credentials: 'same-origin' })
           .then(function (r) { return r.json(); })
@@ -158,7 +159,11 @@ fbq('track', 'PageView');
         var form = ev.target;
         if (form && form.action && /\\/cart\\/add/.test(form.action)) {
           var idField = form.querySelector('[name="id"]');
-          fireAddToCart(idField && idField.value);
+          var vid = idField && idField.value;
+          // Capture phase runs before the theme's handler: wait one tick to see whether
+          // it took over with AJAX (defaultPrevented; its fetch has then fired already)
+          // or lets the browser post the form and navigate away.
+          setTimeout(function () { fireAddToCart(vid, !ev.defaultPrevented); }, 0);
         }
       } catch (e) {}
     }, true);
