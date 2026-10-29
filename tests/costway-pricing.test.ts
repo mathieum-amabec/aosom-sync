@@ -4,14 +4,18 @@ import { charm99, costOf, costwaySellPrice, marginOf, sellableQty, dropshipDisco
 afterEach(() => { delete process.env.COSTWAY_DROPSHIP_DISCOUNT; delete process.env.COSTWAY_TARGET_MARGIN; });
 
 describe("costwaySellPrice", () => {
-  it("aims at 23 % margin on our price, rounded up to x.99", () => {
-    expect(targetMargin()).toBe(0.23);
-    expect(costwaySellPrice({ price: 239.99, priceDrop: null, promoTag: "" })).toBe(261.99);
-    expect(costwaySellPrice({ price: 69, priceDrop: null, promoTag: "Clearance" })).toBe(75.99);
-    expect(marginOf(261.99, 239.99).pct).toBeGreaterThanOrEqual(23);
+  it("sells at Costway's price, rounded up to x.99 (2026-10-29)", () => {
+    expect(targetMargin()).toBe(0);
+    expect(costwaySellPrice({ price: 239.99, priceDrop: null, promoTag: "" })).toBe(239.99);
+    expect(costwaySellPrice({ price: 69, priceDrop: null, promoTag: "Clearance" })).toBe(69.99);
+    expect(marginOf(239.99, 239.99).pct).toBe(16);
   });
   it("uses the same rule on a Drop Price item (uniform prices)", () => {
-    expect(costwaySellPrice({ price: 479.99, priceDrop: null, promoTag: "Drop Price" })).toBe(523.99);
+    expect(costwaySellPrice({ price: 479.99, priceDrop: null, promoTag: "Drop Price" })).toBe(479.99);
+  });
+  it("COSTWAY_TARGET_MARGIN puts a markup back", () => {
+    process.env.COSTWAY_TARGET_MARGIN = "0.23";
+    expect(costwaySellPrice({ price: 239.99, priceDrop: null, promoTag: "" })).toBe(261.99);
   });
   it("never goes below Costway's price nor its Price Drop floor", () => {
     expect(costwaySellPrice({ price: 100, priceDrop: 130, promoTag: "Drop Price" })).toBe(130.99);

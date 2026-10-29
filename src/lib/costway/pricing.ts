@@ -7,9 +7,10 @@
  *    feed lags behind). Its "crossed-out" compare-at price is Costway's own marketing price.
  *  - our cost is that price minus the 16% dropship discount.
  *
- * Rules (Mat, 2026-10-17 — replaces "sell at the feed price"):
- *  - target `COSTWAY_TARGET_MARGIN` (default 23 %) gross margin on OUR price: price = cost / (1 - margin), about
- *    +9 % over Costway's price. One rule for every item (a "Drop Price" item is no longer treated apart);
+ * Rules (Mat, 2026-10-29 — back to "sell at Costway's price", like the Aosom rule of 2026-10-28; the 23 % margin of
+ * 2026-10-17 put us ~9 % above Costway):
+ *  - our price = Costway's own price (16 % gross margin). One rule for every item (a "Drop Price" item is not treated
+ *    apart). `COSTWAY_TARGET_MARGIN` (default 0 = none) can put a markup back: price = cost / (1 - margin);
  *  - uniform price endings like the rest of the catalogue: rounded UP to the next x.99;
  *  - NEVER below Costway's own price nor its `Price Drop` (Costway's advertised-price floor);
  *  - NEVER reuse Costway's crossed-out price as our compare-at (a 79%-off "original price" is
@@ -22,10 +23,10 @@ export function dropshipDiscount(): number {
   return Number.isFinite(v) && v > 0 && v < 0.6 ? v : 0.16;
 }
 
-/** Gross margin we aim for on our price. Override: COSTWAY_TARGET_MARGIN (0 < m < 0.6). */
+/** Gross margin we aim for on our price; 0 = sell at Costway's price. Override: COSTWAY_TARGET_MARGIN (0 < m < 0.6). */
 export function targetMargin(): number {
   const v = Number(process.env.COSTWAY_TARGET_MARGIN);
-  return Number.isFinite(v) && v > 0 && v < 0.6 ? v : 0.23;
+  return Number.isFinite(v) && v > 0 && v < 0.6 ? v : 0;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
