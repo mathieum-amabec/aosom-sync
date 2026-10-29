@@ -203,14 +203,21 @@ export interface CompareAtResult {
 
 const emptyPlan = (): CompareAtPlan => ({ changes: [], keptValid: 0, noHistory: 0, skippedDrift: 0, alreadyRight: 0 });
 
-export async function runCompareAtSync(opts: { deps: CompareAtDeps; mode?: CompareAtMode; persistPlan?: boolean }): Promise<CompareAtResult> {
+export async function runCompareAtSync(opts: {
+  deps: CompareAtDeps;
+  mode?: CompareAtMode;
+  persistPlan?: boolean;
+  /** Truncation guard; a caller passing a known, complete subset (the Costway job) lowers it. */
+  minVariantsSeen?: number;
+}): Promise<CompareAtResult> {
   const d = opts.deps;
   const mode = opts.mode ?? parseCompareAtMode(await d.getSetting(COMPARE_AT_MODE_KEY));
   const base: CompareAtResult = { mode, variantsSeen: 0, plan: emptyPlan(), applied: 0, failed: 0, deferred: 0 };
   if (mode === "off") return { ...base, skipped: "off" };
 
   const live = await d.loadLiveVariants();
-  if (live.length < MIN_VARIANTS_SEEN) return { ...base, variantsSeen: live.length, skipped: `listing-incomplete:${live.length}` };
+  const minSeen = opts.minVariantsSeen ?? MIN_VARIANTS_SEEN;
+  if (live.length < minSeen) return { ...base, variantsSeen: live.length, skipped: `listing-incomplete:${live.length}` };
   const sources = await d.loadSources();
   const now = d.now();
   const minDays = parseMinDays(await d.getSetting(COMPARE_AT_MIN_DAYS_KEY));
