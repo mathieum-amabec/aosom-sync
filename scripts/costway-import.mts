@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * scripts/costway-import.mts — Costway import: big sellers in any category (--mode demand, the default) or the
- * original appliance pilot (--mode appliances). Prices follow pricing.ts (23 % target margin, x.99 endings).
+ * original appliance pilot (--mode appliances). Prices follow pricing.ts (Costway's price, x.99 endings).
  *
  *   prepare   pick the best candidates by margin, write the copy, run every gate, save a plan file.
  *             No Shopify write (it does spend LLM tokens and writes the usual image-verdict cache).

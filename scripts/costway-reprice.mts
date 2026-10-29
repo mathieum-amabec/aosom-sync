@@ -1,12 +1,13 @@
 #!/usr/bin/env tsx
 /**
  * scripts/costway-reprice.mts — put every Costway product already on Shopify at the current price rule (pricing.ts:
- * 23 % target margin, x.99 endings, never below Costway's price or Price Drop), so the catalogue's prices stay uniform.
+ * Costway's own price, x.99 endings, never below Costway's price or Price Drop), so the catalogue's prices stay uniform.
  *
  *   node-x64 --env-file=<main clone>/.env.local node_modules/tsx/dist/cli.mjs scripts/costway-reprice.mts           # dry run
  *   node-x64 --env-file=… node_modules/tsx/dist/cli.mjs scripts/costway-reprice.mts --apply                          # writes
  *
- * Only the selling price changes: the crossed-out price is never touched (updateShopifyVariantPrice without oldPrice).
+ * A cut of 10 % or more shows the previous price crossed out ("Ancien prix", updateShopifyVariantPrice with oldPrice);
+ * a smaller change or an increase leaves the crossed-out price alone.
  * Variants are matched by our internal SKU. ≤ 2 Shopify calls per second.
  */
 const APPLY = process.argv.includes("--apply");
@@ -45,7 +46,7 @@ async function main() {
       console.log(`${r.internal_sku}  ${now.toFixed(2)} → ${next.toFixed(2)} $  (Costway ${Number(r.price).toFixed(2)}, marge ${m.pct} %)`);
       changed++;
       if (APPLY) {
-        await sc.updateShopifyVariantPrice(String(v.id), next);
+        await sc.updateShopifyVariantPrice(String(v.id), next, now);
         await db.execute({ sql: `UPDATE costway_products SET sell_price = ? WHERE sku = ?`, args: [next, r.sku] });
         await sleep(550);
       }
