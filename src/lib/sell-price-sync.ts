@@ -8,7 +8,7 @@
  *
  * Stability rules, so prices do not flutter:
  *   - an unset price, or one under the Aosom floor, is always set;
- *   - a LOWER price is followed at once (we stay under the competitor, and an Aosom drop is passed on);
+ *   - a LOWER price is followed at once (an Aosom drop is passed on);
  *   - a HIGHER price is only taken for a meaningful gain (>= max(2 $, 2 %)).
  * A per-run cap (`pricing_max_changes_per_run`, default 500) rolls a large change out over several days; floor fixes
  * come first, then decreases, then the biggest increases.
@@ -111,8 +111,7 @@ export function planSellPrices(
     if (res.competitorIgnored) plan.competitorIgnored++;
     // The lowest acceptable price: the Aosom floor, and the profit floor when our cost is known.
     const min = Math.max(floor, profitFloor(r.cost) || 0);
-    // Without any competitor data, keep what we have: only unset, under-floor or unprofitable products get a price.
-    if (competitor === null && r.sellPrice !== null && r.sellPrice >= min - 0.005) { plan.unchanged++; continue; }
+    // The rule no longer reads the competitor (2026-10-28), so a missing competitor snapshot changes nothing.
     if (!shouldUpdateSellPrice(r.sellPrice, res.price, min)) { plan.unchanged++; continue; }
     all.push({ sku: r.sku, from: r.sellPrice, to: res.price, aosomPrice: r.aosomPrice, reason: res.reason });
   }

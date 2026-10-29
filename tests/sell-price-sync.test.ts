@@ -59,26 +59,15 @@ describe("shouldUpdateSellPrice (stability)", () => {
 const row = (sku: string, aosomPrice: number, sellPrice: number | null = null, productType = "Home Furnishings"): SellPriceRow => ({ sku, aosomPrice, productType, sellPrice });
 
 describe("planSellPrices", () => {
-  it("prices a product a dollar under the competitor", () => {
-    const comp = new Map([["A", 258.99]]);
-    const p = planSellPrices([row("A", 239.99)], comp);
-    expect(p.changes).toEqual([expect.objectContaining({ sku: "A", from: null, to: 257.99, reason: "competitor" })]);
+  it("prices a product at the Aosom price, whatever the competitor (2026-10-28)", () => {
+    const p = planSellPrices([row("A", 239.99)], new Map([["A", 258.99]]));
+    expect(p.changes).toEqual([expect.objectContaining({ sku: "A", from: null, to: 239.99, reason: "floor" })]);
   });
 
-  it("falls back to the tiers when the competitor does not carry the SKU", () => {
-    const p = planSellPrices([row("B", 60.99)], new Map([["OTHER", 10]]));
-    expect(p.changes[0]).toMatchObject({ sku: "B", to: 64.99, reason: "tier" });
-  });
-
-  it("leaves existing prices alone when no competitor data is available at all, but still prices unset ones", () => {
-    const p = planSellPrices([row("A", 239.99, 257.99), row("B", 60.99, null)], null);
-    expect(p.changes.map((c) => c.sku)).toEqual(["B"]);
+  it("brings a raised price back down to the Aosom price, even with no competitor data", () => {
+    const p = planSellPrices([row("A", 239.99, 257.99), row("B", 60.99, null), row("C", 50, 50)], null);
+    expect(p.changes.map((c) => [c.sku, c.to])).toEqual([["A", 239.99], ["B", 60.99]]);
     expect(p.unchanged).toBe(1);
-  });
-
-  it("matches competitor SKUs case-insensitively", () => {
-    const p = planSellPrices([row("ab-1", 100.99)], new Map([["AB-1", 112.99]]));
-    expect(p.changes[0].reason).toBe("competitor");
   });
 
   it("counts an invalid Aosom price instead of pricing it", () => {
@@ -87,17 +76,14 @@ describe("planSellPrices", () => {
     expect(p.changes).toHaveLength(0);
   });
 
-  it("caps the changes per run: under-floor fixes first, then decreases, then products with no price, then the largest raises", () => {
+  it("caps the changes per run: under-floor fixes first, then decreases, then products with no price", () => {
     const rows = [
-      row("RAISE_SMALL", 100, 100.99), // would go to ~106.99 (raise of 6)
-      row("RAISE_BIG", 300, 300.99), // tier 6 % -> ~317.99 (raise of 17)
-      row("DROP", 100, 120.99), // competitor lower -> a decrease
       row("UNSET", 100, null),
+      row("DROP", 100, 120.99), // raised on 2026-10-15 -> back to Aosom
       row("UNDER", 100, 90), // stored price under the Aosom floor
     ];
-    const comp = new Map([["DROP", 111.99]]);
-    const p = planSellPrices(rows, comp, 4);
-    expect(p.changes.map((c) => c.sku)).toEqual(["UNDER", "DROP", "UNSET", "RAISE_BIG"]);
+    const p = planSellPrices(rows, null, 2);
+    expect(p.changes.map((c) => c.sku)).toEqual(["UNDER", "DROP"]);
     expect(p.deferred).toBe(1);
   });
 
@@ -202,12 +188,18 @@ describe("computeDiffs with a stored sell price", () => {
 });
 
 describe("planSellPrices keeps an existing discount (maxPrice)", () => {
-  it("caps the sell price so the product stays at least 10 % under its reference price", () => {
-    // Aosom 94.99 with a real reference of 109.99 -> max 98.99; the rule alone would go to 100.99 (tier 7 %)
+  it("keeps the product at least 10 % under its reference price (the Aosom price already is)", () => {
     const rows: SellPriceRow[] = [{ sku: "D", aosomPrice: 94.99, productType: "Home Furnishings", sellPrice: null, maxPrice: 109.99 * 0.9 }];
     const p = planSellPrices(rows, new Map());
-    expect(p.changes[0].to).toBe(98.99);
+    expect(p.changes[0].to).toBe(94.99);
     expect(p.changes[0].to).toBeLessThanOrEqual(109.99 * 0.9);
+  });
+
+  it("caps a profit-floor price under the reference when the floor allows it", () => {
+    // Aosom 94.99 under cost 100 -> profit floor 105.99; cap 108.99 keeps it, cap 102 cannot (profit wins)
+    const at = (maxPrice: number) => planSellPrices([{ sku: "D", aosomPrice: 94.99, productType: "x", sellPrice: null, maxPrice, cost: 100 }], null).changes[0].to;
+    expect(at(108.99)).toBe(105.99);
+    expect(at(102)).toBe(105.99);
   });
 
   it("never goes below the Aosom floor, whatever the cap", () => {
@@ -217,15 +209,15 @@ describe("planSellPrices keeps an existing discount (maxPrice)", () => {
     expect(p.changes[0].reason).toBe("floor");
   });
 
-  it("lowers a price that was already raised above the cap", () => {
+  it("lowers a price that was raised above the cap back to the Aosom price", () => {
     const rows: SellPriceRow[] = [{ sku: "D", aosomPrice: 94.99, productType: "Home Furnishings", sellPrice: 105.99, maxPrice: 98.99 }];
     const p = planSellPrices(rows, new Map());
-    expect(p.changes[0]).toMatchObject({ from: 105.99, to: 98.99 });
+    expect(p.changes[0]).toMatchObject({ from: 105.99, to: 94.99 });
   });
 
-  it("does not touch a product with no cap", () => {
+  it("prices a product with no cap at the Aosom price", () => {
     const rows: SellPriceRow[] = [{ sku: "D", aosomPrice: 94.99, productType: "Home Furnishings", sellPrice: null, maxPrice: null }];
-    expect(planSellPrices(rows, new Map()).changes[0].to).toBe(100.99); // 94.99 x 1.07 = 101.64, rounded down to .99
+    expect(planSellPrices(rows, new Map()).changes[0].to).toBe(94.99);
   });
 });
 
