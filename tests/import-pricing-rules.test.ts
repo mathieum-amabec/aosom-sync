@@ -29,11 +29,11 @@ const ctx = (extra: Partial<Parameters<typeof buildCandidates>[1]> = {}) => ({
 
 describe("import pricing rules", () => {
   it("keeps a product whose price rule leaves a healthy margin and records it", () => {
-    // Aosom 100, cost 86: 20 % margin price is 106.99 -> margin ~19.6 %
+    // Aosom 100, cost 86: sold at the Aosom price (2026-10-28) -> margin 14 %, over the 12 % minimum
     const out = buildCandidates([group("ok", 100)], ctx({ costs: costs({ "ok-A": 86 }) }));
     expect(out.candidates.map((c) => c.groupKey)).toEqual(["ok"]);
-    expect(out.candidates[0].margin).toBeGreaterThan(0.19);
-    expect(out.candidates[0].marginDollars).toBeGreaterThan(20);
+    expect(out.candidates[0].margin).toBeCloseTo(0.14, 2);
+    expect(out.candidates[0].marginDollars).toBeCloseTo(14, 1);
     expect(out.rejected).toEqual({ noCost: 0, lowMargin: 0, lowDemand: 0 });
   });
 
@@ -50,8 +50,8 @@ describe("import pricing rules", () => {
     expect(out.rejected.lowMargin).toBe(1);
   });
 
-  it("a competitor a dollar-under price can make a product too thin to import", () => {
-    // cost 90, competitor 100 -> price 98.99, margin 9.1 % < 12 %
+  it("a product too thin at the Aosom price is not imported, whatever the competitor", () => {
+    // cost 90, Aosom 100 -> margin 10 % < 12 %
     const out = buildCandidates([group("squeezed", 100)], ctx({ costs: costs({ "squeezed-A": 90 }), competitor: new Map([["SQUEEZED-A", 100]]) }));
     expect(out.candidates).toHaveLength(0);
     expect(out.rejected.lowMargin).toBe(1);

@@ -4,6 +4,7 @@ import {
   planCompareAt,
   runCompareAtSync,
   parseCompareAtMode,
+  parseMinDays,
   MAX_WRITES_PER_RUN,
   COMPARE_AT_PLAN_KEY,
   type CompareAtDeps,
@@ -31,6 +32,13 @@ describe("referencePrice", () => {
     // 60 for a long time, a 5-day spike to 80, back to 60: the spike is not a reference
     const steps = [step(60, 80, 8), step(80, 60, 3)];
     expect(referencePrice(60, steps, ago(50), NOW)).toBeNull();
+  });
+
+  it("accepts a price held a few days when the minimum is lowered (compare_at_min_days, 2026-10-28)", () => {
+    // raised 60 -> 72.99 two days ago, back to 60 now
+    const steps = [step(60, 72.99, 2), step(72.99, 60, 0)];
+    expect(referencePrice(60, steps, ago(50), NOW)).toBeNull();
+    expect(referencePrice(60, steps, ago(50), NOW, { minDays: 1 })).toBe(72.99);
   });
 
   it("ignores a price older than the 90-day window", () => {
@@ -177,5 +185,17 @@ describe("parseCompareAtMode", () => {
     expect(parseCompareAtMode("yes")).toBe("off");
     expect(parseCompareAtMode("dry")).toBe("dry");
     expect(parseCompareAtMode("live")).toBe("live");
+  });
+});
+
+describe("parseMinDays", () => {
+  it("defaults to 14 days and accepts 1..90", () => {
+    expect(parseMinDays(null)).toBe(14);
+    expect(parseMinDays("")).toBe(14);
+    expect(parseMinDays("abc")).toBe(14);
+    expect(parseMinDays("0")).toBe(14);
+    expect(parseMinDays("120")).toBe(14);
+    expect(parseMinDays("1")).toBe(1);
+    expect(parseMinDays("3")).toBe(3);
   });
 });

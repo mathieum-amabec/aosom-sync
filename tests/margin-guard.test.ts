@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeSellPrice, profitFloor, netProfit, roundUpTo99, MAX_DISCOUNT } from "@/lib/sell-price-rule";
+import { computeSellPrice, profitFloor, netProfit, roundUpTo99, FLOOR_DISCOUNT } from "@/lib/sell-price-rule";
 import { planSellPrices } from "@/lib/sell-price-sync";
 import { evaluateDiscounts, findLosses, maxPerItem, toDiscountInfo, type DiscountInfo } from "@/lib/margin-guard";
 
@@ -9,10 +9,10 @@ const disc = (o: Partial<DiscountInfo>): DiscountInfo => ({
 });
 
 describe("profitFloor", () => {
-  it("stays profitable after the biggest discount and the card fees", () => {
+  it("stays profitable at list price after the card fees (no discount assumed since 2026-10-28)", () => {
     for (const cost of [5, 19.9, 74.17, 167.95, 750.34, 2400]) {
       const p = profitFloor(cost);
-      expect(netProfit(p, cost, MAX_DISCOUNT)).toBeGreaterThan(0);
+      expect(netProfit(p, cost, FLOOR_DISCOUNT)).toBeGreaterThan(0);
       expect(Math.round((p % 1) * 100)).toBe(99);
     }
   });
@@ -62,9 +62,9 @@ describe("planSellPrices applies the profit floor", () => {
     expect(plan.changes[0].to).toBe(profitFloor(167.95));
     expect(plan.changes[0].reason).toBe("profit");
   });
-  it("keeps a profitable stored price when there is no competitor data", () => {
+  it("brings a profitable but raised stored price back to the Aosom price (2026-10-28)", () => {
     const plan = planSellPrices([{ sku: "B", aosomPrice: 100, productType: "Home Furnishings", sellPrice: 124.99, cost: 70 }], null);
-    expect(plan.changes).toHaveLength(0);
+    expect(plan.changes).toEqual([expect.objectContaining({ sku: "B", from: 124.99, to: 100, reason: "floor" })]);
   });
 });
 
