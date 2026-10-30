@@ -2,6 +2,13 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.51] - 2026-10-30
+
+### Added
+
+- **Google feeds: `product_highlight` + `product_detail` for AI Mode / Gemini.** The Google FR and EN feeds (and Bing) now carry up to 6 highlights per product, taken verbatim from the description's « Caractéristiques » bullets (supplier names and shipping promos scrubbed, « Assemblage requis » stubs dropped, 150-char cap, omitted below Google's minimum of 2), plus the assembled width / depth / height in cm as `product_detail` rows, read from the fit checker's `custom.lc_dims` metafield (omitted when missing — never guessed). Live dry run 2026-10-30: 5,609 offers, 5,609 with highlights, 4,734 with dimensions, 0 supplier names. Meta, Pinterest and Reddit feeds are unchanged (`rich` option, off by default).
+- **Bing / Microsoft Shopping feed** now also emits `condition`, `google_product_category`, `item_group_id`, `color`, `size`, `material` and `mpn`, ready for Microsoft Merchant Center. Price stays the single current price (no sale split).
+
 ## [0.5.107.49] - 2026-10-23
 
 ### Added

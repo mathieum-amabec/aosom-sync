@@ -3,7 +3,8 @@
 // The pure mapper `shopifyToFeedItems` is unit-tested; `getFeedItems` does the fetch.
 import { SHOPIFY } from "@/lib/config";
 import { STOREFRONT_BASE_URL, EN_STOREFRONT_BASE_URL } from "@/lib/insights";
-import { type FeedItem, mapToGoogleCategory, stripHtml, truncate } from "./feed";
+import { type FeedDetail, type FeedItem, mapToGoogleCategory, stripHtml, truncate } from "./feed";
+import { FIT_DIMS_KEY, FIT_DIMS_NAMESPACE, type FitDims } from "../fit-dims";
 import { parseSku } from "../variant-merger";
 import { isSpecImageUrl } from "../selectors/shopify-product";
 import { imageUrlStem } from "../image-compliance-audit";
@@ -220,6 +221,50 @@ export function stripImperialDimensions(title: string): string {
 
 // Either house brand, whichever locale it came from. Used to recognise our OWN name in the
 // Shopify `vendor` field (see resolveBrand).
+// <g:product_highlight>: Google wants 2–100 short, scannable fragments and recommends 4–6;
+// AI Mode and Gemini quote them when answering "does it…?" questions. Our descriptions
+// already carry exactly that as the "Caractéristiques" bullet list (250/250 sampled
+// 2026-10-30 had one, median 7 bullets), so we reuse the bullets verbatim: no generated text,
+// nothing the product page does not already say.
+const HIGHLIGHT_MAX = 6;
+const HIGHLIGHT_MIN_CHARS = 12; // drops empty and one-word stubs
+// "Assemblage requis" closes most bullet lists: true, but it answers no shopper question.
+const ASSEMBLY_STUB = /^(?:assemblage|montage)\s+(?:requis|nécessaire)$|^assembly\s+required$/i;
+const HIGHLIGHT_MAX_CHARS = 150; // Google's per-highlight limit
+
+/** Up to 6 highlights from the description's <li> bullets, or [] when fewer than 2 qualify
+ * (Google rejects a single highlight). Supplier names and shipping promos are scrubbed the
+ * same way as the description. */
+export function highlightsFromBody(html: string | null | undefined, houseBrand: string = HOUSE_BRAND): string[] {
+  const bullets = Array.from(String(html ?? "").matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi), (m) =>
+    stripPromoText(scrubSupplier(stripHtml(m[1]), houseBrand)).replace(/[\s.;:,]+$/u, ""),
+  ).filter((b) => b.length >= HIGHLIGHT_MIN_CHARS && b.length <= HIGHLIGHT_MAX_CHARS && !ASSEMBLY_STUB.test(b));
+  const unique = Array.from(new Set(bullets)).slice(0, HIGHLIGHT_MAX);
+  return unique.length >= 2 ? unique : [];
+}
+
+export const DIMS_METAFIELD_KEY = `${FIT_DIMS_NAMESPACE}.${FIT_DIMS_KEY}`;
+
+/** <g:product_detail> rows for a variant's assembled size, read from the fit checker's
+ * custom.lc_dims metafield (cm, [width, depth, height], already checked against the product
+ * page by fit-dims-sync). [] when the metafield is missing, malformed or has no entry for
+ * this SKU — a wrong dimension is worse than none. */
+export function dimensionDetails(raw: string | null | undefined, sku: string, english: boolean): FeedDetail[] {
+  if (!raw) return [];
+  let dims: FitDims;
+  try {
+    dims = JSON.parse(raw) as FitDims;
+  } catch {
+    return [];
+  }
+  const p = dims?.s?.[sku]?.p;
+  if (!Array.isArray(p) || p.length !== 3 || !p.every((n) => typeof n === "number" && n > 0)) return [];
+  const fmt = (n: number) => `${english ? String(n) : String(n).replace(".", ",")} cm`;
+  const section = english ? "Dimensions (assembled)" : "Dimensions (assemblé)";
+  const names = english ? ["Width", "Depth", "Height"] : ["Largeur", "Profondeur", "Hauteur"];
+  return p.map((n, i) => ({ section, name: names[i], value: fmt(n) }));
+}
+
 const HOUSE_BRANDS = [HOUSE_BRAND, HOUSE_BRAND_EN];
 
 /** Brand to show: keep a real product vendor (Outsunny, …); replace empty, the supplier
@@ -277,6 +322,10 @@ export function shopifyToFeedItems(
     verifiedStems?: ReadonlySet<string>;
     /** FR option value -> EN option value (Shopify EN translations of product option values, e.g. "Blanc crème" -> "Cream white"). EN feed only: variant titles, colour and size come out in English. */
     optionValueEn?: ReadonlyMap<string, string>;
+    /** Google / Bing only: add product_highlight (description bullets) and product_detail
+     * (assembled size from custom.lc_dims). Off for Meta/Pinterest/Reddit, whose specs
+     * do not define these attributes. */
+    rich?: boolean;
   } = {},
 ): FeedItem[] {
   const english = opts.preferEnglishTitle === true;
@@ -322,6 +371,7 @@ export function shopifyToFeedItems(
     const link = `${storefrontBase}/products/${encodeURIComponent(p.handle)}`;
     const rawBody = english && p.bodyEn && p.bodyEn.trim() !== "" ? p.bodyEn : (p.body_html ?? "");
     const description = truncate(stripPromoText(scrubSupplier(stripHtml(rawBody), houseBrand)), DESCRIPTION_MAX);
+    const highlights = opts.rich ? highlightsFromBody(rawBody, houseBrand) : [];
     const enMap = english ? opts.optionValueEn : undefined;
     const toEn = <T extends string | null | undefined>(s: T): T | string =>
       !enMap || !s ? s : String(s).split(" / ").map((part) => enMap.get(part.trim()) ?? part).join(" / ");
@@ -385,6 +435,9 @@ export function shopifyToFeedItems(
         // <g:material> from a Shopify metafield only — never inferred. Product-level, so
         // every variant of a product shares it. Null today: no material metafield exists.
         material: materialFromMetafields(p.metafields),
+        ...(opts.rich
+          ? { highlights, details: dimensionDetails(p.metafields?.[DIMS_METAFIELD_KEY], id, english) }
+          : {}),
         productType: p.product_type ?? "",
         googleCategoryId: cat.id,
       });
@@ -626,9 +679,48 @@ export async function fetchMaterialMap(): Promise<Map<string, string>> {
   }
 }
 
+/** Fetch product-id → raw custom.lc_dims JSON (the fit checker's per-SKU sizes). Rich feeds
+ * only. Never throws: missing dimensions degrade to omitted product_detail rows. */
+export async function fetchDimsMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const token = process.env.SHOPIFY_ACCESS_TOKEN;
+  if (!token) return map;
+  const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}/graphql.json`;
+  const query = `query Dims($cursor: String) {
+    products(first: 250, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { legacyResourceId metafield(namespace: "${FIT_DIMS_NAMESPACE}", key: "${FIT_DIMS_KEY}") { value } }
+    }
+  }`;
+  try {
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const body = await graphqlWithRetry(url, token, query, { cursor });
+      const conn = (body.data as {
+        products?: {
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+          nodes: Array<{ legacyResourceId: string; metafield: { value: string } | null }>;
+        };
+      })?.products;
+      if (!conn) break;
+      for (const node of conn.nodes) {
+        const value = node.metafield?.value?.trim();
+        if (value) map.set(String(node.legacyResourceId), value);
+      }
+      cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+      pages++;
+    } while (cursor && pages < MAX_PAGES);
+  } catch (err) {
+    console.warn("[FEED] lc_dims lookup failed (non-fatal, product_detail omitted):", err);
+  }
+  return map;
+}
+
 /** Fetch all products from Shopify (paginated) and return feed items.
- * Pass `{ english: true }` to overlay custom.title_en titles for the Pinterest EN feed. */
-export async function getFeedItems(opts: { english?: boolean } = {}): Promise<FeedItem[]> {
+ * Pass `{ english: true }` to overlay custom.title_en titles for the Pinterest EN feed, and
+ * `{ rich: true }` (Google, Bing) for product_highlight + product_detail. */
+export async function getFeedItems(opts: { english?: boolean; rich?: boolean } = {}): Promise<FeedItem[]> {
   const token = process.env.SHOPIFY_ACCESS_TOKEN;
   if (!token) throw new Error("SHOPIFY_ACCESS_TOKEN not configured");
   const base = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}`;
@@ -659,6 +751,14 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
     }
   }
 
+  if (opts.rich) {
+    const dimsMap = await fetchDimsMap();
+    for (const p of products) {
+      const value = dimsMap.get(String(p.id));
+      if (value) p.metafields = { ...(p.metafields ?? {}), [DIMS_METAFIELD_KEY]: value };
+    }
+  }
+
   if (opts.english) {
     const [titleEnMap, bodyEnMap, optionValueEn] = await Promise.all([fetchTitleEnMap(), fetchBodyEnMap().catch(() => new Map<string, string>()), fetchOptionValueEnMap()]);
     for (const p of products) {
@@ -668,11 +768,11 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
       if (bodyEn) p.bodyEn = bodyEn;
     }
     const { nonCompliant, verified } = await fetchImageVerdictStems(products);
-    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems: nonCompliant, verifiedStems: verified, optionValueEn });
+    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems: nonCompliant, verifiedStems: verified, optionValueEn, rich: opts.rich });
   }
 
   const { nonCompliant, verified } = await fetchImageVerdictStems(products);
-  return shopifyToFeedItems(products, { nonCompliantStems: nonCompliant, verifiedStems: verified });
+  return shopifyToFeedItems(products, { nonCompliantStems: nonCompliant, verifiedStems: verified, rich: opts.rich });
 }
 
 /** Bulk-load the vision classifier's verdicts (image_classifications) for every image in
