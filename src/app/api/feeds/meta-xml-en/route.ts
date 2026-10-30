@@ -12,7 +12,7 @@ const CACHE = "public, max-age=0, s-maxage=600, stale-while-revalidate=600"; // 
 
 export async function GET() {
   try {
-    const items = await getFeedItems({ english: true });
+    const items = await getFeedItems({ english: true, lifestyle: true });
     const xml = buildMetaXmlFeed(items, {
       title: "Furnish Direct — Meta Catalog feed (EN)",
       link: EN_STOREFRONT_BASE_URL,

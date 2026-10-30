@@ -130,6 +130,9 @@ describe("locale", () => {
       // Only Google and Bing carry product_highlight / product_detail.
       if (label === "google" || label === "google-en" || label === "bing") expect(arg).toMatchObject({ rich: true });
       else expect(arg ?? {}).not.toMatchObject({ rich: true });
+      // Only the Meta feeds swap in lifestyle photos (every Meta ad = lifestyle, Mat 2026-10-30).
+      if (label === "meta" || label === "meta-xml" || label === "meta-xml-en") expect(arg).toMatchObject({ lifestyle: true });
+      else expect(arg ?? {}).not.toMatchObject({ lifestyle: true });
     }
   });
 });

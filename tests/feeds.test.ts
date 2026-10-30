@@ -562,6 +562,92 @@ describe("shopifyToFeedItems — verifiedStems (fail-closed carousel images, 202
   });
 });
 
+describe("shopifyToFeedItems — imageStyles (Meta ads = lifestyle only, 2026-10-30)", () => {
+  // Mat's rule: every Meta ad shows a lifestyle photo. The black variant owns a studio
+  // packshot; the product has one verified lifestyle photo further down the gallery.
+  const STUDIO = "https://cdn.shopify.com/s/files/1/0/0/files/sSTU0000000000001.jpg";
+  const LIFE = "https://cdn.shopify.com/s/files/1/0/0/files/lLIF0000000000002.jpg";
+  const STUDIO2 = "https://cdn.shopify.com/s/files/1/0/0/files/tSTU0000000000003.jpg";
+  const LIFE_UNVERIFIED = "https://cdn.shopify.com/s/files/1/0/0/files/uLIF0000000000004.jpg";
+  const LIFE_RED = "https://cdn.shopify.com/s/files/1/0/0/files/rLIF0000000000005.jpg";
+  const product: ShopifyFeedProduct = {
+    id: 21, title: "Fauteuil", handle: "fauteuil", status: "active", published_at: PUBLISHED,
+    images: [{ id: 1, src: STUDIO }, { id: 2, src: STUDIO2 }, { id: 3, src: LIFE }, { id: 4, src: LIFE_UNVERIFIED }],
+    variants: [
+      { id: 501, sku: "FAU-BK", price: "199.99", inventory_management: null, title: "Noir", image_id: 2 },
+      { id: 502, sku: "FAU-GY", price: "199.99", inventory_management: null, title: "Gris", image_id: 3 },
+    ],
+  };
+  const verifiedStems = new Set([STUDIO, STUDIO2, LIFE].map(imageUrlStem));
+  const imageStyles = new Map([
+    [imageUrlStem(STUDIO), "studio" as const],
+    [imageUrlStem(STUDIO2), "studio" as const],
+    [imageUrlStem(LIFE), "lifestyle" as const],
+    [imageUrlStem(LIFE_UNVERIFIED), "lifestyle" as const],
+  ]);
+
+  it("swaps a studio variant photo for the product's verified lifestyle photo", () => {
+    const items = shopifyToFeedItems([product], { verifiedStems, imageStyles });
+    const bk = items.find((i) => i.id === "FAU-BK")!;
+    expect(bk.imageLink).toBe(LIFE);
+    expect(bk.imageStyle).toBe("lifestyle");
+  });
+
+  it("keeps a variant's own photo when it already is lifestyle", () => {
+    const gy = shopifyToFeedItems([product], { verifiedStems, imageStyles }).find((i) => i.id === "FAU-GY")!;
+    expect(gy.imageLink).toBe(LIFE);
+    expect(gy.imageStyle).toBe("lifestyle");
+  });
+
+  it("keeps a variant's own lifestyle photo even when another lifestyle photo leads the gallery", () => {
+    const red = {
+      ...product,
+      images: [...product.images!, { id: 5, src: LIFE_RED }],
+      variants: [{ id: 503, sku: "FAU-RD", price: "199.99", inventory_management: null, title: "Rouge", image_id: 5 }],
+    };
+    const styles = new Map([...imageStyles, [imageUrlStem(LIFE_RED), "lifestyle" as const]]);
+    const [item] = shopifyToFeedItems([red], { verifiedStems: new Set([...verifiedStems, imageUrlStem(LIFE_RED)]), imageStyles: styles });
+    expect(item.imageLink).toBe(LIFE_RED);
+    expect(item.imageStyle).toBe("lifestyle");
+  });
+
+  it("falls back to a lifestyle first photo when no lifestyle photo is verified", () => {
+    const p = { ...product, images: [{ id: 4, src: LIFE_UNVERIFIED }, { id: 1, src: STUDIO }], variants: [{ sku: "FAU-1", price: "99.99", inventory_management: null, image_id: 1 }] };
+    const [item] = shopifyToFeedItems([p], { verifiedStems: new Set([imageUrlStem(STUDIO)]), imageStyles });
+    expect(item.imageLink).toBe(LIFE_UNVERIFIED);
+    expect(item.imageStyle).toBe("lifestyle");
+  });
+
+  it("additional images are lifestyle AND verified only", () => {
+    const [bk] = shopifyToFeedItems([product], { verifiedStems, imageStyles });
+    expect(bk.additionalImageLinks).toEqual([]); // STUDIO/STUDIO2 studio, LIFE is the main image, LIFE_UNVERIFIED unverified
+  });
+
+  it("labels a product with no lifestyle photo studio (kept out of ads by the product set)", () => {
+    const studioOnly = { ...product, images: [{ id: 1, src: STUDIO }, { id: 2, src: STUDIO2 }], variants: [product.variants![0]] };
+    const [item] = shopifyToFeedItems([studioOnly], { verifiedStems, imageStyles });
+    expect(item.imageLink).toBe(STUDIO2);
+    expect(item.imageStyle).toBe("studio");
+  });
+
+  it("an unclassified photo counts as studio (fail-closed)", () => {
+    const [item] = shopifyToFeedItems([{ ...product, variants: [product.variants![0]] }], { verifiedStems, imageStyles: new Map() });
+    expect(item.imageStyle).toBe("studio");
+  });
+
+  it("without imageStyles (Google, Pinterest…) nothing changes", () => {
+    const [bk] = shopifyToFeedItems([product], { verifiedStems });
+    expect(bk.imageLink).toBe(STUDIO2);
+    expect(bk.imageStyle).toBeUndefined();
+  });
+
+  it("the Meta XML carries the style as g:custom_label_4", () => {
+    const xml = buildMetaXmlFeed(shopifyToFeedItems([product], { verifiedStems, imageStyles }), { title: "Meta", link: "https://x", description: "d" });
+    expect(xml).toContain("<g:custom_label_4>lifestyle</g:custom_label_4>");
+    expect(buildMetaXmlFeed(shopifyToFeedItems([product]), { title: "Meta", link: "https://x", description: "d" })).not.toContain("custom_label_4");
+  });
+});
+
 describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => {
   const enProducts: ShopifyFeedProduct[] = [
     {

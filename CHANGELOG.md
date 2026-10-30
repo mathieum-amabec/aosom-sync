@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.52] - 2026-10-30
+
+### Changed
+
+- **Meta feeds: lifestyle photos only.** Mat: « Assure-toi que toutes nos pubs Meta soient des photos lifestyle. TOUJOURS. » The Meta feeds (`/api/feeds/meta`, `meta-xml`, `meta-xml-en`) now swap a studio `image_link` (the variant's own packshot or the hero) for the product's verified lifestyle photo, keep only lifestyle photos as `additional_image_link`, and label each item `g:custom_label_4` = `lifestyle` / `studio` so the ad product sets can exclude products with no lifestyle photo at all. Google, Bing, Pinterest and Reddit feeds are unchanged. Audit of the live Meta feed (2026-10-30): 3,306 of 5,609 items showed a studio photo; 2,631 of them have a lifestyle photo in their gallery, 675 have none.
+- The Meta feeds now answer 500 (Meta keeps its current catalog) when fewer than 90 % of product photos are classified, instead of labelling most of the catalog `studio`.
+
+### Added
+
+- **`image_styles` cache + `/api/cron/image-styles` (every 4 h).** Classifies every product photo as lifestyle or studio from pixels only (zero tokens, no Shopify writes): studio = outer 10 % frame mostly near-white OR at least two near-white corners. The corner test fixes the border-only heuristic, which called ~40 % of sampled packshots "lifestyle" when the product touched the frame edge (visual check: 38/40 lifestyle correct, 16/16 reclassified photos really studio). Only uncached photos are downloaded.
+
 ## [0.5.107.51] - 2026-10-30
 
 ### Added

@@ -8,7 +8,8 @@ import { FIT_DIMS_KEY, FIT_DIMS_NAMESPACE, type FitDims } from "../fit-dims";
 import { parseSku } from "../variant-merger";
 import { isSpecImageUrl } from "../selectors/shopify-product";
 import { imageUrlStem } from "../image-compliance-audit";
-import { getCachedImageVerdicts } from "../database";
+import { getCachedImageStyles, getCachedImageVerdicts } from "../database";
+import type { AdImageStyle } from "../image-style";
 
 export interface ShopifyFeedVariant {
   /** Shopify variant id — drives the `?variant=` deep link on multi-variant products. */
@@ -326,6 +327,15 @@ export function shopifyToFeedItems(
      * (assembled size from custom.lc_dims). Off for Meta/Pinterest/Reddit, whose specs
      * do not define these attributes. */
     rich?: boolean;
+    /**
+     * Meta only: photo stem -> lifestyle/studio (image_styles cache). When given, an item's
+     * image_link must be a LIFESTYLE photo — Mat's rule (2026-10-30): every Meta ad shows a
+     * lifestyle photo, always. A studio variant/hero photo is swapped for the product's
+     * lifestyle photo, extras are lifestyle-only, and each item is labelled imageStyle so the
+     * ad product sets can keep "studio" items (no lifestyle photo at all) out of ads.
+     * An unclassified photo counts as studio (fail-closed).
+     */
+    imageStyles?: ReadonlyMap<string, AdImageStyle>;
   } = {},
 ): FeedItem[] {
   const english = opts.preferEnglishTitle === true;
@@ -368,6 +378,13 @@ export function shopifyToFeedItems(
     const isVerified = (src: string) => !verified || verified.has(imageUrlStem(src));
     // Hero: the first photo as before, unless it was never verified and a verified one exists.
     const heroSrc = isVerified(images[0]) ? images[0] : (images.find(isVerified) ?? images[0]);
+    const styles = opts.imageStyles;
+    const isLifestyle = (src: string) => styles?.get(imageUrlStem(src)) === "lifestyle";
+    // Lifestyle stand-in for a studio photo: a verified-clean lifestyle shot, or the first
+    // gallery photo when it is lifestyle (the same unverified allowance the hero already has).
+    const lifestyleSrc = styles
+      ? (images.find((src) => isLifestyle(src) && isVerified(src)) ?? (isLifestyle(images[0]) ? images[0] : undefined))
+      : undefined;
     const link = `${storefrontBase}/products/${encodeURIComponent(p.handle)}`;
     const rawBody = english && p.bodyEn && p.bodyEn.trim() !== "" ? p.bodyEn : (p.body_html ?? "");
     const description = truncate(stripPromoText(scrubSupplier(stripHtml(rawBody), houseBrand)), DESCRIPTION_MAX);
@@ -409,15 +426,21 @@ export function shopifyToFeedItems(
       const variantLink = multi && v.id != null && String(v.id) !== ""
         ? `${link}?variant=${encodeURIComponent(String(v.id))}`
         : link;
+      // Meta: a studio photo gives way to the product's lifestyle photo, even when that one
+      // shows another colour — a lifestyle ad beats an exact-colour packshot (Mat's rule).
+      const naturalSrc = ownImage ? ownImage.src : heroSrc;
+      const imageLink = styles && !isLifestyle(naturalSrc) && lifestyleSrc ? lifestyleSrc : naturalSrc;
       items.push({
         id,
         itemGroupId: multi ? String(p.id) : null,
         title: truncate(stripPromoText(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`, houseBrand))), 150),
         description,
         link: variantLink,
-        imageLink: ownImage ? ownImage.src : heroSrc,
-        // Secondary images are what the Meta carousel cycles through: only verified-clean ones.
-        additionalImageLinks: images.filter((src) => src !== (ownImage ? ownImage.src : heroSrc) && isVerified(src)),
+        imageLink,
+        // Secondary images are what the Meta carousel cycles through: only verified-clean ones
+        // (and, for Meta, lifestyle ones).
+        additionalImageLinks: images.filter((src) => src !== imageLink && isVerified(src) && (!styles || isLifestyle(src))),
+        ...(styles ? { imageStyle: isLifestyle(imageLink) ? ("lifestyle" as const) : ("studio" as const) } : {}),
         price,
         compareAtPrice,
         availability,
@@ -717,10 +740,9 @@ export async function fetchDimsMap(): Promise<Map<string, string>> {
   return map;
 }
 
-/** Fetch all products from Shopify (paginated) and return feed items.
- * Pass `{ english: true }` to overlay custom.title_en titles for the Pinterest EN feed, and
- * `{ rich: true }` (Google, Bing) for product_highlight + product_detail. */
-export async function getFeedItems(opts: { english?: boolean; rich?: boolean } = {}): Promise<FeedItem[]> {
+/** Every Shopify product (REST, paginated) with the fields the feeds need. Throws rather than
+ * return a truncated catalog. Shared by getFeedItems and the image-styles sync. */
+export async function fetchShopifyFeedProducts(): Promise<ShopifyFeedProduct[]> {
   const token = process.env.SHOPIFY_ACCESS_TOKEN;
   if (!token) throw new Error("SHOPIFY_ACCESS_TOKEN not configured");
   const base = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}`;
@@ -740,6 +762,16 @@ export async function getFeedItems(opts: { english?: boolean; rich?: boolean } =
 
   // Fail loud rather than silently serve (and CDN-cache for 24h) a truncated catalog.
   if (pageInfo) throw new Error(`Feed pagination exceeded ${MAX_PAGES} pages — catalog larger than expected; refusing to serve a partial feed`);
+  return products;
+}
+
+/** Fetch all products from Shopify (paginated) and return feed items.
+ * Pass `{ english: true }` to overlay custom.title_en titles for the Pinterest EN feed,
+ * `{ rich: true }` (Google, Bing) for product_highlight + product_detail, and
+ * `{ lifestyle: true }` (Meta) for lifestyle-only images + the imageStyle label. */
+export async function getFeedItems(opts: { english?: boolean; rich?: boolean; lifestyle?: boolean } = {}): Promise<FeedItem[]> {
+  const products = await fetchShopifyFeedProducts();
+  const imageStyles = opts.lifestyle ? await fetchImageStyles(products) : undefined;
 
   // Overlay <g:material> from its metafield. No-op (one cheap call) until one is defined.
   const materialMap = await fetchMaterialMap();
@@ -767,12 +799,29 @@ export async function getFeedItems(opts: { english?: boolean; rich?: boolean } =
       const bodyEn = bodyEnMap.get(String(p.id));
       if (bodyEn) p.bodyEn = bodyEn;
     }
-    const { nonCompliant, verified } = await fetchImageVerdictStems(products);
-    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems: nonCompliant, verifiedStems: verified, optionValueEn, rich: opts.rich });
+    const { nonCompliant, verified } = await fetchImageVerdictStems(products, { strict: opts.lifestyle });
+    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems: nonCompliant, verifiedStems: verified, optionValueEn, rich: opts.rich, imageStyles });
   }
 
-  const { nonCompliant, verified } = await fetchImageVerdictStems(products);
-  return shopifyToFeedItems(products, { nonCompliantStems: nonCompliant, verifiedStems: verified, rich: opts.rich });
+  const { nonCompliant, verified } = await fetchImageVerdictStems(products, { strict: opts.lifestyle });
+  return shopifyToFeedItems(products, { nonCompliantStems: nonCompliant, verifiedStems: verified, rich: opts.rich, imageStyles });
+}
+
+/** Below this share of classified photos the style cache is not trusted (fresh deploy, or the
+ *  cron fell behind): labelling most of the catalog "studio" would empty the ad product sets. */
+export const MIN_STYLE_COVERAGE = 0.9;
+
+/** Load lifestyle/studio styles for every product photo (Meta feeds). THROWS when the cache
+ *  is unreachable or under MIN_STYLE_COVERAGE: the feed route then answers 500 and Meta keeps
+ *  the catalog it already has, instead of ingesting a feed that strips every ad of products. */
+async function fetchImageStyles(products: ShopifyFeedProduct[]): Promise<Map<string, AdImageStyle>> {
+  const stems = [...new Set(products.filter((p) => p.status === "active").flatMap((p) => (p.images ?? []).map((i) => imageUrlStem(i.src)).filter(Boolean)))];
+  const styles = await getCachedImageStyles(stems);
+  const coverage = stems.length === 0 ? 1 : styles.size / stems.length;
+  if (coverage < MIN_STYLE_COVERAGE) {
+    throw new Error(`image_styles coverage ${(coverage * 100).toFixed(1)}% < ${MIN_STYLE_COVERAGE * 100}% — run /api/cron/image-styles; refusing to serve a Meta feed that would drop products from ads`);
+  }
+  return styles;
 }
 
 /** Bulk-load the vision classifier's verdicts (image_classifications) for every image in
@@ -782,6 +831,7 @@ export async function getFeedItems(opts: { english?: boolean; rich?: boolean } =
  *  classified yet"). See shopifyToFeedItems's nonCompliantStems doc comment. */
 async function fetchImageVerdictStems(
   products: ShopifyFeedProduct[],
+  opts: { strict?: boolean } = {},
 ): Promise<{ nonCompliant: Set<string>; verified: Set<string> }> {
   const nonCompliant = new Set<string>();
   const verified = new Set<string>();
@@ -790,6 +840,10 @@ async function fetchImageVerdictStems(
     const verdicts = await getCachedImageVerdicts(stems);
     for (const [stem, v] of verdicts) (v.compliant ? verified : nonCompliant).add(stem);
   } catch (err) {
+    // Meta (lifestyle) feeds: an empty verified set would leave only images[0] as a lifestyle
+    // candidate and label most of the catalog "studio", emptying the ad product sets. Fail
+    // the feed instead — Meta keeps its current catalog until the next fetch.
+    if (opts.strict) throw err;
     // Fail-closed for secondary images: an empty `verified` set means no additional images,
     // the hero image still ships. Better a plain feed for 10 minutes than text-laden carousels.
     console.warn(`[FEED] vision-classification lookup failed (non-fatal, additional images withheld):`, err);
