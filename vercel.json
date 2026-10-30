@@ -8,6 +8,10 @@
       "schedule": "15 21 * * *"
     },
     {
+      "path": "/api/cron/image-styles",
+      "schedule": "40 */4 * * *"
+    },
+    {
       "path": "/api/cron/category-guard",
       "schedule": "0 10 * * *"
     },

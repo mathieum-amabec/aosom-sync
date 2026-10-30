@@ -8,6 +8,7 @@ import { DEFAULT_PUBLICATION_SCHEDULE, DEFAULT_BLOG_SCHEDULE } from "@/lib/confi
 import type { AosomProduct } from "@/types/aosom";
 import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
 import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
+import type { AdImageStyle } from "@/lib/image-style";
 import { isSqliteUtc } from "@/lib/draft-scheduler";
 import { usageLoggingEnabled, withUsageLogging } from "@/lib/turso-usage";
 
@@ -660,6 +661,17 @@ async function _initSchemaImpl(): Promise<void> {
       created_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_image_classifications_compliant ON image_classifications(compliant)`,
+
+    // ── Ad photo style cache (lifestyle vs studio) ───────────────────────────
+    // One row per PHOTO, keyed like image_classifications (imageUrlStem). Pixel heuristic
+    // only (src/lib/image-style.ts), zero tokens. Filled by /api/cron/image-styles; read by
+    // the Meta feeds so catalog ads only ever show lifestyle photos (Mat, 2026-10-30).
+    `CREATE TABLE IF NOT EXISTS image_styles (
+      url_stem TEXT PRIMARY KEY,
+      style TEXT NOT NULL,           -- 'lifestyle' | 'studio'
+      sample_url TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now'))
+    )`,
 
     // ── pos-1 image review queue (operator approval) ─────────────────────────
     // Populated by the sync's image-compliance pass when it finds a pos-1 image carrying a
@@ -5127,6 +5139,43 @@ export async function putCachedImageVerdict(
       meta.model, meta.sampleUrl.slice(0, 500), verdict.confidence ?? null,
     ],
   });
+}
+
+// ─── Ad photo style cache (lifestyle vs studio) ──────────────────────
+
+/** Look up cached photo styles for a batch of stems. Missing stems are simply absent. */
+export async function getCachedImageStyles(stems: string[]): Promise<Map<string, AdImageStyle>> {
+  const out = new Map<string, AdImageStyle>();
+  const unique = [...new Set(stems.filter(Boolean))];
+  if (unique.length === 0) return out;
+  const db = await ensureSchema();
+  for (let i = 0; i < unique.length; i += 200) {
+    const chunk = unique.slice(i, i + 200);
+    const result = await db.execute({
+      sql: `SELECT url_stem, style FROM image_styles WHERE url_stem IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) {
+      const o = rowToObj(r);
+      if (o.style === "lifestyle" || o.style === "studio") out.set(String(o.url_stem), o.style);
+    }
+  }
+  return out;
+}
+
+/** Persist photo styles. Idempotent: re-classifying a stem overwrites it. */
+export async function putCachedImageStyles(rows: Array<{ stem: string; style: AdImageStyle; sampleUrl: string }>): Promise<void> {
+  const valid = rows.filter((r) => r.stem);
+  if (valid.length === 0) return;
+  const db = await ensureSchema();
+  for (let i = 0; i < valid.length; i += 100) {
+    await db.batch(valid.slice(i, i + 100).map((r) => ({
+      sql: `INSERT INTO image_styles (url_stem, style, sample_url) VALUES (?, ?, ?)
+            ON CONFLICT(url_stem) DO UPDATE SET style=excluded.style, sample_url=excluded.sample_url,
+              created_at=strftime('%s','now')`,
+      args: [r.stem, r.style, r.sampleUrl.slice(0, 500)],
+    })), "write");
+  }
 }
 
 // ─── pos-1 image review queue ────────────────────────────────────────

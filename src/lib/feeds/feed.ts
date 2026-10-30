@@ -26,6 +26,7 @@ export interface FeedItem {
   material?: string | null;      // primary material read from the description (g:material)
   highlights?: string[];         // g:product_highlight — description bullets (rich feeds only)
   details?: FeedDetail[];        // g:product_detail — assembled dimensions (rich feeds only)
+  imageStyle?: "lifestyle" | "studio"; // Meta feeds only — image_link photo style (g:custom_label_4)
   productType: string;           // Aosom taxonomy path (g:product_type)
   googleCategoryId: number;      // g:google_product_category
 }
@@ -316,8 +317,9 @@ export function buildPinterestFeed(items: FeedItem[], opts: { title: string; lin
 }
 
 // ── Meta Catalog feed (RSS 2.0 + g:) — Meta rejects JSON; it ingests RSS/ATOM XML ──
-// Same shape as Google, plus: g:custom_label_0 = product_type, and g:sale_price when the
-// item is discounted (g:price then carries the regular/compare-at price).
+// Same shape as Google, plus: g:custom_label_0 = product_type, g:custom_label_4 = image_link
+// photo style (lifestyle/studio), and g:sale_price when the item is discounted (g:price then
+// carries the regular/compare-at price).
 function metaXmlItemXml(it: FeedItem): string {
   const onSale = it.compareAtPrice != null && it.compareAtPrice > it.price;
   const regular = onSale ? (it.compareAtPrice as number) : it.price;
@@ -336,6 +338,8 @@ function metaXmlItemXml(it: FeedItem): string {
     `<g:google_product_category>${it.googleCategoryId}</g:google_product_category>`,
     it.productType ? `<g:product_type>${escapeXml(it.productType)}</g:product_type>` : "",
     it.productType ? `<g:custom_label_0>${escapeXml(it.productType)}</g:custom_label_0>` : "",
+    // Ad product sets filter on this so a product with no lifestyle photo never reaches an ad.
+    it.imageStyle ? `<g:custom_label_4>${it.imageStyle}</g:custom_label_4>` : "",
     it.itemGroupId ? `<g:item_group_id>${escapeXml(it.itemGroupId)}</g:item_group_id>` : "",
     `<g:identifier_exists>false</g:identifier_exists>`,
   ].filter(Boolean);
