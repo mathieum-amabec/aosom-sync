@@ -219,8 +219,6 @@ export function stripImperialDimensions(title: string): string {
   return cleaned.replace(/[\s,/–—-]+$/u, "").trim();
 }
 
-// Either house brand, whichever locale it came from. Used to recognise our OWN name in the
-// Shopify `vendor` field (see resolveBrand).
 // <g:product_highlight>: Google wants 2–100 short, scannable fragments and recommends 4–6;
 // AI Mode and Gemini quote them when answering "does it…?" questions. Our descriptions
 // already carry exactly that as the "Caractéristiques" bullet list (250/250 sampled
@@ -265,6 +263,8 @@ export function dimensionDetails(raw: string | null | undefined, sku: string, en
   return p.map((n, i) => ({ section, name: names[i], value: fmt(n) }));
 }
 
+// Either house brand, whichever locale it came from. Used to recognise our OWN name in the
+// Shopify `vendor` field (see resolveBrand).
 const HOUSE_BRANDS = [HOUSE_BRAND, HOUSE_BRAND_EN];
 
 /** Brand to show: keep a real product vendor (Outsunny, …); replace empty, the supplier
