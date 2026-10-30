@@ -125,8 +125,11 @@ describe("locale", () => {
       vi.mocked(getFeedItems).mockClear();
       await handler();
       const arg = vi.mocked(getFeedItems).mock.calls[0]?.[0];
-      if (label === "pinterest-en" || label === "google-en" || label === "meta-xml-en") expect(arg).toEqual({ english: true });
+      if (label === "pinterest-en" || label === "google-en" || label === "meta-xml-en") expect(arg).toMatchObject({ english: true });
       else expect(arg ?? {}).not.toMatchObject({ english: true });
+      // Only Google and Bing carry product_highlight / product_detail.
+      if (label === "google" || label === "google-en" || label === "bing") expect(arg).toMatchObject({ rich: true });
+      else expect(arg ?? {}).not.toMatchObject({ rich: true });
     }
   });
 });

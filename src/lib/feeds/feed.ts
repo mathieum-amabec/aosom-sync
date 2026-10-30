@@ -1,6 +1,13 @@
 // Pure feed model + serializers (no I/O — fully unit-testable).
 import { mapToGoogleCategory } from "./google-category";
 
+/** One <g:product_detail> row: a labelled spec Google AI Mode / Gemini can quote. */
+export interface FeedDetail {
+  section: string;
+  name: string;
+  value: string;
+}
+
 export interface FeedItem {
   id: string;                    // variant SKU (g:id)
   itemGroupId?: string | null;   // Shopify product id — groups variants
@@ -17,6 +24,8 @@ export interface FeedItem {
   color?: string | null;         // FR colour, from the Shopify option or the SKU suffix (g:color)
   size?: string | null;          // Shopify "Taille" option value (g:size), null when none
   material?: string | null;      // primary material read from the description (g:material)
+  highlights?: string[];         // g:product_highlight — description bullets (rich feeds only)
+  details?: FeedDetail[];        // g:product_detail — assembled dimensions (rich feeds only)
   productType: string;           // Aosom taxonomy path (g:product_type)
   googleCategoryId: number;      // g:google_product_category
 }
@@ -162,6 +171,14 @@ export function formatPrice(price: number): string {
 }
 
 // ── Google Merchant feed (RSS 2.0 + g: namespace) ─────────────────────────
+function productDetailXml(d: FeedDetail): string {
+  return `<g:product_detail>
+        <g:section_name>${escapeXml(d.section)}</g:section_name>
+        <g:attribute_name>${escapeXml(d.name)}</g:attribute_name>
+        <g:attribute_value>${escapeXml(d.value)}</g:attribute_value>
+      </g:product_detail>`;
+}
+
 function googleItemXml(it: FeedItem, now?: Date, fmt: AvailabilityFormat = "underscore"): string {
   const { price, salePrice } = saleSplit(it);
   const g: string[] = [
@@ -180,6 +197,8 @@ function googleItemXml(it: FeedItem, now?: Date, fmt: AvailabilityFormat = "unde
     it.color ? `<g:color>${escapeXml(it.color)}</g:color>` : "",
     it.size ? `<g:size>${escapeXml(it.size)}</g:size>` : "",
     it.material ? `<g:material>${escapeXml(it.material)}</g:material>` : "",
+    ...(it.highlights ?? []).map((h) => `<g:product_highlight>${escapeXml(h)}</g:product_highlight>`),
+    ...(it.details ?? []).map(productDetailXml),
     `<g:google_product_category>${it.googleCategoryId}</g:google_product_category>`,
     it.productType ? `<g:product_type>${escapeXml(it.productType)}</g:product_type>` : "",
     it.itemGroupId ? `<g:item_group_id>${escapeXml(it.itemGroupId)}</g:item_group_id>` : "",
@@ -213,7 +232,10 @@ ${items.map((it) => googleItemXml(it, now, fmt)).join("\n")}
 // ── Bing / Microsoft Shopping feed (RSS 2.0 + g:) ─────────────────────────
 // Microsoft Advertising ingests the Google Shopping feed format, so we emit the same
 // RSS+g: shape with the Bing field subset: id, title, description, link, image_link,
-// price, availability, brand, product_type, shipping. No condition/category needed.
+// price, availability, brand, product_type, shipping, plus the identifiers and variant
+// attributes Microsoft Merchant Center reads the same way Google does (condition, category,
+// item_group_id, color, size, material, mpn). Price stays the single current price: no
+// sale split, so nothing here can disagree with what the page charges.
 function bingItemXml(it: FeedItem): string {
   const g: string[] = [
     `<g:id>${escapeXml(it.id)}</g:id>`,
@@ -224,8 +246,15 @@ function bingItemXml(it: FeedItem): string {
     `<g:price>${escapeXml(formatPrice(it.price))}</g:price>`,
     `<g:availability>${it.availability}</g:availability>`,
     `<g:brand>${escapeXml(it.brand)}</g:brand>`,
+    `<g:condition>${it.condition}</g:condition>`,
+    it.color ? `<g:color>${escapeXml(it.color)}</g:color>` : "",
+    it.size ? `<g:size>${escapeXml(it.size)}</g:size>` : "",
+    it.material ? `<g:material>${escapeXml(it.material)}</g:material>` : "",
+    `<g:google_product_category>${it.googleCategoryId}</g:google_product_category>`,
     it.productType ? `<g:product_type>${escapeXml(it.productType)}</g:product_type>` : "",
+    it.itemGroupId ? `<g:item_group_id>${escapeXml(it.itemGroupId)}</g:item_group_id>` : "",
     SHIPPING_BLOCK,
+    `<g:mpn>${escapeXml(it.id)}</g:mpn>`,
   ].filter(Boolean);
   return `    <item>\n      ${g.join("\n      ")}\n    </item>`;
 }

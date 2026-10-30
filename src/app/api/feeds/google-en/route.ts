@@ -14,7 +14,7 @@ const CACHE = "public, max-age=0, s-maxage=600, stale-while-revalidate=600"; // 
 
 export async function GET() {
   try {
-    const items = await getFeedItems({ english: true });
+    const items = await getFeedItems({ english: true, rich: true });
     const xml = buildGoogleFeed(items, {
       title: "Furnish Direct — Google Merchant feed (EN)",
       link: EN_STOREFRONT_BASE_URL,

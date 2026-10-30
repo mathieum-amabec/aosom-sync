@@ -9,7 +9,7 @@ import {
   buildGoogleFeed, buildPinterestFeed, buildMetaFeed, buildMetaXmlFeed,
   buildBingFeed, buildRedditFeed, saleSplit, salePriceEffectiveDate, availabilityValue, type FeedItem,
 } from "@/lib/feeds/feed";
-import { shopifyToFeedItems, stripImperialDimensions, stripPromoText, frenchifyColor, optionValue, materialFromMetafields, MATERIAL_METAFIELD_KEYS, type ShopifyFeedProduct } from "@/lib/feeds/source";
+import { shopifyToFeedItems, highlightsFromBody, dimensionDetails, DIMS_METAFIELD_KEY, stripImperialDimensions, stripPromoText, frenchifyColor, optionValue, materialFromMetafields, MATERIAL_METAFIELD_KEYS, type ShopifyFeedProduct } from "@/lib/feeds/source";
 import { imageUrlStem } from "@/lib/image-compliance-audit";
 
 describe("mapToGoogleCategory", () => {
@@ -774,9 +774,13 @@ describe("buildBingFeed", () => {
     expect(xml).toContain("<g:shipping>");
     expect((xml.match(/<item>/g) || []).length).toBe(sample.length);
   });
-  it("omits Google-only fields not in the Bing set (condition, category)", () => {
-    expect(xml).not.toContain("<g:condition>");
-    expect(xml).not.toContain("<g:google_product_category>");
+  it("carries the identifiers Microsoft Merchant Center reads (condition, category, mpn)", () => {
+    expect(xml).toContain("<g:condition>new</g:condition>");
+    expect(xml).toContain("<g:google_product_category>");
+    expect(xml).toContain("<g:mpn>PAT-001GY</g:mpn>");
+  });
+  it("keeps a single current price — no sale split on Bing", () => {
+    expect(xml).not.toContain("<g:sale_price>");
   });
 });
 
@@ -1142,5 +1146,85 @@ describe("buildGoogleFeed — material and sale window", () => {
   });
   it("passes a real Date to every item (map index must not leak into `now`)", () => {
     expect(() => buildGoogleFeed(items, { title: "G", link: "https://x", description: "d" })).not.toThrow();
+  });
+});
+
+// ── g:product_highlight and g:product_detail (rich feeds: Google, Bing) ──────
+
+describe("highlightsFromBody", () => {
+  const body = `<p>Intro.</p><h3>Caractéristiques :</h3><ul>
+<li>Capacité : 3 vélos ou outils de jardinage</li>
+<li>Revêtement résistant aux UV.</li>
+<li>Assemblage requis</li>
+<li>Cadre en acier galvanisé Aosom anti-corrosion</li>
+<li>Livraison gratuite partout au Canada</li>
+</ul>`;
+  it("reuses the description bullets, trimmed of trailing punctuation", () => {
+    const h = highlightsFromBody(body);
+    expect(h).toContain("Capacité : 3 vélos ou outils de jardinage");
+    expect(h).toContain("Revêtement résistant aux UV");
+  });
+  it("drops stubs and empty promo bullets, scrubs the supplier name", () => {
+    const h = highlightsFromBody(body);
+    expect(h).not.toContain("Assemblage requis");
+    expect(h.join(" ")).not.toMatch(/aosom|livraison gratuite/i);
+    expect(h).toContain("Cadre en acier galvanisé Ameublo Direct anti-corrosion");
+  });
+  it("caps at 6 and returns [] below Google's minimum of 2", () => {
+    const many = Array.from({ length: 9 }, (_, i) => `<li>Caractéristique numéro ${i} bien décrite</li>`).join("");
+    expect(highlightsFromBody(`<ul>${many}</ul>`)).toHaveLength(6);
+    expect(highlightsFromBody("<ul><li>Une seule caractéristique utile</li></ul>")).toEqual([]);
+    expect(highlightsFromBody(null)).toEqual([]);
+  });
+  it("skips bullets over 150 characters", () => {
+    const long = "x".repeat(151);
+    expect(highlightsFromBody(`<ul><li>${long}</li><li>Première vraie caractéristique</li><li>Deuxième vraie caractéristique</li></ul>`))
+      .toEqual(["Première vraie caractéristique", "Deuxième vraie caractéristique"]);
+  });
+});
+
+describe("dimensionDetails", () => {
+  const raw = JSON.stringify({ v: 1, s: { "84C-001": { p: [121.4, 60, 75.5] } } });
+  it("labels width/depth/height in cm, French decimal comma", () => {
+    expect(dimensionDetails(raw, "84C-001", false)).toEqual([
+      { section: "Dimensions (assemblé)", name: "Largeur", value: "121,4 cm" },
+      { section: "Dimensions (assemblé)", name: "Profondeur", value: "60 cm" },
+      { section: "Dimensions (assemblé)", name: "Hauteur", value: "75,5 cm" },
+    ]);
+  });
+  it("uses English labels and a decimal point for the EN feed", () => {
+    expect(dimensionDetails(raw, "84C-001", true)[0]).toEqual({ section: "Dimensions (assembled)", name: "Width", value: "121.4 cm" });
+  });
+  it("omits rather than guesses: other SKU, malformed JSON, bad numbers", () => {
+    expect(dimensionDetails(raw, "OTHER", false)).toEqual([]);
+    expect(dimensionDetails("{not json", "84C-001", false)).toEqual([]);
+    expect(dimensionDetails(JSON.stringify({ v: 1, s: { A: { p: [0, 10, 10] } } }), "A", false)).toEqual([]);
+    expect(dimensionDetails(null, "84C-001", false)).toEqual([]);
+  });
+});
+
+describe("rich feed items", () => {
+  const products: ShopifyFeedProduct[] = [
+    {
+      id: 777, title: "Abri à vélos", handle: "abri-velos", vendor: "Ameublo Direct", status: "active",
+      published_at: "2020-01-01T00:00:00-05:00", product_type: "Patio & Garden > Sheds",
+      body_html: "<ul><li>Capacité : 3 vélos ou outils</li><li>Cadre en acier galvanisé robuste</li></ul>",
+      images: [{ src: "https://img/abri.jpg" }],
+      variants: [{ sku: "845-030", price: "199.99" }],
+      metafields: { [DIMS_METAFIELD_KEY]: JSON.stringify({ v: 1, s: { "845-030": { p: [160, 220, 160] } } }) },
+    },
+  ];
+  const opts = { title: "G", link: "https://x", description: "d" };
+  it("Google feed emits product_highlight and product_detail when rich", () => {
+    const xml = buildGoogleFeed(shopifyToFeedItems(products, { rich: true }), opts);
+    expect(xml).toContain("<g:product_highlight>Capacité : 3 vélos ou outils</g:product_highlight>");
+    expect(xml).toContain("<g:attribute_name>Profondeur</g:attribute_name>");
+    expect(xml).toContain("<g:attribute_value>220 cm</g:attribute_value>");
+  });
+  it("non-rich items (Meta, Pinterest, Reddit) carry neither", () => {
+    const items = shopifyToFeedItems(products);
+    expect(items[0]).not.toHaveProperty("highlights");
+    expect(buildPinterestFeed(items, opts)).not.toContain("product_highlight");
+    expect(buildPinterestFeed(items, opts)).not.toContain("product_detail");
   });
 });
