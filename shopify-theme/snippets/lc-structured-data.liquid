@@ -25,14 +25,18 @@
     assign desc = product.description | strip_html
     assign desc = desc | replace: 'Outsunny', '' | replace: 'outsunny', '' | replace: 'OUTSUNNY', ''
     assign desc = desc | replace: 'Aosom', '' | replace: 'aosom', '' | replace: 'AOSOM', ''
-    assign desc = desc | replace: '  ', ' ' | strip | truncatewords: 60
+    assign desc = desc | replace: '  ', ' ' | strip | truncatewords: 120
 
     assign availability = 'https://schema.org/OutOfStock'
     if v.available
       assign availability = 'https://schema.org/InStock'
     endif
 
-    assign price_valid_until = 'now' | date: '%s' | plus: 31536000 | date: '%Y-%m-%d'
+    comment
+    Google wants priceValidUntil close enough to be meaningful; a year out is accepted
+    but says nothing. 30 days (2592000 s) matches the sale window the feed declares.
+  endcomment
+  assign price_valid_until = 'now' | date: '%s' | plus: 2592000 | date: '%Y-%m-%d'
     assign product_abs_url = request.origin | append: product.url
 
     assign color = ''
@@ -68,7 +72,7 @@
     "category": {{ product.type | json }},
     "image": [
       {%- for image in product.images limit: 5 -%}
-      {{ image | image_url: width: 1600 | json }}{%- unless forloop.last %},{% endunless -%}
+      {{ image | image_url: width: 1600 | prepend: 'https:' | json }}{%- unless forloop.last %},{% endunless -%}
       {%- endfor -%}
     ],
     {%- if jm != blank and jm.number_of_reviews and jm.number_of_reviews > 0 %}
@@ -86,8 +90,31 @@
       "priceValidUntil": {{ price_valid_until | json }},
       "availability": {{ availability | json }},
       "itemCondition": "https://schema.org/NewCondition",
+      {%- comment -%} GEO 2026-10-17 — mêmes chiffres que lc-org-schema.liquid et les pages
+         politique-de-livraison / politique-de-retour : livraison gratuite au Canada,
+         traitement 1–3 j ouvrables, transport 3–9 j ; retours 30 j par la poste, frais au client
+         (sauf défectueux : gratuit — détail au niveau entreprise). {%- endcomment %}
+      "shippingDetails": {
+        "@type": "OfferShippingDetails",
+        "shippingRate": { "@type": "MonetaryAmount", "value": 0, "currency": "CAD" },
+        "shippingDestination": { "@type": "DefinedRegion", "addressCountry": "CA" },
+        "deliveryTime": {
+          "@type": "ShippingDeliveryTime",
+          "handlingTime": { "@type": "QuantitativeValue", "minValue": 1, "maxValue": 3, "unitCode": "DAY" },
+          "transitTime": { "@type": "QuantitativeValue", "minValue": 3, "maxValue": 9, "unitCode": "DAY" }
+        }
+      },
+      "hasMerchantReturnPolicy": {
+        "@type": "MerchantReturnPolicy",
+        "applicableCountry": "CA",
+        "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
+        "merchantReturnDays": 30,
+        "returnMethod": "https://schema.org/ReturnByMail",
+        "returnFees": "https://schema.org/ReturnFeesCustomerResponsibility"
+      },
       "seller": {
         "@type": "Organization",
+        "@id": {{ shop.url | append: '/#organization' | json }},
         "name": {{ brand | json }}
       }
     }
@@ -102,8 +129,17 @@
         break
       endunless
     endfor
-    if bc_collection == nil
-      assign bc_type_handle = product.type | handleize
+    comment
+      GEO 2026-10-18 : fil d'Ariane localisé (Accueil/Home, liens /en sur l'anglais). Sans collection,
+      on saute le niveau 2 au lieu d'inventer une URL /collections/<type> qui peut ne pas exister.
+    endcomment
+    assign bc_home_name = 'Accueil'
+    if request.locale.iso_code != 'fr'
+      assign bc_home_name = 'Home'
+    endif
+    assign bc_last = 2
+    if bc_collection != nil
+      assign bc_last = 3
     endif
   -%}
   <script type="application/ld+json">
@@ -114,27 +150,20 @@
       {
         "@type": "ListItem",
         "position": 1,
-        "name": "Accueil",
-        "item": {{ request.origin | json }}
+        "name": {{ bc_home_name | json }},
+        "item": {{ request.origin | append: routes.root_url | json }}
       },
       {%- if bc_collection != nil %}
       {
         "@type": "ListItem",
         "position": 2,
         "name": {{ bc_collection.title | json }},
-        "item": {{ request.origin | append: '/collections/' | append: bc_collection.handle | json }}
-      },
-      {%- else %}
-      {
-        "@type": "ListItem",
-        "position": 2,
-        "name": {{ product.type | json }},
-        "item": {{ request.origin | append: '/collections/' | append: bc_type_handle | json }}
+        "item": {{ request.origin | append: bc_collection.url | json }}
       },
       {%- endif %}
       {
         "@type": "ListItem",
-        "position": 3,
+        "position": {{ bc_last }},
         "name": {{ product.title | json }},
         "item": {{ product_abs_url | json }}
       }

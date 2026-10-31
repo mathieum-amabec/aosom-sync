@@ -1,13 +1,14 @@
 <!doctype html>
 <html class="js" lang="{{ request.locale.iso_code }}">
   <head>
+  <script>window.lcT=function(g,e,f,s,p){return g==='fr'?f:(g==='es'&&s!=null?s:(g==='pa'&&p!=null?p:e));};</script>
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="theme-color" content="">
     <link rel="canonical" href="{{ canonical_url }}">
     {%- if request.page_type == 'index' -%}
-      <link rel="preload" as="image" href="{{ 'lc-hero.jpg' | asset_url }}" fetchpriority="high">
+      <link rel="preload" as="image" href="{{ 'lc-hero.jpg' | asset_url }}" media="(min-width: 750px)" fetchpriority="high">
     {%- endif -%}
 
     {%- if settings.favicon != blank -%}
@@ -17,24 +18,43 @@
     {%- unless settings.type_header_font.system? and settings.type_body_font.system? -%}
       <link rel="preconnect" href="https://fonts.shopifycdn.com" crossorigin>
     {%- endunless -%}
+    {%- comment -%} Redesign 2026-10-16: Fraunces (display) + Manrope (text), self-hosted (same woff2 files Google Fonts serves) so no third-party render-blocking stylesheet. Latin files preloaded; latin-ext only downloads if such a glyph appears. {%- endcomment -%}
+    <link rel="preload" href="{{ 'lc-manrope-latin.woff2' | asset_url }}" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="{{ 'lc-fraunces-latin.woff2' | asset_url }}" as="font" type="font/woff2" crossorigin>
+    <style>
+      {%- assign lc_latin = 'U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2190-2199, U+2212, U+2215, U+FEFF, U+FFFD' -%}
+      {%- assign lc_latinext = 'U+0100-0130, U+0132-0151, U+0154-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF' -%}
+      @font-face{font-family:'Fraunces';font-style:normal;font-weight:500 700;font-display:swap;src:url({{ 'lc-fraunces-latin.woff2' | asset_url }}) format('woff2');unicode-range:{{ lc_latin }}}
+      @font-face{font-family:'Fraunces';font-style:normal;font-weight:500 700;font-display:swap;src:url({{ 'lc-fraunces-latinext.woff2' | asset_url }}) format('woff2');unicode-range:{{ lc_latinext }}}
+      @font-face{font-family:'Fraunces';font-style:italic;font-weight:400 700;font-display:swap;src:url({{ 'lc-fraunces-italic-latin.woff2' | asset_url }}) format('woff2');unicode-range:{{ lc_latin }}}
+      @font-face{font-family:'Fraunces';font-style:italic;font-weight:400 700;font-display:swap;src:url({{ 'lc-fraunces-italic-latinext.woff2' | asset_url }}) format('woff2');unicode-range:{{ lc_latinext }}}
+      @font-face{font-family:'Manrope';font-style:normal;font-weight:500 800;font-display:swap;src:url({{ 'lc-manrope-latin.woff2' | asset_url }}) format('woff2');unicode-range:{{ lc_latin }}}
+      @font-face{font-family:'Manrope';font-style:normal;font-weight:500 800;font-display:swap;src:url({{ 'lc-manrope-latinext.woff2' | asset_url }}) format('woff2');unicode-range:{{ lc_latinext }}}
+    </style>
 
     <title>
       {%- assign lc_loc = request.locale.iso_code | downcase -%}
       {%- comment -%} EN product pages: the product's SEO title_tag is stored in French ("… | Livraison gratuite — Ameublo Direct") and already contains shop.name, so the localized suffix below is skipped. Build a clean EN title from the (translated) product.title instead. {%- endcomment -%}
-      {%- if request.page_type == 'product' and lc_loc == 'en' and product.title != blank -%}
-        {{ product.title }} | Free shipping &mdash; Furnish Direct
+      {%- if request.page_type == 'index' -%}
+        {%- if lc_loc == 'en' -%}Furnish Direct | Furniture, Home &amp; Yard &mdash; Free Shipping{%- elsif lc_loc == 'es' -%}Furnish Direct | Muebles, hogar &amp; jardín &mdash; Envío gratis{%- elsif lc_loc == 'pa' -%}Furnish Direct | ਫ਼ਰਨੀਚਰ, ਘਰ &amp; ਵਿਹੜਾ &mdash; ਮੁਫ਼ਤ ਸ਼ਿਪਿੰਗ{%- else -%}Ameublo Direct | Meubles, maison et cour &mdash; Livraison gratuite{%- endif -%}
+      {%- elsif request.page_type == 'product' and lc_loc != 'fr' and product.title != blank -%}
+        {{ product.title }} | Furnish Direct
       {%- else -%}
         {{ page_title }}
         {%- if current_tags %} &ndash; tagged "{{ current_tags | join: ', ' }}"{% endif -%}
         {%- if current_page != 1 %} &ndash; Page {{ current_page }}{% endif -%}
-        {%- unless page_title contains shop.name %} &ndash; {% if lc_loc == 'en' %}Furnish Direct{% else %}{{ shop.name }}{% endif %}{% endunless -%}
+        {%- unless page_title contains shop.name or page_title contains 'Furnish Direct' %} &ndash; {% if lc_loc == 'en' %}Furnish Direct{% elsif lc_loc == 'es' %}Furnish Direct{% elsif lc_loc == 'pa' %}Furnish Direct{% else %}{{ shop.name }}{% endif %}{% endunless -%}
       {%- endif -%}
     </title>
 
     {% if request.page_type == 'index' %}
-      <meta name="description" content="Aménagez votre patio et votre jardin pour l'été québécois : mobilier d'extérieur, BBQ, déco et accessoires, livrés gratuitement partout au Canada.">
+      <meta name="description" content="{% if lc_loc == 'en' %}Furniture, home essentials, yard, pet and leisure products, delivered free across Canada. Pay in 4 interest-free instalments.{% elsif lc_loc == 'es' %}Muebles, artículos esenciales para el hogar, jardín, mascotas y ocio, con envío gratis a todo Canadá. Paga en 4 cuotas sin interés.{% elsif lc_loc == 'pa' %}ਫ਼ਰਨੀਚਰ, ਘਰ ਦਾ ਜ਼ਰੂਰੀ ਸਾਮਾਨ, ਵਿਹੜੇ, ਪਾਲਤੂ ਜਾਨਵਰਾਂ ਅਤੇ ਮਨੋਰੰਜਨ ਦੇ ਉਤਪਾਦ, ਪੂਰੇ ਕੈਨੇਡਾ ਵਿੱਚ ਮੁਫ਼ਤ ਡਿਲੀਵਰੀ। 4 ਬਿਨਾ ਵਿਆਜ ਵਾਲੀਆਂ ਕਿਸ਼ਤਾਂ ਵਿੱਚ ਭੁਗਤਾਨ ਕਰੋ।{% else %}Meubles, articles pour la maison, la cour, les animaux et les loisirs, livrés gratuitement partout au Canada. Paiement en 4 fois sans intérêts.{% endif %}">
     {% elsif page_description %}
       <meta name="description" content="{{ page_description | escape }}">
+    {% elsif request.page_type == 'collection' and collection %}
+      <meta name="description" content="{% if lc_loc == 'en' %}Shop {% if collection.handle == 'all' %}all our products{% else %}{{ collection.title | escape }}{% endif %} at Furnish Direct: free shipping across Canada, 30-day returns and secure payment.{% elsif lc_loc == 'es' %}Compra {% if collection.handle == 'all' %}todos nuestros productos{% else %}{{ collection.title | escape }}{% endif %} en Furnish Direct: envío gratis a todo Canadá, devoluciones en 30 días y pago seguro.{% elsif lc_loc == 'pa' %}Furnish Direct 'ਤੇ {% if collection.handle == 'all' %}ਸਾਡੇ ਸਾਰੇ ਪ੍ਰੋਡਕਟਾਂ{% else %}{{ collection.title | escape }}{% endif %} ਦੀ ਖਰੀਦਦਾਰੀ ਕਰੋ: ਪੂਰੇ ਕੈਨੇਡਾ ਵਿੱਚ ਮੁਫ਼ਤ ਸ਼ਿਪਿੰਗ, 30-ਦਿਨਾਂ ਦੀ ਵਾਪਸੀ ਅਤੇ ਸੁਰੱਖਿਅਤ ਭੁਗਤਾਨ।{% else %}Magasinez {% if collection.handle == 'all' %}tous nos produits{% else %}{{ collection.title | escape }}{% endif %} chez Ameublo Direct : livraison gratuite partout au Canada, retours 30 jours et paiement sécurisé.{% endif %}">
+    {% elsif request.page_type == 'blog' %}
+      <meta name="description" content="{% if lc_loc == 'en' %}Furniture, home and yard tips and buying guides from Furnish Direct.{% elsif lc_loc == 'es' %}Consejos sobre muebles, hogar y jardín y guías de compra de Furnish Direct.{% elsif lc_loc == 'pa' %}Furnish Direct ਵੱਲੋਂ ਫ਼ਰਨੀਚਰ, ਘਰ ਅਤੇ ਵਿਹੜੇ ਲਈ ਸੁਝਾਅ ਅਤੇ ਖ਼ਰੀਦਦਾਰੀ ਗਾਈਡਾਂ।{% else %}Conseils, idées et guides d'achat pour la maison, la cour et les animaux, par Ameublo Direct.{% endif %}">
     {% endif %}
 
     {% render 'meta-tags' %}
@@ -302,6 +322,7 @@
     {% endstyle %}
 
     {{ 'base.css' | asset_url | stylesheet_tag }}
+    {{ 'lc-brand.css' | asset_url | stylesheet_tag }}
     <link rel="stylesheet" href="{{ 'component-cart-items.css' | asset_url }}" media="print" onload="this.media='all'">
 
     {%- if settings.cart_type == 'drawer' -%}
@@ -312,16 +333,7 @@
       {{ 'component-discounts.css' | asset_url | stylesheet_tag }}
     {%- endif -%}
 
-    {%- unless settings.type_body_font.system? -%}
-      {% comment %}theme-check-disable AssetPreload{% endcomment %}
-      <link rel="preload" as="font" href="{{ settings.type_body_font | font_url }}" type="font/woff2" crossorigin>
-      {% comment %}theme-check-enable AssetPreload{% endcomment %}
-    {%- endunless -%}
-    {%- unless settings.type_header_font.system? -%}
-      {% comment %}theme-check-disable AssetPreload{% endcomment %}
-      <link rel="preload" as="font" href="{{ settings.type_header_font | font_url }}" type="font/woff2" crossorigin>
-      {% comment %}theme-check-enable AssetPreload{% endcomment %}
-    {%- endunless -%}
+    {%- comment -%} Redesign 2026-10-16: the Shopify-hosted fonts from settings (Jost / DM Sans) are no longer used — lc-brand.css points every font variable at Fraunces/Manrope — so their preloads are gone (two fewer font downloads per page). {%- endcomment -%}
 
     {%- if localization.available_countries.size > 1 or localization.available_languages.size > 1 -%}
       {{ 'component-localization-form.css' | asset_url | stylesheet_tag: preload: true }}
@@ -348,6 +360,26 @@
 <meta name="p:domain_verify" content="848f4b63265c8afcedd2f5e255f0522f"/>
   {% render 'lc-structured-data', product: product %}
   {% render 'lc-gcr-optin' %}
+    <!-- Klaviyo onsite (2026-10-14): Viewed Product / Active on Site for browse-abandonment. XAvTkS = public company key. -->
+    <script>window._klOnsite=window._klOnsite||[];window.klaviyo=window.klaviyo||{push:function(){window._klOnsite.push.apply(window._klOnsite,arguments);}};</script>
+    <script async src="https://static.klaviyo.com/onsite/js/XAvTkS/klaviyo.js"></script>
+{%- if template contains 'product' and product -%}
+    <script>
+      try {
+        window.klaviyo.push(['track', 'Viewed Product', {
+          ProductName: {{ product.title | json }},
+          ProductID: {{ product.id | json }},
+          SKU: {{ product.selected_or_first_available_variant.sku | json }},
+          Categories: {{ product.type | json }},
+          ImageURL: {{ product.featured_image | image_url: width: 600 | prepend: 'https:' | json }},
+          URL: {{ shop.url | append: product.url | json }},
+          Brand: "Ameublo Direct",
+          Price: {{ product.selected_or_first_available_variant.price | money_without_currency | json }},
+          CompareAtPrice: {{ product.selected_or_first_available_variant.compare_at_price | money_without_currency | json }}
+        }]);
+      } catch (e) {}
+    </script>
+{%- endif -%}
 </head>
 
   <body class="gradient{% if settings.animations_hover_elements != 'none' %} animate--hover-{{ settings.animations_hover_elements }}{% endif %}">
@@ -427,7 +459,7 @@
 
     <!-- Floating Messenger button -->
     {%- assign loc = request.locale.iso_code | downcase -%}
-    {%- if loc == 'en' -%}{%- assign msgr_label = 'Chat with us!' -%}{%- else -%}{%- assign msgr_label = 'Chattez avec nous!' -%}{%- endif -%}
+    {%- if loc != 'fr' -%}{%- assign msgr_label = 'Chat with us!' -%}{%- else -%}{%- assign msgr_label = 'Chattez avec nous!' -%}{%- endif -%}
     <a href="https://m.me/AmeubloDirect" target="_blank" rel="noopener" class="lc-msgr" data-umami-event="Messenger Click" aria-label="{{ msgr_label }}" data-tip="{{ msgr_label }}">
       <svg viewBox="0 0 24 24" fill="white" width="28" height="28" aria-hidden="true"><path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.906 1.272 5.506 3.296 7.3V22l3.22-1.778c.86.237 1.77.365 2.714.365 5.523 0 10-4.144 10-9.244S17.523 2 12 2zm1.006 12.43l-2.548-2.72-4.97 2.72 5.467-5.808 2.61 2.72 4.908-2.72-5.467 5.808z"/></svg>
     </a>
@@ -438,9 +470,22 @@
       .lc-msgr::before{content:"";position:absolute;right:62px;top:50%;transform:translateY(-50%);border:6px solid transparent;border-left-color:#1A1A2E;opacity:0;pointer-events:none;transition:opacity .15s ease}
       .lc-msgr:hover::after,.lc-msgr:hover::before{opacity:1}
       @keyframes lc-msgr-pulse{0%{box-shadow:0 4px 14px rgba(0,0,0,.25),0 0 0 0 rgba(0,153,255,.5)}70%{box-shadow:0 4px 14px rgba(0,0,0,.25),0 0 0 14px rgba(0,153,255,0)}100%{box-shadow:0 4px 14px rgba(0,0,0,.25),0 0 0 0 rgba(0,153,255,0)}}
-      @media (max-width:749px){.lc-msgr{bottom:90px;right:16px}.lc-msgr::after,.lc-msgr::before{display:none}}
+      @media (max-width:749px){.lc-msgr{bottom:90px;right:16px}.lc-msgr::after,.lc-msgr::before{display:none}
+      /* La pastille est en position:fixed : en bas de page elle se posait sur la
+         rangée des moyens de paiement du footer (constaté en QA mobile 2026-09-13).
+         On réserve la hauteur de la pastille + sa marge sous le footer pour que le
+         dernier contenu passe au-dessus. Le cadrage de la pastille ne bouge pas. */
+      .footer{padding-bottom:88px}}
       @media (prefers-reduced-motion:reduce){.lc-msgr{animation:none}}
+      {%- comment -%} 2026-10-16: on phone product pages three floating widgets stacked (Messenger, assistant, sticky add-to-cart). The assistant already answers there, so Messenger steps aside; desktop and other pages unchanged. {%- endcomment -%}
+      {%- if request.page_type == 'product' -%}@media (max-width:749px){.lc-msgr{display:none!important}}{%- endif -%}
+      {%- comment -%} 2026-10-23: on the phone cart page the fixed bubbles (Messenger, assistant) sat over the total and the "Payer" button; they step aside there. {%- endcomment -%}
+      {%- if request.page_type == 'cart' -%}@media (max-width:749px){.lc-msgr,.lc-asst__fab{display:none!important}}{%- endif -%}
+      {%- comment -%} 2026-10-24 (Mat): the welcome wheel is the conversion tool. The assistant mascot is hidden everywhere; Messenger stays on desktop only (phones keep the bottom of the screen free for the buy button). {%- endcomment -%}
+      .lc-asst__fab{display:none!important}
+      @media (max-width:749px){.lc-msgr{display:none!important}}
     </style>
+      {% render 'lc-roue' %}
       {% render 'lc-assistant-widget' %}
   </body>
 </html>
