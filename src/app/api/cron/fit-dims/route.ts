@@ -21,8 +21,8 @@ export async function GET(request: Request) {
     const result = await trackCron(
       apply ? "fit-dims" : "fit-dims-dryrun",
       () => syncFitDims({ apply }),
-      (r) => `products=${r.products} toWrite=${r.toWrite} unchanged=${r.unchanged} conflicts=${r.pageSizeConflict}` +
-        `${r.dryRun ? " [dry-run]" : ` written=${r.written} failed=${r.failed}${r.deferred ? ` deferred=${r.deferred}` : ""}`}`,
+      (r) => `products=${r.products} toWrite=${r.toWrite} unchanged=${r.unchanged} conflicts=${r.pageSizeConflict} stale=${r.staleToRemove}` +
+        `${r.dryRun ? " [dry-run]" : ` written=${r.written} removed=${r.removed} failed=${r.failed}${r.deferred ? ` deferred=${r.deferred}` : ""}`}`,
     );
     const { plan, conflicts, ...summary } = result;
     return NextResponse.json(
