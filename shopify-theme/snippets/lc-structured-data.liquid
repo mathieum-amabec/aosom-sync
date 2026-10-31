@@ -49,12 +49,15 @@
     assign size_varies = false
     for opt in product.options_with_values
       assign name_down = opt.name | downcase
-      if name_down contains 'couleur' or name_down contains 'color' or name_down contains 'colour'
+      comment
+        es/pa translate the option names too ("Talla", "ਰੰਗ", "ਸਾਈਜ਼"); "color" already covers es.
+      endcomment
+      if name_down contains 'couleur' or name_down contains 'color' or name_down contains 'colour' or name_down contains 'ਰੰਗ'
         assign color_idx = forloop.index0
         if opt.values.size > 1
           assign color_varies = true
         endif
-      elsif name_down contains 'taille' or name_down contains 'size' or name_down contains 'dimension' or name_down contains 'format'
+      elsif name_down contains 'taille' or name_down contains 'size' or name_down contains 'dimension' or name_down contains 'format' or name_down contains 'talla' or name_down contains 'tamaño' or name_down contains 'ਸਾਈਜ਼' or name_down contains 'ਆਕਾਰ'
         assign size_idx = forloop.index0
         if opt.values.size > 1
           assign size_varies = true
@@ -218,6 +221,13 @@
     assign bc_collection = nil
     for col in product.collections
       if bc_skip contains col.handle
+        continue
+      endif
+      comment
+        Future promo collections are skipped by pattern, so a new Black Friday / rabais-* collection
+        never becomes the category level just because it is small.
+      endcomment
+      if col.handle contains 'rabais' or col.handle contains 'black-friday' or col.handle contains 'cyber' or col.handle contains 'promo' or col.handle contains 'solde' or col.handle contains 'saisonniere'
         continue
       endif
       if bc_collection == nil or col.products_count < bc_collection.products_count or col.products_count == bc_collection.products_count and col.id < bc_collection.id
