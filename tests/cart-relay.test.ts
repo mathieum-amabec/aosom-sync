@@ -83,8 +83,12 @@ describe("selectCarts", () => {
     expect(reasons([ev()], ctx({ state }))).toEqual(["cooldown"]);
     expect(selectCarts([ev()], ctx({ state: { ...emptyState(), profiles: { p1: ago(60 * 24 * 8) } } }), now).send).toHaveLength(1);
   });
-  it("skips a profile relance-paiement already reminded (nobody gets both for the same session)", () => {
+  it("skips a profile relance-paiement reminded in the last 72 h, not longer", () => {
     expect(reasons([ev()], ctx({ relanceProfiles: { p1: ago(60 * 24) } }))).toEqual(["relance-paiement"]);
+    expect(reasons([ev()], ctx({ relanceProfiles: { p1: ago(60 * 71) } }))).toEqual(["relance-paiement"]);
+    // 2026-10-31 regression: a checkout reminder 3–7 days old used to block the cart email.
+    expect(selectCarts([ev()], ctx({ relanceProfiles: { p1: ago(60 * 73) } }), now).send).toHaveLength(1);
+    expect(selectCarts([ev()], ctx({ relanceProfiles: { p1: ago(60 * 24 * 5) } }), now).send).toHaveLength(1);
   });
   it("never emails the same cart twice, nor an address without email or an internal one", () => {
     expect(reasons([ev()], ctx({ state: { ...emptyState(), events: { e1: ago(10) } } }))).toEqual(["done"]);

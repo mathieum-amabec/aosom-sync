@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.53] - 2026-10-31
+
+### Fixed
+
+- **Cart-abandon email relay sent nothing for a week.** A checkout reminder (relance-paiement) blocked the cart email for 7 days, while relance-paiement itself only waits 72 h. On 2026-10-31 the only two shoppers who added to cart without ordering had each had a checkout reminder 2–5.5 days earlier, so every real cart was skipped. That block is now 72 h (`RELANCE_COOLDOWN_H`). The relay's own 7-day repeat cooldown is unchanged.
+
 ## [0.5.107.52] - 2026-10-30
 
 ### Changed
