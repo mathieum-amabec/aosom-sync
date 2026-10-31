@@ -1,14 +1,39 @@
 {%- comment -%}
-  lc-announcement — one static line, bilingual in Liquid (no theme translations to maintain).
+  lc-announcement — one line, bilingual in Liquid (no theme translations to maintain); seasonal line below.
   Redesign 2026-10-16. Desktop shows the three claims; phones show two.
 {%- endcomment -%}
 {%- assign loc = request.locale.iso_code | downcase -%}
 {%- assign ret_url = routes.root_url | append: '/pages/politique-de-retour' | replace: '//pages', '/pages' -%}
+{%- comment -%}
+  Seasonal line (shop date), fr/en only — es/pa keep the usual claims:
+  - Black Friday week Nov 20–30, only once the collection is really published (an unpublished collection
+    has no products here), so the link can never 404.
+  - Christmas cut-off Dec 1–7: handling 1–3 + transit 3–9 business days → Dec 7 is the last safe day.
+{%- endcomment -%}
+{%- liquid
+  assign lc_md = 'now' | date: '%m%d' | plus: 0
+  assign lc_season = ''
+  if loc == 'fr' or loc == 'en'
+    assign lc_bf_count = collections['black-friday-gros-rabais'].products_count | default: 0
+    if lc_md >= 1120 and lc_md <= 1130 and lc_bf_count > 0
+      assign lc_season = 'bf'
+    elsif lc_md >= 1201 and lc_md <= 1207
+      assign lc_season = 'xmas'
+    endif
+  endif
+  assign bf_url = routes.root_url | append: '/collections/black-friday-gros-rabais' | replace: '//collections', '/collections'
+-%}
 <div class="lc-ann" role="region" aria-label="{% if loc == 'en' %}Announcement{% elsif loc == 'es' %}Anuncio{% elsif loc == 'pa' %}ਐਲਾਨ{% else %}Annonce{% endif %}">
+{%- if lc_season == 'bf' %}
+  <a href="{{ bf_url }}">🔥 {% if loc == 'en' %}Black Friday: our biggest deals of the year — shop now{% else %}Vendredi fou : nos plus gros rabais de l'année — magasiner{% endif %}</a>
+{%- elsif lc_season == 'xmas' %}
+  <span>🎄 {% if loc == 'en' %}Order by December 7 for delivery before Christmas{% else %}Commandez d'ici le 7 décembre pour une livraison avant Noël{% endif %}</span>
+{%- else %}
   <span>🚚 <span class="lc-ann__d">{% if loc == 'en' %}Free shipping across Canada{% elsif loc == 'es' %}Envío gratis a todo Canadá{% elsif loc == 'pa' %}ਪੂਰੇ ਕੈਨੇਡਾ ਵਿੱਚ ਮੁਫ਼ਤ ਸ਼ਿਪਿੰਗ{% else %}Livraison gratuite partout au Canada{% endif %}</span><span class="lc-ann__m">{% if loc == 'en' %}Free shipping in Canada{% elsif loc == 'es' %}Envío gratis en Canadá{% elsif loc == 'pa' %}ਕੈਨੇਡਾ ਵਿੱਚ ਮੁਫ਼ਤ ਸ਼ਿਪਿੰਗ{% else %}Livraison gratuite au Canada{% endif %}</span></span>
   <span class="lc-ann__dot" aria-hidden="true">•</span>
   <a href="{{ ret_url }}">{% if loc == 'en' %}30-day returns{% elsif loc == 'es' %}Devoluciones en 30 días{% elsif loc == 'pa' %}30-ਦਿਨਾਂ ਵਿੱਚ ਵਾਪਸੀ{% else %}Retours 30 jours{% endif %}</a>
   <span class="lc-ann__d"><span class="lc-ann__dot" aria-hidden="true">•</span>{% if loc == 'en' %}Secure payment{% elsif loc == 'es' %}Pago seguro{% elsif loc == 'pa' %}ਸੁਰੱਖਿਅਤ ਭੁਗਤਾਨ{% else %}Paiement sécurisé{% endif %}</span>
+{%- endif %}
 </div>
 {% schema %}
 {
