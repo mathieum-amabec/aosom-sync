@@ -140,6 +140,18 @@ describe("rendering", () => {
     expect(cartSubject("fr").subject).toContain("panier");
     expect(cartSubject("en").subject).toContain("cart");
   });
+  it("uses the Black Friday subject only Nov 20–30 (Toronto date), still without promising a discount", () => {
+    const bf = cartSubject("fr", new Date("2026-11-27T15:00:00Z"));
+    expect(bf.subject).toContain("Vendredi fou");
+    expect(cartSubject("en", new Date("2026-11-30T20:00:00Z")).subject).toContain("Black Friday");
+    // 2026-11-20 00:30 Toronto = 05:30 UTC → in; 2026-12-01 03:00 UTC is still Nov 30 in Toronto → in
+    expect(cartSubject("fr", new Date("2026-11-20T05:30:00Z")).subject).toContain("Vendredi fou");
+    expect(cartSubject("fr", new Date("2026-12-01T03:00:00Z")).subject).toContain("Vendredi fou");
+    expect(cartSubject("fr", new Date("2026-12-01T06:00:00Z")).subject).not.toContain("Vendredi fou");
+    expect(cartSubject("fr", new Date("2026-11-19T12:00:00Z")).subject).not.toContain("Vendredi fou");
+    const all = [bf.subject, bf.preview, cartSubject("en", new Date("2026-11-27T15:00:00Z")).preview].join("\n");
+    expect(all).not.toMatch(/rabais|discount|promo|coupon|code /i);
+  });
   it("never names a supplier, and offers no discount or code", () => {
     const all = [buildTemplateHtml("fr"), buildTemplateHtml("en"), cartSubject("fr").subject, cartSubject("fr").preview, cartSubject("en").subject, cartSubject("en").preview].join("\n");
     expect(all).not.toMatch(/aosom|homcom|outsunny|pawhut|costway|wayfair/i);
