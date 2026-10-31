@@ -1,0 +1,21 @@
+{%- comment -%}
+  lc-announcement — one static line, bilingual in Liquid (no theme translations to maintain).
+  Redesign 2026-10-16. Desktop shows the three claims; phones show two.
+{%- endcomment -%}
+{%- assign loc = request.locale.iso_code | downcase -%}
+{%- assign ret_url = routes.root_url | append: '/pages/politique-de-retour' | replace: '//pages', '/pages' -%}
+<div class="lc-ann" role="region" aria-label="{% if loc == 'en' %}Announcement{% elsif loc == 'es' %}Anuncio{% elsif loc == 'pa' %}ਐਲਾਨ{% else %}Annonce{% endif %}">
+  <span>🚚 <span class="lc-ann__d">{% if loc == 'en' %}Free shipping across Canada{% elsif loc == 'es' %}Envío gratis a todo Canadá{% elsif loc == 'pa' %}ਪੂਰੇ ਕੈਨੇਡਾ ਵਿੱਚ ਮੁਫ਼ਤ ਸ਼ਿਪਿੰਗ{% else %}Livraison gratuite partout au Canada{% endif %}</span><span class="lc-ann__m">{% if loc == 'en' %}Free shipping in Canada{% elsif loc == 'es' %}Envío gratis en Canadá{% elsif loc == 'pa' %}ਕੈਨੇਡਾ ਵਿੱਚ ਮੁਫ਼ਤ ਸ਼ਿਪਿੰਗ{% else %}Livraison gratuite au Canada{% endif %}</span></span>
+  <span class="lc-ann__dot" aria-hidden="true">•</span>
+  <a href="{{ ret_url }}">{% if loc == 'en' %}30-day returns{% elsif loc == 'es' %}Devoluciones en 30 días{% elsif loc == 'pa' %}30-ਦਿਨਾਂ ਵਿੱਚ ਵਾਪਸੀ{% else %}Retours 30 jours{% endif %}</a>
+  <span class="lc-ann__d"><span class="lc-ann__dot" aria-hidden="true">•</span>{% if loc == 'en' %}Secure payment{% elsif loc == 'es' %}Pago seguro{% elsif loc == 'pa' %}ਸੁਰੱਖਿਅਤ ਭੁਗਤਾਨ{% else %}Paiement sécurisé{% endif %}</span>
+</div>
+{% schema %}
+{
+  "name": "Annonce (Ameublo)",
+  "class": "announcement-bar-section",
+  "enabled_on": { "groups": ["header"] },
+  "settings": [],
+  "presets": [{ "name": "Annonce (Ameublo)" }]
+}
+{% endschema %}
