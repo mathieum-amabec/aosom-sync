@@ -33,6 +33,8 @@ for (const key of FILES) {
   const baseline = execFileSync("git", ["show", `${BASE}:shopify-theme/${key}`], { encoding: "utf8" });
   const next = fs.readFileSync(`shopify-theme/${key}`, "utf8");
   const current = await getAsset(key, themeId);
+  // A file already equal to the new version was written by an earlier, interrupted --apply.
+  if (norm(current) === norm(next)) { console.log(`${key}: already applied`); continue; }
   const same = norm(current) === norm(baseline);
   console.log(`${key}: draft ${same ? "matches" : "DIFFERS FROM"} the live baseline · change ${norm(next) === norm(baseline) ? "none" : "ready"}`);
   if (!same) ok = false;
@@ -48,7 +50,12 @@ if (!APPLY) {
 }
 for (const { key, next } of plan) {
   await putAsset(key, next, themeId);
-  const back = await getAsset(key, themeId);
+  // Shopify can serve the previous version for a few seconds after a PUT: retry before failing.
+  let back = "";
+  for (let i = 0; i < 5 && norm(back) !== norm(next); i++) {
+    if (i) await new Promise((r) => setTimeout(r, 3000));
+    back = await getAsset(key, themeId);
+  }
   if (norm(back) !== norm(next)) throw new Error(`read-back mismatch on ${key}`);
   console.log(`✔ ${key}`);
 }
