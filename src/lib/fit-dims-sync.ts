@@ -33,6 +33,9 @@ export interface FitDimsSyncResult {
   noFeedMatch: number;
   feedButNoSize: number;
   pageSizeConflict: number;
+  /** Conflicting products that still carry an older (wrong) value, removed on apply. */
+  staleToRemove: number;
+  removed: number;
   written: number;
   failed: number;
   /** Planned writes beyond the per-run cap, picked up by the next run. */
@@ -46,7 +49,7 @@ interface ProductNode {
   handle: string;
   status: string;
   description: string;
-  variants: { nodes: { sku: string | null }[] };
+  variants: { nodes: { sku: string | null; title: string }[] };
   metafield: { value: string } | null;
 }
 
@@ -72,7 +75,7 @@ export async function syncFitDims(
   do {
     const r: { data?: { products: { nodes: ProductNode[]; pageInfo: { hasNextPage: boolean; endCursor: string } } }; errors?: { message: string }[] } = await gql(
       `query($after: String) { products(first: 100, after: $after) {
-        nodes { id handle status description variants(first: 100) { nodes { sku } } metafield(namespace: "${FIT_DIMS_NAMESPACE}", key: "${FIT_DIMS_KEY}") { value } }
+        nodes { id handle status description variants(first: 100) { nodes { sku title } } metafield(namespace: "${FIT_DIMS_NAMESPACE}", key: "${FIT_DIMS_KEY}") { value } }
         pageInfo { hasNextPage endCursor } } }`,
       { after: cursor },
     );
@@ -83,6 +86,7 @@ export async function syncFitDims(
 
   const plan: FitDimsPlanItem[] = [];
   const conflicts: string[] = [];
+  const stale: { id: string; handle: string }[] = [];
   let noFeedMatch = 0, feedButNoSize = 0, unchanged = 0;
   for (const p of products) {
     const skus = p.variants.nodes.map((v) => (v.sku || "").trim()).filter(Boolean);
@@ -93,8 +97,16 @@ export async function syncFitDims(
     if (rows.length === 0) { noFeedMatch++; continue; }
     const built = buildFitDims(rows);
     if (!built) { feedButNoSize++; continue; }
-    const dims = checkAgainstPage(built, p.description);
-    if (!dims) { conflicts.push(p.handle); continue; }
+    // The page size can live in the description or only in a variant title ("Gris / 103 x 71 x 69 cm"); without
+    // the titles, 14 feed sizes that were really inches passed as cm (2026-10-31: a 182 cm kayak shown at 72 cm).
+    const pageText = [p.description, ...p.variants.nodes.map((v) => v.title)].join("\n");
+    const dims = checkAgainstPage(built, pageText);
+    if (!dims) {
+      conflicts.push(p.handle);
+      // A value written before this check existed is wrong too: remove it so the checker hides instead of lying.
+      if (p.metafield) stale.push({ id: p.id, handle: p.handle });
+      continue;
+    }
     const value = serializeFitDims(dims);
     if (p.metafield?.value === value) { unchanged++; continue; }
     plan.push({ id: p.id, handle: p.handle, status: p.status, value, skus: skus.length, matched: Object.keys(dims.s).length });
@@ -109,6 +121,8 @@ export async function syncFitDims(
     noFeedMatch,
     feedButNoSize,
     pageSizeConflict: conflicts.length,
+    staleToRemove: stale.length,
+    removed: 0,
     written: 0,
     failed: 0,
     deferred: 0,
@@ -116,6 +130,22 @@ export async function syncFitDims(
     conflicts,
   };
   if (!opts.apply) return result;
+
+  for (let i = 0; i < stale.length; i += BATCH) {
+    const batch = stale.slice(i, i + BATCH);
+    try {
+      const r = await gql<{ metafieldsDelete: { userErrors: { field: string[]; message: string }[] } }>(
+        `mutation($m: [MetafieldIdentifierInput!]!) { metafieldsDelete(metafields: $m) { userErrors { field message } } }`,
+        { m: batch.map((x) => ({ ownerId: x.id, namespace: FIT_DIMS_NAMESPACE, key: FIT_DIMS_KEY })) },
+      );
+      const errs = r.data?.metafieldsDelete.userErrors ?? [{ field: [], message: JSON.stringify(r.errors) }];
+      if (errs.length) { result.failed += batch.length; console.error(`[fit-dims] delete failed: ${JSON.stringify(errs).slice(0, 300)}`); continue; }
+      result.removed += batch.length;
+    } catch (err) {
+      result.failed += batch.length;
+      console.error(`[fit-dims] delete error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   const cap = Math.min(opts.limit ?? FIT_DIMS_MAX_WRITES_PER_RUN, FIT_DIMS_MAX_WRITES_PER_RUN);
   const todo = plan.slice(0, cap);

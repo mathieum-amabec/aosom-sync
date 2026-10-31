@@ -5,23 +5,28 @@ import type { AosomProduct } from "@/types/aosom";
 const feedRow = (sku: string, l: string, w: string, h: string, box = "50x20x10 cm") =>
   ({ sku, dimensionsRaw: { length: l, width: w, height: h }, boxSize: box }) as unknown as AosomProduct;
 
-function fakeShopify(nodes: Array<{ id: string; handle: string; skus: string[]; description?: string; current?: string }>) {
+function fakeShopify(nodes: Array<{ id: string; handle: string; skus: string[]; description?: string; current?: string; variantTitle?: string }>) {
   const writes: Array<{ ownerId: string; value: string }> = [];
+  const deletes: Array<{ ownerId: string }> = [];
   const gql = vi.fn(async (query: string, vars?: Record<string, unknown>) => {
     if (query.includes("metafieldsSet")) {
       writes.push(...(vars!.m as Array<{ ownerId: string; value: string }>));
       return { data: { metafieldsSet: { userErrors: [] } } };
     }
+    if (query.includes("metafieldsDelete")) {
+      deletes.push(...(vars!.m as Array<{ ownerId: string }>));
+      return { data: { metafieldsDelete: { userErrors: [] } } };
+    }
     return {
       data: {
         products: {
-          nodes: nodes.map((n) => ({ id: n.id, handle: n.handle, status: "ACTIVE", description: n.description ?? "", variants: { nodes: n.skus.map((sku) => ({ sku })) }, metafield: n.current ? { value: n.current } : null })),
+          nodes: nodes.map((n) => ({ id: n.id, handle: n.handle, status: "ACTIVE", description: n.description ?? "", variants: { nodes: n.skus.map((sku) => ({ sku, title: n.variantTitle ?? "Default Title" })) }, metafield: n.current ? { value: n.current } : null })),
           pageInfo: { hasNextPage: false, endCursor: "" },
         },
       },
     };
   });
-  return { gql: gql as never, writes };
+  return { gql: gql as never, writes, deletes };
 }
 
 describe("syncFitDims (daily safety net)", () => {
@@ -48,6 +53,20 @@ describe("syncFitDims (daily safety net)", () => {
     ]);
     const r = await syncFitDims({ apply: true }, { feed, gql: again.gql });
     expect(r).toMatchObject({ toWrite: 0, unchanged: 2, written: 0 });
+  });
+
+  it("checks the size in variant titles too, and removes a stored value the page contradicts", async () => {
+    // Feed says "40.6" with a cm unit but it is really inches; only the variant title states the true cm size.
+    const feed = async () => [feedRow("K", "40.60 cm", "28.00 cm", "27.20 cm")];
+    const s = fakeShopify([
+      { id: "gid://p/9", handle: "compost-bin", skus: ["K"], variantTitle: "Noir / 103 x 71 x 69 cm", current: '{"v":1,"s":{"K":{"p":[40.6,28,27.2]}}}' },
+    ]);
+    const dry = await syncFitDims({}, { feed, gql: s.gql });
+    expect(dry).toMatchObject({ toWrite: 0, pageSizeConflict: 1, staleToRemove: 1, removed: 0 });
+    const r = await syncFitDims({ apply: true }, { feed, gql: s.gql });
+    expect(r.removed).toBe(1);
+    expect(s.deletes.map((d) => d.ownerId)).toEqual(["gid://p/9"]);
+    expect(s.writes).toEqual([]);
   });
 
   it("caps writes per run and reports the rest as deferred", async () => {
