@@ -1,5 +1,23 @@
 <!doctype html>
-<html class="js" lang="{{ request.locale.iso_code }}">
+{%- comment -%} SEO audit 2026-10-31 — blog articles have NO translations: the "blog" blog is written in English,
+  "actualites" and "guides" in French. Shopify still serves every article on every locale/domain, so the English
+  articles showed up on ameublodirect.ca as lang="fr" and the French ones on furnishdirect.ca as en-CA. A blog page
+  served in a locale that isn't its writing language gets its real lang attribute and noindex (links still followed). {%- endcomment -%}
+{%- liquid
+  assign lc_doc_lang = request.locale.iso_code
+  assign lc_noindex = false
+  if request.page_type == 'article' or request.page_type == 'blog'
+    assign lc_blog_lang = 'fr'
+    if blog.handle == 'blog'
+      assign lc_blog_lang = 'en'
+    endif
+    if lc_blog_lang != request.locale.iso_code
+      assign lc_noindex = true
+      assign lc_doc_lang = lc_blog_lang
+    endif
+  endif
+-%}
+<html class="js" lang="{{ lc_doc_lang }}">
   <head>
   <script>window.lcT=function(g,e,f,s,p){return g==='fr'?f:(g==='es'&&s!=null?s:(g==='pa'&&p!=null?p:e));};</script>
     <meta charset="utf-8">
@@ -7,6 +25,9 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="theme-color" content="">
     <link rel="canonical" href="{{ canonical_url }}">
+    {%- if lc_noindex %}
+    <meta name="robots" content="noindex, follow">
+    {%- endif %}
     {%- if request.page_type == 'index' -%}
       <link rel="preload" as="image" href="{{ 'lc-hero.jpg' | asset_url }}" media="(min-width: 750px)" fetchpriority="high">
     {%- endif -%}
@@ -51,6 +72,8 @@
       <meta name="description" content="{% if lc_loc == 'en' %}Furniture, home essentials, yard, pet and leisure products, delivered free across Canada. Pay in 4 interest-free instalments.{% elsif lc_loc == 'es' %}Muebles, artículos esenciales para el hogar, jardín, mascotas y ocio, con envío gratis a todo Canadá. Paga en 4 cuotas sin interés.{% elsif lc_loc == 'pa' %}ਫ਼ਰਨੀਚਰ, ਘਰ ਦਾ ਜ਼ਰੂਰੀ ਸਾਮਾਨ, ਵਿਹੜੇ, ਪਾਲਤੂ ਜਾਨਵਰਾਂ ਅਤੇ ਮਨੋਰੰਜਨ ਦੇ ਉਤਪਾਦ, ਪੂਰੇ ਕੈਨੇਡਾ ਵਿੱਚ ਮੁਫ਼ਤ ਡਿਲੀਵਰੀ। 4 ਬਿਨਾ ਵਿਆਜ ਵਾਲੀਆਂ ਕਿਸ਼ਤਾਂ ਵਿੱਚ ਭੁਗਤਾਨ ਕਰੋ।{% else %}Meubles, articles pour la maison, la cour, les animaux et les loisirs, livrés gratuitement partout au Canada. Paiement en 4 fois sans intérêts.{% endif %}">
     {% elsif page_description %}
       <meta name="description" content="{{ page_description | escape }}">
+    {% elsif request.page_type == 'policy' %}
+      <meta name="description" content="{% if lc_loc == 'en' or lc_loc == 'es' or lc_loc == 'pa' %}{{ page_title | escape }} — Furnish Direct: free shipping across Canada and 30-day returns.{% else %}{{ page_title | escape }} — Ameublo Direct : livraison gratuite partout au Canada et retours sous 30 jours.{% endif %}">
     {% elsif request.page_type == 'collection' and collection %}
       <meta name="description" content="{% if lc_loc == 'en' %}Shop {% if collection.handle == 'all' %}all our products{% else %}{{ collection.title | escape }}{% endif %} at Furnish Direct: free shipping across Canada, 30-day returns and secure payment.{% elsif lc_loc == 'es' %}Compra {% if collection.handle == 'all' %}todos nuestros productos{% else %}{{ collection.title | escape }}{% endif %} en Furnish Direct: envío gratis a todo Canadá, devoluciones en 30 días y pago seguro.{% elsif lc_loc == 'pa' %}Furnish Direct 'ਤੇ {% if collection.handle == 'all' %}ਸਾਡੇ ਸਾਰੇ ਪ੍ਰੋਡਕਟਾਂ{% else %}{{ collection.title | escape }}{% endif %} ਦੀ ਖਰੀਦਦਾਰੀ ਕਰੋ: ਪੂਰੇ ਕੈਨੇਡਾ ਵਿੱਚ ਮੁਫ਼ਤ ਸ਼ਿਪਿੰਗ, 30-ਦਿਨਾਂ ਦੀ ਵਾਪਸੀ ਅਤੇ ਸੁਰੱਖਿਅਤ ਭੁਗਤਾਨ।{% else %}Magasinez {% if collection.handle == 'all' %}tous nos produits{% else %}{{ collection.title | escape }}{% endif %} chez Ameublo Direct : livraison gratuite partout au Canada, retours 30 jours et paiement sécurisé.{% endif %}">
     {% elsif request.page_type == 'blog' %}

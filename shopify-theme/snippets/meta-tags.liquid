@@ -82,6 +82,9 @@
 %}
 
 <meta property="og:site_name" content="{{ og_site_name | escape }}">
+{%- comment -%} SEO audit 2026-10-31: og:locale was missing on every page. {%- endcomment -%}
+{%- assign lc_og_loc = request.locale.iso_code | downcase -%}
+<meta property="og:locale" content="{% if lc_og_loc == 'fr' %}fr_CA{% elsif lc_og_loc == 'es' %}es_CA{% elsif lc_og_loc == 'pa' %}pa_CA{% else %}en_CA{% endif %}">
 <meta property="og:url" content="{{ og_url }}">
 <meta property="og:title" content="{{ og_title | escape }}">
 <meta property="og:type" content="{{ og_type }}">
@@ -100,7 +103,8 @@
 {%- endif -%}
 
 {%- if request.page_type == 'product' -%}
-  <meta property="og:price:amount" content="{{ product.price | money_without_currency | strip_html }}">
+  {%- comment -%} Same variant as the Product JSON-LD (was product.price = the cheapest variant, even unavailable). {%- endcomment -%}
+  <meta property="og:price:amount" content="{{ product.selected_or_first_available_variant.price | money_without_currency | strip_html }}">
   <meta property="og:price:currency" content="{{ cart.currency.iso_code }}">
 {%- endif -%}
 
