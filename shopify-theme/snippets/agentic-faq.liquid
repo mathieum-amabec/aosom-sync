@@ -1,5 +1,6 @@
 {%- comment -%}
-  agentic-faq.liquid — FAQPage JSON-LD only (2026-10-15 UX pass).
+  agentic-faq.liquid — product Q&A block (when the product has custom.faq_fr / faq_en) + FAQPage
+  JSON-LD. Store-level answers (2026-10-15 UX pass) stay JSON-LD only:
 
   The visible answers now live in ONE accordion list with the store info (templates/product.json,
   block `pdp_info`): Livraison, Retours, Garantie, Montage, Entretien, Paiement sécurisé. Before,
@@ -23,12 +24,54 @@
   assign a4 = 'faq.a4' | t | replace: '&#39;', "'" | replace: '&quot;', '"' | replace: '&lt;', '<' | replace: '&gt;', '>' | replace: '&amp;', '&'
   assign q5 = 'faq.q5' | t | replace: '&#39;', "'" | replace: '&quot;', '"' | replace: '&lt;', '<' | replace: '&gt;', '>' | replace: '&amp;', '&'
   assign a5 = 'faq.a5' | t | replace: '&#39;', "'" | replace: '&quot;', '"' | replace: '&lt;', '<' | replace: '&gt;', '>' | replace: '&amp;', '&'
+
+  comment
+    Product-specific Q&A (pilot 2026-11): JSON metafields custom.faq_fr / custom.faq_en = [{q, a}],
+    written from the product's own data only. Shown visibly AND listed first in the FAQPage, so the
+    markup always matches what the page shows. es/pa have no Q&A yet: nothing product-specific there.
+  endcomment
+  assign lc_pfaq = nil
+  assign lc_pfaq_title = 'Questions sur ce produit'
+  if request.locale.iso_code == 'fr'
+    assign lc_pfaq = product.metafields.custom.faq_fr.value
+  elsif request.locale.iso_code == 'en'
+    assign lc_pfaq = product.metafields.custom.faq_en.value
+    assign lc_pfaq_title = 'Questions about this product'
+  endif
 -%}
+{%- if lc_pfaq != blank and lc_pfaq.size > 0 -%}
+  <section class="lc-pfaq" aria-labelledby="lc-pfaq-title-{{ product.id }}">
+    <h2 id="lc-pfaq-title-{{ product.id }}" class="lc-pfaq__title">{{ lc_pfaq_title }}</h2>
+    {%- for item in lc_pfaq -%}
+      <details class="lc-pfaq__item"{% if forloop.first %} open{% endif %}>
+        <summary class="lc-pfaq__q">{{ item.q | escape }}</summary>
+        <p class="lc-pfaq__a">{{ item.a | escape }}</p>
+      </details>
+    {%- endfor -%}
+  </section>
+  <style>
+    .lc-pfaq { margin: 1.5rem 0; }
+    .lc-pfaq__title { font-size: 1.15rem; margin: 0 0 .5rem; }
+    .lc-pfaq__item { border-top: 1px solid rgba(var(--color-foreground), .12); }
+    .lc-pfaq__item:last-child { border-bottom: 1px solid rgba(var(--color-foreground), .12); }
+    .lc-pfaq__q { cursor: pointer; padding: .8rem 0; font-weight: 600; list-style: none; display: flex; justify-content: space-between; gap: 1rem; }
+    .lc-pfaq__q::-webkit-details-marker { display: none; }
+    .lc-pfaq__q::after { content: '+'; font-weight: 400; }
+    .lc-pfaq__item[open] .lc-pfaq__q::after { content: '−'; }
+    .lc-pfaq__q:focus-visible { outline: 2px solid rgb(var(--color-foreground)); outline-offset: 2px; }
+    .lc-pfaq__a { margin: 0 0 .9rem; line-height: 1.55; }
+  </style>
+{%- endif -%}
 <script type="application/ld+json">
 {
   "@context": "https://schema.org/",
   "@type": "FAQPage",
   "mainEntity": [
+    {%- if lc_pfaq != blank -%}
+    {%- for item in lc_pfaq %}
+    { "@type": "Question", "name": {{ item.q | json }}, "acceptedAnswer": { "@type": "Answer", "text": {{ item.a | json }} } },
+    {%- endfor -%}
+    {%- endif %}
     { "@type": "Question", "name": {{ q2 | json }}, "acceptedAnswer": { "@type": "Answer", "text": {{ a2 | json }} } },
     { "@type": "Question", "name": {{ q5 | json }}, "acceptedAnswer": { "@type": "Answer", "text": {{ a5 | json }} } },
     { "@type": "Question", "name": {{ q4 | json }}, "acceptedAnswer": { "@type": "Answer", "text": {{ a4 | json }} } },
