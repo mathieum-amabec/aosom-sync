@@ -1,0 +1,116 @@
+{%- liquid
+  assign lc_og_en = false
+  if request.locale.iso_code != 'fr'
+    assign lc_og_en = true
+  endif
+
+  assign og_site_name = shop.name
+  assign lc_og_home_desc = "Meubles, articles pour la maison, la cour, les animaux et les loisirs, livrés gratuitement partout au Canada. Paiement en 4 fois sans intérêts."
+  assign lc_og_brand_image = 'og-ameublo-fr.jpg' | asset_url | prepend: 'https:'
+  if lc_og_en
+    assign og_site_name = 'Furnish Direct'
+    assign lc_og_home_desc = 'Furniture, home essentials, yard, pet and leisure products, delivered free across Canada. Pay in 4 interest-free instalments.'
+    assign lc_og_brand_image = 'og-ameublo-en.jpg' | asset_url | prepend: 'https:'
+  endif
+
+  assign og_title = page_title | default: og_site_name
+  assign og_url = canonical_url | default: request.origin
+  assign og_type = 'website'
+  assign og_description = page_description
+
+  if request.page_type == 'index'
+    if lc_og_en
+      assign og_title = 'Furnish Direct | Furniture, Home & Yard — Free Shipping'
+    else
+      assign og_title = 'Ameublo Direct | Meubles, maison et cour — Livraison gratuite'
+    endif
+    assign og_description = lc_og_home_desc
+  endif
+
+  comment
+    Without its own description a collection used to fall back to the shop's old all-caps slogan;
+    use the same sentence the <meta name="description"> already shows Google.
+  endcomment
+  if og_description == blank and request.page_type == 'collection' and collection
+    if lc_og_en
+      if collection.handle == 'all'
+        assign og_description = 'Shop all our products at Furnish Direct: free shipping across Canada, 30-day returns and secure payment.'
+      else
+        assign og_description = 'Shop ' | append: collection.title | append: ' at Furnish Direct: free shipping across Canada, 30-day returns and secure payment.'
+      endif
+    else
+      if collection.handle == 'all'
+        assign og_description = 'Magasinez tous nos produits chez Ameublo Direct : livraison gratuite partout au Canada, retours 30 jours et paiement sécurisé.'
+      else
+        assign og_description = 'Magasinez ' | append: collection.title | append: ' chez Ameublo Direct : livraison gratuite partout au Canada, retours 30 jours et paiement sécurisé.'
+      endif
+    endif
+  endif
+  assign lc_og_own_desc = 'product,collection,article,page,blog' | split: ','
+  unless lc_og_own_desc contains request.page_type
+    assign og_description = blank
+  endunless
+  if og_description == blank or og_description == shop.description
+    assign og_description = lc_og_home_desc
+  endif
+
+  comment
+    Share image: product/article photo when there is one, the collection's own image or first
+    product photo, else the 1200x630 brand card (never the wide logo Shopify falls back to).
+  endcomment
+  assign lc_og_image = nil
+  case request.page_type
+    when 'product'
+      assign lc_og_image = page_image
+    when 'article'
+      assign lc_og_image = article.image
+    when 'collection'
+      if collection.image
+        assign lc_og_image = collection.image
+      else
+        assign lc_og_image = collection.products.first.featured_image
+      endif
+  endcase
+
+  if request.page_type == 'product'
+    assign og_type = 'product'
+  elsif request.page_type == 'article'
+    assign og_type = 'article'
+  elsif request.page_type == 'password'
+    assign og_url = request.origin
+  endif
+%}
+
+<meta property="og:site_name" content="{{ og_site_name | escape }}">
+{%- comment -%} SEO audit 2026-10-31: og:locale was missing on every page. {%- endcomment -%}
+{%- assign lc_og_loc = request.locale.iso_code | downcase -%}
+<meta property="og:locale" content="{% if lc_og_loc == 'fr' %}fr_CA{% elsif lc_og_loc == 'es' %}es_CA{% elsif lc_og_loc == 'pa' %}pa_CA{% else %}en_CA{% endif %}">
+<meta property="og:url" content="{{ og_url }}">
+<meta property="og:title" content="{{ og_title | escape }}">
+<meta property="og:type" content="{{ og_type }}">
+<meta property="og:description" content="{{ og_description | escape }}">
+
+{%- if lc_og_image -%}
+  <meta property="og:image" content="https:{{ lc_og_image | image_url: width: 1200 }}">
+  <meta property="og:image:secure_url" content="https:{{ lc_og_image | image_url: width: 1200 }}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="{{ 1200 | divided_by: lc_og_image.aspect_ratio | round }}">
+{%- else -%}
+  <meta property="og:image" content="{{ lc_og_brand_image }}">
+  <meta property="og:image:secure_url" content="{{ lc_og_brand_image }}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+{%- endif -%}
+
+{%- if request.page_type == 'product' -%}
+  {%- comment -%} Same variant as the Product JSON-LD (was product.price = the cheapest variant, even unavailable). {%- endcomment -%}
+  <meta property="og:price:amount" content="{{ product.selected_or_first_available_variant.price | divided_by: 100.0 | round: 2 }}">
+  <meta property="og:price:currency" content="{{ cart.currency.iso_code }}">
+{%- endif -%}
+
+{%- if settings.social_twitter_link != blank -%}
+  <meta name="twitter:site" content="{{ settings.social_twitter_link | split: 'twitter.com/' | last | prepend: '@' }}">
+{%- endif -%}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ og_title | escape }}">
+<meta name="twitter:description" content="{{ og_description | escape }}">

@@ -1,5 +1,5 @@
 {%- comment -%}
-  lc-structured-data.liquid — Product + BreadcrumbList JSON-LD for the PDP.
+  lc-structured-data.liquid — Product (or ProductGroup) + BreadcrumbList JSON-LD for the PDP.
 
   Rendered from layout/theme.liquid (before </head>) rather than from the product
   section, so the markup sits in <head> where crawlers read it first.
@@ -13,6 +13,13 @@
   Product schema exists per page). Two Product entities on one URL make Google pick
   arbitrarily.
 
+  SEO audit 2026-10-31: a product with several variants is now a ProductGroup with one
+  Product + Offer per variant (hasVariant / variesBy, Google's variant markup), so the
+  price and stock of EVERY colour/size are visible to crawlers and agents — before, only
+  the selected variant's Offer was. Single-variant products keep the plain Product.
+  The breadcrumb now skips promotional collections (Liquidation, Coups de cœur, Rabais…),
+  which made the EN and FR trails disagree ("Clearance" vs the real category).
+
   Usage: {% render 'lc-structured-data', product: product %}
 {%- endcomment -%}
 
@@ -20,41 +27,102 @@
   {%- liquid
     assign v = product.selected_or_first_available_variant
     assign brand = shop.name
-    assign price_amount = v.price | divided_by: 100.0
 
     assign desc = product.description | strip_html
     assign desc = desc | replace: 'Outsunny', '' | replace: 'outsunny', '' | replace: 'OUTSUNNY', ''
     assign desc = desc | replace: 'Aosom', '' | replace: 'aosom', '' | replace: 'AOSOM', ''
-    assign desc = desc | replace: '  ', ' ' | strip | truncatewords: 60
+    assign desc = desc | replace: '  ', ' ' | strip | truncatewords: 120
 
-    assign availability = 'https://schema.org/OutOfStock'
-    if v.available
-      assign availability = 'https://schema.org/InStock'
-    endif
-
-    assign price_valid_until = 'now' | date: '%s' | plus: 31536000 | date: '%Y-%m-%d'
+    comment
+    Google wants priceValidUntil close enough to be meaningful; a year out is accepted
+    but says nothing. 30 days (2592000 s) matches the sale window the feed declares.
+  endcomment
+  assign price_valid_until = 'now' | date: '%s' | plus: 2592000 | date: '%Y-%m-%d'
     assign product_abs_url = request.origin | append: product.url
 
-    assign color = ''
+    comment
+      Option positions that carry a colour / a size (names are FR on the primary locale, EN on /en).
+    endcomment
+    assign color_idx = -1
+    assign size_idx = -1
+    assign color_varies = false
+    assign size_varies = false
     for opt in product.options_with_values
       assign name_down = opt.name | downcase
-      if name_down contains 'couleur' or name_down contains 'color'
-        assign color = opt.selected_value
+      if name_down contains 'couleur' or name_down contains 'color' or name_down contains 'colour'
+        assign color_idx = forloop.index0
+        if opt.values.size > 1
+          assign color_varies = true
+        endif
+      elsif name_down contains 'taille' or name_down contains 'size' or name_down contains 'dimension' or name_down contains 'format'
+        assign size_idx = forloop.index0
+        if opt.values.size > 1
+          assign size_varies = true
+        endif
       endif
     endfor
 
+    assign color = ''
+    if color_idx >= 0
+      assign color = v.options[color_idx]
+    endif
+
+    assign is_group = false
+    if product.variants.size > 1
+      assign is_group = true
+    endif
+
     assign jm = product.metafields.judgeme.review_widget_data.value
   -%}
+  {%- capture lc_offer_extras -%}
+      "priceCurrency": {{ shop.currency | json }},
+      "priceValidUntil": {{ price_valid_until | json }},
+      "itemCondition": "https://schema.org/NewCondition",
+      {%- comment -%} GEO 2026-10-17 — mêmes chiffres que lc-org-schema.liquid et les pages
+         politique-de-livraison / politique-de-retour : livraison gratuite au Canada,
+         traitement 1–3 j ouvrables, transport 3–9 j ; retours 30 j par la poste, frais au client
+         (sauf défectueux : gratuit — détail au niveau entreprise). {%- endcomment %}
+      "shippingDetails": {
+        "@type": "OfferShippingDetails",
+        "shippingRate": { "@type": "MonetaryAmount", "value": 0, "currency": "CAD" },
+        "shippingDestination": { "@type": "DefinedRegion", "addressCountry": "CA" },
+        "deliveryTime": {
+          "@type": "ShippingDeliveryTime",
+          "handlingTime": { "@type": "QuantitativeValue", "minValue": 1, "maxValue": 3, "unitCode": "DAY" },
+          "transitTime": { "@type": "QuantitativeValue", "minValue": 3, "maxValue": 9, "unitCode": "DAY" }
+        }
+      },
+      "hasMerchantReturnPolicy": {
+        "@type": "MerchantReturnPolicy",
+        "applicableCountry": "CA",
+        "returnPolicyCategory": "https://schema.org/MerchantReturnFiniteReturnWindow",
+        "merchantReturnDays": 30,
+        "returnMethod": "https://schema.org/ReturnByMail",
+        "returnFees": "https://schema.org/ReturnFeesCustomerResponsibility"
+      },
+      "seller": {
+        "@type": "Organization",
+        "@id": {{ shop.url | append: '/#organization' | json }},
+        "name": {{ brand | json }}
+      }
+  {%- endcapture -%}
   <script type="application/ld+json">
   {
     "@context": "https://schema.org/",
+    {%- if is_group %}
+    "@type": "ProductGroup",
+    "productGroupID": {{ product.id | append: '' | json }},
+    "url": {{ product_abs_url | json }},
+    {%- else %}
     "@type": "Product",
-    "name": {{ product.title | json }},
+    {%- endif %}
+    "name": {{ product.title | strip | json }},
     "description": {{ desc | json }},
     "brand": {
       "@type": "Brand",
       "name": {{ brand | json }}
     },
+    {%- unless is_group %}
     "sku": {{ v.sku | json }},
     {%- comment -%} Aosom item SKU doubles as the manufacturer part number; brand + mpn is the
        identifier pair we also declare in the Google feed (g:mpn / identifier_exists). {%- endcomment -%}
@@ -65,10 +133,11 @@
     {%- if color != blank %}
     "color": {{ color | json }},
     {%- endif %}
+    {%- endunless %}
     "category": {{ product.type | json }},
     "image": [
       {%- for image in product.images limit: 5 -%}
-      {{ image | image_url: width: 1600 | json }}{%- unless forloop.last %},{% endunless -%}
+      {{ image | image_url: width: 1600 | prepend: 'https:' | json }}{%- unless forloop.last %},{% endunless -%}
       {%- endfor -%}
     ],
     {%- if jm != blank and jm.number_of_reviews and jm.number_of_reviews > 0 %}
@@ -78,32 +147,94 @@
       "reviewCount": {{ jm.number_of_reviews }}
     },
     {%- endif %}
+    {%- if is_group %}
+    {%- capture lc_varies -%}
+      {%- if color_varies -%}"https://schema.org/color"{%- endif -%}
+      {%- if size_varies -%}{%- if color_varies -%},{%- endif -%}"https://schema.org/size"{%- endif -%}
+    {%- endcapture %}
+    {%- if lc_varies != blank %}
+    "variesBy": [{{ lc_varies }}],
+    {%- endif %}
+    "hasVariant": [
+      {%- for var in product.variants %}
+      {%- liquid
+        assign var_url = product_abs_url | append: '?variant=' | append: var.id
+        assign var_avail = 'https://schema.org/OutOfStock'
+        if var.available
+          assign var_avail = 'https://schema.org/InStock'
+        endif
+        assign var_img = var.featured_image | default: product.featured_image
+      -%}
+      {
+        "@type": "Product",
+        "name": {{ product.title | strip | append: ' — ' | append: var.title | json }},
+        "sku": {{ var.sku | json }},
+        "mpn": {{ var.sku | json }},
+        {%- if var.barcode != blank %}
+        "gtin": {{ var.barcode | json }},
+        {%- endif %}
+        {%- if color_idx >= 0 %}
+        "color": {{ var.options[color_idx] | json }},
+        {%- endif %}
+        {%- if size_idx >= 0 %}
+        "size": {{ var.options[size_idx] | json }},
+        {%- endif %}
+        {%- if var_img %}
+        "image": {{ var_img | image_url: width: 1600 | prepend: 'https:' | json }},
+        {%- endif %}
+        "offers": {
+          "@type": "Offer",
+          "url": {{ var_url | json }},
+          "price": "{{ var.price | divided_by: 100.0 | round: 2 }}",
+          "availability": {{ var_avail | json }},
+          {{ lc_offer_extras }}
+        }
+      }{%- unless forloop.last -%},{%- endunless -%}
+      {%- endfor %}
+    ]
+    {%- else %}
     "offers": {
       "@type": "Offer",
       "url": {{ product_abs_url | json }},
-      "priceCurrency": {{ shop.currency | json }},
-      "price": "{{ price_amount | round: 2 }}",
-      "priceValidUntil": {{ price_valid_until | json }},
-      "availability": {{ availability | json }},
-      "itemCondition": "https://schema.org/NewCondition",
-      "seller": {
-        "@type": "Organization",
-        "name": {{ brand | json }}
-      }
+      "price": "{{ v.price | divided_by: 100.0 | round: 2 }}",
+      "availability": {% if v.available %}"https://schema.org/InStock"{% else %}"https://schema.org/OutOfStock"{% endif %},
+      {{ lc_offer_extras }}
     }
+    {%- endif %}
   }
   </script>
 
   {%- liquid
+    comment
+      Promotional / technical collections never make a breadcrumb level: product.collections order
+      differs per locale, so the first one used to be "Liquidation"/"Clearance" on one language and
+      the real category on the other.
+    endcomment
+    assign bc_skip = 'all,frontpage,coups-de-coeur,rabais,rabais-lifestyle,rabais-2e-article,liquidation,nouveaux-arrivages,nouveaux-arrivages-lifestyle,halloween,noel,suivi-source-c,collection-de-printemps' | split: ','
+    comment
+      Most specific category = the smallest remaining collection (ties: lowest handle-independent id),
+      so FR and EN pick the same one whatever order product.collections comes in.
+    endcomment
     assign bc_collection = nil
     for col in product.collections
-      unless col.handle == 'all' or col.handle == 'frontpage'
+      if bc_skip contains col.handle
+        continue
+      endif
+      if bc_collection == nil or col.products_count < bc_collection.products_count or col.products_count == bc_collection.products_count and col.id < bc_collection.id
         assign bc_collection = col
-        break
-      endunless
+      endif
     endfor
-    if bc_collection == nil
-      assign bc_type_handle = product.type | handleize
+    comment
+      GEO 2026-10-18 : fil d'Ariane localisé (Accueil/Home, liens /en sur l'anglais). Sans collection,
+      on saute le niveau 2 au lieu d'inventer une URL /collections/<type> qui peut ne pas exister.
+    endcomment
+    assign bc_home_name = 'Accueil'
+    if request.locale.iso_code != 'fr'
+      assign bc_home_name = 'Home'
+    endif
+    assign bc_last = 2
+    if bc_collection != nil
+      assign bc_last = 3
     endif
   -%}
   <script type="application/ld+json">
@@ -114,28 +245,21 @@
       {
         "@type": "ListItem",
         "position": 1,
-        "name": "Accueil",
-        "item": {{ request.origin | json }}
+        "name": {{ bc_home_name | json }},
+        "item": {{ request.origin | append: routes.root_url | json }}
       },
       {%- if bc_collection != nil %}
       {
         "@type": "ListItem",
         "position": 2,
         "name": {{ bc_collection.title | json }},
-        "item": {{ request.origin | append: '/collections/' | append: bc_collection.handle | json }}
-      },
-      {%- else %}
-      {
-        "@type": "ListItem",
-        "position": 2,
-        "name": {{ product.type | json }},
-        "item": {{ request.origin | append: '/collections/' | append: bc_type_handle | json }}
+        "item": {{ request.origin | append: bc_collection.url | json }}
       },
       {%- endif %}
       {
         "@type": "ListItem",
-        "position": 3,
-        "name": {{ product.title | json }},
+        "position": {{ bc_last }},
+        "name": {{ product.title | strip | json }},
         "item": {{ product_abs_url | json }}
       }
     ]
