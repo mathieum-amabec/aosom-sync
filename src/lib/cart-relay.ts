@@ -221,7 +221,15 @@ const COPY = {
   },
 } as const;
 
-export function cartSubject(locale: "fr" | "en"): { subject: string; preview: string } {
+/** Black Friday week 2026 (Nov 20–30, Toronto date): seasonal subject. Like the rest, it promises no discount. */
+const BF_COPY = {
+  fr: { subject: "Ton panier t'attend — c'est le Vendredi fou 🔥", preview: "C'est la semaine du Vendredi fou chez Ameublo Direct." },
+  en: { subject: "Your cart is waiting — it's Black Friday 🔥", preview: "It's Black Friday week at Ameublo Direct." },
+} as const;
+
+export function cartSubject(locale: "fr" | "en", now: Date = new Date()): { subject: string; preview: string } {
+  const day = now.toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
+  if (day >= "2026-11-20" && day <= "2026-11-30") return { ...BF_COPY[locale] };
   return { subject: COPY[locale].subject, preview: COPY[locale].preview };
 }
 
