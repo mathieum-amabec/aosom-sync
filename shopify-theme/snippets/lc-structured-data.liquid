@@ -211,12 +211,18 @@
       the real category on the other.
     endcomment
     assign bc_skip = 'all,frontpage,coups-de-coeur,rabais,rabais-lifestyle,rabais-2e-article,liquidation,nouveaux-arrivages,nouveaux-arrivages-lifestyle,halloween,noel,suivi-source-c,collection-de-printemps' | split: ','
+    comment
+      Most specific category = the smallest remaining collection (ties: lowest handle-independent id),
+      so FR and EN pick the same one whatever order product.collections comes in.
+    endcomment
     assign bc_collection = nil
     for col in product.collections
-      unless bc_skip contains col.handle
+      if bc_skip contains col.handle
+        continue
+      endif
+      if bc_collection == nil or col.products_count < bc_collection.products_count or col.products_count == bc_collection.products_count and col.id < bc_collection.id
         assign bc_collection = col
-        break
-      endunless
+      endif
     endfor
     comment
       GEO 2026-10-18 : fil d'Ariane localisé (Accueil/Home, liens /en sur l'anglais). Sans collection,

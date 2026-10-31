@@ -104,7 +104,7 @@
 
 {%- if request.page_type == 'product' -%}
   {%- comment -%} Same variant as the Product JSON-LD (was product.price = the cheapest variant, even unavailable). {%- endcomment -%}
-  <meta property="og:price:amount" content="{{ product.selected_or_first_available_variant.price | money_without_currency | strip_html }}">
+  <meta property="og:price:amount" content="{{ product.selected_or_first_available_variant.price | divided_by: 100.0 | round: 2 }}">
   <meta property="og:price:currency" content="{{ cart.currency.iso_code }}">
 {%- endif -%}
 

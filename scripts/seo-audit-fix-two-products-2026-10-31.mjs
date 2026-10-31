@@ -23,7 +23,7 @@ const FIXES = [
     handle: "serre-adossee-aluminium-192x127cm-polycarbonate-gris-fonce",
     title: "Serre adossée en aluminium 192 x 127 cm, polycarbonate — Gris foncé",
     seoTitle: "Serre adossée aluminium 192 x 127 cm | Livraison gratuite — Ameublo",
-    titleEn: "Lean-to Greenhouse, Aluminium, 192 x 127 cm, Polycarbonate — Dark Grey",
+    titleEn: "Lean-to Greenhouse, Aluminum, 192 x 127 cm, Polycarbonate — Dark Grey",
     body: `<p>Cette serre adossée se fixe contre un mur pour cultiver fleurs, légumes et fines herbes sans prendre trop de place. Son cadre en alliage d'aluminium forme une structure solide, et ses panneaux de polycarbonate traités anti-UV protègent vos plantes tout en laissant passer la lumière naturelle.</p>
 <h3>Caractéristiques</h3>
 <ul>
@@ -31,7 +31,7 @@ const FIXES = [
 <li>Cadre en alliage d'aluminium robuste, fait pour durer</li>
 <li>Panneaux de polycarbonate avec protection UV</li>
 <li>Porte coulissante pour entrer et sortir facilement</li>
-<li>Fenêtre de toit réglable sur 5 positions pour une bonne aération</li>
+<li>Fenêtre réglable sur 5 positions pour une bonne aération</li>
 <li>Toit incliné avec gouttière pour éviter l'accumulation d'eau</li>
 <li>Base galvanisée et 4 piquets d'ancrage inclus</li>
 <li>Assemblage requis; le colis peut arriver en deux boîtes</li>
@@ -60,6 +60,8 @@ const FIXES = [
       [/Perfect for growing vegetables, herbs, and flowers all year round, even during our harsh winters\./, "Perfect for growing vegetables, herbs and flowers from spring to fall. Not built for heavy snow loads: place it against a sheltered wall and clear snow from the roof in winter."],
       [/Perfect for growing vegetables, herbs, and flowers year-round, even during harsh Canadian winters\./, "Perfect for growing vegetables, herbs and flowers from spring to fall. Not built for heavy snow loads: place it against a sheltered wall and clear snow from the roof in winter."],
       [/ - Resists Canadian weather conditions/, " - Solid, long-lasting structure"],
+      [/ - Designed for the Canadian climate/, " - Stands up to moderate wind"],
+      [/ - Engineered for Canadian climate/, " - Stands up to moderate wind"],
       [/ - Built to withstand Canadian weather conditions/, " - Solid, long-lasting structure"],
     ],
   },
@@ -90,7 +92,11 @@ const FIXES = [
 <li>1 bac surélevé</li>
 <li>1 guide d'assemblage</li>
 </ul>`,
-    enBodyReplace: [],
+    // Sold in 3 colours (grey, green, silver): drop the single-colour line; soften the weather claim.
+    enBodyReplace: [
+      [/<li>Elegant dark gr[ae]y colou?r complements any outdoor (setting|space)<\/li>\n?/, ""],
+      [/designed to withstand Canadian elements/, "built to last outdoors"],
+    ],
   },
 ];
 
@@ -106,18 +112,31 @@ for (const f of FIXES) {
   for (const s of [f.title, f.seoTitle, f.titleEn, f.body]) if (s && BRAND_RE.test(s)) throw new Error(`supplier name in fix for ${f.handle}`);
   const d = await g(`query($h:String!){productByHandle(handle:$h){id title descriptionHtml seo{title description}
     mf:metafield(namespace:"custom",key:"title_en"){value}
-    translations(locale:"en"){key value}}}`, { h: f.handle });
+    mfBody:metafield(namespace:"custom",key:"body_html_en"){value type}
+    translations(locale:"en"){key value}
+    es:translations(locale:"es"){key value} pa:translations(locale:"pa"){key value}}}`, { h: f.handle });
   const p = d.productByHandle;
   if (!p) throw new Error(`not found ${f.handle}`);
   const enBody = p.translations.find((t) => t.key === "body_html")?.value ?? "";
   let newEnBody = enBody;
   for (const [re, rep] of f.enBodyReplace) newEnBody = newEnBody.replace(re, rep);
-  const backup = { handle: f.handle, id: p.id, title: p.title, body: p.descriptionHtml, seo: p.seo, title_en_mf: p.mf?.value, translations: p.translations };
-  fs.writeFileSync(path.join(OUT, `backup-${f.handle}.json`), JSON.stringify(backup, null, 1));
-  console.log(`\n${f.handle}\n  title: ${p.title}  →  ${f.title}\n  seoTitle: ${p.seo.title}  →  ${f.seoTitle ?? "(unchanged)"}\n  EN title → ${f.titleEn}\n  EN body changed: ${newEnBody !== enBody}`);
+  // The EN product page and the EN feed render custom.body_html_en, not the translation — fix both.
+  const mfBodyEn = p.mfBody?.value ?? "";
+  let newMfBodyEn = mfBodyEn;
+  for (const [re, rep] of f.enBodyReplace) newMfBodyEn = newMfBodyEn.replace(re, rep);
+  // es/pa translations were made from the old English-derived text (wrong dimensions): drop them so those
+  // locales fall back to the corrected French until they are re-translated.
+  const staleKeys = ["title", "body_html", "meta_title", "meta_description"];
+  const staleLocales = ["es", "pa"].filter((l) => p[l].some((t) => staleKeys.includes(t.key)));
+  const backup = { handle: f.handle, id: p.id, title: p.title, body: p.descriptionHtml, seo: p.seo, title_en_mf: p.mf?.value, body_html_en_mf: mfBodyEn, translations: p.translations, es: p.es, pa: p.pa };
+  // Never overwrite: a dry-run after --apply would otherwise replace the true original with the fixed version.
+  const bk = path.join(OUT, `backup-full-${f.handle}.json`);
+  if (!fs.existsSync(bk)) fs.writeFileSync(bk, JSON.stringify(backup, null, 1));
+  console.log(`\n${f.handle}\n  title: ${p.title}  →  ${f.title}\n  seoTitle: ${p.seo.title}  →  ${f.seoTitle ?? "(unchanged)"}\n  EN title → ${f.titleEn}\n  EN body changed: ${newEnBody !== enBody} · EN body metafield changed: ${newMfBodyEn !== mfBodyEn} · drop es/pa: ${staleLocales.join(",") || "none"}`);
   if (!APPLY) continue;
 
   const input = { id: p.id, title: f.title, descriptionHtml: f.body, metafields: [{ namespace: "custom", key: "title_en", type: "single_line_text_field", value: f.titleEn }] };
+  if (newMfBodyEn !== mfBodyEn) input.metafields.push({ namespace: "custom", key: "body_html_en", type: p.mfBody.type, value: newMfBodyEn });
   if (f.seoTitle) input.seo = { title: f.seoTitle, description: p.seo.description };
   const u = await g(`mutation($p:ProductInput!){productUpdate(input:$p){userErrors{field message}}}`, { p: input });
   if (u.productUpdate.userErrors.length) throw new Error(JSON.stringify(u.productUpdate.userErrors));
@@ -129,6 +148,10 @@ for (const f of FIXES) {
   if (enBody) t.push({ key: "body_html", locale: "en", value: newEnBody, translatableContentDigest: dig.body_html });
   const r = await g(`mutation($id:ID!,$t:[TranslationInput!]!){translationsRegister(resourceId:$id,translations:$t){userErrors{field message}}}`, { id: p.id, t });
   if (r.translationsRegister.userErrors.length) throw new Error(JSON.stringify(r.translationsRegister.userErrors));
+  if (staleLocales.length) {
+    const x = await g(`mutation($id:ID!,$k:[String!]!,$l:[String!]!){translationsRemove(resourceId:$id,translationKeys:$k,locales:$l){userErrors{field message}}}`, { id: p.id, k: staleKeys, l: staleLocales });
+    if (x.translationsRemove.userErrors.length) throw new Error(JSON.stringify(x.translationsRemove.userErrors));
+  }
   console.log("  ✔ applied");
 }
 if (!APPLY) console.log("\nDRY-RUN — nothing written (backups saved).");
