@@ -21,8 +21,15 @@ export const ADDED_TO_CART_ID = "SmdQyJ";
 export const CART_DELAY_H = 3;
 /** Older carts are not reminded (stale emails are worse than none). */
 export const CART_MAX_AGE_H = 48;
-/** One email per profile per this window, across this relay AND relance-paiement. */
+/** One cart email per profile per this window (this relay's own repeat sends). */
 export const PROFILE_COOLDOWN_H = 7 * 24;
+/**
+ * A checkout reminder (relance-paiement) blocks a cart email for this long — the same 72 h
+ * relance-paiement applies to itself. It was 7 days, which silenced every real cart abandoner:
+ * on 2026-10-31 the only two shoppers who added to cart without ordering had both received a
+ * checkout reminder 2–5.5 days earlier, so the relay sent nothing for a week.
+ */
+export const RELANCE_COOLDOWN_H = 72;
 export const MAX_PER_RUN = 25;
 export const MAX_PER_DAY = 60;
 const INTERNAL_EMAIL = /^qa-|^ops-|@ameublodirect\.ca$/i;
@@ -158,9 +165,9 @@ export function selectCarts(
     const from = new Date(Date.parse(c.firstAt) - 5 * 60e3).toISOString();
     if (ctx.orderedAfter(c.profileId, from)) { skip("ordered", true); continue; }
     if (ctx.checkoutAfter(c.profileId, from)) { skip("checkout-after", true); continue; }
-    const cooled = (iso?: string) => !!iso && now.getTime() - Date.parse(iso) < PROFILE_COOLDOWN_H * 3600e3;
-    if (cooled(ctx.relanceProfiles[c.profileId])) { skip("relance-paiement", true); continue; }
-    if (cooled(ctx.state.profiles[c.profileId])) { skip("cooldown", true); continue; }
+    const cooled = (iso: string | undefined, h: number) => !!iso && now.getTime() - Date.parse(iso) < h * 3600e3;
+    if (cooled(ctx.relanceProfiles[c.profileId], RELANCE_COOLDOWN_H)) { skip("relance-paiement", true); continue; }
+    if (cooled(ctx.state.profiles[c.profileId], PROFILE_COOLDOWN_H)) { skip("cooldown", true); continue; }
     if (!ctx.canEmail(c.profileId)) { skip("no-consent", true); continue; }
     if (send.length >= limit) { skip("too-recent", false); continue; } // over the cap: retried next run
     send.push(c);
