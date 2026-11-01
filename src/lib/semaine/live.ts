@@ -71,6 +71,18 @@ export async function verifyProduct(c: Candidate): Promise<LiveProduct | null> {
   return "product" in r ? r.product : null;
 }
 
+/**
+ * Cooldown key for a whole Shopify product. Colour variants are separate catalog SKUs
+ * (831-823V80WT / 831-823V80BK) but ONE Shopify product, so a per-SKU cooldown let the same
+ * vanity come back 4 days later in another colour. The cooldown set holds both SKUs (old rows,
+ * products since removed from Shopify) and these product keys.
+ */
+export const productKey = (shopifyProductId: string) => `pid:${shopifyProductId}`;
+
+export function inCooldown(skip: Set<string>, c: { sku: string; shopifyProductId: string }): boolean {
+  return skip.has(c.sku) || (!!c.shopifyProductId && skip.has(productKey(c.shopifyProductId)));
+}
+
 /** Verify candidates in order until `want` pass (the Shopify calls are throttled, so stop early). */
 export async function verifyUntil(
   candidates: Candidate[],
@@ -82,12 +94,17 @@ export async function verifyUntil(
 ): Promise<LiveProduct[]> {
   const out: LiveProduct[] = [];
   const seenImages = new Set<string>();
+  const seenProducts = new Set<string>();
   const fails: Record<string, number> = {};
   let tried = 0;
   for (const c of candidates) {
     if (out.length >= want) break;
-    if (skip.has(c.sku)) {
+    if (inCooldown(skip, c)) {
       fails.cooldown = (fails.cooldown ?? 0) + 1;
+      continue;
+    }
+    if (c.shopifyProductId && seenProducts.has(c.shopifyProductId)) {
+      fails.same_product = (fails.same_product ?? 0) + 1; // another colour of a product already in this post
       continue;
     }
     tried++;
@@ -106,6 +123,7 @@ export async function verifyUntil(
       continue;
     }
     seenImages.add(p.imageUrl);
+    if (c.shopifyProductId) seenProducts.add(c.shopifyProductId);
     out.push(p);
   }
   console.log(`[semaine] ${tag || "verify"}: ${candidates.length} candidats, ${tried} vérifiés, ${out.length}/${want} retenus ${JSON.stringify(fails)}`);

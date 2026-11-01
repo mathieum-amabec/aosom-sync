@@ -84,6 +84,8 @@ export const morningReportSources: MorningReportSources = {
       { label: "Imports en erreur", count: a.importErrors },
       { label: "Problèmes de cohérence du catalogue", count: a.catalogIssues },
       { label: "Publications en échec (récentes ou à venir)", count: a.failedPublications },
+      { label: "Publications ratées ou partielles (dernier contrôle de 6 h 15, 24 h)", count: a.publishCheckProblems },
+      { label: "Reels retirés par la garde de prix (rabais affiché ≠ Shopify)", count: a.reelPriceGuardBlocked },
       { label: "Notifications non lues", count: a.unreadNotifications },
     ];
   },

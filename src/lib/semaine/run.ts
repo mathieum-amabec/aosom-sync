@@ -14,12 +14,13 @@ import { toSqliteUtc } from "@/lib/draft-scheduler";
 import { activeChannels } from "@/lib/config";
 import { draftToQueueItems } from "@/lib/social-publisher";
 import { buildCaptions, defaultTextGen, type TextGen } from "./caption";
-import { FALLBACKS, PICKERS, localDay, plannedFormat, type PickCtx } from "./formats";
+import { FALLBACKS, PICKERS, localDay, plannedFormat, seasonalMoment, type PickCtx } from "./formats";
+import { productKey } from "./live";
 import { getPost, recentSkus, savePost } from "./store";
 import type { FormatId, PlannedPost, RunResult, SlotName } from "./types";
 
 export const KILL_SWITCH_SETTING = "semaine_enabled";
-/** SKUs stay out of new posts for this long. */
+/** A posted product (every colour of it: the cooldown is per Shopify product, see live.ts) stays out of new posts for this long. */
 export const COOLDOWN_DAYS = 21;
 const MAX_FORMAT_ATTEMPTS = 3; // formats tried per slot (each gets two product picks)
 
@@ -91,15 +92,19 @@ export async function runSemaine(opts: RunOpts, deps: RunDeps = defaultDeps): Pr
   for (const format of attempts) {
     if (lastFormat === format && why.at(-1)?.startsWith(`${format}: pas assez`)) continue; // nothing left to retry
     lastFormat = format;
-    const plan = await deps.picker(format, ctx);
-    if (!plan) {
+    const picked = await deps.picker(format, ctx);
+    if (!picked) {
       why.push(`${format}: pas assez de produits vérifiés`);
       continue;
     }
+    const plan: PlannedPost = { ...picked, moment: seasonalMoment(day) ?? undefined }; // seasonal footer (caption.ts)
     const built = await buildCaptions(plan, deps.gen);
     if (!built.ok) {
       why.push(`${format}: ${built.reason}`);
-      for (const p of plan.products) ctx.skip.add(p.sku);
+      for (const p of plan.products) {
+        ctx.skip.add(p.sku);
+        if (p.shopifyProductId) ctx.skip.add(productKey(p.shopifyProductId));
+      }
       continue;
     }
     const skus = plan.products.map((p) => p.sku);

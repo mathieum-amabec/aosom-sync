@@ -5,7 +5,37 @@ vi.mock("@/lib/config", () => ({
   META: { GRAPH_API_URL: "https://graph.facebook.com/v21.0" },
 }));
 
-import { publishReel, publishCarousel, publishPhoto } from "@/lib/instagram-client";
+import { publishReel, publishCarousel, publishPhoto, instagramSafeImageUrl } from "@/lib/instagram-client";
+
+describe("instagramSafeImageUrl (Shopify CDN serves WebP to WebP-accepting clients)", () => {
+  it("pins cdn.shopify.com images to JPEG, keeping the version param", () => {
+    expect(instagramSafeImageUrl("https://cdn.shopify.com/s/files/1/0678/1327/7801/files/Iz20aa19496f93381.jpg?v=1788164193"))
+      .toBe("https://cdn.shopify.com/s/files/1/0678/1327/7801/files/Iz20aa19496f93381.jpg?v=1788164193&format=pjpg");
+    expect(instagramSafeImageUrl("https://cdn.shopify.com/a.jpg")).toBe("https://cdn.shopify.com/a.jpg?format=pjpg");
+    expect(instagramSafeImageUrl("https://cdn.shopify.com/a.jpg?format=webp")).toBe("https://cdn.shopify.com/a.jpg?format=pjpg");
+    expect(instagramSafeImageUrl("https://ameublodirect.ca/cdn/shop/files/a.jpg?v=1")).toBe("https://ameublodirect.ca/cdn/shop/files/a.jpg?v=1&format=pjpg");
+  });
+
+  it("leaves other hosts and junk untouched", () => {
+    expect(instagramSafeImageUrl("https://x.public.blob.vercel-storage.com/a.jpg")).toBe("https://x.public.blob.vercel-storage.com/a.jpg");
+    expect(instagramSafeImageUrl("not a url")).toBe("not a url");
+  });
+
+  it("is what the photo and carousel containers are created with", async () => {
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes("media_publish")) return Promise.resolve(json({ id: "m" }));
+      if (url.includes("/IG_123/media")) return Promise.resolve(json({ id: JSON.parse(String(init?.body)).media_type ? "parent" : "child" }));
+      return Promise.resolve(json({ status_code: "FINISHED" }));
+    });
+    await publishPhoto({ caption: "c", imageUrl: "https://cdn.shopify.com/a.jpg?v=1", brand: "ameublo" });
+    await publishCarousel({ caption: "c", imageUrls: ["https://cdn.shopify.com/a.jpg?v=1", "https://cdn.shopify.com/b.jpg?v=2"], brand: "ameublo" });
+    const sent = fetchMock.mock.calls
+      .filter((c) => String(c[0]).endsWith("/IG_123/media"))
+      .map((c) => JSON.parse(c[1].body).image_url)
+      .filter(Boolean);
+    expect(sent).toEqual(["https://cdn.shopify.com/a.jpg?v=1&format=pjpg", "https://cdn.shopify.com/a.jpg?v=1&format=pjpg", "https://cdn.shopify.com/b.jpg?v=2&format=pjpg"]);
+  });
+});
 
 const json = (body: unknown, status = 200) =>
   ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Response;
