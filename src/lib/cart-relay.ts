@@ -221,7 +221,11 @@ const COPY = {
   },
 } as const;
 
-/** Black Friday week 2026 (Nov 20–30, Toronto date): seasonal subject. Like the rest, it promises no discount. */
+/** Black Friday 2026 (Toronto date): early launch Nov 6–26, then the BF days Nov 27–30. Like the rest, it promises no discount. */
+const BF_EARLY_COPY = {
+  fr: { subject: "Ton panier t'attend — le Vendredi fou a commencé 🔥", preview: "Le Vendredi fou a commencé plus tôt chez Ameublo Direct." },
+  en: { subject: "Your cart is waiting — Black Friday has started 🔥", preview: "Black Friday started early at Ameublo Direct." },
+} as const;
 const BF_COPY = {
   fr: { subject: "Ton panier t'attend — c'est le Vendredi fou 🔥", preview: "C'est la semaine du Vendredi fou chez Ameublo Direct." },
   en: { subject: "Your cart is waiting — it's Black Friday 🔥", preview: "It's Black Friday week at Ameublo Direct." },
@@ -229,7 +233,8 @@ const BF_COPY = {
 
 export function cartSubject(locale: "fr" | "en", now: Date = new Date()): { subject: string; preview: string } {
   const day = now.toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
-  if (day >= "2026-11-20" && day <= "2026-11-30") return { ...BF_COPY[locale] };
+  if (day >= "2026-11-06" && day <= "2026-11-26") return { ...BF_EARLY_COPY[locale] };
+  if (day >= "2026-11-27" && day <= "2026-11-30") return { ...BF_COPY[locale] };
   return { subject: COPY[locale].subject, preview: COPY[locale].preview };
 }
 
