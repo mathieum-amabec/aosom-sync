@@ -2,6 +2,24 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.54] - 2026-11-01
+
+### Changed
+
+- **La semaine Ameublo follows the Black Friday / Christmas calendar** (Toronto dates, 2026 only — next year's dates must be set on purpose in `semaine/formats.ts` `SEASON`). Nov 6–26 (early Black Friday): the morning post is `baisses` Monday to Friday, Saturday/Sunday keep `astuce`/`coeur` for variety. Nov 27–30 (Black Friday weekend + Cyber Monday): `baisses` every morning. `baisses` still only shows a real Shopify compare-at ≥ 10 %, and looks 80 products deep during the sale (instead of 30) so the cooldown does not starve it. Nov 1–Dec 15: Christmas categories (both `Holiday & Seasonal > Christmas…` forms) join the afternoon `vedette` (tried first every other day in November, every day in December) and the Sunday `coeur`. Captions get a code-owned seasonal line + hashtags — FR « Vendredi fou en avance » #vendredifou, #vendredifou on Black Friday, #cyberlundi on Cyber Monday, #noel Dec 1–15; EN #blackfriday / #cybermonday / #christmas. The model's text is unchanged (still no %, $ or #).
+- **Semaine cooldown is per Shopify product, not per SKU.** Colour variants (831-823 WT/BK, 831-651, 839-846, 839-308) came back within 3–7 days of each other. The 21-day cooldown now also holds every posted SKU's `shopify_product_id` (resolved through `products`, so it covers past posts too), and one post never carries two colours of the same product.
+- **06:15 publish check covers the last 24 h, every content type.** It flags `failed` rows, rows stuck in `publishing` > 30 min, rows still `pending` > 15 min past their slot, and `published` rows whose error shows a platform failed (e.g. the Ameublo Instagram half) — ignoring the known "INSTAGRAM_FURNISH_ACCOUNT_ID not configured" noise. `publish_check_last` keeps its shape plus `windowHours`, `failedCount`, `stuckCount`, `overdueCount`, `partialCount`, `byType`, `priceGuardBlocked`. The morning report's « Alertes » now counts the last check's problems and the Reels the price guard removed.
+
+### Fixed
+
+- **Halloween / Noël social categories matched 0 products.** Aosom moved the seasonal branch from `Home Furnishings > Holiday & Seasonal > …` to top-level `Holiday & Seasonal > …`; both forms are matched (Noël: 185 live products on 2026-11-01, 104 discounted).
+- **Christmas posts were tagged #chambre #deco.** A bare `Holiday → bedroom_decor` hook rule caught the new top-level path before the seasonal rule. Holiday & Seasonal now maps to `seasonal_decor`, and a Christmas product gets Christmas hashtags only (no #halloween), a Halloween one Halloween hashtags only.
+- **Instagram "Only photo or video can be accepted as media type"** (5 of 14 Ameublo semaine posts, #1630 #1642 #1658 #1676 #1682; Facebook went out). cdn.shopify.com serves WebP under the same `.jpg` URL to any client that accepts WebP (`Vary: Accept`), and Instagram only ingests JPEG. Instagram photo and carousel containers now get `format=pjpg`, which pins JPEG and returns the original bytes unchanged. Other hosts are untouched.
+
+### Added
+
+- **Reel price guard** (`/api/cron/reel-price-guard`, 12:00 and 20:00 UTC, `?dryRun=1`). For every `pending` sequential_ad Reel due in the next 36 h whose `metadata.badges` lists `{sku, pct}`, re-reads the variant on Shopify (read-only) and checks it is active, available and that round((1 − price/compareAt) × 100) still equals the rabais burned into the video. A mismatch moves the row to `draft` with `price-guard: <details>` (not published, slot freed); a failed Shopify read never blocks. Result in settings `reel_price_guard_last`, surfaced by the publish check and the morning report.
+
 ## [0.5.107.53] - 2026-10-31
 
 ### Fixed

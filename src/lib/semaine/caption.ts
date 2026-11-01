@@ -9,7 +9,7 @@ import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "@/lib/strip-markdown";
 import { stripSupplierBrands, forbiddenBrandsIn, detectDescriptionLanguage } from "@/lib/catalog-guard";
-import type { BuiltCaptions, FormatId, LiveProduct, PlannedPost } from "./types";
+import type { BuiltCaptions, FormatId, LiveProduct, PlannedPost, SeasonalMoment } from "./types";
 
 export type TextGen = (prompt: string) => Promise<string>;
 
@@ -69,9 +69,36 @@ const HASHTAGS: Record<Lang, Record<FormatId, string>> = {
   },
 };
 
+/**
+ * Seasonal line + hashtag, code-owned (the model body never sees them, so the body validator's
+ * no-%/no-$/no-# rule is untouched). No amount and no promise here: the only numbers a post
+ * shows stay the live Shopify ones in factsBlock.
+ */
+export const SEASONAL: Record<SeasonalMoment, Record<Lang, { line: string; tags: string }>> = {
+  "early-bf": {
+    fr: { line: "Vendredi fou en avance chez Ameublo Direct.", tags: "#vendredifou" },
+    en: { line: "Early Black Friday at Furnish Direct.", tags: "#blackfriday" },
+  },
+  "black-friday": {
+    fr: { line: "C'est le Vendredi fou chez Ameublo Direct.", tags: "#vendredifou" },
+    en: { line: "It's Black Friday at Furnish Direct.", tags: "#blackfriday" },
+  },
+  "cyber-monday": {
+    fr: { line: "C'est le Cyberlundi chez Ameublo Direct.", tags: "#cyberlundi #vendredifou" },
+    en: { line: "It's Cyber Monday at Furnish Direct.", tags: "#cybermonday #blackfriday" },
+  },
+  noel: {
+    fr: { line: "Des idées pour le temps des fêtes.", tags: "#noel #tempsdesfetes" },
+    en: { line: "Ideas for the holiday season.", tags: "#christmas #holidayseason" },
+  },
+};
+
 export function footer(plan: PlannedPost, lang: Lang): string {
   const base = lang === "fr" ? "#ameublodirect #maison #québec" : "#furnishdirect #home #canada";
-  return `${lang === "fr" ? "Livraison gratuite." : "Free shipping."}\n${HASHTAGS[lang][plan.format]} ${base}`;
+  const s = plan.moment ? SEASONAL[plan.moment][lang] : null;
+  const shipping = lang === "fr" ? "Livraison gratuite." : "Free shipping.";
+  const tags = [s?.tags, HASHTAGS[lang][plan.format], base].filter(Boolean).join(" ");
+  return `${s ? `${s.line} ` : ""}${shipping}\n${tags}`;
 }
 
 export function assemble(plan: PlannedPost, lang: Lang, body: string): string {

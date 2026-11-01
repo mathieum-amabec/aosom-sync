@@ -7,7 +7,7 @@ import type { Row } from "@libsql/client";
 import { getSelectorDb } from "@/lib/selectors/db";
 import { compareAtSubquery } from "@/lib/selectors/map";
 import { verifyUntil } from "./live";
-import type { Candidate, FormatId, LiveProduct, PlannedPost, SlotName } from "./types";
+import type { Candidate, FormatId, LiveProduct, PlannedPost, SeasonalMoment, SlotName } from "./types";
 
 export const TIMEZONE = "America/Toronto";
 
@@ -37,8 +37,53 @@ export const MORNING_FORMAT: Record<number, FormatId> = {
   1: "nouveautes", 2: "baisses", 3: "piece", 4: "ab", 5: "top-ventes", 6: "astuce", 0: "coeur",
 };
 
+// ── Seasonal layer (Black Friday 2026 + Christmas) ─────────────────────────
+//
+// Date-driven, on Toronto calendar days (YYYY-MM-DD strings compare in date order). The dates
+// are 2026's on purpose: Black Friday moves every year, so outside these windows nothing
+// changes and next year's dates must be set deliberately.
+//
+//   Nov 1 – Dec 15   Christmas categories join the vedette/coeur pools (see featuredOrder).
+//   Nov 6 – Nov 26   early Black Friday: morning = `baisses` Mon–Fri; Sat/Sun keep astuce/coeur.
+//   Nov 27 – Nov 29  Black Friday + weekend: morning = `baisses` every day.
+//   Nov 30           Cyber Monday: morning = `baisses`.
+//   Dec 1 – Dec 15   Christmas: captions carry the holiday footer (caption.ts).
+//
+// `baisses` only ever shows a REAL Shopify compare-at ≥ 10 % (live.ts), so leaning on it during
+// the sale cannot invent a discount: when too few products carry one, the usual fallbacks run.
+
+export type { SeasonalMoment };
+
+export const SEASON = {
+  christmasCategories: { from: "2026-11-01", to: "2026-12-15" },
+  earlyBf: { from: "2026-11-06", to: "2026-11-26" },
+  blackFriday: { from: "2026-11-27", to: "2026-11-29" },
+  cyberMonday: { from: "2026-11-30", to: "2026-11-30" },
+  noel: { from: "2026-12-01", to: "2026-12-15" },
+} as const;
+
+const within = (day: LocalDay, w: { from: string; to: string }) => day.date >= w.from && day.date <= w.to;
+
+/** The sales moment a day belongs to (drives the caption footer and the morning format), or null. */
+export function seasonalMoment(day: LocalDay): SeasonalMoment | null {
+  if (within(day, SEASON.earlyBf)) return "early-bf";
+  if (within(day, SEASON.blackFriday)) return "black-friday";
+  if (within(day, SEASON.cyberMonday)) return "cyber-monday";
+  if (within(day, SEASON.noel)) return "noel";
+  return null;
+}
+
+export function isChristmasSeason(day: LocalDay): boolean {
+  return within(day, SEASON.christmasCategories);
+}
+
 export function plannedFormat(day: LocalDay, slot: SlotName): FormatId {
-  return slot === "afternoon" ? "vedette" : MORNING_FORMAT[day.weekday];
+  if (slot === "afternoon") return "vedette";
+  const moment = seasonalMoment(day);
+  const weekend = day.weekday === 0 || day.weekday === 6;
+  if (moment === "black-friday" || moment === "cyber-monday") return "baisses";
+  if (moment === "early-bf" && !weekend) return "baisses"; // the weekend keeps astuce / coeur for variety
+  return MORNING_FORMAT[day.weekday];
 }
 
 /** When a morning format cannot be built, try these in order (never itself). */
@@ -118,6 +163,34 @@ export const FEATURED_CATEGORIES = [
 
 const HEART_CATEGORIES = ["%Sofas%", "%Accent Chairs%", "%Beds%", "%Dressing & Vanity%", "%Storage Ottomans%", "%Pet Supplies%", "%Bedside%"];
 
+/**
+ * Christmas branch. The leading `%` matches both the old `Home Furnishings > Holiday & Seasonal > …`
+ * form and the top-level `Holiday & Seasonal > …` Aosom has used since autumn 2026 (185 live
+ * products on 2026-11-01).
+ */
+export const CHRISTMAS_CATEGORIES = ["%Holiday & Seasonal > Christmas Trees%", "%Holiday & Seasonal > Christmas Decorations%"];
+
+const rotate = <T>(list: readonly T[], start: number): T[] => list.map((_, i) => list[(start + i) % list.length]);
+
+/**
+ * Category order for the afternoon `vedette`. During the Christmas window the Christmas branch is
+ * tried FIRST every other day in November and every day in December (until Dec 15); the other
+ * days keep the usual rotation so the feed is not six weeks of trees. A Christmas pattern that
+ * yields no verified product simply falls through to the next category.
+ */
+export function featuredOrder(day: LocalDay): string[] {
+  const usual = rotate(FEATURED_CATEGORIES, day.dayIndex % FEATURED_CATEGORIES.length);
+  if (!isChristmasSeason(day)) return usual;
+  const christmasFirst = day.date >= SEASON.noel.from || day.dayIndex % 2 === 0;
+  return christmasFirst ? [...CHRISTMAS_CATEGORIES, ...usual] : [...usual, ...CHRISTMAS_CATEGORIES];
+}
+
+/** Category order for the Sunday `coeur`: Christmas first during the Christmas window. */
+export function heartOrder(day: LocalDay): string[] {
+  const usual = rotate(HEART_CATEGORIES, day.week % HEART_CATEGORIES.length);
+  return isChristmasSeason(day) ? [...CHRISTMAS_CATEGORIES, ...usual] : usual;
+}
+
 // ── Pickers ────────────────────────────────────────────────────────────────
 
 export interface PickCtx {
@@ -140,8 +213,11 @@ const nouveautes: Picker = async ({ day, skip }) => {
 };
 
 const baisses: Picker = async ({ day, skip }) => {
+  // During the sale `baisses` runs almost daily and the 21-day product cooldown eats the top of
+  // the list, so look deeper (cooldown skips cost no Shopify call).
+  const limit = seasonalMoment(day) && seasonalMoment(day) !== "noel" ? 80 : 30;
   const c = await candidates(
-    `AND ${compareAtSubquery("p")} >= p.price * 1.1`, [], `(${compareAtSubquery("p")} - p.price) / p.price DESC`, 30, day.month,
+    `AND ${compareAtSubquery("p")} >= p.price * 1.1`, [], `(${compareAtSubquery("p")} - p.price) / p.price DESC`, limit, day.month,
   );
   // The DB's derived compare-at is only a shortlist: Shopify must carry a real ≥10 % rabais too.
   const items = await verifyUntil(c, 5, skip, (p) => p.compareAt != null, "baisses", true);
@@ -203,8 +279,7 @@ const astuce: Picker = async ({ day, skip }) => {
 };
 
 const coeur: Picker = async ({ day, skip }) => {
-  for (let i = 0; i < HEART_CATEGORIES.length; i++) {
-    const pattern = HEART_CATEGORIES[(day.week + i) % HEART_CATEGORIES.length];
+  for (const pattern of heartOrder(day)) {
     const c = await candidates(`AND p.product_type LIKE ?`, [pattern], "velocity DESC, p.qty DESC", 12, day.month);
     const items = await verifyUntil(c, 1, skip, undefined, "coeur");
     if (items.length === 1) return post("coeur", "Coup de cœur", items, 1);
@@ -213,8 +288,7 @@ const coeur: Picker = async ({ day, skip }) => {
 };
 
 const vedette: Picker = async ({ day, skip }) => {
-  for (let i = 0; i < FEATURED_CATEGORIES.length; i++) {
-    const pattern = FEATURED_CATEGORIES[(day.dayIndex + i) % FEATURED_CATEGORIES.length];
+  for (const pattern of featuredOrder(day)) {
     const c = await candidates(`AND p.product_type LIKE ?`, [pattern], "velocity DESC, p.qty DESC", 12, day.month);
     const items = await verifyUntil(c, 1, skip, undefined, "vedette");
     if (items.length === 1) return post("vedette", "Produit vedette", items, 1);

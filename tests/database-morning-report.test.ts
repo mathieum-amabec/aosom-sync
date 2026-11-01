@@ -191,6 +191,8 @@ describe("countMorningReportAlerts", () => {
       catalogIssues: 2,
       unreadNotifications: 1,
       failedPublications: 0,
+      publishCheckProblems: 0,
+      reelPriceGuardBlocked: 0,
     });
   });
 
@@ -200,6 +202,14 @@ describe("countMorningReportAlerts", () => {
     await queued("assembly", "failed", at(24 * 5)); // re-slotted ahead but still 'failed' (the 2026-10 incident)
     await queued("sequential_ad", "pending", at(24)); // healthy
     expect((await mod.countMorningReportAlerts()).failedPublications).toBe(2);
+  });
+
+  it("surfaces the last publish check and the Reel price guard", async () => {
+    await mod.setSetting("publish_check_last", JSON.stringify({ ok: false, problems: ["a", "b"] }));
+    await mod.setSetting("reel_price_guard_last", JSON.stringify({ blocked: [{ id: 1 }] }));
+    const a = await mod.countMorningReportAlerts();
+    expect(a.publishCheckProblems).toBe(2);
+    expect(a.reelPriceGuardBlocked).toBe(1);
   });
 
   it("treats a missing or corrupt audit setting as zero instead of throwing", async () => {
