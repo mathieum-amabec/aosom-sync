@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Black Friday 2026 (Fri 11-27, Cyber Monday 11-30) — the two collections Mat chose 2026-10-31:
+ * Black Friday 2026 (early launch 11-06, Fri 11-27, Cyber Monday 11-30) — the two collections Mat chose 2026-10-31:
  *   A  black-friday-gros-rabais   "Vendredi fou — nos plus gros rabais": genuine crossed price ≥ 15 %.
  *   B  black-friday-cadeaux-noel  "Idées cadeaux en rabais": A + Noël collections, toys, pets, décor ≥ 10 %.
  * No extra discount: only products whose current compare-at (a real former price, see the 10 % rule and
@@ -20,18 +20,22 @@ const TAG_B = "bf26-cadeaux";
 const GIFT_TYPE = /^Toys & Games|^Pet Supplies|Decor|Christmas|Holiday|Seasonal/i;
 const NOEL = ["noel", "noel-sapins", "noel-decorations"];
 
+// Early launch Nov 6 (Mat, 2026-11-01): the price guarantee removes the "wait for the real Black Friday" objection.
+const GUARANTEE_FR = "<p><strong>Prix garanti jusqu'au 30 novembre.</strong> Si le prix d'un article acheté chez nous à partir du 6 novembre baisse sur notre site d'ici le 30 novembre 2026, écrivez-nous avec votre numéro de commande : nous vous remboursons la différence.</p>";
+const GUARANTEE_EN = "<p><strong>Price guaranteed until November 30.</strong> If the price of an item you bought from us on or after November 6 drops on our site by November 30, 2026, email us your order number and we will refund the difference.</p>";
+
 const COLLECTIONS = [
   {
     handle: "black-friday-gros-rabais", tag: TAG_A,
     title: "Vendredi fou — nos plus gros rabais", titleEn: "Black Friday — Our Biggest Deals",
-    body: "<p>Nos plus gros rabais de l'année, jusqu'à épuisement des stocks. Livraison gratuite partout au Canada.</p>",
-    bodyEn: "<p>Our biggest deals of the year, while supplies last. Free shipping across Canada.</p>",
+    body: `<p>Le Vendredi fou commence maintenant : nos plus gros rabais de l'année, jusqu'à épuisement des stocks. Commandez tôt pour recevoir avant Noël. Livraison gratuite au Canada.</p>${GUARANTEE_FR}`,
+    bodyEn: `<p>Black Friday starts now: our biggest deals of the year, while supplies last. Order early to receive before Christmas. Free shipping in Canada.</p>${GUARANTEE_EN}`,
   },
   {
     handle: "black-friday-cadeaux-noel", tag: TAG_B,
     title: "Idées cadeaux en rabais", titleEn: "Gift Ideas on Sale",
-    body: "<p>Des idées cadeaux pour toute la famille, et pour les animaux, à prix réduit. Commandez tôt pour recevoir avant Noël. Livraison gratuite partout au Canada.</p>",
-    bodyEn: "<p>Gift ideas for the whole family, pets included, at reduced prices. Order early to receive before Christmas. Free shipping across Canada.</p>",
+    body: `<p>Des idées cadeaux pour toute la famille, et pour les animaux, à prix réduit. Commandez tôt pour recevoir avant Noël. Livraison gratuite au Canada.</p>${GUARANTEE_FR}`,
+    bodyEn: `<p>Gift ideas for the whole family, pets included, at reduced prices. Order early to receive before Christmas. Free shipping in Canada.</p>${GUARANTEE_EN}`,
   },
 ];
 
@@ -83,8 +87,11 @@ console.log(`scanned ${scanned} · A=${count.A} · B=${count.B} · tag changes o
 
 // 3. Collections that already exist
 const existing = {};
-for (const c of COLLECTIONS) existing[c.handle] = (await gql(`query($h:String!){collectionByHandle(handle:$h){id title}}`, { h: c.handle })).data.collectionByHandle;
-for (const c of COLLECTIONS) console.log(`collection ${c.handle}: ${existing[c.handle] ? "exists" : "to create (unpublished)"}`);
+for (const c of COLLECTIONS) existing[c.handle] = (await gql(`query($h:String!){collectionByHandle(handle:$h){id title descriptionHtml}}`, { h: c.handle })).data.collectionByHandle;
+for (const c of COLLECTIONS) {
+  const e = existing[c.handle];
+  console.log(`collection ${c.handle}: ${!e ? "to create (unpublished)" : e.descriptionHtml === c.body ? "exists, text up to date" : "exists, text to update (FR + EN)"}`);
+}
 if (!APPLY) {
   console.log("DRY-RUN — nothing written.");
   process.exit(0);
@@ -103,18 +110,31 @@ for (const x of plan) {
   await sleep(250);
 }
 
-for (const c of COLLECTIONS) {
-  if (existing[c.handle]) continue;
-  const r = (await gql(`mutation($i:CollectionInput!){collectionCreate(input:$i){collection{id} userErrors{field message}}}`, {
-    i: { handle: c.handle, title: c.title, descriptionHtml: c.body, sortOrder: "BEST_SELLING", ruleSet: { appliedDisjunctively: false, rules: [{ column: "TAG", relation: "EQUALS", condition: c.tag }] } },
-  })).data.collectionCreate;
-  if (r.userErrors.length) { errors++; console.log("✘ create", c.handle, JSON.stringify(r.userErrors)); continue; }
-  const id = r.collection.id;
+async function registerEn(id, c) {
   const dig = Object.fromEntries((await gql(`query($id:ID!){translatableResource(resourceId:$id){translatableContent{key digest}}}`, { id })).data.translatableResource.translatableContent.map((x) => [x.key, x.digest]));
   const t = [{ key: "title", locale: "en", value: c.titleEn, translatableContentDigest: dig.title }];
   if (dig.body_html) t.push({ key: "body_html", locale: "en", value: c.bodyEn, translatableContentDigest: dig.body_html });
   const tr = (await gql(`mutation($id:ID!,$t:[TranslationInput!]!){translationsRegister(resourceId:$id,translations:$t){userErrors{message}}}`, { id, t })).data.translationsRegister;
   if (tr.userErrors.length) { errors++; console.log("✘ EN", c.handle, JSON.stringify(tr.userErrors)); }
-  console.log(`✔ created ${c.handle} (${id}), unpublished`);
+}
+
+for (const c of COLLECTIONS) {
+  const ex = existing[c.handle];
+  if (ex) {
+    // Text changed since creation → update FR and re-register EN (the EN translation goes stale otherwise).
+    // collectionUpdate does not touch publication: a hidden collection stays hidden.
+    if (ex.descriptionHtml === c.body) continue;
+    const e = (await gql(`mutation($i:CollectionInput!){collectionUpdate(input:$i){userErrors{field message}}}`, { i: { id: ex.id, descriptionHtml: c.body } })).data.collectionUpdate.userErrors;
+    if (e.length) { errors++; console.log("✘ update", c.handle, JSON.stringify(e)); continue; }
+    await registerEn(ex.id, c);
+    console.log(`✔ updated text ${c.handle}`);
+    continue;
+  }
+  const r = (await gql(`mutation($i:CollectionInput!){collectionCreate(input:$i){collection{id} userErrors{field message}}}`, {
+    i: { handle: c.handle, title: c.title, descriptionHtml: c.body, sortOrder: "BEST_SELLING", ruleSet: { appliedDisjunctively: false, rules: [{ column: "TAG", relation: "EQUALS", condition: c.tag }] } },
+  })).data.collectionCreate;
+  if (r.userErrors.length) { errors++; console.log("✘ create", c.handle, JSON.stringify(r.userErrors)); continue; }
+  await registerEn(r.collection.id, c);
+  console.log(`✔ created ${c.handle} (${r.collection.id}), unpublished`);
 }
 console.log(`APPLIED — ${errors} error(s)`);

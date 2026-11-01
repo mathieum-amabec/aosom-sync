@@ -6,8 +6,8 @@
 {%- assign ret_url = routes.root_url | append: '/pages/politique-de-retour' | replace: '//pages', '/pages' -%}
 {%- comment -%}
   Seasonal line (shop date), fr/en only — es/pa keep the usual claims:
-  - Black Friday week Nov 20–30, only once the collection is really published (an unpublished collection
-    has no products here), so the link can never 404.
+  - Black Friday: early launch Nov 6–26 (price guaranteed to Nov 30), then last days Nov 27–30 — only once
+    the collection is really published (an unpublished collection has no products here), so the link can never 404.
   - Christmas cut-off Dec 1–7: handling 1–3 + transit 3–9 business days → Dec 7 is the last safe day.
 {%- endcomment -%}
 {%- liquid
@@ -15,7 +15,9 @@
   assign lc_season = ''
   if loc == 'fr' or loc == 'en'
     assign lc_bf_count = collections['black-friday-gros-rabais'].products_count | default: 0
-    if lc_md >= 1120 and lc_md <= 1130 and lc_bf_count > 0
+    if lc_md >= 1106 and lc_md <= 1126 and lc_bf_count > 0
+      assign lc_season = 'bf_early'
+    elsif lc_md >= 1127 and lc_md <= 1130 and lc_bf_count > 0
       assign lc_season = 'bf'
     elsif lc_md >= 1201 and lc_md <= 1207
       assign lc_season = 'xmas'
@@ -24,8 +26,10 @@
   assign bf_url = routes.root_url | append: '/collections/black-friday-gros-rabais' | replace: '//collections', '/collections'
 -%}
 <div class="lc-ann" role="region" aria-label="{% if loc == 'en' %}Announcement{% elsif loc == 'es' %}Anuncio{% elsif loc == 'pa' %}ਐਲਾਨ{% else %}Annonce{% endif %}">
-{%- if lc_season == 'bf' %}
-  <a href="{{ bf_url }}">🔥 {% if loc == 'en' %}Black Friday: our biggest deals of the year — shop now{% else %}Vendredi fou : nos plus gros rabais de l'année — magasiner{% endif %}</a>
+{%- if lc_season == 'bf_early' %}
+  <a href="{{ bf_url }}">🔥 {% if loc == 'en' %}Black Friday starts now · price guaranteed to Nov 30 — shop now{% else %}Le Vendredi fou commence maintenant · prix garantis jusqu'au 30 nov. — magasiner{% endif %}</a>
+{%- elsif lc_season == 'bf' %}
+  <a href="{{ bf_url }}">🔥 {% if loc == 'en' %}Black Friday: last days for our biggest deals — shop now{% else %}Vendredi fou : derniers jours de nos plus gros rabais — magasiner{% endif %}</a>
 {%- elsif lc_season == 'xmas' %}
   <span>🎄 {% if loc == 'en' %}Order by December 7 for delivery before Christmas{% else %}Commandez d'ici le 7 décembre pour une livraison avant Noël{% endif %}</span>
 {%- else %}
