@@ -152,16 +152,21 @@ describe("rendering", () => {
     expect(cartSubject("fr", new Date("2026-11-27T03:00:00Z")).subject).toContain("a commencé");
     expect(cartSubject("fr", new Date("2026-11-27T06:00:00Z")).subject).toContain("c'est le Vendredi fou");
     // 2026-12-01 03:00 UTC is still Nov 30 in Toronto → in; then back to the usual subject
-    expect(cartSubject("fr", new Date("2026-12-01T03:00:00Z")).subject).toContain("Vendredi fou");
+    expect(cartSubject("fr", new Date("2026-12-01T03:00:00Z")).subject).toContain("c'est le Vendredi fou");
     expect(cartSubject("fr", new Date("2026-12-01T06:00:00Z")).subject).not.toContain("Vendredi fou");
     expect(cartSubject("fr", new Date("2026-11-06T03:00:00Z")).subject).not.toContain("Vendredi fou");
+    expect(cartSubject("en", new Date("2026-11-06T05:30:00Z")).subject).toContain("has started");
+    expect(cartSubject("en", new Date("2026-11-27T06:00:00Z")).subject).toContain("it's Black Friday");
+    expect(cartSubject("en", new Date("2026-12-01T06:00:00Z")).subject).not.toContain("Black Friday");
     const all = [early.subject, early.preview, bf.subject, bf.preview,
       cartSubject("en", new Date("2026-11-12T15:00:00Z")).preview, cartSubject("en", new Date("2026-11-27T15:00:00Z")).preview].join("\n");
     expect(all).not.toMatch(/rabais|discount|promo|coupon|code /i);
   });
   it("never names a supplier, and offers no discount or code", () => {
-    const all = [buildTemplateHtml("fr"), buildTemplateHtml("en"), cartSubject("fr").subject, cartSubject("fr").preview, cartSubject("en").subject, cartSubject("en").preview].join("\n");
-    expect(all).not.toMatch(/aosom|homcom|outsunny|pawhut|costway|wayfair/i);
+    const dated = ["2026-11-12T15:00:00Z", "2026-11-27T15:00:00Z"].flatMap((d) =>
+      (["fr", "en"] as const).flatMap((l) => { const s = cartSubject(l, new Date(d)); return [s.subject, s.preview]; }));
+    const all = [buildTemplateHtml("fr"), buildTemplateHtml("en"), cartSubject("fr").subject, cartSubject("fr").preview, cartSubject("en").subject, cartSubject("en").preview, ...dated].join("\n");
+    expect(all).not.toMatch(/aosom|homcom|outsunny|pawhut|costway|soozier|qaba|vinsetto|wayfair/i);
     expect(all).not.toMatch(/rabais|discount|promo|coupon|code /i);
   });
   it("prunes old bookkeeping", () => {

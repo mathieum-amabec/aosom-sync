@@ -27,7 +27,8 @@
 -%}
 <div class="lc-ann" role="region" aria-label="{% if loc == 'en' %}Announcement{% elsif loc == 'es' %}Anuncio{% elsif loc == 'pa' %}ਐਲਾਨ{% else %}Annonce{% endif %}">
 {%- if lc_season == 'bf_early' %}
-  <a href="{{ bf_url }}">🔥 {% if loc == 'en' %}Black Friday starts now · price guaranteed to Nov 30 — shop now{% else %}Le Vendredi fou commence maintenant · prix garantis jusqu'au 30 nov. — magasiner{% endif %}</a>
+  {%- comment -%} The guarantee terms are in the collection description, one click away (Quebec LPC). {%- endcomment -%}
+  <a href="{{ bf_url }}">🔥 <span class="lc-ann__d">{% if loc == 'en' %}Black Friday starts now · price drops by Nov 30? We refund the difference* — shop now{% else %}Le Vendredi fou est commencé · le prix baisse d'ici le 30 nov. ? On rembourse la différence* — magasiner{% endif %}</span><span class="lc-ann__m">{% if loc == 'en' %}Black Friday starts early · price protected to Nov 30*{% else %}Vendredi fou en avance · prix protégé au 30 nov.*{% endif %}</span></a>
 {%- elsif lc_season == 'bf' %}
   <a href="{{ bf_url }}">🔥 {% if loc == 'en' %}Black Friday: last days for our biggest deals — shop now{% else %}Vendredi fou : derniers jours de nos plus gros rabais — magasiner{% endif %}</a>
 {%- elsif lc_season == 'xmas' %}
