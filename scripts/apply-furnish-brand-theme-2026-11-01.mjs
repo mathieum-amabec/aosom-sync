@@ -19,12 +19,27 @@ const WITH_BF = process.argv.includes("--with-bf-banner");
 const EN = "request.locale.iso_code == 'en'";
 
 const PATCHES = {
+  // The shop name is now "Ameublo Direct | Furnish Direct" so the checkout, Apple Pay and order emails name both
+  // stores. On the storefront each locale keeps its own brand instead of the combined name.
+  "layout/theme.liquid": [
+    ["{%- unless page_title contains shop.name or page_title contains 'Furnish Direct' %}", "{%- unless page_title contains 'Ameublo Direct' or page_title contains 'Furnish Direct' %}"],
+    ["{% elsif lc_loc == 'pa' %}Furnish Direct{% else %}{{ shop.name }}{% endif %}{% endunless -%}", "{% elsif lc_loc == 'pa' %}Furnish Direct{% else %}Ameublo Direct{% endif %}{% endunless -%}"],
+  ],
+  "snippets/meta-tags.liquid": [["assign og_site_name = shop.name", "assign og_site_name = 'Ameublo Direct'"]],
+  "snippets/lc-org-schema.liquid": [
+    [`"name": {{ shop.name | json }},\n  "alternateName": ["Furnish Direct", "Ameublo"],`, `"name": "Ameublo Direct",\n  "alternateName": ["Furnish Direct", "Ameublo"],`],
+    [`"name": {{ shop.name | json }},\n  "alternateName": "Furnish Direct",`, `"name": "Ameublo Direct",\n  "alternateName": "Furnish Direct",`],
+  ],
+  "snippets/lc-page-schema.liquid": [
+    [`"author": { "@type": "Organization", "@id": {{ org_id | json }}, "name": {{ shop.name | json }},`, `"author": { "@type": "Organization", "@id": {{ org_id | json }}, "name": "Ameublo Direct",`],
+    [`"publisher": { "@type": "Organization", "@id": {{ org_id | json }}, "name": {{ shop.name | json }},`, `"publisher": { "@type": "Organization", "@id": {{ org_id | json }}, "name": "Ameublo Direct",`],
+  ],
   // Footer brand column heading ("AMEUBLO DIRECT") and copyright (shop.name is the single shop name).
   "sections/footer.liquid": [
     [`<h2 class="footer-block__heading inline-richtext">{{- block.settings.heading -}}</h2>`,
       `<h2 class="footer-block__heading inline-richtext">{%- if ${EN} and block.settings.heading contains 'Ameublo' -%}Furnish Direct{%- else -%}{{- block.settings.heading -}}{%- endif -%}</h2>`],
     [`&copy; {{ 'now' | date: '%Y' }}, {{ shop.name | link_to: routes.root_url -}}`,
-      `&copy; {{ 'now' | date: '%Y' }}, {% if ${EN} %}{{ 'Furnish Direct' | link_to: routes.root_url -}}{% else %}{{ shop.name | link_to: routes.root_url -}}{% endif -%}`],
+      `&copy; {{ 'now' | date: '%Y' }}, {% if ${EN} %}{{ 'Furnish Direct' | link_to: routes.root_url -}}{% else %}{{ 'Ameublo Direct' | link_to: routes.root_url -}}{% endif -%}`],
   ],
   "sections/lc-newsletter.liquid": [
     ["By signing up you agree to receive emails from Ameublo Direct.", "By signing up you agree to receive emails from Furnish Direct (Ameublo Direct)."],
@@ -32,10 +47,10 @@ const PATCHES = {
   // "The Ameublo Guide" (desktop menu + mobile drawer) → "The Furnish Guide" on every non-French locale.
   "snippets/header-mega-menu.liquid": [["assign guide_label = 'The Ameublo Guide'", "assign guide_label = 'The Furnish Guide'"]],
   "snippets/header-drawer.liquid": [["assign guide_label = 'The Ameublo Guide'", "assign guide_label = 'The Furnish Guide'"]],
-  // Product JSON-LD brand (= shop.name) → Furnish Direct on en.
-  "snippets/lc-structured-data.liquid": [["    assign brand = shop.name\n", `    assign brand = shop.name\n    if ${EN}\n      assign brand = 'Furnish Direct'\n    endif\n`]],
+  // Product JSON-LD brand (was shop.name, now the combined name) → Ameublo Direct, Furnish Direct on en.
+  "snippets/lc-structured-data.liquid": [["    assign brand = shop.name\n", `    assign brand = 'Ameublo Direct'\n    if ${EN}\n      assign brand = 'Furnish Direct'\n    endif\n`]],
   // This file uses CRLF line endings: no trailing newline in the match.
-  "snippets/agentic-structured-data.liquid": [["  assign brand = shop.name", `  assign brand = shop.name\n  if ${EN}\n    assign brand = 'Furnish Direct'\n  endif`]],
+  "snippets/agentic-structured-data.liquid": [["  assign brand = shop.name", `  assign brand = 'Ameublo Direct'\n  if ${EN}\n    assign brand = 'Furnish Direct'\n  endif`]],
   // Homepage reviews are written in French by Quebec customers: keep them (real social proof) but say so.
   "snippets/lc_judgeme_all_reviews.liquid": [[
     `        li.appendChild(b);`,
