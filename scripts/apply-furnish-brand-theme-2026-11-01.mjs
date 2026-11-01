@@ -24,7 +24,7 @@ const PATCHES = {
     [`<h2 class="footer-block__heading inline-richtext">{{- block.settings.heading -}}</h2>`,
       `<h2 class="footer-block__heading inline-richtext">{%- if ${EN} and block.settings.heading contains 'Ameublo' -%}Furnish Direct{%- else -%}{{- block.settings.heading -}}{%- endif -%}</h2>`],
     [`&copy; {{ 'now' | date: '%Y' }}, {{ shop.name | link_to: routes.root_url -}}`,
-      `&copy; {{ 'now' | date: '%Y' }}, {% if ${EN} %}{{ 'Furnish Direct' | link_to: routes.root_url -}}{% else %}{{ shop.name | link_to: routes.root_url -}}{% endif %}`],
+      `&copy; {{ 'now' | date: '%Y' }}, {% if ${EN} %}{{ 'Furnish Direct' | link_to: routes.root_url -}}{% else %}{{ shop.name | link_to: routes.root_url -}}{% endif -%}`],
   ],
   "sections/lc-newsletter.liquid": [
     ["By signing up you agree to receive emails from Ameublo Direct.", "By signing up you agree to receive emails from Furnish Direct (Ameublo Direct)."],
@@ -44,10 +44,12 @@ const PATCHES = {
   ],[".lc-rv__body{min-width:0;}", ".lc-rv__body{min-width:0;}\n  .lc-rv__orig{margin:.15rem 0 0;font-size:.75rem;opacity:.65;font-style:italic;}"]],
 };
 
+// Base = the target draft when given (a fresh duplicate of live: keeps any change already in that draft), else live.
 const live = await getLiveThemeId();
+const base = THEME || live;
 const out = {};
 for (const [key, list] of Object.entries(PATCHES)) {
-  let v = await getAsset(key, live);
+  let v = await getAsset(key, base);
   for (const [from, to] of list) {
     const n = v.split(from).length - 1;
     if (n !== 1) throw new Error(`${key}: patch matched ${n}× (expected 1): ${from.slice(0, 70)}`);
@@ -63,7 +65,7 @@ for (const [k, v] of Object.entries(out)) {
   fs.mkdirSync(path.dirname(f), { recursive: true });
   fs.writeFileSync(f, v);
 }
-console.log(`live ${live} · ${Object.keys(out).length} files patched → .context/furnish-fix/patched/`);
+console.log(`live ${live} · base ${base} · ${Object.keys(out).length} files patched → .context/furnish-fix/patched/`);
 if (!THEME) { console.log("DRY-RUN — nothing written to Shopify."); process.exit(0); }
 
 let errors = 0;
