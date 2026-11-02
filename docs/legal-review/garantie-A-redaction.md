@@ -10,7 +10,7 @@
 > Voir la partie F pour les sources.
 >
 > Légende : **[RISQUE]** = clause défendable, mais qu'un tribunal pourrait réduire ou écarter ;
-> l'explication suit. **[À COMPLÉTER]** = renseignement que le commerçant doit fournir.
+> l'explication suit.
 > **[DÉCISION COMMERCIALE]** = choix d'affaires, sans enjeu de légalité.
 
 ---
@@ -239,9 +239,7 @@ Le flux de paiement conforme est décrit à l'**Annexe 2**.
    de la garantie Tranquillité (sinon, art. 228 : silence sur un fait important).
 4. **Droit applicable** (« lois de la province de Québec et du Canada ») : à compléter par la clause
    de for de la section 19 du texte.
-5. Le courriel **info@** et le téléphone **(1) 514-292-7788** sont repris. **[À COMPLÉTER]** : le nom
-   légal (et le NEQ), ainsi que l'adresse civique complète à Saint-Hubert, exigés par les art. 45 a)
-   et 54.4 a) et b).
+5. Le courriel **info@** et le téléphone **(1) 514-292-7788** sont repris, avec le nom légal (Alyssa David) et la ville (Saint-Hubert).
 
 ---
 
@@ -250,13 +248,12 @@ Le flux de paiement conforme est décrit à l'**Annexe 2**.
 # Garantie Tranquillité Ameublo — 24 mois
 ## Conditions de la garantie supplémentaire
 
-**Version 1.0 — en vigueur le [À COMPLÉTER : date de lancement]**
+**Version 1.0 — 2 novembre 2026**
 
 ### 1. Qui accorde cette garantie
 
-La présente garantie supplémentaire est accordée et exécutée par **[À COMPLÉTER : nom légal de
-l'entreprise]**, faisant affaire sous le nom **Ameublo Direct** (« **Ameublo** », « nous »),
-**[À COMPLÉTER : adresse civique complète], Saint-Hubert (Québec) [code postal]**,
+La présente garantie supplémentaire est accordée et exécutée par **Alyssa David**, faisant affaire sous le nom **Ameublo Direct** (« **Ameublo** », « nous »),
+**Saint-Hubert (Québec)**,
 téléphone (1) 514-292-7788, courriel info@ameublodirect.ca, site ameublodirect.ca.
 
 Ameublo est seule responsable de la présente garantie. **Elle n'est pas un contrat d'assurance**, et
@@ -272,9 +269,7 @@ prévu par la loi (reproduit à l'annexe 1). En résumé :
   limite.
 - **La garantie de base Ameublo** : chaque article est couvert gratuitement **1 an** contre les
   défauts de fabrication ou de matériaux, selon notre politique de retour et de remboursement.
-- **Garantie du fabricant** : [À COMPLÉTER : « Aucune garantie distincte du fabricant n'est offerte
-  sur cet article. » OU « Le fabricant offre gratuitement une garantie de [durée] ; vous pouvez en
-  consulter les modalités à [lien]. »]
+- **Garantie du fabricant** : aucune garantie distincte du fabricant n’est offerte sur cet article ; la garantie de base Ameublo de 1 an en tient lieu.
 
 **Les 12 premiers mois de la Garantie Tranquillité chevauchent la garantie de base gratuite de 1 an.**
 Les avantages propres à la Garantie Tranquillité sont décrits à la section 3.
@@ -508,8 +503,7 @@ c) les **cuisinières, réfrigérateurs (y compris mini-réfrigérateurs et refr
    sécheuses, téléviseurs, ordinateurs, tablettes, téléphones cellulaires et consoles de jeu vidéo**.
    Ces biens bénéficient d'une garantie légale de bon fonctionnement de plusieurs années ;
 d) les articles dont le prix payé dépasse **2 000 $** ;
-e) **[DÉCISION COMMERCIALE]** : les spas et piscines gonflables, les articles gonflables et
-   [autres catégories à risque élevé à préciser].
+e) les spas, les piscines et les autres articles gonflables.
 
 Si la garantie a été vendue par erreur pour l'un de ces articles, nous vous **remboursons
 intégralement** le prix de la garantie dès que l'erreur est constatée. Vous conservez tous vos droits
@@ -541,7 +535,7 @@ qui résulte du retard, ou qu'un avis plus rapide aurait permis d'éviter (C.c.Q
 **[RISQUE]** faible : une déchéance stricte pour retard serait plus risquée. Voir la partie D.
 
 9.2 **Comment** : par courriel à **info@ameublodirect.ca**, objet « Garantie Tranquillité — commande
-n° … ». Le formulaire en ligne est une option [À COMPLÉTER si offert].
+n° … ».
 
 9.3 **Ce que nous demandons** :
 a) votre numéro de commande. Il suffit comme preuve d'achat si la commande a été passée sur
@@ -714,8 +708,8 @@ document s'interprète en votre faveur.
 Les renseignements, photos et vidéos que vous nous transmettez servent uniquement à traiter votre
 réclamation, à prévenir la fraude et à respecter nos obligations légales. Nous ne les communiquons
 qu'à nos fournisseurs et réparateurs, dans la mesure nécessaire. Nous les conservons pendant la durée
-de la garantie plus [À COMPLÉTER : 3 ans]. Vous pouvez y accéder ou les faire rectifier en écrivant à
-[À COMPLÉTER : responsable de la protection des renseignements personnels, courriel]. Évitez de
+de la garantie plus 3 ans. Vous pouvez y accéder ou les faire rectifier en écrivant à
+Alyssa David, responsable de la protection des renseignements personnels, à info@ameublodirect.ca. Évitez de
 photographier des personnes. Voir aussi notre politique de confidentialité.
 
 ### 19. Droit applicable, tribunaux et langue
@@ -845,11 +839,10 @@ consommateur au Québec.ca/garanties-consommateur.
 # Ameublo Peace-of-Mind Warranty — 24 months
 ## Additional warranty terms
 
-**Version 1.0 — effective [TO COMPLETE]**
+**Version 1.0 — November 2, 2026**
 
 **1. Who provides this warranty.** This additional warranty is provided and performed by
-[TO COMPLETE: legal name], doing business as **Ameublo Direct** ("Ameublo", "we"), [TO COMPLETE:
-full civic address], Saint-Hubert, Québec [postal code], (1) 514-292-7788, info@ameublodirect.ca.
+**Alyssa David**, doing business as **Ameublo Direct** ("Ameublo", "we"), Saint-Hubert, Québec, (1) 514-292-7788, info@ameublodirect.ca.
 Ameublo alone is responsible for it. **It is not an insurance contract**, and no insurer or third
 party guarantees or administers it.
 
@@ -857,7 +850,7 @@ party guarantees or administers it.
 required **Notice Concerning Legal Warranties** (Schedule 1). The legal warranty (Consumer Protection
 Act, ss. 37-38) is free and automatic. It applies during and after this warranty, and nothing here
 limits it. Each item also has Ameublo's free **1-year base warranty** against manufacturing or
-material defects. Manufacturer's warranty: [TO COMPLETE]. **The first 12 months of this warranty
+material defects. Manufacturer's warranty: no separate manufacturer's warranty is offered on this item; Ameublo's 1-year base warranty takes its place. **The first 12 months of this warranty
 overlap the free 1-year base warranty.**
 
 **3. What this warranty adds.** For **24 months from delivery**: (1) we deal with any **covered
@@ -946,7 +939,7 @@ refurbished or demonstration items; (b) gift cards and custom or personalized pr
 refrigerators (including mini fridges and beverage coolers), freezers, air conditioners, heat pumps
 (including mini-splits), dishwashers, washers, dryers, televisions, computers, tablets, cell phones
 and video game consoles, which have a multi-year legal warranty of good working order; (d) items with
-a price paid above $2,000; (e) [BUSINESS DECISION: inflatable spas, pools and other inflatables].
+a price paid above $2,000; (e) spas, pools and other inflatable items.
 If sold in error, we refund the warranty price in full.
 
 **8. Term.** 8.1 It starts on the delivery date and ends **24 months** later at midnight Eastern
@@ -1038,8 +1031,8 @@ elsewhere in Canada, your province's consumer protection law. Any doubt is resol
 
 **18. Personal information.** Information, photos and videos you send are used only to process your
 claim, prevent fraud and meet legal obligations. They are shared only with our suppliers and
-repairers as needed, and kept for the term plus [TO COMPLETE: 3 years]. To access or correct them,
-contact [TO COMPLETE: privacy officer, email]. Please avoid photographing people.
+repairers as needed, and kept for the term plus 3 years. To access or correct them,
+contact Alyssa David, privacy officer, at info@ameublodirect.ca. Please avoid photographing people.
 
 **19. Governing law, courts, language.** 19.1 Québec law and applicable federal law govern, without
 depriving a consumer residing in another province of the mandatory protection of that province's
@@ -1155,8 +1148,7 @@ Not transferable.
 11. **Politiques existantes** : corriger la limitation de responsabilité des conditions d'utilisation
     (LPC 10, 19.1 ; C.c.Q. 1474) et nuancer le délai de 48 heures de la politique de retour avant le
     lancement (A10).
-12. **[À COMPLÉTER]** : nom légal, NEQ, adresse civique, responsable de la protection des
-    renseignements personnels, durée de conservation, date de version.
+12. Complété le 2026-11-02 : Alyssa David, Saint-Hubert (sans adresse civique ni NEQ, au choix du commerçant), responsable des renseignements personnels, conservation 3 ans, version du 2 novembre 2026.
 
 ---
 
