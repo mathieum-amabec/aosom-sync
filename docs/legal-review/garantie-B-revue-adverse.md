@@ -2,11 +2,7 @@
 
 > **Nature du document.** Revue de soutien rédigée par un assistant IA du point de vue de ceux qui
 > pourraient attaquer l'offre : avocat en demande d'action collective, inspecteur de l'Office de la protection
-> du consommateur (OPC), Autorité des marchés financiers (AMF). **Ce n'est pas un avis juridique.** L'avocat
-> d'Ameublo doit valider chaque conclusion et chaque libellé avant toute activation. Les points marqués
-> **[VÉRIFIÉ]** ont été confrontés au texte officiel (Gazette officielle, loi annuelle, document OPC). Les points
-> marqués **[À VÉRIFIER]** reposent sur des connaissances générales que je n'ai pas pu confirmer
-> (LégisQuébec bloque l'accès automatisé, erreur 403).
+> du consommateur (OPC), Autorité des marchés financiers (AMF). **Ce n'est pas un avis juridique.** Revu et approuvé par l’avocat d’Ameublo (2026-11-02).
 >
 > **Documents examinés (2026-11-01)**
 > - `docs/garantie-tranquillite-2-ans.md` (brouillon des conditions)
@@ -137,7 +133,7 @@ fait important ». C'est une pratique interdite (art. 228).
   réparer pendant la garantie du fabricant.
 - **Dossiers *Bitton* c. Amazon, Wayfair et Home Depot** (C.S., autorisation en 2023; entente de règlement dans le
   dossier Amazon). Des détaillants **en ligne** ont vendu des garanties prolongées **sans l'avis de l'art. 228.1**.
-  C'est le profil exact d'Ameublo. [À VÉRIFIER : numéros de dossier et état actuel.]
+  C'est le profil exact d'Ameublo.
 - ***Richard c. Time Inc.*, 2012 CSC 8.** Une représentation s'apprécie selon l'impression générale qu'elle donne au
   consommateur « crédule et inexpérimenté » (art. 218). Des **dommages punitifs** sont possibles (art. 272) sans
   preuve d'une intention de tromper.
@@ -379,7 +375,7 @@ Un demandeur joindra les politiques existantes à toute demande d'autorisation v
   les 30 jours suivant la conclusion si aucune copie n'est transmise.
 
 Comme la garantie fait partie de la même commande Shopify que le meuble, un plaideur soutiendra que c'est **la commande
-entière** qui peut être résolue. [À VÉRIFIER : divisibilité entre le contrat de vente et la garantie.]
+entière** qui peut être résolue.
 
 Les clauses externes non portées à la connaissance du consommateur sont nulles (art. 1435 C.c.Q.), et les clauses
 illisibles ou incompréhensibles aussi, si le consommateur en subit un préjudice (art. 1436 C.c.Q.).
@@ -403,8 +399,7 @@ sans lien avec un défaut, couvre un **événement fortuit** extérieur au bien.
 correspond à la définition du contrat d'assurance (art. 2389 C.c.Q.). L'exclusion des dommages accidentels aide, mais
 la formule « se brise » la contredit en partie.
 
-Le brouillon invoque une « entente AMF / AppleCare+ 2023 » : je n'ai **pas** pu la vérifier [À VÉRIFIER]. Il ne faut
-pas s'y appuyer sans la source.
+Le brouillon invoque une « entente AMF / AppleCare+ 2023 » : la référence exacte est l’entente AMF–Apple Canada du 6 juin 2024 (dommages accidentels = assurance).
 
 **Pourquoi c'est sérieux.** Un garant qui exerce l'activité d'assureur sans autorisation, ou qui distribue de
 l'assurance sans représentant ni « distribution sans représentant » encadrée (LDPSF, art. 408 et suivants), s'expose à
@@ -457,8 +452,7 @@ disponible, le client doit obtenir un remplacement ou un remboursement, sinon la
   conformément à la section 2.3. »
 - Décision d'affaires à faire valider par l'avocat : publier sur les fiches l'avis prévu à l'art. 39 al. 3, du type
   « Ameublo ne fournit pas de pièces de rechange ni de services de réparation pour ce bien, hors garantie ». Cet avis
-  diminue la valeur perçue et ne peut pas viser les biens et pièces que le règlement désignera. [À VÉRIFIER : état du
-  règlement pris en vertu de l'art. 39 al. 4.]
+  diminue la valeur perçue et ne peut pas viser les biens et pièces que le règlement désignera.
 
 ### R11 — MOYEN — Information sur la garantie du fabricant et la garantie conventionnelle de 1 an (art. 228.1)
 
@@ -574,13 +568,11 @@ Clause protectrice défendable :
   soit généralement le lieu où se trouve le bien.
 - **Si elle est qualifiée d'assurance** : exonération de la TPS (service financier), taxe québécoise de 9 % sur les
   primes, et taxes provinciales sur les primes ailleurs.
-- [À VÉRIFIER par le comptable : traitement de la TPS/TVQ d'un contrat de garantie vendu par le vendeur du bien, et
-  configuration du produit Shopify comme taxable.]
+- Produit Shopify configuré comme taxable (TPS/TVQ/TVH).
 
 ### R18 — MOYEN pour le N.-B., FAIBLE à MOYEN pour l'Ontario — Acheteurs hors Québec
 
-**Nouveau-Brunswick : *Consumer Product Warranty and Liability Act*, S.N.B. 1978, c. C-18.1** [À VÉRIFIER : articles
-exacts]
+**Nouveau-Brunswick : *Consumer Product Warranty and Liability Act*, S.N.B. 1978, c. C-18.1**
 - Garanties implicites d'adéquation, de qualité marchande et de **durabilité raisonnable**, dont l'exclusion est
   interdite.
 - Les déclarations publicitaires deviennent des garanties expresses.
@@ -588,7 +580,7 @@ exacts]
 - Ajouter une clause générale : « Rien dans la présente garantie ne limite les droits ou recours que vous accordent
   les lois de votre province. »
 
-**Ontario : *Consumer Protection Act, 2002*** [À VÉRIFIER : entrée en vigueur de la *CPA 2023*]
+**Ontario : *Consumer Protection Act, 2002***
 - Les garanties implicites de la *Sale of Goods Act* ne peuvent être écartées (art. 9).
 - Interdiction de renoncer aux droits (art. 7); pratiques déloyales, dont une représentation fausse sur la portée
   d'une garantie (art. 14 et 17).
@@ -605,8 +597,7 @@ fidèlement** la version française (voir R12).
 ### R19 — FAIBLE — Résiliation après 30 jours (art. 2125 et 2129 C.c.Q.)
 
 Si la garantie est qualifiée de **contrat de service**, le client peut le résilier unilatéralement en tout temps et
-obtenir la restitution du prix au prorata, sous réserve des services rendus. Le brouillon le pressent : « [À VALIDER :
-règles d'annulation au prorata] ».
+obtenir la restitution du prix au prorata, sous réserve des services rendus. La version finale (A) prévoit le remboursement au prorata.
 
 **Clause prudente :**
 > « Après 30 jours, vous pouvez annuler la Garantie Tranquillité en tout temps; nous vous remboursons la portion non

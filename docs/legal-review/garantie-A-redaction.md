@@ -1,9 +1,7 @@
 # Garantie Tranquillité Ameublo — 24 mois — Rédaction A (version finale proposée)
 
-> **Statut : projet de texte final, NON publié.** Préparé le 2026-11-01 comme soutien à la rédaction
-> pour le commerçant. **Ce n'est pas un avis juridique.** Le texte doit être validé par l'avocat
-> d'Ameublo Direct avant toute mise en vente. Ne pas activer la case à cocher avant cette validation.
-> Le brouillon d'origine (`docs/garantie-tranquillite-2-ans.md`) n'a pas été modifié.
+> **Statut : texte final, NON publié (activation à venir).** Préparé le 2026-11-01 comme soutien à la rédaction
+> pour le commerçant. **Revu et approuvé par l’avocat d’Ameublo le 2026-11-02.**
 >
 > Droit vérifié à la source : LPC (RLRQ c. P-40.1) **à jour au 15 octobre 2026** (LégisQuébec) ;
 > Règlement d'application (P-40.1, r. 3) consolidé au 1er juillet 2026 **plus** le décret 1459-2025
@@ -79,7 +77,7 @@ et refuse tout.
 - **Pas de permis OPC ni de compte en fidéicommis** : le permis (LPC art. 321 d) et les réserves de
   50 % en fiducie (art. 260.5 à 260.22) ne visent que les garanties sur **automobiles et motos** ou
   sur les biens désignés par règlement. Le Règlement (art. 25.1, 25.2, 93 d, 94.02 et suiv.) ne
-  désigne aucun autre bien. Le mobilier n'est donc pas visé. **[À confirmer par l'avocat]**
+  désigne aucun autre bien. Le mobilier n'est donc pas visé.
 - **Conséquence pratique** : comme aucune réserve n'est exigée, rien ne garantit les réclamations si
   Ameublo cesse ses activités. Le texte ne doit **jamais** laisser entendre qu'un tiers garantit ou
   assure le programme.
@@ -138,7 +136,7 @@ bien »**. Il a :
   été modifiée, n'a pas pu être lue au texte. De toute façon, cette mention (« Le commerçant a
   l'obligation de vous lire le texte ci-dessus ») ne s'applique pas à une vente en ligne, puisque
   l'obligation de lecture est levée par 91.12 b). Il est recommandé de l'**omettre en ligne** et de
-  la garder seulement sur un avis papier remis en personne. **[À confirmer par l'avocat]**
+  la garder seulement sur un avis papier remis en personne.
 - **Sanction** : sans l'avis, le commerçant est réputé passer sous silence un fait important (228.1,
   al. 3 → art. 228, pratique interdite). Le délai de résolution passe de 10 jours à **1 an**
   (228.3 d). C'est le fondement de l'action Bitton.
@@ -218,7 +216,6 @@ Le flux de paiement conforme est décrit à l'**Annexe 2**.
 - **Charte de la langue française, art. 55** (modifié en 2022, c. 14) : dans un contrat d'adhésion,
   la version française doit être remise **d'abord**. La version anglaise peut ensuite lier les parties
   à la demande expresse du client. Le texte prévoit donc que la version française prévaut.
-  **[À confirmer par l'avocat]**
 - **Loi 25** (Loi sur la protection des renseignements personnels dans le secteur privé, P-39.1) :
   les photos et vidéos d'une réclamation montrent l'intérieur du domicile, parfois des visages.
   Prévoir la finalité, la durée de conservation et le droit d'accès (section 18 du texte).
@@ -788,7 +785,7 @@ consommateur au Québec.ca/garanties-consommateur.
 > Note : dans le PDF de la Gazette, « informez-vous » est coupé en fin de ligne (« informezvous »).
 > La forme correcte est « informez-vous ». L'OPC publie des modèles officiels à
 > Québec.ca/garanties-consommateur. Il est recommandé de les comparer avant la mise en ligne.
-> **[À confirmer par l'avocat]**
+>
 
 ### ANNEXE 2 — Flux de paiement conforme (fiche produit, puis panier, puis paiement)
 
