@@ -17,7 +17,7 @@
 {%- endcomment -%}
 {%- assign lc_w = all_products['garantie-tranquillite-2-ans'] -%}
 {%- if lc_w != blank and lc_w.available and product.handle != lc_w.handle and product.price > 0 -%}
-{%- unless product.tags contains 'sans-garantie-tranquillite' -%}
+{%- unless product.tags contains 'sans-garantie-tranquillite' or product.tags contains 'garantie-legale-6ans' or product.tags contains 'garantie-legale-5ans' -%}
   {%- assign loc = request.locale.iso_code | downcase -%}
   {%- assign en = false -%}{%- if loc == 'en' -%}{%- assign en = true -%}{%- endif -%}
   {%- assign lc_w_enabled = shop.metafields.custom.warranty_enabled.value | default: false -%}
