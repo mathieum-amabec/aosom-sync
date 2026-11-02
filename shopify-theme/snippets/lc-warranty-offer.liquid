@@ -1,0 +1,152 @@
+{%- comment -%}
+  Garantie Tranquillité 2 ans — optional paid extended warranty offered under the buy buttons (PDP).
+
+  - Sold as the internal product `garantie-tranquillite-2-ans` (one variant per 10 $ price bracket,
+    option1 = bracket upper bound in dollars, price = 10 % of it). Honoured by Ameublo itself.
+  - OFF until the lawyer validates the text: rendered hidden, shown only when the shop metafield
+    custom.warranty_enabled is true, or for QA with ?lc_garantie=1 (remembered for the session).
+  - LPC art. 228.1: the legal-warranty notice is shown ABOVE the checkbox, readable without a click.
+  - The checkbox is unchecked by default. When checked, the warranty line is added to the cart
+    BEFORE the product form (or the "Acheter maintenant" form) submits, with line properties linking
+    it to the product; lc-warranty-guard removes orphaned warranty lines.
+
+  Accepts: product (Object), section_id (String)
+{%- endcomment -%}
+{%- assign lc_w = all_products['garantie-tranquillite-2-ans'] -%}
+{%- if lc_w != blank and lc_w.available and product.handle != lc_w.handle and product.price > 0 -%}
+  {%- assign loc = request.locale.iso_code | downcase -%}
+  {%- assign lc_w_enabled = shop.metafields.custom.warranty_enabled.value | default: false -%}
+  <div
+    class="lc-warranty"
+    data-lc-warranty
+    data-section-id="{{ section_id }}"
+    data-enabled="{{ lc_w_enabled }}"
+    data-product-title="{{ product.title | escape }}"
+    hidden
+  >
+    <p class="lc-warranty__legal">
+      {%- if loc == 'en' -%}
+        <strong>Legal warranty notice.</strong> Quebec's Consumer Protection Act gives you a free legal warranty: the
+        item must be usable for its normal purpose for a reasonable time (sections 37 and 38). This item is also covered
+        free of charge by Ameublo's 1-year manufacturing-defect warranty.
+      {%- else -%}
+        <strong>Avis sur la garantie légale.</strong> La Loi sur la protection du consommateur vous accorde gratuitement
+        une garantie légale : le bien doit pouvoir servir à son usage normal pendant une durée raisonnable (articles 37
+        et 38). Ce produit est aussi couvert sans frais par la garantie Ameublo de 1 an contre les défauts de fabrication.
+      {%- endif -%}
+    </p>
+    <label class="lc-warranty__opt">
+      <input type="checkbox" data-lc-warranty-check>
+      <span class="lc-warranty__txt">
+        <strong>
+          {%- if loc == 'en' -%}Add the 2-Year Peace-of-Mind Warranty{%- else -%}Ajouter la Garantie Tranquillité 2 ans{%- endif -%}
+        </strong>
+        <span class="lc-warranty__price" data-lc-warranty-price></span>
+        <span class="lc-warranty__sub">
+          {%- if loc == 'en' -%}
+            Repair or replacement with no debate for 24 months · free parts shipped home · no return fees on covered claims.
+          {%- else -%}
+            Réparation ou remplacement sans débat pendant 24 mois · pièces expédiées gratuitement · aucuns frais de retour pour une réclamation couverte.
+          {%- endif -%}
+          <a href="{{ routes.root_url | append: '/pages/garantie-tranquillite' | replace: '//pages', '/pages' }}" target="_blank" rel="noopener">
+            {%- if loc == 'en' -%}Details{%- else -%}Détails{%- endif -%}
+          </a>
+        </span>
+      </span>
+    </label>
+    <script type="application/json" data-lc-warranty-tiers>
+      {
+        "tiers": [{%- for v in lc_w.variants -%}{%- if v.available -%}{"max": {{ v.option1 | plus: 0 }}, "id": {{ v.id }}, "price": {{ v.price }}}{%- unless forloop.last -%},{%- endunless -%}{%- endif -%}{%- endfor -%}],
+        "variants": [{%- for v in product.variants -%}{"id": {{ v.id }}, "price": {{ v.price }}, "title": {{ v.title | json }}}{%- unless forloop.last -%},{%- endunless -%}{%- endfor -%}],
+        "for": {{ 'Pour' | json }},
+        "forEn": {{ 'For' | json }},
+        "locale": {{ loc | json }}
+      }
+    </script>
+  </div>
+  <style>
+    .lc-warranty{margin:.2rem 0 1.4rem;padding:1rem 1.2rem;border:1px solid rgba(26,35,64,.18);border-radius:10px;background:#fff;font-size:1.3rem;line-height:1.45;color:#1A2340}
+    .lc-warranty__legal{margin:0 0 .8rem;font-size:1.2rem;opacity:.85}
+    .lc-warranty__opt{display:flex;gap:.9rem;align-items:flex-start;cursor:pointer}
+    .lc-warranty__opt input{width:2rem;height:2rem;margin-top:.15rem;flex:0 0 auto;accent-color:#1A2340}
+    .lc-warranty__txt{display:flex;flex-direction:column;gap:.15rem}
+    .lc-warranty__price{font-weight:700;color:#1A2340}
+    .lc-warranty__sub{font-size:1.2rem;opacity:.85}
+    .lc-warranty__sub a{color:inherit;text-decoration:underline}
+  </style>
+  <script>
+    (function () {
+      var box = document.querySelector('[data-lc-warranty][data-section-id="{{ section_id }}"]');
+      if (!box || box.dataset.bound) return;
+      box.dataset.bound = '1';
+      var qs = new URLSearchParams(location.search);
+      try { if (qs.get('lc_garantie') === '1') sessionStorage.setItem('lcGarantie', '1'); } catch (e) {}
+      var preview = false;
+      try { preview = sessionStorage.getItem('lcGarantie') === '1'; } catch (e) {}
+      if (box.dataset.enabled !== 'true' && !preview) return;
+      var cfg = JSON.parse(box.querySelector('[data-lc-warranty-tiers]').textContent);
+      if (!cfg.tiers.length) return;
+      cfg.tiers.sort(function (a, b) { return a.max - b.max; });
+      var check = box.querySelector('[data-lc-warranty-check]');
+      var priceEl = box.querySelector('[data-lc-warranty-price]');
+      var en = cfg.locale === 'en';
+      var section = box.dataset.sectionId;
+      var mainForm = document.getElementById('product-form-' + section);
+
+      function selectedVariant() {
+        var input = mainForm && mainForm.querySelector('input[name="id"]');
+        var id = input ? Number(input.value) : cfg.variants[0].id;
+        return cfg.variants.find(function (v) { return v.id === id; }) || cfg.variants[0];
+      }
+      function tierFor(cents) {
+        var dollars = cents / 100;
+        return cfg.tiers.find(function (t) { return dollars <= t.max; }) || null;
+      }
+      function money(cents) {
+        return en ? '$' + (cents / 100).toFixed(2) : (cents / 100).toFixed(2).replace('.', ',') + ' $';
+      }
+      function refresh() {
+        var t = tierFor(selectedVariant().price);
+        if (!t) { box.hidden = true; check.checked = false; return; }
+        box.hidden = false;
+        priceEl.textContent = (en ? 'for ' : 'pour ') + money(t.price);
+      }
+      refresh();
+      document.addEventListener('change', function (e) {
+        if (e.target.closest && e.target.closest('variant-selects')) setTimeout(refresh, 400);
+      });
+      if (mainForm) mainForm.querySelector('input[name="id"]') &&
+        new MutationObserver(refresh).observe(mainForm.querySelector('input[name="id"]'), { attributes: true, attributeFilter: ['value'] });
+
+      // Add the warranty line first, then let the original submit proceed (product form or buy-now form).
+      var passing = false;
+      function qtyFor(form) {
+        var q = form.querySelector('input[name="quantity"]') || document.querySelector('#Quantity-' + section);
+        return Math.max(1, parseInt(q && q.value, 10) || 1);
+      }
+      document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (passing || box.hidden || !check.checked) return;
+        if (form !== mainForm && !form.classList.contains('buy-now-form')) return;
+        var v = selectedVariant();
+        var t = tierFor(v.price);
+        if (!t) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        var props = {};
+        props[en ? cfg.forEn : cfg.for] = box.dataset.productTitle + (v.title && v.title !== 'Default Title' ? ' — ' + v.title : '');
+        props._lc_warranty_for = String(v.id);
+        fetch((window.routes && window.routes.cart_add_url ? window.routes.cart_add_url : '/cart/add') + '.js', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ items: [{ id: t.id, quantity: qtyFor(form), properties: props }] }),
+        })
+          .catch(function () {})
+          .then(function () {
+            passing = true;
+            try { form.requestSubmit ? form.requestSubmit() : form.submit(); } finally { passing = false; }
+          });
+      }, true);
+    })();
+  </script>
+{%- endif -%}

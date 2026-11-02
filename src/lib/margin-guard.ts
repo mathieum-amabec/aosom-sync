@@ -18,6 +18,7 @@ import { createNotification, ensureSchema } from "@/lib/database";
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { costOf } from "@/lib/costway/pricing";
 import { FLOOR_DISCOUNT, MAX_DISCOUNT, netProfit } from "@/lib/sell-price-rule";
+import { isInternalProduct } from "./internal-product";
 
 // ─── 1. Discounts ────────────────────────────────────────────────────────────
 
@@ -177,13 +178,14 @@ async function loadActiveVariants(): Promise<PricedVariant[]> {
   const out: PricedVariant[] = [];
   let pageInfo: string | null = null;
   for (let i = 0; i < 100; i++) {
-    const params = new URLSearchParams({ limit: "250", fields: "handle,tags,variants" });
+    const params = new URLSearchParams({ limit: "250", fields: "handle,tags,product_type,variants" });
     if (pageInfo) params.set("page_info", pageInfo);
     else params.set("status", "active");
     const res = await shopifyFetch(`/products.json?${params}`);
     if (!res.ok) throw new Error(`margin-guard: products fetch failed ${res.status}`);
-    const data = (await res.json()) as { products: Array<{ handle: string; tags: string; variants: Array<{ sku: string; price: string }> }> };
+    const data = (await res.json()) as { products: Array<{ handle: string; tags: string; product_type?: string; variants: Array<{ sku: string; price: string }> }> };
     for (const p of data.products) {
+      if (isInternalProduct(p)) continue;
       const source = p.tags.split(",").map((t) => t.trim()).includes("src-c") ? "costway" : "aosom";
       for (const v of p.variants) if (v.sku) out.push({ sku: v.sku, handle: p.handle, price: Number(v.price), source });
     }
