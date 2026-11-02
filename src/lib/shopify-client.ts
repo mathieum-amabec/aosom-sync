@@ -12,6 +12,7 @@ import { colourPhotoIndex, type ColourSource } from "./variant-photos";
 import { toEnglishColour } from "./colour-names";
 import { toFrenchSize } from "./size-names";
 import { buildFitDims, checkAgainstPage, serializeFitDims, FIT_DIMS_KEY, FIT_DIMS_NAMESPACE } from "./fit-dims";
+import { isInternalProduct } from "./internal-product";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -88,7 +89,7 @@ export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[
 
     const data = await response.json();
     for (const p of data.products) {
-      if (costwayIds.has(String(p.id))) continue;
+      if (costwayIds.has(String(p.id)) || isInternalProduct(p)) continue;
       products.push(mapShopifyProduct(p));
     }
 
@@ -124,7 +125,7 @@ export async function fetchShopifyVariantsPage(pageInfo: string | null): Promise
   if (!env.hasShopifyToken) return { variants: [], nextPageInfo: null };
 
   const costwayIds = await getCostwayShopifyProductIds();
-  const params = new URLSearchParams({ limit: "250", fields: "id,variants" });
+  const params = new URLSearchParams({ limit: "250", fields: "id,variants,product_type,tags" });
   if (pageInfo) params.set("page_info", pageInfo);
 
   const response = await shopifyFetch(`/products.json?${params}`);
@@ -132,9 +133,9 @@ export async function fetchShopifyVariantsPage(pageInfo: string | null): Promise
 
   const data = await response.json();
   const variants: ShopifyVariantPageItem[] = (
-    data.products as Array<{ id: number; variants: Array<{ id: number; sku: string; price: string; compare_at_price?: string | null }> }>
+    data.products as Array<{ id: number; product_type?: string; tags?: string; variants: Array<{ id: number; sku: string; price: string; compare_at_price?: string | null }> }>
   )
-    .filter((p) => !costwayIds.has(String(p.id)))
+    .filter((p) => !costwayIds.has(String(p.id)) && !isInternalProduct(p))
     .flatMap((p) =>
     p.variants.map((v) => ({
       sku: v.sku,
@@ -289,7 +290,7 @@ export async function fetchActiveVariantInventory(): Promise<
   let pageInfo: string | null = null;
 
   do {
-    const params = new URLSearchParams({ limit: "250", fields: "id,variants" });
+    const params = new URLSearchParams({ limit: "250", fields: "id,variants,product_type,tags" });
     // status filter only on the first page; page_info follow-ups reject extra filters.
     if (pageInfo) params.set("page_info", pageInfo);
     else params.set("status", "active");
@@ -299,7 +300,7 @@ export async function fetchActiveVariantInventory(): Promise<
 
     const data = await response.json();
     for (const p of data.products) {
-      if (costwayIds.has(String(p.id))) continue;
+      if (costwayIds.has(String(p.id)) || isInternalProduct(p)) continue;
       for (const v of (p.variants as Record<string, unknown>[]) || []) {
         const sku = (v.sku as string) || "";
         if (!sku) continue;

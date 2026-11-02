@@ -10,6 +10,7 @@ import { isSpecImageUrl } from "../selectors/shopify-product";
 import { imageUrlStem } from "../image-compliance-audit";
 import { getCachedImageStyles, getCachedImageVerdicts } from "../database";
 import type { AdImageStyle } from "../image-style";
+import { isInternalProduct } from "../internal-product";
 
 export interface ShopifyFeedVariant {
   /** Shopify variant id — drives the `?variant=` deep link on multi-variant products. */
@@ -755,7 +756,7 @@ export async function fetchShopifyFeedProducts(): Promise<ShopifyFeedProduct[]> 
     const res = await fetchWithRetry(`${base}/products.json?${params}`, token);
     if (!res.ok) throw new Error(`Shopify products fetch failed: ${res.status}`);
     const data = (await res.json()) as { products: ShopifyFeedProduct[] };
-    products.push(...data.products);
+    products.push(...data.products.filter((p) => !isInternalProduct(p)));
     pageInfo = parseNextPageInfo(res.headers.get("Link"));
     pages++;
   } while (pageInfo && pages < MAX_PAGES);

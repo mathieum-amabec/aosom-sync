@@ -24,6 +24,7 @@ import { setSetting, getSetting } from "./database";
 import { shopifyToFeedItems, type ShopifyFeedProduct } from "./feeds/source";
 import type { FeedItem } from "./feeds/feed";
 import { getPublicAppUrl } from "./config";
+import { isInternalProduct } from "./internal-product";
 
 export const FEED_INTEGRITY_SETTING = "feed_integrity_audit";
 /** Served items allowed to differ from a fresh generation (24 h cache lag) before it is red. */
@@ -265,7 +266,7 @@ async function fetchProductsFresh(): Promise<ShopifyFeedProduct[]> {
     const res = await shopifyFetch(endpoint); // plain fetch: not the feed's 24 h Data Cache
     if (!res.ok) throw new Error(`Shopify fetch failed: ${res.status}`);
     const data = (await res.json()) as { products?: ShopifyFeedProduct[] };
-    out.push(...(data.products ?? []));
+    out.push(...(data.products ?? []).filter((p) => !isInternalProduct(p)));
     const next = /<([^>]+)>;\s*rel="next"/.exec(res.headers.get("link") ?? "")?.[1];
     endpoint = next ? next.replace(/^https:\/\/[^/]+\/admin\/api\/[^/]+/, "") : null;
   }
