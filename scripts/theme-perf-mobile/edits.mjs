@@ -53,6 +53,19 @@ export const EDITS = {
     [`  if (document.readyState !== "loading") { run(); } else { document.addEventListener("DOMContentLoaded", run); }\n})();\n</script>\n{%- endif -%}`,
      `  if (document.readyState !== "loading") { run(); } else { document.addEventListener("DOMContentLoaded", run); }\n})();\n</script>\n{%- endif -%}\n{%- endif -%}`],
   ],
+  "snippets/lc-complete-the-room.liquid": [
+    // « Complétez la pièce » sits below the fold but called /api/assistant (LLM pool) and pulled 3 full-size
+    // Aosom photos (up to 1 MB each) on EVERY product page load. Now it starts ~600 px before it scrolls in.
+    [`  fetch(el.getAttribute('data-api'),`, `  function go(){fetch(el.getAttribute('data-api'),`],
+    [
+      `      el.hidden=false;\n    })\n    .catch(function(){});\n})();`,
+      `      el.hidden=false;\n    })\n    .catch(function(){});}\n  /* 2026-11-04 perf: start when the slot is ~600px from the viewport (the section itself is hidden until filled, so observe a 1px sentinel). */\n  if('IntersectionObserver' in window){var lcS=document.createElement('span');lcS.style.cssText='display:block;height:1px';el.parentNode.insertBefore(lcS,el);var lcIO=new IntersectionObserver(function(es){if(es[0].isIntersecting){lcIO.disconnect();go();}},{rootMargin:'600px 0px'});lcIO.observe(lcS);}else{go();}\n})();`,
+    ],
+    [
+      `a.innerHTML='<img loading="lazy" src="'+esc(p.image||'')+'" alt="">'`,
+      `a.innerHTML='<img loading="lazy" decoding="async" src="'+esc(/cdn\\.shopify\\.com|\\/cdn\\/shop\\//.test(p.image||'')?(p.image+(p.image.indexOf('?')<0?'?':'&')+'width=400'):(p.image||''))+'" alt="">'`,
+    ],
+  ],
   "snippets/lc_ugc_video_reel.liquid": [
     // root:track made a video "visible" as soon as the reel existed, even far below the fold:
     // the homepage downloaded a 3 MB mp4 on load. Start the autoplay observer only once the

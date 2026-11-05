@@ -32,7 +32,7 @@
   var grid=el.querySelector('[data-lc-ctr-grid]');
   function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
   function money(n){try{return new Intl.NumberFormat((LOC==='fr'?'fr-CA':LOC==='es'?'es':LOC==='pa'?'pa-IN':'en-CA'),{style:'currency',currency:'CAD'}).format(n);}catch(e){return '$'+Number(n).toFixed(2);}}
-  fetch(el.getAttribute('data-api'),{method:'POST',headers:{'Content-Type':'application/json'},
+  function go(){fetch(el.getAttribute('data-api'),{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({mode:'complementary',name:el.getAttribute('data-name'),productType:el.getAttribute('data-type'),locale:(LOC==='fr'?'fr':'en')})})
     .then(function(r){return r.json();})
     .then(function(j){
@@ -41,7 +41,7 @@
       if(!items.length)return;
       items.forEach(function(p){
         var a=document.createElement('a');a.className='lc-ctr__card';a.href=p.url;
-        a.innerHTML='<img loading="lazy" src="'+esc(p.image||'')+'" alt="">'
+        a.innerHTML='<img loading="lazy" decoding="async" src="'+esc(/cdn\.shopify\.com|\/cdn\/shop\//.test(p.image||'')?(p.image+(p.image.indexOf('?')<0?'?':'&')+'width=400'):(p.image||''))+'" alt="">'
           +'<div class="lc-ctr__card-b"><div class="lc-ctr__card-name">'+esc(p.name)+'</div>'
           +'<div class="lc-ctr__card-price">'+esc(money(p.price))+'</div>'
           +(p.reason?'<div class="lc-ctr__card-reason">'+esc(p.reason)+'</div>':'')+'</div>';
@@ -49,6 +49,8 @@
       });
       el.hidden=false;
     })
-    .catch(function(){});
+    .catch(function(){});}
+  /* 2026-11-04 perf: start when the slot is ~600px from the viewport (the section itself is hidden until filled, so observe a 1px sentinel). */
+  if('IntersectionObserver' in window){var lcS=document.createElement('span');lcS.style.cssText='display:block;height:1px';el.parentNode.insertBefore(lcS,el);var lcIO=new IntersectionObserver(function(es){if(es[0].isIntersecting){lcIO.disconnect();go();}},{rootMargin:'600px 0px'});lcIO.observe(lcS);}else{go();}
 })();
 </script>
