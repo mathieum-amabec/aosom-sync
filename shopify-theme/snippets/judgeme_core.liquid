@@ -19,6 +19,11 @@
   window.jdgm.data = window.jdgm.data || {};
 </script>
 {%- if template contains 'product' -%}
+{%- assign lc_rev_count = product.metafields.reviews.rating_count.value | default: 0 | plus: 0 -%}
+{%- if lc_rev_count == 0 -%}
+{%- comment -%} 2026-11-04: no review yet (3,474 of 3,484 products) → no empty "Avis clients / Soyez le premier" block, no "No reviews" string, no widget fetch. Count = Judge.me's reviews.rating_count metafield. {%- endcomment -%}
+<style>.jdgm-preview-badge,.jdgm-widget,#judgeme_product_reviews,[id^="shopify-section-"][id$="__17745733386da0d1df"]{display:none!important}</style>
+{%- else -%}
 <link rel="stylesheet" href="https://cdn.judge.me/shopify_v2.css" media="all">
 <style>
   /* The API badge ships hidden (inline display:none + JM CSS default); force it visible. */
@@ -97,4 +102,5 @@
   if (document.readyState !== "loading") { run(); } else { document.addEventListener("DOMContentLoaded", run); }
 })();
 </script>
+{%- endif -%}
 {%- endif -%}

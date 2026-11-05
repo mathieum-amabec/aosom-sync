@@ -29,6 +29,12 @@
   unless lazy_load == false
     assign lazy = 'lazy'
   endunless
+  # 2026-11-04 perf: the first gallery image is the mobile LCP — fetch it eagerly at high priority.
+  assign lc_fp = 'auto'
+  if lazy_load == false and position == 1
+    assign lazy = 'eager'
+    assign lc_fp = 'high'
+  endif
 
   assign desktop_columns = 1
   if desktop_layout == 'columns' and media_count > 1
@@ -84,6 +90,7 @@
         | image_tag:
           class: image_class,
           loading: lazy,
+          fetchpriority: lc_fp,
           sizes: sizes,
           widths: '246, 493, 600, 713, 823, 990, 1100, 1206, 1346, 1426, 1646, 1946'
       }}

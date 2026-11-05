@@ -125,7 +125,8 @@
       var io=new IntersectionObserver(function(es){es.forEach(function(e){var v=e.target;
         if(e.isIntersecting){loadVid(v);var p=v.play();if(p&&p.catch)p.catch(function(){});}
         else{v.pause();}});},{root:track,threshold:0.6});
-      cards.forEach(function(c){io.observe(c.querySelector('.lcugc-vid'));});
+      var lcNear=new IntersectionObserver(function(es){if(!es[0].isIntersecting)return;lcNear.disconnect();cards.forEach(function(c){io.observe(c.querySelector('.lcugc-vid'));});},{rootMargin:'200px 0px'});
+      lcNear.observe(track);
     } else { cards.forEach(function(c){var v=c.querySelector('.lcugc-vid');loadVid(v);v.play();}); }
 
     function updateCenter(){

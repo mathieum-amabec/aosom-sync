@@ -17,7 +17,6 @@
     <summary><span>{% if loc == 'en' %}Will it fit in my space?{% elsif loc == 'es' %}¿Cabrá en mi espacio?{% elsif loc == 'pa' %}ਕੀ ਇਹ ਮੇਰੀ ਜਗ੍ਹਾ ਵਿੱਚ ਫਿੱਟ ਆਵੇਗਾ?{% else %}Est-ce que ça va entrer chez moi ?{% endif %}<small class="lc-qa__sub">{% if loc == 'en' %}Check it with your measurements{% elsif loc == 'es' %}Verifícalo con tus medidas{% elsif loc == 'pa' %}ਆਪਣੇ ਮਾਪਾਂ ਨਾਲ ਇਸ ਦੀ ਜਾਂਚ ਕਰੋ{% else %}Vérifiez-le avec vos mesures{% endif %}</small></span></summary>
     <div class="lc-qa__a">
       {%- render 'lc-fit', product: product -%}
-      <p><button type="button" class="lc-qa__ask" data-lc-qa-ask>{% if loc == 'en' %}Not sure? Ask Furni{% elsif loc == 'es' %}¿No estás seguro? Pregúntale a Furni{% elsif loc == 'pa' %}ਪੱਕਾ ਪਤਾ ਨਹੀਂ? Furni ਨੂੰ ਪੁੱਛੋ{% else %}Pas certain ? Demandez à Ameublo{% endif %}</button></p>
     </div>
   </details>
   {%- else -%}
@@ -43,7 +42,6 @@
     <div class="lc-qa__a"><p>{% if loc == 'en' %}Yes: 10% off the second item, applied automatically in the cart. Mix and match across the store. Not combinable with promo codes: at checkout, the discount that saves you the most is applied.{% elsif loc == 'es' %}Sí: 10% de descuento en el segundo artículo, aplicado automáticamente en el carrito. Combina productos en toda la tienda. No acumulable con códigos promocionales: al pagar, se aplica el descuento que más te ahorre.{% elsif loc == 'pa' %}ਹਾਂ: ਦੂਜੀ ਆਈਟਮ 'ਤੇ 10% ਛੋਟ, ਕਾਰਟ ਵਿੱਚ ਆਪਣੇ ਆਪ ਲਾਗੂ ਹੁੰਦੀ ਹੈ। ਪੂਰੇ ਸਟੋਰ ਵਿੱਚ ਮਿਕਸ ਅਤੇ ਮੈਚ ਕਰੋ। ਪ੍ਰੋਮੋ ਕੋਡਾਂ ਨਾਲ ਜੋੜਨ ਯੋਗ ਨਹੀਂ: ਚੈੱਕਆਊਟ 'ਤੇ, ਉਹ ਛੋਟ ਲਾਗੂ ਹੁੰਦੀ ਹੈ ਜੋ ਤੁਹਾਡੀ ਸਭ ਤੋਂ ਵੱਧ ਬੱਚਤ ਕਰਦੀ ਹੈ।{% else %}Oui : 10&nbsp;% de rabais sur le 2e article, appliqué automatiquement au panier. Vous pouvez combiner n'importe quels articles de la boutique. Non cumulable avec les codes promo : à la caisse, c'est le rabais le plus avantageux pour vous qui s'applique.{% endif %}</p></div>
   </details>
 </div>
-<div class="lc-vis-slot" data-lc-vis-slot></div>
 <style>
   .lc-qa{margin:1.8rem 0 .4rem;background:#fff;border:1px solid var(--lc-line,#E7E1D8);border-radius:18px;padding:1.2rem 1.6rem .4rem;font-family:var(--lc-font-text,inherit)}
   .lc-qa__h{margin:0 0 .4rem;font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--lc-terra-btn,#B8553C)}
