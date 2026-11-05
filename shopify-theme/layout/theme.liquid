@@ -68,7 +68,7 @@
         {{ page_title }}
         {%- if current_tags %} &ndash; tagged "{{ current_tags | join: ', ' }}"{% endif -%}
         {%- if current_page != 1 %} &ndash; Page {{ current_page }}{% endif -%}
-        {%- unless page_title contains shop.name or page_title contains 'Furnish Direct' %} &ndash; {% if lc_loc == 'en' %}Furnish Direct{% elsif lc_loc == 'es' %}Furnish Direct{% elsif lc_loc == 'pa' %}Furnish Direct{% else %}{{ shop.name }}{% endif %}{% endunless -%}
+        {%- unless page_title contains 'Ameublo Direct' or page_title contains 'Furnish Direct' %} &ndash; {% if lc_loc == 'en' %}Furnish Direct{% elsif lc_loc == 'es' %}Furnish Direct{% elsif lc_loc == 'pa' %}Furnish Direct{% else %}Ameublo Direct{% endif %}{% endunless -%}
       {%- endif -%}
     </title>
 
@@ -389,7 +389,7 @@
   {% render 'lc-gcr-optin' %}
     <!-- Klaviyo onsite (2026-10-14): Viewed Product / Active on Site for browse-abandonment. XAvTkS = public company key. -->
     <script>window._klOnsite=window._klOnsite||[];window.klaviyo=window.klaviyo||{push:function(){window._klOnsite.push.apply(window._klOnsite,arguments);}};</script>
-    <script async src="https://static.klaviyo.com/onsite/js/XAvTkS/klaviyo.js"></script>
+    {%- comment -%} 2026-11-04 perf: klaviyo.js is loaded ONCE by the Klaviyo app embed (klaviyo.js?company_id=XAvTkS). The second copy that lived here was removed; the stub above keeps queuing pushes until it loads. {%- endcomment -%}
 {%- if template contains 'product' and product -%}
     <script>
       try {
@@ -512,7 +512,8 @@
       .lc-asst__fab{display:none!important}
       @media (max-width:749px){.lc-msgr{display:none!important}}
     </style>
-      {% render 'lc-roue' %}
-      {% render 'lc-assistant-widget' %}
+      {%- comment -%} 2026-11-04 perf mobile: 'lc-roue' (welcome wheel, auto-opening, covered "Filtrer et trier") and 'lc-assistant-widget' (fab hidden since 2026-10-24, ~1 message/week) are no longer rendered. Both snippets stay in the theme; re-add the render line to restore. {%- endcomment -%}
+      {% render 'lc-warranty-guard' %}
+      {% render 'lc-card-swatch-js' %}
   </body>
 </html>

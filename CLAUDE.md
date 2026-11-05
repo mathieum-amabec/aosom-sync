@@ -461,7 +461,24 @@ Mat: « aucun de nos produits ne devrait passer sous notre coût, malgré les ra
 **Creating a discount:** keep it ≤ 10 % per item and non-combinable (a fixed amount needs a minimum ≥ 10× the amount).
 A bigger one needs `MAX_DISCOUNT` raised first (which raises every floor).
 
-## Roue de bienvenue (2026-10-19, plan approved by Mat — not live yet)
+## Perf mobile (2026-11-04) — what was removed from the live theme, and why
+
+Audit: 53 % of traffic is Meta in-app mobile, conversion 0.03 %. Applied with `scripts/theme-perf-mobile/apply.mjs`
+(exact-string edits on the FRESH live asset, idempotent; backup theme `164084482153` « BACKUP avant perf mobile 2026-11-04 »).
+- **Wheel off:** `layout/theme.liquid` no longer renders `lc-roue` (the snippet and `/api/roue` stay). Re-add the render line to restore.
+- **Assistant off:** `lc-assistant-widget` is no longer rendered (fab hidden since 10-24, ~1 message/week in `assistant_ip_daily`);
+  the « Demandez à Ameublo » button in `lc-pdp-qa` went with it.
+- **Visualiser teaser off:** `main-product` no longer renders `lc-visualiser` (« Voyez-le chez vous — BIENTÔT »).
+- **Klaviyo is loaded ONCE, by the app embed** (`klaviyo.js?company_id=XAvTkS`). Never re-add a `<script src=…klaviyo.js>` in
+  the theme: it ran the SDK twice. The `_klOnsite` stub + « Viewed Product » push in `theme.liquid` stay.
+- **Judge.me on a product with 0 reviews** (3,474 of 3,484): `judgeme_core` reads `reviews.rating_count`; at 0 it fetches
+  nothing and hides the badge, the widget and the apps section `…__17745733386da0d1df`.
+- **Card colour-dot CSS/JS** moved out of `card-product` (it was printed once PER CARD) into `snippets/lc-card-swatch-js.liquid`,
+  rendered once from `theme.liquid`.
+- First product image: `loading=eager fetchpriority=high` (`product-thumbnail`). The UGC reel starts its videos only near the
+  viewport (its observer used `root: track`, so the homepage downloaded a 3 MB mp4 on load).
+
+## Roue de bienvenue (2026-10-19 — turned OFF 2026-11-04, see « Perf mobile » above)
 
 One spin wheel replaces the homepage newsletter popup (`entry_popup`, BIENVENUE20). Mat's goal: « le plus de
 conversions possible ». Plan: 1) build it on a DRAFT theme; 2) publish only on Mat's « publie », then measure for 4

@@ -1,0 +1,56 @@
+{%- comment -%}
+  "Complétez la pièce" — on a PDP, asks /api/assistant (mode: complementary) for 3
+  products from OTHER categories that pair with the current product. Renders nothing
+  until the API responds (self-hides on error / no results).
+{%- endcomment -%}
+{%- assign lc_loc = request.locale.iso_code | downcase -%}
+<section class="lc-ctr page-width" data-lc-ctr
+         data-name="{{ product.title | escape }}"
+         data-type="{{ product.type | escape }}"
+         data-loc="{{ lc_loc }}"
+         data-api="https://aosom-sync.vercel.app/api/assistant" hidden>
+  <h2 class="lc-ctr__title">&#128715; {% if lc_loc == 'en' %}Complete the room{% elsif lc_loc == 'es' %}Complete la habitación{% elsif lc_loc == 'pa' %}ਕਮਰੇ ਦੀ ਦਿੱਖ ਪੂਰੀ ਕਰੋ{% else %}Compl&eacute;tez la pi&egrave;ce{% endif %}</h2>
+  <div class="lc-ctr__grid" data-lc-ctr-grid></div>
+</section>
+<style>
+  .lc-ctr{padding-top:1.5rem;padding-bottom:.5rem;font-family:var(--lc-font-text),sans-serif}
+  .lc-ctr__title{font-size:2rem;font-weight:700;color:#1B2A4A;margin:0 0 1.2rem}
+  .lc-ctr__grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem}
+  @media(max-width:749px){.lc-ctr__grid{display:flex;gap:1rem;overflow-x:auto;scroll-snap-type:x mandatory;scroll-padding-left:1.5rem;margin:0 -1.5rem;padding:0 1.5rem .6rem;scrollbar-width:none}.lc-ctr__grid::-webkit-scrollbar{display:none}.lc-ctr__card{flex:0 0 44%;scroll-snap-align:start}}
+  .lc-ctr__card{display:flex;flex-direction:column;background:#fff;border:1px solid #e7e3dc;border-radius:12px;overflow:hidden;text-decoration:none;color:#1B2A4A}
+  .lc-ctr__card:hover{border-color:#D4A853;box-shadow:0 4px 16px rgba(0,0,0,.1)}
+  .lc-ctr__card img{width:100%;aspect-ratio:1/1;object-fit:contain;background:#fff}
+  .lc-ctr__card-b{padding:.9rem 1rem 1.1rem;display:flex;flex-direction:column;gap:.25rem}
+  .lc-ctr__card-name{font-size:1.35rem;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .lc-ctr__card-price{font-size:1.5rem;font-weight:700;color:#1A2340}
+  .lc-ctr__card-reason{font-size:1.15rem;color:#797068;line-height:1.35}
+</style>
+<script>
+(function(){
+  var el=document.querySelector('[data-lc-ctr]'); if(!el) return;
+  var LOC=el.getAttribute('data-loc')==='fr'?'fr':'en';
+  var grid=el.querySelector('[data-lc-ctr-grid]');
+  function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+  function money(n){try{return new Intl.NumberFormat((LOC==='fr'?'fr-CA':LOC==='es'?'es':LOC==='pa'?'pa-IN':'en-CA'),{style:'currency',currency:'CAD'}).format(n);}catch(e){return '$'+Number(n).toFixed(2);}}
+  function go(){fetch(el.getAttribute('data-api'),{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({mode:'complementary',name:el.getAttribute('data-name'),productType:el.getAttribute('data-type'),locale:(LOC==='fr'?'fr':'en')})})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(!j||!j.success||!j.data||!j.data.products||!j.data.products.length)return;
+      var items=j.data.products.filter(function(p){return Number(p.price)>0&&p.url;}).slice(0,3);
+      if(!items.length)return;
+      items.forEach(function(p){
+        var a=document.createElement('a');a.className='lc-ctr__card';a.href=p.url;
+        a.innerHTML='<img loading="lazy" decoding="async" src="'+esc(/cdn\.shopify\.com|\/cdn\/shop\//.test(p.image||'')?(p.image+(p.image.indexOf('?')<0?'?':'&')+'width=400'):(p.image||''))+'" alt="">'
+          +'<div class="lc-ctr__card-b"><div class="lc-ctr__card-name">'+esc(p.name)+'</div>'
+          +'<div class="lc-ctr__card-price">'+esc(money(p.price))+'</div>'
+          +(p.reason?'<div class="lc-ctr__card-reason">'+esc(p.reason)+'</div>':'')+'</div>';
+        grid.appendChild(a);
+      });
+      el.hidden=false;
+    })
+    .catch(function(){});}
+  /* 2026-11-04 perf: start when the slot is ~600px from the viewport (the section itself is hidden until filled, so observe a 1px sentinel). */
+  if('IntersectionObserver' in window){var lcS=document.createElement('span');lcS.style.cssText='display:block;height:1px';el.parentNode.insertBefore(lcS,el);var lcIO=new IntersectionObserver(function(es){if(es[0].isIntersecting){lcIO.disconnect();go();}},{rootMargin:'600px 0px'});lcIO.observe(lcS);}else{go();}
+})();
+</script>
