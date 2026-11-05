@@ -518,3 +518,21 @@ export async function getCostwaySummary(): Promise<CostwaySummary> {
     promoTags: tags.rows.map((r) => ({ tag: String(r.tag), variants: Number(r.variants) })),
   };
 }
+
+/** Stock of every Costway variant that is on Shopify, for the sold-out hide job (sold-out-hide.ts). */
+export async function getImportedCostwayStock(): Promise<Array<{ shopifyProductId: string; sku: string; inStock: boolean; qty: number }>> {
+  const db = await ensureSchema();
+  const res = await db.execute(
+    `SELECT shopify_product_id, sku, in_stock, qty FROM costway_products
+      WHERE shopify_product_id IS NOT NULL AND TRIM(shopify_product_id) != ''`,
+  );
+  return res.rows.map((r) => {
+    const o = r as unknown as Record<string, unknown>;
+    return {
+      shopifyProductId: String(o.shopify_product_id),
+      sku: String(o.sku ?? ""),
+      inStock: Number(o.in_stock) === 1,
+      qty: Number(o.qty) || 0,
+    };
+  });
+}

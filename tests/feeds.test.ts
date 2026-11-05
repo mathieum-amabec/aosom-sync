@@ -11,6 +11,7 @@ import {
 } from "@/lib/feeds/feed";
 import { shopifyToFeedItems, highlightsFromBody, dimensionDetails, DIMS_METAFIELD_KEY, stripImperialDimensions, stripPromoText, frenchifyColor, optionValue, materialFromMetafields, MATERIAL_METAFIELD_KEYS, type ShopifyFeedProduct } from "@/lib/feeds/source";
 import { imageUrlStem } from "@/lib/image-compliance-audit";
+import { seasonalRulesFromSetting } from "@/lib/sold-out-hide";
 
 describe("mapToGoogleCategory", () => {
   const cases: Array<[string, number]> = [
@@ -226,6 +227,16 @@ describe("shopifyToFeedItems", () => {
       { id: 889, title: "Actif publié", handle: "actif-publie", status: "active", published_at: PUBLISHED, images: [{ src: "z" }], variants: [{ sku: "U2", price: "20", inventory_management: null }] },
     ]);
     expect(published.map((i) => i.id)).toEqual(["U2"]);
+  });
+  it("skips an out-of-season Halloween product, using the window it is GIVEN (settings.seasonal_windows)", () => {
+    const halloween = [
+      { id: 891, title: "Sorcière", handle: "sorciere", status: "active", product_type: "Holiday & Seasonal > Halloween Decorations", published_at: PUBLISHED, images: [{ src: "z" }], variants: [{ sku: "HW1", price: "20", inventory_management: null }] },
+    ];
+    const nov4 = new Date("2026-11-04T15:00:00Z");
+    expect(shopifyToFeedItems(halloween, { now: nov4 })).toEqual([]); // default window 09-01 → 11-01
+    // A window moved in settings (here: until Nov 10) moves the feed too.
+    const extended = seasonalRulesFromSetting('{"halloween":{"start":"09-01","end":"11-10"}}');
+    expect(shopifyToFeedItems(halloween, { now: nov4, seasonRules: extended }).map((i) => i.id)).toEqual(["HW1"]);
   });
   it("excludes a scheduled (future-dated published_at) product — not live on the storefront yet", () => {
     const scheduled = shopifyToFeedItems([

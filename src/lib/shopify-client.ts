@@ -994,10 +994,12 @@ export async function draftShopifyProduct(shopifyId: string): Promise<void> {
  */
 export async function publishShopifyProduct(
   shopifyId: string,
-  opts: { activate?: boolean } = {},
+  opts: { activate?: boolean; tags?: string[] } = {},
 ): Promise<void> {
   const product: Record<string, unknown> = { id: shopifyId, published: true };
   if (opts.activate) product.status = "active";
+  // Same full-replace contract as updateShopifyProduct.
+  if (opts.tags) product.tags = opts.tags.join(", ");
   const response = await shopifyFetch(`/products/${shopifyId}.json`, {
     method: "PUT",
     body: JSON.stringify({ product }),
@@ -1399,4 +1401,66 @@ export function parseLinkHeader(header: string | null): string | null {
   if (!header) return null;
   const match = header.match(/<[^>]*page_info=([^&>]+)[^>]*>;\s*rel="next"/);
   return match ? match[1] : null;
+}
+
+/**
+ * Every product's status, tags, product_type, title and handle (REST, paginated — archived
+ * products are not returned). Drives sold-out-hide.ts, which needs `product_type` for the
+ * seasonal rule; unlike fetchAllShopifyProducts it does NOT skip Costway products.
+ */
+export async function fetchProductVisibilityStates(): Promise<
+  Array<{ shopifyId: string; status: "active" | "draft" | "archived"; tags: string[]; productType: string; title: string; handle: string }>
+> {
+  if (!env.hasShopifyToken) return [];
+  const out: Array<{ shopifyId: string; status: "active" | "draft" | "archived"; tags: string[]; productType: string; title: string; handle: string }> = [];
+  let pageInfo: string | null = null;
+  do {
+    const params = new URLSearchParams({ limit: "250", fields: "id,status,tags,product_type,title,handle" });
+    if (pageInfo) params.set("page_info", pageInfo);
+    const response = await shopifyFetch(`/products.json?${params}`);
+    if (!response.ok) throw new Error(`Shopify visibility-state fetch failed: ${response.status}`);
+    const data = await response.json();
+    for (const p of data.products) {
+      out.push({
+        shopifyId: String(p.id),
+        status: (p.status as "active" | "draft" | "archived") || "active",
+        tags: typeof p.tags === "string" ? p.tags.split(",").map((t: string) => t.trim()).filter(Boolean) : [],
+        productType: typeof p.product_type === "string" ? p.product_type : "",
+        title: typeof p.title === "string" ? p.title : "",
+        handle: typeof p.handle === "string" ? p.handle : "",
+      });
+    }
+    pageInfo = parseLinkHeader(response.headers.get("Link"));
+  } while (pageInfo);
+  return out;
+}
+
+/**
+ * Shopify product ids that appear in an OPEN order not yet fully fulfilled (and not cancelled).
+ * Throws on any API error: callers that must not touch a product someone is buying fail closed.
+ */
+export async function fetchOpenOrderProductIds(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  if (!env.hasShopifyToken) return ids;
+  let pageInfo: string | null = null;
+  do {
+    const params = new URLSearchParams({ limit: "250", status: "open", fields: "id,fulfillment_status,cancelled_at,line_items" });
+    if (pageInfo) {
+      params.delete("status");
+      params.delete("fields");
+      params.set("page_info", pageInfo);
+      params.set("fields", "id,fulfillment_status,cancelled_at,line_items");
+    }
+    const response = await shopifyFetch(`/orders.json?${params}`);
+    if (!response.ok) throw new Error(`Shopify open-orders fetch failed: ${response.status}`);
+    const data = (await response.json()) as {
+      orders?: Array<{ fulfillment_status: string | null; cancelled_at: string | null; line_items?: Array<{ product_id: number | null }> }>;
+    };
+    for (const o of data.orders ?? []) {
+      if (o.cancelled_at || o.fulfillment_status === "fulfilled") continue;
+      for (const li of o.line_items ?? []) if (li.product_id != null) ids.add(String(li.product_id));
+    }
+    pageInfo = parseLinkHeader(response.headers.get("Link"));
+  } while (pageInfo);
+  return ids;
 }
