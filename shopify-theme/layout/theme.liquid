@@ -68,7 +68,7 @@
         {{ page_title }}
         {%- if current_tags %} &ndash; tagged "{{ current_tags | join: ', ' }}"{% endif -%}
         {%- if current_page != 1 %} &ndash; Page {{ current_page }}{% endif -%}
-        {%- unless page_title contains shop.name or page_title contains 'Furnish Direct' %} &ndash; {% if lc_loc == 'en' %}Furnish Direct{% elsif lc_loc == 'es' %}Furnish Direct{% elsif lc_loc == 'pa' %}Furnish Direct{% else %}{{ shop.name }}{% endif %}{% endunless -%}
+        {%- unless page_title contains 'Ameublo Direct' or page_title contains 'Furnish Direct' %} &ndash; {% if lc_loc == 'en' %}Furnish Direct{% elsif lc_loc == 'es' %}Furnish Direct{% elsif lc_loc == 'pa' %}Furnish Direct{% else %}Ameublo Direct{% endif %}{% endunless -%}
       {%- endif -%}
     </title>
 
@@ -513,6 +513,7 @@
       @media (max-width:749px){.lc-msgr{display:none!important}}
     </style>
       {% render 'lc-roue' %}
+      {% render 'lc-warranty-guard' %}
       {% render 'lc-assistant-widget' %}
   </body>
 </html>

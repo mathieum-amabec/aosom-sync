@@ -125,12 +125,13 @@
                   <h1>{{ lc_product_title | escape }}</h1>
                   {%- if product.tags contains 'out-of-stock' -%}
                     <div class="popular-badge">
-                      ⭐ Article populaire — Revenez bientôt !
-                      <span>Inscrivez-vous pour être notifié</span>
+                      {% if request.locale.iso_code == 'fr' %}⭐ Article populaire — Revenez bientôt !{% elsif request.locale.iso_code == 'es' %}⭐ Artículo popular — ¡Vuelve pronto!{% elsif request.locale.iso_code == 'pa' %}⭐ ਪ੍ਰਸਿੱਧ ਵਸਤੂ — ਜਲਦੀ ਦੁਬਾਰਾ ਆਓ!{% else %}⭐ Popular item — Check back soon!{% endif %}
+                      <span>{% if request.locale.iso_code == 'fr' %}Inscrivez-vous pour être notifié{% elsif request.locale.iso_code == 'es' %}Regístrate para recibir un aviso{% elsif request.locale.iso_code == 'pa' %}ਸੂਚਿਤ ਹੋਣ ਲਈ ਸਾਈਨ ਅੱਪ ਕਰੋ{% else %}Sign up to be notified{% endif %}</span>
                     </div>
                   {%- endif -%}
                   <a href="#judgeme_product_reviews" class="jdgm-prev-badge-link" style="display:inline-block;margin-top:.5rem;text-decoration:none"><div class="jdgm-widget jdgm-preview-badge" data-id="{{ product.id }}">{{ product.metafields.judgeme.badge }}</div></a>
                   <style>.jdgm-prev-badge-link:has([data-number-of-reviews="0"]){display:none !important}</style>
+                  {%- comment -%} 2026-11-03: the shop-level rating moved into the reassurance checklist under the price (Mat reco #4). {%- endcomment -%}
                 </div>
               {%- when 'price' -%}
                 <div id="price-{{ section.id }}" role="status" {{ block.shopify_attributes }}>
@@ -144,9 +145,9 @@
                 {%- comment -%} 30-day price badge (draft only) — driven by the custom.price_badge metafield written by job1-sync; bilingual {%- endcomment -%}
                 {%- assign lc_price_badge = product.metafields.custom.price_badge.value -%}
                 {%- if lc_price_badge == 'best_30d' -%}
-                  <div class="lc-price-badge lc-price-badge--best">{%- if lc_loc == 'en' -%}💚 Best price in the last 30 days{%- else -%}💚 Meilleur prix des 30 derniers jours{%- endif -%}</div>
+                  <div class="lc-price-badge lc-price-badge--best">{%- if lc_loc == 'en' -%}💚 Best price in the last 30 days{%- elsif lc_loc == 'es' -%}💚 Mejor precio en los últimos 30 días{%- elsif lc_loc == 'pa' -%}💚 ਪਿਛਲੇ 30 ਦਿਨਾਂ ਵਿੱਚ ਸਭ ਤੋਂ ਵਧੀਆ ਕੀਮਤ{%- else -%}💚 Meilleur prix des 30 derniers jours{%- endif -%}</div>
                 {%- elsif lc_price_badge == 'price_drop' -%}
-                  <div class="lc-price-badge lc-price-badge--drop">{%- if lc_loc == 'en' -%}📉 Price drop{%- else -%}📉 Prix en baisse{%- endif -%}</div>
+                  <div class="lc-price-badge lc-price-badge--drop">{%- if lc_loc == 'en' -%}📉 Price drop{%- elsif lc_loc == 'es' -%}📉 Bajada de precio{%- elsif lc_loc == 'pa' -%}📉 ਕੀਮਤ ਵਿੱਚ ਗਿਰਾਵਟ{%- else -%}📉 Prix en baisse{%- endif -%}</div>
                 {%- endif -%}
                 {%- if lc_price_badge == 'best_30d' or lc_price_badge == 'price_drop' -%}
                   {%- style -%}
@@ -161,15 +162,28 @@
                   no warranty / "shipped from Canada" line until those are confirmed.
                 {%- endcomment -%}
                 <ul class="lc-checklist" role="list">
-                  <li>{%- if lc_loc == 'en' -%}Free shipping across Canada{%- else -%}Livraison gratuite partout au Canada{%- endif -%}</li>
-                  <li>{%- if lc_loc == 'en' -%}30-day returns{%- else -%}Retours 30 jours{%- endif -%}</li>
-                  <li><a href="{% if request.locale.iso_code contains 'en' %}/en/pages/garantie-de-securite-des-paiements{% else %}/pages/garantie-de-securite-des-paiements{% endif %}" style="color:inherit;text-decoration:underline;text-underline-offset:2px">{%- if lc_loc == 'en' -%}100% secure payment{%- else -%}Paiement 100&nbsp;% sécurisé{%- endif -%}</a></li>
-                  <li>{%- if lc_loc == 'en' -%}1-year manufacturer warranty{%- else -%}Garantie fabricant 1 an{%- endif -%}</li>
+                  {%- comment -%} 2026-11-03 (Mat reco #4): the SHOP rating, labelled as such, only on products without their own reviews. {%- endcomment -%}
+                  {%- assign lc_sr_n = shop.metafields.judgeme.all_reviews_count.value | plus: 0 -%}
+                  {%- assign lc_pr_n = product.metafields.judgeme.review_widget_data.value.number_of_reviews | plus: 0 -%}
+                  {%- if lc_pr_n == 0 and lc_sr_n >= 5 -%}
+                    {%- assign lc_sr_avg = shop.metafields.judgeme.all_reviews_rating.value | plus: 0.0 | round: 1 -%}
+                    <li class="lc-checklist__stars"><a href="{{ routes.root_url | append: '/pages/avis-clients' | replace: '//pages', '/pages' }}" class="lc-shop-proof" data-umami-event="Shop reviews proof click" style="color:inherit;text-decoration:underline;text-underline-offset:2px">
+                      {%- if lc_loc == 'en' %}Shop rated {{ lc_sr_avg }}/5 by our customers ({{ lc_sr_n }} verified reviews)
+                      {%- elsif lc_loc == 'es' %}Tienda calificada {{ lc_sr_avg }}/5 por nuestros clientes ({{ lc_sr_n }} reseñas verificadas)
+                      {%- elsif lc_loc == 'pa' %}ਸਾਡੇ ਗਾਹਕਾਂ ਵੱਲੋਂ ਸਟੋਰ ਨੂੰ {{ lc_sr_avg }}/5 ({{ lc_sr_n }} ਪ੍ਰਮਾਣਿਤ ਸਮੀਖਿਆਵਾਂ)
+                      {%- else %}Boutique notée {{ lc_sr_avg | replace: '.', ',' }}/5 par nos clients ({{ lc_sr_n }} avis vérifiés)
+                      {%- endif -%}</a></li>
+                  {%- endif -%}
+                  <li>{%- if lc_loc == 'en' -%}Free shipping across Canada{%- elsif lc_loc == 'es' -%}Envío gratis a todo Canadá{%- elsif lc_loc == 'pa' -%}ਪੂਰੇ ਕੈਨੇਡਾ ਵਿੱਚ ਮੁਫ਼ਤ ਸ਼ਿਪਿੰਗ{%- else -%}Livraison gratuite partout au Canada{%- endif -%}</li>
+                  <li>{%- if lc_loc == 'en' -%}30-day returns{%- elsif lc_loc == 'es' -%}Devoluciones en 30 días{%- elsif lc_loc == 'pa' -%}30-ਦਿਨਾਂ ਵਿੱਚ ਵਾਪਸੀ{%- else -%}Retours 30 jours{%- endif -%}</li>
+                  <li><a href="{{ '/pages/garantie-de-securite-des-paiements' | prepend: routes.root_url | replace: '//', '/' }}" style="color:inherit;text-decoration:underline;text-underline-offset:2px">{%- if lc_loc == 'en' -%}100% secure payment{%- elsif lc_loc == 'es' -%}Pago 100% seguro{%- elsif lc_loc == 'pa' -%}100% ਸੁਰੱਖਿਅਤ ਭੁਗਤਾਨ{%- else -%}Paiement 100&nbsp;% sécurisé{%- endif -%}</a></li>
+                  {%- assign lc_gl = 0 -%}{%- if product.tags contains 'garantie-legale-6ans' -%}{%- assign lc_gl = 6 -%}{%- elsif product.tags contains 'garantie-legale-5ans' -%}{%- assign lc_gl = 5 -%}{%- endif -%}{%- if lc_gl > 0 -%}<li>{%- if lc_loc == 'en' or lc_loc == 'pa' -%}Legal warranty of good working order: {{ lc_gl }} years{%- elsif lc_loc == 'es' -%}Garantía legal de buen funcionamiento: {{ lc_gl }} años{%- else -%}Garantie légale de bon fonctionnement : {{ lc_gl }} ans{%- endif -%}</li>{%- else -%}<li>{%- if lc_loc == 'en' -%}1-year manufacturer warranty{%- elsif lc_loc == 'es' -%}Garantía del fabricante de 1 año{%- elsif lc_loc == 'pa' -%}1-ਸਾਲ ਦੀ ਨਿਰਮਾਤਾ ਵਾਰੰਟੀ{%- else -%}Garantie fabricant 1 an{%- endif -%}</li>{%- endif -%}
                 </ul>
                 {%- style -%}
                   .lc-checklist{list-style:none;margin:1.2rem 0 .4rem;padding:0;display:grid;gap:.5rem}
                   .lc-checklist li{display:flex;align-items:center;gap:.7rem;font-size:1.4rem;font-weight:600;color:#1A2340;line-height:1.3}
                   .lc-checklist li::before{content:"✔";color:#2D7A3A;font-weight:800;flex:0 0 auto}
+                  .lc-checklist li.lc-checklist__stars::before{content:"★";color:#D4A853}
                 {%- endstyle -%}
                 {%- if product.quantity_price_breaks_configured? -%}
                   <div class="volume-pricing-note" id="Volume-Note-{{ section.id }}">
@@ -540,6 +554,24 @@
 
               {%- when 'variant_picker' -%}
                 {% render 'product-variant-picker', product: product, block: block, product_form_id: product_form_id %}
+                {%- if request.locale.iso_code == 'en' -%}
+                  {%- comment -%} 2026-11-03 (Mat reco #6): English shoppers read inches. Display-only: "41 × 50 × 97 cm" → "41 × 50 × 97 cm (16.1 × 19.7 × 38.2 in)". Re-applied after Dawn swaps the picker on variant change. {%- endcomment -%}
+                  <script>
+                  (function(){
+                    var RE=/(^|[^\d.,])(\d+(?:[.,]\d+)?)\s*[×xX]\s*(\d+(?:[.,]\d+)?)(?:\s*[×xX]\s*(\d+(?:[.,]\d+)?))?\s*cm\b(?!\s*\()/;
+                    function inch(v){ var n=parseFloat(String(v).replace(',','.'))/2.54; return (Math.round(n*10)/10).toString(); }
+                    function conv(t){ var m=t.match(RE); if(!m) return null; var parts=[m[2],m[3]]; if(m[4]) parts.push(m[4]); return t.replace(RE, function(all){ return all+' ('+parts.map(inch).join(' × ')+' in)'; }); }
+                    function run(){
+                      document.querySelectorAll('variant-selects label, variant-selects option, variant-selects .form__label span, variant-selects legend + * span').forEach(function(el){
+                        for(var i=0;i<el.childNodes.length;i++){ var n=el.childNodes[i]; if(n.nodeType!==3) continue; var c=conv(n.nodeValue); if(c){ n.nodeValue=c; } }
+                      });
+                    }
+                    run();
+                    var host=document.querySelector('.product__info-container');
+                    if(host&&window.MutationObserver){ var t; new MutationObserver(function(){ clearTimeout(t); t=setTimeout(run,30); }).observe(host,{childList:true,subtree:true}); }
+                  })();
+                  </script>
+                {%- endif -%}
                 <style>
                   .lc-swatch-set legend{margin-bottom:.6rem}
                   .lc-swatch-set label.lc-swatch{position:relative;width:34px!important;height:34px!important;min-width:34px!important;padding:0!important;border-radius:50%!important;border:2px solid #d9d2c7!important;background:var(--sw)!important;box-shadow:inset 0 0 0 2px #fff;font-size:0!important;line-height:0!important;overflow:hidden;cursor:pointer;transition:border-color .15s ease,box-shadow .15s ease}
@@ -618,7 +650,7 @@
                     is enabled in Shopify Payments — no hardcoded list.
                   {%- endcomment -%}
                   {%- if shop.enabled_payment_types.size > 0 -%}
-                    <ul class="lc-payicons list-payment" role="list" aria-label="{%- if lc_loc == 'en' -%}Accepted payment methods{%- else -%}Modes de paiement acceptés{%- endif -%}">
+                    <ul class="lc-payicons list-payment" role="list" aria-label="{%- if lc_loc == 'en' -%}Accepted payment methods{%- elsif lc_loc == 'es' -%}Métodos de pago aceptados{%- elsif lc_loc == 'pa' -%}ਸਵੀਕਾਰ ਕੀਤੇ ਜਾਂਦੇ ਭੁਗਤਾਨ ਦੇ ਤਰੀਕੇ{%- else -%}Modes de paiement acceptés{%- endif -%}">
                       {%- for type in shop.enabled_payment_types -%}
                         <li class="list-payment__item">{{ type | payment_type_svg_tag: class: 'icon icon--full-color' }}</li>
                       {%- endfor -%}
@@ -634,16 +666,16 @@
                   {%- assign lc_wl_sku = product.selected_or_first_available_variant.sku | default: product.variants.first.sku -%}
                   <div class="lc-waitlist" style="margin:.4rem 0 .2rem;">
                     <p class="lc-waitlist__lead" style="font-size:.92rem;color:#5b6172;margin:0 0 .6rem;font-weight:600;">
-                      {%- if lc_loc == 'en' -%}⭐ This item is out of stock — get notified the moment it&rsquo;s back.{%- else -%}⭐ Cet article est épuisé — soyez averti dès son retour en stock.{%- endif -%}
+                      {%- if lc_loc == 'en' -%}⭐ This item is out of stock — get notified the moment it&rsquo;s back.{%- elsif lc_loc == 'es' -%}⭐ Este artículo está agotado — recibe un aviso en cuanto vuelva a estar disponible.{%- elsif lc_loc == 'pa' -%}⭐ ਇਹ ਆਈਟਮ ਆਊਟ ਆਫ਼ ਸਟਾਕ ਹੈ — ਜਿਵੇਂ ਹੀ ਇਹ ਸਟਾਕ&rsquo;ਚ ਵਾਪਸ ਆਵੇਗੀ, ਸੂਚਨਾ ਪ੍ਰਾਪਤ ਕਰੋ।{%- else -%}⭐ Cet article est épuisé — soyez averti dès son retour en stock.{%- endif -%}
                     </p>
                     <form id="lc-waitlist-form-{{ product.id }}" class="lc-waitlist__form" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:stretch;">
                       <input type="email" required
-                        placeholder="{%- if lc_loc == 'en' -%}Your email{%- else -%}Votre courriel{%- endif -%}"
-                        aria-label="{%- if lc_loc == 'en' -%}Your email{%- else -%}Votre courriel{%- endif -%}"
+                        placeholder="{%- if lc_loc == 'en' -%}Your email{%- elsif lc_loc == 'es' -%}Tu correo electrónico{%- elsif lc_loc == 'pa' -%}ਤੁਹਾਡੀ ਈਮੇਲ{%- else -%}Votre courriel{%- endif -%}"
+                        aria-label="{%- if lc_loc == 'en' -%}Your email{%- elsif lc_loc == 'es' -%}Tu correo electrónico{%- elsif lc_loc == 'pa' -%}ਤੁਹਾਡੀ ਈਮੇਲ{%- else -%}Votre courriel{%- endif -%}"
                         style="flex:1 1 auto;min-width:180px;padding:.7rem .8rem;border:1px solid #1B2A4A;border-radius:4px;font-size:.95rem;">
                       <button type="submit"
                         style="flex:0 0 auto;padding:.7rem 1.2rem;background:#1B2A4A;color:#fff;border:none;border-radius:4px;font-weight:700;cursor:pointer;">
-                        {%- if lc_loc == 'en' -%}Notify me{%- else -%}Avertissez-moi{%- endif -%}
+                        {%- if lc_loc == 'en' -%}Notify me{%- elsif lc_loc == 'es' -%}Notificarme{%- elsif lc_loc == 'pa' -%}ਮੈਨੂੰ ਸੂਚਿਤ ਕਰੋ{%- else -%}Avertissez-moi{%- endif -%}
                       </button>
                     </form>
                     <p id="lc-waitlist-msg-{{ product.id }}" class="lc-waitlist__msg" style="display:none;margin:.6rem 0 0;font-size:.88rem;color:#1B2A4A;"></p>
@@ -653,7 +685,7 @@
                       var form = document.getElementById('lc-waitlist-form-{{ product.id }}');
                       if (!form) return;
                       var msg = document.getElementById('lc-waitlist-msg-{{ product.id }}');
-                      var isEN = {% if lc_loc == 'en' %}true{% else %}false{% endif %};
+                      var LG = {{ request.locale.iso_code | downcase | json }}, isEN = LG !== 'fr';
                       form.addEventListener('submit', async function (e) {
                         e.preventDefault();
                         var email = form.querySelector('input[type=email]').value;
@@ -666,14 +698,14 @@
                           var d = await r.json();
                           msg.style.display = 'block';
                           if (d && d.success) {
-                            msg.textContent = d.message || (isEN ? 'Thanks! Check your email to confirm.' : 'Merci ! Vérifiez votre courriel pour confirmer.');
+                            msg.textContent = d.message || (lcT(LG,'Thanks! Check your email to confirm.','Merci ! Vérifiez votre courriel pour confirmer.','¡Gracias! Revisa tu correo electrónico para confirmar.','ਧੰਨਵਾਦ! ਪੁਸ਼ਟੀ ਕਰਨ ਲਈ ਆਪਣੀ ਈਮੇਲ ਦੀ ਜਾਂਚ ਕਰੋ।'));
                             form.style.display = 'none';
                           } else {
-                            msg.textContent = (d && d.error) || (isEN ? 'Something went wrong. Please try again.' : 'Une erreur est survenue. Réessayez.');
+                            msg.textContent = (d && d.error) || (lcT(LG,'Something went wrong. Please try again.','Une erreur est survenue. Réessayez.','Algo salió mal. Por favor, inténtalo de nuevo.','ਕੁਝ ਗੜਬੜ ਹੋ ਗਈ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।'));
                           }
                         } catch (err) {
                           msg.style.display = 'block';
-                          msg.textContent = isEN ? 'Something went wrong. Please try again.' : 'Une erreur est survenue. Réessayez.';
+                          msg.textContent = lcT(LG,'Something went wrong. Please try again.','Une erreur est survenue. Réessayez.','Algo salió mal. Por favor, inténtalo de nuevo.','ਕੁਝ ਗੜਬੜ ਹੋ ਗਈ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।');
                         }
                       });
                     })();
@@ -940,6 +972,14 @@
 
 {%- if product -%}{% render 'lc-complete-the-room' %}{%- endif -%}
 
+{%- comment -%} 2026-10-24: Judge.me serves "Based on N reviews" in English even for fr visitors; translate in place (dashboard setting not reachable by API). {%- endcomment -%}
+{%- if request.locale.iso_code == 'fr' -%}
+<script id="lc-based-on-fr">
+(function(){var re=/Based on ([0-9]+) reviews?/i;function fix(root){var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),n;while((n=w.nextNode())){if(re.test(n.nodeValue)){n.nodeValue=n.nodeValue.replace(re,function(_,c){return 'Basé sur '+c+' avis';});}}}
+function run(){var r=document.querySelector('.jdgm-rev-widg');if(r)fix(r);}
+run();var t=null;new MutationObserver(function(){clearTimeout(t);t=setTimeout(run,150);}).observe(document.body,{childList:true,subtree:true});})();
+</script>
+{%- endif -%}
 {% schema %}
 {
   "name": "t:sections.main-product.name",
@@ -2468,3 +2508,4 @@
   ]
 }
 {% endschema %}
+
