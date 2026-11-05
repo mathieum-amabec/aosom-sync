@@ -34,8 +34,10 @@ const TO_PAUSE = {
   "52607128656205": "Ameublo — Vendredi fou 2026 — VENTES (6–30 nov.) — scheduled auto-start, non-compliant",
 };
 
-const APPROVED = "On saute le magasin. Tu sautes le prix.\n\nPas de magasin, pas de loyer, pas de vendeur à commission. Juste le produit, importé directement du fabricant, livré chez toi. Des centaines de produits en stock, livraison gratuite partout au Canada.";
-const BUY2 = "Achète 2 articles : 10 % de rabais sur le moins cher des deux, appliqué automatiquement au panier. Aucun code.\n\nMeubles, rangement, patio, déco : des milliers de produits, livraison gratuite partout au Canada.";
+// Copy v2 (2026-11-04 follow-up, applied by fix-copy.mjs): qualified shipping wording + "des milliers".
+const SHIP = "Livraison gratuite au Canada (sauf certaines régions éloignées).";
+const APPROVED = `On saute le magasin. Tu sautes le prix.\n\nPas de magasin, pas de loyer, pas de vendeur à commission. Juste le produit, importé directement du fabricant, livré chez toi. Des milliers de produits en stock.\n\n${SHIP}`;
+const BUY2 = `Achète 2 articles : 10 % de rabais sur le moins cher des deux, appliqué automatiquement au panier. Aucun code.\n\nMeubles, rangement, patio, déco : des milliers de produits.\n\n${SHIP}`;
 // Vendredi fou copy, verbatim from the scheduled campaign's catalog ad (creative 1818674972755223).
 const BF = "Non, ce n'est pas une erreur de prix. 😳 Jusqu'à -55 % : le Vendredi fou commence maintenant chez Ameublo Direct, 3 semaines avant le vrai Vendredi fou.\n\nLivraison gratuite au Canada (sauf certaines régions éloignées).\nPrix protégé jusqu'au 30 nov. : si le prix baisse sur notre site, on rembourse la différence sur demande (conditions sur ameublodirect.ca).";
 
