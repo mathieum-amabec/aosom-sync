@@ -21,7 +21,7 @@
  */
 import { shopifyFetch } from "./shopify-client";
 import { setSetting, getSetting } from "./database";
-import { shopifyToFeedItems, type ShopifyFeedProduct } from "./feeds/source";
+import { shopifyToFeedItems, loadSeasonalRules, type ShopifyFeedProduct } from "./feeds/source";
 import type { FeedItem } from "./feeds/feed";
 import { getPublicAppUrl } from "./config";
 import { isInternalProduct } from "./internal-product";
@@ -192,7 +192,7 @@ export async function runFeedIntegrityAudit(deps: FeedIntegrityDeps): Promise<Fe
 
   // 1. Logic on fresh data.
   const products = await deps.fetchProducts();
-  const fresh = shopifyToFeedItems(products);
+  const fresh = shopifyToFeedItems(products, { seasonRules: await loadSeasonalRules() });
   const logic = checkFeedLogic(products, fresh);
   const v = logic.violations;
   if (v.missing_variant_link) reasons.push(`${v.missing_variant_link} offre(s) multi-variantes sans lien ?variant=`);

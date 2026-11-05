@@ -21,9 +21,8 @@ import {
   assertHidePlausible,
   costwayAvailability,
   parseHideMode,
-  parseSeasonWindows,
   planSoldOutHide,
-  seasonalRules,
+  seasonalRulesFromSetting,
   RATE_LIMIT_MS,
   SEASONAL_WINDOWS_KEY,
   SOLD_OUT_HIDE_MODE_KEY,
@@ -95,7 +94,7 @@ export async function runSoldOutHide(
   if (mode === "off") return { mode, counts: empty, applied: 0, skippedChanged: 0, deferred: 0, failed: 0, actions: [] };
 
   const now = d.now();
-  const rules = seasonalRules(parseSeasonWindows(await d.getSetting(SEASONAL_WINDOWS_KEY)));
+  const rules = seasonalRulesFromSetting(await d.getSetting(SEASONAL_WINDOWS_KEY));
 
   const [csvQtyBySku, baseline, costway, shopify, openOrders] = await Promise.all([
     d.fetchAosomCsvQty(),

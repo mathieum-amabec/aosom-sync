@@ -18,7 +18,11 @@
  *     restock, and publish-reconcile already refuses to republish them.
  *   - `hors-saison` (SEASON_TAG) — out of season. Deliberately WITHOUT `auto-drafted`, so the
  *     stock-check reactivation (which only looks at `auto-drafted`) never republishes an in-stock
- *     Halloween product in November. Only this job lifts it, once the season starts.
+ *     Halloween product in November. Only this job lifts it, once the season starts. It is the
+ *     job's OWN marker: only this job adds it, and only to a product it drafted itself (ACTIVE →
+ *     DRAFT) or to an automatic `auto-drafted` draft, never to an operator's draft.
+ *
+ * Keep a seasonal product live out of season: tag it `exclude-stale` (the operator pin).
  *
  * Decision rule per product (pure, `planSoldOutHide`):
  *   ACTIVE product
@@ -30,8 +34,10 @@
  *   DRAFT product
  *     - `hors-saison`, now in season (or no longer seasonal): sellable → ACTIVE (+ publish),
  *       not sellable → swap `hors-saison` for `auto-drafted` (it comes back on restock)
- *     - seasonal, out of season, not yet marked (not `exclude-stale`) → add `hors-saison`
- *       (and drop `auto-drafted`, so the stock-check cannot revive it before the season)
+ *     - seasonal, out of season, `auto-drafted` (an automatic draft) → swap it for `hors-saison`,
+ *       so the stock-check cannot revive it before the season
+ *     - seasonal, out of season, WITHOUT `auto-drafted` → never touched: an operator's draft (or
+ *       one of unknown origin) is never marked, so it is never published at a season start
  *     - `auto-drafted`, not seasonal-out, sellable in today's feed → ACTIVE (+ publish)
  *   Any other draft (an operator's, an import awaiting review…) is never touched.
  *
@@ -93,6 +99,11 @@ export const DEFAULT_SEASON_WINDOWS: Record<string, SeasonWindow> = {
 /** product_type contains the WORD Halloween — the rule shown in the module header. */
 export function isHalloweenProductType(productType: string): boolean {
   return /\bhalloween\b/i.test(productType || "");
+}
+
+/** Rules from the raw `settings.seasonal_windows` value — the job AND the feeds use this. */
+export function seasonalRulesFromSetting(raw: string | null | undefined): SeasonalRule[] {
+  return seasonalRules(parseSeasonWindows(raw));
 }
 
 export function seasonalRules(windows: Record<string, SeasonWindow> = DEFAULT_SEASON_WINDOWS): SeasonalRule[] {
@@ -305,11 +316,14 @@ export function planSoldOutHide(input: HidePlanInput): HidePlan {
     }
 
     if (offSeason) {
-      // An import held for human review is never marked: marking it would let this job
-      // publish it at the next season start without that review.
-      if (pinned || hasTag(p.tags, NEEDS_REVIEW_TAG)) continue;
+      // Only an AUTOMATIC draft (`auto-drafted`: this job or stock-check) is converted to
+      // `hors-saison`, so the stock-check cannot revive it before the season. A draft without
+      // that marker belongs to an operator (or has an unknown origin): it is NEVER marked,
+      // because marking it would make this job publish it at the next season start. An import
+      // held for review is never marked either.
+      if (!autoDrafted || pinned || hasTag(p.tags, NEEDS_REVIEW_TAG)) continue;
       const tags = withTag(withoutTag(p.tags, STOCK_TAG_AUTODRAFTED), SEASON_TAG);
-      push(p, { action: "mark_season", reason: `déjà en brouillon, marqué hors saison (${offSeason.key})`, targetStatus: "draft", tags });
+      push(p, { action: "mark_season", reason: `brouillon automatique, passé hors saison (${offSeason.key})`, targetStatus: "draft", tags });
       counts.markSeason++;
       continue;
     }

@@ -8,12 +8,10 @@ import { FIT_DIMS_KEY, FIT_DIMS_NAMESPACE, type FitDims } from "../fit-dims";
 import { parseSku } from "../variant-merger";
 import { isSpecImageUrl } from "../selectors/shopify-product";
 import { imageUrlStem } from "../image-compliance-audit";
-import { getCachedImageStyles, getCachedImageVerdicts } from "../database";
+import { getCachedImageStyles, getCachedImageVerdicts, getSetting } from "../database";
 import type { AdImageStyle } from "../image-style";
 import { isInternalProduct } from "../internal-product";
-import { outOfSeasonRule, seasonalRules } from "../sold-out-hide";
-
-const SEASON_RULES = seasonalRules();
+import { outOfSeasonRule, seasonalRules, seasonalRulesFromSetting, SEASONAL_WINDOWS_KEY, type SeasonalRule } from "../sold-out-hide";
 
 export interface ShopifyFeedVariant {
   /** Shopify variant id — drives the `?variant=` deep link on multi-variant products. */
@@ -340,8 +338,14 @@ export function shopifyToFeedItems(
      * An unclassified photo counts as studio (fail-closed).
      */
     imageStyles?: ReadonlyMap<string, AdImageStyle>;
+    /** Seasonal rules (loadSeasonalRules: the same `settings.seasonal_windows` as sold-out-hide.ts).
+     *  Omitted → the default windows. */
+    seasonRules?: SeasonalRule[];
+    /** "now" for the season check; injectable for tests. */
+    now?: Date;
   } = {},
 ): FeedItem[] {
+  const seasonRules = opts.seasonRules ?? seasonalRules();
   const english = opts.preferEnglishTitle === true;
   const houseBrand = english ? HOUSE_BRAND_EN : HOUSE_BRAND;
   const storefrontBase = english ? EN_STOREFRONT_BASE_URL : STOREFRONT_BASE_URL;
@@ -350,7 +354,7 @@ export function shopifyToFeedItems(
   let dupCount = 0;
   let unpublishedCount = 0;
   let offSeasonCount = 0;
-  const now = new Date();
+  const now = opts.now ?? new Date();
   for (const p of products) {
     if (p.status !== "active") continue;          // active status
     // Must be published to the Online Store *now* — an active product is only live on the
@@ -362,7 +366,7 @@ export function shopifyToFeedItems(
     if (!p.handle) continue;
     // Out-of-season seasonal product (Halloween after Oct 31): sold-out-hide.ts drafts it, this
     // is the belt-and-braces for the hours between a season end and that job's next run.
-    if (outOfSeasonRule(p.product_type ?? "", SEASON_RULES, now)) { offSeasonCount++; continue; }
+    if (outOfSeasonRule(p.product_type ?? "", seasonRules, now)) { offSeasonCount++; continue; }
     const rawImages = (p.images ?? []).filter((i) => Boolean(i.src));
     if (rawImages.length === 0) continue;         // Google/Pinterest/Meta require an image
     // Drop spec/infographic/dimension-chart/marketing-overlay shots before this product's
@@ -779,8 +783,20 @@ export async function fetchShopifyFeedProducts(): Promise<ShopifyFeedProduct[]> 
  * Pass `{ english: true }` to overlay custom.title_en titles for the Pinterest EN feed,
  * `{ rich: true }` (Google, Bing) for product_highlight + product_detail, and
  * `{ lifestyle: true }` (Meta) for lifestyle-only images + the imageStyle label. */
+/** Seasonal rules from `settings.seasonal_windows`: the SAME source as the sold-out-hide job,
+ *  so a window moved without a deploy moves the feeds too. A settings read failure falls back
+ *  to the default windows (the feed must still be served). */
+export async function loadSeasonalRules(): Promise<SeasonalRule[]> {
+  try {
+    return seasonalRulesFromSetting(await getSetting(SEASONAL_WINDOWS_KEY));
+  } catch {
+    return seasonalRules();
+  }
+}
+
 export async function getFeedItems(opts: { english?: boolean; rich?: boolean; lifestyle?: boolean } = {}): Promise<FeedItem[]> {
   const products = await fetchShopifyFeedProducts();
+  const seasonRules = await loadSeasonalRules();
   const imageStyles = opts.lifestyle ? await fetchImageStyles(products) : undefined;
 
   // Overlay <g:material> from its metafield. No-op (one cheap call) until one is defined.
@@ -810,11 +826,11 @@ export async function getFeedItems(opts: { english?: boolean; rich?: boolean; li
       if (bodyEn) p.bodyEn = bodyEn;
     }
     const { nonCompliant, verified } = await fetchImageVerdictStems(products, { strict: opts.lifestyle });
-    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems: nonCompliant, verifiedStems: verified, optionValueEn, rich: opts.rich, imageStyles });
+    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems: nonCompliant, verifiedStems: verified, optionValueEn, rich: opts.rich, imageStyles, seasonRules });
   }
 
   const { nonCompliant, verified } = await fetchImageVerdictStems(products, { strict: opts.lifestyle });
-  return shopifyToFeedItems(products, { nonCompliantStems: nonCompliant, verifiedStems: verified, rich: opts.rich, imageStyles });
+  return shopifyToFeedItems(products, { nonCompliantStems: nonCompliant, verifiedStems: verified, rich: opts.rich, imageStyles, seasonRules });
 }
 
 /** Below this share of classified photos the style cache is not trusted (fresh deploy, or the

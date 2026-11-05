@@ -127,10 +127,18 @@ describe("planSoldOutHide — drafts and coming back", () => {
     expect(p.actions).toEqual([]);
   });
 
-  it("marks an existing Halloween draft hors-saison so it can come back next season", () => {
+  it("NEVER marks an operator's Halloween draft (no auto-drafted): it must not come back at a season start", () => {
     const p = plan([prod({ id: "H", status: "draft", productType: HALLOWEEN, tags: ["Halloween"], availability: { present: false, sellable: false } })]);
-    expect(p.actions[0]).toMatchObject({ action: "mark_season", targetStatus: "draft" });
-    expect(p.actions[0].tags).toEqual(["Halloween", SEASON_TAG]);
+    expect(p.actions).toEqual([]);
+    // …and at the season start it is still left alone, even in stock.
+    expect(plan([prod({ id: "H", status: "draft", productType: HALLOWEEN, tags: ["Halloween"] })], SEP).actions).toEqual([]);
+  });
+
+  it("the full cycle: an active in-stock Halloween product it drafts in November comes back in September", () => {
+    const hidden = plan([prod({ id: "H", productType: HALLOWEEN, tags: ["Halloween"] })]).actions[0];
+    expect(hidden.action).toBe("hide_season");
+    const back = plan([prod({ id: "H", status: "draft", productType: HALLOWEEN, tags: hidden.tags })], SEP).actions[0];
+    expect(back).toMatchObject({ action: "reactivate", targetStatus: "active", tags: ["Halloween", "back-in-stock"] });
   });
 
   it("does not mark an import held for review", () => {
