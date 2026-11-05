@@ -1,0 +1,17 @@
+import fs from "node:fs";
+import { get, getAll } from "./_graph.mjs";
+const CAT = "384890002574549", DS = "214720653324969";
+const out = {};
+const t = async (k, f) => { try { out[k] = await f(); } catch (e) { out[k] = { error: e.message }; } };
+await t("feeds", () => getAll(`${CAT}/product_feeds`, { fields: "id,name,schedule,update_schedule,latest_upload{id,start_time,end_time},product_count,url,ingestion_source_type" }));
+await t("halloween_sample", () => get(`${CAT}/products`, { fields: "retailer_id,name,product_type,availability,url", filter: JSON.stringify({ product_type: { i_contains: "halloween" } }), limit: "5", summary: "true" }));
+await t("oos_sample", () => get(`${CAT}/products`, { fields: "retailer_id,name,availability", filter: JSON.stringify({ availability: { eq: "out of stock" } }), limit: "3", summary: "true" }));
+await t("all_summary", () => get(`${CAT}/products`, { fields: "retailer_id", limit: "1", summary: "true" }));
+await t("lifestyle_summary", () => get(`${CAT}/products`, { fields: "retailer_id,url", filter: JSON.stringify({ and: [{ availability: { eq: "in stock" } }, { custom_label_4: { eq: "lifestyle" } }, { product_type: { i_not_contains: "halloween" } }] }), limit: "3", summary: "true" }));
+await t("dataset", () => get(DS, { fields: "id,name,last_fired_time,is_unavailable,owner_business{id,name}" }));
+await t("stats", () => get(`${DS}/stats`, { aggregation: "event", start_time: String(Math.floor(Date.now()/1000) - 7*86400) }));
+await t("stats_src", () => get(`${DS}/stats`, { aggregation: "event_source", start_time: String(Math.floor(Date.now()/1000) - 7*86400) }));
+await t("catalog", () => get(CAT, { fields: "id,name,product_count,da_display_settings,business{id,name}" }));
+await t("cat_pixels", () => get(`${CAT}/external_event_sources`, { fields: "id,name" }));
+fs.writeFileSync(process.argv[2], JSON.stringify(out, null, 2));
+console.log("ok");
