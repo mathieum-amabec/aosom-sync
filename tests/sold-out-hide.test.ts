@@ -213,6 +213,7 @@ describe("runSoldOutHide", () => {
       setActive: vi.fn(async () => {}),
       setTags: vi.fn(async () => {}),
       sleep: async () => {},
+      revalidateFeeds: vi.fn(),
       ...over,
     };
   };
@@ -250,6 +251,56 @@ describe("runSoldOutHide", () => {
     const deps = baseDeps({ fetchAosomCsvQty: async () => new Map() });
     await expect(runSoldOutHide({ mode: "live" }, deps)).rejects.toThrow(/truncated/);
     expect(deps.setDraft).not.toHaveBeenCalled();
+  });
+
+  it("a live run that changed statuses busts the feeds cache once", async () => {
+    const deps = baseDeps();
+    const r = await runSoldOutHide({ mode: "live" }, deps);
+    expect(r.statusChanges).toBe(3);
+    expect(r.feedsRevalidated).toBe(true);
+    expect(deps.revalidateFeeds).toHaveBeenCalledTimes(1);
+  });
+
+  it("a reactivation alone is enough to bust the feeds cache", async () => {
+    const deps = baseDeps({ fetchAosomCsvQty: async () => new Map([["SO-A", 50], ["OK-A", 50], ["H-A", 50], ["BACK-A", 40]]), now: () => SEP });
+    const r = await runSoldOutHide({ mode: "live" }, deps);
+    expect(deps.setDraft).not.toHaveBeenCalled();
+    expect(deps.setActive).toHaveBeenCalledWith("BACK", expect.anything());
+    expect(r.statusChanges).toBe(1);
+    expect(deps.revalidateFeeds).toHaveBeenCalledTimes(1);
+  });
+
+  it("dry, off and zero-change runs never bust the feeds cache", async () => {
+    const dry = baseDeps();
+    expect((await runSoldOutHide({ mode: "dry" }, dry)).feedsRevalidated).toBe(false);
+    expect(dry.revalidateFeeds).not.toHaveBeenCalled();
+
+    const off = baseDeps();
+    await runSoldOutHide({ mode: "off" }, off);
+    expect(off.revalidateFeeds).not.toHaveBeenCalled();
+
+    // every product changed in the admin since the plan → nothing written
+    const none = baseDeps({ getState: async () => null });
+    const r = await runSoldOutHide({ mode: "live" }, none);
+    expect(r.applied).toBe(0);
+    expect(r.feedsRevalidated).toBe(false);
+    expect(none.revalidateFeeds).not.toHaveBeenCalled();
+
+    // every write failed → no status changed
+    const failing = baseDeps({ setDraft: vi.fn(async () => { throw new Error("boom"); }), setActive: vi.fn(async () => { throw new Error("boom"); }) });
+    const rf = await runSoldOutHide({ mode: "live" }, failing);
+    expect(rf.failed).toBe(3);
+    expect(failing.revalidateFeeds).not.toHaveBeenCalled();
+  });
+
+  it("a feeds revalidation failure is logged and does not fail the run", async () => {
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const deps = baseDeps({ revalidateFeeds: vi.fn(() => { throw new Error("no static store"); }) });
+    const r = await runSoldOutHide({ mode: "live" }, deps);
+    expect(r.applied).toBe(3);
+    expect(r.feedsRevalidated).toBe(false);
+    expect(err).toHaveBeenCalledWith("[sold-out-hide] feeds revalidation failed:", expect.any(Error));
+    err.mockRestore();
   });
 
   it("an open-orders failure aborts the run (fail closed)", async () => {

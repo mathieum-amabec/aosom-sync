@@ -9,6 +9,7 @@ import { fetchAosomCatalog } from "./csv-fetcher";
 import { getSetting, getStockBaseline } from "./database";
 import { getImportedCostwayStock } from "./costway/db";
 import { assertFeedComplete } from "./stock-reconcile";
+import { revalidateFeeds } from "./feeds/revalidate";
 import {
   fetchOpenOrderProductIds,
   fetchProductVisibilityStates,
@@ -40,6 +41,10 @@ export interface SoldOutHideResult {
   skippedChanged: number;
   deferred: number;
   failed: number;
+  /** writes that changed a product's visibility (drafted, or reactivated/republished) — tag-only writes excluded. */
+  statusChanges: number;
+  /** true when the feeds cache was busted after this run (live run with ≥1 status change). */
+  feedsRevalidated: boolean;
   /** every planned action (dry and live) — the rollback record. */
   actions: PlannedHideAction[];
 }
@@ -57,6 +62,8 @@ export interface SoldOutHideDeps {
   setActive: (id: string, tags: string[]) => Promise<void>;
   setTags: (id: string, tags: string[]) => Promise<void>;
   sleep: (ms: number) => Promise<void>;
+  /** busts the feeds Data Cache so drafted products leave the ad feeds (and reactivated ones return). */
+  revalidateFeeds: () => unknown;
 }
 
 const defaultDeps: SoldOutHideDeps = {
@@ -79,6 +86,7 @@ const defaultDeps: SoldOutHideDeps = {
   setActive: (id, tags) => publishShopifyProduct(id, { activate: true, tags }),
   setTags: async (id, tags) => { await updateShopifyProduct(id, { tags }); },
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+  revalidateFeeds,
 };
 
 export async function runSoldOutHide(
@@ -91,7 +99,7 @@ export async function runSoldOutHide(
     products: 0, hideSoldOut: 0, hideSeason: 0, markSeason: 0, releaseSeason: 0, reactivate: 0,
     skippedOpenOrder: 0, skippedExcludeStale: 0, skippedAbsentFromFeed: 0, activeProducts: 0,
   };
-  if (mode === "off") return { mode, counts: empty, applied: 0, skippedChanged: 0, deferred: 0, failed: 0, actions: [] };
+  if (mode === "off") return { mode, counts: empty, applied: 0, skippedChanged: 0, deferred: 0, failed: 0, statusChanges: 0, feedsRevalidated: false, actions: [] };
 
   const now = d.now();
   const rules = seasonalRulesFromSetting(await d.getSetting(SEASONAL_WINDOWS_KEY));
@@ -126,7 +134,7 @@ export async function runSoldOutHide(
   const plan = planSoldOutHide({ products: candidates, openOrderProductIds: openOrders, rules, now });
   assertHidePlausible(plan);
 
-  const res: SoldOutHideResult = { mode, counts: plan.counts, applied: 0, skippedChanged: 0, deferred: 0, failed: 0, actions: plan.actions };
+  const res: SoldOutHideResult = { mode, counts: plan.counts, applied: 0, skippedChanged: 0, deferred: 0, failed: 0, statusChanges: 0, feedsRevalidated: false, actions: plan.actions };
   if (mode === "dry") return res;
 
   const cap = opts.maxWrites ?? SOLD_OUT_HIDE_WRITE_CAP;
@@ -141,14 +149,31 @@ export async function runSoldOutHide(
       const again = planSoldOutHide({ products: [{ ...base, status: live.status, tags: live.tags }], openOrderProductIds: openOrders, rules, now }).actions[0];
       if (!again || again.action !== a.action) { res.skippedChanged++; continue; }
 
-      if (again.targetStatus === "draft" && live.status === "active") await d.setDraft(a.shopifyProductId, again.tags);
-      else if (again.targetStatus === "active") await d.setActive(a.shopifyProductId, again.tags);
-      else await d.setTags(a.shopifyProductId, again.tags);
+      if (again.targetStatus === "draft" && live.status === "active") {
+        await d.setDraft(a.shopifyProductId, again.tags);
+        res.statusChanges++;
+      } else if (again.targetStatus === "active") {
+        await d.setActive(a.shopifyProductId, again.tags);
+        res.statusChanges++; // also republishes: feed visibility changes either way
+      } else await d.setTags(a.shopifyProductId, again.tags);
       res.applied++;
       await d.sleep(RATE_LIMIT_MS);
     } catch (err) {
       res.failed++;
       console.error(`[sold-out-hide] ${a.action} failed for ${a.shopifyProductId}:`, err);
+    }
+  }
+
+  // The feeds read Shopify through a Data Cache kept up to 24 h (lib/feeds/source.ts): without
+  // this, a drafted product stays in the Meta/Google feeds and ads keep pointing to a 404 page.
+  // Only when a status actually changed; a failure here is logged, never fails the run (the
+  // writes are done, and the 24 h cache expiry still catches up).
+  if (res.statusChanges > 0) {
+    try {
+      await d.revalidateFeeds();
+      res.feedsRevalidated = true;
+    } catch (err) {
+      console.error("[sold-out-hide] feeds revalidation failed:", err);
     }
   }
   return res;

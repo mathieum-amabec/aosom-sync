@@ -1,12 +1,6 @@
 import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
-import { revalidateTag, revalidatePath } from "next/cache";
-
-// Every storefront feed (Google / Pinterest / Meta, incl. the EN + XML variants) derives
-// from one shared Shopify product fetch tagged 'feeds' in lib/feeds/source.ts. Refreshing
-// the feeds = bust that Data Cache tag + revalidate each feed route's path. The route
-// names double as the URL segment under /api/feeds/.
-const FEEDS = ["google", "pinterest", "pinterest-en", "meta", "meta-xml", "bing", "reddit"] as const;
+import { revalidateFeeds } from "@/lib/feeds/revalidate";
 
 /**
  * POST /api/revalidate — Bearer CRON_SECRET.
@@ -27,10 +21,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ revalidated: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  // One shared data tag → refreshes the product data behind every feed.
-  revalidateTag("feeds", "max");
-  // Per-route invalidation so each feed route regenerates on its next request.
-  for (const feed of FEEDS) revalidatePath(`/api/feeds/${feed}`);
-
-  return NextResponse.json({ revalidated: true, feeds: [...FEEDS] });
+  // Shared 'feeds' data tag + per-route invalidation (see lib/feeds/revalidate.ts).
+  const feeds = revalidateFeeds();
+  return NextResponse.json({ revalidated: true, feeds: [...feeds] });
 }

@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.56] - 2026-11-05
+
+### Fixed
+
+- **Products drafted by sold-out-hide now leave the ad feeds within ~10 minutes, not up to 24 h.** The feeds read Shopify through a Data Cache kept 24 h (`lib/feeds/source.ts`, tag `feeds`) and the job never busted it, so a drafted product stayed in the Meta/Google feeds and ads could point to a 404 page. After a LIVE run that changed at least one product's visibility (drafted, or reactivated/republished), the job now busts the `feeds` tag and every feed route, exactly like `POST /api/revalidate` (new shared helper `src/lib/feeds/revalidate.ts`, used by both). Never on dry/off runs, tag-only runs or runs where every write was skipped/failed; a revalidation failure is logged and does not fail the run. Result gains `statusChanges` and `feedsRevalidated`. The shared feed list now also covers `google-en` and `meta-xml-en`, which `POST /api/revalidate` was missing (a test pins the list to the route directories).
+
 ## [0.5.107.55] - 2026-11-04
 
 ### Added
