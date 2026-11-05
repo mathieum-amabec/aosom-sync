@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     const result = await trackCron(
       mode === "dry" ? "sold-out-hide-dryrun" : "sold-out-hide",
       () => runSoldOutHide({ mode, maxWrites }),
-      (r) => `${r.mode}: soldOut=${r.counts.hideSoldOut} season=${r.counts.hideSeason} mark=${r.counts.markSeason} reactivate=${r.counts.reactivate} release=${r.counts.releaseSeason} applied=${r.applied}${r.deferred ? ` deferred=${r.deferred}` : ""}${r.failed ? ` failed=${r.failed}` : ""}${r.counts.skippedOpenOrder ? ` openOrder=${r.counts.skippedOpenOrder}` : ""}`,
+      (r) => `${r.mode}: soldOut=${r.counts.hideSoldOut} season=${r.counts.hideSeason} mark=${r.counts.markSeason} reactivate=${r.counts.reactivate} release=${r.counts.releaseSeason} applied=${r.applied}${r.feedsRevalidated ? " feeds=revalidated" : ""}${r.deferred ? ` deferred=${r.deferred}` : ""}${r.failed ? ` failed=${r.failed}` : ""}${r.counts.skippedOpenOrder ? ` openOrder=${r.counts.skippedOpenOrder}` : ""}`,
     );
     return NextResponse.json({ success: true, data: result }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
