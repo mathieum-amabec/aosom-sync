@@ -11,6 +11,9 @@ import { imageUrlStem } from "../image-compliance-audit";
 import { getCachedImageStyles, getCachedImageVerdicts } from "../database";
 import type { AdImageStyle } from "../image-style";
 import { isInternalProduct } from "../internal-product";
+import { outOfSeasonRule, seasonalRules } from "../sold-out-hide";
+
+const SEASON_RULES = seasonalRules();
 
 export interface ShopifyFeedVariant {
   /** Shopify variant id — drives the `?variant=` deep link on multi-variant products. */
@@ -346,6 +349,8 @@ export function shopifyToFeedItems(
   const seenIds = new Set<string>();
   let dupCount = 0;
   let unpublishedCount = 0;
+  let offSeasonCount = 0;
+  const now = new Date();
   for (const p of products) {
     if (p.status !== "active") continue;          // active status
     // Must be published to the Online Store *now* — an active product is only live on the
@@ -355,6 +360,9 @@ export function shopifyToFeedItems(
     // exclude it rather than ship a dead link.
     if (!p.published_at || new Date(p.published_at).getTime() > Date.now()) { unpublishedCount++; continue; }
     if (!p.handle) continue;
+    // Out-of-season seasonal product (Halloween after Oct 31): sold-out-hide.ts drafts it, this
+    // is the belt-and-braces for the hours between a season end and that job's next run.
+    if (outOfSeasonRule(p.product_type ?? "", SEASON_RULES, now)) { offSeasonCount++; continue; }
     const rawImages = (p.images ?? []).filter((i) => Boolean(i.src));
     if (rawImages.length === 0) continue;         // Google/Pinterest/Meta require an image
     // Drop spec/infographic/dimension-chart/marketing-overlay shots before this product's
@@ -467,6 +475,7 @@ export function shopifyToFeedItems(
       });
     }
   }
+  if (offSeasonCount > 0) console.warn(`[FEED] excluded ${offSeasonCount} out-of-season products`);
   if (unpublishedCount > 0) console.warn(`[FEED] excluded ${unpublishedCount} active products not published to the Online Store (storefront would 404)`);
   if (dupCount > 0) console.warn(`[FEED] skipped ${dupCount} variants with duplicate SKUs (g:id must be unique)`);
   return items;

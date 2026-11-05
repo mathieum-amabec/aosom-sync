@@ -104,6 +104,10 @@
       "schedule": "0 22 * * *"
     },
     {
+      "path": "/api/cron/sold-out-hide",
+      "schedule": "20 10,16,22 * * *"
+    },
+    {
       "path": "/api/cron/csv-precache",
       "schedule": "0 4 * * *"
     },

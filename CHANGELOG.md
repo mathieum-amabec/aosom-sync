@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.55] - 2026-11-04
+
+### Added
+
+- **Sold-out and out-of-season products are taken off sale, and come back by themselves** (`src/lib/sold-out-hide.ts`, cron `/api/cron/sold-out-hide` at 10:20 / 16:20 / 22:20 UTC, script `scripts/sold-out-hide.mts`). Mat: « retire les produits en rupture dont l'Halloween ». A product is set to DRAFT (hidden from every sales channel, URL/photos/reviews/publications kept) when every variant is sold out (Aosom: `stockBufferQty(fresh CSV qty) = 0`; Costway: `in_stock = 0` or < 3 units), tagged `auto-drafted` — the stock-check marker, so its existing restock path also brings it back. Halloween products (`product_type` contains the word « Halloween », never the tags — a Christmas tree carries the tag) are drafted outside Sep 1 → Nov 1 (store-local, `settings.seasonal_windows`) even when in stock, tagged `hors-saison` without `auto-drafted` so stock-check cannot revive them; this job reactivates them (status active + published) at the season start if in stock. Never touches: an `exclude-stale` product, one in an open unfulfilled order (fail-closed on an API error), one entirely absent from the feed (left to removed-catalog's rename guard), a `needs-review` import, an operator's own draft. Guards: `assertFeedComplete`, a mass-hide breaker (max(200, 10 % of active)), 150 writes/run at 2/s, each write re-reads and re-plans the product. Mode `settings.sold_out_hide_mode` off/dry/live (default live); `?mode=dry`.
+- First run on 2026-11-04: 55 sold-out products drafted (51 Aosom, 4 Costway), 2 in-stock Halloween products drafted, 34 already-draft Halloween products marked `hors-saison`. Rollback record: `aosom-sync-backups/soldout-2026-11-05*.json`.
+
+### Changed
+
+- publish-reconcile never republishes a `hors-saison` draft; the ad feeds skip out-of-season products as a second barrier.
+
 ## [0.5.107.54] - 2026-11-01
 
 ### Changed
