@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.57] - 2026-11-08
+
+### Fixed
+
+- **Server Purchase events now carry Meta's click ids.** The orders/paid webhook sent email, phone and address but `fbp`/`fbc` at 0 %, so Meta could only link a sale to an ad by matching the customer's details. The ScriptTag now copies the `_fbp`/`_fbc` cookies into hidden cart attributes, which reach the order as `note_attributes`: as hidden inputs on a form post to `/cart/add` (the only route for "buy now", which skips the cart), otherwise through `/cart/update.js` on a cart that has items. When a checkout skipped both, the `fbclid` in `order.landing_site` is the fallback, unless it runs into Shopify's 255-character cap: 28 of the last 50 such ids were cut off. Values are shape-checked and the fbclid is never rewritten. Same `event_id`, so deduplication does not change.
+
 ## [0.5.107.56] - 2026-11-05
 
 ### Fixed

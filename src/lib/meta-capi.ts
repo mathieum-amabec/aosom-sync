@@ -7,11 +7,24 @@
  *    (`eventID`) and to /api/capi/event.
  * Customer data (email, phone, name, address) is SHA-256 hashed after Meta's normalisation rules; IP, user agent,
  * fbp and fbc are sent as-is (Meta requires them unhashed).
+ *
+ * Purchase click ids: the webhook has no browser, so fbp/fbc come from the order itself. The ScriptTag copies the
+ * _fbp/_fbc cookies into hidden cart attributes (they become order.note_attributes); when a checkout skipped that,
+ * the fbclid in order.landing_site is the fallback. Meta wants the fbclid byte-for-byte, so it is never lower-cased
+ * or otherwise rewritten, and Shopify caps landing_site at 255 characters, so an fbclid running into that cap is
+ * discarded: on real orders more than half were cut off, and a cut id would still look valid.
  */
 import crypto from "crypto";
 import { env } from "@/lib/config";
 
 export const CAPI_VERSION = "v21.0";
+
+/** Shape of Meta's _fbp / _fbc values: fb.<subdomain index>.<creation ms>.<id>. */
+export const FB_COOKIE_RE = /^fb\.[0-9]\.[0-9]{10,13}\.[A-Za-z0-9_.-]{4,200}$/;
+
+/** Shopify cuts order.landing_site at 255 characters; a margin covers cuts inside a multi-byte or encoded character. */
+const LANDING_SITE_CAP = 250;
+const DAY_MS = 86_400_000;
 
 const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
 
@@ -133,11 +146,46 @@ export interface ShopifyOrderLike {
   client_details?: { browser_ip?: string | null; user_agent?: string | null } | null;
   line_items?: Array<{ sku?: string | null; quantity?: number; price?: string | number }>;
   order_status_url?: string | null;
+  note_attributes?: Array<{ name?: string | null; value?: unknown }> | null;
+  landing_site?: string | null;
 }
 
 /** Shopify checkout token == the Custom Web Pixel's `checkout.token` == the browser Purchase `eid`. */
 export function purchaseEventId(o: Pick<ShopifyOrderLike, "id" | "checkout_token">): string {
   return o.checkout_token && String(o.checkout_token).trim() ? String(o.checkout_token) : `order_${o.id}`;
+}
+
+/**
+ * fbp/fbc for a server Purchase. Anything that does not look like a Meta value is dropped: note_attributes can be
+ * set by anyone holding the cart, and a malformed fbc is worse for Meta than none.
+ * `eventMs` stamps an fbc rebuilt from landing_site, whose real click time is unknown but never after the order,
+ * and rejects a cart value claiming a creation time after the order (one day of leeway for clock skew).
+ */
+export function clickIdsFromOrder(
+  o: Pick<ShopifyOrderLike, "note_attributes" | "landing_site">,
+  eventMs: number,
+): { fbp: string | null; fbc: string | null } {
+  const attr = (name: string): string | null => {
+    const v = (o.note_attributes ?? []).find((a) => a?.name === name)?.value;
+    if (typeof v !== "string") return null;
+    const s = v.trim();
+    if (!FB_COOKIE_RE.test(s)) return null;
+    return Number(s.split(".")[2]) > eventMs + DAY_MS ? null : s;
+  };
+  const fbp = attr("_fbp");
+  let fbc = attr("_fbc");
+  if (!fbc) {
+    const site = o.landing_site ?? "";
+    const m = /[?&]fbclid=([^&#]+)/.exec(site);
+    const cutOff = m != null && site.length >= LANDING_SITE_CAP && m.index + m[0].length === site.length;
+    if (m && !cutOff) {
+      let clickId = m[1];
+      try { clickId = decodeURIComponent(clickId); } catch { /* malformed encoding: the shape test below rejects it */ }
+      const built = `fb.1.${eventMs}.${clickId}`;
+      if (FB_COOKIE_RE.test(built)) fbc = built;
+    }
+  }
+  return { fbp, fbc };
 }
 
 export function purchaseEventFromOrder(o: ShopifyOrderLike): CapiEvent {
@@ -146,9 +194,11 @@ export function purchaseEventFromOrder(o: ShopifyOrderLike): CapiEvent {
   let sourceUrl = "https://ameublodirect.ca/";
   try { if (o.order_status_url) sourceUrl = `${new URL(o.order_status_url).origin}/`; } catch { /* keep default */ }
   const t = new Date(o.processed_at || o.created_at).getTime();
+  const eventSec = Math.floor((Number.isFinite(t) ? t : Date.now()) / 1000);
+  const { fbp, fbc } = clickIdsFromOrder(o, eventSec * 1000);
   return {
     event_name: "Purchase",
-    event_time: Math.floor((Number.isFinite(t) ? t : Date.now()) / 1000),
+    event_time: eventSec,
     event_id: purchaseEventId(o),
     event_source_url: sourceUrl,
     action_source: "website",
@@ -164,6 +214,8 @@ export function purchaseEventFromOrder(o: ShopifyOrderLike): CapiEvent {
       externalId: o.customer?.id != null ? String(o.customer.id) : null,
       ip: o.client_details?.browser_ip,
       userAgent: o.client_details?.user_agent,
+      fbp,
+      fbc,
     }),
     custom_data: {
       value: Number(o.total_price) || 0,
