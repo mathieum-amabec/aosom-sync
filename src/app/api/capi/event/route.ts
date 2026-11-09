@@ -10,14 +10,13 @@ import { NextResponse } from "next/server";
 import { STOREFRONT_ORIGINS } from "@/lib/storefront-cors";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { clientIp } from "@/lib/client-ip";
-import { buildUserData, capiConfig, sendCapiEvents, type CapiEvent } from "@/lib/meta-capi";
+import { buildUserData, capiConfig, FB_COOKIE_RE, sendCapiEvents, type CapiEvent } from "@/lib/meta-capi";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const ALLOWED_EVENTS = new Set(["ViewContent", "AddToCart"]);
 const ID_RE = /^[A-Za-z0-9_.:-]{8,100}$/;
-const FB_COOKIE_RE = /^fb\.[0-9]\.[0-9]{10,13}\.[A-Za-z0-9_.-]{4,200}$/;
 const CUR_RE = /^[A-Za-z]{3}$/;
 
 const cors = (origin: string | null): Record<string, string> => {

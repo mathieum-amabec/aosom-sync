@@ -29,6 +29,7 @@ function runInFakeStore(script: string, opts: { pdpVariants?: Array<{ id: number
     location: { href: "https://ameublodirect.ca/collections/all", search: "" },
     navigator: { sendBeacon: () => true },
     setTimeout,
+    clearTimeout,
   };
   win.window = win;
   const document = {
@@ -37,7 +38,7 @@ function runInFakeStore(script: string, opts: { pdpVariants?: Array<{ id: number
     createElement: () => ({}),
     getElementsByTagName: () => [{ parentNode: { insertBefore: () => {} } }],
   };
-  vm.runInNewContext(script, { ...win, window: win, document, JSON, Date, Math, RegExp, String, Promise });
+  vm.runInNewContext(script, { ...win, window: win, document, JSON, Date, Math, RegExp, String, Promise, setTimeout, clearTimeout });
   return { win, fbqCalls, fetchCalls, listeners };
 }
 
