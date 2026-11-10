@@ -196,10 +196,24 @@ describe("planSellPrices keeps an existing discount (maxPrice)", () => {
   });
 
   it("caps a profit-floor price under the reference when the floor allows it", () => {
-    // Aosom 94.99 under cost 100 -> profit floor 105.99; cap 108.99 keeps it, cap 102 cannot (profit wins)
+    // cost 100 -> estimate 115.88, profit floor 105.88; cap 108.99 brings it to 108.88, cap 102 cannot (profit wins)
     const at = (maxPrice: number) => planSellPrices([{ sku: "D", aosomPrice: 94.99, productType: "x", sellPrice: null, maxPrice, cost: 100 }], null).changes[0].to;
-    expect(at(108.99)).toBe(105.99);
-    expect(at(102)).toBe(105.99);
+    expect(at(108.99)).toBe(108.88);
+    expect(at(102)).toBe(105.88);
+  });
+
+  it("moves an existing .99 price to its .88, however small the rise (2026-11-09)", () => {
+    // cost 50 -> estimate 57.50 -> 57.88; stored 57.99 is a 0.11 $ drop -> applied; stored 56.99 is a 0.89 $ rise -> applied too
+    const plan = (sellPrice: number) => planSellPrices([{ sku: "E", aosomPrice: 50, productType: "x", sellPrice, cost: 50 }], null).changes;
+    expect(plan(57.99)).toEqual([expect.objectContaining({ to: 57.88, reason: "estimate" })]);
+    expect(plan(56.99)).toEqual([expect.objectContaining({ to: 57.88 })]);
+    expect(plan(57.88)).toEqual([]);
+  });
+
+  it("keeps a capped price under a round number it would barely pass", () => {
+    // cost 275.17 -> estimate 316.88; a cap at 302.50 gives 301.88, shown as 299.88
+    const to = planSellPrices([{ sku: "F", aosomPrice: 295.99, productType: "x", sellPrice: 295.99, cost: 275.17, maxPrice: 302.5 }], null).changes[0].to;
+    expect(to).toBe(299.88);
   });
 
   it("never goes below the Aosom floor, whatever the cap", () => {

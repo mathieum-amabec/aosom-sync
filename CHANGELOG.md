@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.58] - 2026-11-09
+
+### Changed
+
+- **Aosom products are priced at our estimate of Aosom's current price, ending in .88.** The Aosom feed has carried no public price since 2026-10-15, so the rule sold at a price frozen in mid-October while Aosom kept raising our cost: on 2026-11-09 an order lost money and 337 live variants sat under cost after a mid-day cost rise. Eight real aosom.ca prices that day sat at 1.07–1.19 × our cost (wholesale + delivery), median 1.15, the same median as the frozen public price over today's cost across 7,935 feed SKUs. The sell price is now `cost × 1.15` ending in .88 (Mat's signature), dropped to the .88 under a round number it barely passes (301.88 → 299.88). It never goes under the frozen Aosom price or the profit floor (which now ends in .88 too); without a known cost the frozen price is kept. Existing .99 prices move to their .88 on the next run, however small the change. Dry run on prod: 4,490 of 5,739 prices change (median +1 %, none above +10 %, 92 cuts of a few cents).
+
 ## [0.5.107.57] - 2026-11-08
 
 ### Fixed
