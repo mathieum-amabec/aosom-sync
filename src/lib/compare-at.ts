@@ -171,8 +171,12 @@ export function planCompareAt(live: LiveVariant[], sources: Map<string, PriceSou
     const desired = referencePrice(v.price, src.steps, src.firstSeenAt, nowS, opts);
     const hasValid = validCrossed(v.compareAtPrice, v.price, minDiscount);
     if (desired === null) {
-      if (v.compareAtPrice !== null && !hasValid) plan.changes.push({ sku: v.sku, variantId: v.variantId, action: "clear", from: v.compareAtPrice, to: null, price: v.price });
-      else if (hasValid) plan.keptValid++;
+      // RULE (Mat, 2026-11-10): a crossed price already shown and still ABOVE the price is kept even when the discount
+      // has fallen under MIN_DISCOUNT (e.g. after a price rise): "montrer qu'on a des rabais est toujours bon".
+      // MIN_DISCOUNT only gates SETTING a new crossed price. Only a crossed price at or below the price is cleared.
+      const shownAbove = v.compareAtPrice !== null && v.compareAtPrice > v.price + EPS;
+      if (v.compareAtPrice !== null && !shownAbove) plan.changes.push({ sku: v.sku, variantId: v.variantId, action: "clear", from: v.compareAtPrice, to: null, price: v.price });
+      else if (shownAbove) plan.keptValid++;
       else plan.alreadyRight++;
       continue;
     }
