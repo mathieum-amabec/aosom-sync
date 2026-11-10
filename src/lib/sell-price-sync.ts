@@ -13,7 +13,7 @@
  * A per-run cap (`pricing_max_changes_per_run`, default 500) rolls a large change out over several days; floor fixes
  * come first, then decreases, then the biggest increases.
  */
-import { computeSellPrice, profitFloor, roundDownTo99, withProfitFloor, type SellPriceReason } from "@/lib/sell-price-rule";
+import { computeSellPrice, hasSignatureEnding, profitFloor, roundDownTo88, signaturePrice, withProfitFloor, type SellPriceReason } from "@/lib/sell-price-rule";
 import { targetSellPrice } from "@/lib/pricing";
 
 export const PRICING_MODE_KEY = "pricing_mode";
@@ -35,6 +35,8 @@ export function shouldUpdateSellPrice(current: number | null, next: number, floo
   if (current < floor - 0.005) return true;
   if (Math.abs(next - current) < 0.005) return false;
   if (next < current) return true;
+  // One-time move to our .88 signature (2026-11-09): a price that does not end in .88 yet takes its new one, however small the rise.
+  if (hasSignatureEnding(next) && !hasSignatureEnding(current)) return true;
   return next - current >= Math.max(RAISE_MIN_DOLLARS, current * RAISE_MIN_FRACTION);
 }
 
@@ -103,7 +105,8 @@ export function planSellPrices(
     if (!Number.isFinite(res.price)) { plan.invalid++; continue; }
     if (r.maxPrice != null && Number.isFinite(r.maxPrice) && res.price > r.maxPrice) {
       // Keep the discount: never above maxPrice, never below the Aosom floor.
-      res.price = Math.max(floor, roundDownTo99(r.maxPrice));
+      // The cap in our .88, never just over a round number (301.88 → 299.88).
+      res.price = Math.max(floor, signaturePrice(roundDownTo88(r.maxPrice)));
       res.reason = res.price <= floor ? "floor" : res.reason;
       // ...but never at a loss either: profitability beats keeping a crossed price.
       Object.assign(res, withProfitFloor(res, r.cost));
