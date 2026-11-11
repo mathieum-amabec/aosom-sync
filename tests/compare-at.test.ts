@@ -72,18 +72,27 @@ const live = (sku: string, price: number, compareAtPrice: number | null = null):
 const src = (dbPrice: number, steps: PriceStep[], firstSeenDaysAgo = 60): PriceSource => ({ dbPrice, steps, firstSeenAt: ago(firstSeenDaysAgo) });
 
 describe("planCompareAt", () => {
-  it("sets a missing crossed price, keeps a valid one, clears an invalid one", () => {
+  it("sets a missing crossed price, keeps a valid one, clears one at or below the price", () => {
     const sources = new Map<string, PriceSource>([
       ["A", src(59.99, [step(72.99, 59.99, 10)])],
       ["B", src(59.99, [step(72.99, 59.99, 10)])],
       ["C", src(100, [])],
+      ["D", src(100, [])],
     ]);
-    const p = planCompareAt([live("A", 59.99), live("B", 59.99, 80), live("C", 100, 105)], sources, NOW);
+    const p = planCompareAt([live("A", 59.99), live("B", 59.99, 80), live("C", 100, 100), live("D", 100, 95)], sources, NOW);
     expect(p.changes).toEqual([
       expect.objectContaining({ sku: "A", action: "set", to: 72.99 }),
-      expect.objectContaining({ sku: "C", action: "clear", from: 105, to: null }),
+      expect.objectContaining({ sku: "C", action: "clear", from: 100, to: null }),
+      expect.objectContaining({ sku: "D", action: "clear", from: 95, to: null }),
     ]);
     expect(p.keptValid).toBe(1); // B already shows a valid 80
+  });
+
+  it("keeps a crossed price still above the price even when the discount fell under 10 % (Mat, 2026-11-10)", () => {
+    const sources = new Map<string, PriceSource>([["E", src(100, [])]]);
+    const p = planCompareAt([live("E", 100, 105)], sources, NOW);
+    expect(p.changes).toEqual([]);
+    expect(p.keptValid).toBe(1);
   });
 
   it("never overwrites an already-valid crossed price", () => {

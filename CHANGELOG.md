@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.59] - 2026-11-10
+
+### Changed
+
+- **A crossed price already shown is kept while it stays above the price, even under 10 %.** After the .88 price rise, 72 live variants showed a crossed price with a discount under 10 %; the daily compare-at sync would have cleared them. Mat's rule: showing a discount is always good. The 10 % threshold now only gates setting a NEW crossed price; the sync clears a crossed price only when it is at or below the price.
+
 ## [0.5.107.58] - 2026-11-09
 
 ### Changed
