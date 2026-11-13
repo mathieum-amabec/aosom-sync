@@ -119,7 +119,11 @@ export function mergeEngineIntoRelay(relay: RelayState, engine: EngineState | nu
   return { ...relay, done, prof };
 }
 
-export interface RelanceLike { events?: Record<string, string>; sent?: Record<string, string>; profiles?: Record<string, string> }
+export interface RelanceLike {
+  events?: Record<string, string>; sent?: Record<string, string>; profiles?: Record<string, string>;
+  /** checkout event id → ISO time relance-paiement's reminder #2 WITH 15 $ CODE went out (src/lib/relance-code.ts) */
+  sent2?: Record<string, string>;
+}
 
 /** relance-paiement state + the engine's reminder #1 (handled, really sent, cooldowns). */
 export function mergeEngineIntoRelance<T extends RelanceLike>(relance: T, engine: EngineState | null): T {
@@ -199,7 +203,8 @@ export interface RelayView {
 
 export function relayView(relay: RelayState | null, relance: RelanceLike | null): RelayView {
   return {
-    done: { ...(relay?.done ?? {}), [RELANCE_PAIEMENT_RELAY]: relance?.events ?? {} },
+    // a checkout that got the 15 $ code email counts as done for the generic reminder #2 (checkout-2 → engine relance-2)
+    done: { ...(relay?.done ?? {}), [RELANCE_PAIEMENT_RELAY]: relance?.events ?? {}, "checkout-2": merge(relay?.done?.["checkout-2"], relance?.sent2) },
     prof: { ...(relay?.prof ?? {}), [RELANCE_PAIEMENT_RELAY]: relance?.profiles ?? {} },
   };
 }
