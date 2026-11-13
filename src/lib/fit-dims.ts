@@ -107,6 +107,50 @@ export function checkAgainstPage(dims: FitDims | null, pageText: string | null |
   return Object.values(dims.s).some((e) => sizesAgree(e.p, page)) ? dims : null;
 }
 
+const SUP_UNIT = String.raw`(”|"|''|″|inch(?:es)?\b|in\b|cm\b|mm\b)`;
+const SUP_NUM = String.raw`(\d+(?:\.\d+)?)`;
+const SUP_TRIPLE = new RegExp(
+  `${SUP_NUM}\\s*${SUP_UNIT}?\\s*[x×X*]\\s*${SUP_NUM}\\s*${SUP_UNIT}?\\s*[x×X*]\\s*${SUP_NUM}\\s*${SUP_UNIT}?`,
+  "gi",
+);
+/** Words that, right before a triple, mean "this is the assembled item". */
+const SUP_LABEL = /dimension|overall|assembled|product size|item size/i;
+/** Words that, just before a triple, mean "this is a part" (drawer, mirror…). */
+const SUP_PART = /inner|drawer|top|mirror|flowerpot|seat|opening|stool/i;
+/** Words anywhere in the label that mean "this is the parcel". */
+const SUP_PARCEL = /package|packing|box|carton|shipping/i;
+
+/**
+ * Assembled size from a SUPPLIER description (Costway feed bodies: "Overall Dimension: 94.5” x 32.5” x 32.5” (L x W x H)"),
+ * in cm as [width, depth, height] = the supplier's L × W × H. Only a triple labelled as the item's size and not as a
+ * part or the parcel is accepted — anything less certain returns null so the checker stays hidden rather than guess.
+ * Unitless or inch-marked numbers are inches (the feed's convention); cm / mm are converted.
+ * Audit 2026-11-12: 288 of the 361 Costway products without sizes pass; a hand check of a sample found no wrong pick.
+ */
+export function extractSupplierSize(html: string | null | undefined): Cm3 | null {
+  const text = (html || "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ");
+  for (const seg of text.split(/(?<=[.●|;])\s+|●/)) {
+    for (const m of seg.matchAll(SUP_TRIPLE)) {
+      const at = m.index ?? 0;
+      const before = seg.slice(Math.max(0, at - 45), at);
+      const label = [...before.matchAll(new RegExp(SUP_LABEL.source, "gi"))].pop();
+      if (!label) continue;
+      // Only what qualifies THIS label counts: "Package Dimensions:" / "Box size …" are the parcel, but an earlier
+      // "Shipped in 3 boxes:" heading is not.
+      const qualifier = before.slice(Math.max(0, (label.index ?? 0) - 14));
+      if (SUP_PARCEL.test(qualifier) || SUP_PART.test(before.slice(-25))) continue;
+      const unit = (m[6] || m[4] || m[2] || '"').toLowerCase();
+      const k = unit.startsWith("cm") ? 1 : unit.startsWith("mm") ? 0.1 : 2.54;
+      const dims = [m[1], m[3], m[5]].map((x) => round1(parseFloat(x) * k)) as Cm3;
+      if (dims.every((d) => d >= 2 && d <= 500)) return dims;
+    }
+  }
+  return null;
+}
+
 /** Same JSON the theme reads; stable key order so a re-run only rewrites products whose dimensions changed. */
 export function serializeFitDims(d: FitDims): string {
   const s: Record<string, FitDimsEntry> = {};

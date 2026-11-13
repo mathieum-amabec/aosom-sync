@@ -5,12 +5,37 @@
  * New imports already get the metafield at creation (createShopifyProduct). This daily pass is the safety net for the
  * rest: jobs queued before the feed carried unit strings, products created by other paths, and feed corrections. It
  * writes only products whose value changed (sorted JSON compare), so a normal day writes a handful at most; capped per
- * run. Products with no SKU in the feed (Costway…) and products whose page states another size are left alone.
+ * run. Products whose page states another size are left alone.
+ *
+ * Costway products (no SKU in the Aosom feed) get their size from the supplier description stored in
+ * `costway_products.body_html` (extractSupplierSize) — audit 2026-11-12: 361 of them had none, and the FR description
+ * we generate drops the measurements. Only filled when the product has NO value yet: a supplier text is weaker than a
+ * feed column, so it never overwrites or removes anything.
  */
 import { fetchAosomCatalog } from "./csv-fetcher";
 import { shopifyFetch } from "./shopify-client";
-import { buildFitDims, checkAgainstPage, serializeFitDims, FIT_DIMS_KEY, FIT_DIMS_NAMESPACE } from "./fit-dims";
+import { ensureSchema } from "./database";
+import { buildFitDims, checkAgainstPage, extractSupplierSize, serializeFitDims, FIT_DIMS_KEY, FIT_DIMS_NAMESPACE } from "./fit-dims";
+import type { FitDims } from "./fit-dims";
 import type { AosomProduct } from "@/types/aosom";
+
+/** Supplier description per Ameublo SKU, for the SKUs that are Costway internal SKUs. */
+export type SupplierBodies = (skus: string[]) => Promise<Map<string, string>>;
+
+const costwayBodies: SupplierBodies = async (skus) => {
+  const out = new Map<string, string>();
+  if (!skus.length) return out;
+  const db = await ensureSchema();
+  for (let i = 0; i < skus.length; i += 400) {
+    const chunk = skus.slice(i, i + 400);
+    const res = await db.execute({
+      sql: `SELECT internal_sku, body_html FROM costway_products WHERE internal_sku IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of res.rows) out.set(String(r.internal_sku), String(r.body_html ?? ""));
+  }
+  return out;
+};
 
 export const FIT_DIMS_MAX_WRITES_PER_RUN = 500;
 const BATCH = 25;
@@ -31,6 +56,8 @@ export interface FitDimsSyncResult {
   toWrite: number;
   unchanged: number;
   noFeedMatch: number;
+  /** No feed row, size read from the supplier description (Costway), planned for products with no value yet. */
+  fromSupplierText: number;
   feedButNoSize: number;
   pageSizeConflict: number;
   /** Conflicting products that still carry an older (wrong) value, removed on apply. */
@@ -64,9 +91,10 @@ const shopifyGql: Gql = async (query, variables) => {
 /** Compare every product against the feed; with `apply`, write the changed ones (up to `limit`). */
 export async function syncFitDims(
   opts: { apply?: boolean; limit?: number } = {},
-  deps: { feed?: () => Promise<AosomProduct[]>; gql?: Gql } = {},
+  deps: { feed?: () => Promise<AosomProduct[]>; gql?: Gql; supplierBodies?: SupplierBodies } = {},
 ): Promise<FitDimsSyncResult> {
   const gql = deps.gql ?? shopifyGql;
+  const supplierBodies = deps.supplierBodies ?? costwayBodies;
   const feed = await (deps.feed ?? fetchAosomCatalog)();
   const bySku = new Map(feed.map((p) => [p.sku, p]));
 
@@ -87,14 +115,19 @@ export async function syncFitDims(
   const plan: FitDimsPlanItem[] = [];
   const conflicts: string[] = [];
   const stale: { id: string; handle: string }[] = [];
-  let noFeedMatch = 0, feedButNoSize = 0, unchanged = 0;
+  let noFeedMatch = 0, feedButNoSize = 0, unchanged = 0, fromSupplierText = 0;
+  const noFeed: { p: ProductNode; skus: string[] }[] = [];
   for (const p of products) {
     const skus = p.variants.nodes.map((v) => (v.sku || "").trim()).filter(Boolean);
     const rows = skus.flatMap((sku) => {
       const f = bySku.get(sku);
       return f?.dimensionsRaw ? [{ sku, ...f.dimensionsRaw, boxSize: f.boxSize }] : [];
     });
-    if (rows.length === 0) { noFeedMatch++; continue; }
+    if (rows.length === 0) {
+      noFeedMatch++;
+      if (!p.metafield && skus.length) noFeed.push({ p, skus });
+      continue;
+    }
     const built = buildFitDims(rows);
     if (!built) { feedButNoSize++; continue; }
     // The page size can live in the description or only in a variant title ("Gris / 103 x 71 x 69 cm"); without
@@ -112,6 +145,24 @@ export async function syncFitDims(
     plan.push({ id: p.id, handle: p.handle, status: p.status, value, skus: skus.length, matched: Object.keys(dims.s).length });
   }
 
+  // Costway & co: no feed row, no stored value → try the supplier description.
+  if (noFeed.length) {
+    const bodies = await supplierBodies(noFeed.flatMap((x) => x.skus));
+    for (const { p, skus } of noFeed) {
+      const s: FitDims["s"] = {};
+      for (const sku of skus) {
+        const size = extractSupplierSize(bodies.get(sku));
+        if (size) s[sku] = { p: size };
+      }
+      if (!Object.keys(s).length) continue;
+      const pageText = [p.description, ...p.variants.nodes.map((v) => v.title)].join("\n");
+      const dims = checkAgainstPage({ v: 1, s }, pageText);
+      if (!dims) { conflicts.push(p.handle); continue; }
+      fromSupplierText++;
+      plan.push({ id: p.id, handle: p.handle, status: p.status, value: serializeFitDims(dims), skus: skus.length, matched: Object.keys(dims.s).length });
+    }
+  }
+
   const result: FitDimsSyncResult = {
     dryRun: !opts.apply,
     feedSkus: feed.length,
@@ -119,6 +170,7 @@ export async function syncFitDims(
     toWrite: plan.length,
     unchanged,
     noFeedMatch,
+    fromSupplierText,
     feedButNoSize,
     pageSizeConflict: conflicts.length,
     staleToRemove: stale.length,

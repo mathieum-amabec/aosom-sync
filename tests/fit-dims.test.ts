@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { lengthToCm, parseBoxSizes, buildFitDims, serializeFitDims, parseCmTriple, sizesAgree, checkAgainstPage } from "@/lib/fit-dims";
+import { lengthToCm, parseBoxSizes, buildFitDims, serializeFitDims, parseCmTriple, sizesAgree, checkAgainstPage, extractSupplierSize } from "@/lib/fit-dims";
 
 describe("lengthToCm", () => {
   it("converts each unit the feed uses", () => {
@@ -54,6 +54,24 @@ describe("checkAgainstPage", () => {
   it("drops sizes that contradict the page", () => {
     expect(checkAgainstPage(dims, "Dimensions: 61 x 35 x 25 cm")).toBeNull();
     expect(checkAgainstPage(null, "x")).toBeNull();
+  });
+});
+
+describe("extractSupplierSize (Costway descriptions)", () => {
+  it("reads a labelled L x W x H triple in inches and converts to cm", () => {
+    expect(extractSupplierSize("<li>The overall dimension of the sofa: is 94.5” x 32.5” x 32.5” (L x W x H)</li>")).toEqual([240, 82.6, 82.6]);
+    expect(extractSupplierSize("Product Dimensions: 21 x 20.5 x 31 inch (L x W x H)")).toEqual([53.3, 52.1, 78.7]);
+    expect(extractSupplierSize("Overall Dimension: 120 x 60 x 75 cm")).toEqual([120, 60, 75]);
+  });
+  it("skips parcel and part sizes and picks the item's own size", () => {
+    expect(extractSupplierSize("Package Dimensions: 40\" x 20\" x 10\" ● Overall Dimension: 30\" x 15\" x 12\"")).toEqual([76.2, 38.1, 30.5]);
+    expect(extractSupplierSize("Inner size of big drawer: 25.5\" x 20\" x 5\" (L x W x H)")).toBeNull();
+    expect(extractSupplierSize("Size of Flowerpot 7.5” x 7.5” x 10.5”")).toBeNull();
+  });
+  it("returns null without a label, or for an implausible size", () => {
+    expect(extractSupplierSize("Measuring 23\" x 15\" x 14\" this unit fits anywhere")).toBeNull();
+    expect(extractSupplierSize("Overall Dimension: 900\" x 2\" x 3\"")).toBeNull();
+    expect(extractSupplierSize(null)).toBeNull();
   });
 });
 

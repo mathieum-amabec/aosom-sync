@@ -5,6 +5,8 @@ import type { AosomProduct } from "@/types/aosom";
 const feedRow = (sku: string, l: string, w: string, h: string, box = "50x20x10 cm") =>
   ({ sku, dimensionsRaw: { length: l, width: w, height: h }, boxSize: box }) as unknown as AosomProduct;
 
+const none = async () => new Map<string, string>();
+
 function fakeShopify(nodes: Array<{ id: string; handle: string; skus: string[]; description?: string; current?: string; variantTitle?: string }>) {
   const writes: Array<{ ownerId: string; value: string }> = [];
   const deletes: Array<{ ownerId: string }> = [];
@@ -38,11 +40,11 @@ describe("syncFitDims (daily safety net)", () => {
       { id: "gid://p/3", handle: "costway", skus: ["CW-1"] },
       { id: "gid://p/4", handle: "wrong-page", skus: ["C"], description: "Dimensions: 10 x 10 x 10 cm" },
     ]);
-    const dry = await syncFitDims({}, { feed, gql: first.gql });
+    const dry = await syncFitDims({}, { feed, gql: first.gql, supplierBodies: none });
     expect(dry).toMatchObject({ dryRun: true, toWrite: 2, noFeedMatch: 1, pageSizeConflict: 1, written: 0 });
     expect(first.writes).toEqual([]);
 
-    const applied = await syncFitDims({ apply: true }, { feed, gql: first.gql });
+    const applied = await syncFitDims({ apply: true }, { feed, gql: first.gql, supplierBodies: none });
     expect(applied.written).toBe(2);
     expect(first.writes.map((w) => w.ownerId)).toEqual(["gid://p/1", "gid://p/2"]);
 
@@ -51,7 +53,7 @@ describe("syncFitDims (daily safety net)", () => {
       { id: "gid://p/1", handle: "new-desk", skus: ["A"], current: first.writes[0].value },
       { id: "gid://p/2", handle: "gazebo", skus: ["B"], current: first.writes[1].value },
     ]);
-    const r = await syncFitDims({ apply: true }, { feed, gql: again.gql });
+    const r = await syncFitDims({ apply: true }, { feed, gql: again.gql, supplierBodies: none });
     expect(r).toMatchObject({ toWrite: 0, unchanged: 2, written: 0 });
   });
 
@@ -61,9 +63,9 @@ describe("syncFitDims (daily safety net)", () => {
     const s = fakeShopify([
       { id: "gid://p/9", handle: "compost-bin", skus: ["K"], variantTitle: "Noir / 103 x 71 x 69 cm", current: '{"v":1,"s":{"K":{"p":[40.6,28,27.2]}}}' },
     ]);
-    const dry = await syncFitDims({}, { feed, gql: s.gql });
+    const dry = await syncFitDims({}, { feed, gql: s.gql, supplierBodies: none });
     expect(dry).toMatchObject({ toWrite: 0, pageSizeConflict: 1, staleToRemove: 1, removed: 0 });
-    const r = await syncFitDims({ apply: true }, { feed, gql: s.gql });
+    const r = await syncFitDims({ apply: true }, { feed, gql: s.gql, supplierBodies: none });
     expect(r.removed).toBe(1);
     expect(s.deletes.map((d) => d.ownerId)).toEqual(["gid://p/9"]);
     expect(s.writes).toEqual([]);
@@ -72,7 +74,30 @@ describe("syncFitDims (daily safety net)", () => {
   it("caps writes per run and reports the rest as deferred", async () => {
     const feed = async () => Array.from({ length: 30 }, (_, i) => feedRow(`S${i}`, "10 in", "10 in", "10 in"));
     const s = fakeShopify(Array.from({ length: 30 }, (_, i) => ({ id: `gid://p/${i}`, handle: `p${i}`, skus: [`S${i}`] })));
-    const r = await syncFitDims({ apply: true, limit: 10 }, { feed, gql: s.gql });
+    const r = await syncFitDims({ apply: true, limit: 10 }, { feed, gql: s.gql, supplierBodies: none });
     expect(r).toMatchObject({ written: 10, deferred: 20 });
+  });
+
+  it("fills a Costway product (no feed row) from the supplier description, never one that already has a value", async () => {
+    const feed = async () => [];
+    const body = "<p>● Shipped in 3 Boxes: The overall dimension of the sofa: is 94.5” x 32.5” x 32.5” (L x W x H)</p>";
+    const bodies = vi.fn(async (skus: string[]) => new Map(skus.filter((k) => k !== "NONE").map((k) => [k, body])));
+    const s = fakeShopify([
+      { id: "gid://p/c1", handle: "canape", skus: ["MAAA", "MBBB"] },
+      { id: "gid://p/c2", handle: "deja-rempli", skus: ["MCCC"], current: '{"v":1,"s":{"MCCC":{"p":[1,2,3]}}}' },
+      { id: "gid://p/c3", handle: "sans-texte", skus: ["NONE"] },
+    ]);
+    const r = await syncFitDims({ apply: true }, { feed, gql: s.gql, supplierBodies: bodies });
+    expect(r).toMatchObject({ noFeedMatch: 3, fromSupplierText: 1, written: 1, removed: 0 });
+    expect(bodies).toHaveBeenCalledWith(["MAAA", "MBBB", "NONE"]);
+    expect(s.writes).toEqual([{ ownerId: "gid://p/c1", namespace: "custom", key: "lc_dims", type: "json", value: '{"v":1,"s":{"MAAA":{"p":[240,82.6,82.6]},"MBBB":{"p":[240,82.6,82.6]}}}' }]);
+    expect(s.deletes).toEqual([]);
+  });
+
+  it("drops a supplier size the product page contradicts", async () => {
+    const s = fakeShopify([{ id: "gid://p/c4", handle: "table", skus: ["MT"], description: "Dimensions : 10 x 10 x 10 cm" }]);
+    const bodies = async () => new Map([["MT", "Overall Dimensions: 31\" x 16\" x 13\" (L x W x H)"]]);
+    const r = await syncFitDims({ apply: true }, { feed: async () => [], gql: s.gql, supplierBodies: bodies });
+    expect(r).toMatchObject({ fromSupplierText: 0, pageSizeConflict: 1, written: 0 });
   });
 });
