@@ -17,7 +17,7 @@
  * gets two codes nor two emails. Kill switch `relance2_enabled`: OFF unless exactly "1".
  */
 import crypto from "crypto";
-import { INTERNAL_EMAIL, esc, type CheckoutEvent, type RelanceState } from "./relance-paiement";
+import { INTERNAL_EMAIL, checkoutDiscounts, checkoutSubtotal, esc, type CheckoutEvent, type RelanceState } from "./relance-paiement";
 
 export const RELANCE2_ENABLED_KEY = "relance2_enabled";
 export const RELANCE2_TEMPLATES_KEY = "relance_paiement2_templates_v1";
@@ -32,14 +32,36 @@ export const RELANCE2_PROFILE_COOLDOWN_H = 30 * 24;
 
 export const relance2Enabled = (raw: string | null) => raw === "1";
 
-/** While reminder #2 with code is ON, the generic reminder #2 (flow-relay "checkout-2") leaves it these checkouts. */
-export const relance2Owns = (subtotal: number) => subtotal >= RELANCE2_MIN_SUBTOTAL;
+/**
+ * Checkouts reminder #2 with code is for: subtotal ≥ 250 $ and NO discount already on the cart
+ * (Mat 2026-11-13: a cart that already has the automatic 10 % on the 2nd item, or any code, gets the
+ * generic reminder #2 instead — the 15 $ would replace that discount, not add to it).
+ */
+export const relance2Owns = (subtotal: number, discounts = 0) => subtotal >= RELANCE2_MIN_SUBTOTAL && !(discounts > 0);
+
+/**
+ * Should flow-relay's generic reminder #2 ("checkout-2") leave this checkout alone?
+ *   - yes for good once the code email went out (`sent2`), even if the switch was turned off since;
+ *   - yes while the code email may still go out: switch ON (and relance-paiement not killed), the
+ *     checkout is one it owns, and it has not settled it yet (`events2`). Every FINAL skip of the code
+ *     email (cooldown, too old, Shopify error, expiring code…) writes `events2`, so the generic one
+ *     then falls back inside its own 24–48 h window.
+ */
+export function genericCheckout2Yields(
+  eventId: string,
+  props: Record<string, unknown>,
+  relance: { sent2?: Record<string, string>; events2?: Record<string, string> },
+  r2Active: boolean,
+): boolean {
+  if (relance.sent2?.[eventId]) return true;
+  return r2Active && relance2Owns(checkoutSubtotal(props), checkoutDiscounts(props)) && !relance.events2?.[eventId];
+}
 
 // ─── selection (pure) ──────────────────────────────────────────────────
 
 export type Relance2Skip =
   | "done" | "too-recent" | "too-old" | "no-email" | "internal" | "no-url" | "no-items" | "below-threshold"
-  | "no-relance-1" | "ordered" | "checkout-2-sent" | "cooldown" | "busy";
+  | "no-relance-1" | "ordered" | "checkout-2-sent" | "cooldown" | "busy" | "has-discount";
 
 export interface Relance2Ctx {
   now: Date;
@@ -69,7 +91,8 @@ export function selectRelance2(events: CheckoutEvent[], state: RelanceState, c: 
     if (INTERNAL_EMAIL.test(e.email)) { skip("internal", true); continue; }
     if (!e.recoverUrl) { skip("no-url", true); continue; }
     if (!e.items.length) { skip("no-items", true); continue; }
-    if (!relance2Owns(e.subtotal)) { skip("below-threshold", true); continue; }
+    if (e.subtotal < RELANCE2_MIN_SUBTOTAL) { skip("below-threshold", true); continue; }
+    if (!relance2Owns(e.subtotal, e.discounts)) { skip("has-discount", true); continue; }
     // consent basis of the existing reminders: #2 only after #1 really went out (a #1 retry may still land → not final)
     if (!state.sent?.[e.eventId]) { skip("no-relance-1", false); continue; }
     if (c.orderedAfter(e.profileId, e.at)) { skip("ordered", true); continue; }
@@ -203,10 +226,10 @@ const COPY2 = {
   fr: {
     brand: "Ameublo Direct",
     subject: "15 $ de rabais pour terminer ta commande",
-    preview: "Ton code est valide 48 h sur les commandes de 250 $ et plus.",
+    preview: "Ton code de 15 $ pour les commandes de 250 $ et plus.",
     title: "Un petit 15 $ pour t'aider à te décider",
     intro: "Ton panier chez Ameublo Direct est encore là. Si le prix te faisait hésiter, voici un code de 15 $ de rabais, rien que pour toi :",
-    terms: "15 $ de rabais sur une commande de 250 $ et plus (avant taxes). Valide 48 h, jusqu'au",
+    terms: "15 $ de rabais sur une commande de 250 $ et plus (avant taxes), valide jusqu'au",
     tz: "(heure de l'Est)",
     once: "Une seule utilisation, non combinable avec d'autres rabais.",
     howto: "Reprends ta commande avec le bouton ci-dessous, puis entre le code dans la case « Code de réduction » à la caisse.",
@@ -218,10 +241,10 @@ const COPY2 = {
   en: {
     brand: "Furnish Direct",
     subject: "$15 off to finish your order",
-    preview: "Your code is valid for 48 h on orders of $250 or more.",
+    preview: "Your $15 code for orders of $250 or more.",
     title: "A little $15 to help you decide",
     intro: "Your cart at Furnish Direct is still waiting. If the price was holding you back, here's a $15 off code, just for you:",
-    terms: "$15 off an order of $250 or more (before tax). Valid for 48 h, until",
+    terms: "$15 off an order of $250 or more (before tax), valid until",
     tz: "(Eastern time)",
     once: "Single use, can't be combined with other discounts.",
     howto: "Pick up your order with the button below, then enter the code in the “Discount code” field at checkout.",

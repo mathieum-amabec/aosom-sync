@@ -2,8 +2,8 @@ import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
 import { trackCron } from "@/lib/cron-tracking";
 import { acquireLease, getSetting, releaseLease, setSetting } from "@/lib/database";
-import { STATE_KEY as RELANCE_STATE_KEY, checkoutSubtotal } from "@/lib/relance-paiement";
-import { RELANCE2_ENABLED_KEY, relance2Enabled, relance2Owns } from "@/lib/relance-code";
+import { ENABLED_KEY as RELANCE_ENABLED_KEY, STATE_KEY as RELANCE_STATE_KEY } from "@/lib/relance-paiement";
+import { RELANCE2_ENABLED_KEY, genericCheckout2Yields, relance2Enabled } from "@/lib/relance-code";
 import { loadEngineStateForRelays, loadRelayKeysOwnedByEngine, mergeEngineIntoRelance, mergeEngineIntoRelay } from "@/lib/email/flows";
 import {
   RELAY_LEASE_KEY, RELAY_LEASE_TTL_S, assertRenders, campaignStatus, cleanupLists, createList, flowsSendingAgain, kv,
@@ -99,7 +99,7 @@ async function run(dryRun: boolean) {
   for (const o of orders) orderTimes.set(o.profileId, [...(orderTimes.get(o.profileId) ?? []), Date.parse(o.at)]);
   const wheel = await triggerEvents(WHEEL_WON, iso(7 * 24 * 60));
   const sendingAgain = await flowsSendingAgain(now);
-  let relance: { sent?: Record<string, string>; sent2?: Record<string, string> } = {};
+  let relance: { sent?: Record<string, string>; sent2?: Record<string, string>; events2?: Record<string, string> } = {};
   try { relance = JSON.parse((await getSetting(RELANCE_STATE_KEY)) ?? "{}"); } catch { /* none */ }
   relance = mergeEngineIntoRelance(relance, engine);
 
@@ -110,11 +110,12 @@ async function run(dryRun: boolean) {
     relancePaiementSent: (id: string) => !!relance.sent?.[id],
     flowSendingAgain: (flowId: string) => sendingAgain.has(flowId) || sendingAgain.has("*"),
   };
-  // abandoned checkout #2: while the 15 $ code email is ON, checkouts of ≥ 250 $ get THAT one instead (src/lib/relance-code.ts)
-  const r2On = relance2Enabled(await getSetting(RELANCE2_ENABLED_KEY));
+  // abandoned checkout #2: while the 15 $ code email may still go out for a checkout, it gets THAT one
+  // instead; once that email went out, never the generic one too (src/lib/relance-code.ts)
+  const [r2Flag, relanceFlag] = await Promise.all([getSetting(RELANCE2_ENABLED_KEY), getSetting(RELANCE_ENABLED_KEY)]);
+  const r2Active = relance2Enabled(r2Flag) && relanceFlag !== "0";
   const due = STEPS.map((step) => ({ step, events: selectDue(step, byMetric.get(step.metricId) ?? [], ctx)
-    // …and one that already got the code email never gets the generic one too (switch turned off since)
-    .filter((e) => step.key !== "checkout-2" || !(relance.sent2?.[e.id] || (r2On && relance2Owns(checkoutSubtotal(e.props)))))
+    .filter((e) => step.key !== "checkout-2" || !genericCheckout2Yields(e.id, e.props, relance, r2Active))
     .slice(0, MAX_PER_STEP) })).filter((d) => d.events.length);
 
   if (dryRun) {

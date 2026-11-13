@@ -172,7 +172,13 @@ async function run(dryRun: boolean) {
     const codes = await ensureRelance2Codes(r2.send, {
       now, state, save: (s) => setSetting(STATE_KEY, JSON.stringify(s)), create: (input) => createRelance2Discount(input),
     });
-    for (const e of codes.errors) results.push({ kind: "r2", locale: "-", sent: 0, error: `${e.eventId}: ${e.error}` });
+    // no code (Shopify error, stored code expiring) = a final skip: settled in events2, so flow-relay's
+    // generic reminder #2 falls back for that checkout instead of the shopper getting nothing
+    for (const e of codes.errors) {
+      state.events2[e.eventId] = now.toISOString();
+      results.push({ kind: "r2", locale: "-", sent: 0, error: `${e.eventId}: ${e.error}` });
+    }
+    if (codes.errors.length) await setSetting(STATE_KEY, JSON.stringify(state));
     const codeOf = new Map<string, StoredCode>(codes.ready.map((r) => [r.event.eventId, r.code]));
     let templates: Record<string, string> = {};
     try { templates = JSON.parse((await getSetting(RELANCE2_TEMPLATES_KEY)) ?? "{}"); } catch { /* recreate */ }

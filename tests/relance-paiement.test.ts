@@ -5,7 +5,7 @@ const now = new Date("2026-10-20T20:00:00Z");
 const ago = (min: number) => new Date(now.getTime() - min * 60e3).toISOString();
 const ev = (o: Partial<CheckoutEvent> = {}): CheckoutEvent => ({
   eventId: "e1", profileId: "p1", email: "client@gmail.com", at: ago(60), locale: "fr",
-  recoverUrl: "https://ameublodirect.ca/1/checkouts/ac/x/recover?key=k", value: 164.4, subtotal: 142.99,
+  recoverUrl: "https://ameublodirect.ca/1/checkouts/ac/x/recover?key=k", value: 164.4, subtotal: 142.99, discounts: 0,
   items: [{ title: "Armoire console — Chêne", quantity: 1, price: 142.99, image: null, handle: "armoire" }], ...o,
 });
 const never = () => false;

@@ -39,6 +39,8 @@ export interface CheckoutEvent {
   value: number;
   /** Merchandise subtotal before tax and shipping (`$value` includes tax). */
   subtotal: number;
+  /** Discounts already on the checkout ("Total Discounts": the automatic 10 % on the 2nd item, a code…). */
+  discounts: number;
   items: Array<{ title: string; quantity: number; price: number; image: string | null; handle: string | null }>;
 }
 
@@ -95,7 +97,13 @@ export function parseCheckoutEvent(ev: { id: string; attributes: { datetime: str
   }).filter((i) => i.title);
   const locale = String(p["Customer Locale"] ?? "fr").toLowerCase().startsWith("en") ? "en" : "fr";
   const url = typeof extra.checkout_url === "string" && /^https:\/\//.test(extra.checkout_url) ? extra.checkout_url : null;
-  return { eventId: ev.id, profileId, email, at: ev.attributes.datetime, locale, recoverUrl: url, value: Number(p.$value ?? 0) || 0, subtotal: checkoutSubtotal(p), items };
+  return { eventId: ev.id, profileId, email, at: ev.attributes.datetime, locale, recoverUrl: url, value: Number(p.$value ?? 0) || 0, subtotal: checkoutSubtotal(p), discounts: checkoutDiscounts(p), items };
+}
+
+/** "Total Discounts" of a Klaviyo "Checkout Started" event (0 when absent). */
+export function checkoutDiscounts(p: Record<string, unknown>): number {
+  const d = Number(p["Total Discounts"] ?? 0);
+  return Number.isFinite(d) && d > 0 ? Math.round(d * 100) / 100 : 0;
 }
 
 /**

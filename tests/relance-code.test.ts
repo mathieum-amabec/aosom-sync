@@ -1,15 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
-import { checkoutSubtotal, emptyState, pruneState, type CheckoutEvent, type RelanceState } from "@/lib/relance-paiement";
+import { relayView } from "@/lib/email/flows";
+import { checkoutDiscounts, checkoutSubtotal, emptyState, pruneState, type CheckoutEvent, type RelanceState } from "@/lib/relance-paiement";
 import {
   CODE_PREFIX, DISCOUNT_MUTATION, buildRelance2TemplateHtml, createRelance2Discount, ensureRelance2Codes, generateRelance2Code,
-  relance2DiscountInput, relance2Enabled, relance2Owns, relance2ProfileProps, relance2Subject, selectRelance2, type Relance2Ctx,
+  genericCheckout2Yields, relance2DiscountInput, relance2Enabled, relance2Owns, relance2ProfileProps, relance2Subject, selectRelance2, type Relance2Ctx,
 } from "@/lib/relance-code";
 
 const now = new Date("2026-11-13T20:00:00Z");
 const agoH = (h: number) => new Date(now.getTime() - h * 3600e3).toISOString();
 const ev = (o: Partial<CheckoutEvent> = {}): CheckoutEvent => ({
   eventId: "e1", profileId: "p1", email: "client@gmail.com", at: agoH(24), locale: "fr",
-  recoverUrl: "https://ameublodirect.ca/1/checkouts/ac/x/recover?key=k", value: 310.5, subtotal: 270,
+  recoverUrl: "https://ameublodirect.ca/1/checkouts/ac/x/recover?key=k", value: 310.5, subtotal: 270, discounts: 0,
   items: [{ title: "Sofa 3 places", quantity: 1, price: 270, image: null, handle: "sofa" }], ...o,
 });
 /** reminder #1 went out ~30 min after each checkout */
@@ -34,6 +35,12 @@ describe("selectRelance2", () => {
     expect(selectRelance2([ev({ subtotal: 250 })], st(), ctx()).send.map((e) => e.eventId)).toEqual(["e1"]);
     expect(relance2Owns(249.99)).toBe(false);
     expect(relance2Owns(250)).toBe(true);
+  });
+  it("a cart that already has a discount (10 % on the 2nd item, a code) gets the generic reminder instead", () => {
+    expect(selectRelance2([ev({ discounts: 27 })], st(), ctx()).skipped[0]).toMatchObject({ reason: "has-discount", final: true });
+    expect(relance2Owns(300, 0.01)).toBe(false);
+    expect(checkoutDiscounts({ "Total Discounts": "18.38" })).toBe(18.38);
+    expect(checkoutDiscounts({})).toBe(0);
   });
   it("skips someone who ordered since the checkout", () => {
     expect(reasons([ev()], st(), ctx({ orderedAfter: (pid) => pid === "p1" }))).toEqual(["ordered"]);
@@ -61,6 +68,28 @@ describe("selectRelance2", () => {
     expect(reasons([ev({ email: "qa-x@ameublodirect.ca" })])).toEqual(["internal"]);
     expect(reasons([ev({ recoverUrl: null })])).toEqual(["no-url"]);
     expect(reasons([ev({ email: null })])).toEqual(["no-email"]);
+  });
+});
+
+describe("generic reminder #2 fallback (flow-relay checkout-2)", () => {
+  const big = { $extra: { subtotal_price: "300.00" } };
+  it("yields while the code email may still go out", () => {
+    expect(genericCheckout2Yields("e1", big, {}, true)).toBe(true);
+  });
+  it("falls back once the code email settled the checkout without sending (cooldown, Shopify error…)", () => {
+    expect(genericCheckout2Yields("e1", big, { events2: { e1: agoH(1) } }, true)).toBe(false);
+  });
+  it("falls back when the switch (or relance-paiement) is off, for small carts and carts with a discount", () => {
+    expect(genericCheckout2Yields("e1", big, {}, false)).toBe(false);
+    expect(genericCheckout2Yields("e1", { $extra: { subtotal_price: "249.99" } }, {}, true)).toBe(false);
+    expect(genericCheckout2Yields("e1", { ...big, "Total Discounts": 30 }, {}, true)).toBe(false);
+  });
+  it("never after the code email went out, even with the switch off since", () => {
+    expect(genericCheckout2Yields("e1", big, { sent2: { e1: agoH(3) }, events2: { e1: agoH(3) } }, false)).toBe(true);
+  });
+  it("email engine: the code email counts as done for checkout-2 / relance-2", () => {
+    const v = relayView({ startAt: "", done: { "checkout-2": { x: agoH(5) } }, prof: {}, pending: [], failures: [] }, { sent2: { e1: agoH(3) } });
+    expect(Object.keys(v.done["checkout-2"]).sort()).toEqual(["e1", "x"]);
   });
 });
 
@@ -163,7 +192,9 @@ describe("email", () => {
       const h = buildRelance2TemplateHtml(l);
       for (const k of ["relance2_code", "relance2_expires", "relance_url", "relance_items_html"]) expect(h).toContain(k);
       expect(h).toContain(l === "fr" ? "250 $ et plus" : "$250 or more");
-      expect(h).toContain(l === "fr" ? "48 h" : "48 h");
+      expect(h).toContain(l === "fr" ? "valide jusqu&#39;au {{ person|lookup:'relance2_expires' }}" : "valid until {{ person|lookup:'relance2_expires' }}");
+      // a reused code may have less than 48 h left: only the exact expiry is shown
+      expect(`${h} ${relance2Subject(l).preview}`).not.toMatch(/48\s*h/);
       expect(h).toContain(l === "fr" ? "Ameublo Direct" : "Furnish Direct");
       expect(h).toContain(l === "fr" ? "{% unsubscribe 'Se désabonner' %}" : "{% unsubscribe 'Unsubscribe' %}");
       const { subject, preview } = relance2Subject(l);
