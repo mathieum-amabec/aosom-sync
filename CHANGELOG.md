@@ -2,6 +2,17 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.60] - 2026-11-12
+
+### Added
+
+- **Costway products get their size for the fit checker and the new "Dimensions" line.** 361 live Costway products had no `custom.lc_dims`: the daily fit-dims job only read the Aosom feed, and the French description we generate drops the measurements. The job now reads the supplier description kept in `costway_products.body_html` (`extractSupplierSize`): only a triple labelled as the item's size ("Overall Dimension: 94.5” x 32.5” x 32.5” (L x W x H)"), never a parcel, drawer, mirror or pot size; inches unless marked cm/mm. It only fills products with no value and drops a size the product page contradicts. 288 products were written by hand on 2026-11-12 after a dry run (the new function gives the same 288 values, plus one); the next run adds the rest as Costway descriptions allow.
+
+### Changed
+
+- **Meta's fbevents.js loads after the page, not during it.** On a mid-range phone it cost ~450 ms of main-thread work while the hero image loaded (Grokbot audit, Lighthouse mobile 45). The `fbq` stub still queues every call immediately; the SDK now loads on the first interaction or 1.5 s after the load event. PageView is also relayed to the Conversions API with the same `event_id` (`/api/capi/event` accepts PageView, with no product data), so a visitor who leaves before the SDK arrives is still counted, and Meta de-duplicates the pair. The first cart-attribute sync waits for the SDK's load event (8 s at most) so `_fbp` exists.
+- **`/api/trending` and `/api/ugc-videos` are cached 5 minutes by the browser** (`max-age=300`), on top of the CDN cache.
+
 ## [0.5.107.59] - 2026-11-10
 
 ### Changed

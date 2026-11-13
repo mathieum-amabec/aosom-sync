@@ -17,14 +17,22 @@ const EMPTY_SCRIPT = "/* Meta Pixel not configured (NEXT_PUBLIC_META_PIXEL_ID un
  */
 function buildPixelScript(pixelId: string, capiUrl: string): string {
   // pixelId is validated to be digits-only before interpolation (no injection).
+  // 2026-11-12 (mobile perf audit): fbevents.js (~210 KB, ~450 ms of main-thread work on a mid phone) used to load
+  // the moment this ScriptTag ran, competing with the hero image. The fbq stub still queues every call right away;
+  // the SDK itself now loads on the first interaction, or 1.5 s after the page's load event, whichever comes first.
+  // PageView is relayed to the Conversions API too (same eventID, Meta de-duplicates), so a visitor who leaves
+  // before the SDK arrives is still counted server-side.
   return `/* Meta Pixel — injected by aosom-sync ScriptTag */
 !function(f,b,e,v,n,t,s){if(f.fbq)return;n=f.fbq=function(){n.callMethod?
 n.callMethod.apply(n,arguments):n.queue.push(arguments)};if(!f._fbq)f._fbq=n;
-n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];t=b.createElement(e);t.async=!0;
-t.src=v;s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}(window,
+n.push=n;n.loaded=!0;n.version='2.0';n.queue=[];f.__lcFbLazy=1;
+function go(){if(f.__lcFbGo)return;f.__lcFbGo=1;t=b.createElement(e);t.async=!0;t.src=v;
+t.onload=function(){f.__lcFbReady=1;try{b.dispatchEvent(new Event('lc:fb-ready'))}catch(x){}};
+s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}
+['pointerdown','keydown','touchstart','scroll'].forEach(function(k){f.addEventListener(k,go,{once:true,passive:true})});
+if(b.readyState==='complete')setTimeout(go,1500);else f.addEventListener('load',function(){setTimeout(go,1500)})}(window,
 document,'script','https://connect.facebook.net/en_US/fbevents.js');
 fbq('init', '${pixelId}');
-fbq('track', 'PageView');
 
 (function () {
   try {
@@ -69,6 +77,9 @@ fbq('track', 'PageView');
         else fetch(url, { method: 'POST', body: body, keepalive: true, mode: 'cors' }).catch(function () {});
       } catch (e) {}
     }
+
+    // Browser PageView (queued until fbevents.js loads) + the same event_id relayed server-side.
+    track('PageView', {});
 
     // content_ids everywhere = variant SKU, to match the Meta catalog whose
     // retailer_id is the SKU (e.g. "01-0901") — NOT the numeric variant.id.
@@ -309,8 +320,15 @@ fbq('track', 'PageView');
     }
 
     // A returning visitor can go straight to checkout with a cart from an earlier visit. Waits for
-    // fbevents.js to have set the cookies.
-    setTimeout(function () { syncCartAttributes(false); }, 1500);
+    // fbevents.js to have set the cookies (it now loads lazily: wait for its load event, 8 s at most).
+    var cartSyncDone = false;
+    function initialCartSync() { if (cartSyncDone) return; cartSyncDone = true; syncCartAttributes(false); }
+    if (!window.__lcFbLazy) setTimeout(initialCartSync, 1500); // fbq was already on the page: SDK not ours to time
+    else if (window.__lcFbReady) setTimeout(initialCartSync, 300);
+    else {
+      try { document.addEventListener('lc:fb-ready', function () { setTimeout(initialCartSync, 300); }); } catch (e) {}
+      setTimeout(initialCartSync, 8000);
+    }
   } catch (e) { /* never break the storefront */ }
 })();
 `;

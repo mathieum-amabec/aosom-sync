@@ -3,7 +3,7 @@
  *
  * The ScriptTag (src/app/api/pixel/script/route.ts) fires the browser pixel with an `eventID` and sends the SAME id
  * here, so Meta de-duplicates the two. Public (allow-listed in proxy.ts) and locked down: storefront-origin check,
- * per-IP rate limit, strict payload validation, only ViewContent/AddToCart. Does nothing unless the setting
+ * per-IP rate limit, strict payload validation, only PageView/ViewContent/AddToCart. Does nothing unless the setting
  * `capi_enabled` = "1". Always answers quickly with 2xx so it can never slow the storefront.
  */
 import { NextResponse } from "next/server";
@@ -15,7 +15,8 @@ import { buildUserData, capiConfig, FB_COOKIE_RE, sendCapiEvents, type CapiEvent
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ALLOWED_EVENTS = new Set(["ViewContent", "AddToCart"]);
+// PageView added 2026-11-12: fbevents.js now loads lazily (mobile perf), so a visitor who leaves first is still counted.
+const ALLOWED_EVENTS = new Set(["PageView", "ViewContent", "AddToCart"]);
 const ID_RE = /^[A-Za-z0-9_.:-]{8,100}$/;
 const CUR_RE = /^[A-Za-z]{3}$/;
 
@@ -83,7 +84,7 @@ export async function POST(request: Request) {
     event_source_url: url,
     action_source: "website",
     user_data: buildUserData({ ip: rawIp(request), userAgent: request.headers.get("user-agent"), fbp, fbc }),
-    custom_data: {
+    custom_data: name === "PageView" ? {} : {
       content_type: "product",
       ...(ids.length ? { content_ids: ids } : {}),
       ...(value !== undefined ? { value } : {}),
