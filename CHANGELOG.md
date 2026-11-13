@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.61] - 2026-11-13
+
+### Added
+
+- **Abandoned checkout of 250 $ or more: a second reminder with a unique 15 $ code (OFF until `relance2_enabled` = "1").** Mat 2026-11-13: "un 15 $ sur le 250 et plus, si les gens n'achètent pas". The relance-paiement cron now also emails, 20 to 40 h after an unpaid checkout whose subtotal before tax is 250 $ or more, a single-use Shopify code (`discountCodeBasicCreate`): 15 $ off the order, minimum 250 $, 1 use, once per customer, valid 48 h, not combinable with product or order discounts (the automatic 10 % on the 2nd item does not stack), free shipping still applies. Same guards as the existing reminders: only after reminder #1 really went out for that checkout, never after an order, one per person per 30 days. It replaces the generic reminder #2 for those checkouts: while the switch is on, flow-relay's `checkout-2` leaves checkouts of 250 $ or more to it, and a checkout that already got the generic one never gets the code. The code is stored per checkout before the email goes out and reused on any retry, so a checkout never gets two codes or two emails. `?dryRun=1` shows who would get it and the exact mutation payload, and creates nothing. The subtotal comes from Shopify's `subtotal_price` or the line prices minus discounts, never Klaviyo's `$value`, which includes tax.
+
 ## [0.5.107.60] - 2026-11-12
 
 ### Added
