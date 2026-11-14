@@ -1,0 +1,76 @@
+{%- comment -%}
+  Keeps Garantie Tranquillité lines consistent with the cart: a warranty line (line property
+  _lc_warranty_for = covered variant id) may not exceed the quantity of the covered variant in the cart.
+  Removing the product (or lowering its quantity) removes / lowers its warranty. Runs on /cart load and
+  after every Dawn cartUpdate event. Rendered once from layout/theme.liquid.
+{%- endcomment -%}
+<script>
+  (function () {
+    if (window.__lcWarrantyGuard) return;
+    window.__lcWarrantyGuard = true;
+    var running = false;
+
+    function fixes(cart) {
+      var have = {};
+      cart.items.forEach(function (it) {
+        if (!(it.properties && it.properties._lc_warranty_for)) have[it.variant_id] = (have[it.variant_id] || 0) + it.quantity;
+      });
+      var out = [];
+      cart.items.forEach(function (it) {
+        var forId = it.properties && it.properties._lc_warranty_for;
+        if (!forId) return;
+        var left = have[forId] || 0;
+        var keep = Math.min(it.quantity, left);
+        have[forId] = left - keep;
+        if (keep !== it.quantity) out.push({ id: it.key, quantity: keep });
+      });
+      return out;
+    }
+
+    function rerender() {
+      if (location.pathname.replace(/^\/(en|es|pa)(?=\/)/, '') === '/cart') return location.reload();
+      var drawer = document.querySelector('cart-drawer');
+      if (!drawer || !drawer.getSectionsToRender) return;
+      var secs = drawer.getSectionsToRender();
+      return fetch(location.pathname + '?sections=' + secs.map(function (s) { return s.id; }).join(','))
+        .then(function (r) { return r.json(); })
+        .then(function (json) {
+          secs.forEach(function (s) {
+            var el = document.querySelector(s.selector || '#' + s.id);
+            if (el && json[s.id]) el.innerHTML = drawer.getSectionInnerHTML(json[s.id], s.selector);
+          });
+        });
+    }
+
+    function check() {
+      if (running) return;
+      running = true;
+      fetch('/cart.js', { headers: { Accept: 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .then(function (cart) {
+          var list = fixes(cart);
+          if (!list.length) return;
+          return list
+            .reduce(function (p, f) {
+              return p.then(function () {
+                return fetch('/cart/change.js', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                  body: JSON.stringify(f),
+                });
+              });
+            }, Promise.resolve())
+            .then(rerender);
+        })
+        .catch(function () {})
+        .then(function () { running = false; });
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+      if (typeof subscribe === 'function' && typeof PUB_SUB_EVENTS !== 'undefined') {
+        subscribe(PUB_SUB_EVENTS.cartUpdate, function () { setTimeout(check, 50); });
+      }
+      if (/\/cart\/?$/.test(location.pathname)) check();
+    });
+  })();
+</script>

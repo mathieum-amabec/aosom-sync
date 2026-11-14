@@ -2,11 +2,111 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
-## [0.5.107.50] - 2026-10-23
+## [0.5.107.63] - 2026-11-13
 
 ### Fixed
 
-- **Importer no longer writes supplier names.** `custom.brand_fr` is now always "Ameublo Direct" (it fell back to the supplier brand, e.g. "Aosom"), and supplier names are filtered out of product tags (tag filter URLs and `/products/x.json` expose them). Existing products were cleaned the same day (248 tags, 3,135 brand_fr values; backups kept).
+- **The importer no longer writes supplier names.** `custom.brand_fr` is now always "Ameublo Direct" for Aosom imports too. It used to fall back to the supplier brand (e.g. "Aosom"), while Costway imports and the existing products, cleaned up on 2026-10-23, already used the store brand. `opts.extraTags` is filtered for supplier names as well, since tag filter URLs and `/products/x.json` expose them. Originally PR #651 (v0.5.107.50), rebased onto main.
+
+## [0.5.107.62] - 2026-11-13
+
+### Fixed
+
+- **Price alerts can finally be confirmed.** Signing up for a price alert tracks a Klaviyo "Price Alert Confirmation" event carrying the double opt-in link, but no Klaviyo flow ever existed for that event, so the confirmation email never went out. As of 2026-11-13, 0 of 54 alerts were confirmed and no price-drop email could ever be sent. Each signup still created a Klaviyo profile, which helped fill the free plan. flow-relay now has a `price-alert-confirm` step: the metric is `Ymt2yf` and the template is `UG3wCQ` (source in `docs/klaviyo/price-alert-confirm.html`, FR/EN). It sends the confirmation through a one-recipient campaign at the next run (within 15 min), up to 20 h after signup, since the link expires at 24 h. The step has no flow of its own, so only the "Klaviyo flows work again" guard stops it.
+
+## [0.5.107.61] - 2026-11-13
+
+### Added
+
+- **Abandoned checkout of 250 $ or more: a second reminder with a unique 15 $ code (OFF until `relance2_enabled` = "1").** Mat 2026-11-13: "un 15 $ sur le 250 et plus, si les gens n'achètent pas". The relance-paiement cron now also emails, 20 to 40 h after an unpaid checkout whose subtotal before tax is 250 $ or more, a single-use Shopify code (`discountCodeBasicCreate`): 15 $ off the order, minimum 250 $, 1 use, once per customer, valid 48 h, not combinable with product or order discounts (the automatic 10 % on the 2nd item does not stack), free shipping still applies. Same guards as the existing reminders: only after reminder #1 really went out for that checkout, never after an order, one per person per 30 days. It replaces the generic reminder #2 for those checkouts: while the switch is on, flow-relay's `checkout-2` leaves checkouts of 250 $ or more to it, and a checkout that already got the generic one never gets the code. The code is stored per checkout before the email goes out and reused on any retry, so a checkout never gets two codes or two emails. `?dryRun=1` shows who would get it and the exact mutation payload, and creates nothing. The subtotal comes from Shopify's `subtotal_price` or the line prices minus discounts, never Klaviyo's `$value`, which includes tax. A cart that already has a discount (the automatic 10 % on the 2nd item, or any code) gets the generic reminder #2, not the code (Mat's call). The generic reminder only stands aside while the code email may still go out: every final skip of the code email (cooldown, too old, has a discount, Shopify error, expiring code) records the checkout as settled, so the generic one falls back within its own 24–48 h window, and it also falls back when `relance_paiement_enabled` = "0". The email shows only the exact expiry ("valide jusqu'au …, heure de l'Est"), since a reused code may have less than 48 h left. Our email engine (`relayView`) also counts a checkout that got the code email as done for its own reminder #2.
+
+## [0.5.107.60] - 2026-11-12
+
+### Added
+
+- **Costway products get their size for the fit checker and the new "Dimensions" line.** 361 live Costway products had no `custom.lc_dims`: the daily fit-dims job only read the Aosom feed, and the French description we generate drops the measurements. The job now reads the supplier description kept in `costway_products.body_html` (`extractSupplierSize`): only a triple labelled as the item's size ("Overall Dimension: 94.5” x 32.5” x 32.5” (L x W x H)"), never a parcel, drawer, mirror or pot size; inches unless marked cm/mm. It only fills products with no value and drops a size the product page contradicts. 288 products were written by hand on 2026-11-12 after a dry run (the new function gives the same 288 values, plus one); the next run adds the rest as Costway descriptions allow.
+
+### Changed
+
+- **Meta's fbevents.js loads after the page, not during it.** On a mid-range phone it cost ~450 ms of main-thread work while the hero image loaded (Grokbot audit, Lighthouse mobile 45). The `fbq` stub still queues every call immediately; the SDK now loads on the first interaction or 1.5 s after the load event. PageView is also relayed to the Conversions API with the same `event_id` (`/api/capi/event` accepts PageView, with no product data), so a visitor who leaves before the SDK arrives is still counted, and Meta de-duplicates the pair. The first cart-attribute sync waits for the SDK's load event (8 s at most) so `_fbp` exists.
+- **`/api/trending` and `/api/ugc-videos` are cached 5 minutes by the browser** (`max-age=300`), on top of the CDN cache.
+
+## [0.5.107.59] - 2026-11-10
+
+### Changed
+
+- **A crossed price already shown is kept while it stays above the price, even under 10 %.** After the .88 price rise, 72 live variants showed a crossed price with a discount under 10 %; the daily compare-at sync would have cleared them. Mat's rule: showing a discount is always good. The 10 % threshold now only gates setting a NEW crossed price; the sync clears a crossed price only when it is at or below the price.
+
+## [0.5.107.58] - 2026-11-09
+
+### Changed
+
+- **Aosom products are priced at our estimate of Aosom's current price, ending in .88.** The Aosom feed has carried no public price since 2026-10-15, so the rule sold at a price frozen in mid-October while Aosom kept raising our cost: on 2026-11-09 an order lost money and 337 live variants sat under cost after a mid-day cost rise. Eight real aosom.ca prices that day sat at 1.07–1.19 × our cost (wholesale + delivery), median 1.15, the same median as the frozen public price over today's cost across 7,935 feed SKUs. The sell price is now `cost × 1.15` ending in .88 (Mat's signature), dropped to the .88 under a round number it barely passes (301.88 → 299.88). It never goes under the frozen Aosom price or the profit floor (which now ends in .88 too); without a known cost the frozen price is kept. Existing .99 prices move to their .88 on the next run, however small the change. Dry run on prod: 4,490 of 5,739 prices change (median +1 %, none above +10 %, 92 cuts of a few cents).
+
+## [0.5.107.57] - 2026-11-08
+
+### Fixed
+
+- **Server Purchase events now carry Meta's click ids.** The orders/paid webhook sent email, phone and address but `fbp`/`fbc` at 0 %, so Meta could only link a sale to an ad by matching the customer's details. The ScriptTag now copies the `_fbp`/`_fbc` cookies into hidden cart attributes, which reach the order as `note_attributes`: as hidden inputs on a form post to `/cart/add` (the only route for "buy now", which skips the cart), otherwise through `/cart/update.js` on a cart that has items. When a checkout skipped both, the `fbclid` in `order.landing_site` is the fallback, unless it runs into Shopify's 255-character cap: 28 of the last 50 such ids were cut off. Values are shape-checked and the fbclid is never rewritten. Same `event_id`, so deduplication does not change.
+
+## [0.5.107.56] - 2026-11-05
+
+### Fixed
+
+- **Products drafted by sold-out-hide now leave the ad feeds within ~10 minutes, not up to 24 h.** The feeds read Shopify through a Data Cache kept 24 h (`lib/feeds/source.ts`, tag `feeds`) and the job never busted it, so a drafted product stayed in the Meta/Google feeds and ads could point to a 404 page. After a LIVE run that changed at least one product's visibility (drafted, or reactivated/republished), the job now busts the `feeds` tag and every feed route, exactly like `POST /api/revalidate` (new shared helper `src/lib/feeds/revalidate.ts`, used by both). Never on dry/off runs, tag-only runs or runs where every write was skipped/failed; a revalidation failure is logged and does not fail the run. Result gains `statusChanges` and `feedsRevalidated`. The shared feed list now also covers `google-en` and `meta-xml-en`, which `POST /api/revalidate` was missing (a test pins the list to the route directories).
+
+## [0.5.107.55] - 2026-11-04
+
+### Added
+
+- **Sold-out and out-of-season products are taken off sale, and come back by themselves** (`src/lib/sold-out-hide.ts`, cron `/api/cron/sold-out-hide` at 10:20 / 16:20 / 22:20 UTC, script `scripts/sold-out-hide.mts`). Mat: « retire les produits en rupture dont l'Halloween ». A product is set to DRAFT (hidden from every sales channel, URL/photos/reviews/publications kept) when every variant is sold out (Aosom: `stockBufferQty(fresh CSV qty) = 0`; Costway: `in_stock = 0` or < 3 units), tagged `auto-drafted` — the stock-check marker, so its existing restock path also brings it back. Halloween products (`product_type` contains the word « Halloween », never the tags — a Christmas tree carries the tag) are drafted outside Sep 1 → Nov 1 (store-local, `settings.seasonal_windows`) even when in stock, tagged `hors-saison` without `auto-drafted` so stock-check cannot revive them; this job reactivates them (status active + published) at the season start if in stock. `hors-saison` is only ever added by this job to a product it drafted itself (ACTIVE → DRAFT) or to an `auto-drafted` draft: an operator's draft is never marked, so never published at a season start. Keep one live out of season with `exclude-stale`. Never touches: an `exclude-stale` product, one in an open unfulfilled order (fail-closed on an API error), one entirely absent from the feed (left to removed-catalog's rename guard), a `needs-review` import, an operator's own draft. Guards: `assertFeedComplete`, a mass-hide breaker (max(200, 10 % of active)), 150 writes/run at 2/s, each write re-reads and re-plans the product. Mode `settings.sold_out_hide_mode` off/dry/live (default live); `?mode=dry`.
+- First run on 2026-11-04: 55 sold-out products drafted (51 Aosom, 4 Costway), 2 in-stock Halloween products drafted (they come back on 2027-09-01 if in stock). The first run had also tagged 34 Halloween products that were ALREADY draft (origin unknown) `hors-saison`; that was reverted the same day (their tags restored exactly, they stay draft and will not be revived). Rollback records: `aosom-sync-backups/soldout-2026-11-05*.json`, `soldout-2026-11-05-restore-34.json`.
+
+### Changed
+
+- publish-reconcile never republishes a `hors-saison` draft; the ad feeds (and the feed-integrity audit) skip out-of-season products as a second barrier, reading the same `settings.seasonal_windows` as the job.
+
+## [0.5.107.54] - 2026-11-01
+
+### Changed
+
+- **La semaine Ameublo follows the Black Friday / Christmas calendar** (Toronto dates, 2026 only — next year's dates must be set on purpose in `semaine/formats.ts` `SEASON`). Nov 6–26 (early Black Friday): the morning post is `baisses` Monday to Friday, Saturday/Sunday keep `astuce`/`coeur` for variety. Nov 27–30 (Black Friday weekend + Cyber Monday): `baisses` every morning. `baisses` still only shows a real Shopify compare-at ≥ 10 %, and looks 80 products deep during the sale (instead of 30) so the cooldown does not starve it. Nov 1–Dec 15: Christmas categories (both `Holiday & Seasonal > Christmas…` forms) join the afternoon `vedette` (tried first every other day in November, every day in December) and the Sunday `coeur`. Captions get a code-owned seasonal line + hashtags — FR « Vendredi fou en avance » #vendredifou, #vendredifou on Black Friday, #cyberlundi on Cyber Monday, #noel Dec 1–15; EN #blackfriday / #cybermonday / #christmas. The model's text is unchanged (still no %, $ or #).
+- **Semaine cooldown is per Shopify product, not per SKU.** Colour variants (831-823 WT/BK, 831-651, 839-846, 839-308) came back within 3–7 days of each other. The 21-day cooldown now also holds every posted SKU's `shopify_product_id` (resolved through `products`, so it covers past posts too), and one post never carries two colours of the same product.
+- **06:15 publish check covers the last 24 h, every content type.** It flags `failed` rows, rows stuck in `publishing` > 30 min, rows still `pending` > 15 min past their slot, and `published` rows whose error shows a platform failed (e.g. the Ameublo Instagram half) — ignoring the known "INSTAGRAM_FURNISH_ACCOUNT_ID not configured" noise. `publish_check_last` keeps its shape plus `windowHours`, `failedCount`, `stuckCount`, `overdueCount`, `partialCount`, `byType`, `priceGuardBlocked`. The morning report's « Alertes » now counts the last check's problems and the Reels the price guard removed.
+
+### Fixed
+
+- **Halloween / Noël social categories matched 0 products.** Aosom moved the seasonal branch from `Home Furnishings > Holiday & Seasonal > …` to top-level `Holiday & Seasonal > …`; both forms are matched (Noël: 185 live products on 2026-11-01, 104 discounted).
+- **Christmas posts were tagged #chambre #deco.** A bare `Holiday → bedroom_decor` hook rule caught the new top-level path before the seasonal rule. Holiday & Seasonal now maps to `seasonal_decor`, and a Christmas product gets Christmas hashtags only (no #halloween), a Halloween one Halloween hashtags only.
+- **Instagram "Only photo or video can be accepted as media type"** (5 of 14 Ameublo semaine posts, #1630 #1642 #1658 #1676 #1682; Facebook went out). cdn.shopify.com serves WebP under the same `.jpg` URL to any client that accepts WebP (`Vary: Accept`), and Instagram only ingests JPEG. Instagram photo and carousel containers now get `format=pjpg`, which pins JPEG and returns the original bytes unchanged. Other hosts are untouched.
+
+### Added
+
+- **Reel price guard** (`/api/cron/reel-price-guard`, 12:00 and 20:00 UTC, `?dryRun=1`). For every `pending` sequential_ad Reel due in the next 36 h whose `metadata.badges` lists `{sku, pct}`, re-reads the variant on Shopify (read-only) and checks it is active, available and that round((1 − price/compareAt) × 100) still equals the rabais burned into the video. A mismatch moves the row to `draft` with `price-guard: <details>` (not published, slot freed); a failed Shopify read never blocks. Result in settings `reel_price_guard_last`, surfaced by the publish check and the morning report.
+
+## [0.5.107.53] - 2026-10-31
+
+### Fixed
+
+- **Cart-abandon email relay sent nothing for a week.** A checkout reminder (relance-paiement) blocked the cart email for 7 days, while relance-paiement itself only waits 72 h. On 2026-10-31 the only two shoppers who added to cart without ordering had each had a checkout reminder 2–5.5 days earlier, so every real cart was skipped. That block is now 72 h (`RELANCE_COOLDOWN_H`). The relay's own 7-day repeat cooldown is unchanged.
+
+## [0.5.107.52] - 2026-10-30
+
+### Changed
+
+- **Meta feeds: lifestyle photos only.** Mat: « Assure-toi que toutes nos pubs Meta soient des photos lifestyle. TOUJOURS. » The Meta feeds (`/api/feeds/meta`, `meta-xml`, `meta-xml-en`) now swap a studio `image_link` (the variant's own packshot or the hero) for the product's verified lifestyle photo, keep only lifestyle photos as `additional_image_link`, and label each item `g:custom_label_4` = `lifestyle` / `studio` so the ad product sets can exclude products with no lifestyle photo at all. Google, Bing, Pinterest and Reddit feeds are unchanged. Audit of the live Meta feed (2026-10-30): 3,306 of 5,609 items showed a studio photo; 2,631 of them have a lifestyle photo in their gallery, 675 have none.
+- The Meta feeds now answer 500 (Meta keeps its current catalog) when fewer than 90 % of product photos are classified, instead of labelling most of the catalog `studio`.
+
+### Added
+
+- **`image_styles` cache + `/api/cron/image-styles` (every 4 h).** Classifies every product photo as lifestyle or studio from pixels only (zero tokens, no Shopify writes): studio = outer 10 % frame mostly near-white OR at least two near-white corners. The corner test fixes the border-only heuristic, which called ~40 % of sampled packshots "lifestyle" when the product touched the frame edge (visual check: 38/40 lifestyle correct, 16/16 reclassified photos really studio). Only uncached photos are downloaded.
+
+## [0.5.107.51] - 2026-10-30
+
+### Added
+
+- **Google feeds: `product_highlight` + `product_detail` for AI Mode / Gemini.** The Google FR and EN feeds (and Bing) now carry up to 6 highlights per product, taken verbatim from the description's « Caractéristiques » bullets (supplier names and shipping promos scrubbed, « Assemblage requis » stubs dropped, 150-char cap, omitted below Google's minimum of 2), plus the assembled width / depth / height in cm as `product_detail` rows, read from the fit checker's `custom.lc_dims` metafield (omitted when missing — never guessed). Live dry run 2026-10-30: 5,609 offers, 5,609 with highlights, 4,734 with dimensions, 0 supplier names. Meta, Pinterest and Reddit feeds are unchanged (`rich` option, off by default).
+- **Bing / Microsoft Shopping feed** now also emits `condition`, `google_product_category`, `item_group_id`, `color`, `size`, `material` and `mpn`, ready for Microsoft Merchant Center. Price stays the single current price (no sale split).
 
 ## [0.5.107.49] - 2026-10-23
 

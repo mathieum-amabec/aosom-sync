@@ -8,7 +8,7 @@ const CACHE = "public, max-age=0, s-maxage=600, stale-while-revalidate=600"; // 
 
 export async function GET() {
   try {
-    const items = await getFeedItems();
+    const items = await getFeedItems({ rich: true });
     const xml = buildGoogleFeed(items, {
       title: "Ameublo Direct — Google Merchant feed",
       link: STOREFRONT_BASE_URL,

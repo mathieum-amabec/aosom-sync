@@ -44,6 +44,7 @@ const H = 60, D = 24 * 60;
 export const PLACED_ORDER = "SbdeEU";
 export const CHECKOUT_STARTED = "Rycc4h";
 export const WHEEL_WON = "V5gzPH";
+export const PRICE_ALERT_CONFIRMATION = "Ymt2yf";
 
 /**
  * Browse abandonment (QYEyd8) is deliberately NOT relayed: a product view by someone who never
@@ -66,6 +67,12 @@ export const STEPS: RelayStep[] = [
     subject: "⏰ Dernières heures pour {{ event.prize_fr }} / Last hours for {{ event.prize_en }}", preview: "Ton code expire bientôt. / Your code expires soon.", noOrderSinceTrigger: true },
   { key: "price-drop", flowId: "W34UkT", metricId: "SVCFpn", offsetMin: 0, graceMin: D, templateId: "RPc6Hi",
     subject: "Bonne nouvelle — le prix a baissé ! 💸 / Price drop alert!", preview: "" },
+  // Double opt-in of the price alert (POST /api/price-alert tracks "Price Alert Confirmation"). There was
+  // never a Klaviyo flow for it, so no one could ever confirm (0/54 alerts confirmed as of 2026-11-13).
+  // No flow → flowId "" (never "sending again"). Template UG3wCQ = docs/klaviyo/price-alert-confirm.html.
+  // Grace 20 h: the link expires 24 h after signup.
+  { key: "price-alert-confirm", flowId: "", metricId: PRICE_ALERT_CONFIRMATION, offsetMin: 0, graceMin: 20 * H, templateId: "UG3wCQ",
+    subject: "Confirme ton alerte de prix 🔔 / Confirm your price alert", preview: "Un clic pour l'activer. / One click to turn it on." },
   { key: "morning-report", flowId: "X49Zbn", metricId: "V7i73U", offsetMin: 0, graceMin: 6 * H, templateId: "TnEXP2",
     subject: "{{ event.subject }}", preview: "" },
 ];

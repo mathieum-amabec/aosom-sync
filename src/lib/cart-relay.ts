@@ -21,8 +21,15 @@ export const ADDED_TO_CART_ID = "SmdQyJ";
 export const CART_DELAY_H = 3;
 /** Older carts are not reminded (stale emails are worse than none). */
 export const CART_MAX_AGE_H = 48;
-/** One email per profile per this window, across this relay AND relance-paiement. */
+/** One cart email per profile per this window (this relay's own repeat sends). */
 export const PROFILE_COOLDOWN_H = 7 * 24;
+/**
+ * A checkout reminder (relance-paiement) blocks a cart email for this long — the same 72 h
+ * relance-paiement applies to itself. It was 7 days, which silenced every real cart abandoner:
+ * on 2026-10-31 the only two shoppers who added to cart without ordering had both received a
+ * checkout reminder 2–5.5 days earlier, so the relay sent nothing for a week.
+ */
+export const RELANCE_COOLDOWN_H = 72;
 export const MAX_PER_RUN = 25;
 export const MAX_PER_DAY = 60;
 const INTERNAL_EMAIL = /^qa-|^ops-|@ameublodirect\.ca$/i;
@@ -158,9 +165,9 @@ export function selectCarts(
     const from = new Date(Date.parse(c.firstAt) - 5 * 60e3).toISOString();
     if (ctx.orderedAfter(c.profileId, from)) { skip("ordered", true); continue; }
     if (ctx.checkoutAfter(c.profileId, from)) { skip("checkout-after", true); continue; }
-    const cooled = (iso?: string) => !!iso && now.getTime() - Date.parse(iso) < PROFILE_COOLDOWN_H * 3600e3;
-    if (cooled(ctx.relanceProfiles[c.profileId])) { skip("relance-paiement", true); continue; }
-    if (cooled(ctx.state.profiles[c.profileId])) { skip("cooldown", true); continue; }
+    const cooled = (iso: string | undefined, h: number) => !!iso && now.getTime() - Date.parse(iso) < h * 3600e3;
+    if (cooled(ctx.relanceProfiles[c.profileId], RELANCE_COOLDOWN_H)) { skip("relance-paiement", true); continue; }
+    if (cooled(ctx.state.profiles[c.profileId], PROFILE_COOLDOWN_H)) { skip("cooldown", true); continue; }
     if (!ctx.canEmail(c.profileId)) { skip("no-consent", true); continue; }
     if (send.length >= limit) { skip("too-recent", false); continue; } // over the cap: retried next run
     send.push(c);
@@ -214,7 +221,20 @@ const COPY = {
   },
 } as const;
 
-export function cartSubject(locale: "fr" | "en"): { subject: string; preview: string } {
+/** Black Friday 2026 (Toronto date): early launch Nov 6–26, then the BF days Nov 27–30. Like the rest, it promises no discount. */
+const BF_EARLY_COPY = {
+  fr: { subject: "Ton panier t'attend — le Vendredi fou a commencé 🔥", preview: "Le Vendredi fou a commencé plus tôt chez Ameublo Direct." },
+  en: { subject: "Your cart is waiting — Black Friday has started 🔥", preview: "Black Friday started early at Ameublo Direct." },
+} as const;
+const BF_COPY = {
+  fr: { subject: "Ton panier t'attend — c'est le Vendredi fou 🔥", preview: "C'est la semaine du Vendredi fou chez Ameublo Direct." },
+  en: { subject: "Your cart is waiting — it's Black Friday 🔥", preview: "It's Black Friday week at Ameublo Direct." },
+} as const;
+
+export function cartSubject(locale: "fr" | "en", now: Date = new Date()): { subject: string; preview: string } {
+  const day = now.toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
+  if (day >= "2026-11-06" && day <= "2026-11-26") return { ...BF_EARLY_COPY[locale] };
+  if (day >= "2026-11-27" && day <= "2026-11-30") return { ...BF_COPY[locale] };
   return { subject: COPY[locale].subject, preview: COPY[locale].preview };
 }
 

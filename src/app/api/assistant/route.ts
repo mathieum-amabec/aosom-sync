@@ -1,4 +1,5 @@
-import { runAssistant, runComplementary, type AssistantTurn, type Locale } from "@/lib/assistant";
+import { runAssistant, runComplementary, type AssistantTurn } from "@/lib/assistant";
+import { parseLang, localeOf, type Lang, type Locale } from "@/lib/assistant-lang";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import {
   countAssistantRequests,
@@ -162,7 +163,9 @@ export async function POST(request: Request): Promise<Response> {
     return json({ success: false, error: "invalid_json" }, 400);
   }
 
-  const locale: Locale = body.locale === "en" ? "en" : "fr";
+  // "es"/"pa" (furnishdirect.ca/es, /pa) answer in their language on the English store; limit/abuse notices stay English there.
+  const lang: Lang = parseLang(body.locale);
+  const locale: Locale = localeOf(lang);
 
   try {
     if (body.mode === "complementary") {
@@ -176,10 +179,10 @@ export async function POST(request: Request): Promise<Response> {
       }
       // No LLM since 2026-10-02 (runComplementary is plain catalogue logic); the 24h cache still
       // saves the Shopify live-check round-trip per page view.
-      const cacheKey = complementaryCacheKey(name, productType, locale);
+      const cacheKey = complementaryCacheKey(name, productType, lang);
       const cached = await getCachedComplementary(cacheKey).catch(() => null);
       if (cached) return json({ success: true, data: cached });
-      const result = await runComplementary({ name, productType, locale });
+      const result = await runComplementary({ name, productType, lang });
       await putCachedComplementary(cacheKey, result).catch((e) =>
         console.warn("[assistant] complementary cache write failed:", e instanceof Error ? e.message : e),
       );
@@ -270,7 +273,7 @@ export async function POST(request: Request): Promise<Response> {
     // First question of a conversation (quick-question chips, identical openers): serve the
     // answer computed in the last hour instead of re-running the tool loop. 0 tokens, instant.
     // Still counts as a message for the hourly quota and the visitor's daily usage.
-    const answerKey = history.length === 0 ? answerCacheKey(message, locale) : null;
+    const answerKey = history.length === 0 ? answerCacheKey(message, lang) : null;
     if (answerKey) {
       const cached = await getCachedAnswer(answerKey).catch(() => null);
       if (cached) {
@@ -282,7 +285,7 @@ export async function POST(request: Request): Promise<Response> {
       }
     }
 
-    const full = await runAssistant({ message, history, locale });
+    const full = await runAssistant({ message, history, lang });
     const { meta, ...result } = full;
     if (answerKey) {
       await putCachedAnswer(answerKey, full).catch((e) =>

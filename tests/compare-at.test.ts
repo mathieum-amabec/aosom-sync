@@ -4,6 +4,7 @@ import {
   planCompareAt,
   runCompareAtSync,
   parseCompareAtMode,
+  parseMinDays,
   MAX_WRITES_PER_RUN,
   COMPARE_AT_PLAN_KEY,
   type CompareAtDeps,
@@ -31,6 +32,13 @@ describe("referencePrice", () => {
     // 60 for a long time, a 5-day spike to 80, back to 60: the spike is not a reference
     const steps = [step(60, 80, 8), step(80, 60, 3)];
     expect(referencePrice(60, steps, ago(50), NOW)).toBeNull();
+  });
+
+  it("accepts a price held a few days when the minimum is lowered (compare_at_min_days, 2026-10-28)", () => {
+    // raised 60 -> 72.99 two days ago, back to 60 now
+    const steps = [step(60, 72.99, 2), step(72.99, 60, 0)];
+    expect(referencePrice(60, steps, ago(50), NOW)).toBeNull();
+    expect(referencePrice(60, steps, ago(50), NOW, { minDays: 1 })).toBe(72.99);
   });
 
   it("ignores a price older than the 90-day window", () => {
@@ -64,18 +72,27 @@ const live = (sku: string, price: number, compareAtPrice: number | null = null):
 const src = (dbPrice: number, steps: PriceStep[], firstSeenDaysAgo = 60): PriceSource => ({ dbPrice, steps, firstSeenAt: ago(firstSeenDaysAgo) });
 
 describe("planCompareAt", () => {
-  it("sets a missing crossed price, keeps a valid one, clears an invalid one", () => {
+  it("sets a missing crossed price, keeps a valid one, clears one at or below the price", () => {
     const sources = new Map<string, PriceSource>([
       ["A", src(59.99, [step(72.99, 59.99, 10)])],
       ["B", src(59.99, [step(72.99, 59.99, 10)])],
       ["C", src(100, [])],
+      ["D", src(100, [])],
     ]);
-    const p = planCompareAt([live("A", 59.99), live("B", 59.99, 80), live("C", 100, 105)], sources, NOW);
+    const p = planCompareAt([live("A", 59.99), live("B", 59.99, 80), live("C", 100, 100), live("D", 100, 95)], sources, NOW);
     expect(p.changes).toEqual([
       expect.objectContaining({ sku: "A", action: "set", to: 72.99 }),
-      expect.objectContaining({ sku: "C", action: "clear", from: 105, to: null }),
+      expect.objectContaining({ sku: "C", action: "clear", from: 100, to: null }),
+      expect.objectContaining({ sku: "D", action: "clear", from: 95, to: null }),
     ]);
     expect(p.keptValid).toBe(1); // B already shows a valid 80
+  });
+
+  it("keeps a crossed price still above the price even when the discount fell under 10 % (Mat, 2026-11-10)", () => {
+    const sources = new Map<string, PriceSource>([["E", src(100, [])]]);
+    const p = planCompareAt([live("E", 100, 105)], sources, NOW);
+    expect(p.changes).toEqual([]);
+    expect(p.keptValid).toBe(1);
   });
 
   it("never overwrites an already-valid crossed price", () => {
@@ -177,5 +194,17 @@ describe("parseCompareAtMode", () => {
     expect(parseCompareAtMode("yes")).toBe("off");
     expect(parseCompareAtMode("dry")).toBe("dry");
     expect(parseCompareAtMode("live")).toBe("live");
+  });
+});
+
+describe("parseMinDays", () => {
+  it("defaults to 14 days and accepts 1..90", () => {
+    expect(parseMinDays(null)).toBe(14);
+    expect(parseMinDays("")).toBe(14);
+    expect(parseMinDays("abc")).toBe(14);
+    expect(parseMinDays("0")).toBe(14);
+    expect(parseMinDays("120")).toBe(14);
+    expect(parseMinDays("1")).toBe(1);
+    expect(parseMinDays("3")).toBe(3);
   });
 });

@@ -9,7 +9,8 @@ import { runPublishCheck, type PublishCheckResult } from "@/lib/publish-check";
 import { isPublisherPaused } from "@/lib/automation-controls";
 
 /**
- * GET /api/cron/publish-check — 06:15 America/Montreal check that the morning slot(s) really went out.
+ * GET /api/cron/publish-check — 06:15 America/Montreal check that every queue row due in the last 24 h really
+ * went out (failed / stuck / overdue / partly published, every content type) — see lib/publish-check.ts.
  *
  * READ-ONLY: never publishes or edits a row. A problem is recorded as an `error` run in `cron_runs`
  * (visible on the dashboard "Résumé du jour" and via the MCP `recent_cron_runs` tool), the result is
@@ -54,7 +55,7 @@ export async function GET(request: Request) {
           const recipient = env.morningReportEmail;
           if (recipient) {
             await trackEvent(KLAVIYO_ALERT_METRIC, recipient, {
-              subject: `⚠️ Publication de 6 h: ${result.problems.length} problème(s)`,
+              subject: `⚠️ Publications des dernières 24 h: ${result.problems.length} problème(s)`,
               body: result.problems.join("\n"),
             }).catch(() => undefined);
           }

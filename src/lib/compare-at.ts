@@ -27,6 +27,16 @@ export type CompareAtMode = "off" | "dry" | "live";
 
 export const REFERENCE_MIN_DAYS = 14;
 export const REFERENCE_WINDOW_DAYS = 90;
+/**
+ * Override of REFERENCE_MIN_DAYS (days, 1..90). Mat, 2026-10-28, on his lawyer's advice: the prices raised on
+ * 2026-10-15..28 may be shown crossed out once they come back down, even when held only a few days.
+ */
+export const COMPARE_AT_MIN_DAYS_KEY = "compare_at_min_days";
+
+export function parseMinDays(raw: string | null): number {
+  const n = Number(raw);
+  return raw !== null && raw.trim() !== "" && Number.isFinite(n) && n >= 1 && n <= REFERENCE_WINDOW_DAYS ? n : REFERENCE_MIN_DAYS;
+}
 /** Safety valve: Shopify writes per run (about 2 req/s). A first run adds ~100; a normal day a handful. */
 export const MAX_WRITES_PER_RUN = 300;
 /** A variant listing smaller than this is treated as truncated; the run changes nothing. */
@@ -161,8 +171,12 @@ export function planCompareAt(live: LiveVariant[], sources: Map<string, PriceSou
     const desired = referencePrice(v.price, src.steps, src.firstSeenAt, nowS, opts);
     const hasValid = validCrossed(v.compareAtPrice, v.price, minDiscount);
     if (desired === null) {
-      if (v.compareAtPrice !== null && !hasValid) plan.changes.push({ sku: v.sku, variantId: v.variantId, action: "clear", from: v.compareAtPrice, to: null, price: v.price });
-      else if (hasValid) plan.keptValid++;
+      // RULE (Mat, 2026-11-10): a crossed price already shown and still ABOVE the price is kept even when the discount
+      // has fallen under MIN_DISCOUNT (e.g. after a price rise): "montrer qu'on a des rabais est toujours bon".
+      // MIN_DISCOUNT only gates SETTING a new crossed price. Only a crossed price at or below the price is cleared.
+      const shownAbove = v.compareAtPrice !== null && v.compareAtPrice > v.price + EPS;
+      if (v.compareAtPrice !== null && !shownAbove) plan.changes.push({ sku: v.sku, variantId: v.variantId, action: "clear", from: v.compareAtPrice, to: null, price: v.price });
+      else if (shownAbove) plan.keptValid++;
       else plan.alreadyRight++;
       continue;
     }
@@ -193,17 +207,25 @@ export interface CompareAtResult {
 
 const emptyPlan = (): CompareAtPlan => ({ changes: [], keptValid: 0, noHistory: 0, skippedDrift: 0, alreadyRight: 0 });
 
-export async function runCompareAtSync(opts: { deps: CompareAtDeps; mode?: CompareAtMode; persistPlan?: boolean }): Promise<CompareAtResult> {
+export async function runCompareAtSync(opts: {
+  deps: CompareAtDeps;
+  mode?: CompareAtMode;
+  persistPlan?: boolean;
+  /** Truncation guard; a caller passing a known, complete subset (the Costway job) lowers it. */
+  minVariantsSeen?: number;
+}): Promise<CompareAtResult> {
   const d = opts.deps;
   const mode = opts.mode ?? parseCompareAtMode(await d.getSetting(COMPARE_AT_MODE_KEY));
   const base: CompareAtResult = { mode, variantsSeen: 0, plan: emptyPlan(), applied: 0, failed: 0, deferred: 0 };
   if (mode === "off") return { ...base, skipped: "off" };
 
   const live = await d.loadLiveVariants();
-  if (live.length < MIN_VARIANTS_SEEN) return { ...base, variantsSeen: live.length, skipped: `listing-incomplete:${live.length}` };
+  const minSeen = opts.minVariantsSeen ?? MIN_VARIANTS_SEEN;
+  if (live.length < minSeen) return { ...base, variantsSeen: live.length, skipped: `listing-incomplete:${live.length}` };
   const sources = await d.loadSources();
   const now = d.now();
-  const plan = planCompareAt(live, sources, Math.floor(now.getTime() / 1000));
+  const minDays = parseMinDays(await d.getSetting(COMPARE_AT_MIN_DAYS_KEY));
+  const plan = planCompareAt(live, sources, Math.floor(now.getTime() / 1000), { minDays });
   const result: CompareAtResult = { ...base, variantsSeen: live.length, plan };
 
   if (mode === "dry") {

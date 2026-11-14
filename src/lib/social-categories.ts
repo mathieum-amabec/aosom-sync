@@ -26,6 +26,10 @@
  *     Home Furnishings > Holiday & Seasonal > Christmas Trees > …            52
  *     Home Furnishings > Holiday & Seasonal > Christmas Decorations > …       3
  *
+ * UPDATE 2026-11-01: Aosom moved the seasonal branch to the TOP level
+ * ("Holiday & Seasonal > Christmas Trees > …"). The old `Home Furnishings > Holiday…` LIKE
+ * matched 0 live products while 192 sat under the new path, so both forms are matched now.
+ *
  * So every category here is one indexed-ish LIKE on a column we already hold. No API call,
  * no cache to invalidate, and it keeps working when a product's Shopify tags are edited.
  *
@@ -79,17 +83,19 @@ export const SOCIAL_CATEGORIES: SocialCategory[] = [
   {
     key: "halloween",
     label: "🎃 Halloween",
-    predicate: "product_type LIKE 'Home Furnishings > Holiday & Seasonal > Halloween%'",
+    predicate: "(product_type LIKE 'Holiday & Seasonal > Halloween%' OR product_type LIKE 'Home Furnishings > Holiday & Seasonal > Halloween%')",
     args: [],
-    measuredPool: 34, measuredLifestylePool: 34,
+    // 2026-11-01: 4 imported + in stock (the season is over). Lifestyle count not re-measured.
+    measuredPool: 4, measuredLifestylePool: 4,
     cooldownDays: SEASONAL_COOLDOWN_DAYS,
   },
   {
     key: "noel",
     label: "🎄 Noël",
-    predicate: "product_type LIKE 'Home Furnishings > Holiday & Seasonal > Christmas%'",
+    predicate: "(product_type LIKE 'Holiday & Seasonal > Christmas%' OR product_type LIKE 'Home Furnishings > Holiday & Seasonal > Christmas%')",
     args: [],
-    measuredPool: 54, measuredLifestylePool: 7,
+    // 2026-11-01: 185 imported + in stock (104 with a discount). Lifestyle count not re-measured (7 on 2026-09-03).
+    measuredPool: 185, measuredLifestylePool: 7,
     cooldownDays: SEASONAL_COOLDOWN_DAYS,
   },
   {

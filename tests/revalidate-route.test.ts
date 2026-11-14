@@ -61,7 +61,7 @@ describe("POST /api/revalidate", () => {
     mockDeps("test-secret");
     const res = await post(req("Bearer test-secret"));
     expect(res.status).toBe(200);
-    const feeds = ["google", "pinterest", "pinterest-en", "meta", "meta-xml", "bing", "reddit"];
+    const feeds = ["google", "google-en", "pinterest", "pinterest-en", "meta", "meta-xml", "meta-xml-en", "bing", "reddit"];
     expect(await res.json()).toEqual({ revalidated: true, feeds });
     expect(revalidateTag).toHaveBeenCalledWith("feeds", "max");
     expect(revalidatePath).toHaveBeenCalledTimes(feeds.length);

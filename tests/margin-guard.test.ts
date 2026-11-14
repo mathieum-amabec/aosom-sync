@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeSellPrice, profitFloor, netProfit, roundUpTo99, MAX_DISCOUNT } from "@/lib/sell-price-rule";
+import { computeSellPrice, profitFloor, netProfit, roundUpTo99, FLOOR_DISCOUNT } from "@/lib/sell-price-rule";
 import { planSellPrices } from "@/lib/sell-price-sync";
 import { evaluateDiscounts, findLosses, maxPerItem, toDiscountInfo, type DiscountInfo } from "@/lib/margin-guard";
 
@@ -9,11 +9,11 @@ const disc = (o: Partial<DiscountInfo>): DiscountInfo => ({
 });
 
 describe("profitFloor", () => {
-  it("stays profitable after the biggest discount and the card fees", () => {
+  it("stays profitable at list price after the card fees (no discount assumed since 2026-10-28)", () => {
     for (const cost of [5, 19.9, 74.17, 167.95, 750.34, 2400]) {
       const p = profitFloor(cost);
-      expect(netProfit(p, cost, MAX_DISCOUNT)).toBeGreaterThan(0);
-      expect(Math.round((p % 1) * 100)).toBe(99);
+      expect(netProfit(p, cost, FLOOR_DISCOUNT)).toBeGreaterThan(0);
+      expect(Math.round((p % 1) * 100)).toBe(88);
     }
   });
   it("is NaN without a cost", () => {
@@ -29,21 +29,21 @@ describe("profitFloor", () => {
 });
 
 describe("computeSellPrice never sells at a loss (2026-10-18 cases)", () => {
-  it("beats the +15 % cap over a frozen Aosom price", () => {
+  // Since 2026-11-09 the price is our estimate of Aosom's (cost × 1.15), which always clears the profit floor.
+  it("beats a frozen Aosom price under our cost", () => {
     // commode: Aosom 144.99, cost 167.95 → was sold 144.99 (below cost)
     const r = computeSellPrice({ aosomPrice: 144.99, cost: 167.95, productType: "Home Furnishings" });
-    expect(r.reason).toBe("profit");
-    expect(r.price).toBe(profitFloor(167.95));
+    expect(r.reason).toBe("estimate");
+    expect(r.price).toBeGreaterThanOrEqual(profitFloor(167.95));
     expect(netProfit(r.price, 167.95)).toBeGreaterThan(0);
   });
-  it("beats the outdoor +7 % cap", () => {
+  it("beats a small frozen price", () => {
     const r = computeSellPrice({ aosomPrice: 58.99, cost: 74.17, productType: "Patio & Garden > Greenhouses" });
-    expect(r.reason).toBe("profit");
     expect(netProfit(r.price, 74.17)).toBeGreaterThan(0);
   });
-  it("beats a cheaper competitor", () => {
+  it("ignores a cheaper competitor", () => {
     const r = computeSellPrice({ aosomPrice: 700, cost: 750.34, competitorPrice: 770 });
-    expect(r.reason).toBe("profit");
+    expect(r.price).toBeGreaterThan(770);
     expect(netProfit(r.price, 750.34)).toBeGreaterThan(0);
   });
   it("leaves a profitable price alone", () => {
@@ -62,9 +62,10 @@ describe("planSellPrices applies the profit floor", () => {
     expect(plan.changes[0].to).toBe(profitFloor(167.95));
     expect(plan.changes[0].reason).toBe("profit");
   });
-  it("keeps a profitable stored price when there is no competitor data", () => {
+  it("brings a raised stored price back to the frozen Aosom price when our estimate is under it", () => {
+    // estimate 70 × 1.15 = 80.50 → 79.88, under the frozen 100 → 100.88 (its .88)
     const plan = planSellPrices([{ sku: "B", aosomPrice: 100, productType: "Home Furnishings", sellPrice: 124.99, cost: 70 }], null);
-    expect(plan.changes).toHaveLength(0);
+    expect(plan.changes).toEqual([expect.objectContaining({ sku: "B", from: 124.99, to: 100.88, reason: "floor" })]);
   });
 });
 

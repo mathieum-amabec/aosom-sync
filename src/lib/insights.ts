@@ -3,6 +3,9 @@ import { SHOPIFY } from "./config";
 /** Public storefront base (FR). Storefront product URLs are /products/{handle}. */
 export const STOREFRONT_BASE_URL = "https://ameublodirect.ca";
 
+/** Public storefront base (EN). Same store/theme, served as the root of its own domain since 2026-10-25. */
+export const EN_STOREFRONT_BASE_URL = "https://furnishdirect.ca";
+
 export interface StoreLink {
   /** true when the product already exists in Shopify (has a shopify_product_id or handle). */
   inStore: boolean;

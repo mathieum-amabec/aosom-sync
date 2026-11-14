@@ -140,8 +140,8 @@ export async function generateBilingual(
   // Hashtags scoped to the product's category — was a single global settings value
   // (patio/garden-themed) slapped on every post regardless of what's in the photo.
   const scope = mapProductTypeToScope(productType);
-  const frVars = { ...vars, hashtags: hashtagsForScope(scope, "FR") };
-  const enVars = { ...vars, hashtags: hashtagsForScope(scope, "EN") };
+  const frVars = { ...vars, hashtags: hashtagsForScope(scope, "FR", productType) };
+  const enVars = { ...vars, hashtags: hashtagsForScope(scope, "EN", productType) };
 
   const basePromptFr = interpolatePrompt(frTpl, frVars);
   const basePromptEn = interpolatePrompt(enTpl, enVars);

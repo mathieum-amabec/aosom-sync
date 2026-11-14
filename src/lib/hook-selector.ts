@@ -57,15 +57,19 @@ const SCOPE_RULES: Array<{ prefix: string; scope: ProductScope }> = [
   { prefix: "Bedding & Bath", scope: "bedroom_decor" },
   { prefix: "Home Décor", scope: "bedroom_decor" },
   { prefix: "Home Decor", scope: "bedroom_decor" },
-  { prefix: "Holiday", scope: "bedroom_decor" },
 
   // Seasonal decorations (Halloween, Christmas trees, holiday décor) — was falling
   // through to the "Home Furnishings" catch-all below (mobilier_indoor), which fed
   // furniture-shopping hooks ("this bedroom collection...") onto e.g. a Halloween
   // inflatable cat. Also covers non-holiday home décor (artificial trees,
   // fireplaces) that isn't bedroom-specific either. Must stay ABOVE the generic
-  // "Home Furnishings" rule, since the real Aosom/Shopify taxonomy always prefixes
-  // these with "Home Furnishings > ", not the bare "Holiday"/"Home Décor" above.
+  // "Home Furnishings" rule.
+  // Since autumn 2026 Aosom files the seasonal branch at the TOP level
+  // ("Holiday & Seasonal > Christmas Trees > …", 192 live products on 2026-11-01) instead
+  // of under "Home Furnishings > ". A bare `Holiday → bedroom_decor` rule used to sit above
+  // this block and caught every one of them, so Christmas posts went out tagged
+  // #chambre #deco. Both forms now map to seasonal_decor.
+  { prefix: "Holiday", scope: "seasonal_decor" },
   { prefix: "Home Furnishings > Holiday & Seasonal", scope: "seasonal_decor" },
   { prefix: "Home Furnishings > Home Décor", scope: "seasonal_decor" },
   { prefix: "Home Furnishings > Home Decor", scope: "seasonal_decor" },
@@ -116,7 +120,20 @@ export const SCOPE_HASHTAGS: Record<ProductScope, { fr: string; en: string }> = 
   universal: { fr: "#quebec #canada #maison", en: "#quebec #canada #home" },
 };
 
-export function hashtagsForScope(scope: ProductScope, language: "FR" | "EN"): string {
+/**
+ * seasonal_decor covers BOTH holidays, so a Christmas tree used to get #halloween too.
+ * When the product type names the holiday, tag only that one.
+ */
+const HOLIDAY_HASHTAGS: Array<{ re: RegExp; fr: string; en: string }> = [
+  { re: /christmas/i, fr: "#noel #decorationdenoel #tempsdesfetes #canada", en: "#christmas #christmasdecor #holidayseason #canada" },
+  { re: /halloween/i, fr: "#halloween #decohalloween #decosaisonniere #canada", en: "#halloween #halloweendecor #seasonaldecor #canada" },
+];
+
+export function hashtagsForScope(scope: ProductScope, language: "FR" | "EN", productType?: string | null): string {
+  if (scope === "seasonal_decor" && productType) {
+    const h = HOLIDAY_HASHTAGS.find((x) => x.re.test(productType));
+    if (h) return language === "FR" ? h.fr : h.en;
+  }
   const tags = SCOPE_HASHTAGS[scope];
   return language === "FR" ? tags.fr : tags.en;
 }

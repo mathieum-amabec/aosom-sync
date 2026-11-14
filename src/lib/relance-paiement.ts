@@ -21,7 +21,7 @@ export const RELANCE_DELAY_MIN = 30;
 /** Only checkouts younger than this are reminded (older ones are a separate, manual decision). */
 export const RELANCE_MAX_AGE_H = 36;
 export const PROFILE_COOLDOWN_H = 72;
-const INTERNAL_EMAIL = /^qa-|@ameublodirect\.ca$/i;
+export const INTERNAL_EMAIL = /^qa-|@ameublodirect\.ca$/i;
 
 export const STATE_KEY = "relance_paiement_state";
 export const ENABLED_KEY = "relance_paiement_enabled";
@@ -37,6 +37,10 @@ export interface CheckoutEvent {
   locale: "fr" | "en";
   recoverUrl: string | null;
   value: number;
+  /** Merchandise subtotal before tax and shipping (`$value` includes tax). */
+  subtotal: number;
+  /** Discounts already on the checkout ("Total Discounts": the automatic 10 % on the 2nd item, a code…). */
+  discounts: number;
   items: Array<{ title: string; quantity: number; price: number; image: string | null; handle: string | null }>;
 }
 
@@ -47,17 +51,30 @@ export interface RelanceState {
   sent: Record<string, string>;
   /** profile id → ISO time of the last reminder sent */
   profiles: Record<string, string>;
-  /** campaigns whose final status is checked on the next run ("No Recipients" → retried) */
-  pending: Array<{ campaignId: string; eventIds: string[]; profileIds: string[]; at: string }>;
+  /** campaigns whose final status is checked on the next run ("No Recipients" → retried). kind "r2" = reminder #2 with code */
+  pending: Array<{ campaignId: string; eventIds: string[]; profileIds: string[]; at: string; kind?: "r2" }>;
+  /** Reminder #2 with a 15 $ code (relance-code.ts): checkout event id → ISO time it was handled (sent, or skipped for good) */
+  events2: Record<string, string>;
+  /** checkout event id → ISO time reminder #2 with code really went out */
+  sent2: Record<string, string>;
+  /** profile id → ISO time of the last reminder #2 with code */
+  profiles2: Record<string, string>;
+  /** checkout event id → the Shopify code created for it (reused on a retry: never two codes for one checkout) */
+  codes: Record<string, { code: string; discountId: string; endsAt: string; at: string }>;
 }
 
-export const emptyState = (): RelanceState => ({ events: {}, sent: {}, profiles: {}, pending: [] });
+export const emptyState = (): RelanceState => ({ events: {}, sent: {}, profiles: {}, pending: [], events2: {}, sent2: {}, profiles2: {}, codes: {} });
 
-/** Drop bookkeeping older than 8 days so the settings row stays small. */
+/** Drop bookkeeping older than 8 days so the settings row stays small (the reminder-#2 profile cooldown is 30 days). */
 export function pruneState(s: RelanceState, now: Date): RelanceState {
   const min = now.getTime() - 8 * 24 * 3600e3;
-  const keep = (o: Record<string, string> | undefined) => Object.fromEntries(Object.entries(o ?? {}).filter(([, t]) => Date.parse(t) >= min));
-  return { events: keep(s.events), sent: keep(s.sent), profiles: keep(s.profiles), pending: (s.pending ?? []).filter((p) => Date.parse(p.at) >= now.getTime() - 2 * 24 * 3600e3) };
+  const keep = (o: Record<string, string> | undefined, minT = min) => Object.fromEntries(Object.entries(o ?? {}).filter(([, t]) => Date.parse(t) >= minT));
+  return {
+    events: keep(s.events), sent: keep(s.sent), profiles: keep(s.profiles),
+    pending: (s.pending ?? []).filter((p) => Date.parse(p.at) >= now.getTime() - 2 * 24 * 3600e3),
+    events2: keep(s.events2), sent2: keep(s.sent2), profiles2: keep(s.profiles2, now.getTime() - 31 * 24 * 3600e3),
+    codes: Object.fromEntries(Object.entries(s.codes ?? {}).filter(([, c]) => Date.parse(c.at) >= min)),
+  };
 }
 
 /** Map a raw Klaviyo "Checkout Started" event (Shopify integration) to what we need. */
@@ -80,7 +97,29 @@ export function parseCheckoutEvent(ev: { id: string; attributes: { datetime: str
   }).filter((i) => i.title);
   const locale = String(p["Customer Locale"] ?? "fr").toLowerCase().startsWith("en") ? "en" : "fr";
   const url = typeof extra.checkout_url === "string" && /^https:\/\//.test(extra.checkout_url) ? extra.checkout_url : null;
-  return { eventId: ev.id, profileId, email, at: ev.attributes.datetime, locale, recoverUrl: url, value: Number(p.$value ?? 0) || 0, items };
+  return { eventId: ev.id, profileId, email, at: ev.attributes.datetime, locale, recoverUrl: url, value: Number(p.$value ?? 0) || 0, subtotal: checkoutSubtotal(p), discounts: checkoutDiscounts(p), items };
+}
+
+/** "Total Discounts" of a Klaviyo "Checkout Started" event (0 when absent). */
+export function checkoutDiscounts(p: Record<string, unknown>): number {
+  const d = Number(p["Total Discounts"] ?? 0);
+  return Number.isFinite(d) && d > 0 ? Math.round(d * 100) / 100 : 0;
+}
+
+/**
+ * Subtotal before tax and shipping of a Klaviyo "Checkout Started" event. `$value` is the TOTAL
+ * (tax included: 134.27 for 127.88 of items, prod 2026-11-13), so it is never used here. Shopify's
+ * `$extra.subtotal_price` when present (after line discounts), else the line prices minus "Total
+ * Discounts" — on the low side, so a shopper never gets a code their cart does not qualify for.
+ */
+export function checkoutSubtotal(p: Record<string, unknown>): number {
+  const extra = (p.$extra ?? {}) as Record<string, unknown>;
+  const direct = Number(extra.subtotal_price);
+  if (extra.subtotal_price != null && Number.isFinite(direct)) return Math.round(direct * 100) / 100;
+  const lines = Array.isArray(extra.line_items) ? (extra.line_items as Array<Record<string, unknown>>) : [];
+  const sum = lines.reduce((a, l) => a + (Number(l.line_price ?? 0) || 0), 0);
+  const disc = Number(p["Total Discounts"] ?? 0) || 0;
+  return Math.max(0, Math.round((sum - disc) * 100) / 100);
 }
 
 export type SkipReason = "too-recent" | "too-old" | "done" | "ordered" | "cooldown" | "no-url" | "no-email" | "internal" | "no-items";

@@ -1,11 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  computeSellPrice,
-  roundDownTo99,
-  tierMarkup,
-  MAX_MARKUP,
-  UNDERCUT_DOLLARS,
-} from "@/lib/sell-price-rule";
+import { computeSellPrice, estimatedAosomPrice, floorPrice, hasSignatureEnding, netProfit, profitFloor, roundDownTo88, roundDownTo99, roundUpTo88, signaturePrice } from "@/lib/sell-price-rule";
 
 describe("roundDownTo99", () => {
   it("rounds down to the nearest .99, never up", () => {
@@ -21,91 +15,99 @@ describe("roundDownTo99", () => {
   });
 });
 
-describe("tierMarkup (no competitor price)", () => {
-  it("carries more on small and mid items and less on big tickets (7/7/6/5/3 %)", () => {
-    expect(tierMarkup(49.99)).toBe(0.07);
-    expect(tierMarkup(99.99)).toBe(0.07);
-    expect(tierMarkup(100)).toBe(0.07);
-    expect(tierMarkup(199.99)).toBe(0.07);
-    expect(tierMarkup(200)).toBe(0.06);
-    expect(tierMarkup(399.99)).toBe(0.06);
-    expect(tierMarkup(400)).toBe(0.05);
-    expect(tierMarkup(799.99)).toBe(0.05);
-    expect(tierMarkup(800)).toBe(0.03);
-    expect(tierMarkup(2000)).toBe(0.03);
+describe(".88 rounding", () => {
+  it("rounds up and down to .88", () => {
+    expect(roundUpTo88(86.5)).toBe(86.88);
+    expect(roundUpTo88(86.88)).toBe(86.88);
+    expect(roundUpTo88(86.9)).toBe(87.88);
+    expect(roundDownTo88(86.9)).toBe(86.88);
+    expect(roundDownTo88(86.5)).toBe(85.88);
   });
-  it("applies no markup to patio / outdoor / garden, whatever the price", () => {
-    expect(tierMarkup(120, "Patio & Garden > Sun Loungers")).toBe(0);
-    expect(tierMarkup(60, "Outdoor & Patio")).toBe(0);
-    expect(tierMarkup(60, "Home Furnishings")).toBe(0.07);
+  it("recognises the signature ending", () => {
+    expect(hasSignatureEnding(255.88)).toBe(true);
+    expect(hasSignatureEnding(255.99)).toBe(false);
+    expect(hasSignatureEnding(null)).toBe(false);
   });
 });
 
-describe("computeSellPrice", () => {
-  it("never goes below the Aosom price", () => {
-    for (const aosom of [19.99, 89.99, 239.99, 744.99, 1699.99]) {
-      for (const comp of [undefined, null, aosom * 0.6, aosom, aosom * 1.2]) {
-        const r = computeSellPrice({ aosomPrice: aosom, competitorPrice: comp });
-        expect(r.price).toBeGreaterThanOrEqual(aosom);
-      }
-    }
+describe("signaturePrice — .88, never just over a round number", () => {
+  it("keeps the .88 of the target's dollar", () => {
+    expect(signaturePrice(255.53)).toBe(255.88);
+    expect(signaturePrice(104.0)).toBe(104.88);
+    expect(signaturePrice(5.2)).toBe(5.88);
   });
-
-  it("undercuts the competitor by a dollar when they are above us", () => {
-    // Aosom 239.99, competitor 258.99: want 257.99 (inside the +15% cap of 275.98)
-    const r = computeSellPrice({ aosomPrice: 239.99, competitorPrice: 258.99 });
-    expect(r.price).toBe(257.99);
-    expect(r.reason).toBe("competitor");
-    expect(UNDERCUT_DOLLARS).toBe(1);
+  it("drops under a round number it barely passes", () => {
+    expect(signaturePrice(301.2)).toBe(299.88);
+    expect(signaturePrice(60.5)).toBe(59.88);
+    expect(signaturePrice(1001)).toBe(999.88);
   });
-
-  it("stays strictly below the competitor whenever we sit above the floor", () => {
-    for (const [aosom, comp] of [[239.99, 258.99], [77.99, 87.99], [436.99, 474.99], [329.99, 423.99]] as const) {
-      const r = computeSellPrice({ aosomPrice: aosom, competitorPrice: comp });
-      if (r.price > aosom) expect(r.price).toBeLessThan(comp);
-    }
+  it("is NaN for an invalid target", () => {
+    expect(signaturePrice(0)).toBeNaN();
+    expect(signaturePrice(NaN)).toBeNaN();
   });
+});
 
-  it("caps the markup at +15% even if the competitor is far above", () => {
-    // Aosom 329.99, competitor 423.99 (+28%): cap = 379.4885 -> rounded down 378.99
-    const r = computeSellPrice({ aosomPrice: 329.99, competitorPrice: 423.99 });
-    expect(r.price).toBe(378.99);
-    expect(r.reason).toBe("cap");
-    expect(r.price).toBeLessThanOrEqual(329.99 * (1 + MAX_MARKUP));
+describe("floorPrice — the frozen Aosom price in .88, unless that crosses a round number", () => {
+  it("rounds up to .88 within the same ten / hundred", () => {
+    expect(floorPrice(63.99)).toBe(64.88);
+    expect(floorPrice(292.99)).toBe(293.88);
   });
-
-  it("sits at the Aosom floor when the competitor is at or below it (we cannot go lower)", () => {
-    expect(computeSellPrice({ aosomPrice: 144.99, competitorPrice: 133.99 })).toMatchObject({ price: 144.99, reason: "floor" });
-    expect(computeSellPrice({ aosomPrice: 100.99, competitorPrice: 100.99 })).toMatchObject({ price: 100.99, reason: "floor" });
+  it("keeps the price as it is when its .88 would cross a round number", () => {
+    expect(floorPrice(299.99)).toBe(299.99);
+    expect(floorPrice(99.99)).toBe(99.99);
+    expect(floorPrice(59.95)).toBe(59.95);
   });
+});
 
-  it("ignores an implausible competitor price (different pack / bad scrape) and falls back to the tiers", () => {
-    const tooHigh = computeSellPrice({ aosomPrice: 100.99, competitorPrice: 400 });
-    expect(tooHigh.competitorIgnored).toBe(true);
-    expect(tooHigh.reason).toBe("tier");
-    expect(tooHigh.price).toBe(107.99); // 100.99 * 1.07 = 108.06 -> rounded down to .99
-    const tooLow = computeSellPrice({ aosomPrice: 100.99, competitorPrice: 20 });
-    expect(tooLow.competitorIgnored).toBe(true);
-    expect(tooLow.price).toBeGreaterThanOrEqual(100.99);
+describe("estimatedAosomPrice — cost × 1.15 (8 real aosom.ca prices, 2026-11-09)", () => {
+  it("lands within a few percent of Aosom's real price", () => {
+    // [cost, real aosom.ca price]
+    const cases: Array<[number, number]> = [[222.2, 259.99], [53.87, 63.99], [101.61, 108.99], [103.37, 122.99], [112.03, 124.99], [275.17, 304.99], [399.38, 474.99], [691.23, 782.99]];
+    for (const [cost, real] of cases) expect(Math.abs(estimatedAosomPrice(cost) / real - 1)).toBeLessThan(0.08);
+    expect(estimatedAosomPrice(222.2)).toBe(255.88);
+    expect(estimatedAosomPrice(691.23)).toBe(794.88);
   });
-
-  it("uses the tiers when no competitor price exists", () => {
-    // 60.99 * 1.07 = 65.26 -> 64.99 (rounded down to .99)
-    const r = computeSellPrice({ aosomPrice: 60.99 });
-    expect(r.reason).toBe("tier");
-    expect(r.price).toBe(64.99);
-    // 1500.99 * 1.03 = 1546.02 -> 1545.99
-    expect(computeSellPrice({ aosomPrice: 1500.99 })).toMatchObject({ price: 1545.99, reason: "tier" });
+  it("is NaN without a cost", () => {
+    expect(estimatedAosomPrice(null)).toBeNaN();
   });
+});
 
-  it("returns NaN for a missing or invalid Aosom price so callers skip (never push $0)", () => {
-    expect(computeSellPrice({ aosomPrice: 0 }).price).toBeNaN();
-    expect(computeSellPrice({ aosomPrice: -5 }).price).toBeNaN();
+describe("computeSellPrice — our estimate of Aosom's price (Mat, 2026-11-09)", () => {
+  it("sells at the estimate when it is above the frozen Aosom price", () => {
+    // 921-683V83BK: cost 222.20, frozen Aosom 204.99, real aosom.ca 259.99 that day
+    expect(computeSellPrice({ aosomPrice: 204.99, cost: 222.2 })).toEqual({ price: 255.88, reason: "estimate", competitorIgnored: false });
+  });
+  it("never goes under the frozen Aosom price (shown as its .88)", () => {
+    // 83A-705V02GN: cost 238.17 → estimate 273.88, frozen Aosom 292.99
+    expect(computeSellPrice({ aosomPrice: 292.99, cost: 238.17 })).toEqual({ price: 293.88, reason: "floor", competitorIgnored: false });
+  });
+  it("ignores the competitor price and the product type", () => {
+    const r = computeSellPrice({ aosomPrice: 139.99, cost: 115.64, competitorPrice: 199.99, productType: "Patio & Garden" });
+    expect(r.price).toBe(140.88);
+  });
+  it("keeps the frozen Aosom price as it is when the cost is unknown", () => {
+    expect(computeSellPrice({ aosomPrice: 89.99, cost: null }).price).toBe(89.99);
+  });
+  it("prices a frozen price under our cost at the estimate, profitably", () => {
+    const r = computeSellPrice({ aosomPrice: 299.99, cost: 300 });
+    expect(r).toMatchObject({ price: 345.88, reason: "estimate" });
+    expect(netProfit(r.price, 300)).toBeGreaterThan(0);
+  });
+  it("returns NaN for an invalid Aosom price", () => {
+    expect(computeSellPrice({ aosomPrice: 0, cost: 10 }).price).toBeNaN();
     expect(computeSellPrice({ aosomPrice: NaN }).price).toBeNaN();
   });
+});
 
-  it("keeps a floor that does not end in .99 untouched", () => {
-    const r = computeSellPrice({ aosomPrice: 4.14, competitorPrice: undefined });
-    expect(r.price).toBeGreaterThanOrEqual(4.14);
+describe("profitFloor (list price, after card fees)", () => {
+  it("clears the cost by about 2 % at list price and ends in .88", () => {
+    for (const cost of [5, 19.9, 74.17, 167.95, 750.34, 2400]) {
+      const p = profitFloor(cost);
+      expect(netProfit(p, cost)).toBeGreaterThanOrEqual(Math.round(cost * 0.02 * 100) / 100 - 0.01);
+      expect(Math.round((p % 1) * 100)).toBe(88);
+    }
+  });
+  it("is about cost × 1.05 + 0.31 $ (no discount assumed any more)", () => {
+    expect(profitFloor(100)).toBe(105.88);
   });
 });

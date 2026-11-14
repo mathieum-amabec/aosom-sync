@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mapProductTypeToScope, buildHookedPrompt, buildHookedPromptEn, selectHook } from "@/lib/hook-selector";
+import { mapProductTypeToScope, hashtagsForScope, buildHookedPrompt, buildHookedPromptEn, selectHook } from "@/lib/hook-selector";
 import type { HookSelection } from "@/lib/hook-selector";
 import * as database from "@/lib/database";
 import { HOOKS_SEED } from "@/lib/seed/hooks-seed";
@@ -108,6 +108,23 @@ describe("mapProductTypeToScope", () => {
     expect(
       mapProductTypeToScope("Home Furnishings > Holiday & Seasonal > Christmas Trees > Pencil Christmas Trees"),
     ).toBe("seasonal_decor");
+  });
+
+  // 2026-11-01: Aosom moved the branch to the top level; a bare "Holiday" rule sent it to bedroom_decor.
+  it("maps top-level Holiday & Seasonal > Christmas … → seasonal_decor (not bedroom_decor)", () => {
+    expect(mapProductTypeToScope("Holiday & Seasonal > Christmas Trees > Pencil Christmas Tree")).toBe("seasonal_decor");
+    expect(mapProductTypeToScope("Holiday & Seasonal > Halloween Decorations")).toBe("seasonal_decor");
+    expect(mapProductTypeToScope("Holiday & Seasonal")).toBe("seasonal_decor");
+  });
+
+  it("tags a Christmas product with Christmas hashtags only", () => {
+    const fr = hashtagsForScope("seasonal_decor", "FR", "Holiday & Seasonal > Christmas Trees > Pre Lit Christmas Trees");
+    expect(fr).toContain("#noel");
+    expect(fr).not.toContain("#halloween");
+    expect(fr).not.toContain("#chambre");
+    expect(hashtagsForScope("seasonal_decor", "EN", "Holiday & Seasonal > Christmas Decorations")).toContain("#christmas");
+    expect(hashtagsForScope("seasonal_decor", "FR", "Holiday & Seasonal > Halloween Decorations")).not.toContain("#noel");
+    expect(hashtagsForScope("seasonal_decor", "FR")).toContain("#decosaisonniere");
   });
 
   it("maps Home Furnishings > Home Décor > Artificial Trees → seasonal_decor (not bedroom_decor)", () => {

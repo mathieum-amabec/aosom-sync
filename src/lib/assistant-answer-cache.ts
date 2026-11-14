@@ -13,7 +13,8 @@
  */
 import { createHash } from "node:crypto";
 import { ensureSchema } from "@/lib/database";
-import type { AssistantResult, Locale } from "@/lib/assistant";
+import type { AssistantResult } from "@/lib/assistant";
+import type { Lang } from "@/lib/assistant-lang";
 
 export const ANSWER_TTL_SECS = 60 * 60;
 
@@ -27,7 +28,7 @@ export function normalizeQuestion(message: string): string {
     .trim();
 }
 
-export function answerCacheKey(message: string, locale: Locale): string {
+export function answerCacheKey(message: string, locale: Lang): string {
   return createHash("sha1").update(`${locale}|${normalizeQuestion(message)}`).digest("hex");
 }
 
@@ -35,7 +36,7 @@ export function answerCacheKey(message: string, locale: Locale): string {
 export function isCacheableAnswer(result: AssistantResult): boolean {
   if (!result.reply) return false;
   if (result.meta?.flag) return false;
-  if (/^(Je n'ai pas trouvé|I couldn't find)/.test(result.reply)) return false;
+  if (/^(Je n'ai pas trouvé|I couldn't find|No encontré|ਮੈਨੂੰ ਇਸ ਰੇਂਜ ਵਿੱਚ ਕੋਈ ਉਤਪਾਦ ਨਹੀਂ)/.test(result.reply)) return false;
   if ((result as { limitReached?: boolean }).limitReached) return false;
   return true;
 }

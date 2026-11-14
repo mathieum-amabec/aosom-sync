@@ -12,6 +12,7 @@ import { colourPhotoIndex, type ColourSource } from "./variant-photos";
 import { toEnglishColour } from "./colour-names";
 import { toFrenchSize } from "./size-names";
 import { buildFitDims, checkAgainstPage, serializeFitDims, FIT_DIMS_KEY, FIT_DIMS_NAMESPACE } from "./fit-dims";
+import { isInternalProduct } from "./internal-product";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -88,7 +89,7 @@ export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[
 
     const data = await response.json();
     for (const p of data.products) {
-      if (costwayIds.has(String(p.id))) continue;
+      if (costwayIds.has(String(p.id)) || isInternalProduct(p)) continue;
       products.push(mapShopifyProduct(p));
     }
 
@@ -124,7 +125,7 @@ export async function fetchShopifyVariantsPage(pageInfo: string | null): Promise
   if (!env.hasShopifyToken) return { variants: [], nextPageInfo: null };
 
   const costwayIds = await getCostwayShopifyProductIds();
-  const params = new URLSearchParams({ limit: "250", fields: "id,variants" });
+  const params = new URLSearchParams({ limit: "250", fields: "id,variants,product_type,tags" });
   if (pageInfo) params.set("page_info", pageInfo);
 
   const response = await shopifyFetch(`/products.json?${params}`);
@@ -132,9 +133,9 @@ export async function fetchShopifyVariantsPage(pageInfo: string | null): Promise
 
   const data = await response.json();
   const variants: ShopifyVariantPageItem[] = (
-    data.products as Array<{ id: number; variants: Array<{ id: number; sku: string; price: string; compare_at_price?: string | null }> }>
+    data.products as Array<{ id: number; product_type?: string; tags?: string; variants: Array<{ id: number; sku: string; price: string; compare_at_price?: string | null }> }>
   )
-    .filter((p) => !costwayIds.has(String(p.id)))
+    .filter((p) => !costwayIds.has(String(p.id)) && !isInternalProduct(p))
     .flatMap((p) =>
     p.variants.map((v) => ({
       sku: v.sku,
@@ -289,7 +290,7 @@ export async function fetchActiveVariantInventory(): Promise<
   let pageInfo: string | null = null;
 
   do {
-    const params = new URLSearchParams({ limit: "250", fields: "id,variants" });
+    const params = new URLSearchParams({ limit: "250", fields: "id,variants,product_type,tags" });
     // status filter only on the first page; page_info follow-ups reject extra filters.
     if (pageInfo) params.set("page_info", pageInfo);
     else params.set("status", "active");
@@ -299,7 +300,7 @@ export async function fetchActiveVariantInventory(): Promise<
 
     const data = await response.json();
     for (const p of data.products) {
-      if (costwayIds.has(String(p.id))) continue;
+      if (costwayIds.has(String(p.id)) || isInternalProduct(p)) continue;
       for (const v of (p.variants as Record<string, unknown>[]) || []) {
         const sku = (v.sku as string) || "";
         if (!sku) continue;
@@ -997,10 +998,12 @@ export async function draftShopifyProduct(shopifyId: string): Promise<void> {
  */
 export async function publishShopifyProduct(
   shopifyId: string,
-  opts: { activate?: boolean } = {},
+  opts: { activate?: boolean; tags?: string[] } = {},
 ): Promise<void> {
   const product: Record<string, unknown> = { id: shopifyId, published: true };
   if (opts.activate) product.status = "active";
+  // Same full-replace contract as updateShopifyProduct.
+  if (opts.tags) product.tags = opts.tags.join(", ");
   const response = await shopifyFetch(`/products/${shopifyId}.json`, {
     method: "PUT",
     body: JSON.stringify({ product }),
@@ -1402,4 +1405,66 @@ export function parseLinkHeader(header: string | null): string | null {
   if (!header) return null;
   const match = header.match(/<[^>]*page_info=([^&>]+)[^>]*>;\s*rel="next"/);
   return match ? match[1] : null;
+}
+
+/**
+ * Every product's status, tags, product_type, title and handle (REST, paginated — archived
+ * products are not returned). Drives sold-out-hide.ts, which needs `product_type` for the
+ * seasonal rule; unlike fetchAllShopifyProducts it does NOT skip Costway products.
+ */
+export async function fetchProductVisibilityStates(): Promise<
+  Array<{ shopifyId: string; status: "active" | "draft" | "archived"; tags: string[]; productType: string; title: string; handle: string }>
+> {
+  if (!env.hasShopifyToken) return [];
+  const out: Array<{ shopifyId: string; status: "active" | "draft" | "archived"; tags: string[]; productType: string; title: string; handle: string }> = [];
+  let pageInfo: string | null = null;
+  do {
+    const params = new URLSearchParams({ limit: "250", fields: "id,status,tags,product_type,title,handle" });
+    if (pageInfo) params.set("page_info", pageInfo);
+    const response = await shopifyFetch(`/products.json?${params}`);
+    if (!response.ok) throw new Error(`Shopify visibility-state fetch failed: ${response.status}`);
+    const data = await response.json();
+    for (const p of data.products) {
+      out.push({
+        shopifyId: String(p.id),
+        status: (p.status as "active" | "draft" | "archived") || "active",
+        tags: typeof p.tags === "string" ? p.tags.split(",").map((t: string) => t.trim()).filter(Boolean) : [],
+        productType: typeof p.product_type === "string" ? p.product_type : "",
+        title: typeof p.title === "string" ? p.title : "",
+        handle: typeof p.handle === "string" ? p.handle : "",
+      });
+    }
+    pageInfo = parseLinkHeader(response.headers.get("Link"));
+  } while (pageInfo);
+  return out;
+}
+
+/**
+ * Shopify product ids that appear in an OPEN order not yet fully fulfilled (and not cancelled).
+ * Throws on any API error: callers that must not touch a product someone is buying fail closed.
+ */
+export async function fetchOpenOrderProductIds(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  if (!env.hasShopifyToken) return ids;
+  let pageInfo: string | null = null;
+  do {
+    const params = new URLSearchParams({ limit: "250", status: "open", fields: "id,fulfillment_status,cancelled_at,line_items" });
+    if (pageInfo) {
+      params.delete("status");
+      params.delete("fields");
+      params.set("page_info", pageInfo);
+      params.set("fields", "id,fulfillment_status,cancelled_at,line_items");
+    }
+    const response = await shopifyFetch(`/orders.json?${params}`);
+    if (!response.ok) throw new Error(`Shopify open-orders fetch failed: ${response.status}`);
+    const data = (await response.json()) as {
+      orders?: Array<{ fulfillment_status: string | null; cancelled_at: string | null; line_items?: Array<{ product_id: number | null }> }>;
+    };
+    for (const o of data.orders ?? []) {
+      if (o.cancelled_at || o.fulfillment_status === "fulfilled") continue;
+      for (const li of o.line_items ?? []) if (li.product_id != null) ids.add(String(li.product_id));
+    }
+    pageInfo = parseLinkHeader(response.headers.get("Link"));
+  } while (pageInfo);
+  return ids;
 }

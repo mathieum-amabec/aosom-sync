@@ -1,15 +1,15 @@
 /**
  * Margin guard (Mat, 2026-10-18: "aucun de nos produits ne devrait passer sous notre coût, malgré les rabais").
  *
- * The profit floor in sell-price-rule.ts keeps every Aosom price profitable as long as no item can get more than
- * MAX_DISCOUNT off. This daily check proves both halves against the live store:
+ * The profit floor in sell-price-rule.ts keeps every Aosom price profitable at list price; no single discount may take
+ * more than MAX_DISCOUNT off. This daily check proves both halves against the live store:
  *
  *   1. DISCOUNTS — every ACTIVE Shopify discount: the most one item can lose to it, and whether discounts combine.
  *      Anything above MAX_DISCOUNT (or a discount we cannot bound: app discount, fixed amount without a minimum)
  *      breaks the floor's assumption and is flagged.
  *   2. PRICES — every variant of every active product against our cost (Aosom: wholesale + delivery from today's feed;
- *      Costway: feed price less the dropship discount). A variant that loses money with the biggest active discount
- *      and the card fees is flagged.
+ *      Costway: feed price less the dropship discount). A variant that loses money at list price after the card fees
+ *      is flagged (since 2026-10-28 prices sit at Aosom's: a discounted 2nd item may earn less, by Mat's choice).
  *
  * Read-only: it reports (dashboard notification); the fix is the sell-price sync (Aosom) or a reprice (Costway).
  */
@@ -17,7 +17,8 @@ import { shopifyFetch, parseLinkHeader } from "@/lib/shopify-client";
 import { createNotification, ensureSchema } from "@/lib/database";
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { costOf } from "@/lib/costway/pricing";
-import { MAX_DISCOUNT, netProfit } from "@/lib/sell-price-rule";
+import { FLOOR_DISCOUNT, MAX_DISCOUNT, netProfit } from "@/lib/sell-price-rule";
+import { isInternalProduct } from "./internal-product";
 
 // ─── 1. Discounts ────────────────────────────────────────────────────────────
 
@@ -177,13 +178,14 @@ async function loadActiveVariants(): Promise<PricedVariant[]> {
   const out: PricedVariant[] = [];
   let pageInfo: string | null = null;
   for (let i = 0; i < 100; i++) {
-    const params = new URLSearchParams({ limit: "250", fields: "handle,tags,variants" });
+    const params = new URLSearchParams({ limit: "250", fields: "handle,tags,product_type,variants" });
     if (pageInfo) params.set("page_info", pageInfo);
     else params.set("status", "active");
     const res = await shopifyFetch(`/products.json?${params}`);
     if (!res.ok) throw new Error(`margin-guard: products fetch failed ${res.status}`);
-    const data = (await res.json()) as { products: Array<{ handle: string; tags: string; variants: Array<{ sku: string; price: string }> }> };
+    const data = (await res.json()) as { products: Array<{ handle: string; tags: string; product_type?: string; variants: Array<{ sku: string; price: string }> }> };
     for (const p of data.products) {
+      if (isInternalProduct(p)) continue;
       const source = p.tags.split(",").map((t) => t.trim()).includes("src-c") ? "costway" : "aosom";
       for (const v of p.variants) if (v.sku) out.push({ sku: v.sku, handle: p.handle, price: Number(v.price), source });
     }
@@ -217,8 +219,9 @@ export interface MarginGuardReport {
 export async function runMarginGuard(opts: { notify?: boolean } = {}): Promise<MarginGuardReport> {
   const disc = evaluateDiscounts(await loadActiveDiscounts());
   const [variants, costs] = await Promise.all([loadActiveVariants(), loadCosts()]);
-  // Prices are checked against the larger of the floor's assumption and what the store really allows today.
-  const discount = Math.max(MAX_DISCOUNT, disc.worst);
+  // Prices are checked at list price (Mat, 2026-10-28: prices sit at Aosom's, a discounted 2nd item may earn less than
+  // our margin). Discounts above MAX_DISCOUNT are still flagged by `evaluateDiscounts`.
+  const discount = FLOOR_DISCOUNT;
   const { losses, withoutCost } = findLosses(variants, costs, discount);
 
   let notified = false;

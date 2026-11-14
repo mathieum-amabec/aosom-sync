@@ -8,6 +8,7 @@ import { DEFAULT_PUBLICATION_SCHEDULE, DEFAULT_BLOG_SCHEDULE } from "@/lib/confi
 import type { AosomProduct } from "@/types/aosom";
 import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
 import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
+import type { AdImageStyle } from "@/lib/image-style";
 import { isSqliteUtc } from "@/lib/draft-scheduler";
 import { usageLoggingEnabled, withUsageLogging } from "@/lib/turso-usage";
 
@@ -660,6 +661,17 @@ async function _initSchemaImpl(): Promise<void> {
       created_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_image_classifications_compliant ON image_classifications(compliant)`,
+
+    // ── Ad photo style cache (lifestyle vs studio) ───────────────────────────
+    // One row per PHOTO, keyed like image_classifications (imageUrlStem). Pixel heuristic
+    // only (src/lib/image-style.ts), zero tokens. Filled by /api/cron/image-styles; read by
+    // the Meta feeds so catalog ads only ever show lifestyle photos (Mat, 2026-10-30).
+    `CREATE TABLE IF NOT EXISTS image_styles (
+      url_stem TEXT PRIMARY KEY,
+      style TEXT NOT NULL,           -- 'lifestyle' | 'studio'
+      sample_url TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now'))
+    )`,
 
     // ── pos-1 image review queue (operator approval) ─────────────────────────
     // Populated by the sync's image-compliance pass when it finds a pos-1 image carrying a
@@ -5129,6 +5141,43 @@ export async function putCachedImageVerdict(
   });
 }
 
+// ─── Ad photo style cache (lifestyle vs studio) ──────────────────────
+
+/** Look up cached photo styles for a batch of stems. Missing stems are simply absent. */
+export async function getCachedImageStyles(stems: string[]): Promise<Map<string, AdImageStyle>> {
+  const out = new Map<string, AdImageStyle>();
+  const unique = [...new Set(stems.filter(Boolean))];
+  if (unique.length === 0) return out;
+  const db = await ensureSchema();
+  for (let i = 0; i < unique.length; i += 200) {
+    const chunk = unique.slice(i, i + 200);
+    const result = await db.execute({
+      sql: `SELECT url_stem, style FROM image_styles WHERE url_stem IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) {
+      const o = rowToObj(r);
+      if (o.style === "lifestyle" || o.style === "studio") out.set(String(o.url_stem), o.style);
+    }
+  }
+  return out;
+}
+
+/** Persist photo styles. Idempotent: re-classifying a stem overwrites it. */
+export async function putCachedImageStyles(rows: Array<{ stem: string; style: AdImageStyle; sampleUrl: string }>): Promise<void> {
+  const valid = rows.filter((r) => r.stem);
+  if (valid.length === 0) return;
+  const db = await ensureSchema();
+  for (let i = 0; i < valid.length; i += 100) {
+    await db.batch(valid.slice(i, i + 100).map((r) => ({
+      sql: `INSERT INTO image_styles (url_stem, style, sample_url) VALUES (?, ?, ?)
+            ON CONFLICT(url_stem) DO UPDATE SET style=excluded.style, sample_url=excluded.sample_url,
+              created_at=strftime('%s','now')`,
+      args: [r.stem, r.style, r.sampleUrl.slice(0, 500)],
+    })), "write");
+  }
+}
+
 // ─── pos-1 image review queue ────────────────────────────────────────
 
 export interface ImageReviewRow {
@@ -6870,10 +6919,14 @@ export async function countMorningReportAlerts(): Promise<{
   unreadNotifications: number;
   /** Queue rows in 'failed' that were due in the last 3 days OR are still ahead — the ones nobody has looked at (found 2026-10-06: 16 batch Reels sat 'failed' for weeks, re-slotted but never reset). */
   failedPublications: number;
+  /** Problems found by the last 06:15 publish check (publish-check.ts, setting `publish_check_last`): missed, stuck or partly failed posts of the 24 h before it. */
+  publishCheckProblems: number;
+  /** Reels the last price-guard run took out of the queue because a burned-in rabais no longer matches Shopify (setting `reel_price_guard_last`). */
+  reelPriceGuardBlocked: number;
 }> {
   const db = await ensureSchema();
   const dayAgo = Math.floor(Date.now() / 1000) - 86400;
-  const [audit, incidents, images, imports, catalog, notif, failedQueue] = await Promise.all([
+  const [audit, incidents, images, imports, catalog, notif, failedQueue, publishCheck, reelGuard] = await Promise.all([
     db.execute(`SELECT value FROM settings WHERE key = 'price_audit_result'`),
     db.execute({ sql: `SELECT COUNT(*) AS c FROM price_floor_incidents WHERE detected_at >= ?`, args: [dayAgo] }),
     db.execute(`SELECT COUNT(*) AS c FROM image_review_queue WHERE status = 'pending'`),
@@ -6881,6 +6934,8 @@ export async function countMorningReportAlerts(): Promise<{
     db.execute(`SELECT value FROM settings WHERE key = 'catalog_consistency_audit'`),
     db.execute(`SELECT COUNT(*) AS c FROM notifications WHERE read = 0`),
     db.execute(`SELECT COUNT(*) AS c FROM publication_queue WHERE status = 'failed' AND scheduled_at >= datetime('now', '-3 days')`),
+    db.execute(`SELECT value FROM settings WHERE key = 'publish_check_last'`),
+    db.execute(`SELECT value FROM settings WHERE key = 'reel_price_guard_last'`),
   ]);
   const c = (res: { rows: Row[] }) => Number(rowToObj(res.rows[0]).c) || 0;
   const json = (res: { rows: Row[] }): Record<string, unknown> | null => {
@@ -6902,6 +6957,8 @@ export async function countMorningReportAlerts(): Promise<{
     catalogIssues: Array.isArray(issues) ? issues.length : 0,
     unreadNotifications: c(notif),
     failedPublications: c(failedQueue),
+    publishCheckProblems: Array.isArray(json(publishCheck)?.problems) ? (json(publishCheck)!.problems as unknown[]).length : 0,
+    reelPriceGuardBlocked: Array.isArray(json(reelGuard)?.blocked) ? (json(reelGuard)!.blocked as unknown[]).length : 0,
   };
 }
 

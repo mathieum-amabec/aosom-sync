@@ -114,12 +114,12 @@ describe("selectCandidates", () => {
     expect(await selectCandidates(db, { limit: 1 })).toHaveLength(1);
   });
 
-  it("measures margin on the cheapest sellable variant, at the 23 % rule (same on a Drop Price item)", async () => {
+  it("measures margin on the cheapest sellable variant, at Costway's price (same on a Drop Price item)", async () => {
     await insert({ sku: "1_A", item: "1", title: "Dehumidifier 60 Pints", category: DEHUM, price: 479.99, tag: "Drop Price" });
     const [c] = await selectCandidates(db, { limit: 1 });
     const m = candidateMargin(c);
-    expect(m.sell).toBe(523.99);
-    expect(m.dollars).toBeCloseTo(523.99 - 479.99 * 0.84, 1);
+    expect(m.sell).toBe(479.99);
+    expect(m.dollars).toBeCloseTo(479.99 * 0.16, 1);
   });
 
   it("unionImages de-duplicates, keeps variant order and caps at 8", () => {
@@ -158,11 +158,11 @@ async function oneCandidate(opts: Partial<{ tag: string; qty: number; price: num
 }
 
 describe("prepareCandidate", () => {
-  it("is ready when every gate passes, prices at the 23 % rule and caps the sellable stock", async () => {
+  it("is ready when every gate passes, prices at Costway's price and caps the sellable stock", async () => {
     const c = await oneCandidate();
     const p = await prepareCandidate(c, prepDeps());
     expect(p.problems).toEqual([]);
-    expect(p.variants[0]).toMatchObject({ feedPrice: 829.99, sellPrice: 905.99, sellQty: 50 });
+    expect(p.variants[0]).toMatchObject({ feedPrice: 829.99, sellPrice: 829.99, sellQty: 50 });
     expect(p.productType).toBe("Home Furnishings > Appliances > Dehumidifiers");
   });
 
@@ -199,7 +199,7 @@ describe("prepareCandidate", () => {
 
   it("prices a Drop Price item like any other and honours the Price Drop floor", async () => {
     const dropped = await prepareCandidate(await oneCandidate({ tag: "Drop Price", price: 479.99 }), prepDeps());
-    expect(dropped.variants[0].sellPrice).toBe(523.99);
+    expect(dropped.variants[0].sellPrice).toBe(479.99);
     await db.execute(`DELETE FROM costway_products`);
     const floored = await prepareCandidate(await oneCandidate({ tag: "Drop Price", price: 479.99, priceDrop: 600 }), prepDeps());
     expect(floored.variants[0].sellPrice).toBe(600.99);
@@ -289,7 +289,7 @@ describe("applyPrepared", () => {
     expect(trace.stock).toEqual([["inv0", 50]]);
     // tracking in aosom-sync
     const row = (await db.execute(`SELECT * FROM costway_products`)).rows[0] as unknown as Record<string, unknown>;
-    expect(row).toMatchObject({ shopify_product_id: "777", shopify_handle: "deshumidificateur-commercial", import_batch: "pilot-1", import_status: "draft", sell_price: 905.99, imported_at: 1_700_000_000 });
+    expect(row).toMatchObject({ shopify_product_id: "777", shopify_handle: "deshumidificateur-commercial", import_batch: "pilot-1", import_status: "draft", sell_price: 829.99, imported_at: 1_700_000_000 });
     expect(isInternalSku(String(row.internal_sku))).toBe(true);
   });
 

@@ -26,6 +26,9 @@ const ROWS: [string, string, number, number][] = [
   ["HW-1", "Home Furnishings > Holiday & Seasonal > Halloween Decorations", 0, now - 400 * 86400],
   ["XM-1", "Home Furnishings > Holiday & Seasonal > Christmas Trees > Artificial", 0, now - 400 * 86400],
   ["XM-2", "Home Furnishings > Holiday & Seasonal > Christmas Decorations > Wreaths", 0, now - 400 * 86400],
+  // 2026-11-01: Aosom moved the branch to the top level (the only live form now).
+  ["HW-2", "Holiday & Seasonal > Halloween Decorations", 0, now - 400 * 86400],
+  ["XM-3", "Holiday & Seasonal > Christmas Trees > Pencil Christmas Tree", 0, now - 400 * 86400],
   ["LR-1", "Home Furnishings > Living Room Furniture > Sofas", 1, now - 400 * 86400],
   ["BR-1", "Home Furnishings > Bedroom Furniture > Beds", 0, now - 400 * 86400],
   ["OF-1", "Office Products > Office Furniture > Desks", 0, now - 400 * 86400],
@@ -69,8 +72,8 @@ describe("category predicates as executable SQL", () => {
 
   it.each([
     ["all", ROWS.map((r) => r[0]).sort()],
-    ["halloween", ["HW-1"]],
-    ["noel", ["XM-1", "XM-2"]],
+    ["halloween", ["HW-1", "HW-2"]],
+    ["noel", ["XM-1", "XM-2", "XM-3"]],
     ["salon", ["LR-1"]],
     ["chambre", ["BR-1"]],
     ["bureau", ["OF-1"]],
@@ -100,7 +103,7 @@ describe("category predicates as executable SQL", () => {
 
   it("a product posted inside the repost window is excluded whatever the category", async () => {
     await db.execute({
-      sql: `UPDATE products SET last_posted_at = ? WHERE sku = 'HW-1'`,
+      sql: `UPDATE products SET last_posted_at = ? WHERE sku IN ('HW-1', 'HW-2')`,
       args: [now + 86400],
     });
     expect(await select("halloween")).toEqual([]);

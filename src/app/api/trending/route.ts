@@ -55,7 +55,7 @@ export async function GET(request: Request) {
         status: 200,
         headers: {
           ...cors,
-          "Cache-Control": "public, s-maxage=1800, stale-while-revalidate=3600",
+          "Cache-Control": "public, max-age=300, s-maxage=1800, stale-while-revalidate=3600",
         },
       },
     );

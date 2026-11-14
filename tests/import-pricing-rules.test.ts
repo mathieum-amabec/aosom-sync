@@ -29,11 +29,11 @@ const ctx = (extra: Partial<Parameters<typeof buildCandidates>[1]> = {}) => ({
 
 describe("import pricing rules", () => {
   it("keeps a product whose price rule leaves a healthy margin and records it", () => {
-    // Aosom 100, cost 86: 20 % margin price is 106.99 -> margin ~19.6 %
+    // Aosom 100 (frozen), cost 86: estimate 86 × 1.15 = 98.90 → 98.88 is under the frozen price, so 100.88 -> margin 14.75 %
     const out = buildCandidates([group("ok", 100)], ctx({ costs: costs({ "ok-A": 86 }) }));
     expect(out.candidates.map((c) => c.groupKey)).toEqual(["ok"]);
-    expect(out.candidates[0].margin).toBeGreaterThan(0.19);
-    expect(out.candidates[0].marginDollars).toBeGreaterThan(20);
+    expect(out.candidates[0].margin).toBeCloseTo(0.1475, 3);
+    expect(out.candidates[0].marginDollars).toBeCloseTo(14.88, 2);
     expect(out.rejected).toEqual({ noCost: 0, lowMargin: 0, lowDemand: 0 });
   });
 
@@ -43,16 +43,16 @@ describe("import pricing rules", () => {
     expect(out.rejected.noCost).toBe(1);
   });
 
-  it("rejects a product whose margin stays under the minimum even at the rule's price", () => {
-    // cost 98 on a 100 price: even +15 % (114.99) gives 14.8 %... use cost 105 -> under water at 114.99? margin 8.7 %
+  it("a frozen Aosom price under our cost no longer blocks the import: our estimate prices it", () => {
+    // cost 105, frozen Aosom 100: estimate 120.75 → 120.88 -> margin 13.1 %
     const out = buildCandidates([group("thin", 100)], ctx({ costs: costs({ "thin-A": 105 }) }));
-    expect(out.candidates).toHaveLength(0);
-    expect(out.rejected.lowMargin).toBe(1);
+    expect(out.candidates.map((c) => c.groupKey)).toEqual(["thin"]);
+    expect(out.candidates[0].margin).toBeGreaterThan(MIN_IMPORT_MARGIN);
   });
 
-  it("a competitor a dollar-under price can make a product too thin to import", () => {
-    // cost 90, competitor 100 -> price 98.99, margin 9.1 % < 12 %
-    const out = buildCandidates([group("squeezed", 100)], ctx({ costs: costs({ "squeezed-A": 90 }), competitor: new Map([["SQUEEZED-A", 100]]) }));
+  it("rejects a product whose signature price drops under the minimum margin", () => {
+    // cost 88: estimate 101.20 → 101.88 sits just over 100 → 99.88 -> margin 11.9 % < 12 %
+    const out = buildCandidates([group("thin2", 50)], ctx({ costs: costs({ "thin2-A": 88 }) }));
     expect(out.candidates).toHaveLength(0);
     expect(out.rejected.lowMargin).toBe(1);
   });
