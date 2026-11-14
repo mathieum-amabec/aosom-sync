@@ -28,11 +28,17 @@ describe("GET /api/catalog — new filter params", () => {
     );
   });
 
+  it("forwards imported as a boolean", async () => {
+    const res = await catalogGET(new Request("https://app.test/api/catalog?imported=true"));
+    expect(res.status).toBe(200);
+    expect(db.getProducts).toHaveBeenCalledWith(expect.objectContaining({ imported: true }));
+  });
+
   it("defaults the new filters to false when absent", async () => {
     const res = await catalogGET(new Request("https://app.test/api/catalog"));
     expect(res.status).toBe(200);
     expect(db.getProducts).toHaveBeenCalledWith(
-      expect.objectContaining({ notImported: false, withDiscount: false, lowStock: false }),
+      expect.objectContaining({ notImported: false, imported: false, withDiscount: false, lowStock: false }),
     );
   });
 

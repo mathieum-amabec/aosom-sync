@@ -7,7 +7,7 @@ const CACHE = "public, max-age=0, s-maxage=600, stale-while-revalidate=600"; // 
 
 export async function GET() {
   try {
-    const items = await getFeedItems();
+    const items = await getFeedItems({ lifestyle: true });
     const json = buildMetaFeed(items);
     await recordFeedSync("meta", items.length, "success");
     return new Response(JSON.stringify(json), {

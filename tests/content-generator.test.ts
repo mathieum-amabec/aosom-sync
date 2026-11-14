@@ -16,8 +16,10 @@ vi.mock("@anthropic-ai/sdk", () => ({
   },
 }));
 
-const { slugify, clampMetaTitle, backfillSeoFields, stripSupplierBrands, generateProductContent } =
-  await import("@/lib/content-generator");
+const {
+  slugify, clampMetaTitle, backfillSeoFields, stripSupplierBrands, generateProductContent,
+  inferDimensionsCm, dimensionsCmFromSupplierText, collectCopyIssues,
+} = await import("@/lib/content-generator");
 import type { GeneratedContent } from "@/lib/content-generator";
 
 describe("stripSupplierBrands", () => {
@@ -148,7 +150,7 @@ function claudeReturns(titleFr: string, titleEn: string) {
         text: JSON.stringify({
           titleFr,
           titleEn,
-          descriptionFr: "<p>fr</p>",
+          descriptionFr: "<p>Cette chaise pour votre jardin est confortable et pratique pour tous les jours.</p>",
           descriptionEn: "<p>en</p>",
           seoDescriptionFr: "desc fr",
           seoDescriptionEn: "desc en",
@@ -158,7 +160,7 @@ function claudeReturns(titleFr: string, titleEn: string) {
           metaDescriptionEn: "md en",
           urlHandleFr: "chaise-fr",
           urlHandleEn: "chair-en",
-          tags: ["jardin"],
+          tags: ["jardin","abri de jardin","garden shed","rangement outils","tool storage","outdoor storage","patio","remise"],
         }),
       },
     ],
@@ -187,5 +189,358 @@ describe("generateProductContent — supplier brand stripping", () => {
     const out = await generateProductContent(makeProduct());
     expect(out.titleFr).toBe("Bureau");
     expect(out.titleEn).toBe("Clean Office Desk"); // no brand, unchanged
+  });
+});
+
+// Regression: 350 live SEO titles ended mid-phrase ("Tables de chevet avec | Livraison gratuite —
+// Ameublo Direct"). Model-written meta titles now get the short store suffix, and a name part that
+// ends on a stopword is rebuilt from the guarded product title. Found 2026-10-16.
+describe("generateProductContent — meta title safety net", () => {
+  it("swaps the old long suffix for the store name", async () => {
+    claudeReturns("Chaise longue grise", "Grey lounge chair");
+    const out = await generateProductContent(makeProduct());
+    expect(out.metaTitleFr).toBe("m fr | Ameublo Direct");
+    // "m en" ends on "en" (a French stopword — the list is shared), so it is rebuilt from titleEn.
+    expect(out.metaTitleEn).toBe("Grey lounge chair | Furnish Direct");
+  });
+
+  it("rebuilds a dangling model meta title from the product title", async () => {
+    create.mockResolvedValueOnce({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          titleFr: "Tables de chevet avec tiroir", titleEn: "Nightstands with drawer",
+          descriptionFr: "<p>Cette chaise pour votre jardin est confortable et pratique pour tous les jours.</p>",
+          descriptionEn: "<p>en</p>", seoDescriptionFr: "d", seoDescriptionEn: "d",
+          metaTitleFr: "Tables de chevet avec | Livraison gratuite — Ameublo Direct",
+          metaTitleEn: "Nightstands with | Free Shipping — Furnish Direct",
+          metaDescriptionFr: "md", metaDescriptionEn: "md", urlHandleFr: "a", urlHandleEn: "b",
+          tags: ["jardin","abri de jardin","garden shed","rangement outils","tool storage","outdoor storage","patio","remise"],
+        }),
+      }],
+    });
+    const out = await generateProductContent(makeProduct());
+    expect(out.metaTitleFr).toBe("Tables de chevet avec tiroir | Ameublo Direct");
+    expect(out.metaTitleEn).toBe("Nightstands with drawer | Furnish Direct");
+  });
+});
+
+// Regression: stripSupplierBrands was only ever applied to titleFr/titleEn and the
+// URL handles — never to descriptionFr/descriptionEn/seoDescription*, so a model
+// that echoed the supplier name into the body (as the raw Aosom feed text often
+// does) reached Shopify body_html untouched. Found during the 2026-09-15 catalog
+// content investigation (532/1347 active products leaking a supplier name).
+describe("generateProductContent — description brand stripping", () => {
+  function claudeReturnsDescription(descriptionFr: string, descriptionEn = "<p>A chair.</p>") {
+    create.mockResolvedValue({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            titleFr: "Chaise longue grise",
+            titleEn: "Grey lounge chair",
+            descriptionFr,
+            descriptionEn,
+            seoDescriptionFr: "Chaise confortable pour votre jardin, avec des accoudoirs.",
+            seoDescriptionEn: "desc en",
+            metaTitleFr: "m fr | Livraison gratuite — Ameublo Direct",
+            metaTitleEn: "m en | Free Shipping — Furnish Direct",
+            metaDescriptionFr: "md fr",
+            metaDescriptionEn: "md en",
+            urlHandleFr: "chaise-fr",
+            urlHandleEn: "chair-en",
+            tags: ["jardin","abri de jardin","garden shed","rangement outils","tool storage","outdoor storage","patio","remise"],
+          }),
+        },
+      ],
+    });
+  }
+
+  it("strips a supplier brand mentioned in the body of descriptionFr", async () => {
+    claudeReturnsDescription(
+      "<p>Cette chaise Outsunny est parfaite pour votre jardin, avec des accoudoirs confortables.</p>",
+    );
+    const out = await generateProductContent(makeProduct());
+    expect(out.descriptionFr).not.toMatch(/outsunny/i);
+    expect(out.descriptionFr).toContain("Cette chaise");
+    expect(out.descriptionFr).toContain("accoudoirs");
+  });
+
+  it("handles a French elision directly attached to the brand without leaving a dangling apostrophe", async () => {
+    claudeReturnsDescription(
+      "<p>Profitez de l'Aosom chaise longue pour votre jardin, avec des accoudoirs confortables.</p>",
+    );
+    const out = await generateProductContent(makeProduct());
+    expect(out.descriptionFr).not.toMatch(/aosom/i);
+    expect(out.descriptionFr).not.toMatch(/\bl['’]\s/); // no orphaned "l' "
+  });
+});
+
+// Write-time guard: descriptionFr must read as French. This is the backstop for
+// the description-language class of bug (679/1382 active products served English
+// body_html via a since-fixed diff-engine defect, CHANGELOG v0.5.92.3) — a bad
+// generation must never reach Shopify silently.
+describe("generateProductContent — French language guard", () => {
+  it("escalates to the top-tier model when the batch model returns English descriptionFr", async () => {
+    const englishResponse = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            titleFr: "Chaise longue grise",
+            titleEn: "Grey lounge chair",
+            descriptionFr: "<p>This chair is great for your garden and easy to clean with a soft cloth.</p>",
+            descriptionEn: "<p>This chair is great for your garden.</p>",
+            seoDescriptionFr: "desc fr",
+            seoDescriptionEn: "desc en",
+            metaTitleFr: "m fr | Livraison gratuite — Ameublo Direct",
+            metaTitleEn: "m en | Free Shipping — Furnish Direct",
+            metaDescriptionFr: "md fr",
+            metaDescriptionEn: "md en",
+            urlHandleFr: "chaise-fr",
+            urlHandleEn: "chair-en",
+            tags: ["jardin","abri de jardin","garden shed","rangement outils","tool storage","outdoor storage","patio","remise"],
+          }),
+        },
+      ],
+    };
+    const frenchResponse = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            titleFr: "Chaise longue grise",
+            titleEn: "Grey lounge chair",
+            descriptionFr: "<p>Cette chaise est parfaite pour votre jardin et facile à nettoyer.</p>",
+            descriptionEn: "<p>This chair is great for your garden.</p>",
+            seoDescriptionFr: "desc fr",
+            seoDescriptionEn: "desc en",
+            metaTitleFr: "m fr | Livraison gratuite — Ameublo Direct",
+            metaTitleEn: "m en | Free Shipping — Furnish Direct",
+            metaDescriptionFr: "md fr",
+            metaDescriptionEn: "md en",
+            urlHandleFr: "chaise-fr",
+            urlHandleEn: "chair-en",
+            tags: ["jardin","abri de jardin","garden shed","rangement outils","tool storage","outdoor storage","patio","remise"],
+          }),
+        },
+      ],
+    };
+    create.mockClear();
+    create.mockResolvedValueOnce(englishResponse).mockResolvedValueOnce(frenchResponse);
+    const out = await generateProductContent(makeProduct());
+    expect(out.descriptionFr).toContain("parfaite pour votre jardin");
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws when even the top-tier model's descriptionFr is not French", async () => {
+    const englishResponse = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            titleFr: "Chaise longue grise",
+            titleEn: "Grey lounge chair",
+            descriptionFr: "<p>This chair is great for your garden and easy to clean with a soft cloth.</p>",
+            descriptionEn: "<p>This chair is great for your garden.</p>",
+            seoDescriptionFr: "desc fr",
+            seoDescriptionEn: "desc en",
+            metaTitleFr: "m fr | Livraison gratuite — Ameublo Direct",
+            metaTitleEn: "m en | Free Shipping — Furnish Direct",
+            metaDescriptionFr: "md fr",
+            metaDescriptionEn: "md en",
+            urlHandleFr: "chaise-fr",
+            urlHandleEn: "chair-en",
+            tags: ["jardin","abri de jardin","garden shed","rangement outils","tool storage","outdoor storage","patio","remise"],
+          }),
+        },
+      ],
+    };
+    create.mockResolvedValue(englishResponse); // both tiers return the same bad content
+    await expect(generateProductContent(makeProduct())).rejects.toThrow();
+  });
+});
+
+describe("generateProductContent — tags never carry a supplier name", () => {
+  it("strips a brand out of a tag and drops a tag that was only the brand", async () => {
+    create.mockResolvedValue({
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          titleFr: "Chaise longue", titleEn: "Lounge chair",
+          descriptionFr: "<p>Cette chaise pour votre jardin est confortable et pratique pour tous les jours.</p>",
+          descriptionEn: "<p>en</p>", seoDescriptionFr: "d", seoDescriptionEn: "d",
+          metaTitleFr: "m | Livraison gratuite — Ameublo Direct", metaTitleEn: "m | Free Shipping — Furnish Direct",
+          metaDescriptionFr: "md", metaDescriptionEn: "md", urlHandleFr: "chaise", urlHandleEn: "chair",
+          tags: ["costway chaise", "outsunny", "bureau", "a", "b", "c", "d", "e"],
+        }),
+      }],
+    });
+    const out = await generateProductContent(makeProduct());
+    expect(out.tags).toContain("chaise");
+    expect(out.tags).toContain("bureau");
+    expect(out.tags).not.toContain("outsunny");
+    expect(out.tags.join(" ").toLowerCase()).not.toMatch(/costway|outsunny/);
+  });
+});
+
+// Regression (2026-10-04): a batch of newly-imported "coffres de rangement extérieur" came
+// out with no physical dimensions in the description at all, and inconsistent capacity units
+// (some litres, some gallons, some both) — a shopper has no reliable way to judge size. Root
+// cause: product.dimensions was never passed into the prompt, and the capacity unit was never
+// constrained. See inferDimensionsCm's own doc comment for why Aosom's raw Length/Width/Height
+// columns need a heuristic at all (they are not unit-consistent row to row).
+describe("inferDimensionsCm", () => {
+  it("converts to cm when the max axis is a plausible inch value (<=120)", () => {
+    // Real row: D2-0014 "62'' L 2-Story Rabbit Hutch" — the feed's 62.3 IS inches.
+    expect(inferDimensionsCm({ length: 62.3, width: 22.8, height: 26.8 })).toEqual({
+      length: 158.2, width: 57.9, height: 68.1,
+    });
+  });
+
+  it("leaves the triple unconverted when the max axis is already implausible as inches (>120)", () => {
+    // Real row: 845-209V01BN "30" x 21" x 71" Garden Storage Shed" — the feed's 179 is
+    // already cm (179cm ≈ 71in matches the title; as raw inches it would be 14.9 FEET tall).
+    expect(inferDimensionsCm({ length: 77, width: 54.2, height: 179 })).toEqual({
+      length: 77, width: 54.2, height: 179,
+    });
+  });
+
+  it("returns null when any axis is zero or missing (never fabricate a size)", () => {
+    expect(inferDimensionsCm({ length: 0, width: 10, height: 10 })).toBeNull();
+    expect(inferDimensionsCm(undefined)).toBeNull();
+  });
+});
+
+describe("collectCopyIssues — dimensions & capacity consistency", () => {
+  const base: GeneratedContent = {
+    titleFr: "Coffre de rangement", titleEn: "Storage box",
+    descriptionFr: "<p>Un coffre robuste pour votre jardin, facile à nettoyer et étanche.</p>",
+    descriptionEn: "<p>A sturdy box for your garden.</p>",
+    seoDescriptionFr: "Coffre de rangement étanche pour jardin.", seoDescriptionEn: "Waterproof garden storage box.",
+    metaTitleFr: "m | Livraison gratuite — Ameublo Direct", metaTitleEn: "m | Free Shipping — Furnish Direct",
+    metaDescriptionFr: "md", metaDescriptionEn: "md", urlHandleFr: "coffre", urlHandleEn: "box",
+    tags: ["jardin","coffre","rangement","storage","patio","outdoor","etanche","waterproof"],
+    brand: "Outsunny",
+  };
+
+  it("flags a description that never mentions dimensions that WERE provided", () => {
+    const issues = collectCopyIssues(base, { length: 127, width: 55.9, height: 59.9 });
+    expect(issues.some((i) => /dimensions/i.test(i))).toBe(true);
+  });
+
+  it("does not flag anything when the description states the provided dimensions", () => {
+    const withDims: GeneratedContent = {
+      ...base,
+      descriptionFr: base.descriptionFr + " Dimensions : 127 x 55.9 x 59.9 cm (50 x 22 x 23.6 po).",
+      descriptionEn: base.descriptionEn + " Dimensions: 127 x 55.9 x 59.9 cm (50 x 22 x 23.6 in).",
+    };
+    const issues = collectCopyIssues(withDims, { length: 127, width: 55.9, height: 59.9 });
+    expect(issues.some((i) => /dimensions/i.test(i))).toBe(false);
+  });
+
+  it("does not require dimensions when none were provided (expectedDimsCm omitted)", () => {
+    expect(collectCopyIssues(base).some((i) => /dimensions/i.test(i))).toBe(false);
+    expect(collectCopyIssues(base, null).some((i) => /dimensions/i.test(i))).toBe(false);
+  });
+
+  it("flags \"gallon\" anywhere in the body, even alongside a litre figure", () => {
+    const withGallons: GeneratedContent = {
+      ...base,
+      descriptionEn: base.descriptionEn + " Offers 283 litres (75 gallons) of storage.",
+    };
+    const issues = collectCopyIssues(withGallons);
+    expect(issues.some((i) => /gallon/i.test(i))).toBe(true);
+  });
+
+  it("does not flag a description that states capacity in litres only", () => {
+    const litresOnly: GeneratedContent = { ...base, descriptionEn: base.descriptionEn + " Offers 283 litres of storage." };
+    expect(collectCopyIssues(litresOnly).some((i) => /gallon/i.test(i))).toBe(false);
+  });
+});
+
+describe("generateProductContent — dimensions reach the prompt and the final copy", () => {
+  function makeProductWithDims(dims: { length: number; width: number; height: number }) {
+    return {
+      name: "Coffre de rangement",
+      description: "<p>Un coffre.</p>",
+      shortDescription: "<p>Court.</p>",
+      brand: "Outsunny",
+      productType: "Patio & Garden > Patio Furniture > Deck Box & Outdoor Storage",
+      material: "Résine",
+      variants: [{ sku: "84B-458GY", price: 199, dimensions: dims }],
+    } as never;
+  }
+
+  it("sends a computed cm Dimensions line to Claude when the source variant has real dimensions", async () => {
+    create.mockClear();
+    claudeReturns("Coffre de rangement extérieur", "Outdoor storage box");
+    await generateProductContent(makeProductWithDims({ length: 50, width: 22, height: 23.6 }));
+    const sentPrompt = create.mock.calls[0][0].messages[0].content as string;
+    expect(sentPrompt).toContain("Dimensions: 127 x 55.9 x 59.9 cm");
+  });
+
+  it("tells the model not to invent dimensions when the source has none", async () => {
+    create.mockClear();
+    claudeReturns("Coffre de rangement extérieur", "Outdoor storage box");
+    await generateProductContent(makeProductWithDims({ length: 0, width: 0, height: 0 }));
+    const sentPrompt = create.mock.calls[0][0].messages[0].content as string;
+    expect(sentPrompt).toContain("not provided by the supplier — do not invent");
+  });
+
+  it("retries once on the same tier when the model drops the provided dimensions, and keeps the retry's copy", async () => {
+    const missingDims = {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          titleFr: "Coffre de rangement extérieur", titleEn: "Outdoor storage box",
+          descriptionFr: "<p>Ce coffre robuste protège vos outils de jardin des intempéries.</p>",
+          descriptionEn: "<p>This sturdy box protects your garden tools from the weather.</p>",
+          seoDescriptionFr: "Coffre de rangement étanche pour jardin.", seoDescriptionEn: "Waterproof garden storage box.",
+          metaTitleFr: "m | Livraison gratuite — Ameublo Direct", metaTitleEn: "m | Free Shipping — Furnish Direct",
+          metaDescriptionFr: "md", metaDescriptionEn: "md", urlHandleFr: "coffre", urlHandleEn: "box",
+          tags: ["jardin","coffre","rangement","storage","patio","outdoor","etanche","waterproof"],
+        }),
+      }],
+    };
+    const withDims = {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          titleFr: "Coffre de rangement extérieur", titleEn: "Outdoor storage box",
+          descriptionFr: "<p>Ce coffre robuste protège vos outils de jardin des intempéries. Dimensions : 127 x 55.9 x 59.9 cm.</p>",
+          descriptionEn: "<p>This sturdy box protects your garden tools from the weather. Dimensions: 127 x 55.9 x 59.9 cm.</p>",
+          seoDescriptionFr: "Coffre de rangement étanche pour jardin.", seoDescriptionEn: "Waterproof garden storage box.",
+          metaTitleFr: "m | Livraison gratuite — Ameublo Direct", metaTitleEn: "m | Free Shipping — Furnish Direct",
+          metaDescriptionFr: "md", metaDescriptionEn: "md", urlHandleFr: "coffre", urlHandleEn: "box",
+          tags: ["jardin","coffre","rangement","storage","patio","outdoor","etanche","waterproof"],
+        }),
+      }],
+    };
+    create.mockClear();
+    create.mockResolvedValueOnce(missingDims).mockResolvedValueOnce(withDims);
+    const out = await generateProductContent(makeProductWithDims({ length: 50, width: 22, height: 23.6 }));
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(out.descriptionFr).toContain("127 x 55.9 x 59.9 cm");
+    // The retry call is still on the SAME (first) tier, not an escalation to the stronger model.
+    expect(create.mock.calls[1][0].model).toBe(create.mock.calls[0][0].model);
+  });
+});
+
+describe("dimensionsCmFromSupplierText", () => {
+  it("reads the cm triple the supplier wrote even when the feed numbers are already cm (shelf 112.5 x 30 x 100)", () => {
+    const d = '<p>Overall Dimensions: 44.3" L x 11.8" W x 39.4" H (112.5 x 30 x 100 cm) • Top Shelf: 11.2" W (28.5 cm)</p>';
+    expect(dimensionsCmFromSupplierText(d, '44.3" L x 11.8" W x 39.4" H')).toEqual({ length: 112.5, width: 30, height: 100 });
+  });
+
+  it("reads the cm triple when the feed numbers are inches above 120 (bouncy castle 342 x 255 x 209)", () => {
+    const d = 'Overall Dimensions: 134.6" L x 100.4" W x 82.3" H (342 x 255 x 209 cm) • Pool Dimensions: 66.9" L (170 cm)';
+    expect(dimensionsCmFromSupplierText(d, "342 cm L x 255 cm l x 209 cm H")).toEqual({ length: 342, width: 255, height: 209 });
+  });
+
+  it("falls back to the size label (inches converted, cm kept) and returns null when nothing is spelled out", () => {
+    expect(dimensionsCmFromSupplierText("no dims here", '30" L x 20" W x 10" H')).toEqual({ length: 76.2, width: 50.8, height: 25.4 });
+    expect(dimensionsCmFromSupplierText("", "77 cm L x 54 cm W x 179 cm H")).toEqual({ length: 77, width: 54, height: 179 });
+    expect(dimensionsCmFromSupplierText("Overall size is big", "Large")).toBeNull();
   });
 });

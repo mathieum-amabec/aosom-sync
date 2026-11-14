@@ -16,7 +16,8 @@
  * Every figure this module produces is an ESTIMATE and must be labelled as such in the UI.
  * The Anthropic console is the only source that knows the real split.
  */
-import { CLAUDE } from "./config";
+import { GEMINI } from "./config";
+import { llmModel } from "./llm-models";
 import type { LlmBudgetPool } from "./database";
 
 /** USD per million tokens, per model. Mirrors Anthropic's public list price. */
@@ -24,6 +25,13 @@ export const MODEL_PRICING: Record<string, { inputPerMTok: number; outputPerMTok
   "claude-sonnet-4-6": { inputPerMTok: 3, outputPerMTok: 15 },
   "claude-haiku-4-5": { inputPerMTok: 1, outputPerMTok: 5 },
   "claude-opus-4-8": { inputPerMTok: 5, outputPerMTok: 25 },
+  // Google list price, ai.google.dev/gemini-api/docs/pricing (checked 2026-10-02).
+  "gemini-3.5-flash-lite": { inputPerMTok: 0.3, outputPerMTok: 2.5 },
+  // gemini-3.8-flash: $0.75/$3.75 through 2026-12-31, then $1.50/$7.50 — bump this on 2027-01-01.
+  "gemini-3.8-flash": { inputPerMTok: 0.75, outputPerMTok: 3.75 },
+  // Image output is billed at $60/MTok (≈ $0.067 per 1K image); text/image input at $0.50. Third-party listings,
+  // 2026-10-20 — confirm on ai.google.dev before relying on the dashboard figure.
+  "gemini-3.1-flash-image": { inputPerMTok: 0.5, outputPerMTok: 60 },
 };
 
 /** Fallback when a pool runs a model absent from MODEL_PRICING — priced as Sonnet 4.6 so
@@ -46,12 +54,33 @@ export const ASSUMED_INPUT_SHARE: Record<LlmBudgetPool, number> = {
   // Vision maintenance passes are almost pure input: one image in, a two-line JSON verdict
   // out. Measured on the 1,730-product pos-1 audit: ~870 input / ~85 output tokens per call.
   maintenance: 0.92,
+  // Video-batch QC is the same call shape as `maintenance` (one frame in, a short JSON
+  // verdict out) — MEASURED directly, not assumed: 4 real calls against
+  // STRICT_DEMAND_GEN_PROMPT on 2026-09-22 gave 785-1,787 input / 60-68 output tokens
+  // depending on source resolution (avg in=1,036 out=66 -> 94.0% input). Re-measure if the
+  // prompt or the frame-extraction resolution changes materially.
+  video: 0.94,
+  // Auto-import: product copy (output-weighted like `batch`) plus several image/judge calls
+  // (input-weighted). Estimated, not measured — re-measure after the first live week.
+  import: 0.55,
+  // Room visualiser: two images + prompt in (~2,700), one 1K image out (~1,300). Estimated from the published
+  // per-image token counts, not measured — re-measure after the first live week.
+  visualiser: 0.67,
+  // Décorateur: a photo reading + the assistant's tool loop — the assistant's input-heavy shape.
+  decorateur: 0.9,
 };
 
 /** The model each pool currently runs. Reads config, so the CLAUDE_ASSISTANT_MODEL /
- *  CLAUDE_BATCH_MODEL overrides are reflected in the estimate without a code change. */
+ *  CLAUDE_BATCH_MODEL / CLAUDE_VIDEO_QC_MODEL overrides are reflected in the estimate
+ *  without a code change. */
 export function poolModel(pool: LlmBudgetPool): string {
-  return pool === "assistant" ? CLAUDE.MODEL_ASSISTANT : CLAUDE.MODEL_BATCH;
+  if (pool === "assistant") return GEMINI.MODEL_ASSISTANT;
+  if (pool === "video") return GEMINI.MODEL_VIDEO_QC;
+  if (pool === "visualiser") return GEMINI.MODEL_VISUALISER;
+  if (pool === "decorateur") return GEMINI.MODEL_DECORATOR;
+  // batch / maintenance: Gemini Flash-Lite carries most of the volume (captions, vision, product
+  // copy first tier); the long-form tier (3.8 Flash) is a minority, so this slightly under-prices.
+  return llmModel("lite");
 }
 
 /**

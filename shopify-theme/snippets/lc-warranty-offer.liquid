@@ -1,0 +1,214 @@
+{%- comment -%}
+  Garantie Tranquillité 24 mois — optional paid additional warranty under the buy buttons (PDP).
+  Final legal text: docs/legal-review/garantie-A-redaction.md (approved by Ameublo's lawyer 2026-11-02),
+  flow = its Annexe 2:
+    a) link "Avis sur les garanties légales" opens the prescribed notice ALONE (Annexe 1, Règlement art. 91.9 d)
+       and 91.10 as amended by décret 1459-2025) in a printable dialog; the checkbox stays DISABLED until opened,
+       and the opening time is kept on the cart line (_avis_garanties_ouvert) as proof;
+    b) free warranties line (art. 228.1 al. 2); c) unchecked box with price "taxes en sus";
+    d) plain-language summary visible without a click (Annexe 3), incl. the 10-day free cancellation;
+    e) link to the full terms (/pages/garantie-tranquillite).
+  Never offered on items tagged `sans-garantie-tranquillite` (art. 38.1 appliances — legal warranty of good
+  working order —, spas/pools/inflatables, final sale), nor above 2 000 $ (no price bracket).
+
+  Sold as the internal product `garantie-tranquillite-2-ans` (variant per 10 $ bracket, 10 %). OFF until the
+  shop metafield custom.warranty_enabled is true, or ?lc_garantie=1 for QA (remembered for the session).
+  Accepts: product (Object), section_id (String)
+{%- endcomment -%}
+{%- assign lc_w = all_products['garantie-tranquillite-2-ans'] -%}
+{%- if lc_w != blank and lc_w.available and product.handle != lc_w.handle and product.price > 0 -%}
+{%- unless product.tags contains 'sans-garantie-tranquillite' or product.tags contains 'garantie-legale-6ans' or product.tags contains 'garantie-legale-5ans' -%}
+  {%- assign loc = request.locale.iso_code | downcase -%}
+  {%- assign en = false -%}{%- if loc == 'en' -%}{%- assign en = true -%}{%- endif -%}
+  {%- assign lc_w_enabled = shop.metafields.custom.warranty_enabled.value | default: false -%}
+  {%- assign lc_terms_url = routes.root_url | append: '/pages/garantie-tranquillite' | replace: '//pages', '/pages' -%}
+  <div class="lc-warranty" data-lc-warranty data-section-id="{{ section_id }}" data-enabled="{{ lc_w_enabled }}"
+       data-product-title="{{ product.title | escape }}" hidden>
+    <button type="button" class="lc-warranty__notice-link" data-lc-warranty-open>
+      {%- if en -%}Notice on legal warranties — read before adding a warranty{%- else -%}Avis sur les garanties légales — à lire avant d’ajouter une garantie{%- endif -%}
+    </button>
+    <p class="lc-warranty__free">
+      {%- if en -%}<strong>Free warranties:</strong> legal warranty + Ameublo 1-year base warranty.{%- else -%}<strong>Garanties gratuites :</strong> garantie légale + garantie de base Ameublo 1 an.{%- endif -%}
+    </p>
+    <label class="lc-warranty__opt">
+      <input type="checkbox" data-lc-warranty-check disabled>
+      <span>
+        <strong>{%- if en -%}Add the Peace-of-Mind Warranty, 24 months{%- else -%}Ajouter la Garantie Tranquillité 24 mois{%- endif -%}</strong>
+        <span data-lc-warranty-price></span>
+        <span class="lc-warranty__hint" data-lc-warranty-hint>{%- if en -%}(open the notice above first){%- else -%}(ouvrez d’abord l’avis ci-dessus){%- endif -%}</span>
+      </span>
+    </label>
+    <div class="lc-warranty__summary">
+      {%- if en -%}
+        <p><strong>In short.</strong> <strong>Covers</strong> manufacturing, material or design defects that keep the item from working properly or make it unsafe, in normal home use, for 24 months after delivery: parts, repair or replacement at our cost.</p>
+        <p><strong>Does not cover:</strong> accidents (falls, stains, spills), pets, normal wear (foam softening, pilling, fading), abuse or ignoring the instructions and maximum load, commercial or rental use, weather and improper outdoor use, damage from moving, modifications or third-party repairs, cosmetic defects. <em>Full list in the terms.</em></p>
+        <p>Your free warranties remain in full: legal warranty + Ameublo 1-year base warranty (the first 12 months overlap). <strong>Cancel free of charge within 10 days of your order</strong>, and under our terms up to 30 days after delivery; after that, prorated refund. Provided by Ameublo Direct, no insurer. One warranty per item. Not transferable.</p>
+      {%- else -%}
+        <p><strong>En bref.</strong> <strong>Couvre</strong> les défauts de fabrication, de matériaux ou de conception qui empêchent l’article de bien fonctionner ou le rendent fragile, lors d’un usage normal à la maison, pendant 24 mois après la livraison : pièces, réparation ou remplacement à nos frais.</p>
+        <p><strong>Ne couvre pas :</strong> les accidents (chutes, taches, déversements), les animaux, l’usure normale (mousse qui s’assouplit, boulochage, décoloration), l’abus ou le non-respect de la notice et de la charge maximale, l’usage commercial ou locatif, les intempéries et la mauvaise utilisation extérieure, les dommages d’un déménagement, de modifications ou de réparations par un tiers, les défauts esthétiques. <em>Liste complète dans les conditions.</em></p>
+        <p>Vos garanties gratuites restent entières : garantie légale + garantie de base Ameublo 1 an (les 12 premiers mois chevauchent la garantie de base). <strong>Annulable sans frais dans les 10 jours de la commande</strong>, et selon nos conditions jusqu’à 30 jours après la livraison ; ensuite, remboursement au prorata. Accordée par Ameublo Direct, sans assureur. Une garantie par article. Non cessible.</p>
+      {%- endif -%}
+      <p><a href="{{ lc_terms_url }}" target="_blank" rel="noopener">{%- if en -%}Full terms (printable){%- else -%}Conditions complètes (imprimables){%- endif -%}</a></p>
+    </div>
+
+    <dialog class="lc-wnotice" data-lc-warranty-dialog aria-labelledby="LcWNotice-{{ section_id }}">
+      <div class="lc-wnotice__body" data-lc-warranty-notice>
+        <h2 id="LcWNotice-{{ section_id }}" class="lc-wnotice__h">AVIS SUR LES GARANTIES LÉGALES</h2>
+        <p class="lc-wnotice__box">La loi accorde une garantie gratuite sur le bien que vous achetez ou louez : il doit pouvoir servir à son usage normal pendant une durée raisonnable.</p>
+        <div class="lc-wnotice__box">
+          <p>La Loi sur la protection du consommateur accorde des garanties gratuites sur tous les biens que vous achetez ou louez d’un commerçant.</p>
+          <p>Le bien doit pouvoir servir :</p>
+          <p>— à l’usage auquel il est normalement destiné (article 37 de la Loi);</p>
+          <p>— à un usage normal pendant une durée raisonnable, qui peut varier selon le prix payé, les dispositions du contrat et les conditions d’utilisation (article 38 de la Loi).</p>
+        </div>
+        <p class="lc-wnotice__foot">Pour plus de renseignements sur les garanties, informez-vous auprès de l’Office de la protection du consommateur au Québec.ca/garanties-consommateur.</p>
+        {%- if en -%}
+          <hr>
+          <h2 class="lc-wnotice__h">NOTICE ON LEGAL WARRANTIES</h2>
+          <p class="lc-wnotice__box">The law provides a free warranty on the goods you buy or lease: they must be fit for normal use for a reasonable length of time.</p>
+          <div class="lc-wnotice__box">
+            <p>The Consumer Protection Act provides free warranties on all goods you buy or lease from a merchant.</p>
+            <p>The goods must be fit:</p>
+            <p>— for the purpose for which they are ordinarily used (section 37 of the Act);</p>
+            <p>— for normal use for a reasonable length of time, which may vary according to the price paid, the terms of the contract and the conditions of use (section 38 of the Act).</p>
+          </div>
+          <p class="lc-wnotice__foot">For more information on warranties, contact the Office de la protection du consommateur at Québec.ca/garanties-consommateur.</p>
+        {%- endif -%}
+      </div>
+      <div class="lc-wnotice__actions">
+        <button type="button" class="button button--secondary" data-lc-warranty-print>{%- if en -%}Print / Save{%- else -%}Imprimer / Enregistrer{%- endif -%}</button>
+        <button type="button" class="button" data-lc-warranty-close>{%- if en -%}Close{%- else -%}Fermer{%- endif -%}</button>
+      </div>
+    </dialog>
+
+    <script type="application/json" data-lc-warranty-tiers>
+      {
+        "tiers": [{%- for v in lc_w.variants -%}{%- if v.available -%}{"max": {{ v.option1 | plus: 0 }}, "id": {{ v.id }}, "price": {{ v.price }}}{%- unless forloop.last -%},{%- endunless -%}{%- endif -%}{%- endfor -%}],
+        "variants": [{%- for v in product.variants -%}{"id": {{ v.id }}, "price": {{ v.price }}, "title": {{ v.title | json }}, "sku": {{ v.sku | json }}}{%- unless forloop.last -%},{%- endunless -%}{%- endfor -%}],
+        "en": {{ en | json }}
+      }
+    </script>
+  </div>
+  <style>
+    .lc-warranty{margin:.2rem 0 1.4rem;padding:1.1rem 1.2rem;border:1px solid rgba(26,35,64,.18);border-radius:10px;background:#fff;font-size:1.3rem;line-height:1.45;color:#1A2340}
+    .lc-warranty__notice-link{all:unset;cursor:pointer;display:block;margin:0 0 .6rem;font-weight:700;text-decoration:underline;text-underline-offset:2px;color:#1A2340}
+    .lc-warranty__free{margin:0 0 .8rem}
+    .lc-warranty__opt{display:flex;gap:.9rem;align-items:flex-start;cursor:pointer}
+    .lc-warranty__opt input{width:2rem;height:2rem;margin-top:.15rem;flex:0 0 auto;accent-color:#1A2340}
+    .lc-warranty__opt input:disabled+span{opacity:.6}
+    .lc-warranty__opt > span{display:flex;flex-direction:column;gap:.1rem}
+    .lc-warranty__hint{font-size:1.15rem;font-style:italic}
+    .lc-warranty__summary{margin-top:.8rem;font-size:1.2rem}
+    .lc-warranty__summary p{margin:0 0 .5rem}
+    .lc-warranty__summary a{color:inherit;text-decoration:underline}
+    .lc-wnotice{max-width:640px;width:calc(100% - 32px);border:0;border-radius:12px;padding:0;color:#000;background:#fff}
+    .lc-wnotice::backdrop{background:rgba(0,0,0,.55)}
+    .lc-wnotice__body{padding:24px 22px 8px;max-height:70vh;overflow:auto;font-family:Arial,Helvetica,sans-serif}
+    .lc-wnotice__h{margin:0 0 14px;font-size:19px;font-weight:700;text-transform:uppercase;letter-spacing:0;font-family:inherit}
+    .lc-wnotice__box{border:2px solid #000;padding:10px 12px;margin:0 0 14px;font-size:19px;line-height:1.4}
+    .lc-wnotice__box p{margin:0 0 6px;font-size:19px}
+    .lc-wnotice__foot{font-size:16px;margin:0 0 12px}
+    .lc-wnotice__actions{display:flex;gap:10px;justify-content:flex-end;padding:12px 22px 20px}
+  </style>
+  <script>
+    (function () {
+      var box = document.querySelector('[data-lc-warranty][data-section-id="{{ section_id }}"]');
+      if (!box || box.dataset.bound) return;
+      box.dataset.bound = '1';
+      try { if (new URLSearchParams(location.search).get('lc_garantie') === '1') sessionStorage.setItem('lcGarantie', '1'); } catch (e) {}
+      var preview = false;
+      try { preview = sessionStorage.getItem('lcGarantie') === '1'; } catch (e) {}
+      if (box.dataset.enabled !== 'true' && !preview) return;
+
+      var cfg = JSON.parse(box.querySelector('[data-lc-warranty-tiers]').textContent);
+      if (!cfg.tiers.length) return;
+      cfg.tiers.sort(function (a, b) { return a.max - b.max; });
+      var en = cfg.en;
+      var check = box.querySelector('[data-lc-warranty-check]');
+      var hint = box.querySelector('[data-lc-warranty-hint]');
+      var priceEl = box.querySelector('[data-lc-warranty-price]');
+      var dialog = box.querySelector('[data-lc-warranty-dialog]');
+      var section = box.dataset.sectionId;
+      var mainForm = document.getElementById('product-form-' + section);
+      var noticeOpenedAt = '';
+
+      function selectedVariant() {
+        var input = mainForm && mainForm.querySelector('input[name="id"]');
+        var id = input ? Number(input.value) : cfg.variants[0].id;
+        return cfg.variants.find(function (v) { return v.id === id; }) || cfg.variants[0];
+      }
+      function tierFor(cents) {
+        var d = cents / 100;
+        return cfg.tiers.find(function (t) { return d <= t.max; }) || null;
+      }
+      function money(cents) {
+        return en ? '$' + (cents / 100).toFixed(2) : (cents / 100).toFixed(2).replace('.', ',') + ' $';
+      }
+      function refresh() {
+        var t = tierFor(selectedVariant().price);
+        if (!t) { box.hidden = true; check.checked = false; return; }
+        box.hidden = false;
+        priceEl.textContent = '— ' + money(t.price) + (en ? ' (plus taxes)' : ' (taxes en sus)');
+      }
+      refresh();
+      document.addEventListener('change', function (e) {
+        if (e.target.closest && e.target.closest('variant-selects')) setTimeout(refresh, 400);
+      });
+      var idInput = mainForm && mainForm.querySelector('input[name="id"]');
+      if (idInput) new MutationObserver(refresh).observe(idInput, { attributes: true, attributeFilter: ['value'] });
+
+      // a) the notice must be opened before the box can be ticked
+      box.querySelector('[data-lc-warranty-open]').addEventListener('click', function () {
+        if (dialog.showModal) dialog.showModal(); else dialog.setAttribute('open', '');
+        if (!noticeOpenedAt) noticeOpenedAt = new Date().toISOString();
+        check.disabled = false;
+        if (hint) hint.hidden = true;
+      });
+      box.querySelector('[data-lc-warranty-close]').addEventListener('click', function () {
+        dialog.close ? dialog.close() : dialog.removeAttribute('open');
+      });
+      box.querySelector('[data-lc-warranty-print]').addEventListener('click', function () {
+        var w = window.open('', '_blank');
+        if (!w) return window.print();
+        w.document.write('<!doctype html><meta charset="utf-8"><title>Avis sur les garanties légales</title><style>body{font-family:Arial,sans-serif;max-width:640px;margin:24px auto;color:#000}h2{font-size:19px;text-transform:uppercase}.lc-wnotice__box{border:2px solid #000;padding:10px 12px;margin:0 0 14px;font-size:19px}.lc-wnotice__foot{font-size:16px}</style>' + box.querySelector('[data-lc-warranty-notice]').innerHTML);
+        w.document.close();
+        w.focus();
+        w.print();
+      });
+
+      // Add the warranty line first, then let the original submit proceed (product form or buy-now form).
+      var passing = false;
+      function qtyFor(form) {
+        var q = form.querySelector('input[name="quantity"]') || document.querySelector('#Quantity-' + section);
+        return Math.max(1, parseInt(q && q.value, 10) || 1);
+      }
+      document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (passing || box.hidden || !check.checked || check.disabled) return;
+        if (form !== mainForm && !form.classList.contains('buy-now-form')) return;
+        var v = selectedVariant();
+        var t = tierFor(v.price);
+        if (!t) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        var label = box.dataset.productTitle + (v.title && v.title !== 'Default Title' ? ' — ' + v.title : '') + (v.sku ? ' (' + v.sku + ')' : '');
+        var props = {};
+        props[en ? 'For' : 'Pour'] = label;
+        props._lc_warranty_for = String(v.id);
+        props._avis_garanties_ouvert = noticeOpenedAt;
+        props._conditions_version = '1.0 (2026-11-02)';
+        fetch('/cart/add.js', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ items: [{ id: t.id, quantity: qtyFor(form), properties: props }] }),
+        })
+          .catch(function () {})
+          .then(function () {
+            passing = true;
+            try { form.requestSubmit ? form.requestSubmit() : form.submit(); } finally { passing = false; }
+          });
+      }, true);
+    })();
+  </script>
+{%- endunless -%}
+{%- endif -%}

@@ -147,6 +147,14 @@ export const MUSIC_FAMILIES: Record<string, string[]> = {
   enfants: ["mixkit-pop-250.mp3"],
   // Playful funk for pet products.
   animaux: ["mixkit-funk-1140.mp3"],
+  // Christmas/seasonal-decor products (Home Furnishings > Holiday & Seasonal). "Holiday /
+  // Seasonal 3" by Diego Nava — same artist already verified for `bureau` above (Golden
+  // Storm), same Mixkit Free License (isAccessibleForFree: true,
+  // https://mixkit.co/license/#musicFree, verified 2026-09-21). Classical/bells/mallets,
+  // 2:46, festive without being a vocal carol.
+  // src/audio/ is gitignored, so the file does not travel with the repo. Re-fetch:
+  //   curl -L https://assets.mixkit.co/music/510/510.mp3 -o src/audio/mixkit-holiday-seasonal-510.mp3
+  noel: ["mixkit-holiday-seasonal-510.mp3"],
 };
 
 /**
@@ -170,6 +178,8 @@ export const TRACK_GAIN: Record<string, number> = {
   "mixkit-lounge-695.mp3": 2.26,
   "mixkit-pop-250.mp3": 2.02,
   "mixkit-funk-1140.mp3": 2.85,
+  // measured mean_volume -9.8dB, close to the -10.5dB reference already used for the pool.
+  "mixkit-holiday-seasonal-510.mp3": 0.92,
 };
 
 /** Fallback family when the product type is unknown or matches nothing. */
@@ -184,6 +194,9 @@ export const DEFAULT_FAMILY = "exterieur";
 export function musicFamilyFor(productType: string | null | undefined): string {
   const t = String(productType ?? "");
   if (!t) return DEFAULT_FAMILY;
+  // Checked BEFORE the generic Home Furnishings match below — Holiday & Seasonal is a child
+  // of Home Furnishings in the Aosom taxonomy, so the order matters here.
+  if (/Holiday & Seasonal/.test(t)) return "noel";
   if (/^Patio & Garden/.test(t)) return "exterieur";
   if (/^Pet Supplies/.test(t)) return "animaux";
   if (/^Toys & Games/.test(t)) return "enfants";

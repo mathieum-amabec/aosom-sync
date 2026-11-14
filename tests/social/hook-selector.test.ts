@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mapProductTypeToScope, buildHookedPrompt, buildHookedPromptEn, selectHook } from "@/lib/hook-selector";
+import { mapProductTypeToScope, hashtagsForScope, buildHookedPrompt, buildHookedPromptEn, selectHook } from "@/lib/hook-selector";
 import type { HookSelection } from "@/lib/hook-selector";
 import * as database from "@/lib/database";
 import { HOOKS_SEED } from "@/lib/seed/hooks-seed";
@@ -93,6 +93,56 @@ describe("mapProductTypeToScope", () => {
 
   it("maps Furniture → mobilier_indoor", () => {
     expect(mapProductTypeToScope("Furniture")).toBe("mobilier_indoor");
+  });
+
+  // ── Seasonal decorations — regression: fell through to mobilier_indoor and could
+  // open a Halloween-decoration post with a furniture-shopping hook ("this bedroom
+  // collection..."). See draft #938 (sku 830-098) in the 2026-09-18 investigation.
+  it("maps Home Furnishings > Holiday & Seasonal > Halloween Decorations → seasonal_decor", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Holiday & Seasonal > Halloween Decorations")).toBe(
+      "seasonal_decor",
+    );
+  });
+
+  it("maps Home Furnishings > Holiday & Seasonal > Christmas Trees > Pencil Christmas Trees → seasonal_decor", () => {
+    expect(
+      mapProductTypeToScope("Home Furnishings > Holiday & Seasonal > Christmas Trees > Pencil Christmas Trees"),
+    ).toBe("seasonal_decor");
+  });
+
+  // 2026-11-01: Aosom moved the branch to the top level; a bare "Holiday" rule sent it to bedroom_decor.
+  it("maps top-level Holiday & Seasonal > Christmas … → seasonal_decor (not bedroom_decor)", () => {
+    expect(mapProductTypeToScope("Holiday & Seasonal > Christmas Trees > Pencil Christmas Tree")).toBe("seasonal_decor");
+    expect(mapProductTypeToScope("Holiday & Seasonal > Halloween Decorations")).toBe("seasonal_decor");
+    expect(mapProductTypeToScope("Holiday & Seasonal")).toBe("seasonal_decor");
+  });
+
+  it("tags a Christmas product with Christmas hashtags only", () => {
+    const fr = hashtagsForScope("seasonal_decor", "FR", "Holiday & Seasonal > Christmas Trees > Pre Lit Christmas Trees");
+    expect(fr).toContain("#noel");
+    expect(fr).not.toContain("#halloween");
+    expect(fr).not.toContain("#chambre");
+    expect(hashtagsForScope("seasonal_decor", "EN", "Holiday & Seasonal > Christmas Decorations")).toContain("#christmas");
+    expect(hashtagsForScope("seasonal_decor", "FR", "Holiday & Seasonal > Halloween Decorations")).not.toContain("#noel");
+    expect(hashtagsForScope("seasonal_decor", "FR")).toContain("#decosaisonniere");
+  });
+
+  it("maps Home Furnishings > Home Décor > Artificial Trees → seasonal_decor (not bedroom_decor)", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Home Décor > Artificial Trees")).toBe("seasonal_decor");
+  });
+
+  // ── Appliances / Bathroom — real taxonomy prefixes these "Home Furnishings > ...",
+  // so the bare "Appliances" rule never matched and they fell through to mobilier_indoor.
+  it("maps Home Furnishings > Appliances > Small Kitchen Appliances → storage_kitchen", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Appliances > Small Kitchen Appliances")).toBe(
+      "storage_kitchen",
+    );
+  });
+
+  it("maps Home Furnishings > Bathroom Furniture > Bathroom Cabinets → storage_kitchen", () => {
+    expect(mapProductTypeToScope("Home Furnishings > Bathroom Furniture > Bathroom Cabinets")).toBe(
+      "storage_kitchen",
+    );
   });
 
   // ── Universal fallback
@@ -229,6 +279,11 @@ describe("selectHook", () => {
   it("maps Toys & Games to kids_toys_sport scope before querying", async () => {
     await selectHook("FR", "Toys & Games", null);
     expect(mockSelectCompatibleHooks.mock.calls[0][0]).toBe("kids_toys_sport");
+  });
+
+  it("maps a Halloween decoration to seasonal_decor, not mobilier_indoor (regression)", async () => {
+    await selectHook("EN", "Home Furnishings > Holiday & Seasonal > Halloween Decorations", null);
+    expect(mockSelectCompatibleHooks.mock.calls[0][0]).toBe("seasonal_decor");
   });
 
   it("passes language correctly to selectCompatibleHooks", async () => {

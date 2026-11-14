@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 import path from "path";
 import fs from "fs";
-import { isValidCheckpoint } from "@/lib/database";
+import { isValidCheckpoint, isValidPriceReconcileCheckpoint, filterFloorIncidents, type PriceCorrectionLog } from "@/lib/database";
 import { PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
 import { storeLink, STOREFRONT_BASE_URL } from "@/lib/insights";
 
@@ -148,6 +148,84 @@ describe("isValidCheckpoint (GAP 1 — type guard)", () => {
   });
 });
 
+describe("isValidPriceReconcileCheckpoint (LAYER 2 rotation checkpoint)", () => {
+  const valid = {
+    pageInfo: "abc123",
+    sweepNumber: 3,
+    sweepStartedAt: 1_700_000_000,
+    pagesThisSweep: 4,
+    variantsScannedThisSweep: 1000,
+    driftThisSweep: 2,
+    correctedThisSweep: 2,
+    lastSweepCompletedAt: 1_699_990_000,
+  };
+
+  it("returns true for a well-formed checkpoint mid-sweep", () => {
+    expect(isValidPriceReconcileCheckpoint(valid)).toBe(true);
+  });
+
+  it("accepts null for pageInfo (start of a sweep) and lastSweepCompletedAt (before the first sweep ever finishes)", () => {
+    expect(isValidPriceReconcileCheckpoint({ ...valid, pageInfo: null, lastSweepCompletedAt: null })).toBe(true);
+  });
+
+  it("returns false when a numeric field is missing", () => {
+    const rest: Record<string, unknown> = { ...valid };
+    delete rest.pagesThisSweep;
+    expect(isValidPriceReconcileCheckpoint(rest)).toBe(false);
+  });
+
+  it("returns false when pageInfo is neither a string nor null", () => {
+    expect(isValidPriceReconcileCheckpoint({ ...valid, pageInfo: 123 })).toBe(false);
+  });
+
+  it("returns false for null, primitives, and empty object", () => {
+    expect(isValidPriceReconcileCheckpoint(null)).toBe(false);
+    expect(isValidPriceReconcileCheckpoint("string")).toBe(false);
+    expect(isValidPriceReconcileCheckpoint({})).toBe(false);
+  });
+});
+
+describe("filterFloorIncidents (TASK 3 — unified price floor incident log)", () => {
+  const entry = (over: Partial<PriceCorrectionLog> = {}): PriceCorrectionLog => ({
+    sku: "A", shopifyProductId: "p1", oldPriceShopify: 100, newPriceTurso: 120, reason: "reconciliation",
+    ...over,
+  });
+
+  it("keeps a reconciliation correction that moved the price UP (was below floor)", () => {
+    expect(filterFloorIncidents([entry({ oldPriceShopify: 90, newPriceTurso: 100 })])).toHaveLength(1);
+  });
+
+  it("keeps a sync_retry correction that moved the price UP", () => {
+    expect(filterFloorIncidents([entry({ reason: "sync_retry", oldPriceShopify: 90, newPriceTurso: 100 })])).toHaveLength(1);
+  });
+
+  it("drops a correction that moved the price DOWN (was above floor, not a loss)", () => {
+    expect(filterFloorIncidents([entry({ oldPriceShopify: 120, newPriceTurso: 100 })])).toHaveLength(0);
+  });
+
+  it("drops an exact no-op (old === new)", () => {
+    expect(filterFloorIncidents([entry({ oldPriceShopify: 100, newPriceTurso: 100 })])).toHaveLength(0);
+  });
+
+  it("drops hausse_20pct even though it structurally looks like old < new — it's a HELD increase, not a fix", () => {
+    expect(filterFloorIncidents([entry({ reason: "hausse_20pct", oldPriceShopify: 90, newPriceTurso: 120 })])).toHaveLength(0);
+  });
+
+  it("filters a mixed batch, keeping only the genuine below-floor fixes", () => {
+    const entries = [
+      entry({ sku: "UP", oldPriceShopify: 80, newPriceTurso: 100 }), // keep
+      entry({ sku: "DOWN", oldPriceShopify: 130, newPriceTurso: 100 }), // drop
+      entry({ sku: "SPIKE", reason: "hausse_20pct", oldPriceShopify: 80, newPriceTurso: 130 }), // drop
+      entry({ sku: "SYNC_UP", reason: "sync_retry", oldPriceShopify: 40, newPriceTurso: 45 }), // keep
+    ];
+    expect(filterFloorIncidents(entries).map((e) => e.sku)).toEqual(["UP", "SYNC_UP"]);
+  });
+
+  it("is empty for an empty input", () => {
+    expect(filterFloorIncidents([])).toEqual([]);
+  });
+});
+
 describe("completeSyncRun WHERE status='running' guard (GAP 3)", () => {
   let db: Client;
 
@@ -275,6 +353,38 @@ describe("getProductsSnapshot — SQL shape (direct SQL)", () => {
 
     expect(result.rows[0].shopify_product_id).toBeNull();
     expect(result.rows[0].sku).toBe("SKU-UNIMPORTED");
+  });
+});
+
+describe("getCatalogFreshnessCandidates — SQL shape (direct SQL)", () => {
+  let db: Client;
+
+  beforeEach(async () => {
+    db = setupTestDb();
+    await db.execute(`CREATE TABLE IF NOT EXISTS products (
+      sku TEXT PRIMARY KEY, qty INTEGER, last_seen_at INTEGER, shopify_product_id TEXT
+    )`);
+  });
+  afterEach(async () => { db.close(); if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH); });
+
+  // Mirror of getCatalogFreshnessCandidates' query.
+  const CANDIDATES_SQL = `SELECT sku, qty, last_seen_at FROM products WHERE qty != 0`;
+
+  it("returns only qty != 0 rows, imported or not, with last_seen_at intact", async () => {
+    await db.batch([
+      { sql: `INSERT INTO products (sku, qty, last_seen_at, shopify_product_id) VALUES (?, ?, ?, ?)`, args: ["IN-STOCK-IMPORTED", 5, 1700000000, "shop-1"] },
+      { sql: `INSERT INTO products (sku, qty, last_seen_at, shopify_product_id) VALUES (?, ?, ?, ?)`, args: ["IN-STOCK-NEVER-IMPORTED", 3, 1700000500, null] },
+      { sql: `INSERT INTO products (sku, qty, last_seen_at, shopify_product_id) VALUES (?, ?, ?, ?)`, args: ["ALREADY-ZERO", 0, 1600000000, null] },
+    ]);
+
+    const result = await db.execute(CANDIDATES_SQL);
+    const skus = result.rows.map((r) => r.sku as string).sort();
+
+    // ALREADY-ZERO is excluded (nothing to do); both qty!=0 rows come back regardless
+    // of shopify_product_id — the population is deliberately import-status-agnostic.
+    expect(skus).toEqual(["IN-STOCK-IMPORTED", "IN-STOCK-NEVER-IMPORTED"]);
+    const bySku = Object.fromEntries(result.rows.map((r) => [r.sku as string, r]));
+    expect(Number(bySku["IN-STOCK-NEVER-IMPORTED"].last_seen_at)).toBe(1700000500);
   });
 });
 
@@ -475,6 +585,98 @@ describe("getEligibleHighlightCandidates SQL logic (two-step pattern)", () => {
   });
 });
 
+// ─── Trend-aware stock-highlight selection (Part B Task 8, 2026-09-18) ────────
+describe("isTrendSelectionTrialActive (pure, no DB)", () => {
+  it("is active when now is before the trial-until date", async () => {
+    const { isTrendSelectionTrialActive } = await import("@/lib/database");
+    const nowMs = Date.parse("2026-09-25T00:00:00Z");
+    expect(isTrendSelectionTrialActive("2026-10-09T00:00:00Z", nowMs)).toBe(true);
+  });
+
+  it("is inactive once now is past the trial-until date — falls back, not forward", async () => {
+    const { isTrendSelectionTrialActive } = await import("@/lib/database");
+    const nowMs = Date.parse("2026-10-10T00:00:00Z");
+    expect(isTrendSelectionTrialActive("2026-10-09T00:00:00Z", nowMs)).toBe(false);
+  });
+
+  it("is inactive at the exact expiry instant (strict <, not <=)", async () => {
+    const { isTrendSelectionTrialActive } = await import("@/lib/database");
+    const untilMs = Date.parse("2026-10-09T00:00:00Z");
+    expect(isTrendSelectionTrialActive("2026-10-09T00:00:00Z", untilMs)).toBe(false);
+  });
+
+  it("is inactive when the setting is unset (null) — never trend-dependent by default", async () => {
+    const { isTrendSelectionTrialActive } = await import("@/lib/database");
+    expect(isTrendSelectionTrialActive(null)).toBe(false);
+  });
+
+  it("is inactive on an unparseable date string — fail-safe, not a thrown error", async () => {
+    const { isTrendSelectionTrialActive } = await import("@/lib/database");
+    expect(isTrendSelectionTrialActive("not-a-date")).toBe(false);
+  });
+});
+
+// getEligibleHighlightCandidatesTrendAware itself connects to Turso via ensureSchema()
+// (same limitation as getEligibleHighlightCandidates above), so — matching that
+// function's own test convention — these validate the trending-first merge logic the
+// function applies, not the full function end-to-end.
+describe("getEligibleHighlightCandidatesTrendAware merge logic (SQL + ranking, direct)", () => {
+  let db: ReturnType<typeof setupTestDb>;
+
+  const CREATE_PRODUCTS = `CREATE TABLE IF NOT EXISTS products (
+    sku TEXT PRIMARY KEY, name TEXT, price REAL, qty INTEGER,
+    shopify_product_id TEXT, last_posted_at INTEGER
+  )`;
+
+  beforeEach(async () => {
+    db = setupTestDb();
+    await db.execute(CREATE_PRODUCTS);
+  });
+  afterEach(async () => {
+    db.close();
+    if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
+  });
+
+  /** Mirrors the trending-first merge inside getEligibleHighlightCandidatesTrendAware. */
+  function mergeTrendingFirst(eligibleSkus: string[], trendingSkusRanked: string[], limit: number): string[] {
+    const eligible = new Set(eligibleSkus);
+    const trendingEligible = trendingSkusRanked.filter((s) => eligible.has(s));
+    const rest = eligibleSkus.filter((s) => !trendingEligible.includes(s));
+    return [...trendingEligible, ...rest].slice(0, limit);
+  }
+
+  it("during the trial, trending-and-eligible SKUs are placed before the random rest", async () => {
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-COLD", "Cold", 10, 5, "shop-cold", null] });
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-HOT", "Hot", 20, 3, "shop-hot", null] });
+    const { rows } = await db.execute(`SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND qty > 0`);
+    const eligible = rows.map((r) => (r as Record<string, unknown>).sku as string);
+
+    const picked = mergeTrendingFirst(eligible, ["SKU-HOT"], 2);
+    expect(picked[0]).toBe("SKU-HOT");
+    expect(picked).toEqual(expect.arrayContaining(["SKU-HOT", "SKU-COLD"]));
+  });
+
+  it("a trending SKU that is not eligible (e.g. out of stock) is skipped, not force-included", async () => {
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-INSTOCK", "In stock", 10, 5, "shop-a", null] });
+    // SKU-OOS is trending per trend_scores but has qty=0, so never appears in the eligible-SKU query.
+    const { rows } = await db.execute(`SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND qty > 0`);
+    const eligible = rows.map((r) => (r as Record<string, unknown>).sku as string);
+
+    const picked = mergeTrendingFirst(eligible, ["SKU-OOS", "SKU-INSTOCK"], 5);
+    expect(picked).toEqual(["SKU-INSTOCK"]);
+  });
+
+  it("no trending/eligible overlap at all still returns the full random-fallback pool", async () => {
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-1", "P1", 10, 5, "shop-1", null] });
+    await db.execute({ sql: `INSERT INTO products VALUES (?, ?, ?, ?, ?, ?)`, args: ["SKU-2", "P2", 20, 3, "shop-2", null] });
+    const { rows } = await db.execute(`SELECT sku FROM products WHERE shopify_product_id IS NOT NULL AND qty > 0`);
+    const eligible = rows.map((r) => (r as Record<string, unknown>).sku as string);
+
+    const picked = mergeTrendingFirst(eligible, [], 5);
+    expect(picked.sort()).toEqual(["SKU-1", "SKU-2"]);
+  });
+});
+
 // ─── getProducts — sort by best_sellers + price_drop (direct SQL) ────────────
 
 describe("getProducts sort — best_sellers and price_drop (direct SQL)", () => {
@@ -613,6 +815,81 @@ describe("getProducts sort — best_sellers and price_drop (direct SQL)", () => 
     const dropB = Number((rows[1] as unknown as Record<string, unknown>).drop_pct);
     expect(dropA).toBe(50.0);
     expect(dropB).toBe(10.0);
+  });
+});
+
+// ─── getProducts — sort by "newest" (direct SQL) ──────────────────────────────
+// Mirror of getProducts' default branch with sort=newest: ORDER BY created_at DESC,
+// sku ASC. created_at is the products row's first-ever INSERT timestamp (DB default,
+// never touched by the upsert's ON CONFLICT DO UPDATE) — the best available proxy for
+// "first seen in the Aosom feed" (see catalog-freshness investigation, 2026-09-20).
+
+describe("getProducts sort — newest (direct SQL)", () => {
+  let db: ReturnType<typeof setupTestDb>;
+
+  beforeEach(async () => {
+    db = setupTestDb();
+    await db.batch([
+      `CREATE TABLE IF NOT EXISTS products (
+        sku TEXT PRIMARY KEY, name TEXT, price REAL, qty INTEGER,
+        color TEXT, product_type TEXT, image1 TEXT, shopify_product_id TEXT,
+        created_at INTEGER DEFAULT (strftime('%s','now'))
+      )`,
+    ]);
+  });
+
+  afterEach(async () => {
+    db.close();
+    if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
+  });
+
+  const NEWEST_SQL = `
+    WITH filtered AS (SELECT sku, name, price, qty, color, product_type, image1, shopify_product_id, created_at FROM products)
+    SELECT sku, created_at FROM filtered
+    ORDER BY created_at DESC, sku ASC`;
+
+  it("orders genuinely new arrivals ahead of older ones, most recent first", async () => {
+    const day = 86400;
+    const now = Math.floor(Date.now() / 1000);
+    await db.batch([
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-OLDEST", "Old", 10, 1, now - 30 * day] },
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-NEWEST", "Newest", 10, 1, now] },
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-MIDDLE", "Middle", 10, 1, now - 5 * day] },
+    ]);
+
+    const rows = (await db.execute(NEWEST_SQL)).rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
+    expect(rows).toEqual(["SKU-NEWEST", "SKU-MIDDLE", "SKU-OLDEST"]);
+  });
+
+  it("tiebreaks same-timestamp rows (e.g. a bulk-seed day) deterministically by sku ASC", async () => {
+    // Reproduces prod: 85% of rows share one bulk-seed created_at. The sort must still
+    // be stable/deterministic across pages, not DB-insertion-order-dependent.
+    const seedDay = 1775894400;
+    await db.batch([
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-C", "C", 10, 1, seedDay] },
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-A", "A", 10, 1, seedDay] },
+      { sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-B", "B", 10, 1, seedDay] },
+    ]);
+
+    const rows = (await db.execute(NEWEST_SQL)).rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
+    expect(rows).toEqual(["SKU-A", "SKU-B", "SKU-C"]); // same created_at → sku ASC
+  });
+
+  it("a genuinely new SKU always outranks the entire bulk-seed cohort, regardless of cohort size", async () => {
+    const seedDay = 1775894400;
+    // Zero-padded so string sku ASC matches numeric order — SEED-10 < SEED-2
+    // lexicographically otherwise, which would make this assertion wrong, not the code.
+    const seedSku = (i: number) => `SEED-${String(i).padStart(2, "0")}`;
+    const inserts = [];
+    for (let i = 0; i < 20; i++) {
+      inserts.push({ sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: [seedSku(i), `Seed ${i}`, 10, 1, seedDay] });
+    }
+    inserts.push({ sql: `INSERT INTO products (sku, name, price, qty, created_at) VALUES (?, ?, ?, ?, ?)`, args: ["SKU-FRESH", "Fresh arrival", 10, 1, seedDay + 86400] });
+    await db.batch(inserts);
+
+    const rows = (await db.execute(NEWEST_SQL)).rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
+    expect(rows[0]).toBe("SKU-FRESH");
+    expect(rows.slice(1)).toEqual(Array.from({ length: 20 }, (_, i) => seedSku(i))); // sku ASC among the tied cohort
   });
 });
 

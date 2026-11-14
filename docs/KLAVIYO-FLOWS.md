@@ -11,6 +11,24 @@ flow/template/trigger IDs for future reference and wiring.
 > [REVIEWS-AUTOMATION.md](./REVIEWS-AUTOMATION.md) — the post-purchase flow is
 > mis-triggered (`Placed Order` instead of `Fulfilled Order`) and Judge.me native
 > review requests are the recommended path instead.
+>
+> ⚠️ **Update 2026-09-18 (Part A damage control, strategic investigation):** by this
+> date the account had drifted further from this doc — `Abandoned Cart` (`Wcjr3F`) and
+> `Welcome Series` (`XJghtC`) were ALSO live (not `draft` as recorded below), and a
+> fifth flow, `Post-Achat — Crédit 10$ prochaine commande` (`XiTLNi`, status `manual`),
+> had been created outside this script. **Always re-verify live status with a fresh
+> `GET /flows/` before assuming this file is current — it has been stale twice now.**
+> `scripts/fix-klaviyo-review-and-cart-flows.mjs --apply` ran on 2026-09-18 and:
+> - Paused `TGfezb` (`live → draft`) — its trigger (`Placed Order`) cannot be edited via
+>   API (Klaviyo's Flow API only allows PATCHing `status`), so pausing was the only way
+>   to stop the mis-timed sends immediately.
+> - Created `Post-Purchase — Review Request v2 (Fulfilled Order)` (`ULN3my`), triggered
+>   on the `Fulfilled Order` metric (`VL4ZFS`) + 10-day delay, CTA linking to
+>   `/pages/avis-clients` instead of the homepage. **Left in `draft`** — see
+>   REVIEWS-AUTOMATION.md for why it likely never needs to go live (Judge.me native is
+>   the recommended canonical channel; this flow exists as a correctly-timed fallback).
+> - Paused `Wcjr3F` (Abandoned Cart, `live → draft`) — see the "Abandoned cart: one
+>   channel, not two" section below.
 
 > For account/dashboard setup, the bilingual strategy, and the deliverability
 > checklist, see **[KLAVIYO-SETUP.md](./KLAVIYO-SETUP.md)**. This file is the
@@ -114,6 +132,44 @@ The Welcome flow hands out a 10%-off code. Created in Shopify via
 `draft → live` after the pre-launch checklist above. The code is store-wide (any
 customer who types it gets 10% once), so the Welcome email is just the distribution
 channel — there's no per-flow "attach" in Klaviyo.
+
+## Abandoned cart: one channel, not two
+
+The theme already runs an abandoned-cart recovery mechanism: a 2-screen popup with an
+automatic 10% discount (CLAUDE.md, "LIVE 2026-09-16 — Popup 2 écrans + rabais auto 10%").
+The Klaviyo `Abandoned Cart (FR/EN)` flow (`Wcjr3F`, triggered on `Checkout Started`)
+targets the exact same moment with a separate, uncoordinated discount path. Found live
+and paused on 2026-09-18 (see CLAUDE.md for the full rationale and the standing rule
+against re-activating it). **Do not flip `Wcjr3F` back to live** while the popup remains
+the chosen strategy — doing so risks a customer stacking the popup's 10% with whatever
+the flow's emails end up offering, or simply two redundant touchpoints nobody
+coordinated.
+
+## Panier abandonné — campaign relay (`/api/cron/cart-relay`, OFF by default)
+
+`Abandoned Cart (FR/EN)` (`Wcjr3F`) stays a **draft**; the relay does its job through one-recipient
+campaigns, like `relance-paiement` (same shared plumbing in `src/lib/klaviyo-campaigns.ts`, same
+lease). Code: `src/lib/cart-relay.ts`, route `src/app/api/cron/cart-relay/route.ts`, tests
+`tests/cart-relay.test.ts`.
+
+- **Trigger:** Shopify `Added to Cart` events (metric `SmdQyJ`), grouped per profile into one cart.
+  Emailed when the profile's last add is 3 h to 48 h old.
+- **Skipped:** no email; internal address; Checkout Started or Placed Order after the cart's first
+  add (checkout abandoners belong to `relance-paiement`); `can_receive_email_marketing` not true,
+  UNSUBSCRIBED or any suppression; already emailed in the last 7 days by this relay **or** by
+  `relance-paiement` (its `profiles` state); the same cart twice.
+- **Caps:** 25 per run, 60 per rolling 24 h. Runs at :12 and :42.
+- **Email:** FR/EN (event locale, else `/en` in the product URL, else the Klaviyo profile locale, else FR),
+  items from the event (title, image, price when the event has one, product link), free shipping
+  across Canada, no discount or code, localized `{% unsubscribe %}` link. Profile properties
+  `cart_relay_items_html` / `cart_relay_url`; templates cached in settings `cart_relay_templates_v1`
+  (bump the key to publish new copy).
+- **Switch:** settings `cart_relay_enabled` = `"1"` turns it on; anything else (including no row) is
+  OFF. Unlike the other relays, which run unless set to `"0"`.
+- **Dry run:** `GET /api/cron/cart-relay?dryRun=1` (Bearer `CRON_SECRET`) works whether the flag is on
+  or off, sends and writes nothing, and lists who would be emailed (masked) and skip reasons.
+- **State:** settings `cart_relay_state` (handled event ids, last send per profile, 24 h send log,
+  campaigns awaiting a status check; pruned at 8 days). Do **not** set `Wcjr3F` live while this runs.
 
 ## Re-running / idempotency
 

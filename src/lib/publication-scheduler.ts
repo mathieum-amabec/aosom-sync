@@ -28,14 +28,20 @@ import {
   DEFAULT_VIDEO_SCHEDULE,
   DEFAULT_BLOG_SCHEDULE,
   DEFAULT_SLIDESHOW_SETTINGS,
+  DEFAULT_DEMAND_GEN_EXT_SCHEDULE,
+  DEFAULT_ASSEMBLY_SCHEDULE,
+  DEFAULT_GUIDE_SCHEDULE,
+  DEFAULT_AMEUBLO_SCHEDULE,
+  DEFAULT_REACTION_SCHEDULE,
 } from "@/lib/config";
 import { getOccupiedQueueSlots, type QueueContentType } from "@/lib/database";
 
 /** SQLite datetime() text ('YYYY-MM-DD HH:MM:SS' UTC) → unix seconds. */
 const sqliteToUnixSec = (s: string): number => Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
 
-/** Platforms that post on the shared `publication_schedule`. */
-export type PublishPlatform = "facebook" | "instagram";
+/** Platforms that post on the shared `publication_schedule` (or their own dedicated grid —
+ * see ContentBatchFormat / getNextAvailableSlot's `opts.schedule`). */
+export type PublishPlatform = "facebook" | "instagram" | "shopify_guide";
 
 /** weekday key → JS day index (0=Sun … 6=Sat). */
 const WEEKDAY_INDEX: Record<WeekdayKey, number> = {
@@ -92,7 +98,7 @@ function normalizeSlot(raw: unknown): PublicationSlot | null {
 }
 
 /** Coerce arbitrary JSON into a valid PublicationSchedule, falling back per-field to `d`. */
-function normalizeScheduleWith(raw: unknown, d: PublicationSchedule): PublicationSchedule {
+function normalizeScheduleWith(raw: unknown, d: PublicationSchedule, maxPerDayCap = 5): PublicationSchedule {
   if (!raw || typeof raw !== "object") return clone(d);
   const r = raw as Record<string, unknown>;
   const slots = Array.isArray(r.slots)
@@ -102,7 +108,7 @@ function normalizeScheduleWith(raw: unknown, d: PublicationSchedule): Publicatio
     enabled: typeof r.enabled === "boolean" ? r.enabled : d.enabled,
     slots,
     timezone: isValidTimeZone(r.timezone) ? r.timezone : d.timezone,
-    max_per_day: clampInt(r.max_per_day, 1, 5, d.max_per_day),
+    max_per_day: clampInt(r.max_per_day, 1, maxPerDayCap, d.max_per_day),
   };
 }
 
@@ -179,6 +185,85 @@ export function parseVideoSchedule(rawJson: string | null | undefined): VideoSch
   } catch {
     return clone(DEFAULT_VIDEO_SCHEDULE);
   }
+}
+
+// ─── Content-batch (demand_gen_ext / assembly) schedules ────
+
+/** The content-scale-chantier batch video formats (the avant/après format was removed on
+ * 2026-10-01 — Mat: poor results, never used), plus the pSEO guide deferred-publish
+ * queue (same recurring-grid shape, reused rather than reimplemented) — each gets its own
+ * independent slot pool. */
+export type ContentBatchFormat = "demand_gen_ext" | "assembly" | "guide";
+
+export const CONTENT_BATCH_SCHEDULE_DEFAULTS: Record<ContentBatchFormat, PublicationSchedule> = {
+  demand_gen_ext: DEFAULT_DEMAND_GEN_EXT_SCHEDULE,
+  assembly: DEFAULT_ASSEMBLY_SCHEDULE,
+  guide: DEFAULT_GUIDE_SCHEDULE,
+};
+
+/** The `settings` row each format's grid is stored under (see config.ts's ALLOWED_SETTINGS_KEYS). */
+export const CONTENT_BATCH_SCHEDULE_SETTING_KEY: Record<ContentBatchFormat, string> = {
+  demand_gen_ext: "demand_gen_ext_schedule",
+  assembly: "assembly_schedule",
+  guide: "guide_schedule",
+};
+
+/**
+ * Parse a stored per-format schedule JSON (or null) into a PublicationSchedule, falling back
+ * per-field to that format's own default (mirrors parseVideoSchedule, generalized over the 3
+ * formats instead of one fixed default).
+ */
+export function parseContentBatchSchedule(
+  format: ContentBatchFormat,
+  rawJson: string | null | undefined,
+): PublicationSchedule {
+  const d = CONTENT_BATCH_SCHEDULE_DEFAULTS[format];
+  if (!rawJson) return clone(d);
+  try {
+    return normalizeScheduleWith(JSON.parse(rawJson), d);
+  } catch {
+    return clone(d);
+  }
+}
+
+/** Studio Reels run up to 6 a day per page (FR + EN share the cap), well above the social-post limit of 5. */
+const AMEUBLO_MAX_PER_DAY = 12;
+
+/** Parse the stored ameublo_schedule JSON (Studio Ameublo Reels); defaults on any error. */
+export function parseAmeubloSchedule(rawJson: string | null | undefined): PublicationSchedule {
+  if (!rawJson) return clone(DEFAULT_AMEUBLO_SCHEDULE);
+  try {
+    return normalizeScheduleWith(JSON.parse(rawJson), DEFAULT_AMEUBLO_SCHEDULE, AMEUBLO_MAX_PER_DAY);
+  } catch {
+    return clone(DEFAULT_AMEUBLO_SCHEDULE);
+  }
+}
+
+/** Parse the stored reaction_schedule JSON (Studio Ameublo "Réaction" videos); defaults on any error. */
+export function parseReactionSchedule(rawJson: string | null | undefined): PublicationSchedule {
+  if (!rawJson) return clone(DEFAULT_REACTION_SCHEDULE);
+  try {
+    return normalizeScheduleWith(JSON.parse(rawJson), DEFAULT_REACTION_SCHEDULE, AMEUBLO_MAX_PER_DAY);
+  } catch {
+    return clone(DEFAULT_REACTION_SCHEDULE);
+  }
+}
+
+/**
+ * The part of the Studio grid that belongs to one language: per day, the 1st and 3rd time are
+ * French, the 2nd and 4th English (a day with a single time serves both). The per-day cap
+ * halves too, so FR and EN Reels each get their own fixed hours and never crowd each other.
+ */
+export function ameubloScheduleForLang(schedule: PublicationSchedule, lang: "fr" | "en"): PublicationSchedule {
+  const want = lang === "fr" ? 0 : 1;
+  const slots = schedule.slots
+    .map((s) => {
+      const times = [...s.times].sort();
+      const mine = times.length === 1 ? times : times.filter((_, i) => i % 2 === want);
+      return { day: s.day, times: mine };
+    })
+    .filter((s) => s.times.length > 0);
+  return { ...schedule, slots, max_per_day: Math.max(1, Math.ceil(schedule.max_per_day / 2)) };
 }
 
 /**

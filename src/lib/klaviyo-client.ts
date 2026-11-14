@@ -144,3 +144,48 @@ export async function trackEvent(
     },
   });
 }
+
+async function klaviyoGet(url: string): Promise<{ ok: boolean; json?: Record<string, unknown> }> {
+  const key = env.klaviyoApiKey;
+  if (!key) return { ok: false };
+  return schedule(async () => {
+    try {
+      const res = await fetch(url, {
+        headers: { Authorization: `Klaviyo-API-Key ${key}`, revision: KLAVIYO_REVISION, Accept: "application/json" },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+      return res.ok ? { ok: true, json: (await res.json()) as Record<string, unknown> } : { ok: false };
+    } catch {
+      return { ok: false };
+    }
+  });
+}
+
+/**
+ * Units our store sold per Shopify product id, from Klaviyo's "Ordered Product" events (one per order line, written by
+ * the Shopify integration). Used where the Shopify token cannot read orders (no read_orders scope). `days` bounds the
+ * window; `maxPages` bounds the cost. Never throws: an empty map when Klaviyo is not configured or unreachable.
+ */
+export async function fetchOrderedProductUnits(days = 365, maxPages = 20): Promise<Map<string, number>> {
+  const units = new Map<string, number>();
+  const metrics = await klaviyoGet(`${KLAVIYO_BASE}/metrics/`);
+  const list = (metrics.json?.data ?? []) as Array<{ id: string; attributes?: { name?: string } }>;
+  const metric = list.find((m) => m.attributes?.name === "Ordered Product");
+  if (!metric) return units;
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  let url: string | null =
+    `${KLAVIYO_BASE}/events/?filter=${encodeURIComponent(`equals(metric_id,"${metric.id}"),greater-than(datetime,${since})`)}`;
+  for (let page = 0; url && page < maxPages; page++) {
+    const r = await klaviyoGet(url);
+    if (!r.ok || !r.json) break;
+    for (const e of (r.json.data ?? []) as Array<{ attributes?: { event_properties?: Record<string, unknown> } }>) {
+      const p = e.attributes?.event_properties ?? {};
+      const id = p.ProductID;
+      if (id === undefined || id === null || id === "") continue;
+      const qty = Number(p.Quantity ?? 1);
+      units.set(String(id), (units.get(String(id)) ?? 0) + (Number.isFinite(qty) && qty > 0 ? qty : 1));
+    }
+    url = ((r.json.links ?? {}) as { next?: string | null }).next ?? null;
+  }
+  return units;
+}

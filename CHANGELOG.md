@@ -2,6 +2,1653 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.62] - 2026-11-13
+
+### Fixed
+
+- **Price alerts can finally be confirmed.** Signing up for a price alert tracks a Klaviyo "Price Alert Confirmation" event carrying the double opt-in link, but no Klaviyo flow ever existed for that event, so the confirmation email never went out. As of 2026-11-13, 0 of 54 alerts were confirmed and no price-drop email could ever be sent. Each signup still created a Klaviyo profile, which helped fill the free plan. flow-relay now has a `price-alert-confirm` step: the metric is `Ymt2yf` and the template is `UG3wCQ` (source in `docs/klaviyo/price-alert-confirm.html`, FR/EN). It sends the confirmation through a one-recipient campaign at the next run (within 15 min), up to 20 h after signup, since the link expires at 24 h. The step has no flow of its own, so only the "Klaviyo flows work again" guard stops it.
+
+## [0.5.107.61] - 2026-11-13
+
+### Added
+
+- **Abandoned checkout of 250 $ or more: a second reminder with a unique 15 $ code (OFF until `relance2_enabled` = "1").** Mat 2026-11-13: "un 15 $ sur le 250 et plus, si les gens n'achètent pas". The relance-paiement cron now also emails, 20 to 40 h after an unpaid checkout whose subtotal before tax is 250 $ or more, a single-use Shopify code (`discountCodeBasicCreate`): 15 $ off the order, minimum 250 $, 1 use, once per customer, valid 48 h, not combinable with product or order discounts (the automatic 10 % on the 2nd item does not stack), free shipping still applies. Same guards as the existing reminders: only after reminder #1 really went out for that checkout, never after an order, one per person per 30 days. It replaces the generic reminder #2 for those checkouts: while the switch is on, flow-relay's `checkout-2` leaves checkouts of 250 $ or more to it, and a checkout that already got the generic one never gets the code. The code is stored per checkout before the email goes out and reused on any retry, so a checkout never gets two codes or two emails. `?dryRun=1` shows who would get it and the exact mutation payload, and creates nothing. The subtotal comes from Shopify's `subtotal_price` or the line prices minus discounts, never Klaviyo's `$value`, which includes tax. A cart that already has a discount (the automatic 10 % on the 2nd item, or any code) gets the generic reminder #2, not the code (Mat's call). The generic reminder only stands aside while the code email may still go out: every final skip of the code email (cooldown, too old, has a discount, Shopify error, expiring code) records the checkout as settled, so the generic one falls back within its own 24–48 h window, and it also falls back when `relance_paiement_enabled` = "0". The email shows only the exact expiry ("valide jusqu'au …, heure de l'Est"), since a reused code may have less than 48 h left. Our email engine (`relayView`) also counts a checkout that got the code email as done for its own reminder #2.
+
+## [0.5.107.60] - 2026-11-12
+
+### Added
+
+- **Costway products get their size for the fit checker and the new "Dimensions" line.** 361 live Costway products had no `custom.lc_dims`: the daily fit-dims job only read the Aosom feed, and the French description we generate drops the measurements. The job now reads the supplier description kept in `costway_products.body_html` (`extractSupplierSize`): only a triple labelled as the item's size ("Overall Dimension: 94.5” x 32.5” x 32.5” (L x W x H)"), never a parcel, drawer, mirror or pot size; inches unless marked cm/mm. It only fills products with no value and drops a size the product page contradicts. 288 products were written by hand on 2026-11-12 after a dry run (the new function gives the same 288 values, plus one); the next run adds the rest as Costway descriptions allow.
+
+### Changed
+
+- **Meta's fbevents.js loads after the page, not during it.** On a mid-range phone it cost ~450 ms of main-thread work while the hero image loaded (Grokbot audit, Lighthouse mobile 45). The `fbq` stub still queues every call immediately; the SDK now loads on the first interaction or 1.5 s after the load event. PageView is also relayed to the Conversions API with the same `event_id` (`/api/capi/event` accepts PageView, with no product data), so a visitor who leaves before the SDK arrives is still counted, and Meta de-duplicates the pair. The first cart-attribute sync waits for the SDK's load event (8 s at most) so `_fbp` exists.
+- **`/api/trending` and `/api/ugc-videos` are cached 5 minutes by the browser** (`max-age=300`), on top of the CDN cache.
+
+## [0.5.107.59] - 2026-11-10
+
+### Changed
+
+- **A crossed price already shown is kept while it stays above the price, even under 10 %.** After the .88 price rise, 72 live variants showed a crossed price with a discount under 10 %; the daily compare-at sync would have cleared them. Mat's rule: showing a discount is always good. The 10 % threshold now only gates setting a NEW crossed price; the sync clears a crossed price only when it is at or below the price.
+
+## [0.5.107.58] - 2026-11-09
+
+### Changed
+
+- **Aosom products are priced at our estimate of Aosom's current price, ending in .88.** The Aosom feed has carried no public price since 2026-10-15, so the rule sold at a price frozen in mid-October while Aosom kept raising our cost: on 2026-11-09 an order lost money and 337 live variants sat under cost after a mid-day cost rise. Eight real aosom.ca prices that day sat at 1.07–1.19 × our cost (wholesale + delivery), median 1.15, the same median as the frozen public price over today's cost across 7,935 feed SKUs. The sell price is now `cost × 1.15` ending in .88 (Mat's signature), dropped to the .88 under a round number it barely passes (301.88 → 299.88). It never goes under the frozen Aosom price or the profit floor (which now ends in .88 too); without a known cost the frozen price is kept. Existing .99 prices move to their .88 on the next run, however small the change. Dry run on prod: 4,490 of 5,739 prices change (median +1 %, none above +10 %, 92 cuts of a few cents).
+
+## [0.5.107.57] - 2026-11-08
+
+### Fixed
+
+- **Server Purchase events now carry Meta's click ids.** The orders/paid webhook sent email, phone and address but `fbp`/`fbc` at 0 %, so Meta could only link a sale to an ad by matching the customer's details. The ScriptTag now copies the `_fbp`/`_fbc` cookies into hidden cart attributes, which reach the order as `note_attributes`: as hidden inputs on a form post to `/cart/add` (the only route for "buy now", which skips the cart), otherwise through `/cart/update.js` on a cart that has items. When a checkout skipped both, the `fbclid` in `order.landing_site` is the fallback, unless it runs into Shopify's 255-character cap: 28 of the last 50 such ids were cut off. Values are shape-checked and the fbclid is never rewritten. Same `event_id`, so deduplication does not change.
+
+## [0.5.107.56] - 2026-11-05
+
+### Fixed
+
+- **Products drafted by sold-out-hide now leave the ad feeds within ~10 minutes, not up to 24 h.** The feeds read Shopify through a Data Cache kept 24 h (`lib/feeds/source.ts`, tag `feeds`) and the job never busted it, so a drafted product stayed in the Meta/Google feeds and ads could point to a 404 page. After a LIVE run that changed at least one product's visibility (drafted, or reactivated/republished), the job now busts the `feeds` tag and every feed route, exactly like `POST /api/revalidate` (new shared helper `src/lib/feeds/revalidate.ts`, used by both). Never on dry/off runs, tag-only runs or runs where every write was skipped/failed; a revalidation failure is logged and does not fail the run. Result gains `statusChanges` and `feedsRevalidated`. The shared feed list now also covers `google-en` and `meta-xml-en`, which `POST /api/revalidate` was missing (a test pins the list to the route directories).
+
+## [0.5.107.55] - 2026-11-04
+
+### Added
+
+- **Sold-out and out-of-season products are taken off sale, and come back by themselves** (`src/lib/sold-out-hide.ts`, cron `/api/cron/sold-out-hide` at 10:20 / 16:20 / 22:20 UTC, script `scripts/sold-out-hide.mts`). Mat: « retire les produits en rupture dont l'Halloween ». A product is set to DRAFT (hidden from every sales channel, URL/photos/reviews/publications kept) when every variant is sold out (Aosom: `stockBufferQty(fresh CSV qty) = 0`; Costway: `in_stock = 0` or < 3 units), tagged `auto-drafted` — the stock-check marker, so its existing restock path also brings it back. Halloween products (`product_type` contains the word « Halloween », never the tags — a Christmas tree carries the tag) are drafted outside Sep 1 → Nov 1 (store-local, `settings.seasonal_windows`) even when in stock, tagged `hors-saison` without `auto-drafted` so stock-check cannot revive them; this job reactivates them (status active + published) at the season start if in stock. `hors-saison` is only ever added by this job to a product it drafted itself (ACTIVE → DRAFT) or to an `auto-drafted` draft: an operator's draft is never marked, so never published at a season start. Keep one live out of season with `exclude-stale`. Never touches: an `exclude-stale` product, one in an open unfulfilled order (fail-closed on an API error), one entirely absent from the feed (left to removed-catalog's rename guard), a `needs-review` import, an operator's own draft. Guards: `assertFeedComplete`, a mass-hide breaker (max(200, 10 % of active)), 150 writes/run at 2/s, each write re-reads and re-plans the product. Mode `settings.sold_out_hide_mode` off/dry/live (default live); `?mode=dry`.
+- First run on 2026-11-04: 55 sold-out products drafted (51 Aosom, 4 Costway), 2 in-stock Halloween products drafted (they come back on 2027-09-01 if in stock). The first run had also tagged 34 Halloween products that were ALREADY draft (origin unknown) `hors-saison`; that was reverted the same day (their tags restored exactly, they stay draft and will not be revived). Rollback records: `aosom-sync-backups/soldout-2026-11-05*.json`, `soldout-2026-11-05-restore-34.json`.
+
+### Changed
+
+- publish-reconcile never republishes a `hors-saison` draft; the ad feeds (and the feed-integrity audit) skip out-of-season products as a second barrier, reading the same `settings.seasonal_windows` as the job.
+
+## [0.5.107.54] - 2026-11-01
+
+### Changed
+
+- **La semaine Ameublo follows the Black Friday / Christmas calendar** (Toronto dates, 2026 only — next year's dates must be set on purpose in `semaine/formats.ts` `SEASON`). Nov 6–26 (early Black Friday): the morning post is `baisses` Monday to Friday, Saturday/Sunday keep `astuce`/`coeur` for variety. Nov 27–30 (Black Friday weekend + Cyber Monday): `baisses` every morning. `baisses` still only shows a real Shopify compare-at ≥ 10 %, and looks 80 products deep during the sale (instead of 30) so the cooldown does not starve it. Nov 1–Dec 15: Christmas categories (both `Holiday & Seasonal > Christmas…` forms) join the afternoon `vedette` (tried first every other day in November, every day in December) and the Sunday `coeur`. Captions get a code-owned seasonal line + hashtags — FR « Vendredi fou en avance » #vendredifou, #vendredifou on Black Friday, #cyberlundi on Cyber Monday, #noel Dec 1–15; EN #blackfriday / #cybermonday / #christmas. The model's text is unchanged (still no %, $ or #).
+- **Semaine cooldown is per Shopify product, not per SKU.** Colour variants (831-823 WT/BK, 831-651, 839-846, 839-308) came back within 3–7 days of each other. The 21-day cooldown now also holds every posted SKU's `shopify_product_id` (resolved through `products`, so it covers past posts too), and one post never carries two colours of the same product.
+- **06:15 publish check covers the last 24 h, every content type.** It flags `failed` rows, rows stuck in `publishing` > 30 min, rows still `pending` > 15 min past their slot, and `published` rows whose error shows a platform failed (e.g. the Ameublo Instagram half) — ignoring the known "INSTAGRAM_FURNISH_ACCOUNT_ID not configured" noise. `publish_check_last` keeps its shape plus `windowHours`, `failedCount`, `stuckCount`, `overdueCount`, `partialCount`, `byType`, `priceGuardBlocked`. The morning report's « Alertes » now counts the last check's problems and the Reels the price guard removed.
+
+### Fixed
+
+- **Halloween / Noël social categories matched 0 products.** Aosom moved the seasonal branch from `Home Furnishings > Holiday & Seasonal > …` to top-level `Holiday & Seasonal > …`; both forms are matched (Noël: 185 live products on 2026-11-01, 104 discounted).
+- **Christmas posts were tagged #chambre #deco.** A bare `Holiday → bedroom_decor` hook rule caught the new top-level path before the seasonal rule. Holiday & Seasonal now maps to `seasonal_decor`, and a Christmas product gets Christmas hashtags only (no #halloween), a Halloween one Halloween hashtags only.
+- **Instagram "Only photo or video can be accepted as media type"** (5 of 14 Ameublo semaine posts, #1630 #1642 #1658 #1676 #1682; Facebook went out). cdn.shopify.com serves WebP under the same `.jpg` URL to any client that accepts WebP (`Vary: Accept`), and Instagram only ingests JPEG. Instagram photo and carousel containers now get `format=pjpg`, which pins JPEG and returns the original bytes unchanged. Other hosts are untouched.
+
+### Added
+
+- **Reel price guard** (`/api/cron/reel-price-guard`, 12:00 and 20:00 UTC, `?dryRun=1`). For every `pending` sequential_ad Reel due in the next 36 h whose `metadata.badges` lists `{sku, pct}`, re-reads the variant on Shopify (read-only) and checks it is active, available and that round((1 − price/compareAt) × 100) still equals the rabais burned into the video. A mismatch moves the row to `draft` with `price-guard: <details>` (not published, slot freed); a failed Shopify read never blocks. Result in settings `reel_price_guard_last`, surfaced by the publish check and the morning report.
+
+## [0.5.107.53] - 2026-10-31
+
+### Fixed
+
+- **Cart-abandon email relay sent nothing for a week.** A checkout reminder (relance-paiement) blocked the cart email for 7 days, while relance-paiement itself only waits 72 h. On 2026-10-31 the only two shoppers who added to cart without ordering had each had a checkout reminder 2–5.5 days earlier, so every real cart was skipped. That block is now 72 h (`RELANCE_COOLDOWN_H`). The relay's own 7-day repeat cooldown is unchanged.
+
+## [0.5.107.52] - 2026-10-30
+
+### Changed
+
+- **Meta feeds: lifestyle photos only.** Mat: « Assure-toi que toutes nos pubs Meta soient des photos lifestyle. TOUJOURS. » The Meta feeds (`/api/feeds/meta`, `meta-xml`, `meta-xml-en`) now swap a studio `image_link` (the variant's own packshot or the hero) for the product's verified lifestyle photo, keep only lifestyle photos as `additional_image_link`, and label each item `g:custom_label_4` = `lifestyle` / `studio` so the ad product sets can exclude products with no lifestyle photo at all. Google, Bing, Pinterest and Reddit feeds are unchanged. Audit of the live Meta feed (2026-10-30): 3,306 of 5,609 items showed a studio photo; 2,631 of them have a lifestyle photo in their gallery, 675 have none.
+- The Meta feeds now answer 500 (Meta keeps its current catalog) when fewer than 90 % of product photos are classified, instead of labelling most of the catalog `studio`.
+
+### Added
+
+- **`image_styles` cache + `/api/cron/image-styles` (every 4 h).** Classifies every product photo as lifestyle or studio from pixels only (zero tokens, no Shopify writes): studio = outer 10 % frame mostly near-white OR at least two near-white corners. The corner test fixes the border-only heuristic, which called ~40 % of sampled packshots "lifestyle" when the product touched the frame edge (visual check: 38/40 lifestyle correct, 16/16 reclassified photos really studio). Only uncached photos are downloaded.
+
+## [0.5.107.51] - 2026-10-30
+
+### Added
+
+- **Google feeds: `product_highlight` + `product_detail` for AI Mode / Gemini.** The Google FR and EN feeds (and Bing) now carry up to 6 highlights per product, taken verbatim from the description's « Caractéristiques » bullets (supplier names and shipping promos scrubbed, « Assemblage requis » stubs dropped, 150-char cap, omitted below Google's minimum of 2), plus the assembled width / depth / height in cm as `product_detail` rows, read from the fit checker's `custom.lc_dims` metafield (omitted when missing — never guessed). Live dry run 2026-10-30: 5,609 offers, 5,609 with highlights, 4,734 with dimensions, 0 supplier names. Meta, Pinterest and Reddit feeds are unchanged (`rich` option, off by default).
+- **Bing / Microsoft Shopping feed** now also emits `condition`, `google_product_category`, `item_group_id`, `color`, `size`, `material` and `mpn`, ready for Microsoft Merchant Center. Price stays the single current price (no sale split).
+
+## [0.5.107.49] - 2026-10-23
+
+### Added
+
+- **Morning report: new « Boutique (Shopify) » section** (`src/lib/shop-analytics.ts`), right after the guards and before Meta. Mat, after granting the token the reports/orders scopes: « intégrer au rapport du matin ». Shows yesterday's orders and sales with the origin of each order (Meta ad / search / direct / email / AI assistant, read from the order's customer journey), yesterday's visits and funnel (cart → checkout → purchase), the last 7 days vs the previous 7 (visits, orders, sales, conversion), the checkout→purchase rate, the traffic sources with their conversion, and the Meta spend of the 7 days against the orders Shopify itself attributes to a Meta ad (cost per order). Visits/sales come from ShopifyQL (`shopifyqlQuery`), orders from the Admin GraphQL API; read-only. A failure in this section (e.g. a missing scope) marks only that section « indisponible » and the rest of the report still goes out; a Meta failure only blanks the Meta line. The order window is enforced in code because Shopify's order search was seen to ignore the upper `created_at` bound.
+
+## [0.5.107.48] - 2026-10-22
+
+### Added
+
+- **Abandoned-cart email relay (`/api/cron/cart-relay`), OFF by default.** Mat: « Prépare … le relais pour le courriel de panier abandonné ». Shoppers who added to cart with an identified email, never started a checkout nor ordered, and whose last add is 3 h to 48 h old get one one-recipient Klaviyo campaign with their items (title, image, price from the event, product link), FR or EN, free shipping across Canada, no discount or code, localized unsubscribe link. Consent is checked per profile (can receive marketing, not unsubscribed, no suppression); 7-day cooldown per profile shared with `relance-paiement` (checkout abandoners are never double-mailed); 25 per run and 60 per 24 h. Gate: settings `cart_relay_enabled` = `"1"` (the other relays run unless `"0"`; this one is the reverse), `?dryRun=1` always available. Reuses the relays' campaign plumbing and lease; `Wcjr3F` stays a draft. `esc` / `money` of `relance-paiement.ts` are now exported for reuse.
+
+## [0.5.107.47] - 2026-10-22
+
+### Added
+
+- **Own email engine on Resend — foundation, OFF.** Mat finds Klaviyo too expensive and wants full control of the text through an API. `src/lib/email/` adds the Resend transport, a single `sendEmail` exit door (master switch `email_engine_mode` off/test/live, test allow-list, suppression list, never the same email twice via `email_sends` + Resend Idempotency-Key), the CASL footer (sender, mailing address from `email_mailing_address`, signed unsubscribe link) and Gmail/Yahoo one-click `List-Unsubscribe` headers. New public routes `/api/email/unsubscribe` (GET asks, POST unsubscribes, also suppresses in Klaviyo) and `/api/email/webhook` (Svix-signed; hard bounces and spam complaints are suppressed).
+- **The 9 flow emails as code, FR + EN** (`src/lib/email/templates.ts`: abandoned checkout 1–2, welcome 1–2, wheel 1–3, review request, price drop), copy ported from the Klaviyo templates; links only to our domains, event text escaped.
+- **Hand-over from the Klaviyo relays, group by group** (`src/lib/email/flows.ts`, cron `/api/cron/email-flows` at 4/19/34/49): same timing and guards as the relays, Klaviyo consent checked, `email_engine_takeover` tells the relays which groups to skip once the engine is live; switching back copies what the engine sent into the relays' state. With the default settings (off) the relays behave exactly as before.
+- **Dashboard panel "Courriels automatiques (Resend)"**: switch off/test/live (live asks for confirmation and is refused while setup is missing), mailing address, test list, FR/EN preview of every email, per-group hand-over, 30-day results. See `docs/EMAIL-ENGINE.md`.
+
+## [0.5.107.46] - 2026-10-21
+
+### Fixed
+
+- **Ad feeds showed the wrong photo on 22 offers (morning report « Flux publicitaires »).** `isSpecImageUrl` matched the Aosom spec-shot suffixes `-b0`..`-f0` anywhere in the URL, and the `_<uuid>` Shopify adds to a re-uploaded file produces them by chance (`…-c01aff82e81c.jpg`). Good photos were dropped as « spec images »: 12 offers showed another colour, 10 showed photo 2 instead of photo 1. The ad feeds now remove the uuid suffix before the keyword match (`isSpecImageUrl(url, { ignoreShopifyUuid: true })`); they also apply the vision classifier's verdict, which keeps out the ~150 overlay shots the keyword filter had hidden by chance. The social/slideshow selectors have no vision filter, so they keep the old behaviour. Live re-check against all 3925 products: 0 image mismatches (was 22).
+- **French checkout reminder said « Unsubscribe ».** The link now reads « Se désabonner » (EN keeps « Unsubscribe »); templates key bumped to `relance_paiement_templates_v2` so the next run creates the new templates.
+
+## [0.5.107.45] - 2026-10-20
+
+### Added
+
+- **Daily fit-checker sizes sync (`/api/cron/fit-dims`, 21:15 UTC).** Mat: "Assure-toi que les produits futurs vont avoir les dimensions." New imports already get `custom.lc_dims` at creation; this pass writes it for every product whose Aosom sizes are missing or changed (jobs queued before the feed carried units, other creation paths, feed corrections), only changed values, ≤ 500 per run, same page-size guard. Logic moved to `src/lib/fit-dims-sync.ts`; `scripts/backfill-fit-dims.mts` is now a thin operator wrapper. The one-time backfill ran on 2026-10-20: 3106 products written, 0 failed; a re-run finds 0 to write.
+## [0.5.107.44] - 2026-10-20
+
+### Added
+
+- **"Bientôt" teasers that measure demand before paying for AI (Mat: "fais le code, ne l'active pas").** A "Voyez-le chez vous · Bientôt" pill sits on the main product photo and opens a sheet explaining the coming feature and asking "Est-ce que ça vous aiderait à choisir ?"; the Ameublo assistant gets a persistent "Décorer ma pièce à partir d'une photo · Bientôt" button. Unique-visitor funnel (view → click → yes/no → launch-notice email) per feature and entry point in `teaser_events` / `teaser_signups` (consent wording stored, one launch notice only), shown on the dashboard ("Fonctions « bientôt »"). Bots, headless renderers, the theme editor and visitors who refused analytics are not counted.
+- **The two AI tools themselves, built but OFF.** `POST /api/visualiser` places the product in the shopper's room photo (Gemini 3.1 Flash Image) and `POST /api/decorateur` reads the room and lets the assistant pick live products; both answer 503 until settings `visualiser_enabled` / `decorateur_enabled` = "1". Own token pools (`visualiser`, `decorateur`, on the usage dashboard), atomic per-IP daily caps (3 / 5), product photos restricted to the product's own images, photos never stored.
+## [0.5.107.43] - 2026-10-20
+
+### Added
+
+- **"Est-ce que ça va entrer chez moi ?" fit checker (product pages).** Every Aosom product can now carry its real assembled size and shipping-box sizes per variant, in cm, in the `custom.lc_dims` metafield (`src/lib/fit-dims.ts`). The feed's Length/Width/Height now name their unit ("47.80 in", "10.00 ft", "120.00 cm"); the raw strings are kept (`dimensionsRaw`) because the parsed numbers dropped it. New imports get the metafield at creation; `scripts/backfill-fit-dims.mts` fills existing products (dry-run by default). A product whose page states a different size gets nothing, so the checker never contradicts the page (audit: 1405 of 1459 pages agree). The theme snippet `lc-fit` (inside the first PDP question) compares the shopper's space and narrowest doorway with the product and its boxes, in inches or cm, with a top view to scale.
+## [0.5.107.42] - 2026-10-19
+
+### Changed
+
+- **Roue de bienvenue — legal and clarity pass.** Email-marketing consent is now optional to play (CASL forbids making it a condition): without it nothing is sent to Klaviyo and the visitor keeps the code on screen and in the cart. The wheel closes on its printed end date, 31 janvier 2027 (`ROUE_ENDS_AT`, GET and POST answer as switched off afterwards). The theme snippet is redesigned so the wheel reads as a wheel of fortune at a glance, with one task per step and the short contest rules under the form.
+
+## [0.5.107.41] - 2026-10-19
+
+### Added
+
+- **Roue de bienvenue — server side.** `POST /api/roue` (public, Origin allowlist, per-IP limits, kill switch `settings.roue_enabled="0"`) draws the prize on the server, keeps one spin per normalized email (table `wheel_spins`), creates a unique single-use Shopify code valid 72 h (fixed $ off a minimum subtotal, never more than 10 % of that minimum so the profit floor and the margin guard hold; combines with shipping only), records the email-marketing consent the visitor ticked in Klaviyo and fires the event "Roue gagnée" that drives the 3-email code flow. Prizes: 15 $ dès 150 $ (45 %), 25/250 (30 %), 40/400 (17 %), 60/600 (7 %), 100/1000 (1 %). Nothing on the storefront calls it until the theme snippet `lc-roue` is published.
+
+## [0.5.107.40] - 2026-10-17
+
+### Fixed
+
+- **English links and video overlays no longer use furnishdirect.ca.** That domain is not registered (NXDOMAIN at the .ca registry), so every English link to it led nowhere: 56 Furnish posts published in the last 30 days carried one. The Ameublo caption generator, the "La semaine Ameublo" captions and the three video renderers (slideshow, remix, Top 5 countdown) now use `ameublodirect.ca/en`, the English locale of the same store. The 37 Furnish posts already in the publication queue were rewritten the same way in the database. The CORS allow-lists keep furnishdirect.ca for the day the domain is connected.
+
+## [0.5.107.39] - 2026-10-16
+
+### Added
+
+- **Daily site health check ("Santé du site" in the dashboard Alertes panel).** `/api/cron/site-health` runs at 10:30 UTC and never writes to Shopify or Klaviyo. It opens every collection and page in both languages, 20 products a day in rotation and every internal link of the two homepages (about 270 pages, 30 s), and turns red on a broken page or link, a Liquid error, a page without a Google description or without exactly one H1. It also reads every live Klaviyo flow email and checks that each promo code in it is an active Shopify discount: on 2026-10-16 it caught the Welcome email still giving BIENVENUE10, expired since 2026-10-02. The summary lists the shoppers' real searches of the last 7 days that return no product (replayed against the store search) and a 7-day funnel from Klaviyo (checkouts started → orders, 25 → 12 on the first run); store visitors and add-to-cart clicks join it once `UMAMI_API_KEY` is set.
+
+## [0.5.107.38] - 2026-10-16
+
+### Changed
+
+- **"Les plus demandés cette semaine" will include what our own customers buy.** The homepage list ranked products by how fast the supplier's stock drops (all resellers combined) and by price drops. It now also counts units sold on our store over the last 30 days, with a weight that grows with order volume: nothing below 5 paid orders, then up to 35 % of the score at 40 orders. It needs the Shopify read_orders permission on the app token; until that is granted the list ranks exactly as before.
+
+## [0.5.107.37] - 2026-10-16
+
+### Changed
+
+- **Homepage customer videos are served from our own storage.** The "Déballé chez nos clients" reel used to play each video straight from the supplier's servers, which put the supplier's name in the page's network requests and would have left the reel blank if the supplier moved the files. The videos are now copied to our public Vercel Blob store (script `scripts/mirror-ugc-videos.mjs`, 55 copied on 2026-10-16) and the reel picks copied videos first; a video not copied yet still plays from its original address.
+## [0.5.107.36] - 2026-10-16
+
+### Fixed
+
+- **Product SEO titles no longer stop mid-phrase.** The Google title of a product was "<name> | Livraison gratuite — Ameublo Direct"; the long suffix left about 28 characters for the name inside the 65-character budget, so 350 of 2,269 active products showed titles like "Tables de chevet avec | …" or "Bureau d'ordinateur 3 | …". New titles end with just the store name ("| Ameublo Direct", "| Furnish Direct" in English), which leaves 48 characters for the name, and a shortened name never ends on a word like "de", "avec", "pour", "with", a bare number or a dash ("2-en-1" stays whole). Titles written by the AI get the same treatment, and one whose name part dangles is rebuilt from the product title. Live products are repaired with `scripts/fix-seo-titles.mts` (dry run by default; `--apply` writes): the dry run of 2026-10-16 finds 912 titles to rewrite (306 cut mid-phrase, 654 shared word-for-word with another product, 3 under 12 characters).
+
+## [0.5.107.35] - 2026-10-15
+
+### Fixed
+
+- **Product-page "Complétez la pièce" cards no longer show 0,00 $.** During the 2026-10-15 feed outage the block cached 145 suggestions with a price of 0, and every card used the Aosom catalogue price rather than the price shown on the product page. Cards (on product pages and in the shopping assistant) now carry the live Shopify price, a card with no real price is dropped, and the cache key is versioned so every old suggestion is recomputed and a cached card at 0 $ counts as a miss.
+
+## [0.5.107.34] - 2026-10-15
+
+### Changed
+
+- **Clear pricing rules for new imports.** A product is now imported only when its Aosom price is known (>= 30 $), our cost is known (wholesale + delivery from the feed), and at the price the sell-price rule will give it (about 20 % margin, a dollar under the competitor) the margin on cost is at least 12 %; thinner products would not survive payment fees and the return cost. Among eligible products the more profitable ones come first. The product is created AT its rule price, not at the Aosom price to be raised a day later (pricing mode live). A feed that carries fewer than 1,000 costs does not block imports (the margin rules switch off). The auto-import cron detail now shows how many products were eligible and how many the rules left out.
+
+## [0.5.107.33] - 2026-10-15
+
+### Changed
+
+- **Sell prices now aim for about 20 % margin on our cost.** The feed carries our cost since 2026-10-15 (wholesale price + delivery). Without a competitor price, a product is priced so that it earns 20 % on that cost (never below the last known Aosom price, at most +15 %, outdoor +7 %); with a competitor price the rule is unchanged (a dollar under them, they always win over the margin target). Simulation on 3,333 products: average margin 18.0 % -> 20.2 %, products under 10 % margin 128 -> 33, none above the competitor. Costs come from the feed at run time; if the feed is unreachable the tiered markup applies. Rollout is the usual 500 changes a day.
+
+## [0.5.107.32] - 2026-10-15
+
+### Fixed
+
+- **The Aosom feed lost its public price column.** On 2026-10-15 the feed replaced `Price` by `2B Product Price` (the wholesale price, 25-40 % lower than the price Aosom publishes, written like "41.36 CAD"). The 06:00 sync read every price as 0, wrote 0 over every stored price and logged 8,017 fake price drops. Effects: the daily auto-import found no product with a price (0 candidates, it had 1,890 on 10-08), and the compare-at sync skipped variants as "drift". Rows with no feed price now keep the last known price (never the wholesale price: we must not display below what Aosom publishes), the feed price is parsed even when written with a currency, and the sync logs an alert when the feed has no public price. One-off repair: `scripts/repair-feed-zero-prices.mjs` (dry run by default) restores the 8,017 prices from the history rows.
+- **Compare-at follows our own price.** The "Ancien prix" sync expected Shopify to show the Aosom price, so every marked-up variant looked like a drift and was skipped. It now expects the sell price and takes the reference from our own sell-price history (Aosom steps up to our first sell price, then ours), so a markup is never shown as a price the customer once paid.
+
+## [0.5.107.31] - 2026-10-15
+
+### Fixed
+
+- **Sell-price fixes no longer queue behind new work.** The per-run cap (500) was filled by products with no sell price yet, so the corrections that restore a discount (a price above its discount cap) waited behind about 2,500 of them: the number of crossed prices stayed at 109 instead of coming back to 126. Plan order is now: under the Aosom floor, then decreases, then products with no price, then the largest raises.
+
+## [0.5.107.30] - 2026-10-15
+
+### Fixed
+
+- **The markup cap also protects the crossed price actually shown on the storefront.** The cap added in 0.5.107.29 only saw discounts that satisfy the compare-at reference rule (held 14+ days in the last 90). Older crossed prices set by the previous writer do not always, so on the first live run the number of variants showing a crossed price went from 126 to 109. The sell-price sync now also reads the live crossed price of every variant and keeps the price at least 10 % under it (`discountCap`); a price already above the cap is lowered at once. An incomplete Shopify listing aborts the run (no change). The live listing is imported lazily to avoid an import cycle with the Shopify client.
+
+## [0.5.107.29] - 2026-10-15
+
+### Fixed
+
+- **The markup no longer eats a real discount.** A product with a real reference price (a 10 %+ drop it really made, see compare-at.ts) now has its sell price capped so it stays at least 10 % under that reference. Seen on the first live run: the 2 first products raised by the rule fell under 10 % and left the Liquidation collection. A price already raised above the cap is lowered at once; the Aosom floor still wins. `loadCompareAtSources` moved to `price-history-db.ts` (shared by the compare-at and sell-price syncs, and it avoids an import cycle with the Shopify client).
+
+## [0.5.107.28] - 2026-10-15
+
+### Added
+
+- **Sell-price rule wired in (off by default).** `products.sell_price` (new column) holds our computed selling price per SKU; new daily cron `/api/cron/sell-price-sync` (08:15 UTC) fills it from `sell-price-rule.ts` (never below Aosom, a dollar under the competitor, tiers 7/7/6/5/3 % otherwise). Controlled by `settings.pricing_mode` = off | dry | live (default off) and `pricing_max_changes_per_run` (default 500, rolls a large change out over several days). `pricing.ts#effectiveSellPrice` is the single reader: the stored price when sane (>= the Aosom price, <= 1.5x), else the Aosom price, so with the mode off every path behaves exactly as before. Read by the Phase 1 and Phase 2 diff (`computeDiffs` takes the map), the post-sync sample, the hourly `price-reconcile` (it used to expect the plain Aosom price and would have reverted any markup) and product creation. Stability: a lower price is followed at once, a higher one only for a gain of at least max(2 $, 2 %). New tables `competitor_prices` (cached snapshot, refetched after 20 h, a stale one is kept up to 7 days) and `sell_price_history` (our own price history, for the compare-at sync once the markup is live).
+
+### Changed
+
+- **`updateShopifyVariantPrice` no longer clears the crossed price on a price increase or a small step.** It only sets it for a drop of 10 % or more and otherwise leaves it alone, so the markup rollout cannot wipe a real discount. Invalid crossed prices are cleared by the compare-at sync. Two tests updated accordingly.
+
+## [0.5.107.27] - 2026-10-14
+
+### Added
+
+- **Compare-at ("Ancien prix") sync.** New daily cron `/api/cron/compare-at-sync` (10:30 UTC) derives the struck-through price from `price_history` instead of from the last price write: shown when the current price is 10 % or more below the highest price the product held for 14+ days within the last 90 days, cleared when it stops being true, never overwriting an already-valid one. Fixes the two ways a real drop went unshown: a slide in small steps (each step under 10 %, 35 of 67 missing cases) and a price re-written later or a path that never set it (32 of 67). Controlled by `settings.compare_at_mode` = off | dry | live (default off). Dry run on 2026-10-14: 3,994 variants read, 68 to add (median 12 %, p90 19 %), 1 invalid to clear (8 % discount), 83 already valid kept. `fetchShopifyVariantsPage` now also returns `compareAtPrice`; new `setVariantCompareAt` writes only that field. Limit: `price_history` is the Aosom price history, which equals ours while the sell-price markup is off.
+
+## [0.5.107.26] - 2026-10-14
+
+### Added
+
+- **Sell-price rule (not wired yet, no price changes).** `sell-price-rule.ts`: never below Aosom, a dollar under the competitor's public price (capped at +15 % over Aosom), tiered markup (7/7/6/5/3 % under 100 / 200 / 400 / 800 / above, none on patio/outdoor) when no competitor price exists, prices end .99. `competitor-prices.ts` reads their public catalogue and returns nothing rather than a partial map. `scripts/pricing-dry-run.mts` simulates the rule over every Shopify-linked product (read-only). Dry run on 2026-10-14: 3,975 products, 76 % repriced, median +5.7 %, weighted +4.9 %, strictly cheaper than the competitor on 1,944 of 2,391 comparable products, margin 14.4 % to 19.2 % (cost = feed B2B price + shipping).
+
+## [0.5.107.25] - 2026-10-14
+
+### Fixed
+
+- **Auto-import no longer paused itself every day after ~10 products.** The safety pause (40% held) was judged over only 10 products, so 6 published + 4 held tripped it on 2026-10-09..14 and the cron imported ~6/day instead of 100. Three changes: the pause now needs a sample of 30; products held only because their supplier photos are unusable (`gallery_too_few_clean_photos`, `no_clean_primary_photo`) stay parked for review but no longer feed the pause rule (counted apart in `photoHeld`; vision-model failures still pause); and the photo check no longer treats a brand printed on the product itself (PawHut, Soozier, HOMCOM…) as a supplier logo. Only a logo or name added over the photo, or "Aosom" anywhere, drops a photo. Checked on the 3 products held on 2026-10-14: before, 1 to 4 photos kept; after, 7 of 7.
+
+## [0.5.107.24] - 2026-10-10
+
+### Fixed
+
+- **Meta carousel / extra images no longer ship unverified photos.** The feed guard only removed images the classifier had flagged bad, so every never-classified photo went out as an
+  additional image: 2,048 secondary images were live, and a 300-image check found 67 % of them carried text, dimension drawings or marketing overlays (the already-classified ones: 0 %).
+  Additional images (`additional_image_link`, i.e. what the Meta dynamic-ads carousel cycles through, plus Google/Pinterest extras) now require a positive "compliant" verdict (fail-closed).
+  If the hero image was never verified and a verified one exists, that one becomes the hero. A classifier lookup failure withholds extras and still ships the hero.
+- **Daily gallery classification.** New `gallery-classification.ts`, run in the daily sync after the pos-1 guard: judges (Gemini, same strict no-text/no-dimensions prompt) every never-classified
+  photo of every active, published product, capped at 600 calls and 150 s per run, so a new product's secondary photos either reach the carousel or are flagged and dropped.
+  Backlog of ~2,200 photos classified by hand with `scripts/classify-gallery-images.mts` (catalogue now 100 % judged).
+
+## [0.5.107.23] - 2026-10-08
+
+### Added
+
+- **Bing URL submission.** Bing knew ~50 of 3,000+ pages and ChatGPT / Copilot search lean on its index. New daily cron `/api/cron/bing-submit` (11:00 UTC) reads the storefront
+  sitemaps and sends the URLs Bing has not seen, or that changed since (sitemap `lastmod`), through the Webmaster URL Submission API, newest first, within the daily
+  quota Bing reports (100/day on a new site, so the backlog drains over a few weeks). Sent URLs are tracked in `bing_submitted`. Needs `BING_WEBMASTER_API_KEY`; without it the run is a no-op.
+
+## [0.5.107.22] - 2026-10-08
+
+### Changed
+
+- **Auto-import judge: tolerance for rounding.** The layer 2 judge prompt now ignores unit-conversion differences caused only by rounding (under 1 cm, 0.5 kg or 2 %), plain
+  rephrasings and filler adjectives, and only reports what changes what the customer believes they are buying. Real inventions, wrong titles and wrong products are still held.
+
+## [0.5.107.21] - 2026-10-08
+
+### Fixed
+
+- **Auto-import: false positive on "30 kg (66 lb)".** Layer 1's `english_units_in_french_copy` rule rejected the house style (metric value followed by its imperial
+  equivalent in parentheses), so 4 of the first 5 live products went to review and the failure-rate pause stopped the day. Imperial equivalents right after a metric
+  value are now ignored by that rule; a bare "71 inches" or "66 lb" is still flagged.
+
+## [0.5.107.20] - 2026-10-08
+
+### Added
+
+- **Search Console health check.** After each good `/api/cron/gsc-sync`, `checkGscHealth` flags what a 200 from Google cannot: the property still has no data
+  4 days after the first successful connection, or the newest imported day is more than 4 days behind. The run is then recorded as an `error` in `cron_runs`
+  (dashboard "Résumé du jour"); "no data yet" inside the 4-day grace window is reported as pending, not an error. The result is stored in `gsc_health_last`
+  and shown as a banner on the SEO page.
+
+## [0.5.107.19] - 2026-10-08
+
+### Added
+
+- **Google Search Console connection.** Service-account auth (RS256 JWT via node:crypto, read-only scope, no OAuth refresh token to expire) in `src/lib/gsc-client.ts`;
+  daily import into `gsc_page_daily` / `gsc_query_daily` (`src/lib/gsc-sync.ts`, cron `/api/cron/gsc-sync` 12:30 UTC, `?backfill=N` up to 480 days); new **SEO (Google)** page
+  with clicks, impressions, CTR and position vs the previous period, by section (guides, blog, products, collections), top pages and queries, and blog/guide pages seen but never clicked.
+  Needs `GSC_SERVICE_ACCOUNT_JSON` + `GSC_SITE_URL`; until set, the cron is a no-op and the page shows setup steps.
+
+## [0.5.107.18] - 2026-10-08
+
+### Added
+
+- **Blog quality control** (`src/lib/blog-quality.ts`), the review blogs never had — guides get a fact check and a human, blogs only got one generic 0-100 score that
+  let "Chez Aosom Canada", price ranges and invented statistics ("selon Statistique Canada, près d'un travailleur sur trois…") onto the live site.
+  The auto-publish gate now runs, after the score and before the season/cap checks: (1) deterministic rules — supplier/internal names (incl. "Aosom"), prices and SKUs,
+  bare percentages and unsourced "studies show" claims, 3–10 H2, 550–2,500 words, no H1 in the body, no inline scripts (FAQ JSON-LD allowed), links only to our domains
+  and Unsplash photo credits, language, title and meta length, near-duplicate title; then (2) a claims check by the strong model that lists every contestable statement
+  and fails on statistics, studies, health/safety, legal, price and guarantee claims (fail-closed). A failing article stays a Shopify draft with the reasons in
+  `publishReason`; it is never auto-published. The generator prompt now forbids price ranges, statistics/studies and external links, and its one corrective retry
+  names any forbidden content it finds. The judge prompt no longer calls the store "Aosom Canada".
+- `scripts/blog-quality-audit.mts` — audit (default, read-only) and repair (`--apply`) of the editorial blogs already online: store-name swap, H1 demotion and a minimal
+  model rewrite for prices/percentages/study claims, accepted only if it re-passes the rules and keeps ≥ 90 % of the words; structurally poor articles are
+  unpublished (never deleted). Full article bodies are saved to `scripts/blog-reports/` (git-ignored) before any write.
+
+## [0.5.107.17] - 2026-10-08
+
+### Added
+
+- **"Automatisations" page** (`/automations`, admin only, sidebar → Admin): one place to stop — and watch — everything that runs by itself, with a per-job switch and
+  a "Tout arrêter / Tout reprendre" button. Every switch is a `settings` row read on the next cron tick, so a pause is immediate and nothing queued is deleted.
+  - **Importation automatique**: mode selector (Arrêté / Simulation / Pilote / En direct) + stop/resume (resume restores the previous mode), today's imports vs cap,
+    toys, products "à revoir" and errors over 24 h with the reasons, tokens used on the `import` pool, last cron run.
+  - **Publications automatiques** (`publisher_paused`): while paused the publisher cron drains nothing (rows stay `pending`, logged as "EN PAUSE" in `cron_runs`), the
+    price-drop autopost (`maybeAutopostPriceDrop`) does not publish and the blog cron still generates its articles but does not flip them live. Shows pending, overdue,
+    failed (3 d), next slot and last publication. The 06:15 publish check skips (and reports "en pause (voulu)") instead of raising a false alarm.
+  - **La semaine Ameublo**: the existing `semaine_enabled` kill switch, with the number of queued photos and its last run.
+- `GET /api/automations` (status) and `POST /api/automations` `{ key: auto_import|publisher|semaine|all, enabled, mode? }` — session + admin required, last change recorded
+  in `settings.automation_last_change`. The manual `POST /api/cron/publisher` trigger is unchanged (an operator action).
+
+## [0.5.107.16] - 2026-10-08
+
+### Added
+
+- **Automatic daily catalogue import** (`src/lib/auto-import/`, cron `/api/cron/auto-import`, every 10 min 07:00–20:50 UTC). **Ships OFF**:
+  `settings.auto_import_mode` = `off` (default) | `dry` (records the plan, writes nothing) | `pilot` (≤10 DRAFTS tagged `auto-import-pilot`, for review)
+  | `live`. `settings.auto_import_daily_cap` (default 100). Imports are paced across the window (a tick takes ≤3 groups), counters live in
+  `settings.auto_import_state` (Montréal day), a lock prevents overlapping ticks, and a feed with < 6,000 SKUs is refused.
+  Selection (`policy.ts`): every new arrival first, then toys up to 60/day, then Maison 35 / Animaux 28 / Sports 18 / Bureau 10 / autres 9 %;
+  only groups with a variant ≥ 10 in stock, ≥ 3 photos, price ≥ 30 $; patio only if a winter/Christmas item; Christmas and winter items first in season;
+  licensed third-party names (Mercedes-Benz, Disney, LEGO…) are left for a human.
+- **Three verification layers** (`verify.ts`), all passed before a product is visible: (1) deterministic rules on the copy — required fields, template leftovers,
+  English units, prices, unsafe/unbalanced HTML, supplier brands, and every measurement in the copy must be explainable by the supplier data (unit-converted);
+  (2) an independent judge model re-reads the copy against the supplier data (fail-closed, and must also find the French title sensible) and a vision model examines
+  the first 6 gallery photos in one call: photos with a supplier logo, watermark or no product are DROPPED, then the position-1 photo is chosen — a clean lifestyle
+  scene when one exists, otherwise the first photo without burned-in text — and the corrected order is saved before anything is created (fails only if < 3 usable
+  photos remain); titles are checked deterministically (no store/supplier/third-party/company-like name, no repeated words, not truncated or malformed, 25–110 chars);
+  colour swatches must be able to change the photo (every colour owns a photo in the gallery, not all the same one) and, after creation, every colour variant must
+  carry its own image id on Shopify; (3) the product is created as a DRAFT, what Shopify stored is compared with what was meant (variants, price ≥ supplier, inventory
+  not tracked, images), it is activated, and the public page is fetched (title, price, image, no supplier name). Any failure parks the job as `needs_review` with the reasons
+  and, after creation, unpublishes + tags the product.
+- **Dedicated `import` LLM pool** (`LLM_IMPORT_DAILY_BUDGET`, default 3,000,000 tokens/day) with `withBudgetPool()`, so the automatic import can no longer exhaust the shared
+  `batch` pool (the 2026-10-07 incident: every manual import failed with an opaque "Content generation failed") and vice versa. Shown on the usage dashboard.
+- `importToShopify(jobId, overrides, { status })` can create a product as a draft; `fetchShopifyProductSummary()` reads back what Shopify stored.
+
+## [0.5.107.15] - 2026-10-07
+
+### Added
+
+- **Mascot guard.** The Ameublo mascot (sofa with a witch hat) is off the air: every Ameublo Studio render burns it into the frame except the
+  faceless real-footage `emotion` style. `approvalBlocker` now refuses those videos even with `force`, and `publishQueueItem` throws
+  `mascot_blocked` instead of posting one that got into the queue anyway (a mascot Reel went out on the 06:00 slot the morning after the decision).
+  `MASCOT_VIDEOS_ALLOWED` in `mascot-guard.ts` is the single switch, changed only through a reviewed PR; a row can opt out with `metadata.mascotFree`.
+- **06:15 publish check** (`/api/cron/publish-check`, registered at 10:15 and 11:15 UTC like the morning report, only the run where Montréal reads 06:xx executes).
+  Read-only: flags every slot due in the last 3 hours that is still `pending` / `publishing` / `failed`, and any scheduled mascot row. A problem is
+  recorded as an `error` run in `cron_runs` (dashboard "Résumé du jour", MCP `recent_cron_runs`), kept in `settings.publish_check_last`, and sent as a
+  best-effort Klaviyo "Alerte publication" event. Klaviyo delivery to the owner is not reliable (see 0.5.107.14), so `cron_runs` is the source of truth.
+
+## [0.5.107.14] - 2026-10-07
+
+### Added
+
+- **The morning report no longer depends on Klaviyo to be reachable.** The 06:00 job now stores the finished report in `settings.morning_report_last`
+  (date, subject, plain text, unavailable sections, build time) BEFORE it tries the email, so a silent or failing email never makes the report vanish.
+  Klaviyo had accepted the event every day since Sep 26 while no email ever reached the inbox (flow live, 0 recipients, profile never subscribed), so
+  "sent" proved nothing.
+- **New MCP tool `morning_report`** (scope `read`, one SELECT on that settings key, no Meta call): returns the latest report as plain text with its date,
+  age in hours and any unavailable section. Ask Claude for "le rapport du matin" from claude.ai / desktop / mobile, or let a scheduled agent fetch it and
+  deliver it anywhere. Reconnect the AMEUBLO connector once for the new tool to appear.
+
+## [0.5.107.13] - 2026-10-07
+
+### Fixed
+
+- **Instagram photo / carousel posts were published without waiting for Instagram to say the image was ready**, and the Facebook+Instagram
+  publish only logged an Instagram failure to the console (the item stayed "published"). Over the last 9 days 22 of 40 photo posts never appeared
+  on the Ameublo Instagram account (all images are square 2000x2000, so the format is not the cause) and nobody could see why. Now: the photo,
+  each carousel child and the carousel itself are polled until FINISHED (an ERROR status is reported with Instagram's own reason; 30 s limit),
+  `media_publish` is retried up to 3 times when Meta says the media is not ready yet (never on a permission or policy refusal), and a post that went
+  out on one channel only keeps its reason in `publication_queue.error` and raises a "Publication partielle" notification
+  (`queue-partial-error.ts`). The real cause, if it is not readiness, will now be readable from the next failures.
+
+## [0.5.107.12] - 2026-10-07
+
+### Added
+
+- **Photo posts are now measured and tagged.** Every storefront link in a photo / album post (`content_type=social`) is UTM-tagged at publish
+  time, like the Reels: `utm_source=facebook|instagram&utm_medium=photo&utm_campaign=<La semaine Ameublo format, else "social">&utm_content=q<queue id>`
+  (only ameublodirect.ca / furnishdirect.ca links; an already-tagged link is left alone), so Umami can tell which post brought a visit.
+- A daily cron, `/api/cron/photo-insights` (09:35 UTC, after reel-insights and before the 06:00 Montreal report), reads each photo post's
+  views, reach, reactions, comments and shares (Facebook) and views / reach / likes / saves (Instagram) for the last 14 days into
+  `photo_insights` (created lazily; one snapshot per post per platform per day). A retired Meta metric never costs the snapshot; the post's own
+  counters carry the engagement. Instagram insights need the `instagram_manage_insights` permission: a refusal is noted once per run, not
+  counted as a failure on every post.
+- Morning report: new **"Résultats des photos (Facebook)"** section — totals, Instagram views when readable, and the best La semaine Ameublo
+  format (only photos older than 48 h are compared, at least 5 per format).
+
+### Fixed
+
+- A single-platform photo post (every Furnish Direct one) never returned its Facebook post id to the publisher, so nothing could be measured for it;
+  it now goes through the same path as a Reel and the id is recorded.
+
+## [0.5.107.11] - 2026-10-07
+
+### Added
+
+- **"La semaine Ameublo": fully automated photo posts, 2 a day per brand (Facebook + Instagram), off by default.** Two crons,
+  `/api/cron/semaine?slot=morning` (13:00 UTC, for the 10:00 Toronto slot) and `?slot=afternoon` (18:00 UTC, for 15:00), build one
+  post each and put it in `publication_queue` (the existing publisher posts it, with its retries and failed-item alert). Morning =
+  a format per weekday: new arrivals (Mon), price drops (Tue), a complete room (Wed), A or B (Thu), most popular (Fri), a measuring
+  tip (Sat), a favourite (Sun); afternoon = one featured product with its link. Multi-product posts go out as a Facebook album /
+  Instagram carousel of the raw Shopify photos (no renderer; the shelved carousel module stays shelved).
+- **Every number a customer sees is written by code from live data, never by the model.** Each product must pass a live gate
+  (Shopify active, in stock, real storefront price, a verified lifestyle photo; new arrivals and price drops may use the clean
+  primary photo, since fresh imports are never verified yet). The model writes only the hook: price, rabais (only a real Shopify
+  compare-at of 10 % or more), link, free shipping and hashtags are appended by code. The text is validated (no price, link or
+  hashtag, no invented number, no delivery talk, no fake urgency, no supplier name, right language, ends with a question) and
+  re-read by a judge call; two rejected tries re-pick other products, then fall back to another format, then the slot is skipped
+  with a notification. Out-of-season products (patio, sandbox, pool…) are excluded from October to April; SKUs rest for 21 days.
+- **Kill switch:** the setting `semaine_enabled` must be `"1"` (anything else queues nothing). `?dryRun=1` previews a post without
+  queueing or writing anything (also `scripts/semaine-preview.mts`). One row per day and slot in `semaine_posts` (created lazily)
+  makes the cron idempotent and holds the history used for the cooldown and, later, for measurement.
+
+## [0.5.107.10] - 2026-10-06
+
+### Added
+
+- **Reel measurement.** The publisher now records which Facebook / Instagram post each published row became
+  (`queue_post_ids`, best-effort: a failure to record never fails a live post). A daily cron, `/api/cron/reel-insights` (09:30 UTC,
+  before the morning report), reads each Reel's plays, watch time and social actions from the Graph API (page token we already
+  hold, no new permission) into `reel_insights`, one snapshot per Reel per day. A Meta metric that gets retired never costs the
+  whole snapshot. Studio Ameublo has a new **Résultats** tab (`GET /api/ameublo/insights`): by kind of video, page and time slot,
+  with the sample size beside every number; **only Reels older than 48 h are compared** (a young Reel has not collected what an old
+  one has) and groups under 5 Reels are flagged. The morning report gets a "Résultats des Reels" section.
+- **UTM tags on every storefront link in a Reel caption**, applied at publish time (so videos approved long ago are tagged and the
+  stored caption stays clean): `utm_source=facebook|instagram&utm_medium=reel&utm_campaign=<style>&utm_content=v<studio id>|q<queue id>`.
+  Only ameublodirect.ca / furnishdirect.ca links; an already-tagged link is left alone. Umami can now tell which video brought a visit.
+- Morning report: **"Publications en échec"** alert — failed queue rows due in the last 3 days or still ahead (16 batch Reels sat
+  `failed` for weeks without anyone knowing).
+- Studio: the Hormozi styles (aventure, budget, vote, mesure) and batch types (assembly, demand_gen_ext…) show their names instead of the raw key.
+- Scripts: `backfill-reel-post-ids.mts` (attach Facebook ids to Reels published before this change, by publication time — dry run by
+  default) and `requeue-failed-batch-reels.mts` (see below).
+
+### Fixed
+
+- **Batch Reels (assembly / demand_gen_ext) went out with NO link.** Their caption prompt says "le lien est sous la vidéo", but a Reel
+  has no link field (`link` is only used for text-only Facebook posts). The product page is now appended to the caption.
+- **16 batch Reels were stuck `failed`** ("payload.caption is required", the bug fixed on 2026-10-01): they had failed on their original
+  slots and were later re-timed without being reset to `pending`. `requeue-failed-batch-reels.mts` puts back the ones that are safe
+  (video reachable, Shopify product active, no stale seasonal content, no price burned in the title); 13 were re-queued, 3 Halloween ones
+  scheduled after Halloween are left for a human decision.
+
+## [0.5.107.8] - 2026-10-05
+
+### Added
+
+- **Pinterest: OAuth with automatic token refresh** (`src/lib/pinterest-auth.ts`). Authorize URL, code exchange, refresh
+  (continuous refresh: 30-day access token, 60-day refresh token renewed on every use), a token store in the `settings`
+  table (sandbox and production under separate keys) and `resolvePinterestCredentials()`. Concurrent callers share one
+  refresh. Errors never echo the app secret, the code or a token.
+- **Pinterest: video Pins** (`PinterestClient.createVideoPin`): register media, upload the MP4 to the pre-signed URL, wait for
+  Pinterest to process it, create the Pin (cover image required, 100 MB cap, bounded polling). `studioVideoToPin()` turns a
+  Studio Ameublo video into a Pin that links to the product page (FR `ameublodirect.ca`, EN `furnishdirect.ca`) and refuses,
+  with a reason, a video that has no product page or cover.
+- **Pinterest sandbox**: `PINTEREST_ENV=sandbox` / `credentials.sandbox` points the client at `api-sandbox.pinterest.com`
+  (what an app on Trial access can use).
+- Scripts: `scripts/pinterest-oauth.mts` (url / exchange / whoami / refresh) and `scripts/pinterest-video-pin.mts` (dry run by
+  default; `--apply [--sandbox]`). `docs/PINTEREST-SETUP.md` rewritten: access tiers, env vars, the Trial → Standard
+  screen-recording checklist and the remaining gaps.
+
+Ships **dormant**: nothing in `src/app` imports it and the publisher queue is untouched (adding a `pinterest` platform needs a
+`publication_queue` table rebuild, deferred until the app is approved).
+
+## [0.5.107.7] - 2026-10-05
+
+### Added
+
+- **Studio Ameublo: "Plan de la semaine".** New tab that proposes the next 7 days of Reels from the
+  videos nobody approved yet (3 per page per day: 07:45 / 12:15 / 19:45 FR, EN +5 min, plus a 06:00
+  slot reserved for the seasonal campaign while it runs). Remove what you do not want (it is replaced
+  by the next video in stock), then "Approuver la semaine" books every entry on its exact slot.
+  `GET/POST /api/ameublo/week-plan` (admin-only; the POST only accepts grid slots) and
+  `approveAmeubloVideoAt` (same blockers and price guard as the normal approval; a taken slot is
+  reported, never shifted). Planner: `src/lib/ameublo-week-plan.ts` (pure, unit-tested).
+
+- **Morning report: "Réserve de Reels (Studio)".** Per page (Ameublo FR / Furnish EN): days of approved Reels still
+  ahead, how many are scheduled and how many are ready to approve. Under 7 days it turns red, flags the subject
+  ("🟠 réserve de Reels basse") and points to "Plan de la semaine" — approval is manual, so the queue used to run
+  dry silently. `countReelsStock()` (read-only) + `reelsRunwayDays()`.
+
+### Changed
+
+- **Publisher cron: hourly → every 5 minutes** (`vercel.json`). Slots went out at the next full hour
+  (07:45 → 08:00, an EN 06:05 → 07:00); they now go out within 5 minutes of their time. Overlapping
+  runs stay safe (atomic claim + the stranded-row reaper); `cron_runs` gets ~288 rows/day (pruned at 30 days).
+- Studio Ameublo header text now states the real grid.
+
+## [0.5.107.6] - 2026-10-04
+
+### Added
+
+- **Catalog page: "Importés" filter.** Mirrors the existing "Non importés" toggle — filters
+  to products that already have a `shopify_product_id` (`imported` param on
+  `GET /api/catalog`, `buildCatalogWhere`'s new `imported` condition). The two toggles are
+  mutually exclusive in the UI (selecting one clears the other) so they can't silently
+  cancel each other into zero results.
+
+## [0.5.107.5] - 2026-10-04
+
+**Studio Ameublo: Halloween series + category / sub-category filters.** 59 Halloween videos (FR + EN, QA-passed, none approved) are in the Studio as "Nouveau", series "Halloween 2026". The Studio can now be filtered by what is on screen.
+
+### Added
+
+- `--pool halloween` in `scripts/ameublo-batch.mts`: curated FR/EN on-screen titles, FR/EN subject-match guard, no-break-space glue so "PI"/"FT"/"CM" never wraps alone. Halloween tips, product family and VALUE copy (inflatables, animated, hanging) in the scenes/copy/i18n modules.
+- Category chips (Halloween, Animaux, Salon, Cuisine, Chambre, Bureau, Rangement, ...) with counts, and a sub-category row (Gonflables / Animés / Suspendus, Chats / Chiens, Tabourets de bar, ...). Derived from the catalogue `product_type` of the SKUs on screen (`src/lib/ameublo-categories.ts`), never from the `campaign` tag (417 of 493 videos carry "maison-2026" whatever they show). Multi-product videos take the most common category.
+- `GET /api/ameublo/videos` annotates each video with `category`, `category_label`, `sub_category`; `productTypesBySku` in `database.ts`.
+
+### Changed
+
+- Picking a category clears the series filter (the auto "latest series" filter would otherwise hide the other themes); category counts ignore the series filter.
+
+## [0.5.107.4] - 2026-10-04
+
+**Studio Ameublo: clear feedback after "Approuver et planifier".** Nothing showed that the click had worked and the button stayed clickable. The success banner sat at the top of the page (out of view while scrolling the grid), the busy lock was released before the list reload finished (so the card stayed a clickable "Nouveau" during the reload), and the card then simply disappeared from the default "Nouveau" filter.
+
+### Fixed
+
+- The card switches immediately to "Planifié · date" with the "Retirer de l'horaire" button, and stays visible under the current filter until the filters change.
+- The confirmation/error banner is sticky at the top of the viewport.
+- Button reads "Planification…" while busy; a second click is ignored (ref guard) instead of racing the first.
+- Same treatment for "Retirer de l'horaire".
+
+## [0.5.107.3] - 2026-10-04
+
+**Studio Ameublo: generator quality pass.** A QA review of the v2 series flagged 63 of 119 videos (ambiguous title, wrong room, people in a photo, non-comparable pairs). The generator now refuses those cases at planning time, and the flagged rows get their own "Écartée (QA)" status instead of sitting in the default view.
+
+### Changed
+
+- Titles: `cleanTitle` cuts only at a clause boundary, keeps "lot de N", capitalises, refuses leftover English/French words, and returns nothing rather than a half-sentence. Titles that name a colour are skipped (the group photo may show another one).
+- Photos: vitrine and "devine le prix" use the white-background shot plus the human-validated lifestyle photo (Shopify tag `lifestyle-verified`); the unreliable per-photo classifier note is no longer trusted for extra photos.
+- A/B and Top 3 choose a comparable combination (same class, same unit, honest price spread) from a per-category pool instead of burning products on failed tries; more classes (wall, filing, corner, L-shaped, rolling).
+- "La pièce en 4 articles": room-specific bans and four distinct roles per room (no islands or pantries in a dining nook, no second storage unit in an office or bedroom).
+- Tips: armchairs, recliners and pet sofas get their own advice instead of the sofa one. New `bain` family. Vitrine caption no longer says "Elle va bien dans ton salon".
+- `ameublo-batch.mts`: `--need`, `--skip-series`, `--preview` staging and `--release` (uploads only videos that passed the visual review, marked `qa_verdict='pass'`).
+
+### Added
+
+- Studio status "Écartée (QA)" for rows with a `fail` / `review` verdict. `tests/ameublo-title.test.ts`.
+
+## [0.5.107.2] - 2026-10-04
+
+**Studio Ameublo: 4 Reels a day per page (was 2).** The mascot content is free to render, so the grid is widened. Nothing is published until the operator approves videos.
+
+### Changed
+
+- `DEFAULT_AMEUBLO_SCHEDULE`: 8 slots a day (07:45, 09:45, 12:15, 14:30, 16:15, 18:30, 20:15, 21:45), cap 8. French (Ameublo Direct) takes the 1st/3rd/5th/7th, English (Furnish Direct) the 2nd/4th/6th/8th, so each page gets 4 a day on distinct hourly publisher runs. No `ameublo_schedule` setting is stored in prod, so the default applies on deploy.
+- `parseAmeubloSchedule` accepts a `max_per_day` up to 12 (the shared normalizer capped every grid at 5).
+
+## [0.5.107.1] - 2026-10-04
+
+**Studio Ameublo: remove the music picker and open on the latest series.** The music is chosen and used, so the "Choisis tes musiques" list is dead weight.
+
+### Removed
+
+- The "🎵 Choisis tes musiques" section of `/ameublo`, its `GET`/`PATCH /api/ameublo/music` route, `ameublo-music-catalog.ts` and its test. The six picks stay hard-coded in `scripts/ameublo-batch.mts`; the `ameublo_music_picks` setting is no longer read.
+
+### Changed
+
+- `/ameublo` opens filtered on the most recent series, so the 217 older renders (Série 1 and the previous batch, old music) no longer crowd the page. They stay reachable through the "Série" filter.
+
+## [0.5.107.0] - 2026-10-04
+
+**Studio Ameublo: bilingual video series (FR Ameublo / EN Furni), approval and auto-scheduling.** Mat disliked the "constance" series and asked for a fresh set in every style, in both languages, built from his music picks, that he can approve in one click and that schedules itself.
+
+### Added
+
+- **Seven free (sharp + ffmpeg, no AI) styles**, each generated in French for Ameublo Direct and in English for Furnish Direct (mascot "Furni"): vitrine, astuce, devine le prix, tu prends lequel, top 3, la pièce en 4 articles, réaction (UGC clip).
+  - `scripts/ameublo-batch.mts` plans and renders a resumable series (`--plan`, then `--render`), one contact sheet per video for review.
+  - Music comes only from Mat's picks (5, 30, 59, 60, 75; 49 is reserved for Noël).
+  - Essential text, prices and CTA stay out of the bottom third (Meta Reels safe zone); titles are cut at a word boundary with no dangling connector (`tidyTitle`).
+- **One-click approval** (`src/lib/ameublo-approval.ts`): approving a Studio video enqueues it in `publication_queue` on the next free slot of its language's share of the mascot grid (FR 07:45 and 18:30, EN 12:15 and 20:45, America/Toronto, max 4 per day). The hourly publisher does the rest. The price guard runs at approval and at publish time. Approval is only ever an operator action.
+- **Captions** per language (`ameublo-caption.ts`) and **language layer** (`ameublo-i18n.ts`): CAD formats (`84,99 $` vs `$84.99`), English titles stripped of supplier names.
+- **Reviewer verdicts** (`qa_verdict` / `qa_notes` columns) shown in `/ameublo`, recorded with `scripts/ameublo-qa-apply.mts` (dry-run unless `--apply`). The page groups videos by style and language.
+
+### Fixed
+
+- `rerender-stale-sequential-ads.mts` no longer touches Studio videos.
+
+## [0.5.106.0] - 2026-10-04
+
+**Studio Ameublo: Série 2 of music** (Mat picked #5, #30 and #49 and asked for more of the same family, but upbeat and joyful, plus some electro or soft hip-hop).
+
+### Added
+
+- 65 more royalty-free tracks in `/ameublo` (numbers 55–119) in five new "Série 2" groups: chillhop / jazz enjoué, house / nu-disco joyeux, Noël enjoué, électro joyeux, hip-hop doux.
+  - Same licences as Série 1 (Pixabay Content License, Mixkit Free License). Pixabay tracks badged "Content ID Registered" or "AI generated" are excluded (checked 2026-10-03).
+  - ⭐ marks eight new favourites. Each description ends with the track's duration.
+  - Moods come from the sites' titles and tags, not from listening, so a listen is still needed.
+- Mat's earlier ❤️ picks (5, 30, 49) are kept.
+
+## [0.5.105.1] - 2026-10-04
+
+A batch of newly-imported outdoor storage boxes came out with no physical dimensions in the
+description at all, and inconsistent capacity units (litres, gallons, or both mixed together)
+— a shopper has no reliable way to judge the size from text alone. Root cause: the content
+generator never looked at `product.dimensions` (real L×W×H data Aosom provides), and nothing
+constrained the capacity unit.
+
+### Fixed
+
+- **Dimensions now reach the prompt and are enforced in the copy** (`content-generator.ts`).
+  `inferDimensionsCm` converts the primary variant's dimensions to cm — Aosom's feed is NOT
+  unit-consistent row to row (some rows report inches, others already cm, no unit column),
+  so this uses a calibrated heuristic (max axis >120 ⇒ already cm, else inches × 2.54),
+  validated against 5 real catalog rows including 3 cross-checked against their own stated
+  gallon capacity. When dimensions are available, `collectCopyIssues` now requires BOTH
+  descriptions to actually state them — missing dimensions trigger the existing one-shot
+  same-tier corrective retry (same mechanism already used for missing accents/tags).
+- **Capacity is litres-only.** The system prompt now forbids "gallon"/"gal" anywhere in the
+  output (convert at 1 US gal = 3.785 L), and `collectCopyIssues` flags any leftover mention
+  the same way.
+- When no dimensions are available from the supplier, the model is explicitly told not to
+  invent or estimate them.
+
+Only affects content generated from here on — the storage-box batch imported 2026-10-03 (the
+one that surfaced this) still needs its 6 listings regenerated by hand if that's wanted.
+
+## [0.5.105.0] - 2026-10-03
+
+**Studio Ameublo: pick the background music** (Mat: the stock tracks sound "trop commercial BS"; "mets ça dans Aosom-sync… une façon simple et rapide pour moi de te dire ceux que j'aime").
+
+### Added
+
+- "🎵 Choisis tes musiques" at the top of `/ameublo`: 54 royalty-free tracks in 7 mood groups (lo-fi, jazz/bossa, funk 70s, nu-disco, playful pizzicato/marimba, acoustic/autumn, Noël).
+  - Each track plays inline.
+  - ❤️ saves a pick at once, and a free-text comment saves when the field loses focus.
+  - ⭐ marks Claude's ten favourites; ⚠ flags over-used tracks or AI-heavy artists.
+- `ameublo-music-catalog.ts` holds the candidates; `GET`/`PATCH /api/ameublo/music` reads and writes the picks in the `ameublo_music_picks` setting.
+- Licensing: Pixabay Content License or Mixkit Free License only. Both are free for paid ads with no attribution. Tracks badged "Content ID Registered" or "AI generated" are excluded.
+
+### Changed
+
+- CSP `media-src` now allows `cdn.pixabay.com` and `assets.mixkit.co`, so the previews can play.
+
+## [0.5.104.1] - 2026-10-03
+
+Dashboard sidebar was a single flat list of 19 links with no grouping — regrouped into 4
+labeled sections, and 7 of those links collapsed into 2 (video pages) without losing any
+page.
+
+### Changed
+
+- **Sidebar grouped into Catalogue / Vidéo / Contenu / Admin** (`components/sidebar.tsx`),
+  each with a small uppercase section label. 19 flat links → ~13 visible rows.
+- **5 video-producing pages share one sidebar row** ("Vidéos"): /videos,
+  /demand-gen-videos, /sequential-ads, /content-formats, /ameublo. Each page still has its
+  own route (own layout, own logic — nothing merged) but now renders a shared
+  `SectionTabs` bar (`components/section-tabs.tsx`) at the top linking to the other 4, so
+  they read as one section with tabs instead of 5 separate sidebar entries. The "Vidéos"
+  sidebar row stays highlighted on any of the 5 routes.
+- **Social Media + Drafts share one row** the same way (`Générer` / `Réviser` tabs) — two
+  steps of one workflow. Drafts deliberately stayed its own route: it's outside the
+  reviewer role's allowlist (`AUTH.REVIEWER_ALLOWED_PREFIXES`), and merging the URL would
+  have silently exposed it to the Meta-review seeded account.
+- **Collections moved under Settings** as a 4th tab (`settings/CollectionsTab.tsx`) — it's
+  an occasional config task (Aosom category → Shopify collection mapping), not a daily
+  workflow page, so it no longer needs its own sidebar entry. `/collections` now redirects
+  to `/settings`.
+
+### Fixed
+
+- Sidebar's own "active row" check used a bare `pathname.startsWith(item.href)`, which
+  could in principle also light up an unrelated route sharing the same prefix (e.g. a
+  future `/social-x` would have highlighted "Social Media"). Now requires an exact match
+  or a `/`-bounded prefix.
+
+### Added
+
+- **La pièce en 4 articles** (Mat: "il fait aussi la pièce en quatre articles"). "TON SALON COMPLET EN 4 ARTICLES": each product lands big with its "+ price", then drops into a 2×2 grid while a running subtotal counts up. The exact total slams in at the end with free shipping.
+  - `roomTotal` keeps the total equal to the sum of the real prices, to the cent.
+  - Samples in Studio Ameublo: a salon at 594,96 $ (#35) and a bureau (#36).
+
+## [0.5.103.0] - 2026-10-03
+
+**Ameublo styles, round 2** (Mat's review: Réaction loved but needs varied Hormozi-style copy, Vitrine too slow and the desk wasn't visible, Intro/Outro dropped, find more formats).
+
+### Added
+
+- `ameublo-copy.ts`: hand-written Hormozi-style lines, picked deterministically per SKU and varied across a series. Each video gets a hook ("ATTENDS DE VOIR LE PRIX", "ARRÊTE DE SCROLLER"…), a value line for its product family, a price teaser and a call to action.
+  - Honest clickbait only: no "le moins cher", no fake scarcity, no invented discount.
+- Three new formats, picked from research on 2024–2026 short-form formats:
+  - **Devine le prix**: two prices on screen and a 3-2-1 countdown over quick cuts, then the real price is revealed. The decoy is presented as a guess, never as a former price.
+  - **Tu prends lequel ?**: A versus B side by side, a spotlight alternating between them while Ameublo points, then "ÉCRIS A OU B EN COMMENTAIRE".
+  - **Top 3**: "3 TROUVAILLES SOUS 120 $", counting down #3, #2, #1. The cap is the next $10 above the dearest product, so it is always true.
+- `popWords` kinetic text, a white flash on hard cuts, a price slam, and a punch-in on every photo cut.
+
+### Changed
+
+- **Réaction**: five beats (hook → value → teaser → price slam → CTA) instead of two fixed lines.
+- **Vitrine**: 8.5 s instead of 12 s, a cut every 0.9 s, kinetic hook text, price at 4.8 s.
+- **Astuce**: 9 s instead of 13 s; the tip arrives line by line.
+- Photos: the white-background shot (`image1`, the whole piece) comes first. Other gallery photos are kept only when the vision audit marked them clean (`image_classifications.compliant = 1`); Aosom galleries mix in English marketing text and dimension diagrams.
+
+### Removed
+
+- The Intro / Outro style (Mat: "on l'enlève complètement"), with its samples in Studio Ameublo.
+
+## [0.5.102.0] - 2026-10-03
+
+**Four more free Ameublo video styles, for Mat to approve or reject** (Mat: "peux-tu me créer d'autres style de vidéos gratuit? J'approuverai ou désapprouverai"). No AI call; review only.
+
+### Added
+
+- `video-engines/ameublo-scenes.ts`: full-frame scenes starring Ameublo. Each style describes what is on screen at time t; `renderScene` composites the layers with sharp and pipes raw RGBA frames into ffmpeg over a background and an optional clip.
+  - **Réaction**: a customer clip in a framed card, Ameublo reacting under it ("OH ! REGARDEZ ÇA" → "J'ADORE !"), then the price tag.
+  - **Vitrine**: three product photos slide in on a card, Ameublo presents them, the price tag drops in.
+  - **Astuce d'Ameublo**: he thinks, shares a practical tip for the product family (hand-written list, no claims), then suggests the product.
+  - **Intro / Outro**: wraps an existing ad with a 1.6 s "Ameublo vous présente…" card and a 2.4 s "À bientôt !" card.
+- `ameublo-sprite.ts`: wide eyes, body tilt and thought dots.
+- `scripts/ameublo-style-samples.mts`: two samples per style into Studio Ameublo (series "Style : …"). `--stills DIR` for a layout check without rendering.
+
+### Fixed
+
+- Scene text goes through sharp's Pango renderer with the bundled DM Sans file. librsvg's SVG `<text>` fell back to a serif font on Windows.
+
+## [0.5.101.0] - 2026-10-03
+
+**Studio Ameublo: a dashboard section to review mascot test videos** (Mat: "fait une série de vidéo test pour voir la constance… une section dans Aosom-Sync pour voir"). Review only: nothing here is ever published.
+
+### Added
+
+- `/ameublo` (sidebar "Studio Ameublo"): the test videos grouped by series, each one playable. 👍 "Constant" / 👎 "À revoir" per video, an optional comment, and a running count per series. Reviewers are read-only.
+- `GET`/`PATCH /api/ameublo/videos`, and the table `ameublo_test_videos`. Nothing reads this table into `publication_queue`.
+- `scripts/ameublo-test-series.mts`: takes a spread of sequential-ad drafts across campaigns and lays the free "Ameublo présente" overlay on them.
+  - It reads where the ad's copy sits (the darker gradient band) and puts Ameublo in the other half.
+  - It uploads each result to Blob and records it for review. The source drafts are untouched.
+  - Dry-run by default.
+
+### Data
+
+- "Série 1 — constance": 10 test videos across Noël, animaux, automne, enfants and maison. Cost: 0 $ (no AI call).
+
+## [0.5.100.0] - 2026-10-03
+
+**"Ameublo présente": the mascot in our videos, for free** (Mat: "Allons-y avec A"). Opt-in, off by default; no video was rendered or published.
+
+### Added
+
+- `ameublo-sprite.ts`: Ameublo as a parametric SVG. A pose is a few numbers (eyes, mouth, gaze, both arms, hop, squash), so every frame comes from the same vector drawing and he stays on-model with no AI call.
+  - The `ameubloPoseAt` choreography: pops up from below, waves hello, points at a speech bubble with the arm on the bubble's side, then waves goodbye with two hops. He breathes and blinks throughout.
+  - Seasonal accessories by campaign: Quebec tuque (hiver), Santa hat (noël), maple leaf (automne), witch hat (halloween).
+  - Five in-character bubble lines, picked per SKU.
+- `video-engines/ameublo-overlay.ts`: rasterises the frames with sharp and lays them over a clip with ffmpeg, together with the bubble (DM Sans `drawtext`). Placement goes in the half of the frame the ad copy is not in: top corner by default, bottom corner above the brand bar when the copy moved up. Cost per video: 0 $.
+- `render-sequential-ads.mts --ameublo` applies the overlay after the normal render.
+
+## [0.5.99.1] - 2026-10-02
+
+### Fixed
+
+- `render-sequential-ads.mts`: Turso writes and Blob uploads retry on transient network errors (`withRetry`). Every write of the first stale-price re-render failed with "socket hang up": the minutes-long synchronous ffmpeg renders leave the pooled keep-alive sockets to be closed by Turso.
+- Video copy kept dropping French elision apostrophes (`normalizeLine` stripped every `'`), so "L'ENTRAÎNEMENT" was burned in as "LENTRAÎNEMENT". An apostrophe between letters is now kept as a typographic ’ (DM Sans renders it).
+
+## [0.5.99.0] - 2026-10-02
+
+**Sequential ads never go out with a stale price** (Mat: "Vérif + re-rendu"). The renderer runs on the operator's PC (ffmpeg, music, source clips), so the site can't re-render at approval time on its own. It guards instead.
+
+### Added
+
+- `sequential-ad-price.ts`: the renderer records the price burned into the frame (`metadata.renderedPrice`, written by `render-sequential-ads.mts` on insert and on `--replace`).
+  - **Approval** refuses an ad whose price changed since the render: "Prix changé depuis le rendu : 79,99 $ → 84,99 $" (HTTP 409). It flags the ad `needsRerender`.
+  - **Publisher** re-checks right before posting. On a change, the ad goes back to `draft`, flagged, with a dashboard notification, instead of being published or marked failed (`SequentialAdPriceChangedError`, `flagSequentialAdForRerender`).
+- `scripts/rerender-stale-sequential-ads.mts`: lists every flagged or price-drifted draft, grouped by creative and campaign, and re-renders each group in place with today's price (`--skus … --replace`, same id, slot and status; clears the flag). Dry-run by default. `SEQ_ASSETS_ROOT` points at the main clone's music and clips.
+- `/sequential-ads` shows "💲 Prix à re-rendre — <reason>" on flagged ads.
+
+### Data
+
+- The 61 seasonal drafts were backfilled with the price that had been burned in at render time, reconstructed from `price_history`. 43 were stale.
+
+## [0.5.98.0] - 2026-10-02
+
+Catalogue clean-up approved by Mat (points 3, 6a–6d) and the guardrails that keep it clean.
+
+### Added
+
+- **Sizes arrive in French at import** (`size-names.ts`, `toFrenchSize`): "Large" → "Grand", "Set of 4" → "Lot de 4", "3-Drawer" → "3 tiroirs", "6FT" → "6 pi"… The Aosom wording is registered as the EN translation (`registerOptionEnTranslations(productId, sizeEn)`). Words only — inch marks, metric units and decimals are left as Aosom wrote them.
+- **Daily category guard** (`category-guard.ts`, `GET /api/cron/category-guard`, 10:00 UTC): read-only, it raises a dashboard notification when an active product sits in no storefront-menu collection, or an import mapping points at a deleted collection.
+
+### Fixed (data, applied to production the same day)
+
+- 332 English size values on 264 products translated to French, with EN translations registered. The Christmas tree "6ft" / "6 pi" duplicate was merged.
+- The 9 "duplicate colour" products got correct, distinct French colours: Noir / Noir et blanc, Blanc / Blanc marbre, Vert / Vert pâle, Vert / Vert — lot de 2, plus EN translations. 65 ghost option values (used by no variant) were deleted across 30 products.
+- Swatches added for Camouflage, Couleurs pâles, Couleurs foncées and Carbonisé (theme `main-product.liquid`).
+- "Meubles & Déco › Salle de bain" grew from 25 to 48 products: Aosom had moved bathroom cabinets from "Bedding & Bath" to "Bathroom Furniture", and the smart rule only knew the old branch.
+- 2 import mappings to the deleted "Autres" collection were removed. Those products remain reachable through "Bricolage & Outils" and their other menu sections.
+- 56 summer patio sequential-ad drafts cancelled.
+
+## [0.5.97.0] - 2026-10-02
+
+Ameublo spends fewer tokens for the same answers, and its limit messages speak in its own voice.
+
+### Changed
+
+- **First-question answer cache** (`assistant-answer-cache.ts`, table `assistant_answer_cache`, 1 h TTL): the quick-question chips and any identical opening question (no history) are served from the answer computed in the last hour, at 0 tokens and instantly. It still counts as a message for the hourly quota and the visitor's day. Flagged, empty or "no match" answers are never replayed.
+- **Leaner context re-sent on every step**:
+  - system prompt condensed from 9.1k to 4.9k characters, same rules;
+  - search rows carry the leaf category, a capped name, and colour/stock only when informative (`compactRow`);
+  - product descriptions are cut to 900 chars, spec lines first (`specFirst`).
+- Measured on the same questions as earlier that day:
+  - delivery 6.2k → 4.3k tokens;
+  - coffee table 16k → 11k;
+  - living room in a budget 13–29k → 10.9k;
+  - returns ~4.7k → 4.4k.
+- **Limit messages in Ameublo's voice**: light, a little funny, still professional ("Ouf, ça fait beaucoup de questions d'affilée ! Laissez-moi regonfler mes coussins…", "Je fais une petite sieste dans mon coin 💤…"). The abuse block stays neutral. Every hand-off now also gives the store phone (`contactPhone`, `ASSISTANT_CONTACT_PHONE`, default 514-292-7788).
+
+## [0.5.96.2] - 2026-10-02
+
+Investigated "I queued a never-imported product but it's still showing Not imported on the
+catalog page, no error anywhere" — a real bug, distinct from the already-fixed 2026-09-18 one.
+
+### Fixed
+
+- **`upsertImportJob`'s ON CONFLICT(group_key) branch left a stale `shopify_id` on the row.**
+  Aosom's PSIN groups every BTU/capacity + colour combination of a model under ONE group_key
+  (confirmed live: 823-058V81BK/WT [8,000 BTU] and 823-058V83BK/WT [10,000 BTU] share PSIN
+  `256L5LETCAO00`), but these combinations have historically been imported to Shopify as
+  SEPARATE products. Queuing a never-imported combination whose group_key was previously used
+  by an already-imported sibling reset `status` to `'pending'` but left the sibling's
+  `shopify_id` in place. `importToShopify`'s idempotency guard (`if (row.shopify_id) return
+  already_imported`) then silently refused to ever call `createShopifyProduct` for the new
+  combination — no error, no Shopify product, forever "Not imported" on the catalog page.
+  The conflict branch now also clears `shopify_id`/`content`/`error` (`database.ts`,
+  `upsertImportJob`). `tests/database-import-job-upsert.test.ts` reproduces it against the
+  real schema in an in-memory libsql DB and fails without the fix.
+
+**Ameublo the mascot** replaces the chat bubble (theme draft only, not published).
+
+### Added
+
+- A little gold armchair character drawn as inline SVG with CSS animations — idle breathing + blinking, a wave (once per visit after 4 s, and when the chat opens), a thinking pose while the assistant answers, a happy hop when the answer lands. Animations are off for `prefers-reduced-motion`.
+- The floating button is the mascot itself with its "Demandez à Ameublo" pill (desktop bottom-right, Messenger moved up above it; mobile bottom-left); the same drawing sits in the chat header.
+- `docs/brand/` — `ameublo-mascot.svg` (standalone, for posts / videos), `ameublo-poses.html` (the four animated poses with the site CSS), `AMEUBLO.md` (palette, SVG rig, how to render frames for videos).
+- Uploaded to draft theme 162992816233 "DRAFT — Assistant Ameublo 2026-10-02"; verified on desktop and mobile previews. Live theme untouched.
+
+## [0.5.96.1] - 2026-10-02
+
+**Ameublo the mascot** replaces the chat bubble (theme draft only, not published).
+
+### Added
+
+- A little gold armchair character drawn as inline SVG with CSS animations — idle breathing + blinking, a wave (once per visit after 4 s, and when the chat opens), a thinking pose while the assistant answers, a happy hop when the answer lands. Animations are off for `prefers-reduced-motion`.
+- The floating button is the mascot itself with its "Demandez à Ameublo" pill (desktop bottom-right, Messenger moved up above it; mobile bottom-left); the same drawing sits in the chat header.
+- `docs/brand/` — `ameublo-mascot.svg` (standalone, for posts / videos), `ameublo-poses.html` (the four animated poses with the site CSS), `AMEUBLO.md` (palette, SVG rig, how to render frames for videos).
+- Uploaded to draft theme 162992816233 "DRAFT — Assistant Ameublo 2026-10-02"; verified on desktop and mobile previews. Live theme untouched.
+
+## [0.5.96.0] - 2026-10-02
+
+Ameublo becomes a real in-store advisor: product facts, room-in-a-budget, decor and seasonal advice, with a personality — and still nothing outside the home and the store.
+
+### Added
+
+- **`get_product_details` tool** (`product-details.ts`): reads the live Shopify page of a product the shopper was shown (FR description, or the `custom.body_html_en` metafield on the EN site; options, variants and prices), cached 30 min. Ameublo now answers "will it fit on my 9 ft wall?", assembly, materials, capacity, and compares two products — never stating a spec the page doesn't give.
+- **Room in a total budget**: all pieces searched in parallel in one turn, one product per piece, and the exact total of the cards shown appended server-side (`roomTotalLine`). The model's own sums were wrong on 2 of 3 live tests.
+- **Advice**: general decor / layout know-how (rug sizes, table clearance, stool heights, small condos) and Québec seasonal care (wintering patio furniture, car shelters for snow, materials care). Product pages always win over general advice.
+- **Personality**: warm Québec salesperson, "vous", light humour, ≤ 1 emoji, remembers what the shopper said, brief small talk then back to the home, honest "I'm the store's virtual assistant", one next-step suggestion.
+- **Limits**: no opinions on competitors / politics / religion / news, never asks for personal data, never discusses its own workings, never invents; unknown → info@ameublodirect.ca or the store phone (`ASSISTANT_CONTACT_PHONE`, default 514-292-7788).
+- Widget (draft theme 162992816233, unpublished): greeting mentions fit checks and decor tips; chip "Meubler un salon pour 1 500 $".
+
+### Changed
+
+- Search results are live-checked (ACTIVE + published) BEFORE the model sees them, over-fetching ×2: picked-then-dropped drafts had left "table basse avec rangement" with 0 cards and room totals that no longer matched the cards.
+- `MAX_STEPS` 4 → 5; `SEARCH_LIMIT` 12 → 8 (rows are re-sent on every later step).
+- Per-visitor daily cap 30k → 60k tokens: advisor answers measured 6–29k tokens (simple policy question ~6k, "will it fit" ~11–17k, room in a budget ~13–29k).
+
+## [0.5.95.0] - 2026-10-02
+
+The storefront assistant becomes **Ameublo** (FR) / **Furni** (EN): a store advisor that answers policy questions from the live site, with per-visitor limits and automatic abuse blocking.
+
+### Added
+
+- **Persona** (`assistantName`, env `ASSISTANT_NAME_FR` / `ASSISTANT_NAME_EN`) and a rewritten system prompt with hard rules: products only from the catalog, policies only from `get_store_info`, no invented discounts/delays/refunds, no order access (hand-off to info@), no supplier names, plain text, decline off-topic, no guessing for cases the policy doesn't name.
+- **`get_store_info` tool** (`store-knowledge.ts`): delivery, returns, warranty, financing, terms, FAQ and contact read live from the Shopify pages + policies (cached 1 h), split into sections and ranked per question; answers cite the page URL. `MAX_STEPS` 3 → 4.
+- **Abuse guard** (`assistant-guard.ts`): per-visitor daily token cap (30k ≈ 10 conversations), abuse score (jailbreak phrasings, oversized/pasted payloads, verbatim repeats, the model's own `flag`), automatic block 24 h → 7 days on repeat. IPs stored as salted hashes only (Law 25). New tables `assistant_ip_daily`, `assistant_blocklist`; new shopper copy `daily_quota` / `blocked`.
+- **Dashboard** `/assistant-guard` ("Assistant (Ameublo)"): active blocks with Unblock, today's heaviest visitors, block history.
+- **Theme widget** (`shopify-theme/snippets/lc-assistant-widget.liquid`, uploaded to draft theme 162992816233, not published): avatar + name, greeting, quick-question chips, bare https URLs rendered as links (text nodes only, never innerHTML).
+
+### Fixed
+
+- A pure information answer (no product picks) is no longer replaced by the "no products found" line.
+- Markdown in replies is stripped server-side (the widget renders textContent).
+
+## [0.5.94.9] - 2026-10-02
+
+"Complétez la pièce" (product page block) no longer uses the LLM.
+
+### Fixed
+
+- **The block drained the assistant pool.** It ran the full assistant tool loop (~5k tokens) on every product-page view of an uncached product, fired automatically on page load — measured ~50 distinct product pages/hour (crawler-like), which emptied the shared `assistant` pool every day and left the shopper chat "temporarily unavailable" most of the day for at least two weeks.
+- `runComplementary` is now plain catalogue logic (`getComplementaryCandidates`): same room first (taxonomy path, 2 levels), widening to the top level; never the viewed category (3 levels) nor a leaf containing its head noun; same safety filters as the chat cross-sell tool + the live/FR-title check; one card per category, rotated per product. 0 tokens, ~250 ms instead of 3–7 s. The cards no longer carry a sentence (it was the only thing the model wrote).
+
+## [0.5.94.8] - 2026-10-02
+
+Hotfix for the Gemini assistant (v0.5.94.7), seen live in production right after deploy: "foyer extérieur" returned a kayak and a planter with no reasons.
+
+### Fixed
+
+- The last of the 3 model steps is sent WITHOUT tools (and told to answer now), so Gemini must give the final JSON instead of searching until the loop ends on the salvage reply.
+- Catalog search relaxation tries the phrase minus one word before single words: "outdoor fire pit" now falls back to "fire pit", not to "outdoor".
+
+## [0.5.94.7] - 2026-10-02
+
+The storefront assistant and the video-batch frame QC now run on Gemini 3.5 Flash-Lite (operator decision after a cost review, no Claude fallback).
+
+### Changed
+
+- **Assistant** (`/api/assistant` → `runAssistant`): Haiku 4.5 → Gemini 3.5 Flash-Lite via the new budget-gated `gemini-client.ts` (function calling, thought signatures round-tripped verbatim). Same response contract (`data.reply` + `data.products`), same `assistant` budget pool. ~0.52 $/MTok blended vs 1.40 on Haiku — the biggest LLM line (~15.5M tokens / 30 days).
+- **Video QC** (`demand-gen-clean-window.ts`, `video-scene-selector.ts`): Sonnet 4.6 → Gemini 3.5 Flash-Lite, ~0.43 $/MTok vs 3.72. The sequential-ad scene scorer now also bills the `video` pool (it was on `batch`).
+- Config: `CLAUDE.MODEL_ASSISTANT` / `MODEL_VIDEO_QC` replaced by `GEMINI.MODEL_ASSISTANT` / `MODEL_VIDEO_QC` (env overrides `GEMINI_ASSISTANT_MODEL` / `GEMINI_VIDEO_QC_MODEL`). Usage dashboard prices them at Google list price.
+
+### Fixed
+
+- **Assistant catalog search returned nothing for natural queries.** `productType` is a prefix of the full taxonomy path ("Sofas" never matched), `color` is an exact ENGLISH match ("Gris" matched nothing) and a multi-word search needed every word in the name ("grey sofa" → 0, "sofa" → 29). The tool now ranks by category/colour instead of filtering, translates FR colours, and relaxes a phrase to its words. The prompt also tells the model the catalog is indexed in English (Gemini searched "foyer" verbatim).
+
+## [0.5.94.6] - 2026-10-02
+
+Manual review of the first real Gemini classification pilot (50 photos) found the one gap the
+strict overlay prompt missed: zoom-medallion/callout-circle graphics added in post-production
+(e.g. a circled close-up of a hinge with a line pointing to it) were passing as compliant
+whenever they carried no literal text, even though a textless callout is the same kind of
+post-production graphic as the arrows/bubbles the prompt already caught.
+
+### Changed
+
+- `STRICT_OVERLAY_PROMPT` (`vision-classifier.ts`, shared by both the daily pos-1 guard and
+  the gallery gap-filler) now explicitly flags zoom circles/detail medallions/connecting
+  lines as non-compliant even without text — not just text-bearing overlays. A plain close-up
+  with no added graphic is still compliant; only the added montage element trips it.
+- Re-ran the full gallery backlog (10,590 Gemini-side verdicts total, including the ~770
+  already cached under the narrower prompt, which were explicitly re-classified rather than
+  bulk-deleted) — catalog is now 100% classified (14,020/14,020 photos). 7,377 of the
+  Gemini-classified photos are flagged non-compliant under the widened rule.
+
+## [0.5.94.5] - 2026-10-02
+
+Social highlights: the "Bureau & Télétravail can't generate" bug is fixed, and the operator can now target precise sub-categories (e.g. autumn outdoor: fire pits, sheds, gazebos) and save them as themes.
+
+### Fixed
+
+- **Highlights drew blind.** The generator sampled 15 random eligible SKUs and only then checked which had a validated lifestyle photo. Bureau had 17 verified fiches out of 108, and the trend trial pinned 4 unverified trending SKUs at the head of every sample, so a draft missed ~5% of the time and more with every post. The draw is now restricted up front to lifestyle-verified products (`lifestyle-verified-set.ts`: one paged GraphQL search, cached 10 min; falls back to the old draw if Shopify can't answer). Verified live: 0 misses over 20 draws for Bureau, Rangement and Halloween.
+- An empty result now distinguishes "the products with a photo all have a recent post" from "every product is in the cooldown", and the messages no longer tell the operator to retry a draw that is no longer random.
+
+### Added
+
+- **Ciblage précis** panel on /social: the real Aosom `product_type` tree (275 branches) with, per branch, in-stock fiches and how many are postable now (verified photo + outside the repost window). Tick branches → "Générer 3 brouillons".
+- **Saved themes** (`settings.social_themes`): name a selection, regenerate it in one click, edit or delete it. One theme can be the daily cron's preference (`settings.social_auto_theme`) instead of the seasonal default, with the same soft fallback to the whole catalog.
+- `GET/POST /api/social/targets`. Targets only choose WHICH products drafts are generated for — nothing approves, schedules or publishes.
+
+## [0.5.94.4] - 2026-10-01
+
+Switched the gallery classifier (v0.5.94.3) from Vercel AI Gateway to Google's Gemini API directly — cheaper at our volume (Google's own free tier applies; the Gateway doesn't offer one for this model) and one less billing relationship for a ~1-2 $ one-off job.
+
+### Changed
+
+- `classifyProductImageGemini` (`vision-classifier.ts`) now calls `generativelanguage.googleapis.com` directly (the Interactions API, `GEMINI_API_KEY`) instead of Vercel AI Gateway. Same validated `STRICT_OVERLAY_PROMPT`, same `ImageClassification` contract, same `image_classifications` cache — nothing downstream changes.
+- Model is `gemini-3.5-flash-lite`, not `gemini-2.5-flash-lite`: confirmed live that the 2.5 model is retired for any key created on a Google Cloud project ("no longer available to new users").
+- `scripts/classify-gallery-images.mts`: real requests-per-second pacing (not just a concurrency pool), and `--limit` now defaults to a 50-photo pilot instead of the whole backlog — this is the project's first-ever call to this API, so the first run is capped and reviewable by default; raise `--limit` explicitly once it looks right.
+
+### Known blocker (not resolved here)
+
+The Google Cloud project behind the operator's new key returns `402 — Your prepayment credits are depleted` on every call, confirmed 3 times live against production (including through the real script's `--apply` path, which failed safely: 0 cached, 3 clean error logs, nothing corrupted). The $5 prepay the operator believed they'd added has not taken effect as of this release — needs to be re-checked at https://ai.studio/projects for the project tied to this key (205730193449) before any real classification can run.
+
+## [0.5.94.3] - 2026-10-01
+
+Found that a vision classifier already runs daily and already knows which product photos carry a marketing/measurement overlay — it just never protected the ad feeds, only the storefront's featured photo. Wired it in for free, and added a cheaper model for the part it never reaches.
+
+### Added
+
+- **Gemini-based gallery classifier** (`classifyProductImageGemini`, `vision-classifier.ts`) — the same validated marketing-overlay prompt already used for the daily pos-1 guard, routed through Vercel AI Gateway to Gemini 2.5 Flash-Lite instead of Claude. Writes into the SAME `image_classifications` cache, so a Gemini verdict and a Claude verdict are interchangeable to every reader.
+- `scripts/classify-gallery-images.mts` — dry-run by default, `--apply --limit=N` to classify N photos for real. Measured live: of the catalog's 14,029 distinct photos, only 24.5% are classified at all — position 1 is 96.5% covered by the existing daily guard, but positions 2+ (everything an ad feed's `additional_image_link` serves) are only 15.9% covered. ~10,600 photos still need a verdict; at Gemini pricing that's roughly 0.40 $, versus ~18 $ on Claude's existing pool for the same backlog.
+- Needs `AI_GATEWAY_API_KEY` (same gap already noted for Studio's AI retouch) — not set yet; the script aborts with a clear message under `--apply` until an operator adds a key + Gateway credit in Vercel.
+
+### Fixed
+
+- **Ad feeds (Google/Meta/Bing/Reddit/Pinterest) now consult the existing vision-classification cache** — `shopifyToFeedItems` excludes any image the classifier already flagged as carrying a marketing/measurement overlay (`image_classifications`, matched by Aosom hash stem so a resized/re-ingested copy of the same photo still matches). This is immediate and free: 1,897 already-known-bad photos currently reachable by the feed are excluded the moment this ships, no new classification needed.
+
+## [0.5.94.2] - 2026-10-01
+
+Found a real gap in the Google/Meta/Bing/Reddit/Pinterest ad feed's images, and fixed the part that is actually fixable by filename. Full fix needs a visual check — see the limitation noted below, not yet built.
+
+### Fixed
+
+- **Ad feeds could serve a spec/infographic/assembly-diagram image** — `shopifyToFeedItems` mirrored a product's ENTIRE Shopify gallery into `image_link`/`additional_image_link` with no content filtering, while an identical keyword filter (`isSpecImageUrl`, `selectors/shopify-product.ts`) already existed for social/slideshow content but was never wired into the feed. Confirmed live on the Meta catalog: a parasol's carousel card could show an assembly-instruction diagram. Now filtered the same way the social pipeline already is, with a safe fallback to the unfiltered gallery if an entire product's images were ever all flagged.
+- **Known limitation, not fixed here**: this keyword filter matches almost nothing in the CURRENT catalog, because Shopify renames every uploaded file to an opaque hash on ingest and sets no alt text — there is no filename/alt/dimension signal left to tell a diagram from a real photo. Confirmed empirically against the live feed (0/2612 items flagged). Catching this for real needs a visual (vision-model) classification pass over each product's full gallery, the same technique already used at import time for the position-1 photo only (`enforceCleanPrimaryImage`) — not yet built; would need to run across ~2600 products' galleries.
+
+## [0.5.94.1] - 2026-09-30
+
+Investigated the 10 products the "Problèmes" tab (0.5.94.0) flagged as live on Shopify but gone from the Aosom feed. All 10 turned out to be a false positive in that same new tab, not real discontinuations: Aosom had corrected each SKU's colour/variant suffix after we imported it (e.g. `84B-206BU` became `84B-206BK`), and the classifier compared against the SKU frozen at import time instead of whichever SKU currently carries the Shopify link. Separately, found and fixed a real (smaller) gap in the 30-day stale-catalog cron.
+
+### Fixed
+
+- **Import page "Problèmes" tab — renamed-SKU false positive** — `classifyAllImportJobs` now looks up feed freshness by the job's resolved Shopify product id (`getFeedRowsByShopifyIds`, new), not by the SKU frozen in `import_jobs.product_data` at import time. Confirmed on production: the "problem" bucket drops from 14 to 4, the 4 remaining being genuine deleted-product cases already handled by the existing cleanup script.
+- **`stale-catalog` judged staleness per SKU, not per product** — a single stale sibling variant could draft the whole product even while another sibling was still fresh and in stock, and briefly reactivate/re-draft it daily once stock-check saw the live sibling. `getStaleImportedProducts` now groups by `shopify_product_id` and requires every sibling SKU to be past the window.
+- **`stale-catalog` now self-heals `products.shopify_product_id`** — a new `reconcileProductShopifyLinks` runs at the start of every daily run (zero extra Shopify calls — it reuses the same paginated fetch), using Shopify's own current variant list as the source of truth. Production dry run: 13 SKUs whose link pointed at a deleted/recreated product, now self-correcting daily instead of staying wrong indefinitely.
+- `scripts/repair-orphaned-shopify-links.mts` — one-off, dry-run by default, for the same reconciliation against the current production backlog.
+
+## [0.5.94.0] - 2026-09-30
+
+The import page now shows where each product really is: live or hidden on Shopify, still in stock at Aosom or not, and why. The queue status alone said "pending" for 91 products that were all already on Shopify.
+
+### Added
+
+- **Real state on the import page** — every line shows two badges (Shopify: en ligne / masqué / archivé / supprimé / pas créé; Aosom: en stock / rupture / retiré du flux) and a one-line reason. The stat cards became filter tabs: À importer, En ligne, Masqués mais en stock, Masqués (normal), Problèmes. The list renders 100 rows at a time.
+- `GET /api/import/state` — classifies every job from import_jobs + the `products` feed rows + one GraphQL pass over Shopify products (which includes archived ones, so a missing id really means deleted). Rules in `src/lib/import-job-state.ts`.
+- `scripts/cleanup-import-jobs.mts` — one-off, dry-run by default: moves unfinished jobs whose product already exists on Shopify to `done`, relinks jobs whose product was deleted and re-created, and sends jobs with nothing left on Shopify back to `pending`. Never touches Shopify or `needs_review` jobs.
+
+### Fixed
+
+- **Generate / Push buttons no longer target products already on Shopify** — a "pending" or "reviewing" job whose product exists is skipped by the bulk run and shows no Generate/Push button, so it cannot burn an LLM call or risk a duplicate.
+
+## [0.5.93.1] - 2026-09-30
+
+The catalog "Nouveaux produits Aosom" sort works again. It returned a server error instead of the list.
+
+### Fixed
+
+- **Catalog sort "Nouveaux produits Aosom"** — every request failed with `ambiguous column name: sku`.
+  The ORDER BY used a bare `sku` while the query LEFT JOINs `last_price`, which also has a
+  `sku`. Columns are now qualified (`f.created_at DESC, f.sku ASC`). New test
+  `tests/database-catalog-sorts.test.ts` runs every sort option against the real `getProducts`
+  query; the old test copied the SQL without the join and could not catch this.
+
+## [0.5.93.0] - 2026-09-27
+
+Mat now builds before/after videos himself on a new "Studio Avant/Après" page: he picks the
+product, the two images, the music and the transition, with optional AI retouching of photos.
+
+### Added
+
+- **Studio Avant/Après** (`/studio`, admin only) — a semi-automatic before/after video builder:
+  1. **Top 50** Aosom best sellers (units that left Aosom's stock over 7/14/30 days, one row per
+     product, colour variants summed), with category, search and "already has a video" filters.
+     This is Aosom's market, not our own Shopify sales (`read_orders` isn't granted).
+  2. **Image picker** — the full Shopify gallery (`cdn.shopify.com`) plus Mat's own uploads (style
+     D: a real "before" photo) and AI retouches. Mat clicks an AVANT image and an APRÈS image; each
+     is framed whole over a blurred copy or full-bleed cropped.
+  3. **Music** from a Blob library (`studio/music/`, seeded from `src/audio` by
+     `scripts/studio-seed-music.mjs`; Mat can upload tracks), with preview and a start offset.
+  4. **8 transitions**, led by the **curseur comparatif** (a wipe with a moving divider line),
+     plus fondu, balayage, glissement, rideau, cercle, zoom and pixelisation.
+  5. **Formats 9:16 and 4:5**, 6/10/15 s, FR or EN, optional title, price, gold CTA pill and
+     AVANT/APRÈS labels.
+  - **Rendering** — rendered on Vercel (`POST /api/studio/render`, ffmpeg-static, run in `after()`,
+    status polled at `/api/studio/render/:id`). Output goes to the public Blob store.
+  - **After rendering** — Mat either sends the video to the queue as a `before_after` **draft**
+    (approved in /content-formats like the batch drafts) or downloads the MP4 for Meta ads.
+  - **Design** — reuses the validated before_after v3 look: Ken Burns, grade, navy brand bar with
+    the logo.
+- **AI retouch** (`POST /api/studio/retouch`) through Vercel AI Gateway, with a **Qualité /
+  Économique** selector per retouch:
+  - **Qualité:** `google/gemini-3.1-flash-image`, ~0.07 $ per image, #1 on the blind Image Editing
+    Arena (Sept. 2026). Override with `STUDIO_AI_IMAGE_MODEL`.
+  - **Économique:** `google/gemini-3.1-flash-lite-image`, ~0.03 $ per image. Override with
+    `STUDIO_AI_IMAGE_MODEL_ECONOMY`.
+  - DeepSeek was evaluated and rejected. Its hosted API is text-only, and its image model (Janus-Pro)
+    is self-hosted open weights without real photo editing.
+  - **Presets:** nettoyer (remove logos and text), mettre en scène (place the product in a room),
+    pièce vide (remove the product to create the "before" of style C), améliorer, ambiance
+    saisonnière, and a free French instruction.
+  - **Guardrail:** every prompt requires the product itself to stay identical.
+  - **Where results go:** they land in the product's Studio gallery tagged "IA" and never touch the
+    Shopify product.
+  - **Daily cap:** `STUDIO_AI_DAILY_CAP` (default 40).
+  - **Requires** `AI_GATEWAY_API_KEY` in Vercel. Without it the page says the feature is off.
+- Tables `studio_images` and `studio_renders`. CSP `connect-src` now allows `https://vercel.com`,
+  so the page can upload photos and music straight to Blob.
+
+## [0.5.92.26] - 2026-09-27
+
+The Costway catalogue (second supplier) now lives in aosom-sync, fully separate from Aosom, and is not sent to Shopify.
+
+### Added
+
+- **Costway catalogue, separate from Aosom** — new table `costway_products` (one row per variant;
+  `item_no` groups a product's colours), filled from the Costway dropship feed (`COSTWAY_FEED_URL`,
+  default `cdn.costway.com/media/feed/CA-Costway-Shopify.csv`, ~100 MB, ~22.5k variants and ~12k
+  products). Nothing in the Aosom sync, stock, stale or publish jobs reads it, and nothing here
+  writes to Shopify. Importing Costway products, and their pricing rules, is a later step.
+- **Tolerant feed parser** (`src/lib/costway/feed.ts`) — Costway never quotes fields and strips
+  commas from values, so raw `"` characters (inch marks, HTML attributes) break standard CSV parsers
+  ("illegal quoting", merged rows). The parser splits each line on commas and skips, and counts, any
+  line with the wrong field count. Stock comes from Costway's `1=In Stock|0=OOS` flag, as their
+  dropship instructions require. The `Price Drop` column (the advertised-price floor) and Costway's
+  tags are stored for later.
+- **Daily sync** — cron `GET /api/cron/costway-sync` at **16:00 UTC (12:00 Montreal)**, after the
+  feed's ~14:50 UTC refresh. A full row is rewritten only when its text or images changed; stock and
+  price changes use a light update. SKUs that leave the feed are flagged `removed_at`, never
+  deleted. A feed under 5,000 rows, or under 70% of the last good sync, is rejected as truncated.
+  `?dryRun=1` computes the diff without writing.
+- **"Catalogue Costway" dashboard page** (`/costway`) — browse by product, with search, category,
+  Costway tag, stock and price filters. It shows the Costway price, the compare-at price and the
+  `Price Drop` floor. A "Synchroniser maintenant" button (`POST /api/costway/sync`) runs the first
+  load.
+
+## [0.5.92.25] - 2026-09-25
+
+Mat now gets an automatic morning report by email, every day at 06:00 Montreal time.
+
+### Added
+
+- **Automatic morning report by email** — new read-only cron `GET /api/cron/morning-report`
+  sends a short digest every day at **06:00 Montreal time, all year** (registered at 10:00 and
+  11:00 UTC; only the run where Montreal reads 06:xx sends, at most once a day). Sections:
+  yesterday's active **Meta campaigns** (spend vs budget, impressions, clicks, attributed
+  purchases, learning status), **pSEO guides** awaiting approval (ready vs attention),
+  **/content-formats videos** (awaiting approval, scheduled in the next 3 days), dashboard
+  **alerts**, and counts of **actions waiting on Mat** (sequential ads, imports, social drafts,
+  blog drafts). Sent as the Klaviyo event `Rapport matinal` to `MORNING_REPORT_EMAIL`; a
+  Klaviyo flow renders it. A failing source (e.g. Meta down) is marked "Section indisponible"
+  and the email still goes out. It never approves or publishes anything. `?dryRun=1`
+  previews, `?force=1` resends. Setup: `docs/MORNING-REPORT.md`.
+
+## [0.5.92.24] - 2026-09-25
+
+Paid Google Shopping and Meta catalog ads now show and open the exact variant they advertise.
+
+### Fixed
+
+- **Product feeds: per-variant photo and `?variant=` deep link** — every feed item is one
+  variant (`g:id` = SKU), but each carried the product's first image and a bare
+  `/products/{handle}` link, so a variant offer such as the silver mini fridge
+  (`800-128V81BK`, "Argent") advertised the black hero photo and landed on the default
+  variant. `shopifyToFeedItems` now uses the variant's own assigned photo
+  (`variant.image_id`) as `image_link`, falling back to the product's main photo only when
+  the variant has none, and appends `?variant={id}` to the link of multi-variant products.
+  One shared mapper, so the fix covers every channel feed: Google, Meta (CSV + XML),
+  Pinterest (FR + EN), Bing and Reddit. Single-variant items are unchanged — verified
+  byte-identical (838/838) against the live catalog; the 1,681 multi-variant items differ
+  only in link and image.
+
+## [0.5.92.23] - 2026-09-24
+
+Guide approval no longer publishes instantly, and a published guide is now discoverable from
+the storefront instead of only by direct URL.
+
+### Added
+
+- **Deferred-publish scheduling for pSEO guides** — "Approuver" on `/guides` now books the
+  guide onto the next free slot of a dedicated `guide_schedule` grid (default: Tuesday +
+  Friday 10:00 America/Toronto, 1/day) instead of calling `publishBlogArticle` immediately.
+  The guide stays `pending_review` with `scheduled_publish_at` set until the existing hourly
+  `/api/cron/publisher` drains the slot for real — reuses the same `publication_queue`
+  mechanism already used for video/social (`content_type='guide'`, `platform='shopify_guide'`),
+  so no new cron was needed.
+- **`PATCH`/`DELETE /api/guides/:id/schedule`** — lets an operator move a scheduled guide to a
+  different time, or cancel its schedule entirely (reverts to unscheduled `pending_review`).
+- **Collection "Guide d'achat" link** — once a guide is genuinely published (never before),
+  its Shopify collection gets a `custom.guide_url` metafield, and the collection page shows a
+  "Guide d'achat" link pointing to it. Gated to non-EN locales (guides are an FR-only pilot).
+
+### Fixed
+
+- **`publication_queue` migration data-loss bug** — two earlier CHECK-rebuild migrations
+  (`+sequential_ad`, `+demand_gen_ext/before_after/assembly`) didn't carry the `claimed_at`
+  column through their copy, silently dropping it on a brand-new database. No effect on prod
+  (those migrations are long-since no-ops there), but now fixed at the source.
+
+## [0.5.92.22] - 2026-09-24
+
+Quality safety net for the pSEO guide pipeline, plus a data-hygiene fix that unblocks 9
+subcategories from ever getting a guide.
+
+### Added
+
+- **Automatic targeted retry for low-quality guides** — any guide whose `quality_score` lands
+  below `RETRY_QUALITY_THRESHOLD` (70) now triggers one automatic regeneration pass before
+  being shown to the reviewer: Claude gets the original structured copy plus the judge's exact
+  complaints and is told to fix only what's flagged, not rewrite from scratch. Both the
+  before/after quality and fact-check scores are stored (`guide_pages.quality_score_before_retry`
+  / `fact_check_score_before_retry`) and surfaced in the `/guides` review UI when the retry
+  still doesn't clear the bar, so a reviewer can tell "tried and failed" apart from "never
+  tried." Also applied retroactively to every already-pending low-score guide — "Patio Shade"
+  went 62 → 92 quality (92 → 95 fact-check).
+
+### Fixed
+
+- **9 stale `collection_mappings` rows** pointed at deleted Shopify collection ids (404s),
+  permanently blocking guide generation for Patio Furniture, Patio Swings & Hammocks, Sun
+  Loungers, Home Décor, Wedding & Events Tents, Bathroom Furniture, Raised Garden Beds, Exercise
+  Equipment, and Bikes & Scooters. Re-resolved each against a live collection (7/9 via an exact
+  `type`-rule match on the `aosom_category` path) and cleared the stale `skipped_empty`
+  `guide_pages` rows blocking re-generation.
+
+## [0.5.92.21] - 2026-09-24
+
+Weekly automation for the Phase 1 pSEO subcategory guide pipeline (generation → fact-check →
+quality/tone judge → real product images → JSON-LD), plus the Google Business Profile weekly-
+post pipeline built alongside it — both gated behind manual approval in the new `/guides`
+review dashboard, nothing publishes automatically.
+
+### Added
+
+- **`/api/cron/guide-batch`** — weekly cron (Wed 17:30 UTC) generating up to 4 new pSEO guides
+  among the subcategories not yet covered by `guide_pages`, through the full validated
+  pipeline. **Stops doing work automatically** once every real subcategory
+  (`collection_mappings`, role='sub') has a `guide_pages` row — becomes a single cheap DB read
+  with zero Claude/Shopify calls, and fires a one-time "coverage complete" dashboard
+  notification (guarded so it never repeats weekly after).
+- **`/guides` dashboard page** — full review interface for every generated guide: read the
+  complete text in-app (not just a Shopify link), real fact-check/quality verdict badges, and
+  "Approuver et publier" (the only code path that can make a guide go live).
+- Google Business Profile weekly-post pipeline (`gbp-post-generator.ts`, `gbp-client.ts`,
+  `gbp-publish.ts`, `/api/cron/gbp-post`) — same generation → judge → manual-approval pattern,
+  with an explicit `confirmFirstPost` gate on the very first real GBP post regardless of the
+  `GBP_AUTO_PUBLISH` flag.
+
+### Fixed
+
+- **Cron slot collision** — `gbp-post` was scheduled at Monday 16:00 UTC, the same slot as the
+  daily `stock-check` cron. Moved to 17:00.
+- **Shopify article handle collisions** — several distinct subcategories in
+  `collection_mappings` share one real Shopify collection (e.g. "Fire Pits", "Lawn & Garden"
+  and "Patio Shade" all roll up to "Mobiliers extérieurs et jardins"), which collided on the
+  same generated handle. Now retries once with the subcategory's own leaf segment appended,
+  deterministic and never guessed.
+
+### Changed
+
+- Every Claude call in the new guide/GBP pipelines now routes through `budgetedCreate`
+  (`CLAUDE.MODEL_BATCH`, `batch` pool) instead of a raw `client.messages.create` on
+  `CLAUDE.MODEL` — integrating with the LLM cost-optimization guardrails added since this work
+  started, enforced repo-wide by `tests/llm-cost-optimization.test.ts`.
+
+## [0.5.92.20] - 2026-09-22
+
+A dedicated `video` token-budget pool, isolated from the shared `batch` pool that imports,
+blog and social captions also draw from — same split that solved this for catalogue vision
+audits (`maintenance` pool, 2026-09-11), now applied to video-batch production, which had
+been draining `batch` fast enough in one session to risk starving same-day content generation.
+
+### Added
+
+- **`video` pool** (`daily_llm_budget`) covering demand-gen-ext, before_after and assembly
+  video QC — capped at **400,000 tokens/day** by default (`LLM_VIDEO_DAILY_BUDGET`), sized
+  from the actual publication schedule (Demand-Gen 3x/week, Assembly daily, Avant/Après
+  paused) with a 25% production margin and the measured 42% QC yield / 36,712 tokens-per-
+  attempt real cost. Real spend at that production rate: **~5.94 $/mois** (~1.37 $/semaine),
+  measured at 94% input share on Sonnet 4.6 — about 3.25× smaller a ceiling than the shared
+  `batch` cap it used to draw from.
+- Wired into all 3 video-batch scripts (`demand-gen-clean-window.ts` — covers demand-gen-ext
+  and before_after's post-render verify — plus `batch-before-after.mts`'s gallery
+  classification; `batch-assembly.mts` makes no LLM calls today, left with a routing comment
+  for if that changes).
+- **Full dashboard visibility from day one** — pool card AND the 7-day trend chart. The
+  `maintenance` pool shipped without trend-chart visibility and that gap went unnoticed for a
+  while; `video` does not repeat it.
+
+## [0.5.92.19] - 2026-09-22
+
+Closes the 3 remaining gaps behind the `842-375V00CG` incident (imported 2026-08-20,
+sold below the Aosom floor for 32 days): a write path that skipped verification, an
+all-or-nothing hourly catalog fetch, and no durable record of when this happens.
+
+### Fixed
+
+- **3 unverified price-write paths** — `createShopifyProduct` (import), `price-audit.ts`
+  (`/api/health/price-audit`, still on the daily cron), and `scripts/force-push-shopify.ts`
+  (manual ops script) all trusted a 200 from Shopify's PUT/POST as proof the price actually
+  persisted. All 3 now read back what Shopify stored and correct any mismatch via
+  `writePriceVerified` — the same write-then-verify machinery `job1-sync.ts`'s daily push and
+  `/api/cron/price-reconcile`'s hourly sweep have used since v0.5.77.0.
+
+### Added
+
+- **`price-reconcile` rotation** (`PriceReconcileCheckpoint`) — the hourly cron used to
+  re-fetch the entire Shopify catalog every run; a single rate-limit mid-fetch threw away
+  that whole hour's coverage. It now processes one Shopify page (250 variants) per run,
+  resuming from a persisted `page_info` cursor, same checkpoint pattern as
+  `shopify_push_checkpoint`/`phase1_checkpoint`. A full sweep of the current catalog
+  completes in roughly 12-32 hours (one page/hour) — well inside "at least once a week" —
+  and posts a dashboard notification when a sweep completes.
+- **`price_floor_incidents` table** — a single, durable log (not purged) of every below-floor
+  price detected and corrected, across all 5 write paths, with SKU, old/new price, source,
+  and detection time. Surfaced via `GET /api/price-floor-incidents` and a new dashboard panel
+  directly under "Alertes", so "how often does this happen, since when" has a real answer
+  instead of a manual cross-reference of `price_history` and `sync_logs`.
+
+## [0.5.92.18] - 2026-09-22
+
+Dedicated recurring publish schedules for the 3 content-scale-chantier video formats
+(`demand_gen_ext`, `before_after`, `assembly`), replacing the previous "approve → now+24h,
+retry an hour later on collision" default with the same real-grid mechanism already used for
+social posts, Reels and sequential ads.
+
+### Added
+
+- **3 new recurring grids** (`PublicationSchedule` shape, `src/lib/config.ts`): Demand-Gen
+  élargi Mon/Wed/Fri 09:15 (1/day), Avant-Après Tue/Thu 13:00+13:30 + Sat 11:00 (2/day),
+  Assembly daily 17:00 (1/day). Times deliberately distinct from `publication_schedule` and
+  `video_schedule`'s existing anchors (09:00/10:00/12:00/18:00) so a real collision on the
+  shared `(platform, scheduled_at)` slot stays rare rather than designed-in. Cadence sized to
+  each format's backlog at launch (demand_gen_ext 4, before_after 10, assembly 9). Stored as
+  settings (`demand_gen_ext_schedule` / `before_after_schedule` / `assembly_schedule`,
+  `PublicationSchedule`-shaped, editable via the generic `/api/settings` route) — each falls
+  back to its own default independently (`parseContentBatchSchedule`, not a shared default).
+- **`approveOneContentBatchDraft`** (`content-batch-approval.ts`) — approving a draft with no
+  explicit time now auto-assigns the next free slot on ITS format's grid (`getNextAvailableSlot`
+  scoped by `contentType`), retrying up to 6 times past a slot lost to `QueueSlotTakenError` —
+  mirrors `approveOneSequentialAd`. Manual replanning (an operator-chosen date/time) is
+  untouched — approval never publishes anything itself, it only reserves when it WILL publish
+  once the hourly `/api/cron/publisher` reaches that slot.
+- **"Prochains créneaux" calendar strip on `/content-formats`** — a simple day-grouped,
+  color-badged chronological list of every upcoming *scheduled* (`status='pending'`) item
+  across the 3 formats (`GET /api/content-batches/calendar`, `getUpcomingContentBatchItems`).
+  Draft rows are excluded on purpose: their `scheduled_at` is a generation-time placeholder,
+  not a real reserved slot, so showing them would be misleading.
+
+## [0.5.92.17] - 2026-09-21
+
+Content-scale chantier merged: 3 new organic-video ad formats (`demand_gen_ext`,
+`before_after`, `assembly`) driven by a trend+season priority selector, plus the
+approval dashboard to review them — and a round-2 correction pass that replaces
+one-off patches with generalized quality gates after Mat found real defects in the
+first batch.
+
+### Added
+
+- **Trend+season priority selector** (`src/lib/selectors/content-priority.ts`) —
+  combines 14-day sales velocity, active discount and a seasonal multiplier into one
+  score, used by all 3 batch scripts to pick which SKUs get videoed first.
+- **`demand_gen_ext`** (`scripts/batch-demand-gen-extend.mts`) — extends the
+  hand-audited demand-gen pipeline to any priority SKU with source video.
+  `src/lib/demand-gen-clean-window.ts` (new): dense ~1/sec Vision sampling, a strict
+  dual-gate prompt (product fully visible AND no foreign text/logo, checked
+  independently), and a genuine sub-window search at the real render duration —
+  replacing a coarser analyzer that missed a flickering supplier logo (837-164WT,
+  now permanently excluded) and a too-tight crop (830-243, Christmas tree never
+  shown whole).
+- **`before_after`** (`scripts/batch-before-after.mts`) — `classifyGalleryForBeforeAfter`
+  scores up to 10 gallery images per SKU at once (not just the first/last) and can
+  legitimately return "no qualifying pair" instead of forcing a bad match — fixed a
+  case (830-323) where the only genuine neutral "before" shot was mid-gallery and
+  never considered.
+- **`assembly`** (`scripts/batch-assembly.mts`) — animated build-sequence clips;
+  fixed a centering bug where ffmpeg's multi-line `drawtext` centers the widest
+  line's bounding box only, leaving shorter lines visibly off-center (now one
+  `drawtext` call per line, each independently centered).
+- **Post-render verification** (`verifyRenderedClip`) — every `demand_gen_ext` clip
+  is re-scored by Vision *after* compositing, with a prompt that explicitly ignores
+  the pipeline's own intentional overlay (title band, delivery pill, logo) so it only
+  flags genuine defects. A clip that still fails is never queued as a draft.
+- Licensed Christmas/seasonal music track (Mixkit Free License) added to the
+  category-based music pool, routed for `Home Furnishings > Holiday & Seasonal`.
+- **`/content-formats` dashboard page** (3 tabs) + `QueueContentType` extended with
+  the 3 new types (CHECK-constraint migration, mirrors the existing `sequential_ad`
+  pattern) — review, approve and schedule generated clips from one screen.
+
+### Known limitation (documented, not silently dropped)
+
+`findCleanWindow` scores a candidate window by its *average* per-frame score, so a
+window can still contain a bad moment if the camera pans within it (confirmed on
+830-243 and 924-067V00WT). The post-render check catches the resulting bad clips and
+withholds them rather than shipping the defect, but a real fix needs a sliding
+*minimum*-score sub-window — left as a follow-up.
+
+## [0.5.92.16] - 2026-09-20
+
+Closes the catalog-freshness gap the 2026-09-20 investigation found: the existing
+removed-from-feed reconcile (`removed-catalog.ts`) only zeroes qty for SKUs already
+linked to a live Shopify product, leaving ~8,953 never-imported catalog rows with NO
+reconciliation at all — some stale 160+ days while still showing a positive qty in the
+Catalogue browser, which is why so many import attempts hit the (correctly working)
+"no longer available at the supplier" warning added in the mixed-batch/feed-gone fix
+(v0.5.92.13).
+
+### Added
+
+- **Catalog-freshness zero-out** (`runCatalogFreshnessZero`, `removed-catalog.ts`) — any
+  product row, imported or not, whose `last_seen_at` is 21+ days old gets `qty` set to 0.
+  Runs inside `runSyncInit`, the same daily cron path (`/api/cron/sync` → `runSyncFull`,
+  06:00 UTC) as the existing removed-from-feed reconcile, right after it — not a new
+  process. Non-fatal, independent of today's diff. Covers **both** never-imported
+  catalog rows (the gap this closes) **and** already-imported ones — a single uniform
+  rule, not two separate paths.
+- Idempotent and self-healing: a SKU that reappears in a later Aosom feed is upserted
+  with its real qty by the normal daily sync regardless of having been zeroed — no
+  separate "excluded forever" flag exists to get stuck.
+- No feed-completeness guard on this rule specifically (unlike the existing same-day
+  reconcile): the 21-day window already absorbs a single truncated CSV day, and the rule
+  only ever runs as part of a sync that itself executed, so a cron outage cannot create a
+  false positive.
+- `getCatalogFreshnessCandidates` (`database.ts`) — new minimal read (`sku, qty,
+  last_seen_at` for every `qty != 0` row) backing the above.
+
+### Dry-run (production, 2026-09-20, threshold=21 days) — confirmed, applied
+
+- **3,218 products** zeroed on first run: 3,168 never imported + 50 already imported
+  (persistent stragglers the same-day reconcile's rename-suspect guard leaves live —
+  this rule is a slightly earlier catch of what the existing 30-day stale-catalog net
+  would eventually draft anyway).
+- Age breakdown of the affected set: 1,519 rows >90 days stale, 1,016 rows 60-90 days,
+  683 rows 21-60 days.
+- Numbers confirmed by the operator before merge; the next 06:00 UTC sync applies them.
+
+## [0.5.92.15] - 2026-09-20
+
+### Added
+
+- **Catalog sort: "Nouveaux produits Aosom"** — new sort option in the Catalogue browser
+  (`sort=newest`) ordering by `created_at` DESC, the product row's first-ever `INSERT`
+  into `products` (a DB-level default, never touched by the daily upsert's
+  `ON CONFLICT DO UPDATE`), which is the best available proxy for "first seen in the
+  Aosom feed" — no dedicated `first_seen_at` column existed, and `created_at` already
+  captures exactly that for any SKU discovered since the table's 2026-04-11 bulk seed.
+  Known limitation, documented in code: the 85% of rows (10,269/12,013) created that
+  single seed day all share one timestamp and sort as a same-date tail — correct,
+  conservative behavior (never falsely promoted as "new"), but the sort is only fully
+  meaningful for SKUs first seen after that date. `sku ASC` tiebreaks same-timestamp rows
+  for a deterministic, pagination-stable order. Verified against production data: the
+  top results are genuinely the most recently added SKUs (dated 2026-09-16 through
+  2026-09-20), not an artifact of another field.
+
+## [0.5.92.14] - 2026-09-20
+
+Three safety nets around the import dashboard's automatic bulk push ("Generate All
+Pending"), which until now generated content and pushed to Shopify back-to-back with no
+quality check and no way to stop a bad batch early.
+
+### Added
+
+- **Pre-publish quality gate** — before `createShopifyProduct`, every product is checked
+  for a clean primary image (`enforceCleanPrimaryImage`, already in place — cache hit in
+  the common case since these images were classified once already at queue time), French
+  copy (`detectDescriptionLanguage`, already validated 2026-09-11 against 1382 active
+  products), and no supplier-brand leak (`forbiddenBrandsIn`, same canonical list
+  `stripSupplierBrands` already strips). A failure sets the job to a new `needs_review`
+  status instead of `done` — nothing is published, and the rest of the batch continues.
+- **Post-publish safety net** — right after a successful push, fetches what Shopify
+  *actually* serves and re-runs the same three checks against it, catching drift between
+  generation and storage. A failure automatically unpublishes the product
+  (`unpublishShopifyProduct`, new — mirror of the existing `publishShopifyProduct`), tags
+  it `exclude-stale` so the publish-reconcile cron never silently republishes it, and
+  surfaces in the dashboard's existing "Alertes" panel instead of leaving a defect live
+  unnoticed.
+- **Circuit breaker on the bulk batch** — past a minimum of 10 products processed, if more
+  than 15% failed (hard errors + `needs_review` combined), the rest of the batch stops
+  automatically with a dashboard banner, instead of continuing to publish against a likely
+  systemic bug.
+- Zero additional LLM calls in the common case for all three checks — the image check is
+  a cache hit, French/brand checks are pure regex.
+
+### Fixed (same-day, before the first production build)
+
+- The circuit breaker's constants briefly lived in the same module as the (server-only,
+  DB/API-backed) quality gates; importing them into the dashboard's client component broke
+  `next build` on the PR's own preview deployment. Never reached production — caught before
+  merge, fixed by moving the circuit breaker into its own zero-dependency module
+  (`import-batch-guard.ts`).
+
+## [0.5.92.13] - 2026-09-19
+
+Two confirmed bugs in the import flow, reproduced live against prod before the fix:
+submitting a mixed batch (one already-imported variant + a never-imported sibling of the
+same PSIN group) silently queued nothing at all, and a SKU discontinued by Aosom between
+being catalogued and clicking Confirm vanished with no error — both looked identical to a
+full success (200 OK, 0 jobs, no explanation).
+
+### Root cause
+
+`queueForImport()` checked idempotency AFTER `mergeVariants()` folded a batch's SKUs into
+one merged product per PSIN group — one already-imported variant anywhere in that merged
+group discarded the WHOLE group, including siblings that had never been imported.
+Reproduced with `501-004PK` (already on Shopify) + `501-004BK` (never imported, same
+group): submitted together, 0 jobs. Separately, a requested SKU no longer present in
+`fetchAosomCatalog()` (`840-158GN`, discontinued by the supplier) just never appeared in
+`matched`, with nothing recording why.
+
+### Changed
+
+- Idempotency is now checked per requested SKU, before `mergeVariants()` runs, not per
+  merged group after. A never-imported sibling now queues normally even when submitted
+  alongside an already-imported one; a defensive post-merge re-check remains for the race
+  window between the two.
+- `queueForImport()` returns `{ jobs, skipped }`, where `skipped` names every requested SKU
+  that produced no job and why (`already_imported` or `not_in_feed`) — propagated through
+  `POST /api/import/queue`'s response and both CLI callers (`pilot-import.mts`,
+  `mass-import-from-batch.ts`).
+- Catalog UI: checkboxes for already-imported variants are now disabled (mobile card and
+  desktop table row), and "select page" / the header checkbox skip them, so the mixed
+  batch this bug depended on can no longer be assembled by hand. `sendToImport()` surfaces
+  `skipped` via the existing error banner when nothing queued ("Ce produit n'est plus
+  disponible chez le fournisseur, retiré de votre sélection."), or a blocking confirmation
+  before navigating away on a partial batch.
+- Verified unaffected: `createShopifyProduct`'s publish-as-active-on-create behavior.
+
+## [0.5.92.12] - 2026-09-18
+
+Social post text sometimes didn't match the product in the photo — Mat's report, confirmed
+with draft #938 (a Halloween inflatable black cat) whose EN caption opened "This bedroom
+collection sells out fast every time it goes on sale."
+
+### Root cause
+
+`mapProductTypeToScope` (`hook-selector.ts`) picks which pool of hooks and hashtags a post
+draws from — outdoor, storage/kitchen, pets, bedroom, seasonal, etc. — from the product's
+`product_type`. Several `SCOPE_RULES` entries checked BARE category prefixes ("Holiday",
+"Home Décor", "Appliances") that can never match: the real Aosom/Shopify taxonomy always
+prefixes them with "Home Furnishings > " (e.g. "Home Furnishings > Holiday & Seasonal >
+Halloween Decorations"). Every product under Holiday & Seasonal, Home Décor, Appliances, or
+Bathroom Furniture silently fell through every specific rule to the generic "Home
+Furnishings" catch-all (`mobilier_indoor`) and got served furniture-shopping hooks and
+`#deco #meubles #salon` / `#homedecor #furniture #livingroom` hashtags regardless of what was
+actually in the photo. `social_hashtags_fr/en` compounded this: a single GLOBAL setting
+(patio/garden-themed) applied to every post regardless of scope, so even correctly-scoped
+posts carried `#jardinage #patio #mobilierexterieur`.
+
+### Changed — generation pipeline (prevents future occurrences)
+
+- `SCOPE_RULES` gained the real prefixed paths ABOVE the generic "Home Furnishings" rule
+  (order matters — first match wins), plus a new `seasonal_decor` scope so Halloween/Noël/
+  home-décor items stop being treated as furniture at all.
+- Hashtags are now resolved PER SCOPE via a new `SCOPE_HASHTAGS` map + `hashtagsForScope()`,
+  read at generation time by `generateBilingual` (`job4-social.ts`) instead of the old global
+  setting — the tags now match the category, not a fixed patio default.
+- These two changes are structural, not a data patch: every future `new_product` /
+  `price_drop` / `stock_highlight` draft resolves its scope through the corrected table, so a
+  new Halloween or Appliances product cannot regress into `mobilier_indoor` the way #938 did.
+  (Landed via #480, ahead of this release's version bump.)
+
+### Changed — one-time backfill (this release)
+
+- 40 `facebook_drafts` (status draft/approved) generated BEFORE the fix above still carried
+  the old mismatched hook + hashtags, including 2 with a `publication_queue` row due the same
+  day. `generateBilingual` exported from `job4-social.ts` (no logic change — the exact
+  function `triggerNewProduct`/`triggerPriceDrop`/`runStockHighlight` already call) and driven
+  by a new one-shot script, `scripts/regenerate-scope-mismatched-drafts.mts`, which re-runs it
+  for each affected draft with that draft's original trigger vars, then rewrites
+  `post_text`/`post_text_en` and rebuilds any pending `publication_queue.payload` via the same
+  `draftToQueueItems` the approve/schedule routes use, so what actually publishes matches the
+  regenerated text.
+- Executed against prod: 40/40 regenerated, 0 failures, 4 pending queue rows rebuilt.
+  Verified live: no residual pre-fix hook text in any of the 40 drafts or their queue
+  payloads.
+
+## [0.5.92.11] - 2026-09-17
+
+Dashboard catalog search buried real matches in noise instead of missing them — Mat's
+report of "bed frame" seeming to be gone from the catalog.
+
+### Root cause
+
+`toFtsQuery` quoted every search token SEPARATELY (`"bed"* "frame"*`), which FTS5 reads as
+an implicit AND of two independent prefix terms — matching any row containing both words
+ANYWHERE, in any order. Measured on production: searching "bed frame" returned **100** rows
+for **12** real bed frames; the other 88 were raised garden BEDs, mirrors with a metal
+FRAME, a hammock stand with a day BED and a metal FRAME — all genuinely in Turso, none
+missing, just buried. All 12 real bed-frame SKUs were confirmed present in `products` before
+any code changed — this was never an Aosom→Turso sync gap.
+
+The search was also blind to the category/taxonomy text: `product_type` carries the full
+Aosom path ("Home Furnishings > Bedroom Furniture > Bed Frames") but was never indexed or
+searched, so a term matching only the category, not a product's own title, found nothing.
+
+### Changed
+
+- `toFtsQuery` (`catalog-filters.ts`) now quotes the whole token sequence as ONE FTS5 phrase
+  with the prefix operator on the outside (`"bed frame"*`), requiring adjacency instead of an
+  unordered AND. Production: "bed frame" 100 → 23 rows (all 12 real matches retained),
+  "patio table" 583 → 99, "dog house" 29 → 15 — same pattern each time.
+- `products_fts` now indexes `product_type` alongside `sku`/`name` (schema migration in
+  `database.ts`: FTS5 can't ALTER a virtual table's columns, so a pre-existing 2-column index
+  is dropped and rebuilt; gated by a bumped rebuild marker, non-fatal — degrades to the LIKE
+  fallback on failure). The LIKE fallback path also gained `product_type LIKE ?`.
+- Dashboard catalog page (`/catalog`): added a "Sous-catégorie" dropdown next to the existing
+  category select. No new data source — `product_type_counts` already stored every prefix
+  level of the taxonomy path (`rebuildProductTypeCounts`); the page just discarded everything
+  but the top level when building the category dropdown. `deriveSubCategoryOptions` (new,
+  DB-free, testable) surfaces the next level down; picking one narrows via the existing
+  `productType` prefix filter, unchanged.
+
+### Known limitation (not fixed here — needs a human decision)
+
+`products.name` is the raw ENGLISH Aosom title (see `catalog-name-is-english-fr-on-shopify`);
+Turso has no French field at all. French search terms ("base de lit", "chaise de bureau")
+return **zero** results even though the matching English product exists — confirmed on 5
+French category terms, all 0. This is not a bug this fix can close: it would need either
+backfilling curated Shopify FR titles into Turso (per-product Admin API calls, rate-limited)
+or a translation layer — both bigger, separate scope. The new subcategory dropdown gives a
+non-text browsing path around it for the dashboard's category-level use case.
+
+## [0.5.92.10] - 2026-09-14
+
+stale-catalog could not see the products it most needed to see.
+
+### The blind spot
+
+`getStaleImportedProducts` required `qty > 0`, framing the job purely as oversell protection.
+That excluded the clearest discontinued case there is — a product BOTH sold out AND gone from
+the Aosom feed — and nothing else caught those either: the removed-from-feed reconcile fires on
+the day a SKU disappears, not retroactively. So they accumulated.
+
+Measured against production: of the 179 feed-absent products still live in the Meta catalog,
+**139 were invisible to this query for that reason alone**, while the cron reported a reassuring
+`stale=44` every morning for weeks.
+
+A sold-out stale product is not an oversell risk, but it is dead weight: `active` and published,
+occupying a slot in the Meta catalog and showing up in on-site search as a permanently
+unavailable result.
+
+### Changed
+
+- `qty > 0` removed from the query. The 30-day candidate list goes from **45 to 406**.
+- **`WRITE_CAP = 250`** added to `computeStaleDrafts`, because unbounded was fine at 45 and is
+  not at 406: 500ms a write is ~3.4min of writes alone inside a 300s cron that must also
+  paginate the whole Shopify catalog first. The cap counts **writes**, not scans, so a run whose
+  candidates are mostly already-drafted still reaches the ones needing work.
+- `StaleCatalogResult.deferred` + the cron detail string now report what the cap held back.
+
+Safe to cap because the pass is convergent and idempotent: candidates are ordered
+`last_seen_at ASC`, an already-drafted product is skipped next run, and the cron is daily.
+
+### Tests
+
+7 new. The cap: stops at the limit and defers the rest, does not burn itself on no-ops, leaves a
+normal under-cap run untouched, and converges across two runs with nothing lost or
+double-drafted. The query: one pre-existing test asserted the *old* behaviour ("ignores a
+product already showing zero stock") and is inverted, with the in-stock case kept explicitly so
+the original oversell path stays covered.
+
 ## [0.5.92.9] - 2026-09-13
 
 Same treatment as the catalogue import fix, applied to the rest of the dashboard:

@@ -72,11 +72,6 @@ export interface BuildSlideshowOptions {
   items?: SlideshowItem[];
 }
 
-/** True when `v` is one of the SlideshowTemplate enum values. */
-export function isSlideshowTemplate(v: unknown): v is SlideshowTemplate {
-  return typeof v === "string" && (Object.values(SlideshowTemplate) as string[]).includes(v);
-}
-
 /** Default overlay/caption language for a brand (ameublo → FR, furnish → EN). */
 export function languageForBrand(brand: SlideshowBrand): SlideshowLanguage {
   return brand === "furnish" ? "en" : "fr";

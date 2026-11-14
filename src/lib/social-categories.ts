@@ -26,6 +26,10 @@
  *     Home Furnishings > Holiday & Seasonal > Christmas Trees > …            52
  *     Home Furnishings > Holiday & Seasonal > Christmas Decorations > …       3
  *
+ * UPDATE 2026-11-01: Aosom moved the seasonal branch to the TOP level
+ * ("Holiday & Seasonal > Christmas Trees > …"). The old `Home Furnishings > Holiday…` LIKE
+ * matched 0 live products while 192 sat under the new path, so both forms are matched now.
+ *
  * So every category here is one indexed-ish LIKE on a column we already hold. No API call,
  * no cache to invalidate, and it keeps working when a product's Shopify tags are edited.
  *
@@ -62,7 +66,16 @@ export interface SocialCategory {
    * stale degrades a hint, not the feature.
    */
   measuredLifestylePool: number;
+  /**
+   * Repost cooldown (days) for this category, overriding social_min_days_between_reposts
+   * (30) when SHORTER. Seasonal pools are small and their window is a few weeks: with 30 days
+   * the 33 Halloween products were all locked from Sep 19 into October (2026-09-25).
+   */
+  cooldownDays?: number;
 }
+
+/** Cooldown used for seasonal categories (Halloween, Noël). */
+export const SEASONAL_COOLDOWN_DAYS = 7;
 
 /** `all` first; the rest in the order the dropdown shows them. */
 export const SOCIAL_CATEGORIES: SocialCategory[] = [
@@ -70,16 +83,20 @@ export const SOCIAL_CATEGORIES: SocialCategory[] = [
   {
     key: "halloween",
     label: "🎃 Halloween",
-    predicate: "product_type LIKE 'Home Furnishings > Holiday & Seasonal > Halloween%'",
+    predicate: "(product_type LIKE 'Holiday & Seasonal > Halloween%' OR product_type LIKE 'Home Furnishings > Holiday & Seasonal > Halloween%')",
     args: [],
-    measuredPool: 34, measuredLifestylePool: 34,
+    // 2026-11-01: 4 imported + in stock (the season is over). Lifestyle count not re-measured.
+    measuredPool: 4, measuredLifestylePool: 4,
+    cooldownDays: SEASONAL_COOLDOWN_DAYS,
   },
   {
     key: "noel",
     label: "🎄 Noël",
-    predicate: "product_type LIKE 'Home Furnishings > Holiday & Seasonal > Christmas%'",
+    predicate: "(product_type LIKE 'Holiday & Seasonal > Christmas%' OR product_type LIKE 'Home Furnishings > Holiday & Seasonal > Christmas%')",
     args: [],
-    measuredPool: 54, measuredLifestylePool: 7,
+    // 2026-11-01: 185 imported + in stock (104 with a discount). Lifestyle count not re-measured (7 on 2026-09-03).
+    measuredPool: 185, measuredLifestylePool: 7,
+    cooldownDays: SEASONAL_COOLDOWN_DAYS,
   },
   {
     key: "salon",
@@ -232,4 +249,94 @@ export function resolveCategory(
   const seasonal = getCategory(seasonalDefaultCategory(month) ?? undefined);
   if (seasonal) return { category: seasonal, source: "seasonal", canFallBack: true };
   return { category: null, source: "none", canFallBack: false };
+}
+
+// ─── Fine targeting: sub-categories + saved themes (2026-10-02) ──────
+
+/**
+ * The 12 categories above are broad ("Extérieur & Patio" is 525 products: loungers,
+ * planters, umbrellas…). Mat wanted to post a precise SEASONAL slice — autumn outdoor:
+ * fire pits, car shelters, sheds, heaters — so the generator also accepts any set of
+ * Aosom `product_type` branches, picked in the dashboard from the real tree, and the
+ * operator can save such a set as a named theme.
+ *
+ * A branch selects itself AND every sub-branch: "Patio & Garden > Lawn & Garden > Sheds"
+ * also matches "… > Sheds > Portable Shed". The values travel as bound args (never inlined),
+ * with LIKE wildcards escaped, so an operator-picked string can't widen the filter.
+ */
+export interface SocialTheme {
+  /** Stable id, generated at save time. */
+  id: string;
+  /** Shown in the dashboard ("Extérieur automne"). */
+  label: string;
+  /** Aosom product_type branches the theme covers. */
+  productTypes: string[];
+}
+
+/** Settings key holding the saved themes (JSON array of SocialTheme). */
+export const SOCIAL_THEMES_KEY = "social_themes";
+/** Settings key: theme id the DAILY cron prefers instead of the seasonal default ("" = none). */
+export const SOCIAL_AUTO_THEME_KEY = "social_auto_theme";
+
+export const MAX_THEME_PRODUCT_TYPES = 60;
+const MAX_PRODUCT_TYPE_LEN = 200;
+const MAX_THEME_LABEL_LEN = 60;
+export const MAX_THEMES = 30;
+
+/** Normalise an operator-sent list of product_type branches; null when invalid. */
+export function validateProductTypes(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const out = [...new Set(raw.map((t) => (typeof t === "string" ? t.trim() : "")))];
+  if (out.length === 0 || out.length > MAX_THEME_PRODUCT_TYPES) return null;
+  if (out.some((t) => t.length === 0 || t.length > MAX_PRODUCT_TYPE_LEN)) return null;
+  return out;
+}
+
+/** Trim + bound a theme label; null when empty. */
+export function validateThemeLabel(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const label = raw.trim().slice(0, MAX_THEME_LABEL_LEN);
+  return label.length > 0 ? label : null;
+}
+
+/** Parse the stored themes, dropping any malformed entry rather than failing the page. */
+export function parseThemes(raw: string | null | undefined): SocialTheme[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    const themes: SocialTheme[] = [];
+    for (const t of arr) {
+      const o = t as Record<string, unknown>;
+      const label = validateThemeLabel(o?.label);
+      const productTypes = validateProductTypes(o?.productTypes);
+      if (typeof o?.id === "string" && o.id && label && productTypes) {
+        themes.push({ id: o.id, label, productTypes });
+      }
+    }
+    return themes;
+  } catch {
+    return [];
+  }
+}
+
+/** Escape LIKE wildcards with `!` (a backslash would need double-escaping in SQL + JS). */
+function escapeLike(s: string): string {
+  return s.replace(/[!%_]/g, (c) => `!${c}`);
+}
+
+/**
+ * A runtime category over product_type branches. Its predicate is built from a constant
+ * template (one clause per branch); the branch strings themselves are bound args.
+ */
+export function buildTargetCategory(label: string, productTypes: string[]): SocialCategory {
+  return {
+    key: "custom",
+    label,
+    predicate: productTypes.map(() => `(product_type = ? OR product_type LIKE ? ESCAPE '!')`).join(" OR "),
+    args: productTypes.flatMap((t) => [t, `${escapeLike(t)} > %`]),
+    // Unknown until measured live: the targets API reports the real postable count.
+    measuredPool: -1,
+    measuredLifestylePool: -1,
+  };
 }

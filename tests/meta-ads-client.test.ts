@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Fake env so config.ts doesn't throw on the metaAccessToken getter.
 process.env.META_ACCESS_TOKEN = "TEST_META_TOKEN";
+process.env.NEXT_PUBLIC_META_PIXEL_ID = "TEST_PIXEL_ID";
 
 import {
   getAdAccounts,
@@ -12,6 +13,8 @@ import {
   uploadAdVideo,
   getAdVideoStatus,
   pollAdVideoReady,
+  ensureWebsiteCustomAudience,
+  ensureCoreRemarketingAudiences,
   __resetRateLimit,
 } from "@/lib/meta-ads-client";
 import { META_ADS } from "@/lib/config";
@@ -250,5 +253,100 @@ describe("meta-ads-client", () => {
       new Response(JSON.stringify({ status: { video_status: "processing" } }), { status: 200 }),
     ) as unknown as typeof fetch;
     await expect(pollAdVideoReady("vid_1", { timeoutMs: 5, intervalMs: 1 })).rejects.toThrow(/not ready after/i);
+  });
+
+  describe("ensureWebsiteCustomAudience", () => {
+    it("returns the existing audience's id without POSTing when one with that name exists", async () => {
+      global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === "string" ? url : url.toString();
+        calls.push({ url: urlStr, method: init?.method || "GET", body: init?.body ? JSON.parse(init.body as string) : null });
+        if (urlStr.includes("/customaudiences") && (init?.method || "GET") === "GET") {
+          return new Response(
+            JSON.stringify({ data: [{ id: "aud_existing", name: "Visiteurs 30 jours (pixel)", subtype: "WEBSITE" }] }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }) as unknown as typeof fetch;
+
+      const audience = await ensureWebsiteCustomAudience("act_111", "Visiteurs 30 jours (pixel)", { retentionDays: 30 });
+      expect(audience.id).toBe("aud_existing");
+      expect(calls.some((c) => c.method === "POST")).toBe(false);
+    });
+
+    it("creates the audience with a pixel-based WEBSITE rule when none exists by that name", async () => {
+      global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === "string" ? url : url.toString();
+        const body = init?.body ? JSON.parse(init.body as string) : null;
+        calls.push({ url: urlStr, method: init?.method || "GET", body });
+        if (urlStr.includes("/customaudiences") && (init?.method || "GET") === "GET") {
+          return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        }
+        if (urlStr.includes("/customaudiences") && init?.method === "POST") {
+          return new Response(JSON.stringify({ id: "aud_new" }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }) as unknown as typeof fetch;
+
+      const audience = await ensureWebsiteCustomAudience("act_111", "Ajouts au panier 30 jours (pixel)", {
+        retentionDays: 30,
+        event: "AddToCart",
+      });
+      expect(audience.id).toBe("aud_new");
+
+      const post = calls.find((c) => c.method === "POST");
+      expect(post?.body?.subtype).toBe("WEBSITE");
+      expect(post?.body?.name).toBe("Ajouts au panier 30 jours (pixel)");
+      expect(post?.body?.prefill).toBe(true);
+      const rule = JSON.parse(post?.body?.rule as string);
+      expect(rule.inclusions.rules[0].event_sources).toEqual([{ type: "pixel", id: "TEST_PIXEL_ID" }]);
+      expect(rule.inclusions.rules[0].retention_seconds).toBe(30 * 86400);
+      expect(rule.inclusions.rules[0].filter.filters[0]).toEqual({ field: "event", operator: "eq", value: "AddToCart" });
+    });
+
+    it("never creates a duplicate across repeated calls (idempotent by name)", async () => {
+      const existingByName = new Map<string, string>();
+      let nextId = 1;
+      global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === "string" ? url : url.toString();
+        const body = init?.body ? JSON.parse(init.body as string) : null;
+        if (urlStr.includes("/customaudiences") && (init?.method || "GET") === "GET") {
+          const data = [...existingByName.entries()].map(([name, id]) => ({ id, name, subtype: "WEBSITE" }));
+          return new Response(JSON.stringify({ data }), { status: 200 });
+        }
+        if (urlStr.includes("/customaudiences") && init?.method === "POST") {
+          const id = `aud_${nextId++}`;
+          existingByName.set(body.name, id);
+          return new Response(JSON.stringify({ id }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }) as unknown as typeof fetch;
+
+      const first = await ensureWebsiteCustomAudience("act_111", "Visiteurs 30 jours (pixel)", { retentionDays: 30 });
+      const second = await ensureWebsiteCustomAudience("act_111", "Visiteurs 30 jours (pixel)", { retentionDays: 30 });
+      expect(second.id).toBe(first.id);
+      expect(existingByName.size).toBe(1);
+    });
+  });
+
+  describe("ensureCoreRemarketingAudiences", () => {
+    it("ensures all three tiers and returns their ids", async () => {
+      global.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+        const urlStr = typeof url === "string" ? url : url.toString();
+        const body = init?.body ? JSON.parse(init.body as string) : null;
+        if (urlStr.includes("/customaudiences") && (init?.method || "GET") === "GET") {
+          return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        }
+        if (urlStr.includes("/customaudiences") && init?.method === "POST") {
+          return new Response(JSON.stringify({ id: `aud_${String(body.name).slice(0, 6)}` }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      }) as unknown as typeof fetch;
+
+      const result = await ensureCoreRemarketingAudiences("act_111");
+      expect(result.visitors30d.id).toBeTruthy();
+      expect(result.addToCart30d.id).toBeTruthy();
+      expect(result.viewContent14d.id).toBeTruthy();
+    });
   });
 });

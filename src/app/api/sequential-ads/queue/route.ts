@@ -37,6 +37,9 @@ export interface SequentialAdQueueItem {
   payload: { reelsVideoUrl?: string; caption?: string; brand?: string };
   style: string | null;
   campaign: string | null;
+  /** Price guard (sequential-ad-price.ts): the burned price is stale — re-render before approving. */
+  needs_rerender: boolean;
+  error: string | null;
 }
 
 /** Pull just the display essentials out of the JSON payload (never throws). */
@@ -78,6 +81,8 @@ export async function GET(request: Request) {
     payload: safePayload(r.payload),
     style: typeof r.metadata?.style === "string" ? r.metadata.style : null,
     campaign: typeof r.metadata?.campaign === "string" ? r.metadata.campaign : null,
+    needs_rerender: r.metadata?.needsRerender === true,
+    error: r.error ?? null,
   }));
   return NextResponse.json({ items, campaigns, total, campaign });
 }

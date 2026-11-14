@@ -1,0 +1,511 @@
+/**
+ * Morning report — Mat's daily 06:00 (America/Montreal) email digest.
+ *
+ * STRICTLY READ-ONLY: every source below only reads (Turso, Meta insights). Nothing here
+ * approves, publishes, schedules or mutates anything — it's a summary so Mat doesn't have to
+ * go fetch the numbers himself.
+ *
+ * Each section is collected independently: a source that throws (Meta API down, a missing
+ * table…) becomes a `{ ok: false }` section rendered as "section indisponible", and the email
+ * still goes out with everything else. Pure collect/render so both are unit-tested without
+ * a DB or network (sources are injected).
+ */
+import type { CampaignDaySummary } from "./meta-ads-client";
+import { styleLabelOf } from "./ameublo-style-label";
+import { formatLabelOf } from "./photo-insights";
+import type { GuardStatus } from "./guard-status";
+import type { ShopSummary } from "./shop-analytics";
+
+export const REPORT_TIME_ZONE = "America/Montreal";
+/** Local hour the report must go out at. The cron fires at 10:00 and 11:00 UTC (06:00 EDT /
+ *  06:00 EST); the route sends only on the run where this is the Montreal wall-clock hour. */
+export const REPORT_LOCAL_HOUR = 6;
+
+// ── sections ──────────────────────────────────────────────────────────────────
+export type Section<T> = { ok: true; data: T } | { ok: false; error: string };
+
+export interface GuidesSummary {
+  pending: number;
+  ready: number;
+  attention: number;
+  /** Titles of the "attention" guides (capped), so Mat knows which ones need a look. */
+  attentionTitles: string[];
+}
+
+export interface VideosSummary {
+  /** Videos waiting for approval on /content-formats. */
+  pendingApproval: number;
+  /** Approved videos queued to publish in the next `horizonDays` days. */
+  scheduledSoon: number;
+  horizonDays: number;
+}
+
+export interface AlertItem {
+  label: string;
+  count: number;
+}
+
+export interface BlockedItem {
+  label: string;
+  count: number;
+}
+
+/** Raw Studio Reels stock for one language (what the DB knows; the report derives the runway). */
+export interface ReelsStockRaw {
+  /** Approved Reels still waiting to publish (pending/publishing). */
+  scheduled: number;
+  /** `scheduled_at` (SQLite UTC) of the latest of them, or null when none. */
+  lastScheduledAt: string | null;
+  /** Videos ready to approve in the Studio ("Nouveau": nothing queued, not rejected, QA not flagged). */
+  ready: number;
+}
+export interface ReelsStockSummary {
+  fr: ReelsStockRaw;
+  en: ReelsStockRaw;
+}
+/** Below this many days of approved Reels per page, the report raises the alert. */
+export const REELS_RUNWAY_ALERT_DAYS = 7;
+
+/** Days of approved Reels still ahead of `today` (Montreal date, inclusive of the last day); 0 when none. */
+export function reelsRunwayDays(lastScheduledAt: string | null, today: string): number {
+  if (!lastScheduledAt) return 0;
+  const last = localClock(new Date(`${lastScheduledAt.replace(" ", "T")}Z`)).date;
+  const diff = Math.round((Date.parse(`${last}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000);
+  return Math.max(0, diff + 1);
+}
+
+/** How the Reels of the last `days` days performed on Facebook (from the daily reel-insights snapshot). */
+export interface ReelResultsSummary {
+  days: number;
+  measured: number;
+  totalPlays: number;
+  /** Mean of the Reels' own average watch time, in seconds; null when none reported one. */
+  avgWatchS: number | null;
+  /** Best-performing kind of video among groups with enough Reels to compare; null while the samples are too small. */
+  bestStyle: { key: string; avgPlays: number; n: number } | null;
+  lastMeasuredOn: string | null;
+}
+
+/** How the photo posts (La semaine Ameublo) of the last `days` days performed on Facebook, from the daily photo-insights snapshot. */
+export interface PhotoResultsSummary {
+  days: number;
+  measured: number;
+  totalViews: number;
+  totalReactions: number;
+  totalComments: number;
+  totalShares: number;
+  /** Instagram views of the same window; null when none were measured. */
+  instagramViews: number | null;
+  /** Best format among those with enough photos to compare; null while the samples are too small. */
+  bestFormat: { key: string; avgViews: number; n: number } | null;
+  lastMeasuredOn: string | null;
+}
+
+export interface MorningReportData {
+  /** Montreal calendar date the report is for (YYYY-MM-DD). */
+  reportDate: string;
+  /** The day the Meta figures cover (the ad account's "yesterday"). */
+  metaDay: string;
+  meta: Section<CampaignDaySummary[]>;
+  /** Store numbers from Shopify itself: sales, visits, funnel, traffic sources, where the orders came from. */
+  shop: Section<ShopSummary>;
+  guides: Section<GuidesSummary>;
+  videos: Section<VideosSummary>;
+  /** Studio Reels reserve: how many days of approved videos are left per page. */
+  reelsStock: Section<ReelsStockSummary>;
+  /** What the published Reels got (plays, watch time), so the grid and the video types can be judged on numbers. */
+  reelResults: Section<ReelResultsSummary>;
+  /** What the photo posts got (views, reactions…), so the weekly formats can be judged on numbers. */
+  photoResults: Section<PhotoResultsSummary>;
+  alerts: Section<AlertItem[]>;
+  blocked: Section<BlockedItem[]>;
+  /** Red/green verdict per daily guard (guard-status.ts) — the same one the dashboard shows. */
+  guards: Section<GuardStatus[]>;
+}
+
+export interface MorningReportSources {
+  meta: (day: string) => Promise<CampaignDaySummary[]>;
+  shop: (day: string) => Promise<ShopSummary>;
+  guides: () => Promise<GuidesSummary>;
+  videos: () => Promise<VideosSummary>;
+  reelsStock: () => Promise<ReelsStockSummary>;
+  reelResults: () => Promise<ReelResultsSummary>;
+  photoResults: () => Promise<PhotoResultsSummary>;
+  alerts: () => Promise<AlertItem[]>;
+  blocked: () => Promise<BlockedItem[]>;
+  guards: () => Promise<GuardStatus[]>;
+}
+
+// ── time helpers ──────────────────────────────────────────────────────────────
+/** Wall-clock date + hour of `now` in `timeZone`. */
+export function localClock(now: Date, timeZone = REPORT_TIME_ZONE): { date: string; hour: number } {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(now)
+      .map((p) => [p.type, p.value]),
+  );
+  return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) };
+}
+
+/** YYYY-MM-DD of the calendar day before `date` (YYYY-MM-DD). */
+export function previousDay(date: string): string {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// ── collect ───────────────────────────────────────────────────────────────────
+async function settle<T>(fn: () => Promise<T>): Promise<Section<T>> {
+  try {
+    return { ok: true, data: await fn() };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function collectMorningReport(sources: MorningReportSources, now: Date): Promise<MorningReportData> {
+  const reportDate = localClock(now).date;
+  const metaDay = previousDay(reportDate);
+  const [meta, shop, guides, videos, reelsStock, reelResults, photoResults, alerts, blocked, guards] = await Promise.all([
+    settle(() => sources.meta(metaDay)),
+    settle(() => sources.shop(metaDay)),
+    settle(sources.guides),
+    settle(sources.videos),
+    settle(sources.reelsStock),
+    settle(sources.reelResults),
+    settle(sources.photoResults),
+    settle(sources.alerts),
+    settle(sources.blocked),
+    settle(sources.guards),
+  ]);
+  return { reportDate, metaDay, meta, shop, guides, videos, reelsStock, reelResults, photoResults, alerts, blocked, guards };
+}
+
+// ── render ────────────────────────────────────────────────────────────────────
+const money = (n: number) =>
+  new Intl.NumberFormat("fr-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 2 }).format(n);
+const int = (n: number) => new Intl.NumberFormat("fr-CA").format(Math.round(n));
+// French: 0 and 1 take the singular.
+const plural = (n: number, one: string, many: string) => `${int(n)} ${n >= 2 ? many : one}`;
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+}
+
+const LEARNING_LABEL: Record<string, string> = {
+  LEARNING: "en apprentissage",
+  SUCCESS: "apprentissage terminé",
+  FAIL: "apprentissage limité",
+  WAIVING: "apprentissage non requis",
+};
+
+function learningLabel(statuses: string[]): string {
+  if (statuses.length === 0) return "apprentissage : pas encore de statut";
+  return statuses.map((s) => LEARNING_LABEL[s] ?? s.toLowerCase()).join(" / ");
+}
+
+/** Friendly day label, e.g. "mercredi 24 septembre". */
+function dayLabel(date: string): string {
+  return new Intl.DateTimeFormat("fr-CA", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).format(
+    new Date(`${date}T12:00:00Z`),
+  );
+}
+
+type ReportSection = { title: string; lines: string[]; missing?: string; alert?: boolean };
+
+/** Guards that need attention today (red). */
+export function redGuards(data: MorningReportData): GuardStatus[] {
+  return data.guards.ok ? data.guards.data.filter((g) => g.state === "red") : [];
+}
+
+const pct = (x: number, digits = 1) => `${new Intl.NumberFormat("fr-CA", { maximumFractionDigits: digits }).format(x * 100)} %`;
+/** "+12 %" / "−8 %" vs the previous period; null when there is no base to compare to. */
+function delta(now: number, before: number): string | null {
+  if (before <= 0) return null;
+  const d = Math.round(((now - before) / before) * 100);
+  return `${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)} %`;
+}
+
+/** The "Boutique" section: Shopify's own numbers for yesterday and the last 7 days. */
+function shopSection(data: MorningReportData): ReportSection {
+  const title = `Boutique (Shopify) — ${dayLabel(data.metaDay)}`;
+  if (!data.shop.ok) return { title, lines: [], missing: data.shop.error };
+  const s = data.shop.data;
+  const lines: string[] = [];
+  lines.push(
+    s.daySales.orders === 0
+      ? "Hier : 0 commande."
+      : `Hier : ${plural(s.daySales.orders, "commande", "commandes")} · ${money(s.daySales.total)}${s.daySales.aov != null ? ` · panier moyen ${money(s.daySales.aov)}` : ""}.`,
+  );
+  if (s.dayOrderSources.length) {
+    lines.push(`Provenance des commandes d'hier : ${s.dayOrderSources.map((o) => `${o.label} ${int(o.orders)} (${money(o.total)})`).join(" · ")}.`);
+  }
+  const f = s.dayFunnel;
+  lines.push(
+    `Visites hier : ${int(f.sessions)} · ${plural(f.carts, "panier", "paniers")} · ${plural(f.checkouts, "paiement commencé", "paiements commencés")} · ${plural(f.bought, "achat", "achats")} · conversion ${pct(f.conversion, 2)}.`,
+  );
+  const w = s.weekFunnel, pw = s.prevWeekFunnel;
+  const dv = delta(w.sessions, pw.sessions), dord = delta(s.weekSales.orders, s.prevWeekSales.orders), dtot = delta(s.weekSales.total, s.prevWeekSales.total);
+  lines.push(
+    `7 derniers jours : ${int(w.sessions)} visites${dv ? ` (${dv})` : ""} · ${plural(s.weekSales.orders, "commande", "commandes")}${dord ? ` (${dord})` : ""} · ${money(s.weekSales.total)}${dtot ? ` (${dtot})` : ""} · conversion ${pct(w.conversion, 2)}.`,
+  );
+  if (w.checkouts > 0) {
+    lines.push(
+      `Entonnoir 7 jours : ${pct(w.carts / Math.max(w.sessions, 1))} ajoutent au panier → ${int(w.checkouts)} arrivent au paiement → ${int(w.bought)} achètent (${pct(w.bought / w.checkouts, 0)} de ceux qui arrivent au paiement).`,
+    );
+  }
+  if (s.sources.length) {
+    lines.push(`Sources des visites (7 jours) : ${s.sources.map((x) => `${x.name} ${int(x.sessions)} (conv. ${pct(x.conversion, 2)})`).join(" · ")}.`);
+  }
+  if ("error" in s.meta) lines.push(`Pub Meta vs ventes : indisponible (${s.meta.error}).`);
+  else {
+    const m = s.meta;
+    // Indicative: last click only, and Meta's own spend window vs Montreal days. Shown as a range when untagged
+    // Facebook orders exist, so « cost per order » never reads as exact.
+    const head = `Pub Meta (7 jours, dernier clic, indicatif) : ${money(m.spend)} dépensés`;
+    if (m.costPerOrder == null) {
+      lines.push(
+        m.maybeOrders > 0
+          ? `${head} · aucune commande avec une pub identifiée, ${plural(m.maybeOrders, "commande venue", "commandes venues")} de Facebook/Instagram sans pub identifiée.`
+          : `${head} · aucune commande reliée à Facebook/Instagram.`,
+      );
+    } else if (m.maybeOrders > 0 && m.costPerOrderLow != null) {
+      lines.push(
+        `${head} · ${plural(m.orders, "commande", "commandes")} avec pub identifiée (${money(m.costPerOrder)} par commande), ${money(m.costPerOrderLow)} si on compte aussi les ${int(m.maybeOrders)} venues de Facebook sans pub identifiée.`,
+      );
+    } else {
+      lines.push(`${head} · ${plural(m.orders, "commande", "commandes")} avec pub identifiée · environ ${money(m.costPerOrder)} par commande.`);
+    }
+  }
+  return { title, lines };
+}
+
+/** Lines (plain text) for each section; the HTML is built from the same lines. */
+function sectionLines(data: MorningReportData): ReportSection[] {
+  const out: ReportSection[] = [];
+
+  // 0. Guards — first, so a red guard is the first thing Mat reads. One section groups every
+  //    guard (price floor, catalog, images, ad feeds); when all are green it is a single line.
+  {
+    const title = "Garde-fous";
+    if (!data.guards.ok) out.push({ title, lines: [], missing: data.guards.error });
+    else {
+      const red = redGuards(data);
+      const green = data.guards.data.filter((g) => g.state === "green").map((g) => g.label.toLowerCase());
+      const unknown = data.guards.data.filter((g) => g.state === "unknown").map((g) => g.label.toLowerCase());
+      const lines = red.map((g) => `🔴 ${g.label} : ${g.reasons.join(" · ")}`);
+      if (red.length === 0) lines.push(`✅ Tous les garde-fous sont au vert (${green.join(", ")}).`);
+      else if (green.length) lines.push(`Au vert : ${green.join(", ")}.`);
+      if (unknown.length) lines.push(`Pas encore de résultat : ${unknown.join(", ")}.`);
+      out.push({ title: red.length ? `Garde-fous — ${plural(red.length, "alerte", "alertes")}` : title, lines, alert: red.length > 0 });
+    }
+  }
+
+  // 0b. Shopify store numbers — what really happened on the site (sales, visits, funnel, sources).
+  out.push(shopSection(data));
+
+  // 1. Meta
+  {
+    const title = `Publicités Meta — ${dayLabel(data.metaDay)}`;
+    if (!data.meta.ok) out.push({ title, lines: [], missing: data.meta.error });
+    else if (data.meta.data.length === 0) out.push({ title, lines: ["Aucune campagne active."] });
+    else {
+      const rows = data.meta.data;
+      const total = rows.reduce((s, r) => s + r.spend, 0);
+      const lines = rows.map((r) => {
+        const sales =
+          r.purchases > 0
+            ? `${plural(r.purchases, "achat", "achats")} (${money(r.purchaseValue)})`
+            : "0 achat";
+        const budget = r.dailyBudget != null ? ` / ${money(r.dailyBudget / 100)} par jour` : "";
+        return (
+          `${r.name} : ${money(r.spend)}${budget} · ${plural(r.impressions, "impression", "impressions")} · ` +
+          `${plural(r.linkClicks, "clic", "clics")} · ${sales} · ${learningLabel(r.learning)}`
+        );
+      });
+      lines.push(`Total dépensé : ${money(total)}`);
+      out.push({ title, lines });
+    }
+  }
+
+  // 2. Guides
+  {
+    const title = "Guides en attente d'approbation";
+    if (!data.guides.ok) out.push({ title, lines: [], missing: data.guides.error });
+    else {
+      const g = data.guides.data;
+      const lines =
+        g.pending === 0
+          ? ["Aucun guide en attente."]
+          : [`${plural(g.pending, "guide", "guides")} en attente : ${int(g.ready)} prêts, ${int(g.attention)} à vérifier.`];
+      if (g.attentionTitles.length) lines.push(`À vérifier : ${g.attentionTitles.join(" · ")}`);
+      out.push({ title, lines });
+    }
+  }
+
+  // 3. Videos
+  {
+    const title = "Vidéos";
+    if (!data.videos.ok) out.push({ title, lines: [], missing: data.videos.error });
+    else {
+      const v = data.videos.data;
+      out.push({
+        title,
+        lines: [
+          `${plural(v.pendingApproval, "vidéo", "vidéos")} en attente d'approbation.`,
+          `${plural(v.scheduledSoon, "vidéo planifiée", "vidéos planifiées")} dans les ${v.horizonDays} prochains jours.`,
+        ],
+      });
+    }
+  }
+
+  // 3b. Studio Reels reserve — warns BEFORE the queue runs dry (approval is manual, so it empties silently).
+  {
+    const title = "Réserve de Reels (Studio)";
+    if (!data.reelsStock.ok) out.push({ title, lines: [], missing: data.reelsStock.error });
+    else {
+      const rows = (["fr", "en"] as const).map((lang) => {
+        const s = data.reelsStock.ok ? data.reelsStock.data[lang] : { scheduled: 0, lastScheduledAt: null, ready: 0 };
+        return { lang, ...s, days: reelsRunwayDays(s.lastScheduledAt, data.reportDate) };
+      });
+      const low = rows.filter((r) => r.days < REELS_RUNWAY_ALERT_DAYS);
+      const lines = rows.map((r) => {
+        const name = r.lang === "fr" ? "Ameublo (FR)" : "Furnish (EN)";
+        const cover = r.days === 0 ? "plus aucune vidéo planifiée" : `${plural(r.days, "jour", "jours")} de vidéos planifiées (${plural(r.scheduled, "vidéo", "vidéos")})`;
+        return `${r.days < REELS_RUNWAY_ALERT_DAYS ? "🔴 " : ""}${name} : ${cover} · ${plural(r.ready, "prête", "prêtes")} à approuver.`;
+      });
+      if (low.length) lines.push("Ouvre le Studio Ameublo → « Plan de la semaine » pour approuver la suite en un clic.");
+      out.push({ title: low.length ? `${title} — basse` : title, lines, alert: low.length > 0 });
+    }
+  }
+
+  // 3c. Reel results — what the published Reels got, so types / time slots can be judged on numbers rather than hunches.
+  {
+    const title = "Résultats des Reels (Facebook)";
+    if (!data.reelResults.ok) out.push({ title, lines: [], missing: data.reelResults.error });
+    else {
+      const r = data.reelResults.data;
+      if (r.measured === 0) {
+        out.push({ title, lines: ["Aucun Reel mesuré pour l'instant (la collecte quotidienne vient de démarrer)."] });
+      } else {
+        const lines = [
+          `${plural(r.measured, "Reel mesuré", "Reels mesurés")} sur ${r.days} jours · ${plural(r.totalPlays, "lecture", "lectures")} au total` +
+            (r.avgWatchS != null ? ` · ${new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 1 }).format(r.avgWatchS)} s regardées en moyenne.` : "."),
+        ];
+        lines.push(
+          r.bestStyle
+            ? `Type le plus regardé : ${styleLabelOf(r.bestStyle.key, "fr")} (${new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 1 }).format(r.bestStyle.avgPlays)} lectures en moyenne, ${plural(r.bestStyle.n, "Reel", "Reels")}).`
+            : "Trop tôt pour comparer les types de vidéos (il faut au moins 5 Reels par type).",
+        );
+        out.push({ title: `${title} — ${r.days} j`, lines });
+      }
+    }
+  }
+
+  // 3d. Photo results — what the daily photo posts got, so the weekly formats can be judged on numbers rather than hunches.
+  {
+    const title = "Résultats des photos (Facebook)";
+    if (!data.photoResults.ok) out.push({ title, lines: [], missing: data.photoResults.error });
+    else {
+      const r = data.photoResults.data;
+      if (r.measured === 0) {
+        out.push({ title, lines: ["Aucune photo mesurée pour l'instant (la collecte quotidienne vient de démarrer)."] });
+      } else {
+        const fmt = (n: number) => new Intl.NumberFormat("fr-CA", { maximumFractionDigits: 1 }).format(n);
+        const lines = [
+          `${plural(r.measured, "photo mesurée", "photos mesurées")} sur ${r.days} jours · ${plural(r.totalViews, "vue", "vues")} · ${plural(r.totalReactions, "réaction", "réactions")}, ` +
+            `${plural(r.totalComments, "commentaire", "commentaires")}, ${plural(r.totalShares, "partage", "partages")}` +
+            (r.instagramViews != null ? ` · Instagram : ${plural(r.instagramViews, "vue", "vues")}.` : "."),
+          r.bestFormat
+            ? `Format le plus vu : ${formatLabelOf(r.bestFormat.key)} (${fmt(r.bestFormat.avgViews)} vues en moyenne, ${plural(r.bestFormat.n, "photo", "photos")}).`
+            : "Trop tôt pour comparer les formats (il faut au moins 5 photos par format, vieilles de 48 h).",
+        ];
+        out.push({ title: `${title} — ${r.days} j`, lines });
+      }
+    }
+  }
+
+  // 4. Alerts
+  {
+    const title = "Alertes";
+    if (!data.alerts.ok) out.push({ title, lines: [], missing: data.alerts.error });
+    else {
+      const active = data.alerts.data.filter((a) => a.count > 0);
+      out.push({ title, lines: active.length ? active.map((a) => `${a.label} : ${int(a.count)}`) : ["Rien à signaler."] });
+    }
+  }
+
+  // 5. Blocked on Mat
+  {
+    const title = "En attente de ton action";
+    if (!data.blocked.ok) out.push({ title, lines: [], missing: data.blocked.error });
+    else {
+      const active = data.blocked.data.filter((b) => b.count > 0);
+      out.push({ title, lines: active.length ? active.map((b) => `${b.label} : ${int(b.count)}`) : ["Rien en attente."] });
+    }
+  }
+  return out;
+}
+
+export interface RenderedReport {
+  subject: string;
+  html: string;
+  text: string;
+  /** Titles of sections that could not be collected (empty when complete). */
+  missingSections: string[];
+}
+
+export function renderMorningReport(data: MorningReportData): RenderedReport {
+  const sections = sectionLines(data);
+  const missingSections = sections.filter((s) => s.missing !== undefined).map((s) => s.title);
+  const heading = `Rapport du matin — ${dayLabel(data.reportDate)}`;
+  const base = missingSections.length
+    ? `${heading} (${plural(missingSections.length, "section indisponible", "sections indisponibles")})`
+    : heading;
+  // A red guard leads the subject so it shows in the inbox list, not only once opened.
+  const red = redGuards(data).length;
+  const lowReserve = sections.some((s) => s.alert && s.title.startsWith("Réserve de Reels"));
+  const flags = [
+    red ? `🔴 ${plural(red, "garde-fou en alerte", "garde-fous en alerte")}` : "",
+    lowReserve ? "🟠 réserve de Reels basse" : "",
+  ].filter(Boolean);
+  const subject = flags.length ? `${flags.join(" · ")} — ${base}` : base;
+
+  const text = [
+    heading,
+    "",
+    ...sections.flatMap((s) => [
+      s.title.toUpperCase(),
+      ...(s.missing !== undefined ? [`⚠ Section indisponible (${s.missing})`] : s.lines.map((l) => `• ${l}`)),
+      "",
+    ]),
+    "Rapport informatif uniquement — aucune action n'a été déclenchée.",
+  ].join("\n");
+
+  const block = (s: (typeof sections)[number]) => {
+    const body =
+      s.missing !== undefined
+        ? `<p style="margin:0;color:#b45309">⚠ Section indisponible — ${escapeHtml(s.missing)}</p>`
+        : `<ul style="margin:0;padding-left:18px">${s.lines
+            .map((l) => `<li style="margin:2px 0">${escapeHtml(l)}</li>`)
+            .join("")}</ul>`;
+    return (
+      `<h2 style="font-size:15px;margin:18px 0 6px;color:${s.alert ? "#b91c1c" : "#111"}">${escapeHtml(s.title)}</h2>` + body
+    );
+  };
+  const html =
+    `<div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;font-size:14px;line-height:1.45;color:#222;max-width:600px">` +
+    `<h1 style="font-size:18px;margin:0 0 4px">${escapeHtml(heading)}</h1>` +
+    sections.map(block).join("") +
+    `<p style="margin:20px 0 0;font-size:12px;color:#777">Rapport informatif uniquement — aucune action n'a été déclenchée.</p>` +
+    `</div>`;
+
+  return { subject, html, text, missingSections };
+}

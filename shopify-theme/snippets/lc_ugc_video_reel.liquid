@@ -8,14 +8,19 @@
   nothing the section stays hidden (no empty heading on the homepage).
 {%- endcomment -%}
 {%- assign loc = request.locale.iso_code | downcase -%}
-<div class="lcugc-wrap" data-lcugc hidden style="background:#FAFAF8">
+<div class="lcugc-wrap" id="videos-clients" data-lcugc hidden>
   <div class="page-width lcugc-inner">
-    <h2 class="lcugc-h">{% if loc == 'en' %}See it at home{% else %}Voyez-le chez vous{% endif %}</h2>
-    <p class="lcugc-sub">{% if loc == 'en' %}Real unboxings, filmed by real customers{% else %}De vrais déballages, filmés par de vrais clients{% endif %}</p>
+    <div class="lc-head" style="justify-content:center;text-align:center">
+      <div class="lc-head__txt">
+        <span class="lc-kicker">{% if loc == 'en' %}Real customers{% elsif loc == 'es' %}Clientes reales{% elsif loc == 'pa' %}ਅਸਲ ਗਾਹਕ{% else %}De vrais clients{% endif %}</span>
+        <h2 class="lc-h2 lcugc-h">{% if loc == 'en' %}Unboxed <span class="lc-em">at home</span>{% elsif loc == 'es' %}Desempaquetado <span class="lc-em">en casa</span>{% elsif loc == 'pa' %}ਅਨਬਾਕਸ ਕੀਤਾ <span class="lc-em">ਘਰ ਵਿੱਚ</span>{% else %}Déballé <span class="lc-em">chez vous</span>{% endif %}</h2>
+        <p class="lc-sub lcugc-sub" style="margin:.4rem auto 0">{% if loc == 'en' %}Real unboxings, filmed by real customers{% elsif loc == 'es' %}Desempaquetados reales, grabados por clientes reales{% elsif loc == 'pa' %}ਅਸਲ ਅਨਬਾਕਸਿੰਗ, ਅਸਲ ਗਾਹਕਾਂ ਦੁਆਰਾ ਫਿਲਮਾਈ ਗਈ{% else %}De vrais déballages, filmés par de vrais clients{% endif %}</p>
+      </div>
+    </div>
     <div class="lcugc-viewport">
-      <button class="lcugc-arr lcugc-arr--l" type="button" aria-label="{% if loc == 'en' %}Previous{% else %}Précédent{% endif %}">&#8249;</button>
+      <button class="lcugc-arr lcugc-arr--l" type="button" aria-label="{% if loc == 'en' %}Previous{% elsif loc == 'es' %}Anterior{% elsif loc == 'pa' %}ਪਿਛਲਾ{% else %}Précédent{% endif %}">&#8249;</button>
       <ul class="lcugc-track" role="list"></ul>
-      <button class="lcugc-arr lcugc-arr--r" type="button" aria-label="{% if loc == 'en' %}Next{% else %}Suivant{% endif %}">&#8250;</button>
+      <button class="lcugc-arr lcugc-arr--r" type="button" aria-label="{% if loc == 'en' %}Next{% elsif loc == 'es' %}Siguiente{% elsif loc == 'pa' %}ਅਗਲਾ{% else %}Suivant{% endif %}">&#8250;</button>
     </div>
     <ul class="lcugc-dots" role="list" aria-hidden="true"></ul>
   </div>
@@ -23,20 +28,20 @@
 <style>
   .lcugc-wrap{padding:28px 0;overflow:visible;width:100vw;margin-left:calc(-50vw + 50%);max-width:none;position:relative;isolation:isolate}
   .lcugc-wrap[hidden]{display:none}
-  .lcugc-h{font-family:'DM Sans',sans-serif;font-weight:700;color:#1B2A4A;text-align:center;font-size:clamp(2rem,3.5vw,2.6rem);margin:0 0 .4rem}
-  .lcugc-sub{text-align:center;color:#5b6172;font-size:1.15rem;margin:0 0 1.6rem}
+  #videos-clients{scroll-margin-top:90px}
+  .lcugc-wrap{background:var(--lc-sky)}
   .lcugc-viewport{position:relative}
   .lcugc-track{display:flex;flex-direction:row;gap:18px;overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none;list-style:none;margin:0;padding:28px 50% 28px;cursor:grab}
   .lcugc-track::-webkit-scrollbar{display:none}
-  .lcugc-card{position:relative;flex:0 0 300px;scroll-snap-align:center;border-radius:18px;overflow:hidden;background:#1B2A4A;aspect-ratio:9/16;transition:transform .35s ease,box-shadow .35s ease,opacity .35s ease;transform:scale(.82);opacity:.58}
+  .lcugc-card{position:relative;flex:0 0 300px;scroll-snap-align:center;border-radius:24px;overflow:hidden;background:#1B2A4A;aspect-ratio:9/16;transition:transform .35s ease,box-shadow .35s ease,opacity .35s ease;transform:scale(.82);opacity:.58}
   .lcugc-card.is-center{transform:scale(1);opacity:1;box-shadow:0 28px 60px rgba(27,42,74,.45);z-index:2}
   @media(min-width:1024px){.lcugc-card{flex:0 0 340px}}
   @media(max-width:767px){.lcugc-track{padding:18px 50% 22px;gap:12px}.lcugc-card{flex:0 0 66vw;transform:scale(.88);opacity:.66}.lcugc-card.is-center{transform:scale(1.02);box-shadow:0 16px 36px rgba(27,42,74,.4)}}
   .lcugc-vid{width:100%;height:100%;object-fit:cover;display:block;background:#1B2A4A}
   .lcugc-shade{position:absolute;inset:0;z-index:1;text-decoration:none}
-  .lcugc-meta{position:absolute;left:0;right:0;bottom:0;z-index:2;pointer-events:none;padding:34px 16px 14px;background:linear-gradient(to top,rgba(27,42,74,.92),rgba(27,42,74,.35),transparent);font-family:'DM Sans',sans-serif}
-  .lcugc-t{color:#fff;font-weight:700;font-size:.95rem;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-  .lcugc-p{color:#D4A853;font-weight:700;font-size:1rem;display:block;margin-top:4px}
+  .lcugc-meta{position:absolute;left:0;right:0;bottom:0;z-index:2;pointer-events:none;padding:34px 16px 14px;background:linear-gradient(to top,rgba(27,42,74,.92),rgba(27,42,74,.35),transparent);font-family:var(--lc-font-text)}
+  .lcugc-t{color:#fff;font-weight:700;font-size:14px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .lcugc-p{color:var(--lc-sun);font-weight:800;font-size:14px;display:block;margin-top:4px}
   .lcugc-ctrl{position:absolute;z-index:3;width:38px;height:38px;border-radius:50%;border:none;background:rgba(27,42,74,.55);color:#fff;cursor:pointer;display:none;align-items:center;justify-content:center;backdrop-filter:blur(2px);transition:background .2s ease}
   .lcugc-ctrl:hover{background:rgba(212,168,83,.92);color:#1B2A4A}
   .lcugc-ctrl svg{width:18px;height:18px;fill:currentColor;display:block}
@@ -44,22 +49,22 @@
   .lcugc-play{top:12px;left:12px}
   .lcugc-mute{bottom:64px;right:12px}
   .lcugc-arr{position:absolute;top:50%;transform:translateY(-50%);z-index:10;width:46px;height:46px;border-radius:50%;border:none;background:rgba(255,255,255,.94);color:#1B2A4A;font-size:1.9rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(27,42,74,.18)}
-  .lcugc-arr:hover{background:#D4A853;color:#fff}
+  .lcugc-arr:hover{background:var(--lc-terra);color:#fff}
   .lcugc-arr--l{left:12px}.lcugc-arr--r{right:12px}
   @media(max-width:767px){.lcugc-arr{display:none}}
   .lcugc-dots{display:flex;justify-content:center;gap:8px;margin:16px 0 0;padding:0;list-style:none}
   .lcugc-dot{width:8px;height:8px;border-radius:999px;background:rgba(27,42,74,.22);border:none;padding:0;cursor:pointer;transition:background .3s ease,width .3s ease}
-  .lcugc-dot.is-active{width:22px;background:#D4A853}
+  .lcugc-dot.is-active{width:22px;background:var(--lc-terra)}
 </style>
 <script>
 (function(){
   var wrap=document.querySelector('[data-lcugc]');
   if(!wrap||wrap.dataset.lcugcInit) return;
   wrap.dataset.lcugcInit='1';
-  var LOC={% if loc == 'en' %}'en'{% else %}'fr'{% endif %};
+  var LOC={{ request.locale.iso_code | downcase | json }};
   var ROOT={{ routes.root_url | json }};
   var API='https://aosom-sync.vercel.app/api/ugc-videos';
-  var LBL={play:LOC==='en'?'Play':'Lecture',pause:LOC==='en'?'Pause':'Pause',mute:LOC==='en'?'Unmute':'Activer le son',muted:LOC==='en'?'Mute':'Couper le son'};
+  var LBL={play:lcT(LOC,'Play','Lecture','Reproducir','ਚਲਾਓ'),pause:lcT(LOC,'Pause','Pause','Pausar','ਰੋਕੋ'),mute:lcT(LOC,'Unmute','Activer le son','Activar sonido','ਆਵਾਜ਼ ਚਾਲੂ ਕਰੋ'),muted:lcT(LOC,'Mute','Couper le son','Silenciar','ਆਵਾਜ਼ ਬੰਦ ਕਰੋ')};
   var ICON={
     play:'<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
     pause:'<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>',
@@ -70,19 +75,21 @@
   var dotsWrap=wrap.querySelector('.lcugc-dots');
   var arrL=wrap.querySelector('.lcugc-arr--l'), arrR=wrap.querySelector('.lcugc-arr--r');
   var esc=function(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;};
-  var money=function(n){return (typeof n==='number'&&isFinite(n))?'$'+n.toFixed(2):'';};
+  /* 2026-10-16: posters were full-size (15 x 100-450 KB on page load); Shopify CDN resizes on the fly. */
+  var thumb=function(u){return (u.indexOf('cdn.shopify.com')>-1||u.indexOf('/cdn/shop/')>-1)?u+(u.indexOf('?')>-1?'&':'?')+'width=600':u;};
+  var money=function(n){if(typeof n!=='number'||!isFinite(n))return '';return (LOC!=='fr'?'$'+n.toFixed(2):n.toFixed(2).replace('.',',')+'\u00a0$');};
 
   fetch(API,{headers:{'Accept':'application/json'}}).then(function(r){return r.ok?r.json():null;}).then(function(data){
     var items=(data&&data.items)||[];
     if(!items.length){return;}
     var cards=[], dots=[];
     items.forEach(function(it,i){
-      var title=(LOC==='en'? (it.titleEn||it.titleFr):(it.titleFr||it.titleEn))||'';
+      var title=((LOC!=='fr'? (it.titleEn||it.titleFr):(it.titleFr||it.titleEn)))||'';
       var href=String(ROOT).replace(/\/+$/,'')+'/products/'+it.handle;
       var li=document.createElement('li');
       li.className='lcugc-card';
       li.innerHTML=
-        '<video class="lcugc-vid" muted loop playsinline preload="none"'+(it.imageUrl?(' poster="'+esc(it.imageUrl)+'"'):'')+'>'+
+        '<video class="lcugc-vid" muted loop playsinline preload="none"'+(it.imageUrl?(' poster="'+esc(thumb(it.imageUrl))+'"'):'')+'>'+
           '<source data-src="'+esc(it.videoUrl)+'" type="video/mp4"></video>'+
         '<button class="lcugc-ctrl lcugc-play" type="button" aria-label="'+esc(LBL.pause)+'">'+ICON.pause+'</button>'+
         '<button class="lcugc-ctrl lcugc-mute" type="button" aria-label="'+esc(LBL.mute)+'">'+ICON.muted+'</button>'+
@@ -118,7 +125,8 @@
       var io=new IntersectionObserver(function(es){es.forEach(function(e){var v=e.target;
         if(e.isIntersecting){loadVid(v);var p=v.play();if(p&&p.catch)p.catch(function(){});}
         else{v.pause();}});},{root:track,threshold:0.6});
-      cards.forEach(function(c){io.observe(c.querySelector('.lcugc-vid'));});
+      var lcNear=new IntersectionObserver(function(es){if(!es[0].isIntersecting)return;lcNear.disconnect();cards.forEach(function(c){io.observe(c.querySelector('.lcugc-vid'));});},{rootMargin:'200px 0px'});
+      lcNear.observe(track);
     } else { cards.forEach(function(c){var v=c.querySelector('.lcugc-vid');loadVid(v);v.play();}); }
 
     function updateCenter(){
@@ -146,7 +154,7 @@
     // center on the middle card and paint the initial center state
     requestAnimationFrame(function(){
       var mididx=Math.floor(cards.length/2);
-      if(cards[mididx])cards[mididx].scrollIntoView({inline:'center',block:'nearest'});
+      var mc=cards[mididx];if(mc){var tr=track.getBoundingClientRect(),cr=mc.getBoundingClientRect();track.scrollLeft+=(cr.left+cr.width/2)-(tr.left+tr.width/2);}
       updateCenter();
     });
   }).catch(function(){/* fail closed: leave the section hidden */});

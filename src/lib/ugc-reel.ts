@@ -1,8 +1,9 @@
 /**
  * Homepage "Voyez-le chez vous" UGC video reel data source.
  *
- * Picks the 5 most-in-stock products that have a clean CA/US customer unboxing
- * video (see `getUgcVideoCandidates`) and enriches each with its curated FR + EN
+ * Picks the most-in-stock products that have a clean CA/US customer unboxing
+ * video (see `getUgcVideoCandidates`), videos already copied to our own storage
+ * first (see `ugc-video-mirror.ts`), and enriches each with its curated FR + EN
  * titles, price, PDP handle, and a clean cdn.shopify.com hero image. Titles come
  * from Shopify (curated), never from `products.name` (raw English Aosom title,
  * forbidden in client-facing content). Consumed by `GET /api/ugc-videos`.
@@ -10,6 +11,7 @@
 import { getUgcVideoCandidates } from "@/lib/database";
 import { resolveProductFields } from "@/lib/selectors/shopify-product";
 import { shopifyFetch } from "@/lib/shopify-client";
+import { loadMirroredPaths, mirroredFirst, resolveVideoUrl } from "@/lib/ugc-video-mirror";
 
 export interface UgcReelItem {
   sku: string;
@@ -23,7 +25,7 @@ export interface UgcReelItem {
   handle: string;
   /** Clean cdn.shopify.com hero image, or null. */
   imageUrl: string | null;
-  /** Customer UGC unboxing video URL (aosom CDN, browser-servable). */
+  /** Customer unboxing video URL — our Vercel Blob mirror, or the source URL if not mirrored yet. */
   videoUrl: string;
 }
 
@@ -51,7 +53,9 @@ async function resolveTitleEn(shopifyProductId: string, fallback: string): Promi
  * headroom to still reach `count` when some drop out.
  */
 export async function getUgcVideoReel(count = 15): Promise<UgcReelItem[]> {
-  const candidates = await getUgcVideoCandidates(count + 8);
+  // Wider pool so mirrored videos (served from our own storage) can fill the slots first.
+  const [pool, mirrored] = await Promise.all([getUgcVideoCandidates(count + 40), loadMirroredPaths()]);
+  const candidates = mirroredFirst(pool, mirrored);
   const items: UgcReelItem[] = [];
   for (const c of candidates) {
     if (items.length >= count) break;
@@ -75,7 +79,7 @@ export async function getUgcVideoReel(count = 15): Promise<UgcReelItem[]> {
       currency: "CAD",
       handle,
       imageUrl: fields.images[0] ?? null,
-      videoUrl: c.videoUgc,
+      videoUrl: resolveVideoUrl(c.videoUgc, mirrored).url,
     });
   }
   return items;

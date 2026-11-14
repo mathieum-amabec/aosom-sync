@@ -1,9 +1,11 @@
+import { toFrenchColour } from "./colour-names";
 import type {
   AosomProduct,
   AosomMergedProduct,
   AosomVariant,
 } from "@/types/aosom";
 import { assertPublicHttpsUrl } from "./url-safety";
+import { exclusiveImages, imageKey, type ColourSource } from "./variant-photos";
 
 /**
  * French color map ported from reference aosom-shopify/merger.js.
@@ -36,7 +38,8 @@ export const COLOR_MAP: Record<string, string> = {
 };
 
 /**
- * Parse a SKU into base and French color.
+ * Parse a SKU into base and color-code suffix. Used for PSIN-fallback grouping
+ * (getGroupKey) only — NOT for color translation, see translateColor() below.
  * Algorithm: check last 2 chars against COLOR_MAP. If match and base >= 3 chars, split.
  */
 export function parseSku(sku: string): { base: string; colorCode: string | null; color: string | null } {
@@ -46,6 +49,12 @@ export function parseSku(sku: string): { base: string; colorCode: string | null;
     return { base: sku.slice(0, -2), colorCode: suffix, color: COLOR_MAP[suffix] };
   }
   return { base: sku, colorCode: null, color: null };
+}
+
+export function translateColor(rawColor: string): string {
+  // Phrase + compound translation lives in colour-names.ts (2026-09-30: the 25-entry map
+  // left 300+ variants in English on the FR store — "Yellow", "Oak", "Rustic Brown"…).
+  return toFrenchColour(rawColor);
 }
 
 // Color words for title stripping (FR + EN)
@@ -125,18 +134,58 @@ export function mergeVariants(products: AosomProduct[]): AosomMergedProduct[] {
   return merged;
 }
 
+/**
+ * Import-path guard: keep ONE row per (group, colour, size).
+ *
+ * Aosom sometimes lists the same chair twice under one PSIN with different SKUs (835-483BK and
+ * 835-483V03BK: both "Noir / Set of 4", different photos and price). Merged as-is they collide on
+ * the Couleur/Taille pair, and shopify-client's last-resort label de-collision invents a fake size
+ * ("Lot de 4 2") — a variant no shopper can tell apart from "Lot de 4". The duplicates are not
+ * variants, they are alternate listings of one, so the extras are dropped BEFORE merging and
+ * reported to the caller. Preferred survivor: in stock, then cheapest, then feed order.
+ * Import only — never run inside mergeVariants, which the daily sync also uses for products that
+ * already exist on Shopify with their duplicate SKUs attached.
+ */
+export function dropDuplicateOptionListings(products: AosomProduct[]): {
+  kept: AosomProduct[];
+  dropped: Array<{ sku: string; keptSku: string }>;
+} {
+  const best = new Map<string, AosomProduct>();
+  const order: string[] = [];
+  const dropped: Array<{ sku: string; keptSku: string }> = [];
+  const rank = (p: AosomProduct) => [p.qty > 0 ? 0 : 1, p.price] as const;
+
+  for (const p of products) {
+    const sig = `${getGroupKey(p)}|${translateColor(p.color).toLowerCase().trim()}|${(p.size ?? "").toLowerCase().trim()}`;
+    const cur = best.get(sig);
+    if (!cur) {
+      best.set(sig, p);
+      order.push(sig);
+      continue;
+    }
+    const [a0, a1] = rank(p);
+    const [b0, b1] = rank(cur);
+    if (a0 < b0 || (a0 === b0 && a1 < b1)) {
+      dropped.push({ sku: cur.sku, keptSku: p.sku });
+      best.set(sig, p);
+    } else {
+      dropped.push({ sku: p.sku, keptSku: cur.sku });
+    }
+  }
+  return { kept: order.map((s) => best.get(s)!), dropped };
+}
+
 function toVariant(p: AosomProduct): AosomVariant {
-  // Use French color name from COLOR_MAP if available
-  const { color: frColor } = parseSku(p.sku);
   return {
     sku: p.sku,
     price: p.price,
     qty: p.qty,
-    color: frColor || p.color,
+    color: translateColor(p.color),
     size: p.size,
     gtin: p.gtin,
     weight: p.weight,
     dimensions: p.dimensions,
+    ...(p.dimensionsRaw ? { dimensionsRaw: p.dimensionsRaw } : {}),
     images: p.images,
     estimatedArrival: p.estimatedArrival,
     outOfStockExpected: p.outOfStockExpected,
@@ -352,4 +401,54 @@ export async function selectProductImagesAsync(
     .sort((a, b) => KIND_RANK[a.c.kind] - KIND_RANK[b.c.kind] || a.i - b.i)
     .map(({ c }) => c.url);
   return ordered.slice(0, MAX_IMAGES_PER_PRODUCT);
+}
+
+/** Ceiling once every colour's own photo is guaranteed (Shopify allows 250; keep pages light). */
+export const MAX_IMAGES_WITH_VARIANT_PHOTOS = 16;
+
+/**
+ * The curated gallery is capped at MAX_IMAGES_PER_PRODUCT across ALL variants, so a product in
+ * 4 colours kept only the first colour's photos and the others had none on the page (audit
+ * 2026-09-30: ~716 colours on 419 products). Append each variant's own primary photo when the
+ * curation dropped it, so every colour can have its photo attached at creation. One photo per
+ * distinct colour is enough (sizes of the same colour share it).
+ */
+export function ensureVariantPrimaryImages(curated: string[], variants: AosomVariant[]): string[] {
+  const out = [...curated];
+  // A colour's own photo must be EXCLUSIVE to it: a photo Aosom lists under several colours (lifestyle shot,
+  // infographic) used to count as "already in the gallery" and the colour ended up showing another colour (2026-10-18).
+  const colourKey = (v: AosomVariant) => (v.color || v.sku).trim().toLowerCase();
+  const sources: ColourSource[] = [];
+  for (const v of variants) {
+    const k = colourKey(v);
+    const s = sources.find((x) => x.colour === k);
+    if (s) s.images.push(...v.images);
+    else sources.push({ colour: k, images: [...v.images] });
+  }
+  const excl = exclusiveImages(sources);
+  const outKeys = () => new Set(out.map(imageKey));
+  for (const s of sources) {
+    const own = (excl.get(s.colour) ?? []).filter((url) => {
+      const dim = smallestUrlDimension(url);
+      return dim === null || dim >= MIN_IMAGE_PX;
+    });
+    if (own.length === 0 || own.some((u) => outKeys().has(imageKey(u)))) continue;
+    if (out.length >= MAX_IMAGES_WITH_VARIANT_PHOTOS) break;
+    out.push(own[0]);
+  }
+  return out;
+}
+
+/**
+ * For each variant, the index in `gallery` of its own photo (first of its images present in
+ * the gallery), or -1. Used to attach a photo to every colour at product creation.
+ */
+export function variantImageIndexes(gallery: string[], variants: AosomVariant[]): number[] {
+  return variants.map((v) => {
+    for (const url of v.images) {
+      const i = gallery.indexOf(url);
+      if (i >= 0) return i;
+    }
+    return -1;
+  });
 }

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 
 interface ErroredImportJob { id: string; groupKey: string; sku: string | null; error: string | null; updatedAt: string; }
+interface NeedsReviewImportJob { id: string; groupKey: string; sku: string | null; stage: "pre" | "post" | "unknown"; failures: string[]; shopifyId: string | null; updatedAt: string; }
 interface FeedSync { feedType: string; lastSuccessAt: number | null; itemCount: number | null; lastStatus: string | null; }
 interface MetaToken { configured: boolean; state?: string; daysLeft?: number | null; expiresAt?: number; }
 interface PriceFloorItem { sku: string; shopify_price: number; aosom_price: number; gap: number; corrected_price?: number; status?: "corrected" | "failed"; error?: string; }
@@ -10,13 +11,17 @@ interface PriceFloor { belowFloorCount: number; total: number; corrected: number
 interface LlmPool { pool: "assistant" | "batch"; state: "ok" | "warning" | "exhausted"; used: number; budget: number; pct: number; }
 interface Alerts {
   erroredImportJobs: ErroredImportJob[];
+  needsReviewImportJobs: NeedsReviewImportJob[];
   staleDraftCount: number;
   feeds: FeedSync[];
   metaToken: MetaToken;
   priceFloor: PriceFloor | null;
   /** Absent on an older deploy, or [] when the budget store was unreachable. */
   llmPools?: LlmPool[];
+  /** Daily guard verdicts (lib/guard-status.ts) — same source as the morning report. */
+  guards?: Guard[];
 }
+interface Guard { key: string; label: string; state: "red" | "green" | "unknown"; summary: string; reasons: string[]; checkedAt: number | null; }
 
 const FEED_LABELS: Record<string, string> = {
   google: "Google", meta: "Meta (JSON)", meta_xml: "Meta (XML)", pinterest: "Pinterest", pinterest_en: "Pinterest (EN)",
@@ -88,10 +93,12 @@ export function AlertsPanel() {
   const pressuredPools = (data.llmPools ?? [])
     .filter((p) => p.state !== "ok")
     .sort((a, b) => (a.state === b.state ? 0 : a.state === "exhausted" ? -1 : 1));
+  const guards = data.guards ?? [];
+  const redGuards = guards.filter((g) => g.state === "red");
   // Failed corrections (or an un-broken-down legacy backlog) are alerts; auto-corrected ones are good news.
-  const hasAlerts = data.erroredImportJobs.length > 0 || data.staleDraftCount > 0 || tokenAlert ||
+  const hasAlerts = data.erroredImportJobs.length > 0 || data.needsReviewImportJobs.length > 0 || data.staleDraftCount > 0 || tokenAlert ||
     floorFailed > 0 || floorLegacy || data.feeds.some((f) => f.lastStatus === "error") ||
-    pressuredPools.length > 0;
+    pressuredPools.length > 0 || redGuards.length > 0;
   const floorAuditedAt = data.priceFloor?.auditedAt;
   const floorAge = floorAuditedAt ? ` · ${timeAgoEpoch(floorAuditedAt)}` : "";
 
@@ -101,6 +108,35 @@ export function AlertsPanel() {
       <div className="space-y-3">
         {!hasAlerts && (
           <Row tone="ok" title="Tout va bien" detail="Aucune alerte critique détectée." />
+        )}
+
+        {/* Daily guards (price floor, catalog, images, ad feeds) — red ones first, in full. */}
+        {redGuards.map((g) => (
+          <Row
+            key={g.key}
+            tone="error"
+            title={`Garde-fou en alerte — ${g.label}`}
+            detail={g.reasons.join(" · ") + (g.checkedAt ? ` · vérifié ${timeAgoEpoch(g.checkedAt)}` : "")}
+          />
+        ))}
+        {guards.length > 0 && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+            <div className="px-4 py-2 text-xs font-medium text-gray-400 border-b border-gray-800/60">Garde-fous quotidiens</div>
+            <ul className="divide-y divide-gray-800/50">
+              {guards.map((g) => (
+                <li key={g.key} className="flex items-center justify-between gap-3 px-4 py-2 text-sm">
+                  <span className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${g.state === "red" ? "bg-red-400" : g.state === "green" ? "bg-green-400" : "bg-gray-600"}`} />
+                    <span className="text-gray-300">{g.label}</span>
+                  </span>
+                  <span className="text-gray-500 shrink-0 text-right">
+                    {g.state === "red" ? <span className="text-red-400">en alerte</span> : g.summary}
+                    {g.checkedAt ? ` · ${timeAgoEpoch(g.checkedAt)}` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
 
         {/* LLM daily budget pressure — warns at 80% so there is room to act before the
@@ -134,6 +170,28 @@ export function AlertsPanel() {
                 <li key={j.id} className="px-4 py-2 text-xs text-gray-400">
                   <span className="text-gray-300">{j.sku || j.groupKey}</span>
                   {j.error ? <span className="text-red-400/80"> — {j.error}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Import jobs a quality gate flagged (clean image / French / no brand leak) —
+            amber, not red: these are automatically pulled back or never pushed, not a
+            hard failure needing urgent attention, but worth a look. */}
+        {data.needsReviewImportJobs.length > 0 && (
+          <div className="bg-amber-950/20 border border-amber-800/40 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 text-sm font-medium text-amber-300">
+              {data.needsReviewImportJobs.length} produit{data.needsReviewImportJobs.length > 1 ? "s" : ""} à réviser (contrôle qualité)
+            </div>
+            <ul className="divide-y divide-amber-900/30">
+              {data.needsReviewImportJobs.slice(0, 8).map((j) => (
+                <li key={j.id} className="px-4 py-2 text-xs text-gray-400">
+                  <span className="text-gray-300">{j.sku || j.groupKey}</span>
+                  <span className="text-amber-400/80">
+                    {" "}— {j.stage === "post" ? "dépublié après coup" : "non publié"}
+                    {j.failures.length > 0 ? ` (${j.failures.join(", ")})` : ""}
+                  </span>
                 </li>
               ))}
             </ul>

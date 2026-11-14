@@ -65,8 +65,12 @@ next-env.d.ts
 .env*.local
 
 # Claude Code — agent worktrees + scratch (e.g. .claude/worktrees/ created by other
-# sessions). Not project config to commit.
-.claude/
+# sessions). Not project config to commit. Exception: .claude/agents/ holds custom
+# subagent definitions (tool-restricted, e.g. read-only-investigator.md) meant to be
+# shared project config, not per-session scratch — tracked deliberately.
+.claude/*
+!.claude/agents/
+!.claude/agents/**
 # build output (root /out/ is covered above; this also catches nested out/ dirs)
 out/
 
@@ -104,3 +108,15 @@ coverage/
 
 # pos-1 image audit scratch (checkpoint + HTML/CSV report)
 /.tmp-imgaudit/
+# One-off agent scripts / investigation dirs dropped at the repo root (.tmp-*.mjs, .tmp-invest/).
+# 45 had piled up in the main clone by 2026-09-27; they were archived outside the repo.
+/.tmp-*
+/.ameublo-scene-*
+
+# ── Halloween ad tooling (scripts/halloween-ads): source clips, renders and scratch live outside git ──
+/scripts/halloween-ads/src/
+/scripts/halloween-ads/work/
+/scripts/halloween-ads/out/
+
+# Blog audit reports + article backups (contain full article bodies)
+/scripts/blog-reports/

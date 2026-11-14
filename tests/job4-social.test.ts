@@ -13,7 +13,7 @@ vi.mock("@/lib/content-generator", () => ({
 
 vi.mock("@/lib/database", () => ({
   getAllSettings: vi.fn(),
-  getEligibleHighlightCandidates: vi.fn(),
+  getEligibleHighlightCandidatesTrendAware: vi.fn(),
   getPendingSocialCandidates: vi.fn(),
   createFacebookDraft: vi.fn(),
   markProductPosted: vi.fn(),
@@ -44,7 +44,7 @@ vi.mock("@/lib/social-publisher", () => ({
 
 import {
   getAllSettings,
-  getEligibleHighlightCandidates,
+  getEligibleHighlightCandidatesTrendAware,
   getPendingSocialCandidates,
   getProduct,
   createFacebookDraft,
@@ -105,7 +105,7 @@ describe("raw lifestyle image", () => {
       prompt_price_drop_fr: "Baisse {product_name}",
       prompt_price_drop_en: "Drop {product_name}",
     });
-    vi.mocked(getEligibleHighlightCandidates).mockResolvedValue([PRODUCT] as never);
+    vi.mocked(getEligibleHighlightCandidatesTrendAware).mockResolvedValue([PRODUCT] as never);
     vi.mocked(getProduct).mockResolvedValue(PRODUCT as never);
     vi.mocked(createFacebookDraft).mockResolvedValue(DRAFT_ID);
     vi.mocked(markProductPosted).mockResolvedValue(undefined);
@@ -157,7 +157,7 @@ describe("generateSocialBatch — pending sweep before highlights", () => {
       prompt_price_drop_en: "Drop EN {product_name}",
     });
     vi.mocked(getProduct).mockResolvedValue(PRODUCT as never);
-    vi.mocked(getEligibleHighlightCandidates).mockResolvedValue([PRODUCT] as never);
+    vi.mocked(getEligibleHighlightCandidatesTrendAware).mockResolvedValue([PRODUCT] as never);
     vi.mocked(createFacebookDraft).mockResolvedValue(DRAFT_ID);
     vi.mocked(markProductPosted).mockResolvedValue(undefined);
     vi.mocked(resolveLifestyle).mockResolvedValue({ ...LIFESTYLE_VERIFIED });
@@ -198,7 +198,7 @@ describe("triggerStockHighlight — Anthropic timeout handling", () => {
     vi.resetAllMocks();
 
     vi.mocked(getAllSettings).mockResolvedValue(SETTINGS);
-    vi.mocked(getEligibleHighlightCandidates).mockResolvedValue([PRODUCT] as never);
+    vi.mocked(getEligibleHighlightCandidatesTrendAware).mockResolvedValue([PRODUCT] as never);
     vi.mocked(createFacebookDraft).mockResolvedValue(DRAFT_ID);
     vi.mocked(markProductPosted).mockResolvedValue(undefined);
     vi.mocked(resolveLifestyle).mockResolvedValue({ ...LIFESTYLE_VERIFIED });
@@ -223,6 +223,34 @@ describe("triggerStockHighlight — Anthropic timeout handling", () => {
     expect(createFacebookDraft).toHaveBeenCalledOnce();
     expect(markProductPosted).toHaveBeenCalledWith("TEST-001");
     expect(mockCreate).toHaveBeenCalledTimes(2);
+  });
+
+  // Regression: hashtags used to come from a single global setting
+  // (#jardinage #patio #mobilierexterieur, patio-themed) slapped on every post
+  // regardless of category — e.g. a bathroom cabinet post tagged #jardinage.
+  // They're now derived from the product's scope (see hook-selector.ts).
+  it("uses hashtags scoped to the product's category, not the global patio default", async () => {
+    vi.mocked(getAllSettings).mockResolvedValue({
+      ...SETTINGS,
+      prompt_highlight_fr: "Post FR pour {product_name}. Hashtags: {hashtags}",
+      prompt_highlight_en: "Post EN for {product_name}. Hashtags: {hashtags}",
+    });
+    vi.mocked(getEligibleHighlightCandidatesTrendAware).mockResolvedValue([
+      { ...PRODUCT, product_type: "Home Furnishings > Holiday & Seasonal > Halloween Decorations" },
+    ] as never);
+    mockCreate
+      .mockResolvedValueOnce(makeMsg("Texte FR"))
+      .mockResolvedValueOnce(makeMsg("EN text"));
+
+    await triggerStockHighlight();
+
+    const frPrompt = mockCreate.mock.calls[0][0].messages[0].content as string;
+    const enPrompt = mockCreate.mock.calls[1][0].messages[0].content as string;
+    expect(frPrompt).toContain("#halloween");
+    expect(frPrompt).not.toContain("#jardinage");
+    expect(frPrompt).not.toContain("#mobilierexterieur");
+    expect(enPrompt).toContain("#halloween");
+    expect(enPrompt).not.toContain("#patio");
   });
 
   // ── Scenarios 2 + 3: retry delay is 10ms in test env (NODE_ENV=test) ──

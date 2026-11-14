@@ -1,47 +1,49 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// config is read at module load via content-generator; mock it (no real env needed).
+// The assistant runs on Gemini since 2026-10-02 (gemini-client.ts). Mock config (no env).
 vi.mock("@/lib/config", () => ({
-  env: { anthropicApiKey: "test-key" },
-  CLAUDE: {
-    MODEL_ASSISTANT: "claude-haiku-4-5-20251001",
-    MODEL: "claude-sonnet-4-6",
-    MODEL_BATCH: "claude-haiku-4-5",
-    MAX_TOKENS_CONTENT: 1000,
-    MAX_TOKENS_SOCIAL: 500,
-  },
+  env: { geminiApiKey: "test-key" },
+  GEMINI: { MODEL_ASSISTANT: "gemini-3.5-flash-lite", MODEL_VIDEO_QC: "gemini-3.5-flash-lite" },
 }));
 
+// geminiGenerate wraps the HTTP call with the daily-budget guard; delegate to `create` so these
+// tests exercise the tool loop, not the budget bookkeeping. create.mock.calls[n][0] = params.
 const { create } = vi.hoisted(() => ({ create: vi.fn() }));
-vi.mock("@anthropic-ai/sdk", () => ({ default: class { messages = { create }; } }));
-
-// budgetedCreate wraps client.messages.create with the daily-budget guard; delegate to the
-// mocked create so these tests exercise the tool loop, not the budget bookkeeping.
-vi.mock("@/lib/llm-budget", () => ({
-  budgetedCreate: (client: { messages: { create: typeof create } }, params: unknown) => client.messages.create(params),
-}));
+vi.mock("@/lib/gemini-client", () => ({ geminiGenerate: (params: unknown) => create(params) }));
 
 const getProducts = vi.fn();
-vi.mock("@/lib/database", () => ({ getProducts }));
+const getComplementaryProducts = vi.fn();
+const getComplementaryCandidates = vi.fn();
+const getProduct = vi.fn();
+vi.mock("@/lib/database", () => ({ getProducts, getProduct, getComplementaryProducts, getComplementaryCandidates }));
 
 // FR-title resolution calls shopifyFetch(/graphql.json). Mock it; default = no match
 // (so cards fall back to the catalog name unless a test opts into FR titles).
 const shopifyFetch = vi.fn();
 vi.mock("@/lib/shopify-client", () => ({ shopifyFetch }));
 
-const { runAssistant, runComplementary } = await import("@/lib/assistant");
+const { runAssistant, runComplementary, pickComplementary, stripMarkdown, resetSearchCache } = await import("@/lib/assistant");
 
 const prod = (over: Partial<Record<string, unknown>> = {}) => ({
   sku: "A-1", name: "Sofa sectionnel", price: 499, qty: 5, color: "Gris",
   product_type: "Sofas", image1: "https://img/1.jpg",
   shopify_product_id: "111", shopify_handle: "sofa-sectionnel-gris", ...over,
 });
-const toolUse = (input: unknown) => ({ stop_reason: "tool_use", content: [{ type: "tool_use", id: "t1", name: "search_catalog", input }] });
-const final = (obj: unknown) => ({ stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(obj) }] });
+const toolUse = (input: unknown, name = "search_catalog") => ({
+  functionCalls: [{ name, args: input, id: "t1" }],
+  content: { role: "model", parts: [{ functionCall: { name, args: input, id: "t1" }, thoughtSignature: "sig" }] },
+  text: "",
+});
+const textReply = (text: string) => ({ functionCalls: [], content: { role: "model", parts: [{ text }] }, text });
+const final = (obj: unknown) => textReply(JSON.stringify(obj));
+type Turn = { role: string; parts: Array<{ text?: string; functionResponse?: { response: { result: unknown } } }> };
 
 beforeEach(() => {
+  resetSearchCache();
   create.mockReset();
+  getComplementaryCandidates.mockReset().mockResolvedValue([]);
   getProducts.mockReset().mockResolvedValue({ products: [prod()], total: 1, productTypes: [] });
+  getComplementaryProducts.mockReset().mockResolvedValue([]);
   // default: FR-title lookup returns no nodes -> cards fall back to the catalog name
   shopifyFetch.mockReset().mockResolvedValue({ ok: true, json: async () => ({ data: { products: { nodes: [] } } }) });
 });
@@ -63,13 +65,13 @@ describe("runAssistant", () => {
     expect(create).toHaveBeenCalledTimes(2);
   });
 
-  it("sends every turn on the assistant model, never the Sonnet escalation tier", async () => {
-    // The saving is only real if EVERY call in the loop uses MODEL_ASSISTANT — a tool-use
-    // turn left on Sonnet would keep most of the cost, since the loop runs up to MAX_STEPS.
-    create.mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+  it("sends every turn on the Gemini assistant model", async () => {
+    // The saving is only real if EVERY call in the loop uses GEMINI.MODEL_ASSISTANT.
+    create.mockResolvedValueOnce(toolUse({ query: "table" })).mockResolvedValueOnce(final({ reply: "ok", products: [] }));
     await runAssistant({ message: "une table", locale: "fr" });
+    expect(create).toHaveBeenCalledTimes(2);
     for (const call of create.mock.calls) {
-      expect(call[0].model).toBe("claude-haiku-4-5-20251001");
+      expect(call[0].model).toBe("gemini-3.5-flash-lite");
     }
   });
 
@@ -84,10 +86,10 @@ describe("runAssistant", () => {
         { role: "user", content: "j'ai un budget de 500$" },
       ],
     });
-    const sentMessages = create.mock.calls[0][0].messages as Array<{ role: string; content: unknown }>;
-    // history turns must precede the latest user message, in order.
-    const textOf = (m: { content: unknown }) => (typeof m.content === "string" ? m.content : "");
-    expect(sentMessages.map(textOf)).toEqual([
+    const sent = create.mock.calls[0][0].contents as Turn[];
+    // history turns must precede the latest user message, in order; assistant turns are "model".
+    expect(sent.map((m) => m.role)).toEqual(["user", "model", "user", "user"]);
+    expect(sent.map((m) => m.parts[0].text)).toEqual([
       "je cherche un canapé pour un petit salon",
       "Voici quelques options.",
       "j'ai un budget de 500$",
@@ -98,36 +100,90 @@ describe("runAssistant", () => {
   it("system prompt distinguishes indoor vs outdoor and instructs multi-turn refinement", async () => {
     create.mockResolvedValueOnce(final({ reply: "ok", products: [] }));
     await runAssistant({ message: "un canapé pour mon salon", locale: "fr" });
-    // `system` is a block array since the cache breakpoint was added, not a bare string.
-    const blocks = create.mock.calls[0][0].system as { type: string; text: string }[];
-    const system = blocks.map((b) => b.text).join("\n");
+    const system = create.mock.calls[0][0].systemInstruction as string;
     expect(system).toMatch(/INDOOR vs OUTDOOR/);
     expect(system).toMatch(/patio|outdoor/i);
     expect(system).toMatch(/refine|accumulated|maxPrice/i);
   });
 
-  it("marks the stable prefix as cacheable on every turn of the loop", async () => {
-    // The marker is a no-op on Haiku 4.5 (minimum cacheable prefix is 4096 tokens, ours is
-    // ~1,150) but it must still be present and well-formed: switching the assistant back to
-    // Sonnet 4.6 via CLAUDE_ASSISTANT_MODEL is the supported way to turn caching on, and a
-    // dropped marker would make that switch silently do nothing.
-    create.mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+  it("declares the three tools on every non-final turn and tells the model the catalog is in English", async () => {
+    create.mockResolvedValueOnce(toolUse({ query: "table" })).mockResolvedValueOnce(final({ reply: "ok", products: [] }));
     await runAssistant({ message: "une table", locale: "fr" });
     for (const call of create.mock.calls) {
-      const blocks = call[0].system as { type: string; cache_control?: { type: string } }[];
-      expect(Array.isArray(blocks)).toBe(true);
-      expect(blocks[blocks.length - 1].cache_control).toEqual({ type: "ephemeral" });
+      expect((call[0].tools as Array<{ name: string }>).map((t) => t.name)).toEqual(["search_catalog", "recommend_complementary_products", "get_store_info", "get_product_details"]);
+    }
+    // Gemini searched "sofa gris" verbatim and found nothing (2026-10-02).
+    expect(create.mock.calls[0][0].systemInstruction).toMatch(/indexed in ENGLISH/);
+  });
+
+  it("pushes the model's function-call turn back verbatim (Gemini 3 thought signatures)", async () => {
+    create.mockResolvedValueOnce(toolUse({ query: "sofa" })).mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+    await runAssistant({ message: "canapé", locale: "fr" });
+    const second = create.mock.calls[1][0].contents as Array<{ role: string; parts: Array<Record<string, unknown>> }>;
+    expect(second[1]).toEqual({ role: "model", parts: [{ functionCall: { name: "search_catalog", args: { query: "sofa" }, id: "t1" }, thoughtSignature: "sig" }] });
+    expect(second[2].parts[0].functionResponse).toMatchObject({ name: "search_catalog", id: "t1" });
+  });
+
+  it("relaxes a multi-word search that finds nothing to its single words", async () => {
+    // "grey sofa" → 0 rows in production (the colour is its own column); "sofa" → many.
+    getProducts.mockImplementation(async (f: { search?: string }) =>
+      f.search === "sofa" ? { products: [prod()], total: 1, productTypes: [] } : { products: [], total: 0, productTypes: [] },
+    );
+    create
+      .mockResolvedValueOnce(toolUse({ query: "grey velvet sofa" }))
+      .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
+    const res = await runAssistant({ message: "canapé gris", locale: "fr" });
+    expect(res.products.map((p) => p.sku)).toEqual(["A-1"]);
+    // Colour words are stripped from the text search; the category/colour never hit SQL.
+    const searches = getProducts.mock.calls.map((c) => c[0].search);
+    expect(searches[0]).toBe("velvet sofa");
+    for (const c of getProducts.mock.calls) {
+      expect(c[0].productType).toBeUndefined();
+      expect(c[0].color).toBeUndefined();
     }
   });
 
-  // CHANGED in v0.5.59.3: this asserted `furnishdirect.ca`, which is NXDOMAIN — the test was
-  // locking in a dead link for every EN shopper. EN is the /en locale of the same storefront.
-  it("uses the /en locale path for locale=en", async () => {
+  it("ranks the asked colour first, translating it FR→EN", async () => {
+    getProducts.mockResolvedValue({
+      products: [prod({ sku: "B-1", color: "Black" }), prod({ sku: "G-1", color: "Grey" })],
+      total: 2,
+      productTypes: [],
+    });
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa", color: "Gris" }))
+      .mockResolvedValueOnce(final({ reply: "ok", products: [] }));
+    await runAssistant({ message: "canapé gris", locale: "fr" });
+    const second = create.mock.calls[1][0].contents as Turn[];
+    const result = second[2].parts[0].functionResponse!.response.result as Array<{ sku: string }>;
+    expect(result.map((r) => r.sku)).toEqual(["G-1", "B-1"]);
+  });
+
+  // v0.5.59.3 pinned EN links to ameublodirect.ca/en because furnishdirect.ca was NXDOMAIN. Since 2026-10-25 the
+  // English store IS furnishdirect.ca (ameublodirect.ca/en 301s there), with Spanish and Punjabi at /es and /pa.
+  it("links locale=en cards to furnishdirect.ca", async () => {
     create
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
       .mockResolvedValueOnce(final({ reply: "Here you go.", products: [{ sku: "A-1", reason: "Comfy" }] }));
     const res = await runAssistant({ message: "I need a sofa", locale: "en" });
-    expect(res.products[0].url).toBe("https://ameublodirect.ca/en/products/sofa-sectionnel-gris");
+    expect(res.products[0].url).toBe("https://furnishdirect.ca/products/sofa-sectionnel-gris");
+  });
+
+  it.each([
+    ["es", "https://furnishdirect.ca/es/products/sofa-sectionnel-gris", "Sofá seccional gris", "Spanish"],
+    ["pa", "https://furnishdirect.ca/pa/products/sofa-sectionnel-gris", "ਸਲੇਟੀ ਸੈਕਸ਼ਨਲ ਸੋਫਾ", "Punjabi"],
+  ] as const)("lang=%s: own store path, Shopify-translated title, replies in %s", async (lang, url, title, langName) => {
+    shopifyFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { products: { nodes: [{ handle: "sofa-sectionnel-gris", title: "Canapé sectionnel gris", status: "ACTIVE", onlineStoreUrl: "https://x", tr: [{ key: "title", value: title }] }] } } }),
+    });
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
+    const res = await runAssistant({ message: "sofa", lang });
+    expect(res.products[0].url).toBe(url);
+    expect(res.products[0].name).toBe(title);
+    expect(String(create.mock.calls[0][0].systemInstruction)).toContain(langName);
+    expect(String(shopifyFetch.mock.calls.at(-1)?.[1]?.body)).toContain(`translations(locale: \\"${lang}\\")`);
   });
 
   it("swaps the raw EN catalog name for the curated Shopify FR title on locale=fr", async () => {
@@ -155,7 +211,9 @@ describe("runAssistant", () => {
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
       .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
     const res = await runAssistant({ message: "I need a sofa", locale: "en" });
-    expect(shopifyFetch).toHaveBeenCalledTimes(1);
+    // Twice since 2026-10-02: search results are live-checked before the model sees them,
+    // and the final cards once more (FR title + a product unpublished in between).
+    expect(shopifyFetch).toHaveBeenCalledTimes(2);
     expect(res.products[0].name).toBe("Sofa sectionnel"); // NOT the FR title
   });
 
@@ -185,6 +243,84 @@ describe("runAssistant", () => {
     expect(res.products).toHaveLength(0);
   });
 
+  it("withholds the tools on the last step so the model has to answer", async () => {
+    // Gemini kept searching through all 3 steps and shoppers got the salvage reply (2026-10-02).
+    create.mockResolvedValue(toolUse({ query: "sofa" }));
+    await runAssistant({ message: "canapé", locale: "fr" });
+    expect(create).toHaveBeenCalledTimes(5);
+    expect(create.mock.calls[0][0].tools).toHaveLength(4);
+    expect(create.mock.calls[4][0].tools).toBeUndefined();
+    expect(create.mock.calls[4][0].systemInstruction).toMatch(/NO MORE SEARCHES/);
+  });
+
+  it("get_product_details reads the live page of a product from the pool, never an unknown sku", async () => {
+    shopifyFetch.mockImplementation(async (url: string) =>
+      url.startsWith("/products.json")
+        ? { ok: true, json: async () => ({ products: [{ id: 9, title: "Sofa gris", body_html: "<p>Largeur : 84 po</p>", options: [{ name: "Couleur", values: ["Gris"] }], variants: [{ title: "Gris", price: "499.00" }] }] }) }
+        : { ok: true, json: async () => ({ data: { products: { nodes: [] } } }) },
+    );
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(toolUse({ sku: "A-1" }, "get_product_details"))
+      .mockResolvedValueOnce(final({ reply: "Il fait 84 po.", products: [{ sku: "A-1", reason: "x" }] }));
+    await runAssistant({ message: "un sofa pour un mur de 9 pi", locale: "fr" });
+    const third = create.mock.calls[2][0].contents as Turn[];
+    const details = third[4].parts[0].functionResponse!.response.result as { description: string; options: string[] };
+    expect(details.description).toContain("84 po");
+    expect(details.options).toEqual(["Couleur: Gris"]);
+    expect(shopifyFetch.mock.calls.some((c) => String(c[0]).includes("handle=sofa-sectionnel-gris"))).toBe(true);
+  });
+
+  it("adds the server-computed total under a room-in-a-budget answer", async () => {
+    getProducts.mockResolvedValue({
+      products: [prod({ sku: "S-1", price: 400 }), prod({ sku: "T-1", price: 99.5, shopify_handle: "table" })],
+      total: 2,
+      productTypes: [],
+    });
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(final({ reply: "Voici votre salon.", products: [{ sku: "S-1", reason: "" }, { sku: "T-1", reason: "" }] }));
+    const res = await runAssistant({ message: "un salon complet pour 1200$", locale: "fr" });
+    // fr-CA formatting uses (narrow) no-break spaces, which \s matches.
+    expect(res.reply).toMatch(/\nTotal : 499,50\s\$ \(budget : 1\s200,00\s\$\)$/);
+  });
+
+  it("answers a policy question from get_store_info and keeps the reply even with no products", async () => {
+    create
+      .mockResolvedValueOnce(toolUse({ question: "délai de retour" }, "get_store_info"))
+      .mockResolvedValueOnce(final({ reply: "Vous avez 30 jours pour retourner un article.", products: [], flag: null }));
+    const res = await runAssistant({ message: "Je peux retourner un article?", locale: "fr" });
+    expect(res.reply).toBe("Vous avez 30 jours pour retourner un article.");
+    expect(res.products).toEqual([]);
+    expect(getProducts).not.toHaveBeenCalled();
+  });
+
+  it("reports tokens and the model's abuse flag in meta (stripped by the route)", async () => {
+    create.mockResolvedValueOnce({ ...final({ reply: "Je ne peux pas faire ça.", products: [], flag: "off_topic" }), usage: { totalTokenCount: 1234 } });
+    const res = await runAssistant({ message: "écris-moi un poème", locale: "fr" });
+    expect(res.meta).toEqual({ tokens: 1234, flag: "off_topic" });
+  });
+
+  it("names the persona per locale", async () => {
+    create.mockResolvedValue(final({ reply: "ok", products: [] }));
+    await runAssistant({ message: "allo", locale: "fr" });
+    await runAssistant({ message: "hi", locale: "en" });
+    expect(create.mock.calls[0][0].systemInstruction).toMatch(/You are Ameublo, .* Ameublo Direct/);
+    expect(create.mock.calls[1][0].systemInstruction).toMatch(/You are Furni, .* Furnish Direct/);
+  });
+
+  it("falls back from a 3-word phrase to 2-word sub-phrases before single words", async () => {
+    getProducts.mockImplementation(async (f: { search?: string }) =>
+      f.search === "fire pit" ? { products: [prod()], total: 1, productTypes: [] } : { products: [], total: 0, productTypes: [] },
+    );
+    create
+      .mockResolvedValueOnce(toolUse({ query: "outdoor fire pit" }))
+      .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
+    await runAssistant({ message: "foyer extérieur", locale: "fr" });
+    const searches = [...new Set(getProducts.mock.calls.map((c) => c[0].search))];
+    expect(searches).toEqual(["outdoor fire pit", "fire pit"]);
+  });
+
   it("falls back gracefully when the model never emits final JSON", async () => {
     // Every step returns tool_use → loop exhausts MAX_STEPS without a final answer.
     create.mockResolvedValue(toolUse({ query: "sofa" }));
@@ -197,7 +333,7 @@ describe("runAssistant", () => {
   it("handles a non-JSON final answer without throwing", async () => {
     create
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
-      .mockResolvedValueOnce({ stop_reason: "end_turn", content: [{ type: "text", text: "désolé, je ne peux pas" }] });
+      .mockResolvedValueOnce(textReply("désolé, je ne peux pas"));
     const res = await runAssistant({ message: "canapé", locale: "fr" });
     expect(res.products).toHaveLength(0);
     expect(typeof res.reply).toBe("string");
@@ -208,28 +344,90 @@ describe("runAssistant", () => {
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
       .mockResolvedValueOnce(final({ reply: "ok", products: [{ sku: "A-1", reason: "x" }] }));
     await runAssistant({ message: "canapé", locale: "fr" });
-    // The tool_result handed back to the model must NOT leak internal fields (handle/image).
-    const secondCallMessages = create.mock.calls[1][0].messages as Array<{ role: string; content: unknown }>;
-    const toolResultMsg = secondCallMessages.find((m) => m.role === "user" && Array.isArray(m.content));
-    const payload = JSON.parse(((toolResultMsg!.content as Array<{ content: string }>)[0]).content);
+    // The function response handed back to the model must NOT leak internal fields (handle/image).
+    const second = create.mock.calls[1][0].contents as Turn[];
+    const toolTurn = second.find((m) => m.role === "user" && m.parts[0].functionResponse);
+    const payload = toolTurn!.parts[0].functionResponse!.response.result as Array<Record<string, unknown>>;
     expect(payload[0]).toHaveProperty("sku");
     expect(payload[0]).not.toHaveProperty("handle");
     expect(payload[0]).not.toHaveProperty("image");
   });
+
+  it("routes a recommend_complementary_products tool call to getComplementaryProducts, not getProducts", async () => {
+    getComplementaryProducts.mockResolvedValueOnce([
+      { sku: "RUG-1", name: "Tapis gris", price: 89, qty: 3, image1: "https://img/rug.jpg", shopify_handle: "tapis-gris", product_type: "Area Rugs", color: "Gris" },
+    ]);
+    create
+      .mockResolvedValueOnce(toolUse({ baseSku: "A-1", productType: "Area Rugs" }, "recommend_complementary_products"))
+      .mockResolvedValueOnce(final({ reply: "Pour compléter votre salon :", products: [{ sku: "RUG-1", reason: "S'agence avec le gris" }] }));
+
+    const res = await runAssistant({ message: "je prends le canapé A-1", locale: "fr" });
+
+    expect(getComplementaryProducts).toHaveBeenCalledWith(
+      expect.objectContaining({ excludeSku: "A-1", productType: "Area Rugs" }),
+    );
+    expect(getProducts).not.toHaveBeenCalled();
+    expect(res.products).toHaveLength(1);
+    expect(res.products[0]).toMatchObject({ sku: "RUG-1", reason: "S'agence avec le gris" });
+  });
 });
 
-describe("runComplementary", () => {
-  it("seeds a complementary-products request and returns cards", async () => {
-    create
-      .mockResolvedValueOnce(toolUse({ query: "coffee table" }))
-      .mockResolvedValueOnce(final({ reply: "Pour compléter :", products: [{ sku: "A-1", reason: "S'agence bien" }] }));
-    const res = await runComplementary({ name: "Canapé gris", productType: "Sofas", locale: "fr" });
-    expect(res.products).toHaveLength(1);
-    // The seed (first user message, index 0 since there's no history) should mention
-    // complementary intent. NB: the messages array is mutated in place during the tool
-    // loop, so only index 0 is stable — the tail holds later tool-result blocks.
-    const firstMessages = create.mock.calls[0][0].messages;
-    expect(firstMessages[0].content).toMatch(/complémentaires/i);
+describe("stripMarkdown (the widget renders textContent)", () => {
+  it("turns Markdown links and bold into plain text", () => {
+    expect(stripMarkdown("Voir notre [politique de retour](https://ameublodirect.ca/pages/politique-de-retour)."))
+      .toBe("Voir notre politique de retour : https://ameublodirect.ca/pages/politique-de-retour.");
+    expect(stripMarkdown("C'est **gratuit**.")).toBe("C'est gratuit.");
+    expect(stripMarkdown("Rien à changer : https://x.ca")).toBe("Rien à changer : https://x.ca");
+  });
+});
+
+describe("runComplementary (no LLM since 2026-10-02)", () => {
+  const row = (sku: string, type: string) => ({
+    sku, name: sku, price: 50, qty: 3, image1: "https://img/x.jpg", shopify_handle: `h-${sku}`, product_type: type, color: "",
+  });
+  const L = "Home Furnishings > Living Room Furniture";
+
+  it("never calls the model and fills 3 cards from different categories of the same room", async () => {
+    getComplementaryCandidates.mockResolvedValue([
+      row("CT-1", `${L} > Coffee Tables`), row("CT-2", `${L} > Coffee Tables`),
+      row("RUG-1", `${L} > Area Rugs`), row("TV-1", `${L} > TV Stands`), row("LMP-1", `${L} > Floor Lamps`),
+    ]);
+    const res = await runComplementary({ name: "Canapé gris", productType: `${L} > Sofas`, locale: "fr" });
+    expect(create).not.toHaveBeenCalled();
+    expect(res.products).toHaveLength(3);
+    const types = res.products.map((p) => p.sku.split("-")[0]);
+    expect(new Set(types).size).toBe(3);
+    expect(res.reply).toBe("");
+    expect(getComplementaryCandidates).toHaveBeenCalledWith({ scope: L, exclude: `${L} > Sofas`, limit: 80 });
+  });
+
+  it("drops candidates of the same kind even under a differently named leaf", async () => {
+    getComplementaryCandidates.mockResolvedValue([
+      row("S-1", `${L} > Sofas & Reclining Chairs`), row("S-2", `${L} > 2-Seater Sofas`),
+      row("CT-1", `${L} > Coffee Tables`),
+    ]);
+    const res = await runComplementary({ name: "Canapé", productType: `${L} > Sofas`, locale: "fr" });
+    expect(res.products.map((p) => p.sku)).toEqual(["CT-1"]);
+  });
+
+  it("widens from the room to the top-level branch when the room is thin", async () => {
+    getComplementaryCandidates.mockResolvedValueOnce([row("CT-1", `${L} > Coffee Tables`)]).mockResolvedValueOnce([]);
+    await runComplementary({ name: "Canapé", productType: `${L} > Sofas`, locale: "fr" });
+    expect(getComplementaryCandidates.mock.calls.map((c) => c[0].scope)).toEqual([L, "Home Furnishings"]);
+  });
+
+  it("returns nothing for an empty product type", async () => {
+    const res = await runComplementary({ name: "x", productType: "  ", locale: "fr" });
+    expect(res.products).toEqual([]);
+    expect(getComplementaryCandidates).not.toHaveBeenCalled();
+  });
+
+  it("pickComplementary is stable per product and varies across products", () => {
+    const rows = ["A", "B", "C", "D", "E", "F"].map((t) => row(t, `${L} > ${t}`));
+    const a1 = pickComplementary(rows, "produit-1").map((r) => r.sku);
+    expect(pickComplementary(rows, "produit-1").map((r) => r.sku)).toEqual(a1);
+    const others = ["produit-2", "produit-3", "produit-4", "produit-5"].map((s) => pickComplementary(rows, s).map((r) => r.sku).join());
+    expect(others.some((o) => o !== a1.join())).toBe(true);
   });
 });
 
@@ -256,14 +454,14 @@ describe("extractBudget", () => {
   });
 });
 
-describe("EN locale links (regression: furnishdirect.ca is NXDOMAIN)", () => {
-  it("links EN cards to the /en locale path, never furnishdirect.ca", async () => {
+describe("EN locale links", () => {
+  it("links EN cards to furnishdirect.ca, never the retired ameublodirect.ca/en path", async () => {
     create
       .mockResolvedValueOnce(toolUse({ query: "sofa" }))
       .mockResolvedValueOnce(final({ reply: "Here you go.", products: [{ sku: "A-1", reason: "Comfy" }] }));
     const res = await runAssistant({ message: "I need a sofa", locale: "en" });
-    expect(res.products[0].url).toBe("https://ameublodirect.ca/en/products/sofa-sectionnel-gris");
-    expect(res.products[0].url).not.toContain("furnishdirect");
+    expect(res.products[0].url).toBe("https://furnishdirect.ca/products/sofa-sectionnel-gris");
+    expect(res.products[0].url).not.toContain("ameublodirect.ca/en");
   });
 });
 
@@ -300,6 +498,32 @@ describe("draft / unpublished products never reach the shopper", () => {
       .mockResolvedValueOnce(final({ reply: "Voici une option.", products: [{ sku: "A-1", reason: "x" }] }));
     const res = await runAssistant({ message: "canapé", locale: "fr" });
     expect(res.products).toHaveLength(1);
+  });
+});
+
+describe("card price = the live Shopify price (regression: 0,00 $ cards on 2026-10-15)", () => {
+  const live = (amount: string) => ({
+    handle: "sofa-sectionnel-gris", title: "Canapé", status: "ACTIVE", onlineStoreUrl: "https://x",
+    priceRangeV2: { minVariantPrice: { amount } },
+  });
+
+  it("shows the price the product page shows, not the Aosom catalogue price", async () => {
+    shopifyFetch.mockResolvedValue(liveNodes([live("1049.99")]));
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(final({ reply: "Voici une option.", products: [{ sku: "A-1", reason: "x" }] }));
+    const res = await runAssistant({ message: "canapé", locale: "fr" });
+    expect(res.products[0].price).toBe(1049.99);
+  });
+
+  it("drops a card that has neither a live nor a catalogue price", async () => {
+    getProducts.mockResolvedValue({ products: [prod({ price: 0 })], total: 1, productTypes: [] });
+    shopifyFetch.mockResolvedValue(liveNodes([live("0.00")]));
+    create
+      .mockResolvedValueOnce(toolUse({ query: "sofa" }))
+      .mockResolvedValueOnce(final({ reply: "Voici une option.", products: [{ sku: "A-1", reason: "x" }] }));
+    const res = await runAssistant({ message: "canapé", locale: "fr" });
+    expect(res.products).toHaveLength(0);
   });
 });
 
@@ -346,5 +570,40 @@ describe("sanitizeShopperText", () => {
     const { sanitizeShopperText } = await import("@/app/api/assistant/route");
     expect(sanitizeShopperText("Je cherche un canape, budget 800$")).toBe("Je cherche un canape, budget 800$");
     expect(sanitizeShopperText("  terrasse 10x10   pieds  ")).toBe("terrasse 10x10 pieds");
+  });
+});
+
+describe("compactRow (re-sent on every step)", () => {
+  it("sends the leaf category, a capped name, and colour / stock only when informative", async () => {
+    const { compactRow } = await import("@/lib/assistant");
+    expect(compactRow({ sku: "A", name: "x".repeat(120), price: 10, type: "Home Furnishings > Living Room Furniture > Sofas", color: "", inStock: true }))
+      .toEqual({ sku: "A", name: `${"x".repeat(87)}...`, price: 10, type: "Sofas" });
+    expect(compactRow({ sku: "B", name: "n", price: 1, type: "Rugs", color: "Grey", inStock: false }))
+      .toEqual({ sku: "B", name: "n", price: 1, type: "Rugs", color: "Grey", in_stock: false });
+  });
+});
+
+describe("search read budget", () => {
+  const search = (query: string) => ({ ...toolUse({ query }) });
+  const done = final({ reply: "Voici.", products: [{ sku: "A-1", reason: "ok" }] });
+
+  it("caps the relaxation ladder at 3 attempts and enables the LIKE fallback only on the last", async () => {
+    getProducts.mockReset().mockResolvedValue({ products: [], total: -1, productTypes: [] });
+    create.mockResolvedValueOnce(search("grand canape sectionnel gris angle")).mockResolvedValueOnce(done);
+    await runAssistant({ message: "grand canape sectionnel gris angle" });
+    const likeFlags = getProducts.mock.calls.map((c) => c[0].likeFallback);
+    // 3 attempts x (inStock then unfiltered) = 6 calls max
+    expect(getProducts.mock.calls.length).toBeLessThanOrEqual(6);
+    expect(likeFlags.slice(0, 4).every((v) => v === false)).toBe(true);
+    expect(likeFlags.slice(-1)[0]).toBe(true);
+  });
+
+  it("serves a repeated search from the cache without touching the catalog", async () => {
+    create.mockResolvedValueOnce(search("table basse")).mockResolvedValueOnce(done);
+    await runAssistant({ message: "table basse" });
+    const first = getProducts.mock.calls.length;
+    create.mockResolvedValueOnce(search("table basse")).mockResolvedValueOnce(done);
+    await runAssistant({ message: "table basse" });
+    expect(getProducts.mock.calls.length).toBe(first);
   });
 });

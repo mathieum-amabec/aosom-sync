@@ -302,3 +302,17 @@ describe("sanitizeArticleHtml", () => {
     expect(body).toContain("<h2>Un</h2>");
   });
 });
+
+describe("articleProblems — deterministic gate on generated articles", () => {
+  const words = (n: number) => `<p>${"mot ".repeat(n)}</p>`;
+  it("flags a foreign-script glitch as HARD (the real 'гарonie' corruption)", async () => {
+    const { articleProblems } = await import("@/lib/blog-generator");
+    const r = articleProblems({ title: "Un titre", bodyHtml: words(700).replace("mot", "Pour une гарonie parfaite") });
+    expect(r.hard.length).toBe(1);
+  });
+  it("flags a thin article as SOFT, passes a full one", async () => {
+    const { articleProblems } = await import("@/lib/blog-generator");
+    expect(articleProblems({ title: "t", bodyHtml: words(477) }).soft.length).toBe(1);
+    expect(articleProblems({ title: "t", bodyHtml: words(700) })).toEqual({ hard: [], soft: [] });
+  });
+});

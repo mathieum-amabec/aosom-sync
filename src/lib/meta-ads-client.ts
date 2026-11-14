@@ -119,18 +119,6 @@ export interface Campaign {
   created_time?: string;
 }
 
-export interface AdSet {
-  id: string;
-  name: string;
-  status: string;
-  effective_status?: string;
-  daily_budget?: string;
-  lifetime_budget?: string;
-  optimization_goal?: string;
-  billing_event?: string;
-  campaign_id?: string;
-}
-
 export interface CreateCampaignParams {
   name: string;
   /** e.g. OUTCOME_TRAFFIC, OUTCOME_SALES, OUTCOME_AWARENESS. */
@@ -237,19 +225,75 @@ export async function createAdSet(adAccountId: string, params: CreateAdSetParams
   return graph<{ id: string }>(`${actId(adAccountId)}/adsets`, { method: "POST", body });
 }
 
-/** List the ad sets of a campaign. */
-export async function getAdSets(campaignId: string): Promise<AdSet[]> {
-  return graphPaged<AdSet>(`${campaignId}/adsets`, {
-    fields: "id,name,status,effective_status,daily_budget,lifetime_budget,optimization_goal,billing_event,campaign_id",
-  });
-}
-
 /** Account-level insights for a date range (spend, reach, clicks, ROAS, …). */
 export async function getInsights(adAccountId: string, dateRange: DateRange): Promise<InsightsRow[]> {
   return graphPaged<InsightsRow>(`${actId(adAccountId)}/insights`, {
     fields: "spend,reach,impressions,clicks,cpc,cpm,ctr,purchase_roas",
     time_range: JSON.stringify({ since: dateRange.since, until: dateRange.until }),
   });
+}
+
+/** One active campaign's results for a single day, plus its ad sets' learning phase. */
+export interface CampaignDaySummary {
+  id: string;
+  name: string;
+  /** Sum of the ad sets' daily budgets, in the account's minor unit (cents); null if none set. */
+  dailyBudget: number | null;
+  spend: number;
+  impressions: number;
+  linkClicks: number;
+  purchases: number;
+  purchaseValue: number;
+  /** Distinct ad-set learning statuses (e.g. ["LEARNING"], ["SUCCESS"], ["FAIL"]); [] when Meta reports none. */
+  learning: string[];
+}
+
+const PURCHASE_ACTION = "offsite_conversion.fb_pixel_purchase";
+
+function actionValue(list: Array<{ action_type: string; value: string }> | undefined, type: string): number {
+  return Number(list?.find((a) => a.action_type === type)?.value ?? 0);
+}
+
+/**
+ * Per-campaign results for ONE day (YYYY-MM-DD, the ad account's own day) for every ACTIVE
+ * campaign. Read-only: 1 call for campaigns + 2 per campaign (insights, ad sets).
+ */
+export async function getActiveCampaignDaySummaries(adAccountId: string, day: string): Promise<CampaignDaySummary[]> {
+  const campaigns = await getCampaigns(adAccountId);
+  const out: CampaignDaySummary[] = [];
+  for (const c of campaigns) {
+    const [insights, adSets] = await Promise.all([
+      graphPaged<{
+        spend?: string;
+        impressions?: string;
+        inline_link_clicks?: string;
+        actions?: Array<{ action_type: string; value: string }>;
+        action_values?: Array<{ action_type: string; value: string }>;
+      }>(`${c.id}/insights`, {
+        fields: "spend,impressions,inline_link_clicks,actions,action_values",
+        time_range: JSON.stringify({ since: day, until: day }),
+      }),
+      graphPaged<{ effective_status?: string; daily_budget?: string; learning_stage_info?: { status?: string } }>(
+        `${c.id}/adsets`,
+        { fields: "effective_status,daily_budget,learning_stage_info" },
+      ),
+    ]);
+    const row = insights[0];
+    const live = adSets.filter((a) => a.effective_status === "ACTIVE");
+    const budget = live.reduce((s, a) => s + Number(a.daily_budget ?? 0), 0) || Number(c.daily_budget ?? 0);
+    out.push({
+      id: c.id,
+      name: c.name,
+      dailyBudget: budget > 0 ? budget : null,
+      spend: Number(row?.spend ?? 0),
+      impressions: Number(row?.impressions ?? 0),
+      linkClicks: Number(row?.inline_link_clicks ?? 0),
+      purchases: actionValue(row?.actions, PURCHASE_ACTION),
+      purchaseValue: actionValue(row?.action_values, PURCHASE_ACTION),
+      learning: [...new Set(live.map((a) => a.learning_stage_info?.status).filter((s): s is string => !!s))],
+    });
+  }
+  return out;
 }
 
 export interface TokenDebugInfo {
@@ -341,4 +385,112 @@ export async function pollAdVideoReady(
     }
     await sleep(Math.min(intervalMs, remaining));
   }
+}
+
+// ── custom audiences (pixel-based remarketing) ─────────────────────────────
+//
+// A Meta "Website Custom Audience" (subtype WEBSITE, rule-based on our pixel's own
+// events) is kept up to date by Meta itself the moment it exists — membership is
+// computed continuously from incoming pixel events, there is nothing to "sync" on
+// our side. What actually needs automating is just: (1) the audience exists at all
+// (it could be deleted by accident, or never created in the first place — today
+// `scripts/create-meta-dynamic-ads.mjs` had a literal placeholder string where an id
+// should go), and (2) visibility into its current size. `ensureWebsiteCustomAudience`
+// is idempotent by NAME (Graph has no "get or create" — we list then create-if-absent),
+// so calling it repeatedly (e.g. from a cron) never produces duplicates.
+
+export interface CustomAudience {
+  id: string;
+  name: string;
+  subtype?: string;
+  approximate_count_lower_bound?: number;
+  approximate_count_upper_bound?: number;
+}
+
+/**
+ * Builds the Custom Audience `rule` (Meta's pixel rule-engine JSON) for "visited the
+ * site" (no event filter — any pixel-tracked pageview) when `event` is omitted, or a
+ * specific standard event (e.g. "AddToCart", "ViewContent") when given. `retentionDays`
+ * is how far back a matching visitor stays in the audience (Meta calls this
+ * `retention_seconds` inside the rule, NOT the top-level `retention_days` param, which
+ * is a legacy field ignored for rule-based WEBSITE audiences).
+ */
+function pixelRule(pixelId: string, retentionDays: number, event?: string): string {
+  const filters = event ? [{ field: "event", operator: "eq", value: event }] : [{ field: "url", operator: "i_contains", value: "/" }];
+  return JSON.stringify({
+    inclusions: {
+      operator: "or",
+      rules: [
+        {
+          event_sources: [{ type: "pixel", id: pixelId }],
+          retention_seconds: retentionDays * 86400,
+          filter: { operator: "and", filters },
+        },
+      ],
+    },
+  });
+}
+
+/**
+ * Idempotent by `name`: returns the existing audience's id if one with that exact
+ * name already exists on the ad account, else creates it (subtype WEBSITE, PAUSED
+ * spend is not a concept here — a Custom Audience is a targeting list, not a
+ * campaign, so creating/updating it never spends money or goes live publicly on
+ * its own). `prefill: true` backfills membership from pixel history immediately
+ * instead of only growing from this point forward.
+ */
+export async function ensureWebsiteCustomAudience(
+  adAccountId: string,
+  name: string,
+  opts: { retentionDays: number; event?: string; description?: string },
+): Promise<CustomAudience> {
+  const pixelId = env.metaPixelId;
+  if (!pixelId) throw new Error("NEXT_PUBLIC_META_PIXEL_ID not set — cannot build a pixel-based Custom Audience rule");
+
+  const existing = await graphPaged<CustomAudience>(`${actId(adAccountId)}/customaudiences`, {
+    fields: "id,name,subtype,approximate_count_lower_bound,approximate_count_upper_bound",
+  });
+  const found = existing.find((a) => a.name === name);
+  if (found) return found;
+
+  const body: Record<string, unknown> = {
+    name,
+    subtype: "WEBSITE",
+    rule: pixelRule(pixelId, opts.retentionDays, opts.event),
+    prefill: true,
+  };
+  if (opts.description) body.description = opts.description;
+  const created = await graph<{ id: string }>(`${actId(adAccountId)}/customaudiences`, { method: "POST", body });
+  return { id: created.id, name, subtype: "WEBSITE" };
+}
+
+export interface CoreRemarketingAudiences {
+  visitors30d: CustomAudience;
+  addToCart30d: CustomAudience;
+  viewContent14d: CustomAudience;
+}
+
+/**
+ * Ensures the three standard remarketing tiers exist (creates whichever are
+ * missing, reuses whichever already exist) and returns all three ids + current
+ * approximate sizes. Safe to call on every cron tick — never creates duplicates.
+ */
+export async function ensureCoreRemarketingAudiences(adAccountId: string): Promise<CoreRemarketingAudiences> {
+  const [visitors30d, addToCart30d, viewContent14d] = await Promise.all([
+    ensureWebsiteCustomAudience(adAccountId, "Visiteurs 30 jours (pixel)", {
+      retentionDays: 30,
+      description: "Tout visiteur du site tracké par le pixel, 30 derniers jours.",
+    }),
+    ensureWebsiteCustomAudience(adAccountId, "Ajouts au panier 30 jours (pixel)", {
+      retentionDays: 30,
+      event: "AddToCart",
+      description: "A ajouté un produit au panier, 30 derniers jours.",
+    }),
+    ensureWebsiteCustomAudience(adAccountId, "Vues produit 14 jours (pixel)", {
+      retentionDays: 14,
+      event: "ViewContent",
+      description: "A consulté une fiche produit, 14 derniers jours.",
+    }),
+  ]);
+  return { visitors30d, addToCart30d, viewContent14d };
 }

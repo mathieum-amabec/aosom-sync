@@ -25,6 +25,7 @@ import {
   setProductMetafield,
   deleteProductMetafield,
   fetchVariant,
+  attachVariantImages,
 } from "@/lib/shopify-client";
 import {
   writePriceVerified,
@@ -35,6 +36,8 @@ import {
   type PriceWriteResult,
 } from "@/lib/price-protection";
 import { runPostSyncSample } from "@/lib/price-reconcile";
+import { getSellPriceMap } from "@/lib/sell-price-db";
+import { effectiveSellPrice } from "@/lib/pricing";
 import {
   createSyncRun,
   completeSyncRun,
@@ -76,8 +79,10 @@ import type { ChangeTypeHistory } from "@/lib/database";
 import { isKlaviyoConfigured, trackEvent } from "@/lib/klaviyo-client";
 import { storeLink } from "@/lib/insights";
 import { diffProductsLight } from "@/lib/product-diff";
-import { runRemovedFromFeedDraft } from "@/lib/removed-catalog";
+import { runRemovedFromFeedDraft, runCatalogFreshnessZero } from "@/lib/removed-catalog";
 import { runImageCompliance } from "@/lib/image-compliance";
+import { checkGalleryDrift } from "@/lib/image-compliance-drift";
+import { runGalleryClassification } from "@/lib/gallery-classification";
 import {
   savePhase1Blob,
   readPhase1Blob,
@@ -260,7 +265,16 @@ async function applyToShopify(
         }
 
         if (Object.keys(productUpdates).length > 0) {
-          await updateShopifyProduct(diff.shopifyId, productUpdates);
+          const updated = await updateShopifyProduct(diff.shopifyId, productUpdates);
+          // A new gallery drops every variant's image link: re-attach each colour's own photo, or the swatches
+          // freeze on / show another colour's photo until the variant-photo guard runs (2026-10-19).
+          if (productUpdates.images && updated) {
+            try {
+              await attachVariantImages(updated, diff.aosomProduct);
+            } catch (err) {
+              log(`variant photos not re-attached for ${diff.productName}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
         }
 
         const priceChanges = diff.changes.filter((c) => c.field === "price");
@@ -665,6 +679,23 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
       } catch (imgErr) {
         log(`image-compliance failed (non-fatal): ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`, { phase: "imageCompliance" });
       }
+      // Shopify-API-only (no Claude calls) — catches an already-"checked" product whose live
+      // pos-1 changed since, which image_checked_at's own reset (products.image1 only) never
+      // notices. See image-compliance-drift.ts.
+      try {
+        const driftRes = await checkGalleryDrift();
+        log("image-compliance-drift done", { phase: "imageComplianceDrift", ...driftRes });
+      } catch (driftErr) {
+        log(`image-compliance-drift failed (non-fatal): ${driftErr instanceof Error ? driftErr.message : String(driftErr)}`, { phase: "imageComplianceDrift" });
+      }
+      // Judge every never-classified gallery photo (cap + time budget) so a new product's
+      // secondary photos can reach the ad carousels — see gallery-classification.ts.
+      try {
+        const galRes = await runGalleryClassification();
+        log("gallery-classification done", { phase: "galleryClassification", ...galRes });
+      } catch (galErr) {
+        log(`gallery-classification failed (non-fatal): ${galErr instanceof Error ? galErr.message : String(galErr)}`, { phase: "galleryClassification" });
+      }
     }
 
     // Phase 7: Rebuild product type counts
@@ -699,7 +730,8 @@ export async function runSync(options: { dryRun?: boolean; shopifyPush?: boolean
       log("Application des changements sur Shopify...");
       const t0Shopify = Date.now();
       const mergedForPush = mergeVariants(aosomProducts);
-      const computedForPush = computeDiffs(mergedForPush, shopifyProducts);
+      const sellPricesForPush = await getSellPriceMap();
+      const computedForPush = computeDiffs(mergedForPush, shopifyProducts, sellPricesForPush);
 
       // GUARD 2 — same archive circuit breaker as runShopifyPush.
       // This path was strictly MORE dangerous than the cron it mirrors: it had no guard
@@ -856,7 +888,8 @@ export async function runShopifyPush(): Promise<{ updates: number; archived: num
     log(`${dbProducts.length} produits DB, ${shopifyProducts.length} produits Shopify`);
 
     const merged = mergeVariants(dbProducts);
-    const computed = computeDiffs(merged, shopifyProducts)
+    const sellPrices = await getSellPriceMap();
+    const computed = computeDiffs(merged, shopifyProducts, sellPrices)
       .filter((d) => d.action !== "create"); // Phase 2 only applies updates + archives
 
     // GUARD 2 — never archive the catalogue in one pass.
@@ -947,7 +980,11 @@ export async function runShopifyPush(): Promise<{ updates: number; archived: num
           // variants. mergeVariants() does the grouping later, for the diff only.
           loadExpected: async () => {
             const m = new Map<string, { price: number; qty: number }>();
-            for (const p of dbProducts) m.set(p.sku, { price: p.price, qty: p.qty });
+            const sellPricesForSample = await getSellPriceMap();
+            for (const p of dbProducts) {
+              const expectedPrice = effectiveSellPrice(p.price, sellPricesForSample.get(p.sku));
+              m.set(p.sku, { price: Number.isFinite(expectedPrice) ? expectedPrice : p.price, qty: p.qty });
+            }
             return m;
           },
           loadShopifyVariants: async () =>
@@ -1136,6 +1173,18 @@ export async function runSyncInit(): Promise<SyncInitResult> {
       } catch (removedErr) {
         log(`removed-from-feed reconcile failed (non-fatal): ${removedErr instanceof Error ? removedErr.message : String(removedErr)}`, { phase: "removedFromFeed" });
       }
+    }
+
+    // Catalog-freshness zero-out — same cadence as the removed-from-feed reconcile above,
+    // but covers every product row (imported or not), not just ones linked to a live
+    // Shopify product. Closes the gap for never-imported catalog rows: see
+    // runCatalogFreshnessZero's docstring (removed-catalog.ts) and the 2026-09-20
+    // investigation. Non-fatal, independent of today's diff.
+    try {
+      const freshnessRes = await runCatalogFreshnessZero();
+      log("catalog-freshness-zero reconcile", { phase: "catalogFreshnessZero", ...freshnessRes });
+    } catch (freshnessErr) {
+      log(`catalog-freshness-zero reconcile failed (non-fatal): ${freshnessErr instanceof Error ? freshnessErr.message : String(freshnessErr)}`, { phase: "catalogFreshnessZero" });
     }
 
     const totalChunks = toWrite.length > 0 ? Math.ceil(toWrite.length / REFRESH_CHUNK_SIZE) : 0;
@@ -1398,6 +1447,26 @@ export async function runSyncFinalize(): Promise<SyncFinalizeResult> {
       log("image-compliance done", { phase: "finalize", duration_ms: Date.now() - t0Img, ...imgRes });
     } catch (imgErr) {
       log(`image-compliance failed (non-fatal): ${imgErr instanceof Error ? imgErr.message : String(imgErr)}`, { phase: "finalize" });
+    }
+
+    // Gallery-drift scan (production path) — Shopify-API-only, no Claude calls, so it never
+    // competes with runImageCompliance's budget. See image-compliance-drift.ts.
+    try {
+      const t0Drift = Date.now();
+      const driftRes = await checkGalleryDrift();
+      log("image-compliance-drift done", { phase: "finalize", duration_ms: Date.now() - t0Drift, ...driftRes });
+    } catch (driftErr) {
+      log(`image-compliance-drift failed (non-fatal): ${driftErr instanceof Error ? driftErr.message : String(driftErr)}`, { phase: "finalize" });
+    }
+
+    // Judge every never-classified gallery photo (cap + time budget) so a new product's
+    // secondary photos can reach the ad carousels — see gallery-classification.ts.
+    try {
+      const t0Gal = Date.now();
+      const galRes = await runGalleryClassification();
+      log("gallery-classification done", { phase: "finalize", duration_ms: Date.now() - t0Gal, ...galRes });
+    } catch (galErr) {
+      log(`gallery-classification failed (non-fatal): ${galErr instanceof Error ? galErr.message : String(galErr)}`, { phase: "finalize" });
     }
 
     // Retention: drop price_history older than 30 days now that today's changes are

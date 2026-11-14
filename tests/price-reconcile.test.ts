@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import { runPriceReconcile, runPostSyncSample, MAX_CORRECTIONS_PER_RECONCILE } from "@/lib/price-reconcile";
+import {
+  runPriceReconcile,
+  runPostSyncSample,
+  MAX_CORRECTIONS_PER_RECONCILE,
+  advanceReconcileCheckpoint,
+  formatSweepCompleteAlert,
+} from "@/lib/price-reconcile";
+import type { PriceReconcileCheckpoint } from "@/lib/database";
 
 const noSleep = async () => {};
 
@@ -250,5 +257,116 @@ describe("LOG DÉTAILLÉ — traçabilité sync_logs", () => {
     const r = await runPriceReconcile({ ...h.deps, recordCorrections: undefined });
     expect(r.corrected).toBe(1);
     expect(r.logged).toBe(0);
+  });
+});
+
+// ─── LAYER 2 rotation — TASK 2 ──────────────────────────────────────────────
+//
+// Whole-catalog coverage without an all-in-one-fetch: the route now processes one
+// Shopify page per hourly run and resumes from where it left off. These tests cover
+// the pure checkpoint bookkeeping only — runPriceReconcile itself is unchanged and
+// already covered above, since it never cared whether its variant list was the
+// whole catalog or a single page.
+describe("advanceReconcileCheckpoint (rotation bookkeeping)", () => {
+  const NOW = 1_790_000_000;
+
+  it("starts a fresh sweep from a null checkpoint and advances to the next page", () => {
+    const { checkpoint, completedSweep } = advanceReconcileCheckpoint(
+      null,
+      { nextPageInfo: "page2cursor", scanned: 250, drifted: 3, corrected: 3 },
+      NOW,
+    );
+    expect(completedSweep).toBeNull();
+    expect(checkpoint).toEqual<PriceReconcileCheckpoint>({
+      pageInfo: "page2cursor",
+      sweepNumber: 0,
+      sweepStartedAt: NOW,
+      pagesThisSweep: 1,
+      variantsScannedThisSweep: 250,
+      driftThisSweep: 3,
+      correctedThisSweep: 3,
+      lastSweepCompletedAt: null,
+    });
+  });
+
+  it("accumulates running totals across pages within the same sweep", () => {
+    const midSweep: PriceReconcileCheckpoint = {
+      pageInfo: "page2cursor", sweepNumber: 0, sweepStartedAt: NOW - 3600,
+      pagesThisSweep: 1, variantsScannedThisSweep: 250, driftThisSweep: 3, correctedThisSweep: 3,
+      lastSweepCompletedAt: null,
+    };
+    const { checkpoint, completedSweep } = advanceReconcileCheckpoint(
+      midSweep,
+      { nextPageInfo: "page3cursor", scanned: 250, drifted: 1, corrected: 1 },
+      NOW,
+    );
+    expect(completedSweep).toBeNull();
+    expect(checkpoint).toMatchObject({
+      pageInfo: "page3cursor",
+      pagesThisSweep: 2,
+      variantsScannedThisSweep: 500,
+      driftThisSweep: 4,
+      correctedThisSweep: 4,
+      sweepStartedAt: NOW - 3600, // unchanged — the sweep didn't restart
+    });
+  });
+
+  it("completes the sweep on the last page (nextPageInfo null), reports totals, and wraps to a fresh one", () => {
+    const lastPage: PriceReconcileCheckpoint = {
+      pageInfo: "page12cursor", sweepNumber: 4, sweepStartedAt: NOW - 40_000,
+      pagesThisSweep: 11, variantsScannedThisSweep: 2750, driftThisSweep: 6, correctedThisSweep: 5,
+      lastSweepCompletedAt: NOW - 200_000,
+    };
+    const { checkpoint, completedSweep } = advanceReconcileCheckpoint(
+      lastPage,
+      { nextPageInfo: null, scanned: 60, drifted: 0, corrected: 0 },
+      NOW,
+    );
+    expect(completedSweep).toEqual({
+      sweepNumber: 5, startedAt: NOW - 40_000, completedAt: NOW,
+      pages: 12, variantsScanned: 2810, totalDrift: 6, totalCorrected: 5,
+    });
+    // Fresh sweep: cursor and running totals reset, sweepNumber carried forward.
+    expect(checkpoint).toEqual<PriceReconcileCheckpoint>({
+      pageInfo: null, sweepNumber: 5, sweepStartedAt: NOW,
+      pagesThisSweep: 0, variantsScannedThisSweep: 0, driftThisSweep: 0, correctedThisSweep: 0,
+      lastSweepCompletedAt: NOW,
+    });
+  });
+
+  it("completes the very first sweep from a null checkpoint (single-page catalog)", () => {
+    const { checkpoint, completedSweep } = advanceReconcileCheckpoint(
+      null,
+      { nextPageInfo: null, scanned: 40, drifted: 0, corrected: 0 },
+      NOW,
+    );
+    expect(completedSweep).toEqual({
+      sweepNumber: 1, startedAt: NOW, completedAt: NOW, pages: 1, variantsScanned: 40, totalDrift: 0, totalCorrected: 0,
+    });
+    expect(checkpoint.sweepNumber).toBe(1);
+    expect(checkpoint.lastSweepCompletedAt).toBe(NOW);
+  });
+});
+
+describe("formatSweepCompleteAlert", () => {
+  it("summarizes a completed sweep with hours elapsed and totals", () => {
+    const a = formatSweepCompleteAlert({
+      sweepNumber: 3, startedAt: 1_000, completedAt: 1_000 + 18 * 3600,
+      pages: 20, variantsScanned: 5000, totalDrift: 12, totalCorrected: 11,
+    });
+    expect(a.title).toContain("#3");
+    expect(a.title).toContain("18h");
+    expect(a.title).toContain("20 pages");
+    expect(a.message).toContain("5000 variantes vérifiées");
+    expect(a.message).toContain("12 écart(s) détecté(s)");
+    expect(a.message).toContain("11 corrigé(s)");
+  });
+
+  it("rounds up to at least 1h for a sweep that completes within the same hour", () => {
+    const a = formatSweepCompleteAlert({
+      sweepNumber: 1, startedAt: 1_000, completedAt: 1_100,
+      pages: 1, variantsScanned: 40, totalDrift: 0, totalCorrected: 0,
+    });
+    expect(a.title).toContain("1h");
   });
 });

@@ -91,6 +91,93 @@ describe("publishShopifyProduct", () => {
   });
 });
 
+describe("unpublishShopifyProduct", () => {
+  it("sets published:false and leaves status alone by default", async () => {
+    const { unpublishShopifyProduct } = await load();
+    mockFetch.mockResolvedValue(res({ product: { id: 1 } }));
+
+    await unpublishShopifyProduct("1");
+
+    expect(endpoint(0)).toBe("/products/1.json");
+    expect(mockFetch.mock.calls[0][1].method).toBe("PUT");
+    expect(bodyOf(0)).toEqual({ product: { id: "1", published: false } });
+  });
+
+  it("also sets status:draft when asked (belt and suspenders vs. publish-reconcile)", async () => {
+    const { unpublishShopifyProduct } = await load();
+    mockFetch.mockResolvedValue(res({ product: { id: 1 } }));
+
+    await unpublishShopifyProduct("1", { deactivate: true });
+
+    expect(bodyOf(0)).toEqual({ product: { id: "1", published: false, status: "draft" } });
+  });
+
+  it("replaces the tag list when tags are passed", async () => {
+    const { unpublishShopifyProduct } = await load();
+    mockFetch.mockResolvedValue(res({ product: { id: 1 } }));
+
+    await unpublishShopifyProduct("1", { tags: ["patio", "exclude-stale", "needs-review"] });
+
+    expect(bodyOf(0)).toEqual({
+      product: { id: "1", published: false, tags: "patio, exclude-stale, needs-review" },
+    });
+  });
+
+  it("throws with the status and body when Shopify refuses", async () => {
+    const { unpublishShopifyProduct } = await load();
+    mockFetch.mockResolvedValue(res({}, { status: 422, text: "cannot unpublish" }));
+
+    await expect(unpublishShopifyProduct("1")).rejects.toThrow(
+      /unpublish failed: 422 — cannot unpublish/,
+    );
+  });
+});
+
+describe("fetchShopifyProductContent", () => {
+  it("returns title/body_html/image URLs/tags for the post-publish quality check", async () => {
+    const { fetchShopifyProductContent } = await load();
+    mockFetch.mockResolvedValue(
+      res({
+        product: {
+          title: "Chaise longue",
+          body_html: "<p>Confortable</p>",
+          images: [{ src: "https://cdn/a.jpg" }, { src: "https://cdn/b.jpg" }],
+          tags: "patio, exterieur",
+        },
+      }),
+    );
+
+    expect(await fetchShopifyProductContent("42")).toEqual({
+      title: "Chaise longue",
+      bodyHtml: "<p>Confortable</p>",
+      images: ["https://cdn/a.jpg", "https://cdn/b.jpg"],
+      tags: ["patio", "exterieur"],
+    });
+    expect(endpoint(0)).toBe("/products/42.json?fields=title,body_html,images,tags");
+  });
+
+  it("degrades to empty values rather than throwing on a missing field", async () => {
+    const { fetchShopifyProductContent } = await load();
+    mockFetch.mockResolvedValue(res({ product: {} }));
+
+    expect(await fetchShopifyProductContent("42")).toEqual({
+      title: "",
+      bodyHtml: "",
+      images: [],
+      tags: [],
+    });
+  });
+
+  it("throws on an HTTP failure", async () => {
+    const { fetchShopifyProductContent } = await load();
+    mockFetch.mockResolvedValue(res({}, { status: 404, text: "not found" }));
+
+    await expect(fetchShopifyProductContent("42")).rejects.toThrow(
+      /product fetch failed: 404 — not found/,
+    );
+  });
+});
+
 describe("fetchProductPublishStates", () => {
   it("treats a past published_at as published and a null one as not", async () => {
     const { fetchProductPublishStates } = await load();

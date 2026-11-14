@@ -1,9 +1,14 @@
-import { runAssistant, runComplementary, type AssistantTurn, type Locale } from "@/lib/assistant";
+import { runAssistant, runComplementary, type AssistantTurn } from "@/lib/assistant";
+import { parseLang, localeOf, type Lang, type Locale } from "@/lib/assistant-lang";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import {
   countAssistantRequests,
   recordAssistantRequest,
   secondsUntilAssistantSlot,
+  getAssistantBlock,
+  getAssistantIpDay,
+  addAssistantIpUsage,
+  blockAssistantIp,
 } from "@/lib/database";
 import {
   MAX_MESSAGES_PER_HOUR,
@@ -13,6 +18,21 @@ import {
 } from "@/lib/assistant-limits";
 import { ASSISTANT_TOKEN_HEADER, verifyAssistantToken } from "@/lib/assistant-auth";
 import { LlmBudgetExceededError } from "@/lib/llm-budget";
+import {
+  hashIp,
+  scoreMessage,
+  scoreModelFlag,
+  blockDurationSecs,
+  DAILY_TOKENS_PER_IP,
+  ABUSE_BLOCK_SCORE,
+} from "@/lib/assistant-guard";
+import {
+  isBotUserAgent,
+  complementaryCacheKey,
+  getCachedComplementary,
+  putCachedComplementary,
+} from "@/lib/assistant-complementary-cache";
+import { answerCacheKey, getCachedAnswer, putCachedAnswer } from "@/lib/assistant-answer-cache";
 
 /**
  * POST /api/assistant — PUBLIC storefront shopping assistant. No auth (called from the
@@ -143,14 +163,29 @@ export async function POST(request: Request): Promise<Response> {
     return json({ success: false, error: "invalid_json" }, 400);
   }
 
-  const locale: Locale = body.locale === "en" ? "en" : "fr";
+  // "es"/"pa" (furnishdirect.ca/es, /pa) answer in their language on the English store; limit/abuse notices stay English there.
+  const lang: Lang = parseLang(body.locale);
+  const locale: Locale = localeOf(lang);
 
   try {
     if (body.mode === "complementary") {
       const name = typeof body.name === "string" ? body.name : "";
       const productType = typeof body.productType === "string" ? body.productType : "";
       if (!name || !productType) return json({ success: false, error: "name_and_productType_required" }, 400);
-      const result = await runComplementary({ name, productType, locale });
+      // Crawlers render PDPs too: never spend LLM tokens on them. The block self-hides on an
+      // empty product list, so this is invisible to shoppers.
+      if (isBotUserAgent(request.headers.get("user-agent"))) {
+        return json({ success: true, data: { reply: "", products: [] } });
+      }
+      // No LLM since 2026-10-02 (runComplementary is plain catalogue logic); the 24h cache still
+      // saves the Shopify live-check round-trip per page view.
+      const cacheKey = complementaryCacheKey(name, productType, lang);
+      const cached = await getCachedComplementary(cacheKey).catch(() => null);
+      if (cached) return json({ success: true, data: cached });
+      const result = await runComplementary({ name, productType, lang });
+      await putCachedComplementary(cacheKey, result).catch((e) =>
+        console.warn("[assistant] complementary cache write failed:", e instanceof Error ? e.message : e),
+      );
       return json({ success: true, data: result });
     }
 
@@ -206,7 +241,75 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const result = await runAssistant({ message, history, locale });
+    // ── Abuse guard (assistant-guard.ts) ─────────────────────────────────────────────
+    // Every check fails OPEN on a DB error, like the hourly quota above: the storefront
+    // assistant must not go dark because a counter is unreachable, and the daily pool still
+    // bounds the worst case.
+    const ipHash = hashIp(ip);
+    const now = Math.floor(Date.now() / 1000);
+    const secsToUtcMidnight = 86400 - (now % 86400);
+    try {
+      const block = await getAssistantBlock(ipHash);
+      if (block && block.blockedUntil > now) {
+        return json({ success: true, data: limitPayload(locale, "blocked", block.blockedUntil - now) }, 403);
+      }
+      const day = await getAssistantIpDay(ipHash);
+      if (day.tokens >= DAILY_TOKENS_PER_IP) {
+        return json({ success: true, data: limitPayload(locale, "daily_quota", secsToUtcMidnight) }, 429);
+      }
+      const signals = scoreMessage(message, history);
+      if (signals.score > 0) {
+        const after = await addAssistantIpUsage(ipHash, { abuse: signals.score, reasons: signals.reasons });
+        if (after.abuseScore >= ABUSE_BLOCK_SCORE) {
+          await blockAssistantIp(ipHash, now + blockDurationSecs(block?.strikes ?? 0), signals.reasons.join(","), message);
+          console.warn(`[assistant] auto-blocked ${ipHash} (score ${after.abuseScore}: ${signals.reasons.join(",")})`);
+          return json({ success: true, data: limitPayload(locale, "blocked", blockDurationSecs(block?.strikes ?? 0)) }, 403);
+        }
+      }
+    } catch (err) {
+      console.warn("[assistant] guard check failed — allowing:", err instanceof Error ? err.message : err);
+    }
+
+    // First question of a conversation (quick-question chips, identical openers): serve the
+    // answer computed in the last hour instead of re-running the tool loop. 0 tokens, instant.
+    // Still counts as a message for the hourly quota and the visitor's daily usage.
+    const answerKey = history.length === 0 ? answerCacheKey(message, lang) : null;
+    if (answerKey) {
+      const cached = await getCachedAnswer(answerKey).catch(() => null);
+      if (cached) {
+        try { await addAssistantIpUsage(ipHash, { messages: 1 }); } catch { /* best-effort */ }
+        if (used >= 0) {
+          try { await recordAssistantRequest(ip); } catch { /* best-effort */ }
+        }
+        return json({ success: true, data: cached });
+      }
+    }
+
+    const full = await runAssistant({ message, history, lang });
+    const { meta, ...result } = full;
+    if (answerKey) {
+      await putCachedAnswer(answerKey, full).catch((e) =>
+        console.warn("[assistant] answer cache write failed:", e instanceof Error ? e.message : e),
+      );
+    }
+
+    // Charge the answer to the visitor: tokens (daily cap) + the model's own verdict.
+    try {
+      const flagged = scoreModelFlag(meta?.flag);
+      const after = await addAssistantIpUsage(ipHash, {
+        tokens: meta?.tokens ?? 0,
+        messages: 1,
+        abuse: flagged.score,
+        reasons: flagged.reasons,
+      });
+      if (flagged.score > 0 && after.abuseScore >= ABUSE_BLOCK_SCORE) {
+        const prior = await getAssistantBlock(ipHash);
+        await blockAssistantIp(ipHash, now + blockDurationSecs(prior?.strikes ?? 0), flagged.reasons.join(","), message);
+        console.warn(`[assistant] auto-blocked ${ipHash} after model flag (score ${after.abuseScore})`);
+      }
+    } catch (err) {
+      console.warn("[assistant] guard bookkeeping failed:", err instanceof Error ? err.message : err);
+    }
 
     // Recorded only after a SUCCESSFUL answer, so a failed generation doesn't consume the
     // shopper's allowance. Best-effort: a bookkeeping failure must not fail the reply.

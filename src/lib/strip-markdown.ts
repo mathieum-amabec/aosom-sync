@@ -10,6 +10,7 @@
  *                                 so it never eats bold markers, and same-line only so a
  *                                 leading `* ` bullet can't pair with the next line's `*`)
  *  - `# .. ###### ` ATX headers → heading text (leading hashes dropped)
+ *  - ~~strike~~                 → inner text
  *  - `---` / `***` / `___` rules → removed (whole line)
  *  - trailing whitespace + 3+ blank lines collapsed, then trimmed
  *
@@ -23,6 +24,7 @@ export function stripMarkdown(text: string): string {
     .replace(/\*\*([^*]+)\*\*/g, "$1")            // **bold** → bold
     .replace(/\*([^*\n]+)\*/g, "$1")              // *italic* → italic (after **bold**; same-line only)
     .replace(/__([^_]+)__/g, "$1")                // __bold__ → bold
+    .replace(/~~([^~\n]+)~~/g, "$1")              // ~~strike~~ → text (Gemini 3.8 Flash emitted a struck-through old price)
     .replace(/[ \t]+$/gm, "")                      // trailing whitespace per line
     .replace(/\n{3,}/g, "\n\n")                    // collapse 3+ newlines
     .trim();

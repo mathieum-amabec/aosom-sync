@@ -5,6 +5,7 @@ import { getDailyLlmTokensUsed, getDashboardAlerts } from "@/lib/database";
 import { poolBudget } from "@/lib/llm-budget";
 import { getTokenInfo } from "@/lib/meta-ads-client";
 import { llmPoolStatus, tokenExpiryStatus, type LlmPoolStatus, type TokenExpiryState } from "@/lib/dashboard-metrics";
+import { loadGuardStatuses, type GuardStatus } from "@/lib/guard-status";
 
 /**
  * GET /api/dashboard/alerts — "Alertes" panel.
@@ -74,12 +75,15 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const [alerts, metaToken, llmPools] = await Promise.all([
+    // Guard verdicts come from the same module as the morning report, so the panel and the
+    // email can never disagree. A read failure degrades to [] rather than failing the panel.
+    const [alerts, metaToken, llmPools, guards] = await Promise.all([
       getDashboardAlerts(),
       metaTokenAlert(),
       llmBudgetAlerts(),
+      loadGuardStatuses().catch((): GuardStatus[] => []),
     ]);
-    return NextResponse.json({ ...alerts, metaToken, llmPools }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ ...alerts, metaToken, llmPools, guards }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     console.error("[API] GET /api/dashboard/alerts failed:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

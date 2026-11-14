@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><title>Ameublo — mascotte</title>
+<style>
+  body{margin:0;background:#f6f1e7;font-family:system-ui,sans-serif;display:flex;gap:28px;flex-wrap:wrap;padding:28px}
+  figure{margin:0;text-align:center;font-size:14px;color:#1b2a47}
+  .lc-ameublo{width:180px;height:180px;display:block;overflow:visible}
+
+  /* ── mascot CSS (copied into the theme snippet) ─────────────────── */
+  .lc-ameublo .am-body{transform-origin:60px 104px;animation:am-breathe 3.6s ease-in-out infinite}
+  .lc-ameublo .am-eye{transform-box:fill-box;transform-origin:center;animation:am-blink 4.8s infinite}
+  .lc-ameublo .am-arm-r{transform-box:fill-box;transform-origin:50% 100%}
+  .lc-ameublo .am-all{transform-origin:60px 110px}
+  .lc-ameublo .am-think,.lc-ameublo .am-mouth-o,.lc-ameublo .am-eye-happy{opacity:0}
+  @keyframes am-breathe{0%,100%{transform:scale(1,1)}50%{transform:scale(1.015,.985)}}
+  @keyframes am-blink{0%,94%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+  /* wave */
+  .lc-ameublo.is-wave .am-arm-r{animation:am-wave 1.2s ease-in-out 2}
+  @keyframes am-wave{0%,100%{transform:translateY(0) rotate(0)}20%{transform:translateY(-16px) rotate(22deg)}40%{transform:translateY(-16px) rotate(-6deg)}60%{transform:translateY(-16px) rotate(22deg)}80%{transform:translateY(-16px) rotate(-6deg)}}
+  /* thinking */
+  .lc-ameublo.is-thinking .am-pupil{transform:translate(1.6px,-1.8px)}
+  .lc-ameublo.is-thinking .am-mouth-smile{opacity:0}
+  .lc-ameublo.is-thinking .am-mouth-o{opacity:1}
+  .lc-ameublo.is-thinking .am-think{opacity:1}
+  .lc-ameublo.is-thinking .am-think circle{animation:am-dots 1.2s ease-in-out infinite}
+  .lc-ameublo.is-thinking .am-think circle:nth-child(2){animation-delay:.2s}
+  .lc-ameublo.is-thinking .am-think circle:nth-child(3){animation-delay:.4s}
+  @keyframes am-dots{0%,100%{transform:translateY(0);opacity:.5}50%{transform:translateY(-3px);opacity:1}}
+  /* happy */
+  .lc-ameublo.is-happy .am-all{animation:am-hop .5s ease-out 2}
+  .lc-ameublo.is-happy .am-eye{opacity:0}
+  .lc-ameublo.is-happy .am-eye-happy{opacity:1}
+  @keyframes am-hop{0%,100%{transform:translateY(0) scale(1,1)}30%{transform:translateY(0) scale(1.06,.92)}60%{transform:translateY(-7px) scale(.97,1.04)}}
+  @media (prefers-reduced-motion:reduce){.lc-ameublo *{animation:none!important}}
+</style></head>
+<body>
+<template id="am"><svg class="lc-ameublo" viewBox="0 0 120 120" aria-hidden="true">
+  <ellipse cx="60" cy="112" rx="34" ry="4.5" fill="#1b2a47" opacity=".12"/>
+  <g class="am-all">
+  <g class="am-body">
+    <!-- legs -->
+    <rect x="31" y="96" width="7" height="14" rx="3" fill="#8a5a2b"/>
+    <rect x="82" y="96" width="7" height="14" rx="3" fill="#8a5a2b"/>
+    <!-- backrest -->
+    <path d="M24 70 C22 34 38 18 60 18 C82 18 98 34 96 70 Z" fill="#D4A853"/>
+    <path d="M30 66 C30 38 42 26 60 26 C78 26 90 38 90 66 Z" fill="#E2BC6E"/>
+    <!-- tufting buttons -->
+    <circle cx="46" cy="36" r="1.6" fill="#C17F3E"/><circle cx="74" cy="36" r="1.6" fill="#C17F3E"/>
+    <!-- face -->
+    <g class="am-face">
+      <g class="am-eye"><ellipse cx="50" cy="48" rx="5" ry="6.4" fill="#1b2a47"/><circle class="am-pupil" cx="51.6" cy="45.8" r="1.8" fill="#fff"/></g>
+      <g class="am-eye"><ellipse cx="70" cy="48" rx="5" ry="6.4" fill="#1b2a47"/><circle class="am-pupil" cx="71.6" cy="45.8" r="1.8" fill="#fff"/></g>
+      <g class="am-eye-happy" fill="none" stroke="#1b2a47" stroke-width="3" stroke-linecap="round">
+        <path d="M45 49 Q50 43 55 49"/><path d="M65 49 Q70 43 75 49"/>
+      </g>
+      <ellipse cx="42" cy="57" rx="4.2" ry="2.6" fill="#E9897E" opacity=".55"/>
+      <ellipse cx="78" cy="57" rx="4.2" ry="2.6" fill="#E9897E" opacity=".55"/>
+      <path class="am-mouth-smile" d="M53 57 Q60 64 67 57" fill="none" stroke="#1b2a47" stroke-width="2.6" stroke-linecap="round"/>
+      <ellipse class="am-mouth-o" cx="60" cy="59" rx="2.6" ry="3" fill="#1b2a47"/>
+    </g>
+    <!-- seat -->
+    <rect x="22" y="70" width="76" height="28" rx="10" fill="#C99A43"/>
+    <rect x="30" y="66" width="60" height="16" rx="8" fill="#FBF3E2"/>
+    <path d="M36 74 H84" stroke="#EADCC0" stroke-width="2" stroke-linecap="round"/>
+    <!-- left armrest -->
+    <rect x="12" y="58" width="20" height="36" rx="10" fill="#D4A853"/>
+    <rect x="12" y="58" width="20" height="10" rx="5" fill="#E2BC6E"/>
+  </g>
+  <!-- right armrest = the waving arm (outside the breathing group so it pivots cleanly) -->
+  <g class="am-arm-r">
+    <rect x="88" y="58" width="20" height="36" rx="10" fill="#D4A853"/>
+    <rect x="88" y="58" width="20" height="10" rx="5" fill="#E2BC6E"/>
+  </g>
+  </g>
+  <!-- thinking dots -->
+  <g class="am-think" fill="#1b2a47"><circle cx="98" cy="22" r="2.4"/><circle cx="106" cy="16" r="2.4"/><circle cx="114" cy="10" r="2.4"/></g>
+</svg></template>
+<script>
+  const tpl = document.getElementById("am").innerHTML;
+  for (const [cls, label] of [["", "Repos"], ["is-wave", "Salut"], ["is-thinking", "Réfléchit"], ["is-happy", "Content"]]) {
+    const f = document.createElement("figure");
+    f.innerHTML = tpl.replace('class="lc-ameublo"', `class="lc-ameublo ${cls}"`) + `<figcaption>${label}</figcaption>`;
+    document.body.appendChild(f);
+  }
+</script>
+</body></html>

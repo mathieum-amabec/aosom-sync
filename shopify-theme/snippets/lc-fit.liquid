@@ -1,0 +1,156 @@
+{%- comment -%}
+  lc-fit — "Est-ce que ça va entrer chez moi ?" checker, inside the first PDP question (lc-pdp-qa).
+  Reads product.metafields.custom.lc_dims (written by aosom-sync: fit-dims.ts + scripts/backfill-fit-dims.mts):
+  {"v":1,"s":{"<SKU>":{"p":[width,depth,height] cm,"b":[[a,b,c] cm, …] boxes, smallest side first}}}.
+  The shopper types their space (and narrowest doorway); everything is computed in the browser, nothing is sent.
+  Follows the selected variant (Dawn rewrites ?variant= on change). Renders nothing without data for the product.
+{%- endcomment -%}
+{%- assign loc = request.locale.iso_code | downcase -%}
+<div class="lc-fit" data-loc="{{ loc }}" hidden>
+  <script type="application/json" data-lc-fit-dims>{{ product.metafields.custom.lc_dims.value | json }}</script>
+  <script type="application/json" data-lc-fit-skus>{ {%- for vr in product.variants -%}"{{ vr.id }}":{{ vr.sku | json }}{%- unless forloop.last -%},{%- endunless -%}{%- endfor -%} }</script>
+  <p class="lc-fit__size">
+    {% if loc == 'en' %}This item, assembled:{% else %}Ce produit, une fois monté :{% endif %}
+    <strong data-fit-psize></strong>
+    <span class="lc-fit__axes">{% if loc == 'en' %}(W × D × H){% else %}(L × P × H){% endif %}</span>
+  </p>
+  <div class="lc-fit__units" role="group" aria-label="{% if loc == 'en' %}Units{% else %}Unités{% endif %}">
+    <button type="button" data-fit-unit="in" aria-pressed="true">{% if loc == 'en' %}inches{% else %}pouces{% endif %}</button>
+    <button type="button" data-fit-unit="cm" aria-pressed="false">cm</button>
+  </div>
+  <p class="lc-fit__lead">{% if loc == 'en' %}Enter your space (fill in what you know):{% else %}Entrez votre espace (remplissez ce que vous savez) :{% endif %}</p>
+  <div class="lc-fit__grid">
+    <label><span>{% if loc == 'en' %}Width{% else %}Largeur{% endif %}</span><input type="text" inputmode="decimal" autocomplete="off" data-fit-in="0"><em data-fit-u></em></label>
+    <label><span>{% if loc == 'en' %}Depth{% else %}Profondeur{% endif %}</span><input type="text" inputmode="decimal" autocomplete="off" data-fit-in="1"><em data-fit-u></em></label>
+    <label><span>{% if loc == 'en' %}Height{% else %}Hauteur{% endif %}</span><input type="text" inputmode="decimal" autocomplete="off" data-fit-in="2"><em data-fit-u></em></label>
+    <label class="lc-fit__door"><span>{% if loc == 'en' %}Narrowest doorway on the way{% else %}Porte la plus étroite en chemin{% endif %}</span><input type="text" inputmode="decimal" autocomplete="off" data-fit-door><em data-fit-u></em></label>
+  </div>
+  <ul class="lc-fit__res" aria-live="polite" data-fit-res></ul>
+  <svg class="lc-fit__plan" data-fit-plan viewBox="0 0 300 170" role="img" hidden></svg>
+  <p class="lc-fit__note">{% if loc == 'en' %}Manufacturer measurements. Leave a little room for doors, drawers and baseboards.{% else %}Mesures du fabricant. Gardez un peu de jeu pour les portes, les tiroirs et les plinthes.{% endif %}</p>
+</div>
+<style>
+  .lc-fit{margin:.2rem 0 .4rem}
+  .lc-fit__size{margin:0 0 .8rem}
+  .lc-fit__size strong{color:var(--lc-ink,#17213A);white-space:nowrap}
+  .lc-fit__axes{color:var(--lc-muted,#6B6B7A);font-size:1.2rem}
+  .lc-fit__units{display:inline-flex;border:1px solid var(--lc-line,#E7E1D8);border-radius:999px;padding:2px;margin:0 0 .8rem}
+  .lc-fit__units button{border:0;background:none;padding:.35rem 1rem;border-radius:999px;font:inherit;font-size:1.25rem;font-weight:700;color:var(--lc-muted,#6B6B7A);cursor:pointer}
+  .lc-fit__units button[aria-pressed="true"]{background:var(--lc-navy,#1B2A4A);color:#fff}
+  .lc-fit__lead{margin:0 0 .5rem;font-weight:700;color:var(--lc-ink,#17213A)}
+  .lc-fit__grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.6rem}
+  .lc-fit__grid label{display:flex;flex-direction:column;gap:.25rem;position:relative;min-width:0}
+  .lc-fit__grid span{font-size:1.2rem;color:var(--lc-muted,#6B6B7A)}
+  .lc-fit__grid input{width:100%;box-sizing:border-box;border:1px solid #cfd4de;border-radius:10px;padding:.7rem 2.6rem .7rem .8rem;font:inherit;font-size:16px;color:var(--lc-ink,#17213A);background:#fff}
+  .lc-fit__grid input:focus{outline:2px solid var(--lc-terra-btn,#B8553C);outline-offset:1px;border-color:transparent}
+  .lc-fit__grid em{position:absolute;right:.8rem;bottom:.85rem;font-style:normal;font-size:1.2rem;color:var(--lc-muted,#6B6B7A);pointer-events:none}
+  .lc-fit__door{grid-column:1/-1}
+  .lc-fit__res{list-style:none;margin:.9rem 0 0;padding:0;display:flex;flex-direction:column;gap:.45rem}
+  .lc-fit__res li{display:flex;gap:.6rem;align-items:flex-start;padding:.6rem .8rem;border-radius:10px;font-size:1.35rem;line-height:1.4}
+  .lc-fit__res li::before{flex:none;font-weight:800}
+  .lc-fit__res .ok{background:#E9F4EE;color:#1E5B3E}.lc-fit__res .ok::before{content:"✓"}
+  .lc-fit__res .no{background:#FBEAE6;color:#8A2E1C}.lc-fit__res .no::before{content:"✕"}
+  .lc-fit__res .tip{background:#F4F1EA;color:#4A4636}.lc-fit__res .tip::before{content:"↻"}
+  .lc-fit__plan{display:block;width:100%;max-width:340px;height:auto;margin:.9rem 0 0}
+  .lc-fit__plan[hidden]{display:none}
+  .lc-fit__note{margin:.8rem 0 0;font-size:1.2rem;color:var(--lc-muted,#6B6B7A)}
+</style>
+<script>
+(function(){
+  var root=document.currentScript&&document.currentScript.previousElementSibling&&document.currentScript.previousElementSibling.previousElementSibling;
+  if(!root||root.dataset.lcFit) return; root.dataset.lcFit='1';
+  var data, skus;
+  try{ data=JSON.parse(root.querySelector('[data-lc-fit-dims]').textContent); skus=JSON.parse(root.querySelector('[data-lc-fit-skus]').textContent); }catch(e){ return; }
+  if(!data||!data.s) return;
+  var EN=root.dataset.loc==='en', KEY='lc_fit_unit';
+  var unit='in'; try{ unit=localStorage.getItem(KEY)==='cm'?'cm':'in'; }catch(e){}
+  var ins=[].slice.call(root.querySelectorAll('[data-fit-in]')), door=root.querySelector('[data-fit-door]');
+  var res=root.querySelector('[data-fit-res]'), plan=root.querySelector('[data-fit-plan]'), psize=root.querySelector('[data-fit-psize]');
+  var names=EN?['Width','Depth','Height']:['Largeur','Profondeur','Hauteur'];
+
+  function entry(){ // the selected variant's sizes, else the first SKU with data
+    var id=new URLSearchParams(location.search).get('variant'); var f=document.querySelector('form[action*="/cart/add"] [name="id"]');
+    if(!id&&f) id=f.value;
+    var e=id&&skus[id]&&data.s[skus[id]]; if(e) return e;
+    for(var k in data.s) return data.s[k];
+  }
+  var toU=function(cm){ return unit==='in'?cm/2.54:cm; };
+  var fromU=function(v){ return unit==='in'?v*2.54:v; };
+  function fmt(cm){ var n=toU(cm), r=n>=100?Math.round(n):Math.round(n*10)/10; var s=EN?String(r):String(r).replace('.',','); return s+(unit==='in'?(EN?' in':' po'):' cm'); }
+  function fmt3(a){ return a.map(function(c){ return fmt(c).replace(/ (po|in|cm)$/,''); }).join(' × ')+(unit==='in'?(EN?' in':' po'):' cm'); }
+  function num(input){ var v=parseFloat(String(input.value).replace(',','.').replace(/[^\d.]/g,'')); return v>0?fromU(v):null; }
+  function li(cls,text){ var l=document.createElement('li'); l.className=cls; l.textContent=text; res.appendChild(l); }
+
+  var tracked=false;
+  function run(){
+    var e=entry(); if(!e) return;
+    psize.textContent=fmt3(e.p);
+    root.querySelectorAll('[data-fit-u]').forEach(function(u){ u.textContent=unit==='in'?(EN?'in':'po'):'cm'; });
+    res.textContent='';
+    var sp=ins.map(num), any=false, fails=[];
+    sp.forEach(function(s,i){
+      if(s==null) return; any=true; var gap=s-e.p[i];
+      if(gap>=0){
+        var side=i===0?(EN?' ('+fmt(gap/2)+' on each side)':' ('+fmt(gap/2)+' de chaque côté)'):'';
+        var tight=gap<2.5; // under an inch: it fits, but say so
+        li('ok', names[i]+(EN?(tight?': fits, just barely: ':': fits, ')+fmt(gap)+' to spare':(tight?' : ça entre de justesse, il reste ':' : ça entre, il reste ')+fmt(gap))+side+'.');
+      } else { fails.push(i); li('no', names[i]+(EN?': '+fmt(-gap)+' too big.':' : '+fmt(-gap)+' de trop.')); }
+    });
+    // Turned sideways, width and depth swap.
+    if(sp[0]!=null&&sp[1]!=null&&(fails.indexOf(0)>=0||fails.indexOf(1)>=0)&&e.p[1]<=sp[0]&&e.p[0]<=sp[1])
+      li('tip', EN?'Turned sideways (depth along the wall), it would fit.':'Tourné de côté (la profondeur le long du mur), il entrerait.');
+    var d=num(door);
+    if(d!=null){
+      any=true;
+      if(e.b&&e.b.length){
+        // A box goes through on its edge: thinnest side within the door's width, middle side under a ~200 cm door height.
+        var vol=function(b){ return b[0]*b[1]*b[2]; };
+        var big=e.b.slice().sort(function(a,b){ return vol(b)-vol(a); })[0], ok=e.b.every(function(b){ return b[0]<=d&&b[1]<=200; });
+        var worst=e.b.slice().sort(function(a,b){ return b[0]-a[0]; })[0], thick=worst[0];
+        var n=e.b.length, boxes=ok
+          ? (n>1?(EN?n+' boxes, the biggest ':n+' boîtes, la plus grosse '):(EN?'the box ':'la boîte '))
+          : (n>1?(EN?'one of the '+n+' boxes ':'une des '+n+' boîtes '):(EN?'the box ':'la boîte '));
+        li(ok?'ok':'no', ok
+          ? (EN?'Delivery: '+boxes+'('+fmt3(big)+') goes through a '+fmt(d)+' doorway on its edge.':'Livraison : '+boxes+'('+fmt3(big)+') passe par une porte de '+fmt(d)+', sur le côté.')
+          : (EN?'Delivery: '+boxes+'('+fmt3(worst)+') is '+fmt(thick)+' thick at its thinnest: too wide for a '+fmt(d)+' doorway.':'Livraison : '+boxes+'('+fmt3(worst)+') fait '+fmt(thick)+' d\'épaisseur au plus mince : trop pour une porte de '+fmt(d)+'.'));
+        var thin=Math.min.apply(null,e.p);
+        if(ok&&thin>d) li('tip', EN?'Once assembled it no longer fits through that door: assemble it where it will stay.':'Une fois monté, il ne passe plus par cette porte : montez-le sur place.');
+      } else {
+        var t=Math.min.apply(null,e.p);
+        li(t<=d?'ok':'no', EN?(t<=d?'Assembled, it goes through a '+fmt(d)+' doorway on its side.':'Assembled, it is '+fmt(t)+' at its thinnest: too wide for '+fmt(d)+'.'):(t<=d?'Monté, il passe par une porte de '+fmt(d)+', sur le côté.':'Monté, il fait au moins '+fmt(t)+' : trop pour une porte de '+fmt(d)+'.'));
+      }
+    }
+    drawPlan(e, sp);
+    if(any&&!tracked){ tracked=true; try{ if(window.fbq) fbq('trackCustom','FitCheck'); }catch(x){} }
+  }
+
+  // Seen from above: the space (dashed) against the back wall, the product drawn to scale.
+  function drawPlan(e, sp){
+    if(sp[0]==null||sp[1]==null){ plan.setAttribute('hidden',''); return; }
+    var W=Math.max(sp[0],e.p[0]), D=Math.max(sp[1],e.p[1]), k=Math.min(280/W,130/D);
+    var sx=(300-sp[0]*k)/2, px=(300-e.p[0]*k)/2, top=12;
+    var fit=e.p[0]<=sp[0]&&e.p[1]<=sp[1];
+    plan.innerHTML='<rect x="'+sx.toFixed(1)+'" y="'+top+'" width="'+(sp[0]*k).toFixed(1)+'" height="'+(sp[1]*k).toFixed(1)+'" fill="#F7F5F0" stroke="#9aa3b5" stroke-dasharray="5 4"/>'+
+      '<line x1="'+(sx-6).toFixed(1)+'" y1="'+top+'" x2="'+(sx+sp[0]*k+6).toFixed(1)+'" y2="'+top+'" stroke="#1B2A4A" stroke-width="3"/>'+
+      '<rect x="'+px.toFixed(1)+'" y="'+top+'" width="'+(e.p[0]*k).toFixed(1)+'" height="'+(e.p[1]*k).toFixed(1)+'" rx="3" fill="'+(fit?'#2F6B5E':'#B8553C')+'" fill-opacity=".85"/>'+
+      '<text x="150" y="'+(top+Math.max(sp[1],e.p[1])*k+16).toFixed(1)+'" text-anchor="middle" font-size="11" fill="#6B6B7A">'+(EN?'Seen from above · wall at the top':'Vu de haut · mur en haut')+'</text>';
+    plan.setAttribute('aria-label', EN?(fit?'The item fits in the space':'The item is larger than the space'):(fit?'Le produit entre dans l\'espace':'Le produit dépasse l\'espace'));
+    plan.removeAttribute('hidden');
+  }
+
+  function setUnit(u){
+    if(u===unit) return;
+    var fields=[].concat(ins,[door]), vals=fields.map(num); // cm, read in the old unit
+    unit=u; try{ localStorage.setItem(KEY,u); }catch(e){}
+    fields.forEach(function(i,k){ if(vals[k]==null) return; var n=Math.round(toU(vals[k])*10)/10; i.value=EN?String(n):String(n).replace('.',','); });
+    root.querySelectorAll('[data-fit-unit]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.fitUnit===unit)); });
+    run();
+  }
+  root.querySelectorAll('[data-fit-unit]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.fitUnit===unit)); b.addEventListener('click',function(){ setUnit(b.dataset.fitUnit); }); });
+  [].concat(ins,[door]).forEach(function(i){ i.addEventListener('input',run); });
+  document.addEventListener('change',function(ev){ if(ev.target.closest&&ev.target.closest('variant-selects,variant-radios,.product-form__input')) setTimeout(run,120); });
+  root.hidden=false;
+  var fb=root.parentElement&&root.parentElement.querySelector('[data-lc-fit-fallback]'); if(fb) fb.hidden=true;
+  run();
+})();
+</script>

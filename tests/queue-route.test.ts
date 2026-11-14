@@ -67,6 +67,7 @@ describe("GET /api/queue", () => {
     expect(d.status).toBe("pending");
     // 2025-12-08 15:00:00 UTC === 1765206000 unix seconds
     expect(d.scheduledAt).toBe(1765206000);
+    expect(d.contentId).toBe("draft-1");
   });
 
   it("falls back to imageUrls[0] when imageUrl is absent", async () => {

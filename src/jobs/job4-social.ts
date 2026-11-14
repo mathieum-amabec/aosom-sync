@@ -12,6 +12,7 @@
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { getAnthropicClient } from "@/lib/content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "@/lib/strip-markdown";
 import { env, CLAUDE, SYNC, CHANNELS, type ChannelKey } from "@/lib/config";
@@ -19,17 +20,26 @@ import {
   getAllSettings,
   getProduct,
   createFacebookDraft,
-  getEligibleHighlightCandidates,
+  getEligibleHighlightCandidatesTrendAware,
+  nextHighlightAvailableAt,
   getPendingSocialCandidates,
   markProductPosted,
   createNotification,
   getAutopostCountToday,
   incrementAutopostCountToday,
 } from "@/lib/database";
-import { selectHook, buildHookedPrompt, buildHookedPromptEn } from "@/lib/hook-selector";
+import { selectHook, buildHookedPrompt, buildHookedPromptEn, mapProductTypeToScope, hashtagsForScope } from "@/lib/hook-selector";
 import { publishDraftToChannels } from "@/lib/social-publisher";
 import { resolveLifestyle } from "@/lib/selectors/shopify-images";
-import { resolveCategory, type SocialCategory } from "@/lib/social-categories";
+import { getLifestyleVerifiedProductIds } from "@/lib/selectors/lifestyle-verified-set";
+import {
+  resolveCategory,
+  buildTargetCategory,
+  parseThemes,
+  SOCIAL_THEMES_KEY,
+  SOCIAL_AUTO_THEME_KEY,
+  type SocialCategory,
+} from "@/lib/social-categories";
 
 // How many eligible products to sample when hunting for a lifestyle-verified one
 // for the daily stock highlight. ~80% of the catalog is tagged, so a handful of
@@ -103,7 +113,7 @@ async function generatePostText(prompt: string): Promise<string> {
   log("anthropic call started", { prompt_tokens: Math.ceil(prompt.length / 4) });
   const message = await budgetedCreate(client,
     {
-      model: CLAUDE.MODEL_BATCH,
+      model: llmModel("lite"),
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       messages: [{ role: "user", content: prompt }],
     },
@@ -116,7 +126,7 @@ async function generatePostText(prompt: string): Promise<string> {
 }
 
 /** Generate FR and EN captions in parallel, with one retry on Anthropic timeout. */
-async function generateBilingual(
+export async function generateBilingual(
   settings: Record<string, string>,
   triggerType: "new_product" | "price_drop" | "highlight",
   vars: Record<string, string>,
@@ -127,8 +137,11 @@ async function generateBilingual(
   const frTpl = settings[frKey] || "Rédige un post Facebook pour: {product_name}";
   const enTpl = settings[enKey] || "Write a Facebook post for: {product_name}";
 
-  const frVars = { ...vars, hashtags: settings.social_hashtags_fr || "" };
-  const enVars = { ...vars, hashtags: settings.social_hashtags_en || "" };
+  // Hashtags scoped to the product's category — was a single global settings value
+  // (patio/garden-themed) slapped on every post regardless of what's in the photo.
+  const scope = mapProductTypeToScope(productType);
+  const frVars = { ...vars, hashtags: hashtagsForScope(scope, "FR", productType) };
+  const enVars = { ...vars, hashtags: hashtagsForScope(scope, "EN", productType) };
 
   const basePromptFr = interpolatePrompt(frTpl, frVars);
   const basePromptEn = interpolatePrompt(enTpl, enVars);
@@ -293,18 +306,36 @@ async function generateOneStockHighlight(
   settings: Awaited<ReturnType<typeof getAllSettings>>,
   minDays: number,
   category: SocialCategory | null = null,
-): Promise<GenerateDraftResult | null> {
-  // Sample a small random batch of eligible products, then post the first that is
+): Promise<GenerateDraftResult | HighlightMiss> {
+  // Sample a small batch of eligible products, then post the first that is
   // lifestyle-verified. A non-verified product is skipped (never posted with a
-  // white-bg image) — matching the new_product / price_drop gate.
-  const candidates = await getEligibleHighlightCandidates(
+  // white-bg image) — matching the new_product / price_drop gate. While the
+  // 2026-09-18 trend-selection trial is active (trend_selection_trial_until in
+  // settings), trending-eligible SKUs are sampled first; past expiry this call
+  // is an exact pass-through to the old uniform-random behavior — see
+  // getEligibleHighlightCandidatesTrendAware in database.ts.
+  //
+  // The draw is restricted to lifestyle-verified products up front when Shopify can say
+  // which those are (lifestyle-verified-set.ts). Without it, a category with few verified
+  // fiches lost them in a blind 15-SKU sample — "Bureau & Télétravail" failed with 17
+  // verified fiches out of 108 (2026-10-01). null = Shopify unreachable: old blind draw.
+  const filter = category?.predicate ? { predicate: category.predicate, args: category.args } : null;
+  const verified = await getLifestyleVerifiedProductIds();
+  const candidates = await getEligibleHighlightCandidatesTrendAware(
     minDays,
     HIGHLIGHT_LIFESTYLE_SAMPLE,
-    category?.predicate ? { predicate: category.predicate, args: category.args } : null,
+    filter,
+    verified,
   );
   if (candidates.length === 0) {
+    // With the verified restriction, "nothing" can mean two things: every product is in
+    // its repost cooldown, or the free ones have no validated photo. Tell them apart.
+    if (verified && (await getEligibleHighlightCandidatesTrendAware(minDays, 1, filter)).length > 0) {
+      log(`No lifestyle-verified product outside the repost window${category ? ` in ${category.key}` : ""}`);
+      return { miss: "no_lifestyle" };
+    }
     log(`No eligible product for stock highlight${category ? ` in ${category.key}` : ""}`);
-    return null;
+    return { miss: "cooldown" };
   }
   let product: Record<string, unknown> | null = null;
   let lifestyleUrl: string | null = null;
@@ -321,7 +352,7 @@ async function generateOneStockHighlight(
       `No lifestyle-verified product among ${candidates.length} eligible candidates` +
         (category ? ` in ${category.key}` : ""),
     );
-    return null;
+    return { miss: "no_lifestyle" };
   }
 
   const sku = product.sku as string;
@@ -355,12 +386,27 @@ async function generateOneStockHighlight(
 }
 
 /** What a stock-highlight run actually did, so the UI can explain an empty result. */
+/** Why a highlight attempt produced nothing: every product of the pool is in its repost
+ *  cooldown, or none of the sampled ones has a verified lifestyle photo. */
+export interface HighlightMiss { miss: "cooldown" | "no_lifestyle" }
+
+/** Seasonal categories carry a shorter cooldown (social-categories.ts); never a longer one. */
+export function effectiveCooldownDays(defaultDays: number, category: SocialCategory | null): number {
+  return category?.cooldownDays ? Math.min(defaultDays, category.cooldownDays) : defaultDays;
+}
+
 export interface StockHighlightRun {
   drafts: GenerateDraftResult[];
+  /** Set when nothing was produced: why the LAST attempted pool came up empty. */
+  emptyReason: HighlightMiss["miss"] | null;
+  /** When emptyReason is "cooldown": epoch seconds the first product of that pool frees up. */
+  nextAvailableAt: number | null;
+  /** Cooldown (days) applied to the last attempted pool. */
+  cooldownDays: number;
   /** Category key actually filtered on for the LAST attempt; null = whole catalog. */
   categoryUsed: string | null;
-  /** Where that category came from. */
-  categorySource: "explicit" | "seasonal" | "none";
+  /** Where that category came from. "theme" = the daily cron's saved-theme preference. */
+  categorySource: "explicit" | "seasonal" | "theme" | "none";
   /** True when the seasonal preference found nothing and we widened to the catalog. */
   fellBackToAll: boolean;
 }
@@ -379,9 +425,22 @@ export interface StockHighlightRun {
  */
 export async function runStockHighlight(
   count = 1,
-  category?: string | null,
+  /**
+   * A category key (dropdown), or a runtime target built from product_type branches
+   * (sub-category picker / saved theme). `soft: true` makes the target a preference that
+   * widens to the whole catalog on a miss, like the seasonal default — used by the daily
+   * cron's saved theme; an operator's explicit pick is always strict.
+   */
+  category?: string | null | { target: SocialCategory; soft?: boolean },
 ): Promise<StockHighlightRun> {
-  const resolved = resolveCategory(category);
+  const resolved: {
+    category: SocialCategory | null;
+    source: StockHighlightRun["categorySource"];
+    canFallBack: boolean;
+  } =
+    category && typeof category === "object"
+      ? { category: category.target, source: category.soft ? "theme" : "explicit", canFallBack: !!category.soft }
+      : resolveCategory(category);
   log(
     `stock_highlight trigger (count=${count}, category=${resolved.category?.key ?? "all"}` +
       `, source=${resolved.source})`,
@@ -394,29 +453,41 @@ export async function runStockHighlight(
   const results: GenerateDraftResult[] = [];
   let active = resolved.category;
   let fellBackToAll = false;
+  let lastMiss: HighlightMiss["miss"] | null = null;
+  const isMiss = (x: GenerateDraftResult | HighlightMiss): x is HighlightMiss => "miss" in x;
   for (let i = 0; i < Math.max(1, count); i++) {
-    let r = await generateOneStockHighlight(settings, minDays, active);
-    if (!r && active && resolved.canFallBack && !fellBackToAll) {
+    let r = await generateOneStockHighlight(settings, effectiveCooldownDays(minDays, active), active);
+    if (isMiss(r) && active && resolved.canFallBack && !fellBackToAll) {
       // Seasonal preference came up empty — widen once rather than return nothing.
       log(`seasonal ${active.key} yielded nothing, widening to the whole catalog`);
       fellBackToAll = true;
       active = null;
       r = await generateOneStockHighlight(settings, minDays, null);
     }
-    if (!r) break;
+    if (isMiss(r)) { lastMiss = r.miss; break; }
     results.push(r);
   }
+  const cooldownDays = effectiveCooldownDays(minDays, active);
+  const nextAvailableAt =
+    results.length === 0 && lastMiss === "cooldown"
+      ? await nextHighlightAvailableAt(cooldownDays, active?.predicate ? { predicate: active.predicate, args: active.args } : null)
+      : null;
   if (results.length === 0) {
     await createNotification(
       "warning",
       "Stock highlight ignoré",
       resolved.category
-        ? `Aucun produit lifestyle-verified dans « ${resolved.category.label} » parmi les candidats échantillonnés`
+        ? lastMiss === "cooldown"
+          ? `Tous les produits « ${resolved.category.label} » ont déjà un post de moins de ${cooldownDays} jours`
+          : `Aucun produit lifestyle-verified dans « ${resolved.category.label} » parmi les candidats échantillonnés`
         : "Aucun produit lifestyle-verified parmi les candidats échantillonnés"
     );
   }
   return {
     drafts: results,
+    emptyReason: results.length === 0 ? lastMiss : null,
+    nextAvailableAt,
+    cooldownDays,
     categoryUsed: active?.key ?? null,
     categorySource: resolved.source,
     fellBackToAll,
@@ -484,8 +555,21 @@ export async function generateSocialBatch(count = SOCIAL_DAILY_BATCH): Promise<G
   // No category argument, so the daily cron picks up the seasonal preference too
   // (Halloween in Sept-Oct, Noël in Nov-Dec, patio in summer), widening to the whole
   // catalog when the season is thin. That is the point of the seasonal default.
+  //
+  // A saved theme picked as the daily preference (settings social_auto_theme) replaces the
+  // seasonal default, with the same soft fallback to the whole catalog.
   if (results.length < count && !overBudget()) {
-    const fill = await triggerStockHighlight(count - results.length);
+    const autoTheme = parseThemes(settings[SOCIAL_THEMES_KEY]).find(
+      (t) => t.id === settings[SOCIAL_AUTO_THEME_KEY],
+    );
+    const fill = autoTheme
+      ? (
+          await runStockHighlight(count - results.length, {
+            target: buildTargetCategory(autoTheme.label, autoTheme.productTypes),
+            soft: true,
+          })
+        ).drafts
+      : await triggerStockHighlight(count - results.length);
     results.push(...fill);
   }
 
@@ -510,6 +594,10 @@ export async function maybeAutopostPriceDrop(
     const settings = await getAllSettings();
     if (settings.social_autopost_enabled !== "true") {
       return { published: false, reason: "autopost disabled" };
+    }
+    // Operator switch ("Automatisations" page): no automatic publication while paused.
+    if (settings.publisher_paused === "1") {
+      return { published: false, reason: "automatic publications paused" };
     }
 
     const pctDrop = oldPrice > 0 ? ((oldPrice - newPrice) / oldPrice) * 100 : 0;

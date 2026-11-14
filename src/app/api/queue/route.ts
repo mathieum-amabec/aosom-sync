@@ -25,6 +25,7 @@ const MAX_ITEMS = 50;
 
 export interface QueueItemDTO {
   id: number;
+  contentId: string;
   scheduledAt: number | null; // unix seconds (UTC), or null if unparseable
   platform: PublicationQueueItem["platform"];
   contentType: PublicationQueueItem["contentType"];
@@ -93,6 +94,7 @@ export async function GET() {
       const { preview, imageUrl } = extractPreview(item);
       return {
         id: item.id,
+        contentId: item.contentId,
         scheduledAt: sqliteUtcToUnix(item.scheduledAt),
         platform: item.platform,
         contentType: item.contentType,

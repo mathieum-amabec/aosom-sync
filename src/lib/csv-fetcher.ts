@@ -1,7 +1,8 @@
 import { parse } from "csv-parse/sync";
 import type { AosomRawRow, AosomProduct } from "@/types/aosom";
 import { AOSOM } from "./config";
-import { getCachedBlobUrl } from "./database";
+import { getCachedBlobUrl, getKnownPrices } from "./database";
+import { parseFeedPrice, carryForwardMissingPrices, PRICE_COLUMN_LOST_SHARE } from "./feed-price-guard";
 
 /** Covers headers + body stream — 60s margin under Vercel 300s function limit */
 const FETCH_TIMEOUT_MS = 240_000;
@@ -45,6 +46,31 @@ function log(msg: string, extra?: Record<string, unknown>): void {
  *  2. Live Aosom CDN fallback (240s budget) — used when cache is absent or blob fetch fails
  */
 export async function fetchAosomCatalog(): Promise<AosomProduct[]> {
+  return withKnownPrices(await fetchRawCatalog());
+}
+
+/**
+ * Rows the feed gives no price for keep the last price we knew (see feed-price-guard). Every consumer of the feed —
+ * sync, auto-import, import — then sees a real price instead of 0. A DB failure leaves the rows untouched.
+ */
+async function withKnownPrices(products: AosomProduct[]): Promise<AosomProduct[]> {
+  if (!products.some((p) => !(p.price > 0))) return products;
+  try {
+    const known = await getKnownPrices();
+    const r = carryForwardMissingPrices(products, known);
+    const lost = r.missingShare >= PRICE_COLUMN_LOST_SHARE;
+    log(lost ? "feed_price_column_lost" : "feed_rows_without_price", {
+      carried: r.carried, unknown: r.unknown, missing_share: Number(r.missingShare.toFixed(3)),
+      note: lost ? "the feed carries no public price; last known prices are used, wholesale price is NOT a substitute" : undefined,
+    });
+    return r.products;
+  } catch (err) {
+    log("feed_price_carry_failed", { err: String(err) });
+    return products;
+  }
+}
+
+async function fetchRawCatalog(): Promise<AosomProduct[]> {
   // Step 1: Try blob cache
   try {
     const cache = await getCachedBlobUrl();
@@ -129,6 +155,13 @@ export function parseTsv(text: string): AosomProduct[] {
     .map(normalizeRow);
 }
 
+/** Our cost per unit: wholesale price + delivery fee. Absent when the feed has no wholesale price. */
+function feedCost(row: AosomRawRow): { cost?: number } {
+  const wholesale = parseFeedPrice(row["2B Product Price"]);
+  if (!(wholesale > 0)) return {};
+  return { cost: Math.round((wholesale + parseFeedPrice(row.shiping_fee)) * 100) / 100 };
+}
+
 function normalizeRow(row: AosomRawRow): AosomProduct {
   const images = collectImages(row);
   const brand = extractBrand(row.Name);
@@ -142,7 +175,8 @@ function normalizeRow(row: AosomRawRow): AosomProduct {
   return {
     sku: row.SKU.trim(),
     name: row.Name?.trim() || "",
-    price: parseFloat(row.Price) || 0,
+    price: parseFeedPrice(row.Price),
+    ...feedCost(row),
     qty: parseInt(row.Qty, 10) || 0,
     color: row.color?.trim() || "",
     size: row.size?.trim() || "",
@@ -156,6 +190,8 @@ function normalizeRow(row: AosomRawRow): AosomProduct {
       width: parseFloat(row.Width) || 0,
       height: parseFloat(row.Height) || 0,
     },
+    // The feed now writes the unit in each value ("47.80 in", "10.00 ft", "120.00 cm"); parseFloat above drops it.
+    dimensionsRaw: { length: row.Length?.trim() || "", width: row.Width?.trim() || "", height: row.Height?.trim() || "" },
     productType: row.Product_Type?.trim() || "",
     category: row.Category?.trim() || "",
     brand,

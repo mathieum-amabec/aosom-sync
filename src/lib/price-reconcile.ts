@@ -25,7 +25,99 @@ import {
   type DriftItem,
   type PriceWriteResult,
 } from "@/lib/price-protection";
-import { newReconcileRunId, type PriceCorrectionLog } from "@/lib/database";
+import { newReconcileRunId, type PriceCorrectionLog, type PriceReconcileCheckpoint } from "@/lib/database";
+
+// ─── Rotation (LAYER 2, catalog-wide coverage) ───────────────────────────────
+//
+// runPriceReconcile above doesn't care whether the variants it's handed are the
+// WHOLE catalog or a single Shopify page — it just detects and corrects drift in
+// whatever list it's given. That's what makes the rotation additive: the route
+// fetches one page (fetchShopifyVariantsPage) and feeds it through unchanged;
+// this function is the pure bookkeeping for which page comes next and when a full
+// sweep has completed. See PriceReconcileCheckpoint in database.ts for why this
+// exists — an all-in-one-fetch run throws away its whole hour of coverage on a
+// single Shopify rate-limit.
+
+export interface CompletedSweepSummary {
+  sweepNumber: number;
+  startedAt: number; // epoch seconds
+  completedAt: number; // epoch seconds
+  pages: number;
+  variantsScanned: number;
+  totalDrift: number;
+  totalCorrected: number;
+}
+
+export interface ReconcileCheckpointAdvance {
+  /** Persist this as the new checkpoint, regardless of whether a sweep completed. */
+  checkpoint: PriceReconcileCheckpoint;
+  /** Non-null exactly on the run whose page had no next cursor — the sweep just finished. */
+  completedSweep: CompletedSweepSummary | null;
+}
+
+const freshCheckpoint = (nowEpoch: number): PriceReconcileCheckpoint => ({
+  pageInfo: null,
+  sweepNumber: 0,
+  sweepStartedAt: nowEpoch,
+  pagesThisSweep: 0,
+  variantsScannedThisSweep: 0,
+  driftThisSweep: 0,
+  correctedThisSweep: 0,
+  lastSweepCompletedAt: null,
+});
+
+/**
+ * Pure — no I/O — so the sweep wrap-around logic (when running totals reset, when
+ * sweepNumber increments) is unit-testable without a database or Shopify.
+ */
+export function advanceReconcileCheckpoint(
+  current: PriceReconcileCheckpoint | null,
+  page: { nextPageInfo: string | null; scanned: number; drifted: number; corrected: number },
+  nowEpoch: number,
+): ReconcileCheckpointAdvance {
+  const base = current ?? freshCheckpoint(nowEpoch);
+  const pages = base.pagesThisSweep + 1;
+  const variantsScanned = base.variantsScannedThisSweep + page.scanned;
+  const totalDrift = base.driftThisSweep + page.drifted;
+  const totalCorrected = base.correctedThisSweep + page.corrected;
+
+  if (page.nextPageInfo === null) {
+    // Last page of the sweep — report the completed totals, then wrap to a fresh one.
+    const sweepNumber = base.sweepNumber + 1;
+    return {
+      completedSweep: {
+        sweepNumber, startedAt: base.sweepStartedAt, completedAt: nowEpoch,
+        pages, variantsScanned, totalDrift, totalCorrected,
+      },
+      checkpoint: {
+        pageInfo: null, sweepNumber, sweepStartedAt: nowEpoch,
+        pagesThisSweep: 0, variantsScannedThisSweep: 0, driftThisSweep: 0, correctedThisSweep: 0,
+        lastSweepCompletedAt: nowEpoch,
+      },
+    };
+  }
+
+  return {
+    completedSweep: null,
+    checkpoint: {
+      pageInfo: page.nextPageInfo, sweepNumber: base.sweepNumber, sweepStartedAt: base.sweepStartedAt,
+      pagesThisSweep: pages, variantsScannedThisSweep: variantsScanned,
+      driftThisSweep: totalDrift, correctedThisSweep: totalCorrected,
+      lastSweepCompletedAt: base.lastSweepCompletedAt,
+    },
+  };
+}
+
+/** Notification body for a completed full-catalog sweep. */
+export function formatSweepCompleteAlert(s: CompletedSweepSummary): { title: string; message: string } {
+  const hours = Math.max(1, Math.round((s.completedAt - s.startedAt) / 3600));
+  return {
+    title: `Balayage prix complet #${s.sweepNumber} (${hours}h, ${s.pages} pages)`,
+    message:
+      `${s.variantsScanned} variantes vérifiées, ${s.totalDrift} écart(s) détecté(s), ` +
+      `${s.totalCorrected} corrigé(s). Prochain balayage démarré.`,
+  };
+}
 
 export interface ReconcileDeps {
   /** SKU → the price we intend to sell at (Turso products.price). */

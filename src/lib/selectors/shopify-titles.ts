@@ -10,11 +10,8 @@
  *
  * The actual fetch/cache/throttle lives in `shopify-product.ts`, shared with the
  * image resolver so both fields come from a single per-product request.
- *
- * A test seam (`__setTitleResolverForTests`) lets the selector suite inject
- * deterministic titles without hitting the network.
  */
-import { resolveProductFields, clearProductCache } from "./shopify-product";
+import { resolveProductFields } from "./shopify-product";
 
 /** A function that returns the FR (Shopify) title for a product id, or "". */
 export type TitleResolver = (shopifyProductId: string) => Promise<string>;
@@ -24,19 +21,9 @@ async function defaultResolveShopifyTitle(shopifyProductId: string): Promise<str
   return (await resolveProductFields(shopifyProductId)).titleFr;
 }
 
-let resolver: TitleResolver = defaultResolveShopifyTitle;
+const resolver: TitleResolver = defaultResolveShopifyTitle;
 
 /** Resolve a product's FR (Shopify) title (cached, throttled). "" when absent. */
 export function resolveProductTitleFr(shopifyProductId: string): Promise<string> {
   return resolver(shopifyProductId);
-}
-
-/** Test-only: swap the resolver (pass null to restore the real one). */
-export function __setTitleResolverForTests(fn: TitleResolver | null): void {
-  resolver = fn ?? defaultResolveShopifyTitle;
-}
-
-/** Test/maintenance helper: drop the per-product cache (shared with images). */
-export function clearTitleCache(): void {
-  clearProductCache();
 }

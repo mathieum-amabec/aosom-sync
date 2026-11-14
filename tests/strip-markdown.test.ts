@@ -286,3 +286,9 @@ describe("cleanSocialCaption + hook label", () => {
     );
   });
 });
+
+describe("stripMarkdown — ~~strikethrough~~", () => {
+  it("keeps the text of a struck-through old price instead of publishing the tildes", () => {
+    expect(stripMarkdown("Maintenant 99 $ au lieu de ~~129 $~~ !")).toBe("Maintenant 99 $ au lieu de 129 $ !");
+  });
+});

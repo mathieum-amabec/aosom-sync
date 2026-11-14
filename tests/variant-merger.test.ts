@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import sharp from "sharp";
 import {
   parseSku,
+  translateColor,
   stripColorFromTitle,
   mergeVariants,
   COLOR_MAP,
@@ -55,6 +56,42 @@ describe("parseSku", () => {
       expect(result.colorCode).toBe(code);
       expect(result.color).toBe(name);
     }
+  });
+});
+
+describe("translateColor", () => {
+  it("translates known English feed colors to French, case-insensitively", () => {
+    expect(translateColor("Red")).toBe("Rouge");
+    expect(translateColor("black")).toBe("Noir");
+    expect(translateColor("DARK GREY")).toBe("Gris foncé");
+  });
+
+  it("covers every COLOR_MAP English equivalent", () => {
+    // Every COLOR_MAP French value must be reachable from its English feed name —
+    // keeps the two dictionaries from silently drifting apart.
+    const frValues = new Set(Object.values(COLOR_MAP));
+    const translated = new Set(
+      ["black", "dark grey", "dark brown", "green", "light grey", "light green",
+        "silver", "cream", "charcoal", "grey", "blue", "brown", "beige", "dark blue",
+        "forest green", "khaki", "walnut", "white", "red", "pink", "orange", "natural",
+        "coffee"].map(translateColor)
+    );
+    expect(translated).toEqual(frValues);
+  });
+
+  it("translates compounds part by part, and passes through anything not fully translatable", () => {
+    expect(translateColor("Black and Red")).toBe("Noir et rouge");
+    expect(translateColor("Natural Wood, White")).toBe("Bois naturel et blanc");
+    expect(translateColor("Black and Plaid")).toBe("Black and Plaid");
+  });
+
+  it("translates the colours the old 25-entry map left in English", () => {
+    expect(["Yellow", "Oak", "Rustic Brown", "Multi Colour", "Cream White", "Clear"].map(translateColor))
+      .toEqual(["Jaune", "Chêne", "Brun rustique", "Multicolore", "Blanc crème", "Transparent"]);
+  });
+
+  it("passes through empty input safely", () => {
+    expect(translateColor("")).toBe("");
   });
 });
 
@@ -133,14 +170,29 @@ describe("mergeVariants", () => {
     expect(merged[0].groupKey).toBe("842-001");
   });
 
-  it("assigns French color names from COLOR_MAP", () => {
+  it("translates the feed's English color field to French, regardless of SKU shape", () => {
     const products = [
-      makeProduct({ sku: "TEST-001BK", psin: "G1" }),
-      makeProduct({ sku: "TEST-001GY", psin: "G1" }),
+      makeProduct({ sku: "TEST-001BK", psin: "G1", color: "Black" }),
+      makeProduct({ sku: "TEST-001GY", psin: "G1", color: "Grey" }),
     ];
     const merged = mergeVariants(products);
     expect(merged[0].variants[0].color).toBe("Noir");
     expect(merged[0].variants[1].color).toBe("Gris");
+  });
+
+  it("regression: a PSIN base SKU without a color-code suffix still translates correctly (was the Red/Rouge duplicate-option bug)", () => {
+    // Real-world shape: a 2-in-1 bundle's "base" SKU (E2-0007) carries no 2-letter
+    // color suffix, while its sibling (B20-109V00RD) does. Both share the same raw
+    // feed color "Red". The old parseSku-suffix approach translated only the second
+    // one, leaving the base SKU as raw "Red" — two option values for one color.
+    const products = [
+      makeProduct({ sku: "E2-0007", psin: "G1", color: "Red" }),
+      makeProduct({ sku: "B20-109V00RD", psin: "G1", color: "Red" }),
+    ];
+    const merged = mergeVariants(products);
+    expect(merged[0].variants).toHaveLength(2);
+    expect(merged[0].variants[0].color).toBe("Rouge");
+    expect(merged[0].variants[1].color).toBe("Rouge");
   });
 
   it("strips color from merged product name", () => {
@@ -287,5 +339,35 @@ describe("selectProductImagesAsync", () => {
     const small = "https://x.com/scene_400x400.jpg"; // dropped by MIN_IMAGE_PX
     const out = await selectProductImagesAsync([small, W], fetchImpl);
     expect(out).toEqual([W]);
+  });
+});
+
+import { dropDuplicateOptionListings } from "../src/lib/variant-merger";
+
+describe("dropDuplicateOptionListings (chairs 2026-10-05: 'Lot de 4 2')", () => {
+  const row = (sku: string, color: string, size: string, price: number, qty = 10) =>
+    ({ sku, psin: "P1", color, size, price, qty, name: "n", images: [] }) as never;
+
+  it("keeps ONE row per colour+size under a PSIN — in stock first, then cheapest", () => {
+    const { kept, dropped } = dropDuplicateOptionListings([
+      row("835-483BK", "Black", "Set of 4", 143.99),
+      row("835-483V03GY", "Grey", "Set of 4", 128.99),
+      row("835-483V03BK", "Black", "Set of 4", 144.99),
+    ]);
+    expect(kept.map((p) => p.sku)).toEqual(["835-483BK", "835-483V03GY"]);
+    expect(dropped).toEqual([{ sku: "835-483V03BK", keptSku: "835-483BK" }]);
+  });
+  it("prefers the in-stock duplicate over a cheaper sold-out one", () => {
+    const { kept } = dropDuplicateOptionListings([row("A-BK", "Black", "Set of 4", 100, 0), row("B-BK", "Black", "Set of 4", 120, 5)]);
+    expect(kept.map((p) => p.sku)).toEqual(["B-BK"]);
+  });
+  it("never merges genuinely different sizes or colours", () => {
+    const { kept, dropped } = dropDuplicateOptionListings([
+      row("A-BK", "Black", "Set of 4", 1),
+      row("B-BK", "Black", "Set of 6", 2),
+      row("C-GY", "Grey", "Set of 4", 3),
+    ]);
+    expect(kept).toHaveLength(3);
+    expect(dropped).toHaveLength(0);
   });
 });

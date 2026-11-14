@@ -3,7 +3,16 @@ import type { AosomMergedProduct } from "@/types/aosom";
 import { slugify, type GeneratedContent } from "./content-generator";
 import { stripLeadingHeading } from "./html-utils";
 import { env, SHOPIFY, SYNC } from "./config";
-import { targetSellPrice } from "./pricing";
+import { effectiveSellPrice } from "./pricing";
+import { getSellPricesForSkus, priceNewVariants } from "./sell-price-db";
+import { writePriceVerified, PRICE_EPSILON } from "./price-protection";
+import { recordPriceFloorIncident, getCostwayShopifyProductIds } from "./database";
+import { EN_FIELD_MAP, rejectEnValue, type EnTranslatableKey } from "./en-translations";
+import { colourPhotoIndex, type ColourSource } from "./variant-photos";
+import { toEnglishColour } from "./colour-names";
+import { toFrenchSize } from "./size-names";
+import { buildFitDims, checkAgainstPage, serializeFitDims, FIT_DIMS_KEY, FIT_DIMS_NAMESPACE } from "./fit-dims";
+import { isInternalProduct } from "./internal-product";
 
 const SHOPIFY_FETCH_TIMEOUT_MS = 25_000;
 const SHOPIFY_MAX_RETRIES = 3;
@@ -55,18 +64,23 @@ export async function shopifyFetch(
 }
 
 /**
- * Fetch all products from Shopify (paginated).
+ * Fetch all AOSOM products from Shopify (paginated). Costway products (a separate supplier,
+ * tracked in `costway_products`) are excluded: they are absent from the Aosom feed by definition,
+ * so every caller — the diff archive, removed-catalog, stale-catalog, price-audit — would treat
+ * them as "gone from the supplier" and draft them. Same exclusion in fetchShopifyVariantsPage and
+ * fetchActiveVariantInventory, the other two whole-catalogue sweeps feeding Aosom-only jobs.
  */
 export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[]> {
   if (!env.hasShopifyToken) return [];
 
+  const costwayIds = await getCostwayShopifyProductIds();
   const products: ShopifyExistingProduct[] = [];
   let pageInfo: string | null = null;
 
   do {
     const params = new URLSearchParams({
       limit: "250",
-      fields: "id,title,status,variants,images,body_html,product_type,tags",
+      fields: "id,title,handle,status,variants,images,body_html,product_type,tags",
     });
     if (pageInfo) params.set("page_info", pageInfo);
 
@@ -75,6 +89,7 @@ export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[
 
     const data = await response.json();
     for (const p of data.products) {
+      if (costwayIds.has(String(p.id)) || isInternalProduct(p)) continue;
       products.push(mapShopifyProduct(p));
     }
 
@@ -82,6 +97,56 @@ export async function fetchAllShopifyProducts(): Promise<ShopifyExistingProduct[
   } while (pageInfo);
 
   return products;
+}
+
+export interface ShopifyVariantPageItem {
+  sku: string;
+  price: number;
+  variantId: string;
+  shopifyProductId: string;
+  /** The struck-through price, or null when none is set. */
+  compareAtPrice?: number | null;
+}
+
+export interface ShopifyVariantPage {
+  variants: ShopifyVariantPageItem[];
+  /** Cursor for the next page, or null when this was the last one. */
+  nextPageInfo: string | null;
+}
+
+/**
+ * Fetch ONE page (up to 250 products' worth of variants) instead of the whole
+ * paginated catalog. Used by price-reconcile's rotation so an hourly run's Shopify
+ * API footprint stays small and predictable instead of an all-or-nothing fetch of
+ * every product — a single rate-limit mid-fetch used to throw away that entire
+ * run's coverage (see price-reconcile.ts / PriceReconcileCheckpoint).
+ */
+export async function fetchShopifyVariantsPage(pageInfo: string | null): Promise<ShopifyVariantPage> {
+  if (!env.hasShopifyToken) return { variants: [], nextPageInfo: null };
+
+  const costwayIds = await getCostwayShopifyProductIds();
+  const params = new URLSearchParams({ limit: "250", fields: "id,variants,product_type,tags" });
+  if (pageInfo) params.set("page_info", pageInfo);
+
+  const response = await shopifyFetch(`/products.json?${params}`);
+  if (!response.ok) throw new Error(`Shopify fetch failed: ${response.status}`);
+
+  const data = await response.json();
+  const variants: ShopifyVariantPageItem[] = (
+    data.products as Array<{ id: number; product_type?: string; tags?: string; variants: Array<{ id: number; sku: string; price: string; compare_at_price?: string | null }> }>
+  )
+    .filter((p) => !costwayIds.has(String(p.id)) && !isInternalProduct(p))
+    .flatMap((p) =>
+    p.variants.map((v) => ({
+      sku: v.sku,
+      price: Number(v.price),
+      variantId: String(v.id),
+      shopifyProductId: String(p.id),
+      compareAtPrice: v.compare_at_price == null || v.compare_at_price === "" ? null : Number(v.compare_at_price),
+    })),
+  );
+
+  return { variants, nextPageInfo: parseLinkHeader(response.headers.get("Link")) };
 }
 
 export interface ShopifyProductImage {
@@ -218,11 +283,14 @@ export async function fetchActiveVariantInventory(): Promise<
 > {
   if (!env.hasShopifyToken) return [];
 
+  // Costway variants are absent from the Aosom feed, so the sweep would read them as "not sellable",
+  // switch tracking on and zero them — the one way these jobs could make a Costway product unsellable.
+  const costwayIds = await getCostwayShopifyProductIds();
   const out: Array<{ sku: string; inventoryQuantity: number; inventoryItemId: string; tracked: boolean }> = [];
   let pageInfo: string | null = null;
 
   do {
-    const params = new URLSearchParams({ limit: "250", fields: "id,variants" });
+    const params = new URLSearchParams({ limit: "250", fields: "id,variants,product_type,tags" });
     // status filter only on the first page; page_info follow-ups reject extra filters.
     if (pageInfo) params.set("page_info", pageInfo);
     else params.set("status", "active");
@@ -232,6 +300,7 @@ export async function fetchActiveVariantInventory(): Promise<
 
     const data = await response.json();
     for (const p of data.products) {
+      if (costwayIds.has(String(p.id)) || isInternalProduct(p)) continue;
       for (const v of (p.variants as Record<string, unknown>[]) || []) {
         const sku = (v.sku as string) || "";
         if (!sku) continue;
@@ -255,6 +324,7 @@ function mapShopifyProduct(raw: Record<string, unknown>): ShopifyExistingProduct
   return {
     shopifyId: String(raw.id),
     title: (raw.title as string) || "",
+    handle: (raw.handle as string) || "",
     status: (raw.status as "active" | "draft" | "archived") || "active",
     bodyHtml: (raw.body_html as string) || "",
     productType: (raw.product_type as string) || "",
@@ -310,9 +380,24 @@ function dedupeVariantOptionLabels<T extends { option1?: string | null; option2?
  * Create a Shopify product with FR primary + EN metafields.
  * Published live ('active') on import. No inventory tracking (dropship).
  */
+export interface CreateProductOptions {
+  /** Default "active" (Aosom imports go live). The Costway pilot creates "draft". */
+  status?: "active" | "draft";
+  /** Replaces the default `merged.images` URL ingest. [] = create without images (uploaded afterwards). */
+  images?: Array<{ src?: string; attachment?: string; filename?: string; alt?: string }>;
+  /** Tags appended to the generated ones (e.g. the neutral supplier-lot tag). */
+  extraTags?: string[];
+  /**
+   * The variant prices are final (another supplier's own rule already set them, e.g. Costway's 23 % in
+   * costway/pricing.ts): skip the Aosom sell-price rule, which would add its markup on top (seen 2026-10-17: +5 %).
+   */
+  finalPrices?: boolean;
+}
+
 export async function createShopifyProduct(
   merged: AosomMergedProduct,
-  content: GeneratedContent
+  content: GeneratedContent,
+  opts: CreateProductOptions = {},
 ): Promise<{ id: string; handle: string }> {
   const hasColor = merged.variants.some((v) => v.color);
   const hasSize = merged.variants.some((v) => v.size);
@@ -335,15 +420,30 @@ export async function createShopifyProduct(
     .replace(/--+/g, "-")
     .replace(/^-|-$/g, "");
 
+  // Sizes go to Shopify in French ("Set of 4" → "Lot de 4"); the Aosom wording becomes the EN
+  // translation registered below (size-names.ts, 2026-10-02).
+  const sizeEn = new Map<string, string>();
+  const frSize = (raw: string) => {
+    const fr = toFrenchSize(raw);
+    if (fr && fr !== raw) sizeEn.set(fr, raw);
+    return fr;
+  };
+
   // Build variants, then de-collide duplicate (option1, option2) pairs so a group
   // with two SKUs that map to the same Couleur/Taille imports instead of 422-ing.
+  // Our computed sell price when one is stored for the SKU (sell-price-sync.ts), else the Aosom price. A product
+  // created before its first sell-price run starts at the Aosom price; the next run and the reconcile raise it.
+  const sellPriceBySku = opts.finalPrices ? new Map<string, number>() : await getSellPricesForSkus(merged.variants.map((v) => v.sku));
+  // No stored price yet (a brand-new SKU): price it with the rule now, so the product is born at its real price.
+  const unpriced = opts.finalPrices ? [] : merged.variants.filter((v) => !sellPriceBySku.has(v.sku)).map((v) => ({ sku: v.sku, price: v.price }));
+  if (unpriced.length > 0) for (const [sku, price] of await priceNewVariants(unpriced, merged.productType ?? "")) sellPriceBySku.set(sku, price);
   const builtVariants = dedupeVariantOptionLabels(
     merged.variants.map((v) => ({
       sku: v.sku,
       // Floor at the Aosom price (0% markup, never below) — same rule as the sync. See pricing.ts.
-      // Fall back to the raw price if the Aosom price is invalid (targetSellPrice → NaN),
+      // Fall back to the raw price if the Aosom price is invalid (effectiveSellPrice → NaN),
       // so we never emit the string "NaN" to Shopify (bad CSV data is a separate concern).
-      price: String(targetSellPrice(v.price) || v.price),
+      price: String(effectiveSellPrice(v.price, sellPriceBySku.get(v.sku)) || v.price),
       inventory_management: null as null, // dropship — no inventory tracking
       requires_shipping: true,
       weight: v.weight,
@@ -352,10 +452,17 @@ export async function createShopifyProduct(
       option1: hasColor
         ? v.color || "Défaut"
         : hasSize
-          ? v.size || "Défaut"
+          ? frSize(v.size) || "Défaut"
           : "Titre par défaut",
-      option2: hasColor && hasSize ? v.size || "Défaut" : undefined as string | undefined,
+      option2: hasColor && hasSize ? frSize(v.size) || "Défaut" : undefined as string | undefined,
     })),
+  );
+
+  // Only rows that carry the feed's unit strings: the bare numbers in `dimensions` lost their unit (inch/ft/cm).
+  // Dropped when the generated description states a size no variant matches (fit-dims.ts checkAgainstPage).
+  const fitDims = checkAgainstPage(
+    buildFitDims(merged.variants.flatMap((v) => (v.dimensionsRaw ? [{ sku: v.sku, ...v.dimensionsRaw, boxSize: v.boxSize }] : []))),
+    content.descriptionFr,
   );
 
   const payload = {
@@ -376,11 +483,11 @@ export async function createShopifyProduct(
       // Once taxonomy tags are tracked (import job / products table), merge them in:
       // tags: [...new Set([...content.tags, ...taxonomyTags])].join(", ").
       // See docs/taxonomy-changelog.md. Non-blocking for the idempotency fix.
-      tags: content.tags.join(", "),
-      status: "active",
+      tags: [...content.tags, ...(opts.extraTags ?? [])].join(", "),
+      status: opts.status ?? "active",
       options,
       variants: builtVariants,
-      images: merged.images.map((src) => ({ src })),
+      images: opts.images ?? merged.images.map((src) => ({ src })),
       metafields: [
         // Native Shopify SEO (store default locale = FR). EN equivalents kept in
         // custom.* for later translation (Translate & Adapt / GraphQL).
@@ -427,6 +534,8 @@ export async function createShopifyProduct(
           value: merged.brand || "Aosom",
           type: "single_line_text_field",
         },
+        // Per-SKU assembled + box sizes for the PDP "Est-ce que ça va entrer ?" checker (fit-dims.ts).
+        ...(fitDims ? [{ namespace: FIT_DIMS_NAMESPACE, key: FIT_DIMS_KEY, value: serializeFitDims(fitDims), type: "json" }] : []),
         // Shopify 422s the entire product create on a blank single_line_text_field
         // value, so drop any metafield whose value is empty/undefined (e.g. an LLM
         // that returned "" for a meta field).
@@ -445,10 +554,221 @@ export async function createShopifyProduct(
   }
 
   const data = await response.json();
+
+  // LAYER 1 for the import path. Every other price write (Phase 2 push, price-reconcile)
+  // is written-then-verified; this create was the one path that sent a floor price and
+  // never confirmed Shopify actually stored it — a 201 here means the request was
+  // accepted, not that the value on file matches. Shopify already returns the created
+  // variants in this same response, so the check costs nothing when prices match (the
+  // normal case) and only spends network calls on the rare mismatch, via the same
+  // write-then-verify + retry machinery every other write path uses.
+  const createdVariants = Array.isArray(data.product?.variants) ? data.product.variants : [];
+  const expectedBySku = new Map(builtVariants.map((v) => [v.sku, Number(v.price)]));
+  for (const created of createdVariants) {
+    const sku = typeof created?.sku === "string" ? created.sku : "";
+    const expected = expectedBySku.get(sku);
+    if (expected == null || !Number.isFinite(expected)) continue;
+    const stored = Number(created.price);
+    if (Number.isFinite(stored) && Math.abs(stored - expected) <= PRICE_EPSILON) continue;
+
+    const variantId = String(created.id);
+    const result = await writePriceVerified(sku, variantId, expected, stored, {
+      writePrice: (id, price) => updateShopifyVariantPrice(id, price),
+      readVariant: (id) => fetchVariant(id),
+    });
+    if (!result.ok) {
+      console.error(
+        `[IMPORT] price floor NOT confirmed on create for ${sku} (variant ${variantId}): wanted ${expected}, Shopify holds ${result.observed ?? "?"} — ${result.error ?? "unknown"}`,
+      );
+    } else {
+      console.warn(`[IMPORT] price floor corrected on create for ${sku}: Shopify returned ${stored}, forced to ${expected}`);
+      // TASK 3: only the below-floor direction is a real incident — Shopify returning a
+      // price ABOVE the floor on create is a different (less severe) drift, not the
+      // "vente à perte" shape this log is for.
+      if (Number.isFinite(stored) && stored < expected) {
+        try {
+          await recordPriceFloorIncident({ sku, oldPrice: stored, newPrice: expected, source: "import" });
+        } catch (err) {
+          console.error(`[IMPORT] failed to record price_floor_incident for ${sku}:`, err);
+        }
+      }
+    }
+  }
+
+  // Best-effort: the product exists and is live either way; a failure here only means the
+  // EN page falls back to FR for Shopify-level fields until the backfill script runs.
+  try {
+    await registerProductEnTranslations(String(data.product.id), {
+      title: content.titleEn,
+      body_html: content.descriptionEn,
+      meta_title: content.metaTitleEn,
+      meta_description: content.metaDescriptionEn,
+    });
+  } catch (err) {
+    console.error(`[IMPORT] EN translations not registered for product ${data.product.id}:`, err instanceof Error ? err.message : err);
+  }
+
+  // Best-effort, like the translations: attach each colour's own photo to its variants so
+  // clicking a colour shows it, and register EN option names / colour labels.
+  try {
+    await attachVariantImages(data.product, merged);
+  } catch (err) {
+    console.error(`[IMPORT] variant photos not attached for product ${data.product.id}:`, err instanceof Error ? err.message : err);
+  }
+  try {
+    await registerOptionEnTranslations(String(data.product.id), sizeEn);
+  } catch (err) {
+    console.error(`[IMPORT] EN option translations not registered for product ${data.product.id}:`, err instanceof Error ? err.message : err);
+  }
+
   return {
     id: String(data.product.id),
     handle: typeof data.product.handle === "string" ? data.product.handle : "",
   };
+}
+
+/**
+ * Attach a photo to every variant of a multi-colour product (Dawn switches the main photo on
+ * the selected variant's image). Each colour gets its OWN photo — one of its exclusive feed
+ * images, found in the created gallery by FILE, never by position (a refused upload used to
+ * shift every later colour onto its neighbour's photo, 2026-10-18). A colour with no own photo
+ * gets the position-1 photo — never only SOME variants, or the theme keeps showing the
+ * previously selected colour's photo; the daily variant-photo guard reports it.
+ * Single-colour products are left alone. `sourceOf` maps a created image's src to the URL it
+ * was uploaded from, when the upload renamed it (Costway neutral file names).
+ */
+export async function attachVariantImages(
+  created: { variants?: { id: number | string; sku?: string }[]; images?: { id: number | string; src?: string }[] },
+  merged: AosomMergedProduct,
+  sourceOf?: (src: string) => string | undefined,
+): Promise<number> {
+  const colourOf = (v: { color?: string }) => (v.color || "").trim().toLowerCase();
+  const colours = new Set(merged.variants.map(colourOf).filter(Boolean));
+  const images = created.images ?? [];
+  if (colours.size < 2 || images.length === 0) return 0;
+  const sources: ColourSource[] = [...colours].map((c) => ({
+    colour: c,
+    images: merged.variants.filter((v) => colourOf(v) === c).flatMap((v) => v.images),
+  }));
+  const galleryUrls = images.map((im) => (im.src ? (sourceOf?.(im.src) ?? im.src) : ""));
+  const indexByColour = new Map([...colours].map((c) => [c, colourPhotoIndex(c, sources, galleryUrls)]));
+  const indexBySku = new Map(merged.variants.map((v) => [v.sku, indexByColour.get(colourOf(v)) ?? -1]));
+  let attached = 0;
+  for (const variant of created.variants ?? []) {
+    const idx = indexBySku.get(String(variant.sku ?? "")) ?? -1;
+    const image = images[idx >= 0 && idx < images.length ? idx : 0];
+    const res = await shopifyFetch(`/variants/${variant.id}.json`, {
+      method: "PUT",
+      body: JSON.stringify({ variant: { id: Number(variant.id), image_id: Number(image.id) } }),
+    });
+    if (!res.ok) throw new Error(`variant ${variant.id} image: ${res.status} ${await res.text()}`);
+    attached++;
+  }
+  return attached;
+}
+
+/**
+ * EN translations for a product's option NAMES (Couleur → Color, Taille → Size) and colour
+ * VALUES (Noir → Black) and translated SIZE values (Lot de 4 → Set of 4), so the EN locale
+ * doesn't show French option labels. Skips anything
+ * already translated or that toEnglishColour can't translate. Returns the count registered.
+ */
+export async function registerOptionEnTranslations(
+  productId: string,
+  /** FR size label → original Aosom (English) wording, from createShopifyProduct. */
+  sizeEn: Map<string, string> = new Map(),
+): Promise<number> {
+  const gql = async (query: string, variables: Record<string, unknown>) => {
+    const res = await shopifyFetch("/graphql.json", { method: "POST", body: JSON.stringify({ query, variables }) });
+    if (!res.ok) throw new Error(`GraphQL ${res.status}`);
+    return res.json();
+  };
+  const p = await gql(`query($id: ID!) { product(id: $id) { options { id name optionValues { id name } } } }`, {
+    id: `gid://shopify/Product/${productId}`,
+  });
+  const wanted = new Map<string, string>();
+  for (const o of p.data?.product?.options ?? []) {
+    const en = OPTION_NAME_EN[o.name];
+    if (en) wanted.set(o.id, en);
+    if (o.name === "Couleur") for (const v of o.optionValues) {
+      const ev = toEnglishColour(v.name);
+      if (ev && ev !== v.name) wanted.set(v.id, ev);
+    }
+    if (o.name === "Taille") for (const v of o.optionValues) {
+      const ev = sizeEn.get(v.name);
+      if (ev) wanted.set(v.id, ev);
+    }
+  }
+  if (wanted.size === 0) return 0;
+  const d = await gql(
+    `query($ids: [ID!]!) { translatableResourcesByIds(first: 250, resourceIds: $ids) { nodes { resourceId translatableContent { key digest } translations(locale: "en") { key value } } } }`,
+    { ids: [...wanted.keys()] },
+  );
+  let count = 0;
+  for (const n of d.data?.translatableResourcesByIds?.nodes ?? []) {
+    // Skip only a translation that is already right. Renaming a value keeps its id AND its old English translation
+    // (2026-10-18: "Gris pâle" renamed "Brun pâle vieilli" still read "Light grey" on the EN store), so a stale one is replaced.
+    if (n.translations.some((t: { key: string; value?: string }) => t.key === "name" && t.value === wanted.get(n.resourceId))) continue;
+    const digest = n.translatableContent.find((c: { key: string }) => c.key === "name")?.digest;
+    if (!digest) continue;
+    const r = await gql(
+      `mutation($id: ID!, $t: [TranslationInput!]!) { translationsRegister(resourceId: $id, translations: $t) { userErrors { message } } }`,
+      { id: n.resourceId, t: [{ key: "name", value: wanted.get(n.resourceId), locale: "en", translatableContentDigest: digest }] },
+    );
+    if ((r.data?.translationsRegister?.userErrors ?? []).length === 0) count++;
+  }
+  return count;
+}
+
+const OPTION_NAME_EN: Record<string, string> = { Couleur: "Color", Taille: "Size", Titre: "Title" };
+
+/**
+ * Register the English copy as real Shopify EN translations (see en-translations.ts for why
+ * the custom.* metafields alone aren't enough). Only fills keys Shopify can translate (it
+ * needs the FR source's digest) and skips unsafe values (supplier name, price, French text).
+ * Returns the keys registered.
+ */
+export async function registerProductEnTranslations(
+  productId: string,
+  en: Partial<Record<EnTranslatableKey, string | undefined>>,
+): Promise<EnTranslatableKey[]> {
+  const resourceId = `gid://shopify/Product/${productId}`;
+  const digestRes = await shopifyFetch("/graphql.json", {
+    method: "POST",
+    body: JSON.stringify({
+      query: `query($id: ID!) { translatableResource(resourceId: $id) { translatableContent { key digest } } }`,
+      variables: { id: resourceId },
+    }),
+  });
+  if (!digestRes.ok) throw new Error(`translatableResource failed: ${digestRes.status}`);
+  const digestJson = (await digestRes.json()) as {
+    data?: { translatableResource?: { translatableContent?: { key: string; digest: string }[] } };
+  };
+  const digests = new Map((digestJson.data?.translatableResource?.translatableContent ?? []).map((c) => [c.key, c.digest]));
+
+  const translations: { key: string; value: string; locale: string; translatableContentDigest: string }[] = [];
+  for (const key of Object.keys(EN_FIELD_MAP) as EnTranslatableKey[]) {
+    const value = en[key]?.trim() ?? "";
+    const digest = digests.get(key);
+    if (!digest || rejectEnValue(value)) continue;
+    translations.push({ key, value, locale: "en", translatableContentDigest: digest });
+  }
+  if (translations.length === 0) return [];
+
+  const res = await shopifyFetch("/graphql.json", {
+    method: "POST",
+    body: JSON.stringify({
+      query: `mutation($id: ID!, $t: [TranslationInput!]!) {
+        translationsRegister(resourceId: $id, translations: $t) { userErrors { field message } }
+      }`,
+      variables: { id: resourceId, t: translations },
+    }),
+  });
+  if (!res.ok) throw new Error(`translationsRegister failed: ${res.status}`);
+  const json = (await res.json()) as { data?: { translationsRegister?: { userErrors: { message: string }[] } } };
+  const errors = json.data?.translationsRegister?.userErrors ?? [];
+  if (errors.length) throw new Error(`translationsRegister userErrors: ${errors.map((e) => e.message).join("; ")}`);
+  return translations.map((t) => t.key as EnTranslatableKey);
 }
 
 export async function updateShopifyProduct(
@@ -460,7 +780,7 @@ export async function updateShopifyProduct(
     status?: "active" | "draft" | "archived";
     tags?: string[];
   }
-): Promise<void> {
+): Promise<{ variants?: { id: number; sku?: string }[]; images?: { id: number; src?: string }[] } | undefined> {
   const payload: Record<string, unknown> = { id: shopifyId };
   if (updates.title !== undefined) payload.title = updates.title;
   if (updates.bodyHtml !== undefined) payload.body_html = updates.bodyHtml;
@@ -479,6 +799,10 @@ export async function updateShopifyProduct(
     const text = await response.text();
     throw new Error(`Shopify update failed: ${response.status} — ${text}`);
   }
+  // The updated product (variants + new image ids), so a caller that replaced the gallery can re-attach each
+  // colour's photo — replacing images drops every variant's image link.
+  const data = await response.json().catch(() => null);
+  return data?.product;
 }
 
 /**
@@ -501,6 +825,59 @@ export async function setProductMetafield(
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Shopify set metafield failed: ${response.status} — ${text}`);
+  }
+}
+
+/**
+ * Upsert a single COLLECTION metafield via the GraphQL `metafieldsSet` mutation. Unlike
+ * products, collection writes have no unified REST endpoint (custom_collections vs
+ * smart_collections are separate resources) — metafieldsSet on the GraphQL `Collection` type
+ * works for both subtypes without needing to know which one this id is, so it's the correct
+ * write path rather than a REST PUT.
+ */
+export async function setCollectionMetafield(
+  collectionId: string,
+  namespace: string,
+  key: string,
+  type: string,
+  value: string,
+): Promise<void> {
+  const response = await shopifyFetch("/graphql.json", {
+    method: "POST",
+    body: JSON.stringify({
+      query: `mutation($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+          metafields { id }
+          userErrors { field message }
+        }
+      }`,
+      variables: {
+        metafields: [
+          {
+            ownerId: `gid://shopify/Collection/${collectionId}`,
+            namespace,
+            key,
+            type,
+            value,
+          },
+        ],
+      },
+    }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify set collection metafield failed: ${response.status} — ${text}`);
+  }
+  const body = (await response.json()) as {
+    data?: { metafieldsSet?: { userErrors?: { field: string[]; message: string }[] } };
+    errors?: unknown;
+  };
+  const userErrors = body.data?.metafieldsSet?.userErrors ?? [];
+  if (userErrors.length > 0) {
+    throw new Error(`Shopify set collection metafield failed: ${JSON.stringify(userErrors)}`);
+  }
+  if (body.errors) {
+    throw new Error(`Shopify set collection metafield failed: ${JSON.stringify(body.errors)}`);
   }
 }
 
@@ -539,14 +916,15 @@ export async function updateShopifyVariantPrice(
   const variant: Record<string, unknown> = { id: variantId, price: String(price) };
 
   if (oldPrice !== undefined) {
-    // Only show a struck-through "was" price for a real discount >= the configured
-    // threshold (default 10%). A 1% dip no longer renders a fake sale. oldPrice > 0
-    // guards against divide-by-zero; a price increase clears compare_at_price.
+    // Only show a struck-through "was" price for a real drop >= the configured threshold (default 10%); a 1% dip
+    // never renders a fake sale. oldPrice > 0 guards against divide-by-zero. Any other write (an increase, a small
+    // step, a re-write of the same price) leaves the field ALONE: it used to be cleared, which wiped a valid crossed
+    // price on the next write and would wipe every real discount when the sell-price markup rolls out. Invalid ones
+    // (crossed price at or below the price, or under the threshold) are cleared by the compare-at sync.
     const discountPct = oldPrice > 0 ? (oldPrice - price) / oldPrice : 0;
-    variant.compare_at_price =
-      price < oldPrice && discountPct >= SYNC.MIN_DISCOUNT_DISPLAY_PERCENT / 100
-        ? String(oldPrice)
-        : null;
+    if (price < oldPrice && discountPct >= SYNC.MIN_DISCOUNT_DISPLAY_PERCENT / 100) {
+      variant.compare_at_price = String(oldPrice);
+    }
   }
 
   const response = await shopifyFetch(`/variants/${variantId}.json`, {
@@ -556,6 +934,21 @@ export async function updateShopifyVariantPrice(
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Shopify variant update failed: ${response.status} — ${text}`);
+  }
+}
+
+/**
+ * Set or clear ONLY the struck-through price of a variant ("Ancien prix"); the selling price is never touched.
+ * Used by the compare-at sync (compare-at.ts). Throws on a non-OK response.
+ */
+export async function setVariantCompareAt(variantId: string, compareAt: number | null): Promise<void> {
+  const response = await shopifyFetch(`/variants/${variantId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ variant: { id: variantId, compare_at_price: compareAt === null ? null : String(compareAt) } }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify compare-at update failed: ${response.status} — ${text}`);
   }
 }
 
@@ -601,10 +994,12 @@ export async function draftShopifyProduct(shopifyId: string): Promise<void> {
  */
 export async function publishShopifyProduct(
   shopifyId: string,
-  opts: { activate?: boolean } = {},
+  opts: { activate?: boolean; tags?: string[] } = {},
 ): Promise<void> {
   const product: Record<string, unknown> = { id: shopifyId, published: true };
   if (opts.activate) product.status = "active";
+  // Same full-replace contract as updateShopifyProduct.
+  if (opts.tags) product.tags = opts.tags.join(", ");
   const response = await shopifyFetch(`/products/${shopifyId}.json`, {
     method: "PUT",
     body: JSON.stringify({ product }),
@@ -613,6 +1008,107 @@ export async function publishShopifyProduct(
     const text = await response.text();
     throw new Error(`Shopify publish failed: ${response.status} — ${text}`);
   }
+}
+
+/**
+ * Mirror of publishShopifyProduct — take a product OFF the Online Store via REST
+ * `published: false`. Used by the import pipeline's post-publish quality safety net:
+ * a product that fails the quality gates AFTER creation (image/language/brand-leak,
+ * checked against what Shopify actually serves) gets pulled back rather than left
+ * live with a defect. `deactivate` mirrors `activate` on the publish side (also sets
+ * `status: "draft"` — belt and suspenders, since `published: false` alone still
+ * leaves the product `status: "active"`, which is exactly the anomaly
+ * publish-reconcile.ts exists to fix in the other direction).
+ *
+ * `tags`, when passed, REPLACES the product's tag list (same full-replace contract
+ * as updateShopifyProduct) — the caller is expected to include
+ * `stale-catalog.EXCLUDE_TAG` ("exclude-stale") so publish-reconcile never silently
+ * re-publishes a product this safety net just pulled.
+ */
+export async function unpublishShopifyProduct(
+  shopifyId: string,
+  opts: { deactivate?: boolean; tags?: string[] } = {},
+): Promise<void> {
+  const product: Record<string, unknown> = { id: shopifyId, published: false };
+  if (opts.deactivate) product.status = "draft";
+  if (opts.tags) product.tags = opts.tags.join(", ");
+  const response = await shopifyFetch(`/products/${shopifyId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ product }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify unpublish failed: ${response.status} — ${text}`);
+  }
+}
+
+/**
+ * Fetch what a product actually serves right now — title, description, image URLs,
+ * tags — for the import pipeline's post-publish quality safety net. Deliberately a
+ * fresh GET rather than trusting createShopifyProduct's create response: the point
+ * is to catch drift between what we generated and what Shopify actually stored.
+ */
+export async function fetchShopifyProductContent(shopifyId: string): Promise<{
+  title: string;
+  bodyHtml: string;
+  images: string[];
+  tags: string[];
+}> {
+  const response = await shopifyFetch(
+    `/products/${shopifyId}.json?fields=title,body_html,images,tags`,
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify product fetch failed: ${response.status} — ${text}`);
+  }
+  const data = await response.json();
+  const p = data.product || {};
+  return {
+    title: typeof p.title === "string" ? p.title : "",
+    bodyHtml: typeof p.body_html === "string" ? p.body_html : "",
+    images: Array.isArray(p.images) ? p.images.map((img: { src: string }) => img.src) : [],
+    tags: typeof p.tags === "string" && p.tags.trim() ? p.tags.split(",").map((t: string) => t.trim()) : [],
+  };
+}
+
+/**
+ * What Shopify actually stored for a product — handle, state, per-variant price/inventory tracking and
+ * image count. Read-only; used by the automatic import's layer-3 check, which compares it with what the
+ * import meant to create before the product is activated.
+ */
+export async function fetchShopifyProductSummary(shopifyId: string): Promise<{
+  handle: string;
+  status: string;
+  published: boolean;
+  tags: string[];
+  imageCount: number;
+  variants: Array<{ sku: string; price: number; inventoryManagement: string | null; imageId: number | null }>;
+}> {
+  const response = await shopifyFetch(
+    `/products/${shopifyId}.json?fields=id,handle,status,published_at,tags,images,variants`,
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify product summary failed: ${response.status} — ${text}`);
+  }
+  const data = await response.json();
+  const p = data.product || {};
+  const publishedAt = typeof p.published_at === "string" ? Date.parse(p.published_at) : NaN;
+  return {
+    handle: typeof p.handle === "string" ? p.handle : "",
+    status: typeof p.status === "string" ? p.status : "",
+    published: Number.isFinite(publishedAt) && publishedAt <= Date.now(),
+    tags: typeof p.tags === "string" && p.tags.trim() ? p.tags.split(",").map((t: string) => t.trim()) : [],
+    imageCount: Array.isArray(p.images) ? p.images.length : 0,
+    variants: Array.isArray(p.variants)
+      ? p.variants.map((v: { sku?: string; price?: string; inventory_management?: string | null; image_id?: number | null }) => ({
+          sku: String(v.sku ?? ""),
+          price: Number(v.price),
+          inventoryManagement: v.inventory_management ?? null,
+          imageId: v.image_id ?? null,
+        }))
+      : [],
+  };
 }
 
 /**
@@ -652,6 +1148,56 @@ export async function fetchProductPublishStates(): Promise<
   return out;
 }
 
+/**
+ * Every product's status / Online-Store publication / tags, keyed by numeric id, via the GraphQL
+ * `products` connection — which, unlike the REST list above, includes ARCHIVED products, so an
+ * id missing from the map really means "deleted". ~8 pages of 250 for the current catalogue.
+ * Drives the import page's real-state view (import-job-state.ts).
+ */
+export async function fetchAllProductStates(): Promise<
+  Map<string, { status: "active" | "draft" | "archived"; published: boolean; tags: string[] }>
+> {
+  const out = new Map<string, { status: "active" | "draft" | "archived"; published: boolean; tags: string[] }>();
+  if (!env.hasShopifyToken) return out;
+
+  let after: string | null = null;
+  do {
+    const response = await shopifyFetch("/graphql.json", {
+      method: "POST",
+      body: JSON.stringify({
+        query: `query($after: String) {
+          products(first: 250, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            nodes { legacyResourceId status publishedAt tags }
+          }
+        }`,
+        variables: { after },
+      }),
+    });
+    if (!response.ok) throw new Error(`Shopify product-state fetch failed: ${response.status}`);
+    const body = (await response.json()) as {
+      data?: {
+        products: {
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+          nodes: { legacyResourceId: string; status: string; publishedAt: string | null; tags: string[] }[];
+        };
+      };
+      errors?: unknown;
+    };
+    if (!body.data) throw new Error(`Shopify product-state fetch failed: ${JSON.stringify(body.errors)}`);
+    for (const p of body.data.products.nodes) {
+      out.set(String(p.legacyResourceId), {
+        status: p.status.toLowerCase() as "active" | "draft" | "archived",
+        published: !!p.publishedAt && new Date(p.publishedAt).getTime() <= Date.now(),
+        tags: p.tags,
+      });
+    }
+    after = body.data.products.pageInfo.hasNextPage ? body.data.products.pageInfo.endCursor : null;
+  } while (after);
+
+  return out;
+}
+
 /** Current status + tags for a single product — what the intraday stock-check needs to flip
  * the stock-state tags (preserving the rest) without paging the whole catalog. Returns null
  * if the product no longer exists (404). Tags come back comma-separated; normalized to a list. */
@@ -669,6 +1215,34 @@ export async function getShopifyStockState(
       ? raw.tags.split(",").map((t) => t.trim()).filter(Boolean)
       : [],
   };
+}
+
+/** Real (curated, FR) Shopify title for a product — `products.name` in Turso is Aosom's raw
+ * English feed title, never the storefront title (see CLAUDE.md "Catalog name is English, FR
+ * on Shopify"). Falls back to the given fallback string on any failure so a single API hiccup
+ * never hard-blocks a generation job. */
+export async function getShopifyProductTitle(shopifyProductId: string, fallback: string): Promise<string> {
+  try {
+    const res = await shopifyFetch(`/products/${shopifyProductId}.json?fields=title`);
+    if (!res.ok) return fallback;
+    const data = (await res.json()) as { product?: { title?: string } };
+    return data.product?.title || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** Real Shopify collection handle (URL slug) — never guessed/slugified from the title, which
+ * is exactly what produced dead links in the first SEO-articles lot (docs/seo-articles/). */
+export async function getShopifyCollectionHandle(collectionId: string): Promise<string | null> {
+  try {
+    const res = await shopifyFetch(`/collections/${collectionId}.json?fields=handle`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { collection?: { handle?: string } };
+    return data.collection?.handle || null;
+  } catch {
+    return null;
+  }
 }
 
 // ─── Inventory tracking ─────────────────────────────────────────────
@@ -823,8 +1397,70 @@ export async function fetchAllCollections(): Promise<{ id: string; title: string
   }));
 }
 
-function parseLinkHeader(header: string | null): string | null {
+export function parseLinkHeader(header: string | null): string | null {
   if (!header) return null;
   const match = header.match(/<[^>]*page_info=([^&>]+)[^>]*>;\s*rel="next"/);
   return match ? match[1] : null;
+}
+
+/**
+ * Every product's status, tags, product_type, title and handle (REST, paginated — archived
+ * products are not returned). Drives sold-out-hide.ts, which needs `product_type` for the
+ * seasonal rule; unlike fetchAllShopifyProducts it does NOT skip Costway products.
+ */
+export async function fetchProductVisibilityStates(): Promise<
+  Array<{ shopifyId: string; status: "active" | "draft" | "archived"; tags: string[]; productType: string; title: string; handle: string }>
+> {
+  if (!env.hasShopifyToken) return [];
+  const out: Array<{ shopifyId: string; status: "active" | "draft" | "archived"; tags: string[]; productType: string; title: string; handle: string }> = [];
+  let pageInfo: string | null = null;
+  do {
+    const params = new URLSearchParams({ limit: "250", fields: "id,status,tags,product_type,title,handle" });
+    if (pageInfo) params.set("page_info", pageInfo);
+    const response = await shopifyFetch(`/products.json?${params}`);
+    if (!response.ok) throw new Error(`Shopify visibility-state fetch failed: ${response.status}`);
+    const data = await response.json();
+    for (const p of data.products) {
+      out.push({
+        shopifyId: String(p.id),
+        status: (p.status as "active" | "draft" | "archived") || "active",
+        tags: typeof p.tags === "string" ? p.tags.split(",").map((t: string) => t.trim()).filter(Boolean) : [],
+        productType: typeof p.product_type === "string" ? p.product_type : "",
+        title: typeof p.title === "string" ? p.title : "",
+        handle: typeof p.handle === "string" ? p.handle : "",
+      });
+    }
+    pageInfo = parseLinkHeader(response.headers.get("Link"));
+  } while (pageInfo);
+  return out;
+}
+
+/**
+ * Shopify product ids that appear in an OPEN order not yet fully fulfilled (and not cancelled).
+ * Throws on any API error: callers that must not touch a product someone is buying fail closed.
+ */
+export async function fetchOpenOrderProductIds(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  if (!env.hasShopifyToken) return ids;
+  let pageInfo: string | null = null;
+  do {
+    const params = new URLSearchParams({ limit: "250", status: "open", fields: "id,fulfillment_status,cancelled_at,line_items" });
+    if (pageInfo) {
+      params.delete("status");
+      params.delete("fields");
+      params.set("page_info", pageInfo);
+      params.set("fields", "id,fulfillment_status,cancelled_at,line_items");
+    }
+    const response = await shopifyFetch(`/orders.json?${params}`);
+    if (!response.ok) throw new Error(`Shopify open-orders fetch failed: ${response.status}`);
+    const data = (await response.json()) as {
+      orders?: Array<{ fulfillment_status: string | null; cancelled_at: string | null; line_items?: Array<{ product_id: number | null }> }>;
+    };
+    for (const o of data.orders ?? []) {
+      if (o.cancelled_at || o.fulfillment_status === "fulfilled") continue;
+      for (const li of o.line_items ?? []) if (li.product_id != null) ids.add(String(li.product_id));
+    }
+    pageInfo = parseLinkHeader(response.headers.get("Link"));
+  } while (pageInfo);
+  return ids;
 }

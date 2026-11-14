@@ -76,12 +76,37 @@ describe("dashboard alerts queries (direct SQL)", () => {
   beforeEach(async () => {
     db = setupDb();
     await db.batch([
-      `CREATE TABLE import_jobs (id TEXT PRIMARY KEY, group_key TEXT, product_data TEXT, status TEXT, error TEXT, updated_at TEXT)`,
+      `CREATE TABLE import_jobs (id TEXT PRIMARY KEY, group_key TEXT, product_data TEXT, status TEXT, error TEXT, shopify_id TEXT, updated_at TEXT)`,
       `CREATE TABLE facebook_drafts (id INTEGER PRIMARY KEY AUTOINCREMENT, status TEXT, created_at INTEGER)`,
       `CREATE TABLE feed_syncs (id INTEGER PRIMARY KEY AUTOINCREMENT, feed_type TEXT, item_count INTEGER, status TEXT, error TEXT, fetched_at INTEGER)`,
     ]);
   });
   afterEach(() => db.close());
+
+  // Mirror of getDashboardAlerts' needs_review query + the stage/failures parsing
+  // of the error column ("<pre|post>_publish_gate_failed:code1,code2").
+  it("lists needs_review import jobs and parses stage + failures from the error column", async () => {
+    await db.batch([
+      { sql: `INSERT INTO import_jobs (id, group_key, product_data, status, error, shopify_id, updated_at) VALUES ('j1', 'GRP-1', ?, 'needs_review', 'pre_publish_gate_failed:not_french', NULL, '2026-06-07')`, args: [JSON.stringify({ sku: "SKU-1" })] },
+      { sql: `INSERT INTO import_jobs (id, group_key, product_data, status, error, shopify_id, updated_at) VALUES ('j2', 'GRP-2', ?, 'needs_review', 'post_publish_gate_failed:brand_leak,image_not_clean', '999', '2026-06-07')`, args: [JSON.stringify({ sku: "SKU-2" })] },
+      { sql: `INSERT INTO import_jobs (id, group_key, product_data, status, error, shopify_id, updated_at) VALUES ('j3', 'GRP-3', ?, 'done', NULL, '111', '2026-06-07')`, args: [JSON.stringify({ sku: "SKU-3" })] },
+    ]);
+    const r = await db.execute(`SELECT id, group_key, product_data, error, shopify_id FROM import_jobs WHERE status = 'needs_review' ORDER BY id`);
+    expect(r.rows.length).toBe(2);
+
+    const parse = (row: Record<string, unknown>) => {
+      const raw = (row.error as string) ?? "";
+      const m = /^(pre|post)_publish_gate_failed:(.*)$/.exec(raw);
+      return {
+        stage: m ? m[1] : "unknown",
+        failures: m && m[2] ? m[2].split(",").filter(Boolean) : [],
+        shopifyId: (row.shopify_id as string) || null,
+      };
+    };
+    const rows = r.rows.map((x) => x as unknown as Record<string, unknown>);
+    expect(parse(rows[0])).toEqual({ stage: "pre", failures: ["not_french"], shopifyId: null });
+    expect(parse(rows[1])).toEqual({ stage: "post", failures: ["brand_leak", "image_not_clean"], shopifyId: "999" });
+  });
 
   it("lists errored import jobs and extracts the SKU from product_data JSON", async () => {
     await db.batch([

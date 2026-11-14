@@ -23,6 +23,11 @@ export const env = {
   get klaviyoApiKey(): string | undefined {
     return process.env.KLAVIYO_API_KEY || undefined;
   },
+  /** Optional: recipient of the 06:00 morning report (sent via a Klaviyo metric-triggered
+   *  flow). When unset, the morning-report cron records an error instead of sending. */
+  get morningReportEmail(): string | undefined {
+    return process.env.MORNING_REPORT_EMAIL?.trim() || undefined;
+  },
   get cronSecret(): string {
     const v = process.env.CRON_SECRET;
     if (!v) throw new Error("CRON_SECRET not set in .env.local");
@@ -153,12 +158,63 @@ export const env = {
   get klingApiKey(): string | undefined {
     return process.env.KLING_API_KEY || undefined;
   },
+  // ─── Google Business Profile (GBP) ───
+  // OAuth client can be a dedicated one OR the same installed-app client already used for
+  // Google Ads (GOOGLE_ADS_CLIENT_ID/_SECRET) — the Business Profile API just needs to be
+  // enabled on that same Cloud project. The refresh token is separate because the SCOPE
+  // differs (business.manage vs adwords). See docs/GBP-SETUP.md.
+  get gbpClientId(): string | undefined {
+    return process.env.GOOGLE_GBP_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID || undefined;
+  },
+  get gbpClientSecret(): string | undefined {
+    return process.env.GOOGLE_GBP_CLIENT_SECRET || process.env.GOOGLE_ADS_CLIENT_SECRET || undefined;
+  },
+  get gbpRefreshToken(): string | undefined {
+    return process.env.GOOGLE_GBP_REFRESH_TOKEN || undefined;
+  },
+  /** "accounts/{id}" — the GBP account resource. */
+  get gbpAccountId(): string | undefined {
+    return process.env.GOOGLE_GBP_ACCOUNT_ID || undefined;
+  },
+  /** "locations/{id}" — the specific business location to post to. */
+  get gbpLocationId(): string | undefined {
+    return process.env.GOOGLE_GBP_LOCATION_ID || undefined;
+  },
+  get hasGbp(): boolean {
+    return !!(
+      process.env.GOOGLE_GBP_REFRESH_TOKEN &&
+      (process.env.GOOGLE_GBP_CLIENT_ID || process.env.GOOGLE_ADS_CLIENT_ID) &&
+      (process.env.GOOGLE_GBP_CLIENT_SECRET || process.env.GOOGLE_ADS_CLIENT_SECRET) &&
+      process.env.GOOGLE_GBP_ACCOUNT_ID &&
+      process.env.GOOGLE_GBP_LOCATION_ID
+    );
+  },
+  /** Off by default — first post always waits for explicit human approval regardless of
+   * this flag (see gbp-post-generator.ts). Once Mat has seen a few real posts, flipping this
+   * to "true" lets the weekly cron publish straight through the quality gate unattended. */
+  get gbpAutoPublish(): boolean {
+    return process.env.GBP_AUTO_PUBLISH === "true";
+  },
   get isProduction(): boolean {
     return process.env.NODE_ENV === "production";
   },
   /** Returns true if Shopify token is configured (for optional features). */
   get hasShopifyToken(): boolean {
     return !!process.env.SHOPIFY_ACCESS_TOKEN;
+  },
+  /** Direct Google Gemini API key (generativelanguage.googleapis.com), used by
+   *  classifyProductImageGemini for the gallery-wide image classifier
+   *  (scripts/classify-gallery-images.mts) — NOT Vercel AI Gateway: Gateway charges no
+   *  markup either, but Google's own API has a genuine free tier at this volume that the
+   *  Gateway doesn't offer for this model, and the operator preferred one less billing
+   *  relationship for a ~1-2 $ one-off job (2026-10-01). Every caller must check
+   *  `hasGeminiKey` first and degrade gracefully — never throw from a background job just
+   *  because this optional key is absent. */
+  get geminiApiKey(): string | undefined {
+    return process.env.GEMINI_API_KEY || undefined;
+  },
+  get hasGeminiKey(): boolean {
+    return !!process.env.GEMINI_API_KEY;
   },
 } as const;
 
@@ -176,6 +232,11 @@ export const SHOPIFY = {
 export const BLOG = {
   FR_ID: 90302349417,
   EN_ID: 91161428073,
+  // Dedicated blog for pSEO subcategory guide pages — kept separate from the editorial
+  // "Actualités" blog so the guides form their own clean topical cluster (URL:
+  // /blogs/guides/{article-handle}), rather than diluting into seasonal/editorial content.
+  // Created 2026-09-22 (handle "guides"). EN counterpart not created yet — FR-only pilot.
+  GUIDES_FR_ID: 101889212521,
   ADMIN_ARTICLE_URL: (id: string | number) =>
     `${SHOPIFY.ADMIN_URL}/articles/${id}`,
   // Auto-publish: an article goes live only if Claude's quality judge scores it at/above
@@ -183,6 +244,11 @@ export const BLOG = {
   // cap + on/off switch live in the `blog_schedule` setting (BlogSchedule.posts_per_week /
   // .enabled), edited via /api/settings/schedule.
   AUTO_PUBLISH_SCORE_THRESHOLD: 80,
+  // Collection metafield the queue publisher sets on a guide's shopify_collection_id once
+  // the guide is actually live (never before — see Task C's "only a real published guide
+  // links" requirement). The collection.liquid template reads this to render the "Guide
+  // d'achat" link — see docs/collection-guide-link.liquid for the theme snippet source.
+  GUIDE_URL_METAFIELD: { namespace: "custom", key: "guide_url", type: "single_line_text_field" },
 } as const;
 
 // ─── Aosom Feed ─────────────────────────────────────────────────────
@@ -193,28 +259,23 @@ export const AOSOM = {
   FETCH_BACKOFF_MS: 5000,
 } as const;
 
+// ─── Costway (second supplier — catalogue only, NOT imported to Shopify yet) ──
+
+export const COSTWAY = {
+  CSV_URL: process.env.COSTWAY_FEED_URL || "https://cdn.costway.com/media/feed/CA-Costway-Shopify.csv",
+  /** The feed is ~100 MB; give the download most of the 300s function budget. */
+  FETCH_TIMEOUT_MS: 240_000,
+  /** Truncation guard: far below the live ~22.5k rows, only catches an error page / cut download. */
+  MIN_ROWS_ABSOLUTE: 5_000,
+  /** A feed under this fraction of the last good row count is a truncation, not a catalogue change. */
+  MIN_ROWS_RATIO: 0.7,
+} as const;
+
 // ─── Claude API ─────────────────────────────────────────────────────
 
 export const CLAUDE = {
   /**
-   * The public shopping assistant's model (`/api/assistant` → runAssistant only).
-   *
-   * Moved off Sonnet 4.6 to Haiku 4.5 on 2026-09-02. The assistant's job is choosing among
-   * catalogue rows the search tool has already narrowed, and it accounts for ~86% of all
-   * recorded token volume. Haiku 4.5 is exactly one third of Sonnet 4.6 on BOTH input
-   * ($1 vs $3 per MTok) and output ($5 vs $15), so this cuts the pool's cost by two thirds
-   * however the input/output mix falls.
-   *
-   * ⚠️ This changes cost per token, NOT tokens consumed. The `assistant` pool caps TOKENS,
-   * so this swap alone does not serve one extra shopper — raising LLM_ASSISTANT_DAILY_BUDGET
-   * is what does that, and at Haiku rates 1.5M tokens/day costs what 500k did on Sonnet.
-   *
-   * Override per-deploy with CLAUDE_ASSISTANT_MODEL — set it to "claude-sonnet-4-6" to put
-   * the assistant back on Sonnet with no code change if answer quality regresses.
-   */
-  MODEL_ASSISTANT: process.env.CLAUDE_ASSISTANT_MODEL?.trim() || "claude-haiku-4-5-20251001",
-  /**
-   * The quality / escalation tier. No longer the assistant's model: its remaining job is
+   * The quality / escalation tier. Its remaining job is
    * being the model `generateProductContent` re-runs on when MODEL_BATCH output fails
    * validation (content-generator.ts). It MUST stay stronger than MODEL_BATCH or that
    * escalation degrades into a same-model retry.
@@ -236,6 +297,30 @@ export const CLAUDE = {
   MODEL_BATCH: process.env.CLAUDE_BATCH_MODEL?.trim() || "claude-haiku-4-5",
   MAX_TOKENS_CONTENT: 4000,
   MAX_TOKENS_SOCIAL: 500,
+} as const;
+
+// ─── Gemini API ─────────────────────────────────────────────────────
+
+/**
+ * Gemini models (src/lib/gemini-client.ts). Both moved here on 2026-10-02 after a cost
+ * review, by the operator's decision, with no Claude fallback:
+ *
+ *   - MODEL_ASSISTANT — the public shopping assistant (/api/assistant → runAssistant), the
+ *     biggest LLM line (~15.5M tokens / 30 days). Was Haiku 4.5 ($1 / $5 per MTok);
+ *     Gemini 3.5 Flash-Lite is $0.30 / $2.50.
+ *   - MODEL_VIDEO_QC — video-batch frame QC (demand-gen-clean-window.ts, the sequential-ad
+ *     scene scorer in video-scene-selector.ts). Was Sonnet 4.6 ($3 / $15). On the strict
+ *     lifestyle-photo prompt Gemini matched Sonnet 91/91 (2026-10-02).
+ *
+ * Override per-deploy with GEMINI_ASSISTANT_MODEL / GEMINI_VIDEO_QC_MODEL.
+ */
+export const GEMINI = {
+  MODEL_ASSISTANT: process.env.GEMINI_ASSISTANT_MODEL?.trim() || "gemini-3.5-flash-lite",
+  MODEL_VIDEO_QC: process.env.GEMINI_VIDEO_QC_MODEL?.trim() || "gemini-3.5-flash-lite",
+  /** Storefront "Vois-le chez toi" placement (image in → image out). Listed on this key 2026-10-20 ("Nano Banana 2"). */
+  MODEL_VISUALISER: process.env.GEMINI_VISUALISER_MODEL?.trim() || "gemini-3.1-flash-image",
+  /** "Ameublo décorateur" room reading (image in → JSON out); same cheap tier as the assistant. */
+  MODEL_DECORATOR: process.env.GEMINI_DECORATOR_MODEL?.trim() || "gemini-3.5-flash-lite",
 } as const;
 
 // ─── Meta Graph API ─────────────────────────────────────────────────
@@ -517,6 +602,78 @@ export const DEFAULT_VIDEO_SCHEDULE: VideoSchedule = {
   platform: "both",
 };
 
+// Content-scale chantier's 3 batch video formats each get their OWN dedicated recurring
+// grid (plain PublicationSchedule shape — no ratio/platform knob, unlike video_schedule:
+// these are always 9:16 vertical, published to 'facebook' only, per the batch scripts).
+// Distinct weekday/time from publication_schedule and video_schedule on purpose — real
+// collisions on the shared (platform, scheduled_at) slot are then rare rather than
+// designed-in, though getNextAvailableSlot's retry-on-collision still covers the rare case.
+// Cadence is sized to the backlog each format had at launch (2026-09-21): demand_gen_ext 4,
+// assembly 9 (daily — its UGC-clip pool is small, ~90
+// SKUs total, so it won't refill fast).
+export const DEFAULT_DEMAND_GEN_EXT_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: [
+    { day: "mon", times: ["09:15"] },
+    { day: "wed", times: ["09:15"] },
+    { day: "fri", times: ["09:15"] },
+  ],
+  timezone: "America/Toronto",
+  max_per_day: 1,
+};
+
+
+// pSEO guide deferred publish — operator approval no longer publishes immediately (see
+// guide-scheduler.ts); it books the next free slot on THIS grid instead. Default cadence is
+// Mat's explicit "1-2 guides/week, spaced" ask: Tuesday + Friday, one per day, so guides never
+// all land on the same day.
+export const DEFAULT_GUIDE_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: [
+    { day: "tue", times: ["10:00"] },
+    { day: "fri", times: ["10:00"] },
+  ],
+  timezone: "America/Toronto",
+  max_per_day: 1,
+};
+
+// Studio Ameublo "Réaction" videos run on their OWN grid, apart from the 8-a-day mascot grid
+// below: one a day per page. Sorted times split by language like ameublo_schedule (1st = FR
+// Ameublo Direct, 2nd = EN Furnish Direct). Its hours must never equal an ameublo_schedule
+// hour: the queue's unique slot index is global per platform.
+export const DEFAULT_REACTION_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: (["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const).map((day) => ({ day, times: ["11:00", "19:00"] })),
+  timezone: "America/Toronto",
+  max_per_day: 2,
+};
+
+// Studio Ameublo mascot Reels (FR = Ameublo Direct, EN = Furnish Direct): 8 a day, every day.
+// Times are sorted: the 1st, 3rd, 5th and 7th belong to French videos, the 2nd, 4th, 6th and 8th
+// to English ones (see ameublo-approval.ts), so each page gets 4 a day at fixed, spread-out
+// hours, each on its own hourly publisher run (:00 cron).
+export const DEFAULT_AMEUBLO_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: [{ day: "mon", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "tue", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "wed", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "thu", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "fri", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "sat", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }, { day: "sun", times: ["07:45", "09:45", "12:15", "14:30", "16:15", "18:30", "20:15", "21:45"] }],
+  timezone: "America/Toronto",
+  max_per_day: 8,
+};
+
+export const DEFAULT_ASSEMBLY_SCHEDULE: PublicationSchedule = {
+  enabled: true,
+  slots: [
+    { day: "mon", times: ["17:00"] },
+    { day: "tue", times: ["17:00"] },
+    { day: "wed", times: ["17:00"] },
+    { day: "thu", times: ["17:00"] },
+    { day: "fri", times: ["17:00"] },
+    { day: "sat", times: ["17:00"] },
+    { day: "sun", times: ["17:00"] },
+  ],
+  timezone: "America/Toronto",
+  max_per_day: 1,
+};
+
 // ─── Slideshow content settings ─────────────────────────────────────
 // Operator controls for the slideshow/montage content engine (Module G). The
 // template keys mirror SlideshowTemplate in src/lib/slideshow/types.ts but are
@@ -620,4 +777,15 @@ export const ALLOWED_SETTINGS_KEYS = new Set([
   "blog_schedule",
   // video_schedule (PublicationSchedule shape) — independent reel/video cadence.
   "video_schedule",
+  // Per-format recurring grids for the content-scale chantier's 3 batch video formats
+  // (PublicationSchedule shape each, edited via the generic /api/settings route — no
+  // dedicated schedule-tab UI for these yet).
+  "demand_gen_ext_schedule",
+  "assembly_schedule",
+  // ameublo_schedule (PublicationSchedule shape) — Studio Ameublo mascot Reels, FR/EN interleaved.
+  "ameublo_schedule",
+  // reaction_schedule (PublicationSchedule shape) — Studio Ameublo "Réaction" videos, 1/day/page, apart from ameublo_schedule.
+  "reaction_schedule",
+  // guide_schedule (PublicationSchedule shape) — pSEO guide deferred-publish cadence.
+  "guide_schedule",
 ]);

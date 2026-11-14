@@ -97,13 +97,13 @@ describe("verifyAssistantToken", () => {
 describe("limitPayload — shopper-facing copy", () => {
   it("tells the shopper WHEN to come back on an hourly-quota trip (FR)", () => {
     const p = limitPayload("fr", "hourly_quota", 12 * 60);
-    expect(p.message).toBe("Trop de requêtes. Réessayez dans environ 12 minutes.");
+    expect(p.message).toBe("Ouf, ça fait beaucoup de questions d'affilée ! Laissez-moi regonfler mes coussins et revenez me voir dans environ 12 minutes 🛋️");
     expect(p.retryAfter).toBe(720);
   });
 
   it("same in EN", () => {
     expect(limitPayload("en", "hourly_quota", 12 * 60).message)
-      .toBe("Too many requests. Please try again in about 12 minutes.");
+      .toBe("Phew, that was a lot of questions in a row! Let me fluff my cushions and come back in about 12 minutes 🛋️");
   });
 
   it("rounds up and never says 'in 0 minutes'", () => {
@@ -113,9 +113,9 @@ describe("limitPayload — shopper-facing copy", () => {
 
   it("gives a graceful message when the daily pool is exhausted, not an error (FR + EN)", () => {
     expect(limitPayload("fr", "budget_exhausted", 0).message)
-      .toBe("Notre assistant est temporairement indisponible. Écrivez-nous à info@ameublodirect.ca 😊");
+      .toBe("Je fais une petite sieste dans mon coin 💤 Écrivez-nous à info@ameublodirect.ca ou appelez le 514-292-7788, on vous répond avec plaisir !");
     expect(limitPayload("en", "budget_exhausted", 0).message)
-      .toBe("Our assistant is temporarily unavailable. Email us at info@ameublodirect.ca 😊");
+      .toBe("I'm taking a little nap in my corner 💤 Email us at info@ameublodirect.ca or call 514-292-7788, we'll gladly help!");
   });
 
   it("does not append the generic contact tail to the self-contained budget copy", () => {
@@ -139,7 +139,7 @@ describe("limitPayload — shopper-facing copy", () => {
       expect(p.reply).toContain("https://wa.me/15145550123");
       // `message` stays the operator-specified sentence, verbatim.
       expect(p.message).toBe(
-        "Notre assistant est temporairement indisponible. Écrivez-nous à info@ameublodirect.ca 😊",
+        "Je fais une petite sieste dans mon coin 💤 Écrivez-nous à info@ameublodirect.ca ou appelez le 514-292-7788, on vous répond avec plaisir !",
       );
       expect(p.reply.match(/info@ameublodirect\.ca/g)).toHaveLength(1);
     } finally {
@@ -320,8 +320,8 @@ describe("POST /api/assistant — quota and budget responses", () => {
     expect(body.success).toBe(true);
     expect(body.data.limitReached).toBe(true);
     expect(body.data.reason).toBe("budget_exhausted");
-    expect(body.data.message).toContain("temporairement indisponible");
-    expect(body.data.reply).toContain("temporairement indisponible");
+    expect(body.data.message).toContain("petite sieste");
+    expect(body.data.reply).toContain("petite sieste");
     expect(body.data.reply).toMatch(/@/); // contact route out
   });
 

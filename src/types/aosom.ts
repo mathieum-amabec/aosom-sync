@@ -7,6 +7,10 @@ export interface AosomRawRow {
   Image: string;
   Name: string;
   Price: string;
+  /** Wholesale (B2B) price, our cost. Replaced `Price` in the feed on 2026-10-15. */
+  "2B Product Price"?: string;
+  /** Delivery fee Aosom charges us, in a separate column since 2026-10-15. */
+  shiping_fee?: string;
   custom_tagid: string;
   Category: string;
   Qty: string;
@@ -47,6 +51,8 @@ export interface AosomProduct {
   sku: string;
   name: string;
   price: number;
+  /** What a unit costs us: wholesale price + delivery fee, when the feed gives it (never a display price). */
+  cost?: number;
   qty: number;
   color: string;
   size: string;
@@ -56,6 +62,8 @@ export interface AosomProduct {
   gtin: string;
   weight: number;
   dimensions: { length: number; width: number; height: number };
+  /** The feed's own strings, unit included ("47.80 in", "10.00 ft", "120.00 cm") — see fit-dims.ts lengthToCm. */
+  dimensionsRaw?: { length: string; width: string; height: string };
   productType: string; // hierarchical e.g. "Patio & Garden > Gazebos"
   category: string;
   brand: string; // extracted from Name or Category
@@ -101,6 +109,7 @@ export interface AosomVariant {
   gtin: string;
   weight: number;
   dimensions: { length: number; width: number; height: number };
+  dimensionsRaw?: { length: string; width: string; height: string };
   images: string[];
   estimatedArrival: string;
   outOfStockExpected: string;

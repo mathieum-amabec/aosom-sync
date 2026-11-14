@@ -64,20 +64,20 @@ describe("limitPayload", () => {
   it("carries the exact French copy", () => {
     const p = limitPayload("fr", "consecutive_messages", 60);
     expect(p.message).toBe(
-      "Vous avez atteint la limite de questions. Notre équipe peut vous aider directement 😊",
+      "Une question à la fois et je vous suis, promis 😄 Si c'est plus simple, notre équipe peut vous répondre directement.",
     );
   });
 
   it("carries the exact English copy", () => {
     const p = limitPayload("en", "consecutive_messages", 60);
-    expect(p.message).toBe("You've reached the question limit. Our team can help you directly 😊");
+    expect(p.message).toBe("One question at a time and I'll keep up, promise 😄 If it's easier, our team can answer you directly.");
   });
 
   it("names the wait on an hourly-quota trip, in both locales", () => {
     expect(limitPayload("fr", "hourly_quota", 3600).message)
-      .toBe("Trop de requêtes. Réessayez dans environ 60 minutes.");
+      .toBe("Ouf, ça fait beaucoup de questions d'affilée ! Laissez-moi regonfler mes coussins et revenez me voir dans environ 60 minutes 🛋️");
     expect(limitPayload("en", "hourly_quota", 3600).message)
-      .toBe("Too many requests. Please try again in about 60 minutes.");
+      .toBe("Phew, that was a lot of questions in a row! Let me fluff my cushions and come back in about 60 minutes 🛋️");
   });
 
   it("renders in the deployed widget: it has reply + products", () => {

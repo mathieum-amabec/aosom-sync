@@ -15,7 +15,7 @@ vi.mock("@/lib/llm-usage", () => ({
   estimateCostUsd: vi.fn().mockReturnValue(0),
   poolModel: vi.fn().mockReturnValue("test-model"),
   blendedRatePerMTok: vi.fn().mockReturnValue(0),
-  ASSUMED_INPUT_SHARE: { assistant: 0.5, batch: 0.5, maintenance: 0.5 },
+  ASSUMED_INPUT_SHARE: { assistant: 0.5, batch: 0.5, maintenance: 0.5, video: 0.5 },
 }));
 
 import { GET } from "@/app/api/dashboard/llm-usage/route";
@@ -26,7 +26,7 @@ const windowMock = vi.mocked(getLlmUsageWindow);
 describe("GET /api/dashboard/llm-usage — uncapped pool serialization", () => {
   beforeEach(() => {
     windowMock.mockReset().mockResolvedValue([
-      { day: "2026-09-13", assistant: 100, batch: 200, maintenance: 929 },
+      { day: "2026-09-13", assistant: 100, batch: 200, maintenance: 929, video: 367_120 },
     ] as unknown as Awaited<ReturnType<typeof getLlmUsageWindow>>);
     // maintenance is uncapped by default in this test env (no LLM_MAINTENANCE_DAILY_BUDGET set).
     delete process.env.LLM_MAINTENANCE_DAILY_BUDGET;
@@ -48,6 +48,18 @@ describe("GET /api/dashboard/llm-usage — uncapped pool serialization", () => {
     const assistant = body.pools.find((p: { pool: string }) => p.pool === "assistant");
     expect(typeof assistant.budget).toBe("number");
     expect(Number.isFinite(assistant.budget)).toBe(true);
+  });
+
+  it("includes the video pool, capped (not null/Infinity) unlike maintenance", async () => {
+    const res = await GET();
+    const body = await res.json();
+    const video = body.pools.find((p: { pool: string }) => p.pool === "video");
+
+    expect(video).toBeDefined();
+    expect(video.tokens).toBe(367_120);
+    // video is capped by default (400k) — unlike maintenance, this must be a real number.
+    expect(typeof video.budget).toBe("number");
+    expect(Number.isFinite(video.budget)).toBe(true);
   });
 
   it("round-trips through JSON.stringify exactly like the real HTTP response would", async () => {

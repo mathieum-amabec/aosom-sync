@@ -29,7 +29,9 @@ import { createClient } from "@libsql/client";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fetchAllShopifyProducts, updateShopifyVariantPrice } from "@/lib/shopify-client";
+import { fetchAllShopifyProducts, updateShopifyVariantPrice, fetchVariant } from "@/lib/shopify-client";
+import { writePriceVerified } from "@/lib/price-protection";
+import { recordPriceFloorIncident } from "@/lib/database";
 import type { ShopifyExistingProduct } from "@/types/sync";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -221,7 +223,7 @@ export function writeReport(data: ReportData): string {
 // ─── Apply (exported for unit tests) ─────────────────────────────────────────
 export async function applyPriceDiffs(
   diffs: PriceDiff[],
-  opts: { delayMs?: number } = {}
+  opts: { delayMs?: number; sleep?: (ms: number) => Promise<void> } = {}
 ): Promise<{ applied: number; failed: number; errors: { sku: string; error: string }[] }> {
   const delayMs = opts.delayMs ?? APPLY_DELAY_MS;
   let applied = 0;
@@ -230,12 +232,33 @@ export async function applyPriceDiffs(
 
   for (const diff of diffs) {
     try {
-      await updateShopifyVariantPrice(diff.variant_id, diff.db_price);
+      // LAYER 1: write, read back, retry up to 3x — the same machinery the daily push
+      // and the hourly reconcile use. A 200 on this PUT means Shopify accepted the
+      // request, not that the price actually stuck; this script used to trust the PUT
+      // alone, which is exactly the class of gap that left 842-375V00CG underpriced.
+      const result = await writePriceVerified(diff.sku, diff.variant_id, diff.db_price, undefined, {
+        writePrice: (variantId, price) => updateShopifyVariantPrice(variantId, price),
+        readVariant: fetchVariant,
+        sleep: opts.sleep,
+      });
+      if (!result.ok) {
+        throw new Error(result.error ?? `price write not verified for ${diff.sku}`);
+      }
       applied++;
       log.info(
-        { sku: diff.sku, from: diff.shopify_price, to: diff.db_price },
-        "Price updated"
+        { sku: diff.sku, from: diff.shopify_price, to: diff.db_price, attempts: result.attempts },
+        "Price updated (verified)"
       );
+      // TASK 3: only the below-floor direction is a real incident.
+      if (diff.shopify_price < diff.db_price) {
+        try {
+          await recordPriceFloorIncident({
+            sku: diff.sku, oldPrice: diff.shopify_price, newPrice: diff.db_price, source: "force_push_script",
+          });
+        } catch (logErr) {
+          log.error({ sku: diff.sku, err: logErr instanceof Error ? logErr.message : String(logErr) }, "Failed to record price_floor_incident");
+        }
+      }
     } catch (err) {
       failed++;
       const message = err instanceof Error ? err.message : String(err);

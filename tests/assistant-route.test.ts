@@ -120,7 +120,7 @@ describe("POST /api/assistant — conversation limits", () => {
     secondsUntilAssistantSlot.mockResolvedValue(9 * 60);
     const res = await post({ message: "a sofa", locale: "en" }, { ip: "10.1.0.3" });
     const body = await res.json();
-    expect(body.data.reply).toContain("Please try again in about 9 minutes");
+    expect(body.data.reply).toContain("come back in about 9 minutes");
   });
 
   it("hands off on the 4th consecutive shopper turn, before touching the quota", async () => {

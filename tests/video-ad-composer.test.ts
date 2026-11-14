@@ -229,6 +229,7 @@ describe("music families by product category", () => {
     "C:/a/mixkit-golden-storm-470.mp3",
     "C:/a/mixkit-pop-250.mp3",
     "C:/a/mixkit-funk-1140.mp3",
+    "C:/a/mixkit-holiday-seasonal-510.mp3",
   ];
   // Windows paths on purpose: production builds these with path.join, so they carry
   // backslashes. An earlier fixture used forward slashes and let through a base() that only
@@ -248,11 +249,17 @@ describe("music families by product category", () => {
     expect(musicFamilyFor("Home Furnishings > Storage & Organization > Shelving")).toBe("bureau");
     expect(musicFamilyFor("Home Furnishings > Living Room Furniture > Sofas")).toBe("interieur");
     expect(musicFamilyFor("Home Furnishings > Bedroom Furniture > Beds")).toBe("interieur");
+    expect(musicFamilyFor("Home Furnishings > Holiday & Seasonal > Christmas Trees > Pre Lit Christmas Trees")).toBe("noel");
   });
 
   // Storage is Home Furnishings too, so order matters: it must not fall through to interieur.
   it("routes storage to bureau even though it lives under Home Furnishings", () => {
     expect(musicFamilyFor("Home Furnishings > Storage & Organization > Storage Cabinets")).toBe("bureau");
+  });
+
+  // Holiday & Seasonal is Home Furnishings too — same ordering hazard as storage above.
+  it("routes Holiday & Seasonal to noel even though it lives under Home Furnishings", () => {
+    expect(musicFamilyFor("Home Furnishings > Holiday & Seasonal > Christmas Trees > Artificial Christmas Trees")).toBe("noel");
   });
 
   it("falls back rather than guessing on an unknown or empty product type", () => {
@@ -266,6 +273,7 @@ describe("music families by product category", () => {
     expect(base(pickMusic("X", WINPATHS, "Toys & Games > Ride-On").track)).toBe("mixkit-pop-250.mp3");
     expect(base(pickMusic("X", WINPATHS, "Office Products > Desks").track)).toBe("mixkit-golden-storm-470.mp3");
     expect(base(pickMusic("X", WINPATHS, "Home Furnishings > Living Room Furniture").track)).toBe("mixkit-lounge-695.mp3");
+    expect(base(pickMusic("X", WINPATHS, "Home Furnishings > Holiday & Seasonal > Christmas Trees").track)).toBe("mixkit-holiday-seasonal-510.mp3");
   });
 
   // The identity that already shipped on every published patio ad must not move.

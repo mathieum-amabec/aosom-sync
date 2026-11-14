@@ -27,7 +27,12 @@
  */
 
 export const PINTEREST_API_BASE = "https://api.pinterest.com/v5";
-/** Scopes a token must carry for `createPin` to succeed. */
+/**
+ * Apps on Pinterest "Trial" access talk to this separate environment: nothing created there is
+ * public, and its tokens do not work on the production base (and vice versa).
+ */
+export const PINTEREST_SANDBOX_API_BASE = "https://api-sandbox.pinterest.com/v5";
+/** Scopes a token must carry for `createPin` / `createVideoPin` to succeed. */
 export const PINTEREST_SCOPES = ["pins:write", "boards:read"] as const;
 
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -39,9 +44,14 @@ export interface PinterestCredentials {
   accessToken: string;
   /** Destination board. Pinterest has no "default board" — a Pin without one is rejected. */
   boardId: string;
+  /** Talk to the sandbox environment (Trial access) instead of production. */
+  sandbox?: boolean;
 }
 
-/** Env vars this client reads. PINTEREST_TAG_ID is deliberately NOT among them. */
+/** Base URL of the environment these credentials belong to. */
+export const pinterestApiBase = (sandbox?: boolean): string => (sandbox ? PINTEREST_SANDBOX_API_BASE : PINTEREST_API_BASE);
+
+/** Env vars this client reads. PINTEREST_TAG_ID is deliberately NOT among them. `PINTEREST_ENV=sandbox` is optional. */
 export const PINTEREST_ENV_KEYS = ["PINTEREST_ACCESS_TOKEN", "PINTEREST_BOARD_ID"] as const;
 
 /** Returns null when anything required is missing, so callers degrade to dry-run. */
@@ -51,7 +61,7 @@ export function readPinterestCredentials(
   const accessToken = source.PINTEREST_ACCESS_TOKEN;
   const boardId = source.PINTEREST_BOARD_ID;
   if (!accessToken || !boardId) return null;
-  return { accessToken, boardId };
+  return { accessToken, boardId, ...(source.PINTEREST_ENV === "sandbox" ? { sandbox: true } : {}) };
 }
 
 /** Which required env vars are missing — for an actionable "run setup" error. */
@@ -125,6 +135,38 @@ export function buildPinBody(input: PinInput, boardId: string): Record<string, u
   };
 }
 
+// ─── Video Pins ───────────────────────────────────────────────────────────────────────
+
+export interface VideoPinInput {
+  title: string;
+  description: string;
+  /** Destination URL — the PDP. This is what makes a Pin worth publishing: it is clickable. */
+  link: string;
+  /** Publicly reachable MP4 (Pinterest takes the bytes from us, not from the URL: we download then upload). */
+  videoUrl: string;
+  /** REQUIRED by Pinterest for video Pins. Publicly reachable image. */
+  coverImageUrl: string;
+  altText?: string;
+}
+
+/** Pinterest: MP4/MOV/M4V, 4 s – 15 min, at most 100 MB. */
+export const PINTEREST_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
+
+/** Exact v5 body for a Pin whose media was already uploaded (`mediaId`). */
+export function buildVideoPinBody(input: VideoPinInput, boardId: string, mediaId: string): Record<string, unknown> {
+  const { media_source: _image, ...base } = buildPinBody({ ...input, imageUrl: input.coverImageUrl }, boardId);
+  void _image;
+  return { ...base, media_source: { source_type: "video_id", media_id: mediaId, cover_image_url: input.coverImageUrl } };
+}
+
+/** What `POST /media` answers: where to put the bytes, and the form fields S3 insists on. */
+interface RegisteredMedia {
+  media_id?: string;
+  upload_url?: string;
+  upload_parameters?: Record<string, string>;
+}
+const MEDIA_FAILED = new Set(["failed"]);
+
 /**
  * Flatten HTML to plain text for a Pin description.
  *
@@ -186,6 +228,12 @@ export interface PinterestClientOptions {
   dryRun?: boolean;
   /** Injectable for tests. */
   fetchImpl?: typeof fetch;
+  /** Injectable for tests: how the video-processing poll waits. */
+  sleepImpl?: (ms: number) => Promise<void>;
+  /** Poll the uploaded video's processing status this often (default 3 s)… */
+  pollIntervalMs?: number;
+  /** …for at most this long (default 120 s) before giving up. */
+  maxWaitMs?: number;
 }
 
 export class PinterestClient {
@@ -195,11 +243,17 @@ export class PinterestClient {
 
   private readonly creds: PinterestCredentials | null;
   private readonly fetchImpl: typeof fetch;
+  private readonly sleep: (ms: number) => Promise<void>;
+  private readonly pollIntervalMs: number;
+  private readonly maxWaitMs: number;
   private dryRunCounter = 0;
 
   constructor(creds: PinterestCredentials | null, options: PinterestClientOptions = {}) {
     this.dryRun = options.dryRun ?? false;
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.sleep = options.sleepImpl ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.pollIntervalMs = options.pollIntervalMs ?? 3_000;
+    this.maxWaitMs = options.maxWaitMs ?? 120_000;
     this.creds = creds;
     if (!this.dryRun && !creds) {
       throw new Error(
@@ -234,8 +288,74 @@ export class PinterestClient {
     return { pinId: json.id, url: `https://www.pinterest.com/pin/${json.id}/` };
   }
 
-  /** POST with a bounded timeout and a retry on 429/5xx. */
-  private async request(path: string, body: unknown, attempt = 0): Promise<unknown> {
+  /**
+   * Create a video Pin: register the media, upload the bytes (S3, not Pinterest), wait for Pinterest
+   * to process them, then create the Pin on the media id. Four calls where an image Pin needs one,
+   * which is why each is recorded in `plan` — a half-finished run is diagnosable from it.
+   *
+   * Under dry-run nothing is downloaded or sent; the planned bodies are recorded with synthetic ids.
+   */
+  async createVideoPin(input: VideoPinInput): Promise<{ pinId: string; url: string; mediaId: string }> {
+    if (this.dryRun) {
+      const mediaId = `dryrun-media-${++this.dryRunCounter}`;
+      this.plan.push({ step: "registerMedia", path: "/media", body: { media_type: "video" }, pinId: mediaId });
+      this.plan.push({ step: "uploadVideo", path: "(upload_url)", body: { source: input.videoUrl }, pinId: mediaId });
+      this.plan.push({ step: "awaitMedia", path: `/media/${mediaId}`, body: null, pinId: mediaId });
+      const pinId = `dryrun-pin-${++this.dryRunCounter}`;
+      this.plan.push({ step: "createPin", path: "/pins", body: buildVideoPinBody(input, this.boardId, mediaId), pinId });
+      return { pinId, url: `https://www.pinterest.com/pin/${pinId}/`, mediaId };
+    }
+
+    const reg = (await this.request("/media", { media_type: "video" })) as RegisteredMedia;
+    if (!reg.media_id || !reg.upload_url || !reg.upload_parameters) {
+      throw new Error(`Pinterest /media returned an unexpected answer: ${JSON.stringify(reg).slice(0, 200)}`);
+    }
+    this.plan.push({ step: "registerMedia", path: "/media", body: { media_type: "video" }, pinId: reg.media_id });
+
+    await this.uploadVideoBytes(input.videoUrl, reg.upload_url, reg.upload_parameters);
+    this.plan.push({ step: "uploadVideo", path: "(upload_url)", body: { source: input.videoUrl }, pinId: reg.media_id });
+
+    await this.awaitMedia(reg.media_id);
+    this.plan.push({ step: "awaitMedia", path: `/media/${reg.media_id}`, body: null, pinId: reg.media_id });
+
+    const body = buildVideoPinBody(input, this.boardId, reg.media_id);
+    const json = (await this.request("/pins", body)) as { id?: string };
+    if (!json.id) throw new Error(`Pinterest /pins returned no id: ${JSON.stringify(json).slice(0, 200)}`);
+    this.plan.push({ step: "createPin", path: "/pins", body, pinId: json.id });
+    return { pinId: json.id, url: `https://www.pinterest.com/pin/${json.id}/`, mediaId: reg.media_id };
+  }
+
+  /** Download the MP4 and POST it to the pre-signed upload URL (no Pinterest auth there; S3 wants the `file` field LAST). */
+  private async uploadVideoBytes(videoUrl: string, uploadUrl: string, params: Record<string, string>): Promise<void> {
+    const src = await this.fetchImpl(videoUrl);
+    if (!src.ok) throw new Error(`Pinterest video upload: cannot download ${videoUrl} (HTTP ${src.status})`);
+    const bytes = await src.arrayBuffer();
+    if (bytes.byteLength > PINTEREST_VIDEO_MAX_BYTES) {
+      throw new Error(`Pinterest video upload: ${(bytes.byteLength / 1048576).toFixed(1)} MB exceeds the 100 MB limit`);
+    }
+    const form = new FormData();
+    for (const [k, v] of Object.entries(params)) form.append(k, v);
+    form.append("file", new Blob([bytes], { type: "video/mp4" }), "video.mp4");
+    const up = await this.fetchImpl(uploadUrl, { method: "POST", body: form });
+    if (!up.ok) throw new Error(`Pinterest video upload: storage answered HTTP ${up.status}`);
+  }
+
+  /** Poll `GET /media/{id}` until Pinterest finished processing the video (or failed / ran out of time). */
+  private async awaitMedia(mediaId: string): Promise<void> {
+    const deadline = Date.now() + this.maxWaitMs;
+    for (;;) {
+      const m = (await this.request(`/media/${mediaId}`, undefined, 0, "GET")) as { status?: string };
+      if (m.status === "succeeded") return;
+      if (m.status && MEDIA_FAILED.has(m.status)) throw new Error(`Pinterest could not process the video (media ${mediaId}: ${m.status})`);
+      if (Date.now() + this.pollIntervalMs > deadline) {
+        throw new Error(`Pinterest video still "${m.status ?? "unknown"}" after ${Math.round(this.maxWaitMs / 1000)}s (media ${mediaId})`);
+      }
+      await this.sleep(this.pollIntervalMs);
+    }
+  }
+
+  /** JSON call with a bounded timeout and a retry on 429/5xx. POST unless `method` says otherwise. */
+  private async request(path: string, body?: unknown, attempt = 0, method: "GET" | "POST" = "POST"): Promise<unknown> {
     const creds = this.creds;
     if (!creds) throw new Error("PinterestClient: no credentials");
 
@@ -243,14 +363,14 @@ export class PinterestClient {
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     let res: Response;
     try {
-      res = await this.fetchImpl(`${PINTEREST_API_BASE}${path}`, {
-        method: "POST",
+      res = await this.fetchImpl(`${pinterestApiBase(creds.sandbox)}${path}`, {
+        method,
         signal: controller.signal,
         headers: {
           Authorization: `Bearer ${creds.accessToken}`,
-          "Content-Type": "application/json",
+          ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
         },
-        body: JSON.stringify(body),
+        ...(method === "POST" ? { body: JSON.stringify(body) } : {}),
       });
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
@@ -264,7 +384,7 @@ export class PinterestClient {
     if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
       const retryAfter = Number(res.headers.get("Retry-After")) || 2 ** attempt;
       await new Promise((r) => setTimeout(r, Math.min(retryAfter, 30) * 1000));
-      return this.request(path, body, attempt + 1);
+      return this.request(path, body, attempt + 1, method);
     }
 
     const json: unknown = await res.json().catch(() => ({}));

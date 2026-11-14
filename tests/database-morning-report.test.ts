@@ -1,0 +1,320 @@
+/**
+ * The morning-report count helpers, run through the REAL exported functions against the REAL
+ * schema in an in-memory libsql database (same approach as database-critical-queries.test.ts),
+ * so the status rules can't silently drift from the dashboard's own.
+ */
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import type { Client } from "@libsql/client";
+
+// Must be set before database.ts is imported: it caches its client on first use.
+process.env.TURSO_DATABASE_URL = ":memory:";
+process.env.TURSO_AUTH_TOKEN = "test";
+
+let db: Client;
+let mod: typeof import("@/lib/database");
+
+let guideSeq = 0;
+async function guide(over: { status?: string; overall?: string | null; scheduled?: string | null; title?: string }) {
+  guideSeq++;
+  await db.execute({
+    sql: `INSERT INTO guide_pages (aosom_category, shopify_collection_id, shopify_collection_title, status,
+            overall_status, scheduled_publish_at, title)
+          VALUES (?, ?, 'Coll', ?, ?, ?, ?)`,
+    args: [
+      `cat-${guideSeq}`,
+      `coll-${guideSeq}`,
+      over.status ?? "pending_review",
+      over.overall === undefined ? "ready" : over.overall,
+      over.scheduled ?? null,
+      over.title ?? `Guide ${guideSeq}`,
+    ],
+  });
+}
+
+let queueSeq = 0;
+async function queued(contentType: string, status: string, scheduledAt: string) {
+  queueSeq++;
+  await db.execute({
+    sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at, status)
+          VALUES (?, ?, 'facebook', '{}', ?, ?)`,
+    args: [contentType, `c-${queueSeq}`, scheduledAt, status],
+  });
+}
+
+/** SQLite 'YYYY-MM-DD HH:MM:SS' UTC, `hours` from now. */
+const at = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString().slice(0, 19).replace("T", " ");
+
+beforeAll(async () => {
+  mod = await import("@/lib/database");
+  db = await mod.ensureSchema();
+});
+
+beforeEach(async () => {
+  for (const t of [
+    "guide_pages", "ameublo_test_videos", "publication_queue", "image_review_queue", "import_jobs", "notifications",
+    "price_floor_incidents", "facebook_drafts", "blog_posts", "cron_runs", "queue_post_ids", "reel_insights",
+  ]) {
+    await db.execute(`DELETE FROM ${t}`);
+  }
+  await db.execute(`DELETE FROM settings WHERE key IN ('price_audit_result', 'catalog_consistency_audit', 'feed_integrity_audit', 'site_health_audit')`);
+});
+
+describe("loadGuardInputs", () => {
+  it("reads each guard's stored result, its LATEST cron run and the pending image queue", async () => {
+    await mod.setSetting("price_audit_result", JSON.stringify({ belowFloor: 2, failed: 1, auditedAt: 100 }));
+    await mod.setSetting("catalog_consistency_audit", JSON.stringify({ duplicateColorOptions: 5, auditedAt: 200 }));
+    await mod.setSetting("feed_integrity_audit", "not json"); // corrupt → null, never a throw
+    await mod.setSetting("site_health_audit", JSON.stringify({ ok: true, reasons: [], auditedAt: 300 }));
+    // Older error then newer success for price-audit: only the latest counts.
+    await db.execute(`INSERT INTO cron_runs (name, status, detail, ran_at) VALUES
+      ('price-audit', 'error', 'boom', 10), ('price-audit', 'success', 'ok', 20),
+      ('catalog-consistency', 'error', 'rate limit', 30), ('sync', 'error', 'not a guard', 40)`);
+    await db.execute(`INSERT INTO image_review_queue (shopify_product_id, sku, current_url, proposed_url, status, created_at) VALUES
+      ('1', 'a', 'u', 'v', 'pending', 500), ('2', 'b', 'u', 'v', 'pending', 400), ('3', 'c', 'u', 'v', 'applied', 1)`);
+
+    const g = await mod.loadGuardInputs();
+    expect(g.priceAudit).toEqual({ belowFloor: 2, failed: 1, auditedAt: 100 });
+    expect(g.catalogAudit).toEqual({ duplicateColorOptions: 5, auditedAt: 200 });
+    expect(g.feedAudit).toBeNull();
+    expect(g.siteHealth).toEqual({ ok: true, reasons: [], auditedAt: 300 });
+    expect(g.lastRuns).toEqual({
+      "price-audit": { status: "success", ranAt: 20, detail: "ok" },
+      "catalog-consistency": { status: "error", ranAt: 30, detail: "rate limit" },
+    });
+    expect(g.imagesPending).toBe(2);
+    expect(g.imagesOldestPendingAt).toBe(400);
+  });
+
+  it("returns empty inputs on a fresh database", async () => {
+    const g = await mod.loadGuardInputs();
+    expect(g).toEqual({ priceAudit: null, catalogAudit: null, feedAudit: null, siteHealth: null, lastRuns: {}, imagesPending: 0, imagesOldestPendingAt: null });
+  });
+});
+
+describe("countGuidesAwaitingApproval", () => {
+  it("counts pending_review guides not yet scheduled, split ready / attention, with attention titles", async () => {
+    await guide({ overall: "ready" });
+    await guide({ overall: "ready" });
+    await guide({ overall: "attention", title: "Guide balançoires" });
+    await guide({ overall: null }); // not scored yet: pending but neither ready nor attention
+    await guide({ overall: "attention", scheduled: "2026-10-01 13:00:00" }); // approved → excluded
+    await guide({ status: "skipped_empty" });
+
+    expect(await mod.countGuidesAwaitingApproval()).toEqual({
+      pending: 4,
+      ready: 2,
+      attention: 1,
+      attentionTitles: ["Guide balançoires"],
+    });
+  });
+
+  it("returns zeros on an empty table", async () => {
+    expect(await mod.countGuidesAwaitingApproval()).toEqual({ pending: 0, ready: 0, attention: 0, attentionTitles: [] });
+  });
+});
+
+describe("countContentFormatVideos", () => {
+  it("counts drafts, and approved videos due within the horizon (not past, not later, not other types)", async () => {
+    await queued("assembly", "draft", at(100));
+    await queued("demand_gen_ext", "draft", at(1));
+    await queued("demand_gen_ext", "pending", at(5)); // due soon
+    await queued("assembly", "pending", at(48)); // due soon
+    await queued("assembly", "pending", at(24 * 10)); // beyond 3 days
+    await queued("assembly", "pending", at(-2)); // overdue slot: not "upcoming"
+    await queued("sequential_ad", "draft", at(5)); // not a /content-formats video
+    await queued("assembly", "published", at(-10));
+
+    expect(await mod.countContentFormatVideos(3)).toEqual({ pendingApproval: 2, scheduledSoon: 2 });
+  });
+});
+
+describe("countAwaitingOperator", () => {
+  it("counts only the states that wait on Mat", async () => {
+    await queued("sequential_ad", "draft", at(5));
+    await queued("sequential_ad", "draft", at(6));
+    await queued("sequential_ad", "pending", at(7)); // already approved
+    const job = (id: string, status: string) =>
+      db.execute({
+        sql: `INSERT INTO import_jobs (id, group_key, product_data, status, created_at, updated_at)
+              VALUES (?, ?, '{}', ?, '2026-09-25', '2026-09-25')`,
+        args: [id, `g-${id}`, status],
+      });
+    await job("a", "reviewing");
+    await job("live", "reviewing");
+    await db.execute(`UPDATE import_jobs SET shopify_id = '900' WHERE id = 'live'`); // already on Shopify
+    await job("b", "needs_review");
+    await job("c", "done");
+    await job("d", "pending"); // not generated yet — not waiting on Mat
+    // facebook_drafts.sku is a FK to products.
+    await db.execute(`INSERT OR IGNORE INTO products (sku, name, price) VALUES ('1', 'P1', 1), ('2', 'P2', 1)`);
+    await db.execute(
+      `INSERT INTO facebook_drafts (sku, trigger_type, language, post_text, status) VALUES
+         ('1', 't', 'FR', 'x', 'draft'), ('2', 't', 'FR', 'x', 'approved')`,
+    );
+
+    expect(await mod.countAwaitingOperator()).toEqual({
+      sequentialAds: 2,
+      importsToPush: 1,
+      importsNeedsReview: 1,
+      socialDrafts: 1,
+      blogDrafts: 0,
+    });
+  });
+});
+
+describe("countMorningReportAlerts", () => {
+  it("reads the stored audits and counts open items", async () => {
+    // Same shape persistPriceAudit writes (`belowFloor`, not the dashboard's `belowFloorCount`).
+    await mod.setSetting("price_audit_result", JSON.stringify({ belowFloor: 3, total: 100 }));
+    await mod.setSetting("catalog_consistency_audit", JSON.stringify({ issues: [{}, {}] }));
+    const now = Math.floor(Date.now() / 1000);
+    await db.execute({
+      sql: `INSERT INTO price_floor_incidents (sku, old_price, new_price, source, detected_at) VALUES
+              ('a', 10, 5, 'sync', ?), ('b', 10, 5, 'sync', ?)`,
+      args: [now - 3600, now - 3 * 86400],
+    });
+    await db.execute(
+      `INSERT INTO image_review_queue (shopify_product_id, sku, current_url, proposed_url, status) VALUES
+         ('1', 'a', 'u', 'v', 'pending'), ('2', 'b', 'u', 'v', 'applied')`,
+    );
+    await db.execute(
+      `INSERT INTO import_jobs (id, group_key, product_data, status, created_at, updated_at)
+       VALUES ('e', 'g-e', '{}', 'error', '2026-09-25', '2026-09-25')`,
+    );
+    await db.execute(`INSERT INTO notifications (type, title, message, read) VALUES ('x', 't', 'm', 0), ('x', 't', 'm', 1)`);
+
+    expect(await mod.countMorningReportAlerts()).toEqual({
+      priceBelowFloor: 3,
+      priceFloorIncidents24h: 1,
+      imagesPendingReview: 1,
+      importErrors: 1,
+      catalogIssues: 2,
+      unreadNotifications: 1,
+      failedPublications: 0,
+      publishCheckProblems: 0,
+      reelPriceGuardBlocked: 0,
+    });
+  });
+
+  it("counts failed publications that were due in the last 3 days or are still ahead — not old history", async () => {
+    await queued("assembly", "failed", at(-24 * 10)); // 10 days ago: history, ignored
+    await queued("sequential_ad", "failed", at(-24)); // yesterday
+    await queued("assembly", "failed", at(24 * 5)); // re-slotted ahead but still 'failed' (the 2026-10 incident)
+    await queued("sequential_ad", "pending", at(24)); // healthy
+    expect((await mod.countMorningReportAlerts()).failedPublications).toBe(2);
+  });
+
+  it("surfaces the last publish check and the Reel price guard", async () => {
+    await mod.setSetting("publish_check_last", JSON.stringify({ ok: false, problems: ["a", "b"] }));
+    await mod.setSetting("reel_price_guard_last", JSON.stringify({ blocked: [{ id: 1 }] }));
+    const a = await mod.countMorningReportAlerts();
+    expect(a.publishCheckProblems).toBe(2);
+    expect(a.reelPriceGuardBlocked).toBe(1);
+  });
+
+  it("treats a missing or corrupt audit setting as zero instead of throwing", async () => {
+    await mod.setSetting("price_audit_result", "not json");
+    const a = await mod.countMorningReportAlerts();
+    expect(a.priceBelowFloor).toBe(0);
+    expect(a.catalogIssues).toBe(0);
+  });
+});
+
+describe("countReelsStock", () => {
+  const studioRow = async (lang: string, status: string, scheduledAt: string) => {
+    queueSeq++;
+    const r = await db.execute({
+      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at, status, metadata)
+            VALUES ('sequential_ad', ?, 'both', '{}', ?, ?, ?)`,
+      args: [`ameublo:${queueSeq}`, scheduledAt, status, JSON.stringify({ source: "ameublo_studio", lang })],
+    });
+    return Number(r.lastInsertRowid);
+  };
+  const video = async (lang: string, o: { queueId?: number; verdict?: string; qa?: string; caption?: string } = {}) => {
+    await db.execute({
+      sql: `INSERT INTO ameublo_test_videos (series, video_url, style, lang, caption, queue_id, verdict, qa_verdict)
+            VALUES ('S', 'https://blob/x.mp4', 'vitrine', ?, ?, ?, ?, ?)`,
+      args: [lang, o.caption ?? "Légende", o.queueId ?? null, o.verdict ?? null, o.qa ?? null],
+    });
+  };
+
+  it("counts what is still to publish per language, with the last slot, and the videos ready to approve", async () => {
+    await studioRow("fr", "pending", "2026-10-10 11:45:00");
+    const last = await studioRow("fr", "pending", "2026-10-12 23:45:00");
+    await studioRow("fr", "published", "2026-10-20 11:45:00"); // already out: not "still to publish"
+    await studioRow("en", "pending", "2026-10-11 11:50:00");
+    await video("fr", { queueId: last }); // approved → not "ready"
+    await video("fr"); // ready
+    await video("fr", { qa: "pass" }); // ready
+    await video("fr", { verdict: "bad" }); // rejected
+    await video("fr", { qa: "fail" }); // flagged
+    await video("fr", { caption: "  " }); // no caption
+    await video("en"); // ready
+    const s = await mod.countReelsStock();
+    expect(s.fr).toEqual({ scheduled: 2, lastScheduledAt: "2026-10-12 23:45:00", ready: 2 });
+    expect(s.en).toEqual({ scheduled: 1, lastScheduledAt: "2026-10-11 11:50:00", ready: 1 });
+  });
+
+  it("returns zeros and a null last slot on an empty Studio", async () => {
+    expect(await mod.countReelsStock()).toEqual({
+      fr: { scheduled: 0, lastScheduledAt: null, ready: 0 },
+      en: { scheduled: 0, lastScheduledAt: null, ready: 0 },
+    });
+  });
+});
+
+describe("Reel measurement storage", () => {
+  const publishedReel = async (opts: { style?: string; lang?: "fr" | "en"; videoId?: number; hoursAgo?: number; scheduledAt?: string } = {}) => {
+    queueSeq++;
+    const brand = opts.lang === "en" ? "furnish" : "ameublo";
+    const r = await db.execute({
+      sql: `INSERT INTO publication_queue (content_type, content_id, platform, payload, scheduled_at, status, published_at, metadata)
+            VALUES ('sequential_ad', ?, 'both', ?, ?, 'published', datetime('now', ?), ?)`,
+      args: [`ameublo:${queueSeq}`, JSON.stringify({ brand, caption: "x" }), opts.scheduledAt ?? `2026-10-06 11:${String(queueSeq % 60).padStart(2, "0")}:00`,`-${opts.hoursAgo ?? 5} hours`, JSON.stringify({ source: "ameublo_studio", style: opts.style ?? "vitrine", ameubloVideoId: opts.videoId ?? null })],
+    });
+    return Number(r.lastInsertRowid);
+  };
+  const M = { plays: 12, initialPlays: 10, avgWatchMs: 4200, totalWatchMs: 50000, socialActions: 3 };
+
+  it("recordQueuePostIds keeps what is already known when a later call only brings one platform", async () => {
+    const id = await publishedReel();
+    await mod.recordQueuePostIds(id, { fb: "FB1" });
+    await mod.recordQueuePostIds(id, { ig: "IG1" });
+    const row = (await db.execute({ sql: `SELECT fb_post_id, ig_post_id FROM queue_post_ids WHERE queue_id = ?`, args: [id] })).rows[0] as unknown as { fb_post_id: string; ig_post_id: string };
+    expect(row).toMatchObject({ fb_post_id: "FB1", ig_post_id: "IG1" });
+    await mod.recordQueuePostIds(id, {}); // nothing to record: a no-op
+  });
+
+  it("listReelsToMeasure returns published Reels with a Facebook id inside the window, with their brand", async () => {
+    const recent = await publishedReel({ hoursAgo: 5 });
+    const old = await publishedReel({ hoursAgo: 24 * 30 });
+    const igOnly = await publishedReel({ hoursAgo: 5 });
+    await mod.recordQueuePostIds(recent, { fb: "FB-recent" });
+    await mod.recordQueuePostIds(old, { fb: "FB-old" });
+    await mod.recordQueuePostIds(igOnly, { ig: "IG-only" });
+    const got = await mod.listReelsToMeasure(14);
+    expect(got.map((r) => r.fbPostId)).toEqual(["FB-recent"]);
+    expect(got[0]).toMatchObject({ queueId: recent, brand: "ameublo" });
+  });
+
+  it("saveReelInsight is one snapshot per day: the second run of a day overwrites it", async () => {
+    const id = await publishedReel();
+    await mod.saveReelInsight(id, "facebook", "FB1", M);
+    await mod.saveReelInsight(id, "facebook", "FB1", { ...M, plays: 20 });
+    const rows = (await db.execute({ sql: `SELECT plays FROM reel_insights WHERE queue_id = ?`, args: [id] })).rows;
+    expect(rows).toHaveLength(1);
+    expect(Number((rows[0] as unknown as { plays: number }).plays)).toBe(20);
+  });
+
+  it("getReelResultRows gives the latest snapshot of each Reel with its style, language and Studio video", async () => {
+    const vid = await db.execute({ sql: `INSERT INTO ameublo_test_videos (series, video_url, style, lang, label) VALUES ('S', 'u', 'vote', 'en', 'Sofa vs chair')` });
+    const q = await publishedReel({ style: "vote", lang: "en", videoId: Number(vid.lastInsertRowid) });
+    await db.execute({ sql: `UPDATE ameublo_test_videos SET queue_id = ? WHERE id = ?`, args: [q, Number(vid.lastInsertRowid)] });
+    await db.execute({ sql: `INSERT INTO reel_insights (queue_id, platform, post_id, day, plays) VALUES (?, 'facebook', 'F', '2026-10-01', 1), (?, 'facebook', 'F', '2026-10-02', 7)`, args: [q, q] });
+    const other = await publishedReel({ style: "vitrine" }); // never measured: absent
+    void other;
+    const rows = await mod.getReelResultRows(14);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ queueId: q, style: "vote", lang: "en", label: "Sofa vs chair", plays: 7, measuredOn: "2026-10-02" });
+  });
+});

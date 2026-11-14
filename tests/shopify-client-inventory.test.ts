@@ -26,6 +26,12 @@ vi.mock("@/lib/config", () => ({
   SYNC: { MIN_DISCOUNT_DISPLAY_PERCENT: 10 },
 }));
 
+// Costway product ids the active-variant sweep must skip (see getCostwayShopifyProductIds).
+const mockCostwayIds = vi.hoisted(() => vi.fn().mockResolvedValue(new Set<string>()));
+vi.mock("@/lib/database", () => ({ getCostwayShopifyProductIds: mockCostwayIds }));
+// Default every test back to "no Costway products" so a rejected-lookup test cannot leak.
+beforeEach(() => { mockCostwayIds.mockResolvedValue(new Set<string>()); });
+
 /** Minimal Response stand-in: only what shopify-client actually reads. */
 function res(
   body: unknown,
@@ -195,6 +201,28 @@ describe("setInventoryLevel", () => {
 });
 
 describe("fetchActiveVariantInventory", () => {
+  it("skips Costway products — absent from the Aosom feed, they would be tracked and zeroed", async () => {
+    const { fetchActiveVariantInventory } = await load();
+    mockCostwayIds.mockResolvedValue(new Set(["2"]));
+    mockFetch.mockResolvedValue(
+      res({
+        products: [
+          { id: 1, variants: [{ sku: "A-1", inventory_quantity: 5, inventory_item_id: 100, inventory_management: "shopify" }] },
+          { id: 2, variants: [{ sku: "CW_1", inventory_quantity: 0, inventory_item_id: 200, inventory_management: null }] },
+        ],
+      }),
+    );
+    const out = await fetchActiveVariantInventory();
+    expect(out.map((v) => v.sku)).toEqual(["A-1"]);
+  });
+
+  it("fails closed when the Costway id lookup errors", async () => {
+    const { fetchActiveVariantInventory } = await load();
+    mockCostwayIds.mockRejectedValue(new Error("turso down"));
+    await expect(fetchActiveVariantInventory()).rejects.toThrow("turso down");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it("filters on status=active and flattens every variant", async () => {
     const { fetchActiveVariantInventory } = await load();
     mockFetch.mockResolvedValue(

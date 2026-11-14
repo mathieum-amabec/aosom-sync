@@ -9,7 +9,9 @@ import {
   buildGoogleFeed, buildPinterestFeed, buildMetaFeed, buildMetaXmlFeed,
   buildBingFeed, buildRedditFeed, saleSplit, salePriceEffectiveDate, availabilityValue, type FeedItem,
 } from "@/lib/feeds/feed";
-import { shopifyToFeedItems, stripImperialDimensions, stripPromoText, frenchifyColor, optionValue, materialFromMetafields, MATERIAL_METAFIELD_KEYS, type ShopifyFeedProduct } from "@/lib/feeds/source";
+import { shopifyToFeedItems, highlightsFromBody, dimensionDetails, DIMS_METAFIELD_KEY, stripImperialDimensions, stripPromoText, frenchifyColor, optionValue, materialFromMetafields, MATERIAL_METAFIELD_KEYS, type ShopifyFeedProduct } from "@/lib/feeds/source";
+import { imageUrlStem } from "@/lib/image-compliance-audit";
+import { seasonalRulesFromSetting } from "@/lib/sold-out-hide";
 
 describe("mapToGoogleCategory", () => {
   const cases: Array<[string, number]> = [
@@ -226,6 +228,16 @@ describe("shopifyToFeedItems", () => {
     ]);
     expect(published.map((i) => i.id)).toEqual(["U2"]);
   });
+  it("skips an out-of-season Halloween product, using the window it is GIVEN (settings.seasonal_windows)", () => {
+    const halloween = [
+      { id: 891, title: "Sorcière", handle: "sorciere", status: "active", product_type: "Holiday & Seasonal > Halloween Decorations", published_at: PUBLISHED, images: [{ src: "z" }], variants: [{ sku: "HW1", price: "20", inventory_management: null }] },
+    ];
+    const nov4 = new Date("2026-11-04T15:00:00Z");
+    expect(shopifyToFeedItems(halloween, { now: nov4 })).toEqual([]); // default window 09-01 → 11-01
+    // A window moved in settings (here: until Nov 10) moves the feed too.
+    const extended = seasonalRulesFromSetting('{"halloween":{"start":"09-01","end":"11-10"}}');
+    expect(shopifyToFeedItems(halloween, { now: nov4, seasonRules: extended }).map((i) => i.id)).toEqual(["HW1"]);
+  });
   it("excludes a scheduled (future-dated published_at) product — not live on the storefront yet", () => {
     const scheduled = shopifyToFeedItems([
       { id: 890, title: "Publication planifiée", handle: "planifie", status: "active", published_at: "2999-01-01T00:00:00Z", images: [{ src: "z" }], variants: [{ sku: "F1", price: "20", inventory_management: null }] },
@@ -296,6 +308,357 @@ describe("shopifyToFeedItems", () => {
   });
 });
 
+describe("shopifyToFeedItems — per-variant image and ?variant= deep link", () => {
+  // Shaped like the live mini fridge (mini-refrigerateur-congelateur-91l-double-zone): the
+  // black variant owns a gallery photo, the silver one owns an image uploaded at the END of
+  // the gallery, the red one has no image of its own.
+  const fridge: ShopifyFeedProduct = {
+    id: 9397106933865, title: "Mini réfrigérateur", handle: "mini-frigo", status: "active", published_at: PUBLISHED,
+    images: [
+      { id: 1, src: "https://img/hero-black.jpg" },
+      { id: 2, src: "https://img/black-kitchen.jpg" },
+      { id: 3, src: "https://img/dims.jpg" },
+      { id: 99, src: "https://img/silver-kitchen.jpg" },
+    ],
+    variants: [
+      { id: 47816248983657, sku: "800-128BK", price: "303.99", inventory_management: null, title: "Noir / 18\" x 19.75\" x 34\"", image_id: 2 },
+      { id: 47816249016425, sku: "800-128V81BK", price: "299.99", inventory_management: null, title: "Argent / 18\" x 19.75\" x 34\"", image_id: 99 },
+      { id: 47816249049193, sku: "800-128V80RD", price: "281.99", inventory_management: null, title: "Rouge / 18\" x 19.75\" x 34\"", image_id: null },
+    ],
+  };
+  const items = shopifyToFeedItems([fridge]);
+  const byId = (sku: string) => items.find((i) => i.id === sku)!;
+
+  it("uses the variant's own image when one is assigned", () => {
+    expect(byId("800-128V81BK").imageLink).toBe("https://img/silver-kitchen.jpg");
+    expect(byId("800-128BK").imageLink).toBe("https://img/black-kitchen.jpg");
+  });
+  it("keeps the rest of the gallery as additional images, without repeating the main one", () => {
+    expect(byId("800-128V81BK").additionalImageLinks).toEqual([
+      "https://img/hero-black.jpg", "https://img/black-kitchen.jpg", "https://img/dims.jpg",
+    ]);
+  });
+  it("falls back to the product's first image for a variant with no image of its own (unchanged)", () => {
+    expect(byId("800-128V80RD").imageLink).toBe("https://img/hero-black.jpg");
+    expect(byId("800-128V80RD").additionalImageLinks).toEqual([
+      "https://img/black-kitchen.jpg", "https://img/dims.jpg", "https://img/silver-kitchen.jpg",
+    ]);
+  });
+  it("falls back when image_id points at an image no longer in the gallery", () => {
+    const stale = shopifyToFeedItems([{ ...fridge, id: 2, handle: "stale", variants: [
+      { id: 5, sku: "ST-1BK", price: "10", inventory_management: null, title: "Noir", image_id: 12345 },
+      { id: 6, sku: "ST-1WT", price: "10", inventory_management: null, title: "Blanc" },
+    ] }]);
+    expect(stale.find((i) => i.id === "ST-1BK")!.imageLink).toBe("https://img/hero-black.jpg");
+  });
+  it("a variant pointing at the hero image yields exactly the pre-fix output", () => {
+    const hero = shopifyToFeedItems([{ ...fridge, id: 3, handle: "hero", variants: [
+      { sku: "HR-1BK", price: "10", inventory_management: null, title: "Noir", image_id: 1 },
+      { sku: "HR-1WT", price: "10", inventory_management: null, title: "Blanc" },
+    ] }]);
+    const [withHero, without] = hero;
+    expect(withHero.imageLink).toBe(without.imageLink);
+    expect(withHero.additionalImageLinks).toEqual(without.additionalImageLinks);
+  });
+  it("deep-links each multi-variant offer to its own variant", () => {
+    expect(byId("800-128V81BK").link).toBe("https://ameublodirect.ca/products/mini-frigo?variant=47816249016425");
+    expect(byId("800-128BK").link).toBe("https://ameublodirect.ca/products/mini-frigo?variant=47816248983657");
+    expect(byId("800-128V80RD").link).toBe("https://ameublodirect.ca/products/mini-frigo?variant=47816249049193");
+  });
+  it("deep-links the EN feed on furnishdirect.ca as well", () => {
+    const en = shopifyToFeedItems([fridge], { preferEnglishTitle: true });
+    expect(en.find((i) => i.id === "800-128V81BK")!.link)
+      .toBe("https://furnishdirect.ca/products/mini-frigo?variant=47816249016425");
+  });
+  it("leaves the link bare when the variant id is unknown", () => {
+    const noIds = shopifyToFeedItems([{ ...fridge, id: 4, handle: "no-ids", variants: fridge.variants!.map((v) => ({ ...v, id: null })) }]);
+    for (const i of noIds) expect(i.link).toBe("https://ameublodirect.ca/products/no-ids");
+  });
+  it("single-variant products are byte-for-byte unchanged (no ?variant=, first image)", () => {
+    const single: ShopifyFeedProduct = {
+      id: 7, title: "Tabouret", handle: "tabouret", status: "active", published_at: PUBLISHED,
+      images: [{ id: 70, src: "https://img/s1.jpg" }, { id: 71, src: "https://img/s2.jpg" }],
+      variants: [{ id: 700, sku: "TAB-1", price: "49.99", inventory_management: null, title: "Default Title", image_id: 70 }],
+    };
+    // Same product as the pre-fix code saw it: no variant id, no image_id, no image ids.
+    const legacy: ShopifyFeedProduct = {
+      ...single, images: single.images!.map(({ src }) => ({ src })),
+      variants: [{ sku: "TAB-1", price: "49.99", inventory_management: null, title: "Default Title" }],
+    };
+    const [now] = shopifyToFeedItems([single]);
+    expect(now).toEqual(shopifyToFeedItems([legacy])[0]);
+    expect(now.link).toBe("https://ameublodirect.ca/products/tabouret");
+    expect(now.imageLink).toBe("https://img/s1.jpg");
+  });
+  it("a single-variant product whose variant owns a non-hero image still keeps its bare link", () => {
+    const [it1] = shopifyToFeedItems([{
+      id: 8, title: "Lampe", handle: "lampe", status: "active", published_at: PUBLISHED,
+      images: [{ id: 80, src: "https://img/l1.jpg" }, { id: 81, src: "https://img/l2.jpg" }],
+      variants: [{ id: 800, sku: "LMP-1", price: "20", inventory_management: null, title: "Default Title", image_id: 81 }],
+    }]);
+    expect(it1.link).toBe("https://ameublodirect.ca/products/lampe");
+    expect(it1.imageLink).toBe("https://img/l2.jpg");
+  });
+  it("flows into every channel's output (Google, Bing, Pinterest, Meta CSV + XML, Reddit)", () => {
+    const silver = [byId("800-128V81BK")];
+    const meta = { title: "t", link: "https://x", description: "d" };
+    for (const out of [
+      buildGoogleFeed(silver, meta), buildBingFeed(silver, meta), buildPinterestFeed(silver, meta),
+      buildRedditFeed(silver, meta), JSON.stringify(buildMetaFeed(silver)), buildMetaXmlFeed(silver, meta),
+    ]) {
+      expect(out).toContain("https://img/silver-kitchen.jpg");
+      expect(out).toContain("mini-frigo?variant=47816249016425");
+    }
+  });
+});
+
+describe("shopifyToFeedItems — spec/infographic images never reach an ad feed (2026-10-01)", () => {
+  // Confirmed live: a parasol's additional_image_link on the Meta catalog carried an assembly
+  // diagram ("Detachable pole with spiral connection..."), because this mapper mirrored
+  // Shopify's gallery with zero content filtering — isSpecImageUrl already existed for
+  // social/slideshow content but was never wired in here.
+  const withSpecShot: ShopifyFeedProduct = {
+    id: 1, title: "Parasol", handle: "parasol", status: "active", published_at: PUBLISHED,
+    images: [
+      { src: "https://img/lifestyle.jpg" },
+      { src: "https://img/assembly-diagram.jpg" }, // "diagram" keyword
+      { src: "https://img/white-bg.jpg" },
+    ],
+    variants: [{ sku: "PARA-1", price: "99.99", inventory_management: null }],
+  };
+
+  it("drops a spec/diagram image from both the primary and the additional images", () => {
+    const [item] = shopifyToFeedItems([withSpecShot]);
+    expect(item.imageLink).toBe("https://img/lifestyle.jpg");
+    expect(item.additionalImageLinks).toEqual(["https://img/white-bg.jpg"]);
+  });
+
+  it("drops it even when it is the ONLY image at gallery position 1", () => {
+    const specFirst: ShopifyFeedProduct = {
+      ...withSpecShot, id: 2, handle: "parasol-2",
+      images: [{ src: "https://img/size-chart.jpg" }, { src: "https://img/lifestyle.jpg" }],
+    };
+    const [item] = shopifyToFeedItems([specFirst]);
+    expect(item.imageLink).toBe("https://img/lifestyle.jpg"); // not the size chart
+    expect(item.additionalImageLinks).toEqual([]);
+  });
+
+  it("matches the Aosom -B0.. -F0 gallery-shot suffixes, case-insensitively", () => {
+    const suffixed: ShopifyFeedProduct = {
+      ...withSpecShot, id: 3, handle: "parasol-3",
+      images: [{ src: "https://img/lifestyle.jpg" }, { src: "https://img/0sg8D1-C0.jpg" }],
+    };
+    const [item] = shopifyToFeedItems([suffixed]);
+    expect(item.additionalImageLinks).toEqual([]);
+  });
+
+  it("keeps a variant's own photo whose Shopify _<uuid> suffix happens to contain -c0 (2026-10-21)", () => {
+    const own = "https://cdn.shopify.com/s/files/1/0/0/files/aJ8dc419f1f2cee58_6baf086d-3cf8-46ad-a384-c01aff82e81c.jpg";
+    const colour: ShopifyFeedProduct = {
+      id: 6, title: "Cabanon", handle: "cabanon", status: "active", published_at: PUBLISHED,
+      images: [{ id: 1, src: "https://img/hero.jpg" }, { id: 2, src: own }],
+      variants: [{ sku: "CAB-WT", price: "10", inventory_management: null, image_id: 2 }],
+    };
+    const [item] = shopifyToFeedItems([colour]);
+    expect(item.imageLink).toBe(own);
+  });
+
+  it("falls back to the unfiltered gallery when EVERY image looks like a spec shot (never ships zero images)", () => {
+    const allSpec: ShopifyFeedProduct = {
+      ...withSpecShot, id: 4, handle: "parasol-4",
+      images: [{ src: "https://img/diagram-1.jpg" }, { src: "https://img/size-chart.jpg" }],
+    };
+    const [item] = shopifyToFeedItems([allSpec]);
+    expect(item.imageLink).toBe("https://img/diagram-1.jpg");
+    expect(item.additionalImageLinks).toEqual(["https://img/size-chart.jpg"]);
+  });
+
+  it("a variant's own image_id is ignored when that exact image is a spec shot — falls back like an unassigned variant", () => {
+    const variantPointsAtSpec: ShopifyFeedProduct = {
+      id: 5, title: "Chaise", handle: "chaise", status: "active", published_at: PUBLISHED,
+      images: [
+        { id: 1, src: "https://img/hero.jpg" },
+        { id: 2, src: "https://img/dimension-diagram.jpg" },
+      ],
+      variants: [{ sku: "CH-1", price: "10", inventory_management: null, image_id: 2 }],
+    };
+    const [item] = shopifyToFeedItems([variantPointsAtSpec]);
+    expect(item.imageLink).toBe("https://img/hero.jpg");
+    expect(item.additionalImageLinks).toEqual([]);
+  });
+});
+
+describe("shopifyToFeedItems — nonCompliantStems (the vision-classifier cache, 2026-10-01)", () => {
+  // Real-world shape: Shopify renames every upload to an opaque hash, so isSpecImageUrl (the
+  // keyword filter) cannot catch it — confirmed live, 0/2612 catalog images matched a
+  // keyword. The vision classifier (image_classifications, by Aosom hash STEM — see
+  // imageUrlStem) is the signal that actually works against today's data.
+  const product: ShopifyFeedProduct = {
+    id: 1, title: "Parasol", handle: "parasol", status: "active", published_at: PUBLISHED,
+    images: [
+      { src: "https://cdn.shopify.com/s/files/1/0/0/files/TWA47c19cec1e44e9.jpg" },
+      { src: "https://cdn.shopify.com/s/files/1/0/0/files/aJ8dc419f1f2cee58_0ac0d3af-e908-4019-9772-fe48a29c7c8b.jpg" },
+      { src: "https://cdn.shopify.com/s/files/1/0/0/files/oDw0d719f1f2cee58_1024x1024.jpg" },
+    ],
+    variants: [{ sku: "PARA-1", price: "99.99", inventory_management: null }],
+  };
+
+  it("drops an image whose STEM (not its exact URL) is flagged non-compliant", () => {
+    // Flag the middle image by its stem — a DIFFERENT URL (no ingest suffix) than the one in
+    // the gallery, exactly how a verdict cached from the Shopify REST `images[].src` or the
+    // Aosom feed URL still matches the resized/_uuid'd copy the feed actually serves.
+    const nonCompliantStems = new Set([imageUrlStem("https://aosomcdn.com/x/aJ8dc419f1f2cee58.jpg")]);
+    const [item] = shopifyToFeedItems([product], { nonCompliantStems });
+    expect(item.imageLink).toBe("https://cdn.shopify.com/s/files/1/0/0/files/TWA47c19cec1e44e9.jpg");
+    expect(item.additionalImageLinks).toEqual([
+      "https://cdn.shopify.com/s/files/1/0/0/files/oDw0d719f1f2cee58_1024x1024.jpg",
+    ]);
+  });
+
+  it("drops it even at position 1 — promotes a compliant image instead", () => {
+    const nonCompliantStems = new Set([imageUrlStem(product.images![0].src)]);
+    const [item] = shopifyToFeedItems([product], { nonCompliantStems });
+    expect(item.imageLink).not.toBe(product.images![0].src);
+  });
+
+  it("with no verdicts supplied (undefined), behaves exactly as before — no regression", () => {
+    const withUndefined = shopifyToFeedItems([product]);
+    const withEmptySet = shopifyToFeedItems([product], { nonCompliantStems: new Set() });
+    expect(withUndefined).toEqual(withEmptySet);
+  });
+
+  it("falls back to the unfiltered gallery when every image is flagged (never ships zero images)", () => {
+    const nonCompliantStems = new Set(product.images!.map((i) => imageUrlStem(i.src)));
+    const [item] = shopifyToFeedItems([product], { nonCompliantStems });
+    expect(item.imageLink).toBe(product.images![0].src);
+  });
+});
+
+describe("shopifyToFeedItems — verifiedStems (fail-closed carousel images, 2026-10-10)", () => {
+  // 2 048 never-classified secondary images (67 % with text/dimensions) reached the Meta
+  // carousel because only KNOWN-bad stems were removed. With verifiedStems, an unclassified
+  // photo can no longer be an additional image.
+  const A = "https://cdn.shopify.com/s/files/1/0/0/files/aAAA0000000000001.jpg";
+  const B = "https://cdn.shopify.com/s/files/1/0/0/files/bBBB0000000000002.jpg";
+  const C = "https://cdn.shopify.com/s/files/1/0/0/files/cCCC0000000000003.jpg";
+  const product: ShopifyFeedProduct = {
+    id: 9, title: "Banc", handle: "banc", status: "active", published_at: PUBLISHED,
+    images: [{ src: A }, { src: B }, { src: C }],
+    variants: [{ sku: "BANC-1", price: "89.99", inventory_management: null }],
+  };
+
+  it("keeps only verified-clean images as additional images", () => {
+    const verifiedStems = new Set([imageUrlStem(A), imageUrlStem(C)]);
+    const [item] = shopifyToFeedItems([product], { verifiedStems });
+    expect(item.imageLink).toBe(A);
+    expect(item.additionalImageLinks).toEqual([C]); // B was never classified -> withheld
+  });
+
+  it("promotes a verified image to hero when the first photo was never verified", () => {
+    const verifiedStems = new Set([imageUrlStem(B)]);
+    const [item] = shopifyToFeedItems([product], { verifiedStems });
+    expect(item.imageLink).toBe(B);
+    expect(item.additionalImageLinks).toEqual([]);
+  });
+
+  it("an empty verified set (DB hiccup) withholds extras but still ships the hero", () => {
+    const [item] = shopifyToFeedItems([product], { verifiedStems: new Set() });
+    expect(item.imageLink).toBe(A);
+    expect(item.additionalImageLinks).toEqual([]);
+  });
+
+  it("without verifiedStems the legacy behaviour is unchanged", () => {
+    const [item] = shopifyToFeedItems([product]);
+    expect(item.additionalImageLinks).toEqual([B, C]);
+  });
+});
+
+describe("shopifyToFeedItems — imageStyles (Meta ads = lifestyle only, 2026-10-30)", () => {
+  // Mat's rule: every Meta ad shows a lifestyle photo. The black variant owns a studio
+  // packshot; the product has one verified lifestyle photo further down the gallery.
+  const STUDIO = "https://cdn.shopify.com/s/files/1/0/0/files/sSTU0000000000001.jpg";
+  const LIFE = "https://cdn.shopify.com/s/files/1/0/0/files/lLIF0000000000002.jpg";
+  const STUDIO2 = "https://cdn.shopify.com/s/files/1/0/0/files/tSTU0000000000003.jpg";
+  const LIFE_UNVERIFIED = "https://cdn.shopify.com/s/files/1/0/0/files/uLIF0000000000004.jpg";
+  const LIFE_RED = "https://cdn.shopify.com/s/files/1/0/0/files/rLIF0000000000005.jpg";
+  const product: ShopifyFeedProduct = {
+    id: 21, title: "Fauteuil", handle: "fauteuil", status: "active", published_at: PUBLISHED,
+    images: [{ id: 1, src: STUDIO }, { id: 2, src: STUDIO2 }, { id: 3, src: LIFE }, { id: 4, src: LIFE_UNVERIFIED }],
+    variants: [
+      { id: 501, sku: "FAU-BK", price: "199.99", inventory_management: null, title: "Noir", image_id: 2 },
+      { id: 502, sku: "FAU-GY", price: "199.99", inventory_management: null, title: "Gris", image_id: 3 },
+    ],
+  };
+  const verifiedStems = new Set([STUDIO, STUDIO2, LIFE].map(imageUrlStem));
+  const imageStyles = new Map([
+    [imageUrlStem(STUDIO), "studio" as const],
+    [imageUrlStem(STUDIO2), "studio" as const],
+    [imageUrlStem(LIFE), "lifestyle" as const],
+    [imageUrlStem(LIFE_UNVERIFIED), "lifestyle" as const],
+  ]);
+
+  it("swaps a studio variant photo for the product's verified lifestyle photo", () => {
+    const items = shopifyToFeedItems([product], { verifiedStems, imageStyles });
+    const bk = items.find((i) => i.id === "FAU-BK")!;
+    expect(bk.imageLink).toBe(LIFE);
+    expect(bk.imageStyle).toBe("lifestyle");
+  });
+
+  it("keeps a variant's own photo when it already is lifestyle", () => {
+    const gy = shopifyToFeedItems([product], { verifiedStems, imageStyles }).find((i) => i.id === "FAU-GY")!;
+    expect(gy.imageLink).toBe(LIFE);
+    expect(gy.imageStyle).toBe("lifestyle");
+  });
+
+  it("keeps a variant's own lifestyle photo even when another lifestyle photo leads the gallery", () => {
+    const red = {
+      ...product,
+      images: [...product.images!, { id: 5, src: LIFE_RED }],
+      variants: [{ id: 503, sku: "FAU-RD", price: "199.99", inventory_management: null, title: "Rouge", image_id: 5 }],
+    };
+    const styles = new Map([...imageStyles, [imageUrlStem(LIFE_RED), "lifestyle" as const]]);
+    const [item] = shopifyToFeedItems([red], { verifiedStems: new Set([...verifiedStems, imageUrlStem(LIFE_RED)]), imageStyles: styles });
+    expect(item.imageLink).toBe(LIFE_RED);
+    expect(item.imageStyle).toBe("lifestyle");
+  });
+
+  it("falls back to a lifestyle first photo when no lifestyle photo is verified", () => {
+    const p = { ...product, images: [{ id: 4, src: LIFE_UNVERIFIED }, { id: 1, src: STUDIO }], variants: [{ sku: "FAU-1", price: "99.99", inventory_management: null, image_id: 1 }] };
+    const [item] = shopifyToFeedItems([p], { verifiedStems: new Set([imageUrlStem(STUDIO)]), imageStyles });
+    expect(item.imageLink).toBe(LIFE_UNVERIFIED);
+    expect(item.imageStyle).toBe("lifestyle");
+  });
+
+  it("additional images are lifestyle AND verified only", () => {
+    const [bk] = shopifyToFeedItems([product], { verifiedStems, imageStyles });
+    expect(bk.additionalImageLinks).toEqual([]); // STUDIO/STUDIO2 studio, LIFE is the main image, LIFE_UNVERIFIED unverified
+  });
+
+  it("labels a product with no lifestyle photo studio (kept out of ads by the product set)", () => {
+    const studioOnly = { ...product, images: [{ id: 1, src: STUDIO }, { id: 2, src: STUDIO2 }], variants: [product.variants![0]] };
+    const [item] = shopifyToFeedItems([studioOnly], { verifiedStems, imageStyles });
+    expect(item.imageLink).toBe(STUDIO2);
+    expect(item.imageStyle).toBe("studio");
+  });
+
+  it("an unclassified photo counts as studio (fail-closed)", () => {
+    const [item] = shopifyToFeedItems([{ ...product, variants: [product.variants![0]] }], { verifiedStems, imageStyles: new Map() });
+    expect(item.imageStyle).toBe("studio");
+  });
+
+  it("without imageStyles (Google, Pinterest…) nothing changes", () => {
+    const [bk] = shopifyToFeedItems([product], { verifiedStems });
+    expect(bk.imageLink).toBe(STUDIO2);
+    expect(bk.imageStyle).toBeUndefined();
+  });
+
+  it("the Meta XML carries the style as g:custom_label_4", () => {
+    const xml = buildMetaXmlFeed(shopifyToFeedItems([product], { verifiedStems, imageStyles }), { title: "Meta", link: "https://x", description: "d" });
+    expect(xml).toContain("<g:custom_label_4>lifestyle</g:custom_label_4>");
+    expect(buildMetaXmlFeed(shopifyToFeedItems([product]), { title: "Meta", link: "https://x", description: "d" })).not.toContain("custom_label_4");
+  });
+});
+
 describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => {
   const enProducts: ShopifyFeedProduct[] = [
     {
@@ -317,6 +680,40 @@ describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => 
     },
   ];
 
+  // EN feed must be English end to end: description, variant label, colour.
+  describe("English description and option values", () => {
+    const p: ShopifyFeedProduct = {
+      id: 710, title: "Tabouret ergonomique", titleEn: "Ergonomic Stool", body_html: "<p>Ce tabouret est idéal pour le bureau.</p>",
+      bodyEn: "<p>This stool is ideal for the office.</p>", handle: "tabouret", status: "active", published_at: PUBLISHED,
+      images: [{ src: "https://img/9.jpg" }],
+      options: [{ name: "Couleur", position: 1 }],
+      variants: [
+        { sku: "EN-010A", price: "49.99", title: "Blanc crème / 61 × 52 cm", option1: "Blanc crème", inventory_management: null },
+        { sku: "EN-010B", price: "49.99", title: "Gris / 61 × 52 cm", option1: "Gris", inventory_management: null },
+      ],
+    } as ShopifyFeedProduct;
+    const optionValueEn = new Map([["Blanc crème", "Cream white"], ["Gris", "Grey"]]);
+
+    it("uses the English description and English variant labels", () => {
+      const items = shopifyToFeedItems([p], { preferEnglishTitle: true, optionValueEn });
+      expect(items[0].description).toBe("This stool is ideal for the office.");
+      expect(items[0].title).toBe("Ergonomic Stool - Cream white / 61 × 52 cm");
+      expect(items[1].title).toBe("Ergonomic Stool - Grey / 61 × 52 cm");
+    });
+
+    it("keeps French untouched on the FR feed", () => {
+      const items = shopifyToFeedItems([p], { optionValueEn });
+      expect(items[0].description).toContain("idéal");
+      expect(items[0].title).toBe("Tabouret ergonomique - Blanc crème / 61 × 52 cm");
+    });
+
+    it("falls back to the source text when no English exists", () => {
+      const items = shopifyToFeedItems([{ ...p, bodyEn: null }], { preferEnglishTitle: true });
+      expect(items[0].description).toContain("idéal");
+      expect(items[0].title).toContain("Blanc crème");
+    });
+  });
+
   it("uses custom.title_en when present", () => {
     const items = shopifyToFeedItems(enProducts, { preferEnglishTitle: true });
     expect(items.find((i) => i.id === "EN-001")!.title).toBe("Patio Chair");
@@ -331,16 +728,16 @@ describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => 
     expect(items.find((i) => i.id === "EN-001")!.title).toBe("Chaise de patio");
   });
 
-  // The EN feed is the `/en` locale of the SAME storefront, branded "Furnish Direct".
+  // The EN feed is the SAME storefront served in English on furnishdirect.ca, branded "Furnish Direct".
   // Link, brand and scrubbed copy must move together — an EN offer linking to the FR page,
   // or branded "Furnish Direct" while the page says "Ameublo Direct", is the brand/landing
   // -page mismatch Pinterest and Google flag.
-  it("links to the /en storefront, never a bare /products path", () => {
+  it("links to the furnishdirect.ca storefront, never the FR domain or /en", () => {
     const items = shopifyToFeedItems(enProducts, { preferEnglishTitle: true });
     expect(items.find((i) => i.id === "EN-001")!.link).toBe(
-      "https://ameublodirect.ca/en/products/chaise-de-patio",
+      "https://furnishdirect.ca/products/chaise-de-patio",
     );
-    for (const i of items) expect(i.link).toContain("/en/products/");
+    for (const i of items) expect(i.link).not.toContain("/en/products/");
   });
 
   it("keeps FR links free of the /en prefix", () => {
@@ -351,14 +748,14 @@ describe("shopifyToFeedItems — preferEnglishTitle (Pinterest EN feed)", () => 
     for (const i of items) expect(i.link).not.toContain("/en/products/");
   });
 
-  // furnishdirect.ca is NXDOMAIN (verified against the .ca registry 2026-08-12). If it ever
-  // creeps into the feed every offer becomes a dead link, so lock it out explicitly.
-  it("never emits a furnishdirect.ca link", () => {
-    for (const opts of [{ preferEnglishTitle: true }, {}]) {
-      for (const i of shopifyToFeedItems(enProducts, opts)) {
-        expect(i.link).not.toContain("furnishdirect");
-        expect(i.link.startsWith("https://ameublodirect.ca/")).toBe(true);
-      }
+  // furnishdirect.ca is the EN domain since 2026-10-25: EN offers must use it, FR offers never.
+  it("EN offers link to furnishdirect.ca, FR offers to ameublodirect.ca", () => {
+    for (const i of shopifyToFeedItems(enProducts, { preferEnglishTitle: true })) {
+      expect(i.link.startsWith("https://furnishdirect.ca/")).toBe(true);
+    }
+    for (const i of shopifyToFeedItems(enProducts, {})) {
+      expect(i.link).not.toContain("furnishdirect");
+      expect(i.link.startsWith("https://ameublodirect.ca/")).toBe(true);
     }
   });
 
@@ -474,9 +871,13 @@ describe("buildBingFeed", () => {
     expect(xml).toContain("<g:shipping>");
     expect((xml.match(/<item>/g) || []).length).toBe(sample.length);
   });
-  it("omits Google-only fields not in the Bing set (condition, category)", () => {
-    expect(xml).not.toContain("<g:condition>");
-    expect(xml).not.toContain("<g:google_product_category>");
+  it("carries the identifiers Microsoft Merchant Center reads (condition, category, mpn)", () => {
+    expect(xml).toContain("<g:condition>new</g:condition>");
+    expect(xml).toContain("<g:google_product_category>");
+    expect(xml).toContain("<g:mpn>PAT-001GY</g:mpn>");
+  });
+  it("keeps a single current price — no sale split on Bing", () => {
+    expect(xml).not.toContain("<g:sale_price>");
   });
 });
 
@@ -842,5 +1243,85 @@ describe("buildGoogleFeed — material and sale window", () => {
   });
   it("passes a real Date to every item (map index must not leak into `now`)", () => {
     expect(() => buildGoogleFeed(items, { title: "G", link: "https://x", description: "d" })).not.toThrow();
+  });
+});
+
+// ── g:product_highlight and g:product_detail (rich feeds: Google, Bing) ──────
+
+describe("highlightsFromBody", () => {
+  const body = `<p>Intro.</p><h3>Caractéristiques :</h3><ul>
+<li>Capacité : 3 vélos ou outils de jardinage</li>
+<li>Revêtement résistant aux UV.</li>
+<li>Assemblage requis</li>
+<li>Cadre en acier galvanisé Aosom anti-corrosion</li>
+<li>Livraison gratuite partout au Canada</li>
+</ul>`;
+  it("reuses the description bullets, trimmed of trailing punctuation", () => {
+    const h = highlightsFromBody(body);
+    expect(h).toContain("Capacité : 3 vélos ou outils de jardinage");
+    expect(h).toContain("Revêtement résistant aux UV");
+  });
+  it("drops stubs and empty promo bullets, scrubs the supplier name", () => {
+    const h = highlightsFromBody(body);
+    expect(h).not.toContain("Assemblage requis");
+    expect(h.join(" ")).not.toMatch(/aosom|livraison gratuite/i);
+    expect(h).toContain("Cadre en acier galvanisé Ameublo Direct anti-corrosion");
+  });
+  it("caps at 6 and returns [] below Google's minimum of 2", () => {
+    const many = Array.from({ length: 9 }, (_, i) => `<li>Caractéristique numéro ${i} bien décrite</li>`).join("");
+    expect(highlightsFromBody(`<ul>${many}</ul>`)).toHaveLength(6);
+    expect(highlightsFromBody("<ul><li>Une seule caractéristique utile</li></ul>")).toEqual([]);
+    expect(highlightsFromBody(null)).toEqual([]);
+  });
+  it("skips bullets over 150 characters", () => {
+    const long = "x".repeat(151);
+    expect(highlightsFromBody(`<ul><li>${long}</li><li>Première vraie caractéristique</li><li>Deuxième vraie caractéristique</li></ul>`))
+      .toEqual(["Première vraie caractéristique", "Deuxième vraie caractéristique"]);
+  });
+});
+
+describe("dimensionDetails", () => {
+  const raw = JSON.stringify({ v: 1, s: { "84C-001": { p: [121.4, 60, 75.5] } } });
+  it("labels width/depth/height in cm, French decimal comma", () => {
+    expect(dimensionDetails(raw, "84C-001", false)).toEqual([
+      { section: "Dimensions (assemblé)", name: "Largeur", value: "121,4 cm" },
+      { section: "Dimensions (assemblé)", name: "Profondeur", value: "60 cm" },
+      { section: "Dimensions (assemblé)", name: "Hauteur", value: "75,5 cm" },
+    ]);
+  });
+  it("uses English labels and a decimal point for the EN feed", () => {
+    expect(dimensionDetails(raw, "84C-001", true)[0]).toEqual({ section: "Dimensions (assembled)", name: "Width", value: "121.4 cm" });
+  });
+  it("omits rather than guesses: other SKU, malformed JSON, bad numbers", () => {
+    expect(dimensionDetails(raw, "OTHER", false)).toEqual([]);
+    expect(dimensionDetails("{not json", "84C-001", false)).toEqual([]);
+    expect(dimensionDetails(JSON.stringify({ v: 1, s: { A: { p: [0, 10, 10] } } }), "A", false)).toEqual([]);
+    expect(dimensionDetails(null, "84C-001", false)).toEqual([]);
+  });
+});
+
+describe("rich feed items", () => {
+  const products: ShopifyFeedProduct[] = [
+    {
+      id: 777, title: "Abri à vélos", handle: "abri-velos", vendor: "Ameublo Direct", status: "active",
+      published_at: "2020-01-01T00:00:00-05:00", product_type: "Patio & Garden > Sheds",
+      body_html: "<ul><li>Capacité : 3 vélos ou outils</li><li>Cadre en acier galvanisé robuste</li></ul>",
+      images: [{ src: "https://img/abri.jpg" }],
+      variants: [{ sku: "845-030", price: "199.99" }],
+      metafields: { [DIMS_METAFIELD_KEY]: JSON.stringify({ v: 1, s: { "845-030": { p: [160, 220, 160] } } }) },
+    },
+  ];
+  const opts = { title: "G", link: "https://x", description: "d" };
+  it("Google feed emits product_highlight and product_detail when rich", () => {
+    const xml = buildGoogleFeed(shopifyToFeedItems(products, { rich: true }), opts);
+    expect(xml).toContain("<g:product_highlight>Capacité : 3 vélos ou outils</g:product_highlight>");
+    expect(xml).toContain("<g:attribute_name>Profondeur</g:attribute_name>");
+    expect(xml).toContain("<g:attribute_value>220 cm</g:attribute_value>");
+  });
+  it("non-rich items (Meta, Pinterest, Reddit) carry neither", () => {
+    const items = shopifyToFeedItems(products);
+    expect(items[0]).not.toHaveProperty("highlights");
+    expect(buildPinterestFeed(items, opts)).not.toContain("product_highlight");
+    expect(buildPinterestFeed(items, opts)).not.toContain("product_detail");
   });
 });

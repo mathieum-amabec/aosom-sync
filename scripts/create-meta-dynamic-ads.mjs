@@ -5,13 +5,15 @@
 // sends NOTHING. Pass --apply to actually create.
 //
 // Usage (run under x64 node — see CLAUDE.md / [[aosom-sync-arm64-dev]]):
-//   node scripts/create-meta-dynamic-ads.mjs                          # dry-run: print payloads, send nothing
-//   node scripts/create-meta-dynamic-ads.mjs --audience-id 1234567890 # dry-run with a real retargeting audience
-//   node scripts/create-meta-dynamic-ads.mjs --apply --audience-id 1234567890   # actually create (PAUSED)
+//   node scripts/create-meta-dynamic-ads.mjs           # dry-run: print payloads, send nothing
+//   node scripts/create-meta-dynamic-ads.mjs --apply   # actually create (PAUSED) — auto-resolves the
+//                                                       # "Visiteurs 30 jours (pixel)" retargeting audience
+//                                                       # (creates it via the pixel if it doesn't exist yet)
+//   node scripts/create-meta-dynamic-ads.mjs --apply --audience-id 1234567890   # use a specific audience instead
 //
 // Flags:
 //   --apply                 actually POST to the Marketing API (default: dry-run)
-//   --audience-id <id>      custom audience id (30-day site visitors) — REQUIRED for --apply
+//   --audience-id <id>      use this custom audience id instead of auto-resolving the 30-day-visitors one
 //   --product-set-id <id>   promote a product SET instead of the whole catalog (Meta usually wants this for catalog sales)
 //   --objective <obj>       campaign objective (default: PRODUCT_CATALOG_SALES)
 //   --daily-budget <cents>  ad set daily budget in the account minor unit (e.g. 1500 = $15.00)
@@ -49,6 +51,7 @@ const DAILY_BUDGET = flag("daily-budget");
 
 const env = loadEnv();
 const TOKEN = env.META_ACCESS_TOKEN;
+const PIXEL_ID = env.NEXT_PUBLIC_META_PIXEL_ID;
 const AD_ACCOUNT = (() => {
   const a = env.META_AD_ACCOUNT_ID || "20658834";
   return a.startsWith("act_") ? a : `act_${a}`;
@@ -76,6 +79,46 @@ async function graph(path, { method = "GET", body, params = {} } = {}) {
   return data;
 }
 
+/**
+ * Idempotent "get or create" for the standard 30-day-visitors pixel audience —
+ * same rule/logic as `ensureWebsiteCustomAudience` in src/lib/meta-ads-client.ts
+ * (duplicated here rather than imported: this script is a standalone .mjs CLI
+ * tool, consistent with the rest of scripts/, which don't import src/lib). A
+ * Website Custom Audience's membership is kept live by Meta from pixel events —
+ * there is nothing to "sync" after creation, so this only needs to run once (or
+ * whenever the audience might be missing).
+ */
+async function ensureVisitorsAudience() {
+  if (!PIXEL_ID) fail("NEXT_PUBLIC_META_PIXEL_ID not set in .env.local — cannot build a pixel-based audience rule.");
+  const name = "Visiteurs 30 jours (pixel)";
+  const list = await graph(`${AD_ACCOUNT}/customaudiences`, { params: { fields: "id,name" } });
+  const found = (list.data ?? []).find((a) => a.name === name);
+  if (found) return found.id;
+  const rule = JSON.stringify({
+    inclusions: {
+      operator: "or",
+      rules: [
+        {
+          event_sources: [{ type: "pixel", id: PIXEL_ID }],
+          retention_seconds: 30 * 86400,
+          filter: { operator: "and", filters: [{ field: "url", operator: "i_contains", value: "/" }] },
+        },
+      ],
+    },
+  });
+  const created = await graph(`${AD_ACCOUNT}/customaudiences`, {
+    method: "POST",
+    body: { name, subtype: "WEBSITE", rule, prefill: true, description: "Tout visiteur du site tracké par le pixel, 30 derniers jours." },
+  });
+  return created.id;
+}
+
+// ── Resolve the retargeting audience (auto, no more manual copy-paste) ────
+const RESOLVED_AUDIENCE_ID = AUDIENCE_ID || (APPLY ? await ensureVisitorsAudience() : undefined);
+if (!AUDIENCE_ID && RESOLVED_AUDIENCE_ID) {
+  console.log(`No --audience-id given — resolved "Visiteurs 30 jours (pixel)" automatically -> ${RESOLVED_AUDIENCE_ID}`);
+}
+
 // ── Build payloads ───────────────────────────────────────────────────────
 const campaignPayload = {
   name: "Ameublo Direct — Retargeting",
@@ -95,7 +138,7 @@ const adSetPayload = {
   name: "Retargeting — Visiteurs 30j",
   targeting: {
     geo_locations: { countries: ["CA"] },
-    custom_audiences: AUDIENCE_ID ? [{ id: AUDIENCE_ID }] : ["<REQUIRED: 30-day visitors custom audience id>"],
+    ...(RESOLVED_AUDIENCE_ID ? { custom_audiences: [{ id: RESOLVED_AUDIENCE_ID }] } : {}),
   },
   promoted_object: promotedObject,
   billing_event: "IMPRESSIONS",
@@ -113,15 +156,20 @@ console.log(JSON.stringify(adSetPayload, null, 2));
 
 if (!APPLY) {
   console.log("\n── DRY RUN — nothing sent. ──");
-  console.log("Review the payloads above, then re-run with:");
-  console.log("  node scripts/create-meta-dynamic-ads.mjs --apply --audience-id <30d-visitors-audience-id>");
-  if (!AUDIENCE_ID) console.log("\n⚠ No --audience-id given: the ad set would have no retargeting audience.");
+  console.log("Review the payloads above, then re-run with --apply.");
+  if (AUDIENCE_ID) {
+    console.log(`Using the given --audience-id ${AUDIENCE_ID}.`);
+  } else {
+    console.log('No --audience-id given: --apply will auto-resolve "Visiteurs 30 jours (pixel)" (create it if missing).');
+  }
   process.exit(0);
 }
 
 // ── Apply ────────────────────────────────────────────────────────────────
-if (!AUDIENCE_ID) {
-  fail("--apply requires --audience-id (a retargeting ad set with no custom audience would target broadly and spend on cold traffic).");
+// RESOLVED_AUDIENCE_ID is always set by now on --apply (either --audience-id, or
+// auto-resolved/created above) — this is a defensive guard, not the primary path.
+if (!RESOLVED_AUDIENCE_ID) {
+  fail("Could not resolve a retargeting audience (a retargeting ad set with no custom audience would target broadly and spend on cold traffic).");
 }
 
 console.log("\nPreflight: checking token …");

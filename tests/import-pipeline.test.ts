@@ -15,9 +15,11 @@ vi.mock("@/lib/csv-fetcher", () => ({
 }));
 vi.mock("@/lib/variant-merger", () => ({
   mergeVariants: vi.fn(),
+  dropDuplicateOptionListings: vi.fn((p: unknown[]) => ({ kept: p, dropped: [] })),
   buildSkuIndex: vi.fn(),
   selectProductImages: vi.fn((imgs: string[]) => imgs),
   selectProductImagesAsync: vi.fn(async (imgs: string[]) => imgs),
+  ensureVariantPrimaryImages: vi.fn((imgs: string[]) => imgs),
 }));
 vi.mock("@/lib/content-generator", () => ({
   generateProductContent: vi.fn(),
@@ -26,6 +28,22 @@ vi.mock("@/lib/content-generator", () => ({
 vi.mock("@/lib/shopify-client", () => ({
   createShopifyProduct: vi.fn(),
   addProductToCollection: vi.fn().mockResolvedValue(undefined),
+  unpublishShopifyProduct: vi.fn().mockResolvedValue(undefined),
+  fetchShopifyProductContent: vi.fn().mockResolvedValue({
+    title: "Chaise longue",
+    bodyHtml: "<p>fr</p>",
+    images: ["https://cdn/a.jpg"],
+    tags: [],
+  }),
+}));
+// Default: gates pass. Individual tests override with mockResolvedValueOnce to
+// exercise the pre-publish / post-publish failure paths without re-testing the
+// gates' own internals (see tests/import-quality-gates.test.ts for that).
+vi.mock("@/lib/import-quality-gates", () => ({
+  runQualityGates: vi.fn().mockResolvedValue({ passed: true, failures: [] }),
+}));
+vi.mock("@/lib/stale-catalog", () => ({
+  EXCLUDE_TAG: "exclude-stale",
 }));
 vi.mock("@/lib/database", () => ({
   upsertImportJob: vi.fn().mockResolvedValue(undefined),
@@ -44,7 +62,8 @@ vi.mock("@/jobs/job4-social", () => ({
 
 import { importToShopify, queueForImport, generateContent } from "@/lib/import-pipeline";
 import { generateProductContent } from "@/lib/content-generator";
-import { createShopifyProduct } from "@/lib/shopify-client";
+import { createShopifyProduct, unpublishShopifyProduct, fetchShopifyProductContent } from "@/lib/shopify-client";
+import { runQualityGates } from "@/lib/import-quality-gates";
 import { getImportJob, getProduct, upsertImportJob, updateImportJob } from "@/lib/database";
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { mergeVariants } from "@/lib/variant-merger";
@@ -103,18 +122,126 @@ describe("importToShopify — duplicate-job guard", () => {
   });
 });
 
+describe("importToShopify — pre-publish quality gate", () => {
+  it("does not push to Shopify when the pre-publish gate fails", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(runQualityGates).mockResolvedValueOnce({
+      passed: false,
+      failures: ["not_french"],
+    } as never);
+
+    const job = await importToShopify("job-1");
+
+    expect(job.status).toBe("needs_review");
+    expect(createShopifyProduct).not.toHaveBeenCalled();
+    expect(updateImportJob).toHaveBeenCalledWith(
+      "job-1",
+      expect.objectContaining({ status: "needs_review", error: "pre_publish_gate_failed:not_french" }),
+    );
+  });
+
+  it("reports every failing gate in the stored error, comma-separated", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(runQualityGates).mockResolvedValueOnce({
+      passed: false,
+      failures: ["image_not_clean", "not_french", "brand_leak"],
+    } as never);
+
+    await importToShopify("job-1");
+
+    expect(updateImportJob).toHaveBeenCalledWith(
+      "job-1",
+      expect.objectContaining({ error: "pre_publish_gate_failed:image_not_clean,not_french,brand_leak" }),
+    );
+  });
+
+  it("pushes normally when the pre-publish gate passes (default mock)", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
+
+    const job = await importToShopify("job-1");
+
+    expect(createShopifyProduct).toHaveBeenCalledTimes(1);
+    expect(job.status).toBe("done");
+  });
+});
+
+describe("importToShopify — post-publish quality safety net", () => {
+  it("unpublishes and marks needs_review when the post-publish check fails", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
+    vi.mocked(fetchShopifyProductContent).mockResolvedValueOnce({
+      title: "Some drifted title",
+      bodyHtml: "<p>drifted</p>",
+      images: ["https://cdn/drifted.jpg"],
+      tags: ["patio"],
+    });
+    // First call (pre-publish) passes, second call (post-publish) fails.
+    vi.mocked(runQualityGates)
+      .mockResolvedValueOnce({ passed: true, failures: [] } as never)
+      .mockResolvedValueOnce({ passed: false, failures: ["brand_leak"] } as never);
+
+    const job = await importToShopify("job-1");
+
+    expect(job.status).toBe("needs_review");
+    expect(job.shopifyId).toBe("123"); // the product WAS created, then pulled back
+    expect(unpublishShopifyProduct).toHaveBeenCalledWith(
+      "123",
+      expect.objectContaining({ deactivate: true, tags: expect.arrayContaining(["patio", "exclude-stale", "needs-review"]) }),
+    );
+    expect(updateImportJob).toHaveBeenCalledWith(
+      "job-1",
+      expect.objectContaining({ status: "needs_review", error: "post_publish_gate_failed:brand_leak" }),
+    );
+  });
+
+  it("checks what Shopify actually serves, not the generated content", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
+
+    await importToShopify("job-1");
+
+    expect(fetchShopifyProductContent).toHaveBeenCalledWith("123");
+  });
+
+  it("leaves the product published when the check itself errors (best-effort, does not fail the import)", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
+    vi.mocked(fetchShopifyProductContent).mockRejectedValueOnce(new Error("Shopify 500"));
+
+    const job = await importToShopify("job-1");
+
+    expect(job.status).toBe("done");
+    expect(unpublishShopifyProduct).not.toHaveBeenCalled();
+  });
+
+  it("stays done when the post-publish check passes (default mock)", async () => {
+    vi.mocked(getImportJob).mockResolvedValue(makeJobRow({ shopify_id: null }));
+    vi.mocked(createShopifyProduct).mockResolvedValue({ id: "123", handle: "test-handle" });
+
+    const job = await importToShopify("job-1");
+
+    expect(job.status).toBe("done");
+    expect(unpublishShopifyProduct).not.toHaveBeenCalled();
+  });
+});
+
 describe("queueForImport — existing-SKU guard", () => {
-  it("skips a SKU already mapped to a Shopify product", async () => {
+  it("skips a SKU already mapped to a Shopify product, and reports why", async () => {
     vi.mocked(fetchAosomCatalog).mockResolvedValue([{ sku: "S1" }] as never);
     vi.mocked(mergeVariants).mockReturnValue([
       { groupKey: "G1", productType: "X", images: [], variants: [{ sku: "S1" }] },
     ] as never);
     vi.mocked(getProduct).mockResolvedValue({ shopify_product_id: "555" } as never);
 
-    const jobs = await queueForImport(["S1"]);
+    const { jobs, skipped } = await queueForImport(["S1"]);
 
     expect(jobs).toHaveLength(0);
+    expect(skipped).toEqual([{ sku: "S1", reason: "already_imported" }]);
     expect(upsertImportJob).not.toHaveBeenCalled();
+    // The already-imported SKU is filtered out BEFORE mergeVariants runs — see the
+    // mixed-batch describe block below for why that ordering is the fix, not a detail.
+    expect(mergeVariants).not.toHaveBeenCalled();
   });
 
   it("queues a SKU that is not yet in Shopify", async () => {
@@ -124,11 +251,88 @@ describe("queueForImport — existing-SKU guard", () => {
     ] as never);
     vi.mocked(getProduct).mockResolvedValue(null);
 
-    const jobs = await queueForImport(["S2"]);
+    const { jobs, skipped } = await queueForImport(["S2"]);
 
     expect(jobs).toHaveLength(1);
     expect(jobs[0].groupKey).toBe("G2");
+    expect(skipped).toEqual([]);
     expect(upsertImportJob).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("queueForImport — mixed batch: already-imported variant + new sibling, same PSIN group", () => {
+  // Regression for the live-confirmed bug (2026-09-19): submitting 501-004PK
+  // (already on Shopify) together with 501-004BK (never imported, same merged
+  // group) used to drop BOTH — the post-merge guard saw one already-imported
+  // variant anywhere in the merged product and discarded the whole group,
+  // silently, with the API still answering 200 and 0 jobs. The fix filters
+  // per-SKU BEFORE mergeVariants ever sees the already-imported SKU.
+  it("queues the never-imported sibling and reports only the already-imported one as skipped (501-004PK + 501-004BK)", async () => {
+    vi.mocked(fetchAosomCatalog).mockResolvedValue([
+      { sku: "501-004PK" },
+      { sku: "501-004BK" },
+    ] as never);
+    // Mirrors real mergeVariants: folds whatever it's handed into one merged
+    // group. Because the fix filters already-imported SKUs out first, this is
+    // called with ONLY 501-004BK — never with 501-004PK included.
+    vi.mocked(mergeVariants).mockImplementation(
+      (products: unknown) =>
+        [
+          {
+            groupKey: "501-004",
+            productType: "X",
+            images: [],
+            variants: products,
+          },
+        ] as never,
+    );
+    vi.mocked(getProduct).mockImplementation(async (sku: unknown) =>
+      sku === "501-004PK" ? ({ shopify_product_id: "555" } as never) : (null as never),
+    );
+
+    const { jobs, skipped } = await queueForImport(["501-004PK", "501-004BK"]);
+
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].groupKey).toBe("501-004");
+    expect(jobs[0].product.variants).toEqual([{ sku: "501-004BK" }]);
+    expect(skipped).toEqual([{ sku: "501-004PK", reason: "already_imported" }]);
+    expect(upsertImportJob).toHaveBeenCalledTimes(1);
+    // mergeVariants must never have seen the already-imported SKU.
+    expect(mergeVariants).toHaveBeenCalledWith([{ sku: "501-004BK" }]);
+  });
+});
+
+describe("queueForImport — SKU vanished from the Aosom feed", () => {
+  // Regression for the live-confirmed bug (2026-09-19): 840-158GN was catalogued
+  // earlier but the supplier had discontinued it by the time the operator clicked
+  // Confirm. Before this fix, a requested SKU absent from fetchAosomCatalog() just
+  // never appeared in `matched` — 0 jobs, 200 OK, no trace of why.
+  it("reports a not-in-feed SKU as skipped instead of silently producing 0 jobs (840-158GN)", async () => {
+    vi.mocked(fetchAosomCatalog).mockResolvedValue([] as never); // feed no longer carries it
+    vi.mocked(mergeVariants).mockReturnValue([] as never);
+    vi.mocked(getProduct).mockResolvedValue(null);
+
+    const { jobs, skipped } = await queueForImport(["840-158GN"]);
+
+    expect(jobs).toHaveLength(0);
+    expect(skipped).toEqual([{ sku: "840-158GN", reason: "not_in_feed" }]);
+    expect(upsertImportJob).not.toHaveBeenCalled();
+    // getProduct is the already-imported check — a feed-gone SKU must never reach it.
+    expect(getProduct).not.toHaveBeenCalled();
+  });
+
+  it("reports only the vanished SKU when submitted alongside a still-live one", async () => {
+    vi.mocked(fetchAosomCatalog).mockResolvedValue([{ sku: "840-158OG" }] as never);
+    vi.mocked(mergeVariants).mockReturnValue([
+      { groupKey: "840-158", productType: "X", images: [], variants: [{ sku: "840-158OG" }] },
+    ] as never);
+    vi.mocked(getProduct).mockResolvedValue(null);
+
+    const { jobs, skipped } = await queueForImport(["840-158GN", "840-158OG"]);
+
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].groupKey).toBe("840-158");
+    expect(skipped).toEqual([{ sku: "840-158GN", reason: "not_in_feed" }]);
   });
 });
 

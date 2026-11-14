@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { describeApiFailure, describePayloadFailure, describeNetworkFailure } from "@/lib/api-error-message";
+import { SectionTabs, VIDEO_SECTION_TABS } from "@/components/section-tabs";
 
 // ─── Shared types (mirror /lib/database VideoJob) ────────────────────
 
@@ -254,6 +255,8 @@ export default function VideosClient() {
 
   return (
     <div className="p-4 md:p-8">
+      <SectionTabs tabs={VIDEO_SECTION_TABS} />
+
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-white">Vidéos</h2>
         <p className="text-gray-400 text-sm mt-0.5">

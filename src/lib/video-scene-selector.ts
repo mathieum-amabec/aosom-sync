@@ -24,8 +24,8 @@ import os from "os";
 import path from "path";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { getAnthropicClient } from "@/lib/content-generator";
-import { budgetedCreate } from "@/lib/llm-budget";
+import { geminiGenerate, imagePart } from "@/lib/gemini-client";
+import { GEMINI } from "@/lib/config";
 import type { ProductZone } from "@/lib/video-ad-composer";
 
 const execFileAsync = promisify(execFile);
@@ -148,21 +148,17 @@ export function parseScoreReply(text: string): { score: number; reason: string; 
 
 async function defaultScoreFrame(jpegPath: string): Promise<{ score: number; reason: string; zone: ProductZone } | null> {
   const buf = await fs.promises.readFile(jpegPath);
-  const res = await budgetedCreate(getAnthropicClient(), {
-    model: "claude-sonnet-4-6",
-    max_tokens: 200,
-    messages: [
-      {
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: buf.toString("base64") } },
-          { type: "text", text: FRAME_PROMPT },
-        ],
-      },
-    ],
-  });
-  const text = res.content.map((c) => ("text" in c ? c.text : "")).join("");
-  return parseScoreReply(text);
+  // Gemini since 2026-10-02 (was a hard-coded Sonnet 4.6 on the batch pool). Frame scoring
+  // is video QC, so it now bills the "video" pool like demand-gen-clean-window.ts.
+  const res = await geminiGenerate(
+    {
+      model: GEMINI.MODEL_VIDEO_QC,
+      maxOutputTokens: 200,
+      contents: [{ role: "user", parts: [imagePart(buf), { text: FRAME_PROMPT }] }],
+    },
+    "video",
+  );
+  return parseScoreReply(res.text);
 }
 
 // ── windowing ─────────────────────────────────────────────────────────────

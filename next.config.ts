@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // ffmpeg-static resolves its binary with `path.join(__dirname, "ffmpeg")` at RUNTIME. When
+  // bundled, __dirname is frozen at build time to "/ROOT/node_modules/ffmpeg-static", so on
+  // Vercel every render died with `spawn /ROOT/node_modules/ffmpeg-static/ffmpeg ENOENT`
+  // (video_jobs since 2026-06-26). Keep it external
+  // (native require → real __dirname) AND trace the binary into each route that spawns it.
+  serverExternalPackages: ["ffmpeg-static"],
   // The FFmpeg slideshow render (reached via the publish/cron routes) reads the DM Sans
   // + Noto Emoji TTFs at runtime (not via the module graph), registered with fontconfig
   // (see register-brand-fonts.ts) so slide text renders in DM Sans and the CTA emoji
@@ -11,6 +17,7 @@ const nextConfig: NextConfig = {
     "/api/cron/publisher": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
     "/api/cron/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
     "/api/social": ["./src/fonts/DMSans-Regular.ttf", "./src/fonts/DMSans-Bold.ttf", "./src/fonts/NotoEmoji.ttf"],
+    "/api/videos/generate": ["./node_modules/ffmpeg-static/ffmpeg"],
   },
   async headers() {
     return [
@@ -31,12 +38,14 @@ const nextConfig: NextConfig = {
             // sequential-ad renders are served from the public Vercel Blob store, and the
             // client also plays freshly rendered clips from blob: URLs. This directive is
             // what makes those previews play at all.
+            // cdn.pixabay.com + assets.mixkit.co: the Studio Ameublo music picker plays the
+            // candidate tracks inline from their own CDNs (previews only, nothing is stored).
             value:
               "default-src 'self'; " +
               "script-src 'self' 'unsafe-inline'; " +
               "style-src 'self' 'unsafe-inline'; " +
               "img-src 'self' https: data:; " +
-              "media-src 'self' blob: https://jcskqp8orcub9i0l.public.blob.vercel-storage.com; " +
+              "media-src 'self' blob: https://jcskqp8orcub9i0l.public.blob.vercel-storage.com https://cdn.pixabay.com https://assets.mixkit.co; " +
               "font-src 'self'; " +
               "connect-src 'self' https://api.anthropic.com https://graph.facebook.com; " +
               "frame-ancestors 'none';",

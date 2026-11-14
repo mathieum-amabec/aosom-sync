@@ -4,18 +4,32 @@ _Audit autonome du 2026-07-04. Lecture seule — aucune écriture Shopify. Ce do
 constate l'état réel (API Judge.me / Klaviyo + storefront live) et documente les
 étapes exactes à faire dans les dashboards (non scriptables)._
 
+> ⚠️ **Mise à jour 2026-09-18 (Part A damage control, investigation stratégique) :**
+> le flow Klaviyo `TGfezb` a été **mis en pause** (`live → draft`) via
+> `scripts/fix-klaviyo-review-and-cart-flows.mjs --apply` — il ne peut plus envoyer de
+> demande d'avis prématurée. Le déclencheur d'un flow Klaviyo existant n'est **pas**
+> modifiable par API (seul `status` l'est) ; une version corrigée,
+> `Post-Purchase — Review Request v2 (Fulfilled Order)` (`ULN3my`), a été créée sur le
+> métrique `Fulfilled Order` + délai 10 jours, **laissée en `draft`**. Le double-envoi
+> Klaviyo est donc déjà neutralisé — il ne reste que l'action dashboard Judge.me
+> ci-dessous (non scriptable ; confirmé : l'endpoint `GET /api/v1/settings` de Judge.me
+> existe mais ne documente aucune clé de réglage exploitable en toute sécurité).
+
 ## TL;DR — recommandation
 
 - **Judge.me est bien installé et connecté au thème, mais il y a 0 avis.** C'est la
   lacune n°1 de conversion (cf. audit stratégique) — surtout pour le trafic froid des
   campagnes DPA Meta.
-- **Un flow Klaviyo « Post-Purchase — Review Request » existe ET est `live`** (il envoie
-  déjà). Mais il est **mal réglé** : déclenché sur `Placed Order` (à la commande) + 14 j,
-  lien vers la page d'accueil (pas de deep link Judge.me), sans incitation photo, sans
-  exclusion des commandes annulées/remboursées.
-- **Recommandation :** faire des **demandes d'avis natives Judge.me** (déclenchées à
-  l'expédition, deep link par produit, upload photo intégré) le **canal canonique**, et
-  **désactiver la partie « demande d'avis » du flow Klaviyo** pour éviter le double envoi.
+- ~~Un flow Klaviyo « Post-Purchase — Review Request » existe ET est `live`~~ **Corrigé
+  le 2026-09-18 : mis en pause.** Il était mal réglé : déclenché sur `Placed Order` (à
+  la commande) + 14 j, lien vers la page d'accueil (pas de deep link Judge.me), sans
+  incitation photo, sans exclusion des commandes annulées/remboursées.
+- **Recommandation (inchangée) :** faire des **demandes d'avis natives Judge.me**
+  (déclenchées à l'expédition, deep link par produit, upload photo intégré) le
+  **canal canonique**. Le double-envoi Klaviyo est déjà neutralisé (flow en pause) ;
+  il reste à activer Judge.me dans son dashboard (Option A ci-dessous) — ou, si ce choix
+  change, réviser puis flipper `ULN3my` en `live` à la place (Option B, flow déjà
+  correctement câblé, jamais activé sans revue humaine).
   Amorcer avec un **import CSV éthique** d'avis réels.
 
 ---
@@ -144,9 +158,9 @@ droit :
 
 **Toi (dashboards, non scriptable) :**
 - [ ] Judge.me → activer les **review requests natives** (trigger fulfillment, ~10 j,
-      photo activée) — Option A.
-- [ ] Klaviyo → **désactiver** la demande d'avis du flow `TGfezb` (éviter le double envoi),
-      ou le corriger si on choisit l'Option B.
+      photo activée) — Option A. Confirmé le 2026-09-18 : pas d'endpoint API sûr pour
+      ça (`GET /api/v1/settings` existe mais aucune clé documentée) — vraiment
+      dashboard-only.
 - [ ] Judge.me → **import CSV** d'avis réels pour amorcer (Objectif 3).
 - [ ] Vérifier l'authentification du domaine d'envoi (Judge.me et/ou Klaviyo).
 
@@ -154,3 +168,6 @@ droit :
 - [x] Judge.me installé + widget PDP + page « Avis clients » live.
 - [x] Intégration Shopify→Klaviyo avec métriques `Fulfilled/Cancelled/Refunded Order`.
 - [x] Structure du flow Klaviyo review-request (à re-router, pas à recréer).
+- [x] **2026-09-18 : flow Klaviyo `TGfezb` mis en pause** (plus de double-envoi possible
+      dès que Judge.me natif sera activé) ; version corrigée `ULN3my` créée en `draft`
+      comme filet de secours si le choix Judge.me natif change un jour.

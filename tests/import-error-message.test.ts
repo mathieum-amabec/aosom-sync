@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { describeImportFailure } from "@/lib/import-error-message";
+import { describeImportFailure, describeSkippedImports } from "@/lib/import-error-message";
 
 /**
  * catalog/page.tsx used to do `if (res.ok) { ... }` with NO else, so every
@@ -80,5 +80,46 @@ describe("describeImportFailure", () => {
       const msg = await describeImportFailure(res(status), 10);
       expect(msg.trim(), `status ${status} produced no message`).not.toBe("");
     }
+  });
+});
+
+describe("describeSkippedImports", () => {
+  // queueForImport's `skipped` list used to have no wording at all — a batch
+  // that skipped everything looked identical to a full success.
+  it("names a single vanished-from-feed SKU with the requested wording (840-158GN)", () => {
+    const msg = describeSkippedImports([{ sku: "840-158GN", reason: "not_in_feed" }]);
+    expect(msg).toContain("n'est plus disponible chez le fournisseur");
+    expect(msg).toContain("retiré de votre sélection");
+    expect(msg).toContain("840-158GN");
+  });
+
+  it("pluralizes multiple vanished-from-feed SKUs", () => {
+    const msg = describeSkippedImports([
+      { sku: "840-158GN", reason: "not_in_feed" },
+      { sku: "840-159GN", reason: "not_in_feed" },
+    ]);
+    expect(msg).toContain("2 produits");
+    expect(msg).toContain("840-158GN, 840-159GN");
+  });
+
+  it("names a single already-imported SKU (501-004PK)", () => {
+    const msg = describeSkippedImports([{ sku: "501-004PK", reason: "already_imported" }]);
+    expect(msg).toMatch(/déjà importé/i);
+    expect(msg).toContain("501-004PK");
+  });
+
+  it("reports both reasons as separate sentences when a batch mixes them", () => {
+    const msg = describeSkippedImports([
+      { sku: "840-158GN", reason: "not_in_feed" },
+      { sku: "501-004PK", reason: "already_imported" },
+    ]);
+    expect(msg).toContain("840-158GN");
+    expect(msg).toContain("501-004PK");
+    expect(msg).toMatch(/n'est plus disponible[\s\S]*déjà importé|déjà importé[\s\S]*n'est plus disponible/);
+  });
+
+  it("never returns an empty string, even for an unrecognized reason", () => {
+    const msg = describeSkippedImports([{ sku: "X", reason: "some_future_reason" }]);
+    expect(msg.trim()).not.toBe("");
   });
 });

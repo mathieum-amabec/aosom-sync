@@ -29,6 +29,11 @@ export interface CreateBlogArticleInput {
   author?: string;
   /** SEO meta description (used as `metafields_global_description_tag`). */
   metaDescription?: string;
+  /** Override the lang-derived blog id — used by the pSEO guide generator to target the
+   * dedicated BLOG.GUIDES_FR_ID blog instead of the editorial Actualités/Blog. */
+  blogIdOverride?: number;
+  /** Explicit URL handle. Omit to let Shopify auto-derive one from the title. */
+  handle?: string;
 }
 
 export interface CreatedBlogArticle {
@@ -52,7 +57,7 @@ export async function createBlogArticle(
   if (!input.title.trim()) throw new Error("createBlogArticle: title required");
   if (!input.bodyHtml.trim()) throw new Error("createBlogArticle: bodyHtml required");
 
-  const blogId = blogIdFor(input.lang);
+  const blogId = input.blogIdOverride ?? blogIdFor(input.lang);
 
   const tags =
     Array.isArray(input.tags) ? input.tags.join(", ") : input.tags ?? "";
@@ -64,6 +69,9 @@ export async function createBlogArticle(
     tags,
     published: false,
   };
+  if (input.handle) {
+    article.handle = input.handle;
+  }
 
   if (input.summaryHtml) {
     article.summary_html = input.summaryHtml;
@@ -113,15 +121,49 @@ export async function createBlogArticle(
  * `published_at` to now. Idempotent on Shopify's side — re-publishing an already-live
  * article is a no-op. Used by the blog auto-publisher once an article clears the quality
  * + season + weekly-cap gates.
+ *
+ * `bodyHtml`, when given, is written in the SAME PUT as the publish flip, so there is no
+ * window where the article is live with the old body (used by the guide publisher to drop the
+ * draft banner).
  */
-export async function publishBlogArticle(blogId: number, articleId: string): Promise<void> {
+export async function publishBlogArticle(blogId: number, articleId: string, bodyHtml?: string): Promise<void> {
+  const article: Record<string, unknown> = { id: Number(articleId), published: true };
+  if (bodyHtml !== undefined) article.body_html = bodyHtml;
   const response = await shopifyFetch(`/blogs/${blogId}/articles/${articleId}.json`, {
     method: "PUT",
-    body: JSON.stringify({ article: { id: Number(articleId), published: true } }),
+    body: JSON.stringify({ article }),
   });
 
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Shopify blog article publish failed: ${response.status} — ${text}`);
+  }
+}
+
+/** Current body_html of an article as stored in Shopify (includes any edit made in admin). */
+export async function getBlogArticleBody(blogId: number, articleId: string): Promise<string> {
+  const response = await shopifyFetch(`/blogs/${blogId}/articles/${articleId}.json?fields=id,body_html`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify blog article fetch failed: ${response.status} — ${text}`);
+  }
+  const data = (await response.json()) as { article?: { body_html?: string | null } };
+  return data.article?.body_html ?? "";
+}
+
+/**
+ * Overwrite an existing article's body_html in place — does NOT touch `published`. Used by
+ * the guide-quality retry pass to push a revised draft over the original without creating a
+ * duplicate article or accidentally publishing it.
+ */
+export async function updateBlogArticleBody(blogId: number, articleId: string, bodyHtml: string): Promise<void> {
+  const response = await shopifyFetch(`/blogs/${blogId}/articles/${articleId}.json`, {
+    method: "PUT",
+    body: JSON.stringify({ article: { id: Number(articleId), body_html: bodyHtml } }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Shopify blog article body update failed: ${response.status} — ${text}`);
   }
 }

@@ -91,3 +91,27 @@ describe("error handling (task B, structural)", () => {
     expect(src).toMatch(/role="alert"/);
   });
 });
+
+describe("mixed-batch / feed-gone handling (2026-09-19 fix, structural)", () => {
+  it("already-imported checkboxes are disabled, not just selectable-but-styled", () => {
+    // toggleSelect() alone can't be trusted to keep an already-imported row out
+    // of a submitted batch — the checkbox itself must refuse the click. Both the
+    // mobile card and the desktop table row wire this the same way.
+    const matches = source().match(/disabled=\{imported\}/g) ?? [];
+    expect(matches.length).toBe(2);
+  });
+
+  it("select-all skips already-imported rows instead of trying to include them", () => {
+    expect(source()).toMatch(/if \(!isImported\(p\)\) next\.add\(p\.sku\)/);
+  });
+
+  it("a zero-job response with something skipped surfaces why, instead of navigating to an empty queue", () => {
+    const src = source();
+    expect(src).toContain("jobCount === 0");
+    expect(src).toContain("describeSkippedImports(skipped)");
+  });
+
+  it("a partial batch (some queued, some skipped) is confirmed visibly before navigating away", () => {
+    expect(source()).toMatch(/window\.alert\(describeSkippedImports\(skipped\)\)/);
+  });
+});

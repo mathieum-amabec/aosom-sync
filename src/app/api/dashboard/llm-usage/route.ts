@@ -16,7 +16,7 @@ import { estimateCostUsd, poolModel, blendedRatePerMTok, ASSUMED_INPUT_SHARE } f
  */
 export const dynamic = "force-dynamic";
 
-const POOLS: LlmBudgetPool[] = ["assistant", "batch", "maintenance"];
+const POOLS: LlmBudgetPool[] = ["assistant", "batch", "maintenance", "video", "import", "visualiser", "decorateur"];
 const WINDOW_DAYS = 7;
 
 export async function GET() {
@@ -49,11 +49,24 @@ export async function GET() {
       };
     });
 
+    // `video` gets full trend-chart visibility from day one — `maintenance` shipped without
+    // it and nobody noticed for a while (the exact "created but never really counted" gap
+    // this pool was asked to avoid repeating).
     const days = window.map((d) => ({
       day: d.day,
       assistant: d.assistant,
       batch: d.batch,
-      costUsd: estimateCostUsd("assistant", d.assistant) + estimateCostUsd("batch", d.batch),
+      video: d.video,
+      import: d.import,
+      visualiser: d.visualiser,
+      decorateur: d.decorateur,
+      costUsd:
+        estimateCostUsd("assistant", d.assistant) +
+        estimateCostUsd("batch", d.batch) +
+        estimateCostUsd("video", d.video) +
+        estimateCostUsd("import", d.import) +
+        estimateCostUsd("visualiser", d.visualiser) +
+        estimateCostUsd("decorateur", d.decorateur),
     }));
 
     return NextResponse.json(

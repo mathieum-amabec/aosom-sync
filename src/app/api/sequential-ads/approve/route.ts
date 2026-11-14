@@ -1,14 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAuthenticated, getSessionRole } from "@/lib/auth";
-import {
-  getQueueItemById,
-  approveSequentialAdDraft,
-  cancelSequentialAdDraft,
-  getOccupiedQueueSlots,
-  getSetting,
-  QueueSlotTakenError,
-} from "@/lib/database";
-import { getNextAvailableSlot, parseVideoSchedule } from "@/lib/publication-scheduler";
+import { cancelSequentialAdDraft } from "@/lib/database";
+import { approveOneSequentialAd } from "@/lib/sequential-ad-approval";
 
 /**
  * Approve / cancel a generated sequential ad sitting in publication_queue as a DRAFT
@@ -18,10 +11,10 @@ import { getNextAvailableSlot, parseVideoSchedule } from "@/lib/publication-sche
  *
  * POST   { queueId } → draft → pending, reserving a slot (publisher then publishes it).
  * DELETE { queueId } → cancel the draft. Admin-only (reviewers are read-only).
+ *
+ * The slot-safe approval itself lives in sequential-ad-approval.ts, shared with
+ * /api/sequential-ads/bulk-approve so both paths retry the exact same way on collision.
  */
-
-/** SQLite datetime() text ('YYYY-MM-DD HH:MM:SS' UTC) → unix seconds. */
-const sqliteToUnixSec = (s: string): number => Math.floor(Date.parse(`${s.replace(" ", "T")}Z`) / 1000);
 
 async function parseQueueId(request: Request): Promise<number | null> {
   let body: unknown;
@@ -54,57 +47,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "`queueId` (positive integer) is required" }, { status: 400 });
   }
 
-  const row = await getQueueItemById(queueId);
-  if (!row || row.contentType !== "sequential_ad") {
-    return NextResponse.json({ error: "No sequential-ad queue item with that id" }, { status: 404 });
+  const result = await approveOneSequentialAd(queueId);
+  if (!result.success) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
-  if (row.status !== "draft") {
-    return NextResponse.json(
-      { error: `Item ${queueId} is not an approvable draft (status: ${row.status})` },
-      { status: 400 },
-    );
-  }
-
-  // 1. Try the draft's own (tentative) slot first.
-  try {
-    if (await approveSequentialAdDraft(queueId, row.scheduledAt)) {
-      return NextResponse.json({ success: true, queueId, scheduledAt: sqliteToUnixSec(row.scheduledAt) });
-    }
-    return NextResponse.json({ error: "Draft was already approved or cancelled" }, { status: 409 });
-  } catch (err) {
-    if (!(err instanceof QueueSlotTakenError)) throw err;
-    // Slot taken since generation — fall through to recompute a free one.
-  }
-
-  // 2. Recompute the next free slot for this platform's sequential-ad pool.
-  const videoSchedule = parseVideoSchedule(await getSetting("video_schedule"));
-  const nowSec = Math.floor(Date.now() / 1000);
-  const occupied = (await getOccupiedQueueSlots(row.platform, "sequential_ad")).map(sqliteToUnixSec);
-
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const next = await getNextAvailableSlot("facebook", {}, {
-      nowSec,
-      occupied,
-      schedule: videoSchedule,
-      contentType: "sequential_ad",
-    });
-    if (!next) {
-      return NextResponse.json({ error: "No free publication slot (schedule disabled or full)" }, { status: 409 });
-    }
-    try {
-      if (await approveSequentialAdDraft(queueId, next.sqlite)) {
-        return NextResponse.json({ success: true, queueId, scheduledAt: next.at });
-      }
-      return NextResponse.json({ error: "Draft was already approved or cancelled" }, { status: 409 });
-    } catch (err) {
-      if (err instanceof QueueSlotTakenError) {
-        occupied.push(next.at);
-        continue;
-      }
-      throw err;
-    }
-  }
-  return NextResponse.json({ error: "Could not secure a free slot after retries" }, { status: 409 });
+  return NextResponse.json({ success: true, queueId: result.queueId, scheduledAt: result.scheduledAt });
 }
 
 export async function DELETE(request: Request) {

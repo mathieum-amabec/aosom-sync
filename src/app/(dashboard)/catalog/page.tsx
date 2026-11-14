@@ -4,7 +4,8 @@ import { Suspense, useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { storeLink } from "@/lib/insights";
 import { IMPORT } from "@/lib/config";
-import { describeImportFailure, isOverBatchCap, excessOverBatchCap } from "@/lib/import-error-message";
+import { describeImportFailure, describeSkippedImports, isOverBatchCap, excessOverBatchCap } from "@/lib/import-error-message";
+import { deriveSubCategoryOptions } from "@/lib/catalog-filters";
 
 interface CatalogProduct {
   sku: string;
@@ -108,11 +109,23 @@ function CatalogBrowser() {
   // Filters — initialised from the URL so links/refreshes are sticky.
   const [search, setSearch] = useState(() => sp.get("search") ?? "");
   const [searchInput, setSearchInput] = useState(() => sp.get("search") ?? "");
-  const [productType, setProductType] = useState(() => sp.get("productType") ?? "");
+  // The URL's `productType` param can hold either a top-level category ("Home Furnishings")
+  // or a full subcategory path ("Home Furnishings > Bedroom Furniture > Bed Frames") — the
+  // API's `productType` filter accepts both (prefix LIKE). On load, split a subcategory value
+  // back into its two dropdowns so a shared/bookmarked link renders both selects correctly.
+  const [productType, setProductType] = useState(() => {
+    const v = sp.get("productType") ?? "";
+    return v.includes(">") ? v.split(">")[0].trim() : v;
+  });
+  const [subCategory, setSubCategory] = useState(() => {
+    const v = sp.get("productType") ?? "";
+    return v.includes(">") ? v : "";
+  });
   const [minPrice, setMinPrice] = useState(() => sp.get("minPrice") ?? "");
   const [maxPrice, setMaxPrice] = useState(() => sp.get("maxPrice") ?? "");
   const [inStock, setInStock] = useState(() => sp.get("inStock") === "true");
   const [notImported, setNotImported] = useState(() => sp.get("notImported") === "true");
+  const [imported, setImported] = useState(() => sp.get("imported") === "true");
   const [withDiscount, setWithDiscount] = useState(() => sp.get("withDiscount") === "true");
   const [lowStock, setLowStock] = useState(() => sp.get("lowStock") === "true");
   const [sort, setSort] = useState(() => sp.get("sort") ?? "");
@@ -133,20 +146,24 @@ function CatalogBrowser() {
   const overBatchCap = isOverBatchCap(selected.size);
 
   // Build the query params shared by the fetch and the URL (page=1 / falsy omitted).
+  // subCategory, when set, is strictly more specific than productType (see the two selects
+  // below) and is what the API's `productType` prefix filter actually receives.
   const buildParams = useCallback(() => {
     const p = new URLSearchParams();
     if (search) p.set("search", search);
-    if (productType) p.set("productType", productType);
+    const effectiveProductType = subCategory || productType;
+    if (effectiveProductType) p.set("productType", effectiveProductType);
     if (minPrice) p.set("minPrice", minPrice);
     if (maxPrice) p.set("maxPrice", maxPrice);
     if (inStock) p.set("inStock", "true");
     if (notImported) p.set("notImported", "true");
+    if (imported) p.set("imported", "true");
     if (withDiscount) p.set("withDiscount", "true");
     if (lowStock) p.set("lowStock", "true");
     if (sort) p.set("sort", sort);
     if (page > 1) p.set("page", String(page));
     return p;
-  }, [search, productType, minPrice, maxPrice, inStock, notImported, withDiscount, lowStock, sort, page]);
+  }, [search, productType, subCategory, minPrice, maxPrice, inStock, notImported, imported, withDiscount, lowStock, sort, page]);
 
   const fetchCatalog = useCallback(async () => {
     setLoading(true);
@@ -206,11 +223,20 @@ function CatalogBrowser() {
     });
   }
 
+  /** Already on Shopify — checkbox is disabled for these, so "select all" and
+   * the header checkbox's own "all selected" check must skip them too, or
+   * they'd count against a page that can never actually be fully selected. */
+  function isImported(product: CatalogProduct) {
+    return !!product.shopify_product_id;
+  }
+
   function selectAllOnPage() {
     if (!data) return;
     setSelected((prev) => {
       const next = new Set(prev);
-      for (const p of data.products) next.add(p.sku);
+      for (const p of data.products) {
+        if (!isImported(p)) next.add(p.sku);
+      }
       return next;
     });
   }
@@ -219,11 +245,11 @@ function CatalogBrowser() {
     setSelected(new Set());
   }
 
-  /** Header checkbox: toggles every product on the current page. */
+  /** Header checkbox: toggles every SELECTABLE (not-yet-imported) product on the page. */
   function toggleAllOnPage() {
     if (!data) return;
-    const allSkus = data.products.map((p) => p.sku);
-    const allSelected = allSkus.every((s) => selected.has(s));
+    const selectableSkus = data.products.filter((p) => !isImported(p)).map((p) => p.sku);
+    const allSelected = selectableSkus.length > 0 && selectableSkus.every((s) => selected.has(s));
     if (allSelected) deselectAll();
     else selectAllOnPage();
   }
@@ -247,6 +273,36 @@ function CatalogBrowser() {
       });
 
       if (res.ok) {
+        const body = (await res.json().catch(() => null)) as {
+          data?: unknown[];
+          skipped?: { sku: string; reason: string }[];
+        } | null;
+        const jobCount = Array.isArray(body?.data) ? body.data.length : 0;
+        const skipped = body?.skipped ?? [];
+
+        if (jobCount === 0) {
+          // Every requested SKU was skipped — e.g. it vanished from the Aosom
+          // feed between being catalogued and Confirm being clicked (840-158GN,
+          // 2026-09), or a race made it already-imported. This used to be a
+          // silent 200 with an empty /import queue and nothing on screen.
+          setImportError(
+            skipped.length > 0
+              ? describeSkippedImports(skipped)
+              : "Aucun produit n'a pu être mis en file. Réessayez.",
+          );
+          setImporting(false);
+          return;
+        }
+
+        if (skipped.length > 0) {
+          // Partial batch — most likely a race (another tab/session imported a
+          // sibling SKU between page load and this click; already-imported rows
+          // are normally disabled client-side, see isImported()). Block on a
+          // visible confirmation before navigating away, since the /import page
+          // has no record of what got silently dropped.
+          window.alert(describeSkippedImports(skipped));
+        }
+
         setSelected(new Set());
         setConfirmingImport(false);
         window.location.href = "/import";
@@ -320,6 +376,9 @@ function CatalogBrowser() {
             value={productType}
             onChange={(e) => {
               setProductType(e.target.value);
+              // A subcategory only makes sense under its parent — clear it whenever the
+              // top-level category changes (including back to "All categories").
+              setSubCategory("");
               setPage(1);
             }}
             className={INPUT_CLASS}
@@ -332,6 +391,25 @@ function CatalogBrowser() {
                   {t.type} ({t.count})
                 </option>
               ))}
+          </select>
+        </div>
+        <div>
+          <select
+            value={subCategory}
+            onChange={(e) => {
+              setSubCategory(e.target.value);
+              setPage(1);
+            }}
+            disabled={!productType}
+            className={`${INPUT_CLASS} disabled:opacity-50 disabled:cursor-not-allowed`}
+            title={!productType ? "Choisissez d'abord une catégorie" : undefined}
+          >
+            <option value="">All subcategories</option>
+            {deriveSubCategoryOptions(data?.productTypes ?? [], productType).map((t) => (
+              <option key={t.type} value={t.type}>
+                {t.type.slice(productType.length + 3)} ({t.count})
+              </option>
+            ))}
           </select>
         </div>
         <div>
@@ -351,6 +429,7 @@ function CatalogBrowser() {
             <option value="qty_asc">Stock: low first</option>
             <option value="qty_desc">Stock: high first</option>
             <option value="low_stock">Low stock (in stock)</option>
+            <option value="newest">Nouveaux produits Aosom</option>
           </select>
         </div>
         <div className="flex gap-2">
@@ -388,10 +467,20 @@ function CatalogBrowser() {
           }}
         />
         <FilterToggle
+          label="Importés"
+          active={imported}
+          onChange={(v) => {
+            setImported(v);
+            if (v) setNotImported(false);
+            setPage(1);
+          }}
+        />
+        <FilterToggle
           label="Non importés"
           active={notImported}
           onChange={(v) => {
             setNotImported(v);
+            if (v) setImported(false);
             setPage(1);
           }}
         />
@@ -523,18 +612,21 @@ function CatalogBrowser() {
           <div className="md:hidden space-y-3">
             {data.products.map((product) => {
               const isSelected = selected.has(product.sku);
+              const imported = isImported(product);
               return (
                 <div
                   key={product.sku}
                   className={`bg-gray-900 border rounded-xl p-3 flex gap-3 ${
                     isSelected ? "border-blue-600/50 bg-blue-950/20" : "border-gray-800"
-                  }`}
+                  } ${imported ? "opacity-60" : ""}`}
                 >
                   <input
                     type="checkbox"
                     checked={isSelected}
+                    disabled={imported}
+                    title={imported ? "Déjà importé dans Shopify" : undefined}
                     onChange={() => toggleSelect(product.sku)}
-                    className="mt-1 rounded bg-gray-800 border-gray-700 text-blue-500 shrink-0"
+                    className="mt-1 rounded bg-gray-800 border-gray-700 text-blue-500 shrink-0 disabled:cursor-not-allowed disabled:opacity-40"
                   />
                   {product.image1 ? (
                     <img
@@ -587,10 +679,10 @@ function CatalogBrowser() {
                       <input
                         type="checkbox"
                         onChange={toggleAllOnPage}
-                        checked={
-                          data.products.length > 0 &&
-                          data.products.every((p) => selected.has(p.sku))
-                        }
+                        checked={(() => {
+                          const selectable = data.products.filter((p) => !isImported(p));
+                          return selectable.length > 0 && selectable.every((p) => selected.has(p.sku));
+                        })()}
                         className="rounded bg-gray-800 border-gray-700 text-blue-500"
                       />
                     </th>
@@ -611,19 +703,23 @@ function CatalogBrowser() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.products.map((product) => (
+                  {data.products.map((product) => {
+                    const imported = isImported(product);
+                    return (
                     <tr
                       key={product.sku}
                       className={`border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors ${
                         selected.has(product.sku) ? "bg-blue-950/20" : ""
-                      }`}
+                      } ${imported ? "opacity-60" : ""}`}
                     >
                       <td className="px-4 py-3">
                         <input
                           type="checkbox"
                           checked={selected.has(product.sku)}
+                          disabled={imported}
+                          title={imported ? "Déjà importé dans Shopify" : undefined}
                           onChange={() => toggleSelect(product.sku)}
-                          className="rounded bg-gray-800 border-gray-700 text-blue-500"
+                          className="rounded bg-gray-800 border-gray-700 text-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
                         />
                       </td>
                       <td className="px-4 py-2">
@@ -679,7 +775,8 @@ function CatalogBrowser() {
                         <StoreBadge product={product} />
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

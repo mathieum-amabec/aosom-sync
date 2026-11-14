@@ -4,12 +4,24 @@ import { useState, useEffect, useCallback } from "react";
 import { ErrorBanner } from "@/components/error-banner";
 import { describePayloadFailure, describeNetworkFailure } from "@/lib/api-error-message";
 import { SOCIAL_CATEGORIES, seasonalDefaultCategory, getCategory } from "@/lib/social-categories";
+import { TargetingPanel, type TargetSelection } from "./targeting-panel";
+import { SectionTabs, SOCIAL_SECTION_TABS } from "@/components/section-tabs";
 
 interface ChannelState {
   status: "pending" | "published" | "error" | "skipped";
   publishedId?: string;
   publishedAt?: number;
   error?: string;
+}
+
+/** What will actually happen to this draft, joined from publication_queue. See queue-state.ts. */
+interface QueueInfo {
+  state: "scheduled" | "publishing" | "published" | "failed" | "none";
+  scheduledAt: number | null;
+  publishedAt: number | null;
+  error: string | null;
+  counts: { pending: number; publishing: number; published: number; failed: number; cancelled: number; draft: number };
+  total: number;
 }
 
 interface Draft {
@@ -32,6 +44,8 @@ interface Draft {
   createdAt: number;
   productName?: string;
   productImage?: string;
+  unsplashImageUrl?: string | null;
+  queue: QueueInfo;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -104,6 +118,58 @@ function ChannelBadge({ channelKey, state }: { channelKey: string; state: Channe
   );
 }
 
+/**
+ * What will actually happen to this draft next — the persistent counterpart to the
+ * one-time "Planifié pour…" toast shown at approve time. Survives a page refresh because
+ * it's derived from publication_queue on every GET, not from a client-side flash message.
+ */
+function QueueStatusLine({ draft }: { draft: Draft }) {
+  const q = draft.queue;
+  const multi = q.total > 1 ? ` · ${q.total} canaux` : "";
+  switch (q.state) {
+    case "scheduled":
+      return q.scheduledAt !== null ? (
+        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-blue-900/40 text-blue-400 border-blue-800/50">
+          🕑 En file — {formatSlot(q.scheduledAt)}{multi}
+        </span>
+      ) : null;
+    case "publishing":
+      return (
+        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-amber-900/40 text-amber-400 border-amber-800/50">
+          ⏳ Publication en cours…
+        </span>
+      );
+    case "published":
+      return q.publishedAt !== null ? (
+        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-purple-900/40 text-purple-400 border-purple-800/50">
+          ✓ Publié via la file — {formatPublishedAt(q.publishedAt)}
+        </span>
+      ) : null;
+    case "failed":
+      return (
+        <span
+          title={q.error || undefined}
+          className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-red-900/40 text-red-400 border-red-800/50"
+        >
+          ✗ Échec de publication{q.counts.published > 0 ? ` · ${q.counts.published}/${q.total} publié` : ""}
+          {q.error ? ` — ${q.error}` : ""}
+        </span>
+      );
+    case "none":
+      // The one case that matters most: approved but never made it into the queue (no
+      // free slot at approve time). Indistinguishable from a correctly-queued draft
+      // before this fix — now called out explicitly.
+      if (draft.status === "approved") {
+        return (
+          <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-amber-900/40 text-amber-400 border-amber-800/50">
+            ⚠ Approuvé — aucun créneau trouvé, à replanifier manuellement
+          </span>
+        );
+      }
+      return null;
+  }
+}
+
 export default function SocialPage() {
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [activeChannels, setActiveChannels] = useState<string[]>(DEFAULT_CHANNELS);
@@ -140,8 +206,13 @@ export default function SocialPage() {
   const [view, setView] = useState<"list" | "calendar">("list");
   const [previewLang, setPreviewLang] = useState<Record<number, "FR" | "EN">>({});
 
+  // "scheduled" is a client-side filter on real queue state (see visibleDrafts below) —
+  // facebook_drafts.status="scheduled" is dead, nothing writes it, so it must NOT be sent
+  // to the server or the fetch always comes back empty.
+  const statusParam = filter !== "all" && filter !== "scheduled" ? filter : undefined;
+
   const fetchDrafts = useCallback(async () => {
-    const params = filter !== "all" ? `?status=${filter}` : "";
+    const params = statusParam ? `?status=${statusParam}` : "";
     const res = await fetch(`/api/social${params}`);
     const data = await res.json();
     if (data.success) {
@@ -149,12 +220,12 @@ export default function SocialPage() {
       if (Array.isArray(data.activeChannels)) setActiveChannels(data.activeChannels);
     }
     setLoading(false);
-  }, [filter]);
+  }, [statusParam]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const params = filter !== "all" ? `?status=${filter}` : "";
+      const params = statusParam ? `?status=${statusParam}` : "";
       const res = await fetch(`/api/social${params}`);
       const data = await res.json();
       if (cancelled) return;
@@ -167,7 +238,7 @@ export default function SocialPage() {
     return () => {
       cancelled = true;
     };
-  }, [filter]);
+  }, [statusParam]);
 
   async function doAction(action: string, id: number, extra?: Record<string, unknown>) {
     const res = await fetch("/api/social", {
@@ -200,7 +271,9 @@ export default function SocialPage() {
     }
   }
 
-  async function generateHighlight() {
+  // `selection` comes from the "Ciblage précis" panel (theme or sub-categories) and
+  // replaces the dropdown category for that click.
+  async function generateHighlight(selection?: TargetSelection) {
     setGenerating(true);
     try {
       const res = await fetch("/api/social", {
@@ -211,7 +284,7 @@ export default function SocialPage() {
           triggerType: "stock_highlight",
           count: 3,
           // Omitted when blank so the server picks the season.
-          ...(category ? { category } : {}),
+          ...(selection ?? (category ? { category } : {})),
         }),
       });
       const data = await res.json();
@@ -223,6 +296,8 @@ export default function SocialPage() {
         showOk(
           `${data.count} brouillon(s) générés — rien de saisonnier en stock, repli sur tout le catalogue.`
         );
+      } else if (selection) {
+        showOk(`${data.count} brouillon(s) générés — à revoir dans la liste ci-dessous.`);
       }
     } catch {
       showError(describeNetworkFailure("La génération"));
@@ -299,14 +374,32 @@ export default function SocialPage() {
     total: drafts.length,
     draft: drafts.filter((d) => d.status === "draft").length,
     approved: drafts.filter((d) => d.status === "approved").length,
-    scheduled: drafts.filter((d) => d.status === "scheduled").length,
-    published: drafts.filter((d) => d.status === "published").length,
+    // Real queue state, not the dead facebook_drafts.status="scheduled" (nothing writes
+    // that anymore — see queue-state.ts).
+    scheduled: drafts.filter((d) => d.queue.state === "scheduled").length,
+    published: drafts.filter((d) => d.status === "published" || d.queue.state === "published").length,
+    failed: drafts.filter((d) => d.queue.state === "failed").length,
   };
 
-  const calendarDrafts = drafts.filter((d) => d.scheduledAt || d.publishedAt);
+  // "En file" is a client-side filter on real queue state (facebook_drafts.status="scheduled"
+  // never gets written, so filtering server-side on it always returns empty).
+  // "all" = everything still in play: rejected (incl. TTL-expired) drafts only show under their
+  // own tab — mixed into "all" they read as endless duplicates of the same post.
+  const visibleDrafts =
+    filter === "scheduled"
+      ? drafts.filter((d) => d.queue.state === "scheduled")
+      : filter === "all"
+        ? drafts.filter((d) => d.status !== "rejected")
+        : drafts;
+
+  const calendarDrafts = drafts.filter(
+    (d) => d.scheduledAt || d.publishedAt || d.queue.scheduledAt || d.queue.publishedAt,
+  );
 
   return (
     <div className="p-4 md:p-8 max-w-6xl">
+      <SectionTabs tabs={SOCIAL_SECTION_TABS} />
+
       {/* Replaces this page's ten system alert()s — same banner as the catalogue import. */}
       <ErrorBanner
         message={notice?.text ?? null}
@@ -341,7 +434,7 @@ export default function SocialPage() {
             <option value="all">Toutes les catégories</option>
           </select>
           <button
-            onClick={generateHighlight}
+            onClick={() => generateHighlight()}
             disabled={generating}
             className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-500 disabled:opacity-50 transition-colors whitespace-nowrap"
           >
@@ -350,13 +443,21 @@ export default function SocialPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 md:grid-cols-5 gap-2 md:gap-3 mb-6">
+      <TargetingPanel
+        generating={generating}
+        onGenerate={generateHighlight}
+        onError={showError}
+        onOk={showOk}
+      />
+
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 md:gap-3 mb-6">
         {[
           { label: "Total", value: stats.total, color: "text-white" },
           { label: "Drafts", value: stats.draft, color: "text-gray-400" },
           { label: "Approved", value: stats.approved, color: "text-green-400" },
-          { label: "Scheduled", value: stats.scheduled, color: "text-blue-400" },
+          { label: "En file", value: stats.scheduled, color: "text-blue-400" },
           { label: "Published", value: stats.published, color: "text-purple-400" },
+          { label: "Échecs", value: stats.failed, color: "text-red-400" },
         ].map((s) => (
           <div key={s.label} className="p-2 md:p-3 bg-gray-900 border border-gray-800 rounded-xl text-center">
             <p className={`text-lg md:text-xl font-bold ${s.color}`}>{s.value}</p>
@@ -375,7 +476,7 @@ export default function SocialPage() {
                 filter === f ? "bg-blue-600/20 border-blue-600 text-blue-400" : "border-gray-700 text-gray-400 hover:text-white"
               }`}
             >
-              {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
+              {f === "all" ? "All" : f === "scheduled" ? "En file" : f.charAt(0).toUpperCase() + f.slice(1)}
             </button>
           ))}
         </div>
@@ -392,16 +493,18 @@ export default function SocialPage() {
       {loading ? (
         <div className="p-8 text-center text-gray-500">Loading...</div>
       ) : view === "list" ? (
-        drafts.length === 0 ? (
+        visibleDrafts.length === 0 ? (
           <div className="p-8 bg-gray-900 border border-gray-800 rounded-xl text-center">
             <p className="text-gray-500 text-sm">No drafts yet</p>
             <p className="text-gray-600 text-xs mt-1">Import products or run a sync to trigger draft generation</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {drafts.map((draft) => {
-              const lang = previewLang[draft.id] || "FR";
-              const previewText = lang === "FR" ? draft.postText : draft.postTextEn || draft.postText;
+            {visibleDrafts.map((draft) => {
+              const lang = previewLang[draft.id] || (draft.postText ? "FR" : "EN");
+              const previewText = lang === "FR" ? draft.postText || draft.postTextEn || "" : draft.postTextEn || draft.postText;
+              // Editorial posts carry a placeholder sku — never show it or a product for them.
+              const isEditorial = draft.triggerType === "content_template";
               const hasEn = !!draft.postTextEn;
               const failedChannels = Object.entries(draft.channels || {}).filter(([, s]) => s.status === "error");
               // Pick browser-loadable thumbnails. draft.imagePath on Vercel is an absolute serverless filesystem
@@ -412,7 +515,9 @@ export default function SocialPage() {
                   ? draft.imageUrls
                   : draft.imageUrl
                   ? [draft.imageUrl]
-                  : draft.productImage
+                  : draft.unsplashImageUrl
+                  ? [draft.unsplashImageUrl]
+                  : draft.productImage && !isEditorial
                   ? [draft.productImage]
                   : [];
               const composedThumb =
@@ -460,7 +565,7 @@ export default function SocialPage() {
                         <span className="px-2 py-0.5 bg-gray-800 text-gray-400 rounded-md text-xs">
                           {TRIGGER_LABELS[draft.triggerType] || draft.triggerType}
                         </span>
-                        <span className="text-xs text-gray-600">{draft.sku}</span>
+                        {!isEditorial && <span className="text-xs text-gray-600">{draft.sku}</span>}
                         {isPublished(draft) && draft.publishedAt !== null && (
                           <span className="text-xs text-purple-300">
                             · Publié le {formatPublishedAt(draft.publishedAt)}
@@ -485,9 +590,11 @@ export default function SocialPage() {
                         )}
                       </div>
 
-                      {draft.productName && (
+                      {isEditorial ? (
+                        <p className="text-sm text-gray-400 italic truncate mb-1">Contenu éditorial — aucun produit associé</p>
+                      ) : draft.productName ? (
                         <p className="text-sm text-gray-300 font-medium truncate mb-1">{draft.productName}</p>
-                      )}
+                      ) : null}
 
                       {editingId === draft.id ? (
                         <div className="mt-2">
@@ -680,11 +787,7 @@ export default function SocialPage() {
                         </div>
                       )}
 
-                      {draft.scheduledAt && draft.status === "scheduled" && (
-                        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-xs font-medium border bg-blue-900/40 text-blue-400 border-blue-800/50">
-                          🕑 Schedulé — {formatSlot(draft.scheduledAt)}
-                        </span>
-                      )}
+                      <QueueStatusLine draft={draft} />
                       {isPublished(draft) && draft.publishedAt !== null && (
                         <p className="text-xs text-purple-400 mt-1">
                           Publié le {formatPublishedAt(draft.publishedAt)}
@@ -711,12 +814,13 @@ export default function SocialPage() {
                           </button>
                         )}
                         {(() => {
-                          // 'scheduled' is a legacy status: scheduling now flows through
-                          // publication_queue and the social-scheduled cron that drained these
-                          // rows is gone, so nothing writes this status anymore. Keep manual
-                          // publish disabled for any historical 'scheduled' rows (no automatic
-                          // publisher) — unschedule first to revert to draft, then publish.
-                          const publishDisabled = isPublished(draft) || draft.status === "scheduled";
+                          // 'scheduled' is a legacy status nothing writes anymore, kept here
+                          // only for any historical row. The real guard is the live queue
+                          // state: a pending/publishing row means the hourly cron will publish
+                          // this draft on its own, so publishing manually on top of that would
+                          // double-post once the cron catches up.
+                          const inFlight = draft.queue.state === "scheduled" || draft.queue.state === "publishing";
+                          const publishDisabled = isPublished(draft) || draft.status === "scheduled" || inFlight;
                           return (
                             <button
                               onClick={() => {
@@ -724,7 +828,13 @@ export default function SocialPage() {
                                 setPublishChannels(new Set(activeChannels));
                               }}
                               disabled={publishDisabled}
-                              title={draft.status === "scheduled" ? "En file — déschedulez pour publier maintenant" : undefined}
+                              title={
+                                inFlight
+                                  ? "En file pour publication automatique — déplanifiez pour publier maintenant"
+                                  : draft.status === "scheduled"
+                                  ? "En file — déschedulez pour publier maintenant"
+                                  : undefined
+                              }
                               className={`px-3 py-1.5 bg-purple-600/20 text-purple-400 text-xs rounded-lg border border-purple-800/50 ${publishDisabled ? "opacity-40 cursor-not-allowed" : "hover:bg-purple-600/30"}`}
                             >
                               Publish
@@ -803,7 +913,7 @@ function CalendarView({ drafts }: { drafts: Draft[] }) {
     const dayStart = Math.floor(date.getTime() / 1000);
     const dayEnd = dayStart + 86400;
     return drafts.filter((d) => {
-      const ts = d.scheduledAt || d.publishedAt || 0;
+      const ts = d.queue.scheduledAt || d.queue.publishedAt || d.scheduledAt || d.publishedAt || 0;
       return ts >= dayStart && ts < dayEnd;
     });
   }
@@ -841,7 +951,9 @@ function CalendarView({ drafts }: { drafts: Draft[] }) {
                     <div
                       key={d.id}
                       className={`mt-0.5 px-1 py-0.5 rounded text-[10px] truncate ${
-                        d.status === "published" ? "bg-purple-900/40 text-purple-400" : "bg-blue-900/40 text-blue-400"
+                        d.status === "published" || d.queue.state === "published"
+                          ? "bg-purple-900/40 text-purple-400"
+                          : "bg-blue-900/40 text-blue-400"
                       }`}
                       title={d.postText.slice(0, 100)}
                     >

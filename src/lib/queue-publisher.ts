@@ -14,23 +14,45 @@
  *     { title, bodyHtml, lang: "fr"|"en", featuredImage?, summaryHtml?, tags?,
  *       author?, metaDescription? }
  *
+ *   shopify_guide                →  GuideQueuePayload
+ *     { guidePageId, blogId, articleId, shopifyCollectionId, shopifyHandle } — the article
+ *     already exists as a Shopify draft (created at generation time); this just flips it
+ *     live via publishBlogArticle, records the guide_pages row as published, and (best-
+ *     effort) sets the collection's `custom.guide_url` metafield so the storefront can show
+ *     a "Guide d'achat" link. See guide-scheduler.ts (the producer).
+ *
  * A malformed payload throws (→ markFailed), so a bad producer never silently no-ops.
  */
 import { type FacebookBrand } from "./facebook-client";
 import { publishSocialPayload, type SocialPayload } from "./social-publisher";
-import { createBlogArticle } from "./shopify-blog";
+import { createBlogArticle, publishBlogArticle, getBlogArticleBody } from "./shopify-blog";
+import { stripGuideDraftBanner, hasGuideDraftBanner } from "./guide-draft-banner";
+import { setCollectionMetafield, getShopifyProductTitle } from "./shopify-client";
+import { stripSupplierBrands } from "./catalog-guard";
 import { getAnthropicClient } from "./content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "./strip-markdown";
-import { CLAUDE } from "./config";
+import { CLAUDE, BLOG } from "./config";
+
+const { GUIDE_URL_METAFIELD } = BLOG;
 import {
   getNextPending,
   claimQueueItem,
   reclaimStrandedPublishing,
   markPublished,
   markFailed,
+  markGuidePagePublished,
+  getProduct,
+  flagSequentialAdForRerender,
+  createNotification,
+  recordQueuePostIds,
   type PublicationQueueItem,
 } from "./database";
+import { checkSequentialAdPrice } from "./sequential-ad-price";
+import { addUtm, tagCaptionLinks } from "./utm";
+import { assertNoMascot } from "./mascot-guard";
+import { recordPartialFailure } from "./queue-partial-error";
 
 export interface SocialQueuePayload {
   caption: string;
@@ -116,6 +138,44 @@ export function parseBlogPayload(raw: unknown): BlogQueuePayload {
   };
 }
 
+export interface GuideQueuePayload {
+  guidePageId: number;
+  blogId: number;
+  articleId: string;
+  shopifyCollectionId: string;
+  shopifyHandle: string;
+}
+
+/** Validate + narrow a raw payload for a pSEO guide deferred publish. */
+export function parseGuidePayload(raw: unknown): GuideQueuePayload {
+  if (!raw || typeof raw !== "object") throw new Error("payload must be a JSON object");
+  const o = raw as Record<string, unknown>;
+  const guidePageId = Number(o.guidePageId);
+  if (!Number.isInteger(guidePageId) || guidePageId <= 0) {
+    throw new Error("payload.guidePageId must be a positive integer");
+  }
+  const blogId = Number(o.blogId);
+  if (!Number.isInteger(blogId) || blogId <= 0) {
+    throw new Error("payload.blogId must be a positive integer");
+  }
+  if (typeof o.articleId !== "string" || o.articleId.trim() === "") {
+    throw new Error("payload.articleId is required");
+  }
+  if (typeof o.shopifyCollectionId !== "string" || o.shopifyCollectionId.trim() === "") {
+    throw new Error("payload.shopifyCollectionId is required");
+  }
+  if (typeof o.shopifyHandle !== "string" || o.shopifyHandle.trim() === "") {
+    throw new Error("payload.shopifyHandle is required");
+  }
+  return {
+    guidePageId,
+    blogId,
+    articleId: o.articleId,
+    shopifyCollectionId: o.shopifyCollectionId,
+    shopifyHandle: o.shopifyHandle,
+  };
+}
+
 /**
  * Normalize a queue payload (which also allows a singular `imageUrl`) into the shared
  * SocialPayload consumed by publishSocialPayload — the one place FB/IG media routing lives.
@@ -133,8 +193,49 @@ function toSocialPayload(p: SocialQueuePayload): SocialPayload {
 
 export interface PublishItemResult {
   postId: string;
+  /** The Facebook post (a Reel's video id) when one was created — what its insights are read from. */
+  fbPostId?: string;
+  /** The Instagram media id when one was created. */
+  igPostId?: string;
   /** Set when one channel of a 'both' post failed while the other succeeded. */
   partialError?: string;
+}
+
+/** Per-platform last touch on a payload just before it goes out (UTM tagging of a Reel's links). */
+type Decorate = (p: SocialQueuePayload, platform: "facebook" | "instagram") => SocialQueuePayload;
+
+/**
+ * UTM tags for a Reel's storefront links: which platform sent the click, what kind of video it was, which video. Applied at
+ * publish time so videos approved long ago are tagged too and the stored caption stays clean. `ameubloVideoId` (Studio videos)
+ * names the video; batch videos fall back to their queue row.
+ */
+function reelUtm(item: PublicationQueueItem): Decorate {
+  const meta = item.metadata ?? {};
+  const campaign = typeof meta.style === "string" && meta.style ? meta.style : item.contentType;
+  const content = typeof meta.ameubloVideoId === "number" ? `v${meta.ameubloVideoId}` : `q${item.id}`;
+  return (p, platform) => {
+    const utm = { source: platform, medium: "reel", campaign, content };
+    return { ...p, caption: tagCaptionLinks(p.caption, utm), link: p.link ? addUtm(p.link, utm) : p.link };
+  };
+}
+
+/**
+ * UTM tags for a photo post's storefront links: which platform sent the click, what kind of post it was (the La semaine Ameublo
+ * format, else "social"), which post (its queue row). Same publish-time tagging as the Reels, with medium=photo.
+ */
+function socialUtm(item: PublicationQueueItem): Decorate {
+  const meta = item.metadata ?? {};
+  const campaign = typeof meta.format === "string" && meta.format ? meta.format : "social";
+  return (p, platform) => {
+    const utm = { source: platform, medium: "photo", campaign, content: `q${item.id}` };
+    return { ...p, caption: tagCaptionLinks(p.caption, utm), link: p.link ? addUtm(p.link, utm) : p.link };
+  };
+}
+
+/** Publish on ONE platform, recording which post it became. */
+async function publishOn(platform: "facebook" | "instagram", p: SocialQueuePayload, decorate?: Decorate): Promise<PublishItemResult> {
+  const { postId } = await publishSocialPayload(platform, toSocialPayload(decorate ? decorate(p, platform) : p));
+  return platform === "facebook" ? { postId, fbPostId: postId } : { postId, igPostId: postId };
 }
 
 /**
@@ -143,29 +244,69 @@ export interface PublishItemResult {
  * already went out. Throws only when BOTH fail. A partial failure is surfaced via
  * `partialError` (logged by the caller) — the item is still marked published.
  */
-async function publishToBoth(p: SocialQueuePayload): Promise<PublishItemResult> {
-  const sp = toSocialPayload(p);
+async function publishToBoth(p: SocialQueuePayload, decorate?: Decorate): Promise<PublishItemResult> {
   let fbId: string | undefined;
   let igId: string | undefined;
   const errors: string[] = [];
   try {
-    fbId = (await publishSocialPayload("facebook", sp)).postId;
+    fbId = (await publishSocialPayload("facebook", toSocialPayload(decorate ? decorate(p, "facebook") : p))).postId;
   } catch (err) {
     errors.push(`facebook: ${err instanceof Error ? err.message : String(err)}`);
   }
   try {
-    igId = (await publishSocialPayload("instagram", sp)).postId;
+    igId = (await publishSocialPayload("instagram", toSocialPayload(decorate ? decorate(p, "instagram") : p))).postId;
   } catch (err) {
     errors.push(`instagram: ${err instanceof Error ? err.message : String(err)}`);
   }
   if (!fbId && !igId) throw new Error(errors.join(" | "));
   return {
     postId: (fbId ?? igId)!,
+    fbPostId: fbId,
+    igPostId: igId,
     partialError: errors.length > 0 ? errors.join(" | ") : undefined,
   };
 }
 
 const LANG_LABEL = { fr: "français", en: "anglais" } as const;
+
+/** What each batch video shows — the caption writer's angle. */
+export const BATCH_VIDEO_ANGLE: Record<string, string> = {
+  assembly: "vidéo qui montre le montage du produit, étape par étape, fait soi-même à la maison",
+  demand_gen_ext: "courte vidéo qui montre le produit en situation réelle",
+};
+
+/**
+ * Turn a content-batches queue payload ({sku, productName, blobUrl}) into a publishable Reel:
+ * the REAL French product title from Shopify (productName is sometimes a label like "on monte
+ * le meuble à chat"), a link to the product page, and a direct-response caption. Never throws
+ * over the caption — it falls back to the title — only over a payload with no video.
+ */
+export async function batchVideoToSocialPayload(contentType: string, raw: unknown): Promise<SocialQueuePayload> {
+  if (!raw || typeof raw !== "object") throw new Error("payload must be a JSON object");
+  const o = raw as Record<string, unknown>;
+  const blobUrl = optString(o.blobUrl) ?? optString(o.reelsVideoUrl);
+  if (!blobUrl) throw new Error("payload.blobUrl is required");
+  const sku = optString(o.sku);
+  const fallbackName = optString(o.productName) ?? "";
+  let title = fallbackName;
+  let link: string | undefined;
+  if (sku) {
+    try {
+      const product = await getProduct(sku);
+      if (product?.shopify_product_id) title = await getShopifyProductTitle(product.shopify_product_id, fallbackName);
+      if (product?.shopify_handle) link = `https://ameublodirect.ca/products/${product.shopify_handle}`;
+    } catch (err) {
+      console.warn(`[publisher] ${contentType} ${sku}: product lookup failed, using the stored name: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  const angle = BATCH_VIDEO_ANGLE[contentType] ?? "vidéo du produit";
+  const generated = optString(o.caption) ? null : await generateReelCaption(`${title} — ${angle}`, "fr");
+  const caption = optString(o.caption) ?? generated ?? `${title} — livraison gratuite au Canada.${link ? ` 👉 ${link}` : ""}`;
+  // The generated caption tells people "le lien est sous la vidéo", but a Reel has no link field: `link` is only used for
+  // text-only Facebook posts, so these Reels went out with NO link at all (found 2026-10-06). Put it in the caption itself.
+  const withLink = link && !caption.includes(link) ? `${caption}\n\n👉 ${link}` : caption;
+  return { caption: stripSupplierBrands(withLink), brand: "ameublo", reelsVideoUrl: blobUrl, link };
+}
 
 /**
  * Generate a short clickbait caption for a Reel at publish time, so the posted copy is
@@ -177,13 +318,27 @@ export async function generateReelCaption(
   productText: string,
   language: "fr" | "en",
 ): Promise<string | null> {
+  // Direct-response style "à la Alex Hormozi" (Mat, 2026-10-01): a scroll-stopping first line
+  // built on a concrete benefit or the problem it solves, then value, then a clear call to
+  // action. Truthful only: no price (it changes), no fake urgency/scarcity, no supplier name.
   const prompt =
-    `Génère un texte Facebook/Instagram clickbait de 2-3 phrases en ${LANG_LABEL[language]} ` +
-    `pour ce produit : ${productText}. Accrocheur, émoji, appel à l'action. Max 150 caractères. ` +
-    `Pas de hashtags — ils seront ajoutés séparément. Réponds uniquement avec le texte, sans guillemets.`;
+    `Écris le texte d'une vidéo Facebook/Instagram en ${LANG_LABEL[language]}, style direct-response à la Alex Hormozi, ` +
+    `pour ce produit : ${productText}.\n` +
+    `Structure : 1) une accroche-choc en première ligne (le problème réglé ou le bénéfice concret, jamais vague) ; ` +
+    `2) une phrase de valeur concrète ; 3) un appel à l'action clair (voir le produit, magasiner). ` +
+    `1 ou 2 émojis maximum. Max 220 caractères. ${language === "fr" ? "Vouvoiement." : ""}\n` +
+    `Vérité absolue : n'affirme AUCUNE caractéristique, durée, quantité ou résultat qui n'est pas écrit dans le nom du produit ` +
+    `(jamais "en 30 minutes", "sans outil", "pendant des heures", "absorbe les odeurs", "montage garanti"). ` +
+    `L'accroche peut nommer un besoin courant, sans exagérer. ` +
+    `Ton direct mais poli et chaleureux : jamais vulgaire, jamais dégoûtant, jamais culpabilisant. ` +
+    `Pas de "lien en bio" (le lien est sous la vidéo).\n` +
+    `Interdit : tout prix ou pourcentage, fausse urgence ou fausse rareté ("dernière chance", "stock limité"), ` +
+    `superlatifs invérifiables ("le meilleur"), nom de fournisseur ou de marque fabricante, hashtags. ` +
+    `La livraison gratuite au Canada est vraie : tu peux la mentionner. ` +
+    `Réponds uniquement avec le texte, sans guillemets.`;
   try {
     const message = await budgetedCreate(getAnthropicClient(), {
-      model: CLAUDE.MODEL_BATCH,
+      model: llmModel("strong"),
       max_tokens: CLAUDE.MAX_TOKENS_SOCIAL,
       messages: [{ role: "user", content: prompt }],
     });
@@ -192,7 +347,7 @@ export async function generateReelCaption(
     // Same cleanup as the draft paths: strip surrounding quotes, Markdown, and a
     // leading platform-label line ("Post Facebook 🌿") — this reel caption is
     // published unreviewed, so it must not ship a label prefix.
-    const text = cleanSocialCaption(block.text.trim().replace(/^["']+|["']+$/g, ""));
+    const text = stripSupplierBrands(cleanSocialCaption(block.text.trim().replace(/^["']+|["']+$/g, "")));
     return text || null;
   } catch (err) {
     console.warn(
@@ -206,15 +361,24 @@ export async function generateReelCaption(
  * Guard that content_type agrees with platform before dispatch. The DB CHECK constraints
  * allow any combination, and dispatch keys only on platform — so a row with
  * content_type='blog' but platform='facebook' (or vice versa) would run the wrong parser
- * on the payload and post garbage. Fail loud → markFailed instead.
+ * on the payload and post garbage. Fail loud → markFailed instead. Each dedicated
+ * (platform, content_type) pair below is checked both ways (a platform-specific row must
+ * carry its matching content_type, and vice versa).
  */
+const DEDICATED_PLATFORM_CONTENT_TYPE = {
+  shopify_blog: "blog",
+  shopify_guide: "guide",
+} as const;
+
 function assertContentPlatformPairing(item: PublicationQueueItem): void {
-  const isBlogPlatform = item.platform === "shopify_blog";
-  const isBlogContent = item.contentType === "blog";
-  if (isBlogPlatform !== isBlogContent) {
-    throw new Error(
-      `content_type '${item.contentType}' does not match platform '${item.platform}'`,
-    );
+  for (const [platform, contentType] of Object.entries(DEDICATED_PLATFORM_CONTENT_TYPE)) {
+    const isThisPlatform = item.platform === platform;
+    const isThisContentType = item.contentType === contentType;
+    if (isThisPlatform !== isThisContentType) {
+      throw new Error(
+        `content_type '${item.contentType}' does not match platform '${item.platform}'`,
+      );
+    }
   }
 }
 
@@ -222,14 +386,51 @@ function assertContentPlatformPairing(item: PublicationQueueItem): void {
  * Publish one queue item according to its platform. Returns the published post id.
  * Throws on an invalid payload or a publish failure — the caller maps that to markFailed.
  */
+/** A sequential ad whose burned price changed since the render — never publish it. */
+export class SequentialAdPriceChangedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SequentialAdPriceChangedError";
+  }
+}
+
 export async function publishQueueItem(item: PublicationQueueItem): Promise<PublishItemResult> {
   assertContentPlatformPairing(item);
+
+  // Last line of the price guard (sequential-ad-price.ts): the price may have moved between
+  // approval and the slot. A wrong price in the frame is worse than a late post.
+  if (item.contentType === "sequential_ad") {
+    const price = await checkSequentialAdPrice(item);
+    if (!price.ok) throw new SequentialAdPriceChangedError(price.reason!);
+  }
 
   let raw: unknown;
   try {
     raw = JSON.parse(item.payload);
   } catch {
     throw new Error("payload is not valid JSON");
+  }
+
+  // No mascot on the air (2026-10-07): refuse loudly rather than post a Studio render that burns it in.
+  assertNoMascot(item.metadata);
+
+  // Batch video formats (content-batches pipeline) are queued as {sku, productName, blobUrl}
+  // — no caption, no brand — so they used to hit parseSocialPayload below and fail with
+  // "payload.caption is required": 0 ever published, every scheduled one failed (found
+  // 2026-10-01). Build a real Reel payload from the product instead.
+  if (item.contentType in BATCH_VIDEO_ANGLE) {
+    const social = await batchVideoToSocialPayload(item.contentType, raw);
+    const decorate = reelUtm(item);
+    switch (item.platform) {
+      case "facebook":
+        return publishOn("facebook", social, decorate);
+      case "instagram":
+        return publishOn("instagram", social, decorate);
+      case "both":
+        return publishToBoth(social, decorate);
+      default:
+        throw new Error(`Unsupported platform for ${item.contentType}: ${item.platform}`);
+    }
   }
 
   // Reels (content_type='video' or 'sequential_ad' with a reelsVideoUrl): regenerate the
@@ -239,30 +440,72 @@ export async function publishQueueItem(item: PublicationQueueItem): Promise<Publ
     const social = parseSocialPayload(raw);
     if (social.reelsVideoUrl) {
       const language: "fr" | "en" = social.brand === "furnish" ? "en" : "fr";
-      const clickbait = await generateReelCaption(social.caption, language);
+      // Studio Ameublo videos carry a deterministic, operator-editable caption: keep it as-is.
+      const clickbait = item.metadata?.keepCaption === true ? null : await generateReelCaption(social.caption, language);
       const finalPayload: SocialQueuePayload = clickbait ? { ...social, caption: clickbait } : social;
+      const decorate = reelUtm(item);
       switch (item.platform) {
         case "facebook":
-          return { postId: (await publishSocialPayload("facebook", toSocialPayload(finalPayload))).postId };
+          return publishOn("facebook", finalPayload, decorate);
         case "instagram":
-          return { postId: (await publishSocialPayload("instagram", toSocialPayload(finalPayload))).postId };
+          return publishOn("instagram", finalPayload, decorate);
         case "both":
-          return publishToBoth(finalPayload);
+          return publishToBoth(finalPayload, decorate);
         default:
           throw new Error(`Unsupported platform for video content_type: ${item.platform}`);
       }
     }
   }
 
+  // Photo / album posts ('social'): tag the storefront links so Umami can tell which post brought a visit, and use publishOn so
+  // the post id is recorded even for a single-platform post (the bare call below returns no id to measure). Other content types
+  // (blog, guide…) keep their own handling.
+  const photoDecorate = item.contentType === "social" ? socialUtm(item) : undefined;
+
   switch (item.platform) {
     case "facebook":
-      return { postId: (await publishSocialPayload("facebook", toSocialPayload(parseSocialPayload(raw)))).postId };
+      return photoDecorate ? publishOn("facebook", parseSocialPayload(raw), photoDecorate) : { postId: (await publishSocialPayload("facebook", toSocialPayload(parseSocialPayload(raw)))).postId };
     case "instagram":
-      return { postId: (await publishSocialPayload("instagram", toSocialPayload(parseSocialPayload(raw)))).postId };
+      return photoDecorate ? publishOn("instagram", parseSocialPayload(raw), photoDecorate) : { postId: (await publishSocialPayload("instagram", toSocialPayload(parseSocialPayload(raw)))).postId };
     case "both":
-      return publishToBoth(parseSocialPayload(raw));
+      return publishToBoth(parseSocialPayload(raw), photoDecorate);
     case "shopify_blog":
       return { postId: (await createBlogArticle(parseBlogPayload(raw))).articleId };
+    case "shopify_guide": {
+      const payload = parseGuidePayload(raw);
+      // The draft carries a "BROUILLON — Ne pas publier" review banner. Read the CURRENT
+      // Shopify body (it may have been edited in admin since generation), drop the banner, and
+      // write it in the same PUT as the publish flip. Fail closed: if a banner is still there
+      // after stripping (Shopify re-serialized it into a shape we don't recognize), throw
+      // (→ markFailed) rather than put "Ne pas publier" on the live storefront.
+      const currentBody = await getBlogArticleBody(payload.blogId, payload.articleId);
+      const publicBody = stripGuideDraftBanner(currentBody);
+      if (!publicBody.trim()) throw new Error(`guide ${payload.guidePageId}: Shopify article body is empty`);
+      if (hasGuideDraftBanner(publicBody)) {
+        throw new Error(`guide ${payload.guidePageId}: draft banner could not be removed — not publishing`);
+      }
+      await publishBlogArticle(payload.blogId, payload.articleId, publicBody);
+      await markGuidePagePublished(payload.guidePageId);
+      // Best-effort: the "Guide d'achat" collection link (Task C) is a discoverability
+      // nicety, not the primary effect. The article is already live at this point — a
+      // metafield write failure must never make this publish look failed (→ markFailed
+      // would leave guide_pages inconsistent with the real, already-live Shopify article).
+      try {
+        await setCollectionMetafield(
+          payload.shopifyCollectionId,
+          GUIDE_URL_METAFIELD.namespace,
+          GUIDE_URL_METAFIELD.key,
+          GUIDE_URL_METAFIELD.type,
+          `/blogs/guides/${payload.shopifyHandle}`,
+        );
+      } catch (err) {
+        console.error(
+          `[publisher] guide ${payload.guidePageId} published, but setting the collection "Guide d'achat" link failed:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+      return { postId: payload.articleId };
+    }
     default:
       throw new Error(`Unsupported platform: ${item.platform}`);
   }
@@ -381,8 +624,22 @@ export async function drainPublisherQueue(opts: {
     try {
       const result = await publishQueueItem(item);
       await markPublished(item.id);
+      // Remember which posts this became, so their insights can be read later. Best-effort: the post is already live and
+      // marked published — a failure here must never turn that into a failed item (a retry would double-post).
+      try {
+        await recordQueuePostIds(item.id, { fb: result.fbPostId, ig: result.igPostId });
+      } catch (err) {
+        console.warn(`[publisher] item ${item.id}: could not record the post ids: ${err instanceof Error ? err.message : err}`);
+      }
       if (result.partialError) {
         console.warn(`[publisher] item ${item.id} (${item.platform}) published with partial failure: ${result.partialError}`);
+        // Keep the reason where it can be read (it only lived in this log line, so a failing channel went unnoticed for weeks).
+        // Best-effort: the post is live, a bookkeeping failure must not turn it into a failed item.
+        try {
+          await recordPartialFailure(item.id, item.platform, result.partialError);
+        } catch (err) {
+          console.warn(`[publisher] item ${item.id}: could not record the partial failure: ${err instanceof Error ? err.message : err}`);
+        }
       }
       outcomes.push({
         id: item.id,
@@ -393,6 +650,14 @@ export async function drainPublisherQueue(opts: {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      if (err instanceof SequentialAdPriceChangedError) {
+        // Back to draft, flagged for a re-render — not a failure, and its slot is freed.
+        await flagSequentialAdForRerender(item.id, msg);
+        await createNotification("warning", "Pub séquentielle remise en brouillon", `#${item.id} : ${msg}`).catch(() => undefined);
+        console.warn(`[publisher] item ${item.id} held for re-render: ${msg}`);
+        outcomes.push({ id: item.id, platform: item.platform, status: "skipped", error: msg });
+        continue;
+      }
       await markFailed(item.id, msg);
       console.error(`[publisher] item ${item.id} (${item.platform}) failed: ${msg}`);
       outcomes.push({ id: item.id, platform: item.platform, status: "failed", error: msg });

@@ -163,11 +163,6 @@ export async function getSession(): Promise<SessionPayload | null> {
   return verifySessionToken(token);
 }
 
-export async function getSessionUsername(): Promise<string | null> {
-  const session = await getSession();
-  return session?.username ?? null;
-}
-
 export async function getSessionRole(): Promise<UserRole | null> {
   const session = await getSession();
   return session?.role ?? null;

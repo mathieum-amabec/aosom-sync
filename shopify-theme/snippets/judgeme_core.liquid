@@ -19,6 +19,11 @@
   window.jdgm.data = window.jdgm.data || {};
 </script>
 {%- if template contains 'product' -%}
+{%- assign lc_rev_count = product.metafields.reviews.rating_count.value | default: 0 | plus: 0 -%}
+{%- if lc_rev_count == 0 -%}
+{%- comment -%} 2026-11-04: no review yet (3,474 of 3,484 products) → no empty "Avis clients / Soyez le premier" block, no "No reviews" string, no widget fetch. Count = Judge.me's reviews.rating_count metafield. {%- endcomment -%}
+<style>.jdgm-preview-badge,.jdgm-widget,#judgeme_product_reviews,[id^="shopify-section-"][id$="__17745733386da0d1df"]{display:none!important}</style>
+{%- else -%}
 <link rel="stylesheet" href="https://cdn.judge.me/shopify_v2.css" media="all">
 <style>
   /* The API badge ships hidden (inline display:none + JM CSS default); force it visible. */
@@ -30,9 +35,9 @@
   var SHOP = "27u5y2-kp.myshopify.com";
   var TOKEN = "NUZrHBQpbht0-nHvK_4MlzovnDI";
   var PID = "{{ product.id }}";
-  var LOC = "{{ request.locale.iso_code | downcase }}";
-  var EMPTY = (LOC === "en") ? "Be the first to write a review" : "Soyez le premier à laisser un avis";
-  var TITLE = (LOC === "en") ? "Customer Reviews" : "Avis clients";
+  var LOC = {{ request.locale.iso_code | downcase | json }};
+  var EMPTY = lcT(LOC,"Be the first to write a review","Soyez le premier à laisser un avis","Sé el primero en escribir una reseña","ਸਭ ਤੋਂ ਪਹਿਲਾਂ ਸਮੀਖਿਆ ਲਿਖੋ।");
+  var TITLE = lcT(LOC,"Customer Reviews","Avis clients","Opiniones de los clientes","ਗਾਹਕਾਂ ਦੀਆਂ ਸਮੀਖਿਆਵਾਂ");
   var MARK = "<span data-o3 hidden></span>";
 
   function api(path) {
@@ -64,6 +69,8 @@
       own(el, html, function (node) {
         node.style.display = "";
         var b = node.querySelector(".jdgm-prev-badge");
+        // 2026-10-14: don't advertise "0 reviews" next to the title — hide the empty badge.
+        if (b && b.getAttribute("data-number-of-reviews") === "0") { node.style.display = "none"; return; }
         if (b) { b.style.setProperty("display", "inline-flex", "important"); }
       });
     }).catch(function () {});
@@ -73,6 +80,13 @@
     api("product_review").then(function (d) {
       var el = document.getElementById("judgeme_product_reviews");
       var raw = (d && d.widget) ? d.widget.trim() : "";
+      if (LOC === "fr" && raw) {
+        // 2026-10-14: Judge.me ships English strings on the FR storefront — translate the visible ones.
+        raw = raw.replace(/Customer Reviews/g, TITLE)
+                 .replace(/Be the first to write a review/g, EMPTY)
+                 .replace(/Write a review/g, "Écrire un avis")
+                 .replace(/Ask a question/g, "Poser une question");
+      }
       var stripped = raw.replace(/<div>\s*<\/div>/i, "").trim();
       var html = (stripped.length > 0)
         ? (raw + MARK)
@@ -88,4 +102,5 @@
   if (document.readyState !== "loading") { run(); } else { document.addEventListener("DOMContentLoaded", run); }
 })();
 </script>
+{%- endif -%}
 {%- endif -%}

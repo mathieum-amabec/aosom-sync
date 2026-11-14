@@ -4,8 +4,12 @@ import {
   isRenameSuspect,
   runRemovedFromFeedDraft,
   MIN_ACTIVE_COVERAGE,
+  planCatalogFreshnessZero,
+  runCatalogFreshnessZero,
+  CATALOG_FRESHNESS_ZERO_DAYS,
   type RemovedPlanInput,
 } from "@/lib/removed-catalog";
+import type { CatalogFreshnessCandidate } from "@/lib/database";
 import type { ShopifyExistingProduct, ShopifyExistingVariant } from "@/types/sync";
 
 // ─── builders ───────────────────────────────────────────────────────
@@ -220,5 +224,118 @@ describe("runRemovedFromFeedDraft", () => {
 
   it("MIN_ACTIVE_COVERAGE is the documented 80% threshold", () => {
     expect(MIN_ACTIVE_COVERAGE).toBe(0.8);
+  });
+});
+
+// ─── planCatalogFreshnessZero (pure) ─────────────────────────────────
+describe("planCatalogFreshnessZero", () => {
+  const DAY = 86400;
+  const now = 1_800_000_000; // fixed reference instant
+
+  function candidate(sku: string, qty: number, ageDays: number): CatalogFreshnessCandidate {
+    return { sku, qty, lastSeenAt: now - ageDays * DAY };
+  }
+
+  it("zeroes a SKU last seen exactly past the threshold", () => {
+    const skus = planCatalogFreshnessZero([candidate("A", 5, 22)], now);
+    expect(skus).toEqual(["A"]);
+  });
+
+  it("does NOT zero a SKU seen within the threshold window", () => {
+    const skus = planCatalogFreshnessZero([candidate("A", 5, 20)], now);
+    expect(skus).toEqual([]);
+  });
+
+  it("is exact at the boundary (< cutoff zeroes, >= cutoff does not)", () => {
+    const cutoffAgeDays = CATALOG_FRESHNESS_ZERO_DAYS; // exactly 21 days old → lastSeenAt === cutoff → NOT < cutoff
+    const justOverDays = CATALOG_FRESHNESS_ZERO_DAYS + 1 / DAY; // one second older than the cutoff
+    expect(planCatalogFreshnessZero([candidate("EXACT", 5, cutoffAgeDays)], now)).toEqual([]);
+    expect(planCatalogFreshnessZero([candidate("OVER", 5, justOverDays)], now)).toEqual(["OVER"]);
+  });
+
+  it("skips rows already at qty=0 (nothing to do, idempotent)", () => {
+    const skus = planCatalogFreshnessZero([candidate("ALREADY-ZERO", 0, 200)], now);
+    expect(skus).toEqual([]);
+  });
+
+  it("applies uniformly whether or not the candidate is import-linked — the caller decides the population, this function only looks at qty/lastSeenAt", () => {
+    // planCatalogFreshnessZero has no concept of shopify_product_id at all — the
+    // never-imported vs imported distinction lives entirely in what getCatalogFreshnessCandidates
+    // selects (every row with qty != 0), not in this decision function.
+    const skus = planCatalogFreshnessZero(
+      [candidate("NEVER-IMPORTED", 5, 30), candidate("IMPORTED", 5, 30)],
+      now,
+    );
+    expect(skus.sort()).toEqual(["IMPORTED", "NEVER-IMPORTED"]);
+  });
+
+  it("a reappeared SKU (lastSeenAt refreshed to now) is no longer a candidate — no permanent block", () => {
+    // Simulates: zeroed on day 22, reappears in the feed, refreshProducts() bumps
+    // last_seen_at to now. Re-running the plan the same day must not re-flag it.
+    const reseen = candidate("BACK", 12, 0); // qty restored, lastSeenAt = now
+    const skus = planCatalogFreshnessZero([reseen], now);
+    expect(skus).toEqual([]);
+  });
+
+  it("respects a custom thresholdDays override", () => {
+    const skus7d = planCatalogFreshnessZero([candidate("A", 5, 10)], now, 7);
+    expect(skus7d).toEqual(["A"]);
+    const skus30d = planCatalogFreshnessZero([candidate("A", 5, 10)], now, 30);
+    expect(skus30d).toEqual([]);
+  });
+
+  it("CATALOG_FRESHNESS_ZERO_DAYS is the documented 21-day threshold", () => {
+    expect(CATALOG_FRESHNESS_ZERO_DAYS).toBe(21);
+  });
+});
+
+// ─── runCatalogFreshnessZero (I/O wiring, injected deps) ─────────────
+describe("runCatalogFreshnessZero", () => {
+  const DAY = 86400;
+  const now = 1_800_000_000;
+
+  it("fetches candidates, plans, and writes qty=0 for the ones past threshold", async () => {
+    const candidates: CatalogFreshnessCandidate[] = [
+      { sku: "STALE-1", qty: 3, lastSeenAt: now - 40 * DAY },
+      { sku: "STALE-2", qty: 1, lastSeenAt: now - 25 * DAY },
+      { sku: "FRESH", qty: 8, lastSeenAt: now - 2 * DAY },
+    ];
+    const getCandidates = vi.fn().mockResolvedValue(candidates);
+    const zeroQty = vi.fn().mockResolvedValue(2);
+
+    const res = await runCatalogFreshnessZero({ getCandidates, zeroQty, now, log: () => {} });
+
+    expect(zeroQty).toHaveBeenCalledWith(["STALE-1", "STALE-2"]);
+    expect(res).toEqual({ candidates: 3, planned: 2, zeroed: 2 });
+  });
+
+  it("does not call the writer at all when nothing is past threshold", async () => {
+    const getCandidates = vi.fn().mockResolvedValue([{ sku: "FRESH", qty: 5, lastSeenAt: now - 1 * DAY }]);
+    const zeroQty = vi.fn();
+
+    const res = await runCatalogFreshnessZero({ getCandidates, zeroQty, now, log: () => {} });
+
+    expect(zeroQty).not.toHaveBeenCalled();
+    expect(res).toEqual({ candidates: 1, planned: 0, zeroed: 0 });
+  });
+
+  it("no candidates at all → no-op, writer never called", async () => {
+    const getCandidates = vi.fn().mockResolvedValue([]);
+    const zeroQty = vi.fn();
+
+    const res = await runCatalogFreshnessZero({ getCandidates, zeroQty, now, log: () => {} });
+
+    expect(zeroQty).not.toHaveBeenCalled();
+    expect(res).toEqual({ candidates: 0, planned: 0, zeroed: 0 });
+  });
+
+  it("honors a custom thresholdDays end-to-end", async () => {
+    const getCandidates = vi.fn().mockResolvedValue([{ sku: "A", qty: 5, lastSeenAt: now - 10 * DAY }]);
+    const zeroQty = vi.fn().mockResolvedValue(1);
+
+    const res = await runCatalogFreshnessZero({ getCandidates, zeroQty, now, thresholdDays: 7, log: () => {} });
+
+    expect(zeroQty).toHaveBeenCalledWith(["A"]);
+    expect(res.zeroed).toBe(1);
   });
 });

@@ -11,8 +11,25 @@ vi.mock("@/lib/config", () => ({
   SYNC: { MIN_DISCOUNT_DISPLAY_PERCENT: 10 },
 }));
 
+// createShopifyProduct's LAYER 1 correction logs a price_floor_incident on a genuine
+// below-floor mismatch — avoid hitting a real DB from this API-client test file.
+const mockRecordPriceFloorIncident = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+// Costway product ids that the whole-catalogue sweeps must skip (see getCostwayShopifyProductIds).
+const mockCostwayIds = vi.hoisted(() => vi.fn().mockResolvedValue(new Set<string>()));
+// No stored sell prices in this file: created products start at the Aosom price (sell-price-sync.ts).
+vi.mock("@/lib/sell-price-db", () => ({
+  priceNewVariants: vi.fn(async () => new Map()),
+  getSellPriceMap: vi.fn(async () => new Map<string, number>()),
+  getExpectedSellPrices: vi.fn(async () => []),
+  getSellPricesForSkus: vi.fn(async () => new Map<string, number>()),
+}));
+vi.mock("@/lib/database", () => ({
+  recordPriceFloorIncident: mockRecordPriceFloorIncident,
+  getCostwayShopifyProductIds: mockCostwayIds,
+}));
+
 // Import after mocks
-const { updateShopifyVariantPrice, createShopifyProduct } = await import("@/lib/shopify-client");
+const { updateShopifyVariantPrice, createShopifyProduct, fetchShopifyVariantsPage, fetchAllShopifyProducts, attachVariantImages, registerOptionEnTranslations } = await import("@/lib/shopify-client");
 
 import type { AosomMergedProduct } from "@/types/aosom";
 import type { GeneratedContent } from "@/lib/content-generator";
@@ -127,6 +144,211 @@ describe("createShopifyProduct — metafield + handle safety", () => {
     const body = JSON.parse(mockFetch.mock.calls[0][1].body);
     expect(body.product.status).toBe("active");
   });
+
+  it("keeps final prices as given (Costway's own 23 % rule): the Aosom sell-price rule is not applied on top", async () => {
+    const db = await import("@/lib/sell-price-db");
+    vi.mocked(db.priceNewVariants).mockClear();
+    await createShopifyProduct(mergedFixture(), contentFixture({}), { status: "draft", finalPrices: true });
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.product.variants[0].price).toBe("99");
+    expect(db.priceNewVariants).not.toHaveBeenCalled();
+  });
+});
+
+// LAYER 1 for the import path: 842-375V00CG was created with a price nothing ever read
+// back and confirmed. These tests exercise the fix — verify-on-create.
+const restCalls = () => mockFetch.mock.calls.filter((c) => typeof c[0] === "string" && !c[0].endsWith("/graphql.json"));
+
+describe("createShopifyProduct — LAYER 1 write-then-verify on create", () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+    mockRecordPriceFloorIncident.mockClear();
+  });
+
+  it("does nothing extra when Shopify's create response already matches the floor price", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        product: { id: 555, handle: "chaise", variants: [{ id: 9001, sku: "SKU1", price: "99.00" }] },
+      }),
+    });
+
+    await createShopifyProduct(mergedFixture(), contentFixture({}));
+
+    // Only the single create POST — no follow-up price write or read-back needed (the
+    // GraphQL calls are the best-effort EN-translation registration, not price traffic).
+    expect(restCalls()).toHaveLength(1);
+  });
+
+  it("corrects a variant whose create response price does not match the floor, and confirms it", async () => {
+    // mergedFixture()'s SKU1 has an Aosom price of 99 (0% markup → floor 99), but
+    // Shopify's create response reports 89.99 for it — a silent mismatch nothing
+    // previously checked.
+    // Vitest's own runner occasionally probes the stubbed global fetch with no
+    // arguments during test cleanup (unrelated to createShopifyProduct) — the
+    // undefined-url guard keeps that a harmless no-op instead of an unhandled
+    // rejection attributed to this test.
+    mockFetch.mockImplementation(async (url?: string, opts?: RequestInit) => {
+      if (url === undefined) return { ok: true, json: async () => ({}) };
+      if (url.endsWith("/products.json")) {
+        return {
+          ok: true,
+          json: async () => ({
+            product: { id: 555, handle: "chaise", variants: [{ id: 9001, sku: "SKU1", price: "89.99" }] },
+          }),
+        };
+      }
+      if (url.includes("/variants/9001.json") && opts?.method === "PUT") {
+        return { ok: true, json: async () => ({ variant: { id: 9001, sku: "SKU1", price: "99.00" } }) };
+      }
+      if (url.includes("/variants/9001.json")) {
+        // The verifying read-back after the PUT.
+        return { ok: true, json: async () => ({ variant: { id: 9001, sku: "SKU1", price: "99.00" } }) };
+      }
+      throw new Error(`unexpected fetch: ${opts?.method ?? "GET"} ${url}`);
+    });
+
+    await createShopifyProduct(mergedFixture(), contentFixture({}));
+
+    // create POST + corrective PUT + verifying GET.
+    expect(restCalls()).toHaveLength(3);
+    const putCall = mockFetch.mock.calls.find((c) => c[1]?.method === "PUT");
+    expect(putCall?.[0]).toContain("/variants/9001.json");
+    expect(JSON.parse(putCall![1].body).variant.price).toBe("99");
+    // TASK 3: a confirmed below-floor fix is logged as a unified incident.
+    expect(mockRecordPriceFloorIncident).toHaveBeenCalledWith({
+      sku: "SKU1", oldPrice: 89.99, newPrice: 99, source: "import",
+    });
+  });
+
+  it("logs but does not throw when the corrective write never confirms (deleted variant)", async () => {
+    mockFetch.mockImplementation(async (url?: string, opts?: RequestInit) => {
+      if (url === undefined) return { ok: true, json: async () => ({}) };
+      if (url.endsWith("/products.json")) {
+        return {
+          ok: true,
+          json: async () => ({
+            product: { id: 555, handle: "chaise", variants: [{ id: 9001, sku: "SKU1", price: "89.99" }] },
+          }),
+        };
+      }
+      if (url.includes("/variants/9001.json") && opts?.method === "PUT") {
+        return { ok: true, json: async () => ({ variant: { id: 9001, sku: "SKU1", price: "89.99" } }) };
+      }
+      // Read-back reports the variant gone.
+      return { ok: false, status: 404 };
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(createShopifyProduct(mergedFixture(), contentFixture({}))).resolves.toMatchObject({ id: "555" });
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("price floor NOT confirmed"));
+    // An unconfirmed write is not a resolved incident — nothing to log yet.
+    expect(mockRecordPriceFloorIncident).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+  });
+});
+
+// TASK 2: price-reconcile rotation fetches one page at a time instead of the whole
+// catalog every run — this is the primitive it rotates on.
+describe("fetchShopifyVariantsPage — one-page fetch for the reconcile rotation", () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  it("requests without a page_info param when called with null (start of a sweep)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({ products: [{ id: 1, variants: [{ id: 10, sku: "A", price: "9.99" }] }] }),
+    });
+
+    const page = await fetchShopifyVariantsPage(null);
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).not.toContain("page_info");
+    expect(page.variants).toEqual([{ sku: "A", price: 9.99, variantId: "10", shopifyProductId: "1", compareAtPrice: null }]);
+    expect(page.nextPageInfo).toBeNull();
+  });
+
+  it("returns the struck-through price when the variant has one", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({ products: [{ id: 1, variants: [{ id: 10, sku: "A", price: "9.99", compare_at_price: "14.99" }, { id: 11, sku: "B", price: "5.00", compare_at_price: "" }] }] }),
+    });
+    const page = await fetchShopifyVariantsPage(null);
+    expect(page.variants.map((v) => v.compareAtPrice)).toEqual([14.99, null]);
+  });
+
+  it("forwards the cursor and reads the next one off the Link header", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: { get: (name: string) => (name === "Link" ? '<https://x/products.json?page_info=NEXT>; rel="next"' : null) },
+      json: async () => ({ products: [{ id: 2, variants: [{ id: 20, sku: "B", price: "19.99" }] }] }),
+    });
+
+    const page = await fetchShopifyVariantsPage("CURSOR1");
+
+    const url = mockFetch.mock.calls[0][0] as string;
+    expect(url).toContain("page_info=CURSOR1");
+    expect(page.nextPageInfo).toBe("NEXT");
+  });
+
+  it("flattens multiple products' variants into one flat list", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      json: async () => ({
+        products: [
+          { id: 1, variants: [{ id: 10, sku: "A", price: "9.99" }, { id: 11, sku: "A-BK", price: "9.99" }] },
+          { id: 2, variants: [{ id: 20, sku: "B", price: "19.99" }] },
+        ],
+      }),
+    });
+
+    const page = await fetchShopifyVariantsPage(null);
+
+    expect(page.variants).toHaveLength(3);
+    expect(page.variants.map((v) => v.sku)).toEqual(["A", "A-BK", "B"]);
+  });
+
+  it("throws on a non-ok response instead of returning a silently empty page", async () => {
+    mockFetch.mockResolvedValue({ ok: false, status: 500 });
+    await expect(fetchShopifyVariantsPage(null)).rejects.toThrow(/Shopify fetch failed: 500/);
+  });
+});
+
+describe("Costway isolation — whole-catalogue sweeps skip Costway products", () => {
+  beforeEach(() => { mockFetch.mockReset(); mockCostwayIds.mockReset(); });
+
+  const page = (products: unknown[]) => ({ ok: true, headers: { get: () => null }, json: async () => ({ products }) });
+
+  it("fetchAllShopifyProducts drops products whose id is a Costway product", async () => {
+    mockCostwayIds.mockResolvedValue(new Set(["2"]));
+    mockFetch.mockResolvedValue(page([
+      { id: 1, title: "Aosom A", variants: [], images: [] },
+      { id: 2, title: "Costway B", variants: [], images: [] },
+    ]));
+    const out = await fetchAllShopifyProducts();
+    expect(out.map((p) => p.shopifyId)).toEqual(["1"]);
+  });
+
+  it("fetchShopifyVariantsPage drops the variants of a Costway product", async () => {
+    mockCostwayIds.mockResolvedValue(new Set(["2"]));
+    mockFetch.mockResolvedValue(page([
+      { id: 1, variants: [{ id: 10, sku: "A", price: "9.99" }] },
+      { id: 2, variants: [{ id: 20, sku: "CW_1", price: "5.00" }] },
+    ]));
+    const res = await fetchShopifyVariantsPage(null);
+    expect(res.variants.map((v) => v.sku)).toEqual(["A"]);
+  });
+
+  it("fails CLOSED: a lookup error aborts the sweep instead of returning Costway products", async () => {
+    mockCostwayIds.mockRejectedValue(new Error("turso down"));
+    mockFetch.mockResolvedValue(page([{ id: 2, title: "x", variants: [], images: [] }]));
+    await expect(fetchAllShopifyProducts()).rejects.toThrow("turso down");
+    await expect(fetchShopifyVariantsPage(null)).rejects.toThrow("turso down");
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
 });
 
 describe("shopifyFetch — AbortError / timeout", () => {
@@ -215,23 +437,23 @@ describe("updateShopifyVariantPrice", () => {
     expect(body.variant.compare_at_price).toBe("39.99");
   });
 
-  it("clears compare_at_price on a sub-threshold drop (< MIN_DISCOUNT_DISPLAY_PERCENT)", async () => {
-    // 100 -> 99 is a 1% drop, below the 10% threshold: no fake "sale".
+  it("does not set compare_at_price on a sub-threshold drop (< MIN_DISCOUNT_DISPLAY_PERCENT), and leaves an existing one alone", async () => {
+    // 100 -> 99 is a 1% drop, below the 10% threshold: no fake "sale", and no wiping of a valid crossed price.
     await updateShopifyVariantPrice("variant-1", 99, 100);
 
     const call = mockFetch.mock.calls[0];
     const body = JSON.parse(call[1].body);
     expect(body.variant.price).toBe("99");
-    expect(body.variant.compare_at_price).toBeNull();
+    expect(body.variant).not.toHaveProperty("compare_at_price");
   });
 
-  it("clears compare_at_price on price increase", async () => {
+  it("leaves compare_at_price alone on a price increase (a markup must not wipe a real discount)", async () => {
     await updateShopifyVariantPrice("variant-1", 49.99, 39.99);
 
     const call = mockFetch.mock.calls[0];
     const body = JSON.parse(call[1].body);
     expect(body.variant.price).toBe("49.99");
-    expect(body.variant.compare_at_price).toBeNull();
+    expect(body.variant).not.toHaveProperty("compare_at_price");
   });
 
   it("omits compare_at_price when oldPrice not provided", async () => {
@@ -241,5 +463,143 @@ describe("updateShopifyVariantPrice", () => {
     const body = JSON.parse(call[1].body);
     expect(body.variant.price).toBe("29.99");
     expect(body.variant).not.toHaveProperty("compare_at_price");
+  });
+});
+
+describe("createShopifyProduct — EN translations registered at creation", () => {
+  beforeEach(() => mockFetch.mockReset());
+
+  function route(registerErrors: { message: string }[] = []) {
+    const registered: { key: string; value: string; locale: string }[][] = [];
+    mockFetch.mockImplementation(async (url?: string, opts?: RequestInit) => {
+      if (url === undefined) return { ok: true, json: async () => ({}) };
+      if (url.endsWith("/products.json")) {
+        return { ok: true, json: async () => ({ product: { id: 555, handle: "chaise", variants: [{ id: 9001, sku: "SKU1", price: "99.00" }] } }) };
+      }
+      if (url.endsWith("/graphql.json")) {
+        const body = JSON.parse(String(opts?.body));
+        // Option-translation lookup (registerOptionEnTranslations): no options → nothing to do.
+        if (body.query.includes("product(id")) return { ok: true, json: async () => ({ data: { product: { options: [] } } }) };
+        if (body.query.includes("translatableResource")) {
+          return { ok: true, json: async () => ({ data: { translatableResource: { translatableContent: [
+            { key: "title", digest: "d-title" }, { key: "body_html", digest: "d-body" },
+            { key: "meta_title", digest: "d-mt" }, { key: "meta_description", digest: "d-md" },
+          ] } } }) };
+        }
+        registered.push(body.variables.t);
+        return { ok: true, json: async () => ({ data: { translationsRegister: { userErrors: registerErrors } } }) };
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    return registered;
+  }
+
+  it("registers the English copy as Shopify EN translations with the FR digests", async () => {
+    const registered = route();
+    await createShopifyProduct(mergedFixture(), contentFixture({ titleEn: "Office Chair", descriptionEn: "<p>A comfortable chair for your desk and the office.</p>", metaTitleEn: "Office Chair | Furnish Direct", metaDescriptionEn: "Comfortable office chair with free shipping in Canada." }));
+    expect(registered).toHaveLength(1);
+    expect(registered[0]).toEqual(expect.arrayContaining([
+      { key: "title", value: "Office Chair", locale: "en", translatableContentDigest: "d-title" },
+      expect.objectContaining({ key: "body_html", translatableContentDigest: "d-body" }),
+      expect.objectContaining({ key: "meta_title" }),
+      expect.objectContaining({ key: "meta_description" }),
+    ]));
+  });
+
+  it("never registers an unsafe EN value (price, supplier name)", async () => {
+    const registered = route();
+    await createShopifyProduct(mergedFixture(), contentFixture({ titleEn: "Office Chair", descriptionEn: "<p>Great Aosom chair for the office and the home.</p>", metaTitleEn: "Office Chair", metaDescriptionEn: "Office chair, now only $89.99 with free shipping." }));
+    const keys = registered[0].map((t) => t.key);
+    expect(keys).toContain("title");
+    expect(keys).not.toContain("body_html");
+    expect(keys).not.toContain("meta_description");
+  });
+
+  it("still returns the created product when translation registration fails (best-effort)", async () => {
+    route([{ message: "boom" }]);
+    await expect(createShopifyProduct(mergedFixture(), contentFixture({ titleEn: "Office Chair" }))).resolves.toEqual({ id: "555", handle: "chaise" });
+  });
+});
+
+describe("attachVariantImages", () => {
+  beforeEach(() => mockFetch.mockReset());
+  const merged = (variants: { sku: string; color: string; images: string[] }[], images: string[]) =>
+    ({ ...mergedFixture(), images, variants: variants.map((v) => ({ ...mergedFixture().variants[0], ...v })) }) as AosomMergedProduct;
+  const puts = () => mockFetch.mock.calls.filter((c) => c[1]?.method === "PUT").map((c) => JSON.parse(c[1].body).variant);
+
+  it("gives each colour its own photo, and the pos-1 photo to a colour without one (never only some variants)", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    const n = await attachVariantImages(
+      { variants: [{ id: 1, sku: "BK" }, { id: 2, sku: "WT" }, { id: 3, sku: "GY" }], images: [{ id: 101, src: "https://cdn/b_0f0f0f0f-1111-2222-3333-444444444444.jpg" }, { id: 102, src: "https://cdn/x.jpg" }, { id: 103, src: "https://cdn/w.jpg?v=1" }] },
+      merged([{ sku: "BK", color: "Noir", images: ["https://a/b.jpg"] }, { sku: "WT", color: "Blanc", images: ["https://a/w.jpg"] }, { sku: "GY", color: "Gris", images: ["https://a/missing.jpg"] }], ["https://a/b.jpg", "https://a/x.jpg", "https://a/w.jpg"]),
+    );
+    expect(n).toBe(3);
+    expect(puts()).toEqual([{ id: 1, image_id: 101 }, { id: 2, image_id: 103 }, { id: 3, image_id: 101 }]);
+  });
+
+  it("matches by FILE, not position: a refused upload does not shift colours onto a neighbour's photo (2026-10-18)", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    // Payload was [b, x, w, g]; Shopify refused "x", so the created gallery is one shorter.
+    await attachVariantImages(
+      { variants: [{ id: 1, sku: "BK" }, { id: 2, sku: "WT" }, { id: 3, sku: "GY" }], images: [{ id: 101, src: "https://cdn/b.jpg" }, { id: 103, src: "https://cdn/w.jpg" }, { id: 104, src: "https://cdn/g.jpg" }] },
+      merged([{ sku: "BK", color: "Noir", images: ["https://a/b.jpg"] }, { sku: "WT", color: "Blanc", images: ["https://a/w.jpg"] }, { sku: "GY", color: "Gris", images: ["https://a/g.jpg"] }], ["https://a/b.jpg", "https://a/x.jpg", "https://a/w.jpg", "https://a/g.jpg"]),
+    );
+    expect(puts()).toEqual([{ id: 1, image_id: 101 }, { id: 2, image_id: 103 }, { id: 3, image_id: 104 }]);
+  });
+
+  it("never gives a colour a photo another colour also lists (shared lifestyle shot)", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    await attachVariantImages(
+      { variants: [{ id: 1, sku: "BK" }, { id: 2, sku: "WT" }], images: [{ id: 201, src: "https://cdn/life.jpg" }, { id: 202, src: "https://cdn/b.jpg" }, { id: 203, src: "https://cdn/w.jpg" }] },
+      merged([{ sku: "BK", color: "Noir", images: ["https://a/life.jpg", "https://a/b.jpg"] }, { sku: "WT", color: "Blanc", images: ["https://a/life.jpg", "https://a/w.jpg"] }], ["https://a/life.jpg", "https://a/b.jpg", "https://a/w.jpg"]),
+    );
+    expect(puts()).toEqual([{ id: 1, image_id: 202 }, { id: 2, image_id: 203 }]);
+  });
+
+  it("maps renamed uploads back to their source (Costway neutral names)", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: async () => ({}) });
+    const names: Record<string, string> = { "https://cdn/m1-1.jpg": "https://a/b.jpg", "https://cdn/m1-2.jpg": "https://a/w.jpg" };
+    await attachVariantImages(
+      { variants: [{ id: 1, sku: "BK" }, { id: 2, sku: "WT" }], images: [{ id: 301, src: "https://cdn/m1-1.jpg" }, { id: 302, src: "https://cdn/m1-2.jpg" }] },
+      merged([{ sku: "BK", color: "Noir", images: ["https://a/b.jpg"] }, { sku: "WT", color: "Blanc", images: ["https://a/w.jpg"] }], ["https://a/b.jpg", "https://a/w.jpg"]),
+      (src) => names[src],
+    );
+    expect(puts()).toEqual([{ id: 1, image_id: 301 }, { id: 2, image_id: 302 }]);
+  });
+
+  it("leaves single-colour products alone", async () => {
+    const n = await attachVariantImages(
+      { variants: [{ id: 1, sku: "A" }, { id: 2, sku: "B" }], images: [{ id: 101 }] },
+      merged([{ sku: "A", color: "Noir", images: ["a"] }, { sku: "B", color: "Noir", images: ["a"] }], ["a"]),
+    );
+    expect(n).toBe(0);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("registerOptionEnTranslations", () => {
+  beforeEach(() => mockFetch.mockReset());
+  it("translates option names and colour values, skipping correct translations and replacing a stale one (renamed value)", async () => {
+    const registered: { id: string; value: string }[] = [];
+    mockFetch.mockImplementation(async (_url?: string, opts?: RequestInit) => {
+      if (!opts?.body) return { ok: true, json: async () => ({}) };
+      const body = JSON.parse(String(opts.body));
+      if (body.query.includes("product(id")) {
+        return { ok: true, json: async () => ({ data: { product: { options: [
+          { id: "opt-c", name: "Couleur", optionValues: [{ id: "v-noir", name: "Noir" }, { id: "v-plaid", name: "Plaid" }] },
+          { id: "opt-t", name: "Taille", optionValues: [{ id: "v-s", name: "120 cm" }] },
+        ] } } }) };
+      }
+      if (body.query.includes("translatableResourcesByIds")) {
+        return { ok: true, json: async () => ({ data: { translatableResourcesByIds: { nodes: body.variables.ids.map((id: string) => ({
+          resourceId: id, translatableContent: [{ key: "name", digest: `d-${id}` }], translations: id === "opt-t" ? [{ key: "name", value: "Size" }] : id === "v-noir" ? [{ key: "name", value: "Grey" }] : [],
+        })) } } }) };
+      }
+      registered.push({ id: body.variables.id, value: body.variables.t[0].value });
+      return { ok: true, json: async () => ({ data: { translationsRegister: { userErrors: [] } } }) };
+    });
+    const n = await registerOptionEnTranslations("555");
+    expect(n).toBe(2);
+    expect(registered).toEqual([{ id: "opt-c", value: "Color" }, { id: "v-noir", value: "Black" }]);
   });
 });

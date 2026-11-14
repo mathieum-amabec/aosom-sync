@@ -2,9 +2,9 @@
  * Hook Selector — picks a hook from the pool for a given product and language.
  *
  * Strategy:
- * - Map product_type → one of 7 scopes (outdoor_patio, storage_kitchen,
- *   mobilier_indoor, pets, kids_toys_sport, bedroom_decor, universal).
- *   home_office is merged into mobilier_indoor.
+ * - Map product_type → one of 8 scopes (outdoor_patio, storage_kitchen,
+ *   mobilier_indoor, pets, kids_toys_sport, bedroom_decor, seasonal_decor,
+ *   universal). home_office is merged into mobilier_indoor.
  * - Exclude the last 5 used categories (anti-repeat rotation).
  *   If no hooks survive exclusion, retry without exclusion.
  * - 60% pool (hook text verbatim as post opener), 40% generative_seeded.
@@ -25,6 +25,7 @@ export type ProductScope =
   | "pets"
   | "kids_toys_sport"
   | "bedroom_decor"
+  | "seasonal_decor"
   | "universal";
 
 export interface HookSelection {
@@ -56,11 +57,31 @@ const SCOPE_RULES: Array<{ prefix: string; scope: ProductScope }> = [
   { prefix: "Bedding & Bath", scope: "bedroom_decor" },
   { prefix: "Home Décor", scope: "bedroom_decor" },
   { prefix: "Home Decor", scope: "bedroom_decor" },
-  { prefix: "Holiday", scope: "bedroom_decor" },
+
+  // Seasonal decorations (Halloween, Christmas trees, holiday décor) — was falling
+  // through to the "Home Furnishings" catch-all below (mobilier_indoor), which fed
+  // furniture-shopping hooks ("this bedroom collection...") onto e.g. a Halloween
+  // inflatable cat. Also covers non-holiday home décor (artificial trees,
+  // fireplaces) that isn't bedroom-specific either. Must stay ABOVE the generic
+  // "Home Furnishings" rule.
+  // Since autumn 2026 Aosom files the seasonal branch at the TOP level
+  // ("Holiday & Seasonal > Christmas Trees > …", 192 live products on 2026-11-01) instead
+  // of under "Home Furnishings > ". A bare `Holiday → bedroom_decor` rule used to sit above
+  // this block and caught every one of them, so Christmas posts went out tagged
+  // #chambre #deco. Both forms now map to seasonal_decor.
+  { prefix: "Holiday", scope: "seasonal_decor" },
+  { prefix: "Home Furnishings > Holiday & Seasonal", scope: "seasonal_decor" },
+  { prefix: "Home Furnishings > Home Décor", scope: "seasonal_decor" },
+  { prefix: "Home Furnishings > Home Decor", scope: "seasonal_decor" },
 
   // Storage & Kitchen — sub-paths before parent catch-all
   { prefix: "Home Furnishings > Storage", scope: "storage_kitchen" },
   { prefix: "Home Furnishings > Kitchen", scope: "storage_kitchen" },
+  // Real taxonomy prefixes these "Home Furnishings > Appliances" / "> Bathroom
+  // Furniture" — the bare "Appliances" rule below never matched them, so they also
+  // fell through to mobilier_indoor.
+  { prefix: "Home Furnishings > Appliances", scope: "storage_kitchen" },
+  { prefix: "Home Furnishings > Bathroom", scope: "storage_kitchen" },
   { prefix: "Appliances", scope: "storage_kitchen" },
 
   // Mobilier intérieur — home_office merged here, catch-all last
@@ -81,6 +102,40 @@ export function mapProductTypeToScope(productType: string | null | undefined): P
     if (normalized.startsWith(rule.prefix)) return rule.scope;
   }
   return "universal";
+}
+
+// ─── Scope → Hashtags ─────────────────────────────────────────────────
+// Was a single global settings value (social_hashtags_fr/en) applied to every post
+// regardless of category — e.g. a bathroom cabinet or a Christmas tree post tagged
+// #jardinage #patio #mobilierexterieur. Scoped the same way as hooks, so the tags
+// match what's actually in the photo.
+export const SCOPE_HASHTAGS: Record<ProductScope, { fr: string; en: string }> = {
+  outdoor_patio: { fr: "#jardinage #patio #mobilierexterieur #canada", en: "#garden #patio #outdoorfurniture #canada" },
+  storage_kitchen: { fr: "#rangement #cuisine #organisation #canada", en: "#storage #kitchen #organization #canada" },
+  mobilier_indoor: { fr: "#deco #meubles #salon #canada", en: "#homedecor #furniture #livingroom #canada" },
+  pets: { fr: "#animaux #chien #chat #canada", en: "#pets #dog #cat #canada" },
+  kids_toys_sport: { fr: "#enfants #jouets #pleinair #canada", en: "#kids #toys #outdoorplay #canada" },
+  bedroom_decor: { fr: "#chambre #deco #maison #canada", en: "#bedroom #homedecor #canada" },
+  seasonal_decor: { fr: "#halloween #noel #decosaisonniere #canada", en: "#halloween #christmas #seasonaldecor #canada" },
+  universal: { fr: "#quebec #canada #maison", en: "#quebec #canada #home" },
+};
+
+/**
+ * seasonal_decor covers BOTH holidays, so a Christmas tree used to get #halloween too.
+ * When the product type names the holiday, tag only that one.
+ */
+const HOLIDAY_HASHTAGS: Array<{ re: RegExp; fr: string; en: string }> = [
+  { re: /christmas/i, fr: "#noel #decorationdenoel #tempsdesfetes #canada", en: "#christmas #christmasdecor #holidayseason #canada" },
+  { re: /halloween/i, fr: "#halloween #decohalloween #decosaisonniere #canada", en: "#halloween #halloweendecor #seasonaldecor #canada" },
+];
+
+export function hashtagsForScope(scope: ProductScope, language: "FR" | "EN", productType?: string | null): string {
+  if (scope === "seasonal_decor" && productType) {
+    const h = HOLIDAY_HASHTAGS.find((x) => x.re.test(productType));
+    if (h) return language === "FR" ? h.fr : h.en;
+  }
+  const tags = SCOPE_HASHTAGS[scope];
+  return language === "FR" ? tags.fr : tags.en;
 }
 
 // ─── Core selection logic ─────────────────────────────────────────────

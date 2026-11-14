@@ -3,6 +3,24 @@ import type { AosomMergedProduct } from "@/types/aosom";
 import { stripColorFromTitle } from "./variant-merger";
 import { env, CLAUDE } from "./config";
 import { budgetedCreate } from "@/lib/llm-budget";
+import { getContentProvider, getContentGeminiModel, getContentGeminiStrongModel } from "./content-provider";
+import {
+  capTitleWords,
+  convertImperialInTitle,
+  findImperialOnly,
+  findUnaccentedFrench,
+  stripColourFromTitle,
+  ensureTitlePieceCount,
+  inferPieceCount,
+  mentionsPieceCount,
+  MIN_TAGS,
+} from "./content-guards";
+import { stripSupplierBrands, detectDescriptionLanguage } from "./catalog-guard";
+
+import { buildMetaTitle, normalizeMetaTitle } from "./meta-title";
+
+export { stripSupplierBrands } from "./catalog-guard";
+export { clampMetaTitle, buildMetaTitle, normalizeMetaTitle, META_TITLE_SUFFIX } from "./meta-title";
 
 let anthropicClient: Anthropic | null = null;
 
@@ -39,42 +57,14 @@ export interface GeneratedContent {
  * Defensive — guarantees a clean handle regardless of what the model returns.
  */
 /**
- * Clamp a "Name | suffix — Brand" meta title to `max` chars WITHOUT cutting the
- * brand suffix. If too long, trim the name part (at a word boundary) and keep the
- * full "| … — Brand" tail. Falls back to a plain tail-slice if there is no " | ".
- */
-export function clampMetaTitle(title: string, max: number): string {
-  if (title.length <= max) return title;
-  const sepIdx = title.indexOf(" | ");
-  if (sepIdx === -1) return title.slice(0, max);
-  const suffix = title.slice(sepIdx); // " | Livraison gratuite — Ameublo Direct"
-  const room = max - suffix.length;
-  if (room <= 3) return title.slice(0, max); // suffix alone ~fills the budget
-  let name = title.slice(0, room);
-  const lastSpace = name.lastIndexOf(" ");
-  if (lastSpace > 0) name = name.slice(0, lastSpace);
-  return name.trimEnd() + suffix;
-}
-
-/**
  * Supplier brand names that must never surface in customer-facing output.
  * Mirrors the forbidden list in SYSTEM_PROMPT (the prompt asks Claude to omit
  * them; this is the deterministic backstop). Case-insensitive, so HOMCOM/HomCom
  * and PawHut/Pawhut collapse to one entry each.
+ *
+ * stripSupplierBrands() itself now lives in ./catalog-guard (shared with the
+ * catalog audit script) and is re-exported above for existing callers/tests.
  */
-const SUPPLIER_BRANDS = [
-  "Outsunny", "HOMCOM", "Aosom", "Vinsetto", "PawHut",
-  "Soozier", "Qaba", "ShopEZ", "Wikinger", "Portland", "Aousthop",
-];
-const SUPPLIER_BRAND_RE = new RegExp(`\\b(?:${SUPPLIER_BRANDS.join("|")})\\b`, "gi");
-
-/**
- * Strip any supplier brand token from a string. Safe to run before slugify():
- * slugify collapses the whitespace gaps left behind into clean kebab-case.
- */
-export function stripSupplierBrands(s: string): string {
-  return s.replace(SUPPLIER_BRAND_RE, " ");
-}
 
 export function slugify(s: string): string {
   return s
@@ -98,8 +88,8 @@ export function backfillSeoFields(content: GeneratedContent, brand: string): Gen
   const empty = (v: unknown): boolean => typeof v !== "string" || v.trim() === "";
 
   if (empty(c.brand)) c.brand = brand;
-  if (empty(c.metaTitleFr)) c.metaTitleFr = clampMetaTitle(`${c.titleFr} | Livraison gratuite — Ameublo Direct`, 65);
-  if (empty(c.metaTitleEn)) c.metaTitleEn = clampMetaTitle(`${c.titleEn} | Free Shipping — Furnish Direct`, 65);
+  if (empty(c.metaTitleFr)) c.metaTitleFr = buildMetaTitle(c.titleFr, "fr");
+  if (empty(c.metaTitleEn)) c.metaTitleEn = buildMetaTitle(c.titleEn, "en");
   if (empty(c.metaDescriptionFr)) c.metaDescriptionFr = (c.seoDescriptionFr || c.titleFr).slice(0, 155);
   if (empty(c.metaDescriptionEn)) c.metaDescriptionEn = (c.seoDescriptionEn || c.titleEn).slice(0, 155);
   if (empty(c.urlHandleFr)) c.urlHandleFr = slugify(c.titleFr);
@@ -115,32 +105,57 @@ You write product listings in Canadian French and English.
 
 GLOBAL RULES
 - French must sound natural for Quebec shoppers (not Parisian French).
-- Use metric units (cm, kg) — convert if needed.
+- Use metric units (cm, kg) — convert if needed. Never leave an inch, foot or pound value without its
+  metric equivalent; titles are metric only.
+- Spell every French word with its accents (bébé, sécurité, résistant, étanche).
 - Include relevant Canadian keywords for SEO.
 - HTML body: clean, mobile-friendly, no inline styles, 5-8 bullet-point features.
 - Replace any "[BRAND NAME]" with the actual brand name provided.
 - Do NOT mention shipping or delivery in the product title or HTML body.
 - Do NOT put color or size in the product title or body (those are variant-level).
 
+DIMENSIONS — the shopper cannot measure a photo; this is how they judge whether it fits:
+  - If "Dimensions:" is given in the input data below, descriptionFr AND descriptionEn MUST
+    each include ONE bullet point stating them, in cm, using exactly this pattern:
+    FR: "Dimensions : L x l x H cm (L x l x H po)" — EN: "Dimensions: L x W x H cm (L x W x H in)".
+    Use the cm figures given verbatim; compute the inch figures in parentheses yourself.
+  - If "Dimensions:" is NOT given (not provided by the supplier), do not invent, estimate or
+    guess them — simply omit the dimensions bullet.
+
+PIECE COUNT — when the input data gives a "Piece count: N":
+  - The shopper must know how many pieces come in the purchase. The FIRST sentence of descriptionFr
+    AND descriptionEn must state it in digits ("Ce lot de 4 chaises …" / "This set of 4 chairs …").
+  - The title keeps it as a short trailing segment ("… — Lot de 4" / "… — Set of 4"). Never drop it,
+    never leave a dangling "Lot" without its number.
+  - Describe the SET, never one piece alone ("la chaise") when N > 1.
+
+CAPACITY (storage boxes, bins, coolers, tanks, planters, …) — when the source names a volume:
+  - State it in litres ONLY. NEVER write "gallon(s)" or "gal" anywhere in your output, not even
+    in parentheses alongside litres. Convert: 1 US gallon = 3.785 litres, rounded to a whole number.
+
 PRODUCT TITLE (titleFr / titleEn) — strict pattern:
   [Product type] [distinctive feature] [size/capacity if relevant] — [color if relevant]
   - NEVER include a supplier brand name ANYWHERE in your response: Outsunny, HOMCOM, HomCom, Aosom, Vinsetto, Pawhut,
-    PawHut, Soozier, Qaba, ShopEZ, Wikinger, Portland, Aousthop.
+    PawHut, Soozier, Qaba, ShopEZ, Wikinger, Portland, Aousthop, Costway.
   - Maximum 10 words, strict — truncate if necessary. Product type FIRST (SEO). No brand, no model number.
   - Color, only if relevant, after an em dash "—".
 
 META TITLE (metaTitleFr / metaTitleEn) — max 65 characters total:
-  - FR pattern: "<product name FR> | Livraison gratuite — Ameublo Direct"
-  - EN pattern: "<product name EN> | Free Shipping — Furnish Direct"
-  - Keep the product-name part short so the whole string stays within 65 characters.
+  - FR pattern: "<product name FR> | Ameublo Direct"
+  - EN pattern: "<product name EN> | Furnish Direct"
+  - Keep the product-name part short (48 characters max) so the whole string stays within 65.
+  - The name part must read as a complete phrase: never end it on "de", "avec", "pour", "et",
+    "à", "with", "for", "and", a bare number or a dash — shorten to the last complete idea instead.
 
 META DESCRIPTION (metaDescriptionFr / metaDescriptionEn) — max 155 characters:
   - Lead with the main benefit, mention free shipping in Canada, end with a short CTA.
-  - (Meta title/description are the ONLY place shipping may be mentioned.)
+  - (The meta description is the ONLY place shipping may be mentioned.)
 
 URL HANDLE (urlHandleFr / urlHandleEn):
   - Short kebab-case slug: lowercase, no accents, no supplier brand, words joined by "-".
   - Example: "chaise-longue-reglable-grise".
+
+TAGS: 8 to 12 short SEO tags, mixing French and English search terms.
 
 Return valid JSON only, no markdown fences.`;
 
@@ -185,6 +200,63 @@ export class ContentValidationError extends Error {
 }
 
 /**
+ * Aosom's Length/Width/Height feed columns are NOT unit-consistent: some rows report inches,
+ * others centimetres, with no unit column to disambiguate. Confirmed by cross-referencing
+ * against supplier titles that spell out a dimension (2026-10-04):
+ *   - D2-0014 "62'' L 2-Story Rabbit Hutch" → {length:62.3,...} — that IS 62.3, i.e. inches.
+ *   - 845-209V01BN "30" x 21" x 71" Garden Storage Shed" → {77,54.2,179} — 77cm≈30in,
+ *     54.2cm≈21in, 179cm≈71in, i.e. that row is ALREADY cm.
+ * Heuristic (calibrated against 5 real rows spanning both cases, incl. 3 cross-checked against
+ * the row's own stated gallon capacity): a real inch value over 120 (10 ft) is implausible for
+ * these categories, so treat the whole triple as already-cm above that; below it, as inches
+ * needing ×2.54. Not provably correct for every edge case (a genuine small cm-native item
+ * could be misread as inches) — this is a deliberate, documented trade-off against the
+ * alternative of omitting dimensions entirely, which is the bug being fixed here.
+ */
+export function inferDimensionsCm(
+  dims: { length: number; width: number; height: number } | undefined,
+): { length: number; width: number; height: number } | null {
+  if (!dims) return null;
+  const { length, width, height } = dims;
+  if (length <= 0 || width <= 0 || height <= 0) return null;
+  const alreadyCm = Math.max(length, width, height) > 120;
+  const toCm = (v: number) => Math.round((alreadyCm ? v : v * 2.54) * 10) / 10;
+  return { length: toCm(length), width: toCm(width), height: toCm(height) };
+}
+
+const NUM = "(\\d+(?:\\.\\d+)?)";
+const TRIPLE_SEP = "\\s*[x×]\\s*";
+/** "(112.5 x 30 x 100 cm)" right after an "Overall Dimensions" label. */
+const OVERALL_CM_RE = new RegExp(
+  `overall\\s+dimensions?\\s*:[^()]{0,120}\\(\\s*${NUM}[^x×\\d]{0,4}${TRIPLE_SEP}${NUM}[^x×\\d]{0,4}${TRIPLE_SEP}${NUM}\\s*cm\\s*\\)`,
+  "i",
+);
+/** A size label that spells its own unit: 44.3" L x 11.8" W x 39.4" H, or 342 cm L x 255 cm l x 209 cm H. */
+const SIZE_INCH_RE = new RegExp(`${NUM}\\s*(?:"|”|″|in\\b|inch(?:es)?)\\s*[a-z]?\\s*${TRIPLE_SEP}${NUM}\\s*(?:"|”|″|in\\b|inch(?:es)?)\\s*[a-z]?\\s*${TRIPLE_SEP}${NUM}\\s*(?:"|”|″|in\\b|inch(?:es)?)`, "i");
+const SIZE_CM_RE = new RegExp(`${NUM}\\s*cm\\s*[a-z]?\\s*${TRIPLE_SEP}${NUM}\\s*cm\\s*[a-z]?\\s*${TRIPLE_SEP}${NUM}\\s*cm`, "i");
+
+/**
+ * Overall dimensions in cm read from what the supplier WROTE (description or size label), which names its own unit.
+ * The raw feed numbers cannot be trusted: the inch/cm guess in `inferDimensionsCm` is wrong for a 112.5 cm shelf (read as
+ * inches → 285.8 cm) and a 134.6 in bouncy castle (read as cm). Returns null when the text has no unambiguous triple.
+ */
+export function dimensionsCmFromSupplierText(
+  description: string | undefined,
+  size?: string,
+): { length: number; width: number; height: number } | null {
+  const round = (v: number) => Math.round(v * 10) / 10;
+  const text = (description || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
+  const o = OVERALL_CM_RE.exec(text);
+  if (o) return { length: round(+o[1]), width: round(+o[2]), height: round(+o[3]) };
+  const s = size || "";
+  const cm = SIZE_CM_RE.exec(s);
+  if (cm) return { length: round(+cm[1]), width: round(+cm[2]), height: round(+cm[3]) };
+  const inch = SIZE_INCH_RE.exec(s);
+  if (inch) return { length: round(+inch[1] * 2.54), width: round(+inch[2] * 2.54), height: round(+inch[3] * 2.54) };
+  return null;
+}
+
+/**
  * Generate bilingual FR/EN product content using Claude API.
  */
 export async function generateProductContent(
@@ -200,13 +272,28 @@ export async function generateProductContent(
     .map((v) => `- SKU: ${v.sku}, Price: $${v.price}`)
     .join("\n");
 
+  const dimsCm =
+    dimensionsCmFromSupplierText(product.description, product.variants[0]?.size) ??
+    inferDimensionsCm(product.variants[0]?.dimensions);
+  const dimensionsLine = dimsCm
+    ? `Dimensions: ${dimsCm.length} x ${dimsCm.width} x ${dimsCm.height} cm`
+    : "Dimensions: not provided by the supplier — do not invent or estimate them.";
+
+  // A set is sold as N pieces; the listing must say so (title + first sentence of the body).
+  const pieceCount = inferPieceCount(product.name, ...product.variants.map((v) => v.size), cleanShort);
+  const pieceCountLine = pieceCount
+    ? `Piece count: ${pieceCount} — sold as ONE set of ${pieceCount} pieces (see PIECE COUNT rule).\n`
+    : "";
+
   const prompt = `Create a Shopify product listing from this data:
 
 Name: ${cleanName}
+${pieceCountLine}
 Brand (supplier — internal only, NEVER put it in the title): ${product.brand}
 Category: ${product.productType}
 Material: ${product.material}
 Price: $${product.variants[0]?.price || 0} CAD
+${dimensionsLine}
 Description: ${cleanDesc.slice(0, 1500)}
 Short Description: ${cleanShort.slice(0, 500)}
 Variants:
@@ -222,8 +309,8 @@ Return JSON with this exact structure:
   "descriptionEn": "<HTML product description in English>",
   "seoDescriptionFr": "...",
   "seoDescriptionEn": "...",
-  "metaTitleFr": "<= 65 chars, pattern: name FR | Livraison gratuite — Ameublo Direct",
-  "metaTitleEn": "<= 65 chars, pattern: name EN | Free Shipping — Furnish Direct",
+  "metaTitleFr": "<= 65 chars, pattern: name FR | Ameublo Direct",
+  "metaTitleEn": "<= 65 chars, pattern: name EN | Furnish Direct",
   "metaDescriptionFr": "<= 155 chars, benefit + livraison gratuite + CTA",
   "metaDescriptionEn": "<= 155 chars, benefit + free shipping + CTA",
   "urlHandleFr": "kebab-case-fr-no-accents-no-brand",
@@ -231,27 +318,43 @@ Return JSON with this exact structure:
   "tags": ["tag1", "tag2"]
 }`;
 
-  // Two-tier model strategy. The batch model (Haiku by default, see CLAUDE.MODEL_BATCH)
-  // runs first; if its output fails ANY of the schema checks below, the same prompt is
-  // re-run on the assistant-grade model. Every field is validated, so a cheaper model
-  // cannot silently degrade a listing — it either returns a well-formed listing or it
-  // triggers the escalation. Only ContentValidationError escalates: a budget-exceeded
-  // or network failure must not buy a second paid call.
-  const attempt = async (model: string): Promise<GeneratedContent> => {
+  // Model chain (CONTENT_PROVIDER, see content-provider.ts). Only a ContentValidationError moves
+  // down the chain: a budget-exceeded or network failure must not buy a second paid call.
+  //   gemini mode (default): Gemini Flash-Lite -> Gemini 3.8 Flash  (no Claude in the path)
+  //   anthropic mode:        Claude Haiku      -> Claude Sonnet     (the historical chain)
+  // budgetedCreate serves a gemini-* model with Google and returns the same Message shape, so one
+  // code path handles both. The same prompt, validation and guardrails apply whichever model
+  // wrote the draft.
+  //
+  // `correction` is set on the single same-tier retry that fixes soft problems (inch values left
+  // in the body, missing accents, too few tags) — see collectCopyIssues below.
+  type Tier = "first" | "second";
+  const tiers: Tier[] = ["first", "second"];
+  const gemini = getContentProvider() === "gemini";
+  const modelFor = (t: Tier) =>
+    gemini
+      ? t === "first" ? getContentGeminiModel() : getContentGeminiStrongModel()
+      : t === "first" ? CLAUDE.MODEL_BATCH : CLAUDE.MODEL;
+  const attempt = async (tier: Tier, correction?: string): Promise<GeneratedContent> => {
+    const model = modelFor(tier);
+    const userPrompt = correction ? `${prompt}
+
+${correction}` : prompt;
+
     const message = await budgetedCreate(client, {
       model,
       max_tokens: CLAUDE.MAX_TOKENS_CONTENT,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content: userPrompt }],
     });
 
     if (!message.content.length || message.content[0].type !== "text" || !message.content[0].text.trim()) {
       throw new ContentValidationError("empty or non-text content (possible refusal)");
     }
-
     const text = message.content[0].text;
     const jsonStr = text.replace(/^```json?\s*\n?/m, "").replace(/\n?```\s*$/m, "");
 
+    let content: GeneratedContent;
     try {
       const parsed = JSON.parse(jsonStr);
       // Validate required string fields (LLM output trust boundary)
@@ -265,7 +368,13 @@ Return JSON with this exact structure:
         if (typeof parsed[field] !== "string") throw new Error(`Missing or invalid field: ${field}`);
       }
       if (!Array.isArray(parsed.tags)) throw new Error("Missing or invalid field: tags");
-      parsed.tags = parsed.tags.filter((t: unknown) => typeof t === "string").slice(0, 20);
+      parsed.tags = parsed.tags
+        .filter((t: unknown): t is string => typeof t === "string")
+        // Tags were the one field the brand strip never reached: a "costway" / "outsunny" tag would be
+        // public on the storefront. A tag that IS a brand collapses to "" and is dropped.
+        .map((t: string) => stripSupplierBrands(t).replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .slice(0, 20);
 
       // Programmatic safety net: strip supplier brand names the model may still echo
       // into titles. Runs before length/meta/handle derivation so those stay clean too.
@@ -274,17 +383,34 @@ Return JSON with this exact structure:
       parsed.titleFr = stripSupplierBrands(parsed.titleFr).replace(/\s+/g, " ").trim();
       parsed.titleEn = stripSupplierBrands(parsed.titleEn).replace(/\s+/g, " ").trim();
 
+      // Title guardrails (content-guards.ts): the prompt's own rules, enforced in code because
+      // every model slips on them some of the time. Order matters: convert inch/foot values
+      // first (so a dimension reads as one unit), then drop the colour, then cap the length.
+      const multiColour = new Set(product.variants.map((v) => v.color).filter(Boolean)).size > 1;
+      for (const [key, locale] of [["titleFr", "fr"], ["titleEn", "en"]] as const) {
+        parsed[key] = ensureTitlePieceCount(
+          capTitleWords(stripColourFromTitle(convertImperialInTitle(parsed[key], locale), multiColour)),
+          pieceCount,
+          locale,
+        );
+      }
+
       // Enforce length / format limits
       parsed.titleFr = parsed.titleFr.slice(0, 200);
       parsed.titleEn = parsed.titleEn.slice(0, 200);
       // LLM output trust boundary: sanitize the model's HTML (same allow-list as the
       // input) BEFORE it is persisted to Shopify body_html / custom.body_html_en.
-      parsed.descriptionFr = sanitizeHtml(parsed.descriptionFr).slice(0, 10000);
-      parsed.descriptionEn = sanitizeHtml(parsed.descriptionEn).slice(0, 10000);
-      parsed.seoDescriptionFr = parsed.seoDescriptionFr.slice(0, 200);
-      parsed.seoDescriptionEn = parsed.seoDescriptionEn.slice(0, 200);
-      parsed.metaTitleFr = clampMetaTitle(parsed.metaTitleFr, 65);
-      parsed.metaTitleEn = clampMetaTitle(parsed.metaTitleEn, 65);
+      // stripSupplierBrands() runs on descriptions too, not just titles/handles — the
+      // system prompt asks the model to omit the supplier name, but that is a soft
+      // instruction; this is the deterministic backstop the titles already had.
+      parsed.descriptionFr = stripSupplierBrands(sanitizeHtml(parsed.descriptionFr)).slice(0, 10000);
+      parsed.descriptionEn = stripSupplierBrands(sanitizeHtml(parsed.descriptionEn)).slice(0, 10000);
+      parsed.seoDescriptionFr = stripSupplierBrands(parsed.seoDescriptionFr).slice(0, 200);
+      parsed.seoDescriptionEn = stripSupplierBrands(parsed.seoDescriptionEn).slice(0, 200);
+      // Meta-title safety net: re-apply the store suffix, clamp at a clean word boundary, and
+      // rebuild from the (already guarded) product title when the model's name part dangles.
+      parsed.metaTitleFr = normalizeMetaTitle(stripSupplierBrands(parsed.metaTitleFr), parsed.titleFr, "fr");
+      parsed.metaTitleEn = normalizeMetaTitle(stripSupplierBrands(parsed.metaTitleEn), parsed.titleEn, "en");
       parsed.metaDescriptionFr = parsed.metaDescriptionFr.slice(0, 155);
       parsed.metaDescriptionEn = parsed.metaDescriptionEn.slice(0, 155);
       parsed.urlHandleFr = slugify(stripSupplierBrands(parsed.urlHandleFr));
@@ -294,7 +420,21 @@ Return JSON with this exact structure:
       // can be the Shopify vendor + stored in custom.brand_fr.
       parsed.brand = product.brand;
 
-      return parsed as GeneratedContent;
+      // Language backstop: descriptionFr must actually read as French. This is the
+      // write-time guard against the description-language class of bug (679/1382
+      // active products went English via a since-fixed diff-engine defect) — a model
+      // that returns English (or an empty/unparseable body) for descriptionFr must
+      // never reach Shopify silently. Throwing ContentValidationError here reuses the
+      // existing MODEL_BATCH → MODEL escalation below: a cheap-tier slip retries on
+      // the stronger model before this ever surfaces to the caller.
+      const frLang = detectDescriptionLanguage(parsed.descriptionFr);
+      if (frLang.lang === "EN" || frLang.lang === "empty") {
+        throw new ContentValidationError(
+          `descriptionFr does not read as French (detected: ${frLang.lang}, fr=${frLang.fr} en=${frLang.en})`,
+        );
+      }
+
+      content = parsed as GeneratedContent;
     } catch (err) {
       // Name the model: with two tiers in play, "invalid content" is only actionable if
       // the log says which model produced it.
@@ -302,16 +442,107 @@ Return JSON with this exact structure:
       console.error(`[content-generator] ${model} returned invalid content (${reason}):`, text.slice(0, 500));
       throw new ContentValidationError(`invalid or incomplete JSON payload from ${model}`);
     }
+
+    // Soft problems (inch values left in the body, missing accents, too few tags). These are
+    // fixable by the SAME model in one cheap extra call, so they never escalate to the paid tier
+    // and are handled OUTSIDE the try above — a budget/network failure on the retry must
+    // propagate as itself, not be relabelled a validation error (which would buy an escalation).
+    const issues = collectCopyIssues(content, dimsCm, pieceCount);
+    if (issues.length && !correction) {
+      console.warn(`[content-generator] ${model} copy needs a fix (${issues.join("; ")}) — one corrective retry`);
+      return attempt(tier, buildCorrection(issues));
+    }
+    if (issues.length) {
+      console.warn(`[content-generator] ${model} still has issues after the corrective retry — keeping the draft: ${issues.join("; ")}`);
+    }
+    return content;
   };
 
-  try {
-    return await attempt(CLAUDE.MODEL_BATCH);
-  } catch (err) {
-    if (!(err instanceof ContentValidationError) || CLAUDE.MODEL_BATCH === CLAUDE.MODEL) throw err;
-    console.warn(
-      `[content-generator] ${CLAUDE.MODEL_BATCH} output rejected (${err.message}) — ` +
-        `re-running "${cleanName}" on ${CLAUDE.MODEL}`,
-    );
-    return await attempt(CLAUDE.MODEL);
+  for (let i = 0; ; i++) {
+    try {
+      return await attempt(tiers[i]);
+    } catch (err) {
+      // Only a validation failure moves down the chain; an API/budget/network error propagates.
+      if (!(err instanceof ContentValidationError)) throw err;
+      // Skip any tier configured to the SAME model (e.g. CLAUDE_BATCH_MODEL set to Sonnet):
+      // re-running the same model on the same prompt is a paid no-op.
+      let next = i + 1;
+      while (next < tiers.length && modelFor(tiers[next]) === modelFor(tiers[i])) next++;
+      if (next >= tiers.length) throw err;
+      console.warn(
+        `[content-generator] ${modelFor(tiers[i])} output rejected (${err.message}) — ` +
+          `re-running "${cleanName}" on ${modelFor(tiers[next])}`,
+      );
+      i = next - 1;
+    }
   }
+}
+
+const stripTags = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+/**
+ * Soft problems in an otherwise valid listing, as short human-readable lines (empty = clean).
+ * Titles are NOT checked here — they are repaired deterministically before this runs.
+ *
+ * `expectedDimsCm` is the dimensions line actually sent to the model (see
+ * `inferDimensionsCm`/`dimensionsLine` in generateProductContent) — when it was given real
+ * numbers, BOTH descriptions must mention them, or a shopper has no way to judge the size from
+ * text alone (the prompt also forbids a dimensions-overlay photo from standing in for this —
+ * see vision-classifier.ts's STRICT_OVERLAY_PROMPT).
+ */
+export function collectCopyIssues(
+  c: GeneratedContent,
+  expectedDimsCm?: { length: number; width: number; height: number } | null,
+  expectedPieceCount?: number | null,
+): string[] {
+  const issues: string[] = [];
+  if (expectedPieceCount) {
+    // The count must be readable in the FIRST sentence/paragraph, not only buried in a bullet.
+    for (const [lang, html] of [["French", c.descriptionFr], ["English", c.descriptionEn]] as const) {
+      const lead = stripTags(html).slice(0, 320);
+      if (!mentionsPieceCount(lead, expectedPieceCount)) {
+        issues.push(
+          `the ${lang} description does not state in its opening sentence that this is a set of ${expectedPieceCount} pieces — say it up front ("Lot de ${expectedPieceCount} …" / "Set of ${expectedPieceCount} …")`,
+        );
+      }
+    }
+  }
+  const bodyText = [c.descriptionFr, c.descriptionEn, c.seoDescriptionFr, c.seoDescriptionEn].map(stripTags).join(" . ");
+  const imperial = findImperialOnly(bodyText);
+  if (imperial.length) {
+    issues.push(`imperial values without a metric equivalent: ${imperial.slice(0, 6).join(", ")}`);
+  }
+  if (/\bgal(?:lons?)?\b/i.test(bodyText)) {
+    issues.push('capacity given in gallons — state it in litres only, remove every "gallon"/"gal"');
+  }
+  if (expectedDimsCm) {
+    // Loose match: at least two of the three figures must appear somewhere in either
+    // description, as EITHER the exact value we gave the model ("55.9", since the prompt
+    // says to use it verbatim) OR its rounded whole number ("56", in case the model rounds
+    // for a cleaner-sounding bullet) — tolerates either style, but still catches the
+    // dimensions being dropped entirely.
+    const axes = [expectedDimsCm.length, expectedDimsCm.width, expectedDimsCm.height];
+    const hits = axes.filter((v) => bodyText.includes(String(v)) || bodyText.includes(String(Math.round(v)))).length;
+    if (hits < 2) {
+      issues.push(
+        `dimensions (${axes.join(" x ")} cm) were provided but are missing from the description — add a "Dimensions" bullet in both languages`,
+      );
+    }
+  }
+  const accents = findUnaccentedFrench(
+    [c.titleFr, stripTags(c.descriptionFr), c.metaTitleFr, c.metaDescriptionFr, c.seoDescriptionFr].join(" . "),
+  );
+  if (accents.length) issues.push(`French words missing accents: ${accents.slice(0, 6).join(", ")}`);
+  if (c.tags.length < MIN_TAGS) issues.push(`only ${c.tags.length} tags (need 8 to 12)`);
+  return issues;
+}
+
+/** The follow-up message for the one same-tier corrective retry. */
+function buildCorrection(issues: string[]): string {
+  return (
+    "Your previous answer was valid JSON but had these problems:\n" +
+    issues.map((i) => `- ${i}`).join("\n") +
+    "\nReturn the COMPLETE JSON again, fixing exactly these. Give metric values (cm, m, kg) — you may keep " +
+    "the original imperial value in parentheses after the metric one. Keep everything else unchanged."
+  );
 }

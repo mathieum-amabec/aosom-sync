@@ -6,14 +6,23 @@
  *      FAIL-CLOSED (throws) when the pool is exhausted, and
  *   2. records the call's actual input+output tokens against that pool's counter.
  *
- * Two pools, so a bulk run can never starve the public storefront:
+ * Four pools, so no one bulk workload can starve another:
  *   - `assistant` — ONLY `/api/assistant` (the public shopping assistant). Budget:
  *     `LLM_ASSISTANT_DAILY_BUDGET` (default 500k).
- *   - `batch` — everything else (imports, product/blog content, social captions,
- *     slideshow/video hooks, vision). Budget: `LLM_DAILY_TOKEN_BUDGET` (default 1.3M).
- * A bulk import drains only the `batch` pool, so the `assistant` pool — and shoppers —
- * are unaffected. `budgetedCreate` defaults to `batch`; only the assistant passes
- * `"assistant"`, so a new caller can never accidentally spend against the assistant pool.
+ *   - `batch` — imports, product/blog content, social captions. Budget:
+ *     `LLM_DAILY_TOKEN_BUDGET` (default 1.3M).
+ *   - `maintenance` — operator-launched catalogue vision audits (e.g. the pos-1 photo
+ *     audit). Budget: `LLM_MAINTENANCE_DAILY_BUDGET` (default uncapped).
+ *   - `video` — demand-gen-ext / assembly video-batch vision QC. Budget:
+ *     `LLM_VIDEO_DAILY_BUDGET` (default 400k). Split out 2026-09-22 for the same reason
+ *     `maintenance` was: a video production run is vision-call-heavy (dense per-frame
+ *     scoring) and was draining the shared `batch` pool fast enough to risk starving
+ *     same-day imports/social — see llm-usage.ts's `video` entry in ASSUMED_INPUT_SHARE
+ *     for the measured call shape.
+ * A bulk import drains only the `batch` pool and a video run drains only `video`, so
+ * neither can starve the `assistant` pool (or each other). `budgetedCreate` defaults to
+ * `batch`; every other caller passes its pool explicitly, so a new caller can never
+ * accidentally spend against a pool it doesn't own.
  *
  * Counters live in Turso (`daily_llm_budget`, keyed by (UTC date, pool)), so the caps
  * hold ACROSS Vercel Fluid Compute instances — unlike the per-process in-memory
@@ -21,13 +30,66 @@
  * is a financial backstop against a leaked credential or a runaway loop, not a per-user
  * rate limit.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getDailyLlmTokensUsed, addDailyLlmTokens, type LlmBudgetPool } from "@/lib/database";
 
 export type BudgetPool = LlmBudgetPool;
 
+/**
+ * Pool override for a whole call tree. `withBudgetPool("import", fn)` makes every
+ * `budgetedCreate` that would have charged the shared `batch` pool (the default, and the
+ * explicit "batch" the vision classifier passes) charge `import` instead — without threading a
+ * pool argument through content-generator, vision-classifier and the quality gates. Pools a
+ * caller names on purpose (assistant, video, maintenance) are never overridden.
+ */
+const poolOverride = new AsyncLocalStorage<BudgetPool>();
+export function withBudgetPool<T>(pool: BudgetPool, fn: () => Promise<T>): Promise<T> {
+  return poolOverride.run(pool, fn);
+}
+
 const DEFAULT_BATCH_TOKEN_BUDGET = 1_300_000;
+/**
+ * The automatic daily import (src/lib/auto-import) runs on its own pool so a bulk catalogue
+ * run can never lock the operator out of manual imports, blog or social generation (the
+ * 2026-10-07 incident: the shared `batch` cap ran out mid-afternoon and every manual import
+ * failed with an opaque "Content generation failed"), and the reverse. Sized for the target
+ * of 100 imports/day at ~25k tokens each once the three verification layers run (content +
+ * main-image check + judge + gallery check) = ~2.5M, plus margin for retries.
+ */
+const DEFAULT_IMPORT_TOKEN_BUDGET = 3_000_000;
 const DEFAULT_ASSISTANT_TOKEN_BUDGET = 500_000;
+/**
+ * 400,000 tokens/day for the `video` pool — sized 2026-09-22 from the ACTUAL publication
+ * schedule, not an arbitrary round number:
+ *   - Demand-Gen (3 slots/week, Mon/Wed/Fri) × 1.25 margin (QC rejects + operator choice
+ *     before approval) → 4 delivered/week → ÷ 42% measured QC yield (8/19 real SKUs that
+ *     day, 2026-09-22) → ~10 attempts/week × 36,712 measured tokens/attempt ≈ 367,120
+ *     tokens/week.
+ *   - Assembly (7 slots/week) × 1.25 margin → 9 attempts/week, but costs 0 tokens (pure
+ *     ffmpeg, no vision QC by design) — contributes nothing to this figure.
+ *   - Before/After (5 slots/week when active) is PAUSED — not counted here. Reactivating
+ *     it will need this budget revisited (it shares the same vision-QC call shape, so
+ *     assume a similar per-attempt cost until measured for real).
+ * 400,000/day covers the full week's ~367,120-token need in a single production session
+ * (the realistic usage pattern — see scripts/batch-demand-gen-extend.mts) with ~9% slack
+ * for variance (longer clips sample more frames), while staying ~3.25× smaller than the
+ * shared `batch` cap it used to draw from.
+ */
+const DEFAULT_VIDEO_TOKEN_BUDGET = 400_000;
+/**
+ * 300,000 tokens/day for the storefront AI room visualiser + decorator (room-visualizer.ts), its own pool so a
+ * popular day can never starve the assistant or imports. One placement ≈ 2 input images (~1,300 tokens each at
+ * 1K) + prompt + ~1,300 output image tokens ≈ 4,000 tokens, so ~75 images/day — about 5 $ US/day at worst at
+ * the Gemini 3.1 Flash Image rate (~0.067 $/image). Set `LLM_VISUALISER_DAILY_BUDGET` to override.
+ */
+const DEFAULT_VISUALISER_TOKEN_BUDGET = 300_000;
+/**
+ * 300,000 tokens/day for the storefront "Ameublo décorateur": one room reading (~1,500 tokens, Flash-Lite) plus the
+ * assistant's tool loop (~3,000 tokens/step, up to 5 steps) ≈ 15,000 tokens per photo → ~20 photos/day, well under
+ * 1 $ US at Flash-Lite rates. Its own pool so it can never drain the storefront chat. `LLM_DECORATEUR_DAILY_BUDGET`.
+ */
+const DEFAULT_DECORATEUR_TOKEN_BUDGET = 300_000;
 
 /**
  * Resolve a pool's daily token budget from its env var, falling back to the default.
@@ -37,11 +99,32 @@ const DEFAULT_ASSISTANT_TOKEN_BUDGET = 500_000;
  * two days of the whole `batch` cap — can run without starving imports, blog and social
  * generation, while its tokens are still COUNTED and shown on the usage dashboard. A silent
  * bypass would have hidden that spend entirely. Set `LLM_MAINTENANCE_DAILY_BUDGET` to cap it.
+ *
+ * `video` — unlike `maintenance` — IS capped by default (see DEFAULT_VIDEO_TOKEN_BUDGET):
+ * video-batch runs are a recurring weekly cadence, not an occasional operator-launched pass,
+ * so an explicit ceiling (not Infinity) is the right default. Set `LLM_VIDEO_DAILY_BUDGET`
+ * to override.
  */
 export function poolBudget(pool: BudgetPool): number {
   if (pool === "maintenance") {
     const raw = Number(process.env.LLM_MAINTENANCE_DAILY_BUDGET);
     return Number.isFinite(raw) && raw > 0 ? raw : Infinity;
+  }
+  if (pool === "video") {
+    const raw = Number(process.env.LLM_VIDEO_DAILY_BUDGET);
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_VIDEO_TOKEN_BUDGET;
+  }
+  if (pool === "import") {
+    const raw = Number(process.env.LLM_IMPORT_DAILY_BUDGET);
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_IMPORT_TOKEN_BUDGET;
+  }
+  if (pool === "visualiser") {
+    const raw = Number(process.env.LLM_VISUALISER_DAILY_BUDGET);
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_VISUALISER_TOKEN_BUDGET;
+  }
+  if (pool === "decorateur") {
+    const raw = Number(process.env.LLM_DECORATEUR_DAILY_BUDGET);
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_DECORATEUR_TOKEN_BUDGET;
   }
   const [envName, fallback] =
     pool === "assistant"
@@ -61,6 +144,10 @@ export class LlmBudgetExceededError extends Error {
     const envName =
       pool === "assistant" ? "LLM_ASSISTANT_DAILY_BUDGET"
       : pool === "maintenance" ? "LLM_MAINTENANCE_DAILY_BUDGET"
+      : pool === "video" ? "LLM_VIDEO_DAILY_BUDGET"
+      : pool === "import" ? "LLM_IMPORT_DAILY_BUDGET"
+      : pool === "visualiser" ? "LLM_VISUALISER_DAILY_BUDGET"
+      : pool === "decorateur" ? "LLM_DECORATEUR_DAILY_BUDGET"
       : "LLM_DAILY_TOKEN_BUDGET";
     super(
       `LLM daily token budget exceeded for pool "${pool}" (${used}/${budget} tokens used today, UTC) — ` +
@@ -130,8 +217,15 @@ export async function budgetedCreate(
   client: Anthropic,
   params: Anthropic.Messages.MessageCreateParamsNonStreaming,
   options?: Anthropic.RequestOptions,
-  pool: BudgetPool = "batch",
+  requestedPool: BudgetPool = "batch",
 ): Promise<Anthropic.Messages.Message> {
+  // A call tree wrapped in withBudgetPool() redirects ONLY the shared "batch" pool.
+  const pool: BudgetPool = requestedPool === "batch" ? (poolOverride.getStore() ?? "batch") : requestedPool;
+  // Provider routing by model id: a `gemini-*` model is served by Google instead of Anthropic,
+  // returned in the SAME Message shape so every caller keeps parsing `message.content[0].text`
+  // and `message.usage` unchanged — switching a call site to Gemini is one model constant.
+  if (isGeminiModel(params.model)) return geminiCreate(params, pool);
+
   await assertLlmBudget(pool);
   const message = await client.messages.create(params, options);
   try {
@@ -152,4 +246,96 @@ export async function budgetedCreate(
     );
   }
   return message;
+}
+
+// ── Gemini routing ───────────────────────────────────────────────────────────────────────────
+
+/** True for a Google model id (`gemini-3.5-flash-lite`, …) — routed to Gemini by budgetedCreate. */
+export function isGeminiModel(model: string): boolean {
+  return typeof model === "string" && model.startsWith("gemini-");
+}
+
+type GeminiPartLite = { text?: string; inlineData?: { mimeType: string; data: string } };
+
+/** Anthropic content (string | blocks) → Gemini parts. Only text and base64 images are supported. */
+function toGeminiParts(content: Anthropic.Messages.MessageParam["content"]): GeminiPartLite[] {
+  if (typeof content === "string") return [{ text: content }];
+  return content.map((block): GeminiPartLite => {
+    if (block.type === "text") return { text: block.text };
+    if (block.type === "image" && block.source.type === "base64") {
+      return { inlineData: { mimeType: block.source.media_type, data: block.source.data } };
+    }
+    throw new Error(`budgetedCreate(gemini): unsupported content block "${block.type}" (text and base64 images only)`);
+  });
+}
+
+function toGeminiSystem(system: Anthropic.Messages.MessageCreateParams["system"]): string | undefined {
+  if (!system) return undefined;
+  if (typeof system === "string") return system;
+  return system.map((b) => b.text).join("\n");
+}
+
+/**
+ * Gemini thinking depth for a text call.
+ *   - Flash-Lite models accept "minimal" (near-zero billed thought tokens, lowest latency) — the default.
+ *   - Every other Gemini model REJECTS "minimal" with 400 INVALID_ARGUMENT ("Thinking level MINIMAL is not
+ *     supported for this model", seen live on gemini-3.8-flash 2026-10-03), so they default to "low".
+ * GEMINI_THINKING_LEVEL (low|medium|high) overrides either default; "minimal" is never forced onto a
+ * model that does not support it.
+ */
+export function geminiThinkingLevel(model: string): "minimal" | "low" | "medium" | "high" {
+  const supportsMinimal = model.includes("flash-lite");
+  const v = process.env.GEMINI_THINKING_LEVEL?.trim().toLowerCase();
+  if (v === "low" || v === "medium" || v === "high") return v;
+  return supportsMinimal ? "minimal" : "low";
+}
+
+/**
+ * Serve an Anthropic-shaped request with Gemini and return an Anthropic-shaped Message.
+ * Budget gating and usage recording happen inside geminiGenerate (same pool counters), so this
+ * does NOT call assertLlmBudget/recordLlmUsage again — that would double-count every call.
+ */
+async function geminiCreate(
+  params: Anthropic.Messages.MessageCreateParamsNonStreaming,
+  pool: BudgetPool,
+): Promise<Anthropic.Messages.Message> {
+  // Dynamic import: gemini-client imports assertLlmBudget from this module (static cycle otherwise).
+  const { geminiGenerate } = await import("@/lib/gemini-client");
+  const thinkingLevel = geminiThinkingLevel(params.model);
+  const result = await geminiGenerate(
+    {
+      model: params.model,
+      systemInstruction: toGeminiSystem(params.system),
+      contents: params.messages.map((m) => ({
+        role: m.role === "assistant" ? ("model" as const) : ("user" as const),
+        parts: toGeminiParts(m.content),
+      })),
+      // Gemini's thought tokens are drawn from the SAME budget as the visible answer. A caller that
+      // sized max_tokens for the answer alone (200-500 for a caption, a verdict, a classification)
+      // would get it cut mid-sentence once the model thinks — seen live on gemini-3.8-flash with
+      // thinking "low" (a Reel caption ending "…ce camion à péd", a vision JSON cut mid-object).
+      // So headroom is added on top; the answer's own length is still bounded by the prompt.
+      maxOutputTokens: params.max_tokens + geminiThoughtHeadroom(thinkingLevel),
+      thinkingLevel,
+    },
+    pool,
+  );
+  return {
+    id: `gemini-${Date.now()}`,
+    type: "message",
+    role: "assistant",
+    model: params.model,
+    content: result.text ? [{ type: "text", text: result.text, citations: null }] : [],
+    stop_reason: result.finishReason === "MAX_TOKENS" ? "max_tokens" : "end_turn",
+    stop_sequence: null,
+    usage: {
+      input_tokens: result.usage?.promptTokenCount ?? 0,
+      output_tokens: (result.usage?.candidatesTokenCount ?? 0) + (result.usage?.thoughtsTokenCount ?? 0),
+    },
+  } as Anthropic.Messages.Message;
+}
+
+/** Extra output tokens to reserve for Gemini's thinking (0 when thinking is "minimal"). */
+export function geminiThoughtHeadroom(level: "minimal" | "low" | "medium" | "high"): number {
+  return { minimal: 0, low: 2500, medium: 6000, high: 12000 }[level];
 }

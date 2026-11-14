@@ -8,7 +8,9 @@ import { DEFAULT_PUBLICATION_SCHEDULE, DEFAULT_BLOG_SCHEDULE } from "@/lib/confi
 import type { AosomProduct } from "@/types/aosom";
 import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
 import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
+import type { AdImageStyle } from "@/lib/image-style";
 import { isSqliteUtc } from "@/lib/draft-scheduler";
+import { usageLoggingEnabled, withUsageLogging } from "@/lib/turso-usage";
 
 let client: Client | null = null;
 
@@ -19,7 +21,12 @@ function getDb(): Client {
 
     if (tursoUrl && tursoToken) {
       // Production: remote Turso
-      client = createClient({ url: tursoUrl, authToken: tursoToken });
+      client = createClient({
+        url: tursoUrl,
+        authToken: tursoToken,
+        // Opt-in rows_read logging (TURSO_USAGE_LOG=1) — see turso-usage.ts.
+        ...(usageLoggingEnabled() ? { fetch: withUsageLogging(globalThis.fetch.bind(globalThis)) } : {}),
+      });
     } else if (tursoUrl || tursoToken) {
       // Partial config — one set without the other. Fail loud.
       throw new Error("Both TURSO_DATABASE_URL and TURSO_AUTH_TOKEN must be set (or neither for local SQLite)");
@@ -127,22 +134,28 @@ async function _initSchemaImpl(): Promise<void> {
     // so rowids are stable and the triggers below stay in lockstep.
     //
     // remove_diacritics 2 makes "canape" match "canapé" — the old LIKE could not.
+    //
+    // `product_type` is indexed alongside sku/name (added 2026-09-17, catalog-search-bedframe-
+    // gap fix) so a search term that only matches the Aosom taxonomy path — not the product's
+    // own title — still finds it, e.g. "Bed Frames" as a category vs. as literal name text.
+    // A pre-existing DB whose products_fts still has only 2 columns is migrated below (FTS5
+    // virtual tables can't ALTER their column list, so it's dropped and rebuilt).
     `CREATE VIRTUAL TABLE IF NOT EXISTS products_fts USING fts5(
-      sku, name, content='products', content_rowid='rowid',
+      sku, name, product_type, content='products', content_rowid='rowid',
       tokenize='unicode61 remove_diacritics 2'
     )`,
     // Keep the index in step with the table. Deleting by rowid is O(1); a trigger that
     // deleted by `sku` would rescan the whole FTS table on every one of the ~1,300 rows
     // the daily sync touches.
     `CREATE TRIGGER IF NOT EXISTS products_fts_ai AFTER INSERT ON products BEGIN
-      INSERT INTO products_fts(rowid, sku, name) VALUES (new.rowid, new.sku, new.name);
+      INSERT INTO products_fts(rowid, sku, name, product_type) VALUES (new.rowid, new.sku, new.name, new.product_type);
     END`,
     `CREATE TRIGGER IF NOT EXISTS products_fts_ad AFTER DELETE ON products BEGIN
-      INSERT INTO products_fts(products_fts, rowid, sku, name) VALUES('delete', old.rowid, old.sku, old.name);
+      INSERT INTO products_fts(products_fts, rowid, sku, name, product_type) VALUES('delete', old.rowid, old.sku, old.name, old.product_type);
     END`,
-    `CREATE TRIGGER IF NOT EXISTS products_fts_au AFTER UPDATE OF sku, name ON products BEGIN
-      INSERT INTO products_fts(products_fts, rowid, sku, name) VALUES('delete', old.rowid, old.sku, old.name);
-      INSERT INTO products_fts(rowid, sku, name) VALUES (new.rowid, new.sku, new.name);
+    `CREATE TRIGGER IF NOT EXISTS products_fts_au AFTER UPDATE OF sku, name, product_type ON products BEGIN
+      INSERT INTO products_fts(products_fts, rowid, sku, name, product_type) VALUES('delete', old.rowid, old.sku, old.name, old.product_type);
+      INSERT INTO products_fts(rowid, sku, name, product_type) VALUES (new.rowid, new.sku, new.name, new.product_type);
     END`,
     `CREATE TABLE IF NOT EXISTS price_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, old_price REAL, new_price REAL,
@@ -150,6 +163,15 @@ async function _initSchemaImpl(): Promise<void> {
       detected_at INTEGER DEFAULT (strftime('%s','now')), applied_to_shopify INTEGER DEFAULT 0,
       FOREIGN KEY (sku) REFERENCES products(sku)
     )`,
+    // Competitor price snapshot (competitor-prices.ts) and OUR sell-price history (sell-price-sync.ts).
+    `CREATE TABLE IF NOT EXISTS competitor_prices (
+      sku TEXT PRIMARY KEY, price REAL NOT NULL, fetched_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS sell_price_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, old_price REAL, new_price REAL NOT NULL,
+      aosom_price REAL, reason TEXT, detected_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_sell_price_history_sku ON sell_price_history(sku, detected_at)`,
     `CREATE INDEX IF NOT EXISTS idx_price_history_sku ON price_history(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_price_history_change_type ON price_history(change_type)`,
     `CREATE INDEX IF NOT EXISTS idx_price_history_detected_at ON price_history(detected_at)`,
@@ -160,6 +182,21 @@ async function _initSchemaImpl(): Promise<void> {
     // Composite (change_type, detected_at): serves the dashboard new_product count and the
     // best_sellers/price_drop aggregates, which filter change_type AND a detected_at window.
     `CREATE INDEX IF NOT EXISTS idx_price_history_changetype_detected ON price_history(change_type, detected_at)`,
+    // price_floor_incidents: a single, durable log of every time a Shopify price was found
+    // BELOW the Aosom floor and corrected, across all 5 correction paths (import,
+    // price-audit, price-reconcile, the daily sync push, and the manual force-push script).
+    // Exists because 842-375V00CG's below-floor window could only be reconstructed by
+    // cross-referencing price_history (90-day retention) and sync_logs (7-day retention),
+    // each with a different shape and neither recording *why* the write happened. This
+    // table is intentionally NOT purged — it's the answer to "how often does this happen,
+    // since when", and at a few rows a day it will never be a storage concern.
+    `CREATE TABLE IF NOT EXISTS price_floor_incidents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL,
+      old_price REAL NOT NULL, new_price REAL NOT NULL, source TEXT NOT NULL,
+      detected_at INTEGER DEFAULT (strftime('%s','now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_price_floor_incidents_sku ON price_floor_incidents(sku)`,
+    `CREATE INDEX IF NOT EXISTS idx_price_floor_incidents_detected_at ON price_floor_incidents(detected_at)`,
     `CREATE TABLE IF NOT EXISTS facebook_drafts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, sku TEXT NOT NULL, trigger_type TEXT NOT NULL,
       language TEXT NOT NULL, post_text TEXT NOT NULL, image_path TEXT, image_url TEXT,
@@ -384,6 +421,56 @@ async function _initSchemaImpl(): Promise<void> {
     // Covering index for the remix selector (Module F): filters by ratio +
     // non-null blob_url, joins/returns sku + duration_sec.
     `CREATE INDEX IF NOT EXISTS idx_vdg_ratio_blob ON video_demand_gen(ratio, blob_url, sku, duration_sec)`,
+    // gbp_posts: weekly Google Business Profile local-post pipeline. status starts at
+    // 'pending_review' always (the first real publish needs explicit human confirmation
+    // regardless of GBP_AUTO_PUBLISH — see gbp-post-generator.ts), then moves to
+    // 'published' | 'rejected' | 'failed'. judge_score/reasons are the Claude quality-gate
+    // verdict (mirrors blog-auto-publish.ts's scoreArticle), kept even for rejected posts
+    // so a rejection can be audited without re-running the judge.
+    `CREATE TABLE IF NOT EXISTS gbp_posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sku TEXT NOT NULL,
+      product_type TEXT,
+      signal_type TEXT NOT NULL,
+      summary_fr TEXT NOT NULL,
+      cta_url TEXT NOT NULL,
+      image_url TEXT,
+      velocity_score REAL NOT NULL DEFAULT 0,
+      price_drop_score REAL NOT NULL DEFAULT 0,
+      judge_score INTEGER,
+      judge_reasons TEXT,
+      status TEXT NOT NULL DEFAULT 'pending_review' CHECK (status IN ('pending_review','approved','published','rejected','failed')),
+      gbp_post_name TEXT,
+      error_message TEXT,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+      published_at INTEGER,
+      FOREIGN KEY (sku) REFERENCES products(sku)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_gbp_posts_status_created ON gbp_posts(status, created_at)`,
+    // guide_pages: tracks pSEO subcategory guide pages generated against
+    // collection_mappings(role='sub'). Every row is either a real Shopify blog article
+    // created as a draft (published:false, via createBlogArticle — see
+    // subcategory-guide-generator.ts) or a 'skipped_empty' record for a subcategory that
+    // failed the data-sufficiency check (no in-stock products / can't form a comparison) —
+    // logged instead of ever creating a hollow page. One row per (aosom_category) generation
+    // attempt; a subcategory can be regenerated later (new row), the old one stays for history.
+    `CREATE TABLE IF NOT EXISTS guide_pages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      aosom_category TEXT NOT NULL,
+      shopify_collection_id TEXT NOT NULL,
+      shopify_collection_title TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending_review','skipped_empty')),
+      skip_reason TEXT,
+      shopify_article_id TEXT,
+      shopify_blog_id INTEGER,
+      shopify_handle TEXT,
+      title TEXT,
+      min_price REAL,
+      max_price REAL,
+      in_stock_count INTEGER,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_guide_pages_category ON guide_pages(aosom_category)`,
     `CREATE TABLE IF NOT EXISTS price_alerts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL,
@@ -415,6 +502,27 @@ async function _initSchemaImpl(): Promise<void> {
       UNIQUE(email, sku)
     )`,
     // cron_runs: one row per cron invocation (last-run status surfaced on the dashboard).
+    // mcp_keys: access keys for the remote MCP endpoint (/api/mcp). Only the SHA-256 hash is stored.
+    `CREATE TABLE IF NOT EXISTS mcp_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, key_hint TEXT NOT NULL,
+      created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER
+    )`,
+    // OAuth 2.1 (authorization code + PKCE) for the remote MCP endpoint — see src/lib/mcp/oauth.ts.
+    `CREATE TABLE IF NOT EXISTS oauth_clients (
+      client_id TEXT PRIMARY KEY, client_name TEXT NOT NULL, redirect_uris TEXT NOT NULL, created_at INTEGER NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS oauth_grants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL, client_name TEXT NOT NULL,
+      created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER
+    )`,
+    `CREATE TABLE IF NOT EXISTS oauth_codes (
+      code_hash TEXT PRIMARY KEY, grant_id INTEGER NOT NULL, client_id TEXT NOT NULL, redirect_uri TEXT NOT NULL,
+      code_challenge TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER
+    )`,
+    `CREATE TABLE IF NOT EXISTS oauth_tokens (
+      token_hash TEXT PRIMARY KEY, grant_id INTEGER NOT NULL, kind TEXT NOT NULL, expires_at INTEGER NOT NULL
+    )`,
     `CREATE TABLE IF NOT EXISTS cron_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL, status TEXT NOT NULL, detail TEXT,
@@ -428,9 +536,11 @@ async function _initSchemaImpl(): Promise<void> {
     )`,
     // daily_llm_budget: Anthropic spend guardrail, split into independent pools so a
     // bulk batch run can never starve the public storefront assistant. One row per
-    // (UTC day, pool) — pools are 'assistant' (only /api/assistant) and 'batch'
-    // (imports, content generation, social — everything else). Resets at 00:00 UTC by
-    // keying on the date string. Every Claude call asserts its pool's tokens_used <
+    // (UTC day, pool) — pools are 'assistant' (only /api/assistant), 'batch' (imports,
+    // content generation, social), 'maintenance' (operator-launched catalogue vision
+    // audits) and 'video' (demand-gen-ext / assembly video QC — isolated
+    // from 'batch' for the same reason 'maintenance' was split out). Resets at 00:00 UTC
+    // by keying on the date string. Every Claude call asserts its pool's tokens_used <
     // that pool's budget (fail-closed) then adds its usage. (Legacy single-key tables
     // are migrated to this composite key in the migration block below.)
     `CREATE TABLE IF NOT EXISTS daily_llm_budget (
@@ -450,6 +560,28 @@ async function _initSchemaImpl(): Promise<void> {
       ts INTEGER NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_assistant_rl_ip_ts ON assistant_rate_limit(ip, ts)`,
+    // Assistant abuse protection (assistant-guard.ts, 2026-10-02). Keyed by a SALTED HASH of
+    // the IP, never the raw address. assistant_ip_daily: per visitor per UTC day — tokens
+    // spent (daily cap), messages, accumulated abuse score. assistant_blocklist: active and
+    // past automatic blocks, liftable from the dashboard (/assistant-guard).
+    `CREATE TABLE IF NOT EXISTS assistant_ip_daily (
+      day TEXT NOT NULL,
+      ip_hash TEXT NOT NULL,
+      tokens INTEGER NOT NULL DEFAULT 0,
+      messages INTEGER NOT NULL DEFAULT 0,
+      abuse_score INTEGER NOT NULL DEFAULT 0,
+      last_reasons TEXT,
+      PRIMARY KEY (day, ip_hash)
+    )`,
+    `CREATE TABLE IF NOT EXISTS assistant_blocklist (
+      ip_hash TEXT PRIMARY KEY,
+      blocked_until INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      strikes INTEGER NOT NULL DEFAULT 1,
+      sample TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_run ON sync_logs(sync_run_id)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_logs_sku ON sync_logs(sku)`,
     `CREATE INDEX IF NOT EXISTS idx_sync_runs_date ON sync_runs(started_at)`,
@@ -461,6 +593,21 @@ async function _initSchemaImpl(): Promise<void> {
     // (sku, notified_at): serves getPendingWaitlist — seek by sku, filter notified_at IS NULL.
     `CREATE INDEX IF NOT EXISTS idx_waitlist_sku_pending ON back_in_stock_waitlist(sku, notified_at)`,
     `CREATE INDEX IF NOT EXISTS idx_cron_runs_name_at ON cron_runs(name, ran_at DESC)`,
+    // Reel measurement. publication_queue never stored WHICH post a published row became, so there was nothing to
+    // read insights from. queue_post_ids is written by the publisher right after a successful publish (best-effort);
+    // reel_insights holds one snapshot per (queue row, platform, UTC day), upserted by /api/cron/reel-insights.
+    // Separate tables on purpose: publication_queue is rebuilt by table migrations (CHECK constraints) and must stay untouched.
+    `CREATE TABLE IF NOT EXISTS queue_post_ids (
+      queue_id INTEGER PRIMARY KEY,
+      fb_post_id TEXT, ig_post_id TEXT,
+      recorded_at TEXT DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS reel_insights (
+      queue_id INTEGER NOT NULL, platform TEXT NOT NULL, post_id TEXT NOT NULL, day TEXT NOT NULL,
+      plays INTEGER, initial_plays INTEGER, avg_watch_ms INTEGER, total_watch_ms INTEGER, social_actions INTEGER,
+      collected_at TEXT DEFAULT (datetime('now')),
+      PRIMARY KEY (queue_id, platform, day)
+    )`,
     // Serves listBlogPosts — the /blog dashboard reads newest-first, nothing else.
     `CREATE INDEX IF NOT EXISTS idx_blog_posts_created ON blog_posts(created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS idx_feed_syncs_type_at ON feed_syncs(feed_type, fetched_at DESC)`,
@@ -493,6 +640,9 @@ async function _initSchemaImpl(): Promise<void> {
     // in /api/queue/add can't silently double-book a slot under concurrent requests. failed/
     // cancelled rows drop out of the index, freeing their slot for rebooking.
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`,
+    // Serves getQueueRowsForContent — the draft-list page's per-item "what will happen to
+    // this post" lookup, batched by content_type + content_id.
+    `CREATE INDEX IF NOT EXISTS idx_publication_queue_content ON publication_queue(content_type, content_id)`,
 
     // ── Vision image classification cache ────────────────────────────────────
     // One row per PHOTO (not per URL). The key is the Aosom hash stem, which survives
@@ -511,6 +661,17 @@ async function _initSchemaImpl(): Promise<void> {
       created_at INTEGER DEFAULT (strftime('%s','now'))
     )`,
     `CREATE INDEX IF NOT EXISTS idx_image_classifications_compliant ON image_classifications(compliant)`,
+
+    // ── Ad photo style cache (lifestyle vs studio) ───────────────────────────
+    // One row per PHOTO, keyed like image_classifications (imageUrlStem). Pixel heuristic
+    // only (src/lib/image-style.ts), zero tokens. Filled by /api/cron/image-styles; read by
+    // the Meta feeds so catalog ads only ever show lifestyle photos (Mat, 2026-10-30).
+    `CREATE TABLE IF NOT EXISTS image_styles (
+      url_stem TEXT PRIMARY KEY,
+      style TEXT NOT NULL,           -- 'lifestyle' | 'studio'
+      sample_url TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now'))
+    )`,
 
     // ── pos-1 image review queue (operator approval) ─────────────────────────
     // Populated by the sync's image-compliance pass when it finds a pos-1 image carrying a
@@ -538,6 +699,169 @@ async function _initSchemaImpl(): Promise<void> {
     // One OPEN review per product: re-running the audit must update the existing row rather
     // than stack duplicates for the same product. Decided rows drop out and keep the history.
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_image_review_queue_open ON image_review_queue(shopify_product_id) WHERE status IN ('pending', 'approved')`,
+    // Costway supplier catalogue — deliberately a SEPARATE table from `products` (Aosom):
+    // the two feeds never mix, and nothing in the Aosom sync/stock/stale jobs reads it.
+    // One row per variant (Variant SKU); item_no groups a product's variants. Written only
+    // by src/lib/costway/sync.ts. content_hash covers the heavy text/image fields so the
+    // daily sync rewrites a full row only when its content changed; stock/price changes go
+    // through a light UPDATE. removed_at is set when a SKU leaves the feed (never deleted).
+    `CREATE TABLE IF NOT EXISTS costway_products (
+      sku TEXT PRIMARY KEY,
+      item_no TEXT NOT NULL,
+      handle TEXT,
+      title TEXT NOT NULL,
+      body_html TEXT,
+      category TEXT,
+      top_category TEXT,
+      product_type TEXT,
+      color TEXT,
+      product_url TEXT,
+      images TEXT NOT NULL DEFAULT '[]',
+      in_stock INTEGER NOT NULL DEFAULT 0,
+      qty INTEGER NOT NULL DEFAULT 0,
+      us_qty INTEGER,
+      ca_qty INTEGER,
+      price REAL,
+      price_drop REAL,
+      compare_at_price REAL,
+      promo_tag TEXT,
+      content_hash TEXT NOT NULL,
+      first_seen_at INTEGER DEFAULT (strftime('%s','now')),
+      updated_at INTEGER,
+      removed_at INTEGER,
+      shopify_product_id TEXT,
+      internal_sku TEXT,
+      imported_at INTEGER,
+      shopify_handle TEXT,
+      import_batch TEXT,
+      sell_price REAL,
+      import_status TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_costway_products_item_no ON costway_products(item_no)`,
+    `CREATE INDEX IF NOT EXISTS idx_costway_products_top_category ON costway_products(top_category)`,
+    // One row per Costway SKU whose stock moved between two daily syncs (2026-10-17). A drop is a
+    // proxy for what sells at Costway, the same way price_history stock_change is for Aosom.
+    `CREATE TABLE IF NOT EXISTS costway_stock_history (
+      sku TEXT NOT NULL,
+      item_no TEXT,
+      old_qty INTEGER,
+      new_qty INTEGER,
+      old_ca_qty INTEGER,
+      new_ca_qty INTEGER,
+      detected_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_costway_stock_history_at ON costway_stock_history(detected_at)`,
+    // PDP "Complétez la pièce" suggestions (assistant mode=complementary), cached per product
+    // so the LLM runs once per product per TTL instead of on every product-page view
+    // (~1,100 calls/day burned the whole assistant pool by ~20:30 Montréal). See
+    // src/lib/assistant-complementary-cache.ts.
+    `CREATE TABLE IF NOT EXISTS assistant_complementary_cache (
+      cache_key TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    )`,
+    // Storefront assistant first-question answers (chips + identical opening questions), 1 h TTL.
+    // See src/lib/assistant-answer-cache.ts.
+    `CREATE TABLE IF NOT EXISTS assistant_answer_cache (
+      cache_key TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    )`,
+    // "Studio Ameublo": mascot test videos for review only. Never published — nothing reads
+    // this table into publication_queue. See scripts/ameublo-test-series.mts.
+    `CREATE TABLE IF NOT EXISTS ameublo_test_videos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      series TEXT NOT NULL,
+      sku TEXT,
+      campaign TEXT,
+      label TEXT,
+      video_url TEXT NOT NULL,
+      source_queue_id INTEGER,
+      verdict TEXT CHECK (verdict IN ('ok','bad')),
+      note TEXT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    // Roue de bienvenue: one spin per normalized email. The row is reserved BEFORE the Shopify code exists
+    // (code NULL), so two concurrent spins for one email cannot both create a code. See welcome-wheel.ts.
+    `CREATE TABLE IF NOT EXISTS wheel_spins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email_key TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL,
+      prize_key TEXT NOT NULL,
+      code TEXT,
+      discount_id TEXT,
+      expires_at INTEGER,
+      ip_hash TEXT,
+      locale TEXT,
+      created_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_wheel_spins_ip ON wheel_spins(ip_hash, created_at)`,
+    // "Bientôt" teasers (Vois-le chez toi, Ameublo décorateur): anonymous interest events, no PII. visitor_hash is
+    // a hash of a random id the browser keeps, so unique visitors can be counted. See src/lib/teaser.ts.
+    // source = where the shopper met the teaser ("pdp" photo pill, "sheet" link inside it, "chat" assistant button),
+    // so two entry points never blend into one funnel. One row per (feature, event, source, visitor).
+    `CREATE TABLE IF NOT EXISTS teaser_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      feature TEXT NOT NULL,
+      event TEXT NOT NULL,
+      source TEXT NOT NULL,
+      visitor_hash TEXT NOT NULL,
+      handle TEXT,
+      locale TEXT,
+      created_at INTEGER NOT NULL,
+      UNIQUE (feature, event, source, visitor_hash)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_teaser_events_feature ON teaser_events(feature, event, created_at)`,
+    // "M'avertir au lancement": one row per (feature, email), used for ONE launch notice, never for newsletters, and
+    // to be deleted once that notice is sent. consent_text keeps the exact wording the shopper agreed to (CASL proof).
+    `CREATE TABLE IF NOT EXISTS teaser_signups (
+      feature TEXT NOT NULL,
+      email_key TEXT NOT NULL,
+      email TEXT NOT NULL,
+      source TEXT NOT NULL,
+      consent_text TEXT NOT NULL,
+      locale TEXT,
+      handle TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (feature, email_key)
+    )`,
+    // AI room visualiser / decorator calls once switched on: per-IP daily cap (ip_hash), never the photo itself.
+    `CREATE TABLE IF NOT EXISTS visualiser_uses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      ip_hash TEXT NOT NULL,
+      handle TEXT,
+      ok INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_visualiser_uses_ip ON visualiser_uses(ip_hash, created_at)`,
+    // Own email engine (Resend, src/lib/email/): addresses never to mail again (unsubscribe, hard bounce, spam
+    // complaint). email = trimmed lower-case address. The first reason recorded is kept.
+    `CREATE TABLE IF NOT EXISTS email_suppressions (
+      email TEXT PRIMARY KEY,
+      reason TEXT NOT NULL,
+      source TEXT NOT NULL,
+      detail TEXT,
+      created_at INTEGER NOT NULL,
+      in_klaviyo INTEGER NOT NULL DEFAULT 0
+    )`,
+    // One row per email the engine tried to send. idem_key (flow + step + trigger) makes a second send of the same
+    // email impossible, even from two overlapping cron runs. status: sending → sent | failed | skipped, then the
+    // Resend webhook moves sent → delivered → opened → clicked (or bounced / complained).
+    `CREATE TABLE IF NOT EXISTS email_sends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      idem_key TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL,
+      flow TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      resend_id TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_email_sends_resend ON email_sends(resend_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_email_sends_flow ON email_sends(flow, created_at)`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
@@ -621,6 +945,92 @@ async function _initSchemaImpl(): Promise<void> {
     ]);
   }
 
+  // ameublo_test_videos: classification + publication link (v0.5.107). A video is a candidate
+  // for the Reels queue only once the operator approves it from /ameublo (queue_id then points
+  // at its publication_queue row). Older rows (Série 1, old-music renders) keep these NULL.
+  const avInfo = await db.execute(`PRAGMA table_info(ameublo_test_videos)`);
+  const avCols = new Set(avInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  for (const [col, ddl] of [
+    ["style", "TEXT"], ["lang", "TEXT"], ["caption", "TEXT"], ["skus", "TEXT"], ["prices", "TEXT"],
+    ["music", "TEXT"], ["queue_id", "INTEGER"], ["qa_verdict", "TEXT"], ["qa_notes", "TEXT"],
+  ] as const) {
+    if (!avCols.has(col)) {
+      await runBatch(`ameublo_test_videos add ${col}`, [{ sql: `ALTER TABLE ameublo_test_videos ADD COLUMN ${col} ${ddl}`, args: [] }]);
+    }
+  }
+
+  // email_suppressions.in_klaviyo (0 = to push, 1 = in Klaviyo, 2 = Klaviyo refused it for good): added after the
+  // table's first version, so a DB created by an early preview gets it here.
+  const esInfo = await db.execute(`PRAGMA table_info(email_suppressions)`);
+  if (!esInfo.rows.some((r) => String((r as unknown as Record<string, unknown>).name) === "in_klaviyo")) {
+    await runBatch("email_suppressions add in_klaviyo", [{ sql: `ALTER TABLE email_suppressions ADD COLUMN in_klaviyo INTEGER NOT NULL DEFAULT 0`, args: [] }]);
+  }
+
+  // costway_products.shopify_product_id: the Shopify product a Costway variant was imported as.
+  // NULL everywhere today (nothing is imported yet). The Aosom jobs that sweep every Shopify
+  // product (fetchAllShopifyProducts, fetchActiveVariantInventory, fetchShopifyVariantsPage) use
+  // it to skip Costway products — see getCostwayShopifyProductIds. The index is created HERE,
+  // after the guarded ALTER, because on an existing DB the column does not exist yet when the
+  // CREATE TABLE batch above runs.
+  // MCP permissions (read / analytics / import): scope column on keys and OAuth grants. Existing rows = read only.
+  const grantInfo = await db.execute(`PRAGMA table_info(oauth_grants)`);
+  if (!grantInfo.rows.some((r) => String((r as unknown as Record<string, unknown>).name) === "key_id")) {
+    await runBatch("oauth_grants add key_id", [{ sql: `ALTER TABLE oauth_grants ADD COLUMN key_id INTEGER`, args: [] }]);
+  }
+  for (const t of ["mcp_keys", "oauth_grants"]) {
+    const info = await db.execute(`PRAGMA table_info(${t})`);
+    if (!info.rows.some((r) => String((r as unknown as Record<string, unknown>).name) === "scope")) {
+      await runBatch(`${t} add scope`, [{ sql: `ALTER TABLE ${t} ADD COLUMN scope TEXT NOT NULL DEFAULT 'read'`, args: [] }]);
+    }
+  }
+
+  const cwInfo = await db.execute(`PRAGMA table_info(costway_products)`);
+  const cwCols = new Set(cwInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!cwCols.has("shopify_product_id")) {
+    await runBatch("costway_products add shopify_product_id", [
+      { sql: `ALTER TABLE costway_products ADD COLUMN shopify_product_id TEXT`, args: [] },
+    ]);
+  }
+  await runBatch("costway_products shopify_product_id index", [
+    { sql: `CREATE INDEX IF NOT EXISTS idx_costway_products_shopify_id ON costway_products(shopify_product_id)`, args: [] },
+  ]);
+
+  // costway_products.internal_sku: the opaque Ameublo SKU a Costway variant is sold under. The
+  // supplier SKU ("02956471_CB10061BK") and its numeric item number must never reach Shopify, a
+  // feed or an ad — see src/lib/costway/identity.ts. Assigned lazily at import time (not for all
+  // ~22k rows), so it is NULL until a variant is imported. UNIQUE (partial: NULLs allowed) so two
+  // variants can never share one, whatever race produced them.
+  if (!cwCols.has("internal_sku")) {
+    await runBatch("costway_products add internal_sku", [
+      { sql: `ALTER TABLE costway_products ADD COLUMN internal_sku TEXT`, args: [] },
+    ]);
+  }
+  await runBatch("costway_products internal_sku unique index", [
+    {
+      sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_costway_products_internal_sku ON costway_products(internal_sku) WHERE internal_sku IS NOT NULL`,
+      args: [],
+    },
+  ]);
+
+  // Import tracking (Mat, 2026-10-03: "une façon de bien les différencier dans aosom-sync pour faire
+  // un suivi"). Written by src/lib/costway/importer.ts when a variant is imported to Shopify:
+  //   imported_at     unix seconds of the Shopify product creation
+  //   shopify_handle  our public handle for it (never the supplier's)
+  //   import_batch    the batch label ("pilot-1"…) so a lot can be reviewed / rolled back together
+  //   sell_price      the price we put on Shopify (CSV price, minus the Drop-Price adjustment)
+  //   import_status   'draft' | 'active' | 'archived' — mirrors the Shopify product status
+  // All NULL until imported; nothing in the Aosom pipeline reads them.
+  for (const col of [["imported_at", "INTEGER"], ["shopify_handle", "TEXT"], ["import_batch", "TEXT"], ["sell_price", "REAL"], ["import_status", "TEXT"]] as const) {
+    if (!cwCols.has(col[0])) {
+      await runBatch(`costway_products add ${col[0]}`, [
+        { sql: `ALTER TABLE costway_products ADD COLUMN ${col[0]} ${col[1]}`, args: [] },
+      ]);
+    }
+  }
+  await runBatch("costway_products import_batch index", [
+    { sql: `CREATE INDEX IF NOT EXISTS idx_costway_products_import_batch ON costway_products(import_batch)`, args: [] },
+  ]);
+
   // `claimed_at`: when claimQueueItem flipped this row to 'publishing' (unix seconds).
   //
   // This exists ONLY so the reaper can tell a stranded row from one being published right
@@ -667,7 +1077,11 @@ async function _initSchemaImpl(): Promise<void> {
   }
 
   // publication_queue.content_type CHECK migration: (…,'video') → +'sequential_ad'. Same guarded
-  // table-rebuild pattern as +video / +draft above. Carries the metadata column through the copy.
+  // table-rebuild pattern as +video / +draft above. Carries metadata AND claimed_at through the
+  // copy — claimed_at is added by the guarded ALTER above, which runs earlier in ensureSchema,
+  // so on a truly fresh DB it already exists by the time this migration fires and must survive
+  // the rebuild (a `:memory:` test DB replays every migration in order on first use, unlike
+  // prod where this migration ran once, historically, before claimed_at existed).
   const pqDef3 = await db.execute(
     `SELECT sql FROM sqlite_master WHERE type='table' AND name='publication_queue'`,
   );
@@ -686,14 +1100,95 @@ async function _initSchemaImpl(): Promise<void> {
         error TEXT,
         created_at TEXT DEFAULT (datetime('now')),
         published_at TEXT,
-        metadata TEXT
+        metadata TEXT,
+        claimed_at INTEGER
       )`, args: [] },
-      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata)
-              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata FROM publication_queue`, args: [] },
+      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at)
+              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at FROM publication_queue`, args: [] },
       { sql: `DROP TABLE publication_queue`, args: [] },
       { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
       { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
       { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
+    ]);
+  }
+
+  // publication_queue.content_type CHECK migration: +'demand_gen_ext','before_after','assembly'
+  // ('before_after' stays allowed by the CHECK only so this historical migration is a no-op on
+  // existing DBs — the format itself was removed 2026-10-01, nothing writes it any more.)
+  // (content-scale chantier, Étape 3-5). Same guarded table-rebuild pattern as +sequential_ad
+  // above (including carrying claimed_at through — see that migration's comment). The active-
+  // slot unique index stays (platform, scheduled_at) — UNCHANGED, matching every prior
+  // content_type addition: slot uniqueness is platform-wide across ALL content types, not per-
+  // type. getOccupiedQueueSlots(platform, contentType) only scopes the QUERY that searches for
+  // a free slot to offer; it does not partition the DB constraint itself, so two different
+  // content types can still collide on the exact same slot — same as sequential_ad vs. video
+  // today — and callers handle that via QueueSlotTakenError + retry (see the approve routes),
+  // not via a wider index.
+  const pqDef4 = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='publication_queue'`,
+  );
+  const pqSql4 = pqDef4.rows[0] ? String((pqDef4.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (pqSql4 && !pqSql4.includes("'demand_gen_ext'")) {
+    await runBatch("publication_queue content_type CHECK +demand_gen_ext,before_after,assembly", [
+      { sql: `DROP TABLE IF EXISTS publication_queue_new`, args: [] },
+      { sql: `CREATE TABLE publication_queue_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video', 'sequential_ad', 'demand_gen_ext', 'before_after', 'assembly')),
+        content_id TEXT NOT NULL,
+        platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog')),
+        payload TEXT NOT NULL,
+        scheduled_at TEXT NOT NULL,
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled', 'draft')),
+        error TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        published_at TEXT,
+        metadata TEXT,
+        claimed_at INTEGER
+      )`, args: [] },
+      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at)
+              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at FROM publication_queue`, args: [] },
+      { sql: `DROP TABLE publication_queue`, args: [] },
+      { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
+      { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
+    ]);
+  }
+
+  // publication_queue: +content_type 'guide' / +platform 'shopify_guide' — the pSEO guide
+  // review dashboard's "Approuver" now enqueues a real scheduled slot (deferred publish)
+  // instead of calling publishBlogArticle immediately (see /api/guides/[id]/approve). Same
+  // guarded rebuild pattern as every prior CHECK addition. MUST carry `claimed_at` (added by
+  // the guarded ALTER above, which runs earlier in ensureSchema) through the copy — omitting
+  // it here would silently wipe the reaper's stranded-claim timestamps on a DB that still
+  // needed this migration.
+  const pqDef5 = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type='table' AND name='publication_queue'`,
+  );
+  const pqSql5 = pqDef5.rows[0] ? String((pqDef5.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (pqSql5 && !pqSql5.includes("'guide'")) {
+    await runBatch("publication_queue content_type CHECK +guide, platform CHECK +shopify_guide", [
+      { sql: `DROP TABLE IF EXISTS publication_queue_new`, args: [] },
+      { sql: `CREATE TABLE publication_queue_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content_type TEXT NOT NULL CHECK (content_type IN ('social', 'draft', 'blog', 'video', 'sequential_ad', 'demand_gen_ext', 'before_after', 'assembly', 'guide')),
+        content_id TEXT NOT NULL,
+        platform TEXT NOT NULL CHECK (platform IN ('facebook', 'instagram', 'both', 'shopify_blog', 'shopify_guide')),
+        payload TEXT NOT NULL,
+        scheduled_at TEXT NOT NULL,
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'publishing', 'published', 'failed', 'cancelled', 'draft')),
+        error TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        published_at TEXT,
+        metadata TEXT,
+        claimed_at INTEGER
+      )`, args: [] },
+      { sql: `INSERT INTO publication_queue_new (id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at)
+              SELECT id, content_type, content_id, platform, payload, scheduled_at, status, error, created_at, published_at, metadata, claimed_at FROM publication_queue`, args: [] },
+      { sql: `DROP TABLE publication_queue`, args: [] },
+      { sql: `ALTER TABLE publication_queue_new RENAME TO publication_queue`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_status_scheduled ON publication_queue(status, scheduled_at)`, args: [] },
+      { sql: `CREATE UNIQUE INDEX IF NOT EXISTS idx_publication_queue_active_slot ON publication_queue(platform, scheduled_at) WHERE status IN ('pending', 'publishing', 'published')`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_publication_queue_content ON publication_queue(content_type, content_id)`, args: [] },
     ]);
   }
 
@@ -778,6 +1273,11 @@ async function _initSchemaImpl(): Promise<void> {
   if (!productCols.has("shopify_handle")) {
     alters.push(`ALTER TABLE products ADD COLUMN shopify_handle TEXT`);
   }
+  // sell_price: our computed selling price (sell-price-sync.ts). NULL = not computed; readers fall back to the
+  // Aosom price via effectiveSellPrice().
+  if (!productCols.has("sell_price")) {
+    alters.push(`ALTER TABLE products ADD COLUMN sell_price REAL`);
+  }
   // has_discount: precomputed rabais flag (see recomputeHasDiscount). Backfilled once
   // below when the column is first added; refreshed every sync thereafter.
   const hasDiscountColExisted = productCols.has("has_discount");
@@ -795,6 +1295,18 @@ async function _initSchemaImpl(): Promise<void> {
   // resets it to NULL whenever image1 changes so a new pos-1 image is re-classified.
   if (!productCols.has("image_checked_at")) {
     alters.push(`ALTER TABLE products ADD COLUMN image_checked_at INTEGER`);
+  }
+  // image_gallery_signature: the Shopify gallery's image ids, in position order, joined by
+  // ",", as they were at the moment image_checked_at was last stamped. image_checked_at only
+  // resets on an image1 (Aosom feed) change — it never notices a Shopify-side-only change
+  // (re-ingest minting a new image id, a manual reorder), so a product can sit "checked" while
+  // its live pos-1 has silently drifted (regression found 2026-09-17: 13/32 non-compliant
+  // pos-1 images were in this state). checkGalleryDrift() (image-compliance-drift.ts) refetches
+  // the live gallery for already-checked products and resets image_checked_at (+ this column)
+  // to NULL when the signature no longer matches, so the drifted product falls back into the
+  // normal daily classification queue.
+  if (!productCols.has("image_gallery_signature")) {
+    alters.push(`ALTER TABLE products ADD COLUMN image_gallery_signature TEXT`);
   }
 
   // image_classifications.confidence: the model always reported it, the parser always dropped
@@ -820,6 +1332,89 @@ async function _initSchemaImpl(): Promise<void> {
     alters.push(`ALTER TABLE price_alerts ADD COLUMN token_expires_at INTEGER`);
   }
 
+  // guide_pages.status CHECK migration: add 'published' — the review dashboard (guides page)
+  // flips a Shopify draft live via publishBlogArticle and needs to record that locally too.
+  // Same rebuild-then-guard pattern as publication_queue's CHECK migrations above.
+  const gpDef = await db.execute(`SELECT sql FROM sqlite_master WHERE type='table' AND name='guide_pages'`);
+  const gpSql = gpDef.rows[0] ? String((gpDef.rows[0] as unknown as Record<string, unknown>).sql ?? "") : "";
+  if (gpSql && !gpSql.includes("'published'")) {
+    await runBatch("guide_pages status CHECK +published", [
+      { sql: `DROP TABLE IF EXISTS guide_pages_new`, args: [] },
+      { sql: `CREATE TABLE guide_pages_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        aosom_category TEXT NOT NULL,
+        shopify_collection_id TEXT NOT NULL,
+        shopify_collection_title TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending_review','skipped_empty','published')),
+        skip_reason TEXT,
+        shopify_article_id TEXT,
+        shopify_blog_id INTEGER,
+        shopify_handle TEXT,
+        title TEXT,
+        min_price REAL,
+        max_price REAL,
+        in_stock_count INTEGER,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      )`, args: [] },
+      { sql: `INSERT INTO guide_pages_new (id, aosom_category, shopify_collection_id, shopify_collection_title,
+                status, skip_reason, shopify_article_id, shopify_blog_id, shopify_handle, title,
+                min_price, max_price, in_stock_count, created_at)
+              SELECT id, aosom_category, shopify_collection_id, shopify_collection_title,
+                status, skip_reason, shopify_article_id, shopify_blog_id, shopify_handle, title,
+                min_price, max_price, in_stock_count, created_at FROM guide_pages`, args: [] },
+      { sql: `DROP TABLE guide_pages`, args: [] },
+      { sql: `ALTER TABLE guide_pages_new RENAME TO guide_pages`, args: [] },
+      { sql: `CREATE INDEX IF NOT EXISTS idx_guide_pages_category ON guide_pages(aosom_category)`, args: [] },
+    ]);
+  }
+
+  // guide_pages: body_html (so the review dashboard can render the full text without a
+  // Shopify round-trip) + the 3-pass quality pipeline's verdicts (fact-check + tone/brand
+  // judge, mirroring blog-auto-publish.ts's scoreArticle). Added after the table already
+  // shipped once (2026-09-22 pilot), hence a migration rather than just the CREATE TABLE.
+  const guidePagesInfo = await db.execute(`PRAGMA table_info(guide_pages)`);
+  const guidePagesCols = new Set(guidePagesInfo.rows.map((r) => String((r as unknown as Record<string, unknown>).name)));
+  if (!guidePagesCols.has("body_html")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN body_html TEXT`);
+  }
+  if (!guidePagesCols.has("fact_check_score")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN fact_check_score INTEGER`);
+  }
+  if (!guidePagesCols.has("fact_check_issues")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN fact_check_issues TEXT`);
+  }
+  if (!guidePagesCols.has("quality_score")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN quality_score INTEGER`);
+  }
+  if (!guidePagesCols.has("quality_reasons")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN quality_reasons TEXT`);
+  }
+  if (!guidePagesCols.has("overall_status")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN overall_status TEXT`);
+  }
+  // quality_score/fact_check_score_before_retry: the PRE-retry snapshot for a guide that
+  // triggered the automatic revision pass (quality_score < RETRY_QUALITY_THRESHOLD). NULL
+  // means no retry was attempted; non-NULL means one was, even if it didn't help — the
+  // dashboard shows both numbers rather than making a retried-but-still-weak guide look
+  // untouched. The main quality_score/fact_check_score columns always hold the FINAL
+  // (post-retry, if any) verdict.
+  if (!guidePagesCols.has("quality_score_before_retry")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN quality_score_before_retry INTEGER`);
+  }
+  if (!guidePagesCols.has("fact_check_score_before_retry")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN fact_check_score_before_retry INTEGER`);
+  }
+  // scheduled_publish_at: SQLite datetime TEXT ('YYYY-MM-DD HH:MM:SS' UTC), set when an
+  // operator approves a guide — mirrors publication_queue.scheduled_at for the linked
+  // content_type='guide' row. NULL means not yet approved/scheduled. Deliberately does NOT
+  // require a guide_pages.status CHECK change ("scheduled" isn't a new status value): the
+  // row stays 'pending_review' with this column populated until the queue publisher actually
+  // flips it to 'published', so a CHECK-rebuild (which risks silently dropping a column the
+  // rebuild's copy-over forgets) is never needed for this feature.
+  if (!guidePagesCols.has("scheduled_publish_at")) {
+    alters.push(`ALTER TABLE guide_pages ADD COLUMN scheduled_publish_at TEXT`);
+  }
+
   if (alters.length > 0) {
     await runBatch("column ALTERs", alters.map(sql => ({ sql, args: [] })));
   }
@@ -835,6 +1430,52 @@ async function _initSchemaImpl(): Promise<void> {
   // schema promise. Refreshed every sync thereafter via recomputeHasDiscount().
   if (!hasDiscountColExisted) {
     await db.execute(`UPDATE products SET has_discount = CASE WHEN ${PRODUCT_HAS_DISCOUNT_SQL} THEN 1 ELSE 0 END`);
+  }
+
+  // products_fts migration: add `product_type` to a pre-existing 2-column (sku, name) index
+  // (catalog-search-bedframe-gap, 2026-09-17). FTS5 virtual tables can't ALTER their column
+  // list, so an old index is dropped — along with its shadow tables — and recreated with the
+  // 3-column schema from schemaStatements above (which only ran as a no-op here, since the
+  // table already existed). The rebuild-marker check below re-populates it from `products`.
+  const ftsSchemaRow = await db.execute(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'products_fts'`
+  );
+  const ftsSql = ftsSchemaRow.rows.length > 0 ? String(rowToObj(ftsSchemaRow.rows[0]).sql || "") : "";
+  const ftsNeedsMigration = ftsSchemaRow.rows.length > 0 && !ftsSql.includes("product_type");
+  if (ftsNeedsMigration) {
+    await runBatch("products_fts category migration", [
+      { sql: `DROP TRIGGER IF EXISTS products_fts_ai`, args: [] },
+      { sql: `DROP TRIGGER IF EXISTS products_fts_ad`, args: [] },
+      { sql: `DROP TRIGGER IF EXISTS products_fts_au`, args: [] },
+      { sql: `DROP TABLE IF EXISTS products_fts`, args: [] },
+      {
+        sql: `CREATE VIRTUAL TABLE products_fts USING fts5(
+          sku, name, product_type, content='products', content_rowid='rowid',
+          tokenize='unicode61 remove_diacritics 2'
+        )`,
+        args: [],
+      },
+      {
+        sql: `CREATE TRIGGER products_fts_ai AFTER INSERT ON products BEGIN
+          INSERT INTO products_fts(rowid, sku, name, product_type) VALUES (new.rowid, new.sku, new.name, new.product_type);
+        END`,
+        args: [],
+      },
+      {
+        sql: `CREATE TRIGGER products_fts_ad AFTER DELETE ON products BEGIN
+          INSERT INTO products_fts(products_fts, rowid, sku, name, product_type) VALUES('delete', old.rowid, old.sku, old.name, old.product_type);
+        END`,
+        args: [],
+      },
+      {
+        sql: `CREATE TRIGGER products_fts_au AFTER UPDATE OF sku, name, product_type ON products BEGIN
+          INSERT INTO products_fts(products_fts, rowid, sku, name, product_type) VALUES('delete', old.rowid, old.sku, old.name, old.product_type);
+          INSERT INTO products_fts(rowid, sku, name, product_type) VALUES (new.rowid, new.sku, new.name, new.product_type);
+        END`,
+        args: [],
+      },
+    ]);
+    console.info("[db] products_fts migrated to (sku, name, product_type) for category search");
   }
 
   // One-time backfill of products_fts. The triggers only cover writes from here on, so an
@@ -855,7 +1496,12 @@ async function _initSchemaImpl(): Promise<void> {
   // Non-fatal by design: getProducts falls back to the LIKE predicate when FTS returns
   // nothing, so a failed rebuild degrades to the old behaviour instead of taking schema
   // init (and with it the whole app) down.
-  const FTS_BUILD_MARKER = "products_fts_built_v1";
+  //
+  // v2: bumped by the product_type migration above — the DROP+CREATE leaves a structurally
+  // correct but EMPTY index, and the old v1 marker would already be set from the original
+  // 2-column backfill, so reusing it would skip this rebuild forever and leave search on an
+  // empty index (worse than the pre-migration state).
+  const FTS_BUILD_MARKER = "products_fts_built_v2_category";
   try {
     const built = await db.execute({
       sql: `SELECT value FROM settings WHERE key = ?`,
@@ -1013,12 +1659,12 @@ async function _initSchemaImpl(): Promise<void> {
     ['social_include_price', 'true'],
     ['social_include_link', 'true'],
     ['social_tone', 'promotional'],
-    ['prompt_new_product_fr', 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur. Rédige un post Facebook engageant pour ce nouveau produit : {product_name}. Prix : {price}$. Ton : enthousiaste et accessible. Maximum 150 mots. Termine avec les hashtags : {hashtags}'],
-    ['prompt_new_product_en', 'You are a marketing expert for a Canadian outdoor furniture store. Write an engaging Facebook post for this new product: {product_name}. Price: {price}$. Tone: enthusiastic and approachable. Maximum 150 words. End with hashtags: {hashtags}'],
+    ['prompt_new_product_fr', 'Tu es un expert en marketing pour une boutique québécoise de meubles et d’articles pour la maison. Rédige un post Facebook engageant pour ce nouveau produit : {product_name}. Prix : {price}$. Ton : enthousiaste et accessible. Maximum 150 mots. Termine avec les hashtags : {hashtags}'],
+    ['prompt_new_product_en', 'You are a marketing expert for a Canadian home goods and furniture store. Write an engaging Facebook post for this new product: {product_name}. Price: {price}$. Tone: enthusiastic and approachable. Maximum 150 words. End with hashtags: {hashtags}'],
     ['prompt_price_drop_fr', 'Tu es un expert en marketing promotionnel québécois. Rédige un post Facebook pour annoncer une baisse de prix sur : {product_name}. Ancien prix : {old_price}$. Nouveau prix : {new_price}$. Mets en valeur les économies. Maximum 120 mots. Hashtags : {hashtags}'],
     ['prompt_price_drop_en', 'You are a Canadian promotional marketing expert. Write a Facebook post announcing a price drop on: {product_name}. Old price: {old_price}$. New price: {new_price}$. Highlight the savings. Maximum 120 words. Hashtags: {hashtags}'],
-    ['prompt_highlight_fr', 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur. Rédige un post Facebook pour mettre en valeur ce produit populaire de notre catalogue : {product_name}. Prix : {price}$. Stock disponible : {qty} unités. Maximum 130 mots. Hashtags : {hashtags}'],
-    ['prompt_highlight_en', 'You are a marketing expert for a Canadian outdoor furniture store. Write a Facebook post highlighting this popular product from our catalogue: {product_name}. Price: {price}$. Stock: {qty} units available. Maximum 130 words. Hashtags: {hashtags}'],
+    ['prompt_highlight_fr', 'Tu es un expert en marketing pour une boutique québécoise de meubles et d’articles pour la maison. Rédige un post Facebook pour mettre en valeur ce produit populaire de notre catalogue : {product_name}. Prix : {price}$. Stock disponible : {qty} unités. Maximum 130 mots. Hashtags : {hashtags}'],
+    ['prompt_highlight_en', 'You are a marketing expert for a Canadian home goods and furniture store. Write a Facebook post highlighting this popular product from our catalogue: {product_name}. Price: {price}$. Stock: {qty} units available. Maximum 130 words. Hashtags: {hashtags}'],
     ['social_accent_color', '#2563eb'],
     ['social_text_color', '#ffffff'],
     ['social_store_display_name', ''],
@@ -1092,6 +1738,95 @@ async function _initSchemaImpl(): Promise<void> {
   // Seed hook pool on first run (no-op if already seeded)
   await seedHooksIfEmpty();
 
+  // seasonal_decor hook scope — added when mapProductTypeToScope gained a rule for
+  // "Home Furnishings > Holiday & Seasonal" / "> Home Décor" (previously fell through
+  // to the mobilier_indoor catch-all, so a Halloween decoration could open with a
+  // furniture-shopping hook like "this bedroom collection..."). No existing hook was
+  // scoped "seasonal_decor" — without new rows, selectCompatibleHooks("seasonal_decor",
+  // ...) only ever matches the generic "universal" hooks (safe, but never seasonal).
+  // Gated the same way as tutoiement_v1: a settings flag, so this runs exactly once.
+  // Must run AFTER seedHooksIfEmpty() — category_id=5 ("Saisonnier") only exists once
+  // content_hook_categories has been seeded, and these rows FK-reference it.
+  const seasonalHooksDone = await db.execute(
+    `SELECT value FROM settings WHERE key = 'seasonal_decor_hooks_v1_migrated' LIMIT 1`,
+  );
+  if (seasonalHooksDone.rows.length === 0) {
+    const SEASONAL_DECOR_HOOKS: Array<{ language: "FR" | "EN"; text: string; mode: "pool" | "generative_seeded" }> = [
+      { language: "FR", text: "Halloween approche. Ta cour n'est pas encore prête.", mode: "pool" },
+      { language: "FR", text: "Noël arrive vite. La déco qui manque à ta maison est ici.", mode: "pool" },
+      { language: "FR", text: "Une déco saisonnière qui dure, pas du jetable.", mode: "generative_seeded" },
+      { language: "FR", text: "Chaque année, la même décoration. Cette année, change ça.", mode: "pool" },
+      { language: "EN", text: "Halloween's coming. Your yard isn't ready yet.", mode: "pool" },
+      { language: "EN", text: "Christmas comes fast. The decoration your home is missing is here.", mode: "pool" },
+      { language: "EN", text: "Seasonal décor that lasts, not something disposable.", mode: "generative_seeded" },
+      { language: "EN", text: "Same decoration every year. This year, change that.", mode: "pool" },
+    ];
+    await runBatch("seasonal_decor hooks v1", [
+      ...SEASONAL_DECOR_HOOKS.map(({ language, text, mode }) => ({
+        sql: `INSERT OR IGNORE INTO content_hooks (category_id, language, text, product_scopes, mode) VALUES (5, ?, ?, ?, ?)`,
+        args: [language, text, JSON.stringify(["seasonal_decor"]), mode] as import("@libsql/client").InValue[],
+      })),
+    ]);
+    await db.execute(`INSERT OR IGNORE INTO settings (key, value) VALUES ('seasonal_decor_hooks_v1_migrated', '1')`);
+  }
+
+  // trend_selection_trial_until — 3-week trial (2026-09-18 strategic investigation,
+  // Part B Task 8): stock-highlight selection starts favoring trend_scores-ranked SKUs
+  // instead of picking uniformly at random. Fixed target date, not "N days from
+  // whenever this migration runs" — a fixed date is auditable and doesn't silently
+  // shift on a delayed deploy. Fail-safe by construction: once `now` passes this date,
+  // getEligibleHighlightCandidatesTrendAware() falls straight back to the untouched
+  // pre-trial random behavior (getEligibleHighlightCandidates) — nobody has to flip a
+  // switch to turn the trial OFF, only to extend it by moving this date forward.
+  const trendTrialDone = await db.execute(
+    `SELECT value FROM settings WHERE key = 'trend_selection_trial_v1_migrated' LIMIT 1`,
+  );
+  if (trendTrialDone.rows.length === 0) {
+    await runBatch("trend selection trial v1", [
+      { sql: `INSERT OR IGNORE INTO settings (key, value) VALUES ('trend_selection_trial_until', '2026-10-09T00:00:00Z')`, args: [] },
+      { sql: `INSERT OR IGNORE INTO settings (key, value) VALUES ('trend_selection_trial_v1_migrated', '1')`, args: [] },
+    ]);
+  }
+
+  // Prompt templates framed the store as a "boutique québécoise de mobilier extérieur" /
+  // "Canadian outdoor furniture store" for EVERY category — bleeding "perfect for your
+  // patio" language into posts about bathroom cabinets, Christmas trees, coffee tables,
+  // etc. (same root cause as the hook/hashtag scoping bugs above: a bias baked into a
+  // single global string instead of following the product). Corrects the two already-
+  // persisted templates that carried it, but ONLY if still the exact old default text —
+  // an operator's manual edit is left untouched.
+  const outdoorBiasDone = await db.execute(
+    `SELECT value FROM settings WHERE key = 'outdoor_furniture_bias_v1_migrated' LIMIT 1`,
+  );
+  if (outdoorBiasDone.rows.length === 0) {
+    const OLD_PREFIX_FR = 'Tu es un expert en marketing pour une boutique québécoise de mobilier extérieur.';
+    const OLD_PREFIX_EN = 'You are a marketing expert for a Canadian outdoor furniture store.';
+    const NEW_PREFIX_FR = 'Tu es un expert en marketing pour une boutique québécoise de meubles et d’articles pour la maison.';
+    const NEW_PREFIX_EN = 'You are a marketing expert for a Canadian home goods and furniture store.';
+    const OLD_NEW_PRODUCT_FR = `${OLD_PREFIX_FR} Rédige un post Facebook engageant pour ce nouveau produit : {product_name}. Prix : {price}$. Ton : enthousiaste et accessible. Maximum 150 mots. Termine avec les hashtags : {hashtags}`;
+    const OLD_NEW_PRODUCT_EN = `${OLD_PREFIX_EN} Write an engaging Facebook post for this new product: {product_name}. Price: {price}$. Tone: enthusiastic and approachable. Maximum 150 words. End with hashtags: {hashtags}`;
+    const OLD_HIGHLIGHT_FR = `${OLD_PREFIX_FR} Rédige un post Facebook pour mettre en valeur ce produit populaire de notre catalogue : {product_name}. Prix : {price}$. Stock disponible : {qty} unités. Maximum 130 mots. Hashtags : {hashtags}`;
+    const OLD_HIGHLIGHT_EN = `${OLD_PREFIX_EN} Write a Facebook post highlighting this popular product from our catalogue: {product_name}. Price: {price}$. Stock: {qty} units available. Maximum 130 words. Hashtags: {hashtags}`;
+    await runBatch("outdoor furniture bias v1", [
+      {
+        sql: `UPDATE settings SET value = ? WHERE key = 'prompt_new_product_fr' AND value = ?`,
+        args: [OLD_NEW_PRODUCT_FR.replace(OLD_PREFIX_FR, NEW_PREFIX_FR), OLD_NEW_PRODUCT_FR],
+      },
+      {
+        sql: `UPDATE settings SET value = ? WHERE key = 'prompt_new_product_en' AND value = ?`,
+        args: [OLD_NEW_PRODUCT_EN.replace(OLD_PREFIX_EN, NEW_PREFIX_EN), OLD_NEW_PRODUCT_EN],
+      },
+      {
+        sql: `UPDATE settings SET value = ? WHERE key = 'prompt_highlight_fr' AND value = ?`,
+        args: [OLD_HIGHLIGHT_FR.replace(OLD_PREFIX_FR, NEW_PREFIX_FR), OLD_HIGHLIGHT_FR],
+      },
+      {
+        sql: `UPDATE settings SET value = ? WHERE key = 'prompt_highlight_en' AND value = ?`,
+        args: [OLD_HIGHLIGHT_EN.replace(OLD_PREFIX_EN, NEW_PREFIX_EN), OLD_HIGHLIGHT_EN],
+      },
+    ]);
+    await db.execute(`INSERT OR IGNORE INTO settings (key, value) VALUES ('outdoor_furniture_bias_v1_migrated', '1')`);
+  }
 }
 
 /** Ensure schema is initialized before any query */
@@ -1358,6 +2093,33 @@ export async function zeroQtyForRemovedSkus(skus: string[]): Promise<number> {
   return affected;
 }
 
+export interface CatalogFreshnessCandidate {
+  sku: string;
+  qty: number;
+  lastSeenAt: number;
+}
+
+/**
+ * Every product row with a nonzero qty — the candidate pool for the catalog-freshness
+ * zero-out (removed-catalog.ts's runCatalogFreshnessZero). Unlike zeroQtyForRemovedSkus
+ * above (which only reaches SKUs already linked to a live Shopify product), this covers
+ * EVERY row regardless of shopify_product_id, closing the gap the 2026-09-20
+ * investigation found: ~8,953 never-imported catalog rows had no reconciliation at all.
+ * Only 3 columns — this can be ~10k rows, kept minimal on purpose.
+ */
+export async function getCatalogFreshnessCandidates(): Promise<CatalogFreshnessCandidate[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT sku, qty, last_seen_at FROM products WHERE qty != 0`);
+  return result.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      sku: (o.sku as string) || "",
+      qty: Number(o.qty) || 0,
+      lastSeenAt: Number(o.last_seen_at) || 0,
+    };
+  });
+}
+
 export interface ProductSnapshot {
   sku: string;
   name: string;
@@ -1389,6 +2151,13 @@ const SNAPSHOT_COLS =
   "image1, image2, image3, image4, image5, image6, image7, " +
   "video, description, short_description, material, gtin, weight, " +
   "out_of_stock_expected, estimated_arrival, shopify_product_id";
+
+/** Last known Aosom price per SKU (rows with a price only) — used when the feed gives no usable price. */
+export async function getKnownPrices(): Promise<Map<string, { price: number }>> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT sku, price FROM products WHERE price > 0`);
+  return new Map(result.rows.map((r) => [String(r.sku), { price: Number(r.price) }]));
+}
 
 export async function getProductsSnapshot(): Promise<Map<string, ProductSnapshot>> {
   const db = await ensureSchema();
@@ -1480,6 +2249,7 @@ export async function getProducts(filters: {
   color?: string;
   size?: string;
   notImported?: boolean;
+  imported?: boolean;
   withDiscount?: boolean;
   lowStock?: boolean;
   page?: number;
@@ -1498,6 +2268,12 @@ export async function getProducts(filters: {
    * either; if you need them, do not pass this flag.
    */
   skipCount?: boolean;
+  /**
+   * With `skipCount`, also re-run an empty FTS result on the unindexable `LIKE '%…%'` predicate
+   * (a full scan of `products`). Default true; the assistant passes false on all but its last
+   * relaxation attempt, since most of its attempts are expected to miss.
+   */
+  likeFallback?: boolean;
 }): Promise<{ products: ProductRow[]; total: number; productTypes: { type: string; count: number }[] }> {
   const db = await ensureSchema();
   // WHERE clause + args are shared with getCatalogStats via buildCatalogWhere.
@@ -1529,79 +2305,77 @@ export async function getProducts(filters: {
     case "low_stock": orderBy = "CASE WHEN qty > 0 THEN 0 ELSE 1 END, qty ASC"; break;
     case "best_sellers": joinSort = "best_sellers"; break;
     case "price_drop": joinSort = "price_drop"; break;
+    // "Nouveaux produits Aosom" — newest first, by created_at (the row's first-ever
+    // INSERT into `products`, a DB-level default never touched by the upsert's ON
+    // CONFLICT DO UPDATE — see refreshProducts). KNOWN LIMITATION: 85% of current rows
+    // (10,269/12,013 as of 2026-09-20) share the exact same created_at, the day this
+    // table was bulk-seeded — for those, created_at reflects the seed date, not the
+    // SKU's true Aosom debut. The sort is fully meaningful only for SKUs first seen
+    // after that seed date; older rows sort as a same-timestamp tail, which is the
+    // conservative/correct behavior for a "new arrivals" sort (never falsely promoted
+    // to the top). sku ASC tiebreaks for a deterministic, pagination-safe order among
+    // same-timestamp rows. Columns are qualified with `f.`: the final SELECT LEFT JOINs
+    // `last_price`, which also has a `sku`, so a bare `sku` is ambiguous and SQLite
+    // rejects the whole query (the sort 500'd in prod until this was qualified).
+    case "newest": orderBy = "f.created_at DESC, f.sku ASC"; break;
   }
 
   // Select only columns the catalog UI needs
-  const catalogColumns = "sku, name, price, qty, color, product_type, image1, shopify_product_id, shopify_handle";
+  const catalogColumns = "sku, name, price, qty, color, product_type, image1, shopify_product_id, shopify_handle, created_at";
 
-  // `last_price` exposes the old_price of each SKU's most recent price change so the catalog
-  // table can render the ▼/▲ movement badge (current price vs. previous price). ROW_NUMBER
-  // picks exactly one row per SKU, ordered detected_at DESC then id DESC — the id tiebreak
-  // makes selection deterministic when a SKU has two price changes in the same detected_at
-  // second (detected_at is second-granularity, so batch syncs can collide). Restocks/
-  // stock-only events are excluded (change_type filter), so the badge always reflects the
-  // last *price* move, not an incidental stock update.
-  const lastPriceCte = `last_price AS (
-        SELECT sku, prev_price FROM (
-          SELECT sku, old_price AS prev_price,
-            ROW_NUMBER() OVER (PARTITION BY sku ORDER BY detected_at DESC, id DESC) AS rn
-          FROM price_history
-          WHERE change_type IN ('price_drop', 'price_increase') AND old_price IS NOT NULL
-        ) WHERE rn = 1
-      )`;
-
-  // All three branches share the same shape: a `filtered` CTE applies the WHERE clause, the
-  // result is LEFT JOINed to `last_price` (and, for the velocity/discount sorts, to a 14-day
-  // `ph_agg`). COALESCE(…, 0) keeps products without history at the bottom of the list.
+  // `prev_price` is the old_price of each SKU's most recent price change (restocks/stock-only
+  // events excluded), so the catalog table's ▼/▲ badge reflects the last *price* move. Ordered
+  // detected_at DESC then id DESC: detected_at is second-granularity, so the id tiebreak keeps
+  // the pick deterministic when a batch sync records two changes in the same second.
+  // The velocity / discount sorts use a 14-day window.
   const cutoff14d = Math.floor(Date.now() / 1000) - 14 * 86400;
-  const selectCols = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, f.shopify_handle, lp.prev_price`;
+  // Rows-only callers (skipCount) never render the ▼/▲ badge: prev_price is returned as NULL.
+  const withPrev = !filters.skipCount;
 
   // Built as a function of (where, args) so the FTS→LIKE fallback can re-issue the exact
-  // same query shape against the other predicate without duplicating three SQL branches.
+  // same query shape against the other predicate.
   const buildProductsQuery = (w: string, a: (string | number)[]): { sql: string; args: (string | number)[] } => {
   const filteredCte = `filtered AS (SELECT ${catalogColumns} FROM products ${w})`;
-  const args = a;
-  let productsSql: string;
-  let productsArgs: (string | number)[];
+  const colList = `f.sku, f.name, f.price, f.qty, f.color, f.product_type, f.image1, f.shopify_product_id, f.shopify_handle, f.created_at`;
 
+  // PERF (2026-10-03): this used to LEFT JOIN `last_price` / `ph_agg` — CTEs over the whole
+  // price_history table — onto every filtered row. SQLite has no index on those derived tables,
+  // so the join was ~quadratic: ONE catalog page sorted by best_sellers read 124M rows and one
+  // sorted by price_drop 173M (measured on prod; Turso's "Top Queries" showed the same 79–115M
+  // statements). Now: (1) the sort key is a per-row scalar subquery that hits
+  // idx_price_history_sku_detected / idx_ph_velocity, (2) the page is cut FIRST (inner query,
+  // LIMIT/OFFSET) and only those <=200 rows pay for the prev_price lookup (outer query).
+  let innerExtra = "";
+  let innerOrder = orderBy;
+  let outerOrder = orderBy;
+  let sortArgs: number[] = [];
   if (joinSort === "best_sellers") {
-    productsSql = `
-      WITH ${filteredCte}, ${lastPriceCte},
-      ph_agg AS (
-        SELECT sku, SUM(old_qty - new_qty) AS units_moved
-        FROM price_history WHERE detected_at > ? AND change_type = 'stock_change' AND old_qty > new_qty GROUP BY sku
-      )
-      SELECT ${selectCols}
-      FROM filtered f
-      LEFT JOIN last_price lp ON lp.sku = f.sku
-      LEFT JOIN ph_agg ON ph_agg.sku = f.sku
-      ORDER BY COALESCE(ph_agg.units_moved, 0) DESC LIMIT ? OFFSET ?`;
-    productsArgs = [...args, cutoff14d, limit, offset];
+    innerExtra = `, COALESCE((SELECT SUM(ph.old_qty - ph.new_qty) FROM price_history ph
+        WHERE ph.sku = f.sku AND ph.detected_at > ? AND ph.change_type = 'stock_change' AND ph.old_qty > ph.new_qty), 0) AS sortkey`;
+    innerOrder = "sortkey DESC, f.sku ASC";
+    outerOrder = "f.sortkey DESC, f.sku ASC";
+    sortArgs = [cutoff14d];
   } else if (joinSort === "price_drop") {
-    productsSql = `
-      WITH ${filteredCte}, ${lastPriceCte},
-      ph_agg AS (
-        SELECT ph.sku,
-          ROUND(((MAX(ph.old_price) - MIN(p2.price)) / MAX(ph.old_price)) * 100.0, 1) AS drop_pct
-        FROM price_history ph JOIN products p2 ON p2.sku = ph.sku
-        WHERE ph.detected_at > ? AND ph.change_type = 'price_drop' AND ph.old_price > p2.price AND ph.old_price > 0
-        GROUP BY ph.sku
-      )
-      SELECT ${selectCols}
-      FROM filtered f
-      LEFT JOIN last_price lp ON lp.sku = f.sku
-      LEFT JOIN ph_agg ON ph_agg.sku = f.sku
-      ORDER BY COALESCE(ph_agg.drop_pct, 0) DESC LIMIT ? OFFSET ?`;
-    productsArgs = [...args, cutoff14d, limit, offset];
-  } else {
-    productsSql = `
-      WITH ${filteredCte}, ${lastPriceCte}
-      SELECT ${selectCols}
-      FROM filtered f
-      LEFT JOIN last_price lp ON lp.sku = f.sku
-      ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
-    productsArgs = [...args, limit, offset];
+    innerExtra = `, COALESCE((SELECT ROUND(((MAX(ph.old_price) - f.price) / MAX(ph.old_price)) * 100.0, 1) FROM price_history ph
+        WHERE ph.sku = f.sku AND ph.detected_at > ? AND ph.change_type = 'price_drop' AND ph.old_price > f.price AND ph.old_price > 0), 0) AS sortkey`;
+    innerOrder = "sortkey DESC, f.sku ASC";
+    outerOrder = "f.sortkey DESC, f.sku ASC";
+    sortArgs = [cutoff14d];
   }
+  // Rows-only callers (skipCount) never render the ▼/▲ badge: no lookup at all.
+  const prevCol = withPrev
+    ? `(SELECT ph.old_price FROM price_history ph
+        WHERE ph.sku = f.sku AND ph.change_type IN ('price_drop', 'price_increase') AND ph.old_price IS NOT NULL
+        ORDER BY ph.detected_at DESC, ph.id DESC LIMIT 1)`
+    : `NULL`;
+  const productsSql = `
+      WITH ${filteredCte}
+      SELECT ${colList}, ${prevCol} AS prev_price
+      FROM (
+        SELECT ${colList}${innerExtra} FROM filtered f ORDER BY ${innerOrder} LIMIT ? OFFSET ?
+      ) f
+      ORDER BY ${outerOrder}`;
+  const productsArgs: (string | number)[] = [...a, ...sortArgs, limit, offset];
     return { sql: productsSql, args: productsArgs };
   };
 
@@ -1610,7 +2384,7 @@ export async function getProducts(filters: {
   if (filters.skipCount) {
     let q = buildProductsQuery(where, args);
     let rows = (await db.execute({ sql: q.sql, args: q.args })).rows;
-    if (rows.length === 0 && usingFts) {
+    if (rows.length === 0 && usingFts && filters.likeFallback !== false) {
       q = buildProductsQuery(likeVariant.where, likeVariant.args);
       rows = (await db.execute({ sql: q.sql, args: q.args })).rows;
     }
@@ -1745,18 +2519,6 @@ export async function upsertCollectionMappingsBatch(mappings: CollectionMapping[
   );
 }
 
-export async function deleteCollectionMapping(aosomCategory: string, role?: CollectionRole): Promise<void> {
-  const db = await ensureSchema();
-  if (role) {
-    await db.execute({
-      sql: `DELETE FROM collection_mappings WHERE aosom_category = ? AND collection_role = ?`,
-      args: [aosomCategory, role],
-    });
-  } else {
-    await db.execute({ sql: `DELETE FROM collection_mappings WHERE aosom_category = ?`, args: [aosomCategory] });
-  }
-}
-
 /**
  * Look up BOTH the main and sub collections for a product.
  *
@@ -1789,6 +2551,130 @@ export async function findCollectionsForProduct(
   return { main, sub };
 }
 
+export interface ComplementaryProductRow {
+  sku: string;
+  name: string;
+  price: number;
+  qty: number;
+  image1: string | null;
+  shopify_handle: string | null;
+  product_type: string;
+  color: string;
+}
+
+/**
+ * Cross-sell candidates for the storefront assistant's `recommend_complementary_products`
+ * tool. Two guardrails are enforced IN SQL (not filtered after the fact in JS, where a
+ * future edit could silently drop them):
+ *
+ *  1. Never out of stock — `qty > 0`, same predicate `search_catalog` already uses.
+ *  2. Never a product with a known, unresolved image problem — excludes any SKU that
+ *     has been checked (`image_checked_at IS NOT NULL`, so unverified rows don't pass by
+ *     default) AND has no `image_review_queue` row still sitting at a status other than
+ *     `applied` (pending/approved/rejected/failed all mean the live gallery may still show
+ *     the flagged image). No Claude Vision call here — this is a live chat response path,
+ *     so it only reads compliance state the image pipeline already computed and stored.
+ *
+ * `excludeSku` drops the product the shopper is already looking at. `productType`/`query`
+ * are free-text filters the model supplies itself (it is told to pick a DIFFERENT category
+ * than the base product — see the assistant system prompt) — this function does not encode
+ * a fixed complementary-category map, matching how `search_catalog` already lets the model
+ * choose its own category text.
+ */
+export async function getComplementaryProducts(opts: {
+  excludeSku: string;
+  productType?: string;
+  query?: string;
+  limit?: number;
+}): Promise<ComplementaryProductRow[]> {
+  const db = await ensureSchema();
+  const limit = Math.max(1, Math.min(opts.limit ?? 12, 40));
+  const conditions: string[] = [
+    "qty > 0",
+    "shopify_product_id IS NOT NULL",
+    "shopify_handle IS NOT NULL AND TRIM(shopify_handle) <> ''",
+    "image_checked_at IS NOT NULL",
+    "NOT EXISTS (SELECT 1 FROM image_review_queue irq WHERE irq.sku = products.sku AND irq.status != 'applied')",
+    "sku != ?",
+  ];
+  const args: (string | number)[] = [opts.excludeSku];
+  if (opts.productType) {
+    conditions.push("product_type LIKE ?");
+    args.push(`%${opts.productType}%`);
+  }
+  if (opts.query) {
+    conditions.push("(name LIKE ? OR product_type LIKE ?)");
+    args.push(`%${opts.query}%`, `%${opts.query}%`);
+  }
+  args.push(limit);
+
+  const result = await db.execute({
+    sql: `SELECT sku, name, price, qty, image1, shopify_handle, product_type, color
+          FROM products
+          WHERE ${conditions.join(" AND ")}
+          ORDER BY qty DESC
+          LIMIT ?`,
+    args,
+  });
+  return result.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      sku: String(o.sku),
+      name: o.name == null ? "" : String(o.name),
+      price: o.price == null ? 0 : Number(o.price),
+      qty: Number(o.qty ?? 0),
+      image1: o.image1 == null ? null : String(o.image1),
+      shopify_handle: o.shopify_handle == null ? null : String(o.shopify_handle),
+      product_type: o.product_type == null ? "" : String(o.product_type),
+      color: o.color == null ? "" : String(o.color),
+    };
+  });
+}
+
+/**
+ * Candidates for the product page's "Complétez la pièce" block (no LLM since 2026-10-02 —
+ * see runComplementary). Products under the `scope` taxonomy branch, excluding the viewed
+ * product's own `exclude` branch, with the same in-SQL safety guardrails as
+ * getComplementaryProducts. Both strings come from the storefront request, so they are bound
+ * args with LIKE wildcards escaped — a caller can only narrow, never widen, the selection.
+ */
+export async function getComplementaryCandidates(opts: {
+  scope: string;
+  exclude: string;
+  limit?: number;
+}): Promise<ComplementaryProductRow[]> {
+  const db = await ensureSchema();
+  const esc = (s: string) => s.replace(/[!%_]/g, (c) => `!${c}`);
+  const limit = Math.max(1, Math.min(opts.limit ?? 60, 200));
+  const result = await db.execute({
+    sql: `SELECT sku, name, price, qty, image1, shopify_handle, product_type, color
+          FROM products
+          WHERE qty > 0
+            AND shopify_product_id IS NOT NULL
+            AND shopify_handle IS NOT NULL AND TRIM(shopify_handle) <> ''
+            AND image_checked_at IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM image_review_queue irq WHERE irq.sku = products.sku AND irq.status != 'applied')
+            AND (product_type = ? OR product_type LIKE ? ESCAPE '!')
+            AND NOT (product_type = ? OR product_type LIKE ? ESCAPE '!')
+          ORDER BY qty DESC
+          LIMIT ?`,
+    args: [opts.scope, `${esc(opts.scope)} > %`, opts.exclude, `${esc(opts.exclude)} > %`, limit],
+  });
+  return result.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      sku: String(o.sku),
+      name: o.name == null ? "" : String(o.name),
+      price: o.price == null ? 0 : Number(o.price),
+      qty: Number(o.qty ?? 0),
+      image1: o.image1 == null ? null : String(o.image1),
+      shopify_handle: o.shopify_handle == null ? null : String(o.shopify_handle),
+      product_type: o.product_type == null ? "" : String(o.product_type),
+      color: o.color == null ? "" : String(o.color),
+    };
+  });
+}
+
 export async function getProductsWithShopifyId(): Promise<{ sku: string; product_type: string; shopify_product_id: string }[]> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT sku, product_type, shopify_product_id FROM products WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''`);
@@ -1796,34 +2682,6 @@ export async function getProductsWithShopifyId(): Promise<{ sku: string; product
     const o = rowToObj(row);
     return { sku: o.sku as string, product_type: o.product_type as string, shopify_product_id: o.shopify_product_id as string };
   });
-}
-
-export async function getProductCount(): Promise<number> {
-  const db = await ensureSchema();
-  const result = await db.execute(`SELECT COUNT(*) as cnt FROM products`);
-  return Number(rowToObj(result.rows[0]).cnt) || 0;
-}
-
-/**
- * Distinct product_types among IMPORTED products (have a Shopify id), sorted A→Z.
- * Powers the category dropdown in the slideshow generation panel. Served by the
- * idx_products_category composite index.
- */
-export async function getImportedProductTypes(): Promise<string[]> {
-  const db = await ensureSchema();
-  const result = await db.execute(
-    `SELECT DISTINCT product_type FROM products
-     WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''
-       AND product_type IS NOT NULL AND product_type != ''
-     ORDER BY product_type ASC`,
-  );
-  return result.rows.map((row) => String(rowToObj(row).product_type)).filter(Boolean);
-}
-
-export async function getImportedProductCount(): Promise<number> {
-  const db = await ensureSchema();
-  const result = await db.execute(`SELECT COUNT(*) as cnt FROM products WHERE shopify_product_id IS NOT NULL`);
-  return Number(rowToObj(result.rows[0]).cnt) || 0;
 }
 
 export async function updateProductShopifyIds(sku: string, shopifyProductId: string, shopifyVariantId: string): Promise<void> {
@@ -1852,14 +2710,6 @@ export async function linkProductToShopify(skus: string[], shopifyProductId: str
 // ─── Price History (enriched) ────────────────────────────────────────
 
 export type ChangeTypeHistory = "price_drop" | "price_increase" | "stock_change" | "new_product" | "restock" | "floor_correction";
-
-export async function recordPriceChange(entry: {
-  sku: string; oldPrice: number | null; newPrice: number | null;
-  oldQty: number | null; newQty: number | null; changeType: ChangeTypeHistory;
-}): Promise<void> {
-  const db = await ensureSchema();
-  await db.execute({ sql: `INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type) VALUES (?, ?, ?, ?, ?, ?)`, args: [entry.sku, entry.oldPrice, entry.newPrice, entry.oldQty, entry.newQty, entry.changeType] });
-}
 
 export async function recordPriceChanges(entries: {
   sku: string; oldPrice: number | null; newPrice: number | null;
@@ -1901,7 +2751,7 @@ function utcDayKey(): string {
  * can never exhaust the 'assistant' pool that the public storefront /api/assistant
  * draws from. Each pool has its own daily counter row and its own budget env var.
  */
-export type LlmBudgetPool = "assistant" | "batch" | "maintenance";
+export type LlmBudgetPool = "assistant" | "batch" | "maintenance" | "video" | "import" | "visualiser" | "decorateur";
 
 /** Tokens the given pool consumed so far today (UTC). 0 when no row yet. */
 export async function getDailyLlmTokensUsed(pool: LlmBudgetPool): Promise<number> {
@@ -1930,6 +2780,15 @@ export interface LlmUsageDay {
   batch: number;
   /** Uncapped operator-launched maintenance passes (catalogue vision audits). */
   maintenance: number;
+  /** Video-batch QC (demand-gen-ext, assembly) — isolated from `batch` so a
+   *  production run can never starve imports/blog/social. See llm-budget.ts. */
+  video: number;
+  /** Automatic daily catalogue import (src/lib/auto-import) — isolated so it can never starve `batch`. */
+  import: number;
+  /** Storefront "Voyez-le chez vous" image placement (room-visualizer.ts), off until `visualiser_enabled` = "1". */
+  visualiser: number;
+  /** Storefront "Ameublo décorateur" (room reading + assistant picks), off until `decorateur_enabled` = "1". */
+  decorateur: number;
 }
 
 /**
@@ -1949,13 +2808,15 @@ export async function getLlmUsageWindow(days: number): Promise<LlmUsageDay[]> {
     args: [keys[0]],
   });
   const byDay = new Map<string, LlmUsageDay>(
-    keys.map((day) => [day, { day, assistant: 0, batch: 0, maintenance: 0 }]),
+    keys.map((day) => [day, { day, assistant: 0, batch: 0, maintenance: 0, video: 0, import: 0, visualiser: 0, decorateur: 0 }]),
   );
   for (const row of res.rows) {
     const entry = byDay.get(row.day as string);
     if (!entry) continue; // row older than the window (the >= bound is inclusive of keys[0])
     const pool = row.pool as LlmBudgetPool;
-    if (pool === "assistant" || pool === "batch" || pool === "maintenance") entry[pool] = Number(row.tokens_used) || 0;
+    if (pool === "assistant" || pool === "batch" || pool === "maintenance" || pool === "video" || pool === "import" || pool === "visualiser" || pool === "decorateur") {
+      entry[pool] = Number(row.tokens_used) || 0;
+    }
   }
   return keys.map((day) => byDay.get(day)!);
 }
@@ -2005,6 +2866,126 @@ export async function recordAssistantRequest(ip: string): Promise<void> {
   await db.execute({
     sql: `INSERT INTO assistant_rate_limit (ip, ts) VALUES (?, ?)`,
     args: [ip, Math.floor(Date.now() / 1000)],
+  });
+}
+
+// ─── Assistant abuse protection (assistant-guard.ts) ─────────────────
+
+const utcDay = () => new Date().toISOString().slice(0, 10);
+
+export interface AssistantIpDay {
+  tokens: number;
+  messages: number;
+  abuseScore: number;
+}
+
+/** Today's usage for one hashed visitor (zeros when none). */
+export async function getAssistantIpDay(ipHash: string): Promise<AssistantIpDay> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT tokens, messages, abuse_score FROM assistant_ip_daily WHERE day = ? AND ip_hash = ?`,
+    args: [utcDay(), ipHash],
+  });
+  const o = r.rows[0] ? rowToObj(r.rows[0]) : null;
+  return { tokens: Number(o?.tokens ?? 0), messages: Number(o?.messages ?? 0), abuseScore: Number(o?.abuse_score ?? 0) };
+}
+
+/** Add to today's counters for one hashed visitor; returns the updated totals. */
+export async function addAssistantIpUsage(
+  ipHash: string,
+  delta: { tokens?: number; messages?: number; abuse?: number; reasons?: string[] },
+): Promise<AssistantIpDay> {
+  const db = await ensureSchema();
+  const reasons = delta.reasons?.length ? delta.reasons.join(",").slice(0, 200) : null;
+  await db.execute({
+    sql: `INSERT INTO assistant_ip_daily (day, ip_hash, tokens, messages, abuse_score, last_reasons)
+          VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(day, ip_hash) DO UPDATE SET
+            tokens = tokens + excluded.tokens,
+            messages = messages + excluded.messages,
+            abuse_score = abuse_score + excluded.abuse_score,
+            last_reasons = COALESCE(excluded.last_reasons, last_reasons)`,
+    args: [utcDay(), ipHash, delta.tokens ?? 0, delta.messages ?? 0, delta.abuse ?? 0, reasons],
+  });
+  return getAssistantIpDay(ipHash);
+}
+
+export interface AssistantBlock {
+  ipHash: string;
+  blockedUntil: number;
+  reason: string;
+  strikes: number;
+  sample: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function toBlock(o: Record<string, unknown>): AssistantBlock {
+  return {
+    ipHash: String(o.ip_hash),
+    blockedUntil: Number(o.blocked_until),
+    reason: String(o.reason),
+    strikes: Number(o.strikes ?? 1),
+    sample: o.sample == null ? null : String(o.sample),
+    createdAt: Number(o.created_at),
+    updatedAt: Number(o.updated_at),
+  };
+}
+
+/** The block row for a hashed visitor (active or expired), or null. */
+export async function getAssistantBlock(ipHash: string): Promise<AssistantBlock | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT * FROM assistant_blocklist WHERE ip_hash = ?`, args: [ipHash] });
+  return r.rows[0] ? toBlock(rowToObj(r.rows[0])) : null;
+}
+
+/** Block (or re-block, incrementing strikes) a hashed visitor until `until` (epoch secs). */
+export async function blockAssistantIp(ipHash: string, until: number, reason: string, sample: string): Promise<void> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  await db.execute({
+    sql: `INSERT INTO assistant_blocklist (ip_hash, blocked_until, reason, strikes, sample, created_at, updated_at)
+          VALUES (?, ?, ?, 1, ?, ?, ?)
+          ON CONFLICT(ip_hash) DO UPDATE SET
+            blocked_until = excluded.blocked_until, reason = excluded.reason,
+            strikes = strikes + 1, sample = excluded.sample, updated_at = excluded.updated_at`,
+    args: [ipHash, until, reason.slice(0, 200), sample.slice(0, 300), now, now],
+  });
+}
+
+/** Lift a block now (keeps the row and its strike count, so a repeat still escalates). */
+export async function unblockAssistantIp(ipHash: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE assistant_blocklist SET blocked_until = 0, updated_at = ? WHERE ip_hash = ?`,
+    args: [Math.floor(Date.now() / 1000), ipHash],
+  });
+}
+
+/** Every block row, most recent first (dashboard). */
+export async function listAssistantBlocks(limit = 100): Promise<AssistantBlock[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT * FROM assistant_blocklist ORDER BY updated_at DESC LIMIT ?`, args: [limit] });
+  return r.rows.map((row) => toBlock(rowToObj(row)));
+}
+
+/** Today's heaviest visitors (dashboard). */
+export async function listAssistantTopVisitors(limit = 20): Promise<Array<AssistantIpDay & { ipHash: string; lastReasons: string | null }>> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT ip_hash, tokens, messages, abuse_score, last_reasons FROM assistant_ip_daily
+          WHERE day = ? ORDER BY tokens DESC LIMIT ?`,
+    args: [utcDay(), limit],
+  });
+  return r.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      ipHash: String(o.ip_hash),
+      tokens: Number(o.tokens),
+      messages: Number(o.messages),
+      abuseScore: Number(o.abuse_score),
+      lastReasons: o.last_reasons == null ? null : String(o.last_reasons),
+    };
   });
 }
 
@@ -2106,6 +3087,77 @@ export async function recordFloorCorrection(entry: {
     sql: `INSERT INTO price_history (sku, old_price, new_price, old_qty, new_qty, change_type, applied_to_shopify) VALUES (?, ?, ?, NULL, NULL, 'floor_correction', ?)`,
     args: [entry.sku, entry.oldPrice, entry.newPrice, entry.applied ? 1 : 0],
   });
+}
+
+// ─── Price floor incident history ────────────────────────────────────────────
+//
+// One durable, unified record per below-floor correction, regardless of which of the
+// 5 write paths caught it. `source` names the path so "how often, since when, from
+// where" can be answered without cross-referencing price_history and sync_logs (each
+// with a different retention window and neither recording *why*). See TASK 3 / the
+// 842-375V00CG investigation.
+
+export type PriceFloorIncidentSource =
+  | "import" // createShopifyProduct — the create response's price didn't match what was sent
+  | "price_audit" // /api/health/price-audit (daily, upward-only)
+  | "price_reconcile" // /api/cron/price-reconcile (hourly, bidirectional)
+  | "sync_push" // job1-sync.ts Phase 2 daily push
+  | "force_push_script"; // scripts/force-push-shopify.ts (manual ops)
+
+export interface PriceFloorIncident {
+  id: number;
+  sku: string;
+  oldPrice: number;
+  newPrice: number;
+  source: PriceFloorIncidentSource;
+  detectedAt: number; // epoch seconds
+}
+
+/**
+ * Log one below-floor detection+correction. Callers should wrap this in a try/catch
+ * (like `safeRecord` elsewhere in this file) — a logging failure must never undo or
+ * mask an already-successful Shopify price correction.
+ */
+export async function recordPriceFloorIncident(entry: {
+  sku: string; oldPrice: number; newPrice: number; source: PriceFloorIncidentSource;
+}): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO price_floor_incidents (sku, old_price, new_price, source) VALUES (?, ?, ?, ?)`,
+    args: [entry.sku, entry.oldPrice, entry.newPrice, entry.source],
+  });
+}
+
+/** Most recent incidents first, for the dashboard list. */
+export async function getPriceFloorIncidents(limit = 100): Promise<PriceFloorIncident[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT id, sku, old_price, new_price, source, detected_at
+          FROM price_floor_incidents ORDER BY detected_at DESC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    return {
+      id: Number(o.id),
+      sku: String(o.sku),
+      oldPrice: Number(o.old_price),
+      newPrice: Number(o.new_price),
+      source: o.source as PriceFloorIncidentSource,
+      detectedAt: Number(o.detected_at),
+    };
+  });
+}
+
+/** Total incident count, optionally since a given epoch-seconds cutoff. */
+export async function countPriceFloorIncidents(sinceEpoch?: number): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute(
+    sinceEpoch != null
+      ? { sql: `SELECT COUNT(*) as c FROM price_floor_incidents WHERE detected_at >= ?`, args: [sinceEpoch] }
+      : { sql: `SELECT COUNT(*) as c FROM price_floor_incidents`, args: [] },
+  );
+  return Number(rowToObj(result.rows[0]).c) || 0;
 }
 
 /**
@@ -2511,6 +3563,202 @@ export async function updateUserPassword(id: number, passwordHash: string): Prom
   await db.execute({ sql: `UPDATE users SET password_hash = ? WHERE id = ?`, args: [passwordHash, id] });
 }
 
+// ─── Roue de bienvenue ───────────────────────────────────────────────
+
+export interface WheelSpinRow {
+  id: number;
+  email_key: string;
+  email: string;
+  prize_key: string;
+  code: string | null;
+  discount_id: string | null;
+  expires_at: number | null;
+  locale: string | null;
+  created_at: number;
+}
+
+export async function getWheelSpin(emailKey: string): Promise<WheelSpinRow | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT * FROM wheel_spins WHERE email_key = ?`, args: [emailKey] });
+  return r.rows[0] ? (rowToObj(r.rows[0]) as unknown as WheelSpinRow) : null;
+}
+
+export async function countWheelSpinsForIp(ipHash: string, sinceSec: number): Promise<number> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT COUNT(*) AS n FROM wheel_spins WHERE ip_hash = ? AND created_at >= ?`, args: [ipHash, sinceSec] });
+  return Number(rowToObj(r.rows[0]).n ?? 0);
+}
+
+/** Reserve the email's only spin. False when the email already has one (the caller then reads it back). */
+export async function reserveWheelSpin(s: { emailKey: string; email: string; prizeKey: string; ipHash: string; locale: string }): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO wheel_spins (email_key, email, prize_key, ip_hash, locale, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(email_key) DO NOTHING`,
+    args: [s.emailKey, s.email, s.prizeKey, s.ipHash, s.locale, Math.floor(Date.now() / 1000)],
+  });
+  return r.rowsAffected === 1;
+}
+
+export async function setWheelSpinCode(emailKey: string, code: string, discountId: string, expiresAt: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE wheel_spins SET code = ?, discount_id = ?, expires_at = ? WHERE email_key = ?`, args: [code, discountId, expiresAt, emailKey] });
+}
+
+/** Undo a reservation whose Shopify code could not be created, so the visitor can retry. */
+export async function releaseWheelSpin(emailKey: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `DELETE FROM wheel_spins WHERE email_key = ? AND code IS NULL`, args: [emailKey] });
+}
+
+// ─── Teasers ("bientôt") + AI visualiser usage ─────────────────────
+
+/** Log one funnel event; a repeat of the same (feature, event, source, visitor) is ignored by the UNIQUE key. */
+export async function insertTeaserEvent(e: { feature: string; event: string; source: string; visitorHash: string; handle: string | null; locale: string }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT OR IGNORE INTO teaser_events (feature, event, source, visitor_hash, handle, locale, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [e.feature, e.event, e.source, e.visitorHash, e.handle, e.locale, Math.floor(Date.now() / 1000)],
+  });
+}
+
+export async function upsertTeaserSignup(s: { feature: string; emailKey: string; email: string; source: string; consentText: string; locale: string; handle: string | null }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO teaser_signups (feature, email_key, email, source, consent_text, locale, handle, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(feature, email_key) DO NOTHING`,
+    args: [s.feature, s.emailKey, s.email, s.source, s.consentText, s.locale, s.handle, Math.floor(Date.now() / 1000)],
+  });
+}
+
+export interface TeaserStatsRow { feature: string; source: string; event: string; visitors: number }
+
+/** Unique visitors per (feature, source, event) since `sinceSec`, plus launch signups per (feature, source). */
+export async function getTeaserStats(sinceSec: number): Promise<{ events: TeaserStatsRow[]; signups: { feature: string; source: string; n: number }[] }> {
+  const db = await ensureSchema();
+  const ev = await db.execute({
+    sql: `SELECT feature, source, event, COUNT(DISTINCT visitor_hash) AS visitors FROM teaser_events WHERE created_at >= ? GROUP BY feature, source, event ORDER BY feature, source, event`,
+    args: [sinceSec],
+  });
+  const su = await db.execute({ sql: `SELECT feature, source, COUNT(*) AS n FROM teaser_signups WHERE created_at >= ? GROUP BY feature, source`, args: [sinceSec] });
+  return {
+    events: ev.rows.map((r) => { const o = rowToObj(r); return { feature: String(o.feature), source: String(o.source), event: String(o.event), visitors: Number(o.visitors) }; }),
+    signups: su.rows.map((r) => { const o = rowToObj(r); return { feature: String(o.feature), source: String(o.source), n: Number(o.n) }; }),
+  };
+}
+
+/**
+ * Atomically take one of this visitor's daily AI uses: the row is inserted only while fewer than `cap` exist for
+ * (kind, ip) since `sinceSec`, so parallel requests cannot all pass a count-then-call check. Returns the row id to
+ * finish, or null when the cap is reached. The attempt counts whatever its outcome.
+ */
+export async function reserveVisualiserUse(u: { kind: string; ipHash: string; handle: string | null; cap: number; sinceSec: number }): Promise<number | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO visualiser_uses (kind, ip_hash, handle, ok, created_at)
+          SELECT ?, ?, ?, 0, ? WHERE (SELECT COUNT(*) FROM visualiser_uses WHERE kind = ? AND ip_hash = ? AND created_at >= ?) < ?`,
+    args: [u.kind, u.ipHash, u.handle, Math.floor(Date.now() / 1000), u.kind, u.ipHash, u.sinceSec, u.cap],
+  });
+  return r.rowsAffected === 1 && r.lastInsertRowid != null ? Number(r.lastInsertRowid) : null;
+}
+
+export async function finishVisualiserUse(id: number, ok: boolean): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE visualiser_uses SET ok = ? WHERE id = ?`, args: [ok ? 1 : 0, id] });
+}
+
+// ─── Own email engine (Resend) ───────────────────────────────────────
+
+export async function isEmailSuppressed(email: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT 1 FROM email_suppressions WHERE email = ?`, args: [email.trim().toLowerCase()] });
+  return r.rows.length > 0;
+}
+
+export async function suppressEmail(s: { email: string; reason: string; source: string; detail?: string | null }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT OR IGNORE INTO email_suppressions (email, reason, source, detail, created_at) VALUES (?, ?, ?, ?, ?)`,
+    args: [s.email.trim().toLowerCase(), s.reason, s.source, s.detail ?? null, Math.floor(Date.now() / 1000)],
+  });
+}
+
+/** Suppressed addresses not yet pushed to Klaviyo (its call failed, or they came from the Resend webhook). */
+export async function listSuppressionsNotInKlaviyo(limit: number): Promise<string[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT email FROM email_suppressions WHERE in_klaviyo = 0 ORDER BY created_at LIMIT ?`, args: [limit] });
+  return r.rows.map((x) => String(rowToObj(x).email));
+}
+
+/** 1 = now in Klaviyo; 2 = Klaviyo refused this address for good (4xx), stop retrying it. */
+export async function markSuppressionInKlaviyo(email: string, state: 1 | 2 = 1): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE email_suppressions SET in_klaviyo = ? WHERE email = ?`, args: [state, email.trim().toLowerCase()] });
+}
+
+/** A 'sending' row older than this was cut off mid-send (crash, timeout): it may be claimed again. */
+export const EMAIL_SEND_STALE_S = 10 * 60;
+
+/**
+ * Claim the right to send the email `idemKey`. Returns the row id, or null when it was already sent or is being
+ * sent by another run. A previous FAILED attempt, or one stuck in 'sending' for EMAIL_SEND_STALE_S, can be claimed
+ * again (Resend's Idempotency-Key, kept 24 h, stops a real duplicate). The conditional upsert is one statement, so
+ * two overlapping runs cannot both win.
+ */
+export async function reserveEmailSend(s: { idemKey: string; email: string; flow: string; kind: string }): Promise<number | null> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const r = await db.execute({
+    sql: `INSERT INTO email_sends (idem_key, email, flow, kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'sending', ?, ?)
+          ON CONFLICT(idem_key) DO UPDATE SET status = 'sending', error = NULL, updated_at = excluded.updated_at
+          WHERE email_sends.status = 'failed' OR (email_sends.status = 'sending' AND email_sends.updated_at < ?)`,
+    args: [s.idemKey, s.email.trim().toLowerCase(), s.flow, s.kind, now, now, now - EMAIL_SEND_STALE_S],
+  });
+  if (r.rowsAffected !== 1) return null;
+  const row = await db.execute({ sql: `SELECT id FROM email_sends WHERE idem_key = ?`, args: [s.idemKey] });
+  return row.rows.length ? Number(rowToObj(row.rows[0]).id) : null;
+}
+
+export async function finishEmailSend(id: number, r: { status: "sent" | "failed" | "skipped"; resendId?: string | null; error?: string | null }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE email_sends SET status = ?, resend_id = COALESCE(?, resend_id), error = ?, updated_at = ? WHERE id = ?`,
+    args: [r.status, r.resendId ?? null, r.error ?? null, Math.floor(Date.now() / 1000), id],
+  });
+}
+
+/** Suppressed addresses per reason (unsubscribe, bounce, complaint). */
+export async function countEmailSuppressions(): Promise<Record<string, number>> {
+  const db = await ensureSchema();
+  const r = await db.execute(`SELECT reason, COUNT(*) AS n FROM email_suppressions GROUP BY reason`);
+  return Object.fromEntries(r.rows.map((x) => { const o = rowToObj(x); return [String(o.reason), Number(o.n)]; }));
+}
+
+/** Status of the email `idemKey` (null = never tried). */
+export async function getEmailSendStatus(idemKey: string): Promise<string | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT status FROM email_sends WHERE idem_key = ?`, args: [idemKey] });
+  return r.rows.length ? String(rowToObj(r.rows[0]).status) : null;
+}
+
+/** Webhooks arrive out of order (opened before delivered…): a status only ever moves forward. */
+const EMAIL_STATUS_RANK: Record<string, number> = { sent: 1, delivery_delayed: 1, delivered: 2, opened: 3, clicked: 4, failed: 5, bounced: 5, complained: 6 };
+
+export async function updateEmailSendStatus(resendId: string, status: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const cur = await db.execute({ sql: `SELECT id, status FROM email_sends WHERE resend_id = ?`, args: [resendId] });
+  if (!cur.rows.length) return false;
+  const o = rowToObj(cur.rows[0]);
+  if ((EMAIL_STATUS_RANK[status] ?? 0) <= (EMAIL_STATUS_RANK[String(o.status)] ?? 0)) return false;
+  await db.execute({ sql: `UPDATE email_sends SET status = ?, updated_at = ? WHERE id = ?`, args: [status, Math.floor(Date.now() / 1000), Number(o.id)] });
+  return true;
+}
+
+/** Sends per (flow, status) since `sinceSec`, for the dashboard. */
+export async function getEmailSendStats(sinceSec: number): Promise<{ flow: string; status: string; n: number }[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT flow, status, COUNT(*) AS n FROM email_sends WHERE created_at >= ? GROUP BY flow, status ORDER BY flow, status`, args: [sinceSec] });
+  return r.rows.map((x) => { const o = rowToObj(x); return { flow: String(o.flow), status: String(o.status), n: Number(o.n) }; });
+}
+
 // ─── Settings ────────────────────────────────────────────────────────
 
 export async function getSetting(key: string): Promise<string | null> {
@@ -2524,6 +3772,25 @@ export async function setSetting(key: string, value: string): Promise<void> {
   const db = await ensureSchema();
   const now = Math.floor(Date.now() / 1000);
   await db.execute({ sql: `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, args: [key, value, now] });
+}
+
+/**
+ * Take the named lease (a settings row) when it is free or older than `ttlSec`. The UPDATE is a
+ * single conditional statement, so two concurrent cron invocations can't both get it. Returns the
+ * holder token, or null when someone else holds it.
+ */
+export async function acquireLease(key: string, ttlSec: number): Promise<string | null> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const token = `${now}-${Math.random().toString(36).slice(2)}`;
+  await db.execute({ sql: `INSERT INTO settings (key, value, updated_at) VALUES (?, '', 0) ON CONFLICT(key) DO NOTHING`, args: [key] });
+  const r = await db.execute({ sql: `UPDATE settings SET value = ?, updated_at = ? WHERE key = ? AND (value = '' OR updated_at < ?)`, args: [token, now, key, now - ttlSec] });
+  return r.rowsAffected === 1 ? token : null;
+}
+
+export async function releaseLease(key: string, token: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE settings SET value = '' WHERE key = ? AND value = ?`, args: [key, token] });
 }
 
 /**
@@ -2542,22 +3809,96 @@ export async function getProductsForPriceAudit(): Promise<{ sku: string; price: 
 
 /**
  * Imported products that have gone stale in the Aosom feed: present on Shopify
- * (`shopify_product_id` not null), still showing stock (`qty > 0`), but not seen in the CSV
- * for `maxAgeDays` days. These are likely discontinued at Aosom yet still sellable on the
- * storefront (oversell risk). Consumed by the stale-catalog cron, which drafts them.
+ * (`shopify_product_id` not null) but not seen in the CSV for `maxAgeDays` days. These are
+ * likely discontinued at Aosom yet still live on the storefront. Consumed by the
+ * stale-catalog cron, which drafts them.
+ *
+ * The `qty > 0` clause this query used to carry was removed on 2026-09-14. It was meant as
+ * "only bother with the ones that can still oversell", but it excluded the single most
+ * clear-cut case of a discontinued product: one that is BOTH sold out AND gone from the feed.
+ * Those matched no other cleanup either — the removed-from-feed reconcile acts on the day a
+ * SKU disappears, not retroactively — so they accumulated indefinitely: on 2026-09-14, 139 of
+ * the 179 feed-absent products in the Meta catalog were invisible to this query for exactly
+ * that reason, while the cron reported a steady, healthy-looking `stale=44`.
+ *
+ * A sold-out stale product is not an oversell risk, but it is still dead weight: it sits
+ * `active` and published, occupies a slot in the Meta catalog, and shows up in on-site search
+ * as a permanently unavailable result. Drafting it is the right outcome, and the caller's own
+ * guards (coverage floor, per-run cap, `auto-drafted` tagging) decide what actually happens.
  */
-export async function getStaleImportedProducts(maxAgeDays = 30): Promise<{ sku: string; shopify_product_id: string }[]> {
+export interface StaleImportedProduct {
+  shopify_product_id: string;
+  /** Every variant SKU of this Shopify product that we have a `products` row for. */
+  skus: string[];
+}
+
+/**
+ * Grouped by Shopify product, not by SKU row: a product is a candidate only when its
+ * FRESHEST sibling SKU (`MAX(last_seen_at)`) is still older than the window. Until
+ * 2026-09-30 this returned one row per SKU, so a single stale variant drafted the WHOLE
+ * product even when a sibling was still fresh and in stock — the same multi-variant bug the
+ * other feed-absence nets (removed-catalog, stock-reconcile) already guard against by
+ * requiring every SKU to be gone. See stale-catalog.ts's `computeStaleDrafts`, which now
+ * consumes one row per product.
+ */
+export async function getStaleImportedProducts(maxAgeDays = 30): Promise<StaleImportedProduct[]> {
   const db = await ensureSchema();
   const result = await db.execute({
-    sql: `SELECT sku, shopify_product_id FROM products
-          WHERE shopify_product_id IS NOT NULL AND qty > 0 AND last_seen_at < unixepoch() - 86400 * ?
-          ORDER BY last_seen_at ASC`,
+    sql: `SELECT shopify_product_id, GROUP_CONCAT(sku, '|') AS skus, MAX(last_seen_at) AS freshest
+          FROM products
+          WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''
+          GROUP BY shopify_product_id
+          HAVING MAX(last_seen_at) < unixepoch() - 86400 * ?
+          ORDER BY freshest ASC`,
     args: [maxAgeDays],
   });
   return result.rows.map((r) => {
     const o = rowToObj(r);
-    return { sku: o.sku as string, shopify_product_id: String(o.shopify_product_id) };
+    return { shopify_product_id: String(o.shopify_product_id), skus: String(o.skus).split("|") };
   });
+}
+
+/**
+ * Reconcile `products.shopify_product_id`/`shopify_handle` against Shopify's OWN current
+ * variant list — the authoritative source, since a SKU normally lives on exactly one Shopify
+ * product at a time. Fixes the gap left by `linkProductToShopify`'s best-effort, fire-and-forget
+ * write right after import (`import-pipeline.ts`): a swallowed failure there left a product
+ * permanently invisible to `getStaleImportedProducts` and the stock-check baseline, both of
+ * which require this column (2026-09-30 investigation: 193 products affected, spread from
+ * April through September, never self-healing). Called once at the start of every
+ * stale-catalog run, which has ALREADY paginated every Shopify product — so this costs zero
+ * extra Shopify API calls, only chunked Turso reads plus the targeted writes.
+ *
+ * Only writes SKUs whose row disagrees with Shopify (NULL, or linked to a different id —
+ * e.g. the product was deleted and re-created since). Returns how many SKUs it corrected.
+ */
+export async function reconcileProductShopifyLinks(
+  liveProducts: { shopifyId: string; handle: string | null; skus: string[] }[],
+): Promise<number> {
+  const db = await ensureSchema();
+  const allSkus = liveProducts.flatMap((p) => p.skus.map((sku) => ({ sku, shopifyId: p.shopifyId, handle: p.handle })));
+  if (allSkus.length === 0) return 0;
+
+  const current = new Map<string, string | null>();
+  for (let i = 0; i < allSkus.length; i += 500) {
+    const chunk = allSkus.slice(i, i + 500).map((s) => s.sku);
+    const result = await db.execute({
+      sql: `SELECT sku, shopify_product_id FROM products WHERE sku IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) current.set(r.sku as string, (r.shopify_product_id as string | null) || null);
+  }
+
+  const fixes = allSkus.filter((s) => current.has(s.sku) && current.get(s.sku) !== s.shopifyId);
+  if (fixes.length === 0) return 0;
+  await db.batch(
+    fixes.map((f) => ({
+      sql: `UPDATE products SET shopify_product_id = ?, shopify_handle = ? WHERE sku = ?`,
+      args: [f.shopifyId, f.handle, f.sku],
+    })),
+    "write",
+  );
+  return fixes.length;
 }
 
 export async function getAllSettings(): Promise<Record<string, string>> {
@@ -2603,6 +3944,521 @@ export async function getTrendingProducts(limit = 10): Promise<TrendingProduct[]
       units_moved: Number(o.units_moved) || 0,
       current_qty: Number(o.current_qty) || 0,
     };
+  });
+}
+
+// ─── GBP (Google Business Profile) trend candidates + posts ─────────
+
+export interface GbpTrendCandidate {
+  sku: string; name: string; price: number; image1: string; product_type: string;
+  shopify_product_id: string | null; shopify_handle: string | null;
+  velocity_score: number; price_drop_score: number; blended_score: number;
+  /** 'stock' when velocity dominates, 'price' when the price drop dominates — informs which
+   * angle (nouveauté/popularité vs rabais) the post generator should lead with. */
+  signal_type: "stock" | "price";
+}
+
+/**
+ * Candidates for the weekly GBP post, ranked by a blended trend score.
+ *
+ * Mirrors getTrendingProducts' velocity signal (SUM(old_qty-new_qty) over 14 days) and adds
+ * the price_drop signal already used elsewhere (see the price_drop badge query) — the plan's
+ * "vélocité + baisses de prix" trend score didn't actually combine the two before this; each
+ * lived in its own separate query. Both are normalized to their own max (0-1) before blending
+ * 50/50, so a handful-of-units velocity outlier can't drown out a real double-digit % price
+ * drop, or vice versa.
+ */
+export async function getGbpTrendCandidates(limit = 15): Promise<GbpTrendCandidate[]> {
+  const db = await ensureSchema();
+  const windowStart = "cast(strftime('%s','now','-14 days') as integer)";
+
+  const velocityResult = await db.execute({
+    sql: `SELECT ph.sku, SUM(ph.old_qty - ph.new_qty) as units_moved
+      FROM price_history ph
+      WHERE ph.change_type = 'stock_change' AND ph.detected_at > ${windowStart} AND ph.old_qty > ph.new_qty
+      GROUP BY ph.sku`,
+    args: [],
+  });
+  const priceDropResult = await db.execute({
+    sql: `SELECT ph.sku, MAX((ph.old_price - ph.new_price) / ph.old_price) as drop_pct
+      FROM price_history ph
+      WHERE ph.change_type = 'price_drop' AND ph.detected_at > ${windowStart}
+        AND ph.old_price > 0 AND ph.new_price < ph.old_price
+      GROUP BY ph.sku`,
+    args: [],
+  });
+
+  const velocityBySku = new Map<string, number>();
+  for (const row of velocityResult.rows) {
+    const o = rowToObj(row);
+    velocityBySku.set(o.sku as string, Number(o.units_moved) || 0);
+  }
+  const dropBySku = new Map<string, number>();
+  for (const row of priceDropResult.rows) {
+    const o = rowToObj(row);
+    dropBySku.set(o.sku as string, Number(o.drop_pct) || 0);
+  }
+
+  const allSkus = new Set([...velocityBySku.keys(), ...dropBySku.keys()]);
+  if (allSkus.size === 0) return [];
+
+  const maxVelocity = Math.max(1, ...velocityBySku.values());
+  const maxDrop = Math.max(0.0001, ...dropBySku.values());
+
+  const skuList = [...allSkus];
+  const placeholders = skuList.map(() => "?").join(",");
+  const productsResult = await db.execute({
+    sql: `SELECT sku, name, price, image1, product_type, shopify_product_id, shopify_handle
+      FROM products WHERE sku IN (${placeholders}) AND shopify_product_id IS NOT NULL`,
+    args: skuList,
+  });
+
+  const candidates: GbpTrendCandidate[] = [];
+  for (const row of productsResult.rows) {
+    const o = rowToObj(row);
+    const sku = o.sku as string;
+    const velocity = velocityBySku.get(sku) || 0;
+    const drop = dropBySku.get(sku) || 0;
+    const velocityNorm = velocity / maxVelocity;
+    const dropNorm = drop / maxDrop;
+    candidates.push({
+      sku,
+      name: (o.name as string) || "",
+      price: Number(o.price) || 0,
+      image1: (o.image1 as string) || "",
+      product_type: (o.product_type as string) || "",
+      shopify_product_id: (o.shopify_product_id as string) || null,
+      shopify_handle: (o.shopify_handle as string) || null,
+      velocity_score: velocity,
+      price_drop_score: drop,
+      blended_score: velocityNorm * 0.5 + dropNorm * 0.5,
+      signal_type: dropNorm >= velocityNorm ? "price" : "stock",
+    });
+  }
+
+  return candidates.sort((a, b) => b.blended_score - a.blended_score).slice(0, limit);
+}
+
+/** product_type of the last N published/approved GBP posts, most recent first — used to
+ * steer weekly product selection away from repeating the same category back-to-back. */
+export async function getRecentGbpCategories(limit = 2): Promise<string[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT product_type FROM gbp_posts
+      WHERE status IN ('published','approved') AND product_type IS NOT NULL AND product_type != ''
+      ORDER BY created_at DESC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((row) => rowToObj(row).product_type as string);
+}
+
+export interface GbpPostInput {
+  sku: string;
+  productType: string;
+  signalType: string;
+  summaryFr: string;
+  ctaUrl: string;
+  imageUrl?: string;
+  velocityScore: number;
+  priceDropScore: number;
+  judgeScore: number | null;
+  judgeReasons: string | null;
+  status: "pending_review" | "rejected" | "failed";
+  errorMessage?: string;
+}
+
+export async function createGbpPost(input: GbpPostInput): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `INSERT INTO gbp_posts
+      (sku, product_type, signal_type, summary_fr, cta_url, image_url, velocity_score,
+       price_drop_score, judge_score, judge_reasons, status, error_message)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      input.sku, input.productType, input.signalType, input.summaryFr, input.ctaUrl,
+      input.imageUrl || null, input.velocityScore, input.priceDropScore,
+      input.judgeScore, input.judgeReasons, input.status, input.errorMessage || null,
+    ],
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export interface GbpPostRow {
+  id: number; sku: string; product_type: string; signal_type: string; summary_fr: string;
+  cta_url: string; image_url: string | null; velocity_score: number; price_drop_score: number;
+  judge_score: number | null; judge_reasons: string | null; status: string;
+  gbp_post_name: string | null; error_message: string | null; created_at: number; published_at: number | null;
+}
+
+export async function getGbpPosts(status?: string, limit = 50): Promise<GbpPostRow[]> {
+  const db = await ensureSchema();
+  const result = status
+    ? await db.execute({ sql: `SELECT * FROM gbp_posts WHERE status = ? ORDER BY created_at DESC LIMIT ?`, args: [status, limit] })
+    : await db.execute({ sql: `SELECT * FROM gbp_posts ORDER BY created_at DESC LIMIT ?`, args: [limit] });
+  return result.rows.map((row) => rowToObj(row) as unknown as GbpPostRow);
+}
+
+export async function getGbpPostById(id: number): Promise<GbpPostRow | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT * FROM gbp_posts WHERE id = ?`, args: [id] });
+  if (result.rows.length === 0) return null;
+  return rowToObj(result.rows[0]) as unknown as GbpPostRow;
+}
+
+export async function updateGbpPostStatus(
+  id: number,
+  status: "approved" | "published" | "rejected" | "failed",
+  extra?: { gbpPostName?: string; errorMessage?: string },
+): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE gbp_posts SET status = ?, gbp_post_name = COALESCE(?, gbp_post_name),
+      error_message = COALESCE(?, error_message),
+      published_at = CASE WHEN ? = 'published' THEN strftime('%s','now') ELSE published_at END
+      WHERE id = ?`,
+    args: [status, extra?.gbpPostName || null, extra?.errorMessage || null, status, id],
+  });
+}
+
+// ─── pSEO Subcategory Guides ──────────────────────────────────────────
+
+export interface SubcategoryTrendStats {
+  aosomCategory: string;
+  shopifyCollectionId: string;
+  shopifyCollectionTitle: string;
+  inStockCount: number;
+  minPrice: number;
+  maxPrice: number;
+  velocityScore: number;
+  priceDropScore: number;
+  blendedScore: number;
+  topProducts: {
+    sku: string; name: string; price: number; image1: string;
+    shopify_product_id: string; shopify_handle: string; units_moved: number;
+  }[];
+}
+
+/**
+ * Trend stats aggregated per REAL, curated subcategory (collection_mappings rows with
+ * collection_role='sub' — 28 as of 2026-09, each already verified against a real Shopify
+ * collection, unlike the earlier SEO-articles lot which had to hand-fix guessed handles).
+ * product_type is matched by PREFIX against aosom_category, since product_type carries
+ * deeper leaf levels (e.g. "Patio & Garden > Lawn & Garden > Sheds" under the "Patio &
+ * Garden > Lawn & Garden" sub mapping).
+ *
+ * Same blended velocity+price_drop scoring as getGbpTrendCandidates, just grouped at the
+ * subcategory level instead of per-product, plus the real price range and in-stock count a
+ * guide page needs. topProducts returns up to 3 real in-stock products for the comparison
+ * section, ranked by units_moved (falls back to price desc when nothing moved recently —
+ * still real products, never placeholders).
+ */
+export async function getSubcategoryTrendStats(): Promise<SubcategoryTrendStats[]> {
+  const db = await ensureSchema();
+  const subMappings = await db.execute(
+    `SELECT aosom_category, shopify_collection_id, shopify_collection_title FROM collection_mappings WHERE collection_role = 'sub' ORDER BY aosom_category`,
+  );
+
+  const stats: SubcategoryTrendStats[] = [];
+  for (const mappingRow of subMappings.rows) {
+    const m = rowToObj(mappingRow);
+    const aosomCategory = m.aosom_category as string;
+    const productsResult = await db.execute({
+      sql: `SELECT sku, name, price, image1, shopify_product_id, shopify_handle, qty
+        FROM products WHERE product_type LIKE ? AND shopify_product_id IS NOT NULL AND qty > 0`,
+      args: [`${aosomCategory}%`],
+    });
+    const s = await buildTrendStats(
+      { aosomCategory, shopifyCollectionId: m.shopify_collection_id as string, shopifyCollectionTitle: m.shopify_collection_title as string },
+      productsResult.rows.map((r) => rowToObj(r)),
+    );
+    if (s) stats.push(s);
+  }
+
+  return stats.sort((a, b) => b.blendedScore - a.blendedScore);
+}
+
+/**
+ * Same trend stats, for an explicit set of Shopify product ids — the REAL membership of a
+ * Shopify collection (see guide-collection-topics.ts). Only in-stock products that exist in
+ * the catalog count. Returns null when none are in stock; inStockIds = the in-stock subset.
+ */
+export async function getTrendStatsForShopifyProductIds(
+  meta: { aosomCategory: string; shopifyCollectionId: string; shopifyCollectionTitle: string },
+  shopifyProductIds: string[],
+): Promise<{ stats: SubcategoryTrendStats; inStockIds: string[] } | null> {
+  const db = await ensureSchema();
+  const rows: Record<string, unknown>[] = [];
+  // Chunked: SQLite caps bound parameters per statement.
+  for (let i = 0; i < shopifyProductIds.length; i += 400) {
+    const chunk = shopifyProductIds.slice(i, i + 400);
+    const res = await db.execute({
+      sql: `SELECT sku, name, price, image1, shopify_product_id, shopify_handle, qty
+        FROM products WHERE shopify_product_id IN (${chunk.map(() => "?").join(",")}) AND qty > 0`,
+      args: chunk,
+    });
+    rows.push(...res.rows.map((r) => rowToObj(r)));
+  }
+  const stats = await buildTrendStats(meta, rows);
+  return stats ? { stats, inStockIds: rows.map((o) => String(o.shopify_product_id)) } : null;
+}
+
+/** Shopify product ids of the in-stock catalog products whose product_type starts with a
+ * category — used to measure overlap between a candidate collection and an existing guide. */
+export async function getInStockShopifyIdsForCategory(aosomCategory: string): Promise<string[]> {
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT shopify_product_id FROM products WHERE product_type LIKE ? AND shopify_product_id IS NOT NULL AND qty > 0`,
+    args: [`${aosomCategory}%`],
+  });
+  return res.rows.map((r) => String(rowToObj(r).shopify_product_id));
+}
+
+/** Top-level product_type segments ("Home Furnishings", "Patio & Garden"…) — a collection
+ * built on one of these is a whole store department, too broad for a buying guide. */
+export async function getProductDepartments(): Promise<Set<string>> {
+  const db = await ensureSchema();
+  const res = await db.execute(`SELECT DISTINCT product_type FROM products WHERE product_type IS NOT NULL AND product_type != ''`);
+  return new Set(res.rows.map((r) => String(rowToObj(r).product_type).split(" > ")[0].trim()));
+}
+
+async function buildTrendStats(
+  meta: { aosomCategory: string; shopifyCollectionId: string; shopifyCollectionTitle: string },
+  productRows: Record<string, unknown>[],
+): Promise<SubcategoryTrendStats | null> {
+  if (productRows.length === 0) return null; // no in-stock products → not a candidate at all
+  const db = await ensureSchema();
+  const windowStart = "cast(strftime('%s','now','-14 days') as integer)";
+
+  const skus = productRows.map((o) => o.sku as string);
+  const skuPlaceholders = skus.map(() => "?").join(",");
+
+  const velocityResult = await db.execute({
+    sql: `SELECT sku, SUM(old_qty - new_qty) as units_moved FROM price_history
+      WHERE sku IN (${skuPlaceholders}) AND change_type = 'stock_change'
+        AND detected_at > ${windowStart} AND old_qty > new_qty GROUP BY sku`,
+    args: skus,
+  });
+  const priceDropResult = await db.execute({
+    sql: `SELECT sku, MAX((old_price - new_price) / old_price) as drop_pct FROM price_history
+      WHERE sku IN (${skuPlaceholders}) AND change_type = 'price_drop' AND detected_at > ${windowStart}
+        AND old_price > 0 AND new_price < old_price GROUP BY sku`,
+    args: skus,
+  });
+
+  const velocityBySku = new Map<string, number>();
+  for (const row of velocityResult.rows) {
+    const o = rowToObj(row);
+    velocityBySku.set(o.sku as string, Number(o.units_moved) || 0);
+  }
+  const dropBySku = new Map<string, number>();
+  for (const row of priceDropResult.rows) {
+    const o = rowToObj(row);
+    dropBySku.set(o.sku as string, Number(o.drop_pct) || 0);
+  }
+
+  let totalVelocity = 0;
+  let maxDrop = 0;
+  let minPrice = Infinity;
+  let maxPrice = -Infinity;
+  const products: SubcategoryTrendStats["topProducts"] = [];
+
+  for (const o of productRows) {
+    const sku = o.sku as string;
+    const price = Number(o.price) || 0;
+    if (price > 0) {
+      minPrice = Math.min(minPrice, price);
+      maxPrice = Math.max(maxPrice, price);
+    }
+    const velocity = velocityBySku.get(sku) || 0;
+    totalVelocity += velocity;
+    maxDrop = Math.max(maxDrop, dropBySku.get(sku) || 0);
+    products.push({
+      sku, name: (o.name as string) || "", price,
+      image1: (o.image1 as string) || "",
+      shopify_product_id: (o.shopify_product_id as string) || "",
+      shopify_handle: (o.shopify_handle as string) || "",
+      units_moved: velocity,
+    });
+  }
+
+  products.sort((a, b) => b.units_moved - a.units_moved || b.price - a.price);
+
+  return {
+    aosomCategory: meta.aosomCategory,
+    shopifyCollectionId: meta.shopifyCollectionId,
+    shopifyCollectionTitle: meta.shopifyCollectionTitle,
+    inStockCount: productRows.length,
+    minPrice: minPrice === Infinity ? 0 : minPrice,
+    maxPrice: maxPrice === -Infinity ? 0 : maxPrice,
+    velocityScore: totalVelocity,
+    priceDropScore: maxDrop,
+    // Normalized against this subcategory's own scale isn't meaningful across only 28 rows
+    // with wildly different volumes, so rank by a simple weighted sum instead — good enough
+    // to pick a top-5 pilot, revisit if this graduates past the pilot stage.
+    blendedScore: totalVelocity * 0.6 + maxDrop * 100 * 0.4,
+    topProducts: products.slice(0, 3),
+  };
+}
+
+export interface GuidePageInput {
+  aosomCategory: string;
+  shopifyCollectionId: string;
+  shopifyCollectionTitle: string;
+  status: "pending_review" | "skipped_empty";
+  skipReason?: string;
+  shopifyArticleId?: string;
+  shopifyBlogId?: number;
+  shopifyHandle?: string;
+  title?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  inStockCount?: number;
+  bodyHtml?: string;
+  factCheckScore?: number;
+  factCheckIssues?: string;
+  qualityScore?: number;
+  qualityReasons?: string;
+  overallStatus?: string;
+  /** Pre-retry snapshot — set only when the automatic revision pass ran (quality_score was
+   * initially below RETRY_QUALITY_THRESHOLD). See guide-quality-pipeline.ts. */
+  qualityScoreBeforeRetry?: number;
+  factCheckScoreBeforeRetry?: number;
+}
+
+export async function createGuidePage(input: GuidePageInput): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `INSERT INTO guide_pages
+      (aosom_category, shopify_collection_id, shopify_collection_title, status, skip_reason,
+       shopify_article_id, shopify_blog_id, shopify_handle, title, min_price, max_price, in_stock_count,
+       body_html, fact_check_score, fact_check_issues, quality_score, quality_reasons, overall_status,
+       quality_score_before_retry, fact_check_score_before_retry)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      input.aosomCategory, input.shopifyCollectionId, input.shopifyCollectionTitle,
+      input.status, input.skipReason || null, input.shopifyArticleId || null,
+      input.shopifyBlogId || null, input.shopifyHandle || null, input.title || null,
+      input.minPrice ?? null, input.maxPrice ?? null, input.inStockCount ?? null,
+      input.bodyHtml || null, input.factCheckScore ?? null, input.factCheckIssues || null,
+      input.qualityScore ?? null, input.qualityReasons || null, input.overallStatus || null,
+      input.qualityScoreBeforeRetry ?? null, input.factCheckScoreBeforeRetry ?? null,
+    ],
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export interface GuidePageRow {
+  id: number; aosom_category: string; shopify_collection_id: string; shopify_collection_title: string;
+  status: string; skip_reason: string | null; shopify_article_id: string | null;
+  shopify_blog_id: number | null; shopify_handle: string | null; title: string | null;
+  min_price: number | null; max_price: number | null; in_stock_count: number | null;
+  body_html: string | null; fact_check_score: number | null; fact_check_issues: string | null;
+  quality_score: number | null; quality_reasons: string | null; overall_status: string | null;
+  quality_score_before_retry: number | null; fact_check_score_before_retry: number | null;
+  /** SQLite datetime TEXT ('YYYY-MM-DD HH:MM:SS' UTC) of the guide's queued publish slot, or
+   * null if not yet approved/scheduled. Mirrors the linked publication_queue row's
+   * scheduled_at — see guide-scheduler.ts. */
+  scheduled_publish_at: string | null;
+  created_at: number;
+}
+
+export async function getGuidePages(): Promise<GuidePageRow[]> {
+  const db = await ensureSchema();
+  const result = await db.execute(`SELECT * FROM guide_pages ORDER BY created_at DESC`);
+  return result.rows.map((row) => rowToObj(row) as unknown as GuidePageRow);
+}
+
+export async function getGuidePageByCategory(aosomCategory: string): Promise<GuidePageRow | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM guide_pages WHERE aosom_category = ? ORDER BY created_at DESC LIMIT 1`,
+    args: [aosomCategory],
+  });
+  if (result.rows.length === 0) return null;
+  return rowToObj(result.rows[0]) as unknown as GuidePageRow;
+}
+
+export async function getGuidePageById(id: number): Promise<GuidePageRow | null> {
+  const db = await ensureSchema();
+  const result = await db.execute({ sql: `SELECT * FROM guide_pages WHERE id = ?`, args: [id] });
+  if (result.rows.length === 0) return null;
+  return rowToObj(result.rows[0]) as unknown as GuidePageRow;
+}
+
+export async function markGuidePagePublished(id: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE guide_pages SET status = 'published', scheduled_publish_at = NULL WHERE id = ?`,
+    args: [id],
+  });
+}
+
+/** Records the queued publish slot on the guide row (does NOT change `status` — the guide
+ * stays 'pending_review' until the queue publisher actually flips it to 'published'). Called
+ * right after the matching publication_queue row is enqueued/rescheduled. */
+export async function scheduleGuidePagePublish(id: number, scheduledAt: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE guide_pages SET scheduled_publish_at = ? WHERE id = ?`,
+    args: [scheduledAt, id],
+  });
+}
+
+/** Clears a guide's scheduled slot (used when the operator cancels a pending schedule). */
+export async function clearGuidePageSchedule(id: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE guide_pages SET scheduled_publish_at = NULL WHERE id = ?`,
+    args: [id],
+  });
+}
+
+/** Backfill helper: sets body_html + the quality-pipeline verdict on an existing row (used to
+ * retroactively populate guides created before these columns existed). */
+export async function updateGuidePageVerdictAndBody(
+  id: number,
+  data: {
+    bodyHtml: string;
+    factCheckScore: number;
+    factCheckIssues: string;
+    qualityScore: number;
+    qualityReasons: string;
+    overallStatus: string;
+  },
+): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE guide_pages SET body_html = ?, fact_check_score = ?, fact_check_issues = ?,
+      quality_score = ?, quality_reasons = ?, overall_status = ? WHERE id = ?`,
+    args: [data.bodyHtml, data.factCheckScore, data.factCheckIssues, data.qualityScore, data.qualityReasons, data.overallStatus, id],
+  });
+}
+
+/** Retroactive-retry helper: same shape as updateGuidePageVerdictAndBody plus the pre-retry
+ * scores, for applying the automatic revision pass to a guide that was already pending_review
+ * before RETRY_QUALITY_THRESHOLD existed. */
+export async function updateGuidePageRetryResult(
+  id: number,
+  data: {
+    bodyHtml: string;
+    factCheckScore: number;
+    factCheckIssues: string;
+    qualityScore: number;
+    qualityReasons: string;
+    overallStatus: string;
+    qualityScoreBeforeRetry: number;
+    factCheckScoreBeforeRetry: number;
+  },
+): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE guide_pages SET body_html = ?, fact_check_score = ?, fact_check_issues = ?,
+      quality_score = ?, quality_reasons = ?, overall_status = ?,
+      quality_score_before_retry = ?, fact_check_score_before_retry = ? WHERE id = ?`,
+    args: [
+      data.bodyHtml, data.factCheckScore, data.factCheckIssues, data.qualityScore, data.qualityReasons,
+      data.overallStatus, data.qualityScoreBeforeRetry, data.factCheckScoreBeforeRetry, id,
+    ],
   });
 }
 
@@ -2704,6 +4560,23 @@ export interface FeedSyncSummary {
 }
 export interface ErroredImportJob { id: string; groupKey: string; sku: string | null; error: string | null; updatedAt: string; }
 
+/**
+ * An import job a quality gate flagged (import-quality-gates.ts). `stage` and
+ * `failures` are parsed from the job's `error` column, written as
+ * `<pre|post>_publish_gate_failed:<comma-separated failure codes>`. `shopifyId` is
+ * set only for `stage: "post"` — the product was created, then auto-unpublished by
+ * the safety net; `stage: "pre"` jobs never reached Shopify at all.
+ */
+export interface NeedsReviewImportJob {
+  id: string;
+  groupKey: string;
+  sku: string | null;
+  stage: "pre" | "post" | "unknown";
+  failures: string[];
+  shopifyId: string | null;
+  updatedAt: string;
+}
+
 export interface DashboardSummary {
   newProductsToday: number;
   draftsThisWeek: number;
@@ -2727,13 +4600,6 @@ async function cachedMetric<T>(key: string, ttlMs: number, fn: () => Promise<T>)
   const data = await fn();
   _metricsCache.set(key, { data, expires: Date.now() + ttlMs });
   return data;
-}
-
-/** Clear the dashboard metrics cache. The cache is intentionally not auto-invalidated on
- * writes — the panels tolerate ≤5 min of staleness, so writers don't call this. Exposed for
- * tests and for any caller that explicitly wants the next dashboard read to recompute. */
-export function clearMetricsCache(): void {
-  _metricsCache.clear();
 }
 
 /** "Résumé du jour" DB metrics (Meta-Ads revenue is merged client-side from /api/ads/insights). */
@@ -2788,6 +4654,8 @@ export interface PriceFloorAlert {
 
 export interface DashboardAlerts {
   erroredImportJobs: ErroredImportJob[];
+  /** Import jobs a quality gate (import-quality-gates.ts) flagged — pre or post publish. */
+  needsReviewImportJobs: NeedsReviewImportJob[];
   staleDraftCount: number;
   feeds: FeedSyncSummary[];
   /** Last price-floor audit summary (from settings.price_audit_result). null if never run. */
@@ -2802,8 +4670,9 @@ export async function getDashboardAlerts(): Promise<DashboardAlerts> {
 async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
   const db = await ensureSchema();
   const weekAgo = epochDaysAgo(new Date(), 7);
-  const [errs, stale, feeds, priceAudit] = await Promise.all([
+  const [errs, needsReview, stale, feeds, priceAudit] = await Promise.all([
     db.execute({ sql: `SELECT id, group_key, product_data, error, updated_at FROM import_jobs WHERE status = 'error' ORDER BY updated_at DESC LIMIT 20` }),
+    db.execute({ sql: `SELECT id, group_key, product_data, error, shopify_id, updated_at FROM import_jobs WHERE status = 'needs_review' ORDER BY updated_at DESC LIMIT 20` }),
     db.execute({ sql: `SELECT COUNT(*) AS c FROM facebook_drafts WHERE status IN ('draft', 'pending') AND created_at < ?`, args: [weekAgo] }),
     // Per feed: time + count of the last SUCCESS, plus the status of the most recent
     // attempt (so a feed whose latest fetch errored is flagged even if an older success exists).
@@ -2826,6 +4695,29 @@ async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
     } catch { /* product_data not JSON — fall back to group_key */ }
     return { id: o.id as string, groupKey: o.group_key as string, sku, error: (o.error as string) ?? null, updatedAt: (o.updated_at as string) ?? "" };
   });
+  const needsReviewImportJobs: NeedsReviewImportJob[] = needsReview.rows.map((r) => {
+    const o = rowToObj(r);
+    let sku: string | null = null;
+    try {
+      const pd = JSON.parse((o.product_data as string) || "{}") as Record<string, unknown>;
+      const variants = pd.variants as Array<{ sku?: string }> | undefined;
+      sku = (pd.sku as string) || (pd.SKU as string) || (variants && variants[0]?.sku) || null;
+    } catch { /* product_data not JSON — fall back to group_key */ }
+    // Format written by importToShopify: "<pre|post>_publish_gate_failed:code1,code2".
+    const raw = (o.error as string) ?? "";
+    const m = /^(pre|post)_publish_gate_failed:(.*)$/.exec(raw);
+    const stage: NeedsReviewImportJob["stage"] = m ? (m[1] as "pre" | "post") : "unknown";
+    const failures = m && m[2] ? m[2].split(",").filter(Boolean) : [];
+    return {
+      id: o.id as string,
+      groupKey: o.group_key as string,
+      sku,
+      stage,
+      failures,
+      shopifyId: (o.shopify_id as string) || null,
+      updatedAt: (o.updated_at as string) ?? "",
+    };
+  });
   let priceFloor: PriceFloorAlert | null = null;
   if (priceAudit.rows.length > 0) {
     try {
@@ -2843,6 +4735,7 @@ async function _loadDashboardAlerts(): Promise<DashboardAlerts> {
   }
   return {
     erroredImportJobs,
+    needsReviewImportJobs,
     staleDraftCount: Number(rowToObj(stale.rows[0]).c) || 0,
     feeds: feeds.rows.map((r) => {
       const o = rowToObj(r);
@@ -2913,6 +4806,20 @@ export interface PriceCorrectionLog {
 }
 
 /**
+ * Which of these correction entries represent a genuine below-floor FIX — the price
+ * moved UP because Shopify was under the Aosom floor. `hausse_20pct` is the opposite
+ * shape (a supplier increase deliberately held back, LAYER 5), never an incident. Pure
+ * so the filter is unit-testable without touching sync_logs or price_floor_incidents.
+ */
+export function filterFloorIncidents(entries: PriceCorrectionLog[]): PriceCorrectionLog[] {
+  return entries.filter((e) => e.reason !== "hausse_20pct" && e.oldPriceShopify < e.newPriceTurso);
+}
+
+function sourceForCorrectionReason(reason: PriceCorrectionReason): PriceFloorIncidentSource {
+  return reason === "reconciliation" ? "price_reconcile" : "sync_push";
+}
+
+/**
  * Persist price corrections to `sync_logs` — permanent, queryable traceability for every
  * price the protection layers touched.
  *
@@ -2923,6 +4830,11 @@ export interface PriceCorrectionLog {
  * every correction from one run under a single greppable key.
  *
  * Batched through addSyncLogsBatch, so a 300-correction run is 3 round trips, not 300.
+ *
+ * TASK 3: shared by both job1-sync.ts (Phase 2 push, reasons sync_retry/hausse_20pct)
+ * and price-reconcile.ts (reason reconciliation) — the single choke point for both, so
+ * the below-floor subset (filterFloorIncidents) only needs logging to
+ * price_floor_incidents here, once, instead of at each caller.
  */
 export async function recordPriceCorrections(
   runId: string,
@@ -2942,44 +4854,24 @@ export async function recordPriceCorrections(
       newValue: e.newPriceTurso.toFixed(2),
     })),
   );
+
+  for (const e of filterFloorIncidents(entries)) {
+    try {
+      await recordPriceFloorIncident({
+        sku: e.sku, oldPrice: e.oldPriceShopify, newPrice: e.newPriceTurso,
+        source: sourceForCorrectionReason(e.reason),
+      });
+    } catch (err) {
+      console.error(`[recordPriceCorrections] failed to record price_floor_incident for ${e.sku}:`, err);
+    }
+  }
+
   return entries.length;
 }
 
 /** Build the synthetic run id shared by every correction of one reconciliation pass. */
 export function newReconcileRunId(now: Date = new Date()): string {
   return `reconcile-${now.toISOString()}`;
-}
-
-/**
- * Read back price corrections, newest first. Powers the verification report and any
- * future dashboard panel. `reason` narrows to one layer.
- */
-export async function getPriceCorrections(
-  opts: { limit?: number; reason?: PriceCorrectionReason; sku?: string } = {},
-): Promise<Array<{ runId: string; timestamp: string; sku: string; reason: string; oldPrice: number; newPrice: number; shopifyProductId: string | null }>> {
-  const db = await ensureSchema();
-  const where: string[] = ["action = ?"];
-  const args: InValue[] = [PRICE_CORRECTION_ACTION];
-  if (opts.reason) { where.push("field = ?"); args.push(opts.reason); }
-  if (opts.sku) { where.push("sku = ?"); args.push(opts.sku); }
-  args.push(opts.limit ?? 200);
-  const result = await db.execute({
-    sql: `SELECT sync_run_id, timestamp, sku, field, old_value, new_value, shopify_product_id
-          FROM sync_logs WHERE ${where.join(" AND ")} ORDER BY timestamp DESC, sku ASC LIMIT ?`,
-    args,
-  });
-  return result.rows.map((r) => {
-    const o = rowToObj(r);
-    return {
-      runId: String(o.sync_run_id),
-      timestamp: String(o.timestamp),
-      sku: String(o.sku),
-      reason: String(o.field),
-      oldPrice: Number(o.old_value),
-      newPrice: Number(o.new_value),
-      shopifyProductId: o.shopify_product_id == null ? null : String(o.shopify_product_id),
-    };
-  });
 }
 
 export async function getSyncLogs(syncRunId: string, limit = 500): Promise<SyncLogEntry[]> {
@@ -3045,18 +4937,79 @@ export async function getImageComplianceCandidates(limit: number): Promise<Image
 /**
  * Stamp image_checked_at=now on every SKU row of the given Shopify products so they are
  * not re-classified until image1 changes again. No-op on an empty list.
+ *
+ * `signatures`, when given, also stamps image_gallery_signature — the verified pos-1
+ * image's URL stem (imageUrlStem()) at check time. checkGalleryDrift() (image-compliance-
+ * drift.ts) compares this against the LIVE Shopify pos-1 stem on a later pass and resets
+ * both columns to NULL when they diverge, so a product whose gallery changed after being
+ * checked falls back into the normal classification queue instead of staying silently
+ * "checked" forever. A product without an entry in `signatures` keeps its prior signature
+ * untouched (older callers that never learned this parameter).
  */
-export async function markImageChecked(shopifyProductIds: string[]): Promise<void> {
+export async function markImageChecked(
+  shopifyProductIds: string[],
+  signatures?: Map<string, string>,
+): Promise<void> {
   if (shopifyProductIds.length === 0) return;
   const db = await ensureSchema();
   const now = Math.floor(Date.now() / 1000);
+  const stmts = shopifyProductIds.map((id) => {
+    const sig = signatures?.get(id);
+    return sig !== undefined
+      ? {
+          sql: `UPDATE products SET image_checked_at = ?, image_gallery_signature = ? WHERE shopify_product_id = ?`,
+          args: [now, sig, id],
+        }
+      : { sql: `UPDATE products SET image_checked_at = ? WHERE shopify_product_id = ?`, args: [now, id] };
+  });
+  for (let i = 0; i < stmts.length; i += 100) {
+    await db.batch(stmts.slice(i, i + 100), "write");
+  }
+}
+
+/**
+ * Reset image_checked_at + image_gallery_signature to NULL for the given Shopify products —
+ * the counterpart to markImageChecked, used when checkGalleryDrift() finds the live pos-1
+ * stem no longer matches what was last verified. No-op on an empty list.
+ */
+export async function resetImageChecked(shopifyProductIds: string[]): Promise<void> {
+  if (shopifyProductIds.length === 0) return;
+  const db = await ensureSchema();
   const stmts = shopifyProductIds.map((id) => ({
-    sql: `UPDATE products SET image_checked_at = ? WHERE shopify_product_id = ?`,
-    args: [now, id],
+    sql: `UPDATE products SET image_checked_at = NULL, image_gallery_signature = NULL WHERE shopify_product_id = ?`,
+    args: [id],
   }));
   for (let i = 0; i < stmts.length; i += 100) {
     await db.batch(stmts.slice(i, i + 100), "write");
   }
+}
+
+/**
+ * Products already marked checked (image_checked_at NOT NULL), oldest-checked first — the
+ * candidate pool for checkGalleryDrift(). Oldest first because a stale check is more likely
+ * to have drifted, and it makes eventual coverage of the whole checked set fair over time.
+ */
+export async function getCheckedProductsForDriftScan(
+  limit: number,
+): Promise<Array<{ shopifyProductId: string; sku: string; signature: string | null }>> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT shopify_product_id, MIN(sku) AS sku, MAX(image_gallery_signature) AS image_gallery_signature
+          FROM products
+          WHERE shopify_product_id IS NOT NULL AND shopify_product_id != '' AND image_checked_at IS NOT NULL
+          GROUP BY shopify_product_id
+          ORDER BY MIN(image_checked_at) ASC
+          LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => {
+    const o = rowToObj(r);
+    return {
+      shopifyProductId: String(o.shopify_product_id),
+      sku: String(o.sku || ""),
+      signature: (o.image_gallery_signature as string) || null,
+    };
+  });
 }
 
 /**
@@ -3186,6 +5139,43 @@ export async function putCachedImageVerdict(
       meta.model, meta.sampleUrl.slice(0, 500), verdict.confidence ?? null,
     ],
   });
+}
+
+// ─── Ad photo style cache (lifestyle vs studio) ──────────────────────
+
+/** Look up cached photo styles for a batch of stems. Missing stems are simply absent. */
+export async function getCachedImageStyles(stems: string[]): Promise<Map<string, AdImageStyle>> {
+  const out = new Map<string, AdImageStyle>();
+  const unique = [...new Set(stems.filter(Boolean))];
+  if (unique.length === 0) return out;
+  const db = await ensureSchema();
+  for (let i = 0; i < unique.length; i += 200) {
+    const chunk = unique.slice(i, i + 200);
+    const result = await db.execute({
+      sql: `SELECT url_stem, style FROM image_styles WHERE url_stem IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) {
+      const o = rowToObj(r);
+      if (o.style === "lifestyle" || o.style === "studio") out.set(String(o.url_stem), o.style);
+    }
+  }
+  return out;
+}
+
+/** Persist photo styles. Idempotent: re-classifying a stem overwrites it. */
+export async function putCachedImageStyles(rows: Array<{ stem: string; style: AdImageStyle; sampleUrl: string }>): Promise<void> {
+  const valid = rows.filter((r) => r.stem);
+  if (valid.length === 0) return;
+  const db = await ensureSchema();
+  for (let i = 0; i < valid.length; i += 100) {
+    await db.batch(valid.slice(i, i + 100).map((r) => ({
+      sql: `INSERT INTO image_styles (url_stem, style, sample_url) VALUES (?, ?, ?)
+            ON CONFLICT(url_stem) DO UPDATE SET style=excluded.style, sample_url=excluded.sample_url,
+              created_at=strftime('%s','now')`,
+      args: [r.stem, r.style, r.sampleUrl.slice(0, 500)],
+    })), "write");
+  }
 }
 
 // ─── pos-1 image review queue ────────────────────────────────────────
@@ -3340,12 +5330,24 @@ const IMPORT_JOB_COLUMNS = new Set([
  * attempt keeps its old id and the passed-in id is discarded. Returning the real id
  * (via RETURNING) lets the caller address the row it actually owns; trusting the
  * passed-in id caused "Job <uuid> not found" on re-imports of a previously-failed group.
+ *
+ * The conflict branch ALSO clears shopify_id/content/error, not just status. Aosom's
+ * PSIN groups every BTU/capacity + colour combination of a model under ONE group_key
+ * (confirmed live 2026-10-02: 823-058V81BK/WT [8,000 BTU] and 823-058V83BK/WT [10,000
+ * BTU] all share PSIN 256L5LETCAO00), but these combinations have historically been
+ * imported to Shopify as SEPARATE products. Queuing a never-imported combination (83)
+ * whose group_key was previously used by an already-imported sibling (81) used to
+ * leave that sibling's shopify_id sitting on the row — status reset to 'pending', but
+ * shopify_id still set. importToShopify's idempotency guard (`if (row.shopify_id)
+ * return already_imported`) then short-circuited on that leftover value and never
+ * called createShopifyProduct, so the new combination silently never got created —
+ * forever "Not imported" on the catalog page with zero error anywhere.
  */
 export async function upsertImportJob(job: { id: string; groupKey: string; productData: string; status: string; createdAt: string; updatedAt: string }): Promise<string> {
   const db = await ensureSchema();
   const result = await db.execute({
     sql: `INSERT INTO import_jobs (id, group_key, product_data, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(group_key) DO UPDATE SET product_data=excluded.product_data, status='pending', updated_at=excluded.updated_at
+     ON CONFLICT(group_key) DO UPDATE SET product_data=excluded.product_data, status='pending', updated_at=excluded.updated_at, shopify_id=NULL, content=NULL, error=NULL
      RETURNING id`,
     args: [job.id, job.groupKey, job.productData, job.status, job.createdAt, job.updatedAt],
   });
@@ -3356,6 +5358,71 @@ export async function getImportJobs(): Promise<Record<string, unknown>[]> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT * FROM import_jobs ORDER BY created_at DESC`);
   return result.rows.map(rowToObj);
+}
+
+/**
+ * Feed/stock/Shopify-link columns for a set of SKUs — what the import page needs to tell
+ * "still sellable" from "gone from the Aosom feed". Chunked IN lists keep each statement
+ * well under SQLite's bound-parameter limit and read only the requested rows.
+ */
+export async function getFeedRowsForSkus(
+  skus: string[],
+): Promise<{ sku: string; qty: number; lastSeenAt: number | null; shopifyProductId: string | null }[]> {
+  const db = await ensureSchema();
+  const unique = [...new Set(skus)];
+  const out: { sku: string; qty: number; lastSeenAt: number | null; shopifyProductId: string | null }[] = [];
+  for (let i = 0; i < unique.length; i += 500) {
+    const chunk = unique.slice(i, i + 500);
+    const result = await db.execute({
+      sql: `SELECT sku, qty, last_seen_at, shopify_product_id FROM products WHERE sku IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) {
+      out.push({
+        sku: r.sku as string,
+        qty: Number(r.qty) || 0,
+        lastSeenAt: r.last_seen_at == null ? null : Number(r.last_seen_at),
+        shopifyProductId: r.shopify_product_id ? String(r.shopify_product_id) : null,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Feed/stock rows for a set of Shopify product ids, by CURRENT link
+ * (`products.shopify_product_id`) rather than by a frozen SKU snapshot.
+ *
+ * Why this exists (2026-09-30 investigation): `getFeedRowsForSkus` looks up the exact SKU
+ * string an import_jobs row recorded at import time. When Aosom later corrects that SKU's
+ * colour/variant suffix (confirmed happening routinely — e.g. `84B-206BU` became
+ * `84B-206BK`), the daily sync starts seeing the product under the NEW string while the OLD
+ * one goes stale. The import page's classifier, reading only the frozen SKU, concluded the
+ * product was "gone from the feed" for 10 products that were in fact selling normally under
+ * their corrected SKU the whole time — a false positive, not a real discontinuation. Grouping
+ * by the Shopify id instead picks up whatever SKU currently carries the link, renamed or not.
+ * Returns one row per (shopifyProductId, sku) pair, bucketed by id.
+ */
+export async function getFeedRowsByShopifyIds(
+  shopifyIds: string[],
+): Promise<Map<string, { sku: string; qty: number; lastSeenAt: number | null }[]>> {
+  const db = await ensureSchema();
+  const unique = [...new Set(shopifyIds)].filter(Boolean);
+  const out = new Map<string, { sku: string; qty: number; lastSeenAt: number | null }[]>();
+  for (let i = 0; i < unique.length; i += 500) {
+    const chunk = unique.slice(i, i + 500);
+    const result = await db.execute({
+      sql: `SELECT sku, qty, last_seen_at, shopify_product_id FROM products WHERE shopify_product_id IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) {
+      const id = String(r.shopify_product_id);
+      const arr = out.get(id) ?? [];
+      arr.push({ sku: r.sku as string, qty: Number(r.qty) || 0, lastSeenAt: r.last_seen_at == null ? null : Number(r.last_seen_at) });
+      out.set(id, arr);
+    }
+  }
+  return out;
 }
 
 export async function getImportJob(jobId: string): Promise<Record<string, unknown> | null> {
@@ -3718,25 +5785,6 @@ export async function recordHookUsage(hookId: number, draftId: number | null): P
   ], "write");
 }
 
-export async function getHookById(id: number): Promise<ContentHook | null> {
-  const db = await ensureSchema();
-  const result = await db.execute({ sql: `SELECT * FROM content_hooks WHERE id = ?`, args: [id] });
-  if (result.rows.length === 0) return null;
-  const o = rowToObj(result.rows[0]);
-  let scopes: string[] = [];
-  try { scopes = JSON.parse(o.product_scopes as string); } catch { scopes = ["universal"]; }
-  return {
-    id: Number(o.id),
-    categoryId: Number(o.category_id),
-    language: o.language as "FR" | "EN",
-    text: o.text as string,
-    productScopes: scopes,
-    mode: (o.mode as "pool" | "generative_seeded") || "pool",
-    usedCount: Number(o.used_count || 0),
-    lastUsedAt: o.last_used_at != null ? Number(o.last_used_at) : null,
-  };
-}
-
 export async function seedHooksIfEmpty(): Promise<void> {
   const db = getDb();
   const countRow = await db.execute(`SELECT COUNT(*) as n FROM content_hooks`);
@@ -3818,6 +5866,18 @@ function mapDraft(row: Record<string, unknown>): FacebookDraft {
   };
 }
 
+/** True when some facebook_drafts row already carries this exact video URL. Used to
+ * keep UGC-video reinjection (job-ugc-reinject.ts) from drafting the same customer
+ * clip twice across runs. */
+export async function isDraftVideoUrlUsed(videoUrl: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const res = await db.execute({
+    sql: `SELECT 1 FROM facebook_drafts WHERE video_url = ? LIMIT 1`,
+    args: [videoUrl],
+  });
+  return res.rows.length > 0;
+}
+
 export async function createFacebookDraft(draft: {
   sku: string; triggerType: string; language: string; postText: string;
   postTextEn?: string | null;
@@ -3869,7 +5929,9 @@ export async function setDraftChannelState(id: number, channelKey: string, state
 
 export async function getFacebookDrafts(filters?: { status?: string; limit?: number }): Promise<FacebookDraft[]> {
   const db = await ensureSchema();
-  let sql = `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku`;
+  // Editorial posts (content_template) carry a placeholder sku (the FK needs a products row) —
+  // never join it: it labelled every editorial card "Classic Adirondack Chair" with its photo.
+  let sql = `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template'`;
   const args: InValue[] = [];
   if (filters?.status) { sql += ` WHERE fd.status = ?`; args.push(filters.status); }
   sql += ` ORDER BY fd.created_at DESC`;
@@ -3881,29 +5943,10 @@ export async function getFacebookDrafts(filters?: { status?: string; limit?: num
 export async function getFacebookDraft(id: number): Promise<FacebookDraft | null> {
   const db = await ensureSchema();
   const result = await db.execute({
-    sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku WHERE fd.id = ?`,
+    sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template' WHERE fd.id = ?`,
     args: [id],
   });
   return result.rows.length > 0 ? mapDraft(rowToObj(result.rows[0])) : null;
-}
-
-/**
- * Currently-scheduled drafts reduced to what the auto-scheduler needs: the slot
- * timestamp + which languages each occupies. Used to compute per-slot occupancy.
- */
-export async function getScheduledDraftSlots(): Promise<Array<{ scheduledAt: number | null; fr: boolean; en: boolean }>> {
-  const db = await ensureSchema();
-  const result = await db.execute(
-    `SELECT scheduled_at, post_text, post_text_en FROM facebook_drafts WHERE status = 'scheduled' AND scheduled_at IS NOT NULL`,
-  );
-  return result.rows.map((row) => {
-    const o = rowToObj(row);
-    return {
-      scheduledAt: o.scheduled_at != null ? Number(o.scheduled_at) : null,
-      fr: !!o.post_text && String(o.post_text).trim() !== "",
-      en: !!o.post_text_en && String(o.post_text_en).trim() !== "",
-    };
-  });
 }
 
 export async function updateFacebookDraft(id: number, fields: Record<string, unknown>): Promise<void> {
@@ -3919,11 +5962,24 @@ export async function updateFacebookDraft(id: number, fields: Record<string, unk
   if (sets.length === 0) return;
   args.push(id);
   await db.execute({ sql: `UPDATE facebook_drafts SET ${sets.join(", ")} WHERE id = ?`, args });
+  // A rejected draft no longer holds its fiche's repost cooldown (/api/social "reject").
+  if (fields.status === "rejected") {
+    const sku = await draftSku(id);
+    if (sku) await recomputeProductCooldown([sku]);
+  }
+}
+
+async function draftSku(id: number): Promise<string | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT sku FROM facebook_drafts WHERE id = ?`, args: [id] });
+  return r.rows.length ? String(rowToObj(r.rows[0]).sku) : null;
 }
 
 export async function deleteFacebookDraft(id: number): Promise<void> {
   const db = await ensureSchema();
+  const sku = await draftSku(id);
   await db.execute({ sql: `DELETE FROM facebook_drafts WHERE id = ?`, args: [id] });
+  if (sku) await recomputeProductCooldown([sku]); // a deleted draft releases its cooldown too
 }
 
 // ─── Publication Queue ───────────────────────────────────────────────
@@ -3934,8 +5990,15 @@ export async function deleteFacebookDraft(id: number): Promise<void> {
 // getNextPending compares lexicographically against datetime('now'). Producers
 // MUST store slots in that exact format (see toSqliteUtc in draft-scheduler).
 
-export type QueueContentType = "social" | "draft" | "blog" | "video" | "sequential_ad";
-export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog";
+export type QueueContentType =
+  | "social" | "draft" | "blog" | "video" | "sequential_ad"
+  // Content-scale chantier (Étape 3-5): extended demand-gen and assembly
+  // batches reuse the exact sequential_ad approve/schedule/list pattern below, generalized
+  // to any content_type instead of duplicated per type.
+  | "demand_gen_ext" | "assembly"
+  // pSEO guide deferred publish — see guide-scheduler.ts.
+  | "guide";
+export type QueuePlatform = "facebook" | "instagram" | "both" | "shopify_blog" | "shopify_guide";
 export type QueueStatus = "pending" | "publishing" | "published" | "failed" | "cancelled" | "draft";
 
 export interface PublicationQueueItem {
@@ -4172,25 +6235,6 @@ export async function cancelPendingQueueItems(
   return result.rowsAffected ?? 0;
 }
 
-/**
- * Cancel a content item's still-pending OR still-draft queue rows. Used when a
- * fresh generation replaces a prior take for the same content_id (a not-yet-
- * approved draft or an approved-but-unpublished pending). 'publishing'/'published'
- * rows are left untouched. Returns the number of rows cancelled.
- */
-export async function cancelQueueItemsForContent(
-  contentType: QueueContentType,
-  contentId: string,
-): Promise<number> {
-  const db = await ensureSchema();
-  const result = await db.execute({
-    sql: `UPDATE publication_queue SET status = 'cancelled'
-          WHERE content_type = ? AND content_id = ? AND status IN ('pending', 'draft')`,
-    args: [contentType, contentId],
-  });
-  return result.rowsAffected ?? 0;
-}
-
 /** A single queue row by id, or null. */
 export async function getQueueItemById(id: number): Promise<PublicationQueueItem | null> {
   const db = await ensureSchema();
@@ -4217,6 +6261,38 @@ export async function getVideoQueueItems(limit = 50): Promise<PublicationQueueIt
     args: [limit],
   });
   return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
+ * Batch-fetch every non-cancelled `publication_queue` row for a set of content ids within
+ * one content_type, keyed by content_id, for the caller to reduce with `summarizeQueueRows`.
+ * One `IN (...)` query per 100 ids — the draft-list page needs up to a few hundred, and this
+ * keeps it at a handful of round-trips instead of one query per draft.
+ */
+export async function getQueueRowsForContent(
+  contentType: QueueContentType,
+  contentIds: string[],
+): Promise<Map<string, PublicationQueueItem[]>> {
+  const out = new Map<string, PublicationQueueItem[]>();
+  const unique = [...new Set(contentIds.filter(Boolean))];
+  if (unique.length === 0) return out;
+  const db = await ensureSchema();
+  for (let i = 0; i < unique.length; i += 100) {
+    const chunk = unique.slice(i, i + 100);
+    const result = await db.execute({
+      sql: `SELECT * FROM publication_queue
+            WHERE content_type = ? AND status != 'cancelled'
+              AND content_id IN (${chunk.map(() => "?").join(",")})`,
+      args: [contentType, ...chunk],
+    });
+    for (const r of result.rows) {
+      const item = mapQueueItem(rowToObj(r));
+      const list = out.get(item.contentId);
+      if (list) list.push(item);
+      else out.set(item.contentId, [item]);
+    }
+  }
+  return out;
 }
 
 /**
@@ -4286,6 +6362,7 @@ export async function getSequentialAdQueueItems(
   const result = await db.execute({
     sql: `SELECT * FROM publication_queue
           WHERE content_type = 'sequential_ad' AND status != 'cancelled'
+            AND COALESCE(json_extract(metadata, '$.source'), '') != 'ameublo_studio'
             AND (? IS NULL OR json_extract(metadata, '$.campaign') = ?)
           ORDER BY created_at DESC, id DESC LIMIT ?`,
     args: [
@@ -4310,6 +6387,7 @@ export async function getSequentialAdCampaigns(): Promise<string[]> {
     `SELECT json_extract(metadata, '$.campaign') AS campaign, MAX(created_at) AS last_seen
      FROM publication_queue
      WHERE content_type = 'sequential_ad' AND status != 'cancelled'
+            AND COALESCE(json_extract(metadata, '$.source'), '') != 'ameublo_studio'
        AND json_extract(metadata, '$.campaign') IS NOT NULL
      GROUP BY campaign
      ORDER BY last_seen DESC`,
@@ -4324,6 +6402,7 @@ export async function countSequentialAdQueueItems(campaign?: string | null): Pro
   const result = await db.execute({
     sql: `SELECT COUNT(*) AS n FROM publication_queue
           WHERE content_type = 'sequential_ad' AND status != 'cancelled'
+            AND COALESCE(json_extract(metadata, '$.source'), '') != 'ameublo_studio'
             AND (? IS NULL OR json_extract(metadata, '$.campaign') = ?)`,
     args: [filtered ? campaign : null, filtered ? campaign : null],
   });
@@ -4353,6 +6432,24 @@ export async function approveSequentialAdDraft(id: number, scheduledAt: string):
     }
     throw err;
   }
+}
+
+/**
+ * Price guard (sequential-ad-price.ts): flag a sequential ad whose burned price is stale.
+ * Puts it back to 'draft' (from 'draft', 'pending' or a claimed 'publishing') so it can never
+ * go out with the wrong price, records the reason in `error`, and sets
+ * metadata.needsRerender so scripts/rerender-stale-sequential-ads.mts picks it up.
+ */
+export async function flagSequentialAdForRerender(id: number, reason: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue
+          SET status = 'draft', claimed_at = NULL, error = ?,
+              metadata = json_set(COALESCE(metadata, '{}'), '$.needsRerender', json('true'))
+          WHERE id = ? AND content_type = 'sequential_ad' AND status IN ('draft', 'pending', 'publishing')`,
+    args: [reason, id],
+  });
+  return (result.rowsAffected ?? 0) === 1;
 }
 
 /** Cancel a sequential-ad draft (draft → cancelled). Only acts on a 'draft' sequential_ad row. */
@@ -4395,6 +6492,125 @@ export async function rescheduleSequentialAd(id: number, scheduledAt: string): P
   } catch (err) {
     if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
       throw new QueueSlotTakenError("sequential_ad", scheduledAt);
+    }
+    throw err;
+  }
+}
+
+// ─── Generic content-batch queue (demand_gen_ext / assembly) ──────────
+//
+// Same shape as the sequential_ad functions just above (approve/cancel/reschedule/list/
+// count), generalized over `contentType` instead of duplicated 3x. Content-scale chantier
+// (Étape 3-5): the three new batch formats reuse this instead of a bespoke mechanism.
+
+/** Content-batch queue rows (any of the 3 new content types), newest first. */
+export async function getContentBatchQueueItems(
+  contentType: QueueContentType,
+  limit = 200,
+): Promise<PublicationQueueItem[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM publication_queue
+          WHERE content_type = ? AND status != 'cancelled'
+          ORDER BY created_at DESC, id DESC LIMIT ?`,
+    args: [contentType, limit],
+  });
+  return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/** Total non-cancelled rows for one content-batch type, for a "N items" count in the UI. */
+export async function countContentBatchQueueItems(contentType: QueueContentType): Promise<number> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT COUNT(*) AS n FROM publication_queue WHERE content_type = ? AND status != 'cancelled'`,
+    args: [contentType],
+  });
+  return Number(rowToObj(result.rows[0]).n ?? 0);
+}
+
+/**
+ * The nearest-`limit` upcoming scheduled (status='pending') rows across all 3 content-batch
+ * video formats, soonest first — drives /content-formats' "prochains créneaux" calendar
+ * strip. Draft rows are deliberately excluded: their `scheduled_at` is a placeholder from
+ * generation time, not a real reserved slot, so showing them on a calendar would be
+ * misleading (see content-batch-approval.ts's header for why).
+ */
+export async function getUpcomingContentBatchItems(limit = 30): Promise<PublicationQueueItem[]> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `SELECT * FROM publication_queue
+          WHERE content_type IN ('demand_gen_ext', 'assembly') AND status = 'pending'
+          ORDER BY scheduled_at ASC LIMIT ?`,
+    args: [limit],
+  });
+  return result.rows.map((r) => mapQueueItem(rowToObj(r)));
+}
+
+/**
+ * Approve a content-batch draft: flip draft → pending at `scheduledAt` (reserves the
+ * slot). Only acts on a 'draft' row of the given content_type (idempotent). Surfaces a
+ * slot collision as QueueSlotTakenError. Mirrors approveSequentialAdDraft.
+ */
+export async function approveContentBatchDraft(
+  id: number,
+  contentType: QueueContentType,
+  scheduledAt: string,
+): Promise<boolean> {
+  if (!isSqliteUtc(scheduledAt)) {
+    throw new Error(`approveContentBatchDraft: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${scheduledAt}')`);
+  }
+  const db = await ensureSchema();
+  try {
+    const result = await db.execute({
+      sql: `UPDATE publication_queue SET status = 'pending', scheduled_at = ?
+            WHERE id = ? AND status = 'draft' AND content_type = ?`,
+      args: [scheduledAt, id, contentType],
+    });
+    return (result.rowsAffected ?? 0) === 1;
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+      throw new QueueSlotTakenError(contentType, scheduledAt);
+    }
+    throw err;
+  }
+}
+
+/** Cancel a content-batch draft (draft → cancelled). Mirrors cancelSequentialAdDraft. */
+export async function cancelContentBatchDraft(id: number, contentType: QueueContentType): Promise<boolean> {
+  const db = await ensureSchema();
+  const result = await db.execute({
+    sql: `UPDATE publication_queue SET status = 'cancelled'
+          WHERE id = ? AND status = 'draft' AND content_type = ?`,
+    args: [id, contentType],
+  });
+  return (result.rowsAffected ?? 0) === 1;
+}
+
+/**
+ * Set a content-batch item's publication slot from the dashboard's date picker. Accepts
+ * 'draft' or already-'pending' and lands it 'pending' at `scheduledAt` either way — serves
+ * both "approve at a time I choose" and "move an already-scheduled item". Mirrors
+ * rescheduleSequentialAd; refuses publishing/published/failed/cancelled for the same reason.
+ */
+export async function rescheduleContentBatchDraft(
+  id: number,
+  contentType: QueueContentType,
+  scheduledAt: string,
+): Promise<boolean> {
+  if (!isSqliteUtc(scheduledAt)) {
+    throw new Error(`rescheduleContentBatchDraft: scheduledAt must be 'YYYY-MM-DD HH:MM:SS' (got '${scheduledAt}')`);
+  }
+  const db = await ensureSchema();
+  try {
+    const result = await db.execute({
+      sql: `UPDATE publication_queue SET status = 'pending', scheduled_at = ?
+            WHERE id = ? AND content_type = ? AND status IN ('draft', 'pending')`,
+      args: [scheduledAt, id, contentType],
+    });
+    return (result.rowsAffected ?? 0) === 1;
+  } catch (err) {
+    if (err instanceof Error && /UNIQUE constraint failed/i.test(err.message)) {
+      throw new QueueSlotTakenError(contentType, scheduledAt);
     }
     throw err;
   }
@@ -4644,6 +6860,370 @@ export async function countBlogPostsByStatus(): Promise<Record<BlogPostStatus, n
   return counts;
 }
 
+// ─── Morning report (read-only counts) ───────────────────────────────
+// One function per report section so a failing query only blanks its own section.
+
+/** /guides awaiting approval = pending_review and not yet scheduled (same rule as the UI). */
+export async function countGuidesAwaitingApproval(attentionLimit = 5): Promise<{
+  pending: number;
+  ready: number;
+  attention: number;
+  attentionTitles: string[];
+}> {
+  const db = await ensureSchema();
+  const [counts, titles] = await Promise.all([
+    db.execute(
+      `SELECT COUNT(*) AS pending,
+              SUM(CASE WHEN overall_status = 'ready' THEN 1 ELSE 0 END) AS ready,
+              SUM(CASE WHEN overall_status = 'attention' THEN 1 ELSE 0 END) AS attention
+         FROM guide_pages WHERE status = 'pending_review' AND scheduled_publish_at IS NULL`,
+    ),
+    db.execute({
+      sql: `SELECT title FROM guide_pages
+             WHERE status = 'pending_review' AND scheduled_publish_at IS NULL AND overall_status = 'attention'
+             ORDER BY created_at DESC LIMIT ?`,
+      args: [attentionLimit],
+    }),
+  ]);
+  const o = rowToObj(counts.rows[0]);
+  return {
+    pending: Number(o.pending) || 0,
+    ready: Number(o.ready) || 0,
+    attention: Number(o.attention) || 0,
+    attentionTitles: titles.rows.map((r) => String(rowToObj(r).title)),
+  };
+}
+
+/** /content-formats videos: drafts awaiting approval + approved ones due within `horizonDays`. */
+export async function countContentFormatVideos(horizonDays: number): Promise<{ pendingApproval: number; scheduledSoon: number }> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS drafts,
+                 SUM(CASE WHEN status = 'pending' AND scheduled_at >= datetime('now')
+                           AND scheduled_at < datetime('now', ?) THEN 1 ELSE 0 END) AS soon
+            FROM publication_queue
+           WHERE content_type IN ('demand_gen_ext', 'assembly')`,
+    args: [`+${horizonDays} days`],
+  });
+  const o = rowToObj(r.rows[0]);
+  return { pendingApproval: Number(o.drafts) || 0, scheduledSoon: Number(o.soon) || 0 };
+}
+
+/** Counts behind the dashboard's alert panels (price floor, images, imports, catalog, bell). */
+export async function countMorningReportAlerts(): Promise<{
+  priceBelowFloor: number;
+  priceFloorIncidents24h: number;
+  imagesPendingReview: number;
+  importErrors: number;
+  catalogIssues: number;
+  unreadNotifications: number;
+  /** Queue rows in 'failed' that were due in the last 3 days OR are still ahead — the ones nobody has looked at (found 2026-10-06: 16 batch Reels sat 'failed' for weeks, re-slotted but never reset). */
+  failedPublications: number;
+  /** Problems found by the last 06:15 publish check (publish-check.ts, setting `publish_check_last`): missed, stuck or partly failed posts of the 24 h before it. */
+  publishCheckProblems: number;
+  /** Reels the last price-guard run took out of the queue because a burned-in rabais no longer matches Shopify (setting `reel_price_guard_last`). */
+  reelPriceGuardBlocked: number;
+}> {
+  const db = await ensureSchema();
+  const dayAgo = Math.floor(Date.now() / 1000) - 86400;
+  const [audit, incidents, images, imports, catalog, notif, failedQueue, publishCheck, reelGuard] = await Promise.all([
+    db.execute(`SELECT value FROM settings WHERE key = 'price_audit_result'`),
+    db.execute({ sql: `SELECT COUNT(*) AS c FROM price_floor_incidents WHERE detected_at >= ?`, args: [dayAgo] }),
+    db.execute(`SELECT COUNT(*) AS c FROM image_review_queue WHERE status = 'pending'`),
+    db.execute(`SELECT COUNT(*) AS c FROM import_jobs WHERE status = 'error'`),
+    db.execute(`SELECT value FROM settings WHERE key = 'catalog_consistency_audit'`),
+    db.execute(`SELECT COUNT(*) AS c FROM notifications WHERE read = 0`),
+    db.execute(`SELECT COUNT(*) AS c FROM publication_queue WHERE status = 'failed' AND scheduled_at >= datetime('now', '-3 days')`),
+    db.execute(`SELECT value FROM settings WHERE key = 'publish_check_last'`),
+    db.execute(`SELECT value FROM settings WHERE key = 'reel_price_guard_last'`),
+  ]);
+  const c = (res: { rows: Row[] }) => Number(rowToObj(res.rows[0]).c) || 0;
+  const json = (res: { rows: Row[] }): Record<string, unknown> | null => {
+    const raw = res.rows[0] ? rowToObj(res.rows[0]).value : null;
+    try {
+      return raw ? (JSON.parse(String(raw)) as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  };
+  const issues = json(catalog)?.issues;
+  return {
+    // price-audit persists `belowFloor` (see persistPriceAudit / _loadDashboardAlerts);
+    // `belowFloorCount` is only the dashboard's mapped field name and never exists in the row.
+    priceBelowFloor: Number(json(audit)?.belowFloor) || 0,
+    priceFloorIncidents24h: c(incidents),
+    imagesPendingReview: c(images),
+    importErrors: c(imports),
+    catalogIssues: Array.isArray(issues) ? issues.length : 0,
+    unreadNotifications: c(notif),
+    failedPublications: c(failedQueue),
+    publishCheckProblems: Array.isArray(json(publishCheck)?.problems) ? (json(publishCheck)!.problems as unknown[]).length : 0,
+    reelPriceGuardBlocked: Array.isArray(json(reelGuard)?.blocked) ? (json(reelGuard)!.blocked as unknown[]).length : 0,
+  };
+}
+
+// ─── Reel measurement ───────────────────────────────────────────────
+
+/** Remember which Facebook / Instagram posts a published queue row became (best-effort, written by the publisher). */
+export async function recordQueuePostIds(queueId: number, ids: { fb?: string; ig?: string }): Promise<void> {
+  if (!ids.fb && !ids.ig) return;
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO queue_post_ids (queue_id, fb_post_id, ig_post_id) VALUES (?, ?, ?)
+          ON CONFLICT(queue_id) DO UPDATE SET
+            fb_post_id = COALESCE(excluded.fb_post_id, fb_post_id),
+            ig_post_id = COALESCE(excluded.ig_post_id, ig_post_id),
+            recorded_at = datetime('now')`,
+    args: [queueId, ids.fb ?? null, ids.ig ?? null],
+  });
+}
+
+export interface ReelToMeasure {
+  queueId: number;
+  fbPostId: string;
+  brand: "ameublo" | "furnish";
+  publishedAt: string | null;
+}
+
+/** Published Reels with a known Facebook id, published within the last `days` days — what the insights cron measures. */
+export async function listReelsToMeasure(days: number): Promise<ReelToMeasure[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT q.id, q.payload, q.published_at, p.fb_post_id
+            FROM publication_queue q JOIN queue_post_ids p ON p.queue_id = q.id
+           WHERE q.status = 'published' AND p.fb_post_id IS NOT NULL
+             AND q.published_at >= datetime('now', ?)
+           ORDER BY q.published_at DESC`,
+    args: [`-${Math.max(1, Math.floor(days))} days`],
+  });
+  const out: ReelToMeasure[] = [];
+  for (const row of r.rows) {
+    const o = rowToObj(row);
+    let brand: string | undefined;
+    try {
+      brand = (JSON.parse(String(o.payload)) as { brand?: string }).brand;
+    } catch {
+      /* unreadable payload: skip below */
+    }
+    if (brand !== "ameublo" && brand !== "furnish") continue;
+    out.push({ queueId: Number(o.id), fbPostId: String(o.fb_post_id), brand, publishedAt: o.published_at ? String(o.published_at) : null });
+  }
+  return out;
+}
+
+export interface ReelMetrics {
+  plays: number | null;
+  initialPlays: number | null;
+  avgWatchMs: number | null;
+  totalWatchMs: number | null;
+  socialActions: number | null;
+}
+
+/** One snapshot per (queue row, platform, UTC day): re-running the same day overwrites it. */
+export async function saveReelInsight(queueId: number, platform: "facebook" | "instagram", postId: string, m: ReelMetrics): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO reel_insights (queue_id, platform, post_id, day, plays, initial_plays, avg_watch_ms, total_watch_ms, social_actions)
+          VALUES (?, ?, ?, date('now'), ?, ?, ?, ?, ?)
+          ON CONFLICT(queue_id, platform, day) DO UPDATE SET
+            post_id = excluded.post_id, plays = excluded.plays, initial_plays = excluded.initial_plays,
+            avg_watch_ms = excluded.avg_watch_ms, total_watch_ms = excluded.total_watch_ms,
+            social_actions = excluded.social_actions, collected_at = datetime('now')`,
+    args: [queueId, platform, postId, m.plays, m.initialPlays, m.avgWatchMs, m.totalWatchMs, m.socialActions],
+  });
+}
+
+export interface ReelResultRow {
+  queueId: number;
+  contentType: string;
+  /** Studio style (vitrine, vote, …) for Studio videos, else the batch content type. */
+  style: string;
+  lang: "fr" | "en";
+  label: string | null;
+  studioVideoId: number | null;
+  scheduledAt: string;
+  publishedAt: string | null;
+  plays: number | null;
+  avgWatchMs: number | null;
+  totalWatchMs: number | null;
+  socialActions: number | null;
+  /** UTC date of the snapshot these numbers come from. */
+  measuredOn: string;
+  /** Hours between publication and the snapshot: a Reel measured at 3 h has not had time to collect what one measured at 3 weeks has. */
+  ageHours: number;
+}
+
+/** The latest Facebook snapshot of every Reel published in the last `days` days, with what kind of video it was. */
+export async function getReelResultRows(days: number): Promise<ReelResultRow[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT q.id, q.content_type, q.payload, q.metadata, q.scheduled_at, q.published_at,
+                 i.plays, i.avg_watch_ms, i.total_watch_ms, i.social_actions, i.day, i.collected_at,
+                 v.id AS video_id, v.label AS video_label
+            FROM publication_queue q
+            JOIN reel_insights i ON i.queue_id = q.id AND i.platform = 'facebook'
+             AND i.day = (SELECT MAX(day) FROM reel_insights WHERE queue_id = q.id AND platform = 'facebook')
+            LEFT JOIN ameublo_test_videos v ON v.queue_id = q.id
+           WHERE q.status = 'published' AND q.published_at >= datetime('now', ?)
+           ORDER BY q.published_at DESC`,
+    args: [`-${Math.max(1, Math.floor(days))} days`],
+  });
+  const out: ReelResultRow[] = [];
+  for (const row of r.rows) {
+    const o = rowToObj(row);
+    let brand: string | undefined;
+    let meta: Record<string, unknown> = {};
+    try {
+      brand = (JSON.parse(String(o.payload)) as { brand?: string }).brand;
+    } catch {
+      /* fall through */
+    }
+    try {
+      meta = o.metadata ? (JSON.parse(String(o.metadata)) as Record<string, unknown>) : {};
+    } catch {
+      /* fall through */
+    }
+    const num = (v: unknown) => (v == null ? null : Number(v));
+    out.push({
+      queueId: Number(o.id),
+      contentType: String(o.content_type),
+      style: typeof meta.style === "string" && meta.style ? meta.style : String(o.content_type),
+      lang: brand === "furnish" ? "en" : "fr",
+      label: o.video_label ? String(o.video_label) : null,
+      studioVideoId: o.video_id != null ? Number(o.video_id) : null,
+      scheduledAt: String(o.scheduled_at),
+      publishedAt: o.published_at ? String(o.published_at) : null,
+      plays: num(o.plays),
+      avgWatchMs: num(o.avg_watch_ms),
+      totalWatchMs: num(o.total_watch_ms),
+      socialActions: num(o.social_actions),
+      measuredOn: String(o.day),
+      ageHours: Math.max(0, (Date.parse(`${String(o.collected_at).replace(" ", "T")}Z`) - Date.parse(`${String(o.published_at).replace(" ", "T")}Z`)) / 3_600_000) || 0,
+    });
+  }
+  return out;
+}
+
+/** Raw inputs for the guard verdicts (guard-status.ts): each daily guard's persisted result
+ *  (settings JSON, parsed; null when never run or malformed), the latest cron_runs row per guard
+ *  cron, and the image review queue. One cheap read — the guards themselves never run here. */
+export interface GuardInputs {
+  priceAudit: Record<string, unknown> | null;
+  catalogAudit: Record<string, unknown> | null;
+  feedAudit: Record<string, unknown> | null;
+  siteHealth: Record<string, unknown> | null;
+  lastRuns: Record<string, { status: string; ranAt: number; detail: string | null }>;
+  imagesPending: number;
+  imagesOldestPendingAt: number | null;
+}
+
+export const GUARD_CRON_NAMES = ["price-audit", "catalog-consistency", "feed-integrity", "site-health"] as const;
+
+export async function loadGuardInputs(): Promise<GuardInputs> {
+  const db = await ensureSchema();
+  const [settings, runs, images] = await Promise.all([
+    db.execute(
+      `SELECT key, value FROM settings WHERE key IN ('price_audit_result', 'catalog_consistency_audit', 'feed_integrity_audit', 'site_health_audit')`,
+    ),
+    db.execute({
+      sql: `SELECT r.name, r.status, r.ran_at, r.detail FROM cron_runs r
+            JOIN (SELECT name, MAX(id) AS id FROM cron_runs WHERE name IN (${GUARD_CRON_NAMES.map(() => "?").join(", ")}) GROUP BY name) last
+              ON last.id = r.id`,
+      args: [...GUARD_CRON_NAMES],
+    }),
+    db.execute(`SELECT COUNT(*) AS c, MIN(created_at) AS oldest FROM image_review_queue WHERE status = 'pending'`),
+  ]);
+  const byKey = new Map(settings.rows.map((r) => { const o = rowToObj(r); return [o.key as string, o.value as string]; }));
+  const parse = (key: string): Record<string, unknown> | null => {
+    const raw = byKey.get(key);
+    if (!raw) return null;
+    try { const v = JSON.parse(raw); return v && typeof v === "object" ? (v as Record<string, unknown>) : null; } catch { return null; }
+  };
+  const lastRuns: GuardInputs["lastRuns"] = {};
+  for (const r of runs.rows) {
+    const o = rowToObj(r);
+    lastRuns[o.name as string] = { status: o.status as string, ranAt: Number(o.ran_at) || 0, detail: (o.detail as string) ?? null };
+  }
+  const img = rowToObj(images.rows[0]);
+  return {
+    priceAudit: parse("price_audit_result"),
+    catalogAudit: parse("catalog_consistency_audit"),
+    feedAudit: parse("feed_integrity_audit"),
+    siteHealth: parse("site_health_audit"),
+    lastRuns,
+    imagesPending: Number(img.c) || 0,
+    imagesOldestPendingAt: img.oldest != null ? Number(img.oldest) : null,
+  };
+}
+
+/**
+ * Studio Reels reserve per language, for the morning report: approved Reels still waiting to publish
+ * (and when the last one goes out), plus the videos ready to approve. "Ready" mirrors the Studio's
+ * "Nouveau": nothing queued (a cancelled/failed row doesn't count), not rejected, QA not flagged.
+ */
+export async function countReelsStock(): Promise<{
+  fr: { scheduled: number; lastScheduledAt: string | null; ready: number };
+  en: { scheduled: number; lastScheduledAt: string | null; ready: number };
+}> {
+  const db = await ensureSchema();
+  const [queued, ready] = await Promise.all([
+    db.execute(
+      `SELECT json_extract(metadata, '$.lang') AS lang, COUNT(*) AS n, MAX(scheduled_at) AS last
+         FROM publication_queue
+        WHERE content_type = 'sequential_ad' AND status IN ('pending', 'publishing')
+          AND json_extract(metadata, '$.source') = 'ameublo_studio'
+        GROUP BY 1`,
+    ),
+    db.execute(
+      `SELECT v.lang AS lang, COUNT(*) AS n
+         FROM ameublo_test_videos v LEFT JOIN publication_queue q ON q.id = v.queue_id
+        WHERE v.lang IN ('fr', 'en') AND v.style IS NOT NULL AND TRIM(COALESCE(v.caption, '')) <> ''
+          AND (v.verdict IS NULL OR v.verdict <> 'bad')
+          AND (v.qa_verdict IS NULL OR v.qa_verdict NOT IN ('fail', 'review'))
+          AND (q.id IS NULL OR q.status NOT IN ('pending', 'publishing', 'published', 'draft'))
+        GROUP BY 1`,
+    ),
+  ]);
+  const pick = (res: { rows: Row[] }, lang: string) => res.rows.map(rowToObj).find((r) => r.lang === lang);
+  const one = (lang: "fr" | "en") => {
+    const q = pick(queued, lang);
+    const r = pick(ready, lang);
+    return { scheduled: Number(q?.n) || 0, lastScheduledAt: q?.last ? String(q.last) : null, ready: Number(r?.n) || 0 };
+  };
+  return { fr: one("fr"), en: one("en") };
+}
+
+/** Items that only move once Mat acts (approve / push / review). Counts only. A 'reviewing'
+ *  import that already has a shopify_id is live (push returns already_imported) — not counted. */
+export async function countAwaitingOperator(): Promise<{
+  sequentialAds: number;
+  importsToPush: number;
+  importsNeedsReview: number;
+  socialDrafts: number;
+  blogDrafts: number;
+}> {
+  const db = await ensureSchema();
+  const [seq, imports, social, blog] = await Promise.all([
+    db.execute(`SELECT COUNT(*) AS c FROM publication_queue WHERE content_type = 'sequential_ad' AND status = 'draft'`),
+    db.execute(
+      `SELECT SUM(CASE WHEN status = 'reviewing' AND (shopify_id IS NULL OR shopify_id = '') THEN 1 ELSE 0 END) AS push,
+              SUM(CASE WHEN status = 'needs_review' THEN 1 ELSE 0 END) AS review
+         FROM import_jobs`,
+    ),
+    db.execute(`SELECT COUNT(*) AS c FROM facebook_drafts WHERE status = 'draft'`),
+    db.execute(`SELECT COUNT(*) AS c FROM blog_posts WHERE status = 'draft'`),
+  ]);
+  const c = (res: { rows: Row[] }) => Number(rowToObj(res.rows[0]).c) || 0;
+  const im = rowToObj(imports.rows[0]);
+  return {
+    sequentialAds: c(seq),
+    importsToPush: Number(im.push) || 0,
+    importsNeedsReview: Number(im.review) || 0,
+    socialDrafts: c(social),
+    blogDrafts: c(blog),
+  };
+}
+
 export async function getBlogPost(id: number): Promise<BlogPostRow | null> {
   const db = await ensureSchema();
   const r = await db.execute({
@@ -4717,21 +7297,18 @@ export async function getEligibleHighlightCandidates(
    * a constant string from that module's own table — never operator input, so inlining it is
    * safe; anything variable still travels as a bound arg.
    */
-  filter?: { predicate: string; args: (string | number)[] } | null
+  filter?: { predicate: string; args: (string | number)[] } | null,
+  /**
+   * Shopify product ids that can actually be posted (lifestyle-verified). When given, the
+   * draw happens among those only, so a thin category no longer loses its few postable
+   * products in a blind random sample. null/undefined = no restriction (the old behavior).
+   */
+  allowedProductIds?: Set<string> | null,
 ): Promise<Record<string, unknown>[]> {
+  const skus = await eligibleHighlightSkus(minDaysBetween, filter, allowedProductIds);
+  if (skus.length === 0) return [];
   const db = await ensureSchema();
-  const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
 
-  const extra = filter?.predicate ? ` AND (${filter.predicate})` : "";
-  const skusResult = await db.execute({
-    sql: `SELECT sku FROM products
-          WHERE shopify_product_id IS NOT NULL AND qty > 0
-            AND (last_posted_at IS NULL OR last_posted_at < ?)${extra}`,
-    args: [cutoff, ...(filter?.args ?? [])],
-  });
-  if (skusResult.rows.length === 0) return [];
-
-  const skus = skusResult.rows.map((r) => (r as unknown as Record<string, unknown>).sku as string);
   // Fisher-Yates shuffle, then take the first `limit`.
   for (let i = skus.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -4754,9 +7331,184 @@ export async function getEligibleHighlightCandidates(
     .filter((o): o is Record<string, unknown> => o !== undefined);
 }
 
+/** SKUs eligible for a stock highlight (imported, in stock, outside the repost window,
+ *  matching the category filter), optionally restricted to postable Shopify products. */
+async function eligibleHighlightSkus(
+  minDaysBetween: number,
+  filter?: { predicate: string; args: (string | number)[] } | null,
+  allowedProductIds?: Set<string> | null,
+): Promise<string[]> {
+  const db = await ensureSchema();
+  const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
+  const extra = filter?.predicate ? ` AND (${filter.predicate})` : "";
+  const res = await db.execute({
+    sql: `SELECT sku, shopify_product_id FROM products
+          WHERE shopify_product_id IS NOT NULL AND qty > 0
+            AND (last_posted_at IS NULL OR last_posted_at < ?)${extra}`,
+    args: [cutoff, ...(filter?.args ?? [])],
+  });
+  const rows = res.rows.map((r) => r as unknown as Record<string, unknown>);
+  return rows
+    .filter((r) => !allowedProductIds || allowedProductIds.has(String(r.shopify_product_id)))
+    .map((r) => r.sku as string);
+}
+
+export const TREND_SELECTION_TRIAL_UNTIL_KEY = "trend_selection_trial_until";
+
+/**
+ * Pure decision, exported for direct unit testing (no DB access needed): is the
+ * trend-aware stock-highlight selection trial (2026-09-18, Part B Task 8) still
+ * active? `trialUntilIso` is the raw `trend_selection_trial_until` settings value
+ * (or null when unset). Fail-safe: anything unparseable or absent reads as "trial
+ * not active" — the caller then falls back to the untouched pre-trial random
+ * behavior, never to a trend-dependent one by accident.
+ */
+export function isTrendSelectionTrialActive(trialUntilIso: string | null, nowMs: number = Date.now()): boolean {
+  if (!trialUntilIso) return false;
+  const untilMs = Date.parse(trialUntilIso);
+  return Number.isFinite(untilMs) && nowMs < untilMs;
+}
+
+/**
+ * Trend-aware variant of `getEligibleHighlightCandidates`, gated by the trial window
+ * above. While the trial is active, SKUs the weekly `trend_scores` recompute ranked
+ * highest are placed first (still requiring the same eligibility filters — qty,
+ * imported, cooldown, optional category); the rest of the eligible pool fills out
+ * `limit` in random order exactly as before, so a day with no trending-eligible match
+ * still returns a full candidate list. Once the trial expires (and nobody has pushed
+ * `trend_selection_trial_until` forward), this delegates straight to
+ * `getEligibleHighlightCandidates` — the exact pre-trial code path, unmodified.
+ */
+export async function getEligibleHighlightCandidatesTrendAware(
+  minDaysBetween: number,
+  limit: number,
+  filter?: { predicate: string; args: (string | number)[] } | null,
+  allowedProductIds?: Set<string> | null,
+): Promise<Record<string, unknown>[]> {
+  const trialUntil = await getSetting(TREND_SELECTION_TRIAL_UNTIL_KEY);
+  if (!isTrendSelectionTrialActive(trialUntil)) {
+    return getEligibleHighlightCandidates(minDaysBetween, limit, filter, allowedProductIds);
+  }
+
+  const db = await ensureSchema();
+  // Restricting to postable products here also stops unverified trending SKUs from
+  // taking the head of every sample (4 of Bureau's 15 slots, 2026-10-01).
+  const eligibleSkus = new Set(await eligibleHighlightSkus(minDaysBetween, filter, allowedProductIds));
+  if (eligibleSkus.size === 0) return [];
+
+  const trending = await getTopTrendScores("product", 30);
+  const trendingEligible = trending.map((t) => t.entityId).filter((sku) => eligibleSkus.has(sku));
+
+  const rest = [...eligibleSkus].filter((sku) => !trendingEligible.includes(sku));
+  // Fisher-Yates shuffle the non-trending remainder — same algorithm as the base fn,
+  // so the fallback portion of the list is exactly as random as it always was.
+  for (let i = rest.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [rest[i], rest[j]] = [rest[j], rest[i]];
+  }
+
+  const pick = [...trendingEligible, ...rest].slice(0, Math.max(1, limit));
+  if (pick.length === 0) return [];
+
+  const placeholders = pick.map(() => "?").join(", ");
+  const rowsRes = await db.execute({
+    sql: `SELECT * FROM products WHERE sku IN (${placeholders}) AND shopify_product_id IS NOT NULL AND qty > 0`,
+    args: pick,
+  });
+  const bySku = new Map(rowsRes.rows.map((r) => { const o = rowToObj(r); return [o.sku as string, o]; }));
+  return pick
+    .map((s) => bySku.get(s))
+    .filter((o): o is Record<string, unknown> => o !== undefined);
+}
+
+/** Start the repost cooldown for the whole Shopify fiche, not just this SKU. Every selector
+ *  (highlights, new-product/price-drop sweep, UGC reinject) filters on last_posted_at per SKU,
+ *  so marking only the chosen colour let the same fiche come back via its other colours —
+ *  up to 4 posts in 30 days on 4-colour fiches. A SKU with no Shopify product marks itself. */
+// The cooldown of a fiche = its most recent LIVE product draft (anything not rejected:
+// draft, approved, queued, published). Shared by the targeted and the global recompute.
+const LIVE_POST_AT = `(SELECT MAX(fd.created_at) FROM facebook_drafts fd JOIN products p2 ON p2.sku = fd.sku
+    WHERE fd.status != 'rejected' AND fd.trigger_type != 'content_template'
+      AND (p2.sku = products.sku
+           OR (products.shopify_product_id IS NOT NULL AND p2.shopify_product_id = products.shopify_product_id)))`;
+
+/** Release the repost cooldown a rejected / expired / deleted draft was holding. The cooldown
+ *  starts when a draft is CREATED (so pending drafts block re-picks), but a draft that never
+ *  goes out must not keep its fiche locked for 30 days — the 12 rejected Halloween highlights
+ *  froze the whole Halloween pool in the middle of the season (2026-09-25). Recomputes
+ *  last_posted_at for every SKU of the given SKUs' fiches from their remaining live drafts
+ *  (NULL when none is left). */
+export async function recomputeProductCooldown(skus: string[]): Promise<void> {
+  const list = [...new Set(skus.filter(Boolean))];
+  if (list.length === 0) return;
+  const db = await ensureSchema();
+  const ph = list.map(() => "?").join(",");
+  await db.execute({
+    sql: `UPDATE products SET last_posted_at = ${LIVE_POST_AT}
+          WHERE sku IN (${ph})
+             OR shopify_product_id IN (SELECT shopify_product_id FROM products WHERE sku IN (${ph}) AND shopify_product_id IS NOT NULL)`,
+    args: [...list, ...list],
+  });
+}
+
+/** One-shot catch-up: recompute every cooldown from live drafts (run once after deploying the
+ *  release-on-reject rule, so drafts rejected before it stop blocking). Returns rows changed. */
+export async function recomputeAllProductCooldowns(): Promise<number> {
+  const db = await ensureSchema();
+  const res = await db.execute(
+    `UPDATE products SET last_posted_at = ${LIVE_POST_AT}
+     WHERE last_posted_at IS NOT NULL AND last_posted_at IS NOT ${LIVE_POST_AT}`,
+  );
+  return res.rowsAffected;
+}
+
+/** Earliest epoch-seconds at which a product of this pool leaves the cooldown, or null when
+ *  none is cooling (the pool is empty for another reason, e.g. nothing imported / in stock). */
+export async function nextHighlightAvailableAt(
+  minDaysBetween: number,
+  filter?: { predicate: string; args: (string | number)[] } | null,
+): Promise<number | null> {
+  const db = await ensureSchema();
+  const cutoff = Math.floor(Date.now() / 1000) - minDaysBetween * 86400;
+  const extra = filter?.predicate ? ` AND (${filter.predicate})` : "";
+  const r = await db.execute({
+    sql: `SELECT MIN(last_posted_at) AS t FROM products
+          WHERE shopify_product_id IS NOT NULL AND qty > 0 AND last_posted_at >= ?${extra}`,
+    args: [cutoff, ...(filter?.args ?? [])],
+  });
+  const t = rowToObj(r.rows[0]).t;
+  return t == null ? null : Number(t) + minDaysBetween * 86400;
+}
+
+/** In-stock imported products with their product_type and repost state. The social
+ *  sub-category picker (/api/social/targets) aggregates these into a tree of postable counts. */
+export async function getSocialTargetRows(): Promise<
+  { productType: string; shopifyProductId: string; lastPostedAt: number | null }[]
+> {
+  const db = await ensureSchema();
+  const res = await db.execute(
+    `SELECT product_type, shopify_product_id, last_posted_at FROM products
+     WHERE shopify_product_id IS NOT NULL AND qty > 0
+       AND product_type IS NOT NULL AND TRIM(product_type) != ''`,
+  );
+  return res.rows.map((r) => {
+    const o = rowToObj(r);
+    return {
+      productType: String(o.product_type).trim(),
+      shopifyProductId: String(o.shopify_product_id),
+      lastPostedAt: o.last_posted_at == null ? null : Number(o.last_posted_at),
+    };
+  });
+}
+
 export async function markProductPosted(sku: string): Promise<void> {
   const db = await ensureSchema();
-  await db.execute({ sql: `UPDATE products SET last_posted_at = strftime('%s','now') WHERE sku = ?`, args: [sku] });
+  await db.execute({
+    sql: `UPDATE products SET last_posted_at = strftime('%s','now')
+          WHERE sku = ?
+             OR shopify_product_id = (SELECT shopify_product_id FROM products WHERE sku = ? AND shopify_product_id IS NOT NULL)`,
+    args: [sku, sku],
+  });
 }
 
 export interface PendingSocialCandidate {
@@ -4999,6 +7751,63 @@ export async function saveShopifyPushCheckpoint(cp: ShopifyPushCheckpoint): Prom
   await setSetting("shopify_push_checkpoint", JSON.stringify(cp));
 }
 
+// ─── Price reconcile rotation checkpoint (LAYER 2) ──────────────────────────────
+//
+// The hourly /api/cron/price-reconcile used to fetch the ENTIRE Shopify catalog in
+// one paginated loop every run — reliable at ~3000 variants, but a single Shopify
+// rate-limit mid-fetch throws away the WHOLE run's coverage for that hour (observed
+// 2026-09-22 01:00 UTC), and it only gets more fragile as the catalog grows. This
+// checkpoint lets the route process one page (250 variants) per invocation instead,
+// resuming from where the last run left off via Shopify's page_info cursor, and
+// wrapping to a fresh sweep when it reaches the end. See price-reconcile/route.ts.
+
+export interface PriceReconcileCheckpoint {
+  /** Shopify page_info cursor for the NEXT page to fetch; null = start of a sweep. */
+  pageInfo: string | null;
+  /** Increments each time a sweep completes (page_info exhausts back to null). */
+  sweepNumber: number;
+  sweepStartedAt: number; // epoch seconds
+  pagesThisSweep: number;
+  variantsScannedThisSweep: number;
+  driftThisSweep: number;
+  correctedThisSweep: number;
+  lastSweepCompletedAt: number | null; // epoch seconds, null until the first sweep finishes
+}
+
+export function isValidPriceReconcileCheckpoint(v: unknown): v is PriceReconcileCheckpoint {
+  if (!v || typeof v !== "object") return false;
+  const c = v as Record<string, unknown>;
+  return (
+    (c.pageInfo === null || typeof c.pageInfo === "string") &&
+    typeof c.sweepNumber === "number" &&
+    typeof c.sweepStartedAt === "number" &&
+    typeof c.pagesThisSweep === "number" &&
+    typeof c.variantsScannedThisSweep === "number" &&
+    typeof c.driftThisSweep === "number" &&
+    typeof c.correctedThisSweep === "number" &&
+    (c.lastSweepCompletedAt === null || typeof c.lastSweepCompletedAt === "number")
+  );
+}
+
+export async function getPriceReconcileCheckpoint(): Promise<PriceReconcileCheckpoint | null> {
+  const raw = await getSetting("price_reconcile_checkpoint");
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isValidPriceReconcileCheckpoint(parsed)) {
+      console.warn("[DB] price_reconcile_checkpoint corrupted, discarding:", raw.slice(0, 100));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export async function savePriceReconcileCheckpoint(cp: PriceReconcileCheckpoint): Promise<void> {
+  await setSetting("price_reconcile_checkpoint", JSON.stringify(cp));
+}
+
 // ─── Phase 1 chunked checkpoint ────────────────────────────────────────────────
 
 export interface Phase1Checkpoint {
@@ -5050,7 +7859,9 @@ export async function savePhase1Checkpoint(cp: Phase1Checkpoint): Promise<void> 
   await setSetting("phase1_checkpoint", JSON.stringify(cp));
 }
 
-/** Returns the first available product SKU, used as a fallback for non-product drafts. */
+/** Placeholder sku for editorial (content_template) drafts, which have no product but must
+ *  satisfy facebook_drafts.sku NOT NULL + FK. It is meaningless: every draft read joins
+ *  products only for non-editorial drafts, and the publisher never uses its image. */
 export async function getAnyProductSku(): Promise<string | null> {
   const db = await ensureSchema();
   const result = await db.execute(`SELECT sku FROM products LIMIT 1`);
@@ -5153,7 +7964,7 @@ export async function getDraftsForReview(filters: DraftFilters = {}): Promise<Dr
     db.execute({ sql: `SELECT COUNT(*) as n FROM facebook_drafts fd ${whereClause}`, args }),
     db.execute({
       sql: `SELECT fd.*, p.name, p.image1 FROM facebook_drafts fd
-            LEFT JOIN products p ON fd.sku = p.sku
+            LEFT JOIN products p ON fd.sku = p.sku AND fd.trigger_type != 'content_template'
             ${whereClause}
             ORDER BY fd.created_at DESC
             LIMIT ? OFFSET ?`,
@@ -5181,6 +7992,8 @@ export async function rejectDraftDb(id: number, notes: string, reviewedBy = "adm
     sql: `UPDATE facebook_drafts SET status = 'rejected', approved_at = strftime('%s','now'), reviewed_by = ?, review_notes = ? WHERE id = ?`,
     args: [reviewedBy, notes, id],
   });
+  const sku = await draftSku(id);
+  if (sku) await recomputeProductCooldown([sku]); // rejected → releases the fiche's cooldown
 }
 
 /**
@@ -5191,15 +8004,34 @@ export async function rejectDraftDb(id: number, notes: string, reviewedBy = "adm
  * status='draft' rows, so an approved/queued draft is never affected. Returns rows expired.
  */
 export async function expireStaleNewProductDrafts(maxAgeDays = 7): Promise<number> {
+  return expireStaleDrafts({ new_product: maxAgeDays });
+}
+
+/** Auto-reject unapproved drafts older than their trigger's TTL (days). Only status='draft'
+ *  is touched — an approved/queued draft is never affected. Before 2026-09-25 only new_product
+ *  expired, so editorial and stock-highlight drafts piled up forever on /social. */
+export async function expireStaleDrafts(ttlDaysByTrigger: Record<string, number>): Promise<number> {
   const db = await ensureSchema();
-  const res = await db.execute({
-    sql: `UPDATE facebook_drafts
-          SET status = 'rejected', approved_at = strftime('%s','now'), reviewed_by = 'auto-ttl', review_notes = ?
-          WHERE status = 'draft' AND trigger_type = 'new_product'
-            AND created_at < unixepoch() - 86400 * ?`,
-    args: [`Auto-expiré: new_product >${maxAgeDays}j`, maxAgeDays],
-  });
-  return res.rowsAffected;
+  let total = 0;
+  const released: string[] = [];
+  for (const [trigger, days] of Object.entries(ttlDaysByTrigger)) {
+    const doomed = await db.execute({
+      sql: `SELECT sku FROM facebook_drafts WHERE status = 'draft' AND trigger_type = ? AND created_at < unixepoch() - 86400 * ?`,
+      args: [trigger, days],
+    });
+    released.push(...doomed.rows.map((r) => String(rowToObj(r).sku)));
+    const res = await db.execute({
+      sql: `UPDATE facebook_drafts
+            SET status = 'rejected', approved_at = strftime('%s','now'), reviewed_by = 'auto-ttl', review_notes = ?
+            WHERE status = 'draft' AND trigger_type = ?
+              AND created_at < unixepoch() - 86400 * ?`,
+      args: [`Auto-expiré: ${trigger} >${days}j`, trigger, days],
+    });
+    total += res.rowsAffected;
+  }
+  // Expired drafts never went out: release the cooldown they were holding.
+  await recomputeProductCooldown(released);
+  return total;
 }
 
 // ─── Trend scores (weekly composite — see lib/trend-score.ts) ─────────
@@ -5286,4 +8118,410 @@ export async function getTrendScoresComputedAt(): Promise<number | null> {
   const res = await db.execute(`SELECT MAX(computed_at) AS at FROM trend_scores`);
   const at = Number(rowToObj(res.rows[0]).at);
   return Number.isFinite(at) && at > 0 ? at : null;
+}
+
+/**
+ * Shopify product ids that belong to the Costway supplier catalogue (imported Costway products).
+ *
+ * Every Aosom job that sweeps the WHOLE Shopify catalogue compares it against the Aosom feed, and
+ * a Costway product is by definition not in that feed. Unscoped it would be drafted (diff archive,
+ * removed-catalog, stale-catalog), have its price rewritten (price-reconcile / price-audit), or
+ * have inventory tracking switched on and zeroed (inventory-sweep). Those jobs filter these ids out.
+ *
+ * Fail-CLOSED on purpose: a DB error throws instead of returning an empty set, because an empty
+ * set would silently put Costway products back inside the Aosom jobs' blast radius.
+ */
+export async function getCostwayShopifyProductIds(): Promise<Set<string>> {
+  const db = await ensureSchema();
+  const res = await db.execute(
+    `SELECT DISTINCT shopify_product_id AS id FROM costway_products
+      WHERE shopify_product_id IS NOT NULL AND TRIM(shopify_product_id) != ''`,
+  );
+  return new Set(res.rows.map((r) => String((r as unknown as Record<string, unknown>).id)));
+}
+
+// ─── Studio Ameublo (mascot test videos, review only) ────────────────────────
+
+export type AmeubloLang = "fr" | "en";
+export type AmeubloQa = "pass" | "fail" | "review";
+
+export interface AmeubloTestVideo {
+  id: number;
+  series: string;
+  sku: string | null;
+  campaign: string | null;
+  label: string | null;
+  video_url: string;
+  source_queue_id: number | null;
+  verdict: "ok" | "bad" | null;
+  note: string | null;
+  created_at: string;
+  style: string | null;
+  lang: AmeubloLang | null;
+  caption: string | null;
+  skus: string[];
+  /** sku → price burned into the frame (for the price guard at approval/publish). */
+  prices: Record<string, number>;
+  music: string | null;
+  queue_id: number | null;
+  /** Live state of the linked publication_queue row (null while not approved). */
+  queue_status: string | null;
+  queue_scheduled_at: string | null;
+  qa_verdict: AmeubloQa | null;
+  qa_notes: string | null;
+}
+
+export async function insertAmeubloTestVideo(v: {
+  series: string;
+  sku?: string | null;
+  campaign?: string | null;
+  label?: string | null;
+  videoUrl: string;
+  sourceQueueId?: number | null;
+  style?: string | null;
+  lang?: AmeubloLang | null;
+  caption?: string | null;
+  skus?: string[];
+  prices?: Record<string, number>;
+  music?: string | null;
+}): Promise<number> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO ameublo_test_videos
+            (series, sku, campaign, label, video_url, source_queue_id, style, lang, caption, skus, prices, music)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      v.series, v.sku ?? null, v.campaign ?? null, v.label ?? null, v.videoUrl, v.sourceQueueId ?? null,
+      v.style ?? null, v.lang ?? null, v.caption ?? null,
+      v.skus ? JSON.stringify(v.skus) : null, v.prices ? JSON.stringify(v.prices) : null, v.music ?? null,
+    ],
+  });
+  return Number(r.lastInsertRowid);
+}
+
+function parseJson<T>(raw: unknown, fallback: T): T {
+  if (typeof raw !== "string" || !raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function mapAmeubloVideo(o: Record<string, unknown>): AmeubloTestVideo {
+  return {
+    id: Number(o.id),
+    series: String(o.series),
+    sku: o.sku == null ? null : String(o.sku),
+    campaign: o.campaign == null ? null : String(o.campaign),
+    label: o.label == null ? null : String(o.label),
+    video_url: String(o.video_url),
+    source_queue_id: o.source_queue_id == null ? null : Number(o.source_queue_id),
+    verdict: o.verdict === "ok" || o.verdict === "bad" ? o.verdict : null,
+    note: o.note == null ? null : String(o.note),
+    created_at: String(o.created_at),
+    style: o.style == null ? null : String(o.style),
+    lang: o.lang === "fr" || o.lang === "en" ? o.lang : null,
+    caption: o.caption == null ? null : String(o.caption),
+    skus: parseJson<string[]>(o.skus, []),
+    prices: parseJson<Record<string, number>>(o.prices, {}),
+    music: o.music == null ? null : String(o.music),
+    queue_id: o.queue_id == null ? null : Number(o.queue_id),
+    queue_status: o.q_status == null ? null : String(o.q_status),
+    queue_scheduled_at: o.q_scheduled_at == null ? null : String(o.q_scheduled_at),
+    qa_verdict: o.qa_verdict === "pass" || o.qa_verdict === "fail" || o.qa_verdict === "review" ? o.qa_verdict : null,
+    qa_notes: o.qa_notes == null ? null : String(o.qa_notes),
+  };
+}
+
+const AMEUBLO_SELECT = `SELECT v.*, q.status AS q_status, q.scheduled_at AS q_scheduled_at
+  FROM ameublo_test_videos v LEFT JOIN publication_queue q ON q.id = v.queue_id`;
+
+export async function listAmeubloTestVideos(): Promise<AmeubloTestVideo[]> {
+  const db = await ensureSchema();
+  const r = await db.execute(`${AMEUBLO_SELECT} ORDER BY v.created_at DESC, v.id ASC`);
+  return r.rows.map((row) => mapAmeubloVideo(rowToObj(row)));
+}
+
+/** Catalogue product_type per SKU (Studio category filter). SKUs unknown to the catalogue are absent from the map. */
+export async function productTypesBySku(skus: string[]): Promise<Map<string, string>> {
+  const db = await ensureSchema();
+  const out = new Map<string, string>();
+  const list = [...new Set(skus.filter(Boolean))];
+  for (let i = 0; i < list.length; i += 200) {
+    const part = list.slice(i, i + 200);
+    const r = await db.execute({
+      sql: `SELECT sku, product_type FROM products WHERE sku IN (${part.map(() => "?").join(",")})`,
+      args: part,
+    });
+    for (const row of r.rows) {
+      const o = rowToObj(row);
+      if (o.product_type != null) out.set(String(o.sku), String(o.product_type));
+    }
+  }
+  return out;
+}
+
+export async function getAmeubloTestVideo(id: number): Promise<AmeubloTestVideo | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `${AMEUBLO_SELECT} WHERE v.id = ?`, args: [id] });
+  return r.rows.length ? mapAmeubloVideo(rowToObj(r.rows[0])) : null;
+}
+
+/**
+ * The other-language version of a video: same series, style and SKU set, opposite language.
+ * Twins are rendered together, so the closest id wins; already scheduled/published or "bad" ones are skipped.
+ */
+export async function findAmeubloTwin(v: AmeubloTestVideo): Promise<AmeubloTestVideo | null> {
+  if (!v.lang || !v.style) return null;
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `${AMEUBLO_SELECT} WHERE v.series = ? AND v.style = ? AND v.lang = ? AND v.id <> ?`,
+    args: [v.series, v.style, v.lang === "fr" ? "en" : "fr", v.id],
+  });
+  const key = [...v.skus].sort().join(",");
+  const candidates = r.rows
+    .map((row) => mapAmeubloVideo(rowToObj(row)))
+    .filter((c) => [...c.skus].sort().join(",") === key && c.verdict !== "bad")
+    .filter((c) => !(c.queue_id != null && c.queue_status && ["pending", "publishing", "published"].includes(c.queue_status)))
+    .sort((a, b) => Math.abs(a.id - v.id) - Math.abs(b.id - v.id));
+  return candidates[0] ?? null;
+}
+
+/** Operator's verdict on a test video. `verdict: null` clears it. Returns false when the id is unknown. */
+export async function setAmeubloTestVerdict(id: number, verdict: "ok" | "bad" | null, note?: string | null): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE ameublo_test_videos SET verdict = ?, note = COALESCE(?, note) WHERE id = ?`,
+    args: [verdict, note === undefined ? null : note, id],
+  });
+  return r.rowsAffected > 0;
+}
+
+/** Record the reviewer agent's verdict (pass / fail / review = needs a human look). */
+export async function setAmeubloQa(id: number, verdict: AmeubloQa | null, notes: string | null): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE ameublo_test_videos SET qa_verdict = ?, qa_notes = ? WHERE id = ?`,
+    args: [verdict, notes, id],
+  });
+  return r.rowsAffected > 0;
+}
+
+/** Edit the caption of a video that is not yet on the schedule. */
+export async function setAmeubloCaption(id: number, caption: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE ameublo_test_videos SET caption = ? WHERE id = ?`,
+    args: [caption, id],
+  });
+  return r.rowsAffected > 0;
+}
+
+/** Link (or unlink with null) a video to its publication_queue row. */
+export async function setAmeubloQueueId(id: number, queueId: number | null): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `UPDATE ameublo_test_videos SET queue_id = ? WHERE id = ?`,
+    args: [queueId, id],
+  });
+  return r.rowsAffected > 0;
+}
+
+/**
+ * Slots already taken by Studio Ameublo Reels (sequential_ad rows tagged source='ameublo_studio').
+ * Scoped by source so the per-day cap of the mascot grid is independent of the sequential ads.
+ */
+export async function getOccupiedAmeubloSlots(lang?: AmeubloLang, grid?: "reaction" | "main"): Promise<string[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT scheduled_at FROM publication_queue
+          WHERE content_type = 'sequential_ad' AND status IN ('pending', 'publishing', 'published')
+            AND json_extract(metadata, '$.source') = 'ameublo_studio'
+            AND (? IS NULL OR json_extract(metadata, '$.lang') = ?)
+            AND (? IS NULL
+                 OR (? = 'reaction' AND json_extract(metadata, '$.style') = 'reaction')
+                 OR (? = 'main' AND COALESCE(json_extract(metadata, '$.style'), '') <> 'reaction'))`,
+    args: [lang ?? null, lang ?? null, grid ?? null, grid ?? null, grid ?? null],
+  });
+  return r.rows.map((row) => String(rowToObj(row).scheduled_at));
+}
+
+// ─── MCP access keys ────────────────────────────────────────────────
+
+export interface McpKeyRow { id: number; name: string; key_hint: string; scope: string; created_at: number; last_used_at: number | null; revoked_at: number | null }
+
+export async function createMcpKey(name: string, keyHash: string, keyHint: string, scope = "read"): Promise<number> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO mcp_keys (name, key_hash, key_hint, scope, created_at) VALUES (?, ?, ?, ?, ?)`,
+    args: [name, keyHash, keyHint, scope, Math.floor(Date.now() / 1000)],
+  });
+  return Number(r.lastInsertRowid);
+}
+
+/** Id + scope of a live key (no last_used stamp) — used by the OAuth consent page to check the pasted key. */
+export async function findActiveMcpKey(keyHash: string): Promise<{ id: number; scope: string } | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT id, scope FROM mcp_keys WHERE key_hash = ? AND revoked_at IS NULL`, args: [keyHash] });
+  if (!r.rows[0]) return null;
+  const o = rowToObj(r.rows[0]);
+  return { id: Number(o.id), scope: String(o.scope ?? "read") };
+}
+
+export async function listMcpKeys(): Promise<McpKeyRow[]> {
+  const db = await ensureSchema();
+  const r = await db.execute(`SELECT id, name, key_hint, scope, created_at, last_used_at, revoked_at FROM mcp_keys ORDER BY id DESC LIMIT 100`);
+  return r.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      id: Number(o.id), name: String(o.name), key_hint: String(o.key_hint), scope: String(o.scope ?? "read"), created_at: Number(o.created_at),
+      last_used_at: o.last_used_at == null ? null : Number(o.last_used_at),
+      revoked_at: o.revoked_at == null ? null : Number(o.revoked_at),
+    };
+  });
+}
+
+export async function revokeMcpKey(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const r = await db.execute({ sql: `UPDATE mcp_keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, args: [now, id] });
+  if (r.rowsAffected === 0) return false;
+  // The connections this key authorized (OAuth) die with it.
+  await db.execute({ sql: `DELETE FROM oauth_tokens WHERE grant_id IN (SELECT id FROM oauth_grants WHERE key_id = ?)`, args: [id] });
+  await db.execute({ sql: `UPDATE oauth_grants SET revoked_at = ? WHERE key_id = ? AND revoked_at IS NULL`, args: [now, id] });
+  return true;
+}
+
+/**
+ * The scope string of a non-revoked key, or null when `keyHash` is unknown/revoked. Stamps last_used_at at most once every
+ * 10 minutes per key so a chatty client does not turn every tool call into a write.
+ */
+export async function verifyMcpKey(keyHash: string): Promise<string | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT id, scope, last_used_at FROM mcp_keys WHERE key_hash = ? AND revoked_at IS NULL`, args: [keyHash] });
+  if (!r.rows[0]) return null;
+  const o = rowToObj(r.rows[0]);
+  const now = Math.floor(Date.now() / 1000);
+  if (o.last_used_at == null || now - Number(o.last_used_at) > 600) {
+    await db.execute({ sql: `UPDATE mcp_keys SET last_used_at = ? WHERE id = ?`, args: [now, Number(o.id)] });
+  }
+  return String(o.scope ?? "read");
+}
+
+// ─── OAuth (MCP) ────────────────────────────────────────────────────
+
+const nowSec = () => Math.floor(Date.now() / 1000);
+
+export interface OAuthClientRow { client_id: string; client_name: string; redirect_uris: string[] }
+
+export async function registerOAuthClient(clientId: string, name: string, redirectUris: string[]): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO oauth_clients (client_id, client_name, redirect_uris, created_at) VALUES (?, ?, ?, ?)`,
+    args: [clientId, name, JSON.stringify(redirectUris), nowSec()],
+  });
+}
+
+export async function getOAuthClient(clientId: string): Promise<OAuthClientRow | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT client_id, client_name, redirect_uris FROM oauth_clients WHERE client_id = ?`, args: [clientId] });
+  if (!r.rows[0]) return null;
+  const o = rowToObj(r.rows[0]);
+  return { client_id: String(o.client_id), client_name: String(o.client_name), redirect_uris: JSON.parse(String(o.redirect_uris)) as string[] };
+}
+
+/** One approved connection (grant) + its single-use authorization code. */
+export async function createOAuthGrantWithCode(a: {
+  clientId: string; clientName: string; redirectUri: string; codeChallenge: string; codeHash: string; ttlSec: number; scope: string; keyId?: number | null;
+}): Promise<number> {
+  const db = await ensureSchema();
+  const g = await db.execute({
+    sql: `INSERT INTO oauth_grants (client_id, client_name, scope, key_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+    args: [a.clientId, a.clientName, a.scope, a.keyId ?? null, nowSec()],
+  });
+  const grantId = Number(g.lastInsertRowid);
+  await db.execute({
+    sql: `INSERT INTO oauth_codes (code_hash, grant_id, client_id, redirect_uri, code_challenge, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    args: [a.codeHash, grantId, a.clientId, a.redirectUri, a.codeChallenge, nowSec() + a.ttlSec],
+  });
+  return grantId;
+}
+
+export interface OAuthCodeRow { grant_id: number; client_id: string; redirect_uri: string; code_challenge: string }
+
+/** Atomically consume a code: returns it once, only while unexpired and its grant is not revoked. */
+export async function consumeOAuthCode(codeHash: string): Promise<OAuthCodeRow | null> {
+  const db = await ensureSchema();
+  const upd = await db.execute({
+    sql: `UPDATE oauth_codes SET used_at = ? WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?`,
+    args: [nowSec(), codeHash, nowSec()],
+  });
+  if (upd.rowsAffected === 0) return null;
+  const r = await db.execute({
+    sql: `SELECT c.grant_id, c.client_id, c.redirect_uri, c.code_challenge FROM oauth_codes c
+           JOIN oauth_grants g ON g.id = c.grant_id WHERE c.code_hash = ? AND g.revoked_at IS NULL`,
+    args: [codeHash],
+  });
+  if (!r.rows[0]) return null;
+  const o = rowToObj(r.rows[0]);
+  return { grant_id: Number(o.grant_id), client_id: String(o.client_id), redirect_uri: String(o.redirect_uri), code_challenge: String(o.code_challenge) };
+}
+
+export async function storeOAuthTokens(grantId: number, access: { hash: string; ttlSec: number }, refresh: { hash: string; ttlSec: number }): Promise<void> {
+  const db = await ensureSchema();
+  await db.batch([
+    { sql: `INSERT INTO oauth_tokens (token_hash, grant_id, kind, expires_at) VALUES (?, ?, 'access', ?)`, args: [access.hash, grantId, nowSec() + access.ttlSec] },
+    { sql: `INSERT INTO oauth_tokens (token_hash, grant_id, kind, expires_at) VALUES (?, ?, 'refresh', ?)`, args: [refresh.hash, grantId, nowSec() + refresh.ttlSec] },
+  ], "write");
+}
+
+/** Single-use refresh token (rotated on every refresh). Returns the grant id when valid. */
+export async function consumeOAuthRefresh(tokenHash: string): Promise<{ grant_id: number; client_id: string } | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT t.grant_id, g.client_id FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id
+           WHERE t.token_hash = ? AND t.kind = 'refresh' AND t.expires_at > ? AND g.revoked_at IS NULL`,
+    args: [tokenHash, nowSec()],
+  });
+  if (!r.rows[0]) return null;
+  const del = await db.execute({ sql: `DELETE FROM oauth_tokens WHERE token_hash = ?`, args: [tokenHash] });
+  if (del.rowsAffected === 0) return null; // lost a race with a parallel refresh
+  const o = rowToObj(r.rows[0]);
+  return { grant_id: Number(o.grant_id), client_id: String(o.client_id) };
+}
+
+/** Scope string of a live access token of a non-revoked grant, else null (last_used_at stamped ≤ every 10 min). */
+export async function verifyOAuthAccess(tokenHash: string): Promise<string | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT g.id, g.scope, g.last_used_at FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id
+           WHERE t.token_hash = ? AND t.kind = 'access' AND t.expires_at > ? AND g.revoked_at IS NULL`,
+    args: [tokenHash, nowSec()],
+  });
+  if (!r.rows[0]) return null;
+  const o = rowToObj(r.rows[0]);
+  if (o.last_used_at == null || nowSec() - Number(o.last_used_at) > 600) {
+    await db.execute({ sql: `UPDATE oauth_grants SET last_used_at = ? WHERE id = ?`, args: [nowSec(), Number(o.id)] });
+  }
+  return String(o.scope ?? "read");
+}
+
+export interface OAuthGrantRow { id: number; client_name: string; scope: string; created_at: number; last_used_at: number | null }
+
+export async function listOAuthGrants(): Promise<OAuthGrantRow[]> {
+  const db = await ensureSchema();
+  const r = await db.execute(`SELECT id, client_name, scope, created_at, last_used_at FROM oauth_grants WHERE revoked_at IS NULL ORDER BY id DESC LIMIT 100`);
+  return r.rows.map((row) => {
+    const o = rowToObj(row);
+    return { id: Number(o.id), client_name: String(o.client_name), scope: String(o.scope ?? "read"), created_at: Number(o.created_at), last_used_at: o.last_used_at == null ? null : Number(o.last_used_at) };
+  });
+}
+
+export async function revokeOAuthGrant(id: number): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `UPDATE oauth_grants SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, args: [nowSec(), id] });
+  if (r.rowsAffected === 0) return false;
+  await db.execute({ sql: `DELETE FROM oauth_tokens WHERE grant_id = ?`, args: [id] });
+  return true;
 }

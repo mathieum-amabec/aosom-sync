@@ -17,6 +17,7 @@
  * the failure this module exists to prevent.
  */
 import { getAnthropicClient } from "@/lib/content-generator";
+import { llmModel } from "@/lib/llm-models";
 import { budgetedCreate } from "@/lib/llm-budget";
 import { cleanSocialCaption } from "@/lib/strip-markdown";
 
@@ -104,9 +105,14 @@ function userPrompt(p: CopyProduct): string {
   return lines.join("\n");
 }
 
-/** Uppercase, strip markdown/quotes/emoji, collapse spaces, drop trailing punctuation. */
+/**
+ * Uppercase, strip markdown/quotes/emoji, collapse spaces, drop trailing punctuation.
+ * An apostrophe BETWEEN letters is French elision, not a quote: keep it as a typographic ’
+ * ("L'ENTRAÎNEMENT" was being burned into videos as "LENTRAÎNEMENT", 2026-10-02).
+ */
 export function normalizeLine(s: string): string {
   return cleanSocialCaption(String(s ?? ""))
+    .replace(/(\p{L})['’](?=\p{L})/gu, "$1’")
     .replace(/["'“”«»]/g, "")
     .replace(/[\p{Extended_Pictographic}]/gu, "")
     .replace(/\s+/g, " ")
@@ -197,7 +203,7 @@ export async function generateVideoCopy(
 ): Promise<VideoCopy> {
   const angle = CAMPAIGN_ANGLE[campaign] ?? NEUTRAL_ANGLE;
   const used = (opts.usedHooks ?? []).map((h) => normalizeLine(h));
-  const model = opts.model ?? "claude-haiku-4-5";
+  const model = opts.model ?? llmModel("strong");
   const complete = opts.complete ?? ((s: string, u: string) => defaultComplete(s, u, model));
 
   for (let attempt = 0; attempt < 2; attempt++) {

@@ -41,7 +41,7 @@ const PHRASE_REDUCTIONS: Array<[RegExp, string]> = [[/\bBASE DE PARASOL\b/g, "BA
  * Supplier brand names that must never appear in a video overlay (Aosom's own
  * brands). Stripped from the START of the title, before any other processing.
  */
-export const SUPPLIER_BRANDS = ["Outsunny", "HOMCOM", "Aosom", "Qaba", "PawHut", "Vinsetto"];
+export const SUPPLIER_BRANDS = ["Outsunny", "HOMCOM", "Aosom", "Qaba", "PawHut", "Vinsetto", "Costway"];
 // `®?` covers the registered-mark variants; `\s+` requires a word boundary so a
 // real word starting with a brand ("Aosomething") is never truncated.
 const BRAND_PREFIX_RE = new RegExp(`^\\s*(?:${SUPPLIER_BRANDS.join("|")})®?\\s+`, "i");

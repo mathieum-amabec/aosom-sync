@@ -233,17 +233,21 @@ function log(entry: Record<string, unknown>) {
   log({ event: "queue_start", targets: targets.length, variant_skus: allVariantSkus.length });
 
   const queueStart = Date.now();
-  const jobs = await queueForImport(allVariantSkus);
+  const { jobs, skipped } = await queueForImport(allVariantSkus);
   const queueMs = Date.now() - queueStart;
   console.log(`[mass-import] Queued ${jobs.length} jobs in ${(queueMs / 1000).toFixed(1)}s`);
-  log({ event: "queue_done", queued: jobs.length, elapsed_ms: queueMs });
+  log({ event: "queue_done", queued: jobs.length, elapsed_ms: queueMs, skipped: skipped.length });
 
   if (jobs.length === 0) {
-    console.error("[mass-import] ERROR: queueForImport returned 0 jobs. Check SKU matching.");
+    console.error(`[mass-import] ERROR: queueForImport returned 0 jobs. ${skipped.length} SKUs skipped:`);
+    for (const s of skipped) console.error(`  ${s.sku}: ${s.reason}`);
     process.exit(1);
   }
   if (jobs.length !== targets.length) {
-    console.warn(`[mass-import] WARN: queued ${jobs.length} jobs but expected ${targets.length}. Some SKUs may have been filtered by the CSV fetcher.`);
+    const byReason = new Map<string, number>();
+    for (const s of skipped) byReason.set(s.reason, (byReason.get(s.reason) ?? 0) + 1);
+    const breakdown = [...byReason.entries()].map(([r, n]) => `${n} ${r}`).join(", ") || "raison inconnue";
+    console.warn(`[mass-import] WARN: queued ${jobs.length} jobs but expected ${targets.length}. Skipped: ${breakdown}.`);
   }
 
   // ─── fix queueForImport id drift ──────────────────────────────────

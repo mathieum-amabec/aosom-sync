@@ -47,6 +47,11 @@ function brandCreds(brand: InstagramBrand): BrandCreds {
   throw new Error(`Unknown Instagram brand: ${brand}`);
 }
 
+/** Public accessor for a brand's IG user id + token (used by the photo-insights reader). */
+export function instagramBrandCreds(brand: InstagramBrand): BrandCreds {
+  return brandCreds(brand);
+}
+
 /**
  * Test the Instagram connection by fetching account info.
  */
@@ -58,6 +63,33 @@ export async function testConnection(brand: InstagramBrand = "ameublo"): Promise
   const data = await res.json();
   if (data.error) throw new Error(`${brand}: ${data.error.message}`);
   return { username: data.username, id: data.id, brand };
+}
+
+/**
+ * Pin a Shopify CDN image to JPEG for Instagram.
+ *
+ * cdn.shopify.com negotiates the format on the request's Accept header (`Vary: Accept`): a client
+ * that accepts WebP gets WebP bytes under the very same `.jpg` URL (measured 2026-11-01 on
+ * Iz20aa19496f93381.jpg: Accept "image/webp,*\/*" → image/webp, 77 KB; "*\/*" → image/jpeg, 152 KB).
+ * Instagram only ingests JPEG and answers "Only photo or video can be accepted as media type" when
+ * its fetcher is served something else — the error 5 of 14 Ameublo semaine posts got between
+ * 2026-10-19 and 2026-11-01 while Facebook published the same URLs fine, and the same kind of
+ * file (2000×2000 progressive JPEG) succeeded on other days — consistent with an intermittent
+ * WebP answer to Meta's fetcher (most likely cause; Meta does not say what it received). `format=pjpg` forces JPEG whatever the Accept header,
+ * and returns the original bytes unchanged (same 152,476-byte 2000×2000 file). Note `format=jpg`
+ * does NOT pin it (still WebP). Other hosts are left untouched.
+ */
+export function instagramSafeImageUrl(url: string): string {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return url;
+  }
+  if (u.hostname !== "cdn.shopify.com" && !u.pathname.startsWith("/cdn/shop/")) return url;
+  if (u.searchParams.has("format")) u.searchParams.set("format", "pjpg");
+  else u.searchParams.append("format", "pjpg");
+  return u.toString();
 }
 
 /**
@@ -82,7 +114,7 @@ export async function publishPhoto(opts: {
   const createRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ image_url: opts.imageUrl, caption }),
+    body: JSON.stringify({ image_url: instagramSafeImageUrl(opts.imageUrl), caption }),
   });
 
   if (createRes.status === 429) {
@@ -94,16 +126,43 @@ export async function publishPhoto(opts: {
   const creationId: string = createData.id;
   if (!creationId) throw new Error(`${label}: no creation_id returned`);
 
-  // Step 2: Publish the container
-  const publishRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media_publish`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ creation_id: creationId }),
-  });
-
-  const publishData = await publishRes.json();
-  if (publishData.error) throw new Error(`${label} (publish): ${publishData.error.message}`);
+  // Step 2: wait for Instagram to say the container is ready (it fetches the image itself), then publish. Publishing
+  // right away is refused ("media not ready") whenever that fetch is slow, and that failure is intermittent.
+  await waitForContainerReady(creationId, token, label, IMAGE_POLL);
+  const publishData = await publishContainer(igUserId, token, label, creationId, "publish");
   return { id: publishData.id, creationId };
+}
+
+/** Image containers are usually ready at once: poll every second for at most 30 s. */
+const IMAGE_POLL = { intervalMs: 1_000, timeoutMs: 30_000, acceptMissingStatus: true, kind: "photo" } as const;
+const PUBLISH_RETRY_DELAY_MS = 4_000;
+const PUBLISH_MAX_ATTEMPTS = 3;
+/** Errors worth another try a few seconds later: a container that is not ready yet, or a passing Meta hiccup. */
+const TRANSIENT_PUBLISH = /not (yet )?(ready|available)|please wait|try again|temporar|unexpected error|(^|\D)9007(\D|$)/i;
+
+/** media_publish with a short retry when Meta says the container is not ready yet. Never retries a refusal (permission, policy). */
+async function publishContainer(
+  igUserId: string,
+  token: string,
+  label: string,
+  creationId: string,
+  what: string,
+): Promise<{ id: string }> {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media_publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ creation_id: creationId }),
+    });
+    const data = await res.json();
+    if (!data.error) return data;
+    const detail = `${data.error.message ?? ""} ${data.error.code ?? ""} ${data.error.error_subcode ?? ""}`;
+    if (attempt < PUBLISH_MAX_ATTEMPTS && TRANSIENT_PUBLISH.test(detail)) {
+      await new Promise((r) => setTimeout(r, PUBLISH_RETRY_DELAY_MS));
+      continue;
+    }
+    throw new Error(`${label} (${what}): ${data.error.message}${attempt > 1 ? ` [after ${attempt} attempts]` : ""}`);
+  }
 }
 
 const CAROUSEL_MIN_ITEMS = 2;
@@ -147,7 +206,7 @@ export async function publishCarousel(opts: {
     const res = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ image_url: opts.imageUrls[i], is_carousel_item: true }),
+      body: JSON.stringify({ image_url: instagramSafeImageUrl(opts.imageUrls[i]), is_carousel_item: true }),
     });
     if (res.status === 429) throw new Error(`${label}: Instagram rate limit on carousel item ${i + 1}, retry later`);
     const data = await res.json();
@@ -155,6 +214,8 @@ export async function publishCarousel(opts: {
     if (!data.id) throw new Error(`${label}: no creation_id for carousel item ${i + 1}`);
     childIds.push(String(data.id));
   }
+  // Every child must be ready before the parent can reference it.
+  for (const id of childIds) await waitForContainerReady(id, token, label, IMAGE_POLL);
 
   // Step 2: create the parent CAROUSEL container referencing the children.
   const createRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
@@ -168,14 +229,9 @@ export async function publishCarousel(opts: {
   const creationId: string = createData.id;
   if (!creationId) throw new Error(`${label}: no creation_id returned for carousel`);
 
-  // Step 3: publish the carousel container.
-  const publishRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media_publish`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ creation_id: creationId }),
-  });
-  const publishData = await publishRes.json();
-  if (publishData.error) throw new Error(`${label} (publish carousel): ${publishData.error.message}`);
+  // Step 3: wait for the carousel container, then publish it.
+  await waitForContainerReady(creationId, token, label, IMAGE_POLL);
+  const publishData = await publishContainer(igUserId, token, label, creationId, "publish carousel");
   console.log(`[PUBLISH] ${label} carousel posted with ${childIds.length} photos (media: ${publishData.id})`);
   return { id: publishData.id, creationId };
 }
@@ -189,8 +245,9 @@ async function waitForContainerReady(
   creationId: string,
   token: string,
   label: string,
-  opts: { intervalMs?: number; timeoutMs?: number } = {},
+  opts: { intervalMs?: number; timeoutMs?: number; acceptMissingStatus?: boolean; kind?: string } = {},
 ): Promise<void> {
+  const kind = opts.kind ?? "reel";
   const intervalMs = opts.intervalMs ?? REEL_POLL_INTERVAL_MS;
   const deadline = Date.now() + (opts.timeoutMs ?? REEL_POLL_TIMEOUT_MS);
   for (;;) {
@@ -201,11 +258,13 @@ async function waitForContainerReady(
     if (data.error) throw new Error(`${label} (status): ${data.error.message}`);
     const code = data.status_code as string | undefined;
     if (code === "FINISHED") return;
+    // An answer with no status at all is not a "processing" answer: for photos, go on and let the publish step decide.
+    if (code === undefined && opts.acceptMissingStatus) return;
     if (code === "ERROR" || code === "EXPIRED") {
-      throw new Error(`${label}: reel container ${code}${data.status ? ` — ${data.status}` : ""}`);
+      throw new Error(`${label}: ${kind} container ${code}${data.status ? ` — ${data.status}` : ""}`);
     }
     if (Date.now() >= deadline) {
-      throw new Error(`${label}: reel container not ready after ${Math.round((opts.timeoutMs ?? REEL_POLL_TIMEOUT_MS) / 1000)}s (last status ${code ?? "unknown"})`);
+      throw new Error(`${label}: ${kind} container not ready after ${Math.round((opts.timeoutMs ?? REEL_POLL_TIMEOUT_MS) / 1000)}s (last status ${code ?? "unknown"})`);
     }
     await new Promise((r) => setTimeout(r, intervalMs));
   }

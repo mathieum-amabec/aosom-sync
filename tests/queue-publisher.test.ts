@@ -1,10 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const mascot = vi.hoisted(() => ({ enforce: false }));
+vi.mock("@/lib/mascot-guard", async (orig) => {
+  const actual = await orig<typeof import("@/lib/mascot-guard")>();
+  return {
+    ...actual,
+    // Off by default so the existing Studio fixtures (vitrine/reaction…) keep exercising the paths they test.
+    assertNoMascot: (m: never) => { if (mascot.enforce) actual.assertNoMascot(m); },
+    mascotBlockReason: (m: never) => (mascot.enforce ? actual.mascotBlockReason(m) : null),
+  };
+});
+
 vi.mock("@/lib/facebook-client", () => ({
   publishText: vi.fn().mockResolvedValue({ id: "fb-txt", postId: "fb-txt" }),
   publishWithImage: vi.fn().mockResolvedValue({ id: "fb-img", postId: "fb-img" }),
   publishWithImages: vi.fn().mockResolvedValue({ id: "fb-alb", postId: "fb-alb" }),
   publishVideo: vi.fn().mockResolvedValue({ id: "fb-vid", postId: "fb-vid" }),
+  publishFacebookReel: vi.fn().mockResolvedValue({ postId: "fb-reel" }),
+  facebookBrandCreds: vi.fn(() => ({ pageId: "p1", token: "t1", label: "Ameublo" })),
 }));
 vi.mock("@/lib/instagram-client", () => ({
   publishPhoto: vi.fn().mockResolvedValue({ id: "ig-photo", creationId: "c1" }),
@@ -12,6 +25,12 @@ vi.mock("@/lib/instagram-client", () => ({
 }));
 vi.mock("@/lib/shopify-blog", () => ({
   createBlogArticle: vi.fn().mockResolvedValue({ articleId: "blog-1", blogId: 7, handle: "h", adminUrl: "u" }),
+  publishBlogArticle: vi.fn().mockResolvedValue(undefined),
+  getBlogArticleBody: vi.fn().mockResolvedValue("<p>Intro</p>"),
+}));
+vi.mock("@/lib/shopify-client", () => ({
+  setCollectionMetafield: vi.fn().mockResolvedValue(undefined),
+  getShopifyProductTitle: vi.fn(async () => "Meuble à chat 3 niveaux en bois"),
 }));
 vi.mock("@/lib/database", () => ({
   getNextPending: vi.fn(),
@@ -20,7 +39,13 @@ vi.mock("@/lib/database", () => ({
   PUBLISHER_MAX_DURATION_SECONDS: 300,
   markPublished: vi.fn().mockResolvedValue(undefined),
   markFailed: vi.fn().mockResolvedValue(undefined),
+  markGuidePagePublished: vi.fn().mockResolvedValue(undefined),
+  getProduct: vi.fn(async () => ({ shopify_product_id: "123", shopify_handle: "meuble-chat-3-niveaux" })),
+  flagSequentialAdForRerender: vi.fn().mockResolvedValue(true),
+  createNotification: vi.fn().mockResolvedValue(1),
+  recordQueuePostIds: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/queue-partial-error", () => ({ recordPartialFailure: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@/lib/content-generator", () => ({ getAnthropicClient: vi.fn() }));
 
 import {
@@ -28,17 +53,30 @@ import {
   drainPublisherQueue,
   parseSocialPayload,
   parseBlogPayload,
+  parseGuidePayload,
 } from "@/lib/queue-publisher";
 import {
   publishText,
   publishWithImage,
   publishWithImages,
   publishVideo,
+  publishFacebookReel,
 } from "@/lib/facebook-client";
 import { publishPhoto, publishReel } from "@/lib/instagram-client";
-import { createBlogArticle } from "@/lib/shopify-blog";
-import { getNextPending, claimQueueItem, markPublished, markFailed, reclaimStrandedPublishing } from "@/lib/database";
+import { createBlogArticle, publishBlogArticle, getBlogArticleBody } from "@/lib/shopify-blog";
+import { DRAFT_BANNER_HTML } from "@/lib/guide-draft-banner";
+import { setCollectionMetafield } from "@/lib/shopify-client";
+import {
+  getNextPending,
+  claimQueueItem,
+  markPublished,
+  markFailed,
+  reclaimStrandedPublishing,
+  markGuidePagePublished,
+  recordQueuePostIds,
+} from "@/lib/database";
 import { getAnthropicClient } from "@/lib/content-generator";
+import { recordPartialFailure } from "@/lib/queue-partial-error";
 
 const mockGetClient = getAnthropicClient as unknown as ReturnType<typeof vi.fn>;
 /** Stub the Anthropic client so messages.create returns `text` (or throws if `text` is null). */
@@ -50,12 +88,12 @@ function stubClaude(text: string | null) {
   return create;
 }
 
-function item(overrides: Partial<{ id: number; platform: string; payload: unknown; contentType: string }>) {
+function item(overrides: Partial<{ id: number; platform: string; payload: unknown; contentType: string; contentId: string; metadata: Record<string, unknown> | null }>) {
   const payload = overrides.payload;
   return {
     id: overrides.id ?? 1,
     contentType: (overrides.contentType ?? "social") as never,
-    contentId: "src-1",
+    contentId: overrides.contentId ?? "src-1",
     platform: (overrides.platform ?? "facebook") as never,
     payload: typeof payload === "string" ? payload : JSON.stringify(payload ?? {}),
     scheduledAt: "2026-06-15 15:00:00",
@@ -63,7 +101,7 @@ function item(overrides: Partial<{ id: number; platform: string; payload: unknow
     error: null,
     createdAt: "2026-06-15 14:00:00",
     publishedAt: null,
-    metadata: null,
+    metadata: overrides.metadata ?? null,
   };
 }
 
@@ -173,6 +211,87 @@ describe("publishQueueItem — shopify_blog + validation", () => {
   });
 });
 
+const guidePayload = (extra: Record<string, unknown> = {}) => ({
+  guidePageId: 42,
+  blogId: 7,
+  articleId: "art-1",
+  shopifyCollectionId: "999",
+  shopifyHandle: "guide-a",
+  ...extra,
+});
+
+describe("publishQueueItem — shopify_guide (pSEO guide deferred publish)", () => {
+  it("publishes the existing Shopify draft, marks the guide_pages row published, and sets the collection guide-link metafield", async () => {
+    const r = await publishQueueItem(item({
+      platform: "shopify_guide",
+      contentType: "guide",
+      payload: guidePayload(),
+    }));
+    expect(publishBlogArticle).toHaveBeenCalledWith(7, "art-1", "<p>Intro</p>");
+    expect(markGuidePagePublished).toHaveBeenCalledWith(42);
+    expect(setCollectionMetafield).toHaveBeenCalledWith("999", "custom", "guide_url", "single_line_text_field", "/blogs/guides/guide-a");
+    expect(r.postId).toBe("art-1");
+    // Unlike shopify_blog, this must NEVER create a new article.
+    expect(createBlogArticle).not.toHaveBeenCalled();
+  });
+
+  it("strips the BROUILLON draft banner from the live body in the same PUT as the publish", async () => {
+    vi.mocked(getBlogArticleBody).mockResolvedValueOnce(`${DRAFT_BANNER_HTML}\n\n<p>Intro</p>\n<table></table>`);
+    await publishQueueItem(item({ platform: "shopify_guide", contentType: "guide", payload: guidePayload() }));
+    const body = vi.mocked(publishBlogArticle).mock.calls.at(-1)?.[2] ?? "";
+    expect(body).not.toContain("BROUILLON");
+    expect(body).toContain("<p>Intro</p>");
+    expect(body).toContain("<table></table>");
+  });
+
+  it("strips a banner Shopify re-serialized (attribute/br formatting changed)", async () => {
+    const reserialized = `<div style="border: 2px solid #D4A853; padding: 16px;"><strong>⚠️ BROUILLON — Ne pas publier sans relecture</strong><br />Texte.</div><p>Intro</p>`;
+    vi.mocked(getBlogArticleBody).mockResolvedValueOnce(reserialized);
+    await publishQueueItem(item({ platform: "shopify_guide", contentType: "guide", payload: guidePayload() }));
+    expect(vi.mocked(publishBlogArticle).mock.calls.at(-1)?.[2]).toBe("<p>Intro</p>");
+  });
+
+  it("fails closed (never publishes) when a banner survives stripping", async () => {
+    vi.mocked(publishBlogArticle).mockClear();
+    vi.mocked(getBlogArticleBody).mockResolvedValueOnce(`<p>⚠️ BROUILLON — Ne pas publier sans relecture</p><p>Intro</p>`);
+    await expect(
+      publishQueueItem(item({ platform: "shopify_guide", contentType: "guide", payload: guidePayload() })),
+    ).rejects.toThrow(/banner/i);
+    expect(publishBlogArticle).not.toHaveBeenCalled();
+  });
+
+  it("still succeeds and still marks the guide published when the metafield write fails (best-effort, non-blocking)", async () => {
+    vi.mocked(setCollectionMetafield).mockRejectedValueOnce(new Error("Shopify down"));
+    const r = await publishQueueItem(item({
+      platform: "shopify_guide",
+      contentType: "guide",
+      payload: guidePayload(),
+    }));
+    expect(markGuidePagePublished).toHaveBeenCalledWith(42);
+    expect(r.postId).toBe("art-1");
+  });
+
+  it("rejects a missing guidePageId/blogId/articleId/shopifyCollectionId/shopifyHandle", () => {
+    expect(() => parseGuidePayload(guidePayload({ guidePageId: undefined }))).toThrow(/guidePageId/i);
+    expect(() => parseGuidePayload(guidePayload({ blogId: undefined }))).toThrow(/blogId/i);
+    expect(() => parseGuidePayload(guidePayload({ articleId: undefined }))).toThrow(/articleId/i);
+    expect(() => parseGuidePayload(guidePayload({ shopifyCollectionId: undefined }))).toThrow(/shopifyCollectionId/i);
+    expect(() => parseGuidePayload(guidePayload({ shopifyHandle: undefined }))).toThrow(/shopifyHandle/i);
+  });
+
+  it("rejects a content_type/platform mismatch (guide content on a social platform)", async () => {
+    await expect(
+      publishQueueItem(item({ platform: "facebook", contentType: "guide", payload: guidePayload() })),
+    ).rejects.toThrow(/does not match platform/i);
+  });
+
+  it("rejects a content_type/platform mismatch (social content on shopify_guide)", async () => {
+    await expect(
+      publishQueueItem(item({ platform: "shopify_guide", contentType: "social", payload: social() })),
+    ).rejects.toThrow(/does not match platform/i);
+  });
+});
+
 describe("parse helpers", () => {
   it("parseSocialPayload rejects a bad brand", () => {
     expect(() => parseSocialPayload({ caption: "x", brand: "twitter" })).toThrow(/brand must be/i);
@@ -189,6 +308,29 @@ describe("parse helpers", () => {
 
 describe("drainPublisherQueue", () => {
   const noSleep = vi.fn().mockResolvedValue(undefined);
+
+  it("holds a sequential ad whose burned price changed: back to draft for a re-render, not failed", async () => {
+    const { getProduct, flagSequentialAdForRerender } = await import("@/lib/database");
+    vi.mocked(getProduct).mockResolvedValueOnce({ price: 84.99 } as never);
+    vi.mocked(getNextPending).mockResolvedValue([
+      item({
+        id: 5,
+        contentType: "sequential_ad",
+        contentId: "seqad:ugc_video:automne-2026:831-194WT",
+        platform: "facebook",
+        payload: social({ reelsVideoUrl: "https://x/v.mp4" }),
+        metadata: { style: "ugc_video", renderedPrice: 79.99 },
+      }),
+    ] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+
+    const res = await drainPublisherQueue({ sleep: noSleep });
+
+    expect(flagSequentialAdForRerender).toHaveBeenCalledWith(5, expect.stringContaining("Prix changé"));
+    expect(markPublished).not.toHaveBeenCalled();
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ published: 0, failed: 0, skipped: 1 });
+  });
 
   it("claims, publishes, and marks each pending item; rate-limits between (not before first)", async () => {
     vi.mocked(getNextPending).mockResolvedValue([
@@ -273,6 +415,20 @@ describe("publishQueueItem — Reel clickbait caption (content_type=video)", () 
     expect(publishReel).toHaveBeenCalledWith(
       expect.objectContaining({ caption: "🔥 Ce ventilateur va vous rafraîchir! Commandez maintenant 👉" }),
     );
+  });
+
+  it("keeps the stored caption as-is when metadata.keepCaption is set (Studio Ameublo videos)", async () => {
+    const create = stubClaude("SHOULD NOT BE USED");
+    await publishQueueItem(
+      item({
+        platform: "instagram",
+        contentType: "sequential_ad",
+        payload: social({ reelsVideoUrl: "https://blob/r.mp4", caption: "Ma légende approuvée" }),
+        metadata: { source: "ameublo_studio", keepCaption: true },
+      }),
+    );
+    expect(create).not.toHaveBeenCalled();
+    expect(publishReel).toHaveBeenCalledWith(expect.objectContaining({ caption: "Ma légende approuvée" }));
   });
 
   it("uses the EN prompt for the furnish brand", async () => {
@@ -369,5 +525,167 @@ describe("stranded-publish reaper", () => {
     const r = await drainPublisherQueue();
     expect(r.reclaimed).toBe(0);
     expect(getNextPending).toHaveBeenCalled();
+  });
+});
+
+describe("publishQueueItem — batch video formats (assembly / demand_gen_ext)", () => {
+  const batch = { sku: "D31-078V01RB", productName: "on monte le meuble à chat", blobUrl: "https://blob.example/ASM-D31.mp4" };
+
+  it("publishes a {sku, productName, blobUrl} payload as a Reel with a generated caption and the product link (used to fail: caption is required)", async () => {
+    const create = stubClaude("Votre chat mérite son château 🐱 Montage simple, fait à la maison. Voyez-le 👉");
+    const r = await publishQueueItem(item({ platform: "facebook", contentType: "assembly", payload: batch }));
+    expect(r.postId).toBeTruthy();
+    const prompt = create.mock.calls[0][0].messages[0].content as string;
+    expect(prompt).toContain("Meuble à chat 3 niveaux en bois"); // real Shopify title, not the label
+    expect(prompt).toContain("montage");
+    expect(prompt).toMatch(/Hormozi/);
+    const opts = vi.mocked(publishFacebookReel).mock.calls.at(-1)![0];
+    expect(opts.videoUrl).toBe(batch.blobUrl);
+    expect(opts.caption).toContain("château");
+    // A Reel has no link field, so the product page must be IN the caption (it used to be missing: "le lien est sous la vidéo" was false).
+    expect(opts.caption).toContain("👉 https://ameublodirect.ca/products/meuble-chat-3-niveaux");
+  });
+
+  it("falls back to the product title + link when caption generation fails — never blocks the publish", async () => {
+    stubClaude(null);
+    await publishQueueItem(item({ platform: "facebook", contentType: "demand_gen_ext", payload: { ...batch, sku: "844-874V00BN" } }));
+    const caption = vi.mocked(publishFacebookReel).mock.calls.at(-1)![0].caption;
+    expect(caption).toContain("Meuble à chat 3 niveaux en bois");
+    expect(caption).toContain("https://ameublodirect.ca/products/meuble-chat-3-niveaux");
+  });
+
+  it("still fails loudly when the payload has no video", async () => {
+    await expect(publishQueueItem(item({ platform: "facebook", contentType: "assembly", payload: { sku: "X" } }))).rejects.toThrow(/blobUrl/);
+  });
+});
+
+describe("Reel UTM tagging + post id recording", () => {
+  const LINK = "https://ameublodirect.ca/products/canape";
+  const studio = (extra: Record<string, unknown> = {}, meta: Record<string, unknown> = {}) =>
+    item({
+      id: 77,
+      platform: "both",
+      contentType: "sequential_ad",
+      payload: social({ reelsVideoUrl: "https://blob/r.mp4", caption: `Canapé — 244,99 $ : ${LINK}\n#maison`, ...extra }),
+      metadata: { source: "ameublo_studio", keepCaption: true, style: "vitrine", ameubloVideoId: 546, ...meta },
+    });
+  const fbCaption = () => vi.mocked(publishFacebookReel).mock.calls.at(-1)![0].caption;
+  const igCaption = () => vi.mocked(publishReel).mock.calls.at(-1)![0].caption;
+
+  it("tags the storefront link per platform: facebook gets utm_source=facebook, instagram gets utm_source=instagram", async () => {
+    const r = await publishQueueItem(studio());
+    expect(fbCaption()).toContain(`${LINK}?utm_source=facebook&utm_medium=reel&utm_campaign=vitrine&utm_content=v546`);
+    expect(igCaption()).toContain(`${LINK}?utm_source=instagram&utm_medium=reel&utm_campaign=vitrine&utm_content=v546`);
+    expect(fbCaption()).toContain("Canapé — 244,99 $ : "); // the words around the link are untouched
+    expect(r.fbPostId).toBe("fb-reel");
+    expect(r.igPostId).toBeTruthy();
+  });
+
+  it("falls back to the queue row for batch videos, and names the campaign after the content type", async () => {
+    stubClaude("Voyez-le 👉");
+    await publishQueueItem(item({ id: 9, platform: "facebook", contentType: "assembly", payload: { sku: "D31", productName: "x", blobUrl: "https://blob.example/a.mp4" } }));
+    expect(fbCaption()).toContain("utm_campaign=assembly&utm_content=q9");
+  });
+
+  it("never touches a third-party link or a caption with no link", async () => {
+    await publishQueueItem(studio({ caption: "Voir https://www.facebook.com/ameublodirect merci" }));
+    expect(fbCaption()).toBe("Voir https://www.facebook.com/ameublodirect merci");
+    await publishQueueItem(studio({ caption: "Un salon qui se monte tout seul." }));
+    expect(fbCaption()).toBe("Un salon qui se monte tout seul.");
+  });
+
+  it("tags a photo post's storefront links with medium=photo, named after its La semaine Ameublo format", async () => {
+    await publishQueueItem(item({ id: 7, platform: "facebook", metadata: { source: "semaine", format: "baisses" }, payload: social({ imageUrl: "a.jpg", caption: `Voir ${LINK}` }) }));
+    expect(vi.mocked(publishWithImage).mock.calls.at(-1)![0].caption).toBe(`Voir ${LINK}?utm_source=facebook&utm_medium=photo&utm_campaign=baisses&utm_content=q7`);
+  });
+
+  it("names the campaign 'social' for a photo post that is not from La semaine Ameublo", async () => {
+    await publishQueueItem(item({ id: 8, platform: "facebook", payload: social({ imageUrl: "a.jpg", caption: `Voir ${LINK}` }) }));
+    expect(vi.mocked(publishWithImage).mock.calls.at(-1)![0].caption).toContain("utm_medium=photo&utm_campaign=social&utm_content=q8");
+  });
+
+  it("never touches a third-party link in a photo post", async () => {
+    await publishQueueItem(item({ platform: "facebook", payload: social({ imageUrl: "a.jpg", caption: "Voir https://www.facebook.com/ameublodirect" }) }));
+    expect(vi.mocked(publishWithImage).mock.calls.at(-1)![0].caption).toBe("Voir https://www.facebook.com/ameublodirect");
+  });
+
+  it("returns the post id of a single-platform photo post so it can be measured", async () => {
+    const r = await publishQueueItem(item({ platform: "facebook", payload: social({ imageUrl: "a.jpg", caption: "x" }) }));
+    expect(r.fbPostId).toBeTruthy();
+  });
+
+  it("records the Facebook and Instagram post ids after publishing", async () => {
+    vi.mocked(getNextPending).mockResolvedValue([studio()] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+    await drainPublisherQueue({ sleep: vi.fn().mockResolvedValue(undefined) });
+    expect(recordQueuePostIds).toHaveBeenCalledWith(77, { fb: "fb-reel", ig: expect.any(String) });
+  });
+
+  it("keeps the reason when only one channel published (Facebook ok, Instagram refused)", async () => {
+    vi.mocked(publishPhoto).mockRejectedValueOnce(new Error("Instagram Ameublo Direct (publish): media not ready"));
+    vi.mocked(getNextPending).mockResolvedValue([item({ id: 91, platform: "both", payload: social({ imageUrl: "a.jpg", caption: "x" }) })] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+    const res = await drainPublisherQueue({ sleep: vi.fn().mockResolvedValue(undefined) });
+    expect(res).toMatchObject({ published: 1, failed: 0 });
+    expect(recordPartialFailure).toHaveBeenCalledWith(91, "both", expect.stringMatching(/instagram: .*media not ready/));
+  });
+
+  it("does not record anything when both channels publish", async () => {
+    vi.mocked(recordPartialFailure).mockClear();
+    vi.mocked(getNextPending).mockResolvedValue([item({ id: 92, platform: "both", payload: social({ imageUrl: "a.jpg", caption: "x" }) })] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+    await drainPublisherQueue({ sleep: vi.fn().mockResolvedValue(undefined) });
+    expect(recordPartialFailure).not.toHaveBeenCalled();
+  });
+
+  it("never lets a failure to record the partial failure turn a live post into a failed item", async () => {
+    vi.mocked(recordPartialFailure).mockRejectedValueOnce(new Error("db hiccup"));
+    vi.mocked(publishPhoto).mockRejectedValueOnce(new Error("IG down"));
+    vi.mocked(getNextPending).mockResolvedValue([item({ id: 93, platform: "both", payload: social({ imageUrl: "a.jpg", caption: "x" }) })] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+    const res = await drainPublisherQueue({ sleep: vi.fn().mockResolvedValue(undefined) });
+    expect(markFailed).not.toHaveBeenCalledWith(93, expect.anything());
+    expect(res).toMatchObject({ failed: 0 });
+  });
+
+  it("never lets a failure to record the ids turn a live post into a failed item", async () => {
+    vi.mocked(recordQueuePostIds).mockRejectedValueOnce(new Error("db hiccup"));
+    vi.mocked(getNextPending).mockResolvedValue([studio()] as never);
+    vi.mocked(claimQueueItem).mockResolvedValue(true);
+    const res = await drainPublisherQueue({ sleep: vi.fn().mockResolvedValue(undefined) });
+    expect(markPublished).toHaveBeenCalledWith(77);
+    expect(markFailed).not.toHaveBeenCalled();
+    expect(res).toMatchObject({ published: 1, failed: 0 });
+  });
+});
+
+describe("publishQueueItem — mascot guard", () => {
+  const studioItem = (style: string) =>
+    item({
+      platform: "instagram",
+      contentType: "sequential_ad",
+      payload: social({ reelsVideoUrl: "https://blob/r.mp4", caption: "Légende" }),
+      metadata: { source: "ameublo_studio", keepCaption: true, style },
+    });
+
+  it("refuses a Studio render that burns the mascot in, without publishing", async () => {
+    mascot.enforce = true;
+    try {
+      vi.mocked(publishReel).mockClear();
+      await expect(publishQueueItem(studioItem("piece"))).rejects.toThrow(/mascot_blocked/);
+      expect(publishReel).not.toHaveBeenCalled();
+    } finally {
+      mascot.enforce = false;
+    }
+  });
+
+  it("still publishes the faceless real-footage style", async () => {
+    mascot.enforce = true;
+    try {
+      await publishQueueItem(studioItem("emotion"));
+      expect(publishReel).toHaveBeenCalled();
+    } finally {
+      mascot.enforce = false;
+    }
   });
 });

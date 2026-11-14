@@ -1,8 +1,20 @@
 import { fetchAosomCatalog } from "./csv-fetcher";
-import { mergeVariants, selectProductImagesAsync } from "./variant-merger";
-import { enforceCleanPrimaryImage } from "./image-compliance-audit";
+import {
+  mergeVariants,
+  dropDuplicateOptionListings,
+  selectProductImagesAsync,
+  ensureVariantPrimaryImages,
+} from "./variant-merger";
+import { enforceCleanPrimaryImage, cleanVariantImages } from "./image-compliance-audit";
 import { generateProductContent, backfillSeoFields, type GeneratedContent } from "./content-generator";
-import { createShopifyProduct, addProductToCollection } from "./shopify-client";
+import { runQualityGates } from "./import-quality-gates";
+import {
+  createShopifyProduct,
+  addProductToCollection,
+  unpublishShopifyProduct,
+  fetchShopifyProductContent,
+} from "./shopify-client";
+import { EXCLUDE_TAG } from "./stale-catalog";
 import { findCollectionsForProduct, getProduct, linkProductToShopify } from "./database";
 import {
   upsertImportJob,
@@ -10,7 +22,7 @@ import {
   getImportJob as dbGetImportJob,
   updateImportJob,
 } from "./database";
-import type { AosomMergedProduct } from "@/types/aosom";
+import type { AosomMergedProduct, AosomProduct } from "@/types/aosom";
 
 export type ImportStatus =
   | "pending"
@@ -19,7 +31,12 @@ export type ImportStatus =
   | "importing"
   | "done"
   | "error"
-  | "already_imported";
+  | "already_imported"
+  // A quality gate (clean image / French copy / no supplier-brand leak) failed —
+  // either before the Shopify push (no shopifyId set) or after, against what
+  // Shopify actually serves (shopifyId set, but auto-unpublished — see
+  // import-quality-gates.ts and importToShopify's post-publish safety net).
+  | "needs_review";
 
 export interface ImportJob {
   id: string;
@@ -59,15 +76,71 @@ function rowToJob(row: Record<string, unknown>): ImportJob {
   };
 }
 
+/** Why a requested SKU produced no import job. */
+export type SkippedImportReason = "already_imported" | "not_in_feed" | "duplicate_listing";
+
+export interface SkippedImportSku {
+  sku: string;
+  reason: SkippedImportReason;
+}
+
+export interface QueueForImportResult {
+  jobs: ImportJob[];
+  /** Requested SKUs that did NOT get a job, with why — surfaced to the caller instead
+   * of silently vanishing (see the 2026-09-19 investigation: a batch that mixed an
+   * already-imported SKU with a never-imported sibling used to drop BOTH with no
+   * feedback at all, and the API still returned 200). */
+  skipped: SkippedImportSku[];
+}
+
 /**
  * Queue products for import by their SKUs.
  */
-export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
+export async function queueForImport(skus: string[]): Promise<QueueForImportResult> {
   const catalog = await fetchAosomCatalog();
-  const matched = catalog.filter((p) => skus.includes(p.sku));
-  if (matched.length === 0) throw new Error("No matching products found");
+  const catalogSkus = new Set(catalog.map((p) => p.sku));
+  const skipped: SkippedImportSku[] = [];
 
-  const merged = mergeVariants(matched);
+  // A SKU the caller asked for but that no longer exists in the live Aosom feed
+  // (discontinued by the supplier since it was catalogued). Used to vanish from
+  // `matched` below with zero trace — report it instead.
+  for (const sku of skus) {
+    if (!catalogSkus.has(sku)) skipped.push({ sku, reason: "not_in_feed" });
+  }
+
+  const matched = catalog.filter((p) => skus.includes(p.sku));
+
+  // Idempotency, checked PER REQUESTED SKU, before merging — not per merged group,
+  // after. mergeVariants() below combines every matched SKU that shares a group into
+  // ONE AosomMergedProduct; checking idempotency only after that merge (the previous
+  // behaviour) meant one already-imported SKU submitted alongside a never-imported
+  // sibling of the same product took the WHOLE merged group down with it — the
+  // never-imported sibling got no job, no error, nothing (reproduced live 2026-09-19:
+  // 501-004PK + 501-004BK submitted together → 0 jobs, though 501-004PK alone queued
+  // fine). Filtering here, before mergeVariants ever sees the already-imported SKU,
+  // means it's dropped on its own — correctly, silently — without touching its
+  // siblings.
+  const toMerge: AosomProduct[] = [];
+  for (const p of matched) {
+    const existing = await getProduct(p.sku);
+    if (existing?.shopify_product_id) {
+      skipped.push({ sku: p.sku, reason: "already_imported" });
+    } else {
+      toMerge.push(p);
+    }
+  }
+
+  if (toMerge.length === 0) return { jobs: [], skipped };
+
+  // Two Aosom SKUs with the same colour AND size under one PSIN are one variant listed twice,
+  // not two variants (see dropDuplicateOptionListings). Keep one, say so for the other.
+  const { kept, dropped } = dropDuplicateOptionListings(toMerge);
+  for (const d of dropped) {
+    console.warn(`[IMPORT] ${d.sku} ignoré — même couleur/taille que ${d.keptSku} (annonce en double)`);
+    skipped.push({ sku: d.sku, reason: "duplicate_listing" });
+  }
+
+  const merged = mergeVariants(kept);
   const now = new Date().toISOString();
   const jobs: ImportJob[] = [];
 
@@ -96,11 +169,19 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
       console.warn(`[IMPORT] ${rawProduct.groupKey}: vérification pos-1 impossible (importé tel quel): ${guard.reason ?? "aucun verdict"}`);
     }
 
-    const product = { ...rawProduct, images: guard.images };
+    // Every colour keeps its own primary photo, even past the 8-photo cap (see
+    // ensureVariantPrimaryImages) — createShopifyProduct then attaches it to its variants.
+    // The variant's photo is what the card and the PDP show for that colour, so it gets the same
+    // clean-photo guard as pos-1 (see cleanVariantImages).
+    const variants = await cleanVariantImages(rawProduct.variants);
+    const product = { ...rawProduct, variants, images: ensureVariantPrimaryImages(guard.images, variants) };
 
-    // Idempotency: skip any product whose SKU already maps to a Shopify product.
-    // Re-importing would create a duplicate (createShopifyProduct always POSTs),
-    // and the new product would not carry the original's manual tags/metafields.
+    // Defensive re-check, not the primary guard anymore (that's the per-SKU filter
+    // above, before merge). Catches only a race: the product got imported by a
+    // concurrent request in the window between the filter above and here. Every
+    // variant still trapped in this merged group is reported skipped — a race is
+    // rare enough that "silently dropped" would be a worse failure mode than
+    // "briefly slower to notice", now that we have the vocabulary to report it.
     let existingShopifyId: string | null = null;
     for (const v of product.variants) {
       const existing = await getProduct(v.sku);
@@ -110,7 +191,8 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
       }
     }
     if (existingShopifyId) {
-      console.log(`[IMPORT] Skipping ${product.groupKey} — already_in_shopify (${existingShopifyId})`);
+      console.log(`[IMPORT] Skipping ${product.groupKey} — already_in_shopify (${existingShopifyId}) [race, post-merge]`);
+      for (const v of product.variants) skipped.push({ sku: v.sku, reason: "already_imported" });
       continue;
     }
 
@@ -138,7 +220,7 @@ export async function queueForImport(skus: string[]): Promise<ImportJob[]> {
     });
   }
 
-  return jobs;
+  return { jobs, skipped };
 }
 
 /**
@@ -195,7 +277,9 @@ export async function generateContent(jobId: string, opts?: { force?: boolean })
  */
 export async function importToShopify(
   jobId: string,
-  contentOverrides?: Partial<GeneratedContent>
+  contentOverrides?: Partial<GeneratedContent>,
+  /** `status: "draft"` creates the product unpublished (automatic import: verify first, activate after). */
+  opts: { status?: "active" | "draft" } = {},
 ): Promise<ImportJob> {
   const row = await dbGetImportJob(jobId);
   if (!row) throw new Error(`Job ${jobId} not found`);
@@ -217,10 +301,28 @@ export async function importToShopify(
   // defaults so a stale job imports with degraded SEO instead of 422-ing.
   content = backfillSeoFields(content, product.brand);
 
+  // Pre-publish quality gate: same three checks the post-publish safety net runs
+  // below, but here a failure means the product is never created at all — cheaper
+  // to catch than to un-publish, and it can't leave a defective listing live even
+  // for the few seconds between create and the post-publish check.
+  const preGate = await runQualityGates(product.images, content);
+  if (!preGate.passed) {
+    console.warn(`[IMPORT] Pre-publish quality gate FAILED for ${row.group_key} (${preGate.failures.join(",")}) — not pushed`);
+    await updateImportJob(jobId, {
+      status: "needs_review",
+      error: `pre_publish_gate_failed:${preGate.failures.join(",")}`,
+    });
+    return { ...rowToJob(row), status: "needs_review", content };
+  }
+
   await updateImportJob(jobId, { status: "importing" });
 
   try {
-    const { id: shopifyId, handle: shopifyHandle } = await createShopifyProduct(product, content);
+    const { id: shopifyId, handle: shopifyHandle } = await createShopifyProduct(
+      product,
+      content,
+      opts.status ? { status: opts.status } : {},
+    );
     await updateImportJob(jobId, { status: "done", shopify_id: shopifyId });
 
     // Persist the Shopify mapping (id + storefront handle) onto the catalog rows so the
@@ -279,12 +381,42 @@ export async function importToShopify(
     // product's clean Shopify position-1 lifestyle photo raw, and self-skips when the
     // product isn't lifestyle-verified yet (typical for a brand-new import).
     const primarySku = product.variants[0]?.sku;
-    if (primarySku) {
+    // A draft is not on the storefront yet: the caller triggers the social draft after activation.
+    if (primarySku && opts.status !== "draft") {
       import("@/jobs/job4-social").then(({ triggerNewProduct }) => {
         triggerNewProduct(primarySku).catch((err) =>
           console.error(`[IMPORT] Social draft failed for ${primarySku}: ${err}`)
         );
       }).catch(() => {});
+    }
+
+    // Post-publish quality safety net: re-run the SAME gates against what Shopify
+    // actually serves (not what we generated) — catches drift between generation
+    // and what got stored, or anything the pre-publish check missed. Best-effort:
+    // a failure IN the check itself must not fail the (already successful) import,
+    // and must not silently hide that the check didn't run.
+    try {
+      const served = await fetchShopifyProductContent(shopifyId);
+      const postGate = await runQualityGates(served.images, {
+        titleFr: served.title,
+        descriptionFr: served.bodyHtml,
+      });
+      if (!postGate.passed) {
+        console.warn(
+          `[IMPORT] Post-publish quality gate FAILED for ${shopifyId} (${postGate.failures.join(",")}) — unpublishing`,
+        );
+        await unpublishShopifyProduct(shopifyId, {
+          deactivate: true,
+          tags: [...served.tags, EXCLUDE_TAG, "needs-review"],
+        });
+        await updateImportJob(jobId, {
+          status: "needs_review",
+          error: `post_publish_gate_failed:${postGate.failures.join(",")}`,
+        });
+        return { ...rowToJob(row), status: "needs_review", shopifyId, content };
+      }
+    } catch (err) {
+      console.error(`[IMPORT] Post-publish quality check errored for ${shopifyId} (product stays published):`, err);
     }
 
     return { ...rowToJob(row), status: "done", shopifyId, content };
@@ -298,9 +430,4 @@ export async function importToShopify(
 export async function getImportJobsList(): Promise<ImportJob[]> {
   const rows = await dbGetImportJobs();
   return rows.map(rowToJob);
-}
-
-export async function getImportJobById(jobId: string): Promise<ImportJob | null> {
-  const row = await dbGetImportJob(jobId);
-  return row ? rowToJob(row) : null;
 }

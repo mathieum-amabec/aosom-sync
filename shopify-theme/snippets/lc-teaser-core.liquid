@@ -1,0 +1,78 @@
+{%- comment -%}
+  lc-teaser-core — shared helpers for the "bientôt" teasers and the AI room tools (lc-visualiser, the décorateur
+  button in lc-assistant-widget). Rendered by each of them; defines window.lcTeaser once.
+  - log(feature, event, source, extra): fire-and-forget POST to /api/teaser (text/plain → no CORS preflight).
+    Skipped for bots / headless renderers / the theme editor (they would inflate "view" counts) and for visitors
+    who refused analytics in Shopify's privacy banner — except "email", which the shopper typed on purpose.
+    The visitor id (random, no PII) is created only when a log is actually sent.
+  - status(): Promise<{visualiser, decorateur}> — which tools are live (GET /api/visualiser, cached 10 min).
+  - shrink(file): Promise<{data, type, w, h}> — the shopper's photo resized in the browser (≤ 1600 px JPEG).
+{%- endcomment -%}
+<script>
+(function(){
+  if(window.lcTeaser) return;
+  var BASE='https://aosom-sync.vercel.app';
+  var loc=(document.documentElement.lang||'fr').slice(0,2)==='en'?'en':'fr';
+  var BOT=/bot|crawl|spider|slurp|lighthouse|headless|preview|facebookexternalhit|pinterestbot|embedly|bingpreview/i;
+  function trackable(){
+    try{
+      if(navigator.webdriver||BOT.test(navigator.userAgent||'')) return false;
+      if(window.Shopify&&Shopify.designMode) return false;
+      var cp=window.Shopify&&Shopify.customerPrivacy;
+      if(cp&&typeof cp.analyticsProcessingAllowed==='function'&&cp.analyticsProcessingAllowed()===false) return false;
+    }catch(e){}
+    return true;
+  }
+  var vid='';
+  function visitor(){
+    if(vid) return vid;
+    try{ vid=localStorage.getItem('lc_vid')||''; }catch(e){}
+    if(!/^[A-Za-z0-9_-]{16,64}$/.test(vid)){
+      var a=new Uint8Array(16); (window.crypto||window.msCrypto).getRandomValues(a);
+      vid=Array.prototype.map.call(a,function(b){ return ('0'+b.toString(16)).slice(-2); }).join('');
+      try{ localStorage.setItem('lc_vid',vid); }catch(e){}
+    }
+    return vid;
+  }
+  var sent={};
+  function log(f,e,s,extra){
+    if(e!=='email'&&!trackable()) return Promise.resolve(null);
+    var k=f+':'+e+':'+s; if(e!=='email'&&sent[k]) return Promise.resolve(null); sent[k]=1;
+    var body={f:f,e:e,s:s,v:visitor(),l:loc}; if(extra) for(var x in extra) body[x]=extra[x];
+    var p;
+    try{ p=fetch(BASE+'/api/teaser',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(body),keepalive:true,mode:'cors'}); }
+    catch(err){ p=Promise.reject(err); }
+    p.catch(function(){}); // a failed beacon must never surface as an unhandled rejection
+    return p;
+  }
+  var st=null;
+  function status(){
+    if(st) return st;
+    try{ var c=JSON.parse(sessionStorage.getItem('lc_vis_status')||'null'); if(c&&Date.now()-c.t<6e5) return (st=Promise.resolve(c.s)); }catch(e){}
+    st=fetch(BASE+'/api/visualiser').then(function(r){ return r.json(); }).then(function(s){
+      s={visualiser:s.visualiser===true,decorateur:s.decorateur===true};
+      try{ sessionStorage.setItem('lc_vis_status',JSON.stringify({t:Date.now(),s:s})); }catch(e){}
+      return s;
+    }).catch(function(){ return {visualiser:false,decorateur:false}; });
+    return st;
+  }
+  function shrink(file){
+    return new Promise(function(ok,ko){
+      // Some Android pickers give no type: try to decode anyway; anything that isn't an image fails below.
+      if(!file||(file.type&&!/^image\//.test(file.type))) return ko(new Error('type'));
+      var url=URL.createObjectURL(file), img=new Image();
+      img.onload=function(){
+        var max=1600, k=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+        var w=Math.max(1,Math.round(img.naturalWidth*k)), h=Math.max(1,Math.round(img.naturalHeight*k));
+        var c=document.createElement('canvas'), g=c.getContext('2d'); c.width=w; c.height=h;
+        g.fillStyle='#fff'; g.fillRect(0,0,w,h); // a transparent PNG must not turn black in JPEG
+        g.drawImage(img,0,0,w,h); URL.revokeObjectURL(url);
+        var d=c.toDataURL('image/jpeg',0.85); ok({data:d.slice(d.indexOf(',')+1),type:'image/jpeg',w:w,h:h});
+      };
+      img.onerror=function(){ URL.revokeObjectURL(url); ko(new Error('read')); };
+      img.src=url;
+    });
+  }
+  window.lcTeaser={base:BASE,loc:loc,log:log,status:status,shrink:shrink};
+})();
+</script>
