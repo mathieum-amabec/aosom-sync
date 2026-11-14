@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.62] - 2026-11-13
+
+### Fixed
+
+- **Price alerts can finally be confirmed.** Signing up for a price alert tracks a Klaviyo "Price Alert Confirmation" event carrying the double opt-in link, but no Klaviyo flow ever existed for that event, so the confirmation email never went out. As of 2026-11-13, 0 of 54 alerts were confirmed and no price-drop email could ever be sent. Each signup still created a Klaviyo profile, which helped fill the free plan. flow-relay now has a `price-alert-confirm` step: the metric is `Ymt2yf` and the template is `UG3wCQ` (source in `docs/klaviyo/price-alert-confirm.html`, FR/EN). It sends the confirmation through a one-recipient campaign at the next run (within 15 min), up to 20 h after signup, since the link expires at 24 h. The step has no flow of its own, so only the "Klaviyo flows work again" guard stops it.
+
 ## [0.5.107.61] - 2026-11-13
 
 ### Added
