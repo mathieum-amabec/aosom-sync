@@ -59,6 +59,8 @@ export interface GeminiResult {
   /** Concatenated non-thought text parts. */
   text: string;
   functionCalls: Array<{ name: string; args: Record<string, unknown>; id?: string }>;
+  /** Generated images (image models only), base64. Thought images are left out. */
+  images: Array<{ mimeType: string; data: string }>;
   finishReason: string | null;
   usage: GeminiUsage | null;
 }
@@ -81,6 +83,12 @@ export interface GeminiGenerateParams {
   maxOutputTokens?: number;
   /** Gemini 3 thinking depth. "minimal" keeps latency and billed thought tokens near zero. */
   thinkingLevel?: "minimal" | "low" | "medium" | "high";
+  /** Image models: ["IMAGE"] (or ["TEXT","IMAGE"]). Image models take no thinkingConfig, so none is sent then. */
+  responseModalities?: Array<"TEXT" | "IMAGE">;
+  /** Image models: output aspect ratio ("4:3", "3:4", "1:1"…) and size ("1K" ≈ 1,290 output tokens). */
+  imageConfig?: { aspectRatio?: string; imageSize?: "1K" | "2K" | "4K" };
+  /** "application/json" asks for a JSON-only text answer. */
+  responseMimeType?: string;
 }
 
 type Fetcher = typeof fetch;
@@ -126,13 +134,16 @@ async function post(model: string, body: unknown): Promise<Record<string, unknow
 /** Budget-gated `generateContent`. Throws LlmBudgetExceededError when the pool is spent. */
 export async function geminiGenerate(params: GeminiGenerateParams, pool: BudgetPool): Promise<GeminiResult> {
   await assertLlmBudget(pool);
-  const body: Record<string, unknown> = {
-    contents: params.contents,
-    generationConfig: {
-      maxOutputTokens: params.maxOutputTokens ?? 1024,
-      thinkingConfig: { thinkingLevel: params.thinkingLevel ?? "minimal" },
-    },
-  };
+  const wantsImage = params.responseModalities?.includes("IMAGE") ?? false;
+  const generationConfig: Record<string, unknown> = { maxOutputTokens: params.maxOutputTokens ?? 1024 };
+  if (wantsImage) {
+    generationConfig.responseModalities = params.responseModalities;
+    if (params.imageConfig) generationConfig.imageConfig = params.imageConfig;
+  } else {
+    generationConfig.thinkingConfig = { thinkingLevel: params.thinkingLevel ?? "minimal" };
+  }
+  if (params.responseMimeType) generationConfig.responseMimeType = params.responseMimeType;
+  const body: Record<string, unknown> = { contents: params.contents, generationConfig };
   if (params.systemInstruction) body.systemInstruction = { parts: [{ text: params.systemInstruction }] };
   if (params.tools?.length) body.tools = [{ functionDeclarations: params.tools }];
 
@@ -164,6 +175,9 @@ export async function geminiGenerate(params: GeminiGenerateParams, pool: BudgetP
     functionCalls: parts
       .filter((p) => p.functionCall?.name)
       .map((p) => ({ name: p.functionCall!.name, args: p.functionCall!.args ?? {}, id: p.functionCall!.id })),
+    images: parts
+      .filter((p) => !p.thought && typeof p.inlineData?.data === "string" && /^image\/(png|jpeg|webp)$/.test(p.inlineData.mimeType))
+      .map((p) => ({ mimeType: p.inlineData!.mimeType, data: p.inlineData!.data })),
     finishReason: typeof candidate?.finishReason === "string" ? candidate.finishReason : null,
     usage,
   };

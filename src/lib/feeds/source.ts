@@ -2,12 +2,16 @@
 // handle + images live there, and only Shopify knows which products are 'active').
 // The pure mapper `shopifyToFeedItems` is unit-tested; `getFeedItems` does the fetch.
 import { SHOPIFY } from "@/lib/config";
-import { STOREFRONT_BASE_URL } from "@/lib/insights";
-import { type FeedItem, mapToGoogleCategory, stripHtml, truncate } from "./feed";
+import { STOREFRONT_BASE_URL, EN_STOREFRONT_BASE_URL } from "@/lib/insights";
+import { type FeedDetail, type FeedItem, mapToGoogleCategory, stripHtml, truncate } from "./feed";
+import { FIT_DIMS_KEY, FIT_DIMS_NAMESPACE, type FitDims } from "../fit-dims";
 import { parseSku } from "../variant-merger";
 import { isSpecImageUrl } from "../selectors/shopify-product";
 import { imageUrlStem } from "../image-compliance-audit";
-import { getCachedImageVerdicts } from "../database";
+import { getCachedImageStyles, getCachedImageVerdicts, getSetting } from "../database";
+import type { AdImageStyle } from "../image-style";
+import { isInternalProduct } from "../internal-product";
+import { outOfSeasonRule, seasonalRules, seasonalRulesFromSetting, SEASONAL_WINDOWS_KEY, type SeasonalRule } from "../sold-out-hide";
 
 export interface ShopifyFeedVariant {
   /** Shopify variant id — drives the `?variant=` deep link on multi-variant products. */
@@ -45,6 +49,8 @@ export interface ShopifyFeedProduct {
   /** English product title from the custom.title_en metafield. Only populated for the
    * EN feed; absent/empty falls back to the FR `title`. */
   titleEn?: string | null;
+  /** English description (custom.body_html_en metafield, HTML). EN feed only; absent/empty falls back to the FR body_html. */
+  bodyEn?: string | null;
   /** Selected product metafields keyed "namespace.key". Only the keys the feed actually
    * reads are populated (see MATERIAL_METAFIELD_KEYS); absent when none are defined. */
   metafields?: Record<string, string | null | undefined> | null;
@@ -63,16 +69,11 @@ const SUPPLIER_WORD = /\baosom\b/i; // single match (no /g — safe with .test()
 const SUPPLIER_GLOBAL = /\baosom\b/gi; // replace-all
 
 // English feeds carry the store's EN identity, "Furnish Direct". That is NOT a separate shop:
-// it is the same 27u5y2-kp store rendered at the `/en` locale path, which is why the EN link
-// is the FR domain + EN_PATH_PREFIX and not a domain of its own.
-//
-// ⚠️ `furnishdirect.ca` is NOT a live domain — it is NXDOMAIN at the .ca registry (verified
-// 2026-08-12 against CIRA; Shopify reports exactly one domain, `ameublodirect.ca`). Pointing
-// feed links there would ship a dead link for every offer. If that domain is ever registered
-// and attached to Shopify as an EN market/alias, swap EN_PATH_PREFIX for the domain here —
-// nothing else in this file needs to change.
+// it is the same 27u5y2-kp store, served in English at the root of furnishdirect.ca (attached to
+// the Canada market next to ameublodirect.ca on 2026-10-25). EN offers link to
+// EN_STOREFRONT_BASE_URL/products/{handle}. The old ameublodirect.ca/en/... URLs now 301 there,
+// and a redirecting landing page is a Merchant Center disapproval — never link them.
 const HOUSE_BRAND_EN = "Furnish Direct";
-const EN_PATH_PREFIX = "/en";
 
 /** Replace any "Aosom" occurrence with the house brand and tidy whitespace.
  * `houseBrand` selects the locale's identity so an EN description never reads
@@ -221,6 +222,50 @@ export function stripImperialDimensions(title: string): string {
   return cleaned.replace(/[\s,/–—-]+$/u, "").trim();
 }
 
+// <g:product_highlight>: Google wants 2–100 short, scannable fragments and recommends 4–6;
+// AI Mode and Gemini quote them when answering "does it…?" questions. Our descriptions
+// already carry exactly that as the "Caractéristiques" bullet list (250/250 sampled
+// 2026-10-30 had one, median 7 bullets), so we reuse the bullets verbatim: no generated text,
+// nothing the product page does not already say.
+const HIGHLIGHT_MAX = 6;
+const HIGHLIGHT_MIN_CHARS = 12; // drops empty and one-word stubs
+// "Assemblage requis" closes most bullet lists: true, but it answers no shopper question.
+const ASSEMBLY_STUB = /^(?:assemblage|montage)\s+(?:requis|nécessaire)$|^assembly\s+required$/i;
+const HIGHLIGHT_MAX_CHARS = 150; // Google's per-highlight limit
+
+/** Up to 6 highlights from the description's <li> bullets, or [] when fewer than 2 qualify
+ * (Google rejects a single highlight). Supplier names and shipping promos are scrubbed the
+ * same way as the description. */
+export function highlightsFromBody(html: string | null | undefined, houseBrand: string = HOUSE_BRAND): string[] {
+  const bullets = Array.from(String(html ?? "").matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi), (m) =>
+    stripPromoText(scrubSupplier(stripHtml(m[1]), houseBrand)).replace(/[\s.;:,]+$/u, ""),
+  ).filter((b) => b.length >= HIGHLIGHT_MIN_CHARS && b.length <= HIGHLIGHT_MAX_CHARS && !ASSEMBLY_STUB.test(b));
+  const unique = Array.from(new Set(bullets)).slice(0, HIGHLIGHT_MAX);
+  return unique.length >= 2 ? unique : [];
+}
+
+export const DIMS_METAFIELD_KEY = `${FIT_DIMS_NAMESPACE}.${FIT_DIMS_KEY}`;
+
+/** <g:product_detail> rows for a variant's assembled size, read from the fit checker's
+ * custom.lc_dims metafield (cm, [width, depth, height], already checked against the product
+ * page by fit-dims-sync). [] when the metafield is missing, malformed or has no entry for
+ * this SKU — a wrong dimension is worse than none. */
+export function dimensionDetails(raw: string | null | undefined, sku: string, english: boolean): FeedDetail[] {
+  if (!raw) return [];
+  let dims: FitDims;
+  try {
+    dims = JSON.parse(raw) as FitDims;
+  } catch {
+    return [];
+  }
+  const p = dims?.s?.[sku]?.p;
+  if (!Array.isArray(p) || p.length !== 3 || !p.every((n) => typeof n === "number" && n > 0)) return [];
+  const fmt = (n: number) => `${english ? String(n) : String(n).replace(".", ",")} cm`;
+  const section = english ? "Dimensions (assembled)" : "Dimensions (assemblé)";
+  const names = english ? ["Width", "Depth", "Height"] : ["Largeur", "Profondeur", "Hauteur"];
+  return p.map((n, i) => ({ section, name: names[i], value: fmt(n) }));
+}
+
 // Either house brand, whichever locale it came from. Used to recognise our OWN name in the
 // Shopify `vendor` field (see resolveBrand).
 const HOUSE_BRANDS = [HOUSE_BRAND, HOUSE_BRAND_EN];
@@ -250,7 +295,7 @@ function resolveBrand(
  *
  * When `opts.preferEnglishTitle` is set the feed switches to the EN locale wholesale, not
  * just the title: the base title comes from `p.titleEn` (custom.title_en metafield, falling
- * back to the FR `p.title` when missing or blank), links point at the `/en` storefront, and
+ * back to the FR `p.title` when missing or blank), links point at furnishdirect.ca, and
  * the house brand becomes "Furnish Direct". Those three move together on purpose — an EN
  * title linking to a FR page, or a "Furnish Direct" brand on a page headed "Ameublo Direct",
  * is exactly the mismatch Pinterest/Google flag. Used by the Pinterest EN feed. */
@@ -278,15 +323,38 @@ export function shopifyToFeedItems(
      * Omit to keep the legacy fail-open behaviour (unit tests, ad-hoc callers).
      */
     verifiedStems?: ReadonlySet<string>;
+    /** FR option value -> EN option value (Shopify EN translations of product option values, e.g. "Blanc crème" -> "Cream white"). EN feed only: variant titles, colour and size come out in English. */
+    optionValueEn?: ReadonlyMap<string, string>;
+    /** Google / Bing only: add product_highlight (description bullets) and product_detail
+     * (assembled size from custom.lc_dims). Off for Meta/Pinterest/Reddit, whose specs
+     * do not define these attributes. */
+    rich?: boolean;
+    /**
+     * Meta only: photo stem -> lifestyle/studio (image_styles cache). When given, an item's
+     * image_link must be a LIFESTYLE photo — Mat's rule (2026-10-30): every Meta ad shows a
+     * lifestyle photo, always. A studio variant/hero photo is swapped for the product's
+     * lifestyle photo, extras are lifestyle-only, and each item is labelled imageStyle so the
+     * ad product sets can keep "studio" items (no lifestyle photo at all) out of ads.
+     * An unclassified photo counts as studio (fail-closed).
+     */
+    imageStyles?: ReadonlyMap<string, AdImageStyle>;
+    /** Seasonal rules (loadSeasonalRules: the same `settings.seasonal_windows` as sold-out-hide.ts).
+     *  Omitted → the default windows. */
+    seasonRules?: SeasonalRule[];
+    /** "now" for the season check; injectable for tests. */
+    now?: Date;
   } = {},
 ): FeedItem[] {
+  const seasonRules = opts.seasonRules ?? seasonalRules();
   const english = opts.preferEnglishTitle === true;
   const houseBrand = english ? HOUSE_BRAND_EN : HOUSE_BRAND;
-  const pathPrefix = english ? EN_PATH_PREFIX : "";
+  const storefrontBase = english ? EN_STOREFRONT_BASE_URL : STOREFRONT_BASE_URL;
   const items: FeedItem[] = [];
   const seenIds = new Set<string>();
   let dupCount = 0;
   let unpublishedCount = 0;
+  let offSeasonCount = 0;
+  const now = opts.now ?? new Date();
   for (const p of products) {
     if (p.status !== "active") continue;          // active status
     // Must be published to the Online Store *now* — an active product is only live on the
@@ -296,13 +364,17 @@ export function shopifyToFeedItems(
     // exclude it rather than ship a dead link.
     if (!p.published_at || new Date(p.published_at).getTime() > Date.now()) { unpublishedCount++; continue; }
     if (!p.handle) continue;
+    // Out-of-season seasonal product (Halloween after Oct 31): sold-out-hide.ts drafts it, this
+    // is the belt-and-braces for the hours between a season end and that job's next run.
+    if (outOfSeasonRule(p.product_type ?? "", seasonRules, now)) { offSeasonCount++; continue; }
     const rawImages = (p.images ?? []).filter((i) => Boolean(i.src));
     if (rawImages.length === 0) continue;         // Google/Pinterest/Meta require an image
     // Drop spec/infographic/dimension-chart/marketing-overlay shots before this product's
     // images ever reach an ad feed. Two independent filters, both applied:
     //  1. isSpecImageUrl — free keyword match. Confirmed 2026-10-01 it matches 0/2612 current
     //     catalog images (Shopify renames every upload to an opaque hash), so it only guards
-    //     a future/un-renamed URL.
+    //     a future/un-renamed URL. It ignores Shopify's `_<uuid>` re-upload suffix, whose hex
+    //     produced "-c0" etc. by chance and dropped good colour photos (2026-10-21).
     //  2. nonCompliantStems — the vision classifier's verdict (image_classifications), the
     //     ONE signal that actually works against today's data. A parasol's
     //     additional_image_link carried an assembly diagram ("Detachable pole with spiral
@@ -311,7 +383,7 @@ export function shopifyToFeedItems(
     // product whose ENTIRE gallery is flagged, so a feed item never ships with no image.
     const nonCompliantStems = opts.nonCompliantStems;
     const cleanImages = rawImages.filter(
-      (i) => !isSpecImageUrl(i.src) && !(nonCompliantStems?.has(imageUrlStem(i.src))),
+      (i) => !isSpecImageUrl(i.src, { ignoreShopifyUuid: true }) && !(nonCompliantStems?.has(imageUrlStem(i.src))),
     );
     const productImages = cleanImages.length > 0 ? cleanImages : rawImages;
     const images = productImages.map((i) => i.src);
@@ -319,8 +391,20 @@ export function shopifyToFeedItems(
     const isVerified = (src: string) => !verified || verified.has(imageUrlStem(src));
     // Hero: the first photo as before, unless it was never verified and a verified one exists.
     const heroSrc = isVerified(images[0]) ? images[0] : (images.find(isVerified) ?? images[0]);
-    const link = `${STOREFRONT_BASE_URL}${pathPrefix}/products/${encodeURIComponent(p.handle)}`;
-    const description = truncate(stripPromoText(scrubSupplier(stripHtml(p.body_html ?? ""), houseBrand)), DESCRIPTION_MAX);
+    const styles = opts.imageStyles;
+    const isLifestyle = (src: string) => styles?.get(imageUrlStem(src)) === "lifestyle";
+    // Lifestyle stand-in for a studio photo: a verified-clean lifestyle shot, or the first
+    // gallery photo when it is lifestyle (the same unverified allowance the hero already has).
+    const lifestyleSrc = styles
+      ? (images.find((src) => isLifestyle(src) && isVerified(src)) ?? (isLifestyle(images[0]) ? images[0] : undefined))
+      : undefined;
+    const link = `${storefrontBase}/products/${encodeURIComponent(p.handle)}`;
+    const rawBody = english && p.bodyEn && p.bodyEn.trim() !== "" ? p.bodyEn : (p.body_html ?? "");
+    const description = truncate(stripPromoText(scrubSupplier(stripHtml(rawBody), houseBrand)), DESCRIPTION_MAX);
+    const highlights = opts.rich ? highlightsFromBody(rawBody, houseBrand) : [];
+    const enMap = english ? opts.optionValueEn : undefined;
+    const toEn = <T extends string | null | undefined>(s: T): T | string =>
+      !enMap || !s ? s : String(s).split(" / ").map((part) => enMap.get(part.trim()) ?? part).join(" / ");
     const brand = resolveBrand(p.vendor, houseBrand);
     const cat = mapToGoogleCategory(p.product_type);
     const variants = (p.variants ?? []).filter((v) => v.sku && String(v.sku).trim() !== "");
@@ -342,7 +426,7 @@ export function shopifyToFeedItems(
       const availability: FeedItem["availability"] =
         tracked && (v.inventory_quantity ?? 0) <= 0 ? "out of stock" : "in stock";
       // Differentiate variant titles when the product has real variants.
-      const variantTitle = multi && v.title && v.title !== "Default Title" ? ` - ${v.title}` : "";
+      const variantTitle = multi && v.title && v.title !== "Default Title" ? ` - ${toEn(v.title)}` : "";
       // Each variant is its own offer (g:id = SKU), so its image must show THAT variant — an
       // "Argent" item carrying the product's black hero photo is an image/variant mismatch.
       // Use the variant's assigned image; fall back to the product's first image only when it
@@ -355,15 +439,21 @@ export function shopifyToFeedItems(
       const variantLink = multi && v.id != null && String(v.id) !== ""
         ? `${link}?variant=${encodeURIComponent(String(v.id))}`
         : link;
+      // Meta: a studio photo gives way to the product's lifestyle photo, even when that one
+      // shows another colour — a lifestyle ad beats an exact-colour packshot (Mat's rule).
+      const naturalSrc = ownImage ? ownImage.src : heroSrc;
+      const imageLink = styles && !isLifestyle(naturalSrc) && lifestyleSrc ? lifestyleSrc : naturalSrc;
       items.push({
         id,
         itemGroupId: multi ? String(p.id) : null,
         title: truncate(stripPromoText(stripImperialDimensions(scrubSupplier(`${baseTitle}${variantTitle}`, houseBrand))), 150),
         description,
         link: variantLink,
-        imageLink: ownImage ? ownImage.src : heroSrc,
-        // Secondary images are what the Meta carousel cycles through: only verified-clean ones.
-        additionalImageLinks: images.filter((src) => src !== (ownImage ? ownImage.src : heroSrc) && isVerified(src)),
+        imageLink,
+        // Secondary images are what the Meta carousel cycles through: only verified-clean ones
+        // (and, for Meta, lifestyle ones).
+        additionalImageLinks: images.filter((src) => src !== imageLink && isVerified(src) && (!styles || isLifestyle(src))),
+        ...(styles ? { imageStyle: isLifestyle(imageLink) ? ("lifestyle" as const) : ("studio" as const) } : {}),
         price,
         compareAtPrice,
         availability,
@@ -373,19 +463,23 @@ export function shopifyToFeedItems(
         // distinguishes "Gris foncé" from "Gris", which the 2-letter SKU suffix cannot), so
         // prefer it and fall back to the SKU suffix (COLOR_MAP) when the product has no
         // colour option. English option values are mapped to French for the FR market.
-        color: frenchifyColor(optionValue(p, v, COLOUR_OPTION)) ?? parseSku(id).color,
+        color: toEn(frenchifyColor(optionValue(p, v, COLOUR_OPTION)) ?? parseSku(id).color) as string | null | undefined,
         // <g:size> from the Shopify "Taille" option. Values are Aosom's imperial dimension
         // strings; Google accepts free-form size text, and having it lets Shopping tell
         // same-product variants apart in the same item_group.
-        size: optionValue(p, v, SIZE_OPTION),
+        size: toEn(optionValue(p, v, SIZE_OPTION)) as string | null | undefined,
         // <g:material> from a Shopify metafield only — never inferred. Product-level, so
         // every variant of a product shares it. Null today: no material metafield exists.
         material: materialFromMetafields(p.metafields),
+        ...(opts.rich
+          ? { highlights, details: dimensionDetails(p.metafields?.[DIMS_METAFIELD_KEY], id, english) }
+          : {}),
         productType: p.product_type ?? "",
         googleCategoryId: cat.id,
       });
     }
   }
+  if (offSeasonCount > 0) console.warn(`[FEED] excluded ${offSeasonCount} out-of-season products`);
   if (unpublishedCount > 0) console.warn(`[FEED] excluded ${unpublishedCount} active products not published to the Online Store (storefront would 404)`);
   if (dupCount > 0) console.warn(`[FEED] skipped ${dupCount} variants with duplicate SKUs (g:id must be unique)`);
   return items;
@@ -500,6 +594,69 @@ export async function fetchTitleEnMap(): Promise<Map<string, string>> {
   return map;
 }
 
+/** Fetch product-id -> English description HTML (custom.body_html_en). Same pass shape as fetchTitleEnMap. */
+export async function fetchBodyEnMap(): Promise<Map<string, string>> {
+  const token = process.env.SHOPIFY_ACCESS_TOKEN;
+  if (!token) throw new Error("SHOPIFY_ACCESS_TOKEN not configured");
+  const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}/graphql.json`;
+  const query = `query BodyEn($cursor: String) {
+    products(first: 100, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { legacyResourceId metafield(namespace: "custom", key: "body_html_en") { value } }
+    }
+  }`;
+  const map = new Map<string, string>();
+  let cursor: string | null = null;
+  let pages = 0;
+  do {
+    const body = await graphqlWithRetry(url, token, query, { cursor });
+    if (body.errors?.length) throw new Error(`Shopify GraphQL errors: ${body.errors.map((e) => e.message).join("; ")}`);
+    const conn = (body.data as { products?: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<{ legacyResourceId: string; metafield: { value: string } | null }> } })?.products;
+    if (!conn) throw new Error("Shopify GraphQL returned no products connection");
+    for (const node of conn.nodes) {
+      const value = node.metafield?.value?.trim();
+      if (value) map.set(String(node.legacyResourceId), value);
+    }
+    cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+    pages++;
+  } while (cursor && pages < MAX_PAGES * 3);
+  return map;
+}
+
+/** FR option value -> EN option value, from Shopify EN translations of product option values. Never throws: a failure degrades to French option text, not a dead feed. */
+export async function fetchOptionValueEnMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  try {
+    const token = process.env.SHOPIFY_ACCESS_TOKEN;
+    if (!token) return map;
+    const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}/graphql.json`;
+    const query = `query OptEn($cursor: String) {
+      translatableResources(first: 250, after: $cursor, resourceType: PRODUCT_OPTION_VALUE) {
+        pageInfo { hasNextPage endCursor }
+        nodes { translatableContent { key value } translations(locale: "en") { key value } }
+      }
+    }`;
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const body = await graphqlWithRetry(url, token, query, { cursor });
+      if (body.errors?.length) return map;
+      const conn = (body.data as { translatableResources?: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: Array<{ translatableContent: Array<{ key: string; value: string }>; translations: Array<{ key: string; value: string }> }> } })?.translatableResources;
+      if (!conn) return map;
+      for (const n of conn.nodes) {
+        const fr = n.translatableContent.find((c) => c.key === "name")?.value?.trim();
+        const en = n.translations.find((t) => t.key === "name")?.value?.trim();
+        if (fr && en && !map.has(fr)) map.set(fr, en);
+      }
+      cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+      pages++;
+    } while (cursor && pages < 100);
+  } catch (err) {
+    console.warn("[FEED] option-value EN translations unavailable (non-fatal):", err);
+  }
+  return map;
+}
+
 /** Fetch product-id → material for whichever of MATERIAL_METAFIELD_KEYS is defined.
  *
  * Gated on a definition existing, so on a store with no material metafield (which is the
@@ -559,9 +716,47 @@ export async function fetchMaterialMap(): Promise<Map<string, string>> {
   }
 }
 
-/** Fetch all products from Shopify (paginated) and return feed items.
- * Pass `{ english: true }` to overlay custom.title_en titles for the Pinterest EN feed. */
-export async function getFeedItems(opts: { english?: boolean } = {}): Promise<FeedItem[]> {
+/** Fetch product-id → raw custom.lc_dims JSON (the fit checker's per-SKU sizes). Rich feeds
+ * only. Never throws: missing dimensions degrade to omitted product_detail rows. */
+export async function fetchDimsMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const token = process.env.SHOPIFY_ACCESS_TOKEN;
+  if (!token) return map;
+  const url = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}/graphql.json`;
+  const query = `query Dims($cursor: String) {
+    products(first: 250, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { legacyResourceId metafield(namespace: "${FIT_DIMS_NAMESPACE}", key: "${FIT_DIMS_KEY}") { value } }
+    }
+  }`;
+  try {
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const body = await graphqlWithRetry(url, token, query, { cursor });
+      const conn = (body.data as {
+        products?: {
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+          nodes: Array<{ legacyResourceId: string; metafield: { value: string } | null }>;
+        };
+      })?.products;
+      if (!conn) break;
+      for (const node of conn.nodes) {
+        const value = node.metafield?.value?.trim();
+        if (value) map.set(String(node.legacyResourceId), value);
+      }
+      cursor = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+      pages++;
+    } while (cursor && pages < MAX_PAGES);
+  } catch (err) {
+    console.warn("[FEED] lc_dims lookup failed (non-fatal, product_detail omitted):", err);
+  }
+  return map;
+}
+
+/** Every Shopify product (REST, paginated) with the fields the feeds need. Throws rather than
+ * return a truncated catalog. Shared by getFeedItems and the image-styles sync. */
+export async function fetchShopifyFeedProducts(): Promise<ShopifyFeedProduct[]> {
   const token = process.env.SHOPIFY_ACCESS_TOKEN;
   if (!token) throw new Error("SHOPIFY_ACCESS_TOKEN not configured");
   const base = `https://${SHOPIFY.STORE}/admin/api/${SHOPIFY.API_VERSION}`;
@@ -574,13 +769,35 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
     const res = await fetchWithRetry(`${base}/products.json?${params}`, token);
     if (!res.ok) throw new Error(`Shopify products fetch failed: ${res.status}`);
     const data = (await res.json()) as { products: ShopifyFeedProduct[] };
-    products.push(...data.products);
+    products.push(...data.products.filter((p) => !isInternalProduct(p)));
     pageInfo = parseNextPageInfo(res.headers.get("Link"));
     pages++;
   } while (pageInfo && pages < MAX_PAGES);
 
   // Fail loud rather than silently serve (and CDN-cache for 24h) a truncated catalog.
   if (pageInfo) throw new Error(`Feed pagination exceeded ${MAX_PAGES} pages — catalog larger than expected; refusing to serve a partial feed`);
+  return products;
+}
+
+/** Fetch all products from Shopify (paginated) and return feed items.
+ * Pass `{ english: true }` to overlay custom.title_en titles for the Pinterest EN feed,
+ * `{ rich: true }` (Google, Bing) for product_highlight + product_detail, and
+ * `{ lifestyle: true }` (Meta) for lifestyle-only images + the imageStyle label. */
+/** Seasonal rules from `settings.seasonal_windows`: the SAME source as the sold-out-hide job,
+ *  so a window moved without a deploy moves the feeds too. A settings read failure falls back
+ *  to the default windows (the feed must still be served). */
+export async function loadSeasonalRules(): Promise<SeasonalRule[]> {
+  try {
+    return seasonalRulesFromSetting(await getSetting(SEASONAL_WINDOWS_KEY));
+  } catch {
+    return seasonalRules();
+  }
+}
+
+export async function getFeedItems(opts: { english?: boolean; rich?: boolean; lifestyle?: boolean } = {}): Promise<FeedItem[]> {
+  const products = await fetchShopifyFeedProducts();
+  const seasonRules = await loadSeasonalRules();
+  const imageStyles = opts.lifestyle ? await fetchImageStyles(products) : undefined;
 
   // Overlay <g:material> from its metafield. No-op (one cheap call) until one is defined.
   const materialMap = await fetchMaterialMap();
@@ -592,18 +809,45 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
     }
   }
 
+  if (opts.rich) {
+    const dimsMap = await fetchDimsMap();
+    for (const p of products) {
+      const value = dimsMap.get(String(p.id));
+      if (value) p.metafields = { ...(p.metafields ?? {}), [DIMS_METAFIELD_KEY]: value };
+    }
+  }
+
   if (opts.english) {
-    const titleEnMap = await fetchTitleEnMap();
+    const [titleEnMap, bodyEnMap, optionValueEn] = await Promise.all([fetchTitleEnMap(), fetchBodyEnMap().catch(() => new Map<string, string>()), fetchOptionValueEnMap()]);
     for (const p of products) {
       const en = titleEnMap.get(String(p.id));
       if (en) p.titleEn = en;
+      const bodyEn = bodyEnMap.get(String(p.id));
+      if (bodyEn) p.bodyEn = bodyEn;
     }
-    const { nonCompliant, verified } = await fetchImageVerdictStems(products);
-    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems: nonCompliant, verifiedStems: verified });
+    const { nonCompliant, verified } = await fetchImageVerdictStems(products, { strict: opts.lifestyle });
+    return shopifyToFeedItems(products, { preferEnglishTitle: true, nonCompliantStems: nonCompliant, verifiedStems: verified, optionValueEn, rich: opts.rich, imageStyles, seasonRules });
   }
 
-  const { nonCompliant, verified } = await fetchImageVerdictStems(products);
-  return shopifyToFeedItems(products, { nonCompliantStems: nonCompliant, verifiedStems: verified });
+  const { nonCompliant, verified } = await fetchImageVerdictStems(products, { strict: opts.lifestyle });
+  return shopifyToFeedItems(products, { nonCompliantStems: nonCompliant, verifiedStems: verified, rich: opts.rich, imageStyles, seasonRules });
+}
+
+/** Below this share of classified photos the style cache is not trusted (fresh deploy, or the
+ *  cron fell behind): labelling most of the catalog "studio" would empty the ad product sets. */
+export const MIN_STYLE_COVERAGE = 0.9;
+
+/** Load lifestyle/studio styles for every product photo (Meta feeds). THROWS when the cache
+ *  is unreachable or under MIN_STYLE_COVERAGE: the feed route then answers 500 and Meta keeps
+ *  the catalog it already has, instead of ingesting a feed that strips every ad of products. */
+async function fetchImageStyles(products: ShopifyFeedProduct[]): Promise<Map<string, AdImageStyle>> {
+  const stems = [...new Set(products.filter((p) => p.status === "active").flatMap((p) => (p.images ?? []).map((i) => imageUrlStem(i.src)).filter(Boolean)))];
+  const styles = await getCachedImageStyles(stems);
+  const coverage = stems.length === 0 ? 1 : styles.size / stems.length;
+  if (coverage < MIN_STYLE_COVERAGE) {
+    throw new Error(`image_styles coverage ${(coverage * 100).toFixed(1)}% < ${MIN_STYLE_COVERAGE * 100}% — run /api/cron/image-styles; refusing to serve a Meta feed that would drop products from ads`);
+  }
+  return styles;
 }
 
 /** Bulk-load the vision classifier's verdicts (image_classifications) for every image in
@@ -613,6 +857,7 @@ export async function getFeedItems(opts: { english?: boolean } = {}): Promise<Fe
  *  classified yet"). See shopifyToFeedItems's nonCompliantStems doc comment. */
 async function fetchImageVerdictStems(
   products: ShopifyFeedProduct[],
+  opts: { strict?: boolean } = {},
 ): Promise<{ nonCompliant: Set<string>; verified: Set<string> }> {
   const nonCompliant = new Set<string>();
   const verified = new Set<string>();
@@ -621,6 +866,10 @@ async function fetchImageVerdictStems(
     const verdicts = await getCachedImageVerdicts(stems);
     for (const [stem, v] of verdicts) (v.compliant ? verified : nonCompliant).add(stem);
   } catch (err) {
+    // Meta (lifestyle) feeds: an empty verified set would leave only images[0] as a lifestyle
+    // candidate and label most of the catalog "studio", emptying the ad product sets. Fail
+    // the feed instead — Meta keeps its current catalog until the next fetch.
+    if (opts.strict) throw err;
     // Fail-closed for secondary images: an empty `verified` set means no additional images,
     // the hero image still ships. Better a plain feed for 10 minutes than text-laden carousels.
     console.warn(`[FEED] vision-classification lookup failed (non-fatal, additional images withheld):`, err);

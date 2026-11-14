@@ -21,7 +21,7 @@ export const STYLE_LABEL: Record<AmeubloStyle, { fr: string; en: string }> = {
 
 export const SHOP_URL: Record<Lang, string> = {
   fr: "https://ameublodirect.ca",
-  en: "https://furnishdirect.ca",
+  en: "https://ameublodirect.ca/en", // furnishdirect.ca is NXDOMAIN (not registered) — EN = /en locale
 };
 
 export function productUrl(handle: string | null | undefined, lang: Lang): string {

@@ -4,6 +4,7 @@
  * measurement step reads later. Created lazily so this feature adds no migration to database.ts.
  */
 import { ensureSchema } from "@/lib/database";
+import { productKey } from "./live";
 import type { FormatId, RunStatus, SlotName } from "./types";
 
 let ready: Promise<void> | null = null;
@@ -75,7 +76,12 @@ export async function savePost(p: {
   });
 }
 
-/** SKUs used by a queued post within the last `days` days — the repost cooldown. */
+/**
+ * The repost cooldown: every SKU used by a queued post within the last `days` days, PLUS a
+ * `pid:<shopify_product_id>` key (see live.ts `productKey`) for the Shopify product each SKU
+ * belongs to — so the other colours of a posted product stay out too. The product ids are
+ * resolved through `products` at read time, which also covers rows written before this existed.
+ */
 export async function recentSkus(days: number): Promise<Set<string>> {
   await ensureTable();
   const db = await ensureSchema();
@@ -90,6 +96,15 @@ export async function recentSkus(days: number): Promise<Set<string>> {
     } catch {
       /* ignore a malformed row */
     }
+  }
+  const skus = [...out];
+  for (let i = 0; i < skus.length; i += 200) {
+    const chunk = skus.slice(i, i + 200);
+    const p = await db.execute({
+      sql: `SELECT DISTINCT shopify_product_id FROM products WHERE sku IN (${chunk.map(() => "?").join(",")}) AND shopify_product_id IS NOT NULL AND shopify_product_id != ''`,
+      args: chunk,
+    });
+    for (const row of p.rows) out.add(productKey(String((row as unknown as { shopify_product_id: string }).shopify_product_id)));
   }
   return out;
 }

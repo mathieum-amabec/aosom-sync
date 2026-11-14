@@ -29,6 +29,13 @@ const EN_TO_FR: Record<string, string> = {
   "high gloss marble-effect black": "Noir lustré effet marbre", "log colour": "Couleur bois",
   "multi colour": "Multicolore", multicolour: "Multicolore", "multi-colored": "Multicolore", "multi-coloured": "Multicolore",
   camouflage: "Camouflage", "flower pattern": "Motif floral", carbonized: "Carbonisé",
+  // 2026-10-18 audit: supplier colours that stayed in English on the store.
+  "earthy yellow": "Jaune terreux", espresso: "Espresso", teal: "Sarcelle", "light lilac": "Lilas pâle", lilac: "Lilas",
+  peach: "Pêche", cherry: "Cerise", "distressed grey": "Gris vieilli", "distressed black": "Noir vieilli", "distressed white": "Blanc vieilli",
+  "high gloss black": "Noir lustré", "high gloss white": "Blanc lustré", "black wood grain": "Grain de bois noir",
+  "distressed light grey": "Gris pâle vieilli", "distressed light brown": "Brun pâle vieilli", "distressed dark grey": "Gris foncé vieilli",
+  navy: "Bleu marine", "marble white": "Blanc marbre", "cement grey": "Gris ciment", "grey wash": "Gris délavé", "stone grey": "Gris pierre",
+  "mixed colour": "Multicolore", "rainbow-colored": "Multicolore", "black white": "Noir et blanc", "teak wood effect": "Effet teck",
 };
 
 /** FR label → EN, for the EN-locale translation of existing French option values. */
@@ -49,6 +56,11 @@ const FR_TO_EN: Record<string, string> = {
   camouflage: "Camouflage", "motif floral": "Flower pattern", carbonisé: "Carbonized",
   "couleurs pâles": "Light colours", "couleurs foncées": "Dark colours", "blanc vieilli": "Antique white", "blanc lustré": "Glossy white",
   "blanc effet marbre": "Marble-effect white", défaut: "Default",
+  "jaune terreux": "Earthy yellow", espresso: "Espresso", sarcelle: "Teal", "lilas pâle": "Light lilac", lilas: "Lilac",
+  pêche: "Peach", cerise: "Cherry", "gris vieilli": "Distressed grey", "noir vieilli": "Distressed black",
+  "noir lustré": "High-gloss black", "grain de bois noir": "Black wood grain", "gris pâle vieilli": "Distressed light grey",
+  "brun pâle vieilli": "Distressed light brown", "gris foncé vieilli": "Distressed dark grey", "blanc marbre": "Marble white",
+  "gris ciment": "Cement grey", "gris délavé": "Grey wash", "gris pierre": "Stone grey", "effet teck": "Teak wood effect",
 };
 
 const SEPARATOR = /\s*(?:,|&|\band\b|\bet\b)\s*/i;

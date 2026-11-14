@@ -128,3 +128,14 @@ describe("computePublishReconcile — write cap", () => {
     expect(PUBLISH_WRITE_CAP).toBe(67);
   });
 });
+
+describe("computePublishReconcile — hors-saison (sold-out-hide.ts)", () => {
+  it("never republishes an out-of-season draft, even sellable", () => {
+    const plan = computePublishReconcile({
+      baseline: [row("H-1", "PH")],
+      csvQtyBySku: csv([["H-1", SELLABLE]]),
+      stateById: states([["PH", st("draft", false, ["hors-saison"])]]),
+    });
+    expect(plan.actions).toEqual([]);
+  });
+});

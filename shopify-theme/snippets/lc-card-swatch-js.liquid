@@ -1,0 +1,29 @@
+{%- comment -%} Card colour dots (lc-card-swatch) — styles + hover swap. Moved out of card-product.liquid on 2026-11-04 (it was printed once per card, 24× per collection page). Rendered once from layout/theme.liquid. {%- endcomment -%}
+<style>
+  .lc-card-swatches{position:relative;z-index:2;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:.5rem 0 .15rem}
+  .lc-card-swatch{flex:0 0 auto;width:2.2rem;height:2.2rem;border-radius:50%;background:var(--sw,#ddd);border:1px solid rgba(0,0,0,.2);box-shadow:inset 0 0 0 2px #fff;display:inline-flex;align-items:center;justify-content:center;font-size:.7rem;color:#1A2340;text-decoration:none}
+  .lc-card-swatch:hover,.lc-card-swatch.is-on{outline:2px solid #1A2340;outline-offset:1px}
+  .lc-card-swatch--txt{background:#FAFAF8;font-weight:700;text-transform:uppercase}
+  .lc-card-swatch-more{font-size:.8rem;color:#797068;font-weight:600}
+</style>
+<script>
+  (function(){
+    if (window.__lcCardSw) return; window.__lcCardSw = true;
+    function img(card){ return card && card.querySelector('.card__media img'); }
+    document.addEventListener('mouseover', function(e){
+      var sw = e.target.closest && e.target.closest('.lc-card-swatch'); if (!sw) return;
+      var card = sw.closest('.card-wrapper, .card'); var im = img(card); if (!im) return;
+      if (!im.dataset.lcOrig) { im.dataset.lcOrig = im.getAttribute('src') || ''; im.dataset.lcOrigSet = im.getAttribute('srcset') || ''; }
+      var to = sw.getAttribute('data-img');
+      if (to) { im.removeAttribute('srcset'); im.src = to; }
+      else { im.src = im.dataset.lcOrig; if (im.dataset.lcOrigSet) im.setAttribute('srcset', im.dataset.lcOrigSet); }
+      card.querySelectorAll('.lc-card-swatch.is-on').forEach(function(x){ x.classList.remove('is-on'); }); sw.classList.add('is-on');
+    });
+    document.addEventListener('mouseout', function(e){
+      var box = e.target.closest && e.target.closest('.lc-card-swatches'); if (!box || box.contains(e.relatedTarget)) return;
+      var card = box.closest('.card-wrapper, .card'); var im = img(card); if (!im || !im.dataset.lcOrig) return;
+      im.src = im.dataset.lcOrig; if (im.dataset.lcOrigSet) im.setAttribute('srcset', im.dataset.lcOrigSet);
+      box.querySelectorAll('.is-on').forEach(function(x){ x.classList.remove('is-on'); });
+    });
+  })();
+</script>

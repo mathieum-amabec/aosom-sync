@@ -139,8 +139,9 @@ export async function runStaleCatalogDraft(maxAgeDays = STALE_DAYS): Promise<Sta
   // reactivate ONLY the products WE auto-drafted (never a product an operator drafted by
   // hand) when they return to the feed with sellable stock. Without the marker, a
   // stale-catalog draft could never come back live. See stock-reconcile.planStockActions.
-  const draftAndTag = (shopifyId: string) =>
-    updateShopifyProduct(shopifyId, { status: "draft", tags: addAutoDraftedTag(tagsById.get(shopifyId) ?? []) });
+  const draftAndTag = async (shopifyId: string) => {
+    await updateShopifyProduct(shopifyId, { status: "draft", tags: addAutoDraftedTag(tagsById.get(shopifyId) ?? []) });
+  };
 
   const result = await computeStaleDrafts(stale, statusById, draftAndTag, RATE_LIMIT_MS, excludedIds);
   return { ...result, relinked };

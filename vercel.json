@@ -4,8 +4,28 @@
   ],
   "crons": [
     {
+      "path": "/api/cron/fit-dims",
+      "schedule": "15 21 * * *"
+    },
+    {
+      "path": "/api/cron/image-styles",
+      "schedule": "40 */4 * * *"
+    },
+    {
       "path": "/api/cron/category-guard",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/appliance-warranty-guard",
+      "schedule": "15 10 * * *"
+    },
+    {
+      "path": "/api/cron/margin-guard",
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/variant-photo-guard",
+      "schedule": "30 11 * * *"
     },
     {
       "path": "/api/cron/sync",
@@ -37,7 +57,7 @@
     },
     {
       "path": "/api/cron/auto-import",
-      "schedule": "*/10 7-20 * * *"
+      "schedule": "*/5 7-20 * * *"
     },
     {
       "path": "/api/cron/blog",
@@ -84,6 +104,10 @@
       "schedule": "0 22 * * *"
     },
     {
+      "path": "/api/cron/sold-out-hide",
+      "schedule": "20 10,16,22 * * *"
+    },
+    {
       "path": "/api/cron/csv-precache",
       "schedule": "0 4 * * *"
     },
@@ -114,6 +138,10 @@
     {
       "path": "/api/cron/feed-integrity",
       "schedule": "45 9 * * *"
+    },
+    {
+      "path": "/api/cron/site-health",
+      "schedule": "30 10 * * *"
     },
     {
       "path": "/api/cron/draft-ttl",
@@ -172,12 +200,40 @@
       "schedule": "15 11 * * *"
     },
     {
+      "path": "/api/cron/reel-price-guard",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/reel-price-guard",
+      "schedule": "0 20 * * *"
+    },
+    {
       "path": "/api/cron/costway-sync",
       "schedule": "0 16 * * *"
     },
     {
+      "path": "/api/cron/costway-reprice",
+      "schedule": "45 16 * * *"
+    },
+    {
       "path": "/api/cron/bing-submit",
       "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/relance-paiement",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/flow-relay",
+      "schedule": "7,22,37,52 * * * *"
+    },
+    {
+      "path": "/api/cron/cart-relay",
+      "schedule": "12,42 * * * *"
+    },
+    {
+      "path": "/api/cron/email-flows",
+      "schedule": "4,19,34,49 * * * *"
     }
   ]
 }

@@ -8,6 +8,7 @@ import { DEFAULT_PUBLICATION_SCHEDULE, DEFAULT_BLOG_SCHEDULE } from "@/lib/confi
 import type { AosomProduct } from "@/types/aosom";
 import { startOfUtcDayEpoch, epochDaysAgo } from "@/lib/dashboard-metrics";
 import { buildCatalogWhere, PRODUCT_HAS_DISCOUNT_SQL } from "@/lib/catalog-filters";
+import type { AdImageStyle } from "@/lib/image-style";
 import { isSqliteUtc } from "@/lib/draft-scheduler";
 import { usageLoggingEnabled, withUsageLogging } from "@/lib/turso-usage";
 
@@ -661,6 +662,17 @@ async function _initSchemaImpl(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_image_classifications_compliant ON image_classifications(compliant)`,
 
+    // ── Ad photo style cache (lifestyle vs studio) ───────────────────────────
+    // One row per PHOTO, keyed like image_classifications (imageUrlStem). Pixel heuristic
+    // only (src/lib/image-style.ts), zero tokens. Filled by /api/cron/image-styles; read by
+    // the Meta feeds so catalog ads only ever show lifestyle photos (Mat, 2026-10-30).
+    `CREATE TABLE IF NOT EXISTS image_styles (
+      url_stem TEXT PRIMARY KEY,
+      style TEXT NOT NULL,           -- 'lifestyle' | 'studio'
+      sample_url TEXT,
+      created_at INTEGER DEFAULT (strftime('%s','now'))
+    )`,
+
     // ── pos-1 image review queue (operator approval) ─────────────────────────
     // Populated by the sync's image-compliance pass when it finds a pos-1 image carrying a
     // marketing/measurement overlay AND a clean alternative in the same image set. NOTHING
@@ -727,6 +739,18 @@ async function _initSchemaImpl(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_item_no ON costway_products(item_no)`,
     `CREATE INDEX IF NOT EXISTS idx_costway_products_top_category ON costway_products(top_category)`,
+    // One row per Costway SKU whose stock moved between two daily syncs (2026-10-17). A drop is a
+    // proxy for what sells at Costway, the same way price_history stock_change is for Aosom.
+    `CREATE TABLE IF NOT EXISTS costway_stock_history (
+      sku TEXT NOT NULL,
+      item_no TEXT,
+      old_qty INTEGER,
+      new_qty INTEGER,
+      old_ca_qty INTEGER,
+      new_ca_qty INTEGER,
+      detected_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_costway_stock_history_at ON costway_stock_history(detected_at)`,
     // PDP "Complétez la pièce" suggestions (assistant mode=complementary), cached per product
     // so the LLM runs once per product per TTL instead of on every product-page view
     // (~1,100 calls/day burned the whole assistant pool by ~20:30 Montréal). See
@@ -757,6 +781,87 @@ async function _initSchemaImpl(): Promise<void> {
       note TEXT,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    // Roue de bienvenue: one spin per normalized email. The row is reserved BEFORE the Shopify code exists
+    // (code NULL), so two concurrent spins for one email cannot both create a code. See welcome-wheel.ts.
+    `CREATE TABLE IF NOT EXISTS wheel_spins (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email_key TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL,
+      prize_key TEXT NOT NULL,
+      code TEXT,
+      discount_id TEXT,
+      expires_at INTEGER,
+      ip_hash TEXT,
+      locale TEXT,
+      created_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_wheel_spins_ip ON wheel_spins(ip_hash, created_at)`,
+    // "Bientôt" teasers (Vois-le chez toi, Ameublo décorateur): anonymous interest events, no PII. visitor_hash is
+    // a hash of a random id the browser keeps, so unique visitors can be counted. See src/lib/teaser.ts.
+    // source = where the shopper met the teaser ("pdp" photo pill, "sheet" link inside it, "chat" assistant button),
+    // so two entry points never blend into one funnel. One row per (feature, event, source, visitor).
+    `CREATE TABLE IF NOT EXISTS teaser_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      feature TEXT NOT NULL,
+      event TEXT NOT NULL,
+      source TEXT NOT NULL,
+      visitor_hash TEXT NOT NULL,
+      handle TEXT,
+      locale TEXT,
+      created_at INTEGER NOT NULL,
+      UNIQUE (feature, event, source, visitor_hash)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_teaser_events_feature ON teaser_events(feature, event, created_at)`,
+    // "M'avertir au lancement": one row per (feature, email), used for ONE launch notice, never for newsletters, and
+    // to be deleted once that notice is sent. consent_text keeps the exact wording the shopper agreed to (CASL proof).
+    `CREATE TABLE IF NOT EXISTS teaser_signups (
+      feature TEXT NOT NULL,
+      email_key TEXT NOT NULL,
+      email TEXT NOT NULL,
+      source TEXT NOT NULL,
+      consent_text TEXT NOT NULL,
+      locale TEXT,
+      handle TEXT,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (feature, email_key)
+    )`,
+    // AI room visualiser / decorator calls once switched on: per-IP daily cap (ip_hash), never the photo itself.
+    `CREATE TABLE IF NOT EXISTS visualiser_uses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      ip_hash TEXT NOT NULL,
+      handle TEXT,
+      ok INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_visualiser_uses_ip ON visualiser_uses(ip_hash, created_at)`,
+    // Own email engine (Resend, src/lib/email/): addresses never to mail again (unsubscribe, hard bounce, spam
+    // complaint). email = trimmed lower-case address. The first reason recorded is kept.
+    `CREATE TABLE IF NOT EXISTS email_suppressions (
+      email TEXT PRIMARY KEY,
+      reason TEXT NOT NULL,
+      source TEXT NOT NULL,
+      detail TEXT,
+      created_at INTEGER NOT NULL,
+      in_klaviyo INTEGER NOT NULL DEFAULT 0
+    )`,
+    // One row per email the engine tried to send. idem_key (flow + step + trigger) makes a second send of the same
+    // email impossible, even from two overlapping cron runs. status: sending → sent | failed | skipped, then the
+    // Resend webhook moves sent → delivered → opened → clicked (or bounced / complained).
+    `CREATE TABLE IF NOT EXISTS email_sends (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      idem_key TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL,
+      flow TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      resend_id TEXT,
+      error TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_email_sends_resend ON email_sends(resend_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_email_sends_flow ON email_sends(flow, created_at)`,
   ];
 
   const allStatements = [...schemaStatements, ...legacyStatements];
@@ -852,6 +957,13 @@ async function _initSchemaImpl(): Promise<void> {
     if (!avCols.has(col)) {
       await runBatch(`ameublo_test_videos add ${col}`, [{ sql: `ALTER TABLE ameublo_test_videos ADD COLUMN ${col} ${ddl}`, args: [] }]);
     }
+  }
+
+  // email_suppressions.in_klaviyo (0 = to push, 1 = in Klaviyo, 2 = Klaviyo refused it for good): added after the
+  // table's first version, so a DB created by an early preview gets it here.
+  const esInfo = await db.execute(`PRAGMA table_info(email_suppressions)`);
+  if (!esInfo.rows.some((r) => String((r as unknown as Record<string, unknown>).name) === "in_klaviyo")) {
+    await runBatch("email_suppressions add in_klaviyo", [{ sql: `ALTER TABLE email_suppressions ADD COLUMN in_klaviyo INTEGER NOT NULL DEFAULT 0`, args: [] }]);
   }
 
   // costway_products.shopify_product_id: the Shopify product a Costway variant was imported as.
@@ -2639,7 +2751,7 @@ function utcDayKey(): string {
  * can never exhaust the 'assistant' pool that the public storefront /api/assistant
  * draws from. Each pool has its own daily counter row and its own budget env var.
  */
-export type LlmBudgetPool = "assistant" | "batch" | "maintenance" | "video" | "import";
+export type LlmBudgetPool = "assistant" | "batch" | "maintenance" | "video" | "import" | "visualiser" | "decorateur";
 
 /** Tokens the given pool consumed so far today (UTC). 0 when no row yet. */
 export async function getDailyLlmTokensUsed(pool: LlmBudgetPool): Promise<number> {
@@ -2673,6 +2785,10 @@ export interface LlmUsageDay {
   video: number;
   /** Automatic daily catalogue import (src/lib/auto-import) — isolated so it can never starve `batch`. */
   import: number;
+  /** Storefront "Voyez-le chez vous" image placement (room-visualizer.ts), off until `visualiser_enabled` = "1". */
+  visualiser: number;
+  /** Storefront "Ameublo décorateur" (room reading + assistant picks), off until `decorateur_enabled` = "1". */
+  decorateur: number;
 }
 
 /**
@@ -2692,13 +2808,13 @@ export async function getLlmUsageWindow(days: number): Promise<LlmUsageDay[]> {
     args: [keys[0]],
   });
   const byDay = new Map<string, LlmUsageDay>(
-    keys.map((day) => [day, { day, assistant: 0, batch: 0, maintenance: 0, video: 0, import: 0 }]),
+    keys.map((day) => [day, { day, assistant: 0, batch: 0, maintenance: 0, video: 0, import: 0, visualiser: 0, decorateur: 0 }]),
   );
   for (const row of res.rows) {
     const entry = byDay.get(row.day as string);
     if (!entry) continue; // row older than the window (the >= bound is inclusive of keys[0])
     const pool = row.pool as LlmBudgetPool;
-    if (pool === "assistant" || pool === "batch" || pool === "maintenance" || pool === "video" || pool === "import") {
+    if (pool === "assistant" || pool === "batch" || pool === "maintenance" || pool === "video" || pool === "import" || pool === "visualiser" || pool === "decorateur") {
       entry[pool] = Number(row.tokens_used) || 0;
     }
   }
@@ -3447,6 +3563,202 @@ export async function updateUserPassword(id: number, passwordHash: string): Prom
   await db.execute({ sql: `UPDATE users SET password_hash = ? WHERE id = ?`, args: [passwordHash, id] });
 }
 
+// ─── Roue de bienvenue ───────────────────────────────────────────────
+
+export interface WheelSpinRow {
+  id: number;
+  email_key: string;
+  email: string;
+  prize_key: string;
+  code: string | null;
+  discount_id: string | null;
+  expires_at: number | null;
+  locale: string | null;
+  created_at: number;
+}
+
+export async function getWheelSpin(emailKey: string): Promise<WheelSpinRow | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT * FROM wheel_spins WHERE email_key = ?`, args: [emailKey] });
+  return r.rows[0] ? (rowToObj(r.rows[0]) as unknown as WheelSpinRow) : null;
+}
+
+export async function countWheelSpinsForIp(ipHash: string, sinceSec: number): Promise<number> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT COUNT(*) AS n FROM wheel_spins WHERE ip_hash = ? AND created_at >= ?`, args: [ipHash, sinceSec] });
+  return Number(rowToObj(r.rows[0]).n ?? 0);
+}
+
+/** Reserve the email's only spin. False when the email already has one (the caller then reads it back). */
+export async function reserveWheelSpin(s: { emailKey: string; email: string; prizeKey: string; ipHash: string; locale: string }): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO wheel_spins (email_key, email, prize_key, ip_hash, locale, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(email_key) DO NOTHING`,
+    args: [s.emailKey, s.email, s.prizeKey, s.ipHash, s.locale, Math.floor(Date.now() / 1000)],
+  });
+  return r.rowsAffected === 1;
+}
+
+export async function setWheelSpinCode(emailKey: string, code: string, discountId: string, expiresAt: number): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE wheel_spins SET code = ?, discount_id = ?, expires_at = ? WHERE email_key = ?`, args: [code, discountId, expiresAt, emailKey] });
+}
+
+/** Undo a reservation whose Shopify code could not be created, so the visitor can retry. */
+export async function releaseWheelSpin(emailKey: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `DELETE FROM wheel_spins WHERE email_key = ? AND code IS NULL`, args: [emailKey] });
+}
+
+// ─── Teasers ("bientôt") + AI visualiser usage ─────────────────────
+
+/** Log one funnel event; a repeat of the same (feature, event, source, visitor) is ignored by the UNIQUE key. */
+export async function insertTeaserEvent(e: { feature: string; event: string; source: string; visitorHash: string; handle: string | null; locale: string }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT OR IGNORE INTO teaser_events (feature, event, source, visitor_hash, handle, locale, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    args: [e.feature, e.event, e.source, e.visitorHash, e.handle, e.locale, Math.floor(Date.now() / 1000)],
+  });
+}
+
+export async function upsertTeaserSignup(s: { feature: string; emailKey: string; email: string; source: string; consentText: string; locale: string; handle: string | null }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT INTO teaser_signups (feature, email_key, email, source, consent_text, locale, handle, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(feature, email_key) DO NOTHING`,
+    args: [s.feature, s.emailKey, s.email, s.source, s.consentText, s.locale, s.handle, Math.floor(Date.now() / 1000)],
+  });
+}
+
+export interface TeaserStatsRow { feature: string; source: string; event: string; visitors: number }
+
+/** Unique visitors per (feature, source, event) since `sinceSec`, plus launch signups per (feature, source). */
+export async function getTeaserStats(sinceSec: number): Promise<{ events: TeaserStatsRow[]; signups: { feature: string; source: string; n: number }[] }> {
+  const db = await ensureSchema();
+  const ev = await db.execute({
+    sql: `SELECT feature, source, event, COUNT(DISTINCT visitor_hash) AS visitors FROM teaser_events WHERE created_at >= ? GROUP BY feature, source, event ORDER BY feature, source, event`,
+    args: [sinceSec],
+  });
+  const su = await db.execute({ sql: `SELECT feature, source, COUNT(*) AS n FROM teaser_signups WHERE created_at >= ? GROUP BY feature, source`, args: [sinceSec] });
+  return {
+    events: ev.rows.map((r) => { const o = rowToObj(r); return { feature: String(o.feature), source: String(o.source), event: String(o.event), visitors: Number(o.visitors) }; }),
+    signups: su.rows.map((r) => { const o = rowToObj(r); return { feature: String(o.feature), source: String(o.source), n: Number(o.n) }; }),
+  };
+}
+
+/**
+ * Atomically take one of this visitor's daily AI uses: the row is inserted only while fewer than `cap` exist for
+ * (kind, ip) since `sinceSec`, so parallel requests cannot all pass a count-then-call check. Returns the row id to
+ * finish, or null when the cap is reached. The attempt counts whatever its outcome.
+ */
+export async function reserveVisualiserUse(u: { kind: string; ipHash: string; handle: string | null; cap: number; sinceSec: number }): Promise<number | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `INSERT INTO visualiser_uses (kind, ip_hash, handle, ok, created_at)
+          SELECT ?, ?, ?, 0, ? WHERE (SELECT COUNT(*) FROM visualiser_uses WHERE kind = ? AND ip_hash = ? AND created_at >= ?) < ?`,
+    args: [u.kind, u.ipHash, u.handle, Math.floor(Date.now() / 1000), u.kind, u.ipHash, u.sinceSec, u.cap],
+  });
+  return r.rowsAffected === 1 && r.lastInsertRowid != null ? Number(r.lastInsertRowid) : null;
+}
+
+export async function finishVisualiserUse(id: number, ok: boolean): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE visualiser_uses SET ok = ? WHERE id = ?`, args: [ok ? 1 : 0, id] });
+}
+
+// ─── Own email engine (Resend) ───────────────────────────────────────
+
+export async function isEmailSuppressed(email: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT 1 FROM email_suppressions WHERE email = ?`, args: [email.trim().toLowerCase()] });
+  return r.rows.length > 0;
+}
+
+export async function suppressEmail(s: { email: string; reason: string; source: string; detail?: string | null }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT OR IGNORE INTO email_suppressions (email, reason, source, detail, created_at) VALUES (?, ?, ?, ?, ?)`,
+    args: [s.email.trim().toLowerCase(), s.reason, s.source, s.detail ?? null, Math.floor(Date.now() / 1000)],
+  });
+}
+
+/** Suppressed addresses not yet pushed to Klaviyo (its call failed, or they came from the Resend webhook). */
+export async function listSuppressionsNotInKlaviyo(limit: number): Promise<string[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT email FROM email_suppressions WHERE in_klaviyo = 0 ORDER BY created_at LIMIT ?`, args: [limit] });
+  return r.rows.map((x) => String(rowToObj(x).email));
+}
+
+/** 1 = now in Klaviyo; 2 = Klaviyo refused this address for good (4xx), stop retrying it. */
+export async function markSuppressionInKlaviyo(email: string, state: 1 | 2 = 1): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE email_suppressions SET in_klaviyo = ? WHERE email = ?`, args: [state, email.trim().toLowerCase()] });
+}
+
+/** A 'sending' row older than this was cut off mid-send (crash, timeout): it may be claimed again. */
+export const EMAIL_SEND_STALE_S = 10 * 60;
+
+/**
+ * Claim the right to send the email `idemKey`. Returns the row id, or null when it was already sent or is being
+ * sent by another run. A previous FAILED attempt, or one stuck in 'sending' for EMAIL_SEND_STALE_S, can be claimed
+ * again (Resend's Idempotency-Key, kept 24 h, stops a real duplicate). The conditional upsert is one statement, so
+ * two overlapping runs cannot both win.
+ */
+export async function reserveEmailSend(s: { idemKey: string; email: string; flow: string; kind: string }): Promise<number | null> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const r = await db.execute({
+    sql: `INSERT INTO email_sends (idem_key, email, flow, kind, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'sending', ?, ?)
+          ON CONFLICT(idem_key) DO UPDATE SET status = 'sending', error = NULL, updated_at = excluded.updated_at
+          WHERE email_sends.status = 'failed' OR (email_sends.status = 'sending' AND email_sends.updated_at < ?)`,
+    args: [s.idemKey, s.email.trim().toLowerCase(), s.flow, s.kind, now, now, now - EMAIL_SEND_STALE_S],
+  });
+  if (r.rowsAffected !== 1) return null;
+  const row = await db.execute({ sql: `SELECT id FROM email_sends WHERE idem_key = ?`, args: [s.idemKey] });
+  return row.rows.length ? Number(rowToObj(row.rows[0]).id) : null;
+}
+
+export async function finishEmailSend(id: number, r: { status: "sent" | "failed" | "skipped"; resendId?: string | null; error?: string | null }): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `UPDATE email_sends SET status = ?, resend_id = COALESCE(?, resend_id), error = ?, updated_at = ? WHERE id = ?`,
+    args: [r.status, r.resendId ?? null, r.error ?? null, Math.floor(Date.now() / 1000), id],
+  });
+}
+
+/** Suppressed addresses per reason (unsubscribe, bounce, complaint). */
+export async function countEmailSuppressions(): Promise<Record<string, number>> {
+  const db = await ensureSchema();
+  const r = await db.execute(`SELECT reason, COUNT(*) AS n FROM email_suppressions GROUP BY reason`);
+  return Object.fromEntries(r.rows.map((x) => { const o = rowToObj(x); return [String(o.reason), Number(o.n)]; }));
+}
+
+/** Status of the email `idemKey` (null = never tried). */
+export async function getEmailSendStatus(idemKey: string): Promise<string | null> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT status FROM email_sends WHERE idem_key = ?`, args: [idemKey] });
+  return r.rows.length ? String(rowToObj(r.rows[0]).status) : null;
+}
+
+/** Webhooks arrive out of order (opened before delivered…): a status only ever moves forward. */
+const EMAIL_STATUS_RANK: Record<string, number> = { sent: 1, delivery_delayed: 1, delivered: 2, opened: 3, clicked: 4, failed: 5, bounced: 5, complained: 6 };
+
+export async function updateEmailSendStatus(resendId: string, status: string): Promise<boolean> {
+  const db = await ensureSchema();
+  const cur = await db.execute({ sql: `SELECT id, status FROM email_sends WHERE resend_id = ?`, args: [resendId] });
+  if (!cur.rows.length) return false;
+  const o = rowToObj(cur.rows[0]);
+  if ((EMAIL_STATUS_RANK[status] ?? 0) <= (EMAIL_STATUS_RANK[String(o.status)] ?? 0)) return false;
+  await db.execute({ sql: `UPDATE email_sends SET status = ?, updated_at = ? WHERE id = ?`, args: [status, Math.floor(Date.now() / 1000), Number(o.id)] });
+  return true;
+}
+
+/** Sends per (flow, status) since `sinceSec`, for the dashboard. */
+export async function getEmailSendStats(sinceSec: number): Promise<{ flow: string; status: string; n: number }[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT flow, status, COUNT(*) AS n FROM email_sends WHERE created_at >= ? GROUP BY flow, status ORDER BY flow, status`, args: [sinceSec] });
+  return r.rows.map((x) => { const o = rowToObj(x); return { flow: String(o.flow), status: String(o.status), n: Number(o.n) }; });
+}
+
 // ─── Settings ────────────────────────────────────────────────────────
 
 export async function getSetting(key: string): Promise<string | null> {
@@ -3460,6 +3772,25 @@ export async function setSetting(key: string, value: string): Promise<void> {
   const db = await ensureSchema();
   const now = Math.floor(Date.now() / 1000);
   await db.execute({ sql: `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, args: [key, value, now] });
+}
+
+/**
+ * Take the named lease (a settings row) when it is free or older than `ttlSec`. The UPDATE is a
+ * single conditional statement, so two concurrent cron invocations can't both get it. Returns the
+ * holder token, or null when someone else holds it.
+ */
+export async function acquireLease(key: string, ttlSec: number): Promise<string | null> {
+  const db = await ensureSchema();
+  const now = Math.floor(Date.now() / 1000);
+  const token = `${now}-${Math.random().toString(36).slice(2)}`;
+  await db.execute({ sql: `INSERT INTO settings (key, value, updated_at) VALUES (?, '', 0) ON CONFLICT(key) DO NOTHING`, args: [key] });
+  const r = await db.execute({ sql: `UPDATE settings SET value = ?, updated_at = ? WHERE key = ? AND (value = '' OR updated_at < ?)`, args: [token, now, key, now - ttlSec] });
+  return r.rowsAffected === 1 ? token : null;
+}
+
+export async function releaseLease(key: string, token: string): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({ sql: `UPDATE settings SET value = '' WHERE key = ? AND value = ?`, args: [key, token] });
 }
 
 /**
@@ -4808,6 +5139,43 @@ export async function putCachedImageVerdict(
       meta.model, meta.sampleUrl.slice(0, 500), verdict.confidence ?? null,
     ],
   });
+}
+
+// ─── Ad photo style cache (lifestyle vs studio) ──────────────────────
+
+/** Look up cached photo styles for a batch of stems. Missing stems are simply absent. */
+export async function getCachedImageStyles(stems: string[]): Promise<Map<string, AdImageStyle>> {
+  const out = new Map<string, AdImageStyle>();
+  const unique = [...new Set(stems.filter(Boolean))];
+  if (unique.length === 0) return out;
+  const db = await ensureSchema();
+  for (let i = 0; i < unique.length; i += 200) {
+    const chunk = unique.slice(i, i + 200);
+    const result = await db.execute({
+      sql: `SELECT url_stem, style FROM image_styles WHERE url_stem IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const r of result.rows) {
+      const o = rowToObj(r);
+      if (o.style === "lifestyle" || o.style === "studio") out.set(String(o.url_stem), o.style);
+    }
+  }
+  return out;
+}
+
+/** Persist photo styles. Idempotent: re-classifying a stem overwrites it. */
+export async function putCachedImageStyles(rows: Array<{ stem: string; style: AdImageStyle; sampleUrl: string }>): Promise<void> {
+  const valid = rows.filter((r) => r.stem);
+  if (valid.length === 0) return;
+  const db = await ensureSchema();
+  for (let i = 0; i < valid.length; i += 100) {
+    await db.batch(valid.slice(i, i + 100).map((r) => ({
+      sql: `INSERT INTO image_styles (url_stem, style, sample_url) VALUES (?, ?, ?)
+            ON CONFLICT(url_stem) DO UPDATE SET style=excluded.style, sample_url=excluded.sample_url,
+              created_at=strftime('%s','now')`,
+      args: [r.stem, r.style, r.sampleUrl.slice(0, 500)],
+    })), "write");
+  }
 }
 
 // ─── pos-1 image review queue ────────────────────────────────────────
@@ -6551,10 +6919,14 @@ export async function countMorningReportAlerts(): Promise<{
   unreadNotifications: number;
   /** Queue rows in 'failed' that were due in the last 3 days OR are still ahead — the ones nobody has looked at (found 2026-10-06: 16 batch Reels sat 'failed' for weeks, re-slotted but never reset). */
   failedPublications: number;
+  /** Problems found by the last 06:15 publish check (publish-check.ts, setting `publish_check_last`): missed, stuck or partly failed posts of the 24 h before it. */
+  publishCheckProblems: number;
+  /** Reels the last price-guard run took out of the queue because a burned-in rabais no longer matches Shopify (setting `reel_price_guard_last`). */
+  reelPriceGuardBlocked: number;
 }> {
   const db = await ensureSchema();
   const dayAgo = Math.floor(Date.now() / 1000) - 86400;
-  const [audit, incidents, images, imports, catalog, notif, failedQueue] = await Promise.all([
+  const [audit, incidents, images, imports, catalog, notif, failedQueue, publishCheck, reelGuard] = await Promise.all([
     db.execute(`SELECT value FROM settings WHERE key = 'price_audit_result'`),
     db.execute({ sql: `SELECT COUNT(*) AS c FROM price_floor_incidents WHERE detected_at >= ?`, args: [dayAgo] }),
     db.execute(`SELECT COUNT(*) AS c FROM image_review_queue WHERE status = 'pending'`),
@@ -6562,6 +6934,8 @@ export async function countMorningReportAlerts(): Promise<{
     db.execute(`SELECT value FROM settings WHERE key = 'catalog_consistency_audit'`),
     db.execute(`SELECT COUNT(*) AS c FROM notifications WHERE read = 0`),
     db.execute(`SELECT COUNT(*) AS c FROM publication_queue WHERE status = 'failed' AND scheduled_at >= datetime('now', '-3 days')`),
+    db.execute(`SELECT value FROM settings WHERE key = 'publish_check_last'`),
+    db.execute(`SELECT value FROM settings WHERE key = 'reel_price_guard_last'`),
   ]);
   const c = (res: { rows: Row[] }) => Number(rowToObj(res.rows[0]).c) || 0;
   const json = (res: { rows: Row[] }): Record<string, unknown> | null => {
@@ -6583,6 +6957,8 @@ export async function countMorningReportAlerts(): Promise<{
     catalogIssues: Array.isArray(issues) ? issues.length : 0,
     unreadNotifications: c(notif),
     failedPublications: c(failedQueue),
+    publishCheckProblems: Array.isArray(json(publishCheck)?.problems) ? (json(publishCheck)!.problems as unknown[]).length : 0,
+    reelPriceGuardBlocked: Array.isArray(json(reelGuard)?.blocked) ? (json(reelGuard)!.blocked as unknown[]).length : 0,
   };
 }
 
@@ -6735,18 +7111,19 @@ export interface GuardInputs {
   priceAudit: Record<string, unknown> | null;
   catalogAudit: Record<string, unknown> | null;
   feedAudit: Record<string, unknown> | null;
+  siteHealth: Record<string, unknown> | null;
   lastRuns: Record<string, { status: string; ranAt: number; detail: string | null }>;
   imagesPending: number;
   imagesOldestPendingAt: number | null;
 }
 
-export const GUARD_CRON_NAMES = ["price-audit", "catalog-consistency", "feed-integrity"] as const;
+export const GUARD_CRON_NAMES = ["price-audit", "catalog-consistency", "feed-integrity", "site-health"] as const;
 
 export async function loadGuardInputs(): Promise<GuardInputs> {
   const db = await ensureSchema();
   const [settings, runs, images] = await Promise.all([
     db.execute(
-      `SELECT key, value FROM settings WHERE key IN ('price_audit_result', 'catalog_consistency_audit', 'feed_integrity_audit')`,
+      `SELECT key, value FROM settings WHERE key IN ('price_audit_result', 'catalog_consistency_audit', 'feed_integrity_audit', 'site_health_audit')`,
     ),
     db.execute({
       sql: `SELECT r.name, r.status, r.ran_at, r.detail FROM cron_runs r
@@ -6772,6 +7149,7 @@ export async function loadGuardInputs(): Promise<GuardInputs> {
     priceAudit: parse("price_audit_result"),
     catalogAudit: parse("catalog_consistency_audit"),
     feedAudit: parse("feed_integrity_audit"),
+    siteHealth: parse("site_health_audit"),
     lastRuns,
     imagesPending: Number(img.c) || 0,
     imagesOldestPendingAt: img.oldest != null ? Number(img.oldest) : null,

@@ -11,9 +11,10 @@ process.env.TURSO_DATABASE_URL = ":memory:";
 process.env.TURSO_AUTH_TOKEN = "test";
 
 import {
-  selectCandidates, prepareCandidate, applyPrepared, candidateMargin, unionImages, galleryFor,
+  selectCandidates, selectDemandCandidates, prepareCandidate, applyPrepared, candidateMargin, unionImages, galleryFor,
   type Candidate, type PrepareDeps, type ApplyDeps, type CreatedProduct, type PreparedItem,
 } from "@/lib/costway/importer";
+import { matchAosomType, stems, type AosomTypeDemand } from "@/lib/costway/demand";
 import { isInternalSku } from "@/lib/costway/identity";
 
 let db: Client;
@@ -45,6 +46,50 @@ beforeEach(async () => {
   await db.execute(`DELETE FROM products`);
 });
 
+describe("what will sell: Aosom product types and selectDemandCandidates", () => {
+  const T = (type: string, perSku: number, skus = 20): AosomTypeDemand => ({ type, perSku, skus, units: perSku * skus });
+  const types = [
+    T("Home Furnishings > Kitchen & Dining Furniture > Bar Stools", 15),
+    T("Home Furnishings > Bedroom Furniture > Wall Mirrors", 4),
+    T("Home Furnishings > Bedroom Furniture > Bedside Tables", 21),
+    T("Holiday & Seasonal > Christmas Trees", 8),
+    T("Toys & Games > Baby & Toddler Toys > Play Kitchen", 30),
+    T("Patio & Garden > Patio Furniture > Patio Furniture Sets", 25),
+    T("Sports & Recreation > Bikes & Scooters > Bike Trailers > Kids Bike Trailers", 5),
+  ];
+
+  it("matches a Costway category to the closest Aosom product type, and refuses a one-word overlap", () => {
+    expect(matchAosomType("Furniture > Kitchen & Dining > Bar Stools", types)?.type).toContain("Bar Stools");
+    expect(matchAosomType("Furniture > Bedroom > Nightstands", types)?.type).toContain("Bedside Tables");
+    expect(matchAosomType("Decor > Holiday Decor > Christmas > Christmas Tree", types)?.type).toBe("Holiday & Seasonal > Christmas Trees");
+    expect(matchAosomType("Toys & Hobbies > Ride On Toys > Kids Bike", types)).toBeNull();
+    expect([...stems("Wall Mirrors & Accessories")]).toEqual(["wall", "mirror"]);
+  });
+
+  it("keeps big sellers, Christmas in season, no toys and no patio out of season, ranked by expected margin dollars", async () => {
+    await insert({ sku: "s1", item: "s1", title: "Bar Stool Set of 2", category: "Furniture > Kitchen & Dining > Bar Stools", price: 150, ca: 40 });
+    await insert({ sku: "n1", item: "n1", title: "Nightstand with Drawer", category: "Furniture > Bedroom > Nightstands", price: 120, ca: 40 });
+    await insert({ sku: "m1", item: "m1", title: "Wall Mirror", category: "Decor > Mirrors > Wall Mirrors", price: 90, ca: 40 });          // 4/SKU: too slow
+    await insert({ sku: "x1", item: "x1", title: "7ft Christmas Tree", category: "Decor > Holiday Decor > Christmas > Christmas Tree", price: 140, ca: 40 }); // seasonal
+    await insert({ sku: "k1", item: "k1", title: "Play Kitchen", category: "Toys & Hobbies > Pretend Toys > Play Kitchen Sets", price: 140, ca: 40 }); // toys
+    await insert({ sku: "p1", item: "p1", title: "Patio Set", category: "Outdoor > Patio Furniture Sets", price: 400, ca: 40 });           // patio, not winter
+    await insert({ sku: "u1", item: "u1", title: "Bar Stool US only", category: "Furniture > Kitchen & Dining > Bar Stools", price: 150, ca: 0 }); // no CA stock
+    const out = await selectDemandCandidates(db, { limit: 10, aosomTypes: types, now: new Date("2026-10-17T12:00:00Z") });
+    // nightstand 21/SKU x 30.19 $ > stools 15 x 37.99 $ > the seasonal tree 8 x 35.39 $
+    expect(out.map((c) => c.itemNo)).toEqual(["n1", "s1", "x1"]);
+    expect(out[1]).toMatchObject({ kind: "general", productType: "Home Furnishings > Kitchen & Dining Furniture > Bar Stools", expectedDemand: 15 });
+    const summer = await selectDemandCandidates(db, { limit: 10, aosomTypes: types, now: new Date("2026-07-01T12:00:00Z") });
+    expect(summer.map((c) => c.itemNo)).not.toContain("x1");
+  });
+
+  it("uses Costway's own sales instead of the Aosom estimate when they are given", async () => {
+    await insert({ sku: "m1", item: "m1", title: "Wall Mirror", category: "Decor > Mirrors > Wall Mirrors", price: 90, ca: 40 });
+    const out = await selectDemandCandidates(db, { limit: 10, aosomTypes: types, costwayDemand: new Map([["m1", 30]]) });
+    expect(out.map((c) => c.itemNo)).toEqual(["m1"]);
+    expect(out[0].expectedDemand).toBe(30);
+  });
+});
+
 describe("selectCandidates", () => {
   it("keeps eligible products, ranks by margin, and drops everything the pilot must not touch", async () => {
     await insert({ sku: "1_A", item: "1", title: "180 PPD Commercial Dehumidifier with Pump", category: DEHUM, price: 830 });
@@ -69,12 +114,12 @@ describe("selectCandidates", () => {
     expect(await selectCandidates(db, { limit: 1 })).toHaveLength(1);
   });
 
-  it("measures margin on the cheapest sellable variant, with the Drop Price adjustment", async () => {
+  it("measures margin on the cheapest sellable variant, at Costway's price (same on a Drop Price item)", async () => {
     await insert({ sku: "1_A", item: "1", title: "Dehumidifier 60 Pints", category: DEHUM, price: 479.99, tag: "Drop Price" });
     const [c] = await selectCandidates(db, { limit: 1 });
     const m = candidateMargin(c);
-    expect(m.sell).toBe(465.59);
-    expect(m.dollars).toBeCloseTo(465.59 - 479.99 * 0.84, 1);
+    expect(m.sell).toBe(479.99);
+    expect(m.dollars).toBeCloseTo(479.99 * 0.16, 1);
   });
 
   it("unionImages de-duplicates, keeps variant order and caps at 8", () => {
@@ -113,7 +158,7 @@ async function oneCandidate(opts: Partial<{ tag: string; qty: number; price: num
 }
 
 describe("prepareCandidate", () => {
-  it("is ready when every gate passes, prices at the feed price and caps the sellable stock", async () => {
+  it("is ready when every gate passes, prices at Costway's price and caps the sellable stock", async () => {
     const c = await oneCandidate();
     const p = await prepareCandidate(c, prepDeps());
     expect(p.problems).toEqual([]);
@@ -152,12 +197,40 @@ describe("prepareCandidate", () => {
     expect(p2.problems).toContain("gate:not_french");
   });
 
-  it("applies the Drop Price adjustment and the Price Drop floor", async () => {
+  it("prices a Drop Price item like any other and honours the Price Drop floor", async () => {
     const dropped = await prepareCandidate(await oneCandidate({ tag: "Drop Price", price: 479.99 }), prepDeps());
-    expect(dropped.variants[0].sellPrice).toBe(465.59);
+    expect(dropped.variants[0].sellPrice).toBe(479.99);
     await db.execute(`DELETE FROM costway_products`);
-    const floored = await prepareCandidate(await oneCandidate({ tag: "Drop Price", price: 479.99, priceDrop: 479 }), prepDeps());
-    expect(floored.variants[0].sellPrice).toBe(479);
+    const floored = await prepareCandidate(await oneCandidate({ tag: "Drop Price", price: 479.99, priceDrop: 600 }), prepDeps());
+    expect(floored.variants[0].sellPrice).toBe(600.99);
+  });
+
+  it("names each size of a same-colour family, smallest first, and drops the lone size from the title", async () => {
+    const c: Candidate = {
+      itemNo: "1", title: "PVC Slim Pencil Christmas Tree-7 Feet", bodyHtml: "", category: "", kind: "general",
+      variants: [7, 5, 6].map((ft) => ({
+        sku: `S${ft}`, title: `PVC Slim Pencil Christmas Tree-${ft} Feet`, color: "Green", feedPrice: 50 + ft, priceDrop: null,
+        promoTag: "", qty: 100, caQty: 100, usQty: 0, images: [],
+      })),
+    };
+    const seen: AosomMergedProduct[] = [];
+    const generate = async (m: AosomMergedProduct) => { seen.push(m); return goodContent({ titleFr: "Arbre de Noël mince 213 cm" }); };
+    const p = await prepareCandidate(c, prepDeps({ generate }));
+    expect(p.problems).toEqual([]);
+    expect(p.variants.map((v) => [v.supplierSku, v.size, v.color])).toEqual([
+      ["S5", "5 ft (152 cm)", ""], ["S6", "6 ft (183 cm)", ""], ["S7", "7 ft (213 cm)", ""],
+    ]);
+    expect(seen[0].variants.map((v) => v.color)).toEqual(["", "", ""]);
+    expect(p.content.titleFr).toBe("Arbre de Noël mince");
+  });
+
+  it("blocks a same-colour family whose variants nothing tells apart", async () => {
+    const c: Candidate = {
+      itemNo: "2", title: "Tree", bodyHtml: "", category: "", kind: "general",
+      variants: ["A", "B"].map((s) => ({ sku: s, title: `Tree with lights ${s}`, color: "Green", feedPrice: 60, priceDrop: null, promoTag: "", qty: 100, caQty: 100, usQty: 0, images: [] })),
+    };
+    const p = await prepareCandidate(c, prepDeps());
+    expect(p.problems.some((x) => x.startsWith("variants:"))).toBe(true);
   });
 });
 

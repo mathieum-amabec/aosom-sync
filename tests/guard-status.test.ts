@@ -12,10 +12,12 @@ function inputs(over: Partial<GuardInputs> = {}): GuardInputs {
     priceAudit: { auditedAt: fresh, total: 3099, belowFloor: 16, corrected: 16, failed: 0, deferred: 0 },
     catalogAudit: { auditedAt: fresh, totalActive: 1374, englishDescriptions: 0, brandLeaks: 0, duplicateColorOptions: 0, issues: [] },
     feedAudit: { auditedAt: fresh, ok: true, reasons: [], logic: { items: 2519, multiItems: 1681 } },
+    siteHealth: { auditedAt: fresh, ok: true, reasons: [], pages: { checked: 272 }, promoCodes: { checked: ["BIENVENUE20"], dead: [] }, searches: { tested: 7, zeroResults: [] }, funnel: { checkoutStarted: 25, placedOrder: 12 } },
     lastRuns: {
       "price-audit": { status: "success", ranAt: fresh, detail: null },
       "catalog-consistency": { status: "success", ranAt: fresh, detail: null },
       "feed-integrity": { status: "success", ranAt: fresh, detail: null },
+      "site-health": { status: "success", ranAt: fresh, detail: null },
     },
     imagesPending: 0,
     imagesOldestPendingAt: null,
@@ -25,12 +27,22 @@ function inputs(over: Partial<GuardInputs> = {}): GuardInputs {
 const byKey = (i: GuardInputs) => Object.fromEntries(evaluateGuards(i, NOW).map((g) => [g.key, g]));
 
 describe("evaluateGuards", () => {
-  it("all clean → four green guards with a summary", () => {
+  it("all clean → five green guards with a summary", () => {
     const g = byKey(inputs());
-    expect(Object.values(g).map((x) => x.state)).toEqual(["green", "green", "green", "green"]);
+    expect(Object.values(g).map((x) => x.state)).toEqual(["green", "green", "green", "green", "green"]);
     expect(g.price.summary).toBe("3099 prix vérifiés · 16 corrigés automatiquement");
     expect(g.catalog.summary).toBe("1374 fiches actives vérifiées");
     expect(g.feed.summary).toBe("2519 items vérifiés (1681 multi-variantes)");
+    expect(g.site.summary).toBe("272 pages vérifiées · 1 code promo des courriels vérifiés · 7 j : 25 caisses → 12 commandes");
+  });
+
+  it("site: the check's own reasons are red; zero-result searches stay information in the summary", () => {
+    const red = byKey(inputs({ siteHealth: { auditedAt: fresh, ok: false, reasons: ["le courriel « Welcome » donne le code BIENVENUE10, qui est EXPIRED dans Shopify"] } })).site;
+    expect(red.state).toBe("red");
+    expect(red.reasons).toEqual(["le courriel « Welcome » donne le code BIENVENUE10, qui est EXPIRED dans Shopify"]);
+    const info = byKey(inputs({ siteHealth: { auditedAt: fresh, ok: true, reasons: [], pages: { checked: 3 }, searches: { tested: 2, zeroResults: [{ q: "lampe torchère", count: 2 }] }, funnel: null } })).site;
+    expect(info.state).toBe("green");
+    expect(info.summary).toBe("3 pages vérifiées · 0 code promo des courriels vérifiés · recherches sans résultat : « lampe torchère »");
   });
 
   it("price: auto-corrected below-floor prices stay green; a FAILED correction is red", () => {

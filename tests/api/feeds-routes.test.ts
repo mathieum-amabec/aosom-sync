@@ -15,7 +15,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/feeds/source", () => ({ getFeedItems: vi.fn() }));
 vi.mock("@/lib/database", () => ({ recordFeedSync: vi.fn() }));
-vi.mock("@/lib/insights", () => ({ STOREFRONT_BASE_URL: "https://ameublodirect.ca" }));
+vi.mock("@/lib/insights", () => ({ STOREFRONT_BASE_URL: "https://ameublodirect.ca", EN_STOREFRONT_BASE_URL: "https://furnishdirect.ca" }));
 
 import { getFeedItems } from "@/lib/feeds/source";
 import { recordFeedSync } from "@/lib/database";
@@ -25,6 +25,8 @@ import { GET as bing } from "@/app/api/feeds/bing/route";
 import { GET as meta } from "@/app/api/feeds/meta/route";
 import { GET as metaXml } from "@/app/api/feeds/meta-xml/route";
 import { GET as pinterest } from "@/app/api/feeds/pinterest/route";
+import { GET as googleEn } from "@/app/api/feeds/google-en/route";
+import { GET as metaXmlEn } from "@/app/api/feeds/meta-xml-en/route";
 import { GET as pinterestEn } from "@/app/api/feeds/pinterest-en/route";
 import { GET as reddit } from "@/app/api/feeds/reddit/route";
 
@@ -33,6 +35,8 @@ const CACHED = "public, max-age=0, s-maxage=600, stale-while-revalidate=600";
 /** [label, handler, feed_syncs key, expected Content-Type prefix] */
 const ROUTES: Array<[string, () => Promise<Response>, string, string]> = [
   ["google", google, "google", "application/xml"],
+  ["google-en", googleEn, "google_en", "application/xml"],
+  ["meta-xml-en", metaXmlEn, "meta_xml_en", "application/xml"],
   ["bing", bing, "bing", "application/xml"],
   ["meta", meta, "meta", "application/json"],
   ["meta-xml", metaXml, "meta_xml", "application/xml"],
@@ -116,13 +120,19 @@ describe.each(ROUTES)("GET /api/feeds/%s", (label, handler, key, contentType) =>
 });
 
 describe("locale", () => {
-  it("only the pinterest-en route asks for English items", async () => {
+  it("only the pinterest-en, google-en and meta-xml-en routes ask for English items", async () => {
     for (const [label, handler] of ROUTES) {
       vi.mocked(getFeedItems).mockClear();
       await handler();
       const arg = vi.mocked(getFeedItems).mock.calls[0]?.[0];
-      if (label === "pinterest-en") expect(arg).toEqual({ english: true });
+      if (label === "pinterest-en" || label === "google-en" || label === "meta-xml-en") expect(arg).toMatchObject({ english: true });
       else expect(arg ?? {}).not.toMatchObject({ english: true });
+      // Only Google and Bing carry product_highlight / product_detail.
+      if (label === "google" || label === "google-en" || label === "bing") expect(arg).toMatchObject({ rich: true });
+      else expect(arg ?? {}).not.toMatchObject({ rich: true });
+      // Only the Meta feeds swap in lifestyle photos (every Meta ad = lifestyle, Mat 2026-10-30).
+      if (label === "meta" || label === "meta-xml" || label === "meta-xml-en") expect(arg).toMatchObject({ lifestyle: true });
+      else expect(arg ?? {}).not.toMatchObject({ lifestyle: true });
     }
   });
 });

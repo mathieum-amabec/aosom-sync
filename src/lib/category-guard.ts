@@ -19,6 +19,7 @@
  */
 import { shopifyFetch } from "@/lib/shopify-client";
 import { getAllCollectionMappings, createNotification } from "@/lib/database";
+import { isInternalProduct } from "./internal-product";
 
 const MENU_HANDLES = ["taxonomie-categories", "main-menu"];
 
@@ -80,6 +81,7 @@ export async function runCategoryGuard(opts: { notify?: boolean } = {}): Promise
       { c: cursor },
     );
     for (const p of d.products.nodes) {
+      if (isInternalProduct({ product_type: p.productType })) continue;
       active++;
       if (!p.collections.nodes.some((c) => menuIds.has(String(c.legacyResourceId)))) {
         unreachable.push({ handle: p.handle, productType: p.productType });

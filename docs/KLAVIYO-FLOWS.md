@@ -145,6 +145,32 @@ the chosen strategy — doing so risks a customer stacking the popup's 10% with 
 the flow's emails end up offering, or simply two redundant touchpoints nobody
 coordinated.
 
+## Panier abandonné — campaign relay (`/api/cron/cart-relay`, OFF by default)
+
+`Abandoned Cart (FR/EN)` (`Wcjr3F`) stays a **draft**; the relay does its job through one-recipient
+campaigns, like `relance-paiement` (same shared plumbing in `src/lib/klaviyo-campaigns.ts`, same
+lease). Code: `src/lib/cart-relay.ts`, route `src/app/api/cron/cart-relay/route.ts`, tests
+`tests/cart-relay.test.ts`.
+
+- **Trigger:** Shopify `Added to Cart` events (metric `SmdQyJ`), grouped per profile into one cart.
+  Emailed when the profile's last add is 3 h to 48 h old.
+- **Skipped:** no email; internal address; Checkout Started or Placed Order after the cart's first
+  add (checkout abandoners belong to `relance-paiement`); `can_receive_email_marketing` not true,
+  UNSUBSCRIBED or any suppression; already emailed in the last 7 days by this relay **or** by
+  `relance-paiement` (its `profiles` state); the same cart twice.
+- **Caps:** 25 per run, 60 per rolling 24 h. Runs at :12 and :42.
+- **Email:** FR/EN (event locale, else `/en` in the product URL, else the Klaviyo profile locale, else FR),
+  items from the event (title, image, price when the event has one, product link), free shipping
+  across Canada, no discount or code, localized `{% unsubscribe %}` link. Profile properties
+  `cart_relay_items_html` / `cart_relay_url`; templates cached in settings `cart_relay_templates_v1`
+  (bump the key to publish new copy).
+- **Switch:** settings `cart_relay_enabled` = `"1"` turns it on; anything else (including no row) is
+  OFF. Unlike the other relays, which run unless set to `"0"`.
+- **Dry run:** `GET /api/cron/cart-relay?dryRun=1` (Bearer `CRON_SECRET`) works whether the flag is on
+  or off, sends and writes nothing, and lists who would be emailed (masked) and skip reasons.
+- **State:** settings `cart_relay_state` (handled event ids, last send per profile, 24 h send log,
+  campaigns awaiting a status check; pruned at 8 days). Do **not** set `Wcjr3F` live while this runs.
+
 ## Re-running / idempotency
 
 `node scripts/setup-klaviyo-flows.mjs` is **idempotent**: it matches existing lists,

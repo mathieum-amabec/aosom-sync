@@ -10,7 +10,8 @@
  */
 import { createHash } from "node:crypto";
 import { ensureSchema } from "@/lib/database";
-import type { AssistantResult, Locale } from "@/lib/assistant";
+import type { AssistantResult } from "@/lib/assistant";
+import type { Lang } from "@/lib/assistant-lang";
 
 export const COMPLEMENTARY_TTL_SECS = 24 * 60 * 60;
 
@@ -22,10 +23,18 @@ export function isBotUserAgent(ua: string | null | undefined): boolean {
   return !!ua && BOT_UA.test(ua);
 }
 
+/**
+ * Bumped when the cached payload's meaning changes, so old rows simply stop matching.
+ * v2 (2026-10-15): card prices are the live Shopify price; v1 rows carried the Aosom price,
+ * and those written during the feed outage carried 0 (shown as "0,00 $" on product pages).
+ * v3 (2026-10-26): EN/ES/PA card links point at furnishdirect.ca (EN used the retired ameublodirect.ca/en).
+ */
+const CACHE_VERSION = "v3";
+
 /** Same product + category + language → same key (case/whitespace-insensitive). */
-export function complementaryCacheKey(name: string, productType: string, locale: Locale): string {
+export function complementaryCacheKey(name: string, productType: string, locale: Lang): string {
   const norm = (s: string) => s.normalize("NFC").trim().replace(/\s+/g, " ").toLowerCase();
-  return createHash("sha1").update(`${locale}|${norm(productType)}|${norm(name)}`).digest("hex");
+  return createHash("sha1").update(`${CACHE_VERSION}|${locale}|${norm(productType)}|${norm(name)}`).digest("hex");
 }
 
 export async function getCachedComplementary(key: string, nowSec = Math.floor(Date.now() / 1000)): Promise<AssistantResult | null> {
@@ -37,7 +46,10 @@ export async function getCachedComplementary(key: string, nowSec = Math.floor(Da
   const row = r.rows[0];
   if (!row || nowSec - Number(row.created_at) > COMPLEMENTARY_TTL_SECS) return null;
   try {
-    return JSON.parse(String(row.payload)) as AssistantResult;
+    const result = JSON.parse(String(row.payload)) as AssistantResult;
+    // A card without a real price is a miss, never something to show.
+    if (result.products?.some((p) => !(Number(p.price) > 0))) return null;
+    return result;
   } catch {
     return null;
   }

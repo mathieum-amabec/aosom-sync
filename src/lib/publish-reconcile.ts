@@ -27,6 +27,7 @@
  */
 import { stockBufferQty, hasAutoDraftedTag } from "./diff-engine";
 import { EXCLUDE_TAG } from "./stale-catalog";
+import { SEASON_TAG } from "./sold-out-hide";
 import { assertFeedComplete } from "./stock-reconcile";
 import { getStockBaseline } from "./database";
 import { fetchAosomCatalog } from "./csv-fetcher";
@@ -128,6 +129,9 @@ export function computePublishReconcile(input: PublishReconcileInput): PublishPl
 
     // Operator opt-out wins over everything.
     if (state.tags.some((t) => t.toLowerCase() === EXCLUDE_TAG)) { skippedExcludeStale++; continue; }
+    // Out-of-season product drafted by sold-out-hide.ts: only that job brings it back, at the
+    // season start. Republishing it here would put Halloween decor back on sale in November.
+    if (state.tags.some((t) => t.toLowerCase() === SEASON_TAG)) { skippedAutoDrafted++; continue; }
 
     if (state.status === "active" && !state.published) {
       matched.push({ shopifyProductId: g.shopifyProductId, skus: g.skus, action: "publish" });

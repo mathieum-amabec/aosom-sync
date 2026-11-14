@@ -2,6 +2,197 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.62] - 2026-11-13
+
+### Fixed
+
+- **Price alerts can finally be confirmed.** Signing up for a price alert tracks a Klaviyo "Price Alert Confirmation" event carrying the double opt-in link, but no Klaviyo flow ever existed for that event, so the confirmation email never went out. As of 2026-11-13, 0 of 54 alerts were confirmed and no price-drop email could ever be sent. Each signup still created a Klaviyo profile, which helped fill the free plan. flow-relay now has a `price-alert-confirm` step: the metric is `Ymt2yf` and the template is `UG3wCQ` (source in `docs/klaviyo/price-alert-confirm.html`, FR/EN). It sends the confirmation through a one-recipient campaign at the next run (within 15 min), up to 20 h after signup, since the link expires at 24 h. The step has no flow of its own, so only the "Klaviyo flows work again" guard stops it.
+
+## [0.5.107.61] - 2026-11-13
+
+### Added
+
+- **Abandoned checkout of 250 $ or more: a second reminder with a unique 15 $ code (OFF until `relance2_enabled` = "1").** Mat 2026-11-13: "un 15 $ sur le 250 et plus, si les gens n'achètent pas". The relance-paiement cron now also emails, 20 to 40 h after an unpaid checkout whose subtotal before tax is 250 $ or more, a single-use Shopify code (`discountCodeBasicCreate`): 15 $ off the order, minimum 250 $, 1 use, once per customer, valid 48 h, not combinable with product or order discounts (the automatic 10 % on the 2nd item does not stack), free shipping still applies. Same guards as the existing reminders: only after reminder #1 really went out for that checkout, never after an order, one per person per 30 days. It replaces the generic reminder #2 for those checkouts: while the switch is on, flow-relay's `checkout-2` leaves checkouts of 250 $ or more to it, and a checkout that already got the generic one never gets the code. The code is stored per checkout before the email goes out and reused on any retry, so a checkout never gets two codes or two emails. `?dryRun=1` shows who would get it and the exact mutation payload, and creates nothing. The subtotal comes from Shopify's `subtotal_price` or the line prices minus discounts, never Klaviyo's `$value`, which includes tax. A cart that already has a discount (the automatic 10 % on the 2nd item, or any code) gets the generic reminder #2, not the code (Mat's call). The generic reminder only stands aside while the code email may still go out: every final skip of the code email (cooldown, too old, has a discount, Shopify error, expiring code) records the checkout as settled, so the generic one falls back within its own 24–48 h window, and it also falls back when `relance_paiement_enabled` = "0". The email shows only the exact expiry ("valide jusqu'au …, heure de l'Est"), since a reused code may have less than 48 h left. Our email engine (`relayView`) also counts a checkout that got the code email as done for its own reminder #2.
+
+## [0.5.107.60] - 2026-11-12
+
+### Added
+
+- **Costway products get their size for the fit checker and the new "Dimensions" line.** 361 live Costway products had no `custom.lc_dims`: the daily fit-dims job only read the Aosom feed, and the French description we generate drops the measurements. The job now reads the supplier description kept in `costway_products.body_html` (`extractSupplierSize`): only a triple labelled as the item's size ("Overall Dimension: 94.5” x 32.5” x 32.5” (L x W x H)"), never a parcel, drawer, mirror or pot size; inches unless marked cm/mm. It only fills products with no value and drops a size the product page contradicts. 288 products were written by hand on 2026-11-12 after a dry run (the new function gives the same 288 values, plus one); the next run adds the rest as Costway descriptions allow.
+
+### Changed
+
+- **Meta's fbevents.js loads after the page, not during it.** On a mid-range phone it cost ~450 ms of main-thread work while the hero image loaded (Grokbot audit, Lighthouse mobile 45). The `fbq` stub still queues every call immediately; the SDK now loads on the first interaction or 1.5 s after the load event. PageView is also relayed to the Conversions API with the same `event_id` (`/api/capi/event` accepts PageView, with no product data), so a visitor who leaves before the SDK arrives is still counted, and Meta de-duplicates the pair. The first cart-attribute sync waits for the SDK's load event (8 s at most) so `_fbp` exists.
+- **`/api/trending` and `/api/ugc-videos` are cached 5 minutes by the browser** (`max-age=300`), on top of the CDN cache.
+
+## [0.5.107.59] - 2026-11-10
+
+### Changed
+
+- **A crossed price already shown is kept while it stays above the price, even under 10 %.** After the .88 price rise, 72 live variants showed a crossed price with a discount under 10 %; the daily compare-at sync would have cleared them. Mat's rule: showing a discount is always good. The 10 % threshold now only gates setting a NEW crossed price; the sync clears a crossed price only when it is at or below the price.
+
+## [0.5.107.58] - 2026-11-09
+
+### Changed
+
+- **Aosom products are priced at our estimate of Aosom's current price, ending in .88.** The Aosom feed has carried no public price since 2026-10-15, so the rule sold at a price frozen in mid-October while Aosom kept raising our cost: on 2026-11-09 an order lost money and 337 live variants sat under cost after a mid-day cost rise. Eight real aosom.ca prices that day sat at 1.07–1.19 × our cost (wholesale + delivery), median 1.15, the same median as the frozen public price over today's cost across 7,935 feed SKUs. The sell price is now `cost × 1.15` ending in .88 (Mat's signature), dropped to the .88 under a round number it barely passes (301.88 → 299.88). It never goes under the frozen Aosom price or the profit floor (which now ends in .88 too); without a known cost the frozen price is kept. Existing .99 prices move to their .88 on the next run, however small the change. Dry run on prod: 4,490 of 5,739 prices change (median +1 %, none above +10 %, 92 cuts of a few cents).
+
+## [0.5.107.57] - 2026-11-08
+
+### Fixed
+
+- **Server Purchase events now carry Meta's click ids.** The orders/paid webhook sent email, phone and address but `fbp`/`fbc` at 0 %, so Meta could only link a sale to an ad by matching the customer's details. The ScriptTag now copies the `_fbp`/`_fbc` cookies into hidden cart attributes, which reach the order as `note_attributes`: as hidden inputs on a form post to `/cart/add` (the only route for "buy now", which skips the cart), otherwise through `/cart/update.js` on a cart that has items. When a checkout skipped both, the `fbclid` in `order.landing_site` is the fallback, unless it runs into Shopify's 255-character cap: 28 of the last 50 such ids were cut off. Values are shape-checked and the fbclid is never rewritten. Same `event_id`, so deduplication does not change.
+
+## [0.5.107.56] - 2026-11-05
+
+### Fixed
+
+- **Products drafted by sold-out-hide now leave the ad feeds within ~10 minutes, not up to 24 h.** The feeds read Shopify through a Data Cache kept 24 h (`lib/feeds/source.ts`, tag `feeds`) and the job never busted it, so a drafted product stayed in the Meta/Google feeds and ads could point to a 404 page. After a LIVE run that changed at least one product's visibility (drafted, or reactivated/republished), the job now busts the `feeds` tag and every feed route, exactly like `POST /api/revalidate` (new shared helper `src/lib/feeds/revalidate.ts`, used by both). Never on dry/off runs, tag-only runs or runs where every write was skipped/failed; a revalidation failure is logged and does not fail the run. Result gains `statusChanges` and `feedsRevalidated`. The shared feed list now also covers `google-en` and `meta-xml-en`, which `POST /api/revalidate` was missing (a test pins the list to the route directories).
+
+## [0.5.107.55] - 2026-11-04
+
+### Added
+
+- **Sold-out and out-of-season products are taken off sale, and come back by themselves** (`src/lib/sold-out-hide.ts`, cron `/api/cron/sold-out-hide` at 10:20 / 16:20 / 22:20 UTC, script `scripts/sold-out-hide.mts`). Mat: « retire les produits en rupture dont l'Halloween ». A product is set to DRAFT (hidden from every sales channel, URL/photos/reviews/publications kept) when every variant is sold out (Aosom: `stockBufferQty(fresh CSV qty) = 0`; Costway: `in_stock = 0` or < 3 units), tagged `auto-drafted` — the stock-check marker, so its existing restock path also brings it back. Halloween products (`product_type` contains the word « Halloween », never the tags — a Christmas tree carries the tag) are drafted outside Sep 1 → Nov 1 (store-local, `settings.seasonal_windows`) even when in stock, tagged `hors-saison` without `auto-drafted` so stock-check cannot revive them; this job reactivates them (status active + published) at the season start if in stock. `hors-saison` is only ever added by this job to a product it drafted itself (ACTIVE → DRAFT) or to an `auto-drafted` draft: an operator's draft is never marked, so never published at a season start. Keep one live out of season with `exclude-stale`. Never touches: an `exclude-stale` product, one in an open unfulfilled order (fail-closed on an API error), one entirely absent from the feed (left to removed-catalog's rename guard), a `needs-review` import, an operator's own draft. Guards: `assertFeedComplete`, a mass-hide breaker (max(200, 10 % of active)), 150 writes/run at 2/s, each write re-reads and re-plans the product. Mode `settings.sold_out_hide_mode` off/dry/live (default live); `?mode=dry`.
+- First run on 2026-11-04: 55 sold-out products drafted (51 Aosom, 4 Costway), 2 in-stock Halloween products drafted (they come back on 2027-09-01 if in stock). The first run had also tagged 34 Halloween products that were ALREADY draft (origin unknown) `hors-saison`; that was reverted the same day (their tags restored exactly, they stay draft and will not be revived). Rollback records: `aosom-sync-backups/soldout-2026-11-05*.json`, `soldout-2026-11-05-restore-34.json`.
+
+### Changed
+
+- publish-reconcile never republishes a `hors-saison` draft; the ad feeds (and the feed-integrity audit) skip out-of-season products as a second barrier, reading the same `settings.seasonal_windows` as the job.
+
+## [0.5.107.54] - 2026-11-01
+
+### Changed
+
+- **La semaine Ameublo follows the Black Friday / Christmas calendar** (Toronto dates, 2026 only — next year's dates must be set on purpose in `semaine/formats.ts` `SEASON`). Nov 6–26 (early Black Friday): the morning post is `baisses` Monday to Friday, Saturday/Sunday keep `astuce`/`coeur` for variety. Nov 27–30 (Black Friday weekend + Cyber Monday): `baisses` every morning. `baisses` still only shows a real Shopify compare-at ≥ 10 %, and looks 80 products deep during the sale (instead of 30) so the cooldown does not starve it. Nov 1–Dec 15: Christmas categories (both `Holiday & Seasonal > Christmas…` forms) join the afternoon `vedette` (tried first every other day in November, every day in December) and the Sunday `coeur`. Captions get a code-owned seasonal line + hashtags — FR « Vendredi fou en avance » #vendredifou, #vendredifou on Black Friday, #cyberlundi on Cyber Monday, #noel Dec 1–15; EN #blackfriday / #cybermonday / #christmas. The model's text is unchanged (still no %, $ or #).
+- **Semaine cooldown is per Shopify product, not per SKU.** Colour variants (831-823 WT/BK, 831-651, 839-846, 839-308) came back within 3–7 days of each other. The 21-day cooldown now also holds every posted SKU's `shopify_product_id` (resolved through `products`, so it covers past posts too), and one post never carries two colours of the same product.
+- **06:15 publish check covers the last 24 h, every content type.** It flags `failed` rows, rows stuck in `publishing` > 30 min, rows still `pending` > 15 min past their slot, and `published` rows whose error shows a platform failed (e.g. the Ameublo Instagram half) — ignoring the known "INSTAGRAM_FURNISH_ACCOUNT_ID not configured" noise. `publish_check_last` keeps its shape plus `windowHours`, `failedCount`, `stuckCount`, `overdueCount`, `partialCount`, `byType`, `priceGuardBlocked`. The morning report's « Alertes » now counts the last check's problems and the Reels the price guard removed.
+
+### Fixed
+
+- **Halloween / Noël social categories matched 0 products.** Aosom moved the seasonal branch from `Home Furnishings > Holiday & Seasonal > …` to top-level `Holiday & Seasonal > …`; both forms are matched (Noël: 185 live products on 2026-11-01, 104 discounted).
+- **Christmas posts were tagged #chambre #deco.** A bare `Holiday → bedroom_decor` hook rule caught the new top-level path before the seasonal rule. Holiday & Seasonal now maps to `seasonal_decor`, and a Christmas product gets Christmas hashtags only (no #halloween), a Halloween one Halloween hashtags only.
+- **Instagram "Only photo or video can be accepted as media type"** (5 of 14 Ameublo semaine posts, #1630 #1642 #1658 #1676 #1682; Facebook went out). cdn.shopify.com serves WebP under the same `.jpg` URL to any client that accepts WebP (`Vary: Accept`), and Instagram only ingests JPEG. Instagram photo and carousel containers now get `format=pjpg`, which pins JPEG and returns the original bytes unchanged. Other hosts are untouched.
+
+### Added
+
+- **Reel price guard** (`/api/cron/reel-price-guard`, 12:00 and 20:00 UTC, `?dryRun=1`). For every `pending` sequential_ad Reel due in the next 36 h whose `metadata.badges` lists `{sku, pct}`, re-reads the variant on Shopify (read-only) and checks it is active, available and that round((1 − price/compareAt) × 100) still equals the rabais burned into the video. A mismatch moves the row to `draft` with `price-guard: <details>` (not published, slot freed); a failed Shopify read never blocks. Result in settings `reel_price_guard_last`, surfaced by the publish check and the morning report.
+
+## [0.5.107.53] - 2026-10-31
+
+### Fixed
+
+- **Cart-abandon email relay sent nothing for a week.** A checkout reminder (relance-paiement) blocked the cart email for 7 days, while relance-paiement itself only waits 72 h. On 2026-10-31 the only two shoppers who added to cart without ordering had each had a checkout reminder 2–5.5 days earlier, so every real cart was skipped. That block is now 72 h (`RELANCE_COOLDOWN_H`). The relay's own 7-day repeat cooldown is unchanged.
+
+## [0.5.107.52] - 2026-10-30
+
+### Changed
+
+- **Meta feeds: lifestyle photos only.** Mat: « Assure-toi que toutes nos pubs Meta soient des photos lifestyle. TOUJOURS. » The Meta feeds (`/api/feeds/meta`, `meta-xml`, `meta-xml-en`) now swap a studio `image_link` (the variant's own packshot or the hero) for the product's verified lifestyle photo, keep only lifestyle photos as `additional_image_link`, and label each item `g:custom_label_4` = `lifestyle` / `studio` so the ad product sets can exclude products with no lifestyle photo at all. Google, Bing, Pinterest and Reddit feeds are unchanged. Audit of the live Meta feed (2026-10-30): 3,306 of 5,609 items showed a studio photo; 2,631 of them have a lifestyle photo in their gallery, 675 have none.
+- The Meta feeds now answer 500 (Meta keeps its current catalog) when fewer than 90 % of product photos are classified, instead of labelling most of the catalog `studio`.
+
+### Added
+
+- **`image_styles` cache + `/api/cron/image-styles` (every 4 h).** Classifies every product photo as lifestyle or studio from pixels only (zero tokens, no Shopify writes): studio = outer 10 % frame mostly near-white OR at least two near-white corners. The corner test fixes the border-only heuristic, which called ~40 % of sampled packshots "lifestyle" when the product touched the frame edge (visual check: 38/40 lifestyle correct, 16/16 reclassified photos really studio). Only uncached photos are downloaded.
+
+## [0.5.107.51] - 2026-10-30
+
+### Added
+
+- **Google feeds: `product_highlight` + `product_detail` for AI Mode / Gemini.** The Google FR and EN feeds (and Bing) now carry up to 6 highlights per product, taken verbatim from the description's « Caractéristiques » bullets (supplier names and shipping promos scrubbed, « Assemblage requis » stubs dropped, 150-char cap, omitted below Google's minimum of 2), plus the assembled width / depth / height in cm as `product_detail` rows, read from the fit checker's `custom.lc_dims` metafield (omitted when missing — never guessed). Live dry run 2026-10-30: 5,609 offers, 5,609 with highlights, 4,734 with dimensions, 0 supplier names. Meta, Pinterest and Reddit feeds are unchanged (`rich` option, off by default).
+- **Bing / Microsoft Shopping feed** now also emits `condition`, `google_product_category`, `item_group_id`, `color`, `size`, `material` and `mpn`, ready for Microsoft Merchant Center. Price stays the single current price (no sale split).
+
+## [0.5.107.49] - 2026-10-23
+
+### Added
+
+- **Morning report: new « Boutique (Shopify) » section** (`src/lib/shop-analytics.ts`), right after the guards and before Meta. Mat, after granting the token the reports/orders scopes: « intégrer au rapport du matin ». Shows yesterday's orders and sales with the origin of each order (Meta ad / search / direct / email / AI assistant, read from the order's customer journey), yesterday's visits and funnel (cart → checkout → purchase), the last 7 days vs the previous 7 (visits, orders, sales, conversion), the checkout→purchase rate, the traffic sources with their conversion, and the Meta spend of the 7 days against the orders Shopify itself attributes to a Meta ad (cost per order). Visits/sales come from ShopifyQL (`shopifyqlQuery`), orders from the Admin GraphQL API; read-only. A failure in this section (e.g. a missing scope) marks only that section « indisponible » and the rest of the report still goes out; a Meta failure only blanks the Meta line. The order window is enforced in code because Shopify's order search was seen to ignore the upper `created_at` bound.
+
+## [0.5.107.48] - 2026-10-22
+
+### Added
+
+- **Abandoned-cart email relay (`/api/cron/cart-relay`), OFF by default.** Mat: « Prépare … le relais pour le courriel de panier abandonné ». Shoppers who added to cart with an identified email, never started a checkout nor ordered, and whose last add is 3 h to 48 h old get one one-recipient Klaviyo campaign with their items (title, image, price from the event, product link), FR or EN, free shipping across Canada, no discount or code, localized unsubscribe link. Consent is checked per profile (can receive marketing, not unsubscribed, no suppression); 7-day cooldown per profile shared with `relance-paiement` (checkout abandoners are never double-mailed); 25 per run and 60 per 24 h. Gate: settings `cart_relay_enabled` = `"1"` (the other relays run unless `"0"`; this one is the reverse), `?dryRun=1` always available. Reuses the relays' campaign plumbing and lease; `Wcjr3F` stays a draft. `esc` / `money` of `relance-paiement.ts` are now exported for reuse.
+
+## [0.5.107.47] - 2026-10-22
+
+### Added
+
+- **Own email engine on Resend — foundation, OFF.** Mat finds Klaviyo too expensive and wants full control of the text through an API. `src/lib/email/` adds the Resend transport, a single `sendEmail` exit door (master switch `email_engine_mode` off/test/live, test allow-list, suppression list, never the same email twice via `email_sends` + Resend Idempotency-Key), the CASL footer (sender, mailing address from `email_mailing_address`, signed unsubscribe link) and Gmail/Yahoo one-click `List-Unsubscribe` headers. New public routes `/api/email/unsubscribe` (GET asks, POST unsubscribes, also suppresses in Klaviyo) and `/api/email/webhook` (Svix-signed; hard bounces and spam complaints are suppressed).
+- **The 9 flow emails as code, FR + EN** (`src/lib/email/templates.ts`: abandoned checkout 1–2, welcome 1–2, wheel 1–3, review request, price drop), copy ported from the Klaviyo templates; links only to our domains, event text escaped.
+- **Hand-over from the Klaviyo relays, group by group** (`src/lib/email/flows.ts`, cron `/api/cron/email-flows` at 4/19/34/49): same timing and guards as the relays, Klaviyo consent checked, `email_engine_takeover` tells the relays which groups to skip once the engine is live; switching back copies what the engine sent into the relays' state. With the default settings (off) the relays behave exactly as before.
+- **Dashboard panel "Courriels automatiques (Resend)"**: switch off/test/live (live asks for confirmation and is refused while setup is missing), mailing address, test list, FR/EN preview of every email, per-group hand-over, 30-day results. See `docs/EMAIL-ENGINE.md`.
+
+## [0.5.107.46] - 2026-10-21
+
+### Fixed
+
+- **Ad feeds showed the wrong photo on 22 offers (morning report « Flux publicitaires »).** `isSpecImageUrl` matched the Aosom spec-shot suffixes `-b0`..`-f0` anywhere in the URL, and the `_<uuid>` Shopify adds to a re-uploaded file produces them by chance (`…-c01aff82e81c.jpg`). Good photos were dropped as « spec images »: 12 offers showed another colour, 10 showed photo 2 instead of photo 1. The ad feeds now remove the uuid suffix before the keyword match (`isSpecImageUrl(url, { ignoreShopifyUuid: true })`); they also apply the vision classifier's verdict, which keeps out the ~150 overlay shots the keyword filter had hidden by chance. The social/slideshow selectors have no vision filter, so they keep the old behaviour. Live re-check against all 3925 products: 0 image mismatches (was 22).
+- **French checkout reminder said « Unsubscribe ».** The link now reads « Se désabonner » (EN keeps « Unsubscribe »); templates key bumped to `relance_paiement_templates_v2` so the next run creates the new templates.
+
+## [0.5.107.45] - 2026-10-20
+
+### Added
+
+- **Daily fit-checker sizes sync (`/api/cron/fit-dims`, 21:15 UTC).** Mat: "Assure-toi que les produits futurs vont avoir les dimensions." New imports already get `custom.lc_dims` at creation; this pass writes it for every product whose Aosom sizes are missing or changed (jobs queued before the feed carried units, other creation paths, feed corrections), only changed values, ≤ 500 per run, same page-size guard. Logic moved to `src/lib/fit-dims-sync.ts`; `scripts/backfill-fit-dims.mts` is now a thin operator wrapper. The one-time backfill ran on 2026-10-20: 3106 products written, 0 failed; a re-run finds 0 to write.
+## [0.5.107.44] - 2026-10-20
+
+### Added
+
+- **"Bientôt" teasers that measure demand before paying for AI (Mat: "fais le code, ne l'active pas").** A "Voyez-le chez vous · Bientôt" pill sits on the main product photo and opens a sheet explaining the coming feature and asking "Est-ce que ça vous aiderait à choisir ?"; the Ameublo assistant gets a persistent "Décorer ma pièce à partir d'une photo · Bientôt" button. Unique-visitor funnel (view → click → yes/no → launch-notice email) per feature and entry point in `teaser_events` / `teaser_signups` (consent wording stored, one launch notice only), shown on the dashboard ("Fonctions « bientôt »"). Bots, headless renderers, the theme editor and visitors who refused analytics are not counted.
+- **The two AI tools themselves, built but OFF.** `POST /api/visualiser` places the product in the shopper's room photo (Gemini 3.1 Flash Image) and `POST /api/decorateur` reads the room and lets the assistant pick live products; both answer 503 until settings `visualiser_enabled` / `decorateur_enabled` = "1". Own token pools (`visualiser`, `decorateur`, on the usage dashboard), atomic per-IP daily caps (3 / 5), product photos restricted to the product's own images, photos never stored.
+## [0.5.107.43] - 2026-10-20
+
+### Added
+
+- **"Est-ce que ça va entrer chez moi ?" fit checker (product pages).** Every Aosom product can now carry its real assembled size and shipping-box sizes per variant, in cm, in the `custom.lc_dims` metafield (`src/lib/fit-dims.ts`). The feed's Length/Width/Height now name their unit ("47.80 in", "10.00 ft", "120.00 cm"); the raw strings are kept (`dimensionsRaw`) because the parsed numbers dropped it. New imports get the metafield at creation; `scripts/backfill-fit-dims.mts` fills existing products (dry-run by default). A product whose page states a different size gets nothing, so the checker never contradicts the page (audit: 1405 of 1459 pages agree). The theme snippet `lc-fit` (inside the first PDP question) compares the shopper's space and narrowest doorway with the product and its boxes, in inches or cm, with a top view to scale.
+## [0.5.107.42] - 2026-10-19
+
+### Changed
+
+- **Roue de bienvenue — legal and clarity pass.** Email-marketing consent is now optional to play (CASL forbids making it a condition): without it nothing is sent to Klaviyo and the visitor keeps the code on screen and in the cart. The wheel closes on its printed end date, 31 janvier 2027 (`ROUE_ENDS_AT`, GET and POST answer as switched off afterwards). The theme snippet is redesigned so the wheel reads as a wheel of fortune at a glance, with one task per step and the short contest rules under the form.
+
+## [0.5.107.41] - 2026-10-19
+
+### Added
+
+- **Roue de bienvenue — server side.** `POST /api/roue` (public, Origin allowlist, per-IP limits, kill switch `settings.roue_enabled="0"`) draws the prize on the server, keeps one spin per normalized email (table `wheel_spins`), creates a unique single-use Shopify code valid 72 h (fixed $ off a minimum subtotal, never more than 10 % of that minimum so the profit floor and the margin guard hold; combines with shipping only), records the email-marketing consent the visitor ticked in Klaviyo and fires the event "Roue gagnée" that drives the 3-email code flow. Prizes: 15 $ dès 150 $ (45 %), 25/250 (30 %), 40/400 (17 %), 60/600 (7 %), 100/1000 (1 %). Nothing on the storefront calls it until the theme snippet `lc-roue` is published.
+
+## [0.5.107.40] - 2026-10-17
+
+### Fixed
+
+- **English links and video overlays no longer use furnishdirect.ca.** That domain is not registered (NXDOMAIN at the .ca registry), so every English link to it led nowhere: 56 Furnish posts published in the last 30 days carried one. The Ameublo caption generator, the "La semaine Ameublo" captions and the three video renderers (slideshow, remix, Top 5 countdown) now use `ameublodirect.ca/en`, the English locale of the same store. The 37 Furnish posts already in the publication queue were rewritten the same way in the database. The CORS allow-lists keep furnishdirect.ca for the day the domain is connected.
+
+## [0.5.107.39] - 2026-10-16
+
+### Added
+
+- **Daily site health check ("Santé du site" in the dashboard Alertes panel).** `/api/cron/site-health` runs at 10:30 UTC and never writes to Shopify or Klaviyo. It opens every collection and page in both languages, 20 products a day in rotation and every internal link of the two homepages (about 270 pages, 30 s), and turns red on a broken page or link, a Liquid error, a page without a Google description or without exactly one H1. It also reads every live Klaviyo flow email and checks that each promo code in it is an active Shopify discount: on 2026-10-16 it caught the Welcome email still giving BIENVENUE10, expired since 2026-10-02. The summary lists the shoppers' real searches of the last 7 days that return no product (replayed against the store search) and a 7-day funnel from Klaviyo (checkouts started → orders, 25 → 12 on the first run); store visitors and add-to-cart clicks join it once `UMAMI_API_KEY` is set.
+
+## [0.5.107.38] - 2026-10-16
+
+### Changed
+
+- **"Les plus demandés cette semaine" will include what our own customers buy.** The homepage list ranked products by how fast the supplier's stock drops (all resellers combined) and by price drops. It now also counts units sold on our store over the last 30 days, with a weight that grows with order volume: nothing below 5 paid orders, then up to 35 % of the score at 40 orders. It needs the Shopify read_orders permission on the app token; until that is granted the list ranks exactly as before.
+
+## [0.5.107.37] - 2026-10-16
+
+### Changed
+
+- **Homepage customer videos are served from our own storage.** The "Déballé chez nos clients" reel used to play each video straight from the supplier's servers, which put the supplier's name in the page's network requests and would have left the reel blank if the supplier moved the files. The videos are now copied to our public Vercel Blob store (script `scripts/mirror-ugc-videos.mjs`, 55 copied on 2026-10-16) and the reel picks copied videos first; a video not copied yet still plays from its original address.
+## [0.5.107.36] - 2026-10-16
+
+### Fixed
+
+- **Product SEO titles no longer stop mid-phrase.** The Google title of a product was "<name> | Livraison gratuite — Ameublo Direct"; the long suffix left about 28 characters for the name inside the 65-character budget, so 350 of 2,269 active products showed titles like "Tables de chevet avec | …" or "Bureau d'ordinateur 3 | …". New titles end with just the store name ("| Ameublo Direct", "| Furnish Direct" in English), which leaves 48 characters for the name, and a shortened name never ends on a word like "de", "avec", "pour", "with", a bare number or a dash ("2-en-1" stays whole). Titles written by the AI get the same treatment, and one whose name part dangles is rebuilt from the product title. Live products are repaired with `scripts/fix-seo-titles.mts` (dry run by default; `--apply` writes): the dry run of 2026-10-16 finds 912 titles to rewrite (306 cut mid-phrase, 654 shared word-for-word with another product, 3 under 12 characters).
+
+## [0.5.107.35] - 2026-10-15
+
+### Fixed
+
+- **Product-page "Complétez la pièce" cards no longer show 0,00 $.** During the 2026-10-15 feed outage the block cached 145 suggestions with a price of 0, and every card used the Aosom catalogue price rather than the price shown on the product page. Cards (on product pages and in the shopping assistant) now carry the live Shopify price, a card with no real price is dropped, and the cache key is versioned so every old suggestion is recomputed and a cached card at 0 $ counts as a miss.
+
 ## [0.5.107.34] - 2026-10-15
 
 ### Changed

@@ -298,8 +298,9 @@ export async function analyzeGallery(
   images: string[],
   llm: LlmText = defaultLlmText,
   fetchImage: (url: string) => Promise<FetchedImage | null> = fetchImageBase64,
+  start = 0,
 ): Promise<GalleryAnalysis> {
-  const urls = [...new Set(images)].slice(0, GALLERY_ANALYZE_COUNT);
+  const urls = [...new Set(images)].slice(start, start + GALLERY_ANALYZE_COUNT);
   const reachable: Array<{ url: string; img: FetchedImage }> = [];
   const unreachable: string[] = [];
   for (const u of urls) {
@@ -314,7 +315,7 @@ export async function analyzeGallery(
   let raw: string;
   try {
     raw = await llm(
-      `Examine ces ${reachable.length} photos produit dans l'ordre (index 1..${reachable.length}). Pour chacune indique: supplier_logo (logo ou nom du fournisseur AJOUTÉ sur la photo: coin d'image, bandeau, filigrane de marque, ou le nom « Aosom » où que ce soit; une marque imprimée ou gravée sur le produit lui-même ne compte PAS), watermark (filigrane), not_product (ne montre pas le produit: page de texte, QR code, emballage vide), unreadable (illisible ou trop floue), lifestyle (le produit est montré en situation réelle: pièce meublée, jardin, animal, enfant qui l'utilise; false si le produit est seul sur fond uni ou blanc), text_overlay (texte marketing, flèches ou cotes de dimensions incrustés sur la photo). Réponds UNIQUEMENT en JSON: {"images":[{"index":1,"supplier_logo":false,"watermark":false,"not_product":false,"unreadable":false,"lifestyle":true,"text_overlay":false}]}`,
+      `Examine ces ${reachable.length} photos produit dans l'ordre (index 1..${reachable.length}). Pour chacune indique: supplier_logo (logo ou nom du fournisseur AJOUTÉ par-dessus la photo: coin d'image, bandeau, filigrane de marque, ou le nom « Aosom » où que ce soit; une marque imprimée ou gravée sur le produit lui-même ne compte PAS, ni une plaque, une étiquette ou un autocollant fixé sur le produit, par exemple une plaque PawHut ou HOMCOM sur une cage ou un meuble: mets-la dans brand_on_product), brand_on_product (une marque est visible SUR le produit lui-même; c'est permis, ne fait rien rejeter), watermark (filigrane), not_product (ne montre pas le produit: page de texte, QR code, emballage vide), unreadable (illisible ou trop floue), lifestyle (le produit est montré en situation réelle: pièce meublée, jardin, animal, enfant qui l'utilise; false si le produit est seul sur fond uni ou blanc), text_overlay (texte marketing, flèches ou cotes de dimensions incrustés sur la photo). Réponds UNIQUEMENT en JSON: {"images":[{"index":1,"supplier_logo":false,"brand_on_product":false,"watermark":false,"not_product":false,"unreadable":false,"lifestyle":true,"text_overlay":false}]}`,
       { images: reachable.map((r) => r.img), tier: "lite" },
     );
   } catch (err) {
@@ -325,7 +326,7 @@ export async function analyzeGallery(
   const flags: GalleryFlag[] = reachable.map((r, i) => {
     const o = out.images!.find((x) => x.index === i + 1) ?? {};
     return {
-      index: i + 1,
+      index: start + i + 1,
       url: r.url,
       supplierLogo: !!o.supplier_logo,
       watermark: !!o.watermark,
@@ -378,6 +379,28 @@ export function cleanGallery(images: string[], a: GalleryAnalysis, minKeep = 3):
   const reasons: string[] = [];
   if (!lifestyle && !clean(kept[0])) reasons.push("no_clean_primary_photo");
   return { images: kept, dropped, promoted, hasLifestyle: !!lifestyle, reasons };
+}
+
+/**
+ * analyzeGallery + cleanGallery, with a second look when needed: Aosom galleries often carry dimension callouts or
+ * marketing text on the first six photos while a plain studio shot sits at position 7-12. When the first pass finds no
+ * photo fit to lead the gallery and more photos exist, the next six are analysed too (one more vision call) and the
+ * gallery is cleaned again over both passes. A failed second call keeps the first answer.
+ */
+export async function analyzeAndCleanGallery(
+  images: string[],
+  llm: LlmText = defaultLlmText,
+  fetchImage: (url: string) => Promise<FetchedImage | null> = fetchImageBase64,
+): Promise<{ analysis: GalleryAnalysis; cleaned: CleanedGallery | null }> {
+  const first = await analyzeGallery(images, llm, fetchImage);
+  if (!first.ok) return { analysis: first, cleaned: null };
+  const cleaned = cleanGallery(images, first);
+  const unique = [...new Set(images)];
+  if (!cleaned.reasons.includes("no_clean_primary_photo") || unique.length <= GALLERY_ANALYZE_COUNT) return { analysis: first, cleaned };
+  const more = await analyzeGallery(images, llm, fetchImage, GALLERY_ANALYZE_COUNT);
+  if (!more.ok) return { analysis: first, cleaned };
+  const both: GalleryAnalysis = { ok: true, reasons: [], flags: [...first.flags, ...more.flags], unreachable: [...first.unreachable, ...more.unreachable] };
+  return { analysis: both, cleaned: cleanGallery(images, both) };
 }
 
 // ── Titles and colour photos ───────────────────────────────────────────────────────────────────

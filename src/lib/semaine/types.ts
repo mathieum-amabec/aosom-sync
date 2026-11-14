@@ -55,7 +55,12 @@ export interface PlannedPost {
   topic?: { fr: string; en: string };
   /** Hard cap for how many products a post carries. */
   maxProducts: number;
+  /** Sales moment of the post's day (formats.ts `seasonalMoment`): adds the code-owned seasonal footer. */
+  moment?: SeasonalMoment;
 }
+
+/** Black Friday 2026 / Christmas moments, see formats.ts `SEASON`. */
+export type SeasonalMoment = "early-bf" | "black-friday" | "cyber-monday" | "noel";
 
 export interface BuiltCaptions {
   fr: string;

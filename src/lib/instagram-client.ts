@@ -66,6 +66,33 @@ export async function testConnection(brand: InstagramBrand = "ameublo"): Promise
 }
 
 /**
+ * Pin a Shopify CDN image to JPEG for Instagram.
+ *
+ * cdn.shopify.com negotiates the format on the request's Accept header (`Vary: Accept`): a client
+ * that accepts WebP gets WebP bytes under the very same `.jpg` URL (measured 2026-11-01 on
+ * Iz20aa19496f93381.jpg: Accept "image/webp,*\/*" → image/webp, 77 KB; "*\/*" → image/jpeg, 152 KB).
+ * Instagram only ingests JPEG and answers "Only photo or video can be accepted as media type" when
+ * its fetcher is served something else — the error 5 of 14 Ameublo semaine posts got between
+ * 2026-10-19 and 2026-11-01 while Facebook published the same URLs fine, and the same kind of
+ * file (2000×2000 progressive JPEG) succeeded on other days — consistent with an intermittent
+ * WebP answer to Meta's fetcher (most likely cause; Meta does not say what it received). `format=pjpg` forces JPEG whatever the Accept header,
+ * and returns the original bytes unchanged (same 152,476-byte 2000×2000 file). Note `format=jpg`
+ * does NOT pin it (still WebP). Other hosts are left untouched.
+ */
+export function instagramSafeImageUrl(url: string): string {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return url;
+  }
+  if (u.hostname !== "cdn.shopify.com" && !u.pathname.startsWith("/cdn/shop/")) return url;
+  if (u.searchParams.has("format")) u.searchParams.set("format", "pjpg");
+  else u.searchParams.append("format", "pjpg");
+  return u.toString();
+}
+
+/**
  * Publish a photo post to an Instagram Business account.
  *
  * Meta fetches the RAW source `image_url` server-side (IG can't take a binary upload).
@@ -87,7 +114,7 @@ export async function publishPhoto(opts: {
   const createRes = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ image_url: opts.imageUrl, caption }),
+    body: JSON.stringify({ image_url: instagramSafeImageUrl(opts.imageUrl), caption }),
   });
 
   if (createRes.status === 429) {
@@ -179,7 +206,7 @@ export async function publishCarousel(opts: {
     const res = await fetch(`${META.GRAPH_API_URL}/${igUserId}/media`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ image_url: opts.imageUrls[i], is_carousel_item: true }),
+      body: JSON.stringify({ image_url: instagramSafeImageUrl(opts.imageUrls[i]), is_carousel_item: true }),
     });
     if (res.status === 429) throw new Error(`${label}: Instagram rate limit on carousel item ${i + 1}, retry later`);
     const data = await res.json();

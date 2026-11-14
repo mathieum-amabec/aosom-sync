@@ -77,6 +77,19 @@ const DEFAULT_ASSISTANT_TOKEN_BUDGET = 500_000;
  * shared `batch` cap it used to draw from.
  */
 const DEFAULT_VIDEO_TOKEN_BUDGET = 400_000;
+/**
+ * 300,000 tokens/day for the storefront AI room visualiser + decorator (room-visualizer.ts), its own pool so a
+ * popular day can never starve the assistant or imports. One placement ≈ 2 input images (~1,300 tokens each at
+ * 1K) + prompt + ~1,300 output image tokens ≈ 4,000 tokens, so ~75 images/day — about 5 $ US/day at worst at
+ * the Gemini 3.1 Flash Image rate (~0.067 $/image). Set `LLM_VISUALISER_DAILY_BUDGET` to override.
+ */
+const DEFAULT_VISUALISER_TOKEN_BUDGET = 300_000;
+/**
+ * 300,000 tokens/day for the storefront "Ameublo décorateur": one room reading (~1,500 tokens, Flash-Lite) plus the
+ * assistant's tool loop (~3,000 tokens/step, up to 5 steps) ≈ 15,000 tokens per photo → ~20 photos/day, well under
+ * 1 $ US at Flash-Lite rates. Its own pool so it can never drain the storefront chat. `LLM_DECORATEUR_DAILY_BUDGET`.
+ */
+const DEFAULT_DECORATEUR_TOKEN_BUDGET = 300_000;
 
 /**
  * Resolve a pool's daily token budget from its env var, falling back to the default.
@@ -105,6 +118,14 @@ export function poolBudget(pool: BudgetPool): number {
     const raw = Number(process.env.LLM_IMPORT_DAILY_BUDGET);
     return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_IMPORT_TOKEN_BUDGET;
   }
+  if (pool === "visualiser") {
+    const raw = Number(process.env.LLM_VISUALISER_DAILY_BUDGET);
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_VISUALISER_TOKEN_BUDGET;
+  }
+  if (pool === "decorateur") {
+    const raw = Number(process.env.LLM_DECORATEUR_DAILY_BUDGET);
+    return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_DECORATEUR_TOKEN_BUDGET;
+  }
   const [envName, fallback] =
     pool === "assistant"
       ? ["LLM_ASSISTANT_DAILY_BUDGET", DEFAULT_ASSISTANT_TOKEN_BUDGET]
@@ -125,6 +146,8 @@ export class LlmBudgetExceededError extends Error {
       : pool === "maintenance" ? "LLM_MAINTENANCE_DAILY_BUDGET"
       : pool === "video" ? "LLM_VIDEO_DAILY_BUDGET"
       : pool === "import" ? "LLM_IMPORT_DAILY_BUDGET"
+      : pool === "visualiser" ? "LLM_VISUALISER_DAILY_BUDGET"
+      : pool === "decorateur" ? "LLM_DECORATEUR_DAILY_BUDGET"
       : "LLM_DAILY_TOKEN_BUDGET";
     super(
       `LLM daily token budget exceeded for pool "${pool}" (${used}/${budget} tokens used today, UTC) — ` +

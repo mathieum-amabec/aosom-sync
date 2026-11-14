@@ -45,7 +45,7 @@ const FONT = `"${VIDEO_BRAND.font.family}", system-ui, Arial, sans-serif`;
 
 const STORE_URL: Record<CountdownBrand, string> = {
   ameublo: "ameublodirect.ca",
-  furnish: "furnishdirect.ca",
+  furnish: "ameublodirect.ca/en", // furnishdirect.ca is NXDOMAIN — never burn it into a video
 };
 
 function introCopy(language: CountdownLanguage): { kicker: string; title: string } {

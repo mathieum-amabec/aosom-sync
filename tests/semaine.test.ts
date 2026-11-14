@@ -14,10 +14,12 @@ const db = vi.hoisted(() => {
 vi.mock("@/lib/database", () => db);
 vi.mock("@/lib/content-generator", () => ({ getAnthropicClient: () => ({}) }));
 vi.mock("@/lib/semaine/store", () => ({ getPost: vi.fn(), savePost: vi.fn(), recentSkus: vi.fn(), recentPosts: vi.fn() }));
+const shopify = vi.hoisted(() => ({ resolveProductFields: vi.fn() }));
+vi.mock("@/lib/selectors/shopify-product", () => shopify);
 
-import { localDay, plannedFormat, MORNING_FORMAT } from "@/lib/semaine/formats";
-import { shortEnglishTitle } from "@/lib/semaine/live";
-import { validateBody, factsBlock, assemble, buildCaptions, formatPrice, bodyPrompt } from "@/lib/semaine/caption";
+import { localDay, plannedFormat, MORNING_FORMAT, seasonalMoment, featuredOrder, CHRISTMAS_CATEGORIES } from "@/lib/semaine/formats";
+import { shortEnglishTitle, verifyUntil, inCooldown, productKey } from "@/lib/semaine/live";
+import { validateBody, factsBlock, assemble, buildCaptions, formatPrice, bodyPrompt, footer } from "@/lib/semaine/caption";
 import { runSemaine, type RunDeps } from "@/lib/semaine/run";
 import * as store from "@/lib/semaine/store";
 import type { LiveProduct, PlannedPost } from "@/lib/semaine/types";
@@ -46,6 +48,101 @@ describe("calendar", () => {
   });
 });
 
+describe("seasonal layer (Black Friday 2026 + Christmas)", () => {
+  // Noon UTC = morning in Toronto, same calendar day.
+  const d = (date: string) => localDay(new Date(`${date}T16:00:00Z`));
+
+  it("maps the 2026 dates to their sales moment", () => {
+    expect(seasonalMoment(d("2026-11-05"))).toBeNull();
+    expect(seasonalMoment(d("2026-11-06"))).toBe("early-bf");
+    expect(seasonalMoment(d("2026-11-26"))).toBe("early-bf");
+    expect(seasonalMoment(d("2026-11-27"))).toBe("black-friday");
+    expect(seasonalMoment(d("2026-11-29"))).toBe("black-friday");
+    expect(seasonalMoment(d("2026-11-30"))).toBe("cyber-monday");
+    expect(seasonalMoment(d("2026-12-01"))).toBe("noel");
+    expect(seasonalMoment(d("2026-12-15"))).toBe("noel");
+    expect(seasonalMoment(d("2026-12-16"))).toBeNull();
+    expect(seasonalMoment(d("2027-11-27"))).toBeNull(); // next year's dates are set on purpose, not guessed
+  });
+
+  it("uses the Toronto day at the edges (Nov 6 starts at midnight Toronto, not UTC)", () => {
+    expect(seasonalMoment(localDay(new Date("2026-11-06T03:00:00Z")))).toBeNull(); // still Nov 5, 22:00 Toronto
+    expect(seasonalMoment(localDay(new Date("2026-11-06T06:00:00Z")))).toBe("early-bf");
+  });
+
+  it("runs baisses on weekday mornings of the early sale, keeps the weekend formats", () => {
+    expect(plannedFormat(d("2026-11-09"), "morning")).toBe("baisses"); // Monday (normally nouveautés)
+    expect(plannedFormat(d("2026-11-12"), "morning")).toBe("baisses"); // Thursday (normally A/B)
+    expect(plannedFormat(d("2026-11-07"), "morning")).toBe("astuce"); // Saturday
+    expect(plannedFormat(d("2026-11-08"), "morning")).toBe("coeur"); // Sunday
+    expect(plannedFormat(d("2026-11-09"), "afternoon")).toBe("vedette");
+  });
+
+  it("runs baisses every morning from Black Friday to Cyber Monday", () => {
+    for (const date of ["2026-11-27", "2026-11-28", "2026-11-29", "2026-11-30"]) expect(plannedFormat(d(date), "morning")).toBe("baisses");
+  });
+
+  it("is back to the usual calendar outside the sale", () => {
+    expect(plannedFormat(d("2026-11-02"), "morning")).toBe("nouveautes");
+    expect(plannedFormat(d("2026-12-02"), "morning")).toBe("piece");
+  });
+
+  it("puts Christmas categories in the vedette rotation from Nov 1 to Dec 15 only", () => {
+    expect(featuredOrder(d("2026-10-31")).some((p) => p.includes("Christmas"))).toBe(false);
+    expect(featuredOrder(d("2026-12-16")).some((p) => p.includes("Christmas"))).toBe(false);
+    const nov = [d("2026-11-10"), d("2026-11-11")].map((x) => featuredOrder(x)[0]);
+    expect(nov.filter((p) => CHRISTMAS_CATEGORIES.includes(p))).toHaveLength(1); // first every other day in November
+    expect(CHRISTMAS_CATEGORIES).toContain(featuredOrder(d("2026-12-05"))[0]); // first every day in December
+    expect(featuredOrder(d("2026-11-11"))).toEqual(expect.arrayContaining(CHRISTMAS_CATEGORIES));
+  });
+
+  it("Christmas patterns match both product_type forms", () => {
+    const like = (pattern: string, s: string) => new RegExp(`^${pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/%/g, ".*")}$`).test(s);
+    expect(like(CHRISTMAS_CATEGORIES[0], "Holiday & Seasonal > Christmas Trees > Pencil Christmas Tree")).toBe(true);
+    expect(like(CHRISTMAS_CATEGORIES[0], "Home Furnishings > Holiday & Seasonal > Christmas Trees > Pre Lit")).toBe(true);
+  });
+
+  it("adds the code-owned seasonal line and hashtags, in each language", () => {
+    expect(footer(plan({ moment: "early-bf" }), "fr")).toContain("Vendredi fou en avance");
+    expect(footer(plan({ moment: "early-bf" }), "fr")).toContain("#vendredifou");
+    expect(footer(plan({ moment: "early-bf" }), "en")).toContain("#blackfriday");
+    expect(footer(plan({ moment: "cyber-monday" }), "fr")).toContain("#cyberlundi");
+    expect(footer(plan({ moment: "cyber-monday" }), "en")).toContain("#cybermonday");
+    expect(footer(plan({ moment: "noel" }), "fr")).toContain("#noel");
+    expect(footer(plan({ moment: "noel" }), "en")).toContain("#christmas");
+    expect(footer(plan(), "fr")).not.toMatch(/vendredi|#noel/i);
+    for (const m of ["early-bf", "black-friday", "cyber-monday", "noel"] as const) {
+      expect(footer(plan({ moment: m }), "fr")).not.toMatch(/\d|%|\$/); // never an amount or a promise
+      expect(footer(plan({ moment: m }), "fr")).toContain("Livraison gratuite.");
+    }
+  });
+});
+
+describe("cooldown per Shopify product", () => {
+  const cand = (sku: string, pid: string) => ({ sku, shopifyProductId: pid, nameEn: "Vanity", productType: "Dressing & Vanity Tables", stock: 5, velocity: 1 });
+  const fields = (img: string) => ({ images: [img], titleFr: "Coiffeuse", lifestyle: { verified: true, primaryImageUrl: img }, handle: "coiffeuse", status: "active", price: "199.99", compareAtPrice: null });
+
+  beforeEach(() => shopify.resolveProductFields.mockReset());
+
+  it("treats another colour of a posted product as in cooldown", () => {
+    const skip = new Set([productKey("7752237121641")]);
+    expect(inCooldown(skip, { sku: "831-823V80WT", shopifyProductId: "7752237121641" })).toBe(true);
+    expect(inCooldown(skip, { sku: "831-651V81WT", shopifyProductId: "7788349882473" })).toBe(false);
+    expect(inCooldown(new Set(["831-823V80BK"]), { sku: "831-823V80BK", shopifyProductId: "" })).toBe(true);
+  });
+
+  it("verifyUntil skips a product in cooldown without calling Shopify, and never puts two colours of one product in a post", async () => {
+    shopify.resolveProductFields.mockImplementation(async (id: string) => fields(`https://cdn.shopify.com/${id}-${Math.random()}.jpg`));
+    const out = await verifyUntil(
+      [cand("831-823V80BK", "100"), cand("831-823V80WT", "200"), cand("831-823V81WT", "200"), cand("839-846V80BK", "300")],
+      3,
+      new Set([productKey("100")]),
+    );
+    expect(out.map((p) => p.sku)).toEqual(["831-823V80WT", "839-846V80BK"]);
+    expect(shopify.resolveProductFields).not.toHaveBeenCalledWith("100");
+  });
+});
+
 describe("titles", () => {
   it("cuts the supplier title at the first clause and strips brands", () => {
     expect(shortEnglishTitle("HOMCOM Fold-out Convertible Office Desk, Wall Mount Computer Desk with Blackboard")).toBe("Fold-out Convertible Office Desk");
@@ -56,7 +153,7 @@ describe("facts are written by code", () => {
   it("formats single product with price and link in each language", () => {
     expect(factsBlock(plan(), "fr")).toBe("Bureau mural rabattable 150 cm — 147,99 $\nVoir le produit: https://ameublodirect.ca/products/bureau-mural");
     expect(factsBlock(plan(), "en")).toContain("$147.99");
-    expect(factsBlock(plan(), "en")).toContain("https://furnishdirect.ca/products/bureau-mural");
+    expect(factsBlock(plan(), "en")).toContain("https://ameublodirect.ca/en/products/bureau-mural");
   });
   it("shows the rabais only when the product carries one", () => {
     const p = plan({ products: [product({ price: 75, compareAt: 100 })] });
@@ -230,7 +327,7 @@ describe("runSemaine", () => {
     const r = await runSemaine({ slot: "morning", now: NOW }, deps);
     expect(r.format).toBe("nouveautes");
     expect(seen[0]).toEqual([]);
-    expect(seen[1]).toEqual(["P1"]); // the rejected product is excluded from the second pick
+    expect(seen[1]).toEqual(["P1", "pid:1"]); // the rejected product (SKU + whole Shopify product) is excluded from the second pick
   });
 
   it("moves to the next format when a caption is rejected twice", async () => {
@@ -262,6 +359,28 @@ describe("runSemaine", () => {
     const r = await runSemaine({ slot: "morning", now: new Date("2026-10-12T15:00:00Z") }, deps); // 11:00 Toronto
     expect(r.status).toBe("skipped");
     expect(db.addToQueue).not.toHaveBeenCalled();
+  });
+
+  it("during the early Black Friday sale the morning post is baisses and carries the seasonal footer", async () => {
+    const r = await runSemaine({ slot: "morning", now: new Date("2026-11-09T12:00:00Z") }, deps); // Monday 07:00 Toronto
+    expect(r).toMatchObject({ status: "queued", format: "baisses" });
+    expect(r.captions?.fr).toContain("#vendredifou");
+    expect(r.captions?.en).toContain("#blackfriday");
+  });
+
+  it("a rejected caption puts the whole product (every colour) out of the retry pick", async () => {
+    const seen: string[][] = [];
+    let calls = 0;
+    deps.picker = vi.fn(async (format, ctx) => {
+      seen.push([...ctx.skip]);
+      return plan({ format, products: [product({ sku: "831-823V80BK", shopifyProductId: "7752237121641" })] });
+    });
+    deps.gen = vi.fn(async (p: string) => {
+      if (p.includes("fact-checker")) return calls++ < 4 ? '{"ok": false, "issue": "invented"}' : '{"ok": true}';
+      return p.includes("Ameublo Direct") ? good : goodEn;
+    });
+    await runSemaine({ slot: "morning", now: NOW }, deps);
+    expect(seen[1]).toEqual(expect.arrayContaining(["831-823V80BK", productKey("7752237121641")]));
   });
 
   it("dry run builds everything, queues and saves nothing, and ignores the kill switch", async () => {

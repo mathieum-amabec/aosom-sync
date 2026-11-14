@@ -30,7 +30,7 @@ describe("studioVideoToPin", () => {
 
   it("links EN videos to Furnish Direct", () => {
     const r = studioVideoToPin(video({ lang: "en", caption: "A sofa.\n#furnishdirect" }), product);
-    expect(r.ok && r.input.link).toBe("https://furnishdirect.ca/products/canape-2-places");
+    expect(r.ok && r.input.link).toBe("https://ameublodirect.ca/en/products/canape-2-places");
   });
 
   it("lets the caller pick a better cover", () => {

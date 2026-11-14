@@ -42,6 +42,7 @@ const RULES: Array<[RegExp, string | ((...m: string[]) => string)]> = [
   [/"\s*wide\b/gi, "\" de large"],
   [/"\s*tall\b/gi, "\" de haut"],
   [/\bcu\.? ?ft\b/gi, "pi³"],
+  [/\bpints?\b/gi, "pintes"],
   [/\binches\b|\binch\b/gi, "po"],
   [/(\d)\s?(ft|feet|foot)\b/gi, "$1 pi"],
   [/\bft\b/gi, "pi"],

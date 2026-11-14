@@ -26,8 +26,7 @@ import { withBudgetPool } from "@/lib/llm-budget";
 import { STOREFRONT_BASE_URL } from "@/lib/insights";
 import {
   checkContentStructure,
-  analyzeGallery,
-  cleanGallery,
+  analyzeAndCleanGallery,
   checkTitle,
   checkColorPhotos,
   judgeContent,
@@ -120,12 +119,12 @@ export async function processCandidate(c: Candidate, mode: Exclude<AutoImportMod
       // Layer 2a: photos. Look at the first six, drop logos/watermarks/non-product shots, then put a CLEAN
       // lifestyle scene first (studio shot only when there is none). The corrected order is saved on the job
       // BEFORE creation so Shopify gets exactly this gallery.
-      const analysis = await analyzeGallery(job.product.images);
-      if (!analysis.ok) {
+      // When none of the first six photos can lead (dimension callouts on all of them), the next six are looked at too.
+      const { analysis, cleaned } = await analyzeAndCleanGallery(job.product.images);
+      if (!analysis.ok || !cleaned) {
         await park(job.id, "gallery", analysis.reasons);
         return { ...base, outcome: "needs_review", layer: "gallery", reasons: analysis.reasons };
       }
-      const cleaned = cleanGallery(job.product.images, analysis);
       if (cleaned.reasons.length) {
         await park(job.id, "gallery", cleaned.reasons);
         return { ...base, outcome: "needs_review", layer: "gallery", reasons: cleaned.reasons };

@@ -3,11 +3,11 @@
  * Pure builders + a thin layer over an injected `ShopifyFetchLike`, so every decision is unit-tested
  * against a fake store and the CLI (scripts/costway-setup-shopify.mts) only wires real I/O.
  *
- *  a) `rabais-2e-article` must exclude Costway. It is the collection the automatic BXGY
- *     "10% sur le 2e article" buys from AND gets from, and its only rule is `variant price > 0`, so
- *     EVERY product joins it. With a 16% dropship discount a 10% second-item rebate leaves ~6%
- *     (and can sink under Costway's `Price Drop` floor) — Costway products carry the tag `src-c`
- *     and are excluded with a ANDed `TAG != src-c` rule.
+ *  a) `rabais-2e-article` must INCLUDE Costway (Mat, 2026-10-18: "les produits Costway peuvent faire partie du
+ *     rabais ou de n'importe quel rabais"). It is the collection the automatic BXGY "10% sur le 2e article" buys
+ *     from AND gets from; its rule is `variant price > 0`, so every product joins it. From 2026-10-03 to
+ *     2026-10-18 Costway was kept out with an ANDed `TAG != src-c` rule; this step now REMOVES that rule if it
+ *     is ever back, so re-running the setup can never exclude Costway again.
  *  b) Three smart collections: two shopper-facing categories (Déshumidificateurs, Buanderie) and an
  *     INTERNAL tracking collection (tag = src-c) that must never be published to the storefront.
  *  c) Menu step (explicit flag only): the two category collections under « Électro & Tech », via
@@ -74,22 +74,17 @@ export interface RuleSet {
 const ruleKey = (r: CollectionRule) => `${r.column}|${r.relation}|${r.condition}`;
 const RULE_FIELDS = `ruleSet { appliedDisjunctively rules { column relation condition } }`;
 
-/** The exclusion rule that keeps Costway out of the 2nd-item rebate. */
+/** The rule that USED TO keep Costway out of the 2nd-item rebate (2026-10-03 → 2026-10-18). It must not be there. */
 export const COSTWAY_EXCLUSION_RULE: CollectionRule = { column: "TAG", relation: "NOT_EQUALS", condition: COSTWAY_TAG };
 
 /**
- * `existing` + the exclusion rule. Idempotent (never duplicates). The set must stay CONJUNCTIVE:
- * with `appliedDisjunctively = true` a `!= src-c` rule would be OR-ed in and match every product.
+ * `existing` without the Costway exclusion rule; every other rule and the AND/OR mode are kept. Idempotent.
+ * Refuses to leave a smart collection with no rule at all (Shopify needs one).
  */
-export function withCostwayExclusion(existing: RuleSet): { ruleSet: RuleSet; changed: boolean } {
-  if (existing.appliedDisjunctively) {
-    throw new Error("rabais-2e-article is disjunctive (OR): adding a NOT_EQUALS rule would match every product — refusing");
-  }
-  const has = existing.rules.some((r) => ruleKey(r) === ruleKey(COSTWAY_EXCLUSION_RULE));
-  return {
-    ruleSet: { appliedDisjunctively: false, rules: has ? existing.rules : [...existing.rules, COSTWAY_EXCLUSION_RULE] },
-    changed: !has,
-  };
+export function withoutCostwayExclusion(existing: RuleSet): { ruleSet: RuleSet; changed: boolean } {
+  const rules = existing.rules.filter((r) => ruleKey(r) !== ruleKey(COSTWAY_EXCLUSION_RULE));
+  if (!rules.length) throw new Error("rabais-2e-article would be left with no rule — refusing");
+  return { ruleSet: { appliedDisjunctively: existing.appliedDisjunctively, rules }, changed: rules.length !== existing.rules.length };
 }
 
 export interface RabaisPlan {
@@ -117,11 +112,11 @@ export async function planRabais(client: ShopifySetupClient): Promise<RabaisPlan
   );
   const c = data.collection;
   if (!c || !c.ruleSet) throw new Error("rabais-2e-article not found or not a smart collection");
-  const { ruleSet, changed } = withCostwayExclusion(c.ruleSet);
+  const { ruleSet, changed } = withoutCostwayExclusion(c.ruleSet);
   return { id: c.id, title: c.title, handle: c.handle, count: c.productsCount.count, current: c.ruleSet, desired: ruleSet, changed };
 }
 
-/** Applies the rule, then reads back: rules present, existing rules kept, product count unchanged. */
+/** Removes the exclusion, then reads back: rule gone, every other rule kept, AND/OR unchanged, no product lost. */
 export async function applyRabais(client: ShopifySetupClient, plan: RabaisPlan): Promise<{ count: number }> {
   if (!plan.changed) return { count: plan.count };
   const out = await client.gql<{ collectionUpdate: { userErrors: { message: string }[] } }>(
@@ -133,12 +128,11 @@ export async function applyRabais(client: ShopifySetupClient, plan: RabaisPlan):
   }
   const after = await planRabais(client);
   const keys = new Set(after.current.rules.map(ruleKey));
-  if (!keys.has(ruleKey(COSTWAY_EXCLUSION_RULE))) throw new Error("rabais read-back: exclusion rule missing");
-  for (const r of plan.current.rules) if (!keys.has(ruleKey(r))) throw new Error(`rabais read-back: lost existing rule ${ruleKey(r)}`);
-  if (after.current.appliedDisjunctively) throw new Error("rabais read-back: collection became disjunctive");
-  if (after.count !== plan.count) {
-    throw new Error(`rabais read-back: product count changed ${plan.count} → ${after.count} (no Costway product exists yet, so it must not)`);
-  }
+  if (keys.has(ruleKey(COSTWAY_EXCLUSION_RULE))) throw new Error("rabais read-back: Costway exclusion rule still there");
+  for (const r of plan.desired.rules) if (!keys.has(ruleKey(r))) throw new Error(`rabais read-back: lost existing rule ${ruleKey(r)}`);
+  if (after.current.appliedDisjunctively !== plan.current.appliedDisjunctively) throw new Error("rabais read-back: AND/OR mode changed");
+  // Costway products JOIN the collection (Shopify recomputes asynchronously), so the count may only grow.
+  if (after.count < plan.count) throw new Error(`rabais read-back: product count dropped ${plan.count} → ${after.count}`);
   return { count: after.count };
 }
 

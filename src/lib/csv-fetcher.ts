@@ -190,6 +190,8 @@ function normalizeRow(row: AosomRawRow): AosomProduct {
       width: parseFloat(row.Width) || 0,
       height: parseFloat(row.Height) || 0,
     },
+    // The feed now writes the unit in each value ("47.80 in", "10.00 ft", "120.00 cm"); parseFloat above drops it.
+    dimensionsRaw: { length: row.Length?.trim() || "", width: row.Width?.trim() || "", height: row.Height?.trim() || "" },
     productType: row.Product_Type?.trim() || "",
     category: row.Category?.trim() || "",
     brand,

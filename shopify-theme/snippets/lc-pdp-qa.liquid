@@ -1,0 +1,72 @@
+{%- comment -%}
+  lc-pdp-qa — "Questions fréquentes" right under the buy buttons (2026-10-16, Mat reco #5).
+  Product-aware answers to the three questions that stall furniture purchases: will it fit,
+  can I pay in instalments (amount computed from the selected variant), is there a 2nd-item deal.
+  The 2nd-item answer shows on every product: the automatic BXGY applies to all of them (collection
+  rabais-2e-article, price > 0; Costway / tag src-c included since 2026-10-18). Shipping / returns / assembly stay in the accordion below
+  (pdp_info) so nothing is said twice. Last row opens the Ameublo assistant.
+{%- endcomment -%}
+{%- assign loc = request.locale.iso_code | downcase -%}
+{%- assign v = product.selected_or_first_available_variant -%}
+{%- assign quarter = v.price | plus: 3 | divided_by: 4 -%}
+{%- assign fin = routes.root_url | append: '/pages/financement' | replace: '//pages', '/pages' -%}
+<div class="lc-qa">
+  <p class="lc-qa__h">{% if loc == 'en' %}Customers often ask{% elsif loc == 'es' %}Los clientes suelen preguntar{% elsif loc == 'pa' %}ਗਾਹਕ ਅਕਸਰ ਪੁੱਛਦੇ ਹਨ{% else %}Les clients demandent souvent{% endif %}</p>
+  {%- if product.metafields.custom.lc_dims.value -%}
+  <details class="lc-qa__i lc-qa__i--fit">
+    <summary><span>{% if loc == 'en' %}Will it fit in my space?{% elsif loc == 'es' %}¿Cabrá en mi espacio?{% elsif loc == 'pa' %}ਕੀ ਇਹ ਮੇਰੀ ਜਗ੍ਹਾ ਵਿੱਚ ਫਿੱਟ ਆਵੇਗਾ?{% else %}Est-ce que ça va entrer chez moi ?{% endif %}<small class="lc-qa__sub">{% if loc == 'en' %}Check it with your measurements{% elsif loc == 'es' %}Verifícalo con tus medidas{% elsif loc == 'pa' %}ਆਪਣੇ ਮਾਪਾਂ ਨਾਲ ਇਸ ਦੀ ਜਾਂਚ ਕਰੋ{% else %}Vérifiez-le avec vos mesures{% endif %}</small></span></summary>
+    <div class="lc-qa__a">
+      {%- render 'lc-fit', product: product -%}
+    </div>
+  </details>
+  {%- else -%}
+  <details class="lc-qa__i">
+    <summary>{% if loc == 'en' %}Will it fit in my space?{% elsif loc == 'es' %}¿Cabrá en mi espacio?{% elsif loc == 'pa' %}ਕੀ ਇਹ ਮੇਰੀ ਜਗ੍ਹਾ ਵਿੱਚ ਫਿੱਟ ਆਵੇਗਾ?{% else %}Est-ce que ça va entrer chez moi ?{% endif %}</summary>
+    <div class="lc-qa__a">
+      <p>{% if loc == 'en' %}The exact dimensions are listed in the description. Measure the spot (and the doorways on the way!), then compare.{% elsif loc == 'es' %}Las dimensiones exactas figuran en la descripción. Mide el espacio (¡y los marcos de las puertas en el camino!), luego compara.{% elsif loc == 'pa' %}ਸਹੀ ਮਾਪ ਵੇਰਵੇ ਵਿੱਚ ਦਰਜ ਹਨ। ਜਗ੍ਹਾ ਦਾ ਮਾਪ ਲਵੋ (ਅਤੇ ਰਸਤੇ ਵਿੱਚ ਆਉਣ ਵਾਲੇ ਦਰਵਾਜ਼ਿਆਂ ਦਾ ਵੀ!), ਫਿਰ ਤੁਲਨਾ ਕਰੋ।{% else %}Les dimensions exactes sont dans la description. Mesurez l'endroit prévu (et les cadres de porte en chemin !), puis comparez.{% endif %}</p>
+      <p><a href="#lc-qa-desc" data-lc-qa-desc>{% if loc == 'en' %}See the dimensions{% elsif loc == 'es' %}Ver las dimensiones{% elsif loc == 'pa' %}ਮਾਪ ਦੇਖੋ{% else %}Voir les dimensions{% endif %} ↓</a> · <button type="button" class="lc-qa__ask" data-lc-qa-ask>{% if loc == 'en' %}Not sure? Ask Furni{% elsif loc == 'es' %}¿No estás seguro? Pregúntale a Furni{% elsif loc == 'pa' %}ਪੱਕਾ ਪਤਾ ਨਹੀਂ? Furni ਨੂੰ ਪੁੱਛੋ{% else %}Pas certain ? Demandez à Ameublo{% endif %}</button></p>
+    </div>
+  </details>
+  {%- endif -%}
+  {%- if v.price >= 5000 -%}
+  <details class="lc-qa__i">
+    <summary>{% if loc == 'en' %}Can I pay in instalments?{% elsif loc == 'es' %}¿Puedo pagar en cuotas?{% elsif loc == 'pa' %}ਕੀ ਮੈਂ ਕਿਸ਼ਤਾਂ ਵਿੱਚ ਭੁਗਤਾਨ ਕਰ ਸਕਦਾ/ਸਕਦੀ ਹਾਂ?{% else %}Puis-je payer en plusieurs fois ?{% endif %}</summary>
+    <div class="lc-qa__a">
+      <p>{% if loc == 'en' %}Yes: with Shop Pay, split it into 4 interest-free payments of about <strong>{% render 'lc-money', amount: quarter %}</strong>, or pay monthly depending on the amount. Choose Shop Pay at checkout.{% elsif loc == 'es' %}Sí: con Shop Pay, divídelo en 4 pagos sin intereses de aproximadamente <strong>{% render 'lc-money', amount: quarter %}</strong>, o paga mensualmente según el monto. Elige Shop Pay al finalizar la compra.{% elsif loc == 'pa' %}ਹਾਂ: Shop Pay ਨਾਲ, ਇਸਨੂੰ ਲਗਭਗ <strong>{% render 'lc-money', amount: quarter %}</strong> ਦੀਆਂ 4 ਵਿਆਜ-ਮੁਕਤ ਕਿਸ਼ਤਾਂ ਵਿੱਚ ਵੰਡੋ, ਜਾਂ ਰਕਮ ਦੇ ਆਧਾਰ 'ਤੇ ਮਹੀਨਾਵਾਰ ਭੁਗਤਾਨ ਕਰੋ। ਚੈੱਕਆਉਟ 'ਤੇ Shop Pay ਚੁਣੋ।{% else %}Oui : avec Shop Pay, payez en 4 versements sans intérêts d'environ <strong>{% render 'lc-money', amount: quarter %}</strong>, ou en mensualités selon le montant. Choisissez Shop Pay à la caisse.{% endif %}</p>
+      <p><a href="{{ fin }}">{% if loc == 'en' %}How it works{% elsif loc == 'es' %}Cómo funciona{% elsif loc == 'pa' %}ਇਹ ਕਿਵੇਂ ਕੰਮ ਕਰਦਾ ਹੈ{% else %}Comment ça marche{% endif %} →</a></p>
+    </div>
+  </details>
+  {%- endif -%}
+  <details class="lc-qa__i">
+    <summary>{% if loc == 'en' %}Any deal if I buy two items?{% elsif loc == 'es' %}¿Hay alguna oferta si compro dos artículos?{% elsif loc == 'pa' %}ਕੀ ਦੋ ਆਈਟਮਾਂ ਖਰੀਦਣ 'ਤੇ ਕੋਈ ਡੀਲ ਹੈ?{% else %}Y a-t-il un rabais si j'achète 2 articles ?{% endif %}</summary>
+    <div class="lc-qa__a"><p>{% if loc == 'en' %}Yes: 10% off the second item, applied automatically in the cart. Mix and match across the store. Not combinable with promo codes: at checkout, the discount that saves you the most is applied.{% elsif loc == 'es' %}Sí: 10% de descuento en el segundo artículo, aplicado automáticamente en el carrito. Combina productos en toda la tienda. No acumulable con códigos promocionales: al pagar, se aplica el descuento que más te ahorre.{% elsif loc == 'pa' %}ਹਾਂ: ਦੂਜੀ ਆਈਟਮ 'ਤੇ 10% ਛੋਟ, ਕਾਰਟ ਵਿੱਚ ਆਪਣੇ ਆਪ ਲਾਗੂ ਹੁੰਦੀ ਹੈ। ਪੂਰੇ ਸਟੋਰ ਵਿੱਚ ਮਿਕਸ ਅਤੇ ਮੈਚ ਕਰੋ। ਪ੍ਰੋਮੋ ਕੋਡਾਂ ਨਾਲ ਜੋੜਨ ਯੋਗ ਨਹੀਂ: ਚੈੱਕਆਊਟ 'ਤੇ, ਉਹ ਛੋਟ ਲਾਗੂ ਹੁੰਦੀ ਹੈ ਜੋ ਤੁਹਾਡੀ ਸਭ ਤੋਂ ਵੱਧ ਬੱਚਤ ਕਰਦੀ ਹੈ।{% else %}Oui : 10&nbsp;% de rabais sur le 2e article, appliqué automatiquement au panier. Vous pouvez combiner n'importe quels articles de la boutique. Non cumulable avec les codes promo : à la caisse, c'est le rabais le plus avantageux pour vous qui s'applique.{% endif %}</p></div>
+  </details>
+</div>
+<style>
+  .lc-qa{margin:1.8rem 0 .4rem;background:#fff;border:1px solid var(--lc-line,#E7E1D8);border-radius:18px;padding:1.2rem 1.6rem .4rem;font-family:var(--lc-font-text,inherit)}
+  .lc-qa__h{margin:0 0 .4rem;font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--lc-terra-btn,#B8553C)}
+  .lc-qa__i{border-top:1px solid var(--lc-line,#E7E1D8)}
+  .lc-qa__i:first-of-type{border-top:0}
+  .lc-qa__i summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:1rem;padding:1.15rem 0;font-size:1.5rem;font-weight:700;color:var(--lc-ink,#17213A)}
+  .lc-qa__i summary::-webkit-details-marker{display:none}
+  .lc-qa__i summary::before{content:"?";flex:0 0 2.4rem;height:2.4rem;border-radius:50%;background:var(--lc-sky,#D6E4F0);color:var(--lc-navy,#1B2A4A);display:inline-flex;align-items:center;justify-content:center;font-size:1.3rem;font-weight:800}
+  .lc-qa__i summary::after{content:"+";margin-left:auto;font-size:2rem;font-weight:400;color:var(--lc-muted,#6B6B7A)}
+  .lc-qa__i[open] summary::after{content:"\2212"}
+  .lc-qa__i summary:focus-visible{outline:2px solid var(--lc-terra-btn,#B8553C);outline-offset:2px;border-radius:8px}
+  .lc-qa__sub{display:block;font-size:1.25rem;font-weight:600;color:var(--lc-terra-btn,#B8553C);margin-top:.15rem}
+  .lc-qa__i--fit summary::before{content:"\2195"}
+  @media(max-width:749px){.lc-qa__i--fit .lc-qa__a{padding-left:0}}
+  .lc-qa__a{padding:0 0 1.2rem 3.4rem;font-size:1.4rem;line-height:1.55;color:#3b4254}
+  .lc-qa__a p{margin:0 0 .6rem}.lc-qa__a p:last-child{margin:0}
+  .lc-qa__a a,.lc-qa__ask{color:var(--lc-navy,#1B2A4A);font-weight:700;text-decoration:underline;text-decoration-color:var(--lc-terra-btn,#B8553C);text-underline-offset:3px;background:none;border:0;padding:0;font:inherit;font-weight:700;cursor:pointer}
+</style>
+<script>
+(function(){
+  var qa=document.currentScript&&document.currentScript.previousElementSibling&&document.currentScript.previousElementSibling.previousElementSibling;
+  if(!qa||qa.dataset.lcQa)return; qa.dataset.lcQa='1';
+  var d=qa.querySelector('[data-lc-qa-desc]');
+  if(d)d.addEventListener('click',function(e){var t=document.querySelector('.product__description');if(!t)return;e.preventDefault();t.scrollIntoView({behavior:'smooth',block:'start'});});
+  var a=qa.querySelector('[data-lc-qa-ask]');
+  if(a)a.addEventListener('click',function(){var f=document.querySelector('.lc-asst__fab');if(f)f.click();});
+})();
+</script>

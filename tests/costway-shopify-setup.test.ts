@@ -1,12 +1,12 @@
 /**
- * Costway Shopify setup (rabais exclusion, collections, menu) against an in-memory fake store.
+ * Costway Shopify setup (rabais inclusion, collections, menu) against an in-memory fake store.
  * The fake implements just the endpoints/queries shopify-setup.ts uses, so the real decisions
  * (idempotency, read-back checks, ids preserved across menuUpdate) are what is under test.
  */
 import { describe, it, expect } from "vitest";
 import {
   ShopifySetupClient,
-  withCostwayExclusion,
+  withoutCostwayExclusion,
   COSTWAY_EXCLUSION_RULE,
   COLLECTION_SPECS,
   RABAIS_COLLECTION_GID,
@@ -53,7 +53,8 @@ function fakeStore(opts: FakeOpts = {}) {
     handle: "rabais-2e-article",
     title: "Rabais 2e article (interne)",
     count: 2055,
-    ruleSet: { appliedDisjunctively: false, rules: [{ column: "VARIANT_PRICE", relation: "GREATER_THAN", condition: "0" }] } as RuleSet,
+    // As live until 2026-10-18: price > 0 AND the Costway exclusion the setup must now remove.
+    ruleSet: { appliedDisjunctively: false, rules: [{ column: "VARIANT_PRICE", relation: "GREATER_THAN", condition: "0" }, { column: "TAG", relation: "NOT_EQUALS", condition: "src-c" }] } as RuleSet,
   };
   const collections = new Map<string, { id: string; handle: string; title: string; published_at: string | null }>();
   const translations = new Map<string, string>(); // resourceId -> EN title
@@ -143,35 +144,37 @@ function fakeStore(opts: FakeOpts = {}) {
   return { client: new ShopifySetupClient(fetchFn), calls, rabais, collections, translations, getMenu: () => menu };
 }
 
-describe("withCostwayExclusion", () => {
-  const base: RuleSet = { appliedDisjunctively: false, rules: [{ column: "VARIANT_PRICE", relation: "GREATER_THAN", condition: "0" }] };
-  it("appends the TAG != src-c rule to the existing AND rules", () => {
-    const { ruleSet, changed } = withCostwayExclusion(base);
+describe("withoutCostwayExclusion", () => {
+  const price = { column: "VARIANT_PRICE", relation: "GREATER_THAN", condition: "0" };
+  const base: RuleSet = { appliedDisjunctively: false, rules: [price, COSTWAY_EXCLUSION_RULE] };
+  it("removes the TAG != src-c rule and keeps the others and the AND mode", () => {
+    const { ruleSet, changed } = withoutCostwayExclusion(base);
     expect(changed).toBe(true);
     expect(ruleSet.appliedDisjunctively).toBe(false);
-    expect(ruleSet.rules).toEqual([...base.rules, COSTWAY_EXCLUSION_RULE]);
+    expect(ruleSet.rules).toEqual([price]);
   });
-  it("is idempotent: no duplicate on a second pass", () => {
-    const once = withCostwayExclusion(base).ruleSet;
-    const twice = withCostwayExclusion(once);
+  it("is idempotent: nothing to change on a second pass", () => {
+    const once = withoutCostwayExclusion(base).ruleSet;
+    const twice = withoutCostwayExclusion(once);
     expect(twice.changed).toBe(false);
-    expect(twice.ruleSet.rules).toHaveLength(2);
+    expect(twice.ruleSet.rules).toEqual([price]);
   });
-  it("refuses a disjunctive (OR) set, where a != rule would match everything", () => {
-    expect(() => withCostwayExclusion({ ...base, appliedDisjunctively: true })).toThrow(/disjunctive/);
+  it("refuses to leave the collection with no rule", () => {
+    expect(() => withoutCostwayExclusion({ appliedDisjunctively: false, rules: [COSTWAY_EXCLUSION_RULE] })).toThrow(/no rule/);
   });
 });
 
 describe("rabais-2e-article", () => {
-  it("applies the rule, keeps the old rule, and verifies the product count did not move", async () => {
-    const s = fakeStore();
+  it("removes the exclusion, keeps the price rule, and accepts the count growing as Costway joins", async () => {
+    const s = fakeStore({ rabaisCountAfter: 2404 });
     const plan = await planRabais(s.client);
     expect(plan.changed).toBe(true);
     const res = await applyRabais(s.client, plan);
-    expect(res.count).toBe(2055);
-    expect(s.rabais.ruleSet.rules.map((r) => r.column)).toEqual(["VARIANT_PRICE", "TAG"]);
+    expect(res.count).toBe(2404);
+    expect(s.rabais.ruleSet.rules.map((r) => r.column)).toEqual(["VARIANT_PRICE"]);
+    expect(s.rabais.ruleSet.appliedDisjunctively).toBe(false);
   });
-  it("does not write when the rule is already there", async () => {
+  it("does not write when the exclusion is already gone", async () => {
     const s = fakeStore();
     await applyRabais(s.client, await planRabais(s.client));
     const before = s.calls.length;
@@ -180,9 +183,9 @@ describe("rabais-2e-article", () => {
     await applyRabais(s.client, again);
     expect(s.calls.slice(before).some((c) => c.query?.includes("collectionUpdate"))).toBe(false);
   });
-  it("fails loudly if the product count changes after the update", async () => {
+  it("fails loudly if products are lost after the update", async () => {
     const s = fakeStore({ rabaisCountAfter: 10 });
-    await expect(applyRabais(s.client, await planRabais(s.client))).rejects.toThrow(/count changed/);
+    await expect(applyRabais(s.client, await planRabais(s.client))).rejects.toThrow(/count dropped/);
   });
 });
 

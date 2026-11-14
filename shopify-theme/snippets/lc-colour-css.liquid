@@ -1,0 +1,83 @@
+{%- comment -%}
+  lc-colour-css — THE colour of a colour-option value, for every swatch on the store (collection cards AND the product
+  page). Single source since 2026-10-18: the card and the product page used two different maps, so one colour could show
+  two different dots, and the page matched substrings ("Motif floral" contains "or" → gold).
+  Rules: trailing number dropped ("Noir 2"); a value naming several colours ("Noir et blanc", "Rouge, bleu et blanc") is
+  split and drawn as a divided dot; each part is matched as a WHOLE phrase or whole words, longest first. Unknown →
+  outputs nothing (the caller shows the label's initials instead of guessing a colour).
+  WHITE RULE (Mat, 2026-10-20): a part containing the WORD blanc/white is pure white #FFFFFF whatever the other words
+  (crème, cassé, ivoire, vieilli, wood grain…) — checked BEFORE the map, because crème/cream = #FFFDD0 drew a pale-yellow
+  dot next to a white seat (83A-654V00CW « Blanc crème »). A part that also names another colour (« black white ») and
+  two-colour values (« Noir et blanc », « Orange/Green ») keep the divided dot.
+  Usage: {% render 'lc-colour-css', value: val %}   (FR and EN values are both in the map)
+{%- endcomment -%}
+{%- liquid
+  assign lc_map = 'multicolore pastel=linear-gradient(135deg,#f9d5e5,#c7e9f1,#fdf3c4)|multicolore foncé=linear-gradient(135deg,#1f3a93,#7a1f2b,#1e5631)|couleurs foncées=linear-gradient(135deg,#1f3a93,#7a1f2b,#1e5631)|rainbow colored=linear-gradient(135deg,#e74c3c,#f1c40f,#2ecc71,#3498db)|couleurs pâles=linear-gradient(135deg,#f9d5e5,#c7e9f1,#fdf3c4)|flower pattern=linear-gradient(135deg,#f4c2c2,#9bc49b,#f7e7a6)|brun rustique=#8B5A2B|charcoal grey=#36454F|earthy yellow=#C8A13A|jaune terreux=#C8A13A|blanc vieilli=#FFFFFF|gris charbon=#36454F|gris carbone=#3B3B3B|brun vieilli=#7A5A3C|bois naturel=#C8A27A|rustic brown=#8B5A2B|natural wood=#C8A27A|gris ardoise=#5A6470|mixed colour=linear-gradient(135deg,#e74c3c,#f1c40f,#2ecc71,#3498db)|motif floral=linear-gradient(135deg,#f4c2c2,#9bc49b,#f7e7a6)|gris vieilli=#8A8A85|noir vieilli=#2B2B2B|gris cendré=#B2B2B2|beige foncé=#C3A57A|blanc crème=#FFFFFF|bleu marine=#1B2A4A|noyer foncé=#4A3222|multicolore=linear-gradient(135deg,#e74c3c,#f1c40f,#2ecc71,#3498db)|transparent=linear-gradient(135deg,#ffffff,#dfe7ec)|light brown=#B08B6E|cream white=#FFFFFF|light green=#A8D5A2|dark walnut=#4A3222|multicolour=linear-gradient(135deg,#e74c3c,#f1c40f,#2ecc71,#3498db)|black white=linear-gradient(135deg,#1a1a1a 50%,#FFFFFF 50%)|light lilac=#DCC6E0|gris clair=#D3D3D3|gris foncé=#404040|beige gris=#B8AE9C|brun foncé=#5C3A21|bleu foncé=#1F3A93|vert foncé=#1E5631|vert forêt=#228B22|vert olive=#808000|chêne pâle=#D2B48C|noyer pâle=#8B6B4A|anthracite=#383E42|camouflage=linear-gradient(135deg,#4b5320 0 33%,#8b7d5b 33% 66%,#2f3a22 66%)|light gray=#D3D3D3|light grey=#C8C8C8|dark brown=#5C3A21|light blue=#ADD8E6|dark green=#1E5631|gris taupe=#8B7D6B|vert sapin=#1E4D2B|lilas pâle=#DCC6E0|gris pâle=#C8C8C8|brun pâle=#B08B6E|brun café=#6F4E37|bleu pâle=#ADD8E6|bleu ciel=#87CEEB|vert pâle=#A8D5A2|rouge vin=#722F37|turquoise=#40E0D0|carbonisé=#4a3426|dark gray=#404040|dark grey=#404040|dark blue=#1F3A93|navy blue=#1B2A4A|light oak=#D2B48C|bordeaux=#800020|sky blue=#87CEEB|wine red=#722F37|charcoal=#36454F|moutarde=#D4A017|chocolat=#5C3317|espresso=#4B3621|lavender=#E6E6FA|sarcelle=#008080|mahogany=#C0392B|lavande=#E6E6FA|naturel=#D2B48C|charbon=#36454F|natural=#D2B48C|marron=#6B3A2A|ivoire=#FFFFF0|orange=#FFA500|violet=#8B008B|acajou=#C0392B|bambou=#DAA520|argent=#C0C0C0|bronze=#CD7F32|cuivre=#B87333|coffee=#6F4E37|yellow=#FFD700|purple=#8B008B|walnut=#5C4033|silver=#C0C0C0|coloré=linear-gradient(135deg,#e74c3c,#f1c40f,#2ecc71,#3498db)|cerise=#9E1B32|cherry=#9E1B32|copper=#B87333|bamboo=#DAA520|rattan=#C19A6B|blanc=#FFFFFF|beige=#F5F5DC|taupe=#8B7355|crème=#FFFDD0|sauge=#8FBC8F|rouge=#DC143C|jaune=#FFD700|chêne=#8B6914|noyer=#5C4033|rotin=#C19A6B|acier=#708090|sable=#C2B280|black=#1a1a1a|white=#FFFFFF|brown=#8B4513|cream=#FFFDD0|green=#228B22|steel=#708090|linen=#FAF0E6|khaki=#C3B091|clear=linear-gradient(135deg,#ffffff,#dfe7ec)|mixed=linear-gradient(#808080,#D3D3D3)|mixte=linear-gradient(#808080,#D3D3D3)|olive=#808000|mauve=#B784A7|ivory=#FFFFF0|lilas=#C8A2C8|lilac=#C8A2C8|pêche=#FFCBA4|peach=#FFCBA4|noir=#1a1a1a|gris=#808080|brun=#8B4513|café=#6F4E37|bleu=#4169E1|vert=#228B22|rose=#FFB6C1|doré=#D4A853|kaki=#C3B091|gray=#808080|grey=#808080|blue=#4169E1|navy=#1B2A4A|pink=#FFB6C1|gold=#D4A853|sand=#C2B280|teck=#A0703C|teak=#A0703C|sage=#8FBC8F|teal=#008080|lin=#FAF0E6|red=#DC143C|oak=#8B6914|tan=#C3A57A|or=#D4A853' | split: '|'
+  assign lc_v = value | downcase | strip
+  assign lc_last = lc_v | split: ' ' | last
+  assign lc_num = lc_last | plus: 0
+  if lc_num > 0
+    assign lc_cut = lc_last | size | plus: 1
+    assign lc_len = lc_v | size | minus: lc_cut
+    assign lc_v = lc_v | slice: 0, lc_len
+  endif
+  assign lc_v = lc_v | replace: '-', ' ' | replace: ' & ', ',' | replace: ' et ', ',' | replace: ' and ', ',' | replace: ', ', ',' | replace: '/', ','
+  assign lc_others = 'noir,black,gris,grey,gray,bleu,blue,rouge,red,vert,green,brun,brown,rose,pink,jaune,yellow,orange,violet,purple,marine,navy' | split: ','
+  assign lc_parts = lc_v | split: ','
+  assign lc_out = ''
+  assign lc_n = 0
+  for lc_part in lc_parts limit: 3
+    assign lc_p = lc_part | strip
+    if lc_p == ''
+      continue
+    endif
+    assign lc_hit = ''
+    assign lc_pp = ' ' | append: lc_p | append: ' '
+    if lc_pp contains ' blanc ' or lc_pp contains ' white '
+      assign lc_hit = '#FFFFFF'
+      for lc_w in lc_others
+        assign lc_wk = ' ' | append: lc_w | append: ' '
+        if lc_pp contains lc_wk
+          assign lc_hit = ''
+          break
+        endif
+      endfor
+    endif
+    if lc_hit == ''
+      for lc_e in lc_map
+        assign lc_kv = lc_e | split: '='
+        assign lc_k = ' ' | append: lc_kv[0] | append: ' '
+        if lc_pp contains lc_k
+          assign lc_hit = lc_kv[1]
+          break
+        endif
+      endfor
+    endif
+    if lc_hit == ''
+      assign lc_out = ''
+      assign lc_n = -1
+      break
+    endif
+    assign lc_n = lc_n | plus: 1
+    assign lc_solid = lc_hit
+    if lc_hit contains 'gradient'
+      assign lc_hx = lc_hit | split: '#'
+      assign lc_solid = lc_hx[1] | slice: 0, 6 | prepend: '#'
+    endif
+    if lc_n == 1
+      assign lc_out = lc_hit
+      assign lc_solids = lc_solid
+    else
+      assign lc_solids = lc_solids | append: '~' | append: lc_solid
+    endif
+  endfor
+  if lc_n > 1
+    assign lc_cols = lc_solids | split: '~'
+    if lc_n == 2
+      assign lc_out = 'linear-gradient(135deg,' | append: lc_cols[0] | append: ' 50%,' | append: lc_cols[1] | append: ' 50%)'
+    else
+      assign lc_out = 'linear-gradient(135deg,' | append: lc_cols[0] | append: ' 34%,' | append: lc_cols[1] | append: ' 34% 66%,' | append: lc_cols[2] | append: ' 66%)'
+    endif
+  endif
+  echo lc_out
+-%}

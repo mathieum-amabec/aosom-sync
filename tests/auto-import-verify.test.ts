@@ -8,6 +8,7 @@ import {
   checkContentStructure,
   stripImperialEquivalents,
   analyzeGallery,
+  analyzeAndCleanGallery,
   cleanGallery,
   checkTitle,
   checkColorPhotos,
@@ -189,6 +190,30 @@ describe("layer 2 — gallery analysis, cleaning and the lifestyle first photo",
     const texty = cleanGallery(urls, await analyzeGallery(urls, async () => flagsJson([{ text_overlay: true }, {}, {}, {}, {}, {}]), async () => img));
     expect(texty.images[0]).toBe("u2");
     expect(texty.promoted).toBe(true);
+  });
+
+  it("says a plate or label fixed on the product (PawHut on a crate) is allowed and goes to brand_on_product", async () => {
+    const llm = vi.fn(async () => flagsJson([{}, {}, {}, {}, {}, {}]));
+    await analyzeGallery(urls, llm as unknown as LlmText, async () => img);
+    const prompt = String((llm.mock.calls[0] as unknown[])[0]);
+    expect(prompt).toContain("plaque PawHut");
+    expect(prompt).toContain("brand_on_product");
+  });
+
+  it("looks at photos 7-12 when none of the first six can lead, and promotes a clean one found there", async () => {
+    const many = ["u1", "u2", "u3", "u4", "u5", "u6", "u7", "u8", "u9"];
+    const allText = flagsJson([{ text_overlay: true }, { text_overlay: true }, { text_overlay: true }, { text_overlay: true }, { text_overlay: true }, { text_overlay: true }]);
+    const llm = vi.fn(async (p: string) => (p.includes("index 1..6") ? allText : flagsJson([{ text_overlay: true }, {}, { text_overlay: true }])));
+    const { cleaned } = await analyzeAndCleanGallery(many, llm as unknown as LlmText, async () => img);
+    expect(llm).toHaveBeenCalledTimes(2);
+    expect(cleaned?.reasons).toEqual([]);
+    expect(cleaned?.images[0]).toBe("u8");
+  });
+
+  it("makes a single vision call when the first six already give a clean first photo", async () => {
+    const llm = vi.fn(async () => flagsJson([{}, {}, {}, {}, {}, {}]));
+    await analyzeAndCleanGallery([...urls, "u7", "u8"], llm as unknown as LlmText, async () => img);
+    expect(llm).toHaveBeenCalledTimes(1);
   });
 
   it("fails when fewer than three clean photos remain", async () => {

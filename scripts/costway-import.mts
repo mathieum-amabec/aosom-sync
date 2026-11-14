@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 /**
- * scripts/costway-import.mts — Costway pilot import (appliances: dehumidifiers, washers, dryers).
+ * scripts/costway-import.mts — Costway import: big sellers in any category (--mode demand, the default) or the
+ * original appliance pilot (--mode appliances). Prices follow pricing.ts (Costway's price, x.99 endings).
  *
  *   prepare   pick the best candidates by margin, write the copy, run every gate, save a plan file.
  *             No Shopify write (it does spend LLM tokens and writes the usual image-verdict cache).
@@ -31,16 +32,36 @@ async function main() {
     const limit = Number(flag("--limit") ?? "50");
     const minQty = Number(flag("--min-qty") ?? "10");
     const { generateProductContent, sanitizeHtml, stripSupplierBrands } = await import("@/lib/content-generator");
-    const { enforceCleanPrimaryImage } = await import("@/lib/image-compliance-audit");
+    const { lifestyleFirst } = await import("@/lib/costway/gallery");
     const { runQualityGates } = await import("@/lib/import-quality-gates");
 
     // Over-select: some candidates will be rejected by a gate, and we still want `limit` ready ones.
-    const candidates = await imp.selectCandidates(db, { limit: Math.ceil(limit * 1.4), minQty });
-    console.log(`\n🛒 prepare — ${candidates.length} candidates (target ${limit}) by margin, minQty=${minQty}\n`);
+    // --mode demand (default since 2026-10-17): any category, big sellers only, ranked by expected margin dollars
+    // (Aosom's sales of the matched product type; Costway's own with --costway-history once it has a few weeks).
+    // --mode appliances: the original pilot selection (dehumidifiers, washers, dryers), by margin.
+    const mode = flag("--mode") ?? "demand";
+    let candidates: import("@/lib/costway/importer").Candidate[];
+    if (mode === "appliances") {
+      candidates = await imp.selectCandidates(db, { limit: Math.ceil(limit * 1.4), minQty });
+    } else {
+      const { loadAosomTypeDemand } = await import("@/lib/costway/demand");
+      const { getCostwayDemand } = await import("@/lib/costway/db");
+      candidates = await imp.selectDemandCandidates(db, {
+        limit: Math.ceil(limit * 1.4),
+        minQty,
+        minDemand: Number(flag("--min-demand") ?? "10"),
+        // Over-selection (x1.4) keeps the per-type cap meaningful: about 10 ready products per type per 40.
+        maxPerType: Math.max(1, Math.ceil(Number(flag("--max-per-type") ?? "10") * 1.4)),
+        aosomTypes: await loadAosomTypeDemand(db),
+        costwayDemand: has("--costway-history") ? await getCostwayDemand(30) : undefined,
+      });
+    }
+    console.log(`\n🛒 prepare — ${candidates.length} candidates (target ${limit}), mode=${mode}, minQty=${minQty}\n`);
 
     const deps: import("@/lib/costway/importer").PrepareDeps = {
       generate: generateProductContent,
-      guardImages: async (urls) => { const g = await enforceCleanPrimaryImage(urls); return { images: g.images, outcome: g.outcome }; },
+      // Store rule: a clean LIFESTYLE photo first, the studio shot only when none exists (same check as the Aosom import).
+      guardImages: async (urls) => { const g = await lifestyleFirst(urls); return { images: g.images, outcome: g.outcome }; },
       qualityGates: async (images, content) => { const r = await runQualityGates(images, content); return { failures: r.failures }; },
       cleanHtml: (h) => sanitizeHtml(stripSupplierBrands(h)),
     };
@@ -87,7 +108,7 @@ async function main() {
     db,
     now: () => Math.floor(Date.now() / 1000),
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-    createProduct: (merged, content) => sc.createShopifyProduct(merged, content, { status: "draft", images: [], extraTags: [SOURCE_TAG] }),
+    createProduct: (merged, content) => sc.createShopifyProduct(merged, content, { status: "draft", images: [], extraTags: [SOURCE_TAG], finalPrices: true }),
     // assets.costway.ca drops connections under a burst ("fetch failed", seen on ~40% of the first
     // batch's images): retry with a growing pause instead of leaving a hole in the gallery.
     downloadImage: async (url) => {
@@ -121,7 +142,7 @@ async function main() {
         images: (p.images ?? []).map((i: Record<string, unknown>) => ({ id: String(i.id), src: String(i.src), alt: (i.alt as string) ?? null })),
       };
     },
-    attachVariantImages: (created, merged) => sc.attachVariantImages(created, merged),
+    attachVariantImages: (created, merged, sourceOf) => sc.attachVariantImages(created, merged, sourceOf),
     trackInventory: async (inventoryItemId, qty) => {
       await sc.enableVariantTracking(inventoryItemId);
       await sc.setInventoryLevel(inventoryItemId, await sc.getPrimaryLocationId(), qty);
@@ -159,4 +180,9 @@ async function main() {
   console.log(`\n=== ok=${ok} fail=${fail} already-imported=${skipped} ===`);
 }
 
-main().then(() => process.exit(0)).catch((e) => { console.error("FATAL:", e); process.exit(1); });
+// Costway imports are imports: charge them to the dedicated "import" pool, never the shared "batch" one (a
+// 170-product prepare drained batch on 2026-10-17 and starved the social/blog jobs for the rest of the day).
+import("@/lib/llm-budget")
+  .then(({ withBudgetPool }) => withBudgetPool("import", main))
+  .then(() => process.exit(0))
+  .catch((e) => { console.error("FATAL:", e); process.exit(1); });

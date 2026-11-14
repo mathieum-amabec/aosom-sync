@@ -41,6 +41,26 @@ describe("geminiGenerate", () => {
     expect(JSON.parse(init.body).generationConfig.thinkingConfig).toEqual({ thinkingLevel: "minimal" });
   });
 
+  it("image models: asks for image output without thinkingConfig and returns the images (not thought ones)", async () => {
+    fetchMock.mockResolvedValue(ok({
+      candidates: [{ content: { role: "model", parts: [
+        { inlineData: { mimeType: "image/png", data: "draft" }, thought: true },
+        { inlineData: { mimeType: "image/png", data: "final" } },
+        { text: "ok" },
+      ] }, finishReason: "STOP" }],
+      usageMetadata: { totalTokenCount: 4000 },
+    }));
+    const r = await geminiGenerate(
+      { model: "gemini-3.1-flash-image", contents: [], responseModalities: ["TEXT", "IMAGE"], imageConfig: { aspectRatio: "4:3", imageSize: "1K" } },
+      "visualiser",
+    );
+    expect(r.images).toEqual([{ mimeType: "image/png", data: "final" }]);
+    const cfg = JSON.parse(fetchMock.mock.calls[0][1].body).generationConfig;
+    expect(cfg).toMatchObject({ responseModalities: ["TEXT", "IMAGE"], imageConfig: { aspectRatio: "4:3", imageSize: "1K" } });
+    expect(cfg.thinkingConfig).toBeUndefined();
+    expect(addDailyLlmTokens).toHaveBeenCalledWith("visualiser", 4000);
+  });
+
   it("never calls the API when the budget is spent", async () => {
     assertLlmBudget.mockRejectedValue(new Error("budget"));
     await expect(geminiGenerate({ model: "m", contents: [] }, "assistant")).rejects.toThrow("budget");

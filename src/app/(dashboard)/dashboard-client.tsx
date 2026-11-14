@@ -8,6 +8,8 @@ import { AlertsPanel } from "./alerts-panel";
 import { PriceFloorIncidentsPanel } from "./price-floor-incidents-panel";
 import { PublicationQueuePanel } from "./publication-queue-panel";
 import { LlmUsagePanel } from "./llm-usage-panel";
+import { TeaserPanel } from "./teaser-panel";
+import { EmailPanel } from "./email-panel";
 
 interface PriceChange {
   sku: string; name: string; image: string; oldPrice: number; newPrice: number; change: number; pct: number; recordedAt: string; inStore: boolean; shopifyUrl: string | null;
@@ -77,6 +79,10 @@ export function DashboardClient({ recentRuns, latestRun }: { recentRuns: SyncRun
       {/* AlertsPanel shows today's live status; this is the durable trail behind it. */}
       <PriceFloorIncidentsPanel />
       <PublicationQueuePanel />
+      {/* "Bientôt" fake-door results (Voyez-le chez vous, Ameublo décorateur): Mat's go/no-go signal. */}
+      <TeaserPanel />
+      {/* Own email engine (Resend): switch, previews, hand-over from the Klaviyo relays. */}
+      <EmailPanel />
 
       {/* Last Sync Banner */}
       {latestRun && (

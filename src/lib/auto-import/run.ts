@@ -1,7 +1,7 @@
 /**
  * Automatic daily import — one cron tick.
  *
- * Runs every 10 minutes inside the UTC window (see vercel.json). Each tick takes the next few
+ * Runs every 5 minutes inside the UTC window (see vercel.json; 3 per tick = up to ~500/day, so a 300 cap fits). Each tick takes the next few
  * candidates the day's pace allows, so ~100 imports/day are spread across the window and a tick
  * always fits in its time budget. Everything is idempotent: the day's counters live in
  * `settings.auto_import_state`, a group with a job is never re-picked, and a lock keeps two ticks
@@ -15,9 +15,11 @@ import { mergeVariants } from "@/lib/variant-merger";
 import { ensureSchema, getSetting, setSetting } from "@/lib/database";
 import { localClock } from "@/lib/morning-report";
 import { LlmBudgetExceededError } from "@/lib/llm-budget";
+import { fetchOrderedProductUnits } from "@/lib/klaviyo-client";
 import type { AosomMergedProduct } from "@/types/aosom";
 import {
   DEFAULT_DAILY_CAP,
+  DEMAND_DAYS,
   PILOT_DAILY_CAP,
   MAX_PER_TICK,
   allowedSoFar,
@@ -33,9 +35,35 @@ import { processCandidate, type ProcessResult } from "./process-one";
 
 export const MODE_KEY = "auto_import_mode";
 export const CAP_KEY = "auto_import_daily_cap";
+/**
+ * Temporary higher cap: { "cap": 300, "until": "2026-10-20" } (Montréal date, inclusive). Past `until` the normal
+ * CAP_KEY applies again by itself — nothing to undo by hand (Mat, 2026-10-17: a 3-day boost, then back to 100).
+ */
+export const BOOST_KEY = "auto_import_cap_boost";
+
+/** The day's cap: the boost while it lasts, else the normal cap. A malformed boost is ignored. */
+export function boostedCap(baseCap: number, boostRaw: string | null, day: string): number {
+  if (!boostRaw) return baseCap;
+  try {
+    const b = JSON.parse(boostRaw) as { cap?: unknown; until?: unknown };
+    const cap = Number(b.cap);
+    if (Number.isFinite(cap) && cap > 0 && typeof b.until === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.until) && day <= b.until) return cap;
+  } catch {
+    /* ignored */
+  }
+  return baseCap;
+}
 export const STATE_KEY = "auto_import_state";
 export const PLAN_KEY = "auto_import_last_plan";
 export const LOCK_KEY = "auto_import_lock";
+/** Daily cache of the supplier demand map ({ day, units: { sku: n } }). */
+export const DEMAND_KEY = "auto_import_demand";
+/** Largest stock drop between two syncs still counted as sales (bigger = feed glitch or stock correction). */
+const DEMAND_MAX_STEP = 60;
+/** Daily cache of our own store's units sold per supplier product type ({ day, types: { type: n } }). */
+export const STORE_SALES_KEY = "auto_import_store_sales";
+/** Our order volume is still small: a year of orders gives the type signal something to stand on. */
+const STORE_SALES_DAYS = 365;
 /** A feed with fewer merged SKUs than this is treated as truncated (today's feed carries ~7,990). */
 export const MIN_FEED_SKUS = 6000;
 const LOCK_TTL_SECONDS = 280;
@@ -69,6 +97,10 @@ export interface TickDeps {
   loadCatalog(): Promise<{ groups: AosomMergedProduct[]; skuCount: number; costs?: Map<string, number> }>;
   /** Cached competitor prices (SKU upper case), for the price the rule will give. Optional. */
   loadCompetitor?(): Promise<Map<string, number>>;
+  /** SKU -> units that left the supplier's stock over DEMAND_DAYS. Optional; without it every demand is 0. */
+  loadDemand?(day: string): Promise<Map<string, number>>;
+  /** Supplier product type -> units our store sold of that type. Optional. */
+  loadStoreTypeSales?(day: string): Promise<Map<string, number>>;
   loadImportedSkus(): Promise<Set<string>>;
   loadFirstSeen(): Promise<Map<string, number>>;
   loadJobs(): Promise<Map<string, { status: string; updatedAt: string }>>;
@@ -86,7 +118,7 @@ export interface TickResult {
   flaggedLicensed: number;
   candidates: number;
   /** Candidates left out by the import pricing rules (see policy.ts). */
-  rejected?: { noCost: number; lowMargin: number };
+  rejected?: { noCost: number; lowMargin: number; lowDemand?: number };
   state: DayState;
 }
 
@@ -107,6 +139,58 @@ export function defaultDeps(): TickDeps {
       const db = await ensureSchema();
       const r = await db.execute(`SELECT sku, price FROM competitor_prices`);
       return new Map(r.rows.map((x) => [String(x.sku).toUpperCase(), Number(x.price)]));
+    },
+    async loadDemand(day) {
+      // Computed once per local day and cached in settings: the stock history is ~60k rows, the cron ticks every 10 min.
+      const cached = await getSetting(DEMAND_KEY);
+      if (cached) {
+        try {
+          const c = JSON.parse(cached) as { day: string; units: Record<string, number> };
+          if (c.day === day) return new Map(Object.entries(c.units));
+        } catch {
+          /* recompute */
+        }
+      }
+      const db = await ensureSchema();
+      const since = Math.floor(Date.now() / 1000) - DEMAND_DAYS * 86400;
+      // A drop larger than DEMAND_MAX_STEP in one sync is a feed glitch or a stock correction, not sales.
+      const r = await db.execute({
+        sql: `SELECT sku, SUM(CASE WHEN old_qty > new_qty AND old_qty - new_qty <= ? THEN old_qty - new_qty ELSE 0 END) AS units
+              FROM price_history WHERE change_type = 'stock_change' AND detected_at >= ? GROUP BY sku`,
+        args: [DEMAND_MAX_STEP, since],
+      });
+      const units: Record<string, number> = {};
+      for (const x of r.rows) if (Number(x.units) > 0) units[String(x.sku)] = Number(x.units);
+      await setSetting(DEMAND_KEY, JSON.stringify({ day, units }));
+      return new Map(Object.entries(units));
+    },
+    async loadStoreTypeSales(day) {
+      // Our own sales come from Klaviyo "Ordered Product" events (the Shopify token has no read_orders), mapped to the
+      // supplier product type through products.shopify_product_id. Once per local day, cached like the demand map.
+      const cached = await getSetting(STORE_SALES_KEY);
+      if (cached) {
+        try {
+          const c = JSON.parse(cached) as { day: string; types: Record<string, number> };
+          if (c.day === day) return new Map(Object.entries(c.types));
+        } catch {
+          /* recompute */
+        }
+      }
+      const byProduct = await fetchOrderedProductUnits(STORE_SALES_DAYS);
+      const types: Record<string, number> = {};
+      if (byProduct.size > 0) {
+        const db = await ensureSchema();
+        const r = await db.execute(
+          `SELECT DISTINCT shopify_product_id, product_type FROM products WHERE shopify_product_id IS NOT NULL AND shopify_product_id != ''`,
+        );
+        const typeOf = new Map(r.rows.map((x) => [String(x.shopify_product_id), String(x.product_type ?? "")]));
+        for (const [id, n] of byProduct) {
+          const t = typeOf.get(id);
+          if (t) types[t] = (types[t] ?? 0) + n;
+        }
+      }
+      await setSetting(STORE_SALES_KEY, JSON.stringify({ day, types }));
+      return new Map(Object.entries(types));
     },
     async loadImportedSkus() {
       const db = await ensureSchema();
@@ -167,7 +251,8 @@ export async function runAutoImportTick(opts: { force?: boolean; deps?: TickDeps
   if (mode === "off") return { ...base, skipped: "off" };
 
   const capSetting = Number(await d.getSetting(CAP_KEY));
-  const dailyCap = mode === "pilot" ? PILOT_DAILY_CAP : Number.isFinite(capSetting) && capSetting > 0 ? capSetting : DEFAULT_DAILY_CAP;
+  const baseCap = Number.isFinite(capSetting) && capSetting > 0 ? capSetting : DEFAULT_DAILY_CAP;
+  const dailyCap = mode === "pilot" ? PILOT_DAILY_CAP : boostedCap(baseCap, await d.getSetting(BOOST_KEY), day);
   if (state.total >= dailyCap) return { ...base, skipped: "cap-reached" };
   if (shouldPause(state)) return { ...base, skipped: "paused-high-failure-rate" };
 
@@ -183,7 +268,11 @@ export async function runAutoImportTick(opts: { force?: boolean; deps?: TickDeps
 
     const [importedSkus, firstSeen, jobs] = await Promise.all([d.loadImportedSkus(), d.loadFirstSeen(), d.loadJobs()]);
     const competitor = d.loadCompetitor ? await d.loadCompetitor().catch(() => undefined) : undefined;
-    const { candidates, flaggedLicensed, rejected } = buildCandidates(groups, { importedSkus, firstSeen, jobs, now, costs, competitor });
+    const demand = d.loadDemand ? await d.loadDemand(day).catch(() => undefined) : undefined;
+    const storeTypeSales = d.loadStoreTypeSales ? await d.loadStoreTypeSales(day).catch(() => undefined) : undefined;
+    const { candidates, flaggedLicensed, rejected } = buildCandidates(groups, {
+      importedSkus, firstSeen, jobs, now, costs, competitor, demand, storeTypeSales,
+    });
     const picked = pickBatch(candidates, state, n, dailyCap);
     const summary = picked.map((c) => ({ groupKey: c.groupKey, name: c.name.slice(0, 80), top: c.top, isNew: c.isNew }));
     const out: TickResult = { ...base, picked: summary, flaggedLicensed: flaggedLicensed.length, candidates: candidates.length, rejected };

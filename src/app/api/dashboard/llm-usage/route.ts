@@ -16,7 +16,7 @@ import { estimateCostUsd, poolModel, blendedRatePerMTok, ASSUMED_INPUT_SHARE } f
  */
 export const dynamic = "force-dynamic";
 
-const POOLS: LlmBudgetPool[] = ["assistant", "batch", "maintenance", "video", "import"];
+const POOLS: LlmBudgetPool[] = ["assistant", "batch", "maintenance", "video", "import", "visualiser", "decorateur"];
 const WINDOW_DAYS = 7;
 
 export async function GET() {
@@ -58,11 +58,15 @@ export async function GET() {
       batch: d.batch,
       video: d.video,
       import: d.import,
+      visualiser: d.visualiser,
+      decorateur: d.decorateur,
       costUsd:
         estimateCostUsd("assistant", d.assistant) +
         estimateCostUsd("batch", d.batch) +
         estimateCostUsd("video", d.video) +
-        estimateCostUsd("import", d.import),
+        estimateCostUsd("import", d.import) +
+        estimateCostUsd("visualiser", d.visualiser) +
+        estimateCostUsd("decorateur", d.decorateur),
     }));
 
     return NextResponse.json(

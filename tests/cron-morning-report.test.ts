@@ -27,6 +27,23 @@ vi.mock("@/lib/meta-ads-client", () => ({
   getAdAccounts: vi.fn(),
 }));
 
+// Shopify analytics (ShopifyQL + orders) are covered by tests/shop-analytics.test.ts; here the cron only needs a stable summary.
+vi.mock("@/lib/shop-analytics", () => ({
+  collectShopSummary: vi.fn(async (day: string) => ({
+    day,
+    weekStart: day,
+    dayFunnel: { sessions: 100, carts: 5, checkouts: 2, bought: 1, conversion: 0.01 },
+    daySales: { orders: 1, total: 100, aov: 100 },
+    weekFunnel: { sessions: 700, carts: 30, checkouts: 14, bought: 4, conversion: 4 / 700 },
+    weekSales: { orders: 4, total: 400, aov: 100 },
+    prevWeekFunnel: { sessions: 0, carts: 0, checkouts: 0, bought: 0, conversion: 0 },
+    prevWeekSales: { orders: 0, total: 0, aov: null },
+    sources: [],
+    dayOrderSources: [],
+    meta: { error: "test" },
+  })),
+}));
+
 import * as db from "@/lib/database";
 import { trackEvent } from "@/lib/klaviyo-client";
 import { getActiveCampaignDaySummaries } from "@/lib/meta-ads-client";
@@ -50,7 +67,7 @@ beforeEach(() => {
   vi.mocked(db.countGuidesAwaitingApproval).mockResolvedValue({ pending: 2, ready: 1, attention: 1, attentionTitles: ["X"] });
   vi.mocked(db.countContentFormatVideos).mockResolvedValue({ pendingApproval: 3, scheduledSoon: 5 });
   vi.mocked(db.countMorningReportAlerts).mockResolvedValue({
-    priceBelowFloor: 0, priceFloorIncidents24h: 0, imagesPendingReview: 4, importErrors: 0, catalogIssues: 0, unreadNotifications: 0, failedPublications: 0,
+    priceBelowFloor: 0, priceFloorIncidents24h: 0, imagesPendingReview: 4, importErrors: 0, catalogIssues: 0, unreadNotifications: 0, failedPublications: 0, publishCheckProblems: 0, reelPriceGuardBlocked: 0,
   });
   vi.mocked(db.getReelResultRows).mockResolvedValue([]);
   vi.mocked(db.countAwaitingOperator).mockResolvedValue({
@@ -62,7 +79,7 @@ beforeEach(() => {
   });
   // No guard has produced a result yet → all "unknown": no red line, no subject prefix.
   vi.mocked(db.loadGuardInputs).mockResolvedValue({
-    priceAudit: null, catalogAudit: null, feedAudit: null, lastRuns: {}, imagesPending: 0, imagesOldestPendingAt: null,
+    priceAudit: null, catalogAudit: null, feedAudit: null, siteHealth: null, lastRuns: {}, imagesPending: 0, imagesOldestPendingAt: null,
   });
   vi.mocked(getActiveCampaignDaySummaries).mockResolvedValue([
     { id: "1", name: "Advantage+ Sales", dailyBudget: 14000, spend: 120, impressions: 8000, linkClicks: 400, purchases: 1, purchaseValue: 150, learning: ["LEARNING"] },

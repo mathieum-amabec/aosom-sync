@@ -292,10 +292,13 @@ function diffProduct(
     });
   }
 
-  // Image change — compare sorted URL lists
-  const aosomImgKey = aosom.images.slice().sort().join("|");
-  const shopifyImgKey = shopify.images.slice().sort().join("|");
-  if (aosomImgKey !== shopifyImgKey) {
+  // Images — import-time content, like the description below: the gallery is curated at import (lifestyle photo
+  // first, overlay photos dropped, each colour's own photo attached to its variants). Only an EMPTY gallery is
+  // repaired from the feed. The old check compared sorted URL lists, but Shopify serves its own CDN copy, never the
+  // feed URL, so every product differed every day and the chunked push replaced ~20 whole galleries a day — wiping
+  // the colour → photo links (swatch showing another colour's photo) and the pos-1 choice (2026-10-19). Comparing by
+  // file is no better: Aosom renames its files monthly (1,023 products), while the store keeps working copies.
+  if (shopify.images.length === 0 && aosom.images.length > 0) {
     changes.push({
       field: "images",
       sku: aosom.variants[0].sku,

@@ -70,6 +70,22 @@ describe("runCostwaySync", () => {
     expect(gone.rows[0].removed_at).not.toBeNull();
   });
 
+  it("records stock movements of known SKUs and turns the drops into demand per product", async () => {
+    await db.execute(`DELETE FROM costway_stock_history`);
+    const stock = (bk: string, gy: string) =>
+      csv(
+        { "Item No": "111", "Variant SKU": "111_BK", Title: "Chaise", "Option1 Value": "Black", "Variant Price": "100", "Variant Inventory Qty": bk },
+        { "Item No": "222", "Variant SKU": "222_GY", Title: "Parasol", "Variant Price": "50", "Variant Inventory Qty": gy },
+      );
+    expect((await runCostwaySync({ text: stock("40", "20") })).stockMoves).toBe(0); // first sight is not a movement
+    expect((await runCostwaySync({ text: stock("31", "20") })).stockMoves).toBe(1);
+    await runCostwaySync({ text: stock("29", "500") }); // 222 restocked: not demand
+    const { getCostwayDemand } = await import("@/lib/costway/db");
+    const demand = await getCostwayDemand(30);
+    expect(demand.get("111")).toBe(11);
+    expect(demand.has("222")).toBe(false);
+  });
+
   it("never touches the Aosom products table", async () => {
     await db.execute(`INSERT INTO products (sku, name, price, qty) VALUES ('84A-001', 'Aosom', 10, 3)`);
     await runCostwaySync({ text: feedV1 });

@@ -1,52 +1,142 @@
 /**
- * Sell-price rule (Mat, 2026-10-14): raise prices slightly, never below Aosom, and stay a little cheaper than
- * the competitor wherever we can see their price.
+ * Sell-price rule (Mat, 2026-11-09): sell at our ESTIMATE of Aosom's current retail price, ending in .88 (our signature).
  *
- * PURE: no I/O. `pricing.ts#targetSellPrice` stays the Aosom floor (the audit and the spike guard still rely on it);
- * this module decides how far ABOVE the floor a product may sit.
+ * Since 2026-10-15 the Aosom feed carries no public price, only our cost (`2B Product Price` + `shiping_fee`). The last
+ * known public price (products.price) is frozen at mid-October, and Aosom has raised its costs since: on 2026-11-09 an
+ * order sold at the frozen price lost money. Eight real aosom.ca prices that day sat at 1.07–1.19 × our cost (median
+ * 1.15, the same median as frozen public price / today's cost over 7,935 feed SKUs), so Aosom's retail ≈ cost × 1.15.
  *
- * Rule, in order:
- *   1. FLOOR  — never below the Aosom price (Mat's agreement with Aosom: we cannot display lower than they do).
- *   2. With a trustworthy competitor price: candidate = competitor − UNDERCUT_DOLLARS, capped at Aosom × (1 + MAX_MARKUP).
- *      We always stay below the competitor; when that leaves less than TARGET_MARGIN, the competitor wins (the margin
- *      is "about" 20 %, Mat 2026-10-15).
- *   3. Without one, and with our cost known (wholesale + delivery, feed of 2026-10-15): the price giving TARGET_MARGIN on
- *      cost, at least the tiered markup, capped at Aosom × (1 + MAX_MARKUP) (outdoor: OUTDOOR_MAX_MARKUP).
- *   4. Cost unknown: a tiered markup (small items carry more, big tickets and patio carry none).
- *   5. Prices end in .99 (rounded DOWN, so the result never exceeds the candidate), and are floored at Aosom again.
+ * PURE: no I/O. `pricing.ts#targetSellPrice` stays the frozen Aosom floor (the audit and the spike guard rely on it).
  *
- * A competitor SKU match is only trusted when their price is within a plausible band of Aosom's: a far-off price is a
- * different pack size or a bad scrape, and following it would put us far above (or below) a sane price.
+ * Rule, when our cost is known:
+ *   1. ESTIMATE = cost × AOSOM_RETAIL_MULTIPLIER, ending in .88. When that lands just over a round number (a ten under
+ *      100 $, a hundred above), it drops to the .88 below it (301.88 → 299.88): the first digit is what shoppers read.
+ *   2. FLOOR — never below the last known Aosom public price (shown as its .88 at or above it, unless that .88 would
+ *      cross a round number: 299.99 stays 299.99).
+ *   3. PROFIT FLOOR — never below `profitFloor(cost)` (cost + 2 % after card fees, ending in .88).
+ * Cost unknown: the last known Aosom price, unchanged.
+ *
+ * Checkout discounts (10 % on the 2nd item, BIENVENUE20, the welcome wheel) are not covered by the floor; MAX_DISCOUNT
+ * still caps what a single discount may take and the margin guard flags discounts above it.
  */
 
-export const MAX_MARKUP = 0.15;
-export const UNDERCUT_DOLLARS = 1;
-/** Margin on cost-based price we aim for when no competitor price limits us (Mat, 2026-10-15: about 20 %). */
-export const TARGET_MARGIN = 0.2;
-/** Outdoor / patio is compared the most and is off-season: it may rise less. */
-export const OUTDOOR_MAX_MARKUP = 0.07;
-/** A competitor price outside [Aosom × LOW, Aosom × HIGH] is ignored (different pack, wrong match, bad scrape). */
-export const COMPETITOR_PLAUSIBLE_LOW = 0.5;
-export const COMPETITOR_PLAUSIBLE_HIGH = 1.6;
+/**
+ * Biggest discount one item can get at checkout. On 2026-10-18 the store runs three discounts and none combines with
+ * another: 10 % on the 2nd item, BIENVENUE20 (20 $ from 200 $, so at most 10 %), a 10 % one-customer discount. A new
+ * discount above this, or discounts that combine, is flagged by margin-guard.ts.
+ */
+export const MAX_DISCOUNT = 0.1;
+/** Discount the profit floor assumes: none (Mat, 2026-10-28 — a discounted 2nd item may earn less than our margin). */
+export const FLOOR_DISCOUNT = 0;
+/** Shopify Payments (Canada) card fee on what the customer pays: rate + fixed part. */
+export const CARD_FEE_RATE = 0.029;
+export const CARD_FEE_FIXED = 0.3;
+/** What we must still earn over our cost at list price, after the card fees. */
+export const MIN_PROFIT_ON_COST = 0.02;
+/** Aosom's retail price ≈ our cost (wholesale + delivery) × this (measured 2026-11-09, see header). */
+export const AOSOM_RETAIL_MULTIPLIER = 1.15;
+/** Our signature price ending. */
+export const PRICE_ENDING = 0.88;
 
-/** Tiered markup used when no competitor price is available. Upper bound exclusive. */
-export const TIERS: ReadonlyArray<{ below: number; markup: number }> = [
-  { below: 100, markup: 0.07 },
-  { below: 200, markup: 0.07 },
-  { below: 400, markup: 0.06 },
-  { below: 800, markup: 0.05 },
-  { below: Infinity, markup: 0.03 },
-];
+const round2 = (n: number): number => Math.round(n * 100) / 100;
+const cents = (p: number): number => Math.round((p - Math.floor(p)) * 100);
 
-/** Patio / outdoor carry no markup (seasonal and compared the most). Matches Aosom product_type text. */
-const NO_MARKUP_TYPE = /outdoor|patio|garden/i;
+/** Smallest price ending in .99 that is >= `p`. */
+export function roundUpTo99(p: number): number {
+  if (!Number.isFinite(p)) return p;
+  let r = Math.floor(p) + 0.99;
+  if (r < p - 1e-9) r += 1;
+  return round2(r);
+}
 
-export type SellPriceReason = "competitor" | "cap" | "tier" | "margin" | "floor";
+/** Largest price ending in .99 that is <= `p` (p >= 0.99). */
+export function roundDownTo99(p: number): number {
+  if (!Number.isFinite(p) || p < 0.99) return round2(p);
+  return round2(Math.floor(p - 0.99 + 1e-9) + 0.99);
+}
+
+/** Smallest price ending in .88 that is >= `p`. */
+export function roundUpTo88(p: number): number {
+  if (!Number.isFinite(p)) return p;
+  let r = Math.floor(p) + PRICE_ENDING;
+  if (r < p - 1e-9) r += 1;
+  return round2(r);
+}
+
+/** Largest price ending in .88 that is <= `p` (p >= 0.88). */
+export function roundDownTo88(p: number): number {
+  if (!Number.isFinite(p) || p < PRICE_ENDING) return round2(p);
+  return round2(Math.floor(p - PRICE_ENDING + 1e-9) + PRICE_ENDING);
+}
+
+/** True when the price already carries our .88 ending. */
+export function hasSignatureEnding(p: number | null | undefined): boolean {
+  return typeof p === "number" && Number.isFinite(p) && cents(p) === Math.round(PRICE_ENDING * 100);
+}
+
+/**
+ * A target price as our signature: the .88 nearest at or under `t + 0.88`, i.e. `floor(t) + .88`. When that sits just
+ * over a round number (a ten under 100 $, a hundred from 100 $; "just over" = within max(1 $, 3 %)), it drops to the
+ * .88 under that round number: 301.88 → 299.88, 60.88 → 59.88.
+ */
+export function signaturePrice(t: number): number {
+  if (!Number.isFinite(t) || t <= 0) return NaN;
+  const p = round2(Math.floor(t) + PRICE_ENDING);
+  const step = roundStep(p);
+  const base = Math.floor(p / step) * step;
+  const over = p - base;
+  if (base > 0 && over < Math.max(1, p * 0.03)) return round2(base - 1 + PRICE_ENDING);
+  return p;
+}
+
+/** The round-number step a price is read against: tens under 100 $, hundreds from 100 $. */
+function roundStep(p: number): number {
+  return p < 100 ? 10 : 100;
+}
+
+/**
+ * The frozen Aosom price as a floor, in our .88 when that does not cross a round number (63.99 → 64.88), else as it is
+ * (299.99 stays 299.99 rather than 300.88).
+ */
+export function floorPrice(aosomPrice: number): number {
+  if (!Number.isFinite(aosomPrice) || aosomPrice <= 0) return NaN;
+  const up = roundUpTo88(aosomPrice);
+  const step = roundStep(aosomPrice);
+  return Math.floor(up / step) === Math.floor(aosomPrice / step) ? up : round2(aosomPrice);
+}
+
+/** Our estimate of Aosom's current retail price for a unit costing `cost`, as a signature price. NaN when unknown. */
+export function estimatedAosomPrice(cost: number | null | undefined): number {
+  if (typeof cost !== "number" || !Number.isFinite(cost) || cost <= 0) return NaN;
+  return signaturePrice(cost * AOSOM_RETAIL_MULTIPLIER);
+}
+
+/**
+ * Lowest price that stays profitable for a unit costing `cost`: after FLOOR_DISCOUNT and the card fees we still keep
+ * cost × (1 + MIN_PROFIT_ON_COST). About cost × 1.05 + 0.31 $, ending in .88. NaN when the cost is unknown.
+ */
+export function profitFloor(cost: number | null | undefined): number {
+  if (typeof cost !== "number" || !Number.isFinite(cost) || cost <= 0) return NaN;
+  return roundUpTo88((cost * (1 + MIN_PROFIT_ON_COST) + CARD_FEE_FIXED) / ((1 - FLOOR_DISCOUNT) * (1 - CARD_FEE_RATE)));
+}
+
+/** What we keep on one unit sold at `price` with `discount` off and the card fees paid. */
+export function netProfit(price: number, cost: number, discount = FLOOR_DISCOUNT): number {
+  const paid = price * (1 - discount);
+  return round2(paid - paid * CARD_FEE_RATE - CARD_FEE_FIXED - cost);
+}
+
+/**
+ * "estimate" = our estimate of Aosom's price; "floor" = the frozen Aosom price; "profit" = the profit floor.
+ * "competitor" | "cap" | "tier" | "margin" come from older rules and survive only in price history rows.
+ */
+export type SellPriceReason = "competitor" | "cap" | "tier" | "margin" | "floor" | "profit" | "estimate";
 
 export interface SellPriceInput {
+  /** The last known Aosom public price (frozen since 2026-10-15). */
   aosomPrice: number;
   productType?: string;
-  /** The competitor's current price for the same SKU, when known. */
+  /** Ignored since 2026-10-28 (kept so callers need not change). */
   competitorPrice?: number | null;
   /** Our unit cost (wholesale price + delivery fee), when known. */
   cost?: number | null;
@@ -55,58 +145,26 @@ export interface SellPriceInput {
 export interface SellPriceResult {
   price: number;
   reason: SellPriceReason;
-  /** True when the competitor price was ignored as implausible. */
+  /** Always false since 2026-10-28: no competitor price is used. */
   competitorIgnored: boolean;
 }
 
-const round2 = (n: number): number => Math.round(n * 100) / 100;
-
-/** Largest price ending in .99 that is <= `p` (p >= 0.99). */
-export function roundDownTo99(p: number): number {
-  if (!Number.isFinite(p) || p < 0.99) return round2(p);
-  return round2(Math.floor(p - 0.99 + 1e-9) + 0.99);
-}
-
-export function tierMarkup(aosomPrice: number, productType?: string): number {
-  if (productType && NO_MARKUP_TYPE.test(productType)) return 0;
-  for (const t of TIERS) if (aosomPrice < t.below) return t.markup;
-  return 0;
-}
-
 export function computeSellPrice(input: SellPriceInput): SellPriceResult {
-  const { aosomPrice, productType, competitorPrice, cost } = input;
+  const { aosomPrice, cost } = input;
   if (!Number.isFinite(aosomPrice) || aosomPrice <= 0) return { price: NaN, reason: "floor", competitorIgnored: false };
-  const floor = round2(aosomPrice);
+  const estimate = estimatedAosomPrice(cost);
+  // Cost unknown: the frozen Aosom price, as it is.
+  if (!Number.isFinite(estimate)) return { price: round2(aosomPrice), reason: "floor", competitorIgnored: false };
+  const floor = floorPrice(aosomPrice);
+  const res: SellPriceResult = estimate >= floor
+    ? { price: estimate, reason: "estimate", competitorIgnored: false }
+    : { price: floor, reason: "floor", competitorIgnored: false };
+  return withProfitFloor(res, cost);
+}
 
-  const hasCompetitor = typeof competitorPrice === "number" && Number.isFinite(competitorPrice) && competitorPrice > 0;
-  const plausible =
-    hasCompetitor &&
-    (competitorPrice as number) >= aosomPrice * COMPETITOR_PLAUSIBLE_LOW &&
-    (competitorPrice as number) <= aosomPrice * COMPETITOR_PLAUSIBLE_HIGH;
-  const competitorIgnored = hasCompetitor && !plausible;
-
-  let candidate: number;
-  let reason: SellPriceReason;
-  if (plausible) {
-    const undercut = (competitorPrice as number) - UNDERCUT_DOLLARS;
-    const cap = aosomPrice * (1 + MAX_MARKUP);
-    candidate = Math.min(undercut, cap);
-    reason = undercut <= cap ? "competitor" : "cap";
-  } else {
-    const tierCandidate = aosomPrice * (1 + tierMarkup(aosomPrice, productType));
-    if (typeof cost === "number" && Number.isFinite(cost) && cost > 0) {
-      const outdoor = !!productType && NO_MARKUP_TYPE.test(productType);
-      const marginCandidate = cost / (1 - TARGET_MARGIN);
-      const cap = aosomPrice * (1 + (outdoor ? OUTDOOR_MAX_MARKUP : MAX_MARKUP));
-      candidate = Math.min(Math.max(tierCandidate, marginCandidate), cap);
-      reason = marginCandidate > tierCandidate ? "margin" : "tier";
-    } else {
-      candidate = tierCandidate;
-      reason = "tier";
-    }
-  }
-
-  const rounded = roundDownTo99(candidate);
-  if (rounded <= floor) return { price: floor, reason: "floor", competitorIgnored };
-  return { price: rounded, reason, competitorIgnored };
+/** Raises a price to `profitFloor(cost)` when it sits below it (reason "profit"). Unknown cost: unchanged. */
+export function withProfitFloor(res: SellPriceResult, cost: number | null | undefined): SellPriceResult {
+  const min = profitFloor(cost);
+  if (!Number.isFinite(res.price) || !Number.isFinite(min) || res.price >= min - 0.005) return res;
+  return { ...res, price: min, reason: "profit" };
 }

@@ -88,7 +88,7 @@ describe("submitToBing", () => {
   it("submits within the quota, newest first, and records what it sent", async () => {
     const { f, posts } = fakeFetch(2);
     const r = await submitToBing({ env: { BING_WEBMASTER_API_KEY: "k" }, fetchImpl: f, now: new Date("2026-10-08T12:00:00Z") });
-    expect(r).toEqual({ configured: true, quota: 2, candidates: 3, submitted: 2, remaining: 1 });
+    expect(r).toMatchObject({ configured: true, quota: 2, candidates: 3, submitted: 2, remaining: 1 });
     expect(posts).toHaveLength(1);
     expect(posts[0].siteUrl).toBe("https://ameublodirect.ca");
     expect(posts[0].urlList).toEqual(["https://ameublodirect.ca/products/a", "https://ameublodirect.ca/products/b"]);
@@ -104,6 +104,40 @@ describe("submitToBing", () => {
     const r = await submitToBing({ env: { BING_WEBMASTER_API_KEY: "k" }, fetchImpl: f });
     expect(posts[0].urlList).toEqual(["https://ameublodirect.ca/products/c"]);
     expect(r.remaining).toBe(0);
+  });
+
+  it("also submits furnishdirect.ca (es/pa included) under its own siteUrl", async () => {
+    const posts: Array<{ siteUrl: string; urlList: string[] }> = [];
+    const f = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("GetUrlSubmissionQuota")) return new Response(JSON.stringify({ d: { DailyQuota: 100 } }), { status: 200 });
+      if (u.includes("SubmitUrlbatch")) {
+        posts.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ d: null }), { status: 200 });
+      }
+      if (u === "https://furnishdirect.ca/sitemap.xml") return new Response(`<sitemapindex><sitemap><loc>https://furnishdirect.ca/sitemap_pages_1.xml</loc></sitemap></sitemapindex>`, { status: 200 });
+      if (u === "https://furnishdirect.ca/sitemap_pages_1.xml") return new Response(`<urlset><url><loc>https://furnishdirect.ca/es</loc></url><url><loc>https://furnishdirect.ca/pa</loc></url></urlset>`, { status: 200 });
+      if (u.endsWith("/sitemap.xml")) return new Response("<sitemapindex></sitemapindex>", { status: 200 });
+      return new Response("nope", { status: 404 });
+    }) as unknown as typeof fetch;
+    const r = await submitToBing({ env: { BING_WEBMASTER_API_KEY: "k" }, fetchImpl: f });
+    expect(posts).toEqual([{ siteUrl: "https://furnishdirect.ca", urlList: ["https://furnishdirect.ca/es", "https://furnishdirect.ca/pa"] }]);
+    expect(r.others?.["https://furnishdirect.ca/"]).toMatchObject({ submitted: 2, remaining: 0 });
+  });
+
+  it("reports (not throws) when furnishdirect.ca is not verified in Bing yet", async () => {
+    const f = vi.fn(async (url: string | URL | Request) => {
+      const u = String(url);
+      if (u.includes("GetUrlSubmissionQuota") && u.includes(encodeURIComponent("https://furnishdirect.ca/"))) return new Response(JSON.stringify({ Message: "ERROR!!! Not authorized" }), { status: 403 });
+      if (u.includes("GetUrlSubmissionQuota")) return new Response(JSON.stringify({ d: { DailyQuota: 100 } }), { status: 200 });
+      if (u.endsWith("/sitemap.xml")) return new Response(INDEX, { status: 200 });
+      if (u.includes("sitemap_products_1")) return new Response(PRODUCTS, { status: 200 });
+      if (u.includes("SubmitUrlbatch")) return new Response(JSON.stringify({ d: null }), { status: 200 });
+      return new Response("nope", { status: 404 });
+    }) as unknown as typeof fetch;
+    const r = await submitToBing({ env: { BING_WEBMASTER_API_KEY: "k" }, fetchImpl: f });
+    expect(r.submitted).toBe(3);
+    expect(r.others?.["https://furnishdirect.ca/"]).toEqual({ error: expect.stringContaining("Not authorized") });
   });
 
   it("surfaces Bing's refusal and records nothing", async () => {
