@@ -89,6 +89,13 @@ describe("buildCandidates", () => {
     expect(stripLicensedNames("Kart Volkswagen VW Beetle")).not.toMatch(/volkswagen|\bvw\b/i);
   });
 
+  it("stripLicensedNames removes the lead-in with the brand so no stub is left", () => {
+    expect(stripLicensedNames("Design réaliste inspiré de la Mercedes avec phares à DEL")).toBe("Design réaliste avec phares à DEL");
+    expect(stripLicensedNames("Design inspiré du Jeep Wrangler, phares DEL")).toBe("Design Wrangler, phares DEL");
+    expect(stripLicensedNames("Realistic design inspired by Mercedes with LED lights")).toBe("Realistic design with LED lights");
+    expect(stripLicensedNames("Voiture de la Ford pour enfants")).not.toMatch(/\bde la\s+pour/i);
+  });
+
   it("stripLicensedFromContent cleans titles, descriptions, handles and tags and reports what changed", () => {
     const content = {
       titleFr: "Voiture Mercedes-Benz pour enfants 12 V",
