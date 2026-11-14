@@ -93,7 +93,15 @@ describe("createShopifyProduct — metafield + handle safety", () => {
     expect(mf.find((m) => m.namespace === "global" && m.key === "title_tag")).toBeUndefined();
     // The non-empty ones survive.
     expect(mf.find((m) => m.namespace === "global" && m.key === "description_tag")?.value).toBe("desc fr");
-    expect(mf.find((m) => m.key === "brand_fr")?.value).toBe("Outsunny");
+    // brand_fr is always the store brand, never the supplier ("Outsunny" in the fixture).
+    expect(mf.find((m) => m.key === "brand_fr")?.value).toBe("Ameublo Direct");
+  });
+
+  it("never writes a supplier name as a tag", async () => {
+    await createShopifyProduct(mergedFixture(), contentFixture({ tags: ["jardin", "Outsunny", "aosom pets", "patio"] }), { extraTags: ["homcom"] });
+
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    expect(body.product.tags).toBe("jardin, patio");
   });
 
   it("falls back to a title-derived handle when urlHandleFr is empty", async () => {

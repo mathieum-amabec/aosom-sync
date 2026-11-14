@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.63] - 2026-11-13
+
+### Fixed
+
+- **The importer no longer writes supplier names.** `custom.brand_fr` is now always "Ameublo Direct" for Aosom imports too. It used to fall back to the supplier brand (e.g. "Aosom"), while Costway imports and the existing products, cleaned up on 2026-10-23, already used the store brand. `opts.extraTags` is filtered for supplier names as well, since tag filter URLs and `/products/x.json` expose them. Originally PR #651 (v0.5.107.50), rebased onto main.
+
 ## [0.5.107.62] - 2026-11-13
 
 ### Fixed
