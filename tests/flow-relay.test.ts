@@ -126,3 +126,26 @@ describe("state", () => {
     for (const s of ["Adding Recipients", "Scheduled", "Sending", "Draft"]) { expect(stillInFlight(s)).toBe(true); expect(shouldRetry(s)).toBe(false); }
   });
 });
+
+describe("price-alert double opt-in (2026-11-13)", () => {
+  const s = STEPS.find((x) => x.key === "price-alert-confirm")!;
+  const ctx = (now: Date): Ctx => ({ now, state: { ...emptyRelayState(), startAt: "2026-11-01T00:00:00Z" }, orderedAfter: () => false, wonWheelWithin7d: () => false, relancePaiementSent: () => false, flowSendingAgain: (id) => id === "*" });
+  const ev = (id: string, at: string, email = "client@example.com", pid = "P" + id): TriggerEvent => ({ id, profileId: pid, email, at, props: { confirm_url: "https://outils.ameublodirect.ca/api/price-alert/confirm?token=t", product_name: "Divan" } });
+
+  it("relays the Price Alert Confirmation metric, right away, while the 24 h link is still valid", () => {
+    expect(s.metricId).toBe("Ymt2yf");
+    const now = new Date("2026-11-13T12:00:00Z");
+    expect(selectDue(s, [ev("a", "2026-11-13T11:55:00Z")], ctx(now)).map((e) => e.id)).toEqual(["a"]);
+    expect(selectDue(s, [ev("b", "2026-11-12T15:00:00Z")], ctx(now))).toEqual([]); // 21 h old: link nearly dead
+  });
+
+  it("is stopped only by the all-flows guard (it has no Klaviyo flow of its own)", () => {
+    const now = new Date("2026-11-13T12:00:00Z");
+    expect(selectDue(s, [ev("a", "2026-11-13T11:55:00Z")], { ...ctx(now), flowSendingAgain: () => true })).toEqual([]);
+  });
+
+  it("its template reads the event (confirm link) and its subject has no event tag", () => {
+    expect(usesEvent('<a href="{{ event.confirm_url }}">', s)).toBe(true);
+    expect(rewriteBody('<body><a href="{{ event.confirm_url }}">x</a></body>', propKey(s))).toContain("person|lookup:'rl_price_alert_confirm'");
+  });
+});

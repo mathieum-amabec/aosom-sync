@@ -58,11 +58,11 @@ describe("templates", () => {
 });
 
 describe("hand-over from the relays", () => {
-  it("every flow maps to an existing relay step and every relay step but the morning report has a flow", () => {
+  it("every flow maps to an existing relay step and every relay step but the morning report and the price-alert double opt-in has a flow", () => {
     const relayKeys = new Set(RELAY_STEPS.map((s) => s.key));
     for (const f of FLOWS) if (f.relayKey !== "relance-paiement") expect(relayKeys.has(f.relayKey), f.key).toBe(true);
     const covered = new Set(FLOWS.map((f) => f.relayKey));
-    expect(RELAY_STEPS.filter((s) => !covered.has(s.key)).map((s) => s.key)).toEqual(["morning-report"]);
+    expect(RELAY_STEPS.filter((s) => !covered.has(s.key)).map((s) => s.key)).toEqual(["price-alert-confirm", "morning-report"]); // the opt-in confirmation stays on the relay (engine has no template for it)
   });
 
   it("the relays only stop for groups the engine runs LIVE", () => {

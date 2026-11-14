@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"/><meta content="width=device-width,initial-scale=1" name="viewport"/></head>
+<body style="margin:0;background:#FAFAF8">
+<table cellpadding="0" cellspacing="0" role="presentation" style="background:#FAFAF8" width="100%"><tr><td align="center" style="padding:24px 12px">
+<table cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%;background:#fff;border:1px solid rgba(27,42,74,.08);border-radius:10px;overflow:hidden" width="600">
+<tr><td style="background:#1B2A4A;padding:18px 28px"><span style="font-family:Georgia,serif;font-size:20px;color:#fff;font-weight:700">Ameublo Direct</span><span style="font-family:Arial,sans-serif;font-size:12px;color:#cdd5e3">  |  Furnish Direct</span></td></tr>
+<tr><td style="padding:24px 28px 8px"><table cellpadding="0" cellspacing="0" role="presentation" width="100%">
+<tr><td style="padding:0 0 10px"><h1 style="margin:0;font-family:Georgia,serif;font-size:24px;line-height:1.25;color:#1B2A4A">Confirme ton alerte de prix 🔔</h1></td></tr>
+<tr><td style="padding:0 0 18px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">Tu as demandé à être averti·e quand le prix de <b>{{ event.product_name|default:'ce produit' }}</b> baissera. Clique sur le bouton pour activer l'alerte. Le lien est valide 24 h.</p></td></tr>
+<tr><td style="padding:0 0 8px"><a href="{{ event.confirm_url }}" style="display:inline-block;background:#C17F3E;color:#fff;text-decoration:none;font-weight:700;padding:14px 28px;border-radius:6px;font-family:Arial,sans-serif;font-size:15px">Activer mon alerte</a></td></tr>
+<tr><td style="padding:10px 0 0"><p style="margin:0;font-family:Arial,sans-serif;font-size:13px;line-height:1.5;color:#797068">Ce n'est pas toi? Ignore ce courriel : sans confirmation, tu ne recevras rien.</p></td></tr></table></td></tr>
+<tr><td style="padding:8px 28px"><hr style="border:none;border-top:1px solid #ece6df;margin:0"/></td></tr>
+<tr><td style="padding:8px 28px 24px"><table cellpadding="0" cellspacing="0" role="presentation" width="100%">
+<tr><td style="padding:0 0 10px"><h1 style="margin:0;font-family:Georgia,serif;font-size:20px;line-height:1.25;color:#1B2A4A">Confirm your price alert 🔔</h1></td></tr>
+<tr><td style="padding:0 0 18px"><p style="margin:0;font-family:Arial,sans-serif;font-size:15px;line-height:1.6;color:#1A1A2E">You asked to be notified when the price of <b>{{ event.product_name|default:'this product' }}</b> drops. Click the button to turn the alert on. The link is valid for 24 h.</p></td></tr>
+<tr><td style="padding:0 0 8px"><a href="{{ event.confirm_url }}" style="display:inline-block;background:#C17F3E;color:#fff;text-decoration:none;font-weight:700;padding:14px 28px;border-radius:6px;font-family:Arial,sans-serif;font-size:15px">Turn on my alert</a></td></tr>
+<tr><td style="padding:10px 0 0"><p style="margin:0;font-family:Arial,sans-serif;font-size:13px;line-height:1.5;color:#797068">Not you? Ignore this email: without confirmation you won't get anything.</p></td></tr></table></td></tr>
+<tr><td style="background:#FAFAF8;padding:18px 28px;border-top:1px solid #ece6df">
+<p style="margin:0;font-family:Arial,sans-serif;font-size:11px;line-height:1.6;color:#797068">
+          Ameublo Direct · Québec, Canada · {% unsubscribe 'Se désabonner / Unsubscribe' %}
+        </p></td></tr>
+</table>
+</td></tr></table>
+</body></html>
