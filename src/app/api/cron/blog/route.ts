@@ -18,7 +18,8 @@ import {
   type Season,
 } from "@/lib/blog-topics";
 import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
-import { generateBlogArticle } from "@/lib/blog-generator";
+import { generateBlogArticle, type GenerateBlogInput } from "@/lib/blog-generator";
+import { fetchCollectionProducts, type BlogProduct } from "@/lib/blog-products";
 import { trackCron } from "@/lib/cron-tracking";
 import { isPublisherPaused } from "@/lib/automation-controls";
 
@@ -84,6 +85,7 @@ async function generateOne(
   keywords: string[],
   season: Season,
   images: UnsplashImage[] | undefined,
+  commerce: Pick<GenerateBlogInput, "collection" | "relatedCollections" | "products">,
 ): Promise<LangOutcome> {
   const tag = lang.toUpperCase();
   try {
@@ -97,6 +99,7 @@ async function generateOne(
       season,
       autoPublish,
       ...(images ? { images } : {}),
+      ...commerce,
     });
     console.log(
       `[CRON/blog] ${tag} article created: ${result.articleId} (${result.title}) — ` +
@@ -128,13 +131,17 @@ export async function GET(request: Request) {
 
   // slot distinguishes the Mon run from the Thu run — both share an ISO week, so it is the
   // only thing keeping the two runs on different topics.
-  console.log(`[CRON/blog] week=${sel.week} slot=${sel.slot} idx=${sel.idx} FR="${sel.fr}" EN="${sel.en}" img="${sel.imageQuery}"`);
+  console.log(
+    `[CRON/blog] week=${sel.week} slot=${sel.slot} run=${sel.run} idx=${sel.idx} season=${sel.season} ` +
+      `collection=${sel.collection ?? "-"} FR="${sel.fr}" EN="${sel.en}" img="${sel.imageQuery}"`,
+  );
 
   // trackCron records the run (success/error) in cron_runs for the dashboard. The work throws
   // on total failure so it is logged as 'error'; the outer catch turns that back into the
   // same 500 response shape.
   let articles: LangOutcome[] = [];
   let sharedCount = 0;
+  let productCount = 0;
   try {
     const generated = await trackCron("blog", async () => {
       // One shared photo set for the whole pair → identical imagery FR + EN.
@@ -142,12 +149,24 @@ export async function GET(request: Request) {
       sharedCount = sharedImages ? sharedImages.length : 0;
       console.log(`[CRON/blog] shared images: ${sharedImages ? sharedImages.length : "none (self-fetch)"}`);
 
-      const fr = await generateOne(sel.fr, "fr", sel.keywordsFr, sel.season, sharedImages);
+      // One shared product set (read-only, never throws) → the FR + EN pair recommends the same products.
+      const products: BlogProduct[] = sel.collection
+        ? await fetchCollectionProducts(sel.collection, { titlePattern: sel.productTitlePattern })
+        : [];
+      productCount = products.length;
+      if (sel.collection) console.log(`[CRON/blog] products from "${sel.collection}": ${products.length}`);
+      const commerce = {
+        ...(sel.collection ? { collection: sel.collection } : {}),
+        ...(sel.relatedCollections ? { relatedCollections: sel.relatedCollections } : {}),
+        products,
+      };
+
+      const fr = await generateOne(sel.fr, "fr", sel.keywordsFr, sel.season, sharedImages, commerce);
 
       console.log(`[CRON/blog] Waiting ${BETWEEN_LANGS_DELAY_MS}ms before EN`);
       await new Promise((r) => setTimeout(r, BETWEEN_LANGS_DELAY_MS));
 
-      const en = await generateOne(sel.en, "en", sel.keywordsEn, sel.season, sharedImages);
+      const en = await generateOne(sel.en, "en", sel.keywordsEn, sel.season, sharedImages, commerce);
 
       articles = [fr, en];
       const count = articles.filter((a) => a.success).length;
@@ -171,6 +190,9 @@ export async function GET(request: Request) {
         success: true,
         week: sel.week,
         topicIndex: sel.idx,
+        season: sel.season,
+        collection: sel.collection ?? null,
+        products: productCount,
         sharedImages: sharedCount,
         articles,
         generated,

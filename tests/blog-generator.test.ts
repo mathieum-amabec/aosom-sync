@@ -316,3 +316,104 @@ describe("articleProblems — deterministic gate on generated articles", () => {
     expect(articleProblems({ title: "t", bodyHtml: words(700) })).toEqual({ hard: [], soft: [] });
   });
 });
+
+describe("generateBlogArticle — commercial topics (product picks)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  const PRODUCTS = [
+    {
+      handle: "sapin-floque-2-m",
+      titleFr: "Sapin de Noël floqué 2 m",
+      titleEn: "Flocked Christmas Tree 2 m",
+      imageUrl: "https://cdn.shopify.com/s/files/sapin.jpg",
+      factsFr: "Sapin enneigé livré avec sa base.",
+      factsEn: "Snowy tree with its stand.",
+    },
+    {
+      handle: "sapin-mince-1-8-m",
+      titleFr: "Sapin mince pré-éclairé 1,8 m",
+      imageUrl: "https://cdn.shopify.com/s/files/mince.jpg",
+      factsFr: "Format étroit pour les petits salons.",
+    },
+  ];
+
+  function claudeSpy(payload: unknown) {
+    const create = vi.fn().mockResolvedValue({ content: [{ type: "text", text: JSON.stringify(payload) }] });
+    return { create, mod: { getAnthropicClient: () => ({ messages: { create } }) } };
+  }
+
+  it("puts the products (names, relative URLs, facts — no prices) in the prompt", async () => {
+    const { create, mod: claude } = claudeSpy(ARTICLE_JSON);
+    const { mod } = await loadGenerator({ claude });
+
+    await mod.generateBlogArticle({ topic: "Choisir un sapin", lang: "fr", collection: "noel-sapins", products: PRODUCTS, images: THREE_IMAGES });
+
+    const prompt: string = create.mock.calls[0][0].messages[0].content;
+    expect(prompt).toContain("Sapin de Noël floqué 2 m — /products/sapin-floque-2-m — Sapin enneigé livré avec sa base.");
+    expect(prompt).toContain("/collections/noel-sapins");
+    expect(prompt).toMatch(/never state or guess a price/i);
+    expect(prompt).not.toMatch(/\d\s?\$/);
+  });
+
+  it("the EN prompt uses EN titles and leaves out products without one", async () => {
+    const { mod } = await loadGenerator();
+    const prompt = mod.buildUserPrompt({ topic: "Choosing a tree", lang: "en", collection: "noel-sapins", products: PRODUCTS });
+    expect(prompt).toContain("Flocked Christmas Tree 2 m — /products/sapin-floque-2-m");
+    expect(prompt).not.toContain("Sapin mince");
+  });
+
+  it("a topic without products keeps the plain prompt", async () => {
+    const { mod } = await loadGenerator();
+    expect(mod.buildUserPrompt({ topic: "Petit salon", lang: "fr" })).not.toContain("/products/");
+  });
+
+  it("appends the picks block, uses a product photo as cover, unwraps invented product links, and gates the body WITH the picks", async () => {
+    const body =
+      '<p>Intro avec <a href="/products/sapin-floque-2-m">ce sapin</a> et <a href="/products/sapin-invente">un autre</a>.</p><h2>Un</h2><p>Un corps.</p><h2>Deux</h2><p>Deux corps.</p><p>Conclusion.</p>';
+    const { mod, createBlogArticle, maybeAutoPublish } = await loadGenerator({ claude: claudeReturning({ ...ARTICLE_JSON, bodyHtml: body }) });
+
+    const res = await mod.generateBlogArticle({
+      topic: "Choisir un sapin",
+      lang: "fr",
+      collection: "noel-sapins",
+      products: PRODUCTS,
+      images: THREE_IMAGES,
+      autoPublish: true,
+    });
+
+    const created = createBlogArticle.mock.calls[0][0];
+    expect(created.bodyHtml).toContain("<h2>Nos suggestions</h2>");
+    expect(created.bodyHtml).toContain('href="/products/sapin-mince-1-8-m"');
+    expect(created.bodyHtml).toContain('<a href="/products/sapin-floque-2-m">ce sapin</a>');
+    expect(created.bodyHtml).not.toContain("sapin-invente");
+    expect(created.bodyHtml).toContain("Unsplash"); // inline photos keep their credit
+    expect(created.featuredImage.src).toBe("https://cdn.shopify.com/s/files/sapin.jpg");
+    expect(maybeAutoPublish.mock.calls[0][0].article.bodyHtml).toContain("Nos suggestions");
+    expect(res.productHandles).toEqual(["sapin-floque-2-m", "sapin-mince-1-8-m"]);
+  });
+
+  it("falls back to the Unsplash cover and no block when the collection has no usable product", async () => {
+    const { mod, createBlogArticle } = await loadGenerator();
+    await mod.generateBlogArticle({ topic: "Choisir un sapin", lang: "fr", collection: "noel-sapins", products: [], images: THREE_IMAGES });
+    const created = createBlogArticle.mock.calls[0][0];
+    expect(created.featuredImage.src).toBe(THREE_IMAGES[0].url);
+    expect(created.bodyHtml).not.toContain("Nos suggestions");
+  });
+
+  it("fetches the collection's products itself when called with a collection but no products", async () => {
+    const fetchCollectionProducts = vi.fn().mockResolvedValue(PRODUCTS);
+    vi.doMock("@/lib/blog-products", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("@/lib/blog-products")>()),
+      fetchCollectionProducts,
+    }));
+    const { mod, createBlogArticle } = await loadGenerator();
+    await mod.generateBlogArticle({ topic: "Choosing a tree", lang: "en", collection: "noel-sapins", productTitlePattern: "^sapin", images: THREE_IMAGES });
+    expect(fetchCollectionProducts).toHaveBeenCalledWith("noel-sapins", { titlePattern: "^sapin" });
+    const body = createBlogArticle.mock.calls[0][0].bodyHtml;
+    expect(body).toContain("<h2>Our picks</h2>");
+    expect(body).toContain("Flocked Christmas Tree 2 m");
+    expect(body).not.toContain("sapin-mince-1-8-m"); // no EN title → not in the EN article
+  });
+});

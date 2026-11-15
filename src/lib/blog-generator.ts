@@ -25,6 +25,14 @@ import { maybeAutoPublish } from "./blog-auto-publish";
 import { recordBlogPost } from "./database";
 import { type Season } from "./blog-topics";
 import { contentRuleProblems } from "./blog-quality";
+import {
+  buildProductPicksHtml,
+  buildProductPromptContext,
+  fetchCollectionProducts,
+  productsForLang,
+  unwrapUnknownProductLinks,
+  type BlogProduct,
+} from "./blog-products";
 
 export interface GenerateBlogInput {
   topic: string;
@@ -38,6 +46,15 @@ export interface GenerateBlogInput {
   /** Opt in to the quality/season/cap auto-publish gate. The cron sets this true; manual
    *  calls default to draft-only. */
   autoPublish?: boolean;
+  /** Shopify collection handle whose products the article recommends. */
+  collection?: string;
+  /** Regex source narrowing the collection's products by FR title (see blog-topics.ts). */
+  productTitlePattern?: string;
+  /** Other collection handles the model may link to. */
+  relatedCollections?: readonly string[];
+  /** Pre-fetched products (from the bilingual cron, shared by FR + EN). When absent and a
+   *  `collection` is set, the generator fetches them itself. */
+  products?: BlogProduct[];
 }
 
 export interface GeneratedBlogArticle {
@@ -47,6 +64,8 @@ export interface GeneratedBlogArticle {
   blogId: number;
   title: string;
   imagesUsed: { id: string; photographer: string }[];
+  /** Products recommended in the "Nos suggestions" / "Our picks" block (handles). */
+  productHandles: string[];
   score: number | null;
   published: boolean;
   publishReason: string;
@@ -92,16 +111,18 @@ function langPromptFragment(lang: BlogLang): string {
     : "Write in clear North American English suited to Canadian readers.";
 }
 
-function buildUserPrompt(input: GenerateBlogInput): string {
+export function buildUserPrompt(input: GenerateBlogInput): string {
   const kw =
     input.keywords && input.keywords.length > 0
       ? `Target SEO keywords (weave naturally, do not stuff): ${input.keywords.join(", ")}.`
       : "No specific SEO keywords — focus on natural readability.";
+  const products = buildProductPromptContext(input.products ?? [], input.lang, input.collection, input.relatedCollections);
 
   return `Write a blog article on this topic: "${input.topic}".
 
 ${langPromptFragment(input.lang)}
 ${kw}
+${products ? `\n${products}\nThe article is read by people about to buy: give concrete, practical buying advice (what to look for, how to measure, which format suits which home) and point to the products above where they fit. Do not write a "Nos suggestions" / "Our picks" list yourself: one is added automatically after the conclusion.\n` : ""}
 
 Return JSON with this exact shape:
 {
@@ -326,8 +347,21 @@ export async function generateBlogArticle(
 ): Promise<GeneratedBlogArticle> {
   let article: ClaudeArticleJson | undefined;
   try {
-    // 1. Article copy from Claude.
-    article = await generateArticleJson(input);
+    // 0. Products to recommend (commercial topics). Shared by the cron for the FR + EN pair;
+    //    fetched here for a direct call. Best-effort: no products → a plain article.
+    const allProducts =
+      input.products ??
+      (input.collection
+        ? await fetchCollectionProducts(input.collection, { titlePattern: input.productTitlePattern })
+        : []);
+    const products = productsForLang(allProducts, input.lang);
+
+    // 1. Article copy from Claude (with the product context in the prompt).
+    article = await generateArticleJson({ ...input, products });
+    // A product link the model was not given (invented or stale) is unwrapped to plain text.
+    const knownHandles = new Set(products.map((p) => p.handle));
+    article = { ...article, bodyHtml: unwrapUnknownProductLinks(article.bodyHtml, knownHandles) };
+    const picksHtml = buildProductPicksHtml(products, input.lang, input.collection);
 
     // 2. Use the caller-supplied shared photo set when present (keeps the FR + EN pair
     //    identical); otherwise search Unsplash for this topic.
@@ -348,17 +382,23 @@ export async function generateBlogArticle(
       }
     }
 
-    // 3. Compose the final body: 2 inline images injected into Claude's HTML.
-    const featured = images[0];
-    const inline = images.slice(1, 3);
-    const finalBodyHtml = injectInlineImages(article.bodyHtml, inline, input.lang);
+    // 3. Compose the final body: 2 inline Unsplash images (with their credits) injected into
+    //    Claude's HTML, then the server-side product picks block. The cover is the first
+    //    product's real photo when there is one; otherwise the first Unsplash photo.
+    const coverProduct = products.find((p) => p.imageUrl);
+    const featuredImage = coverProduct
+      ? { src: coverProduct.imageUrl, alt: (input.lang === "fr" ? coverProduct.titleFr : coverProduct.titleEn) ?? article.title }
+      : { src: images[0].url, alt: images[0].altDescription };
+    const inline = coverProduct ? images.slice(0, 2) : images.slice(1, 3);
+    const bodyWithPicks = article.bodyHtml + picksHtml;
+    const finalBodyHtml = injectInlineImages(article.bodyHtml, inline, input.lang) + picksHtml;
 
     // 4. Create the Shopify draft article in the right blog.
     const created = await createBlogArticle({
       title: article.title,
       bodyHtml: finalBodyHtml,
       lang: input.lang,
-      featuredImage: { src: featured.url, alt: featured.altDescription },
+      featuredImage,
       summaryHtml: `<p>${escapeHtml(article.excerpt)}</p>`,
       tags: article.tags,
       metaDescription: article.metaDescription,
@@ -370,7 +410,9 @@ export async function generateBlogArticle(
       autoPublish: input.autoPublish ?? false,
       lang: input.lang,
       season: input.season,
-      article,
+      // The gate (judge + blog-quality rules, incl. the supplier-name guard) reviews the body
+      // WITH the product picks block, so a supplier-named product could never slip through.
+      article: { ...article, bodyHtml: bodyWithPicks },
       blogId: created.blogId,
       articleId: created.articleId,
     });
@@ -389,6 +431,7 @@ export async function generateBlogArticle(
       blogId: created.blogId,
       title: article.title,
       imagesUsed: images.map((i) => ({ id: i.id, photographer: i.photographer })),
+      productHandles: products.map((p) => p.handle),
       score,
       published,
       publishReason,
