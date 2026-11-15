@@ -12,13 +12,16 @@
 
 import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
+import { countBlogPostsSince } from "@/lib/database";
 import {
   selectBilingualTopic,
+  slotStartOf,
   type Language,
   type Season,
 } from "@/lib/blog-topics";
 import { searchImages, triggerDownload, type UnsplashImage } from "@/lib/unsplash";
-import { generateBlogArticle } from "@/lib/blog-generator";
+import { generateBlogArticle, type GenerateBlogInput } from "@/lib/blog-generator";
+import { fetchCollectionProducts, type BlogProduct } from "@/lib/blog-products";
 import { trackCron } from "@/lib/cron-tracking";
 import { isPublisherPaused } from "@/lib/automation-controls";
 
@@ -55,15 +58,16 @@ type LangOutcome =
  * Unsplash fails — each language then self-fetches, so a photo hiccup never blocks the
  * articles, at the cost of the "same image" guarantee for that one run.
  */
-async function fetchSharedImages(query: string): Promise<UnsplashImage[] | undefined> {
+async function fetchSharedImages(query: string, used: number = SHARED_IMAGE_COUNT): Promise<UnsplashImage[] | undefined> {
   try {
-    const images = await searchImages(query, SHARED_IMAGE_COUNT);
-    if (images.length < SHARED_IMAGE_COUNT) {
-      console.error(`[CRON/blog] shared image query "${query}" returned ${images.length}/${SHARED_IMAGE_COUNT}; langs will self-fetch`);
+    const images = (await searchImages(query, SHARED_IMAGE_COUNT)).slice(0, used);
+    if (images.length < used) {
+      console.error(`[CRON/blog] shared image query "${query}" returned ${images.length}/${used}; langs will self-fetch`);
       return undefined;
     }
     // Trigger the download pings once here (Unsplash guideline) since the generator skips
-    // its own search + ping when images are supplied.
+    // its own search + ping when images are supplied. Only photos that will be shown are kept
+    // and pinged: with a product cover, the article uses 2 Unsplash photos, not 3.
     for (const img of images) {
       await triggerDownload(img.downloadLocation);
     }
@@ -84,6 +88,7 @@ async function generateOne(
   keywords: string[],
   season: Season,
   images: UnsplashImage[] | undefined,
+  commerce: Pick<GenerateBlogInput, "collection" | "relatedCollections" | "products">,
 ): Promise<LangOutcome> {
   const tag = lang.toUpperCase();
   try {
@@ -97,6 +102,7 @@ async function generateOne(
       season,
       autoPublish,
       ...(images ? { images } : {}),
+      ...commerce,
     });
     console.log(
       `[CRON/blog] ${tag} article created: ${result.articleId} (${result.title}) — ` +
@@ -124,30 +130,73 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const sel = selectBilingualTopic(new Date());
+  const now = new Date();
+  const sel = selectBilingualTopic(now);
+
+  // Re-trigger guard: the selection is deterministic per slot, so a second call in the same slot
+  // (Vercel retry, manual re-run) would publish the SAME topic twice. Skip when articles were
+  // already logged since the start of this slot, unless ?force=1. Any non-failed article
+  // counts (a manual one too); a partial run (FR ok, EN failed) + ?force=1 regenerates BOTH.
+  const force = new URL(request.url).searchParams.get("force") === "1";
+  if (!force) {
+    const since = slotStartOf(now).getTime() / 1000;
+    let already = 0;
+    try {
+      already = await countBlogPostsSince(since);
+    } catch (err) {
+      // A failed check must not cost the run: proceed (worst case = the old behaviour).
+      console.error("[CRON/blog] slot guard check failed, proceeding:", err);
+    }
+    if (already > 0) {
+      console.log(`[CRON/blog] slot run=${sel.run} already produced ${already} article(s) — skipped (use ?force=1 to override)`);
+      return NextResponse.json(
+        { success: true, skipped: "already ran this slot", week: sel.week, run: sel.run, topicIndex: sel.idx, existing: already },
+        { status: 200 },
+      );
+    }
+  }
 
   // slot distinguishes the Mon run from the Thu run — both share an ISO week, so it is the
   // only thing keeping the two runs on different topics.
-  console.log(`[CRON/blog] week=${sel.week} slot=${sel.slot} idx=${sel.idx} FR="${sel.fr}" EN="${sel.en}" img="${sel.imageQuery}"`);
+  console.log(
+    `[CRON/blog] week=${sel.week} slot=${sel.slot} run=${sel.run} idx=${sel.idx} season=${sel.season} ` +
+      `collection=${sel.collection ?? "-"} FR="${sel.fr}" EN="${sel.en}" img="${sel.imageQuery}"`,
+  );
 
   // trackCron records the run (success/error) in cron_runs for the dashboard. The work throws
   // on total failure so it is logged as 'error'; the outer catch turns that back into the
   // same 500 response shape.
   let articles: LangOutcome[] = [];
   let sharedCount = 0;
+  let productCount = 0;
   try {
     const generated = await trackCron("blog", async () => {
-      // One shared photo set for the whole pair → identical imagery FR + EN.
-      const sharedImages = await fetchSharedImages(sel.imageQuery);
+      // One shared product set (read-only, never throws) → the FR + EN pair recommends the same products.
+      const products: BlogProduct[] = sel.collection
+        ? await fetchCollectionProducts(sel.collection, { titlePattern: sel.productTitlePattern })
+        : [];
+      productCount = products.length;
+      if (sel.collection) console.log(`[CRON/blog] products from "${sel.collection}": ${products.length}`);
+
+      // One shared photo set for the whole pair → identical imagery FR + EN. When BOTH articles
+      // get a product cover (FR: any product; EN: a product with an English title), only 2
+      // Unsplash photos are used.
+      const bothHaveCover = products.length > 0 && products.some((p) => !!p.titleEn);
+      const sharedImages = await fetchSharedImages(sel.imageQuery, bothHaveCover ? 2 : SHARED_IMAGE_COUNT);
       sharedCount = sharedImages ? sharedImages.length : 0;
       console.log(`[CRON/blog] shared images: ${sharedImages ? sharedImages.length : "none (self-fetch)"}`);
+      const commerce = {
+        ...(sel.collection ? { collection: sel.collection } : {}),
+        ...(sel.relatedCollections ? { relatedCollections: sel.relatedCollections } : {}),
+        products,
+      };
 
-      const fr = await generateOne(sel.fr, "fr", sel.keywordsFr, sel.season, sharedImages);
+      const fr = await generateOne(sel.fr, "fr", sel.keywordsFr, sel.season, sharedImages, commerce);
 
       console.log(`[CRON/blog] Waiting ${BETWEEN_LANGS_DELAY_MS}ms before EN`);
       await new Promise((r) => setTimeout(r, BETWEEN_LANGS_DELAY_MS));
 
-      const en = await generateOne(sel.en, "en", sel.keywordsEn, sel.season, sharedImages);
+      const en = await generateOne(sel.en, "en", sel.keywordsEn, sel.season, sharedImages, commerce);
 
       articles = [fr, en];
       const count = articles.filter((a) => a.success).length;
@@ -171,6 +220,9 @@ export async function GET(request: Request) {
         success: true,
         week: sel.week,
         topicIndex: sel.idx,
+        season: sel.season,
+        collection: sel.collection ?? null,
+        products: productCount,
         sharedImages: sharedCount,
         articles,
         generated,

@@ -36,6 +36,8 @@ interface Overrides {
   generateBlogArticle?: ReturnType<typeof vi.fn>;
   searchImages?: ReturnType<typeof vi.fn>;
   recordCronRun?: ReturnType<typeof vi.fn>;
+  fetchCollectionProducts?: ReturnType<typeof vi.fn>;
+  countBlogPostsSince?: ReturnType<typeof vi.fn>;
 }
 
 async function loadRoute(o: Overrides = {}) {
@@ -46,15 +48,19 @@ async function loadRoute(o: Overrides = {}) {
 
   vi.doMock("@/lib/blog-generator", () => ({ generateBlogArticle }));
   vi.doMock("@/lib/unsplash", () => ({ searchImages, triggerDownload }));
+  // Product lookup is Shopify I/O — mocked so the "no HTTP" guarantee below stays meaningful.
+  const fetchCollectionProducts = o.fetchCollectionProducts ?? vi.fn().mockResolvedValue([]);
+  vi.doMock("@/lib/blog-products", () => ({ fetchCollectionProducts }));
   // Real trackCron runs on top of this so the recorded detail string is asserted for real.
-  vi.doMock("@/lib/database", () => ({ recordCronRun }));
+  const countBlogPostsSince = o.countBlogPostsSince ?? vi.fn().mockResolvedValue(0);
+  vi.doMock("@/lib/database", () => ({ recordCronRun, countBlogPostsSince }));
 
   const route = await import("@/app/api/cron/blog/route");
-  return { route, generateBlogArticle, searchImages, triggerDownload, recordCronRun };
+  return { route, generateBlogArticle, searchImages, triggerDownload, recordCronRun, fetchCollectionProducts, countBlogPostsSince };
 }
 
-function req(headers: Record<string, string> = {}) {
-  return new Request("https://aosom-sync.vercel.app/api/cron/blog", { headers });
+function req(headers: Record<string, string> = {}, query = "") {
+  return new Request(`https://aosom-sync.vercel.app/api/cron/blog${query}`, { headers });
 }
 
 describe("GET /api/cron/blog", () => {
@@ -112,6 +118,100 @@ describe("GET /api/cron/blog", () => {
     expect(enArgs.images).toEqual(frArgs.images);
     // Pings fire once for the shared set, not once per language.
     expect(triggerDownload).toHaveBeenCalledTimes(3);
+  });
+
+  it("on a commercial topic, fetches the collection's products once and shares them FR + EN", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-16T08:00:00Z")); // first run of the season-first selector → Christmas trees
+    try {
+      const products = [{ handle: "sapin-a", titleFr: "Sapin A", titleEn: "Tree A", imageUrl: "https://cdn.shopify.com/a.jpg", factsFr: "x" }];
+      const fetchCollectionProducts = vi.fn().mockResolvedValue(products);
+      const { route, generateBlogArticle } = await loadRoute({ fetchCollectionProducts });
+
+      const res = await route.GET(req(AUTH));
+      const body = await res.json();
+
+      expect(fetchCollectionProducts).toHaveBeenCalledTimes(1);
+      expect(fetchCollectionProducts.mock.calls[0][0]).toBe("noel-sapins");
+      expect(body.collection).toBe("noel-sapins");
+      expect(body.season).toBe("holidays");
+      expect(body.products).toBe(1);
+      const [frArgs, enArgs] = generateBlogArticle.mock.calls.map((c) => c[0]);
+      expect(frArgs.collection).toBe("noel-sapins");
+      expect(frArgs.products).toEqual(products);
+      expect(enArgs.products).toBe(frArgs.products);
+      expect(frArgs.season).toBe("holidays");
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips a re-trigger of a slot that already produced articles", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-19T15:00:00Z")); // Thursday slot, later the same day
+    try {
+      const countBlogPostsSince = vi.fn().mockResolvedValue(2);
+      const { route, generateBlogArticle } = await loadRoute({ countBlogPostsSince });
+
+      const res = await route.GET(req(AUTH));
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(body.skipped).toBe("already ran this slot");
+      expect(generateBlogArticle).not.toHaveBeenCalled();
+      // window = slot start → Thu 2026-11-19 00:00 UTC
+      expect(countBlogPostsSince).toHaveBeenCalledWith(Date.parse("2026-11-19T00:00:00Z") / 1000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a Sunday re-run looks back to the start of the slot (Thursday 00:00), so Thursday's articles still block it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-22T12:00:00Z")); // Sunday, slot started Thu 00:00 (84 h ago)
+    try {
+      const countBlogPostsSince = vi.fn().mockResolvedValue(2);
+      const { route, generateBlogArticle } = await loadRoute({ countBlogPostsSince });
+      const res = await route.GET(req(AUTH));
+      expect(countBlogPostsSince).toHaveBeenCalledWith(Date.parse("2026-11-19T00:00:00Z") / 1000);
+      expect((await res.json()).skipped).toBe("already ran this slot");
+      expect(generateBlogArticle).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("?force=1 bypasses the slot guard", async () => {
+    const countBlogPostsSince = vi.fn().mockResolvedValue(2);
+    const { route, generateBlogArticle } = await loadRoute({ countBlogPostsSince });
+
+    const res = await route.GET(req(AUTH, "?force=1"));
+
+    expect(res.status).toBe(200);
+    expect(countBlogPostsSince).not.toHaveBeenCalled();
+    expect(generateBlogArticle).toHaveBeenCalledTimes(2);
+  });
+
+  it("proceeds when the slot guard check itself fails", async () => {
+    const { route, generateBlogArticle } = await loadRoute({ countBlogPostsSince: vi.fn().mockRejectedValue(new Error("turso down")) });
+    const res = await route.GET(req(AUTH));
+    expect(res.status).toBe(200);
+    expect(generateBlogArticle).toHaveBeenCalledTimes(2);
+  });
+
+  it("with products for both languages, keeps and pings only the 2 Unsplash photos actually used", async () => {
+    const products = [{ handle: "sapin-a", titleFr: "Sapin A", titleEn: "Tree A", imageUrl: "https://cdn.shopify.com/a.jpg", factsFr: "x" }];
+    const { route, generateBlogArticle, triggerDownload } = await loadRoute({ fetchCollectionProducts: vi.fn().mockResolvedValue(products) });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-16T08:00:00Z"));
+    try {
+      await route.GET(req(AUTH));
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(generateBlogArticle.mock.calls[0][0].images).toHaveLength(2);
+    expect(triggerDownload).toHaveBeenCalledTimes(2);
   });
 
   it("lets each language self-fetch images when the shared Unsplash fetch fails", async () => {

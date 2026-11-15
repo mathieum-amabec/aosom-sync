@@ -143,6 +143,16 @@ describe("POST /api/blog/generate — body validation", () => {
     expect(arg.autoPublish).toBe(true);
   });
 
+  it("accepts the holidays / cold / outdoor season windows", async () => {
+    for (const season of ["holidays", "cold", "outdoor"]) {
+      vi.resetModules();
+      const { route, generateBlogArticle } = await loadRoute();
+      const res = await route.POST(post({ ...VALID, season }));
+      expect(res.status).toBe(200);
+      expect(generateBlogArticle.mock.calls[0][0].season).toBe(season);
+    }
+  });
+
   it("defaults autoPublish to false so a manual call never publishes by accident", async () => {
     const { route, generateBlogArticle } = await loadRoute();
     await route.POST(post(VALID));
