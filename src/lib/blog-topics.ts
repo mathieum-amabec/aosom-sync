@@ -70,7 +70,7 @@ export interface BilingualTopic {
 // Topics are only APPENDED: the index is logged per run, so reordering would make old logs misleading.
 export const BILINGUAL_TOPICS: readonly BilingualTopic[] = [
   { fr: "Aménager un salon cosy et chaleureux", en: "Creating a cozy, welcoming living room", imageQuery: "cozy living room interior", season: "all", collection: "meubles-salon" },
-  { fr: "Mobilier extérieur tendance pour 2026", en: "Trending outdoor furniture for 2026", imageQuery: "modern outdoor patio furniture", season: "summer", collection: "patio-mobilier" },
+  { fr: "Mobilier extérieur tendance pour 2026", en: "Trending outdoor furniture for 2026", imageQuery: "modern outdoor patio furniture", season: "summer", collection: "patio-mobilier", retired: true }, // année figée + déjà couvert
   { fr: "Aménager un petit balcon urbain", en: "Styling a small urban balcony", imageQuery: "small balcony garden seating", season: "summer", collection: "patio-mobilier" },
   { fr: "Choisir un canapé durable et confortable", en: "Choosing a durable, comfortable sofa", imageQuery: "modern sofa living room", season: "all", collection: "fauteuils-et-canapes" },
   { fr: "Créer un coin lecture cocooning", en: "Creating a cozy reading nook", imageQuery: "reading nook armchair", season: "all" },
@@ -83,7 +83,7 @@ export const BILINGUAL_TOPICS: readonly BilingualTopic[] = [
   { fr: "Recevoir : une salle à manger conviviale", en: "Hosting: a welcoming dining room", imageQuery: "modern dining room table", season: "all", collection: "cuisine-tables-a-manger", relatedCollections: ["cuisine-chaises-salle-a-manger"] },
   // ── 2026 expansion: décoration tendances, petits espaces, 4 saisons, entretien,
   // styles, enfants, rangement, animaux, budget, DIY ──
-  { fr: "Les grandes tendances déco de 2026", en: "The biggest decor trends of 2026", imageQuery: "2026 interior design trends", season: "all" },
+  { fr: "Les grandes tendances déco de 2026", en: "The biggest decor trends of 2026", imageQuery: "2026 interior design trends", season: "all", retired: true }, // année figée + déjà couvert
   { fr: "Meubler un studio sans le surcharger", en: "Furnishing a studio apartment without clutter", imageQuery: "studio apartment small furniture", season: "all" },
   { fr: "Mobilier extérieur 4 saisons pour l'hiver québécois", en: "All-season outdoor furniture for Canadian winters", imageQuery: "winter proof outdoor patio furniture", season: "winter", retired: true }, // live FR + EN since 2026
   { fr: "Entretenir et protéger vos meubles en bois", en: "Caring for and protecting wooden furniture", imageQuery: "wood furniture care cleaning", season: "all" },

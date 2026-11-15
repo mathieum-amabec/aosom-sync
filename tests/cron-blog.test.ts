@@ -160,21 +160,23 @@ describe("GET /api/cron/blog", () => {
       expect(res.status).toBe(200);
       expect(body.skipped).toBe("already ran this slot");
       expect(generateBlogArticle).not.toHaveBeenCalled();
-      // window = max(slot start Thu 00:00, now - 72 h) → Thu 2026-11-19 00:00 UTC
+      // window = slot start → Thu 2026-11-19 00:00 UTC
       expect(countBlogPostsSince).toHaveBeenCalledWith(Date.parse("2026-11-19T00:00:00Z") / 1000);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("caps the look-back at 72 h (Sunday of the Thursday slot)", async () => {
+  it("a Sunday re-run looks back to the start of the slot (Thursday 00:00), so Thursday's articles still block it", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-22T12:00:00Z")); // Sunday, slot started Thu 00:00 (84 h ago)
     try {
-      const countBlogPostsSince = vi.fn().mockResolvedValue(0);
-      const { route } = await loadRoute({ countBlogPostsSince });
-      await route.GET(req(AUTH));
-      expect(countBlogPostsSince).toHaveBeenCalledWith(Date.parse("2026-11-19T12:00:00Z") / 1000);
+      const countBlogPostsSince = vi.fn().mockResolvedValue(2);
+      const { route, generateBlogArticle } = await loadRoute({ countBlogPostsSince });
+      const res = await route.GET(req(AUTH));
+      expect(countBlogPostsSince).toHaveBeenCalledWith(Date.parse("2026-11-19T00:00:00Z") / 1000);
+      expect((await res.json()).skipped).toBe("already ran this slot");
+      expect(generateBlogArticle).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

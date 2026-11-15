@@ -40,9 +40,6 @@ const BETWEEN_LANGS_DELAY_MS = process.env.NODE_ENV === "test" ? 0 : 3_000;
 // set per run keeps Unsplash usage and download pings low.
 const SHARED_IMAGE_COUNT = 3;
 
-// A slot's articles count as "already ran" for at most 72 h (a slot spans 3-4 days).
-const SLOT_GUARD_MS = 72 * 3_600_000;
-
 type LangOutcome =
   | {
       language: Language;
@@ -138,10 +135,11 @@ export async function GET(request: Request) {
 
   // Re-trigger guard: the selection is deterministic per slot, so a second call in the same slot
   // (Vercel retry, manual re-run) would publish the SAME topic twice. Skip when articles were
-  // already logged in this slot (and within 72 h), unless ?force=1.
+  // already logged since the start of this slot, unless ?force=1. Any non-failed article
+  // counts (a manual one too); a partial run (FR ok, EN failed) + ?force=1 regenerates BOTH.
   const force = new URL(request.url).searchParams.get("force") === "1";
   if (!force) {
-    const since = Math.max(slotStartOf(now).getTime(), now.getTime() - SLOT_GUARD_MS) / 1000;
+    const since = slotStartOf(now).getTime() / 1000;
     let already = 0;
     try {
       already = await countBlogPostsSince(since);
