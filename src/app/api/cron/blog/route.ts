@@ -12,8 +12,10 @@
 
 import { verifyCronSecret } from "@/lib/cron-auth";
 import { NextResponse } from "next/server";
+import { countBlogPostsSince } from "@/lib/database";
 import {
   selectBilingualTopic,
+  slotStartOf,
   type Language,
   type Season,
 } from "@/lib/blog-topics";
@@ -38,6 +40,9 @@ const BETWEEN_LANGS_DELAY_MS = process.env.NODE_ENV === "test" ? 0 : 3_000;
 // set per run keeps Unsplash usage and download pings low.
 const SHARED_IMAGE_COUNT = 3;
 
+// A slot's articles count as "already ran" for at most 72 h (a slot spans 3-4 days).
+const SLOT_GUARD_MS = 72 * 3_600_000;
+
 type LangOutcome =
   | {
       language: Language;
@@ -56,15 +61,16 @@ type LangOutcome =
  * Unsplash fails — each language then self-fetches, so a photo hiccup never blocks the
  * articles, at the cost of the "same image" guarantee for that one run.
  */
-async function fetchSharedImages(query: string): Promise<UnsplashImage[] | undefined> {
+async function fetchSharedImages(query: string, used: number = SHARED_IMAGE_COUNT): Promise<UnsplashImage[] | undefined> {
   try {
-    const images = await searchImages(query, SHARED_IMAGE_COUNT);
-    if (images.length < SHARED_IMAGE_COUNT) {
-      console.error(`[CRON/blog] shared image query "${query}" returned ${images.length}/${SHARED_IMAGE_COUNT}; langs will self-fetch`);
+    const images = (await searchImages(query, SHARED_IMAGE_COUNT)).slice(0, used);
+    if (images.length < used) {
+      console.error(`[CRON/blog] shared image query "${query}" returned ${images.length}/${used}; langs will self-fetch`);
       return undefined;
     }
     // Trigger the download pings once here (Unsplash guideline) since the generator skips
-    // its own search + ping when images are supplied.
+    // its own search + ping when images are supplied. Only photos that will be shown are kept
+    // and pinged: with a product cover, the article uses 2 Unsplash photos, not 3.
     for (const img of images) {
       await triggerDownload(img.downloadLocation);
     }
@@ -127,7 +133,30 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const sel = selectBilingualTopic(new Date());
+  const now = new Date();
+  const sel = selectBilingualTopic(now);
+
+  // Re-trigger guard: the selection is deterministic per slot, so a second call in the same slot
+  // (Vercel retry, manual re-run) would publish the SAME topic twice. Skip when articles were
+  // already logged in this slot (and within 72 h), unless ?force=1.
+  const force = new URL(request.url).searchParams.get("force") === "1";
+  if (!force) {
+    const since = Math.max(slotStartOf(now).getTime(), now.getTime() - SLOT_GUARD_MS) / 1000;
+    let already = 0;
+    try {
+      already = await countBlogPostsSince(since);
+    } catch (err) {
+      // A failed check must not cost the run: proceed (worst case = the old behaviour).
+      console.error("[CRON/blog] slot guard check failed, proceeding:", err);
+    }
+    if (already > 0) {
+      console.log(`[CRON/blog] slot run=${sel.run} already produced ${already} article(s) — skipped (use ?force=1 to override)`);
+      return NextResponse.json(
+        { success: true, skipped: "already ran this slot", week: sel.week, run: sel.run, topicIndex: sel.idx, existing: already },
+        { status: 200 },
+      );
+    }
+  }
 
   // slot distinguishes the Mon run from the Thu run — both share an ISO week, so it is the
   // only thing keeping the two runs on different topics.
@@ -144,17 +173,20 @@ export async function GET(request: Request) {
   let productCount = 0;
   try {
     const generated = await trackCron("blog", async () => {
-      // One shared photo set for the whole pair → identical imagery FR + EN.
-      const sharedImages = await fetchSharedImages(sel.imageQuery);
-      sharedCount = sharedImages ? sharedImages.length : 0;
-      console.log(`[CRON/blog] shared images: ${sharedImages ? sharedImages.length : "none (self-fetch)"}`);
-
       // One shared product set (read-only, never throws) → the FR + EN pair recommends the same products.
       const products: BlogProduct[] = sel.collection
         ? await fetchCollectionProducts(sel.collection, { titlePattern: sel.productTitlePattern })
         : [];
       productCount = products.length;
       if (sel.collection) console.log(`[CRON/blog] products from "${sel.collection}": ${products.length}`);
+
+      // One shared photo set for the whole pair → identical imagery FR + EN. When BOTH articles
+      // get a product cover (FR: any product; EN: a product with an English title), only 2
+      // Unsplash photos are used.
+      const bothHaveCover = products.length > 0 && products.some((p) => !!p.titleEn);
+      const sharedImages = await fetchSharedImages(sel.imageQuery, bothHaveCover ? 2 : SHARED_IMAGE_COUNT);
+      sharedCount = sharedImages ? sharedImages.length : 0;
+      console.log(`[CRON/blog] shared images: ${sharedImages ? sharedImages.length : "none (self-fetch)"}`);
       const commerce = {
         ...(sel.collection ? { collection: sel.collection } : {}),
         ...(sel.relatedCollections ? { relatedCollections: sel.relatedCollections } : {}),

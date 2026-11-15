@@ -6,6 +6,7 @@ import {
   factsLine,
   fetchCollectionProducts,
   toBlogProduct,
+  unwrapUnknownCollectionLinks,
   unwrapUnknownProductLinks,
   type BlogProduct,
 } from "@/lib/blog-products";
@@ -98,6 +99,16 @@ describe("chooseProducts", () => {
   it("caps at max and survives an invalid pattern", () => {
     expect(chooseProducts(list, "(", 2, 1)).toHaveLength(2);
   });
+
+  it("dedupes identical titles (case-insensitive) before slicing, keeping the first (best seller)", () => {
+    const dupes = [
+      P("gris", { titleFr: "Banc coffre en velours" }),
+      P("beige", { titleFr: "BANC COFFRE EN VELOURS " }),
+      P("noir", { titleFr: "banc coffre en velours" }),
+      P("autre", { titleFr: "Banc de rangement d'entrée" }),
+    ];
+    expect(chooseProducts(dupes, "^banc", 2, 1).map((p) => p.handle)).toEqual(["gris", "autre"]);
+  });
 });
 
 describe("buildProductPicksHtml", () => {
@@ -139,6 +150,17 @@ describe("buildProductPicksHtml", () => {
     expect(contentRuleProblems({ title: "Titre de test assez long", bodyHtml: html })).toEqual([]);
   });
 
+  it("is styled inline as a grid (no theme change) and shows at most 4 products", () => {
+    const html = buildProductPicksHtml([P("a"), P("b"), P("c"), P("d"), P("e"), P("f")], "fr", "noel-sapins");
+    expect(html).toContain(
+      'style="list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:16px"',
+    );
+    expect(html).toContain('style="width:100%;height:auto"');
+    expect((html.match(/<li>/g) ?? []).length).toBe(4);
+    expect(html).not.toContain("/products/e");
+    expect(contentRuleProblems({ title: "Titre de test assez long", bodyHtml: html })).toEqual([]);
+  });
+
   it("returns an empty string when there is nothing to show", () => {
     expect(buildProductPicksHtml([], "fr", "noel-sapins")).toBe("");
     expect(buildProductPicksHtml([P("a", { titleEn: undefined })], "en")).toBe("");
@@ -168,6 +190,27 @@ describe("unwrapUnknownProductLinks", () => {
     expect(out).not.toContain("invented-123");
     expect(out).toContain("celui-ci");
     expect(out).toContain('<a href="/collections/noel-sapins">');
+  });
+});
+
+describe("unwrapUnknownCollectionLinks", () => {
+  it("keeps the topic's (and related) collections, unwraps invented ones, accepts a /xx/ prefix", () => {
+    const html =
+      '<p><a href="/collections/noel-sapins">sapins</a>, <a href="/en/collections/noel-decorations">déco</a>, ' +
+      '<a href="/collections/sapins-de-luxe">luxe</a>, <a href="/fr/collections/inventee?page=2">inventée</a>, ' +
+      '<a href="/products/x">produit</a></p>';
+    const out = unwrapUnknownCollectionLinks(html, new Set(["noel-sapins", "noel-decorations"]));
+    expect(out).toContain('<a href="/collections/noel-sapins">sapins</a>');
+    expect(out).toContain('<a href="/en/collections/noel-decorations">déco</a>');
+    expect(out).not.toContain("sapins-de-luxe");
+    expect(out).toContain("luxe");
+    expect(out).not.toContain("/collections/inventee");
+    expect(out).toContain("inventée");
+    expect(out).toContain('<a href="/products/x">produit</a>'); // product links are not its job
+  });
+
+  it("with no allowed collection, every collection link is unwrapped", () => {
+    expect(unwrapUnknownCollectionLinks('<a href="/collections/salon">salon</a>', new Set())).toBe("salon");
   });
 });
 

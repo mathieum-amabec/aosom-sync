@@ -6845,6 +6845,19 @@ export async function listBlogPosts(
   return r.rows.map(rowToBlogPost);
 }
 
+/**
+ * Articles (any status except 'failed') logged since `sinceUnix` (unix seconds). Used by the
+ * blog cron to refuse a second generation in a run slot that already produced articles.
+ */
+export async function countBlogPostsSince(sinceUnix: number): Promise<number> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT COUNT(*) AS c FROM blog_posts WHERE status != 'failed' AND created_at >= ?`,
+    args: [Math.floor(sinceUnix)],
+  });
+  return r.rows.length > 0 ? Number(rowToObj(r.rows[0]).c) || 0 : 0;
+}
+
 /** Per-status row counts across the WHOLE table (not just the current page/filter). */
 export async function countBlogPostsByStatus(): Promise<Record<BlogPostStatus, number>> {
   const db = await ensureSchema();

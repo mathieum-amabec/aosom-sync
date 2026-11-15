@@ -16,7 +16,7 @@ import { verifyCronSecret } from "@/lib/cron-auth";
 import { isAuthenticated, isAdmin } from "@/lib/auth";
 import { type UnsplashImage } from "@/lib/unsplash";
 import { type BlogLang } from "@/lib/shopify-blog";
-import { type Season } from "@/lib/blog-topics";
+import { VALID_SEASONS, type Season } from "@/lib/blog-topics";
 import { generateBlogArticle, type GenerateBlogInput } from "@/lib/blog-generator";
 import { checkRateLimit } from "@/lib/rate-limiter";
 
@@ -85,10 +85,10 @@ function parseBody(raw: unknown): GenerateBlogInput | { error: string } {
   let season: Season | undefined;
   if (obj.season !== undefined) {
     const s = obj.season;
-    if (s !== "spring" && s !== "summer" && s !== "fall" && s !== "winter" && s !== "all") {
-      return { error: "`season` must be one of: spring, summer, fall, winter, all" };
+    if (typeof s !== "string" || !(VALID_SEASONS as readonly string[]).includes(s)) {
+      return { error: `\`season\` must be one of: ${VALID_SEASONS.join(", ")}` };
     }
-    season = s;
+    season = s as Season;
   }
 
   const autoPublish = obj.autoPublish === true;

@@ -30,6 +30,7 @@ import {
   buildProductPromptContext,
   fetchCollectionProducts,
   productsForLang,
+  unwrapUnknownCollectionLinks,
   unwrapUnknownProductLinks,
   type BlogProduct,
 } from "./blog-products";
@@ -360,32 +361,40 @@ export async function generateBlogArticle(
     article = await generateArticleJson({ ...input, products });
     // A product link the model was not given (invented or stale) is unwrapped to plain text.
     const knownHandles = new Set(products.map((p) => p.handle));
-    article = { ...article, bodyHtml: unwrapUnknownProductLinks(article.bodyHtml, knownHandles) };
+    // Same for /collections/ links: only the topic's collection(s) are known to exist.
+    const allowedCollections = new Set([input.collection, ...(input.relatedCollections ?? [])].filter((c): c is string => !!c));
+    article = {
+      ...article,
+      bodyHtml: unwrapUnknownCollectionLinks(unwrapUnknownProductLinks(article.bodyHtml, knownHandles), allowedCollections),
+    };
     const picksHtml = buildProductPicksHtml(products, input.lang, input.collection);
+
+    // The cover is the first product's real photo when there is one (then only 2 Unsplash
+    // photos are used, both inline); otherwise Unsplash supplies the cover + 2 inline.
+    const coverProduct = products.find((p) => p.imageUrl);
+    const needed = coverProduct ? 2 : 3;
 
     // 2. Use the caller-supplied shared photo set when present (keeps the FR + EN pair
     //    identical); otherwise search Unsplash for this topic.
     let images: UnsplashImage[];
-    if (input.images && input.images.length >= 3) {
+    if (input.images && input.images.length >= needed) {
       // Download pings already fired by whoever fetched the shared set.
-      images = input.images;
+      images = input.images.slice(0, needed);
     } else {
       const searchQuery = [input.topic, ...(input.keywords ?? [])].filter(Boolean).join(" ");
-      images = await searchImages(searchQuery, 3);
-      if (images.length < 3) {
-        throw new Error(`Unsplash returned ${images.length} image(s) for "${searchQuery}", need 3`);
+      images = (await searchImages(searchQuery, 3)).slice(0, needed);
+      if (images.length < needed) {
+        throw new Error(`Unsplash returned ${images.length} image(s) for "${searchQuery}", need ${needed}`);
       }
-      // Unsplash API guideline — required whenever a photo is used. Failures are logged
-      // inside triggerDownload and never block the article.
+      // Unsplash API guideline — required whenever a photo is used (and only then). Failures
+      // are logged inside triggerDownload and never block the article.
       for (const img of images) {
         await triggerDownload(img.downloadLocation);
       }
     }
 
     // 3. Compose the final body: 2 inline Unsplash images (with their credits) injected into
-    //    Claude's HTML, then the server-side product picks block. The cover is the first
-    //    product's real photo when there is one; otherwise the first Unsplash photo.
-    const coverProduct = products.find((p) => p.imageUrl);
+    //    Claude's HTML, then the server-side product picks block.
     const featuredImage = coverProduct
       ? { src: coverProduct.imageUrl, alt: (input.lang === "fr" ? coverProduct.titleFr : coverProduct.titleEn) ?? article.title }
       : { src: images[0].url, alt: images[0].altDescription };

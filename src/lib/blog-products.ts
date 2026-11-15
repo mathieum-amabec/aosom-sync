@@ -31,6 +31,8 @@ export interface BlogProduct {
 
 /** Products shown per article. */
 export const BLOG_PRODUCTS_MAX = 6;
+/** Products shown in the server-side picks block (the prompt may list up to BLOG_PRODUCTS_MAX). */
+export const BLOG_PICKS_MAX = 4;
 /** Minimum we try to reach by topping up with non-matching products of the same collection. */
 export const BLOG_PRODUCTS_MIN = 4;
 
@@ -130,10 +132,19 @@ export function chooseProducts(products: BlogProduct[], titlePattern?: string, m
       re = null;
     }
   }
-  const matching = re ? products.filter((p) => re!.test(p.titleFr)) : products;
+  // Colour variants are often separate products with the SAME title: keep the first (best seller)
+  // so the picks never show the same name twice.
+  const seen = new Set<string>();
+  const unique = products.filter((p) => {
+    const key = p.titleFr.trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const matching = re ? unique.filter((p) => re!.test(p.titleFr)) : unique;
   const picked = matching.slice(0, max);
   if (picked.length < min) {
-    for (const p of products) {
+    for (const p of unique) {
       if (picked.length >= min) break;
       if (!picked.includes(p)) picked.push(p);
     }
@@ -178,6 +189,9 @@ export function productsForLang(products: readonly BlogProduct[], lang: Language
   return lang === "fr" ? [...products] : products.filter((p) => !!p.titleEn);
 }
 
+const GRID_STYLE = "list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:16px";
+const IMG_STYLE = "width:100%;height:auto";
+
 const nameOf = (p: BlogProduct, lang: Language) => (lang === "fr" ? p.titleFr : p.titleEn ?? p.titleFr);
 
 function esc(s: string): string {
@@ -216,20 +230,21 @@ export function buildProductPromptContext(
  * as a second line of defence); no price is ever rendered. Returns "" when nothing is usable.
  */
 export function buildProductPicksHtml(products: readonly BlogProduct[], lang: Language, collection?: string): string {
-  const list = productsForLang(products, lang).filter(
-    (p) => HANDLE_RE.test(p.handle) && /^https:\/\//.test(p.imageUrl) && isBlogSafeText(nameOf(p, lang)),
-  );
+  const list = productsForLang(products, lang)
+    .filter((p) => HANDLE_RE.test(p.handle) && /^https:\/\//.test(p.imageUrl) && isBlogSafeText(nameOf(p, lang)))
+    .slice(0, BLOG_PICKS_MAX);
   if (list.length === 0) return "";
   const heading = lang === "fr" ? "Nos suggestions" : "Our picks";
   const seeAll = lang === "fr" ? "Voir toute la collection" : "See the whole collection";
   const items = list.map((p) => {
     const name = esc(stripSupplierBrands(nameOf(p, lang)));
     const href = `/products/${p.handle}`;
-    return `<li><a href="${href}"><img src="${esc(p.imageUrl)}" alt="${name}" loading="lazy" width="300" /></a><br /><a href="${href}">${name}</a></li>`;
+    return `<li><a href="${href}"><img src="${esc(p.imageUrl)}" alt="${name}" loading="lazy" style="${IMG_STYLE}" /></a><br /><a href="${href}">${name}</a></li>`;
   });
+  // Inline styles on purpose: the block must render as a grid without touching the live theme.
   return [
     `<h2>${heading}</h2>`,
-    `<ul class="blog-product-picks">${items.join("")}</ul>`,
+    `<ul class="blog-product-picks" style="${GRID_STYLE}">${items.join("")}</ul>`,
     collection && HANDLE_RE.test(collection) ? `<p><a href="/collections/${collection}">${seeAll}</a></p>` : "",
   ].join("");
 }
@@ -242,5 +257,16 @@ export function unwrapUnknownProductLinks(html: string, knownHandles: ReadonlySe
   return html.replace(
     /<a\s[^>]*href=["'](?:https?:\/\/[^"'/]+)?\/(?:[a-z]{2}\/)?products\/([^"'?#/]+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi,
     (whole, handle: string, text: string) => (knownHandles.has(handle.toLowerCase()) ? whole : text),
+  );
+}
+
+/**
+ * Same for /collections/<handle> (optionally /xx/collections/…): only the topic's collection and
+ * its related collections may be linked — anything else the model wrote may not exist (404).
+ */
+export function unwrapUnknownCollectionLinks(html: string, allowedCollections: ReadonlySet<string>): string {
+  return html.replace(
+    /<a\s[^>]*href=["'](?:https?:\/\/[^"'/]+)?\/(?:[a-z]{2}\/)?collections\/([^"'?#/]+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi,
+    (whole, handle: string, text: string) => (allowedCollections.has(handle.toLowerCase()) ? whole : text),
   );
 }

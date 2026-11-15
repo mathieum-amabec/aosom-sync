@@ -9,6 +9,7 @@ import {
   isSeasonActive,
   isTopicInSeason,
   runIndexOf,
+  slotStartOf,
   SEASONAL_SELECTOR_GO_LIVE,
   type Season,
 } from "@/lib/blog-topics";
@@ -197,23 +198,41 @@ describe("BILINGUAL_TOPICS — commercial seasonal topics", () => {
     for (const c of [
       "noel-sapins",
       "noel-decorations",
-      "black-friday-cadeaux-noel",
       "foyers-interieurs",
-      "rangement-range-chaussures",
+      "rangement-poufs-bancs",
       "cuisine-tables-a-manger",
       "fauteuils-et-canapes",
-      "meubles-salon",
       "arbres-a-chat",
       "bureau-et-travail",
     ]) {
-      expect(byCollection(c).some((t) => isSeasonActive(t.season, new Date("2026-12-01T08:00:00Z")) && t.season !== "all"), c).toBe(true);
+      expect(byCollection(c).some((t) => !t.retired && isSeasonActive(t.season, new Date("2026-12-01T08:00:00Z")) && t.season !== "all"), c).toBe(true);
     }
   });
 
   it("covers the spring/summer buying needs with real collections", () => {
-    for (const c of ["patio-mobilier", "gazebos-et-pergolas", "jardinieres-surelevees", "patio-remises-jardin"]) {
-      expect(byCollection(c).some((t) => t.season !== "all" && t.season !== "cold" && t.season !== "holidays"), c).toBe(true);
+    for (const c of ["patio-mobilier", "gazebos-et-pergolas", "patio-remises-jardin"]) {
+      expect(byCollection(c).some((t) => !t.retired && t.season !== "all" && t.season !== "cold" && t.season !== "holidays"), c).toBe(true);
     }
+  });
+
+  it("has no broad duplicate of an existing article (narrow angles; gift ideas removed)", () => {
+    const fr = BILINGUAL_TOPICS.map((t) => t.fr);
+    expect(fr.some((t) => /idées cadeaux/i.test(t))).toBe(false); // guides/idees-cadeaux-noel-2026
+    expect(fr).not.toContain("Choisir le bon sapin de Noël artificiel"); // guides/choisir-sapin-noel-artificiel-2026
+    const sapin = BILINGUAL_TOPICS.find((t) => t.collection === "noel-sapins")!;
+    expect(sapin.productTitlePattern).toBe("crayon|mince|étroit");
+    // every active seasonal topic has a product filter or a collection narrow enough to stay on-angle
+    for (const t of BILINGUAL_TOPICS.filter((x) => x.season === "holidays" || x.season === "cold" || x.season === "outdoor")) {
+      expect(t.collection, t.fr).toBeTruthy();
+    }
+  });
+
+  it("sofa-bed pattern matches 'lit' only as a word", () => {
+    const t = BILINGUAL_TOPICS.find((x) => x.fr.includes("canapé-lit"))!;
+    const re = new RegExp(t.productTitlePattern!, "i");
+    expect(re.test("Canapé-lit convertible")).toBe(true);
+    expect(re.test("Fauteuil inclinable en velours")).toBe(false);
+    expect(re.test("Lot de 2 chaises éclairées")).toBe(false);
   });
 
   it("collection handles are Shopify-handle shaped and title patterns compile", () => {
@@ -246,8 +265,8 @@ describe("selectBilingualTopic — season-first selection", () => {
   });
 
   it("serves every in-season seasonal topic before falling back to evergreen", () => {
-    // Nov 16 → Dec 18 (5 weeks = 10 runs): 5 holiday + 5 cold topics exist.
-    const sels = cronRuns("2026-11-16T08:00:00Z", 5).map(selectBilingualTopic);
+    // Nov 16 → Dec 14 (9 runs): 4 holiday + 5 cold topics exist.
+    const sels = cronRuns("2026-11-16T08:00:00Z", 5).slice(0, 9).map(selectBilingualTopic);
     expect(sels.every((s) => s.season !== "all")).toBe(true);
     expect(new Set(sels.map((s) => s.idx)).size).toBe(sels.length);
     const holidayIdx = BILINGUAL_TOPICS.map((t, i) => (t.season === "holidays" ? i : -1)).filter((i) => i >= 0);
@@ -282,11 +301,33 @@ describe("selectBilingualTopic — season-first selection", () => {
 
   it("brings the spring/summer commercial topics in their season", () => {
     const march = cronRuns("2027-03-01T08:00:00Z", 2).map(selectBilingualTopic);
-    expect(march.slice(0, 3).every((s) => s.season === "spring")).toBe(true); // March opens with spring topics
+    expect(march.slice(0, 2).every((s) => s.season === "spring")).toBe(true); // March opens with spring topics
     const warm = cronRuns("2027-03-01T08:00:00Z", 17).map(selectBilingualTopic); // Mar → Jun
     expect(warm.map((s) => s.collection)).toEqual(
-      expect.arrayContaining(["patio-remises-jardin", "jardinieres-surelevees", "patio-mobilier", "gazebos-et-pergolas"]),
+      expect.arrayContaining(["patio-remises-jardin", "patio-mobilier", "gazebos-et-pergolas"]),
     );
+  });
+
+  it("never selects a retired topic (a live article already covers it)", () => {
+    const retired = new Set(BILINGUAL_TOPICS.map((t, i) => (t.retired ? i : -1)).filter((i) => i >= 0));
+    expect(retired.size).toBeGreaterThan(0);
+    for (const d of cronRuns("2026-11-16T08:00:00Z", 60)) expect(retired.has(selectBilingualTopic(d).idx)).toBe(false);
+  });
+
+  it("seeds the history with the legacy round-robin, so recently published evergreen topics do not come back in late December", () => {
+    // Legacy formula (isoWeek*2+slot)%30 published idx 28 on 2026-10-26, 0 on 11-02, 3 on 11-12.
+    const dec24 = selectBilingualTopic(new Date("2026-12-24T08:00:00Z"));
+    expect(dec24.idx).not.toBe(0);
+    expect(dec24.idx).not.toBe(3);
+    const lateDec = cronRuns("2026-12-14T08:00:00Z", 3).map((d) => selectBilingualTopic(d).idx);
+    for (const i of [0, 3, 28]) expect(lateDec).not.toContain(i);
+  });
+
+  it("slotStartOf returns the Monday (Mon-Wed) or Thursday (Thu-Sun) at 00:00 UTC", () => {
+    expect(slotStartOf(new Date("2026-11-18T15:00:00Z")).toISOString()).toBe("2026-11-16T00:00:00.000Z");
+    expect(slotStartOf(new Date("2026-11-16T08:00:00Z")).toISOString()).toBe("2026-11-16T00:00:00.000Z");
+    expect(slotStartOf(new Date("2026-11-19T08:00:00Z")).toISOString()).toBe("2026-11-19T00:00:00.000Z");
+    expect(slotStartOf(new Date("2026-11-22T23:00:00Z")).toISOString()).toBe("2026-11-19T00:00:00.000Z");
   });
 
   it("is deterministic per run slot (any time / weekday inside the slot gives the same topic)", () => {

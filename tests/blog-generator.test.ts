@@ -394,6 +394,32 @@ describe("generateBlogArticle — commercial topics (product picks)", () => {
     expect(res.productHandles).toEqual(["sapin-floque-2-m", "sapin-mince-1-8-m"]);
   });
 
+  it("unwraps /collections/ links outside the topic's collection + related collections", async () => {
+    const body =
+      '<p>Voyez <a href="/collections/noel-sapins">nos sapins</a>, <a href="/collections/noel-decorations">la déco</a> et <a href="/collections/inventee">ceci</a>.</p><h2>Un</h2><p>Un corps.</p><h2>Deux</h2><p>Deux corps.</p><p>Conclusion.</p>';
+    const { mod, createBlogArticle } = await loadGenerator({ claude: claudeReturning({ ...ARTICLE_JSON, bodyHtml: body }) });
+    await mod.generateBlogArticle({
+      topic: "Choisir un sapin",
+      lang: "fr",
+      collection: "noel-sapins",
+      relatedCollections: ["noel-decorations"],
+      products: PRODUCTS,
+      images: THREE_IMAGES,
+    });
+    const html = createBlogArticle.mock.calls[0][0].bodyHtml;
+    expect(html).toContain('<a href="/collections/noel-sapins">nos sapins</a>');
+    expect(html).toContain('<a href="/collections/noel-decorations">la déco</a>');
+    expect(html).not.toContain("/collections/inventee");
+    expect(html).toContain("ceci");
+  });
+
+  it("with a product cover, only the 2 inline Unsplash photos are used, counted and pinged", async () => {
+    const { mod, triggerDownload } = await loadGenerator();
+    const res = await mod.generateBlogArticle({ topic: "Choisir un sapin", lang: "fr", collection: "noel-sapins", products: PRODUCTS });
+    expect(res.imagesUsed.map((i) => i.id)).toEqual(["a", "b"]);
+    expect(triggerDownload).toHaveBeenCalledTimes(2);
+  });
+
   it("falls back to the Unsplash cover and no block when the collection has no usable product", async () => {
     const { mod, createBlogArticle } = await loadGenerator();
     await mod.generateBlogArticle({ topic: "Choisir un sapin", lang: "fr", collection: "noel-sapins", products: [], images: THREE_IMAGES });
