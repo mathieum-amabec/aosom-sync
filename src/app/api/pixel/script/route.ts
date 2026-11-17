@@ -15,7 +15,7 @@ const EMPTY_SCRIPT = "/* Meta Pixel not configured (NEXT_PUBLIC_META_PIXEL_ID un
  * available. Every access to a storefront global is guarded so the script is
  * inert on pages/themes where those globals are absent.
  */
-function buildPixelScript(pixelId: string, capiUrl: string): string {
+function buildPixelScript(pixelId: string, capiUrl: string, visitUrl: string): string {
   // pixelId is validated to be digits-only before interpolation (no injection).
   // 2026-11-12 (mobile perf audit): fbevents.js (~210 KB, ~450 ms of main-thread work on a mid phone) used to load
   // the moment this ScriptTag ran, competing with the hero image. The fbq stub still queues every call right away;
@@ -33,6 +33,69 @@ s=b.getElementsByTagName(e)[0];s.parentNode.insertBefore(t,s)}
 if(b.readyState==='complete')setTimeout(go,1500);else f.addEventListener('load',function(){setTimeout(go,1500)})}(window,
 document,'script','https://connect.facebook.net/en_US/fbevents.js');
 fbq('init', '${pixelId}');
+
+/* First visit vs return — our own count (src/lib/visitor-tracking.ts). First-party storage and our own endpoint only:
+   it never touches fbq, the CAPI relay or the cart beyond one hidden attribute, and any failure just turns it off. */
+(function () {
+  try {
+    var nav = window.navigator || {};
+    var BOT = /bot|crawl|spider|slurp|lighthouse|headless|preview|facebookexternalhit|pinterestbot|embedly|bingpreview/i;
+    if (nav.webdriver || BOT.test(nav.userAgent || '')) return;
+    if (window.Shopify && window.Shopify.designMode) return;
+    var cp = window.Shopify && window.Shopify.customerPrivacy;
+    if (cp && typeof cp.analyticsProcessingAllowed === 'function' && cp.analyticsProcessingAllowed() === false) return;
+    var ls = window.localStorage;
+    if (!ls || !window.JSON) return;
+    // lc_vid is the random id the "bientôt" teasers already keep; an id from before this count started is flagged
+    // (p), because its first counted visit is not its first visit.
+    var vid = ls.getItem('lc_vid') || '';
+    var st = null;
+    try { st = JSON.parse(ls.getItem('lc_vis') || 'null'); } catch (e) {}
+    var pre = 0;
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(vid)) {
+      var c = window.crypto || window.msCrypto;
+      if (!c || !c.getRandomValues) return;
+      var a = new Uint8Array(16); c.getRandomValues(a);
+      vid = Array.prototype.map.call(a, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+      ls.setItem('lc_vid', vid);
+      st = null;
+    } else if (!st) pre = 1;
+    if (!st || typeof st.n !== 'number' || st.n < 1) st = { n: 0, f: Date.now(), l: 0, p: pre };
+    var now = Date.now();
+    // A new visit after 30 minutes without a page view, like Shopify's sessions.
+    var fresh = !st.l || now - st.l > 1800000;
+    var gap = st.l ? (now - st.l) / 86400000 : null;
+    if (fresh) st.n = Math.min(100000, (st.n | 0) + 1);
+    st.l = now;
+    ls.setItem('lc_vis', JSON.stringify(st));
+    var url = '${visitUrl}';
+    var send = function (o) {
+      try {
+        var b = JSON.stringify(o);
+        if (nav.sendBeacon) nav.sendBeacon(url, b);
+        else if (window.fetch) window.fetch(url, { method: 'POST', body: b, keepalive: true, mode: 'cors' }).catch(function () {});
+      } catch (e) {}
+    };
+    var sent = {};
+    window.__lcVisit = {
+      v: vid,
+      n: st.n,
+      mark: function (t) { if (sent[t]) return; sent[t] = 1; send({ t: t, v: vid, n: st.n }); }
+    };
+    if (fresh) {
+      var msg = { t: 'visit', v: vid, n: st.n, f: st.f, u: String(window.location.href).slice(0, 600), r: String(document.referrer || '').slice(0, 300) };
+      if (st.p) msg.p = 1;
+      if (gap !== null && st.n > 1) msg.g = gap;
+      send(msg);
+    }
+    document.addEventListener('click', function (ev) {
+      try {
+        var el = ev.target && ev.target.closest ? ev.target.closest('[name="checkout"], a[href*="/checkout"]') : null;
+        if (el) window.__lcVisit.mark('checkout');
+      } catch (e) {}
+    }, true);
+  } catch (e) { /* never break the storefront */ }
+})();
 
 (function () {
   try {
@@ -224,6 +287,8 @@ fbq('init', '${pixelId}');
       try {
         setHiddenInput(form, 'attributes[_fbp]', cookie('_fbp'));
         setHiddenInput(form, 'attributes[_fbc]', currentFbc());
+        // Visit number on the order (first visit vs return for buyers too); hidden from customers by the underscore.
+        if (window.__lcVisit) setHiddenInput(form, 'attributes[_lc_v]', window.__lcVisit.v + '.' + window.__lcVisit.n);
       } catch (e) {}
     }
 
@@ -232,6 +297,7 @@ fbq('init', '${pixelId}');
       if (now - lastAtcTs < 1000) return;
       lastAtcTs = now;
       syncAfterAdd();
+      try { if (window.__lcVisit) window.__lcVisit.mark('atc'); } catch (e) {}
       var v = variantId ? variantsById[String(variantId)] : null;
       var payload = { content_type: 'product', currency: currency };
       if (v && v.sku) {
@@ -339,10 +405,12 @@ export async function GET(request: Request) {
   // The relay URL is derived from this script's own origin (not user input beyond the Host header,
   // restricted to a hostname charset) so it works on any deployment alias.
   const host = new URL(request.url).host;
-  const capiUrl = /^[a-z0-9.-]+(:\d+)?$/i.test(host) ? `https://${host}/api/capi/event` : "https://aosom-sync.vercel.app/api/capi/event";
+  const safeHost = /^[a-z0-9.-]+(:\d+)?$/i.test(host) ? host : "aosom-sync.vercel.app";
+  const capiUrl = `https://${safeHost}/api/capi/event`;
+  const visitUrl = `https://${safeHost}/api/pixel/visit`;
   // Only digits are valid Meta Pixel IDs; reject anything else to keep the
   // interpolation injection-proof even though the value is operator-controlled.
-  const body = pixelId && /^[0-9]+$/.test(pixelId) ? buildPixelScript(pixelId, capiUrl) : EMPTY_SCRIPT;
+  const body = pixelId && /^[0-9]+$/.test(pixelId) ? buildPixelScript(pixelId, capiUrl, visitUrl) : EMPTY_SCRIPT;
   return new NextResponse(body, {
     status: 200,
     headers: {

@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.64] - 2026-11-16
+
+### Added
+
+- **First visit vs return, counted by us.** Shopify cannot tell whether a visitor who did not buy is new or returning. The storefront pixel script now keeps a random id and a visit counter in localStorage. A new visit starts after 30 min without a page view. The script sends one beacon per visit to `POST /api/pixel/visit`, plus one when that visit adds to the cart and one when it heads to checkout. The visit number also rides on the cart as the hidden attribute `_lc_v`, so orders carry it. Rows go to the new table `visitor_sessions`; the report is `GET /api/dashboard/visitors?days=30&country=CA`, split by site. No PII: the id is random and stored hashed, no IP is kept, and only the referrer host and the landing path are stored. Bots, the theme editor and visitors who refused analytics are skipped. The Meta pixel, the CAPI relay and the existing cart attributes are unchanged, verified on the live storefront. Kill switch: setting `visit_tracking` = "0".
+
 ## [0.5.107.63] - 2026-11-13
 
 ### Fixed

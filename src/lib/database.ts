@@ -848,6 +848,28 @@ async function _initSchemaImpl(): Promise<void> {
     // One row per email the engine tried to send. idem_key (flow + step + trigger) makes a second send of the same
     // email impossible, even from two overlapping cron runs. status: sending → sent | failed | skipped, then the
     // Resend webhook moves sent → delivered → opened → clicked (or bounced / complained).
+    // First visit vs return (src/lib/visitor-tracking.ts): one row per (visitor, visit number). visitor_hash is a hash
+    // of a random browser id, no PII and no IP. pre = the id existed before counting began (its visit 1 is not its
+    // first). atc / checkout = that visit added to the cart / headed to checkout.
+    `CREATE TABLE IF NOT EXISTS visitor_sessions (
+      visitor_hash TEXT NOT NULL,
+      visit_n INTEGER NOT NULL,
+      pre INTEGER NOT NULL DEFAULT 0,
+      first_seen INTEGER,
+      gap_days REAL,
+      host TEXT,
+      landing TEXT,
+      referrer TEXT,
+      utm_source TEXT,
+      fbclid INTEGER NOT NULL DEFAULT 0,
+      country TEXT,
+      device TEXT,
+      atc INTEGER NOT NULL DEFAULT 0,
+      checkout INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (visitor_hash, visit_n)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_visitor_sessions_created ON visitor_sessions(created_at)`,
     `CREATE TABLE IF NOT EXISTS email_sends (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       idem_key TEXT NOT NULL UNIQUE,
@@ -3608,6 +3630,61 @@ export async function setWheelSpinCode(emailKey: string, code: string, discountI
 export async function releaseWheelSpin(emailKey: string): Promise<void> {
   const db = await ensureSchema();
   await db.execute({ sql: `DELETE FROM wheel_spins WHERE email_key = ? AND code IS NULL`, args: [emailKey] });
+}
+
+// ─── First visit vs return (visitor_sessions) ─────────────────────
+
+export interface VisitorSessionInput {
+  visitorHash: string; visitN: number; pre: boolean; firstSeen: number | null; gapDays: number | null;
+  host: string | null; landing: string | null; referrer: string | null; utmSource: string | null; fbclid: boolean;
+  country: string | null; device: string | null;
+}
+
+/** Record the start of a visit; a repeat beacon for the same (visitor, visit) is ignored. */
+export async function insertVisitorSession(v: VisitorSessionInput): Promise<void> {
+  const db = await ensureSchema();
+  await db.execute({
+    sql: `INSERT OR IGNORE INTO visitor_sessions (visitor_hash, visit_n, pre, first_seen, gap_days, host, landing, referrer, utm_source, fbclid, country, device, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [v.visitorHash, v.visitN, v.pre ? 1 : 0, v.firstSeen, v.gapDays, v.host, v.landing, v.referrer, v.utmSource, v.fbclid ? 1 : 0, v.country, v.device, Math.floor(Date.now() / 1000)],
+  });
+}
+
+/** Flag that a visit added to the cart / headed to checkout. Creates the row when its visit beacon was lost. */
+export async function markVisitorSession(visitorHash: string, visitN: number, event: "atc" | "checkout", extra: { country: string | null; device: string | null }): Promise<void> {
+  const db = await ensureSchema();
+  const col = event === "atc" ? "atc" : "checkout";
+  await db.execute({
+    sql: `INSERT INTO visitor_sessions (visitor_hash, visit_n, ${col}, country, device, created_at) VALUES (?, ?, 1, ?, ?, ?)
+          ON CONFLICT(visitor_hash, visit_n) DO UPDATE SET ${col} = 1`,
+    args: [visitorHash, visitN, extra.country, extra.device, Math.floor(Date.now() / 1000)],
+  });
+}
+
+export interface VisitorSessionRow {
+  visitor_hash: string; visit_n: number; pre: number; host: string | null; referrer: string | null; utm_source: string | null;
+  fbclid: number; country: string | null; device: string | null; atc: number; checkout: number; gap_days: number | null; created_at: number;
+}
+
+const strOrNull = (v: unknown): string | null => (v == null ? null : String(v));
+
+/** Raw visits since `sinceSec` (the report aggregates them; a month is a few tens of thousands of small rows). */
+export async function getVisitorSessions(sinceSec: number, country: string | null): Promise<VisitorSessionRow[]> {
+  const db = await ensureSchema();
+  const r = await db.execute({
+    sql: `SELECT visitor_hash, visit_n, pre, host, referrer, utm_source, fbclid, country, device, atc, checkout, gap_days, created_at
+          FROM visitor_sessions WHERE created_at >= ?${country ? " AND country = ?" : ""}`,
+    args: country ? [sinceSec, country] : [sinceSec],
+  });
+  return r.rows.map((row) => {
+    const o = rowToObj(row);
+    return {
+      visitor_hash: String(o.visitor_hash), visit_n: Number(o.visit_n), pre: Number(o.pre),
+      host: strOrNull(o.host), referrer: strOrNull(o.referrer), utm_source: strOrNull(o.utm_source), fbclid: Number(o.fbclid),
+      country: strOrNull(o.country), device: strOrNull(o.device), atc: Number(o.atc), checkout: Number(o.checkout),
+      gap_days: o.gap_days == null ? null : Number(o.gap_days), created_at: Number(o.created_at),
+    };
+  });
 }
 
 // ─── Teasers ("bientôt") + AI visualiser usage ─────────────────────

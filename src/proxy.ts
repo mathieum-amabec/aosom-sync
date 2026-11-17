@@ -4,6 +4,7 @@ import { AUTH } from "@/lib/config";
 
 // "/api/pixel/script" and "/api/pixel/pinterest-script" are public so Shopify's
 // storefront ScriptTags (Meta + Pinterest) can fetch them with no session.
+// "/api/pixel/visit" is public too: the same script beacons first-visit/return counts to it (Origin-checked).
 // "/api/pixel/install" is intentionally NOT public — it stays session-gated for
 // the dashboard.
 // "/api/price-alert" is public so the Shopify storefront can POST price-drop
@@ -39,7 +40,7 @@ import { AUTH } from "@/lib/config";
 // visualiser/decorator (Origin allowlist, per-IP limits; the AI routes answer 503 until their setting is "1").
 // "/api/email/unsubscribe" (signed link in every email footer) and "/api/email/webhook" (Svix-signed Resend events)
 // are public; the rest of /api/email stays behind login.
-const PUBLIC_PATHS = ["/api/email/unsubscribe", "/api/email/webhook", "/api/roue","/api/teaser", "/api/visualiser", "/api/decorateur","/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/pixel/pinterest-script", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/capi", "/api/webhooks/shopify-orders-paid", "/api/ugc-videos", "/api/video-serve", "/api/assistant", "/api/trending", "/api/mcp", "/oauth", "/.well-known"];
+const PUBLIC_PATHS = ["/api/email/unsubscribe", "/api/email/webhook", "/api/roue","/api/teaser", "/api/visualiser", "/api/decorateur","/login", "/privacy", "/api/auth", "/api/cron", "/api/health", "/api/social/content", "/api/blog", "/api/pixel/script", "/api/pixel/pinterest-script", "/api/pixel/visit", "/api/feeds", "/api/revalidate", "/api/price-alert", "/api/waitlist", "/api/capi", "/api/webhooks/shopify-orders-paid", "/api/ugc-videos", "/api/video-serve", "/api/assistant", "/api/trending", "/api/mcp", "/oauth", "/.well-known"];
 
 function isReviewerAllowed(pathname: string): boolean {
   return AUTH.REVIEWER_ALLOWED_PREFIXES.some(
