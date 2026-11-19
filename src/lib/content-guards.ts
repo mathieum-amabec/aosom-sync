@@ -281,9 +281,12 @@ export const MIN_TAGS = 6;
 export function inferPieceCount(...texts: Array<string | null | undefined>): number | null {
   for (const t of texts) {
     if (!t) continue;
+    // "Dollhouse with 8 PCS Accessories", "Play Kitchen … 12PCs Accessories": the number counts the accessories of ONE
+    // product, not products sold together — it must never become "Lot de 8" (judge held both, 2026-11-19).
+    const own = t.replace(/\b\d{1,2}[\s-]*(?:pcs?|pieces?)\s+(?:of\s+)?(?:accessor\w*|toys?|play\s*food|foods?)/gi, " ");
     const m =
-      /\b(?:set|pack|lot|bundle)\s+of\s+(\d{1,2})\b/i.exec(t) ||
-      /\b(\d{1,2})[\s-]*(?:pcs?|pieces?|pack)\b/i.exec(t);
+      /\b(?:set|pack|lot|bundle)\s+of\s+(\d{1,2})\b/i.exec(own) ||
+      /\b(\d{1,2})[\s-]*(?:pcs?|pieces?|pack)\b/i.exec(own);
     const n = m ? Number(m[1]) : NaN;
     if (n >= 2 && n <= 24) return n;
   }

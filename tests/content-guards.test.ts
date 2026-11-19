@@ -150,6 +150,11 @@ describe("findUnaccentedFrench", () => {
 import { inferPieceCount, mentionsPieceCount, ensureTitlePieceCount } from "../src/lib/content-guards";
 
 describe("piece count", () => {
+  it("does not read '8 PCS Accessories' as a set of 8 (dollhouse bug 2026-11-19)", () => {
+    expect(inferPieceCount("Dollhouse with 8 PCS Accessories, Dreamhouse Villa")).toBeNull();
+    expect(inferPieceCount("Wooden Play Kitchen Set for Kids, 12PCs Accessories")).toBeNull();
+    expect(inferPieceCount("Folding Chairs 6 Pack")).toBe(6);
+  });
   it("reads the set size from a supplier title or size label", () => {
     expect(inferPieceCount("High Back Dining Chairs, Set of 4, Black")).toBe(4);
     expect(inferPieceCount("x", "Set of 6")).toBe(6);
