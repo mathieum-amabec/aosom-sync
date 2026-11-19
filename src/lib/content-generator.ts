@@ -11,6 +11,7 @@ import {
   findUnaccentedFrench,
   stripColourFromTitle,
   ensureTitlePieceCount,
+  repairFrenchSlips,
   inferPieceCount,
   mentionsPieceCount,
   MIN_TAGS,
@@ -393,6 +394,11 @@ ${correction}` : prompt;
           pieceCount,
           locale,
         );
+      }
+
+      // Known French slips ("Chemalet", "Caissier de classeur", "méelamine"…) the judge keeps holding products for.
+      for (const k of ["titleFr", "descriptionFr", "seoDescriptionFr", "metaTitleFr", "metaDescriptionFr"] as const) {
+        if (typeof parsed[k] === "string") parsed[k] = repairFrenchSlips(parsed[k]);
       }
 
       // Enforce length / format limits

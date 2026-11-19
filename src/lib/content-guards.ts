@@ -223,6 +223,32 @@ export function findImperialOnly(text: string): string[] {
   return [...new Set(out)];
 }
 
+// ── Known French slips ─────────────────────────────────────────────────────────────────────
+// Misspellings / bad calques the content models keep producing and the judge then (rightly) holds the product for
+// (2026-11-19 held list: "Chemalet" for chevalet, "Caissier de classeur" for classeur, "Caissson", "méelamine", "Quinquailles").
+// Repaired in code like the title units: deterministic, high-precision, every entry is wrong in any context.
+const FR_SLIPS: Array<[RegExp, string]> = [
+  [/\bcaissiers?\s+(?:de|à|pour)\s+(classeurs?)\b/gi, "$1"],
+  [/\bcaissiers?\b/gi, "caisson"],
+  [/\bcaiss{2,}on(s?)\b/gi, "caisson$1"],
+  [/\bch[ae]m[ae]l(?:et|eau)(s|x)?\b/gi, "chevalet$1"],
+  [/\bchevelets?\b/gi, "chevalet"],
+  [/\bméelamine\b/gi, "mélamine"],
+  [/\bquinquail\p{L}*/giu, "quincaillerie"],
+];
+
+/** Fix known French misspellings in generated copy (title, description, SEO fields). Keeps the first-letter case. */
+export function repairFrenchSlips(text: string): string {
+  let out = text;
+  for (const [re, to] of FR_SLIPS) {
+    out = out.replace(re, (m: string, g1?: unknown) => {
+      const rep = to.replace("$1", typeof g1 === "string" ? g1 : "");
+      return /^[A-ZÀ-Ý]/.test(m) ? rep.charAt(0).toUpperCase() + rep.slice(1) : rep;
+    });
+  }
+  return out;
+}
+
 // ── Missing accents ─────────────────────────────────────────────────────────────────────────
 // Unaccented spellings a model sometimes emits for words that are always accented in French.
 // Deliberately a short, high-precision list (every entry is wrong unaccented in any context).

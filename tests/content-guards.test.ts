@@ -7,6 +7,7 @@ import {
   findImperialOnly,
   findUnaccentedFrench,
   convertImperialSize,
+  repairFrenchSlips,
 } from "@/lib/content-guards";
 
 describe("countTitleWords — a dimension group is ONE word", () => {
@@ -184,5 +185,18 @@ describe("convertImperialSize — Taille option values in metric", () => {
     expect(convertImperialSize("120 cm")).toBe("120 cm");
     expect(convertImperialSize("Lot de 4")).toBe("Lot de 4");
     expect(convertImperialSize("Grand")).toBe("Grand");
+  });
+});
+
+describe("repairFrenchSlips", () => {
+  it("fixes the slips the judge held products for (2026-11-19)", () => {
+    expect(repairFrenchSlips("Chemalet d'artiste pliant en pin")).toBe("Chevalet d'artiste pliant en pin");
+    expect(repairFrenchSlips("Caissier de classeur vertical à 2 tiroirs")).toBe("Classeur vertical à 2 tiroirs");
+    expect(repairFrenchSlips("Caissson mobile à 4 tiroirs")).toBe("Caisson mobile à 4 tiroirs");
+    expect(repairFrenchSlips("panneau en méelamine")).toBe("panneau en mélamine");
+    expect(repairFrenchSlips("chemalets")).toBe("chevalets");
+  });
+  it("leaves correct French alone", () => {
+    expect(repairFrenchSlips("Chevalet en mélamine, caisson et classeur")).toBe("Chevalet en mélamine, caisson et classeur");
   });
 });
