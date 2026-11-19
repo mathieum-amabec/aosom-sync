@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.65] - 2026-11-18
+
+### Removed
+
+- **Klaviyo review request.** Customers got two review requests about 10 days after purchase: Judge.me's own email (stars clickable in the email, the source of the store's verified reviews) and the Klaviyo flow relayed by `flow-relay`. The relayed one only linked to `/pages/avis-clients`, which has no write-review form. Mat decided on 2026-11-18 that review requests come from Judge.me only. The relay step `review` is now marked `retired` and never sent, and the email engine drops its `avis` copy too. The step stays in the code so its history and tests remain readable.
+
 ## [0.5.107.64] - 2026-11-16
 
 ### Added

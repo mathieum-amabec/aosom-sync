@@ -62,7 +62,9 @@ describe("hand-over from the relays", () => {
     const relayKeys = new Set(RELAY_STEPS.map((s) => s.key));
     for (const f of FLOWS) if (f.relayKey !== "relance-paiement") expect(relayKeys.has(f.relayKey), f.key).toBe(true);
     const covered = new Set(FLOWS.map((f) => f.relayKey));
-    expect(RELAY_STEPS.filter((s) => !covered.has(s.key)).map((s) => s.key)).toEqual(["price-alert-confirm", "morning-report"]); // the opt-in confirmation stays on the relay (engine has no template for it)
+    expect(RELAY_STEPS.filter((s) => !s.retired && !covered.has(s.key)).map((s) => s.key)).toEqual(["price-alert-confirm", "morning-report"]); // the opt-in confirmation stays on the relay (engine has no template for it)
+    // a retired relay step has no engine copy either (review requests come from Judge.me since 2026-11-18)
+    for (const s of RELAY_STEPS.filter((x) => x.retired)) expect(covered.has(s.key), s.key).toBe(false);
   });
 
   it("the relays only stop for groups the engine runs LIVE", () => {
@@ -85,14 +87,14 @@ describe("hand-over from the relays", () => {
 
   it("the relays always see what the engine handled: events, cooldowns, reminder #1 really sent", () => {
     const engine: EngineState = { ...emptyEngineState("2026-11-01T00:00:00Z"),
-      done: { "roue-1": { e1: "t" }, "relance-1": { c1: "t", c2: "t" }, avis: { a1: "t" } },
-      prof: { avis: { p1: "t" }, "relance-1": { p2: "t" } },
+      done: { "roue-1": { e1: "t" }, "relance-1": { c1: "t", c2: "t" }, "bienvenue-1": { a1: "t" } },
+      prof: { "bienvenue-1": { p1: "t" }, "relance-1": { p2: "t" } },
       sent: { "relance-1": { c1: "t" } } };
     const relay: RelayState = { ...emptyRelayState(), done: { "roue-1": { e0: "t" } } };
     const merged = mergeEngineIntoRelay(relay, engine);
     expect(merged.done["roue-1"]).toEqual({ e0: "t", e1: "t" });
-    expect(merged.done.review).toEqual({ a1: "t" });
-    expect(merged.prof.review).toEqual({ p1: "t" });
+    expect(merged.done["welcome-1"]).toEqual({ a1: "t" });
+    expect(merged.prof["welcome-1"]).toEqual({ p1: "t" });
     expect(relay.done["roue-1"]).toEqual({ e0: "t" }); // input untouched
     expect(mergeEngineIntoRelance({ events: {}, sent: {}, profiles: {}, pending: [] }, engine)).toEqual({ events: { c1: "t", c2: "t" }, sent: { c1: "t" }, profiles: { p2: "t" }, pending: [] });
     expect(mergeEngineIntoRelay(relay, null)).toBe(relay);

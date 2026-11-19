@@ -30,6 +30,8 @@ export interface RelayStep {
   templateId: string;
   subject: string;
   preview: string;
+  /** Never sent any more (reason). Kept so the step's history and tests stay readable. */
+  retired?: string;
   /** Skip if the profile placed an order after the trigger. */
   noOrderSinceTrigger?: boolean;
   /** Skip if the profile won the wheel in the last 7 days (two competing codes). */
@@ -54,7 +56,10 @@ export const STEPS: RelayStep[] = [
   { key: "checkout-2", flowId: "Xw6R8f", metricId: CHECKOUT_STARTED, offsetMin: D, graceMin: D, templateId: "Y4uDpu",
     subject: "Toujours intéressé·e ? 🔥 / Still interested?", preview: "", noOrderSinceTrigger: true, cooldownH: 72, requiresRelancePaiement: true },
   { key: "review", flowId: "ULN3my", metricId: "VL4ZFS", offsetMin: 10 * D, graceMin: 3 * D, templateId: "VWcSfq",
-    subject: "Comment trouves-tu ton achat ? ⭐ / How's your purchase?", preview: "", cooldownH: 30 * 24 },
+    subject: "Comment trouves-tu ton achat ? ⭐ / How's your purchase?", preview: "", cooldownH: 30 * 24,
+    // Judge.me already sends its own review request 10 days after purchase (stars clickable in the email); this
+    // one doubled it, and its only link (/pages/avis-clients) has no write-review form.
+    retired: "2026-11-18 (Mat): review requests come from Judge.me only" },
   { key: "welcome-1", flowId: "XJghtC", metricId: "QYnDET", match: (p) => p.list_id === "Sm4Zq4", offsetMin: 10, graceMin: 2 * D, templateId: "Wuecen",
     subject: "Bienvenue chez Ameublo Direct ! 🎉 / Welcome to Furnish Direct!", preview: "", noOrderSinceTrigger: true, noRecentWheelWin: true, cooldownH: 365 * 24 },
   { key: "welcome-2", flowId: "XJghtC", metricId: "QYnDET", match: (p) => p.list_id === "Sm4Zq4", offsetMin: 3 * D + 10, graceMin: 2 * D, templateId: "Wj7cEE",

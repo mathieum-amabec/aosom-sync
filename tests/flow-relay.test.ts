@@ -54,6 +54,13 @@ describe("template rewriting", () => {
   });
 });
 
+describe("retired steps", () => {
+  it("no longer sends the review request (Judge.me sends it, 2026-11-18)", () => {
+    expect(step("review").retired).toBeTruthy();
+    expect(STEPS.filter((s) => s.retired).map((s) => s.key)).toEqual(["review"]);
+  });
+});
+
 describe("eventContext", () => {
   it("exposes $extra as extra, trims line items, drops internal keys", () => {
     const c = eventContext({ $event_id: "x", $value: 10, "Item Count": 1, code: "ROUE-1", ip_address: "1.2.3.4", email_address: "a@b.c",

@@ -57,6 +57,7 @@ export interface EngineState extends RelayState {
 function relayStep(key: string, over: Partial<RelayStep> = {}): RelayStep | null {
   const s = RELAY_STEPS.find((x) => x.key === key);
   if (!s) console.error(`[email-flows] flow-relay step "${key}" not found — flow disabled`);
+  if (s?.retired) return null; // retired on purpose (e.g. review requests → Judge.me): no engine copy either
   return s ? { ...s, ...over } : null;
 }
 
