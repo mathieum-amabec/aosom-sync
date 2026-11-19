@@ -137,7 +137,7 @@ PRODUCT TITLE (titleFr / titleEn) — strict pattern:
   [Product type] [distinctive feature] [size/capacity if relevant] — [color if relevant]
   - NEVER include a supplier brand name ANYWHERE in your response: Outsunny, HOMCOM, HomCom, Aosom, Vinsetto, Pawhut,
     PawHut, Soozier, Qaba, ShopEZ, Wikinger, Portland, Aousthop, Costway.
-  - Maximum 10 words, strict — truncate if necessary. Product type FIRST (SEO). No brand, no model number.
+  - Maximum 8 words, strict — truncate if necessary. Product type FIRST (SEO). No brand, no model number.
   - Color, only if relevant, after an em dash "—".
 
 META TITLE (metaTitleFr / metaTitleEn) — max 65 characters total:

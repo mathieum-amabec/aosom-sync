@@ -20,7 +20,9 @@
 const DIMENSION_RE =
   /\d+(?:[.,]\d+)?(?:\s*[x×]\s*\d+(?:[.,]\d+)?)*(?:\s*(?:cm|mm|m²|m2|m|kg|g|l|w|v|po|pi|in|ft|lbs?)(?![\p{L}²])|\s*["″'])?/giu;
 
-const MAX_TITLE_WORDS = 10;
+// Mat 2026-11-19: "assure-toi que le titre des prochains reste court". 10 → 8: a product-type-first
+// title ("Ensemble table et 4 chaises pour enfants") says everything a shopper scans for.
+const MAX_TITLE_WORDS = 8;
 
 /** Words that read as dangling when a title is cut right after them. */
 const DANGLING = new Set([
@@ -127,7 +129,8 @@ const COLOUR_WORDS = [
 // Longest first so "gris foncé" wins over "gris".
 const COLOUR_ALT = [...new Set(COLOUR_WORDS)].sort((a, b) => b.length - a.length).map((c) => c.replace(/ /g, "\\s+")).join("|");
 const TRAILING_COLOUR_RE = new RegExp(`\\s*[—–-]\\s*(?:${COLOUR_ALT})(?:\\s*(?:et|and|/|,)\\s*(?:${COLOUR_ALT}))*\\s*$`, "i");
-const INLINE_COLOUR_RE = new RegExp(`(?<![\\p{L}\\d])(?:${COLOUR_ALT})(?![\\p{L}\\d])`, "giu");
+const MIDDLE_COLOUR_RE = new RegExp(`\\s+[—–-]\\s*(?:${COLOUR_ALT})(?:\\s*(?:et|and|/|,)\\s*(?:${COLOUR_ALT}))*\\s*(?=[—–-]\\s)`, "i");
+const INLINE_COLOUR_RE =new RegExp(`(?<![\\p{L}\\d])(?:${COLOUR_ALT})(?![\\p{L}\\d])`, "giu");
 
 /**
  * Remove colour from a generated title. A trailing "— gris" segment is always removed. Colour
@@ -137,7 +140,9 @@ const INLINE_COLOUR_RE = new RegExp(`(?<![\\p{L}\\d])(?:${COLOUR_ALT})(?![\\p{L}
  * description of the thing, not a variant label.
  */
 export function stripColourFromTitle(title: string, multiColour: boolean): string {
-  let out = title.replace(TRAILING_COLOUR_RE, "");
+  // A dash-delimited colour-only segment in the MIDDLE ("… enfants — Jaune — Lot de 5") is a
+  // variant label too: the trailing rule below only sees the very end of the title.
+  let out = title.replace(MIDDLE_COLOUR_RE, " ").replace(TRAILING_COLOUR_RE, "");
   if (multiColour) out = out.replace(INLINE_COLOUR_RE, " ");
   return out.replace(/\s{2,}/g, " ").replace(/\s+([,.;:])/g, "$1").replace(/[\s—–-]+$/, "").trim();
 }
@@ -256,6 +261,9 @@ export function mentionsPieceCount(text: string, n: number): boolean {
 /** Append "— Lot de N" / "— Set of N" when a generated title does not carry the piece count. */
 export function ensureTitlePieceCount(title: string, n: number | null, locale: "fr" | "en"): string {
   if (!n || mentionsPieceCount(title, n)) return title;
+  // "Ensemble table et 4 chaises" already spells out what the set contains: a "5-piece" feed count
+  // (table + 4 chairs) must not become a false "Lot de 5" multi-pack.
+  if (/\b(?:et|avec|and|with)\s+\d{1,2}\s+(?!cm\b|mm\b|m\b|kg\b|po\b|pi\b|in\b|ft\b|lb)\p{L}{3,}/iu.test(title)) return title;
   const tail = locale === "fr" ? `Lot de ${n}` : `Set of ${n}`;
   return capTitleWords(`${title.replace(/[\s—–-]+$/, "")} — ${tail}`);
 }
