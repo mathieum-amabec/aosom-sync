@@ -85,7 +85,7 @@ async function run(dryRun: boolean) {
 
   // 2. inputs — steps our own email engine took over (src/lib/email/flows.ts) are no longer relayed
   const owned = await loadRelayKeysOwnedByEngine(getSetting);
-  const STEPS = ALL_STEPS.filter((s) => !owned.has(s.key));
+  const STEPS = ALL_STEPS.filter((s) => !s.retired && !owned.has(s.key));
   if (!STEPS.length) return NextResponse.json({ success: true, skipped: "taken-over-by-email-engine" });
   const metrics = [...new Set(STEPS.map((s) => s.metricId))];
   const byMetric = new Map<string, TriggerEvent[]>();
