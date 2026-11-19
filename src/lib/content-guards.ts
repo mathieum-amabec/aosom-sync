@@ -307,6 +307,10 @@ export function mentionsPieceCount(text: string, n: number): boolean {
 
 /** Append "— Lot de N" / "— Set of N" when a generated title does not carry the piece count. */
 export function ensureTitlePieceCount(title: string, n: number | null, locale: "fr" | "en"): string {
+  // The model sometimes states the count twice ("Ensemble de trois haltères — Lot de 3"): the judge holds those
+  // as repetition. When the part before a trailing "— Lot de N" already carries N, the tail goes.
+  const dup = /^(.*\S)\s*[—–-]\s*(?:Lot de|Set of)\s+(\d{1,2})\s*$/iu.exec(title);
+  if (dup && /\b(?:ensemble|jeu|lot|paquet|set|pack)\s+(?:de|d'|of)\s*\p{L}*\s*\d*/iu.test(dup[1]) && mentionsPieceCount(dup[1], Number(dup[2]))) return dup[1].trim();
   if (!n || mentionsPieceCount(title, n)) return title;
   // "Ensemble table et 4 chaises" already spells out what the set contains: a "5-piece" feed count
   // (table + 4 chairs) must not become a false "Lot de 5" multi-pack.

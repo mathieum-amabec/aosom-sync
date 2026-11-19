@@ -150,6 +150,11 @@ describe("findUnaccentedFrench", () => {
 import { inferPieceCount, mentionsPieceCount, ensureTitlePieceCount } from "../src/lib/content-guards";
 
 describe("piece count", () => {
+  it("drops a duplicated count: 'Ensemble de trois haltères — Lot de 3' (judge repetition holds 2026-11-19)", () => {
+    expect(ensureTitlePieceCount("Ensemble de trois haltères russes — Lot de 3", 3, "fr")).toBe("Ensemble de trois haltères russes");
+    expect(ensureTitlePieceCount("Haltère ajustable ensemble de 2 — Lot de 2", 2, "fr")).toBe("Haltère ajustable ensemble de 2");
+    expect(ensureTitlePieceCount("Chaises modernes — Lot de 4", 4, "fr")).toBe("Chaises modernes — Lot de 4");
+  });
   it("does not read '8 PCS Accessories' as a set of 8 (dollhouse bug 2026-11-19)", () => {
     expect(inferPieceCount("Dollhouse with 8 PCS Accessories, Dreamhouse Villa")).toBeNull();
     expect(inferPieceCount("Wooden Play Kitchen Set for Kids, 12PCs Accessories")).toBeNull();
