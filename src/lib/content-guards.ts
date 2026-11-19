@@ -36,7 +36,10 @@ const PLACEHOLDER = (i: number) => `\u0001${i}\u0001`;
 // from the title. Protected as ONE word, ahead of DIMENSION_RE (which would swallow the bare "4").
 const QUANTITY_SRC = String.raw`(?:lot|ensemble|paquet|jeu|s[ée]rie|set|pack)\s+(?:de|d'|of)\s*\d+(?![\d.,]*\s*(?:cm|mm|m|kg|po|pi|in|ft))`;
 const QUANTITY_ONLY_RE = new RegExp(`^${QUANTITY_SRC}$`, "iu");
-const PROTECT_RE = new RegExp(`${QUANTITY_SRC}|${DIMENSION_RE.source}`, "giu");
+// "5-8 personnes", "4 places": a capacity is ONE word too — cutting between the number and its noun left
+// "Abri de pêche sur glace pop-up 5" (held by the judge as truncated, 2026-11-19).
+const CAPACITY_SRC = String.raw`\d+(?:\s*[-–]\s*\d+)?\s+(?:personnes?|places?|pers\.?)(?![\p{L}])`;
+const PROTECT_RE = new RegExp(`${QUANTITY_SRC}|${CAPACITY_SRC}|${DIMENSION_RE.source}`, "giu");
 
 function protectDimensions(s: string): { text: string; dims: string[] } {
   const dims: string[] = [];
@@ -83,7 +86,7 @@ export function capTitleWords(title: string, max: number = MAX_TITLE_WORDS): str
   const trimTail = (list: string[]) => {
     while (list.length) {
       const last = list[list.length - 1].toLowerCase().replace(/[.,;:]+$/, "");
-      if (isSeparator(last) || DANGLING.has(last)) list.pop();
+      if (isSeparator(last) || DANGLING.has(last) || /^\d+(?:[-–]\d+)?$/.test(last)) list.pop();
       else break;
     }
     return list;

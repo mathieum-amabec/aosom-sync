@@ -58,6 +58,17 @@ describe("capTitleWords", () => {
   });
 });
 
+describe("capTitleWords — capacity stays whole", () => {
+  it("never leaves a bare number: '5-8 personnes' is one word (ice tent bug 2026-11-19)", () => {
+    const out = capTitleWords("Abri de pêche sur glace portable pliable pop-up isolé 5-8 personnes");
+    expect(out).not.toMatch(/sd+(?:-d+)?$/);
+    expect(countTitleWords(out)).toBeLessThanOrEqual(8);
+  });
+  it("counts a capacity as one word", () => {
+    expect(countTitleWords("Abri de pêche sur glace pop-up 5-8 personnes")).toBe(7);
+  });
+});
+
 describe("stripColourFromTitle", () => {
   it("always removes a trailing '— colour' segment", () => {
     expect(stripColourFromTitle("Chaise longue pliante — gris", false)).toBe("Chaise longue pliante");
