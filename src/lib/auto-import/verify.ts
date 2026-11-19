@@ -264,6 +264,7 @@ interface GalleryOut {
     unreadable?: boolean;
     lifestyle?: boolean;
     text_overlay?: boolean;
+    whole_product?: boolean;
   }>;
 }
 
@@ -279,6 +280,12 @@ export interface GalleryFlag {
   lifestyle: boolean;
   /** Marketing text / dimension callouts burned onto the photo. */
   textOverlay: boolean;
+  /**
+   * The WHOLE product (or the main set as sold) is visible. A scene photo of a door knob, branch tips or a mattress
+   * corner is not a good lead photo (curate-top-photos found these passing as "clean lifestyle"). `undefined` = the
+   * model did not say = no objection (older answers / tests).
+   */
+  wholeProduct?: boolean;
 }
 
 export interface GalleryAnalysis {
@@ -315,7 +322,7 @@ export async function analyzeGallery(
   let raw: string;
   try {
     raw = await llm(
-      `Examine ces ${reachable.length} photos produit dans l'ordre (index 1..${reachable.length}). Pour chacune indique: supplier_logo (logo ou nom du fournisseur AJOUTÉ par-dessus la photo: coin d'image, bandeau, filigrane de marque, ou le nom « Aosom » où que ce soit; une marque imprimée ou gravée sur le produit lui-même ne compte PAS, ni une plaque, une étiquette ou un autocollant fixé sur le produit, par exemple une plaque PawHut ou HOMCOM sur une cage ou un meuble: mets-la dans brand_on_product), brand_on_product (une marque est visible SUR le produit lui-même; c'est permis, ne fait rien rejeter), watermark (filigrane), not_product (ne montre pas le produit: page de texte, QR code, emballage vide), unreadable (illisible ou trop floue), lifestyle (le produit est montré en situation réelle: pièce meublée, jardin, animal, enfant qui l'utilise; false si le produit est seul sur fond uni ou blanc), text_overlay (texte marketing, flèches ou cotes de dimensions incrustés sur la photo). Réponds UNIQUEMENT en JSON: {"images":[{"index":1,"supplier_logo":false,"brand_on_product":false,"watermark":false,"not_product":false,"unreadable":false,"lifestyle":true,"text_overlay":false}]}`,
+      `Examine ces ${reachable.length} photos produit dans l'ordre (index 1..${reachable.length}). Pour chacune indique: supplier_logo (logo ou nom du fournisseur AJOUTÉ par-dessus la photo: coin d'image, bandeau, filigrane de marque, ou le nom « Aosom » où que ce soit; une marque imprimée ou gravée sur le produit lui-même ne compte PAS, ni une plaque, une étiquette ou un autocollant fixé sur le produit, par exemple une plaque PawHut ou HOMCOM sur une cage ou un meuble: mets-la dans brand_on_product), brand_on_product (une marque est visible SUR le produit lui-même; c'est permis, ne fait rien rejeter), watermark (filigrane), not_product (ne montre pas le produit: page de texte, QR code, emballage vide), unreadable (illisible ou trop floue), lifestyle (le produit est montré en situation réelle: pièce meublée, jardin, animal, enfant qui l'utilise; false si le produit est seul sur fond uni ou blanc), text_overlay (texte marketing, flèches ou cotes de dimensions incrustés sur la photo), whole_product (le PRODUIT ENTIER, ou l'ensemble principal tel que vendu, est clairement visible; false pour un gros plan, un détail, une main qui tient une pièce ou un produit coupé par le cadre). Réponds UNIQUEMENT en JSON: {"images":[{"index":1,"supplier_logo":false,"brand_on_product":false,"watermark":false,"not_product":false,"unreadable":false,"lifestyle":true,"text_overlay":false,"whole_product":true}]}`,
       { images: reachable.map((r) => r.img), tier: "lite" },
     );
   } catch (err) {
@@ -334,6 +341,7 @@ export async function analyzeGallery(
       unreadable: !!o.unreadable,
       lifestyle: !!o.lifestyle,
       textOverlay: !!o.text_overlay,
+      wholeProduct: o.whole_product === undefined ? undefined : !!o.whole_product,
     };
   });
   return { ok: true, reasons: [], flags, unreachable };
@@ -368,7 +376,8 @@ export function cleanGallery(images: string[], a: GalleryAnalysis, minKeep = 3):
     const f = byUrl.get(u);
     return !!f && !f.textOverlay;
   };
-  const lifestyle = kept.find((u) => byUrl.get(u)?.lifestyle && clean(u));
+  // A lead lifestyle photo must show the whole product: a clean close-up is not a scene worth leading with.
+  const lifestyle = kept.find((u) => byUrl.get(u)?.lifestyle && byUrl.get(u)?.wholeProduct !== false && clean(u));
   let pick: string | undefined = lifestyle;
   if (!pick && !clean(kept[0])) pick = kept.find(clean);
   let promoted = false;

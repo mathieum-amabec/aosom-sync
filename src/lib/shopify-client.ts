@@ -11,6 +11,7 @@ import { EN_FIELD_MAP, rejectEnValue, type EnTranslatableKey } from "./en-transl
 import { colourPhotoIndex, type ColourSource } from "./variant-photos";
 import { toEnglishColour } from "./colour-names";
 import { toFrenchSize } from "./size-names";
+import { convertImperialSize } from "./content-guards";
 import { buildFitDims, checkAgainstPage, serializeFitDims, FIT_DIMS_KEY, FIT_DIMS_NAMESPACE } from "./fit-dims";
 import { isInternalProduct } from "./internal-product";
 
@@ -424,7 +425,8 @@ export async function createShopifyProduct(
   // translation registered below (size-names.ts, 2026-10-02).
   const sizeEn = new Map<string, string>();
   const frSize = (raw: string) => {
-    const fr = toFrenchSize(raw);
+    // Words in French, then inches/feet in metric (Mat 2026-11-19: metric everywhere). The Aosom wording stays the EN translation.
+    const fr = convertImperialSize(toFrenchSize(raw));
     if (fr && fr !== raw) sizeEn.set(fr, raw);
     return fr;
   };

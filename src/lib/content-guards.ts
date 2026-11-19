@@ -186,7 +186,22 @@ export function convertImperialInTitle(title: string, locale: "fr" | "en" = "fr"
   });
 }
 
-const IMPERIAL_RE = /\d+(?:[.,]\d+)?\s?(?:po|pi²?|ft|inch(?:es)?|in(?!\s?\d)|lbs?|oz|gal)(?![\p{L}²])|\d+(?:[.,]\d+)?\s?["″](?!\w)/giu;
+/**
+ * Metric label for a Shopify "Taille" option VALUE. Aosom writes sizes in inches / feet (`9.3" x 9.3" x 72.4"`,
+ * "6 pi"); ~40 % of imports since 2026-10-20 reached the store that way. Same conversion as titles, plus the
+ * `31.5"W x 15.7"D` form. A value that already carries a metric figure ("6 pi (183 cm)", Costway) is left alone,
+ * and so are labels with no unit ("Lot de 4", "Grand").
+ */
+export function convertImperialSize(value: string, locale: "fr" | "en" = "fr"): string {
+  if (!value || /\d\s?(?:cm|mm|m)(?![\p{L}²])/iu.test(value)) return value;
+  // A letter right after an inch mark (W/D/H/L): convert the number, keep the letter.
+  let out = value.replace(/(\d+(?:[.,]\d+)?)\s*["″]\s*([WDHL])\b/g, (_m, n: string, l: string) => `${fmt(num(n) * CM_PER_INCH, locale)} cm ${l}`);
+  // `9.3" x 9.3" x 72.4"` → `9.3 x 9.3 x 72.4"` so the whole group converts as one dimension.
+  out = out.replace(/(\d)\s*["″]\s*([x×])\s*(?=\d)/g, "$1 $2 ");
+  return convertImperialInTitle(out, locale);
+}
+
+const IMPERIAL_RE =/\d+(?:[.,]\d+)?\s?(?:po|pi²?|ft|inch(?:es)?|in(?!\s?\d)|lbs?|oz|gal)(?![\p{L}²])|\d+(?:[.,]\d+)?\s?["″](?!\w)/giu;
 const METRIC_NEAR_RE = /\d+(?:[.,]\d+)?\s?(?:cm|mm|m²|m2|m|kg|g|l|ml)(?![\p{L}])/iu;
 
 /**

@@ -6,6 +6,7 @@ import {
   convertImperialInTitle,
   findImperialOnly,
   findUnaccentedFrench,
+  convertImperialSize,
 } from "@/lib/content-guards";
 
 describe("countTitleWords — a dimension group is ONE word", () => {
@@ -156,5 +157,21 @@ describe("piece count", () => {
     );
     expect(ensureTitlePieceCount("Chaises modernes — Lot de 4", 4, "fr")).toBe("Chaises modernes — Lot de 4");
     expect(ensureTitlePieceCount("Chaise", null, "fr")).toBe("Chaise");
+  });
+});
+
+describe("convertImperialSize — Taille option values in metric", () => {
+  it("converts a W x D x H label written with inch marks", () => {
+    expect(convertImperialSize('9.3" x 9.3" x 72.4"')).toBe("24 x 24 x 184 cm");
+  });
+  it("converts the W/D/H lettered form and feet", () => {
+    expect(convertImperialSize('31.5"W x 15.7"D')).toBe("80 cm W x 40 cm D");
+    expect(convertImperialSize("6 pi")).toBe("183 cm");
+  });
+  it("leaves metric, mixed and word labels alone", () => {
+    expect(convertImperialSize("6 pi (183 cm)")).toBe("6 pi (183 cm)");
+    expect(convertImperialSize("120 cm")).toBe("120 cm");
+    expect(convertImperialSize("Lot de 4")).toBe("Lot de 4");
+    expect(convertImperialSize("Grand")).toBe("Grand");
   });
 });
