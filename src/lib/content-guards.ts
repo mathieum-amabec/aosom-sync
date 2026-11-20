@@ -20,7 +20,9 @@
 const DIMENSION_RE =
   /\d+(?:[.,]\d+)?(?:\s*[x×]\s*\d+(?:[.,]\d+)?)*(?:\s*(?:cm|mm|m²|m2|m|kg|g|l|w|v|po|pi|in|ft|lbs?)(?![\p{L}²])|\s*["″'])?/giu;
 
-const MAX_TITLE_WORDS = 10;
+// Mat 2026-11-19: "assure-toi que le titre des prochains reste court". 10 → 8: a product-type-first
+// title ("Ensemble table et 4 chaises pour enfants") says everything a shopper scans for.
+const MAX_TITLE_WORDS = 8;
 
 /** Words that read as dangling when a title is cut right after them. */
 const DANGLING = new Set([
@@ -34,7 +36,10 @@ const PLACEHOLDER = (i: number) => `\u0001${i}\u0001`;
 // from the title. Protected as ONE word, ahead of DIMENSION_RE (which would swallow the bare "4").
 const QUANTITY_SRC = String.raw`(?:lot|ensemble|paquet|jeu|s[ée]rie|set|pack)\s+(?:de|d'|of)\s*\d+(?![\d.,]*\s*(?:cm|mm|m|kg|po|pi|in|ft))`;
 const QUANTITY_ONLY_RE = new RegExp(`^${QUANTITY_SRC}$`, "iu");
-const PROTECT_RE = new RegExp(`${QUANTITY_SRC}|${DIMENSION_RE.source}`, "giu");
+// "5-8 personnes", "4 places": a capacity is ONE word too — cutting between the number and its noun left
+// "Abri de pêche sur glace pop-up 5" (held by the judge as truncated, 2026-11-19).
+const CAPACITY_SRC = String.raw`\d+(?:\s*[-–]\s*\d+)?\s+(?:personnes?|places?|pers\.?)(?![\p{L}])`;
+const PROTECT_RE = new RegExp(`${QUANTITY_SRC}|${CAPACITY_SRC}|${DIMENSION_RE.source}`, "giu");
 
 function protectDimensions(s: string): { text: string; dims: string[] } {
   const dims: string[] = [];
@@ -81,7 +86,7 @@ export function capTitleWords(title: string, max: number = MAX_TITLE_WORDS): str
   const trimTail = (list: string[]) => {
     while (list.length) {
       const last = list[list.length - 1].toLowerCase().replace(/[.,;:]+$/, "");
-      if (isSeparator(last) || DANGLING.has(last)) list.pop();
+      if (isSeparator(last) || DANGLING.has(last) || /^\d+(?:[-–]\d+)?$/.test(last)) list.pop();
       else break;
     }
     return list;
@@ -127,7 +132,8 @@ const COLOUR_WORDS = [
 // Longest first so "gris foncé" wins over "gris".
 const COLOUR_ALT = [...new Set(COLOUR_WORDS)].sort((a, b) => b.length - a.length).map((c) => c.replace(/ /g, "\\s+")).join("|");
 const TRAILING_COLOUR_RE = new RegExp(`\\s*[—–-]\\s*(?:${COLOUR_ALT})(?:\\s*(?:et|and|/|,)\\s*(?:${COLOUR_ALT}))*\\s*$`, "i");
-const INLINE_COLOUR_RE = new RegExp(`(?<![\\p{L}\\d])(?:${COLOUR_ALT})(?![\\p{L}\\d])`, "giu");
+const MIDDLE_COLOUR_RE = new RegExp(`\\s+[—–-]\\s*(?:${COLOUR_ALT})(?:\\s*(?:et|and|/|,)\\s*(?:${COLOUR_ALT}))*\\s*(?=[—–-]\\s)`, "i");
+const INLINE_COLOUR_RE =new RegExp(`(?<![\\p{L}\\d])(?:${COLOUR_ALT})(?![\\p{L}\\d])`, "giu");
 
 /**
  * Remove colour from a generated title. A trailing "— gris" segment is always removed. Colour
@@ -137,7 +143,9 @@ const INLINE_COLOUR_RE = new RegExp(`(?<![\\p{L}\\d])(?:${COLOUR_ALT})(?![\\p{L}
  * description of the thing, not a variant label.
  */
 export function stripColourFromTitle(title: string, multiColour: boolean): string {
-  let out = title.replace(TRAILING_COLOUR_RE, "");
+  // A dash-delimited colour-only segment in the MIDDLE ("… enfants — Jaune — Lot de 5") is a
+  // variant label too: the trailing rule below only sees the very end of the title.
+  let out = title.replace(MIDDLE_COLOUR_RE, " ").replace(TRAILING_COLOUR_RE, "");
   if (multiColour) out = out.replace(INLINE_COLOUR_RE, " ");
   return out.replace(/\s{2,}/g, " ").replace(/\s+([,.;:])/g, "$1").replace(/[\s—–-]+$/, "").trim();
 }
@@ -181,7 +189,22 @@ export function convertImperialInTitle(title: string, locale: "fr" | "en" = "fr"
   });
 }
 
-const IMPERIAL_RE = /\d+(?:[.,]\d+)?\s?(?:po|pi²?|ft|inch(?:es)?|in(?!\s?\d)|lbs?|oz|gal)(?![\p{L}²])|\d+(?:[.,]\d+)?\s?["″](?!\w)/giu;
+/**
+ * Metric label for a Shopify "Taille" option VALUE. Aosom writes sizes in inches / feet (`9.3" x 9.3" x 72.4"`,
+ * "6 pi"); ~40 % of imports since 2026-10-20 reached the store that way. Same conversion as titles, plus the
+ * `31.5"W x 15.7"D` form. A value that already carries a metric figure ("6 pi (183 cm)", Costway) is left alone,
+ * and so are labels with no unit ("Lot de 4", "Grand").
+ */
+export function convertImperialSize(value: string, locale: "fr" | "en" = "fr"): string {
+  if (!value || /\d\s?(?:cm|mm|m)(?![\p{L}²])/iu.test(value)) return value;
+  // A letter right after an inch mark (W/D/H/L): convert the number, keep the letter.
+  let out = value.replace(/(\d+(?:[.,]\d+)?)\s*["″]\s*([WDHL])\b/g, (_m, n: string, l: string) => `${fmt(num(n) * CM_PER_INCH, locale)} cm ${l}`);
+  // `9.3" x 9.3" x 72.4"` → `9.3 x 9.3 x 72.4"` so the whole group converts as one dimension.
+  out = out.replace(/(\d)\s*["″]\s*([x×])\s*(?=\d)/g, "$1 $2 ");
+  return convertImperialInTitle(out, locale);
+}
+
+const IMPERIAL_RE =/\d+(?:[.,]\d+)?\s?(?:po|pi²?|ft|inch(?:es)?|in(?!\s?\d)|lbs?|oz|gal)(?![\p{L}²])|\d+(?:[.,]\d+)?\s?["″](?!\w)/giu;
 const METRIC_NEAR_RE = /\d+(?:[.,]\d+)?\s?(?:cm|mm|m²|m2|m|kg|g|l|ml)(?![\p{L}])/iu;
 
 /**
@@ -198,6 +221,32 @@ export function findImperialOnly(text: string): string[] {
     out.push(m[0].trim());
   }
   return [...new Set(out)];
+}
+
+// ── Known French slips ─────────────────────────────────────────────────────────────────────
+// Misspellings / bad calques the content models keep producing and the judge then (rightly) holds the product for
+// (2026-11-19 held list: "Chemalet" for chevalet, "Caissier de classeur" for classeur, "Caissson", "méelamine", "Quinquailles").
+// Repaired in code like the title units: deterministic, high-precision, every entry is wrong in any context.
+const FR_SLIPS: Array<[RegExp, string]> = [
+  [/\bcaissiers?\s+(?:de|à|pour)\s+(classeurs?)\b/gi, "$1"],
+  [/\bcaissiers?\b/gi, "caisson"],
+  [/\bcaiss{2,}on(s?)\b/gi, "caisson$1"],
+  [/\bch[ae]m[ae]l(?:et|eau)(s|x)?\b/gi, "chevalet$1"],
+  [/\bchevelets?\b/gi, "chevalet"],
+  [/\bméelamine\b/gi, "mélamine"],
+  [/\bquinquail\p{L}*/giu, "quincaillerie"],
+];
+
+/** Fix known French misspellings in generated copy (title, description, SEO fields). Keeps the first-letter case. */
+export function repairFrenchSlips(text: string): string {
+  let out = text;
+  for (const [re, to] of FR_SLIPS) {
+    out = out.replace(re, (m: string, g1?: unknown) => {
+      const rep = to.replace("$1", typeof g1 === "string" ? g1 : "");
+      return /^[A-ZÀ-Ý]/.test(m) ? rep.charAt(0).toUpperCase() + rep.slice(1) : rep;
+    });
+  }
+  return out;
 }
 
 // ── Missing accents ─────────────────────────────────────────────────────────────────────────
@@ -232,9 +281,12 @@ export const MIN_TAGS = 6;
 export function inferPieceCount(...texts: Array<string | null | undefined>): number | null {
   for (const t of texts) {
     if (!t) continue;
+    // "Dollhouse with 8 PCS Accessories", "Play Kitchen … 12PCs Accessories": the number counts the accessories of ONE
+    // product, not products sold together — it must never become "Lot de 8" (judge held both, 2026-11-19).
+    const own = t.replace(/\b\d{1,2}[\s-]*(?:pcs?|pieces?)\s+(?:of\s+)?(?:accessor\w*|toys?|play\s*food|foods?)/gi, " ");
     const m =
-      /\b(?:set|pack|lot|bundle)\s+of\s+(\d{1,2})\b/i.exec(t) ||
-      /\b(\d{1,2})[\s-]*(?:pcs?|pieces?|pack)\b/i.exec(t);
+      /\b(?:set|pack|lot|bundle)\s+of\s+(\d{1,2})\b/i.exec(own) ||
+      /\b(\d{1,2})[\s-]*(?:pcs?|pieces?|pack)\b/i.exec(own);
     const n = m ? Number(m[1]) : NaN;
     if (n >= 2 && n <= 24) return n;
   }
@@ -255,7 +307,14 @@ export function mentionsPieceCount(text: string, n: number): boolean {
 
 /** Append "— Lot de N" / "— Set of N" when a generated title does not carry the piece count. */
 export function ensureTitlePieceCount(title: string, n: number | null, locale: "fr" | "en"): string {
+  // The model sometimes states the count twice ("Ensemble de trois haltères — Lot de 3"): the judge holds those
+  // as repetition. When the part before a trailing "— Lot de N" already carries N, the tail goes.
+  const dup = /^(.*\S)\s*[—–-]\s*(?:Lot de|Set of)\s+(\d{1,2})\s*$/iu.exec(title);
+  if (dup && /\b(?:ensemble|jeu|lot|paquet|set|pack)\s+(?:de|d'|of)\s*\p{L}*\s*\d*/iu.test(dup[1]) && mentionsPieceCount(dup[1], Number(dup[2]))) return dup[1].trim();
   if (!n || mentionsPieceCount(title, n)) return title;
+  // "Ensemble table et 4 chaises" already spells out what the set contains: a "5-piece" feed count
+  // (table + 4 chairs) must not become a false "Lot de 5" multi-pack.
+  if (/\b(?:et|avec|and|with)\s+\d{1,2}\s+(?!cm\b|mm\b|m\b|kg\b|po\b|pi\b|in\b|ft\b|lb)\p{L}{3,}/iu.test(title)) return title;
   const tail = locale === "fr" ? `Lot de ${n}` : `Set of ${n}`;
   return capTitleWords(`${title.replace(/[\s—–-]+$/, "")} — ${tail}`);
 }

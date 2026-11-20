@@ -15,7 +15,7 @@
 import { fetchAosomCatalog } from "./csv-fetcher";
 import { shopifyFetch } from "./shopify-client";
 import { ensureSchema } from "./database";
-import { buildFitDims, checkAgainstPage, extractSupplierSize, serializeFitDims, FIT_DIMS_KEY, FIT_DIMS_NAMESPACE } from "./fit-dims";
+import { buildFitDims, lengthToCm, checkAgainstPage, extractSupplierSize, serializeFitDims, FIT_DIMS_KEY, FIT_DIMS_NAMESPACE } from "./fit-dims";
 import type { FitDims } from "./fit-dims";
 import type { AosomProduct } from "@/types/aosom";
 
@@ -38,6 +38,8 @@ const costwayBodies: SupplierBodies = async (skus) => {
 };
 
 export const FIT_DIMS_MAX_WRITES_PER_RUN = 500;
+/** Circuit breaker: a feed gone wrong must not wipe every stored size in one pass; the rest waits for the next run. */
+export const FIT_DIMS_MAX_DELETES_PER_RUN = 100;
 const BATCH = 25;
 
 export interface FitDimsPlanItem {
@@ -75,7 +77,9 @@ interface ProductNode {
   id: string;
   handle: string;
   status: string;
+  title?: string;
   description: string;
+  options?: { values: string[] }[];
   variants: { nodes: { sku: string | null; title: string }[] };
   metafield: { value: string } | null;
 }
@@ -103,7 +107,7 @@ export async function syncFitDims(
   do {
     const r: { data?: { products: { nodes: ProductNode[]; pageInfo: { hasNextPage: boolean; endCursor: string } } }; errors?: { message: string }[] } = await gql(
       `query($after: String) { products(first: 100, after: $after) {
-        nodes { id handle status description variants(first: 100) { nodes { sku title } } metafield(namespace: "${FIT_DIMS_NAMESPACE}", key: "${FIT_DIMS_KEY}") { value } }
+        nodes { id handle status title description options { values } variants(first: 100) { nodes { sku title } } metafield(namespace: "${FIT_DIMS_NAMESPACE}", key: "${FIT_DIMS_KEY}") { value } }
         pageInfo { hasNextPage endCursor } } }`,
       { after: cursor },
     );
@@ -128,11 +132,23 @@ export async function syncFitDims(
       if (!p.metafield && skus.length) noFeed.push({ p, skus });
       continue;
     }
-    const built = buildFitDims(rows);
-    if (!built) { feedButNoSize++; continue; }
     // The page size can live in the description or only in a variant title ("Gris / 103 x 71 x 69 cm"); without
     // the titles, 14 feed sizes that were really inches passed as cm (2026-10-31: a 182 cm kayak shown at 72 cm).
-    const pageText = [p.description, ...p.variants.nodes.map((v) => v.title)].join("\n");
+    // The product title and option values count too: they carry "190x190x200cm" / "3x3m" and let buildFitDims
+    // re-read a feed value whose unit label is wrong (2026-11-19: a 9.1 FOOT shed labelled "9.10 in" showed 23 × 16 × 16 cm).
+    const pageText = [p.description, ...p.variants.nodes.map((v) => v.title), p.title ?? "", ...(p.options ?? []).flatMap((o) => o.values)].join("\n");
+    // Cues for the unit re-read come from the labels only (title, option values, variant titles): a description lists
+    // parts and bases ("base 13 x 13 cm") that would match a wrong reading by coincidence.
+    const labelText = [p.title ?? "", ...(p.options ?? []).flatMap((o) => o.values), ...p.variants.nodes.map((v) => v.title)].join("\n");
+    const built = buildFitDims(rows, labelText);
+    if (!built) {
+      feedButNoSize++;
+      // The feed carried a size we no longer trust: a value written earlier must not stay on the page. A feed row with NO
+      // parseable size at all (blank columns, like the lost price column of 2026-10-15) deletes nothing.
+      const hadSize = rows.some((r) => lengthToCm(r.length) != null && lengthToCm(r.width) != null && lengthToCm(r.height) != null);
+      if (p.metafield && hadSize) stale.push({ id: p.id, handle: p.handle });
+      continue;
+    }
     const dims = checkAgainstPage(built, pageText);
     if (!dims) {
       conflicts.push(p.handle);
@@ -183,8 +199,9 @@ export async function syncFitDims(
   };
   if (!opts.apply) return result;
 
-  for (let i = 0; i < stale.length; i += BATCH) {
-    const batch = stale.slice(i, i + BATCH);
+  const staleTodo = stale.slice(0, FIT_DIMS_MAX_DELETES_PER_RUN);
+  for (let i = 0; i < staleTodo.length; i += BATCH) {
+    const batch = staleTodo.slice(i, i + BATCH);
     try {
       const r = await gql<{ metafieldsDelete: { userErrors: { field: string[]; message: string }[] } }>(
         `mutation($m: [MetafieldIdentifierInput!]!) { metafieldsDelete(metafields: $m) { userErrors { field message } } }`,

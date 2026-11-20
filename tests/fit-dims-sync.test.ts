@@ -57,11 +57,21 @@ describe("syncFitDims (daily safety net)", () => {
     expect(r).toMatchObject({ toWrite: 0, unchanged: 2, written: 0 });
   });
 
-  it("checks the size in variant titles too, and removes a stored value the page contradicts", async () => {
-    // Feed says "40.6" with a cm unit but it is really inches; only the variant title states the true cm size.
+  it("re-reads a feed value whose unit label is wrong when a variant title states the true cm size", async () => {
+    // Feed says "40.6" with a cm unit but it is really inches; the variant title states the true cm size.
     const feed = async () => [feedRow("K", "40.60 cm", "28.00 cm", "27.20 cm")];
     const s = fakeShopify([
       { id: "gid://p/9", handle: "compost-bin", skus: ["K"], variantTitle: "Noir / 103 x 71 x 69 cm", current: '{"v":1,"s":{"K":{"p":[40.6,28,27.2]}}}' },
+    ]);
+    const r = await syncFitDims({ apply: true }, { feed, gql: s.gql, supplierBodies: none });
+    expect(r).toMatchObject({ toWrite: 1, written: 1, pageSizeConflict: 0, removed: 0 });
+    expect(JSON.parse(s.writes[0].value).s.K.p).toEqual([103.1, 71.1, 69.1]);
+  });
+
+  it("removes a stored value the page contradicts when no unit slip explains it", async () => {
+    const feed = async () => [feedRow("K", "40.60 cm", "28.00 cm", "27.20 cm")];
+    const s = fakeShopify([
+      { id: "gid://p/9", handle: "compost-bin", skus: ["K"], variantTitle: "Noir / 103 x 71 x 12 cm", current: '{"v":1,"s":{"K":{"p":[40.6,28,27.2]}}}' },
     ]);
     const dry = await syncFitDims({}, { feed, gql: s.gql, supplierBodies: none });
     expect(dry).toMatchObject({ toWrite: 0, pageSizeConflict: 1, staleToRemove: 1, removed: 0 });
@@ -69,6 +79,32 @@ describe("syncFitDims (daily safety net)", () => {
     expect(r.removed).toBe(1);
     expect(s.deletes.map((d) => d.ownerId)).toEqual(["gid://p/9"]);
     expect(s.writes).toEqual([]);
+  });
+
+  it('a 6x3x2m tunnel greenhouse read as 49 x 25 x 17 cm is re-read as feet', async () => {
+    const feed = async () => [feedRow("K", "19.50 in", "9.80 in", "6.90 in", "155x40x30 cm")];
+    const s = fakeShopify([
+      { id: "gid://p/7", handle: "tunnel", skus: ["K"], variantTitle: "Blanc / 6x3x2m", current: '{"v":1,"s":{"K":{"p":[49.5,24.9,17.5]}}}' },
+    ]);
+    const r = await syncFitDims({ apply: true }, { feed, gql: s.gql, supplierBodies: none });
+    expect(JSON.parse(s.writes[0].value).s.K.p.map(Math.round)).toEqual([594, 299, 210]);
+    expect(r.removed).toBe(0);
+  });
+
+  it("deletes nothing when the feed row has no parseable size at all (blank columns)", async () => {
+    const feed = async () => [feedRow("K", "", "", "")];
+    const s = fakeShopify([{ id: "gid://p/5", handle: "blank", skus: ["K"], current: '{"v":1,"s":{"K":{"p":[40,30,20]}}}' }]);
+    const r = await syncFitDims({ apply: true }, { feed, gql: s.gql, supplierBodies: none });
+    expect(r).toMatchObject({ removed: 0, staleToRemove: 0 });
+    expect(s.deletes).toEqual([]);
+  });
+
+  it("caps deletions per run", async () => {
+    const feed = async () => Array.from({ length: 130 }, (_, i) => feedRow(`D${i}`, "40.60 cm", "28.00 cm", "27.20 cm"));
+    const s = fakeShopify(Array.from({ length: 130 }, (_, i) => ({ id: `gid://p/${i}`, handle: `p${i}`, skus: [`D${i}`], variantTitle: "Noir / 103 x 71 x 12 cm", current: '{"v":1,"s":{"X":{"p":[1,1,1]}}}' })));
+    const r = await syncFitDims({ apply: true }, { feed, gql: s.gql, supplierBodies: none });
+    expect(r.removed).toBe(100);
+    expect(r.staleToRemove).toBe(130);
   });
 
   it("caps writes per run and reports the rest as deferred", async () => {

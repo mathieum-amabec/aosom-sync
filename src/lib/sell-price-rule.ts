@@ -151,8 +151,14 @@ export interface SellPriceResult {
 
 export function computeSellPrice(input: SellPriceInput): SellPriceResult {
   const { aosomPrice, cost } = input;
-  if (!Number.isFinite(aosomPrice) || aosomPrice <= 0) return { price: NaN, reason: "floor", competitorIgnored: false };
   const estimate = estimatedAosomPrice(cost);
+  if (!Number.isFinite(aosomPrice) || aosomPrice <= 0) {
+    // The feed carries no public price for ~150 SKUs (feed_price_column_lost). With our cost known they are priced like
+    // every other product — the estimate of Aosom's price, never under the profit floor — instead of going live at 0 $
+    // (2026-11-19: 10 imports sat quarantined at 0 $). No cost either: nothing to price from.
+    if (!Number.isFinite(estimate)) return { price: NaN, reason: "floor", competitorIgnored: false };
+    return withProfitFloor({ price: estimate, reason: "estimate", competitorIgnored: false }, cost);
+  }
   // Cost unknown: the frozen Aosom price, as it is.
   if (!Number.isFinite(estimate)) return { price: round2(aosomPrice), reason: "floor", competitorIgnored: false };
   const floor = floorPrice(aosomPrice);

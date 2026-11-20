@@ -182,6 +182,12 @@ describe("layer 2 — gallery analysis, cleaning and the lifestyle first photo",
     expect(c.images).toEqual(["u3", "u1", "u2", "u4", "u5", "u6"]); // u2 is lifestyle but carries text: skipped
   });
 
+  it("does not lead with a clean lifestyle CLOSE-UP: the whole product must be visible (curate-top-photos finding)", async () => {
+    const a = await analyzeGallery(urls, async () => flagsJson([{ lifestyle: false }, { lifestyle: true, whole_product: false }, { lifestyle: true, whole_product: true }, {}, {}, {}]), async () => img);
+    const c = cleanGallery(urls, a);
+    expect(c.images[0]).toBe("u3");
+  });
+
   it("keeps a clean studio photo first when no lifestyle photo exists, and avoids a first photo with text", async () => {
     const plain = cleanGallery(urls, await analyzeGallery(urls, async () => flagsJson([{}, {}, {}, {}, {}, {}]), async () => img));
     expect(plain.images[0]).toBe("u1");

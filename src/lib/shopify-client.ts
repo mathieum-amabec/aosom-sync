@@ -11,6 +11,7 @@ import { EN_FIELD_MAP, rejectEnValue, type EnTranslatableKey } from "./en-transl
 import { colourPhotoIndex, type ColourSource } from "./variant-photos";
 import { toEnglishColour } from "./colour-names";
 import { toFrenchSize } from "./size-names";
+import { convertImperialSize } from "./content-guards";
 import { buildFitDims, checkAgainstPage, serializeFitDims, FIT_DIMS_KEY, FIT_DIMS_NAMESPACE } from "./fit-dims";
 import { isInternalProduct } from "./internal-product";
 
@@ -424,7 +425,8 @@ export async function createShopifyProduct(
   // translation registered below (size-names.ts, 2026-10-02).
   const sizeEn = new Map<string, string>();
   const frSize = (raw: string) => {
-    const fr = toFrenchSize(raw);
+    // Words in French, then inches/feet in metric (Mat 2026-11-19: metric everywhere). The Aosom wording stays the EN translation.
+    const fr = convertImperialSize(toFrenchSize(raw));
     if (fr && fr !== raw) sizeEn.set(fr, raw);
     return fr;
   };
@@ -443,7 +445,9 @@ export async function createShopifyProduct(
       // Floor at the Aosom price (0% markup, never below) — same rule as the sync. See pricing.ts.
       // Fall back to the raw price if the Aosom price is invalid (effectiveSellPrice → NaN),
       // so we never emit the string "NaN" to Shopify (bad CSV data is a separate concern).
-      price: String(effectiveSellPrice(v.price, sellPriceBySku.get(v.sku)) || v.price),
+      // The feed lost its public price for ~150 SKUs (v.price = 0): then the price the rule just computed from our cost
+      // (priceNewVariants) is the price, never 0 $ (10 imports were quarantined at 0 $ on 2026-11-19).
+      price: String(effectiveSellPrice(v.price, sellPriceBySku.get(v.sku)) || (v.price > 0 ? v.price : sellPriceBySku.get(v.sku)) || v.price),
       inventory_management: null as null, // dropship — no inventory tracking
       requires_shipping: true,
       weight: v.weight,
@@ -460,8 +464,13 @@ export async function createShopifyProduct(
 
   // Only rows that carry the feed's unit strings: the bare numbers in `dimensions` lost their unit (inch/ft/cm).
   // Dropped when the generated description states a size no variant matches (fit-dims.ts checkAgainstPage).
+  // The title and size labels join the page text: they carry "190x190x200cm" and let buildFitDims re-read a feed value
+  // whose unit label is wrong (a 9.1 FOOT shed labelled "9.10 in" went live as 23 × 16 × 16 cm, 2026-11-19).
   const fitDims = checkAgainstPage(
-    buildFitDims(merged.variants.flatMap((v) => (v.dimensionsRaw ? [{ sku: v.sku, ...v.dimensionsRaw, boxSize: v.boxSize }] : []))),
+    buildFitDims(
+      merged.variants.flatMap((v) => (v.dimensionsRaw ? [{ sku: v.sku, ...v.dimensionsRaw, boxSize: v.boxSize }] : [])),
+      [content.titleFr, ...merged.variants.map((v) => v.size ?? "")].join("\n"),
+    ),
     content.descriptionFr,
   );
 
