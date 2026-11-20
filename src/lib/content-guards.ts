@@ -195,13 +195,42 @@ export function convertImperialInTitle(title: string, locale: "fr" | "en" = "fr"
  * `31.5"W x 15.7"D` form. A value that already carries a metric figure ("6 pi (183 cm)", Costway) is left alone,
  * and so are labels with no unit ("Lot de 4", "Grand").
  */
-export function convertImperialSize(value: string, locale: "fr" | "en" = "fr"): string {
-  if (!value || /\d\s?(?:cm|mm|m)(?![\p{L}²])/iu.test(value)) return value;
-  // A letter right after an inch mark (W/D/H/L): convert the number, keep the letter.
-  let out = value.replace(/(\d+(?:[.,]\d+)?)\s*["″]\s*([WDHL])\b/g, (_m, n: string, l: string) => `${fmt(num(n) * CM_PER_INCH, locale)} cm ${l}`);
-  // `9.3" x 9.3" x 72.4"` → `9.3 x 9.3 x 72.4"` so the whole group converts as one dimension.
-  out = out.replace(/(\d)\s*["″]\s*([x×])\s*(?=\d)/g, "$1 $2 ");
-  return convertImperialInTitle(out, locale);
+export function convertImperialSize(value: string, locale: "fr" | "en" = "fr", apostrophe: "in" | "ft" | null = null): string {
+  // Already metric somewhere ("6 pi (183 cm)", "(13H x 96-130L x 7Wcm)").
+  if (!value || /\d\s?(?:cm|mm|m)(?![\p{L}²])/iu.test(value) || /\d[A-Za-z]{0,2}cm\b/i.test(value)) return value;
+  // Volumes and weights are not lengths ("1,1 pi³", "50 lb"), nor is a fraction of an inch ("1/2" x 100 pi"): left to a human.
+  if (/[²³]|\b(?:pi|ft)\s?[23]\b|\b(?:gal|lbs?|oz)\b|\d\/\d/iu.test(value)) return value;
+  const s = value.replace(/[″”]|''/g, '"');
+  // number + optional unit (inch mark, po, in, pi, ft). "3 in 1" is a feature, not 3 inches.
+  const TOKEN = /(\d+(?:[.,]\d+)?)(\s*(?:"|'|pouces?(?![\p{L}])|po(?![\p{L}])|in(?![\p{L}]|\s*\d)|pieds?(?![\p{L}])|pi(?![\p{L}])|feet(?![\p{L}])|ft(?![\p{L}])))?/giu;
+  const toks = [...s.matchAll(TOKEN)].map((m) => ({ start: m.index!, end: m.index! + m[0].length, n: num(m[1]), unit: (m[2] ?? "").trim().toLowerCase(), cm: 0, own: false }));
+  // Resolve each token's unit: its own mark, else the next token's when only a separator lies between ("8 x 3 x 1 pi", "5 x 7 pi").
+  const GAP = /^\s*[WDHLwdhl]?\s*(?:[x×*]|-|–|\/)\s*(?:Dia\.?|[Φφ⌀ØФ])?\s*$/u;
+  const kind: ("in" | "ft" | null)[] = toks.map(() => null);
+  for (let i = toks.length - 1; i >= 0; i--) {
+    const u = toks[i].unit;
+    if (u === "'") { if (!apostrophe) return value; kind[i] = apostrophe; toks[i].own = true; }
+    else if (u) { kind[i] = /^(?:pi|pieds?|ft|feet)$/.test(u) ? "ft" : "in"; toks[i].own = true; }
+    else if (i + 1 < toks.length && kind[i + 1] && GAP.test(s.slice(toks[i].end, toks[i + 1].start))) kind[i] = kind[i + 1];
+  }
+  if (!toks.some((t) => t.own)) return value;
+  const cms = toks.map((t, i) => (kind[i] ? t.n * (kind[i] === "ft" ? CM_PER_FOOT : CM_PER_INCH) : NaN));
+  // A figure under half a centimetre ("0.03" D") is a thickness, not a size label worth rewriting.
+  if (cms.some((c) => Number.isFinite(c) && c < 0.5)) return value;
+  const metres = Math.max(...cms.filter(Number.isFinite)) >= 300;
+  let out = "", pos = 0;
+  toks.forEach((t, i) => {
+    out += s.slice(pos, t.start);
+    pos = t.end;
+    if (!kind[i]) { out += s.slice(t.start, t.end); return; }
+    out += metres ? fmt(cms[i] / 100, locale, 1) : fmt(cms[i], locale);
+    // The unit goes after the last figure of a chain; "cm" between two figures of one chain is dropped.
+    const next = toks[i + 1];
+    const chained = next && kind[i + 1] && /^\s*(?:[x×*]|-|–|\/)\s*$/u.test(s.slice(t.end, next.start));
+    if (t.own && !chained) out += metres ? " m" : " cm";
+    if (t.own && !chained && /^[A-Za-z]/.test(s.slice(t.end))) out += " ";
+  });
+  return (out + s.slice(pos)).replace(/(\d)\s*[x×*]\s*(?=\d)/g, "$1 x ").replace(/(\d)\s+-(?=\d)/g, "$1-");
 }
 
 const IMPERIAL_RE =/\d+(?:[.,]\d+)?\s?(?:po|pi²?|ft|inch(?:es)?|in(?!\s?\d)|lbs?|oz|gal)(?![\p{L}²])|\d+(?:[.,]\d+)?\s?["″](?!\w)/giu;

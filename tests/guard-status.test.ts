@@ -12,11 +12,13 @@ function inputs(over: Partial<GuardInputs> = {}): GuardInputs {
     priceAudit: { auditedAt: fresh, total: 3099, belowFloor: 16, corrected: 16, failed: 0, deferred: 0 },
     catalogAudit: { auditedAt: fresh, totalActive: 1374, englishDescriptions: 0, brandLeaks: 0, duplicateColorOptions: 0, issues: [] },
     feedAudit: { auditedAt: fresh, ok: true, reasons: [], logic: { items: 2519, multiItems: 1681 } },
+    leadAudit: { auditedAt: fresh, ok: true, reasons: [], products: 3500, fixable: 40, newFixable: 0, galleryLead: { lifestyle: 3000, studio: 400, unknown: 100 } },
     siteHealth: { auditedAt: fresh, ok: true, reasons: [], pages: { checked: 272 }, promoCodes: { checked: ["BIENVENUE20"], dead: [] }, searches: { tested: 7, zeroResults: [] }, funnel: { checkoutStarted: 25, placedOrder: 12 } },
     lastRuns: {
       "price-audit": { status: "success", ranAt: fresh, detail: null },
       "catalog-consistency": { status: "success", ranAt: fresh, detail: null },
       "feed-integrity": { status: "success", ranAt: fresh, detail: null },
+      "lead-photo-audit": { status: "success", ranAt: fresh, detail: null },
       "site-health": { status: "success", ranAt: fresh, detail: null },
     },
     imagesPending: 0,
@@ -27,12 +29,13 @@ function inputs(over: Partial<GuardInputs> = {}): GuardInputs {
 const byKey = (i: GuardInputs) => Object.fromEntries(evaluateGuards(i, NOW).map((g) => [g.key, g]));
 
 describe("evaluateGuards", () => {
-  it("all clean → five green guards with a summary", () => {
+  it("all clean → six green guards with a summary", () => {
     const g = byKey(inputs());
-    expect(Object.values(g).map((x) => x.state)).toEqual(["green", "green", "green", "green", "green"]);
+    expect(Object.values(g).map((x) => x.state)).toEqual(["green", "green", "green", "green", "green", "green"]);
     expect(g.price.summary).toBe("3099 prix vérifiés · 16 corrigés automatiquement");
     expect(g.catalog.summary).toBe("1374 fiches actives vérifiées");
     expect(g.feed.summary).toBe("2519 items vérifiés (1681 multi-variantes)");
+    expect(g.lead.summary).toBe("3500 produits — photo de tête lifestyle sur 3000, 40 à corriger (reliquat)");
     expect(g.site.summary).toBe("272 pages vérifiées · 1 code promo des courriels vérifiés · 7 j : 25 caisses → 12 commandes");
   });
 
@@ -70,6 +73,13 @@ describe("evaluateGuards", () => {
     const g = byKey(inputs({ feedAudit: { auditedAt: fresh, ok: false, reasons: ["le flux Google publié est vide"], logic: {} } })).feed;
     expect(g.state).toBe("red");
     expect(g.reasons).toEqual(["le flux Google publié est vide"]);
+  });
+
+  it("lead photo: the audit's own reasons (a recent import on a packshot) are red; the old backlog alone is not", () => {
+    const red = byKey(inputs({ leadAudit: { auditedAt: fresh, ok: false, reasons: ["2 produits importés depuis 14 jours ouvrent sur un fond blanc"] } })).lead;
+    expect(red.state).toBe("red");
+    expect(red.reasons).toEqual(["2 produits importés depuis 14 jours ouvrent sur un fond blanc"]);
+    expect(byKey(inputs()).lead.state).toBe("green");
   });
 
   it("a guard that stopped running (result older than 36 h) is red even if its last result was clean", () => {

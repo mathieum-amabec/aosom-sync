@@ -140,6 +140,10 @@
       "schedule": "45 9 * * *"
     },
     {
+      "path": "/api/cron/lead-photo-audit",
+      "schedule": "50 9 * * *"
+    },
+    {
       "path": "/api/cron/site-health",
       "schedule": "30 10 * * *"
     },

@@ -44,6 +44,8 @@ export interface ShopifyFeedProduct {
    * NOT published to the storefront. Such a product's /products/{handle} page 404s, so it
    * must be excluded from the feed (Google Merchant: "Product page unavailable"). */
   published_at?: string | null;
+  /** Shopify creation timestamp (ISO) — the lead-photo guard only alerts on RECENT imports. */
+  created_at?: string | null;
   images?: Array<{ id?: number | string | null; src: string }>;
   variants?: ShopifyFeedVariant[];
   /** English product title from the custom.title_en metafield. Only populated for the
@@ -764,7 +766,7 @@ export async function fetchShopifyFeedProducts(): Promise<ShopifyFeedProduct[]> 
   let pageInfo: string | null = null;
   let pages = 0;
   do {
-    const params = new URLSearchParams({ limit: "250", fields: "id,title,handle,vendor,status,product_type,body_html,images,variants,published_at,options" });
+    const params = new URLSearchParams({ limit: "250", fields: "id,title,handle,vendor,status,product_type,body_html,images,variants,published_at,created_at,options" });
     if (pageInfo) params.set("page_info", pageInfo);
     const res = await fetchWithRetry(`${base}/products.json?${params}`, token);
     if (!res.ok) throw new Error(`Shopify products fetch failed: ${res.status}`);
