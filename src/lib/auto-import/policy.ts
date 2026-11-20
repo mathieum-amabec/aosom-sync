@@ -257,7 +257,10 @@ export function buildCandidates(catalog: AosomMergedProduct[], ctx: CandidateCon
 
     let marginInfo: { margin: number; dollars: number } | null = null;
     if (rulesOn) {
-      const cheapest = [...stocked].sort((a, b) => a.price - b.price)[0];
+      // Only a variant with a known Aosom price can set the margin: an unknown price (0) is priced from cost by the rule,
+      // which would make every such group look profitable by construction.
+      const cheapest = [...stocked].filter((v) => v.price > 0).sort((a, b) => a.price - b.price)[0];
+      if (!cheapest) continue;
       const cost = ctx.costs!.get(cheapest.sku);
       if (!(typeof cost === "number" && cost > 0)) { rejected.noCost++; continue; }
       const rule = computeSellPrice({ aosomPrice: cheapest.price, productType: g.productType, cost, competitorPrice: ctx.competitor?.get(cheapest.sku.toUpperCase()) ?? null });

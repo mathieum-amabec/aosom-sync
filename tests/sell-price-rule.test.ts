@@ -93,9 +93,18 @@ describe("computeSellPrice — our estimate of Aosom's price (Mat, 2026-11-09)",
     expect(r).toMatchObject({ price: 345.88, reason: "estimate" });
     expect(netProfit(r.price, 300)).toBeGreaterThan(0);
   });
-  it("returns NaN for an invalid Aosom price", () => {
-    expect(computeSellPrice({ aosomPrice: 0, cost: 10 }).price).toBeNaN();
+  it("returns NaN for an invalid Aosom price when our cost is unknown too", () => {
+    expect(computeSellPrice({ aosomPrice: 0 }).price).toBeNaN();
     expect(computeSellPrice({ aosomPrice: NaN }).price).toBeNaN();
+  });
+  it("prices an unknown Aosom price (feed lost it) from our cost, like every other product, never at 0 $", () => {
+    // 2026-11-19: 10 imports sat quarantined at 0 $ because the feed carries no public price for ~150 SKUs.
+    const r = computeSellPrice({ aosomPrice: 0, cost: 100 });
+    expect(r).toMatchObject({ price: estimatedAosomPrice(100), reason: "estimate" });
+    expect(r.price).toBeGreaterThan(100);
+    expect(computeSellPrice({ aosomPrice: NaN, cost: 100 }).price).toBe(r.price);
+    // and never under the profit floor
+    expect(computeSellPrice({ aosomPrice: 0, cost: 1000 }).price).toBeGreaterThanOrEqual(profitFloor(1000));
   });
 });
 

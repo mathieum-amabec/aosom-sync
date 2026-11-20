@@ -26,6 +26,8 @@
  *     --max-seconds S      stop starting new products after S seconds (default 540) and print the next --start
  *     --apply              write to Shopify (+ image_checked_at, close open image_review_queue rows)
  *     --skip-done          skip products already in the checkpoint (always on with --apply)
+ *     --input FILE         JSON list [{id,handle,name,skus,demand,colors,nColors}] (default .tmp-top200/top200-live.json)
+ *     --pos1-only          only the lead photo; no per-colour variant images
  *     --report NAME        report base name in .tmp-top200/photos/ (default "report")
  *     --rollback <id|all>  restore from backup.jsonl (dry-run unless --apply): old variant images, old pos-1,
  *                          deletes ONLY images this script uploaded. Never deletes an original image.
@@ -58,7 +60,9 @@ const SKIP_DONE = flag("skip-done") || APPLY;
 const REPORT_NAME = opt("report") ?? "report";
 
 const DIR = ".tmp-top200/photos";
-const INPUT = ".tmp-top200/top200-live.json";
+const INPUT = opt("input") ?? ".tmp-top200/top200-live.json";
+/** Lead photo only: leave every colour's variant image alone (catalogue-wide pass, 2026-11-19). */
+const POS1_ONLY = flag("pos1-only");
 const BACKUP = `${DIR}/backup.jsonl`;
 const CHECKPOINT = `${DIR}/checkpoint.jsonl`;
 const STRONG_CACHE = `${DIR}/strong-confirm.jsonl`;
@@ -490,7 +494,7 @@ async function planProduct(
   const used = new Set<string>(); // image keys chosen for a colour (never the same photo for 2 colours)
   const chosen = new Map<string, ColourPlan>(); // key → colour plan using it
   const colOpt = p.options.find((o) => COLOUR_OPT.test(o.name.trim()));
-  if (colOpt && colOpt.values.length >= 2) {
+  if (colOpt && colOpt.values.length >= 2 && !POS1_ONLY) {
     const key = `option${colOpt.position}` as "option1" | "option2" | "option3";
     const byColour = new Map<string, ShopVariant[]>();
     for (const v of p.variants) {
