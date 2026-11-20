@@ -142,6 +142,16 @@ describe("buildCandidates", () => {
     expect(out.rejected.lowDemand).toBe(1);
   });
 
+  it("admits a seasonal item with no supplier demand, but still rejects a cold non-seasonal one", () => {
+    const out = buildCandidates(
+      [group("tree", { name: "Sapin de Noël artificiel 6 pi" }), group("cold")],
+      ctx({ demand: new Map([["tree-A", 0], ["cold-A", 0], ["other-A", 50]]) }),
+    );
+    expect(out.candidates.map((c) => c.groupKey)).toEqual(["tree"]);
+    expect(out.candidates[0].seasonal).toBe(true);
+    expect(out.rejected.lowDemand).toBe(1);
+  });
+
   it("does not filter on demand when the history is missing (never stops every import)", () => {
     expect(buildCandidates([group("a")], ctx()).candidates).toHaveLength(1);
     expect(buildCandidates([group("a")], ctx({ demand: new Map() })).candidates).toHaveLength(1);

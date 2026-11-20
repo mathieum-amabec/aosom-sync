@@ -250,7 +250,10 @@ export function buildCandidates(catalog: AosomMergedProduct[], ctx: CandidateCon
 
     const demand = skus.reduce((s, sku) => s + (ctx.demand?.get(sku) ?? 0), 0);
     const storeTypeSales = ctx.storeTypeSales?.get(g.productType) ?? 0;
-    if (bigSellersOnly && demand < MIN_DEMAND && storeTypeSales < MIN_STORE_TYPE_SALES) { rejected.lowDemand++; continue; }
+    // A seasonal item (Christmas run-up, winter sports) is admitted without demand: supplier stock has not moved yet because the
+    // season is only starting, so "big sellers only" would hide exactly the products the window is for (2026-11-19: 4 Christmas
+    // groups had to be imported by hand). Every other gate (stock, images, price, margin, the judge) still applies.
+    if (bigSellersOnly && !seasonal && demand < MIN_DEMAND && storeTypeSales < MIN_STORE_TYPE_SALES) { rejected.lowDemand++; continue; }
 
     // Licensed names are no longer a reason to skip: the copy is generated, then the name is stripped.
     if (LICENSED_RE.test(g.name)) flaggedLicensed.push(g.groupKey);

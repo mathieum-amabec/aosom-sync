@@ -190,6 +190,28 @@ describe("convertImperialSize — Taille option values in metric", () => {
     expect(convertImperialSize('31.5"W x 15.7"D')).toBe("80 cm W x 40 cm D");
     expect(convertImperialSize("6 pi")).toBe("183 cm");
   });
+  it("converts every figure of a chain, ranges and shared units (2026-11-20 dry-run bugs)", () => {
+    expect(convertImperialSize('Φ100.8" x 96.5"H')).toBe("Φ256 x 245 cm H");
+    expect(convertImperialSize("6*9 pi")).toBe("183 x 274 cm");
+    expect(convertImperialSize("8 x 3 x 1 pi")).toBe("244 x 91 x 30 cm");
+    expect(convertImperialSize("29''-39.8''W x 41'' H")).toBe("74-101 cm W x 104 cm H");
+    expect(convertImperialSize('26.8" L x 11.4" W x 4"/6"/8" H')).toBe("68 cm L x 29 cm W x 10/15/20 cm H");
+    expect(convertImperialSize("10 x 10 pi")).toBe("3 x 3 m");
+    expect(convertImperialSize("46\"x32.25\"x29.25\"")).toBe("117 x 82 x 74 cm");
+  });
+  it("never touches volumes, weights or '3 in 1'", () => {
+    expect(convertImperialSize("1,1 pi³")).toBe("1,1 pi³");
+    expect(convertImperialSize("50 lb")).toBe("50 lb");
+    expect(convertImperialSize("3 in 1")).toBe("3 in 1");
+    expect(convertImperialSize('1/2" x 100 pi')).toBe('1/2" x 100 pi');
+    expect(convertImperialSize('137" L x 0.03" D x 43.3" H')).toBe('137" L x 0.03" D x 43.3" H');
+    expect(convertImperialSize('5.1"H x 37.8"L (13H x 96L x 7Wcm)')).toBe('5.1"H x 37.8"L (13H x 96L x 7Wcm)');
+  });
+  it("a single apostrophe is converted only when the caller says what it means", () => {
+    expect(convertImperialSize("9' x 6'")).toBe("9' x 6'");
+    expect(convertImperialSize("9' x 6'", "fr", "ft")).toBe("274 x 183 cm");
+    expect(convertImperialSize("18.5' x 22'", "fr", "in")).toBe("47 x 56 cm");
+  });
   it("leaves metric, mixed and word labels alone", () => {
     expect(convertImperialSize("6 pi (183 cm)")).toBe("6 pi (183 cm)");
     expect(convertImperialSize("120 cm")).toBe("120 cm");

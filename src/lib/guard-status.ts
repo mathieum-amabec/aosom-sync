@@ -12,7 +12,7 @@
  */
 import { loadGuardInputs, type GuardInputs } from "./database";
 
-export type GuardKey = "price" | "catalog" | "images" | "feed" | "site";
+export type GuardKey = "price" | "catalog" | "images" | "feed" | "lead" | "site";
 /** "unknown" = never produced a result yet (e.g. a guard deployed today). Not an alert. */
 export type GuardState = "red" | "green" | "unknown";
 
@@ -123,6 +123,17 @@ export function evaluateGuards(inputs: GuardInputs, nowSecs: number): GuardStatu
     const logic = (a?.logic ?? {}) as Record<string, unknown>;
     const summary = a ? `${num(logic.items)} items vérifiés (${num(logic.multiItems)} multi-variantes)` : "";
     out.push(verdict("feed", "Flux publicitaires", checkedAt, reasons, summary, !a && reasons.length === 0));
+  }
+
+  // Lead photo of live products — see lead-photo-audit.ts; red only for a RECENT import that opens on a packshot.
+  {
+    const a = inputs.leadAudit;
+    const checkedAt = a?.auditedAt != null ? num(a.auditedAt) : null;
+    const reasons: string[] = Array.isArray(a?.reasons) ? (a!.reasons as unknown[]).map(String) : [];
+    reasons.push(...runHealth(inputs, "lead-photo-audit", checkedAt, nowSecs));
+    const g = (a?.galleryLead ?? {}) as Record<string, unknown>;
+    const summary = a ? `${num(a.products)} produits — photo de tête lifestyle sur ${num(g.lifestyle)}, ${num(a.fixable)} à corriger (reliquat)` : "";
+    out.push(verdict("lead", "Photo de tête", checkedAt, reasons, summary, !a && reasons.length === 0));
   }
 
   // Storefront + email health — see site-health.ts; like the feed audit it persists its own red reasons.

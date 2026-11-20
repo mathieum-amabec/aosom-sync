@@ -76,6 +76,7 @@ describe("loadGuardInputs", () => {
     expect(g.priceAudit).toEqual({ belowFloor: 2, failed: 1, auditedAt: 100 });
     expect(g.catalogAudit).toEqual({ duplicateColorOptions: 5, auditedAt: 200 });
     expect(g.feedAudit).toBeNull();
+    expect(g.leadAudit).toBeNull();
     expect(g.siteHealth).toEqual({ ok: true, reasons: [], auditedAt: 300 });
     expect(g.lastRuns).toEqual({
       "price-audit": { status: "success", ranAt: 20, detail: "ok" },
@@ -87,7 +88,7 @@ describe("loadGuardInputs", () => {
 
   it("returns empty inputs on a fresh database", async () => {
     const g = await mod.loadGuardInputs();
-    expect(g).toEqual({ priceAudit: null, catalogAudit: null, feedAudit: null, siteHealth: null, lastRuns: {}, imagesPending: 0, imagesOldestPendingAt: null });
+    expect(g).toEqual({ priceAudit: null, catalogAudit: null, feedAudit: null, leadAudit: null, siteHealth: null, lastRuns: {}, imagesPending: 0, imagesOldestPendingAt: null });
   });
 });
 
