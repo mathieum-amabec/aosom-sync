@@ -64,7 +64,8 @@ const INPUT = opt("input") ?? ".tmp-top200/top200-live.json";
 /** Lead photo only: leave every colour's variant image alone (catalogue-wide pass, 2026-11-19). */
 const POS1_ONLY = flag("pos1-only");
 const BACKUP = `${DIR}/backup.jsonl`;
-const CHECKPOINT = `${DIR}/checkpoint.jsonl`;
+/** `--checkpoint NAME` keeps a pass apart: the lead-photo-only pass and the per-colour pass must not skip each other's products. */
+const CHECKPOINT = `${DIR}/${opt("checkpoint") ?? "checkpoint"}.jsonl`;
 const STRONG_CACHE = `${DIR}/strong-confirm.jsonl`;
 const FULLVIEW_CACHE = `${DIR}/fullview-cache-v2.jsonl`; // v2 2026-11-19: stricter prompt (cropped / not the main subject / FX render)
 /** Durable copy of every backup line, OUTSIDE the worktree (a worktree can be removed; the originals must survive). */
