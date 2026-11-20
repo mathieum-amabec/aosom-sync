@@ -66,7 +66,7 @@ const POS1_ONLY = flag("pos1-only");
 const BACKUP = `${DIR}/backup.jsonl`;
 const CHECKPOINT = `${DIR}/checkpoint.jsonl`;
 const STRONG_CACHE = `${DIR}/strong-confirm.jsonl`;
-const FULLVIEW_CACHE = `${DIR}/fullview-cache.jsonl`;
+const FULLVIEW_CACHE = `${DIR}/fullview-cache-v2.jsonl`; // v2 2026-11-19: stricter prompt (cropped / not the main subject / FX render)
 /** Durable copy of every backup line, OUTSIDE the worktree (a worktree can be removed; the originals must survive). */
 const DURABLE_BACKUP = "C:\\Users\\vente\\Documents\\aosom-photo-backups\\backup.jsonl";
 
@@ -180,9 +180,17 @@ async function readProduct(pid: string | number): Promise<ShopProduct | null> {
 }
 
 async function download(url: string): Promise<Buffer> {
-  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
-  if (!res.ok) throw new Error(`download ${url}: ${res.status}`);
-  return Buffer.from(await res.arrayBuffer());
+  // The Shopify CDN answers 403/429 when several passes hammer it (706 lead photos came back "undetermined" on 2026-11-19):
+  // retry with a growing pause before giving up.
+  let last = 0;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    if (res.ok) return Buffer.from(await res.arrayBuffer());
+    last = res.status;
+    if (res.status !== 403 && res.status !== 429 && res.status < 500) break;
+  }
+  throw new Error(`download ${url}: ${last}`);
 }
 
 /**
@@ -327,6 +335,9 @@ fullProduct = false pour :
 - un collage, une mosaïque ou plusieurs photos juxtaposées
 - un produit à peine reconnaissable, minuscule dans le cadre, fortement coupé, caché ou masqué par d'autres objets
 - une pièce dont le produit n'est pas le sujet
+- un produit coupé par le bord du cadre (pied, toit, bord, extrémité absents) ou dont une partie importante est cachée derrière un autre meuble
+- un produit qui n'est pas le sujet principal : un salon/une terrasse complète où le produit n'occupe qu'une petite partie de l'image
+- un rendu stylisé : flou de mouvement, effets lumineux/néon, montage publicitaire
 
 Au moindre doute, réponds false.`;
 
@@ -427,7 +438,9 @@ async function firstCleanLifestyle(
     const strong = await strongOf(url);
     if (!strong) { notes.push("strong?"); continue; }
     if (!isClean(strong)) { notes.push(`overlay-strong (${strong.reason.slice(0, 40)})`); continue; }
-    if (isFeedUpload(url)) {
+    {
+      // Second opinion from the strong tier on EVERY photo about to lead (an independent review found cropped scenes and a
+      // room where the product was a minor element passing the lite check).
       const fullStrong = await fullViewOf(url, "strong");
       if (!fullStrong) { notes.push("fullview-strong?"); continue; }
       if (!fullStrong.fullProduct) { counters.fullRefusedStrong++; notes.push(`détail/produit non entier-strong (${fullStrong.reason.slice(0, 40)})`); continue; }
@@ -613,7 +626,8 @@ async function planProduct(
     const galleryUrls = gallery.slice(1).map((g) => g.src);
     const feedUrls: string[] = [];
     const seen = new Set(gallery.map((g) => L.photos.imageKey(g.src)));
-    for (const v of p.variants) for (const u of feedBySku.get(v.sku)?.images ?? []) {
+    // Default variant only: the colour it carries is the one shown first (an upload of another colour's photo changed a table from brown to white).
+    for (const v of p.variants.slice(0, 1)) for (const u of feedBySku.get(v.sku)?.images ?? []) {
       const k = L.photos.imageKey(u);
       if (k && !seen.has(k)) { seen.add(k); feedUrls.push(u); }
     }
