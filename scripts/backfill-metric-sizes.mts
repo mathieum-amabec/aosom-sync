@@ -88,13 +88,16 @@ function contradicts(label: string, metafield: string | null): boolean {
 }
 /** Convert one value; a lone apostrophe (feet on a shed, inches on a stool) is decided by the stored size. */
 function convertValue(value: string, metafield: string | null): { to: string; note?: string } {
-  if (!/ds*'(?!')/.test(value)) return { to: convertImperialSize(value) };
+  if (!/\d\s*'(?!')/.test(value)) return { to: convertImperialSize(value) };
   const asFt = convertImperialSize(value, "fr", "ft"), asIn = convertImperialSize(value, "fr", "in");
   const sizes = storedSizes(metafield);
-  const fits = (label: string) => { const cues = metricCues(label).filter((c) => c.length >= 2); return cues.length > 0 && cues.some((c) => sizes.some((s) => cueFits(c, s))); };
-  const okFt = fits(asFt), okIn = fits(asIn);
-  if (okFt && !okIn) return { to: asFt };
-  if (okIn && !okFt) return { to: asIn };
+  // A shed sold as "9' x 6'" is a nominal footprint, its outer size is bigger. The label's LARGEST figure must land on the
+  // LARGEST stored dimension of some SKU, and only the feet reading may do so (an apostrophe read as inches once turned a
+  // gazebo curtain "10' x 12'" into 25 x 30 cm because a 30 cm thickness matched).
+  const fits = (label: string) => metricCues(label).some((c) => sizes.some((s) => near(Math.max(...c), Math.max(...s))));
+  // Mixed ' and " in one label ("4' x 10' x 2\"") is left to a human.
+  if (/\d\s*"/.test(value) || /\d\s*''/.test(value)) return { to: value, note: "unités mélangées" };
+  if (fits(asFt) && !fits(asIn)) return { to: asFt };
   return { to: value, note: "apostrophe ambiguë" };
 }
 
