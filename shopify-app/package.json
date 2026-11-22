@@ -1,0 +1,12 @@
+{
+  "name": "ameublo-merci-app",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "deploy": "shopify app deploy",
+    "dev": "shopify app dev"
+  },
+  "workspaces": [
+    "extensions/*"
+  ]
+}

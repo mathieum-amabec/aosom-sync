@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Shopify app (checkout UI extension) — built by the Shopify CLI, not by Next.
+    "shopify-app/**",
   ]),
 ]);
 

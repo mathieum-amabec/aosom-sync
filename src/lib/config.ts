@@ -28,6 +28,14 @@ export const env = {
   get morningReportEmail(): string | undefined {
     return process.env.MORNING_REPORT_EMAIL?.trim() || undefined;
   },
+  /** Offre de remerciement: the "Ameublo Merci" Shopify app's client secret (signs the extension's session tokens). */
+  get merciAppSecret(): string | undefined {
+    return process.env.SHOPIFY_MERCI_APP_SECRET?.trim() || undefined;
+  },
+  /** Offre de remerciement: the "Ameublo Merci" Shopify app's client id (the session token's `aud`). */
+  get merciAppClientId(): string | undefined {
+    return process.env.SHOPIFY_MERCI_APP_CLIENT_ID?.trim() || undefined;
+  },
   get cronSecret(): string {
     const v = process.env.CRON_SECRET;
     if (!v) throw new Error("CRON_SECRET not set in .env.local");

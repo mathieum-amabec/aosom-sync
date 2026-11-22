@@ -1,0 +1,21 @@
+# "Ameublo Merci" — custom app that only carries the thank-you page block (extensions/merci-offre).
+# Distribution: CUSTOM (single store 27u5y2-kp.myshopify.com). No embedded admin UI, no webhooks.
+# client_id: paste the app's Client ID from the Shopify Dev Dashboard (also set it on Vercel as
+# SHOPIFY_MERCI_APP_CLIENT_ID; the Client secret goes to SHOPIFY_MERCI_APP_SECRET).
+client_id = "163c60e4236328197d8cf5496d35406b"
+name = "Ameublo Merci"
+application_url = "https://outils.ameublodirect.ca"
+embedded = false
+
+[build]
+automatically_update_urls_on_dev = false
+
+[access_scopes]
+# The block reads nothing through the app's own token; the backend uses the store's existing Admin token.
+scopes = ""
+
+[auth]
+redirect_urls = ["https://outils.ameublodirect.ca/api/auth/callback"]
+
+[webhooks]
+api_version = "2026-10"

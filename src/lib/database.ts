@@ -796,6 +796,38 @@ async function _initSchemaImpl(): Promise<void> {
       created_at INTEGER NOT NULL
     )`,
     `CREATE INDEX IF NOT EXISTS idx_wheel_spins_ip ON wheel_spins(ip_hash, created_at)`,
+    // Offre de remerciement (thank-you page): eligible add-on variants, rebuilt nightly by /api/cron/merci-catalog.
+    // Rows of one build share `gen`; readers take the generation named by settings `merci_catalog_gen`, so a
+    // half-written rebuild is never read. See src/lib/post-purchase/.
+    `CREATE TABLE IF NOT EXISTS merci_candidates (
+      gen INTEGER NOT NULL,
+      variant_id TEXT NOT NULL,
+      product_id TEXT NOT NULL,
+      sku TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('aosom', 'costway')),
+      handle TEXT NOT NULL,
+      title TEXT NOT NULL,
+      type TEXT NOT NULL,
+      colour TEXT,
+      price REAL NOT NULL,
+      compare_at REAL,
+      cost REAL NOT NULL,
+      image_url TEXT NOT NULL,
+      pct INTEGER NOT NULL,
+      PRIMARY KEY (gen, variant_id)
+    )`,
+    // One row per order that reached the thank-you page offer. Reserved ('pending') before any Shopify code exists so
+    // two concurrent requests cannot both create codes; expires_at is fixed once, so the timer never resets. `claim`
+    // is the reserving request's random token: only that request may finish or release the row.
+    `CREATE TABLE IF NOT EXISTS post_purchase_offers (
+      order_id TEXT PRIMARY KEY,
+      order_name TEXT,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'none')),
+      claim TEXT,
+      offers TEXT,
+      expires_at INTEGER,
+      created_at INTEGER NOT NULL
+    )`,
     // "Bientôt" teasers (Vois-le chez toi, Ameublo décorateur): anonymous interest events, no PII. visitor_hash is
     // a hash of a random id the browser keeps, so unique visitors can be counted. See src/lib/teaser.ts.
     // source = where the shopper met the teaser ("pdp" photo pill, "sheet" link inside it, "chat" assistant button),
