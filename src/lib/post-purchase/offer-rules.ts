@@ -10,8 +10,8 @@
  *   - ranking (map order, colour family, price near 30 % of the anchor),
  *   - the discount tier each candidate can afford (10 % / 5 % / none) at today's cost.
  *
- * Data findings behind the map: scratchpad reco-findings.md (2026-11-21) — 81 % of last month's orders get ≥ 2
- * good candidates with the max(50 %, 50 $) cap.
+ * Data findings behind the map: scratchpad reco-findings.md (2026-11-21). Price cap max(75 %, 75 $) since 2026-11-22:
+ * a read-only replay of the last 30 orders gave an offer to 17 of them at the old max(50 %, 50 $), 26 at 75 %/75 $.
  */
 import { netProfit } from "@/lib/sell-price-rule";
 
@@ -72,8 +72,8 @@ export const TIERS = [10, 5] as const;
 /** Candidates priced under this are skipped (the catalogue has almost nothing useful below). */
 export const MIN_CANDIDATE_PRICE = 15;
 /** The cap is max(ANCHOR_SHARE × anchor, CAP_FLOOR), and never above the anchor itself. */
-export const ANCHOR_SHARE = 0.5;
-export const CAP_FLOOR = 50;
+export const ANCHOR_SHARE = 0.75;
+export const CAP_FLOOR = 75;
 /** Sweet spot of an add-on, as a share of the anchor price. */
 export const SWEET_SPOT = 0.3;
 
