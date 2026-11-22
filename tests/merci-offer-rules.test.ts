@@ -101,9 +101,9 @@ describe("discountTier — keep ≥ max(8 $, 8 %) after the discount and card fe
 });
 
 describe("priceCap", () => {
-  it("is max(50 %, 50 $) and never above the anchor", () => {
-    expect(priceCap(300)).toBe(150);
-    expect(priceCap(80)).toBe(50);
+  it("is max(75 %, 75 $) and never above the anchor", () => {
+    expect(priceCap(300)).toBe(225);
+    expect(priceCap(80)).toBe(75);
     expect(priceCap(40)).toBe(40);
   });
 });

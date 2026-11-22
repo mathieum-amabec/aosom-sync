@@ -95,8 +95,8 @@ describe("getOrCreateOffer", () => {
     expect(out.body.offers.map((o) => [o.title, o.price, o.pct, o.discountedPrice])).toEqual([["Plateau d'accoudoir", 41.99, 5, 39.89]]);
     expect(createMerciDiscount).toHaveBeenCalledTimes(1);
     expect(createMerciDiscount).toHaveBeenCalledWith(expect.objectContaining({ variantId: "222", price: 41.99, pct: 5 }), expect.any(Date), expect.any(Date));
-    // The re-check got the anchor's price cap: max(50 % of 240.88, 50 $) = 120.44.
-    expect(vi.mocked(verifyLive).mock.calls[0][1]).toBeCloseTo(120.44, 2);
+    // The re-check got the anchor's price cap: max(75 % of 240.88, 75 $) = 180.66.
+    expect(vi.mocked(verifyLive).mock.calls[0][1]).toBeCloseTo(180.66, 2);
   });
 
   it("#2 nothing survives the live re-check → 'none', no code", async () => {
