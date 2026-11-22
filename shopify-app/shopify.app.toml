@@ -2,7 +2,7 @@
 # Distribution: CUSTOM (single store 27u5y2-kp.myshopify.com). No embedded admin UI, no webhooks.
 # client_id: paste the app's Client ID from the Shopify Dev Dashboard (also set it on Vercel as
 # SHOPIFY_MERCI_APP_CLIENT_ID; the Client secret goes to SHOPIFY_MERCI_APP_SECRET).
-client_id = "163c60e4236328197d8cf5496d35406b"
+client_id = "641861d240682e83ada749ef8afd506d"
 name = "Ameublo Merci"
 application_url = "https://outils.ameublodirect.ca"
 embedded = false
