@@ -54,7 +54,15 @@ export interface MerciPick extends MerciCandidate {
   why: string;
   /** Price after the offer's discount. */
   discountedPrice: number;
+  /**
+   * Other variants of the same product that passed every filter, best first (max SIBLINGS_KEPT). The live re-check
+   * falls back to them when the chosen variant fails (sold out, price moved, unpublished option).
+   */
+  siblings?: MerciCandidate[];
 }
+
+/** Sibling variants kept per product for the live re-check fallback. */
+export const SIBLINGS_KEPT = 2;
 
 /** Minimum profit after the offer discount and the card fees: max(8 $, 8 % of the discounted price). */
 export const MIN_PROFIT_ABS = 8;
@@ -207,14 +215,38 @@ export function outOfSeason(type: string, month: number, day = 1): boolean {
  * Never offered as an add-on: appliances (no 2-year guarantee story, returns are costly), and anything electric that
  * heats — electric fireplaces, heaters, radiators — which the fireplace rule's targets would otherwise reach.
  */
+const FIRE_AREA = /Fireplace|Fire Pits?|Firewood|Heat/i;
+/** Fireplace-area items that are accessories, not units: logs, wood racks, tools, screens, grates. */
+const FIRE_ACCESSORY = /b[ûu]ches?|outils|accessoires|r[âa]telier|porte-b[ûu]ches|support [àa] bois|range-bois|bois de chauffage|pare-[ée]tincelles|grille|log rack|firewood|\btools?\b|screen/i;
+/** Fireplace-area items that are units (electric, gas or wood): never an add-on. */
+const FIRE_UNIT = /foyer|po[êe]le|chemin[ée]e|insert|fireplace|stove/i;
+/** Signs of a powered unit: electric (accented or not), smart/Wi-Fi, LED flames, wattage. */
+const POWERED = /[ée]lectri|wi-?fi|intelligent|\bDEL\b|\bLED\b|quartz|infrarouge|\d+\s?W\b/i;
+
+/**
+ * Never offered as an add-on: appliances (costly returns), anything that heats, and fireplace units of any kind.
+ * Only fireplace ACCESSORIES (wood racks, tools, logs, screens) remain in that area.
+ */
 export function isAppliance(type: string, title: string): boolean {
   if (/Appliances|Smart Toilets|Heaters?|Electric Fireplaces?/i.test(type)) return true;
   if (/réfrigérateur|frigo|laveuse|sécheuse|congélateur|déshumidificateur|climatiseur|lave-vaisselle/i.test(title)) return true;
-  // Anything that heats, anywhere in the catalogue.
-  if (/chauffage|chauffant|heater|radiateur/i.test(title)) return true;
-  // "Électrique" alone is NOT an appliance (kids' ride-on cars, filing cabinets with outlets, lift chairs — 2026-11-21
-  // real-data check: 260 variants carried it, almost none heaters). It is excluded only in the fireplace/heating area.
-  if (/Fireplace|Fire Pits?|Firewood|Heat/i.test(type) && /électrique|electric/i.test(title)) return true;
+  // Anything that heats — but « bois de chauffage » / firewood is the wood, not a heater (wood racks must stay).
+  const heatText = title.replace(/bois de chauffage|firewood/gi, "");
+  if (/chauffage|chauffant|heater|radiateur/i.test(heatText)) return true;
+  // A fireplace sold as furniture elsewhere (« Meuble TV foyer électrique ») is still a fireplace unit.
+  if (/foyer|chemin[ée]e/i.test(title) && /[ée]lectri|encastr|flamme/i.test(title)) return true;
+  // A title that STARTS with a unit word is the unit itself (« Foyer extérieur 3-en-1 avec grille… »), whatever
+  // accessory words follow; « Ensemble d'outils pour foyer » starts otherwise and stays an accessory.
+  const startsAsUnit = /^\s*(foyer|po[êe]le|chemin[ée]e|insert|fireplace|stove)\b/i.test(title);
+  if (FIRE_AREA.test(type)) {
+    if (POWERED.test(title) || startsAsUnit) return true;
+    if (FIRE_ACCESSORY.test(title)) return false;
+    if (FIRE_UNIT.test(title)) return true;
+  } else if (/foyer|chemin[ée]e|po[êe]le [àa]/i.test(title.replace(/pour (le )?foyer/gi, "")) && !FIRE_ACCESSORY.test(title)) {
+    // Outside the fireplace area a fireplace word means furniture with a fireplace (« Meuble TV cheminée »): no.
+    return true;
+  }
+  // "Électrique" alone is NOT an appliance elsewhere (kids' ride-on cars, filing cabinets with outlets, lift chairs).
   return false;
 }
 
@@ -301,7 +333,8 @@ export function pickOffers(lines: OrderLineInput[], catalogue: MerciCandidate[],
   const anchorIsBath = /Bath/i.test(anchorType);
 
   type Scored = MerciCandidate & { score: number };
-  const best = new Map<string, Scored>();
+  // Every variant that passed, per product (a product can match several targets: keep its best score per variant).
+  const byProduct = new Map<string, Map<string, Scored>>();
   rule.targets.forEach((target, rank) => {
     for (const c of catalogue) {
       if (!(c.pct > 0)) continue;
@@ -318,18 +351,27 @@ export function pickOffers(lines: OrderLineInput[], catalogue: MerciCandidate[],
       if (!anchorIsBath && /salle de bain|anti-?bu[ée]e/i.test(c.title)) continue;
       const cf = colourFamily(c.colour);
       const score = rank * 10 + (aFam && cf && aFam === cf ? -4 : 0) + Math.abs(c.price / anchor.price - SWEET_SPOT) * 5;
-      const prev = best.get(c.productId);
-      if (!prev || score < prev.score) best.set(c.productId, { ...c, type, score });
+      const variants = byProduct.get(c.productId) ?? new Map<string, Scored>();
+      const prev = variants.get(c.variantId);
+      if (!prev || score < prev.score) variants.set(c.variantId, { ...c, type, score });
+      byProduct.set(c.productId, variants);
     }
   });
 
   const why = `Pour aller avec votre ${rule.noun}`;
-  const ranked: MerciPick[] = [...best.values()]
-    .sort((a, b) => a.score - b.score || a.price - b.price)
-    .map((x) => {
-      const { score, ...c } = x;
-      void score;
-      return { ...c, why, discountedPrice: discountedPrice(c.price, c.pct) };
+  const strip = (x: Scored): MerciCandidate => {
+    const { score, ...c } = x;
+    void score;
+    return c;
+  };
+  const byScore = (a: Scored, b: Scored) => a.score - b.score || a.price - b.price;
+  const ranked: MerciPick[] = [...byProduct.values()]
+    .map((variants) => [...variants.values()].sort(byScore))
+    .sort((a, b) => byScore(a[0], b[0]))
+    .map(([first, ...rest]) => {
+      const c = strip(first);
+      const siblings = rest.slice(0, SIBLINGS_KEPT).map(strip);
+      return { ...c, why, discountedPrice: discountedPrice(c.price, c.pct), ...(siblings.length ? { siblings } : {}) };
     });
   return { anchor, rule, picks: choosePair(ranked), ranked, pool: ranked.length };
 }

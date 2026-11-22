@@ -92,6 +92,10 @@
       "schedule": "45 10 * * *"
     },
     {
+      "path": "/api/cron/merci-catalog",
+      "schedule": "15 18 * * *"
+    },
+    {
       "path": "/api/cron/photo-insights",
       "schedule": "35 9 * * *"
     },

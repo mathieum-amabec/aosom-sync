@@ -15,7 +15,7 @@ vi.mock("@/lib/post-purchase/store", () => ({
   releaseOffer: vi.fn(),
 }));
 vi.mock("@/lib/post-purchase/discount", () => ({ createMerciDiscount: vi.fn() }));
-vi.mock("@/lib/post-purchase/live-check", () => ({ verifyLive: vi.fn() }));
+vi.mock("@/lib/post-purchase/live-check", () => ({ verifyLive: vi.fn(), withTimeout: <T,>(p: Promise<T>) => p, CALL_TIMEOUT_MS: 6000 }));
 
 import { getOrCreateOffer, checkoutUrl, OFFER_TTL_MS } from "@/lib/post-purchase/offer-service";
 import { getSetting } from "@/lib/database";

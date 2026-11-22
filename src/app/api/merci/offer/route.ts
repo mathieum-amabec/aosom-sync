@@ -19,6 +19,10 @@ import { checkRateLimit } from "@/lib/rate-limiter";
 import { clientIp } from "@/lib/client-ip";
 import { verifySessionToken } from "@/lib/post-purchase/session-token";
 import { getOrCreateOffer } from "@/lib/post-purchase/offer-service";
+import { withTimeout } from "@/lib/post-purchase/live-check";
+
+/** The whole answer must come back well inside maxDuration; past this the buyer simply gets no offer. */
+const ANSWER_DEADLINE_MS = 20_000; // not exported: route files may only export handlers + segment config
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,7 +52,10 @@ export async function POST(request: Request) {
   const auth = request.headers.get("authorization") ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7).trim() : null;
   const v = verifySessionToken(token, { secret, clientId, shopDomain: SHOPIFY.STORE });
-  if (!v.ok) return json(401, { error: "token" });
+  if (!v.ok) {
+    console.warn(`[merci] 401 token: ${v.reason}`);
+    return json(401, { error: "token" });
+  }
 
   let body: { orderId?: unknown; confirmationNumber?: unknown };
   try {
@@ -59,13 +66,18 @@ export async function POST(request: Request) {
   if (body.orderId == null) return json(400, { error: "orderId" });
 
   try {
-    const out = await getOrCreateOffer(body.orderId, {
-      sub: v.claims.sub ?? null,
-      confirmationNumber: typeof body.confirmationNumber === "string" ? body.confirmationNumber : null,
-    });
+    const out = await withTimeout(
+      getOrCreateOffer(body.orderId, {
+        sub: v.claims.sub ?? null,
+        confirmationNumber: typeof body.confirmationNumber === "string" ? body.confirmationNumber : null,
+      }),
+      ANSWER_DEADLINE_MS,
+      "answer",
+    );
     return json(out.status, out.body);
   } catch (err) {
-    console.error("[merci] offer failed:", err);
+    // Fail closed: a timeout or any error = no offer. The cause goes to the Vercel logs for QA.
+    console.error(`[merci] 500 ${String(body.orderId).slice(0, 60)}: ${err instanceof Error ? err.message : String(err)}`);
     // The extension renders nothing on any non-200: a failure never shows a broken block to the buyer.
     return json(500, { error: "failed" });
   }

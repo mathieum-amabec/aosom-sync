@@ -24,7 +24,7 @@ describe("merciDiscountInput", () => {
       endsAt: ends.toISOString(),
       customerSelection: { all: true },
       customerGets: { value: { discountAmount: { amount: "5.39", appliesOnEachItem: false } }, items: { products: { productVariantsToAdd: ["gid://shopify/ProductVariant/111"] } } },
-      minimumRequirement: { subtotal: { greaterThanOrEqualToSubtotal: "53.99" } },
+      minimumRequirement: { subtotal: { greaterThanOrEqualToSubtotal: "53.90" } },
       usageLimit: 1,
       appliesOncePerCustomer: true,
       combinesWith: { orderDiscounts: false, productDiscounts: false, shippingDiscounts: true },
@@ -34,6 +34,13 @@ describe("merciDiscountInput", () => {
     expect(() => merciDiscountInput("MERCI-X", { variantId: "1", pct: 15, price: 50, orderName: null }, now, ends)).toThrow();
     expect(() => merciDiscountInput("MERCI-X", { variantId: "1", pct: 0, price: 50, orderName: null }, now, ends)).toThrow();
     expect(() => merciDiscountInput("MERCI-X", { variantId: "1", pct: 5, price: 0, orderName: null }, now, ends)).toThrow();
+  });
+  it("N5 the minimum is amount / 10 %, not the price: a 5 % code survives a price drop of ~50 %", () => {
+    const five = merciDiscountInput("MERCI-X", { variantId: "1", pct: 5, price: 53.99, orderName: null }, now, ends);
+    expect(five.customerGets.value.discountAmount.amount).toBe("2.69");
+    expect(five.minimumRequirement.subtotal.greaterThanOrEqualToSubtotal).toBe("26.90");
+    const ten = merciDiscountInput("MERCI-X", { variantId: "1", pct: 10, price: 84.88, orderName: null }, now, ends);
+    expect(Number(ten.minimumRequirement.subtotal.greaterThanOrEqualToSubtotal)).toBeLessThanOrEqual(84.88);
   });
   it("#9 stays inside the margin guard's bound (amount / minimum subtotal = pct)", async () => {
     const { maxPerItem } = await import("@/lib/margin-guard");

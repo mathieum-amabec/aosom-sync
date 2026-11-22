@@ -7,9 +7,9 @@ vi.mock("@/lib/database", () => ({ ensureSchema: vi.fn() }));
 import { shopifyFetch } from "@/lib/shopify-client";
 import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { ensureSchema } from "@/lib/database";
-import { applyLive, verifyLive, liveCheckSet, __resetFeedCacheForTests, type LiveVariant } from "@/lib/post-purchase/live-check";
+import { applyLive, verifyLive, liveCheckSet, supplyFrom, withTimeout, type LiveVariant } from "@/lib/post-purchase/live-check";
 import { variantDisplayTitle } from "@/lib/post-purchase/catalog";
-import { callerOwnsOrder, usedMerciCode } from "@/lib/post-purchase/order";
+import { callerOwnsOrder, usedMerciCode, ownershipProblem } from "@/lib/post-purchase/order";
 import type { MerciPick } from "@/lib/post-purchase/offer-rules";
 
 const pick = (over: Partial<MerciPick>): MerciPick => ({
@@ -44,18 +44,19 @@ describe("#2 applyLive — the shown price is the live (checkout) price, re-chec
   });
 });
 
-describe("#2 verifyLive — one Shopify call, today's feed for Aosom, the table for Costway", () => {
+describe("#2 / N3 verifyLive — one Shopify call + Turso rows by SKU, never the feed", () => {
   beforeEach(() => {
     vi.mocked(shopifyFetch).mockReset();
-    __resetFeedCacheForTests();
+    vi.mocked(fetchAosomCatalog).mockReset();
   });
-  it("reads live variants and supplier cost/stock", async () => {
+  it("reads live variants, Aosom qty (catalogue cost) and Costway cost/stock — no feed download", async () => {
     vi.mocked(shopifyFetch).mockResolvedValue(new Response(JSON.stringify({ data: { nodes: [
       { id: "gid://shopify/ProductVariant/1", title: "Default Title", price: "62.00", compareAtPrice: null, image: null, product: { title: "Table", status: "ACTIVE", onlineStoreUrl: "https://x", featuredImage: { url: "https://cdn/f.jpg" } } },
       { id: "gid://shopify/ProductVariant/2", title: "Gris", price: "70.00", compareAtPrice: null, image: { url: "https://cdn/g.jpg" }, product: { title: "Miroir", status: "ACTIVE", onlineStoreUrl: "https://x", featuredImage: null } },
     ] } }), { status: 200 }));
-    vi.mocked(fetchAosomCatalog).mockResolvedValue([{ sku: "A-1", cost: 30, qty: 4 }] as never);
-    const execute = vi.fn().mockResolvedValue({ rows: [{ internal_sku: "C-2", price: 50, in_stock: 1, qty: 3, ca_qty: 3 }] });
+    const execute = vi.fn(async (q: { sql: string }) =>
+      /FROM products/.test(q.sql) ? { rows: [{ sku: "A-1", qty: 4 }] } : { rows: [{ internal_sku: "C-2", price: 50, in_stock: 1, qty: 3, ca_qty: 3 }] },
+    );
     vi.mocked(ensureSchema).mockResolvedValue({ execute } as never);
     const out = await verifyLive([pick({}), pick({ variantId: "2", productId: "p2", sku: "C-2", source: "costway" })], 120);
     expect(out.map((p) => [p.title, p.price, p.imageUrl, p.cost])).toEqual([
@@ -63,7 +64,40 @@ describe("#2 verifyLive — one Shopify call, today's feed for Aosom, the table 
       ["Miroir — Gris", 70, "https://cdn/g.jpg", 42],
     ]);
     expect(JSON.parse(String(vi.mocked(shopifyFetch).mock.calls[0][1]?.body)).variables.ids).toEqual(["gid://shopify/ProductVariant/1", "gid://shopify/ProductVariant/2"]);
-    expect(execute.mock.calls[0][0].args).toEqual(["C-2"]);
+    expect(fetchAosomCatalog).not.toHaveBeenCalled();
+    const args = execute.mock.calls.map((c) => (c[0] as unknown as { args: string[] }).args);
+    expect(args).toContainEqual(["A-1"]);
+    expect(args).toContainEqual(["C-2"]);
+  });
+  it("N3 fails closed when a call hangs (timeout rejects)", async () => {
+    await expect(withTimeout(new Promise(() => {}), 20, "hang")).rejects.toThrow(/timeout after 20 ms: hang/);
+    await expect(withTimeout(Promise.resolve(7), 20, "ok")).resolves.toBe(7);
+  });
+  it("N3 Aosom supply = catalogue cost + Turso qty; unknown SKU → null", () => {
+    const sup = supplyFrom(new Map([["A-1", 0], ["A-2", 5]]), new Map());
+    expect(sup({ sku: "A-1", source: "aosom", cost: 30 })).toEqual({ cost: 30, inStock: false });
+    expect(sup({ sku: "A-2", source: "aosom", cost: 30 })).toEqual({ cost: 30, inStock: true });
+    expect(sup({ sku: "A-9", source: "aosom", cost: 30 })).toBeNull();
+  });
+});
+
+describe("N6 sibling fallback", () => {
+  it("uses the next sibling variant when the chosen one fails live, keeping the product's rank", () => {
+    const sib = { ...pick({ variantId: "9", sku: "A-9", title: "Table — Gris" }) };
+    delete (sib as Partial<MerciPick>).why;
+    const ranked = [pick({ siblings: [sib] }), pick({ variantId: "5", productId: "p5", sku: "A-5", type: "C > D" })];
+    const liveMap = new Map([["1", live({ active: true, published: false })], ["9", live({ variantId: "9", title: "Table — Gris", price: 61 })], ["5", live({ variantId: "5", title: "Lampe" })]]);
+    const out = applyLive(ranked, 120, liveMap, () => ({ cost: 30, inStock: true }));
+    expect(out.map((p) => [p.variantId, p.title, p.why])).toEqual([["9", "Table — Gris", "w"], ["5", "Lampe", "w"]]);
+    expect(out[0].siblings).toBeUndefined();
+  });
+  it("pickOffers keeps up to 2 siblings per product", async () => {
+    const { pickOffers } = await import("@/lib/post-purchase/offer-rules");
+    const L = "Home Furnishings > Living Room Furniture";
+    const c = (v: string, price: number) => ({ variantId: v, productId: "77", sku: "S" + v, source: "aosom" as const, handle: "h", title: "T" + v, type: `${L} > Side Tables`, colour: null, price, compareAt: null, cost: 20, imageUrl: "x", pct: 10 });
+    const res = pickOffers([{ productId: "1", productType: `${L} > Sofas & Reclining Chairs`, title: "Sofa", price: 240 }], [c("1", 72), c("2", 60), c("3", 80), c("4", 90)], { now: new Date("2026-11-21T15:00:00Z") });
+    expect(res.ranked).toHaveLength(1);
+    expect(res.ranked[0].siblings?.length).toBe(2);
   });
 });
 
@@ -98,6 +132,14 @@ describe("#4 / #5 order guards", () => {
   it("an order without a confirmation number needs the logged-in buyer", () => {
     expect(callerOwnsOrder({ customerId: "gid://shopify/Customer/77", confirmationNumber: null }, {})).toBe(false);
     expect(callerOwnsOrder({ customerId: "gid://shopify/Customer/77", confirmationNumber: null }, { sub: "gid://shopify/Customer/77" })).toBe(true);
+  });
+  it("N4 says which ownership check failed (for the [merci] 403 log)", () => {
+    expect(ownershipProblem(order, {})).toBe("confirmation-missing");
+    expect(ownershipProblem(order, { confirmationNumber: "X" })).toBe("confirmation-mismatch");
+    expect(ownershipProblem(order, { confirmationNumber: "L8UWCL9KC", sub: "gid://shopify/Customer/8" })).toBe("token-customer-mismatch");
+    expect(ownershipProblem({ customerId: null, confirmationNumber: "X" }, { sub: "gid://shopify/Customer/8" })).toBe("token-customer-on-guest-order");
+    expect(ownershipProblem({ customerId: null, confirmationNumber: null }, {})).toBe("no-confirmation-and-no-token-customer");
+    expect(ownershipProblem(order, { confirmationNumber: "L8UWCL9KC" })).toBeNull();
   });
   it("detects an order paid with a MERCI code", () => {
     expect(usedMerciCode({ discountCodes: ["BIENVENUE20"] })).toBe(false);

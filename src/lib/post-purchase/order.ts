@@ -84,12 +84,23 @@ export async function fetchMerciOrder(gid: string): Promise<MerciOrder | null> {
  *   - when the token names a customer (`sub`), it must be the order's customer.
  */
 export function callerOwnsOrder(order: Pick<MerciOrder, "customerId" | "confirmationNumber">, auth: { sub?: string | null; confirmationNumber?: string | null }): boolean {
+  return ownershipProblem(order, auth) === null;
+}
+
+/** Why the caller is refused, for the logs (no PII: never the numbers themselves), or null when they own the order. */
+export function ownershipProblem(
+  order: Pick<MerciOrder, "customerId" | "confirmationNumber">,
+  auth: { sub?: string | null; confirmationNumber?: string | null },
+): string | null {
   const sub = auth.sub?.trim() || null;
-  if (sub && sub !== order.customerId) return false;
+  if (sub && !order.customerId) return "token-customer-on-guest-order";
+  if (sub && sub !== order.customerId) return "token-customer-mismatch";
   if (order.confirmationNumber) {
-    return (auth.confirmationNumber ?? "").trim().toUpperCase() === order.confirmationNumber.trim().toUpperCase();
+    const given = (auth.confirmationNumber ?? "").trim().toUpperCase();
+    if (!given) return "confirmation-missing";
+    return given === order.confirmationNumber.trim().toUpperCase() ? null : "confirmation-mismatch";
   }
-  return !!sub;
+  return sub ? null : "no-confirmation-and-no-token-customer";
 }
 
 /** An order paid with one of our own MERCI codes never gets another offer (no chain of discounts). */

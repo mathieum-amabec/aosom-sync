@@ -13,10 +13,10 @@
 import crypto from "crypto";
 import { getSetting } from "@/lib/database";
 import { pickOffers, choosePair, priceCap } from "./offer-rules";
-import { fetchMerciOrder, toOrderGid, callerOwnsOrder, usedMerciCode } from "./order";
+import { fetchMerciOrder, toOrderGid, ownershipProblem, usedMerciCode } from "./order";
 import { loadCandidates, catalogueColour, getOfferRow, reserveOffer, takeStaleReservation, finishOffer, releaseOffer, type StoredOffer, type OfferRow } from "./store";
 import { createMerciDiscount } from "./discount";
-import { verifyLive } from "./live-check";
+import { verifyLive, withTimeout, CALL_TIMEOUT_MS } from "./live-check";
 
 export const OFFER_TTL_MS = 30 * 60_000;
 /** Only orders this fresh get an offer (the page is shown right after payment; reloads later show nothing new). */
@@ -93,9 +93,17 @@ export async function getOrCreateOffer(rawOrderId: unknown, auth: CallerAuth = {
   if (!enabled && testers.size === 0) return EMPTY;
 
   // Always re-read the order, even for a reload: it is what binds the request to the buyer.
-  const order = await fetchMerciOrder(gid);
-  if (!order) return { status: 202, body: { pending: true } };
-  if (!callerOwnsOrder(order, auth)) return { status: 403, body: { error: "order" } };
+  const order = await withTimeout(fetchMerciOrder(gid), CALL_TIMEOUT_MS, "shopify order");
+  if (!order) {
+    console.info(`[merci] 202 ${gid}: order not created yet`);
+    return { status: 202, body: { pending: true } };
+  }
+  const problem = ownershipProblem(order, auth);
+  if (problem) {
+    // QA diagnosis from Vercel logs (no PII: only which check failed and what was present).
+    console.warn(`[merci] 403 ${order.name}: ${problem} (number given: ${!!auth.confirmationNumber}, order has number: ${!!order.confirmationNumber}, token customer: ${!!auth.sub}, order customer: ${!!order.customerId})`);
+    return { status: 403, body: { error: "order" } };
+  }
   if (!enabled && !testers.has((order.email ?? "").toLowerCase())) return EMPTY;
   if (usedMerciCode(order)) return EMPTY;
 
@@ -122,28 +130,36 @@ export async function getOrCreateOffer(rawOrderId: unknown, auth: CallerAuth = {
   };
 
   try {
-    const catalogue = await loadCandidates();
+    const catalogue = await withTimeout(loadCandidates(), CALL_TIMEOUT_MS, "turso catalogue");
     const anchorPid = [...order.lines].sort((a, b) => b.price - a.price)[0]?.productId ?? null;
-    const anchorColour = anchorPid ? await catalogueColour(anchorPid) : null;
+    const anchorColour = anchorPid ? await withTimeout(catalogueColour(anchorPid), CALL_TIMEOUT_MS, "turso colour") : null;
     const { anchor, ranked } = pickOffers(order.lines, catalogue, { now: new Date(nowMs), anchorColour });
-    const verified = anchor && ranked.length ? await verifyLive(ranked, priceCap(anchor.price), nowMs) : [];
+    const verified = anchor && ranked.length ? await verifyLive(ranked, priceCap(anchor.price)) : [];
     const picks = choosePair(verified);
-    if (!picks.length) return (await settle("none", [], null)) ?? EMPTY;
+    if (!picks.length) {
+      console.info(`[merci] ${order.name}: no offer (ranked ${ranked.length}, verified ${verified.length})`);
+      return (await settle("none", [], null)) ?? EMPTY;
+    }
 
     const now = new Date(nowMs);
     const endsAt = new Date(nowMs + OFFER_TTL_MS);
+    // Both codes in parallel, each with a hard timeout (a slow one is dropped; if it was created anyway it expires
+    // unused and the nightly cleanup deletes it).
+    const results = await Promise.allSettled(
+      picks.map((p) => withTimeout(createMerciDiscount({ variantId: p.variantId, pct: p.pct, price: p.price, orderName: order.name }, now, endsAt), CALL_TIMEOUT_MS, `code ${p.variantId}`)),
+    );
     const stored: StoredOffer[] = [];
-    for (const p of picks) {
-      try {
-        const { code, discountId } = await createMerciDiscount({ variantId: p.variantId, pct: p.pct, price: p.price, orderName: order.name }, now, endsAt);
-        stored.push({
-          title: p.title, imageUrl: p.imageUrl, handle: p.handle, variantId: p.variantId, price: p.price, compareAt: p.compareAt,
-          discountedPrice: p.discountedPrice, pct: p.pct, why: p.why, code, discountId,
-        });
-      } catch (err) {
-        console.error(`[merci] code creation failed for ${order.name} variant ${p.variantId}: ${err}`);
+    results.forEach((r, i) => {
+      const p = picks[i];
+      if (r.status === "rejected") {
+        console.error(`[merci] code creation failed for ${order.name} variant ${p.variantId}: ${r.reason}`);
+        return;
       }
-    }
+      stored.push({
+        title: p.title, imageUrl: p.imageUrl, handle: p.handle, variantId: p.variantId, price: p.price, compareAt: p.compareAt,
+        discountedPrice: p.discountedPrice, pct: p.pct, why: p.why, code: r.value.code, discountId: r.value.discountId,
+      });
+    });
     if (!stored.length) {
       await releaseOffer(gid, claim);
       return { status: 502, body: { error: "code" } };

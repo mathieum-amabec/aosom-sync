@@ -196,6 +196,24 @@ describe("review fixes 2026-11-21", () => {
     expect(pickOffers([fire], [heater, rack], { now: NOV }).picks.map((p) => p.title)).toEqual(["Râtelier à bûches"]);
   });
 
+  it("N1 firewood racks « bois de chauffage » stay; heaters still go", () => {
+    const FP = "Home Furnishings > Home Décor > Fireplaces & Accessories";
+    expect(isAppliance(FP, "Support à bois de chauffage avec outils")).toBe(false);
+    expect(isAppliance("Patio & Garden > Firewood Racks", "Râtelier pour bois de chauffage extérieur")).toBe(false);
+    expect(isAppliance(FP, "Chauffage d'appoint céramique")).toBe(true);
+  });
+
+  it("N2 no fireplace unit of any kind (electric unaccented, smart, LED, TV-stand fireplaces), accessories allowed", () => {
+    const FP = "Home Furnishings > Home Décor > Fireplaces & Accessories";
+    for (const t of ["Foyer encastrable Wi-Fi intelligent 58 cm", "Meuble TV foyer encastré lumières DEL", "Foyer electrique encastrable a quartz", "Poêle à bois en fonte", "Insert de cheminée 1500 W"]) {
+      expect(isAppliance(FP, t)).toBe(true);
+    }
+    expect(isAppliance("Home Furnishings > Living Room Furniture > TV Stands", "Meuble TV avec foyer électrique 1400W")).toBe(true);
+    for (const t of ["Pare-étincelles 3 panneaux", "Ensemble d'outils de foyer 5 pièces", "Porte-bûches en métal", "Grille de foyer en fonte"]) {
+      expect(isAppliance(FP, t)).toBe(false);
+    }
+  });
+
   it("#11 Christmas items stop after December 15 (Montréal time)", () => {
     expect(outOfSeason(TREE, 12, 15)).toBe(false);
     expect(outOfSeason(TREE, 12, 16)).toBe(true);
@@ -214,5 +232,14 @@ describe("review fixes 2026-11-21", () => {
     expect(choosePair([])).toEqual([]);
     const res = pickOffers([sofa], [cand({ price: 53 }), cand({ price: 54 }), cand({ type: L, price: 40 })], { now: NOV });
     expect(res.ranked.length).toBe(3);
+  });
+});
+
+describe("N2 follow-up: units by title start, fireplace furniture", () => {
+  it("a title starting with a unit word is a unit even with accessory words; fireplace TV stands are blocked", () => {
+    expect(isAppliance("Patio & Garden > Fire Pits", "Foyer extérieur 3-en-1 avec grille et couvercle")).toBe(true);
+    expect(isAppliance("Home Furnishings > Home Décor > Fireplaces & Accessories", "Ensemble d'outils pour foyer — Lot de 5")).toBe(false);
+    expect(isAppliance("Home Furnishings > Living Room Furniture > TV Stands", "Meuble TV cheminée pour téléviseur 152 cm")).toBe(true);
+    expect(isAppliance("Home Furnishings > Storage & Organization", "Organisateur pratique pour le foyer")).toBe(false);
   });
 });

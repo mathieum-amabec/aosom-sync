@@ -1,22 +1,34 @@
 /**
  * Offre de remerciement — re-check the chosen candidates LIVE before any code is created.
  *
- * The catalogue is built once a day; prices, publication, stock and Aosom costs can move in between (Aosom raised
- * costs intra-day on 2026-11-09). So at offer time, for the best candidates in rank order:
+ * The catalogue is rebuilt twice a day (after the 10:30 and 18:00 UTC feed refreshes) with today's Aosom cost; prices,
+ * publication and stock can move in between. At offer time, for a handful of candidates (and up to 2 sibling variants
+ * of each, used when the chosen variant fails):
  *   - Shopify, live: variant price + compare-at, product ACTIVE and published on the Online Store, variant title/photo;
- *   - today's cost and stock: Aosom feed (newest Blob/CDN copy, cached in memory 20 min), Costway table row;
+ *   - stock and cost from Turso rows by SKU only (Aosom `products.qty`, kept fresh by the sync, with the catalogue's
+ *     cost; Costway `costway_products` row) — the request path NEVER downloads the Aosom feed;
  *   - the tier is recomputed with the same max(8 $, 8 %) floor, and the price cap re-applied.
- * A candidate failing any of it is dropped. The price shown is the live Shopify price, i.e. the checkout price.
+ * Every external call has a hard timeout; anything failing or slow means no offer (fail closed).
  */
 import { shopifyFetch } from "@/lib/shopify-client";
 import { ensureSchema } from "@/lib/database";
-import { fetchAosomCatalog } from "@/lib/csv-fetcher";
 import { costOf } from "@/lib/costway/pricing";
-import { discountTier, discountedPrice, MIN_CANDIDATE_PRICE, type MerciPick } from "./offer-rules";
+import { discountTier, discountedPrice, MIN_CANDIDATE_PRICE, type MerciCandidate, type MerciPick } from "./offer-rules";
 import { variantDisplayTitle } from "./catalog";
 
-/** How many ranked candidates are re-checked at most (one Shopify call, one feed lookup). */
+/** How many ranked products are re-checked at most (one Shopify call, ≤ 2 Turso reads). */
 export const MAX_LIVE_CHECK = 8;
+/** Hard ceiling for each external call made while answering the Thank you page. */
+export const CALL_TIMEOUT_MS = 6_000;
+
+/** Reject after `ms` — the caller treats it like any failure (no offer). */
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const t = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`[merci] timeout after ${ms} ms: ${label}`)), ms);
+  });
+  return Promise.race([p, t]).finally(() => clearTimeout(timer));
+}
 
 export interface LiveVariant {
   variantId: string;
@@ -33,34 +45,53 @@ export interface LiveSupply {
   inStock: boolean;
 }
 
-/** Pure: apply live data to ranked candidates; keeps the ones that still pass, in the same order. */
+/**
+ * Pure: apply live data to ranked candidates; keeps the ones that still pass, in the same order. When the chosen
+ * variant fails, its siblings are tried in order and the first that passes takes its place.
+ */
 export function applyLive(
   ranked: MerciPick[],
   cap: number,
   live: ReadonlyMap<string, LiveVariant>,
-  supply: (c: Pick<MerciPick, "sku" | "source">) => LiveSupply | null,
+  supply: (c: Pick<MerciCandidate, "sku" | "source" | "cost">) => LiveSupply | null,
 ): MerciPick[] {
   const out: MerciPick[] = [];
   for (const c of ranked) {
-    const v = live.get(c.variantId);
-    if (!v || !v.active || !v.published) continue;
-    if (!(v.price >= MIN_CANDIDATE_PRICE) || v.price > cap) continue;
-    const s = supply(c);
-    if (!s || !s.inStock) continue;
-    const pct = discountTier(v.price, s.cost);
-    if (!pct) continue;
-    out.push({
-      ...c,
-      title: v.title || c.title,
-      imageUrl: v.imageUrl || c.imageUrl,
-      price: v.price,
-      compareAt: v.compareAt != null && v.compareAt > v.price ? v.compareAt : null,
-      cost: s.cost,
-      pct,
-      discountedPrice: discountedPrice(v.price, pct),
-    });
+    for (const v of [c, ...(c.siblings ?? [])]) {
+      const ok = check(v, cap, live, supply);
+      if (!ok) continue;
+      const { siblings, ...base } = c;
+      void siblings;
+      out.push({ ...base, ...ok });
+      break;
+    }
   }
   return out;
+}
+
+function check(
+  c: MerciCandidate,
+  cap: number,
+  live: ReadonlyMap<string, LiveVariant>,
+  supply: (c: Pick<MerciCandidate, "sku" | "source" | "cost">) => LiveSupply | null,
+): (MerciCandidate & { discountedPrice: number }) | null {
+  const v = live.get(c.variantId);
+  if (!v || !v.active || !v.published) return null;
+  if (!(v.price >= MIN_CANDIDATE_PRICE) || v.price > cap) return null;
+  const s = supply(c);
+  if (!s || !s.inStock) return null;
+  const pct = discountTier(v.price, s.cost);
+  if (!pct) return null;
+  return {
+    ...c,
+    title: v.title || c.title,
+    imageUrl: v.imageUrl || c.imageUrl,
+    price: v.price,
+    compareAt: v.compareAt != null && v.compareAt > v.price ? v.compareAt : null,
+    cost: s.cost,
+    pct,
+    discountedPrice: discountedPrice(v.price, pct),
+  };
 }
 
 const LIVE_QUERY = `query merciLive($ids: [ID!]!) {
@@ -103,26 +134,18 @@ export async function fetchLiveVariants(variantIds: string[]): Promise<Map<strin
   return out;
 }
 
-// Aosom feed parsed into sku → cost/qty, kept in memory between requests on a warm instance.
-const FEED_TTL_MS = 20 * 60_000;
-let feedCache: { at: number; map: Map<string, LiveSupply> } | null = null;
-
-async function aosomSupply(nowMs: number): Promise<Map<string, LiveSupply>> {
-  if (feedCache && nowMs - feedCache.at < FEED_TTL_MS) return feedCache.map;
-  const map = new Map<string, LiveSupply>();
-  for (const p of await fetchAosomCatalog()) {
-    if (typeof p.cost === "number" && p.cost > 0) map.set(p.sku, { cost: p.cost, inStock: p.qty > 0 });
-  }
-  feedCache = { at: nowMs, map };
+/** Aosom stock by SKU from Turso (the sync keeps `products.qty` fresh). Cost stays the catalogue's (feed of the day). */
+export async function aosomStock(skus: string[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (!skus.length) return map;
+  const db = await ensureSchema();
+  const r = await db.execute({ sql: `SELECT sku, qty FROM products WHERE sku IN (${skus.map(() => "?").join(", ")})`, args: skus });
+  for (const row of r.rows) map.set(String(row.sku), Number(row.qty));
   return map;
 }
 
-/** Test-only: forget the cached feed. */
-export function __resetFeedCacheForTests(): void {
-  feedCache = null;
-}
-
-async function costwaySupply(skus: string[]): Promise<Map<string, LiveSupply>> {
+/** Costway cost and stock by internal SKU from its table (the Costway sync keeps it fresh). */
+export async function costwaySupply(skus: string[]): Promise<Map<string, LiveSupply>> {
   const map = new Map<string, LiveSupply>();
   if (!skus.length) return map;
   const db = await ensureSchema();
@@ -137,6 +160,15 @@ async function costwaySupply(skus: string[]): Promise<Map<string, LiveSupply>> {
     map.set(String(row.internal_sku), { cost: costOf(price), inStock: ca != null ? ca > 0 : Number(row.in_stock) === 1 && Number(row.qty) > 0 });
   }
   return map;
+}
+
+/** Supply lookup from the two Turso maps: Aosom = catalogue cost + fresh qty; Costway = its row. */
+export function supplyFrom(stock: ReadonlyMap<string, number>, costway: ReadonlyMap<string, LiveSupply>) {
+  return (c: Pick<MerciCandidate, "sku" | "source" | "cost">): LiveSupply | null => {
+    if (c.source === "costway") return costway.get(c.sku) ?? null;
+    const qty = stock.get(c.sku);
+    return qty == null ? null : { cost: c.cost, inStock: qty > 0 };
+  };
 }
 
 /**
@@ -160,15 +192,15 @@ export function liveCheckSet<T extends { type: string }>(ranked: T[], max = MAX_
   return out;
 }
 
-/** Re-check the best candidates (see liveCheckSet) against live Shopify and today's cost/stock. */
-export async function verifyLive(ranked: MerciPick[], cap: number, nowMs = Date.now()): Promise<MerciPick[]> {
+/** Re-check the best candidates (see liveCheckSet) and their siblings against live Shopify and Turso stock/cost. */
+export async function verifyLive(ranked: MerciPick[], cap: number): Promise<MerciPick[]> {
   const head = liveCheckSet(ranked);
   if (!head.length) return [];
-  const needAosom = head.some((c) => c.source === "aosom");
-  const [live, aosom, costway] = await Promise.all([
-    fetchLiveVariants(head.map((c) => c.variantId)),
-    needAosom ? aosomSupply(nowMs) : Promise.resolve(new Map<string, LiveSupply>()),
-    costwaySupply(head.filter((c) => c.source === "costway").map((c) => c.sku)),
+  const all: MerciCandidate[] = head.flatMap((c) => [c, ...(c.siblings ?? [])]);
+  const [live, stock, costway] = await Promise.all([
+    withTimeout(fetchLiveVariants(all.map((c) => c.variantId)), CALL_TIMEOUT_MS, "shopify live variants"),
+    withTimeout(aosomStock(all.filter((c) => c.source === "aosom").map((c) => c.sku)), CALL_TIMEOUT_MS, "turso aosom stock"),
+    withTimeout(costwaySupply(all.filter((c) => c.source === "costway").map((c) => c.sku)), CALL_TIMEOUT_MS, "turso costway supply"),
   ]);
-  return applyLive(head, cap, live, (c) => (c.source === "costway" ? costway.get(c.sku) : aosom.get(c.sku)) ?? null);
+  return applyLive(head, cap, live, supplyFrom(stock, costway));
 }

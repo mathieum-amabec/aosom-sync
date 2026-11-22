@@ -19,9 +19,20 @@ export function generateMerciCode(): string {
 
 /**
  * The offer is "X % on ONE article". A percentage code would take X % off every unit of the variant in the cart, so the
- * code is a fixed amount (price × X %) taken ONCE per order (appliesOnEachItem: false) on that variant only, with a
- * minimum subtotal of the variant's price — amount / minimum = X %, which keeps the margin guard's bound ≤ MAX_DISCOUNT.
+ * code is a fixed amount (price × X %, rounded down) taken ONCE per order (appliesOnEachItem: false) on that variant only.
+ *
+ * Minimum subtotal = amount / MAX_DISCOUNT: the LOWEST minimum the margin guard still bounds at ≤ 10 % (it reads a fixed
+ * amount as amount / minimum). Not the price, so a price drop during the 30 minutes does not void the code:
+ *   - 5 % offers: minimum ≈ half the price → the price can fall ~50 % and the code still works;
+ *   - 10 % offers: minimum = 10 × amount ≤ price (a few cents of slack only) — a 10 % code cannot have more room
+ *     without breaking the guard's bound; prices move at most hourly (price-reconcile), so this is rare, and the
+ *     buyer then pays the new lower price without the code. Never below the amount itself.
  */
+/** Lowest minimum subtotal keeping amount / minimum ≤ MAX_DISCOUNT (to the cent, rounded up). */
+export function minimumFor(amount: number): number {
+  return Math.max(amount, Math.ceil((amount / MAX_DISCOUNT) * 100 - 1e-6) / 100);
+}
+
 export function merciDiscountInput(code: string, v: { variantId: string; pct: number; price: number; orderName: string | null }, now: Date, endsAt: Date) {
   if (!(v.pct > 0) || v.pct / 100 > MAX_DISCOUNT + 1e-9) throw new Error(`merci: ${v.pct} % exceeds MAX_DISCOUNT`);
   if (!(v.price > 0)) throw new Error("merci: price required");
@@ -37,7 +48,7 @@ export function merciDiscountInput(code: string, v: { variantId: string; pct: nu
       value: { discountAmount: { amount: amount.toFixed(2), appliesOnEachItem: false } },
       items: { products: { productVariantsToAdd: [`gid://shopify/ProductVariant/${v.variantId}`] } },
     },
-    minimumRequirement: { subtotal: { greaterThanOrEqualToSubtotal: v.price.toFixed(2) } },
+    minimumRequirement: { subtotal: { greaterThanOrEqualToSubtotal: minimumFor(amount).toFixed(2) } },
     usageLimit: 1,
     appliesOncePerCustomer: true,
     combinesWith: { orderDiscounts: false, productDiscounts: false, shippingDiscounts: true },

@@ -542,23 +542,27 @@ App Store apps may use it (custom apps need Plus) — see the 2026-11-21 analysi
   (armchair → side table/arm tray/lamp/rug, buffet → trash can/kitchen cart, tree → wreath/lit decor…); never the
   same product type as anything in the order (head-noun guard: no 2nd table/tree/sofa — title targets « ~… » only
   widen matching, they never lift these guards); never appliances nor anything that heats (« chauffage/chauffant/
-  radiateur/heater » anywhere; « électrique » in the fireplace/heating area — not elsewhere: kids' cars, filing cabinets
-  with outlets etc. are not appliances); seasons (Halloween Sep–Oct, Christmas Nov 1 – Dec 15, summer patio blocked Oct–Mar
+  radiateur/heater » anywhere, except « bois de chauffage »); no fireplace unit of any kind: in the fireplace area only
+  accessories pass (racks, tools, logs, screens, grates) — anything powered ([ée]lectri, Wi-Fi, DEL/LED, quartz, watts)
+  or whose title starts with foyer/poêle/cheminée/insert is out, and fireplace furniture elsewhere (« Meuble TV
+  cheminée / foyer électrique ») is out. « Électrique » alone elsewhere (kids' cars, filing cabinets) is fine.; seasons (Halloween Sep–Oct, Christmas Nov 1 – Dec 15, summer patio blocked Oct–Mar
   except covers/deck boxes/shovels); price
   ≤ max(50 % of the anchor, 50 $) and ≤ the anchor, ≥ 15 $; ranking = map order, colour family, price near 30 %.
   No good candidate → nothing is shown (never a weak pick).
 - **Discount = what the margin allows, per variant, at today's cost:** 10 % if we keep ≥ max(8 $, 8 %) after it and
   the card fees, else 5 % with the same test, else the variant is not offered. Deep "−40 %" Aosom items are mostly
   excluded by this (they sit at ~1.17 × cost). Codes never exceed MAX_DISCOUNT, so the margin guard stays green.
-- **Catalogue:** `GET /api/cron/merci-catalog` (daily 10:45 UTC, after sell-price-sync and compare-at-sync; `?dry=1`
+- **Catalogue:** `GET /api/cron/merci-catalog` (10:45 and 18:15 UTC, after the feed refreshes; `?dry=1`
   writes nothing) rebuilds table `merci_candidates` (generation in `settings.merci_catalog_gen`): ACTIVE + published
   + photo + in stock (Aosom: today's feed qty and cost, `image_checked_at`, no open image review; Costway:
   `ca_qty`, `costOf(price)`). Each variant carries its own photo and its option values in the title. Same run
   deletes MERCI codes that ended > 2 days ago. `?dry=1` does not even write the cron_runs row.
-- **Live re-check at offer time** (`live-check.ts`): the catalogue is up to 24 h old, so 8 candidates (best 4 of the
-  top type + best 4 of other types, so an alternative survives) are re-read before any code: Shopify live price/compare-at, product ACTIVE + published on the Online Store; today's
-  cost/stock (Aosom feed, cached 20 min per instance; Costway row); tier recomputed with the same floor; cap
-  re-applied. Failing candidates are dropped. The price shown = the live Shopify price = what checkout charges.
+- **Live re-check at offer time** (`live-check.ts`): 8 products (best 4 of the top type + best 4 of other types) and
+  up to 2 sibling variants each (fallback when the chosen variant fails) are re-read before any code: Shopify live
+  price/compare-at, ACTIVE + published; stock from Turso rows by SKU (Aosom `products.qty`, kept fresh by the sync,
+  with the catalogue's cost of the day; Costway row with its cost). **The request path never downloads the Aosom
+  feed.** Tier recomputed with the same floor, cap re-applied. Every external call has a 6 s timeout and the whole
+  answer a 20 s deadline: slow or failing = no offer (fail closed). The price shown = the checkout price.
 - **API:** `POST /api/merci/offer` (public path; CORS `*` because extensions run in a Web Worker; the gate is the
   session token — HS256 JWT signed with the app secret, `aud` = client id, `dest` = our store; `maxDuration` 30 s).
   Body `{orderId, confirmationNumber}` from `shopify.orderConfirmation`. The order is re-read via the Admin API on
@@ -568,8 +572,11 @@ App Store apps may use it (custom apps need Plus) — see the 2026-11-21 analysi
   row per order, reserved under a random `claim` before any code exists; only the claim owner may finish/release
   it, so a superseded request can never overwrite the expiry — **expiry fixed once → the timer never resets**. One
   unique `MERCI-XXXXXXX` code per offered variant: a fixed amount (price × pct, rounded down to the cent) taken ONCE
-  per order on that variant only, minimum subtotal = its price (so the margin guard bounds it at pct), usageLimit 1,
+  per order on that variant only, minimum subtotal = amount / 10 % (the lowest the margin guard still bounds at
+  ≤ 10 %: a 5 % code survives a ~50 % price drop; a 10 % code has only cents of slack), usageLimit 1,
   once per customer, combines with shipping only, ends with the offer. Link quantity is 1.
+- **Logs (QA):** `[merci] 403 #1150: confirmation-mismatch (…)` (which ownership check failed, no PII), `[merci] 202`,
+  `[merci] 401 token: <reason>`, `[merci] 500 …: <cause>` (timeouts included), `[merci] #1150: no offer (ranked n, verified n)`.
 - **Settings:** `merci_offer_enabled` = "1" → everyone (default OFF). `merci_offer_test_emails` (comma list) → those
   order emails get it while OFF (QA on real orders).
 - **Env (Vercel):** `SHOPIFY_MERCI_APP_SECRET` (app Client secret), `SHOPIFY_MERCI_APP_CLIENT_ID`. Missing → 503 and
