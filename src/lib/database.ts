@@ -803,6 +803,8 @@ async function _initSchemaImpl(): Promise<void> {
       gen INTEGER NOT NULL,
       variant_id TEXT NOT NULL,
       product_id TEXT NOT NULL,
+      sku TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('aosom', 'costway')),
       handle TEXT NOT NULL,
       title TEXT NOT NULL,
       type TEXT NOT NULL,
@@ -815,11 +817,13 @@ async function _initSchemaImpl(): Promise<void> {
       PRIMARY KEY (gen, variant_id)
     )`,
     // One row per order that reached the thank-you page offer. Reserved ('pending') before any Shopify code exists so
-    // two concurrent requests cannot both create codes; expires_at is fixed once, so the timer never resets.
+    // two concurrent requests cannot both create codes; expires_at is fixed once, so the timer never resets. `claim`
+    // is the reserving request's random token: only that request may finish or release the row.
     `CREATE TABLE IF NOT EXISTS post_purchase_offers (
       order_id TEXT PRIMARY KEY,
       order_name TEXT,
       status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'none')),
+      claim TEXT,
       offers TEXT,
       expires_at INTEGER,
       created_at INTEGER NOT NULL

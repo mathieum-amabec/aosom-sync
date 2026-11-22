@@ -540,8 +540,11 @@ App Store apps may use it (custom apps need Plus) — see the 2026-11-21 analysi
 
 - **Rules** (`src/lib/post-purchase/offer-rules.ts`, pure): anchor = most expensive line; hand-written category map
   (armchair → side table/arm tray/lamp/rug, buffet → trash can/kitchen cart, tree → wreath/lit decor…); never the
-  same product type as anything in the order (head-noun guard: no 2nd table/tree/sofa); never appliances; seasons
-  (Halloween Sep–Oct, Christmas Nov–Dec, summer patio blocked Oct–Mar except covers/deck boxes/shovels); price
+  same product type as anything in the order (head-noun guard: no 2nd table/tree/sofa — title targets « ~… » only
+  widen matching, they never lift these guards); never appliances nor anything that heats (« chauffage/chauffant/
+  radiateur/heater » anywhere; « électrique » in the fireplace/heating area — not elsewhere: kids' cars, filing cabinets
+  with outlets etc. are not appliances); seasons (Halloween Sep–Oct, Christmas Nov 1 – Dec 15, summer patio blocked Oct–Mar
+  except covers/deck boxes/shovels); price
   ≤ max(50 % of the anchor, 50 $) and ≤ the anchor, ≥ 15 $; ranking = map order, colour family, price near 30 %.
   No good candidate → nothing is shown (never a weak pick).
 - **Discount = what the margin allows, per variant, at today's cost:** 10 % if we keep ≥ max(8 $, 8 %) after it and
@@ -550,22 +553,33 @@ App Store apps may use it (custom apps need Plus) — see the 2026-11-21 analysi
 - **Catalogue:** `GET /api/cron/merci-catalog` (daily 10:45 UTC, after sell-price-sync and compare-at-sync; `?dry=1`
   writes nothing) rebuilds table `merci_candidates` (generation in `settings.merci_catalog_gen`): ACTIVE + published
   + photo + in stock (Aosom: today's feed qty and cost, `image_checked_at`, no open image review; Costway:
-  `ca_qty`, `costOf(price)`). Same run deletes MERCI codes that ended > 2 days ago.
+  `ca_qty`, `costOf(price)`). Each variant carries its own photo and its option values in the title. Same run
+  deletes MERCI codes that ended > 2 days ago. `?dry=1` does not even write the cron_runs row.
+- **Live re-check at offer time** (`live-check.ts`): the catalogue is up to 24 h old, so 8 candidates (best 4 of the
+  top type + best 4 of other types, so an alternative survives) are re-read before any code: Shopify live price/compare-at, product ACTIVE + published on the Online Store; today's
+  cost/stock (Aosom feed, cached 20 min per instance; Costway row); tier recomputed with the same floor; cap
+  re-applied. Failing candidates are dropped. The price shown = the live Shopify price = what checkout charges.
 - **API:** `POST /api/merci/offer` (public path; CORS `*` because extensions run in a Web Worker; the gate is the
-  session token — HS256 JWT signed with the app secret, `aud` = client id, `dest` = our store). Body `{orderId}` from
-  `shopify.orderConfirmation`. The order is re-read via the Admin API (202 while Shopify has not created it yet — the
-  block retries 6 × 3 s). Orders > 2 h old or cancelled get nothing. Table `post_purchase_offers`: one row per order,
-  reserved before any code exists; **expiry fixed once → the timer never resets** on reload. One unique
-  `MERCI-XXXXXXX` code per offered variant: percentage on that variant only, usageLimit 1, once per customer,
-  combines with shipping only, ends with the offer.
+  session token — HS256 JWT signed with the app secret, `aud` = client id, `dest` = our store; `maxDuration` 30 s).
+  Body `{orderId, confirmationNumber}` from `shopify.orderConfirmation`. The order is re-read via the Admin API on
+  every call, reloads included (202 while Shopify has not created it yet — the block retries 6 × 3 s) and must
+  belong to the caller: the confirmation number must match, and a token `sub` must be the order's customer
+  (else 403). Orders > 2 h old, cancelled, or paid with a MERCI- code get nothing. Table `post_purchase_offers`: one
+  row per order, reserved under a random `claim` before any code exists; only the claim owner may finish/release
+  it, so a superseded request can never overwrite the expiry — **expiry fixed once → the timer never resets**. One
+  unique `MERCI-XXXXXXX` code per offered variant: a fixed amount (price × pct, rounded down to the cent) taken ONCE
+  per order on that variant only, minimum subtotal = its price (so the margin guard bounds it at pct), usageLimit 1,
+  once per customer, combines with shipping only, ends with the offer. Link quantity is 1.
 - **Settings:** `merci_offer_enabled` = "1" → everyone (default OFF). `merci_offer_test_emails` (comma list) → those
   order emails get it while OFF (QA on real orders).
 - **Env (Vercel):** `SHOPIFY_MERCI_APP_SECRET` (app Client secret), `SHOPIFY_MERCI_APP_CLIENT_ID`. Missing → 503 and
   the block renders nothing.
 - **Block:** `shopify-app/` (app "Ameublo Merci", extension `merci-offre`, target `purchase.thank-you.block.render`,
   `network_access = true`). French copy, calm tone (no "Dernière chance"), countdown from the server's `expiresAt`,
-  fine print « Nouvelle commande séparée, livrée séparément… non cumulable ». Renders nothing on error/empty/expired.
-  Excluded from Next/tsc/eslint; built only by the Shopify CLI.
+  fine print « … Rabais de X % sur 1 article par commande, valide 30 minutes. 1 utilisation, non cumulable avec
+  d'autres rabais (livraison toujours incluse). » Waits for `orderConfirmation` (signal) if it arrives late. Calls
+  `https://outils.ameublodirect.ca` (our alias of this app — never the vercel.app name, which carries the supplier
+  name). Renders nothing on error/empty/expired/403. Excluded from Next/tsc/eslint; built only by the Shopify CLI.
 - **Deploy steps (Mat — need his Shopify login):**
   1. Dev Dashboard (dev.shopify.com) → Create app « Ameublo Merci » → distribution **Custom** → store 27u5y2-kp.
   2. Settings → Access requests → **Enable network access**.

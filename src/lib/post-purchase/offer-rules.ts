@@ -21,8 +21,11 @@ export interface MerciCandidate {
   variantId: string;
   /** Numeric Shopify product id. */
   productId: string;
+  /** Supplier SKU (Shopify variant SKU) and supplier, so the offer can re-check today's cost and stock live. */
+  sku: string;
+  source: "aosom" | "costway";
   handle: string;
-  /** French storefront title. */
+  /** French storefront title, with the variant's option values when it has any ("Table d'appoint — Noir"). */
   title: string;
   /** Normalised product type (see normalizeType). */
   type: string;
@@ -145,7 +148,7 @@ export const COMPLEMENT_MAP: MapRule[] = [
   { anchor: /Office Cabinets/, noun: "bureau", targets: [O + " > Office Chairs", "Bookshelves"] },
   { anchor: /Bathroom Cabinets|Medicine Cabinets/, noun: "salle de bain", targets: [BA + " > Bath Accessories", "Mirror Medicine Cabinets", "Wall Mounted Cabinets", "Over The Toilet", BA + " > Bath Chairs"] },
   { anchor: /Bath Accessories|Bath Chairs|Health Care/, noun: "salle de bain", targets: [BA + " > Bath Accessories", BA + " > Bath Chairs", "Health & Beauty > Health Care", "Wall Mounted Cabinets"] },
-  { anchor: /Christmas Trees/, noun: "sapin", targets: [XM, "~jupe de sapin|tree skirt|guirlande", "Christmas Deer Lights", "Artificial Trees"] },
+  { anchor: /Christmas Trees/, noun: "sapin", targets: [XM, "~jupe de sapin|tree skirt|guirlande", "Christmas Deer Lights"] },
   { anchor: /Christmas Decorations/, noun: "décor des Fêtes", targets: ["Christmas Trees", XM] },
   { anchor: /Fire Pits|Fireplaces|Firewood|Heater/, noun: "foyer", targets: ["Firewood Racks", FP, "Patio Furniture Covers", "Snow Shovels"] },
   { anchor: /Cat Litter/, noun: "chat", targets: ["Cats > Cat Trees", "Cats > Cat Houses"] },
@@ -175,22 +178,44 @@ export function matchesTarget(type: string, title: string, target: string): bool
 
 const SUMMER = /Sun Loungers|Patio Umbrellas|Umbrella Bases|Raised Garden|Gazebo|Pergola|Swimming|Pool|Hammock|Outdoor Gliders|Rocking Chairs|Patio Furniture Sets|Patio Chair Cushions|Bistro|Fans|Air Conditioner|Lawn Games|Water Fountains|Solar/;
 
-/** Month 1–12 in Montréal time. */
-export function montrealMonth(now: Date): number {
-  const m = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", month: "numeric" }).format(now);
-  return Number(m);
+/** Month 1–12 and day of month in Montréal time. */
+export function montrealDate(now: Date): { month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", month: "numeric", day: "numeric" }).formatToParts(now);
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  return { month: get("month"), day: get("day") };
 }
 
-/** Halloween only Sept–Oct; Christmas only Nov–Dec; summer patio blocked Oct–Mar (covers, deck boxes, shovels stay). */
-export function outOfSeason(type: string, month: number): boolean {
+export function montrealMonth(now: Date): number {
+  return montrealDate(now).month;
+}
+
+/** Last December day a Christmas item is offered: a later order would not arrive before Christmas. */
+export const CHRISTMAS_LAST_DAY = 15;
+
+/**
+ * Halloween only Sept–Oct; Christmas Nov 1 – Dec 15; summer patio blocked Oct–Mar (covers, deck boxes, shovels stay).
+ * `day` defaults to 1 for callers that only know the month.
+ */
+export function outOfSeason(type: string, month: number, day = 1): boolean {
   if (/Halloween/i.test(type)) return month !== 9 && month !== 10;
-  if (/Christmas/i.test(type)) return month !== 11 && month !== 12;
+  if (/Christmas/i.test(type)) return !(month === 11 || (month === 12 && day <= CHRISTMAS_LAST_DAY));
   if ((month >= 10 || month <= 3) && SUMMER.test(type)) return true;
   return false;
 }
 
+/**
+ * Never offered as an add-on: appliances (no 2-year guarantee story, returns are costly), and anything electric that
+ * heats — electric fireplaces, heaters, radiators — which the fireplace rule's targets would otherwise reach.
+ */
 export function isAppliance(type: string, title: string): boolean {
-  return /Appliances|Smart Toilets/.test(type) || /réfrigérateur|frigo|laveuse|sécheuse|congélateur|déshumidificateur|climatiseur|lave-vaisselle/i.test(title);
+  if (/Appliances|Smart Toilets|Heaters?|Electric Fireplaces?/i.test(type)) return true;
+  if (/réfrigérateur|frigo|laveuse|sécheuse|congélateur|déshumidificateur|climatiseur|lave-vaisselle/i.test(title)) return true;
+  // Anything that heats, anywhere in the catalogue.
+  if (/chauffage|chauffant|heater|radiateur/i.test(title)) return true;
+  // "Électrique" alone is NOT an appliance (kids' ride-on cars, filing cabinets with outlets, lift chairs — 2026-11-21
+  // real-data check: 260 variants carried it, almost none heaters). It is excluded only in the fireplace/heating area.
+  if (/Fireplace|Fire Pits?|Firewood|Heat/i.test(type) && /électrique|electric/i.test(title)) return true;
+  return false;
 }
 
 /** Colour families so a black armchair gets a black side table first. */
@@ -214,8 +239,16 @@ export function discountTier(price: number, cost: number | null | undefined): nu
   return 0;
 }
 
+/**
+ * The dollars the code takes off one unit: price × pct, rounded DOWN to the cent, so it never exceeds pct (the margin
+ * guard flags anything above MAX_DISCOUNT) and the page shows exactly what checkout charges.
+ */
+export function discountAmount(price: number, pct: number): number {
+  return Math.floor(price * pct + 1e-6) / 100;
+}
+
 export function discountedPrice(price: number, pct: number): number {
-  return round2(price * (1 - pct / 100));
+  return round2(price - discountAmount(price, pct));
 }
 
 /** Price cap for an add-on to an anchor at `anchorPrice`. */
@@ -233,8 +266,18 @@ export interface PickResult {
   anchor: OrderLineInput | null;
   rule: MapRule | null;
   picks: MerciPick[];
+  /** Every product that passed the filters, best first (one variant each). The offer re-checks these live, in order. */
+  ranked: MerciPick[];
   /** Distinct products that passed every filter (for coverage stats). */
   pool: number;
+}
+
+/** Main = the best; alternative = the best of a DIFFERENT product type. */
+export function choosePair<T extends { type: string }>(ranked: T[]): T[] {
+  const main = ranked[0];
+  if (!main) return [];
+  const alt = ranked.find((c) => c.type !== main.type);
+  return alt ? [main, alt] : [main];
 }
 
 /**
@@ -243,11 +286,11 @@ export interface PickResult {
  */
 export function pickOffers(lines: OrderLineInput[], catalogue: MerciCandidate[], opts: { now?: Date; anchorColour?: string | null } = {}): PickResult {
   const anchor = anchorOf(lines);
-  if (!anchor) return { anchor: null, rule: null, picks: [], pool: 0 };
+  if (!anchor) return { anchor: null, rule: null, picks: [], ranked: [], pool: 0 };
   const rule = ruleFor(anchor.productType);
-  if (!rule) return { anchor, rule: null, picks: [], pool: 0 };
+  if (!rule) return { anchor, rule: null, picks: [], ranked: [], pool: 0 };
 
-  const month = montrealMonth(opts.now ?? new Date());
+  const { month, day } = montrealDate(opts.now ?? new Date());
   const anchorType = normalizeType(anchor.productType);
   const aHead = leafHead(anchorType);
   const aFam = colourFamily(opts.anchorColour) ?? colourFamily(anchor.variantTitle);
@@ -260,14 +303,15 @@ export function pickOffers(lines: OrderLineInput[], catalogue: MerciCandidate[],
   type Scored = MerciCandidate & { score: number };
   const best = new Map<string, Scored>();
   rule.targets.forEach((target, rank) => {
-    const titleTarget = target.startsWith("~");
     for (const c of catalogue) {
       if (!(c.pct > 0)) continue;
       const type = normalizeType(c.type);
       if (orderPids.has(c.productId)) continue;
-      if (!titleTarget && orderTypes.has(type)) continue; // never the same type as anything in the order
-      if (!titleTarget && aHead && leafHead(type) === aHead) continue; // no 2nd sofa / 2nd tree
-      if (isAppliance(type, c.title) || outOfSeason(type, month)) continue;
+      // Never the same type as anything in the order, never the same kind (no 2nd sofa / tree) — title targets ("~")
+      // only widen what matches, they never lift these guards.
+      if (orderTypes.has(type)) continue;
+      if (aHead && leafHead(type) === aHead) continue;
+      if (isAppliance(type, c.title) || outOfSeason(type, month, day)) continue;
       if (c.price < MIN_CANDIDATE_PRICE || c.price > cap) continue;
       if (!matchesTarget(type, c.title, target)) continue;
       if (!anchorIsKids && /enfant|kids/i.test(c.title + " " + type)) continue;
@@ -279,17 +323,13 @@ export function pickOffers(lines: OrderLineInput[], catalogue: MerciCandidate[],
     }
   });
 
-  const ranked = [...best.values()].sort((a, b) => a.score - b.score || a.price - b.price);
-  const main = ranked[0];
-  if (!main) return { anchor, rule, picks: [], pool: 0 };
-  const alt = ranked.find((c) => c.type !== main.type);
   const why = `Pour aller avec votre ${rule.noun}`;
-  const picks = [main, alt]
-    .filter((x): x is Scored => !!x)
+  const ranked: MerciPick[] = [...best.values()]
+    .sort((a, b) => a.score - b.score || a.price - b.price)
     .map((x) => {
       const { score, ...c } = x;
       void score;
       return { ...c, why, discountedPrice: discountedPrice(c.price, c.pct) };
     });
-  return { anchor, rule, picks, pool: ranked.length };
+  return { anchor, rule, picks: choosePair(ranked), ranked, pool: ranked.length };
 }

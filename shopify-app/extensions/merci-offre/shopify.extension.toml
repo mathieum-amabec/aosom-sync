@@ -9,7 +9,7 @@ handle = "merci-offre"
 target = "purchase.thank-you.block.render"
 module = "./src/ThankYou.jsx"
 
-# The block calls https://aosom-sync.vercel.app/api/merci/offer with a session token.
+# The block calls https://outils.ameublodirect.ca/api/merci/offer with a session token.
 # Enable "Network access" for the app in the Dev Dashboard (Settings > Access requests) before deploying.
 [extensions.capabilities]
 network_access = true

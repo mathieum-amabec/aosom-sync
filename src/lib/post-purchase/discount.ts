@@ -6,6 +6,7 @@
 import crypto from "crypto";
 import { shopifyFetch } from "@/lib/shopify-client";
 import { MAX_DISCOUNT } from "@/lib/sell-price-rule";
+import { discountAmount } from "./offer-rules";
 
 export const CODE_PREFIX = "MERCI-";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
@@ -16,8 +17,15 @@ export function generateMerciCode(): string {
   return `${CODE_PREFIX}${s}`;
 }
 
-export function merciDiscountInput(code: string, v: { variantId: string; pct: number; orderName: string | null }, now: Date, endsAt: Date) {
+/**
+ * The offer is "X % on ONE article". A percentage code would take X % off every unit of the variant in the cart, so the
+ * code is a fixed amount (price × X %) taken ONCE per order (appliesOnEachItem: false) on that variant only, with a
+ * minimum subtotal of the variant's price — amount / minimum = X %, which keeps the margin guard's bound ≤ MAX_DISCOUNT.
+ */
+export function merciDiscountInput(code: string, v: { variantId: string; pct: number; price: number; orderName: string | null }, now: Date, endsAt: Date) {
   if (!(v.pct > 0) || v.pct / 100 > MAX_DISCOUNT + 1e-9) throw new Error(`merci: ${v.pct} % exceeds MAX_DISCOUNT`);
+  if (!(v.price > 0)) throw new Error("merci: price required");
+  const amount = discountAmount(v.price, v.pct);
   return {
     // Title starts with the code (MERCI-…) so the cleanup can find these by prefix.
     title: `${code} — Offre de remerciement${v.orderName ? ` — ${v.orderName}` : ""}`,
@@ -26,9 +34,10 @@ export function merciDiscountInput(code: string, v: { variantId: string; pct: nu
     endsAt: endsAt.toISOString(),
     customerSelection: { all: true },
     customerGets: {
-      value: { percentage: v.pct / 100 },
+      value: { discountAmount: { amount: amount.toFixed(2), appliesOnEachItem: false } },
       items: { products: { productVariantsToAdd: [`gid://shopify/ProductVariant/${v.variantId}`] } },
     },
+    minimumRequirement: { subtotal: { greaterThanOrEqualToSubtotal: v.price.toFixed(2) } },
     usageLimit: 1,
     appliesOncePerCustomer: true,
     combinesWith: { orderDiscounts: false, productDiscounts: false, shippingDiscounts: true },
@@ -42,7 +51,7 @@ const CREATE_MUTATION = `mutation merciCode($d: DiscountCodeBasicInput!) {
   }
 }`;
 
-export async function createMerciDiscount(v: { variantId: string; pct: number; orderName: string | null }, now: Date, endsAt: Date): Promise<{ code: string; discountId: string }> {
+export async function createMerciDiscount(v: { variantId: string; pct: number; price: number; orderName: string | null }, now: Date, endsAt: Date): Promise<{ code: string; discountId: string }> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const code = generateMerciCode();
     const input = merciDiscountInput(code, v, now, endsAt);

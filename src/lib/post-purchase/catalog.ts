@@ -24,7 +24,19 @@ export interface ShopProduct {
   status: string;
   published_at: string | null;
   image: { src: string } | null;
-  variants: Array<{ id: number; sku: string; price: string; compare_at_price: string | null }>;
+  images?: Array<{ id: number; src: string }>;
+  variants: Array<{ id: number; sku: string; title?: string; price: string; compare_at_price: string | null; image_id?: number | null }>;
+}
+
+/** "Table d'appoint — Noir": the product title plus the variant's option values (none for "Default Title"). */
+export function variantDisplayTitle(productTitle: string, variantTitle: string | null | undefined): string {
+  const v = String(variantTitle ?? "").trim();
+  if (!v || /^default title$/i.test(v)) return productTitle;
+  // Keep the colour-like options, drop dimension strings ("28L x 20W po", "44 × 44 × 51 cm") that bury the title.
+  const parts = v.split(" / ").map((s) => s.trim()).filter(Boolean);
+  const named = parts.filter((s) => !/\d/.test(s));
+  const shown = (named.length ? named : parts.slice(0, 1)).join(" / ");
+  return `${productTitle} — ${shown}`;
 }
 
 export interface SupplierInfo {
@@ -54,13 +66,16 @@ export function buildCandidates(products: ShopProduct[], supplier: (sku: string,
         variantId: String(v.id),
         productId: String(p.id),
         handle: p.handle,
-        title: p.title,
+        sku: v.sku,
+        source,
+        title: variantDisplayTitle(p.title, v.title),
         type: normalizeType(p.product_type),
         colour: info.colour,
         price,
         compareAt,
         cost: info.cost,
-        imageUrl: p.image.src,
+        // The variant's own photo (its colour), else the product's main photo.
+        imageUrl: (v.image_id && p.images?.find((im) => im.id === v.image_id)?.src) || p.image.src,
         pct,
       });
     }
@@ -72,7 +87,7 @@ async function loadActiveProducts(): Promise<ShopProduct[]> {
   const out: ShopProduct[] = [];
   let pageInfo: string | null = null;
   for (let i = 0; i < 100; i++) {
-    const params = new URLSearchParams({ limit: "250", fields: "id,handle,title,product_type,tags,status,published_at,image,variants" });
+    const params = new URLSearchParams({ limit: "250", fields: "id,handle,title,product_type,tags,status,published_at,image,images,variants" });
     if (pageInfo) params.set("page_info", pageInfo);
     else params.set("status", "active");
     const res = await shopifyFetch(`/products.json?${params}`);
@@ -86,7 +101,7 @@ async function loadActiveProducts(): Promise<ShopProduct[]> {
   return out;
 }
 
-async function loadSupplierInfo(): Promise<(sku: string, source: "aosom" | "costway") => SupplierInfo | null> {
+export async function loadSupplierInfo(): Promise<(sku: string, source: "aosom" | "costway") => SupplierInfo | null> {
   const feed = new Map<string, { cost?: number; qty: number; color: string }>();
   for (const p of await fetchAosomCatalog()) feed.set(p.sku, { cost: p.cost, qty: p.qty, color: p.color });
 

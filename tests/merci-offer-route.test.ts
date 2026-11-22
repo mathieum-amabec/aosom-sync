@@ -3,14 +3,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("@/lib/rate-limiter", () => ({ checkRateLimit: vi.fn() }));
 vi.mock("@/lib/post-purchase/offer-service", () => ({ getOrCreateOffer: vi.fn() }));
 
-import { POST, OPTIONS } from "@/app/api/merci/offer/route";
+import { POST, OPTIONS, maxDuration } from "@/app/api/merci/offer/route";
 import { checkRateLimit } from "@/lib/rate-limiter";
 import { getOrCreateOffer } from "@/lib/post-purchase/offer-service";
 import { signSessionToken } from "@/lib/post-purchase/session-token";
 
 const SECRET = "shpss_test";
 const nowSec = () => Math.floor(Date.now() / 1000);
-const good = () => signSessionToken({ dest: "27u5y2-kp.myshopify.com", aud: "client-1", exp: nowSec() + 300, nbf: nowSec() - 5 }, SECRET);
+const good = (extra: Record<string, unknown> = {}) => signSessionToken({ dest: "27u5y2-kp.myshopify.com", aud: "client-1", exp: nowSec() + 300, nbf: nowSec() - 5, ...extra }, SECRET);
 
 function req(body: unknown, token: string | null = good()) {
   return new Request("https://aosom-sync.vercel.app/api/merci/offer", {
@@ -37,7 +37,16 @@ describe("POST /api/merci/offer", () => {
     const res = await POST(req({ orderId: "gid://shopify/OrderIdentity/6001" }));
     expect(res.status).toBe(200);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
-    expect(getOrCreateOffer).toHaveBeenCalledWith("gid://shopify/OrderIdentity/6001");
+    expect(getOrCreateOffer).toHaveBeenCalledWith("gid://shopify/OrderIdentity/6001", { sub: null, confirmationNumber: null });
+  });
+  it("#5 passes the token's customer and the confirmation number; 403 goes back to the block", async () => {
+    vi.mocked(getOrCreateOffer).mockResolvedValue({ status: 403, body: { error: "order" } });
+    const res = await POST(req({ orderId: "1", confirmationNumber: "L8UWCL9KC" }, good({ sub: "gid://shopify/Customer/77" })));
+    expect(res.status).toBe(403);
+    expect(getOrCreateOffer).toHaveBeenCalledWith("1", { sub: "gid://shopify/Customer/77", confirmationNumber: "L8UWCL9KC" });
+  });
+  it("#8 the route is capped at 30 s", () => {
+    expect(maxDuration).toBe(30);
   });
   it("passes 202 through so the extension retries", async () => {
     vi.mocked(getOrCreateOffer).mockResolvedValue({ status: 202, body: { pending: true } });

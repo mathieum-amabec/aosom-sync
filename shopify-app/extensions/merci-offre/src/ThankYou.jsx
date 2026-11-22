@@ -2,9 +2,11 @@ import '@shopify/ui-extensions/preact';
 import {render} from 'preact';
 import {useEffect, useState} from 'preact/hooks';
 
-const API_URL = 'https://aosom-sync.vercel.app/api/merci/offer';
+// Our own domain (alias of the tools app). Never a supplier name in anything the buyer can see.
+const API_URL = 'https://outils.ameublodirect.ca/api/merci/offer';
 const MAX_TRIES = 6;
 const RETRY_MS = 3000;
+const CONFIRMATION_WAIT_MS = 15000;
 
 export default async () => {
   render(<Extension />, document.body);
@@ -25,6 +27,26 @@ function remaining(expiresAt, now) {
   return {left, label: `${m}:${s}`};
 }
 
+// The order confirmation can arrive after the block mounts: wait for it on the signal instead of giving up.
+function waitForConfirmation() {
+  const current = shopify.orderConfirmation.value;
+  if (current?.order?.id) return Promise.resolve(current);
+  return new Promise((resolve) => {
+    let done = false;
+    let unsubscribe = () => {};
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      unsubscribe();
+      resolve(value);
+    };
+    unsubscribe = shopify.orderConfirmation.subscribe((value) => {
+      if (value?.order?.id) finish(value);
+    });
+    setTimeout(() => finish(null), CONFIRMATION_WAIT_MS);
+  });
+}
+
 function Extension() {
   const [data, setData] = useState(null);
   const [now, setNow] = useState(Date.now());
@@ -32,15 +54,16 @@ function Extension() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      const orderId = shopify.orderConfirmation.value?.order?.id;
-      if (!orderId) return;
+      const confirmation = await waitForConfirmation();
+      const orderId = confirmation?.order?.id;
+      if (!orderId || cancelled) return;
       for (let i = 0; i < MAX_TRIES && !cancelled; i++) {
         try {
           const token = await shopify.sessionToken.get();
           const res = await fetch(API_URL, {
             method: 'POST',
             headers: {Authorization: `Bearer ${token}`, 'Content-Type': 'application/json'},
-            body: JSON.stringify({orderId}),
+            body: JSON.stringify({orderId, confirmationNumber: confirmation.number ?? null}),
           });
           if (res.status === 202) {
             await sleep(RETRY_MS);
@@ -122,8 +145,8 @@ function Extension() {
         ) : null}
 
         <s-text type="small" color="subdued">
-          Nouvelle commande séparée, livrée séparément. Rabais de {pcts} % valide 30 minutes, sur ces articles
-          seulement. 1 utilisation, non cumulable avec d'autres offres.
+          Nouvelle commande séparée, livrée séparément. Rabais de {pcts} % sur 1 article par commande, valide
+          30 minutes. 1 utilisation, non cumulable avec d'autres rabais (livraison toujours incluse).
         </s-text>
       </s-stack>
     </s-section>

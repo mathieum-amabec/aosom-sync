@@ -5,6 +5,8 @@ import {
   ruleFor,
   outOfSeason,
   isAppliance,
+  choosePair,
+  COMPLEMENT_MAP,
   colourFamily,
   discountTier,
   priceCap,
@@ -23,6 +25,8 @@ function cand(over: Partial<MerciCandidate>): MerciCandidate {
   return {
     variantId: String(1000 + n),
     productId: String(500 + n),
+    sku: `SKU-${n}`,
+    source: "aosom",
     handle: `p-${n}`,
     title: `Produit ${n}`,
     type: `${L} > Side Tables`,
@@ -111,7 +115,7 @@ describe("pickOffers", () => {
     const res = pickOffers([sofa], [tray, side], { now: NOV });
     expect(res.picks.map((p) => p.title)).toEqual(["Table d'appoint ronde", "Plateau d'accoudoir"]);
     expect(res.picks[0].why).toBe("Pour aller avec votre nouveau salon");
-    expect(res.picks[0].discountedPrice).toBe(48.59);
+    expect(res.picks[0].discountedPrice).toBe(48.6); // 53.99 − 5.39 (rounded down): exactly what checkout charges
   });
 
   it("never proposes the same product type as anything in the order (no 2nd sofa / 2nd table)", () => {
@@ -162,5 +166,53 @@ describe("pickOffers", () => {
   it("no kids' items unless the anchor is a kids' item", () => {
     const kids = cand({ title: "Bibliothèque pour enfant", type: "Home Furnishings > Living Room Furniture > Side Tables" });
     expect(pickOffers([sofa], [kids], { now: NOV }).picks).toEqual([]);
+  });
+});
+
+describe("review fixes 2026-11-21", () => {
+  const TREE = "Holiday Decor > Christmas Decorations > Christmas Trees";
+  const tree: OrderLineInput = { productId: "1", productType: TREE, title: "Sapin 7 pi", price: 200 };
+
+  it("#1 a title target never lifts the same-type / same-kind guards (no 2nd tree « avec guirlande »)", () => {
+    const secondTree = cand({ title: "Sapin pré-illuminé avec guirlande", type: TREE, price: 90 });
+    const otherTreeType = cand({ title: "Sapin crayon avec guirlande", type: "Holiday Decor > Christmas Trees > Pencil Christmas Trees", price: 80 });
+    const wreath = cand({ title: "Couronne", type: "Holiday Decor > Christmas Decorations > Wreaths", price: 60 });
+    const res = pickOffers([tree], [secondTree, otherTreeType, wreath], { now: NOV });
+    expect(res.picks.map((p) => p.title)).toEqual(["Couronne"]);
+  });
+
+  it("#6 never offers electric fireplaces, heaters or radiators", () => {
+    expect(isAppliance("Home Furnishings > Home Décor > Fireplaces & Accessories > Electric Fireplaces", "Foyer")).toBe(true);
+    expect(isAppliance("Patio & Garden > Fire Pits", "Radiateur soufflant 1500 W")).toBe(true);
+    expect(isAppliance("Home Furnishings > Home Décor > Fireplaces & Accessories", "Foyer électrique mural")).toBe(true);
+    expect(isAppliance("Home Furnishings > Home Décor > Fireplaces & Accessories", "Chauffage d'appoint céramique")).toBe(true);
+    expect(isAppliance("Home Furnishings > Home Décor > Fireplaces & Accessories", "Râtelier à bûches avec 4 outils")).toBe(false);
+    // Real-data check: "électrique" alone is not an appliance outside the fireplace/heating area.
+    expect(isAppliance("Toys & Games > Electric Ride-On Toys > Electric Toy Cars", "Auto électrique pour enfants 12V")).toBe(false);
+    expect(isAppliance("Office Products > Office Furniture > Office Cabinets & Cupboards", "Classeur mobile avec prises électriques")).toBe(false);
+    const fire: OrderLineInput = { productId: "9", productType: "Patio & Garden > Fire Pits", title: "Foyer extérieur", price: 269.99 };
+    const heater = cand({ title: "Chauffage tour céramique effet flamme", type: "Home Furnishings > Home Décor > Fireplaces & Accessories", price: 79.99 });
+    const rack = cand({ title: "Râtelier à bûches", type: "Patio & Garden > Firewood Racks", price: 79.88 });
+    expect(pickOffers([fire], [heater, rack], { now: NOV }).picks.map((p) => p.title)).toEqual(["Râtelier à bûches"]);
+  });
+
+  it("#11 Christmas items stop after December 15 (Montréal time)", () => {
+    expect(outOfSeason(TREE, 12, 15)).toBe(false);
+    expect(outOfSeason(TREE, 12, 16)).toBe(true);
+    const wreath = cand({ title: "Couronne", type: "Holiday Decor > Christmas Decorations > Wreaths", price: 60 });
+    expect(pickOffers([tree], [wreath], { now: new Date("2026-12-15T20:00:00Z") }).picks).toHaveLength(1);
+    expect(pickOffers([tree], [wreath], { now: new Date("2026-12-16T15:00:00Z") }).picks).toHaveLength(0);
+  });
+
+  it("#14 the Christmas tree rule has no dead « Artificial Trees » target", () => {
+    const rule = COMPLEMENT_MAP.find((r) => r.anchor.test(TREE));
+    expect(rule?.targets).not.toContain("Artificial Trees");
+  });
+
+  it("choosePair: main + first of another type, and ranked is exposed for the live re-check", () => {
+    expect(choosePair([{ type: "a" }, { type: "a" }, { type: "b" }]).map((x) => x.type)).toEqual(["a", "b"]);
+    expect(choosePair([])).toEqual([]);
+    const res = pickOffers([sofa], [cand({ price: 53 }), cand({ price: 54 }), cand({ type: L, price: 40 })], { now: NOV });
+    expect(res.ranked.length).toBe(3);
   });
 });

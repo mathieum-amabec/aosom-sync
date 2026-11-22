@@ -9,6 +9,12 @@ export interface MerciOrder {
   createdAt: string;
   cancelled: boolean;
   test: boolean;
+  /** Customer GID, or null for a guest order. */
+  customerId: string | null;
+  /** The random confirmation number the buyer sees on the Thank you page (orderConfirmation.number). */
+  confirmationNumber: string | null;
+  /** Discount codes used on the order. */
+  discountCodes: string[];
   lines: OrderLineInput[];
 }
 
@@ -24,7 +30,8 @@ export function toOrderGid(raw: unknown): string | null {
 
 const ORDER_QUERY = `query merciOrder($id: ID!) {
   order(id: $id) {
-    id name email createdAt cancelledAt test
+    id name email createdAt cancelledAt test confirmationNumber discountCodes
+    customer { id }
     lineItems(first: 50) { nodes {
       title variantTitle quantity
       originalUnitPriceSet { shopMoney { amount } }
@@ -40,6 +47,7 @@ export async function fetchMerciOrder(gid: string): Promise<MerciOrder | null> {
     data?: {
       order: {
         id: string; name: string; email: string | null; createdAt: string; cancelledAt: string | null; test: boolean;
+        confirmationNumber: string | null; discountCodes: string[] | null; customer: { id: string } | null;
         lineItems: { nodes: Array<{ title: string; variantTitle: string | null; quantity: number; originalUnitPriceSet: { shopMoney: { amount: string } }; product: { id: string; productType: string } | null }> };
       } | null;
     };
@@ -55,6 +63,9 @@ export async function fetchMerciOrder(gid: string): Promise<MerciOrder | null> {
     createdAt: o.createdAt,
     cancelled: !!o.cancelledAt,
     test: o.test,
+    customerId: o.customer?.id ?? null,
+    confirmationNumber: o.confirmationNumber ?? null,
+    discountCodes: o.discountCodes ?? [],
     lines: o.lineItems.nodes.map((l) => ({
       productId: l.product ? l.product.id.split("/").pop() ?? null : null,
       productType: l.product?.productType ?? "",
@@ -63,4 +74,25 @@ export async function fetchMerciOrder(gid: string): Promise<MerciOrder | null> {
       price: Number(l.originalUnitPriceSet.shopMoney.amount),
     })),
   };
+}
+
+/**
+ * Is the caller the buyer of this order? The session token proves only that the request comes from a checkout of our
+ * store; the order id in the body could be anyone's. So:
+ *   - the confirmation number shown on the buyer's Thank you page must match (when the order has one — all recent
+ *     orders do); without one, a logged-in token is required;
+ *   - when the token names a customer (`sub`), it must be the order's customer.
+ */
+export function callerOwnsOrder(order: Pick<MerciOrder, "customerId" | "confirmationNumber">, auth: { sub?: string | null; confirmationNumber?: string | null }): boolean {
+  const sub = auth.sub?.trim() || null;
+  if (sub && sub !== order.customerId) return false;
+  if (order.confirmationNumber) {
+    return (auth.confirmationNumber ?? "").trim().toUpperCase() === order.confirmationNumber.trim().toUpperCase();
+  }
+  return !!sub;
+}
+
+/** An order paid with one of our own MERCI codes never gets another offer (no chain of discounts). */
+export function usedMerciCode(order: Pick<MerciOrder, "discountCodes">): boolean {
+  return order.discountCodes.some((c) => c.trim().toUpperCase().startsWith("MERCI-"));
 }

@@ -11,9 +11,9 @@ export async function replaceCandidates(rows: MerciCandidate[], gen = Date.now()
   for (let i = 0; i < rows.length; i += CHUNK) {
     await db.batch(
       rows.slice(i, i + CHUNK).map((c) => ({
-        sql: `INSERT OR REPLACE INTO merci_candidates (gen, variant_id, product_id, handle, title, type, colour, price, compare_at, cost, image_url, pct)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [gen, c.variantId, c.productId, c.handle, c.title, c.type, c.colour, c.price, c.compareAt, c.cost, c.imageUrl, c.pct],
+        sql: `INSERT OR REPLACE INTO merci_candidates (gen, variant_id, product_id, sku, source, handle, title, type, colour, price, compare_at, cost, image_url, pct)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [gen, c.variantId, c.productId, c.sku, c.source, c.handle, c.title, c.type, c.colour, c.price, c.compareAt, c.cost, c.imageUrl, c.pct],
       })),
       "write",
     );
@@ -31,6 +31,8 @@ export async function loadCandidates(): Promise<MerciCandidate[]> {
   return r.rows.map((row) => ({
     variantId: String(row.variant_id),
     productId: String(row.product_id),
+    sku: String(row.sku),
+    source: String(row.source) === "costway" ? ("costway" as const) : ("aosom" as const),
     handle: String(row.handle),
     title: String(row.title),
     type: String(row.type),
@@ -98,36 +100,45 @@ export async function getOfferRow(orderId: string): Promise<OfferRow | null> {
   };
 }
 
-/** Reserve the order's only offer. False when a row already exists (the caller reads it back). */
-export async function reserveOffer(orderId: string, nowSec = Math.floor(Date.now() / 1000)): Promise<boolean> {
+/** Reserve the order's only offer under this request's `claim` token. False when a row already exists. */
+export async function reserveOffer(orderId: string, claim: string, nowSec = Math.floor(Date.now() / 1000)): Promise<boolean> {
   const db = await ensureSchema();
   const r = await db.execute({
-    sql: `INSERT INTO post_purchase_offers (order_id, status, created_at) VALUES (?, 'pending', ?) ON CONFLICT(order_id) DO NOTHING`,
-    args: [orderId, nowSec],
+    sql: `INSERT INTO post_purchase_offers (order_id, status, claim, created_at) VALUES (?, 'pending', ?, ?) ON CONFLICT(order_id) DO NOTHING`,
+    args: [orderId, claim, nowSec],
   });
   return r.rowsAffected === 1;
 }
 
-/** Take over a crashed reservation (still 'pending' and older than `staleSec`). True when we got it. */
-export async function takeStaleReservation(orderId: string, staleSec: number, nowSec = Math.floor(Date.now() / 1000)): Promise<boolean> {
+/** Take over a crashed reservation (still 'pending' and older than `staleSec`) under a new claim. True when we got it. */
+export async function takeStaleReservation(orderId: string, claim: string, staleSec: number, nowSec = Math.floor(Date.now() / 1000)): Promise<boolean> {
   const db = await ensureSchema();
   const r = await db.execute({
-    sql: `UPDATE post_purchase_offers SET created_at = ? WHERE order_id = ? AND status = 'pending' AND created_at < ?`,
-    args: [nowSec, orderId, nowSec - staleSec],
+    sql: `UPDATE post_purchase_offers SET created_at = ?, claim = ? WHERE order_id = ? AND status = 'pending' AND created_at < ?`,
+    args: [nowSec, claim, orderId, nowSec - staleSec],
   });
   return r.rowsAffected === 1;
 }
 
-export async function finishOffer(orderId: string, v: { orderName: string | null; status: "ready" | "none"; offers: StoredOffer[]; expiresAt: number | null }): Promise<void> {
+/**
+ * Finish the reservation — only while this request still owns it ('pending' with the same claim). False when another
+ * request took it over meanwhile: the caller reads the row back instead of overwriting that request's offer and expiry.
+ */
+export async function finishOffer(
+  orderId: string,
+  claim: string,
+  v: { orderName: string | null; status: "ready" | "none"; offers: StoredOffer[]; expiresAt: number | null },
+): Promise<boolean> {
   const db = await ensureSchema();
-  await db.execute({
-    sql: `UPDATE post_purchase_offers SET order_name = ?, status = ?, offers = ?, expires_at = ? WHERE order_id = ?`,
-    args: [v.orderName, v.status, JSON.stringify(v.offers), v.expiresAt, orderId],
+  const r = await db.execute({
+    sql: `UPDATE post_purchase_offers SET order_name = ?, status = ?, offers = ?, expires_at = ? WHERE order_id = ? AND status = 'pending' AND claim = ?`,
+    args: [v.orderName, v.status, JSON.stringify(v.offers), v.expiresAt, orderId, claim],
   });
+  return r.rowsAffected === 1;
 }
 
-/** Undo a reservation whose codes could not be created, so a retry can try again. */
-export async function releaseOffer(orderId: string): Promise<void> {
+/** Undo this request's reservation (codes could not be created), so a retry can try again. */
+export async function releaseOffer(orderId: string, claim: string): Promise<void> {
   const db = await ensureSchema();
-  await db.execute({ sql: `DELETE FROM post_purchase_offers WHERE order_id = ? AND status = 'pending'`, args: [orderId] });
+  await db.execute({ sql: `DELETE FROM post_purchase_offers WHERE order_id = ? AND status = 'pending' AND claim = ?`, args: [orderId, claim] });
 }

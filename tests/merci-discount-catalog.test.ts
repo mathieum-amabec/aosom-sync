@@ -15,23 +15,32 @@ function res(body: unknown) {
 }
 
 describe("merciDiscountInput", () => {
-  it("is a single-use percentage code on ONE variant, ending with the offer, shipping-combinable only", () => {
-    const input = merciDiscountInput("MERCI-ABCDEFG", { variantId: "111", pct: 10, orderName: "#1150" }, now, ends);
+  it("#9 is a single-use fixed amount taken ONCE per order on ONE variant, ending with the offer, shipping-combinable only", () => {
+    const input = merciDiscountInput("MERCI-ABCDEFG", { variantId: "111", pct: 10, price: 53.99, orderName: "#1150" }, now, ends);
     expect(input).toEqual({
       title: "MERCI-ABCDEFG — Offre de remerciement — #1150",
       code: "MERCI-ABCDEFG",
       startsAt: now.toISOString(),
       endsAt: ends.toISOString(),
       customerSelection: { all: true },
-      customerGets: { value: { percentage: 0.1 }, items: { products: { productVariantsToAdd: ["gid://shopify/ProductVariant/111"] } } },
+      customerGets: { value: { discountAmount: { amount: "5.39", appliesOnEachItem: false } }, items: { products: { productVariantsToAdd: ["gid://shopify/ProductVariant/111"] } } },
+      minimumRequirement: { subtotal: { greaterThanOrEqualToSubtotal: "53.99" } },
       usageLimit: 1,
       appliesOncePerCustomer: true,
       combinesWith: { orderDiscounts: false, productDiscounts: false, shippingDiscounts: true },
     });
   });
-  it("refuses anything above MAX_DISCOUNT (10 %)", () => {
-    expect(() => merciDiscountInput("MERCI-X", { variantId: "1", pct: 15, orderName: null }, now, ends)).toThrow();
-    expect(() => merciDiscountInput("MERCI-X", { variantId: "1", pct: 0, orderName: null }, now, ends)).toThrow();
+  it("refuses anything above MAX_DISCOUNT (10 %) or without a price", () => {
+    expect(() => merciDiscountInput("MERCI-X", { variantId: "1", pct: 15, price: 50, orderName: null }, now, ends)).toThrow();
+    expect(() => merciDiscountInput("MERCI-X", { variantId: "1", pct: 0, price: 50, orderName: null }, now, ends)).toThrow();
+    expect(() => merciDiscountInput("MERCI-X", { variantId: "1", pct: 5, price: 0, orderName: null }, now, ends)).toThrow();
+  });
+  it("#9 stays inside the margin guard's bound (amount / minimum subtotal = pct)", async () => {
+    const { maxPerItem } = await import("@/lib/margin-guard");
+    const input = merciDiscountInput("MERCI-X", { variantId: "1", pct: 10, price: 84.88, orderName: null }, now, ends);
+    const amount = Number(input.customerGets.value.discountAmount.amount);
+    const min = Number(input.minimumRequirement.subtotal.greaterThanOrEqualToSubtotal);
+    expect(maxPerItem({ title: "t", typename: "DiscountCodeBasic", percentage: null, amount, amountOnEachItem: false, minSubtotal: min, combinesWithProduct: false, combinesWithOrder: false })).toBeLessThanOrEqual(0.1);
   });
   it("codes look like MERCI-XXXXXXX without ambiguous characters", () => {
     for (let i = 0; i < 50; i++) expect(generateMerciCode()).toMatch(/^MERCI-[A-HJ-NP-Z2-9]{7}$/);
@@ -44,7 +53,7 @@ describe("createMerciDiscount", () => {
     vi.mocked(shopifyFetch)
       .mockResolvedValueOnce(res({ data: { discountCodeBasicCreate: { codeDiscountNode: null, userErrors: [{ message: "Code must be unique", code: "TAKEN" }] } } }))
       .mockResolvedValueOnce(res({ data: { discountCodeBasicCreate: { codeDiscountNode: { id: "gid://shopify/DiscountCodeNode/9" }, userErrors: [] } } }));
-    const out = await createMerciDiscount({ variantId: "1", pct: 5, orderName: null }, now, ends);
+    const out = await createMerciDiscount({ variantId: "1", pct: 5, price: 40, orderName: null }, now, ends);
     expect(out.discountId).toBe("gid://shopify/DiscountCodeNode/9");
     expect(out.code).toMatch(/^MERCI-/);
   });
@@ -93,7 +102,7 @@ describe("buildCandidates", () => {
 
   it("keeps active, published, in-stock, photo-checked variants that can afford a tier", () => {
     const out = buildCandidates([product({})], lookup);
-    expect(out).toEqual([{ variantId: "11", productId: "1", handle: "h", title: "Table", type: "Home Furnishings > Living Room Furniture > Side Tables", colour: "Black", price: 65.88, compareAt: 99.99, cost: 38, imageUrl: "https://cdn/x.jpg", pct: 10 }]);
+    expect(out).toEqual([{ variantId: "11", productId: "1", sku: "A-1", source: "aosom", handle: "h", title: "Table", type: "Home Furnishings > Living Room Furniture > Side Tables", colour: "Black", price: 65.88, compareAt: 99.99, cost: 38, imageUrl: "https://cdn/x.jpg", pct: 10 }]);
   });
   it("drops unpublished, draft, no-image, internal warranty, out of stock, unchecked photo, no tier, unknown cost", () => {
     const v = (sku: string) => [{ id: 2, sku, price: "65.88", compare_at_price: null }];
@@ -111,6 +120,20 @@ describe("buildCandidates", () => {
       lookup,
     );
     expect(out).toEqual([]);
+  });
+  it("#3 shows the variant's own photo and its option values in the title (never « Default Title »)", () => {
+    const p = product({
+      images: [{ id: 5, src: "https://cdn/main.jpg" }, { id: 7, src: "https://cdn/noir.jpg" }],
+      variants: [
+        { id: 21, sku: "A-1", title: "Noir", price: "65.88", compare_at_price: null, image_id: 7 },
+        { id: 22, sku: "A-1", title: "Default Title", price: "65.88", compare_at_price: null, image_id: null },
+      ],
+    });
+    const out = buildCandidates([p], lookup);
+    expect(out.map((c) => [c.title, c.imageUrl])).toEqual([
+      ["Table — Noir", "https://cdn/noir.jpg"],
+      ["Table", "https://cdn/x.jpg"],
+    ]);
   });
   it("routes src-c products to the Costway lookup", () => {
     lookup.mockClear();
