@@ -1,0 +1,15 @@
+api_version = "2026-10"
+
+[[extensions]]
+type = "ui_extension"
+name = "Offre de remerciement"
+handle = "merci-offre"
+
+[[extensions.targeting]]
+target = "purchase.thank-you.block.render"
+module = "./src/ThankYou.jsx"
+
+# The block calls https://aosom-sync.vercel.app/api/merci/offer with a session token.
+# Enable "Network access" for the app in the Dev Dashboard (Settings > Access requests) before deploying.
+[extensions.capabilities]
+network_access = true

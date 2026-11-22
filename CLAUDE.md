@@ -530,6 +530,55 @@ least 2× the old popup, add the Club Ameublo v3 page (retention, linked from Kl
     with `isSkillAnswerCorrect` and answers 400 `skill` otherwise.
   - CASL mailing address: Mat will get a PO box (case postale); add it to the form and the 3 emails once he sends it.
 
+## Offre de remerciement (thank-you page) — V1 built 2026-11-21, OFF until Mat says so
+
+Right after payment, the Thank you page shows ONE product that goes with the purchase (+ one alternative of another
+type) with a small discount valid **30 minutes**. The button opens a **new, separate order** at checkout with the code
+already applied and Shop Pay selected (`/cart/{variant}:1?discount=CODE&payment=shop_pay`), so nothing changes in the
+way supplier orders are placed. The real one-click post-purchase page is NOT possible for us: on Shopify Basic only
+App Store apps may use it (custom apps need Plus) — see the 2026-11-21 analysis.
+
+- **Rules** (`src/lib/post-purchase/offer-rules.ts`, pure): anchor = most expensive line; hand-written category map
+  (armchair → side table/arm tray/lamp/rug, buffet → trash can/kitchen cart, tree → wreath/lit decor…); never the
+  same product type as anything in the order (head-noun guard: no 2nd table/tree/sofa); never appliances; seasons
+  (Halloween Sep–Oct, Christmas Nov–Dec, summer patio blocked Oct–Mar except covers/deck boxes/shovels); price
+  ≤ max(50 % of the anchor, 50 $) and ≤ the anchor, ≥ 15 $; ranking = map order, colour family, price near 30 %.
+  No good candidate → nothing is shown (never a weak pick).
+- **Discount = what the margin allows, per variant, at today's cost:** 10 % if we keep ≥ max(8 $, 8 %) after it and
+  the card fees, else 5 % with the same test, else the variant is not offered. Deep "−40 %" Aosom items are mostly
+  excluded by this (they sit at ~1.17 × cost). Codes never exceed MAX_DISCOUNT, so the margin guard stays green.
+- **Catalogue:** `GET /api/cron/merci-catalog` (daily 10:45 UTC, after sell-price-sync and compare-at-sync; `?dry=1`
+  writes nothing) rebuilds table `merci_candidates` (generation in `settings.merci_catalog_gen`): ACTIVE + published
+  + photo + in stock (Aosom: today's feed qty and cost, `image_checked_at`, no open image review; Costway:
+  `ca_qty`, `costOf(price)`). Same run deletes MERCI codes that ended > 2 days ago.
+- **API:** `POST /api/merci/offer` (public path; CORS `*` because extensions run in a Web Worker; the gate is the
+  session token — HS256 JWT signed with the app secret, `aud` = client id, `dest` = our store). Body `{orderId}` from
+  `shopify.orderConfirmation`. The order is re-read via the Admin API (202 while Shopify has not created it yet — the
+  block retries 6 × 3 s). Orders > 2 h old or cancelled get nothing. Table `post_purchase_offers`: one row per order,
+  reserved before any code exists; **expiry fixed once → the timer never resets** on reload. One unique
+  `MERCI-XXXXXXX` code per offered variant: percentage on that variant only, usageLimit 1, once per customer,
+  combines with shipping only, ends with the offer.
+- **Settings:** `merci_offer_enabled` = "1" → everyone (default OFF). `merci_offer_test_emails` (comma list) → those
+  order emails get it while OFF (QA on real orders).
+- **Env (Vercel):** `SHOPIFY_MERCI_APP_SECRET` (app Client secret), `SHOPIFY_MERCI_APP_CLIENT_ID`. Missing → 503 and
+  the block renders nothing.
+- **Block:** `shopify-app/` (app "Ameublo Merci", extension `merci-offre`, target `purchase.thank-you.block.render`,
+  `network_access = true`). French copy, calm tone (no "Dernière chance"), countdown from the server's `expiresAt`,
+  fine print « Nouvelle commande séparée, livrée séparément… non cumulable ». Renders nothing on error/empty/expired.
+  Excluded from Next/tsc/eslint; built only by the Shopify CLI.
+- **Deploy steps (Mat — need his Shopify login):**
+  1. Dev Dashboard (dev.shopify.com) → Create app « Ameublo Merci » → distribution **Custom** → store 27u5y2-kp.
+  2. Settings → Access requests → **Enable network access**.
+  3. Put the Client ID in `shopify-app/shopify.app.toml` (`client_id`), and on Vercel set
+     `SHOPIFY_MERCI_APP_CLIENT_ID` + `SHOPIFY_MERCI_APP_SECRET`, then redeploy.
+  4. `cd shopify-app && npm install && shopify app deploy` (login prompt), then install the app on the store
+     with the custom-distribution link.
+  5. Run `GET /api/cron/merci-catalog` once (Bearer CRON_SECRET) to fill the catalogue.
+  6. Shopify admin → Settings → Checkout → **Customize** → page **Thank you** → Add app block « Offre de
+     remerciement » → Save.
+  7. QA: set `merci_offer_test_emails` to a test email, place a real order, check timer/code/checkout, then
+     cancel/refund it. Go live with `merci_offer_enabled` = "1" only on Mat's OK.
+
 ## Pastilles de couleur = photo de la couleur (2026-10-18)
 
 Mat: « la pastille de couleur n'avait aucun rapport avec l'image ». Audit of the 1,023 multi-colour products (3 vision

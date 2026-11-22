@@ -2,6 +2,12 @@
 
 All notable changes to Aosom Sync will be documented in this file.
 
+## [0.5.107.66] - 2026-11-21
+
+### Added
+
+- **Offre de remerciement on the Thank you page (V1, OFF by default).** Right after payment the page shows one product that goes with the purchase (and one alternative of another type) with a 5 % or 10 % discount valid 30 minutes. The button opens a new, separate order at checkout with the code applied and Shop Pay selected. Pieces: pure rules (`src/lib/post-purchase/offer-rules.ts`: category map, same-type guard, seasons, price cap max(50 %, 50 $), colour family, per-variant tier that keeps ≥ max(8 $, 8 %) after the discount and card fees), a daily catalogue cron `/api/cron/merci-catalog` (table `merci_candidates`, also deletes expired MERCI codes), `POST /api/merci/offer` (session-token JWT, Admin re-read of the order, table `post_purchase_offers` so the 30-min expiry is fixed once), and the checkout UI extension under `shopify-app/`. Settings `merci_offer_enabled` (default OFF) and `merci_offer_test_emails`; env `SHOPIFY_MERCI_APP_SECRET`, `SHOPIFY_MERCI_APP_CLIENT_ID`. Deploy steps in CLAUDE.md.
+
 ## [0.5.107.65] - 2026-11-18
 
 ### Removed
