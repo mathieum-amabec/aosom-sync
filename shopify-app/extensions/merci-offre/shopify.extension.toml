@@ -4,6 +4,7 @@ api_version = "2026-10"
 type = "ui_extension"
 name = "Offre de remerciement"
 handle = "merci-offre"
+uid = "b4805d80-61b0-96de-55a5-8dd80df286e1ba0175a5"
 
 [[extensions.targeting]]
 target = "purchase.thank-you.block.render"
